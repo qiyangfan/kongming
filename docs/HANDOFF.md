@@ -5,7 +5,7 @@
 
 ## 项目一句话
 
-企业级 Agent 数据平台(自然语言 → SQL → 执行 → 洞察),Python 双进程 + React SPA。
+全能 AI Agent 助手(数据问答/分析为首发王牌),Python 双进程 + React SPA。品牌 docs/brand.md。
 前身 `/Users/solvela/nl2sql-data-platform`(Java COLA,38 变更,仍在运行,**不动它**)。
 知识资产已平移(41 域 spec → 本仓库 15 域 + roadmap 登记 22 域)。
 

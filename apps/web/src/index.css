@@ -1,13 +1,81 @@
 @import "tailwindcss";
 
-/* 设计 token(品牌:emerald,继承前系统已验证的视觉资产)。
-   shadcn/ui 初始化后与此共存:组件层用 token,不硬编码色值。 */
-@theme {
-  --color-brand-50: #ecfdf5;
-  --color-brand-500: #10b981;
-  --color-brand-600: #059669;
-  --color-brand-700: #047857;
+/* 铁律 3/5/6/7 的单源:品牌色(武侯祠三元:红墙·黛瓦·鎏金)全部定义于此。
+   色彩意图与命名见 docs/brand.md(文档定意、CSS 定值)。
+   组件只许引用 token 类(bg-primary/from-grad-from…),禁硬编码色值。 */
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* 语义 token:主色朱砂(武侯祠红墙,庄重决断);鎏金仅点睛;中性色配黛瓦青灰 */
+  --background: #fbfaf7; /* 宣纸白(微暖,非冷白) */
+  --foreground: #1f2933; /* 青墨字 */
+  --card: #ffffff;
+  --card-foreground: #1f2933;
+  --primary: #8f2d2f; /* 红墙朱砂:深沉庄重,非高唤醒亮红 */
+  --primary-foreground: #fdf9f0; /* 宣纸白 */
+  --secondary: #eef0ec; /* 青灰浅 */
+  --secondary-foreground: #1f2933;
+  --muted: #eef0ec;
+  --muted-foreground: #52606d; /* 青灰 */
+  --accent: #f5edda; /* 宣纸米黄 */
+  --accent-foreground: #6b2424; /* 深朱 */
+  --destructive: #dc2626; /* 错误语义用鲜红,与朱砂 primary 靠明度区分 */
+  --destructive-foreground: #ffffff;
+  --border: #dfe3de; /* 青灰线 */
+  --input: #dfe3de;
+  --ring: #c9a063; /* 鎏金点睛:匾额之金,哑光不炫 */
+}
+
+.dark {
+  --background: #0e1416; /* 黛墨夜 */
+  --foreground: #eef0ec;
+  --card: #151d20; /* 黛瓦暗面 */
+  --card-foreground: #eef0ec;
+  --primary: #b0484a; /* 夜祠朱门:暗底提亮一档 */
+  --primary-foreground: #fdf9f0;
+  --secondary: #243034;
+  --secondary-foreground: #eef0ec;
+  --muted: #243034;
+  --muted-foreground: #9aa8ae;
+  --accent: #2a2018; /* 暗金底 */
+  --accent-foreground: #dcc08a;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #2a363a;
+  --input: #2a363a;
+  --ring: #c9a063;
+}
+
+@theme inline {
   --font-sans:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC",
     "Microsoft YaHei", sans-serif;
+
+  /* 语义层 → Tailwind 色类(bg-background / text-muted-foreground / …) */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* 品牌点缀:鎏金(匾额之金,logo 一笔/高亮/点睛,禁大面积铺开) */
+  --color-gild: #c9a063;
+
+  /* 品牌渐变:黛瓦暮色(黛青→深黛→墨),沉静不晃眼 */
+  --color-grad-from: #2e4a56; /* 黛瓦 */
+  --color-grad-mid: #1d3742; /* 深黛 */
+  --color-grad-end: #0f1a22; /* 青墨 */
 }

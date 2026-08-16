@@ -11,17 +11,23 @@
     "contracts:gen": "openapi-typescript ../../contracts/openapi.json --output src/lib/api-types.gen.ts"
   },
   "dependencies": {
+    "@radix-ui/react-label": "^2.1.15",
     "@tanstack/react-query": "^5.64.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "echarts": "^5.6.0",
     "echarts-for-react": "^3.0.2",
+    "lucide-react": "^1.31.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router": "^7.1.0",
+    "tailwind-merge": "^3.6.0",
     "zustand": "^5.0.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",
     "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^26.2.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",

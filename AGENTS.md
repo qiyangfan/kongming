@@ -1,6 +1,7 @@
 # Kongming 工作区指引
 
-企业级 Agent 数据平台(自然语言 → SQL → 执行 → 洞察)。Python 双进程后端 + React SPA。
+全能 AI Agent 助手(数据问答与分析为首发王牌)。Python 双进程后端 + React SPA。
+品牌基调见 docs/brand.md(色彩 token 单源 index.css)。
 **动手前必读**:敏感区改动前先读对应文档(见文末"前置阅读"),不要凭直觉改架构。
 
 ## 目录
@@ -41,6 +42,10 @@ make up / down      # compose 起/停 postgres redis
    timestamptz、软删仅 identity 域。
 5. **技术栈锁定(docs/tech-stack.md)**:换库/升 major 需先写 ADR。不引入:
    Keycloak、Next.js/SSR、微服务中间件、消息队列、Litestar。
+6. **前端样式铁律(docs/tech-stack.md「前端样式铁律」节)**:基础交互组件一律
+   shadcn/ui 禁手搓;Tailwind 原子类为唯一样式语言(禁新建 css/内联 style);
+   色值/圆角/字体只经 `@theme` 设计 token 引用,禁硬编码;图标用 lucide-react 禁 emoji;
+   图表主题色板从 token 派生;品牌表现层(渐变/空态/动效)豁免但用色仍走 token。
 
 ## 工作流与约定
 

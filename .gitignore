@@ -21,3 +21,6 @@ contracts/openapi.json.tmp
 .idea/
 .vscode/
 .DS_Store
+
+# 浏览器自动化截图产物
+.playwright-mcp/

@@ -45,6 +45,30 @@
 | 图表 | ECharts(echarts-for-react) |
 | 契约 | openapi-typescript 生成,禁手写 API 类型(ADR-005) |
 
+## 前端样式铁律(继承旧项目 ADR-006/007 纪律,按新栈重写)
+
+1. **组件优先,禁手搓基础交互组件**:按钮/输入/下拉/弹窗/日期/开关等一律用
+   shadcn/ui(Radix 无头,代码自有于 `src/components/ui/`);手写仅限**业务组合层**
+   (`src/components/` 下的卡片、布局块,由基础组件拼装)。判据:一个"按钮"若需要
+   focus 态/键盘可达性/aria 属性,就不该手写。
+2. **Tailwind 原子类是唯一样式语言**:不新建 `.css` 文件(`src/index.css` 的
+   `@theme` 定义与必要第三方覆盖除外);禁内联 `style=`(第三方图表尺寸等动态值除外);
+   禁 `@apply` 堆砌二次封装。
+3. **设计 token 单源**:品牌色/字体/圆角只定义在 `index.css` 的 `@theme`,组件经
+   token 类引用(`bg-brand-600`);**禁散落硬编码色值**(hex/rgb 直接写进类名)。
+   这是旧项目"设计 Token 三方镜像腐化"教训的单源化修正。
+4. **图标用 lucide-react**(shadcn 生态标配),禁 emoji 充图标。
+5. **亮暗主题**统一走 Tailwind v4 `dark` variant + CSS 变量,色值经 token,
+   不在组件里写死主题分支。
+6. **图表主题与 token 桥接**:ECharts 不吃 Tailwind 类,其主题色板/字体 MUST
+   从 `@theme` 的 CSS 变量派生(运行时读取注入 chart theme),禁止在图表配置里
+   硬编码色值——否则图表色与界面色漂移(旧项目"三方镜像"教训的根治条款)。
+7. **表现层豁免(审美上限不设限)**:铁律只约束基础交互组件与日常样式;品牌时刻
+   (登录页渐变/空状态/加载动效/图表视觉)鼓励自由发挥,约束仅一条——用色仍从
+   token 派生。纪律的目的是让这些"审美时刻"稀疏而醒目,不是消灭它们。
+8. 过渡条款:shadcn/ui 在主布局域开工时初始化(避免骨架期空转);
+   此前**新增页面不得再引入新的手搓基础组件**(现有 Login 页的原生元素届时一并替换)。
+
 ## 工程纪律
 
 - Python:ruff(lint+format)+ mypy strict + pytest;uv 锁定

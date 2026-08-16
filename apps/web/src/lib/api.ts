@@ -19,8 +19,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!resp.ok) {
-    const detail = await resp.text();
-    throw new Error(detail || `HTTP ${resp.status}`);
+    // 优先取 FastAPI {detail} 文案,原始 JSON 体不直接抛给用户
+    let detail = `HTTP ${resp.status}`;
+    try {
+      const body: unknown = await resp.json();
+      if (body && typeof body === "object" && "detail" in body) {
+        const d = (body as { detail: unknown }).detail;
+        detail = typeof d === "string" ? d : detail;
+      }
+    } catch {
+      /* 非 JSON 响应,保留 HTTP 状态码文案 */
+    }
+    throw new Error(detail);
   }
   return (await resp.json()) as T;
 }

@@ -1,9 +1,10 @@
 # Kongming · 孔明
 
-> 问计于数据,如问计于孔明。
-> 企业级 Agent 数据平台:自然语言 → SQL → 执行 → 洞察。
+> 万事,问孔明。
+> 全能 AI Agent 助手:数据问答与分析(NL → SQL → 洞察)是首发王牌场景。
+> 品牌:[docs/brand.md](docs/brand.md) · Crafted by Solvela(漆阳帆)
 
-[![Tech](https://img.shields.io/badge/stack-Python%20%C3%972%20%2B%20React-059669)](docs/tech-stack.md)
+[![Tech](https://img.shields.io/badge/stack-Python%20%C3%972%20%2B%20React-8f2d2f)](docs/tech-stack.md)
 
 ## 架构一页纸
 
