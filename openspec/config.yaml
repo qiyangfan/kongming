@@ -1,0 +1,40 @@
+schema: spec-driven
+
+context: |
+  Kongming(孔明)——企业级 Agent 数据平台:自然语言 → SQL → 执行 → 洞察。
+  项目定位:以数据问答(NL2SQL)与数据分析(NL2Insight)为首发场景的
+  Tool-Calling Agent 平台。
+
+  技术栈(docs/tech-stack.md 锁定,偏离须 ADR):
+  - 后端 Python 3.13 双进程:apps/api(控制面,持凭证,FastAPI + SQLAlchemy 2 async
+    + Alembic baseline 制 + PyJWT/argon2 自建认证)+ apps/agent(Agent 面,零凭证,
+    LangGraph + openai 兼容客户端)
+  - 前端 React 19 纯 SPA:apps/web(Vite + Tailwind v4 + shadcn/ui,
+    类型由 OpenAPI 生成,禁手写 API 类型)
+  - PostgreSQL 17 + pgvector / Redis 8;不引入:Keycloak、Next.js、微服务、消息队列
+
+  分层纪律:域包内 router(适配)→ service(用例)→ models(领域)→ repository(基础设施);
+  domain 不 import 任何框架,import-linter 守护(pyproject 已配)。
+
+  治理三层:docs/adr/ = 为什么(不可逆决策);specs/ = 行为契约;changes/ = 增量提案。
+
+rules:
+  proposal:
+    - 必须有 Non-goals(不做什么)一节
+    - 涉及信任边界/认证/schema/契约管线的变更,必须显式引用对应 ADR(002/003/004/005)
+    - 禁止"顺手扩大范围":一个 change 一个能力域
+  tasks:
+    - 安全规则类(SQL 防火墙/权限/租户)必须测试先行:先写失败测试再实现
+    - 每个 task 完成后跑 make check 对应子集并在 apply 记录结果
+  spec:
+    - Requirement 用 SHALL/SHOULD;Scenario 用 GIVEN/WHEN/THEN
+    - spec 只写行为,不绑定实现(不出现框架名/库名);实现选择属于 ADR
+    - 数据库行为契约列进 spec 时,同步核对 baseline(ADR-004)是否已建列
+
+operations:
+  apply:
+    guidance:
+      - 完成后必须验证:相关 make check 子集绿 + 手工冒烟路径记录
+  archive:
+    guidance:
+      - 归档前核对 spec deltas 已 sync 进 specs/,ADR 如有涉及须已更新

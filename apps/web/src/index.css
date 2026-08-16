@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+/* 设计 token(品牌:emerald,继承前系统已验证的视觉资产)。
+   shadcn/ui 初始化后与此共存:组件层用 token,不硬编码色值。 */
+@theme {
+  --color-brand-50: #ecfdf5;
+  --color-brand-500: #10b981;
+  --color-brand-600: #059669;
+  --color-brand-700: #047857;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+}

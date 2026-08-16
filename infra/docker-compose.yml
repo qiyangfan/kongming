@@ -1,0 +1,61 @@
+name: kongming
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: kongming
+      POSTGRES_USER: kongming
+      POSTGRES_PASSWORD: ${KM_DB_PASSWORD:?KM_DB_PASSWORD required}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./pg-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kongming"]
+      interval: 5s
+      retries: 12
+
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 12
+
+  api:
+    build:
+      context: ../apps/api
+      dockerfile: ../../infra/api.Dockerfile
+    environment:
+      KM_ENVIRONMENT: dev
+      KM_DATABASE_URL: postgresql+asyncpg://kongming:${KM_DB_PASSWORD}@postgres:5432/kongming
+      KM_REDIS_URL: redis://redis:6379/0
+      KM_INTERNAL_TOKEN: ${KM_INTERNAL_TOKEN:?KM_INTERNAL_TOKEN required}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  agent:
+    build:
+      context: ../apps/agent
+      dockerfile: ../../infra/agent.Dockerfile
+    environment:
+      # ADR-002:此处刻意没有任何 DATABASE/DB_PASSWORD 变量——构造级保证
+      KM_AGENT_LLM_API_KEY: ${KM_AGENT_LLM_API_KEY:?}
+      KM_AGENT_LLM_BASE_URL: ${KM_AGENT_LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      KM_AGENT_LLM_MODEL: ${KM_AGENT_LLM_MODEL:-qwen-plus}
+      KM_AGENT_API_BASE_URL: http://api:8000
+      KM_AGENT_INTERNAL_TOKEN: ${KM_INTERNAL_TOKEN:?KM_INTERNAL_TOKEN required}
+    ports:
+      - "8001:8001"
+    depends_on:
+      - api
+
+volumes:
+  pg_data:
