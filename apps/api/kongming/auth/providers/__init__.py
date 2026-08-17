@@ -4,9 +4,19 @@
 """
 
 from kongming.auth.ports import OAuthProvider
+from kongming.auth.providers.dingtalk import DingTalkProvider
+from kongming.auth.providers.feishu import FeishuProvider
 from kongming.auth.providers.github import GitHubProvider
 from kongming.auth.providers.google import GoogleProvider
+from kongming.auth.providers.wecom import WecomProvider
 
 REGISTRY: dict[str, OAuthProvider] = {
-    p.key: p for p in (GitHubProvider(), GoogleProvider())
+    p.key: p
+    for p in (
+        GitHubProvider(),
+        GoogleProvider(),
+        WecomProvider(),
+        DingTalkProvider(),
+        FeishuProvider(),
+    )
 }

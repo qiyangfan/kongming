@@ -2,6 +2,27 @@
 
 日期: 2026-08-16
 状态: 已接受(002/003 变更的实施蓝图)
+演进注记(2026-08-17,003 落地按官方文档核验):
+① 飞书采用 authen **v2** 端点——app 凭证(client_id/client_secret,JSON 体)
+直换 user_access_token,**无需预取 app_access_token**(下文「实施节奏」的"预取"
+注记是旧 v1 端点路径,随 v2 采用失效);飞书官方支持 PKCE(authorize 阶段
+code_challenge + token 阶段 code_verifier)→ pkce=True,authorize 现行域名
+accounts.feishu.cn。
+② 企微详档(cgi-bin/user/get)需应用通讯录查看权限;无权限时插件降级
+display_name=UserId,登录链路不断(引导管理员开权限,见 .env.example 注释)。
+③ 钉钉统一身份认证文档无 PKCE 形态、企微 qrConnect 不支持 PKCE → 两家 pkce=False。
+
+演进注记(2026-08-17 晚,五路真凭证 e2e 后):
+④ 飞书 v2 token 换取**必带 redirect_uri**(官方文档标注"可选",授权阶段携带时实测
+必带,e2e 抓出即修)——文档与实现的偏差以实测为准。
+⑤ **联邦建号用户名一律 {base}-{provider}**(无冲突也带后缀,来源可溯;超长 base 先预留
+后缀位再截断,脱冲突 -N 链保留)——用户拍板;spec 仅立约"冲突时生成不重复用户名",
+属契约粒度以下实现变更。
+⑥ **联邦总开关 KM_<PROVIDER>_ENABLED**(默认 true):false 即停用该家(options 隐藏 +
+start/callback 404),凭证保留——为企微这类"凭证在、环境未就绪"的场景提供软关停。
+⑦ 企微平台侧两门槛(非代码):可信域名需归属校验(校验文件放域名根目录;ngrok 免费
+域名因拦截页不兼容,cloudflared 快速隧道可过);gettoken 要求出口 IP 在应用
+「企业可信 IP」白名单(60020)。
 
 ## 背景
 

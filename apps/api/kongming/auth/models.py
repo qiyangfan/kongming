@@ -116,6 +116,10 @@ class ProviderNotFound(AuthError):
     """provider 未注册或未配置。"""
 
 
+class ProviderExchangeFailed(AuthError):
+    """联邦 code 交换/profile 拉取失败(provider 侧拒绝或异常)。"""
+
+
 class CurrentPasswordWrong(AuthError):
     """自助改密:当前密码校验失败。"""
 

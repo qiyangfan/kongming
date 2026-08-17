@@ -13,6 +13,8 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // 放行隧道域名(企微可信域名 e2e 用):cloudflared 快速隧道 + ngrok 免费固定域名
+    allowedHosts: [".trycloudflare.com", ".ngrok-free.app", ".ngrok-free.dev"],
     proxy: {
       "/api": { target: "http://localhost:8000", rewrite: (p) => p.replace(/^\/api/, "") },
     },

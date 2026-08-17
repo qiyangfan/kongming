@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- 孔明 favicon:朱砂底 + 白色羽扇剪影(品牌三元色:朱砂主色,从简两色) -->
+  <rect width="64" height="64" rx="14" fill="#8f2d2f"/>
+  <path d="M32 46 L9.5 33 A26 26 0 0 1 54.5 33 Z" fill="#fff"/>
+  <g stroke="#8f2d2f" stroke-width="2.4" stroke-linecap="round">
+    <path d="M32 46 L19 23.5"/>
+    <path d="M32 46 L32 20"/>
+    <path d="M32 46 L45 23.5"/>
+  </g>
+  <rect x="30" y="45" width="4" height="10" rx="2" fill="#fff"/>
+</svg>

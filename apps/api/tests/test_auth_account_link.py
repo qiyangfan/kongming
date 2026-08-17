@@ -136,6 +136,56 @@ async def test_username_conflict_gets_distinct_suffix(
     assert len(names) == 2 and len(set(names)) == 2  # 冲突用户名已脱冲突
 
 
+async def test_auto_provision_username_always_carries_provider_suffix(
+    client: AsyncClient, fake_provider, session: AsyncSession
+) -> None:
+    """联邦建号一律 {base}-{provider}:无冲突也不占裸名(来源可溯,003 e2e 后拍板)。"""
+    await seed_all(session, get_settings())
+    fake_provider("github", _profile())
+    r = await _callback(client, "github")
+    assert r.status_code == 200
+    names = (
+        await session.execute(
+            text("SELECT username FROM public.sys_user WHERE username LIKE 'octocat%'")
+        )
+    ).scalars().all()
+    assert names == ["octocat-github"]
+
+
+async def test_auto_provision_suffix_conflict_falls_back_to_numbered(
+    client: AsyncClient, fake_provider, make_user: MakeUser, session: AsyncSession
+) -> None:
+    """后缀名也被占时追加 -N(bounded 链不丢)。"""
+    await seed_all(session, get_settings())
+    await make_user("octocat-github", "Passw0rd!")
+    fake_provider("github", _profile())
+    r = await _callback(client, "github")
+    assert r.status_code == 200
+    names = (
+        await session.execute(
+            text("SELECT username FROM public.sys_user WHERE username LIKE 'octocat%'")
+        )
+    ).scalars().all()
+    assert names == ["octocat-github", "octocat-github-2"]
+
+
+async def test_auto_provision_long_base_reserves_suffix_room(
+    client: AsyncClient, fake_provider, session: AsyncSession
+) -> None:
+    """超长 base(如 Google email 本地部分可达 64 字符)先预留后缀位再截断:
+    脱冲突名 ≤64 且 provider 后缀完整(防截断后多候选同串误报失败)。"""
+    await seed_all(session, get_settings())
+    fake_provider("github", _profile(username="a" * 70))
+    r = await _callback(client, "github")
+    assert r.status_code == 200
+    name = (
+        await session.execute(
+            text("SELECT username FROM public.sys_user WHERE username LIKE 'aaa%'")
+        )
+    ).scalar_one()
+    assert len(name) <= 64 and name.endswith("-github")
+
+
 async def test_multi_identity_binding(
     client: AsyncClient, fake_provider, make_user: MakeUser, session: AsyncSession
 ) -> None:

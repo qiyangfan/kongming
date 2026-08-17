@@ -120,8 +120,8 @@ async def test_callback_expired_state_rejected(
 
 
 async def test_unknown_provider_404(client: AsyncClient) -> None:
-    assert (await client.get("/auth/wecom/start")).status_code == 404
-    r = await client.post("/auth/wecom/callback", json={"code": "x", "state": "y"})
+    assert (await client.get("/auth/nosuch/start")).status_code == 404
+    r = await client.post("/auth/nosuch/callback", json={"code": "x", "state": "y"})
     assert r.status_code == 404
 
 

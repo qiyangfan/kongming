@@ -6,10 +6,24 @@
 
 from abc import ABC, abstractmethod
 
+import httpx
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 
-from kongming.auth.models import NormalizedProfile
+from kongming.auth.models import NormalizedProfile, ProviderExchangeFailed
 from kongming.config import Settings
+
+
+def resp_json(resp: httpx.Response, provider_name: str) -> dict[str, object]:
+    """provider HTTP 响应 → JSON 对象;非 JSON/非对象 → ProviderExchangeFailed(防 500)。"""
+    try:
+        data = resp.json()
+    except ValueError as e:
+        raise ProviderExchangeFailed(
+            f"{provider_name}登录失败(响应格式异常:{resp.status_code})"
+        ) from e
+    if not isinstance(data, dict):
+        raise ProviderExchangeFailed(f"{provider_name}登录失败(响应格式异常:{resp.status_code})")
+    return data
 
 
 class OAuthProviderBase(ABC):
@@ -35,7 +49,9 @@ class OAuthProviderBase(ABC):
         ...
 
     def configured(self, s: Settings) -> bool:
-        return bool(self.client_id(s) and self.client_secret(s))
+        # 联邦总开关(默认开):KM_<KEY>_ENABLED=false 即停用该家,无需摘除凭证
+        enabled = bool(getattr(s, f"{self.key}_enabled", True))
+        return enabled and bool(self.client_id(s) and self.client_secret(s))
 
     def _client(self, s: Settings) -> AsyncOAuth2Client:
         return AsyncOAuth2Client(

@@ -279,11 +279,14 @@ class AuthService:
         return user
 
     async def _dedupe_username(self, base: str, provider_key: str) -> str:
-        """用户名冲突脱冲突:base → base-provider → base-provider-N(bounded)。"""
-        candidates = [base, f"{base}-{provider_key}"] + [
-            f"{base}-{provider_key}-{i}" for i in range(2, 6)
+        """联邦建号用户名:一律 {base}-{provider} 起步(来源可溯,003 e2e 后拍板);
+        后缀名仍冲突再追加 -N(bounded)。base 超长时先给后缀留位再截断,
+        保证候选彼此恒不同且 ≤64(防截断后多候选同串误报失败)。"""
+        short = base[: 64 - len(provider_key) - 3]  # 预留 -provider 与 -N 的位置
+        candidates = [f"{short}-{provider_key}"] + [
+            f"{short}-{provider_key}-{i}" for i in range(2, 7)
         ]
-        for c in (c[:64] for c in candidates):  # 先截断再查:超长输入查截后名,避免误判空位
+        for c in candidates:
             if await self._uow.users.get_by_username(c) is None:
                 return c
         raise RuntimeError("用户名脱冲突失败")

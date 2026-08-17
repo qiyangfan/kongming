@@ -22,6 +22,31 @@ os.environ.setdefault("KM_GITHUB_CLIENT_ID", "test-gh-id")
 os.environ.setdefault("KM_GITHUB_CLIENT_SECRET", "test-gh-secret")
 os.environ.setdefault("KM_GOOGLE_CLIENT_ID", "test-gg-id")
 os.environ.setdefault("KM_GOOGLE_CLIENT_SECRET", "test-gg-secret")
+# 国内三家默认"未配置"(空串经 env 优先级盖住本地 .env 的真实凭证,防渗入测试面);
+# 「配置后」场景由 domestic 测试 monkeypatch 设置
+for _k in (
+    "KM_WECOM_CORPID",
+    "KM_WECOM_SECRET",
+    "KM_WECOM_AGENTID",
+    "KM_DINGTALK_CLIENT_ID",
+    "KM_DINGTALK_CLIENT_SECRET",
+    "KM_FEISHU_APP_ID",
+    "KM_FEISHU_APP_SECRET",
+):
+    os.environ.setdefault(_k, "")
+# 三家 redirect_uri 同样钉回默认值(本地 .env 可能指向隧道域名)
+os.environ.setdefault("KM_WECOM_REDIRECT_URI", "http://localhost:5173/auth/wecom/callback")
+os.environ.setdefault("KM_DINGTALK_REDIRECT_URI", "http://localhost:5173/auth/dingtalk/callback")
+os.environ.setdefault("KM_FEISHU_REDIRECT_URI", "http://localhost:5173/auth/feishu/callback")
+# 联邦总开关钉为开(本地 .env 可能关停某家,如企微;防渗入测试面)
+for _k in (
+    "KM_GITHUB_ENABLED",
+    "KM_GOOGLE_ENABLED",
+    "KM_WECOM_ENABLED",
+    "KM_DINGTALK_ENABLED",
+    "KM_FEISHU_ENABLED",
+):
+    os.environ.setdefault(_k, "true")
 
 import asyncpg  # noqa: E402
 import pytest  # noqa: E402
