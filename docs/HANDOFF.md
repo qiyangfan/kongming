@@ -1,6 +1,6 @@
 # HANDOFF — Kongming 交接文档
 
-> 最后更新:2026-08-16(001-foundation 归档后)。清空上下文/新会话先读本文与 `AGENTS.md`,
+> 最后更新:2026-08-17(基础设施切 compose 冷启动,默认端口实测跑通)。清空上下文/新会话先读本文与 `AGENTS.md`,
 > 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
 
 ## 项目一句话
@@ -19,20 +19,17 @@
    若其占用上述端口则 Kongming 服务暂缓启动,待其释放。
 3. **本地环境冷启动**(幂等,任何"连不上/端口不对"先跑这个):
    ```bash
-   podman rm -f kongming-pg kongming-redis 2>/dev/null || true   # 清理旧容器
-   podman run -d --name kongming-pg \
-     -e POSTGRES_DB=kongming -e POSTGRES_USER=kongming -e POSTGRES_PASSWORD=kongming \
-     -v $PWD/infra/pg-init:/docker-entrypoint-initdb.d:ro \
-     -p 5432:5432 docker.io/pgvector/pgvector:pg17
-   podman run -d --name kongming-redis -p 6379:6379 docker.io/library/redis:8
+   make up                                 # podman compose 起 postgres+redis(默认端口)
    cd apps/api && uv run alembic upgrade head
    ```
+   pg 数据持久化在 compose 卷 `kongming_pg_data`;删卷/重置属破坏性操作,须用户明确授权。
 4. 三处 `.env` 已配好(不入库):根(占位密钥)、`apps/api/.env`(默认端口连接串 +
    `KM_INTERNAL_TOKEN=dev-internal-token`)、`apps/agent/.env`(同内部令牌;LLM key=dummy)。
 5. 可能有三个后台 dev 进程在跑(api/agent/web),日志 `/tmp/km-{api,agent,web}.log`;
    重启前先清理(如 `pkill -f "uvicorn kongming"`、`pkill -f vite`)。
-6. 本地 dev 流程:两个 Python 服务直接 `uv run uvicorn ...`(不走 compose);compose 文件
-   是给完整部署用的,本机首次跑需 `podman compose` 适配(未实测)。
+6. 本地 dev 流程:基础设施(pg/redis)走 `make up`(podman compose 委托 docker-compose 二进制,
+   已实测);两个 Python 服务日常 dev 直接 `uv run uvicorn ...`(compose 的 api/agent
+   服务留给完整部署用)。
 
 ## 当前状态(截至奠基根提交 + 001 归档,单提交仓库)
 
@@ -68,7 +65,7 @@
 ## 已知 TODO(代码内标注,非缺陷)
 
 `auth/router.py` login/github_callback 501(user store);`internal/router.py` 执行路由;
-agent graph 各节点 LLM;`web/App.tsx` 主布局;compose 的 podman 适配未实测。
+agent graph 各节点 LLM;`web/App.tsx` 主布局。
 
 ## 命令速查
 

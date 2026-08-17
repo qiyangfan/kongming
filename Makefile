@@ -16,7 +16,7 @@ contracts:
 	cd apps/web && pnpm contracts:gen
 
 up:
-	docker compose -f infra/docker-compose.yml up -d postgres redis
+	podman compose --env-file .env -f infra/docker-compose.yml up -d postgres redis
 
 down:
-	docker compose -f infra/docker-compose.yml stop
+	podman compose --env-file .env -f infra/docker-compose.yml stop
