@@ -13,7 +13,7 @@
 - [x] 全覆盖评审:修复 7 缺陷,剔除 2 类虚构,双侧门禁全绿
 - [x] 测试 12 用例(防火墙 16 场景 / JWT 回路 4 / 图拓扑 6)
 - [x] CI 四门禁 workflow;契约管线激活(openapi.json 入库)
-- [x] git init(-b main)+ 根提交(含本归档与 HANDOFF,单提交仓库,哈希以 git log 为准)
+- [x] 仓库 git 版本化
 
 ## 验收
 

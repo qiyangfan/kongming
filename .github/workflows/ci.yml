@@ -16,6 +16,28 @@ jobs:
     defaults:
       run:
         working-directory: apps/api
+    # 认证安全测试需要真实 PG/Redis(测试先行;conftest 自建 kongming_test 库、用 db15)
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: kongming
+          POSTGRES_USER: kongming
+          POSTGRES_PASSWORD: kongming
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kongming"
+          --health-interval 5s
+          --health-retries 12
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-retries 12
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

@@ -41,16 +41,22 @@ select = ["E", "F", "I", "UP", "B", "S", "ASYNC"]
 
 [tool.ruff.lint.per-file-ignores]
 "alembic/versions/*" = ["E501"]  # DDL 行折叠伤可读性,版本文件放开行宽
-"tests/*" = ["S101"]  # pytest 惯例
+"tests/*" = ["S101", "S105", "S106", "S107"]  # pytest 惯例;测试密码为道具非密钥
 
 [tool.mypy]
 strict = true
 python_version = "3.13"
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# 会话级事件循环:engine/redis 客户端 lru_cache 单例与 asyncpg 连接绑定同一 loop
+asyncio_default_test_loop_scope = "session"
+asyncio_default_fixture_loop_scope = "session"
+
 # authlib 官方存根不完整:AsyncOAuth2Client 的 httpx 继承方法(get/aclose)
-# 运行时存在、存根未声明,该模块关闭 attr-defined(其余 strict 全开)
+# 运行时存在、存根未声明,provider 模块关闭 attr-defined(其余 strict 全开)
 [[tool.mypy.overrides]]
-module = "kongming.auth.github"
+module = "kongming.auth.providers.*"
 disable_error_code = ["attr-defined"]
 
 [tool.importlinter]

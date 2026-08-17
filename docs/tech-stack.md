@@ -18,7 +18,7 @@
 | Web | FastAPI + Pydantic v2 |
 | ORM | SQLAlchemy 2.0 async + asyncpg |
 | 迁移 | Alembic(baseline 制,见 ADR-004) |
-| 认证 | 自建:argon2-cffi + PyJWT(RS256)+ authlib(GitHub OAuth),见 ADR-003 |
+| 认证 | 自建:argon2-cffi + PyJWT(RS256)+ authlib(GitHub OAuth),见 ADR-003;联邦登录走连接器架构(ADR-006) |
 | SQL 治理 | sqlglot(AST 防火墙 + 方言能力储备) |
 | 限流 | 按需(nginx limit_req 起步,不预设库) |
 | 可观测 | structlog(JSON)+ prometheus-client + OpenTelemetry(按需启用) |
@@ -43,6 +43,7 @@
 | 数据 | TanStack Query(服务端状态)+ Zustand(客户端状态) |
 | 路由 | React Router v7 |
 | 图表 | ECharts(echarts-for-react) |
+| 品牌图标 | simple-icons(联邦 logo 等多品牌场景,ADR-006;单个图标可内联官方 SVG) |
 | 契约 | openapi-typescript 生成,禁手写 API 类型(ADR-005) |
 
 ## 前端样式铁律(继承旧项目 ADR-006/007 纪律,按新栈重写)

@@ -1,77 +1,70 @@
-"""认证路由(ADR-003):登录页即前端路由,后端只出 JSON 与 JWT。
+"""认证路由(ADR-003/006):登录页即前端路由,后端只出 JSON 与 JWT(薄适配层)。
 
-POST /auth/login           账密 → {access, refresh}(user store 待接入)
-POST /auth/refresh         refresh 轮换(body 传参,不经 URL 防日志泄漏)→ 新对
-GET  /auth/me              当前用户(Bearer 解析)
-GET  /auth/github/start    发起 GitHub OAuth
-GET  /auth/github/callback GitHub 回调 → JWT(建号逻辑待接入)
+POST /auth/login                账密 → 令牌对(锁定/禁用/首登改密)
+POST /auth/refresh              refresh 轮换(旧票复用 → 吊销全家族)
+POST /auth/logout               吊销 refresh 所属家族(幂等 204)
+GET  /auth/me                   当前用户(真实角色/权限点/租户)
+POST /auth/password/change      自助改密(吊销全部家族,全端重登)
+GET  /auth/options              已配置联邦 provider 清单(前端按钮数据驱动)
+GET  /auth/{provider}/start     发起联邦(一次性 state;PKCE 按家声明)
+POST /auth/{provider}/callback  联邦回调(code+state → 令牌对;OAuth token 不出后端)
 """
 
 from typing import Annotated
 
 import jwt as pyjwt
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel
+from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import JSONResponse, Response
 
-from kongming.auth import password as pwd
-from kongming.auth import tokens
+from kongming.auth import providers, tokens
+from kongming.auth.models import (
+    AccountDisabled,
+    AccountLocked,
+    AuthError,
+    CurrentPasswordWrong,
+    LoginFailed,
+    MeInfo,
+    NoLocalPassword,
+    ProviderNotFound,
+    StateInvalid,
+    TokenInvalid,
+    TokenPair,
+)
+from kongming.auth.repository import SqlUnitOfWork
+from kongming.auth.service import AuthService
+from kongming.auth.stores import (
+    RedisLoginAttemptStore,
+    RedisOAuthStateStore,
+    RedisRefreshFamilyStore,
+)
+from kongming.config import get_settings
+from kongming.db import get_session
+from kongming.redis_client import get_redis
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
+# ---- 依赖装配(唯一知道"哪个端口绑哪个实现"的地方) ----
 
 
-class RefreshRequest(BaseModel):
-    refresh_token: str
-
-
-class TokenPair(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "Bearer"  # noqa: S105 —— 固定字面量,非密钥(命名触发启发式误报)
-
-
-@router.post("/login", response_model=TokenPair)
-async def login(req: LoginRequest) -> TokenPair:
-    # TODO(user-store): 查 sys_user + verify(pwd) + 失败计数锁定;骨架期返回 501
-    _ = (req.username, pwd.hash_password(req.password))
-    raise HTTPException(status_code=501, detail="user store 待接入(baseline 已建表)")
-
-
-@router.post("/refresh", response_model=TokenPair)
-async def refresh(req: RefreshRequest) -> TokenPair:
-    try:
-        claims = tokens.verify(req.refresh_token, expected_type="refresh")
-    except pyjwt.PyJWTError as e:
-        raise HTTPException(status_code=401, detail=f"invalid refresh token: {e}") from e
-    subject = str(claims["sub"])
-    return TokenPair(
-        access_token=tokens.issue(subject, "access"),
-        refresh_token=tokens.issue(subject, "refresh"),
+async def get_auth_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> AuthService:
+    return AuthService(
+        SqlUnitOfWork(session),
+        attempts=RedisLoginAttemptStore(redis),
+        families=RedisRefreshFamilyStore(redis),
+        states=RedisOAuthStateStore(redis),
+        settings=get_settings(),
+        registry=providers.REGISTRY,
     )
 
 
-@router.get("/github/start")
-async def github_start() -> dict[str, str]:
-    from kongming.auth.github import GITHUB_AUTH_URL, client
-
-    c = client()
-    url, _state = c.create_authorization_url(GITHUB_AUTH_URL, scope="read:user user:email")
-    return {"authorize_url": url}
-
-
-@router.get("/github/callback", response_model=TokenPair)
-async def github_callback(code: str) -> TokenPair:
-    from kongming.auth import github
-
-    profile = await github.exchange_and_profile(code)
-    # TODO(user-store): (GITHUB, str(profile["id"])) 查/建号 → 签发
-    raise HTTPException(
-        status_code=501, detail=f"github 用户 {profile.get('login')} 建号逻辑待接入"
-    )
+Service = Annotated[AuthService, Depends(get_auth_service)]
 
 
 async def current_user(request: Request) -> dict[str, object]:
@@ -86,7 +79,181 @@ async def current_user(request: Request) -> dict[str, object]:
     return claims
 
 
-@router.get("/me")
-async def me(user: Annotated[dict[str, object], Depends(current_user)]) -> dict[str, object]:
-    # TODO(rbac): perm_codes 由权限域填充
-    return {"user_id": user["sub"], "perm_codes": []}
+# ---- 传输模型 ----
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class CallbackRequest(BaseModel):
+    code: str
+    state: str
+
+
+class TokenPairOut(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "Bearer"  # noqa: S105 —— 固定字面量,非密钥
+    must_change_password: bool = False
+
+
+class TenantRefOut(BaseModel):
+    tenant_key: str
+    tenant_name: str
+
+
+class MeOut(BaseModel):
+    user_id: str
+    username: str
+    nickname: str
+    role_keys: list[str]
+    perm_codes: list[str]
+    tenants: list[TenantRefOut]
+    must_change_password: bool
+
+
+class ProviderOption(BaseModel):
+    provider: str
+    display_name: str
+
+
+class OptionsOut(BaseModel):
+    providers: list[ProviderOption]
+
+
+class StartOut(BaseModel):
+    authorize_url: str
+
+
+def _pair_out(pair: TokenPair) -> TokenPairOut:
+    return TokenPairOut(
+        access_token=pair.access_token,
+        refresh_token=pair.refresh_token,
+        must_change_password=pair.must_change_password,
+    )
+
+
+def _me_out(info: MeInfo) -> MeOut:
+    return MeOut(
+        user_id=info.user_id,
+        username=info.username,
+        nickname=info.nickname,
+        role_keys=info.role_keys,
+        perm_codes=info.perm_codes,
+        tenants=[
+            TenantRefOut(tenant_key=t.tenant_key, tenant_name=t.tenant_name)
+            for t in info.tenants
+        ],
+        must_change_password=info.must_change_password,
+    )
+
+
+# ---- 端点 ----
+
+
+@router.post("/login", response_model=TokenPairOut)
+async def login(req: LoginRequest, svc: Service) -> TokenPairOut:
+    return _pair_out(await svc.login(req.username, req.password))
+
+
+@router.post("/refresh", response_model=TokenPairOut)
+async def refresh(req: RefreshRequest, svc: Service) -> TokenPairOut:
+    return _pair_out(await svc.refresh(req.refresh_token))
+
+
+@router.post("/logout", status_code=204)
+async def logout(req: LogoutRequest, svc: Service) -> Response:
+    await svc.logout(req.refresh_token)
+    return Response(status_code=204)
+
+
+@router.get("/me", response_model=MeOut)
+async def me(user: Annotated[dict[str, object], Depends(current_user)], svc: Service) -> MeOut:
+    return _me_out(await svc.me(str(user["sub"])))
+
+
+@router.post("/password/change", status_code=204)
+async def change_password(
+    req: ChangePasswordRequest,
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Service,
+) -> Response:
+    await svc.change_password(str(user["sub"]), req.current_password, req.new_password)
+    return Response(status_code=204)
+
+
+@router.get("/options", response_model=OptionsOut)
+async def options(svc: Service) -> OptionsOut:
+    return OptionsOut(
+        providers=[ProviderOption(provider=k, display_name=n) for k, n in svc.oauth_options()]
+    )
+
+
+@router.get("/{provider}/start", response_model=StartOut)
+async def oauth_start(provider: str, svc: Service) -> StartOut:
+    return StartOut(authorize_url=await svc.oauth_start(provider))
+
+
+@router.post("/{provider}/callback", response_model=TokenPairOut)
+async def oauth_callback(provider: str, req: CallbackRequest, svc: Service) -> TokenPairOut:
+    return _pair_out(await svc.oauth_callback(provider, req.code, req.state))
+
+
+# ---- 领域错误 → 状态码统一映射(router 唯一的规则) ----
+
+
+def register_auth_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(LoginFailed)
+    async def _login_failed(_: Request, e: LoginFailed) -> JSONResponse:
+        return JSONResponse(status_code=401, content={"detail": "用户名或密码错误"})
+
+    @app.exception_handler(AccountDisabled)
+    async def _disabled(_: Request, e: AccountDisabled) -> JSONResponse:
+        return JSONResponse(status_code=403, content={"detail": "账号已禁用"})
+
+    @app.exception_handler(AccountLocked)
+    async def _locked(_: Request, e: AccountLocked) -> JSONResponse:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": str(e)},
+            headers={"Retry-After": str(e.retry_after_sec)},
+        )
+
+    @app.exception_handler(TokenInvalid)
+    async def _token_invalid(_: Request, e: TokenInvalid) -> JSONResponse:
+        return JSONResponse(status_code=401, content={"detail": str(e) or "令牌无效或已失效"})
+
+    @app.exception_handler(StateInvalid)
+    async def _state_invalid(_: Request, e: StateInvalid) -> JSONResponse:
+        return JSONResponse(status_code=401, content={"detail": str(e) or "state 无效或已过期"})
+
+    @app.exception_handler(ProviderNotFound)
+    async def _provider_not_found(_: Request, e: ProviderNotFound) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"detail": str(e)})
+
+    @app.exception_handler(CurrentPasswordWrong)
+    async def _current_wrong(_: Request, e: CurrentPasswordWrong) -> JSONResponse:
+        return JSONResponse(status_code=400, content={"detail": str(e)})
+
+    @app.exception_handler(NoLocalPassword)
+    async def _no_local(_: Request, e: NoLocalPassword) -> JSONResponse:
+        return JSONResponse(status_code=400, content={"detail": str(e)})
+
+    @app.exception_handler(AuthError)
+    async def _auth_fallback(_: Request, e: AuthError) -> JSONResponse:
+        return JSONResponse(status_code=400, content={"detail": str(e)})

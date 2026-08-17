@@ -1,15 +1,17 @@
 /* 登录页(铁律样板):基础组件全 shadcn/ui,色值全语义/品牌 token,
-   品牌渐变为表现层(第 7 条豁免)但色值仍从 token 派生。 */
+   品牌渐变为表现层(第 7 条豁免)但色值仍从 token 派生。
+   联邦按钮数据驱动(/auth/options):未配置的 provider 不渲染(ADR-006)。 */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { api } from "../lib/api";
+import { api, type OptionsOut, type StartOut, type TokenPairOut } from "../lib/api";
+import { useAuth } from "../lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-/* lucide 已移除品牌图标,此处内联 GitHub 官方 mark(商标图标属铁律例外) */
+/* 品牌官方 mark 内联(商标图标属铁律例外条款;003 五家齐发时迁 simple-icons) */
 function GithubMark(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden {...props}>
@@ -18,20 +20,62 @@ function GithubMark(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
+function GoogleMark(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden {...props}>
+      <path
+        fill="#4285F4"
+        d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82Z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24Z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09Z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75Z"
+      />
+    </svg>
+  );
+}
+
+const PROVIDER_MARKS: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+  github: GithubMark,
+  google: GoogleMark,
+};
+
 export default function Login() {
   const navigate = useNavigate();
+  const acceptTokens = useAuth((s) => s.acceptTokens);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [providers, setProviders] = useState<OptionsOut["providers"]>([]);
+
+  useEffect(() => {
+    // options 拉取失败不阻断账密登录(联邦入口整体隐藏)
+    api
+      .get<OptionsOut>("/auth/options")
+      .then((o) => setProviders(o.providers))
+      .catch(() => setProviders([]));
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setPending(true);
     setError(null);
     try {
-      await api.post("/auth/login", { username, password });
-      navigate("/");
+      const pair = await api.post<TokenPairOut>("/auth/login", {
+        username,
+        password,
+      });
+      await acceptTokens(pair);
+      navigate("/", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "登录失败");
     } finally {
@@ -39,9 +83,14 @@ export default function Login() {
     }
   }
 
-  async function githubLogin() {
-    const { authorize_url } = await api.get<{ authorize_url: string }>("/auth/github/start");
-    window.location.href = authorize_url;
+  async function federatedLogin(provider: string) {
+    setError(null);
+    try {
+      const { authorize_url } = await api.get<StartOut>(`/auth/${provider}/start`);
+      window.location.href = authorize_url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "联邦登录发起失败");
+    }
   }
 
   return (
@@ -80,13 +129,30 @@ export default function Login() {
             </Button>
           </form>
 
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <span className="h-px flex-1 bg-border" />或<span className="h-px flex-1 bg-border" />
-          </div>
-          <Button variant="outline" className="w-full" onClick={githubLogin}>
-            <GithubMark />
-            使用 GitHub 继续
-          </Button>
+          {providers.length > 0 && (
+            <>
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />或
+                <span className="h-px flex-1 bg-border" />
+              </div>
+              <div className="space-y-2">
+                {providers.map((p) => {
+                  const Mark = PROVIDER_MARKS[p.provider];
+                  return (
+                    <Button
+                      key={p.provider}
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => void federatedLogin(p.provider)}
+                    >
+                      {Mark && <Mark />}
+                      使用 {p.display_name} 继续
+                    </Button>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>

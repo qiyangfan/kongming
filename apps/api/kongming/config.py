@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,8 +19,8 @@ class Settings(BaseSettings):
     jwt_private_key_pem: str | None = None
     jwt_public_key_pem: str | None = None
     jwt_issuer: str = "kongming"
-    access_token_ttl_sec: int = 900        # 15min
-    refresh_token_ttl_sec: int = 7 * 24 * 3600
+    access_token_ttl_sec: int = Field(default=900, ge=1)        # 15min
+    refresh_token_ttl_sec: int = Field(default=7 * 24 * 3600, ge=1)
 
     # 内部服务令牌:api ↔ agent 通道(与用户 JWT 分离,ADR-002)
     internal_token: str | None = None
@@ -29,6 +30,20 @@ class Settings(BaseSettings):
     github_client_secret: str | None = None
     # 须与 GitHub OAuth App 的 Authorization callback URL 精确一致(vite 默认端口 5173)
     github_redirect_uri: str = "http://localhost:5173/auth/github/callback"
+
+    # Google OAuth 联邦(ADR-006 连接器首发第二家)
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    google_redirect_uri: str = "http://localhost:5173/auth/google/callback"
+
+    # 认证安全策略(ADR-003;锁定语义见 auth spec;ge=1 防 0 值导致 Redis EX 报错)
+    auth_login_max_fails: int = Field(default=5, ge=1)  # 连续失败达此次数锁定
+    auth_login_lock_min: int = Field(default=15, ge=1)  # 锁定时长(分钟)
+    auth_state_ttl_sec: int = Field(default=600, ge=1)  # 联邦 state 一次性凭证时效
+
+    # 启动种子(rbac spec「种子数据」):超管账号;缺省密码时强制首登改密
+    admin_username: str = "admin"
+    admin_initial_password: str | None = None
 
     # 动态数据源密码加密密钥
     datasource_encrypt_key: str | None = None

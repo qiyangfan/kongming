@@ -1,6 +1,6 @@
 # HANDOFF — Kongming 交接文档
 
-> 最后更新:2026-08-17(基础设施切 compose 冷启动,默认端口实测跑通)。清空上下文/新会话先读本文与 `AGENTS.md`,
+> 最后更新:2026-08-17(002 认证闭环落地并归档:真用户可登录,令牌生命周期完整,联邦连接器首发)。清空上下文/新会话先读本文与 `AGENTS.md`,
 > 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
 
 ## 项目一句话
@@ -13,10 +13,11 @@
 
 1. **本机是 podman,不是 docker**:`docker` 只是交互 shell 的 alias,非交互命令里
    `docker` 不存在——一律用 `podman`。
-2. **标准端口**:api **8000** / agent **8001** / web dev **5173** /
+2. **标准端口**:api **8000** / agent **8001** / web dev **5173**(见下注)/
    postgres **5432** / redis **6379**(均可配置,见「命令速查」)。本机同时存在旧项目
-   (nl2sql-data-platform)容器,用户已宣布将停用;停用前**绝不触碰其容器**,
-   若其占用上述端口则 Kongming 服务暂缓启动,待其释放。
+   (nl2sql-data-platform)容器与 dev 进程,用户已宣布将停用;停用前**绝不触碰其容器/进程**。
+   **注(2026-08-17 实测):旧项目 vite 正占用 5173,Kongming web dev 自动落到 5174**;
+   同理旧项目容器若占用上述端口则 Kongming 服务暂缓启动,待其释放。
 3. **本地环境冷启动**(幂等,任何"连不上/端口不对"先跑这个):
    ```bash
    make up                                 # podman compose 起 postgres+redis(默认端口)
@@ -31,14 +32,26 @@
    已实测);两个 Python 服务日常 dev 直接 `uv run uvicorn ...`(compose 的 api/agent
    服务留给完整部署用)。
 
-## 当前状态(截至奠基根提交 + 001 归档,单提交仓库)
+## 当前状态(截至 002 认证闭环归档)
 
-- git:已 `init -b main`,单根提交(代码+治理+本归档+本文档一次成型);**无远程、未 push**(待用户指令)。
-- openspec:001-foundation 已归档(本批文档未提交,工作区有未跟踪变更)。
-- 质量:双侧 ruff/mypy strict/import-linter/pytest(12 用例)+ web tsc/eslint/build 全绿;
-  CI 四 job 就绪(未在真实 runner 上跑过——push 后首验)。
-- 全链路已实测跑通(healthz / 防火墙拦截 / 内部通道 / 登录页 / 代理链路)。
-- 防火墙已可用且被测试锁死(AST 只读白名单,拦截 DROP/数据修改 CTE/多语句)。
+- git:main 分支;**无远程、未 push**(待用户指令)。
+- openspec:001-foundation、002-auth-loopback 均已归档;`openspec/specs/auth/` 已立约。
+- 认证(ADR-003/006 落地):账密登录(argon2id + 失败 5 次锁 15min + 禁用/软删拒登 +
+  首登强制改密)、refresh 家族轮换与复用吊销(Redis 三态)、logout、/auth/me 真实
+  角色/权限点/租户、自助改密(吊销全家族)、连接器框架 + GitHub/Google 插件
+  (state 一次性 + PKCE 按家声明 + verified-email 关联 + 自动建号绑 DEVELOPER/default 租户)。
+  **轮换判定已原子化(Lua GETDEL+立墓碑单脚本)**:并发同票刷新仅一个胜者,败者按
+  spec「复用即吊销家族」处理——多标签页毫秒级同票竞刷会触发重新登录,属契约既定语义;
+  前端 bootstrap 已登录态短路,路由重挂载不再重复轮换(防误触发)。
+- 启动幂等种子(lifespan):角色 SUPER_ADMIN/DEVELOPER、权限点注册表(system:user|role:manage)、
+  默认租户 default、超管 admin(KM_ADMIN_INITIAL_PASSWORD 缺省 admin123 强制首登改密)。
+- **dev 库现状**:冒烟后 admin 密码已被改为 `Kongming#2026`(非缺省;如需复位可删库重播或走改密接口)。
+- schema:0001 baseline + 0002 user_identities(sys_user.auth_source/external_id 已删列收敛)。
+- 质量:api ruff/mypy strict/import-linter/pytest 53(认证全栈集成测试,真实 PG+Redis)+
+  agent 同门禁 6 + web tsc/eslint/build 全绿;CI api job 已带 pg/redis services(未在真实 runner 验证——push 后首验)。
+- 契约:openapi.json 已含 /auth/* 全部端点,双出哈希一致;前端类型已重生成。
+- 实测链路:curl 冒烟(登录→me→轮换→复用 401→改密→锁定 429→未配置联邦 404)+
+  浏览器实测(登录页渲染→账密登录→首页占位→刷新会话恢复→登出)全通过。
 
 ## 已定死的决策(不再议,引用即终)
 
@@ -51,21 +64,20 @@
 | 契约 | FastAPI OpenAPI 唯一事实源;前端类型生成禁手写;CI 漂移 diff | ADR-005 |
 | 分层 | 域包内 router→service→models→repository;domain 零框架依赖 | 宪法 Article II |
 
-## 下一步(路线图第一梯队,按序)
+## 下一步(路线图梯队,按序)
 
-1. **认证闭环**(建议下一个 openspec 变更 `002-auth-loopback`):
-   user store 接入(SQLAlchemy repository + Protocol)、`/auth/login` 真实实现、
-   种子数据(rbac spec「种子数据」节)、**auth spec 与实现同步编写**(B 层唯一留白)、
-   web 登录页接线 + token 存取。登录通了才能打通一切管理面。
+1. **003 国内三家联邦**(ADR-006 实施节奏):企微(通讯录权限)/钉钉(app 签名 quirks)/
+   飞书(预取 app_access_token);顺手把 rbac spec「OAuth(GitHub)…」措辞泛化为 provider 无关,
+   simple-icons 上包替代内联 SVG,补 favicon。
 2. `/internal/sql/execute` 执行路由:数据源连接池(默认 default 库即可起步)+
    审计落库 + data_scope 改写接入(datascope spec 测试清单 10 条先行)。
 3. Agent LLM 接线(understand/generate/summarize)+ 回调 api 走通 → 第一条端到端问答。
-4. 前端主布局(会话侧栏 + 对话区 + RBAC 菜单守卫)。
+4. 前端主布局(会话侧栏 + 对话区 + RBAC 菜单守卫;require_perm 依赖随首个受保护端点交付)。
+5. RBAC 管理面 CRUD(用户/角色/权限点/部门,spec 已立约)。
 
 ## 已知 TODO(代码内标注,非缺陷)
 
-`auth/router.py` login/github_callback 501(user store);`internal/router.py` 执行路由;
-agent graph 各节点 LLM;`web/App.tsx` 主布局。
+`internal/router.py` 执行路由;agent graph 各节点 LLM;web 主布局;favicon.ico 缺失(控制台 404,无害)。
 
 ## 命令速查
 

@@ -54,17 +54,33 @@ make up / down      # compose 起/停 postgres redis
 - 安全规则类(SQL 防火墙/RBAC/租户)测试先行:先写失败测试再实现。
 - 文档、ADR、代码注释一律**简体中文**。
 - `uv.lock` 与 `pnpm-lock.yaml` 必须入库(锁文件不进 .gitignore)。
-- 仓库已 init(main 分支,单根提交);git 写操作(add/commit/push 等)仍需用户逐次
-  明确指令,只读查询(status/diff/log)允许。文档中不写死提交哈希,用「根提交/tag/
-  git log」等稳定指代。
+- 仓库已 git 版本化(main 分支);git 写操作(add/commit/push 等)仍需用户逐次明确
+  指令,只读查询(status/diff/log)允许。文档不写提交哈希、不谈提交次数/形态——
+  git 层细节以 git log 为唯一事实源;纯决策/文档类小变更攒批随功能提交搭车,不单独成提交。
 - `.env` 从 `.env.example` 复制;compose 对关键变量 `${VAR:?}` 强校验,缺失拒启是刻意的。
+
+## 上游参考项目
+
+前身:`/Users/solvela/nl2sql-data-platform`(Java COLA 双栈,38 变更验证过;全栈容器
+可能仍在运行——**绝不触碰其容器/卷/网络**)。
+
+| 场景 | 可参考 | 不可照抄 |
+|---|---|---|
+| RAG 三路召回 | 召回策略、RRF 融合、缓存失效逻辑 | Java 实现、双语言 HTTP 回调链 |
+| SQL 防火墙 | 规则集与拦截场景(评估用例尤佳) | AST 库差异(JSqlParser→sqlglot) |
+| 评估体系 | eval yaml 结构、Execution Match 匹配算法、gold 编写规范 | 目录结构 |
+| Agent 链路 | LangGraph 8 节点流程、prompt 设计、selfheal 分类 | 回调方式 |
+| 反馈闭环 | 状态机语义、精修闭环流程 | schema 旧约定(雪花 ID/SMALLINT/Flyway) |
+
+纪律:参考**逻辑**不复制**代码**(禁止 import 上游);行为冲突时以 Kongming 的
+specs/baseline 为准;上游 specs 取材指引见 docs/roadmap.md。
 
 ## 前置阅读(按改动区域)
 
 | 改动区域 | 先读 |
 |---|---|
-| 认证/登录/用户 | docs/adr/003(自建认证,不用 Keycloak) |
+| 认证/登录/用户 | docs/adr/003(自建认证,不用 Keycloak)+ 006(联邦连接器) |
 | api↔agent 交互、部署单元 | docs/adr/002(信任边界) |
-| 数据库表结构 | docs/adr/004 + apps/api/alembic/versions/0001_baseline.py |
+| 数据库表结构 | docs/adr/004 + apps/api/alembic/versions/0001_baseline.py(演进走新迁移) |
 | 前后端契约/加接口 | docs/adr/005 + make contracts |
 | 任何"要不要引入 X" | docs/adr/001(含否决清单)+ openspec/constitution.md |

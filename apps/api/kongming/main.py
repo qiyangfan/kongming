@@ -5,20 +5,37 @@
 - 内部面 /internal/* —— 仅限 agent 进程调用,内部服务令牌认证
 """
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from starlette.responses import JSONResponse
 
+from kongming.auth.router import register_auth_error_handlers
 from kongming.auth.router import router as auth_router
+from kongming.auth.seed import seed_all
 from kongming.config import get_settings
+from kongming.db import get_sessionmaker
 from kongming.internal.router import router as internal_router
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """启动即播种(幂等,rbac spec「种子数据」);DB 不可达则拒启(控制面 fail-closed)。"""
+    async with get_sessionmaker()() as session:
+        await seed_all(session, get_settings())
+    yield
+
 
 app = FastAPI(
     title="Kongming API",
     version="0.1.0",
     description="控制面:持凭证、做安全决策(ADR-002)",
+    lifespan=lifespan,
 )
 app.include_router(auth_router)
 app.include_router(internal_router)
+register_auth_error_handlers(app)
 
 
 @app.get("/healthz", tags=["ops"])
