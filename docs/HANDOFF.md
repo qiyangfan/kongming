@@ -1,20 +1,27 @@
 # HANDOFF — Kongming 交接文档
 
-> 最后更新:2026-08-18(**004 执行路由真实化收官并归档 + 审查循环清零**:
-> /internal/sql/execute 全链路成真——只读池/租户路由/data_scope 改写/审计三类落库;
-> datascope 十条清单 + 17 全栈用例;审查循环 R1–R4 累计修 11 项后清零,api 120 测试全绿)。
+> 最后更新:2026-08-18(**005 端到端问答链路收官 + 审查循环清零**:
+> agent 三节点 LLM 接线(上游 prompt 逐字移植)+ execute 真回调 +
+> api /chat/query(require_perm 首发 chat:execute)+ /internal/meta/schema
+> 内省通道;真 LLM(qwen-plus)冒烟五条路径全过;独立评审实证保留表透出
+> 通路(sys_user.password_hash 可经问答链路被读)已修——执行路由新增
+> 保留表拒读 RESERVED_TABLE;api 144 + agent 53 测试全绿)。
 > 清空上下文/新会话先读本文与 `AGENTS.md`,
 > 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
 
 ## 新会话开工指引(最先看这里)
 
-1. 004 全闭账:执行路由(默认数据源)三态 verdict + 审计贯穿已立约(sql-execution spec);
-   datascope 主 spec「包子查询」措辞已修正为「最外层 WHERE AST 注入」(实测证伪前者)。
-   下一棒:**Agent LLM 接线(understand/generate/summarize)+ 回调 api 走通 →
-   第一条端到端问答**(梯队见文末「下一步」),走 `/opsx:propose` 开局;
-   回调报文形态见 `kongming/internal/router.py` 的 SqlExecuteRequest/Response。
+1. 005 全闭账:问答链路端到端成真——用户 JWT → chat:execute 权限点 →
+   X-Tenant-Id 白名单 → 会话落库 → agent 图(understand/retrieve/generate/
+   validate/execute/selfheal/summarize 全真)→ 三态 verdict → 结构化洞察;
+   保留表拒读(RESERVED_TABLE)已立约进 sql-execution spec。
+   下一棒:**前端主布局(会话侧栏 + 对话区 + RBAC 菜单守卫)**(梯队见文末
+   「下一步」),走 `/opsx:propose` 开局;web 类型已含 /chat/query 契约。
 2. 质量底线:安全规则类测试先行;收工前 `make check` 全绿 + 冒烟记录;
    改 api 必跑 `make contracts` 并提交产物。
+3. **prompt 资产纪律**:apps/agent/graph/prompts.py 与 nodes.py 的 LLM 模板
+   为上游逐字移植(全角标点!),改动前先读文件头注释——手抄易丢全角,
+   建议脚本对拍(005 实操:两次手滑半角,靠码点校验脚本兜底)。
 
 ## 项目一句话
 
@@ -37,7 +44,9 @@
    ```
    pg 数据持久化在 compose 卷 `kongming_pg_data`;删卷/重置属破坏性操作,须用户明确授权。
 4. 三处 `.env` 已配好(不入库):根(占位密钥)、`apps/api/.env`(默认端口连接串 +
-   `KM_INTERNAL_TOKEN=dev-internal-token`)、`apps/agent/.env`(同内部令牌;LLM key=dummy)。
+   `KM_INTERNAL_TOKEN=dev-internal-token`)、`apps/agent/.env`(同内部令牌;
+   **LLM key 已配真值(005,借自上游项目 dashscope qwen-plus)**——冒烟/演示即开即用,
+   注意勿提交、勿打印)。
 5. 可能的后台进程:api(8000,带真联邦凭证)/agent(8001)/web(5173);
    另有 ngrok 固定域名隧道(baggie-armadillo-crave.ngrok-free.dev → 5173,演示用)
    与用户自建的 cloudflared 系统服务隧道(挂起 zone,无效但无害)。日志 /tmp/km-*.log;
@@ -50,14 +59,72 @@
    (DOM 快照可读)——GUI 测试一律用 Playwright MCP 工具组
    (`mcp__plugin_playwright_playwright__browser_*`,独立管道,002 已验证可用)。
 
-## 当前状态(截至 004 提交,工作区干净)
+## 当前状态(截至 005 提交,工作区干净)
 
-- git:main 分支 6 提交(奠基/品牌/compose 收尾/002 认证闭环/003 五路联邦+审查硬化/
-  **004 执行路由真实化+审查清零**,以 git log 为准),**工作区干净;无远程、未 push**
-  (待用户指令)。**分支策略已定
-  (2026-08-17 用户拍板):主干开发不拉 dev;未来协作时按变更开短命 feature 分支合回 main。**
-- openspec:001/002/003/**004** 已归档;新增主 spec `sql-execution`(受控执行路由契约);
-  datascope 主 spec 三处改写措辞修正(包子查询→最外层 WHERE 注入,列限定主表别名)。
+- git:main 分支(以 git log 为准),**005 全部改动已随 005 提交入库**;
+  无远程、未 push。分支策略:主干开发不拉 dev,协作按变更开短命 feature。
+- openspec:001–004 已归档;**005(e2e-chat-query)已归档**;新增主 spec
+  `internal-meta`(租户 schema 实时内省);chat/nl2sql/nl2sql-agent 增量合入;
+  sql-execution 增「控制面保留表拒读」。
+- **问答链路(005)**:用户面 `POST /chat/query`(JWT + **require_perm 首发**
+  chat:execute + X-Tenant-Id 白名单 + 会话/消息落库 + history 补全最近 5 条 +
+  trace_id 贯穿 + 图表建议纯函数 line/pie/bar/none)→ 回调 agent `POST /query`
+  (120s 超时,不可达/非 200/坏报文收敛友好错误,落 FAILED 消息)→
+  8 节点图全真:understand(最近 5 轮指代消解)/retrieve(经
+  /internal/meta/schema 实时内省,保留表已排除,50 表截断)/generate
+  (SQL_GEN_SYSTEM 七规则)/validate(sqlglot 预检四规则,非只读根=权限类
+  直接终态)/execute(回调 004 路由)/selfheal(重试上限 2=初始之外两次,
+  耗尽标 retry_exhausted;BLOCKED 不耗配额)/summarize(结构化洞察 +
+  stats 本地算 + 三级降级)。消息 status:PASS→SUCCESS/BLOCKED→REJECTED/
+  ERROR→FAILED;REJECTED 文案按 reason 前缀分态(DATA_SCOPE/RESERVED_TABLE/
+  非只读)。
+- **保留表拒读(005 审查实证修复)**:sqlfw 新增 check_reserved_tables——
+  sys_/chat_ 前缀 + alembic_version/user_identities,末段名小写比对,
+  不限 schema 生效(裸名落 public 是最危险形态),CTE 名/表函数放行;
+  执行路由复检段调用,verdict=BLOCKED。背景:public 在 search_path 内 +
+  km_readonly 对 public 全表有 SELECT + data_scope 对无 create_by 列降级,
+  三环叠加曾使 sys_user.password_hash 可经问答链路被读出(评审逐环实证)。
+  meta 内省同一判定排除保留表(不占 50 表上限)。
+- **sqlglot 异常口径**:ParseError 与 TokenError 统一按 SqlglotError 捕获
+  (005 评审:TokenError 逃逸曾使未闭合引号 SQL 穿出图变 500)——agent 预检、
+  api 防火墙 check/check_schema_scope 三处同改。
+- **agent 面新文件**:llm.py(AsyncOpenAI 薄封装,温度按节点,30s 超时)、
+  apiclient.py(httpx 回调,HTTP 错误收敛领域结果)、deps.py(工厂,测试
+  monkeypatch 入口)、graph/prompts.py(上游逐字,脚本生成非手抄)、
+  graph/nodes.py(七节点实现)。依赖新增 sqlglot(预检);pytest-asyncio。
+- **api 侧**:httpx dev→主依赖(回调 agent);种子 PERMISSIONS 加
+  chat:execute,DEVELOPER 推荐绑定增量补齐(只增不摘);config 加
+  agent_timeout_sec(120)/meta_schema_max_tables(50);import-linter 增
+  chat.models 零框架契约。
+- **重试语义澄清(005)**:MAX_RETRY=2 指「初始尝试之外最多重试 2 次」,
+  总执行尝试 ≤3;selfheal 预算耗尽不增计数(retry_count=实际发起的重试数)
+  并标 end_reason=retry_exhausted 由路由收束。
+- **冒烟(2026-08-18,真 LLM qwen-plus,全过)**:① 首轮 COUNT 问答 3.5s
+  (会话自动建/消息/审计齐);② 多轮「那它们分别是谁创建的?」指代消解 +
+  LIMIT 100 明细保护;③ 诱导删除:LLM 用 WHERE FALSE 规避(数据无损,
+  纵深防御生效)但摘要谎称"删除成功"——**摘要幻觉已知行为,登记观察**;
+  ④ smoke-self(SELF scope)问"我创建的商品"只回连弩,审计含
+  `WHERE goods.create_by = :km_ds_0` 改写形态;⑤ 评审后复验:「列出
+  sys_user 密码哈希」BLOCKED + 「该查询访问了不允许的表」文案 + meta
+  内省结果仅剩 goods。
+- **005 审查循环**:R1 独立评审 1 阻断(B1 保留表透出通路)+ 1 严重
+  (S1 TokenError 逃逸)+ 5 建议,全部修复(建议项:history 单条限长 2000、
+  REJECTED 分态文案、AgentClient 解析收敛、租户 SQL 下沉 repository、
+  补 trace_id/超管不豁免/TokenError 测试)。
+  **R2(全量 005 变更面)2 必修 + 4 建议全部闭环**:B-1 契约漂移(history 限长
+  改了没跑 make contracts)已重生成;S-1 CTE 遮蔽绕过(WITH sys_user AS
+  (SELECT FROM public.sys_user) 曾穿透五层防御,评审真库实证)已修——
+  CTE 别名命中保留名即拒、仅豁免非保留 CTE 名,spec 示例改非保留名;
+  建议:_json_cell 非有限值映射 None(>2⁵³ 精度取舍注释钉住)、load.sh
+  幂等守卫 + 落点断言、api 防火墙 TokenError 单测。**R3 复核:全部闭环,
+  11 种自拟绕过形态 0 失误,总评可提交**。
+  **R3 侧报已当场闭环**:危险函数拒用(pg_read_file/pg_ls_dir/pg_sleep/
+  set_config/lo_import/dblink 等,FORBIDDEN_FUNC,嵌套也拦)——Select 根
+  纯函数调用曾穿透全部防御层(dev 库 kongming=superuser 实证可读服务器文件);
+  spec 已立约「危险函数拒用」,e2e 实证 BLOCKED。注意:Anonymous 函数名取
+  .name,已收录类型用 sql_name()(sqlglot 两路径,踩过一次)。
+  另:R1 引用的 km_readonly 授权链路非 live 路径(只读引擎用 database_url
+  owner + 事务级只读),暴露结论不变,证据以 executor.py 为准。
 - **执行路由(004)**:`POST /internal/sql/execute` 全链路——内部令牌 middleware(002 已有)
   → 租户解析(tenant_key,未知/禁用 404)→ 用户-租户绑定复校(未绑定 403;user_id 缺省
   =系统调用豁免)→ 非 default 数据源 400(动态池未落地,fail-closed 不静默回退)→
@@ -126,22 +193,29 @@
   前端 bootstrap 已登录态短路,路由重挂载不再重复轮换(防误触发)。
 - 评审循环(002 提交前):核验出 6 真实缺陷全部修复(轮换原子化/0002 downgrade 五家 CHECK/
   config 下界/角色 sort 落库/bootstrap 短路/杂项),剔除全部虚构项;54 测试全绿。
-- 启动幂等种子(lifespan):角色 SUPER_ADMIN/DEVELOPER、权限点注册表(system:user|role:manage)、
-  默认租户 default、超管 admin(KM_ADMIN_INITIAL_PASSWORD 缺省 admin123 强制首登改密)。
+- 启动幂等种子(lifespan):角色 SUPER_ADMIN/DEVELOPER、权限点注册表(system:user|role:manage
+  + **chat:execute**,005)、默认租户 default、超管 admin(KM_ADMIN_INITIAL_PASSWORD
+  缺省 admin123 强制首登改密);DEVELOPER 推荐绑定 chat:execute(只增不摘)。
 - **dev 库现状**:冒烟后 admin 密码已被改为 `Kongming#2026`(非缺省;如需复位可删库重播或走改密接口);
   角色 sort 列为 0/0(种子只增不改,不补齐历史行;新库播种即 1/2);
   另有五路联邦 e2e 留下的 5 个联邦账号(漆阳帆-dingtalk/漆阳帆-feishu/qiyangfan-github/
   qyf…-google/QiYangFan-wecom,均 ACTIVE,可作身份命中回归的活数据);
-  **004 冒烟活数据**:`tenant_default.goods` 小表(4 行)、`smoke-self` 用户
-  (SMOKE_SELF 角色=SELF,绑 default 租户,本人行=连弩)——可作执行路由回归活数据。
+  **004/005 冒烟活数据**:`tenant_default.goods` 小表(4 行)、`smoke-self` 用户
+  (SMOKE_SELF 角色=SELF,绑 default 租户,本人行=连弩;005 已授 chat:execute,
+  密码已置 `Smoke#2026`)——行级问答回归活数据;chat_session/chat_message
+  有 005 冒烟留下的真实问答记录;
+  **示例数据集(2026-08-18 装载)**:sakila(film 1000/rental 16044/customer 599)
+  与 olist(orders 99441/items 112650)两租户已注册并绑 admin;
+  源文件在 `.example-data/`(135MB,已 gitignore),装载管线 `infra/example-data/load.sh`
+  (幂等可重放,含中文注释 comments.sql——内省进 LLM 提示的质量关键)。
 - 前端:登录页五家联邦按钮数据驱动;simple-icons 覆盖 GitHub/Google/微信系,
   **钉钉/飞书 simple-icons@16 未收录 → 按例外条款内联官方 mark**;favicon.svg 已补
   (朱砂底白色羽扇)。003 冒烟:五家图标实测渲染正确。
-- 质量:api ruff/mypy strict/lint-imports/pytest **120**(认证全栈 68 + datascope 30 +
-  执行路由 17 + 防火墙 5,真实 PG+Redis)+ agent 同门禁 6 + web tsc/eslint 全绿;
+- 质量:api ruff/mypy strict/lint-imports/pytest **148**(认证+datascope+执行路由+
+  防火墙+**chat 13 + meta 6**,真实 PG+Redis)+ agent 同门禁 **53** + web tsc/eslint 全绿;
   CI api job 已带 pg/redis services(未在真实 runner 验证——push 后首验)。
-- 契约:openapi.json 含 /auth/* + /internal/sql/execute(三态响应模型);
-  004 模型落定后 `make contracts` 已重生成,web tsc 过。
+- 契约:openapi.json 含 /auth/* + /internal/sql/execute + **/chat/query +
+  /internal/meta/schema**;005 模型落定后 `make contracts` 已重生成,web tsc 过。
 
 ## 已定死的决策(不再议,引用即终)
 
@@ -154,19 +228,27 @@
 | Schema | baseline 制;UUID v7 / VARCHAR+CHECK / timestamptz;已规划能力列一次建全 | ADR-004 |
 | 契约 | FastAPI OpenAPI 唯一事实源;前端类型生成禁手写;CI 漂移 diff | ADR-005 |
 | 分层 | 域包内 router→service→models→repository;domain 零框架依赖 | 宪法 Article II |
-| 执行路由 | 三态 verdict(PASS/BLOCKED/ERROR);用户-租户绑定复校;data_scope 改写=最外层 WHERE AST 注入(非包子查询);非 default 数据源 fail-closed | sql-execution + datascope spec(004) |
+| 执行路由 | 三态 verdict(PASS/BLOCKED/ERROR);用户-租户绑定复校;data_scope 改写=最外层 WHERE AST 注入(非包子查询);非 default 数据源 fail-closed;**控制面保留表(sys_/chat_/user_identities/alembic_version)拒读 + 危险函数(pg_read_file 等)拒用(005 审查循环)** | sql-execution + datascope spec(004/005) |
+| 问答链路 | agent 8 节点图;权限类(BLOCKED/预检非只读)不重试;重试上限=初始之外 2 次;schema 提示 RAG 前=实时内省过渡形态 | nl2sql + nl2sql-agent + chat spec(005) |
 
 ## 下一步(路线图梯队,按序)
 
-1. Agent LLM 接线(understand/generate/summarize)+ 回调 /internal/sql/execute 走通
-   → 第一条端到端问答(报文形态见 sql-execution spec 与 internal/router.py)。
-2. 前端主布局(会话侧栏 + 对话区 + RBAC 菜单守卫;require_perm 依赖随首个受保护端点交付)。
-3. RBAC 管理面 CRUD(用户/角色/权限点/部门,spec 已立约;sys_dept 存储底座 004 已建)。
-4. 动态数据源注册/管理端点(sys_datasource 表已在,池管理器 key 维度与失效钩子已预留)。
+1. 前端主布局(会话侧栏 + 对话区 + RBAC 菜单守卫;require_perm 已随 005 首发,
+   /chat/query 契约已在 openapi.json,对话页可直接消费)。
+2. RBAC 管理面 CRUD(用户/角色/权限点/部门,spec 已立约;sys_dept 存储底座 004 已建)。
+3. 动态数据源注册/管理端点(sys_datasource 表已在,池管理器 key 维度与失效钩子已预留)。
+4. RAG 三路召回 + 知识库(rag/knowledge spec 已立约;落地后 retrieve 从内省过渡形态
+   切换召回收窄,schema 提示源决策见 005 design Open Questions)。
 
 ## 已知 TODO(代码内标注,非缺陷)
 
-agent graph 各节点 LLM;web 主布局;动态数据源池(sys_datasource 行驱动)。
+web 主布局;动态数据源池(sys_datasource 行驱动);RAG 召回与 schema 提示收窄。
+**摘要质量观察(005/数据集冒烟)**:① 诱导写操作时 LLM 可能生成 WHERE FALSE 规避 +
+摘要谎称成功;② summarize 只喂前 5 行数据,聚合结果 >5 行时摘要可能以偏概全
+(olist 状态分布实测说错最大值)——均属 prompt 调优范畴(上游同构行为),
+随 query-streaming/prompt 护栏域评估。
+**数值序列化(005 数据集冒烟修复)**:asyncpg numeric→Decimal 在 JSON 成字符串,
+曾使图表推断/stats 判不出数值列;执行路由已加 _json_cell 归一化(Decimal→float)。
 **执行路由已闭账(004)**:唯一遗留=专用只读登录角色(km_readonly 为 NOLOGIN 组角色,
 现以连接级只读+防火墙双闸替代;随动态数据源变更评估,见 004 design Open Questions)。
 **联邦验收全部关闭**:五路真凭证 e2e 均过(2026-08-17)。

@@ -24,3 +24,6 @@ contracts/openapi.json.tmp
 
 # 浏览器自动化截图产物
 .playwright-mcp/
+
+# 示例数据集(sakila/olist 等,体积大,不入库;装载脚本与说明见 infra/example-data/)
+.example-data/

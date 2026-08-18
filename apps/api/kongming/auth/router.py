@@ -79,6 +79,23 @@ async def current_user(request: Request) -> dict[str, object]:
     return claims
 
 
+def require_perm(perm_code: str):  # type: ignore[no-untyped-def]
+    """权限点校验依赖(rbac spec「权限点校验机制」):实时查库,绑定变更立即生效。
+
+    用法:`dependencies=[Depends(require_perm("chat:execute"))]`。
+    认证失败 401(先于本依赖,current_user 抛);有认证无权限 403。
+    """
+
+    async def _dep(
+        user: Annotated[dict[str, object], Depends(current_user)], svc: Service
+    ) -> None:
+        info = await svc.me(str(user["sub"]))
+        if perm_code not in info.perm_codes:
+            raise HTTPException(status_code=403, detail="forbidden")
+
+    return _dep
+
+
 # ---- 传输模型 ----
 
 

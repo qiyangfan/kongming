@@ -11,12 +11,14 @@ dependencies = [
     "langgraph>=0.2.60",
     "openai>=1.60",                  # 兼容通义/DeepSeek 的 openai 协议客户端
     "httpx>=0.28",                   # 回调控制面
+    "sqlglot>=26.0",                 # validate 节点本地 AST 预检(纯解析,无 IO)
     "structlog>=24.4",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.3",
+    "pytest-asyncio>=0.25",
     "ruff>=0.9",
     "mypy>=1.14",
     "import-linter>=2.2",
@@ -31,10 +33,14 @@ select = ["E", "F", "I", "UP", "B", "S", "ASYNC"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]  # pytest 惯例
+"kongming_agent/graph/prompts.py" = ["E501"]  # prompt 逐字保值(折行即改给 LLM 的文本)
 
 [tool.mypy]
 strict = true
 python_version = "3.13"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [tool.importlinter]
 root_packages = ["kongming_agent"]

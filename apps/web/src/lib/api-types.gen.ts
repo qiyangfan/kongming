@@ -157,6 +157,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/meta/schema": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Meta Schema */
+        post: operations["meta_schema_internal_meta_schema_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Chat Query */
+        post: operations["chat_query_chat_query_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -192,6 +226,64 @@ export interface components {
             /** New Password */
             new_password: string;
         };
+        /** ChartOut */
+        ChartOut: {
+            /** Type */
+            type: string;
+            /** X */
+            x?: string | null;
+            /** Y */
+            y?: string | null;
+        };
+        /** ChatQueryIn */
+        ChatQueryIn: {
+            /** Question */
+            question: string;
+            /** Session Id */
+            session_id?: string | null;
+            /**
+             * Persist
+             * @default true
+             */
+            persist: boolean;
+            /** History */
+            history?: string[];
+            /**
+             * Datasource Key
+             * @default default
+             */
+            datasource_key: string;
+        };
+        /** ChatQueryOut */
+        ChatQueryOut: {
+            /** Session Id */
+            session_id: string | null;
+            /** Success */
+            success: boolean;
+            /** Verdict */
+            verdict: string | null;
+            /** Summary */
+            summary: string;
+            /** Insights */
+            insights: {
+                [key: string]: string;
+            }[];
+            /** Stats */
+            stats: {
+                [key: string]: unknown;
+            };
+            /** Columns */
+            columns: string[];
+            /** Rows */
+            rows: unknown[][];
+            /** Sql */
+            sql: string;
+            chart: components["schemas"]["ChartOut"];
+            /** Retry Count */
+            retry_count: number;
+            /** Error */
+            error: string | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -225,6 +317,49 @@ export interface components {
             tenants: components["schemas"]["TenantRefOut"][];
             /** Must Change Password */
             must_change_password: boolean;
+        };
+        /** MetaColumnOut */
+        MetaColumnOut: {
+            /** Name */
+            name: string;
+            /** Data Type */
+            data_type: string;
+            /**
+             * Comment
+             * @default
+             */
+            comment: string;
+        };
+        /** MetaSchemaIn */
+        MetaSchemaIn: {
+            /** Tenant Key */
+            tenant_key: string;
+            /**
+             * Datasource Key
+             * @default default
+             */
+            datasource_key: string;
+        };
+        /** MetaSchemaOut */
+        MetaSchemaOut: {
+            /** Tables */
+            tables: components["schemas"]["MetaTableOut"][];
+            /** Truncated */
+            truncated: boolean;
+        };
+        /** MetaTableOut */
+        MetaTableOut: {
+            /** Schema */
+            schema: string;
+            /** Name */
+            name: string;
+            /**
+             * Comment
+             * @default
+             */
+            comment: string;
+            /** Columns */
+            columns: components["schemas"]["MetaColumnOut"][];
         };
         /** OptionsOut */
         OptionsOut: {
@@ -589,6 +724,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SqlExecuteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    meta_schema_internal_meta_schema_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetaSchemaIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetaSchemaOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    chat_query_chat_query_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatQueryIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatQueryOut"];
                 };
             };
             /** @description Validation Error */

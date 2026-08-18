@@ -238,6 +238,32 @@ async def test_blocked_write_statement_audited(
     assert rows[0]["question"] == "删数据"
 
 
+async def test_reserved_table_blocked_and_audited(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """保留表拒读(005 评审实证):sys_user 经 search_path 落 public 可读的纵深缺口。
+
+    系统调用(豁免 data_scope)也拦——保留表判定与用户身份无关。
+    """
+    await _mk_tenant(session, "ita")
+    for sql in (
+        "SELECT username, password_hash FROM sys_user",
+        "SELECT * FROM public.sys_user",
+        "SELECT * FROM chat_message",
+    ):
+        p = _payload("ita", sql, question="探测")
+        resp = await client.post("/internal/sql/execute", json=p, headers=INTERNAL)
+        body = resp.json()
+        assert body["verdict"] == "BLOCKED", sql
+        assert "RESERVED_TABLE" in (body["reason"] or ""), sql
+        rows = await _audits(session, p["trace_id"])
+        assert len(rows) == 1 and rows[0]["verdict"] == "BLOCKED"
+    # 对照:业务表正常放行(保留表判定不误伤)
+    p = _payload("ita", "SELECT mark FROM goods")
+    resp = await client.post("/internal/sql/execute", json=p, headers=INTERNAL)
+    assert resp.json()["verdict"] == "PASS"
+
+
 async def test_execution_error_audited_with_db_summary(
     client: AsyncClient, session: AsyncSession
 ) -> None:
@@ -388,3 +414,17 @@ async def test_rewrite_recheck_blocks_tainted_sql(
             )
         ).scalar_one()
     assert alive >= 1
+
+
+def test_json_cell_decimal_normalization() -> None:
+    """numeric 列 JSON 数值化(图表/stats 依赖);NaN/Inf 映射 None(JSON 不可表达)。"""
+    from decimal import Decimal
+
+    from kongming.internal.service import _json_cell
+
+    assert _json_cell(Decimal("4.99")) == 4.99
+    assert isinstance(_json_cell(Decimal("4.99")), float)
+    assert _json_cell(Decimal("NaN")) is None
+    assert _json_cell(Decimal("Infinity")) is None
+    assert _json_cell(Decimal("-Infinity")) is None
+    assert _json_cell(7) == 7 and _json_cell("x") == "x"  # 非 Decimal 原样

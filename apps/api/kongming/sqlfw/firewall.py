@@ -11,6 +11,36 @@ from sqlglot import exp
 # 允许的读语句类型(SELECT 系);任何写/DDL/事务控制一律 BLOCK
 _READONLY_ROOTS = (exp.Select, exp.Union, exp.Subquery)
 
+# 控制面保留表(005 评审实证:public 在 search_path 内,LLM 可猜中表名直读
+# sys_user.password_hash / sys_datasource 密文 / chat_message 他人对话)。
+# 前缀 + 精确名双形态;按未加引号即折叠小写的 PG 语义,一律小写比对。
+# 保留前缀平台级生效:租户 schema 由平台开通,不接受 sys_/chat_ 同名表。
+RESERVED_TABLE_PREFIXES = ("sys_", "chat_")
+RESERVED_TABLE_NAMES = frozenset({"alembic_version", "user_identities"})
+
+# 危险函数拒用(R3 侧报实证:SELECT pg_read_file(...) 经 Select 根全链路过,
+# dev 库 kongming 为 superuser 时可读服务器文件;pg_sleep 属资源滥用)。
+# 按 sqlglot 归一化函数名小写比对;只读系统函数(current_setting 等)不在列。
+_FORBIDDEN_FUNCS = frozenset(
+    {
+        "pg_read_file",
+        "pg_read_binary_file",
+        "pg_ls_dir",
+        "pg_ls_logdir",
+        "pg_ls_waldir",
+        "pg_stat_file",
+        "lo_import",
+        "lo_export",
+        "set_config",
+        "pg_sleep",
+        "dblink",
+        "dblink_connect",
+    }
+)
+
+
+
+
 
 class Verdict:
     def __init__(self, passed: bool, reason: str | None = None) -> None:
@@ -24,7 +54,8 @@ class Verdict:
 def check(sql: str) -> Verdict:
     try:
         statements = sqlglot.parse(sql, dialect="postgres")
-    except sqlglot.errors.ParseError as e:
+    except sqlglot.errors.SqlglotError as e:
+        # ParseError 与 TokenError(未闭合引号/非法 token)同族,均为语法类拒绝
         return Verdict(False, f"PARSE_ERROR: {e}")
 
     if not statements or any(st is None for st in statements):
@@ -45,6 +76,14 @@ def check(sql: str) -> Verdict:
         ):
             if st.find(forbidden):
                 return Verdict(False, f"BLOCKED_NODE: {forbidden.__name__}")
+        # 危险函数拒用(服务器文件/系统操作/资源滥用)
+        for func in st.find_all(exp.Func):
+            # Anonymous(sqlglot 未收录的函数)名在 .name;已收录类型用 sql_name()
+            func_name = (
+                func.name.lower() if isinstance(func, exp.Anonymous) else func.sql_name().lower()
+            )
+            if func_name in _FORBIDDEN_FUNCS:
+                return Verdict(False, f"FORBIDDEN_FUNC: {func_name}")
 
     return Verdict(True)
 
@@ -60,7 +99,7 @@ def check_schema_scope(sql: str, allowed_schemas: set[str]) -> Verdict:
     """
     try:
         statements = sqlglot.parse(sql, dialect="postgres")
-    except sqlglot.errors.ParseError as e:
+    except sqlglot.errors.SqlglotError as e:
         return Verdict(False, f"PARSE_ERROR: {e}")
     # PG 语义:仅未加引号的「引用侧」折叠小写;schema 名本身大小写精确,
     # 白名单不折叠(否则大写 tenant_key 会误放行其小写双胞胎 schema)
@@ -80,4 +119,34 @@ def check_schema_scope(sql: str, allowed_schemas: set[str]) -> Verdict:
             hit = (db_name in allowed_schemas) if quoted else (db_name.lower() in allowed_schemas)
             if not hit:
                 return Verdict(False, f"CROSS_SCHEMA: {db_name}")
+    return Verdict(True)
+
+
+
+
+def check_reserved_tables(sql: str) -> Verdict:
+    """保留表拒读:任何表引用的末段名命中保留前缀/名即拒绝(不限定 schema 也拦——
+    裸名经 search_path 落到 public 控制表,是最危险形态)。
+    CTE 别名命中保留名同样拒(否则遮蔽形态绕过:WITH sys_user AS (SELECT FROM
+    public.sys_user) SELECT FROM sys_user——PG 里 CTE 名只遮蔽裸名,体内限定名
+    引用会被 CTE 豁免误跳过,R2 评审实证);非保留 CTE 名引用与表函数放行。"""
+    try:
+        statements = sqlglot.parse(sql, dialect="postgres")
+    except sqlglot.errors.SqlglotError as e:
+        return Verdict(False, f"PARSE_ERROR: {e}")
+    for st in statements:
+        if st is None:
+            continue
+        cte_names = {cte.alias.lower() for cte in st.find_all(exp.CTE)}
+        for alias in cte_names:
+            if alias.startswith(RESERVED_TABLE_PREFIXES) or alias in RESERVED_TABLE_NAMES:
+                return Verdict(False, f"RESERVED_TABLE: {alias}")
+        for table in st.find_all(exp.Table):
+            if not table.name:  # 表函数等无名节点
+                continue
+            name = table.name.lower()
+            if name in cte_names:
+                continue  # 非保留 CTE 名引用(保留别名已在上方拒掉)
+            if name.startswith(RESERVED_TABLE_PREFIXES) or name in RESERVED_TABLE_NAMES:
+                return Verdict(False, f"RESERVED_TABLE: {table.name}")
     return Verdict(True)

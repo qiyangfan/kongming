@@ -21,6 +21,7 @@ DEFAULT_ADMIN_PASSWORD = "admin123"  # noqa: S105  # 缺省不安全密码:播�
 PERMISSIONS: list[tuple[str, str, int]] = [
     ("system:user:manage", "用户管理", 1),
     ("system:role:manage", "角色管理", 2),
+    ("chat:execute", "问答执行", 3),
 ]
 
 ROLES: list[tuple[str, str, str, str, int]] = [
@@ -28,6 +29,12 @@ ROLES: list[tuple[str, str, str, str, int]] = [
     ("SUPER_ADMIN", "超级管理员", "ALL", "DML_DDL", 1),
     (DEFAULT_ROLE_KEY, "开发者", "SELF", "SELECT_ONLY", 2),
 ]
+
+# 角色推荐绑定(只增不摘):SUPER_ADMIN 由下方逻辑增量补齐全部注册点,
+# 其余内置角色按本清单增量绑定——不覆盖运行时的人工调整
+ROLE_RECOMMENDED_PERMS: dict[str, list[str]] = {
+    DEFAULT_ROLE_KEY: ["chat:execute"],
+}
 
 DEFAULT_TENANT_NAME = "默认租户"
 
@@ -56,6 +63,12 @@ async def seed_all(session: AsyncSession, settings: Settings) -> None:
     admin_role = await uow.roles.get_by_key("SUPER_ADMIN")
     if admin_role is not None:
         await uow.roles.bind_perm_codes(admin_role.id, [c for c, _, _ in PERMISSIONS])
+
+    # 内置角色推荐绑定增量补齐(只增不摘,ON CONFLICT DO NOTHING)
+    for role_key, codes in ROLE_RECOMMENDED_PERMS.items():
+        role = await uow.roles.get_by_key(role_key)
+        if role is not None:
+            await uow.roles.bind_perm_codes(role.id, codes)
 
     # 超管:存在即跳过(含密码;在线改密后重播不覆盖)
     admin = await uow.users.get_by_username(settings.admin_username)

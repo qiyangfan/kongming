@@ -73,6 +73,10 @@ class Settings(BaseSettings):
 
     # Agent 面回调地址
     agent_base_url: str = "http://localhost:8001"
+    agent_timeout_sec: float = 120.0  # 覆盖 understand+generate+≤2 次 selfheal+summarize
+
+    # 内部元数据通道:租户 schema 内省表数上限(防 prompt 膨胀)
+    meta_schema_max_tables: int = Field(default=50, ge=1)
 
     def fail_closed_checks(self) -> None:
         """prod 环境缺敏感配置直接拒启(dev 宽松以便本地起步)。"""

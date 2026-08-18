@@ -19,13 +19,13 @@ dependencies = [
     "structlog>=24.4",
     "prometheus-client>=0.21",
     "cryptography>=44.0",           # 数据源密码 AES-GCM
+    "httpx>=0.28",                  # 回调 agent 面(005)
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.25",
-    "httpx>=0.28",
     "ruff>=0.9",
     "mypy>=1.14",
     "types-Authlib>=1.4",
@@ -74,6 +74,12 @@ name = "datascope/audit 域不依赖 Web 框架(宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = ["kongming.datascope", "kongming.audit"]
 forbidden_modules = ["fastapi"]
+
+[[tool.importlinter.contracts]]
+name = "chat 领域模型不依赖框架(宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = ["kongming.chat.models"]
+forbidden_modules = ["fastapi", "sqlalchemy"]
 
 [build-system]
 requires = ["hatchling"]

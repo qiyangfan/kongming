@@ -10,9 +10,11 @@ sql-execution spec 落地:
 """
 
 import logging
+import math
 import re
 import time
 from dataclasses import dataclass, field
+from decimal import Decimal
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +24,7 @@ from kongming.audit.writer import SqlAuditWriter
 from kongming.datascope import applier
 from kongming.datascope.models import AppliedSQL, DataScopeUnsupported
 from kongming.internal.executor import get_read_engine
-from kongming.sqlfw.firewall import check, check_schema_scope
+from kongming.sqlfw.firewall import check, check_reserved_tables, check_schema_scope
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +50,20 @@ def _error_summary(e: Exception) -> str:
     orig = getattr(e, "orig", None)  # 方言包装层;取不到就用外层
     raw = str(orig.args[0] if orig is not None and orig.args else e)
     return _DRIVER_PREFIX.sub("", raw)
+
+
+def _json_cell(v: object) -> object:
+    """单元格 JSON 友好化:asyncpg 的 numeric→Decimal 在 JSON 里是字符串,
+    下游图表推断/stats 会判成非数值(005 冒烟实证);转 float 保数值语义。
+
+    取舍(钉住,R2 评审):>2⁵³ 的 numeric 转 float 有末位精度损失(展示路径
+    可接受,审计不存行数据);NaN/±Infinity 非有限值 JSON 无法表达(裸 NaN
+    字面量会让前端 JSON.parse 抛错),映射为 None。
+    """
+    if isinstance(v, Decimal):
+        f = float(v)
+        return f if math.isfinite(f) else None
+    return v
 
 
 @dataclass(frozen=True)
@@ -152,11 +168,14 @@ async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
         if applied.warning:
             log.warning("data_scope 降级: %s (trace_id=%s)", applied.warning, trace_id)
 
-    # 6. 改写产物复检:防火墙 + schema 边界(纵深防御,datascope spec 清单 10)
+    # 6. 改写产物复检:防火墙 + 保留表拒读 + schema 边界(纵深防御,datascope spec 清单 10)
     second = check(applied.sql)
     if not second.passed:
         log.error("改写产物未过防火墙复检 trace_id=%s reason=%s", trace_id, second.reason)
         return await _finalize("BLOCKED", applied.sql, f"POST_REWRITE: {second.reason}")
+    reserved = check_reserved_tables(applied.sql)
+    if not reserved.passed:
+        return await _finalize("BLOCKED", applied.sql, reserved.reason or "RESERVED_TABLE")
     scope_verdict = check_schema_scope(applied.sql, {schema_name, "public"})
     if not scope_verdict.passed:
         return await _finalize("BLOCKED", applied.sql, scope_verdict.reason or "CROSS_SCHEMA")
@@ -171,7 +190,7 @@ async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
                 )
                 result = await conn.execute(text(applied.sql), applied.params)
                 columns = [str(c) for c in result.keys()]
-                rows = [list(r) for r in result.fetchmany(limit)]
+                rows = [[_json_cell(v) for v in r] for r in result.fetchmany(limit)]
     except Exception as e:
         return await _finalize("ERROR", applied.sql, _error_summary(e))
 

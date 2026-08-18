@@ -14,8 +14,10 @@ from starlette.responses import JSONResponse
 from kongming.auth.router import register_auth_error_handlers
 from kongming.auth.router import router as auth_router
 from kongming.auth.seed import seed_all
+from kongming.chat.router import router as chat_router
 from kongming.config import get_settings
 from kongming.db import get_sessionmaker
+from kongming.internal.meta import router as internal_meta_router
 from kongming.internal.router import router as internal_router
 
 
@@ -35,6 +37,8 @@ app = FastAPI(
 )
 app.include_router(auth_router)
 app.include_router(internal_router)
+app.include_router(internal_meta_router)
+app.include_router(chat_router)
 register_auth_error_handlers(app)
 
 

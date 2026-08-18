@@ -16,9 +16,11 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     llm_model: str = "qwen-plus"
     llm_api_key: str | None = None
+    llm_timeout_sec: float = 30.0  # 单次 LLM 调用超时
 
     # 控制面回调地址 + 内部令牌(注意:这不是用户凭证,轮换由控制面发起)
     api_base_url: str = "http://localhost:8000"
+    api_timeout_sec: float = 30.0  # 单次回调控制面超时(execute/meta)
     internal_token: str | None = None
 
     def fail_closed_checks(self) -> None:

@@ -2,7 +2,7 @@
 
 节点链:understand → retrieve → generate → validate → execute → selfheal → summarize
 - execute:回调控制面 /internal/sql/execute(不是直连 DB)
-- selfheal:错误分类重试;权限类拒绝不重试
+- selfheal:错误分类重试;权限类(verdict=BLOCKED/预检非只读)不重试
 """
 
 from typing import NotRequired, TypedDict
@@ -10,33 +10,39 @@ from typing import NotRequired, TypedDict
 from pydantic import BaseModel
 
 
-class RetrievedContext(BaseModel):
-    table_docs: list[dict[str, object]] = []
-    sample_queries: list[dict[str, object]] = []
-    history_queries: list[dict[str, object]] = []
-
-
 class ExecutionResult(BaseModel):
-    verdict_passed: bool
-    verdict_reason: str | None = None
+    """控制面执行路由三态响应的 state 载体(与 sql-execution spec 对齐)。"""
+
+    verdict: str  # PASS / BLOCKED / ERROR
+    reason: str | None = None
     columns: list[str] = []
     rows: list[list[object]] = []
     duration_ms: int = 0
 
 
+class ValidationResult(BaseModel):
+    """validate 节点本地预检结果。permission_block=True 即权限类,直接终态不重试。"""
+
+    passed: bool
+    permission_block: bool = False
+    reason: str = ""
+
+
 class AgentState(TypedDict, total=False):
     trace_id: str
-    tenant_id: str
+    tenant_key: str
     datasource_key: str
-    user_id: NotRequired[str]
-    question: str
-    history: list[dict[str, object]]  # 多轮上下文(指代消解用)
-    resolved_question: NotRequired[str]  # understand 产物
-    retrieved: NotRequired[RetrievedContext]  # retrieve 产物
+    user_id: NotRequired[str | None]
+    question: str  # 原始问句(审计/喂回以此为准)
+    history: list[str]  # 多轮上下文:user 问句列表,旧→新(指代消解用)
+    resolved_question: NotRequired[str]  # understand 产物(指代消解后)
+    schema_hint: NotRequired[str]  # retrieve 产物(拼好的 schema 提示文本)
     generated_sql: NotRequired[str]  # generate 产物
-    validation: NotRequired[dict[str, object]]  # validate 产物
+    validation: NotRequired[ValidationResult]  # validate 产物(本地预检)
     execution: NotRequired[ExecutionResult]  # execute 产物(回调)
+    error: NotRequired[str]  # selfheal 写入,喂回 generate
     retry_count: NotRequired[int]
     summary: NotRequired[str]
-    insights: NotRequired[list[str]]
-    end_reason: NotRequired[str]  # fail 分支原因
+    insights: NotRequired[list[dict[str, str]]]
+    stats: NotRequired[dict[str, object]]
+    end_reason: NotRequired[str]  # 终态分类(blocked 等)

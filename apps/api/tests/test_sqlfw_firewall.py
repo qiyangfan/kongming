@@ -101,3 +101,88 @@ def test_schema_scope_uppercase_tenant_key_no_twin_bypass() -> None:
     assert check_schema_scope('SELECT * FROM "tenant_Sakila".goods', allowed).passed
     assert not check_schema_scope("SELECT * FROM tenant_sakila.goods", allowed).passed
     assert not check_schema_scope("SELECT * FROM tenant_Sakila.goods", allowed).passed
+
+
+# ============ 保留表拒读(005 评审:public 控制表经问答链路透出的实证防线)============
+
+RESERVED_BLOCK = [
+    "SELECT username, password_hash FROM sys_user",           # 裸名(search_path 落 public)
+    "SELECT * FROM public.sys_user",                          # 显式 public 限定
+    "SELECT * FROM SYS_USER",                                  # 大小写变体(折叠语义)
+    "SELECT * FROM chat_message",                              # 对话表
+    "SELECT * FROM user_identities",                           # 联邦身份
+    "SELECT * FROM alembic_version",                           # 迁移版本
+    "SELECT * FROM tenant_default.goods g JOIN sys_user u ON true",  #  JOIN 夹带
+    # CTE 遮蔽形态(R2 评审实证绕过):体内限定名引用不得被 CTE 豁免吞掉
+    "WITH sys_user AS (SELECT password_hash FROM public.sys_user) SELECT * FROM sys_user",
+    "WITH g AS (SELECT password_hash FROM public.sys_user) SELECT * FROM g",
+    "WITH sys_x AS (SELECT 1) SELECT * FROM sys_x",            # 保留名 CTE 别名本身即拒
+]
+
+
+def test_reserved_tables_blocked() -> None:
+    from kongming.sqlfw.firewall import check_reserved_tables
+
+    for sql in RESERVED_BLOCK:
+        v = check_reserved_tables(sql)
+        assert not v.passed, f"{sql!r} 应拦截,实际放行"
+        assert v.reason is not None and v.reason.startswith("RESERVED_TABLE")
+
+
+def test_reserved_tables_pass_cases() -> None:
+    from kongming.sqlfw.firewall import check_reserved_tables
+
+    for sql in (
+        "SELECT id, name FROM goods",
+        "SELECT * FROM tenant_default.goods",
+        "WITH g AS (SELECT 1) SELECT * FROM g",          # 非保留 CTE 名引用,放行
+        "WITH top5 AS (SELECT id FROM goods LIMIT 5) SELECT * FROM top5",
+        "SELECT * FROM generate_series(1, 3)",           # 表函数无名节点
+    ):
+        v = check_reserved_tables(sql)
+        assert v.passed, f"{sql!r} 应放行,实际 {v!r}"
+
+
+def test_token_error_forms_blocked_as_parse_error() -> None:
+    """未闭合引号等触发 sqlglot TokenError(非 ParseError 子类)——
+    防火墙两处校验都必须收敛为 PARSE_ERROR 而不是让异常逃逸(005 R1/S1)。"""
+    from kongming.sqlfw.firewall import check, check_schema_scope
+
+    bad = "SELECT * FROM goods WHERE name ILIKE '%连弩"  # 未闭合引号 → TokenError
+    v1 = check(bad)
+    assert not v1.passed and v1.reason is not None and v1.reason.startswith("PARSE_ERROR")
+    v2 = check_schema_scope(bad, {"public"})
+    assert not v2.passed and v2.reason is not None and v2.reason.startswith("PARSE_ERROR")
+
+
+def test_forbidden_functions_blocked() -> None:
+    """危险函数拒用(R3 侧报实证:pg_read_file 经 Select 根可达服务器文件)。"""
+    from kongming.sqlfw.firewall import check
+
+    for sql in (
+        "SELECT pg_read_file('/etc/passwd')",
+        "SELECT pg_read_binary_file('x')",
+        "SELECT * FROM pg_ls_dir('/data')",
+        "SELECT pg_sleep(60)",
+        "SELECT set_config('log_statement','all',false)",
+        "SELECT lo_import('/etc/passwd')",
+        "SELECT id FROM goods WHERE name = (SELECT pg_read_file('x'))",  # 嵌套也拦
+    ):
+        v = check(sql)
+        assert not v.passed, f"{sql!r} 应拦截"
+        assert v.reason is not None and v.reason.startswith("FORBIDDEN_FUNC"), sql
+
+
+def test_benign_functions_pass() -> None:
+    """常规只读函数不误伤。"""
+    from kongming.sqlfw.firewall import check
+
+    for sql in (
+        "SELECT count(*), max(price) FROM goods",
+        "SELECT date_trunc('month', created_at) FROM goods",
+        "SELECT current_setting('search_path')",
+        "SELECT * FROM generate_series(1, 3)",
+        "SELECT coalesce(name, 'n/a') FROM goods",
+    ):
+        v = check(sql)
+        assert v.passed, f"{sql!r} 应放行,实际 {v!r}"
