@@ -26,7 +26,7 @@ data_scope=SELF(仅本人)时加 WHERE 创建者列过滤;业务表无该列时�
 - GIVEN data_scope=SELF,当前用户 id=U
 - AND 业务表有创建者列
 - WHEN 生成「SELECT * FROM customer」
-- THEN 改写为最外层包子查询加 WHERE 创建者=U,只返回本人创建的行
+- THEN 改写为最外层查询 WHERE 注入创建者=U 谓词(列限定主表),只返回本人创建的行
 
 #### Scenario: 表无创建者列安全降级
 - GIVEN data_scope=SELF,业务表无创建者列
@@ -43,7 +43,7 @@ data_scope=DEPT(本部门)时加 WHERE 部门列过滤;表无部门列时安全�
 - GIVEN data_scope=DEPT,用户部门 D
 - AND 业务表有部门列
 - WHEN 生成「SELECT * FROM customer」
-- THEN 改写为最外层包子查询加 WHERE 部门=D,只返回本部门行
+- THEN 改写为最外层查询 WHERE 注入部门=D 谓词(列限定主表),只返回本部门行
 
 ### Requirement: DEPT_AND_BELOW 递归加 IN 过滤
 
@@ -78,7 +78,7 @@ data_scope=CUSTOM(自定义)未实现前,遇到时显式拒绝(fail-closed),不�
 
 ### Requirement: 改写后的 SQL 安全性(纵深防御)
 
-改写基于 SQL AST(非字符串拼接);改写后的 SQL 必须再过一次防火墙校验(防改写引入非法语句);复杂 SQL 在最外层包子查询加 WHERE 不破坏原逻辑。
+改写基于 SQL AST(非字符串拼接);改写后的 SQL 必须再过一次防火墙校验(防改写引入非法语句);复杂 SQL 在最外层查询注入 WHERE 谓词不破坏原逻辑(过滤列属于 FROM 主表,与原查询投影解耦)。
 
 #### Scenario: 改写后再过防火墙
 - GIVEN 改写了 SQL
@@ -93,7 +93,8 @@ data_scope=CUSTOM(自定义)未实现前,遇到时显式拒绝(fail-closed),不�
 #### Scenario: 复杂 SQL 改写正确
 - GIVEN 生成「SELECT c.name, COUNT(r.id) FROM customer c JOIN rental r ON ... GROUP BY c.name」
 - WHEN data_scope=DEPT 处理
-- THEN 最外层包子查询加 WHERE,不破坏原 JOIN 逻辑,改写后语法正确可执行
+- THEN 谓词 AND 进最外层 WHERE(限定主表别名,聚合前过滤),不破坏原 JOIN/GROUP BY 逻辑,改写后语法正确可执行
+- AND 原查询未投影过滤列时(如 SELECT mark FROM goods)改写仍正确执行
 
 ### Requirement: data_scope 仅作用于 NL2SQL 查询链路
 

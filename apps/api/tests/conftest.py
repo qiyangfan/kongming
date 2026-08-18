@@ -63,14 +63,16 @@ TEST_DB = "kongming_test"
 
 TRUNCATED = (
     "public.sys_oper_log",
+    "public.sys_sql_audit",
     "public.user_identities",
     "public.sys_role_permission",
     "public.sys_user_role",
     "public.sys_user_tenant",
     "public.sys_permission",
     "public.sys_role",
-    "public.sys_tenant",
     "public.sys_user",
+    "public.sys_dept",
+    "public.sys_tenant",
 )
 
 

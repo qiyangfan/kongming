@@ -1,14 +1,18 @@
 # HANDOFF — Kongming 交接文档
 
-> 最后更新:2026-08-17 晚(**003 国内三家联邦完整收官并已提交**:五路真凭证 e2e 全过 +
-> 第二轮审查循环清零 + 联邦总开关落地)。清空上下文/新会话先读本文与 `AGENTS.md`,
+> 最后更新:2026-08-18(**004 执行路由真实化收官并归档 + 审查循环清零**:
+> /internal/sql/execute 全链路成真——只读池/租户路由/data_scope 改写/审计三类落库;
+> datascope 十条清单 + 17 全栈用例;审查循环 R1–R4 累计修 11 项后清零,api 120 测试全绿)。
+> 清空上下文/新会话先读本文与 `AGENTS.md`,
 > 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
 
 ## 新会话开工指引(最先看这里)
 
-1. 003 全闭账:五家插件(GitHub/Google/企微/钉钉/飞书)真凭证 e2e 全过;
-   审查循环修复清零;企微经 `KM_WECOM_ENABLED=false` 软关停(凭证在,待正式域名)。
-   下一棒:**/internal/sql/execute 执行路由**(梯队见文末「下一步」),走 `/opsx:propose` 开局。
+1. 004 全闭账:执行路由(默认数据源)三态 verdict + 审计贯穿已立约(sql-execution spec);
+   datascope 主 spec「包子查询」措辞已修正为「最外层 WHERE AST 注入」(实测证伪前者)。
+   下一棒:**Agent LLM 接线(understand/generate/summarize)+ 回调 api 走通 →
+   第一条端到端问答**(梯队见文末「下一步」),走 `/opsx:propose` 开局;
+   回调报文形态见 `kongming/internal/router.py` 的 SqlExecuteRequest/Response。
 2. 质量底线:安全规则类测试先行;收工前 `make check` 全绿 + 冒烟记录;
    改 api 必跑 `make contracts` 并提交产物。
 
@@ -46,12 +50,48 @@
    (DOM 快照可读)——GUI 测试一律用 Playwright MCP 工具组
    (`mcp__plugin_playwright_playwright__browser_*`,独立管道,002 已验证可用)。
 
-## 当前状态(截至 003 归档,工作区改动待提交)
+## 当前状态(截至 004 提交,工作区干净)
 
-- git:main 分支 5 提交(奠基/品牌/compose 收尾/002 认证闭环/**003 五路联邦+审查硬化**,
-  以 git log 为准),**工作区干净;无远程、未 push**(待用户指令)。**分支策略已定
+- git:main 分支 6 提交(奠基/品牌/compose 收尾/002 认证闭环/003 五路联邦+审查硬化/
+  **004 执行路由真实化+审查清零**,以 git log 为准),**工作区干净;无远程、未 push**
+  (待用户指令)。**分支策略已定
   (2026-08-17 用户拍板):主干开发不拉 dev;未来协作时按变更开短命 feature 分支合回 main。**
-- openspec:001/002/003 已归档(rbac 主 spec 已泛化为 provider 无关「联邦账号权限一致」)。
+- openspec:001/002/003/**004** 已归档;新增主 spec `sql-execution`(受控执行路由契约);
+  datascope 主 spec 三处改写措辞修正(包子查询→最外层 WHERE 注入,列限定主表别名)。
+- **执行路由(004)**:`POST /internal/sql/execute` 全链路——内部令牌 middleware(002 已有)
+  → 租户解析(tenant_key,未知/禁用 404)→ 用户-租户绑定复校(未绑定 403;user_id 缺省
+  =系统调用豁免)→ 非 default 数据源 400(动态池未落地,fail-closed 不静默回退)→
+  防火墙初检 → data_scope 改写 → 防火墙复检 → 只读池执行(独立引擎,连接级
+  `default_transaction_read_only=on` + 30s statement_timeout,池 5/0)+ 事务内
+  `SET LOCAL search_path=tenant_<key>, public` + fetchmany 截断(默认 1000)。
+  响应 verdict 三态:PASS/BLOCKED(策略拒绝,含 DATA_SCOPE_UNSUPPORTED)/ERROR
+  (执行错误,reason=驱动层整洁摘要,已剥 SQLAlchemy asyncpg 包装类前缀,供 selfheal)。
+- **datascope 域包**(004):models/service(纯逻辑)零框架;rewrite=sqlglot 最外层
+  WHERE 注入 + 自定义方言子类保留 `:name` 绑定参数(postgres 方言默认渲 pyformat);
+  值按列探测 data_type 类型感知绑定(uuid 列绑 UUID,PG 无 uuid=text 算子);
+  repository=角色 scope 集/用户 dept_id/递归 CTE/information_schema 列探测
+  (schema 限定 tenant_<key>+public)。多角色取最宽松序 ALL>CUSTOM>DEPT_AND_BELOW>
+  DEPT>SELF(与上游 SMALLINT MIN 语义逐档对应);UNION/FROM 子查询取不到主表→安全降级;
+  用户不存在/无角色→降级+告警(沿用上游裁定)。
+- **审计(004)**:SqlAuditWriter 独立短事务写 sys_sql_audit,失败 error 日志不阻断;
+  trace_id>64 截断告警;审计 sql_text=改写后实际执行形态(可回放)。
+- schema:0001 baseline + 0002 user_identities + **0003 dept**(sys_dept 部门表
+  UUID/parent_id 自引用/tenant_id FK + sys_user.dept_id;baseline 当初「dept_id 弃」
+  =缓建,004 补齐)。
+- **Makefile**:api/agent-check 已接线 `lint-imports`(原仅 CI 跑,本地门禁补齐);
+  api 新增约定「datascope/audit 域禁 fastapi」(import-linter 需
+  include_external_packages=true 才可禁外部包)。
+- **004 审查循环(2026-08-18,R1 独立评审 7 项全属实已修 + R2 验收通过)**:
+  ①未知租户「不落审计」测试断言恒真→改全表计数断言;②部门递归 CTE 改 UNION
+  去重止环(脏数据成环曾实证挂到超时,控制面引擎无 statement_timeout);
+  ③编排段基础设施异常(池超时等)收敛 verdict=ERROR+落审计,不再裸 500;
+  ④**新增 schema 边界校验 check_schema_scope**:显式 schema 限定仅允许
+  tenant_<key>/public(未加引号标识符按 PG 语义折叠小写比对,表函数/CTE 名放行)
+  ——search_path 管不了显式限定名,跨租户显式引用此前可读(纵深缺口,spec 已补
+  「租户 schema 边界」条款);⑤trace_id 请求宽度 200→64 与列同宽;
+  ⑥清单 8 补子查询形态用例;⑦防火墙补拦 SELECT INTO(PG 建表写,Select 根放行
+  的预存缺口,R1 自查发现)。R2 低级观察 2 项:大小写折叠误伤已修;
+  schema 限定表函数跳过校验=刻意(本通道无法创建函数,无残余风险,代码注释登记)。
 - 认证(ADR-003/006 落地):账密登录(argon2id + 失败 5 次锁 15min + 禁用/软删拒登 +
   首登强制改密)、refresh 家族轮换与复用吊销(Redis 三态)、logout、/auth/me 真实
   角色/权限点/租户、自助改密(吊销全家族)、连接器框架 + **五路插件** GitHub/Google/
@@ -91,17 +131,17 @@
 - **dev 库现状**:冒烟后 admin 密码已被改为 `Kongming#2026`(非缺省;如需复位可删库重播或走改密接口);
   角色 sort 列为 0/0(种子只增不改,不补齐历史行;新库播种即 1/2);
   另有五路联邦 e2e 留下的 5 个联邦账号(漆阳帆-dingtalk/漆阳帆-feishu/qiyangfan-github/
-  qyf…-google/QiYangFan-wecom,均 ACTIVE,可作身份命中回归的活数据)。
-- schema:0001 baseline + 0002 user_identities(sys_user.auth_source/external_id 已删列收敛);
-  003 零迁移(0002 已五家建全 CHECK)。
+  qyf…-google/QiYangFan-wecom,均 ACTIVE,可作身份命中回归的活数据);
+  **004 冒烟活数据**:`tenant_default.goods` 小表(4 行)、`smoke-self` 用户
+  (SMOKE_SELF 角色=SELF,绑 default 租户,本人行=连弩)——可作执行路由回归活数据。
 - 前端:登录页五家联邦按钮数据驱动;simple-icons 覆盖 GitHub/Google/微信系,
   **钉钉/飞书 simple-icons@16 未收录 → 按例外条款内联官方 mark**;favicon.svg 已补
   (朱砂底白色羽扇)。003 冒烟:五家图标实测渲染正确。
-- 质量:api ruff/mypy strict/import-linter/pytest 70(认证全栈集成测试,真实 PG+Redis,
-  含三家 normalize 回归网 + options/start 形态断言 + enable 开关/后缀建号/超长截断用例)
-  + agent 同门禁 6 + web tsc/eslint 全绿;
+- 质量:api ruff/mypy strict/lint-imports/pytest **120**(认证全栈 68 + datascope 30 +
+  执行路由 17 + 防火墙 5,真实 PG+Redis)+ agent 同门禁 6 + web tsc/eslint 全绿;
   CI api job 已带 pg/redis services(未在真实 runner 验证——push 后首验)。
-- 契约:openapi.json 含 /auth/* 全部端点;003 路由/模型零改动,`make contracts` 实测零 diff。
+- 契约:openapi.json 含 /auth/* + /internal/sql/execute(三态响应模型);
+  004 模型落定后 `make contracts` 已重生成,web tsc 过。
 
 ## 已定死的决策(不再议,引用即终)
 
@@ -114,18 +154,21 @@
 | Schema | baseline 制;UUID v7 / VARCHAR+CHECK / timestamptz;已规划能力列一次建全 | ADR-004 |
 | 契约 | FastAPI OpenAPI 唯一事实源;前端类型生成禁手写;CI 漂移 diff | ADR-005 |
 | 分层 | 域包内 router→service→models→repository;domain 零框架依赖 | 宪法 Article II |
+| 执行路由 | 三态 verdict(PASS/BLOCKED/ERROR);用户-租户绑定复校;data_scope 改写=最外层 WHERE AST 注入(非包子查询);非 default 数据源 fail-closed | sql-execution + datascope spec(004) |
 
 ## 下一步(路线图梯队,按序)
 
-1. `/internal/sql/execute` 执行路由:数据源连接池(默认 default 库即可起步)+
-   审计落库 + data_scope 改写接入(datascope spec 测试清单 10 条先行)。
-2. Agent LLM 接线(understand/generate/summarize)+ 回调 api 走通 → 第一条端到端问答。
-3. 前端主布局(会话侧栏 + 对话区 + RBAC 菜单守卫;require_perm 依赖随首个受保护端点交付)。
-4. RBAC 管理面 CRUD(用户/角色/权限点/部门,spec 已立约)。
+1. Agent LLM 接线(understand/generate/summarize)+ 回调 /internal/sql/execute 走通
+   → 第一条端到端问答(报文形态见 sql-execution spec 与 internal/router.py)。
+2. 前端主布局(会话侧栏 + 对话区 + RBAC 菜单守卫;require_perm 依赖随首个受保护端点交付)。
+3. RBAC 管理面 CRUD(用户/角色/权限点/部门,spec 已立约;sys_dept 存储底座 004 已建)。
+4. 动态数据源注册/管理端点(sys_datasource 表已在,池管理器 key 维度与失效钩子已预留)。
 
 ## 已知 TODO(代码内标注,非缺陷)
 
-`internal/router.py` 执行路由;agent graph 各节点 LLM;web 主布局。
+agent graph 各节点 LLM;web 主布局;动态数据源池(sys_datasource 行驱动)。
+**执行路由已闭账(004)**:唯一遗留=专用只读登录角色(km_readonly 为 NOLOGIN 组角色,
+现以连接级只读+防火墙双闸替代;随动态数据源变更评估,见 004 design Open Questions)。
 **联邦验收全部关闭**:五路真凭证 e2e 均过(2026-08-17)。
 **账号绑定(登录态追加 provider)未立约**:同一人经多家联邦会各自建号(国内三家无
 verified email 可关联),需绑定时另起提案。
@@ -137,7 +180,7 @@ verified email 可关联),需绑定时另起提案。
 ## 命令速查
 
 ```bash
-make check          # 全门禁(api/agent ruff+mypy+pytest + web tsc+eslint)
+make check          # 全门禁(api/agent ruff+mypy+lint-imports+pytest + web tsc+eslint)
 make contracts      # 导出 OpenAPI + 生成前端类型(改 api 后必跑)
 # 服务: apps/api → uv run uvicorn kongming.main:app --port 8000
 #       apps/agent → uv run uvicorn kongming_agent.main:app --port 8001

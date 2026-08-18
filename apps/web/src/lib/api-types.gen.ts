@@ -247,8 +247,8 @@ export interface components {
         SqlExecuteRequest: {
             /** Trace Id */
             trace_id: string;
-            /** Tenant Id */
-            tenant_id: string;
+            /** Tenant Key */
+            tenant_key: string;
             /**
              * Datasource Key
              * @default default
@@ -258,6 +258,8 @@ export interface components {
             sql_text: string;
             /** User Id */
             user_id?: string | null;
+            /** Question */
+            question?: string | null;
             /**
              * Limit
              * @default 1000
@@ -266,14 +268,19 @@ export interface components {
         };
         /** SqlExecuteResponse */
         SqlExecuteResponse: {
-            /** Verdict Passed */
-            verdict_passed: boolean;
-            /** Verdict Reason */
-            verdict_reason?: string | null;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "PASS" | "BLOCKED" | "ERROR";
+            /** Reason */
+            reason?: string | null;
             /** Columns */
             columns: string[];
             /** Rows */
             rows: unknown[][];
+            /** Row Count */
+            row_count: number;
             /** Duration Ms */
             duration_ms: number;
         };

@@ -544,11 +544,15 @@
         "properties": {
           "trace_id": {
             "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
             "title": "Trace Id"
           },
-          "tenant_id": {
+          "tenant_key": {
             "type": "string",
-            "title": "Tenant Id"
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Tenant Key"
           },
           "datasource_key": {
             "type": "string",
@@ -557,12 +561,14 @@
           },
           "sql_text": {
             "type": "string",
+            "minLength": 1,
             "title": "Sql Text"
           },
           "user_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -570,27 +576,7 @@
             ],
             "title": "User Id"
           },
-          "limit": {
-            "type": "integer",
-            "title": "Limit",
-            "default": 1000
-          }
-        },
-        "type": "object",
-        "required": [
-          "trace_id",
-          "tenant_id",
-          "sql_text"
-        ],
-        "title": "SqlExecuteRequest"
-      },
-      "SqlExecuteResponse": {
-        "properties": {
-          "verdict_passed": {
-            "type": "boolean",
-            "title": "Verdict Passed"
-          },
-          "verdict_reason": {
+          "question": {
             "anyOf": [
               {
                 "type": "string"
@@ -599,7 +585,45 @@
                 "type": "null"
               }
             ],
-            "title": "Verdict Reason"
+            "title": "Question"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 1000
+          }
+        },
+        "type": "object",
+        "required": [
+          "trace_id",
+          "tenant_key",
+          "sql_text"
+        ],
+        "title": "SqlExecuteRequest"
+      },
+      "SqlExecuteResponse": {
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "PASS",
+              "BLOCKED",
+              "ERROR"
+            ],
+            "title": "Verdict"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
           },
           "columns": {
             "items": {
@@ -616,6 +640,10 @@
             "type": "array",
             "title": "Rows"
           },
+          "row_count": {
+            "type": "integer",
+            "title": "Row Count"
+          },
           "duration_ms": {
             "type": "integer",
             "title": "Duration Ms"
@@ -623,9 +651,10 @@
         },
         "type": "object",
         "required": [
-          "verdict_passed",
+          "verdict",
           "columns",
           "rows",
+          "row_count",
           "duration_ms"
         ],
         "title": "SqlExecuteResponse"

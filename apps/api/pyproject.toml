@@ -61,12 +61,19 @@ disable_error_code = ["attr-defined"]
 
 [tool.importlinter]
 root_packages = ["kongming"]
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "auth 域不反向依赖业务域(ADR-003 回退路径前提)"
 type = "forbidden"
 source_modules = ["kongming.auth"]
 forbidden_modules = ["kongming.chat", "kongming.rag_admin", "kongming.datasource_admin"]
+
+[[tool.importlinter.contracts]]
+name = "datascope/audit 域不依赖 Web 框架(宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = ["kongming.datascope", "kongming.audit"]
+forbidden_modules = ["fastapi"]
 
 [build-system]
 requires = ["hatchling"]
