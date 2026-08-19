@@ -1,0 +1,49 @@
+/* 用户区(web-nav spec 应用壳):头像 + 下拉(身份概览/登出)。 */
+
+import { LogOut } from "lucide-react";
+
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useAuth } from "@/lib/auth-store";
+
+export function UserMenu() {
+  const { user, logout } = useAuth();
+  const name = user?.nickname || user?.username || "";
+  const initial = name.slice(0, 1) || "?";
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" className="w-full justify-start gap-2 px-2">
+          <Avatar className="size-7">
+            <AvatarFallback className="bg-primary text-xs text-primary-foreground">
+              {initial}
+            </AvatarFallback>
+          </Avatar>
+          <span className="min-w-0 flex-1 truncate text-left text-sm">{name}</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuLabel className="flex flex-col gap-0.5">
+          <span className="truncate">{name}</span>
+          <span className="truncate text-xs font-normal text-muted-foreground">
+            {user?.role_keys.length ? user.role_keys.join(" / ") : "无角色"}
+          </span>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" onSelect={() => void logout()}>
+          <LogOut aria-hidden />
+          退出登录
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}

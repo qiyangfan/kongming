@@ -12,6 +12,7 @@ import {
   type MeOut,
   type TokenPairOut,
 } from "./api";
+import { useTenant } from "./tenant-store";
 
 export type AuthStatus = "loading" | "guest" | "authed";
 
@@ -26,16 +27,22 @@ interface AuthState {
 let booting: Promise<void> | null = null;
 
 export const useAuth = create<AuthState>((set) => {
-  // api 层刷新失败清态 → 同步回落 guest(反向解耦:store 不被 api import)
-  onSessionCleared(() => set({ status: "guest", user: null }));
+  // api 层刷新失败清态 → 同步回落 guest + 清租户上下文(反向解耦:store 不被 api import)
+  onSessionCleared(() => {
+    set({ status: "guest", user: null });
+    useTenant.getState().clear();
+  });
 
   async function loadMe(): Promise<void> {
     try {
       const me = await api.get<MeOut>("/auth/me");
       set({ status: "authed", user: me });
+      // 登录态就绪后校准租户:持久值失效(如被解绑)则回落首项
+      useTenant.getState().calibrate(me.tenants);
     } catch {
       clearTokens();
       set({ status: "guest", user: null });
+      useTenant.getState().clear();
     }
   }
 
@@ -79,6 +86,7 @@ export const useAuth = create<AuthState>((set) => {
       }
       clearTokens();
       set({ status: "guest", user: null });
+      useTenant.getState().clear();
     },
   };
 });

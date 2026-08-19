@@ -78,6 +78,51 @@ class ChatRepository:
             {"id": session_id},
         )
 
+    async def list_sessions(
+        self, *, user_id: str, tenant_id: str, limit: int
+    ) -> list[dict[str, object]]:
+        """本人本租户会话列表,updated_at 倒序(id DESC 作时序 tiebreak)。"""
+        rows = (
+            await self._s.execute(
+                text(
+                    "SELECT id, title, updated_at FROM public.chat_session"
+                    " WHERE user_id = :u AND tenant_id = :t"
+                    " ORDER BY updated_at DESC, id DESC LIMIT :n"
+                ),
+                {"u": user_id, "t": tenant_id, "n": limit},
+            )
+        ).mappings().all()
+        return [
+            {"id": str(r["id"]), "title": str(r["title"]), "updated_at": r["updated_at"]}
+            for r in rows
+        ]
+
+    async def list_messages(self, *, session_id: str) -> list[dict[str, object]]:
+        """会话全部消息,创建时间升序(id ASC tiebreak,与补全取数对偶)。"""
+        rows = (
+            await self._s.execute(
+                text(
+                    "SELECT id, role, question, sql_text, result_json, summary, status"
+                    " FROM public.chat_message WHERE session_id = :s"
+                    " ORDER BY created_at ASC, id ASC"
+                ),
+                {"s": session_id},
+            )
+        ).mappings().all()
+        return [dict(r) for r in rows]
+
+    async def delete_session(self, *, session_id: str, user_id: str, tenant_id: str) -> bool:
+        """归属校验 + 删除一条 SQL(原子,无先查后删竞态窗口);未命中(不存在/
+        越权同形)返回 False。消息经 ON DELETE CASCADE 级联清除。"""
+        res = await self._s.execute(
+            text(
+                "DELETE FROM public.chat_session"
+                " WHERE id = :id AND user_id = :u AND tenant_id = :t RETURNING id"
+            ),
+            {"id": session_id, "u": user_id, "t": tenant_id},
+        )
+        return res.scalar_one_or_none() is not None
+
     async def insert_message(
         self,
         *,

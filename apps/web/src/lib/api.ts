@@ -8,14 +8,25 @@
 */
 
 import type { components } from "./api-types.gen";
+import { TENANT_STORAGE_KEY } from "./tenant-store";
 
 export type TokenPairOut = components["schemas"]["TokenPairOut"];
 export type MeOut = components["schemas"]["MeOut"];
 export type OptionsOut = components["schemas"]["OptionsOut"];
 export type StartOut = components["schemas"]["StartOut"];
+export type SessionItemOut = components["schemas"]["SessionItemOut"];
+export type SessionMessageOut = components["schemas"]["SessionMessageOut"];
+export type ChatQueryOut = components["schemas"]["ChatQueryOut"];
+export type TenantRefOut = components["schemas"]["TenantRefOut"];
 
 const BASE = "/api";
 const REFRESH_KEY = "km.refresh";
+
+/* 当前租户标识(api 层直读持久化键,单点注入免遗漏;头对非 chat 端点无语义影响) */
+function tenantHeader(): Record<string, string> {
+  const t = localStorage.getItem(TENANT_STORAGE_KEY);
+  return t ? { "X-Tenant-Id": t } : {};
+}
 
 let accessToken: string | null = null;
 let refreshing: Promise<boolean> | null = null;
@@ -74,6 +85,7 @@ function doFetch(path: string, init?: RequestInit): Promise<Response> {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...tenantHeader(),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...init?.headers,
     },
@@ -99,7 +111,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* 非 JSON 响应,保留 HTTP 状态码文案 */
     }
-    throw new Error(detail);
+    const err = new Error(detail) as Error & { status?: number };
+    err.status = resp.status;
+    throw err;
   }
   if (resp.status === 204) return undefined as T;
   return (await resp.json()) as T;
@@ -109,4 +123,5 @@ export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "POST", body: JSON.stringify(body) }),
+  delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };

@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { useNavigate } from "react-router";
-import { Protected } from "../App";
+import { Protected } from "@/components/protected";
 import { api, clearTokens } from "../lib/api";
 import { useAuth } from "../lib/auth-store";
 import { Button } from "@/components/ui/button";

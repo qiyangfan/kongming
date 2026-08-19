@@ -39,7 +39,8 @@
 | 框架 | React 19 + TypeScript(strict) |
 | 构建 | Vite(纯 SPA,无 SSR——ADR-001) |
 | 样式 | Tailwind CSS v4 |
-| 组件 | shadcn/ui(Radix 无头 + 代码自有) |
+| 组件 | shadcn/ui(Radix 无头 + 代码自有;Radix 统一走 `radix-ui` 聚合包导入,006 起单轨) |
+| 动画 | tw-animate-css(shadcn Tailwind v4 标准配套,sheet/dropdown 等开合动画依赖) |
 | 数据 | TanStack Query(服务端状态)+ Zustand(客户端状态) |
 | 路由 | React Router v7 |
 | 图表 | ECharts(echarts-for-react) |

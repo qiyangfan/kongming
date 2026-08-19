@@ -191,6 +191,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Sessions */
+        get: operations["list_sessions_chat_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/sessions/{session_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Session Messages */
+        get: operations["session_messages_chat_sessions__session_id__messages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Session */
+        delete: operations["delete_session_chat_sessions__session_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -225,6 +276,15 @@ export interface components {
             current_password: string;
             /** New Password */
             new_password: string;
+        };
+        /** ChartInfoOut */
+        ChartInfoOut: {
+            /** Type */
+            type: string;
+            /** X */
+            x?: string | null;
+            /** Y */
+            y?: string | null;
         };
         /** ChartOut */
         ChartOut: {
@@ -318,6 +378,24 @@ export interface components {
             /** Must Change Password */
             must_change_password: boolean;
         };
+        /** MessageResultOut */
+        MessageResultOut: {
+            /** Columns */
+            columns?: string[];
+            /** Rows */
+            rows?: unknown[][];
+            /** Insights */
+            insights?: {
+                [key: string]: string;
+            }[];
+            /** Stats */
+            stats?: {
+                [key: string]: unknown;
+            };
+            chart: components["schemas"]["ChartInfoOut"];
+            /** Error */
+            error?: string | null;
+        };
         /** MetaColumnOut */
         MetaColumnOut: {
             /** Name */
@@ -377,6 +455,36 @@ export interface components {
         RefreshRequest: {
             /** Refresh Token */
             refresh_token: string;
+        };
+        /** SessionItemOut */
+        SessionItemOut: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** SessionMessageOut */
+        SessionMessageOut: {
+            /** Id */
+            id: string;
+            /** Role */
+            role: string;
+            /** Question */
+            question?: string | null;
+            /** Summary */
+            summary?: string | null;
+            /** Sql */
+            sql?: string | null;
+            /** Status */
+            status: string;
+            /** Error */
+            error?: string | null;
+            result?: components["schemas"]["MessageResultOut"] | null;
         };
         /** SqlExecuteRequest */
         SqlExecuteRequest: {
@@ -793,6 +901,103 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ChatQueryOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sessions_chat_sessions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionItemOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    session_messages_chat_sessions__session_id__messages_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionMessageOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_session_chat_sessions__session_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

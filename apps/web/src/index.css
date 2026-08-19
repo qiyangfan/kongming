@@ -1,10 +1,22 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
 /* 铁律 3/5/6/7 的单源:品牌色(武侯祠三元:红墙·黛瓦·鎏金)全部定义于此。
    色彩意图与命名见 docs/brand.md(文档定意、CSS 定值)。
    组件只许引用 token 类(bg-primary/from-grad-from…),禁硬编码色值。 */
 
 @custom-variant dark (&:is(.dark *));
+
+/* shadcn v4 基线:全局边框/轮廓/页面底色走 token(Tailwind v4 裸 border 落
+currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色且随文字变色) */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
 
 :root {
   /* 语义 token:主色朱砂(武侯祠红墙,庄重决断);鎏金仅点睛;中性色配黛瓦青灰 */
@@ -57,6 +69,9 @@
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
+  /* 浮层别名:下拉/确认框等 portal 浮层与卡片同族(docs/brand.md) */
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--card-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);

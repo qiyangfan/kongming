@@ -1,22 +1,21 @@
 # HANDOFF — Kongming 交接文档
 
-> 最后更新:2026-08-18(**005 端到端问答链路收官 + 审查循环清零**:
-> agent 三节点 LLM 接线(上游 prompt 逐字移植)+ execute 真回调 +
-> api /chat/query(require_perm 首发 chat:execute)+ /internal/meta/schema
-> 内省通道;真 LLM(qwen-plus)冒烟五条路径全过;独立评审实证保留表透出
-> 通路(sys_user.password_hash 可经问答链路被读)已修——执行路由新增
-> 保留表拒读 RESERVED_TABLE;api 144 + agent 53 测试全绿)。
+> 最后更新:2026-08-19(**006 前端主布局收官 + 审查循环清零**:
+> api 会话列表/消息历史/删除三端点(越权/跨租户/不存在统一 404 同形)+
+> result_json 增量补存(chart 完整对象+error,存量 005 形态重算兜存);
+> web 主布局落地:应用壳(侧栏六区+响应式抽屉)/会话侧栏/对话区(三态渲染+
+> 图表 token 派生色板)/RBAC 菜单守卫/租户切换/X-Tenant-Id 单点注入;
+> Playwright 冒烟 14 项全过;R1 评审 4 严重+10 建议、R2/R3 复核全部闭环;
+> api 162 + agent 53 测试全绿)。
 > 清空上下文/新会话先读本文与 `AGENTS.md`,
 > 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
 
 ## 新会话开工指引(最先看这里)
 
-1. 005 全闭账:问答链路端到端成真——用户 JWT → chat:execute 权限点 →
-   X-Tenant-Id 白名单 → 会话落库 → agent 图(understand/retrieve/generate/
-   validate/execute/selfheal/summarize 全真)→ 三态 verdict → 结构化洞察;
-   保留表拒读(RESERVED_TABLE)已立约进 sql-execution spec。
-   下一棒:**前端主布局(会话侧栏 + 对话区 + RBAC 菜单守卫)**(梯队见文末
-   「下一步」),走 `/opsx:propose` 开局;web 类型已含 /chat/query 契约。
+1. 006 全闭账:主布局已成真——登录即对话(会话侧栏/历史回显/图表/租户切换/
+   菜单守卫全通),产品形态「对话即主体验」成立。下一棒:**RBAC 管理面
+   CRUD(用户/角色/权限点/部门,梯队见文末「下一步」)**,走 `/opsx:propose`
+   开局;`/admin` 占位路由与 403 守卫已就位,web-nav spec 已立约。
 2. 质量底线:安全规则类测试先行;收工前 `make check` 全绿 + 冒烟记录;
    改 api 必跑 `make contracts` 并提交产物。
 3. **prompt 资产纪律**:apps/agent/graph/prompts.py 与 nodes.py 的 LLM 模板
@@ -59,13 +58,87 @@
    (DOM 快照可读)——GUI 测试一律用 Playwright MCP 工具组
    (`mcp__plugin_playwright_playwright__browser_*`,独立管道,002 已验证可用)。
 
-## 当前状态(截至 005 提交,工作区干净)
+## 当前状态(截至 006,工作区含 006 全部改动待提交)
 
-- git:main 分支(以 git log 为准),**005 全部改动已随 005 提交入库**;
-  无远程、未 push。分支策略:主干开发不拉 dev,协作按变更开短命 feature。
-- openspec:001–004 已归档;**005(e2e-chat-query)已归档**;新增主 spec
-  `internal-meta`(租户 schema 实时内省);chat/nl2sql/nl2sql-agent 增量合入;
-  sql-execution 增「控制面保留表拒读」。
+- git:main 分支(以 git log 为准),**005 已随其提交入库;006 改动在工作区,
+  待用户明确指令后提交**;无远程、未 push。分支策略:主干开发不拉 dev,
+  协作按变更开短命 feature。
+- openspec:001–006 已归档;主 spec 新增 `web-nav`(应用壳/侧栏/守卫/租户切换/
+  响应式),chat spec 增「会话列表与消息历史端点」(归档时已 sync)。
+- **006 api 侧**:chat 域三端点——`GET /chat/sessions`(limit 1..200 缺省 50,
+  updated_at 倒序+id DESC tiebreak)、`GET /chat/sessions/{id}/messages`
+  (升序+id ASC tiebreak;user 问句/assistant 要素含 chart 完整对象)、
+  `DELETE /chat/sessions/{id}`(204;DELETE..WHERE user+tenant RETURNING
+  单语句原子归属校验,级联删消息)。越权/跨租户/不存在统一 404 同形
+  (find_session_owned 收口);权限点/租户白名单与 /chat/query 同构。
+- **result_json 形态演进(006)**:写入方改为
+  `{columns,rows,insights,stats,chart:{type,x,y},error}`(005 为裸 chartType
+  且无 error);回显读档优先,存量缺失 x/y 时 suggest_chart 纯函数确定性
+  重算兜底(测试双路径锁定);AgentUnavailable 分支也落 result_json
+  (error 文案统一读取路径);**落库段整体 try SQLAlchemyError**——agent
+  回调期间会话被并发删除时 FK 违约仅日志+rollback,不炸 500
+  (R1 评审实证竞态);_to_message 对坏 JSON(非 dict/元素畸形)全窄化防御。
+- **006 web 侧**:应用壳 AppLayout(侧栏:品牌区/新对话/会话列表/导航区/
+  租户切换/用户区;md 以下 Sheet 抽屉);路由 `/chat` + `/chat/:sessionId`
+  (URL 即会话状态单源,刷新/直达天然成立)+ `/admin` 占位 + 403/404 品牌页;
+  **RBAC 守卫双源同构**:lib/nav.ts 配置单源(id/label/icon/to/perm)+
+  hasPerm 谓词,菜单过滤(visibleNav)与路由守卫(PermRoute)同源;
+  对话区:消息回显/提问(Enter 发送/Shift+Enter 换行/isPending 防重复/
+  **失败回填草稿且尊重等待期新输入**)/三态渲染(SUCCESS 卡片含图表+
+  表格+SQL 折叠+洞察+stats;REJECTED/FAILED 分态文案)/会话被删 404 时
+  自动收敛回新建态;图表 echarts,**色板与轴色全部 getComputedStyle 从
+  CSS token 派生**(系列色 [--primary,--ring,--accent-foreground,
+  --muted-foreground],轴字 --muted-foreground/轴线 --border,禁硬编码,
+  R1 评审曾抓到 #666/#bbb 违规已修)。
+- **租户切换(006)**:localStorage `km.tenant` 单源,api.ts 每请求统一注入
+  X-Tenant-Id(单点免遗漏;对非 chat 端点无语义);auth-store loadMe 后
+  calibrate(持久值失效回落首项),登出/会话终结清租户;切换=先导航 /chat
+  再 invalidate sessions+remove messages(避免旧请求带新租户头 404 空转);
+  单租户只读展示。react-query 键全含租户维度;QueryClient retry 对 4xx
+  不重试(api 层 Error 附 status)。
+- **Radix 单轨(006)**:shadcn 新组件(sheet/dropdown-menu/alert-dialog/
+  scroll-area/avatar/separator/skeleton/collapsible/badge/textarea)走
+  radix-ui 聚合包,label.tsx 一并切换,@radix-ui/react-label 已移除
+  (proposal 原预期零新增依赖,实际 CLI 自动引入聚合包,已在评审中裁定
+  单轨化处理;button.tsx 同步升级 shadcn 新版函数式写法)。
+- **006 审查循环**:R1 独立评审 4 严重+10 建议全部闭环
+  (建议全列:成功路径先导航/租户切换顺序/删除失败对话框受控/403 出口
+  动态取首项/main key 死代码/色板去前景色/radix 双轨/FK 违约容错/
+  坏 JSON 防御/显式租户头正向测试)——严重:提问失败
+  静默丢输入(onError 回填+错误条)/会话被删空白死态(404 收敛)/删除按钮
+  hover-only 不可达(focus-within+max-md 常显)/图表硬编码色(token 化);
+  建议:onSuccess 先导航防空态闪回/租户切换顺序/删除失败对话框受控保持
+  开启(404 视为已删)/403 出口动态取 visibleNav 首项/色板去前景色/
+  radix 双轨/FK 违约容错/坏 JSON 防御/显式租户头正向测试。
+  **R2 复核抓回三处假闭环**(删除提示随对话框卸载不可见/首问失败错误条
+  被 EmptyState 分支吞/AgentUnavailable 分支落库未包 try——以及实施中
+  一次 except 块缩进塌缩被测试红抓回),R3 复核确认全闭环。
+  安全面核过无异常:同形 404/原子删除/租户白名单兜底(localStorage 篡改
+  最坏自我 403)/limit 注入面/契约三端点与代码逐项一致。
+  **R4 兼容缺口复审(提交前,8 项全修)**:前三轮盲区=shadcn v4 新组件与
+  定制 token 体系的兼容——①动画类全量静默失效(animate-in/fade-in-0 等
+  v4 核心不含,需 `tw-animate-css`,此前从未安装,抽屉/下拉/确认框全靠
+  瞬间出现);②裸 `border` 落 currentColor(v4 默认边框色变更,shadcn 靠
+  `@layer base` 全局兜底,本项目缺失→outline 按钮/浮层边框墨色且随 hover
+  变色,波及登录页联邦按钮/403 页/租户切换器);③`bg-popover` 未定义
+  (dropdown 浮层透明底)。修复:index.css 补 `@import "tw-animate-css"` +
+  `@layer base` 官方基线(* border-border/body 底色字色 token 化)+
+  popover token(card 别名,brand.md 已按纪律先记意图);
+  另 Sheet 关闭 X 与品牌行热区交叠(showCloseButton={false})与 HANDOFF
+  三处文字勘误。**经验沉淀:后续经 shadcn CLI 加新组件,必核其引用的
+  语义类/动画类在本仓 index.css 是否有定义**(v4 基线三件套:
+  tailwindcss+tw-animate-css+@layer base,缺一即静默降级);
+  浏览器 DOM 实证:outline 边框 #dfe3de/浮层白底/animation:enter 全生效。
+- **006 冒烟(2026-08-19,Playwright MCP + 真 LLM,14 项全过)**:登录→
+  应用壳→首问自动建会话+URL 参数化→问答全链路(图表/表格/洞察/stats/
+  SQL 折叠)→刷新恢复→字面 DELETE 诱导 BLOCKED(REJECTED 视觉+分态文案)
+  →删除会话(确认框→级联→回新建态)→租户切换 sakila(跨域真实查询+
+  会话按租户隔离)→404→管理面占位(admin)→smoke-self 登录:菜单无管理
+  入口+单租户只读+用户级会话隔离→403 直达。
+  **摘要幻觉复现实证(005 已登记行为的 006 再确认)**:诱导删除时 LLM 生成
+  `SELECT COUNT(*)...WHERE name ILIKE '连弩'` 规避写操作,摘要却谎称
+  "删除成功"——数据无损(库内 4 行完好),属 prompt 调优范畴
+  (随 query-streaming/prompt 护栏域评估,见 005 已知 TODO)。
 - **问答链路(005)**:用户面 `POST /chat/query`(JWT + **require_perm 首发**
   chat:execute + X-Tenant-Id 白名单 + 会话/消息落库 + history 补全最近 5 条 +
   trace_id 贯穿 + 图表建议纯函数 line/pie/bar/none)→ 回调 agent `POST /query`
@@ -206,16 +279,21 @@
   有 005 冒烟留下的真实问答记录;
   **示例数据集(2026-08-18 装载)**:sakila(film 1000/rental 16044/customer 599)
   与 olist(orders 99441/items 112650)两租户已注册并绑 admin;
+  **006 冒烟留痕**:default 域 goods 表实测无库存列(仅 name/create_by),
+  问"库存"时 LLM 以 COUNT 释义属正常行为;chat_session/chat_message 另有
+  006 冒烟新增会话(含一条 REJECTED 拦截轮),可作回显回归活数据;
   源文件在 `.example-data/`(135MB,已 gitignore),装载管线 `infra/example-data/load.sh`
   (幂等可重放,含中文注释 comments.sql——内省进 LLM 提示的质量关键)。
 - 前端:登录页五家联邦按钮数据驱动;simple-icons 覆盖 GitHub/Google/微信系,
   **钉钉/飞书 simple-icons@16 未收录 → 按例外条款内联官方 mark**;favicon.svg 已补
   (朱砂底白色羽扇)。003 冒烟:五家图标实测渲染正确。
-- 质量:api ruff/mypy strict/lint-imports/pytest **148**(认证+datascope+执行路由+
-  防火墙+**chat 13 + meta 6**,真实 PG+Redis)+ agent 同门禁 **53** + web tsc/eslint 全绿;
+- 质量:api ruff/mypy strict/lint-imports/pytest **162**(认证+datascope+执行路由+
+  防火墙+chat 15+meta 6+**会话端点 14**,真实 PG+Redis)+ agent 同门禁 **53** +
+  web tsc/eslint 全绿;
   CI api job 已带 pg/redis services(未在真实 runner 验证——push 后首验)。
-- 契约:openapi.json 含 /auth/* + /internal/sql/execute + **/chat/query +
-  /internal/meta/schema**;005 模型落定后 `make contracts` 已重生成,web tsc 过。
+- 契约:openapi.json 含 /auth/* + /internal/sql/execute + /chat/query +
+  /internal/meta/schema + **/chat/sessions(列表/消息/删除,006)**;
+  006 端点落定后 `make contracts` 已重生成,web tsc 过。
 
 ## 已定死的决策(不再议,引用即终)
 
@@ -233,12 +311,14 @@
 
 ## 下一步(路线图梯队,按序)
 
-1. 前端主布局(会话侧栏 + 对话区 + RBAC 菜单守卫;require_perm 已随 005 首发,
-   /chat/query 契约已在 openapi.json,对话页可直接消费)。
-2. RBAC 管理面 CRUD(用户/角色/权限点/部门,spec 已立约;sys_dept 存储底座 004 已建)。
-3. 动态数据源注册/管理端点(sys_datasource 表已在,池管理器 key 维度与失效钩子已预留)。
-4. RAG 三路召回 + 知识库(rag/knowledge spec 已立约;落地后 retrieve 从内省过渡形态
+1. RBAC 管理面 CRUD(用户/角色/权限点/部门,spec 已立约;sys_dept 存储底座 004 已建;
+   /admin 占位路由+403 守卫+菜单入口已随 006 就位)。
+2. 动态数据源注册/管理端点(sys_datasource 表已在,池管理器 key 维度与失效钩子已预留;
+   契约 datasource_key 参数已就位,前端未发送、落缺省 default)。
+3. RAG 三路召回 + 知识库(rag/knowledge spec 已立约;落地后 retrieve 从内省过渡形态
    切换召回收窄,schema 提示源决策见 005 design Open Questions)。
+4. 会话体验深化(标题 LLM 改写/时间分组/搜索/导出 CSV+Excel/EXPLAIN——chat spec
+   已立约的行为面,端点未立,随后续变更)。
 
 ## 已知 TODO(代码内标注,非缺陷)
 
