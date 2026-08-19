@@ -1,0 +1,578 @@
+/* 用户管理页(web-admin spec「用户管理页」):表格+分页+搜索+创建/编辑对话框
+   (用户名创建后不可改、角色多选、部门单选、状态启停)+重置密码+删除确认。 */
+
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  systemApi,
+  type DeptNodeOut,
+  type RoleOut,
+  type TenantOut,
+  type UserItemOut,
+} from "@/lib/system-api";
+
+const PAGE_SIZE = 10;
+
+type FormState = {
+  username: string;
+  password: string;
+  nickname: string;
+  email: string;
+  status: "ACTIVE" | "DISABLED";
+  deptId: string;
+  tenantId: string;
+  roleIds: string[];
+};
+
+const EMPTY_FORM: FormState = {
+  username: "",
+  password: "",
+  nickname: "",
+  email: "",
+  status: "ACTIVE",
+  deptId: "",
+  tenantId: "",
+  roleIds: [],
+};
+
+function flattenDepts(
+  nodes: DeptNodeOut[] | undefined,
+  depth = 0,
+): { id: string; label: string }[] {
+  return (nodes ?? []).flatMap((n) => [
+    { id: n.id, label: `${"—　".repeat(depth)}${n.dept_name}` },
+    ...flattenDepts(n.children, depth + 1),
+  ]);
+}
+
+export default function UsersPage() {
+  const qc = useQueryClient();
+  const [page, setPage] = useState(1);
+  const [keyword, setKeyword] = useState("");
+  const [search, setSearch] = useState("");
+  const [editing, setEditing] = useState<UserItemOut | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [formError, setFormError] = useState("");
+  const [resetting, setResetting] = useState<UserItemOut | null>(null);
+  const [resetPw, setResetPw] = useState("");
+  const [resetError, setResetError] = useState("");
+  const [deleting, setDeleting] = useState<UserItemOut | null>(null);
+
+  const users = useQuery({
+    queryKey: ["admin", "users", page, search],
+    queryFn: () => systemApi.listUsers(page, PAGE_SIZE, search),
+  });
+
+  // 越界自愈:删除末页条目/过滤后总页数收缩时,回退到最后有效页
+  useEffect(() => {
+    const data = users.data;
+    if (!data) return;
+    const lastPage = Math.max(1, Math.ceil(data.total / PAGE_SIZE));
+    if (page > lastPage) setPage(lastPage);
+  }, [users.data, page]);
+  const roles = useQuery({ queryKey: ["admin", "roles"], queryFn: systemApi.listRoles });
+  const depts = useQuery({ queryKey: ["admin", "depts"], queryFn: systemApi.listDepts });
+  const tenants = useQuery({ queryKey: ["admin", "tenants"], queryFn: systemApi.listTenants });
+
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: ["admin", "users"] });
+  };
+
+  const create = useMutation({
+    mutationFn: () =>
+      systemApi.createUser({
+        username: form.username,
+        password: form.password,
+        nickname: form.nickname,
+        email: form.email || null,
+        status: form.status,
+        dept_id: form.deptId || null,
+        tenant_id: form.tenantId,
+        role_ids: form.roleIds,
+      }),
+    onSuccess: () => {
+      setCreating(false);
+      invalidate();
+    },
+    onError: (e: Error) => setFormError(e.message),
+  });
+
+  const update = useMutation({
+    mutationFn: () =>
+      systemApi.updateUser(editing!.id, {
+        nickname: form.nickname,
+        email: form.email || null,
+        status: form.status,
+        dept_id: form.deptId || null,
+        tenant_id: form.tenantId,
+        role_ids: form.roleIds,
+        password: form.password || null,
+      }),
+    onSuccess: () => {
+      setEditing(null);
+      invalidate();
+    },
+    onError: (e: Error) => setFormError(e.message),
+  });
+
+  const reset = useMutation({
+    mutationFn: () => systemApi.resetPassword(resetting!.id, resetPw),
+    onSuccess: () => {
+      setResetting(null);
+      setResetPw("");
+    },
+    onError: (e: Error) => setResetError(e.message),
+  });
+
+  const remove = useMutation({
+    mutationFn: () => systemApi.deleteUser(deleting!.id),
+    onSuccess: () => {
+      setDeleting(null);
+      invalidate();
+    },
+  });
+
+  const openCreate = () => {
+    setForm({
+      ...EMPTY_FORM,
+      tenantId: tenants.data?.[0]?.id ?? "",
+    });
+    setFormError("");
+    setCreating(true);
+  };
+
+  const openEdit = (u: UserItemOut) => {
+    const roleIds =
+      roles.data?.filter((r) => u.role_keys.includes(r.role_key)).map((r) => r.id) ?? [];
+    setForm({
+      username: u.username,
+      password: "",
+      nickname: u.nickname,
+      email: u.email ?? "",
+      status: u.status === "DISABLED" ? "DISABLED" : "ACTIVE",
+      deptId: u.dept_id ?? "",
+      tenantId: u.tenant_id ?? tenants.data?.[0]?.id ?? "",
+      roleIds,
+    });
+    setFormError("");
+    setEditing(u);
+  };
+
+  const submit = () => {
+    setFormError("");
+    if (!form.nickname.trim()) return setFormError("昵称不可为空");
+    if (!form.tenantId) return setFormError("必须选择租户");
+    if (creating && form.password.length < 8) return setFormError("密码至少 8 位");
+    if (editing && form.password && form.password.length < 8) return setFormError("密码至少 8 位");
+    // 角色清单未就绪时禁止提交编辑:roleIds 会按空集覆盖,静默清空既有角色绑定
+    if (editing && !roles.data && editing.role_keys.length > 0) {
+      return setFormError("角色清单尚未加载完成,请稍后重试");
+    }
+    if (creating) create.mutate();
+    else update.mutate();
+  };
+
+  const total = users.data?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const deptOptions = flattenDepts(depts.data ?? []);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Input
+          value={keyword}
+          onChange={(e) => setKeyword(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              setPage(1);
+              setSearch(keyword.trim());
+            }
+          }}
+          placeholder="搜索用户名/昵称,回车确认"
+          className="max-w-64"
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            setPage(1);
+            setSearch(keyword.trim());
+          }}
+        >
+          搜索
+        </Button>
+        <div className="flex-1" />
+        <Button size="sm" onClick={openCreate}>
+          新建用户
+        </Button>
+      </div>
+
+      {users.isError && (
+        <p className="text-destructive text-sm" role="alert">
+          用户列表加载失败:{(users.error as Error).message}
+        </p>
+      )}
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>用户名</TableHead>
+            <TableHead>昵称</TableHead>
+            <TableHead>状态</TableHead>
+            <TableHead>角色</TableHead>
+            <TableHead>部门</TableHead>
+            <TableHead>创建时间</TableHead>
+            <TableHead className="text-right">操作</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {users.isPending && (
+            <TableRow>
+              <TableCell colSpan={7} className="text-center text-muted-foreground">
+                加载中…
+              </TableCell>
+            </TableRow>
+          )}
+          {users.data?.items.map((u) => (
+            <TableRow key={u.id}>
+              <TableCell className="font-medium">{u.username}</TableCell>
+              <TableCell>{u.nickname}</TableCell>
+              <TableCell>
+                {u.status === "ACTIVE" ? (
+                  <Badge>启用</Badge>
+                ) : (
+                  <Badge variant="secondary">禁用</Badge>
+                )}
+              </TableCell>
+              <TableCell>
+                <div className="flex flex-wrap gap-1">
+                  {u.role_keys.length === 0 ? (
+                    <span className="text-muted-foreground text-sm">—</span>
+                  ) : (
+                    u.role_keys.map((k) => (
+                      <Badge key={k} variant="outline">
+                        {k}
+                      </Badge>
+                    ))
+                  )}
+                </div>
+              </TableCell>
+              <TableCell>{u.dept_name ?? "—"}</TableCell>
+              <TableCell className="text-muted-foreground">
+                {new Date(u.created_at).toLocaleDateString("zh-CN")}
+              </TableCell>
+              <TableCell className="text-right">
+                <Button variant="ghost" size="sm" onClick={() => openEdit(u)}>
+                  编辑
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setResetError("");
+                    setResetPw("");
+                    setResetting(u);
+                  }}
+                >
+                  重置密码
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => setDeleting(u)}
+                >
+                  删除
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+          {users.data && users.data.items.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={7} className="text-center text-muted-foreground">
+                无匹配用户
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+
+      <div className="flex items-center justify-between text-sm text-muted-foreground">
+        <span>共 {total} 条</span>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+            上一页
+          </Button>
+          <span>
+            {page} / {pages}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page >= pages}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            下一页
+          </Button>
+        </div>
+      </div>
+
+      <Dialog open={creating || editing !== null} onOpenChange={(open) => {
+        if (!open) {
+          setCreating(false);
+          setEditing(null);
+        }
+      }}>
+        <DialogContent aria-describedby={undefined} className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{creating ? "新建用户" : `编辑用户 ${form.username}`}</DialogTitle>
+          </DialogHeader>
+          {formError && (
+            <p className="text-destructive text-sm" role="alert">
+              {formError}
+            </p>
+          )}
+          <form
+            className="grid gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              submit();
+            }}
+          >
+            {creating && (
+              <div className="grid gap-1.5">
+                <Label htmlFor="u-username">用户名</Label>
+                <Input
+                  id="u-username"
+                  value={form.username}
+                  onChange={(e) => setForm({ ...form, username: e.target.value })}
+                />
+              </div>
+            )}
+            <div className="grid gap-1.5">
+              <Label htmlFor="u-password">
+                密码{editing ? "(留空不改)" : ""}
+              </Label>
+              <Input
+                id="u-password"
+                type="password"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="u-nickname">昵称</Label>
+              <Input
+                id="u-nickname"
+                value={form.nickname}
+                onChange={(e) => setForm({ ...form, nickname: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="u-email">邮箱(可空)</Label>
+              <Input
+                id="u-email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5">
+                <Label>状态</Label>
+                <Select
+                  value={form.status}
+                  onValueChange={(v) => setForm({ ...form, status: v as FormState["status"] })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ACTIVE">启用</SelectItem>
+                    <SelectItem value="DISABLED">禁用</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label>租户</Label>
+                <Select
+                  value={form.tenantId}
+                  onValueChange={(v) => setForm({ ...form, tenantId: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择租户" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(tenants.data ?? []).map((t: TenantOut) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.tenant_name}({t.tenant_key})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid gap-1.5">
+              <Label>部门(可空)</Label>
+              <Select
+                value={form.deptId || "none"}
+                onValueChange={(v) => setForm({ ...form, deptId: v === "none" ? "" : v })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="未绑定" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">未绑定</SelectItem>
+                  {deptOptions.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label>角色(可多选)</Label>
+              <div className="space-y-1.5 rounded-md border p-2">
+                {(roles.data ?? []).map((r: RoleOut) => (
+                  <label key={r.id} className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={form.roleIds.includes(r.id)}
+                      onCheckedChange={(checked) =>
+                        setForm({
+                          ...form,
+                          roleIds: checked
+                            ? [...form.roleIds, r.id]
+                            : form.roleIds.filter((x) => x !== r.id),
+                        })
+                      }
+                    />
+                    {r.role_name}({r.role_key})
+                  </label>
+                ))}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setCreating(false);
+                  setEditing(null);
+                }}
+              >
+                取消
+              </Button>
+              <Button type="submit" disabled={create.isPending || update.isPending}>
+                {create.isPending || update.isPending ? "保存中…" : "保存"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={resetting !== null} onOpenChange={(open) => !open && setResetting(null)}>
+        <DialogContent aria-describedby={undefined} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>重置密码 — {resetting?.username}</DialogTitle>
+          </DialogHeader>
+          {resetError && (
+            <p className="text-destructive text-sm" role="alert">
+              {resetError}
+            </p>
+          )}
+          <form
+            className="grid gap-1.5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setResetError("");
+              if (resetPw.length < 8) return setResetError("密码至少 8 位");
+              reset.mutate();
+            }}
+          >
+            <Label htmlFor="u-reset">新密码(重置后强制首登改密)</Label>
+            <Input
+              id="u-reset"
+              type="password"
+              value={resetPw}
+              onChange={(e) => setResetPw(e.target.value)}
+            />
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setResetting(null)}>
+                取消
+              </Button>
+              <Button type="submit" disabled={reset.isPending}>
+                {reset.isPending ? "重置中…" : "重置"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除用户 {deleting?.username}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              删除为软删除:该用户无法再登录,用户名可被新用户复用。此操作可由管理员感知但不可自助恢复。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {remove.isError && (
+            <p className="text-destructive text-sm" role="alert">
+              {(remove.error as Error).message}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            {/* 受控关闭:mutation 成功才关对话框(onSuccess setDeleting(null)),
+                失败保持开启展示下方错误——Radix Action 点击即关,错误行会随卸载不可见 */}
+            <Button
+              variant="destructive"
+              onClick={() => remove.mutate()}
+              disabled={remove.isPending}
+            >
+              {remove.isPending ? "删除中…" : "删除"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}

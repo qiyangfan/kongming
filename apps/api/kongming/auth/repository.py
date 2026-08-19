@@ -53,7 +53,10 @@ class SqlUserRepo:
     async def get_by_username(self, username: str) -> User | None:
         row = (
             await self._s.execute(
-                text(f"SELECT {_USER_COLS} FROM public.sys_user WHERE username=:u"),  # noqa: S608  # 常量列清单
+                text(
+                    f"SELECT {_USER_COLS} FROM public.sys_user"  # noqa: S608  # 常量列清单
+                    " WHERE username=:u AND deleted_at IS NULL"
+                ),
                 {"u": username},
             )
         ).mappings().one_or_none()

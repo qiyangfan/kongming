@@ -5,7 +5,10 @@ import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
 
 import { AppLayout } from "@/components/app-layout";
 import { PermRoute } from "@/components/perm-route";
-import AdminHome from "@/pages/AdminHome";
+import AdminLayout from "@/pages/admin/AdminLayout";
+import DeptsPage from "@/pages/admin/DeptsPage";
+import RolesPage from "@/pages/admin/RolesPage";
+import UsersPage from "@/pages/admin/UsersPage";
 import ChangePassword from "@/pages/ChangePassword";
 import ChatPage from "@/pages/ChatPage";
 import Login from "@/pages/Login";
@@ -53,11 +56,34 @@ const router = createBrowserRouter([
       },
       {
         path: "admin",
-        element: (
-          <PermRoute perm="system:user:manage">
-            <AdminHome />
-          </PermRoute>
-        ),
+        element: <AdminLayout />,
+        children: [
+          { index: true, element: <Navigate to="/admin/users" replace /> },
+          {
+            path: "users",
+            element: (
+              <PermRoute perm="system:user:manage">
+                <UsersPage />
+              </PermRoute>
+            ),
+          },
+          {
+            path: "roles",
+            element: (
+              <PermRoute perm="system:role:manage">
+                <RolesPage />
+              </PermRoute>
+            ),
+          },
+          {
+            path: "depts",
+            element: (
+              <PermRoute perm="system:user:manage">
+                <DeptsPage />
+              </PermRoute>
+            ),
+          },
+        ],
       },
       { path: "*", element: <NotFoundPage /> },
     ],

@@ -19,6 +19,8 @@ from kongming.config import get_settings
 from kongming.db import get_sessionmaker
 from kongming.internal.meta import router as internal_meta_router
 from kongming.internal.router import router as internal_router
+from kongming.system.router import register_system_error_handlers
+from kongming.system.router import router as system_router
 
 
 @asynccontextmanager
@@ -39,7 +41,9 @@ app.include_router(auth_router)
 app.include_router(internal_router)
 app.include_router(internal_meta_router)
 app.include_router(chat_router)
+app.include_router(system_router)
 register_auth_error_handlers(app)
+register_system_error_handlers(app)
 
 
 @app.get("/healthz", tags=["ops"])

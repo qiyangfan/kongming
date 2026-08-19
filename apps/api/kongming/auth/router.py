@@ -10,6 +10,7 @@ GET  /auth/{provider}/start     发起联邦(一次性 state;PKCE 按家声明)
 POST /auth/{provider}/callback  联邦回调(code+state → 令牌对;OAuth token 不出后端)
 """
 
+import logging
 from typing import Annotated
 
 import jwt as pyjwt
@@ -45,6 +46,8 @@ from kongming.db import get_session
 from kongming.redis_client import get_redis
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+logger = logging.getLogger(__name__)
 
 
 # ---- 依赖装配(唯一知道"哪个端口绑哪个实现"的地方) ----
@@ -83,14 +86,21 @@ def require_perm(perm_code: str):  # type: ignore[no-untyped-def]
     """权限点校验依赖(rbac spec「权限点校验机制」):实时查库,绑定变更立即生效。
 
     用法:`dependencies=[Depends(require_perm("chat:execute"))]`。
-    认证失败 401(先于本依赖,current_user 抛);有认证无权限 403。
+    认证失败 401(先于本依赖,current_user 抛);有认证无权限 403 并落操作审计
+    (rbac spec「撤销权限立即生效」:审计记录该 403;审计写失败不阻断拒绝)。
     """
 
     async def _dep(
-        user: Annotated[dict[str, object], Depends(current_user)], svc: Service
+        request: Request,
+        user: Annotated[dict[str, object], Depends(current_user)],
+        svc: Service,
     ) -> None:
         info = await svc.me(str(user["sub"]))
         if perm_code not in info.perm_codes:
+            try:
+                await svc.log_perm_denied(str(user["sub"]), perm_code, request.url.path)
+            except Exception:  # noqa: BLE001  # 审计尽力而为,拒绝本身不受影响
+                logger.warning("perm_denied 审计写入失败", exc_info=True)
             raise HTTPException(status_code=403, detail="forbidden")
 
     return _dep

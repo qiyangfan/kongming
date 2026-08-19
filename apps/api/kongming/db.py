@@ -1,12 +1,9 @@
-"""数据库基础设施:async engine/session + FastAPI 依赖 + UUID v7 生成器。
+"""数据库基础设施:async engine/session + FastAPI 依赖。
 
-ADR-004 约定主键 UUID v7;Python 3.13 标准库尚无 uuid7(3.14 才入),
-此处按 RFC 9562 内联实现(48bit 毫秒时间戳 + 版本/变体位 + 随机位),不引新依赖。
+ADR-004 约定主键 UUID v7;生成器实现见 kongming/uuid7.py(纯函数模块),
+此处 re-export 维持既有 `from kongming.db import uuid7` import 路径不变。
 """
 
-import os
-import time
-import uuid
 from collections.abc import AsyncIterator
 from functools import lru_cache
 
@@ -18,6 +15,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from kongming.config import get_settings
+from kongming.uuid7 import uuid7
+
+__all__ = ["get_engine", "get_sessionmaker", "get_session", "uuid7"]
 
 
 @lru_cache
@@ -35,17 +35,3 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     async with get_sessionmaker()() as session:
         yield session
 
-
-def uuid7() -> uuid.UUID:
-    """RFC 9562 UUID v7:毫秒时间戳前缀,单调友好(索引局部性优于 v4)。"""
-    ts_ms = time.time_ns() // 1_000_000
-    rand_a = int.from_bytes(os.urandom(2), "big") & 0x0FFF
-    rand_b = int.from_bytes(os.urandom(8), "big") & 0x3FFFFFFFFFFFFFFF
-    value = (
-        ((ts_ms & 0xFFFFFFFFFFFF) << 80)
-        | (0x7 << 76)
-        | (rand_a << 64)
-        | (0x2 << 62)
-        | rand_b
-    )
-    return uuid.UUID(int=value)

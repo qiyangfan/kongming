@@ -1,21 +1,23 @@
 # HANDOFF — Kongming 交接文档
 
-> 最后更新:2026-08-19(**006 前端主布局收官 + 审查循环清零**:
-> api 会话列表/消息历史/删除三端点(越权/跨租户/不存在统一 404 同形)+
-> result_json 增量补存(chart 完整对象+error,存量 005 形态重算兜存);
-> web 主布局落地:应用壳(侧栏六区+响应式抽屉)/会话侧栏/对话区(三态渲染+
-> 图表 token 派生色板)/RBAC 菜单守卫/租户切换/X-Tenant-Id 单点注入;
-> Playwright 冒烟 14 项全过;R1 评审 4 严重+10 建议、R2/R3 复核全部闭环;
-> api 162 + agent 53 测试全绿)。
+> 最后更新:2026-08-19(**007 RBAC 管理面收官 + 双轮审查循环清零并提交**:
+> api system 域 16 端点(/system/*:用户 CRUD+重置密码、角色 CRUD+
+> 权限覆盖式绑定、部门树 CRUD、权限点清单、租户只读清单)+
+> 内置数据保护(内置角色防删/role_key 不可改/超管防删防禁防剥角色/
+> 自删自禁拒)+ 管理面写操作全量审计 + require_perm 403 审计补齐 +
+> 管理面改密吊销 refresh 家族;0004 迁移(username 唯一→软删感知部分索引);
+> web /admin 三页(用户/角色/部门)+ 管理子导航权限过滤;
+> Playwright 冒烟 12 项全过;独立评审 2 严重+5 建议、/goal 审查循环
+> R1 双路(3 严重+9 建议)与 R2 复审全部闭环;api 205 + agent 53 测试全绿)。
 > 清空上下文/新会话先读本文与 `AGENTS.md`,
 > 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
 
 ## 新会话开工指引(最先看这里)
 
-1. 006 全闭账:主布局已成真——登录即对话(会话侧栏/历史回显/图表/租户切换/
-   菜单守卫全通),产品形态「对话即主体验」成立。下一棒:**RBAC 管理面
-   CRUD(用户/角色/权限点/部门,梯队见文末「下一步」)**,走 `/opsx:propose`
-   开局;`/admin` 占位路由与 403 守卫已就位,web-nav spec 已立约。
+1. 007 全闭账:管理面已成真——建号→分角色→绑部门→重置密码→禁用→删除
+   全链路可用,保护规则与审计齐。下一棒:**动态数据源注册/管理端点
+   (sys_datasource 表已在,池管理器 key 维度与失效钩子已预留;梯队见文末
+   「下一步」)**,走 `/opsx:propose` 开局。
 2. 质量底线:安全规则类测试先行;收工前 `make check` 全绿 + 冒烟记录;
    改 api 必跑 `make contracts` 并提交产物。
 3. **prompt 资产纪律**:apps/agent/graph/prompts.py 与 nodes.py 的 LLM 模板
@@ -58,13 +60,94 @@
    (DOM 快照可读)——GUI 测试一律用 Playwright MCP 工具组
    (`mcp__plugin_playwright_playwright__browser_*`,独立管道,002 已验证可用)。
 
-## 当前状态(截至 006,工作区含 006 全部改动待提交)
+## 当前状态(截至 007,工作区含 007 全部改动待提交)
 
-- git:main 分支(以 git log 为准),**005 已随其提交入库;006 改动在工作区,
-  待用户明确指令后提交**;无远程、未 push。分支策略:主干开发不拉 dev,
-  协作按变更开短命 feature。
-- openspec:001–006 已归档;主 spec 新增 `web-nav`(应用壳/侧栏/守卫/租户切换/
-  响应式),chat spec 增「会话列表与消息历史端点」(归档时已 sync)。
+- git:main 分支(以 git log 为准),**007 已随其提交入库**;无远程、未 push。
+  分支策略:主干开发不拉 dev,协作按变更开短命 feature。
+- openspec:001–007 已归档;主 spec 新增 `web-admin` 域、rbac 增 6 条
+  管理端点 requirement(归档时已 sync)。
+- **007 api 侧**:新域包 `kongming/system/`(router/service/models/ports/
+  repository,宪法分层;import-linter 契约「system models/service/ports 零框架」)。
+  端点 16 个全挂 require_perm(用户/部门/租户=system:user:manage,
+  角色/权限清单=system:role:manage);领域错误 router 统一映射
+  (404 不存在/409 冲突保护/400 参数)。
+- **内置数据保护(007)**:内置角色(SUPER_ADMIN/DEVELOPER 按 role_key 集合
+  判定)禁删;role_key 全局创建后不可改(编辑须提交原值否则 400);
+  超管账号(按 settings.admin_username 判定)禁删+禁禁用+禁剥 SUPER_ADMIN
+  绑定(评审 R1 扩展:防锁定/接管向量);自删/自禁 409;角色删除前置校验
+  「无未软删用户绑定」;部门删除前置校验「无子部门且无未软删用户」;
+  部门编辑防成环(新父落在自身后代集合内即拒;「父设为祖先」是合法树上移
+  ——实现初版方向写反被测试抓回,公式见 service 注释)。
+- **role_key 契约(007)**:传输层 pattern `^[A-Z][A-Z0-9_]+$`(评审 R4:
+  拒空白/小写近形变体,防社工混淆;保护本身按精确字符串判定,变体无提权面)。
+- **审计(007)**:管理面全部写操作(9 类动作 user.create/update/reset_password/
+  delete、role.create/update/delete/bind_perms、dept.create/update/delete)
+  与业务同事务落 sys_oper_log(组合 auth 域 SqlOperLogRepo,同会话=同事务);
+  require_perm 403 落 perm_denied 审计(rbac spec 立约补齐;审计写失败
+  仅日志不阻断拒绝)。动作清单测试全量断言锁定。
+- **0004 迁移(007 实现期发现)**:baseline 的 username UNIQUE 全表硬约束
+  与 spec「软删过滤唯一」矛盾(软删记录仍占名);换成部分唯一索引
+  `WHERE deleted_at IS NULL`。连带修复:auth 仓储 get_by_username 补软删过滤
+  (同名双行曾会炸 one_or_none)。角色/部门为物理删除(无软删列,
+  删除有前置校验+级联清绑定+审计留痕兜底)。
+- **uuid7 拆分(007)**:kongming/uuid7.py 纯函数模块,db.py re-export
+  维持既有 import 路径——system service 受 import-linter
+  「不间接 import sqlalchemy」约束(db.py import sqlalchemy 链条曾违规)。
+- **编辑回显字段(007 冒烟抓回)**:用户列表项含 dept_id/tenant_id
+  (租户经 LATERAL 取 tenant_key 最小的一条——管理面单租户绑定形态);
+  缺失曾致编辑对话框静默清空部门绑定(前端回填不了),api+web 已修,
+  测试断言锁定。web 侧配套:角色清单未就绪时禁止编辑提交
+  (否则 roleIds 空集覆盖会静默清空角色绑定,评审 R3)。
+- **并发唯一冲突兜底(007)**:username/role_key 先查后插窗口命中唯一索引
+  → IntegrityError 由 app 级 handler 收敛 409(评审 R2),不再 500。
+- **007 web 侧**:/admin 管理区(AdminLayout 子导航按权限过滤——
+  与 nav.ts 同构 hasPerm,无权者直达子页只见 403 品牌页不见子导航);
+  三页:用户(表格/分页/关键字 ILIKE 搜索/创建编辑对话框——用户名创建后
+  不可改、角色多选、部门树形下拉、状态启停/重置密码/删除确认)、
+  角色(表格+内置 badge+删除禁用/创建编辑——roleKey 禁改/dataScope/
+  sqlScope 下拉/权限绑定面板按命名空间分组复选,覆盖式保存)、
+  部门(树形+折叠+加子级/编辑防环/删除前置校验兜底)。
+  新 shadcn 组件 table/dialog/select/checkbox(语义类已核:tw-animate-css/
+  popover/input token 齐备);api.ts 加 put;lib/system-api.ts 封装
+  (类型全生成)。部门树缩进用预定义类数组(评审 R5:禁内联 style)。
+- **007 冒烟(2026-08-19,Playwright MCP,12 项全过)**:admin 登录→用户列表
+  (7 真实用户含联邦账号活数据,角色/部门聚合)→部门两级树(锦官城研发中心
+  →军师算法组)→建用户 pangtong(绑 DEVELOPER+军师算法组)→搜索「凤雏」
+  过滤→角色页(内置 badge+删除禁用)→建 ANALYST(本部门及以下)→权限绑定
+  (chat/system 分组,勾 chat:execute→1 项)→删 ANALYST→编辑 pangtong
+  (回显修复后部门/租户/角色全正确,改昵称保存部门未清空)→重置密码
+  (curl 验 must_change_password=True)→删除(确认框→列表消失)→
+  smoke-self:无管理入口+直达 /admin/users 403+子导航隐藏。
+  收尾 curl 探针:create→reset→delete 全 204+审计三动作落库可查。
+- **007 审查循环**:独立评审 2 严重+5 建议全闭环——S1 重置密码未复位
+  首登改密标志(update_user COALESCE 路径不触碰该列,专用 reset_password
+  语句修复+「先自助改密再被重置」用例);S2 管理面写操作零审计
+  (design 承诺未兑现,9 类动作补齐+测试全量断言);R1 超管保护扩禁用/剥角色;
+  R2 并发 IntegrityError→409;R3 角色清单未就绪禁存;R4 role_key pattern;
+  R5 部门树内联 style 改预定义类。评审确认合格面:16 端点权限守卫无漏挂、
+  改 SUPER_ADMIN role_key 再删等绕过链逐一验证不可行、契约与代码一致、
+  XSS 无风险、事务语义正确。
+- **007 /goal 审查循环(R1 轮,双路深检)**:api 切口+web 切口两路独立评审。
+  api 严重=管理面改密(重置/编辑传密码)不吊销 refresh 家族——账号泄漏场景
+  下重置密码后攻击者旧 refresh 仍可续换 access;修复=system service 注入
+  RefreshFamilyStore(auth.ports 复用),改密 commit 后吊销全家族,spec delta
+  补「管理员改密踢下线」场景,+2 用例(旧 refresh 401/编辑传密码哈希变+吊销)。
+  api 建议:IntegrityError handler 补日志+作用域收敛(仅 /system 409,其他域
+  维持 500 等价行为);ILIKE 元字符转义(%/_/\ 按字面,ESCAPE '\')+对照行用例;
+  0004 downgrade 前置条件注记(软删同名行需先清);测试死赋值清理+审计用例
+  补状态码断言+detail 非空断言;log_perm_denied 的 commit 前提注释锚定。
+  web 严重=三页删除确认错误提示死代码(Radix AlertDialogAction 点击即关,
+  失败错误行随卸载不可见——006 曾抓过同款)→ 改受控 Button(成功才关,失败
+  保持开);删除末页唯一条目分页越界(「5/4」空页误导)→ useEffect 越界自愈。
+  web 建议:三页 error 态渲染(403/500 下不再空白);DeptsPage 子部门租户随
+  父节点(原恒取清单首项,多租户下会静默挂错);对话框 form 化支持 Enter
+  提交+aria-describedby 消 Radix 警告。核验降级不修:「role:manage-only
+  自定义角色侧栏无管理入口」——子路由 URL 直达可达(非功能不可达),属 nav
+  单权限点模型边角,登记待办。浏览器复验:SMOKE_SELF 删除 409 错误可见+
+  对话框保持开/部门 Enter 创建/删除成功受控关闭。api 205+agent 53+web 绿。
+  评审同时核验通过:SQL 语义(GROUP BY 函数依赖/count-list 同构/json_agg)、
+  事务边界(operlog 同事务/中途抛错隐式回滚)、uuid7 拆分零回归、
+  react-query 键空间、契约消费逐一对、shadcn 组件 token 兼容。
 - **006 api 侧**:chat 域三端点——`GET /chat/sessions`(limit 1..200 缺省 50,
   updated_at 倒序+id DESC tiebreak)、`GET /chat/sessions/{id}/messages`
   (升序+id ASC tiebreak;user 问句/assistant 要素含 chart 完整对象)、
@@ -287,13 +370,13 @@
 - 前端:登录页五家联邦按钮数据驱动;simple-icons 覆盖 GitHub/Google/微信系,
   **钉钉/飞书 simple-icons@16 未收录 → 按例外条款内联官方 mark**;favicon.svg 已补
   (朱砂底白色羽扇)。003 冒烟:五家图标实测渲染正确。
-- 质量:api ruff/mypy strict/lint-imports/pytest **162**(认证+datascope+执行路由+
-  防火墙+chat 15+meta 6+**会话端点 14**,真实 PG+Redis)+ agent 同门禁 **53** +
-  web tsc/eslint 全绿;
+- 质量:api ruff/mypy strict/lint-imports/pytest **205**(认证+datascope+执行路由+
+  防火墙+chat 15+meta 6+会话端点 14+**system 管理面 39**,真实 PG+Redis)+
+  agent 同门禁 **53** + web tsc/eslint 全绿;
   CI api job 已带 pg/redis services(未在真实 runner 验证——push 后首验)。
 - 契约:openapi.json 含 /auth/* + /internal/sql/execute + /chat/query +
-  /internal/meta/schema + **/chat/sessions(列表/消息/删除,006)**;
-  006 端点落定后 `make contracts` 已重生成,web tsc 过。
+  /internal/meta/schema + /chat/sessions(列表/消息/删除)+
+  **/system/* 16 端点(007)**;端点落定后 `make contracts` 已重生成,web tsc 过。
 
 ## 已定死的决策(不再议,引用即终)
 
@@ -308,21 +391,33 @@
 | 分层 | 域包内 router→service→models→repository;domain 零框架依赖 | 宪法 Article II |
 | 执行路由 | 三态 verdict(PASS/BLOCKED/ERROR);用户-租户绑定复校;data_scope 改写=最外层 WHERE AST 注入(非包子查询);非 default 数据源 fail-closed;**控制面保留表(sys_/chat_/user_identities/alembic_version)拒读 + 危险函数(pg_read_file 等)拒用(005 审查循环)** | sql-execution + datascope spec(004/005) |
 | 问答链路 | agent 8 节点图;权限类(BLOCKED/预检非只读)不重试;重试上限=初始之外 2 次;schema 提示 RAG 前=实时内省过渡形态 | nl2sql + nl2sql-agent + chat spec(005) |
+| RBAC 管理面 | 内置角色按 role_key 集合判(SUPER_ADMIN/DEVELOPER)禁删;role_key 创建后不可改+传输层大写蛇形 pattern;超管按 admin_username 判禁删/禁禁/禁剥 SUPER_ADMIN;角色/部门物理删除(前置校验+级联清绑定+审计),仅用户软删(username 唯一=部分索引软删感知);管理面写操作与业务同事务审计 | rbac + web-admin spec(007) |
 
 ## 下一步(路线图梯队,按序)
 
-1. RBAC 管理面 CRUD(用户/角色/权限点/部门,spec 已立约;sys_dept 存储底座 004 已建;
-   /admin 占位路由+403 守卫+菜单入口已随 006 就位)。
-2. 动态数据源注册/管理端点(sys_datasource 表已在,池管理器 key 维度与失效钩子已预留;
+1. 动态数据源注册/管理端点(sys_datasource 表已在,池管理器 key 维度与失效钩子已预留;
    契约 datasource_key 参数已就位,前端未发送、落缺省 default)。
-3. RAG 三路召回 + 知识库(rag/knowledge spec 已立约;落地后 retrieve 从内省过渡形态
+2. RAG 三路召回 + 知识库(rag/knowledge spec 已立约;落地后 retrieve 从内省过渡形态
    切换召回收窄,schema 提示源决策见 005 design Open Questions)。
-4. 会话体验深化(标题 LLM 改写/时间分组/搜索/导出 CSV+Excel/EXPLAIN——chat spec
+3. 会话体验深化(标题 LLM 改写/时间分组/搜索/导出 CSV+Excel/EXPLAIN——chat spec
    已立约的行为面,端点未立,随后续变更)。
 
 ## 已知 TODO(代码内标注,非缺陷)
 
-web 主布局;动态数据源池(sys_datasource 行驱动);RAG 召回与 schema 提示收窄。
+动态数据源池(sys_datasource 行驱动);RAG 召回与 schema 提示收窄。
+**部门树租户过滤(007 design Open Questions)**:部门带 tenant_id 但树查询
+全量返回;按租户过滤部门树随 multitenant 管理变更再定。
+**用户-部门跨租户绑定未校验(007)**:编辑用户时 dept 与 tenant 分属不同租户
+不拦(design 已挂账);部门可迁租户。低风险,随 multitenant 域收口。
+**软删用户的角色绑定残留**:软删不清理 sys_user_role(留审计语义,上游同款);
+未来若做「恢复软删用户」需连带恢复/重建角色绑定。
+**管理入口对单权限点组合的空隙(007 /goal R1 登记)**:自定义角色仅配
+system:role:manage(无 user:manage/chat:execute)时侧栏无「管理」入口
+(nav 单 perm 字段表达力限制)——/admin/roles URL 直达可用,非功能不可达;
+彻底收敛需 nav 多权限点判定+/admin 落点动态重定向,随 web-nav 域演进评估。
+**吊销 fail-open 窗口(007 /goal R2 观察)**:Redis 不可用时管理面改密
+commit 后吊销抛 500,Redis 恢复后旧 refresh 在 TTL 剩余期内仍可续换——
+与 auth 自助改密既有降级语义一致,后续可加吊销失败告警/补偿。
 **摘要质量观察(005/数据集冒烟)**:① 诱导写操作时 LLM 可能生成 WHERE FALSE 规避 +
 摘要谎称成功;② summarize 只喂前 5 行数据,聚合结果 >5 行时摘要可能以偏概全
 (olist 状态分布实测说错最大值)——均属 prompt 调优范畴(上游同构行为),

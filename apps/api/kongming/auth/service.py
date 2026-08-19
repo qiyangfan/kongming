@@ -169,6 +169,20 @@ class AuthService:
             and user.password_changed_at is None,
         )
 
+    # ---- 权限拒绝审计 ----
+
+    async def log_perm_denied(self, user_id: str, perm_code: str, path: str) -> None:
+        """权限点校验 403 的操作审计(rbac spec「撤销权限立即生效」)。
+
+        前提锚定:本方法只在 require_perm 依赖内调用——它先于端点执行,
+        此前 session 仅有只读查询,commit 不会意外提交业务写。若未来在
+        权限校验前引入写型依赖(配额预扣等),须重新评估此处 commit 语义。
+        """
+        await self._uow.operlog.add(
+            user_id, "perm_denied", perm_code, {"path": path}
+        )
+        await self._uow.commit()
+
     # ---- 自助改密 ----
 
     async def change_password(self, user_id: str, current: str, new: str) -> None:
