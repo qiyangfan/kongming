@@ -3,15 +3,16 @@
 ## Purpose
 
 管理面(应用壳内 /admin 区)的界面行为:路由结构、页面级权限守卫、
-用户/角色/部门三管理页的结构与交互契约。数据行为归 rbac 域端点。
+用户/角色/部门/数据源各管理页的结构与交互契约。数据行为归 rbac/datasource 域端点。
 
 ## Requirements
 
 ### Requirement: 管理面路由与页面守卫
 
-/admin 为管理区根,含三个子页;子页按各自权限点守卫
-(用户/部门页 system:user:manage,角色页 system:role:manage);
-侧栏管理入口与子页导航数据同源;无权限直达返回 403 品牌页。
+/admin 为管理区根,SHALL 含四个子页(用户/角色/部门/数据源);子页 SHALL 按各自权限点守卫
+(用户/部门页 system:user:manage,角色页 system:role:manage,
+数据源页 system:datasource:manage);侧栏管理入口与子页导航数据同源;
+无权限直达返回 403 品牌页。
 
 #### Scenario: 按权限进入子页
 - GIVEN 用户角色含 system:user:manage 但不含 system:role:manage
@@ -20,9 +21,14 @@
 - WHEN 直达 /admin/roles
 - THEN 渲染 403 页
 
+#### Scenario: 数据源子页守卫
+- GIVEN 用户角色不含 system:datasource:manage
+- WHEN 直达 /admin/datasources
+- THEN 渲染 403 页,子导航不呈现数据源入口
+
 #### Scenario: 子页导航
 - GIVEN 管理面已渲染
-- THEN 呈现用户/角色/部门三个子页入口,当前子页高亮
+- THEN 按权限呈现用户/角色/部门/数据源子页入口,当前子页高亮
 
 ### Requirement: 用户管理页
 

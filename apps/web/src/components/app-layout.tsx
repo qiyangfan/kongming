@@ -7,6 +7,7 @@ import { Link, Outlet } from "react-router";
 import { Feather, Menu, Plus } from "lucide-react";
 
 import { Protected } from "@/components/protected";
+import { DatasourceSwitcher } from "@/components/datasource-switcher";
 import { SessionSidebar } from "@/components/session-sidebar";
 import { TenantSwitcher } from "@/components/tenant-switcher";
 import { UserMenu } from "@/components/user-menu";
@@ -74,6 +75,7 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
       <div className="mt-auto flex flex-col gap-2">
         <Separator />
         <TenantSwitcher />
+        <DatasourceSwitcher />
         <UserMenu />
       </div>
     </div>

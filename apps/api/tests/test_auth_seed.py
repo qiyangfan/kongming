@@ -18,7 +18,12 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
     perms = (
         await session.execute(text("SELECT perm_code FROM public.sys_permission ORDER BY 1"))
     ).scalars().all()
-    assert perms == ["chat:execute", "system:role:manage", "system:user:manage"]
+    assert perms == [
+        "chat:execute",
+        "system:datasource:manage",
+        "system:role:manage",
+        "system:user:manage",
+    ]
     tenants = (
         await session.execute(text("SELECT tenant_key FROM public.sys_tenant"))
     ).scalars().all()
@@ -62,7 +67,7 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
                 " WHERE r.role_key='SUPER_ADMIN'"
             )
         )
-    ).scalar_one() == 3
+    ).scalar_one() == 4
     # 推荐绑定(只增不摘):DEVELOPER 增量获得 chat:execute
     dev_perms = (
         await session.execute(
@@ -86,11 +91,11 @@ async def test_seed_idempotent_on_repeat(session: AsyncSession) -> None:
 
     assert await _count("public.sys_user") == 1
     assert await _count("public.sys_role") == 2
-    assert await _count("public.sys_permission") == 3
+    assert await _count("public.sys_permission") == 4
     assert await _count("public.sys_tenant") == 1
     assert await _count("public.sys_user_role") == 1
     assert await _count("public.sys_user_tenant") == 1
-    assert await _count("public.sys_role_permission") == 4  # 超管 3 + DEVELOPER 推荐 1
+    assert await _count("public.sys_role_permission") == 5  # 超管 4 + DEVELOPER 推荐 1
 
 
 async def test_seed_with_env_password_not_forced_to_change(

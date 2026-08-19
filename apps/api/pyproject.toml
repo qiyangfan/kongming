@@ -59,6 +59,11 @@ asyncio_default_fixture_loop_scope = "session"
 module = "kongming.auth.providers.*"
 disable_error_code = ["attr-defined"]
 
+# asyncpg 无 py.typed 标记(直连仅测试连接一处消费,异常类 isinstance 判定不受影响)
+[[tool.mypy.overrides]]
+module = "kongming.datasource.tester"
+disable_error_code = ["import-untyped"]
+
 [tool.importlinter]
 root_packages = ["kongming"]
 include_external_packages = true
@@ -67,7 +72,9 @@ include_external_packages = true
 name = "auth 域不反向依赖业务域(ADR-003 回退路径前提)"
 type = "forbidden"
 source_modules = ["kongming.auth"]
-forbidden_modules = ["kongming.chat", "kongming.rag_admin", "kongming.datasource_admin"]
+# kongming.datasource=008 落地的真实包名(基线期猜测名 datasource_admin 曾使防线
+# 对该包静默失效,R1 实证);rag_admin 猜测名挂账 rag 变更核对
+forbidden_modules = ["kongming.chat", "kongming.rag_admin", "kongming.datasource"]
 
 [[tool.importlinter.contracts]]
 name = "datascope/audit 域不依赖 Web 框架(宪法 Article II 领域纯净)"
@@ -85,6 +92,16 @@ forbidden_modules = ["fastapi", "sqlalchemy"]
 name = "system 领域模型/用例不依赖框架(宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = ["kongming.system.models", "kongming.system.service", "kongming.system.ports"]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "datasource 领域模型/用例/端口不依赖框架(宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = [
+    "kongming.datasource.models",
+    "kongming.datasource.service",
+    "kongming.datasource.ports",
+]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
 [build-system]

@@ -14,6 +14,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { api, type ChatQueryOut, type SessionMessageOut } from "@/lib/api";
+import { useDatasource } from "@/lib/datasource-store";
 import { useTenant } from "@/lib/tenant-store";
 
 function EmptyState() {
@@ -47,13 +48,15 @@ function isStatus(err: unknown, status: number): boolean {
 export default function ChatPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const { current } = useTenant();
+  const datasource = useDatasource((s) => s.current);
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [draft, setDraft] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const messages = useQuery({
-    queryKey: ["messages", sessionId ?? "-", current],
+    // 键含租户+数据源双维度:切换即换档,不跨上下文残留
+    queryKey: ["messages", sessionId ?? "-", current, datasource],
     queryFn: () => api.get<SessionMessageOut[]>(`/chat/sessions/${sessionId}/messages`),
     enabled: sessionId !== undefined,
   });
@@ -70,6 +73,7 @@ export default function ChatPage() {
     mutationFn: (question: string) =>
       api.post<ChatQueryOut>("/chat/query", {
         question,
+        datasource_key: datasource, // 选中的数据源随查询发送(008)
         ...(sessionId ? { session_id: sessionId } : {}),
       }),
     onSuccess: (out) => {
@@ -79,7 +83,7 @@ export default function ChatPage() {
       }
       void qc.invalidateQueries({ queryKey: ["sessions", current] });
       if (out.session_id === sessionId) {
-        void qc.invalidateQueries({ queryKey: ["messages", sessionId, current] });
+        void qc.invalidateQueries({ queryKey: ["messages", sessionId, current, datasource] });
       }
     },
     onError: (_err, question) => {

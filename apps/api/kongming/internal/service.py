@@ -1,7 +1,9 @@
-"""内部执行编排:租户解析 → 绑定复校 → 防火墙 → data_scope → 复检 → 只读执行 → 审计。
+"""内部执行编排:租户解析 → 数据源解析 → 绑定复校 → 防火墙 → data_scope → 复检 → 只读执行 → 审计。
 
 sql-execution spec 落地:
-- fail-closed 三面:未知/禁用租户、用户-租户未绑定、非 default 数据源(动态池未落地);
+- fail-closed 三面:未知/禁用租户、用户-租户未绑定、数据源非法(008 动态化:
+  非 default 校验存在+启用+归属当前租户,同形 400 DATASOURCE_INVALID 防 key 探测,
+  审计落 BLOCKED+分类内部可溯;不静默回退默认路径);
 - 系统调用(user_id 缺省)豁免绑定复校与 data_scope,其余防御层不变;
 - 改写产物必过防火墙复检 + schema 边界校验(防御性,防改写引入非法语句/跨租户引用);
 - PASS/BLOCKED/ERROR 三态全落审计,trace_id 原样贯穿,sql_text 记实际执行形态;
@@ -17,13 +19,18 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from sqlalchemy import text
+from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.audit.models import SqlAuditEntry
 from kongming.audit.writer import SqlAuditWriter
+from kongming.config import get_settings
 from kongming.datascope import applier
 from kongming.datascope.models import AppliedSQL, DataScopeUnsupported
-from kongming.internal.executor import get_read_engine
+from kongming.datasource.cipher import get_cipher
+from kongming.datasource.models import CredentialUndecryptable
+from kongming.datasource.repository import SqlDatasourceRepo
+from kongming.internal.executor import get_or_create_engine
 from kongming.sqlfw.firewall import check, check_reserved_tables, check_schema_scope
 
 log = logging.getLogger(__name__)
@@ -37,8 +44,8 @@ class TenantBindingForbidden(Exception):
     """用户未绑定目标租户(防 agent 侧越权代理)。"""
 
 
-class UnsupportedDatasource(Exception):
-    """非 default 数据源:动态池未落地,fail-closed 不静默回退。"""
+class InvalidDatasource(Exception):
+    """数据源不存在/禁用/越属:同形 400 DATASOURCE_INVALID(防 key 探测)。"""
 
 
 # SQLAlchemy asyncpg 方言把驱动错误包成 DBAPIError,args[0] 形如
@@ -101,10 +108,6 @@ async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
         raise TenantNotFound(tenant_key)
     tenant_id = str(tenant["id"])
 
-    # 2. 数据源:仅 default(动态数据源池后续变更插槽)
-    if datasource_key != "default":
-        raise UnsupportedDatasource(datasource_key)
-
     def _elapsed() -> int:
         return int((time.monotonic() - started) * 1000)
 
@@ -124,6 +127,39 @@ async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
             )
         )
         return ExecResult(verdict=verdict, reason=reason, duration_ms=_elapsed())
+
+    # 2. 数据源解析(008 动态化):default 走平台配置连接串;非 default 校验
+    #    存在+启用+归属当前租户——任一不满足:审计 BLOCKED(分类内部可溯)+
+    #    同形 InvalidDatasource(对外不区分原因,防 key 探测);不静默回退默认路径
+    engine_dsn: URL | None = None
+    route_schema = f"tenant_{tenant_key}"
+    if datasource_key != "default":
+        row = await SqlDatasourceRepo(session).find_for_execute(datasource_key)
+        category: str | None = None
+        if row is None:
+            category = "NOT_FOUND"
+        elif row.status != "ACTIVE":
+            category = "DISABLED"
+        elif row.tenant_id != tenant_id:
+            category = "CROSS_TENANT"
+        if category is not None or row is None:
+            await _finalize("BLOCKED", sql_text, f"DATASOURCE_INVALID: {category}")
+            raise InvalidDatasource(datasource_key)
+        try:
+            plain = get_cipher(get_settings().datasource_encrypt_key).decrypt(row.password_enc)
+        except CredentialUndecryptable:
+            # 密钥轮换/密文损坏:凭证不可用归 ERROR(不暴露密文与密钥细节)
+            return await _finalize("ERROR", sql_text, "DATASOURCE_CREDENTIAL_UNAVAILABLE")
+        engine_dsn = URL.create(
+            "postgresql+asyncpg",
+            username=row.username,
+            password=plain,  # 仅存内存局部变量;URL.create 负责转义
+            host=row.host,
+            port=row.port,
+            database=row.database,
+        )
+        route_schema = row.default_schema
+    engine = await get_or_create_engine(datasource_key, engine_dsn)
 
     # 3. 用户-租户绑定复校(系统调用豁免);基础设施异常收敛 ERROR 不裸 500
     if user_id is not None:
@@ -147,17 +183,17 @@ async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
     if not first.passed:
         return await _finalize("BLOCKED", sql_text, first.reason or "BLOCKED")
 
-    # 5. data_scope 改写(系统调用豁免;CUSTOM/未知值 fail-closed)
-    schema_name = f"tenant_{tenant_key}"
+    # 5. data_scope 改写(系统调用豁免;CUSTOM/未知值 fail-closed);
+    #    列探测走执行目标库连接(动态源探测集 {default_schema, public},与 search_path 对齐)
     applied = AppliedSQL(sql=sql_text)
     if user_id is not None:
         try:
-            async with get_read_engine().connect() as probe_conn:
+            async with engine.connect() as probe_conn:
                 applied = await applier.apply(
                     session,
                     probe_conn,
                     user_id=user_id,
-                    tenant_schemas=[schema_name, "public"],
+                    tenant_schemas=[route_schema, "public"],
                     sql=sql_text,
                 )
         except DataScopeUnsupported as e:
@@ -176,14 +212,14 @@ async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
     reserved = check_reserved_tables(applied.sql)
     if not reserved.passed:
         return await _finalize("BLOCKED", applied.sql, reserved.reason or "RESERVED_TABLE")
-    scope_verdict = check_schema_scope(applied.sql, {schema_name, "public"})
+    scope_verdict = check_schema_scope(applied.sql, {route_schema, "public"})
     if not scope_verdict.passed:
         return await _finalize("BLOCKED", applied.sql, scope_verdict.reason or "CROSS_SCHEMA")
 
     # 7. 只读池执行:事务内 SET LOCAL search_path + 行数截断
-    quoted_schema = schema_name.replace('"', '""')
+    quoted_schema = route_schema.replace('"', '""')
     try:
-        async with get_read_engine().connect() as conn:
+        async with engine.connect() as conn:
             async with conn.begin():
                 await conn.execute(
                     text(f'SET LOCAL search_path TO "{quoted_schema}", public')  # noqa: S608  # 标识符双引号转义,非值拼接

@@ -418,6 +418,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/datasource/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Options */
+        get: operations["list_options_system_datasource_options_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/datasource": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Page Datasources */
+        get: operations["page_datasources_system_datasource_get"];
+        put?: never;
+        /** Create Datasource */
+        post: operations["create_datasource_system_datasource_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/datasource/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Connection */
+        post: operations["test_connection_system_datasource_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/datasource/{ds_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Datasource */
+        put: operations["update_datasource_system_datasource__ds_id__put"];
+        post?: never;
+        /** Delete Datasource */
+        delete: operations["delete_datasource_system_datasource__ds_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/datasource/{ds_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable Datasource */
+        post: operations["enable_datasource_system_datasource__ds_id__enable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/datasource/{ds_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable Datasource */
+        post: operations["disable_datasource_system_datasource__ds_id__disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -519,6 +623,128 @@ export interface components {
             retry_count: number;
             /** Error */
             error: string | null;
+        };
+        /** DatasourceCreateIn */
+        DatasourceCreateIn: {
+            /** Datasource Key */
+            datasource_key: string;
+            /** Name */
+            name: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Host */
+            host: string;
+            /**
+             * Port
+             * @default 5432
+             */
+            port: number;
+            /** Database */
+            database: string;
+            /** Username */
+            username: string;
+            /** Password */
+            password: string;
+            /**
+             * Default Schema
+             * @default public
+             */
+            default_schema: string;
+            /**
+             * Readonly
+             * @default true
+             */
+            readonly: boolean;
+        };
+        /** DatasourceItemOut */
+        DatasourceItemOut: {
+            /** Id */
+            id: string;
+            /** Datasource Key */
+            datasource_key: string;
+            /** Name */
+            name: string;
+            /** Tenant Id */
+            tenant_id: string;
+            /** Tenant Key */
+            tenant_key: string;
+            /** Tenant Name */
+            tenant_name: string;
+            /** Host */
+            host: string;
+            /** Port */
+            port: number;
+            /** Database */
+            database: string;
+            /** Username */
+            username: string;
+            /** Default Schema */
+            default_schema: string;
+            /** Readonly */
+            readonly: boolean;
+            /** Status */
+            status: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** DatasourceOptionOut */
+        DatasourceOptionOut: {
+            /** Datasource Key */
+            datasource_key: string;
+            /** Name */
+            name: string;
+        };
+        /** DatasourcePageOut */
+        DatasourcePageOut: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["DatasourceItemOut"][];
+        };
+        /**
+         * DatasourceUpdateIn
+         * @description 编辑全量表单语义;key/tenant_id 须提交原值(不可改,领域校验 400);
+         *     password 不传=不改(留空语义)。
+         */
+        DatasourceUpdateIn: {
+            /** Datasource Key */
+            datasource_key: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Name */
+            name: string;
+            /** Host */
+            host: string;
+            /**
+             * Port
+             * @default 5432
+             */
+            port: number;
+            /** Database */
+            database: string;
+            /** Username */
+            username: string;
+            /** Password */
+            password?: string | null;
+            /**
+             * Default Schema
+             * @default public
+             */
+            default_schema: string;
+            /**
+             * Readonly
+             * @default true
+             */
+            readonly: boolean;
         };
         /** DeptCreateIn */
         DeptCreateIn: {
@@ -862,6 +1088,31 @@ export interface components {
             tenant_key: string;
             /** Tenant Name */
             tenant_name: string;
+        };
+        /** TestConnectionIn */
+        TestConnectionIn: {
+            /** Id */
+            id?: string | null;
+            /** Host */
+            host: string;
+            /**
+             * Port
+             * @default 5432
+             */
+            port: number;
+            /** Database */
+            database: string;
+            /** Username */
+            username: string;
+            /** Password */
+            password?: string | null;
+        };
+        /** TestConnectionOut */
+        TestConnectionOut: {
+            /** Ok */
+            ok: boolean;
+            /** Reason */
+            reason?: string | null;
         };
         /** TokenPairOut */
         TokenPairOut: {
@@ -1885,6 +2136,258 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TenantOut"][];
+                };
+            };
+        };
+    };
+    list_options_system_datasource_options_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasourceOptionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    page_datasources_system_datasource_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                size?: number;
+                keyword?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasourcePageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_datasource_system_datasource_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasourceCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_connection_system_datasource_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestConnectionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestConnectionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_datasource_system_datasource__ds_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ds_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasourceUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_datasource_system_datasource__ds_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ds_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enable_datasource_system_datasource__ds_id__enable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ds_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_datasource_system_datasource__ds_id__disable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ds_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

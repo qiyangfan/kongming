@@ -12,6 +12,7 @@ import {
   type MeOut,
   type TokenPairOut,
 } from "./api";
+import { useDatasource } from "./datasource-store";
 import { useTenant } from "./tenant-store";
 
 export type AuthStatus = "loading" | "guest" | "authed";
@@ -27,10 +28,11 @@ interface AuthState {
 let booting: Promise<void> | null = null;
 
 export const useAuth = create<AuthState>((set) => {
-  // api 层刷新失败清态 → 同步回落 guest + 清租户上下文(反向解耦:store 不被 api import)
+  // api 层刷新失败清态 → 同步回落 guest + 清租户/数据源上下文(反向解耦:store 不被 api import)
   onSessionCleared(() => {
     set({ status: "guest", user: null });
     useTenant.getState().clear();
+    useDatasource.getState().clear();
   });
 
   async function loadMe(): Promise<void> {
@@ -43,6 +45,7 @@ export const useAuth = create<AuthState>((set) => {
       clearTokens();
       set({ status: "guest", user: null });
       useTenant.getState().clear();
+      useDatasource.getState().clear();
     }
   }
 
@@ -87,6 +90,7 @@ export const useAuth = create<AuthState>((set) => {
       clearTokens();
       set({ status: "guest", user: null });
       useTenant.getState().clear();
+      useDatasource.getState().clear();
     },
   };
 });

@@ -2,20 +2,30 @@
 
 供 agent retrieve 节点消费(RAG 落地前的 schema 提示过渡来源);
 内省内容只进 LLM 提示文本,不构成任何执行放行依据。
+008:非 default 数据源经 DatasourceResolver 同构校验(存在+启用+归属,同形 400),
+限其 default_schema 单 schema 内省,走动态池连接(不越出目标库)。
 """
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.engine import URL
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from kongming.config import get_settings
+from kongming.datasource.cipher import get_cipher
+from kongming.datasource.models import CredentialUndecryptable
+from kongming.datasource.repository import SqlDatasourceRepo
 from kongming.db import get_session
+from kongming.internal.executor import get_or_create_engine
 from kongming.sqlfw.firewall import RESERVED_TABLE_NAMES, RESERVED_TABLE_PREFIXES
 
 router = APIRouter(prefix="/internal", tags=["internal"])
+
+log = logging.getLogger(__name__)
 
 
 def _is_reserved(table_name: str) -> bool:
@@ -26,7 +36,8 @@ def _is_reserved(table_name: str) -> bool:
 
 class MetaSchemaIn(BaseModel):
     tenant_key: str = Field(min_length=1, max_length=64)
-    datasource_key: str = "default"
+    # 查询面 pattern 与注册边界同一规则(008 D4 口径一致性收口)
+    datasource_key: str = Field(default="default", pattern=r"^[a-z][a-z0-9_]{1,63}$")
 
 
 class MetaColumnOut(BaseModel):
@@ -50,28 +61,12 @@ class MetaSchemaOut(BaseModel):
     truncated: bool
 
 
-@router.post("/meta/schema", response_model=MetaSchemaOut)
-async def meta_schema(
-    req: MetaSchemaIn, session: Annotated[AsyncSession, Depends(get_session)]
+async def _introspect(
+    conn: AsyncSession | AsyncConnection, schemas: list[str]
 ) -> MetaSchemaOut:
-    # 租户解析:与执行路由同一 fail-closed 语义(未知/禁用同形 404)
-    tenant_id = (
-        await session.execute(
-            text(
-                "SELECT id FROM public.sys_tenant WHERE tenant_key = :k AND status = 'ACTIVE'"
-            ),
-            {"k": req.tenant_key},
-        )
-    ).scalar_one_or_none()
-    if tenant_id is None:
-        raise HTTPException(status_code=404, detail="TENANT_NOT_FOUND")
-    if req.datasource_key != "default":
-        # 动态数据源内省随数据源变更(与执行路由同一 fail-closed)
-        raise HTTPException(status_code=400, detail="UNSUPPORTED_DATASOURCE")
-
-    schemas = [f"tenant_{req.tenant_key}", "public"]
+    """按 schema 集内省表/列/注释(保留表排除+上限截断;默认与动态路径共用)。"""
     table_rows = (
-        await session.execute(
+        await conn.execute(
             text(
                 "SELECT table_schema, table_name FROM information_schema.tables"
                 " WHERE table_schema = ANY(CAST(:schemas AS text[]))"
@@ -88,7 +83,7 @@ async def meta_schema(
     kept = {(r.table_schema, r.table_name) for r in visible[:max_tables]}
 
     col_rows = (
-        await session.execute(
+        await conn.execute(
             text(
                 "SELECT c.table_schema, c.table_name, c.column_name, c.data_type,"
                 " obj_description(cls.oid, 'pg_class') AS table_comment,"
@@ -132,3 +127,49 @@ async def meta_schema(
     return MetaSchemaOut(
         tables=[tables[k] for k in sorted(tables)], truncated=truncated
     )
+
+
+@router.post("/meta/schema", response_model=MetaSchemaOut)
+async def meta_schema(
+    req: MetaSchemaIn, session: Annotated[AsyncSession, Depends(get_session)]
+) -> MetaSchemaOut:
+    # 租户解析:与执行路由同一 fail-closed 语义(未知/禁用同形 404)
+    tenant_id = (
+        await session.execute(
+            text(
+                "SELECT id FROM public.sys_tenant WHERE tenant_key = :k AND status = 'ACTIVE'"
+            ),
+            {"k": req.tenant_key},
+        )
+    ).scalar_one_or_none()
+    if tenant_id is None:
+        raise HTTPException(status_code=404, detail="TENANT_NOT_FOUND")
+
+    if req.datasource_key == "default":
+        # 默认路径:控制面库本库内省(零回归)
+        return await _introspect(session, [f"tenant_{req.tenant_key}", "public"])
+
+    # 动态源:存在+启用+归属校验(同形 400 防探测,与执行路由同构)
+    row = await SqlDatasourceRepo(session).find_for_execute(req.datasource_key)
+    if row is None or row.status != "ACTIVE" or row.tenant_id != str(tenant_id):
+        raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
+    try:
+        plain = get_cipher(get_settings().datasource_encrypt_key).decrypt(row.password_enc)
+    except CredentialUndecryptable:
+        # 凭证不可用:fail-closed 同形(不返回任何 schema 信息),证据留日志
+        log.error("数据源凭证不可解 key=%s(密钥轮换/损坏)", req.datasource_key)
+        raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
+    engine = await get_or_create_engine(
+        req.datasource_key,
+        URL.create(
+            "postgresql+asyncpg",
+            username=row.username,
+            password=plain,
+            host=row.host,
+            port=row.port,
+            database=row.database,
+        ),
+    )
+    # 限 default_schema 单 schema 内省(internal-meta spec 008 delta)
+    async with engine.connect() as conn:
+        return await _introspect(conn, [row.default_schema])

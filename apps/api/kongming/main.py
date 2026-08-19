@@ -16,7 +16,11 @@ from kongming.auth.router import router as auth_router
 from kongming.auth.seed import seed_all
 from kongming.chat.router import router as chat_router
 from kongming.config import get_settings
+from kongming.datasource.cipher import get_cipher
+from kongming.datasource.router import register_datasource_error_handlers
+from kongming.datasource.router import router as datasource_router
 from kongming.db import get_sessionmaker
+from kongming.internal.executor import dispose_read_engines
 from kongming.internal.meta import router as internal_meta_router
 from kongming.internal.router import router as internal_router
 from kongming.system.router import register_system_error_handlers
@@ -25,10 +29,15 @@ from kongming.system.router import router as system_router
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """启动即播种(幂等,rbac spec「种子数据」);DB 不可达则拒启(控制面 fail-closed)。"""
+    """启动即播种(幂等,rbac spec「种子数据」);DB 不可达则拒启(控制面 fail-closed)。
+    启动试构造凭证 cipher:非法密钥(坏 base64/非 16/32 字节)即拒启——
+    prod 缺配已由 config fail-closed 拦截,非法值同属不可服务状态(R1-S3:
+    此前请求期才炸 500)。teardown:只读执行池全量清理(008 接线)。"""
+    get_cipher(get_settings().datasource_encrypt_key)
     async with get_sessionmaker()() as session:
         await seed_all(session, get_settings())
     yield
+    await dispose_read_engines()
 
 
 app = FastAPI(
@@ -42,8 +51,10 @@ app.include_router(internal_router)
 app.include_router(internal_meta_router)
 app.include_router(chat_router)
 app.include_router(system_router)
+app.include_router(datasource_router)
 register_auth_error_handlers(app)
 register_system_error_handlers(app)
+register_datasource_error_handlers(app)
 
 
 @app.get("/healthz", tags=["ops"])

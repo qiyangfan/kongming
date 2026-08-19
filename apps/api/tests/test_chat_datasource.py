@@ -1,0 +1,161 @@
+"""chat 入口数据源预检(008 datasource spec「查询入口 fail-fast 预检」,安全规则类)。
+
+伪造/禁用/跨租户 key → 同形 400 DATASOURCE_INVALID,不进 LLM 链路、不建会话;
+合法 key 全链路透传(agent 收到原样 key,会话落库 key);畸形 key 传输层 422。
+"""
+
+from collections.abc import AsyncIterator
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from kongming.chat.router import get_agent_client
+from kongming.config import get_settings
+from kongming.datasource.cipher import get_cipher
+from kongming.main import app
+from tests.conftest import MakeUser
+from tests.test_chat_query import (
+    FakeAgent,
+    _auth,
+    _default_tenant_id,
+    _user_with_chat_perm,
+)
+
+
+@pytest.fixture
+def fake_agent() -> AsyncIterator[FakeAgent]:  # type: ignore[misc]
+    """scripted agent 替身(与 test_chat_query 同款;fixture 不跨模块共享故就地定义)。"""
+    holder: dict[str, FakeAgent] = {}
+    app.dependency_overrides[get_agent_client] = lambda: holder["agent"]
+    yield holder  # type: ignore[misc]
+    app.dependency_overrides.pop(get_agent_client, None)
+
+
+def _install(holder: dict[str, FakeAgent], agent: FakeAgent) -> None:
+    holder["agent"] = agent
+
+
+async def _mk_tenant(s: AsyncSession, key: str) -> str:
+    tid = (
+        await s.execute(
+            text(
+                "INSERT INTO public.sys_tenant (id, tenant_key, tenant_name)"
+                " VALUES (gen_random_uuid(), :k, :k) RETURNING id"
+            ),
+            {"k": key},
+        )
+    ).scalar_one()
+    await s.commit()
+    return str(tid)
+
+
+async def _mk_ds(s: AsyncSession, key: str, tenant_id: str, *, status: str = "ACTIVE") -> None:
+    enc = get_cipher(get_settings().datasource_encrypt_key).encrypt("kongming")
+    await s.execute(
+        text(
+            "INSERT INTO public.sys_datasource"
+            " (id, datasource_key, name, tenant_id, host, port, database, username,"
+            "  password_enc, default_schema, status)"
+            " VALUES (gen_random_uuid(), :k, :k, :t, '127.0.0.1', 5432, 'kongming_test',"
+            "         'kongming', :pe, 'public', :st)"
+        ),
+        {"k": key, "t": tenant_id, "pe": enc, "st": status},
+    )
+    await s.commit()
+
+
+async def _session_count(s: AsyncSession) -> int:
+    return int(
+        (await s.execute(text("SELECT count(*) FROM public.chat_session"))).scalar_one()
+    )
+
+
+async def test_forged_disabled_cross_tenant_same_shape(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, FakeAgent],
+) -> None:
+    """伪造/禁用/跨租户:同形 400,不建会话、不调 agent(fail-fast 在 LLM 链路之前)。"""
+    agent = FakeAgent()
+    _install(fake_agent, agent)
+    uid, token = await _user_with_chat_perm(client, session, make_user)
+    assert uid
+    tid = await _default_tenant_id(session)
+    other_tid = await _mk_tenant(session, "chat-other")
+    await _mk_ds(session, "chatoff", tid, status="DISABLED")
+    await _mk_ds(session, "chatother", other_tid)
+
+    details: set[str] = set()
+    for key in ("ghost", "chatoff", "chatother"):
+        r = await client.post(
+            "/chat/query",
+            json={"question": "有多少商品", "datasource_key": key},
+            headers=_auth(token),
+        )
+        assert r.status_code == 400, key
+        details.add(r.json()["detail"])
+    assert details == {"DATASOURCE_INVALID"}
+    assert agent.calls == []  # 未进 LLM 链路
+    assert await _session_count(session) == 0  # 未建会话
+
+
+async def test_valid_key_passes_through(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, FakeAgent],
+) -> None:
+    """合法 key:预检放行,agent 收到原样 datasource_key,会话落库同一 key。"""
+    agent = FakeAgent()
+    _install(fake_agent, agent)
+    uid, token = await _user_with_chat_perm(client, session, make_user)
+    tid = await _default_tenant_id(session)
+    await _mk_ds(session, "chatdyn", tid)
+
+    r = await client.post(
+        "/chat/query",
+        json={"question": "有多少商品", "datasource_key": "chatdyn"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    assert agent.calls[0]["datasource_key"] == "chatdyn"  # 透传(凭证不出控制面)
+    row = (
+        await session.execute(
+            text("SELECT datasource_key, user_id FROM public.chat_session")
+        )
+    ).mappings().one()
+    assert row["datasource_key"] == "chatdyn"
+    assert str(row["user_id"]) == uid
+
+
+async def test_malformed_key_422(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """畸形 key(大写/连字符)传输层 pattern 拒绝 422(查询面口径收口,008 D4)。"""
+    _, token = await _user_with_chat_perm(client, session, make_user)
+    r = await client.post(
+        "/chat/query",
+        json={"question": "q", "datasource_key": "BAD-KEY"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 422
+
+
+async def test_default_key_unchanged(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, FakeAgent],
+) -> None:
+    """零回归:缺省/显式 default 不触发预检,行为不变。"""
+    agent = FakeAgent()
+    _install(fake_agent, agent)
+    _, token = await _user_with_chat_perm(client, session, make_user)
+    r = await client.post(
+        "/chat/query", json={"question": "有多少商品"}, headers=_auth(token)
+    )
+    assert r.status_code == 200
+    assert agent.calls[0]["datasource_key"] == "default"

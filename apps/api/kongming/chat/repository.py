@@ -36,7 +36,9 @@ class ChatRepository:
                     "SELECT t.id, t.tenant_key FROM public.sys_tenant t"
                     " JOIN public.sys_user_tenant ut ON ut.tenant_id = t.id"
                     " WHERE ut.user_id = :u AND t.status = 'ACTIVE'"
-                    " ORDER BY (t.tenant_key = 'default') DESC, ut.granted_at ASC"
+                    # t.id tiebreak:granted_at 完全相等(同事务双授)时确定性收口,
+                    # 与 datasource 域同名查询逐字同构(008 R2-N1)
+                    " ORDER BY (t.tenant_key = 'default') DESC, ut.granted_at ASC, t.id"
                     " LIMIT 1"
                 ),
                 {"u": user_id},

@@ -75,6 +75,7 @@ TRUNCATED = (
     "public.sys_user",
     "public.sys_dept",
     "public.sys_tenant",
+    "public.sys_datasource",
 )
 
 

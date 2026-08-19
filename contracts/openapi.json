@@ -1241,6 +1241,362 @@
         }
       }
     },
+    "/system/datasource/options": {
+      "get": {
+        "tags": [
+          "datasource"
+        ],
+        "summary": "List Options",
+        "operationId": "list_options_system_datasource_options_get",
+        "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DatasourceOptionOut"
+                  },
+                  "title": "Response List Options System Datasource Options Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/datasource": {
+      "get": {
+        "tags": [
+          "datasource"
+        ],
+        "summary": "Page Datasources",
+        "operationId": "page_datasources_system_datasource_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 10,
+              "title": "Size"
+            }
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "default": "",
+              "title": "Keyword"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasourcePageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "datasource"
+        ],
+        "summary": "Create Datasource",
+        "operationId": "create_datasource_system_datasource_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasourceCreateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Create Datasource System Datasource Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/datasource/test": {
+      "post": {
+        "tags": [
+          "datasource"
+        ],
+        "summary": "Test Connection",
+        "operationId": "test_connection_system_datasource_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestConnectionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestConnectionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/datasource/{ds_id}": {
+      "put": {
+        "tags": [
+          "datasource"
+        ],
+        "summary": "Update Datasource",
+        "operationId": "update_datasource_system_datasource__ds_id__put",
+        "parameters": [
+          {
+            "name": "ds_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Ds Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasourceUpdateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "datasource"
+        ],
+        "summary": "Delete Datasource",
+        "operationId": "delete_datasource_system_datasource__ds_id__delete",
+        "parameters": [
+          {
+            "name": "ds_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Ds Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/datasource/{ds_id}/enable": {
+      "post": {
+        "tags": [
+          "datasource"
+        ],
+        "summary": "Enable Datasource",
+        "operationId": "enable_datasource_system_datasource__ds_id__enable_post",
+        "parameters": [
+          {
+            "name": "ds_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Ds Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/datasource/{ds_id}/disable": {
+      "post": {
+        "tags": [
+          "datasource"
+        ],
+        "summary": "Disable Datasource",
+        "operationId": "disable_datasource_system_datasource__ds_id__disable_post",
+        "parameters": [
+          {
+            "name": "ds_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Ds Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/healthz": {
       "get": {
         "tags": [
@@ -1411,7 +1767,7 @@
           },
           "datasource_key": {
             "type": "string",
-            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9_]{1,63}$",
             "title": "Datasource Key",
             "default": "default"
           }
@@ -1523,6 +1879,279 @@
           "error"
         ],
         "title": "ChatQueryOut"
+      },
+      "DatasourceCreateIn": {
+        "properties": {
+          "datasource_key": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Datasource Key"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Tenant Id"
+          },
+          "host": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Host"
+          },
+          "port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Port",
+            "default": 5432
+          },
+          "database": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Database"
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Password"
+          },
+          "default_schema": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Default Schema",
+            "default": "public"
+          },
+          "readonly": {
+            "type": "boolean",
+            "title": "Readonly",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasource_key",
+          "name",
+          "tenant_id",
+          "host",
+          "database",
+          "username",
+          "password"
+        ],
+        "title": "DatasourceCreateIn"
+      },
+      "DatasourceItemOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "datasource_key": {
+            "type": "string",
+            "title": "Datasource Key"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "tenant_key": {
+            "type": "string",
+            "title": "Tenant Key"
+          },
+          "tenant_name": {
+            "type": "string",
+            "title": "Tenant Name"
+          },
+          "host": {
+            "type": "string",
+            "title": "Host"
+          },
+          "port": {
+            "type": "integer",
+            "title": "Port"
+          },
+          "database": {
+            "type": "string",
+            "title": "Database"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "default_schema": {
+            "type": "string",
+            "title": "Default Schema"
+          },
+          "readonly": {
+            "type": "boolean",
+            "title": "Readonly"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "datasource_key",
+          "name",
+          "tenant_id",
+          "tenant_key",
+          "tenant_name",
+          "host",
+          "port",
+          "database",
+          "username",
+          "default_schema",
+          "readonly",
+          "status",
+          "created_at"
+        ],
+        "title": "DatasourceItemOut"
+      },
+      "DatasourceOptionOut": {
+        "properties": {
+          "datasource_key": {
+            "type": "string",
+            "title": "Datasource Key"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasource_key",
+          "name"
+        ],
+        "title": "DatasourceOptionOut"
+      },
+      "DatasourcePageOut": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DatasourceItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "DatasourcePageOut"
+      },
+      "DatasourceUpdateIn": {
+        "properties": {
+          "datasource_key": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Datasource Key"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Tenant Id"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "host": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Host"
+          },
+          "port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Port",
+            "default": 5432
+          },
+          "database": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Database"
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Username"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "default_schema": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Default Schema",
+            "default": "public"
+          },
+          "readonly": {
+            "type": "boolean",
+            "title": "Readonly",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasource_key",
+          "tenant_id",
+          "name",
+          "host",
+          "database",
+          "username"
+        ],
+        "title": "DatasourceUpdateIn",
+        "description": "编辑全量表单语义;key/tenant_id 须提交原值(不可改,领域校验 400);\npassword 不传=不改(留空语义)。"
       },
       "DeptCreateIn": {
         "properties": {
@@ -1843,6 +2472,7 @@
           },
           "datasource_key": {
             "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,63}$",
             "title": "Datasource Key",
             "default": "default"
           }
@@ -2285,6 +2915,7 @@
           },
           "datasource_key": {
             "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,63}$",
             "title": "Datasource Key",
             "default": "default"
           },
@@ -2441,6 +3072,91 @@
           "tenant_name"
         ],
         "title": "TenantRefOut"
+      },
+      "TestConnectionIn": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "host": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Host"
+          },
+          "port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Port",
+            "default": 5432
+          },
+          "database": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Database"
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Username"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "host",
+          "database",
+          "username"
+        ],
+        "title": "TestConnectionIn"
+      },
+      "TestConnectionOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "title": "TestConnectionOut"
       },
       "TokenPairOut": {
         "properties": {

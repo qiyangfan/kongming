@@ -22,7 +22,8 @@ export type TenantRefOut = components["schemas"]["TenantRefOut"];
 const BASE = "/api";
 const REFRESH_KEY = "km.refresh";
 
-/* 当前租户标识(api 层直读持久化键,单点注入免遗漏;头对非 chat 端点无语义影响) */
+/* 当前租户标识(api 层直读持久化键,单点注入免遗漏;头对 chat 系端点有语义,
+   对多数管理端点无语义——例外:008 数据源 options 接口为用户面,同构消费该头) */
 function tenantHeader(): Record<string, string> {
   const t = localStorage.getItem(TENANT_STORAGE_KEY);
   return t ? { "X-Tenant-Id": t } : {};

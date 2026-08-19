@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kongming.chat.agent_client import AgentClient, AgentUnavailable
 from kongming.chat.models import ChartSuggestion, suggest_chart
 from kongming.chat.repository import ChatRepository
+from kongming.datasource.ports import DatasourceChecker
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +30,10 @@ class TenantForbidden(Exception):
 
 class SessionNotFound(Exception):
     """会话不存在或不属于当前用户+租户(同形不区分,防探测)。"""
+
+
+class InvalidDatasource(Exception):
+    """数据源不存在/禁用/不归属当前租户(同形不区分,防 key 探测;008 入口预检)。"""
 
 
 @dataclass(frozen=True)
@@ -83,10 +88,13 @@ class SessionMessage:
 
 
 class ChatService:
-    def __init__(self, session: AsyncSession, agent: AgentClient) -> None:
+    def __init__(
+        self, session: AsyncSession, agent: AgentClient, ds_checker: DatasourceChecker
+    ) -> None:
         self._s = session
         self._repo = ChatRepository(session)
         self._agent = agent
+        self._ds_checker = ds_checker
 
     async def _resolve_tenant(self, user_id: str, tenant_key: str | None) -> tuple[str, str]:
         """X-Tenant-Id 解析:显式传入查白名单;缺省取用户默认租户(default 优先,
@@ -113,6 +121,13 @@ class ChatService:
         datasource_key: str,
     ) -> ChatOutcome:
         tenant_id, resolved_key = await self._resolve_tenant(user_id, tenant_key)
+
+        # 数据源入口预检(008 design D8):非 default 校验存在+启用+归属当前租户,
+        # fail-fast 同形 400——不进 LLM 链路、不建会话;连接信息不出控制面(ADR-002)
+        if datasource_key != "default" and not await self._ds_checker.is_usable(
+            datasource_key, tenant_id
+        ):
+            raise InvalidDatasource(datasource_key)
 
         # 会话:显式传入校验归属(不命中 404 同形);缺省且 persist 时新建
         sid: str | None = None

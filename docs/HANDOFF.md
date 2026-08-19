@@ -1,29 +1,22 @@
 # HANDOFF — Kongming 交接文档
 
-> 最后更新:2026-08-19(**008 动态数据源规划收官待 apply**:proposal/design/tasks
-> + datasource/internal-meta/web-admin 三域 delta 齐备,`openspec validate
-> --strict` 通过;/goal 审查循环 R1 双路(4 严重+11 建议)+R2 复审(2 观察)
-> 全部清零——选项接口首位合成 default 项已立约转正、import-linter 基线期
-> 猜测名 datasource_admin 防线静默失效坑已立约修正、管理端点全局视角+
-> 创建显式指定租户归属已立约、测试连接编辑态补位已立约;规划产物已提交,
-> **下一棒=`/opsx:apply` 008-dynamic-datasource**)。
-> 007 RBAC 管理面已提交并归档(详情感官见「当前状态」节)。
+> 最后更新:2026-08-20(**008 动态数据源已提交并归档**:27/27 任务+/goal 审查
+> 循环 R1 双路+R2 复审清零;归档时 delta 已 sync——datasource 主 spec 注册边界
+> 收紧/启停删除与池生命周期新增/选项首位合成 default 转正,internal-meta 动态
+> 内省,web-admin 四子页;api 273+agent 53+web 全绿;
+> **下一棒=路线图第二梯队 rag/knowledge 变更**——fetch-metadata/embedding/
+> 三路召回双过滤,008 已把执行面/内省面/选项面动态化)。
 > 清空上下文/新会话先读本文与 `AGENTS.md`,
 > 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
 
 ## 新会话开工指引(最先看这里)
 
-1. **008 动态数据源:规划已就绪,未实施**。四件套在
-   `openspec/changes/008-dynamic-datasource/`,下一棒 `/opsx:apply`
-   (tasks.md 8 组 24 项,安全规则类测试先行)。开工前先读其 proposal/
-   design——关键考古与立约:baseline `sys_datasource` 缺 name/default_schema
-   两列(0005 迁移补);pyproject import-linter「auth 不反向依赖业务域」
-   forbidden_modules 是基线期猜测名 `datasource_admin`,落地包名
-   `kongming.datasource` 时必须同步修契约(否则防线静默失效,R1 实证);
-   管理端点全局视角(X-Tenant-Id 无语义)+创建时租户归属超管显式指定;
-   options 首位合成 default 项;保留字 default 禁注册;非法 key 同形 400
-   防探测;`dispose_read_engines` 现状零调用点需补 lifespan 接线;
-   fetch-metadata/embedding 与 RAG 双过滤属 rag 变更(Non-goals)。
+1. **008 动态数据源:已提交并归档**(archive/2026-08-20-008-dynamic-datasource,
+   delta 已 sync 入主 spec)。下一棒=路线图第二梯队 **rag/knowledge 变更**:
+   fetch-metadata/embedding/三路召回 datasource 双过滤(008 已把执行面/内省面/
+   选项面动态化,rag 承接知识条目维度;import-linter `rag_admin` 猜测名届时
+   核对真实包名;「datasource_key 与租户归属不可改」scenario 现挂主 spec
+   「元数据抓取」requirement 下,rag 落地时顺手挪位到注册 requirement)。
 2. 质量底线:安全规则类测试先行;收工前 `make check` 全绿 + 冒烟记录;
    改 api 必跑 `make contracts` 并提交产物。
 3. **prompt 资产纪律**:apps/agent/graph/prompts.py 与 nodes.py 的 LLM 模板
@@ -66,13 +59,92 @@
    (DOM 快照可读)——GUI 测试一律用 Playwright MCP 工具组
    (`mcp__plugin_playwright_playwright__browser_*`,独立管道,002 已验证可用)。
 
-## 当前状态(截至 008 规划收官,008 未 apply)
+## 当前状态(截至 008 提交并归档)
 
-- git:main 分支(以 git log 为准),007 与 008 规划产物均已入库;无远程、未 push。
+- git:main 分支(以 git log 为准);无远程、未 push。
   分支策略:主干开发不拉 dev,协作按变更开短命 feature。
-- openspec:001–007 已归档;**008-dynamic-datasource 已立项(规划四件套,
-  未 apply)**;主 spec 新增 `web-admin` 域、rbac 增 6 条
-  管理端点 requirement(归档时已 sync)。
+- openspec:001–008 全部归档;活动变更为零。主 spec 现状:datasource
+  (注册边界收紧+启停删除与池生命周期+选项合成 default)、internal-meta
+  (动态源限 default_schema 内省)、web-admin(四子页)已 sync 008 delta。
+- **008 api 侧**:新域包 `kongming/datasource/`(models/ports/service/
+  repository/cipher/tester/router,宪法分层;import-linter 新增
+  「datasource models/service/ports 零框架」契约,并修正 auth 防线
+  forbidden_modules 猜测名 datasource_admin→真实包名 kongming.datasource)。
+  端点 8 个挂 `/system/datasource/*`(独立 router,非 system 域包):
+  page/create/update/enable/disable/delete/test 挂
+  `system:datasource:manage`(种子排序 4,SUPER_ADMIN 自动覆盖),
+  **options 仅登录**(用户面,X-Tenant-Id 白名单复校与 chat 同构、
+  复校查询 datasource repository 自备;首位合成 default 项非 sys_datasource 行)。
+- **008 凭证加密**:AES-GCM(cryptography),密文=base64(iv12‖ct+tag16)
+  与上游逐字节同构;密钥 KM_DATASOURCE_ENCRYPT_KEY(base64 16/32 字节,
+  prod fail-closed 已在);**dev 缺省降级=代码内固定 dev-only 密钥+构造告警,
+  仍走真 round-trip(优于上游 dev 明文直通)**;.env.example 注记生成方法。
+  DTO/日志/审计永不出现明文或密文;编辑密码留空=COALESCE 路径不触碰该列。
+- **008 动态池与路由**:executor 放开任意 key——get_or_create_engine
+  (模块级 asyncio.Lock 防双池)/evict_engine 定向失效(pop+dispose)/
+  dispose_read_engines 由 **lifespan teardown 接线**(此前零调用点)。
+  internal/service 移除 SUPPORTED_KEYS 硬编码:非 default 校验存在+启用+
+  归属(同形 400 DATASOURCE_INVALID 防探测,审计落 BLOCKED+NOT_FOUND/
+  DISABLED/CROSS_TENANT 分类内部可溯),解密→URL.create 组 DSN(密码转义
+  由 SQLAlchemy 负责)→动态池;防御层与默认路径逐行同构(search_path=
+  default_schema+public 事务级、data_scope 探测集与 schema 边界集同取
+  {default_schema, public}、保留表/危险函数/截断全同);密文不可解归 ERROR
+  (DATASOURCE_CREDENTIAL_UNAVAILABLE,不暴露细节)。meta.py 同构动态化
+  (限 default_schema 单 schema 内省)。chat 入口 DatasourceChecker 端口
+  预检(伪造/禁用/跨租户同形 400,不建会话不调 agent)。
+- **池生命周期**:连接信息(host/port/database/username/password/
+  default_schema)任一变更 commit 后定向 evict;仅改 name 不动池;
+  启停/删除均 evict(禁用即拒,启用后按最新信息惰性重建);evict 失败仅
+  告警不阻断;多 worker 跨进程失效挂账(design Open Questions)。
+- **注册边界**:key pattern `^[a-z][a-z0-9_]{1,63}$`+保留字 default 禁注册
+  +default_schema PG 标识符校验,三者在**领域层**判 400(spec 口径;
+  查询面 chat/internal/meta 传输层 pattern 收口,畸形 key 422)。
+  key+租户归属创建后不可改(编辑须提交原值否则 400);创建租户归属超管
+  显式指定(存在且 ACTIVE),隐式上下文不生效;管理端点全局视角。
+  删除=物理删除(硬 UNIQUE 随行释放,key 可再注册)。
+- **008 web 侧**:/admin/datasources 第四子页(列表/搜索/分页/创建编辑
+  对话框——key+schema+租户禁改回显、密码留空提示、对话框内测试连接、
+  启停行内按钮、删除受控确认);对话页数据源切换器(datasource-store
+  km.datasource 单源,options 按租户 react-query,切租户 calibrate 重置首项,
+  切换=回新建态+失效会话域查询);ChatPage 提问携带 datasource_key、
+  react-query 键含数据源维度;api.ts 头注释已修订(options 例外消费方);
+  登出/会话终结同步清 km.datasource。
+- **008 冒烟(2026-08-19,Playwright MCP + 真 LLM,全过)**:curl 链——
+  注册(查库验密文非明文+可解)→测试连接(编辑态留空密文补位)→
+  options(首位合成 default)→/chat/query 动态源真 LLM 全链路
+  (「有多少部电影」命中 tenant_sakila,1000;meta 动态内省供 retrieve)→
+  禁用即拒 400→改错密池失效重建 ERROR→改回 PASS→删除 400→
+  sys_oper_log 五动作可查。UI 链——管理页 CRUD/测试连接(创建态+编辑态
+  补位)/启停 badge 翻转/删除受控确认;切换器选中 sakila_ui 发问,
+  网络实证请求体 datasource_key=sakila_ui,真 LLM 答 200 演员;
+  切租户 km.datasource 自动重置 default;smoke-self:管理入口不可见+
+  直达 /admin/datasources 403 品牌页+选项仅 default。越权面 curl 复验:
+  保留字 default 400/schema 注入 400/跨租户 key 400/非超管 403+
+  perm_denied 审计落库。**冒烟形态=同实例异 schema 假动态源**
+  (design Risks 钉住;语义合法——search_path 首段切换)。
+  **Playwright MCP 点击坑(实操经验)**:react-query 失效重渲染后快照 ref
+  过期,MCP click 静默落空——改用 browser_evaluate 派 PointerEvent
+  (Radix 下拉/菜单项走 pointerdown,element.click() 无效)。
+- **008 测试面**:api 273(+68):cipher 9+管理端点 28+动态执行 11+meta 动态 4
+  +chat 预检 4+seed 断言随新权限点更新;测试库动态源=同实例异 schema
+  (kongming_test 的 ds_* schema,模块级建删);conftest TRUNCATED 增
+  sys_datasource。agent 53 零改动(透传链 005 已就位)。
+- **008 审查循环(/goal R1 双路+R2 复审,清零)**:R1 api 路 1 严重+3 建议全修——
+  S1 options 缺省租户解析与 chat 不同构(创建序 vs 授予序,多租户下选项选中
+  即被 chat 预检误拒;修为 ut.granted_at 逐字同构+错序回归测试);S2 领域层
+  pattern 用 re.match 被尾换行绕过("default\n" 可注册;改 fullmatch,查询面
+  pydantic Rust regex 本无此洞,参数化用例补齐);S3 非法密钥请求期才 500
+  (lifespan 启动试构造拒启,TestClient 实证+防删行测试);S4 tester finally
+  close 二次异常顶掉失败结果(包 try/except)。web 路 0 严重+2 建议全修——
+  行内启停失败静默(toggleError+role=alert);options 拉取失败兜底误标
+  (isError 分支「选项加载失败」)。会话跨源追问确认为 spec 未立约域,守
+  「禁擅改对外契约」只修注释去过度承诺+挂账⑤。R2 复审抓回:S1 回归测试
+  弱断言(!=400 曾被 403 假放行)收紧 ==200,连带暴露 dependency_overrides
+  传类被 FastAPI 解析 __init__ 签名的 422 坑(零参工厂修正)+用户缺
+  chat:execute 的吊具缺口;chat 侧 ORDER BY 补 t.id tiebreak(两侧逐字同构);
+  dispose_read_engines 单失败不跳过后续;0005 补 upgrade 前置注记。
+  O1(create TOCTOU)核验为既有 IntegrityError handler 已覆盖 /system 前缀
+  归 409,非缺陷剔除。api 273+agent 53+web 绿。
 - **007 api 侧**:新域包 `kongming/system/`(router/service/models/ports/
   repository,宪法分层;import-linter 契约「system models/service/ports 零框架」)。
   端点 16 个全挂 require_perm(用户/部门/租户=system:user:manage,
@@ -305,9 +377,8 @@
   用户不存在/无角色→降级+告警(沿用上游裁定)。
 - **审计(004)**:SqlAuditWriter 独立短事务写 sys_sql_audit,失败 error 日志不阻断;
   trace_id>64 截断告警;审计 sql_text=改写后实际执行形态(可回放)。
-- schema:0001 baseline + 0002 user_identities + **0003 dept**(sys_dept 部门表
-  UUID/parent_id 自引用/tenant_id FK + sys_user.dept_id;baseline 当初「dept_id 弃」
-  =缓建,004 补齐)。
+- schema:0001 baseline + 0002 user_identities + 0003 dept + 0004 软删唯一索引
+  + **0005 sys_datasource 补 name/default_schema**(008;空表瞬时,downgrade 注记)。
 - **Makefile**:api/agent-check 已接线 `lint-imports`(原仅 CI 跑,本地门禁补齐);
   api 新增约定「datascope/audit 域禁 fastapi」(import-linter 需
   include_external_packages=true 才可禁外部包)。
@@ -367,6 +438,9 @@
   (SMOKE_SELF 角色=SELF,绑 default 租户,本人行=连弩;005 已授 chat:execute,
   密码已置 `Smoke#2026`)——行级问答回归活数据;chat_session/chat_message
   有 005 冒烟留下的真实问答记录;
+  **008 冒烟活数据**:sys_datasource 行 `sakila_dyn`(归属 default 租户,
+  同实例异 schema 形态,default_schema=tenant_sakila,密码=dev 库口令经
+  dev-only 密钥加密)——动态源问答回归活数据;另有「有多少部电影/演员」两会话;
   **示例数据集(2026-08-18 装载)**:sakila(film 1000/rental 16044/customer 599)
   与 olist(orders 99441/items 112650)两租户已注册并绑 admin;
   **006 冒烟留痕**:default 域 goods 表实测无库存列(仅 name/create_by),
@@ -377,13 +451,14 @@
 - 前端:登录页五家联邦按钮数据驱动;simple-icons 覆盖 GitHub/Google/微信系,
   **钉钉/飞书 simple-icons@16 未收录 → 按例外条款内联官方 mark**;favicon.svg 已补
   (朱砂底白色羽扇)。003 冒烟:五家图标实测渲染正确。
-- 质量:api ruff/mypy strict/lint-imports/pytest **205**(认证+datascope+执行路由+
-  防火墙+chat 15+meta 6+会话端点 14+**system 管理面 39**,真实 PG+Redis)+
+- 质量:api ruff/mypy strict/lint-imports/pytest **273**(认证+datascope+执行路由+
+  防火墙+chat+meta+会话端点+system 管理面+**datasource 68**,真实 PG+Redis)+
   agent 同门禁 **53** + web tsc/eslint 全绿;
   CI api job 已带 pg/redis services(未在真实 runner 验证——push 后首验)。
 - 契约:openapi.json 含 /auth/* + /internal/sql/execute + /chat/query +
   /internal/meta/schema + /chat/sessions(列表/消息/删除)+
-  **/system/* 16 端点(007)**;端点落定后 `make contracts` 已重生成,web tsc 过。
+  /system/* 16 端点(007)+ **/system/datasource/* 8 端点(008)**;
+  端点落定后 `make contracts` 已重生成,web tsc 过。
 
 ## 已定死的决策(不再议,引用即终)
 
@@ -399,21 +474,35 @@
 | 执行路由 | 三态 verdict(PASS/BLOCKED/ERROR);用户-租户绑定复校;data_scope 改写=最外层 WHERE AST 注入(非包子查询);非 default 数据源 fail-closed;**控制面保留表(sys_/chat_/user_identities/alembic_version)拒读 + 危险函数(pg_read_file 等)拒用(005 审查循环)** | sql-execution + datascope spec(004/005) |
 | 问答链路 | agent 8 节点图;权限类(BLOCKED/预检非只读)不重试;重试上限=初始之外 2 次;schema 提示 RAG 前=实时内省过渡形态 | nl2sql + nl2sql-agent + chat spec(005) |
 | RBAC 管理面 | 内置角色按 role_key 集合判(SUPER_ADMIN/DEVELOPER)禁删;role_key 创建后不可改+传输层大写蛇形 pattern;超管按 admin_username 判禁删/禁禁/禁剥 SUPER_ADMIN;角色/部门物理删除(前置校验+级联清绑定+审计),仅用户软删(username 唯一=部分索引软删感知);管理面写操作与业务同事务审计 | rbac + web-admin spec(007) |
+| 动态数据源 | PG-only;凭证 AES-GCM(base64 iv‖ct+tag,prod 密钥 fail-closed,dev 固定密钥降级);key 小写蛇形+保留字 default 禁注册+创建后 key/租户归属不可改;管理端点全局视角+创建显式指定租户;非法 key 同形 400(不存在/禁用/越属,审计分类可溯);连接信息变更/启停/删除 commit 后定向 evict,仅改 name 不动池;物理删除;选项接口首位合成 default 项 | datasource + internal-meta + web-admin spec(008) |
 
 ## 下一步(路线图梯队,按序)
 
-1. **008-dynamic-datasource apply**(规划已就绪:管理端点 CRUD/启停/测试连接/
-   选项 + AES-GCM 凭证加密 + 动态池真路由 + internal-meta 同构 + chat 入口
-   预检 + web 管理页/对话页切换器;0005 补 name/default_schema 列;
-   冒烟形态=同库异 schema 假动态源 vs 独立库,apply 期定)。
-2. RAG 三路召回 + 知识库(rag/knowledge spec 已立约;落地后 retrieve 从内省过渡形态
-   切换召回收窄,schema 提示源决策见 005 design Open Questions)。
-3. 会话体验深化(标题 LLM 改写/时间分组/搜索/导出 CSV+Excel/EXPLAIN——chat spec
-   已立约的行为面,端点未立,随后续变更)。
+1. **RAG 三路召回 + 知识库(rag/knowledge 变更)**:fetch-metadata/embedding
+   与 datasource 维度双过滤随该变更兑现——008 已把执行面/内省面/选项面动态化,
+   rag 变更承接知识条目维度;落地后 retrieve 从内省过渡形态切换召回收窄,
+   schema 提示源决策见 005 design Open Questions;import-linter rag_admin
+   猜测名届时核对真实包名。
+2. 会话体验深化(标题 LLM 改写/时间分组/搜索/导出 CSV+Excel/EXPLAIN——chat spec
+   已立约的行为面,端点未立,随后续变更;「会话-数据源绑定」挂账见已知 TODO ⑤)。
 
 ## 已知 TODO(代码内标注,非缺陷)
 
-动态数据源池(sys_datasource 行驱动);RAG 召回与 schema 提示收窄。
+RAG 召回与 schema 提示收窄(008 已落地动态数据源池,见 rag 变更)。
+**008 挂账(design Open Questions)**:①密钥轮换无重加密通道——轮换
+KM_DATASOURCE_ENCRYPT_KEY 后存量密文全不可解,以「编辑重填密码」逐源修复,
+随运营事件评估专用工具;②多 worker 池失效——PoolEvictor 只清进程内池,
+api 单 worker 为失效正确性前提(现状 Dockerfile 无 --workers),多 worker
+部署需 Redis 失效广播;单进程内 evict 失败=旧池残留至进程重启(查询路径
+不校验连接信息新鲜度,残留窗口随目标库凭证轮换收敛);③动态源账号只读
+权限强校验挂账(同 004 km_readonly 裁定);④import-linter rag_admin 猜测名
+随 rag 变更核对真实包名;⑤**会话-数据源绑定未立约(008 /goal R1-web)**:
+会话列表不按数据源过滤,直达/侧栏点旧会话追问将按当前选中源执行并记入
+原会话(切换器注释已去过度承诺;fail-closed 方向不破,语义收敛随 chat 域
+后续变更立约)。
+**datasource_key 与租户归属不可改 scenario 现挂主 spec「元数据抓取」
+requirement 下**(上游平移布局),008 已兑现该强制——rag 变更落地
+fetch-metadata 时顺手挪位到注册 requirement。
 **部门树租户过滤(007 design Open Questions)**:部门带 tenant_id 但树查询
 全量返回;按租户过滤部门树随 multitenant 管理变更再定。
 **用户-部门跨租户绑定未校验(007)**:编辑用户时 dept 与 tenant 分属不同租户

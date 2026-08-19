@@ -6,6 +6,7 @@ import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
 import { AppLayout } from "@/components/app-layout";
 import { PermRoute } from "@/components/perm-route";
 import AdminLayout from "@/pages/admin/AdminLayout";
+import DatasourcesPage from "@/pages/admin/DatasourcesPage";
 import DeptsPage from "@/pages/admin/DeptsPage";
 import RolesPage from "@/pages/admin/RolesPage";
 import UsersPage from "@/pages/admin/UsersPage";
@@ -80,6 +81,14 @@ const router = createBrowserRouter([
             element: (
               <PermRoute perm="system:user:manage">
                 <DeptsPage />
+              </PermRoute>
+            ),
+          },
+          {
+            path: "datasources",
+            element: (
+              <PermRoute perm="system:datasource:manage">
+                <DatasourcesPage />
               </PermRoute>
             ),
           },

@@ -17,12 +17,14 @@ from kongming.chat.agent_client import AgentClient
 from kongming.chat.service import (
     ChatOutcome,
     ChatService,
+    InvalidDatasource,
     MessageResult,
     SessionMessage,
     SessionNotFound,
     TenantForbidden,
 )
 from kongming.config import get_settings
+from kongming.datasource.repository import SqlDatasourceRepo
 from kongming.db import get_session
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -36,7 +38,7 @@ def get_chat_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     agent: Annotated[AgentClient, Depends(get_agent_client)],
 ) -> ChatService:
-    return ChatService(session, agent)
+    return ChatService(session, agent, SqlDatasourceRepo(session))
 
 
 class ChatQueryIn(BaseModel):
@@ -47,7 +49,7 @@ class ChatQueryIn(BaseModel):
     history: list[Annotated[str, Field(max_length=2000)]] = Field(
         default_factory=list, max_length=10
     )
-    datasource_key: str = Field(default="default", max_length=64)
+    datasource_key: str = Field(default="default", pattern=r"^[a-z][a-z0-9_]{1,63}$")
 
 
 class ChartOut(BaseModel):
@@ -113,6 +115,9 @@ async def chat_query(
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
     except SessionNotFound:
         raise HTTPException(status_code=404, detail="SESSION_NOT_FOUND") from None
+    except InvalidDatasource:
+        # 不存在/禁用/越属同形(防 key 探测);与 internal 面同一 detail 码
+        raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
     return _out(outcome)
 
 

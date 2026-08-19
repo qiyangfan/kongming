@@ -23,7 +23,8 @@ router = APIRouter(prefix="/internal", tags=["internal"])
 class SqlExecuteRequest(BaseModel):
     trace_id: str = Field(min_length=1, max_length=64)  # 与 sys_sql_audit.trace_id 同宽
     tenant_key: str = Field(min_length=1, max_length=64)
-    datasource_key: str = "default"
+    # 查询面 pattern 与注册边界同一规则(008 D4 口径一致性收口)
+    datasource_key: str = Field(default="default", pattern=r"^[a-z][a-z0-9_]{1,63}$")
     sql_text: str = Field(min_length=1)
     user_id: uuid.UUID | None = None
     question: str | None = None
@@ -58,8 +59,9 @@ async def sql_execute(
         raise HTTPException(status_code=404, detail="TENANT_NOT_FOUND") from None
     except service.TenantBindingForbidden:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
-    except service.UnsupportedDatasource:
-        raise HTTPException(status_code=400, detail="UNSUPPORTED_DATASOURCE") from None
+    except service.InvalidDatasource:
+        # 不存在/禁用/越属同形(防 key 探测);审计已落 BLOCKED+分类
+        raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
     return SqlExecuteResponse(
         verdict=result.verdict,  # type: ignore[arg-type]  # 三态由 service 契约保证
         reason=result.reason,
