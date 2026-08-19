@@ -1,23 +1,29 @@
 # HANDOFF — Kongming 交接文档
 
-> 最后更新:2026-08-19(**007 RBAC 管理面收官 + 双轮审查循环清零并提交**:
-> api system 域 16 端点(/system/*:用户 CRUD+重置密码、角色 CRUD+
-> 权限覆盖式绑定、部门树 CRUD、权限点清单、租户只读清单)+
-> 内置数据保护(内置角色防删/role_key 不可改/超管防删防禁防剥角色/
-> 自删自禁拒)+ 管理面写操作全量审计 + require_perm 403 审计补齐 +
-> 管理面改密吊销 refresh 家族;0004 迁移(username 唯一→软删感知部分索引);
-> web /admin 三页(用户/角色/部门)+ 管理子导航权限过滤;
-> Playwright 冒烟 12 项全过;独立评审 2 严重+5 建议、/goal 审查循环
-> R1 双路(3 严重+9 建议)与 R2 复审全部闭环;api 205 + agent 53 测试全绿)。
+> 最后更新:2026-08-19(**008 动态数据源规划收官待 apply**:proposal/design/tasks
+> + datasource/internal-meta/web-admin 三域 delta 齐备,`openspec validate
+> --strict` 通过;/goal 审查循环 R1 双路(4 严重+11 建议)+R2 复审(2 观察)
+> 全部清零——选项接口首位合成 default 项已立约转正、import-linter 基线期
+> 猜测名 datasource_admin 防线静默失效坑已立约修正、管理端点全局视角+
+> 创建显式指定租户归属已立约、测试连接编辑态补位已立约;规划产物已提交,
+> **下一棒=`/opsx:apply` 008-dynamic-datasource**)。
+> 007 RBAC 管理面已提交并归档(详情感官见「当前状态」节)。
 > 清空上下文/新会话先读本文与 `AGENTS.md`,
 > 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
 
 ## 新会话开工指引(最先看这里)
 
-1. 007 全闭账:管理面已成真——建号→分角色→绑部门→重置密码→禁用→删除
-   全链路可用,保护规则与审计齐。下一棒:**动态数据源注册/管理端点
-   (sys_datasource 表已在,池管理器 key 维度与失效钩子已预留;梯队见文末
-   「下一步」)**,走 `/opsx:propose` 开局。
+1. **008 动态数据源:规划已就绪,未实施**。四件套在
+   `openspec/changes/008-dynamic-datasource/`,下一棒 `/opsx:apply`
+   (tasks.md 8 组 24 项,安全规则类测试先行)。开工前先读其 proposal/
+   design——关键考古与立约:baseline `sys_datasource` 缺 name/default_schema
+   两列(0005 迁移补);pyproject import-linter「auth 不反向依赖业务域」
+   forbidden_modules 是基线期猜测名 `datasource_admin`,落地包名
+   `kongming.datasource` 时必须同步修契约(否则防线静默失效,R1 实证);
+   管理端点全局视角(X-Tenant-Id 无语义)+创建时租户归属超管显式指定;
+   options 首位合成 default 项;保留字 default 禁注册;非法 key 同形 400
+   防探测;`dispose_read_engines` 现状零调用点需补 lifespan 接线;
+   fetch-metadata/embedding 与 RAG 双过滤属 rag 变更(Non-goals)。
 2. 质量底线:安全规则类测试先行;收工前 `make check` 全绿 + 冒烟记录;
    改 api 必跑 `make contracts` 并提交产物。
 3. **prompt 资产纪律**:apps/agent/graph/prompts.py 与 nodes.py 的 LLM 模板
@@ -60,11 +66,12 @@
    (DOM 快照可读)——GUI 测试一律用 Playwright MCP 工具组
    (`mcp__plugin_playwright_playwright__browser_*`,独立管道,002 已验证可用)。
 
-## 当前状态(截至 007,工作区含 007 全部改动待提交)
+## 当前状态(截至 008 规划收官,008 未 apply)
 
-- git:main 分支(以 git log 为准),**007 已随其提交入库**;无远程、未 push。
+- git:main 分支(以 git log 为准),007 与 008 规划产物均已入库;无远程、未 push。
   分支策略:主干开发不拉 dev,协作按变更开短命 feature。
-- openspec:001–007 已归档;主 spec 新增 `web-admin` 域、rbac 增 6 条
+- openspec:001–007 已归档;**008-dynamic-datasource 已立项(规划四件套,
+  未 apply)**;主 spec 新增 `web-admin` 域、rbac 增 6 条
   管理端点 requirement(归档时已 sync)。
 - **007 api 侧**:新域包 `kongming/system/`(router/service/models/ports/
   repository,宪法分层;import-linter 契约「system models/service/ports 零框架」)。
@@ -395,8 +402,10 @@
 
 ## 下一步(路线图梯队,按序)
 
-1. 动态数据源注册/管理端点(sys_datasource 表已在,池管理器 key 维度与失效钩子已预留;
-   契约 datasource_key 参数已就位,前端未发送、落缺省 default)。
+1. **008-dynamic-datasource apply**(规划已就绪:管理端点 CRUD/启停/测试连接/
+   选项 + AES-GCM 凭证加密 + 动态池真路由 + internal-meta 同构 + chat 入口
+   预检 + web 管理页/对话页切换器;0005 补 name/default_schema 列;
+   冒烟形态=同库异 schema 假动态源 vs 独立库,apply 期定)。
 2. RAG 三路召回 + 知识库(rag/knowledge spec 已立约;落地后 retrieve 从内省过渡形态
    切换召回收窄,schema 提示源决策见 005 design Open Questions)。
 3. 会话体验深化(标题 LLM 改写/时间分组/搜索/导出 CSV+Excel/EXPLAIN——chat spec
