@@ -71,16 +71,30 @@ def format_schema_hint(meta: SchemaMeta) -> str:
     return "\n".join(lines)
 
 
-# ── 节点2:schema 提示获取(RAG 落地前=内部元数据通道实时内省,nl2sql-agent spec 过渡形态)──
+# ── 节点2:schema 提示获取(009:RAG 召回优先,零命中/失败回退实时内省兜底)──
 async def retrieve(state: AgentState) -> dict[str, object]:
+    datasource_key = state.get("datasource_key", "default")
+    # 召回用改写问句(指代消解后语义完整;多轮裸指代「这些影片」召回会漏)
+    question = state.get("resolved_question") or state["question"]
+    ctx = await deps.get_api().rag_retrieve(
+        tenant_key=state["tenant_key"],
+        datasource_key=datasource_key,
+        question=question,
+    )
+    # 历史 SQL 独立于表说明命中(R2-S1):「知识未抓取但 query_history 已有成功
+    # 记录」的真实形态下,schema 空回退内省、history 照常作 few-shot,不整体丢弃。
+    history_sql = ctx.history_sql if ctx is not None else ""
+    if ctx is not None and ctx.schema_hint.strip():
+        return {"schema_hint": ctx.schema_hint, "history_sql": history_sql}
+    # 回退:005 过渡形态(实时内省)——新租户/未抓取知识/召回服务失败零质量回归。
     meta = await deps.get_api().fetch_schema(
         tenant_key=state["tenant_key"],
-        datasource_key=state.get("datasource_key", "default"),
+        datasource_key=datasource_key,
     )
     if meta is None:
         # 内省失败降级空提示:不误导、不硬编码全表(spec 明文)
-        return {"schema_hint": ""}
-    return {"schema_hint": format_schema_hint(meta)}
+        return {"schema_hint": "", "history_sql": history_sql}
+    return {"schema_hint": format_schema_hint(meta), "history_sql": history_sql}
 
 
 def clean_sql(raw: str) -> str:
@@ -97,12 +111,18 @@ async def generate(state: AgentState) -> dict[str, object]:
     schema_hint = state.get("schema_hint") or ""
     if not schema_hint.strip():
         schema_hint = _EMPTY_HINT
+    # 历史成功 SQL 段(009):召回命中时拼在表结构之后——人类验证过的 SQL 置信度
+    # 高于表说明内嵌示例(强 few-shot);系统模板资产零改动,只动 user 拼接。
+    history_sql = (state.get("history_sql") or "").strip()
+    history_part = f"\n\n参考历史成功 SQL：\n{history_sql}" if history_sql else ""
     extra = ""
     error = state.get("error") or ""
     if error:
         # 自愈:把上次错误喂回 LLM
         extra = f"\n\n上次生成的 SQL 有误：{error}\n请修正。"
-    user = f"问题：{question}\n\n可用表结构：\n{schema_hint}{extra}\n\n生成 SQL："
+    user = (
+        f"问题：{question}\n\n可用表结构：\n{schema_hint}{history_part}{extra}\n\n生成 SQL："
+    )
     sql = await deps.get_llm().chat(SQL_GEN_SYSTEM, user, temperature=0.1)
     # 生成成功即清掉上轮错误(错误已消费)
     return {"generated_sql": clean_sql(sql), "error": ""}

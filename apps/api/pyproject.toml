@@ -20,6 +20,9 @@ dependencies = [
     "prometheus-client>=0.21",
     "cryptography>=44.0",           # 数据源密码 AES-GCM
     "httpx>=0.28",                  # 回调 agent 面(005)
+    "pypdf>=6.16.1",
+    "python-docx>=1.2.0",
+    "python-multipart>=0.0.32",
 ]
 
 [dependency-groups]
@@ -72,9 +75,9 @@ include_external_packages = true
 name = "auth 域不反向依赖业务域(ADR-003 回退路径前提)"
 type = "forbidden"
 source_modules = ["kongming.auth"]
-# kongming.datasource=008 落地的真实包名(基线期猜测名 datasource_admin 曾使防线
-# 对该包静默失效,R1 实证);rag_admin 猜测名挂账 rag 变更核对
-forbidden_modules = ["kongming.chat", "kongming.rag_admin", "kongming.datasource"]
+# kongming.datasource=008、kongming.rag=009 落地的真实包名(基线期猜测名
+# datasource_admin/rag_admin 曾使防线对真实包静默失效,R1 实证;009 清偿挂账)
+forbidden_modules = ["kongming.chat", "kongming.rag", "kongming.datasource"]
 
 [[tool.importlinter.contracts]]
 name = "datascope/audit 域不依赖 Web 框架(宪法 Article II 领域纯净)"
@@ -101,6 +104,16 @@ source_modules = [
     "kongming.datasource.models",
     "kongming.datasource.service",
     "kongming.datasource.ports",
+]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "rag 领域模型/用例/端口不依赖框架(宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = [
+    "kongming.rag.models",
+    "kongming.rag.service",
+    "kongming.rag.ports",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 

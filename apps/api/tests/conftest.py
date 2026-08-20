@@ -62,6 +62,8 @@ from kongming.redis_client import get_redis  # noqa: E402
 TEST_DB = "kongming_test"
 
 TRUNCATED = (
+    "rag.query_history",
+    "rag.table_descriptions",
     "public.chat_message",
     "public.chat_session",
     "public.sys_oper_log",

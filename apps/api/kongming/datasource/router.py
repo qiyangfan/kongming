@@ -260,7 +260,15 @@ async def disable_datasource(ds_id: uuid.UUID, user: UserClaims, svc: Service) -
 
 @router.delete("/{ds_id}", status_code=204, dependencies=[Depends(require_perm(MANAGE))])
 async def delete_datasource(ds_id: uuid.UUID, user: UserClaims, svc: Service) -> None:
-    await svc.delete(actor_id=str(user["sub"]), ds_id=str(ds_id))
+    # 009:删除同步失效 rag 检索缓存(缓存为 fail-open 基础设施,失效尽力而为)
+    from kongming.rag.cache import ContextCache
+    from kongming.redis_client import get_redis
+
+    await svc.delete(
+        actor_id=str(user["sub"]),
+        ds_id=str(ds_id),
+        ctx_evictor=ContextCache(get_redis()).evict,
+    )
 
 
 # ---- 领域错误 → HTTP 映射 ----

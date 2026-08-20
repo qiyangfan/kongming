@@ -23,6 +23,7 @@ PERMISSIONS: list[tuple[str, str, int]] = [
     ("system:role:manage", "角色管理", 2),
     ("chat:execute", "问答执行", 3),
     ("system:datasource:manage", "数据源管理", 4),
+    ("system:rag:manage", "知识库管理", 5),
 ]
 
 ROLES: list[tuple[str, str, str, str, int]] = [

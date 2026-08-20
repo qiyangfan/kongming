@@ -1,0 +1,180 @@
+"""rag 领域模型与纯函数(009):零框架依赖(宪法 Article II)。
+
+覆盖优先级(knowledge spec):INTROSPECTION < AI_GENERATED < MANUAL_UPLOAD <
+MANUAL_EDIT < FEEDBACK_REFINED——自动来源(抓取/润色)不覆盖更高优先级既有条目。
+召回参数与上游同构:topK=5、RRF k=60(query_history 独立强 few-shot 通道不进融合)。
+"""
+
+from dataclasses import dataclass, field
+
+# source_type 覆盖优先级(baseline CHECK 枚举,0006 演进后的五态)
+SOURCE_TYPE_PRIORITY: dict[str, int] = {
+    "INTROSPECTION": 1,
+    "AI_GENERATED": 2,
+    "MANUAL_UPLOAD": 3,
+    "MANUAL_EDIT": 4,
+    "FEEDBACK_REFINED": 5,
+}
+
+AUTOMATED_SOURCE_TYPES = frozenset({"INTROSPECTION", "AI_GENERATED"})
+
+RECALL_TOP_K = 5
+RRF_K = 60.0
+HISTORY_SQL_LIMIT = 3  # 历史成功 SQL 拼接条数上限(防 token 膨胀)
+
+
+@dataclass(frozen=True)
+class TableBlock:
+    """parser 切块产物:一张表的知识条目内容(schema_name 为请求表单维度)。"""
+
+    table_name: str
+    table_comment: str = ""
+    columns_comment: dict[str, str] = field(default_factory=dict)
+    sample_queries: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class KnowledgeEntry:
+    """知识条目(管理面/召回视图;永不含向量原始值)。"""
+
+    id: str
+    tenant_id: str
+    datasource_key: str
+    schema_name: str
+    table_name: str
+    table_comment: str
+    columns_comment: dict[str, str]
+    sample_queries: list[str]
+    source_type: str
+    updated_at: object
+
+
+@dataclass(frozen=True)
+class RecallHit:
+    """单路召回命中(rank 从 1 起;RRF 输入形态)。"""
+
+    table_name: str
+    schema_name: str = ""
+
+
+@dataclass(frozen=True)
+class IntrospectedTable:
+    """全量内省产物(fetch-metadata 输入;与 meta 通道同口径:BASE TABLE+VIEW+注释)。"""
+
+    schema_name: str
+    table_name: str
+    table_comment: str
+    columns_comment: dict[str, str] = field(default_factory=dict)  # name -> type(纯结构形态)
+
+
+@dataclass(frozen=True)
+class RagContext:
+    """召回编排产物(内部端点响应体)。schema_hint 空=表说明零命中。"""
+
+    schema_hint: str
+    history_sql: str
+
+
+def can_automated_overwrite(existing: str, incoming: str) -> bool:
+    """覆盖优先级判定:自动来源不得覆盖更高优先级既有条目(D5)。
+
+    同级可覆盖(重复抓取幂等更新);人工来源不经过本判定(显式操作即显式覆盖)。
+    """
+    return SOURCE_TYPE_PRIORITY[incoming] >= SOURCE_TYPE_PRIORITY[existing]
+
+
+def build_embedding_text(
+    table_name: str, table_comment: str, columns_comment: dict[str, str]
+) -> str:
+    """embedding 输入文本:表名+表说明+字段说明(上传/抓取/润色三处同一公式,
+    单一实现点;tsv 全文索引内容与之对齐)。"""
+    cols = " ".join(f"{k} {v}" for k, v in columns_comment.items())
+    return " ".join(x for x in (table_name, table_comment, cols) if x).strip()
+
+
+def rrf_fuse(
+    ranked_lists: list[list[RecallHit]], *, k: float = RRF_K, top: int = RECALL_TOP_K
+) -> list[RecallHit]:
+    """RRF 融合:score(d)=Σ 1/(k+rank_i(d)),k=60(上游同构参数)。
+
+    仅表说明两路(向量/全文)进融合;并列分数按首现顺序稳定排序。
+    """
+    scores: dict[str, float] = {}
+    first_hit: dict[str, RecallHit] = {}
+    for hits in ranked_lists:
+        for rank, hit in enumerate(hits, start=1):
+            key = f"{hit.schema_name}.{hit.table_name}"
+            scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank)
+            first_hit.setdefault(key, hit)
+    ordered = sorted(scores.items(), key=lambda kv: -kv[1])
+    return [first_hit[key] for key, _ in ordered[:top]]
+
+
+def build_schema_hint(entries: list[KnowledgeEntry]) -> str:
+    """召回条目 → generate 的 schema 提示文本(纯函数)。
+
+    形态(上游同构):`schema.table(col1(说明),col2(说明2)) -- 表说明`,
+    空说明只留列名;表内嵌示例 SQL 逐条追加。
+    """
+    lines: list[str] = []
+    for e in entries:
+        cols = ", ".join(
+            f"{name}({desc})" if desc else name for name, desc in e.columns_comment.items()
+        )
+        header = f"{e.schema_name}.{e.table_name}({cols})"
+        if e.table_comment:
+            header += f" -- {e.table_comment}"
+        lines.append(header)
+        for sql in e.sample_queries:
+            lines.append(f"  示例:{sql}")
+    return "\n".join(lines)
+
+
+def build_history_sql(sql_texts: list[str]) -> str:
+    """历史成功 SQL 拼接(强 few-shot 段;最多 HISTORY_SQL_LIMIT 条)。"""
+    return "\n".join(sql_texts[:HISTORY_SQL_LIMIT])
+
+
+# ---- 领域错误(router 统一映射状态码;message 即用户可见文案) ----
+
+
+class RagError(Exception):
+    """rag 域错误基类。"""
+
+
+# 400(同形,不区分不存在/禁用/越属——防 key 探测)
+
+
+class DatasourceInvalid(RagError):
+    """数据源不存在/禁用/不归属当前租户(与执行路由同形语义)。"""
+
+
+class InvalidSchemaName(RagError):
+    """schema_name 非合法 PG 标识符。"""
+
+
+class EmptyDocument(RagError):
+    """文档不含任何 `## 表名` 形态表块。"""
+
+
+class DocumentTooLarge(RagError):
+    """文档/文件超过大小上限。"""
+
+
+class TooManyBlocks(RagError):
+    """表块数超过上限(防大文档切块风暴)。"""
+
+
+class TableNameTooLong(RagError):
+    """表名超过列宽上限(128 字符,对齐 table_name VARCHAR(128))。"""
+
+
+class UnsupportedFileType(RagError):
+    """不支持的文件扩展名/解析失败。"""
+
+
+# 404
+
+
+class KnowledgeNotFound(RagError):
+    """知识条目不存在或不属于当前租户(同形,防探测)。"""

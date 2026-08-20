@@ -10,6 +10,7 @@ import DatasourcesPage from "@/pages/admin/DatasourcesPage";
 import DeptsPage from "@/pages/admin/DeptsPage";
 import RolesPage from "@/pages/admin/RolesPage";
 import UsersPage from "@/pages/admin/UsersPage";
+import RagPage from "@/pages/admin/RagPage";
 import ChangePassword from "@/pages/ChangePassword";
 import ChatPage from "@/pages/ChatPage";
 import Login from "@/pages/Login";
@@ -89,6 +90,14 @@ const router = createBrowserRouter([
             element: (
               <PermRoute perm="system:datasource:manage">
                 <DatasourcesPage />
+              </PermRoute>
+            ),
+          },
+          {
+            path: "rag",
+            element: (
+              <PermRoute perm="system:rag:manage">
+                <RagPage />
               </PermRoute>
             ),
           },

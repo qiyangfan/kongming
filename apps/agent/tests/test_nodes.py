@@ -7,7 +7,13 @@
 import pytest
 
 from kongming_agent import deps
-from kongming_agent.apiclient import MetaColumn, MetaTable, SchemaMeta, SqlExecuteOutcome
+from kongming_agent.apiclient import (
+    MetaColumn,
+    MetaTable,
+    RagContext,
+    SchemaMeta,
+    SqlExecuteOutcome,
+)
 from kongming_agent.graph import nodes
 from kongming_agent.graph.state import AgentState, ExecutionResult, ValidationResult
 from kongming_agent.llm import LlmError
@@ -30,11 +36,20 @@ class FakeLlm:
 
 class FakeApi:
     def __init__(
-        self, meta: SchemaMeta | None = None, outcomes: list[SqlExecuteOutcome] | None = None
+        self,
+        meta: SchemaMeta | None = None,
+        outcomes: list[SqlExecuteOutcome] | None = None,
+        rag: RagContext | None = None,
     ) -> None:
         self.meta = meta
         self.outcomes = list(outcomes or [])
+        self.rag = rag
+        self.rag_calls: list[dict[str, object]] = []
         self.execute_calls: list[dict[str, object]] = []
+
+    async def rag_retrieve(self, **kw: object) -> RagContext | None:
+        self.rag_calls.append(kw)
+        return self.rag
 
     async def fetch_schema(self, **kw: object) -> SchemaMeta | None:
         return self.meta
@@ -146,6 +161,7 @@ async def test_retrieve_degrades_to_empty_hint(monkeypatch: pytest.MonkeyPatch) 
     _install(monkeypatch, FakeLlm(), FakeApi(meta=None))
     out = await nodes.retrieve(_state())
     assert out["schema_hint"] == ""  # 内省失败降级空提示,不抛错
+    assert out["history_sql"] == ""  # 双失败路径同样清空历史段(防残留)
 
 
 async def test_retrieve_formats_hint(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -154,7 +170,90 @@ async def test_retrieve_formats_hint(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "tenant_default.goods" in str(out["schema_hint"])
 
 
+async def test_retrieve_prefers_rag_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    """召回命中:提示用召回结果,并透传历史 SQL;不回退内省(009 D4/D12)。"""
+    api = FakeApi(
+        meta=_meta(),
+        rag=RagContext(schema_hint="tenant_sakila.film(title)", history_sql="SELECT 1"),
+    )
+    _install(monkeypatch, FakeLlm(), api)
+    out = await nodes.retrieve(
+        _state(datasource_key="sakila_ui", resolved_question="sakila 有多少部电影")
+    )
+    assert out["schema_hint"] == "tenant_sakila.film(title)"
+    assert out["history_sql"] == "SELECT 1"
+    # 召回问句=understand 改写问句(指代消解后),非原始问句(多轮裸指代召回会漏)
+    assert api.rag_calls[0]["question"] == "sakila 有多少部电影"
+    assert api.rag_calls[0]["datasource_key"] == "sakila_ui"
+
+
+async def test_retrieve_rag_empty_falls_back_introspection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """知识库零命中(schema_hint 空):回退实时内省;history_sql 独立保留
+    (R2-S1:「知识未抓取但已有成功历史」形态下 few-shot 不应被整体丢弃)。"""
+    api = FakeApi(meta=_meta(), rag=RagContext(schema_hint="", history_sql="SELECT 9"))
+    _install(monkeypatch, FakeLlm(), api)
+    out = await nodes.retrieve(_state())
+    assert "tenant_default.goods" in str(out["schema_hint"])  # 内省兜底
+    assert out["history_sql"] == "SELECT 9"  # 历史命中与表说明命中互相独立
+
+
+async def test_retrieve_history_only_still_feeds_generate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """纯历史命中形态(schema 空+history 有):内省兜底+few-shot 共存(R2-S1
+    核心场景:知识从未抓取,问答成功回写后,相似问句应受益于历史 SQL)。"""
+    api = FakeApi(meta=_meta(), rag=RagContext(schema_hint="", history_sql="SELECT 1"))
+    _install(monkeypatch, FakeLlm(), api)
+    out = await nodes.retrieve(_state())
+    assert "tenant_default.goods" in str(out["schema_hint"])
+    assert out["history_sql"] == "SELECT 1"
+
+
+async def test_retrieve_rag_http_failure_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """召回服务失败(rag=None):回退内省(上游纯知识库形态的差异点)。"""
+    api = FakeApi(meta=_meta(), rag=None)
+    _install(monkeypatch, FakeLlm(), api)
+    out = await nodes.retrieve(_state())
+    assert "tenant_default.goods" in str(out["schema_hint"])
+
+
 # ============ generate ============
+
+
+async def test_generate_history_sql_section_placement(monkeypatch: pytest.MonkeyPatch) -> None:
+    """历史成功 SQL 段(009):位于表结构之后;系统模板不动;无命中不出现。"""
+    fake = FakeLlm(["SELECT 1"])
+    _install(monkeypatch, fake, FakeApi())
+    await nodes.generate(
+        _state(schema_hint="表 t(a)", history_sql="SELECT count(*) FROM t")
+    )
+    system, user, _ = fake.calls[0]
+    assert "历史成功 SQL" in user
+    assert user.index("可用表结构") < user.index("参考历史成功 SQL") < user.index("生成 SQL")
+    assert "SELECT count(*) FROM t" in user
+
+    # 无历史命中:段不出现(005 形态回归)
+    fake2 = FakeLlm(["SELECT 2"])
+    _install(monkeypatch, fake2, FakeApi())
+    await nodes.generate(_state(schema_hint="表 t(a)"))
+    assert "历史成功 SQL" not in fake2.calls[0][1]
+
+
+async def test_generate_history_survives_selfheal_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """自愈轮:错误段与历史段共存(历史段在前,错误喂回在后)。"""
+    fake = FakeLlm(["SELECT 1"])
+    _install(monkeypatch, fake, FakeApi())
+    await nodes.generate(
+        _state(schema_hint="表 t(a)", history_sql="SELECT 1", error="上次语法错误")
+    )
+    user = fake.calls[0][1]
+    assert "参考历史成功 SQL" in user and "上次生成的 SQL 有误" in user
 
 
 @pytest.mark.parametrize(

@@ -4,7 +4,13 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from kongming_agent import deps
-from kongming_agent.apiclient import MetaColumn, MetaTable, SchemaMeta, SqlExecuteOutcome
+from kongming_agent.apiclient import (
+    MetaColumn,
+    MetaTable,
+    RagContext,
+    SchemaMeta,
+    SqlExecuteOutcome,
+)
 from kongming_agent.main import app
 
 TOKEN = {"X-Internal-Token": "test-internal-token"}
@@ -19,6 +25,9 @@ class _Llm:
 
 
 class _Api:
+    async def rag_retrieve(self, **kw: object) -> RagContext | None:
+        return None  # 知识库召回零命中路径(回退实时内省,005 形态回归)
+
     async def fetch_schema(self, **kw: object) -> SchemaMeta:
         return SchemaMeta(
             tables=[MetaTable(schema="tenant_default", name="goods", comment="", columns=[

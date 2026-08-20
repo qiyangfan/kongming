@@ -26,6 +26,9 @@ from kongming.chat.service import (
 from kongming.config import get_settings
 from kongming.datasource.repository import SqlDatasourceRepo
 from kongming.db import get_session
+from kongming.rag.cache import ContextCache
+from kongming.rag.repository import RagRepository
+from kongming.rag.service import RagService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -34,11 +37,27 @@ def get_agent_client() -> AgentClient:
     return AgentClient(get_settings())
 
 
+def get_rag_service(session: AsyncSession) -> RagService:
+    from kongming.rag.agent_callback import AgentRagClient
+    from kongming.redis_client import get_redis
+
+    client = AgentRagClient(get_redis())
+    return RagService(
+        RagRepository(session),
+        embedder=client,
+        describer=client,
+        cache=ContextCache(get_redis()),
+    )
+
+
 def get_chat_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     agent: Annotated[AgentClient, Depends(get_agent_client)],
 ) -> ChatService:
-    return ChatService(session, agent, SqlDatasourceRepo(session))
+    # history_writer=rag 回写端口(009;None 安全——注入失败不影响问答主链路)
+    return ChatService(
+        session, agent, SqlDatasourceRepo(session), get_rag_service(session)
+    )
 
 
 class ChatQueryIn(BaseModel):

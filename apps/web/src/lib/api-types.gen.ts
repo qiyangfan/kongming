@@ -522,6 +522,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/rag/documents/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Document */
+        post: operations["upload_document_system_rag_documents_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/rag/tables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Tables */
+        get: operations["list_tables_system_rag_tables_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/rag/tables/{table_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Table */
+        delete: operations["delete_table_system_rag_tables__table_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/rag/fetch-metadata": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Fetch Metadata */
+        post: operations["fetch_metadata_system_rag_fetch_metadata_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/rag/reindex": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reindex */
+        post: operations["reindex_system_rag_reindex_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/rag/retrieve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rag Retrieve */
+        post: operations["rag_retrieve_internal_rag_retrieve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -543,6 +645,15 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Body_upload_document_system_rag_documents_upload_post */
+        Body_upload_document_system_rag_documents_upload_post: {
+            /** File */
+            file: string;
+            /** Datasource Key */
+            datasource_key: string;
+            /** Schema Name */
+            schema_name: string;
+        };
         /** CallbackRequest */
         CallbackRequest: {
             /** Code */
@@ -623,6 +734,11 @@ export interface components {
             retry_count: number;
             /** Error */
             error: string | null;
+        };
+        /** DatasourceActionIn */
+        DatasourceActionIn: {
+            /** Datasource Key */
+            datasource_key: string;
         };
         /** DatasourceCreateIn */
         DatasourceCreateIn: {
@@ -799,10 +915,56 @@ export interface components {
              */
             status: "ACTIVE" | "DISABLED";
         };
+        /** FetchOut */
+        FetchOut: {
+            /** Found */
+            found: number;
+            /** Enriched */
+            enriched: number;
+            /** Skipped */
+            skipped: number;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** KnowledgeItemOut */
+        KnowledgeItemOut: {
+            /** Id */
+            id: string;
+            /** Datasource Key */
+            datasource_key: string;
+            /** Schema Name */
+            schema_name: string;
+            /** Table Name */
+            table_name: string;
+            /** Table Comment */
+            table_comment: string;
+            /** Columns Comment */
+            columns_comment: {
+                [key: string]: string;
+            };
+            /** Sample Queries */
+            sample_queries: string[];
+            /** Source Type */
+            source_type: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** KnowledgePageOut */
+        KnowledgePageOut: {
+            /** Items */
+            items: components["schemas"]["KnowledgeItemOut"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Size */
+            size: number;
         };
         /** LoginRequest */
         LoginRequest: {
@@ -922,10 +1084,38 @@ export interface components {
             /** Refresh Token */
             refresh_token: string;
         };
+        /** ReindexOut */
+        ReindexOut: {
+            /** Deleted */
+            deleted: number;
+            /** Rebuilt */
+            rebuilt: number;
+            /** Enriched */
+            enriched: number;
+        };
         /** ResetPasswordIn */
         ResetPasswordIn: {
             /** New Password */
             new_password: string;
+        };
+        /** RetrieveIn */
+        RetrieveIn: {
+            /** Tenant Key */
+            tenant_key: string;
+            /**
+             * Datasource Key
+             * @default default
+             */
+            datasource_key: string;
+            /** Question */
+            question: string;
+        };
+        /** RetrieveOut */
+        RetrieveOut: {
+            /** Schema Hint */
+            schema_hint: string;
+            /** History Sql */
+            history_sql: string;
         };
         /** RoleCreateIn */
         RoleCreateIn: {
@@ -1130,6 +1320,11 @@ export interface components {
              * @default false
              */
             must_change_password: boolean;
+        };
+        /** UploadOut */
+        UploadOut: {
+            /** Tables */
+            tables: string[];
         };
         /** UserCreateIn */
         UserCreateIn: {
@@ -2380,6 +2575,210 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_document_system_rag_documents_upload_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_document_system_rag_documents_upload_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_tables_system_rag_tables_get: {
+        parameters: {
+            query?: {
+                datasource_key?: string | null;
+                page?: number;
+                size?: number;
+            };
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgePageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_table_system_rag_tables__table_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                table_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fetch_metadata_system_rag_fetch_metadata_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasourceActionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FetchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reindex_system_rag_reindex_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasourceActionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReindexOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rag_retrieve_internal_rag_retrieve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetrieveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrieveOut"];
+                };
             };
             /** @description Validation Error */
             422: {

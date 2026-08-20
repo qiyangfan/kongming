@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     # 内部元数据通道:租户 schema 内省表数上限(防 prompt 膨胀)
     meta_schema_max_tables: int = Field(default=50, ge=1)
 
+    # rag 上传上限(009):文本类/PDF·Word 分档字节上限
+    rag_text_upload_max_bytes: int = Field(default=1024 * 1024, ge=1024)
+    rag_binary_upload_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024)
+    # embedding 维度(009):缓存/回调向量的程序防线——换模型未 bump 缓存版本
+    # 时,旧维度向量命中会被拦为 EmbeddingError(降级),不再 500(R2-R1)
+    rag_embedding_dim: int = Field(default=1536, ge=1)
+
     def fail_closed_checks(self) -> None:
         """prod 环境缺敏感配置直接拒启(dev 宽松以便本地起步)。"""
         if self.environment != "prod":

@@ -16,9 +16,7 @@ from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from kongming.config import get_settings
-from kongming.datasource.cipher import get_cipher
-from kongming.datasource.models import CredentialUndecryptable
-from kongming.datasource.repository import SqlDatasourceRepo
+from kongming.datasource.resolver import DatasourceInvalid, resolve_for_read
 from kongming.db import get_session
 from kongming.internal.executor import get_or_create_engine
 from kongming.sqlfw.firewall import RESERVED_TABLE_NAMES, RESERVED_TABLE_PREFIXES
@@ -149,15 +147,13 @@ async def meta_schema(
         # 默认路径:控制面库本库内省(零回归)
         return await _introspect(session, [f"tenant_{req.tenant_key}", "public"])
 
-    # 动态源:存在+启用+归属校验(同形 400 防探测,与执行路由同构)
-    row = await SqlDatasourceRepo(session).find_for_execute(req.datasource_key)
-    if row is None or row.status != "ACTIVE" or row.tenant_id != str(tenant_id):
-        raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
+    # 动态源:存在+启用+归属校验+解密(同形 400 防探测,与执行路由同构;
+    # 009 抽 resolver 公共,fetch-metadata 复用)
     try:
-        plain = get_cipher(get_settings().datasource_encrypt_key).decrypt(row.password_enc)
-    except CredentialUndecryptable:
-        # 凭证不可用:fail-closed 同形(不返回任何 schema 信息),证据留日志
-        log.error("数据源凭证不可解 key=%s(密钥轮换/损坏)", req.datasource_key)
+        row, plain = await resolve_for_read(
+            session, tenant_id=str(tenant_id), datasource_key=req.datasource_key
+        )
+    except DatasourceInvalid:
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
     engine = await get_or_create_engine(
         req.datasource_key,

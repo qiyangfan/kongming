@@ -28,6 +28,7 @@ from kongming.datasource.ports import (
     CredentialCipher,
     DatasourceRepo,
     PoolEvictor,
+    RagCtxEvictor,
 )
 from kongming.uuid7 import uuid7
 
@@ -182,7 +183,9 @@ class DatasourceService:
 
     # ---- 删除(物理删) ----
 
-    async def delete(self, *, actor_id: str, ds_id: str) -> None:
+    async def delete(
+        self, *, actor_id: str, ds_id: str, ctx_evictor: RagCtxEvictor | None = None
+    ) -> None:
         current = await self._repo.get(ds_id)
         if current is None:
             raise DatasourceNotFound("数据源不存在")
@@ -192,6 +195,13 @@ class DatasourceService:
         )
         await self._repo.commit()
         await self._evict_quietly(current.datasource_key)
+        # 009:数据源删除同步失效 rag 检索缓存(残留知识条目不再可召回;
+        # 知识条目本身保留——级联清理策略挂 multitenant 变更,design Open Questions)
+        if ctx_evictor is not None:
+            try:
+                await ctx_evictor(current.tenant_id, current.datasource_key)
+            except Exception:  # noqa: BLE001  # 缓存失效失败不阻断删除
+                log.warning("datasource 删除的 rag ctx 失效失败", exc_info=True)
 
     # ---- 测试连接(无状态:不落库/不建池/不落审计) ----
 

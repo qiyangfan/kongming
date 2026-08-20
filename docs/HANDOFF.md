@@ -1,22 +1,26 @@
 # HANDOFF — Kongming 交接文档
 
-> 最后更新:2026-08-20(**008 动态数据源已提交并归档**:27/27 任务+/goal 审查
-> 循环 R1 双路+R2 复审清零;归档时 delta 已 sync——datasource 主 spec 注册边界
-> 收紧/启停删除与池生命周期新增/选项首位合成 default 转正,internal-meta 动态
-> 内省,web-admin 四子页;api 273+agent 53+web 全绿;
-> **下一棒=路线图第二梯队 rag/knowledge 变更**——fetch-metadata/embedding/
-> 三路召回双过滤,008 已把执行面/内省面/选项面动态化)。
+> 最后更新:2026-08-20(**009 RAG 三路召回+知识库已提交并归档**:
+> archive/2026-08-20-009-rag-knowledge,28/28 任务,delta 已 sync 六主 spec
+> ——rag(五 requirement 修订)/knowledge(润色+reindex 定形)/datasource
+> (元数据抓取 REMOVED 收编+不可改挪位注册)/nl2sql-agent(Schema 智能选取
+> 召回优先+内省兜底)/sql-execution(rag 拒读)/web-admin(五子页);
+> 提案评审+实施复审+/goal R1/R2 四轮审查全清零;真 LLM 冒烟 12 项全过
+> (抓 3 真 bug);api 333+agent 73+web 全绿、7 契约 KEPT;
+> **下一棒=路线图会话体验深化**(标题 LLM 改写/时间分组/搜索/导出/EXPLAIN——
+> chat spec 已立约行为面,端点未立);rag 后续挂账见「已知 TODO」009 段)。
 > 清空上下文/新会话先读本文与 `AGENTS.md`,
 > 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
 
 ## 新会话开工指引(最先看这里)
 
-1. **008 动态数据源:已提交并归档**(archive/2026-08-20-008-dynamic-datasource,
-   delta 已 sync 入主 spec)。下一棒=路线图第二梯队 **rag/knowledge 变更**:
-   fetch-metadata/embedding/三路召回 datasource 双过滤(008 已把执行面/内省面/
-   选项面动态化,rag 承接知识条目维度;import-linter `rag_admin` 猜测名届时
-   核对真实包名;「datasource_key 与租户归属不可改」scenario 现挂主 spec
-   「元数据抓取」requirement 下,rag 落地时顺手挪位到注册 requirement)。
+1. **009 RAG 三路召回+知识库:已提交并归档**(archive/2026-08-20-009-rag-
+   knowledge,delta 已 sync 六主 spec)。下一棒=**会话体验深化**(chat spec
+   已立约行为面,端点未立)或 rag 挂账(见「已知 TODO」009 段 15 项)。
+   009 已清偿 008 三笔挂账:import-linter rag_admin 猜测名→kongming.rag、
+   「不可改」scenario 挪位 datasource 注册 requirement、fetch-metadata 端点
+   落位 /system/rag/*(datasource spec「元数据抓取」requirement 已 REMOVED
+   收编进 knowledge 域)。
 2. 质量底线:安全规则类测试先行;收工前 `make check` 全绿 + 冒烟记录;
    改 api 必跑 `make contracts` 并提交产物。
 3. **prompt 资产纪律**:apps/agent/graph/prompts.py 与 nodes.py 的 LLM 模板
@@ -59,13 +63,73 @@
    (DOM 快照可读)——GUI 测试一律用 Playwright MCP 工具组
    (`mcp__plugin_playwright_playwright__browser_*`,独立管道,002 已验证可用)。
 
-## 当前状态(截至 008 提交并归档)
+## 当前状态(截至 009 提交并归档;008 及此前已归档)
 
 - git:main 分支(以 git log 为准);无远程、未 push。
   分支策略:主干开发不拉 dev,协作按变更开短命 feature。
-- openspec:001–008 全部归档;活动变更为零。主 spec 现状:datasource
-  (注册边界收紧+启停删除与池生命周期+选项合成 default)、internal-meta
-  (动态源限 default_schema 内省)、web-admin(四子页)已 sync 008 delta。
+- openspec:001–009 全部归档;活动变更为零。
+- **009 架构总览**:rag 两表为 baseline 既有资产(0001 已建 rag schema/四元
+  唯一键/HNSW+GIN),0006 只做增量(source_type CHECK 换五枚举+召回辅助索引,
+  ALTER 型,空表瞬时)。信任边界方向:api 持 pgvector 与全部编排,agent 持
+  LLM key,api→agent 回调新增 /internal/embedding(批量 texts≤64)+ 
+  /internal/describe-table(润色,enriched=False 即降级)两通道。
+- **009 api 侧**:域包 kongming/rag/(models 纯函数含 RRF k=60/top5/优先级/
+  提示构造、parser `## 表名` 切块、ports 端口反转、repository SQL+全量内省、
+  agent_callback httpx+emb 缓存(km:emb:v1:* 24h)、cache ctx(km:ragctx:* 
+  10min SCAN 精确失效)、docparse pypdf/python-docx(to_thread)、service
+  零框架编排、router)。端点:/system/rag/* 5 个(documents/upload 多部分、
+  tables 列表/删除、fetch-metadata、reindex;全部 system:rag:manage+租户
+  白名单复校)+ /internal/rag/retrieve(内部令牌,三路召回双过滤)。
+  种子权限 system:rag:manage 排序 5(SUPER_ADMIN 覆盖/DEVELOPER 不推)。
+- **009 召回与回写**:retrieve 节点召回优先(resolved_question 召回)、零命中/
+  失败回退 005 实时内省(新租户零回归);generate user 模板追加「参考历史成功
+  SQL」段(系统模板资产零改动);chat 最终 SUCCESS 判定后回写 query_history
+  (原始问句,独立 try);embedding 失败降级全文路/无向量落库;**空结果不写
+  ctx 缓存**(冒烟实证:降级空结果入缓存会让恢复后服务 TTL 窗口内持续空)。
+- **009 sqlfw 拒读扩容(评审 B2)**:表引用显式 schema 限定名 db=='rag' 即拒;
+  两表末段名不进保留清单(rag 不在任何执行 search_path 内裸名无通路,
+  query_history 是常见业务表名防误伤)。CTE 体内限定名/引号/JOIN 夹带全拦。
+- **009 web 侧**:/admin/rag 第五子页(列表/数据源筛选/分页/上传/删除受控
+  确认/抓取元数据/重建索引受控确认+结果展示);api.ts 加 postForm
+  (FormData 不设 Content-Type——浏览器须自动生成 boundary,手设 JSON 头
+  曾致 multipart 全字段 422,冒烟实证);lib/rag-api.ts 封装。
+- **009 冒烟(2026-08-20,真 LLM,12 项全过)**:fetch-metadata sakila_dyn
+  28 表 40s 全润色(AI_GENERATED,中文说明+类型前缀+GROUP BY 示例)→三路召回
+  (「有多少部电影」film_list 居首,润色说明进提示)→问答全链路 PASS 1000 部
+  3.2s(提示来自召回非内省)→回写闭环(「电影总数是多少」召回首问 SQL few-shot)
+  →rag 拒读(`SELECT … FROM rag.query_history` 诱导 BLOCKED)→上传幂等→
+  reindex(29 删 28 建)→优先级不误伤→smoke-self 越权 403×3→UI 链(列表/
+  重建确认/删除受控/上传闭环/直达 403)。
+  **冒烟抓回 3 真 bug 已修**:①dashscope text-embedding-v2 单批 25 条上限
+  (28 条整批拒→llm.embed 内部按 25 分批);②tenant_id UUID vs str 恒不等
+  (合法动态源被召回预检恒拒——负向测试(期待 400)掩蔽,加正向用例);
+  ③前端 doFetch 强设 JSON Content-Type 破坏 multipart。
+- **009 提案评审(前轮)+实施复审(后轮)清零**:前轮 B1(rag 两表 baseline
+  既有,0006 改 ALTER 增量)+B2(rag 拒读缺口)+S1-S6/R1-R8 全落工件;
+  后轮 S1(agent_callback resp.json() 异常收敛)+S2(表名 128 上限 400)+
+  S3(PDF/Word 零测试补齐:代码构造 docx/损坏 pdf/超 10MB)+S4(generate
+  历史段断言)+S5(ctx 失效范围双租户测试)+R1-R7 全修;O 级观察 5 项
+  (datasource⇄rag 包级双向依赖为适配层组合、writeback 同步阻塞、fetch
+  TOCTOU、内省列注释未进润色、embedding 单条长度)挂账见下。
+- **009 /goal 审查循环(R1 自查+R2 独立深挖,清零)**:R1 换切口自查抓
+  **3 处前端真实缺陷**(均为 006/007 同类教训再犯):删除末页条目分页越界
+  无自愈(useEffect 补)、删除确认失败错误被 modal 遮罩挡(对话框内渲染
+  isError,007 形态)、**删除对话框 open 表达式并入 !remove.isSuccess 致一次
+  成功后永远打不开**(react-query mutation 状态在下次 mutate 前保持 true;
+  冒烟因每轮重新导航掩蔽——open 只看 target,成功关闭由 onSuccess 收口);
+  浏览器实证连续两次删除正常+越界自愈。R2 独立评审(数据/SQL 语义+并发
+  时序+前端状态机切口)抓 S1-S3:**S1「表说明零命中但历史命中」形态被
+  agent 整体丢弃**(知识未抓取但 query_history 有记录的真实场景 few-shot
+  永不生效;修=history_sql 独立于 schema 命中透传,内省回退与历史段共存,
+  测试反向断言一并纠正)、S2 上传失败后 file input 值残留同文件无法重试
+  (onChange 读值后即清)、S3 中文 simple 全文路局限未声明(design D3 补
+  声明+zhparser 挂账);R1' emb 缓存维度漂移程序防线(AgentRagClient
+  维度断言,漂移按未命中/降级不再 500);O5 remove.onError 清 notice;
+  测试盲区补 3 直证(空结果不写缓存 redis 键数/纯 history 形态入缓存/
+  坏维度缓存重取)。R2 核验清零区含 pgvector 科学计数法解析(strtof 支持
+  e 记法,源码核验)、chat 时序全推演、gather 并发安全等。
+**009 测试面**:api 333(防火墙 rag 4+种子断言随权限点+parser 纯函数 18+
+  管理端点 28+召回/回写 18);agent 73(+纯历史形态);conftest TRUNCATE 增 rag 两表。**008 及更早状态见 git log 与下文(保留)**。
 - **008 api 侧**:新域包 `kongming/datasource/`(models/ports/service/
   repository/cipher/tester/router,宪法分层;import-linter 新增
   「datasource models/service/ports 零框架」契约,并修正 auth 防线
@@ -451,13 +515,14 @@
 - 前端:登录页五家联邦按钮数据驱动;simple-icons 覆盖 GitHub/Google/微信系,
   **钉钉/飞书 simple-icons@16 未收录 → 按例外条款内联官方 mark**;favicon.svg 已补
   (朱砂底白色羽扇)。003 冒烟:五家图标实测渲染正确。
-- 质量:api ruff/mypy strict/lint-imports/pytest **273**(认证+datascope+执行路由+
-  防火墙+chat+meta+会话端点+system 管理面+**datasource 68**,真实 PG+Redis)+
-  agent 同门禁 **53** + web tsc/eslint 全绿;
+- 质量:api ruff/mypy strict/lint-imports/pytest **331**(认证+datascope+执行路由+
+  防火墙+chat+meta+会话端点+system 管理面+datasource 68+**rag 58**,真实 PG+Redis)+
+  agent 同门禁 **72**(+describer 14+retrieve 切换 5) + web tsc/eslint 全绿;
   CI api job 已带 pg/redis services(未在真实 runner 验证——push 后首验)。
 - 契约:openapi.json 含 /auth/* + /internal/sql/execute + /chat/query +
   /internal/meta/schema + /chat/sessions(列表/消息/删除)+
-  /system/* 16 端点(007)+ **/system/datasource/* 8 端点(008)**;
+  /system/* 16 端点(007)+ /system/datasource/* 8 端点(008)+
+  **/system/rag/* 5 端点 + /internal/rag/retrieve(009)**;
   端点落定后 `make contracts` 已重生成,web tsc 过。
 
 ## 已定死的决策(不再议,引用即终)
@@ -475,20 +540,41 @@
 | 问答链路 | agent 8 节点图;权限类(BLOCKED/预检非只读)不重试;重试上限=初始之外 2 次;schema 提示 RAG 前=实时内省过渡形态 | nl2sql + nl2sql-agent + chat spec(005) |
 | RBAC 管理面 | 内置角色按 role_key 集合判(SUPER_ADMIN/DEVELOPER)禁删;role_key 创建后不可改+传输层大写蛇形 pattern;超管按 admin_username 判禁删/禁禁/禁剥 SUPER_ADMIN;角色/部门物理删除(前置校验+级联清绑定+审计),仅用户软删(username 唯一=部分索引软删感知);管理面写操作与业务同事务审计 | rbac + web-admin spec(007) |
 | 动态数据源 | PG-only;凭证 AES-GCM(base64 iv‖ct+tag,prod 密钥 fail-closed,dev 固定密钥降级);key 小写蛇形+保留字 default 禁注册+创建后 key/租户归属不可改;管理端点全局视角+创建显式指定租户;非法 key 同形 400(不存在/禁用/越属,审计分类可溯);连接信息变更/启停/删除 commit 后定向 evict,仅改 name 不动池;物理删除;选项接口首位合成 default 项 | datasource + internal-meta + web-admin spec(008) |
+| RAG/知识库 | rag 两表 baseline 既定(四元唯一键 tenant+ds+schema+table,1536 维+HNSW+tsv GIN);三路召回=向量+全文('simple')RRF k=60 top5 融合+query_history 独立强 few-shot(不进融合,≤3 条);tenant+ds 双过滤;召回零命中/失败回退实时内省;成功 SQL 回写(原始问句,最终 SUCCESS 判定);覆盖优先级 INTROSPECTION<AI_GENERATED<MANUAL_UPLOAD<MANUAL_EDIT<FEEDBACK_REFINED(自动不覆盖人工;reindex 显式清空例外);embedding 独立配置(缺省回退 llm_*,上游 028 教训)不随主模型路由;rag schema 显式限定名执行面拒读(末段名不进清单防误伤);缓存 emb 24h/ctx 10min,写操作 commit 后 SCAN 精确失效,空结果不写缓存 | rag + knowledge + nl2sql-agent + sql-execution + web-admin spec(009) |
 
 ## 下一步(路线图梯队,按序)
 
-1. **RAG 三路召回 + 知识库(rag/knowledge 变更)**:fetch-metadata/embedding
-   与 datasource 维度双过滤随该变更兑现——008 已把执行面/内省面/选项面动态化,
-   rag 变更承接知识条目维度;落地后 retrieve 从内省过渡形态切换召回收窄,
-   schema 提示源决策见 005 design Open Questions;import-linter rag_admin
-   猜测名届时核对真实包名。
-2. 会话体验深化(标题 LLM 改写/时间分组/搜索/导出 CSV+Excel/EXPLAIN——chat spec
-   已立约的行为面,端点未立,随后续变更;「会话-数据源绑定」挂账见已知 TODO ⑤)。
+1. **会话体验深化**(标题 LLM 改写/时间分组/搜索/导出 CSV+Excel/EXPLAIN——
+   chat spec 已立约的行为面,端点未立,随后续变更;「会话-数据源绑定」挂账
+   见已知 TODO ⑤)。
+2. rag/knowledge 后续挂账(见「已知 TODO」009 段)视优先级评估。
 
 ## 已知 TODO(代码内标注,非缺陷)
 
-RAG 召回与 schema 提示收窄(008 已落地动态数据源池,见 rag 变更)。
+**009 挂账(design Open Questions/复审 O 级)**:①datasource 删除后残留知识
+条目不级联(召回需 ds 校验通过,天然 fail-closed;级联策略随 multitenant
+管理变更再定);②fetch-metadata 同步端点大库(>100 表)时长不可控(异步化
+只改执行形态不改契约);③query_history 无去重/上限/TTL(上游取舍,相似问句
+靠余弦聚类;治理随 eval 域);④embedding 换模型需 bump emb 缓存版本前缀 v2
++维度迁移新迁移(类比 008 密钥轮换);⑤writeback 同步阻塞问答响应 P99
+(emb 缓存命中近零,上游 afterCommit 同款);⑥fetch 的优先级读-判-写非原子
+(管理低频操作,并发 fetch+upload 理论 TOCTOU);⑦内省列注释未进润色链路
+(_introspect_all_on 不查 col_description,润色质量增强点);⑧datasource⇄rag
+包级双向依赖(服务层已端口反转,router 适配层组合与 chat 同构,可后续上移
+组合根);⑨rag 拒读若未来把 rag 加入任何执行 search_path,须重估裸名形态;
+⑩HNSW+WHERE 过滤召回不足 topK(pgvector 已知:索引候选先于过滤,规模化后
+   可能返回少于 LIMIT——规模化前评估 hnsw.iterative_scan 或监控召回数,
+   /goal R2-B1);⑪reindex 长事务锁窗口(delete_all 先执行,分钟级 LLM 润色后
+   才 commit,窗口内同 (tenant,ds) 并发 upload 的冲突键会阻塞——可改先润色
+   后删写,/goal R2-R2);⑫中文全文路局限:'simple' 不切中文,tsv 与问句 token
+   须整段一致才命中,中文场景全文路仅精确名/英文词有效(上游同构局限,已在
+   009 design D3 声明;zhparser/自研切分挂账,/goal R2-S3);⑬emb 缓存与回调
+   已有维度程序防线(rag_embedding_dim,漂移按未命中/降级),但换模型仍须
+   bump v1 前缀+维度迁移;⑭AgentRagClient 每请求新建 httpx client(500 表
+   =500 次 TLS 握手,可复用连接);⑮agent apiclient rag_retrieve 对「200 但
+   非 JSON」网关形态会裸抛(概率极低,与 fetch_schema 既有形态一致)。
+**rag 单表知识编辑端点(rag-refine 域)未做**:MANUAL_EDIT/FEEDBACK_REFINED
+枚举值位与优先级已留,人工精修现经上传链路;反馈精修随 feedback 域远期。
 **008 挂账(design Open Questions)**:①密钥轮换无重加密通道——轮换
 KM_DATASOURCE_ENCRYPT_KEY 后存量密文全不可解,以「编辑重填密码」逐源修复,
 随运营事件评估专用工具;②多 worker 池失效——PoolEvictor 只清进程内池,

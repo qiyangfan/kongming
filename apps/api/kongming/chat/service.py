@@ -17,6 +17,7 @@ from kongming.chat.agent_client import AgentClient, AgentUnavailable
 from kongming.chat.models import ChartSuggestion, suggest_chart
 from kongming.chat.repository import ChatRepository
 from kongming.datasource.ports import DatasourceChecker
+from kongming.rag.ports import QueryHistoryWriter
 
 log = logging.getLogger(__name__)
 
@@ -89,12 +90,17 @@ class SessionMessage:
 
 class ChatService:
     def __init__(
-        self, session: AsyncSession, agent: AgentClient, ds_checker: DatasourceChecker
+        self,
+        session: AsyncSession,
+        agent: AgentClient,
+        ds_checker: DatasourceChecker,
+        history_writer: QueryHistoryWriter | None = None,  # 009:成功 SQL 回写(可选注入)
     ) -> None:
         self._s = session
         self._repo = ChatRepository(session)
         self._agent = agent
         self._ds_checker = ds_checker
+        self._history_writer = history_writer
 
     async def _resolve_tenant(self, user_id: str, tenant_key: str | None) -> tuple[str, str]:
         """X-Tenant-Id 解析:显式传入查白名单;缺省取用户默认租户(default 优先,
@@ -243,6 +249,24 @@ class ChatService:
             except SQLAlchemyError:
                 log.warning("assistant 消息落库失败(会话可能已被删除) session=%s", sid)
                 await self._s.rollback()
+
+        # 成功 SQL 回写 query_history(009):最终 SUCCESS 判定后;独立 try 不阻断;
+        # persist=False 为测试通道不触发;空结果的成功查询同样回写(不依赖行数)。
+        if (
+            reply.success
+            and persist
+            and self._history_writer is not None
+            and reply.sql.strip()
+        ):
+            try:
+                await self._history_writer.writeback(
+                    tenant_id=tenant_id,
+                    datasource_key=datasource_key,
+                    question=question,  # 原始问句(与审计口径一致)
+                    sql_text=reply.sql,
+                )
+            except Exception:  # noqa: BLE001  # 回写永不阻断主流程(writeback 内已兜底)
+                log.warning("query_history 回写异常(不阻断)", exc_info=True)
 
         return ChatOutcome(
             session_id=sid,

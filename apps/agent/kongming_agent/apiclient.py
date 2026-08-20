@@ -52,6 +52,14 @@ class SchemaMeta:
     truncated: bool
 
 
+@dataclass(frozen=True)
+class RagContext:
+    """/internal/rag/retrieve 召回结果(009)。schema_hint 空=零命中(回退内省)。"""
+
+    schema_hint: str
+    history_sql: str = ""
+
+
 class ApiClient:
     def __init__(self, settings: Settings) -> None:
         self._base = settings.api_base_url.rstrip("/")
@@ -129,6 +137,32 @@ class ApiClient:
             for t in data.get("tables") or []
         ]
         return SchemaMeta(tables=tables, truncated=bool(data.get("truncated")))
+
+    async def rag_retrieve(
+        self, *, tenant_key: str, datasource_key: str, question: str
+    ) -> RagContext | None:
+        """三路召回(009):问句用 understand 产出的改写问句(语义完整);
+       任何失败返回 None(retrieve 回退实时内省,不抛错)。"""
+        try:
+            resp = await self._post(
+                "/internal/rag/retrieve",
+                {
+                    "tenant_key": tenant_key,
+                    "datasource_key": datasource_key,
+                    "question": question,
+                },
+            )
+        except httpx.HTTPError as e:
+            log.warning("rag_retrieve 回调异常: %s", e)
+            return None
+        if resp.status_code != 200:
+            log.warning("rag_retrieve 被拒(HTTP %s)", resp.status_code)
+            return None
+        data = resp.json()
+        return RagContext(
+            schema_hint=str(data.get("schema_hint") or ""),
+            history_sql=str(data.get("history_sql") or ""),
+        )
 
     async def _post(self, path: str, payload: dict[str, object]) -> httpx.Response:
         async with httpx.AsyncClient(

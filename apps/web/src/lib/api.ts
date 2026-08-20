@@ -82,10 +82,13 @@ export function tryRefresh(): Promise<boolean> {
 }
 
 function doFetch(path: string, init?: RequestInit): Promise<Response> {
+  // multipart(FormData)不设 Content-Type——浏览器须自动生成 boundary,手设会致
+  // 服务端解析不出表单字段(009 冒烟实证);JSON 请求显式声明
+  const isForm = init?.body instanceof FormData;
   return fetch(`${BASE}${path}`, {
     ...init,
     headers: {
-      "Content-Type": "application/json",
+      ...(isForm ? {} : { "Content-Type": "application/json" }),
       ...tenantHeader(),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...init?.headers,
@@ -124,6 +127,9 @@ export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "POST", body: JSON.stringify(body) }),
+  /** multipart 上传(009 知识库文档);浏览器自动设 boundary,勿手写 Content-Type */
+  postForm: <T>(path: string, form: FormData) =>
+    request<T>(path, { method: "POST", body: form }),
   put: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),

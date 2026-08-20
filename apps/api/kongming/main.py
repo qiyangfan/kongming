@@ -23,6 +23,8 @@ from kongming.db import get_sessionmaker
 from kongming.internal.executor import dispose_read_engines
 from kongming.internal.meta import router as internal_meta_router
 from kongming.internal.router import router as internal_router
+from kongming.rag.router import internal_router as rag_internal_router
+from kongming.rag.router import router as rag_router
 from kongming.system.router import register_system_error_handlers
 from kongming.system.router import router as system_router
 
@@ -52,6 +54,8 @@ app.include_router(internal_meta_router)
 app.include_router(chat_router)
 app.include_router(system_router)
 app.include_router(datasource_router)
+app.include_router(rag_router)
+app.include_router(rag_internal_router)
 register_auth_error_handlers(app)
 register_system_error_handlers(app)
 register_datasource_error_handlers(app)

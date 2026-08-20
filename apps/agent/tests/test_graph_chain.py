@@ -9,7 +9,13 @@
 import pytest
 
 from kongming_agent import deps
-from kongming_agent.apiclient import MetaColumn, MetaTable, SchemaMeta, SqlExecuteOutcome
+from kongming_agent.apiclient import (
+    MetaColumn,
+    MetaTable,
+    RagContext,
+    SchemaMeta,
+    SqlExecuteOutcome,
+)
 from kongming_agent.graph.build import MAX_RETRY, get_graph
 from kongming_agent.graph.state import AgentState
 
@@ -32,6 +38,9 @@ class ScriptedApi:
     def __init__(self, outcomes: list[SqlExecuteOutcome]) -> None:
         self.outcomes = list(outcomes)
         self.calls = 0
+
+    async def rag_retrieve(self, **kw: object) -> RagContext | None:
+        return None  # 零命中回退内省(009 回归路径)
 
     async def fetch_schema(self, **kw: object) -> SchemaMeta:
         return SchemaMeta(

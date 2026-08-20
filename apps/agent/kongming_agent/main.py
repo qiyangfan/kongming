@@ -1,12 +1,21 @@
 """Kongming Agent 面入口(仅内网,内部令牌认证,ADR-002)。
 
-唯一业务端点 POST /query:跑一次 NL2SQL 问答图(同步,一次性返回)。
+业务端点:POST /query(NL2SQL 问答图,同步一次性返回)+
+/internal/embedding(批量向量化)+ /internal/describe-table(表元数据润色,
+009)——后两者供控制面回调(api 持 DB、agent 持 LLM key 的分工)。
 """
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
 
+from kongming_agent import deps
+from kongming_agent.describer import (
+    ColumnSpec,
+    DescribeError,
+    TableSpec,
+    describe_table,
+)
 from kongming_agent.graph.build import get_graph
 from kongming_agent.graph.state import AgentState
 from kongming_agent.llm import LlmError
@@ -36,6 +45,74 @@ async def require_internal_token(request: Request, call_next):  # type: ignore[n
 @app.get("/healthz", tags=["ops"])
 async def healthz() -> dict[str, str]:
     return {"status": "ok", "app": _settings.app_name}
+
+
+class EmbeddingIn(BaseModel):
+    """批量向量化请求(009;api 回调,问句/知识文本 → 向量)。"""
+
+    texts: list[str] = Field(min_length=1)
+
+
+class EmbeddingOut(BaseModel):
+    vectors: list[list[float]]
+
+
+@app.post("/internal/embedding", response_model=EmbeddingOut, tags=["internal"])
+async def embedding(req: EmbeddingIn) -> EmbeddingOut:
+    """批量向量化:embedding key 仅 agent 面持有(ADR-002);上限由 llm 客户端校验。"""
+    if len(req.texts) > _settings.embedding_max_texts:
+        raise HTTPException(status_code=422, detail="texts 超单批上限")
+    try:
+        vectors = await deps.get_llm().embed(req.texts)
+    except LlmError as e:
+        # LLM 层失败收敛 503:api 侧按「embedding 不可用」降级(纯全文路/回写跳过)
+        raise HTTPException(status_code=503, detail=f"embedding unavailable: {e}") from e
+    return EmbeddingOut(vectors=vectors)
+
+
+class DescribeColumnIn(BaseModel):
+    name: str
+    type: str = ""
+    comment: str = ""
+
+
+class DescribeTableIn(BaseModel):
+    """表结构润色请求(009;api 回调——内省产物,非业务行数据)。"""
+
+    table_name: str
+    schema_name: str
+    table_comment: str = ""
+    columns: list[DescribeColumnIn] = Field(min_length=1)
+
+
+class DescribeTableOut(BaseModel):
+    enriched: bool  # False=本次失败(不可润色),api 侧自行降级纯结构
+    table_comment: str = ""
+    columns_comment: dict[str, str] = {}
+    sample_queries: list[str] = []
+
+
+@app.post("/internal/describe-table", response_model=DescribeTableOut, tags=["internal"])
+async def describe_table_endpoint(req: DescribeTableIn) -> DescribeTableOut:
+    """LLM 润色表元数据;失败不抛 5xx(enriched=False),由 api 侧降级不阻断整批。"""
+    spec = TableSpec(
+        table_name=req.table_name,
+        schema_name=req.schema_name,
+        table_comment=req.table_comment,
+        columns=[
+            ColumnSpec(name=c.name, type=c.type, comment=c.comment) for c in req.columns
+        ],
+    )
+    try:
+        described = await describe_table(spec, deps.get_llm())
+    except DescribeError:
+        return DescribeTableOut(enriched=False)
+    return DescribeTableOut(
+        enriched=True,
+        table_comment=described.table_comment,
+        columns_comment=described.columns_comment,
+        sample_queries=described.sample_queries,
+    )
 
 
 class QueryIn(BaseModel):

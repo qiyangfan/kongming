@@ -18,6 +18,12 @@ _READONLY_ROOTS = (exp.Select, exp.Union, exp.Subquery)
 RESERVED_TABLE_PREFIXES = ("sys_", "chat_")
 RESERVED_TABLE_NAMES = frozenset({"alembic_version", "user_identities"})
 
+# 保留 schema(009 评审 B2):rag 知识两表含全租户问句/成功 SQL/表结构,
+# 显式限定名(rag.query_history)不受 search_path 约束,按表引用的 schema 段拒;
+# 两表末段名不进 RESERVED_TABLE_NAMES——query_history 等是常见业务表名,
+# 末段名保留会误伤真实业务库(rag 不在任何执行 search_path 内,裸名无通路)。
+RESERVED_SCHEMA_NAMES = frozenset({"rag"})
+
 # 危险函数拒用(R3 侧报实证:SELECT pg_read_file(...) 经 Select 根全链路过,
 # dev 库 kongming 为 superuser 时可读服务器文件;pg_sleep 属资源滥用)。
 # 按 sqlglot 归一化函数名小写比对;只读系统函数(current_setting 等)不在列。
@@ -147,6 +153,9 @@ def check_reserved_tables(sql: str) -> Verdict:
             name = table.name.lower()
             if name in cte_names:
                 continue  # 非保留 CTE 名引用(保留别名已在上方拒掉)
+            # 保留 schema:显式限定名不受 search_path 约束,按 schema 段拒
+            if table.db and table.db.lower() in RESERVED_SCHEMA_NAMES:
+                return Verdict(False, f"RESERVED_TABLE: {table.db}.{table.name}")
             if name.startswith(RESERVED_TABLE_PREFIXES) or name in RESERVED_TABLE_NAMES:
                 return Verdict(False, f"RESERVED_TABLE: {table.name}")
     return Verdict(True)

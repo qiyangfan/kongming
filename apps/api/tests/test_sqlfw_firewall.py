@@ -117,7 +117,26 @@ RESERVED_BLOCK = [
     "WITH sys_user AS (SELECT password_hash FROM public.sys_user) SELECT * FROM sys_user",
     "WITH g AS (SELECT password_hash FROM public.sys_user) SELECT * FROM g",
     "WITH sys_x AS (SELECT 1) SELECT * FROM sys_x",            # 保留名 CTE 别名本身即拒
+    # rag 知识两表(009 评审 B2:显式 schema 限定名,search_path 管不了)
+    "SELECT question, sql_text FROM rag.query_history",
+    "SELECT * FROM rag.table_descriptions",
+    'SELECT * FROM "rag".query_history',                       # 引号限定形态(小写等价)
+    "WITH g AS (SELECT * FROM rag.query_history) SELECT * FROM g",  # CTE 体内限定名
+    "SELECT * FROM tenant_default.goods g JOIN rag.table_descriptions t ON true",  # JOIN 夹带
 ]
+
+
+def test_reserved_rag_schema_names_not_overblocked() -> None:
+    """rag 拒读只按显式 schema 限定名判:通用业务表名(非 rag schema)不误伤——
+    query_history 等是常见业务表名,末段名保留会误伤真实业务库(009 D14)。"""
+    from kongming.sqlfw.firewall import check_reserved_tables
+
+    for sql in (
+        "SELECT * FROM tenant_default.query_history",   # 业务库同名表(显式非 rag schema)
+        "SELECT * FROM tenant_sakila.table_descriptions",
+    ):
+        v = check_reserved_tables(sql)
+        assert v.passed, f"{sql!r} 应放行(业务库同名表),实际 {v!r}"
 
 
 def test_reserved_tables_blocked() -> None:
