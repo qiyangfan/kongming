@@ -115,6 +115,29 @@ async def describe_table_endpoint(req: DescribeTableIn) -> DescribeTableOut:
     )
 
 
+class TitleIn(BaseModel):
+    """会话标题改写请求(010;api 回调,首轮成功后异步触发)。"""
+
+    question: str = Field(min_length=1, max_length=2000)
+
+
+class TitleOut(BaseModel):
+    rewritten: bool  # False=本次失败(降级),api 侧保持截断标题
+    title: str = ""
+
+
+@app.post("/internal/rewrite-title", response_model=TitleOut, tags=["internal"])
+async def rewrite_title_endpoint(req: TitleIn) -> TitleOut:
+    """LLM 会话标题改写;失败不抛 5xx(rewritten=False),api 侧保持截断标题。"""
+    from kongming_agent.titler import TitleError, rewrite_title
+
+    try:
+        title = await rewrite_title(req.question, deps.get_llm())
+    except TitleError:
+        return TitleOut(rewritten=False)
+    return TitleOut(rewritten=True, title=title)
+
+
 class QueryIn(BaseModel):
     """控制面 → agent 的问答请求(nl2sql spec「控制面回调 Agent 面」)。"""
 

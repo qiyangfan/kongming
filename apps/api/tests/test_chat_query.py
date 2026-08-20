@@ -26,12 +26,19 @@ class FakeAgent:
         self.reply = reply or AgentReply(success=True, verdict="PASS")
         self.boom = boom
         self.calls: list[dict[str, object]] = []
+        # 010 标题改写:缺省 None=降级(保持截断标题);赋值字符串即模拟改写成功
+        self.title_reply: str | None = None
+        self.title_calls: list[str] = []
 
     async def query(self, **kw: object) -> AgentReply:
         self.calls.append(kw)
         if self.boom:
             raise AgentUnavailable("connect failed")
         return self.reply
+
+    async def rewrite_title(self, *, question: str) -> str | None:
+        self.title_calls.append(question)
+        return self.title_reply
 
 
 @pytest.fixture

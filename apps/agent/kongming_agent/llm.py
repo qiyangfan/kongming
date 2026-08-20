@@ -5,6 +5,7 @@ ADR-002 注记:LLM key 是 agent 面唯一持有的外部凭证(非数据凭证)
 """
 
 from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
 from kongming_agent.settings import Settings
 
@@ -39,18 +40,34 @@ class LlmClient:
                 timeout=settings.embedding_timeout_sec,
             )
 
-    async def chat(self, system: str, user: str, *, temperature: float = 0.2) -> str:
+    async def chat(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.2,
+        max_tokens: int | None = None,
+    ) -> str:
         if self._client is None:
             raise LlmError("KM_AGENT_LLM_API_KEY 未配置")
+        # max_tokens 缺省不传(供应商默认),仅轻量端点(如标题改写)显式封顶(010);
+        # 分支写法:openai 类型 None ≠ 省略,**kwargs 过不了 mypy 重载
+        messages: list[ChatCompletionMessageParam] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
         try:
-            resp = await self._client.chat.completions.create(
-                model=self._model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                temperature=temperature,
-            )
+            if max_tokens is None:
+                resp = await self._client.chat.completions.create(
+                    model=self._model, messages=messages, temperature=temperature
+                )
+            else:
+                resp = await self._client.chat.completions.create(
+                    model=self._model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
         except Exception as e:
             raise LlmError(f"LLM 调用失败: {e}") from e
         return (resp.choices[0].message.content or "").strip()

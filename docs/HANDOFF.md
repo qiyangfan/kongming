@@ -1,31 +1,36 @@
 # HANDOFF — Kongming 交接文档
 
-> 最后更新:2026-08-20(**009 RAG 三路召回+知识库已提交并归档**:
-> archive/2026-08-20-009-rag-knowledge,28/28 任务,delta 已 sync 六主 spec
-> ——rag(五 requirement 修订)/knowledge(润色+reindex 定形)/datasource
-> (元数据抓取 REMOVED 收编+不可改挪位注册)/nl2sql-agent(Schema 智能选取
-> 召回优先+内省兜底)/sql-execution(rag 拒读)/web-admin(五子页);
-> 提案评审+实施复审+/goal R1/R2 四轮审查全清零;真 LLM 冒烟 12 项全过
-> (抓 3 真 bug);api 333+agent 73+web 全绿、7 契约 KEPT;
-> **下一棒=路线图会话体验深化**(标题 LLM 改写/时间分组/搜索/导出/EXPLAIN——
-> chat spec 已立约行为面,端点未立);rag 后续挂账见「已知 TODO」009 段)。
+> 最后更新:2026-08-20(**010 会话体验深化已提交并归档**:
+> archive/2026-08-20-010-chat-experience,30/30 任务,delta 已 sync chat 主
+> spec——会话持久化(标题两阶段+时间分组)/结果导出/EXPLAIN/问答查询端点
+> 四 requirement 修订 + 会话重命名/会话搜索两 requirement 新增;
+> R1 双路评审 + /goal R1+R2 四轮审查清零;真 LLM 冒烟全过;
+> api 379+agent 85+web 全绿、7 契约 KEPT;**下一棒=图表增强(scatter/
+> 手动切换/PNG,chat spec 已立约残余)或 rag 挂账 15 项**。
+> 清空上下文/新会话先读本文与 `AGENTS.md`,
+> 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
 > 清空上下文/新会话先读本文与 `AGENTS.md`,
 > 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
 
 ## 新会话开工指引(最先看这里)
 
-1. **009 RAG 三路召回+知识库:已提交并归档**(archive/2026-08-20-009-rag-
-   knowledge,delta 已 sync 六主 spec)。下一棒=**会话体验深化**(chat spec
-   已立约行为面,端点未立)或 rag 挂账(见「已知 TODO」009 段 15 项)。
-   009 已清偿 008 三笔挂账:import-linter rag_admin 猜测名→kongming.rag、
-   「不可改」scenario 挪位 datasource 注册 requirement、fetch-metadata 端点
-   落位 /system/rag/*(datasource spec「元数据抓取」requirement 已 REMOVED
-   收编进 knowledge 域)。
+1. **010 会话体验深化:已提交并归档**(archive/2026-08-20-010-chat-experience,
+   delta 已 sync chat 主 spec)。下一棒=**图表增强**(scatter/手动切换/PNG,
+   chat spec「图表可视化」已立约残余)或 **rag 挂账**(见「已知 TODO」009 段
+   15 项)/010 挂账 18 项。010 顺手修了**共享组件级缺陷**:scroll-area Viewport
+   加 `[&>div]:block!`(Radix display:table shrink-to-fit 在不可断行 CJK 长内容
+   +窄视口下把内容撑出视口;此前侧栏无长标题从未暴露)。010 零表结构变更、
+   零新权限点(全复用 chat:execute)、零种子变更;新依赖 openpyxl(+types)。
 2. 质量底线:安全规则类测试先行;收工前 `make check` 全绿 + 冒烟记录;
-   改 api 必跑 `make contracts` 并提交产物。
+   改 api 必跑 `make contracts` 并提交产物。**本地门禁只有 ruff check,
+   不要主动跑 `ruff format`**(010 教训:全仓非 format 管理,误跑致 52 文件
+   格式噪音,靠 git show 逐文件恢复回填)。**真建只读池的测试模块 teardown
+   必须 dispose_read_engines()**(010 实证:test_datasource_admin「不建池」
+   断言被先行模块的池残留污染)。
 3. **prompt 资产纪律**:apps/agent/graph/prompts.py 与 nodes.py 的 LLM 模板
    为上游逐字移植(全角标点!),改动前先读文件头注释——手抄易丢全角,
    建议脚本对拍(005 实操:两次手滑半角,靠码点校验脚本兜底)。
+   agent/titler.py(010)是全新撰写资产,不适用此纪律。
 
 ## 项目一句话
 
@@ -63,11 +68,68 @@
    (DOM 快照可读)——GUI 测试一律用 Playwright MCP 工具组
    (`mcp__plugin_playwright_playwright__browser_*`,独立管道,002 已验证可用)。
 
-## 当前状态(截至 009 提交并归档;008 及此前已归档)
+## 当前状态(截至 010 提交并归档;001–009 及此前已归档)
 
 - git:main 分支(以 git log 为准);无远程、未 push。
   分支策略:主干开发不拉 dev,协作按变更开短命 feature。
-- openspec:001–009 全部归档;活动变更为零。
+- openspec:**001–010 全部归档;活动变更为零**。
+- **010 架构总览**:零表结构变更/零新权限点(复用 chat:execute)/零种子变更。
+  新端点 4:`POST /chat/explain`(message_id 引用,**优于上游**:不收裸 SQL,
+  被分析 SQL 恒为落库 agent 产出;服务端复检后才拼 `EXPLAIN (FORMAT JSON)`,
+  防火墙零改动、永不 ANALYZE;数据源取会话落库 datasource_key 快照)、
+  `POST /chat/export`(columns+rows 不重跑 SQL;CSV=UTF-8 BOM+CRLF+RFC 4180+
+  **公式注入中和**;xlsx=表头加粗+自算列宽东亚宽字符按 2 计;rows 传输层
+  max_length=10000 解析期拒,service 截断双闸)、`PATCH /chat/sessions/{id}`
+  (原子归属 UPDATE)、`GET /chat/sessions?q=`(标题 ILIKE OR user 问句
+  EXISTS,ESCAPE 字面化)。agent 新端点 `POST /internal/rewrite-title`
+  (009 图外代理范式;prompt 全新撰写,上游无此资产)。
+- **010 关键实现决策**:internal/service 前段(租户→数据源→绑定→初检→改写→
+  复检)提取 `_prepare` 供 execute/explain 共享(防线单一事实源,不复制安全
+  逻辑);chat 域 ExplainRunner 端口反转 + router 组合根 `_InternalExplainRunner`
+  (chat.service 不可间接 import internal——携 sqlalchemy,007 uuid7 同款约束);
+  标题改写=首个 SUCCESS 轮 BackgroundTasks(独立 sessionmaker 会话)+ 守卫读
+  (当前标题≠首问截断值短路省 LLM 调用)+ 条件写(WHERE title=expected,
+  人工重命名永不被盖;不刷 updated_at 防顶列表);`_like_pattern` 上移
+  kongming/like.py(system/datasource/chat 三域共享,消两份拷贝)。
+- **010 R1 双路评审(0 阻断 0 严重,8 建议全修)**:api——导出 rows 传输层
+  上限(原截断在解析后挡不住请求体)、xlsx 控制字符 IllegalCharacterError
+  裸 500(ILLEGAL_CHARACTERS_RE 剥除)、CSV 公式注入中和(=+-@\t\r 前置 ',
+  数值不中和)、title_tasks 死参数删除、_Prepared.engine 宽放改 AsyncEngine、
+  孤代理 encode errors=replace;web——执行计划失败永久锁死加重试钮、
+  RenameDialog 补 DialogDescription+role=alert、搜索换词骨架闪屏改
+  placeholderData、downloadBlob 锚点入 DOM+延迟 revoke(Safari 坑)、
+  formatPlanNode 非数值 cost 不渲染 NaN。观察挂账见「已知 TODO」010 段。
+- **010 /goal 审查循环(R1 换切口自查+R2 双路深挖,清零)**:R1(契约对拍/
+  数据语义边界/并发推演)零新发现(契约 q maxLength 在 anyOf 内/参差行不炸/
+  反斜杠字面 0 命中/q 超长 422 逐项实证)。R2 两路:上游/spec 对拍路 3 建议
+  (titler max_tokens≤60 承诺未兑现——LlmClient.chat 加形参 titler 传 60;
+  条件写竞态落败无直证——补 RacingAgent 回调内改名任务级用例+repo 行数用例;
+  tasks/design 文本漂移 3 处回填)+8 观察挂账;时序/生命周期路 1 建议
+  (**标题后台任务持控制面池连接跨 30s LLM 调用,并发 ≥10 可耗尽 pool 5+5
+  连累无关端点**——修=守卫读短会话释放、LLM 池外等待、回写另开短会话;
+  探针实证 checkedout 1→0)+4 观察(双调 LLM 窗口条件写兜底无害/docstring
+  口径/计划跨会话重拉/租户切换保留搜索词语义自洽)。探针实证:预校后禁用
+  窗口 400 优雅/evict 对飞行中连接无影响(SQLAlchemy dispose 语义)/审计
+  失败不影响响应(与 execute 同构)。
+- **010 冒烟(2026-08-20,真 LLM,curl 7 项+UI 8 项全过)**:发问→截断标题→
+  首个 SUCCESS 后 LLM 改写回写(「sakila 里有多少部电影」→「sakila数据库电影
+  数量」,查库实证)→重命名(去空白)→次轮人工标题不被覆盖→搜索(标题词/
+  问句词/通配符 % 字面化)→导出 CSV(BOM efbbbf+CRLF+Content-Disposition
+  时间戳中文名)+xlsx(openpyxl 读回表头加粗)→EXPLAIN(计划树 Aggregate
+  cost=13.76;审计 EXPLAIN 形态;他人消息 404)→诱导删除 LLM WHERE FALSE
+  规避(数据无损,已知行为)。UI:分组(今天/昨天/近7天)/搜索过滤/菜单
+  重命名(对话框 Enter 提交,侧栏即时更新)/删除受控确认开合/计划懒加载
+  渲染/CSV 下载(服务器文件名)。**UI 冒烟抓回 1 共享组件真缺陷**:
+  scroll-area Radix display:table shrink-to-fit 把 CJK 长标题行横向撑出
+  视口(图标/组标全挤出可视区)——Viewport 加 [&>div]:block! 全局修复,
+  复验全绿。**Playwright MCP 操作经验更新**:Radix 菜单项选择=trigger 派
+  pointerdown/up 开菜单 → page.evaluate 里 DOM click() 菜单项(direct click
+  与纯 pointer 序列都选不中)。
+- **010 测试面**:api 379(+46:explain 11+export 16+搜索重命名 12+title 7);
+  agent 85(+12 titler);conftest 无新增清理表(零表结构变更)。
+  **测试序坑实证**:模块级全局只读池——新测试模块真建池后须 teardown
+  dispose_read_engines(),否则 test_datasource_admin「不建池」断言被污染
+  (test_chat_explain 已接线)。
 - **009 架构总览**:rag 两表为 baseline 既有资产(0001 已建 rag schema/四元
   唯一键/HNSW+GIN),0006 只做增量(source_type CHECK 换五枚举+召回辅助索引,
   ALTER 型,空表瞬时)。信任边界方向:api 持 pgvector 与全部编排,agent 持
@@ -515,14 +577,15 @@
 - 前端:登录页五家联邦按钮数据驱动;simple-icons 覆盖 GitHub/Google/微信系,
   **钉钉/飞书 simple-icons@16 未收录 → 按例外条款内联官方 mark**;favicon.svg 已补
   (朱砂底白色羽扇)。003 冒烟:五家图标实测渲染正确。
-- 质量:api ruff/mypy strict/lint-imports/pytest **331**(认证+datascope+执行路由+
-  防火墙+chat+meta+会话端点+system 管理面+datasource 68+**rag 58**,真实 PG+Redis)+
-  agent 同门禁 **72**(+describer 14+retrieve 切换 5) + web tsc/eslint 全绿;
+- 质量:api ruff/mypy strict/lint-imports/pytest **379**(认证+datascope+执行路由+
+  防火墙+chat+meta+会话端点+system 管理面+datasource 68+rag 58+**chat 体验 44**,
+  真实 PG+Redis)+ agent 同门禁 **85**(+titler 12) + web tsc/eslint 全绿;
   CI api job 已带 pg/redis services(未在真实 runner 验证——push 后首验)。
 - 契约:openapi.json 含 /auth/* + /internal/sql/execute + /chat/query +
   /internal/meta/schema + /chat/sessions(列表/消息/删除)+
   /system/* 16 端点(007)+ /system/datasource/* 8 端点(008)+
-  **/system/rag/* 5 端点 + /internal/rag/retrieve(009)**;
+  /system/rag/* 5 端点 + /internal/rag/retrieve(009)+
+  **/chat/explain + /chat/export + PATCH /chat/sessions/{id} + sessions?q(010)**;
   端点落定后 `make contracts` 已重生成,web tsc 过。
 
 ## 已定死的决策(不再议,引用即终)
@@ -541,16 +604,39 @@
 | RBAC 管理面 | 内置角色按 role_key 集合判(SUPER_ADMIN/DEVELOPER)禁删;role_key 创建后不可改+传输层大写蛇形 pattern;超管按 admin_username 判禁删/禁禁/禁剥 SUPER_ADMIN;角色/部门物理删除(前置校验+级联清绑定+审计),仅用户软删(username 唯一=部分索引软删感知);管理面写操作与业务同事务审计 | rbac + web-admin spec(007) |
 | 动态数据源 | PG-only;凭证 AES-GCM(base64 iv‖ct+tag,prod 密钥 fail-closed,dev 固定密钥降级);key 小写蛇形+保留字 default 禁注册+创建后 key/租户归属不可改;管理端点全局视角+创建显式指定租户;非法 key 同形 400(不存在/禁用/越属,审计分类可溯);连接信息变更/启停/删除 commit 后定向 evict,仅改 name 不动池;物理删除;选项接口首位合成 default 项 | datasource + internal-meta + web-admin spec(008) |
 | RAG/知识库 | rag 两表 baseline 既定(四元唯一键 tenant+ds+schema+table,1536 维+HNSW+tsv GIN);三路召回=向量+全文('simple')RRF k=60 top5 融合+query_history 独立强 few-shot(不进融合,≤3 条);tenant+ds 双过滤;召回零命中/失败回退实时内省;成功 SQL 回写(原始问句,最终 SUCCESS 判定);覆盖优先级 INTROSPECTION<AI_GENERATED<MANUAL_UPLOAD<MANUAL_EDIT<FEEDBACK_REFINED(自动不覆盖人工;reindex 显式清空例外);embedding 独立配置(缺省回退 llm_*,上游 028 教训)不随主模型路由;rag schema 显式限定名执行面拒读(末段名不进清单防误伤);缓存 emb 24h/ctx 10min,写操作 commit 后 SCAN 精确失效,空结果不写缓存 | rag + knowledge + nl2sql-agent + sql-execution + web-admin spec(009) |
+| 会话体验 | 标题两阶段:初始=首问前 30 字符,首个 SUCCESS 轮后 LLM 改写(BackgroundTasks+独立会话;守卫读首问截断值短路+条件写 WHERE title=expected,人工重命名永不覆盖;改写不刷 updated_at);EXPLAIN=message_id 引用(不收裸 SQL,服务端复检后拼 EXPLAIN (FORMAT JSON),永不 ANALYZE,数据源取会话快照);导出=传 columns+rows 不重跑 SQL,CSV BOM+CRLF+公式注入中和,xlsx 自算列宽,rows 传输层上限 10000;搜索=标题 ILIKE OR user 问句 EXISTS(共享 like_pattern 转义);重命名=原子归属 UPDATE;全端点复用 chat:execute 无新权限点 | chat spec(010 delta) |
 
 ## 下一步(路线图梯队,按序)
 
-1. **会话体验深化**(标题 LLM 改写/时间分组/搜索/导出 CSV+Excel/EXPLAIN——
-   chat spec 已立约的行为面,端点未立,随后续变更;「会话-数据源绑定」挂账
-   见已知 TODO ⑤)。
-2. rag/knowledge 后续挂账(见「已知 TODO」009 段)视优先级评估。
+1. **图表增强**(chat spec「图表可视化」未兑现残余:scatter 类型/手动切换
+   UI/PNG 下载——010 已立 Non-goal,另起变更)。
+2. rag/knowledge 后续挂账(见「已知 TODO」009 段 15 项)与 010 挂账 18 项
+   视优先级评估;query-streaming 流式输出;反馈闭环(feedback 域)。
 
 ## 已知 TODO(代码内标注,非缺陷)
 
+**010 挂账(R1/R2 评审观察项)**:①用户手动把标题改成与首问截断值逐字相同时,
+改写保护失效(守卫/条件写都按值判定;概率极低,影响=一次自动改写);
+②AgentClient.rewrite_title「永不抛」的理论小孔——httpx client 构造遇非法
+base_url 抛非 HTTPError(title_tasks 外层 except Exception 已兜底);
+③chat.service 不在 import-linter 契约内(HEAD 既有:service 直接构造
+repository 致间接 import sqlalchemy;system/datasource/rag 契约均含 .service,
+chat 域为既有不一致,收口需 service 构造反转);④分组函数固定毫秒日界,
+DST 切换日偏 1 小时(zh-CN 无 DST,记录);⑤删除确认框 busy 期「再想想」
+可点(删除请求已发出,结果正确,文案语义可议);⑥RenameDialog 打开态遇
+他端并发改名 refetch 会冲掉编辑中输入(窗口极小);⑦导出审计不落
+sys_oper_log(数据外发可见性,随 audit 域评估);⑧搜索 ILIKE 全扫不加索引
+(个人侧栏量级;规模化评估 tsv/GIN);⑨标题改写仅新会话首个 SUCCESS 轮触发,
+老会话回填策略随运营需要另议;⑩export_max_rows 调大超 10000 需同步
+ExportIn.rows 传输层上限(design R1 注记);⑪同会话连续成功轮存在双调 LLM
+窗口(守卫读时序;条件写兜底内容无害,代价仅重复 token,R2 探针实证);
+⑫执行计划展开态不跨会话切换保留(useState 随卸载,重展开重拉一次,幂等);
+⑬租户切换保留搜索词(所见即所滤,语义自洽,清空与否属产品取舍);
+⑭时间分组/计划树渲染无前端单测(web 无测试基座,Playwright 冒烟覆盖);
+⑮xlsx 数值 int 原生 vs 上游 doubleValue 显示差异(Kongming 更保真,有意);
+⑯formatPlanNode 未移植上游 Node_Type 别名(PG 恒为空格形态,无缺口);
+⑰重命名长度校验前置于 strip(带空白 201 字 strip 后 ≤200 会被 422,理论边角);
+⑱导出按钮 columns>0 即显,空 rows 可导出仅表头文件(无害)。
 **009 挂账(design Open Questions/复审 O 级)**:①datasource 删除后残留知识
 条目不级联(召回需 ds 校验通过,天然 fail-closed;级联策略随 multitenant
 管理变更再定);②fetch-metadata 同步端点大库(>100 表)时长不可控(异步化

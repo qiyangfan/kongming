@@ -208,6 +208,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Session */
+        delete: operations["delete_session_chat_sessions__session_id__delete"];
+        options?: never;
+        head?: never;
+        /** Rename Session */
+        patch: operations["rename_session_chat_sessions__session_id__patch"];
+        trace?: never;
+    };
     "/chat/sessions/{session_id}/messages": {
         parameters: {
             query?: never;
@@ -225,7 +243,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/chat/sessions/{session_id}": {
+    "/chat/export": {
         parameters: {
             query?: never;
             header?: never;
@@ -234,9 +252,26 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post?: never;
-        /** Delete Session */
-        delete: operations["delete_session_chat_sessions__session_id__delete"];
+        /** Export Result */
+        post: operations["export_result_chat_export_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/explain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Explain Message */
+        post: operations["explain_message_chat_explain_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -915,6 +950,44 @@ export interface components {
              */
             status: "ACTIVE" | "DISABLED";
         };
+        /**
+         * ExplainIn
+         * @description message_id 引用形态(010 design D2):客户端不可提交裸 SQL。
+         */
+        ExplainIn: {
+            /**
+             * Message Id
+             * Format: uuid
+             */
+            message_id: string;
+        };
+        /** ExplainOut */
+        ExplainOut: {
+            /** Success */
+            success: boolean;
+            /** Plan */
+            plan?: unknown | null;
+            /** Error */
+            error?: string | null;
+        };
+        /**
+         * ExportIn
+         * @description 所见即所导(010 design D3):前端传已展示的 columns+rows,不重跑 SQL。
+         *
+         *     rows 传输层上限=R1 评审修复:截断发生在 JSON 解析之后,挡不住请求体本身
+         *     的内存放大;max_length 在解析期即拒(422),service 层截断保留为双闸。
+         */
+        ExportIn: {
+            /**
+             * Format
+             * @enum {string}
+             */
+            format: "csv" | "xlsx";
+            /** Columns */
+            columns: string[];
+            /** Rows */
+            rows?: unknown[][];
+        };
         /** FetchOut */
         FetchOut: {
             /** Found */
@@ -1092,6 +1165,14 @@ export interface components {
             rebuilt: number;
             /** Enriched */
             enriched: number;
+        };
+        /**
+         * RenameIn
+         * @description 重命名(010):空白标题领域层再闸(去空白后为空即 400)。
+         */
+        RenameIn: {
+            /** Title */
+            title: string;
         };
         /** ResetPasswordIn */
         ResetPasswordIn: {
@@ -1772,6 +1853,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                q?: string | null;
             };
             header?: {
                 "x-tenant-id"?: string | null;
@@ -1788,6 +1870,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionItemOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_session_chat_sessions__session_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_session_chat_sessions__session_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionItemOut"];
                 };
             };
             /** @description Validation Error */
@@ -1834,25 +1984,64 @@ export interface operations {
             };
         };
     };
-    delete_session_chat_sessions__session_id__delete: {
+    export_result_chat_export_post: {
         parameters: {
             query?: never;
             header?: {
                 "x-tenant-id"?: string | null;
             };
-            path: {
-                session_id: string;
-            };
+            path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    explain_message_chat_explain_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExplainIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExplainOut"];
+                };
             };
             /** @description Validation Error */
             422: {

@@ -4,10 +4,14 @@
 (不存在与越权同形返回 None,不泄露信息,chat spec)。
 """
 
+from typing import cast
+
 from sqlalchemy import text
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.db import uuid7
+from kongming.like import like_pattern
 
 
 class ChatRepository:
@@ -74,6 +78,24 @@ class ChatRepository:
         ).scalar_one_or_none()
         return None if sid is None else str(sid)  # asyncpg 返回 UUID 对象,统一 str
 
+    async def find_explain_target(
+        self, *, message_id: str, user_id: str, tenant_id: str
+    ) -> dict[str, object] | None:
+        """执行计划定位(010):消息 JOIN 会话做归属收口(不存在/越权同形 None);
+        顺带取会话落库的 datasource_key(快照语义,非切换器实时值,010 design D2)。"""
+        row = (
+            await self._s.execute(
+                text(
+                    "SELECT m.id, m.sql_text, s.datasource_key"
+                    " FROM public.chat_message m"
+                    " JOIN public.chat_session s ON s.id = m.session_id"
+                    " WHERE m.id = :mid AND s.user_id = :u AND s.tenant_id = :t"
+                ),
+                {"mid": message_id, "u": user_id, "t": tenant_id},
+            )
+        ).mappings().one_or_none()
+        return None if row is None else dict(row)
+
     async def touch_session(self, session_id: str) -> None:
         await self._s.execute(
             text("UPDATE public.chat_session SET updated_at = now() WHERE id = :id"),
@@ -81,23 +103,103 @@ class ChatRepository:
         )
 
     async def list_sessions(
-        self, *, user_id: str, tenant_id: str, limit: int
+        self, *, user_id: str, tenant_id: str, limit: int, keyword: str = ""
     ) -> list[dict[str, object]]:
-        """本人本租户会话列表,updated_at 倒序(id DESC 作时序 tiebreak)。"""
+        """本人本租户会话列表,updated_at 倒序(id DESC 作时序 tiebreak)。
+
+        keyword 非空时按「标题 OR user 问句(EXISTS)」ILIKE 包含匹配(010 会话搜索);
+        ESCAPE '\' + like_pattern 转义使 %/_/\\ 按字面(007 R1-3 同款防线);
+        :kw = '' 短路使空白词零行为变更(与 system/datasource 域同构)。
+        """
         rows = (
             await self._s.execute(
                 text(
-                    "SELECT id, title, updated_at FROM public.chat_session"
-                    " WHERE user_id = :u AND tenant_id = :t"
+                    "SELECT id, title, updated_at FROM public.chat_session s"
+                    " WHERE s.user_id = :u AND s.tenant_id = :t"
+                    " AND (:kw = '' OR s.title ILIKE :p ESCAPE '\\'"
+                    " OR EXISTS (SELECT 1 FROM public.chat_message m"
+                    "            WHERE m.session_id = s.id AND m.role = 'USER'"
+                    "            AND m.question ILIKE :p ESCAPE '\\'))"
                     " ORDER BY updated_at DESC, id DESC LIMIT :n"
                 ),
-                {"u": user_id, "t": tenant_id, "n": limit},
+                {
+                    "u": user_id,
+                    "t": tenant_id,
+                    "kw": keyword,
+                    "p": like_pattern(keyword),
+                    "n": limit,
+                },
             )
         ).mappings().all()
         return [
             {"id": str(r["id"]), "title": str(r["title"]), "updated_at": r["updated_at"]}
             for r in rows
         ]
+
+    async def rename_session(
+        self, *, session_id: str, user_id: str, tenant_id: str, title: str
+    ) -> dict[str, object] | None:
+        """重命名(010):归属校验并入 UPDATE 的 WHERE(原子,无先查后改窗口),
+        同时刷新 updated_at(与上游 renameSession 同构);未命中返回 None。"""
+        row = (
+            await self._s.execute(
+                text(
+                    "UPDATE public.chat_session SET title = :title, updated_at = now()"
+                    " WHERE id = :id AND user_id = :u AND tenant_id = :t"
+                    " RETURNING id, title, updated_at"
+                ),
+                {"title": title, "id": session_id, "u": user_id, "t": tenant_id},
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            return None
+        return {
+            "id": str(row["id"]),
+            "title": str(row["title"]),
+            "updated_at": row["updated_at"],
+        }
+
+    async def get_session_title(self, session_id: str) -> str | None:
+        """标题单读(010 改写守卫用;会话被并发删除返回 None)。"""
+        v = (
+            await self._s.execute(
+                text("SELECT title FROM public.chat_session WHERE id = :id"),
+                {"id": session_id},
+            )
+        ).scalar_one_or_none()
+        return None if v is None else str(v)
+
+    async def first_user_question(self, session_id: str) -> str | None:
+        """首条 user 问句(010 标题改写素材与守卫基准);无消息返回 None。"""
+        v = (
+            await self._s.execute(
+                text(
+                    "SELECT question FROM public.chat_message"
+                    " WHERE session_id = :s AND role = 'USER' AND question IS NOT NULL"
+                    " ORDER BY created_at ASC, id ASC LIMIT 1"
+                ),
+                {"s": session_id},
+            )
+        ).scalar_one_or_none()
+        return None if v is None else str(v)
+
+    async def update_title_if_current(
+        self, *, session_id: str, expected: str, new_title: str
+    ) -> int:
+        """LLM 标题改写条件回写(010):仅当当前标题仍等于首问截断值时更新——
+        人工重命名(含与 LLM 回调的竞态)永不被自动改写覆盖;返回受影响行数。
+        不刷新 updated_at:自动改写非用户活动,不应把老会话顶到列表前。"""
+        res = cast(
+            "CursorResult[object]",  # DML 语句的 execute 结果为 CursorResult(有 rowcount)
+            await self._s.execute(
+                text(
+                    "UPDATE public.chat_session SET title = :new"
+                    " WHERE id = :id AND title = :expected"
+                ),
+                {"new": new_title, "id": session_id, "expected": expected},
+            ),
+        )
+        return res.rowcount
 
     async def list_messages(self, *, session_id: str) -> list[dict[str, object]]:
         """会话全部消息,创建时间升序(id ASC tiebreak,与补全取数对偶)。"""

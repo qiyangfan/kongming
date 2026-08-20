@@ -23,6 +23,7 @@ dependencies = [
     "pypdf>=6.16.1",
     "python-docx>=1.2.0",
     "python-multipart>=0.0.32",
+    "openpyxl>=3.1.5",
 ]
 
 [dependency-groups]
@@ -33,6 +34,7 @@ dev = [
     "mypy>=1.14",
     "types-Authlib>=1.4",
     "import-linter>=2.2",
+    "types-openpyxl>=3.1.5.20260807",
 ]
 
 [tool.ruff]
@@ -86,9 +88,9 @@ source_modules = ["kongming.datascope", "kongming.audit"]
 forbidden_modules = ["fastapi"]
 
 [[tool.importlinter.contracts]]
-name = "chat 领域模型不依赖框架(宪法 Article II 领域纯净)"
+name = "chat 领域模型/端口/导出纯函数不依赖框架(宪法 Article II 领域纯净)"
 type = "forbidden"
-source_modules = ["kongming.chat.models"]
+source_modules = ["kongming.chat.models", "kongming.chat.ports", "kongming.chat.export"]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
 [[tool.importlinter.contracts]]

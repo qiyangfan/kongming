@@ -9,8 +9,12 @@ sql-execution spec 落地:
 - PASS/BLOCKED/ERROR 三态全落审计,trace_id 原样贯穿,sql_text 记实际执行形态;
 - 编排段基础设施异常(连接池超时等)同样收敛为 ERROR 落审计,不裸 500;
 - ERROR 的 reason 取驱动层整洁摘要(剥 SQLAlchemy asyncpg 包装类前缀),供 selfheal 喂回。
+
+010 注记:前段(1-6)提取为 _prepare,execute/explain 两入口共享——防线单一事实源,
+EXPLAIN 通道不复制安全逻辑(design D2)。
 """
 
+import json
 import logging
 import math
 import re
@@ -20,7 +24,7 @@ from decimal import Decimal
 
 from sqlalchemy import text
 from sqlalchemy.engine import URL
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kongming.audit.models import SqlAuditEntry
 from kongming.audit.writer import SqlAuditWriter
@@ -83,7 +87,58 @@ class ExecResult:
     duration_ms: int = 0
 
 
-async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
+@dataclass(frozen=True)
+class ExplainResult:
+    """执行计划结果(010):PASS 时 plan=EXPLAIN (FORMAT JSON) 解析产物(顶层数组)。"""
+
+    verdict: str  # PASS / BLOCKED / ERROR
+    reason: str | None = None
+    plan: object | None = None
+    duration_ms: int = 0
+
+
+@dataclass(frozen=True)
+class _Prepared:
+    """执行前段产物(execute/explain 共享):全部防线通过后的执行上下文。"""
+
+    tenant_id: str
+    engine: AsyncEngine
+    route_schema: str
+    applied: AppliedSQL
+
+
+async def _finalize(  # noqa: PLR0913 —— 审计上下文字段平铺
+    writer: SqlAuditWriter,
+    started: float,
+    *,
+    trace_id: str,
+    user_id: str | None,
+    tenant_id: str,
+    datasource_key: str,
+    question: str | None,
+    verdict: str,
+    sql_text: str,
+    reason: str,
+) -> ExecResult:
+    """BLOCKED/ERROR 统一收尾:落审计 + 组装响应(先写审计后返回)。"""
+    elapsed = int((time.monotonic() - started) * 1000)
+    await writer.record(
+        SqlAuditEntry(
+            trace_id=trace_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            datasource_key=datasource_key,
+            question=question,
+            sql_text=sql_text,
+            verdict=verdict,  # type: ignore[arg-type]  # 调用方仅传 BLOCKED/ERROR
+            block_reason=reason,
+            duration_ms=elapsed,
+        )
+    )
+    return ExecResult(verdict=verdict, reason=reason, duration_ms=elapsed)
+
+
+async def _prepare(  # noqa: PLR0913 —— 请求字段平铺,编排前段
     session: AsyncSession,
     *,
     trace_id: str,
@@ -92,9 +147,12 @@ async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
     sql_text: str,
     user_id: str | None,
     question: str | None,
-    limit: int,
-) -> ExecResult:
-    started = time.monotonic()
+    started: float,
+) -> _Prepared | ExecResult:
+    """执行前段(execute/explain 共享,防线顺序即 spec 立约):
+    租户解析 → 数据源解析 → 绑定复校 → 防火墙初检 → data_scope 改写 → 复检三件套。
+    任一不过:返回已落审计的 ExecResult(BLOCKED/ERROR);全过返回 _Prepared。
+    """
     writer = SqlAuditWriter()
 
     # 1. 租户解析(fail-closed:不存在/禁用同形拒绝;此时无租户主体,不落审计)
@@ -108,25 +166,19 @@ async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
         raise TenantNotFound(tenant_key)
     tenant_id = str(tenant["id"])
 
-    def _elapsed() -> int:
-        return int((time.monotonic() - started) * 1000)
-
-    async def _finalize(verdict: str, audited_sql: str, reason: str) -> ExecResult:
-        """BLOCKED/ERROR 统一收尾:落审计 + 组装响应(先写审计后返回)。"""
-        await writer.record(
-            SqlAuditEntry(
-                trace_id=trace_id,
-                user_id=user_id,
-                tenant_id=tenant_id,
-                datasource_key=datasource_key,
-                question=question,
-                sql_text=audited_sql,
-                verdict=verdict,  # type: ignore[arg-type]  # 调用方仅传 BLOCKED/ERROR
-                block_reason=reason,
-                duration_ms=_elapsed(),
-            )
+    async def _fin(verdict: str, sql: str, reason: str) -> ExecResult:
+        return await _finalize(
+            writer,
+            started,
+            trace_id=trace_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            datasource_key=datasource_key,
+            question=question,
+            verdict=verdict,
+            sql_text=sql,
+            reason=reason,
         )
-        return ExecResult(verdict=verdict, reason=reason, duration_ms=_elapsed())
 
     # 2. 数据源解析(008 动态化):default 走平台配置连接串;非 default 校验
     #    存在+启用+归属当前租户——任一不满足:审计 BLOCKED(分类内部可溯)+
@@ -143,13 +195,13 @@ async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
         elif row.tenant_id != tenant_id:
             category = "CROSS_TENANT"
         if category is not None or row is None:
-            await _finalize("BLOCKED", sql_text, f"DATASOURCE_INVALID: {category}")
+            await _fin("BLOCKED", sql_text, f"DATASOURCE_INVALID: {category}")
             raise InvalidDatasource(datasource_key)
         try:
             plain = get_cipher(get_settings().datasource_encrypt_key).decrypt(row.password_enc)
         except CredentialUndecryptable:
             # 密钥轮换/密文损坏:凭证不可用归 ERROR(不暴露密文与密钥细节)
-            return await _finalize("ERROR", sql_text, "DATASOURCE_CREDENTIAL_UNAVAILABLE")
+            return await _fin("ERROR", sql_text, "DATASOURCE_CREDENTIAL_UNAVAILABLE")
         engine_dsn = URL.create(
             "postgresql+asyncpg",
             username=row.username,
@@ -174,14 +226,14 @@ async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
                 )
             ).scalar_one_or_none()
         except Exception as e:
-            return await _finalize("ERROR", sql_text, _error_summary(e))
+            return await _fin("ERROR", sql_text, _error_summary(e))
         if bound is None:
             raise TenantBindingForbidden(f"{user_id} 未绑定租户 {tenant_key}")
 
     # 4. 防火墙初检(原 SQL)
     first = check(sql_text)
     if not first.passed:
-        return await _finalize("BLOCKED", sql_text, first.reason or "BLOCKED")
+        return await _fin("BLOCKED", sql_text, first.reason or "BLOCKED")
 
     # 5. data_scope 改写(系统调用豁免;CUSTOM/未知值 fail-closed);
     #    列探测走执行目标库连接(动态源探测集 {default_schema, public},与 search_path 对齐)
@@ -197,10 +249,10 @@ async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
                     sql=sql_text,
                 )
         except DataScopeUnsupported as e:
-            return await _finalize("BLOCKED", sql_text, f"DATA_SCOPE_UNSUPPORTED: {e.reason}")
+            return await _fin("BLOCKED", sql_text, f"DATA_SCOPE_UNSUPPORTED: {e.reason}")
         except Exception as e:
             # 编排段基础设施异常(池超时/控制库抖动):ERROR 落审计,不裸 500
-            return await _finalize("ERROR", sql_text, _error_summary(e))
+            return await _fin("ERROR", sql_text, _error_summary(e))
         if applied.warning:
             log.warning("data_scope 降级: %s (trace_id=%s)", applied.warning, trace_id)
 
@@ -208,18 +260,49 @@ async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
     second = check(applied.sql)
     if not second.passed:
         log.error("改写产物未过防火墙复检 trace_id=%s reason=%s", trace_id, second.reason)
-        return await _finalize("BLOCKED", applied.sql, f"POST_REWRITE: {second.reason}")
+        return await _fin("BLOCKED", applied.sql, f"POST_REWRITE: {second.reason}")
     reserved = check_reserved_tables(applied.sql)
     if not reserved.passed:
-        return await _finalize("BLOCKED", applied.sql, reserved.reason or "RESERVED_TABLE")
+        return await _fin("BLOCKED", applied.sql, reserved.reason or "RESERVED_TABLE")
     scope_verdict = check_schema_scope(applied.sql, {route_schema, "public"})
     if not scope_verdict.passed:
-        return await _finalize("BLOCKED", applied.sql, scope_verdict.reason or "CROSS_SCHEMA")
+        return await _fin("BLOCKED", applied.sql, scope_verdict.reason or "CROSS_SCHEMA")
+
+    return _Prepared(
+        tenant_id=tenant_id, engine=engine, route_schema=route_schema, applied=applied
+    )
+
+
+async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
+    session: AsyncSession,
+    *,
+    trace_id: str,
+    tenant_key: str,
+    datasource_key: str,
+    sql_text: str,
+    user_id: str | None,
+    question: str | None,
+    limit: int,
+) -> ExecResult:
+    started = time.monotonic()
+    prepared = await _prepare(
+        session,
+        trace_id=trace_id,
+        tenant_key=tenant_key,
+        datasource_key=datasource_key,
+        sql_text=sql_text,
+        user_id=user_id,
+        question=question,
+        started=started,
+    )
+    if isinstance(prepared, ExecResult):
+        return prepared  # 前段已拦(BLOCKED/ERROR 已落审计)
 
     # 7. 只读池执行:事务内 SET LOCAL search_path + 行数截断
-    quoted_schema = route_schema.replace('"', '""')
+    applied = prepared.applied
+    quoted_schema = prepared.route_schema.replace('"', '""')
     try:
-        async with engine.connect() as conn:
+        async with prepared.engine.connect() as conn:
             async with conn.begin():
                 await conn.execute(
                     text(f'SET LOCAL search_path TO "{quoted_schema}", public')  # noqa: S608  # 标识符双引号转义,非值拼接
@@ -228,19 +311,31 @@ async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
                 columns = [str(c) for c in result.keys()]
                 rows = [[_json_cell(v) for v in r] for r in result.fetchmany(limit)]
     except Exception as e:
-        return await _finalize("ERROR", applied.sql, _error_summary(e))
+        return await _finalize(
+            SqlAuditWriter(),
+            started,
+            trace_id=trace_id,
+            user_id=user_id,
+            tenant_id=prepared.tenant_id,
+            datasource_key=datasource_key,
+            question=question,
+            verdict="ERROR",
+            sql_text=applied.sql,
+            reason=_error_summary(e),
+        )
 
-    await writer.record(
+    elapsed = int((time.monotonic() - started) * 1000)
+    await SqlAuditWriter().record(
         SqlAuditEntry(
             trace_id=trace_id,
             user_id=user_id,
-            tenant_id=tenant_id,
+            tenant_id=prepared.tenant_id,
             datasource_key=datasource_key,
             question=question,
             sql_text=applied.sql,
             verdict="PASS",
             row_count=len(rows),
-            duration_ms=_elapsed(),
+            duration_ms=elapsed,
         )
     )
     return ExecResult(
@@ -248,5 +343,90 @@ async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
         columns=columns,
         rows=rows,
         row_count=len(rows),
-        duration_ms=_elapsed(),
+        duration_ms=elapsed,
     )
+
+
+async def explain(  # noqa: PLR0913 —— 与 execute 同构平铺
+    session: AsyncSession,
+    *,
+    trace_id: str,
+    tenant_key: str,
+    datasource_key: str,
+    sql_text: str,
+    user_id: str | None,
+    question: str | None,
+) -> ExplainResult:
+    """执行计划(010,chat spec「EXPLAIN 执行计划」):防线与 execute 全同(_prepare
+    共享),复检通过后由服务端拼 `EXPLAIN (FORMAT JSON)` 前缀——EXPLAIN 文本永不进
+    防火墙 check()(无新攻击面),永不生成 ANALYZE(不真执行目标 SQL)。
+    """
+    started = time.monotonic()
+    prepared = await _prepare(
+        session,
+        trace_id=trace_id,
+        tenant_key=tenant_key,
+        datasource_key=datasource_key,
+        sql_text=sql_text,
+        user_id=user_id,
+        question=question,
+        started=started,
+    )
+    if isinstance(prepared, ExecResult):
+        return ExplainResult(
+            verdict=prepared.verdict, reason=prepared.reason, duration_ms=prepared.duration_ms
+        )
+
+    applied = prepared.applied
+    explain_sql = f"EXPLAIN (FORMAT JSON) {applied.sql}"
+    quoted_schema = prepared.route_schema.replace('"', '""')
+    try:
+        async with prepared.engine.connect() as conn:
+            async with conn.begin():
+                await conn.execute(
+                    text(f'SET LOCAL search_path TO "{quoted_schema}", public')  # noqa: S608  # 标识符双引号转义,非值拼接
+                )
+                result = await conn.execute(text(explain_sql), applied.params)
+                raw = result.scalar_one()
+    except Exception as e:
+        finalized = await _finalize(
+            SqlAuditWriter(),
+            started,
+            trace_id=trace_id,
+            user_id=user_id,
+            tenant_id=prepared.tenant_id,
+            datasource_key=datasource_key,
+            question=question,
+            verdict="ERROR",
+            sql_text=explain_sql,
+            reason=_error_summary(e),
+        )
+        return ExplainResult(
+            verdict="ERROR", reason=finalized.reason, duration_ms=finalized.duration_ms
+        )
+
+    # EXPLAIN (FORMAT JSON) 返回单行单列 json;asyncpg 对 json 列给 str,解析失败降级 raw
+    plan: object
+    if isinstance(raw, str):
+        try:
+            plan = json.loads(raw)
+        except json.JSONDecodeError:
+            plan = {"raw": raw}
+    else:
+        plan = raw
+
+    elapsed = int((time.monotonic() - started) * 1000)
+    await SqlAuditWriter().record(
+        SqlAuditEntry(
+            trace_id=trace_id,
+            user_id=user_id,
+            tenant_id=prepared.tenant_id,
+            datasource_key=datasource_key,
+            question=question,
+            sql_text=explain_sql,  # EXPLAIN 形态落审计(可回放,与 PASS 口径一致)
+            verdict="PASS",
+            row_count=0,
+            duration_ms=elapsed,
+        )
+    )
+    return ExplainResult(verdict="PASS", plan=plan, duration_ms=elapsed)

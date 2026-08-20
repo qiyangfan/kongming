@@ -14,7 +14,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.chat.agent_client import AgentClient, AgentUnavailable
+from kongming.chat.export import to_csv, to_xlsx
 from kongming.chat.models import ChartSuggestion, suggest_chart
+from kongming.chat.ports import ExplainRunner
 from kongming.chat.repository import ChatRepository
 from kongming.datasource.ports import DatasourceChecker
 from kongming.rag.ports import QueryHistoryWriter
@@ -23,6 +25,16 @@ log = logging.getLogger(__name__)
 
 SESSION_TITLE_LEN = 30  # 标题=首问前 30 字符(chat spec)
 HISTORY_FILL_LIMIT = 5  # 后端补全最近 5 条 user 问句
+
+
+def blocked_friendly(reason: str | None) -> str:
+    """BLOCKED 分态文案(005 评审:固定文案以偏概全);问答与执行计划共用。"""
+    r = reason or ""
+    if r.startswith("DATA_SCOPE"):
+        return "该查询超出您的数据范围,暂不支持"
+    if r.startswith("RESERVED_TABLE"):
+        return "该查询访问了不允许的表,已被拒绝"
+    return "该查询涉及非只读操作,已被拒绝"
 
 
 class TenantForbidden(Exception):
@@ -35,6 +47,18 @@ class SessionNotFound(Exception):
 
 class InvalidDatasource(Exception):
     """数据源不存在/禁用/不归属当前租户(同形不区分,防 key 探测;008 入口预检)。"""
+
+
+class MessageNotFound(Exception):
+    """消息不存在或不属于当前用户+租户(010 执行计划;同形不区分,防探测)。"""
+
+
+class ExplainNoSql(Exception):
+    """消息无落库 SQL(user 问句/纯失败轮)——无计划可分析(010)。"""
+
+
+class InvalidTitle(Exception):
+    """标题去空白后为空(010 重命名;参数错误)。"""
 
 
 @dataclass(frozen=True)
@@ -88,6 +112,15 @@ class SessionMessage:
     result: MessageResult | None = None
 
 
+@dataclass(frozen=True)
+class ExplainView:
+    """执行计划视图(010):PASS 含计划树;BLOCKED/ERROR 含友好文案。"""
+
+    success: bool
+    plan: object | None = None
+    error: str | None = None
+
+
 class ChatService:
     def __init__(
         self,
@@ -95,12 +128,19 @@ class ChatService:
         agent: AgentClient,
         ds_checker: DatasourceChecker,
         history_writer: QueryHistoryWriter | None = None,  # 009:成功 SQL 回写(可选注入)
+        explainer: ExplainRunner | None = None,  # 010:执行计划端口(组合根绑定)
     ) -> None:
         self._s = session
         self._repo = ChatRepository(session)
         self._agent = agent
         self._ds_checker = ds_checker
         self._history_writer = history_writer
+        self._explainer = explainer
+
+    @property
+    def agent_for_tasks(self) -> AgentClient:
+        """后台任务用 agent 句柄(010 标题改写;AgentClient 无会话状态,响应后可安全复用)。"""
+        return self._agent
 
     async def _resolve_tenant(self, user_id: str, tenant_key: str | None) -> tuple[str, str]:
         """X-Tenant-Id 解析:显式传入查白名单;缺省取用户默认租户(default 优先,
@@ -208,14 +248,7 @@ class ChatService:
         )
         error: str | None = None
         if status == "REJECTED":
-            # BLOCKED 分态文案(005 评审:固定文案以偏概全)
-            reason = reply.error or ""
-            if reason.startswith("DATA_SCOPE"):
-                error = "该查询超出您的数据范围,暂不支持"
-            elif reason.startswith("RESERVED_TABLE"):
-                error = "该查询访问了不允许的表,已被拒绝"
-            else:
-                error = "该查询涉及非只读操作,已被拒绝"
+            error = blocked_friendly(reply.error)
         elif status == "FAILED":
             error = f"查询失败:{reply.error}" if reply.error else "查询失败,请换个问法试试"
 
@@ -295,16 +328,35 @@ class ChatService:
     # ============ 会话列表/消息历史/删除(006) ============
 
     async def list_sessions(
-        self, *, user_id: str, tenant_key: str | None, limit: int
+        self, *, user_id: str, tenant_key: str | None, limit: int, keyword: str = ""
     ) -> list[SessionSummary]:
         tenant_id, _ = await self._resolve_tenant(user_id, tenant_key)
         rows = await self._repo.list_sessions(
-            user_id=user_id, tenant_id=tenant_id, limit=limit
+            user_id=user_id, tenant_id=tenant_id, limit=limit, keyword=keyword.strip()
         )
         return [
             SessionSummary(id=str(r["id"]), title=str(r["title"]), updated_at=r["updated_at"])
             for r in rows
         ]
+
+    async def rename_session(
+        self, *, user_id: str, tenant_key: str | None, session_id: str, title: str
+    ) -> SessionSummary:
+        """重命名(010):标题去空白非空;归属原子 UPDATE;成功后该标题即人工设定,
+        不再被 LLM 自动改写覆盖(改写走 expected 条件更新,见 title_tasks)。"""
+        tenant_id, _ = await self._resolve_tenant(user_id, tenant_key)
+        cleaned = title.strip()
+        if not cleaned:
+            raise InvalidTitle(title)
+        row = await self._repo.rename_session(
+            session_id=session_id, user_id=user_id, tenant_id=tenant_id, title=cleaned
+        )
+        if row is None:
+            raise SessionNotFound(session_id)
+        await self._s.commit()
+        return SessionSummary(
+            id=str(row["id"]), title=str(row["title"]), updated_at=row["updated_at"]
+        )
 
     async def session_messages(
         self, *, user_id: str, tenant_key: str | None, session_id: str
@@ -328,6 +380,77 @@ class ChatService:
         if not deleted:
             raise SessionNotFound(session_id)
         await self._s.commit()
+
+    # ============ 结果导出(010,chat spec「结果导出 CSV/Excel」) ============
+
+    async def export_result(
+        self,
+        *,
+        user_id: str,
+        tenant_key: str | None,
+        fmt: str,
+        columns: list[str],
+        rows: list[list[object]],
+        max_rows: int,
+    ) -> tuple[bytes, str, str]:
+        """所见即所导(不重跑 SQL):仅做租户白名单复校 + 格式转换;
+        返回 (内容字节, media_type, 扩展名)。截断仅 warn,不报错(chat spec)。"""
+        await self._resolve_tenant(user_id, tenant_key)
+        if fmt == "csv":
+            content, truncated = to_csv(columns, rows, max_rows=max_rows)
+            media_type, ext = "text/csv; charset=utf-8", "csv"
+        else:
+            content, truncated = to_xlsx(columns, rows, max_rows=max_rows)
+            media_type = (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            ext = "xlsx"
+        if truncated:
+            log.warning("导出行数截断: %d → %d 行", len(rows), max_rows)
+        return content, media_type, ext
+
+    # ============ 执行计划(010,chat spec「EXPLAIN 执行计划」) ============
+
+    async def explain_message(
+        self, *, user_id: str, tenant_key: str | None, message_id: str
+    ) -> ExplainView:
+        """message_id 引用形态:客户端不可提交裸 SQL;被分析 SQL 恒为落库消息
+        的 agent 产出,数据源取会话落库快照(非切换器实时值);完整防线在
+        ExplainRunner 实现侧(与 /internal/sql/execute 同源私有段)。"""
+        tenant_id, resolved_key = await self._resolve_tenant(user_id, tenant_key)
+        target = await self._repo.find_explain_target(
+            message_id=message_id, user_id=user_id, tenant_id=tenant_id
+        )
+        if target is None:
+            raise MessageNotFound(message_id)
+        sql_raw = target.get("sql_text")
+        sql_text = str(sql_raw) if sql_raw is not None else ""
+        if not sql_text.strip():
+            raise ExplainNoSql(message_id)
+        ds_key = str(target["datasource_key"])
+        # 数据源快照复校(与问答端点同形同码,防 key 探测)
+        if ds_key != "default" and not await self._ds_checker.is_usable(ds_key, tenant_id):
+            raise InvalidDatasource(ds_key)
+        if self._explainer is None:  # 组合根未接线(部署缺陷)——友好降级不裸 500
+            log.error("ExplainRunner 未注入,执行计划不可用")
+            return ExplainView(success=False, error="执行计划暂不可用,请稍后重试")
+        outcome = await self._explainer.explain(
+            trace_id=uuid.uuid4().hex,
+            tenant_key=resolved_key,
+            datasource_key=ds_key,
+            sql_text=sql_text,
+            user_id=user_id,
+        )
+        if outcome.verdict == "PASS":
+            return ExplainView(success=True, plan=outcome.plan)
+        if outcome.verdict == "BLOCKED":
+            return ExplainView(success=False, error=blocked_friendly(outcome.reason))
+        return ExplainView(
+            success=False,
+            error=(
+                f"执行计划失败:{outcome.reason}" if outcome.reason else "执行计划失败,请稍后重试"
+            ),
+        )
 
     @staticmethod
     def _to_message(row: dict[str, object]) -> SessionMessage:

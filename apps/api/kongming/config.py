@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     # 时,旧维度向量命中会被拦为 EmbeddingError(降级),不再 500(R2-R1)
     rag_embedding_dim: int = Field(default=1536, ge=1)
 
+    # 结果导出行数上限(010):截断保护防服务端内存失控(chat spec 默认 10000)
+    export_max_rows: int = Field(default=10000, ge=1)
+
     def fail_closed_checks(self) -> None:
         """prod 环境缺敏感配置直接拒启(dev 宽松以便本地起步)。"""
         if self.environment != "prod":

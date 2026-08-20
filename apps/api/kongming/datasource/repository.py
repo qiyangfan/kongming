@@ -11,15 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.repository import SqlOperLogRepo
 from kongming.datasource.models import Datasource, DatasourceOption, ResolvedDatasource
+from kongming.like import like_pattern
 
-
-def _like_pattern(keyword: str) -> str:
-    """ILIKE 模式构造:元字符(%/_/\\)转义为字面量(与 system 域同款,R1-3 教训)。"""
-    escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return f"%{escaped}%"
-
-
-# 关键字对 key/name 不区分大小写包含匹配;ESCAPE '\' + 转义按字面匹配
+# 关键字对 key/name 不区分大小写包含匹配;ESCAPE '\' + like_pattern 转义按字面匹配
 _FILTER = "(:kw = '' OR d.datasource_key ILIKE :p ESCAPE '\\' OR d.name ILIKE :p ESCAPE '\\')"
 
 
@@ -55,7 +49,7 @@ class SqlDatasourceRepo:
             text(
                 f"SELECT count(*) FROM public.sys_datasource d WHERE {_FILTER}"  # noqa: S608  # 常量模板,参数化绑定
             ),
-            {"kw": keyword, "p": _like_pattern(keyword)},
+            {"kw": keyword, "p": like_pattern(keyword)},
         )
         return int(n or 0)
 
@@ -70,7 +64,7 @@ class SqlDatasourceRepo:
                     " ORDER BY d.created_at DESC, d.id DESC"
                     " LIMIT :lim OFFSET :off"
                 ),
-                {"kw": keyword, "p": _like_pattern(keyword), "lim": limit, "off": offset},
+                {"kw": keyword, "p": like_pattern(keyword), "lim": limit, "off": offset},
             )
         ).mappings()
         return [_to_datasource(dict(r)) for r in rows]

@@ -1,11 +1,22 @@
-/* assistant 结果卡片(web-nav spec「对话区渲染」):
-   摘要/表格/SQL 折叠/洞察/统计;SUCCESS/REJECTED/FAILED 三态视觉区分。 */
+/* assistant 结果卡片(web-nav spec「对话区渲染」+ 010 导出/执行计划):
+   摘要/表格/SQL 折叠/执行计划懒加载/洞察/统计;SUCCESS/REJECTED/FAILED 三态视觉区分。 */
 
-import { ChevronRight, Database, Lightbulb, ShieldOff, TriangleAlert } from "lucide-react";
+import { useState } from "react";
+import {
+  ChevronRight,
+  Database,
+  Download,
+  Lightbulb,
+  Loader2,
+  ShieldOff,
+  TriangleAlert,
+} from "lucide-react";
 
 import { ChartView } from "@/components/chart-view";
 import type { SessionMessageOut } from "@/lib/api";
+import { explainPlan, exportResult } from "@/lib/chat-api";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -111,6 +122,10 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
         </div>
       )}
 
+      {result.columns.length > 0 && (
+        <ExportButtons columns={result.columns} rows={result.rows} />
+      )}
+
       {msg.sql && (
         <Collapsible>
           <CollapsibleTrigger className="group flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
@@ -128,6 +143,8 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
           </CollapsibleContent>
         </Collapsible>
       )}
+
+      {msg.sql && <ExplainCollapsible messageId={msg.id} />}
 
       {(result.insights?.length ?? 0) > 0 && (
         <div className="space-y-1">
@@ -151,4 +168,165 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
       )}
     </div>
   );
+}
+
+/* 结果导出(010):所见即所导(传展示中的 columns+rows);失败行内提示不炸卡片 */
+function ExportButtons({ columns, rows }: { columns: string[]; rows: unknown[][] }) {
+  const [busy, setBusy] = useState<"csv" | "xlsx" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run(format: "csv" | "xlsx"): Promise<void> {
+    if (busy) return;
+    setBusy(format);
+    setError(null);
+    try {
+      await exportResult(format, columns, rows);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "导出未成,请稍后再试。");
+    }
+    setBusy(null);
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-xs text-muted-foreground">导出</span>
+      <Button
+        variant="ghost"
+        size="xs"
+        onClick={() => void run("csv")}
+        disabled={busy !== null}
+      >
+        {busy === "csv" ? (
+          <Loader2 className="animate-spin" aria-hidden />
+        ) : (
+          <Download aria-hidden />
+        )}
+        CSV
+      </Button>
+      <Button
+        variant="ghost"
+        size="xs"
+        onClick={() => void run("xlsx")}
+        disabled={busy !== null}
+      >
+        {busy === "xlsx" ? (
+          <Loader2 className="animate-spin" aria-hidden />
+        ) : (
+          <Download aria-hidden />
+        )}
+        Excel
+      </Button>
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* 执行计划(010):展开时懒加载一次;计划树递归缩进为等宽文本(上游形态移植),
+   非预期形态降级 JSON 展示;message_id 引用,客户端不提交 SQL */
+function ExplainCollapsible({ messageId }: { messageId: string }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load(): Promise<void> {
+    if (text !== null || error !== null || loading) return; // 成功即缓存;失败见重试钮
+    setLoading(true);
+    try {
+      const out = await explainPlan(messageId);
+      if (out.success) {
+        setText(renderPlan(out.plan));
+      } else {
+        setError(out.error ?? "执行计划获取失败,请稍后再试。");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "执行计划获取失败,请稍后再试。");
+    }
+    setLoading(false);
+  }
+
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) void load();
+      }}
+    >
+      <CollapsibleTrigger className="group flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+        <ChevronRight
+          className="size-3.5 transition-transform group-data-[state=open]:rotate-90"
+          aria-hidden
+        />
+        <Database className="size-3.5" aria-hidden />
+        执行计划
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        {loading ? (
+          <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Loader2 className="size-3 animate-spin" aria-hidden />
+            计划生成中…
+          </p>
+        ) : error ? (
+          <p role="alert" className="mt-1.5 flex items-center gap-2 text-xs text-destructive">
+            {error}
+            {/* R1-S1:失败态给出重试出口(此前 error 非 null 即永久锁死) */}
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => {
+                setError(null);
+                void load();
+              }}
+            >
+              重试
+            </Button>
+          </p>
+        ) : (
+          <pre className="mt-1.5 overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed text-foreground">
+            {text}
+          </pre>
+        )}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+/* EXPLAIN (FORMAT JSON) 顶层为 [{Plan: {...}}];逐层缩进渲染
+   Node Type / cost=Total Cost / rows=Plan Rows / on Relation Name */
+function renderPlan(plan: unknown): string {
+  if (Array.isArray(plan) && plan.length > 0) {
+    const first: unknown = plan[0];
+    if (first && typeof first === "object") {
+      const root = (first as Record<string, unknown>)["Plan"];
+      if (root && typeof root === "object") {
+        return formatPlanNode(root as Record<string, unknown>, 0);
+      }
+    }
+  }
+  return JSON.stringify(plan, null, 2);
+}
+
+function formatPlanNode(node: Record<string, unknown>, depth: number): string {
+  const indent = "  ".repeat(depth);
+  const parts = [String(node["Node Type"] ?? "节点")];
+  const cost = Number(node["Total Cost"]);
+  if (Number.isFinite(cost)) parts.push(`cost=${cost.toFixed(2)}`); // R1-O4:非数值不渲染 NaN
+  const rows = node["Actual Rows"] ?? node["Plan Rows"];
+  if (rows !== undefined) parts.push(`rows=${String(rows)}`);
+  if (node["Relation Name"]) parts.push(`on ${String(node["Relation Name"])}`);
+  const lines = [indent + parts.join("  ")];
+  const children = node["Plans"];
+  if (Array.isArray(children)) {
+    for (const c of children) {
+      if (c && typeof c === "object") {
+        lines.push(formatPlanNode(c as Record<string, unknown>, depth + 1));
+      }
+    }
+  }
+  return lines.join("\n");
 }

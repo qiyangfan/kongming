@@ -91,3 +91,29 @@ class AgentClient:
             log.warning("agent 响应解析失败: %s", e)
             raise AgentUnavailable(f"bad reply: {e}") from e
         return reply
+
+    async def rewrite_title(self, *, question: str) -> str | None:
+        """会话标题改写(010):后台任务兜底语义——任何失败(不可达/非 200/降级
+        应答/坏报文)一律返回 None,永不抛;调用方保持截断标题。"""
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._base, timeout=30.0, headers=self._headers
+            ) as client:
+                resp = await client.post(
+                    "/internal/rewrite-title", json={"question": question}
+                )
+        except httpx.HTTPError as e:
+            log.warning("标题改写回调异常: %s", e)
+            return None
+        if resp.status_code != 200:
+            log.warning("标题改写非 200: HTTP %s", resp.status_code)
+            return None
+        try:
+            data = resp.json()
+            if not data.get("rewritten"):
+                return None  # agent 侧降级(LLM 失败/输出非法)
+            title = str(data.get("title") or "").strip()
+        except (ValueError, TypeError, AttributeError) as e:
+            log.warning("标题改写响应解析失败: %s", e)
+            return None
+        return title or None

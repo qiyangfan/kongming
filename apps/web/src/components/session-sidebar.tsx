@@ -1,13 +1,16 @@
-/* 会话侧栏(web-nav spec「会话侧栏交互」):
-   列表(updated_at 倒序,服务端序)/当前高亮/切换/删除确认;
+/* 会话侧栏(web-nav spec「会话侧栏交互」+ 010 chat spec 时间分组/搜索/重命名):
+   搜索框(300ms 防抖,服务端 ILIKE)/时间分组(今天/昨天/近 7 天/近 30 天/更早)/
+   行内操作菜单(重命名对话框 + 删除受控确认)/当前高亮/切换;
    新建=导航 /chat,零后端请求(首问自动建会话)。 */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, MessageSquare, Trash2 } from "lucide-react";
+import { Loader2, MessageSquare, MoreVertical, Search } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
 
-import { api } from "@/lib/api";
+import { api, type SessionItemOut } from "@/lib/api";
+import { listSessions, renameSession } from "@/lib/chat-api";
+import { groupSessionsByTime } from "@/lib/session-groups";
 import { useTenant } from "@/lib/tenant-store";
 import {
   AlertDialog,
@@ -18,9 +21,23 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -35,16 +52,39 @@ function timeLabel(iso: string): string {
 
 export function SessionSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { current } = useTenant();
+  const [input, setInput] = useState("");
+  const [q, setQ] = useState("");
+  // 300ms 防抖:输入停顿后再发搜索(键含 q 维度,换词即换档)
+  useEffect(() => {
+    const t = setTimeout(() => setQ(input.trim()), 300);
+    return () => clearTimeout(t);
+  }, [input]);
   const { data: sessions, isLoading } = useQuery({
-    queryKey: ["sessions", current],
-    queryFn: () => api.get<{ id: string; title: string; updated_at: string }[]>("/chat/sessions"),
+    queryKey: ["sessions", current, q],
+    queryFn: () => listSessions(q || undefined),
+    // 换词瞬态保留上一档内容,不闪骨架屏(R1-S3)
+    placeholderData: (prev) => prev,
   });
   const { pathname } = useLocation();
   const activeId = pathname.startsWith("/chat/") ? pathname.slice("/chat/".length) : null;
 
+  const groups = sessions ? groupSessionsByTime(sessions) : [];
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <p className="px-2 pb-1 text-xs font-medium text-muted-foreground">会话</p>
+      <div className="relative px-2 pb-2">
+        <Search
+          className="absolute top-1/2 left-4.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+          aria-hidden
+        />
+        <Input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="搜索会话…"
+          aria-label="搜索会话"
+          className="h-8 pl-7 text-xs"
+        />
+      </div>
       <ScrollArea className="min-h-24 flex-1 rounded-md">
         {isLoading ? (
           <div className="space-y-2 p-1">
@@ -52,44 +92,173 @@ export function SessionSidebar({ onNavigate }: { onNavigate?: () => void }) {
             <Skeleton className="h-9 w-full" />
           </div>
         ) : !sessions?.length ? (
-          <p className="px-2 py-3 text-xs text-muted-foreground">尚无会话,问第一句即开卷。</p>
+          <p className="px-2 py-3 text-xs text-muted-foreground">
+            {q ? "没有匹配的会话。" : "尚无会话,问第一句即开卷。"}
+          </p>
         ) : (
-          <ul className="space-y-0.5 pr-2">
-            {sessions.map((s) => (
-              <li key={s.id} className="group relative">
-                <Link
-                  to={`/chat/${s.id}`}
-                  onClick={onNavigate}
-                  className={
-                    "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors " +
-                    (s.id === activeId
-                      ? "bg-accent text-accent-foreground"
-                      : "text-foreground hover:bg-accent/60")
-                  }
-                >
-                  <MessageSquare
-                    className={"size-3.5 shrink-0 " + (s.id === activeId ? "text-primary" : "text-muted-foreground")}
-                    aria-hidden
-                  />
-                  <span className="min-w-0 flex-1 truncate" title={s.title}>
-                    {s.title}
-                  </span>
-                  <span className="shrink-0 text-[10px] text-muted-foreground group-hover:invisible">
-                    {timeLabel(s.updated_at)}
-                  </span>
-                </Link>
-                {s.id === activeId && <DeleteSessionButton id={s.id} />}
-              </li>
-            ))}
-          </ul>
+          groups.map((g) => (
+            <div key={g.label} className="mb-1">
+              <p className="px-2 pt-1 pb-0.5 text-[10px] font-medium text-muted-foreground">
+                {g.label}
+              </p>
+              <ul className="space-y-0.5 pr-2">
+                {g.items.map((s) => (
+                  <li key={s.id} className="group relative">
+                    <Link
+                      to={`/chat/${s.id}`}
+                      onClick={onNavigate}
+                      className={
+                        "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors " +
+                        (s.id === activeId
+                          ? "bg-accent text-accent-foreground"
+                          : "text-foreground hover:bg-accent/60")
+                      }
+                    >
+                      <MessageSquare
+                        className={"size-3.5 shrink-0 " + (s.id === activeId ? "text-primary" : "text-muted-foreground")}
+                        aria-hidden
+                      />
+                      <span className="min-w-0 flex-1 truncate" title={s.title}>
+                        {s.title}
+                      </span>
+                      <span className="shrink-0 text-[10px] text-muted-foreground group-hover:invisible">
+                        {timeLabel(s.updated_at)}
+                      </span>
+                    </Link>
+                    <SessionActions session={s} isActive={s.id === activeId} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
         )}
       </ScrollArea>
     </div>
   );
 }
 
-function DeleteSessionButton({ id }: { id: string }) {
-  const [open, setOpen] = useState(false);
+/* 行内操作(010):重命名对话框 + 删除受控确认;菜单每项会话可达
+   (hover/focus-within 显现,移动端常显——006 可达性教训) */
+function SessionActions({ session, isActive }: { session: SessionItemOut; isActive: boolean }) {
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="会话操作"
+            className="absolute top-1/2 right-1 hidden -translate-y-1/2 group-hover:flex group-focus-within:flex max-md:flex data-[state=open]:flex"
+          >
+            <MoreVertical className="text-muted-foreground" aria-hidden />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => setRenameOpen(true)}>重命名</DropdownMenuItem>
+          <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
+            删除
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {/* 对话框挂菜单外(Radix 焦点陷阱冲突规避),受控开合 */}
+      <RenameDialog session={session} open={renameOpen} onOpenChange={setRenameOpen} />
+      <DeleteDialog session={session} isActive={isActive} open={deleteOpen} onOpenChange={setDeleteOpen} />
+    </>
+  );
+}
+
+function RenameDialog({
+  session,
+  open,
+  onOpenChange,
+}: {
+  session: SessionItemOut;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+}) {
+  const [title, setTitle] = useState(session.title);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const qc = useQueryClient();
+  const { current } = useTenant();
+
+  // 每次打开回填当前标题(上次成功/失败的残留不带入)
+  useEffect(() => {
+    if (open) {
+      setTitle(session.title);
+      setError(null);
+    }
+  }, [open, session.title]);
+
+  async function submit(e: React.FormEvent): Promise<void> {
+    e.preventDefault();
+    const cleaned = title.trim();
+    if (!cleaned || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await renameSession(session.id, cleaned);
+    } catch (err) {
+      // 失败保持对话框开启,错误行内可见(007 教训:不得随卸载不可见)
+      setError(err instanceof Error ? err.message : "重命名未成,请稍后再试。");
+      setBusy(false);
+      return;
+    }
+    setBusy(false);
+    onOpenChange(false);
+    // 前缀失效:覆盖各搜索词下的列表档
+    await qc.invalidateQueries({ queryKey: ["sessions", current] });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>重命名会话</DialogTitle>
+          <DialogDescription>为「{session.title}」起个新名字。</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={(e) => void submit(e)} className="space-y-3">
+          <Input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            maxLength={200}
+            autoFocus
+            aria-label="会话标题"
+          />
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              取消
+            </Button>
+            <Button type="submit" disabled={busy || !title.trim()}>
+              {busy && <Loader2 className="animate-spin" aria-hidden />}
+              保存
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DeleteDialog({
+  session,
+  isActive,
+  open,
+  onOpenChange,
+}: {
+  session: SessionItemOut;
+  isActive: boolean;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const qc = useQueryClient();
@@ -100,7 +269,7 @@ function DeleteSessionButton({ id }: { id: string }) {
     setBusy(true);
     setFailed(false);
     try {
-      await api.delete(`/chat/sessions/${id}`);
+      await api.delete(`/chat/sessions/${session.id}`);
     } catch (err) {
       if ((err as Error & { status?: number }).status !== 404) {
         // 404=他端已删,视为已删照常收敛;其余失败保持对话框开启,提示可见
@@ -110,36 +279,26 @@ function DeleteSessionButton({ id }: { id: string }) {
       }
     }
     setBusy(false);
-    setOpen(false);
+    onOpenChange(false);
     // 已删会话的 messages 键不再 invalidate(重取只会 404);路由离开自然卸载
     await qc.invalidateQueries({ queryKey: ["sessions", current] });
     // 当前会话被删:视图回新建态(spec「删除会话需确认且即时收敛」)
-    navigate("/chat", { replace: true });
+    if (isActive) navigate("/chat", { replace: true });
   }
 
   return (
     <AlertDialog
       open={open}
       onOpenChange={(o) => {
-        setOpen(o);
+        onOpenChange(o);
         if (o) setFailed(false); // 重开清残留错误
       }}
     >
-      <AlertDialogTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="删除会话"
-          className="absolute top-1/2 right-1 hidden -translate-y-1/2 group-hover:flex group-focus-within:flex max-md:flex"
-        >
-          <Trash2 className="text-muted-foreground" aria-hidden />
-        </Button>
-      </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>删除此会话?</AlertDialogTitle>
           <AlertDialogDescription>
-            会话及其全部消息将被移除,此步不可挽回。
+            「{session.title}」及其全部消息将被移除,此步不可挽回。
           </AlertDialogDescription>
         </AlertDialogHeader>
         {failed && <p className="text-sm text-destructive">删除未成,请稍后再试。</p>}

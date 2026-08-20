@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.repository import SqlOperLogRepo
+from kongming.like import like_pattern
 from kongming.system.models import (
     Dept,
     PermItem,
@@ -20,18 +21,12 @@ from kongming.system.models import (
 )
 
 # 关键字对用户名/昵称不区分大小写包含匹配(rbac delta 007「用户列表查询」);
-# ESCAPE '\' + 转义使 %/_/\\ 按字面匹配(搜索语义不失真,R1-3)
+# ESCAPE '\' + like_pattern 转义使 %/_/\\ 按字面匹配(搜索语义不失真,R1-3)
 _USER_FILTER = (
     "u.deleted_at IS NULL"
     " AND (:kw = '' OR u.username ILIKE :p ESCAPE '\\'"
     " OR u.nickname ILIKE :p ESCAPE '\\')"
 )
-
-
-def _like_pattern(keyword: str) -> str:
-    """ILIKE 模式构造:元字符(%/_/\\)转义为字面量,keyword 只做包含匹配。"""
-    escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return f"%{escaped}%"
 
 
 def parse_json_agg(value: str | list[Any]) -> list[Any]:
@@ -111,7 +106,7 @@ class SqlSystemRepo:
             text(
                 f"SELECT count(*) FROM public.sys_user u WHERE {_USER_FILTER}"  # noqa: S608  # 常量模板,参数化绑定
             ),
-            {"kw": keyword, "p": _like_pattern(keyword)},
+            {"kw": keyword, "p": like_pattern(keyword)},
         )
         return int(n or 0)
 
@@ -140,7 +135,7 @@ class SqlSystemRepo:
                     " ORDER BY u.created_at DESC, u.id DESC"
                     " LIMIT :lim OFFSET :off"
                 ),
-                {"kw": keyword, "p": _like_pattern(keyword), "lim": limit, "off": offset},
+                {"kw": keyword, "p": like_pattern(keyword), "lim": limit, "off": offset},
             )
         ).mappings()
         return [_to_user_item(dict(r)) for r in rows]

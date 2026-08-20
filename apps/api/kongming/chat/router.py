@@ -1,4 +1,5 @@
-"""chat 路由(薄适配层):POST /chat/query + 会话列表/消息历史/删除(006)。
+"""chat 路由(薄适配层):POST /chat/query + 会话列表/消息历史/删除(006)
++ 重命名/搜索/导出/执行计划(010)。
 
 首个受权限点保护的端点(chat:execute,rbac spec 权限点校验机制首发);
 租户上下文取 X-Tenant-Id 头(multitenant spec),缺省取用户默认租户。
@@ -6,26 +7,33 @@
 
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.router import current_user, require_perm
 from kongming.chat.agent_client import AgentClient
+from kongming.chat.ports import ExplainOutcome
 from kongming.chat.service import (
     ChatOutcome,
     ChatService,
+    ExplainNoSql,
     InvalidDatasource,
+    InvalidTitle,
+    MessageNotFound,
     MessageResult,
     SessionMessage,
     SessionNotFound,
     TenantForbidden,
 )
+from kongming.chat.title_tasks import rewrite_session_title
 from kongming.config import get_settings
 from kongming.datasource.repository import SqlDatasourceRepo
 from kongming.db import get_session
+from kongming.internal import service as internal_service
 from kongming.rag.cache import ContextCache
 from kongming.rag.repository import RagRepository
 from kongming.rag.service import RagService
@@ -50,13 +58,55 @@ def get_rag_service(session: AsyncSession) -> RagService:
     )
 
 
+class _InternalExplainRunner:
+    """组合根适配器(010):chat 域 ExplainRunner 端口 ← internal.service.explain。
+
+    chat service/models 受 import-linter 零框架契约,不可间接 import internal
+    (携 sqlalchemy);内部异常在此翻译为 chat 域异常,不越域泄漏。
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def explain(
+        self,
+        *,
+        trace_id: str,
+        tenant_key: str,
+        datasource_key: str,
+        sql_text: str,
+        user_id: str,
+    ) -> ExplainOutcome:
+        try:
+            r = await internal_service.explain(
+                self._s,
+                trace_id=trace_id,
+                tenant_key=tenant_key,
+                datasource_key=datasource_key,
+                sql_text=sql_text,
+                user_id=user_id,
+                question=None,
+            )
+        except internal_service.InvalidDatasource as e:
+            # 竞态兜底(chat 已预检):禁用/删除发生在预检与执行之间
+            raise InvalidDatasource(str(e)) from e
+        except (internal_service.TenantNotFound, internal_service.TenantBindingForbidden) as e:
+            raise TenantForbidden(str(e)) from e
+        return ExplainOutcome(verdict=r.verdict, reason=r.reason, plan=r.plan)
+
+
 def get_chat_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     agent: Annotated[AgentClient, Depends(get_agent_client)],
 ) -> ChatService:
     # history_writer=rag 回写端口(009;None 安全——注入失败不影响问答主链路)
+    # explainer=执行计划端口(010,组合根绑定 internal.service.explain)
     return ChatService(
-        session, agent, SqlDatasourceRepo(session), get_rag_service(session)
+        session,
+        agent,
+        SqlDatasourceRepo(session),
+        get_rag_service(session),
+        _InternalExplainRunner(session),
     )
 
 
@@ -118,6 +168,7 @@ async def chat_query(
     req: ChatQueryIn,
     user: Annotated[dict[str, object], Depends(current_user)],
     svc: Annotated[ChatService, Depends(get_chat_service)],
+    background: BackgroundTasks,
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> ChatQueryOut:
     try:
@@ -137,6 +188,10 @@ async def chat_query(
     except InvalidDatasource:
         # 不存在/禁用/越属同形(防 key 探测);与 internal 面同一 detail 码
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
+    # 010 标题两阶段生成:首个 SUCCESS 轮后异步改写(守卫/条件写双闸在任务内);
+    # persist=false 临时对话无会话可改写;REJECTED/FAILED 轮不触发(违规/失败问句不作素材)
+    if outcome.success and req.persist and outcome.session_id is not None:
+        background.add_task(rewrite_session_title, outcome.session_id, svc.agent_for_tasks)
     return _out(outcome)
 
 
@@ -209,10 +264,14 @@ async def list_sessions(
     svc: Annotated[ChatService, Depends(get_chat_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    q: Annotated[str | None, Query(max_length=200)] = None,
 ) -> list[SessionItemOut]:
     try:
         rows = await svc.list_sessions(
-            user_id=str(user["sub"]), tenant_key=x_tenant_id, limit=limit
+            user_id=str(user["sub"]),
+            tenant_key=x_tenant_id,
+            limit=limit,
+            keyword=q or "",
         )
     except TenantForbidden:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
@@ -222,6 +281,43 @@ async def list_sessions(
         )
         for s in rows
     ]
+
+
+class RenameIn(BaseModel):
+    """重命名(010):空白标题领域层再闸(去空白后为空即 400)。"""
+
+    title: str = Field(min_length=1, max_length=200)
+
+
+@router.patch(
+    "/sessions/{session_id}",
+    response_model=SessionItemOut,
+    dependencies=[Depends(require_perm("chat:execute"))],
+)
+async def rename_session(
+    session_id: uuid.UUID,
+    req: RenameIn,
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Annotated[ChatService, Depends(get_chat_service)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> SessionItemOut:
+    try:
+        s = await svc.rename_session(
+            user_id=str(user["sub"]),
+            tenant_key=x_tenant_id,
+            session_id=str(session_id),
+            title=req.title,
+        )
+    except TenantForbidden:
+        raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
+    except SessionNotFound:
+        # 不存在/越权/跨租户同形 404,不泄露会话存在性(chat spec)
+        raise HTTPException(status_code=404, detail="SESSION_NOT_FOUND") from None
+    except InvalidTitle:
+        raise HTTPException(status_code=400, detail="TITLE_INVALID") from None
+    return SessionItemOut(
+        id=s.id, title=s.title, updated_at=s.updated_at  # type: ignore[arg-type]
+    )
 
 
 @router.get(
@@ -268,3 +364,90 @@ async def delete_session(
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
     except SessionNotFound:
         raise HTTPException(status_code=404, detail="SESSION_NOT_FOUND") from None
+
+
+# ============ 结果导出(010,chat spec「结果导出 CSV/Excel」) ============
+
+
+class ExportIn(BaseModel):
+    """所见即所导(010 design D3):前端传已展示的 columns+rows,不重跑 SQL。
+
+    rows 传输层上限=R1 评审修复:截断发生在 JSON 解析之后,挡不住请求体本身
+    的内存放大;max_length 在解析期即拒(422),service 层截断保留为双闸。
+    """
+
+    format: Literal["csv", "xlsx"]
+    columns: list[str] = Field(min_length=1, max_length=200)
+    rows: list[list[object]] = Field(default_factory=list, max_length=10000)
+
+
+@router.post(
+    "/export",
+    dependencies=[Depends(require_perm("chat:execute"))],
+)
+async def export_result(
+    req: ExportIn,
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Annotated[ChatService, Depends(get_chat_service)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> Response:
+    try:
+        content, media_type, ext = await svc.export_result(
+            user_id=str(user["sub"]),
+            tenant_key=x_tenant_id,
+            fmt=req.format,
+            columns=req.columns,
+            rows=req.rows,
+            max_rows=get_settings().export_max_rows,
+        )
+    except TenantForbidden:
+        raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
+    # 「查询结果-<时间戳>.<ext>」(chat spec);RFC 5987 filename* 携带中文名
+    filename = quote(f"查询结果-{datetime.now():%Y%m%d-%H%M%S}.{ext}")
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )
+
+
+# ============ 执行计划(010,chat spec「EXPLAIN 执行计划」) ============
+
+
+class ExplainIn(BaseModel):
+    """message_id 引用形态(010 design D2):客户端不可提交裸 SQL。"""
+
+    message_id: uuid.UUID
+
+
+class ExplainOut(BaseModel):
+    success: bool
+    plan: object | None = None  # EXPLAIN (FORMAT JSON) 解析产物(顶层数组)
+    error: str | None = None
+
+
+@router.post(
+    "/explain",
+    response_model=ExplainOut,
+    dependencies=[Depends(require_perm("chat:execute"))],
+)
+async def explain_message(
+    req: ExplainIn,
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Annotated[ChatService, Depends(get_chat_service)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> ExplainOut:
+    try:
+        view = await svc.explain_message(
+            user_id=str(user["sub"]), tenant_key=x_tenant_id, message_id=str(req.message_id)
+        )
+    except TenantForbidden:
+        raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
+    except MessageNotFound:
+        # 不存在/越权/跨租户同形 404,不泄露消息存在性(与会话端点同语义)
+        raise HTTPException(status_code=404, detail="MESSAGE_NOT_FOUND") from None
+    except ExplainNoSql:
+        raise HTTPException(status_code=400, detail="EXPLAIN_NO_SQL") from None
+    except InvalidDatasource:
+        raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
+    return ExplainOut(success=view.success, plan=view.plan, error=view.error)

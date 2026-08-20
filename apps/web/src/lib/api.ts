@@ -96,6 +96,23 @@ function doFetch(path: string, init?: RequestInit): Promise<Response> {
   });
 }
 
+async function toStatusError(resp: Response): Promise<Error & { status?: number }> {
+  // 优先取 FastAPI {detail} 文案,原始 JSON 体不直接抛给用户
+  let detail = `HTTP ${resp.status}`;
+  try {
+    const body: unknown = await resp.json();
+    if (body && typeof body === "object" && "detail" in body) {
+      const d = (body as { detail: unknown }).detail;
+      detail = typeof d === "string" ? d : detail;
+    }
+  } catch {
+    /* 非 JSON 响应,保留 HTTP 状态码文案 */
+  }
+  const err = new Error(detail) as Error & { status?: number };
+  err.status = resp.status;
+  return err;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // 登录/刷新自身的 401 不重放(避免递归)
   const replayable = path !== "/auth/login" && path !== "/auth/refresh";
@@ -103,24 +120,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (resp.status === 401 && replayable && (await tryRefresh())) {
     resp = await doFetch(path, init);
   }
-  if (!resp.ok) {
-    // 优先取 FastAPI {detail} 文案,原始 JSON 体不直接抛给用户
-    let detail = `HTTP ${resp.status}`;
-    try {
-      const body: unknown = await resp.json();
-      if (body && typeof body === "object" && "detail" in body) {
-        const d = (body as { detail: unknown }).detail;
-        detail = typeof d === "string" ? d : detail;
-      }
-    } catch {
-      /* 非 JSON 响应,保留 HTTP 状态码文案 */
-    }
-    const err = new Error(detail) as Error & { status?: number };
-    err.status = resp.status;
-    throw err;
-  }
+  if (!resp.ok) throw await toStatusError(resp);
   if (resp.status === 204) return undefined as T;
   return (await resp.json()) as T;
+}
+
+/** 文件下载类请求(010 导出):401 重放与错误 detail 与 request 同构;
+    成功返回原始 Response,由调用方取 blob(须先辨 JSON 错误形态,上游实证) */
+async function postBlob(path: string, body: unknown): Promise<Response> {
+  const init = { method: "POST", body: JSON.stringify(body) };
+  let resp = await doFetch(path, init);
+  if (resp.status === 401 && (await tryRefresh())) {
+    resp = await doFetch(path, init);
+  }
+  if (!resp.ok) throw await toStatusError(resp);
+  return resp;
 }
 
 export const api = {
@@ -132,5 +146,8 @@ export const api = {
     request<T>(path, { method: "POST", body: form }),
   put: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
+  patch: <T>(path: string, body: unknown) =>
+    request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+  postBlob,
 };
