@@ -12,6 +12,7 @@
 数据源字段:datasource_key/name/host/port/database/username/password/default_schema/租户归属。name SHALL 用于选项与列表展示;default_schema SHALL 为动态路径 search_path 首段,且 SHALL 通过 PG 标识符合法性校验(未加引号小写折叠语义,`^[a-z_][a-z0-9_]{0,62}$`),防 search_path 注入。
 datasource_key 传输层 SHALL 匹配 `^[a-z][a-z0-9_]{1,63}$`;保留字 `default` SHALL NOT 被注册——default 为内置默认路径标识(走平台配置连接串),不登记为 sys_datasource 行。
 管理端点(page/create/update/enable/disable/delete/test)SHALL 为全局视角:X-Tenant-Id 对其无语义(与身份治理同一惯例);创建数据源时租户归属 SHALL 由超管显式指定,SHALL NOT 取自客户端隐式上下文;page/编辑/启停/删除不限当前租户。选项接口(options)为登录即可的用户面接口,不在管理端点之列。
+datasource_key 与租户归属创建后 SHALL NOT 可修改(009 起 008 已兑现的强制随本 delta 挪位至注册 requirement 立约)。
 
 #### Scenario: 注册数据源并加密密码
 - GIVEN 超管持有 system:datasource:manage
@@ -27,7 +28,7 @@ datasource_key 传输层 SHALL 匹配 `^[a-z][a-z0-9_]{1,63}$`;保留字 `defaul
 
 #### Scenario: 非超管访问管理端点被拒
 - GIVEN 非 SUPER_ADMIN 用户
-- WHEN 访问任一管理端点(page/create/update/enable/disable/delete/test/fetch-metadata;options 为登录即可的只读选项接口,不在此列)
+- WHEN 访问任一管理端点(page/create/update/enable/disable/delete/test;options 为登录即可的只读选项接口,不在此列)
 - THEN 返回 403
 
 #### Scenario: 创建时租户归属显式指定
@@ -45,6 +46,12 @@ datasource_key 传输层 SHALL 匹配 `^[a-z][a-z0-9_]{1,63}$`;保留字 `defaul
 - GIVEN 注册或编辑请求
 - WHEN default_schema 含引号/分号/空白等非法标识符字符
 - THEN 拒绝(400),不落库
+
+#### Scenario: datasource_key 与租户归属不可修改
+- GIVEN 数据源已创建
+- WHEN 尝试修改 datasource_key 或租户归属
+- THEN 拒绝(key 是知识/连接池/前端切换器的全局标识,改名会使旧 key 知识静默失效;租户归属是安全字段)
+- AND 换 key/换归属走新建+删除
 
 ### Requirement: 测试连接
 
@@ -134,28 +141,6 @@ datasource_key 传输层 SHALL 匹配 `^[a-z][a-z0-9_]{1,63}$`;保留字 `defaul
 - WHEN 业务变更提交
 - THEN 审计行与业务行在同一事务落库;测试连接不落审计
 
-### Requirement: 元数据抓取(introspection)
-
-`POST /system/datasource/{key}/fetch-metadata` 连接目标库查 information_schema 自动发现表与列,自动生成知识条目并 embedding;本端点是超管管理操作,允许跨租户;datasource_key 与租户归属创建后不可修改。
-
-#### Scenario: 抓取元数据并沉淀知识
-- GIVEN 超管已登录
-- WHEN 触发抓取元数据
-- THEN 连接目标库查 information_schema(限 default_schema 的 BASE TABLE,排除系统 schema)
-- AND 自动发现表与列(含注释),每张表生成知识条目(tenant 取数据源所属租户,datasource_key 维度)并 embedding
-- AND 重复抓取幂等(upsert),返回发现表数与清单
-
-#### Scenario: datasource_key 与租户归属不可修改
-- GIVEN 数据源已创建
-- WHEN 尝试修改 datasource_key 或租户归属
-- THEN 拒绝(key 是知识/连接池/前端切换器的全局标识,改名会使旧 key 知识静默失效;租户归属是安全字段)
-- AND 换 key/换归属走新建+删除
-
-#### Scenario: 超管跨租户管理
-- GIVEN 超管管理操作
-- WHEN 调用抓取元数据
-- THEN 允许跨租户管理,不要求「数据源租户==当前租户」
-
 ### Requirement: RAG datasource 维度
 
 知识条目以 (tenant, datasource_key, schema_name, table_name) 唯一;三路召回、query_history、审计均按 tenant + datasource_key 双过滤;Agent 回调透传 datasourceKey(标识符非凭证);知识上传与查询入口对 datasourceKey 做存在+启用+归属校验。
@@ -182,11 +167,13 @@ datasource_key 传输层 SHALL 匹配 `^[a-z][a-z0-9_]{1,63}$`;保留字 `defaul
 
 ### Requirement: 管理 UI
 
-数据源管理页 SHALL 提供分页列表与增删改查、测试连接、抓取元数据;数据源选项接口 SHALL 返回首位合成的 default 项与当前租户启用数据源(均不含连接信息);对话页 SHALL 提供数据源切换器。
+数据源管理页 SHALL 提供分页列表与增删改查、测试连接(元数据抓取入口随 rag 域
+落位知识库管理页,不在本页);数据源选项接口 SHALL 返回首位合成的 default 项
+与当前租户启用数据源(均不含连接信息);对话页 SHALL 提供数据源切换器。
 
 #### Scenario: 管理页全功能
 - GIVEN 超管访问数据源管理页
-- THEN 分页列表 + 新增/编辑弹窗 + 测试连接 + 抓取元数据 + 删除
+- THEN 分页列表 + 新增/编辑弹窗 + 测试连接 + 删除
 - AND 编辑时密码留空表示不修改;查库确认密码非明文
 
 #### Scenario: 数据源选项接口
