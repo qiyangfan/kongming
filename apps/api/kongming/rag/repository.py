@@ -452,12 +452,36 @@ async def _introspect_all_on(
         )
     ).all()
     comments = {(r.table_schema, r.table_name): r.table_comment or "" for r in comment_rows}
+    # 列注释(014 挂账⑦清零):数据库既有 col_description 作为润色输入的既有注释
+    # 参考;有注释列以其为说明,无注释列保持英文类型形态(行为逐字不变)
+    col_comment_rows = (
+        await conn.execute(
+            text(
+                "SELECT c.table_schema, c.table_name, c.column_name,"
+                " col_description(cls.oid, a.attnum) AS column_comment"
+                " FROM information_schema.columns c"
+                " JOIN pg_class cls ON cls.relname = c.table_name"
+                " JOIN pg_namespace n ON n.oid = cls.relnamespace"
+                "   AND n.nspname = c.table_schema"
+                " JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name"
+                " WHERE c.table_schema = ANY(CAST(:schemas AS text[]))"
+            ),
+            {"schemas": schemas},
+        )
+    ).all()
+    col_comments = {
+        (r.table_schema, r.table_name, r.column_name): r.column_comment or ""
+        for r in col_comment_rows
+    }
     return [
         IntrospectedTable(
             schema_name=r.table_schema,
             table_name=r.table_name,
             table_comment=comments.get((r.table_schema, r.table_name), ""),
-            columns_comment=columns.get((r.table_schema, r.table_name), {}),
+            columns_comment={
+                name: col_comments.get((r.table_schema, r.table_name, name)) or dtype
+                for name, dtype in columns.get((r.table_schema, r.table_name), {}).items()
+            },
         )
         for r in kept
     ]

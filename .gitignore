@@ -27,3 +27,7 @@ contracts/openapi.json.tmp
 
 # 示例数据集(sakila/olist 等,体积大,不入库;装载脚本与说明见 infra/example-data/)
 .example-data/
+
+# 审计归档产物(015:含真实 user_id/action/ip 审计数据,目录随 audit_archive_dir 配置;
+# 进程 CWD=apps/api,故规则锚 apps/api/var/)
+apps/api/var/

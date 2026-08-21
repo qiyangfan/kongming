@@ -693,6 +693,183 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat/messages/{message_id}/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Feedback */
+        post: operations["submit_feedback_chat_messages__message_id__feedback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback/{message_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Handle Feedback */
+        put: operations["handle_feedback_feedback__message_id__status_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback/{message_id}/involved-tables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Involved Tables */
+        get: operations["involved_tables_feedback__message_id__involved_tables_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Overview */
+        get: operations["overview_feedback_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback/page": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Page */
+        get: operations["page_feedback_page_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/audit/sql/page": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sql Page */
+        get: operations["sql_page_audit_sql_page_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/audit/sql/{audit_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sql Detail */
+        get: operations["sql_detail_audit_sql__audit_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/audit/oper/page": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Oper Page */
+        get: operations["oper_page_audit_oper_page_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/audit/archive/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive Run
+         * @description 手动触发归档(超管;与 lifespan 每日调度同一函数,幂等可重跑)。
+         */
+        post: operations["archive_run_audit_archive_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/audit/archive/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive Restore
+         * @description 重导入归档窗口(manifest SHA-256 校验;id 幂等)。
+         *     window_dir 传输层 8 位数字(pattern)+服务端再校验,防路径穿越。
+         */
+        post: operations["archive_restore_audit_archive_restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -714,6 +891,31 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ArchiveRestoreIn */
+        ArchiveRestoreIn: {
+            /** Window Dir */
+            window_dir: string;
+        };
+        /** ArchiveRestoreOut */
+        ArchiveRestoreOut: {
+            /** Restored */
+            restored: number;
+            /** Skipped */
+            skipped: number;
+        };
+        /** ArchiveRunOut */
+        ArchiveRunOut: {
+            /** Exported */
+            exported: number;
+            /** Deleted */
+            deleted: number;
+            /** Files */
+            files: string[];
+            /** Window Dir */
+            window_dir: string;
+            /** Skipped Export */
+            skipped_export: boolean;
+        };
         /** Body_upload_document_system_rag_documents_upload_post */
         Body_upload_document_system_rag_documents_upload_post: {
             /** File */
@@ -803,6 +1005,13 @@ export interface components {
             retry_count: number;
             /** Error */
             error: string | null;
+            /** Message Id */
+            message_id?: string | null;
+            /**
+             * Datasource Key
+             * @default default
+             */
+            datasource_key: string;
         };
         /** DatasourceActionIn */
         DatasourceActionIn: {
@@ -1022,6 +1231,68 @@ export interface components {
             /** Rows */
             rows?: unknown[][];
         };
+        /** FeedbackIn */
+        FeedbackIn: {
+            /**
+             * Rating
+             * @enum {string}
+             */
+            rating: "UP" | "DOWN";
+            /** Comment */
+            comment?: string | null;
+            /** Corrected Sql */
+            corrected_sql?: string | null;
+        };
+        /**
+         * FeedbackOut
+         * @description 提交后当前反馈状态(前端激活态回显用)。
+         */
+        FeedbackOut: {
+            /** Rating */
+            rating: string;
+            /** Comment */
+            comment: string | null;
+            /** Corrected Sql */
+            corrected_sql: string | null;
+        };
+        /** FeedbackPageItemOut */
+        FeedbackPageItemOut: {
+            /** Message Id */
+            message_id: string;
+            /** Session Id */
+            session_id: string;
+            /** User Id */
+            user_id: string;
+            /** User Nickname */
+            user_nickname: string | null;
+            /** Tenant Id */
+            tenant_id: string;
+            /** Tenant Key */
+            tenant_key: string;
+            /** Datasource Key */
+            datasource_key: string;
+            /** Rating */
+            rating: string | null;
+            /** Question */
+            question: string | null;
+            /** Sql Text */
+            sql_text: string | null;
+            /** Corrected Sql */
+            corrected_sql: string | null;
+            /** Feedback Comment */
+            feedback_comment: string | null;
+            /** Feedback Status */
+            feedback_status: string;
+            /** Feedback Time */
+            feedback_time: string | null;
+        };
+        /** FeedbackPageOut */
+        FeedbackPageOut: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["FeedbackPageItemOut"][];
+        };
         /** FetchOut */
         FetchOut: {
             /** Found */
@@ -1035,6 +1306,40 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HandleIn */
+        HandleIn: {
+            /** Status */
+            status: string;
+            /** Note */
+            note?: string | null;
+        };
+        /** HandleOut */
+        HandleOut: {
+            /** Status */
+            status: string;
+            /** Note */
+            note: string | null;
+        };
+        /** InvolvedTableOut */
+        InvolvedTableOut: {
+            /** Table Name */
+            table_name: string;
+            /** Schema Name */
+            schema_name: string;
+            /** Datasource Key */
+            datasource_key: string;
+            /** Has Knowledge */
+            has_knowledge: boolean;
+            /** Knowledge Id */
+            knowledge_id: string | null;
+        };
+        /** InvolvedTablesOut */
+        InvolvedTablesOut: {
+            /** Tables */
+            tables: components["schemas"]["InvolvedTableOut"][];
+            /** Parse Error */
+            parse_error: boolean;
         };
         /** KnowledgeItemOut */
         KnowledgeItemOut: {
@@ -1163,10 +1468,56 @@ export interface components {
             /** Columns */
             columns: components["schemas"]["MetaColumnOut"][];
         };
+        /** OperLogItemOut */
+        OperLogItemOut: {
+            /** Id */
+            id: string;
+            /** User Id */
+            user_id: string | null;
+            /** User Nickname */
+            user_nickname: string | null;
+            /** Action */
+            action: string;
+            /** Target */
+            target: string | null;
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            } | null;
+            /** Ip */
+            ip: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** OperLogPageOut */
+        OperLogPageOut: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["OperLogItemOut"][];
+        };
         /** OptionsOut */
         OptionsOut: {
             /** Providers */
             providers: components["schemas"]["ProviderOption"][];
+        };
+        /** OverviewOut */
+        OverviewOut: {
+            /** Total */
+            total: number;
+            /** Up Count */
+            up_count: number;
+            /** Down Count */
+            down_count: number;
+            /** Corrected Count */
+            corrected_count: number;
+            /** Down Rate */
+            down_rate: number;
+            /** Trend */
+            trend: components["schemas"]["TrendItemOut"][];
         };
         /** PermOut */
         PermOut: {
@@ -1202,7 +1553,9 @@ export interface components {
         };
         /**
          * RenameIn
-         * @description 重命名(010):空白标题领域层再闸(去空白后为空即 400)。
+         * @description 重命名(010):去空白后非空与不超列上限(200)由领域层判定(013 补齐——
+         *     spec 立约以 strip 后值为准,带空白 201 字 strip 后 ≤200 不再 422 误拒);
+         *     max_length=2000 仅防离谱请求体(与 question 同宽),非业务上限。
          */
         RenameIn: {
             /** Title */
@@ -1331,6 +1684,53 @@ export interface components {
             /** Error */
             error?: string | null;
             result?: components["schemas"]["MessageResultOut"] | null;
+            /** Rating */
+            rating?: string | null;
+            /** Corrected Sql */
+            corrected_sql?: string | null;
+            /** Feedback Comment */
+            feedback_comment?: string | null;
+        };
+        /** SqlAuditItemOut */
+        SqlAuditItemOut: {
+            /** Id */
+            id: string;
+            /** Trace Id */
+            trace_id: string;
+            /** User Id */
+            user_id: string | null;
+            /** User Nickname */
+            user_nickname: string | null;
+            /** Tenant Id */
+            tenant_id: string;
+            /** Tenant Key */
+            tenant_key: string;
+            /** Datasource Key */
+            datasource_key: string;
+            /** Question */
+            question: string | null;
+            /** Sql Text */
+            sql_text: string;
+            /** Verdict */
+            verdict: string;
+            /** Block Reason */
+            block_reason: string | null;
+            /** Row Count */
+            row_count: number | null;
+            /** Duration Ms */
+            duration_ms: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** SqlAuditPageOut */
+        SqlAuditPageOut: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["SqlAuditItemOut"][];
         };
         /** SqlExecuteRequest */
         SqlExecuteRequest: {
@@ -1435,6 +1835,15 @@ export interface components {
              * @default false
              */
             must_change_password: boolean;
+        };
+        /** TrendItemOut */
+        TrendItemOut: {
+            /** Day */
+            day: string;
+            /** Up */
+            up: number;
+            /** Down */
+            down: number;
         };
         /** UploadOut */
         UploadOut: {
@@ -3059,6 +3468,340 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetrieveOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_feedback_chat_messages__message_id__feedback_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    handle_feedback_feedback__message_id__status_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HandleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HandleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    involved_tables_feedback__message_id__involved_tables_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvolvedTablesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    overview_feedback_overview_get: {
+        parameters: {
+            query?: {
+                days?: number;
+                tenant_id?: string | null;
+                datasource_key?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    page_feedback_page_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                size?: number;
+                user_id?: string | null;
+                rating?: ("UP" | "DOWN") | null;
+                tenant_id?: string | null;
+                datasource_key?: string | null;
+                feedback_status?: ("PENDING" | "ADOPTED" | "REJECTED" | "DISMISSED") | null;
+                only_corrected?: boolean;
+                start_time?: string | null;
+                end_time?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackPageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sql_page_audit_sql_page_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                size?: number;
+                trace_id?: string | null;
+                user_id?: string | null;
+                tenant_id?: string | null;
+                verdict?: ("PASS" | "BLOCKED" | "ERROR") | null;
+                start_time?: string | null;
+                end_time?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SqlAuditPageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sql_detail_audit_sql__audit_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                audit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SqlAuditItemOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    oper_page_audit_oper_page_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                size?: number;
+                action?: string | null;
+                user_id?: string | null;
+                start_time?: string | null;
+                end_time?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperLogPageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_run_audit_archive_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveRunOut"];
+                };
+            };
+        };
+    };
+    archive_restore_audit_archive_restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArchiveRestoreIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveRestoreOut"];
                 };
             };
             /** @description Validation Error */

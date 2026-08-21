@@ -24,6 +24,10 @@ PERMISSIONS: list[tuple[str, str, int]] = [
     ("chat:execute", "问答执行", 3),
     ("system:datasource:manage", "数据源管理", 4),
     ("system:rag:manage", "知识库管理", 5),
+    ("chat:feedback:submit", "反馈提交", 6),
+    ("system:feedback:view", "反馈查看", 7),
+    ("system:feedback:handle", "反馈处置", 8),
+    ("system:audit:view", "审计查看", 9),
 ]
 
 ROLES: list[tuple[str, str, str, str, int]] = [
@@ -35,7 +39,7 @@ ROLES: list[tuple[str, str, str, str, int]] = [
 # 角色推荐绑定(只增不摘):SUPER_ADMIN 由下方逻辑增量补齐全部注册点,
 # 其余内置角色按本清单增量绑定——不覆盖运行时的人工调整
 ROLE_RECOMMENDED_PERMS: dict[str, list[str]] = {
-    DEFAULT_ROLE_KEY: ["chat:execute"],
+    DEFAULT_ROLE_KEY: ["chat:execute", "chat:feedback:submit"],
 }
 
 DEFAULT_TENANT_NAME = "默认租户"

@@ -14,9 +14,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kongming.auth.repository import SqlOperLogRepo
 from kongming.auth.router import current_user, require_perm
 from kongming.chat.agent_client import AgentClient
 from kongming.chat.ports import ExplainOutcome
+from kongming.chat.repository import ChatRepository
 from kongming.chat.service import (
     ChatOutcome,
     ChatService,
@@ -46,10 +48,10 @@ def get_agent_client() -> AgentClient:
 
 
 def get_rag_service(session: AsyncSession) -> RagService:
-    from kongming.rag.agent_callback import AgentRagClient
+    from kongming.rag.agent_callback import get_agent_rag_client
     from kongming.redis_client import get_redis
 
-    client = AgentRagClient(get_redis())
+    client = get_agent_rag_client(get_redis())  # 013:进程内单例,连接池跨请求复用
     return RagService(
         RagRepository(session),
         embedder=client,
@@ -101,12 +103,15 @@ def get_chat_service(
 ) -> ChatService:
     # history_writer=rag 回写端口(009;None 安全——注入失败不影响问答主链路)
     # explainer=执行计划端口(010,组合根绑定 internal.service.explain)
+    # 013 构造反转:repo 在组合根装配,service 仅持 ChatRepo 端口(零框架契约)
+    # 015 导出审计:oper_logger 绑定 auth 域 SqlOperLogRepo(007 组合模式)
     return ChatService(
-        session,
+        ChatRepository(session),
         agent,
         SqlDatasourceRepo(session),
         get_rag_service(session),
         _InternalExplainRunner(session),
+        SqlOperLogRepo(session),
     )
 
 
@@ -140,6 +145,9 @@ class ChatQueryOut(BaseModel):
     chart: ChartOut
     retry_count: int
     error: str | None
+    # 014 messageId 打通(纯增):assistant 落库消息 id(反馈提交引用)+执行数据源快照
+    message_id: str | None = None
+    datasource_key: str = "default"
 
 
 def _out(o: ChatOutcome) -> ChatQueryOut:
@@ -156,6 +164,8 @@ def _out(o: ChatOutcome) -> ChatQueryOut:
         chart=ChartOut(type=o.chart.type, x=o.chart.x, y=o.chart.y),
         retry_count=o.retry_count,
         error=o.error,
+        message_id=o.message_id,
+        datasource_key=o.datasource_key,
     )
 
 
@@ -228,6 +238,10 @@ class SessionMessageOut(BaseModel):
     status: str
     error: str | None = None
     result: MessageResultOut | None = None
+    # 014 messageId 打通(纯增):assistant 消息反馈状态回显(user 消息恒 None)
+    rating: str | None = None
+    corrected_sql: str | None = None
+    feedback_comment: str | None = None
 
 
 def _msg_out(m: SessionMessage) -> SessionMessageOut:
@@ -251,6 +265,9 @@ def _msg_out(m: SessionMessage) -> SessionMessageOut:
         status=m.status,
         error=m.error,
         result=result,
+        rating=m.rating,
+        corrected_sql=m.corrected_sql,
+        feedback_comment=m.feedback_comment,
     )
 
 
@@ -284,9 +301,11 @@ async def list_sessions(
 
 
 class RenameIn(BaseModel):
-    """重命名(010):空白标题领域层再闸(去空白后为空即 400)。"""
+    """重命名(010):去空白后非空与不超列上限(200)由领域层判定(013 补齐——
+    spec 立约以 strip 后值为准,带空白 201 字 strip 后 ≤200 不再 422 误拒);
+    max_length=2000 仅防离谱请求体(与 question 同宽),非业务上限。"""
 
-    title: str = Field(min_length=1, max_length=200)
+    title: str = Field(min_length=1, max_length=2000)
 
 
 @router.patch(

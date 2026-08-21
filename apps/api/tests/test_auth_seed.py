@@ -20,7 +20,11 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
     ).scalars().all()
     assert perms == [
         "chat:execute",
+        "chat:feedback:submit",
+        "system:audit:view",
         "system:datasource:manage",
+        "system:feedback:handle",
+        "system:feedback:view",
         "system:rag:manage",
         "system:role:manage",
         "system:user:manage",
@@ -68,19 +72,19 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
                 " WHERE r.role_key='SUPER_ADMIN'"
             )
         )
-    ).scalar_one() == 5  # 009 加 system:rag:manage
-    # 推荐绑定(只增不摘):DEVELOPER 增量获得 chat:execute
+    ).scalar_one() == 9  # 009 加 rag:manage;014 加 3 反馈点;015 加 system:audit:view
+    # 推荐绑定(只增不摘):DEVELOPER 增量获得 chat:execute(005)+chat:feedback:submit(014)
     dev_perms = (
         await session.execute(
             text(
                 "SELECT p.perm_code FROM public.sys_role_permission rp"
                 " JOIN public.sys_role r ON r.id=rp.role_id"
                 " JOIN public.sys_permission p ON p.id=rp.permission_id"
-                " WHERE r.role_key='DEVELOPER'"
+                " WHERE r.role_key='DEVELOPER' ORDER BY 1"
             )
         )
     ).scalars().all()
-    assert list(dev_perms) == ["chat:execute"]
+    assert list(dev_perms) == ["chat:execute", "chat:feedback:submit"]
 
 
 async def test_seed_idempotent_on_repeat(session: AsyncSession) -> None:
@@ -92,11 +96,11 @@ async def test_seed_idempotent_on_repeat(session: AsyncSession) -> None:
 
     assert await _count("public.sys_user") == 1
     assert await _count("public.sys_role") == 2
-    assert await _count("public.sys_permission") == 5  # 009 加 system:rag:manage
+    assert await _count("public.sys_permission") == 9  # 009+3 反馈点(014)+audit:view(015)
     assert await _count("public.sys_tenant") == 1
     assert await _count("public.sys_user_role") == 1
     assert await _count("public.sys_user_tenant") == 1
-    assert await _count("public.sys_role_permission") == 6  # 超管 5 + DEVELOPER 推荐 1
+    assert await _count("public.sys_role_permission") == 11  # 超管 9 + DEVELOPER 推荐 2
 
 
 async def test_seed_with_env_password_not_forced_to_change(

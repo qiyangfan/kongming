@@ -88,6 +88,11 @@ class Settings(BaseSettings):
     # 结果导出行数上限(010):截断保护防服务端内存失控(chat spec 默认 10000)
     export_max_rows: int = Field(default=10000, ge=1)
 
+    # 审计留存与归档(015,audit spec):库内热数据窗口(天)+归档目录
+    # (落盘即随部署备份链;异地加密上传为部署运维面)
+    audit_archive_days: int = Field(default=180, ge=1)
+    audit_archive_dir: str = "var/audit-archive"
+
     def fail_closed_checks(self) -> None:
         """prod 环境缺敏感配置直接拒启(dev 宽松以便本地起步)。"""
         if self.environment != "prod":

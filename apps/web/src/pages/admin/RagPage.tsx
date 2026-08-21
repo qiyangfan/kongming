@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router";
 
 import {
   AlertDialog,
@@ -48,6 +49,9 @@ const SOURCE_LABEL: Record<string, string> = {
 
 export default function RagPage() {
   const qc = useQueryClient();
+  // ?table=<名> 定位(014 feedback-refine「编辑知识」跳转):提示条+行高亮
+  const [searchParams, setSearchParams] = useSearchParams();
+  const locateTable = searchParams.get("table");
   const [page, setPage] = useState(1);
   const [dsFilter, setDsFilter] = useState("");
   const [actionDs, setActionDs] = useState("");
@@ -142,6 +146,21 @@ export default function RagPage() {
 
   return (
     <div className="space-y-4">
+      {locateTable && (
+        <div className="flex items-center justify-between rounded-lg border border-ring/40 bg-accent/40 px-3 py-2 text-sm">
+          <span>
+            已定位自反馈详情:表 <code className="font-mono">{locateTable}</code>
+          </span>
+          <Button
+            variant="ghost"
+            size="xs"
+            aria-label="清除定位"
+            onClick={() => setSearchParams({}, { replace: true })}
+          >
+            清除
+          </Button>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">知识库</h1>
         <div className="flex items-center gap-2">
@@ -283,7 +302,10 @@ export default function RagPage() {
         </TableHeader>
         <TableBody>
           {(list.data?.items ?? []).map((item) => (
-            <TableRow key={item.id}>
+            <TableRow
+              key={item.id}
+              className={item.table_name === locateTable ? "bg-accent/50" : undefined}
+            >
               <TableCell className="font-mono text-xs">{item.datasource_key}</TableCell>
               <TableCell className="font-mono text-xs">{item.schema_name}</TableCell>
               <TableCell className="font-mono text-xs">{item.table_name}</TableCell>

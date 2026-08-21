@@ -1,31 +1,64 @@
 # HANDOFF — Kongming 交接文档
 
-> 最后更新:2026-08-20(**011 图表增强+可读性热修+012 管理台启停范式
-> 已提交并归档**:archive/2026-08-20-011-chart-enhance、
-> archive/2026-08-20-012-admin-status-toggle,delta 已 sync 四主 spec
-> ——chat「图表可视化」/web-nav「结果图表渲染」/rbac「用户启用与禁用」
-> /web-admin「用户管理页+状态列行内启停范式」;R1+R2 两轮独立评审清零;
-> 真 LLM 冒烟可读性闭环+开关全链全过;api 389+agent 85+web 全绿、
-> 契约 +2 端点;**下一棒=rag 挂账 15 项/010 挂账 18 项/011 挂账 9 项/
-> 012 挂账 4 项视优先级评估,或 query-streaming/feedback**)。
-> 清空上下文/新会话先读本文与 `AGENTS.md`,
-> 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
+> 最后更新:2026-08-21(**015 审计可视化与留存已实施归档并入库**:
+> archive/2026-08-21-015-audit-visibility,delta 已 sync audit/chat 两主 spec;
+> 5 端点+1 权限点+ip 链路+导出审计 010⑦清零+归档可重导入+/admin/audit
+> 第七子页;R1 独立评审 5 严重+7 建议全修(归档 cutoff 覆盖校验/进程锁
+> 两条数据丢失路径堵死);api 440+agent 87+web 全绿、契约+5 端点;
+> **同日已归档 013 挂账清理+014 反馈闭环;001–015 齐,活动变更为零;
+> 下一棒=016 eval+ai-eval 域**,其后 query-streaming)。
+> **014 反馈闭环已实施归档并入库**:
+> archive/2026-08-21-014-feedback-loop,delta 已 sync 五主 spec
+> ——feedback/feedback-refine/feedback-analytics/chat/knowledge;
+> 6 端点+3 权限点+赞踩 UI+/admin/feedback 第六子页,009⑦列注释+
+> ⑪reindex 先润色后删写搭车清零;R1 独立评审 0 严重/4 建议全修
+> (uuid 422/编辑知识携带参数/comment 回显预填/类型生成)+12 观察挂账;
+> api 423+agent 87+web 全绿、契约 +5 端点;**013 挂账清理小修包已同日
+> 归档**(7 项挂账清零,archive/2026-08-21-013-backlog-hardening);
+> **下一棒=015-audit-visibility 已提案待实施**,其后 eval/query-streaming)。
 > 清空上下文/新会话先读本文与 `AGENTS.md`,
 > 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
 
 ## 新会话开工指引(最先看这里)
 
-1. **011 图表增强+可读性热修+012 管理台启停范式:已提交并归档**
-   (011=scatter 自动入口/四类型切换/PNG/列序解耦+prompt 标识列热修;
-   012=用户启停专用端点+禁用吊销 refresh+StatusSwitch 两页统一)。
-   其后梯队=**rag 挂账**(见「已知 TODO」009 段 15 项)/010 挂账 18 项/
-   011 挂账 9 项/012 挂账 4 项视优先级评估;query-streaming;feedback。**010 会话体验深化:已提交并归档**
-   (archive/2026-08-20-010-chat-experience,delta 已 sync chat 主 spec)。
-   其后梯队=**rag 挂账**(见「已知 TODO」009 段 15 项)/010 挂账 18 项/
-   011 挂账 6 项。010 顺手修了**共享组件级缺陷**:scroll-area Viewport
-   加 `[&>div]:block!`(Radix display:table shrink-to-fit 在不可断行 CJK 长内容
-   +窄视口下把内容撑出视口;此前侧栏无长标题从未暴露)。010 零表结构变更、
-   零新权限点(全复用 chat:execute)、零种子变更;新依赖 openpyxl(+types)。
+1. **015 审计可视化与留存:已实施归档并入库**(archive/2026-08-21-015-audit-visibility)——
+   GET /audit/sql/page + /audit/sql/{id}(详情 403 同形)+/audit/oper/page
+   +POST /audit/archive/run|restore(权限点 system:audit:view 排序 9 仅
+   SUPER_ADMIN);行级可见性非 ALL 强制本人(014 同款);操作日志 ip 链路=
+   contextvars 横切(ClientIpMiddleware→client_ip_var→SqlOperLogRepo.add,
+   15+ 调用点零改动);chat.export 导出审计(010⑦清零,OperLogger 端口
+   注入);归档=run_archive/run_restore 独立函数(180 天窗 gzip JSONL+
+   manifest SHA-256;同日重跑幂等需 manifest_cutoff>=当前 cutoff 才跳过
+   导出——days 调小不未导先删 R1-S2;asyncio.Lock 进程互斥 R1-S3;恢复
+   按 id 幂等);lifespan 每日 03:00 薄壳调度;/admin/audit 第七子页
+   (双区 toggle+时间范围筛选+详情展开);容器 --proxy-headers。
+   R1 评审 5 严重+7 建议全修(含两条不可逆数据丢失路径)。**016 eval+ai-eval
+   域为下一棒**(Execution Match 双分引擎+gold 数据集 sakila/olist 各
+   15-20 题[上游 nl2sql-agent/tests/eval/*.yaml 参考逻辑]+基线管理+
+   Recall@K+CI smoke;009③ query_history 治理+014 O4 重复沉淀搭车),
+   其后 query-streaming。**014 反馈闭环:已实施归档并入库**(archive/2026-08-21-014-feedback-loop)——
+   feedback 三域全落地:POST /chat/messages/{id}/feedback(幂等三态 null 保持/
+   空串清空/显式覆盖+行锁串行+重复提交清空处置三列+反馈置 PENDING)+
+   纠错防火墙校验(与 internal 同一规则集)复用 009 writeback 沉淀(会话快照
+   数据源,清空不删已沉淀行)+PUT /feedback/{id}/status(处置限定已反馈
+   assistant)+GET involved-tables(sqlglot 抽表 CTE 排除)+overview
+   (Asia/Shanghai 分桶逐天补零)+page(行级可见性非 ALL 强制本人);
+   messageId 打通(实时响应+历史回显 rating/corrected_sql/feedback_comment);
+   权限点 chat:feedback:submit/system:feedback:view/system:feedback:handle
+   排序 6/7/8(DEVELOPER 推荐绑定 submit);赞踩 UI(setQueriesData 本地
+   即时回显)+/admin/feedback 第六子页;**chat_message 反馈 8 列 baseline
+   已建全零迁移**。搭车:009⑦内省列注释进润色(columns_comment=
+   db_comment or data_type,零签名变化三消费方获益)+⑪reindex 先润色
+   后删写(分钟级 LLM 事务外,delete+insert+审计短事务,前置失败不进删写)。
+   R1 评审 0 严重/4 建议全修(非法 uuid 传输层 422/编辑知识 ?table= 定位
+   提示条+行高亮/comment 回显+未触碰传 null 保持/请求体类型生成)。
+   **015-audit-visibility 已提案待实施**(SQL 审计/操作日志查询分页+
+   行级可见性+ip 链路接通+导出审计 010⑦清零+180 天归档 gzip JSONL
+   SHA-256 可重导入+lifespan 每日调度+/admin/audit 第七子页);其后
+   eval+ai-eval 域、query-streaming。**013 挂账清理小修包:已同日归档**
+   (7 项清零:chat.service 构造反转入契约/重命名 strip 后校验/
+   AgentRagClient 单例/rag_retrieve 非 JSON 收敛/temporal 轴截断/
+   scatter tooltip/删除 busy+ESC 闸)。
 2. 质量底线:安全规则类测试先行;收工前 `make check` 全绿 + 冒烟记录;
    改 api 必跑 `make contracts` 并提交产物。**本地门禁只有 ruff check,
    不要主动跑 `ruff format`**(010 教训:全仓非 format 管理,误跑致 52 文件
@@ -73,11 +106,122 @@
    (DOM 快照可读)——GUI 测试一律用 Playwright MCP 工具组
    (`mcp__plugin_playwright_playwright__browser_*`,独立管道,002 已验证可用)。
 
-## 当前状态(截至 011 实施待提交;001–010 及此前已归档)
+## 当前状态(013/014/015 已入库;001–015 全部归档)
 
 - git:main 分支(以 git log 为准);无远程、未 push。
   分支策略:主干开发不拉 dev,协作按变更开短命 feature。
-- openspec:**001–012 全部归档;活动变更为零**。
+- openspec:**001–015 全部归档;活动变更为零**。
+- **015 架构总览**:零表结构/零 agent 改动/零新依赖。api——audit 域包扩全
+  (ports/repository/service/router/archive/context;writer/models 不动);
+  import-linter 调整:datascope 单独保留禁 fastapi 契约,audit 新增
+  models/service/ports 零框架契约(第 8 条);auth.repository SqlOperLogRepo.add
+  读 client_ip_var 填 ip(contextvars 横切,BackgroundTasks 继承副本=发起
+  请求 ip 合理);chat export_result 落 chat.export 审计(rollback 包
+  suppress 防双失败逃逸);config 加 audit_archive_days/dir;归档锁=
+  asyncio.Lock(单 worker 前提,多 worker 需 PG advisory lock 挂账);
+  Dockerfile --proxy-headers --forwarded-allow-ips 内网三段。web——
+  /admin/audit(双区 toggle-group 复用 013 组件;时间列 toLocaleString
+  本地化;时间范围 date 筛选两区共享;详情行内展开完整 SQL/detail)。
+- **015 R1 独立评审(5 严重+7 建议全修)**:S1 chat delta 缺失(导出审计
+  条款会永久丢失)→补 delta 已 sync;S2 归档跳过分支不校验窗口覆盖
+  (days 调小→90~180 天龄行未导先删)→manifest_cutoff>=当前 cutoff 才
+  跳过+直证用例(首轮 180 窗→恢复→90 窗重跑必须重导);S3 归档无并发
+  互斥(gzip "wt" 截断交错=文件损坏且删除后不可恢复)→asyncio.Lock+
+  并发用例(gather 两跑=一真一幂等);S4 窗口命名与 spec 声明背离→
+  改「导出日锚+跨日重复语义显式+恢复幂等去重」;S5 脱敏测试锁定
+  未兑现→补用例(重置密码 detail 无明文无 password 键);B1 导出审计
+  rollback 包 suppress;B2 lifespan cancel 后 gather 收割;B3 时间列
+  本地化;B4 时间范围筛选补 UI(oper user 筛选挂账);B5 proposal ip 句
+  改 contextvar 口径;B6 --proxy-headers;B7 冗余 import。观察挂账:
+  system:audit:view 同点管查询与删数据/回灌(未来细分 archive 权限点);
+  调度 UTC 03:00=北京 11:00(与低峰意图偏差,时区随部署评估);
+  conftest ASGITransport 不跑 lifespan(归档调度路径仅冒烟覆盖);
+  空窗口日产出空 gzip(微量存储);trace_id/action 输入无防抖;
+  manifest name 字段理论可带相对路径(前提=已有文件系统写权限,无增益)。
+- **015 冒烟(2026-08-21,Playwright MCP+curl,7 项全过)**:SQL 审计分页
+  74 条历史+筛选+详情展开完整 SQL+trace_id;操作日志 ip 新请求
+  127.0.0.1(存量 None 不回填)+perm_denied 行带 ip;chat.export 审计
+  detail{fmt,rows,truncated};归档 run{exported:1,deleted:1}+两文件+
+  manifest→restore restored=1→重跑 skipped_export=True 幂等;smoke-self
+  sql/page+archive/run 403;UI 双区+时间筛选+导航守卫。
+- **014 架构总览**:零表结构(反馈 8 列+索引 0001 baseline 已建全)/零 agent
+  改动/新依赖零。api——feedback 域包(models 三态合并+sqlglot 抽表 CTE 排除/
+  ports/service 零框架/repository 全参数化(CAST 形态防 asyncpg None 类型
+  推断坑)/router 双前缀 /chat+/feedback);提交面 403 同形(spec 立约,
+  与 chat 域 404 惯例分立);防火墙三函数复用零拷贝;writeback 复用 009
+  通道(同 session 双 repository 时序安全:feedback 先 commit,writeback
+  后 commit);行级可见性=repository bool_or(data_scope='ALL') 判定+
+  service 强制覆盖 userId;种子 3 权限点+DEVELOPER 推荐绑定(种子断言
+  精确到列表相等);import-linter 第 7 契约。web——setQueriesData 前缀
+  ["messages"] 本地即时回显;FeedbackDialog 未触碰字段传 null 保持
+  (commentTouched 判定);/admin/feedback(统计卡 5+趋势 token 色+筛选
+  6 件+分页越界自愈+详情弹窗三区);「编辑知识」/admin/rag?table=<名>
+  定位提示条+行高亮(零服务端变化)。
+- **014 R1 独立评审(0 严重;4 建议全修+12 观察)**:S1 page/overview
+  user_id/tenant_id 裸 str 直穿 CAST 裸 500→uuid.UUID 传输层 422;
+  S2「编辑知识」裸链无参数→?table= 携带+RagPage 定位;S3 弹窗 comment
+  空串恒提交静默清空既有留言→SessionMessageOut 纯增 feedback_comment
+  回显+未触碰传 null;S4 请求体类型手写违先例→生成。顺手项:O1 处置
+  限定已反馈 assistant(防幽灵行);O2 重复提交清空处置三列(防陈旧
+  处置者);O3 parseError 改「部分失败跳过」spec 措辞;O10 工件失实
+  三处(nav.ts→AdminLayout/「无 spec 变更」措辞/tasks 对齐)。观察挂账:
+  O4 弹窗预填原 SQL 直接提交会重复沉淀(被 009 成功回写天然稀释,
+  query_history 治理随 eval 域);O5 overview 滚动 24h 窗 vs trend 日历日
+  口径微差(差 1 边界);O6 recent_user_question_before 严格小于 created_at
+  (手插同刻数据漏问句,生产跨事务必晚);O7 insert+touch 同事务 commit
+  失败时 mid 悬空(仅 DB 故障窗口);O8 行锁无真实并发捶打(PG 语义
+  成熟);O9「初检」措辞 vs internal 分段(规则集合一致);O10③ days
+  传输层 422 vs spec「钳 90」解读差(实现取 422);O11 REJECTED/FAILED
+  消息 API 层仍可反馈(前端 SUCCESS 才挂入口,方向放宽无风险);
+  O12 前端时间范围只作用统计卡不过滤明细表(API 参数前端未用)。
+- **014 冒烟(2026-08-21,真 LLM+Playwright MCP,9 项全过)**:响应含
+  message_id/点赞 setQueriesData 即时切换/DELETE correctedSql 400
+  (CORRECTED_SQL_REJECTED: BLOCKED_ROOT)/正确 SQL 200+沉淀(embedding
+  真向量)/相似问句召回 few-shot HIT 纠错 SQL/分析页全要素+处置保存
+  ADOPTED 可见/涉及表 goods 定位+编辑知识跳转/smoke-self 提交/page/
+  overview 全 403/fetch 润色+reindex 两次 {1,1,1} 幂等一致。R1 修复后
+  复验:S2 定位提示条+行高亮;S3 弹窗预填「演示纠错」+未触碰提交
+  库内留言保持+状态回 PENDING(O2 联动)。
+- **013 架构总览**:零表结构/零种子/零新依赖;契约 diff 仅 RenameIn
+  maxLength 200→2000(业务上限 200 不变、领域层 strip 后判定,传输层
+  仅防离谱请求体)。api——chat/ports 新增 ChatRepo Protocol(15 方法+
+  commit/rollback)与 ChatStoreError;ChatRepository 写路径 6 方法+commit
+  经 `_store_error_boundary` 装饰器(PEP 695 泛型,Coroutine 返回型与
+  Protocol async def 结构化匹配——Awaitable 宽形态会被 mypy 判不兼容)
+  转译 SQLAlchemyError;ChatService 构造 session→repo 注入,零 sqlalchemy
+  import,import-linter chat 契约补 service 与三域对齐;rename strip 后
+  >200→InvalidTitle(400),RenameIn maxLength 放宽 2000。rag——
+  AgentRagClient 实例 lazy AsyncClient 复用+模块级单例工厂
+  get_agent_rag_client(chat/rag 两 router 组合根同调)。agent——
+  rag_retrieve 200 非 JSON try ValueError 收敛 None(与 describe 形态对称)。
+  web——chart-view formatTemporalLabels 数据层截断(全列 ISO
+  `YYYY-MM-DDTHH:mm` 探测,任一不匹配整列放弃;时间非全零附加 HH:mm;
+  pie 切片名同源截断为有意,R1-S2 已钉文档)+scatter tooltip formatter
+  (列名+数值双行,unknown 窄化);session-sidebar AlertDialogCancel
+  disabled={busy}+AlertDialog onOpenChange 闸(busy 期拦截一切关闭源,
+  R1-S1:ESC 键盘路径等价绕过,按钮 disabled 不够)。
+- **013 R1 独立评审(0 严重;3 建议全修+4 观察)**:S1 busy 期 ESC 仍可关
+  删除对话框(spec 立约语义被键盘等价路径绕过)→onOpenChange 闸,浏览器
+  实证 busy 窗口 ESC 派发 9 帧保持 OPEN、删除完成才关;S2 pie 被
+  formatTemporalLabels 波及(design「不受影响」失实)→文档改「pie 切片名
+  同源截断(有意)」;S3 get_agent_rag_client docstring「测试不经本工厂」
+  失实(TestClient 经组合根触达,类级补丁/连接失败兜底恒空池)→如实改写+
+  _get_client 钉单 loop 前提(成功建连的新测试须复位单例槽)。观察挂账:
+  O2 rollback 不转译后外层 except 少一次兜底(终态同 500,仅记录);
+  O3 formatTemporalLabels 时间判零只看 HH:mm(秒信息丢弃,类目轴按秒
+  取数极罕见)。核过无异常面:Protocol 17 成员逐一镜像/转译覆盖完备/
+  构造点零漏改/temporal 三重形态(date 无 T 原样/timestamp/timestamptz
+  截断)/退化点图 tooltip 立约字面满足/测试锚点(无 xdist 串行安全)。
+- **013 冒烟(2026-08-21,真 LLM+Playwright MCP,6 项全过)**:temporal 轴
+  fiber 直证 xData=「2005-07-05」无 T 后缀(line)/scatter tooltip
+  formatter 输出「length: 183<br/>rental_rate: 4.99」(挂载 function+
+  数值散点 value 轴+样点 [183,4.99])/删除 busy 窗口 10 帧采样「再想想」
+  恒 disabled(fetch hook 延迟 1.5s 注入)/curl 重命名带空白 201 字→
+  200 strip 落库+裸 201 字→400/问答全链路 4 轮真 LLM SUCCESS
+  (chat.service 反转后首验)/rag 召回 history_sql 命中(单例后)。
+  **MCP 操作经验**:textarea 设值须 focus() 后 Enter 才进发送键路
+  (evaluate 设值+MCP press Enter 未聚焦会落空,点发送按钮更稳);
+  短 busy 窗口采样须 fetch hook 延迟注入,本地 API<25ms 直采必错过。
 - **011 架构总览**:零表结构/零新端点/零新权限点/零种子/**零契约漂移**
   (chart.type 契约 schema 为自由 string,值域扩 scatter 在 schema 内,
   make contracts KEPT)。api suggest_chart 补 scatter 分支(首列数值+有
@@ -699,15 +843,52 @@
 | RAG/知识库 | rag 两表 baseline 既定(四元唯一键 tenant+ds+schema+table,1536 维+HNSW+tsv GIN);三路召回=向量+全文('simple')RRF k=60 top5 融合+query_history 独立强 few-shot(不进融合,≤3 条);tenant+ds 双过滤;召回零命中/失败回退实时内省;成功 SQL 回写(原始问句,最终 SUCCESS 判定);覆盖优先级 INTROSPECTION<AI_GENERATED<MANUAL_UPLOAD<MANUAL_EDIT<FEEDBACK_REFINED(自动不覆盖人工;reindex 显式清空例外);embedding 独立配置(缺省回退 llm_*,上游 028 教训)不随主模型路由;rag schema 显式限定名执行面拒读(末段名不进清单防误伤);缓存 emb 24h/ctx 10min,写操作 commit 后 SCAN 精确失效,空结果不写缓存 | rag + knowledge + nl2sql-agent + sql-execution + web-admin spec(009) |
 | 会话体验 | 标题两阶段:初始=首问前 30 字符,首个 SUCCESS 轮后 LLM 改写(BackgroundTasks+独立会话;守卫读首问截断值短路+条件写 WHERE title=expected,人工重命名永不覆盖;改写不刷 updated_at);EXPLAIN=message_id 引用(不收裸 SQL,服务端复检后拼 EXPLAIN (FORMAT JSON),永不 ANALYZE,数据源取会话快照);导出=传 columns+rows 不重跑 SQL,CSV BOM+CRLF+公式注入中和,xlsx 自算列宽,rows 传输层上限 10000;搜索=标题 ILIKE OR user 问句 EXISTS(共享 like_pattern 转义);重命名=原子归属 UPDATE;全端点复用 chat:execute 无新权限点 | chat spec(010 delta) |
 | 图表增强 | 推断补双数值列→scatter(x=首列,y=首个数值列;temporal/pie/bar 既有规则不变);四类型手动切换=卡片本地状态、映射恒定、刷新/同卡片新结果回落建议类型;scatter 渲染按 x 列全数值探测分流(排除 null 防 Number(null)===0 误判),非数值退化类目点图不丢点;PNG=getDataURL pixelRatio 2+背景取 --card token,文件名「图表-<时间戳>.png」 | chat「图表可视化」+ web-nav「结果图表渲染」spec(011 delta) |
+| 反馈闭环 | 提交=幂等三态(null 保持/空串清空/显式覆盖)+行锁串行+置 PENDING+重复提交清空处置三列;归属 403 同形(与 chat 404 惯例分立);仅 assistant;纠错先过防火墙(与 internal 同一规则集)整体拒,通过后复用 009 writeback 沉淀(会话快照数据源;与现值不同才写;清空不删已沉淀行;失败不阻断);处置限定已反馈 assistant,枚举四态,note 三态;涉及表=sqlglot 抽表(CTE 排除,末段小写),匹配不纳 schema 名;统计=Asia/Shanghai 固定分桶逐天补零;行级可见性=非 ALL 强制本人覆盖传值(ALL 判定=角色集 bool_or);messageId 打通=实时响应纯增 message_id/datasource_key+历史回显 rating/corrected_sql/feedback_comment;REJECTED/FAILED 卡片不挂赞踩入口(API 不拦);编辑知识跳 /admin/rag?table=<名> 定位;纠错永不回写 table_descriptions | feedback + feedback-refine + feedback-analytics + chat + knowledge spec(014 delta) |
 
 ## 下一步(路线图梯队,按序)
 
-1. rag/knowledge 后续挂账(见「已知 TODO」009 段 15 项)与 010 挂账 18 项、
-   011 挂账 9 项、012 挂账 4 项视优先级评估;query-streaming 流式输出;
-   反馈闭环(feedback 域)。
+1. **016 eval+ai-eval 域**(Execution Match 严格/宽松双分引擎+gold
+   数据集 sakila/olist 各 15-20 题/租户[上游 nl2sql-agent/tests/eval/
+   *.yaml 与 test_eval.py 参考逻辑重写,tiebreaker/业务可读列规范随集
+   沉淀]+基线管理四组分数+Recall@K+CI smoke 守护+多轮 turns 用例;
+   009③ query_history 治理+014 O4 重复沉淀治理搭车);(SQL 审计/操作日志查询分页+
+   行级可见性+ip 链路接通+chat.export 导出审计 010⑦清零+180 天
+   归档 gzip JSONL+SHA-256 可重导入+lifespan 每日调度+/admin/audit
+   第七子页;零迁移);
+2. query-streaming 流式输出;
+3. 剩余挂账见「已知 TODO」各段,随对应域变更搭车评估。
 
 ## 已知 TODO(代码内标注,非缺陷)
 
+**015 挂账(R1 观察)**:①system:audit:view 同一权限点管「查询」与
+「删数据/回灌」(归档 run/restore),未来细分 archive 权限点;②调度
+UTC 03:00=北京 11:00,与「凌晨低峰」意图偏差(时区随部署评估);
+③conftest ASGITransport 不跑 lifespan,归档调度路径零自动化覆盖
+(仅冒烟);④空窗口日也产出两个空 gzip+manifest(微量存储);
+⑤审计页 trace_id/action 输入无防抖(每键一查,内网管理页可接受);
+⑥归档 run 在 HTTP 请求内跑全量(大表受客户端超时影响,中途取消有
+幂等兜底);⑦manifest name 字段理论可带相对路径(前提=已有文件系统
+写权限,无权限增益);⑧多 worker 部署归档锁需 PG advisory lock
+(单 worker 前提,008 挂账②同款);⑨oper 区 user 筛选接口已备 UI 未做;⑩归档调度时区为 UTC 03:00(北京
+   11:00,与低峰意图偏差,spec 仅立约「每日定时」未钉时区,部署时评估);
+   ⑪run_restore 对表结构演进无防御(归档后加 NOT NULL 列/删列再重导旧档
+   会 500,库内无副作用,可接受边界);⑫--proxy-headers 采信 XFF 最左值,
+   反代须覆盖而非追加 XFF(部署面);⑬归档 tasks 5.3 措辞「fetchmany 分批」
+   与实现 LIMIT/OFFSET 分批不符(行为等价,工件勘误——归档封存不改,
+   以本条为准)。
+
+**014 挂账(R1 观察 O4-O12)**:O4 弹窗预填原 SQL 直接提交会把原 SQL
+重复沉淀(被 009 成功回写天然稀释,随 eval 域 query_history 治理);
+O5 overview 滚动 24h 窗 vs trend 日历日口径微差(边界差 1);
+O6 recent_user_question_before 严格小于 created_at(手插同刻数据漏问句,
+生产跨事务必晚);O7 insert+touch 同事务 commit 失败时 mid 悬空(仅 DB
+故障窗口);O8 行锁无真实并发捶打(PG 语义成熟);O9「初检」措辞 vs
+internal 分段(规则集合一致,仅措辞);O10③ days 传输层 422 vs spec
+「钳 90」解读差(实现取 422);O11 REJECTED/FAILED 消息 API 层仍可
+反馈(前端 SUCCESS 才挂入口,方向放宽无风险,收口需 submit 加 status
+判定+spec 补句);O12 前端时间范围只作用统计卡/趋势不过滤明细表
+(API 的 start_time/end_time 参数前端未用,days 可映射为明细表
+start_time 随体验深化)。
 **012 挂账**:①启停开关无确认弹窗(二元可逆+失败回弹,设计决策;
 自禁/超管有 409 兜底);②行内错误只在最后操作的行保留(单槽 toggleId
 归因;R2 后 pending 已全局互斥,无并发竞态,错误归因单行足够);
@@ -718,23 +899,24 @@
 消息记忆(spec 立约回落建议类型,偏好记忆随 personalization 远期);
 ③pixelRatio=2 印刷/大屏倍率配置化随真实诉求再加;④pie 高基数手动
 切换扇区爆炸不可读(spec 允许自由切换;默认推断的基数门槛仍在,手动
-选择不设卡);⑤temporal 类目轴标签为 ISO 原文(2005-07-05T00:00:00,
-既有行为非 011 引入,日期格式化随体验深化评估);⑥web 无单测基座
+选择不设卡);⑥web 无单测基座
 (同 010 挂账⑭,Playwright 冒烟覆盖);⑦option useMemo 依赖不稳定对象
 引用每次重算(echarts-for-react 内部 fast-deep-equal 挡板,无视觉后果,
 006 既有形态);⑧toggle-group 的 gap-[--spacing(var(--gap))] 任意值类
-编译产物存疑(本仓未传 spacing 恒 0,惰性;未来消费方传非零时回头查);
-⑨散点 tooltip 无 formatter(与 bar/line 一致的薄信息量,体验深化再议)。
+编译产物存疑(本仓未传 spacing 恒 0,惰性;未来消费方传非零时回头查)。
+**(⑤temporal 轴标签、⑨散点 tooltip 已由 013 清零)**
+
+**013 挂账(R1 观察)**:O2 rollback 不转译后外层 except 少一次重复兜底
+(终态同为 500,ports docstring 明示决策,仅记录);O3 formatTemporalLabels
+时间判零只看 HH:mm(如 00:00:30 截为纯日期丢 30 秒;类目轴按秒取数
+极罕见,design D5 截断纪律内)。
 
 **010 挂账(R1/R2 评审观察项)**:①用户手动把标题改成与首问截断值逐字相同时,
 改写保护失效(守卫/条件写都按值判定;概率极低,影响=一次自动改写);
 ②AgentClient.rewrite_title「永不抛」的理论小孔——httpx client 构造遇非法
 base_url 抛非 HTTPError(title_tasks 外层 except Exception 已兜底);
-③chat.service 不在 import-linter 契约内(HEAD 既有:service 直接构造
-repository 致间接 import sqlalchemy;system/datasource/rag 契约均含 .service,
-chat 域为既有不一致,收口需 service 构造反转);④分组函数固定毫秒日界,
-DST 切换日偏 1 小时(zh-CN 无 DST,记录);⑤删除确认框 busy 期「再想想」
-可点(删除请求已发出,结果正确,文案语义可议);⑥RenameDialog 打开态遇
+④分组函数固定毫秒日界,
+DST 切换日偏 1 小时(zh-CN 无 DST,记录);⑥RenameDialog 打开态遇
 他端并发改名 refetch 会冲掉编辑中输入(窗口极小);⑦导出审计不落
 sys_oper_log(数据外发可见性,随 audit 域评估);⑧搜索 ILIKE 全扫不加索引
 (个人侧栏量级;规模化评估 tsv/GIN);⑨标题改写仅新会话首个 SUCCESS 轮触发,
@@ -746,8 +928,9 @@ ExportIn.rows 传输层上限(design R1 注记);⑪同会话连续成功轮存�
 ⑭时间分组/计划树渲染无前端单测(web 无测试基座,Playwright 冒烟覆盖);
 ⑮xlsx 数值 int 原生 vs 上游 doubleValue 显示差异(Kongming 更保真,有意);
 ⑯formatPlanNode 未移植上游 Node_Type 别名(PG 恒为空格形态,无缺口);
-⑰重命名长度校验前置于 strip(带空白 201 字 strip 后 ≤200 会被 422,理论边角);
 ⑱导出按钮 columns>0 即显,空 rows 可导出仅表头文件(无害)。
+**(③chat.service import-linter 契约、⑤删除确认 busy 取消、⑰重命名
+strip 后校验已由 013 清零)**
 **009 挂账(design Open Questions/复审 O 级)**:①datasource 删除后残留知识
 条目不级联(召回需 ds 校验通过,天然 fail-closed;级联策略随 multitenant
 管理变更再定);②fetch-metadata 同步端点大库(>100 表)时长不可控(异步化
@@ -755,21 +938,18 @@ ExportIn.rows 传输层上限(design R1 注记);⑪同会话连续成功轮存�
 靠余弦聚类;治理随 eval 域);④embedding 换模型需 bump emb 缓存版本前缀 v2
 +维度迁移新迁移(类比 008 密钥轮换);⑤writeback 同步阻塞问答响应 P99
 (emb 缓存命中近零,上游 afterCommit 同款);⑥fetch 的优先级读-判-写非原子
-(管理低频操作,并发 fetch+upload 理论 TOCTOU);⑦内省列注释未进润色链路
-(_introspect_all_on 不查 col_description,润色质量增强点);⑧datasource⇄rag
+(管理低频操作,并发 fetch+upload 理论 TOCTOU);⑧datasource⇄rag
 包级双向依赖(服务层已端口反转,router 适配层组合与 chat 同构,可后续上移
 组合根);⑨rag 拒读若未来把 rag 加入任何执行 search_path,须重估裸名形态;
 ⑩HNSW+WHERE 过滤召回不足 topK(pgvector 已知:索引候选先于过滤,规模化后
    可能返回少于 LIMIT——规模化前评估 hnsw.iterative_scan 或监控召回数,
-   /goal R2-B1);⑪reindex 长事务锁窗口(delete_all 先执行,分钟级 LLM 润色后
-   才 commit,窗口内同 (tenant,ds) 并发 upload 的冲突键会阻塞——可改先润色
-   后删写,/goal R2-R2);⑫中文全文路局限:'simple' 不切中文,tsv 与问句 token
+   /goal R2-B1);⑫中文全文路局限:'simple' 不切中文,tsv 与问句 token
    须整段一致才命中,中文场景全文路仅精确名/英文词有效(上游同构局限,已在
    009 design D3 声明;zhparser/自研切分挂账,/goal R2-S3);⑬emb 缓存与回调
    已有维度程序防线(rag_embedding_dim,漂移按未命中/降级),但换模型仍须
-   bump v1 前缀+维度迁移;⑭AgentRagClient 每请求新建 httpx client(500 表
-   =500 次 TLS 握手,可复用连接);⑮agent apiclient rag_retrieve 对「200 但
-   非 JSON」网关形态会裸抛(概率极低,与 fetch_schema 既有形态一致)。
+   bump v1 前缀+维度迁移。
+   **(⑦列注释进润色、⑪reindex 先润色后删写已由 014 清零;
+   ⑭AgentRagClient httpx 复用、⑮rag_retrieve 非 JSON 收敛已由 013 清零)**
 **rag 单表知识编辑端点(rag-refine 域)未做**:MANUAL_EDIT/FEEDBACK_REFINED
 枚举值位与优先级已留,人工精修现经上传链路;反馈精修随 feedback 域远期。
 **008 挂账(design Open Questions)**:①密钥轮换无重加密通道——轮换

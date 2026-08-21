@@ -290,6 +290,9 @@ function DeleteDialog({
     <AlertDialog
       open={open}
       onOpenChange={(o) => {
+        // busy 期拦截一切关闭源(R1-S1):ESC/未来新增关闭路径统一收口——
+        // 「再想想」disabled 只堵按钮,闸在此才堵全(spec「取消操作不可用」)
+        if (!o && busy) return;
         onOpenChange(o);
         if (o) setFailed(false); // 重开清残留错误
       }}
@@ -303,7 +306,9 @@ function DeleteDialog({
         </AlertDialogHeader>
         {failed && <p className="text-sm text-destructive">删除未成,请稍后再试。</p>}
         <AlertDialogFooter>
-          <AlertDialogCancel>再想想</AlertDialogCancel>
+          {/* busy 期禁用取消(013,010 挂账⑤):删除请求已发出,
+              「再想想」可点会误导用户以为请求被撤回(spec「删除进行中取消不可用」) */}
+          <AlertDialogCancel disabled={busy}>再想想</AlertDialogCancel>
           {/* 受控对话框:关闭时机由 remove 决定,Action 需阻默认关 */}
           <AlertDialogAction
             disabled={busy}

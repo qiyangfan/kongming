@@ -564,3 +564,62 @@ async def test_reindex_clears_and_rebuilds_idempotent(
         )
     ).scalar_one()
     assert audit == 2
+
+
+async def test_fetch_metadata_column_comment_into_pipeline(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
+) -> None:
+    """014 挂账⑦:数据库列注释(col_description)进润色输入——有注释列以注释为
+    说明(经替身「中文说明」后缀形态落库),无注释列保持英文类型形态。"""
+    await session.execute(
+        text("COMMENT ON COLUMN tenant_default.goods.name IS '商品名称(人工注释)'")
+    )
+    await session.commit()
+    token = await _admin_token(client, session)
+    r = await client.post(
+        f"{RAG}/fetch-metadata", json={"datasource_key": "default"}, headers=_auth(token)
+    )
+    assert r.status_code == 200, r.text
+    cols = (
+        await session.execute(
+            text(
+                "SELECT columns_comment FROM rag.table_descriptions WHERE table_name='goods'"
+            )
+        )
+    ).scalar_one()
+    # 有注释列:DB 注释进润色输入,替身加「中文说明」后缀
+    assert "商品名称(人工注释)" in cols["name"]
+    # 无注释列:保持类型形态进润色(替身同样加后缀)
+    assert "中文说明" in cols["create_by"]
+
+
+async def test_reindex_preserving_existing_on_prefetch_failure(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """014 挂账⑪:先润色后删写——内省/润色阶段(前置)失败不进入删写事务,
+    既有条目保留(旧形态 delete 先行,失败即丢条目)。"""
+    token = await _admin_token(client, session)
+    r = await client.post(
+        f"{RAG}/fetch-metadata", json={"datasource_key": "default"}, headers=_auth(token)
+    )
+    assert r.status_code == 200
+    before = (
+        await session.execute(text("SELECT count(*) FROM rag.table_descriptions"))
+    ).scalar_one()
+    assert before >= 1
+
+    from kongming.rag.repository import RagRepository
+
+    async def _boom(self: RagRepository, **kw: object) -> list[object]:
+        raise LookupError("datasource gone")
+
+    monkeypatch.setattr(RagRepository, "introspect_all", _boom)
+    r = await client.post(
+        f"{RAG}/reindex", json={"datasource_key": "default"}, headers=_auth(token)
+    )
+    assert r.status_code == 400  # DatasourceInvalid 同形
+    after = (
+        await session.execute(text("SELECT count(*) FROM rag.table_descriptions"))
+    ).scalar_one()
+    assert after == before  # 既有条目零损失(删写事务从未进入)

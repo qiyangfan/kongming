@@ -57,6 +57,21 @@ function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
 
+/* temporal 轴标签本地化(011 挂账⑤/013):PG 日期序列化为 ISO 原文
+   (2005-07-05T00:00:00)不可读。全列匹配 ISO 日期形态才启用(任一不匹配
+   即整列原样,宁不错格式化——编号串不可能匹配完整形态);启用时呈现日期
+   部分,时间非全零附加 HH:mm。不引日期库(截断即可),轴与 tooltip 同源。 */
+const ISO_DATE_RE = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/;
+
+function formatTemporalLabels(labels: string[]): string[] {
+  if (labels.length === 0 || !labels.every((l) => ISO_DATE_RE.test(l))) return labels;
+  return labels.map((l) => {
+    const m = ISO_DATE_RE.exec(l);
+    if (!m) return l;
+    return m[2] === "00" && m[3] === "00" ? m[1] : `${m[1]} ${m[2]}:${m[3]}`;
+  });
+}
+
 export function ChartView({ chart, data }: { chart: ChartSpec; data: ChartDatum }) {
   const palette = useMemo(chartPalette, []);
   const axisColor = useMemo(() => cssVar("--muted-foreground"), []);
@@ -74,7 +89,7 @@ export function ChartView({ chart, data }: { chart: ChartSpec; data: ChartDatum 
   const option = useMemo(() => {
     const xi = chart.x ? data.columns.indexOf(chart.x) : 0;
     const yi = chart.y ? data.columns.indexOf(chart.y) : 1;
-    const labels = data.rows.map((r) => String(r[xi] ?? ""));
+    const labels = formatTemporalLabels(data.rows.map((r) => String(r[xi] ?? "")));
     const values = data.rows.map((r) => {
       const v = r[yi];
       return typeof v === "number" ? v : Number(v);
@@ -108,7 +123,15 @@ export function ChartView({ chart, data }: { chart: ChartSpec; data: ChartDatum 
       if (xNumeric) {
         return {
           grid,
-          tooltip: { trigger: "item" },
+          tooltip: {
+            trigger: "item",
+            // 列名+数值双行呈现(011 挂账⑨/013),与 bar/line 信息量对齐;
+            // y=null 空值点 echarts 不渲染,无 tooltip 触发,?? "—" 纯防御
+            formatter: (p: unknown) => {
+              const v = (p as { value: [number, number | null] }).value;
+              return `${chart.x ?? "x"}: ${v[0]}<br/>${chart.y ?? "y"}: ${v[1] ?? "—"}`;
+            },
+          },
           // scale:true:轴不含零起点,窄区间远离 0 的数据不挤角(散点看分布)
           xAxis: { type: "value", scale: true, ...axisCommon },
           yAxis: { type: "value", scale: true, ...axisCommon },

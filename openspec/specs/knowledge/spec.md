@@ -10,7 +10,10 @@
 
 元数据抓取端点为 `POST /system/rag/fetch-metadata`(body 含 datasource_key;
 租户上下文 + system:rag:manage 权限)。执行时对目标数据源内省全部表(限
-default_schema 的 BASE TABLE,排除系统 schema 与控制面保留表),对每张发现的表
+default_schema 的 BASE TABLE,排除系统 schema 与控制面保留表),**内省 SHALL
+同时抓取列注释(col_description,009 挂账⑦清零):数据库既有列注释(如装载期
+comments.sql 的人工中文注释)作为润色输入的既有注释参考传给 LLM,润色输出
+仍经防御清洗(臆造列剔除),列注释缺失的列行为不变**;对每张发现的表
 经 Agent 面 `/internal/describe-table` 调用 LLM 润色,生成中文表说明、带类型
 前缀的中文字段说明、2-3 条 schema 限定示例 SQL;润色失败 MUST 降级为纯结构
 内容(英文类型注释),不阻断整批拉取。结果幂等落库,落库遵循覆盖优先级:
@@ -23,6 +26,7 @@ INTROSPECTION < AI_GENERATED < MANUAL_UPLOAD < MANUAL_EDIT < FEEDBACK_REFINED
 - GIVEN 已注册外部数据源(存在+启用+归属当前租户)
 - WHEN 抓取并润色表说明
 - THEN 每张表含中文 table_comment、带类型前缀的中文 columns_comment、2-3 条 schema 限定示例 SQL
+- AND 数据库既有列注释(col_description)进入润色输入作参考
 - AND source_type 标记为 AI_GENERATED(润色成功)
 - AND 结果幂等落库,返回发现表数与润色成功表数供前端展示
 
@@ -63,6 +67,10 @@ INTROSPECTION < AI_GENERATED < MANUAL_UPLOAD < MANUAL_EDIT < FEEDBACK_REFINED
 SHALL 清空人工精修条目回到自动生成基线(与 fetch-metadata 的优先级保护不同,
 此为显式声明的语义);要求 system:rag:manage 权限;数据源必须存在+启用+归属
 当前租户;操作记 sys_oper_log;幂等;完成后精确失效检索缓存。
+**执行序(009 挂账⑪清零):润色计算(分钟级 LLM 调用)SHALL 在数据库写事务
+外先行完成,清空(delete)与重写(insert)在同一短事务内收口——消除
+「delete→润色→commit」长事务锁窗口,窗口期并发 upload 冲突键不再阻塞;
+润色阶段失败(数据源不可达/整批异常)则不进入删写事务,既有条目保留。**
 
 #### Scenario: reindex 连续两次结果一致
 - GIVEN 超管已登录并持有 system:rag:manage 权限
@@ -70,6 +78,12 @@ SHALL 清空人工精修条目回到自动生成基线(与 fetch-metadata 的优
 - THEN 清空并重新抓取(含润色),返回 {deleted, rebuilt, enriched}
 - AND 操作记操作日志
 - AND 连续执行两次结果一致(清空+确定性重建)
+
+#### Scenario: 先润色后删写
+- GIVEN reindex 触发
+- WHEN 执行
+- THEN 全部表的内省与润色完成后才开启删写事务
+- AND delete 与 insert 同事务提交,锁窗口仅为删写时长(不含 LLM 耗时)
 
 #### Scenario: 无权限触发被拒
 - GIVEN 角色无 system:rag:manage 权限点

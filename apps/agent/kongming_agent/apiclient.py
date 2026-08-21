@@ -158,7 +158,13 @@ class ApiClient:
         if resp.status_code != 200:
             log.warning("rag_retrieve 被拒(HTTP %s)", resp.status_code)
             return None
-        data = resp.json()
+        try:
+            data = resp.json()
+        except ValueError:
+            # 200 但非 JSON(网关回 HTML 错误页等):按失败回退内省,不裸抛
+            # (013 挂账⑮;docstring「任何失败返回 None」自此兑现)
+            log.warning("rag_retrieve 响应非 JSON,回退实时内省")
+            return None
         return RagContext(
             schema_hint=str(data.get("schema_hint") or ""),
             history_sql=str(data.get("history_sql") or ""),

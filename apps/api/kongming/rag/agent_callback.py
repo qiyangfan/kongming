@@ -23,7 +23,13 @@ _EMB_TTL_SEC = 24 * 3600
 
 
 class AgentRagClient:
-    """EmbeddingPort/TableDescriberPort 实现:httpx 回调 + Redis emb 缓存(fail-open)。"""
+    """EmbeddingPort/TableDescriberPort 实现:httpx 回调 + Redis emb 缓存(fail-open)。
+
+    AsyncClient 实例级 lazy 复用(013 挂账⑭):消每请求 TLS 握手——fetch-metadata
+    500 表润色从 500 次建连降为共享一条 keep-alive 连接链。client 不 close,
+    生命周期随实例(进程级单例见 get_agent_rag_client);httpx.AsyncClient
+    设计为并发任务共享,无锁安全。
+    """
 
     def __init__(self, redis: Redis | None = None) -> None:
         settings = get_settings()
@@ -32,6 +38,22 @@ class AgentRagClient:
         self._timeout = 60.0  # embedding/润色单请求超时(批量 64 条富余)
         self._dim = settings.rag_embedding_dim  # 维度防线(R2-R1)
         self._redis = redis
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        """lazy 创建并复用;首建竞态无害(最多多建一个被 GC,无状态正确性问题)。
+
+        进程单 loop 前提(R1-O1):连接池内连接绑定创建时事件循环——生产
+        uvicorn 单 worker 单 loop 安全;测试若经本实例完成一次成功建连,
+        后续用例换 loop 复用会 RuntimeError,须自行复位单例槽/_client。
+        """
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                base_url=self._base,
+                timeout=self._timeout,
+                headers={"X-Internal-Token": self._token},
+            )
+        return self._client
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """批量向量化;emb 缓存逐条命中跳过(确定性映射,fail-open)。"""
@@ -63,12 +85,7 @@ class AgentRagClient:
 
     async def _embed_http(self, texts: list[str]) -> list[list[float]]:
         try:
-            async with httpx.AsyncClient(
-                base_url=self._base,
-                timeout=self._timeout,
-                headers={"X-Internal-Token": self._token},
-            ) as client:
-                resp = await client.post("/internal/embedding", json={"texts": texts})
+            resp = await self._get_client().post("/internal/embedding", json={"texts": texts})
         except httpx.HTTPError as e:
             raise EmbeddingError(f"embedding 服务不可达: {e}") from e
         if resp.status_code != 200:
@@ -100,12 +117,7 @@ class AgentRagClient:
             ],
         }
         try:
-            async with httpx.AsyncClient(
-                base_url=self._base,
-                timeout=self._timeout,
-                headers={"X-Internal-Token": self._token},
-            ) as client:
-                resp = await client.post("/internal/describe-table", json=payload)
+            resp = await self._get_client().post("/internal/describe-table", json=payload)
         except httpx.HTTPError as e:
             log.warning("describe-table 回调异常: %s", e)
             return False, block
@@ -159,3 +171,21 @@ def _emb_key(text: str) -> str:
 def _looks_like_type(desc: str) -> bool:
     """纯结构块的列说明=英文类型形态(int/varchar…)——回填 type 字段用。"""
     return bool(desc) and all(c.isascii() for c in desc.replace(" ", ""))
+
+
+_singleton: AgentRagClient | None = None
+
+
+def get_agent_rag_client(redis: Redis | None = None) -> AgentRagClient:
+    """进程内共享单例(013 挂账⑭):组合根(chat/router、rag/router 的 Depends
+    工厂)经此取实例,AsyncClient 连接池跨请求复用,消每请求 TLS 握手。
+    redis 仅首建生效(get_redis 自身为单例工厂);单例无业务状态(仅配置+
+    连接池+redis 句柄)。测试面(R1-S3 如实注记):TestClient 测试经组合根
+    触达本工厂,但 embed/describe 类级补丁(test_rag_admin/test_rag_recall)
+    或测试环境连接失败兜底使 _client 恒空池,跨 loop 复用无害;成功建连的
+    新测试须先复位 _singleton(单 loop 前提见 _get_client)。
+    """
+    global _singleton
+    if _singleton is None:
+        _singleton = AgentRagClient(redis)
+    return _singleton

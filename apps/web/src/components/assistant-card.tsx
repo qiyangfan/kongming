@@ -1,7 +1,8 @@
-/* assistant 结果卡片(web-nav spec「对话区渲染」+ 010 导出/执行计划):
-   摘要/表格/SQL 折叠/执行计划懒加载/洞察/统计;SUCCESS/REJECTED/FAILED 三态视觉区分。 */
+/* assistant 结果卡片(web-nav spec「对话区渲染」+ 010 导出/执行计划 + 014 赞踩反馈):
+   摘要/表格/SQL 折叠/执行计划懒加载/洞察/统计/反馈操作行;SUCCESS/REJECTED/FAILED 三态视觉区分。 */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight,
   Database,
@@ -9,12 +10,17 @@ import {
   Lightbulb,
   Loader2,
   ShieldOff,
+  ThumbsDown,
+  ThumbsUp,
   TriangleAlert,
 } from "lucide-react";
 
 import { ChartView } from "@/components/chart-view";
 import type { SessionMessageOut } from "@/lib/api";
 import { explainPlan, exportResult } from "@/lib/chat-api";
+import { submitFeedback } from "@/lib/feedback-api";
+import { useAuth } from "@/lib/auth-store";
+import { hasPerm } from "@/lib/nav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +28,15 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 
 /* 生成类型的 result 字段皆可选:本地归一化收窄 */
 function normalize(msg: SessionMessageOut): {
@@ -166,7 +181,196 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
           ))}
         </div>
       )}
+
+      <FeedbackActions msg={msg} />
     </div>
+  );
+}
+
+/* 反馈操作行(014 feedback spec「前端交互」):赞=立即提交;踩=弹窗收集 comment
+   与 correctedSql;已反馈回显激活态(历史=服务端字段,实时=setQueriesData 本地
+   状态);无 chat:feedback:submit 权限或无 messageId 不渲染入口(spec)。
+   仅 SUCCESS 卡片挂载:REJECTED=系统拦截、FAILED=执行失败,均非「错答」语义 */
+function FeedbackActions({ msg }: { msg: SessionMessageOut }) {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!hasPerm(user, "chat:feedback:submit") || !msg.id) return null;
+  const mid = msg.id;
+
+  async function submit(payload: {
+    rating: "UP" | "DOWN";
+    comment?: string | null;
+    corrected_sql?: string | null;
+  }): Promise<boolean> {
+    if (busy) return false;
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await submitFeedback(mid, payload);
+      // 实时消息本地状态(spec):前缀 setQueriesData 更新含该消息的全部 messages
+      // 缓存,激活态即时回显零重拉
+      qc.setQueriesData({ queryKey: ["messages"] }, (old: unknown) =>
+        Array.isArray(old)
+          ? old.map((m) =>
+              m && typeof m === "object" && (m as { id?: string }).id === mid
+                ? {
+                    ...m,
+                    rating: data.rating,
+                    corrected_sql: data.corrected_sql,
+                    feedback_comment: data.comment,
+                  }
+                : m,
+            )
+          : old,
+      );
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "反馈未成,请稍后再试。");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        aria-label="有用"
+        aria-pressed={msg.rating === "UP"}
+        title="有用"
+        disabled={busy}
+        onClick={() => void submit({ rating: "UP" })}
+        className={msg.rating === "UP" ? "text-primary" : "text-muted-foreground"}
+      >
+        <ThumbsUp aria-hidden className={msg.rating === "UP" ? "fill-current" : undefined} />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        aria-label="不准确"
+        aria-pressed={msg.rating === "DOWN"}
+        title="不准确"
+        disabled={busy}
+        onClick={() => setDialogOpen(true)}
+        className={msg.rating === "DOWN" ? "text-primary" : "text-muted-foreground"}
+      >
+        <ThumbsDown aria-hidden className={msg.rating === "DOWN" ? "fill-current" : undefined} />
+      </Button>
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+      <FeedbackDialog
+        msg={msg}
+        open={dialogOpen}
+        busy={busy}
+        onOpenChange={(o) => {
+          if (busy) return; // 提交中不可关(与删除对话框同范式)
+          setDialogOpen(o);
+        }}
+        onSubmit={async (comment, correctedSql) => {
+          const ok = await submit({
+            rating: "DOWN",
+            comment,
+            corrected_sql: correctedSql,
+          });
+          if (ok) setDialogOpen(false);
+        }}
+      />
+    </div>
+  );
+}
+
+/* 点踩弹窗(014):预填已提交 comment/correctedSql 或当前 SQL,可改可清空
+   (清空提交即撤销纠错/留言);未触碰的字段传 null=保持现值(R1-S3:
+   此前空串恒提交,重开弹窗直接提交会静默清空既有留言);提交中禁用防重复 */
+function FeedbackDialog({
+  msg,
+  open,
+  busy,
+  onOpenChange,
+  onSubmit,
+}: {
+  msg: SessionMessageOut;
+  open: boolean;
+  busy: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (comment: string | null, correctedSql: string) => Promise<void>;
+}) {
+  const [comment, setComment] = useState("");
+  const [sql, setSql] = useState("");
+  const [commentTouched, setCommentTouched] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setComment(msg.feedback_comment ?? "");
+      setSql(msg.corrected_sql ?? msg.sql ?? "");
+      setCommentTouched(false);
+    }
+  }, [open, msg.feedback_comment, msg.corrected_sql, msg.sql]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>此答不准确?</DialogTitle>
+          <DialogDescription>
+            留下指正,军师会记住——纠错 SQL 将作为同类问题的参考。
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            // comment 未触碰传 null=保持现值;触碰后按显式值(空串=清空)
+            void onSubmit(commentTouched ? comment : null, sql);
+          }}
+        >
+          <div className="space-y-1.5">
+            <label htmlFor="fb-comment" className="text-sm text-muted-foreground">
+              留言(可留空)
+            </label>
+            <Textarea
+              id="fb-comment"
+              value={comment}
+              onChange={(e) => {
+                setComment(e.target.value);
+                setCommentTouched(true);
+              }}
+              placeholder="哪里不对?"
+              rows={2}
+              maxLength={500}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="fb-sql" className="text-sm text-muted-foreground">
+              正确的 SQL(清空即撤销纠错)
+            </label>
+            <Textarea
+              id="fb-sql"
+              value={sql}
+              onChange={(e) => setSql(e.target.value)}
+              rows={4}
+              maxLength={4000}
+              className="font-mono text-xs"
+            />
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={busy}>
+              {busy && <Loader2 className="animate-spin" aria-hidden />}
+              提交指正
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

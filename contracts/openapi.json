@@ -2226,6 +2226,834 @@
         }
       }
     },
+    "/chat/messages/{message_id}/feedback": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Submit Feedback",
+        "operationId": "submit_feedback_chat_messages__message_id__feedback_post",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Message Id"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/feedback/{message_id}/status": {
+      "put": {
+        "tags": [
+          "feedback"
+        ],
+        "summary": "Handle Feedback",
+        "operationId": "handle_feedback_feedback__message_id__status_put",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Message Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HandleIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandleOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/feedback/{message_id}/involved-tables": {
+      "get": {
+        "tags": [
+          "feedback"
+        ],
+        "summary": "Involved Tables",
+        "operationId": "involved_tables_feedback__message_id__involved_tables_get",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Message Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvolvedTablesOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/feedback/overview": {
+      "get": {
+        "tags": [
+          "feedback"
+        ],
+        "summary": "Overview",
+        "operationId": "overview_feedback_overview_get",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 90,
+              "minimum": 1,
+              "default": 30,
+              "title": "Days"
+            }
+          },
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          },
+          {
+            "name": "datasource_key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Datasource Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/feedback/page": {
+      "get": {
+        "tags": [
+          "feedback"
+        ],
+        "summary": "Page",
+        "operationId": "page_feedback_page_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Size"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "rating",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "UP",
+                    "DOWN"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rating"
+            }
+          },
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          },
+          {
+            "name": "datasource_key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Datasource Key"
+            }
+          },
+          {
+            "name": "feedback_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "PENDING",
+                    "ADOPTED",
+                    "REJECTED",
+                    "DISMISSED"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feedback Status"
+            }
+          },
+          {
+            "name": "only_corrected",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Only Corrected"
+            }
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Time"
+            }
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackPageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit/sql/page": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "Sql Page",
+        "operationId": "sql_page_audit_sql_page_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Size"
+            }
+          },
+          {
+            "name": "trace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Trace Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          },
+          {
+            "name": "verdict",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "PASS",
+                    "BLOCKED",
+                    "ERROR"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Verdict"
+            }
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Time"
+            }
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SqlAuditPageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit/sql/{audit_id}": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "Sql Detail",
+        "operationId": "sql_detail_audit_sql__audit_id__get",
+        "parameters": [
+          {
+            "name": "audit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Audit Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SqlAuditItemOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit/oper/page": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "Oper Page",
+        "operationId": "oper_page_audit_oper_page_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Size"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Time"
+            }
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperLogPageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit/archive/run": {
+      "post": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "Archive Run",
+        "description": "手动触发归档(超管;与 lifespan 每日调度同一函数,幂等可重跑)。",
+        "operationId": "archive_run_audit_archive_run_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveRunOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit/archive/restore": {
+      "post": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "Archive Restore",
+        "description": "重导入归档窗口(manifest SHA-256 校验;id 幂等)。\nwindow_dir 传输层 8 位数字(pattern)+服务端再校验,防路径穿越。",
+        "operationId": "archive_restore_audit_archive_restore_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArchiveRestoreIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveRestoreOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/healthz": {
       "get": {
         "tags": [
@@ -2254,6 +3082,76 @@
   },
   "components": {
     "schemas": {
+      "ArchiveRestoreIn": {
+        "properties": {
+          "window_dir": {
+            "type": "string",
+            "maxLength": 8,
+            "minLength": 8,
+            "pattern": "^\\d{8}$",
+            "title": "Window Dir"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window_dir"
+        ],
+        "title": "ArchiveRestoreIn"
+      },
+      "ArchiveRestoreOut": {
+        "properties": {
+          "restored": {
+            "type": "integer",
+            "title": "Restored"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          }
+        },
+        "type": "object",
+        "required": [
+          "restored",
+          "skipped"
+        ],
+        "title": "ArchiveRestoreOut"
+      },
+      "ArchiveRunOut": {
+        "properties": {
+          "exported": {
+            "type": "integer",
+            "title": "Exported"
+          },
+          "deleted": {
+            "type": "integer",
+            "title": "Deleted"
+          },
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Files"
+          },
+          "window_dir": {
+            "type": "string",
+            "title": "Window Dir"
+          },
+          "skipped_export": {
+            "type": "boolean",
+            "title": "Skipped Export"
+          }
+        },
+        "type": "object",
+        "required": [
+          "exported",
+          "deleted",
+          "files",
+          "window_dir",
+          "skipped_export"
+        ],
+        "title": "ArchiveRunOut"
+      },
       "Body_upload_document_system_rag_documents_upload_post": {
         "properties": {
           "file": {
@@ -2515,6 +3413,22 @@
               }
             ],
             "title": "Error"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id"
+          },
+          "datasource_key": {
+            "type": "string",
+            "title": "Datasource Key",
+            "default": "default"
           }
         },
         "type": "object",
@@ -3043,6 +3957,234 @@
         "title": "ExportIn",
         "description": "所见即所导(010 design D3):前端传已展示的 columns+rows,不重跑 SQL。\n\nrows 传输层上限=R1 评审修复:截断发生在 JSON 解析之后,挡不住请求体本身\n的内存放大;max_length 在解析期即拒(422),service 层截断保留为双闸。"
       },
+      "FeedbackIn": {
+        "properties": {
+          "rating": {
+            "type": "string",
+            "enum": [
+              "UP",
+              "DOWN"
+            ],
+            "title": "Rating"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "corrected_sql": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrected Sql"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rating"
+        ],
+        "title": "FeedbackIn"
+      },
+      "FeedbackOut": {
+        "properties": {
+          "rating": {
+            "type": "string",
+            "title": "Rating"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "corrected_sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrected Sql"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rating",
+          "comment",
+          "corrected_sql"
+        ],
+        "title": "FeedbackOut",
+        "description": "提交后当前反馈状态(前端激活态回显用)。"
+      },
+      "FeedbackPageItemOut": {
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "user_nickname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Nickname"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "tenant_key": {
+            "type": "string",
+            "title": "Tenant Key"
+          },
+          "datasource_key": {
+            "type": "string",
+            "title": "Datasource Key"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question"
+          },
+          "sql_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql Text"
+          },
+          "corrected_sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrected Sql"
+          },
+          "feedback_comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback Comment"
+          },
+          "feedback_status": {
+            "type": "string",
+            "title": "Feedback Status"
+          },
+          "feedback_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback Time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message_id",
+          "session_id",
+          "user_id",
+          "user_nickname",
+          "tenant_id",
+          "tenant_key",
+          "datasource_key",
+          "rating",
+          "question",
+          "sql_text",
+          "corrected_sql",
+          "feedback_comment",
+          "feedback_status",
+          "feedback_time"
+        ],
+        "title": "FeedbackPageItemOut"
+      },
+      "FeedbackPageOut": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeedbackPageItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "FeedbackPageOut"
+      },
       "FetchOut": {
         "properties": {
           "found": {
@@ -3078,6 +4220,119 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HandleIn": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "maxLength": 16,
+            "minLength": 1,
+            "title": "Status"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "HandleIn"
+      },
+      "HandleOut": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "note"
+        ],
+        "title": "HandleOut"
+      },
+      "InvolvedTableOut": {
+        "properties": {
+          "table_name": {
+            "type": "string",
+            "title": "Table Name"
+          },
+          "schema_name": {
+            "type": "string",
+            "title": "Schema Name"
+          },
+          "datasource_key": {
+            "type": "string",
+            "title": "Datasource Key"
+          },
+          "has_knowledge": {
+            "type": "boolean",
+            "title": "Has Knowledge"
+          },
+          "knowledge_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledge Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "table_name",
+          "schema_name",
+          "datasource_key",
+          "has_knowledge",
+          "knowledge_id"
+        ],
+        "title": "InvolvedTableOut"
+      },
+      "InvolvedTablesOut": {
+        "properties": {
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/InvolvedTableOut"
+            },
+            "type": "array",
+            "title": "Tables"
+          },
+          "parse_error": {
+            "type": "boolean",
+            "title": "Parse Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tables",
+          "parse_error"
+        ],
+        "title": "InvolvedTablesOut"
       },
       "KnowledgeItemOut": {
         "properties": {
@@ -3402,6 +4657,112 @@
         ],
         "title": "MetaTableOut"
       },
+      "OperLogItemOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "user_nickname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Nickname"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "user_nickname",
+          "action",
+          "target",
+          "detail",
+          "ip",
+          "created_at"
+        ],
+        "title": "OperLogItemOut"
+      },
+      "OperLogPageOut": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OperLogItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "OperLogPageOut"
+      },
       "OptionsOut": {
         "properties": {
           "providers": {
@@ -3417,6 +4778,47 @@
           "providers"
         ],
         "title": "OptionsOut"
+      },
+      "OverviewOut": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "up_count": {
+            "type": "integer",
+            "title": "Up Count"
+          },
+          "down_count": {
+            "type": "integer",
+            "title": "Down Count"
+          },
+          "corrected_count": {
+            "type": "integer",
+            "title": "Corrected Count"
+          },
+          "down_rate": {
+            "type": "number",
+            "title": "Down Rate"
+          },
+          "trend": {
+            "items": {
+              "$ref": "#/components/schemas/TrendItemOut"
+            },
+            "type": "array",
+            "title": "Trend"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "up_count",
+          "down_count",
+          "corrected_count",
+          "down_rate",
+          "trend"
+        ],
+        "title": "OverviewOut"
       },
       "PermOut": {
         "properties": {
@@ -3504,7 +4906,7 @@
         "properties": {
           "title": {
             "type": "string",
-            "maxLength": 200,
+            "maxLength": 2000,
             "minLength": 1,
             "title": "Title"
           }
@@ -3514,7 +4916,7 @@
           "title"
         ],
         "title": "RenameIn",
-        "description": "重命名(010):空白标题领域层再闸(去空白后为空即 400)。"
+        "description": "重命名(010):去空白后非空与不超列上限(200)由领域层判定(013 补齐——\nspec 立约以 strip 后值为准,带空白 201 字 strip 后 ≤200 不再 422 误拒);\nmax_length=2000 仅防离谱请求体(与 question 同宽),非业务上限。"
       },
       "ResetPasswordIn": {
         "properties": {
@@ -3841,6 +5243,39 @@
                 "type": "null"
               }
             ]
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "corrected_sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrected Sql"
+          },
+          "feedback_comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback Comment"
           }
         },
         "type": "object",
@@ -3850,6 +5285,148 @@
           "status"
         ],
         "title": "SessionMessageOut"
+      },
+      "SqlAuditItemOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "trace_id": {
+            "type": "string",
+            "title": "Trace Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "user_nickname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Nickname"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "tenant_key": {
+            "type": "string",
+            "title": "Tenant Key"
+          },
+          "datasource_key": {
+            "type": "string",
+            "title": "Datasource Key"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question"
+          },
+          "sql_text": {
+            "type": "string",
+            "title": "Sql Text"
+          },
+          "verdict": {
+            "type": "string",
+            "title": "Verdict"
+          },
+          "block_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block Reason"
+          },
+          "row_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row Count"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "trace_id",
+          "user_id",
+          "user_nickname",
+          "tenant_id",
+          "tenant_key",
+          "datasource_key",
+          "question",
+          "sql_text",
+          "verdict",
+          "block_reason",
+          "row_count",
+          "duration_ms",
+          "created_at"
+        ],
+        "title": "SqlAuditItemOut"
+      },
+      "SqlAuditPageOut": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SqlAuditItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "SqlAuditPageOut"
       },
       "SqlExecuteRequest": {
         "properties": {
@@ -4137,6 +5714,29 @@
           "refresh_token"
         ],
         "title": "TokenPairOut"
+      },
+      "TrendItemOut": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "title": "Day"
+          },
+          "up": {
+            "type": "integer",
+            "title": "Up"
+          },
+          "down": {
+            "type": "integer",
+            "title": "Down"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "up",
+          "down"
+        ],
+        "title": "TrendItemOut"
       },
       "UploadOut": {
         "properties": {

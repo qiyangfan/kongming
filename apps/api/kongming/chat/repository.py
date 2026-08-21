@@ -2,16 +2,43 @@
 
 所有查询经 SQLAlchemy text() 绑定参数;会话归属判定在此收口
 (不存在与越权同形返回 None,不泄露信息,chat spec)。
+写路径方法与 commit 经 _store_error_boundary 转译 SQLAlchemyError →
+ChatStoreError(013 构造反转:service 领域层由此零 sqlalchemy import)。
 """
 
-from typing import cast
+import functools
+from collections.abc import Callable, Coroutine
+from typing import Any, cast
 
 from sqlalchemy import text
 from sqlalchemy.engine import CursorResult
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kongming.chat.ports import ChatStoreError
 from kongming.db import uuid7
 from kongming.like import like_pattern
+
+
+def _store_error_boundary[**P, R](
+    fn: Callable[P, Coroutine[Any, Any, R]],
+) -> Callable[P, Coroutine[Any, Any, R]]:
+    """写路径转译边界:SQLAlchemyError → ChatStoreError。
+
+    只加在 service 容错段覆盖的写方法与 commit 上;读路径不加
+    (service 不容错,原异常冒出维持 500 既定语义)。
+    返回类型保持 Coroutine:与 Protocol 的 async def 成员结构化匹配
+    (Awaitable 宽形态会被 mypy 判不兼容)。
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        try:
+            return await fn(*args, **kwargs)
+        except SQLAlchemyError as e:
+            raise ChatStoreError(str(e)) from e
+
+    return wrapper
 
 
 class ChatRepository:
@@ -50,6 +77,7 @@ class ChatRepository:
         ).mappings().one_or_none()
         return None if row is None else (str(row["id"]), str(row["tenant_key"]))
 
+    @_store_error_boundary
     async def create_session(
         self, *, user_id: str, tenant_id: str, title: str, datasource_key: str
     ) -> str:
@@ -96,6 +124,7 @@ class ChatRepository:
         ).mappings().one_or_none()
         return None if row is None else dict(row)
 
+    @_store_error_boundary
     async def touch_session(self, session_id: str) -> None:
         await self._s.execute(
             text("UPDATE public.chat_session SET updated_at = now() WHERE id = :id"),
@@ -136,6 +165,7 @@ class ChatRepository:
             for r in rows
         ]
 
+    @_store_error_boundary
     async def rename_session(
         self, *, session_id: str, user_id: str, tenant_id: str, title: str
     ) -> dict[str, object] | None:
@@ -183,6 +213,7 @@ class ChatRepository:
         ).scalar_one_or_none()
         return None if v is None else str(v)
 
+    @_store_error_boundary
     async def update_title_if_current(
         self, *, session_id: str, expected: str, new_title: str
     ) -> int:
@@ -202,11 +233,13 @@ class ChatRepository:
         return res.rowcount
 
     async def list_messages(self, *, session_id: str) -> list[dict[str, object]]:
-        """会话全部消息,创建时间升序(id ASC tiebreak,与补全取数对偶)。"""
+        """会话全部消息,创建时间升序(id ASC tiebreak,与补全取数对偶);
+        014 增 rating/corrected_sql 反馈状态列(回显用)。"""
         rows = (
             await self._s.execute(
                 text(
-                    "SELECT id, role, question, sql_text, result_json, summary, status"
+                    "SELECT id, role, question, sql_text, result_json, summary, status,"
+                    " rating, corrected_sql, feedback_comment"
                     " FROM public.chat_message WHERE session_id = :s"
                     " ORDER BY created_at ASC, id ASC"
                 ),
@@ -215,6 +248,7 @@ class ChatRepository:
         ).mappings().all()
         return [dict(r) for r in rows]
 
+    @_store_error_boundary
     async def delete_session(self, *, session_id: str, user_id: str, tenant_id: str) -> bool:
         """归属校验 + 删除一条 SQL(原子,无先查后删竞态窗口);未命中(不存在/
         越权同形)返回 False。消息经 ON DELETE CASCADE 级联清除。"""
@@ -227,6 +261,7 @@ class ChatRepository:
         )
         return res.scalar_one_or_none() is not None
 
+    @_store_error_boundary
     async def insert_message(
         self,
         *,
@@ -274,3 +309,12 @@ class ChatRepository:
             )
         ).scalars().all()
         return [str(q) for q in reversed(rows)]
+
+    @_store_error_boundary
+    async def commit(self) -> None:
+        """事务提交(ChatRepo 端口,013 构造反转);失败转译 ChatStoreError。"""
+        await self._s.commit()
+
+    async def rollback(self) -> None:
+        """事务回滚(ChatRepo 端口);不转译——容错段内再失败逃逸为既定语义。"""
+        await self._s.rollback()

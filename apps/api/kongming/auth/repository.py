@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kongming.audit.context import client_ip_var
 from kongming.auth import ports
 from kongming.auth.models import Role, Tenant, User
 from kongming.db import uuid7
@@ -294,8 +295,8 @@ class SqlOperLogRepo:
     ) -> None:
         await self._s.execute(
             text(
-                "INSERT INTO public.sys_oper_log (id, user_id, action, target, detail)"
-                " VALUES (:i, :u, :a, :t, CAST(:d AS JSONB))"
+                "INSERT INTO public.sys_oper_log (id, user_id, action, target, detail, ip)"
+                " VALUES (:i, :u, :a, :t, CAST(:d AS JSONB), :ip)"
             ),
             {
                 "i": str(uuid7()),
@@ -303,6 +304,9 @@ class SqlOperLogRepo:
                 "a": action,
                 "t": target,
                 "d": json.dumps(detail, ensure_ascii=False),
+                # 015 ip 链路:请求上下文横切(contextvar),调用点零改动;
+                # 无请求上下文(后台任务/定时任务/测试直调)自然为 None
+                "ip": client_ip_var.get(),
             },
         )
 

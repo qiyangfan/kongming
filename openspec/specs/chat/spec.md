@@ -52,7 +52,7 @@ chat_session + chat_message 持久化对话历史,首次问答自动新建会话
 
 ### Requirement: 结果导出 CSV/Excel
 
-查询结果支持导出 CSV(UTF-8 with BOM,Excel 直接打开不乱码)与 Excel(xlsx,表头加粗+自动列宽),导出行数截断保护。导出端点 SHALL 复用与问答端点一致的鉴权约束:JWT 认证 + 权限点 `chat:execute` + X-Tenant-Id 租户白名单校验。导出 SHALL 以请求方已查询到的结果集(columns+rows)为输入,不重新执行 SQL——所见即所导,数据隔离在查询时已由 data_scope 保证,导出本身不产生新的数据访问。
+查询结果支持导出 CSV(UTF-8 with BOM,Excel 直接打开不乱码)与 Excel(xlsx,表头加粗+自动列宽),导出行数截断保护。导出端点 SHALL 复用与问答端点一致的鉴权约束:JWT 认证 + 权限点 `chat:execute` + X-Tenant-Id 租户白名单校验。导出 SHALL 以请求方已查询到的结果集(columns+rows)为输入,不重新执行 SQL——所见即所导,数据隔离在查询时已由 data_scope 保证,导出本身不产生新的数据访问。导出 SHALL 落操作日志 `chat.export`(与业务同事务;detail 含 fmt/rows/truncated;010 挂账⑦,015 清零)——数据外发可见性;审计写失败 SHALL NOT 阻断导出(告警日志,audit spec 铁律)。
 
 #### Scenario: 导出 CSV
 - GIVEN 查询结果有 columns+rows
@@ -84,6 +84,12 @@ chat_session + chat_message 持久化对话历史,首次问答自动新建会话
 - GIVEN 已登录用户角色不含 chat:execute
 - WHEN 请求导出端点
 - THEN 返回 403
+
+#### Scenario: 导出落操作日志
+- GIVEN 用户执行导出
+- WHEN 导出完成
+- THEN sys_oper_log 含 chat.export 动作,detail 含 fmt/rows/truncated,与业务同事务
+- AND 审计写失败不阻断导出(文件照常返回)
 
 ### Requirement: EXPLAIN 执行计划
 
@@ -199,7 +205,10 @@ X-Tenant-Id 租户白名单校验(缺省取用户默认租户,未绑定拒绝,SU
 history(显式多轮上下文)、datasource_key(缺省 default)。系统 SHALL 为每次问答
 生成 trace_id 并贯穿 Agent 面与执行审计。响应 SHALL 携带 session_id、success、
 verdict、summary、insights、stats、columns、rows、sql、chart(图表配置建议)、
-retry_count;失败时 SHALL 携带友好 error,不暴露内部堆栈。消息落库 status 三态映射:
+retry_count;失败时 SHALL 携带友好 error,不暴露内部堆栈。响应 SHALL 纯增携带
+message_id(assistant 落库消息 id,供反馈提交引用;persist=false 或无会话调用
+为 null)与 datasource_key(本次执行的数据源快照)——纯增字段,老调用方不受
+影响(feedback spec「messageId 打通」)。消息落库 status 三态映射:
 verdict=PASS → SUCCESS;verdict=BLOCKED → REJECTED;verdict=ERROR 或重试
 耗尽 → FAILED。Agent 面不可达/超时时 SHALL 返回友好错误并落 FAILED 消息
 (persist=true 时),不裸 500。
@@ -209,6 +218,7 @@ verdict=PASS → SUCCESS;verdict=BLOCKED → REJECTED;verdict=ERROR 或重试
 - WHEN 提交问题(无 session_id)
 - THEN 自动新建会话并返回 session_id,user 问句与 assistant 结果各落一条消息
 - AND 响应含 success=true、verdict=PASS、summary/columns/rows/sql/chart
+- AND 响应含 message_id(assistant 消息 id)与 datasource_key
 - AND 执行审计的 trace_id 与本次问答 trace_id 一致
 
 #### Scenario: 无 chat:execute 权限拒绝
@@ -254,7 +264,10 @@ SHOULD 支持条数上限参数(缺省 50)。列表 SHALL 只含本人本租户�
 系统 SHALL 提供会话消息端点(路径含 session_id):同一鉴权与租户约束;
 返回该会话全部消息按创建时间升序,user 消息含问句,assistant 消息
 SHALL 携带结构化应答要素(状态/摘要/SQL/结果列/行/洞察/统计/图表建议),
-要素缺失时以缺省形态呈现(如无 SQL 则空)。归属校验:会话不存在、
+要素缺失时以缺省形态呈现(如无 SQL 则空);assistant 消息 SHALL 纯增携带
+rating(null=未反馈)、corrected_sql(null=无纠错)与 feedback_comment
+(null=无留言)反馈状态字段供回显(feedback spec「messageId 打通」;
+comment 为点踩弹窗预填源,R1-S3),user 消息不携带。归属校验:会话不存在、
 非本人、非当前租户三种情形 SHALL 统一返回 404,不区分语义
 (不泄露会话存在性)。
 
@@ -287,6 +300,7 @@ SHALL 携带结构化应答要素(状态/摘要/SQL/结果列/行/洞察/统计/
 - WHEN 请求该会话消息
 - THEN 按创建时间升序返回;被拦截轮 assistant 消息 status=REJECTED
   且携带拦截文案,成功轮携带摘要/SQL/结果/图表建议
+- AND 每条 assistant 消息含 rating/corrected_sql/feedback_comment 反馈状态字段
 
 #### Scenario: 删除会话级联清消息
 - GIVEN 会话 S 含多轮消息

@@ -18,7 +18,7 @@ from kongming.auth.router import current_user, require_perm
 from kongming.config import get_settings
 from kongming.datasource.models import PG_IDENTIFIER_PATTERN
 from kongming.db import get_session
-from kongming.rag.agent_callback import AgentRagClient
+from kongming.rag.agent_callback import get_agent_rag_client
 from kongming.rag.cache import ContextCache
 from kongming.rag.docparse import parse_to_text, supported_extension
 from kongming.rag.models import (
@@ -45,7 +45,7 @@ MAX_TABLE_BLOCKS = 500  # 单文档表块上限(防大文档切块风暴,design 
 
 
 def _get_service(session: Annotated[AsyncSession, Depends(get_session)]) -> RagService:
-    client = AgentRagClient(get_redis())
+    client = get_agent_rag_client(get_redis())  # 013:进程内单例,连接池跨请求复用
     return RagService(
         RagRepository(session),
         embedder=client,

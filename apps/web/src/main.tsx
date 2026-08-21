@@ -11,6 +11,8 @@ import DeptsPage from "@/pages/admin/DeptsPage";
 import RolesPage from "@/pages/admin/RolesPage";
 import UsersPage from "@/pages/admin/UsersPage";
 import RagPage from "@/pages/admin/RagPage";
+import FeedbackPage from "@/pages/admin/FeedbackPage";
+import AuditPage from "@/pages/admin/AuditPage";
 import ChangePassword from "@/pages/ChangePassword";
 import ChatPage from "@/pages/ChatPage";
 import Login from "@/pages/Login";
@@ -98,6 +100,22 @@ const router = createBrowserRouter([
             element: (
               <PermRoute perm="system:rag:manage">
                 <RagPage />
+              </PermRoute>
+            ),
+          },
+          {
+            path: "feedback",
+            element: (
+              <PermRoute perm="system:feedback:view">
+                <FeedbackPage />
+              </PermRoute>
+            ),
+          },
+          {
+            path: "audit",
+            element: (
+              <PermRoute perm="system:audit:view">
+                <AuditPage />
               </PermRoute>
             ),
           },

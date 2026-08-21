@@ -172,25 +172,77 @@ class RagService:
     async def reindex(
         self, *, actor_id: str, tenant_id: str, tenant_key: str, datasource_key: str
     ) -> ReindexResult:
-        """清空重建(显式语义:清掉人工精修回到自动生成基线,spec 已声明)。"""
+        """清空重建(显式语义:清掉人工精修回到自动生成基线,spec 已声明)。
+
+        执行序(014 挂账⑪清零,knowledge spec「先润色后删写」):内省+润色+
+        embedding(分钟级 LLM,零 DB 写事务挂起)先行,delete+insert+审计在同一
+        短事务收口——消「delete→润色→commit」长事务锁窗口(窗口期并发 upload
+        冲突键阻塞);前置阶段异常则不进入删写,既有条目保留。
+        reindex 全删重建,无 fetch-metadata 的优先级判定需求,不复用 _ingest。
+        """
         await self._require_usable_datasource(tenant_id, datasource_key)
-        deleted = await self._repo.delete_all_for_datasource(
-            tenant_id=tenant_id, datasource_key=datasource_key
-        )
         try:
             tables = await self._repo.introspect_all(
                 tenant_id=tenant_id, tenant_key=tenant_key, datasource_key=datasource_key
             )
         except LookupError:
             raise DatasourceInvalid(datasource_key) from None
-        result = await self._ingest(
-            actor_id=actor_id,
-            tenant_id=tenant_id,
-            datasource_key=datasource_key,
-            tables=tables,
-            action="rag.reindex",
+
+        # ① 润色(事务外;并发上限,单表失败降级纯结构不阻断整批)
+        sem = asyncio.Semaphore(_DESCRIBE_CONCURRENCY)
+
+        async def describe_one(t: IntrospectedTable) -> tuple[bool, TableBlock]:
+            block = TableBlock(
+                table_name=t.table_name,
+                table_comment=t.table_comment,
+                columns_comment=dict(t.columns_comment),
+            )
+            async with sem:
+                return await self._describer.describe(block, t.schema_name)
+
+        described = await asyncio.gather(*(describe_one(t) for t in tables))
+
+        # ② embedding(事务外;失败全 None 无向量落库,全文路仍可用)
+        vectors = await self._embed_quietly(
+            [
+                build_embedding_text(b.table_name, b.table_comment, b.columns_comment)
+                for _, b in described
+            ]
         )
-        return ReindexResult(deleted=deleted, rebuilt=result.found, enriched=result.enriched)
+
+        # ③ 短事务删写:delete+insert+审计同事务
+        deleted = await self._repo.delete_all_for_datasource(
+            tenant_id=tenant_id, datasource_key=datasource_key
+        )
+        enriched_count = 0
+        for t, (enriched, block), vec in zip(tables, described, vectors, strict=True):
+            await self._repo.upsert_table(
+                tenant_id=tenant_id,
+                datasource_key=datasource_key,
+                schema_name=t.schema_name,
+                table_name=block.table_name,
+                table_comment=block.table_comment,
+                columns_comment=block.columns_comment,
+                sample_queries=block.sample_queries,
+                source_type="AI_GENERATED" if enriched else "INTROSPECTION",
+                embedding=vec,
+            )
+            if enriched:
+                enriched_count += 1
+        await self._repo.log_oper(
+            actor_id,
+            "rag.reindex",
+            datasource_key,
+            {
+                "deleted": deleted,
+                "rebuilt": len(tables),
+                "enriched": enriched_count,
+                "datasource_key": datasource_key,
+            },
+        )
+        await self._repo.commit()
+        await self._cache.evict(tenant_id, datasource_key)
+        return ReindexResult(deleted=deleted, rebuilt=len(tables), enriched=enriched_count)
 
     async def _ingest(
         self,

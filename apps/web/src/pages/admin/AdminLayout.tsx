@@ -3,7 +3,7 @@
    子页守卫由各路由的 PermRoute 承担(直达无权子页 → 403 页兜底)。 */
 
 import { NavLink, Outlet } from "react-router";
-import { BookOpen, Building2, Database, ShieldCheck, Users } from "lucide-react";
+import { BookOpen, Building2, Database, MessageSquareHeart, ScrollText, ShieldCheck, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
@@ -24,6 +24,8 @@ const ADMIN_NAV: AdminNavItem[] = [
   { to: "/admin/depts", label: "部门", icon: Building2, perm: "system:user:manage" },
   { to: "/admin/datasources", label: "数据源", icon: Database, perm: "system:datasource:manage" },
   { to: "/admin/rag", label: "知识库", icon: BookOpen, perm: "system:rag:manage" },
+  { to: "/admin/feedback", label: "反馈", icon: MessageSquareHeart, perm: "system:feedback:view" },
+  { to: "/admin/audit", label: "审计", icon: ScrollText, perm: "system:audit:view" },
 ];
 
 export default function AdminLayout() {

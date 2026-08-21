@@ -225,3 +225,52 @@ async def test_export_rows_over_transport_cap_422(
         headers=_auth(token),
     )
     assert r.status_code == 422
+
+
+# ============ 导出审计(015,010 挂账⑦清零) ============
+
+
+async def test_export_audit_logged(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """导出落 sys_oper_log chat.export(fmt/rows/truncated,同事务;数据外发可见性)。"""
+    from sqlalchemy import text
+
+    _, token = await _user_with_chat_perm(client, session, make_user, "export-audit")
+    r = await client.post(
+        "/chat/export",
+        json={"format": "csv", "columns": ["name"], "rows": [["连弩"], ["木牛"]]},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    row = (
+        await session.execute(
+            text(
+                "SELECT action, detail FROM public.sys_oper_log"
+                " WHERE action='chat.export' ORDER BY created_at DESC LIMIT 1"
+            )
+        )
+    ).mappings().one()
+    assert row["detail"]["fmt"] == "csv"
+    assert row["detail"]["rows"] == 2
+    assert row["detail"]["truncated"] is False
+
+
+async def test_export_audit_failure_not_blocking(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser, monkeypatch
+) -> None:
+    """审计写失败不阻断导出(audit spec 铁律,与 004 SqlAuditWriter 同语义)。"""
+    from kongming.auth.repository import SqlOperLogRepo
+
+    async def _boom(self, *a, **kw):  # type: ignore[no-untyped-def]
+        raise RuntimeError("oper_log down")
+
+    monkeypatch.setattr(SqlOperLogRepo, "add", _boom)
+    _, token = await _user_with_chat_perm(client, session, make_user, "export-auditfail")
+    r = await client.post(
+        "/chat/export",
+        json={"format": "csv", "columns": ["name"], "rows": [["连弩"]]},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200  # 导出照常
+    assert r.content.startswith(b"\xef\xbb\xbf")

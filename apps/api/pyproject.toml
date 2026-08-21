@@ -82,15 +82,20 @@ source_modules = ["kongming.auth"]
 forbidden_modules = ["kongming.chat", "kongming.rag", "kongming.datasource"]
 
 [[tool.importlinter.contracts]]
-name = "datascope/audit 域不依赖 Web 框架(宪法 Article II 领域纯净)"
+name = "datascope 域不依赖 Web 框架(宪法 Article II 领域纯净)"
 type = "forbidden"
-source_modules = ["kongming.datascope", "kongming.audit"]
+source_modules = ["kongming.datascope"]
 forbidden_modules = ["fastapi"]
 
 [[tool.importlinter.contracts]]
-name = "chat 领域模型/端口/导出纯函数不依赖框架(宪法 Article II 领域纯净)"
+name = "chat 领域模型/用例/端口/导出纯函数不依赖框架(宪法 Article II 领域纯净)"
 type = "forbidden"
-source_modules = ["kongming.chat.models", "kongming.chat.ports", "kongming.chat.export"]
+source_modules = [
+    "kongming.chat.models",
+    "kongming.chat.service",
+    "kongming.chat.ports",
+    "kongming.chat.export",
+]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
 [[tool.importlinter.contracts]]
@@ -116,6 +121,22 @@ source_modules = [
     "kongming.rag.models",
     "kongming.rag.service",
     "kongming.rag.ports",
+]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "audit 领域模型/用例/端口不依赖框架(宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = ["kongming.audit.models", "kongming.audit.service", "kongming.audit.ports"]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "feedback 领域模型/用例/端口不依赖框架(宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = [
+    "kongming.feedback.models",
+    "kongming.feedback.service",
+    "kongming.feedback.ports",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 

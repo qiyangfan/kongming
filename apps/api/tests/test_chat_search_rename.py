@@ -158,14 +158,37 @@ async def test_rename_blank_title_400(
     assert title == "原标题"  # 未更新
 
 
-async def test_rename_overlong_422(
+async def test_rename_overlong_400(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
+    """013:非法判定以 strip 后值为准(spec 立约「去首尾空白后非空且不超上限」)——
+    裸 201 字走领域层 400;超 2000 传输层 422 防离谱请求体。"""
     uid, token = await _user_with_chat_perm(client, session, make_user, "ren-long")
     tid = await _default_tenant_id(session)
     sid = await _mk_session(session, user_id=uid, tenant_id=tid)
     r = await client.patch(f"/chat/sessions/{sid}", json={"title": "x" * 201}, headers=_auth(token))
-    assert r.status_code == 422  # 传输层 max_length=200(列上限)
+    assert r.status_code == 400  # 领域层 strip 后 >200
+    r = await client.patch(
+        f"/chat/sessions/{sid}", json={"title": "x" * 2001}, headers=_auth(token)
+    )
+    assert r.status_code == 422  # 传输层防离谱请求体
+
+
+async def test_rename_strip_padded_201_succeeds(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """013 挂账⑰:带空白 201 字 strip 后 ≤200 此前被传输层 422 误拒,
+    现按 spec「去首尾空白后不超上限」成功并落 strip 后值。"""
+    uid, token = await _user_with_chat_perm(client, session, make_user, "ren-pad")
+    tid = await _default_tenant_id(session)
+    sid = await _mk_session(session, user_id=uid, tenant_id=tid, title="原标题")
+    padded = " " + "x" * 200  # 总长 201,strip 后恰 200
+    r = await client.patch(f"/chat/sessions/{sid}", json={"title": padded}, headers=_auth(token))
+    assert r.status_code == 200
+    title = (
+        await session.execute(text("SELECT title FROM public.chat_session WHERE id=:i"), {"i": sid})
+    ).scalar_one()
+    assert title == "x" * 200  # strip 后值落库
 
 
 async def test_rename_other_user_404(

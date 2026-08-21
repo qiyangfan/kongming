@@ -5,25 +5,23 @@
 回调 agent → 消息落库(USER + ASSISTANT,三态映射)→ 响应组装(含图表建议)。
 """
 
+import contextlib
 import json
 import logging
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from kongming.chat.agent_client import AgentClient, AgentUnavailable
 from kongming.chat.export import to_csv, to_xlsx
 from kongming.chat.models import ChartSuggestion, suggest_chart
-from kongming.chat.ports import ExplainRunner
-from kongming.chat.repository import ChatRepository
+from kongming.chat.ports import ChatRepo, ChatStoreError, ExplainRunner, OperLogger
 from kongming.datasource.ports import DatasourceChecker
 from kongming.rag.ports import QueryHistoryWriter
 
 log = logging.getLogger(__name__)
 
 SESSION_TITLE_LEN = 30  # 标题=首问前 30 字符(chat spec)
+SESSION_TITLE_MAX_LEN = 200  # 标题列上限(chat spec「会话重命名」;strip 后判定)
 HISTORY_FILL_LIMIT = 5  # 后端补全最近 5 条 user 问句
 
 
@@ -58,7 +56,7 @@ class ExplainNoSql(Exception):
 
 
 class InvalidTitle(Exception):
-    """标题去空白后为空(010 重命名;参数错误)。"""
+    """标题去空白后为空或超列上限(010 重命名;参数错误,映射 400)。"""
 
 
 @dataclass(frozen=True)
@@ -75,6 +73,10 @@ class ChatOutcome:
     chart: ChartSuggestion = field(default_factory=lambda: ChartSuggestion("none"))
     retry_count: int = 0
     error: str | None = None
+    # 014 messageId 打通:assistant 落库消息 id(反馈提交引用;不落库路径 None)
+    # 与本次执行的数据源快照(会话快照同源口径)
+    message_id: str | None = None
+    datasource_key: str = "default"
 
 
 @dataclass(frozen=True)
@@ -110,6 +112,10 @@ class SessionMessage:
     status: str = "SUCCESS"
     error: str | None = None
     result: MessageResult | None = None
+    # 014 反馈状态回显(assistant 消息;user 消息恒 None)
+    rating: str | None = None
+    corrected_sql: str | None = None
+    feedback_comment: str | None = None
 
 
 @dataclass(frozen=True)
@@ -124,18 +130,19 @@ class ExplainView:
 class ChatService:
     def __init__(
         self,
-        session: AsyncSession,
+        repo: ChatRepo,
         agent: AgentClient,
         ds_checker: DatasourceChecker,
         history_writer: QueryHistoryWriter | None = None,  # 009:成功 SQL 回写(可选注入)
         explainer: ExplainRunner | None = None,  # 010:执行计划端口(组合根绑定)
+        oper_logger: OperLogger | None = None,  # 015:导出审计(可选注入)
     ) -> None:
-        self._s = session
-        self._repo = ChatRepository(session)
+        self._repo = repo
         self._agent = agent
         self._ds_checker = ds_checker
         self._history_writer = history_writer
         self._explainer = explainer
+        self._oper_logger = oper_logger
 
     @property
     def agent_for_tasks(self) -> AgentClient:
@@ -203,7 +210,7 @@ class ChatService:
             await self._repo.insert_message(
                 session_id=sid, role="USER", question=question, status="SUCCESS"
             )
-            await self._s.commit()
+            await self._repo.commit()
 
         try:
             reply = await self._agent.query(
@@ -216,10 +223,11 @@ class ChatService:
             )
         except AgentUnavailable:
             log.warning("agent 不可达 trace_id=%s", trace_id)
+            mid: str | None = None
             if sid is not None:
                 # 落库容错与成功路径对称:回调期间会话可能被并发删除
                 try:
-                    await self._repo.insert_message(
+                    mid = await self._repo.insert_message(
                         session_id=sid,
                         role="ASSISTANT",
                         result_json=json.dumps(
@@ -229,11 +237,16 @@ class ChatService:
                         status="FAILED",
                     )
                     await self._persist_touch_quietly(sid)
-                except SQLAlchemyError:
+                except ChatStoreError:
+                    mid = None  # 落库失败即无消息 id(与未落库语义一致)
                     log.warning("FAILED 消息落库失败(会话可能已被删除) session=%s", sid)
-                    await self._s.rollback()
+                    await self._repo.rollback()
             return ChatOutcome(
-                session_id=sid, success=False, error="问答服务暂不可用,请稍后重试"
+                session_id=sid,
+                success=False,
+                error="问答服务暂不可用,请稍后重试",
+                message_id=mid,
+                datasource_key=datasource_key,
             )
 
         # 三态映射:PASS→SUCCESS;BLOCKED→REJECTED;ERROR/重试耗尽→FAILED
@@ -252,6 +265,7 @@ class ChatService:
         elif status == "FAILED":
             error = f"查询失败:{reply.error}" if reply.error else "查询失败,请换个问法试试"
 
+        mid = None
         if sid is not None:
             # 006:chart 完整对象(x/y)+ error 文案随档落库,回显读档即事实源;
             # 存量 005 形态(裸 chartType)由 _to_message 重算兜底。
@@ -270,7 +284,7 @@ class ChatService:
                     ensure_ascii=False,
                     default=str,
                 )
-                await self._repo.insert_message(
+                mid = await self._repo.insert_message(
                     session_id=sid,
                     role="ASSISTANT",
                     sql_text=reply.sql or None,
@@ -279,9 +293,10 @@ class ChatService:
                     status=status,
                 )
                 await self._persist_touch_quietly(sid)
-            except SQLAlchemyError:
+            except ChatStoreError:
+                mid = None  # 落库失败即无消息 id(与未落库语义一致)
                 log.warning("assistant 消息落库失败(会话可能已被删除) session=%s", sid)
-                await self._s.rollback()
+                await self._repo.rollback()
 
         # 成功 SQL 回写 query_history(009):最终 SUCCESS 判定后;独立 try 不阻断;
         # persist=False 为测试通道不触发;空结果的成功查询同样回写(不依赖行数)。
@@ -314,16 +329,18 @@ class ChatService:
             chart=chart,
             retry_count=reply.retry_count,
             error=error,
+            message_id=mid,
+            datasource_key=datasource_key,
         )
 
     async def _persist_touch_quietly(self, session_id: str) -> None:
         """touch+commit;FK 违约(会话被并发删除)仅日志,不影响响应。"""
         try:
             await self._repo.touch_session(session_id)
-            await self._s.commit()
-        except SQLAlchemyError:
+            await self._repo.commit()
+        except ChatStoreError:
             log.warning("会话 touch 失败(可能已被删除) session=%s", session_id)
-            await self._s.rollback()
+            await self._repo.rollback()
 
     # ============ 会话列表/消息历史/删除(006) ============
 
@@ -342,18 +359,20 @@ class ChatService:
     async def rename_session(
         self, *, user_id: str, tenant_key: str | None, session_id: str, title: str
     ) -> SessionSummary:
-        """重命名(010):标题去空白非空;归属原子 UPDATE;成功后该标题即人工设定,
+        """重命名(010):标题去空白后非空且不超列上限(spec 立约,013 补齐——
+        非法判定以 strip 后值为准,带空白 201 字 strip 后 ≤200 不再误拒);
+        归属原子 UPDATE;成功后该标题即人工设定,
         不再被 LLM 自动改写覆盖(改写走 expected 条件更新,见 title_tasks)。"""
         tenant_id, _ = await self._resolve_tenant(user_id, tenant_key)
         cleaned = title.strip()
-        if not cleaned:
+        if not cleaned or len(cleaned) > SESSION_TITLE_MAX_LEN:
             raise InvalidTitle(title)
         row = await self._repo.rename_session(
             session_id=session_id, user_id=user_id, tenant_id=tenant_id, title=cleaned
         )
         if row is None:
             raise SessionNotFound(session_id)
-        await self._s.commit()
+        await self._repo.commit()
         return SessionSummary(
             id=str(row["id"]), title=str(row["title"]), updated_at=row["updated_at"]
         )
@@ -379,7 +398,7 @@ class ChatService:
         )
         if not deleted:
             raise SessionNotFound(session_id)
-        await self._s.commit()
+        await self._repo.commit()
 
     # ============ 结果导出(010,chat spec「结果导出 CSV/Excel」) ============
 
@@ -407,6 +426,22 @@ class ChatService:
             ext = "xlsx"
         if truncated:
             log.warning("导出行数截断: %d → %d 行", len(rows), max_rows)
+        # 导出审计(015,010 挂账⑦清零):数据外发可见性;写失败不阻断导出
+        # (audit spec 铁律,与 004 SqlAuditWriter 同语义);rollback 亦包保护
+        # ——连接级双失败时异常不逃逸(R1-B1:裸 rollback 再抛会把导出变 500)
+        if self._oper_logger is not None:
+            try:
+                await self._oper_logger.add(
+                    user_id,
+                    "chat.export",
+                    None,
+                    {"fmt": fmt, "rows": len(rows), "truncated": truncated},
+                )
+                await self._repo.commit()
+            except Exception:  # noqa: BLE001
+                log.warning("导出审计落库失败(不阻断)", exc_info=True)
+                with contextlib.suppress(Exception):
+                    await self._repo.rollback()
         return content, media_type, ext
 
     # ============ 执行计划(010,chat spec「EXPLAIN 执行计划」) ============
@@ -505,6 +540,9 @@ class ChatService:
         question = row.get("question")
         summary = row.get("summary")
         sql_text = row.get("sql_text")
+        rating = row.get("rating") if role == "ASSISTANT" else None
+        corrected_sql = row.get("corrected_sql") if role == "ASSISTANT" else None
+        fb_comment = row.get("feedback_comment") if role == "ASSISTANT" else None
         return SessionMessage(
             id=str(row["id"]),
             role=role,
@@ -514,4 +552,7 @@ class ChatService:
             status=str(row["status"]),
             error=error,
             result=result,
+            rating=None if rating is None else str(rating),
+            corrected_sql=None if corrected_sql is None else str(corrected_sql),
+            feedback_comment=None if fb_comment is None else str(fb_comment),
         )
