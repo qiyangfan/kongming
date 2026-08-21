@@ -1,10 +1,12 @@
 """chat 领域模型(零框架,宪法 Article II):图表配置建议纯函数。
 
-推断规则(chat spec「问答查询端点」):
+推断规则(chat spec「图表可视化」):
 - 首列日期/时间 → line(时序趋势);
+- 存在两个数值列(任意位置)→ scatter(x/y=前两个数值列;
+  011 吸收列序解耦——prompt 会给明细附标识列,数值列未必在首列);
 - 首列低基数分类(≤8 类)+ 有数值列 → pie(占比);
 - 首列分类 + 有数值列(基数 ≤50) → bar;
-- 其余(明细/无数值列) → none。
+- 其余(明细/无数值列/首列为唯一数值列) → none。
 基数 >50 推定为明细行,不强加图表。
 """
 
@@ -21,7 +23,7 @@ _DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
 @dataclass(frozen=True)
 class ChartSuggestion:
-    """type: line / bar / pie / none;x/y 为列名(none 时为空)。"""
+    """type: line / bar / pie / scatter / none;x/y 为列名(none 时为空)。"""
 
     type: str
     x: str | None = None
@@ -45,18 +47,24 @@ def suggest_chart(columns: list[str], rows: list[list[object]]) -> ChartSuggesti
     first_vals = [r[0] for r in rows if len(r) > 0]
     if not first_vals:
         return ChartSuggestion("none")
+    # 全列扫描(含首列):scatter 双数值判定不依赖列序(标识列可在任意位置)
     numeric_cols = [
         i
-        for i in range(1, len(columns))
+        for i in range(len(columns))
         if any(_is_numeric(r[i]) for r in rows if len(r) > i)
     ]
     if not numeric_cols:
         return ChartSuggestion("none")
-    y = columns[numeric_cols[0]]
     if all(_is_temporal(v) for v in first_vals):
-        return ChartSuggestion("line", x=columns[0], y=y)
-    if any(_is_numeric(v) for v in first_vals):
-        return ChartSuggestion("none")  # 首列即数值:非典型分组形态,不猜
+        # temporal 首列自身非数值,y 必在其后
+        return ChartSuggestion("line", x=columns[0], y=columns[numeric_cols[0]])
+    if len(numeric_cols) >= 2:
+        return ChartSuggestion(
+            "scatter", x=columns[numeric_cols[0]], y=columns[numeric_cols[1]]
+        )
+    if 0 in numeric_cols:
+        return ChartSuggestion("none")  # 仅首列数值:单个数值列不成对,不猜
+    y = columns[numeric_cols[0]]
     cardinality = len({str(v) for v in first_vals})
     if cardinality <= _PIE_MAX_CARDINALITY:
         return ChartSuggestion("pie", x=columns[0], y=y)

@@ -15,9 +15,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { StatusSwitch } from "@/components/status-switch";
 import {
   Dialog,
   DialogContent,
@@ -88,6 +88,7 @@ export default function DatasourcesPage() {
   const [formError, setFormError] = useState("");
   const [deleting, setDeleting] = useState<DatasourceItemOut | null>(null);
   const [testResult, setTestResult] = useState<TestConnectionOut | null>(null);
+  const [toggleId, setToggleId] = useState<string | null>(null);
   const [toggleError, setToggleError] = useState("");
 
   const datasources = useQuery({
@@ -156,11 +157,15 @@ export default function DatasourcesPage() {
   const toggle = useMutation({
     mutationFn: (item: DatasourceItemOut) =>
       item.status === "ACTIVE" ? datasourceApi.disable(item.id) : datasourceApi.enable(item.id),
-    onSuccess: () => {
+    onMutate: (item) => {
+      setToggleId(item.id);
       setToggleError("");
+    },
+    onSuccess: () => {
+      setToggleId(null);
       invalidate();
     },
-    onError: (e: Error) => setToggleError(e.message), // R1-web-1:启停失败不得静默
+    onError: (e: Error) => setToggleError(e.message), // R1-web-1:启停失败不得静默(012 收敛为行内)
   });
 
   const remove = useMutation({
@@ -266,11 +271,6 @@ export default function DatasourcesPage() {
           数据源列表加载失败:{(datasources.error as Error).message}
         </p>
       )}
-      {toggleError && (
-        <p className="text-destructive text-sm" role="alert">
-          启停操作失败:{toggleError}
-        </p>
-      )}
 
       <Table>
         <TableHeader>
@@ -304,23 +304,17 @@ export default function DatasourcesPage() {
               </TableCell>
               <TableCell>{d.default_schema}</TableCell>
               <TableCell>
-                {d.status === "ACTIVE" ? (
-                  <Badge>启用</Badge>
-                ) : (
-                  <Badge variant="secondary">禁用</Badge>
-                )}
+                <StatusSwitch
+                  active={d.status === "ACTIVE"}
+                  pending={toggle.isPending}
+                  error={!toggle.isPending && toggleId === d.id && toggleError ? toggleError : null}
+                  onToggle={() => toggle.mutate(d)}
+                  ariaLabel={`${d.name} 启用状态`}
+                />
               </TableCell>
               <TableCell className="text-right">
                 <Button variant="ghost" size="sm" onClick={() => openEdit(d)}>
                   编辑
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={toggle.isPending}
-                  onClick={() => toggle.mutate(d)}
-                >
-                  {d.status === "ACTIVE" ? "禁用" : "启用"}
                 </Button>
                 <Button
                   variant="ghost"

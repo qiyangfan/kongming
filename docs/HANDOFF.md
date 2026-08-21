@@ -1,12 +1,13 @@
 # HANDOFF — Kongming 交接文档
 
-> 最后更新:2026-08-20(**010 会话体验深化已提交并归档**:
-> archive/2026-08-20-010-chat-experience,30/30 任务,delta 已 sync chat 主
-> spec——会话持久化(标题两阶段+时间分组)/结果导出/EXPLAIN/问答查询端点
-> 四 requirement 修订 + 会话重命名/会话搜索两 requirement 新增;
-> R1 双路评审 + /goal R1+R2 四轮审查清零;真 LLM 冒烟全过;
-> api 379+agent 85+web 全绿、7 契约 KEPT;**下一棒=图表增强(scatter/
-> 手动切换/PNG,chat spec 已立约残余)或 rag 挂账 15 项**。
+> 最后更新:2026-08-20(**011 图表增强+可读性热修+012 管理台启停范式
+> 已提交并归档**:archive/2026-08-20-011-chart-enhance、
+> archive/2026-08-20-012-admin-status-toggle,delta 已 sync 四主 spec
+> ——chat「图表可视化」/web-nav「结果图表渲染」/rbac「用户启用与禁用」
+> /web-admin「用户管理页+状态列行内启停范式」;R1+R2 两轮独立评审清零;
+> 真 LLM 冒烟可读性闭环+开关全链全过;api 389+agent 85+web 全绿、
+> 契约 +2 端点;**下一棒=rag 挂账 15 项/010 挂账 18 项/011 挂账 9 项/
+> 012 挂账 4 项视优先级评估,或 query-streaming/feedback**)。
 > 清空上下文/新会话先读本文与 `AGENTS.md`,
 > 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
 > 清空上下文/新会话先读本文与 `AGENTS.md`,
@@ -14,10 +15,14 @@
 
 ## 新会话开工指引(最先看这里)
 
-1. **010 会话体验深化:已提交并归档**(archive/2026-08-20-010-chat-experience,
-   delta 已 sync chat 主 spec)。下一棒=**图表增强**(scatter/手动切换/PNG,
-   chat spec「图表可视化」已立约残余)或 **rag 挂账**(见「已知 TODO」009 段
-   15 项)/010 挂账 18 项。010 顺手修了**共享组件级缺陷**:scroll-area Viewport
+1. **011 图表增强+可读性热修+012 管理台启停范式:已提交并归档**
+   (011=scatter 自动入口/四类型切换/PNG/列序解耦+prompt 标识列热修;
+   012=用户启停专用端点+禁用吊销 refresh+StatusSwitch 两页统一)。
+   其后梯队=**rag 挂账**(见「已知 TODO」009 段 15 项)/010 挂账 18 项/
+   011 挂账 9 项/012 挂账 4 项视优先级评估;query-streaming;feedback。**010 会话体验深化:已提交并归档**
+   (archive/2026-08-20-010-chat-experience,delta 已 sync chat 主 spec)。
+   其后梯队=**rag 挂账**(见「已知 TODO」009 段 15 项)/010 挂账 18 项/
+   011 挂账 6 项。010 顺手修了**共享组件级缺陷**:scroll-area Viewport
    加 `[&>div]:block!`(Radix display:table shrink-to-fit 在不可断行 CJK 长内容
    +窄视口下把内容撑出视口;此前侧栏无长标题从未暴露)。010 零表结构变更、
    零新权限点(全复用 chat:execute)、零种子变更;新依赖 openpyxl(+types)。
@@ -68,11 +73,99 @@
    (DOM 快照可读)——GUI 测试一律用 Playwright MCP 工具组
    (`mcp__plugin_playwright_playwright__browser_*`,独立管道,002 已验证可用)。
 
-## 当前状态(截至 010 提交并归档;001–009 及此前已归档)
+## 当前状态(截至 011 实施待提交;001–010 及此前已归档)
 
 - git:main 分支(以 git log 为准);无远程、未 push。
   分支策略:主干开发不拉 dev,协作按变更开短命 feature。
-- openspec:**001–010 全部归档;活动变更为零**。
+- openspec:**001–012 全部归档;活动变更为零**。
+- **011 架构总览**:零表结构/零新端点/零新权限点/零种子/**零契约漂移**
+  (chart.type 契约 schema 为自由 string,值域扩 scatter 在 schema 内,
+  make contracts KEPT)。api suggest_chart 补 scatter 分支(首列数值+有
+  第二数值列→scatter,x=首列 y=首个数值列;numeric_cols 非空前置已保证,
+  「首列数值且无第二数值列→none」由既有 early return 覆盖,既有
+  temporal/pie/bar 规则逐字未动);web chart-view 重写:四类型
+  toggle-group(shadcn 新组件,radix-ui 聚合包**零新依赖**)+PNG 下载
+  (getDataURL pixelRatio=2,backgroundColor=cssVar(--card) 防透明底,
+  「图表-yyyyMMdd-HHmmss.png」,锚点入 DOM 再 click 的 Safari 形态)+
+  scatter 双形态(x 列全数值探测**显式排除 null/undefined/''**——JS
+  Number(null)===0 误判坑;value 轴遇 NaN 静默丢点为上游实证坑,一行脏
+  即整体退化类目点图);切换=卡片本地 useState,映射恒定,刷新/同卡片
+  新结果回落建议类型。新会话冒烟留痕:sakila 域「列出 30 部电影的时长和
+  租金」(scatter)/「各分级的电影数量」(pie)/「2005年7月每天的租赁次数」
+  (line)/「60 位客户的姓名和邮箱」(none)等 4 个新会话可回复核。
+- **011 自查修 2 缺陷**:①回落 effect 依赖写成外层内联组装的包装对象
+  ([chart.type, data]),父组件无关重渲染(输入框逐键)会误重置手动切换
+  ——改依赖基元+react-query 缓存内稳定数组引用(structural sharing 保证),
+  浏览器实证「切 pie 后打字不重置」;②数值散点 y 空值 Number(null)===0
+  会落 y=0 假点——映 null 由 echarts 跳过该点。
+- **可读性热修根因链(冒烟实证,重要操作知识)**:「列出30部电影的时长和
+  租金」出不了 title 的元凶是**rag few-shot 自我强化**——同题历史成功 SQL
+  (query_history)+ctx 缓存(km:ragctx:* 10min)喂旧形态范例压过 system
+  prompt 规则,且每次旧形态成功又回写更多旧范例;清场(DELETE 同题
+  query_history 行+DEL km:ragctx:*)+规则提级(「例外」措辞→主规则
+  「必须」,反例区补两条)后生效:title+ORDER BY film_id+洞察点名电影
+  (ACE GOLDFINGER…)+scatter 正确取双数值列(title 前置不误判)。新形态
+  回写后 few-shot 转为正向强化。**prompt 类改动冒烟必须先清同题历史+ctx
+  缓存,否则验证的是缓存不是 prompt**(009 挂账③ query_history 治理的
+  具体表现)。另:编辑 prompts.py 单行字符串时换行必须是字面 `\n` 转义,
+  插实际换行即 SyntaxError(现场修过)。
+- **012 架构总览**:api——system service 专用 enable_user/disable_user
+  (保护与编辑路径同构:自禁/超管禁 409、404;审计 user.enable/disable;
+  **禁用即吊销 refresh 家族**——收口 service 单点,专用端点与 update_user
+  status→DISABLED 分支两路同调,复用 007 改密吊销管线);repo 加
+  set_user_status(只翻状态列);ports Protocol 同步。web——shadcn switch
+  引入(token 面 primary/input/background/ring 齐备,零新依赖)+
+  `components/status-switch.tsx` 公共组件(受控 checked=服务器真值、
+  pending 禁用、失败回弹+行内 role=alert)+UsersPage/DatasourcesPage
+  状态列统一接入(数据源页旧行内文字按钮与全局错误横幅删除,错误改行内)。
+  契约 +2 端点(POST /system/users/{id}/enable|disable)已重生成。
+- **012 冒烟(2026-08-20,Playwright MCP)**:用户页 7 开关渲染 aria 语义
+  正确/禁用 smoke-self→真值 unchecked/启回→true/**自禁 409:开关回弹+
+  行内「不可禁用自己的账号」可见**/数据源页开关统一形态、旧按钮移除、
+  off→on 闭环/编辑对话框 Select 保留。禁用吊销 refresh 由 api 测试直证
+  (disable 后旧 refresh 401,R2 后补判别步:enable 后旧 refresh 仍 401)。
+- **R2 独立评审(全覆盖三工作包,0 严重;6 必修+8 观察全闭环)**:
+  F10 service 抽 `_assert_disable_allowed`/`_revoke_refresh` 单点(保护与
+  吊销改密/重置/禁用三路同调,防两份漂移);F3 吊销测试补判别步——refresh
+  有 is_active 闸,仅断 401 对「删掉 revoke」不设防,enable 后仍 401 才锁住;
+  F1 scatter 侵占双度量 pie/bar 形态([分类,count,avg]→scatter)为列序
+  解耦既定行为,**裁决=接受**(切换器兜底+规则简洁),补测试+proposal/spec
+  优先级句(temporal>scatter>pie/bar);F5 单行 pending 并发竞态(onSuccess
+  清单槽致后来者错误静默)→ 恢复全局互斥;F6 错误文案 aria-describedby
+  关联(id 空白折连字符);F4 审计清单测试实调两端点+扩 expected;F11 401
+  参数化直测;F7 prompt 补「用户显式限定只要某些列不加强加」豁免;F2
+  docstring 措辞;F8/F9 工件失实回填(prompt 热修锚进 011 Impact、tasks
+  与实现对齐)。核过无异常面:update_user 吊销条件全矩阵(ACTIVE→ACTIVE
+  带密/无密、DISABLED 重复编辑幂等)/软删过滤/契约与生成物一致性/开关
+  受控语义/prompt 字符串完整性与聚合问法零误伤。浏览器复验:自禁 409
+  回弹+错误可见+aria 链接解析正常。
+- **011 R1 独立评审(作者/评审分离,0 严重;3 必修+2 边角+2 文档全修)**:
+  数值散点双 value 轴补 scale:true(echarts 默认含零轴,窄区间远离 0 的
+  数据挤角,冒烟数据恰好掩盖);isNumericCell 补空白串拦截(Number("  ")
+  ===0 与 "" 处理不一致);design/tasks/proposal 回填自查修复后的真实形态
+  (依赖数组+assistant-card 实为零改动);None-any 用例补 x/y 断言;HANDOFF
+  头部 010 遗留重复行顺手清。核过无异常面:回落 effect 依赖推演(structural
+  sharing 链路实证)/notMerge+deep-equal 挡板(pie↔笛卡尔互转零残留)/
+  suggest_chart 分支互斥性(scatter 吸收列序解耦后对原 none 与双度量
+  pie/bar 形态均生效,优先级 temporal>scatter>pie/bar 已进 delta spec)/
+  bar/line/pie 与 006 版逐项行为等价/契约自由 string 实查/toggle token 面
+  与 radix 单轨零新依赖。修复后浏览器确定性回归:scatter 会话 fiber 直证
+  xAxis value+scale:true+数据 [86,0.99];NULL 会话 fresh load=饼图(建议
+  回落)→切散点退化 category 轴 10 点→输入框打字不重置。**MCP 操作注记:
+  评审中出现的 URL 漂移/切换状态残留读数系 HMR/Fast Refresh 竞态伪象**
+  (app 无「恢复上次会话」重定向路径,ChatPage 仅 404 收敛与提问成功两处
+  导航;Fast Refresh 会跨热更新保留组件本地 state——评测量化务必以
+  fresh navigate 后的读数为准)。
+- **011 冒烟(2026-08-20,真 LLM+Playwright MCP,11 项全过)**:双数值
+  出 scatter 默认(网络实证 chart.type=scatter)/四类型来回切换映射恒定/
+  rating 类目切 scatter 退化点图不空白/original_language_id 全 NULL 切
+  scatter 正确退化(10 点分散、无 x=0 挤压,真区分 null 探测)/PNG 下载
+  (中文时间戳文件名,1436×520=2 倍密度,白底)/切 pie 刷新回落 scatter/
+  pie·line 推断零回归/60 客户明细 none 无图表区/切换器激活态·聚焦态
+  视觉/切换后打字不重置/历史会话回显渲染。**环境坑:冒烟中途 podman
+  machine 停机致 pg/redis 断连**(旧 api 进程 healthz 假 200——healthz
+  不探 DB),冷启动流程 podman machine start → make up → 重启 api/agent
+  即恢复;5173 假占用同理=vite 仅监听 [::1] 且挂起,pkill 重启即回。
 - **010 架构总览**:零表结构变更/零新权限点(复用 chat:execute)/零种子变更。
   新端点 4:`POST /chat/explain`(message_id 引用,**优于上游**:不收裸 SQL,
   被分析 SQL 恒为落库 agent 产出;服务端复检后才拼 `EXPLAIN (FORMAT JSON)`,
@@ -577,9 +670,9 @@
 - 前端:登录页五家联邦按钮数据驱动;simple-icons 覆盖 GitHub/Google/微信系,
   **钉钉/飞书 simple-icons@16 未收录 → 按例外条款内联官方 mark**;favicon.svg 已补
   (朱砂底白色羽扇)。003 冒烟:五家图标实测渲染正确。
-- 质量:api ruff/mypy strict/lint-imports/pytest **379**(认证+datascope+执行路由+
-  防火墙+chat+meta+会话端点+system 管理面+datasource 68+rag 58+**chat 体验 44**,
-  真实 PG+Redis)+ agent 同门禁 **85**(+titler 12) + web tsc/eslint 全绿;
+- 质量:api ruff/mypy strict/lint-imports/pytest **389**(认证+datascope+执行路由+
+  防火墙+chat+meta+会话端点+system 管理面+datasource 68+rag 58+chat 体验 44+
+  **图表 scatter 3+012 启停 7**,真实 PG+Redis)+ agent 同门禁 **85** + web tsc/eslint 全绿;
   CI api job 已带 pg/redis services(未在真实 runner 验证——push 后首验)。
 - 契约:openapi.json 含 /auth/* + /internal/sql/execute + /chat/query +
   /internal/meta/schema + /chat/sessions(列表/消息/删除)+
@@ -605,15 +698,33 @@
 | 动态数据源 | PG-only;凭证 AES-GCM(base64 iv‖ct+tag,prod 密钥 fail-closed,dev 固定密钥降级);key 小写蛇形+保留字 default 禁注册+创建后 key/租户归属不可改;管理端点全局视角+创建显式指定租户;非法 key 同形 400(不存在/禁用/越属,审计分类可溯);连接信息变更/启停/删除 commit 后定向 evict,仅改 name 不动池;物理删除;选项接口首位合成 default 项 | datasource + internal-meta + web-admin spec(008) |
 | RAG/知识库 | rag 两表 baseline 既定(四元唯一键 tenant+ds+schema+table,1536 维+HNSW+tsv GIN);三路召回=向量+全文('simple')RRF k=60 top5 融合+query_history 独立强 few-shot(不进融合,≤3 条);tenant+ds 双过滤;召回零命中/失败回退实时内省;成功 SQL 回写(原始问句,最终 SUCCESS 判定);覆盖优先级 INTROSPECTION<AI_GENERATED<MANUAL_UPLOAD<MANUAL_EDIT<FEEDBACK_REFINED(自动不覆盖人工;reindex 显式清空例外);embedding 独立配置(缺省回退 llm_*,上游 028 教训)不随主模型路由;rag schema 显式限定名执行面拒读(末段名不进清单防误伤);缓存 emb 24h/ctx 10min,写操作 commit 后 SCAN 精确失效,空结果不写缓存 | rag + knowledge + nl2sql-agent + sql-execution + web-admin spec(009) |
 | 会话体验 | 标题两阶段:初始=首问前 30 字符,首个 SUCCESS 轮后 LLM 改写(BackgroundTasks+独立会话;守卫读首问截断值短路+条件写 WHERE title=expected,人工重命名永不覆盖;改写不刷 updated_at);EXPLAIN=message_id 引用(不收裸 SQL,服务端复检后拼 EXPLAIN (FORMAT JSON),永不 ANALYZE,数据源取会话快照);导出=传 columns+rows 不重跑 SQL,CSV BOM+CRLF+公式注入中和,xlsx 自算列宽,rows 传输层上限 10000;搜索=标题 ILIKE OR user 问句 EXISTS(共享 like_pattern 转义);重命名=原子归属 UPDATE;全端点复用 chat:execute 无新权限点 | chat spec(010 delta) |
+| 图表增强 | 推断补双数值列→scatter(x=首列,y=首个数值列;temporal/pie/bar 既有规则不变);四类型手动切换=卡片本地状态、映射恒定、刷新/同卡片新结果回落建议类型;scatter 渲染按 x 列全数值探测分流(排除 null 防 Number(null)===0 误判),非数值退化类目点图不丢点;PNG=getDataURL pixelRatio 2+背景取 --card token,文件名「图表-<时间戳>.png」 | chat「图表可视化」+ web-nav「结果图表渲染」spec(011 delta) |
 
 ## 下一步(路线图梯队,按序)
 
-1. **图表增强**(chat spec「图表可视化」未兑现残余:scatter 类型/手动切换
-   UI/PNG 下载——010 已立 Non-goal,另起变更)。
-2. rag/knowledge 后续挂账(见「已知 TODO」009 段 15 项)与 010 挂账 18 项
-   视优先级评估;query-streaming 流式输出;反馈闭环(feedback 域)。
+1. rag/knowledge 后续挂账(见「已知 TODO」009 段 15 项)与 010 挂账 18 项、
+   011 挂账 9 项、012 挂账 4 项视优先级评估;query-streaming 流式输出;
+   反馈闭环(feedback 域)。
 
 ## 已知 TODO(代码内标注,非缺陷)
+
+**012 挂账**:①启停开关无确认弹窗(二元可逆+失败回弹,设计决策;
+自禁/超管有 409 兜底);②行内错误只在最后操作的行保留(单槽 toggleId
+归因;R2 后 pending 已全局互斥,无并发竞态,错误归因单行足够);
+③禁用即吊销的 Redis 不可用窗口与改密吊销同语义(007 挂账既有);
+④行内错误无自动清除路径(换行再操作/刷新即清,挂账)。
+**011 挂账**:①getDataURL 在入场动画(~1s)进行中点击可能导出不完整帧
+(用户看到图到点下载的间隔大概率已过,观察不设卡);②手动切换类型不跨
+消息记忆(spec 立约回落建议类型,偏好记忆随 personalization 远期);
+③pixelRatio=2 印刷/大屏倍率配置化随真实诉求再加;④pie 高基数手动
+切换扇区爆炸不可读(spec 允许自由切换;默认推断的基数门槛仍在,手动
+选择不设卡);⑤temporal 类目轴标签为 ISO 原文(2005-07-05T00:00:00,
+既有行为非 011 引入,日期格式化随体验深化评估);⑥web 无单测基座
+(同 010 挂账⑭,Playwright 冒烟覆盖);⑦option useMemo 依赖不稳定对象
+引用每次重算(echarts-for-react 内部 fast-deep-equal 挡板,无视觉后果,
+006 既有形态);⑧toggle-group 的 gap-[--spacing(var(--gap))] 任意值类
+编译产物存疑(本仓未传 spacing 恒 0,惰性;未来消费方传非零时回头查);
+⑨散点 tooltip 无 formatter(与 bar/line 一致的薄信息量,体验深化再议)。
 
 **010 挂账(R1/R2 评审观察项)**:①用户手动把标题改成与首问截断值逐字相同时,
 改写保护失效(守卫/条件写都按值判定;概率极低,影响=一次自动改写);

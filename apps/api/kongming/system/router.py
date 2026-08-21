@@ -329,6 +329,24 @@ async def delete_user(user_id: uuid.UUID, user: UserClaims, svc: Service) -> Non
     await svc.delete_user(actor_id=str(user["sub"]), user_id=str(user_id))
 
 
+@router.post(
+    "/users/{user_id}/enable",
+    status_code=204,
+    dependencies=[Depends(require_perm("system:user:manage"))],
+)
+async def enable_user(user_id: uuid.UUID, user: UserClaims, svc: Service) -> None:
+    await svc.enable_user(actor_id=str(user["sub"]), user_id=str(user_id))
+
+
+@router.post(
+    "/users/{user_id}/disable",
+    status_code=204,
+    dependencies=[Depends(require_perm("system:user:manage"))],
+)
+async def disable_user(user_id: uuid.UUID, user: UserClaims, svc: Service) -> None:
+    await svc.disable_user(actor_id=str(user["sub"]), user_id=str(user_id))
+
+
 # ---- 角色管理(权限点 system:role:manage) ----
 
 

@@ -16,6 +16,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { StatusSwitch } from "@/components/status-switch";
 import {
   Dialog,
   DialogContent,
@@ -115,6 +116,22 @@ export default function UsersPage() {
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["admin", "users"] });
   };
+
+  const [toggleId, setToggleId] = useState<string | null>(null);
+  const [toggleErr, setToggleErr] = useState<string | null>(null);
+  const toggle = useMutation({
+    mutationFn: (u: UserItemOut) =>
+      u.status === "ACTIVE" ? systemApi.disableUser(u.id) : systemApi.enableUser(u.id),
+    onMutate: (u) => {
+      setToggleId(u.id);
+      setToggleErr(null);
+    },
+    onSuccess: () => {
+      setToggleId(null);
+      invalidate();
+    },
+    onError: (e: Error) => setToggleErr(e.message), // 失败回弹+行内可见(012)
+  });
 
   const create = useMutation({
     mutationFn: () =>
@@ -276,11 +293,13 @@ export default function UsersPage() {
               <TableCell className="font-medium">{u.username}</TableCell>
               <TableCell>{u.nickname}</TableCell>
               <TableCell>
-                {u.status === "ACTIVE" ? (
-                  <Badge>启用</Badge>
-                ) : (
-                  <Badge variant="secondary">禁用</Badge>
-                )}
+                <StatusSwitch
+                  active={u.status === "ACTIVE"}
+                  pending={toggle.isPending}
+                  error={!toggle.isPending && toggleId === u.id ? toggleErr : null}
+                  onToggle={() => toggle.mutate(u)}
+                  ariaLabel={`${u.username} 启用状态`}
+                />
               </TableCell>
               <TableCell>
                 <div className="flex flex-wrap gap-1">

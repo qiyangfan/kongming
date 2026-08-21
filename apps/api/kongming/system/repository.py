@@ -228,6 +228,16 @@ class SqlSystemRepo:
             {"ph": password_hash, "i": user_id},
         )
 
+    async def set_user_status(self, user_id: str, status: str) -> None:
+        """专用启停(012):只翻状态列,不触碰其余字段(与全量编辑区分)。"""
+        await self._s.execute(
+            text(
+                "UPDATE public.sys_user SET status=:st, updated_at=now()"
+                " WHERE id=:i AND deleted_at IS NULL"
+            ),
+            {"st": status, "i": user_id},
+        )
+
     async def soft_delete_user(self, user_id: str) -> bool:
         r = await self._s.execute(
             text(

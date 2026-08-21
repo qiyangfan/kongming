@@ -5,6 +5,8 @@
 对应用例入口,先校验后落库,单用例一事务。
 """
 
+from collections.abc import Mapping
+
 from kongming.auth import password as pwd
 from kongming.auth.ports import RefreshFamilyStore
 from kongming.system.models import (
@@ -144,12 +146,10 @@ class SystemService:
         if current is None:
             raise UserNotFound("用户不存在")
         username = str(current["username"])
-        if status == "DISABLED" and user_id == actor_id:
-            raise SelfDisable("不可禁用自己的账号")
+        if status == "DISABLED":
+            self._assert_disable_allowed(current, actor_id)
         # 超管账号保护(007 R1):不可删除,亦不可禁用/剥离 SUPER_ADMIN 绑定
         if username == self._admin_username:
-            if status == "DISABLED":
-                raise AdminAccountProtected("超管账号不可禁用")
             super_id = await self._repo.role_id_by_key("SUPER_ADMIN")
             if super_id is not None and super_id not in role_ids:
                 raise AdminAccountProtected("超管账号不可剥离 SUPER_ADMIN 角色")
@@ -173,8 +173,9 @@ class SystemService:
         await self._repo.commit()
         # 密码被管理员变更 → 吊销全部 refresh 家族(与自助改密同语义,R1 严重 1:
         # 否则疑似泄漏场景下重置密码后攻击者旧 refresh token 仍可续换 access)
-        if password:
-            await self._families.revoke_all_user_families(user_id, self._refresh_ttl_sec)
+        # 禁用同样踢下线(012):编辑路径与专用端点两路同收口,任一禁用路径生效
+        if password or status == "DISABLED":
+            await self._revoke_refresh(user_id)
 
     async def reset_password(self, *, actor_id: str, user_id: str, new_password: str) -> None:
         current = await self._repo.get_user(user_id)
@@ -188,6 +189,43 @@ class SystemService:
         )
         await self._repo.commit()
         # 重置=强制踢下线:吊销全部 refresh 家族(自助改密同语义)
+        await self._revoke_refresh(user_id)
+
+    async def enable_user(self, *, actor_id: str, user_id: str) -> None:
+        """专用启用(012):只翻状态;启用不涉及吊销。"""
+        current = await self._repo.get_user(user_id)
+        if current is None:
+            raise UserNotFound("用户不存在")
+        await self._repo.set_user_status(user_id, "ACTIVE")
+        await self._repo.log_oper(
+            actor_id, "user.enable", str(current["username"]), {"user_id": user_id}
+        )
+        await self._repo.commit()
+
+    async def disable_user(self, *, actor_id: str, user_id: str) -> None:
+        """专用禁用(012):保护与编辑路径同构;禁用即踢下线(吊销 refresh 家族)。"""
+        current = await self._repo.get_user(user_id)
+        if current is None:
+            raise UserNotFound("用户不存在")
+        self._assert_disable_allowed(current, actor_id)
+        await self._repo.set_user_status(user_id, "DISABLED")
+        await self._repo.log_oper(
+            actor_id, "user.disable", str(current["username"]), {"user_id": user_id}
+        )
+        await self._repo.commit()
+        await self._revoke_refresh(user_id)
+
+    def _assert_disable_allowed(
+        self, current: Mapping[str, object], actor_id: str
+    ) -> None:
+        """禁用保护单点(012 F10):编辑路径与专用端点同调,防两份漂移。"""
+        if str(current["id"]) == actor_id:
+            raise SelfDisable("不可禁用自己的账号")
+        if str(current["username"]) == self._admin_username:
+            raise AdminAccountProtected("超管账号不可禁用")
+
+    async def _revoke_refresh(self, user_id: str) -> None:
+        """吊销全部 refresh 家族(改密/重置/禁用三路同管线,012 收口单点)。"""
         await self._families.revoke_all_user_families(user_id, self._refresh_ttl_sec)
 
     async def delete_user(self, *, actor_id: str, user_id: str) -> None:

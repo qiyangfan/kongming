@@ -302,6 +302,33 @@ async def test_messages_legacy_result_json_recomputed(
     assert m["error"] is None  # 存量无 error → null,前端通用文案兜底
 
 
+async def test_messages_legacy_result_json_recomputed_scatter(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """011:双数值旧档回显重算得 scatter(与查询落库路径共享 suggest_chart)。"""
+    uid, token = await _user_with_chat_perm(client, session, make_user, "legacysc")
+    tid = await _default_tenant_id(session)
+    sid = await _mk_session(session, user_id=uid, tenant_id=tid)
+    legacy = (
+        '{"columns": ["price", "qty"], "rows": [[9.9, 2], [4.5, 3]],'
+        ' "insights": [], "stats": {}, "chartType": "none"}'
+    )
+    await session.execute(
+        text(
+            "INSERT INTO public.chat_message"
+            " (id, session_id, role, sql_text, result_json, summary, status)"
+            " VALUES (gen_random_uuid(), :s, 'ASSISTANT', null, :rj, '旧答', 'SUCCESS')"
+        ),
+        {"s": sid, "rj": legacy},
+    )
+    await session.commit()
+    r = await client.get(f"/chat/sessions/{sid}/messages", headers=_auth(token))
+    assert r.status_code == 200
+    chart = r.json()[0]["result"]["chart"]
+    # 重算补全:chartType=none 的旧档按当前规则重算(双数值 → scatter)
+    assert (chart["type"], chart["x"], chart["y"]) == ("scatter", "price", "qty")
+
+
 async def test_messages_agent_down_shape(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],

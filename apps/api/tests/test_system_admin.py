@@ -65,6 +65,8 @@ async def _role_id(s: AsyncSession, key: str) -> str:
         ("PUT", "/system/users/" + str(uuidlib.uuid4())),
         ("POST", f"/system/users/{uuidlib.uuid4()}/reset-password"),
         ("DELETE", "/system/users/" + str(uuidlib.uuid4())),
+        ("POST", f"/system/users/{uuidlib.uuid4()}/enable"),
+        ("POST", f"/system/users/{uuidlib.uuid4()}/disable"),
         ("GET", "/system/roles"),
         ("POST", "/system/roles"),
         ("PUT", "/system/roles/" + str(uuidlib.uuid4())),
@@ -97,8 +99,18 @@ async def test_no_perm_rejected_and_audited(
     assert int(n.scalar_one()) >= 1
 
 
-async def test_unauthenticated_401(client: AsyncClient) -> None:
-    r = await client.get("/system/users")
+@pytest.mark.parametrize(
+    "method",
+    ["GET", "POST"],
+)
+async def test_unauthenticated_401(client: AsyncClient, method: str) -> None:
+    """012(R2-F11):新启停端点与列表端点同走 UserClaims 认证闸,未认证一律 401。"""
+    ghost = str(uuidlib.uuid4())
+    paths = {
+        "GET": "/system/users",
+        "POST": f"/system/users/{ghost}/disable",
+    }
+    r = await client.request(method, paths[method])
     assert r.status_code == 401
 
 
@@ -805,6 +817,11 @@ async def test_write_operations_audited(
         headers=_auth(token),
     )
     assert r.status_code == 204
+    # 012 启停动作(R2-F4):专用端点动作进清单断言
+    r = await client.post(f"/system/users/{uid}/enable", headers=_auth(token))
+    assert r.status_code == 204
+    r = await client.post(f"/system/users/{uid}/disable", headers=_auth(token))
+    assert r.status_code == 204
     r = await client.delete(f"/system/users/{uid}", headers=_auth(token))
     assert r.status_code == 204
     # 角色与部门
@@ -844,6 +861,7 @@ async def test_write_operations_audited(
     actions = {str(r[0]) for r in rows}
     expected = {
         "user.create", "user.update", "user.reset_password", "user.delete",
+        "user.enable", "user.disable",
         "role.create", "role.bind_perms", "role.delete",
         "dept.create", "dept.delete",
     }
@@ -956,3 +974,134 @@ async def test_error_detail_semantics(
     r = await client.delete(f"/system/roles/{rid}", headers=_auth(token))
     assert r.status_code == 409
     assert r.json()["detail"]
+
+
+# ============ 012 管理台状态启停范式(专用端点+禁用吊销) ============
+
+
+async def test_disable_user_revokes_refresh(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """012:专用禁用端点 = 状态翻转 + 踢下线(旧 refresh 家族吊销)+ 审计。"""
+    await seed_all(session, get_settings())
+    uid = await make_user("victim4")
+    victim_pair = await client.post(
+        "/auth/login", json={"username": "victim4", "password": "Passw0rd!"}
+    )
+    refresh = victim_pair.json()["refresh_token"]
+    _, token = await _admin(client, session, make_user, "boss5")
+    r = await client.post(f"/system/users/{uid}/disable", headers=_auth(token))
+    assert r.status_code == 204
+    # 状态已翻转
+    status = (
+        await session.execute(
+            text("SELECT status FROM public.sys_user WHERE id=:i"), {"i": uid}
+        )
+    ).scalar_one()
+    assert status == "DISABLED"
+    # 禁用即吊销:旧 refresh 不可续换(与改密踢下线对称)
+    r = await client.post("/auth/refresh", json={"refresh_token": refresh})
+    assert r.status_code == 401
+    # 判别步(R2-F3):401 也可能仅由禁用状态导致(refresh 有 is_active 闸);
+    # 重新启用后旧 refresh 仍 401 才证明「家族吊销」独立成立,防 revoke 被静默删掉
+    r = await client.post(f"/system/users/{uid}/enable", headers=_auth(token))
+    assert r.status_code == 204
+    r = await client.post("/auth/refresh", json={"refresh_token": refresh})
+    assert r.status_code == 401
+    # 审计动作落库
+    n = await session.execute(
+        text("SELECT count(*) FROM public.sys_oper_log WHERE action='user.disable'")
+    )
+    assert n.scalar_one() == 1
+
+
+async def test_enable_user_restores_login(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """012:启用端点恢复登录,不涉及吊销;审计 user.enable。"""
+    await seed_all(session, get_settings())
+    uid = await make_user("victim5")
+    _, token = await _admin(client, session, make_user, "boss6")
+    r = await client.post(f"/system/users/{uid}/disable", headers=_auth(token))
+    assert r.status_code == 204
+    r = await client.post(
+        "/auth/login", json={"username": "victim5", "password": "Passw0rd!"}
+    )
+    assert r.status_code == 403  # 禁用后登录被拒
+    r = await client.post(f"/system/users/{uid}/enable", headers=_auth(token))
+    assert r.status_code == 204
+    r = await client.post(
+        "/auth/login", json={"username": "victim5", "password": "Passw0rd!"}
+    )
+    assert r.status_code == 200  # 启用后恢复(密码未动)
+    n = await session.execute(
+        text("SELECT count(*) FROM public.sys_oper_log WHERE action='user.enable'")
+    )
+    assert n.scalar_one() == 1
+
+
+async def test_update_user_status_disabled_also_revokes(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """012:编辑对话框路径 status→DISABLED 同样吊销(两路同收口直证)。"""
+    await seed_all(session, get_settings())
+    uid = await make_user("victim6")
+    victim_pair = await client.post(
+        "/auth/login", json={"username": "victim6", "password": "Passw0rd!"}
+    )
+    refresh = victim_pair.json()["refresh_token"]
+    _, token = await _admin(client, session, make_user, "boss7")
+    tid = await _default_tenant_id(session)
+    r = await client.put(
+        f"/system/users/{uid}",
+        json={
+            "nickname": "禁用",
+            "status": "DISABLED",
+            "tenant_id": tid,
+            "role_ids": [],
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 204
+    r = await client.post("/auth/refresh", json={"refresh_token": refresh})
+    assert r.status_code == 401
+    # 判别步(R2-F3):重新启用后旧 refresh 仍 401 才锁住「编辑路径同吊销」
+    r = await client.put(
+        f"/system/users/{uid}",
+        json={
+            "nickname": "解禁",
+            "status": "ACTIVE",
+            "tenant_id": tid,
+            "role_ids": [],
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 204
+    r = await client.post("/auth/refresh", json={"refresh_token": refresh})
+    assert r.status_code == 401
+
+
+async def test_status_toggle_protections(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """012:专用端点保护与编辑路径同构——自禁 409/超管禁 409/不存在 404。"""
+    await seed_all(session, get_settings())
+    admin_uid, token = await _admin(client, session, make_user, "boss8")
+    # 自禁
+    r = await client.post(f"/system/users/{admin_uid}/disable", headers=_auth(token))
+    assert r.status_code == 409
+    # 超管账号(settings.admin_username)禁用
+    real_admin_id = (
+        await session.execute(
+            text("SELECT id FROM public.sys_user WHERE username='admin'")
+        )
+    ).scalar_one()
+    r = await client.post(
+        f"/system/users/{real_admin_id}/disable", headers=_auth(token)
+    )
+    assert r.status_code == 409
+    # 不存在
+    r = await client.post(f"/system/users/{uuidlib.uuid4()}/disable", headers=_auth(token))
+    assert r.status_code == 404
+    r = await client.post(f"/system/users/{uuidlib.uuid4()}/enable", headers=_auth(token))
+    assert r.status_code == 404

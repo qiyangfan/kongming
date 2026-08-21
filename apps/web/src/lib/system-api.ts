@@ -30,6 +30,8 @@ export const systemApi = {
   resetPassword: (id: string, newPassword: string) =>
     api.post<void>(`/system/users/${id}/reset-password`, { new_password: newPassword }),
   deleteUser: (id: string) => api.delete<void>(`/system/users/${id}`),
+  enableUser: (id: string) => api.post<void>(`/system/users/${id}/enable`, {}),
+  disableUser: (id: string) => api.post<void>(`/system/users/${id}/disable`, {}),
 
   listRoles: () => api.get<RoleOut[]>("/system/roles"),
   createRole: (body: RoleCreateIn) => api.post<CreatedId>("/system/roles", body),

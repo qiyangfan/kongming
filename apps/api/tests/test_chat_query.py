@@ -463,3 +463,55 @@ def test_chart_suggestion_rules() -> None:
     assert suggest_chart(["n"], [[1], [2]]).type == "none"
     # bool 不算数值
     assert suggest_chart(["name", "flag"], [["a", True]]).type == "none"
+
+
+def test_chart_suggestion_scatter() -> None:
+    """011 图表增强:双数值列 → scatter(chat spec「图表可视化」推断补全)。"""
+    import datetime as dt
+    from decimal import Decimal
+
+    from kongming.chat.models import suggest_chart
+
+    # 双数值列 → scatter,x=首列,y=首个数值列
+    c = suggest_chart(["price", "rental"], [[9.9, 2], [4.5, 3]])
+    assert (c.type, c.x, c.y) == ("scatter", "price", "rental")
+    # y 跳过非数值列取首个数值列
+    c = suggest_chart(["x", "label", "y"], [[1, "t", 2], [3, "u", 4]])
+    assert (c.type, c.x, c.y) == ("scatter", "x", "y")
+    # Decimal 双数值 → scatter
+    c = suggest_chart(["a", "b"], [[Decimal("1.5"), 2]])
+    assert c.type == "scatter"
+    # 首列含 None 行的双数值 → scatter(行级容错,any 语义;x/y 取法仍须锁定)
+    c = suggest_chart(["a", "b"], [[None, 1], [2.5, 3]])
+    assert (c.type, c.x, c.y) == ("scatter", "a", "b")
+    # 首列数值但无第二数值列 → none 维持(单数值列不猜)
+    assert suggest_chart(["n", "name"], [[1, "a"], [2, "b"]]).type == "none"
+    # 首列 temporal 优先 line,不被 scatter 分支截胡
+    c = suggest_chart(["day", "n"], [[dt.date(2026, 8, 1), 1], [dt.date(2026, 8, 2), 2]])
+    assert c.type == "line"
+
+
+def test_chart_suggestion_scatter_any_position() -> None:
+    """011 吸收(可读性修缮):scatter 判定解耦列序——prompt 让 LLM 附带标识列
+    (名称/标题)后,双数值列可能不在前两列,推断按「任意位置的前两个数值列」取。"""
+    from kongming.chat.models import suggest_chart
+
+    # 标识列在前,双数值在后 → scatter,x/y=两个数值列(标识列不入图)
+    c = suggest_chart(["title", "length", "rental_rate"], [["a", 86, 0.99], ["b", 48, 4.99]])
+    assert (c.type, c.x, c.y) == ("scatter", "length", "rental_rate")
+    # 单数值列 + 前置标识列(低基数)→ 走分类路径(pie),不误判
+    c = suggest_chart(["title", "length"], [["a", 86], ["b", 48]])
+    assert (c.type, c.x, c.y) == ("pie", "title", "length")
+    # 单数值列 + 高基数标识列 → bar
+    c = suggest_chart(["title", "length"], [[f"t{i}", i] for i in range(20)])
+    assert (c.type, c.x, c.y) == ("bar", "title", "length")
+    # 数值列在前的既有形态零回归
+    c = suggest_chart(["length", "rental_rate"], [[86, 0.99], [48, 4.99]])
+    assert (c.type, c.x, c.y) == ("scatter", "length", "rental_rate")
+    # 双度量聚合形态(R2-F1):[分类, count, avg] 双数值列 → scatter 优先于 pie/bar
+    # (手动切换器可一键回 pie/bar;推断优先级已进 011 delta spec)
+    c = suggest_chart(
+        ["rating", "cnt", "avg"],
+        [["PG", 194, 2.1], ["R", 195, 2.3], ["G", 178, 2.0], ["PG-13", 223, 2.2]],
+    )
+    assert (c.type, c.x, c.y) == ("scatter", "cnt", "avg")
