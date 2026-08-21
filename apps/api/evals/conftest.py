@@ -1,0 +1,164 @@
+"""评估器 fixtures(016):yaml 加载 + 真实链路调用 + gold 直连执行。
+
+评估器以进程外工具形态运行(eval spec「评估运行形态」):
+- 生成侧:登录 → POST /chat/query(persist=false,不落业务数据),完整链路
+  (认证→租户→RAG 召回→生成→执行→洞察)与真实用户同路径;
+- gold 侧:asyncpg 直连目标库(显式 schema 限定,同控制面 DSN);
+- 比对:matchers 严格/宽松双分(匹配器单测进默认门禁,本文件只做编排)。
+
+运行(需评估环境:双进程+示例数据集+LLM 凭证):
+  cd apps/api
+  KM_EVAL_ADMIN_PASSWORD=... uv run pytest evals -m smoke      # ~5 题
+  KM_EVAL_ADMIN_PASSWORD=... uv run pytest evals -m full       # 全量单轮
+  KM_EVAL_ADMIN_PASSWORD=... uv run pytest evals -m multiturn  # 多轮上下文
+
+无凭证环境(CI/新人)显式运行时整层 skip 并给出设置提示,不猜密码。
+"""
+
+import os
+from pathlib import Path
+from typing import Any
+
+import asyncpg
+import httpx
+import pytest
+import yaml
+
+EVAL_DIR = Path(__file__).parent
+API_BASE = os.getenv("KM_EVAL_API_BASE", "http://127.0.0.1:8000")
+ADMIN_USERNAME = os.getenv("KM_EVAL_ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("KM_EVAL_ADMIN_PASSWORD", "")
+CHAT_TIMEOUT = 150.0  # agent_timeout_sec=120 覆盖全图 + 网络余量
+
+if not ADMIN_PASSWORD:
+    pytest.skip(
+        "缺 KM_EVAL_ADMIN_PASSWORD(评估环境登录凭证);设置后重跑", allow_module_level=True
+    )
+
+
+# ============ 评估集加载 ============
+
+
+def _load_yaml_cases() -> list[dict[str, Any]]:
+    """加载 evals/ 下全部 yaml;单轮(无 turns)与多轮(turns[])统一返回,
+    消费方按字段分流(016:文件即资产,不按文件名筛)。
+
+    畸形结构(顶层非 list、条目非 dict)显式 raise——静默跳过会缩 full 统计
+    分母,阈值口径悄悄失真(R1-B2)。空文件(合法空 list)放行。
+    """
+    cases: list[dict[str, Any]] = []
+    for yml in sorted(EVAL_DIR.glob("*.yaml")):
+        with open(yml, encoding="utf-8") as f:
+            loaded = yaml.safe_load(f) or []
+        if not isinstance(loaded, list):
+            raise pytest.UsageError(f"{yml.name}: 顶层必须是题目列表(误写成单条 dict?)")
+        for c in loaded:
+            if not isinstance(c, dict):
+                raise pytest.UsageError(f"{yml.name}: 条目必须是映射(误写了注释行?)")
+            cases.append(c)
+    return cases
+
+
+def _tenant_of(case: dict[str, Any]) -> str:
+    """租户:显式 tenant 字段优先,否则 id 前缀推断(sakila_001 → sakila)。"""
+    return str(case.get("tenant") or case["id"].split("_")[0])
+
+
+# ============ 登录与链路调用 ============
+
+_token_cache: str | None = None
+
+
+async def _login() -> str:
+    """账密登录拿 access JWT(自建认证,ADR-003;非上游 Keycloak 形态)。"""
+    global _token_cache
+    if _token_cache is not None:
+        return _token_cache
+    async with httpx.AsyncClient(base_url=API_BASE, timeout=30.0) as c:
+        r = await c.post(
+            "/auth/login", json={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD}
+        )
+    r.raise_for_status()
+    _token_cache = r.json()["access_token"]
+    return _token_cache
+
+
+async def call_chat(
+    question: str,
+    tenant: str,
+    *,
+    history: list[str] | None = None,
+    datasource_key: str | None = None,
+) -> httpx.Response:
+    """调用户问答端点(persist=false 临时对话:不落会话/消息/不触发标题改写)。
+    access TTL 15min,full+multiturn 可能超窗——401 由调用方触发重登重试。"""
+    global _token_cache
+    token = await _login()
+    headers = {"Authorization": f"Bearer {token}"}
+    if tenant != "default":
+        headers["X-Tenant-Id"] = tenant
+    body: dict[str, Any] = {"question": question, "persist": False}
+    if history:
+        body["history"] = history
+    if datasource_key:
+        body["datasource_key"] = datasource_key
+    async with httpx.AsyncClient(base_url=API_BASE, timeout=CHAT_TIMEOUT) as c:
+        r = await c.post("/chat/query", headers=headers, json=body)
+    if r.status_code == 401:  # token 过期:重登一次重发(上游同款教训)
+        _token_cache = None
+        token = await _login()
+        headers["Authorization"] = f"Bearer {token}"
+        async with httpx.AsyncClient(base_url=API_BASE, timeout=CHAT_TIMEOUT) as c:
+            r = await c.post("/chat/query", headers=headers, json=body)
+    return r
+
+
+# ============ gold 直连执行 ============
+
+
+def _pg_dsn() -> str:
+    """gold 直连 DSN:KM_EVAL_PG_DSN 显式优先(独立 gold 库场景),缺省自
+    控制面 DSN(settings)派生 → asyncpg 形态(剥 sqlalchemy +asyncpg 前缀)。"""
+    url = os.getenv("KM_EVAL_PG_DSN") or _control_plane_dsn()
+    if url.startswith("postgresql+asyncpg://"):
+        return "postgresql://" + url[len("postgresql+asyncpg://"):]
+    if url.startswith("postgresql://"):
+        return url
+    raise pytest.UsageError(f"不识别的 DSN 形态: {url[:40]}…")
+
+
+def _control_plane_dsn() -> str:
+    from kongming.config import get_settings
+
+    return get_settings().database_url
+
+
+async def exec_sql(sql: str) -> tuple[list[str], list[tuple[Any, ...]]]:
+    """直连执行(gold_sql;asyncpg 原生类型,匹配器 canon_cell 归一化)。"""
+    conn = await asyncpg.connect(_pg_dsn())
+    try:
+        stmt = await conn.prepare(sql)
+        cols = [a.name for a in stmt.get_attributes()]
+        rows = await stmt.fetch()
+        return cols, [tuple(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+# ============ Recall@K(间接口径:生成 SQL 表覆盖 expected_tables) ============
+
+
+def gen_tables(sql: str) -> set[str]:
+    """生成 SQL 涉及表(sqlglot 抽表,CTE 排除——复用 014 feedback 实现)。"""
+    from kongming.feedback.models import extract_table_names
+
+    tables, _parse_error = extract_table_names(sql)
+    return tables
+
+
+# ============ pytest fixtures ============
+
+
+@pytest.fixture(scope="session")
+def all_cases() -> list[dict[str, Any]]:
+    return _load_yaml_cases()

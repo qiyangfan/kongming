@@ -1,0 +1,36 @@
+# Olist 多轮上下文评估集(016)——四类上下文依赖覆盖(指代/省略/排序延续/过滤追加)
+
+- id: olist_multiturn_001
+  category: multi_turn
+  turns:
+    - question: 支付总金额最高的前5种支付方式及其总金额
+      # 值列点名(消歧防 LLM 只投影名称);tiebreaker 并列金额按支付方式名稳定
+      gold_sql: SELECT payment_type, SUM(payment_value) FROM tenant_olist.order_payments GROUP BY payment_type ORDER BY SUM(payment_value) DESC, payment_type LIMIT 5
+    - question: 这些支付方式各自的支付笔数是多少
+      gold_sql: SELECT payment_type, COUNT(*) FROM tenant_olist.order_payments WHERE payment_type IN (SELECT payment_type FROM tenant_olist.order_payments GROUP BY payment_type ORDER BY SUM(payment_value) DESC, payment_type LIMIT 5) GROUP BY payment_type ORDER BY payment_type
+
+- id: olist_multiturn_002
+  category: multi_turn
+  turns:
+    - question: 查询已发货的订单
+      gold_sql: SELECT order_id FROM tenant_olist.orders WHERE order_status = 'shipped' ORDER BY order_id LIMIT 100
+    - question: 这些订单里评论评分是5分的有多少个
+      gold_sql: SELECT COUNT(*) FROM tenant_olist.order_reviews r WHERE r.review_score = 5 AND r.order_id IN (SELECT order_id FROM tenant_olist.orders WHERE order_status = 'shipped')
+
+- id: olist_multiturn_003
+  category: multi_turn
+  turns:
+    - question: 每个州的客户数量
+      gold_sql: SELECT customer_state, COUNT(*) FROM tenant_olist.customers GROUP BY customer_state
+    - question: 按客户数从多到少排序,只看前5名
+      gold_sql: SELECT customer_state, COUNT(*) FROM tenant_olist.customers GROUP BY customer_state ORDER BY COUNT(*) DESC, customer_state LIMIT 5
+
+- id: olist_multiturn_004
+  category: multi_turn
+  turns:
+    - question: 每种商品类目有多少个商品
+      # 原「每城市订单数」turn1 结果 4119 行超上限,重设计为类目维度(73 行);
+      # NULL 非类目,t2 翻译表 INNER JOIN 天然排除——t1 显式对齐同口径
+      gold_sql: SELECT p.product_category_name, COUNT(*) FROM tenant_olist.products p WHERE p.product_category_name IS NOT NULL GROUP BY p.product_category_name
+    - question: 这些类目中商品数最多的前5个,对应的英文翻译名是什么
+      gold_sql: SELECT t.product_category_name_english, COUNT(*) FROM tenant_olist.products p JOIN tenant_olist.category_translation t ON p.product_category_name = t.product_category_name GROUP BY t.product_category_name_english ORDER BY COUNT(*) DESC, t.product_category_name_english LIMIT 5

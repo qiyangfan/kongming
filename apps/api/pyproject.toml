@@ -35,6 +35,7 @@ dev = [
     "types-Authlib>=1.4",
     "import-linter>=2.2",
     "types-openpyxl>=3.1.5.20260807",
+    "pyyaml>=6.0",  # 评估器 gold 数据集解析(016;evals/ 工具面,不进产品依赖)
 ]
 
 [tool.ruff]
@@ -47,6 +48,7 @@ select = ["E", "F", "I", "UP", "B", "S", "ASYNC"]
 [tool.ruff.lint.per-file-ignores]
 "alembic/versions/*" = ["E501"]  # DDL 行折叠伤可读性,版本文件放开行宽
 "tests/*" = ["S101", "S105", "S106", "S107"]  # pytest 惯例;测试密码为道具非密钥
+"evals/*" = ["S101", "S105", "S106", "S107"]  # 评估器同 pytest 惯例(016)
 
 [tool.mypy]
 strict = true
@@ -57,6 +59,16 @@ asyncio_mode = "auto"
 # 会话级事件循环:engine/redis 客户端 lru_cache 单例与 asyncpg 连接绑定同一 loop
 asyncio_default_test_loop_scope = "session"
 asyncio_default_fixture_loop_scope = "session"
+# 016 评估器与常规门禁隔离:默认收集只进 tests/(评估需评估环境,显式
+# `uv run pytest evals -m smoke|full|multiturn` 运行,命令行参数覆盖本项)
+testpaths = ["tests"]
+# tests/ 下的匹配器单测 import evals.matchers(匹配器逻辑进默认门禁守护)
+pythonpath = ["."]
+markers = [
+    "smoke: 评估集 smoke 子集(约5题,评估环境显式触发)",
+    "full: 评估集全量单轮(手动/预发,含动态数据源组)",
+    "multiturn: 多轮上下文评估(指代/省略/排序延续/过滤追加)",
+]
 
 # authlib 官方存根不完整:AsyncOAuth2Client 的 httpx 继承方法(get/aclose)
 # 运行时存在、存根未声明,provider 模块关闭 attr-defined(其余 strict 全开)

@@ -1,12 +1,23 @@
 # HANDOFF — Kongming 交接文档
 
-> 最后更新:2026-08-21(**015 审计可视化与留存已实施归档并入库**:
+> 最后更新:2026-08-21(**016 eval+ai-eval 域已实施归档并入库**:
+> archive/2026-08-21-016-eval-execution-match,delta 已 sync eval/ai-eval/rag
+> 三主 spec(20 spec 校验全过);apps/api/evals/ 评估器(进程外工具形态:
+> 登录→/chat/query persist=false 与真实用户同路径,gold 直连 asyncpg,
+> 严格/宽松双分匹配器双路径+异源类型归一化)+gold 数据集 63 条
+> (sakila 22/olist 18/多轮 10 case/动态 4)+首基线回填(宽松 84%/严格 59%/
+> 多轮 70%/动态 4-4/表命中 80%)+匹配器单测 24 进默认门禁;搭车 query_history
+> 治理(0007 去重+唯一索引+UPSERT 幂等+每租户源上限 500,009③+014 O4 清偿,
+> 实库幂等直证);testpaths 门禁隔离+markers 三枚;R1 独立评审 0 严重/7 建议
+> 全修;**/goal 审查循环 R1+R2 六真缺陷再清零**(md5 表达式索引消超长问句
+> 炸/多轮裸 LIMIT×3/expect_reject 假绿/虚构 DSN/保序 flaky/Failed 异常网);
+> api 470+agent 87+web 全绿、契约零漂移;**001–016 齐,活动变更为零;
+> 下一棒=query-streaming 流式输出**)。
+> **015 审计可视化与留存已实施归档并入库**:
 > archive/2026-08-21-015-audit-visibility,delta 已 sync audit/chat 两主 spec;
 > 5 端点+1 权限点+ip 链路+导出审计 010⑦清零+归档可重导入+/admin/audit
 > 第七子页;R1 独立评审 5 严重+7 建议全修(归档 cutoff 覆盖校验/进程锁
-> 两条数据丢失路径堵死);api 440+agent 87+web 全绿、契约+5 端点;
-> **同日已归档 013 挂账清理+014 反馈闭环;001–015 齐,活动变更为零;
-> 下一棒=016 eval+ai-eval 域**,其后 query-streaming)。
+> 两条数据丢失路径堵死);api 440+agent 87+web 全绿、契约+5 端点。
 > **014 反馈闭环已实施归档并入库**:
 > archive/2026-08-21-014-feedback-loop,delta 已 sync 五主 spec
 > ——feedback/feedback-refine/feedback-analytics/chat/knowledge;
@@ -21,7 +32,29 @@
 
 ## 新会话开工指引(最先看这里)
 
-1. **015 审计可视化与留存:已实施归档并入库**(archive/2026-08-21-015-audit-visibility)——
+1. **016 eval+ai-eval 域:已实施归档并入库**(archive/2026-08-21-016-eval-execution-match)——
+   评估器 apps/api/evals/(与 tests/ 平级,testpaths=["tests"] 门禁隔离,
+   `pytest -q`/make check/CI 零收集,显式 `KM_EVAL_ADMIN_PASSWORD=… uv run
+   pytest evals -m smoke|full|multiturn` 运行,无凭证整层 skip);三层
+   marker+yaml 即资产(id/question/gold_sql/expected_tables/category/可选
+   tenant/datasource_key/expect_reject/smoke);gold 直连 asyncpg(控制面
+   DSN 派生),生成侧取 /chat/query 响应(sql+columns+rows,persist=false
+   不落库不回写——writeback 挂 persist 条件,dev 库零污染);匹配器
+   evals/matchers.py 纯函数(严格 multiset/宽松双路径:列等价+投影行近似/
+   数值子集;**宽松不惩罚序错**=路径 2 天然无序,既定语义)——单测
+   tests/test_eval_matchers.py 24 条进默认门禁;Recall=间接口径(生成 SQL
+   表覆盖 expected_tables,复用 014 sqlglot 抽表);评估集 63 条 gold 全部
+   连跑两次一致+≤1000 行;README 规范九条(第 9 条=明细题问句显式指定
+   排序键,prompt 规则 6 已立约 gen 必排序,gold 裸 LIMIT 集合错位必挂——
+   016 冒烟实证);**首基线:宽松 37/44(84%)/严格 26/44(59%)/多轮 7/10/
+   动态 4-4/表命中 35/44**,失败归因五类(gen 统计题误加 LIMIT/::numeric
+   舍入/投影丢列/指代消解错位/漏 DISTINCT)——prompt 护栏与 query-streaming
+   的量化靶点。搭车:0007 迁移(query_history 存量去重保 created_at 最新+
+   唯一索引 tenant+ds+question)+insert_history 改 UPSERT(ON CONFLICT 覆盖
+   保留最新成功 SQL;embedding 失败 COALESCE 保旧向量;同事务上限淘汰
+   QUERY_HISTORY_CAP=500)——009③ 与 014 O4 清偿,curl 同题两问实库直证
+   行数=1。**下一棒=query-streaming 流式输出**。
+   **015 审计可视化与留存:已实施归档并入库**(archive/2026-08-21-015-audit-visibility)——
    GET /audit/sql/page + /audit/sql/{id}(详情 403 同形)+/audit/oper/page
    +POST /audit/archive/run|restore(权限点 system:audit:view 排序 9 仅
    SUPER_ADMIN);行级可见性非 ALL 强制本人(014 同款);操作日志 ip 链路=
@@ -106,11 +139,68 @@
    (DOM 快照可读)——GUI 测试一律用 Playwright MCP 工具组
    (`mcp__plugin_playwright_playwright__browser_*`,独立管道,002 已验证可用)。
 
-## 当前状态(013/014/015 已入库;001–015 全部归档)
+## 当前状态(016 已入库;001–016 全部归档)
 
 - git:main 分支(以 git log 为准);无远程、未 push。
   分支策略:主干开发不拉 dev,协作按变更开短命 feature。
-- openspec:**001–015 全部归档;活动变更为零**。
+- openspec:**001–016 全部归档;活动变更为零**。
+- **016 架构总览**:零端点/零契约漂移/零 agent 改动/零种子;新依赖仅 dev
+  组 pyyaml(评估器 yaml 解析,不进产品)。api——evals/ 新目录
+  (conftest/matchers/test_eval/五份 yaml/README,与 tests/ 平级不继承其
+  建库 conftest);pyproject: testpaths=["tests"](默认收集隔离)+
+  pythonpath=["."](tests 单测 import evals.matchers)+markers 三枚;
+  评估器凭证 KM_EVAL_ADMIN_PASSWORD(缺失整层 skip)/KM_EVAL_API_BASE/
+  KM_EVAL_ADMIN_USERNAME/KM_EVAL_PG_DSN(缺省控制面 DSN 派生);401 重登
+  重试(access TTL 15min 全量超窗);畸形 yaml 显式 raise(R1-B2);
+  治理=alembic 0007(去重+uq_query_history_tdq)+repository UPSERT
+  (COALESCE 保旧向量)+cap 淘汰同事务+service 注释同步;import-linter
+  零变化(evals 不在 kongming 包内,不受契约约束;evals→kongming 方向
+  import 合法)。
+- **016 R1 独立评审(0 严重;7 建议全修)**:B1 主 spec「评估匹配规则」
+  未覆盖双路径实现→delta 补 MODIFIED(数值子集+天然无序+纯文本回退入约)
+  已 sync;B2 畸形 yaml 静默缩分母→显式 raise;B3 rag service docstring/
+  日志与 COALESCE 语义相反→措辞同步;B4 canon_cell 未归一 uuid.UUID
+  (gold 侧 asyncpg 对象 vs gen 侧 JSON 字符串静默假阴性)→加分支+单测;
+  B5 tasks 6.3 状态矛盾→勾选+注记;B6 proposal Impact 失实(service 零
+  改动写成「repository+service 改造」)→对齐+补列 test_rag_writeback;
+  B7 死代码 fixture smoke_cases→删。观察挂账:0007 去重无直证用例(测试
+  基建全新建库无存量,review 论证+PG 语义背书);exec_sql 每题建连(66
+  次本地握手可接受,statement_timeout 未设);matchers 模块双载形态
+  (bare 名与 evals. 前缀各载一次,纯函数无行为差异);匹配器未测分支
+  (严格真子集放行/bool 混排/date-time 归一);full 统计 expect_reject
+  含 ±1 题偏置(strict 恒 False/recall 恒 True,README 已脚注)。
+- **016 /goal 审查循环(R1 换切口自查+R2 独立深挖,清零)**:R1 自查核验
+  3 真缺陷全修——①0007 唯一索引对超长中文问句炸(question 传输层 2000 字
+  可 6000 字节超 btree 行上限 ~2704,裸列索引必炸;修=**md5(question)
+  表达式索引**,去重语义不变;repository ON CONFLICT 同步 md5 形态——PG
+  index inference 要求表达式逐字匹配,R2 三路径实证裸列/表达式失配 42P10;
+  测试补 2000 字问句回写两次=1 行直证);②多轮 yaml 3 处裸 LIMIT 遗漏
+  (单轮排序对齐修订漏改多轮,olist_mt_002 t1 实锤挂因;补 ORDER BY 后
+  3/3 复验过,多轮口径 7/10→8/10);③expect_reject 分支传输层故障被当
+  「拒绝」(服务未起时 deny 题假绿;httpx 对 4xx/5xx 不抛异常,真拒绝走
+  状态码判定,except 只捕服务不可达——改为显式 fail)。R2 独立深挖(端到端
+  数据流/并发时序/PG 语义边界/评估集语义/配置交互五切口)再修 3:D1
+  KM_EVAL_PG_DSN 文档虚构接口(声明了但 conftest 不读,设置了静默无效
+  →难溯源的 gold 错乱;修=实现,显式优先);D2 olist_mt_001 t2 子查询
+  ORDER BY 触发保序判定而外层 GROUP BY 无序(HashAggregate 实现巧合掩蔽
+  的结构性 flaky;修=外层补 ORDER BY;gold 验证脚本改**保序敏感**口径
+  重验 63 条全确定性);D3 test_full_all 异常网捕不到 pytest.fail(Failed
+  继承 BaseException 非 Exception,单题 gold 资产错误会中断全量统计;
+  修=except 网补 pytest.Failed)。顺手:category 标签按「跳数=表数-1」
+  口径修正 4 处(sakila_014/016、olist_015/016)。R2 边界确认 14 项
+  (B1-B14:并发 UPSERT 终态/NOT IN NULL 语义/pytest 行为矩阵含
+  `pytest tests evals` 混跑形态等)与 0007 裸列→md5 未换 revision 号的
+  环境提示(未提交期修正,无已发布环境受影响)。终态 api 470+evals
+  复验(multiturn 修复 case 4/4 过)全绿。
+- **016 冒烟(2026-08-21,真 LLM)**:评估集两轮口径修订(首轮宽松 70%:
+  明细题 gold 裸 LIMIT vs gen 必排序集合错位→问句显式指定排序键对齐
+  prompt 规则 6;top-N 问句点名值列;DISTINCT 排序键进投影;NULL 类目
+  语义界定)后定稿基线:smoke 5/5、full 宽松 37/44(84%)/严格 26/44(59%)/
+  表命中 35/44(80%)/动态 4-4、multiturn 7/10;失败归因五类全为真实链路
+  质量信号(未迁就);63 条 gold 连跑两次一致+≤1000 行(3 处超限题重设计);
+  治理实库直证:curl persist=true 同题两问→query_history 行数=1(UPSERT
+  幂等);评估器抓回并修 3 实现坑(settings→get_settings 形态/asyncpg
+  cursor 事务外炸→prepare+fetch/评估 persist=false 不回写的语义核验)。
 - **015 架构总览**:零表结构/零 agent 改动/零新依赖。api——audit 域包扩全
   (ports/repository/service/router/archive/context;writer/models 不动);
   import-linter 调整:datascope 单独保留禁 fastapi 契约,audit 新增
@@ -814,10 +904,12 @@
 - 前端:登录页五家联邦按钮数据驱动;simple-icons 覆盖 GitHub/Google/微信系,
   **钉钉/飞书 simple-icons@16 未收录 → 按例外条款内联官方 mark**;favicon.svg 已补
   (朱砂底白色羽扇)。003 冒烟:五家图标实测渲染正确。
-- 质量:api ruff/mypy strict/lint-imports/pytest **389**(认证+datascope+执行路由+
+- 质量:api ruff/mypy strict/lint-imports/pytest **470**(认证+datascope+执行路由+
   防火墙+chat+meta+会话端点+system 管理面+datasource 68+rag 58+chat 体验 44+
-  **图表 scatter 3+012 启停 7**,真实 PG+Redis)+ agent 同门禁 **85** + web tsc/eslint 全绿;
-  CI api job 已带 pg/redis services(未在真实 runner 验证——push 后首验)。
+  图表 scatter 3+012 启停 7+013/014/015 增量+****016 匹配器 24+writeback 治理 5**(/goal 后 470),
+  真实 PG+Redis)+ agent 同门禁 **87** + web tsc/eslint 全绿;
+  CI api job 已带 pg/redis services(未在真实 runner 验证——push 后首验);
+  **评估器(evals/)不进默认收集**,评估环境显式运行(016)。
 - 契约:openapi.json 含 /auth/* + /internal/sql/execute + /chat/query +
   /internal/meta/schema + /chat/sessions(列表/消息/删除)+
   /system/* 16 端点(007)+ /system/datasource/* 8 端点(008)+
@@ -844,21 +936,33 @@
 | 会话体验 | 标题两阶段:初始=首问前 30 字符,首个 SUCCESS 轮后 LLM 改写(BackgroundTasks+独立会话;守卫读首问截断值短路+条件写 WHERE title=expected,人工重命名永不覆盖;改写不刷 updated_at);EXPLAIN=message_id 引用(不收裸 SQL,服务端复检后拼 EXPLAIN (FORMAT JSON),永不 ANALYZE,数据源取会话快照);导出=传 columns+rows 不重跑 SQL,CSV BOM+CRLF+公式注入中和,xlsx 自算列宽,rows 传输层上限 10000;搜索=标题 ILIKE OR user 问句 EXISTS(共享 like_pattern 转义);重命名=原子归属 UPDATE;全端点复用 chat:execute 无新权限点 | chat spec(010 delta) |
 | 图表增强 | 推断补双数值列→scatter(x=首列,y=首个数值列;temporal/pie/bar 既有规则不变);四类型手动切换=卡片本地状态、映射恒定、刷新/同卡片新结果回落建议类型;scatter 渲染按 x 列全数值探测分流(排除 null 防 Number(null)===0 误判),非数值退化类目点图不丢点;PNG=getDataURL pixelRatio 2+背景取 --card token,文件名「图表-<时间戳>.png」 | chat「图表可视化」+ web-nav「结果图表渲染」spec(011 delta) |
 | 反馈闭环 | 提交=幂等三态(null 保持/空串清空/显式覆盖)+行锁串行+置 PENDING+重复提交清空处置三列;归属 403 同形(与 chat 404 惯例分立);仅 assistant;纠错先过防火墙(与 internal 同一规则集)整体拒,通过后复用 009 writeback 沉淀(会话快照数据源;与现值不同才写;清空不删已沉淀行;失败不阻断);处置限定已反馈 assistant,枚举四态,note 三态;涉及表=sqlglot 抽表(CTE 排除,末段小写),匹配不纳 schema 名;统计=Asia/Shanghai 固定分桶逐天补零;行级可见性=非 ALL 强制本人覆盖传值(ALL 判定=角色集 bool_or);messageId 打通=实时响应纯增 message_id/datasource_key+历史回显 rating/corrected_sql/feedback_comment;REJECTED/FAILED 卡片不挂赞踩入口(API 不拦);编辑知识跳 /admin/rag?table=<名> 定位;纠错永不回写 table_descriptions | feedback + feedback-refine + feedback-analytics + chat + knowledge spec(014 delta) |
+| 评估体系 | Execution Match=gold 直连执行 vs 链路响应结果集,严格 multiset/宽松双路径(列等价+投影行近似;数值子集天然无序;纯文本回退严格等值)并行;宽松=黄金指标(基线对照/回归红线,劣化 ≥5pp 溯源),**宽松不惩罚序错**=既定语义;评估器=apps/api/evals/ 进程外工具(登录→/chat/query persist=false 与真实用户同路径,gold 直连 asyncpg),testpaths 门禁隔离+三级 marker(smoke~5/full/multiturn),无凭证整层 skip;评估集按租户分文件(sakila22+olist18+多轮 10 case+动态 4),gold 编写规范九条(tiebreaker/业务可读列/结果集 ≤1000/明细 LIMIT 100+问句显式排序键/外层 ORDER BY/避时间戳列/显式 schema/连带同步);Recall=间接口径(生成 SQL 表覆盖 expected_tables,sqlglot CTE 排除);匹配器纯函数单测进默认门禁;CI 不虚构评估运行(smoke=评估环境显式触发,基线记录 README 表);query_history 回写幂等治理(同题覆盖保最新+保旧向量+每租户源上限 500) | eval + ai-eval + rag spec(016 delta) |
 
 ## 下一步(路线图梯队,按序)
 
-1. **016 eval+ai-eval 域**(Execution Match 严格/宽松双分引擎+gold
-   数据集 sakila/olist 各 15-20 题/租户[上游 nl2sql-agent/tests/eval/
-   *.yaml 与 test_eval.py 参考逻辑重写,tiebreaker/业务可读列规范随集
-   沉淀]+基线管理四组分数+Recall@K+CI smoke 守护+多轮 turns 用例;
-   009③ query_history 治理+014 O4 重复沉淀治理搭车);(SQL 审计/操作日志查询分页+
-   行级可见性+ip 链路接通+chat.export 导出审计 010⑦清零+180 天
-   归档 gzip JSONL+SHA-256 可重导入+lifespan 每日调度+/admin/audit
-   第七子页;零迁移);
-2. query-streaming 流式输出;
+1. **query-streaming 流式输出**(评估基线已立:gen 统计题误加 LIMIT/
+   ::numeric 舍入/投影丢列/指代消解错位五类失败归因是 prompt 护栏与
+   流式重构的量化靶点,016 基线表为回归红线);
+2. 其后按 roadmap:prompt 护栏域(摘要幻觉/规避写操作两类既有观察,
+   016 评估集可量化验证);
 3. 剩余挂账见「已知 TODO」各段,随对应域变更搭车评估。
 
 ## 已知 TODO(代码内标注,非缺陷)
+
+**016 挂账(R1 观察+冒烟注记)**:①0007 存量去重无直证用例(测试基建
+全新建库无存量可覆盖;SQL 经 R1 逐条论证+PG row-wise 比较 NOT NULL 列无
+陷阱;补直证需中段迁移测试形态,成本大于收益);②exec_sql 每题建连
+(全量 ~66 次本地握手可接受,finally close 零泄漏;statement_timeout 未设
+——gold 慢查询挂死靠评估集自控);③matchers 模块双载形态(bare 名与
+evals. 前缀各载一次,纯函数无行为差异,统一前缀更稳);④匹配器未测分支
+(数值子集严格真子集放行/bool 与数值混排排序键/date-time 归一化——低风险
+补充项);⑤full 统计 expect_reject 含 ±1 题偏置(strict 恒 False/recall
+恒 True 占位语义,README 已脚注);⑥评估器 401 重登在并发参数化下共享
+_token_cache(评估串行跑无竞态;并行跑评估需改造);⑦README 示例含 dev
+库实况口令(与 HANDOFF 既有记载同面,非新泄漏);⑧评估集首轮 70%→修订
+84% 的口径修订记录在 README 基线说明(评估集演进史即资产);⑨上游
+compare_matchers/analyze_failures 辅助脚本未平移(当前失败量 13,人工溯源
+够用,量级上来再平移)。
 
 **015 挂账(R1 观察)**:①system:audit:view 同一权限点管「查询」与
 「删数据/回灌」(归档 run/restore),未来细分 archive 权限点;②调度

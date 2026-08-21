@@ -21,6 +21,9 @@ AUTOMATED_SOURCE_TYPES = frozenset({"INTROSPECTION", "AI_GENERATED"})
 RECALL_TOP_K = 5
 RRF_K = 60.0
 HISTORY_SQL_LIMIT = 3  # 历史成功 SQL 拼接条数上限(防 token 膨胀)
+# query_history 每 (tenant, datasource_key) 维度总量上限(016 治理):
+# 防膨胀闸门而非常态工作集(上游无上限实测沉淀 <百行/租户源),超出淘汰最旧
+QUERY_HISTORY_CAP = 500
 
 
 @dataclass(frozen=True)

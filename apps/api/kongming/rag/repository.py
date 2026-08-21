@@ -17,7 +17,13 @@ from kongming.datasource.repository import SqlDatasourceRepo
 from kongming.datasource.resolver import DatasourceInvalid, resolve_for_read
 from kongming.db import uuid7
 from kongming.internal.executor import get_or_create_engine
-from kongming.rag.models import RECALL_TOP_K, IntrospectedTable, KnowledgeEntry, RecallHit
+from kongming.rag.models import (
+    QUERY_HISTORY_CAP,
+    RECALL_TOP_K,
+    IntrospectedTable,
+    KnowledgeEntry,
+    RecallHit,
+)
 from kongming.sqlfw.firewall import RESERVED_TABLE_NAMES, RESERVED_TABLE_PREFIXES
 
 
@@ -324,6 +330,10 @@ class RagRepository:
         sql_text: str,
         embedding: list[float] | None,
     ) -> None:
+        """幂等回写(016 治理):同 (tenant, ds, question) 覆盖保留最新成功 SQL
+        (0007 唯一索引支撑);embedding 失败传 None 时保留旧向量(旧向量语义
+        仍有效,清空会使该行退出向量召回);同事务上限淘汰该维度最旧行。
+        """
         vec = _vec_literal(embedding) if embedding else None
         await self._s.execute(
             text(
@@ -331,6 +341,10 @@ class RagRepository:
                 " (id, tenant_id, datasource_key, question, sql_text, status,"
                 "  embedding, created_at)"
                 " VALUES (:id, :t, :d, :q, :sql, 'SUCCESS', CAST(:vec AS vector), now())"
+                " ON CONFLICT (tenant_id, datasource_key, md5(question)) DO UPDATE SET"
+                "  sql_text = EXCLUDED.sql_text,"
+                "  embedding = COALESCE(EXCLUDED.embedding, query_history.embedding),"
+                "  status = 'SUCCESS', created_at = now()"
             ),
             {
                 "id": str(uuid7()),
@@ -340,6 +354,19 @@ class RagRepository:
                 "sql": sql_text,
                 "vec": vec,
             },
+        )
+        # 上限淘汰:保留该维度 created_at 最新的 cap 行(id 作并列 tiebreak)
+        cap = QUERY_HISTORY_CAP
+        await self._s.execute(
+            text(
+                "DELETE FROM rag.query_history"
+                " WHERE tenant_id = :t AND datasource_key = :d"
+                " AND id NOT IN ("
+                "   SELECT id FROM rag.query_history"
+                "   WHERE tenant_id = :t AND datasource_key = :d"
+                "   ORDER BY created_at DESC, id DESC LIMIT :cap)"
+            ),
+            {"t": tenant_id, "d": datasource_key, "cap": cap},
         )
 
     # ============ 租户解析(与 chat/options 白名单复校同构) ============

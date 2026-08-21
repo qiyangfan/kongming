@@ -1,0 +1,54 @@
+# Sakila 多轮上下文评估集(016)——turns[] 顺序执行,前序问句作 history
+# 四类上下文依赖: 指代(这些)/省略(换范围)/排序延续(按…排序)/过滤追加(其中…)
+# gold_sql 每轮独立可执行;外层 ORDER BY 才算保序(规范第 5 条)
+
+- id: sakila_multiturn_001
+  category: multi_turn
+  turns:
+    - question: 查询租金最高的5部影片
+      # tiebreaker:实测 top5 含 4.99×2 并列,序不确定
+      gold_sql: SELECT title FROM tenant_sakila.film ORDER BY rental_rate DESC, film_id LIMIT 5
+    - question: 这些影片各自的分类是什么
+      # 外层补 ORDER BY(仅子查询有 ORDER BY 时外层行序 PG 不保证)
+      gold_sql: SELECT c.name FROM tenant_sakila.category c JOIN tenant_sakila.film_category fc ON c.category_id = fc.category_id JOIN tenant_sakila.film f ON fc.film_id = f.film_id WHERE f.film_id IN (SELECT film_id FROM tenant_sakila.film ORDER BY rental_rate DESC, film_id LIMIT 5) ORDER BY c.name
+
+- id: sakila_multiturn_002
+  category: multi_turn
+  turns:
+    - question: 查询所有评分NC-17的影片
+      gold_sql: SELECT title FROM tenant_sakila.film WHERE rating = 'NC-17' ORDER BY film_id LIMIT 100
+    - question: 其中租金大于3美元的有哪些
+      gold_sql: SELECT title FROM tenant_sakila.film WHERE rating = 'NC-17' AND rental_rate > 3 ORDER BY film_id LIMIT 100
+
+- id: sakila_multiturn_003
+  category: multi_turn
+  turns:
+    - question: 查询每位客户的支付总金额
+      gold_sql: SELECT c.first_name, c.last_name, SUM(p.amount) FROM tenant_sakila.payment p JOIN tenant_sakila.customer c ON p.customer_id = c.customer_id GROUP BY c.customer_id, c.first_name, c.last_name
+    - question: 按金额从高到低排序,只看前10名
+      # tiebreaker:实测第 10 名卡在 15.97×3 并列带
+      gold_sql: SELECT c.first_name, c.last_name, SUM(p.amount) FROM tenant_sakila.payment p JOIN tenant_sakila.customer c ON p.customer_id = c.customer_id GROUP BY c.customer_id, c.first_name, c.last_name ORDER BY SUM(p.amount) DESC, c.customer_id LIMIT 10
+
+- id: sakila_multiturn_004
+  category: multi_turn
+  turns:
+    - question: 查询每个影片分类的影片数量
+      gold_sql: SELECT c.name, COUNT(*) FROM tenant_sakila.category c JOIN tenant_sakila.film_category fc ON c.category_id = fc.category_id GROUP BY c.name
+    - question: 哪个分类的影片最多,数量是多少
+      gold_sql: SELECT c.name, COUNT(*) AS cnt FROM tenant_sakila.category c JOIN tenant_sakila.film_category fc ON c.category_id = fc.category_id GROUP BY c.name ORDER BY cnt DESC, c.name LIMIT 1
+
+- id: sakila_multiturn_005
+  category: multi_turn
+  turns:
+    - question: 查询租赁次数最多的前5位客户
+      gold_sql: SELECT c.first_name, c.last_name, COUNT(*) FROM tenant_sakila.rental r JOIN tenant_sakila.customer c ON r.customer_id = c.customer_id GROUP BY c.customer_id, c.first_name, c.last_name ORDER BY COUNT(*) DESC, c.customer_id LIMIT 5
+    - question: 他们各自的邮箱是什么
+      gold_sql: SELECT c.email FROM tenant_sakila.customer c WHERE c.customer_id IN (SELECT customer_id FROM tenant_sakila.rental GROUP BY customer_id ORDER BY COUNT(*) DESC, customer_id LIMIT 5) ORDER BY c.email
+
+- id: sakila_multiturn_006
+  category: multi_turn
+  turns:
+    - question: 查询所有影片的标题
+      gold_sql: SELECT title FROM tenant_sakila.film ORDER BY film_id LIMIT 100
+    - question: 只看时长超过120分钟的
+      gold_sql: SELECT title FROM tenant_sakila.film WHERE length > 120 ORDER BY film_id LIMIT 100

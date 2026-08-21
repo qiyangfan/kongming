@@ -407,8 +407,10 @@ class RagService:
     ) -> None:
         """成功查询回写 query_history;失败仅告警(调用方独立 try,不阻断主流程)。
 
-        embedding 复用 emb 缓存(相同问句零成本);embedding 失败仍回写(无向量行
-        不参与向量召回,不构成错误 SQL 污染面)。
+        016 治理:同 (tenant, ds, question) 幂等覆盖保留最新成功 SQL(不增行)。
+        embedding 复用 emb 缓存(相同问句零成本);embedding 失败仍回写——
+        首次落库为无向量行(不参与向量召回);同题重写时保留该行旧向量
+        (问句未变旧向量语义仍有效,repository COALESCE)。
         """
         if not sql_text.strip():
             return
@@ -416,7 +418,7 @@ class RagService:
         try:
             vec = (await self._embedder.embed([question]))[0]
         except EmbeddingError:
-            log.warning("回写 embedding 失败,query_history 以无向量形态落库")
+            log.warning("回写 embedding 失败(新行无向量;同题重写保留旧向量)")
         try:
             await self._repo.insert_history(
                 tenant_id=tenant_id,

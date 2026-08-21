@@ -1,0 +1,39 @@
+# 动态数据源评估用例(016):显式 datasource_key 走 008 动态路径(区别于空
+# key=default 的租户 schema 路由);另含 1 题跨租户 key 预期拒绝(fail-closed)。
+# dev/预发形态:sakila_dyn 归属 default 租户(default_schema=tenant_sakila,
+# 同实例异 schema)——动态题 tenant=default。
+
+- id: sakila_ds_001
+  question: 有多少部影片
+  tenant: default
+  datasource_key: sakila_dyn
+  gold_sql: SELECT COUNT(*) FROM tenant_sakila.film
+  expected_tables: [film]
+  category: datasource_dynamic
+  smoke: true  # 动态路径进 smoke(约5题口径:fail-closed 与动态链路同受第一道闸守护)
+
+- id: sakila_ds_002
+  question: 每个影片分类有多少部影片
+  tenant: default
+  datasource_key: sakila_dyn
+  gold_sql: SELECT c.name, COUNT(*) FROM tenant_sakila.category c JOIN tenant_sakila.film_category fc ON c.category_id = fc.category_id GROUP BY c.name
+  expected_tables: [category, film_category]
+  category: datasource_dynamic
+
+- id: sakila_ds_003
+  question: 每位客户支付的总金额
+  tenant: default
+  datasource_key: sakila_dyn
+  gold_sql: SELECT c.first_name, c.last_name, SUM(p.amount) FROM tenant_sakila.payment p JOIN tenant_sakila.customer c ON p.customer_id = c.customer_id GROUP BY c.customer_id, c.first_name, c.last_name
+  expected_tables: [payment, customer]
+  category: datasource_dynamic
+
+# 跨租户数据源拒绝:sakila 租户上下文使用 sakila_dyn(属 default 租户),
+# 008 绑定校验 fail-closed 应拒绝(同形 400 DATASOURCE_INVALID,防 key 探测),
+# 无 gold_sql。
+- id: sakila_ds_deny_001
+  question: 有多少部影片
+  tenant: sakila
+  datasource_key: sakila_dyn
+  expect_reject: true
+  category: datasource_deny
