@@ -433,6 +433,103 @@
         }
       }
     },
+    "/chat/query/stream": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Chat Query Stream",
+        "operationId": "chat_query_stream_chat_query_stream_post",
+        "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatQueryIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "SSE 事件流:stage/sql/summary 过程事件逐帧下发;result=data 与同步 /chat/query 响应逐字段一致;error=传输层/意外失败终态;注释行(: ping)为心跳",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/StreamStageOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamSqlOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamSummaryOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamErrorOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ChatQueryOut"
+                    }
+                  ]
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StreamStageOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamSqlOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamSummaryOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamErrorOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ChatQueryOut"
+                    }
+                  ],
+                  "title": "Response 200 Chat Query Stream Chat Query Stream Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/sessions": {
       "get": {
         "tags": [
@@ -5560,6 +5657,87 @@
           "authorize_url"
         ],
         "title": "StartOut"
+      },
+      "StreamErrorOut": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "title": "Error"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "StreamErrorOut",
+        "description": "error 终态事件 data:仅传输层/意外失败(业务三态走 result 事件)。"
+      },
+      "StreamSqlOut": {
+        "properties": {
+          "sql": {
+            "type": "string",
+            "title": "Sql"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sql"
+        ],
+        "title": "StreamSqlOut",
+        "description": "sql 事件 data:validate 通过后提前下发,内容与终态落库 SQL 一致。"
+      },
+      "StreamStageOut": {
+        "properties": {
+          "node": {
+            "type": "string",
+            "title": "Node"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "done"
+            ],
+            "title": "Status"
+          },
+          "retry_count": {
+            "type": "integer",
+            "title": "Retry Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "node",
+          "status"
+        ],
+        "title": "StreamStageOut",
+        "description": "stage 事件 data:节点粒度进度(status ∈ running/done)。"
+      },
+      "StreamSummaryOut": {
+        "properties": {
+          "delta": {
+            "type": "string",
+            "title": "Delta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "delta"
+        ],
+        "title": "StreamSummaryOut",
+        "description": "summary 事件 data:总结增量(当前为单条完整文案,逐事件追加=打字机语义)。"
       },
       "TenantOut": {
         "properties": {

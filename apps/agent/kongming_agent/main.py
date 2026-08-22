@@ -1,11 +1,17 @@
 """Kongming Agent 面入口(仅内网,内部令牌认证,ADR-002)。
 
 业务端点:POST /query(NL2SQL 问答图,同步一次性返回)+
-/internal/embedding(批量向量化)+ /internal/describe-table(表元数据润色,
-009)——后两者供控制面回调(api 持 DB、agent 持 LLM key 的分工)。
+POST /query/stream(同图流式 SSE,017)+ /internal/embedding(批量向量化)+
+/internal/describe-table(表元数据润色,009)——后两者供控制面回调
+(api 持 DB、agent 持 LLM key 的分工)。
 """
 
+import json
+import logging
+from collections.abc import AsyncIterator
+
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
 
@@ -17,9 +23,11 @@ from kongming_agent.describer import (
     describe_table,
 )
 from kongming_agent.graph.build import get_graph
-from kongming_agent.graph.state import AgentState
+from kongming_agent.graph.state import AgentState, ExecutionResult, ValidationResult
 from kongming_agent.llm import LlmError
 from kongming_agent.settings import Settings
+
+log = logging.getLogger(__name__)
 
 _settings = Settings()
 _settings.fail_closed_checks()
@@ -164,7 +172,12 @@ class QueryOut(BaseModel):
 
 @app.post("/query", response_model=QueryOut, tags=["agent"])
 async def query(req: QueryIn) -> QueryOut:
-    initial: AgentState = {
+    final = await _run_graph(req)
+    return _build_query_out(final)
+
+
+def _initial_state(req: QueryIn) -> AgentState:
+    return {
         "trace_id": req.trace_id,
         "tenant_key": req.tenant_key,
         "question": req.question,
@@ -173,29 +186,100 @@ async def query(req: QueryIn) -> QueryOut:
         "datasource_key": req.datasource_key,
         "retry_count": 0,
     }
+
+
+async def _run_graph(req: QueryIn) -> dict[str, object]:
+    """图执行 + LLM 故障收敛(同步/流式同口径:key 缺失/超时等友好返回)。"""
     try:
-        final = await get_graph().ainvoke(initial)
+        final: dict[str, object] = await get_graph().ainvoke(_initial_state(req))
     except LlmError:
         # LLM 故障(key 缺失/超时/协议异常):链路无法推进,友好返回不裸 500
+        return {"llm_unavailable": True}
+    return final
+
+
+def _build_query_out(final: dict[str, object]) -> QueryOut:
+    """终态构造(同步/流式共用,单一定义防字段漂移;nl2sql-agent spec)。"""
+    if final.get("llm_unavailable"):
         return QueryOut(success=False, error="LLM 服务暂不可用,请稍后重试")
     execution = final.get("execution")
     validation = final.get("validation")
     verdict: str | None
-    if execution is not None:
+    if isinstance(execution, ExecutionResult):
         verdict = execution.verdict
-    elif validation is not None and validation.permission_block:
+    elif isinstance(validation, ValidationResult) and validation.permission_block:
         verdict = "BLOCKED"  # 本地预检拦下的写操作,未达执行路由
     else:
         verdict = None
+    summary = final.get("summary", "")
+    insights = final.get("insights", [])
+    stats = final.get("stats", {})
+    sql = final.get("generated_sql", "")
+    retry = final.get("retry_count", 0)
+    error = final.get("error")
     return QueryOut(
-        success=execution is not None and execution.verdict == "PASS",
+        success=isinstance(execution, ExecutionResult) and execution.verdict == "PASS",
         verdict=verdict,
-        summary=final.get("summary", ""),
-        insights=final.get("insights", []),
-        stats=final.get("stats", {}),
-        columns=execution.columns if execution is not None else [],
-        rows=execution.rows if execution is not None else [],
-        sql=final.get("generated_sql", ""),
-        retry_count=final.get("retry_count", 0),
-        error=final.get("error") or None,
+        summary=summary if isinstance(summary, str) else "",
+        insights=insights if isinstance(insights, list) else [],
+        stats=stats if isinstance(stats, dict) else {},
+        columns=execution.columns if isinstance(execution, ExecutionResult) else [],
+        rows=execution.rows if isinstance(execution, ExecutionResult) else [],
+        sql=sql if isinstance(sql, str) else "",
+        retry_count=retry if isinstance(retry, int) else 0,
+        error=str(error) if isinstance(error, str) and error else None,
+    )
+
+
+def _sse_frame(event: str, data_json: str) -> str:
+    """标准 SSE 帧:event 行 + 单行 data + 空行分帧(017 事件契约)。"""
+    return f"event: {event}\ndata: {data_json}\n\n"
+
+
+@app.post("/query/stream", tags=["agent"])
+async def query_stream(req: QueryIn) -> StreamingResponse:
+    """问答图流式端点(017):custom 通道=节点过程事件,updates 通道累积终态;
+    result 终态与同步 /query 同构(共用 _build_query_out);LLM 故障同同步
+    口径走 result(success=false);意外异常收敛 error 终态不裸 500。"""
+    state = _initial_state(req)
+
+    async def gen() -> AsyncIterator[str]:
+        final: dict[str, object] = {}
+        try:
+            async for mode, chunk in get_graph().astream(
+                state, stream_mode=["updates", "custom"]
+            ):
+                if mode == "custom":
+                    ev = chunk if isinstance(chunk, dict) else {}
+                    event = str(ev.get("event") or "")
+                    if event:
+                        yield _sse_frame(
+                            event, json.dumps(ev.get("data"), ensure_ascii=False)
+                        )
+                elif isinstance(chunk, dict):
+                    for delta in chunk.values():
+                        if isinstance(delta, dict):
+                            final.update(delta)  # updates 累积=终态 state
+        except LlmError:
+            yield _sse_frame(
+                "result",
+                _build_query_out({"llm_unavailable": True}).model_dump_json(),
+            )
+            return
+        except Exception:
+            log.exception("流式问答图执行异常 trace_id=%s", req.trace_id)
+            yield _sse_frame(
+                "error",
+                json.dumps(
+                    {"error": "问答服务内部错误,请稍后重试", "reason_code": None},
+                    ensure_ascii=False,
+                ),
+            )
+            return
+        yield _sse_frame("result", _build_query_out(final).model_dump_json())
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

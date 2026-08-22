@@ -3,18 +3,31 @@
 编排顺序(chat spec「问答查询端点」):
 租户解析(白名单)→ 会话(新建/归属校验)→ history 补全 → trace_id 生成 →
 回调 agent → 消息落库(USER + ASSISTANT,三态映射)→ 响应组装(含图表建议)。
+
+流式编排(017 query-streaming,design §4/§5):
+前段与终态落库同同步路径共用唯一实现(禁复制第二套口径);
+agent 流由后台任务消费,前端断线后继续至终态(断线续存)。
 """
 
+import asyncio
 import contextlib
 import json
 import logging
 import uuid
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
+from typing import Any
 
-from kongming.chat.agent_client import AgentClient, AgentUnavailable
+from kongming.chat.agent_client import AgentClient, AgentReply, AgentUnavailable, parse_agent_reply
 from kongming.chat.export import to_csv, to_xlsx
 from kongming.chat.models import ChartSuggestion, suggest_chart
-from kongming.chat.ports import ChatRepo, ChatStoreError, ExplainRunner, OperLogger
+from kongming.chat.ports import (
+    ChatRepo,
+    ChatStoreError,
+    ExplainRunner,
+    OperLogger,
+    StreamStoreFactory,
+)
 from kongming.datasource.ports import DatasourceChecker
 from kongming.rag.ports import QueryHistoryWriter
 
@@ -23,6 +36,8 @@ log = logging.getLogger(__name__)
 SESSION_TITLE_LEN = 30  # 标题=首问前 30 字符(chat spec)
 SESSION_TITLE_MAX_LEN = 200  # 标题列上限(chat spec「会话重命名」;strip 后判定)
 HISTORY_FILL_LIMIT = 5  # 后端补全最近 5 条 user 问句
+
+AGENT_UNAVAILABLE_TEXT = "问答服务暂不可用,请稍后重试"
 
 
 def blocked_friendly(reason: str | None) -> str:
@@ -127,6 +142,30 @@ class ExplainView:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class _PreparedQuery:
+    """问答前段产物(同步/流式共用,design §5:同一编排口径)。"""
+
+    tenant_id: str
+    resolved_key: str
+    sid: str | None
+    effective_history: list[str]
+    trace_id: str
+
+
+@dataclass
+class StreamHandle:
+    """流式中继句柄(017):queue=待发帧,event 为 result 时 payload=ChatOutcome;
+    task=后台消费任务(断线后照常跑完,调用方不 await)。"""
+
+    queue: asyncio.Queue[tuple[str, object] | None]
+    task: "asyncio.Task[None]"
+
+
+# 后台流任务强引用(防 GC 边角;完成即摘)
+_BACKGROUND_STREAM_TASKS: set["asyncio.Task[None]"] = set()
+
+
 class ChatService:
     def __init__(
         self,
@@ -136,6 +175,7 @@ class ChatService:
         history_writer: QueryHistoryWriter | None = None,  # 009:成功 SQL 回写(可选注入)
         explainer: ExplainRunner | None = None,  # 010:执行计划端口(组合根绑定)
         oper_logger: OperLogger | None = None,  # 015:导出审计(可选注入)
+        stream_store_factory: StreamStoreFactory | None = None,  # 017:断线续存落库单元
     ) -> None:
         self._repo = repo
         self._agent = agent
@@ -143,6 +183,7 @@ class ChatService:
         self._history_writer = history_writer
         self._explainer = explainer
         self._oper_logger = oper_logger
+        self._stream_store_factory = stream_store_factory
 
     @property
     def agent_for_tasks(self) -> AgentClient:
@@ -162,7 +203,7 @@ class ChatService:
             raise TenantForbidden("<default>")
         return default
 
-    async def query(
+    async def _prepare_query(
         self,
         *,
         user_id: str,
@@ -172,7 +213,9 @@ class ChatService:
         persist: bool,
         history: list[str],
         datasource_key: str,
-    ) -> ChatOutcome:
+    ) -> _PreparedQuery:
+        """问答前段(同步/流式共用唯一实现):租户→数据源预检→会话→history→
+        trace_id;USER 消息落库也在此(流式路径须在 SSE 响应开始前完成)。"""
         tenant_id, resolved_key = await self._resolve_tenant(user_id, tenant_key)
 
         # 数据源入口预检(008 design D8):非 default 校验存在+启用+归属当前租户,
@@ -211,44 +254,264 @@ class ChatService:
                 session_id=sid, role="USER", question=question, status="SUCCESS"
             )
             await self._repo.commit()
+        return _PreparedQuery(
+            tenant_id=tenant_id,
+            resolved_key=resolved_key,
+            sid=sid,
+            effective_history=effective_history,
+            trace_id=trace_id,
+        )
 
+    async def query(
+        self,
+        *,
+        user_id: str,
+        tenant_key: str | None,
+        question: str,
+        session_id: str | None,
+        persist: bool,
+        history: list[str],
+        datasource_key: str,
+    ) -> ChatOutcome:
+        p = await self._prepare_query(
+            user_id=user_id,
+            tenant_key=tenant_key,
+            question=question,
+            session_id=session_id,
+            persist=persist,
+            history=history,
+            datasource_key=datasource_key,
+        )
         try:
             reply = await self._agent.query(
-                trace_id=trace_id,
-                tenant_key=resolved_key,
+                trace_id=p.trace_id,
+                tenant_key=p.resolved_key,
                 question=question,
                 user_id=user_id,
-                history=effective_history,
+                history=p.effective_history,
                 datasource_key=datasource_key,
             )
         except AgentUnavailable:
-            log.warning("agent 不可达 trace_id=%s", trace_id)
-            mid: str | None = None
-            if sid is not None:
-                # 落库容错与成功路径对称:回调期间会话可能被并发删除
-                try:
-                    mid = await self._repo.insert_message(
-                        session_id=sid,
-                        role="ASSISTANT",
-                        result_json=json.dumps(
-                            {"error": "问答服务暂不可用,请稍后重试"}, ensure_ascii=False
-                        ),
-                        summary="问答服务暂不可用,请稍后重试",
-                        status="FAILED",
-                    )
-                    await self._persist_touch_quietly(sid)
-                except ChatStoreError:
-                    mid = None  # 落库失败即无消息 id(与未落库语义一致)
-                    log.warning("FAILED 消息落库失败(会话可能已被删除) session=%s", sid)
-                    await self._repo.rollback()
-            return ChatOutcome(
-                session_id=sid,
-                success=False,
-                error="问答服务暂不可用,请稍后重试",
-                message_id=mid,
-                datasource_key=datasource_key,
+            log.warning("agent 不可达 trace_id=%s", p.trace_id)
+            return await self._finalize_unavailable(
+                sid=p.sid, repo=self._repo, datasource_key=datasource_key
             )
+        return await self._finalize_reply(
+            reply=reply,
+            sid=p.sid,
+            tenant_id=p.tenant_id,
+            datasource_key=datasource_key,
+            question=question,
+            persist=persist,
+            repo=self._repo,
+            history_writer=self._history_writer,
+        )
 
+    # ============ 流式编排(017 query-streaming) ============
+
+    async def start_stream(
+        self,
+        *,
+        user_id: str,
+        tenant_key: str | None,
+        question: str,
+        session_id: str | None,
+        persist: bool,
+        history: list[str],
+        datasource_key: str,
+    ) -> StreamHandle:
+        """启动流式问答:前段(含 USER 落库)完成后创建后台消费任务并返回句柄;
+        前段异常(403/404/400)在 SSE 响应开始前抛出,由 router 常规映射。"""
+        p = await self._prepare_query(
+            user_id=user_id,
+            tenant_key=tenant_key,
+            question=question,
+            session_id=session_id,
+            persist=persist,
+            history=history,
+            datasource_key=datasource_key,
+        )
+        queue: asyncio.Queue[tuple[str, object] | None] = asyncio.Queue()
+        task = asyncio.create_task(
+            self._consume_agent_stream(
+                p,
+                user_id=user_id,
+                question=question,
+                persist=persist,
+                datasource_key=datasource_key,
+                queue=queue,
+            )
+        )
+        _BACKGROUND_STREAM_TASKS.add(task)
+        task.add_done_callback(_BACKGROUND_STREAM_TASKS.discard)
+        return StreamHandle(queue=queue, task=task)
+
+    async def _consume_agent_stream(
+        self,
+        p: _PreparedQuery,
+        *,
+        user_id: str,
+        question: str,
+        persist: bool,
+        datasource_key: str,
+        queue: "asyncio.Queue[tuple[str, object] | None]",
+    ) -> None:
+        """后台消费 agent 流至终态(design §4):过程帧透传;result 帧先落库
+        (独立 StreamStore 会话)再富化入队;传输失败收敛 error 终态+FAILED 落库。
+        前端断线不影响本任务(断线续存);落库失败不阻断终态帧(与同步容错一致)。
+        异常收敛铁律:本方法任何退出路径都必须入队终止标记(None)——中继生成器
+        靠它收束,缺失即前端永久等心跳(R1-S1)。"""
+        outcome: ChatOutcome | None = None
+        error_text: str | None = None
+        try:
+
+            async def on_frame(event: str, data_json: str) -> None:
+                nonlocal outcome, error_text
+                if event == "result":
+                    if outcome is not None:
+                        # 终态幂等守卫(R4):契约恰一个终态帧,首个即权威——
+                        # 违约多发的 result 不得二次落库/回写/触发标题任务
+                        log.warning("agent 流重复 result 帧(忽略) trace_id=%s", p.trace_id)
+                        return
+                    # 业务终态:解析→落库(独立会话)→富化;原帧不透传(重构自 api)
+                    try:
+                        reply = parse_agent_reply(json.loads(data_json))
+                    except (ValueError, TypeError, AttributeError) as e:
+                        log.warning("agent result 帧解析失败: %s", e)
+                        error_text = AGENT_UNAVAILABLE_TEXT
+                        return
+                    outcome = await self._stream_finalize(
+                        reply=reply,
+                        p=p,
+                        question=question,
+                        persist=persist,
+                        datasource_key=datasource_key,
+                    )
+                elif event == "error":
+                    # agent 意外异常帧:等价传输层失败,由 api 统一收敛(不透传)
+                    error_text = AGENT_UNAVAILABLE_TEXT
+                elif event in ("stage", "sql", "summary"):
+                    # 过程事件白名单透传(R1-R6:事件名/形状由 api 收口);
+                    # 单帧畸形跳过不中断(上游同款容错)
+                    try:
+                        data = json.loads(data_json)
+                    except ValueError:
+                        log.warning("agent 过程帧解析失败(跳帧): %s", data_json[:100])
+                        return
+                    if isinstance(data, dict):
+                        await queue.put((event, data))
+
+            await self._agent.query_stream(
+                trace_id=p.trace_id,
+                tenant_key=p.resolved_key,
+                question=question,
+                user_id=user_id,
+                history=p.effective_history,
+                datasource_key=datasource_key,
+                on_frame=on_frame,
+            )
+        except AgentUnavailable:
+            log.warning("agent 流式不可达 trace_id=%s", p.trace_id)
+            error_text = AGENT_UNAVAILABLE_TEXT
+        except Exception:
+            # 意外异常(坏报文/落库基础设施逃逸等):同样收敛 error 终态,
+            # 保证终止标记必达(R1-S1:缺标记=前端永久悬挂+FAILED 不落库)
+            log.exception("流式消费任务异常 trace_id=%s", p.trace_id)
+            error_text = AGENT_UNAVAILABLE_TEXT
+        try:
+            if outcome is not None:
+                # 业务终态已落库(result 先finalize):即使读尾传输异常也按成功下发,
+                # 不叠加 FAILED 消息(R3-R1:双落库收敛)
+                await queue.put(("result", outcome))
+            elif error_text is not None:
+                # 传输层/意外失败终态:FAILED 落库(独立会话)+ error 帧
+                await self._stream_finalize_unavailable(p, datasource_key=datasource_key)
+                await queue.put(("error", {"error": error_text, "reason_code": None}))
+            else:
+                # agent 流正常结束但无终态帧(契约破坏):与不可达同收敛
+                log.error("agent 流结束但缺终态帧 trace_id=%s", p.trace_id)
+                await self._stream_finalize_unavailable(p, datasource_key=datasource_key)
+                await queue.put(("error", {"error": AGENT_UNAVAILABLE_TEXT, "reason_code": None}))
+        finally:
+            await queue.put(None)  # 终止标记(生成器据此收束;必达)
+
+    async def _stream_finalize(
+        self,
+        *,
+        reply: AgentReply,
+        p: _PreparedQuery,
+        question: str,
+        persist: bool,
+        datasource_key: str,
+    ) -> ChatOutcome:
+        """流式终态落库(独立 StreamStore 会话;断线后照常执行)+标题任务触发。"""
+        title_trigger: Callable[[str], Coroutine[Any, Any, None]] | None = None
+        if self._stream_store_factory is not None:
+            async with self._stream_store_factory() as store:
+                outcome = await self._finalize_reply(
+                    reply=reply,
+                    sid=p.sid,
+                    tenant_id=p.tenant_id,
+                    datasource_key=datasource_key,
+                    question=question,
+                    persist=persist,
+                    repo=store.repo,
+                    history_writer=store.history_writer,
+                )
+                title_trigger = store.trigger_title_rewrite
+        else:  # 组合根未接线(部署缺陷):终态仍要回给前端,仅放弃断线持久化
+            log.error("stream_store_factory 未注入,流式终态不落库")
+            return await self._finalize_reply(
+                reply=reply,
+                sid=None,
+                tenant_id=p.tenant_id,
+                datasource_key=datasource_key,
+                question=question,
+                persist=False,
+                repo=self._repo,
+                history_writer=None,
+            )
+        if (
+            title_trigger is not None
+            and outcome.success
+            and persist
+            and outcome.session_id is not None
+        ):
+            # 标题任务触发条件与同步端点一致(010);result 帧已可先发,这里不阻塞
+            t = asyncio.create_task(title_trigger(outcome.session_id))
+            _BACKGROUND_STREAM_TASKS.add(t)
+            t.add_done_callback(_BACKGROUND_STREAM_TASKS.discard)
+        return outcome
+
+    async def _stream_finalize_unavailable(
+        self, p: _PreparedQuery, *, datasource_key: str = "default"
+    ) -> None:
+        """流式传输层失败的 FAILED 落库(独立会话);失败仅日志(不阻断 error 帧)。"""
+        if self._stream_store_factory is None:
+            log.error("stream_store_factory 未注入,FAILED 终态不落库")
+            return
+        try:
+            async with self._stream_store_factory() as store:
+                await self._finalize_unavailable(
+                    sid=p.sid, repo=store.repo, datasource_key=datasource_key
+                )
+        except Exception:  # noqa: BLE001  # 断线续存落库兜底:不阻断终态帧下发
+            log.warning("流式 FAILED 终态落库异常 session=%s", p.sid, exc_info=True)
+
+    async def _finalize_reply(
+        self,
+        *,
+        reply: AgentReply,
+        sid: str | None,
+        tenant_id: str,
+        datasource_key: str,
+        question: str,
+        persist: bool,
+        repo: ChatRepo,
+        history_writer: QueryHistoryWriter | None,
+    ) -> ChatOutcome:
+        """终态落库与响应组装(同步/流式共用唯一实现,design §5):
+        三态映射 → chart 建议 → error 文案 → result_json 落库(容错)→ 回写。"""
         # 三态映射:PASS→SUCCESS;BLOCKED→REJECTED;ERROR/重试耗尽→FAILED
         if reply.success:
             status = "SUCCESS"
@@ -284,7 +547,7 @@ class ChatService:
                     ensure_ascii=False,
                     default=str,
                 )
-                mid = await self._repo.insert_message(
+                mid = await repo.insert_message(
                     session_id=sid,
                     role="ASSISTANT",
                     sql_text=reply.sql or None,
@@ -292,22 +555,22 @@ class ChatService:
                     summary=reply.summary or None,
                     status=status,
                 )
-                await self._persist_touch_quietly(sid)
+                await self._persist_touch_quietly(repo, sid)
             except ChatStoreError:
                 mid = None  # 落库失败即无消息 id(与未落库语义一致)
                 log.warning("assistant 消息落库失败(会话可能已被删除) session=%s", sid)
-                await self._repo.rollback()
+                await repo.rollback()
 
         # 成功 SQL 回写 query_history(009):最终 SUCCESS 判定后;独立 try 不阻断;
         # persist=False 为测试通道不触发;空结果的成功查询同样回写(不依赖行数)。
         if (
             reply.success
             and persist
-            and self._history_writer is not None
+            and history_writer is not None
             and reply.sql.strip()
         ):
             try:
-                await self._history_writer.writeback(
+                await history_writer.writeback(
                     tenant_id=tenant_id,
                     datasource_key=datasource_key,
                     question=question,  # 原始问句(与审计口径一致)
@@ -333,14 +596,44 @@ class ChatService:
             datasource_key=datasource_key,
         )
 
-    async def _persist_touch_quietly(self, session_id: str) -> None:
+    async def _finalize_unavailable(
+        self, *, sid: str | None, repo: ChatRepo, datasource_key: str = "default"
+    ) -> ChatOutcome:
+        """agent 不可达终态(同步/流式同构):FAILED 消息落库(容错)+友好错误。"""
+        mid: str | None = None
+        if sid is not None:
+            # 落库容错与成功路径对称:回调期间会话可能被并发删除
+            try:
+                mid = await repo.insert_message(
+                    session_id=sid,
+                    role="ASSISTANT",
+                    result_json=json.dumps(
+                        {"error": AGENT_UNAVAILABLE_TEXT}, ensure_ascii=False
+                    ),
+                    summary=AGENT_UNAVAILABLE_TEXT,
+                    status="FAILED",
+                )
+                await self._persist_touch_quietly(repo, sid)
+            except ChatStoreError:
+                mid = None  # 落库失败即无消息 id(与未落库语义一致)
+                log.warning("FAILED 消息落库失败(会话可能已被删除) session=%s", sid)
+                await repo.rollback()
+        return ChatOutcome(
+            session_id=sid,
+            success=False,
+            error=AGENT_UNAVAILABLE_TEXT,
+            message_id=mid,
+            datasource_key=datasource_key,  # R2-B1:重构时曾丢失,与原同步分支对齐
+        )
+
+    async def _persist_touch_quietly(self, repo: ChatRepo, session_id: str) -> None:
         """touch+commit;FK 违约(会话被并发删除)仅日志,不影响响应。"""
         try:
-            await self._repo.touch_session(session_id)
-            await self._repo.commit()
+            await repo.touch_session(session_id)
+            await repo.commit()
         except ChatStoreError:
             log.warning("会话 touch 失败(可能已被删除) session=%s", session_id)
-            await self._repo.rollback()
+            await repo.rollback()
 
     # ============ 会话列表/消息历史/删除(006) ============
 

@@ -159,7 +159,9 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
         </Collapsible>
       )}
 
-      {msg.sql && <ExplainCollapsible messageId={msg.id} />}
+      {msg.sql && msg.id && <ExplainCollapsible messageId={msg.id} />}
+      {/* msg.id 守卫(017 乐观快照容错分支 id 可能为空串):
+          无落库 id 则无执行计划可查,渲染会 422 白点 */}
 
       {(result.insights?.length ?? 0) > 0 && (
         <div className="space-y-1">

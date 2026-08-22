@@ -191,6 +191,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat/query/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Chat Query Stream */
+        post: operations["chat_query_stream_chat_query_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chat/sessions": {
         parameters: {
             query?: never;
@@ -1778,6 +1795,50 @@ export interface components {
             /** Authorize Url */
             authorize_url: string;
         };
+        /**
+         * StreamErrorOut
+         * @description error 终态事件 data:仅传输层/意外失败(业务三态走 result 事件)。
+         */
+        StreamErrorOut: {
+            /** Error */
+            error: string;
+            /** Reason Code */
+            reason_code?: string | null;
+        };
+        /**
+         * StreamSqlOut
+         * @description sql 事件 data:validate 通过后提前下发,内容与终态落库 SQL 一致。
+         */
+        StreamSqlOut: {
+            /** Sql */
+            sql: string;
+        };
+        /**
+         * StreamStageOut
+         * @description stage 事件 data:节点粒度进度(status ∈ running/done)。
+         */
+        StreamStageOut: {
+            /** Node */
+            node: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "done";
+            /**
+             * Retry Count
+             * @default 0
+             */
+            retry_count: number;
+        };
+        /**
+         * StreamSummaryOut
+         * @description summary 事件 data:总结增量(当前为单条完整文案,逐事件追加=打字机语义)。
+         */
+        StreamSummaryOut: {
+            /** Delta */
+            delta: string;
+        };
         /** TenantOut */
         TenantOut: {
             /** Id */
@@ -2279,6 +2340,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChatQueryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    chat_query_stream_chat_query_stream_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatQueryIn"];
+            };
+        };
+        responses: {
+            /** @description SSE 事件流:stage/sql/summary 过程事件逐帧下发;result=data 与同步 /chat/query 响应逐字段一致;error=传输层/意外失败终态;注释行(: ping)为心跳 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["StreamStageOut"] | components["schemas"]["StreamSqlOut"] | components["schemas"]["StreamSummaryOut"] | components["schemas"]["StreamErrorOut"] | components["schemas"]["ChatQueryOut"];
+                    "application/json": components["schemas"]["StreamStageOut"] | components["schemas"]["StreamSqlOut"] | components["schemas"]["StreamSummaryOut"] | components["schemas"]["StreamErrorOut"] | components["schemas"]["ChatQueryOut"];
                 };
             };
             /** @description Validation Error */

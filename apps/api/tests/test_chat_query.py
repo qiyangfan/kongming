@@ -375,6 +375,8 @@ async def test_agent_unavailable_friendly_error(
     body = r.json()
     assert body["success"] is False
     assert "暂不可用" in body["error"] and "connect failed" not in body["error"]
+    # R2-B1:不可达分支的数据源快照字段与原同步形态一致(重构曾丢失落 default)
+    assert body["datasource_key"] == "default"
     status = (
         await session.execute(
             text(

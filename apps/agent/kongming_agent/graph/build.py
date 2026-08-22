@@ -14,6 +14,7 @@ from langgraph.graph import END, START, StateGraph
 from kongming_agent.graph import nodes
 from kongming_agent.graph.nodes import MAX_RETRY  # re-export(测试与调用方统一入口)
 from kongming_agent.graph.state import AgentState
+from kongming_agent.graph.streams import stage_wrapper
 
 __all__ = ["MAX_RETRY", "build", "get_graph"]
 
@@ -46,13 +47,15 @@ def _after_selfheal(state: AgentState) -> str:
 def get_graph():  # type: ignore[no-untyped-def]
     """编译产物单例(无状态,可跨请求共享)。"""
     g = StateGraph(AgentState)
-    g.add_node("understand", nodes.understand)
-    g.add_node("retrieve", nodes.retrieve)
-    g.add_node("generate", nodes.generate)
-    g.add_node("validate", nodes.validate)
-    g.add_node("execute", nodes.execute)
-    g.add_node("selfheal", nodes.selfheal)
-    g.add_node("summarize", nodes.summarize)
+    # 017 流式:节点挂 stage_wrapper(事件发射点;非流式调用静默跳过零行为变化,
+    # nodes.py 业务实现零改动——prompt 资产纪律)
+    g.add_node("understand", stage_wrapper("understand", nodes.understand))
+    g.add_node("retrieve", stage_wrapper("retrieve", nodes.retrieve))
+    g.add_node("generate", stage_wrapper("generate", nodes.generate))
+    g.add_node("validate", stage_wrapper("validate", nodes.validate))
+    g.add_node("execute", stage_wrapper("execute", nodes.execute))
+    g.add_node("selfheal", stage_wrapper("selfheal", nodes.selfheal))
+    g.add_node("summarize", stage_wrapper("summarize", nodes.summarize))
 
     g.add_edge(START, "understand")
     g.add_edge("understand", "retrieve")

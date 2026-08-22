@@ -6,13 +6,19 @@
 """
 
 import logging
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 
+from kongming.chat.sse import SseDecoder
 from kongming.config import Settings
 
 log = logging.getLogger(__name__)
+
+# 流式帧回调:(event, data_json);协程返回由调用方 await
+StreamFrameHandler = Callable[[str, str], Coroutine[Any, Any, None]]
 
 
 class AgentUnavailable(Exception):
@@ -33,6 +39,34 @@ class AgentReply:
     error: str | None = None
 
 
+def parse_agent_reply(data: dict[str, object]) -> AgentReply:
+    """agent 终态报文 → AgentReply(同步响应/流式 result 帧共用,单一定义防漂移)。"""
+    verdict = data.get("verdict")
+    error = data.get("error")
+    insights_raw = data.get("insights")
+    stats_raw = data.get("stats")
+    columns_raw = data.get("columns")
+    rows_raw = data.get("rows")
+    return AgentReply(
+        success=bool(data.get("success")),
+        verdict=verdict if isinstance(verdict, str) else None,
+        summary=str(data.get("summary") or ""),
+        insights=[
+            {"type": str(i.get("type", "")), "text": str(i.get("text", ""))}
+            for i in insights_raw
+            if isinstance(insights_raw, list) and isinstance(i, dict)
+        ]
+        if isinstance(insights_raw, list)
+        else [],
+        stats=dict(stats_raw) if isinstance(stats_raw, dict) else {},
+        columns=[str(c) for c in columns_raw] if isinstance(columns_raw, list) else [],
+        rows=[list(r) for r in rows_raw] if isinstance(rows_raw, list) else [],
+        sql=str(data.get("sql") or ""),
+        retry_count=retry if isinstance(retry := data.get("retry_count"), int) else 0,
+        error=error if isinstance(error, str) else None,
+    )
+
+
 class AgentClient:
     def __init__(self, settings: Settings) -> None:
         self._base = settings.agent_base_url.rstrip("/")
@@ -49,14 +83,14 @@ class AgentClient:
         history: list[str],
         datasource_key: str,
     ) -> AgentReply:
-        payload: dict[str, object] = {
-            "trace_id": trace_id,
-            "tenant_key": tenant_key,
-            "question": question,
-            "user_id": user_id,
-            "history": history,
-            "datasource_key": datasource_key,
-        }
+        payload = self._payload(
+            trace_id=trace_id,
+            tenant_key=tenant_key,
+            question=question,
+            user_id=user_id,
+            history=history,
+            datasource_key=datasource_key,
+        )
         try:
             async with httpx.AsyncClient(
                 base_url=self._base, timeout=self._timeout, headers=self._headers
@@ -69,28 +103,70 @@ class AgentClient:
             log.warning("agent 回调非 200: HTTP %s", resp.status_code)
             raise AgentUnavailable(f"HTTP {resp.status_code}")
         try:
-            data = resp.json()
-            reply = AgentReply(
-                success=bool(data.get("success")),
-                verdict=data.get("verdict"),
-                summary=str(data.get("summary") or ""),
-                insights=[
-                    {"type": str(i.get("type", "")), "text": str(i.get("text", ""))}
-                    for i in data.get("insights") or []
-                    if isinstance(i, dict)
-                ],
-                stats=dict(data.get("stats") or {}),
-                columns=[str(c) for c in data.get("columns") or []],
-                rows=[list(r) for r in data.get("rows") or []],
-                sql=str(data.get("sql") or ""),
-                retry_count=int(data.get("retry_count") or 0),
-                error=data.get("error"),
-            )
+            reply = parse_agent_reply(resp.json())
         except (ValueError, TypeError, AttributeError) as e:
             # agent 返回 200 但报文非预期:同不可达收敛,不裸 500
             log.warning("agent 响应解析失败: %s", e)
             raise AgentUnavailable(f"bad reply: {e}") from e
         return reply
+
+    async def query_stream(
+        self,
+        *,
+        trace_id: str,
+        tenant_key: str,
+        question: str,
+        user_id: str | None,
+        history: list[str],
+        datasource_key: str,
+        on_frame: StreamFrameHandler,
+    ) -> None:
+        """流式问答(017):消费 agent SSE 流,逐帧 (event, data_json) 回调;
+        错误语义与同步 query 同(不可达/非 200/传输失败一律 AgentUnavailable,
+        由调用方收敛 error 终态+FAILED 落库)。"""
+        payload = self._payload(
+            trace_id=trace_id,
+            tenant_key=tenant_key,
+            question=question,
+            user_id=user_id,
+            history=history,
+            datasource_key=datasource_key,
+        )
+        decoder = SseDecoder()
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._base, timeout=self._timeout, headers=self._headers
+            ) as client:
+                async with client.stream("POST", "/query/stream", json=payload) as resp:
+                    if resp.status_code != 200:
+                        log.warning("agent 流式回调非 200: HTTP %s", resp.status_code)
+                        raise AgentUnavailable(f"HTTP {resp.status_code}")
+                    async for line in resp.aiter_lines():
+                        frame = decoder.feed(line)
+                        if frame is not None:
+                            await on_frame(frame[0], frame[1])
+        except httpx.HTTPError as e:
+            log.warning("agent 流式回调异常: %s", e)
+            raise AgentUnavailable(str(e)) from e
+
+    @staticmethod
+    def _payload(
+        *,
+        trace_id: str,
+        tenant_key: str,
+        question: str,
+        user_id: str | None,
+        history: list[str],
+        datasource_key: str,
+    ) -> dict[str, object]:
+        return {
+            "trace_id": trace_id,
+            "tenant_key": tenant_key,
+            "question": question,
+            "user_id": user_id,
+            "history": history,
+            "datasource_key": datasource_key,
+        }
 
     async def rewrite_title(self, *, question: str) -> str | None:
         """会话标题改写(010):后台任务兜底语义——任何失败(不可达/非 200/降级

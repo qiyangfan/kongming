@@ -18,6 +18,11 @@ export type SessionItemOut = components["schemas"]["SessionItemOut"];
 export type SessionMessageOut = components["schemas"]["SessionMessageOut"];
 export type ChatQueryOut = components["schemas"]["ChatQueryOut"];
 export type TenantRefOut = components["schemas"]["TenantRefOut"];
+/* 017 流式事件 data 形态(make contracts 生成;契约见 openapi responses oneOf) */
+export type StreamStageOut = components["schemas"]["StreamStageOut"];
+export type StreamSqlOut = components["schemas"]["StreamSqlOut"];
+export type StreamSummaryOut = components["schemas"]["StreamSummaryOut"];
+export type StreamErrorOut = components["schemas"]["StreamErrorOut"];
 
 const BASE = "/api";
 const REFRESH_KEY = "km.refresh";
@@ -151,3 +156,94 @@ export const api = {
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
   postBlob,
 };
+
+/* ============ 流式问答(017 query-streaming) ============ */
+
+export interface StreamHandlers {
+  onStage?: (d: StreamStageOut) => void;
+  onSql?: (d: StreamSqlOut) => void;
+  onSummary?: (d: StreamSummaryOut) => void;
+  onResult?: (d: ChatQueryOut) => void;
+  onError?: (d: StreamErrorOut) => void;
+}
+
+/** 解析一个 SSE 帧块(event:/data: 行;注释行忽略)并分发;畸形 data 静默跳帧 */
+function dispatchSseBlock(block: string, handlers: StreamHandlers): boolean {
+  let event = "";
+  const dataLines: string[] = [];
+  for (const line of block.split("\n")) {
+    if (line.startsWith(":")) return false; // 心跳注释行
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+  }
+  if (!event || dataLines.length === 0) return false;
+  let data: unknown;
+  try {
+    data = JSON.parse(dataLines.join("\n"));
+  } catch {
+    return false; // 畸形帧跳过,流不断
+  }
+  switch (event) {
+    case "stage":
+      handlers.onStage?.(data as StreamStageOut);
+      return false;
+    case "sql":
+      handlers.onSql?.(data as StreamSqlOut);
+      return false;
+    case "summary":
+      handlers.onSummary?.(data as StreamSummaryOut);
+      return false;
+    case "result":
+      handlers.onResult?.(data as ChatQueryOut);
+      return true;
+    case "error":
+      handlers.onError?.(data as StreamErrorOut);
+      return true;
+    default:
+      return false; // 未知事件忽略(前向兼容)
+  }
+}
+
+/**
+ * 流式问答(017):fetch + ReadableStream 手写 SSE 分帧(EventSource 不支持
+ * POST/Bearer/X-Tenant-Id)。鉴权头/401 单飞重放与 request 同构;流开始前
+ * 错误(4xx/5xx)抛 status Error(调用方按常规错误呈现);流正常结束但未收到
+ * 终态事件也抛错(防气泡永等待);主动 abort(signal)静默返回不回调错误。
+ */
+export async function streamChatQuery(
+  body: unknown,
+  handlers: StreamHandlers,
+  signal: AbortSignal,
+): Promise<void> {
+  const init: RequestInit = { method: "POST", body: JSON.stringify(body), signal };
+  let resp = await doFetch("/chat/query/stream", init);
+  if (resp.status === 401 && (await tryRefresh())) {
+    resp = await doFetch("/chat/query/stream", init);
+  }
+  if (!resp.ok) throw await toStatusError(resp);
+  const reader = resp.body?.getReader();
+  if (!reader) throw new Error("流式响应不可用");
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let terminated = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      // SSE 规范行尾 CRLF/LF 皆合法:剥除 CR 消除跨 chunk 的 \r\n 分裂边界
+      buffer += decoder.decode(value, { stream: true }).replace(/\r/g, "");
+      // SSE 帧边界:空行
+      for (let idx = buffer.indexOf("\n\n"); idx >= 0; idx = buffer.indexOf("\n\n")) {
+        const block = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        if (dispatchSseBlock(block, handlers)) terminated = true;
+      }
+    }
+  } catch (err) {
+    if (signal.aborted) return; // 主动取消:静默终止(迟到事件由守卫丢弃)
+    throw err instanceof Error ? err : new Error("连接中断");
+  } finally {
+    void reader.cancel().catch(() => undefined);
+  }
+  if (!terminated) throw new Error("连接中断,答案未完整返回");
+}

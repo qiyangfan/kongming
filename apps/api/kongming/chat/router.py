@@ -1,23 +1,28 @@
 """chat 路由(薄适配层):POST /chat/query + 会话列表/消息历史/删除(006)
-+ 重命名/搜索/导出/执行计划(010)。
++ 重命名/搜索/导出/执行计划(010)+ 流式问答(017)。
 
 首个受权限点保护的端点(chat:execute,rbac spec 权限点校验机制首发);
 租户上下文取 X-Tenant-Id 头(multitenant spec),缺省取用户默认租户。
 """
 
+import asyncio
+import json
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.repository import SqlOperLogRepo
 from kongming.auth.router import current_user, require_perm
 from kongming.chat.agent_client import AgentClient
-from kongming.chat.ports import ExplainOutcome
+from kongming.chat.ports import ExplainOutcome, StreamStore, StreamStoreFactory
 from kongming.chat.repository import ChatRepository
 from kongming.chat.service import (
     ChatOutcome,
@@ -29,18 +34,21 @@ from kongming.chat.service import (
     MessageResult,
     SessionMessage,
     SessionNotFound,
+    StreamHandle,
     TenantForbidden,
 )
 from kongming.chat.title_tasks import rewrite_session_title
 from kongming.config import get_settings
 from kongming.datasource.repository import SqlDatasourceRepo
-from kongming.db import get_session
+from kongming.db import get_session, get_sessionmaker
 from kongming.internal import service as internal_service
 from kongming.rag.cache import ContextCache
 from kongming.rag.repository import RagRepository
 from kongming.rag.service import RagService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+STREAM_HEARTBEAT_SEC = 15.0  # SSE 心跳间隔(017;慢查询防中间层空闲断连)
 
 
 def get_agent_client() -> AgentClient:
@@ -105,6 +113,7 @@ def get_chat_service(
     # explainer=执行计划端口(010,组合根绑定 internal.service.explain)
     # 013 构造反转:repo 在组合根装配,service 仅持 ChatRepo 端口(零框架契约)
     # 015 导出审计:oper_logger 绑定 auth 域 SqlOperLogRepo(007 组合模式)
+    # 017 断线续存:stream_store_factory 开独立会话落库(title_tasks 同款模式)
     return ChatService(
         ChatRepository(session),
         agent,
@@ -112,7 +121,24 @@ def get_chat_service(
         get_rag_service(session),
         _InternalExplainRunner(session),
         SqlOperLogRepo(session),
+        _stream_store_factory(agent),
     )
+
+
+def _stream_store_factory(agent: AgentClient) -> StreamStoreFactory:
+    """断线续存落库单元工厂(017 design §4):独立 sessionmaker 短会话——
+    请求作用域会话随 SSE 响应取消而关闭,后台任务落库不得复用。"""
+
+    @asynccontextmanager
+    async def _open() -> AsyncIterator[StreamStore]:
+        async with get_sessionmaker()() as s:
+            yield StreamStore(
+                repo=ChatRepository(s),
+                history_writer=get_rag_service(s),
+                trigger_title_rewrite=lambda sid: rewrite_session_title(sid, agent),
+            )
+
+    return _open
 
 
 class ChatQueryIn(BaseModel):
@@ -203,6 +229,120 @@ async def chat_query(
     if outcome.success and req.persist and outcome.session_id is not None:
         background.add_task(rewrite_session_title, outcome.session_id, svc.agent_for_tasks)
     return _out(outcome)
+
+
+# ============ 流式问答(017 query-streaming) ============
+
+
+class StreamStageOut(BaseModel):
+    """stage 事件 data:节点粒度进度(status ∈ running/done)。"""
+
+    node: str
+    status: Literal["running", "done"]
+    retry_count: int = 0  # selfheal=本次重试序号;其余节点=当前已重试次数
+
+
+class StreamSqlOut(BaseModel):
+    """sql 事件 data:validate 通过后提前下发,内容与终态落库 SQL 一致。"""
+
+    sql: str
+
+
+class StreamSummaryOut(BaseModel):
+    """summary 事件 data:总结增量(当前为单条完整文案,逐事件追加=打字机语义)。"""
+
+    delta: str
+
+
+class StreamErrorOut(BaseModel):
+    """error 终态事件 data:仅传输层/意外失败(业务三态走 result 事件)。"""
+
+    error: str
+    reason_code: str | None = None
+
+
+# model 键使 FastAPI 把全部事件模型注册进 components(ADR-005 类型生成可达),
+# content 键描述 SSE 事件流的真实形态(5 类事件 data 的 oneOf)
+_STREAM_RESPONSES: dict[int | str, dict[str, Any]] = {
+    200: {
+        "model": StreamStageOut | StreamSqlOut | StreamSummaryOut | StreamErrorOut | ChatQueryOut,
+        "description": (
+            "SSE 事件流:stage/sql/summary 过程事件逐帧下发;result=data 与同步"
+            " /chat/query 响应逐字段一致;error=传输层/意外失败终态;注释行(: ping)为心跳"
+        ),
+        "content": {
+            "text/event-stream": {
+                "schema": {
+                    "oneOf": [
+                        {"$ref": "#/components/schemas/StreamStageOut"},
+                        {"$ref": "#/components/schemas/StreamSqlOut"},
+                        {"$ref": "#/components/schemas/StreamSummaryOut"},
+                        {"$ref": "#/components/schemas/StreamErrorOut"},
+                        {"$ref": "#/components/schemas/ChatQueryOut"},
+                    ]
+                }
+            }
+        },
+    }
+}
+
+
+def _sse_frame(event: str, data_json: str) -> str:
+    return f"event: {event}\ndata: {data_json}\n\n"
+
+
+async def _relay_gen(handle: StreamHandle) -> AsyncIterator[str]:
+    """SSE 生成器:从后台任务队列转发帧;超时发心跳注释行;None 即收束。
+    前端断开时本生成器被取消,后台任务(断线续存)继续不受影响。"""
+    while True:
+        try:
+            item = await asyncio.wait_for(handle.queue.get(), timeout=STREAM_HEARTBEAT_SEC)
+        except TimeoutError:
+            yield ": ping\n\n"
+            continue
+        if item is None:
+            return
+        event, payload = item
+        if event == "result" and isinstance(payload, ChatOutcome):
+            yield _sse_frame("result", _out(payload).model_dump_json())
+        else:
+            yield _sse_frame(event, json.dumps(payload, ensure_ascii=False, default=str))
+
+
+@router.post(
+    "/query/stream",
+    dependencies=[Depends(require_perm("chat:execute"))],
+    response_class=StreamingResponse,
+    responses=_STREAM_RESPONSES,
+)
+async def chat_query_stream(
+    req: ChatQueryIn,
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Annotated[ChatService, Depends(get_chat_service)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> StreamingResponse:
+    try:
+        handle = await svc.start_stream(
+            user_id=str(user["sub"]),
+            tenant_key=x_tenant_id,
+            question=req.question,
+            session_id=None if req.session_id is None else str(req.session_id),
+            persist=req.persist,
+            history=req.history[-5:],
+            datasource_key=req.datasource_key,
+        )
+    except TenantForbidden:
+        raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
+    except SessionNotFound:
+        raise HTTPException(status_code=404, detail="SESSION_NOT_FOUND") from None
+    except InvalidDatasource:
+        raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
+    # 前段校验失败在流开始前以常规 JSON 错误响应(query-streaming spec「防线同构」)
+    return StreamingResponse(
+        _relay_gen(handle),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ============ 会话列表/消息历史/删除(006,web-nav 支撑端点) ============

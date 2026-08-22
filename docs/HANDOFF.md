@@ -1,38 +1,66 @@
 # HANDOFF — Kongming 交接文档
 
-> 最后更新:2026-08-21(**016 eval+ai-eval 域已实施归档并入库**:
-> archive/2026-08-21-016-eval-execution-match,delta 已 sync eval/ai-eval/rag
-> 三主 spec(20 spec 校验全过);apps/api/evals/ 评估器(进程外工具形态:
-> 登录→/chat/query persist=false 与真实用户同路径,gold 直连 asyncpg,
-> 严格/宽松双分匹配器双路径+异源类型归一化)+gold 数据集 63 条
-> (sakila 22/olist 18/多轮 10 case/动态 4)+首基线回填(宽松 84%/严格 59%/
-> 多轮 70%/动态 4-4/表命中 80%)+匹配器单测 24 进默认门禁;搭车 query_history
-> 治理(0007 去重+唯一索引+UPSERT 幂等+每租户源上限 500,009③+014 O4 清偿,
-> 实库幂等直证);testpaths 门禁隔离+markers 三枚;R1 独立评审 0 严重/7 建议
-> 全修;**/goal 审查循环 R1+R2 六真缺陷再清零**(md5 表达式索引消超长问句
-> 炸/多轮裸 LIMIT×3/expect_reject 假绿/虚构 DSN/保序 flaky/Failed 异常网);
-> api 470+agent 87+web 全绿、契约零漂移;**001–016 齐,活动变更为零;
-> 下一棒=query-streaming 流式输出**)。
-> **015 审计可视化与留存已实施归档并入库**:
-> archive/2026-08-21-015-audit-visibility,delta 已 sync audit/chat 两主 spec;
-> 5 端点+1 权限点+ip 链路+导出审计 010⑦清零+归档可重导入+/admin/audit
-> 第七子页;R1 独立评审 5 严重+7 建议全修(归档 cutoff 覆盖校验/进程锁
-> 两条数据丢失路径堵死);api 440+agent 87+web 全绿、契约+5 端点。
-> **014 反馈闭环已实施归档并入库**:
-> archive/2026-08-21-014-feedback-loop,delta 已 sync 五主 spec
-> ——feedback/feedback-refine/feedback-analytics/chat/knowledge;
-> 6 端点+3 权限点+赞踩 UI+/admin/feedback 第六子页,009⑦列注释+
-> ⑪reindex 先润色后删写搭车清零;R1 独立评审 0 严重/4 建议全修
-> (uuid 422/编辑知识携带参数/comment 回显预填/类型生成)+12 观察挂账;
-> api 423+agent 87+web 全绿、契约 +5 端点;**013 挂账清理小修包已同日
-> 归档**(7 项挂账清零,archive/2026-08-21-013-backlog-hardening);
-> **下一棒=015-audit-visibility 已提案待实施**,其后 eval/query-streaming)。
+> 最后更新:2026-08-21(**017 query-streaming 已实施归档并入库**:
+> archive/2026-08-21-017-query-streaming,delta 已 sync query-streaming(新)
+> +nl2sql-agent/chat/web-nav 四主 spec(21 spec 常规口径校验全过);
+> SSE 端到端流式问答:agent /query_stream(astream updates+custom 双通道,
+> 节点 wrapper 发事件——nodes.py/prompts.py 零侵入 prompt 资产纪律)+
+> api /chat/query_stream(后台 task+asyncio.Queue 中继——**Starlette 断线
+> 即取消生成器**,断线续存=独立 StreamStore 会话落库照常,010 title_tasks
+> 同款模式;15s 心跳注释行;前段/终态落库与同步共用唯一实现禁第二套口径;
+> 业务三态恒走 result 事件,error 仅传输层——优于上游 017 的混淆形态)+
+> web fetch+ReadableStream 手写分帧(阶段逐个点亮/SQL 提前/打字机/
+> 终态乐观快照接管/AbortController+上下文守卫);事件 data schema 进
+> OpenAPI(responses model 联合注册+content oneOf,ADR-5 生成类型);
+> R1 评审 1 严重(S1 后台任务异常逃逸=前端永久悬挂,except Exception
+> 收敛+终止标记必达)+B1 接管间隙(乐观快照);**/goal R1–R5 五轮审查
+> 循环清零**(R2 深挖再清 3:守卫死锁/datasource_key/快照接管;R3 契约
+> 管线/跨变更交互再清 3:spec 字段漂移/合成卡片非 UUID id 422 面/读尾
+> 双落库;R4 复核 R3 残留再清 2:nl2sql-agent spec 3 处漏改/result 帧
+> 幂等守卫;R5 终收敛零新发现):S1 守卫 null===undefined 恒 false 新会话
+> 首问死锁(冒烟抓回与 R2 推演
+> 双路直证)/B1 datasource_key 重构丢失(_finalize_unavailable 补参+非
+> default 数据源断言锁定)/B2 navigate 触发取消闸清快照(自建导航打标
+> 豁免+Skeleton 让位);api 487+agent 95+web 全绿、契约 +1 端点+4 事件
+> schema;**016 评估 smoke 5/5 复验零劣化**;真 LLM+Playwright 冒烟
+> 9 项全过(阶段时间线直证/SQL 提前/断线续存落库/取消不残留/接管无
+> 骨架屏闪变);**001–017 齐,活动变更为零;下一棒=prompt 护栏域**
+> (摘要幻觉/规避写操作两类既有观察,016 评估集可量化验证)。
 > 清空上下文/新会话先读本文与 `AGENTS.md`,
 > 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
 
 ## 新会话开工指引(最先看这里)
 
-1. **016 eval+ai-eval 域:已实施归档并入库**(archive/2026-08-21-016-eval-execution-match)——
+1. **017 query-streaming:已实施归档并入库**(archive/2026-08-21-017-query-streaming)——
+   流式链路三件套:agent `POST /query_stream`(SSE,事件=stage/sql/summary/
+   result/error 五类;**result 终态与同步 /query 同构**(共用 _build_query_out);
+   事件发射点=graph/streams.py 的 stage_wrapper(**validate/selfheal 是同步
+   节点**,wrapper 兼容两种形态;非流式调用 get_stream_writer 抛 RuntimeError
+   静默跳过=同步路径零行为变化);langgraph 1.2.11 astream 双通道:custom=
+   节点事件,updates=逐节点 dict 累积终态)。api `POST /chat/query/stream`
+   (鉴权/前段与同步同构,异常常规 JSON 响应于流开始前;**中继架构=后台
+   task(_consume_agent_stream)+asyncio.Queue+SSE 生成器**,Starlette 在
+   客户端断开时会取消 StreamingResponse 生成器——与 Java SseEmitter broken
+   标志的关键差异,断线续存因此必须独立 task;落库走 StreamStoreFactory
+   独立会话(请求作用域 session 随取消关闭);**终止标记 None 必达铁律**
+   (R1-S1:任何异常路径经 except Exception 收敛 error 终态,否则前端永久
+   等心跳);心跳=wait_for(queue.get,15s) 超时分支(3.13 wait_for 不丢帧);
+   事件名白名单 stage/sql/summary 透传,result/error 由 api 落库后重构)。
+   web:api.ts streamChatQuery(fetch+ReadableStream 分帧,CR 剥除消跨 chunk
+   边界,401 单飞重放,resp 非 ok 走 toStatusError,无终态抛错防永等待,
+   abort 静默)+StreamCard(阶段点亮 role=status aria-live)+ChatPage 流式
+   状态(**守卫 sid 归一铁律:useParams 无参数=undefined,流发起 ?? null,
+   不归一则 null===undefined 恒 false 全回调被丢弃——S1 死锁根因**;
+   终态乐观快照 toSyntheticMessage 消接管间隙,历史 refetch 命中
+   message_id 即退位;**自建会话导航打标 selfNavigatedRef 豁免取消闸**
+   ——否则 navigate 触发 sessionId 变化清掉快照,B2 间隙以骨架屏复活)。
+   测试面:api 487(+17:流式 16+datasource_key 断言 1)+agent 95(+8);
+   契约 +1 端点+StreamStage/Sql/Summary/Error 四事件 schema(make contracts
+   重生成)。**016 评估链路零影响**:evals 走同步 persist=false,smoke 5/5
+   复验;同步 service.query 重构(前段/终态抽共用)经 R2 逐字段对拍=等价
+   (唯一漂移 datasource_key 已修+断言锁定)。**下一棒=prompt 护栏域**,
+   其后按 roadmap 第三梯队。
+   **016 eval+ai-eval 域:已实施归档并入库**(archive/2026-08-21-016-eval-execution-match)——
    评估器 apps/api/evals/(与 tests/ 平级,testpaths=["tests"] 门禁隔离,
    `pytest -q`/make check/CI 零收集,显式 `KM_EVAL_ADMIN_PASSWORD=… uv run
    pytest evals -m smoke|full|multiturn` 运行,无凭证整层 skip);三层
@@ -139,11 +167,73 @@
    (DOM 快照可读)——GUI 测试一律用 Playwright MCP 工具组
    (`mcp__plugin_playwright_playwright__browser_*`,独立管道,002 已验证可用)。
 
-## 当前状态(016 已入库;001–016 全部归档)
+## 当前状态(017 已入库;001–017 全部归档)
 
 - git:main 分支(以 git log 为准);无远程、未 push。
   分支策略:主干开发不拉 dev,协作按变更开短命 feature。
-- openspec:**001–016 全部归档;活动变更为零**。
+- openspec:**001–017 全部归档;活动变更为零**。
+- **017 架构总览**:零表结构/零新权限点/零种子/零新依赖(fetch/
+  StreamingResponse/asyncio 原生)。agent——graph/streams.py 新增(事件发射
+  wrapper;**同步/异步节点双兼容**——validate/selfheal 是 def 不是 async def,
+  wrapper 用 inspect.isawaitable 分流;**mypy 坑:stage_wrapper 返回
+  Callable 别名标注会触发 add_node Protocol 联合的 Never 推断失败,函数对象
+  可过——返回类型 Any 刻意擦除+注释钉住**)+build.py 挂 wrapper(nodes.py/
+  prompts.py 一行未动)+main.py /query_stream(astream 双通道+终态构造
+  _build_query_out 抽公共与 /query 共用;错误帧字段 snake_case reason_code
+  (R2-R2:曾 camelCase 漂移)。api——chat/sse.py(SseDecoder 增量解码纯
+  函数:注释行忽略/多 data 行拼接/data: 后单空格剥离)+agent_client
+  query_stream(httpx client.stream 逐行;超时=读间隔语义非总时长)+
+  parse_agent_reply 模块级(同步/流式共用防漂移)+ports StreamStore/
+  StreamStoreFactory(独立会话落库单元:repo+history_writer+title_trigger)
+  +service 前段 _prepare_query/终态 _finalize_reply/_finalize_unavailable
+  全共用化(**同步 query 与流式唯一差异=谁调 agent+落库走哪个会话**;R2 逐
+  字段对拍等价,曾丢 datasource_key 已修)+start_stream/_consume_agent_stream
+  (后台 task+_BACKGROUND_STREAM_TASKS 强引用;except Exception 全收敛保证
+  queue None 终止标记必达)+router /chat/query_stream(_relay_gen 生成器
+  wait_for 心跳+_sse_frame;**事件 schema 进 OpenAPI 的手法:responses 的
+  model 键放联合类型使 FastAPI 注册全部成员进 components+content 键手写
+  text/event-stream oneOf $ref(此时 $ref 已有效)——直接 content 手写 $ref
+  不会注册,实验直证**)+_stream_store_factory 组合根(get_sessionmaker
+  独立短会话,010 同款)。web——api.ts streamChatQuery(dispatchSseBlock
+  分发+**CR 剥除在 chunk 追加时(replace(/\r/g,""))消跨 chunk \r\n 分裂**,
+  不能只在 block 内 normalize)+StreamCard(阶段标签七节点+selfheal
+  「第 N 次自愈重试」+SQL 折叠 defaultOpen+打字机;role=status)+
+  ChatPage(streaming/finalized/askError 三态+inOriginCtx 守卫+selfNavigatedRef
+  自建导航豁免+取消闸依赖 [sessionId,current,datasource])。
+- **017 R1 独立评审(1 严重+1 必修+6 建议全修)**:S1 后台任务异常逃逸
+  (on_frame json.loads 畸形过程帧抛 JSONDecodeError→task 死亡→queue 无
+  终止标记→前端永久等心跳;修=过程帧 try ValueError 跳帧+外层 except
+  Exception 收敛 error 终态,直证用例 3 条)→B1 终态接管空白间隙
+  (result 到达先清空后 refetch 补位;修=finalized 乐观快照 toSyntheticMessage,
+  历史 refetch 命中 message_id 退位);R1-R6:spec 时序措辞统一「summarize
+  完成后」/tasks 措辞对齐/错误收敛分支补测/切数据源补进取消触发点(实现
+  超前于契约)/CRLF 分帧真兜底/事件名白名单。
+- **017 /goal 审查循环(R2 六切口深挖,再清 3)**:S1 新会话首问死锁
+  (useParams 无参数 undefined vs 流发起 sid ?? null,**null===undefined 恒
+  false 全回调被丢弃**——发送按钮永久禁用;冒烟抓回与 R2 静态推演双路
+  独立得出同结论;修=sessionIdRef 归一 null)→B1 datasource_key 回归
+  (同步不可达分支重构丢失该字段落 default;修=_finalize_unavailable 补参
+  +test_chat_datasource 非 default 数据源断言锁定)→B2 快照被取消闸清掉
+  (finalizeOk 的 navigate 触发 sessionId 变化→取消闸 effect 清 finalized
+  +Skeleton 分支拦截→接管间隙以骨架屏闪变复活;修=selfNavigatedRef 打标
+  豁免+Skeleton 分支让位 finalized,时间线直证无闪变)。挂账:R3 断线窗口
+  重进无「生成中」占位(spec 为终态后语义不违约);R4 _persist_touch_quietly
+  失败回滚连带吞已成功 insert(mid 悬空,既有行为非 017 引入);O2 selfheal
+  running 帧 retry_count 为进入时旧值(done 帧为本次序号,前端只用 done)。
+- **017 冒烟(2026-08-21,真 LLM+Playwright MCP,9 项全过)**:curl——流式
+  全链(12 stage 帧成对时序正确/sql 提前且与终态 SQL 逐字一致/summary/
+  result 富化含 message_id 与 chart 推断)/REJECTED 走 result(BLOCKED+
+  分态文案,4 stage=图拓扑)/断线续存(--max-time 1.5 断开收 5 帧无终态,
+  12s 后 USER+ASSISTANT 双消息照常落库)/persist=false 零落库;UI——流式
+  时间线直证(t=0 阶段1→t=800 阶段5→t=2800 阶段11+SQL 提前显示→t=5600
+  阶段12+打字机→t=6000 终态表格接管)/终态完整卡片(图表 toggle/导出/
+  SQL/执行计划/洞察/stats+标题 LLM 改写)/取消(流中切会话阶段归零无
+  残留无错误)/B2 修复后接管全程无骨架屏闪变/**冒烟抓回 S1 死锁**(守卫
+  日志直证 inOriginCtx 恒 false,浏览器端 fetch+reader 分帧复刻排除 vite
+  proxy 缓冲嫌疑后定位 sid 归一)。016 评估 smoke 5/5 复验(同步链路零回归)。
+  **MCP 操作经验:textarea 原生 setter+input 事件设值(React 受控组件
+  fill 偶发不触发 state),流式中间态用 evaluate 内 setTimeout 轮询采样
+  (MCP snapshot 单次往返太慢抓不到过程)**。
 - **016 架构总览**:零端点/零契约漂移/零 agent 改动/零种子;新依赖仅 dev
   组 pyyaml(评估器 yaml 解析,不进产品)。api——evals/ 新目录
   (conftest/matchers/test_eval/五份 yaml/README,与 tests/ 平级不继承其
@@ -904,17 +994,19 @@
 - 前端:登录页五家联邦按钮数据驱动;simple-icons 覆盖 GitHub/Google/微信系,
   **钉钉/飞书 simple-icons@16 未收录 → 按例外条款内联官方 mark**;favicon.svg 已补
   (朱砂底白色羽扇)。003 冒烟:五家图标实测渲染正确。
-- 质量:api ruff/mypy strict/lint-imports/pytest **470**(认证+datascope+执行路由+
+- 质量:api ruff/mypy strict/lint-imports/pytest **485**(认证+datascope+执行路由+
   防火墙+chat+meta+会话端点+system 管理面+datasource 68+rag 58+chat 体验 44+
-  图表 scatter 3+012 启停 7+013/014/015 增量+****016 匹配器 24+writeback 治理 5**(/goal 后 470),
-  真实 PG+Redis)+ agent 同门禁 **87** + web tsc/eslint 全绿;
+  图表 scatter 3+012 启停 7+013/014/015 增量+016 匹配器 24+writeback 治理 5+
+  **017 流式 14+SSE 解码器 3+B1 断言**),
+  真实 PG+Redis)+ agent 同门禁 **95**(+8 流式) + web tsc/eslint 全绿;
   CI api job 已带 pg/redis services(未在真实 runner 验证——push 后首验);
   **评估器(evals/)不进默认收集**,评估环境显式运行(016)。
 - 契约:openapi.json 含 /auth/* + /internal/sql/execute + /chat/query +
   /internal/meta/schema + /chat/sessions(列表/消息/删除)+
   /system/* 16 端点(007)+ /system/datasource/* 8 端点(008)+
   /system/rag/* 5 端点 + /internal/rag/retrieve(009)+
-  **/chat/explain + /chat/export + PATCH /chat/sessions/{id} + sessions?q(010)**;
+  **/chat/explain + /chat/export + PATCH /chat/sessions/{id} + sessions?q(010)**+
+   **/chat/query/stream SSE(017,含 Stage/Sql/Summary/Error 事件 schema)**;
   端点落定后 `make contracts` 已重生成,web tsc 过。
 
 ## 已定死的决策(不再议,引用即终)
@@ -940,14 +1032,30 @@
 
 ## 下一步(路线图梯队,按序)
 
-1. **query-streaming 流式输出**(评估基线已立:gen 统计题误加 LIMIT/
-   ::numeric 舍入/投影丢列/指代消解错位五类失败归因是 prompt 护栏与
-   流式重构的量化靶点,016 基线表为回归红线);
-2. 其后按 roadmap:prompt 护栏域(摘要幻觉/规避写操作两类既有观察,
-   016 评估集可量化验证);
+1. **prompt 护栏域**(016 评估基线的量化靶点:gen 统计题误加 LIMIT/
+   ::numeric 舍入/投影丢列/指代消解错位/漏 DISTINCT 五类失败归因+
+   摘要幻觉/规避写操作两类既有观察,016 评估集 full 层可前后对比验证;
+   017 基线表为流式回归红线);
+2. 其后按 roadmap 第三梯队(tool-calling/mcp-interop/workflow-orchestration/
+   cloud-code-sandbox 等,开工时再立 spec);
 3. 剩余挂账见「已知 TODO」各段,随对应域变更搭车评估。
 
 ## 已知 TODO(代码内标注,非缺陷)
+
+**017 挂账(R2-R5 观察)**:①断线续存窗口内重进会话只有 USER 气泡无
+「生成中」占位(spec 为终态后语义不违约,体验增强随 UX 域评估);②
+_persist_touch_quietly 失败回滚连带吞掉已成功的 insert_message(mid 悬空
+→前端反馈 404;既有行为非 017 引入,触发≈DB 故障窗口);③selfheal 的
+stage running 帧 retry_count 为进入时旧值(done 帧为本次序号,前端只用
+done 帧,语义已钉 spec);④summary 单条完整 delta 非 token 级流(上游
+同款 Phase 5 挂牌,契约按逐事件追加立约零演进成本);⑤流式 error 帧
+不携带业务上下文(reason_code 恒 null,传输层失败无分类需求);⑥
+agent_timeout_sec 流式下为读间隔超时非链路总时长(design §8 已注明);
+⑦标题改写 bare create_task 在进程关停窗口不被等待(BackgroundTasks
+会;best-effort 语义可接受,R3-O);⑧api 重启进行中的流随 worker 退出
+(与同步在途请求同类,断线续存不跨进程);⑨落库容错分支(罕见)合成
+卡片 id 空串=反馈/执行计划入口不渲染(R3-B2 修复后守卫天然生效,
+快照永不退位至下一轮提问——刻意兜底)。
 
 **016 挂账(R1 观察+冒烟注记)**:①0007 存量去重无直证用例(测试基建
 全新建库无存量可覆盖;SQL 经 R1 逐条论证+PG row-wise 比较 NOT NULL 列无

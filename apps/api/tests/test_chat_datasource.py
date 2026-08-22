@@ -102,6 +102,29 @@ async def test_forged_disabled_cross_tenant_same_shape(
     assert await _session_count(session) == 0  # 未建会话
 
 
+async def test_unavailable_keeps_datasource_key_snapshot(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, FakeAgent],
+) -> None:
+    """R2-B1 回归锁定:agent 不可达 + 非 default 数据源时,响应 datasource_key
+    保持本次执行快照(流式重构曾将其丢失落 default)。"""
+    _install(fake_agent, FakeAgent(boom=True))
+    _, token = await _user_with_chat_perm(client, session, make_user)
+    tid = await _default_tenant_id(session)
+    await _mk_ds(session, "chatdsdown", tid)
+    r = await client.post(
+        "/chat/query",
+        json={"question": "有多少商品", "datasource_key": "chatdsdown"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is False and "暂不可用" in body["error"]
+    assert body["datasource_key"] == "chatdsdown"
+
+
 async def test_valid_key_passes_through(
     client: AsyncClient,
     session: AsyncSession,

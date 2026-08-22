@@ -5,8 +5,12 @@ service/models 受 import-linter 零框架契约,不可间接 import internal.se
 (携 sqlalchemy 引擎层),007 uuid7 拆分同款教训;适配层组合与 009 rag⇄datasource 同构。
 """
 
+from collections.abc import Callable, Coroutine
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
+
+from kongming.rag.ports import QueryHistoryWriter
 
 
 class ChatStoreError(Exception):
@@ -76,6 +80,26 @@ class OperLogger(Protocol):
     async def add(
         self, user_id: str | None, action: str, target: str | None, detail: dict[str, object]
     ) -> None: ...
+
+
+@dataclass
+class StreamStore:
+    """流式终态落库单元(017 断线续存):独立数据库会话上的端口组装。
+
+    前端断开后请求作用域会话随响应取消而关闭,assistant 落库/回写/标题任务
+    必须走本独立单元(design §4;010 title_tasks 同款模式)。
+    """
+
+    repo: ChatRepo
+    history_writer: QueryHistoryWriter | None = None
+    # 标题改写触发(组合根绑定 title_tasks.rewrite_session_title;None=未接线)
+    trigger_title_rewrite: Callable[[str], Coroutine[Any, Any, None]] | None = None
+
+
+class StreamStoreFactory(Protocol):
+    """断线续存落库单元工厂:每次调用开启一个独立会话(异步上下文管理器)。"""
+
+    def __call__(self) -> AbstractAsyncContextManager[StreamStore]: ...
 
 
 @dataclass(frozen=True)
