@@ -61,7 +61,7 @@
 
 - id: olist_008
   question: 订单评论的平均评分是多少
-  gold_sql: SELECT AVG(review_score) FROM tenant_olist.order_reviews
+  gold_sql: SELECT ROUND(AVG(review_score), 2) FROM tenant_olist.order_reviews
   expected_tables: [order_reviews]
   category: aggregate
 
@@ -98,7 +98,7 @@
 
 - id: olist_014
   question: 评论得分与订单状态的关系,每种状态下评论的平均分
-  gold_sql: SELECT o.order_status, AVG(r.review_score) FROM tenant_olist.orders o JOIN tenant_olist.order_reviews r ON o.order_id = r.order_id GROUP BY o.order_status
+  gold_sql: SELECT o.order_status, ROUND(AVG(r.review_score), 2) FROM tenant_olist.orders o JOIN tenant_olist.order_reviews r ON o.order_id = r.order_id GROUP BY o.order_status
   expected_tables: [orders, order_reviews]
   category: join_2table
 
@@ -110,7 +110,16 @@
   category: join_2table
 
 - id: olist_016
-  question: 每种类目商品的平均价格和平均运费
-  gold_sql: SELECT p.product_category_name, AVG(i.price), AVG(i.freight_value) FROM tenant_olist.order_items i JOIN tenant_olist.products p ON i.product_id = p.product_id GROUP BY p.product_category_name
+  question: 每种商品类目的平均价格和平均运费(按 products 表的 product_category_name 列分组,不要用英文翻译表)
+  # 018 修订×2:gen 把翻译表英文名别名为 product_category_name 规避初版措辞——显式点名表/列+排除翻译表
+  # 聚合小数值 gold 统一 ROUND(…, 2)(规范第 10 条,与 018 生成侧口径互锁)
+  gold_sql: SELECT p.product_category_name, ROUND(AVG(i.price), 2), ROUND(AVG(i.freight_value), 2) FROM tenant_olist.order_items i JOIN tenant_olist.products p ON i.product_id = p.product_id GROUP BY p.product_category_name
   expected_tables: [order_items, products]
   category: join_2table
+
+- id: olist_017
+  question: 每个卖家城市有多少卖家
+  # 018 新增:统计题 LIMIT 拦截(规则 6)——611 分组,gen 误加 LIMIT 100 必挂
+  gold_sql: SELECT seller_city, COUNT(*) FROM tenant_olist.sellers GROUP BY seller_city
+  expected_tables: [sellers]
+  category: aggregate

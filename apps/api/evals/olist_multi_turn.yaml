@@ -28,9 +28,32 @@
 - id: olist_multiturn_004
   category: multi_turn
   turns:
-    - question: 每种商品类目有多少个商品
+    - question: 每种商品类目有多少个商品(类目取 product_category_name 原名)
+      # 018 修订:消「原名 vs 英文翻译名」歧义(同 olist_016)
       # 原「每城市订单数」turn1 结果 4119 行超上限,重设计为类目维度(73 行);
       # NULL 非类目,t2 翻译表 INNER JOIN 天然排除——t1 显式对齐同口径
       gold_sql: SELECT p.product_category_name, COUNT(*) FROM tenant_olist.products p WHERE p.product_category_name IS NOT NULL GROUP BY p.product_category_name
-    - question: 这些类目中商品数最多的前5个,对应的英文翻译名是什么
+    - question: 这些类目中商品数最多的前5个,各自的英文翻译名和商品数是什么
+      # 018 修订:原问句只点名「英文翻译名」,gen 按规则 9 投影完备字面遵循丢
+      # 商品数列——gold 含 COUNT 需问句点名(规范第 9 条 top-N 点名值列同款)
       gold_sql: SELECT t.product_category_name_english, COUNT(*) FROM tenant_olist.products p JOIN tenant_olist.category_translation t ON p.product_category_name = t.product_category_name GROUP BY t.product_category_name_english ORDER BY COUNT(*) DESC, t.product_category_name_english LIMIT 5
+
+- id: olist_multiturn_005
+  category: multi_turn
+  # 018 新增:指代消解保真——「这些城市」= t1 的 top10 城市,不退化为全量
+  turns:
+    - question: 订单数量最多的前10个城市
+      gold_sql: SELECT c.customer_city, COUNT(*) FROM tenant_olist.orders o JOIN tenant_olist.customers c ON o.customer_id = c.customer_id GROUP BY c.customer_city ORDER BY COUNT(*) DESC, c.customer_city LIMIT 10
+    - question: 这些城市的客户记录总数是多少(按客户表行数计数,无论是否下过单)
+      # 018 修订×2:「位客户」被解读为 DISTINCT customer_unique_id(33801)
+      # vs gold 客户表行数(35042)——「记录/行数」措辞显式对齐 COUNT(*)
+      gold_sql: SELECT COUNT(*) FROM tenant_olist.customers WHERE customer_city IN (SELECT c.customer_city FROM tenant_olist.orders o JOIN tenant_olist.customers c ON o.customer_id = c.customer_id GROUP BY c.customer_city ORDER BY COUNT(*) DESC, c.customer_city LIMIT 10)
+
+- id: olist_multiturn_006
+  category: multi_turn
+  # 018 新增:指代消解保真——「这些订单」= t1 的 top10 订单;连跑两次一致
+  turns:
+    - question: 运费总额最高的前10个订单及其运费总额
+      gold_sql: SELECT order_id, SUM(freight_value) FROM tenant_olist.order_items GROUP BY order_id ORDER BY SUM(freight_value) DESC, order_id LIMIT 10
+    - question: 这些订单的支付总金额是多少
+      gold_sql: SELECT SUM(payment_value) FROM tenant_olist.order_payments WHERE order_id IN (SELECT order_id FROM tenant_olist.order_items GROUP BY order_id ORDER BY SUM(freight_value) DESC, order_id LIMIT 10)

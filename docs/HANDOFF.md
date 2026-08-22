@@ -1,37 +1,59 @@
 # HANDOFF — Kongming 交接文档
 
-> 最后更新:2026-08-21(**017 query-streaming 已实施归档并入库**:
-> archive/2026-08-21-017-query-streaming,delta 已 sync query-streaming(新)
-> +nl2sql-agent/chat/web-nav 四主 spec(21 spec 常规口径校验全过);
-> SSE 端到端流式问答:agent /query_stream(astream updates+custom 双通道,
-> 节点 wrapper 发事件——nodes.py/prompts.py 零侵入 prompt 资产纪律)+
-> api /chat/query_stream(后台 task+asyncio.Queue 中继——**Starlette 断线
-> 即取消生成器**,断线续存=独立 StreamStore 会话落库照常,010 title_tasks
-> 同款模式;15s 心跳注释行;前段/终态落库与同步共用唯一实现禁第二套口径;
-> 业务三态恒走 result 事件,error 仅传输层——优于上游 017 的混淆形态)+
-> web fetch+ReadableStream 手写分帧(阶段逐个点亮/SQL 提前/打字机/
-> 终态乐观快照接管/AbortController+上下文守卫);事件 data schema 进
-> OpenAPI(responses model 联合注册+content oneOf,ADR-5 生成类型);
-> R1 评审 1 严重(S1 后台任务异常逃逸=前端永久悬挂,except Exception
-> 收敛+终止标记必达)+B1 接管间隙(乐观快照);**/goal R1–R5 五轮审查
-> 循环清零**(R2 深挖再清 3:守卫死锁/datasource_key/快照接管;R3 契约
-> 管线/跨变更交互再清 3:spec 字段漂移/合成卡片非 UUID id 422 面/读尾
-> 双落库;R4 复核 R3 残留再清 2:nl2sql-agent spec 3 处漏改/result 帧
-> 幂等守卫;R5 终收敛零新发现):S1 守卫 null===undefined 恒 false 新会话
-> 首问死锁(冒烟抓回与 R2 推演
-> 双路直证)/B1 datasource_key 重构丢失(_finalize_unavailable 补参+非
-> default 数据源断言锁定)/B2 navigate 触发取消闸清快照(自建导航打标
-> 豁免+Skeleton 让位);api 487+agent 95+web 全绿、契约 +1 端点+4 事件
-> schema;**016 评估 smoke 5/5 复验零劣化**;真 LLM+Playwright 冒烟
-> 9 项全过(阶段时间线直证/SQL 提前/断线续存落库/取消不残留/接管无
-> 骨架屏闪变);**001–017 齐,活动变更为零;下一棒=prompt 护栏域**
-> (摘要幻觉/规避写操作两类既有观察,016 评估集可量化验证)。
+> 最后更新:2026-08-22(**018 prompt-guardrails 已实施归档并入库**:
+> archive/2026-08-22-018-prompt-guardrails,delta 已 sync nl2sql-agent 主
+> spec)——prompt 质量护栏三层:生成(SQL_GEN_SYSTEM 规则 6 统计/明细
+> 边界重写+top-N tiebreaker/规则 8 ROUND(…, 2) 口径/规则 9 投影完备+
+> 去重/规则 3「ID/编号列不能替代名称列」/规则 1 写操作请求诚实处理)+
+> 理解(understand 指代消解保真:保留上轮全部限定条件)+摘要
+> (SUMMARIZE_SYSTEM 事实性规则+summarize 上下文接地=行数+本地 stats+
+> 前5行,消「只喂前 5 行以偏概全」信息根源)。**016 五类失败归因全部
+> 闭环,评估新基线:宽松 48/48(100%)/严格 37/48(77%)/多轮 12/12/
+> 表命中 46/48(96%)/动态 4/4**(首基线 84%/59%/80%/80%);实施期新
+> 发现 top-N 排序键并列是 gen/gold 集合错位首因→规则 6 补 tiebreaker
+> (gold 规范第 1 条的 gen 侧镜像)后多轮 5 挂中 4 个直接消解;评估集
+> 对齐修订 14 处+新增 6 case+gold 规范第 10 条(ROUND 互锁),全部
+> 演进记入 evals README。写操作诱导冒烟:只读 SELECT 现状+摘要「未执行
+> 删除操作」(WHERE FALSE 规避与谎称成功双消)。评估器运行注记:
+> 评估连跑曾遇「Server disconnected」成片空 SQL,事后定位为本地
+> VPN 切换的环境事件(非配额限流,与链路无关),网络稳定后重跑即可。api 487+
+> agent 105(+10:prompt 护栏 9+summarize 接地 1)+web 全绿、契约零
+> 漂移、零表结构/零端点变更;**001–018 齐,活动变更为零;下一棒=
+> roadmap 第三梯队(tool-calling/mcp-interop/workflow-orchestration
+> 等,开工时再立 spec)**。
 > 清空上下文/新会话先读本文与 `AGENTS.md`,
 > 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
 
 ## 新会话开工指引(最先看这里)
 
-1. **017 query-streaming:已实施归档并入库**(archive/2026-08-21-017-query-streaming)——
+1. **018 prompt-guardrails:已实施归档并入库**(archive/2026-08-22-018-prompt-guardrails)——
+   prompt 质量护栏三层(全部在 apps/agent,零 api/web/契约/表结构变更):
+   ①生成=SQL_GEN_SYSTEM 规则 6 重写(含 GROUP BY/聚合即统计查询不加
+   LIMIT;top-N 除外按统计键排序后 LIMIT;**排序键可能并列必须追加主键
+   等唯一列作第二排序键**——实施期评估实证 top-N 并列是 gen/gold 集合
+   错位首因)+新增规则 8(AVG/比率/除法 ROUND(…, 2),禁裸 ::numeric)
+   +规则 9(问题点名信息项必须进投影;一对多 JOIN 统计 COUNT(DISTINCT
+   主键);JOIN 完全重复明细行 DISTINCT)+规则 3 补强(ID/编号列不能
+   替代名称列)+规则 1 补(写操作请求只生成查看现状的只读 SELECT,禁
+   WHERE FALSE 规避)+反例六条;②理解=UNDERSTAND_MULTI_SYSTEM 保真
+   规则(保留上轮全部限定条件;这些/它们=对上轮结果集的追问;只补全
+   语义不新增不篡改);③摘要=SUMMARIZE_SYSTEM 事实性规则(数值结论以
+   所给统计与可见行为准不外推;写操作请求实际只读查询时如实说明未执行)
+   +nodes.py summarize 上下文接地(总行数+本地 stats+前5行——stats 本就
+   本地算出零成本,消以偏概全信息根源)。prompts.py 文件头例外清单已
+   更新(三模板 018 增量+nodes.py user 上下文段);test_prompts.py 9 条
+   断言防手滑(8 规则标识+1 全角纪律)。**评估新基线(README 基线表):宽松 48/48(100%)/
+   严格 37/48(77%)/多轮 12/12/表命中 46/48(96%)/动态 4/4**;评估集
+   对齐修订 14 处+新增 6 case(sakila_021/022/023、olist_017、olist_mt_
+   005/006)+gold 规范第 10 条(聚合小数值 gold 统一 ROUND(…, 2) 与
+   生成侧互锁,存量 4 题已对齐)。**评估器运行注记(重要)**:qwen-plus
+   连跑曾遇 api 日志「agent 回调异常: Server disconnected」+gen 空
+   SQL 成片失败——事后定位为**本地 VPN 切换的环境事件**(TUN 模式切换
+   窗口路由重建波及回环连接,当日实证;账号配额 250 万 tokens/30s 远超
+   负载,非限流;非链路回归),网络稳定后重跑即恢复,勿误判勿长冷却
+   (R4–R6 实证,R7–R9 全量复跑全过)。**下一棒=roadmap 第三梯队**
+   (tool-calling 等,开工时再立 spec)。
+   **017 query-streaming:已实施归档并入库**(archive/2026-08-21-017-query-streaming)——
    流式链路三件套:agent `POST /query_stream`(SSE,事件=stage/sql/summary/
    result/error 五类;**result 终态与同步 /query 同构**(共用 _build_query_out);
    事件发射点=graph/streams.py 的 stage_wrapper(**validate/selfheal 是同步
@@ -167,11 +189,59 @@
    (DOM 快照可读)——GUI 测试一律用 Playwright MCP 工具组
    (`mcp__plugin_playwright_playwright__browser_*`,独立管道,002 已验证可用)。
 
-## 当前状态(017 已入库;001–017 全部归档)
+## 当前状态(018 已入库;001–018 全部归档)
 
 - git:main 分支(以 git log 为准);无远程、未 push。
   分支策略:主干开发不拉 dev,协作按变更开短命 feature。
-- openspec:**001–017 全部归档;活动变更为零**。
+- openspec:**001–018 全部归档;活动变更为零**。
+- **018 架构总览**:零表结构/零端点/零契约/零 api/web 变更/零新依赖——
+  唯一代码面 apps/agent。prompts.py 三模板加固(规则 6 统计/明细边界
+  +tiebreaker、规则 8 ROUND、规则 9 投影完备+DISTINCT、规则 3 ID 不替名、
+  规则 1 写操作诚实、understand 保真、summarize 事实性);nodes.py
+  summarize 上下文接地(总行数+stats+前5行);test_prompts.py 新增
+  (9 条断言=8 规则标识+1 全角纪律);test_nodes.py +1(stats 入上下文断言)。
+  评估资产:evals 4 份 yaml 修订(14 处对齐+6 新 case)+README 基线表/
+  规范第 10 条/演进注记/VPN 切换环境事件运行注记。
+- **018 实施期评估循环(R1–R8 真 LLM 连跑)**:R1 多轮 5 挂归因→
+  tiebreaker 规则(首因);R2 宽松 88%→规则 3 ID 不替名+规则 9 明细
+  DISTINCT+评估集首轮对齐;R3 宽松 94%/多轮 11/12;R4–R6 qwen-plus
+  「Server disconnected」成片空 SQL(事后定位为本地 VPN 切换环境
+  事件,非限流非链路回归);
+  R7 full 96%+R6-mt 11/12;R8 终验 full 100%+mt 12/12。残留形态:
+  严格口径 13 挂为聚合别名/投影形态差异(宽松判过的合理形态)。
+- **018 冒烟(2026-08-22,真 LLM,curl 4 项全过)**:①统计题「每位客户
+  支付总金额」SQL 无 LIMIT 返回 599 全分组;②写操作诱导「删除 name 为
+  连弩的商品」→只读 SELECT 现状+摘要「…但未执行删除操作」,库内 4 行
+  完好(WHERE FALSE 规避与谎称成功双消);③指代保真「他们各自的邮箱」
+  →top-5 限定+tiebreaker,五邮箱与 gold 逐字一致;④摘要数值接地 olist
+  状态分布:summary 最值 96478/2 与 stats count_max/count_min 精确一致
+  (005「说错最大值」观察闭环)。evals smoke 5/5 复验;make check 全绿
+  (api 487+agent 105+8 契约 KEPT+web)。
+- **018 /goal 审查循环(R1 双路清零)**:R1 换切口自查修 3——prompts.py
+  文件头「反例四条」失实(实际六条)/sakila_014 双注释自相矛盾(残留
+  「DISTINCT 对齐」与「去 DISTINCT」并立)/主 spec SQL 生成质量规则
+  规范性描述缺 tiebreaker/ID 不替名/明细 DISTINCT 三句(scenario 在
+  而规范句缺,sync 后补)。R1 独立评审 0 严重/7 建议全修——B1 规则 2
+  vs 规则 8 张力(规则 2 补「舍入按规则 8」)/B2 tiebreaker 从句隶属
+  明细语境(提升为独立句「凡 ORDER BY … LIMIT 取前 N(明细或统计
+  top-N)」)/B3 文件头例外清单漏规则 3 018 增量/B6 README「14 处」
+  列举混入新增 case(olist_mt_005 t2 移至新增说明)/B7 HANDOFF 测试数
+  表述(9 断言=8 规则标识+1 全角纪律)/O1 prompt 聚合函数枚举去
+  HAVING 与 spec 对齐/O2 spec 指代词 他们→它们 对齐 prompt/O3
+  「裸 ::numeric 截断」PG 语义不准(无标度 ::numeric 不截断;改
+  「禁止用 ::numeric 转换代替 ROUND」)/O7 规则 3 补「与问题点名的
+  信息项外」呼应规则 9。B4/B5(归档 tasks 1.5/design D2「反例四条」、
+  tasks 5.2/design D6「~8 用例」与实际不符)按封存先例转 018 挂账⑦⑧;
+  O4 规则编号顺序(design 已声明无语义)/O5 全角正则窄口径(当前无
+  实例)/O6 data_preview 无长度闸 观察记录。**R2 终审清零**:R9 全量
+  复跑(修复后)宽松 48/48(100%)/严格 37/48(77%,较 R8 73% 反升)/
+  多轮 12/12/动态 4/4 零劣化;make check 全绿(api 487+agent 105+
+  8 契约 KEPT+web)。**「qwen-plus 限流」归因纠错**:R4–R6 成片
+  「Server disconnected」初判限流并施长冷却——用户以配额数据
+  (250 万 tokens/30s,评估负载不到 50 RPM)证伪+自陈当日切换过
+  VPN,终定位=本地 VPN 切换环境事件(TUN 切换窗口路由重建波及
+  回环连接),README 运行注记/决策表/挂账⑤/记忆已全部更正
+  (异常成片先查本地网络,勿长冷却)。
 - **017 架构总览**:零表结构/零新权限点/零种子/零新依赖(fetch/
   StreamingResponse/asyncio 原生)。agent——graph/streams.py 新增(事件发射
   wrapper;**同步/异步节点双兼容**——validate/selfheal 是 def 不是 async def,
@@ -994,11 +1064,12 @@
 - 前端:登录页五家联邦按钮数据驱动;simple-icons 覆盖 GitHub/Google/微信系,
   **钉钉/飞书 simple-icons@16 未收录 → 按例外条款内联官方 mark**;favicon.svg 已补
   (朱砂底白色羽扇)。003 冒烟:五家图标实测渲染正确。
-- 质量:api ruff/mypy strict/lint-imports/pytest **485**(认证+datascope+执行路由+
+- 质量:api ruff/mypy strict/lint-imports/pytest **487**(认证+datascope+执行路由+
   防火墙+chat+meta+会话端点+system 管理面+datasource 68+rag 58+chat 体验 44+
   图表 scatter 3+012 启停 7+013/014/015 增量+016 匹配器 24+writeback 治理 5+
   **017 流式 14+SSE 解码器 3+B1 断言**),
-  真实 PG+Redis)+ agent 同门禁 **95**(+8 流式) + web tsc/eslint 全绿;
+  真实 PG+Redis)+ agent 同门禁 **105**(+10:018 prompt 护栏标识 9+summarize 接地 1)
+  + web tsc/eslint 全绿;
   CI api job 已带 pg/redis services(未在真实 runner 验证——push 后首验);
   **评估器(evals/)不进默认收集**,评估环境显式运行(016)。
 - 契约:openapi.json 含 /auth/* + /internal/sql/execute + /chat/query +
@@ -1029,18 +1100,36 @@
 | 图表增强 | 推断补双数值列→scatter(x=首列,y=首个数值列;temporal/pie/bar 既有规则不变);四类型手动切换=卡片本地状态、映射恒定、刷新/同卡片新结果回落建议类型;scatter 渲染按 x 列全数值探测分流(排除 null 防 Number(null)===0 误判),非数值退化类目点图不丢点;PNG=getDataURL pixelRatio 2+背景取 --card token,文件名「图表-<时间戳>.png」 | chat「图表可视化」+ web-nav「结果图表渲染」spec(011 delta) |
 | 反馈闭环 | 提交=幂等三态(null 保持/空串清空/显式覆盖)+行锁串行+置 PENDING+重复提交清空处置三列;归属 403 同形(与 chat 404 惯例分立);仅 assistant;纠错先过防火墙(与 internal 同一规则集)整体拒,通过后复用 009 writeback 沉淀(会话快照数据源;与现值不同才写;清空不删已沉淀行;失败不阻断);处置限定已反馈 assistant,枚举四态,note 三态;涉及表=sqlglot 抽表(CTE 排除,末段小写),匹配不纳 schema 名;统计=Asia/Shanghai 固定分桶逐天补零;行级可见性=非 ALL 强制本人覆盖传值(ALL 判定=角色集 bool_or);messageId 打通=实时响应纯增 message_id/datasource_key+历史回显 rating/corrected_sql/feedback_comment;REJECTED/FAILED 卡片不挂赞踩入口(API 不拦);编辑知识跳 /admin/rag?table=<名> 定位;纠错永不回写 table_descriptions | feedback + feedback-refine + feedback-analytics + chat + knowledge spec(014 delta) |
 | 评估体系 | Execution Match=gold 直连执行 vs 链路响应结果集,严格 multiset/宽松双路径(列等价+投影行近似;数值子集天然无序;纯文本回退严格等值)并行;宽松=黄金指标(基线对照/回归红线,劣化 ≥5pp 溯源),**宽松不惩罚序错**=既定语义;评估器=apps/api/evals/ 进程外工具(登录→/chat/query persist=false 与真实用户同路径,gold 直连 asyncpg),testpaths 门禁隔离+三级 marker(smoke~5/full/multiturn),无凭证整层 skip;评估集按租户分文件(sakila22+olist18+多轮 10 case+动态 4),gold 编写规范九条(tiebreaker/业务可读列/结果集 ≤1000/明细 LIMIT 100+问句显式排序键/外层 ORDER BY/避时间戳列/显式 schema/连带同步);Recall=间接口径(生成 SQL 表覆盖 expected_tables,sqlglot CTE 排除);匹配器纯函数单测进默认门禁;CI 不虚构评估运行(smoke=评估环境显式触发,基线记录 README 表);query_history 回写幂等治理(同题覆盖保最新+保旧向量+每租户源上限 500) | eval + ai-eval + rag spec(016 delta) |
+| prompt 质量护栏 | 生成规则:含 GROUP BY/聚合函数即统计查询不加 LIMIT(用户明确 top-N 除外,按统计键排序后 LIMIT);排序键可能并列必须追加主键等唯一列作第二排序键;AVG/比率/除法 ROUND(…, 2) 禁裸 ::numeric;问题点名信息项必须进投影;一对多 JOIN 统计 COUNT(DISTINCT 主键)、JOIN 完全重复明细行 DISTINCT;ID/编号列不能替代名称列;写操作请求只生成查看现状的只读 SELECT 禁 WHERE FALSE 规避;明细默认 LIMIT 100+确定性排序既有语义保留。理解:指代消解保真(保留上轮全部限定条件,这些/它们=对上轮结果集的追问,只补全语义不新增不篡改)。摘要:上下文=行数+本地 stats+前5行接地,数值结论以所给统计与可见行为准不外推,写操作请求实际只读查询时如实说明未执行(终态=SUCCESS+诚实摘要,不引入新状态机分支)。评估对齐:聚合小数值 gold 统一 ROUND(…, 2)(规范第 10 条);评估器运行注记(VPN 切换环境事件,网络稳定后重跑) | nl2sql-agent spec(018 delta) |
 
 ## 下一步(路线图梯队,按序)
 
-1. **prompt 护栏域**(016 评估基线的量化靶点:gen 统计题误加 LIMIT/
-   ::numeric 舍入/投影丢列/指代消解错位/漏 DISTINCT 五类失败归因+
-   摘要幻觉/规避写操作两类既有观察,016 评估集 full 层可前后对比验证;
-   017 基线表为流式回归红线);
-2. 其后按 roadmap 第三梯队(tool-calling/mcp-interop/workflow-orchestration/
-   cloud-code-sandbox 等,开工时再立 spec);
-3. 剩余挂账见「已知 TODO」各段,随对应域变更搭车评估。
+1. **roadmap 第三梯队**(tool-calling/mcp-interop/workflow-orchestration/
+   cloud-code-sandbox 等,开工时再立 spec;**安全向 prompt 护栏**(上游 030
+   形态:injection 检测/PII 脱敏/输出审核/sys_guardrail_audit)上游自定
+   位为 tool-calling 伴生需求,随该域一并评估——018 已立 Non-goal 不重复
+   登记);
+2. 剩余挂账见「已知 TODO」各段,随对应域变更搭车评估。
 
 ## 已知 TODO(代码内标注,非缺陷)
+
+**018 挂账**:①严格口径 13/48 挂为聚合别名/投影形态差异(宽松判过的
+合理形态,严格=multiset 精确等值既定语义,非质量信号);②写操作意图
+预检(REJECTED 分态文案)远期随 tool-calling 域评估(design OQ1——
+现形态=SUCCESS+诚实摘要);③UNDERSTAND few-shot 示例按需再加(design
+OQ2——保真规则两句已使多轮 12/12,token 成本不预付);④摘要事实性仍
+靠 LLM 自觉遵守(接地已消信息根源,程序化摘要校验不设);⑤评估器
+评估器「Server disconnected」成片失败为本地 VPN 切换环境事件
+(README 运行注记已记,非配额问题,网络稳定后重跑即可);
+⑥prompts.py 与上游逐字一致面进一步收窄(例外清单已更新,后续上游
+prompt 演进需人工对拍合入);⑦归档 tasks 1.5/design D2「反例补四条」
+与实际六条不符(tiebreaker/ID 两条反例为实施期评估循环新增;归档封存
+不改,以本条为准);⑧归档 tasks 5.2/design D6「~8 用例(sakila 统计题
+LIMIT/写操作诚实动态组)」与实际新增 6 条不符(sakila 侧统计题 LIMIT
+由既有 sakila_007/010/012 等 >100 分组 case 覆盖,写操作诚实由冒烟 6.2
+直证不落评估 case;封存不改,以本条为准);⑨data_preview 的 stats dict
+无长度闸(列数极多时 token 膨胀;前 5 行同为无截断既有形态,规模化
+远期)。
 
 **017 挂账(R2-R5 观察)**:①断线续存窗口内重进会话只有 USER 气泡无
 「生成中」占位(spec 为终态后语义不违约,体验增强随 UX 域评估);②

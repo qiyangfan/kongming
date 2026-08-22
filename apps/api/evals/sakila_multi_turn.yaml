@@ -9,13 +9,16 @@
       # tiebreaker:实测 top5 含 4.99×2 并列,序不确定
       gold_sql: SELECT title FROM tenant_sakila.film ORDER BY rental_rate DESC, film_id LIMIT 5
     - question: 这些影片各自的分类是什么
-      # 外层补 ORDER BY(仅子查询有 ORDER BY 时外层行序 PG 不保证)
-      gold_sql: SELECT c.name FROM tenant_sakila.category c JOIN tenant_sakila.film_category fc ON c.category_id = fc.category_id JOIN tenant_sakila.film f ON fc.film_id = f.film_id WHERE f.film_id IN (SELECT film_id FROM tenant_sakila.film ORDER BY rental_rate DESC, film_id LIMIT 5) ORDER BY c.name
+      # 018 修订:外层排序对齐多轮追问保序语义(gen 保真规则保留上轮排序——
+      # 按上轮排名 rental_rate DESC, film_id 序展示;子查询 ORDER BY 触发保序
+      # 判定,外层 c.name 与 gen 排名序必错位)
+      gold_sql: SELECT c.name FROM tenant_sakila.category c JOIN tenant_sakila.film_category fc ON c.category_id = fc.category_id JOIN tenant_sakila.film f ON fc.film_id = f.film_id WHERE f.film_id IN (SELECT film_id FROM tenant_sakila.film ORDER BY rental_rate DESC, film_id LIMIT 5) ORDER BY f.rental_rate DESC, f.film_id
 
 - id: sakila_multiturn_002
   category: multi_turn
   turns:
-    - question: 查询所有评分NC-17的影片
+    - question: 按影片ID排序,查询评分NC-17的前100部影片
+      # 018 修订:「所有」与 gold LIMIT 100 冲突(规范第 9 条,对齐 sakila_004 形态)
       gold_sql: SELECT title FROM tenant_sakila.film WHERE rating = 'NC-17' ORDER BY film_id LIMIT 100
     - question: 其中租金大于3美元的有哪些
       gold_sql: SELECT title FROM tenant_sakila.film WHERE rating = 'NC-17' AND rental_rate > 3 ORDER BY film_id LIMIT 100
@@ -43,12 +46,14 @@
     - question: 查询租赁次数最多的前5位客户
       gold_sql: SELECT c.first_name, c.last_name, COUNT(*) FROM tenant_sakila.rental r JOIN tenant_sakila.customer c ON r.customer_id = c.customer_id GROUP BY c.customer_id, c.first_name, c.last_name ORDER BY COUNT(*) DESC, c.customer_id LIMIT 5
     - question: 他们各自的邮箱是什么
-      gold_sql: SELECT c.email FROM tenant_sakila.customer c WHERE c.customer_id IN (SELECT customer_id FROM tenant_sakila.rental GROUP BY customer_id ORDER BY COUNT(*) DESC, customer_id LIMIT 5) ORDER BY c.email
+      # 018 修订:外层排序对齐上轮排名序(同 mt_001 t2 口径)
+      gold_sql: SELECT c.email FROM tenant_sakila.customer c WHERE c.customer_id IN (SELECT customer_id FROM tenant_sakila.rental GROUP BY customer_id ORDER BY COUNT(*) DESC, customer_id LIMIT 5) ORDER BY (SELECT COUNT(*) FROM tenant_sakila.rental r2 WHERE r2.customer_id = c.customer_id) DESC, c.customer_id
 
 - id: sakila_multiturn_006
   category: multi_turn
   turns:
-    - question: 查询所有影片的标题
+    - question: 按影片ID排序,查询前100部影片的标题
+      # 018 修订:「所有」与 gold LIMIT 100 冲突(同 mt_002 t1 口径)
       gold_sql: SELECT title FROM tenant_sakila.film ORDER BY film_id LIMIT 100
     - question: 只看时长超过120分钟的
       gold_sql: SELECT title FROM tenant_sakila.film WHERE length > 120 ORDER BY film_id LIMIT 100

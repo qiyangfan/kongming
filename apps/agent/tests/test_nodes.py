@@ -487,3 +487,15 @@ async def test_summarize_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     assert out["summary"] == "库存共 30 件"
     assert out["insights"] == [{"type": "max", "text": "连弩最多"}]
     assert out["stats"]["qty_max"] == 30
+
+
+async def test_summarize_context_grounded_with_stats(monkeypatch: pytest.MonkeyPatch) -> None:
+    """018:喂给 LLM 的上下文含总行数+本地统计+前5行(摘要数值接地)。"""
+    fake = FakeLlm(['{"summary":"x"}'])
+    _install(monkeypatch, fake, FakeApi())
+    exe = ExecutionResult(verdict="PASS", columns=["qty"], rows=[[3], [7], [10]])
+    await nodes.summarize(_state(execution=exe))
+    user = fake.calls[0][1]
+    assert "总行数：3" in user
+    assert "qty_max" in user and "10" in user  # 本地统计进上下文
+    assert "前5行" in user

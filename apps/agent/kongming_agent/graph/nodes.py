@@ -276,7 +276,12 @@ async def summarize(state: AgentState) -> dict[str, object]:
         return {"summary": "查询无结果。", "insights": [], "stats": {}}
     stats = compute_stats(execution.columns, execution.rows)
     question = state.get("resolved_question") or state["question"]
-    data_preview = f"列：{execution.columns}\n前5行：{execution.rows[:5]}"
+    # 上下文接地(018):行数+本地确定性统计+前 5 行——数值结论以 stats 为准,
+    # 消除「只喂前 5 行以偏概全」的信息根源(005 冒烟 olist 状态分布说错最大值)
+    data_preview = (
+        f"列：{execution.columns}\n总行数：{len(execution.rows)}\n"
+        f"本地统计：{stats}\n前5行：{execution.rows[:5]}"
+    )
     summary = ""
     insights: list[dict[str, str]] = []
     try:
