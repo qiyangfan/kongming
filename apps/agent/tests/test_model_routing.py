@@ -145,13 +145,17 @@ async def test_task_routing_and_usage_report() -> None:
     assert coder_comp.models == ["qwen-coder-plus"]  # SQL_GEN 路由命中
     assert main_comp.models == ["qwen-plus"]  # SUMMARIZE 回退主模型
     # R1-L2:上报记录字段钉(漂移=api 422 静默丢量的防线)
+    # 038:补 status/latency_ms(采集补全)
     assert len(recorder.records) == 2
     for rec in recorder.records:
         assert set(rec) == {
             "trace_id", "tenant_key", "model", "task",
             "prompt_tokens", "completion_tokens", "total_tokens",
+            "status", "latency_ms",
         }
         assert rec["prompt_tokens"] == 11 and rec["total_tokens"] == 18
+        assert rec["status"] == "SUCCESS"
+        assert isinstance(rec["latency_ms"], int) and rec["latency_ms"] >= 0
     assert recorder.records[0]["tenant_key"] == "sakila"
     assert recorder.records[0]["model"] == "qwen-coder-plus"
     assert recorder.records[1]["tenant_key"] is None  # 未传
@@ -167,3 +171,106 @@ async def test_usage_report_failure_never_blocks() -> None:
     client._client = _FakeClient(comp)  # type: ignore[assignment]
     out = await client.chat("s", "u", task="SQL_GEN")
     assert out == "ok"
+
+
+class _BoomCompletions:
+    """供应商失败替身:create 恒抛超时异常(038 失败采集路径)。"""
+
+    async def create(self, *, model: str, **kw: object):  # type: ignore[no-untyped-def]
+        raise TimeoutError("Read timeout after 30s")
+
+
+async def test_failure_call_reported_as_error() -> None:
+    """038:失败调用也采集——status=ERROR、tokens=0、latency_ms 在场,
+    异常仍按 LlmError 上抛(fail 语义不变)。"""
+    import asyncio
+
+    import pytest
+
+    from kongming_agent.llm import LlmError
+
+    s = _settings(llm_api_key="sk-main")
+    recorder = _Recorder()
+    client = LlmClient(s, usage_reporter=recorder)
+    client._client = _FakeClient(_BoomCompletions())  # type: ignore[assignment]
+    with pytest.raises(LlmError):
+        await client.chat("s", "u", task="SQL_GEN", trace_id="tr-fail")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert len(recorder.records) == 1
+    rec = recorder.records[0]
+    # R1-B4:失败路径字段集全键钉(与成功路径同构防线)
+    assert set(rec) == {
+        "trace_id", "tenant_key", "model", "task",
+        "prompt_tokens", "completion_tokens", "total_tokens",
+        "status", "latency_ms",
+    }
+    assert rec["status"] == "ERROR"
+    assert rec["prompt_tokens"] == 0 and rec["total_tokens"] == 0
+    assert isinstance(rec["latency_ms"], int) and rec["latency_ms"] >= 0
+    assert rec["trace_id"] == "tr-fail"
+
+
+class _EmptyChoicesCompletions:
+    """R1-B2:供应商 200 但空 choices(应答畸形)——应落 ERROR 并收敛 LlmError。"""
+
+    async def create(self, *, model: str, **kw: object):  # type: ignore[no-untyped-def]
+        class _Resp:
+            choices = []
+            usage = None
+
+        return _Resp()
+
+
+async def test_malformed_response_reported_as_error() -> None:
+    """R1-B2:空 choices 协议错不再裸 IndexError 500,归 ERROR 采集。"""
+    import asyncio
+
+    import pytest
+
+    from kongming_agent.llm import LlmError
+
+    s = _settings(llm_api_key="sk-main")
+    recorder = _Recorder()
+    client = LlmClient(s, usage_reporter=recorder)
+    client._client = _FakeClient(_EmptyChoicesCompletions())  # type: ignore[assignment]
+    with pytest.raises(LlmError):
+        await client.chat("s", "u", task="SQL_GEN", trace_id="tr-malformed")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert len(recorder.records) == 1
+    assert recorder.records[0]["status"] == "ERROR"
+    assert recorder.records[0]["trace_id"] == "tr-malformed"
+
+
+async def test_success_without_usage_still_reported() -> None:
+    """038:成功但供应商未回 usage(resp.usage=None)——同样落记录
+    (旧语义 usage None 即丢弃,038 起调用次数不丢)。"""
+
+    class _NoUsageCompletions:
+        async def create(self, *, model: str, **kw: object):  # type: ignore[no-untyped-def]
+            class _Msg:
+                content = "ok"
+
+            class _Choice:
+                message = _Msg()
+
+            class _Resp:
+                choices = [_Choice()]
+                usage = None
+
+            return _Resp()
+
+    import asyncio
+
+    s = _settings(llm_api_key="sk-main")
+    recorder = _Recorder()
+    client = LlmClient(s, usage_reporter=recorder)
+    client._client = _FakeClient(_NoUsageCompletions())  # type: ignore[assignment]
+    out = await client.chat("s", "u")
+    assert out == "ok"
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert len(recorder.records) == 1
+    assert recorder.records[0]["status"] == "SUCCESS"
+    assert recorder.records[0]["total_tokens"] == 0

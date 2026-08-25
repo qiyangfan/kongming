@@ -1132,6 +1132,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/llm-usage/trend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Usage Trend
+         * @description 按天趋势(Asia/Shanghai 日历日,含今天;逐天补零)。
+         */
+        get: operations["usage_trend_system_llm_usage_trend_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/llm-usage/page": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Usage Page */
+        get: operations["usage_page_system_llm_usage_page_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/llm-usage/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Usage Timeline
+         * @description trace 时间线:LLM 调用+工具执行+SQL 执行三路事件按时间升序拼装;
+         *     trace_id 不存在返回空事件流(与审计查询惯例一致)。
+         */
+        get: operations["usage_timeline_system_llm_usage_timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory": {
         parameters: {
             query?: never;
@@ -4411,6 +4469,27 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /** TimelineEvent */
+        TimelineEvent: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "LLM" | "TOOL" | "SQL";
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Tokens */
+            tokens?: number | null;
+            /** Latency Ms */
+            latency_ms?: number | null;
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+        };
         /** TokenPairOut */
         TokenPairOut: {
             /** Access Token */
@@ -4730,6 +4809,13 @@ export interface components {
             /** Tables */
             tables: string[];
         };
+        /** UsagePageOut */
+        UsagePageOut: {
+            /** Total */
+            total: number;
+            /** Rows */
+            rows: components["schemas"]["UsageRow"][];
+        };
         /** UsageRecordIn */
         UsageRecordIn: {
             /** Trace Id */
@@ -4755,6 +4841,14 @@ export interface components {
              * @default 0
              */
             total_tokens: number;
+            /** Latency Ms */
+            latency_ms?: number | null;
+            /**
+             * Status
+             * @default SUCCESS
+             * @enum {string}
+             */
+            status: "SUCCESS" | "ERROR";
         };
         /** UsageReportIn */
         UsageReportIn: {
@@ -4766,6 +4860,36 @@ export interface components {
             /** Accepted */
             accepted: number;
         };
+        /** UsageRow */
+        UsageRow: {
+            /** Id */
+            id: string;
+            /** Trace Id */
+            trace_id?: string | null;
+            /** Tenant Key */
+            tenant_key: string;
+            /** Model */
+            model: string;
+            /** Task */
+            task: string;
+            /** Status */
+            status: string;
+            /** Bot Id */
+            bot_id?: string | null;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
+            /** Latency Ms */
+            latency_ms?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** UsageSummaryItem */
         UsageSummaryItem: {
             /** Tenant Key */
@@ -4776,17 +4900,46 @@ export interface components {
             task: string;
             /** Calls */
             calls: number;
+            /** Calls Error */
+            calls_error: number;
             /** Prompt Tokens */
             prompt_tokens: number;
             /** Completion Tokens */
             completion_tokens: number;
             /** Total Tokens */
             total_tokens: number;
+            /** Latency Ms Avg */
+            latency_ms_avg?: number | null;
+            /** Latency Ms Max */
+            latency_ms_max?: number | null;
         };
         /** UsageSummaryOut */
         UsageSummaryOut: {
             /** Items */
             items: components["schemas"]["UsageSummaryItem"][];
+        };
+        /** UsageTimelineOut */
+        UsageTimelineOut: {
+            /** Trace Id */
+            trace_id: string;
+            /** Events */
+            events: components["schemas"]["TimelineEvent"][];
+        };
+        /** UsageTrendOut */
+        UsageTrendOut: {
+            /** Points */
+            points: components["schemas"]["UsageTrendPoint"][];
+        };
+        /** UsageTrendPoint */
+        UsageTrendPoint: {
+            /** Date */
+            date: string;
+            /** Calls */
+            calls: number;
+            /** Calls Error */
+            calls_error: number;
+            /** Total Tokens */
+            total_tokens: number;
         };
         /** UserCreateIn */
         UserCreateIn: {
@@ -7363,6 +7516,104 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageSummaryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    usage_trend_system_llm_usage_trend_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageTrendOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    usage_page_system_llm_usage_page_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                size?: number;
+                model?: string | null;
+                task?: string | null;
+                status?: ("SUCCESS" | "ERROR") | null;
+                trace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsagePageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    usage_timeline_system_llm_usage_timeline_get: {
+        parameters: {
+            query: {
+                trace_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageTimelineOut"];
                 };
             };
             /** @description Validation Error */

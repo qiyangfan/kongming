@@ -27,6 +27,7 @@ import McpPage from "@/pages/admin/McpPage";
 import WorkflowsPage from "@/pages/admin/WorkflowsPage";
 import TriggersPage from "@/pages/admin/TriggersPage";
 import TeamsPage from "@/pages/admin/TeamsPage";
+import UsagePage from "@/pages/admin/UsagePage";
 import ChangePassword from "@/pages/ChangePassword";
 import ChatPage from "@/pages/ChatPage";
 import Login from "@/pages/Login";
@@ -234,6 +235,14 @@ const router = createBrowserRouter([
             element: (
               <PermRoute perm="chat:execute">
                 <BotsPage />
+              </PermRoute>
+            ),
+          },
+          {
+            path: "usage",
+            element: (
+              <PermRoute perm="system:llm-usage:view">
+                <UsagePage />
               </PermRoute>
             ),
           },

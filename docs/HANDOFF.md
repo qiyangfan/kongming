@@ -1,5 +1,104 @@
 # HANDOFF — Kongming 交接文档
 
+> 最后更新:2026-08-25(**038 agent-observability 已实施归档+/goal R1
+> 评审循环完成**——roadmap 评估
+> 收敛结论:第三梯队 12+4 域全部落地后,上游 41 域中唯一有上游 spec(023)
+> 而 Kongming 未落地的实质域=observability(rag-refine 已被 037/014 覆盖;
+> 截图残留挂账已消——gitignore 已含 .playwright-mcp/;auth spec 已同步),
+> 且 021 挂账⑤「用量看板 UI 随 observability 等价域」明确指向本域。
+> **LLM 用量可观测**:①采集补全(agent llm.py 四调用点
+> [chat/chat_vision/chat_with_tools/embed 分批]包 time.monotonic 计时,
+> 异常路径先记 status=ERROR/latency_ms=实际耗时/tokens=0 再 raise;
+> _report 去「usage None 即丢弃」短路——失败调用与「成功但供应商未回
+> usage」调用均留痕,失败率可见;fire-and-forget 与 035 收集器双通道
+> 同步扩展,上报语义逐字保留);②表结构(0025 迁移:sys_llm_usage 加
+> latency_ms INTEGER NULL+status VARCHAR(16) DEFAULT 'SUCCESS' CHECK,
+> 存量行缺省语义成立——021 起失败调用本就不落记录);③聚合强化
+> (summary 扩 calls_error/latency_ms_avg/latency_ms_max——**延迟统计
+> 仅 SUCCESS 且非 NULL 参与**(失败耗时语义归时间线,聚合指标保持成功
+> 口径干净);trend 端点 generate_series 按天分桶逐天补零,窗口与分桶
+> 统一 AT TIME ZONE 'Asia/Shanghai'(034 S2 教训);page 明细分页
+> created_at 倒序+model/task/status/trace_id 四筛选+tenant 反解 unknown);
+> ④**trace 时间线**(GET /system/llm-usage/timeline?trace_id=——router
+> 组合根调 llmusage/toolcall/audit 三 repo(后两者各补只读
+> list_by_trace 零行为变更,chat 组合根先例;**共享 AsyncSession 须顺序
+> await,design「并行」措辞失实**),LLM 调用+工具执行+SQL 执行三路事件
+> 按 (ts,kind) 确定性排序拼装,SQL 事件 name=数据源/status=verdict,
+> 空流 200);⑤web 第十七子页「用量」/admin/usage(权限点复用
+> system:llm-usage:view 零新种子:汇总卡四枚+按天趋势双轴 echarts[色板
+> token 派生]+模型×任务对比表[calls_error 红色 destructive badge]+明细
+> 分页四筛选[**Input 型筛选用 useDebounced 300ms 防抖**,trace_id
+> maxLength=64]+行内「时间线」Dialog[纵向时间线 kind 图标+耗时+状态
+中文映射含 verdict/LLM 态+日期时间];四处查询 isError 显式渲染
+[加载失败 role=alert,不再伪装空态];AdminLayout ADMIN_NAV 注册+
+PermRoute 同源双闸)。内部上报接收面纯增字段(latency_ms/status
+缺省兼容旧 agent——滚动升级窗口)。**/goal R1 三路独立评审(agent
+采集面/api 域包 SQL/web+契约+spec)回收 1 严重+17 建议,逐条溯源
+核验后全部实锤修复**:S1 归档 tasks 3.x 漏勾致归档校验失败(补勾,
+`validate --archived` 38 项过——001/003 历史存量除外);A-B2 应答畸形
+保护(空 choices 等→裸 IndexError 500+误标 SUCCESS——四处内容提取段
+try 收敛 LlmError+归 ERROR 采集;embed 补条数校验防向量错位;畸形
+应答已回 usage 保留实测值入约)+A-B3 status Literal 收紧+A-B4 失败
+路径全键钉;B-B1 **0026 迁移三索引**(sys_llm_usage/sys_sql_audit/
+sys_tool_audit 各 (trace_id,created_at)——timeline 三路此前全表扫
+随审计数据线性退化,EXPLAIN Bitmap Index Scan 直证)+B-B2 trend JOIN
+ON 加窗口下界范围谓词走时间索引(**范围条件必须在 ON 内,放 WHERE 会
+把补零桶过滤掉**)+B-B4 测试补五项(纯 ERROR 组 NULL 传播/bot sink
+通道落新列[design 承诺]/跨月归属[design 承诺]/深翻页越界/days 边界+
+status 非法与负 latency 422)+B-B5 SQL 事件 SELECT 死列收敛(name=
+datasource_key);C-B3 主 spec 枚举补 chat_vision(028 起失真,038 重写
+时仍未修正)+畸形语义入约+C-B4 timeline 排序补 kind 次序键(同刻
+事件输出完全确定)+C-B5 isError 四处+C-B6 防抖+C-B8 展示三小项(0
+值显示/verdict 与 LLM 状态中文映射/时间线带日期)。**测试 +6**
+(api 20[+5] +agent 160[+3:失败上报/成功无 usage/应答畸形——HANDOFF
+初版计数 159(+2) 未含畸形用例,R1 实测 160 修正]);api 806(+14)+
+agent 160(+3)+web 全绿、21 契约 KEPT、make contracts 重生成(新端点
+3:趋势/明细/时间线+summary 扩 schema)。**冒烟全过**:真 LLM 问答后
+同 trace 四行 latency/status 落库(UNDERSTAND 661ms→SQL_GEN 929ms→
+SUMMARIZE 1925ms+EMBED 458ms,存量行 NULL);经 /internal/llm-usage 造
+ERROR 行→summary calls_error=1 且延迟统计正确排除(REACT 组 avg/max=
+None——组内唯一 latency 行是 ERROR)/trend 今天桶 err=1/page 筛 ERROR
+total=1/**timeline 五事件时间序回放**(LLM×3+SQL PASS+REACT ERROR
+30.0s,一次请求全链路可见);smoke-self 四端点 curl 403+UI 直达品牌
+403 页+侧栏无入口;Playwright UI:汇总卡失败率 0.2%/趋势 canvas/对比
+表红 badge/明细分页/时间线 Dialog 全要素;冒烟造数已清理(dev 库看板
+零残留)。Non-goals:成本换算(单价在 agent env 注册表,api 不可达;
+计费归 billing 域)/span 级 prompt/response 摘要(体量+脱敏面)/
+人工标注与 eval 导出/行级可见性(sys_llm_usage 无 user 维度,spec
+立约管理面+租户聚合)/OpenTelemetry(技术栈锁定)。docs/roadmap.md
+同步:第二梯队 auth 标已入库、第三梯队标全落地(019–038)、D 层处置
+注记(observability 038 落地作废旧处置/rag-refine 037+014 覆盖)。
+**挂账(R1 裁决登记)**:①汇总卡平均延迟=组平均近似口径(展示卡
+用途;精确以明细行为准)②同刻事件组间序按 kind 字母序(跨表 id 不可
+比,因果序不存在;design「(created_at,id)」指组内 tiebreak,组间由
+kind 键补确定性)③usage 页无租户筛选下拉(租户聚合表已可见,观察
+后加)④汇总卡与趋势窗口脱钩(卡恒全量、趋势随 days;spec 端点支持
+start/end UI 未暴露,随 UX 评估)⑤design/tasks「四处调用点」列举漏
+chat_vision(三个名字对四处;HANDOFF 已写全;归档封存不改,以本段
+为准——同 018 挂账⑦⑧先例)⑥billing month_usage_by_model 的
+count(*) 明细含 ERROR 行(金额按 tokens 零影响;口径注记)⑦输入型
+筛选防抖为页面内 useDebounced 局部实现(出现第二个消费者时抽公共
+hook)⑧全站查询错误态渲染形态沿袭(本页已修,15+ 存量页面随 UX 域
+统一)⑨流式端点 LlmError 分支不带收集器记录(当前流式链路
+collect_usage 恒 False 不可达;流式 bot 落地时须携带,A 评审前瞻)。
+归档 archive/2026-08-25-038-agent-observability,sync observability 新
+主 spec+multi-model-routing delta 进主 spec。**/goal R2 终审清零**
+(修复面复核+全量 diff 兜底,实测三面全绿 api 806/agent 160/web+
+契约运行时与入库 openapi 逐对象比对 EQUAL 零漂移+归档校验 36/38
+过——001/003 历史存量除外):R1 九项修复全部核验通过(畸形分支
+resp 恒非 None/提取与上报顺序无双写/trend 范围谓词为匹配条件的
+必要弱化仅助索引/索引名不撞/防抖与越界自愈 effect 无冲突);新
+发现 1F+3B 全修——**R2-F1 跨月测试日历敏感**(初版
+`replace(day=15)-timedelta(day+3)` 偏移=12-2*day,每月 1-6/29-31
+号必挂 CI,当日通过纯属日期运气;改固定回退 35 天±12h 恒在窗口
+内且必非今天)+R2-B1 model 筛选补 maxLength=64+R2-B2 双请求窗口
+(筛选 onChange 同步 setPage(1)+删回页 effect,防抖值到达时 page
+已归 1 单请求)+R2-B3 embed index 集合等价校验(条数相等但
+index 重复/乱集仍错位,`sorted(index)==range(n)` 一并拦)。终态
+api 806+agent 160+web 全绿。**001–038 齐,活动变更
+为零;全部改动未提交待用户指令;下一棒=挂账沉淀评估(038 九项+
+历史 17 项分拣)或按需新域**。
+>
 > 最后更新:2026-08-25(**/goal 代码审查迭代循环完成**——评审范围=本地全部
 > 未提交改动(019–037 十九变更,211 路径,基线 HEAD)。五路独立评审 agent
 > (agent 面/api 新域包·安全侧/api 新域包·平台侧/api 核心域+迁移链/web+
@@ -791,14 +890,30 @@
    (DOM 快照可读)——GUI 测试一律用 Playwright MCP 工具组
    (`mcp__plugin_playwright_playwright__browser_*`,独立管道,002 已验证可用)。
 
-## 当前状态(001–037 全部归档+审查循环完成;工作区干净——各变更详情以文首段落为准)
+## 当前状态(001–038 全部归档+038 审查循环完成;038 改动本次提交——各变更详情以文首段落为准)
 
-- git:main 分支;019–037+审查循环全部改动**已提交**(单一大提交,
-  390 文件,以 git log 根提交为准);无远程、未 push。
+- git:main 分支;001–037+审查循环已提交(根提交以 git log 为准),
+  **038 agent-observability+其 /goal R1/R2 审查循环为本次提交**
+  (21 路径,迁移 0025/0026);无远程、未 push。
   分支策略:主干开发不拉 dev,协作按变更开短命 feature。
-- openspec:**001–037 全部归档;活动变更为零**;/goal 审查循环(五路
-  独立评审+逐条核验+全量修复+19 回归测试)已完结,挂账 17 项见文首段。
-  下一棒=按 roadmap 评估(挂账沉淀/远期域,开工时再立 spec)。
+- openspec:**001–038 全部归档;活动变更为零**;主 spec 共 39 个
+  (observability 新域随 038 入库,全量校验过;归档校验 36/38 过,
+  001/003 历史存量外全绿)。
+  下一棒=挂账沉淀评估(038 九项+历史 17 项分拣)或按需新域。
+- **038 架构总览**:agent llm.py 四调用点计时+status 采集(失败/应答畸形
+  均留痕,畸形归 ERROR+LlmError 收敛,embed index 集合校验);迁移
+  0025(sys_llm_usage+latency_ms/status)+0026(三表 (trace_id,created_at)
+  索引);api llmusage 域扩 summary 失败延迟统计/trend 按天补零(ON 内
+  范围谓词走索引)/page 四筛选分页/timeline 三表事件流 (ts,kind) 确定性
+  排序(audit/toolcall 各补只读 list_by_trace,组合根顺序 await);
+  web 第十七子页 /admin/usage(汇总卡+双轴趋势+对比表+防抖明细+时间线
+  Dialog,isError 显式渲染);权限全挂既有 system:llm-usage:view 零新种子。
+  spec:observability 新主 spec(4 requirement)+multi-model-routing
+  采集条款修订(枚举补 chat_vision+畸形语义+latency/status 入约)。
+- **038 审查循环**:三路独立评审(采集面/api SQL/web+契约 spec)1 严重
+  +17 建议+R2 终审 1F+3B,逐条溯源核验后实锤全修(应答畸形保护/三索引/
+  trend 索引谓词/五项补测/日历敏感根治/双请求窗口消除等);契约运行时
+  与入库 openapi 逐对象比对 EQUAL;api 806+agent 160+web 全绿。
 - **018 架构总览**:零表结构/零端点/零契约/零 api/web 变更/零新依赖——
   唯一代码面 apps/agent。prompts.py 三模板加固(规则 6 统计/明细边界
   +tiebreaker、规则 8 ROUND、规则 9 投影完备+DISTINCT、规则 3 ID 不替名、

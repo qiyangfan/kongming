@@ -5,6 +5,8 @@
 显式注入(audit spec「不依赖通用机制对审计表的列推断」)。
 """
 
+from typing import Any
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,6 +48,20 @@ class AuditRepository:
         " AND (CAST(:st AS timestamptz) IS NULL OR a.created_at >= CAST(:st AS timestamptz))"
         " AND (CAST(:et AS timestamptz) IS NULL OR a.created_at < CAST(:et AS timestamptz))"
     )
+
+    async def list_sql_by_trace(self, trace_id: str) -> list[dict[str, Any]]:
+        """038 观测域:trace 时间线 SQL 事件(时间升序稳定序)。"""
+        rows = (
+            await self._s.execute(
+                text(
+                    "SELECT id, verdict, duration_ms, datasource_key, created_at"
+                    " FROM public.sys_sql_audit WHERE trace_id = :t"
+                    " ORDER BY created_at ASC, id ASC"
+                ),
+                {"t": trace_id},
+            )
+        ).mappings().all()
+        return [dict(r) for r in rows]
 
     async def sql_page(
         self,

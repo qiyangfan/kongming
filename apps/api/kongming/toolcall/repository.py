@@ -220,6 +220,21 @@ class SqlToolCallRepo:
             for r in rows
         ]
 
+    async def list_by_trace(self, trace_id: str) -> list[dict[str, Any]]:
+        """038 观测域:trace 时间线 TOOL 事件(全部状态;时间升序稳定序)。"""
+        rows = (
+            await self._s.execute(
+                text(
+                    "SELECT tool_name, status, duration_ms, created_at"
+                    " FROM public.sys_tool_audit"
+                    " WHERE trace_id = :t"
+                    " ORDER BY created_at ASC, id ASC"
+                ),
+                {"t": trace_id},
+            )
+        ).mappings().all()
+        return [dict(r) for r in rows]
+
     async def insert_announcement(
         self,
         *,

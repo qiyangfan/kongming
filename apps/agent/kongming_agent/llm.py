@@ -8,8 +8,9 @@ ADR-002 注记:LLM key 是 agent 面唯一持有的外部凭证(非数据凭证)
 import contextvars
 import json
 import logging
+import time
 from dataclasses import dataclass, field
-from typing import cast
+from typing import Literal, cast
 
 from openai import AsyncOpenAI
 from openai.types.chat import (
@@ -162,11 +163,13 @@ class LlmClient:
         trace_id: str | None,
         tenant_key: str | None = None,
         usage: object | None,
+        status: Literal["SUCCESS", "ERROR"] = "SUCCESS",  # 038:失败调用也采集
+        latency_ms: int | None = None,  # 038:调用耗时(毫秒)
     ) -> None:
         """用量采集(021):fire-and-forget,任何失败仅日志不阻断主链路。
-        035:收集器在场(bot 链路)只收集不上报——唯一上报口=响应携带。"""
-        if usage is None:
-            return
+        035:收集器在场(bot 链路)只收集不上报——唯一上报口=响应携带。
+        038:status/latency_ms 补全——失败调用(超时/断连/协议错)同样
+        落记录(失败率可见),usage 缺失不再丢弃(记 0)。"""
         record = {
             "trace_id": trace_id,
             "tenant_key": tenant_key,
@@ -175,6 +178,8 @@ class LlmClient:
             "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
             "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
             "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+            "status": status,
+            "latency_ms": latency_ms,
         }
         collector = _USAGE_COLLECTOR.get()
         if collector is not None:
@@ -212,6 +217,7 @@ class LlmClient:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ]
+        t0 = time.monotonic()
         try:
             if max_tokens is None:
                 resp = await client.chat.completions.create(
@@ -225,15 +231,39 @@ class LlmClient:
                     max_tokens=max_tokens,
                 )
         except Exception as e:
+            self._report(
+                task=task or "CHAT",
+                model=model,
+                trace_id=trace_id,
+                tenant_key=tenant_key,
+                usage=None,
+                status="ERROR",
+                latency_ms=int((time.monotonic() - t0) * 1000),
+            )
             raise LlmError(f"LLM 调用失败: {e}") from e
+        try:
+            content = (resp.choices[0].message.content or "").strip()
+        except (IndexError, AttributeError, TypeError) as e:
+            # R1-B2:应答畸形(空 choices 等)=供应商协议错,同样归 ERROR 采集
+            self._report(
+                task=task or "CHAT",
+                model=model,
+                trace_id=trace_id,
+                tenant_key=tenant_key,
+                usage=resp.usage,
+                status="ERROR",
+                latency_ms=int((time.monotonic() - t0) * 1000),
+            )
+            raise LlmError(f"LLM 应答畸形: {e}") from e
         self._report(
             task=task or "CHAT",
             model=model,
             trace_id=trace_id,
             tenant_key=tenant_key,
             usage=resp.usage,
+            latency_ms=int((time.monotonic() - t0) * 1000),
         )
-        return (resp.choices[0].message.content or "").strip()
+        return content
 
     async def chat_vision(
         self,
@@ -263,20 +293,45 @@ class LlmClient:
             {"role": "system", "content": system},
             {"role": "user", "content": content},  # type: ignore[list-item,misc]
         ]
+        t0 = time.monotonic()
         try:
             resp = await client.chat.completions.create(
                 model=model, messages=messages, temperature=0.2
             )
         except Exception as e:
+            self._report(
+                task=task or "VISION",
+                model=model,
+                trace_id=trace_id,
+                tenant_key=tenant_key,
+                usage=None,
+                status="ERROR",
+                latency_ms=int((time.monotonic() - t0) * 1000),
+            )
             raise LlmError(f"vision 调用失败: {e}") from e
+        try:
+            text = resp.choices[0].message.content or ""
+        except (IndexError, AttributeError, TypeError) as e:
+            # R1-B2:应答畸形=供应商协议错,同样归 ERROR 采集
+            self._report(
+                task=task or "VISION",
+                model=model,
+                trace_id=trace_id,
+                tenant_key=tenant_key,
+                usage=resp.usage,
+                status="ERROR",
+                latency_ms=int((time.monotonic() - t0) * 1000),
+            )
+            raise LlmError(f"vision 应答畸形: {e}") from e
         self._report(
             task=task or "VISION",
             model=model,
             trace_id=trace_id,
             tenant_key=tenant_key,
             usage=resp.usage,
+            latency_ms=int((time.monotonic() - t0) * 1000),
         )
-        return resp.choices[0].message.content or ""
+        return text
 
     async def chat_with_tools(
         self,
@@ -304,6 +359,7 @@ class LlmClient:
             {"role": "system", "content": system},
             *messages,
         ]
+        t0 = time.monotonic()
         try:
             # tools 有无两分支(openai 重载对 **kwargs 展开不过 mypy;同 chat 的
             # max_tokens 分支写法先例);dict 列表结构与 ChatCompletionFunctionToolParam
@@ -321,15 +377,38 @@ class LlmClient:
                     model=model, messages=full_messages, temperature=temperature
                 )
         except Exception as e:
+            self._report(
+                task=task or "CHAT_TOOLS",
+                model=model,
+                trace_id=trace_id,
+                tenant_key=tenant_key,
+                usage=None,
+                status="ERROR",
+                latency_ms=int((time.monotonic() - t0) * 1000),
+            )
             raise LlmError(f"LLM 调用失败: {e}") from e
+        try:
+            msg = resp.choices[0].message
+        except (IndexError, AttributeError, TypeError) as e:
+            # R1-B2:应答畸形(空 choices 等)=供应商协议错,同样归 ERROR 采集
+            self._report(
+                task=task or "CHAT_TOOLS",
+                model=model,
+                trace_id=trace_id,
+                tenant_key=tenant_key,
+                usage=resp.usage,
+                status="ERROR",
+                latency_ms=int((time.monotonic() - t0) * 1000),
+            )
+            raise LlmError(f"LLM 应答畸形: {e}") from e
         self._report(
             task=task or "CHAT_TOOLS",
             model=model,
             trace_id=trace_id,
             tenant_key=tenant_key,
             usage=resp.usage,
+            latency_ms=int((time.monotonic() - t0) * 1000),
         )
-        msg = resp.choices[0].message
         calls: list[LlmToolCall] = []
         for tc in msg.tool_calls or []:
             # SDK 联合类型:function 工具调用与 custom 工具调用;本内核只产出
@@ -362,19 +441,44 @@ class LlmClient:
         out: list[list[float]] = []
         for start in range(0, len(texts), self._emb_batch_size):
             batch = texts[start : start + self._emb_batch_size]
+            t0 = time.monotonic()
             try:
                 resp = await self._emb_client.embeddings.create(
                     model=self._emb_model, input=batch
                 )
             except Exception as e:
+                self._report(
+                    task="EMBED",
+                    model=self._emb_model,
+                    trace_id=None,
+                    usage=None,
+                    status="ERROR",
+                    latency_ms=int((time.monotonic() - t0) * 1000),
+                )
                 raise LlmError(f"embeddings 调用失败: {e}") from e
+            # 按 index 归位(API 不保证返回有序);R1-B2:条数/index 集合缺失
+            # 或重复=应答畸形(静默拼接会致调用方向量错位),归 ERROR 采集后
+            # 收敛 LlmError(R2-B3:index 集合等价一并校验)
+            data = sorted(resp.data, key=lambda d: d.index)
+            if sorted(d.index for d in data) != list(range(len(batch))):
+                self._report(
+                    task="EMBED",
+                    model=self._emb_model,
+                    trace_id=None,
+                    usage=getattr(resp, "usage", None),
+                    status="ERROR",
+                    latency_ms=int((time.monotonic() - t0) * 1000),
+                )
+                raise LlmError(
+                    f"embeddings 应答畸形: 期望 {len(batch)} 条实得 {len(data)}"
+                )
             # 021:embedding 用量同通道上报(不参与模型路由,009 立约)
             self._report(
                 task="EMBED",
                 model=self._emb_model,
                 trace_id=None,
                 usage=getattr(resp, "usage", None),
+                latency_ms=int((time.monotonic() - t0) * 1000),
             )  # tenant 维度不适用(009 embedding 独立通道)
-            # 按 index 归位(API 不保证返回有序)
-            out.extend(d.embedding for d in sorted(resp.data, key=lambda d: d.index))
+            out.extend(d.embedding for d in data)
         return out

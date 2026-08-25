@@ -22,20 +22,23 @@
 | audit | 审计落库/查询/留存归档 |
 | eval / ai-eval | Execution Match 匹配规则、基线管理、few-shot 自学习 |
 
-## 第二梯队(rbac/multitenant/datascope 已改写 ✅;auth 待与实现同步)
+## 第二梯队(rbac/multitenant/datascope/auth 全部入库 ✅)
 
 | 域 | 说明 |
 |---|---|
 | rbac / multitenant / datascope | 已按新枚举(ALL/DEPT/SELF、SELECT_ONLY 等)改写入库,行为契约保留 |
-| auth | **与认证闭环实现同步编写**(ADR-003 自建认证流程与旧 Keycloak 契约根本不同,提前写必漂移) |
+| auth | 已与认证闭环实现同步入库(003/006 落地后随行 sync:账密登录/refresh
+  轮换吊销/自助改密/联邦登录连接器/联邦账号关联) |
 
-## 第三梯队(远期登记,开工时再立 spec,C 层)
+## 第三梯队(全部落地 ✅ 2026-08-25,019–038)
 
 数据 Agent 深化:tool-calling、mcp-interop、workflow-orchestration、cloud-code-sandbox
 (NL2Insight 杀手锏)、agent-memory、multi-model-routing、document-rag、semantic-layer、
-prompt-guardrails、custom-agent、query-streaming、conversation-artifacts、multimodal-input。
+prompt-guardrails、custom-agent、query-streaming、conversation-artifacts、multimodal-input、
+agent-observability(038,用量/失败/延迟可观测+trace 时间线)。
 
-平台商业化:bot-store、developer-portal-billing、team-workspace、triggers-webhooks、datasets。
+平台商业化:bot-store、developer-portal-billing、team-workspace、triggers-webhooks、
+payment-gateway(mock 闭环)、datasets(由 008+009+example-data 管线覆盖,不单独立 spec)。
 
 ### 第三梯队分批计划(2026-08-22 定,按上游依赖拓扑排序)
 
@@ -65,6 +68,13 @@ artifacts(027)⇄ cloud-code-sandbox(029);agent-memory(026)← team-workspace(03
 | 旧 spec | Kongming 对应 |
 |---|---|
 | contract-engineering | ADR-005 契约管线 + CI 漂移门禁 |
-| observability / stability | 宪法 Article III + tech-stack 工程纪律 |
+| stability | 宪法 Article III + tech-stack 工程纪律 |
 | security-compliance | 宪法 Article IV(信任边界)+ ADR-002 |
 | system-nav / web-responsive | web 主布局域开工时随行立 spec |
+
+处置注记(2026-08-25 全量核对):
+- **observability**:已作为第三梯队落地(038 agent-observability——用量/失败/延迟
+  采集与看板+trace 时间线;「宪法 Article III 覆盖」的旧处置作废)。
+- **rag-refine**:已被 037(单表知识编辑端点+alias)与 014(表名抽取/定位跳转)
+  覆盖,不单独立 spec。
+- **datasets**:由 008 动态数据源+009 rag+example-data 装载管线覆盖(第三梯队段)。

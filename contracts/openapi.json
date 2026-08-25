@@ -4147,6 +4147,224 @@
         }
       }
     },
+    "/system/llm-usage/trend": {
+      "get": {
+        "tags": [
+          "llm-usage"
+        ],
+        "summary": "Usage Trend",
+        "description": "按天趋势(Asia/Shanghai 日历日,含今天;逐天补零)。",
+        "operationId": "usage_trend_system_llm_usage_trend_get",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 90,
+              "minimum": 1,
+              "default": 30,
+              "title": "Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageTrendOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/llm-usage/page": {
+      "get": {
+        "tags": [
+          "llm-usage"
+        ],
+        "summary": "Usage Page",
+        "operationId": "usage_page_system_llm_usage_page_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 20,
+              "title": "Size"
+            }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Model"
+            }
+          },
+          {
+            "name": "task",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 24
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Task"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "SUCCESS",
+                    "ERROR"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "trace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Trace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsagePageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/llm-usage/timeline": {
+      "get": {
+        "tags": [
+          "llm-usage"
+        ],
+        "summary": "Usage Timeline",
+        "description": "trace 时间线:LLM 调用+工具执行+SQL 执行三路事件按时间升序拼装;\ntrace_id 不存在返回空事件流(与审计查询惯例一致)。",
+        "operationId": "usage_timeline_system_llm_usage_timeline_get",
+        "parameters": [
+          {
+            "name": "trace_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "title": "Trace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageTimelineOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/memory": {
       "post": {
         "tags": [
@@ -14755,6 +14973,62 @@
         ],
         "title": "TestConnectionOut"
       },
+      "TimelineEvent": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "LLM",
+              "TOOL",
+              "SQL"
+            ],
+            "title": "Kind"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokens"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "name",
+          "status",
+          "ts"
+        ],
+        "title": "TimelineEvent"
+      },
       "TokenPairOut": {
         "properties": {
           "access_token": {
@@ -15561,6 +15835,27 @@
         ],
         "title": "UploadOut"
       },
+      "UsagePageOut": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/UsageRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "rows"
+        ],
+        "title": "UsagePageOut"
+      },
       "UsageRecordIn": {
         "properties": {
           "trace_id": {
@@ -15616,6 +15911,27 @@
             "minimum": 0.0,
             "title": "Total Tokens",
             "default": 0
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "SUCCESS",
+              "ERROR"
+            ],
+            "title": "Status",
+            "default": "SUCCESS"
           }
         },
         "type": "object",
@@ -15656,6 +15972,93 @@
         ],
         "title": "UsageReportOut"
       },
+      "UsageRow": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "tenant_key": {
+            "type": "string",
+            "title": "Tenant Key"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "task": {
+            "type": "string",
+            "title": "Task"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "bot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Id"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "tenant_key",
+          "model",
+          "task",
+          "status",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "created_at"
+        ],
+        "title": "UsageRow"
+      },
       "UsageSummaryItem": {
         "properties": {
           "tenant_key": {
@@ -15674,6 +16077,10 @@
             "type": "integer",
             "title": "Calls"
           },
+          "calls_error": {
+            "type": "integer",
+            "title": "Calls Error"
+          },
           "prompt_tokens": {
             "type": "integer",
             "title": "Prompt Tokens"
@@ -15685,6 +16092,28 @@
           "total_tokens": {
             "type": "integer",
             "title": "Total Tokens"
+          },
+          "latency_ms_avg": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms Avg"
+          },
+          "latency_ms_max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms Max"
           }
         },
         "type": "object",
@@ -15693,6 +16122,7 @@
           "model",
           "task",
           "calls",
+          "calls_error",
           "prompt_tokens",
           "completion_tokens",
           "total_tokens"
@@ -15714,6 +16144,71 @@
           "items"
         ],
         "title": "UsageSummaryOut"
+      },
+      "UsageTimelineOut": {
+        "properties": {
+          "trace_id": {
+            "type": "string",
+            "title": "Trace Id"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trace_id",
+          "events"
+        ],
+        "title": "UsageTimelineOut"
+      },
+      "UsageTrendOut": {
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/UsageTrendPoint"
+            },
+            "type": "array",
+            "title": "Points"
+          }
+        },
+        "type": "object",
+        "required": [
+          "points"
+        ],
+        "title": "UsageTrendOut"
+      },
+      "UsageTrendPoint": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "calls_error": {
+            "type": "integer",
+            "title": "Calls Error"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "calls",
+          "calls_error",
+          "total_tokens"
+        ],
+        "title": "UsageTrendPoint"
       },
       "UserCreateIn": {
         "properties": {
