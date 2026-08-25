@@ -37,6 +37,26 @@ prompt-guardrails、custom-agent、query-streaming、conversation-artifacts、mu
 
 平台商业化:bot-store、developer-portal-billing、team-workspace、triggers-webhooks、datasets。
 
+### 第三梯队分批计划(2026-08-22 定,按上游依赖拓扑排序)
+
+上游依赖拓扑:tool-calling(022)被 6 域引用为内核前置;prompt-guardrails(030)
+被 4 域引用、上游自定位为 tool-calling 伴生;custom-agent(025)← mcp-interop /
+bot-store / developer-portal-billing;workflow(024)← triggers-webhooks(032);
+artifacts(027)⇄ cloud-code-sandbox(029);agent-memory(026)← team-workspace(034)。
+
+- **第一波(Agent 内核)**:019 tool-calling → 020 prompt-guardrails-security
+  (安全向:injection 检测/PII 脱敏/输出审核/工具意图审核/sys_guardrail_audit,
+   与 018 质量向护栏不同域);
+- **第二波(独立增强,互不依赖,可并行推进)**:multi-model-routing(纯 Python
+  侧最友好)/ agent-memory / semantic-layer / document-rag(后两者依托既有 rag 链路);
+- **第三波(深化,依赖第一波内核)**:conversation-artifacts / custom-agent /
+  cloud-code-sandbox / mcp-interop / workflow-orchestration / multimodal-input;
+- **第四波(商业化/自动化)**:team-workspace(归属基础)→ bot-store /
+  developer-portal-billing / triggers-webhooks;
+- **datasets 域**:上游语义(数据导入+表说明登记+白名单授权三件套)已由
+  008 动态数据源 + 009 rag + example-data 装载管线覆盖(sakila/olist 两租户在跑),
+  不再单独立 spec;新增数据集(如天池)走既有管线,无需新域。
+
 参考源:`/Users/solvela/nl2sql-data-platform/openspec/specs/<域>/spec.md`
 (剥离 Java/COLA/Keycloak 实现引用后取其行为场景;schema 契约以 Kongming baseline 为准)。
 

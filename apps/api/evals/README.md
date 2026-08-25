@@ -111,6 +111,15 @@ podman exec kongming-redis-1 redis-cli --scan --pattern 'km:ragctx:*' | xargs -r
 | 2026-08-21 | 016 首基线(评估集落地,问句排序对齐修订后) | 26/44 (59%) | 37/44 (84%) | 7/10 (70%) | 4/4 | 35/44 (80%) |
 | 2026-08-21 | /goal 修复轮:多轮裸 LIMIT 口径补齐 3 case(olist_mt_002/sakila_mt_002/006,单轮题同款口径遗漏) | — | — | 8/10 (80%) | — | — |
 | 2026-08-22 | 018 prompt 护栏(规则 6 统计/明细边界+top-N tiebreaker/规则 8 ROUND 口径/规则 9 投影完备+去重/规则 3 ID 不替名/understand 保真/summarize 统计接地;评估集对齐修订 14 处+新增 6 case) | 37/48 (77%) | 48/48 (100%) | 12/12 (100%) | 4/4 | 46/48 (96%) |
+| 2026-08-22 | 019 tool-calling 实施期复验:recipe(老链路)零劣化红线 | — | recipe smoke 5/5 + full 零 FAILED | — | — | — |
+| 2026-08-22 | 019 ReAct 内核等价性(KM_EVAL_AGENT_MODE=react;rag_retrieve 工具内回退内省修复后) | — | react smoke 5/5 | — | — | — |
+
+> **019 注记**(2026-08-22):`KM_EVAL_AGENT_MODE=react` 环境变量使同一
+> 评估集经 ReAct 内核跑(请求携带 agent_mode=react;缺省 recipe 口径不变)。
+> ReAct 首跑 smoke 曾挂 olist_smoke_002:知识库未抓取租户召回双空,LLM
+> 只能用 execute_sql 探测 information_schema/pg_tables 摸表结构,打满
+> 轮次上限——rag_retrieve 工具内回退实时内省(与老链路 retrieve 节点同
+> 语义)后 5/5。react 每题多次 LLM 调用,耗时约为 recipe 的 2-3 倍。
 
 > **018 演进注记**(2026-08-22):五类失败归因全部闭环——①统计题误加
 > LIMIT(规则 6 统计/明细边界重写,GROUP BY/聚合即统计不加 LIMIT);

@@ -13,6 +13,20 @@ import UsersPage from "@/pages/admin/UsersPage";
 import RagPage from "@/pages/admin/RagPage";
 import FeedbackPage from "@/pages/admin/FeedbackPage";
 import AuditPage from "@/pages/admin/AuditPage";
+import ToolsPage from "@/pages/admin/ToolsPage";
+import MemoryPage from "@/pages/MemoryPage";
+import PortalPage from "@/pages/PortalPage";
+import PayPage from "@/pages/PayPage";
+import StorePage from "@/pages/StorePage";
+import BillingPage from "@/pages/admin/BillingPage";
+import BotPublicPage from "@/pages/BotPublicPage";
+import GuardrailsPage from "@/pages/admin/GuardrailsPage";
+import SemanticPage from "@/pages/admin/SemanticPage";
+import BotsPage from "@/pages/admin/BotsPage";
+import McpPage from "@/pages/admin/McpPage";
+import WorkflowsPage from "@/pages/admin/WorkflowsPage";
+import TriggersPage from "@/pages/admin/TriggersPage";
+import TeamsPage from "@/pages/admin/TeamsPage";
 import ChangePassword from "@/pages/ChangePassword";
 import ChatPage from "@/pages/ChatPage";
 import Login from "@/pages/Login";
@@ -55,6 +69,38 @@ const router = createBrowserRouter([
         element: (
           <PermRoute perm="chat:execute">
             <ChatPage />
+          </PermRoute>
+        ),
+      },
+      {
+        path: "portal",
+        element: (
+          <PermRoute perm="developer:portal">
+            <PortalPage />
+          </PermRoute>
+        ),
+      },
+      {
+        path: "portal/pay/:paymentId",
+        element: (
+          <PermRoute perm="developer:portal">
+            <PayPage />
+          </PermRoute>
+        ),
+      },
+      {
+        path: "store",
+        element: (
+          <PermRoute perm="bot:run">
+            <StorePage />
+          </PermRoute>
+        ),
+      },
+      {
+        path: "memory",
+        element: (
+          <PermRoute perm="chat:execute">
+            <MemoryPage />
           </PermRoute>
         ),
       },
@@ -119,10 +165,88 @@ const router = createBrowserRouter([
               </PermRoute>
             ),
           },
+          {
+            path: "tools",
+            element: (
+              <PermRoute perm="system:tool:manage">
+                <ToolsPage />
+              </PermRoute>
+            ),
+          },
+          {
+            path: "guardrails",
+            element: (
+              <PermRoute perm="system:guardrail:manage">
+                <GuardrailsPage />
+              </PermRoute>
+            ),
+          },
+          {
+            path: "semantic",
+            element: (
+              <PermRoute perm="system:semantic:manage">
+                <SemanticPage />
+              </PermRoute>
+            ),
+          },
+          {
+            path: "mcp",
+            element: (
+              <PermRoute perm="system:mcp:manage">
+                <McpPage />
+              </PermRoute>
+            ),
+          },
+          {
+            path: "workflow",
+            element: (
+              <PermRoute perm="system:workflow:manage">
+                <WorkflowsPage />
+              </PermRoute>
+            ),
+          },
+          {
+            path: "triggers",
+            element: (
+              <PermRoute perm="system:trigger:manage">
+                <TriggersPage />
+              </PermRoute>
+            ),
+          },
+          {
+            path: "billing",
+            element: (
+              <PermRoute perm="system:billing:manage">
+                <BillingPage />
+              </PermRoute>
+            ),
+          },
+          {
+            path: "teams",
+            element: (
+              <PermRoute perm="system:team:manage">
+                <TeamsPage />
+              </PermRoute>
+            ),
+          },
+          {
+            path: "bots",
+            element: (
+              <PermRoute perm="chat:execute">
+                <BotsPage />
+              </PermRoute>
+            ),
+          },
         ],
       },
       { path: "*", element: <NotFoundPage /> },
     ],
+  },
+  {
+    // 025 发布渠道:免登录公开对话页——必须在认证壳外(AppLayout 的
+    // Protected 会把匿名访客踢去 /login,嵌入渠道核心场景不可用——审查循环 S1)
+    path: "/bot/:botKey",
+    element: <BotPublicPage />,
   },
 ]);
 

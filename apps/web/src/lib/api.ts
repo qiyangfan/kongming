@@ -23,6 +23,14 @@ export type StreamStageOut = components["schemas"]["StreamStageOut"];
 export type StreamSqlOut = components["schemas"]["StreamSqlOut"];
 export type StreamSummaryOut = components["schemas"]["StreamSummaryOut"];
 export type StreamErrorOut = components["schemas"]["StreamErrorOut"];
+/* 019 tool-calling:tool_call 事件 + 待确认调用 + 确认回执 */
+export type StreamToolCallOut = components["schemas"]["StreamToolCallOut"];
+export type PendingToolCallOut = components["schemas"]["PendingToolCallOut"];
+export type ToolConfirmOut = components["schemas"]["ToolConfirmOut"];
+export type ToolItemOut = components["schemas"]["ToolItemOut"];
+export type ToolListOut = components["schemas"]["ToolListOut"];
+export type ToolAuditItem = components["schemas"]["ToolAuditItem"];
+export type ToolAuditPageOut = components["schemas"]["ToolAuditPageOut"];
 
 const BASE = "/api";
 const REFRESH_KEY = "km.refresh";
@@ -163,6 +171,7 @@ export interface StreamHandlers {
   onStage?: (d: StreamStageOut) => void;
   onSql?: (d: StreamSqlOut) => void;
   onSummary?: (d: StreamSummaryOut) => void;
+  onToolCall?: (d: StreamToolCallOut) => void;
   onResult?: (d: ChatQueryOut) => void;
   onError?: (d: StreamErrorOut) => void;
 }
@@ -192,6 +201,9 @@ function dispatchSseBlock(block: string, handlers: StreamHandlers): boolean {
       return false;
     case "summary":
       handlers.onSummary?.(data as StreamSummaryOut);
+      return false;
+    case "tool_call":
+      handlers.onToolCall?.(data as StreamToolCallOut);
       return false;
     case "result":
       handlers.onResult?.(data as ChatQueryOut);

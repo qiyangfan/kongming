@@ -70,27 +70,53 @@ class RagRepository:
         sample_queries: list[str],
         source_type: str,
         embedding: list[float] | None,
+        alias: str = "",  # 037:业务称谓别名
     ) -> None:
-        """四元幂等 upsert;embedding 为 None 时清空向量(不参与向量召回,全文路可用)。"""
+        """四元幂等 upsert;embedding 为 None 时自动来源清空向量(009 降级语义)。
+
+        037 alias 覆盖规则(knowledge spec「补齐不改写既有非空 alias」):
+        自动来源(INTROSPECTION/AI_GENERATED)与上传(MANUAL_UPLOAD——parser 无
+        别名语法,清空非显式意图)只补空 alias,不改写既有非空值;人工精修
+        (MANUAL_EDIT/FEEDBACK_REFINED)显式操作即显式覆盖。
+        **tsv 同规则同源**(R1-S1):alias 命中保留分支时,tsv 须以「生效别名」
+        (=既有别名)在 DO UPDATE 内重算,否则派生检索文本与 alias 列不同源,
+        别名召回静默失效;人工精修路径 embedding 传 None 时保留既有向量
+        (清向量会使该表退出向量召回)。
+        """
         vec = _vec_literal(embedding) if embedding else None
         cols_text = " ".join(f"{k} {v}" for k, v in columns_comment.items())
+        # 生效别名(单一定义):保留分支命中→既有别名;否则→传入别名。
+        # alias 列、tsv、tsv 参数四处引用保持一致(EXCLUDED.alias=:alias 值)。
+        effective_alias = (
+            "COALESCE(CASE WHEN :source IN ('INTROSPECTION', 'AI_GENERATED',"
+            " 'MANUAL_UPLOAD') AND COALESCE(rag.table_descriptions.alias, '') <> ''"
+            " THEN rag.table_descriptions.alias END, EXCLUDED.alias)"
+        )
         await self._s.execute(
             text(
-                "INSERT INTO rag.table_descriptions"
+                # S608 豁免:effective_alias 为本文件内常量片段(非用户输入),
+                # 其余全部为绑定参数——无任何外部字符串拼接
+                "INSERT INTO rag.table_descriptions"  # noqa: S608
                 " (id, tenant_id, datasource_key, schema_name, table_name,"
                 "  table_comment, columns_comment, sample_queries, source_type,"
-                "  embedding, tsv, created_at, updated_at)"
+                "  embedding, tsv, alias, created_at, updated_at)"
                 " VALUES (:id, :tenant, :ds, :schema, :table, :comment,"
                 "  CAST(:cols AS jsonb), CAST(:samples AS jsonb), :source,"
                 "  CAST(:vec AS vector),"
-                "  to_tsvector('simple', :table_t || ' ' || :comment_t || ' ' || :cols_text),"
-                "  now(), now())"
+                "  to_tsvector('simple', :table_t || ' ' || :alias_t || ' ' ||"
+                "  :comment_t || ' ' || :cols_text),"
+                "  :alias, now(), now())"
                 " ON CONFLICT (tenant_id, datasource_key, schema_name, table_name)"
                 " DO UPDATE SET table_comment = EXCLUDED.table_comment,"
                 "  columns_comment = EXCLUDED.columns_comment,"
                 "  sample_queries = EXCLUDED.sample_queries,"
                 "  source_type = EXCLUDED.source_type,"
-                "  embedding = EXCLUDED.embedding, tsv = EXCLUDED.tsv,"
+                "  embedding = CASE WHEN :source IN ('INTROSPECTION', 'AI_GENERATED')"
+                "   THEN EXCLUDED.embedding"
+                "   ELSE COALESCE(EXCLUDED.embedding, rag.table_descriptions.embedding) END,"
+                "  tsv = to_tsvector('simple', :table_t || ' ' ||"
+                f"  {effective_alias} || ' ' || :comment_t || ' ' || :cols_text),"
+                "  alias = " + effective_alias + ","
                 "  updated_at = now()"
             ),
             {
@@ -105,27 +131,34 @@ class RagRepository:
                 "source": source_type,
                 "vec": vec,
                 "cols_text": cols_text,
+                "alias": alias,
                 # tsv 内容参数与列值参数分开命名(同值不同参):asyncpg 对同一参数
                 # 在 varchar 列与 tsvector 输入两处推断类型会报 AmbiguousParameter
                 "table_t": table_name,
+                "alias_t": alias or " ",  # 037:alias 进 tsv
                 "comment_t": table_comment or " ",
             },
         )
 
-    async def list_source_types(
+    async def list_source_and_alias(
         self, *, tenant_id: str, datasource_key: str
-    ) -> dict[str, str]:
-        """表名 → source_type(fetch-metadata 批量优先级判定,一次读)。"""
+    ) -> dict[str, tuple[str, str]]:
+        """表名 → (source_type, alias)——优先级判定与生效别名(R1-S1:embedding
+        文本须以生效别名参与,与 alias 列/tsv 同源),一次读免二次往返。"""
         rows = (
             await self._s.execute(
                 text(
-                    "SELECT table_name, source_type FROM rag.table_descriptions"
+                    "SELECT table_name, source_type, COALESCE(alias, '') AS alias"
+                    " FROM rag.table_descriptions"
                     " WHERE tenant_id = :t AND datasource_key = :d"
                 ),
                 {"t": tenant_id, "d": datasource_key},
             )
         ).all()
-        return {str(r.table_name): str(r.source_type) for r in rows}
+        return {
+            str(r.table_name): (str(r.source_type), str(r.alias or ""))
+            for r in rows
+        }
 
     async def list_tables(
         self,
@@ -142,7 +175,8 @@ class RagRepository:
             count_sql = "SELECT count(*) FROM rag.table_descriptions WHERE tenant_id = :t"
             list_sql = (
                 "SELECT id, datasource_key, schema_name, table_name, table_comment,"
-                " columns_comment, sample_queries, source_type, updated_at"
+                " columns_comment, sample_queries, source_type, updated_at,"
+                " COALESCE(alias, '') AS alias"
                 " FROM rag.table_descriptions WHERE tenant_id = :t"
                 " ORDER BY updated_at DESC, id DESC LIMIT :lim OFFSET :off"
             )
@@ -154,7 +188,8 @@ class RagRepository:
             )
             list_sql = (
                 "SELECT id, datasource_key, schema_name, table_name, table_comment,"
-                " columns_comment, sample_queries, source_type, updated_at"
+                " columns_comment, sample_queries, source_type, updated_at,"
+                " COALESCE(alias, '') AS alias"
                 " FROM rag.table_descriptions"
                 " WHERE tenant_id = :t AND datasource_key = :d"
                 " ORDER BY updated_at DESC, id DESC LIMIT :lim OFFSET :off"
@@ -178,6 +213,7 @@ class RagRepository:
             sample_queries=list(row.sample_queries or []),  # type: ignore[attr-defined]
             source_type=str(row.source_type),  # type: ignore[attr-defined]
             updated_at=row.updated_at,  # type: ignore[attr-defined]
+            alias=str(row.alias or ""),  # type: ignore[attr-defined]  # 037
         )
 
     async def find_table(self, *, tenant_id: str, table_id: str) -> KnowledgeEntry | None:
@@ -186,7 +222,8 @@ class RagRepository:
             await self._s.execute(
                 text(
                     "SELECT id, datasource_key, schema_name, table_name, table_comment,"
-                    " columns_comment, sample_queries, source_type, updated_at"
+                    " columns_comment, sample_queries, source_type, updated_at,"
+                    " COALESCE(alias, '') AS alias"
                     " FROM rag.table_descriptions WHERE id = :id AND tenant_id = :t"
                 ),
                 {"id": table_id, "t": tenant_id},
@@ -205,6 +242,7 @@ class RagRepository:
             sample_queries=list(row["sample_queries"] or []),
             source_type=str(row["source_type"]),
             updated_at=row["updated_at"],
+            alias=str(row.get("alias") or ""),  # 037
         )
 
     async def delete_table(self, *, tenant_id: str, table_id: str) -> bool:
@@ -308,7 +346,8 @@ class RagRepository:
                 await self._s.execute(
                     text(
                         "SELECT id, datasource_key, schema_name, table_name, table_comment,"
-                        " columns_comment, sample_queries, source_type, updated_at"
+                        " columns_comment, sample_queries, source_type, updated_at,"
+                        " COALESCE(alias, '') AS alias"
                         " FROM rag.table_descriptions"
                         " WHERE tenant_id = :t AND datasource_key = :d"
                         " AND schema_name = :s AND table_name = :n"

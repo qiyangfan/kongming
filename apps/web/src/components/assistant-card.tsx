@@ -16,6 +16,12 @@ import {
 } from "lucide-react";
 
 import { ChartView } from "@/components/chart-view";
+import {
+  ChartArtifactCard,
+  DocumentCard,
+  SqlArtifactCard,
+} from "@/components/artifact-blocks";
+import type { ArtifactOut } from "@/lib/chat-api";
 import type { SessionMessageOut } from "@/lib/api";
 import { explainPlan, exportResult } from "@/lib/chat-api";
 import { submitFeedback } from "@/lib/feedback-api";
@@ -45,6 +51,7 @@ function normalize(msg: SessionMessageOut): {
   insights: { [key: string]: string }[];
   stats: Record<string, unknown>;
   chart: { type: string; x: string | null; y: string | null };
+  artifacts: ArtifactOut[];
 } {
   const r = msg.result;
   return {
@@ -57,6 +64,7 @@ function normalize(msg: SessionMessageOut): {
       x: r?.chart?.x ?? null,
       y: r?.chart?.y ?? null,
     },
+    artifacts: r?.artifacts ?? [],
   };
 }
 
@@ -84,16 +92,33 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
   }
 
   const result = normalize(msg);
+  // 026:artifacts 非空走类型化产物卡;缺档(026 前存量/persist=false 容错)
+  // 全段回落既有形态(spec「无 artifacts 的历史消息按既有形态渲染」)
+  const sqlArt = result.artifacts.find((a) => a.type === "sql");
+  const chartArt = result.artifacts.find((a) => a.type === "chart");
+  const docArt = result.artifacts.find((a) => a.type === "document");
   return (
     <div className="space-y-3">
-      {msg.summary && (
-        <p className="px-1 text-[15px] leading-relaxed text-foreground">{msg.summary}</p>
+      {docArt ? (
+        <DocumentCard content={docArt.content} />
+      ) : (
+        msg.summary && (
+          <p className="px-1 text-[15px] leading-relaxed text-foreground">{msg.summary}</p>
+        )
       )}
 
-      {result.chart.type !== "none" && result.columns.length > 0 && (
-        <div className="rounded-lg border border-border bg-card px-2 py-1">
-          <ChartView chart={result.chart} data={{ columns: result.columns, rows: result.rows }} />
-        </div>
+      {chartArt && result.columns.length > 0 ? (
+        <ChartArtifactCard
+          chart={result.chart}
+          data={{ columns: result.columns, rows: result.rows }}
+        />
+      ) : (
+        result.chart.type !== "none" &&
+        result.columns.length > 0 && (
+          <div className="rounded-lg border border-border bg-card px-2 py-1">
+            <ChartView chart={result.chart} data={{ columns: result.columns, rows: result.rows }} />
+          </div>
+        )
       )}
 
       {result.columns.length > 0 && (
@@ -141,22 +166,26 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
         <ExportButtons columns={result.columns} rows={result.rows} />
       )}
 
-      {msg.sql && (
-        <Collapsible>
-          <CollapsibleTrigger className="group flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-            <ChevronRight
-              className="size-3.5 transition-transform group-data-[state=open]:rotate-90"
-              aria-hidden
-            />
-            <Database className="size-3.5" aria-hidden />
-            查看 SQL
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <pre className="mt-1.5 overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed text-foreground">
-              {msg.sql}
-            </pre>
-          </CollapsibleContent>
-        </Collapsible>
+      {sqlArt ? (
+        <SqlArtifactCard messageId={msg.id} sql={sqlArt.content} />
+      ) : (
+        msg.sql && (
+          <Collapsible>
+            <CollapsibleTrigger className="group flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+              <ChevronRight
+                className="size-3.5 transition-transform group-data-[state=open]:rotate-90"
+                aria-hidden
+              />
+              <Database className="size-3.5" aria-hidden />
+              查看 SQL
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <pre className="mt-1.5 overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed text-foreground">
+                {msg.sql}
+              </pre>
+            </CollapsibleContent>
+          </Collapsible>
+        )
       )}
 
       {msg.sql && msg.id && <ExplainCollapsible messageId={msg.id} />}

@@ -37,6 +37,8 @@ class AgentReply:
     sql: str = ""
     retry_count: int = 0
     error: str | None = None
+    # 035:bot 链路请求内同步采集(纯增;/query_react 响应携带,空=旧版 agent)
+    usage_records: list[dict[str, object]] = field(default_factory=list)
 
 
 def parse_agent_reply(data: dict[str, object]) -> AgentReply:
@@ -47,6 +49,7 @@ def parse_agent_reply(data: dict[str, object]) -> AgentReply:
     stats_raw = data.get("stats")
     columns_raw = data.get("columns")
     rows_raw = data.get("rows")
+    usage_raw = data.get("usage_records")
     return AgentReply(
         success=bool(data.get("success")),
         verdict=verdict if isinstance(verdict, str) else None,
@@ -64,6 +67,11 @@ def parse_agent_reply(data: dict[str, object]) -> AgentReply:
         sql=str(data.get("sql") or ""),
         retry_count=retry if isinstance(retry := data.get("retry_count"), int) else 0,
         error=error if isinstance(error, str) else None,
+        usage_records=(
+            [dict(r) for r in usage_raw if isinstance(r, dict)]
+            if isinstance(usage_raw, list)
+            else []
+        ),
     )
 
 
@@ -82,7 +90,12 @@ class AgentClient:
         user_id: str | None,
         history: list[str],
         datasource_key: str,
+        react_tools: list[dict[str, object]] | None = None,
+        memory_hint: str = "",
+        attachment_ids: list[str] | None = None,  # 030
     ) -> AgentReply:
+        """同步问答;react_tools 非 None 即走 ReAct 内核端点(019,tools 注入);
+        memory_hint=022 记忆段(空=零回归)。"""
         payload = self._payload(
             trace_id=trace_id,
             tenant_key=tenant_key,
@@ -90,12 +103,16 @@ class AgentClient:
             user_id=user_id,
             history=history,
             datasource_key=datasource_key,
+            react_tools=react_tools,
+            memory_hint=memory_hint,
+            attachment_ids=attachment_ids,
         )
+        path = "/query_react" if react_tools is not None else "/query"
         try:
             async with httpx.AsyncClient(
                 base_url=self._base, timeout=self._timeout, headers=self._headers
             ) as client:
-                resp = await client.post("/query", json=payload)
+                resp = await client.post(path, json=payload)
         except httpx.HTTPError as e:
             log.warning("agent 回调异常: %s", e)
             raise AgentUnavailable(str(e)) from e
@@ -120,10 +137,14 @@ class AgentClient:
         history: list[str],
         datasource_key: str,
         on_frame: StreamFrameHandler,
+        react_tools: list[dict[str, object]] | None = None,
+        memory_hint: str = "",
+        attachment_ids: list[str] | None = None,  # 030
     ) -> None:
         """流式问答(017):消费 agent SSE 流,逐帧 (event, data_json) 回调;
         错误语义与同步 query 同(不可达/非 200/传输失败一律 AgentUnavailable,
-        由调用方收敛 error 终态+FAILED 落库)。"""
+        由调用方收敛 error 终态+FAILED 落库)。019:react_tools 非 None 走
+        /query_react/stream(tools 注入,事件含 tool_call)。"""
         payload = self._payload(
             trace_id=trace_id,
             tenant_key=tenant_key,
@@ -131,13 +152,17 @@ class AgentClient:
             user_id=user_id,
             history=history,
             datasource_key=datasource_key,
+            react_tools=react_tools,
+            memory_hint=memory_hint,
+            attachment_ids=attachment_ids,
         )
+        path = "/query_react/stream" if react_tools is not None else "/query/stream"
         decoder = SseDecoder()
         try:
             async with httpx.AsyncClient(
                 base_url=self._base, timeout=self._timeout, headers=self._headers
             ) as client:
-                async with client.stream("POST", "/query/stream", json=payload) as resp:
+                async with client.stream("POST", path, json=payload) as resp:
                     if resp.status_code != 200:
                         log.warning("agent 流式回调非 200: HTTP %s", resp.status_code)
                         raise AgentUnavailable(f"HTTP {resp.status_code}")
@@ -158,8 +183,11 @@ class AgentClient:
         user_id: str | None,
         history: list[str],
         datasource_key: str,
+        react_tools: list[dict[str, object]] | None = None,
+        memory_hint: str = "",
+        attachment_ids: list[str] | None = None,
     ) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "trace_id": trace_id,
             "tenant_key": tenant_key,
             "question": question,
@@ -167,6 +195,107 @@ class AgentClient:
             "history": history,
             "datasource_key": datasource_key,
         }
+        if react_tools is not None:
+            payload["tools"] = react_tools  # ReAct 内核:api 按授权注入(019)
+        if memory_hint:
+            payload["memory_hint"] = memory_hint  # 022
+        if attachment_ids:
+            payload["attachment_ids"] = attachment_ids  # 030
+        return payload
+
+    async def query_react(
+        self,
+        *,
+        trace_id: str,
+        tenant_key: str,
+        question: str,
+        user_id: str | None,
+        history: list[str],
+        datasource_key: str,
+        tools: list[dict[str, object]],
+        bot_system_prompt: str = "",
+        model: str | None = None,  # 025:Bot 模型覆盖
+        channel: str = "chat",  # 025:渠道标记
+        collect_usage: bool = False,  # 035:仅 bot 链路置真(响应携带用量明细)
+    ) -> AgentReply:
+        """ReAct 显式调用(019/025:tools 注入 + Bot 系统提示);错误语义与 query 同。"""
+        payload: dict[str, object] = {
+            "trace_id": trace_id,
+            "tenant_key": tenant_key,
+            "question": question,
+            "user_id": user_id,
+            "history": history,
+            "datasource_key": datasource_key,
+            "tools": tools,
+        }
+        if bot_system_prompt:
+            payload["bot_system_prompt"] = bot_system_prompt
+        if model:
+            payload["model"] = model
+        if channel != "chat":
+            payload["channel"] = channel
+        if collect_usage:
+            payload["collect_usage"] = True
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._base, timeout=self._timeout, headers=self._headers
+            ) as client:
+                resp = await client.post("/query_react", json=payload)
+        except httpx.HTTPError as e:
+            log.warning("agent react 回调异常: %s", e)
+            raise AgentUnavailable(str(e)) from e
+        if resp.status_code != 200:
+            raise AgentUnavailable(f"HTTP {resp.status_code}")
+        try:
+            return parse_agent_reply(resp.json())
+        except (ValueError, TypeError, AttributeError) as e:
+            raise AgentUnavailable(f"bad reply: {e}") from e
+
+    async def list_models(self) -> list[str]:
+        """021 注册表模型名(025;失败返回空——fail-closed 校验语义)。"""
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._base, timeout=10.0, headers=self._headers
+            ) as client:
+                resp = await client.get("/internal/models")
+        except httpx.HTTPError:
+            return []
+        if resp.status_code != 200:
+            return []
+        try:
+            data = resp.json()
+            return [str(m) for m in data.get("models") or []]
+        except (ValueError, TypeError):
+            return []
+
+    async def extract_memory(self, *, question: str, answer: str) -> list[dict[str, str]]:
+        """隐式记忆提取(022):agent /internal/extract-memory 回调;
+        任何失败收敛空列表(后台任务静默跳过)。"""
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._base, timeout=30.0, headers=self._headers
+            ) as client:
+                resp = await client.post(
+                    "/internal/extract-memory",
+                    json={"question": question, "answer": answer[:2000]},
+                )
+        except httpx.HTTPError as e:
+            log.warning("记忆提取回调异常: %s", e)
+            return []
+        if resp.status_code != 200:
+            log.warning("记忆提取非 200: HTTP %s", resp.status_code)
+            return []
+        try:
+            data = resp.json()
+            items = data.get("memories") or []
+            return [
+                {"content": str(i["content"]), "category": str(i.get("category") or "general")}
+                for i in items
+                if isinstance(i, dict) and isinstance(i.get("content"), str)
+            ]
+        except (ValueError, TypeError, KeyError) as e:
+            log.warning("记忆提取响应解析失败: %s", e)
+            return []
 
     async def rewrite_title(self, *, question: str) -> str | None:
         """会话标题改写(010):后台任务兜底语义——任何失败(不可达/非 200/降级

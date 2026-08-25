@@ -28,6 +28,8 @@ EVAL_DIR = Path(__file__).parent
 API_BASE = os.getenv("KM_EVAL_API_BASE", "http://127.0.0.1:8000")
 ADMIN_USERNAME = os.getenv("KM_EVAL_ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("KM_EVAL_ADMIN_PASSWORD", "")
+# 019:评估内核选择(recipe 缺省 / react=ReAct 内核等价性验证)
+AGENT_MODE = os.getenv("KM_EVAL_AGENT_MODE", "recipe")
 CHAT_TIMEOUT = 150.0  # agent_timeout_sec=120 覆盖全图 + 网络余量
 
 if not ADMIN_PASSWORD:
@@ -102,6 +104,10 @@ async def call_chat(
         body["history"] = history
     if datasource_key:
         body["datasource_key"] = datasource_key
+    # 019:KM_EVAL_AGENT_MODE=react 时经 ReAct 内核跑同一评估集(基线对照);
+    # 缺省 recipe(8 节点链路,既有基线口径不变)
+    if AGENT_MODE != "recipe":
+        body["agent_mode"] = AGENT_MODE
     async with httpx.AsyncClient(base_url=API_BASE, timeout=CHAT_TIMEOUT) as c:
         r = await c.post("/chat/query", headers=headers, json=body)
     if r.status_code == 401:  # token 过期:重登一次重发(上游同款教训)

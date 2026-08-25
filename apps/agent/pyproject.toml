@@ -34,6 +34,9 @@ select = ["E", "F", "I", "UP", "B", "S", "ASYNC"]
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]  # pytest 惯例
 "kongming_agent/graph/prompts.py" = ["E501"]  # prompt 逐字保值(折行即改给 LLM 的文本)
+"kongming_agent/graph/react/prompts.py" = ["E501"]  # 019 ReAct 撰写资产同款(折行即文本)
+"kongming_agent/graph/extract_prompt.py" = ["E501"]  # 022 记忆提取撰写资产同款
+"kongming_agent/graph/doc_prompt.py" = ["E501"]  # 024 知识问答撰写资产同款
 
 [tool.mypy]
 strict = true

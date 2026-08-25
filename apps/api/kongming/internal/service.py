@@ -52,6 +52,39 @@ class InvalidDatasource(Exception):
     """数据源不存在/禁用/越属:同形 400 DATASOURCE_INVALID(防 key 探测)。"""
 
 
+async def resolve_tenant(session: AsyncSession, tenant_key: str) -> str:
+    """租户解析(fail-closed:不存在/禁用同形拒绝;此时无租户主体,不落审计)。
+
+    019 抽共用:internal 执行前段与 toolcall 六层防御 L1 同调(防线单一事实源)。
+    """
+    tenant = (
+        await session.execute(
+            text("SELECT id, status FROM public.sys_tenant WHERE tenant_key = :k"),
+            {"k": tenant_key},
+        )
+    ).mappings().one_or_none()
+    if tenant is None or tenant["status"] != "ACTIVE":
+        raise TenantNotFound(tenant_key)
+    return str(tenant["id"])
+
+
+async def assert_user_bound(
+    session: AsyncSession, *, user_id: str, tenant_id: str, tenant_key: str
+) -> None:
+    """用户-租户绑定复校(019 抽共用;系统调用豁免语义由调用方决定,本函数恒校验)。"""
+    bound = (
+        await session.execute(
+            text(
+                "SELECT 1 FROM public.sys_user_tenant"
+                " WHERE user_id = :u AND tenant_id = :t"
+            ),
+            {"u": user_id, "t": tenant_id},
+        )
+    ).scalar_one_or_none()
+    if bound is None:
+        raise TenantBindingForbidden(f"{user_id} 未绑定租户 {tenant_key}")
+
+
 # SQLAlchemy asyncpg 方言把驱动错误包成 DBAPIError,args[0] 形如
 # "<class 'asyncpg.exceptions.X'>: 真实消息"——剥掉类路径前缀喂 selfheal
 _DRIVER_PREFIX = re.compile(r"^<class '[^']+'>: ")
@@ -155,16 +188,8 @@ async def _prepare(  # noqa: PLR0913 —— 请求字段平铺,编排前段
     """
     writer = SqlAuditWriter()
 
-    # 1. 租户解析(fail-closed:不存在/禁用同形拒绝;此时无租户主体,不落审计)
-    tenant = (
-        await session.execute(
-            text("SELECT id, status FROM public.sys_tenant WHERE tenant_key = :k"),
-            {"k": tenant_key},
-        )
-    ).mappings().one_or_none()
-    if tenant is None or tenant["status"] != "ACTIVE":
-        raise TenantNotFound(tenant_key)
-    tenant_id = str(tenant["id"])
+    # 1. 租户解析(公共函数,019 抽共用;fail-closed 不落审计)
+    tenant_id = await resolve_tenant(session, tenant_key)
 
     async def _fin(verdict: str, sql: str, reason: str) -> ExecResult:
         return await _finalize(
@@ -213,22 +238,16 @@ async def _prepare(  # noqa: PLR0913 —— 请求字段平铺,编排前段
         route_schema = row.default_schema
     engine = await get_or_create_engine(datasource_key, engine_dsn)
 
-    # 3. 用户-租户绑定复校(系统调用豁免);基础设施异常收敛 ERROR 不裸 500
+    # 3. 用户-租户绑定复校(系统调用豁免;公共函数);基础设施异常收敛 ERROR 不裸 500
     if user_id is not None:
         try:
-            bound = (
-                await session.execute(
-                    text(
-                        "SELECT 1 FROM public.sys_user_tenant"
-                        " WHERE user_id = :u AND tenant_id = :t"
-                    ),
-                    {"u": user_id, "t": tenant_id},
-                )
-            ).scalar_one_or_none()
+            await assert_user_bound(
+                session, user_id=user_id, tenant_id=tenant_id, tenant_key=tenant_key
+            )
+        except TenantBindingForbidden:
+            raise
         except Exception as e:
             return await _fin("ERROR", sql_text, _error_summary(e))
-        if bound is None:
-            raise TenantBindingForbidden(f"{user_id} 未绑定租户 {tenant_key}")
 
     # 4. 防火墙初检(原 SQL)
     first = check(sql_text)

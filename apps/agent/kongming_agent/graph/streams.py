@@ -69,7 +69,7 @@ def stage_wrapper(name: str, fn: AsyncNodeFn | SyncNodeFn) -> Any:
             if isinstance(validation, ValidationResult) and validation.passed:
                 # SQL 提前展示:校验通过即下发,内容与终态落库 SQL 一致
                 emit_event("sql", {"sql": state.get("generated_sql") or ""})
-        if name == "summarize":
+        if name in ("summarize", "doc_answer"):  # 024:知识问答节点同样产出终稿
             summary = out.get("summary")
             if isinstance(summary, str) and summary:
                 emit_event("summary", {"delta": summary})

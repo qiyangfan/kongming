@@ -21,6 +21,14 @@ export interface ChartDatum {
   rows: unknown[][];
 }
 
+/* 026 调参(artifact chart 卡):标题/轴名本地即时重绘,不调 LLM;
+   缺省空串=不渲染对应元素,与既有调用方零行为差 */
+export interface ChartTune {
+  title: string;
+  xName: string;
+  yName: string;
+}
+
 const CHART_TYPES = ["bar", "line", "pie", "scatter"] as const;
 type ChartType = (typeof CHART_TYPES)[number];
 
@@ -72,7 +80,15 @@ function formatTemporalLabels(labels: string[]): string[] {
   });
 }
 
-export function ChartView({ chart, data }: { chart: ChartSpec; data: ChartDatum }) {
+export function ChartView({
+  chart,
+  data,
+  tune,
+}: {
+  chart: ChartSpec;
+  data: ChartDatum;
+  tune?: ChartTune;
+}) {
   const palette = useMemo(chartPalette, []);
   const axisColor = useMemo(() => cssVar("--muted-foreground"), []);
   const lineColor = useMemo(() => cssVar("--border"), []);
@@ -98,9 +114,23 @@ export function ChartView({ chart, data }: { chart: ChartSpec; data: ChartDatum 
       axisLabel: { color: axisColor },
       axisLine: { lineStyle: { color: lineColor } },
     };
+    // 026 调参:标题非空才占位(顶部留白随有无标题切换,防空标题压图)
+    const titleOpt = tune?.title
+      ? {
+          title: {
+            text: tune.title,
+            left: "center",
+            top: 4,
+            textStyle: { color: axisColor, fontSize: 13, fontWeight: 500 },
+          },
+        }
+      : {};
+    const xNameOpt = tune?.xName ? { name: tune.xName, nameTextStyle: { color: axisColor } } : {};
+    const yNameOpt = tune?.yName ? { name: tune.yName, nameTextStyle: { color: axisColor } } : {};
 
     if (activeType === "pie") {
       return {
+        ...titleOpt,
         tooltip: { trigger: "item" },
         legend: { bottom: 0, left: "center", textStyle: { color: axisColor } },
         series: [
@@ -116,12 +146,19 @@ export function ChartView({ chart, data }: { chart: ChartSpec; data: ChartDatum 
         ],
       };
     }
-    const grid = { left: 12, right: 16, top: 24, bottom: 8, containLabel: true };
+    const grid = {
+      left: 12,
+      right: 16,
+      top: tune?.title ? 36 : 24,
+      bottom: 8,
+      containLabel: true,
+    };
     if (activeType === "scatter") {
       const xNumeric =
         data.rows.length > 0 && data.rows.every((r) => isNumericCell(r[xi]));
       if (xNumeric) {
         return {
+          ...titleOpt,
           grid,
           tooltip: {
             trigger: "item",
@@ -133,8 +170,8 @@ export function ChartView({ chart, data }: { chart: ChartSpec; data: ChartDatum 
             },
           },
           // scale:true:轴不含零起点,窄区间远离 0 的数据不挤角(散点看分布)
-          xAxis: { type: "value", scale: true, ...axisCommon },
-          yAxis: { type: "value", scale: true, ...axisCommon },
+          xAxis: { type: "value", scale: true, ...xNameOpt, ...axisCommon },
+          yAxis: { type: "value", scale: true, ...yNameOpt, ...axisCommon },
           series: [
             {
               type: "scatter",
@@ -151,20 +188,22 @@ export function ChartView({ chart, data }: { chart: ChartSpec; data: ChartDatum 
       // 退化:类目轴点图(一行非数值即整体退化,宁退化不丢点;
       // y 沿用 values 的 null→0 既有语义,与 bar/line 同构)
       return {
+        ...titleOpt,
         grid,
         tooltip: { trigger: "axis" },
-        xAxis: { type: "category", data: labels, ...axisCommon },
-        yAxis: { type: "value", ...axisCommon },
+        xAxis: { type: "category", data: labels, ...xNameOpt, ...axisCommon },
+        yAxis: { type: "value", ...yNameOpt, ...axisCommon },
         series: [
           { type: "scatter", data: values, itemStyle: { color: palette[0] } },
         ],
       };
     }
     return {
+      ...titleOpt,
       grid,
       tooltip: { trigger: "axis" },
-      xAxis: { type: "category", data: labels, ...axisCommon },
-      yAxis: { type: "value", ...axisCommon },
+      xAxis: { type: "category", data: labels, ...xNameOpt, ...axisCommon },
+      yAxis: { type: "value", ...yNameOpt, ...axisCommon },
       series: [
         activeType === "line"
           ? {
@@ -182,7 +221,8 @@ export function ChartView({ chart, data }: { chart: ChartSpec; data: ChartDatum 
             },
       ],
     };
-  }, [activeType, chart, data, palette, axisColor, lineColor]);
+    // tune 基元展开入依赖(标题/轴名一改即重算重绘,026 调参语义)
+  }, [activeType, chart, data, palette, axisColor, lineColor, tune?.title, tune?.xName, tune?.yName]);
 
   function downloadPng(): void {
     const inst = chartRef.current?.getEchartsInstance();

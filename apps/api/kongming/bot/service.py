@@ -1,0 +1,314 @@
+"""bot 用例编排(025):Bot CRUD + 运行时(权限求交)+ api-key + 审核。零框架。"""
+
+import hashlib
+import logging
+import secrets
+import uuid
+
+from kongming.bot.models import (
+    BOT_KEY_PATTERN,
+    InvalidBotKey,
+    tools_for_perms,
+    validate_tool_subset,
+)
+from kongming.bot.ports import (
+    BotGuardrail,
+    BotOperLogger,
+    BotRepo,
+    DynamicToolLister,
+    PermReader,
+    ReactRunner,
+    UsageSink,
+)
+from kongming.toolcall.registry import filter_specs
+
+log = logging.getLogger(__name__)
+
+GUARDRAIL_REJECT_TEXT = "内容未通过安全检查,请调整后重试"
+
+
+class BotNotFound(Exception):
+    """不存在/非本人/未公开(同形不区分)。"""
+
+
+class GuardrailRejected(Exception):
+    """system_prompt 或输入未过护栏审核。"""
+
+
+class ApiKeyInvalid(Exception):
+    pass
+
+
+class BotService:
+    def __init__(  # noqa: PLR0913
+        self,
+        repo: BotRepo,
+        perms: PermReader,
+        runner: ReactRunner,
+        guardrail: BotGuardrail,
+        oper_logger: BotOperLogger,
+        dynamic_tools: DynamicToolLister | None = None,  # 028:MCP 目录(未注入=纯静态)
+        usage_sink: UsageSink | None = None,  # 035:bot 用量落库(未注入=不落)
+    ) -> None:
+        self._repo = repo
+        self._perms = perms
+        self._runner = runner
+        self._guardrail = guardrail
+        self._oper = oper_logger
+        self._dynamic_tools = dynamic_tools
+        self._usage_sink = usage_sink
+
+    async def _sink_usage(
+        self, reply: dict[str, object], *, tenant_id: str, bot_id: str
+    ) -> None:
+        """035:请求内同步落用量(计费基准);失败仅日志不阻断应答。"""
+        if self._usage_sink is None:
+            return
+        records_raw = reply.get("usage_records")
+        if not isinstance(records_raw, list) or not records_raw:
+            return
+        records = [dict(r) for r in records_raw if isinstance(r, dict)]
+        if not records:
+            return
+        try:
+            await self._usage_sink.insert_bot_usage(
+                records, tenant_id=tenant_id, bot_id=bot_id
+            )
+        except Exception:
+            log.warning(
+                "bot 用量落库失败(不阻断应答): tenant=%s bot=%s 条数=%d",
+                tenant_id, bot_id, len(records), exc_info=True,
+            )
+
+    async def _mcp_names(self, tenant_id: str) -> list[str]:
+        """租户已注册 MCP 工具全名(未接线/空 → 纯静态口径,025 零回归)。"""
+        if self._dynamic_tools is None:
+            return []
+        return [
+            str(e.get("qualified") or "")
+            for e in await self._dynamic_tools.list_dynamic(tenant_id=tenant_id)
+        ]
+
+    @staticmethod
+    def _registered_names(mcp_names: list[str]) -> set[str]:
+        from kongming.toolcall.registry import REGISTRY
+
+        return set(REGISTRY.keys()) | set(mcp_names)
+
+    # ── CRUD ──
+
+    async def create(
+        self, *, user_id: str, tenant_id: str, payload: dict[str, object]
+    ) -> str:
+        bot_key = str(payload["bot_key"])
+        if not BOT_KEY_PATTERN.fullmatch(bot_key):
+            raise InvalidBotKey(bot_key)
+        raw_tools = payload.get("tools") or []
+        tools = [str(t) for t in raw_tools] if isinstance(raw_tools, list) else []
+        mcp_names = await self._mcp_names(tenant_id)
+        allowed = tools_for_perms(await self._perms.list_codes(user_id), mcp_names)
+        validate_tool_subset(tools, allowed, registered_names=self._registered_names(mcp_names))
+        # R1-H2:datasource 归属校验(spec 字面立约;default 恒可用)
+        ds_key = str(payload.get("datasource_key") or "default")
+        if ds_key != "default":
+            await self._assert_datasource(tenant_id, ds_key)
+        # R1-H1:model 注册表校验(非空时;实时查 agent 注册表,不可达 fail-closed 拒)
+        model = payload.get("model")
+        if model is not None:
+            available = await self._runner.list_models()
+            if str(model) not in available:
+                raise InvalidBotKey(f"模型未注册: {model}")
+        # 发布治理:system_prompt 过护栏审核(spec)
+        await self.validate_prompt(
+            user_id=user_id, tenant_id=tenant_id, prompt=str(payload["system_prompt"])
+        )
+        row_id = await self._repo.create_bot(
+            tenant_id=tenant_id,
+            bot_key=bot_key,
+            name=str(payload["name"]),
+            system_prompt=str(payload["system_prompt"]),
+            tools=tools,
+            datasource_key=str(payload.get("datasource_key") or "default"),
+            model=payload.get("model"),
+            is_public=bool(payload.get("is_public", False)),
+            created_by=user_id,
+        )
+        await self._oper.add(
+            user_id, "bot.create", bot_key, {"datasource_key": ds_key}
+        )
+        await self._repo.commit()
+        return row_id
+
+    async def _assert_datasource(self, tenant_id: str, datasource_key: str) -> None:
+        """R1-H2:非 default 源存在+启用+归属(同形 InvalidBotKey 400 防探测)。"""
+        row = await self._repo.find_datasource(datasource_key=datasource_key)
+        if row is None or row["status"] != "ACTIVE" or str(row["tenant_id"]) != tenant_id:
+            raise InvalidBotKey(f"数据源不可用: {datasource_key}")
+
+    async def run(
+        self,
+        *,
+        bot_key: str,
+        question: str,
+        channel: str,  # web_embed / api / mcp(028)
+        tenant_id_hint: str | None = None,  # api-key 渠道从 key 行带出
+    ) -> dict[str, object]:
+        """Bot 运行时:装载(启用/公开闸)→ 权限求交 → ReAct → 护栏 → 响应。
+
+        返回 {success, summary, sql, columns, rows, stats, retry_count, error}。
+        """
+        tenant_id = tenant_id_hint
+        if tenant_id is None:
+            # web 嵌入:bot_key 全局定位(先查全表拿租户——bot_key 租户内唯一,
+            # 公开页不带租户头;经 key 定位租户是刻意的)
+            row = await self._repo.get_by_key_anytenant(bot_key)
+        else:
+            row = await self._repo.get_by_key(tenant_id=tenant_id, bot_key=bot_key)
+        if row is None or not row["enabled"]:
+            raise BotNotFound(bot_key)
+        if channel == "web_embed" and not row["is_public"]:
+            raise BotNotFound(bot_key)
+        creator = str(row["created_by"])
+        # R1-L3:创建者禁用即不可运行(权限继承的账号态闸)
+        creator_status = await self._repo.find_user_status(creator)
+        if creator_status != "ACTIVE":
+            raise BotNotFound(bot_key)  # 创建者不可用同形 404(防探测)
+        trace_id = uuid.uuid4().hex
+        tenant_id = str(row["tenant_id"])
+        # 输入护栏(与 chat 同口径)
+        blocked, processed = await self._guardrail.check_input(
+            trace_id=trace_id, user_id=creator, tenant_id=tenant_id, texts=[question]
+        )
+        if blocked:
+            return {"success": False, "error": GUARDRAIL_REJECT_TEXT, "summary": ""}
+        # 权限求交(spec:Bot 子集 ∩ 创建者当前权限);
+        # filter_specs 吃权限点集(此前误传工具名集=恒空,R1 级自抓)
+        creator_perms = await self._perms.list_codes(creator)
+        mcp_names = await self._mcp_names(tenant_id)
+        allowed_names = tools_for_perms(creator_perms, mcp_names)
+        raw_bot_tools = row["tools"] if isinstance(row["tools"], list) else []
+        bot_tools = [str(t) for t in raw_bot_tools if str(t) in allowed_names]
+        tools = [
+            dict(s) for s in filter_specs(creator_perms) if s["name"] in set(bot_tools)
+        ]
+        # R1-M2:Bot 渠道无确认交互(公开页/OpenAI 无会话)——剔除需确认的写工具,
+        # 防确认死信+LLM 谎称卡片已弹出
+        from kongming.toolcall.registry import REGISTRY as _TOOL_REG
+
+        tools = [
+            t for t in tools
+            if not _TOOL_REG[str(t["name"])].require_confirm
+        ]
+        # 028:MCP 工具补入(filter_specs 只覆盖静态集);写工具同 R1-M2
+        # 剔除(无 readOnlyHint=require_confirm,Bot 渠道确认死信)
+        mcp_wanted = {t for t in bot_tools if t.startswith("mcp__")}
+        if mcp_wanted and self._dynamic_tools is not None:
+            for entry in await self._dynamic_tools.list_dynamic(tenant_id=tenant_id):
+                q = str(entry.get("qualified") or "")
+                if q not in mcp_wanted or not bool(entry.get("read_only")):
+                    continue
+                schema = entry.get("schema")
+                tools.append(
+                    {
+                        "name": q,
+                        "description": str(entry.get("description") or ""),
+                        "parameters": schema if isinstance(schema, dict) else {"type": "object"},
+                        "write": False,
+                        "require_confirm": False,
+                    }
+                )
+        from kongming.chat.agent_client import AgentUnavailable
+
+        try:
+            reply = await self._runner.run_react(
+                trace_id=trace_id,
+                tenant_key=str(row["tenant_key"]),
+                question=processed[0],
+                user_id=creator,
+                datasource_key=str(row["datasource_key"]),
+                tools=tools,
+                bot_system_prompt=str(row["system_prompt"]),
+                model=None if row["model"] is None else str(row["model"]),  # R1-H1
+                channel=channel,  # R1-M4
+            )
+        except AgentUnavailable:
+            # R1-M3:agent 故障收敛友好错误(不裸 500)
+            return {
+                "success": False,
+                "error": "助手暂不可用,请稍后重试",
+                "summary": "",
+                "sql": "",
+                "columns": [],
+                "rows": [],
+                "stats": {},
+                "retry_count": 0,
+            }
+        # 035:请求内同步落用量(计费基准=响应返回时本次用量已可判定;
+        # 失败仅日志不阻断应答)
+        await self._sink_usage(reply, tenant_id=tenant_id, bot_id=str(row["id"]))
+        summary = str(reply.get("summary") or "")
+        filtered = await self._guardrail.filter_output(
+            trace_id=trace_id,
+            user_id=creator,
+            tenant_id=tenant_id,
+            texts=[summary],
+        )
+        return {
+            "success": bool(reply.get("success")),
+            "summary": filtered[0],
+            "sql": str(reply.get("sql") or ""),
+            "columns": reply.get("columns") or [],
+            "rows": reply.get("rows") or [],
+            "stats": reply.get("stats") or {},
+            "retry_count": (
+                int(str(reply.get("retry_count")))
+                if reply.get("retry_count") is not None
+                else 0
+            ),
+            "error": reply.get("error"),
+        }
+
+    async def validate_prompt(self, *, user_id: str, tenant_id: str, prompt: str) -> None:
+        """system_prompt 护栏审核(创建/编辑共用;命中抛 GuardrailRejected)。"""
+        blocked, _ = await self._guardrail.check_input(
+            trace_id=f"bot-{uuid.uuid4().hex[:12]}",
+            user_id=user_id,
+            tenant_id=tenant_id,
+            texts=[prompt],
+        )
+        if blocked:
+            raise GuardrailRejected
+
+    # ── api-key ──
+
+    async def create_key(
+        self, *, bot_id: str, tenant_id: str, user_id: str, name: str
+    ) -> tuple[str, str]:
+        """创建 api-key:返回 (明文, key_id);明文仅本次可见。"""
+        plain = "km_" + secrets.token_urlsafe(32)
+        key_hash = hashlib.sha256(plain.encode()).hexdigest()
+        key_id = await self._repo.insert_api_key(
+            tenant_id=tenant_id,
+            bot_id=bot_id,
+            key_hash=key_hash,
+            name=name,
+            scopes={"bot_keys": []},
+        )
+        await self._repo.commit()
+        return plain, key_id
+
+    async def resolve_api_key(self, plain: str) -> dict[str, object]:
+        """X-Api-Key 鉴权:sha256 查行+未撤销+Bot 启用;返回 {bot_key, tenant_id}。"""
+        key_hash = hashlib.sha256(plain.encode()).hexdigest()
+        row = await self._repo.find_api_key(key_hash=key_hash)
+        if row is None or not row["bot_enabled"]:
+            raise ApiKeyInvalid
+        await self._repo.touch_key_used(key_id=str(row["id"]))
+        await self._repo.commit()
+        # R1-M5:key 绑定单 Bot,scopes 集合校验语义冗余(摘除;计费域重估)
+        # 035:纯增 bot_id(BOT 级配额判定与用量归属用;消费方既有键不变)
+        return {
+            "bot_key": str(row["bot_key"]),
+            "tenant_id": str(row["tenant_id"]),
+            "bot_id": str(row["bot_id"]),
+        }

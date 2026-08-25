@@ -27,7 +27,14 @@ class ScriptedLlm:
         self.answers = list(answers)
         self.users: list[str] = []
 
-    async def chat(self, system: str, user: str, *, temperature: float = 0.2) -> str:
+    async def chat(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.2,
+        **_kw: object,  # 021:task/trace_id/tenant_key 吸收
+    ) -> str:
         self.users.append(user)
         if not self.answers:
             raise AssertionError("LLM 调用次数超出脚本——出现计划外重试")

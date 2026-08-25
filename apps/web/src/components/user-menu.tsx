@@ -1,6 +1,7 @@
-/* 用户区(web-nav spec 应用壳):头像 + 下拉(身份概览/登出)。 */
+/* 用户区(web-nav spec 应用壳):头像 + 下拉(身份概览/我的记忆/登出)。 */
 
-import { LogOut } from "lucide-react";
+import { Brain, LogOut } from "lucide-react";
+import { useNavigate } from "react-router";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import { useAuth } from "@/lib/auth-store";
 
 export function UserMenu() {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const name = user?.nickname || user?.username || "";
   const initial = name.slice(0, 1) || "?";
 
@@ -39,6 +41,10 @@ export function UserMenu() {
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => navigate("/memory")}>
+          <Brain aria-hidden />
+          我的记忆
+        </DropdownMenuItem>
         <DropdownMenuItem variant="destructive" onSelect={() => void logout()}>
           <LogOut aria-hidden />
           退出登录

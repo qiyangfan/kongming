@@ -93,6 +93,28 @@ class Settings(BaseSettings):
     audit_archive_days: int = Field(default=180, ge=1)
     audit_archive_dir: str = "var/audit-archive"
 
+    # mock 支付通道(035,payment-gateway spec):默认开启——mock 是 v1 唯一
+    # 收款路径;密钥 dev 默认占位(生产必须显式替换),支付单在途时长(分钟)
+    billing_mock_enabled: bool = True
+    billing_mock_secret: str = "dev-mock-payment-secret"  # noqa: S105  # dev 占位刻意(生产必须替换,上文注释)
+    billing_payment_ttl_minutes: int = Field(default=30, ge=1)
+
+    # tool-calling(019):工具执行固定窗口限流(次/分钟,租户+用户维度)+
+    # 写工具确认窗口(分钟)
+    tool_rate_limit_per_minute: int = Field(default=60, ge=1)
+    tool_confirm_ttl_minutes: int = Field(default=15, ge=1)
+
+    # cloud-code-sandbox(027):默认关闭——开启且宿主 podman 可用才接 runner;
+    # 镜像名/超时/内存/CPU 限额进容器参数(常量拼装,design D1)
+    sandbox_enabled: bool = False
+    sandbox_image: str = "kongming-sandbox:dev"
+    sandbox_timeout_sec: int = Field(default=30, ge=1, le=300)
+    sandbox_mem_mb: int = Field(default=256, ge=64, le=4096)
+    sandbox_cpus: float = Field(default=0.5, gt=0, le=8)
+
+    # mcp-interop(028):出站调用超时(秒;响应 1MB 闸在 client 常量)
+    mcp_outbound_timeout_sec: int = Field(default=15, ge=1, le=120)
+
     def fail_closed_checks(self) -> None:
         """prod 环境缺敏感配置直接拒启(dev 宽松以便本地起步)。"""
         if self.environment != "prod":
@@ -106,6 +128,16 @@ class Settings(BaseSettings):
         missing = [env for env, val in required if not val]
         if missing:
             raise RuntimeError(f"prod fail-closed: 缺少必需配置 {missing}")
+        # 审查循环 S1(mock 回调验签可伪造):mock 通道开启时密钥必须显式配置
+        # 且不得为仓库公开的 dev 占位值——否则任何人可伪造 PAID 回调核销账单
+        if self.billing_mock_enabled and self.billing_mock_secret in (
+            "",
+            "dev-mock-payment-secret",
+        ):
+            raise RuntimeError(
+                "prod fail-closed: KM_BILLING_MOCK_ENABLED 开启时"
+                " KM_BILLING_MOCK_SECRET 必须显式配置且不得为 dev 占位值"
+            )
 
 
 @lru_cache

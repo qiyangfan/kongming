@@ -11,7 +11,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response
@@ -19,12 +19,20 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.repository import SqlOperLogRepo
+from kongming.attachment.repository import SqlAttachmentRepo
+from kongming.auth.repository import SqlOperLogRepo, SqlPermRepo
 from kongming.auth.router import current_user, require_perm
 from kongming.chat.agent_client import AgentClient
-from kongming.chat.ports import ExplainOutcome, StreamStore, StreamStoreFactory
+from kongming.chat.memory_tasks import extract_memory_task
+from kongming.chat.ports import (
+    ExplainOutcome,
+    SqlRunOutcome,
+    StreamStore,
+    StreamStoreFactory,
+)
 from kongming.chat.repository import ChatRepository
 from kongming.chat.service import (
+    AttachmentNotFound,
     ChatOutcome,
     ChatService,
     ExplainNoSql,
@@ -39,12 +47,16 @@ from kongming.chat.service import (
 )
 from kongming.chat.title_tasks import rewrite_session_title
 from kongming.config import get_settings
+
+if TYPE_CHECKING:
+    from kongming.mcp.service import McpService
 from kongming.datasource.repository import SqlDatasourceRepo
 from kongming.db import get_session, get_sessionmaker
 from kongming.internal import service as internal_service
 from kongming.rag.cache import ContextCache
 from kongming.rag.repository import RagRepository
 from kongming.rag.service import RagService
+from kongming.toolcall.repository import SqlToolCallRepo
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -105,6 +117,39 @@ class _InternalExplainRunner:
         return ExplainOutcome(verdict=r.verdict, reason=r.reason, plan=r.plan)
 
 
+class _InternalExecuteRunner:
+    """026 rerun 端口:复用 internal.service.execute 全链路(六层防御)。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def run(
+        self,
+        *,
+        trace_id: str,
+        tenant_key: str,
+        datasource_key: str,
+        sql_text: str,
+        user_id: str,
+    ) -> SqlRunOutcome:
+        try:
+            return await internal_service.execute(
+                self._s,
+                trace_id=trace_id,
+                tenant_key=tenant_key,
+                datasource_key=datasource_key,
+                sql_text=sql_text,
+                user_id=user_id,
+                question=None,
+                limit=1000,
+            )
+        except internal_service.InvalidDatasource as e:
+            # 竞态兜底(chat 已预检):禁用/删除发生在预检与执行之间(与 explain 适配器同范式)
+            raise InvalidDatasource(str(e)) from e
+        except (internal_service.TenantNotFound, internal_service.TenantBindingForbidden) as e:
+            raise TenantForbidden(str(e)) from e
+
+
 def get_chat_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     agent: Annotated[AgentClient, Depends(get_agent_client)],
@@ -114,6 +159,8 @@ def get_chat_service(
     # 013 构造反转:repo 在组合根装配,service 仅持 ChatRepo 端口(零框架契约)
     # 015 导出审计:oper_logger 绑定 auth 域 SqlOperLogRepo(007 组合模式)
     # 017 断线续存:stream_store_factory 开独立会话落库(title_tasks 同款模式)
+    # 019:tool_specs/pending_tools 绑定 toolcall 域(注册表过滤+待确认聚合,
+    # 均独立短会话——同步/流式路径通用,不随请求作用域会话取消)
     return ChatService(
         ChatRepository(session),
         agent,
@@ -122,7 +169,211 @@ def get_chat_service(
         _InternalExplainRunner(session),
         SqlOperLogRepo(session),
         _stream_store_factory(agent),
+        _RegistryToolSpecProvider(),
+        _PendingToolReader(),
+        _ChatGuardrail(),  # 020 输入/输出护栏
+        _MemoryAdapter(),  # 022 用户长期记忆
+        _InternalExecuteRunner(session),  # 026 再执行
+        attachment_checker=_AttachmentChecker(session),  # 030(关键字传参防错位)
+        implicit_memory_task=extract_memory_task,  # 022 隐式提取(组合根绑定)
     )
+
+
+class _TeamRolesAdapter:
+    """032 TeamRoles 绑定(team 域 role_map;独立短会话)。"""
+
+    async def role_map(self, user_id: str) -> dict[str, str]:
+        from kongming.team.repository import SqlTeamRepo
+
+        async with get_sessionmaker()() as s:
+            return await SqlTeamRepo(s).role_map(user_id=user_id)
+
+
+class _MemoryAdapter:
+    """记忆端口绑定(022):独立短会话(同步/流式/后台任务通用);
+    form_explicit 的敏感拒绝转 False(适配端口 bool 语义)。"""
+
+    async def recall_hint(self, *, user_id: str, tenant_id: str, question: str) -> str:
+        from kongming.memory.repository import SqlMemoryRepo
+        from kongming.memory.service import MemoryService
+        from kongming.rag.agent_callback import get_agent_rag_client
+        from kongming.redis_client import get_redis
+
+        async with get_sessionmaker()() as s:
+            svc = MemoryService(
+                SqlMemoryRepo(s),
+                get_agent_rag_client(get_redis()),
+                SqlOperLogRepo(s),
+                _TeamRolesAdapter(),
+            )
+            return await svc.recall_hint(
+                user_id=user_id, tenant_id=tenant_id, question=question
+            )
+
+    async def explicit_intent(self, question: str) -> str | None:
+        from kongming.memory.models import extract_explicit_intent
+
+        return extract_explicit_intent(question)
+
+    async def form_explicit(self, *, user_id: str, tenant_id: str, content: str) -> bool:
+        from kongming.memory.repository import SqlMemoryRepo
+        from kongming.memory.service import MemoryService, SensitiveContentRejected
+        from kongming.rag.agent_callback import get_agent_rag_client
+        from kongming.redis_client import get_redis
+
+        async with get_sessionmaker()() as s:
+            svc = MemoryService(
+                SqlMemoryRepo(s),
+                get_agent_rag_client(get_redis()),
+                SqlOperLogRepo(s),
+                _TeamRolesAdapter(),
+            )
+            try:
+                await svc.form_explicit(user_id=user_id, tenant_id=tenant_id, content=content)
+            except SensitiveContentRejected:
+                return False
+        return True
+
+    async def form_implicit(
+        self, *, user_id: str, tenant_id: str, candidates: list[dict[str, str]]
+    ) -> int:
+        from kongming.memory.repository import SqlMemoryRepo
+        from kongming.memory.service import MemoryService
+        from kongming.rag.agent_callback import get_agent_rag_client
+        from kongming.redis_client import get_redis
+
+        async with get_sessionmaker()() as s:
+            svc = MemoryService(
+                SqlMemoryRepo(s),
+                get_agent_rag_client(get_redis()),
+                SqlOperLogRepo(s),
+                _TeamRolesAdapter(),
+            )
+            return await svc.form_implicit(
+                user_id=user_id, tenant_id=tenant_id, candidates=candidates
+            )
+
+
+class _AttachmentChecker:
+    """030 AttachmentChecker 绑定(attachment 域仓储,请求会话)。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._repo = SqlAttachmentRepo(session)
+
+    async def validate_owned(
+        self, *, ids: list[str], user_id: str, tenant_id: str
+    ) -> list[dict[str, object]] | None:
+        out: list[dict[str, object]] = []
+        # R1-F3:去重保序——同 id 重复引用过检后第二次取件必 404
+        # (一次性消费),整轮 fail-closed 且文案误导
+        for att_id in dict.fromkeys(ids):
+            row = await self._repo.find_owned(
+                att_id=att_id, tenant_id=tenant_id, user_id=user_id
+            )
+            if row is None or row["status"] != "UPLOADED":
+                return None
+            out.append(
+                {
+                    "id": str(row["id"]),
+                    "filename": str(row["filename"]),
+                    "mime": str(row["mime"]),
+                    "size_bytes": int(row["size_bytes"]),
+                }
+            )
+        return out
+
+
+class _RegistryToolSpecProvider:
+    """ReAct 注入工具的唯一真理源(019):权限点集查询 + toolcall 注册表过滤。
+    028:合并租户 MCP 动态工具(持 tool:mcp:use 才可见——与执行面 L2 同判据)。"""
+
+    async def authorized_tools(
+        self, user_id: str, tenant_id: str
+    ) -> list[dict[str, object]]:
+        from kongming.toolcall.registry import filter_specs
+
+        async with get_sessionmaker()() as s:
+            codes = await SqlPermRepo(s).list_codes(user_id)
+            specs: list[dict[str, object]] = [dict(spec) for spec in filter_specs(codes)]
+            if "tool:mcp:use" in codes:
+                mcp_svc = _build_mcp_service_for(s)
+                for entry in await mcp_svc.list_dynamic_tools(tenant_id=tenant_id):
+                    read_only = bool(entry.get("read_only"))
+                    specs.append(
+                        {
+                            "name": str(entry.get("qualified") or ""),
+                            "description": str(entry.get("description") or ""),
+                            "parameters": (
+                                entry.get("schema")
+                                if isinstance(entry.get("schema"), dict)
+                                else {"type": "object"}
+                            ),
+                            "write": not read_only,
+                            "require_confirm": not read_only,
+                        }
+                    )
+        return specs
+
+
+def _build_mcp_service_for(session: AsyncSession) -> "McpService":
+    """028 装配(chat 适配层;与 toolcall 组合根同构)。"""
+    from kongming.datasource.cipher import get_cipher
+    from kongming.mcp.client import HttpMcpCaller
+    from kongming.mcp.repository import SqlMcpRepo
+    from kongming.mcp.service import McpService
+
+    settings = get_settings()
+    return McpService(
+        SqlMcpRepo(session, get_cipher(settings.datasource_encrypt_key)),
+        HttpMcpCaller(timeout_sec=settings.mcp_outbound_timeout_sec),
+    )
+
+
+class _PendingToolReader:
+    """待确认写工具聚合(019):独立短会话只读(PENDING_CONFIRM 行经独立事务提交)。"""
+
+    async def list_pending(self, trace_id: str) -> list[dict[str, object]]:
+        async with get_sessionmaker()() as s:
+            return await SqlToolCallRepo(s).list_pending_by_trace(trace_id)
+
+
+class _ChatGuardrail:
+    """prompt 护栏端口绑定(020):独立短会话读配置;审计经 writer 独立事务。"""
+
+    async def check_input(
+        self, *, trace_id: str, user_id: str, tenant_id: str, texts: list[str]
+    ) -> tuple[bool, list[str]]:
+        from kongming.guardrail.repository import (
+            SqlGuardrailAuditWriter,
+            SqlGuardrailRepo,
+        )
+        from kongming.guardrail.service import GuardrailService
+
+        async with get_sessionmaker()() as s:
+            svc = GuardrailService(SqlGuardrailRepo(s), SqlGuardrailAuditWriter())
+            verdict = await svc.evaluate_input(
+                trace_id=trace_id, user_id=user_id, tenant_id=tenant_id, texts=texts
+            )
+        return verdict.blocked, verdict.processed
+
+    async def filter_output(
+        self, *, trace_id: str, user_id: str, tenant_id: str, texts: list[str]
+    ) -> list[str]:
+        from kongming.guardrail.repository import (
+            SqlGuardrailAuditWriter,
+            SqlGuardrailRepo,
+        )
+        from kongming.guardrail.service import GuardrailService
+
+        async with get_sessionmaker()() as s:
+            svc = GuardrailService(SqlGuardrailRepo(s), SqlGuardrailAuditWriter())
+            return await svc.evaluate_outputs(
+                trace_id=trace_id,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                texts=texts,
+                safe_replacement="答案未通过安全检查,已省略。",
+            )
 
 
 def _stream_store_factory(agent: AgentClient) -> StreamStoreFactory:
@@ -150,12 +401,32 @@ class ChatQueryIn(BaseModel):
         default_factory=list, max_length=10
     )
     datasource_key: str = Field(default="default", pattern=r"^[a-z][a-z0-9_]{1,63}$")
+    # 019:Agent 内核选择(纯增,缺省 recipe 零回归);react=ReAct 工具调用内核
+    agent_mode: Literal["recipe", "react"] = "recipe"
+    # 030:图片附件引用(纯增,≤3;归属校验在 service)
+    attachment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=3)
 
 
 class ChartOut(BaseModel):
     type: str
     x: str | None = None
     y: str | None = None
+
+
+class ArtifactOut(BaseModel):
+    """类型化产物(026):type ∈ sql/chart/document。"""
+
+    type: str
+    content: str
+    metadata: dict[str, object] = {}
+
+
+class PendingToolCallOut(BaseModel):
+    """待确认写工具调用(019):确认卡片渲染要素。"""
+
+    confirm_id: str
+    tool_name: str
+    args_digest: str = ""
 
 
 class ChatQueryOut(BaseModel):
@@ -174,11 +445,18 @@ class ChatQueryOut(BaseModel):
     # 014 messageId 打通(纯增):assistant 落库消息 id(反馈提交引用)+执行数据源快照
     message_id: str | None = None
     datasource_key: str = "default"
+    # 019(纯增):待确认写工具调用(空列表=无)
+    pending_tool_calls: list[PendingToolCallOut] = []
+    # 026(纯增):类型化产物(空数组零回归)
+    artifacts: list["ArtifactOut"] = []
+    # 030(纯增):附件引用摘要(空数组零回归)
+    attachments: list[dict[str, object]] = []
 
 
 def _out(o: ChatOutcome) -> ChatQueryOut:
     return ChatQueryOut(
         session_id=o.session_id,
+        attachments=[dict(a) for a in o.attachments],
         success=o.success,
         verdict=o.verdict,
         summary=o.summary,
@@ -192,6 +470,22 @@ def _out(o: ChatOutcome) -> ChatQueryOut:
         error=o.error,
         message_id=o.message_id,
         datasource_key=o.datasource_key,
+        pending_tool_calls=[
+            PendingToolCallOut(
+                confirm_id=str(p.get("confirm_id") or ""),
+                tool_name=str(p.get("tool_name") or ""),
+                args_digest=str(p.get("args_digest") or ""),
+            )
+            for p in o.pending_tool_calls
+        ],
+        artifacts=[
+            ArtifactOut(
+                type=str(a.get("type") or ""),
+                content=str(a.get("content") or ""),
+                metadata=dict(_meta) if isinstance(_meta := a.get("metadata"), dict) else {},
+            )
+            for a in o.artifacts
+        ],
     )
 
 
@@ -216,9 +510,13 @@ async def chat_query(
             persist=req.persist,
             history=req.history[-5:],  # 防御性截断(agent 侧另有限制)
             datasource_key=req.datasource_key,
+            agent_mode=req.agent_mode,
+            attachment_ids=[str(a) for a in req.attachment_ids],
         )
     except TenantForbidden:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
+    except AttachmentNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     except SessionNotFound:
         raise HTTPException(status_code=404, detail="SESSION_NOT_FOUND") from None
     except InvalidDatasource:
@@ -228,6 +526,17 @@ async def chat_query(
     # persist=false 临时对话无会话可改写;REJECTED/FAILED 轮不触发(违规/失败问句不作素材)
     if outcome.success and req.persist and outcome.session_id is not None:
         background.add_task(rewrite_session_title, outcome.session_id, svc.agent_for_tasks)
+        # 022 隐式记忆(首 SUCCESS 轮同款触发点;best-effort;
+        # R1-M2:显式短路轮排除——防同内容再落一条 IMPLICIT)
+        if outcome.tenant_id and not outcome.memory_shortcut:
+            background.add_task(
+                extract_memory_task,
+                user_id=str(user["sub"]),
+                tenant_id=outcome.tenant_id,
+                question=req.question,
+                answer=outcome.summary,
+                agent=svc.agent_for_tasks,
+            )
     return _out(outcome)
 
 
@@ -261,13 +570,29 @@ class StreamErrorOut(BaseModel):
     reason_code: str | None = None
 
 
+class StreamToolCallOut(BaseModel):
+    """tool_call 事件 data(019 tool-calling):工具调用进度。
+
+    status ∈ running/done/rejected(confirm_required 以 done 下发,result_digest
+    含「待确认」);args_digest/result_digest 为截断摘要(审计同源口径)。
+    """
+
+    tool_name: str
+    status: Literal["running", "done", "rejected"]
+    args_digest: str = ""
+    result_digest: str = ""
+
+
 # model 键使 FastAPI 把全部事件模型注册进 components(ADR-005 类型生成可达),
-# content 键描述 SSE 事件流的真实形态(5 类事件 data 的 oneOf)
+# content 键描述 SSE 事件流的真实形态(6 类事件 data 的 oneOf)
 _STREAM_RESPONSES: dict[int | str, dict[str, Any]] = {
     200: {
-        "model": StreamStageOut | StreamSqlOut | StreamSummaryOut | StreamErrorOut | ChatQueryOut,
+        "model": (
+            StreamStageOut | StreamSqlOut | StreamSummaryOut
+            | StreamToolCallOut | StreamErrorOut | ChatQueryOut
+        ),
         "description": (
-            "SSE 事件流:stage/sql/summary 过程事件逐帧下发;result=data 与同步"
+            "SSE 事件流:stage/sql/summary/tool_call 过程事件逐帧下发;result=data 与同步"
             " /chat/query 响应逐字段一致;error=传输层/意外失败终态;注释行(: ping)为心跳"
         ),
         "content": {
@@ -277,6 +602,7 @@ _STREAM_RESPONSES: dict[int | str, dict[str, Any]] = {
                         {"$ref": "#/components/schemas/StreamStageOut"},
                         {"$ref": "#/components/schemas/StreamSqlOut"},
                         {"$ref": "#/components/schemas/StreamSummaryOut"},
+                        {"$ref": "#/components/schemas/StreamToolCallOut"},
                         {"$ref": "#/components/schemas/StreamErrorOut"},
                         {"$ref": "#/components/schemas/ChatQueryOut"},
                     ]
@@ -330,9 +656,13 @@ async def chat_query_stream(
             persist=req.persist,
             history=req.history[-5:],
             datasource_key=req.datasource_key,
+            agent_mode=req.agent_mode,
+            attachment_ids=[str(a) for a in req.attachment_ids],
         )
     except TenantForbidden:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
+    except AttachmentNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     except SessionNotFound:
         raise HTTPException(status_code=404, detail="SESSION_NOT_FOUND") from None
     except InvalidDatasource:
@@ -367,7 +697,8 @@ class MessageResultOut(BaseModel):
     stats: dict[str, object] = Field(default_factory=dict)
     chart: ChartInfoOut
     error: str | None = None
-
+    # 026(纯增):类型化产物
+    artifacts: list[ArtifactOut] = []
 
 class SessionMessageOut(BaseModel):
     id: str
@@ -382,6 +713,8 @@ class SessionMessageOut(BaseModel):
     rating: str | None = None
     corrected_sql: str | None = None
     feedback_comment: str | None = None
+    # 030(纯增):附件引用摘要
+    attachments: list[dict[str, object]] = []
 
 
 def _msg_out(m: SessionMessage) -> SessionMessageOut:
@@ -395,6 +728,14 @@ def _msg_out(m: SessionMessage) -> SessionMessageOut:
             stats=r.stats,
             chart=ChartInfoOut(type=r.chart.type, x=r.chart.x, y=r.chart.y),
             error=r.error,
+            artifacts=[
+                ArtifactOut(
+                    type=str(a.get("type") or ""),
+                    content=str(a.get("content") or ""),
+                    metadata=dict(_meta) if isinstance(_meta := a.get("metadata"), dict) else {},
+                )
+                for a in r.artifacts
+            ],
         )
     return SessionMessageOut(
         id=m.id,
@@ -408,7 +749,43 @@ def _msg_out(m: SessionMessage) -> SessionMessageOut:
         rating=m.rating,
         corrected_sql=m.corrected_sql,
         feedback_comment=m.feedback_comment,
+        attachments=[dict(a) for a in m.attachments],
     )
+
+
+class RerunIn(BaseModel):
+    """SQL 卡再执行(026):message_id 引用 + 编辑后 SQL;归属与六层防御在
+    service/实现侧(与 010 EXPLAIN 同范式)。"""
+
+    message_id: uuid.UUID
+    sql: str = Field(min_length=1, max_length=4000)
+
+
+@router.post(
+    "/artifacts/rerun",
+    response_model=ChatQueryOut,
+    dependencies=[Depends(require_perm("chat:execute"))],
+)
+async def rerun_artifact(
+    req: RerunIn,
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Annotated[ChatService, Depends(get_chat_service)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> ChatQueryOut:
+    try:
+        outcome = await svc.rerun_artifact(
+            user_id=str(user["sub"]),
+            tenant_key=x_tenant_id,
+            message_id=str(req.message_id),
+            sql=req.sql,
+        )
+    except TenantForbidden:
+        raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
+    except MessageNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    except InvalidDatasource:
+        raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
+    return _out(outcome)
 
 
 @router.get(

@@ -1,0 +1,116 @@
+"""文档父子分块器(024,document-rag spec):纯函数,零依赖。
+
+父块 ~800 字符按标题层级(Markdown 标题行聚合;无标题按段落/长度兜底);
+子块 ~200 字符滑窗(步进 150=overlap 50);source_ref 定位
+`{文档名} §{父块序号}{父块标题前 20 字}`。
+"""
+
+import re
+
+PARENT_SOFT_MAX = 800
+CHILD_SIZE = 200
+CHILD_STEP = 150  # overlap = SIZE - STEP = 50
+
+_HEADING = re.compile(r"^#{1,6}\s+", re.M)
+
+
+class EmptyDocument(Exception):
+    """全文空白(无有效内容)。"""
+
+
+class TooManyChunks(Exception):
+    """块数超上限(防大文档切块风暴)。"""
+
+
+MAX_PARENT_BLOCKS = 200
+
+
+def _split_parents(text: str) -> list[tuple[str, str]]:
+    """按标题层级聚合父块;返回 [(标题前 20 字, 父块文本)]。"""
+    # 按标题行切段
+    lines = text.split("\n")
+    sections: list[tuple[str, list[str]]] = []
+    cur_title = ""
+    cur: list[str] = []
+    for line in lines:
+        if _HEADING.match(line):
+            if cur:
+                sections.append((cur_title, cur))
+            cur_title = line.lstrip("#").strip()[:20]
+            cur = [line]
+        else:
+            cur.append(line)
+    if cur:
+        sections.append((cur_title, cur))
+    parents: list[tuple[str, str]] = []
+    for title, sec_lines in sections:
+        block = "\n".join(sec_lines).strip()
+        if not block:
+            continue
+        # 超软上限按段落再切(句号/换行边界)
+        while len(block) > PARENT_SOFT_MAX:
+            cut = block.rfind("。", 0, PARENT_SOFT_MAX)
+            if 0 < cut < PARENT_SOFT_MAX // 2:
+                cut = block.rfind("\n", 0, PARENT_SOFT_MAX)
+            if cut <= 0 or cut < PARENT_SOFT_MAX // 2:
+                cut = PARENT_SOFT_MAX
+            else:
+                cut += 1  # R1-L5:切割含句号(下块不以「。」开头)
+            parents.append((title, block[:cut].strip()))
+            block = block[cut:].strip()
+        if block:
+            parents.append((title, block))
+    return parents
+
+
+def _split_children(parent_text: str) -> list[str]:
+    """子块滑窗(定长步进,overlap 兜底语义连续性)。"""
+    out: list[str] = []
+    i = 0
+    while i < len(parent_text):
+        tail = parent_text[i : i + CHILD_SIZE]
+        # R1-L5:尾块短于 overlap 步进余量时不再产块(原块滑窗天然含该尾段)
+        if out and len(tail) <= (CHILD_SIZE - CHILD_STEP):
+            break
+        out.append(tail)
+        i += CHILD_STEP
+    return out
+
+
+def chunk_document(doc_name: str, text: str) -> list[dict[str, object]]:
+    """文档 → 父子块列表(扁平:PARENT 行与 CHILD 行按序,CHILD 带 parent 序号)。
+
+    返回 [{level, seq, parent_seq(None 对 PARENT), content, source_ref}];
+    parent_seq 为父块在返回列表中的 seq,供落库时映射 parent_id。
+    """
+    if not text.strip():
+        raise EmptyDocument(doc_name)
+    parents = _split_parents(text)
+    if len(parents) > MAX_PARENT_BLOCKS:
+        raise TooManyChunks(f"父块数超上限({MAX_PARENT_BLOCKS})")
+    out: list[dict[str, object]] = []
+    seq = 0
+    for p_idx, (title, ptext) in enumerate(parents, start=1):
+        parent_seq = seq
+        out.append(
+            {
+                "level": "PARENT",
+                "seq": parent_seq,
+                "parent_seq": None,
+                "content": ptext,
+                "source_ref": f"{doc_name} §{p_idx}{title}",
+            }
+        )
+        seq += 1
+        for child in _split_children(ptext):
+            out.append(
+                {
+                    "level": "CHILD",
+                    "seq": seq,
+                    "parent_seq": parent_seq,
+                    "content": child,
+                    "source_ref": f"{doc_name} §{p_idx}{title}",
+                }
+            )
+            seq += 1
+    return out

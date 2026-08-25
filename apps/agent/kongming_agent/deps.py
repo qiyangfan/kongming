@@ -11,7 +11,9 @@ from kongming_agent.settings import Settings
 
 
 def get_llm() -> LlmClient:
-    return LlmClient(Settings())
+    settings = Settings()
+    # 021:usage 上报通道装配(fire-and-forget,主链路零阻塞)
+    return LlmClient(settings, usage_reporter=ApiClient(settings).report_usage)
 
 
 def get_api() -> ApiClient:

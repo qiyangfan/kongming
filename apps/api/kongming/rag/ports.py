@@ -50,6 +50,7 @@ class RagRepo(Protocol):
         sample_queries: list[str],
         source_type: str,
         embedding: list[float] | None,
+        alias: str = "",  # 037
     ) -> None: ...
 
     async def list_tables(
@@ -67,9 +68,9 @@ class RagRepo(Protocol):
 
     async def delete_all_for_datasource(self, *, tenant_id: str, datasource_key: str) -> int: ...
 
-    async def list_source_types(
+    async def list_source_and_alias(
         self, *, tenant_id: str, datasource_key: str
-    ) -> dict[str, str]: ...
+    ) -> dict[str, tuple[str, str]]: ...
 
     async def recall_vector(
         self, *, tenant_id: str, datasource_key: str, vector: list[float]

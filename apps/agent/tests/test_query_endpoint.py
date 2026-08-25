@@ -20,7 +20,14 @@ class _Llm:
     def __init__(self, answers: list[str]) -> None:
         self.answers = list(answers)
 
-    async def chat(self, system: str, user: str, *, temperature: float = 0.2) -> str:
+    async def chat(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.2,
+        **_kw: object,  # 021:task/trace_id/tenant_key 吸收
+    ) -> str:
         return self.answers.pop(0)
 
 

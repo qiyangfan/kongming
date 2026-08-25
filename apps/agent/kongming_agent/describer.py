@@ -1,9 +1,11 @@
 """表元数据 LLM 润色(/internal/describe-table 核心逻辑,009)。
 
-prompt 资产纪律:SYSTEM/USER 模板为上游 table_describer.py 逐字移植(全角标点!),
-改动前先比对上游原文,手抄易丢全角。
+prompt 资产纪律:SYSTEM/USER 模板为上游 table_describer.py 移植(全角标点!),
+改动前先比对上游原文,手抄易丢全角。例外(037 增量,不再与上游逐字一致):
+_USER_PROMPT_TEMPLATE 新增第 4 条 alias 产出要求(业务称谓别名,同一次调用
+附带,零增量成本;alias 缺失/畸形按空降级不判润色失败)。其余部分仍逐字保值。
 输入:表结构 JSON(表名/schema/列名/类型/注释——introspection 产物,非业务行数据)。
-输出:中文表说明 + 列说明(保留类型前缀)+ 2-3 条示例 SQL。
+输出:中文表说明 + 列说明(保留类型前缀)+ 2-3 条示例 SQL + 业务称谓别名(037)。
 安全边界(ADR-002):出域给 LLM 的只有表结构元数据,不查行业务行数据。
 降级契约:LLM 失败/超时/输出非法 → 抛异常,由 api 侧降级为纯结构内容(不阻断)。
 """
@@ -24,12 +26,15 @@ _MAX_COMMENT_LEN = 200
 _MAX_COL_DESC_LEN = 200
 _MAX_SQL_LEN = 500
 _MAX_SAMPLES = 3
+_MAX_ALIAS_LEN = 64  # 037:alias 上限(对齐 VARCHAR(64))
+# 结构性字符(换行/括号/竖线)破坏 api 侧 schema_hint 行形态——按空降级(R1-F1)
+_ALIAS_STRUCT_RE = re.compile(r"[\r\n()（）|]")
 # 列名标识符(与 api 侧 parser columnsToJson 同口径)
 _IDENT = re.compile(r"^[a-zA-Z_][\w]*$")
 
 _SYSTEM_PROMPT = (
     "你是数据库文档专家。根据给定的 PostgreSQL 表结构，"
-    "生成中文表说明、列说明和示例 SQL。只输出 JSON，不要输出任何其他文字。"
+    "生成中文表说明、列说明、示例 SQL 和业务称谓别名。只输出 JSON，不要输出任何其他文字。"
 )
 
 _USER_PROMPT_TEMPLATE = """表：{schema_name}.{table_name}
@@ -42,22 +47,34 @@ _USER_PROMPT_TEMPLATE = """表：{schema_name}.{table_name}
 2. columns_comment：对象，键为列名，值为 "类型 中文说明"（必须保留原始类型前缀，覆盖上面所有列）
 3. sample_queries：2-3 条示例查询 SQL，全部是只读 SELECT，表名必须带 schema 前缀
    （如 {schema_name}.{table_name}），其中至少一条是 GROUP BY 聚合统计
+4. alias：业务称谓别名（如「商品表」「影片分类表」），≤10 字的中文短名，
+   禁止用「数据表」「信息表」等泛泛名称，禁止出现「表」字堆砌
+   （用户若已知该表的常用称谓请直接使用；若无法推断则 alias 为空字符串）
 
 严格输出如下 JSON（不要输出 markdown 代码块标记）：
-{{"table_comment": "...", "columns_comment": {{"列名": "类型 中文说明"}}, "sample_queries": ["SELECT ..."]}}"""  # noqa: E501  # JSON 输出模板单行示例,拆行会改变给 LLM 的格式契约(上游同款)
+{{"table_comment": "...", "columns_comment": {{"列名": "类型 中文说明"}}, "sample_queries": ["SELECT ..."], "alias": "业务称谓"}}"""  # noqa: E501  # JSON 输出模板单行示例,拆行会改变给 LLM 的格式契约(上游同款)
 
 
 class DescribedTable(BaseModel):
-    """LLM 润色结果(Pydantic 校验,输出契约)。"""
+    """LLM 润色结果(Pydantic 校验,输出契约)。037:新增 alias 业务称谓别名。"""
 
     table_comment: str = Field(default="")
     columns_comment: dict[str, str] = Field(default_factory=dict)
     sample_queries: list[str] = Field(default_factory=list)
+    alias: str = Field(default="")  # 037:业务称谓别名
 
     @field_validator("table_comment")
     @classmethod
     def _cap_comment(cls, v: str) -> str:
         return (v or "").strip()[:_MAX_COMMENT_LEN]
+
+    @field_validator("alias")
+    @classmethod
+    def _cap_alias(cls, v: str) -> str:
+        # alias 缺失/畸形按空字符串降级(D2:不判润色失败);换行/括号等结构性
+        # 字符会破坏 api 侧 schema_hint 行形态(R1-F1)——同样按空降级
+        folded = " ".join((v or "").split())[:_MAX_ALIAS_LEN]
+        return "" if _ALIAS_STRUCT_RE.search(folded) else folded
 
 
 class DescribeError(Exception):
@@ -106,7 +123,9 @@ async def describe_table(spec: TableSpec, llm: LlmClient) -> DescribedTable:
     )
 
     try:
-        raw = await llm.chat(_SYSTEM_PROMPT, user_prompt, temperature=0.1)
+        raw = await llm.chat(
+            _SYSTEM_PROMPT, user_prompt, temperature=0.1, task="DESCRIBE"
+        )
     except LlmError as e:
         raise DescribeError(f"LLM 调用失败: {e}") from e
     data = _parse_json_loose(raw)
@@ -182,6 +201,7 @@ def fallback_description(spec: TableSpec) -> DescribedTable:
         table_comment=spec.table_comment or "",
         columns_comment={c.name: c.type for c in spec.columns},
         sample_queries=[],
+        alias="",  # 037:降级无 alias
     )
 
 

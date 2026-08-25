@@ -19,15 +19,34 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
         await session.execute(text("SELECT perm_code FROM public.sys_permission ORDER BY 1"))
     ).scalars().all()
     assert perms == [
+        "bot:run",
         "chat:execute",
         "chat:feedback:submit",
+        "developer:portal",
         "system:audit:view",
+        "system:billing:manage",
         "system:datasource:manage",
+        "system:document:manage",
         "system:feedback:handle",
         "system:feedback:view",
+        "system:guardrail:manage",
+        "system:llm-usage:view",
+        "system:mcp:manage",
         "system:rag:manage",
         "system:role:manage",
+        "system:semantic:manage",
+        "system:team:manage",
+        "system:tool:manage",
+        "system:trigger:manage",
         "system:user:manage",
+        "system:workflow:manage",
+        "tool:announcement:create",
+        "tool:code:execute",
+        "tool:mcp:use",
+        "tool:rag:retrieve",
+        "tool:sql:execute",
+        "tool:sql:validate",
+        "workflow:execute",
     ]
     tenants = (
         await session.execute(text("SELECT tenant_key FROM public.sys_tenant"))
@@ -72,8 +91,9 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
                 " WHERE r.role_key='SUPER_ADMIN'"
             )
         )
-    ).scalar_one() == 9  # 009 加 rag:manage;014 加 3 反馈点;015 加 system:audit:view
+    ).scalar_one() == 28  # +…/033 bot:run/034 developer:portal/billing:manage
     # 推荐绑定(只增不摘):DEVELOPER 增量获得 chat:execute(005)+chat:feedback:submit(014)
+    # + 019 只读三件套(公告写工具不推,显式授予制)
     dev_perms = (
         await session.execute(
             text(
@@ -84,7 +104,16 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
             )
         )
     ).scalars().all()
-    assert list(dev_perms) == ["chat:execute", "chat:feedback:submit"]
+    assert list(dev_perms) == [
+        "bot:run",
+        "chat:execute",
+        "chat:feedback:submit",
+        "developer:portal",
+        "tool:rag:retrieve",
+        "tool:sql:execute",
+        "tool:sql:validate",
+        "workflow:execute",
+    ]
 
 
 async def test_seed_idempotent_on_repeat(session: AsyncSession) -> None:
@@ -96,11 +125,13 @@ async def test_seed_idempotent_on_repeat(session: AsyncSession) -> None:
 
     assert await _count("public.sys_user") == 1
     assert await _count("public.sys_role") == 2
-    assert await _count("public.sys_permission") == 9  # 009+3 反馈点(014)+audit:view(015)
+    # …019 工具 5 点+027/028/029/031/032 各增
+    assert await _count("public.sys_permission") == 28
     assert await _count("public.sys_tenant") == 1
     assert await _count("public.sys_user_role") == 1
     assert await _count("public.sys_user_tenant") == 1
-    assert await _count("public.sys_role_permission") == 11  # 超管 9 + DEVELOPER 推荐 2
+    # 超管 28 + DEVELOPER 推荐 8(029/033/034 进推荐集)
+    assert await _count("public.sys_role_permission") == 36
 
 
 async def test_seed_with_env_password_not_forced_to_change(

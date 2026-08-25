@@ -259,7 +259,12 @@ async def disable_datasource(ds_id: uuid.UUID, user: UserClaims, svc: Service) -
 
 
 @router.delete("/{ds_id}", status_code=204, dependencies=[Depends(require_perm(MANAGE))])
-async def delete_datasource(ds_id: uuid.UUID, user: UserClaims, svc: Service) -> None:
+async def delete_datasource(
+    ds_id: uuid.UUID,
+    user: UserClaims,
+    svc: Service,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
     # 009:删除同步失效 rag 检索缓存(缓存为 fail-open 基础设施,失效尽力而为)
     from kongming.rag.cache import ContextCache
     from kongming.redis_client import get_redis
@@ -268,7 +273,35 @@ async def delete_datasource(ds_id: uuid.UUID, user: UserClaims, svc: Service) ->
         actor_id=str(user["sub"]),
         ds_id=str(ds_id),
         ctx_evictor=ContextCache(get_redis()).evict,
+        # 023:语义层级联(与删除同事务;组合根绑定请求会话)
+        semantic_cleaner=_SemanticCleanerAdapter().bind(session),
     )
+
+
+class _SemanticCleanerAdapter:
+    """023 组合根:级联清理走请求会话(与删除同事务)。"""
+
+    def __init__(self) -> None:
+        self._session: AsyncSession | None = None
+
+    def bind(self, session: AsyncSession) -> "_SemanticCleanerAdapter":
+        self._session = session
+        return self
+
+    async def delete_by_datasource(self, *, tenant_id: str, datasource_key: str) -> None:
+        from kongming.semantic.repository import SqlSemanticRepo
+
+        if self._session is None:  # bind 未调用=组合根缺陷,fail-fast
+            raise RuntimeError("SemanticCleanerAdapter 未绑定会话")
+        await SqlSemanticRepo(self._session).delete_by_datasource(
+            tenant_id=tenant_id, datasource_key=datasource_key
+        )
+        # 024:文档同域级联(chunks 经 FK CASCADE 随 documents 清)
+        from kongming.rag.documents_repo import SqlDocumentRepo
+
+        await SqlDocumentRepo(self._session).delete_by_datasource(
+            tenant_id=tenant_id, datasource_key=datasource_key
+        )
 
 
 # ---- 领域错误 → HTTP 映射 ----

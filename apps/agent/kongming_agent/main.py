@@ -4,6 +4,8 @@
 POST /query/stream(同图流式 SSE,017)+ /internal/embedding(批量向量化)+
 /internal/describe-table(表元数据润色,009)——后两者供控制面回调
 (api 持 DB、agent 持 LLM key 的分工)。
+019 新增:POST /query_react + /query_react/stream(ReAct 工具调用内核,
+工具 schema 由控制面按授权注入——agent 零工具真理源,零凭证回调执行)。
 """
 
 import json
@@ -12,6 +14,7 @@ from collections.abc import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from langgraph.errors import GraphRecursionError
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
 
@@ -23,6 +26,9 @@ from kongming_agent.describer import (
     describe_table,
 )
 from kongming_agent.graph.build import get_graph
+from kongming_agent.graph.extract_prompt import EXTRACT_MEMORY_SYSTEM
+from kongming_agent.graph.react import get_react_graph, react_recursion_limit
+from kongming_agent.graph.react.state import ReactState
 from kongming_agent.graph.state import AgentState, ExecutionResult, ValidationResult
 from kongming_agent.llm import LlmError
 from kongming_agent.settings import Settings
@@ -98,6 +104,7 @@ class DescribeTableOut(BaseModel):
     table_comment: str = ""
     columns_comment: dict[str, str] = {}
     sample_queries: list[str] = []
+    alias: str = ""  # 037:业务称谓别名(enriched=True 时有效)
 
 
 @app.post("/internal/describe-table", response_model=DescribeTableOut, tags=["internal"])
@@ -120,6 +127,7 @@ async def describe_table_endpoint(req: DescribeTableIn) -> DescribeTableOut:
         table_comment=described.table_comment,
         columns_comment=described.columns_comment,
         sample_queries=described.sample_queries,
+        alias=described.alias,  # 037
     )
 
 
@@ -146,6 +154,59 @@ async def rewrite_title_endpoint(req: TitleIn) -> TitleOut:
     return TitleOut(rewritten=True, title=title)
 
 
+class ExtractMemoryIn(BaseModel):
+    """记忆提取请求(022;api 回调,成功问答轮后台任务)。"""
+
+    question: str = Field(min_length=1, max_length=2000)
+    answer: str = Field(default="", max_length=2000)  # 摘要(截断后)
+
+
+class ExtractMemoryOut(BaseModel):
+    memories: list[dict[str, str]] = []  # [{content, category}] ≤3;空=无值得记忆
+
+
+
+
+@app.get("/internal/models", tags=["internal"])
+async def list_models() -> dict[str, list[str]]:
+    """021 注册表模型名(025 Bot model 校验用;agent 唯一真理源)。"""
+    return {"models": sorted(Settings().parse_registry().keys())}
+
+
+@app.post("/internal/extract-memory", response_model=ExtractMemoryOut, tags=["internal"])
+async def extract_memory_endpoint(req: ExtractMemoryIn) -> ExtractMemoryOut:
+    """LLM 记忆提取(022 隐式路径;全新撰写 prompt,非上游逐字资产);
+    失败/畸形收敛空数组(api 侧静默跳过)。"""
+    from kongming_agent.graph.nodes import parse_summary_json
+
+    try:
+        raw = await deps.get_llm().chat(
+            EXTRACT_MEMORY_SYSTEM,
+            f"用户问题:{req.question}\n助手答复:{req.answer[:1000]}\n\n输出 JSON:",
+            temperature=0.1,
+            max_tokens=300,
+            task="EXTRACT",  # 021:任务路由(缺省主模型)
+        )
+    except LlmError:
+        return ExtractMemoryOut()
+    parsed = parse_summary_json(raw)
+    out: list[dict[str, str]] = []
+    memories_raw = parsed.get("memories")
+    for item in memories_raw if isinstance(memories_raw, list) else []:
+        if (
+            isinstance(item, dict)
+            and isinstance(item.get("content"), str)
+            and item["content"].strip()
+        ):
+            out.append(
+                {
+                    "content": item["content"].strip()[:500],
+                    "category": str(item.get("category") or "general")[:32],
+                }
+            )
+    return ExtractMemoryOut(memories=out[:3])
+
+
 class QueryIn(BaseModel):
     """控制面 → agent 的问答请求(nl2sql spec「控制面回调 Agent 面」)。"""
 
@@ -155,6 +216,10 @@ class QueryIn(BaseModel):
     user_id: str | None = None  # 缺省=系统调用(控制面豁免语义见 sql-execution spec)
     history: list[str] = []  # user 问句列表,旧→新
     datasource_key: str = "default"
+    # 022:召回的用户已知信息段(控制面注入;缺省/空=零回归)
+    memory_hint: str = ""
+    # 030:图片附件引用(一次性消费;空=纯文本零回归)
+    attachment_ids: list[str] = []
 
 
 class QueryOut(BaseModel):
@@ -168,12 +233,36 @@ class QueryOut(BaseModel):
     sql: str = ""
     retry_count: int = 0
     error: str | None = None
+    # 035:bot 链路请求内同步采集(纯增;仅 /query_react 挂收集器时非空)
+    usage_records: list[dict[str, object]] = []
 
 
 @app.post("/query", response_model=QueryOut, tags=["agent"])
 async def query(req: QueryIn) -> QueryOut:
+    from kongming_agent.multimodal import AttachmentError
+
+    try:
+        req.question = await _combine_with_attachments(req)  # 030(空附件零改动)
+    except AttachmentError as e:
+        return QueryOut(success=False, verdict="ERROR", summary="", error=str(e))
     final = await _run_graph(req)
     return _build_query_out(final)
+
+
+async def _combine_with_attachments(req: QueryIn) -> str:
+    """030:图片附件预处理(进图前,图结构零改动);fail-closed 任一件失败
+    即 AttachmentError;纯文本零调用零回归。"""
+    from kongming_agent.multimodal import combine_question, preprocess_attachments
+
+    prefix = await preprocess_attachments(
+        req.attachment_ids,
+        tenant_key=req.tenant_key,
+        user_id=req.user_id,
+        api=deps.get_api(),
+        llm=deps.get_llm(),
+        trace_id=req.trace_id,
+    )
+    return combine_question(prefix, req.question)
 
 
 def _initial_state(req: QueryIn) -> AgentState:
@@ -185,6 +274,8 @@ def _initial_state(req: QueryIn) -> AgentState:
         "history": req.history,
         "datasource_key": req.datasource_key,
         "retry_count": 0,
+        "memory_hint": req.memory_hint,  # 022
+        "has_attachments": bool(req.attachment_ids),  # 036④:直答分流信号
     }
 
 
@@ -241,6 +332,17 @@ async def query_stream(req: QueryIn) -> StreamingResponse:
     """问答图流式端点(017):custom 通道=节点过程事件,updates 通道累积终态;
     result 终态与同步 /query 同构(共用 _build_query_out);LLM 故障同同步
     口径走 result(success=false);意外异常收敛 error 终态不裸 500。"""
+    from kongming_agent.multimodal import AttachmentError
+
+    try:
+        req.question = await _combine_with_attachments(req)  # 030
+    except AttachmentError as e:
+        # 预处理失败:单 result 终态帧收敛(与 LLM 故障同口径,不裸 500)
+        fail = _build_query_out({"error": str(e), "success": False})
+        async def _fail_gen() -> AsyncIterator[str]:
+            yield _sse_frame("result", fail.model_dump_json())
+
+        return StreamingResponse(_fail_gen(), media_type="text/event-stream")
     state = _initial_state(req)
 
     async def gen() -> AsyncIterator[str]:
@@ -277,6 +379,167 @@ async def query_stream(req: QueryIn) -> StreamingResponse:
             )
             return
         yield _sse_frame("result", _build_query_out(final).model_dump_json())
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ── 019:ReAct 工具调用内核(与 8 节点图并存,终态同构) ──
+
+
+class QueryReactIn(QueryIn):
+    """ReAct 端点请求:QueryIn 字段 + api 注入的授权工具 schema(唯一真理源=api)。
+
+    tools 为空列表时 LLM 无工具可用,退化为纯文本问答(成功终态,不报错)。
+    """
+
+    tools: list[dict[str, object]] = []
+    # 025:Bot 系统提示(身份/场景段;内核纪律后缀由 prompts 强制拼接)
+    bot_system_prompt: str = ""
+    # 025:Bot 模型覆盖(021 注册表名;空=任务路由/主模型)
+    model: str = ""
+    # 025:渠道标记(审计平铺给 tool/execute)
+    channel: str = "chat"
+    # 035:挂 request 级 usage 收集器(仅 bot 链路置真——chat 同步 react/
+    # workflow 缺省 False 走 fire-and-forget,R1-S2 防用量静默整丢)
+    collect_usage: bool = False
+
+
+def _initial_react_state(req: QueryReactIn) -> ReactState:
+    return {
+        "trace_id": req.trace_id,
+        "tenant_key": req.tenant_key,
+        "question": req.question,
+        "user_id": req.user_id,
+        "history": req.history,
+        "datasource_key": req.datasource_key,
+        "tools": req.tools,
+        "rounds": 0,
+        "memory_hint": req.memory_hint,  # 022
+        "bot_system_prompt": req.bot_system_prompt,  # 025
+        "model_override": req.model,  # 025
+        "channel": req.channel,  # 025
+    }
+
+
+async def _run_react(req: QueryReactIn) -> dict[str, object]:
+    """ReAct 图执行 + 故障收敛(与 _run_graph 同口径)。"""
+    try:
+        final: dict[str, object] = await get_react_graph().ainvoke(
+            _initial_react_state(req),
+            config={"recursion_limit": react_recursion_limit()},
+        )
+    except GraphRecursionError:
+        # 图步数兜底(不应触发:轮次上限先于 recursion_limit 收束)
+        return {"error": "工具调用步数超限,请缩小问题范围后重试"}
+    except LlmError:
+        return {"llm_unavailable": True}
+    return final
+
+
+@app.post("/query_react", response_model=QueryOut, tags=["agent"])
+async def query_react(req: QueryReactIn) -> QueryOut:
+    """ReAct 内核同步端点;终态与 /query 逐字段同构(_build_query_out 单一定义)。
+    035:collect_usage=True(bot 链路)才挂 request 级收集器——响应携带明细
+    (bot 渠道唯一上报口,api 请求内落库);缺省 False(chat 同步 react/
+    workflow)不挂,fire-and-forget 旧路零回归(R1-S2)。"""
+    from kongming_agent.llm import reset_usage_collector, set_usage_collector
+    from kongming_agent.multimodal import AttachmentError
+
+    collector: list[dict[str, object]] = []
+    token = set_usage_collector(collector) if req.collect_usage else None
+    try:
+        req.question = await _combine_with_attachments(req)  # 030(与 /query 同前段)
+        final = await _run_react(req)
+    except AttachmentError as e:
+        return QueryOut(success=False, verdict="ERROR", summary="", error=str(e))
+    finally:
+        if token is not None:
+            reset_usage_collector(token)
+    out = _build_query_out(final)
+    out.usage_records = collector
+    return out
+
+
+@app.post("/query_react/stream", tags=["agent"])
+async def query_react_stream(req: QueryReactIn) -> StreamingResponse:
+    """ReAct 流式端点:stage/tool_call/summary 过程事件 + result 终态(同构)。
+
+    035:collect_usage=True 时挂 request 级收集器(与同步 /query_react 同口径
+    ——审查循环 B7:曾静默忽略该字段,bot 渠道一旦流式化用量将静默回退
+    fire-and-forget);result 终态帧携带 usage_records。"""
+    from kongming_agent.llm import reset_usage_collector, set_usage_collector
+    from kongming_agent.multimodal import AttachmentError
+
+    collector: list[dict[str, object]] = []
+
+    try:
+        req.question = await _combine_with_attachments(req)  # 030
+    except AttachmentError as e:
+        fail = _build_query_out({"error": str(e), "success": False})
+        async def _fail_gen2() -> AsyncIterator[str]:
+            yield _sse_frame("result", fail.model_dump_json())
+
+        return StreamingResponse(_fail_gen2(), media_type="text/event-stream")
+    state = _initial_react_state(req)
+
+    async def gen() -> AsyncIterator[str]:
+        # 收集器在生成器上下文内挂载/卸载:流式响应的迭代任务与端点 handler
+        # 分属不同上下文,端点级 set 不传播到 gen(同步端点同款语义)
+        token2 = set_usage_collector(collector) if req.collect_usage else None
+        try:
+            final: dict[str, object] = {}
+            try:
+                async for mode, chunk in get_react_graph().astream(
+                    state,
+                    stream_mode=["updates", "custom"],
+                    config={"recursion_limit": react_recursion_limit()},
+                ):
+                    if mode == "custom":
+                        ev = chunk if isinstance(chunk, dict) else {}
+                        event = str(ev.get("event") or "")
+                        if event:
+                            yield _sse_frame(
+                                event, json.dumps(ev.get("data"), ensure_ascii=False)
+                            )
+                    elif isinstance(chunk, dict):
+                        for delta in chunk.values():
+                            if isinstance(delta, dict):
+                                final.update(delta)
+            except LlmError:
+                yield _sse_frame(
+                    "result",
+                    _build_query_out({"llm_unavailable": True}).model_dump_json(),
+                )
+                return
+            except GraphRecursionError:
+                # 图步数兜底(R1-S4:与同步同口径的结构化错误,不走泛异常)
+                yield _sse_frame(
+                    "result",
+                    _build_query_out(
+                        {"error": "工具调用步数超限,请缩小问题范围后重试"}
+                    ).model_dump_json(),
+                )
+                return
+            except Exception:
+                log.exception("ReAct 流式执行异常 trace_id=%s", req.trace_id)
+                yield _sse_frame(
+                    "error",
+                    json.dumps(
+                        {"error": "问答服务内部错误,请稍后重试", "reason_code": None},
+                        ensure_ascii=False,
+                    ),
+                )
+                return
+            out = _build_query_out(final)
+            out.usage_records = collector  # 035:bot 渠道流式化的同步入账口径
+            yield _sse_frame("result", out.model_dump_json())
+        finally:
+            if token2 is not None:
+                reset_usage_collector(token2)
 
     return StreamingResponse(
         gen(),

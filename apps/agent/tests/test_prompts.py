@@ -75,6 +75,25 @@ def test_summarize_factuality_rules() -> None:
     )
 
 
+def test_summarize_alias_alignment_rules() -> None:
+    """037 称谓对齐规则在位,且与 018 事实性规则共存(互锁不互斥)。"""
+    assert "称谓对齐规则：提及数据实体时必须使用业务称谓别名(alias)" in (
+        prompts.SUMMARIZE_SYSTEM
+    )
+    assert "用户用语优先，其次所给别名" in prompts.SUMMARIZE_SYSTEM
+    assert "禁止只写物理表名" in prompts.SUMMARIZE_SYSTEM
+    assert "禁止出现schema全限定名" in prompts.SUMMARIZE_SYSTEM
+    assert "首次提及可「业务名(物理表名)」并注(如「商品表(goods)」，物理表名即英文表名)" in (
+        prompts.SUMMARIZE_SYSTEM
+    )
+    assert "别名缺失时回退表说明中的中文名称" in prompts.SUMMARIZE_SYSTEM
+    assert "禁止编造别名" in prompts.SUMMARIZE_SYSTEM
+    # 双规则共存(018 事实性 + 037 称谓)
+    assert "不得外推到不可见数据" in prompts.SUMMARIZE_SYSTEM
+    # 例外清单登记(文件头):037 增量已登记
+    assert "SUMMARIZE_SYSTEM 称谓对齐规则(2026-08-24,037 entity-alias)" in prompts.__doc__
+
+
 def test_fullwidth_discipline_no_stray_halfwidth_comma() -> None:
     for text in (
         prompts.SQL_GEN_SYSTEM,

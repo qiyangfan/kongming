@@ -92,11 +92,23 @@ class RagService:
         schema_name: str,
         blocks: list[TableBlock],
     ) -> list[str]:
-        """解析后的表块批量落库(MANUAL_UPLOAD;人工显式操作=显式覆盖,不受优先级限)。"""
+        """解析后的表块批量落库(MANUAL_UPLOAD;人工显式操作=显式覆盖,不受优先级限;
+        alias 例外——parser 无别名语法,清空非用户显式意图,upsert 只补空不改非空)。"""
         await self._require_usable_datasource(tenant_id, datasource_key)
+        # 审查循环 F1:embedding 文本须以「生效别名」参与(与 alias 列/tsv 同源
+        # ——upsert 保留既有非空 alias 时,无别名文本的新向量会使别名向量召回
+        # 静默退化);与 _ingest 同款预读
+        existing = await self._repo.list_source_and_alias(
+            tenant_id=tenant_id, datasource_key=datasource_key
+        )
         vectors = await self._embed_quietly(
             [
-                build_embedding_text(b.table_name, b.table_comment, b.columns_comment)
+                build_embedding_text(
+                    b.table_name,
+                    b.table_comment,
+                    b.columns_comment,
+                    alias=(existing.get(b.table_name, ("", ""))[1] or b.alias),
+                )
                 for b in blocks
             ]
         )
@@ -111,6 +123,7 @@ class RagService:
                 sample_queries=block.sample_queries,
                 source_type="MANUAL_UPLOAD",
                 embedding=vec,
+                alias=block.alias,  # 037
             )
         await self._repo.log_oper(
             actor_id,
@@ -149,6 +162,62 @@ class RagService:
         await self._repo.commit()
         await self._cache.evict(tenant_id, target.datasource_key)
         return target
+
+    async def edit_table(
+        self,
+        *,
+        actor_id: str,
+        tenant_id: str,
+        table_id: str,
+        table_comment: str,
+        alias: str,
+    ) -> KnowledgeEntry | None:
+        """037:人工精修编辑(table_comment 与 alias 同面,knowledge spec)。
+
+        MANUAL_EDIT 显式覆盖(最高覆盖档,自动来源整行跳过不覆盖);embedding
+        以新 comment+alias 重算(输入侧文本与向量/tsv 三者同源),重算失败
+        保留既有向量(upsert 人工路径 COALESCE——清向量会使该表退出向量召回)。
+        """
+        target = await self._repo.find_table(tenant_id=tenant_id, table_id=table_id)
+        if target is None:
+            return None
+        vec = (
+            await self._embed_quietly(
+                [
+                    build_embedding_text(
+                        target.table_name,
+                        table_comment,
+                        target.columns_comment,
+                        alias=alias,
+                    )
+                ]
+            )
+        )[0]
+        await self._repo.upsert_table(
+            tenant_id=tenant_id,
+            datasource_key=target.datasource_key,
+            schema_name=target.schema_name,
+            table_name=target.table_name,
+            table_comment=table_comment,
+            columns_comment=target.columns_comment,
+            sample_queries=target.sample_queries,
+            source_type="MANUAL_EDIT",
+            embedding=vec,
+            alias=alias,
+        )
+        await self._repo.log_oper(
+            actor_id,
+            "rag.edit_table",
+            table_id,
+            {
+                "table_name": target.table_name,
+                "alias": alias,
+                "table_comment": table_comment[:200],
+            },
+        )
+        await self._repo.commit()
+        await self._cache.evict(tenant_id, target.datasource_key)
+        return await self._repo.find_table(tenant_id=tenant_id, table_id=table_id)
 
     # ============ fetch-metadata / reindex(knowledge 域) ============
 
@@ -205,7 +274,9 @@ class RagService:
         # ② embedding(事务外;失败全 None 无向量落库,全文路仍可用)
         vectors = await self._embed_quietly(
             [
-                build_embedding_text(b.table_name, b.table_comment, b.columns_comment)
+                build_embedding_text(
+                    b.table_name, b.table_comment, b.columns_comment, alias=b.alias
+                )
                 for _, b in described
             ]
         )
@@ -226,6 +297,7 @@ class RagService:
                 sample_queries=block.sample_queries,
                 source_type="AI_GENERATED" if enriched else "INTROSPECTION",
                 embedding=vec,
+                alias=block.alias,  # 037
             )
             if enriched:
                 enriched_count += 1
@@ -276,28 +348,34 @@ class RagService:
 
         described = await asyncio.gather(*(describe_one(t) for t in tables))
 
-        # 覆盖优先级:自动来源不覆盖 MANUAL_*(批量预读一次)
-        existing = await self._repo.list_source_types(
+        # 覆盖优先级:自动来源不覆盖 MANUAL_*(批量预读一次);037 同读既有
+        # alias——生效别名(既有非空则沿用)参与 embedding 文本,与 alias 列/
+        # tsv 三处同源(R1-S1:否则 alias 保留时派生检索文本丢别名,召回静默失效)
+        existing = await self._repo.list_source_and_alias(
             tenant_id=tenant_id, datasource_key=datasource_key
         )
-        to_write: list[tuple[str, bool, TableBlock]] = []  # (schema_name, enriched, block)
+        # (schema_name, enriched, block, effective_alias)
+        to_write: list[tuple[str, bool, TableBlock, str]] = []
         skipped = 0
         for t, (enriched, block) in zip(tables, described, strict=True):
             incoming = "AI_GENERATED" if enriched else "INTROSPECTION"
             prior = existing.get(block.table_name)
-            if prior is not None and not can_automated_overwrite(prior, incoming):
+            if prior is not None and not can_automated_overwrite(prior[0], incoming):
                 skipped += 1
                 continue
-            to_write.append((t.schema_name, enriched, block))
+            effective_alias = prior[1] if prior is not None and prior[1] else block.alias
+            to_write.append((t.schema_name, enriched, block, effective_alias))
 
         vectors = await self._embed_quietly(
             [
-                build_embedding_text(b.table_name, b.table_comment, b.columns_comment)
-                for _, _, b in to_write
+                build_embedding_text(
+                    b.table_name, b.table_comment, b.columns_comment, alias=ea
+                )
+                for _, _, b, ea in to_write
             ]
         )
         enriched_count = 0
-        for (schema_name, enriched, block), vec in zip(to_write, vectors, strict=True):
+        for (schema_name, enriched, block, _), vec in zip(to_write, vectors, strict=True):
             await self._repo.upsert_table(
                 tenant_id=tenant_id,
                 datasource_key=datasource_key,
@@ -308,6 +386,7 @@ class RagService:
                 sample_queries=block.sample_queries,
                 source_type="AI_GENERATED" if enriched else "INTROSPECTION",
                 embedding=vec,
+                alias=block.alias,  # 037
             )
             if enriched:
                 enriched_count += 1

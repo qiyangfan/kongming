@@ -14,6 +14,7 @@ import datetime as dt
 import re
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import TypedDict
 
 _PIE_MAX_CARDINALITY = 8  # 低基数分类上界(chat spec)
 _BAR_MAX_CARDINALITY = 50  # 超此基数推定明细,不配图
@@ -71,3 +72,44 @@ def suggest_chart(columns: list[str], rows: list[list[object]]) -> ChartSuggesti
     if cardinality <= _BAR_MAX_CARDINALITY:
         return ChartSuggestion("bar", x=columns[0], y=y)
     return ChartSuggestion("none")
+
+
+# ============ 026 conversation-artifacts:产物派生纯函数 ============
+
+
+class Artifact(TypedDict):
+    """对话产物(026):type ∈ sql/chart/document;content 主内容;metadata 辅助。"""
+
+    type: str
+    content: str
+    metadata: dict[str, object]
+
+
+def derive_artifacts(
+    *, sql: str, chart: ChartSuggestion, summary: str, datasource_key: str
+) -> list[Artifact]:
+    """从既有要素确定性派生产物(纯函数,零 LLM):sql 非空→sql 卡;
+    chart.type≠none→chart 卡;summary 非空→document 卡。
+    派生对同步/流式/回显三路径同源(回显缺档时按要素重算,与 chart 同款)。"""
+    out: list[Artifact] = []
+    if sql.strip():
+        out.append(
+            Artifact(
+                type="sql",
+                content=sql,
+                metadata={"datasource_key": datasource_key},
+            )
+        )
+    if chart.type != "none":
+        out.append(
+            Artifact(
+                type="chart",
+                content="",
+                metadata={
+                    "chart": {"type": chart.type, "x": chart.x, "y": chart.y},
+                },
+            )
+        )
+    if summary.strip():
+        out.append(Artifact(type="document", content=summary, metadata={}))
+    return out

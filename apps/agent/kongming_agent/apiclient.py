@@ -54,10 +54,24 @@ class SchemaMeta:
 
 @dataclass(frozen=True)
 class RagContext:
-    """/internal/rag/retrieve 召回结果(009)。schema_hint 空=零命中(回退内省)。"""
+    """/internal/rag/retrieve 召回结果(009)。schema_hint 空=零命中(回退内省)。
+    023 纯增:relations_hint/metric_hints 语义段(空串=无注入)。"""
 
     schema_hint: str
     history_sql: str = ""
+    relations_hint: str = ""
+    metric_hints: str = ""
+    doc_hints: list[dict[str, str]] = field(default_factory=list)  # 024 文档段
+
+
+@dataclass(frozen=True)
+class ToolExecuteOutcome:
+    """/internal/tool/execute 的响应(019;HTTP 层异常已收敛为 status=error)。"""
+
+    status: str  # executed / rejected / error / rate_limited / confirm_required
+    reason: str | None = None
+    result: dict[str, object] | None = None
+    confirm_id: str | None = None
 
 
 class ApiClient:
@@ -168,7 +182,93 @@ class ApiClient:
         return RagContext(
             schema_hint=str(data.get("schema_hint") or ""),
             history_sql=str(data.get("history_sql") or ""),
+            relations_hint=str(data.get("relations_hint") or ""),
+            metric_hints=str(data.get("metric_hints") or ""),
+            doc_hints=[
+                {
+                    "source_ref": str(h.get("source_ref") or ""),
+                    "content": str(h.get("content") or ""),
+                }
+                for h in data.get("doc_hints") or []
+                if isinstance(h, dict)
+            ],
         )
+
+    async def report_usage(self, records: list[dict[str, object]]) -> None:
+        """LLM 用量上报(021):fire-and-forget;任何失败仅日志(统计口径非计费)。"""
+        try:
+            resp = await self._post("/internal/llm-usage", {"records": records})
+            if resp.status_code != 200:
+                log.warning("usage 上报非 200: HTTP %s(丢弃)", resp.status_code)
+        except Exception as e:  # noqa: BLE001  # 上报永不阻断主链路
+            log.warning("usage 上报失败(丢弃): %s", e)
+
+    async def tool_execute(
+        self,
+        *,
+        trace_id: str,
+        tenant_key: str,
+        datasource_key: str,
+        user_id: str | None,
+        tool_name: str,
+        args: dict[str, object],
+        channel: str = "chat",  # 025
+    ) -> ToolExecuteOutcome:
+        """通用工具执行回调(019):agent 只传工具名/参数/上下文,零凭证(ADR-002)。
+
+        HTTP 层异常(超时/断连/5xx)收敛 status=error 喂回 LLM,不裸抛。
+        """
+        try:
+            resp = await self._post(
+                "/internal/tool/execute",
+                {
+                    "trace_id": trace_id,
+                    "tenant_key": tenant_key,
+                    "datasource_key": datasource_key,
+                    "user_id": user_id,
+                    "tool_name": tool_name,
+                    "args": args,
+                    "channel": channel,
+                },
+            )
+        except httpx.HTTPError as e:
+            log.warning("tool_execute 回调异常: %s", e)
+            return ToolExecuteOutcome(status="error", reason=f"控制面不可达: {e}")
+        if resp.status_code != 200:
+            return ToolExecuteOutcome(
+                status="error", reason=f"控制面拒绝(HTTP {resp.status_code})"
+            )
+        try:
+            data = resp.json()
+        except ValueError:
+            log.warning("tool_execute 响应非 JSON,按错误观察喂回")
+            return ToolExecuteOutcome(status="error", reason="控制面响应畸形")
+        return ToolExecuteOutcome(
+            status=str(data.get("status") or "error"),
+            reason=data.get("reason"),
+            result=data.get("result") if isinstance(data.get("result"), dict) else None,
+            confirm_id=data.get("confirm_id"),
+        )
+
+    async def attachment_content(
+        self, att_id: str, *, tenant_key: str, user_id: str
+    ) -> tuple[str, bytes] | None:
+        """030:一次性取附件内容(内部端点绑定复校+消费语义);
+        404/异常 → None(由调用方 fail-closed 文案化)。"""
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._base, timeout=self._timeout, headers=self._headers
+            ) as client:
+                resp = await client.get(
+                    f"/internal/attachment/{att_id}/content",
+                    params={"tenant_key": tenant_key, "user_id": user_id},
+                )
+        except httpx.HTTPError as e:
+            log.warning("附件取用异常: %s", e)
+            return None
+        if resp.status_code != 200:
+            return None
+        return resp.headers.get("content-type", "image/png").split(";")[0], resp.content
 
     async def _post(self, path: str, payload: dict[str, object]) -> httpx.Response:
         async with httpx.AsyncClient(

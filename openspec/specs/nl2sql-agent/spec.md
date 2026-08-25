@@ -134,6 +134,8 @@ summarize 节点输出结构化洞察:summary(一句话)+ insights[](聚合洞�
 
 摘要 SHALL 事实性接地:summarize 喂给 LLM 的上下文 SHALL 含结果行数、本地确定性统计(stats)与前若干行预览,不只给行预览;summary 与 insights 的数值结论 SHALL 以所给统计与可见行为准,SHALL NOT 外推到不可见数据;用户请求写操作而实际执行的是只读查询时,摘要 SHALL 如实说明未执行写操作,SHALL NOT 声称删除/更新/插入成功。
 
+摘要 SHALL 称谓对齐:summarize 喂给 LLM 的上下文 SHALL 含所涉表的业务称谓别名(alias,随召回 schema_hint 段注入);summary 与 insights 提及数据实体时 SHALL 使用业务称谓——用户用语优先,其次所给别名;SHALL NOT 只写物理表名,SHALL NOT 出现 schema 全限定名;首次提及可以「业务名(物理名)」并注;别名缺失时回退表说明中的中文名称;SHALL NOT 编造别名(与「数值结论不外推」同构的事实性约束)。
+
 #### Scenario: 聚合结果结构化洞察
 - GIVEN 查询返回分组聚合结果
 - WHEN summarize 节点执行
@@ -150,6 +152,16 @@ summarize 节点输出结构化洞察:summary(一句话)+ insights[](聚合洞�
 - WHEN summarize 节点执行
 - THEN 摘要中的最值结论以所给统计为准,不以可见前 5 行外推
 
+#### Scenario: 实体称谓以业务名表达
+- GIVEN 用户提问「商品表有多少种商品」(goods 表 alias=「商品表」已注入上下文)
+- WHEN summarize 节点执行
+- THEN 摘要称「商品表」而非 goods;不出现 tenant_default.goods 全限定名;首次提及可「商品表(goods)」并注
+
+#### Scenario: 用户用语优先于别名
+- GIVEN 用户称某表为「订单主表」而 alias 为「订单表」
+- WHEN summarize 节点执行
+- THEN 摘要沿用用户的「订单主表」,不被别名带偏
+
 #### Scenario: 写操作请求摘要不谎称成功(005/006 冒烟观察)
 - GIVEN 用户问题为「删除 name 为 X 的商品」,实际执行为只读 SELECT
 - WHEN summarize 节点执行
@@ -164,7 +176,6 @@ summarize 节点输出结构化洞察:summary(一句话)+ insights[](聚合洞�
 - GIVEN summarize 节点 LLM 返回纯文本
 - WHEN 解析失败
 - THEN 退化为 summary=该文本,insights/stats 为空,不报错
-
 ### Requirement: Schema 智能选取
 
 retrieve 节点 SHALL 从控制面获取 schema 提示,不维护硬编码全表提示。
@@ -273,3 +284,99 @@ data SHALL 与同步问答端点响应同构(单一定义防字段漂移);图执
 - GIVEN 图执行抛出意外异常
 - WHEN 流式响应进行
 - THEN 下发 error 终态事件(友好文案),不裸 500
+
+### Requirement: ReAct 内核并存与终态等价
+
+Agent 面 SHALL 在既有 8 节点 NL2SQL 问答图之外并存 ReAct 工具调用内核(独立端点),两内核的终态响应单一定义、逐字段同构(success/verdict/summary/insights/stats/columns/rows/sql/retry_count/error)。既有问答图的节点逻辑、路由语义、prompt 资产与流式事件契约 SHALL NOT 因 ReAct 内核引入而变化;ReAct 链路的流式事件在既有事件清单上纯增 tool_call 类型,老消费方不受影响。两内核 SHALL 共享同一套 LLM 客户端纪律(无自写重试,ReAct 循环本身即重试/决策机制)与同一套控制面回调鉴权口径(X-Internal-Token)。
+
+#### Scenario: 双内核终态同构
+
+- GIVEN 同一数据查询问题分别经 8 节点图与 ReAct 内核处理
+- WHEN 两请求完成
+- THEN 两者响应携带相同字段集合与语义(columns/rows 来自最终一次成功 SQL 执行,summary 为最终自然语言总结)
+
+#### Scenario: 既有问答图零回归
+
+- GIVEN 019 引入 ReAct 内核后
+- WHEN 调用既有 /query 或 /query/stream
+- THEN 节点链、事件序列与终态字段与引入前逐字段一致(016 评估基线不降)
+
+#### Scenario: tool_call 事件与既有事件并列
+
+- GIVEN ReAct 流式端点消费方
+- WHEN 循环中发生工具调用
+- THEN 事件流中 tool_call 事件与 stage/result/error 事件并存,既有事件的字段与语义不变
+
+### Requirement: LLM 调用的任务级路由挂接
+
+Agent 面 LLM 客户端 SHALL 在既有 chat/embeddings 接口上纯增任务类型参数(缺省=主模型,既有调用方零改动零回归);各图节点按语义传入任务类型(generate=SQL_GEN、understand=UNDERSTAND、summarize=SUMMARIZE、标题改写=TITLER、表润色=DESCRIBE、ReAct 决策=REACT)。路由判定 SHALL 在 LLM 客户端内单点完成(multi-model-routing spec),节点不感知模型选择细节。多轮上下文/指代消解/生成质量规则/结构化洞察等既有行为契约 SHALL NOT 因路由引入而变化(同一模型配置下行为逐字一致)。
+
+#### Scenario: 节点任务类型全标记
+
+- GIVEN 路由表已配置且注册表多模型可用
+- WHEN 任一图节点调用 LLM
+- THEN 调用携带该节点的任务类型,LLM 客户端按路由表选定模型
+
+#### Scenario: 单模型配置零回归
+
+- GIVEN 未配置注册表/路由表
+- WHEN 任意问答链路执行
+- THEN 全部调用走主模型,016 评估基线不降
+
+### Requirement: 记忆段注入 generate 提示
+
+Agent 面问答请求 SHALL 纯增可选字段 memory_hint(召回的用户已知信息段,控制面注入);generate 节点在拼接用户提示时 SHALL 将非空 memory_hint 作为独立「关于这位用户的已知信息」段置于 schema 提示之前(系统提示模板资产不变);memory_hint 缺省或为空时提示形态与注入前逐字一致。ReAct 内核 SHALL 在首轮 user 消息拼接同一字段(同一拼接语义)。
+
+#### Scenario: 记忆段拼接
+
+- GIVEN 请求携带 memory_hint「偏好月度口径」
+- WHEN generate 节点拼接用户提示
+- THEN 用户提示含「关于这位用户的已知信息」段且位于表结构之前,系统提示不变
+
+#### Scenario: 无记忆零回归
+
+- GIVEN 请求不携带 memory_hint
+- WHEN generate 节点执行
+- THEN 提示形态与 022 之前逐字一致
+
+### Requirement: 召回响应语义段
+
+/internal/rag/retrieve 响应 SHALL 纯增可选字段 relations_hint(召回表集合内的 JOIN path 文字段)与 metric_hints(命中指标口径段);缺省/空时 Agent 面行为与引入前一致。两段由控制面组装(语义层域),召回服务失败时随整体回退实时内省(两段缺省为空)。
+
+#### Scenario: 响应携带语义段
+
+- GIVEN 语义层有相关关系与命中指标
+- WHEN Agent 面调用召回
+- THEN 响应含 relations_hint 与 metric_hints 文字段
+
+### Requirement: 生成提示拼接语义段
+
+generate 节点 SHALL 在用户提示中拼接 relations_hint/metric_hints 非空段(位于表结构提示之后、历史成功 SQL 之前;系统提示模板不变),并在拼接存在时遵循「JOIN 优先依据 relations_hint,口径优先依据 metric_hints」;两段皆空时提示形态与引入前逐字一致。ReAct 内核的 rag_retrieve 工具结果携带同名字段时,LLM 观察原样可见(内核零改动)。
+
+#### Scenario: 拼接位置正确
+
+- GIVEN 召回响应含 relations_hint 与 metric_hints
+- WHEN generate 拼接用户提示
+- THEN 两段位于表结构之后、历史成功 SQL 之前
+
+#### Scenario: 零注入零回归
+
+- GIVEN 语义层无数据
+- WHEN generate 执行
+- THEN 提示形态与 023 之前逐字一致
+
+### Requirement: 文档通道与知识分流节点
+
+retrieve 节点 SHALL 在三路召回之外并行取文档通道检索结果(doc_hints:父块全文+source_ref 列表;零命中为空);分流判定(规则词表+schema 空+文档非空)成立时进入 doc_answer 节点直接产出文本答案(summary=回答,无 SQL),否则走既有链路。doc_answer 的提示 SHALL 只含问句与文档段(全新撰写资产),答案 SHALL 以文档内容为准并标注 source_ref;文档段超限时按序截断。既有节点链路与 prompt 资产 SHALL NOT 变化;文档通道失败 SHALL 降级为空(既不影响 schema 通道)。
+
+#### Scenario: 分流节点零 SQL 面
+
+- GIVEN 分流条件成立
+- WHEN doc_answer 执行
+- THEN 终态无 generated_sql、无执行回调,summary 为文档答案
+
+#### Scenario: 文档通道失败降级
+
+- GIVEN 文档检索服务异常
+- WHEN retrieve 执行
+- THEN doc_hints 为空,链路按无文档处理(与 024 之前一致)

@@ -44,6 +44,11 @@ async def _biz() -> AsyncIterator[None]:
         await conn.execute(text("DROP SCHEMA IF EXISTS tenant_default CASCADE"))
 
 
+def _vec_literal(seed_text: str) -> str:
+    """确定性伪向量的 SQL 字面量形态(embedding <=> 比对用)。"""
+    return "[" + ",".join(repr(v) for v in _fake_vector(seed_text)) + "]"
+
+
 def _fake_vector(seed_text: str) -> list[float]:
     """确定性伪向量(同文本同向量——向量召回可预期;维度=列宽 1536)。"""
     digest = hashlib.sha256(seed_text.encode()).digest()
@@ -77,6 +82,7 @@ def fake_agent(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
                 k: f"{v} 中文说明" for k, v in b.columns_comment.items()  # type: ignore[attr-defined]
             },
             sample_queries=["SELECT count(*) FROM x.y GROUP BY 1"],
+            alias=str(state.get("alias") or ""),  # 037:可控 AI 提炼别名
         )
 
     monkeypatch.setattr(AgentRagClient, "embed", fake_embed)
@@ -364,19 +370,19 @@ async def test_upload_unsupported_type_400(
 
 async def _seed_one(
     session: AsyncSession, tenant_id: str, table: str, *, ds: str = "default",
-    source: str = "MANUAL_UPLOAD",
+    source: str = "MANUAL_UPLOAD", alias: str = "",
 ) -> str:
-    """直插一条知识(arrange 独立于被测实现)。"""
+    """直插一条知识(arrange 独立于被测实现;037:可控 alias)。"""
     tid = (
         await session.execute(
             text(
                 "INSERT INTO rag.table_descriptions"
                 " (id, tenant_id, datasource_key, schema_name, table_name,"
-                "  table_comment, columns_comment, sample_queries, source_type)"
+                "  table_comment, columns_comment, sample_queries, source_type, alias)"
                 " VALUES (gen_random_uuid(), :t, :d, 'tenant_default', :n,"
-                "  'c', '{}', '[]', :st) RETURNING id"
+                "  'c', '{}', '[]', :st, NULLIF(:al, '')) RETURNING id"
             ),
-            {"t": tenant_id, "d": ds, "n": table, "st": source},
+            {"t": tenant_id, "d": ds, "n": table, "st": source, "al": alias},
         )
     ).scalar_one()
     await session.commit()
@@ -509,6 +515,297 @@ async def test_fetch_does_not_overwrite_manual(
     ).mappings().one()
     assert row["source_type"] == "MANUAL_UPLOAD"
     assert row["table_comment"] == "c"  # 原内容未动
+
+
+async def test_fetch_alias_overwrite_priority(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
+) -> None:
+    """037 alias 覆盖优先级:自动来源只补空不改非空;手编整行跳过保护。"""
+    token = await _admin_token(client, session)
+    tid = await _default_tenant_id(session)
+
+    # ① 既有自动行 alias 空 → AI 提炼补齐
+    await _seed_one(session, tid, "goods", source="AI_GENERATED", alias="")
+    fake_agent["alias"] = "AI商品表"
+    r1 = await client.post(
+        f"{RAG}/fetch-metadata", json={"datasource_key": "default"}, headers=_auth(token)
+    )
+    assert r1.status_code == 200, r1.text
+    alias1 = (
+        await session.execute(
+            text("SELECT alias FROM rag.table_descriptions WHERE table_name='goods'")
+        )
+    ).scalar_one()
+    assert alias1 == "AI商品表"  # 空位补齐
+
+    # ② 既有非空 alias(自动来源写入)→ 再次抓取不改写(即便新产出为空);
+    #    且 tsv/embedding 以生效别名(=既有别名)同源重算(R1-S1:否则派生检索
+    #    文本丢别名,「AI商品表」召回静默失效)
+    fake_agent["alias"] = ""
+    await client.post(
+        f"{RAG}/fetch-metadata", json={"datasource_key": "default"}, headers=_auth(token)
+    )
+    from kongming.rag.models import build_embedding_text
+
+    row2 = (
+        await session.execute(
+            text(
+                "SELECT alias, tsv @@ plainto_tsquery('simple', 'AI商品表') AS tsv_hit,"
+                " embedding <=> CAST(:vec AS vector) AS d_keep,"
+                " embedding <=> CAST(:vec0 AS vector) AS d_drop"
+                " FROM rag.table_descriptions WHERE table_name='goods'"
+            ),
+            {
+                "vec": "[" + ",".join(repr(v) for v in _fake_vector(
+                    build_embedding_text(
+                        "goods", "AI:goods",
+                        {"id": "integer 中文说明", "name": "text 中文说明",
+                         "create_by": "uuid 中文说明"},
+                        alias="AI商品表",
+                    )
+                )) + "]",
+                "vec0": "[" + ",".join(repr(v) for v in _fake_vector(
+                    build_embedding_text(
+                        "goods", "AI:goods",
+                        {"id": "integer 中文说明", "name": "text 中文说明",
+                         "create_by": "uuid 中文说明"},
+                        alias="",
+                    )
+                )) + "]",
+            },
+        )
+    ).mappings().one()
+    assert row2["alias"] == "AI商品表"  # 非空不被自动来源改写
+    assert row2["tsv_hit"] is True      # tsv 以生效别名重算
+    assert float(row2["d_keep"]) < 1e-6   # embedding=生效别名文本的向量
+    assert float(row2["d_drop"]) > 0.1    # ≠ 丢别名文本的向量(同源直证)
+
+    # ③ 手编(MANUAL_EDIT)alias:整行跳过保护,alias 不被 AI 触碰
+    await session.execute(
+        text(
+            "UPDATE rag.table_descriptions SET source_type='MANUAL_EDIT',"
+            " alias='手编商品表' WHERE table_name='goods'"
+        )
+    )
+    await session.commit()
+    fake_agent["alias"] = "AI改写名"
+    r3 = await client.post(
+        f"{RAG}/fetch-metadata", json={"datasource_key": "default"}, headers=_auth(token)
+    )
+    assert r3.json()["skipped"] >= 1
+    row3 = (
+        await session.execute(
+            text(
+                "SELECT alias, source_type FROM rag.table_descriptions"
+                " WHERE table_name='goods'"
+            )
+        )
+    ).mappings().one()
+    assert row3["alias"] == "手编商品表"
+    assert row3["source_type"] == "MANUAL_EDIT"
+
+
+# ============ 037 表说明编辑(alias 与 table_comment 同面) ============
+
+
+async def test_edit_table_alias_input_validation(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
+) -> None:
+    """R1-F1:别名禁括号/竖线/换行(防伪表名注入与行结构破坏);strip 落库。"""
+    token = await _admin_token(client, session)
+    tid = await _default_tenant_id(session)
+    row_id = await _seed_one(session, tid, "goods")
+    # 括号:可伪造「fake.table(」形态破坏 023 表名提取——拒收
+    r1 = await client.put(
+        f"{RAG}/tables/{row_id}",
+        json={"table_comment": "c", "alias": "a\nfake.table(q)"},
+        headers=_auth(token),
+    )
+    assert r1.status_code == 422
+    r2 = await client.put(
+        f"{RAG}/tables/{row_id}",
+        json={"table_comment": "c", "alias": "商品(表)"},
+        headers=_auth(token),
+    )
+    assert r2.status_code == 422
+    # 换行破坏 schema_hint 行结构——拒收
+    r3 = await client.put(
+        f"{RAG}/tables/{row_id}",
+        json={"table_comment": "c", "alias": "商品\n表"},
+        headers=_auth(token),
+    )
+    assert r3.status_code == 422
+    # 合法值 strip 后落库
+    r4 = await client.put(
+        f"{RAG}/tables/{row_id}",
+        json={"table_comment": "  商品信息  ", "alias": "  商品表  "},
+        headers=_auth(token),
+    )
+    assert r4.status_code == 200
+    assert r4.json()["alias"] == "商品表"
+    assert r4.json()["table_comment"] == "商品信息"
+
+
+async def test_upload_preserves_existing_alias(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
+) -> None:
+    """R1-B2:重复上传同表文档(parser 无别名语法)不清既有非空 alias。"""
+    token = await _admin_token(client, session)
+    tid = await _default_tenant_id(session)
+    await _seed_one(session, tid, "goods", source="MANUAL_UPLOAD", alias="手编商品表")
+    r = await _upload(client, token, content=_md("goods"))
+    assert r.status_code == 200, r.text
+    row = (
+        await session.execute(
+            text(
+                "SELECT alias, table_comment,"
+                " embedding <=> CAST(:vk AS vector) AS d_keep,"
+                " embedding <=> CAST(:vd AS vector) AS d_drop"
+                " FROM rag.table_descriptions WHERE table_name='goods'"
+            ),
+            {
+                "vk": _vec_literal("goods 手编商品表 goods说明 id 主键"),
+                "vd": _vec_literal("goods goods说明 id 主键"),
+            },
+        )
+    ).mappings().one()
+    assert row["alias"] == "手编商品表"  # alias 只补空不改非空
+    assert row["table_comment"] != "c"   # 说明照常显式覆盖更新
+    # 审查循环 F1:embedding 须以生效别名(=既有别名)同源重算——上传的
+    # parser 无别名语法,曾用无别名文本的向量覆盖(别名向量召回静默退化)
+    assert float(row["d_keep"]) < 1e-6
+    assert float(row["d_drop"]) > 0.1
+
+
+async def test_edit_table_manual_edit_success(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
+) -> None:
+    """编辑 alias+table_comment:落库 MANUAL_EDIT;响应回传;tsv 拼别名;向量重算。"""
+    token = await _admin_token(client, session)
+    tid = await _default_tenant_id(session)
+    row_id = await _seed_one(session, tid, "goods")
+    r = await client.put(
+        f"{RAG}/tables/{row_id}",
+        json={"table_comment": "商品信息表", "alias": "商品表"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["alias"] == "商品表"
+    assert body["table_comment"] == "商品信息表"
+    assert body["source_type"] == "MANUAL_EDIT"
+    row = (
+        await session.execute(
+            text(
+                "SELECT alias, source_type, embedding IS NOT NULL AS has_vec,"
+                " tsv @@ plainto_tsquery('simple', '商品表') AS alias_hit"
+                " FROM rag.table_descriptions WHERE id = :i"
+            ),
+            {"i": row_id},
+        )
+    ).mappings().one()
+    assert row["alias"] == "商品表"
+    assert row["source_type"] == "MANUAL_EDIT"
+    assert row["has_vec"] is True  # 编辑后向量重算(曾误清空,实施期抓回)
+    assert row["alias_hit"] is True  # tsv 拼入别名:全文路「商品表」命中
+    assert (
+        await session.execute(
+            text("SELECT count(*) FROM public.sys_oper_log WHERE action='rag.edit_table'")
+        )
+    ).scalar_one() >= 1
+
+
+async def test_edit_table_empty_alias_clears(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
+) -> None:
+    """alias 传空串=清除别名(允许);表说明不受影响。"""
+    token = await _admin_token(client, session)
+    tid = await _default_tenant_id(session)
+    row_id = await _seed_one(session, tid, "goods", alias="商品表")
+    r = await client.put(
+        f"{RAG}/tables/{row_id}",
+        json={"table_comment": "商品信息", "alias": ""},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    assert r.json()["alias"] == ""
+    assert (
+        await session.execute(
+            text("SELECT COALESCE(alias, '') FROM rag.table_descriptions WHERE id = :i"),
+            {"i": row_id},
+        )
+    ).scalar_one() == ""
+
+
+async def test_edit_table_preserves_vector_when_embed_fails(
+    client: AsyncClient,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_agent: dict[str, object],
+) -> None:
+    """embed 失败:保留旧向量不清空(清向量会使该表退出向量召回)。"""
+    from kongming.rag.ports import EmbeddingError
+
+    token = await _admin_token(client, session)
+    tid = await _default_tenant_id(session)
+    row_id = await _seed_one(session, tid, "goods")
+    r1 = await client.put(  # 第一轮:替身 embed 正常,向量落库
+        f"{RAG}/tables/{row_id}",
+        json={"table_comment": "商品信息", "alias": "商品表"},
+        headers=_auth(token),
+    )
+    assert r1.status_code == 200
+
+    async def boom_embed(self: AgentRagClient, texts: list[str]) -> list[list[float]]:
+        raise EmbeddingError("embed 故障")
+
+    monkeypatch.setattr(AgentRagClient, "embed", boom_embed)
+    r2 = await client.put(  # 第二轮:embed 故障
+        f"{RAG}/tables/{row_id}",
+        json={"table_comment": "商品信息2", "alias": "货品表"},
+        headers=_auth(token),
+    )
+    assert r2.status_code == 200
+    has_vec = (
+        await session.execute(
+            text("SELECT embedding IS NOT NULL FROM rag.table_descriptions WHERE id = :i"),
+            {"i": row_id},
+        )
+    ).scalar_one()
+    assert has_vec is True  # 旧向量保留
+    assert r2.json()["alias"] == "货品表"
+
+
+async def test_edit_table_cross_tenant_404(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
+) -> None:
+    """越租户编辑:同形 404(与删除同口径,防探测)。"""
+    from tests.test_datasource_admin import _mk_tenant
+
+    token = await _admin_token(client, session)
+    other = await _mk_tenant(session, "alias-other")
+    row_id = await _seed_one(session, other, "goods")
+    r = await client.put(
+        f"{RAG}/tables/{row_id}",
+        json={"table_comment": "x", "alias": "y"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 404
+
+
+async def test_edit_table_no_perm_403(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser,
+    fake_agent: dict[str, object],
+) -> None:
+    token = await _noperm_user(client, session, make_user)
+    tid = await _default_tenant_id(session)
+    row_id = await _seed_one(session, tid, "goods")
+    r = await client.put(
+        f"{RAG}/tables/{row_id}",
+        json={"table_comment": "x", "alias": "y"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 403
 
 
 async def test_fetch_no_perm_403(

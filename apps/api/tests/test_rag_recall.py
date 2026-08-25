@@ -56,6 +56,7 @@ async def _seed_knowledge(
     comment: str,
     embed_text: str,
     schema_name: str = "tenant_default",
+    alias: str = "",
 ) -> None:
     vec = "[" + ",".join(repr(v) for v in _fake_vector(embed_text)) + "]"
     await s.execute(
@@ -63,15 +64,17 @@ async def _seed_knowledge(
             "INSERT INTO rag.table_descriptions"
             " (id, tenant_id, datasource_key, schema_name, table_name,"
             "  table_comment, columns_comment, sample_queries, source_type,"
-            "  embedding, tsv)"
+            "  embedding, tsv, alias)"
             " VALUES (gen_random_uuid(), :t, :d, :s, :n, :c, '{}', '[]',"
             "  'MANUAL_UPLOAD', CAST(:vec AS vector),"
-            "  to_tsvector('simple', :n_t || ' ' || :c_t))"
+            "  to_tsvector('simple', :n_t || ' ' || :a_t || ' ' || :c_t),"
+            "  NULLIF(:a, ''))"
             " ON CONFLICT (tenant_id, datasource_key, schema_name, table_name)"
-            " DO UPDATE SET embedding = EXCLUDED.embedding, tsv = EXCLUDED.tsv"
+            " DO UPDATE SET embedding = EXCLUDED.embedding, tsv = EXCLUDED.tsv,"
+            "  alias = EXCLUDED.alias"
         ),
         {"t": tenant_id, "d": ds, "s": schema_name, "n": table, "c": comment, "vec": vec,
-         "n_t": table, "c_t": comment or " "},
+         "n_t": table, "c_t": comment or " ", "a_t": alias or " ", "a": alias},
     )
     await s.commit()
 
@@ -165,6 +168,38 @@ async def test_recall_fulltext_exact_table_promoted(
     assert first.startswith("tenant_default.bed_bath_table")  # 全文修正排序
 
 
+async def test_recall_alias_hits_and_hint_carries_alias(
+    client: AsyncClient, session: AsyncSession, fake_embed: None
+) -> None:
+    """037:业务称谓经别名命中召回(向量路,embedding 文本拼入 alias);
+    schema_hint 表说明段含「goods(商品表)」形态(rag delta 场景)。"""
+    from kongming.redis_client import get_redis
+
+    await get_redis().flushdb()
+    tid = await _ensure_default_tenant(session)
+    # goods 的 embedding 文本拼入 alias「商品表」——问句同文本,余弦距离 0 必中
+    await _seed_knowledge(session, tid, ds="default", table="goods",
+                          comment="商品基础信息", embed_text="商品表有多少种商品",
+                          alias="商品表")
+    await _seed_knowledge(session, tid, ds="default", table="film",
+                          comment="影片表", embed_text="影片电影 movie film")
+    r = await client.post(
+        "/internal/rag/retrieve",
+        json={"tenant_key": "default", "question": "商品表有多少种商品"},
+        headers=INTERNAL,
+    )
+    assert r.status_code == 200, r.text
+    first = r.json()["schema_hint"].splitlines()[0]
+    assert first.startswith("tenant_default.goods(商品表)")  # 别名随表说明段注入
+    # 单词中文问句走全文路也命中(tsv 拼入 alias token)
+    r2 = await client.post(
+        "/internal/rag/retrieve",
+        json={"tenant_key": "default", "question": "商品表"},
+        headers=INTERNAL,
+    )
+    assert "goods" in r2.json()["schema_hint"]
+
+
 async def test_recall_tenant_isolation(
     client: AsyncClient, session: AsyncSession, fake_embed: None
 ) -> None:
@@ -232,7 +267,13 @@ async def test_recall_empty_returns_blank(
         headers=INTERNAL,
     )
     assert r.status_code == 200
-    assert r.json() == {"schema_hint": "", "history_sql": ""}
+    assert r.json() == {
+        "schema_hint": "",
+        "history_sql": "",
+        "relations_hint": "",  # 023 纯增语义段(空)
+        "metric_hints": "",
+        "doc_hints": [],  # 024 纯增文档段(空)
+    }
     keys = [k async for k in get_redis().scan_iter(match="km:ragctx:*")]
     assert keys == []  # 空结果不写缓存(下次请求重试全链路)
 

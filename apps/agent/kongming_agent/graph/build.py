@@ -57,9 +57,17 @@ def get_graph():  # type: ignore[no-untyped-def]
     g.add_node("selfheal", stage_wrapper("selfheal", nodes.selfheal))
     g.add_node("summarize", stage_wrapper("summarize", nodes.summarize))
 
+    g.add_node("doc_answer", stage_wrapper("doc_answer", nodes.doc_answer))  # 024
+
     g.add_edge(START, "understand")
     g.add_edge("understand", "retrieve")
-    g.add_edge("retrieve", "generate")
+    # 024:知识分流(知识意图+文档命中即分流;否则既有 generate;spec 修订后口径)
+    g.add_conditional_edges(
+        "retrieve",
+        nodes.route_after_retrieve,
+        {"generate": "generate", "doc_answer": "doc_answer"},
+    )
+    g.add_edge("doc_answer", END)
     g.add_edge("generate", "validate")
     g.add_conditional_edges(
         "validate", _after_validate, {"execute": "execute", "selfheal": "selfheal", "fail": END}

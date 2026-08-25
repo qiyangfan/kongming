@@ -5,6 +5,7 @@ MANUAL_EDIT < FEEDBACK_REFINED——自动来源(抓取/润色)不覆盖更高�
 召回参数与上游同构:topK=5、RRF k=60(query_history 独立强 few-shot 通道不进融合)。
 """
 
+import re
 from dataclasses import dataclass, field
 
 # source_type 覆盖优先级(baseline CHECK 枚举,0006 演进后的五态)
@@ -34,11 +35,12 @@ class TableBlock:
     table_comment: str = ""
     columns_comment: dict[str, str] = field(default_factory=dict)
     sample_queries: list[str] = field(default_factory=list)
+    alias: str = ""  # 037:业务称谓别名
 
 
 @dataclass(frozen=True)
 class KnowledgeEntry:
-    """知识条目(管理面/召回视图;永不含向量原始值)。"""
+    """知识条目(管理面/召回视图;永不含向量原始值)。037:新增 alias 业务称谓。"""
 
     id: str
     tenant_id: str
@@ -50,6 +52,7 @@ class KnowledgeEntry:
     sample_queries: list[str]
     source_type: str
     updated_at: object
+    alias: str = ""  # 037:业务称谓别名
 
 
 @dataclass(frozen=True)
@@ -86,13 +89,28 @@ def can_automated_overwrite(existing: str, incoming: str) -> bool:
     return SOURCE_TYPE_PRIORITY[incoming] >= SOURCE_TYPE_PRIORITY[existing]
 
 
+# 037 alias 结构防御(R1-F1 纵深):括号/换行/竖线会破坏 schema_hint 行结构
+# 「schema.table(alias)(cols) -- comment」并可借换行伪造「fake.table(」形态
+# 注入 023 表名提取;含违禁字符的别名整体置空(截半句更误导)。
+_ALIAS_FORBIDDEN = re.compile(r"[\r\n()（）|]")
+
+
+def clean_alias(alias: str) -> str:
+    """别名清洗:strip+压缩内部空白;含结构性违禁字符(括号/换行/竖线)置空。"""
+    folded = " ".join(alias.split())
+    return "" if _ALIAS_FORBIDDEN.search(folded) else folded
+
+
 def build_embedding_text(
-    table_name: str, table_comment: str, columns_comment: dict[str, str]
+    table_name: str, table_comment: str, columns_comment: dict[str, str], *, alias: str = ""
 ) -> str:
-    """embedding 输入文本:表名+表说明+字段说明(上传/抓取/润色三处同一公式,
-    单一实现点;tsv 全文索引内容与之对齐)。"""
+    """embedding 输入文本:表名+alias+表说明+字段说明(037 alias 增强输入侧匹配)。
+
+    alias 经 clean_alias 纵深清洗(结构性违禁字符置空)。
+    """
     cols = " ".join(f"{k} {v}" for k, v in columns_comment.items())
-    return " ".join(x for x in (table_name, table_comment, cols) if x).strip()
+    parts = [x for x in (table_name, clean_alias(alias), table_comment, cols) if x]
+    return " ".join(parts).strip()
 
 
 def rrf_fuse(
@@ -113,18 +131,32 @@ def rrf_fuse(
     return [first_hit[key] for key, _ in ordered[:top]]
 
 
+def rrf_fuse_ids(ranked_lists: list[list[str]], *, k: float = RRF_K, top: int = 5) -> list[str]:
+    """通用 RRF(任意 id 键;024 文档子块融合)——与 rrf_fuse 同算法参数,
+    同分按首现顺序稳定排序(不动既有函数)。"""
+    scores: dict[str, float] = {}
+    for hits in ranked_lists:
+        for rank, hit_id in enumerate(hits, start=1):
+            scores[hit_id] = scores.get(hit_id, 0.0) + 1.0 / (k + rank)
+    ordered = sorted(scores.items(), key=lambda kv: -kv[1])
+    return [key for key, _ in ordered[:top]]
+
+
 def build_schema_hint(entries: list[KnowledgeEntry]) -> str:
     """召回条目 → generate 的 schema 提示文本(纯函数)。
 
-    形态(上游同构):`schema.table(col1(说明),col2(说明2)) -- 表说明`,
-    空说明只留列名;表内嵌示例 SQL 逐条追加。
+    形态(037 顺延):`表名(alias):列... -- 表说明`;空 alias 不显括号;
+    空说明只留列名;表内嵌示例 SQL 逐条追加。alias 经 clean_alias 纵深清洗。
     """
     lines: list[str] = []
     for e in entries:
         cols = ", ".join(
             f"{name}({desc})" if desc else name for name, desc in e.columns_comment.items()
         )
-        header = f"{e.schema_name}.{e.table_name}({cols})"
+        # 037:alias 优先显示在表名后括号内
+        alias = clean_alias(e.alias)
+        alias_part = f"({alias})" if alias else ""
+        header = f"{e.schema_name}.{e.table_name}{alias_part}({cols})"
         if e.table_comment:
             header += f" -- {e.table_comment}"
         lines.append(header)

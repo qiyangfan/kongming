@@ -128,6 +128,14 @@ class DatasourceChecker(Protocol):
     async def is_usable(self, datasource_key: str, tenant_id: str) -> bool: ...
 
 
+class SemanticCleaner(Protocol):
+    """023:数据源删除级联清理语义层(关系+指标;同事务,spec 立约)。"""
+
+    async def delete_by_datasource(
+        self, *, tenant_id: str, datasource_key: str
+    ) -> None: ...
+
+
 class RagCtxEvictor(Protocol):
     """rag 检索缓存失效窄端口(009:数据源删除时同步失效该源检索缓存)。"""
 

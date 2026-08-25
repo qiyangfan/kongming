@@ -13,7 +13,7 @@ import httpx
 from redis.asyncio import Redis
 
 from kongming.config import get_settings
-from kongming.rag.models import TableBlock
+from kongming.rag.models import TableBlock, clean_alias
 from kongming.rag.ports import EmbeddingError
 
 log = logging.getLogger(__name__)
@@ -138,6 +138,8 @@ class AgentRagClient:
                 str(k): str(v) for k, v in (data.get("columns_comment") or {}).items()
             },
             sample_queries=[str(s) for s in data.get("sample_queries") or []],
+            # 037:透传即清洗(库内值与消费值一致,审查循环 B6)
+            alias=clean_alias(str(data.get("alias") or "")),
         )
 
     # ---- Redis emb 缓存(fail-open:异常按未命中/放弃写入处理) ----

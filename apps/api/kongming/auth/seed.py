@@ -28,6 +28,40 @@ PERMISSIONS: list[tuple[str, str, int]] = [
     ("system:feedback:view", "反馈查看", 7),
     ("system:feedback:handle", "反馈处置", 8),
     ("system:audit:view", "审计查看", 9),
+    # 019 tool-calling:工具权限点(最小授权,按工具粒度)+ 工具管理面
+    ("tool:sql:validate", "工具-SQL校验", 10),
+    ("tool:sql:execute", "工具-SQL执行", 11),
+    ("tool:rag:retrieve", "工具-知识检索", 12),
+    ("tool:announcement:create", "工具-公告创建", 13),
+    ("system:tool:manage", "工具管理", 14),
+    # 020 prompt-guardrails:护栏规则/审计管理面(仅 SUPER_ADMIN,不推荐 DEVELOPER)
+    ("system:guardrail:manage", "护栏管理", 15),
+    # 021 multi-model-routing:LLM 用量聚合查询(仅 SUPER_ADMIN)
+    ("system:llm-usage:view", "模型用量查看", 16),
+    # 023 semantic-layer:语义层管理(仅 SUPER_ADMIN)
+    ("system:semantic:manage", "语义层管理", 17),
+    # 024 document-rag:文档管理(仅 SUPER_ADMIN)
+    ("system:document:manage", "文档管理", 18),
+    # 025:Bot 是用户资产(归属收口),无全局管理面权限点(R1-L1 摘死权限点)
+    # 027 cloud-code-sandbox:代码执行(显式授予制,不进 DEVELOPER 推荐集——
+    # 代码执行面风险高于只读 SQL,与公告写工具同哲学)
+    ("tool:code:execute", "工具-代码执行", 19),
+    # 028 mcp-interop:MCP 管理面(仅 SUPER_ADMIN)+ 工具使用(显式授予制)
+    ("system:mcp:manage", "MCP服务管理", 20),
+    ("tool:mcp:use", "工具-MCP调用", 21),
+    # 029 workflow-orchestration:管理面(仅 SUPER_ADMIN)+ 执行
+    # (进 DEVELOPER 推荐集——节点级防御以触发者身份逐层复校,无权限放大)
+    ("system:workflow:manage", "工作流管理", 22),
+    ("workflow:execute", "工作流执行", 23),
+    # 031 triggers-webhooks:触发器管理面(仅 SUPER_ADMIN)
+    ("system:trigger:manage", "触发器管理", 24),
+    # 032 team-workspace:团队管理面(仅 SUPER_ADMIN;成员管理走团队 OWNER 闸)
+    ("system:team:manage", "团队管理", 25),
+    # 033 bot-store:商店消费面(bot:run;上架治理走 032 can_manage 无新管理点)
+    ("bot:run", "Bot商店使用", 26),
+    # 034 billing:开发者门户(自助门面)+ 计费管理面(仅超管)
+    ("developer:portal", "开发者门户", 27),
+    ("system:billing:manage", "计费管理", 28),
 ]
 
 ROLES: list[tuple[str, str, str, str, int]] = [
@@ -39,7 +73,20 @@ ROLES: list[tuple[str, str, str, str, int]] = [
 # 角色推荐绑定(只增不摘):SUPER_ADMIN 由下方逻辑增量补齐全部注册点,
 # 其余内置角色按本清单增量绑定——不覆盖运行时的人工调整
 ROLE_RECOMMENDED_PERMS: dict[str, list[str]] = {
-    DEFAULT_ROLE_KEY: ["chat:execute", "chat:feedback:submit"],
+    DEFAULT_ROLE_KEY: [
+        "chat:execute",
+        "chat:feedback:submit",
+        # 019:只读三件套(与 chat:execute 同哲学;公告写工具不推,显式授予制)
+        "tool:sql:validate",
+        "tool:sql:execute",
+        "tool:rag:retrieve",
+        # 029:工作流执行(节点级防御逐层复校)
+        "workflow:execute",
+        # 033:商店消费面(与 chat:execute 同哲学)
+        "bot:run",
+        # 034:开发者门户(自助门面)
+        "developer:portal",
+    ],
 }
 
 DEFAULT_TENANT_NAME = "默认租户"

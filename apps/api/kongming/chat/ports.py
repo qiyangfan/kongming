@@ -67,6 +67,7 @@ class ChatRepo(Protocol):
         result_json: str | None = None,
         summary: str | None = None,
         status: str,
+        attachments: list[dict[str, object]] | None = None,  # 030
     ) -> str: ...
     async def recent_user_questions(self, session_id: str, *, limit: int = 5) -> list[str]: ...
     async def commit(self) -> None: ...
@@ -123,3 +124,92 @@ class ExplainRunner(Protocol):
         sql_text: str,
         user_id: str,
     ) -> ExplainOutcome: ...
+
+
+class ToolSpecProvider(Protocol):
+    """按用户授权集产出可注入 ReAct 内核的工具 schema(019;唯一真理源=toolcall 注册表)。
+
+    实现侧形态:权限点集查询 + 注册表过滤,独立短会话(同步/流式路径通用)。
+    """
+
+    async def authorized_tools(
+        self, user_id: str, tenant_id: str
+    ) -> list[dict[str, object]]: ...
+
+
+class PendingToolReader(Protocol):
+    """按 trace 聚合仍待确认的工具调用(019;chat 响应 pending_tool_calls 附加)。
+
+    实现侧形态:独立短会话只读查询(PENDING_CONFIRM 行经独立事务提交,读已提交)。
+    """
+
+    async def list_pending(self, trace_id: str) -> list[dict[str, object]]: ...
+
+
+class AttachmentChecker(Protocol):
+    """图片附件归属校验(030;实现侧 attachment 域):全部 id 命中(当前用户+
+    租户+UPLOADED)返回摘要列表(filename/mime/size_bytes),任一无效返回 None
+    (404 同形由 service 抛出)。"""
+
+    async def validate_owned(
+        self, *, ids: list[str], user_id: str, tenant_id: str
+    ) -> list[dict[str, object]] | None: ...
+
+
+class GuardrailPort(Protocol):
+    """prompt 安全护栏(020):chat 域消费面。输入判定返回 (blocked, 脱敏后文本序列
+    [question, *history]);输出过滤返回处理后文本序列(拦截=安全文案替换)。
+    实现侧 fail-closed;未注入(None)时链路行为与护栏引入前一致。"""
+
+    async def check_input(
+        self, *, trace_id: str, user_id: str, tenant_id: str, texts: list[str]
+    ) -> tuple[bool, list[str]]: ...
+
+    async def filter_output(
+        self, *, trace_id: str, user_id: str, tenant_id: str, texts: list[str]
+    ) -> list[str]: ...
+
+
+class MemoryPort(Protocol):
+    """用户长期记忆(022):chat 域消费面。recall_hint 返回注入段(空串=无注入
+    零回归);explicit_intent 识别「记住…」;form_explicit/form_implicit 形成。
+    实现侧全部失败降级(仅日志),永不阻断问答主链路。"""
+
+    async def recall_hint(self, *, user_id: str, tenant_id: str, question: str) -> str: ...
+
+    async def explicit_intent(self, question: str) -> str | None: ...
+
+    async def form_explicit(self, *, user_id: str, tenant_id: str, content: str) -> bool: ...
+
+    async def form_implicit(
+        self, *, user_id: str, tenant_id: str, candidates: list[dict[str, str]]
+    ) -> int: ...
+
+
+class SqlRunOutcome(Protocol):
+    """执行结果(026 rerun;internal ExecResult 解耦形态);
+    只读 property 形态——frozen dataclass 结构化匹配(mypy 对可变属性
+    要求可写,只读 Protocol 兼容只读实现)。"""
+
+    @property
+    def verdict(self) -> str: ...
+    @property
+    def reason(self) -> str | None: ...
+    @property
+    def columns(self) -> list[str]: ...
+    @property
+    def rows(self) -> list[list[object]]: ...
+
+
+class ExecuteRunner(Protocol):
+    """SQL 再执行端口(026):完整六层防御由实现侧保证(internal.service.execute)。"""
+
+    async def run(
+        self,
+        *,
+        trace_id: str,
+        tenant_key: str,
+        datasource_key: str,
+        sql_text: str,
+        user_id: str,
+    ) -> SqlRunOutcome: ...

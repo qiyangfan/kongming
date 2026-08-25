@@ -79,9 +79,14 @@ retrieve 链路经控制面 `POST /internal/rag/retrieve`(内部令牌,Agent 面
 问句向量召回;①②两路用 RRF(Reciprocal Rank Fusion,k=60)融合排序后取
 topK;③为独立强 few-shot 通道,SHALL NOT 参与融合(人类验证过的成功 SQL
 置信度高,喂给 generate 的优先级高于表说明内嵌示例)。三路召回均 MUST 强制
-tenant + datasource_key 双过滤。embedding 服务不可用时 SHALL 降级为仅全文路
-(不阻断);检索上下文缓存(Redis)SHALL fail-open——缓存不可用按未命中处理。
-知识写操作(上传/删除/fetch-metadata/reindex)后 SHALL 精确失效对应
+tenant + datasource_key 双过滤。**实体别名(alias) SHALL 参与召回与注入:
+embedding/tsv 文本拼入 alias(用户业务称谓命中 alias 提升召回;alias 命中
+覆盖保留时,tsv/embedding 以生效别名(=既有别名)同源重算,派生检索文本
+不得与 alias 列脱钩);schema_hint 表说明段拼装带 alias(表头行形态
+`表名(别名)(列…) -- 表说明`,generate 与 summarize 共享该段,不再单开
+别名段)**。embedding 服务不可用时 SHALL 降级为仅全文路(不阻断);检索
+上下文缓存(Redis)SHALL fail-open——缓存不可用按未命中处理。知识写操作
+(上传/删除/编辑表说明/fetch-metadata/reindex)后 SHALL 精确失效对应
 tenant+datasource 的检索缓存。
 
 #### Scenario: 表说明向量召回
@@ -89,6 +94,11 @@ tenant+datasource 的检索缓存。
 - WHEN Agent retrieve 节点收到问句「查询所有客户」
 - THEN 经控制面 /internal/rag/retrieve(内部令牌)做向量召回 topK(默认 5)
 - AND customer 表说明相似度最高
+
+#### Scenario: 业务称谓经别名命中召回
+- GIVEN goods 表说明 alias=「商品表」(已向量化拼入)
+- WHEN 提问「商品表有多少种商品」
+- THEN goods 表说明被命中召回;schema_hint 含「goods(商品表)」形态
 
 #### Scenario: 精确表名经全文检索修正排序
 - GIVEN 有「bed_bath_table」表说明,纯向量召回因语义偏移不准
@@ -123,7 +133,6 @@ tenant+datasource 的检索缓存。
 - WHEN 该租户该数据源发生知识写操作(上传/删除/fetch-metadata/reindex)
 - THEN 对应缓存被精确失效(仅目标 tenant+datasource 范围),下次召回重建;
 其余租户/数据源缓存不受影响
-
 ### Requirement: PDF/Word 文档解析(扩展上传格式)
 
 上传格式扩展支持 PDF/Word(仅 .docx;旧 .doc 二进制格式不支持),解析为
@@ -218,3 +227,25 @@ few-shot 召回位;embedding 计算失败时 SHALL 保留该行旧向量(旧向�
 - **GIVEN** 某 (tenant, datasource_key) 维度回写行数达到上限
 - **WHEN** 新回写写入
 - **THEN** 淘汰该维度 created_at 最旧行,总量不超上限
+
+### Requirement: 召回响应纯增语义段组装
+
+/internal/rag/retrieve 在三路召回结果之外 SHALL 追加组装语义段(semantic-layer spec):relations_hint——仅取本次召回表集合(schema_hint 命中的表)两两之间的启用关系,按「左表 JOIN 右表 ON 键」文字描述;metric_hints——问句命中 business_terms 或 metric_name 的启用指标 top-5(含 metric_name 与 sql_template 文字)。两段拼入响应纯增字段;无命中时为空串,不改变既有 schema_hint/history_sql 的任何语义。
+
+#### Scenario: 关系段只含召回集合
+
+- GIVEN 数据源有 20 张表关系,本次召回命中 2 表
+- WHEN 组装响应
+- THEN relations_hint 仅含该 2 表之间的关系行
+
+#### Scenario: 指标段按问句命中
+
+- GIVEN 启用指标「复购率」business_terms 含「复购」
+- WHEN 问句含「复购」
+- THEN metric_hints 含该指标名与口径文字
+
+#### Scenario: 无语义数据零影响
+
+- GIVEN 该租户+数据源无关系与指标
+- WHEN 召回
+- THEN 响应 relations_hint/metric_hints 为空串,schema_hint/history_sql 语义不变

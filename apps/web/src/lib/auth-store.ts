@@ -12,6 +12,7 @@ import {
   type MeOut,
   type TokenPairOut,
 } from "./api";
+import { useAgentMode } from "./agent-mode-store";
 import { useDatasource } from "./datasource-store";
 import { useTenant } from "./tenant-store";
 
@@ -33,6 +34,7 @@ export const useAuth = create<AuthState>((set) => {
     set({ status: "guest", user: null });
     useTenant.getState().clear();
     useDatasource.getState().clear();
+    useAgentMode.getState().clear(); // 019:跨账号不继承内核开关
   });
 
   async function loadMe(): Promise<void> {
@@ -46,6 +48,7 @@ export const useAuth = create<AuthState>((set) => {
       set({ status: "guest", user: null });
       useTenant.getState().clear();
       useDatasource.getState().clear();
+      useAgentMode.getState().clear();
     }
   }
 
@@ -91,6 +94,7 @@ export const useAuth = create<AuthState>((set) => {
       set({ status: "guest", user: null });
       useTenant.getState().clear();
       useDatasource.getState().clear();
+      useAgentMode.getState().clear();
     },
   };
 });

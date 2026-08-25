@@ -8,6 +8,7 @@ generate 读到 error 即拼「上次生成的 SQL 有误」喂回 LLM(自愈闭
 
 import json
 import logging
+import re
 
 import sqlglot
 from sqlglot import exp
@@ -48,7 +49,14 @@ async def understand(state: AgentState) -> dict[str, object]:
     else:
         system = UNDERSTAND_SINGLE_SYSTEM
         prompt = f"用户问题：{question}\n请输出改写后的清晰问题（一行）。"
-    rewritten = await deps.get_llm().chat(system, prompt, temperature=0.1)
+    rewritten = await deps.get_llm().chat(
+        system,
+        prompt,
+        temperature=0.1,
+        task="UNDERSTAND",
+        trace_id=state.get("trace_id"),
+        tenant_key=state.get("tenant_key"),
+    )
     # LLM 返回空时兜底原问句(不中断链路)
     return {"resolved_question": rewritten.strip() or question}
 
@@ -84,17 +92,42 @@ async def retrieve(state: AgentState) -> dict[str, object]:
     # 历史 SQL 独立于表说明命中(R2-S1):「知识未抓取但 query_history 已有成功
     # 记录」的真实形态下,schema 空回退内省、history 照常作 few-shot,不整体丢弃。
     history_sql = ctx.history_sql if ctx is not None else ""
+    doc_hints = list(ctx.doc_hints) if ctx is not None else []
     if ctx is not None and ctx.schema_hint.strip():
-        return {"schema_hint": ctx.schema_hint, "history_sql": history_sql}
+        return {
+            "schema_hint": ctx.schema_hint,
+            "history_sql": history_sql,
+            "relations_hint": ctx.relations_hint,
+            "metric_hints": ctx.metric_hints,
+            "doc_hints": doc_hints,
+        }
     # 回退:005 过渡形态(实时内省)——新租户/未抓取知识/召回服务失败零质量回归。
     meta = await deps.get_api().fetch_schema(
         tenant_key=state["tenant_key"],
         datasource_key=datasource_key,
     )
     if meta is None:
-        # 内省失败降级空提示:不误导、不硬编码全表(spec 明文)
-        return {"schema_hint": "", "history_sql": history_sql}
-    return {"schema_hint": format_schema_hint(meta), "history_sql": history_sql}
+        # 内省失败降级空提示:不误导、不硬编码全表(spec 明文);
+        # R1-L3:doc_hints 照常透传(知识分流不依赖 schema 通道);
+        # 语义段(relations/metric)与内省成败无关(纯函数于召回结果),
+        # 与下方两个兄弟分支同口径透传(审查循环 F5:曾在此分支静默丢弃)
+        out0: dict[str, object] = {"schema_hint": "", "history_sql": history_sql}
+        if ctx is not None:
+            out0["relations_hint"] = ctx.relations_hint
+            out0["metric_hints"] = ctx.metric_hints
+            out0["doc_hints"] = list(ctx.doc_hints)
+        return out0
+    out: dict[str, object] = {
+        "schema_hint": format_schema_hint(meta),
+        "history_sql": history_sql,
+    }
+    # R1-M2:回退内省形态仍透传语义段(metric_hints 按问句命中,不受 schema
+    # 命中约束;relations_hint 在召回空时本就为空)
+    if ctx is not None:
+        out["relations_hint"] = ctx.relations_hint
+        out["metric_hints"] = ctx.metric_hints
+        out["doc_hints"] = list(ctx.doc_hints)
+    return out
 
 
 def clean_sql(raw: str) -> str:
@@ -111,6 +144,16 @@ async def generate(state: AgentState) -> dict[str, object]:
     schema_hint = state.get("schema_hint") or ""
     if not schema_hint.strip():
         schema_hint = _EMPTY_HINT
+    # 022:记忆段(用户已知信息)位于表结构之前;空则形态与引入前逐字一致
+    memory_hint = (state.get("memory_hint") or "").strip()
+    memory_part = f"{memory_hint}\n\n" if memory_hint else ""
+    # 023 语义段:表关系/指标口径位于表结构之后、历史 SQL 之前;空则零痕迹
+    relations_hint = (state.get("relations_hint") or "").strip()
+    metric_hints = (state.get("metric_hints") or "").strip()
+    _rel = f"表关系参考：\n{relations_hint}" if relations_hint else ""
+    _met = f"指标口径参考：\n{metric_hints}" if metric_hints else ""
+    _semantic = "\n\n".join(x for x in (_rel, _met) if x)
+    semantic_part = f"\n\n{_semantic}" if _semantic else ""
     # 历史成功 SQL 段(009):召回命中时拼在表结构之后——人类验证过的 SQL 置信度
     # 高于表说明内嵌示例(强 few-shot);系统模板资产零改动,只动 user 拼接。
     history_sql = (state.get("history_sql") or "").strip()
@@ -121,9 +164,17 @@ async def generate(state: AgentState) -> dict[str, object]:
         # 自愈:把上次错误喂回 LLM
         extra = f"\n\n上次生成的 SQL 有误：{error}\n请修正。"
     user = (
-        f"问题：{question}\n\n可用表结构：\n{schema_hint}{history_part}{extra}\n\n生成 SQL："
+        f"问题：{question}\n\n{memory_part}可用表结构：\n"
+        f"{schema_hint}{semantic_part}{history_part}{extra}\n\n生成 SQL："
     )
-    sql = await deps.get_llm().chat(SQL_GEN_SYSTEM, user, temperature=0.1)
+    sql = await deps.get_llm().chat(
+        SQL_GEN_SYSTEM,
+        user,
+        temperature=0.1,
+        task="SQL_GEN",
+        trace_id=state.get("trace_id"),
+        tenant_key=state.get("tenant_key"),
+    )
     # 生成成功即清掉上轮错误(错误已消费)
     return {"generated_sql": clean_sql(sql), "error": ""}
 
@@ -204,6 +255,99 @@ def selfheal(state: AgentState) -> dict[str, object]:
     return {"error": reason, "retry_count": retry_count + 1}
 
 
+# ── 024 知识分流:意图词表 + doc_answer 节点 ──
+
+# 知识型意图词表(规则初判;误分流只影响答法无数据副作用,spec)
+KNOWLEDGE_INTENT_WORDS = (
+    "是什么", "为什么", "政策", "流程", "口径", "定义", "规范", "制度", "办法", "怎么规定",
+)
+
+# 036④:SQL 强意图词表(纯图片问题分流否决信号)——只收**几乎只在
+# 问库出现**的强信号;通用量词(多少/数量/平均/最高/哪个)不收
+# (真链路冒烟抓回:「这张图里哪个分类最高?数量是多少?」问图也带
+# 「数量」,列入即误否决分流=答非所问复发)
+SQL_INTENT_WORDS = (
+    "数据", "数据库", "表里", "表中", "库中", "统计", "查询",
+    "列出", "显示", "排名", "SQL", "sql",
+    "sakila", "olist", "default",
+)
+
+
+def is_knowledge_intent(question: str) -> bool:
+    """知识型意图规则判定(纯函数)。"""
+    return any(w in question for w in KNOWLEDGE_INTENT_WORDS)
+
+
+def is_sql_intent(question: str) -> bool:
+    """036④:SQL 强意图判定(纯函数)——附件在场时命中即否决直答分流
+    (「带图默认问图,带库词走 SQL」)。"""
+    return any(w in question for w in SQL_INTENT_WORDS)
+
+
+def route_after_retrieve(state: AgentState) -> str:
+    """分流判定(spec「知识分流」):知识意图 + 文档命中即分流;
+    schema 是否命中不作条件(024 冒烟实证:知识问题常有 schema 模糊命中,
+    双条件过严——「退货政策是什么」召回 rental 表说明致不分流)。
+    036④:附件在场且无 SQL 强意图→直答分流(纯图片问题不硬走 SQL)。"""
+    doc_hints = state.get("doc_hints") or []
+    question = state.get("resolved_question") or state["question"]
+    if doc_hints and is_knowledge_intent(question):
+        return "doc_answer"
+    if state.get("has_attachments") and not is_sql_intent(question):
+        return "doc_answer"
+    return "generate"
+
+
+async def doc_answer(state: AgentState) -> dict[str, object]:
+    """知识问答节点(024):LLM 直接按文档内容回答,无 SQL 执行面;
+    终态 PASS 空结果集(022 纯文本同款先例),消息 SUCCESS。
+    036④:doc_hints 为空(纯图片问题分流)时按问题(已含附件描述段)
+    直答——换 IMAGE_ANSWER_SYSTEM(描述为依据,非「文档未提及」);
+    **纯图片路径必须用原始拼接问题**(state["question"])——
+    resolved_question 经指代消解重写会压掉描述段关键数据(冒烟实证:
+    Sports/74 全丢致「图中无法确认」)。"""
+    from kongming_agent.graph.doc_prompt import (
+        DOC_ANSWER_SYSTEM,
+        IMAGE_ANSWER_SYSTEM,
+    )
+
+    doc_hints = state.get("doc_hints") or []
+    if doc_hints:
+        # 036④:附件在场时用原始拼接问题——resolved_question 经指代消解改写
+        # 会压掉描述段关键数据(Sports/74 教训);混合路径(附件+文档命中+
+        # 知识意图)同样适用(审查循环 F3:曾只修纯图片分支)
+        question = (
+            state["question"]
+            if state.get("has_attachments")
+            else (state.get("resolved_question") or state["question"])
+        )
+        parts = [
+            f"来源 {h['source_ref']}:\n{h['content'][:1500]}" for h in doc_hints[:5]
+        ]
+        system = DOC_ANSWER_SYSTEM
+        user = f"问题:{question}\n\n文档内容:\n" + "\n\n".join(parts) + "\n\n回答:"
+    else:
+        system = IMAGE_ANSWER_SYSTEM
+        user = f"问题:{state['question']}\n\n回答:"
+    # LlmError 不在此吞掉:上抛经 _run_graph 统一收敛 llm_unavailable
+    # (success=False)——吞掉后以 PASS+「文档中未提及相关内容。」出链,
+    # 服务故障被表述为内容缺失,属伪造终态(审查循环 F4)
+    answer = await deps.get_llm().chat(
+        system,
+        user,
+        temperature=0.1,
+        task="DOC_ANSWER",
+        trace_id=state.get("trace_id"),
+        tenant_key=state.get("tenant_key"),
+    )
+    return {
+        "execution": ExecutionResult(verdict="PASS", columns=[], rows=[]),
+        "summary": answer or "文档中未提及相关内容。",
+        "insights": [],
+        "stats": {},
+    }
+
+
 def compute_stats(columns: list[str], rows: list[list[object]]) -> dict[str, object]:
     """本地确定性统计:行数 + 数值列 max/min/avg(显式排除 bool)。"""
     stats: dict[str, object] = {"rows": len(rows)}
@@ -222,6 +366,24 @@ def compute_stats(columns: list[str], rows: list[list[object]]) -> dict[str, obj
             stats[f"{col}_min"] = min(values)
             stats[f"{col}_avg"] = round(sum(values) / len(values), 2)
     return stats
+
+
+# 037:summarize 上下文的表说明段抽取——generate 与 summarize 共享召回
+# schema_hint 的表说明段(rag spec「不再单开别名段」):只取召回形态表头行
+# `schema.table(别名)(列…) -- 表说明`,剔除「示例:」行省 token;内省回退
+# 形态(「表 x.y：…」表头+「  - 」列行,无别名且全限定名与称谓规则相悖)
+# 整体不注入(R1-B1)。头行同时含 alias 与表说明中文——别名缺失时 LLM 可依
+# 「回退表说明中的中文名称」规则取中文名。不做任何「表名(…)」正则解析:
+# 该形态无法区分 alias 与列清单,无 alias 表会被解析出「别名=列清单」垃圾
+# (实施期抓回)。
+_HINT_HEADER_RE = re.compile(r"^[A-Za-z_]\w*\.[A-Za-z_]\w*\(")
+
+
+def _table_hint_lines(schema_hint: str) -> str:
+    """取 schema_hint 的召回形态表头行(含业务称谓别名与表说明)。"""
+    return "\n".join(
+        ln for ln in schema_hint.splitlines() if _HINT_HEADER_RE.match(ln)
+    )
 
 
 def parse_summary_json(raw: str) -> dict[str, object]:
@@ -282,11 +444,23 @@ async def summarize(state: AgentState) -> dict[str, object]:
         f"列：{execution.columns}\n总行数：{len(execution.rows)}\n"
         f"本地统计：{stats}\n前5行：{execution.rows[:5]}"
     )
+    # 037:表说明段直拼(含业务称谓别名;用户用语已在 question 中,LLM 按
+    # SUMMARIZE_SYSTEM 称谓规则对齐:用户用语>alias>表说明中文名)
+    schema_hint = state.get("schema_hint") or ""
+    context = f"问题：{question}\n结果：\n{data_preview}"
+    table_hint = _table_hint_lines(schema_hint)
+    if table_hint:
+        context += f"\n所涉表(表名(业务称谓别名) 列 -- 表说明)：\n{table_hint}"
+    context += "\n\n生成 JSON："
     summary = ""
     insights: list[dict[str, str]] = []
     try:
         raw = await deps.get_llm().chat(
-            SUMMARIZE_SYSTEM, f"问题：{question}\n结果：\n{data_preview}\n\n生成 JSON："
+            SUMMARIZE_SYSTEM,
+            context,
+            task="SUMMARIZE",
+            trace_id=state.get("trace_id"),
+            tenant_key=state.get("tenant_key"),
         )
         parsed = parse_summary_json(raw)
         summary = str(parsed.get("summary", "")).strip()

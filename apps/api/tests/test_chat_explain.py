@@ -205,11 +205,13 @@ async def test_explain_message_without_sql_400(
     uid, token = await _user_with_chat_perm(client, session, make_user, "exp-nosql")
     tid = await _default_tenant_id(session)
     sid = await _mk_session(session, user_id=uid, tenant_id=tid)
-    mid_user = await _mk_msg(session, sid, role="USER")  # user 问句无 SQL
     mid_failed = await _mk_msg(session, sid, status="FAILED")  # 失败轮无 SQL
-    for mid in (mid_user, mid_failed):
-        r = await client.post("/chat/explain", json={"message_id": mid}, headers=_auth(token))
-        assert r.status_code == 400
+    r = await client.post("/chat/explain", json={"message_id": mid_failed}, headers=_auth(token))
+    assert r.status_code == 400
+    # 审查循环 B5:锚定限定 ASSISTANT——USER 消息 id 同形 404(不泄露存在性)
+    mid_user = await _mk_msg(session, sid, role="USER")
+    r2 = await client.post("/chat/explain", json={"message_id": mid_user}, headers=_auth(token))
+    assert r2.status_code == 404
 
 
 # ============ 执行面:计划树/改写/拦截/审计 ============

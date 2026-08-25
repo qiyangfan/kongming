@@ -1,32 +1,634 @@
 # HANDOFF — Kongming 交接文档
 
-> 最后更新:2026-08-22(**018 prompt-guardrails 已实施归档并入库**:
-> archive/2026-08-22-018-prompt-guardrails,delta 已 sync nl2sql-agent 主
-> spec)——prompt 质量护栏三层:生成(SQL_GEN_SYSTEM 规则 6 统计/明细
-> 边界重写+top-N tiebreaker/规则 8 ROUND(…, 2) 口径/规则 9 投影完备+
-> 去重/规则 3「ID/编号列不能替代名称列」/规则 1 写操作请求诚实处理)+
-> 理解(understand 指代消解保真:保留上轮全部限定条件)+摘要
-> (SUMMARIZE_SYSTEM 事实性规则+summarize 上下文接地=行数+本地 stats+
-> 前5行,消「只喂前 5 行以偏概全」信息根源)。**016 五类失败归因全部
-> 闭环,评估新基线:宽松 48/48(100%)/严格 37/48(77%)/多轮 12/12/
-> 表命中 46/48(96%)/动态 4/4**(首基线 84%/59%/80%/80%);实施期新
-> 发现 top-N 排序键并列是 gen/gold 集合错位首因→规则 6 补 tiebreaker
-> (gold 规范第 1 条的 gen 侧镜像)后多轮 5 挂中 4 个直接消解;评估集
-> 对齐修订 14 处+新增 6 case+gold 规范第 10 条(ROUND 互锁),全部
-> 演进记入 evals README。写操作诱导冒烟:只读 SELECT 现状+摘要「未执行
-> 删除操作」(WHERE FALSE 规避与谎称成功双消)。评估器运行注记:
-> 评估连跑曾遇「Server disconnected」成片空 SQL,事后定位为本地
-> VPN 切换的环境事件(非配额限流,与链路无关),网络稳定后重跑即可。api 487+
-> agent 105(+10:prompt 护栏 9+summarize 接地 1)+web 全绿、契约零
-> 漂移、零表结构/零端点变更;**001–018 齐,活动变更为零;下一棒=
-> roadmap 第三梯队(tool-calling/mcp-interop/workflow-orchestration
-> 等,开工时再立 spec)**。
+> 最后更新:2026-08-25(**/goal 代码审查迭代循环完成**——评审范围=本地全部
+> 未提交改动(019–037 十九变更,211 路径,基线 HEAD)。五路独立评审 agent
+> (agent 面/api 新域包·安全侧/api 新域包·平台侧/api 核心域+迁移链/web+
+> evals+infra)全量精读+spec 对拍,产出 5S+16F+30B;逐条溯源核验剔除后
+> **全部实锤缺陷已修复**。**严重(S)5 全修**:①ReAct 重复熔断把 BLOCKED
+> 的 SQL 误报「已成功执行过」诱导 LLM 编造数据(熔断集只收 verdict=PASS
+> 的 execute_sql);②validate_args 的 RecursionError 逃逸(深嵌套括号
+> 3000 层不在 SqlglotError 族→500 零审计,except 扩面+多语句单条校验);
+> ③036③ vision 描述围栏可被 `"""` 提前闭合(注入逃逸)——全角化替换+
+> 2000 字截断;④Bot 免登录公开页被认证壳吞(/bot/:botKey 提升 AppLayout
+> 外顶层路由,匿名访客此前 100% 踢登录);⑤prod 漏配 KM_BILLING_MOCK_
+> SECRET 时 mock 回调验签可用仓库公开默认值伪造 PAID 核销账单(fail_
+> closed 拒启,双评审交叉印证)。**必修(F)16 全修**(择要):trigger 出站
+> 通知解密异常逃逸 _fire 的 try→next_fire 不推进=每 30s 无限重触发且
+> 零 run 零审计(解密失败收敛通知错误文案,与入站 R1-T5 对称);bot
+> revoke_key 缺 can_manage 闸(团队 VIEWER 可吊销团队 Bot key);update_
+> bot 工具复校缺 MCP 动态集(含 mcp__ 工具的 Bot 工具集被永久冻结);
+> workflow http 节点 SSRF DNS rebinding TOCTOU(判定与连接两次独立解析
+> →自定义 transport 钉扎判定 IP,Host 头/SNI 经 sni_hostname 扩展保原
+> 域名);rerun 被 BLOCKED 仍落 REJECTED 消息且派生可再执行 sql 卡
+> (非 PASS 不落新消息,spec「不落新结果消息」);store 收藏 toggle 语义
+> 违 spec「重复操作幂等」(拆 POST 收藏/DELETE 取消双幂等端点+web 对齐,
+> 036⑥ advisory lock 随 set 语义自然消解);MCP 敌意 schema 的 ReDoS
+> pattern(check_schema 不查,实测 17s 卡死 worker→sync 期 has_redos_
+> pattern 静态预检降级);MCP notify 慢滴挂死握手(wait_for 全程预算);
+> PENDING_CONFIRM 的 args_json 凭证原文终态不清(确认终态推进时
+> SET NULL+脱敏键白名单扩 authorization/credential/private_key/passwd);
+> 限流 INCR/EXPIRE 非原子(崩溃留永久 key→SET NX EX);upload 路径
+> embedding 与生效别名脱钩(037 S1 同族漏网,upload_blocks 补预读);
+> 回写 query_history 用了脱敏问句违「原始问句」立约(orig_question
+> 双路径);doc_answer 吞 LlmError 伪造 PASS「文档未提及」(上抛经
+> _run_graph 统一收敛 llm_unavailable);混合路径(附件+文档命中)
+> doc_answer 用改写问句压掉图片描述段(036④ 只修了纯图片分支);retrieve
+> 内省失败分支丢 relations/metric 语义段;team add_member 幽灵成员
+> (无 FK 校验存在性+租户绑定);cron run 归因 MANUAL→API;每日兜底
+> 循环窗口 hour!=4 失败即丢当日(放宽 hour>=4);附件上传 commit 失败
+> file-only 孤儿(补偿删文件);0023 downgrade 补 BOT 行前置清理;
+> explain/rerun 锚定消息补 role='ASSISTANT';agent describe 回调 alias
+> 入口即 clean_alias;chat/router 三处死分支删除;semantic 表名白名单
+> _TABLE_REF 启用;**ADR-005 契约化清偿:team/trigger/workflow 三域
+> GET 端点补 response_model(TeamOut/TriggerOut/WorkflowDefOut 等)+
+> 前端三 api 文件改消费生成类型(手写 interface 全消)**。**web 面 B
+> 级 10 修**:Semantic 删除无确认+失败静默/Billing bind·removePolicy
+> 无 onError/ChatPage 上传中可发送丢图/BotsPage 上架恒传空 greeting
+> (上架对话框录入欢迎语+建议问题)/wf_key 编辑态未锁/文档删除裸
+> promise/记忆导出无容错/成员移除无确认/BotPublicPage 手写类型等
+> 3 处手写类型改生成契约。/query_react/stream 补挂 collect_usage
+> 收集器(曾静默忽略,bot 流式化即丢同步入账)。**回归测试 +19**
+> (BLOCKED 不入熔断集/围栏击穿+截断/doc_answer 原始问句+LlmError
+> 上抛/语义段透传/深嵌套+多语句/ReDoS 检测/钉扎 transport/VIEWER
+> 吊销 403/rerun 消息数/收藏双端点幂等(含并发)/prod 密钥闸/upload
+> 向量同源直证);受控行为变更对齐 2 处(explain USER 锚 404/收藏
+> set 语义)+team 协议方法补声明。**api 792(+7)+agent 157(+5)+
+> web 全绿、make-exit=0、21 契约 KEPT、evals smoke 5/5、契约
+> +3 schema 族重生成**。挂账(评审确认但按影响/成本登记未修,共 17
+> 项):A-B6 轮次触顶丢部分结果(spec 未立约)/A-B9 收集器 contextvar
+> 无端到端测试/A-B10 confirm_required 无硬熔断(api 写闸兜底)/
+> B1-B2 mark_dormant 全表 UPDATE/B1-B3 记忆召回侧变体绕过面/
+> B1-B9 bot usage sink 复用请求会话/B1-B10 _tenant_id 四份复制/
+> B1-B11 /mcp 入站 body 闸(待网关层核实)/B2-B1 支付回调先查单后
+> 验签探测面/B2-B4 循环子节点归因粒度/B2-B5 内源 TimeoutError 混同/
+> B2-B6 _should_skip 条件门过宽/B2-B9 http 响应头上限(待核 h11)/
+> doc_name·PII 正则边界登记级/D-B7 进度条动态 style(无静态等价,
+> 接受)/仓库根 6 张冒烟截图残留(建议清理或 gitignore)。
+>
+> 最后更新:2026-08-25(**037 entity-alias 已实施归档**——实体别名(业务
+> 称谓)资产与表达对齐,前一 agent 半成品收口后补全。**终案=称谓是语义
+> 资产不是 prompt 技巧**:rag.table_descriptions 加 alias 列(0024 迁移,
+> VARCHAR(64) NULL)+三路来源(MANUAL_EDIT 手编>AI 提炼(009 润色管线
+> 同一次 LLM 调用附带,零增量成本)>兜底(alias 空时消费层回退表说明中文/
+> 物理名,存量零专项回填))+**覆盖优先级 alias 维度**:自动来源与上传
+> 只补空不改非空,MANUAL_EDIT/FEEDBACK_REFINED 显式覆盖;tsv 与 embedding
+> 以「生效别名」同源重算(R1-S1:否则 alias 命中保留分支时派生检索文本丢
+> 别名,「商品表」召回静默失效——DO UPDATE 内 tsv 重算+service._ingest 按
+> 生效别名算向量双修);schema_hint 表头行形态 `表名(别名)(列…) -- 表说明`
+> (generate 与 summarize 共享该段)+embedding/tsv 拼 alias(输入侧「商品表」
+> 命中 goods);SUMMARIZE_SYSTEM 称谓对齐规则(用户用语>别名>表说明中文名;
+> 禁裸物理名/全限定名/禁编造;首次提及可「业务名(物理表名)」并注;与 018
+> 事实性规则互锁);summarize 上下文直拼召回形态表头行(内省回退形态不注入
+> ——无别名且全限定名与称谓规则相悖);治理面 PUT /system/rag/tables/{id}
+> =table_comment+alias 同面编辑(MANUAL_EDIT,编辑后 embedding 以新说明+
+> 别名重算,失败保留旧向量)+/admin/rag 别名列+编辑对话框;alias 输入校验
+> 三层(EditTableIn 422 拒括号/竖线/换行——**R1-F1 实证可借换行伪造
+> 「fake.table(」注入 023 表名提取**+describer 结构字符按空降级+
+> models.clean_alias 纵深)。**前一 agent 半成品收口(重要现场知识)**:
+> ①0024 迁移误写 `public.rag.table_descriptions` 三段式=PG 跨库引用,
+> conftest 建库即炸、api 全量 772 错(make check 假绿教训:后台任务通知的
+> exit code 是包装 shell 最后一条命令的,须看 make-exit 行);②upsert 漏
+> bind 参数 `alias`;③find_table SELECT 漏 alias 列;④编辑端点做成
+> alias-only 偏离 knowledge delta「与 table_comment 同面编辑」;⑤
+> nodes._parse_alias_map 正则无法区分 (alias) 与 (cols),无别名表被解析出
+> 「别名=列清单」垃圾注入摘要上下文;⑥tasks 全未勾、无测试、无契约、无
+> web。冒烟实证:reindex 真 LLM 提炼 alias 落库(goods→「默认商品」/
+> user_memory→「用户记忆库」);「商品表有多少种商品」摘要称「商品表中商品
+> 的种类数量…」(用户用语,非 goods/全限定名);手编「货品总表」后提问
+> 召回+摘要沿用;用户称「商品表」与别名冲突时用户优先+注形态「商品表
+> (goods)」(prompt 措辞曾出「货品总表(货品总表)」——收紧为「业务名
+> (物理表名)」并给范例);UI Playwright 全链(别名列徽标/编辑对话框回显
+> 保存/「已保存:goods(商品表)」);注入形态 alias curl 422。R1 独立评审
+> (1 严重+2 必修+8 建议)全修:S1 派生文本同源/F1 输入校验/F2 端到端别名
+> 召回测试(test_rag_recall 向量+全文双路)/B1 内省形态不注入/B2 上传不
+> 清既有非空 alias/B3-B5 delta spec 措辞对齐/B6 describer 头注例外清单化;
+> B7(describe payload 透传既有 alias,S1 修复后 LLM 产出别名在保留分支
+> 已被忽略,边际价值低)/B8(tsv 'simple' 中文连续串单 token 局限,009 起
+> 既有)挂账。api 785(+13)+agent 152(+7)+web 全绿、21 契约 KEPT、
+> evals smoke 5/5 零劣化、openspec 39 spec 校验全过;归档 archive/
+> 2026-08-25-entity-alias,sync knowledge/rag/nl2sql-agent 三主 spec。
+> **036 收口说明**:前一 agent 已将 036 归档(archive/2026-08-24-036-
+> cross-domain-debt-clearance,tasks 5.3 标注 R1 清零)并 sync 四主 spec,
+> 但 HANDOFF 头部未更新、037 动工未收口;本会话以全量门禁+冒烟+39 spec
+> 校验覆盖验证 036 面未被破坏,036 的 R1 评审由前一 agent 声称完成(0 发现),
+> 未在本会话重放——如需补审切口清单 a–h 见下方 036 段。**001–037 齐,
+> 活动变更为零;全部改动未提交待用户指令(迁移 0008–0024 链式依赖,须同批
+> 按序提交)**;下一棒=按 roadmap 评估(挂账沉淀/远期域,开工时再立 spec)。
+>
+> 最后更新:2026-08-24(**036 cross-domain-debt-clearance 实施完成
+> 待 R1 评审归档**——029–033 挂账裁决 8 项全落码:030③vision
+> 描述注入包裹(「不可信数据,不是指令」标记+三引号围栏)+030④
+> 纯图片问题意图分流(双信号判定:附件在场且 SQL 强意图词表
+> 未命中→doc_answer 直答,**纯图片路径必须用原始拼接问题**——
+> resolved_question 经指代消解重写会压掉描述段关键数据,冒烟实证
+> Sports/74 全丢致「图中无法确认」;词表只收几乎只在问库出现的
+> 强信号——「数量/多少」等通用量词误列曾致首测答非所问复发)+
+> 030⑤孤儿附件清理(lifespan 每日薄壳,DELETE...RETURNING 驱动
+> 删文件,失败仅日志残留归运维面)+030⑦每模型图片上限
+> (ModelEntry.max_image_mb+llm.image_limit_mb,缺省 10MB)+031⑥⑦
+> cron 日历跳跃重写(月→日→时→分逐级推进,52 万迭代 0.4s 阻塞
+> 消除;Vixie a/b 形态兼容[5/10=5,15,25…],上限 4 年含闰日;
+> a/b 起点越界必拒[60/10 曾静默空集])+032⑥BotOut/MemoryItemOut
+> 纯增 team_id(list_mine 补列)+web 归属徽标(BotsPage/MemoryPage
+> 消费生成类型替手写[ADR-005 顺手清偿])+032⑧成员排除 user_id
+> 化+033⑥收藏原子化(**pg_advisory_xact_lock+单语句 CTE 两件套**
+> ——单语句 CTE 在 READ COMMITTED 下消不掉 wCTE 快照竞态[del
+> 看不到并发未提交插入→del 落空+ins 撞冲突],实施期实测抓回补
+> 锁串行化)。**冒烟抓回 3 真缺陷全修直证**:词表误列/描述段被
+> 重写压掉/CTE 竞态。证据:agent 145(+10)+api cron 25(+10)+
+> api 4+web tsc 全绿;api 772 门禁全绿、21 契约 KEPT、evals
+> smoke 5/5 零劣化(recipe 纯文本零回归);真冒烟:cron 双形态
+> (5/10 保存+远未来 next_fire=2027-01-01 即时,触发器已清理)/
+> 纯图片直答「最高分类是 Sports」零 SQL/带库词「数据库里有多少
+> 种商品」走 SQL 对照/孤儿清理真库 25h 件行+文件双删/徽标渲染
+> ×2(mkt_bot「市场组」+团队记忆「市场组」)。**状态:R1 评审
+> 未回归(036 会话评审 agent 未返回即收尾)——新会话须重新发起
+> R1 独立评审,清零后按 archive 流程归档(sync 4 个 delta:
+> multimodal-input/triggers-webhooks/team-workspace/bot-store)**;
+> tasks.md 已勾除 5.3/5.4。
+>
+> **036 R1 评审切口清单(新会话直接可用)**:a.③围栏逃逸面
+> (vision 转述残留三引号序列);b.④词表覆盖面(问库形态漏网
+> 误分流/问图形态误命中)+多轮带图追问的 has_attachments 与
+> resolved_question 交互+流式 /query_stream 分流等价性;c.⑤清理
+> 并发误删(24h 窗口+一次性消费 FOR UPDATE)+DELETE...RETURNING
+> 与并发上传可见性;d.cron 月进位回绕/「0 0 31 4 *」永不日/
+> 366 天→4 年行为变化面(031 调度器 CronError 置 NULL 语义窗);
+> e.收藏两件套(hashtext 键域碰撞面/锁与 CTE 同事务时序/调用方
+> commit 语义/三并发终态);f.team_id 查询列完备性(list_bots
+> 全部查询路径/list_mine 之外的 memory 查询路径);g.TeamsPage
+> users 分页超一页漏候选(新暴露面还是既有语义);h.spec 逐
+> scenario 对拍。
+>
+> **036 挂账**:①词表启发式误判面(带图问库无强信号词→误分流
+> 答非所问残余,追问可纠偏;远期=意图分类模型或 ReAct 渠道统一);
+> ②清理竞态注记(24h 窗口+FOR UPDATE 先行,误删概率近零);
+> ③残留文件运维面(行删后文件删失败仅日志,定期人工清);
+> ④agent describe-table 上游移植 prompt 的 036 未动纪律保持
+> (037 alias 产出将首例登记例外)。
+>
+> **037 entity-alias 已提案待实施(本会话仅 openspec 不执行,
+> 用户指令)**——实体别名(业务称谓)资产与表达对齐:根因=
+> 摘要 prompt 无称谓规则+表说明只有描述句无称谓+summarize
+> 上下文不含表说明(用户说「商品表」,摘要回 goods/全限定名)。
+> **终案=称谓是语义资产不是 prompt 技巧**(独立决策,推翻首轮
+> 纯 prompt 现场提炼方案——不可治理/逐次漂移/质量波动进用户
+> 视野;参照 LookML/dbt entity alias 一等公民):rag.table_
+> descriptions 加 alias 列(0024 迁移,实施时建)+三路来源
+> MANUAL_EDIT 手编>AI 提炼(009 润色管线同一次 LLM 调用附带,
+> 零增量成本;describer 上游移植 prompt 首例例外清单登记)>
+> 兜底(消费层降级链);rag schema_hint 拼「表名(alias):表说明」
+> +embedding/tsv 拼 alias(输入侧召回同受益);SUMMARIZE_SYSTEM
+> 称谓对齐规则(用户用语>别名>表说明中文名;禁裸物理名/全限定
+> 名/禁编造,与 018 事实性规则互锁);/admin/rag 编辑面 alias
+> 字段。四工件齐+严格校验过(proposal/design/specs[knowledge/
+> rag/nl2sql-agent]/tasks);新会话可直接 /opsx:apply entity-alias
+> (注意:先收 036 再动 037,一次一个活动实施变更)。
+>
+> 最后更新:2026-08-24(**035 mock-payment-gateway 已实施归档**——
+> mock 支付闭环+计费域清偿:支付单(sys_payment 0023,状态机
+> CREATED→PAID/CANCELLED/EXPIRED,每账单一在途单部分唯一索引)+
+> **核销路径唯一**(reconcile_payment 单点,mock-simulate[登录+门户+
+> 本人租户]与 callback/{channel}[无登录验签即鉴权,031 同构]两入口
+> 汇聚;mock 通道 HMAC 与真实通道同构,接微信/支付宝=新增 Channel
+> 实现主链零改)+CAS 幂等(重复回调收敛 idempotent,伪签 401/金额
+> 不符 400/失败回调非终态)+invoice PENDING→PAID 同事务联动+VOID
+> 作废(在途单连带)+30min 惰性过期+lifespan 每日兜底薄壳+收银台
+> /portal/pay(轮询终态/错误态双自停);**请求内同步采集**(agent
+> contextvar 收集器+QueryReactIn.collect_usage **按调用方挂载**[仅
+> bot 链路置真——R1-S2:无差别挂载曾致 chat 同步 react/workflow
+> 用量静默整丢]+api BotService sink 自 commit 落库[bot_id 归属;
+> (trace_id,seq) 部分唯一索引**谓词收窄 bot_id IS NOT NULL**——
+> 裸索引令 chat 渠道存量同 trace 多行 seq=0 必撞 23505,实施期
+> 推演抓回]);**BOT 维度配额**(scope/scope_ref,表达式唯一索引
+> COALESCE 零 uuid,双路判定 Bot 先归因 BOT:TOKENS,跨租户
+> scope_ref 404,CALLS 维不立约,Bot 删除零命中不级联);套餐 U/D
+> (绑定中 409 PLAN_IN_USE,改价不回溯既有账单)+billing 自供租户/
+> Bot 清单(挂账⑥解耦 user:manage/bot:manage)+管理面账单分页
+> (弃 LIMIT 200,行附支付状态)+策略删除 AlertDialog 确认+套餐
+> 数值校验非法行内报错。**R1 评审 2 严重+5 建议+3 提示全修,
+> R2 复核全闭环**:S1 create 竞态二次收款(条件插入 INSERT...
+> SELECT WHERE PENDING 原子+SAVEPOINT 唯一违例收敛+双击幂等
+> 返回在途单+invoice_not_pending 告警审计);S2 收集器挂载闸;
+> A2 收银台单位 10 倍偏差(1 元=1000 厘,/1000);A3 错误态轮询
+> 泄漏;A4 COST 无套餐零信号口径注记+配置面提示;A5 删 Bot 零
+> 命中测试;T2 幂等败者重读/T3 切租户表单重置/T4 409 友好文案。
+> api 758(+33)+agent 138(+4)+web 全绿、21 契约 KEPT、evals
+> smoke 5/5 零劣化;真冒烟:curl 14 项(支付全链/伪签/幂等/惰性
+> 过期/作废连带/BOT 429 归因[真 LLM 调用 520 tokens 入账,二次
+> 调用即拒]/套餐 UD/分页)+UI 11 项(收银台全链/BOT 下拉自供/
+> 删除确认/编辑回显/abc 行内报错/¥1.03 单位直证)。**001–035
+> 齐,活动变更为零;全部改动未提交待用户指令(迁移 0008–0023
+> 链式依赖,须同批按序提交)**;下一棒=036 跨域清偿包
+> (030③④⑤⑦+031⑥⑦+032⑥⑧+033⑥,029–033 挂账裁决产物)。
+>
+> **035 挂账**:①真实支付通道(微信/支付宝 Channel 实现+商户
+> 签约/ICP 备案商务动作,抽象已预留);②用户/TEAM 维度配额;
+> ③BOT 级 CALLS(019 域 sys_tool_audit 扩 bot 列后补);④落库
+> 失败残余低估(仅日志,远期重试队列);⑤callback 枚举 oracle/
+> 伪签审计刷库(接真实公网通道时收紧:同形 401+限频去重);
+> ⑥compose/部署文档 KM_BILLING_MOCK_SECRET 必须替换提醒;
+> ⑦callback except commit 脆弱性(未来核销引入 DB 失败态会
+> 二次炸 500);⑧附件预处理失败的 bot 链路用量漏采(R2 提示,
+> AttachmentError 早返丢收集器内容)。
+>
+> 最后更新:2026-08-24(**034 developer-portal-billing 已实施归档,第四波
+> 全部收官**——三维配额(TOKENS/CALLS/COST,策略 upsert+套餐兜底,0=
+> 不限,按维各用各 warn_pct)+网关切面(v1/chat/completions 执行前
+> fail-closed 429+审计落库[注入+显式 commit],预警 X-Quota-Warning
+> [COST 分支补齐])+套餐(整数厘单价,plan 存在性校验+绑定审计)+
+> 月首出账(lifespan 薄壳,幂等,零用量不出账,失败下小时轮重试
+> [不再睡到次日致整月缺失],明细模型×单价,金额 INTEGER 厘)+
+> 门户(/portal 用量看板三维进度条+预警+api-key 清单[/portal/keys
+> 补 spec 承诺]+账单明细对话框[加载态/错误收敛/打开即清空])+
+> 超管配置(/billing 第十五子页,套餐/策略/绑套餐受控回显[新增
+> tenant plan 查询端点]);权限点 developer:portal 27 推荐集+
+> system:billing:manage 28。**R1 评审 3 严重+9 建议+9 提示全修**:
+> S1 网关 429 与出账审计死代码(oper 未注入+独立会话未 commit);
+> S2 月聚合 to_char 会话时区错位(每月首 8h 配额 fail-open——
+> AT TIME ZONE 'Asia/Shanghai' 三处收口+边界测试);S3 billing 全线
+> 无 response_model(手写类型违 ADR-005——全端点契约化+前端消费
+> 生成类型);A1 warn_pct 多策略取 max 吞单策略线(按维各用各);
+> A2 出账失败睡到次日致失败月账单永久缺失(改下小时轮重试);
+> A3 悬空绑套餐(存在性校验+审计);A4 删策略无审计;A6 门户无 key
+> 清单(spec scenario 未兑现补端点);A7 跨租户 404 假测试(真断言
+> 落地)。api 725+agent 134+web 全绿、21 契约 KEPT、evals smoke
+> 5/5 零劣化;真冒烟:limit=1→429+audit→调大→放行答「诸葛亮」
+> →7 月用量→出账 PENDING→portal 聚合。**001–034 全部收官,活动
+> 变更为零;全部改动未提交待用户指令(迁移 0008–0022 链式依赖,
+> 须同批按序提交)**;roadmap 第三梯队四波 16 域(019–034)全部落地。
+>
+> **034 挂账**:①支付网关(账单 PENDING 出账语义);②请求内同步
+> token 采集(021 fire-and-forget 偏低估为 v1 基准);③用户/Bot 维度
+> 配额(v1 租户级);④套餐 U/D(现仅创建与清单);⑤CALLS 口径=
+> 工具执行计数(纯问答 Bot 恒 0,spec 口径待补注);⑥manage 租户
+> 清单依赖 system:user:manage(自定义角色单授 billing:manage 时
+> 下拉瘫痪——billing 域自供清单端点);⑦策略删除无确认交互+套餐
+> 数值非法静默归零;⑧list_all_invoices LIMIT 200 无分页;⑨429 vs
+> 400 顺序(空问题先 400,既定)。
+>
+> **033 bot-store 详情**——Bot 商店全链:
+> 上架治理(publish/unpublish 仅创建者或归属团队 OWNER[032 can_manage],
+> 上架内容经 020 输出护栏审核[替换即拒],re-publish 保留原
+> published_at)+发现(GET /store/bots[搜索三字段 ILIKE 转义 ESCAPE+
+> hot/new/rating 排序]+详情[response_model 精确化])+收藏(幂等切换,
+> 列表仅在架,favorited 本人态回显)+评分(1-5 upsert,非法分值 422)
+> +使用量(直跑成功才+1 服务端唯一来源)+直跑(025 链路 channel=
+  "store",summary 应答正文回传);bot:run 权限点(26 推荐集);/store
+  页(搜索/排序/收藏 tab/星评组件/详情 suggestions 点击即问)+Bots 页
+  上架按钮(护栏拒绝行内可见)。**R1 评审 2 严重+10 建议+6 提示全修**:
+> S1 上架反馈静默+缓存键错;S2 直跑丢 summary+误导文案(应答正文
+> 回传展示);J1 创建者禁用直跑 500(BotNotFound 收敛);J2 ILIKE 未
+> 转义(like_pattern+ESCAPE 复用);J3 store 端口反转+契约补;J4 端点
+> 契约化(StoreBotOut/DetailOut/RunOut,前端消费生成类型);J5 favorited
+> 初值+收藏 tab;J6 上架后改名绕过(name 变更重审);J7 上架审计;
+> J8 conftest 两表;J9 星评裸 button;J10 publish 缺 chat:execute 闸。
+> api 713+agent 134+web 全绿、20 契约 KEPT、evals smoke 5/5 零劣化;
+> 真冒烟:publish→搜索→直跑真 LLM→计数 0→1→评分→收藏→下架货架空。
+> **001–033 齐,活动变更为零;全部改动未提交待用户指令(迁移
+> 0008–0021 链式依赖,须同批按序提交)**;下一棒=第四波收尾
+> (developer-portal-billing)。
+>
+> **033 挂账**:①评论文本通道(spec 明确不做);②Bot 版本化上架;
+> ③个性化推荐;④分渠道使用量;⑤favorite/rating 无 FK(Bot 删除留
+> 孤儿行,读取面均 JOIN 定义表不可见,良性);⑥toggle_favorite 先查
+> 后写竞态(唯一索引兜底最终态一致,响应布尔可能瞬时不符);⑦重复
+> 上架可刷 new 排序(已保留原 published_at 缓解,无冷却)。
+>
+> **032 team-workspace 详情**——租户内团队层:
+> sys_team/sys_team_member(角色 OWNER/MEMBER/VIEWER)+Bot/工作流归属
+> (team_id 列,NULL=个人零回归)+可见性纯函数单点(visible/can_edit/
+> can_manage)+列表双支过滤(created_by OR team_id ANY uuid[] CAST)+
+> 归属变更(须目标团队 OWNER,审计)+团队记忆(user_memory.team_id;
+> 写入限 OWNER/MEMBER 且团队属当前租户;召回个人∪成员团队双路混排
+> top-K,隐式提取仅个人);/admin/teams 子页+Bots 归属对话框+MemoryPage
+> 团队写入卡。**R1 评审 3 严重+8 建议+7 提示全修**:S1 attach 跨租户
+> (资源行反查/UPDATE 无租户过滤);S2 存新版本无编辑闸+丢 team_id(
+> **032 自身引入的劫持回归**——编辑闸+新版本继承上一版归属);S3 成员
+> 改/删跨租户;J6 离队成员仍召回自己写的团队记忆(个人分支限
+> team_id IS NULL);J2 runs 历史可见性闸;J3 Bot key 三端点团队化;
+> J4 is_public 翻转收全权;J8 team 端口反转(契约扩)。api 707+agent
+> 134+web 全绿、19 契约 KEPT、evals smoke 5/5 零劣化;真冒烟:团队
+> 记忆双路真 LLM 召回(答「不含退款金额」)/attach 生效。**001–032
+> 齐,活动变更为零;全部改动未提交待用户指令(迁移 0008–0020 链式
+> 依赖,须同批按序提交)**;下一棒=第四波收尾(bot-store/billing)。
+>
+> **032 挂账**:①知识库(rag)团队归属(009 模型深化,独立变更);
+> ②触发器归属(团队工作流仅创建者本人触发器可调度,v1 既定语义);
+> ③团队级用量配额;④VIEWER「仅运行不可见」细粒度;⑤团队记忆隐式
+> 提取与休眠流转;⑥BotOut/_def_out/MemoryItemOut 不回传 team_id
+> (归属徽标展示面);⑦attach 仅作用单版本(工作流旧版本 team_id
+> 偏斜——显式旧版本语义既定);⑧成员候选按 username 排除(语义键
+> 应 user_id)。
+>
+> **031 triggers-webhooks 详情**——cron 定时+
+> webhook 入站触发工作流/Bot:手写五字段 cron 解析(零新依赖,日/周
+> 双非*拒,dow 0/7 归一)+lifespan 30s tick 调度薄壳(min_interval 保护/
+> 进行中 SKIPPED/独立会话执行/next_fire_at 持久化,at-most-once)+
+> webhook 随机 UUID 路径(防枚举)+HMAC-SHA256(compare_digest;兼收
+> GitHub X-Hub-Signature-256 sha256= 前缀)+AES-GCM 密钥(创建一次性
+> 展示,轮换经 update secret)+202 即返后台执行+事件适配器(custom
+> 透传/github 标准化)+sys_trigger_run 历史(目标 run 关联回填)+出站
+> 通知(SSRF 复用 029+X-Kongming-Signature+5s);/admin/triggers 第十三
+> 子页。**R1 评审 1 严重+5 建议+9 提示全修**:S1 cron 计算失败三连锁
+> (保存期 500→400/调度器吞异常致 next_fire 滞留=**每 30s 重触发风暴**
+> →CronError 收敛置 NULL 止损+落 FAILED run/同 tick 饿死);S2 重名
+> 409;S3 创建者 ACTIVE 闸(与 bot 分支对称);S5 run 关联回填+历史删后
+> 可读(029 run 返回 run_id);S6 GitHub 签名头兼容;T1 停机收割在飞
+> task/T2 factory 异常兜底/T4 密钥轮换/T6 Content-Length 预检。api 697+
+> agent 134+web 全绿、18 契约 KEPT、evals smoke 5/5 零劣化;真冒烟:
+> cron 到期真触发(run SUCCESS+next_fire 推进)/webhook 签名矩阵 202/401/
+> 超窗 cron 400/重名 409。**001–031 齐,活动变更为零;全部改动未提交
+> 待用户指令(迁移 0008–0019 链式依赖,须同批按序提交)**;下一棒=
+> 第四波余项(team-workspace/bot-store/billing)。
+>
+> **031 挂账**:①失败重试策略(指数退避);②多实例调度互斥(pg
+> advisory lock);③更多事件源(邮件/Slack);④时区可配(固定
+> Asia/Shanghai);⑤SSRF DNS TOCTOU(029 同款);⑥next_fire 保存期
+> 最坏 ~52 万次迭代(请求路径 0.3-0.5s,可异步化);⑦cron 段内「5/10」
+> 形态(现按单值解析,Vixie 为 5-max/10,未立约)。
+>
+> **030 multimodal-input 详情**——图片多模态输入全链:POST /chat/attachments(magic bytes 复核[Content-Type 可
+> 伪造]/10MB 流式闸/uuid7 落盘/operlog)+ ChatQueryIn 纯增
+> attachment_ids(≤3,归属校验 user+tenant+UPLOADED 任一 404 同形)+
+> agent 进图前预处理(内部端点一次性消费[置 CONSUMED+删文件,FOR
+> UPDATE 防双取]+vision 调用[task="vision" 走 021 路由——dev 已配
+> qwen-vl;**坑:env 键=KM_AGENT_+字段名,无 _LLM 段**]+描述段拼问题
+> 前,内核零改动)+消息附件摘要双写回显(user+assistant)+web 附件
+> 按钮/chips/徽标。**R1 评审 2 严重+5 建议+9 提示全修**:S1 上传端点
+> 不读 X-Tenant-Id(非默认租户上传→引用必 404);S2 submit 守卫放行
+> 纯附件(Enter 绕过按钮禁用撞 422 且 chips 清空)——对齐契约;F3 引用
+> 去重(同 id 二次取件必 404);F4 失败恢复 chips;F5 chips 裸 button
+> 红线;F6 徽标共享组件/F7 vision 用量 tenant 维度。api 682+agent 134+
+> web 全绿、17 契约 KEPT、evals smoke 5/5 零劣化;真 LLM 冒烟:qwen-vl
+> 据图正确作答(Sports)/一次性消费 200→404 文件即删/UI chips+徽标。
+> **001–030 齐,第三波全部收官,活动变更为零;全部改动未提交待用户
+> 指令(迁移 0008–0018 链式依赖,须同批按序提交)**;下一棒=第四波
+> (triggers-webhooks/team-workspace/bot-store/billing)。
+>
+> **030 挂账**:①STT 选型(Whisper 自部署 vs 通义听悟);②OCR 兜底;
+> ③图片内容审核+图片经 vision 描述进问题的注入残余面(020 深化);
+> ④recipe 内核对纯图片问题硬走 SQL 答非所问(design O6 实证:建议
+> ReAct 渠道;后续意图分流);⑤孤儿附件清理+上传频率/总量配额;
+> ⑥Bot/工作流渠道附件;⑦供应商图片尺寸/体积限制先于 10MB 生效
+> (qwen-vl 有自身上限)。
+>
+> **029 workflow-orchestration 详情**——工作流编排:JSON DAG 版本冻结(tenant+wf_key+version 唯一,新版本产生即旧
+> 版本自动失活)+拓扑序引擎(上下文不可变深拷贝/条件选路 on 标记/
+> forEach 循环硬顶 100/全局超时 120s 节点级 wait_for 剩余预算/步数上限
+> 200/fail-fast 快照保留)+六类节点(sql=internal 六层全链/http=SSRF
+> 防护[DNS 解析判定+CGNAT 100.64/10 补段+不跟随重定向+1MB+15s]/
+> condition 手写比较零 eval/loop/transform/agent=019 回调触发者权限过滤
+> channel="workflow")+手动触发 workflow:execute(DEVELOPER 推荐集——
+> 节点级防御触发者身份逐层复校无权限放大)+sys_workflow_run 历史分页
+> (列表剥 outputs 防膨胀);/admin/workflow 第十二子页(JSON 编辑器,
+> 画布 Non-goal)。**R1 评审 2 严重+7 建议+6 提示全修**:S1 节点未知
+> 异常逃逸 500 零落库(httpx 异常不经 builtin TimeoutError——引擎收敛
+> FAILED;**控制流异常 _StepLimit/_DeadlineExceeded 改 BaseException 防
+> 误捕**);S2 禁用闸被显式 version 绕过(insert 同事务旧版本失活);
+> J1 loop 子段 id 撞外层静默错读(validate_dag 两遍制递归校验);J2
+> 子段选路不生效(复用 _should_skip+_status);J6 def 读取即提交释放
+> 连接(执行期不占控制面连接槽)。api 676+agent 128+web 全绿、16 契约
+> KEPT、evals smoke 5/5 零劣化;真 LLM 冒烟:sql→transform→agent 链
+> SUCCESS(真点评)/SSRF 169.254 拒/UI 运行对话框三节点状态。**001–
+> 029 齐,活动变更为零;全部改动未提交待用户指令(迁移 0008–0017 链式
+> 依赖,须同批按序提交)**;下一棒=第三波收尾(multimodal-input)。
+>
+> **029 挂账**:①可视化拖拽画布(前端域);②定时/webhook 触发(032);
+> ③并行分支/子工作流/节点重试;④SSRF DNS TOCTOU(连接期 IP 钉扎);
+> ⑤run 详情 outputs 查看端点(列表已剥 outputs);⑥agent 节点自定义
+> system prompt(Bot 化)。
+>
+> **028 mcp-interop 详情**——MCP 双向互操作:
+> 出站=外部 server 配置管理(/system/mcp/* 租户内 CRUD/启停/headers
+> AES-GCM+掩码回显/连通测试/发现同步快照 JSONB)+ 工具以
+> mcp__<key>__<tool> 动态注册进 019 主链(_resolve_tool 统一 execute
+> 与 confirm 重放双路径;tool:mcp:use 显式授予;无 readOnlyHint
+> fail-closed 走确认流;15s 全程超时预算[httpx.Timeout 是单次操作
+> 超时,慢滴架空,须 wait_for 包整交换]+1MB 内容整洁截断+8MB 传输
+> 硬闸);入站=POST /mcp 标准 MCP 协议暴露 Bot(复用 025 单 Bot 绑定
+> api-key;tips:list 恰 1 个;call 经 025 链路 channel="mcp");手写
+> JSON-RPC 零新依赖(仅 Streamable HTTP);/admin/mcp 第十一子页。
+> **R1 评审 2 严重+9 建议+7 提示全修**:S1 禁用 server 管理流 404
+> (get_call_target require_enabled 分流——「禁用→改 endpoint→保存同步」
+> 主流程曾被卡死且编辑静默丢弃);S2 敌意/畸形 JSON Schema 逃逸
+> validate_args 双路径 500(注册时 check_schema 降级 {"type":"object"}
+> +校验面放宽双层);A1 意图审核计数并入 mcp__ 前缀(**LIKE 反斜杠转义
+> 在 Python 字符串层被二级吞掉 ESCAPE 落空静默不命中——改 left() 前缀
+> 判定**);A5 server_key 取 resolve 结果(parse 按第一个 __ 切分,a__b
+> 类 key 被错切)。api 639+agent 128+web 全绿、16 契约 KEPT、evals
+> smoke 5/5 零劣化;真 LLM 冒烟:假 server 注册→ReAct 自主调
+> mcp__fake__read_note+审计+凭证零泄漏扫描;/mcp 入站 initialize/
+> tools/list(恰 1 Bot)/tools/call 真应答/伪造 key 401。**001–028 齐,
+> 活动变更为零;全部改动未提交待用户指令(迁移 0008–0016 链式依赖,
+> 须同批按序提交)**;下一棒=第三波余项(workflow/multimodal)。
+>
+> **028 挂账**:①远端错误文案反射面(恶意 server 可借 error message
+> 把收到的 headers 值反射进审计 error_reason,截 300 字符缓解,如需
+> 收紧只回灌 kind+状态码);②endpoint SSRF 属管理面固有权力(与数据源
+> 管理同信任模型);③非 JSON 响应协议错误文案带响应体前 80 字符(仅
+> 管理面可见);④定时自动重同步(现为手动+保存触发);⑤MCP
+> resources/prompts 原语;⑥JWKS/OAuth 入站(SSO 域);⑦工具结果
+> prompt 注入护栏(020 域深化)。
+>
+> **027 cloud-code-sandbox 详情**——ReAct
+> 新工具 run_python_code:podman 容器即起即销(--network none/只读根
+> fs/非 root/cap-drop ALL/no-new-privileges/cgroup 内存·CPU·pids 限额),
+> data_sql 服务端六层防御取数注入 df(数据不出边界,LLM 不经手行数据),
+> sys_sandbox_run 审计独立短事务(0015),KM_SANDBOX_ENABLED 默认关;
+> infra/sandbox.Dockerfile(pandas/numpy/matplotlib 最小栈+引导脚本
+> stdin/协议行);权限点 tool:code:execute 显式授予制(sort 19)。
+> **R1 评审 1 严重+4 建议+4 提示全修**:S1 宿主 stdout/stderr 有界读
+> (2MB/侧——容器内 64KB 闸可经 os.write(1) 绕过,communicate 全量读
+> 是内存放大 DoS 面,洪水真容器直证杀容器 RESOURCE_LIMIT);A3 取消/
+> 停机窗口 podman kill 按名杀容器本体(conmon 托管,杀 CLI 不杀容器
+> ——TIMEOUT 同款机理第二例);A1 注入闸改 UTF-8 字节口径(CJK 撞
+> 截断误导报文);A2 协议解析全收敛守零抛出契约;T2 宿主复核 images
+> ≤1 张 ≤500KB。**实施期真缺陷**:TIMEOUT 杀 CLI 不杀容器(集成抓回);
+> 测试 override 裸开 get_sessionmaker 泄漏连接耗尽主池 5+5 全模块挂死
+> (改 get_session 子依赖)。api 616+agent 128+web 全绿、15 契约 KEPT、
+> evals smoke 5/5 零劣化;真 LLM 冒烟:ReAct 链 rag_retrieve→execute_sql
+> →run_python_code 自主闭环(均值/标准差/中位数直证),审计行 16×2
+> images_count=1。**001–027 齐,活动变更为零;全部改动未提交待用户
+> 指令(迁移 0008–0015 链式依赖,须同批按序提交)**;下一棒=第三波
+> 余项(mcp-interop/workflow/multimodal)。
+>
+> **027 挂账**:①compose 内 api 容器 podman 接线(socket 挂载/remote
+> client,随部署域);②result_preview 末表达式求值(design O2);
+> ③沙箱产图前端渲染位(artifact image 卡,随 artifact 深化);④exit
+> 137 可被沙箱代码伪造(os._exit(137))→RESOURCE_LIMIT 误分类,仅
+> 审计口径 cosmetic 知情接受;⑤沙箱池化/预热(冷启动 ~1-2.6s 实测);
+> ⑥sys_sandbox_run 管理 UI(SQL 可查)。
+>
+> **026 conversation-artifacts 详情**——产物类型化:derive_artifacts
+> 确定性派生(sql/chart/document 三卡)三路径同源(同步/流式/回显读档;
+> 缺档按要素重算兜底,agent 不可达 FAILED 轮显式空档冻结不重算)+
+> POST /chat/artifacts/rerun(归属 404 同形→六层防御全量→结果落新消息
+> 不覆盖原产物;runner 异常翻译与 EXPLAIN 适配器对称;执行与输出护栏
+> 审计同一 trace)+web 产物卡(sql 可编辑「重新执行」/chart 调参标题·
+> 轴名本地重绘零网络/document markdown 子集渲染+复制;零新依赖——
+> 技术栈锁定未放行 react-markdown,自写 Token 化渲染,原始 HTML 不解析
+> 天然满足 spec 安全条款);R1 评审 0 严重,F1–F7 全修附直证(含 rerun
+> 输出护栏专属测试)。api 594+agent 128+web 全绿、14 契约 KEPT、契约
+> 零漂移、recipe 评估 smoke 5/5 零劣化。
+>
+> **019–025 详情**——019 ReAct 内核/
+> 020 安全护栏/021 多模型路由/022 用户记忆/023 语义层/024 文档 RAG/
+> 025 自定义 Bot(agent-as-config:Bot 定义+权限逐请求求交+公开嵌入页+
+> OpenAI 兼容 /v1/chat/completions+api-key 哈希体系;/admin/bots 与
+> /bot/{key} 页;审计 channel 溯源)。api 587+agent 128+web 全绿、
+> 13 契约 KEPT、recipe 评估 smoke 5/5 零劣化。**001–025 齐,活动变更
+> 为零;全部改动未提交待用户指令(迁移 0008–0014 链式依赖,须同批按序
+> 提交)**;下一棒=第三波余项(conversation-artifacts/cloud-code-sandbox/
+> mcp-interop/workflow/multimodal)。
+>
+> **019-024 详情**——019 ReAct 内核/020 安全护栏/021 多模型路由/022 用户记忆/
+> 023 语义层/024 文档 RAG(父子分块+small-to-big 混合检索+citation+
+> 知识分流[意图词+文档命中即走 doc_answer,无 SQL 面]+/admin/rag 文档区)。
+> api 576+agent 127+web 全绿、12 契约 KEPT、recipe 评估 smoke 5/5 零劣化。
+> **001–024 齐,活动变更为零;全部改动未提交待用户指令(迁移 0008–0013
+> 链式依赖,须同批按序提交)**;下一棒=第三波(conversation-artifacts/
+> custom-agent/cloud-code-sandbox/mcp-interop/workflow/multimodal)。
+>
+> **019-023 详情**——019 ReAct 内核、
+> 020 安全护栏、021 多模型路由、022 用户记忆、023 语义层(表关系 FK
+> introspection[多列按序配对]+指标口径+注入收窄+管理面,/admin/semantic
+> 第十子页)。api 570+agent 125+web 全绿、12 契约 KEPT、recipe 评估
+> smoke 5/5 零劣化。**001–023 齐,活动变更为零;全部改动未提交待用户
+> 指令(迁移 0008–0012 链式依赖,须同批按序提交)**;下一棒=024
+> document-rag(第二波收尾)。
+>
+> **019-022 详情**——019 ReAct
+> 内核、020 安全护栏、021 多模型路由、022 用户长期记忆(显式「请记住」
+> 短路+隐式后台提取+向量召回注入 user 提示+dormant 休眠+自管理四端点
+> 与 /memory 页;双维 fail-closed 隔离,PII/injection 拒落库)。
+> api 561+agent 125+web 全绿、11 契约 KEPT、recipe 评估 smoke 5/5 零劣化。
+> **001–022 齐,活动变更为零;019–022 全部改动未提交待用户指令(迁移
+> 0008–0011 链式依赖,须同批按序提交)**;下一棒=roadmap 第三梯队
+> 第二波余项(semantic-layer/document-rag)。
+>
+> **019-021 详情**——019 ReAct 工具
+> 调用内核(六层防御+写工具确认流)、020 prompt 安全护栏(injection/PII/
+> 输出泄漏/工具意图三层+sys_guardrail_audit)、021 多模型路由(注册表/
+> 任务级路由/出口白名单/用量落库 sys_llm_usage 与聚合端点;冒烟实证
+> SUMMARIZE→qwen-turbo 路由命中、SQL_GEN/UNDERSTAND 回退主模型)。
+> api 550+agent 125+web 全绿、10 契约 KEPT、recipe 评估 smoke 5/5 零劣化。
+> **001–021 齐,活动变更为零;019–021 全部改动未提交待用户指令(注意:
+> 三变更迁移 0008/0009/0010 链式依赖,须同批按序提交)**;下一棒=
+> roadmap 第三梯队第二波余项(agent-memory/semantic-layer/document-rag)。
+>
+> **020 详情**——
+> prompt 安全护栏三层:输入(injection 三族拦截/PII+凭证五族脱敏)+
+> 输出(系统提示词特征片段泄漏替换/凭证脱敏;摘要+insights+FAILED 错误
+> 原文+sql 文本全路径过滤)+工具意图(write_burst 同 trace 写工具超阈值
+> 拦截,先于参数校验);fail-closed 全路径落审计;规则=代码注册表+库覆盖
+> (启停/动作/阈值,None=不触动),sys_guardrail_audit+sys_guardrail_rule
+> 两表(0009),/admin/guardrails 第九子页。R1 评审 H1+M2-M5+L6-L9 全修
+> (英文规则 IGNORECASE/审计摘要全量脱敏不落原文/prompt_leak 动词共现
+> 窄化/PII 边界断言+时间戳前缀排除/toggle 不清动作覆盖/覆盖合法性校验);
+> 冒烟直证:正常问句「统计输出指令的执行次数」零误杀、英文大写拦截、
+> 审计零 PII 原文;评估红线 recipe smoke 5/5 零劣化。api 544+agent 119+
+> web 全绿、10 契约 KEPT。**019/020 均已归档,活动变更为零;两变更全部
+> 改动未提交待用户指令;下一棒=roadmap 第三梯队第二波(multi-model-routing
+> /agent-memory/semantic-layer/document-rag)**。
+>
+> **019 tool-calling 已实施归档**——ReAct 工具调用
+> 内核落地:agent 新图 react⇄tool_dispatch 循环(LLM 自主选择工具)+
+> api 通用回调 /internal/tool/execute 六层纵深防御(内部令牌与绑定复校/
+> 工具权限点/JSON Schema+AST 根语义预检/审计+限流/写工具幂等+人工确认),
+> 内置四工具(validate_sql/execute_sql/rag_retrieve 含零命中回退内省/
+> create_system_announcement 写工具确认流),sys_tool_audit+sys_announcement
+> 两表(0008),chat 纯增 agent_mode(缺省 recipe 零回归)与
+> pending_tool_calls,SSE 新增 tool_call 事件,web 工具链 chips+确认卡+
+> /admin/tools 第八子页。**老链路 8 节点图逐字节保留**(评估红线:recipe
+> smoke 5/5+full 零 FAILED;react 等价 smoke 5/5);冒烟抓回五缺陷(D14
+> 内省回退/D15 效率纪律+重复熔断/D16 确认卡快照退位冲突/D17 事件状态
+> 映射/D18 确认指引文案)与 R1 双路评审 9 项(M1 uuid7/M2 拒绝审计/M3
+> 绑定复校/S1-S6)全部修复附直证;api 526+agent 119+web 全绿、
+> 9 契约 KEPT。
 > 清空上下文/新会话先读本文与 `AGENTS.md`,
 > 动敏感区前按 AGENTS.md 前置阅读表读对应 ADR。**本文行文只记录"代码里看不出来"的事实。**
 
 ## 新会话开工指引(最先看这里)
 
-1. **018 prompt-guardrails:已实施归档并入库**(archive/2026-08-22-018-prompt-guardrails)——
+1. **025 custom-agent:已实施归档**(archive/2026-08-23-025)——
+   sys_bot_definition+sys_api_key(0014,sha256 哈希+明文一次+撤销即失效);
+   运行时=ReAct 内核(bot_system_prompt 身份段替换+纪律段强制保留,
+   prompts 显式分段常量防 split 漂移);权限逐请求求交(filter_specs 吃
+   权限点集——误传工具名集恒空曾自抓);渠道 web_embed/api 落
+   sys_tool_audit.channel。R1 要点:OpenAI 响应 created/model 是 SDK
+   必填;Bot 渠道必须剔除 require_confirm 写工具(无会话=确认死信+
+   LLM 谎称卡片弹出);bot_key 全局唯一(租户内唯一+公开定位=碰撞
+   500/DoS 面);创建者 ACTIVE 闸(禁用≠权限回收)。
+   **024 document-rag:已实施归档**(archive/2026-08-23-024)——
+   rag.documents/document_chunks(0013;chunker 父子分块纯函数[标题层级
+   父块 800/滑窗子块 200 overlap 50];仅子块 embedding;content_hash 幂等);
+   small-to-big 检索(子块向量+全文 RRF→父块回填 top-5,rrf_fuse_ids
+   通用版不动 009 资产);知识分流=retrieve 后条件边(doc_answer 节点,
+   无 SQL 面,引用标注 [文档名 §段落]);分流判定=意图词表+文档命中
+   (冒烟实证「schema 空」双条件过严,知识问题常有模糊 schema 命中)。
+   **R1 要点**:embedding 必须分批(>64 子块整批 422 静默死);文档端点
+   必须 datasource 校验(伪造 key 孤儿数据);supported_extension 返回
+   带点扩展名(分档判断恒假坑);plainto_tsquery 是 AND 语义(问句词须
+   全在文档)。
+   **023 semantic-layer:已实施归档**(archive/2026-08-23-023)——
+   rag.table_relations+rag.metric_definitions(0012);introspection 经
+   information_schema(v1 仅 default 源,非 default 同形 400);注入=
+   rag retrieve 端点与 toolcall rag 适配器双路 enrich(仅召回集合两两
+   关系+问句命中指标 top-5);agent generate 拼接在表结构后历史 SQL 前
+   (空则逐字零回归)。**R1 要点**:多列 FK 必须 position_in_unique_
+   constraint=ordinal_position 配对(ccu 直连=笛卡尔积错配,实证);
+   手工接管翻转 source=manual(否则重抓还原);upsert 必须 RETURNING
+   真实行 id。
+   **022 agent-memory:已实施归档**(archive/2026-08-23-022)——user_memory
+   (0011;双维过滤+HNSW 部分索引 dormant=false);显式短路先于输入护栏
+   (原始问句判定,敏感检测=护栏全规则+密码语境词);隐式=SUCCESS 轮后台
+   任务经 agent /internal/extract-memory(全新撰写 prompt)落 IMPLICIT
+   0.5;召回经 MemoryPort 组合根(独立短会话)拼 memory_hint 传 agent,
+   generate/react 拼接在表结构前、空则逐字零回归。**R1 重大教训**:
+   ①operlog 必须先 add 后 commit(先 commit 再 add=日志被会话退出回滚
+   静默丢失,测试只断言拒绝路径曾全绿掩蔽);②记忆形成期是注入唯一闸
+   (内容跨会话注入 prompt 不再过护栏,故敏感检测必须含 injection 规则);
+   ③隐式任务注入 service 用 callable(函数内 import memory_tasks 会破
+   chat 契约——chat.service 零框架)。
+   **021 multi-model-routing:已实施归档**(archive/2026-08-23-021)——
+   多模型注册表(env JSON:KM_AGENT_MODEL_REGISTRY_JSON/ROUTES_JSON/
+   ALLOWED_HOSTS;畸形剔除/白名单拒配/空表零回归)+任务级路由(LlmClient
+   _resolve 单点,task 形参=SQL_GEN/UNDERSTAND/SUMMARIZE/TITLER/DESCRIBE/
+   REACT,缺省主模型)+用量采集(sys_llm_usage,agent fire-and-forget 上报
+   /internal/llm-usage,tenant_key 反解失败 NULL 归 unknown;聚合端点
+   /system/llm-usage/summary 挂 system:llm-usage:view 排序 16)。R1 修复:
+   启动期路由交叉校验告警+_resolve 回退去重告警(配置漂移可发现)、
+   api_key field(repr=False)、计价字段类型校验;旁路用量(titler/
+   describer/embed)租户归 unknown 为明文取舍。**sync 操作教训:openspec
+   spec 同步追加禁止 `open(p,'w').write(open(p).read()...)` 一句链式
+   (receiver 先求值截断,内容丢失——021 sync 曾覆盖 nl2sql-agent 主
+   spec,git 恢复+重放)——必须先读后写分两句**。
+   **020 prompt-guardrails-security:已实施归档**(archive/2026-08-23-020)——
+   prompt 安全护栏(全在 api 控制面,agent 零感知):guardrail 域包
+   (rules.py 代码注册表 11 规则 + 配置表覆盖启停/动作/阈值,None=不触动);
+   输入挂接 chat query/start_stream(_prepare 后 agent 前;拦截=REJECTED
+   落库「内容未通过安全检查」,脱敏值进 LLM 而 USER 消息/审计记原文);
+   输出在 _finalize_reply(summary/insights/FAILED error 原文/sql 文本四路
+   过滤;结果集 columns/rows 不过——业务数据正当可见);意图审核在
+   tool/execute 参数校验前(write_burst 同 trace 写工具计数含全状态,
+   有意从严);**审计摘要永不落 PII 原文**(digest 生成前过全量 MASKERS,
+   R1-M2);inj_prompt_leak 为动词+目标共现窄化形态(误杀面 R1-M3);
+   特征片段 SYS_PROMPT_SIGNATURES 与 agent prompts 文本耦合(prompt 演进
+   须同步,rules.py 头注与 prompts.py 例外清单互登记)。
+   **019 tool-calling:已实施归档**——ReAct 工具调用内核:
+   **agent 面** graph/react/(独立图:react_llm→tool_dispatch 循环+finalize,
+   轮次上限 8 前移到 dispatch 后路由省空转;重复熔断=同工具同参数已成功
+   不再回调;chat_with_tools 原生 tools 协议,qwen-plus 实证可用);
+   **api 面** toolcall 域包(注册表唯一真理源=api 注入,agent 零副本;
+   /internal/tool/execute 六层防御;写工具确认=挂起 PENDING_CONFIRM 复用
+   sys_tool_audit 行(args_json 留存重放)+ POST /chat/tool-confirm 独立
+   端点,不恢复 ReAct 状态机);**关键实证**:rag_retrieve 工具必须内省
+   回退(知识库未抓取租户否则 LLM 只能探测系统目录打满轮次);确认卡必须
+   独立于 017 finalized 快照(快照退位会把卡片带走);LLM 确认指引必须
+   点名「卡片点击」而非「文字回复」。016 评估器 KM_EVAL_AGENT_MODE=react
+   可切内核跑同一评估集。老链路零改动(016 基线复验零劣化)。
+   **018 prompt-guardrails:已实施归档并入库**(archive/2026-08-22-018-prompt-guardrails)——
    prompt 质量护栏三层(全部在 apps/agent,零 api/web/契约/表结构变更):
    ①生成=SQL_GEN_SYSTEM 规则 6 重写(含 GROUP BY/聚合即统计查询不加
    LIMIT;top-N 除外按统计键排序后 LIMIT;**排序键可能并列必须追加主键
@@ -189,11 +791,15 @@
    (DOM 快照可读)——GUI 测试一律用 Playwright MCP 工具组
    (`mcp__plugin_playwright_playwright__browser_*`,独立管道,002 已验证可用)。
 
-## 当前状态(018 已入库;001–018 全部归档)
+## 当前状态(001–037 全部归档;活动变更为零——各变更详情以文首段落为准)
 
 - git:main 分支(以 git log 为准);无远程、未 push。
   分支策略:主干开发不拉 dev,协作按变更开短命 feature。
-- openspec:**001–018 全部归档;活动变更为零**。
+  **全部改动未提交待用户指令(迁移 0008–0024 链式依赖,须同批按序提交)**。
+- openspec:**001–037 全部归档;活动变更为零**(036 由前一 agent 归档,
+  037 本会话实施+R1 评审清零后归档并 sync knowledge/rag/nl2sql-agent
+  三主 spec,39 spec 校验全过)。下一棒=按 roadmap 评估(各域挂账沉淀/
+  远期域,开工时再立 spec)。
 - **018 架构总览**:零表结构/零端点/零契约/零 api/web 变更/零新依赖——
   唯一代码面 apps/agent。prompts.py 三模板加固(规则 6 统计/明细边界
   +tiebreaker、规则 8 ROUND、规则 9 投影完备+DISTINCT、规则 3 ID 不替名、
@@ -1112,6 +1718,59 @@
 2. 剩余挂账见「已知 TODO」各段,随对应域变更搭车评估。
 
 ## 已知 TODO(代码内标注,非缺陷)
+
+**025 挂账(R1 观察)**:①公开渠道无匿名限流(token/限流挤占创建者
+   配额,随 billing/网关域);②Bot 对话无会话化(多轮记忆随 conversation
+   域);③确认纪律句对 Bot 渠道措辞残留(工具已剔除不触发,措辞随
+   prompt 演进);④BotsPage 无编辑对话框/key 列表 UI(后端已备,随 UX
+   深化);⑤创建者删除后 Bot enabled 不自动翻(超管可禁用)。
+**024 挂账(R1 观察)**:①中文全文路 simple 配置局限(向量路为主,
+   zhparser 挂账与 009⑫同族);②大文档上传同步(>100 父块时长;异步化
+   随 009②);③文档内容不进 020 护栏(上传限 SUPER_ADMIN,doc_answer
+   无 SQL 面,DOC_ANSWER_SYSTEM 已加抗注入条款;信任假设登记);④数据
+   问答的 summarize 文档注入未做(proposal 已删该承诺,随观察再评);
+   ⑤分块质量随真实文档观察(中文标题层级缺失时退化纯长度切)。
+**023 挂账(R1 观察)**:①单表自引用 FK 不注入(spec「两两 JOIN
+   path」未覆盖);②introspection 不清理库内已删 FK 的陈旧行(sync
+   语义随运营);③动态源 introspection 未支持(v1 仅 default;随真实
+   外部 PG 源接入评估);④metric 子串命中误伤面靠触发词治理。
+**022 挂账(R1 观察)**:①隐式提取每 SUCCESS 轮触发(成本随轮次线性;
+   误存率观察靠自管理删除率,演化随 personalization);②embedding 缺失
+   记忆不可召回且无补偿任务(编辑重算可补;后台补算随运营);③召回命中
+   ANY(:ids) 传 UUID 对象数组(asyncpg 原生支持,直证已过);④配置
+   rag_embedding_dim 与 vector(1536) 硬编码漂移耦合(rag 域同款);
+   ⑤injection 拆字/全角变体绕过面(与 020③同族)。
+**021 挂账(R1 观察)**:①注册表池每请求全量重建且不 aclose
+   (deps 无单例时代产物;惰性建池/指纹缓存随规模);②0010 依赖 0009/0008
+   未入库(019-021 三变更须同批按序提交);③旁路用量租户归 unknown(明文
+   取舍);④fire-and-forget 关停窗口丢在飞上报(统计口径非计费);⑤用量
+   看板 UI 未做(聚合端点已备,可视化随 observability 等价域)。
+**020 挂账(R1 观察)**:①18 位纯数字银行卡会按 pii_idcard 归因(规则
+顺序 idcard 先;掩码等价不脱原文,归因偏差仅审计展示);②bankcard 排除
+19/20 前缀后,真实 19/20 开头卡号不脱敏(时间戳误伤与漏脱的取舍,
+选定防误伤;运营观察);③inj 系列正则的拆字/全角变体绕过面(护栏非
+唯一防线,SQL 防火墙+工具六层在后;语义级判定随规模化评估);④输出
+护栏不过结果集(凭证形态业务数据会被展示——脱敏会失真,有意);
+⑤write_burst 计数含 REJECTED 尝试(有意从严,已钉 spec);⑥护栏配置
+无缓存(每请求读表,行数小;规模化后可加 TTL);⑦history 全量逐条过
+输入护栏(早期注入也拦;性能无忧);⑧feature 片段泄漏检测与 prompt
+文本耦合(prompt 演进需同步 SYS_PROMPT_SIGNATURES,否则检测率漂移)。
+
+**019 挂账(R1 观察+冒烟注记)**:①未注册工具先于权限点判定(工具
+存在性探测 oracle;内部令牌收口+静态注册表,暴露面可忽略);②工具观察
+截断(_OBSERVE_TEXT_MAX=2000)对 JSON 硬切产生非法 JSON 喂回 LLM
+(协议层不解析 tool content,LLM 鲁棒,实测观察);③PENDING_CONFIRM
+的 args_json 原文留存不脱敏(当前唯一确认工具 schema 无敏感键;未来
+带 secret 参数的写工具需重估);④确认回执可落本人任意会话(归属校验
+只到用户维度,UX 边角);⑤confirm 路径 dispatch 写死 default 数据源
+(SQL 类工具不经确认路径;未来写工具需数据源上下文时重估,加断言);
+⑥审计页 user/tenant 筛选接口已备 UI 未做(015⑨同先例);⑦015 审计页
+结束日期同款 off-by-one(019 ToolsPage 已修,015 页为归档既定行为,
+随 audit 域后续变更搭车);⑧确认卡=响应级瞬态不落库,刷新/重进会话后
+确认入口消失(PENDING_CONFIRM 行仍在,15min TTL 兜底;持久化回显随
+UX 深化评估);⑨UI 冒烟期一次「确认后页面跳转旧会话」未复现(疑 HMR
+或操作竞态,复现再深挖);⑩ReAct 循环 token 消耗为 recipe 2-3 倍
+(用量采集随 multi-model-routing 域)。
 
 **018 挂账**:①严格口径 13/48 挂为聚合别名/投影形态差异(宽松判过的
 合理形态,严格=multiset 精确等值既定语义,非质量信号);②写操作意图

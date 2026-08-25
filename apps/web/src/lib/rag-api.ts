@@ -9,6 +9,7 @@ export type KnowledgePageOut = components["schemas"]["KnowledgePageOut"];
 export type UploadOut = components["schemas"]["UploadOut"];
 export type FetchOut = components["schemas"]["FetchOut"];
 export type ReindexOut = components["schemas"]["ReindexOut"];
+export type EditTableIn = components["schemas"]["EditTableIn"];
 
 export const ragApi = {
   page: (page: number, size: number, datasourceKey: string) =>
@@ -24,6 +25,8 @@ export const ragApi = {
     return api.postForm<UploadOut>("/system/rag/documents/upload", form);
   },
   remove: (id: string) => api.delete<void>(`/system/rag/tables/${id}`),
+  edit: (id: string, body: EditTableIn) =>
+    api.put<KnowledgeItemOut>(`/system/rag/tables/${id}`, body),
   fetchMetadata: (datasourceKey: string) =>
     api.post<FetchOut>("/system/rag/fetch-metadata", { datasource_key: datasourceKey }),
   reindex: (datasourceKey: string) =>

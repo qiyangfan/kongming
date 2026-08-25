@@ -1,9 +1,23 @@
 /* chat 域 API 封装(010 会话体验深化)。类型契约由 ADR-005 管线生成(禁手写)。 */
 
 import type { components } from "./api-types.gen";
-import { api, type SessionItemOut } from "./api";
+import { api, type ChatQueryOut, type SessionItemOut } from "./api";
 
 export type ExplainOut = components["schemas"]["ExplainOut"];
+export type ArtifactOut = components["schemas"]["ArtifactOut"];
+export type AttachmentOut = components["schemas"]["AttachmentOut"];
+
+/** SQL 产物再执行(026):message_id 归属校验 + 六层防御全量,结果落新消息 */
+export function rerunArtifact(messageId: string, sql: string): Promise<ChatQueryOut> {
+  return api.post<ChatQueryOut>("/chat/artifacts/rerun", { message_id: messageId, sql });
+}
+
+/** 图片附件上传(030):multipart,返回 attachment_id 供问答引用 */
+export async function uploadAttachment(file: File): Promise<AttachmentOut> {
+  const fd = new FormData();
+  fd.append("file", file);
+  return api.postForm("/chat/attachments", fd);
+}
 
 /** 会话列表(010 搜索):q 非空时服务端按标题/user 问句 ILIKE 匹配 */
 export function listSessions(q?: string): Promise<SessionItemOut[]> {

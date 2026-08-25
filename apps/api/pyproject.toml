@@ -24,6 +24,7 @@ dependencies = [
     "python-docx>=1.2.0",
     "python-multipart>=0.0.32",
     "openpyxl>=3.1.5",
+    "jsonschema>=4.23",             # 019 工具参数 JSON Schema 校验(L4)
 ]
 
 [dependency-groups]
@@ -35,6 +36,7 @@ dev = [
     "types-Authlib>=1.4",
     "import-linter>=2.2",
     "types-openpyxl>=3.1.5.20260807",
+    "types-jsonschema>=4.23",  # 019 工具参数校验 stub
     "pyyaml>=6.0",  # 评估器 gold 数据集解析(016;evals/ 工具面,不进产品依赖)
 ]
 
@@ -149,6 +151,133 @@ source_modules = [
     "kongming.feedback.models",
     "kongming.feedback.service",
     "kongming.feedback.ports",
+]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "toolcall 领域模型/用例/端口/注册表不依赖框架(019,宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = [
+    "kongming.toolcall.models",
+    "kongming.toolcall.service",
+    "kongming.toolcall.ports",
+    "kongming.toolcall.registry",
+]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "guardrail 领域模型/用例/端口/规则注册表不依赖框架(020,宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = [
+    "kongming.guardrail.models",
+    "kongming.guardrail.service",
+    "kongming.guardrail.ports",
+    "kongming.guardrail.rules",
+]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "memory 领域模型/用例/端口不依赖框架(022,宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = [
+    "kongming.memory.models",
+    "kongming.memory.service",
+    "kongming.memory.ports",
+]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "semantic 领域模型/用例/端口不依赖框架(023,宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = [
+    "kongming.semantic.models",
+    "kongming.semantic.service",
+    "kongming.semantic.ports",
+]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "sandbox 领域模型/用例/端口不依赖框架(027,宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = [
+    "kongming.sandbox.models",
+    "kongming.sandbox.service",
+    "kongming.sandbox.ports",
+]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "billing 领域模型/用例不依赖框架(034,宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = [
+    "kongming.billing.models",
+    "kongming.billing.service",
+    "kongming.billing.ports",
+    "kongming.billing.channels",
+]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "store 用例不依赖框架(033,宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = ["kongming.store.service"]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "team 领域模型/用例/端口不依赖框架(032,宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = [
+    "kongming.team.models",
+    "kongming.team.service",
+    "kongming.team.ports",
+]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "trigger 领域模型/用例/端口/适配器不依赖框架(031,宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = [
+    "kongming.trigger.models",
+    "kongming.trigger.service",
+    "kongming.trigger.ports",
+    "kongming.trigger.adapters",
+]
+forbidden_modules = ["fastapi", "sqlalchemy", "httpx"]
+
+[[tool.importlinter.contracts]]
+name = "attachment 领域模型不依赖框架(030,宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = ["kongming.attachment.models"]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "workflow 领域模型/用例/端口/引擎不依赖框架(029,宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = [
+    "kongming.workflow.models",
+    "kongming.workflow.service",
+    "kongming.workflow.ports",
+    "kongming.workflow.engine",
+]
+forbidden_modules = ["fastapi", "sqlalchemy", "httpx"]
+
+[[tool.importlinter.contracts]]
+name = "mcp 领域模型/用例/端口不依赖框架(028,宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = [
+    "kongming.mcp.models",
+    "kongming.mcp.service",
+    "kongming.mcp.ports",
+]
+forbidden_modules = ["fastapi", "sqlalchemy", "httpx"]
+
+[[tool.importlinter.contracts]]
+name = "bot 领域模型/用例/端口不依赖框架(025,宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = [
+    "kongming.bot.models",
+    "kongming.bot.service",
+    "kongming.bot.ports",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 

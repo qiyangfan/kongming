@@ -8,6 +8,7 @@ import { useSearchParams } from "react-router";
 
 import {
   AlertDialog,
+  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -17,6 +18,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -34,8 +43,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { datasourceApi } from "@/lib/datasource-api";
+import { api } from "@/lib/api";
 import { ragApi, type KnowledgeItemOut } from "@/lib/rag-api";
+import type { components } from "@/lib/api-types.gen";
+import { FileText, Loader2 as LoaderIcon, Trash2 as TrashIcon, Upload } from "lucide-react";
 
 const PAGE_SIZE = 10;
 
@@ -61,6 +74,10 @@ export default function RagPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<KnowledgeItemOut | null>(null);
   const [reindexOpen, setReindexOpen] = useState(false);
+  // 037 表说明编辑(表说明与业务称谓别名同面)
+  const [editTarget, setEditTarget] = useState<KnowledgeItemOut | null>(null);
+  const [editComment, setEditComment] = useState("");
+  const [editAlias, setEditAlias] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { data: options } = useQuery({
@@ -103,6 +120,27 @@ export default function RagPage() {
       setNotice(null);
     },
   });
+
+  const edit = useMutation({
+    mutationFn: (t: { id: string; comment: string; alias: string }) =>
+      ragApi.edit(t.id, { table_comment: t.comment, alias: t.alias }),
+    onSuccess: (out) => {
+      setEditTarget(null);
+      setNotice(`已保存:${out.table_name}${out.alias ? `(${out.alias})` : ""}`);
+      setError(null);
+      invalidate();
+    },
+    onError: (e: Error) => {
+      setError(`保存失败:${e.message}`);
+      setNotice(null);
+    },
+  });
+
+  const openEdit = (item: KnowledgeItemOut) => {
+    setEditComment(item.table_comment);
+    setEditAlias(item.alias);
+    setEditTarget(item);
+  };
 
   const fetchMeta = useMutation({
     mutationFn: () => ragApi.fetchMetadata(actionDs || "default"),
@@ -294,6 +332,7 @@ export default function RagPage() {
             <TableHead>数据源</TableHead>
             <TableHead>schema</TableHead>
             <TableHead>表名</TableHead>
+            <TableHead>业务称谓</TableHead>
             <TableHead>说明</TableHead>
             <TableHead>来源</TableHead>
             <TableHead>更新时间</TableHead>
@@ -309,6 +348,9 @@ export default function RagPage() {
               <TableCell className="font-mono text-xs">{item.datasource_key}</TableCell>
               <TableCell className="font-mono text-xs">{item.schema_name}</TableCell>
               <TableCell className="font-mono text-xs">{item.table_name}</TableCell>
+              <TableCell className="text-xs">
+                {item.alias ? <Badge variant="outline">{item.alias}</Badge> : <span className="text-muted-foreground">—</span>}
+              </TableCell>
               <TableCell className="max-w-64 truncate" title={item.table_comment}>
                 {item.table_comment}
               </TableCell>
@@ -324,6 +366,13 @@ export default function RagPage() {
                 <Button
                   variant="ghost"
                   size="sm"
+                  onClick={() => openEdit(item)}
+                >
+                  编辑
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   className="text-destructive hover:text-destructive"
                   onClick={() => setDeleteTarget(item)}
                 >
@@ -334,14 +383,14 @@ export default function RagPage() {
           ))}
           {list.isPending && (
             <TableRow>
-              <TableCell colSpan={7} className="text-center text-muted-foreground">
+              <TableCell colSpan={8} className="text-center text-muted-foreground">
                 加载中…
               </TableCell>
             </TableRow>
           )}
           {!list.isPending && (list.data?.items ?? []).length === 0 && (
             <TableRow>
-              <TableCell colSpan={7} className="text-center text-muted-foreground">
+              <TableCell colSpan={8} className="text-center text-muted-foreground">
                 暂无知识条目——可先对数据源「抓取元数据」
               </TableCell>
             </TableRow>
@@ -370,6 +419,73 @@ export default function RagPage() {
           下一页
         </Button>
       </div>
+
+      {/* 037 表说明编辑:表说明与业务称谓别名同面(MANUAL_EDIT,自动润色不覆盖) */}
+      <Dialog
+        open={editTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>编辑表说明</DialogTitle>
+            <DialogDescription>
+              表 {editTarget?.schema_name}.{editTarget?.table_name}
+              ——保存后标记为「人工精修」,自动抓取/润色不再覆盖。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label htmlFor="rag-edit-comment">表说明</Label>
+              <Textarea
+                id="rag-edit-comment"
+                value={editComment}
+                maxLength={500}
+                rows={3}
+                onChange={(e) => setEditComment(e.target.value)}
+                placeholder="一句话中文表说明"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="rag-edit-alias">业务称谓别名</Label>
+              <Input
+                id="rag-edit-alias"
+                value={editAlias}
+                maxLength={64}
+                onChange={(e) => setEditAlias(e.target.value)}
+                placeholder="如「商品表」;留空表示无别名"
+              />
+              <p className="text-xs text-muted-foreground">
+                摘要与洞察将以此称谓提及该表(用户用语优先);留空时回退表说明中的中文名称。
+              </p>
+            </div>
+          </div>
+          {edit.isError && (
+            <p className="text-sm text-destructive" role="alert">
+              {(edit.error as Error).message}
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditTarget(null)}>
+              取消
+            </Button>
+            <Button
+              disabled={edit.isPending}
+              onClick={() =>
+                editTarget &&
+                edit.mutate({
+                  id: editTarget.id,
+                  comment: editComment,
+                  alias: editAlias,
+                })
+              }
+            >
+              {edit.isPending ? "保存中…" : "保存"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* open 只看 target:成功关闭由 onSuccess setDeleteTarget(null) 收口;
           若并入 !remove.isSuccess,一次成功后 mutation 状态保持 true,
@@ -428,6 +544,139 @@ export default function RagPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 024 业务文档区:政策/流程类文档上传与维护(与表知识双通道隔离) */}
+      <DocumentsSection datasource={actionDs || "default"} />
     </div>
+  );
+}
+
+/* ---- 024 业务文档区 ---- */
+
+// ADR-005:消费生成契约(审查循环 F1)
+type DocItem = components["schemas"]["DocumentItemOut"];
+
+function DocumentsSection({ datasource }: { datasource: string }) {
+  const qc2 = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<DocItem | null>(null);  // R1-L7
+  const [delErr, setDelErr] = useState<string | null>(null);
+  const docs = useQuery({
+    queryKey: ["rag-docs", datasource],
+    queryFn: () => api.get<DocItem[]>(`/system/document/documents?datasource_key=${datasource}`),
+  });
+  // 审查循环 B4:裸 promise 改受控 mutation——删除在途可关框/双击重复发请求
+  const delDoc = useMutation({
+    mutationFn: (id: string) => api.delete(`/system/document/documents/${id}`),
+    onSuccess: () => {
+      setRemoving(null);
+      setDelErr(null);
+      void qc2.invalidateQueries({ queryKey: ["rag-docs", datasource] });
+    },
+    onError: (e) => setDelErr(e instanceof Error ? e.message : "删除失败"),
+  });
+
+  async function doUpload(file: File) {
+    setBusy(true);
+    setErr(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("datasource_key", datasource);
+      await api.postForm("/system/document/upload", form);
+      void qc2.invalidateQueries({ queryKey: ["rag-docs", datasource] });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "上传失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="rounded-lg border p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium">业务文档(政策/流程/口径)</h2>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={() => fileRef.current?.click()}
+        >
+          {busy ? <LoaderIcon className="animate-spin" aria-hidden /> : <Upload className="size-3.5" aria-hidden />}
+          上传文档
+        </Button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".md,.txt,.pdf,.docx"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void doUpload(f);
+            e.target.value = ""; // 同文件重选触发(009 R2-S2 教训)
+          }}
+        />
+      </div>
+      {err && <p className="text-xs text-destructive" role="alert">{err}</p>}
+      <div className="divide-y">
+        {docs.isLoading ? (
+          <div className="py-4 text-center">
+            <LoaderIcon className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />
+          </div>
+        ) : (docs.data?.length ?? 0) === 0 ? (
+          <p className="py-4 text-center text-xs text-muted-foreground">
+            暂无业务文档——上传后知识型问题(是什么/政策/流程)将直接按文档回答
+          </p>
+        ) : (
+          docs.data?.map((d: DocItem) => (
+            <div key={d.id} className="flex items-center gap-2 py-2 text-sm">
+              <FileText className="size-4 text-muted-foreground" aria-hidden />
+              <span className="flex-1 truncate">{d.doc_name}</span>
+              <span className="text-xs text-muted-foreground">{d.block_count} 块</span>
+              <Button
+                size="icon"
+                variant="ghost"
+                aria-label="删除文档"
+                onClick={() => {
+                  setRemoving(d);
+                  setDelErr(null);
+                }}
+              >
+                <TrashIcon className="size-3.5" aria-hidden />
+              </Button>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* R1-L7:删除受控确认(与同页表知识同先例);失败对话框内可见 */}
+      <AlertDialog
+        open={removing !== null}
+        onOpenChange={(open) => {
+          if (!open && !delDoc.isPending) setRemoving(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除文档「{removing?.doc_name}」?</AlertDialogTitle>
+            <AlertDialogDescription>
+              删除后其全部知识块移除,知识问答不再引用该文档。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {delErr && <p className="text-xs text-destructive" role="alert">{delErr}</p>}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={delDoc.isPending}>再想想</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={delDoc.isPending}
+              onClick={() => removing && delDoc.mutate(removing.id)}
+            >
+              {delDoc.isPending ? "删除中…" : "删除"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </section>
   );
 }

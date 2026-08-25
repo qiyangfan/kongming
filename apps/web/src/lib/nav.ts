@@ -2,7 +2,7 @@
    菜单可见性过滤与路由级守卫同源消费,新增能力域入口=加一行配置,零改壳代码。 */
 
 import type { LucideIcon } from "lucide-react";
-import { MessageSquare, Settings2 } from "lucide-react";
+import { MessageSquare, Store, KeyRound, Settings2 } from "lucide-react";
 
 import type { MeOut } from "./api";
 
@@ -17,6 +17,8 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { id: "chat", label: "对话", icon: MessageSquare, to: "/chat", perm: "chat:execute" },
+  { id: "store", label: "商店", icon: Store, to: "/store", perm: "bot:run" },
+  { id: "portal", label: "门户", icon: KeyRound, to: "/portal", perm: "developer:portal" },
   { id: "admin", label: "管理", icon: Settings2, to: "/admin", perm: "system:user:manage" },
 ];
 

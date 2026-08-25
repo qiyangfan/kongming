@@ -12,6 +12,8 @@ chat_session + chat_message 持久化对话历史,首次问答自动新建会话
 
 会话标题两阶段生成:初始标题=首问前 30 字符(截断兜底,保证任何时刻标题可用);首个成功问答轮(assistant 状态 SUCCESS)完成后,系统 SHALL 调用 LLM 将首问改写为简洁概括标题并回写会话。LLM 改写输出 SHALL 经净化(去首尾空白/换行/包裹引号)并截断至标题列上限以内;改写失败或超时 SHALL 保持截断标题,不阻断、不延迟问答主链路响应。标题已被用户手动重命名(不再等于截断初始值)的会话 SHALL 跳过自动改写,人工标题不被覆盖。
 
+问答请求契约 SHALL 纯增 attachment_ids(图片附件引用,≤3 个,uuid 形态;缺省空=纯文本零回归,030);user 与 assistant 消息落库 SHALL 含附件引用摘要(filename/mime/size 三元组数组,不含内容),历史回显逐字同源;引用附件 MUST 先过归属校验(当前用户+租户,multimodal-input spec),任一无效 SHALL 404 同形且不进 agent 回调。
+
 #### Scenario: 首次问答自动新建会话
 - GIVEN 用户进入对话页(无当前会话)
 - WHEN 发起首次提问
@@ -49,6 +51,18 @@ chat_session + chat_message 持久化对话历史,首次问答自动新建会话
 - GIVEN 用户 A 的会话
 - WHEN 用户 B 尝试拉取该会话消息
 - THEN 返回会话不存在或无权访问(不区分二者,不泄露信息)
+
+#### Scenario: 带附件问答落库(030)
+
+- GIVEN 用户引用 2 件已上传附件提问
+- WHEN 问答完成
+- THEN 消息含附件摘要;刷新回显徽标;attachment_ids 经归属校验
+
+#### Scenario: 无附件零回归(030)
+
+- GIVEN 纯文本问答(无 attachment_ids)
+- WHEN 落库与回显
+- THEN 消息形态与本字段引入前一致(空数组/缺省不渲染)
 
 ### Requirement: 结果导出 CSV/Excel
 
@@ -416,3 +430,132 @@ sql/summary 事件透传,result/error 终态由控制面在落库后构造下发
 - GIVEN Agent 面不可达或返回非 200 或报文不可解析
 - WHEN 流式问答进行
 - THEN 下发 error 终态事件(友好文案,不暴露内部地址)并落 FAILED 消息
+
+### Requirement: Agent 模式选择(问答端点)
+
+问答查询端点(同步与流式)的请求 SHALL 纯增可选字段 agent_mode ∈ {recipe, react},缺省 recipe(既有 8 节点链路,零回归);agent_mode=react 时控制面 SHALL 改调 Agent 面 ReAct 内核端点,并在请求中按调用方角色集注入授权工具 schema 子集。调用方无任何工具权限点时 SHALL 注入空工具集(ReAct 退化为纯文本问答,不报错)。响应结构与既有问答端点逐字段同构;trace_id 生成与审计贯穿语义不变。
+
+#### Scenario: 缺省 recipe 零回归
+
+- GIVEN 问答请求不携带 agent_mode
+- WHEN 提交问题
+- THEN 走既有 8 节点链路,响应与行为与 019 之前一致
+
+#### Scenario: react 模式走 ReAct 内核
+
+- GIVEN 已登录用户含工具权限点,请求 agent_mode=react
+- WHEN 提交问题
+- THEN 控制面调用 Agent 面 ReAct 端点并注入该用户授权的工具 schema 集,响应字段与 recipe 同构
+
+#### Scenario: 无工具权限的 react 退化
+
+- GIVEN 已登录用户角色不含任何工具权限点,请求 agent_mode=react
+- WHEN 提交问题
+- THEN 注入空工具集,LLM 无工具可用,退化为纯文本回答(成功终态,不报错)
+
+#### Scenario: 非法 agent_mode 值拒绝
+
+- GIVEN 请求 agent_mode 为枚举外取值
+- WHEN 提交问题
+- THEN 传输层校验拒绝(422),不回调 Agent 面
+
+### Requirement: 写工具确认端点
+
+系统 SHALL 提供写工具确认端点:JWT 认证 + 归属校验(仅待确认调用所属会话的发起人可确认/拒绝,他人操作拒绝且不暴露存在性,并落拒绝审计)。确认请求携带确认标识与决策(confirm/reject);确认时控制面 SHALL 按待确认记录重放该工具执行,防御全量复校(用户-租户当前绑定/工具权限点/参数 JSON Schema 三项,适用人工确认路径;限流不适用),执行结果落审计并以 assistant 消息形式落执行回执(persist 语义与所属会话一致);拒绝时落审计、不执行、回执消息说明已取消。待确认记录 SHALL 有过期时间,过期确认按拒绝语义处理并说明。同一确认标识重复提交 SHALL 幂等(返回首次决策结果含执行结果,不重复执行)。
+
+#### Scenario: 确认后执行并回执
+
+- GIVEN 当前用户会话内存在未过期待确认调用
+- WHEN 提交 confirm 决策
+- THEN 工具被执行,落 EXECUTED 审计,会话内新增 assistant 回执消息(含执行结果摘要)
+
+#### Scenario: 拒绝执行
+
+- GIVEN 当前用户会话内存在未过期待确认调用
+- WHEN 提交 reject 决策
+- THEN 工具不执行,落审计,回执消息说明该操作已取消
+
+#### Scenario: 他人确认拒绝
+
+- GIVEN 待确认调用属于用户 A 的会话
+- WHEN 用户 B 携带该确认标识提交确认
+- THEN 拒绝(404 同形,不暴露存在性),不执行
+
+#### Scenario: 过期确认
+
+- GIVEN 待确认记录已过期
+- WHEN 提交 confirm 决策
+- THEN 按拒绝语义处理(不执行),回执说明已过期
+
+### Requirement: 问答链路输入输出护栏挂接
+
+问答查询端点(同步与流式)的用户输入 SHALL 在回调 Agent 面前过输入护栏(prompt-guardrails spec):拦截时落 REJECTED 消息(安全检查未通过文案,复用既有 REJECTED 分态)并返回 success=false,不回调 Agent 面;脱敏时脱敏值进链路(USER 消息落库与审计记原始问句的口径不变——审计 sys_sql_audit 不受影响,护栏事件落 sys_guardrail_audit)。Agent 面返回的自然语言答案/摘要 SHALL 在落库与返回前过输出护栏;输出护栏拦截时消息 status=SUCCESS(查询本身成功),摘要替换为安全文案。护栏故障 SHALL fail-closed(输入按拦截、输出按替换),不裸 500。
+
+#### Scenario: 输入拦截落 REJECTED
+
+- GIVEN 用户问句命中 injection 规则
+- WHEN 提交问答
+- THEN 响应 success=false、assistant 消息 status=REJECTED、文案为安全检查未通过
+- AND 不回调 Agent 面,sys_sql_audit 无记录,sys_guardrail_audit 落拦截记录
+
+#### Scenario: 输入脱敏正常问答
+
+- GIVEN 用户问句含手机号
+- WHEN 提交问答
+- THEN 问答正常进行(Agent 收到脱敏问句),sys_guardrail_audit 落脱敏记录
+
+#### Scenario: 输出泄漏拦截
+
+- GIVEN Agent 返回的摘要含系统提示词特征片段
+- WHEN 响应组装
+- THEN 摘要替换为安全文案,消息 SUCCESS(结果集照常),sys_guardrail_audit 落拦截记录
+
+#### Scenario: 护栏关闭项零行为变化
+
+- GIVEN 全部护栏规则被禁用(或无任何命中)
+- WHEN 提交问答
+- THEN 链路行为与护栏引入前逐字段一致(零回归)
+
+### Requirement: 记忆召回与显式记忆挂接
+
+问答查询端点的链路 SHALL 在回调 Agent 面前执行记忆召回(当前问句向量 top-3,user+tenant 双过滤),召回结果经 memory_hint 传给 Agent 面;召回服务失败 SHALL 降级无注入(问答主链路不受影响)。用户输入含「记住/请记住」意图词时 SHALL 走显式记忆形成路径(agent-memory spec):落库后答复确认,不再走数据问答链路。响应契约零变化(纯链路内增强)。
+
+#### Scenario: 召回注入
+
+- GIVEN 用户有非 dormant 记忆
+- WHEN 提交问答
+- THEN Agent 请求体含 memory_hint,问答正常进行
+
+#### Scenario: 召回失败降级
+
+- GIVEN 记忆召回服务异常(embedding 不可达等)
+- WHEN 提交问答
+- THEN 按无注入处理,问答正常完成,失败仅日志
+
+#### Scenario: 显式记忆短路
+
+- GIVEN 用户输入「请记住:我偏好月度口径」
+- WHEN 提交问答
+- THEN 落显式记忆,答复「已记住」,不产生 SQL 执行
+
+### Requirement: 消息 artifacts 字段
+
+问答响应与历史回显的消息模型 SHALL 纯增 artifacts 数组(conversation-artifacts spec 的派生语义);同步/流式/回显三路径同源派生,字段形态逐字一致;老消息(无 artifacts 档)回显时 SHALL 按要素确定性重算兜底(与 chart 重算同款先例),显式空档(如 agent 不可达 FAILED 轮)按档原样回显。
+
+#### Scenario: 三路径同源
+
+- GIVEN 同一轮问答经同步响应/流式 result/历史回显
+- WHEN 读取
+- THEN 三处 artifacts 内容一致
+
+#### Scenario: 老消息缺档重算
+
+- GIVEN 026 之前落库的消息(result_json 无 artifacts 键)
+- WHEN 回显
+- THEN 按 sql/chart/summary 要素确定性重算 artifacts,与新消息同形态渲染
+
+#### Scenario: 显式空档不重算
+
+- GIVEN agent 不可达的 FAILED 消息(result_json 显式 artifacts=[])
+- WHEN 回显
+- THEN artifacts 为空数组,不派生 document 卡(与当轮同步响应一致)

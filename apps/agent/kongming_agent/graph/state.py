@@ -47,3 +47,8 @@ class AgentState(TypedDict, total=False):
     insights: NotRequired[list[dict[str, str]]]
     stats: NotRequired[dict[str, object]]
     end_reason: NotRequired[str]  # 终态分类(blocked 等)
+    memory_hint: NotRequired[str]  # 022:召回的用户已知信息段(控制面注入)
+    relations_hint: NotRequired[str]  # 023:召回集合内 JOIN path 段
+    metric_hints: NotRequired[str]  # 023:命中指标口径段
+    doc_hints: NotRequired[list[dict[str, str]]]  # 024:文档段(source_ref+content)
+    has_attachments: NotRequired[bool]  # 036④:本轮含图片附件(直答分流信号)

@@ -7,6 +7,7 @@ ChatStoreError(013 构造反转:service 领域层由此零 sqlalchemy import)。
 """
 
 import functools
+import json
 from collections.abc import Callable, Coroutine
 from typing import Any, cast
 
@@ -114,10 +115,11 @@ class ChatRepository:
         row = (
             await self._s.execute(
                 text(
-                    "SELECT m.id, m.sql_text, s.datasource_key"
+                    "SELECT m.id, m.sql_text, m.session_id, s.datasource_key"
                     " FROM public.chat_message m"
                     " JOIN public.chat_session s ON s.id = m.session_id"
                     " WHERE m.id = :mid AND s.user_id = :u AND s.tenant_id = :t"
+                    " AND m.role = 'ASSISTANT'"  # 审查循环 B5:锚定 assistant 产出消息
                 ),
                 {"mid": message_id, "u": user_id, "t": tenant_id},
             )
@@ -234,14 +236,19 @@ class ChatRepository:
 
     async def list_messages(self, *, session_id: str) -> list[dict[str, object]]:
         """会话全部消息,创建时间升序(id ASC tiebreak,与补全取数对偶);
-        014 增 rating/corrected_sql 反馈状态列(回显用)。"""
+        014 增 rating/corrected_sql 反馈状态列(回显用);
+        026 增会话 datasource_key(JOIN 会话快照,artifacts 重算兜底用);
+        030 增 attachments(附件摘要回显)。"""
         rows = (
             await self._s.execute(
                 text(
-                    "SELECT id, role, question, sql_text, result_json, summary, status,"
-                    " rating, corrected_sql, feedback_comment"
-                    " FROM public.chat_message WHERE session_id = :s"
-                    " ORDER BY created_at ASC, id ASC"
+                    "SELECT m.id, m.role, m.question, m.sql_text, m.result_json,"
+                    " m.summary, m.status, m.rating, m.corrected_sql, m.feedback_comment,"
+                    " m.attachments, s.datasource_key"
+                    " FROM public.chat_message m"
+                    " JOIN public.chat_session s ON s.id = m.session_id"
+                    " WHERE m.session_id = :s"
+                    " ORDER BY m.created_at ASC, m.id ASC"
                 ),
                 {"s": session_id},
             )
@@ -272,13 +279,16 @@ class ChatRepository:
         result_json: str | None = None,
         summary: str | None = None,
         status: str,
+        attachments: list[dict[str, object]] | None = None,  # 030
     ) -> str:
         mid = str(uuid7())
         await self._s.execute(
             text(
                 "INSERT INTO public.chat_message"
-                " (id, session_id, role, question, sql_text, result_json, summary, status)"
-                " VALUES (:id, :s, :role, :q, :sql, :rj, :sum, :st)"
+                " (id, session_id, role, question, sql_text, result_json, summary,"
+                "  status, attachments)"
+                " VALUES (:id, :s, :role, :q, :sql, :rj, :sum, :st,"
+                "         CAST(:att AS jsonb))"
             ),
             {
                 "id": mid,
@@ -289,6 +299,7 @@ class ChatRepository:
                 "rj": result_json,
                 "sum": summary,
                 "st": status,
+                "att": json.dumps(attachments or [], ensure_ascii=False),
             },
         )
         return mid

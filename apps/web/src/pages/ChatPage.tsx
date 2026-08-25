@@ -7,14 +7,18 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Feather, Loader2, SendHorizontal, TriangleAlert } from "lucide-react";
+import { Feather, Loader2, Paperclip, SendHorizontal, TriangleAlert, X } from "lucide-react";
 import { useNavigate, useParams } from "react-router";
 
 import { AssistantCard } from "@/components/assistant-card";
-import { StreamCard } from "@/components/stream-card";
+import { StreamCard, mergeToolCall } from "@/components/stream-card";
+import { ToolConfirmCard } from "@/components/tool-confirm-card";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import {
   api,
@@ -22,7 +26,10 @@ import {
   type ChatQueryOut,
   type SessionMessageOut,
   type StreamStageOut,
+  type StreamToolCallOut,
 } from "@/lib/api";
+import { useAgentMode } from "@/lib/agent-mode-store";
+import { uploadAttachment } from "@/lib/chat-api";
 import { useDatasource } from "@/lib/datasource-store";
 import { useTenant } from "@/lib/tenant-store";
 
@@ -46,11 +53,24 @@ interface StreamingState {
   stages: StreamStageOut[];
   sql: string | null;
   summary: string;
+  toolCalls: StreamToolCallOut[];
 }
 
 /** 终态快照(R1-B1):result 到达即由 ChatQueryOut 乐观构造本轮消息渲染,
  * 消息历史 refetch 含该轮(message_id 命中)后自然替换——消灭「先清空后补位」
  * 的空白间隙;persist=false 无历史可对照时保留至下一轮/切换上下文。 */
+/** 030 附件徽标(user 气泡两处共用:历史回显与即时快照) */
+function AttachmentBadge({ items }: { items: { [key: string]: unknown }[] }) {
+  if (items.length === 0) return null;
+  return (
+    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+      <Paperclip className="size-3" aria-hidden />
+      {items.length} 张图片:
+      {items.map((a) => String(a.filename ?? "")).join(", ")}
+    </span>
+  );
+}
+
 function toSyntheticMessage(out: ChatQueryOut): SessionMessageOut {
   const status = out.success ? "SUCCESS" : out.verdict === "BLOCKED" ? "REJECTED" : "FAILED";
   return {
@@ -70,10 +90,14 @@ function toSyntheticMessage(out: ChatQueryOut): SessionMessageOut {
       stats: out.stats,
       chart: out.chart,
       error: out.error,
+      // 026:终态快照携带产物卡(与历史回显 MessageResultOut.artifacts 同形),
+      // 缺档空数组 → assistant-card 回落既有形态,与读档重算兜底口径一致
+      artifacts: out.artifacts ?? [],
     },
     rating: null,
     corrected_sql: null,
     feedback_comment: null,
+    attachments: out.attachments ?? [],  // 030:终态快照同源
   };
 }
 
@@ -93,6 +117,14 @@ export default function ChatPage() {
     null,
   );
   const [askError, setAskError] = useState<string | null>(null);
+  const agentMode = useAgentMode((s) => s.mode);
+  const setAgentMode = useAgentMode((s) => s.setMode);
+  // 019 待确认写工具(独立于 finalized 快照:快照退位由历史接管后确认卡
+  // 仍在,直到用户确认/拒绝或切换上下文——响应级瞬态,不落库不回显)
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    pending: ChatQueryOut["pending_tool_calls"];
+    sessionId: string;
+  } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   // 流发起时的上下文(守卫基准):迟到事件与当前不一致即丢弃(防串上下文)
@@ -141,6 +173,7 @@ export default function ChatPage() {
     setStreaming(null);
     setFinalized(null);
     setAskError(null);
+    setPendingConfirm(null); // 切换上下文丢弃待确认入口(瞬态语义)
   }, [sessionId, current, datasource]);
   useEffect(
     () => () => {
@@ -178,6 +211,12 @@ export default function ChatPage() {
     if (!inOriginCtx()) return;
     setStreaming(null);
     setAskError(null);
+    // 019:待确认调用独立留存(快照退位不带走确认入口);
+    // ?? [] 兜底:前后端版本错位(滚动部署)缺键时不炸(R1-D3)
+    const pendingCalls = out.pending_tool_calls ?? [];
+    if (pendingCalls.length > 0 && out.session_id) {
+      setPendingConfirm({ pending: pendingCalls, sessionId: out.session_id });
+    }
     setFinalized({ question, out }); // 乐观渲染本轮,历史 refetch 后替换(R1-B1)
     // 先导航(消空态闪回),再失效侧栏;新会话 URL 即状态(与原同步路径同构);
     // 自建导航打标——取消闸据此豁免(R2-B2)
@@ -193,29 +232,80 @@ export default function ChatPage() {
     }
   }
 
-  function finalizeError(message: string, question: string): void {
+  function finalizeError(
+    message: string,
+    question: string,
+    attSnapshot: { id: string; filename: string }[] = [],
+  ): void {
     if (!inOriginCtx()) return;
     setStreaming(null);
     setAskError(message);
     // 失败回填,但尊重用户等待期间的新输入
     setDraft((prev) => (prev.trim() ? prev : question));
+    // R1-F4:传输层失败时附件未被消费(agent 未取件),chips 恢复可重试;
+    // 尊重等待期间用户新贴的附件(去重合并)
+    if (attSnapshot.length) {
+      setAttachments((prev) => {
+        const seen = new Set(prev.map((a) => a.id));
+        return [...prev, ...attSnapshot.filter((a) => !seen.has(a.id))];
+      });
+    }
+  }
+
+  // 030:附件状态(已上传附件 chips;发送后清空)
+  const [attachments, setAttachments] = useState<
+    { id: string; filename: string }[]
+  >([]);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // 同文件可重选(009 R2-S2 教训)
+    if (!file) return;
+    if (attachments.length >= 3) {
+      setAskError("一次最多引用 3 张图片。");
+      return;
+    }
+    setUploading(true);
+    setAskError(null);
+    try {
+      const out = await uploadAttachment(file);
+      setAttachments((prev) => [
+        ...prev,
+        { id: out.attachment_id, filename: out.filename },
+      ]);
+    } catch (err) {
+      setAskError(err instanceof Error ? err.message : "附件上传未成,请稍后再试。");
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function submit(): Promise<void> {
     const q = draft.trim();
-    if (!q || streaming !== null) return; // 防重复提交
+    // R1-S2:与按钮/契约对齐(question min_length=1)——曾放行纯附件,
+    // Enter 可绕过按钮禁用直撞 422 且 chips 已清空
+    // 审查循环 B1:上传中禁发——此时提交 attIds 不含上传中附件,
+    // 问答无图且完成后 chips 孤立出现(与按钮禁用态对齐)
+    if (!q || uploading || streaming !== null) return; // 防重复提交
+    const attIds = attachments.map((a) => a.id);
+    const attSnapshot = attachments; // R1-F4:失败恢复用快照
+    setAttachments([]);
     setDraft("");
     setAskError(null);
     setFinalized(null); // 新一轮提问顶掉上一轮快照
     const ac = new AbortController();
     abortRef.current = ac;
     streamCtxRef.current = { sid: sessionId ?? null, tenant: current, ds: datasource };
-    setStreaming({ question: q, stages: [], sql: null, summary: "" });
+    setStreaming({ question: q, stages: [], sql: null, summary: "", toolCalls: [] });
     try {
       await streamChatQuery(
         {
           question: q,
           datasource_key: datasource, // 选中的数据源随查询发送(008)
+          agent_mode: agentMode, // 019:ReAct 内核开关(缺省 recipe 零回归)
+          ...(attIds.length ? { attachment_ids: attIds } : {}), // 030
           ...(sessionId ? { session_id: sessionId } : {}),
         },
         {
@@ -239,8 +329,14 @@ export default function ChatPage() {
             // 打字机:逐事件追加(契约语义;当前实现为单条完整 delta)
             setStreaming((prev) => (prev ? { ...prev, summary: prev.summary + d.delta } : prev));
           },
+          onToolCall: (d) => {
+            if (!inOriginCtx()) return;
+            setStreaming((prev) =>
+              prev ? { ...prev, toolCalls: mergeToolCall(prev.toolCalls, d) } : prev,
+            );
+          },
           onResult: (out) => finalizeOk(out, q),
-          onError: (d) => finalizeError(d.error, q),
+          onError: (d) => finalizeError(d.error, q, attSnapshot),
         },
         ac.signal,
       );
@@ -267,10 +363,11 @@ export default function ChatPage() {
             <>
               {messages.data?.map((m) =>
                 m.role === "USER" ? (
-                  <div key={m.id} className="flex justify-end">
+                  <div key={m.id} className="flex flex-col items-end gap-1">
                     <p className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2 text-sm leading-relaxed text-primary-foreground">
                       {m.question}
                     </p>
+                    <AttachmentBadge items={m.attachments ?? []} />
                   </div>
                 ) : (
                   <div key={m.id} className="max-w-full">
@@ -280,10 +377,11 @@ export default function ChatPage() {
               )}
               {finalized && !streaming && (
                 <>
-                  <div className="flex justify-end">
+                  <div className="flex flex-col items-end gap-1">
                     <p className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2 text-sm text-primary-foreground">
                       {finalized.question}
                     </p>
+                    <AttachmentBadge items={finalized.out.attachments ?? []} />
                   </div>
                   <div className="max-w-full">
                     <AssistantCard msg={toSyntheticMessage(finalized.out)} />
@@ -302,9 +400,17 @@ export default function ChatPage() {
                       stages={streaming.stages}
                       sql={streaming.sql}
                       summary={streaming.summary}
+                      toolCalls={streaming.toolCalls}
                     />
                   </div>
                 </>
+              )}
+              {pendingConfirm && (
+                <ToolConfirmCard
+                  pending={pendingConfirm.pending}
+                  sessionId={pendingConfirm.sessionId}
+                  onAllResolved={() => setPendingConfirm(null)}
+                />
               )}
               {askError && (
                 <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
@@ -322,8 +428,67 @@ export default function ChatPage() {
       </ScrollArea>
 
       <div className="border-t border-border bg-background px-4 py-3">
-        <div className="mx-auto flex max-w-3xl items-end gap-2">
-          <Textarea
+        <div className="mx-auto max-w-3xl">
+          {/* 019:Agent 内核开关(自主工具调用=ReAct;缺省 recipe 零回归) */}
+          <div className="mb-2 flex items-center justify-end gap-2">
+            <Switch
+              id="agent-mode"
+              checked={agentMode === "react"}
+              onCheckedChange={(on) => setAgentMode(on ? "react" : "recipe")}
+              aria-label="自主工具调用模式"
+            />
+            <Label
+              htmlFor="agent-mode"
+              className="cursor-pointer text-xs text-muted-foreground"
+            >
+              自主工具调用(ReAct)
+            </Label>
+          </div>
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pb-1">
+              {attachments.map((a) => (
+                <Badge key={a.id} variant="secondary" className="font-normal">
+                  <Paperclip className="size-3" aria-hidden />
+                  {a.filename}
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={`移除附件 ${a.filename}`}
+                    onClick={() =>
+                      setAttachments((prev) => prev.filter((x) => x.id !== a.id))
+                    }
+                  >
+                    <X aria-hidden />
+                  </Button>
+                </Badge>
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".png,.jpg,.jpeg,.webp,.gif"
+              className="hidden"
+              aria-hidden
+              tabIndex={-1}
+              onChange={(e) => void onPickFile(e)}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading || streaming !== null}
+              aria-label="添加图片附件"
+              title="添加图片(png/jpg/webp/gif,≤10MB)"
+            >
+              {uploading ? (
+                <Loader2 className="animate-spin" aria-hidden />
+              ) : (
+                <Paperclip aria-hidden />
+              )}
+            </Button>
+            <Textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -340,7 +505,7 @@ export default function ChatPage() {
           <Button
             size="icon"
             onClick={() => void submit()}
-            disabled={!draft.trim() || streaming !== null}
+            disabled={!draft.trim() || uploading || streaming !== null}
             aria-label="发送"
           >
             {streaming ? (
@@ -349,6 +514,7 @@ export default function ChatPage() {
               <SendHorizontal aria-hidden />
             )}
           </Button>
+          </div>
         </div>
       </div>
     </div>

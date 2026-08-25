@@ -27,7 +27,14 @@ class _Llm:
     def __init__(self, answers: list[str]) -> None:
         self.answers = list(answers)
 
-    async def chat(self, system: str, user: str, *, temperature: float = 0.2) -> str:
+    async def chat(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.2,
+        **_kw: object,  # 021:task/trace_id/tenant_key 吸收
+    ) -> str:
         if not self.answers:
             raise LlmError("no scripted answer")
         return self.answers.pop(0)
@@ -254,7 +261,14 @@ async def test_stream_empty_result_summary_still_emitted(
 class _BoomLlm:
     """非 LlmError 的意外异常(评审 R3:图意外异常收敛 error 终态)。"""
 
-    async def chat(self, system: str, user: str, *, temperature: float = 0.2) -> str:
+    async def chat(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.2,
+        **_kw: object,  # 021:task/trace_id/tenant_key 吸收
+    ) -> str:
         raise RuntimeError("unexpected boom")
 
 

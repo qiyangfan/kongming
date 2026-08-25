@@ -29,6 +29,7 @@ from kongming.datasource.ports import (
     DatasourceRepo,
     PoolEvictor,
     RagCtxEvictor,
+    SemanticCleaner,
 )
 from kongming.uuid7 import uuid7
 
@@ -184,12 +185,22 @@ class DatasourceService:
     # ---- 删除(物理删) ----
 
     async def delete(
-        self, *, actor_id: str, ds_id: str, ctx_evictor: RagCtxEvictor | None = None
+        self,
+        *,
+        actor_id: str,
+        ds_id: str,
+        ctx_evictor: RagCtxEvictor | None = None,
+        semantic_cleaner: "SemanticCleaner | None" = None,
     ) -> None:
         current = await self._repo.get(ds_id)
         if current is None:
             raise DatasourceNotFound("数据源不存在")
         await self._repo.delete(ds_id)
+        # 023:语义层级联清理(关系+指标,同事务;spec「数据源删除级联」)
+        if semantic_cleaner is not None:
+            await semantic_cleaner.delete_by_datasource(
+                tenant_id=current.tenant_id, datasource_key=current.datasource_key
+            )
         await self._repo.log_oper(
             actor_id, "datasource.delete", current.datasource_key, {"datasource_id": ds_id}
         )

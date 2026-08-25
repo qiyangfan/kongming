@@ -25,12 +25,8 @@ class StubLlm:
         self.max_tokens_seen: int | None = None
 
     async def chat(
-        self,
-        system: str,
-        user: str,
-        *,
-        temperature: float = 0.2,
-        max_tokens: int | None = None,
+        self, system: str, user: str, *, temperature: float = 0.2,
+        max_tokens: int | None = None, **_kw: object,
     ) -> str:
         self.calls.append((system, user))
         self.max_tokens_seen = max_tokens

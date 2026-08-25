@@ -61,6 +61,7 @@ async def rewrite_title(question: str, llm: LlmClient) -> str:
             _USER_PROMPT_TEMPLATE.format(question=q),
             temperature=0.3,
             max_tokens=60,  # 标题 ≤20 字,封顶防长跑输出烧 token(design D1)
+            task="TITLER",  # 021:任务路由(缺省主模型)
         )
     except LlmError as e:
         raise TitleError(f"LLM 调用失败: {e}") from e

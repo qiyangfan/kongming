@@ -27,7 +27,14 @@ class FakeLlm:
         self.boom = boom
         self.calls: list[tuple[str, str, float]] = []
 
-    async def chat(self, system: str, user: str, *, temperature: float = 0.2) -> str:
+    async def chat(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.2,
+        **_kw: object,  # 021:task/trace_id/tenant_key 吸收
+    ) -> str:
         self.calls.append((system, user, temperature))
         if self.boom:
             raise LlmError("LLM 调用失败: 模拟故障")
@@ -197,6 +204,30 @@ async def test_retrieve_rag_empty_falls_back_introspection(
     out = await nodes.retrieve(_state())
     assert "tenant_default.goods" in str(out["schema_hint"])  # 内省兜底
     assert out["history_sql"] == "SELECT 9"  # 历史命中与表说明命中互相独立
+
+
+async def test_retrieve_introspect_fail_keeps_semantic_hints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """审查循环 F5:召回成功(schema 空)+内省失败分支不得丢语义段——
+    relations/metric 与内省成败无关,与兄弟分支同口径透传。"""
+    from kongming_agent.apiclient import RagContext
+
+    api = FakeApi(
+        meta=None,
+        rag=RagContext(
+            schema_hint="",
+            history_sql="SELECT 9",
+            relations_hint="orders -> customers",
+            metric_hints="GMV=SUM(amount)",
+        ),
+    )
+    _install(monkeypatch, FakeLlm(), api)
+    out = await nodes.retrieve(_state())
+    assert out["schema_hint"] == ""
+    assert out["history_sql"] == "SELECT 9"
+    assert out["relations_hint"] == "orders -> customers"
+    assert out["metric_hints"] == "GMV=SUM(amount)"
 
 
 async def test_retrieve_history_only_still_feeds_generate(
@@ -499,3 +530,44 @@ async def test_summarize_context_grounded_with_stats(monkeypatch: pytest.MonkeyP
     assert "总行数：3" in user
     assert "qty_max" in user and "10" in user  # 本地统计进上下文
     assert "前5行" in user
+
+
+async def test_summarize_context_includes_table_hint_with_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """037:上下文含 schema_hint 表说明段(表名(别名) 列 -- 表说明)。
+
+    只取召回形态表头行(R1-B1):示例行剔除省 token,内省回退形态
+    (「表 x.y：…」+「  - 」列行,无别名且全限定名与称谓规则相悖)不注入。
+    """
+    fake = FakeLlm(['{"summary":"x"}'])
+    _install(monkeypatch, fake, FakeApi())
+    exe = ExecutionResult(verdict="PASS", columns=["qty"], rows=[[3]])
+    schema_hint = (
+        "tenant_default.goods(商品表)(id integer, name varchar) -- 商品信息\n"
+        "  示例:SELECT count(*) FROM tenant_default.goods\n"
+        "tenant_default.orders(id bigint) -- 订单主表\n"
+        "表 tenant_default.inventory：库存\n"
+        "  - id bigint\n"
+    )
+    await nodes.summarize(_state(execution=exe, schema_hint=schema_hint))
+    user = fake.calls[0][1]
+    assert "goods(商品表)" in user  # 别名随表说明段注入
+    assert "-- 订单主表" in user  # 无 alias 表:表说明中文可见(称谓回退依据)
+    assert "示例:" not in user  # 示例行剔除省 token
+    assert "表 tenant_default.inventory" not in user  # 内省形态不注入(R1-B1)
+    assert "- id bigint" not in user
+    # 无 alias 表不产出「表名 -> 列清单」形态(正则解析垃圾,实施期抓回)
+    assert "orders ->" not in user
+
+
+async def test_summarize_context_no_schema_hint_no_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """schema_hint 空:不注入表说明段(018 上下文形态零回归)。"""
+    fake = FakeLlm(['{"summary":"x"}'])
+    _install(monkeypatch, fake, FakeApi())
+    exe = ExecutionResult(verdict="PASS", columns=["qty"], rows=[[3]])
+    await nodes.summarize(_state(execution=exe))
+    user = fake.calls[0][1]
+    assert "所涉表" not in user
