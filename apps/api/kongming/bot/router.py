@@ -158,24 +158,28 @@ def _get_service(
         _BotGuardrailAdapter(),
         SqlOperLogRepo(session),  # R1-L2:写操作审计
         _McpDynamicToolLister(session),  # 028
-        _UsageSinkAdapter(session),  # 035:bot 用量请求内落库
+        _UsageSinkAdapter(),  # 035:bot 用量请求内落库(独立短会话,B1-B9)
     )
 
 
 class _UsageSinkAdapter:
-    """035 UsageSink 适配(llmusage 仓储;组合根装配,保 bot.service 零框架)。"""
+    """035 UsageSink 适配(llmusage 仓储;组合根装配,保 bot.service 零框架)。
 
-    def __init__(self, session: AsyncSession) -> None:
-        from kongming.llmusage.repository import SqlLlmUsageRepo
-
-        self._r = SqlLlmUsageRepo(session)
+    独立短会话落库(B1-B9):sink 在 agent 分钟级长外呼之后才被调用,若复用
+    请求级会话,外呼期间白占连接池配额,且 sink 自 commit 会提前提交请求会话
+    上的挂起写——与 _BotGuardrailAdapter 同款独立短会话范式。
+    """
 
     async def insert_bot_usage(
         self, records: list[dict[str, object]], *, tenant_id: str, bot_id: str
     ) -> int:
-        return await self._r.insert_bot_usage_batch(
-            records, tenant_id=tenant_id, bot_id=bot_id
-        )
+        from kongming.db import get_sessionmaker
+        from kongming.llmusage.repository import SqlLlmUsageRepo
+
+        async with get_sessionmaker()() as s:
+            return await SqlLlmUsageRepo(s).insert_bot_usage_batch(
+                records, tenant_id=tenant_id, bot_id=bot_id
+            )
 
 
 async def _team_ids(session: AsyncSession, user_id: str) -> list[str]:
@@ -195,37 +199,14 @@ async def _team_role(session: AsyncSession, user_id: str, team_id: str | None) -
 
 
 async def _tenant_of(session: AsyncSession, user_id: str, tenant_key: str | None) -> str:
-    """与 memory/semantic 同构(ACTIVE+default 优先+tiebreak)。"""
-    from sqlalchemy import text
+    """与 memory/semantic 同构(ACTIVE+default 优先+tiebreak)。
+    SQL 单一真理源=kongming.tenant.resolve_tenant(B1-B10 收口)。"""
+    from kongming.tenant import resolve_tenant
 
-    if tenant_key is not None:
-        row = (
-            await session.execute(
-                text(
-                    "SELECT t.id FROM public.sys_tenant t"
-                    " JOIN public.sys_user_tenant ut ON ut.tenant_id=t.id"
-                    " WHERE ut.user_id=:u AND t.tenant_key=:k AND t.status='ACTIVE'"
-                ),
-                {"u": user_id, "k": tenant_key},
-            )
-        ).scalar_one_or_none()
-        if row is None:
-            raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
-        return str(row)
-    row = (
-        await session.execute(
-            text(
-                "SELECT t.id FROM public.sys_tenant t"
-                " JOIN public.sys_user_tenant ut ON ut.tenant_id=t.id"
-                " WHERE ut.user_id=:u AND t.status='ACTIVE'"
-                " ORDER BY (t.tenant_key = 'default') DESC, ut.granted_at ASC, t.id LIMIT 1"
-            ),
-            {"u": user_id},
-        )
-    ).scalar_one_or_none()
-    if row is None:
+    resolved = await resolve_tenant(session, user_id=user_id, tenant_key=tenant_key)
+    if resolved is None:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
-    return str(row)
+    return resolved[0]
 
 
 # ── 管理端点(登录+chat:execute;归属收口创建者或超管) ──
@@ -770,7 +751,12 @@ async def openai_chat(
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": str(out["summary"])},
+                # R2-F1:失败形态 summary 为空时 error 兜底(触顶/护栏拒绝/
+                # 不可用)——集成方不再拿到静默空 content;error 已过输出护栏
+                "message": {
+                    "role": "assistant",
+                    "content": str(out["summary"] or out["error"] or ""),
+                },
                 "finish_reason": "stop",
             }
         ],

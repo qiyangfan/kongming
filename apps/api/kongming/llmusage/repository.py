@@ -182,9 +182,12 @@ class SqlLlmUsageRepo:
         task: str | None = None,
         status: str | None = None,
         trace_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> tuple[int, list[dict[str, Any]]]:
-        """038:明细分页(created_at 倒序;model/task/status/trace_id 筛选)。
-        返回 (total, rows);tenant 未反解归 unknown。"""
+        """038:明细分页(created_at 倒序;model/task/status/trace_id/tenant 筛选)。
+        返回 (total, rows);tenant 未反解归 unknown(展示口径);租户筛选经
+        u.tenant_id 直滤——该租户全部行均返回,含 tenant_key 反解失败展示为
+        unknown 的行(展示 unknown ≠ 无 tenant_id,038③ 清偿口径)。"""
         conditions = ["1=1"]
         params: dict[str, object] = {"limit": limit, "offset": offset}
         if model:
@@ -199,6 +202,9 @@ class SqlLlmUsageRepo:
         if trace_id:
             conditions.append("u.trace_id = :trace_id")
             params["trace_id"] = trace_id
+        if tenant_id:
+            conditions.append("u.tenant_id = CAST(:tenant_id AS uuid)")
+            params["tenant_id"] = tenant_id
         where = " AND ".join(conditions)
         total = int(
             (

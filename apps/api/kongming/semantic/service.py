@@ -45,7 +45,9 @@ class SemanticService:
     ) -> tuple[str, str]:
         """召回注入段组装(spec:仅召回集合内关系 + 命中指标 top-5)。"""
         relations: list[TableRelation] = []
-        if len(tables) >= 2:
+        # 非空即查(023①:单表自引用 FK 也注入——ANY(:ts) 天然收窄,单表
+        # 集合只命中自引用行,多表行为不变)
+        if tables:
             rows = await self._repo.relations_within(
                 tenant_id=tenant_id, datasource_key=datasource_key, tables=tables
             )

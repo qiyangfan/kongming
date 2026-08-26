@@ -11,7 +11,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.repository import SqlOperLogRepo
@@ -55,38 +54,14 @@ def _get_service(
 async def _tenant_id(
     session: AsyncSession, user_id: str, tenant_key: str | None
 ) -> str:
-    """X-Tenant-Id 白名单复校(与 chat._resolve_tenant 同构);缺省取默认。"""
-    if tenant_key is not None:
-        row = (
-            await session.execute(
-                text(
-                    "SELECT t.id FROM public.sys_tenant t"
-                    " JOIN public.sys_user_tenant ut ON ut.tenant_id=t.id"
-                    " WHERE ut.user_id=:u AND t.tenant_key=:k AND t.status='ACTIVE'"
-                ),
-                {"u": user_id, "k": tenant_key},
-            )
-        ).scalar_one_or_none()
-        if row is None:
-            raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
-        return str(row)
-    row = (
-        await session.execute(
-            text(
-                "SELECT t.id FROM public.sys_tenant t"
-                " JOIN public.sys_user_tenant ut ON ut.tenant_id=t.id"
-                " WHERE ut.user_id=:u AND t.status='ACTIVE'"
-                # R1-M4:与 chat find_default_tenant 逐字同构(default 优先+
-                # 最早授予+ACTIVE 过滤+t.id tiebreak)
-                " ORDER BY (t.tenant_key = 'default') DESC, ut.granted_at ASC, t.id"
-                " LIMIT 1"
-            ),
-            {"u": user_id},
-        )
-    ).scalar_one_or_none()
-    if row is None:
+    """X-Tenant-Id 白名单复校(与 chat._resolve_tenant 同构);缺省取默认。
+    SQL 单一真理源=kongming.tenant.resolve_tenant(B1-B10 收口)。"""
+    from kongming.tenant import resolve_tenant
+
+    resolved = await resolve_tenant(session, user_id=user_id, tenant_key=tenant_key)
+    if resolved is None:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
-    return str(row)
+    return resolved[0]
 
 
 class MemoryItemOut(BaseModel):

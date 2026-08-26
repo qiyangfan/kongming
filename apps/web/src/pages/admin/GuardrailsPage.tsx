@@ -26,6 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { QueryErrorAlert } from "@/components/query-error";
 import {
   guardrailAuditPage,
   guardrailRules,
@@ -144,7 +145,13 @@ export default function GuardrailsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rules.isLoading ? (
+            {rules.isError ? (
+              <TableRow>
+                <TableCell colSpan={6}>
+                  <QueryErrorAlert />
+                </TableCell>
+              </TableRow>
+            ) : rules.isLoading ? (
               <TableRow>
                 <TableCell colSpan={6} className="py-6 text-center">
                   <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />
@@ -294,7 +301,13 @@ export default function GuardrailsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {audit.isLoading ? (
+              {audit.isError ? (
+                <TableRow>
+                  <TableCell colSpan={5}>
+                    <QueryErrorAlert />
+                  </TableCell>
+                </TableRow>
+              ) : audit.isLoading ? (
                 <TableRow>
                   <TableCell colSpan={5} className="py-6 text-center">
                     <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />

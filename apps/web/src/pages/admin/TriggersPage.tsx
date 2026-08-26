@@ -44,6 +44,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { QueryErrorAlert } from "@/components/query-error";
 import {
   createTrigger,
   deleteTrigger,
@@ -195,7 +196,13 @@ export default function TriggersPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {(triggers.data ?? []).length === 0 ? (
+            {triggers.isError ? (
+              <TableRow>
+                <TableCell colSpan={6}>
+                  <QueryErrorAlert />
+                </TableCell>
+              </TableRow>
+            ) : (triggers.data ?? []).length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                   尚未配置触发器。
@@ -489,9 +496,12 @@ export default function TriggersPage() {
         <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>执行历史「{historyOf?.name}」</DialogTitle>
+            <DialogDescription>按时间倒序的触发执行记录。</DialogDescription>
           </DialogHeader>
           <div className="max-h-96 space-y-2 overflow-y-auto">
-            {(runs.data?.items ?? []).length === 0 ? (
+            {runs.isError ? (
+              <QueryErrorAlert />
+            ) : (runs.data?.items ?? []).length === 0 ? (
               <p className="py-6 text-center text-sm text-muted-foreground">暂无记录。</p>
             ) : (
               (runs.data?.items ?? []).map((r) => (

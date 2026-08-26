@@ -16,6 +16,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kongming import tenant
 from kongming.chat.ports import ChatStoreError
 from kongming.db import uuid7
 from kongming.like import like_pattern
@@ -47,36 +48,13 @@ class ChatRepository:
         self._s = session
 
     async def find_bound_tenant(self, *, user_id: str, tenant_key: str) -> str | None:
-        """显式租户白名单校验:命中(绑定 + ACTIVE)返回 tenant_id,否则 None。"""
-        tid = (
-            await self._s.execute(
-                text(
-                    "SELECT t.id FROM public.sys_tenant t"
-                    " JOIN public.sys_user_tenant ut ON ut.tenant_id = t.id"
-                    " WHERE t.tenant_key = :k AND ut.user_id = :u AND t.status = 'ACTIVE'"
-                ),
-                {"k": tenant_key, "u": user_id},
-            )
-        ).scalar_one_or_none()
-        return None if tid is None else str(tid)
+        """显式租户白名单校验:命中(绑定 + ACTIVE)返回 tenant_id,否则 None。
+        单一真理源在 kongming.tenant(B1-B10 收口,五处同构 SQL 唯一定义)。"""
+        return await tenant.bound_tenant_id(self._s, user_id=user_id, tenant_key=tenant_key)
 
     async def find_default_tenant(self, *, user_id: str) -> tuple[str, str] | None:
         """用户默认租户:default 优先,否则最早授予(multitenant spec);返回 (id, key)。"""
-        row = (
-            await self._s.execute(
-                text(
-                    "SELECT t.id, t.tenant_key FROM public.sys_tenant t"
-                    " JOIN public.sys_user_tenant ut ON ut.tenant_id = t.id"
-                    " WHERE ut.user_id = :u AND t.status = 'ACTIVE'"
-                    # t.id tiebreak:granted_at 完全相等(同事务双授)时确定性收口,
-                    # 与 datasource 域同名查询逐字同构(008 R2-N1)
-                    " ORDER BY (t.tenant_key = 'default') DESC, ut.granted_at ASC, t.id"
-                    " LIMIT 1"
-                ),
-                {"u": user_id},
-            )
-        ).mappings().one_or_none()
-        return None if row is None else (str(row["id"]), str(row["tenant_key"]))
+        return await tenant.default_tenant(self._s, user_id=user_id)
 
     @_store_error_boundary
     async def create_session(

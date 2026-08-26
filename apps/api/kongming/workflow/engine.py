@@ -70,6 +70,7 @@ class _Engine:
         user_id: str,
         deadline: float,
         step_cap: int,
+        node_runs: list[NodeRun] | None = None,
     ) -> None:
         self._sql, self._http, self._agent = runners
         self._trace_id = trace_id
@@ -78,6 +79,8 @@ class _Engine:
         self._deadline = deadline
         self._step_cap = step_cap
         self._steps = 0
+        # 循环子节点逐次记入顶层快照(与 run_dag 同一列表;B2-B4 归因粒度)
+        self._node_runs: list[NodeRun] = node_runs if node_runs is not None else []
 
     def _tick(self) -> None:
         self._steps += 1
@@ -191,6 +194,7 @@ class _Engine:
                 f"循环数组 {len(items)} 项超上限 {max_iter}(硬顶 {_HARD_ITER_CAP})"
             )
         collected: list[Any] = []
+        sub_by_id = {n.id: n for n in body_nodes}
         for idx, item in enumerate(items):
             self._tick()  # 迭代计入步数
             sub_context = dict(context)
@@ -198,15 +202,50 @@ class _Engine:
             for sub in _topo_order(body_nodes):
                 if sub.id in sub_context:
                     continue
+                # B2-B4:子节点逐次记入快照(迭代标记形态 <loop>.<i>.<sub>)
+                sub_id = f"{node.id}.{idx}.{sub.id}"
                 # R1-J2:子段选路与顶层同构(condition 门控+SKIPPED 传播)
-                if _should_skip(sub, sub_context):
+                if _should_skip(sub, sub_context, sub_by_id):
+                    self._node_runs.append(NodeRun(node_id=sub_id, status="SKIPPED"))
                     sub_context[sub.id] = {"_status": "SKIPPED", "outputs": {}}
                     continue
-                outputs = await self.execute_node(sub, sub_context)
+                sub_started = time.monotonic()
+                try:
+                    outputs = await self.execute_node(sub, sub_context)
+                except NodeFailed as e:
+                    # 失败按带迭代标记的子节点 id 归因(re-raise 由顶层
+                    # 收敛 loop 节点行——双行并存,子级可精确溯源)
+                    self._node_runs.append(
+                        NodeRun(
+                            node_id=sub_id,
+                            status="FAILED",
+                            error=str(e),
+                            duration_ms=int((time.monotonic() - sub_started) * 1000),
+                        )
+                    )
+                    raise
+                except Exception as e:  # noqa: BLE001  # 未知异常同记行后穿透(顶层统一收敛)
+                    self._node_runs.append(
+                        NodeRun(
+                            node_id=sub_id,
+                            status="FAILED",
+                            error=f"{type(e).__name__}: {str(e)[:300]}",
+                            duration_ms=int((time.monotonic() - sub_started) * 1000),
+                        )
+                    )
+                    raise
                 sub_context[sub.id] = {
                     "_status": "SUCCESS",
                     "outputs": copy.deepcopy(outputs),
                 }
+                self._node_runs.append(
+                    NodeRun(
+                        node_id=sub_id,
+                        status="SUCCESS",
+                        outputs=copy.deepcopy(outputs),
+                        duration_ms=int((time.monotonic() - sub_started) * 1000),
+                    )
+                )
             last = body_nodes[-1].id
             tail = sub_context.get(last, {}).get("outputs", {})
             collected.append(copy.deepcopy(tail.get("value", tail)))
@@ -230,13 +269,19 @@ def _topo_order(nodes: list[NodeDef]) -> list[NodeDef]:
     return out
 
 
-def _should_skip(node: NodeDef, context: dict[str, Any]) -> bool:
-    """跳过判定:任一依赖 SKIPPED 传播;条件门(dep 为 condition 节点时,
-    按本节点 config.on[缺省 "true"] 与 dep.outputs.result 比对)。"""
+def _should_skip(
+    node: NodeDef, context: dict[str, Any], by_id: dict[str, NodeDef]
+) -> bool:
+    """跳过判定:任一依赖 SKIPPED 传播;条件门仅当依赖是 condition 节点
+    (按本节点 config.on[缺省 "true"] 与 dep.outputs.result 比对)——
+    其他类型节点产出 bool 型 result 键不触发选路(B2-B6 收紧)。"""
     for dep in node.depends_on:
         dep_state = context.get(dep) or {}
         if dep_state.get("_status") == "SKIPPED":
             return True
+        dep_def = by_id.get(dep)
+        if dep_def is None or dep_def.type != "condition":
+            continue  # 条件门仅对 condition 前驱生效
         dep_outputs = dep_state.get("outputs") or {}
         if "result" in dep_outputs and isinstance(dep_outputs.get("result"), bool):
             on = str(node.config.get("on") or "true")
@@ -261,6 +306,7 @@ async def run_dag(
 ) -> RunOutcome:
     """引擎入口:拓扑序逐节点执行;fail-fast;超时/步数结构化终态。"""
     started = time.monotonic()
+    node_runs: list[NodeRun] = []
     engine = _Engine(
         (sql, http, agent),
         trace_id=trace_id,
@@ -268,14 +314,15 @@ async def run_dag(
         user_id=user_id,
         deadline=started + timeout_sec,
         step_cap=step_cap,
+        node_runs=node_runs,
     )
     context: dict[str, Any] = {"inputs": copy.deepcopy(inputs)}
-    node_runs: list[NodeRun] = []
+    by_id = {n.id: n for n in nodes}
     outcome_status = "SUCCESS"
     outcome_error = ""
     try:
         for node in _topo_order(nodes):
-            if _should_skip(node, context):
+            if _should_skip(node, context, by_id):
                 node_runs.append(NodeRun(node_id=node.id, status="SKIPPED"))
                 context[node.id] = {"_status": "SKIPPED", "outputs": {}}
                 continue
@@ -285,32 +332,45 @@ async def run_dag(
                 outcome_status = "TIMEOUT"
                 outcome_error = "全局超时"
                 break
+            # 节点级预算(挂死节点可中断);task 显式持有以区分超时来源:
+            # wait_for 到期 ⇒ task 被其取消(cancelled ⇒ 真·全局预算超时);
+            # 节点内源 TimeoutError(socket/驱动语句超时)透传 ⇒ task 未被
+            # 取消——按节点失败归类,不得误标 TIMEOUT(B2-B5)
+            task = asyncio.create_task(engine.execute_node(node, context))
             try:
-                # 节点级预算(挂死节点可中断——tick 只在节点间检查,
-                # 单节点长阻塞须 wait_for 截断)
-                outputs = await asyncio.wait_for(
-                    engine.execute_node(node, context), timeout=remaining
-                )
-            except TimeoutError:
-                outcome_status = "TIMEOUT"
-                outcome_error = "全局超时"
+                outputs = await asyncio.wait_for(task, timeout=remaining)
+            except TimeoutError as e:
+                if task.cancelled():
+                    outcome_status = "TIMEOUT"
+                    outcome_error = "全局超时"
+                    node_runs.append(
+                        NodeRun(
+                            node_id=node.id,
+                            status="FAILED",
+                            error="节点超全局预算中断",
+                            duration_ms=int((time.monotonic() - node_started) * 1000),
+                        )
+                    )
+                    break
+                outcome_status = "FAILED"
+                outcome_error = f"节点 {node.id} 内部超时: {str(e)[:300]}"
                 node_runs.append(
                     NodeRun(
                         node_id=node.id,
                         status="FAILED",
-                        error="节点超全局预算中断",
+                        error=f"节点内部超时: {str(e)[:500]}",
                         duration_ms=int((time.monotonic() - node_started) * 1000),
                     )
                 )
                 break
             except NodeFailed as e:
                 outcome_status = "FAILED"
-                outcome_error = f"节点 {node.id} 失败: {e}"
+                outcome_error = f"节点 {node.id} 失败: {str(e)[:300]}"
                 node_runs.append(
                     NodeRun(
                         node_id=node.id,
                         status="FAILED",
-                        error=str(e),
+                        error=str(e)[:500],
                         duration_ms=int((time.monotonic() - node_started) * 1000),
                     )
                 )

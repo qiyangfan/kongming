@@ -4,6 +4,7 @@
 chat 组合根先例;观测查询与采集通道隔离)。"""
 
 import logging
+import uuid
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
@@ -183,6 +184,8 @@ async def usage_page(
     task: Annotated[str | None, Query(max_length=24)] = None,
     status: Literal["SUCCESS", "ERROR"] | None = None,
     trace_id: Annotated[str | None, Query(max_length=64)] = None,
+    # 038③:租户筛选(uuid 直滤);R1-F1:UUID 类型闸防非法值 500
+    tenant_id: Annotated[uuid.UUID | None, Query()] = None,
 ) -> UsagePageOut:
     total, rows = await SqlLlmUsageRepo(session).page(
         limit=size,
@@ -191,6 +194,7 @@ async def usage_page(
         task=task,
         status=status,
         trace_id=trace_id,
+        tenant_id=str(tenant_id) if tenant_id is not None else None,
     )
     return UsagePageOut(
         total=total,

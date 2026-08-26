@@ -7,6 +7,7 @@
 
 import asyncio
 import logging
+import re
 from datetime import datetime
 from typing import Annotated
 
@@ -483,6 +484,23 @@ async def rag_retrieve(
 doc_router = APIRouter(prefix="/system/document", tags=["document"])
 
 
+def _doc_name_sensitive(name: str) -> bool:
+    """上传文件名敏感信息检测(纯检测,不脱敏):复用护栏 pii_*/cred_ 规则
+    的正则,命中即拒——文件名原样入库/回显/进 LLM 提示词,须在入口拦下;
+    bankcard 规则既有 19/20 前缀排除(时间戳防误伤)对文件名同样生效。"""
+    from kongming.guardrail.rules import REGISTRY
+
+    for rule in REGISTRY:
+        if rule.guardrail_type == "input" and rule.name.startswith(
+            ("pii_", "cred_", "inj_")
+        ):
+            # inj_ 一并拦(R1-B2:文件名经 source_ref 进召回文本→LLM 提示词,
+            # injection 短语文件名与 PII 同为入口防线)
+            if rule.pattern and re.search(rule.pattern, name):
+                return True
+    return False
+
+
 async def _doc_tenant(
     session: AsyncSession, svc: RagService, user_id: str, tenant_key: str | None
 ) -> str:
@@ -596,6 +614,11 @@ async def upload_doc(
     doc_name = file.filename or "unnamed"
     if len(doc_name) > 150:
         raise HTTPException(status_code=400, detail="文件名过长(≤150)") from None
+    if _doc_name_sensitive(doc_name):
+        # 拒绝优于脱敏:脱敏后名可能撞文档唯一键(uq_documents_tdq)
+        raise HTTPException(
+            status_code=400, detail="文件名含敏感信息(手机号/证件号等),请重命名后上传"
+        ) from None
     try:
         text_content = await asyncio.to_thread(parse_to_text, content, file.filename or "")
     except Exception:

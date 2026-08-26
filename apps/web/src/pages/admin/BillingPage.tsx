@@ -44,6 +44,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { QueryErrorAlert } from "@/components/query-error";
 import {
   bindPlan,
   createPlan,
@@ -283,7 +284,14 @@ export default function BillingPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(plans.data ?? []).map((p) => (
+              {plans.isError ? (
+                <TableRow>
+                  <TableCell colSpan={6}>
+                    <QueryErrorAlert />
+                  </TableCell>
+                </TableRow>
+              ) : (
+                (plans.data ?? []).map((p) => (
                 <TableRow key={p.id}>
                   <TableCell className="font-mono text-xs">{p.plan_key}</TableCell>
                   <TableCell>{p.name}</TableCell>
@@ -325,7 +333,8 @@ export default function BillingPage() {
                     </Button>
                   </TableCell>
                 </TableRow>
-              ))}
+                ))
+              )}
             </TableBody>
           </Table>
         </div>
@@ -436,7 +445,13 @@ export default function BillingPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(policies.data ?? []).length === 0 ? (
+                  {policies.isError ? (
+                    <TableRow>
+                      <TableCell colSpan={5}>
+                        <QueryErrorAlert />
+                      </TableCell>
+                    </TableRow>
+                  ) : (policies.data ?? []).length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} className="py-6 text-center text-muted-foreground">
                         无策略(不限量)
@@ -587,7 +602,13 @@ export default function BillingPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(invoices.data?.items ?? []).length === 0 ? (
+              {invoices.isError ? (
+                <TableRow>
+                  <TableCell colSpan={6}>
+                    <QueryErrorAlert />
+                  </TableCell>
+                </TableRow>
+              ) : (invoices.data?.items ?? []).length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="py-6 text-center text-muted-foreground">
                     暂无账单

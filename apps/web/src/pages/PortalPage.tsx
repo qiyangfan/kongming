@@ -23,6 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { QueryErrorAlert } from "@/components/query-error";
 import {
   createPayment,
   getInvoiceDetail,
@@ -171,7 +172,9 @@ export default function PortalPage() {
         <h2 className="text-sm font-medium">
           当期用量({usage.data?.month ?? "…"})
         </h2>
-        {usage.isLoading ? (
+        {usage.isError ? (
+          <QueryErrorAlert />
+        ) : usage.isLoading ? (
           <Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden />
         ) : (
           <>
@@ -195,7 +198,9 @@ export default function PortalPage() {
             />
             <div className="space-y-1 pt-2">
               <p className="text-xs font-medium text-muted-foreground">我的 api-key(仅列有效)</p>
-              {(keys.data ?? []).length === 0 ? (
+              {keys.isError ? (
+                <QueryErrorAlert />
+              ) : (keys.data ?? []).length === 0 ? (
                 <p className="text-xs text-muted-foreground">
                   暂无——在 Bot 详情「创建密钥」生成。
                 </p>
@@ -229,7 +234,13 @@ export default function PortalPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(invoices.data ?? []).length === 0 ? (
+              {invoices.isError ? (
+                <TableRow>
+                  <TableCell colSpan={4}>
+                    <QueryErrorAlert />
+                  </TableCell>
+                </TableRow>
+              ) : (invoices.data ?? []).length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
                     暂无账单(每月 1 日出账)。

@@ -43,20 +43,14 @@ import {
   type TimelineEvent,
 } from "@/lib/usage-api";
 
+import { useDebounced } from "@/hooks/use-debounced";
+import { QueryErrorAlert } from "@/components/query-error";
+import { systemApi } from "@/lib/system-api";
+
 const PAGE_SIZE = 20;
 
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
-/** R1-B6:输入型筛选防抖(300ms)——每键一查的请求放大收敛 */
-function useDebounced<T>(value: T, ms = 300): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
 }
 
 function fmtMs(v: number | null | undefined): string {
@@ -106,6 +100,7 @@ export default function UsagePage() {
   const [task, setTask] = useState("");
   const [status, setStatus] = useState("");
   const [traceId, setTraceId] = useState("");
+  const [tenantId, setTenantId] = useState("");
   const [page, setPage] = useState(1);
   const [timelineTrace, setTimelineTrace] = useState<string | null>(null);
 
@@ -122,8 +117,12 @@ export default function UsagePage() {
     queryKey: ["usage", "trend", days],
     queryFn: () => usageTrend(days),
   });
+  const tenants = useQuery({
+    queryKey: ["admin", "tenants"],
+    queryFn: systemApi.listTenants,
+  });
   const list = useQuery({
-    queryKey: ["usage", "page", page, modelQ, taskQ, status, traceIdQ],
+    queryKey: ["usage", "page", page, modelQ, taskQ, status, traceIdQ, tenantId],
     queryFn: () =>
       usagePage({
         page,
@@ -132,6 +131,7 @@ export default function UsagePage() {
         ...(taskQ ? { task: taskQ } : {}),
         ...(status ? { status: status as "SUCCESS" | "ERROR" } : {}),
         ...(traceIdQ ? { trace_id: traceIdQ } : {}),
+        ...(tenantId ? { tenant_id: tenantId } : {}),
       }),
   });
   const timeline = useQuery({
@@ -234,25 +234,25 @@ export default function UsagePage() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard
           label="总调用"
-          value={summary.isError ? undefined : String(totals.calls)}
+          value={String(totals.calls)}
           loading={summary.isLoading}
           error={summary.isError}
         />
         <StatCard
           label="总 tokens"
-          value={summary.isError ? undefined : fmtTokens(totals.tokens)}
+          value={fmtTokens(totals.tokens)}
           loading={summary.isLoading}
           error={summary.isError}
         />
         <StatCard
           label="失败率"
-          value={summary.isError ? undefined : `${(totals.errorRate * 100).toFixed(1)}%`}
+          value={`${(totals.errorRate * 100).toFixed(1)}%`}
           loading={summary.isLoading}
           error={summary.isError}
         />
         <StatCard
           label="平均延迟"
-          value={summary.isError ? undefined : fmtMs(totals.latAvg)}
+          value={fmtMs(totals.latAvg)}
           loading={summary.isLoading}
           error={summary.isError}
         />
@@ -278,9 +278,7 @@ export default function UsagePage() {
             加载中…
           </div>
         ) : trend.isError ? (
-          <div role="alert" className="flex h-56 items-center justify-center text-sm text-destructive">
-            趋势加载失败
-          </div>
+          <QueryErrorAlert text="趋势加载失败" />
         ) : (
           <ReactECharts option={trendOption} notMerge style={{ height: 240 }} />
         )}
@@ -323,10 +321,17 @@ export default function UsagePage() {
                 <TableCell className="text-right">{fmtMs(i.latency_ms_max)}</TableCell>
               </TableRow>
             ))}
-            {!summary.isLoading && (summary.data?.items ?? []).length === 0 && (
+            {!summary.isLoading && summary.isError && (
+              <TableRow>
+                <TableCell colSpan={8}>
+                  <QueryErrorAlert text="汇总加载失败" />
+                </TableCell>
+              </TableRow>
+            )}
+            {!summary.isLoading && !summary.isError && (summary.data?.items ?? []).length === 0 && (
               <TableRow>
                 <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
-                  {summary.isError ? "汇总加载失败" : "暂无用量记录"}
+                  暂无用量记录
                 </TableCell>
               </TableRow>
             )}
@@ -381,6 +386,34 @@ export default function UsagePage() {
                 <SelectItem value="ERROR">失败</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="usage-tenant-filter" className="text-xs">租户</Label>
+            <Select
+              value={tenantId || "ALL"}
+              onValueChange={(v) => {
+                setTenantId(v === "ALL" ? "" : v);
+                setPage(1);
+              }}
+              disabled={tenants.isError}
+            >
+              <SelectTrigger id="usage-tenant-filter" className="h-8 w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">全部</SelectItem>
+                {(tenants.data ?? []).map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.tenant_key}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {/* R1-F2:listTenants 挂 user:manage(页面守卫是 llm-usage:view,
+                权限错配时 403)——失败显式禁用+提示,不静默 */}
+            {tenants.isError && (
+              <p role="alert" className="text-xs text-destructive">租户筛选不可用</p>
+            )}
           </div>
           <div className="space-y-1">
             <Label className="text-xs">trace_id</Label>
@@ -446,10 +479,17 @@ export default function UsagePage() {
                 </TableCell>
               </TableRow>
             ))}
-            {!list.isLoading && (list.data?.rows ?? []).length === 0 && (
+            {!list.isLoading && list.isError && (
+              <TableRow>
+                <TableCell colSpan={9}>
+                  <QueryErrorAlert text="明细加载失败" />
+                </TableCell>
+              </TableRow>
+            )}
+            {!list.isLoading && !list.isError && (list.data?.rows ?? []).length === 0 && (
               <TableRow>
                 <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
-                  {list.isError ? "明细加载失败" : "无匹配记录"}
+                  无匹配记录
                 </TableCell>
               </TableRow>
             )}
@@ -490,9 +530,7 @@ export default function UsagePage() {
           {timeline.isLoading ? (
             <div className="py-8 text-center text-sm text-muted-foreground">加载中…</div>
           ) : timeline.isError ? (
-            <div role="alert" className="py-8 text-center text-sm text-destructive">
-              时间线加载失败
-            </div>
+            <QueryErrorAlert text="时间线加载失败" />
           ) : (timeline.data?.events ?? []).length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">
               该 trace 下无事件
@@ -527,11 +565,8 @@ function StatCard({
       <div className="mt-1 text-xl font-semibold tabular-nums">
         {loading ? "…" : error ? "—" : (value ?? "—")}
       </div>
-      {error && (
-        <div role="alert" className="mt-0.5 text-xs text-destructive">
-          加载失败
-        </div>
-      )}
+      {/* R1-B3:卡级错误不再逐卡 role=alert(读屏重复播报);数值降 "—" 示错,
+          区块级错误条由消费区(趋势/明细)承载 */}
     </div>
   );
 }

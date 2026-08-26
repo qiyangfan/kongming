@@ -314,3 +314,21 @@ class WorkflowService:
         return await self._repo.page_runs(
             tenant_id=tenant_id, wf_key=wf_key, page=page, size=size
         )
+
+    async def get_run(
+        self,
+        *,
+        tenant_id: str,
+        wf_key: str,
+        run_id: str,
+        user_id: str = "",
+        member_roles: dict[str, str] | None = None,
+    ) -> dict[str, Any] | None:
+        """run 详情(029⑤):完整快照含 outputs;可见性与分页列表同口径
+        (def 存在则闸;def 删后历史仍可读——租户隔离由查询条件保证)。"""
+        latest = await self._repo.latest_def(tenant_id=tenant_id, wf_key=wf_key)
+        if latest is not None:
+            self._assert_visible(latest, user_id=user_id, member_roles=member_roles)
+        return await self._repo.get_run(
+            tenant_id=tenant_id, wf_key=wf_key, run_id=run_id
+        )

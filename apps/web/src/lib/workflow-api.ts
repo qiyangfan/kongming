@@ -66,3 +66,9 @@ export function pageWorkflowRuns(
 ): Promise<{ total: number; items: WorkflowRunItem[] }> {
   return api.get(`/system/workflow/${key}/runs?page=${page}&size=${size}`);
 }
+
+/** run 详情(D2 web 面):node_runs 含 outputs(列表行为省流量剥为 null,
+    详情走独立端点);权限 system:workflow:manage。 */
+export function workflowRunDetail(wfKey: string, runId: string): Promise<WorkflowRunItem> {
+  return api.get(`/system/workflow/${wfKey}/runs/${runId}`);
+}

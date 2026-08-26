@@ -36,6 +36,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { QueryErrorAlert } from "@/components/query-error";
 import {
   createMcpServer,
   deleteMcpServer,
@@ -221,7 +222,13 @@ export default function McpPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {(servers.data ?? []).length === 0 ? (
+            {servers.isError ? (
+              <TableRow>
+                <TableCell colSpan={6}>
+                  <QueryErrorAlert />
+                </TableCell>
+              </TableRow>
+            ) : (servers.data ?? []).length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                   尚未接入 MCP 服务。

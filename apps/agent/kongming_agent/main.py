@@ -308,8 +308,15 @@ def _build_query_out(final: dict[str, object]) -> QueryOut:
     sql = final.get("generated_sql", "")
     retry = final.get("retry_count", 0)
     error = final.get("error")
+    # error 非空 ⇒ 恒非成功终态(轮次触顶携带部分结果的形态:execution
+    # 可能 PASS 但 error 优先——A-B6;其余既有形态 error 与非 PASS 并存,零影响)
+    has_error = isinstance(error, str) and bool(error)
     return QueryOut(
-        success=isinstance(execution, ExecutionResult) and execution.verdict == "PASS",
+        success=(
+            isinstance(execution, ExecutionResult)
+            and execution.verdict == "PASS"
+            and not has_error
+        ),
         verdict=verdict,
         summary=summary if isinstance(summary, str) else "",
         insights=insights if isinstance(insights, list) else [],
@@ -455,7 +462,11 @@ async def query_react(req: QueryReactIn) -> QueryOut:
         req.question = await _combine_with_attachments(req)  # 030(与 /query 同前段)
         final = await _run_react(req)
     except AttachmentError as e:
-        return QueryOut(success=False, verdict="ERROR", summary="", error=str(e))
+        # 035⑧ 清偿:早返也携带已收集记录(多附件部分成功后失败场景,
+        # 第 1 张图 vision 用量已入收集器,不随早返丢弃)
+        out = QueryOut(success=False, verdict="ERROR", summary="", error=str(e))
+        out.usage_records = collector
+        return out
     finally:
         if token is not None:
             reset_usage_collector(token)
@@ -476,21 +487,22 @@ async def query_react_stream(req: QueryReactIn) -> StreamingResponse:
 
     collector: list[dict[str, object]] = []
 
-    try:
-        req.question = await _combine_with_attachments(req)  # 030
-    except AttachmentError as e:
-        fail = _build_query_out({"error": str(e), "success": False})
-        async def _fail_gen2() -> AsyncIterator[str]:
-            yield _sse_frame("result", fail.model_dump_json())
-
-        return StreamingResponse(_fail_gen2(), media_type="text/event-stream")
-    state = _initial_react_state(req)
-
     async def gen() -> AsyncIterator[str]:
         # 收集器在生成器上下文内挂载/卸载:流式响应的迭代任务与端点 handler
-        # 分属不同上下文,端点级 set 不传播到 gen(同步端点同款语义)
+        # 分属不同上下文,端点级 set 不传播到 gen(同步端点同款语义)。
+        # 附件预处理同在 gen 内执行(R1-F2):vision 用量发生在 combine 段,
+        # 挂载若晚于 combine 则该段收集缺位、用量绕过「响应携带」契约。
         token2 = set_usage_collector(collector) if req.collect_usage else None
         try:
+            try:
+                req.question = await _combine_with_attachments(req)  # 030
+            except AttachmentError as e:
+                fail = _build_query_out({"error": str(e), "success": False})
+                fail.verdict = "ERROR"  # R2-B2:与同步端点早返同构(verdict 契约)
+                fail.usage_records = collector  # 035⑧:早返携带已收集记录
+                yield _sse_frame("result", fail.model_dump_json())
+                return
+            state = _initial_react_state(req)
             final: dict[str, object] = {}
             try:
                 async for mode, chunk in get_react_graph().astream(
@@ -510,19 +522,17 @@ async def query_react_stream(req: QueryReactIn) -> StreamingResponse:
                             if isinstance(delta, dict):
                                 final.update(delta)
             except LlmError:
-                yield _sse_frame(
-                    "result",
-                    _build_query_out({"llm_unavailable": True}).model_dump_json(),
-                )
+                unavailable = _build_query_out({"llm_unavailable": True})
+                unavailable.usage_records = collector  # 038⑨:异常终态携带已收集记录
+                yield _sse_frame("result", unavailable.model_dump_json())
                 return
             except GraphRecursionError:
                 # 图步数兜底(R1-S4:与同步同口径的结构化错误,不走泛异常)
-                yield _sse_frame(
-                    "result",
-                    _build_query_out(
-                        {"error": "工具调用步数超限,请缩小问题范围后重试"}
-                    ).model_dump_json(),
+                capped = _build_query_out(
+                    {"error": "工具调用步数超限,请缩小问题范围后重试"}
                 )
+                capped.usage_records = collector  # 异常终态同携带
+                yield _sse_frame("result", capped.model_dump_json())
                 return
             except Exception:
                 log.exception("ReAct 流式执行异常 trace_id=%s", req.trace_id)

@@ -25,7 +25,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { QueryErrorAlert } from "@/components/query-error";
 import { toolAuditPage, toolList } from "@/lib/toolcall-api";
+import { endExclusive } from "@/lib/date-utils";
 
 const PAGE_SIZE = 20;
 
@@ -41,13 +43,6 @@ const STATUS_META: Record<string, { label: string; variant: "default" | "seconda
 
 function fmtTime(v: string | null | undefined): string {
   return v ? new Date(v).toLocaleString("zh-CN", { hour12: false }) : "—";
-}
-
-/** 结束日期 → 排他上界(次日零点):后端 `created_at < :end`,当天记录须可见(R1-D1) */
-function endExclusive(date: string): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString();
 }
 
 export default function ToolsPage() {
@@ -102,7 +97,13 @@ export default function ToolsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {tools.isLoading ? (
+            {tools.isError ? (
+              <TableRow>
+                <TableCell colSpan={4}>
+                  <QueryErrorAlert />
+                </TableCell>
+              </TableRow>
+            ) : tools.isLoading ? (
               <TableRow>
                 <TableCell colSpan={4} className="py-6 text-center">
                   <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />
@@ -199,7 +200,13 @@ export default function ToolsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {audit.isLoading ? (
+              {audit.isError ? (
+                <TableRow>
+                  <TableCell colSpan={6}>
+                    <QueryErrorAlert />
+                  </TableCell>
+                </TableRow>
+              ) : audit.isLoading ? (
                 <TableRow>
                   <TableCell colSpan={6} className="py-6 text-center">
                     <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />

@@ -38,6 +38,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types.gen";
+import { QueryErrorAlert } from "@/components/query-error";
 
 // 036⑥:消费生成类型(ADR-005,禁手写;team_id 回传已在生成类型)
 type BotItem = components["schemas"]["BotOut"];
@@ -166,6 +167,12 @@ export default function BotsPage() {
               <TableRow>
                 <TableCell colSpan={6} className="py-6 text-center">
                   <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />
+                </TableCell>
+              </TableRow>
+            ) : bots.isError ? (
+              <TableRow>
+                <TableCell colSpan={6}>
+                  <QueryErrorAlert />
                 </TableCell>
               </TableRow>
             ) : (bots.data?.length ?? 0) === 0 ? (

@@ -26,7 +26,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { QueryErrorAlert } from "@/components/query-error";
 import { operLogPage, sqlAuditPage } from "@/lib/audit-api";
+import { systemApi } from "@/lib/system-api";
+import { endExclusive } from "@/lib/date-utils";
 
 const PAGE_SIZE = 20;
 
@@ -47,11 +50,12 @@ export default function AuditPage() {
   const [traceId, setTraceId] = useState("");
   const [verdict, setVerdict] = useState("");
   const [action, setAction] = useState("");
+  const [tenantId, setTenantId] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
   const sqlList = useQuery({
-    queryKey: ["audit", "sql", page, traceId, verdict, startDate, endDate],
+    queryKey: ["audit", "sql", page, traceId, verdict, startDate, endDate, tenantId],
     queryFn: () =>
       sqlAuditPage({
         page,
@@ -59,8 +63,14 @@ export default function AuditPage() {
         ...(traceId ? { trace_id: traceId } : {}),
         ...(verdict ? { verdict: verdict as "PASS" | "BLOCKED" | "ERROR" } : {}),
         ...(startDate ? { start_time: `${startDate}T00:00:00Z` } : {}),
-        ...(endDate ? { end_time: `${endDate}T00:00:00Z` } : {}),
+        ...(endDate ? { end_time: endExclusive(endDate) } : {}),
+        ...(tenantId ? { tenant_id: tenantId } : {}),
       }),
+    enabled: section === "sql",
+  });
+  const tenants = useQuery({
+    queryKey: ["admin", "tenants"],
+    queryFn: systemApi.listTenants,
     enabled: section === "sql",
   });
   const operList = useQuery({
@@ -71,7 +81,7 @@ export default function AuditPage() {
         size: PAGE_SIZE,
         ...(action ? { action } : {}),
         ...(startDate ? { start_time: `${startDate}T00:00:00Z` } : {}),
-        ...(endDate ? { end_time: `${endDate}T00:00:00Z` } : {}),
+        ...(endDate ? { end_time: endExclusive(endDate) } : {}),
       }),
     enabled: section === "oper",
   });
@@ -122,6 +132,34 @@ export default function AuditPage() {
       <div className="flex flex-wrap items-end gap-3">
         {section === "sql" ? (
           <>
+            <div className="space-y-1">
+              <Label htmlFor="audit-tenant-filter" className="text-xs text-muted-foreground">租户</Label>
+              <Select
+                value={tenantId || "ALL"}
+                onValueChange={(v) => {
+                  setTenantId(v === "ALL" ? "" : v);
+                  setPage(1);
+                }}
+                disabled={tenants.isError}
+              >
+                <SelectTrigger id="audit-tenant-filter" className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">全部</SelectItem>
+                  {(tenants.data ?? []).map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.tenant_key}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {/* R1-F2:listTenants 挂 user:manage(页面守卫是 audit:view,
+                  权限错配时 403)——失败显式禁用+提示,不静默 */}
+              {tenants.isError && (
+                <p role="alert" className="text-xs text-destructive">租户筛选不可用</p>
+              )}
+            </div>
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">trace_id</Label>
               <Input
@@ -214,7 +252,11 @@ export default function AuditPage() {
             )}
           </TableHeader>
           <TableBody>
-            {section === "sql" ? <SqlRows loading={sqlList.isLoading} items={sqlList.data?.items ?? []} /> : <OperRows loading={operList.isLoading} items={operList.data?.items ?? []} />}
+            {section === "sql" ? (
+              <SqlRows loading={sqlList.isLoading} items={sqlList.data?.items ?? []} error={sqlList.isError} />
+            ) : (
+              <OperRows loading={operList.isLoading} items={operList.data?.items ?? []} error={operList.isError} />
+            )}
           </TableBody>
         </Table>
       </div>
@@ -238,8 +280,25 @@ export default function AuditPage() {
 type SqlItem = NonNullable<Awaited<ReturnType<typeof sqlAuditPage>>["items"][number]>;
 type OperItem = NonNullable<Awaited<ReturnType<typeof operLogPage>>["items"][number]>;
 
-function SqlRows({ loading, items }: { loading: boolean; items: SqlItem[] }) {
+function SqlRows({
+  loading,
+  items,
+  error,
+}: {
+  loading: boolean;
+  items: SqlItem[];
+  error?: boolean;
+}) {
   const [expanded, setExpanded] = useState<string | null>(null);
+  if (error) {
+    return (
+      <TableRow>
+        <TableCell colSpan={8} className="py-8">
+          <QueryErrorAlert />
+        </TableCell>
+      </TableRow>
+    );
+  }
   if (loading) {
     return (
       <TableRow>
@@ -297,8 +356,25 @@ function SqlRows({ loading, items }: { loading: boolean; items: SqlItem[] }) {
   );
 }
 
-function OperRows({ loading, items }: { loading: boolean; items: OperItem[] }) {
+function OperRows({
+  loading,
+  items,
+  error,
+}: {
+  loading: boolean;
+  items: OperItem[];
+  error?: boolean;
+}) {
   const [expanded, setExpanded] = useState<string | null>(null);
+  if (error) {
+    return (
+      <TableRow>
+        <TableCell colSpan={6} className="py-8">
+          <QueryErrorAlert />
+        </TableCell>
+      </TableRow>
+    );
+  }
   if (loading) {
     return (
       <TableRow>

@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { QueryErrorAlert } from "@/components/query-error";
 import {
   addFavorite,
   getStoreBot,
@@ -153,7 +154,9 @@ export default function StorePage() {
         </div>
       </div>
 
-      {(tab === "all" ? bots.isLoading : favorites.isLoading) ? (
+      {(tab === "all" ? bots.isError : favorites.isError) ? (
+        <QueryErrorAlert />
+      ) : (tab === "all" ? bots.isLoading : favorites.isLoading) ? (
         <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden />
       ) : ((tab === "all" ? bots.data : favorites.data) ?? []).length === 0 ? (
         <p className="py-12 text-center text-sm text-muted-foreground">
@@ -218,14 +221,16 @@ export default function StorePage() {
       {/* 详情对话框 */}
       <Dialog open={detailKey !== null} onOpenChange={(o) => !o && setDetailKey(null)}>
         <DialogContent className="max-w-lg">
+          {/* R1-B4:DialogHeader 恒渲染(加载/错误态也有 Title,读屏可识别对话框) */}
+          <DialogHeader>
+            <DialogTitle>{detail.data?.name ?? "Bot 详情"}</DialogTitle>
+            <DialogDescription className="font-mono text-xs">
+              {detail.data ? detail.data.bot_key : detailKey}
+            </DialogDescription>
+          </DialogHeader>
+          {detail.isError && <QueryErrorAlert />}
           {detail.data && (
             <>
-              <DialogHeader>
-                <DialogTitle>{detail.data.name}</DialogTitle>
-                <DialogDescription className="font-mono text-xs">
-                  {detail.data.bot_key}
-                </DialogDescription>
-              </DialogHeader>
               <div className="space-y-3">
                 {detail.data.greeting && (
                   <p className="text-sm">{detail.data.greeting}</p>

@@ -4294,6 +4294,23 @@
               ],
               "title": "Trace Id"
             }
+          },
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
           }
         ],
         "responses": {
@@ -6101,18 +6118,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Request Body"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -6623,6 +6628,75 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WorkflowRunsPageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/workflow/{wf_key}/runs/{run_id}": {
+      "get": {
+        "tags": [
+          "workflow"
+        ],
+        "summary": "Get Run",
+        "description": "run 详情(029⑤ 清偿):完整节点快照含 outputs(列表剥除防膨胀,\n详情按需取);可见性与分页列表同口径。",
+        "operationId": "get_run_system_workflow__wf_key__runs__run_id__get",
+        "parameters": [
+          {
+            "name": "wf_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Wf Key"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowRunItemOut"
                 }
               }
             }

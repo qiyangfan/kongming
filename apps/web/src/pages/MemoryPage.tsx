@@ -42,6 +42,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { QueryErrorAlert } from "@/components/query-error";
 import { api } from "@/lib/api";
 import { listMyTeams } from "@/lib/team-api";
 import type { components } from "@/lib/api-types.gen";
@@ -155,7 +156,13 @@ export default function MemoryPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {list.isLoading ? (
+            {list.isError ? (
+              <TableRow>
+                <TableCell colSpan={7}>
+                  <QueryErrorAlert />
+                </TableCell>
+              </TableRow>
+            ) : list.isLoading ? (
               <TableRow>
                 <TableCell colSpan={7} className="py-8 text-center">
                   <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />

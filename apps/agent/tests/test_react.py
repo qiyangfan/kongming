@@ -194,6 +194,11 @@ async def test_react_round_limit_forces_stop(_patch) -> None:  # type: ignore[no
     assert "上限" in str(final.get("error") or "")
     assert final["retry_count"] == limit
     assert len(api.tool_calls) == limit  # 超限后不再执行
+    # A-B6:触顶不丢已产出部分结果——早前成功轮的 execution/rows 随终态携带
+    exec_obj = final.get("execution")
+    assert exec_obj is not None and exec_obj.verdict == "PASS"
+    assert exec_obj.rows == [[1]]
+    assert final.get("stats")
 
 
 async def test_react_malformed_args_fed_back(_patch) -> None:  # type: ignore[no-untyped-def]

@@ -37,9 +37,10 @@ export interface UsagePageParams {
   task?: string;
   status?: "SUCCESS" | "ERROR";
   trace_id?: string;
+  tenant_id?: string; // 038③:租户筛选(uuid 直滤)
 }
 
-/** 明细分页(created_at 倒序;四类筛选) */
+/** 明细分页(created_at 倒序;五类筛选) */
 export function usagePage(params: UsagePageParams): Promise<UsagePageOut> {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {

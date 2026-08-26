@@ -45,6 +45,49 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 
 /* 生成类型的 result 字段皆可选:本地归一化收窄 */
+function ResultTable({ columns, rows }: { columns: string[]; rows: unknown[][] }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/50">
+          <tr>
+            {columns.map((c) => (
+              <th
+                key={c}
+                className="px-3 py-2 text-left font-medium whitespace-nowrap text-muted-foreground"
+              >
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td
+                colSpan={Math.max(columns.length, 1)}
+                className="px-3 py-6 text-center text-muted-foreground"
+              >
+                查无数据,秋叶落,结果空。
+              </td>
+            </tr>
+          ) : (
+            rows.map((row, i) => (
+              <tr key={i} className="border-t border-border">
+                {row.map((cell, j) => (
+                  <td key={j} className="px-3 py-1.5 whitespace-nowrap text-foreground">
+                    {cell === null || cell === undefined ? "—" : String(cell)}
+                  </td>
+                ))}
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function normalize(msg: SessionMessageOut): {
   columns: string[];
   rows: unknown[][];
@@ -83,10 +126,21 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
     );
   }
   if (msg.status === "FAILED") {
+    const partial = normalize(msg);
     return (
-      <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
-        <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
-        <p className="text-foreground">{msg.error ?? "查询失败,请换个问法试试"}</p>
+      <div className="space-y-3">
+        <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
+          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
+          <p className="text-foreground">{msg.error ?? "查询失败,请换个问法试试"}</p>
+        </div>
+        {/* R2-F2:触顶等形态携带的部分结果不丢弃——错误优先呈现,
+            已产出结果集作参考附带(EXPLAIN 入口同步可达) */}
+        {partial.columns.length > 0 && (
+          <>
+            <ResultTable columns={partial.columns} rows={partial.rows} />
+            {msg.sql && msg.id && <ExplainCollapsible messageId={msg.id} />}
+          </>
+        )}
       </div>
     );
   }
@@ -122,44 +176,7 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
       )}
 
       {result.columns.length > 0 && (
-        <div className="overflow-x-auto rounded-lg border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                {result.columns.map((c) => (
-                  <th
-                    key={c}
-                    className="px-3 py-2 text-left font-medium whitespace-nowrap text-muted-foreground"
-                  >
-                    {c}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {result.rows.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={Math.max(result.columns.length, 1)}
-                    className="px-3 py-6 text-center text-muted-foreground"
-                  >
-                    查无数据,秋叶落,结果空。
-                  </td>
-                </tr>
-              ) : (
-                result.rows.map((row, i) => (
-                  <tr key={i} className="border-t border-border">
-                    {row.map((cell, j) => (
-                      <td key={j} className="px-3 py-1.5 whitespace-nowrap text-foreground">
-                        {cell === null || cell === undefined ? "—" : String(cell)}
-                      </td>
-                    ))}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <ResultTable columns={result.columns} rows={result.rows} />
       )}
 
       {result.columns.length > 0 && (

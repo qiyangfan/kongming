@@ -30,6 +30,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { QueryErrorAlert } from "@/components/query-error";
 import { useDatasource } from "@/lib/datasource-store";
 import {
   addRelation,
@@ -206,7 +207,13 @@ export default function SemanticPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {relations.isLoading ? (
+                {relations.isError ? (
+                  <TableRow>
+                    <TableCell colSpan={5}>
+                      <QueryErrorAlert />
+                    </TableCell>
+                  </TableRow>
+                ) : relations.isLoading ? (
                   <TableRow>
                     <TableCell colSpan={5} className="py-6 text-center">
                       <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />
@@ -291,7 +298,13 @@ export default function SemanticPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {metrics.isLoading ? (
+                {metrics.isError ? (
+                  <TableRow>
+                    <TableCell colSpan={5}>
+                      <QueryErrorAlert />
+                    </TableCell>
+                  </TableRow>
+                ) : metrics.isLoading ? (
                   <TableRow>
                     <TableCell colSpan={5} className="py-6 text-center">
                       <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />

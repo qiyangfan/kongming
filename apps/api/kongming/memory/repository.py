@@ -31,16 +31,21 @@ class SqlMemoryRepo:
     async def commit(self) -> None:
         await self._s.commit()
 
-    async def mark_dormant_lazy(self) -> None:
-        """惰性休眠标记(召回路径顺带):低置信或 90 天未命中 → dormant。"""
+    async def mark_dormant_lazy(self, *, user_id: str, tenant_id: str) -> None:
+        """惰性休眠标记(召回路径顺带):低置信或 90 天未命中 → dormant。
+
+        强制 user_id+tenant_id 双过滤(与召回同隔离铁律)——仅作用本人
+        本租户,禁止跨用户跨租户批量翻牌。
+        """
         await self._s.execute(
             text(
                 "UPDATE public.user_memory SET dormant = true"
-                " WHERE dormant = false AND (confidence < :c"
+                " WHERE user_id = CAST(:u AS uuid) AND tenant_id = CAST(:t AS uuid)"
+                "   AND dormant = false AND (confidence < :c"
                 "   OR (last_hit_at IS NOT NULL AND last_hit_at < now() - interval '90 days')"
                 "   OR (last_hit_at IS NULL AND created_at < now() - interval '90 days'))"
             ),
-            {"c": _DORMANT_CONFIDENCE},
+            {"u": user_id, "t": tenant_id, "c": _DORMANT_CONFIDENCE},
         )
 
     async def recall(

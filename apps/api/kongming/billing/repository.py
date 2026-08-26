@@ -271,11 +271,17 @@ class SqlBillingRepo:
         )
 
     async def month_usage_by_model(self, *, tenant_id: str, month: str) -> list[dict[str, Any]]:
+        """按模型聚合(账单 usage_json 明细)。口径(038⑥ 清偿):calls=
+        成功调用次数(FILTER status='SUCCESS',ERROR 不计);tokens=实际
+        消耗全量(与月账单金额口径 month_token_usage 一致,畸形应答带回
+        usage 的 ERROR 行 tokens 也计)——两语义各自成立,usage_json 自洽
+        (by_model tokens 求和=月总 tokens)。"""
         rows = (
             await self._s.execute(
                 text(
                     "SELECT model, SUM(prompt_tokens) AS prompt,"
-                    " SUM(completion_tokens) AS completion, count(*) AS calls"
+                    " SUM(completion_tokens) AS completion,"
+                    " count(*) FILTER (WHERE status = 'SUCCESS') AS calls"
                     " FROM public.sys_llm_usage"
                     " WHERE tenant_id=CAST(:t AS uuid)"
                     " AND to_char(created_at AT TIME ZONE 'Asia/Shanghai',"

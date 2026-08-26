@@ -1674,6 +1674,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/workflow/{wf_key}/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run
+         * @description run 详情(029⑤ 清偿):完整节点快照含 outputs(列表剥除防膨胀,
+         *     详情按需取);可见性与分页列表同口径。
+         */
+        get: operations["get_run_system_workflow__wf_key__runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chat/attachments": {
         parameters: {
             query?: never;
@@ -7569,6 +7590,7 @@ export interface operations {
                 task?: string | null;
                 status?: ("SUCCESS" | "ERROR") | null;
                 trace_id?: string | null;
+                tenant_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -8627,13 +8649,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -8923,6 +8939,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkflowRunsPageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_system_workflow__wf_key__runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                wf_key: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowRunItemOut"];
                 };
             };
             /** @description Validation Error */

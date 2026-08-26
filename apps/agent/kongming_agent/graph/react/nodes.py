@@ -247,12 +247,21 @@ def finalize(state: ReactState) -> dict[str, object]:
     execution = state.get("last_execution")
     rounds = state.get("rounds", 0)
     # 轮次上限触顶(R1-S6:dispatch 后直接收束):未产出最终答案且轮次已满
-    # → 强制终止结构化错误(spec)
+    # → 强制终止结构化错误(spec)。早前轮次已成功的执行结果随终态携带
+    # (error 优先呈现,rows 作参考;不再调 LLM 摘要——触顶不该再花一次
+    # 模型调用),部分结果不丢弃(A-B6)。
     if state.get("final_answer") is None and rounds >= Settings().max_tool_rounds:
-        return {
+        capped: dict[str, object] = {
             "error": "已达工具调用轮次上限,请缩小问题范围后重试",
             "retry_count": rounds,
         }
+        if isinstance(execution, ExecutionResult):
+            capped["execution"] = execution
+            capped["summary"] = ""
+            capped["stats"] = compute_stats(execution.columns, execution.rows)
+            if state.get("last_sql"):
+                capped["generated_sql"] = state["last_sql"]
+        return capped
     if execution is None:
         # 无 SQL 执行的纯文本回答:成功终态,空结果集
         execution = ExecutionResult(verdict="PASS", columns=[], rows=[])

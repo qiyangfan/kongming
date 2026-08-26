@@ -43,6 +43,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { QueryErrorAlert } from "@/components/query-error";
 import {
   deleteWorkflow,
   listWorkflows,
@@ -51,6 +52,7 @@ import {
   runWorkflow,
   saveWorkflow,
   setWorkflowEnabled,
+  workflowRunDetail,
   type WorkflowItem,
   type WorkflowRunOut,
 } from "@/lib/workflow-api";
@@ -90,6 +92,8 @@ export default function WorkflowsPage() {
   const [runError, setRunError] = useState("");
   const [historyOf, setHistoryOf] = useState<WorkflowItem | null>(null);
   const [historyPage, setHistoryPage] = useState(1);
+  // D2:run 详情对话框(存 runId;详情数据只来自新端点)
+  const [detailRunId, setDetailRunId] = useState<string | null>(null);
   const [toggleError, setToggleError] = useState<Record<string, string>>({});
 
   const workflows = useQuery({ queryKey: ["admin", "workflow"], queryFn: listWorkflows });
@@ -97,6 +101,11 @@ export default function WorkflowsPage() {
     queryKey: ["admin", "workflow-runs", historyOf?.wf_key, historyPage],
     queryFn: () => pageWorkflowRuns(historyOf!.wf_key, historyPage, PAGE_SIZE),
     enabled: historyOf !== null,
+  });
+  const runDetail = useQuery({
+    queryKey: ["admin", "workflow-run-detail", historyOf?.wf_key, detailRunId],
+    queryFn: () => workflowRunDetail(historyOf!.wf_key, detailRunId!),
+    enabled: detailRunId !== null && historyOf !== null,
   });
 
   const invalidate = () => void qc.invalidateQueries({ queryKey: ["admin", "workflow"] });
@@ -208,7 +217,13 @@ export default function WorkflowsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {(workflows.data ?? []).length === 0 ? (
+            {workflows.isError ? (
+              <TableRow>
+                <TableCell colSpan={6}>
+                  <QueryErrorAlert />
+                </TableCell>
+              </TableRow>
+            ) : (workflows.data ?? []).length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                   尚未定义工作流。
@@ -439,15 +454,21 @@ export default function WorkflowsPage() {
       <Dialog
         open={historyOf !== null}
         onOpenChange={(o) => {
-          if (!o) setHistoryOf(null);
+          if (!o) {
+            setHistoryOf(null);
+            setDetailRunId(null); // 详情叠层随历史面板一起收起
+          }
         }}
       >
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>运行历史「{historyOf?.name}」</DialogTitle>
+            <DialogDescription>按时间倒序的执行记录;点「详情」查看完整节点输出。</DialogDescription>
           </DialogHeader>
           <div className="max-h-96 space-y-2 overflow-y-auto">
-            {(runs.data?.items ?? []).length === 0 ? (
+            {runs.isError ? (
+              <QueryErrorAlert />
+            ) : (runs.data?.items ?? []).length === 0 ? (
               <p className="py-6 text-center text-sm text-muted-foreground">
                 暂无运行记录。
               </p>
@@ -455,22 +476,32 @@ export default function WorkflowsPage() {
               (runs.data?.items ?? []).map((r) => (
                 <Collapsible key={r.id}>
                   <div className="rounded-md border px-3 py-2">
-                    <CollapsibleTrigger className="group flex w-full items-center gap-2 text-sm">
-                      <ChevronRight
-                        className="size-3.5 transition-transform group-data-[state=open]:rotate-90"
-                        aria-hidden
-                      />
-                      <Badge
-                        variant={r.status === "SUCCESS" ? "secondary" : "destructive"}
-                        className="font-normal"
+                    <div className="flex items-center gap-2">
+                      <CollapsibleTrigger className="group flex flex-1 items-center gap-2 text-sm">
+                        <ChevronRight
+                          className="size-3.5 transition-transform group-data-[state=open]:rotate-90"
+                          aria-hidden
+                        />
+                        <Badge
+                          variant={r.status === "SUCCESS" ? "secondary" : "destructive"}
+                          className="font-normal"
+                        >
+                          {STATUS_TEXT[r.status] ?? r.status}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">
+                          v{r.version} · {r.trigger_source} · {r.duration_ms}ms ·{" "}
+                          {r.created_at ? new Date(r.created_at).toLocaleString() : ""}
+                        </span>
+                      </CollapsibleTrigger>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 shrink-0"
+                        onClick={() => setDetailRunId(r.id)}
                       >
-                        {STATUS_TEXT[r.status] ?? r.status}
-                      </Badge>
-                      <span className="text-xs text-muted-foreground">
-                        v{r.version} · {r.trigger_source} · {r.duration_ms}ms ·{" "}
-                        {r.created_at ? new Date(r.created_at).toLocaleString() : ""}
-                      </span>
-                    </CollapsibleTrigger>
+                        详情
+                      </Button>
+                    </div>
                     <CollapsibleContent>
                       <div className="mt-2 space-y-1 border-t pt-2">
                         {typeof r.error === "string" && r.error && (
@@ -523,6 +554,106 @@ export default function WorkflowsPage() {
               </Button>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* run 详情(D2:独立端点,node_runs 含 outputs;列表行展示不动) */}
+      <Dialog
+        open={detailRunId !== null}
+        onOpenChange={(o) => {
+          if (!o) setDetailRunId(null);
+        }}
+      >
+        <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>运行详情</DialogTitle>
+            <DialogDescription className="font-mono text-xs break-all">
+              {detailRunId}
+            </DialogDescription>
+          </DialogHeader>
+          {runDetail.isLoading ? (
+            <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+              加载中…
+            </div>
+          ) : runDetail.isError ? (
+            <QueryErrorAlert />
+          ) : runDetail.data ? (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <Badge
+                  variant={runDetail.data.status === "SUCCESS" ? "secondary" : "destructive"}
+                  className="font-normal"
+                >
+                  {STATUS_TEXT[runDetail.data.status] ?? runDetail.data.status}
+                </Badge>
+                <span className="text-xs text-muted-foreground">
+                  v{runDetail.data.version} · 触发源 {runDetail.data.trigger_source} ·{" "}
+                  {runDetail.data.duration_ms}ms
+                  {runDetail.data.created_at
+                    ? ` · ${new Date(runDetail.data.created_at).toLocaleString()}`
+                    : ""}
+                </span>
+              </div>
+              {runDetail.data.error && (
+                <p className="text-sm text-destructive">{runDetail.data.error}</p>
+              )}
+              <div className="space-y-2">
+                {(runDetail.data.node_runs ?? []).map((raw, i) => {
+                  const nr = nodeRunsOf({ node_runs: [raw] })[0];
+                  // R1-B7:渲染前截断 64KB(引擎节点级截断兜底之外的第二道防线,
+                  // 防多 MB 文本整段进 DOM)
+                  // R2-B1:outputs 为 null(未产出)不渲染折叠区——
+                  // stringify(null) 会得到无信息量的字面 "null"
+                  const outputsRaw =
+                    raw.outputs == null ? null : JSON.stringify(raw.outputs, null, 2);
+                  const outputs: string | null =
+                    outputsRaw == null
+                      ? null
+                      : outputsRaw.length > 64 * 1024
+                        ? outputsRaw.slice(0, 64 * 1024) + "\n…(截断,共 " + outputsRaw.length + " 字符)"
+                        : outputsRaw;
+                  return (
+                    <div key={nr.node_id || i} className="rounded-md border px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span className="font-mono text-xs">{nr.node_id}</span>
+                        <Badge
+                          variant={nr.status === "FAILED" ? "destructive" : "secondary"}
+                          className="font-normal"
+                        >
+                          {nr.status}
+                        </Badge>
+                        {nr.duration_ms !== undefined && (
+                          <span className="text-xs text-muted-foreground">
+                            {nr.duration_ms}ms
+                          </span>
+                        )}
+                        {nr.error && (
+                          <span className="text-xs text-destructive">{nr.error}</span>
+                        )}
+                      </div>
+                      {outputs !== null && (
+                        <Collapsible>
+                          <CollapsibleTrigger className="group mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                            <ChevronRight
+                              className="size-3 transition-transform group-data-[state=open]:rotate-90"
+                              aria-hidden
+                            />
+                            outputs
+                          </CollapsibleTrigger>
+                          <CollapsibleContent>
+                            <pre className="mt-1 max-h-64 overflow-auto rounded-md bg-muted/60 p-2 text-xs leading-relaxed">
+                              {outputs}
+                            </pre>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
 

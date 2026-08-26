@@ -37,6 +37,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { QueryErrorAlert } from "@/components/query-error";
 import { useAuth } from "@/lib/auth-store";
 import { datasourceApi } from "@/lib/datasource-api";
 import {
@@ -171,26 +172,31 @@ export default function FeedbackPage() {
 
       {/* 统计卡(feedback-analytics spec) */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <StatCard label="反馈总数" value={ov?.total} loading={overview.isLoading} />
-        <StatCard label="有用(赞)" value={ov?.up_count} loading={overview.isLoading} />
-        <StatCard label="不准确(踩)" value={ov?.down_count} loading={overview.isLoading} />
+        <StatCard label="反馈总数" value={ov?.total} loading={overview.isLoading} error={overview.isError} />
+        <StatCard label="有用(赞)" value={ov?.up_count} loading={overview.isLoading} error={overview.isError} />
+        <StatCard label="不准确(踩)" value={ov?.down_count} loading={overview.isLoading} error={overview.isError} />
         <StatCard
           label="差评率"
           value={ov ? `${(ov.down_rate * 100).toFixed(1)}%` : undefined}
           loading={overview.isLoading}
+          error={overview.isError}
         />
-        <StatCard label="带纠错" value={ov?.corrected_count} loading={overview.isLoading} />
+        <StatCard label="带纠错" value={ov?.corrected_count} loading={overview.isLoading} error={overview.isError} />
       </div>
 
       {/* 趋势折线(token 色板) */}
       <div className="rounded-lg border border-border bg-card px-2 py-1">
-        <ReactECharts
-          option={trendOption}
-          notMerge
-          lazyUpdate
-          style={{ height: 220, width: "100%" }}
-          opts={{ renderer: "canvas" }}
-        />
+        {overview.isError ? (
+          <QueryErrorAlert />
+        ) : (
+          <ReactECharts
+            option={trendOption}
+            notMerge
+            lazyUpdate
+            style={{ height: 220, width: "100%" }}
+            opts={{ renderer: "canvas" }}
+          />
+        )}
       </div>
 
       {/* 筛选区 */}
@@ -282,7 +288,13 @@ export default function FeedbackPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {list.isLoading ? (
+            {list.isError ? (
+              <TableRow>
+                <TableCell colSpan={9}>
+                  <QueryErrorAlert />
+                </TableCell>
+              </TableRow>
+            ) : list.isLoading ? (
               <TableRow>
                 <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
                   <Loader2 className="inline size-4 animate-spin" aria-hidden /> 加载中…
@@ -378,17 +390,20 @@ function StatCard({
   label,
   value,
   loading,
+  error,
 }: {
   label: string;
   value: number | string | undefined;
   loading: boolean;
+  error?: boolean;
 }) {
   return (
     <div className="rounded-lg border border-border bg-card px-4 py-3">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 text-2xl font-semibold tabular-nums">
-        {loading ? "…" : (value ?? 0)}
+        {loading ? "…" : error ? "—" : (value ?? 0)}
       </p>
+      {/* R1-B3:卡级错误不再逐卡 role=alert(读屏重复播报);数值降 "—" 示错 */}
     </div>
   );
 }

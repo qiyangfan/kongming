@@ -7,6 +7,7 @@
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kongming import tenant
 from kongming.auth.repository import SqlOperLogRepo
 from kongming.feedback.models import OverviewData
 
@@ -19,34 +20,12 @@ class FeedbackRepository:
     # ============ 提交面 ============
 
     async def find_bound_tenant(self, *, user_id: str, tenant_key: str) -> str | None:
-        """显式租户白名单复校(与 chat 域逐字同构,008 先例自备)。"""
-        tid = (
-            await self._s.execute(
-                text(
-                    "SELECT t.id FROM public.sys_tenant t"
-                    " JOIN public.sys_user_tenant ut ON ut.tenant_id = t.id"
-                    " WHERE t.tenant_key = :k AND ut.user_id = :u AND t.status = 'ACTIVE'"
-                ),
-                {"k": tenant_key, "u": user_id},
-            )
-        ).scalar_one_or_none()
-        return None if tid is None else str(tid)
+        """显式租户白名单复校(单一真理源 kongming.tenant,B1-B10 收口)。"""
+        return await tenant.bound_tenant_id(self._s, user_id=user_id, tenant_key=tenant_key)
 
     async def find_default_tenant(self, *, user_id: str) -> tuple[str, str] | None:
-        """缺省取默认租户(与 chat 域逐字同构):default 优先,否则最早授予。"""
-        row = (
-            await self._s.execute(
-                text(
-                    "SELECT t.id, t.tenant_key FROM public.sys_tenant t"
-                    " JOIN public.sys_user_tenant ut ON ut.tenant_id = t.id"
-                    " WHERE ut.user_id = :u AND t.status = 'ACTIVE'"
-                    " ORDER BY (t.tenant_key = 'default') DESC, ut.granted_at ASC, t.id"
-                    " LIMIT 1"
-                ),
-                {"u": user_id},
-            )
-        ).mappings().one_or_none()
-        return None if row is None else (str(row["id"]), str(row["tenant_key"]))
+        """缺省取默认租户(default 优先,否则最早授予;单一真理源 kongming.tenant)。"""
+        return await tenant.default_tenant(self._s, user_id=user_id)
 
     async def find_message_for_feedback(
         self, *, message_id: str, user_id: str, tenant_id: str

@@ -53,7 +53,7 @@ class MemoryService:
             vector = await self._embed_quietly([question])
             if vector is None:
                 return ""
-            await self._repo.mark_dormant_lazy()
+            await self._repo.mark_dormant_lazy(user_id=user_id, tenant_id=tenant_id)
             team_ids: list[str] = []
             if self._team_roles is not None:
                 team_ids = list((await self._team_roles.role_map(user_id)).keys())

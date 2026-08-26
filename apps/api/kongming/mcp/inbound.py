@@ -6,10 +6,11 @@ api-key 鉴权:X-Api-Key(025 同款)或 Authorization: Bearer(MCP 客户端
 未知方法 → -32601。无会话态(不协商 Mcp-Session-Id)。
 """
 
+import json
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, Response
+from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
 
 from kongming.bot.router import _get_service  # 025 组合根复用(装配层)
@@ -20,6 +21,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["mcp-inbound"])
 
 _PROTOCOL_VERSION = "2025-03-26"
+_BODY_MAX_BYTES = 1 * 1024 * 1024  # 与 trigger webhook 同值(免登录端点统一闸)
 
 
 def _result(rpc_id: Any, payload: dict[str, Any]) -> JSONResponse:
@@ -42,11 +44,25 @@ def _extract_key(authorization: str | None, x_api_key: str | None) -> str | None
 
 @router.post("/mcp")
 async def mcp_endpoint(
-    request_body: dict[str, Any],
+    request: Request,
     svc: Annotated[BotService, Depends(_get_service)],
     authorization: Annotated[str | None, Header()] = None,
     x_api_key: Annotated[str | None, Header()] = None,
 ) -> Response:
+    # 入站 body 闸(未认证先拒):Content-Length 声明超限不读 body;
+    # 实测超限拒——闸前置于 notifications 短路/鉴权/解析(trigger 同范式)
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > _BODY_MAX_BYTES:
+        return JSONResponse(status_code=413, content={"detail": "PAYLOAD_TOO_LARGE"})
+    raw = await request.body()
+    if len(raw) > _BODY_MAX_BYTES:
+        return JSONResponse(status_code=413, content={"detail": "PAYLOAD_TOO_LARGE"})
+    try:
+        request_body: dict[str, Any] = json.loads(raw)
+        if not isinstance(request_body, dict):
+            raise ValueError("not an object")
+    except (ValueError, UnicodeDecodeError):
+        return _error(None, -32700, "Parse error")
     # notifications/*(MCP 生命周期通告):无 id,202 空响应
     rpc_id = request_body.get("id")
     method = str(request_body.get("method") or "")

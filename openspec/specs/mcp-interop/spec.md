@@ -112,6 +112,9 @@ inputSchema={question: string});绑定 Bot 已停用按 key 无效拒(401,
 tools/call 以 Bot 创建者代理身份运行(输入护栏/配额/审计不豁免,
 渠道标记 mcp);MCP 客户端 MUST 无法感知其他 key/租户的 Bot;
 无 tool:mcp:use 权限不影响本端点(api-key 绑定即授权语义)。
+端点 SHALL 设请求体大小闸(上限 1MB):Content-Length 声明值超限
+或实测体超限均 413 拒绝;闸 MUST 前置于鉴权、notifications 短路与
+body 完整缓冲解析(未认证客户端不可借超大 body 消耗服务端内存)。
 
 #### Scenario: 完整调用链
 
@@ -131,6 +134,12 @@ tools/call 以 Bot 创建者代理身份运行(输入护栏/配额/审计不豁�
 - GIVEN T1 的 key(绑定 T1 的 Bot)与 T2 的启用 Bot
 - WHEN tools/list 或 tools/call(尝试 T2 的 bot__ 名)
 - THEN 仅见 key 绑定的 Bot;T2 的 Bot 不可见,调用按未知工具拒
+
+#### Scenario: 超大请求体拒绝(未认证先拒)
+
+- GIVEN 未携带有效 api-key 的客户端
+- WHEN POST /mcp 携带 > 1MB 的 JSON body(或 Content-Length 声明值 > 1MB)
+- THEN 413 拒绝,先于鉴权与 notifications 短路,body 未被完整缓冲进内存
 
 ### Requirement: 传输收敛
 

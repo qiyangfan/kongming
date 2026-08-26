@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kongming import tenant
 from kongming.auth.repository import SqlOperLogRepo
 from kongming.datasource.models import Datasource, DatasourceOption, ResolvedDatasource
 from kongming.like import like_pattern
@@ -222,37 +223,13 @@ class SqlDatasourceRepo:
         row = await self.find_for_execute(datasource_key)
         return row is not None and row.status == "ACTIVE" and row.tenant_id == tenant_id
 
-    # ---- 选项接口租户复校(自备,不跨域 import chat) ----
+    # ---- 选项接口租户复校(单一真理源 kongming.tenant,B1-B10 六处收口) ----
 
     async def find_bound_tenant(self, user_id: str, tenant_key: str) -> str | None:
-        v = await self._s.scalar(
-            text(
-                "SELECT t.id FROM public.sys_tenant t"
-                " JOIN public.sys_user_tenant ut ON ut.tenant_id = t.id"
-                " WHERE ut.user_id=:u AND t.tenant_key=:k AND t.status='ACTIVE'"
-            ),
-            {"u": user_id, "k": tenant_key},
-        )
-        return None if v is None else str(v)
+        return await tenant.bound_tenant_id(self._s, user_id=user_id, tenant_key=tenant_key)
 
     async def find_default_tenant(self, user_id: str) -> tuple[str, str] | None:
-        row = (
-            await self._s.execute(
-                text(
-                    "SELECT t.id, t.tenant_key FROM public.sys_tenant t"
-                    " JOIN public.sys_user_tenant ut ON ut.tenant_id = t.id"
-                    " WHERE ut.user_id=:u AND t.status='ACTIVE'"
-                    # 与 chat/repository.find_default_tenant 逐字同构:default 优先,
-                    # 否则最早授予(R1-S1:排序分歧曾致 options 与 chat 解析错位误拒)
-                    " ORDER BY (t.tenant_key='default') DESC, ut.granted_at ASC, t.id"
-                    " LIMIT 1"
-                ),
-                {"u": user_id},
-            )
-        ).mappings().one_or_none()
-        if row is None:
-            return None
-        return str(row["id"]), str(row["tenant_key"])
+        return await tenant.default_tenant(self._s, user_id=user_id)
 
     async def list_enabled_by_tenant(self, tenant_id: str) -> list[DatasourceOption]:
         rows = (

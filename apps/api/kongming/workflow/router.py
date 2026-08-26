@@ -466,3 +466,46 @@ async def page_runs(
             for r in rows
         ],
     }
+
+
+@router.get(
+    "/{wf_key}/runs/{run_id}",
+    response_model=WorkflowRunItemOut,
+    dependencies=[Depends(require_perm(MANAGE))],
+)
+async def get_run(
+    wf_key: str,
+    run_id: uuid.UUID,
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Annotated[WorkflowService, Depends(get_workflow_service)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> WorkflowRunItemOut:
+    """run 详情(029⑤ 清偿):完整节点快照含 outputs(列表剥除防膨胀,
+    详情按需取);可见性与分页列表同口径。"""
+    tenant_id, _ = await _tenant_or_403(user, session, x_tenant_id)
+    try:
+        r = await svc.get_run(
+            tenant_id=tenant_id,
+            wf_key=wf_key,
+            run_id=str(run_id),
+            user_id=str(user["sub"]),
+            member_roles=await _member_roles(session, str(user["sub"])),
+        )
+    except WorkflowNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    if r is None:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    return WorkflowRunItemOut(
+        id=str(r["id"]),
+        version=int(r["version"]),
+        trigger_source=str(r["trigger_source"]),
+        status=str(r["status"]),
+        error=(str(r["error"]) if r.get("error") else None),
+        duration_ms=int(r["duration_ms"]),
+        node_runs=list(r["node_runs"] or []),
+        inputs=dict(r["inputs"] or {}),
+        created_at=(
+            r["created_at"].isoformat() if r.get("created_at") else None
+        ),
+    )

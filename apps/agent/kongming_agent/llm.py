@@ -120,6 +120,21 @@ class LlmClient:
                 timeout=settings.embedding_timeout_sec,
             )
 
+    async def aclose(self) -> None:
+        """021① 清偿:显式关闭全部客户端(主/注册表池/embedding)——
+        deps 指纹变更重建时调用,连接关闭不再依赖 GC 时机。"""
+        clients: list[AsyncOpenAI] = []
+        if self._client is not None:
+            clients.append(self._client)
+        clients.extend(c for c, _ in self._pool.values())
+        if self._emb_client is not None:
+            clients.append(self._emb_client)
+        for c in clients:
+            try:
+                await c.close()
+            except Exception:
+                log.warning("LLM client close 失败(忽略)", exc_info=True)
+
     def image_limit_mb(self, task: str | None = None) -> float:
         """036⑦:当前生效模型的图片体积上限(MB)——task 路由命中条目
         有配上限取之,否则回退主模型上限(settings.llm_max_image_mb)。"""

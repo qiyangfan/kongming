@@ -63,8 +63,10 @@ class SqlSemanticRepo:
     async def relations_within(
         self, *, tenant_id: str, datasource_key: str, tables: list[str]
     ) -> list[dict[str, Any]]:
-        """仅取表集合内的两两关系(注入收窄,spec 立约)。"""
-        if len(tables) < 2:
+        """仅取表集合内的两两关系(注入收窄,spec 立约)。
+        非空即查(023①):单表集合命中自引用 FK 行(goods→goods),
+        ANY(:ts) 天然收窄,多表行为不变。"""
+        if not tables:
             return []
         rows = (
             await self._s.execute(

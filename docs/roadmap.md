@@ -63,6 +63,14 @@ artifacts(027)⇄ cloud-code-sandbox(029);agent-memory(026)← team-workspace(03
 参考源:`/Users/solvela/nl2sql-data-platform/openspec/specs/<域>/spec.md`
 (剥离 Java/COLA/Keycloak 实现引用后取其行为场景;schema 契约以 Kongming baseline 为准)。
 
+## 产品待办登记(backlog-settlement 终态化剥离,2026-08-25)
+
+以下为产品路线待办(非技术债;触发=产品决策,开工时再立 spec):
+STT/OCR 选型、真实支付通道 Channel 实现、可视化拖拽画布、MCP
+resources/prompts 原语、Bot 版本化上架、个性化推荐、用户/TEAM 维度
+配额、触发器失败重试策略、更多事件源(邮件/Slack)、中文全文 zhparser、
+知识库(rag)团队归属(032①)。
+
 ## 已被治理文档覆盖,不再立 spec(D 层)
 
 | 旧 spec | Kongming 对应 |

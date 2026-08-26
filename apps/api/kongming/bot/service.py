@@ -247,11 +247,15 @@ class BotService:
         # 失败仅日志不阻断应答)
         await self._sink_usage(reply, tenant_id=tenant_id, bot_id=str(row["id"]))
         summary = str(reply.get("summary") or "")
+        error_text = str(reply.get("error") or "")
+        # R2-F1:error 一并过输出护栏(FAILED 错误原文可能含凭证形态,
+        # OpenAI 兼容端点 content 回退链会消费它——与 chat 域 _finalize_reply
+        # 同纪律)
         filtered = await self._guardrail.filter_output(
             trace_id=trace_id,
             user_id=creator,
             tenant_id=tenant_id,
-            texts=[summary],
+            texts=[summary, error_text],
         )
         return {
             "success": bool(reply.get("success")),
@@ -265,7 +269,7 @@ class BotService:
                 if reply.get("retry_count") is not None
                 else 0
             ),
-            "error": reply.get("error"),
+            "error": filtered[1] or None,
         }
 
     async def validate_prompt(self, *, user_id: str, tenant_id: str, prompt: str) -> None:

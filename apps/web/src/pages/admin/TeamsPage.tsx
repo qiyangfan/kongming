@@ -41,6 +41,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { QueryErrorAlert } from "@/components/query-error";
 import {
   addTeamMember,
   changeTeamMemberRole,
@@ -152,7 +153,13 @@ export default function TeamsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {(teams.data ?? []).length === 0 ? (
+            {teams.isError ? (
+              <TableRow>
+                <TableCell colSpan={4}>
+                  <QueryErrorAlert />
+                </TableCell>
+              </TableRow>
+            ) : (teams.data ?? []).length === 0 ? (
               <TableRow>
                 <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
                   尚未加入任何团队。
@@ -263,6 +270,7 @@ export default function TeamsPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
+            {detail.isError && <QueryErrorAlert />}
             <Table>
               <TableHeader>
                 <TableRow>

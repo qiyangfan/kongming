@@ -25,6 +25,9 @@ from kongming.workflow.ports import SsrFBlocked
 
 _RESPONSE_CAP = 1 * 1024 * 1024  # 1MB 截断
 _BODY_CAP = 64 * 1024  # 进 outputs 的 body 截断
+# 响应头无显式闸:依赖 h11 默认 16KB 头块上限(DEFAULT_MAX_INCOMPLETE_EVENT_SIZE,
+# 超限抛协议异常 → 引擎通用 except 收敛 FAILED)——已实证兜底巨头攻击;该依赖
+# 以「HTTP/1.1 传输(未启用 HTTP/2)」为前提,若未来切换传输须补显式头闸(B2-B9 结案注记)
 _TIMEOUT = 15
 
 
