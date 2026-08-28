@@ -75,7 +75,11 @@ function ResultTable({ columns, rows }: { columns: string[]; rows: unknown[][] }
             rows.map((row, i) => (
               <tr key={i} className="border-t border-border">
                 {row.map((cell, j) => (
-                  <td key={j} className="px-3 py-1.5 whitespace-nowrap text-foreground">
+                  <td
+                    key={j}
+                    className="max-w-80 truncate px-3 py-1.5 text-foreground"
+                    title={cell === null || cell === undefined ? undefined : String(cell) || undefined}
+                  >
                     {cell === null || cell === undefined ? "—" : String(cell)}
                   </td>
                 ))}

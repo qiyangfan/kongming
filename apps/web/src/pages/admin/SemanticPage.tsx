@@ -1,5 +1,5 @@
 /* 语义层页(023,semantic-layer spec「语义层管理与权限」):
-   表关系(introspection 只读/manual 可增删+触发抓取)与指标口径(增删/
+   表关系(introspection 只读/manual 可增删+触发扫描)与指标口径(增删/
    启停)双 Tab;权限点 system:semantic:manage。 */
 
 import { useState } from "react";
@@ -70,11 +70,11 @@ export default function SemanticPage() {
   const introspect = useMutation({
     mutationFn: () => introspectRelations(ds),
     onSuccess: (d) => {
-      setNotice(`抓取完成:${d.relations} 条关系(幂等,手工关系不受影响)`);
+      setNotice(`扫描完成:发现 ${d.relations} 条关系(幂等,手工关系不受影响)`);
       setError(null);
       void qc.invalidateQueries({ queryKey: ["semantic", "relations", ds] });
     },
-    onError: (e) => setError(e instanceof Error ? e.message : "抓取失败"),
+    onError: (e) => setError(e instanceof Error ? e.message : "扫描失败"),
   });
 
   const addRel = useMutation({
@@ -192,7 +192,7 @@ export default function SemanticPage() {
               ) : (
                 <RefreshCw className="size-3.5" aria-hidden />
               )}
-              抓取外键关系
+              扫描外键关系
             </Button>
           </div>
           <div className="rounded-lg border border-border">
@@ -222,15 +222,19 @@ export default function SemanticPage() {
                 ) : (relations.data?.length ?? 0) === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
-                      暂无关系——点「抓取外键关系」或手工新增
+                      暂无关系——点「扫描外键关系」或手工新增
                     </TableCell>
                   </TableRow>
                 ) : (
                   relations.data?.map((r) => (
                     <TableRow key={r.id}>
-                      <TableCell className="font-mono text-xs">{r.source_table}</TableCell>
-                      <TableCell className="font-mono text-xs">{r.target_table}</TableCell>
-                      <TableCell className="font-mono text-xs">
+                      <TableCell className="max-w-48 truncate font-mono text-xs" title={r.source_table}>
+                        {r.source_table}
+                      </TableCell>
+                      <TableCell className="max-w-48 truncate font-mono text-xs" title={r.target_table}>
+                        {r.target_table}
+                      </TableCell>
+                      <TableCell className="max-w-40 truncate font-mono text-xs" title={r.join_keys.map((k) => `${k.left_col}=${k.right_col}`).join(", ") || undefined}>
                         {r.join_keys.map((k) => `${k.left_col}=${k.right_col}`).join(", ")}
                       </TableCell>
                       <TableCell>
@@ -319,11 +323,15 @@ export default function SemanticPage() {
                 ) : (
                   metrics.data?.map((m) => (
                     <TableRow key={m.id}>
-                      <TableCell className="text-sm font-medium">{m.metric_name}</TableCell>
-                      <TableCell className="max-w-md font-mono text-xs text-muted-foreground">
+                      <TableCell className="max-w-32 truncate text-sm font-medium" title={m.metric_name}>
+                        {m.metric_name}
+                      </TableCell>
+                      <TableCell className="max-w-md truncate font-mono text-xs text-muted-foreground" title={m.sql_template}>
                         {m.sql_template}
                       </TableCell>
-                      <TableCell className="text-xs">{m.business_terms.join(", ")}</TableCell>
+                      <TableCell className="max-w-32 truncate text-xs" title={m.business_terms.join(", ") || undefined}>
+                        {m.business_terms.join(", ")}
+                      </TableCell>
                       <TableCell>
                         {/* R1-L4:启停切换(upsert 带原值,不重置其他字段) */}
                         <Switch

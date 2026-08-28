@@ -4,7 +4,7 @@ from typing import Any, Protocol
 
 
 class FkIntrospector(Protocol):
-    """外键抓取(基础设施适配:default=控制面会话/动态源=只读连接)。"""
+    """外键扫描(基础设施适配:default=控制面会话/动态源=只读连接)。"""
 
     async def fetch_fk_pairs(
         self, *, schemas: list[str]

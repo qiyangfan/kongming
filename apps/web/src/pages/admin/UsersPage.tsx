@@ -290,8 +290,8 @@ export default function UsersPage() {
           )}
           {users.data?.items.map((u) => (
             <TableRow key={u.id}>
-              <TableCell className="font-medium">{u.username}</TableCell>
-              <TableCell>{u.nickname}</TableCell>
+              <TableCell className="max-w-40 truncate font-medium" title={u.username}>{u.username}</TableCell>
+              <TableCell className="max-w-32 truncate" title={u.nickname}>{u.nickname}</TableCell>
               <TableCell>
                 <StatusSwitch
                   active={u.status === "ACTIVE"}
@@ -314,7 +314,7 @@ export default function UsersPage() {
                   )}
                 </div>
               </TableCell>
-              <TableCell>{u.dept_name ?? "—"}</TableCell>
+              <TableCell className="max-w-32 truncate" title={u.dept_name ?? undefined}>{u.dept_name ?? "—"}</TableCell>
               <TableCell className="text-muted-foreground">
                 {new Date(u.created_at).toLocaleDateString("zh-CN")}
               </TableCell>

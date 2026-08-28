@@ -177,7 +177,7 @@ export default function MemoryPage() {
             ) : (
               list.data?.items.map((m) => (
                 <TableRow key={m.id}>
-                  <TableCell className="max-w-md text-sm">{m.content}</TableCell>
+                  <TableCell className="max-w-md truncate text-sm" title={m.content}>{m.content}</TableCell>
                   <TableCell className="text-xs">{m.category}</TableCell>
                   <TableCell>
                     <Badge variant={m.source === "EXPLICIT" ? "default" : "secondary"}>
@@ -186,8 +186,8 @@ export default function MemoryPage() {
                   </TableCell>
                   <TableCell>
                     {m.team_id ? (
-                      <Badge variant="outline" className="font-normal">
-                        {teamName(m.team_id)}
+                      <Badge variant="outline" className="max-w-32 font-normal" title={teamName(m.team_id) ?? undefined}>
+                        <span className="truncate">{teamName(m.team_id)}</span>
                       </Badge>
                     ) : (
                       <span className="text-xs text-muted-foreground">个人</span>

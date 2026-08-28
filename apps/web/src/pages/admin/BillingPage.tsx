@@ -61,12 +61,37 @@ import {
   voidInvoice,
   type PlanItem,
 } from "@/lib/billing-api";
+import {
+  DIM_TEXT,
+  INVOICE_STATUS_TEXT,
+  PAYMENT_STATUS_TEXT,
+} from "@/lib/billing-labels";
+import { li2yuan, li2yuanInput } from "@/lib/money";
+
+/**
+ * 价格列(DB INTEGER)超 int32 的输入放行会在落库时 500,故统一取 INT32 上限;
+ * 额度列(monthly_tokens、monthly_calls、limit_value)实为 BIGINT,
+ * 此处一并收紧属前端一致性约束(保守无害)。
+ */
+const INT32_MAX = 2_147_483_647;
 
 /** 数值受控校验(035 挂账⑦):非负整数才合法,非法不归零——返回 null 交行内报错 */
 function parseNonNegInt(raw: string): number | null {
   if (!/^\d+$/.test(raw.trim())) return null;
   const n = Number(raw);
-  return Number.isSafeInteger(n) ? n : null;
+  return Number.isSafeInteger(n) && n <= INT32_MAX ? n : null;
+}
+
+/** 套餐数值行内校验错误文案(创建/编辑共用) */
+const PLAN_NUM_ERROR =
+  "额度须为非负整数(≤2147483647);单价须为非负金额,最多 3 位小数";
+
+/** 单价以「元」录入(精度 0.001 元=1 厘),提交转整数厘;亚厘四舍五入 */
+function parseNonNegYuanLi(raw: string): number | null {
+  const t = raw.trim();
+  if (!/^\d+(\.\d+)?$/.test(t)) return null;
+  const n = Math.round(Number(t) * 1000);
+  return Number.isSafeInteger(n) && n <= INT32_MAX ? n : null;
 }
 
 const EMPTY_PLAN_FORM = {
@@ -142,12 +167,12 @@ export default function BillingPage() {
       const nums = {
         monthly_tokens: parseNonNegInt(planForm.monthly_tokens),
         monthly_calls: parseNonNegInt(planForm.monthly_calls),
-        price_per_mtok: parseNonNegInt(planForm.price_per_mtok),
-        price_per_call: parseNonNegInt(planForm.price_per_call),
+        price_per_mtok: parseNonNegYuanLi(planForm.price_per_mtok),
+        price_per_call: parseNonNegYuanLi(planForm.price_per_call),
       };
       const values = Object.values(nums);
       if (values.some((n) => n === null)) {
-        throw new Error("数值须为非负整数(非法输入不会静默归零)");
+        throw new Error(PLAN_NUM_ERROR);
       }
       // 显式展开守卫后字段(Record 展开会丢字面量类型,契约收紧后 tsc 报错——
       // 审查循环 F1 直证:手写 Record 曾让缺字段静默通过)
@@ -176,12 +201,12 @@ export default function BillingPage() {
       const nums = {
         monthly_tokens: parseNonNegInt(editForm.monthly_tokens),
         monthly_calls: parseNonNegInt(editForm.monthly_calls),
-        price_per_mtok: parseNonNegInt(editForm.price_per_mtok),
-        price_per_call: parseNonNegInt(editForm.price_per_call),
+        price_per_mtok: parseNonNegYuanLi(editForm.price_per_mtok),
+        price_per_call: parseNonNegYuanLi(editForm.price_per_call),
       };
       const values = Object.values(nums);
       if (values.some((n) => n === null)) {
-        throw new Error("数值须为非负整数");
+        throw new Error(PLAN_NUM_ERROR);
       }
       const [monthly_tokens, monthly_calls, price_per_mtok, price_per_call] =
         values as [number, number, number, number];
@@ -213,10 +238,17 @@ export default function BillingPage() {
 
   const upsert = useMutation({
     mutationFn: () => {
-      const limit = parseNonNegInt(policyForm.limit_value);
+      const limit =
+        policyForm.dimension === "COST"
+          ? parseNonNegYuanLi(policyForm.limit_value)
+          : parseNonNegInt(policyForm.limit_value);
       const warn = parseNonNegInt(policyForm.warn_pct);
       if (limit === null || warn === null) {
-        throw new Error("上限/预警须为非负整数");
+        throw new Error(
+          policyForm.dimension === "COST"
+            ? "上限须为非负金额(最多 3 位小数);预警须为非负整数(≤2147483647)"
+            : "上限/预警须为非负整数(≤2147483647)",
+        );
       }
       return upsertPolicy({
         tenant_id: tenantId,
@@ -279,7 +311,7 @@ export default function BillingPage() {
                 <TableHead>名称</TableHead>
                 <TableHead>月 token</TableHead>
                 <TableHead>月调用</TableHead>
-                <TableHead>单价(厘/千t+厘/次)</TableHead>
+                <TableHead>计费单价</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -294,11 +326,11 @@ export default function BillingPage() {
                 (plans.data ?? []).map((p) => (
                 <TableRow key={p.id}>
                   <TableCell className="font-mono text-xs">{p.plan_key}</TableCell>
-                  <TableCell>{p.name}</TableCell>
+                  <TableCell className="max-w-40 truncate" title={p.name}>{p.name}</TableCell>
                   <TableCell>{p.monthly_tokens.toLocaleString()}</TableCell>
                   <TableCell>{p.monthly_calls.toLocaleString()}</TableCell>
                   <TableCell>
-                    {p.price_per_mtok} + {p.price_per_call}
+                    ¥{li2yuan(p.price_per_mtok)}/千 token + ¥{li2yuan(p.price_per_call)}/次
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
@@ -312,8 +344,8 @@ export default function BillingPage() {
                           name: p.name,
                           monthly_tokens: String(p.monthly_tokens),
                           monthly_calls: String(p.monthly_calls),
-                          price_per_mtok: String(p.price_per_mtok),
-                          price_per_call: String(p.price_per_call),
+                          price_per_mtok: li2yuanInput(p.price_per_mtok),
+                          price_per_call: li2yuanInput(p.price_per_call),
                         });
                         setEditError("");
                       }}
@@ -373,14 +405,14 @@ export default function BillingPage() {
           <Input
             value={planForm.price_per_mtok}
             onChange={(e) => setPlanForm({ ...planForm, price_per_mtok: e.target.value })}
-            placeholder="厘/千 token"
+            placeholder="每千 token 单价(元,如 0.002)"
             aria-label="千 token 单价"
           />
           <div className="flex gap-2">
             <Input
               value={planForm.price_per_call}
               onChange={(e) => setPlanForm({ ...planForm, price_per_call: e.target.value })}
-              placeholder="厘/次"
+              placeholder="每次调用单价(元,如 0.001)"
               aria-label="次单价"
             />
             <Button type="submit" disabled={create.isPending}>
@@ -471,16 +503,20 @@ export default function BillingPage() {
                         </TableCell>
                         <TableCell>
                           <Badge variant="secondary" className="font-normal">
-                            {p.dimension}
+                            {DIM_TEXT[p.dimension] ?? p.dimension}
                           </Badge>
                         </TableCell>
-                        <TableCell>{p.limit_value.toLocaleString()}</TableCell>
+                        <TableCell>
+                          {p.dimension === "COST"
+                            ? `¥${li2yuan(p.limit_value)}`
+                            : p.limit_value.toLocaleString()}
+                        </TableCell>
                         <TableCell>{p.warn_pct}%</TableCell>
                         <TableCell className="text-right">
                           <Button
                             variant="ghost"
                             size="icon-xs"
-                            aria-label={`删除 ${p.dimension} 策略`}
+                            aria-label={`删除 ${DIM_TEXT[p.dimension] ?? p.dimension} 策略`}
                             onClick={() => setDeletePolicyId(p.id)}
                           >
                             <Trash2 aria-hidden />
@@ -536,22 +572,28 @@ export default function BillingPage() {
               )}
               <Select
                 value={policyForm.dimension}
-                onValueChange={(v) => setPolicyForm({ ...policyForm, dimension: v })}
+                onValueChange={(v) =>
+                  // 维度切换=单位语义失效(token/次/元),上限清零重录,防跨单位误提交
+                  setPolicyForm({ ...policyForm, dimension: v, limit_value: "0" })
+                }
               >
                 <SelectTrigger className="w-32" aria-label="维度">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="TOKENS">TOKENS</SelectItem>
-                  <SelectItem value="CALLS">CALLS</SelectItem>
-                  <SelectItem value="COST">COST</SelectItem>
+                  <SelectItem value="TOKENS">{DIM_TEXT.TOKENS}</SelectItem>
+                  <SelectItem value="CALLS">{DIM_TEXT.CALLS}</SelectItem>
+                  <SelectItem value="COST">{DIM_TEXT.COST}</SelectItem>
                 </SelectContent>
               </Select>
               <div className="space-y-1">
-                <Label className="text-xs">上限</Label>
+                <Label className="text-xs">
+                  上限{policyForm.dimension === "COST" ? "(元)" : ""}
+                </Label>
                 <Input
                   value={policyForm.limit_value}
                   onChange={(e) => setPolicyForm({ ...policyForm, limit_value: e.target.value })}
+                  placeholder={policyForm.dimension === "COST" ? "如 10.00" : "如 100000"}
                   aria-label="上限"
                 />
               </div>
@@ -574,8 +616,7 @@ export default function BillingPage() {
             </form>
             {policyForm.dimension === "COST" && tenantPlan.data == null && (
               <p className="text-xs text-muted-foreground" role="note">
-                提示:该租户未绑定套餐,COST 维成本估算单价为 0,策略将达不成限量
-                (COST 维以套餐单价为前提,035 口径注记)。
+                提示:该租户未绑定套餐,成本单价按 0 计,「{DIM_TEXT.COST}」上限不会触发限量。
               </p>
             )}
             {policyError && (
@@ -595,7 +636,7 @@ export default function BillingPage() {
               <TableRow>
                 <TableHead>租户</TableHead>
                 <TableHead>周期</TableHead>
-                <TableHead>金额(厘)</TableHead>
+                <TableHead>金额(元)</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>支付单</TableHead>
                 <TableHead className="text-right">操作</TableHead>
@@ -619,14 +660,16 @@ export default function BillingPage() {
                   <TableRow key={inv.id}>
                     <TableCell className="font-mono text-xs">{inv.tenant_key}</TableCell>
                     <TableCell className="font-mono text-xs">{inv.period}</TableCell>
-                    <TableCell>{inv.amount.toLocaleString()}</TableCell>
+                    <TableCell>¥{li2yuan(inv.amount)}</TableCell>
                     <TableCell>
                       <Badge variant="secondary" className="font-normal">
-                        {inv.status}
+                        {INVOICE_STATUS_TEXT[inv.status] ?? inv.status}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {inv.payment_status ?? "—"}
+                      {inv.payment_status
+                        ? (PAYMENT_STATUS_TEXT[inv.payment_status] ?? inv.payment_status)
+                        : "—"}
                     </TableCell>
                     <TableCell className="text-right">
                       {inv.status === "PENDING" && (
@@ -710,7 +753,7 @@ export default function BillingPage() {
                 />
               </div>
               <div>
-                <Label className="text-xs">厘/千 token</Label>
+                <Label className="text-xs">千 token 单价(元)</Label>
                 <Input
                   value={editForm.price_per_mtok}
                   onChange={(e) => setEditForm({ ...editForm, price_per_mtok: e.target.value })}
@@ -718,7 +761,7 @@ export default function BillingPage() {
                 />
               </div>
               <div>
-                <Label className="text-xs">厘/次</Label>
+                <Label className="text-xs">每次调用单价(元)</Label>
                 <Input
                   value={editForm.price_per_call}
                   onChange={(e) => setEditForm({ ...editForm, price_per_call: e.target.value })}
@@ -732,7 +775,7 @@ export default function BillingPage() {
               </p>
             )}
             <p className="text-xs text-muted-foreground">
-              改价不回溯既有账单(账单明细为出账时快照)。
+              改价只对之后的账单生效;已出账单按出账时的价格结算。
             </p>
             <Button type="submit" disabled={update.isPending}>
               {update.isPending && <Loader2 className="animate-spin" aria-hidden />}
@@ -753,7 +796,7 @@ export default function BillingPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>删除套餐 {deletePlanTarget?.plan_key}?</AlertDialogTitle>
             <AlertDialogDescription>
-              绑定中的套餐不可删除(409 PLAN_IN_USE);删除后新租户不可再绑定,既有账单不受影响。
+              绑定中的套餐不可删除;删除后新租户不可再绑定,既有账单不受影响。
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deletePlanError && (
@@ -788,7 +831,7 @@ export default function BillingPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>删除该配额策略?</AlertDialogTitle>
             <AlertDialogDescription>
-              删除即解除该维度限量防线(操作落审计)。
+              删除后该维度不再限量(此操作会记入审计日志)。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

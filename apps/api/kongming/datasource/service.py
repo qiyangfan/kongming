@@ -30,6 +30,7 @@ from kongming.datasource.ports import (
     PoolEvictor,
     RagCtxEvictor,
     SemanticCleaner,
+    SuggestionCacheEvictor,
 )
 from kongming.uuid7 import uuid7
 
@@ -129,6 +130,7 @@ class DatasourceService:
         password: str | None,
         default_schema: str,
         readonly: bool,
+        suggestion_evictor: SuggestionCacheEvictor | None = None,
     ) -> None:
         current = await self._repo.get(ds_id)
         if current is None:
@@ -159,6 +161,9 @@ class DatasourceService:
             default_schema=default_schema,
             readonly=readonly,
         )
+        # 039:连接信息变更级联失效建议缓存(同事务;仅改 name 不失效)
+        if conn_changed and suggestion_evictor is not None:
+            await suggestion_evictor.evict_by_datasource(datasource_key)
         await self._repo.log_oper(
             actor_id, "datasource.update", datasource_key, {"datasource_id": ds_id}
         )
@@ -191,6 +196,7 @@ class DatasourceService:
         ds_id: str,
         ctx_evictor: RagCtxEvictor | None = None,
         semantic_cleaner: "SemanticCleaner | None" = None,
+        suggestion_evictor: SuggestionCacheEvictor | None = None,
     ) -> None:
         current = await self._repo.get(ds_id)
         if current is None:
@@ -201,6 +207,9 @@ class DatasourceService:
             await semantic_cleaner.delete_by_datasource(
                 tenant_id=current.tenant_id, datasource_key=current.datasource_key
             )
+        # 039:建议缓存级联失效(同事务,不留孤儿行)
+        if suggestion_evictor is not None:
+            await suggestion_evictor.evict_by_datasource(current.datasource_key)
         await self._repo.log_oper(
             actor_id, "datasource.delete", current.datasource_key, {"datasource_id": ds_id}
         )

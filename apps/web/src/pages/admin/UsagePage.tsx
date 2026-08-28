@@ -306,7 +306,7 @@ export default function UsagePage() {
             {(summary.data?.items ?? []).map((i, idx) => (
               <TableRow key={idx}>
                 <TableCell className="text-muted-foreground">{i.tenant_key}</TableCell>
-                <TableCell className="font-medium">{i.model}</TableCell>
+                <TableCell className="max-w-40 truncate font-medium" title={i.model}>{i.model}</TableCell>
                 <TableCell>{i.task}</TableCell>
                 <TableCell className="text-right">{i.calls}</TableCell>
                 <TableCell className="text-right">
@@ -450,7 +450,7 @@ export default function UsagePage() {
                   {new Date(r.created_at).toLocaleString()}
                 </TableCell>
                 <TableCell className="text-muted-foreground">{r.tenant_key}</TableCell>
-                <TableCell className="font-medium">{r.model}</TableCell>
+                <TableCell className="max-w-40 truncate font-medium" title={r.model}>{r.model}</TableCell>
                 <TableCell>{r.task}</TableCell>
                 <TableCell>
                   {r.status === "ERROR" ? (
@@ -461,7 +461,7 @@ export default function UsagePage() {
                 </TableCell>
                 <TableCell className="text-right">{fmtTokens(r.total_tokens)}</TableCell>
                 <TableCell className="text-right">{fmtMs(r.latency_ms)}</TableCell>
-                <TableCell className="max-w-32 truncate font-mono text-xs text-muted-foreground">
+                <TableCell className="max-w-32 truncate font-mono text-xs text-muted-foreground" title={r.trace_id ?? undefined}>
                   {r.trace_id ?? "—"}
                 </TableCell>
                 <TableCell>

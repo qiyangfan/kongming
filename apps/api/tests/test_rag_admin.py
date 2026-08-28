@@ -538,7 +538,7 @@ async def test_fetch_alias_overwrite_priority(
     ).scalar_one()
     assert alias1 == "AI商品表"  # 空位补齐
 
-    # ② 既有非空 alias(自动来源写入)→ 再次抓取不改写(即便新产出为空);
+    # ② 既有非空 alias(自动来源写入)→ 再次扫描不改写(即便新产出为空);
     #    且 tsv/embedding 以生效别名(=既有别名)同源重算(R1-S1:否则派生检索
     #    文本丢别名,「AI商品表」召回静默失效)
     fake_agent["alias"] = ""

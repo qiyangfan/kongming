@@ -6,11 +6,11 @@
 
 ### Requirement: 外键/主键 introspection
 
-系统 SHALL 按数据源经 information_schema 抓取表间外键关系与主键(幂等 upsert,source=introspection——重复抓取不产生重复行);无 FK 约束的业务库 SHALL NOT 猜测关系(留空,交手工补充);introspection 仅覆盖单数据源内表间关系;抓取须经数据源存在/启用/归属校验(与既有数据源管理同口径 fail-closed)。
+系统 SHALL 按数据源经 information_schema 扫描表间外键关系与主键(幂等 upsert,source=introspection——重复扫描不产生重复行);无 FK 约束的业务库 SHALL NOT 猜测关系(留空,交手工补充);introspection 仅覆盖单数据源内表间关系;扫描须经数据源存在/启用/归属校验(与既有数据源管理同口径 fail-closed)。
 
-#### Scenario: 幂等抓取
+#### Scenario: 幂等扫描
 
-- GIVEN 某数据源已抓取过外键关系
+- GIVEN 某数据源已扫描过外键关系
 - WHEN 再次触发 introspection
 - THEN 关系行不重复(同 source-target 键 upsert),数量不变
 
@@ -27,7 +27,7 @@
 #### Scenario: 手工关系不被覆盖
 
 - GIVEN 存在一条 source=manual 的关系
-- WHEN introspection 重抓且库内无该 FK
+- WHEN introspection 重扫且库内无该 FK
 - THEN 手工关系保留,不被删除或改写
 
 #### Scenario: 数据源删除级联

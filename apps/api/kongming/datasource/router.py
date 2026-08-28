@@ -230,7 +230,11 @@ async def test_connection(req: TestConnectionIn, svc: Service) -> TestConnection
 
 @router.put("/{ds_id}", status_code=204, dependencies=[Depends(require_perm(MANAGE))])
 async def update_datasource(
-    ds_id: uuid.UUID, req: DatasourceUpdateIn, user: UserClaims, svc: Service
+    ds_id: uuid.UUID,
+    req: DatasourceUpdateIn,
+    user: UserClaims,
+    svc: Service,
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     await svc.update(
         actor_id=str(user["sub"]),
@@ -245,6 +249,8 @@ async def update_datasource(
         password=req.password,
         default_schema=req.default_schema,
         readonly=req.readonly,
+        # 039:连接信息变更级联失效建议缓存(组合根绑定请求会话,同事务)
+        suggestion_evictor=_SuggestionEvictor(session),
     )
 
 
@@ -275,6 +281,8 @@ async def delete_datasource(
         ctx_evictor=ContextCache(get_redis()).evict,
         # 023:语义层级联(与删除同事务;组合根绑定请求会话)
         semantic_cleaner=_SemanticCleanerAdapter().bind(session),
+        # 039:建议缓存级联失效(与删除同事务,不留孤儿行)
+        suggestion_evictor=_SuggestionEvictor(session),
     )
 
 
@@ -302,6 +310,18 @@ class _SemanticCleanerAdapter:
         await SqlDocumentRepo(self._session).delete_by_datasource(
             tenant_id=tenant_id, datasource_key=datasource_key
         )
+
+
+class _SuggestionEvictor:
+    """039 组合根:建议缓存级联失效走请求会话(与变更/删除同事务)。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def evict_by_datasource(self, datasource_key: str) -> None:
+        from kongming.chat.repository import SuggestionRepository
+
+        await SuggestionRepository(self._s).delete_by_datasource(datasource_key)
 
 
 # ---- 领域错误 → HTTP 映射 ----

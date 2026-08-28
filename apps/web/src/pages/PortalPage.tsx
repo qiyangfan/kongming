@@ -32,6 +32,8 @@ import {
   listPortalKeys,
   type InvoiceDetail,
 } from "@/lib/billing-api";
+import { DIM_TEXT, INVOICE_STATUS_TEXT } from "@/lib/billing-labels";
+import { li2yuan } from "@/lib/money";
 
 /** 明细 usage_json 形状(服务端固定结构;生成类型为 generic object,
  *  本地收窄——与服务端 usage_json 组装处逐字段对应) */
@@ -47,28 +49,50 @@ function usageOf(detail: InvoiceDetail): UsageDetail {
   return detail.usage_json as unknown as UsageDetail;
 }
 
-const DIM_TEXT: Record<string, string> = {
-  TOKENS: "Token 用量",
-  CALLS: "调用次数",
-  COST: "成本(厘)",
-};
+/** 行费用(整数厘):与服务端 estimate_cost 同式(整数运算,向下取整)。
+ *  服务端金额按合计一次计算,各行求和与总额至多差尾数取整(厘级),总额以 amount 为准。 */
+function rowCostLi(
+  row: { prompt: number; completion: number; calls: number },
+  u: UsageDetail,
+): number {
+  return (
+    Math.floor(((row.prompt + row.completion) * (u.price_per_mtok ?? 0)) / 1000) +
+    row.calls * (u.price_per_call ?? 0)
+  );
+}
+
+/** 计费公式文案:单价代入算式,替代裸单价展示(用户可自行验算) */
+function formulaText(u: UsageDetail): string {
+  const tokens = u.total_tokens ?? 0;
+  const calls = u.total_calls ?? 0;
+  const tokenFee = Math.floor((tokens * (u.price_per_mtok ?? 0)) / 1000);
+  return (
+    `按用量计费:Token ${tokens.toLocaleString()} × ¥${li2yuan(u.price_per_mtok ?? 0)}/千 = ` +
+    `¥${li2yuan(tokenFee)};调用 ${calls.toLocaleString()} 次 × ¥${li2yuan(u.price_per_call ?? 0)}` +
+    ` = ¥${li2yuan(calls * (u.price_per_call ?? 0))}`
+  );
+}
 
 function UsageBar({
   label,
   used,
   limit,
   warnPct,
+  format,
 }: {
   label: string;
   used: number;
   limit: number;
   warnPct: number;
+  /** 值格式化(如金额维度传 li2yuan 转元);缺省千分位整数 */
+  format?: (n: number) => string;
 }) {
+  const fmt = format ?? ((n: number) => n.toLocaleString());
   if (limit <= 0) {
     return (
       <div className="space-y-1">
         <p className="text-sm">
-          {label}: {used.toLocaleString()}(不限)
+          {label}: {fmt(used)}(不限)
         </p>
       </div>
     );
@@ -80,7 +104,7 @@ function UsageBar({
       <div className="flex items-center justify-between text-sm">
         <span>{label}</span>
         <span className="text-muted-foreground">
-          {used.toLocaleString()} / {limit.toLocaleString()}({pct}%)
+          {fmt(used)} / {fmt(limit)}({pct}%)
         </span>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-muted">
@@ -195,6 +219,7 @@ export default function PortalPage() {
               used={usage.data?.cost ?? 0}
               limit={limitOf("COST")}
               warnPct={warnOf("COST")}
+              format={li2yuan}
             />
             <div className="space-y-1 pt-2">
               <p className="text-xs font-medium text-muted-foreground">我的 api-key(仅列有效)</p>
@@ -228,7 +253,7 @@ export default function PortalPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>周期</TableHead>
-                <TableHead>金额(厘)</TableHead>
+                <TableHead>金额(元)</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
@@ -250,13 +275,13 @@ export default function PortalPage() {
                 (invoices.data ?? []).map((inv) => (
                   <TableRow key={inv.id}>
                     <TableCell className="font-mono text-xs">{inv.period}</TableCell>
-                    <TableCell>{inv.amount.toLocaleString()}</TableCell>
+                    <TableCell>¥{li2yuan(inv.amount)}</TableCell>
                     <TableCell>
                       <Badge
                         variant={inv.status === "PENDING" ? "secondary" : "outline"}
                         className="font-normal"
                       >
-                        {inv.status}
+                        {INVOICE_STATUS_TEXT[inv.status] ?? inv.status}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
@@ -305,35 +330,42 @@ export default function PortalPage() {
           {detail && (
             <div className="space-y-3 text-sm">
               <p>
-                金额:<strong>{detail.amount.toLocaleString()}</strong> 厘 · 状态 {detail.status}
+                金额:<strong>¥{li2yuan(detail.amount)}</strong> · 状态{" "}
+                {INVOICE_STATUS_TEXT[detail.status] ?? detail.status}
               </p>
               {(usageOf(detail).by_model ?? []).length > 0 && (
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>模型</TableHead>
-                      <TableHead>prompt</TableHead>
-                      <TableHead>completion</TableHead>
-                      <TableHead>调用</TableHead>
+                      <TableHead>输入 token</TableHead>
+                      <TableHead>输出 token</TableHead>
+                      <TableHead>调用次数</TableHead>
+                      <TableHead className="text-right">费用</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {(usageOf(detail).by_model ?? []).map((m) => (
                       <TableRow key={m.model}>
-                        <TableCell className="font-mono text-xs">{m.model}</TableCell>
+                        <TableCell className="max-w-40 truncate font-mono text-xs" title={m.model}>{m.model}</TableCell>
                         <TableCell>{m.prompt.toLocaleString()}</TableCell>
                         <TableCell>{m.completion.toLocaleString()}</TableCell>
                         <TableCell>{m.calls}</TableCell>
+                        <TableCell className="text-right">
+                          ¥{li2yuan(rowCostLi(m, usageOf(detail)))}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               )}
-              <p className="text-xs text-muted-foreground">
-                合计 {usageOf(detail).total_tokens?.toLocaleString()} tokens ·{" "}
-                {usageOf(detail).total_calls} 次调用 · 单价 {usageOf(detail).price_per_mtok}
-                厘/千 token + {usageOf(detail).price_per_call} 厘/次
-              </p>
+              <div className="space-y-1 text-xs text-muted-foreground">
+                <p>
+                  合计 {usageOf(detail).total_tokens?.toLocaleString() ?? "0"} tokens ·{" "}
+                  {usageOf(detail).total_calls ?? 0} 次调用
+                </p>
+                <p>{formulaText(usageOf(detail))}</p>
+              </div>
             </div>
           )}
         </DialogContent>

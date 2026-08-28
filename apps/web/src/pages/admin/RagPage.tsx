@@ -1,5 +1,5 @@
 /* 知识库管理页(web-admin 009 delta):列表(数据源筛选/分页)+ 上传(文件选择
-   +数据源/schema)+ 删除受控确认 + 抓取元数据 + 重建索引(受控确认,结果展示)。
+   +数据源/schema)+ 删除受控确认 + 扫描数据源 + 重建索引(受控确认,结果展示)。
    全部走 shadcn 组件;错误反馈 role=alert;进行中操作禁重复提交。 */
 
 import { useEffect, useRef, useState } from "react";
@@ -44,6 +44,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { datasourceApi } from "@/lib/datasource-api";
 import { api } from "@/lib/api";
 import { ragApi, type KnowledgeItemOut } from "@/lib/rag-api";
@@ -145,12 +146,14 @@ export default function RagPage() {
   const fetchMeta = useMutation({
     mutationFn: () => ragApi.fetchMetadata(actionDs || "default"),
     onSuccess: (out) => {
-      setNotice(`抓取完成:发现 ${out.found} 表,润色 ${out.enriched} 表,跳过 ${out.skipped} 表`);
+      const parts = [`发现 ${out.found} 张表,已生成 ${out.enriched} 张的说明`];
+      if (out.skipped > 0) parts.push(`${out.skipped} 张人工精修未覆盖`);
+      setNotice(`扫描完成:${parts.join(",")}`);
       setError(null);
       invalidate();
     },
     onError: (e: Error) => {
-      setError(`抓取元数据失败:${e.message}`);
+      setError(`扫描数据源失败:${e.message}`);
       setNotice(null);
     },
   });
@@ -214,13 +217,20 @@ export default function RagPage() {
               ))}
             </SelectContent>
           </Select>
-          <Button
-            variant="outline"
-            onClick={() => fetchMeta.mutate()}
-            disabled={fetchMeta.isPending}
-          >
-            {fetchMeta.isPending ? "抓取中…" : "抓取元数据"}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                onClick={() => fetchMeta.mutate()}
+                disabled={fetchMeta.isPending}
+              >
+                {fetchMeta.isPending ? "扫描中…" : "扫描数据源"}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-72">
+              读取该数据源的表结构,由 AI 生成每张表的业务说明并保存到知识库(耗时较长);人工精修的条目不会被覆盖。
+            </TooltipContent>
+          </Tooltip>
           <Button
             variant="destructive"
             onClick={() => setReindexOpen(true)}
@@ -349,7 +359,13 @@ export default function RagPage() {
               <TableCell className="font-mono text-xs">{item.schema_name}</TableCell>
               <TableCell className="font-mono text-xs">{item.table_name}</TableCell>
               <TableCell className="text-xs">
-                {item.alias ? <Badge variant="outline">{item.alias}</Badge> : <span className="text-muted-foreground">—</span>}
+                {item.alias ? (
+                  <Badge variant="outline" className="max-w-40" title={item.alias}>
+                    <span className="truncate">{item.alias}</span>
+                  </Badge>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
               </TableCell>
               <TableCell className="max-w-64 truncate" title={item.table_comment}>
                 {item.table_comment}
@@ -391,7 +407,7 @@ export default function RagPage() {
           {!list.isPending && (list.data?.items ?? []).length === 0 && (
             <TableRow>
               <TableCell colSpan={8} className="text-center text-muted-foreground">
-                暂无知识条目——可先对数据源「抓取元数据」
+                暂无知识条目——可在右上角对数据源执行「扫描数据源」
               </TableCell>
             </TableRow>
           )}
@@ -432,7 +448,7 @@ export default function RagPage() {
             <DialogTitle>编辑表说明</DialogTitle>
             <DialogDescription>
               表 {editTarget?.schema_name}.{editTarget?.table_name}
-              ——保存后标记为「人工精修」,自动抓取/润色不再覆盖。
+              ——保存后标记为「人工精修」,自动扫描/润色不再覆盖。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -527,7 +543,7 @@ export default function RagPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>重建索引?</AlertDialogTitle>
             <AlertDialogDescription>
-              将清空数据源「{actionDs || "default"}」在该租户的全部表说明并重新抓取
+              将清空数据源「{actionDs || "default"}」在该租户的全部表说明并重新扫描
               (含 LLM 润色)——人工上传/精修的条目也会被清掉,回到自动生成基线。
               大库耗时较长,请耐心等待。
             </AlertDialogDescription>

@@ -61,7 +61,11 @@ async def react_llm(state: ReactState) -> dict[str, object]:
                 ),
             }
         ]
-    system_prompt = build_react_system(state.get("bot_system_prompt") or "")
+    # 能力-契约一致:纪律段随注入工具集选择(空=无工具纪律段,禁伪调用)
+    system_prompt = build_react_system(
+        state.get("bot_system_prompt") or "",
+        has_tools=bool(state.get("tools")),
+    )
     reply = await deps.get_llm().chat_with_tools(
         system_prompt,
         messages,  # type: ignore[arg-type]  # dict 列表形态与 SDK TypedDict 对齐

@@ -26,17 +26,25 @@ REACT_DISCIPLINE = """你可以调用提供的工具来完成用户的请求；�
 
 终止纪律：拿到足够信息后，直接输出中文最终答案（不再调用任何工具）。最终答案中的数值结论必须以工具返回的数据为准，不得编造或外推。"""
 
+# 无工具纪律段（能力-契约一致：注入工具集为空时替换工具纪律——防模型按
+# 工具纪律「文本伪调用」，产出「自言自语+伪代码」假应答被当作最终答案）
+REACT_NO_TOOLS_DISCIPLINE = """你当前没有任何可用工具。不要尝试调用工具，不要输出工具调用计划、伪代码或代码块。
+
+若用户问题需要查询或操作数据，如实说明「当前助手未配置数据工具，无法执行该查询」，不得编造数值或数据；其余问题直接以中文给出最终答案，内容不得包含编造的事实。"""
+
 # ReAct 系统提示:身份段 + 纪律段显式组装(演进只改段落常量)
 REACT_SYSTEM = REACT_IDENTITY_DEFAULT + REACT_DISCIPLINE
 
 
-def build_react_system(bot_system_prompt: str) -> str:
-    """Bot 模式系统提示(025):Bot 身份段替换默认身份,纪律段完整保留;
-    空=REACT_SYSTEM 原文(零回归)。"""
+def build_react_system(bot_system_prompt: str, *, has_tools: bool) -> str:
+    """Bot 模式系统提示(025):Bot 身份段替换默认身份;纪律段按注入工具集
+    选择——有工具=完整内核纪律(既有行为逐字不变),无工具=无工具纪律段
+    (能力-契约一致,禁伪调用);空=默认身份段(组装同构,零回归)。"""
     bot = bot_system_prompt.strip()
+    discipline = REACT_DISCIPLINE if has_tools else REACT_NO_TOOLS_DISCIPLINE
     if not bot:
-        return REACT_SYSTEM
-    return bot + "\n\n" + REACT_DISCIPLINE
+        return REACT_IDENTITY_DEFAULT + discipline
+    return bot + "\n\n" + discipline
 
 
 def initial_user_prompt(

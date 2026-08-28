@@ -2,7 +2,7 @@
 
 ## Purpose
 
-动态数据源管理:超管注册外部 **PostgreSQL** 业务库(PG-only,方言能力储备见 ADR-001 附注),凭证 AES-GCM 加密落库、DTO 不回传敏感字段,支持测试连接、元数据抓取生成知识,RAG 与查询链路按 datasourceKey 分维度动态路由,无需重启接入新业务库。
+动态数据源管理:超管注册外部 **PostgreSQL** 业务库(PG-only,方言能力储备见 ADR-001 附注),凭证 AES-GCM 加密落库、DTO 不回传敏感字段,支持测试连接、元数据扫描生成知识,RAG 与查询链路按 datasourceKey 分维度动态路由,无需重启接入新业务库。
 
 ## Requirements
 
@@ -167,7 +167,7 @@ datasource_key 与租户归属创建后 SHALL NOT 可修改(009 起 008 已兑�
 
 ### Requirement: 管理 UI
 
-数据源管理页 SHALL 提供分页列表与增删改查、测试连接(元数据抓取入口随 rag 域
+数据源管理页 SHALL 提供分页列表与增删改查、测试连接(元数据扫描入口随 rag 域
 落位知识库管理页,不在本页);数据源选项接口 SHALL 返回首位合成的 default 项
 与当前租户启用数据源(均不含连接信息);对话页 SHALL 提供数据源切换器。
 

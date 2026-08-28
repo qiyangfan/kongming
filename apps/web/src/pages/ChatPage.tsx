@@ -1,6 +1,7 @@
-/* 对话页(web-nav spec「对话区渲染」+ 017 流式):
+/* 对话页(web-nav spec「对话区渲染」+ 017 流式 + 039 冷启动建议问题):
    历史回显 + 流式提问(阶段点亮/SQL 提前/summary 打字机;终态由 AssistantCard
-   接管)+ 新会话品牌空态。路由参数 sessionId 是会话选择的单源(刷新/直达天然成立)。
+   接管)+ 新会话品牌空态(下方建议问句 chips,点击即问)。路由参数 sessionId
+   是会话选择的单源(刷新/直达天然成立)。
    错误路径:流异常回填草稿并提示;会话被他端删除(404)时收敛回新建态。
    取消语义:切会话/新建/切租户/数据源切换/卸载时中止在途流,迟到事件按
    发起上下文守卫丢弃,不写入新上下文(017)。 */
@@ -29,21 +30,54 @@ import {
   type StreamToolCallOut,
 } from "@/lib/api";
 import { useAgentMode } from "@/lib/agent-mode-store";
-import { uploadAttachment } from "@/lib/chat-api";
+import { getSuggestions, uploadAttachment } from "@/lib/chat-api";
 import { useDatasource } from "@/lib/datasource-store";
 import { useTenant } from "@/lib/tenant-store";
 
-function EmptyState() {
+function EmptyState({
+  items,
+  loading,
+  onAsk,
+}: {
+  items: string[];
+  loading: boolean;
+  onAsk: (q: string) => void;
+}) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-      <span className="flex size-14 items-center justify-center rounded-2xl bg-primary">
-        <Feather className="size-7 text-primary-foreground" aria-hidden />
-      </span>
-      <h2 className="text-xl font-semibold tracking-widest text-foreground">万事,问孔明。</h2>
-      <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
-        数据之事,直问即可。问库存、问销量、问趋势——
-        运筹帷幄之事,交给军师。
-      </p>
+    <div className="flex h-full flex-col items-center justify-center gap-5 px-6 text-center">
+      <div className="space-y-3">
+        <span className="flex size-14 items-center justify-center rounded-2xl bg-primary mx-auto">
+          <Feather className="size-7 text-primary-foreground" aria-hidden />
+        </span>
+        <h2 className="text-xl font-semibold tracking-widest text-foreground">万事,问孔明。</h2>
+        <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
+          数据之事,直问即可。问库存、问销量、问趋势——
+          运筹帷幄之事,交给军师。
+        </p>
+      </div>
+      {/* 039 冷启动建议:加载骨架/空清单或失败静默隐藏(不阻塞品牌空态) */}
+      {loading && items.length === 0 && (
+        <div className="flex max-w-lg flex-wrap justify-center gap-2" aria-hidden>
+          <Skeleton className="h-8 w-44 rounded-full" />
+          <Skeleton className="h-8 w-36 rounded-full" />
+          <Skeleton className="h-8 w-40 rounded-full" />
+        </div>
+      )}
+      {items.length > 0 && (
+        <div className="flex max-w-lg flex-wrap justify-center gap-2">
+          {items.map((q) => (
+            <Button
+              key={q}
+              variant="outline"
+              size="sm"
+              className="rounded-full font-normal text-muted-foreground"
+              onClick={() => onAsk(q)}
+            >
+              {q}
+            </Button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -147,6 +181,13 @@ export default function ChatPage() {
     queryKey: ["messages", sessionId ?? "-", current, datasource],
     queryFn: () => api.get<SessionMessageOut[]>(`/chat/sessions/${sessionId}/messages`),
     enabled: sessionId !== undefined,
+  });
+
+  // 039 冷启动建议:仅新建态干净分支启用;键含租户+数据源双维度,切换即换档
+  const suggestions = useQuery({
+    queryKey: ["chat-suggestions", current, datasource],
+    queryFn: () => getSuggestions(datasource),
+    enabled: !sessionId && !streaming && !finalized && !askError,
   });
 
   // 会话已被删除(他端/本端竞态):提示并收敛回新建态,不留空白死态
@@ -282,8 +323,10 @@ export default function ChatPage() {
     }
   }
 
-  async function submit(): Promise<void> {
-    const q = draft.trim();
+  async function submit(text?: string): Promise<void> {
+    // 039:建议 chips 直发(text 显式传入,保留草稿不被清空);缺省=输入框草稿
+    const fromDraft = text === undefined;
+    const q = (text ?? draft).trim();
     // R1-S2:与按钮/契约对齐(question min_length=1)——曾放行纯附件,
     // Enter 可绕过按钮禁用直撞 422 且 chips 已清空
     // 审查循环 B1:上传中禁发——此时提交 attIds 不含上传中附件,
@@ -292,7 +335,7 @@ export default function ChatPage() {
     const attIds = attachments.map((a) => a.id);
     const attSnapshot = attachments; // R1-F4:失败恢复用快照
     setAttachments([]);
-    setDraft("");
+    if (fromDraft) setDraft("");
     setAskError(null);
     setFinalized(null); // 新一轮提问顶掉上一轮快照
     const ac = new AbortController();
@@ -357,7 +400,11 @@ export default function ChatPage() {
             </div>
           ) : !sessionId && !streaming && !finalized && !askError ? (
             <div className="h-[60vh]">
-              <EmptyState />
+              <EmptyState
+                items={suggestions.data?.items ?? []}
+                loading={suggestions.isLoading}
+                onAsk={(q) => void submit(q)}
+              />
             </div>
           ) : (
             <>

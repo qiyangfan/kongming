@@ -159,7 +159,7 @@ def test_build_history_sql_limit() -> None:
 
 
 def test_embedding_text_formula() -> None:
-    """embedding 文本=表名+表说明+字段说明(上传/抓取/润色三处同一公式)。"""
+    """embedding 文本=表名+表说明+字段说明(上传/扫描/润色三处同一公式)。"""
     text = build_embedding_text(
         "film", "影片表", {"film_id": "integer 影片ID", "title": "varchar 片名"}
     )

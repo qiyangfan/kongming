@@ -1,6 +1,8 @@
 /* 管理区布局(web-admin spec「管理面路由与页面守卫」):
    子页入口数据驱动(与路由守卫同源权限点)、按当前用户权限过滤、当前子页高亮;
-   子页守卫由各路由的 PermRoute 承担(直达无权子页 → 403 页兜底)。 */
+   子页守卫由各路由的 PermRoute 承担(直达无权子页 → 403 页兜底)。
+   子导航 md+ 左侧竖排(入口多且持续增长,横排放不下)、md 以下顶部横向滚动;
+   每项 shrink-0,禁止 flex 压缩导致文字竖排换行。 */
 
 import { NavLink, Outlet } from "react-router";
 import { Activity, BookOpen, Bot, Cable, Receipt, Workflow, Zap, UsersRound, Building2, Database, Layers, MessageSquareHeart, ScrollText, ShieldCheck, ShieldAlert, Users, Wrench } from "lucide-react";
@@ -43,16 +45,21 @@ export default function AdminLayout() {
   const visible = ADMIN_NAV.filter((item) => hasPerm(user, item.perm));
 
   return (
-    <div className="flex h-full min-w-0 flex-col gap-4 px-6 py-5">
-      <header className="flex items-center gap-1 border-b pb-3">
-        <h1 className="mr-4 text-lg font-semibold text-foreground">管理</h1>
+    <div className="flex h-full min-w-0 flex-col md:flex-row">
+      <nav
+        aria-label="管理导航"
+        className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-4 py-3 md:w-44 md:flex-col md:items-stretch md:overflow-y-auto md:border-b-0 md:border-r md:px-3 md:py-5"
+      >
+        <h1 className="mr-3 shrink-0 text-lg font-semibold text-foreground md:mb-2 md:mr-0 md:px-3 md:py-1.5">
+          管理
+        </h1>
         {visible.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
             className={({ isActive }) =>
               cn(
-                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors",
+                "flex shrink-0 items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
                 isActive
                   ? "bg-secondary text-secondary-foreground font-medium"
                   : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
@@ -63,8 +70,8 @@ export default function AdminLayout() {
             {label}
           </NavLink>
         ))}
-      </header>
-      <main className="min-h-0 flex-1 overflow-y-auto">
+      </nav>
+      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-5">
         <Outlet />
       </main>
     </div>

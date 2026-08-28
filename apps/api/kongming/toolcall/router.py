@@ -101,7 +101,7 @@ class _RagServiceAdapter:
 
     零命中回退(019 实施期评估实证):召回 schema/history 双空时回退实时内省
     ——与老链路 retrieve 节点「RAG 优先、内省兜底」同语义;ReAct 内核无独立
-    内省工具,工具内回退使新租户/未抓取知识的数据源零质量回归(否则 LLM
+    内省工具,工具内回退使新租户/未扫描知识的数据源零质量回归(否则 LLM
     只能盲目探测 information_schema,评估实证循环打满上限)。
     """
 

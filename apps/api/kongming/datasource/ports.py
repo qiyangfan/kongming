@@ -140,3 +140,10 @@ class RagCtxEvictor(Protocol):
     """rag 检索缓存失效窄端口(009:数据源删除时同步失效该源检索缓存)。"""
 
     async def __call__(self, tenant_id: str, datasource_key: str) -> None: ...
+
+
+class SuggestionCacheEvictor(Protocol):
+    """建议问题缓存失效窄端口(039:数据源连接信息变更/删除时级联失效
+    该源全部租户的对话冷启动建议缓存;实现=chat 域仓储,管理事务内调用)。"""
+
+    async def evict_by_datasource(self, datasource_key: str) -> None: ...

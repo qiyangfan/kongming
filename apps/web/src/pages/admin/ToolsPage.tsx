@@ -118,7 +118,7 @@ export default function ToolsPage() {
                       {t.name}
                     </span>
                   </TableCell>
-                  <TableCell className="max-w-md text-sm text-muted-foreground">
+                  <TableCell className="max-w-md truncate text-sm text-muted-foreground" title={t.description}>
                     {t.description}
                   </TableCell>
                   <TableCell className="font-mono text-xs">{t.perm_code}</TableCell>
@@ -230,7 +230,7 @@ export default function ToolsPage() {
                         {STATUS_META[it.status]?.label ?? it.status}
                       </Badge>
                     </TableCell>
-                    <TableCell className="max-w-72 truncate text-xs text-muted-foreground">
+                    <TableCell className="max-w-72 truncate text-xs text-muted-foreground" title={it.args_digest || undefined}>
                       {it.args_digest || "—"}
                     </TableCell>
                     <TableCell className="text-xs">

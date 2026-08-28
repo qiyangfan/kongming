@@ -312,7 +312,7 @@ export default function FeedbackPage() {
                   <TableCell className="whitespace-nowrap text-muted-foreground">
                     {item.feedback_time ? item.feedback_time.slice(0, 16).replace("T", " ") : "—"}
                   </TableCell>
-                  <TableCell>{item.user_nickname ?? item.user_id.slice(0, 8)}</TableCell>
+                  <TableCell className="max-w-32 truncate" title={item.user_nickname ?? undefined}>{item.user_nickname ?? item.user_id.slice(0, 8)}</TableCell>
                   <TableCell>{item.tenant_key}</TableCell>
                   <TableCell>{item.datasource_key}</TableCell>
                   <TableCell>
@@ -324,7 +324,7 @@ export default function FeedbackPage() {
                       "—"
                     )}
                   </TableCell>
-                  <TableCell className="max-w-56 truncate" title={item.question ?? ""}>
+                  <TableCell className="max-w-56 truncate" title={item.question ?? undefined}>
                     {item.question ?? "—"}
                   </TableCell>
                   <TableCell>{item.corrected_sql ? <Badge variant="outline">带纠错</Badge> : "—"}</TableCell>

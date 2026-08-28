@@ -196,6 +196,33 @@ async def test_public_page_404_when_not_public(
     assert r2.status_code == 404
 
 
+async def test_run_empty_tools_fails_fast(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+) -> None:
+    """零工具 Bot 运行闸:求交后工具集为空 → fail-fast 友好错误,
+    不发起 LLM 调用(伪调用假应答根治;治本闸②)。"""
+    _, token = await _user(client, session, make_user, "bot_notools")
+    fake_agent["agent"] = FakeAgent()
+    r = await client.post(
+        "/system/bots",
+        headers=_auth(token),
+        json={**BOT_PAYLOAD, "bot_key": "notools", "tools": []},
+    )
+    assert r.status_code == 201
+    await client.put(
+        f"/system/bots/{r.json()['id']}", headers=_auth(token), json={"is_public": True}
+    )
+    r2 = await client.post("/bot/notools/chat", json={"question": "有多少商品"})
+    assert r2.status_code == 200
+    body = r2.json()
+    assert body["success"] is False
+    assert "未配置可用工具" in body["error"]
+    assert body["summary"] == ""
+    # 公开页响应契约(BotChatOut;fail-fast 与 LLM 失败分支形态一致)
+    assert set(body) == {"success", "summary", "error"}
+    assert fake_agent["agent"].calls == []  # 零 LLM 调用(fail-fast 直证)
+
+
 async def test_bot_others_404(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:

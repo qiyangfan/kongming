@@ -147,11 +147,15 @@ function SessionActions({ session, isActive }: { session: SessionItemOut; isActi
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
+          {/* 显隐用 visibility 而非 display:菜单打开期间鼠标点空白关闭时,
+              data-state 与 hover 同时失效,若 display:none 会把 anchor 几何
+              清零,Radix Popper 将播放退出动画的弹框重定位到视口左上角闪现;
+              visibility:hidden 保留盒几何,退出动画原位播完 */}
           <Button
             variant="ghost"
             size="icon-xs"
             aria-label="会话操作"
-            className="absolute top-1/2 right-1 hidden -translate-y-1/2 group-hover:flex group-focus-within:flex max-md:flex data-[state=open]:flex"
+            className="absolute top-1/2 right-1 invisible -translate-y-1/2 group-hover:visible group-focus-within:visible max-md:visible data-[state=open]:visible"
           >
             <MoreVertical className="text-muted-foreground" aria-hidden />
           </Button>

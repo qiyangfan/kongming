@@ -493,12 +493,59 @@ def test_build_react_system_bot_injection() -> None:
         build_react_system,
     )
 
-    assert build_react_system("") == REACT_SYSTEM
-    out = build_react_system("你是售后客服助手")
+    assert build_react_system("", has_tools=True) == REACT_SYSTEM
+    out = build_react_system("你是售后客服助手", has_tools=True)
     assert out.startswith("你是售后客服助手")
     assert "孔明数据助手" not in out  # 默认身份被替换
     for marker in ("工具使用纪律", "效率纪律", "终止纪律", "create_system_announcement"):
         assert marker in out  # 纪律后缀完整保留
+
+
+def test_build_react_system_no_tools_discipline() -> None:
+    """能力-契约一致:注入工具集为空时纪律段替换为无工具模式——
+    禁伪调用/禁伪代码,数据类问题如实说明;工具教学不得残留(治本闸①)。"""
+    from kongming_agent.graph.react.prompts import (
+        REACT_DISCIPLINE,
+        REACT_IDENTITY_DEFAULT,
+        REACT_NO_TOOLS_DISCIPLINE,
+        build_react_system,
+    )
+
+    # Bot 注入路径:身份段替换 + 无工具纪律段
+    out = build_react_system("你是售后客服助手", has_tools=False)
+    assert out.startswith("你是售后客服助手")
+    assert "没有任何可用工具" in out
+    assert "不要尝试调用工具" in out
+    assert "不得编造" in out  # 数据类问题如实说明,不编造
+    for banned in (
+        "rag_retrieve",
+        "execute_sql",
+        "validate_sql",
+        "工具使用纪律",
+        "效率纪律",
+        "终止纪律",
+    ):
+        assert banned not in out  # 工具教学零残留
+    # 空身份路径:默认身份 + 无工具纪律段(与 REACT_SYSTEM 组装同构)
+    empty = build_react_system("", has_tools=False)
+    assert empty == REACT_IDENTITY_DEFAULT + REACT_NO_TOOLS_DISCIPLINE
+    assert REACT_DISCIPLINE not in empty
+
+
+async def test_react_no_tools_uses_no_tools_discipline(_patch) -> None:  # type: ignore[no-untyped-def]
+    """图级:空工具集进图时 LLM 收到无工具纪律 system(非工具教学)。"""
+    llm = FakeLlm([ToolChatReply(content="当前助手未配置数据工具,无法执行该查询。")])
+    api = FakeApi()
+    _patch(llm, api)
+    final = await get_react_graph().ainvoke(
+        _state(tools=[]), config={"recursion_limit": react_recursion_limit()}
+    )
+    system = str(llm.calls[0]["system"])
+    assert "没有任何可用工具" in system
+    assert "rag_retrieve" not in system and "execute_sql" not in system
+    # 既有退化契约保持:纯文本应答 → PASS 空结果集终态
+    assert final["summary"] == "当前助手未配置数据工具,无法执行该查询。"
+    assert final["execution"].verdict == "PASS"
 
 
 def test_openai_tools_shape() -> None:

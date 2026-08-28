@@ -23,6 +23,16 @@ _DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
 
 @dataclass(frozen=True)
+class Suggestion:
+    """对话冷启动建议问题缓存行(039):租户+数据源唯一,questions 为
+    3-5 条中文自然语言问句。"""
+
+    tenant_id: str
+    datasource_key: str
+    questions: list[str]
+
+
+@dataclass(frozen=True)
 class ChartSuggestion:
     """type: line / bar / pie / scatter / none;x/y 为列名(none 时为空)。"""
 

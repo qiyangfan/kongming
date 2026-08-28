@@ -294,13 +294,15 @@ export default function DatasourcesPage() {
           )}
           {datasources.data?.items.map((d) => (
             <TableRow key={d.id}>
-              <TableCell className="font-medium">{d.datasource_key}</TableCell>
-              <TableCell>{d.name}</TableCell>
-              <TableCell>
+              <TableCell className="max-w-32 truncate font-medium" title={d.datasource_key}>{d.datasource_key}</TableCell>
+              <TableCell className="max-w-32 truncate" title={d.name}>{d.name}</TableCell>
+              <TableCell className="max-w-40 truncate" title={`${d.tenant_name}(${d.tenant_key})`}>
                 {d.tenant_name}({d.tenant_key})
               </TableCell>
               <TableCell className="text-muted-foreground">
-                {d.host}:{d.port}/{d.database}
+                <span className="block max-w-56 truncate" title={`${d.host}:${d.port}/${d.database}`}>
+                  {d.host}:{d.port}/{d.database}
+                </span>
               </TableCell>
               <TableCell>{d.default_schema}</TableCell>
               <TableCell>

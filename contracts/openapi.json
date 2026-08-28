@@ -433,6 +433,66 @@
         }
       }
     },
+    "/chat/suggestions": {
+      "get": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Chat Suggestions",
+        "operationId": "chat_suggestions_chat_suggestions_get",
+        "parameters": [
+          {
+            "name": "datasource_key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+              "default": "default",
+              "title": "Datasource Key"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuggestionsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/query/stream": {
       "post": {
         "tags": [
@@ -8380,6 +8440,7 @@
           "store"
         ],
         "summary": "My Favorites",
+        "description": "与 /store/bots 同构的 StoreBotOut(含 favorited/fav_count,前端心形\n填充与收藏计数同源);列表本身即本人收藏,favorited 恒 TRUE。",
         "operationId": "my_favorites_store_favorites_get",
         "parameters": [
           {
@@ -8407,8 +8468,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "type": "object",
-                    "additionalProperties": true
+                    "$ref": "#/components/schemas/StoreBotOut"
                   },
                   "title": "Response My Favorites Store Favorites Get"
                 }
@@ -14782,6 +14842,23 @@
         ],
         "title": "StreamToolCallOut",
         "description": "tool_call 事件 data(019 tool-calling):工具调用进度。\n\nstatus ∈ running/done/rejected(confirm_required 以 done 下发,result_digest\n含「待确认」);args_digest/result_digest 为截断摘要(审计同源口径)。"
+      },
+      "SuggestionsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "SuggestionsOut",
+        "description": "GET /chat/suggestions 响应:建议问句清单(空=无建议,静默隐藏)。"
       },
       "TeamDetailOut": {
         "properties": {

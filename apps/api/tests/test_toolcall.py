@@ -431,7 +431,7 @@ async def test_rag_retrieve_handler(
     )
     body = r.json()
     assert body["status"] == "executed"
-    # 知识库零命中(tenant_tc 无抓取)→ 回退实时内省,goods 表进提示
+    # 知识库零命中(tenant_tc 无扫描)→ 回退实时内省,goods 表进提示
     # (spec「内置工具集」回退语义:与老链路 retrieve 节点同形态)
     assert "goods" in body["result"]["schema_hint"]
     assert "history_sql" in body["result"]

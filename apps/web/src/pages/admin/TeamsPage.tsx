@@ -169,7 +169,7 @@ export default function TeamsPage() {
               (teams.data ?? []).map((row) => (
                 <TableRow key={row.id}>
                   <TableCell className="font-mono text-xs">{row.team_key}</TableCell>
-                  <TableCell>{row.name}</TableCell>
+                  <TableCell className="max-w-40 truncate" title={row.name}>{row.name}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {row.created_at ? new Date(row.created_at).toLocaleDateString() : ""}
                   </TableCell>
@@ -282,7 +282,7 @@ export default function TeamsPage() {
               <TableBody>
                 {(detail.data?.members ?? []).map((m) => (
                   <TableRow key={m.user_id}>
-                    <TableCell className="text-sm">{m.username}</TableCell>
+                    <TableCell className="max-w-40 truncate text-sm" title={m.username}>{m.username}</TableCell>
                     <TableCell>
                       <Select
                         value={m.role}

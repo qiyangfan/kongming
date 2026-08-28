@@ -7,6 +7,7 @@
 
 import asyncio
 import json
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -30,7 +31,7 @@ from kongming.chat.ports import (
     StreamStore,
     StreamStoreFactory,
 )
-from kongming.chat.repository import ChatRepository
+from kongming.chat.repository import ChatRepository, SuggestionRepository
 from kongming.chat.service import (
     AttachmentNotFound,
     ChatOutcome,
@@ -45,6 +46,7 @@ from kongming.chat.service import (
     StreamHandle,
     TenantForbidden,
 )
+from kongming.chat.suggestions import SuggestionsService
 from kongming.chat.title_tasks import rewrite_session_title
 from kongming.config import get_settings
 
@@ -53,6 +55,7 @@ if TYPE_CHECKING:
 from kongming.datasource.repository import SqlDatasourceRepo
 from kongming.db import get_session, get_sessionmaker
 from kongming.internal import service as internal_service
+from kongming.internal.meta import MetaTableOut
 from kongming.rag.cache import ContextCache
 from kongming.rag.repository import RagRepository
 from kongming.rag.service import RagService
@@ -61,6 +64,8 @@ from kongming.toolcall.repository import SqlToolCallRepo
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 STREAM_HEARTBEAT_SEC = 15.0  # SSE 心跳间隔(017;慢查询防中间层空闲断连)
+
+log = logging.getLogger(__name__)
 
 
 def get_agent_client() -> AgentClient:
@@ -538,6 +543,111 @@ async def chat_query(
                 agent=svc.agent_for_tasks,
             )
     return _out(outcome)
+
+
+# ============ 对话冷启动建议问题(039 chat-suggestions) ============
+
+_SUGGEST_TABLE_CAP = 30  # 摘要表数封顶(meta 自身另有 max_tables,双闸取严)
+_SUGGEST_DIGEST_CHARS = 12_000  # 摘要字符封顶(防巨库撑爆生成 prompt)
+
+
+def _render_schema_digest(
+    tables: list[MetaTableOut], truncated: bool
+) -> str:
+    """内省结果 → 结构摘要文本(仅元数据,零行数据,ADR-002)。"""
+    lines: list[str] = []
+    for t in tables[:_SUGGEST_TABLE_CAP]:
+        header = f"{t.schema_}.{t.name}"
+        if t.comment:
+            header += f" —— {t.comment}"
+        lines.append(header)
+        for c in t.columns:
+            col = f"  - {c.name} {c.data_type}"
+            if c.comment:
+                col += f" -- {c.comment}"
+            lines.append(col)
+    text = "\n".join(lines)
+    if truncated or len(tables) > _SUGGEST_TABLE_CAP:
+        text += "\n(表过多,以上仅为部分)"
+    return text[:_SUGGEST_DIGEST_CHARS]
+
+
+class _SchemaOverviewSource:
+    """组合根适配器(039):chat 域 SchemaOverviewSource ← internal/meta 同源
+    内省(保留表过滤/注释/单 schema/default 直通语义全部单一真理源)。
+    数据源不可用/内省失败 → None(service 收敛空清单,降级不 5xx)。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def overview(self, *, tenant_key: str, datasource_key: str) -> str | None:
+        from kongming.internal.meta import MetaSchemaIn, meta_schema
+
+        try:
+            out = await meta_schema(
+                MetaSchemaIn(tenant_key=tenant_key, datasource_key=datasource_key),
+                self._s,
+            )
+        except Exception:  # noqa: BLE001  # 生成链路失败降级空清单,不 5xx
+            log.warning("建议问题 schema 摘要内省失败 ds=%s", datasource_key, exc_info=True)
+            return None
+        return _render_schema_digest(out.tables, out.truncated)
+
+
+def get_schema_overview(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> _SchemaOverviewSource:
+    return _SchemaOverviewSource(session)
+
+
+def get_suggestor() -> AgentClient:
+    """Suggestor 端口绑定(AgentClient.suggest_questions 结构化匹配;
+    独立依赖便于测试替身注入,与 get_agent_client 同款)。"""
+    return AgentClient(get_settings())
+
+
+def get_suggestions_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    overview: Annotated[_SchemaOverviewSource, Depends(get_schema_overview)],
+    suggestor: Annotated[AgentClient, Depends(get_suggestor)],
+) -> SuggestionsService:
+    return SuggestionsService(
+        tenants=ChatRepository(session),
+        suggestions=SuggestionRepository(session),
+        ds_checker=SqlDatasourceRepo(session),
+        overview=overview,
+        suggestor=suggestor,
+    )
+
+
+class SuggestionsOut(BaseModel):
+    """GET /chat/suggestions 响应:建议问句清单(空=无建议,静默隐藏)。"""
+
+    items: list[str]
+
+
+@router.get(
+    "/suggestions",
+    response_model=SuggestionsOut,
+    dependencies=[Depends(require_perm("chat:execute"))],
+)
+async def chat_suggestions(
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Annotated[SuggestionsService, Depends(get_suggestions_service)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+    datasource_key: Annotated[
+        str, Query(pattern=r"^[a-z][a-z0-9_]{1,63}$")
+    ] = "default",
+) -> SuggestionsOut:
+    try:
+        items = await svc.list_suggestions(
+            user_id=str(user["sub"]),
+            tenant_key=x_tenant_id,
+            datasource_key=datasource_key,
+        )
+    except TenantForbidden:
+        raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
+    return SuggestionsOut(items=items)
 
 
 # ============ 流式问答(017 query-streaming) ============

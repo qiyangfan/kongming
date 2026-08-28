@@ -210,7 +210,7 @@ system:rag:manage(与页面守卫、同域写操作权限口径一致):列表
 #### Scenario: 重建索引
 - GIVEN 知识有数据但向量过时(如换 embedding 模型后)
 - WHEN 触发重建索引
-- THEN 按知识域 reindex 立约执行:清空当前租户+数据源全部条目并重新抓取
+- THEN 按知识域 reindex 立约执行:清空当前租户+数据源全部条目并重新扫描
    (含润色),重新生成向量更新(行为契约见 knowledge 域)
 
 ### Requirement: 成功 SQL 回写 query_history

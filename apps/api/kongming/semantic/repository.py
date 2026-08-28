@@ -92,7 +92,7 @@ class SqlSemanticRepo:
                     "  join_keys, source)"
                     " VALUES (:i, :t, :d, :st, :tt, CAST(:jk AS jsonb), 'manual')"
                     " ON CONFLICT (tenant_id, datasource_key, source_table, target_table)"
-                    # R1-M1:手工接管——冲突翻转 source=manual(防下次抓取被还原);
+                    # R1-M1:手工接管——冲突翻转 source=manual(防下次扫描被还原);
                     # RETURNING 真实行 id(此前返回新 uuid 指向不存在行)
                     " DO UPDATE SET join_keys = CAST(:jk AS jsonb), source='manual',"
                     "   updated_at = now()"

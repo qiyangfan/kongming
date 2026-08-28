@@ -45,17 +45,28 @@ class StoreRunner(Protocol):
     ) -> tuple[bool, str, str]: ...
 
 
+class ToolLister(Protocol):
+    """求交后实际可用工具集解析(实现侧 bot 域,与运行闸同源单一真理源);
+    上架准入闸消费(零工具 Bot 拒上架,货架不摆必败商品)。"""
+
+    async def resolve_runnable(
+        self, *, creator_id: str, tenant_id: str, row: dict[str, Any]
+    ) -> list[dict[str, Any]]: ...
+
+
 class StoreService:
     def __init__(
         self,
         *,
         repo: StoreRepo,
         bot_reader: BotReader,
+        tool_lister: ToolLister,
         guardrail: StoreGuardrail | None = None,
         runner: StoreRunner | None = None,
     ) -> None:
         self._repo = repo
         self._bot_reader = bot_reader
+        self._tool_lister = tool_lister
         self._guardrail = guardrail
         self._runner = runner
 
@@ -76,6 +87,14 @@ class StoreService:
         row = await self._bot_reader.get_bot(bot_id=bot_id, tenant_id=tenant_id)
         if row is None:
             raise StoreNotFound(bot_id)
+        # 零工具上架闸:求交后工具集为空的 Bot 拒上架(与运行闸同源求交,
+        # fail-closed——端口未接线即构造失败,不做 None 跳过)
+        if not await self._tool_lister.resolve_runnable(
+            creator_id=str(row["created_by"]), tenant_id=tenant_id, row=row
+        ):
+            raise StoreValidationError(
+                "该助手未配置可用工具,不能上架,请先为 Bot 配置工具"
+            )
         if len(greeting) > 500:
             raise StoreValidationError("greeting 超 500 字符")
         suggestions = [str(s)[:200] for s in suggestions[:5]]
@@ -120,7 +139,9 @@ class StoreService:
         )
 
     async def get_detail(self, *, tenant_id: str, bot_key: str, user_id: str) -> dict[str, Any]:
-        row = await self._repo.store_get(tenant_id=tenant_id, bot_key=bot_key)
+        row = await self._repo.store_get(
+            tenant_id=tenant_id, bot_key=bot_key, user_id=user_id
+        )
         if row is None:
             raise StoreNotFound(bot_key)
         row["my_rating"] = await self._repo.my_rating(

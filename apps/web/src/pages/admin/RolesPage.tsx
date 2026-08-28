@@ -203,15 +203,17 @@ export default function RolesPage() {
         <TableBody>
           {roles.data?.map((r) => (
             <TableRow key={r.id}>
-              <TableCell className="font-medium">
-                {r.role_key}
-                {r.builtin && (
-                  <Badge variant="secondary" className="ml-2">
-                    内置
-                  </Badge>
-                )}
+              <TableCell className="max-w-40 truncate font-medium">
+                <span className="flex items-center gap-1.5">
+                  <span title={r.role_key} className="truncate">{r.role_key}</span>
+                  {r.builtin && (
+                    <Badge variant="secondary" className="shrink-0">
+                      内置
+                    </Badge>
+                  )}
+                </span>
               </TableCell>
-              <TableCell>{r.role_name}</TableCell>
+              <TableCell className="max-w-40 truncate" title={r.role_name}>{r.role_name}</TableCell>
               <TableCell>{DATA_SCOPES.find((d) => d.value === r.data_scope)?.label ?? r.data_scope}</TableCell>
               <TableCell>{SQL_SCOPES.find((s) => s.value === r.sql_scope)?.label ?? r.sql_scope}</TableCell>
               <TableCell>{r.sort}</TableCell>

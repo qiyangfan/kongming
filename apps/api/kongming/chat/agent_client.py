@@ -174,6 +174,38 @@ class AgentClient:
             log.warning("agent 流式回调异常: %s", e)
             raise AgentUnavailable(str(e)) from e
 
+    async def suggest_questions(self, digest: str) -> list[str]:
+        """建议问题生成(039,Suggestor 端口实现):回调 agent
+        /internal/suggest-questions。降级契约:不可达/超时/非 200/报文畸形
+        一律返回空清单(service 按生成失败收敛,不落缓存),不抛异常。"""
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._base,
+                timeout=self._timeout,
+                headers=self._headers,
+            ) as client:
+                resp = await client.post(
+                    "/internal/suggest-questions", json={"digest": digest}
+                )
+        except httpx.HTTPError as e:
+            log.warning("建议生成回调异常: %s", e)
+            return []
+        if resp.status_code != 200:
+            log.warning("建议生成回调非 200: HTTP %s", resp.status_code)
+            return []
+        try:
+            data = resp.json()
+        except (ValueError, TypeError, AttributeError) as e:
+            # 200 但报文非 JSON(如中间层注入 HTML):同不可达收敛,不裸 500
+            log.warning("建议生成响应解析失败: %s", e)
+            return []
+        if not isinstance(data, dict) or data.get("generated") is not True:
+            return []
+        raw = data.get("questions")
+        if not isinstance(raw, list):
+            return []
+        return raw
+
     @staticmethod
     def _payload(
         *,

@@ -7,10 +7,13 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
-## 当前状态(2026-08-25)
+## 当前状态(2026-08-29)
 
-- 001–038 + backlog-settlement 全部归档,**活动变更为零**;
-  上游 41 域全覆盖(nl2sql-data-platform 知识资产平移收官)。
+- 001–039 + backlog-settlement 全部归档,**活动变更为零**;上游 41 域
+  全覆盖(nl2sql-data-platform 知识资产平移收官)。
+- **待用户裁决(039 评审期上报)**:`public.user_memory` 无 create_by 列
+  →datascope SELF 降级不过滤→default 源可 SQL 读他人记忆;建议
+  RESERVED_TABLE_NAMES 收编该表,裁决后终态化(进「挂账终态」节)。
 - 工作区/提交状态以 `git status` 与 `git log` 为唯一事实源
   (规约:文档不写提交哈希、不谈提交形态)。
 - **开放挂账=零**(backlog-settlement 终态化裁决,见「挂账终态」节)。
@@ -153,6 +156,8 @@ LLM/异步/协议:
   IndexError;embed 应答校验 index 集合等价而非仅条数。
 - AsyncOpenAI 客户端池跨事件循环不可复用(缓存按 loop 维度+weakref 校验)。
 - 共享 AsyncSession 的多 repo 查询必须顺序 await(并行会话状态未定义)。
+- api 调 agent 回调的应答解析须防非 JSON/畸形(resp.json() 裸抛会违约
+  降级契约;先取文本再显式解析,异常收敛到该用例的降级分支)。
 - evals「Server disconnected」成片失败=本地 VPN 切换环境事件(TUN 路由
   重建波及回环),勿误判限流勿长冷却,网络稳定后重跑。
 

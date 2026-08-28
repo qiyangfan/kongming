@@ -96,6 +96,30 @@ async def test_publish_guardrail_blocks(
     assert all(b["id"] != bot_id for b in r2.json())
 
 
+async def test_publish_empty_tools_rejected(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """零工具上架闸:求交后工具集为空的 Bot 拒上架(货架不摆必败商品)。"""
+    _, token = await _user(client, session, make_user, "st_nt")
+    r = await client.post(
+        "/system/bots",
+        headers={"Authorization": f"Bearer {token}"},
+        json={**BOT2, "tools": []},
+    )
+    assert r.status_code == 201
+    bot_id = str(r.json()["id"])
+    r2 = await client.post(
+        f"/system/bots/{bot_id}/publish",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"greeting": "你好"},
+    )
+    assert r2.status_code == 400
+    assert "未配置可用工具" in r2.json()["detail"]
+    # 仍未上架
+    r3 = await client.get("/store/bots", headers={"Authorization": f"Bearer {token}"})
+    assert all(b["id"] != bot_id for b in r3.json())
+
+
 async def test_discovery_search_sort_detail(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
@@ -145,6 +169,17 @@ async def test_favorite_and_rating(
         "/store/favorites", headers={"Authorization": f"Bearer {token}"}
     )
     assert len(favs.json()) == 1
+    # 收藏列表项同构 StoreBotOut:favorited 恒 TRUE(前端心形填充依据)、
+    # fav_count 全局计数(缺陷修复:曾缺字段致「我的收藏」页红心不亮)
+    assert favs.json()[0]["favorited"] is True
+    assert favs.json()[0]["fav_count"] == 1
+    # 详情接口 favorited 同源真实(曾恒 false 的同根缺陷)
+    d_fav = (
+        await client.get(
+            "/store/bots/store_bot", headers={"Authorization": f"Bearer {token}"}
+        )
+    ).json()
+    assert d_fav["favorited"] is True
     r2 = await client.post(
         "/store/bots/store_bot/favorite", headers={"Authorization": f"Bearer {token}"}
     )

@@ -17,6 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming import tenant
+from kongming.chat.models import Suggestion
 from kongming.chat.ports import ChatStoreError
 from kongming.db import uuid7
 from kongming.like import like_pattern
@@ -306,4 +307,77 @@ class ChatRepository:
 
     async def rollback(self) -> None:
         """事务回滚(ChatRepo 端口);不转译——容错段内再失败逃逸为既定语义。"""
+        await self._s.rollback()
+
+
+class SuggestionRepository:
+    """建议问题缓存读写(039):chat_suggestion 表。
+
+    与 ChatRepository 共享同一请求会话(同事务语义):
+    datasource 管理事务内的级联失效(Evictor 绑定)与建议 upsert/commit
+    在各自请求里走本类;lock 为事务级咨询锁,commit/rollback 即释放。
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def find(self, *, tenant_id: str, datasource_key: str) -> Suggestion | None:
+        row = (
+            await self._s.execute(
+                text(
+                    "SELECT tenant_id, datasource_key, questions"
+                    " FROM public.chat_suggestion"
+                    " WHERE tenant_id=:t AND datasource_key=:k"
+                ),
+                {"t": tenant_id, "k": datasource_key},
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            return None
+        return Suggestion(
+            tenant_id=str(row["tenant_id"]),
+            datasource_key=str(row["datasource_key"]),
+            questions=[str(q) for q in row["questions"]],
+        )
+
+    @_store_error_boundary
+    async def lock(self, lock_key: str) -> None:
+        """事务级咨询锁(039 并发防击穿):同 key 并发首访串行化,
+        取锁后复查缓存命中即免重复生成;commit/rollback 自动释放。"""
+        await self._s.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": lock_key}
+        )
+
+    @_store_error_boundary
+    async def upsert(self, suggestion: Suggestion) -> None:
+        """幂等落库(唯一约束兜底并发双写;覆盖写保持最新生成结果)。"""
+        await self._s.execute(
+            text(
+                "INSERT INTO public.chat_suggestion"
+                " (id, tenant_id, datasource_key, questions)"
+                " VALUES (:id, :t, :k, CAST(:q AS jsonb))"
+                " ON CONFLICT (tenant_id, datasource_key)"
+                " DO UPDATE SET questions = EXCLUDED.questions, updated_at = now()"
+            ),
+            {
+                "id": str(uuid7()),
+                "t": suggestion.tenant_id,
+                "k": suggestion.datasource_key,
+                "q": json.dumps(suggestion.questions, ensure_ascii=False),
+            },
+        )
+
+    @_store_error_boundary
+    async def delete_by_datasource(self, datasource_key: str) -> None:
+        """按数据源全租户级联失效(039;datasource 管理事务内调用)。"""
+        await self._s.execute(
+            text("DELETE FROM public.chat_suggestion WHERE datasource_key=:k"),
+            {"k": datasource_key},
+        )
+
+    @_store_error_boundary
+    async def commit(self) -> None:
+        await self._s.commit()
+
+    async def rollback(self) -> None:
         await self._s.rollback()

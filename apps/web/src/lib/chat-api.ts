@@ -6,6 +6,14 @@ import { api, type ChatQueryOut, type SessionItemOut } from "./api";
 export type ExplainOut = components["schemas"]["ExplainOut"];
 export type ArtifactOut = components["schemas"]["ArtifactOut"];
 export type AttachmentOut = components["schemas"]["AttachmentOut"];
+export type SuggestionsOut = components["schemas"]["SuggestionsOut"];
+
+/** 对话冷启动建议问题(039):按当前数据源获取;空清单=静默隐藏(生成失败/不可用) */
+export function getSuggestions(datasourceKey: string): Promise<SuggestionsOut> {
+  return api.get<SuggestionsOut>(
+    `/chat/suggestions?datasource_key=${encodeURIComponent(datasourceKey)}`,
+  );
+}
 
 /** SQL 产物再执行(026):message_id 归属校验 + 六层防御全量,结果落新消息 */
 export function rerunArtifact(messageId: string, sql: string): Promise<ChatQueryOut> {

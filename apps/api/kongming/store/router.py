@@ -89,10 +89,30 @@ class _StoreRunner:
             return bool(out.get("success")), summary, str(out.get("error") or "")
 
 
+class _StoreToolLister:
+    """上架闸工具集解析:经 bot 域服务求交(与运行闸 resolve_tools 同源;
+    与 _StoreRunner 同款组合根跨域装配,store 不 import bot 基础设施)。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def resolve_runnable(
+        self, *, creator_id: str, tenant_id: str, row: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        from kongming.bot.router import _get_service as _bot_factory
+        from kongming.chat.router import get_agent_client
+
+        svc = _bot_factory(self._s, get_agent_client())
+        return await svc.resolve_tools(
+            creator_id=creator_id, tenant_id=tenant_id, row=row
+        )
+
+
 def _svc(session: AsyncSession) -> StoreService:
     return StoreService(
         repo=SqlStoreRepo(session),
         bot_reader=_BotReader(session),
+        tool_lister=_StoreToolLister(session),
         guardrail=_StoreGuardrail(),
         runner=_StoreRunner(),
     )
@@ -161,6 +181,7 @@ class StoreRunOut(BaseModel):
 
 
 def _store_out(r: dict[str, Any]) -> StoreBotOut:
+    published_at = r.get("published_at")
     return StoreBotOut(
         id=str(r["id"]),
         bot_key=str(r["bot_key"]),
@@ -171,9 +192,7 @@ def _store_out(r: dict[str, Any]) -> StoreBotOut:
         rating_count=int(r.get("rating_count") or 0),
         fav_count=int(r.get("fav_count") or 0),
         favorited=bool(r.get("favorited")),
-        published_at=(
-            r["published_at"].isoformat() if r.get("published_at") else None
-        ),
+        published_at=published_at.isoformat() if published_at else None,
     )
 
 
@@ -332,28 +351,20 @@ async def remove_favorite(
     return {"favorited": favorited}
 
 
-@router.get("/store/favorites", dependencies=[Depends(require_perm(RUN))])
+@router.get("/store/favorites", response_model=list[StoreBotOut],
+            dependencies=[Depends(require_perm(RUN))])
 async def my_favorites(
     user: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
-) -> list[dict[str, Any]]:
+) -> list[StoreBotOut]:
+    """与 /store/bots 同构的 StoreBotOut(含 favorited/fav_count,前端心形
+    填充与收藏计数同源);列表本身即本人收藏,favorited 恒 TRUE。"""
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     rows = await _svc(session).my_favorites(
         tenant_id=tenant_id, user_id=str(user["sub"])
     )
-    return [
-        {
-            "id": str(r["id"]),
-            "bot_key": r["bot_key"],
-            "name": r["name"],
-            "greeting": r.get("greeting") or "",
-            "use_count": r["use_count"],
-            "avg_score": round(float(r.get("avg_score") or 0), 1),
-            "rating_count": r.get("rating_count") or 0,
-        }
-        for r in rows
-    ]
+    return [_store_out(r) for r in rows]
 
 
 class RatingIn(BaseModel):

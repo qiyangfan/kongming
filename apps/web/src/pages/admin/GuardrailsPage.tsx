@@ -162,12 +162,12 @@ export default function GuardrailsPage() {
                 <TableRow key={r.name}>
                   <TableCell className="font-mono text-xs font-medium">
                     <span className="flex items-center gap-1.5">
-                      <ShieldCheck className="size-3.5 text-muted-foreground" aria-hidden />
-                      {r.name}
+                      <ShieldCheck className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                      <span className="truncate" title={r.name}>{r.name}</span>
+                      {r.overridden && (
+                        <Badge variant="outline" className="shrink-0">已调整</Badge>
+                      )}
                     </span>
-                    {r.overridden && (
-                      <Badge variant="outline" className="ml-1">已调整</Badge>
-                    )}
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{TYPE_LABELS[r.guardrail_type] ?? r.guardrail_type}</Badge>
@@ -199,7 +199,7 @@ export default function GuardrailsPage() {
                       </Badge>
                     )}
                   </TableCell>
-                  <TableCell className="max-w-md text-sm text-muted-foreground">
+                  <TableCell className="max-w-md truncate text-sm text-muted-foreground" title={r.description}>
                     {r.description}
                   </TableCell>
                   <TableCell className="text-xs">
@@ -332,7 +332,7 @@ export default function GuardrailsPage() {
                         {ACTION_META[it.action]?.label ?? it.action}
                       </Badge>
                     </TableCell>
-                    <TableCell className="max-w-96 truncate text-xs text-muted-foreground">
+                    <TableCell className="max-w-96 truncate text-xs text-muted-foreground" title={it.content_digest || undefined}>
                       {it.content_digest || "—"}
                     </TableCell>
                   </TableRow>

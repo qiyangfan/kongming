@@ -14,7 +14,9 @@ class StoreRepo(Protocol):
         self, *, tenant_id: str, keyword: str, sort: str, user_id: str = ""
     ) -> list[dict[str, Any]]: ...
 
-    async def store_get(self, *, tenant_id: str, bot_key: str) -> dict[str, Any] | None: ...
+    async def store_get(
+        self, *, tenant_id: str, bot_key: str, user_id: str = ""
+    ) -> dict[str, Any] | None: ...
 
     async def set_favorite(
         self,

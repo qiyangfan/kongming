@@ -21,7 +21,7 @@ class SemanticService:
     async def introspect(
         self, *, tenant_id: str, datasource_key: str, introspector: FkIntrospector
     ) -> int:
-        """外键抓取幂等 upsert(按约束分组聚合多列 join_keys);返回关系条数。"""
+        """外键扫描幂等 upsert(按约束分组聚合多列 join_keys);返回关系条数。"""
         pairs = await introspector.fetch_fk_pairs(schemas=[])
         # 按 (source_table, target_table) 聚合多列外键
         grouped: dict[tuple[str, str], list[dict[str, str]]] = {}

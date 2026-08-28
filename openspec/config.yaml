@@ -26,7 +26,7 @@ rules:
   tasks:
     - 安全规则类(SQL 防火墙/权限/租户)必须测试先行:先写失败测试再实现
     - 每个 task 完成后跑 make check 对应子集并在 apply 记录结果
-  spec:
+  specs:
     - Requirement 用 SHALL/SHOULD;Scenario 用 GIVEN/WHEN/THEN
     - spec 只写行为,不绑定实现(不出现框架名/库名);实现选择属于 ADR
     - 数据库行为契约列进 spec 时,同步核对 baseline(ADR-004)是否已建列

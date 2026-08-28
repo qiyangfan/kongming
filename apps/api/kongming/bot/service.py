@@ -26,6 +26,9 @@ log = logging.getLogger(__name__)
 
 GUARDRAIL_REJECT_TEXT = "内容未通过安全检查,请调整后重试"
 
+# 零工具 Bot 运行闸文案(fail-fast;消费者视角,不暴露内部求交细节)
+NO_TOOLS_TEXT = "该助手未配置可用工具,无法执行查询,请联系助手提供方配置后重试"
+
 
 class BotNotFound(Exception):
     """不存在/非本人/未公开(同形不区分)。"""
@@ -145,6 +148,51 @@ class BotService:
         if row is None or row["status"] != "ACTIVE" or str(row["tenant_id"]) != tenant_id:
             raise InvalidBotKey(f"数据源不可用: {datasource_key}")
 
+    async def resolve_tools(
+        self, *, creator_id: str, tenant_id: str, row: dict[str, object]
+    ) -> list[dict[str, object]]:
+        """实际可用工具集(单一真理源,运行闸/上架闸同源):
+        Bot 子集 ∩ 创建者当前权限 → 剔除需确认写工具(R1-M2)→ MCP 只读补入(028)。
+        返回空集 = 该 Bot 在当前状态下不存在任何可执行工具。"""
+        # 权限求交(spec:Bot 子集 ∩ 创建者当前权限);
+        # filter_specs 吃权限点集(此前误传工具名集=恒空,R1 级自抓)
+        creator_perms = await self._perms.list_codes(creator_id)
+        mcp_names = await self._mcp_names(tenant_id)
+        allowed_names = tools_for_perms(creator_perms, mcp_names)
+        raw = row.get("tools")
+        raw_bot_tools = raw if isinstance(raw, list) else []
+        bot_tools = [str(t) for t in raw_bot_tools if str(t) in allowed_names]
+        tools = [
+            dict(s) for s in filter_specs(creator_perms) if s["name"] in set(bot_tools)
+        ]
+        # R1-M2:Bot 渠道无确认交互(公开页/OpenAI 无会话)——剔除需确认的写工具,
+        # 防确认死信+LLM 谎称卡片已弹出
+        from kongming.toolcall.registry import REGISTRY as _TOOL_REG
+
+        tools = [
+            t for t in tools
+            if not _TOOL_REG[str(t["name"])].require_confirm
+        ]
+        # 028:MCP 工具补入(filter_specs 只覆盖静态集);写工具同 R1-M2
+        # 剔除(无 readOnlyHint=require_confirm,Bot 渠道确认死信)
+        mcp_wanted = {t for t in bot_tools if t.startswith("mcp__")}
+        if mcp_wanted and self._dynamic_tools is not None:
+            for entry in await self._dynamic_tools.list_dynamic(tenant_id=tenant_id):
+                q = str(entry.get("qualified") or "")
+                if q not in mcp_wanted or not bool(entry.get("read_only")):
+                    continue
+                schema = entry.get("schema")
+                tools.append(
+                    {
+                        "name": q,
+                        "description": str(entry.get("description") or ""),
+                        "parameters": schema if isinstance(schema, dict) else {"type": "object"},
+                        "write": False,
+                        "require_confirm": False,
+                    }
+                )
+        return tools
+
     async def run(
         self,
         *,
@@ -181,42 +229,22 @@ class BotService:
         )
         if blocked:
             return {"success": False, "error": GUARDRAIL_REJECT_TEXT, "summary": ""}
-        # 权限求交(spec:Bot 子集 ∩ 创建者当前权限);
-        # filter_specs 吃权限点集(此前误传工具名集=恒空,R1 级自抓)
-        creator_perms = await self._perms.list_codes(creator)
-        mcp_names = await self._mcp_names(tenant_id)
-        allowed_names = tools_for_perms(creator_perms, mcp_names)
-        raw_bot_tools = row["tools"] if isinstance(row["tools"], list) else []
-        bot_tools = [str(t) for t in raw_bot_tools if str(t) in allowed_names]
-        tools = [
-            dict(s) for s in filter_specs(creator_perms) if s["name"] in set(bot_tools)
-        ]
-        # R1-M2:Bot 渠道无确认交互(公开页/OpenAI 无会话)——剔除需确认的写工具,
-        # 防确认死信+LLM 谎称卡片已弹出
-        from kongming.toolcall.registry import REGISTRY as _TOOL_REG
-
-        tools = [
-            t for t in tools
-            if not _TOOL_REG[str(t["name"])].require_confirm
-        ]
-        # 028:MCP 工具补入(filter_specs 只覆盖静态集);写工具同 R1-M2
-        # 剔除(无 readOnlyHint=require_confirm,Bot 渠道确认死信)
-        mcp_wanted = {t for t in bot_tools if t.startswith("mcp__")}
-        if mcp_wanted and self._dynamic_tools is not None:
-            for entry in await self._dynamic_tools.list_dynamic(tenant_id=tenant_id):
-                q = str(entry.get("qualified") or "")
-                if q not in mcp_wanted or not bool(entry.get("read_only")):
-                    continue
-                schema = entry.get("schema")
-                tools.append(
-                    {
-                        "name": q,
-                        "description": str(entry.get("description") or ""),
-                        "parameters": schema if isinstance(schema, dict) else {"type": "object"},
-                        "write": False,
-                        "require_confirm": False,
-                    }
-                )
+        # 权限求交与工具裁剪(run/上架闸同源,见 resolve_tools)
+        tools = await self.resolve_tools(creator_id=creator, tenant_id=tenant_id, row=row)
+        if not tools:
+            # 零工具运行闸:无工具进 ReAct 只会产出「文本伪调用」假应答
+            # (内核纪律段教模型调工具而模型无工具可调)——必败运行不花
+            # LLM 调用,同构失败形态直返(与 AgentUnavailable 分支同构)
+            return {
+                "success": False,
+                "error": NO_TOOLS_TEXT,
+                "summary": "",
+                "sql": "",
+                "columns": [],
+                "rows": [],
+                "stats": {},
+                "retry_count": 0,
+            }
         from kongming.chat.agent_client import AgentUnavailable
 
         try:

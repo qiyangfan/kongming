@@ -82,7 +82,8 @@ export function DatasourceSwitcher() {
           <ChevronsUpDown className="size-3.5 text-muted-foreground" aria-hidden />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-52">
+      {/* 面板宽度随触发器(原生 select 观感,Radix 锚宽变量),内容超长仍可撑宽 */}
+      <DropdownMenuContent align="start" className="min-w-(--radix-popper-anchor-width)">
         <DropdownMenuLabel>切换数据源</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {items.map((o) => (

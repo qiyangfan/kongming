@@ -154,6 +154,29 @@ async def rewrite_title_endpoint(req: TitleIn) -> TitleOut:
     return TitleOut(rewritten=True, title=title)
 
 
+class SuggestQuestionsIn(BaseModel):
+    """建议问题生成请求(039;api 回调——结构摘要,非业务行数据)。"""
+
+    digest: str = Field(min_length=1, max_length=20_000)
+
+
+class SuggestQuestionsOut(BaseModel):
+    questions: list[str] = []
+    generated: bool  # False=本次失败(降级),api 侧收敛空清单不落缓存
+
+
+@app.post("/internal/suggest-questions", response_model=SuggestQuestionsOut, tags=["internal"])
+async def suggest_questions_endpoint(req: SuggestQuestionsIn) -> SuggestQuestionsOut:
+    """LLM 建议问题生成(039);失败不抛 5xx(generated=False),api 侧降级。"""
+    from kongming_agent.suggester import SuggestError, suggest_questions
+
+    try:
+        questions = await suggest_questions(req.digest, deps.get_llm())
+    except SuggestError:
+        return SuggestQuestionsOut(generated=False)
+    return SuggestQuestionsOut(generated=True, questions=questions)
+
+
 class ExtractMemoryIn(BaseModel):
     """记忆提取请求(022;api 回调,成功问答轮后台任务)。"""
 

@@ -1,7 +1,7 @@
 """rag 领域模型与纯函数(009):零框架依赖(宪法 Article II)。
 
 覆盖优先级(knowledge spec):INTROSPECTION < AI_GENERATED < MANUAL_UPLOAD <
-MANUAL_EDIT < FEEDBACK_REFINED——自动来源(抓取/润色)不覆盖更高优先级既有条目。
+MANUAL_EDIT < FEEDBACK_REFINED——自动来源(扫描/润色)不覆盖更高优先级既有条目。
 召回参数与上游同构:topK=5、RRF k=60(query_history 独立强 few-shot 通道不进融合)。
 """
 
@@ -84,7 +84,7 @@ class RagContext:
 def can_automated_overwrite(existing: str, incoming: str) -> bool:
     """覆盖优先级判定:自动来源不得覆盖更高优先级既有条目(D5)。
 
-    同级可覆盖(重复抓取幂等更新);人工来源不经过本判定(显式操作即显式覆盖)。
+    同级可覆盖(重复扫描幂等更新);人工来源不经过本判定(显式操作即显式覆盖)。
     """
     return SOURCE_TYPE_PRIORITY[incoming] >= SOURCE_TYPE_PRIORITY[existing]
 

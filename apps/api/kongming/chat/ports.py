@@ -10,6 +10,7 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from kongming.chat.models import Suggestion
 from kongming.rag.ports import QueryHistoryWriter
 
 
@@ -184,6 +185,48 @@ class MemoryPort(Protocol):
     async def form_implicit(
         self, *, user_id: str, tenant_id: str, candidates: list[dict[str, str]]
     ) -> int: ...
+
+
+class SuggestionTenantSource(Protocol):
+    """建议问题租户复校窄端口(039;ChatRepository 结构化匹配,语义同
+    ChatService._resolve_tenant 的两步解析)。"""
+
+    async def find_bound_tenant(self, *, user_id: str, tenant_key: str) -> str | None: ...
+    async def find_default_tenant(self, *, user_id: str) -> tuple[str, str] | None: ...
+
+
+class SuggestionRepo(Protocol):
+    """建议缓存持久化端口(039):find 为读路径(失败不转译冒出);
+    lock/upsert/delete_by_datasource/commit 为写路径(ChatStoreError 转译)。
+
+    lock 为事务级咨询锁(hashtext(tenant:datasource)),commit/rollback 释放;
+    upsert 以 (tenant_id, datasource_key) 唯一约束幂等落库。
+    """
+
+    async def find(self, *, tenant_id: str, datasource_key: str) -> Suggestion | None: ...
+    async def lock(self, lock_key: str) -> None: ...
+    async def upsert(self, suggestion: Suggestion) -> None: ...
+    async def delete_by_datasource(self, datasource_key: str) -> None: ...
+    async def commit(self) -> None: ...
+    async def rollback(self) -> None: ...
+
+
+class SchemaOverviewSource(Protocol):
+    """schema 摘要来源窄端口(039;组合根绑定 internal/meta 同源内省)。
+
+    返回供 LLM 生成建议问句的结构摘要文本(保留表过滤/注释/封顶语义由实现
+    保证);数据源不可用/内省失败返回 None(service 据此收敛空清单)。"""
+
+    async def overview(self, *, tenant_key: str, datasource_key: str) -> str | None: ...
+
+
+class Suggestor(Protocol):
+    """建议问题生成端口(039;实现=AgentClient.suggest_questions,结构化匹配)。
+
+    降级契约:任何失败(不可达/超时/非 200/产出畸形)返回空清单,不抛异常
+    ——service 据此按「生成失败」收敛且不落缓存。"""
+
+    async def suggest_questions(self, digest: str) -> list[str]: ...
 
 
 class SqlRunOutcome(Protocol):

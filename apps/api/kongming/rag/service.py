@@ -1,4 +1,4 @@
-"""rag 用例层(009):上传/召回/抓取润色/重建/回写编排。
+"""rag 用例层(009):上传/召回/扫描润色/重建/回写编排。
 
 零框架依赖(宪法 Article II):持久化/内省/租户解析经 RagRepo 端口反转,
 向量化经 EmbeddingPort、润色经 TableDescriberPort、缓存失效经 ContextCache。

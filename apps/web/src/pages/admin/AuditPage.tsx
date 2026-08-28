@@ -321,10 +321,10 @@ function SqlRows({
         <Fragment key={it.id}>
           <TableRow>
             <TableCell className="whitespace-nowrap text-muted-foreground">{fmtTime(it.created_at)}</TableCell>
-            <TableCell>{it.user_nickname ?? it.user_id?.slice(0, 8) ?? "系统"}</TableCell>
+            <TableCell className="max-w-32 truncate" title={it.user_nickname ?? undefined}>{it.user_nickname ?? it.user_id?.slice(0, 8) ?? "系统"}</TableCell>
             <TableCell>{it.tenant_key}</TableCell>
             <TableCell>{it.datasource_key}</TableCell>
-            <TableCell className="max-w-56 truncate" title={it.question ?? ""}>{it.question ?? "—"}</TableCell>
+            <TableCell className="max-w-56 truncate" title={it.question ?? undefined}>{it.question ?? "—"}</TableCell>
             <TableCell>
               <Badge variant={VERDICT_META[it.verdict]?.variant ?? "outline"}>
                 {VERDICT_META[it.verdict]?.label ?? it.verdict}
@@ -397,9 +397,9 @@ function OperRows({
         <Fragment key={it.id}>
           <TableRow>
             <TableCell className="whitespace-nowrap text-muted-foreground">{fmtTime(it.created_at)}</TableCell>
-            <TableCell>{it.user_nickname ?? it.user_id?.slice(0, 8) ?? "系统"}</TableCell>
+            <TableCell className="max-w-32 truncate" title={it.user_nickname ?? undefined}>{it.user_nickname ?? it.user_id?.slice(0, 8) ?? "系统"}</TableCell>
             <TableCell className="font-mono text-xs">{it.action}</TableCell>
-            <TableCell className="max-w-48 truncate font-mono text-xs" title={it.target ?? ""}>{it.target ?? "—"}</TableCell>
+            <TableCell className="max-w-48 truncate font-mono text-xs" title={it.target ?? undefined}>{it.target ?? "—"}</TableCell>
             <TableCell className="font-mono text-xs">{it.ip ?? "—"}</TableCell>
             <TableCell className="text-right">
               <Button variant="ghost" size="xs" onClick={() => setExpanded(expanded === it.id ? null : it.id)}>

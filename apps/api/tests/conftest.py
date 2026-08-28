@@ -66,6 +66,7 @@ TRUNCATED = (
     "rag.table_descriptions",
     "public.chat_message",
     "public.chat_session",
+    "public.chat_suggestion",
     "public.sys_oper_log",
     "public.sys_sql_audit",
     "public.user_identities",

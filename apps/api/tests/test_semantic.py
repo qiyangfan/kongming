@@ -94,14 +94,14 @@ async def test_introspect_idempotent_and_no_guess(
             json={"datasource_key": "default"},
         )
         assert r.status_code == 200
-    assert r.json()["relations"] >= 1  # orders→customers FK 被抓
+    assert r.json()["relations"] >= 1  # orders→customers FK 被扫描到
     rows = (
         await session.execute(
             text("SELECT source_table, target_table, source FROM rag.table_relations")
         )
     ).all()
     fk = [r for r in rows if "orders" in r.source_table and "customers" in r.target_table]
-    assert len(fk) == 1  # 幂等:两次抓取仍一行
+    assert len(fk) == 1  # 幂等:两次扫描仍一行
     assert fk[0].source == "introspection"
     # 无 FK 表不产生关系
     assert not any("orphan" in r.source_table or "orphan" in r.target_table for r in rows)
@@ -123,7 +123,7 @@ async def test_manual_relation_not_overwritten(
         },
     )
     assert r.status_code == 201
-    # 重抓 introspection:manual 行保留
+    # 重扫 introspection:manual 行保留
     await client.post(
         "/system/semantic/relations/introspect",
         headers={"Authorization": f"Bearer {token}", "X-Tenant-Id": "sem"},
@@ -367,7 +367,7 @@ async def test_r1_h2_introspect_rejects_non_default(
 async def test_r1_m1_manual_takeover_flips_source(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    """R1-M1:手工 upsert 命中 introspection 行翻转 source=manual,重抓不还原。"""
+    """R1-M1:手工 upsert 命中 introspection 行翻转 source=manual,重扫不还原。"""
     token = await _admin(client, session)
     headers = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "sem"}
     await client.post(

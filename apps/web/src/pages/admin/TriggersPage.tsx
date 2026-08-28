@@ -220,18 +220,18 @@ export default function TriggersPage() {
                   <TableCell className="text-xs">
                     {row.target_type}:{row.target_key}
                   </TableCell>
-                  <TableCell className="max-w-56 font-mono text-xs">
+                  <TableCell className="max-w-56 truncate font-mono text-xs">
                     {row.type === "CRON" ? (
                       <>
-                        {row.cron_expr}
+                        <span className="block truncate" title={row.cron_expr ?? undefined}>{row.cron_expr}</span>
                         {row.next_fire_at && (
-                          <p className="text-muted-foreground">
+                          <p className="whitespace-normal text-muted-foreground">
                             下次 {new Date(row.next_fire_at).toLocaleString()}
                           </p>
                         )}
                       </>
                     ) : (
-                      <span className="break-all">/webhooks/{row.webhook_path}</span>
+                      <span className="block truncate" title={`/webhooks/${row.webhook_path}`}>/webhooks/{row.webhook_path}</span>
                     )}
                   </TableCell>
                   <TableCell>

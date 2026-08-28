@@ -233,7 +233,7 @@ export default function WorkflowsPage() {
               (workflows.data ?? []).map((row) => (
                 <TableRow key={row.id}>
                   <TableCell className="font-mono text-xs">{row.wf_key}</TableCell>
-                  <TableCell>{row.name}</TableCell>
+                  <TableCell className="max-w-40 truncate" title={row.name}>{row.name}</TableCell>
                   <TableCell>
                     <Badge variant="secondary" className="font-normal">
                       v{row.version}

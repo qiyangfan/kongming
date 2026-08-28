@@ -16,6 +16,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { li2yuan } from "@/lib/money";
 import {
   cancelPayment,
   getInvoiceDetail,
@@ -24,11 +25,6 @@ import {
 } from "@/lib/billing-api";
 
 const TERMINAL = new Set(["PAID", "CANCELLED", "EXPIRED"]);
-
-function fen2yuan(fen: number): string {
-  // 金额单位=厘(1 元=1000 厘,与 models/spec 同口径;R1-A2:曾误按分 /100)
-  return (fen / 1000).toFixed(2);
-}
 
 export default function PayPage() {
   const { paymentId = "" } = useParams();
@@ -95,12 +91,7 @@ export default function PayPage() {
             <p className="text-sm text-muted-foreground">
               账单周期 {invoice.data?.period ?? "…"}
             </p>
-            <p className="text-3xl font-semibold">
-              ¥{fen2yuan(pay.amount)}
-              <span className="ml-2 text-sm font-normal text-muted-foreground">
-                ({pay.amount.toLocaleString()} 厘)
-              </span>
-            </p>
+            <p className="text-3xl font-semibold">¥{li2yuan(pay.amount)}</p>
           </div>
 
           {pay.status === "CREATED" && (

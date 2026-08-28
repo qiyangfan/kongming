@@ -238,8 +238,8 @@ export default function McpPage() {
               (servers.data ?? []).map((row) => (
                 <TableRow key={row.id}>
                   <TableCell className="font-mono text-xs">{row.server_key}</TableCell>
-                  <TableCell>{row.name}</TableCell>
-                  <TableCell className="max-w-56 truncate font-mono text-xs">
+                  <TableCell className="max-w-40 truncate" title={row.name}>{row.name}</TableCell>
+                  <TableCell className="max-w-56 truncate font-mono text-xs" title={row.endpoint}>
                     {row.endpoint}
                   </TableCell>
                   <TableCell>
@@ -252,7 +252,11 @@ export default function McpPage() {
                       </p>
                     )}
                     {rowNote[row.id] && (
-                      <p className="mt-1 text-xs text-muted-foreground" role="status">
+                      <p
+                        className="mt-1 max-w-72 truncate text-xs text-muted-foreground"
+                        title={rowNote[row.id]}
+                        role="status"
+                      >
                         {rowNote[row.id]}
                       </p>
                     )}

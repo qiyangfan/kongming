@@ -186,20 +186,24 @@ export default function BotsPage() {
                 <TableRow key={b.id}>
                   <TableCell>
                     <span className="flex items-center gap-1.5">
-                      <Bot className="size-4 text-muted-foreground" aria-hidden />
-                      <span className="font-medium">{b.name}</span>
-                      <span className="font-mono text-xs text-muted-foreground">{b.bot_key}</span>
+                      <Bot className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                      <span className="max-w-40 truncate font-medium" title={b.name}>{b.name}</span>
+                      <span className="max-w-28 truncate font-mono text-xs text-muted-foreground" title={b.bot_key}>{b.bot_key}</span>
                       {b.team_id && (
-                        <Badge variant="outline" className="font-normal">
-                          {(myTeams.data ?? []).find((t) => t.id === b.team_id)?.name ?? "团队"}
+                        <Badge variant="outline" className="max-w-32 font-normal" title={(myTeams.data ?? []).find((t) => t.id === b.team_id)?.name ?? "团队"}>
+                          <span className="truncate">
+                            {(myTeams.data ?? []).find((t) => t.id === b.team_id)?.name ?? "团队"}
+                          </span>
                         </Badge>
                       )}
                     </span>
                   </TableCell>
-                  <TableCell className="font-mono text-xs">
+                  <TableCell className="max-w-56 truncate font-mono text-xs" title={b.tools.length ? b.tools.join(", ") : undefined}>
                     {b.tools.length ? b.tools.join(", ") : "—"}
                   </TableCell>
-                  <TableCell className="text-xs">{b.datasource_key}</TableCell>
+                  <TableCell className="max-w-32 truncate text-xs" title={b.datasource_key ?? undefined}>
+                    {b.datasource_key}
+                  </TableCell>
                   <TableCell>
                     <Switch
                       checked={b.enabled}
@@ -217,7 +221,9 @@ export default function BotsPage() {
                         aria-label={`公开 ${b.name}`}
                       />
                       {b.is_public && (
-                        <Badge variant="outline" className="font-mono text-xs">/bot/{b.bot_key}</Badge>
+                        <Badge variant="outline" className="max-w-28 font-mono text-xs" title={`/bot/${b.bot_key}`}>
+                          <span className="truncate">/bot/{b.bot_key}</span>
+                        </Badge>
                       )}
                     </span>
                   </TableCell>

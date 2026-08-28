@@ -191,6 +191,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat/suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Chat Suggestions */
+        get: operations["chat_suggestions_chat_suggestions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chat/query/stream": {
         parameters: {
             query?: never;
@@ -2032,7 +2049,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** My Favorites */
+        /**
+         * My Favorites
+         * @description 与 /store/bots 同构的 StoreBotOut(含 favorited/fav_count,前端心形
+         *     填充与收藏计数同源);列表本身即本人收藏,favorited 恒 TRUE。
+         */
         get: operations["my_favorites_store_favorites_get"];
         put?: never;
         post?: never;
@@ -4399,6 +4420,14 @@ export interface components {
              */
             result_digest: string;
         };
+        /**
+         * SuggestionsOut
+         * @description GET /chat/suggestions 响应:建议问句清单(空=无建议,静默隐藏)。
+         */
+        SuggestionsOut: {
+            /** Items */
+            items: string[];
+        };
         /** TeamDetailOut */
         TeamDetailOut: {
             team: components["schemas"]["TeamOut"];
@@ -5483,6 +5512,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChatQueryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    chat_suggestions_chat_suggestions_get: {
+        parameters: {
+            query?: {
+                datasource_key?: string;
+            };
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuggestionsOut"];
                 };
             };
             /** @description Validation Error */
@@ -9897,9 +9959,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["StoreBotOut"][];
                 };
             };
             /** @description Validation Error */

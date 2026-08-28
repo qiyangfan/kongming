@@ -14,6 +14,18 @@ _SORT_SQL = {
     "rating": "avg_score DESC NULLS LAST, rating_count DESC, b.published_at DESC",
 }
 
+# 收藏态/计数子查询单源(别名统一 f2;store_list/store_get 上下文 f 空闲,
+# my_favorites 的 f 被主查询占用——三处共用,防改一漏二)
+_FAV_COUNT_SQL = (
+    " (SELECT count(*) FROM public.sys_bot_favorite f2"
+    "  WHERE f2.bot_id=b.id) AS fav_count"
+)
+_FAVORITED_SQL = (
+    " EXISTS(SELECT 1 FROM public.sys_bot_favorite f2"
+    "        WHERE f2.bot_id=b.id"
+    "        AND f2.user_id=CAST(NULLIF(:fu,'') AS uuid)) AS favorited"
+)
+
 
 class SqlStoreRepo:
     def __init__(self, session: AsyncSession) -> None:
@@ -56,14 +68,12 @@ class SqlStoreRepo:
         order = _SORT_SQL.get(sort, _SORT_SQL["new"])
         params: dict[str, Any] = {"t": tenant_id, "fu": user_id}
         base = (
-            "SELECT b.*,"
+            "SELECT b.*,"  # noqa: S608  base 为常量段拼接,值全绑定
             " AVG(r.score) AS avg_score,"
             " COUNT(r.id) AS rating_count,"
-            " (SELECT count(*) FROM public.sys_bot_favorite f"
-            "  WHERE f.bot_id=b.id) AS fav_count,"
-            " EXISTS(SELECT 1 FROM public.sys_bot_favorite f2"
-            "        WHERE f2.bot_id=b.id AND f2.user_id=CAST(:fu AS uuid)) AS favorited"
-            " FROM public.sys_bot_definition b"
+            + _FAV_COUNT_SQL
+            + ", " + _FAVORITED_SQL
+            + " FROM public.sys_bot_definition b"
             " LEFT JOIN public.sys_bot_rating r ON r.bot_id=b.id"
             " WHERE b.tenant_id=CAST(:t AS uuid)"
             " AND b.published_at IS NOT NULL AND b.enabled"
@@ -84,22 +94,24 @@ class SqlStoreRepo:
         ).mappings().all()
         return [dict(r) for r in rows]
 
-    async def store_get(self, *, tenant_id: str, bot_key: str) -> dict[str, Any] | None:
+    async def store_get(
+        self, *, tenant_id: str, bot_key: str, user_id: str = ""
+    ) -> dict[str, Any] | None:
         row = (
             await self._s.execute(
                 text(
-                    "SELECT b.*,"
+                    "SELECT b.*,"  # noqa: S608  常量段拼接,值全绑定
                     " AVG(r.score) AS avg_score,"
                     " COUNT(r.id) AS rating_count,"
-                    " (SELECT count(*) FROM public.sys_bot_favorite f"
-                    "  WHERE f.bot_id=b.id) AS fav_count"
-                    " FROM public.sys_bot_definition b"
+                    + _FAV_COUNT_SQL
+                    + ", " + _FAVORITED_SQL
+                    + " FROM public.sys_bot_definition b"
                     " LEFT JOIN public.sys_bot_rating r ON r.bot_id=b.id"
                     " WHERE b.tenant_id=CAST(:t AS uuid) AND b.bot_key=:k"
                     " AND b.published_at IS NOT NULL AND b.enabled"
                     " GROUP BY b.id"
                 ),
-                {"t": tenant_id, "k": bot_key},
+                {"t": tenant_id, "k": bot_key, "fu": user_id},
             )
         ).mappings().first()
         return dict(row) if row else None
@@ -137,12 +149,16 @@ class SqlStoreRepo:
         rows = (
             await self._s.execute(
                 text(
-                    "SELECT b.id, b.bot_key, b.name, b.greeting, b.use_count,"
-                    " COALESCE(AVG(r.score), 0) AS avg_score, COUNT(r.id) AS rating_count"
+                    "SELECT b.id, b.bot_key, b.name, b.greeting, b.use_count,"  # noqa: S608  常量段拼接,值全绑定
+                    " b.published_at,"
+                    " COALESCE(AVG(r.score), 0) AS avg_score, COUNT(r.id) AS rating_count,"
+                    + _FAV_COUNT_SQL
+                    + ", TRUE AS favorited"
                     " FROM public.sys_bot_favorite f"
                     " JOIN public.sys_bot_definition b ON b.id=f.bot_id"
                     " LEFT JOIN public.sys_bot_rating r ON r.bot_id=b.id"
                     " WHERE f.tenant_id=CAST(:t AS uuid) AND f.user_id=CAST(:u AS uuid)"
+                    " AND b.tenant_id=CAST(:t AS uuid)"
                     " AND b.published_at IS NOT NULL AND b.enabled"
                     " GROUP BY b.id ORDER BY MAX(f.created_at) DESC"
                 ),
