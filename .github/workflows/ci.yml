@@ -107,4 +107,6 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen
       - run: uv run python scripts/export_openapi.py
-      - run: git diff --exit-code contracts/openapi.json
+      # 脚本写仓库根 contracts/(REPO_ROOT 推导);本 job working-directory
+      # 是 apps/api,pathspec 须相对其上行两级
+      - run: git diff --exit-code ../../contracts/openapi.json
