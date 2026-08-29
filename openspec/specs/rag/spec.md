@@ -9,14 +9,45 @@ RAG 检索体系:文档上传 → embedding → pgvector 召回,替代 schema �
 
 ## Requirements
 
+### Requirement: 可扫描 Schema 枚举
+
+系统 SHALL 提供按数据源枚举可扫描 schema 集合的管理端点
+(`GET /system/rag/schemas?datasource_key=`,要求 system:rag:manage 权限 +
+租户上下文白名单复校,携带 response_model)。集合与内省扫描同源同口径:
+default 数据源 SHALL 返回 `[tenant_<租户key>, public]`;动态数据源 SHALL
+返回 `[default_schema]`;datasource_key 不存在/禁用/不归属当前租户 SHALL
+fail-closed 拒绝(同形,防 key 探测)。该集合为知识上传 schema 字段的唯一
+候选来源,SHALL NOT 出现第三处独立计算(单一真理源)。
+
+#### Scenario: default 数据源枚举
+
+- GIVEN 管理员已登录且持 system:rag:manage,当前租户 key 为 sakila
+- WHEN 请求 default 数据源的 schema 枚举
+- THEN 返回 `["tenant_sakila", "public"]`
+
+#### Scenario: 动态数据源枚举
+
+- GIVEN 某动态数据源 default_schema 为 sales
+- WHEN 请求该数据源的 schema 枚举
+- THEN 返回 `["sales"]`
+
+#### Scenario: 数据源不可用 fail-closed
+
+- GIVEN 请求携带的 datasource_key 不存在/已禁用/不归属当前租户
+- WHEN 请求 schema 枚举
+- THEN 拒绝(同形,不区分具体原因,防 key 探测)
+
 ### Requirement: 文档上传与索引
 
 上传 Markdown 表说明(`## 表名` 二级标题切块),生成 embedding(1536 维)后
 幂等写入 rag.table_descriptions;重复上传覆盖更新(upsert);无权限或超限被拒。
 端点为 `POST /system/rag/documents/upload`(multipart),要求 system:rag:manage
 权限 + 租户上下文(与 chat 域同构的 X-Tenant-Id 白名单复校);datasource_key
-SHALL 通过存在+启用+归属当前租户校验;表单 schema_name SHALL 通过 PG 标识符
-校验(`^[a-z_][a-z0-9_]{0,62}$`,与 datasource 域 default_schema 同一规则);
+SHALL 通过存在+启用+归属当前租户校验;表单 schema_name SHALL 双闸校验——
+先过 PG 标识符语法校验(`^[a-z_][a-z0-9_]{0,62}$`,与 datasource 域
+default_schema 同一规则),再校验其属于该数据源的可扫描 schema 集合
+(与内省扫描同源同口径,见「可扫描 Schema 枚举」),越界即 400
+`SCHEMA_NOT_ALLOWED`,不落库——写边界 fail-fast,防拼错 schema 静默毒化召回;
 文档标题解析出的表名/schema SHALL 小写折叠(PG 未加引号标识符语义)。
 上传文件名(doc_name)SHALL 过 PII 检测(护栏 pii_* 规则集),命中敏感信息
 (身份证号/手机号等)即 400 拒绝——拒绝优于脱敏(脱敏后名可能撞
@@ -71,6 +102,13 @@ source_type=MANUAL_UPLOAD;embedding 输入文本 SHALL 为「表名 + 表说明 
 - GIVEN 上传表单 schema_name 含大写/引号/空白等不匹配 `^[a-z_][a-z0-9_]{0,62}$` 的形态
 - WHEN 上传
 - THEN 返回 400,不落库(防畸形值直达 LLM 提示层)
+
+#### Scenario: schema_name 不在可扫描集合被拒
+
+- GIVEN 上传表单 schema_name 语法合法但不在该数据源可扫描集合
+  (如 default 源填 `tenant_others`、拼错的 `tenant_sakila1`)
+- WHEN 上传
+- THEN 返回 400 SCHEMA_NOT_ALLOWED,不落库(写边界拦截,错误不上置到提问期)
 
 #### Scenario: 表名小写折叠幂等
 

@@ -11,8 +11,10 @@
 
 - 001–039 + backlog-settlement 归档后,041(呈现层列标签双轨)、
   040×2(闭集输入闸 / web 主题切换,并行会话产出)、042(fetch-metadata
-  对账语义)已全部落地随批提交;**042 已归档**(specs 已同步);
-  `changes/` 余 040 两目录工件待其会话收口归档。上游 41 域全覆盖。
+  对账语义)已全部落地随批提交并**全部归档**(specs 均已同步:
+  knowledge 扫描对账 / rag 闭集枚举与上传双闸 / semantic-layer 关系
+  引用校验 / triggers-webhooks 目标校验+cron 预览 / theme-switch 新域);
+  **活动变更清零**。上游 41 域全覆盖。
 - **待用户拍板(042 事故定性后立项)**:043 生成纪律——default 租户
   知识未覆盖时 LLM 凭先验编表(实证:同题编 public.staff 连败 4 次)。
   根因两处 prompt 缺口:`_EMPTY_HINT`「请基于问题尽力生成」教唆编表 +

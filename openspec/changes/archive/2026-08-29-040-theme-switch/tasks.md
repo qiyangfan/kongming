@@ -20,6 +20,6 @@
 
 ## 5. 验证与收尾
 
-- [ ] 5.1 `make check` 全绿(web 侧 tsc + eslint)
+- [x] 5.1 `make check` 全绿(web 侧 tsc + eslint)(2026-08-29 收官复核绿后补勾)
 - [x] 5.2 浏览器实测(spec 全场景):首次跟随系统 / 手动切换即时生效并持久化 / 暗色刷新无白闪 / 切换后聊天图表与 admin 图表换色 / 公开页暗色渲染且无入口
 - [x] 5.3 `make contracts` 确认零契约漂移(纯前端 UI,预期无 diff)

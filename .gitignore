@@ -32,3 +32,4 @@ contracts/openapi.json.tmp
 # 进程 CWD=apps/api,故规则锚 apps/api/var/)
 apps/api/var/
 .omc/
+.codegraph/
