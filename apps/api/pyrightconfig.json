@@ -1,7 +1,7 @@
 {
   "typeCheckingMode": "strict",
   "include": ["."],
-  "exclude": ["**/.*", "**/__pycache__", "**/node_modules"],
+  "exclude": ["**/.*", "**/__pycache__", "**/node_modules", ".venv"],
   "reportMissingTypeStubs": "none",
   "venvPath": ".",
   "venv": ".venv"

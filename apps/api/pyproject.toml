@@ -38,6 +38,7 @@ dev = [
     "types-openpyxl>=3.1.5.20260807",
     "types-jsonschema>=4.23",  # 019 工具参数校验 stub
     "pyyaml>=6.0",  # 评估器 gold 数据集解析(016;evals/ 工具面,不进产品依赖)
+    "pyright>=1.1.411",
 ]
 
 [tool.ruff]

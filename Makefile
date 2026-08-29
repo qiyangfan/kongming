@@ -3,10 +3,10 @@
 check: api-check agent-check web-check
 
 api-check:
-	cd apps/api && uv run ruff check . && uv run mypy kongming && uv run lint-imports && uv run pytest -q
+	cd apps/api && uv run ruff check . && uv run mypy kongming && uv run pyright && uv run lint-imports && uv run pytest -q
 
 agent-check:
-	cd apps/agent && uv run ruff check . && uv run mypy kongming_agent && uv run lint-imports && uv run pytest -q
+	cd apps/agent && uv run ruff check . && uv run mypy kongming_agent && uv run pyright && uv run lint-imports && uv run pytest -q
 
 web-check:
 	cd apps/web && pnpm typecheck && pnpm lint
