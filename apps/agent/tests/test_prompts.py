@@ -94,6 +94,22 @@ def test_summarize_alias_alignment_rules() -> None:
     assert "SUMMARIZE_SYSTEM 称谓对齐规则(2026-08-24,037 entity-alias)" in prompts.__doc__
 
 
+def test_sql_gen_table_scope_discipline() -> None:
+    """043 规则 10:表范围纪律——表/列仅来自可用表结构;哨兵是规则 7 唯一例外。"""
+    assert "表范围纪律" in prompts.SQL_GEN_SYSTEM
+    assert "必须只来自「可用表结构」段" in prompts.SQL_GEN_SYSTEM
+    assert "不得引入其中不存在的表" in prompts.SQL_GEN_SYSTEM
+    assert "唯一例外于规则 7——只输出 NO_RELEVANT_TABLE" in prompts.SQL_GEN_SYSTEM
+    # 数词描述与 token 自相矛盾会干扰模型(R1 审查剔除:「六个词」实际为三个词)
+    assert "六个词" not in prompts.SQL_GEN_SYSTEM
+    assert "不要解释、不要编造表名或列名" in prompts.SQL_GEN_SYSTEM
+
+
+def test_prompts_exception_log_043_registered() -> None:
+    """043 增量已在 prompts.py 文件头例外清单登记(prompt 资产纪律)。"""
+    assert "043 generation-discipline" in prompts.__doc__
+
+
 def test_fullwidth_discipline_no_stray_halfwidth_comma() -> None:
     for text in (
         prompts.SQL_GEN_SYSTEM,

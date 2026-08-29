@@ -19,6 +19,8 @@ from kongming_agent.apiclient import (
 from kongming_agent.graph.build import MAX_RETRY, get_graph
 from kongming_agent.graph.state import AgentState
 
+_NO_DATA_ERROR = "当前数据源未找到与问题相关的数据表,可切换数据源或调整问法后重试"
+
 
 class ScriptedLlm:
     """按调用序出答案:understand/generate(/selfheal 后再 generate)/summarize。"""
@@ -139,6 +141,36 @@ async def test_blocked_never_retries(harness) -> None:  # type: ignore[no-untype
     assert final["retry_count"] == 0  # 权限类不耗配额
     assert api.calls == 0
     assert len(llm.users) == 2  # understand + generate,summarize 不跑
+
+
+async def test_sentinel_short_circuit_zero_execution(harness) -> None:  # type: ignore[no-untyped-def]
+    """043:知识未覆盖哨兵短路——零执行零重试,失败终态带用户友好文案。"""
+    llm, api = harness(["员工总数", "NO_RELEVANT_TABLE"], [])
+    final = await get_graph().ainvoke(_initial())
+    assert final["end_reason"] == "no_data"
+    assert final["generated_sql"] == ""
+    assert final["error"] == _NO_DATA_ERROR
+    assert api.calls == 0  # 短路前零执行(sys_sql_audit 零新增记录)
+    assert len(llm.users) == 2  # understand + generate;无重试、无 summarize
+    assert "summary" not in final  # 失败路径不出洞察
+
+
+async def test_sentinel_after_does_not_exist_guides_then_terminates(
+    harness,  # type: ignore[no-untyped-def]
+) -> None:
+    """043:首轮编表执行报 does-not-exist → 喂回附清单引导 → 二轮哨兵短路不再连败。"""
+    llm, api = harness(
+        ["员工总数", "SELECT count(*) FROM staff"],  # 首轮凭先验编表
+        [SqlExecuteOutcome(verdict="ERROR", reason='relation "public.staff" does not exist')],
+    )
+    llm.answers.insert(2, "NO_RELEVANT_TABLE")  # 二轮经引导后如实说明
+    final = await get_graph().ainvoke(_initial())
+    assert final["end_reason"] == "no_data"
+    assert api.calls == 1  # 二轮短路,零新增执行
+    assert "所引用的表不在『可用表结构』清单中" in llm.users[2]  # 喂回引导在位
+    assert final["error"] == _NO_DATA_ERROR
+    assert final["retry_count"] == 1  # 仅首轮后的那一次 selfheal 计数
+    assert "summary" not in final
 
 
 async def test_retry_exhaustion_terminates(harness) -> None:  # type: ignore[no-untyped-def]

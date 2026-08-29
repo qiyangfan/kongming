@@ -33,7 +33,24 @@ MAX_RETRY = 2  # 重试上限(初始尝试不计):nl2sql spec「重试次数 < �
 # 与 api 防火墙只读根一致(sqlfw/firewall.py _READONLY_ROOTS)
 _READONLY_ROOTS = (exp.Select, exp.Union, exp.Subquery)
 
-_EMPTY_HINT = "（无法获取表结构，请基于问题尽力生成）"
+# 043 生成纪律:空结构占位文案与哨兵机制联动(如实说明,严禁教唆编表)
+_EMPTY_HINT = (
+    "（未能检索到与问题相关的表结构；若问题所需数据不在可用范围内，"
+    "只输出 NO_RELEVANT_TABLE——严禁臆测表名或列名。）"
+)
+
+# 043:知识未覆盖哨兵(生成侧如实说明的唯一出口);短路零执行零重试
+_NO_DATA_SENTINEL = "NO_RELEVANT_TABLE"
+_NO_DATA_ERROR = "当前数据源未找到与问题相关的数据表,可切换数据源或调整问法后重试"
+
+
+def _is_no_data_sentinel(raw: str) -> bool:
+    """哨兵识别(纯函数):剥包裹标记后大小写折叠全等;子串出现不触发
+    (夹在解释句中的哨兵按普通输出走既有防御链,防火墙兜底)。"""
+    text = raw.strip().strip("`").strip()
+    if text.lower().startswith("sql\n"):
+        text = text[4:]
+    return text.strip("`").strip().lower() == _NO_DATA_SENTINEL.lower()
 
 
 # ── 节点1:问题理解(多轮指代消解/单轮改写)──
@@ -163,6 +180,13 @@ async def generate(state: AgentState) -> dict[str, object]:
     if error:
         # 自愈:把上次错误喂回 LLM
         extra = f"\n\n上次生成的 SQL 有误：{error}\n请修正。"
+        # 043:表不存在类错误=编表先验复发,附清单引导给哨兵出口,
+        # 杜绝同因连败空转烧 LLM 配额(PG UndefinedTable 报错定式,大小写不敏感)
+        if "does not exist" in error.lower():
+            extra += (
+                "所引用的表不在『可用表结构』清单中——核对清单；"
+                "若清单确无所需数据，只输出 NO_RELEVANT_TABLE。"
+            )
     user = (
         f"问题：{question}\n\n{memory_part}可用表结构：\n"
         f"{schema_hint}{semantic_part}{history_part}{extra}\n\n生成 SQL："
@@ -175,6 +199,10 @@ async def generate(state: AgentState) -> dict[str, object]:
         trace_id=state.get("trace_id"),
         tenant_key=state.get("tenant_key"),
     )
+    # 043:哨兵=模型如实说明知识未覆盖——短路产物直达失败终态,
+    # 不进 validate/execute、不进自愈(零执行零重试;路由见 build._after_generate)
+    if _is_no_data_sentinel(sql):
+        return {"generated_sql": "", "error": _NO_DATA_ERROR, "end_reason": "no_data"}
     # 生成成功即清掉上轮错误(错误已消费)
     return {"generated_sql": clean_sql(sql), "error": ""}
 

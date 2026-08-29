@@ -9,26 +9,21 @@
 
 ## 当前状态(2026-08-29)
 
-- 001–039 + backlog-settlement 归档后,041(呈现层列标签双轨)、
-  040×2(闭集输入闸 / web 主题切换,并行会话产出)、042(fetch-metadata
-  对账语义)已全部落地随批提交并**全部归档**(specs 均已同步:
-  knowledge 扫描对账 / rag 闭集枚举与上传双闸 / semantic-layer 关系
-  引用校验 / triggers-webhooks 目标校验+cron 预览 / theme-switch 新域);
+- 001–042 + backlog-settlement 已全部归档(040×2 闭集输入闸/web 主题
+  切换、041 呈现层列标签双轨、042 fetch-metadata 对账语义)。2026-08-29
+  三连已归档(specs 已同步至 nl2sql-agent/chat/sql-execution):
+  **043 生成纪律**——根除知识未覆盖时 LLM 凭先验编表(prompts 规则 10
+  表范围纪律+哨兵 `NO_RELEVANT_TABLE` 短路:零执行零自愈,自愈喂回附
+  清单引导);**044 NO_DATA 一等中性形态**——agent verdict 与
+  chat_message.status 第四态(迁移 0028),如实说明不再伪装成执行失败,
+  web 中性说明卡非错误横幅;**045 保留表收编 user_memory**——022 漏
+  收编的 default 源读全库记忆通路闭合(裸名/限定名/CTE 遮蔽/JOIN 全形态
+  BLOCKED,任何 data_scope)。
   **活动变更清零**。上游 41 域全覆盖。
-- **待用户拍板(042 事故定性后立项)**:043 生成纪律——default 租户
-  知识未覆盖时 LLM 凭先验编表(实证:同题编 public.staff 连败 4 次)。
-  根因两处 prompt 缺口:`_EMPTY_HINT`「请基于问题尽力生成」教唆编表 +
-  `SQL_GEN_SYSTEM` 无「仅限所给表、未覆盖如实说明」纪律。方案四件:
-  空结构文案改如实说明 / 表范围纪律条 / 哨兵 NO_RELEVANT_TABLE 短路
-  (不执行不自愈)/ does-not-exist 自愈喂回附引导。落点 agent 面
-  prompts/nodes + chat 呈现兼容,测试先行。
-- **待用户裁决(039 评审期上报)**:`public.user_memory` 无 create_by 列
-  →datascope SELF 降级不过滤→default 源可 SQL 读他人记忆;建议
-  RESERVED_TABLE_NAMES 收编该表,裁决后终态化(进「挂账终态」节)。
 - 工作区/提交状态以 `git status` 与 `git log` 为唯一事实源
   (规约:文档不写提交哈希、不谈提交形态)。
 - **开放挂账=零**(backlog-settlement 终态化裁决,见「挂账终态」节)。
-- 下一棒:043(已立项待拍板)或按需新域,无既定排期项。
+- 下一棒:按需新域,无既定排期项。
 
 ## 新会话开工指引
 
@@ -109,7 +104,7 @@ make contracts      # 导出 OpenAPI + 生成前端类型(改 api 后必跑)
 | 契约 | FastAPI OpenAPI 唯一事实源;前端类型生成禁手写;CI 漂移 diff | ADR-005 |
 | 分层 | 域包 router→service→models→repository;domain 零框架依赖 | 宪法 Article II |
 | 执行路由 | verdict 三态(PASS/BLOCKED/ERROR);绑定复校;data_scope=最外层 WHERE AST 注入;控制面保留表拒读+危险函数拒用;只读池连接级只读 | sql-execution + datascope spec |
-| 问答链路 | agent 8 节点图(老链路)+ ReAct 内核(019)双轨;权限类不重试;重试上限=初始之外 2 次 | nl2sql + nl2sql-agent + chat spec |
+| 问答链路 | agent 8 节点图(老链路)+ ReAct 内核(019)双轨;verdict 对外四态(PASS/BLOCKED/ERROR/NO_DATA,044 如实说明);权限类不重试;重试上限=初始之外 2 次 | nl2sql + nl2sql-agent + chat spec |
 | RAG/知识库 | rag 两表(四元唯一键+HNSW+GIN);三路召回 RRF top5+query_history 独立 few-shot;召回零命中回退内省;成功 SQL 回写;覆盖优先级 INTROSPECTION<AI<UPLOAD<EDIT<FEEDBACK;别名(037)=生效值同源重算派生文本 | rag + knowledge spec |
 | 评估体系 | Execution Match 双分引擎;宽松=黄金指标且不惩罚序错;evals 进程外工具 testpaths 隔离;query_history 幂等治理 | eval + ai-eval spec |
 | prompt 质量 | 生成/理解/摘要三层规则(统计不加 LIMIT/tiebreaker/ROUND/投影完备/指代保真/事实性接地);gold 规范十条与生成侧互锁 | nl2sql-agent spec |

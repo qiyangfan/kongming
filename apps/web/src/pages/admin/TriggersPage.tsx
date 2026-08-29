@@ -211,8 +211,7 @@ export default function TriggersPage() {
         </Button>
       </div>
       <p className="text-sm text-muted-foreground">
-        定时调度(常用频率点选,或高级 cron 表达式)或 webhook 入站(HMAC 签名
-        +随机路径)触发工作流/Bot;目标以创建者身份经全套防御执行。
+        定时调度(常用频率点选,或高级 cron 表达式)或 webhook 触发(外部系统调用专属地址即运行)工作流/助手;执行时以创建者身份经过完整安全校验。
       </p>
 
       <div className="rounded-lg border">
@@ -222,7 +221,7 @@ export default function TriggersPage() {
               <TableHead>标识</TableHead>
               <TableHead>类型</TableHead>
               <TableHead>目标</TableHead>
-              <TableHead>调度/路径</TableHead>
+              <TableHead>调度/地址</TableHead>
               <TableHead>启用</TableHead>
               <TableHead className="text-right">操作</TableHead>
             </TableRow>
@@ -381,7 +380,7 @@ export default function TriggersPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="CRON">定时调度</SelectItem>
-                        <SelectItem value="WEBHOOK">webhook 入站</SelectItem>
+                        <SelectItem value="WEBHOOK">webhook 触发</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -493,32 +492,32 @@ export default function TriggersPage() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label>事件源适配器</Label>
+                    <Label>请求数据格式</Label>
                     <Select
                       value={form.adapter}
                       onValueChange={(v) =>
                         setForm({ ...form, adapter: v as "custom" | "github" })
                       }
                     >
-                      <SelectTrigger aria-label="适配器">
+                      <SelectTrigger aria-label="请求数据格式">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="custom">custom(透传)</SelectItem>
-                        <SelectItem value="github">github</SelectItem>
+                        <SelectItem value="custom">custom(原始 JSON)</SelectItem>
+                        <SelectItem value="github">github(GitHub 格式)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
               )}
               <div className="space-y-1.5">
-                <Label htmlFor="tg-notify">结果出站通知 URL(可空)</Label>
+                <Label htmlFor="tg-notify">执行完成后通知地址(可空)</Label>
                 <Input
                   id="tg-notify"
                   value={form.notifyUrl}
                   onChange={(e) => setForm({ ...form, notifyUrl: e.target.value })}
                   className="font-mono text-xs"
-                  placeholder="https://example.com/hook(经 SSRF 判定)"
+                  placeholder="https://example.com/hook(执行结果发送到此地址;仅接受公网地址)"
                 />
               </div>
               {formError && (
@@ -637,7 +636,7 @@ export default function TriggersPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>删除触发器「{deleting?.name}」?</AlertDialogTitle>
             <AlertDialogDescription>
-              删除后不再调度,入站 webhook 立即失效(历史记录保留)。此操作不可恢复。
+              删除后不再触发,webhook 地址随之失效(历史记录保留)。此操作不可恢复。
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteError && (

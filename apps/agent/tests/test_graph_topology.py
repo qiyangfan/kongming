@@ -5,7 +5,13 @@
 005 起权限类(BLOCKED)从 execute/validate 直接终态,不进 selfheal、不耗配额。
 """
 
-from kongming_agent.graph.build import MAX_RETRY, _after_execute, _after_selfheal, _after_validate
+from kongming_agent.graph.build import (
+    MAX_RETRY,
+    _after_execute,
+    _after_generate,
+    _after_selfheal,
+    _after_validate,
+)
 from kongming_agent.graph.state import ExecutionResult, ValidationResult
 
 BLOCKED = ExecutionResult(verdict="BLOCKED", reason="BLOCKED_ROOT: Delete")
@@ -38,6 +44,15 @@ def test_validate_retryable_failure_goes_to_selfheal() -> None:
 
 def test_validate_pass_goes_to_execute() -> None:
     assert _after_validate({"validation": ValidationResult(passed=True)}) == "execute"
+
+
+def test_generate_sentinel_short_circuit_goes_fail() -> None:
+    """043:哨兵短路产物(end_reason=no_data)直达 fail 终态,不进 validate/execute。"""
+    assert _after_generate({"end_reason": "no_data"}) == "fail"
+
+
+def test_generate_normal_goes_to_validate() -> None:
+    assert _after_generate({}) == "validate"
 
 
 def test_retry_exhaustion_terminates() -> None:

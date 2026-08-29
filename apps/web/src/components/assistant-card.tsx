@@ -1,5 +1,5 @@
 /* assistant 结果卡片(web-nav spec「对话区渲染」+ 010 导出/执行计划 + 014 赞踩反馈):
-   摘要/表格/SQL 折叠/执行计划懒加载/洞察/统计/反馈操作行;SUCCESS/REJECTED/FAILED 三态视觉区分。 */
+   摘要/表格/SQL 折叠/执行计划/洞察/统计/反馈操作行;SUCCESS/REJECTED/FAILED/NO_DATA 四态视觉区分(044)。 */
 
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Database,
   Download,
+  Info,
   Lightbulb,
   Loader2,
   ShieldOff,
@@ -141,6 +142,21 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
       </div>
     );
   }
+  if (msg.status === "NO_DATA") {
+    // 044:知识未覆盖如实说明——中性说明卡(非失败),文案在 summary;
+    // 反馈保留:数据源不对/答案没帮上忙恰是高价值信号
+    return (
+      <div className="space-y-3">
+        <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
+          <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <p className="text-foreground">
+            {msg.summary ?? "当前数据源未找到与问题相关的数据表,可切换数据源或调整问法后重试"}
+          </p>
+        </div>
+        <FeedbackActions msg={msg} />
+      </div>
+    );
+  }
   if (msg.status === "FAILED") {
     const partial = normalize(msg);
     return (
@@ -266,7 +282,8 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
 /* 反馈操作行(014 feedback spec「前端交互」):赞=立即提交;踩=弹窗收集 comment
    与 correctedSql;已反馈回显激活态(历史=服务端字段,实时=setQueriesData 本地
    状态);无 chat:feedback:submit 权限或无 messageId 不渲染入口(spec)。
-   仅 SUCCESS 卡片挂载:REJECTED=系统拦截、FAILED=执行失败,均非「错答」语义 */
+   SUCCESS 与 NO_DATA(044:数据源不对/没帮上忙恰是高价值信号)挂载:
+   REJECTED=系统拦截、FAILED=执行失败,均非「错答」语义 */
 function FeedbackActions({ msg }: { msg: SessionMessageOut }) {
   const { user } = useAuth();
   const qc = useQueryClient();

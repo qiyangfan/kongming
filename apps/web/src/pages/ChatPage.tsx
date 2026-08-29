@@ -107,7 +107,15 @@ function AttachmentBadge({ items }: { items: { [key: string]: unknown }[] }) {
 }
 
 function toSyntheticMessage(out: ChatQueryOut): SessionMessageOut {
-  const status = out.success ? "SUCCESS" : out.verdict === "BLOCKED" ? "REJECTED" : "FAILED";
+  // 044 四态:NO_DATA=知识未覆盖如实说明(中性,非失败)
+  const status =
+    out.success
+      ? "SUCCESS"
+      : out.verdict === "BLOCKED"
+        ? "REJECTED"
+        : out.verdict === "NO_DATA"
+          ? "NO_DATA"
+          : "FAILED";
   return {
     // message_id 缺失(落库容错分支)置空串:FeedbackActions 的 !msg.id 守卫
     // 与 EXPLAIN 入口({msg.sql && ...}同上)天然不渲染,避免非 UUID 直传 422(R3-B2)

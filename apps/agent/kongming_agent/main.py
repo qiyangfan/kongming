@@ -247,7 +247,8 @@ class QueryIn(BaseModel):
 
 class QueryOut(BaseModel):
     success: bool
-    verdict: str | None = None  # PASS / BLOCKED / ERROR;LLM 故障未生成 SQL 时为 None
+    verdict: str | None = None  # PASS / BLOCKED / ERROR / NO_DATA(044 如实说明)
+    # None=未生成 SQL(LLM 故障——044 起 no_data 短路判别为 NO_DATA,不再落 None)
     summary: str = ""
     insights: list[dict[str, str]] = []
     stats: dict[str, object] = {}
@@ -319,7 +320,11 @@ def _build_query_out(final: dict[str, object]) -> QueryOut:
     execution = final.get("execution")
     validation = final.get("validation")
     verdict: str | None
-    if isinstance(execution, ExecutionResult):
+    if final.get("end_reason") == "no_data":
+        # 044:知识未覆盖如实说明(短路,未执行)——判定最前:自愈轮短路时
+        # state 残留上轮 execution(ERROR),不得遮蔽最终形态
+        verdict = "NO_DATA"
+    elif isinstance(execution, ExecutionResult):
         verdict = execution.verdict
     elif isinstance(validation, ValidationResult) and validation.permission_block:
         verdict = "BLOCKED"  # 本地预检拦下的写操作,未达执行路由

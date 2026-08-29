@@ -314,10 +314,78 @@ async def test_generate_appends_error_feedback(monkeypatch: pytest.MonkeyPatch) 
 
 
 async def test_generate_empty_hint_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """043:空结构占位文案重写——如实声明+严禁臆测+哨兵出口;「尽力生成」教唆绝迹。"""
     fake = FakeLlm(["SELECT 1"])
     _install(monkeypatch, fake, FakeApi())
     await nodes.generate(_state(schema_hint=""))
-    assert "无法获取表结构" in fake.calls[0][1]  # 降级显式声明,不静默
+    user = fake.calls[0][1]
+    assert "未能检索到与问题相关的表结构" in user  # 如实声明,不静默
+    assert "严禁臆测表名或列名" in user
+    assert "NO_RELEVANT_TABLE" in user  # 与哨兵机制联动
+    assert "尽力生成" not in user
+
+
+# ============ 043 生成纪律(哨兵短路/喂回引导) ============
+
+
+async def test_generate_sentinel_short_circuits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """哨兵输出→短路产物:SQL 空、end_reason=no_data、用户友好文案;不触发执行。"""
+    fake = FakeLlm(["NO_RELEVANT_TABLE"])
+    api = FakeApi()
+    _install(monkeypatch, fake, api)
+    out = await nodes.generate(_state(schema_hint="表 t(a)"))
+    assert out["generated_sql"] == ""
+    assert out["end_reason"] == "no_data"
+    assert out["error"] == "当前数据源未找到与问题相关的数据表,可切换数据源或调整问法后重试"
+    assert api.execute_calls == []
+
+
+async def test_generate_sentinel_wrapped_forms_detected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """形态防御:markdown 包裹/大小写变体识别;哨兵仅作子串出现不误触。"""
+    for raw in (
+        "```sql\nNO_RELEVANT_TABLE\n```",
+        "```\nNO_RELEVANT_TABLE\n```",
+        "  no_relevant_table  ",
+    ):
+        fake = FakeLlm([raw])
+        _install(monkeypatch, fake, FakeApi())
+        out = await nodes.generate(_state(schema_hint="表 t(a)"))
+        assert out.get("end_reason") == "no_data", raw
+    # 子串形态(解释句夹带):不短路,按普通输出走既有防御链(validate→防火墙兜底)
+    fake = FakeLlm(["我认为此处应输出 NO_RELEVANT_TABLE，但 SELECT 1 可行"])
+    _install(monkeypatch, fake, FakeApi())
+    out = await nodes.generate(_state(schema_hint="表 t(a)"))
+    assert "end_reason" not in out
+    assert "NO_RELEVANT_TABLE" in str(out["generated_sql"])
+
+
+async def test_generate_selfheal_dne_error_appends_table_guidance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """喂回增强:上次错误含 does not exist(大小写不敏感)→ 附清单引导+哨兵出口。"""
+    fake = FakeLlm(["SELECT 1"])
+    _install(monkeypatch, fake, FakeApi())
+    await nodes.generate(
+        _state(schema_hint="表 t(a)", error='relation "public.staff" Does Not Exist')
+    )
+    user = fake.calls[0][1]
+    assert '上次生成的 SQL 有误：relation "public.staff" Does Not Exist' in user
+    assert "所引用的表不在『可用表结构』清单中" in user
+    assert "只输出 NO_RELEVANT_TABLE" in user
+
+
+async def test_generate_selfheal_other_error_feedback_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """其余错误形态喂回不变(不附清单引导)。"""
+    fake = FakeLlm(["SELECT 1"])
+    _install(monkeypatch, fake, FakeApi())
+    await nodes.generate(_state(schema_hint="表 t(a)", error="SQL 预检未过：MULTI_STATEMENT"))
+    user = fake.calls[0][1]
+    assert "上次生成的 SQL 有误：SQL 预检未过：MULTI_STATEMENT" in user
+    assert "清单" not in user
 
 
 # ============ validate ============

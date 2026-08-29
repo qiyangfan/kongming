@@ -16,7 +16,11 @@ _READONLY_ROOTS = (exp.Select, exp.Union, exp.Subquery)
 # 前缀 + 精确名双形态;按未加引号即折叠小写的 PG 语义,一律小写比对。
 # 保留前缀平台级生效:租户 schema 由平台开通,不接受 sys_/chat_ 同名表。
 RESERVED_TABLE_PREFIXES = ("sys_", "chat_")
-RESERVED_TABLE_NAMES = frozenset({"alembic_version", "user_identities"})
+# user_memory(045,039 评审上报):022 用户长期记忆表,归属列 user_id 非
+# create_by,datascope SELF/DEPT 域对其安全降级不过滤(不构成防线,spec 明文),
+# 建表时漏同步收编曾构成 default 源读全库记忆的开放通路;记忆正当通路=召回
+# 注入(memory_hint)与 /memory API,均不经执行路由。
+RESERVED_TABLE_NAMES = frozenset({"alembic_version", "user_identities", "user_memory"})
 
 # 保留 schema(009 评审 B2):rag 知识两表含全租户问句/成功 SQL/表结构,
 # 显式限定名(rag.query_history)不受 search_path 约束,按表引用的 schema 段拒;

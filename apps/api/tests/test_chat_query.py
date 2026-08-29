@@ -439,7 +439,41 @@ async def test_error_maps_failed(
     assert status == "FAILED"
 
 
-# ============ 图表建议纯函数 ============
+async def test_no_data_maps_neutral_status(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser,
+    fake_agent: dict[FakeAgent],
+) -> None:
+    """044:verdict=NO_DATA → 消息第四态;summary 承载中性文案,error 空无产物卡。"""
+    _, token = await _user_with_chat_perm(client, session, make_user)
+    reply = AgentReply(
+        success=False, verdict="NO_DATA",
+        error="当前数据源未找到与问题相关的数据表,可切换数据源或调整问法后重试",
+    )
+    _install(fake_agent, FakeAgent(reply))
+    r = await client.post(
+        "/chat/query",
+        json={"question": "统计每个员工处理的租赁总数"},
+        headers=_auth(token),
+    )
+    body = r.json()
+    assert body["success"] is False and body["verdict"] == "NO_DATA"
+    # 中性形态:不走「查询失败:」错误包装,说明文案经 summary 传达
+    assert body["error"] is None
+    assert "未找到与问题相关的数据表" in body["summary"]
+    row = (
+        await session.execute(
+            text(
+                "SELECT status, summary, CAST(result_json AS jsonb)->>'error' AS err,"
+                " CAST(result_json AS jsonb)->'artifacts' AS artifacts"
+                " FROM public.chat_message WHERE role='ASSISTANT' AND session_id=:i"
+            ),
+            {"i": body["session_id"]},
+        )
+    ).mappings().one()
+    assert row["status"] == "NO_DATA"
+    assert "未找到与问题相关的数据表" in (row["summary"] or "")
+    assert not row["err"]  # error 不落档(不进错误横幅)
+    assert row["artifacts"] == []  # 如实说明不派生产物卡(asyncpg 已反序列化 jsonb)
 
 
 def test_chart_suggestion_rules() -> None:

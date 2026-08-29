@@ -19,6 +19,14 @@ from kongming_agent.graph.streams import stage_wrapper
 __all__ = ["MAX_RETRY", "build", "get_graph"]
 
 
+def _after_generate(state: AgentState) -> str:
+    """043:generate 输出哨兵短路产物(end_reason=no_data)直达失败终态——
+    零执行零重试;正常产物照常进本地预检。"""
+    if state.get("end_reason"):
+        return "fail"
+    return "validate"
+
+
 def _after_validate(state: AgentState) -> str:
     validation = state.get("validation")
     if validation is None or validation.passed:
@@ -68,7 +76,10 @@ def get_graph():  # type: ignore[no-untyped-def]
         {"generate": "generate", "doc_answer": "doc_answer"},
     )
     g.add_edge("doc_answer", END)
-    g.add_edge("generate", "validate")
+    # 043:generate→validate 改条件边(哨兵短路直达 fail;见 _after_generate)
+    g.add_conditional_edges(
+        "generate", _after_generate, {"validate": "validate", "fail": END}
+    )
     g.add_conditional_edges(
         "validate", _after_validate, {"execute": "execute", "selfheal": "selfheal", "fail": END}
     )

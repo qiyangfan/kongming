@@ -104,7 +104,9 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
   --color-grad-end: #0f1a22; /* 青墨 */
 
   /* 流式时间轴动效(品牌表现层豁免,用色走 token):
-     运行中节点呼吸光环 + 运行中文字流光(bg-clip-text 扫过) */
+     运行中节点呼吸光环 + 运行中文字流光(bg-clip-text 扫过);
+     完成节点生命周期=降权保留,超限由窗口滚动+顶部 mask 渐隐收束(空间驱动,
+     刻意不做时间驱动消失:自愈/重试场景的轮次叙事不可丢,裁决见会话复盘) */
   --animate-timeline-ping: timeline-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
   --animate-shimmer: shimmer 2.4s linear infinite;
 

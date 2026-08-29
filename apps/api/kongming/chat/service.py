@@ -833,11 +833,14 @@ class ChatService:
         """终态落库与响应组装(同步/流式共用唯一实现,design §5):
         三态映射 → chart 建议 → error 文案 → result_json 落库(容错)→ 回写。
         020:summary/insights 经输出护栏(泄漏拦截替换/凭证脱敏)后才落库返回。"""
-        # 三态映射:PASS→SUCCESS;BLOCKED→REJECTED;ERROR/重试耗尽→FAILED
+        # 四态映射(044):PASS→SUCCESS;BLOCKED→REJECTED;NO_DATA→NO_DATA
+        # (知识未覆盖如实说明,中性形态);ERROR/重试耗尽→FAILED
         if reply.success:
             status = "SUCCESS"
         elif reply.verdict == "BLOCKED":
             status = "REJECTED"
+        elif reply.verdict == "NO_DATA":
+            status = "NO_DATA"
         else:
             status = "FAILED"
         # 020 输出护栏(R1-L9 扩面):summary/insights + FAILED 错误原文(驱动回显
@@ -880,12 +883,21 @@ class ChatService:
         error: str | None = None
         if status == "REJECTED":
             error = blocked_friendly(error_raw)
+        elif status == "NO_DATA":
+            # 044:中性形态——说明文案经 summary 传达(过护栏),不走错误包装
+            summary = error_raw or "当前数据源未找到与问题相关的数据表,可切换数据源或调整问法后重试"
+            error = None
         elif status == "FAILED":
             error = f"查询失败:{error_raw}" if error_raw else "查询失败,请换个问法试试"
 
-        # 026:产物派生(三路径同源)
-        artifacts = derive_artifacts(
-            sql=sql_text, chart=chart, summary=summary, datasource_key=datasource_key
+        # 026:产物派生(三路径同源);044:如实说明不派生产物卡
+        # (derive_artifacts 对非空 summary 会派生 document 卡,NO_DATA 跳过)
+        artifacts = (
+            []
+            if status == "NO_DATA"
+            else derive_artifacts(
+                sql=sql_text, chart=chart, summary=summary, datasource_key=datasource_key
+            )
         )
         mid = None
         if sid is not None:

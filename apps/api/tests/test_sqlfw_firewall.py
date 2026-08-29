@@ -112,6 +112,12 @@ RESERVED_BLOCK = [
     "SELECT * FROM chat_message",                              # 对话表
     "SELECT * FROM user_identities",                           # 联邦身份
     "SELECT * FROM alembic_version",                           # 迁移版本
+    # 045(039 评审上报):user_memory 归属列 user_id 非 create_by,
+    # datascope SELF/DEPT 降级不过滤,保留表拒读是唯一防线
+    "SELECT content FROM user_memory",                         # 裸名
+    "SELECT * FROM public.user_memory",                        # 显式限定
+    "WITH m AS (SELECT content FROM public.user_memory) SELECT * FROM m",  # CTE 遮蔽
+    "SELECT * FROM tenant_default.goods g JOIN user_memory u ON true",  # JOIN 夹带
     "SELECT * FROM tenant_default.goods g JOIN sys_user u ON true",  #  JOIN 夹带
     # CTE 遮蔽形态(R2 评审实证绕过):体内限定名引用不得被 CTE 豁免吞掉
     "WITH sys_user AS (SELECT password_hash FROM public.sys_user) SELECT * FROM sys_user",

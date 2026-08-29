@@ -111,7 +111,10 @@ SHALL NOT 阻断查询响应,但 SHALL 以错误级日志暴露。
 
 执行路由 SHALL 拒绝任何引用控制面保留表的语句(verdict=BLOCKED,落审计),
 与语句其余部分的合法性无关。保留表按表名末段判定(小写折叠语义):
-前缀 `sys_`、`chat_`,及精确名 `alembic_version`、`user_identities`。
+前缀 `sys_`、`chat_`,及精确名 `alembic_version`、`user_identities`、
+`user_memory`(022 用户长期记忆表,2026-08-29 039 评审上报补收编:归属列
+为 user_id 非 create_by,data_scope 行级过滤不构成防线,022 建表时漏同步
+收编曾构成 default 源可读全库记忆的开放通路)。
 rag 知识两表(table_descriptions/query_history,含全租户问句/成功 SQL/表结构)
 SHALL 按**表引用的显式 schema 限定名**拒:schema 为 `rag` 的表引用即拒
 (search_path 管不了 `rag.query_history` 形态的显式限定名,009 评审实证);
@@ -129,6 +132,11 @@ SHALL 按**表引用的显式 schema 限定名**拒:schema 为 `rag` 的表引�
 SELECT 时,LLM 可猜中 `sys_user` 等表名直读口令哈希/数据源密文/他人对话;
 data_scope 对无 create_by 列的表安全降级不过滤,不构成防线。009 背景:
 rag 两表灌入全租户真实问句与 SQL 后,显式限定名读取曾是开放通路。
+045 背景:user_memory 归属列 user_id 不被 data_scope 归属列识别
+(create_by),SELF/DEPT 域安全降级不过滤,default 源限定名/裸名引用
+曾构成可读全库用户记忆的开放通路(跨租户)——收编后任何 data_scope
+(含 ALL)一律拒读;记忆的正当通路=召回注入(memory_hint)与
+/memory API,均不经执行路由。
 
 #### Scenario: 裸名引用保留表拦截
 - GIVEN 语句 `SELECT username, password_hash FROM sys_user`(裸名)
@@ -139,6 +147,14 @@ rag 两表灌入全租户真实问句与 SQL 后,显式限定名读取曾是开�
 - GIVEN 语句 `SELECT * FROM public.sys_user`
 - WHEN 到达执行路由
 - THEN verdict=BLOCKED,落审计
+
+#### Scenario: user_memory 任何 data_scope 一律拦截
+- GIVEN 语句 `SELECT content FROM user_memory`、`SELECT * FROM
+  public.user_memory`、`WITH m AS (SELECT content FROM public.user_memory)
+  SELECT * FROM m` 或 JOIN 夹带形态
+- WHEN 到达执行路由(请求方 data_scope 为 SELF / DEPT / ALL 任意档)
+- THEN verdict=BLOCKED(reason 含 RESERVED_TABLE),落审计
+- AND 业务表普通名查询 SHALL NOT 误伤
 
 #### Scenario: rag schema 限定名拦截
 - GIVEN 语句 `SELECT question, sql_text FROM rag.query_history` 或
