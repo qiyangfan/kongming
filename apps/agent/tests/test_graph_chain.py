@@ -19,7 +19,7 @@ from kongming_agent.apiclient import (
 from kongming_agent.graph.build import MAX_RETRY, get_graph
 from kongming_agent.graph.state import AgentState
 
-_NO_DATA_ERROR = "当前数据源未找到与问题相关的数据表,可切换数据源或调整问法后重试"
+_NO_DATA_ERROR = "当前数据源未找到回答该问题所需的数据,可切换数据源或调整问法后重试"
 
 
 class ScriptedLlm:
@@ -167,7 +167,7 @@ async def test_sentinel_after_does_not_exist_guides_then_terminates(
     final = await get_graph().ainvoke(_initial())
     assert final["end_reason"] == "no_data"
     assert api.calls == 1  # 二轮短路,零新增执行
-    assert "所引用的表不在『可用表结构』清单中" in llm.users[2]  # 喂回引导在位
+    assert "所引用的表或列不在『可用表结构』清单中" in llm.users[2]  # 喂回引导在位
     assert final["error"] == _NO_DATA_ERROR
     assert final["retry_count"] == 1  # 仅首轮后的那一次 selfheal 计数
     assert "summary" not in final

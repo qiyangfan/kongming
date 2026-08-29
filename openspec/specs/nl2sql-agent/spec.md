@@ -55,7 +55,7 @@ NL2SQL 核心链路的能力深化:多轮上下文全链路打通(前端→控�
 
 generate 节点的系统提示必须强化:多表 JOIN 用显式连接条件(非隐式逗号 join)、聚合维度识别(GROUP BY + AVG/COUNT)、PostgreSQL 方言(ILIKE)、时间窗用 interval/DATE_TRUNC(非硬编码日期);且不影响单表简单查询。
 
-统计/明细边界 SHALL 显式化:含 GROUP BY 或聚合函数(COUNT/AVG/SUM/MAX/MIN)的查询一律视为统计查询,SHALL NOT 加 LIMIT——用户明确要求 top-N/前 N 名时除外(此时按统计键排序后 LIMIT);仅逐行返回业务实体的明细查询才适用默认 LIMIT 100 保护。排序键可能并列时 SHALL 追加主键等唯一列作第二排序键,保证结果可复现。聚合小数值(AVG/比率/除法结果)SHALL 用 ROUND(…, 2) 统一舍入口径,禁止裸 ::numeric 截断或全精度直出。投影 SHALL 完备:问题点名的每个信息项(名称/数量/金额等)都必须出现在 SELECT 投影中;ID/编号列 SHALL NOT 替代名称列(用户点名编号或 ID 作排序键时可附加,名称列必须在投影中)。一对多 JOIN 后统计实体数量 SHALL 用 COUNT(DISTINCT 实体主键) 去重,防止扇出膨胀;JOIN 产生完全重复的明细行 SHALL 用 DISTINCT 去重。用户请求写操作(增/删/改)时 SHALL 只生成查看相关数据现状的只读 SELECT,SHALL NOT 生成 WHERE FALSE 等规避形态假装完成。
+统计/明细边界 SHALL 显式化:含 GROUP BY 或聚合函数(COUNT/AVG/SUM/MAX/MIN)的查询一律视为统计查询,SHALL NOT 加 LIMIT——用户明确要求 top-N/前 N 名时除外(此时按统计键排序后 LIMIT);仅逐行返回业务实体的明细查询才适用默认 LIMIT 100 保护。排序键可能并列时 SHALL 追加主键等唯一列作第二排序键,保证结果可复现(DISTINCT 去重查询除外,见投影纪律)。聚合小数值(AVG/比率/除法结果)SHALL 用 ROUND(…, 2) 统一舍入口径,禁止裸 ::numeric 截断或全精度直出。投影 SHALL 完备:问题点名的每个信息项(名称/数量/金额等)都必须出现在 SELECT 投影中;ID/编号列 SHALL NOT 替代名称列(用户点名编号或 ID 作排序键时可附加,名称列必须在投影中)。技术主键等代理键 SHALL 默认不进 SELECT 投影——用户未点名时投影不含 ID 列,用户明确点名 ID/编号时才投影(点名不拦);行标识需要机器可核对编号时 SHALL 优先业务编号列(订单号/编号类面向用户的列)而非代理主键。DISTINCT 去重查询 SHALL NOT 追加投影外的唯一列作排序键(SELECT DISTINCT 语义下 ORDER BY 列必须在投影内,主键入投影则去重失效),排序键 SHALL 取已在投影中的列,并列可能让位于去重语义。一对多 JOIN 后统计实体数量 SHALL 用 COUNT(DISTINCT 实体主键) 去重,防止扇出膨胀;JOIN 产生完全重复的明细行 SHALL 用 DISTINCT 去重。用户请求写操作(增/删/改)时 SHALL 只生成查看相关数据现状的只读 SELECT,SHALL NOT 生成 WHERE FALSE 等规避形态假装完成。
 
 #### Scenario: 多表 join 连接条件推导
 - GIVEN 问题「查询每个客户租过的所有影片」(需 4 表连接)
@@ -83,6 +83,13 @@ generate 节点的系统提示必须强化:多表 JOIN 用显式连接条件(非
 - THEN SQL 排序含第二唯一排序键(如 ORDER BY rental_rate DESC, film_id LIMIT 5),
   结果集确定可复现
 
+#### Scenario: DISTINCT 去重查询不追加投影外唯一列(046)
+- GIVEN 明细查询经一对多 JOIN 产生重复行,生成 DISTINCT 去重且需排序
+- WHEN generate 节点执行
+- THEN 排序键取已在投影中的业务列,不追加投影外主键(不触发 PG
+  「ORDER BY expressions must appear in select list」报错,主键也不入投影)
+- AND 并列可能让位于去重语义(去重正确性优先于排序可复现)
+
 #### Scenario: 聚合小数值统一 ROUND 口径(016 失败归因②)
 - GIVEN 问题「每个影片分类的平均租金」
 - WHEN generate 节点执行
@@ -97,6 +104,21 @@ generate 节点的系统提示必须强化:多表 JOIN 用显式连接条件(非
 - GIVEN 问题「按影片ID排序,查询前100部影片的标题和分类名称」
 - WHEN generate 节点执行
 - THEN SELECT 投影影片标题(title)而非仅 film_id(ID 作排序键可附加,名称列必须在投影中)
+
+#### Scenario: 技术主键默认不进投影(046)
+- GIVEN 问题「列出所有影片的标题」(用户未点名 ID)
+- WHEN generate 节点执行
+- THEN SELECT 投影只含业务列(title 等),不含 film_id 等代理主键
+
+#### Scenario: 用户点名 ID 不拦(046)
+- GIVEN 问题「查询 film_id 为 5 的影片标题」(用户点名 ID)
+- WHEN generate 节点执行
+- THEN SQL 正常生成(WHERE film_id = 5,点名条件不拦),投影按点名信息项出
+
+#### Scenario: 业务编号列优先作展示标识(046)
+- GIVEN 明细列举且行需要编号标识,表中同时存在业务编号列与代理主键
+- WHEN generate 节点执行
+- THEN 投影附业务编号列(面向用户的编号)而非代理主键
 
 #### Scenario: JOIN 完全重复明细行去重
 - GIVEN 明细查询经一对多 JOIN 后存在完全重复行(同一客户两次租同一影片)
@@ -385,24 +407,42 @@ retrieve 节点 SHALL 在三路召回之外并行取文档通道检索结果(doc
 
 generate 环节 SHALL 具备表范围纪律:生成的表名与列名 MUST 仅来自本次
 注入的「可用表结构」上下文(表关系段与历史成功 SQL 段仅作口径参考,
-SHALL NOT 成为引入其中不存在的表的依据);可用表结构未覆盖问题所需
-数据时,生成 SHALL 以哨兵(固定 token `NO_RELEVANT_TABLE`)如实说明,
-系统提示 MUST 显式声明该哨兵为「只输出 SQL」规则的唯一例外。空表结构
-占位文案 MUST NOT 诱导臆测(不得出现「尽力生成」类表述),SHALL 与
-哨兵机制联动。generate 节点 SHALL 识别哨兵输出(去除包裹标记后大小写
-不敏感全等比较)并短路终止:不进入本地预检与执行、不进入 selfheal
-重试(零执行、零 LLM 重试消耗),以用户友好文案收敛为失败终态——文案
-SHALL 面向用户说明「未找到相关数据表,可切换数据源或调整问法」,且
-SHALL NOT 携带表名、schema 名或内部术语。上次执行错误为「表不存在」
-类时,喂回生成环节的修正上下文 SHALL 附「所引表不在可用表结构清单中,
-清单确无所需数据只输出哨兵」的引导。
+SHALL NOT 成为引入其中不存在的表的依据);可用表结构未覆盖问题所需数据
+时,生成 SHALL 以哨兵(固定 token `NO_RELEVANT_TABLE`)如实说明,系统
+提示 MUST 显式声明该哨兵为「只输出 SQL」规则的唯一例外。「未覆盖」SHALL
+为两级:可用表结构中无支撑本问题的表(表级),或问句所需关键信息项(排序/
+筛选/统计所依据的列)不存在且无法由现有列合理推导(列级)——列级缺口
+SHALL NOT 以其他列近似顶替冒充答案。空表结构占位文案 MUST NOT 诱导臆测
+(不得出现「尽力生成」类表述),SHALL 与哨兵机制联动。generate 节点 SHALL
+识别哨兵输出(去除包裹标记后大小写不敏感全等比较)并短路终止:不进入本地
+预检与执行、不进入 selfheal 重试(零执行、零 LLM 重试消耗),以用户友好
+文案收敛为失败终态——文案 SHALL 面向用户说明「未找到回答该问题所需的
+数据,可切换数据源或调整问法」,且 SHALL NOT 携带表名、schema 名或内部
+术语。上次执行错误为「表或列不存在」类时,喂回生成环节的修正上下文
+SHALL 附「所引表或列不在可用表结构清单中,清单确无所需数据只输出哨兵」
+的引导。
 
 #### Scenario: 知识未覆盖哨兵短路(零执行零重试)
 
 - GIVEN default 租户可用表结构不含问题所需表(如问 sakila 员工租赁)
 - WHEN 模型输出哨兵 NO_RELEVANT_TABLE
 - THEN 请求终止,不发起 SQL 执行、不进 selfheal(sys_sql_audit 零新增执行记录)
-- AND 响应为失败终态,error 为「未找到相关数据表,可切换数据源或调整问法」类友好文案
+- AND 响应为失败终态,error 为「未找到回答该问题所需的数据,可切换数据源或调整问法」类友好文案
+
+#### Scenario: 列级缺口如实说明(046)
+
+- GIVEN 问题「价格最高的3个商品」而可用表结构无价格类列且无推导口径
+- WHEN generate 环节执行
+- THEN 模型输出哨兵短路(零执行零重试),SHALL NOT 以主键/时间列等其他列
+  近似顶替排序或统计
+- AND error 为「未找到回答该问题所需的数据」类友好文案(不实指「数据表」)
+
+#### Scenario: 计算型指标不误伤列级哨兵
+
+- GIVEN 问「销售额」而可用表结构无销售额列,但存在单价与数量列
+- WHEN generate 环节执行
+- THEN 正常生成推导表达式(如 SUM(单价×数量)),不触发哨兵(可合理推导
+  不算缺口)
 
 #### Scenario: 空表结构不诱导臆测
 
@@ -413,9 +453,9 @@ SHALL NOT 携带表名、schema 名或内部术语。上次执行错误为「表
 
 #### Scenario: 表不存在类错误的自愈引导
 
-- GIVEN 首轮模型编造表名,执行报 relation ... does not exist 进入 selfheal
+- GIVEN 首轮模型编造表名或列名,执行报 relation/column ... does not exist 进入 selfheal
 - WHEN 重试生成时构造修正上下文
-- THEN 修正上下文附「所引表不在可用表结构清单中,清单确无所需数据只输出 NO_RELEVANT_TABLE」引导
+- THEN 修正上下文附「所引表或列不在可用表结构清单中,清单确无所需数据只输出 NO_RELEVANT_TABLE」引导
 - AND 第二轮模型输出哨兵时短路,不再同因连败
 
 #### Scenario: 哨兵识别的形态防御

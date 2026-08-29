@@ -52,6 +52,41 @@ def test_sql_gen_id_not_name_substitute() -> None:
     assert "❌ 用 ID/编号列替代名称列" in prompts.SQL_GEN_SYSTEM
 
 
+def test_sql_gen_projection_id_discipline() -> None:
+    """046 投影 id 收敛:技术主键默认不进投影+业务编号列优先+DISTINCT 排序例外。"""
+    assert "技术主键等代理键（主键 id 类列）默认不进投影" in prompts.SQL_GEN_SYSTEM
+    assert "行标识需要编号时优先业务编号列" in prompts.SQL_GEN_SYSTEM
+    assert "用户明确点名 ID/编号时才投影" in prompts.SQL_GEN_SYSTEM
+    assert "DISTINCT 去重查询例外" in prompts.SQL_GEN_SYSTEM
+    assert "排序键只能取已在投影中的列" in prompts.SQL_GEN_SYSTEM
+    assert "❌ DISTINCT 去重查询追加投影外主键排序" in prompts.SQL_GEN_SYSTEM
+    # 旧措辞「ID 可附加」与收紧口径冲突,必须绝迹
+    assert "ID 可附加，名称列必须在投影中" not in prompts.SQL_GEN_SYSTEM
+    # 既有钉句存活(018 结论零扰动:名称列必须进投影+tiebreaker 主句)
+    assert "名称列必须在投影中" in prompts.SQL_GEN_SYSTEM
+    assert "排序键可能并列时必须追加主键等唯一列作第二排序键" in prompts.SQL_GEN_SYSTEM
+
+
+def test_prompts_exception_log_046_registered() -> None:
+    """046 增量已在 prompts.py 文件头例外清单登记(prompt 资产纪律)。"""
+    assert "046 projection-id-discipline" in prompts.__doc__
+
+
+def test_sql_gen_column_level_sentinel() -> None:
+    """046 冒烟收编:规则 10 列级哨兵——问句口径所需列不存在且无法推导时如实说明,
+    不得以其他列近似顶替(表级哨兵语义补全至表/列两级)。"""
+    assert "问句指定口径所需的列" in prompts.SQL_GEN_SYSTEM
+    assert "不在该段中且无法由现有列合理推导" in prompts.SQL_GEN_SYSTEM
+    assert "不得用其他列近似顶替" in prompts.SQL_GEN_SYSTEM
+    assert "用名称列冒充价格排序同样是错误答案" in prompts.SQL_GEN_SYSTEM
+    assert "缺支撑问句口径的关键列" in prompts.SQL_GEN_SYSTEM
+    assert "不要硬凑近似答案" in prompts.SQL_GEN_SYSTEM
+    assert "❌ 问句口径所需列不在表结构中时用其他列硬凑" in prompts.SQL_GEN_SYSTEM
+    # 043 既有钉句存活(哨兵出口与规则 7 例外表述不变)
+    assert "唯一例外于规则 7——只输出 NO_RELEVANT_TABLE" in prompts.SQL_GEN_SYSTEM
+    assert "不要解释、不要编造表名或列名" in prompts.SQL_GEN_SYSTEM
+
+
 def test_understand_fidelity_rules() -> None:
     assert "补全必须保留上一轮的全部限定条件（筛选/排序/数量限制/聚合口径）" in (
         prompts.UNDERSTAND_MULTI_SYSTEM

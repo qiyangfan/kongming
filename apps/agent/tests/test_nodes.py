@@ -336,7 +336,7 @@ async def test_generate_sentinel_short_circuits(monkeypatch: pytest.MonkeyPatch)
     out = await nodes.generate(_state(schema_hint="表 t(a)"))
     assert out["generated_sql"] == ""
     assert out["end_reason"] == "no_data"
-    assert out["error"] == "当前数据源未找到与问题相关的数据表,可切换数据源或调整问法后重试"
+    assert out["error"] == "当前数据源未找到回答该问题所需的数据,可切换数据源或调整问法后重试"
     assert api.execute_calls == []
 
 
@@ -372,7 +372,7 @@ async def test_generate_selfheal_dne_error_appends_table_guidance(
     )
     user = fake.calls[0][1]
     assert '上次生成的 SQL 有误：relation "public.staff" Does Not Exist' in user
-    assert "所引用的表不在『可用表结构』清单中" in user
+    assert "所引用的表或列不在『可用表结构』清单中" in user
     assert "只输出 NO_RELEVANT_TABLE" in user
 
 

@@ -571,7 +571,7 @@ chat_message.status SHALL 支持第四态 `NO_DATA`:agent verdict=NO_DATA
 
 #### Scenario: NO_DATA 消息持久化与中性呈现
 
-- GIVEN agent 返回 verdict=NO_DATA、error=「当前数据源未找到与问题相关的数据表…」
+- GIVEN agent 返回 verdict=NO_DATA、error=「当前数据源未找到回答该问题所需的数据…」
 - WHEN chat 终态组装与落库
 - THEN 消息 status=NO_DATA、summary=说明文案、result_json.error 为空、产物卡为空
 - AND 响应与历史回显以中性说明形态渲染(非错误横幅),反馈区可用

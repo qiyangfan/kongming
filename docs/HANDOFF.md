@@ -9,16 +9,20 @@
 
 ## 当前状态(2026-08-29)
 
-- 001–042 + backlog-settlement 已全部归档(040×2 闭集输入闸/web 主题
+- 001–045 + backlog-settlement 已全部归档(040×2 闭集输入闸/web 主题
   切换、041 呈现层列标签双轨、042 fetch-metadata 对账语义)。2026-08-29
-  三连已归档(specs 已同步至 nl2sql-agent/chat/sql-execution):
+  四连已归档(specs 已同步至 nl2sql-agent/chat/sql-execution):
   **043 生成纪律**——根除知识未覆盖时 LLM 凭先验编表(prompts 规则 10
   表范围纪律+哨兵 `NO_RELEVANT_TABLE` 短路:零执行零自愈,自愈喂回附
   清单引导);**044 NO_DATA 一等中性形态**——agent verdict 与
   chat_message.status 第四态(迁移 0028),如实说明不再伪装成执行失败,
   web 中性说明卡非错误横幅;**045 保留表收编 user_memory**——022 漏
   收编的 default 源读全库记忆通路闭合(裸名/限定名/CTE 遮蔽/JOIN 全形态
-  BLOCKED,任何 data_scope)。
+  BLOCKED,任何 data_scope);**046 投影 id 收敛+列级哨兵**——技术主键
+  默认不进投影(点名不拦,业务编号列优先作展示标识)、DISTINCT 去重排序
+  唯一列例外(PG 硬约束)、哨兵补全列级(问句口径所需列不存在且无法由
+  现有列合理推导时如实说明,不得近似顶替;计算型指标豁免),NO_DATA
+  文案泛化「未找到回答该问题所需的数据」(agent 源+api/web 兜底镜像)。
   **活动变更清零**。上游 41 域全覆盖。
 - 工作区/提交状态以 `git status` 与 `git log` 为唯一事实源
   (规约:文档不写提交哈希、不谈提交形态)。
@@ -107,7 +111,7 @@ make contracts      # 导出 OpenAPI + 生成前端类型(改 api 后必跑)
 | 问答链路 | agent 8 节点图(老链路)+ ReAct 内核(019)双轨;verdict 对外四态(PASS/BLOCKED/ERROR/NO_DATA,044 如实说明);权限类不重试;重试上限=初始之外 2 次 | nl2sql + nl2sql-agent + chat spec |
 | RAG/知识库 | rag 两表(四元唯一键+HNSW+GIN);三路召回 RRF top5+query_history 独立 few-shot;召回零命中回退内省;成功 SQL 回写;覆盖优先级 INTROSPECTION<AI<UPLOAD<EDIT<FEEDBACK;别名(037)=生效值同源重算派生文本 | rag + knowledge spec |
 | 评估体系 | Execution Match 双分引擎;宽松=黄金指标且不惩罚序错;evals 进程外工具 testpaths 隔离;query_history 幂等治理 | eval + ai-eval spec |
-| prompt 质量 | 生成/理解/摘要三层规则(统计不加 LIMIT/tiebreaker/ROUND/投影完备/指代保真/事实性接地);gold 规范十条与生成侧互锁 | nl2sql-agent spec |
+| prompt 质量 | 生成/理解/摘要三层规则(统计不加 LIMIT/tiebreaker/ROUND/投影完备+技术主键默认不进投影/列级哨兵两级如实说明/指代保真/事实性接地);prompt 文本迭代经验=点名自我合理化的反例比抽象纪律条遵从度高;gold 规范十条与生成侧互锁 | nl2sql-agent spec |
 | Bot/商业化 | Bot 定义+权限逐请求求交;OpenAI 兼容端点;BOT 维度配额+mock 支付闭环(核销单点 reconcile);团队归属可见性纯函数 | custom-agent + payment + team spec |
 | 多模型/观测 | 注册表 env JSON+任务路由+出口白名单;用量采集 fire-and-forget+bot 收集器双通道;失败调用也采集(status/latency) | multi-model-routing + observability spec |
 | 挂账治理 | 开放挂账=零;新发现项一律给终态(修/关闭/条件触发/产品登记),不留无排期「随域延后」 | backlog-settlement 终态块 |

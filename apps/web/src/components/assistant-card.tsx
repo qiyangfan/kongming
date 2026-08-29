@@ -150,7 +150,7 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
         <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
           <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
           <p className="text-foreground">
-            {msg.summary ?? "当前数据源未找到与问题相关的数据表,可切换数据源或调整问法后重试"}
+            {msg.summary ?? "当前数据源未找到回答该问题所需的数据,可切换数据源或调整问法后重试"}
           </p>
         </div>
         <FeedbackActions msg={msg} />

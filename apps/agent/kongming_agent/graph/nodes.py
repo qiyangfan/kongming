@@ -40,8 +40,9 @@ _EMPTY_HINT = (
 )
 
 # 043:知识未覆盖哨兵(生成侧如实说明的唯一出口);短路零执行零重试
+# 046:语义补全两级——无支撑本问题的表(表级)/所需关键信息项无列且无法推导(列级)
 _NO_DATA_SENTINEL = "NO_RELEVANT_TABLE"
-_NO_DATA_ERROR = "当前数据源未找到与问题相关的数据表,可切换数据源或调整问法后重试"
+_NO_DATA_ERROR = "当前数据源未找到回答该问题所需的数据,可切换数据源或调整问法后重试"
 
 
 def _is_no_data_sentinel(raw: str) -> bool:
@@ -184,7 +185,7 @@ async def generate(state: AgentState) -> dict[str, object]:
         # 杜绝同因连败空转烧 LLM 配额(PG UndefinedTable 报错定式,大小写不敏感)
         if "does not exist" in error.lower():
             extra += (
-                "所引用的表不在『可用表结构』清单中——核对清单；"
+                "所引用的表或列不在『可用表结构』清单中——核对清单；"
                 "若清单确无所需数据，只输出 NO_RELEVANT_TABLE。"
             )
     user = (

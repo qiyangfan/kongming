@@ -885,7 +885,10 @@ class ChatService:
             error = blocked_friendly(error_raw)
         elif status == "NO_DATA":
             # 044:中性形态——说明文案经 summary 传达(过护栏),不走错误包装
-            summary = error_raw or "当前数据源未找到与问题相关的数据表,可切换数据源或调整问法后重试"
+            summary = (
+                error_raw
+                or "当前数据源未找到回答该问题所需的数据,可切换数据源或调整问法后重试"
+            )
             error = None
         elif status == "FAILED":
             error = f"查询失败:{error_raw}" if error_raw else "查询失败,请换个问法试试"

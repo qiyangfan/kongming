@@ -447,7 +447,7 @@ async def test_no_data_maps_neutral_status(
     _, token = await _user_with_chat_perm(client, session, make_user)
     reply = AgentReply(
         success=False, verdict="NO_DATA",
-        error="当前数据源未找到与问题相关的数据表,可切换数据源或调整问法后重试",
+        error="当前数据源未找到回答该问题所需的数据,可切换数据源或调整问法后重试",
     )
     _install(fake_agent, FakeAgent(reply))
     r = await client.post(
@@ -459,7 +459,7 @@ async def test_no_data_maps_neutral_status(
     assert body["success"] is False and body["verdict"] == "NO_DATA"
     # 中性形态:不走「查询失败:」错误包装,说明文案经 summary 传达
     assert body["error"] is None
-    assert "未找到与问题相关的数据表" in body["summary"]
+    assert "未找到回答该问题所需的数据" in body["summary"]
     row = (
         await session.execute(
             text(
@@ -471,7 +471,7 @@ async def test_no_data_maps_neutral_status(
         )
     ).mappings().one()
     assert row["status"] == "NO_DATA"
-    assert "未找到与问题相关的数据表" in (row["summary"] or "")
+    assert "未找到回答该问题所需的数据" in (row["summary"] or "")
     assert not row["err"]  # error 不落档(不进错误横幅)
     assert row["artifacts"] == []  # 如实说明不派生产物卡(asyncpg 已反序列化 jsonb)
 
