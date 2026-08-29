@@ -5,9 +5,11 @@
 事务级 search_path/连接级只读/行数截断);非法 key 同形 400 + 审计分类内部可溯;
 池生命周期:改密/启停/删除定向失效,仅改 name 不动池。
 """
+# pyright: reportPrivateUsage=false
 
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
 import pytest
 from httpx import AsyncClient
@@ -30,7 +32,7 @@ SCHEMA_SELF = "ds_self"  # SELF 改写证物(独立 schema,用例间行隔离)
 
 
 @pytest.fixture(scope="module", autouse=True)
-async def _biz() -> AsyncIterator[None]:
+async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     async with get_engine().begin() as conn:
         for schema, mark in (
             (SCHEMA, "D1"),
@@ -122,8 +124,8 @@ async def _mk_ds(
     return str(did)
 
 
-def _payload(tenant_key: str, sql: str, **kw: object) -> dict:
-    base = {
+def _payload(tenant_key: str, sql: str, **kw: object) -> dict[str, Any]:
+    base: dict[str, Any] = {
         "trace_id": f"tr-{uuid.uuid4().hex[:12]}",
         "tenant_key": tenant_key,
         "sql_text": sql,

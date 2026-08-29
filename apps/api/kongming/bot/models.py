@@ -16,7 +16,7 @@ class BotDef:
     bot_key: str
     name: str
     system_prompt: str
-    tools: list[str] = field(default_factory=list)
+    tools: list[str] = field(default_factory=list[str])
     datasource_key: str = "default"
     model: str | None = None
     enabled: bool = True

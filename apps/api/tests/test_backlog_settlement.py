@@ -1,6 +1,7 @@
 """backlog-settlement 清偿包 api 侧测试(测试先行,安全类优先):
 /mcp body 闸/mark_dormant 收窄/workflow 超时来源+条件门+循环归因/run 详情/
 billing FILTER/usage 租户筛选/自引用 FK/doc_name PII。"""
+# pyright: reportPrivateUsage=false
 
 import asyncio
 from typing import Any
@@ -15,7 +16,9 @@ from kongming.config import get_settings
 from tests.conftest import MakeUser
 from tests.test_chat_query import _default_tenant_id
 from tests.test_llm_usage import INTERNAL, _records
-from tests.test_mcp import fake_agent  # noqa: F401  # pytest fixture(模块级引入方可发现)
+from tests.test_mcp import (
+    fake_agent,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # pytest fixture(模块级引入方可发现)
+)
 
 # ── B1-B11:/mcp 入站 body 闸 ──
 
@@ -33,7 +36,7 @@ async def test_mcp_body_gate_oversize_unauthenticated(
 
 async def test_mcp_body_gate_normal_chain_unaffected(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser,
-    fake_agent: dict,  # noqa: F811  # pytest fixture(模块级引入+参数同名)
+    fake_agent: dict[str, Any],  # noqa: F811  # pytest fixture(模块级引入+参数同名)
 ) -> None:
     """小 body 正常链路零回归(畸形 JSON 归协议错误 -32700)。"""
     from tests.test_mcp import _bot_with_key
@@ -57,7 +60,7 @@ async def test_mcp_body_gate_normal_chain_unaffected(
 
 async def test_bot_openai_error_content_fallback(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser,
-    fake_agent: dict,  # noqa: F811  # pytest fixture(模块级引入+参数同名)
+    fake_agent: dict[str, Any],  # noqa: F811  # pytest fixture(模块级引入+参数同名)
 ) -> None:
     """失败形态(触顶/不可用)summary 为空 → content 回退 error,
     集成方不再拿到静默空回复;error 已过输出护栏。"""
@@ -361,7 +364,7 @@ async def test_workflow_run_detail_visibility_gate(
             return {}
 
     svc = WorkflowService(
-        repo=SqlWorkflowRepo(session), sql=_Noop(), http=_Noop(), agent=_Noop()  # type: ignore[arg-type]
+        repo=SqlWorkflowRepo(session), sql=_Noop(), http=_Noop(), agent=_Noop()
     )
     # 非成员(非创建者、非团队成员)→ 404 同形
     with pytest.raises(WorkflowNotFound):

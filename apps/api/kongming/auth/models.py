@@ -75,9 +75,9 @@ class MeInfo:
     user_id: str
     username: str
     nickname: str
-    role_keys: list[str] = field(default_factory=list)
-    perm_codes: list[str] = field(default_factory=list)
-    tenants: list[TenantRef] = field(default_factory=list)
+    role_keys: list[str] = field(default_factory=list[str])
+    perm_codes: list[str] = field(default_factory=list[str])
+    tenants: list[TenantRef] = field(default_factory=list[TenantRef])
     must_change_password: bool = False
 
 

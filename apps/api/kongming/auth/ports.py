@@ -108,10 +108,10 @@ class OAuthProvider(Protocol):
     display_name: str
     pkce: bool
 
-    def configured(self, settings: Settings) -> bool: ...
+    def configured(self, s: Settings) -> bool: ...
     def authorize_url(
-        self, settings: Settings, *, state: str, code_challenge: str | None
+        self, s: Settings, *, state: str, code_challenge: str | None
     ) -> str: ...
     async def fetch_profile(
-        self, settings: Settings, *, code: str, code_verifier: str | None
+        self, s: Settings, *, code: str, code_verifier: str | None
     ) -> NormalizedProfile: ...

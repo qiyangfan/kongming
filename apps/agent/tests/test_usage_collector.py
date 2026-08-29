@@ -2,6 +2,9 @@
 (bot 链路唯一上报口=响应携带);缺省=fire-and-forget 零回归;reset 后
 恢复旧路。"""
 
+# pyright: reportPrivateUsage=false
+# 测试惯例:复用 test_model_routing 的私有替身与 _settings(仓库测试约定,不改名)
+
 from kongming_agent.llm import (
     LlmClient,
     reset_usage_collector,

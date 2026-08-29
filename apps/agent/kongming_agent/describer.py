@@ -14,6 +14,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from typing import cast
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -97,7 +98,7 @@ class TableSpec:
     table_name: str
     schema_name: str
     table_comment: str = ""
-    columns: list[ColumnSpec] = field(default_factory=list)
+    columns: list[ColumnSpec] = field(default_factory=list[ColumnSpec])
 
 
 async def describe_table(spec: TableSpec, llm: LlmClient) -> DescribedTable:
@@ -144,7 +145,7 @@ async def describe_table(spec: TableSpec, llm: LlmClient) -> DescribedTable:
     # 示例 SQL 只保留只读 SELECT(防 LLM 产出 DML 文本落库;示例仅作 few-shot 文本不执行)
     # INTO 判定用 \bINTO\b 词边界正则——字面 " INTO " 可被 \n/\t 与 SQL 注释绕过;
     # 多语句=去尾分号后仍含分号。条数 ≤3。
-    cleaned_samples = []
+    cleaned_samples: list[str] = []
     for sql in result.sample_queries:
         s = sql.strip()
         upper = " ".join(s.upper().split())
@@ -192,7 +193,8 @@ def _parse_json_loose(raw: str) -> dict[str, object]:
             raise DescribeError("LLM 输出非 JSON") from None
     if not isinstance(parsed, dict):
         raise DescribeError("LLM 输出非 JSON 对象")
-    return parsed
+    # isinstance 收窄产物 dict[Unknown, Unknown] 仍报,守卫后收窄键型
+    return cast("dict[str, object]", parsed)
 
 
 def fallback_description(spec: TableSpec) -> DescribedTable:

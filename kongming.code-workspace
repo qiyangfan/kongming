@@ -1,0 +1,19 @@
+{
+  "folders": [
+    { "name": "kongming", "path": "." },
+    { "name": "api", "path": "apps/api" },
+    { "name": "agent", "path": "apps/agent" }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/.pytest_cache": true,
+      "**/.ruff_cache": true,
+      "**/.mypy_cache": true,
+      "**/.venv": true,
+      "**/node_modules": true,
+      "apps/api": true,
+      "apps/agent": true
+    }
+  }
+}

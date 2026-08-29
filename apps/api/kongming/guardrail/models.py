@@ -5,6 +5,7 @@ spec: prompt-guardrails「输入护栏」「输出护栏」「工具调用前意
 """
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -63,7 +64,7 @@ def mask_apikey(text: str) -> str:
 
 
 # 规则名 → 脱敏函数(注册表 pattern 命中后的处理)
-MASKERS: dict[str, object] = {
+MASKERS: dict[str, Callable[[str], str]] = {
     "pii_phone": mask_phone,
     "pii_idcard": mask_idcard,
     "pii_bankcard": mask_bankcard,
@@ -106,7 +107,7 @@ def evaluate_text(
         if not matched:
             continue
         if cfg.action == "masked" and cfg.rule.name in MASKERS:
-            masked = MASKERS[cfg.rule.name](current)  # type: ignore[operator]
+            masked = MASKERS[cfg.rule.name](current)
             hits.append(
                 GuardrailHit(
                     rule_name=cfg.rule.name,

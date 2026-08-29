@@ -93,7 +93,7 @@ def _parse_sse(text: str) -> list[tuple[str, dict[str, object]]]:
     return frames
 
 
-REQ = {
+REQ: dict[str, object] = {
     "trace_id": "t-stream",
     "tenant_key": "default",
     "question": "商品总库存是多少",

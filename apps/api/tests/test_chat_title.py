@@ -4,8 +4,10 @@
 守卫(人工重命名/已改写跳过,省 LLM 调用)→ agent /internal/rewrite-title →
 update_title_if_current 条件回写(竞态双闸)。失败保持截断标题,主链路零感知。
 """
+# pyright: reportPrivateUsage=false
 
-from collections.abc import AsyncIterator
+
+from collections.abc import Iterator
 
 import pytest
 from httpx import AsyncClient
@@ -25,14 +27,14 @@ from tests.test_chat_query import (
 
 
 @pytest.fixture
-def fake_agent() -> AsyncIterator[dict[str, FakeAgent]]:  # type: ignore[misc]
+def fake_agent() -> Iterator[dict[str, FakeAgent]]:
     holder: dict[str, FakeAgent] = {}
 
     def _factory() -> FakeAgent:
         return holder["agent"]
 
     app.dependency_overrides[get_agent_client] = _factory
-    yield holder  # type: ignore[misc]
+    yield holder
     app.dependency_overrides.pop(get_agent_client, None)
 
 

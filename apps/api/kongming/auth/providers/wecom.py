@@ -13,10 +13,9 @@
 from urllib.parse import urlencode
 
 import httpx
-from authlib.integrations.httpx_client import AsyncOAuth2Client
 
 from kongming.auth.models import NormalizedProfile, ProviderExchangeFailed
-from kongming.auth.providers.base import OAuthProviderBase, resp_json
+from kongming.auth.providers.base import OAuthClient, OAuthProviderBase, resp_json
 from kongming.config import Settings
 
 _API = "https://qyapi.weixin.qq.com"
@@ -73,7 +72,7 @@ class WecomProvider(OAuthProviderBase):
         )
         return f"{self.auth_url}?{q}"
 
-    async def fetch_raw_profile(self, client: AsyncOAuth2Client) -> NormalizedProfile:
+    async def fetch_raw_profile(self, client: OAuthClient) -> NormalizedProfile:
         raise NotImplementedError("企微为非标准两步令牌,走 fetch_profile 覆写")
 
     async def fetch_profile(

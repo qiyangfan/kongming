@@ -18,13 +18,10 @@ class _FakeApi:
     def __init__(self, available: bool = True) -> None:
         self.calls: list[str] = []
 
-        async def _none(**kw: object) -> None:
-            return None
+        def _content(att_id: str, **kw: object) -> tuple[str, bytes] | None:
+            return ("image/png", b"\x89PNG-data") if available else None
 
-        self._content = (
-            (lambda att_id, **kw: ("image/png", b"\x89PNG-data")) if available
-            else (lambda att_id, **kw: None)
-        )
+        self._content = _content
 
     async def attachment_content(self, att_id: str, **kw: object):  # type: ignore[no-untyped-def]
         self.calls.append(att_id)
@@ -33,7 +30,7 @@ class _FakeApi:
 
 class _FakeLlm:
     def __init__(self) -> None:
-        self.vision_calls: list[dict] = []
+        self.vision_calls: list[dict[str, object]] = []
 
     async def chat_vision(self, system: str, user: str, **kw: object) -> str:
         self.vision_calls.append({"system": system, "user": user, **kw})

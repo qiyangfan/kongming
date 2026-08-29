@@ -4,13 +4,18 @@ prompt 为 039 全新撰写(非上游资产);遵守全角标点纪律(本文件�
 降级契约:任何失败 → SuggestError/generated=False,api 侧收敛空清单不落缓存。
 """
 
+# pyright: reportPrivateUsage=false
+# 测试惯例:prompt 资产为模块私有常量,直引断言防手滑删规则(仓库约定,不改名)
+
 import asyncio
+from collections.abc import Coroutine
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
 
 from kongming_agent import deps
-from kongming_agent.llm import LlmError
+from kongming_agent.llm import LlmClient, LlmError
 from kongming_agent.main import app
 from kongming_agent.suggester import (
     SuggestedQuestions,
@@ -46,7 +51,7 @@ class StubLlm:
         raise AssertionError("建议生成链路不应调用 embed")
 
 
-def _run(coro: object) -> object:
+def _run(coro: Coroutine[Any, Any, list[str]]) -> list[str]:
     return asyncio.run(coro)
 
 
@@ -79,29 +84,33 @@ def test_clean_caps_count() -> None:
 
 def test_empty_digest_raises() -> None:
     with pytest.raises(SuggestError):
-        _run(suggest_questions("   ", StubLlm()))
+        _run(suggest_questions("   ", cast("LlmClient", StubLlm())))
 
 
 def test_llm_failure_raises_suggest_error() -> None:
     with pytest.raises(SuggestError):
-        _run(suggest_questions(_DIGEST, StubLlm(boom=True)))
+        _run(suggest_questions(_DIGEST, cast("LlmClient", StubLlm(boom=True))))
 
 
 def test_unparseable_output_raises() -> None:
     with pytest.raises(SuggestError):
-        _run(suggest_questions(_DIGEST, StubLlm("抱歉，我无法回答")))
+        _run(suggest_questions(_DIGEST, cast("LlmClient", StubLlm("抱歉，我无法回答"))))
     with pytest.raises(SuggestError):
-        _run(suggest_questions(_DIGEST, StubLlm('{"questions": }')))
+        _run(suggest_questions(_DIGEST, cast("LlmClient", StubLlm('{"questions": }'))))
 
 
 def test_all_invalid_items_raises() -> None:
     with pytest.raises(SuggestError):
-        _run(suggest_questions(_DIGEST, StubLlm('{"questions": ["", "   "]}')))
+        _run(
+            suggest_questions(
+                _DIGEST, cast("LlmClient", StubLlm('{"questions": ["", "   "]}'))
+            )
+        )
 
 
 def test_success_returns_cleaned_and_uses_suggest_task() -> None:
     llm = StubLlm('```json\n{"questions": ["共有多少商品？", "销量 Top5 是哪些？"]}\n```')
-    out = _run(suggest_questions(_DIGEST, llm))
+    out = _run(suggest_questions(_DIGEST, cast("LlmClient", llm)))
     assert out == ["共有多少商品？", "销量 Top5 是哪些？"]
     assert llm.task_seen == "SUGGEST"  # 021 任务路由(可定向小模型)
     assert "goods" in llm.calls[0][1]  # 摘要进入 prompt

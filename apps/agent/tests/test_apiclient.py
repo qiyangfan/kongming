@@ -5,12 +5,15 @@ nl2sql-agent spec 立约「召回服务失败时回退实时内省兜底」,docs
 """
 
 import httpx
+import pytest
 
 from kongming_agent.apiclient import ApiClient
 from kongming_agent.settings import Settings
 
 
-async def test_rag_retrieve_non_json_200_returns_none(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+async def test_rag_retrieve_non_json_200_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """200 但报文非 JSON(网关回 HTML 错误页等)→ None,不裸抛。"""
     client = ApiClient(Settings())
 
@@ -24,7 +27,9 @@ async def test_rag_retrieve_non_json_200_returns_none(monkeypatch) -> None:  # t
     assert result is None
 
 
-async def test_rag_retrieve_valid_json_still_parsed(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+async def test_rag_retrieve_valid_json_still_parsed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """对照组:正常 JSON 报文解析不受影响(防收敛误伤主路径)。"""
     client = ApiClient(Settings())
 

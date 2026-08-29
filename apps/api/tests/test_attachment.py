@@ -1,5 +1,6 @@
 """030 multimodal-input api 侧测试:上传限制/归属隔离/一次性消费/
 chat 链路引用校验与摘要回显(测试先行,安全类)。"""
+# pyright: reportPrivateUsage=false
 
 import io
 

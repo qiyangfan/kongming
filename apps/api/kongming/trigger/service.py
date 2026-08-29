@@ -6,7 +6,7 @@ import hashlib
 import hmac as hmac_mod
 import re
 import uuid as uuid_mod
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from kongming.trigger.adapters import AdapterError, normalize
 from kongming.trigger.models import CronError, next_fire, parse_cron
@@ -393,4 +393,4 @@ def _parse_json(body: bytes) -> dict[str, Any]:
     parsed = json.loads(body.decode("utf-8", errors="replace"))
     if not isinstance(parsed, dict):
         raise ValueError("payload 须为 JSON 对象")
-    return parsed
+    return cast("dict[str, Any]", parsed)

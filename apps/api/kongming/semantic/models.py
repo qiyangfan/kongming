@@ -15,7 +15,7 @@ class TableRelation:
 class MetricDef:
     metric_name: str
     sql_template: str
-    business_terms: list[str] = field(default_factory=list)
+    business_terms: list[str] = field(default_factory=list[str])
     enabled: bool = True
 
 
@@ -33,7 +33,7 @@ def format_relations_hint(relations: list[TableRelation]) -> str:
 
 def format_metric_hints(metrics: list[MetricDef]) -> str:
     """命中指标 → 口径文字段(纯函数);sql_template 仅为提示文字,永不执行。"""
-    lines = []
+    lines: list[str] = []
     for m in metrics:
         lines.append(f"{m.metric_name}: {m.sql_template}")
     return "\n".join(lines)

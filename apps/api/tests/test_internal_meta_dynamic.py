@@ -6,6 +6,7 @@
 """
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 from httpx import AsyncClient
@@ -22,7 +23,7 @@ SCHEMA_OTHER = "ds_meta_other"
 
 
 @pytest.fixture(scope="module", autouse=True)
-async def _biz() -> AsyncIterator[None]:
+async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     async with get_engine().begin() as conn:
         await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
         await conn.execute(
@@ -80,7 +81,7 @@ async def _mk_ds(
     await s.commit()
 
 
-def _req(tenant_key: str, datasource_key: str) -> dict:
+def _req(tenant_key: str, datasource_key: str) -> dict[str, Any]:
     return {"tenant_key": tenant_key, "datasource_key": datasource_key}
 
 

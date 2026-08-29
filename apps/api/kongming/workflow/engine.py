@@ -10,7 +10,7 @@ import asyncio
 import copy
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import structlog
 
@@ -45,7 +45,8 @@ class _DeadlineExceeded(BaseException):
 class NodeRun:
     node_id: str
     status: str  # SUCCESS / FAILED / SKIPPED
-    outputs: dict[str, Any] = field(default_factory=dict)
+    # default_factory 走参数化泛型别名(bare dict 推断出 Unknown 元素)
+    outputs: dict[str, Any] = field(default_factory=dict[str, Any])
     error: str = ""
     duration_ms: int = 0
 
@@ -82,6 +83,11 @@ class _Engine:
         # 循环子节点逐次记入顶层快照(与 run_dag 同一列表;B2-B4 归因粒度)
         self._node_runs: list[NodeRun] = node_runs if node_runs is not None else []
 
+    @property
+    def deadline(self) -> float:
+        """全局预算截止(monotonic 时钟);编排层读取剩余预算用。"""
+        return self._deadline
+
     def _tick(self) -> None:
         self._steps += 1
         if self._steps > self._step_cap:
@@ -107,7 +113,7 @@ class _Engine:
             )
             if result.get("verdict") != "PASS":
                 raise NodeFailed(f"SQL 未过检: {result.get('reason')}")
-            rows = result.get("rows") or []
+            rows = cast("list[object]", result.get("rows") or [])
             return {
                 "columns": result.get("columns") or [],
                 "rows": rows[:1000],  # 快照截断(与执行 limit 对齐)
@@ -119,7 +125,7 @@ class _Engine:
             if method not in ("GET", "POST", "PUT", "DELETE", "PATCH"):
                 raise NodeFailed(f"非法 method: {method}")
             raw_headers = cfg.get("headers")
-            headers = (
+            headers: dict[str, Any] = (
                 render_template(raw_headers, context)
                 if isinstance(raw_headers, dict)
                 else {}
@@ -165,7 +171,7 @@ class _Engine:
             )
             if not result.get("success"):
                 raise NodeFailed(str(result.get("error") or "agent 执行失败"))
-            rows = result.get("rows") or []
+            rows = cast("list[object]", result.get("rows") or [])
             return {
                 "summary": result.get("summary") or "",
                 "sql": result.get("sql") or "",
@@ -177,6 +183,8 @@ class _Engine:
         items = resolve_ref(str(node.config.get("items_ref") or ""), context)
         if not isinstance(items, list):
             raise NodeFailed("loop.items_ref 未解析为数组")
+        # isinstance 收窄产物元素型未知,收窄后仅做 len/遍历(元素原样透传)
+        items = cast("list[object]", items)
         body_raw = node.config.get("body")
         if not isinstance(body_raw, list) or not body_raw:
             raise NodeFailed("loop.body 必须是非空子节点数组")
@@ -276,13 +284,13 @@ def _should_skip(
     (按本节点 config.on[缺省 "true"] 与 dep.outputs.result 比对)——
     其他类型节点产出 bool 型 result 键不触发选路(B2-B6 收紧)。"""
     for dep in node.depends_on:
-        dep_state = context.get(dep) or {}
+        dep_state: dict[str, Any] = context.get(dep) or {}
         if dep_state.get("_status") == "SKIPPED":
             return True
         dep_def = by_id.get(dep)
         if dep_def is None or dep_def.type != "condition":
             continue  # 条件门仅对 condition 前驱生效
-        dep_outputs = dep_state.get("outputs") or {}
+        dep_outputs: dict[str, Any] = dep_state.get("outputs") or {}
         if "result" in dep_outputs and isinstance(dep_outputs.get("result"), bool):
             on = str(node.config.get("on") or "true")
             want = on == "true"
@@ -327,7 +335,7 @@ async def run_dag(
                 context[node.id] = {"_status": "SKIPPED", "outputs": {}}
                 continue
             node_started = time.monotonic()
-            remaining = engine._deadline - time.monotonic()
+            remaining = engine.deadline - time.monotonic()
             if remaining <= 0:
                 outcome_status = "TIMEOUT"
                 outcome_error = "全局超时"

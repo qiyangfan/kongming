@@ -6,6 +6,7 @@
 
 import asyncio
 import logging
+from typing import Protocol, cast
 
 import asyncpg
 
@@ -14,6 +15,15 @@ from kongming.datasource.models import TestConnectionResult
 log = logging.getLogger(__name__)
 
 _CONNECT_TIMEOUT_SEC = 3  # spec「测试连接」:连接超时 3s
+
+
+class _PgConn(Protocol):
+    """asyncpg 连接的最小类型面:asyncpg 源码未完整注解,pyright strict 下
+    引用 asyncpg.Connection 本身即携带 Unknown;本测试仅消费这两个成员,
+    经 Protocol 收窄(仅类型层面,运行时即原 asyncpg 连接对象)。"""
+
+    async def fetchval(self, query: str) -> object: ...
+    async def close(self) -> None: ...
 
 
 def _classify(e: Exception) -> str:
@@ -40,17 +50,23 @@ class AsyncpgConnectionTester:
     async def test(
         self, *, host: str, port: int, database: str, username: str, password: str
     ) -> TestConnectionResult:
-        conn: asyncpg.Connection | None = None
+        conn: _PgConn | None = None
         try:
-            conn = await asyncpg.connect(
-                host=host,
-                port=port,
-                database=database,
-                user=username,
-                password=password,
-                timeout=_CONNECT_TIMEOUT_SEC,
+            # asyncpg.connect 签名未注解(strict 判部分未知),成员访问行豁免;
+            # 经 _PgConn Protocol 收窄后消费(仅类型断言,运行时为原连接对象)
+            c = cast(
+                "_PgConn",
+                await asyncpg.connect(  # pyright: ignore[reportUnknownMemberType]  # asyncpg 未注解
+                    host=host,
+                    port=port,
+                    database=database,
+                    user=username,
+                    password=password,
+                    timeout=_CONNECT_TIMEOUT_SEC,
+                ),
             )
-            await conn.fetchval("SELECT 1")
+            conn = c
+            await c.fetchval("SELECT 1")
         except Exception as e:  # noqa: BLE001  # 类别已收敛,驱动异常不向外抛
             return TestConnectionResult(ok=False, reason=_classify(e))
         finally:

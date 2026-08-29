@@ -89,7 +89,8 @@ async def apply(
         return AppliedSQL(sql=sql, warning=flt.skip_reason)
 
     new_sql, params = rewrite.apply_filter(sql, flt)
-    if data_type == "uuid":
-        # uuid 列绑 UUID 对象,其余列绑 str(探测 data_type 保证类型匹配)
-        params = {k: uuid.UUID(str(v)) for k, v in params.items()}
-    return AppliedSQL(sql=new_sql, params=params)
+    # uuid 列绑 UUID 对象,其余列绑 str(探测 data_type 保证类型匹配)
+    out_params: dict[str, object] = (
+        {k: uuid.UUID(str(v)) for k, v in params.items()} if data_type == "uuid" else params
+    )
+    return AppliedSQL(sql=new_sql, params=out_params)

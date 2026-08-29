@@ -4,7 +4,11 @@
 核销路径唯一(design D1):mock-simulate 与 callback 两入口共用同一
 reconcile——两入口各自的行为断言都打到同一状态机。
 """
+# pyright: reportPrivateUsage=false
 
+from typing import Any, cast
+
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,7 +46,7 @@ def _sign(payment_id: str, trade_no: str, result: str, amount: int) -> str:
     )
 
 
-async def _payment_row(s: AsyncSession, payment_id: str) -> dict:
+async def _payment_row(s: AsyncSession, payment_id: str) -> dict[str, Any]:
     row = (
         await s.execute(
             text("SELECT * FROM public.sys_payment WHERE id=CAST(:i AS uuid)"),
@@ -440,7 +444,7 @@ async def test_mock_channel_closed() -> None:
         async def get_invoice(self, **kw: object) -> None:  # pragma: no cover
             return None
 
-    svc = BillingService(_Repo(), channels={})  # type: ignore[arg-type]
+    svc = BillingService(cast("Any", _Repo()), channels={})
     try:
         await svc.create_payment(invoice_id="x", tenant_id="y")
         raise AssertionError("应抛 PaymentChannelClosed")
@@ -453,7 +457,7 @@ async def test_mock_channel_closed() -> None:
 
 async def test_create_payment_race_returns_open_payment(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """R1-A1:并发双击——条件插入被部分唯一索引拦(模拟返回 None)时,
     仍有在途单则幂等返回现有单(不新建/不重复审计),不甩 500。"""

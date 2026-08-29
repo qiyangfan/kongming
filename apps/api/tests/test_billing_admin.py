@@ -1,4 +1,5 @@
 """035 套餐 U/D、租户清单自供、管理面账单分页测试(测试先行)。"""
+# pyright: reportPrivateUsage=false
 
 from httpx import AsyncClient
 from sqlalchemy import text

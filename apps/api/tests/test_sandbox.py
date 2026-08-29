@@ -1,11 +1,13 @@
 """027 cloud-code-sandbox 测试:注册表/预检/分发/审计单测(测试先行,
 安全类)+ podman 集成(shutil.which 守卫,CI 无运行时自动 skip)。"""
+# pyright: reportPrivateUsage=false
 
 import json
 import shutil
 import subprocess
 import uuid
 from collections.abc import AsyncIterator
+from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
@@ -17,6 +19,7 @@ from kongming.config import get_settings
 from kongming.db import get_engine
 from kongming.sandbox.models import SandboxOutcome
 from kongming.sandbox.runner import _parse_outcome
+from kongming.toolcall.ports import SandboxExecutor
 from kongming.toolcall.registry import filter_specs
 from tests.conftest import MakeUser
 from tests.test_chat_query import _bind
@@ -32,7 +35,7 @@ SCHEMA = "tenant_sbx"
 SANDBOX_IMAGE = "kongming-sandbox:dev"
 
 @pytest.fixture(scope="module", autouse=True)
-async def _biz() -> AsyncIterator[None]:
+async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     """沙箱测试租户业务 schema(data_sql 真执行活数据,与 test_toolcall 同形态)。"""
     async with get_engine().begin() as conn:
         await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))  # noqa: S608  # 模块常量
@@ -187,8 +190,8 @@ class _RecordingSandbox:
         tenant_id: str,
     ) -> dict[str, object]:
         self.calls.append({"code": code, "data": data, "trace_id": trace_id})
-        rows = (data or {}).get("rows") or []
-        cols = (data or {}).get("columns") or []
+        rows = cast("list[object]", (data or {}).get("rows") or [])
+        cols = cast("list[object]", (data or {}).get("columns") or [])
         proj: dict[str, object] = {
             "status": "SUCCESS", "stdout": "ok", "error": None,
             "images_count": 0, "duration_ms": 7,
@@ -198,7 +201,7 @@ class _RecordingSandbox:
         return proj
 
 
-def _override_service(sandbox: object | None) -> None:
+def _override_service(sandbox: object | None) -> None:  # noqa: ANN401
     """dependency_overrides 工厂(008 R2 教训:传类会被当模型构造 422);
     会话走 get_session 子依赖(FastAPI 请求级关闭)——曾用 get_sessionmaker()
     裸开会话:每请求泄漏一条连接,主池 5+5 耗尽后全模块挂死(实测)。
@@ -231,7 +234,7 @@ def _override_service(sandbox: object | None) -> None:
             rag_retriever=_RagServiceAdapter(s),
             reply_store=_ChatReplyStore(s),
             intent=None,
-            sandbox=sandbox,  # type: ignore[arg-type]
+            sandbox=cast('SandboxExecutor | None', sandbox),
             rate_limit_per_minute=600,
             confirm_ttl_minutes=15,
         )
@@ -315,13 +318,13 @@ async def test_happy_path_injects_df(
         _clear_override()
     body = r.json()
     assert body["status"] == "executed"
-    result = body["result"] or {}
+    result = cast('dict[str, Any]', body["result"] or {})
     # SELF 行级:goods 仅 create_by='someone' 行,本人不可见 → 0×1
     assert result.get("injected") == "已注入 df(0×1)"
     assert len(sandbox.calls) == 1
     data = sandbox.calls[0]["data"]
-    assert isinstance(data, dict) and data.get("columns") == ["name"]
-    assert data.get("rows") == []  # 行级权限同构直证
+    assert isinstance(data, dict) and cast('dict[str, object]', data).get("columns") == ["name"]
+    assert cast('dict[str, object]', data).get("rows") == []  # 行级权限同构直证
 
 
 async def test_data_sql_blocked_no_sandbox(
@@ -347,7 +350,7 @@ async def test_data_sql_blocked_no_sandbox(
         _clear_override()
     body = r.json()
     assert body["status"] == "executed"  # 工具层执行成功,业务结果为取数拒绝
-    result = body["result"] or {}
+    result = cast('dict[str, Any]', body["result"] or {})
     assert result.get("status") == "ERROR"
     assert result.get("verdict") == "BLOCKED"
     assert sandbox.calls == []  # 沙箱未启动
@@ -380,7 +383,7 @@ async def test_inject_over_1mb_rejected(
         _clear_override()
         await session.commit()
     body = r.json()
-    result = body["result"] or {}
+    result = cast('dict[str, Any]', body["result"] or {})
     assert result.get("status") == "ERROR"
     assert "上限" in str(result.get("error"))
     assert sandbox.calls == []
@@ -409,7 +412,7 @@ async def test_inject_gate_counts_bytes_cjk(
         )
     finally:
         _clear_override()
-    result = (r.json())["result"] or {}
+    result = cast('dict[str, Any]', (r.json())["result"] or {})
     assert result.get("status") == "ERROR"
     assert "上限" in str(result.get("error"))
     assert sandbox.calls == []

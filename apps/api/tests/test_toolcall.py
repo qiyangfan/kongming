@@ -9,6 +9,7 @@
 
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
@@ -26,7 +27,7 @@ SCHEMA = "tenant_tc"
 
 
 @pytest.fixture(scope="module", autouse=True)
-async def _biz() -> AsyncIterator[None]:
+async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     """toolcall 测试租户业务 schema(execute_sql 真执行活数据)。"""
     async with get_engine().begin() as conn:
         await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))  # noqa: S608  # 模块常量
@@ -157,7 +158,7 @@ async def _tool_audits(s: AsyncSession, trace_id: str) -> list[dict[str, object]
 
 
 @pytest.fixture(autouse=True)
-async def _tenant(session: AsyncSession) -> None:
+async def _tenant(session: AsyncSession) -> None:  # pyright: ignore[reportUnusedFunction]
     await _mk_tenant(session, "tc")
 
 
@@ -486,7 +487,8 @@ async def test_write_tool_pending_confirm_no_side_effect(
     audits = await _tool_audits(session, trace_id)
     assert [a["status"] for a in audits] == ["PENDING_CONFIRM"]
     assert str(audits[0]["id"]) == confirm_id
-    assert audits[0]["args_json"]["title"] == "明日维护"  # 原文留存(确认重放用)
+    # cast 收口 args_json(object→映射,运行时不变)
+    assert cast("dict[str, Any]", audits[0]["args_json"])["title"] == "明日维护"
     assert audits[0]["expires_at"] is not None
     n = (await session.execute(text("SELECT count(*) FROM public.sys_announcement"))).scalar_one()
     assert n == 0  # 未确认零副作用
@@ -774,7 +776,7 @@ async def test_confirm_other_user_404_audited(
         session, make_user, "tc_fb", ["tool:announcement:create", "chat:execute"]
     )
     sid_b = await _mk_session(session, uid_b)
-    confirm_id, trace_a = await _pending_confirm(client, session, uid_a)
+    confirm_id, _trace_a = await _pending_confirm(client, session, uid_a)
     token_b = await _login(client, "tc_fb")
     r = await client.post(
         "/chat/tool-confirm",

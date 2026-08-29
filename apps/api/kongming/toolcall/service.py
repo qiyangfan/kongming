@@ -21,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 import jsonschema
 import sqlglot
 from sqlglot import exp
+from sqlglot.errors import SqlglotError
 
 from kongming.sqlfw.firewall import check as sql_check
 from kongming.toolcall.models import (
@@ -94,7 +95,7 @@ def validate_args(tool: ToolDef, args: dict[str, object]) -> str | None:
                 stmts = [
                     st for st in sqlglot.parse(sql, dialect="postgres") if st is not None
                 ]
-            except (sqlglot.errors.SqlglotError, RecursionError):
+            except (SqlglotError, RecursionError):
                 # 语法畸形:放行下游(防火墙 ParseError 语义接管);RecursionError
                 # 继承 RuntimeError 不在 SqlglotError 族——深嵌套括号曾逃逸
                 # 此层直裸 500 且绕过审计(审查循环 S1),同样按畸形放行

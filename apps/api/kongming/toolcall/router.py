@@ -12,7 +12,7 @@ import logging
 import shutil
 import uuid
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -298,7 +298,9 @@ class _McpDynamicResolver:
         return ToolDef(
             name=name,
             description=str(entry.get("description") or ""),
-            parameters=schema if isinstance(schema, dict) else {"type": "object"},
+            parameters=cast("dict[str, Any]", schema)
+            if isinstance(schema, dict)
+            else {"type": "object"},
             perm_code="tool:mcp:use",
             write=not read_only,  # fail-closed:未标注 readOnlyHint=写工具
             require_confirm=not read_only,

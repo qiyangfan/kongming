@@ -4,6 +4,9 @@
 writeback SHALL 幂等:(tenant, datasource_key, question) 同键覆盖保留最新
 成功 SQL,embedding 失败保留旧向量;每租户+源维度总量上限淘汰最旧。
 """
+# pyright: reportPrivateUsage=false
+
+from typing import cast
 
 import pytest
 from httpx import AsyncClient
@@ -13,7 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kongming.rag.agent_callback import AgentRagClient
 from tests.conftest import MakeUser
 
-from .test_rag_recall import fake_embed  # noqa: F401  (fixture 复用)
+from .test_rag_recall import (
+    fake_embed,  # noqa: F401  # pyright: ignore[reportUnusedImport]  (fixture 复用)
+)
 
 pytestmark = pytest.mark.usefixtures("fake_embed")
 
@@ -39,7 +44,10 @@ def _patch_agent(monkeypatch: pytest.MonkeyPatch, sql: str) -> None:
 
     fut: Future[object] = Future()
     fut.set_result(_reply(sql))
-    monkeypatch.setattr(AgentClient, "query", lambda self, **kw: fut)
+    def _fake_query(self: AgentClient, **kw: object) -> Future[object]:  # noqa: ARG001
+        return fut
+
+    monkeypatch.setattr(AgentClient, "query", _fake_query)
 
 
 async def _ask(client: AsyncClient, token: str, question: str) -> None:
@@ -50,10 +58,18 @@ async def _ask(client: AsyncClient, token: str, question: str) -> None:
 
 
 async def _rows(s: AsyncSession) -> list[dict[str, object]]:
-    return list(
-        (await s.execute(text("SELECT question, sql_text, embedding FROM rag.query_history")))
-        .mappings()
-        .all()
+    # RowMapping 非 dict 子类,cast 对齐声明(运行时不变)
+    return cast(
+        "list[dict[str, object]]",
+        list(
+            (
+                await s.execute(
+                    text("SELECT question, sql_text, embedding FROM rag.query_history")
+                )
+            )
+            .mappings()
+            .all(),
+        ),
     )
 
 

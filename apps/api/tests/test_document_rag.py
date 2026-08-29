@@ -1,7 +1,9 @@
 """024 document-rag 测试:分块/上传幂等/检索隔离/知识分流两路。"""
+# pyright: reportPrivateUsage=false
+
 
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,6 +68,7 @@ async def test_upload_and_idempotent(
 ) -> None:
     token = await _admin(client, session)
     headers = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "default"}
+    r: Response
     for _ in range(2):
         r = await client.post(
             "/system/document/upload",
@@ -74,7 +77,7 @@ async def test_upload_and_idempotent(
             data={"datasource_key": "default"},
         )
         assert r.status_code == 200
-    body = r.json()
+    body = r.json()  # pyright: ignore[reportPossiblyUnboundVariable]  # range(2) 恒迭代,r 必已绑定
     assert body["skipped"] is True  # 第二次同内容幂等跳过
     # 块结构:PARENT 无向量(测试无 agent),CHILD 有 parent_id
     rows = (
@@ -150,7 +153,7 @@ async def test_retrieve_doc_hints_isolated(client: AsyncClient, session: AsyncSe
         json={"tenant_key": "default", "question": "return policy"},
     )
     assert r.status_code == 200
-    body = r.json()
+    body = r.json()  # pyright: ignore[reportPossiblyUnboundVariable]  # range(2) 恒迭代,r 必已绑定
     assert body["doc_hints"], "全文路应确定性命中 return/policy"
     assert body["doc_hints"][0]["source_ref"].startswith("policy.md §")
     assert "schema_hint" in body  # schema 通道独立(可为空)

@@ -4,8 +4,11 @@
 「记住」短路(落库+确认答复+不走 agent;PII 拒绝);自管理四端点(列表/
 编辑唤醒/删除/导出/越权 404);隐式落库(去重/敏感跳过)。
 """
+# pyright: reportPrivateUsage=false
 
-from collections.abc import AsyncIterator
+
+from collections.abc import Iterator
+from typing import cast
 
 import pytest
 from httpx import AsyncClient
@@ -38,7 +41,7 @@ class FakeAgent:
 
 
 @pytest.fixture
-def fake_agent() -> AsyncIterator[dict[str, FakeAgent]]:  # type: ignore[misc]
+def fake_agent() -> Iterator[dict[str, FakeAgent]]:
     holder: dict[str, FakeAgent] = {}
     app.dependency_overrides[get_agent_client] = lambda: holder["agent"]
     yield holder
@@ -81,9 +84,13 @@ async def _insert_memory(
 
 
 async def test_explicit_memory_short_circuit(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
-    uid, token = await _user(client, session, make_user, "mem_exp")
+    _uid, token = await _user(client, session, make_user, "mem_exp")
     fake_agent["agent"] = FakeAgent()
     r = await client.post(
         "/chat/query",
@@ -107,7 +114,11 @@ async def test_explicit_memory_short_circuit(
 
 
 async def test_explicit_memory_sensitive_rejected(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     _, token = await _user(client, session, make_user, "mem_pii")
     fake_agent["agent"] = FakeAgent()
@@ -133,7 +144,11 @@ async def test_explicit_memory_sensitive_rejected(
 
 
 async def test_recall_hint_injected(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     """召回注入:有向量记忆时 agent 请求体带 memory_hint(embedding 走 009 通道,
     测试库无 agent——embedding 失败降级无注入;此处直证降级形态零回归)。"""
@@ -247,7 +262,13 @@ async def test_implicit_form_dedup_and_sensitive(
             raise RuntimeError("no agent in test")
 
     class _NoopOper:
-        async def add(self, user_id, action, target, detail):  # type: ignore[no-untyped-def]
+        async def add(
+            self,
+            user_id: str | None,
+            action: str,
+            target: str | None,
+            detail: dict[str, object],
+        ) -> None:
             return None
 
     svc = MemoryService(SqlMemoryRepo(session), _FailEmbed(), _NoopOper())
@@ -264,7 +285,7 @@ async def test_implicit_form_dedup_and_sensitive(
     rows = await svc.list_mine(user_id=uid, tenant_id=tid)
     assert len(rows) == 1
     assert rows[0]["source"] == "IMPLICIT"
-    assert float(rows[0]["confidence"]) == 0.5
+    assert float(cast("float", rows[0]["confidence"])) == 0.5
 
 
 
@@ -353,7 +374,11 @@ async def test_recall_dual_filter_and_hit_refresh(session: AsyncSession) -> None
 
 
 async def test_r1_h1_operlog_persisted_on_success(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     """R1-H1:显式形成成功路径的 memory.create 操作日志落库(同事务)。"""
     _, token = await _user(client, session, make_user, "mem_oplog")
@@ -371,7 +396,11 @@ async def test_r1_h1_operlog_persisted_on_success(
 
 
 async def test_r1_h2_injection_memory_rejected(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     """R1-H2:injection 内容的显式记忆拒绝落库(跨会话注入通道封堵)。"""
     _, token = await _user(client, session, make_user, "mem_inj")
@@ -430,7 +459,13 @@ async def test_r1_m1_edit_preserves_vector_on_embedding_failure(
             raise RuntimeError("embedding 不可达")
 
     class _NoopOper:
-        async def add(self, user_id, action, target, detail):  # type: ignore[no-untyped-def]
+        async def add(
+            self,
+            user_id: str | None,
+            action: str,
+            target: str | None,
+            detail: dict[str, object],
+        ) -> None:
             return None
 
     svc = MemoryService(SqlMemoryRepo(session), _FailEmbed(), _NoopOper())

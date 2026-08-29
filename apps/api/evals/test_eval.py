@@ -12,6 +12,7 @@
   - full(-m full):全部单轮题(含动态数据源组),统计+阈值
   - multiturn(-m multiturn):多轮上下文题(指代/省略/排序延续/过滤追加)
 """
+# pyright: reportPrivateUsage=false
 
 from typing import Any
 
@@ -123,15 +124,16 @@ async def test_full_all(all_cases: list[dict[str, Any]]) -> None:
     严格必失败,异常分支无需再细分(上游同款推理)。
     """
     single = [c for c in all_cases if "turns" not in c]
-    results = {
+    # 计数器与失败明细分开放:混装 dict 的推断类型带 Unknown/list,算术自增全报错
+    results: dict[str, int] = {
         "pass": 0,
         "strict_pass": 0,
         "total": 0,
         "recall_hit": 0,
         "ds_pass": 0,
         "ds_total": 0,
-        "details": [],
     }
+    details: list[str] = []
     for case in single:
         is_ds = case.get("datasource_key") or str(case.get("category", "")).startswith(
             "datasource"
@@ -144,12 +146,13 @@ async def test_full_all(all_cases: list[dict[str, Any]]) -> None:
             if is_ds:
                 results["ds_pass"] += 1
         except AssertionError as e:
-            results["details"].append(str(e))
-        except pytest.Failed as e:  # pytest.fail 抛 Failed(BaseException),不进
-            # Exception 网——不接住会中断全量统计(gold 资产错误/deny 不可达)
-            results["details"].append(str(e))
+            details.append(str(e))
+        except pytest.fail.Exception as e:  # pytest.fail 抛 fail.Exception(即 Failed,
+            # BaseException 子类),不进 Exception 网——不接住会中断全量统计
+            # (gold 资产错误/deny 不可达)
+            details.append(str(e))
         except Exception as e:  # noqa: BLE001  # 单题异常不炸全量(计入失败)
-            results["details"].append(f"[{case['id']}] 异常: {e}")
+            details.append(f"[{case['id']}] 异常: {e}")
         results["total"] += 1
         if is_ds:
             results["ds_total"] += 1
@@ -164,7 +167,7 @@ async def test_full_all(all_cases: list[dict[str, Any]]) -> None:
         f" | 表命中 {results['recall_hit']}/{total} ({recall_rate:.0%})"
         f" | 动态数据源 {results['ds_pass']}/{results['ds_total']} ==="
     )
-    for d in results["details"]:
+    for d in details:
         print(d)
     assert pass_rate >= FULL_PASS_FLOOR, (
         f"评估宽松 pass 率 {pass_rate:.0%} 低于 {FULL_PASS_FLOOR:.0%} 阈值"

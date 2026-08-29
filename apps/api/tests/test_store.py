@@ -1,5 +1,6 @@
 """033 bot-store 测试:上架治理(归属/护栏)/发现/互动/直跑计数
 (测试先行,安全类)。"""
+# pyright: reportPrivateUsage=false
 
 from httpx import AsyncClient
 from sqlalchemy import text

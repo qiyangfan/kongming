@@ -4,7 +4,11 @@ mock 形态与 test_nodes.py 同款:FakeLlm 脚本化 chat_with_tools 应答,
 FakeApi 记录 tool_execute 回调;deps 单例 monkeypatch。
 """
 
+# pyright: reportPrivateUsage=false
+# 测试惯例:_observe 为被测模块私有实现,直引锁截断语义(仓库约定,不改名)
+
 import json
+from typing import Any, cast
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -19,7 +23,7 @@ from kongming_agent.main import app
 
 TOKEN = {"X-Internal-Token": "test-internal-token"}
 
-TOOLS = [
+TOOLS: list[dict[str, object]] = [
     {
         "name": "execute_sql",
         "description": "执行只读 SQL",
@@ -99,6 +103,22 @@ def _patch(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
     return _install
 
 
+async def _ainvoke(state: ReactState) -> dict[str, Any]:
+    """get_react_graph().ainvoke 成员型 strict 下部分未知(LangGraph 泛型),
+    测试边界一次收窄为终态 state dict(自构造 state,键型已知)。"""
+    graph = cast("Any", get_react_graph())
+    return cast(
+        "dict[str, Any]",
+        await graph.ainvoke(state, config={"recursion_limit": react_recursion_limit()}),
+    )
+
+
+def _tool_contents(messages: object) -> list[str]:
+    """FakeLlm 记录的 messages 中 role=tool 的 content 列表(边界 cast 收窄)。"""
+    typed = cast("list[dict[str, object]]", messages)
+    return [cast("str", m.get("content", "")) for m in typed if m.get("role") == "tool"]
+
+
 # ============ 图级:自主编排全链 ============
 
 
@@ -125,9 +145,7 @@ async def test_react_full_loop(_patch) -> None:  # type: ignore[no-untyped-def]
         ]
     )
     _patch(llm, api)
-    final = await get_react_graph().ainvoke(
-        _state(), config={"recursion_limit": react_recursion_limit()}
-    )
+    final = await _ainvoke(_state())
     # 终态同构:execution/summary/generated_sql/retry_count
     assert final["summary"] == "共有 1000 部电影。"
     assert final["execution"].verdict == "PASS"
@@ -145,10 +163,9 @@ async def test_react_full_loop(_patch) -> None:  # type: ignore[no-untyped-def]
         "channel",  # 025
     }
     # LLM 第二轮收到的 messages 含 tool 观察(行数据在观察内)
-    second_llm_messages = llm.calls[1]["messages"]
-    tool_msgs = [m for m in second_llm_messages if m.get("role") == "tool"]
+    tool_msgs = _tool_contents(llm.calls[1]["messages"])
     assert len(tool_msgs) == 1
-    assert "1000" in tool_msgs[0]["content"]
+    assert "1000" in tool_msgs[0]
 
 
 async def test_react_terminate_without_tools(_patch) -> None:  # type: ignore[no-untyped-def]
@@ -156,9 +173,7 @@ async def test_react_terminate_without_tools(_patch) -> None:  # type: ignore[no
     llm = FakeLlm([ToolChatReply(content="你好,我是孔明。")])
     api = FakeApi()
     _patch(llm, api)
-    final = await get_react_graph().ainvoke(
-        _state(), config={"recursion_limit": react_recursion_limit()}
-    )
+    final = await _ainvoke(_state())
     assert final["summary"] == "你好,我是孔明。"
     assert final["execution"].verdict == "PASS"  # 无工具执行:成功空结果
     assert final["execution"].rows == []
@@ -188,9 +203,7 @@ async def test_react_round_limit_forces_stop(_patch) -> None:  # type: ignore[no
         * limit
     )
     _patch(llm, api)
-    final = await get_react_graph().ainvoke(
-        _state(), config={"recursion_limit": react_recursion_limit()}
-    )
+    final = await _ainvoke(_state())
     assert "上限" in str(final.get("error") or "")
     assert final["retry_count"] == limit
     assert len(api.tool_calls) == limit  # 超限后不再执行
@@ -211,13 +224,10 @@ async def test_react_malformed_args_fed_back(_patch) -> None:  # type: ignore[no
     )
     api = FakeApi()
     _patch(llm, api)
-    final = await get_react_graph().ainvoke(
-        _state(), config={"recursion_limit": react_recursion_limit()}
-    )
+    final = await _ainvoke(_state())
     assert api.tool_calls == []  # 畸形参数未到达控制面
-    second_messages = llm.calls[1]["messages"]
-    tool_msgs = [m for m in second_messages if m.get("role") == "tool"]
-    assert "畸形" in tool_msgs[0]["content"]
+    tool_msgs = _tool_contents(llm.calls[1]["messages"])
+    assert "畸形" in tool_msgs[0]
     assert final["summary"] == "参数有误,我重新组织。"
 
 
@@ -240,13 +250,10 @@ async def test_react_confirm_required_guides_stop(_patch) -> None:  # type: igno
         [ToolExecuteOutcome(status="confirm_required", confirm_id="cf-1", reason="需用户确认")]
     )
     _patch(llm, api)
-    final = await get_react_graph().ainvoke(
-        _state(), config={"recursion_limit": react_recursion_limit()}
-    )
+    final = await _ainvoke(_state())
     assert "确认" in final["summary"]
-    second_messages = llm.calls[1]["messages"]
-    tool_msgs = [m for m in second_messages if m.get("role") == "tool"]
-    assert "停止" in tool_msgs[0]["content"]
+    tool_msgs = _tool_contents(llm.calls[1]["messages"])
+    assert "停止" in tool_msgs[0]
 
 
 async def test_react_empty_tools_degenerates(_patch) -> None:  # type: ignore[no-untyped-def]
@@ -254,9 +261,7 @@ async def test_react_empty_tools_degenerates(_patch) -> None:  # type: ignore[no
     llm = FakeLlm([ToolChatReply(content="我无法访问数据工具。")])
     api = FakeApi()
     _patch(llm, api)
-    final = await get_react_graph().ainvoke(
-        _state(tools=[]), config={"recursion_limit": react_recursion_limit()}
-    )
+    final = await _ainvoke(_state(tools=[]))
     assert llm.calls[0]["tools"] == []
     assert final["summary"] == "我无法访问数据工具。"
     assert final["execution"].verdict == "PASS"
@@ -272,9 +277,7 @@ async def test_react_rejected_observation_fed_back(_patch) -> None:  # type: ign
     )
     api = FakeApi([ToolExecuteOutcome(status="rejected", reason="TOOL_NOT_REGISTERED")])
     _patch(llm, api)
-    final = await get_react_graph().ainvoke(
-        _state(), config={"recursion_limit": react_recursion_limit()}
-    )
+    final = await _ainvoke(_state())
     assert api.tool_calls[0]["tool_name"] == "ghost_tool"
     assert "该工具不存在" in final["summary"]
 
@@ -446,14 +449,11 @@ async def test_react_duplicate_call_circuit_breaker(_patch) -> None:  # type: ig
         ]
     )
     _patch(llm, api)
-    final = await get_react_graph().ainvoke(
-        _state(), config={"recursion_limit": react_recursion_limit()}
-    )
+    final = await _ainvoke(_state())
     assert len(api.tool_calls) == 1  # 第二次重复调用被熔断,未到达控制面
     # 第三轮 LLM 收到的 messages 含熔断观察
-    third_messages = llm.calls[2]["messages"]
-    tool_msgs = [m for m in third_messages if m.get("role") == "tool"]
-    assert "已成功执行过" in tool_msgs[-1]["content"]
+    tool_msgs = _tool_contents(llm.calls[2]["messages"])
+    assert "已成功执行过" in tool_msgs[-1]
     assert final["summary"] == "已有结果,答案是 1。"
 
 
@@ -474,13 +474,10 @@ async def test_react_blocked_sql_not_deduped(_patch) -> None:  # type: ignore[no
     )
     api = FakeApi([blocked, blocked])
     _patch(llm, api)
-    final = await get_react_graph().ainvoke(
-        _state(), config={"recursion_limit": react_recursion_limit()}
-    )
+    final = await _ainvoke(_state())
     assert len(api.tool_calls) == 2  # 第二次同参调用未被熔断,真回调
-    third_messages = llm.calls[2]["messages"]
-    tool_msgs = [m for m in third_messages if m.get("role") == "tool"]
-    assert "已成功执行过" not in tool_msgs[-1]["content"]  # 无假成功观察
+    tool_msgs = _tool_contents(llm.calls[2]["messages"])
+    assert "已成功执行过" not in tool_msgs[-1]  # 无假成功观察
     assert final["last_execution"].verdict == "BLOCKED"
 
 
@@ -537,9 +534,7 @@ async def test_react_no_tools_uses_no_tools_discipline(_patch) -> None:  # type:
     llm = FakeLlm([ToolChatReply(content="当前助手未配置数据工具,无法执行该查询。")])
     api = FakeApi()
     _patch(llm, api)
-    final = await get_react_graph().ainvoke(
-        _state(tools=[]), config={"recursion_limit": react_recursion_limit()}
-    )
+    final = await _ainvoke(_state(tools=[]))
     system = str(llm.calls[0]["system"])
     assert "没有任何可用工具" in system
     assert "rag_retrieve" not in system and "execute_sql" not in system
@@ -549,7 +544,8 @@ async def test_react_no_tools_uses_no_tools_discipline(_patch) -> None:  # type:
 
 
 def test_openai_tools_shape() -> None:
-    out = nodes.openai_tools(TOOLS)
+    # 返回声明为 dict[str, object],嵌套键按本测试构造的实型收窄后断言
+    out = cast("list[dict[str, Any]]", nodes.openai_tools(TOOLS))
     assert out[0]["type"] == "function"
     assert out[0]["function"]["name"] == "execute_sql"
     assert out[0]["function"]["parameters"]["type"] == "object"
@@ -565,5 +561,7 @@ def test_observe_truncates_rows() -> None:
     )
     result = obs["result"]
     assert isinstance(result, dict)
-    assert len(result["rows"]) == nodes.MAX_OBSERVE_ROWS
+    # isinstance 收窄产物 dict[Unknown, Unknown] 仍未知,按 _observe 构造实型收窄
+    result = cast("dict[str, object]", result)
+    assert len(cast("list[object]", result["rows"])) == nodes.MAX_OBSERVE_ROWS
     assert result["rows_truncated"] is True

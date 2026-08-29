@@ -17,6 +17,7 @@ import contextlib
 import json
 import time
 import uuid
+from typing import Any, cast
 
 import structlog
 
@@ -86,15 +87,16 @@ def _parse_outcome(
             exit_code=exit_code,
         )
     try:
-        body = json.loads(last_line[len(PROTOCOL_PREFIX):])
-        if not isinstance(body, dict):
+        parsed = json.loads(last_line[len(PROTOCOL_PREFIX):])
+        if not isinstance(parsed, dict):
             raise ValueError("协议体非对象")
+        body = cast("dict[str, Any]", parsed)
         # A2:取值全收敛(伪造协议行 int 转换失败不得逃逸——端口零抛出契约)
         data_rows = int(body.get("data_rows") or 0)
         data_cols = int(body.get("data_cols") or 0)
         images_raw = body.get("images")
         images = (
-            [str(i) for i in images_raw if isinstance(i, str)]
+            [str(i) for i in cast("list[object]", images_raw) if isinstance(i, str)]
             if isinstance(images_raw, list)
             else []
         )

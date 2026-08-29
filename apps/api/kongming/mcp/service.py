@@ -1,7 +1,7 @@
 """mcp 用例编排(028):配置 CRUD 校验 + 连通性测试 + 发现同步 +
 动态工具解析 + 出站执行。零框架(宪法 Article II);operlog 经端口。"""
 
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from kongming.mcp.models import (
     SERVER_KEY_RE,
@@ -158,7 +158,7 @@ class McpService:
         # 进快照会让 validate_args 双路径裸 500(评审实证);
         # 审查循环 F1:回溯型 pattern(check_schema 不查,实测 ReDoS 可
         # 卡死 worker)同走降级
-        import jsonschema as _js
+        import jsonschema.validators as _jsv
 
         from kongming.mcp.models import has_redos_pattern
 
@@ -167,7 +167,7 @@ class McpService:
             try:
                 if has_redos_pattern(t.schema):
                     raise ValueError("回溯型 pattern(ReDoS 面已降级)")
-                _js.validators.validator_for(t.schema).check_schema(t.schema)
+                _jsv.validator_for(t.schema).check_schema(t.schema)
             except Exception:  # noqa: BLE001  # 敌意面宽收敛,降级即安全
                 conflicts.append(f"schema 非法已降级: {t.name[:40]}")
                 t.schema.clear()
@@ -204,8 +204,10 @@ class McpService:
         row = await self._repo.find_enabled_by_tool(tenant_id=tenant_id, qualified=qualified)
         if row is None:
             return None
-        for entry in row.get("tools") or []:
-            if isinstance(entry, dict) and entry.get("qualified") == qualified:
+        for raw_entry in cast("list[object]", row.get("tools") or []):
+            # isinstance 守卫保留;收窄产物键型未知,cast 收窄后再取值(仅类型断言)
+            entry = cast("dict[str, Any]", raw_entry) if isinstance(raw_entry, dict) else None
+            if entry is not None and entry.get("qualified") == qualified:
                 return {**entry, "server_key": str(row["server_key"])}
         return None
 
@@ -215,10 +217,12 @@ class McpService:
         seen: set[str] = set()
         out: list[dict[str, Any]] = []
         for row in await self._repo.list_enabled(tenant_id=tenant_id):
-            entries = row.get("tools") or []
-            for e in entries:
-                if not isinstance(e, dict):
+            entries = cast("list[object]", row.get("tools") or [])
+            for raw in entries:
+                if not isinstance(raw, dict):
                     continue
+                # isinstance 收窄产物键型未知,cast 收窄后再取值(仅类型断言)
+                e = cast("dict[str, Any]", raw)
                 q = str(e.get("qualified") or "")
                 if not q or q in seen:
                     continue

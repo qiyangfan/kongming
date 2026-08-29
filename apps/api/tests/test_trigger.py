@@ -1,11 +1,14 @@
 """031 triggers-webhooks 测试:cron 解析/签名/适配器/管理面/调度/
 目标执行(测试先行,安全类)。"""
+# pyright: reportPrivateUsage=false
 
 import asyncio
 import datetime as dt
 import hashlib
 import hmac as hmac_mod
 import json
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
@@ -27,7 +30,7 @@ _TZ = dt.timezone(dt.timedelta(hours=8))
 
 
 def test_cron_all_forms() -> None:
-    m, h, dom, mon, dow = parse_cron("*/15 9-17 * * 1-5")
+    m, h, dom, _mon, dow = parse_cron("*/15 9-17 * * 1-5")
     assert 0 in m and 15 in m and 45 in m
     assert 9 in h and 17 in h and 8 not in h
     assert 1 in dom and 31 in dom  # *=全域
@@ -63,7 +66,8 @@ def test_adapter_custom_passthrough() -> None:
 
 
 def test_adapter_github_push() -> None:
-    payload = {
+    # 空 dict/嵌套混合使推断带 dict[Unknown, Unknown],显式 Any 值域
+    payload: dict[str, Any] = {
         "ref": "refs/heads/main",
         "repository": {"full_name": "org/repo"},
         "commits": [{}, {}],
@@ -90,20 +94,20 @@ def test_adapter_unknown() -> None:
 class _StubService:
     """调度器消费的全部方法内存实现。"""
 
-    def __init__(self, rows: list[dict]) -> None:  # type: ignore[type-arg]
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
         self._rows = rows
         self.fired: list[str] = []
         self.skipped: list[str] = []
         self.failed: list[str] = []
         self.marked: list[tuple[str, str | None]] = []
 
-    async def list_due(self, *, now_iso: str) -> list[dict]:  # type: ignore[type-arg]
+    async def list_due(self, *, now_iso: str) -> list[dict[str, Any]]:
         return self._rows
 
     async def fire_cron(self, *, trigger_id: str) -> None:
         self.fired.append(trigger_id)
 
-    async def get_def(self, *, trigger_id: str) -> dict | None:  # type: ignore[type-arg]
+    async def get_def(self, *, trigger_id: str) -> dict[str, Any] | None:
         return next((r for r in self._rows if r["id"] == trigger_id), None)
 
     async def mark_fired(
@@ -128,7 +132,11 @@ def _scheduler_with(svc: _StubService):
         return svc, _close
 
     sched = TriggerScheduler(service_factory=None)
-    sched._factory = _factory  # noqa: SLF001  # 测试注入(与 lifespan 同点)
+    # 桩服务与 TriggerService 鸭子类型相容,cast 对齐工厂协议(运行时不变)
+    sched._factory = cast(  # noqa: SLF001  # 测试注入(与 lifespan 同点)
+        "Callable[[], Awaitable[tuple[Any, Callable[[], Awaitable[None]]]]]",
+        _factory,
+    )
     return sched
 
 
@@ -163,7 +171,10 @@ async def test_scheduler_in_progress_skips() -> None:
         }]
     )
     sched = _scheduler_with(svc)
-    sched._running["t2"] = asyncio.get_running_loop().create_future()  # noqa: SLF001
+    # 占位 Future 模拟在途执行,cast 对齐 Task 形态(运行时不变)
+    sched._running["t2"] = cast(
+        "asyncio.Task[None]", asyncio.get_running_loop().create_future()
+    )  # noqa: SLF001
     await sched._tick()  # noqa: SLF001
     assert svc.fired == []
     assert svc.skipped == ["前次执行进行中"]
@@ -189,11 +200,11 @@ async def test_scheduler_cron_recalc_failure_stops() -> None:
         raise CronError("366 天内无触发时刻")
 
     orig = models_mod.next_fire
-    models_mod.next_fire = _boom  # type: ignore[assignment]
+    models_mod.next_fire = _boom
     try:
         await sched._fire_then_mark("t3")  # noqa: SLF001
     finally:
-        models_mod.next_fire = orig  # type: ignore[assignment]
+        models_mod.next_fire = orig
     assert svc.failed and "下次触发计算失败" in svc.failed[0]
     assert svc.fired == ["t3"]  # 目标已执行(执行与止损独立)
     assert svc.marked and svc.marked[0][1] is None  # next_fire 置 NULL 止损
@@ -320,7 +331,7 @@ async def test_trigger_crud_and_cron_validation(
 async def test_trigger_perm_and_isolation(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    _, token = await _trigger_admin(client, session, make_user, "tg_admin2")
+    _, _token = await _trigger_admin(client, session, make_user, "tg_admin2")
     uid2 = await make_user("tg_noperm")
     from tests.test_chat_query import _default_tenant_id
 

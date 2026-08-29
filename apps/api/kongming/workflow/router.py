@@ -53,7 +53,7 @@ async def _member_roles(session: AsyncSession, user_id: str) -> dict[str, str]:
 # ── runner 适配(组合根) ──
 
 
-class _InternalSqlRunner:
+class InternalSqlRunner:
     """SqlRunner 绑定:internal 执行全链路(六层防御,触发者身份)。"""
 
     def __init__(self, session: AsyncSession) -> None:
@@ -90,7 +90,7 @@ class _InternalSqlRunner:
         }
 
 
-class _AgentWorkflowRunner:
+class AgentWorkflowRunner:
     """AgentRunner 绑定:019 ReAct 回调;工具=触发者权限点过滤集。"""
 
     def __init__(self, session: AsyncSession, agent: AgentClient) -> None:
@@ -149,9 +149,9 @@ def get_workflow_service(
 ) -> WorkflowService:
     return WorkflowService(
         repo=SqlWorkflowRepo(session),
-        sql=_InternalSqlRunner(session),
+        sql=InternalSqlRunner(session),
         http=HttpNodeRunner(),
-        agent=_AgentWorkflowRunner(session, agent),
+        agent=AgentWorkflowRunner(session, agent),
         oper=_WorkflowOperLogger(session, str(user["sub"])),
     )
 

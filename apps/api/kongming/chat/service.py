@@ -17,7 +17,7 @@ import logging
 import uuid
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from kongming.chat.agent_client import AgentClient, AgentReply, AgentUnavailable, parse_agent_reply
 from kongming.chat.export import to_csv, to_xlsx
@@ -102,10 +102,11 @@ class ChatOutcome:
     success: bool
     verdict: str | None = None
     summary: str = ""
-    insights: list[dict[str, str]] = field(default_factory=list)
-    stats: dict[str, object] = field(default_factory=dict)
-    columns: list[str] = field(default_factory=list)
-    rows: list[list[object]] = field(default_factory=list)
+    # default_factory 用带参泛型别名:裸 list/dict 工厂在 pyright strict 下产物 Unknown
+    insights: list[dict[str, str]] = field(default_factory=list[dict[str, str]])
+    stats: dict[str, object] = field(default_factory=dict[str, object])
+    columns: list[str] = field(default_factory=list[str])
+    rows: list[list[object]] = field(default_factory=list[list[object]])
     sql: str = ""
     chart: ChartSuggestion = field(default_factory=lambda: ChartSuggestion("none"))
     retry_count: int = 0
@@ -116,18 +117,24 @@ class ChatOutcome:
     datasource_key: str = "default"
     # 019 tool-calling:本次问答产生的待确认写工具调用(前端渲染确认卡;
     # 缺省空列表,老调用方零感知)
-    pending_tool_calls: list[dict[str, object]] = field(default_factory=list)
+    pending_tool_calls: list[dict[str, object]] = field(
+        default_factory=list[dict[str, object]]
+    )
     # 022:本次问答的租户 id(隐式记忆后台任务用;不序列化进响应模型)
     tenant_id: str = ""
     # 026:类型化产物(派生自 sql/chart/summary;空数组零回归)
-    artifacts: list[dict[str, object]] = field(default_factory=list)
+    artifacts: list[dict[str, object]] = field(
+        default_factory=list[dict[str, object]]
+    )
     # 030:附件引用摘要(filename/mime/size;空数组零回归)
-    attachments: list[dict[str, object]] = field(default_factory=list)
+    attachments: list[dict[str, object]] = field(
+        default_factory=list[dict[str, object]]
+    )
     # 022:本论为显式记忆短路(R1-M2:隐式提取任务据此排除,防同内容重复落 IMPLICIT)
     memory_shortcut: bool = False
     # 041:呈现层列标签(与 columns 等长对齐;未命中回退原始列名;
     # 空列表=未接线/查询失败,消费方回退 columns)
-    column_labels: list[str] = field(default_factory=list)
+    column_labels: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -143,16 +150,18 @@ class SessionSummary:
 class MessageResult:
     """assistant 消息结构化应答要素(回显形态,与 ChatOutcome 的结果子集对齐)。"""
 
-    columns: list[str] = field(default_factory=list)
-    rows: list[list[object]] = field(default_factory=list)
-    insights: list[dict[str, str]] = field(default_factory=list)
-    stats: dict[str, object] = field(default_factory=dict)
+    columns: list[str] = field(default_factory=list[str])
+    rows: list[list[object]] = field(default_factory=list[list[object]])
+    insights: list[dict[str, str]] = field(default_factory=list[dict[str, str]])
+    stats: dict[str, object] = field(default_factory=dict[str, object])
     chart: ChartSuggestion = field(default_factory=lambda: ChartSuggestion("none"))
     error: str | None = None
     # 026:类型化产物(读档优先,缺档按要素重算)
-    artifacts: list[dict[str, object]] = field(default_factory=list)
+    artifacts: list[dict[str, object]] = field(
+        default_factory=list[dict[str, object]]
+    )
     # 041:呈现层列标签(读档优先;存量档缺失→空列表,消费方回退 columns)
-    column_labels: list[str] = field(default_factory=list)
+    column_labels: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -172,7 +181,9 @@ class SessionMessage:
     corrected_sql: str | None = None
     feedback_comment: str | None = None
     # 030:附件引用摘要(回显徽标;空数组=无附件)
-    attachments: list[dict[str, object]] = field(default_factory=list)
+    attachments: list[dict[str, object]] = field(
+        default_factory=list[dict[str, object]]
+    )
 
 
 @dataclass(frozen=True)
@@ -669,7 +680,9 @@ class ChatService:
                         log.warning("agent 过程帧解析失败(跳帧): %s", data_json[:100])
                         return
                     if isinstance(data, dict):
-                        await queue.put((event, data))
+                        # isinstance 收窄产物键型未知,cast 对齐队列元素类型(运行时不变)
+                        typed = cast("dict[str, object]", data)
+                        await queue.put((event, typed))
 
             await self._agent.query_stream(
                 trace_id=p.trace_id,
@@ -1250,23 +1263,37 @@ class ChatService:
             except json.JSONDecodeError:
                 parsed = None
             # 合法但非 dict 的 JSON(null/数组等)一律按空档处理,不炸回显
-            d: dict[str, object] = parsed if isinstance(parsed, dict) else {}
+            # (json.loads 的 Any 经 isinstance 收窄键型仍 Unknown,真分支 cast 一次)
+            d = cast("dict[str, object]", parsed) if isinstance(parsed, dict) else {}
             cols_raw = d.get("columns")
             rows_raw = d.get("rows")
-            cols = [str(c) for c in cols_raw] if isinstance(cols_raw, list) else []
+            cols = (
+                [str(c) for c in cast("list[object]", cols_raw)]
+                if isinstance(cols_raw, list)
+                else []
+            )
             # 元素级窄化:畸形 JSON 深防御(服务端自身不产生,防手改库)
             rws = (
-                [list(r) for r in rows_raw if isinstance(r, (list, tuple))]
+                [
+                    list(cast("list[object]", r))
+                    for r in cast("list[object]", rows_raw)
+                    if isinstance(r, (list, tuple))
+                ]
                 if isinstance(rows_raw, list)
                 else []
             )
             ins_raw = d.get("insights")
             chart_raw = d.get("chart")
-            if isinstance(chart_raw, dict) and chart_raw.get("type"):
+            # isinstance 守卫后 cast 收窄键型(mcp client 同款;守卫语义与顺序不变)
+            chart_d = cast("dict[str, object]", chart_raw) if isinstance(chart_raw, dict) else None
+            if chart_d is not None and chart_d.get("type"):
+                # 取值局部化:与原双 .get 表达式同值同判(is None 判 None 语义不变)
+                x_raw = chart_d.get("x")
+                y_raw = chart_d.get("y")
                 chart = ChartSuggestion(
-                    type=str(chart_raw["type"]),
-                    x=chart_raw.get("x") if chart_raw.get("x") is None else str(chart_raw["x"]),
-                    y=chart_raw.get("y") if chart_raw.get("y") is None else str(chart_raw["y"]),
+                    type=str(chart_d["type"]),
+                    x=None if x_raw is None else str(x_raw),
+                    y=None if y_raw is None else str(y_raw),
                 )
             else:
                 # 存量兼容:005 只存 chartType(无 x/y)
@@ -1277,7 +1304,11 @@ class ChatService:
             # 026:artifacts 读档;缺档(026 前存量)按要素确定性重算
             art_raw = d.get("artifacts")
             if isinstance(art_raw, list):
-                artifacts = [dict(a) for a in art_raw if isinstance(a, dict)]
+                artifacts = [
+                    dict(cast("dict[str, object]", a))
+                    for a in cast("list[object]", art_raw)
+                    if isinstance(a, dict)
+                ]
             else:
                 artifacts = [
                     dict(a)
@@ -1292,16 +1323,24 @@ class ChatService:
                 columns=cols,
                 rows=rws,
                 insights=(
-                    [dict(i) for i in ins_raw if isinstance(i, dict)]
+                    [
+                        dict(cast("dict[str, str]", i))
+                        for i in cast("list[object]", ins_raw)
+                        if isinstance(i, dict)
+                    ]
                     if isinstance(ins_raw, list)
                     else []
                 ),
-                stats=dict(stats_raw) if isinstance(stats_raw, dict) else {},
+                stats=(
+                    dict(cast("dict[str, object]", stats_raw))
+                    if isinstance(stats_raw, dict)
+                    else {}
+                ),
                 chart=chart,
                 error=error,
                 artifacts=artifacts,
                 column_labels=(  # 041 读档;存量档缺失→空(消费方回退 columns)
-                    [str(x) for x in lb_raw]
+                    [str(x) for x in cast("list[object]", lb_raw)]
                     if isinstance(lb_raw := d.get("column_labels"), list)
                     else []
                 ),
@@ -1314,7 +1353,11 @@ class ChatService:
         fb_comment = row.get("feedback_comment") if role == "ASSISTANT" else None
         att_raw = row.get("attachments")
         attachments = (
-            [dict(a) for a in att_raw if isinstance(a, dict)]
+            [
+                dict(cast("dict[str, object]", a))
+                for a in cast("list[object]", att_raw)
+                if isinstance(a, dict)
+            ]
             if isinstance(att_raw, list)
             else []
         )

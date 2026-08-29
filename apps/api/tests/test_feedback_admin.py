@@ -5,6 +5,7 @@ sqlglot 抽取(CTE 排除+hasKnowledge 匹配+解析失败兜底)/统计口径
 (Asia/Shanghai 分桶逐天补零,downRate 分母零)/明细分页筛选。
 真实 PG;超管=admin(admin123,SUPER_ADMIN 自动覆盖全部权限点)。
 """
+# pyright: reportPrivateUsage=false
 
 import uuid
 from datetime import UTC, datetime, timedelta

@@ -9,9 +9,11 @@ generate 读到 error 即拼「上次生成的 SQL 有误」喂回 LLM(自愈闭
 import json
 import logging
 import re
+from typing import cast
 
 import sqlglot
 from sqlglot import exp
+from sqlglot.errors import SqlglotError
 
 from kongming_agent import deps
 from kongming_agent.apiclient import SchemaMeta
@@ -56,7 +58,8 @@ def _is_no_data_sentinel(raw: str) -> bool:
 
 # ── 节点1:问题理解(多轮指代消解/单轮改写)──
 async def understand(state: AgentState) -> dict[str, object]:
-    question = state["question"]
+    # 入口 state 恒写入 question(main._initial_state);缺键属编程错误,保留下标
+    question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
     history = state.get("history", [])[-MAX_HISTORY:]
     if history:
         system = UNDERSTAND_MULTI_SYSTEM
@@ -100,10 +103,13 @@ def format_schema_hint(meta: SchemaMeta) -> str:
 # ── 节点2:schema 提示获取(009:RAG 召回优先,零命中/失败回退实时内省兜底)──
 async def retrieve(state: AgentState) -> dict[str, object]:
     datasource_key = state.get("datasource_key", "default")
-    # 召回用改写问句(指代消解后语义完整;多轮裸指代「这些影片」召回会漏)
-    question = state.get("resolved_question") or state["question"]
+    # 召回用改写问句(指代消解后语义完整;多轮裸指代「这些影片」召回会漏);
+    # 两处下标:入口 state 恒写入(缺键属编程错误),保留下标求值序
+    question = state.get("resolved_question")
+    if not question:
+        question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
     ctx = await deps.get_api().rag_retrieve(
-        tenant_key=state["tenant_key"],
+        tenant_key=state["tenant_key"],  # pyright: ignore[reportTypedDictNotRequiredAccess]
         datasource_key=datasource_key,
         question=question,
     )
@@ -121,7 +127,7 @@ async def retrieve(state: AgentState) -> dict[str, object]:
         }
     # 回退:005 过渡形态(实时内省)——新租户/未抓取知识/召回服务失败零质量回归。
     meta = await deps.get_api().fetch_schema(
-        tenant_key=state["tenant_key"],
+        tenant_key=state["tenant_key"],  # pyright: ignore[reportTypedDictNotRequiredAccess]
         datasource_key=datasource_key,
     )
     if meta is None:
@@ -158,7 +164,10 @@ def clean_sql(raw: str) -> str:
 
 # ── 节点3:SQL 生成 ──
 async def generate(state: AgentState) -> dict[str, object]:
-    question = state.get("resolved_question") or state["question"]
+    # 下标:入口 state 恒写入 question(缺键属编程错误),保留下标求值序
+    question = state.get("resolved_question")
+    if not question:
+        question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
     schema_hint = state.get("schema_hint") or ""
     if not schema_hint.strip():
         schema_hint = _EMPTY_HINT
@@ -217,7 +226,7 @@ def validate(state: AgentState) -> dict[str, object]:
     else:
         try:
             statements = [st for st in sqlglot.parse(sql, dialect="postgres") if st is not None]
-        except sqlglot.errors.SqlglotError as e:
+        except SqlglotError as e:
             # ParseError 与 TokenError(未闭合引号等)同族,均为可重试的语法类失败
             result = ValidationResult(passed=False, reason=f"PARSE_ERROR: {e}")
         else:
@@ -244,12 +253,15 @@ def validate(state: AgentState) -> dict[str, object]:
 
 # ── 节点5:执行(回调控制面 /internal/sql/execute——唯一执行路径,ADR-002)──
 async def execute(state: AgentState) -> dict[str, object]:
+    # 入口 state 恒含 trace_id/tenant_key/question(main._initial_state 写入),
+    # 下标语义保留(缺键即编程错误)
     outcome = await deps.get_api().sql_execute(
-        trace_id=state["trace_id"],
-        tenant_key=state["tenant_key"],
+        trace_id=state["trace_id"],  # pyright: ignore[reportTypedDictNotRequiredAccess]
+        tenant_key=state["tenant_key"],  # pyright: ignore[reportTypedDictNotRequiredAccess]
         sql_text=state.get("generated_sql") or "",
         user_id=state.get("user_id"),
-        question=state["question"],  # 审计记原始问句(用户真实输入)
+        # 审计记原始问句(用户真实输入)
+        question=state["question"],  # pyright: ignore[reportTypedDictNotRequiredAccess]
         datasource_key=state.get("datasource_key", "default"),
     )
     execution = ExecutionResult(
@@ -319,7 +331,10 @@ def route_after_retrieve(state: AgentState) -> str:
     双条件过严——「退货政策是什么」召回 rental 表说明致不分流)。
     036④:附件在场且无 SQL 强意图→直答分流(纯图片问题不硬走 SQL)。"""
     doc_hints = state.get("doc_hints") or []
-    question = state.get("resolved_question") or state["question"]
+    # 下标:入口 state 恒写入 question(缺键属编程错误),保留下标求值序
+    question = state.get("resolved_question")
+    if not question:
+        question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
     if doc_hints and is_knowledge_intent(question):
         return "doc_answer"
     if state.get("has_attachments") and not is_sql_intent(question):
@@ -345,11 +360,12 @@ async def doc_answer(state: AgentState) -> dict[str, object]:
         # 036④:附件在场时用原始拼接问题——resolved_question 经指代消解改写
         # 会压掉描述段关键数据(Sports/74 教训);混合路径(附件+文档命中+
         # 知识意图)同样适用(审查循环 F3:曾只修纯图片分支)
-        question = (
-            state["question"]
-            if state.get("has_attachments")
-            else (state.get("resolved_question") or state["question"])
-        )
+        # 两处下标:入口 state 恒写入 question(缺键属编程错误),保留求值序
+        if state.get("has_attachments"):
+            question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+        else:
+            resolved = state.get("resolved_question")
+            question = resolved or state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
         parts = [
             f"来源 {h['source_ref']}:\n{h['content'][:1500]}" for h in doc_hints[:5]
         ]
@@ -357,7 +373,9 @@ async def doc_answer(state: AgentState) -> dict[str, object]:
         user = f"问题:{question}\n\n文档内容:\n" + "\n\n".join(parts) + "\n\n回答:"
     else:
         system = IMAGE_ANSWER_SYSTEM
-        user = f"问题:{state['question']}\n\n回答:"
+        # 纯图片直答必须用原始拼接问题(含附件描述段;入口 state 恒写入)
+        question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+        user = f"问题:{question}\n\n回答:"
     # LlmError 不在此吞掉:上抛经 _run_graph 统一收敛 llm_unavailable
     # (success=False)——吞掉后以 PASS+「文档中未提及相关内容。」出链,
     # 服务故障被表述为内容缺失,属伪造终态(审查循环 F4)
@@ -432,7 +450,8 @@ def parse_summary_json(raw: str) -> dict[str, object]:
                 return {}
         else:
             return {}
-    return parsed if isinstance(parsed, dict) else {}
+    # isinstance 收窄产物 dict[Unknown, Unknown] 仍报,守卫后收窄键型
+    return cast("dict[str, object]", parsed) if isinstance(parsed, dict) else {}
 
 
 def fallback_summary(stats: dict[str, object]) -> str:
@@ -454,9 +473,13 @@ def _normalize_insights(raw: object) -> list[dict[str, str]]:
     if not isinstance(raw, list):
         return []
     out: list[dict[str, str]] = []
-    for item in raw:
-        if isinstance(item, dict) and isinstance(item.get("text"), str):
-            out.append({"type": str(item.get("type", "")), "text": item["text"]})
+    for item in cast("list[object]", raw):
+        # isinstance 收窄产物键型仍 Unknown,守卫后 cast 再用(判定序不变)
+        typed = cast("dict[str, object]", item) if isinstance(item, dict) else None
+        if typed is not None and isinstance(typed.get("text"), str):
+            out.append(
+                {"type": str(typed.get("type", "")), "text": cast("str", typed["text"])}
+            )
     return out
 
 
@@ -466,7 +489,10 @@ async def summarize(state: AgentState) -> dict[str, object]:
     if execution is None or not execution.rows:
         return {"summary": "查询无结果。", "insights": [], "stats": {}}
     stats = compute_stats(execution.columns, execution.rows)
-    question = state.get("resolved_question") or state["question"]
+    # 下标:入口 state 恒写入 question(缺键属编程错误),保留下标求值序
+    question = state.get("resolved_question")
+    if not question:
+        question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
     # 上下文接地(018):行数+本地确定性统计+前 5 行——数值结论以 stats 为准,
     # 消除「只喂前 5 行以偏概全」的信息根源(005 冒烟 olist 状态分布说错最大值)
     data_preview = (

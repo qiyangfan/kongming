@@ -3,6 +3,7 @@
 真实 PG;搜索=标题 ILIKE OR user 问句 EXISTS(通配符 %/_/\\ 字面化,共享
 like_pattern);重命名=原子归属 UPDATE(先查后改竞态窗口不存在)。
 """
+# pyright: reportPrivateUsage=false
 
 import uuid
 

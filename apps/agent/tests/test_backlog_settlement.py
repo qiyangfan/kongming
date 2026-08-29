@@ -1,7 +1,11 @@
 """backlog-settlement agent 侧测试:收集器经图传播的端到端直证(A-B9)+
 LLM 注册表池缓存(021①)。"""
 
+# pyright: reportPrivateUsage=false
+# 测试惯例:允许引用兄弟测试模块与被测模块的私有 helper(仓库测试约定,不改名)
+
 import json
+from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
@@ -39,7 +43,7 @@ def _tool_completion(*, content: str | None, tool_name: str | None, call_id: str
                 ),
             )
         ]
-    msg = ChatCompletionMessage(role="assistant", content=content, tool_calls=tool_calls)
+    msg = ChatCompletionMessage(role="assistant", content=content, tool_calls=tool_calls)  # pyright: ignore[reportArgumentType]  # SDK 存根 list 不变型,Function 子类实参运行时安全
     choice = Choice(index=0, message=msg, finish_reason="tool_calls" if tool_name else "stop")
     return ChatCompletion(
         id="cmpl-x", choices=[choice], created=1, model="fake", object="chat.completion",
@@ -88,9 +92,13 @@ async def test_collect_usage_e2e_through_react_graph(
     collector: list[dict[str, object]] = []
     token = set_usage_collector(collector)
     try:
-        final = await get_react_graph().ainvoke(
-            _state(trace_id="tr-e2e", tenant_key="sakila"),  # type: ignore[call-arg]
-            config={"recursion_limit": react_recursion_limit()},
+        # ainvoke 泛型成员 strict 下部分未知(LangGraph),测试边界 cast 收窄为终态 dict
+        final = cast(
+            "dict[str, Any]",
+            await cast("Any", get_react_graph()).ainvoke(
+                _state(trace_id="tr-e2e", tenant_key="sakila"),  # type: ignore[call-arg]
+                config={"recursion_limit": react_recursion_limit()},
+            ),
         )
     finally:
         reset_usage_collector(token)

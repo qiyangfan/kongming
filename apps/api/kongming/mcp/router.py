@@ -7,7 +7,7 @@
 """
 
 import logging
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -133,18 +133,23 @@ class McpServerUpdateIn(BaseModel):
 
 
 def _dict_or_empty(v: Any) -> dict[str, Any]:
-    return v if isinstance(v, dict) else {}
+    # isinstance 收窄产物键型未知,收窄为目标键型(仅类型断言)
+    return cast("dict[str, Any]", v) if isinstance(v, dict) else {}
 
 
 def _row_out(row: dict[str, Any]) -> McpServerOut:
-    tools_raw = row.get("tools") or []
+    tools_raw = cast("list[object]", row.get("tools") or [])
+    # isinstance 守卫保留:先过滤出 dict 形态条目,再收窄键型供字段读取(仅类型断言)
+    tools_entries: list[dict[str, Any]] = [
+        e for e in tools_raw if isinstance(e, dict)
+    ]
     return McpServerOut(
         id=str(row["id"]),
         server_key=str(row["server_key"]),
         name=str(row["name"]),
         endpoint=str(row["endpoint"]),
         enabled=bool(row["enabled"]),
-        header_keys=[str(k) for k in row.get("header_keys") or []],
+        header_keys=[str(k) for k in cast("list[object]", row.get("header_keys") or [])],
         tools=[
             McpToolEntryOut(
                 name=str(e.get("name") or ""),
@@ -153,8 +158,7 @@ def _row_out(row: dict[str, Any]) -> McpServerOut:
                 input_schema=_dict_or_empty(e.get("schema")),
                 read_only=bool(e.get("read_only")),
             )
-            for e in tools_raw
-            if isinstance(e, dict)
+            for e in tools_entries
         ],
         last_sync_at=(
             row["last_sync_at"].isoformat() if row.get("last_sync_at") else None

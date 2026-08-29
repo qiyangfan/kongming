@@ -14,7 +14,7 @@ class SseDecoder:
     """增量 SSE 解码器:feed(行) → 完整帧 (event, data) 或 None(未成帧)。"""
 
     _event: str = ""
-    _data_lines: list[str] = field(default_factory=list)
+    _data_lines: list[str] = field(default_factory=list[str])
 
     def feed(self, line: str) -> tuple[str, str] | None:
         """喂入一行(不含行尾符);帧边界(空行)返回完整帧并复位累积。"""

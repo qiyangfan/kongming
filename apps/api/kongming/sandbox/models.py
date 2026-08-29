@@ -23,7 +23,7 @@ class SandboxOutcome:
     status: SandboxStatus
     stdout: str = ""
     error: str | None = None
-    images: list[str] = field(default_factory=list)
+    images: list[str] = field(default_factory=list[str])
     image_note: str | None = None
     result_preview: str | None = None
     data_rows: int = 0

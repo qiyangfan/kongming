@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.db import uuid7
-from kongming.rag.repository import _vec_literal
+from kongming.rag.repository import vec_literal
 
 
 class SqlDocumentRepo:
@@ -97,7 +97,7 @@ class SqlDocumentRepo:
                     "seq": int(str(c["seq"])),
                     "ref": c["source_ref"],
                     "content": c["content"],
-                    "vec": _vec_literal(vec) if vec else None,
+                    "vec": vec_literal(vec) if vec else None,
                 },
             )
         return doc_id
@@ -160,7 +160,7 @@ class SqlDocumentRepo:
                     "   AND embedding IS NOT NULL"
                     " ORDER BY embedding <=> CAST(:vec AS vector) LIMIT :k"
                 ),
-                {"t": tenant_id, "d": datasource_key, "vec": _vec_literal(vector), "k": top_k},
+                {"t": tenant_id, "d": datasource_key, "vec": vec_literal(vector), "k": top_k},
             )
         ).mappings().all()
         return [dict(r) for r in rows]

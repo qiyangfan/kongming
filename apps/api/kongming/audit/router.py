@@ -8,7 +8,7 @@
 import re
 import uuid
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -172,7 +172,9 @@ async def oper_page(
                 ),
                 action=str(r["action"]),
                 target=None if r["target"] is None else str(r["target"]),
-                detail=r["detail"] if isinstance(r["detail"], dict) else None,
+                detail=cast("dict[str, object]", r["detail"])
+                if isinstance(r["detail"], dict)
+                else None,
                 ip=None if r["ip"] is None else str(r["ip"]),
                 created_at=r["created_at"],  # type: ignore[arg-type]
             )

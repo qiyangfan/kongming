@@ -1,8 +1,10 @@
 """llmusage 端点测试(021 multi-model-routing + 038 agent-observability):
 落库/反解/聚合/守门;采集补全(latency/status)/趋势/明细/时间线。"""
+# pyright: reportPrivateUsage=false
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from httpx import AsyncClient
 from sqlalchemy import text
@@ -16,12 +18,14 @@ from tests.test_toolcall import _bind, _login
 INTERNAL = {"X-Internal-Token": "test-internal-token"}
 
 
-async def _admin_token(client: AsyncClient, s: AsyncSession) -> str:
+async def _admin_token(  # pyright: ignore[reportUnusedFunction]
+    client: AsyncClient, s: AsyncSession
+) -> str:
     await seed_all(s, get_settings())
     return await _login(client, "admin", "admin123")
 
 
-def _records(tenant_key: str | None = "default") -> dict:
+def _records(tenant_key: str | None = "default") -> dict[str, Any]:
     return {
         "records": [
             {
@@ -139,7 +143,7 @@ async def test_summary_forbidden(
 
 
 async def _seed_usage_rows(
-    s: AsyncSession, rows: list[dict]
+    s: AsyncSession, rows: list[dict[str, Any]]
 ) -> None:
     for r in rows:
         await s.execute(

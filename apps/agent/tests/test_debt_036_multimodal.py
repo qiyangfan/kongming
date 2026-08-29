@@ -2,6 +2,8 @@
 ④纯图片问题意图分流(双信号判定+doc_answer 空 hints 直答)/
 ⑦每模型图片上限闸。"""
 
+from typing import cast
+
 import pytest
 
 from kongming_agent.graph.nodes import (
@@ -82,7 +84,7 @@ def test_is_sql_intent_matrix() -> None:
 
 def test_route_image_question_to_doc_answer() -> None:
     """spec「纯图片问题不硬走 SQL」:附件在场+无 SQL 意图→doc_answer。"""
-    state = {
+    state: dict[str, object] = {
         "question": "这张图里哪个分类最高",
         "has_attachments": True,
         "doc_hints": [],
@@ -92,7 +94,7 @@ def test_route_image_question_to_doc_answer() -> None:
 
 def test_route_data_question_with_image_stays_generate() -> None:
     """spec「带图数据问题零回归」:SQL 意图命中→generate(不分流)。"""
-    state = {
+    state: dict[str, object] = {
         "question": "sakila 里有多少位客户",
         "has_attachments": True,
         "doc_hints": [],
@@ -102,7 +104,7 @@ def test_route_data_question_with_image_stays_generate() -> None:
 
 def test_route_no_attachment_zero_regression() -> None:
     """零回归:无附件且无文档命中→generate(024 原语义不变)。"""
-    state = {"question": "随便聊聊", "has_attachments": False, "doc_hints": []}
+    state: dict[str, object] = {"question": "随便聊聊", "has_attachments": False, "doc_hints": []}
     assert route_after_retrieve(state) == "generate"  # type: ignore[arg-type]
 
 
@@ -110,7 +112,7 @@ async def test_doc_answer_empty_hints_direct(monkeypatch: pytest.MonkeyPatch) ->
     """doc_answer 空 hints 直答:user 不含「文档内容」段,按问题(含描述段)答。"""
     from kongming_agent import deps
 
-    calls: list[dict] = []
+    calls: list[dict[str, object]] = []
 
     class _Llm:
         async def chat(self, system: str, user: str, **kw: object) -> str:
@@ -118,13 +120,13 @@ async def test_doc_answer_empty_hints_direct(monkeypatch: pytest.MonkeyPatch) ->
             return "分类A最高(据图)"
 
     monkeypatch.setattr(deps, "get_llm", lambda: _Llm())
-    state = {
+    state: dict[str, object] = {
         "question": "[图片 1 内容描述]\n分类A最高\n\n用户问题:\n这张图里哪个最高",
         "trace_id": "t", "tenant_key": "sakila", "doc_hints": [],
         "has_attachments": True,
     }
     out = await doc_answer(state)  # type: ignore[arg-type]
     assert calls, "LLM 应被调用"
-    assert "文档内容" not in calls[0]["user"]  # 空 hints 不拼文档段
-    assert "这张图里哪个最高" in calls[0]["user"]
+    assert "文档内容" not in cast("str", calls[0]["user"])  # 空 hints 不拼文档段
+    assert "这张图里哪个最高" in cast("str", calls[0]["user"])
     assert out["summary"] == "分类A最高(据图)"

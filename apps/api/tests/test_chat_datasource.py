@@ -3,8 +3,10 @@
 伪造/禁用/跨租户 key → 同形 400 DATASOURCE_INVALID,不进 LLM 链路、不建会话;
 合法 key 全链路透传(agent 收到原样 key,会话落库 key);畸形 key 传输层 422。
 """
+# pyright: reportPrivateUsage=false
 
-from collections.abc import AsyncIterator
+
+from collections.abc import Iterator
 
 import pytest
 from httpx import AsyncClient
@@ -25,11 +27,11 @@ from tests.test_chat_query import (
 
 
 @pytest.fixture
-def fake_agent() -> AsyncIterator[FakeAgent]:  # type: ignore[misc]
+def fake_agent() -> Iterator[dict[str, FakeAgent]]:
     """scripted agent 替身(与 test_chat_query 同款;fixture 不跨模块共享故就地定义)。"""
     holder: dict[str, FakeAgent] = {}
     app.dependency_overrides[get_agent_client] = lambda: holder["agent"]
-    yield holder  # type: ignore[misc]
+    yield holder
     app.dependency_overrides.pop(get_agent_client, None)
 
 

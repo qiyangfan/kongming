@@ -151,8 +151,8 @@ class _TargetRunnerImpl:
                     from kongming.workflow.http_runner import HttpNodeRunner
                     from kongming.workflow.repository import SqlWorkflowRepo
                     from kongming.workflow.router import (
-                        _AgentWorkflowRunner,
-                        _InternalSqlRunner,
+                        AgentWorkflowRunner,
+                        InternalSqlRunner,
                     )
                     from kongming.workflow.service import WorkflowService
 
@@ -173,9 +173,9 @@ class _TargetRunnerImpl:
                     member_roles = await SqlTeamRepo(s).role_map(user_id=creator_id)
                     svc = WorkflowService(
                         repo=SqlWorkflowRepo(s),
-                        sql=_InternalSqlRunner(s),
+                        sql=InternalSqlRunner(s),
                         http=HttpNodeRunner(),
-                        agent=_AgentWorkflowRunner(s, get_agent_client()),
+                        agent=AgentWorkflowRunner(s, get_agent_client()),
                     )
                     out = await svc.run(
                         tenant_id=tenant_id,
@@ -197,7 +197,7 @@ class _TargetRunnerImpl:
                         str(out.get("error") or ""),
                     )
                 # bot
-                from kongming.bot.router import _get_service as _bot_service_factory
+                from kongming.bot.router import get_bot_service as _bot_service_factory
                 from kongming.chat.router import get_agent_client as _gac
 
                 bot_svc = _bot_service_factory(s, _gac())
@@ -230,7 +230,7 @@ async def _scheduler_factory() -> tuple[TriggerService, Any]:
 
 
 def start_scheduler() -> None:
-    scheduler._factory = _scheduler_factory  # noqa: SLF001  # lifespan 注入点
+    scheduler.attach_factory(_scheduler_factory)  # lifespan 注入点
     scheduler.start()
 
 

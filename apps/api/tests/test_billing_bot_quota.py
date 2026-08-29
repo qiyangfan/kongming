@@ -1,6 +1,7 @@
 """035 Bot 维度配额测试(测试先行,安全类):BOT 级超限 429 归因/Bot 级与
 租户级独立/跨租户 scope_ref 404/同组合 upsert 唯一/零命中放行/CALLS
 维 BOT 级拒配。"""
+# pyright: reportPrivateUsage=false
 
 from httpx import AsyncClient
 from sqlalchemy import text

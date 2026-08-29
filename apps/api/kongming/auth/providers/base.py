@@ -5,12 +5,31 @@
 """
 
 from abc import ABC, abstractmethod
+from typing import Protocol, cast
 
 import httpx
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 
 from kongming.auth.models import NormalizedProfile, ProviderExchangeFailed
 from kongming.config import Settings
+
+
+class OAuthClient(Protocol):
+    """OAuth 客户端窄面(本域实际依赖)。
+
+    authlib 无 py.typed,pyright 解不出 AsyncOAuth2Client 的 httpx 继承方法;
+    以 Protocol 声明协议管道所需面,实现实例由 _client 构造处 cast 对齐。
+    """
+
+    def create_authorization_url(
+        self, url: str, *, state: str, **kwargs: str
+    ) -> tuple[str, str | None]: ...
+
+    async def fetch_token(self, url: str, *, code: str, **kwargs: str) -> object: ...
+
+    async def get(self, url: str, **kwargs: object) -> httpx.Response: ...
+
+    async def aclose(self) -> None: ...
 
 
 def resp_json(resp: httpx.Response, provider_name: str) -> dict[str, object]:
@@ -23,7 +42,7 @@ def resp_json(resp: httpx.Response, provider_name: str) -> dict[str, object]:
         ) from e
     if not isinstance(data, dict):
         raise ProviderExchangeFailed(f"{provider_name}登录失败(响应格式异常:{resp.status_code})")
-    return data
+    return cast("dict[str, object]", data)
 
 
 class OAuthProviderBase(ABC):
@@ -44,7 +63,7 @@ class OAuthProviderBase(ABC):
     def redirect_uri(self, s: Settings) -> str: ...
 
     @abstractmethod
-    async def fetch_raw_profile(self, client: AsyncOAuth2Client) -> NormalizedProfile:
+    async def fetch_raw_profile(self, client: OAuthClient) -> NormalizedProfile:
         """token 已就绪的 client → 拉取并归一化 profile(协议差异止步于此)。"""
         ...
 
@@ -53,11 +72,15 @@ class OAuthProviderBase(ABC):
         enabled = bool(getattr(s, f"{self.key}_enabled", True))
         return enabled and bool(self.client_id(s) and self.client_secret(s))
 
-    def _client(self, s: Settings) -> AsyncOAuth2Client:
-        return AsyncOAuth2Client(
-            client_id=self.client_id(s),
-            client_secret=self.client_secret(s),
-            redirect_uri=self.redirect_uri(s),
+    def _client(self, s: Settings) -> OAuthClient:
+        # AsyncOAuth2Client 无 py.typed,结构面经 OAuthClient 窄协议对齐(见其 docstring)
+        return cast(
+            OAuthClient,
+            AsyncOAuth2Client(
+                client_id=self.client_id(s),
+                client_secret=self.client_secret(s),
+                redirect_uri=self.redirect_uri(s),
+            ),
         )
 
     def authorize_url(self, s: Settings, *, state: str, code_challenge: str | None) -> str:

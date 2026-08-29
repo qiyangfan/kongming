@@ -5,9 +5,11 @@
 default_schema 注入防护/key+租户归属不可改/非超管 403+审计/
 创建租户归属显式指定(隐式上下文不生效)/写操作审计/evictor 调用时机。
 """
+# pyright: reportPrivateUsage=false
 
 import uuid as uuidlib
-from collections.abc import AsyncIterator
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from httpx import AsyncClient
@@ -25,7 +27,7 @@ from tests.test_system_admin import _admin
 DS = "/system/datasource"
 
 
-def _body(tenant_id: str, **over: object) -> dict:
+def _body(tenant_id: str, **over: object) -> dict[str, Any]:
     body: dict[str, object] = {
         "datasource_key": "extdb",
         "name": "外部库",
@@ -57,13 +59,13 @@ async def _mk_tenant(s: AsyncSession, key: str, status: str = "ACTIVE") -> str:
 
 async def _create(
     client: AsyncClient, token: str, tenant_id: str, **over: object
-) -> dict:
+) -> dict[str, Any]:
     r = await client.post(DS, json=_body(tenant_id, **over), headers=_auth(token))
     assert r.status_code == 201, r.text
     return dict(r.json())
 
 
-async def _row(s: AsyncSession, key: str) -> dict:
+async def _row(s: AsyncSession, key: str) -> dict[str, Any]:
     row = (
         await s.execute(
             text("SELECT * FROM public.sys_datasource WHERE datasource_key=:k"), {"k": key}
@@ -83,12 +85,12 @@ class FakeEvictor:
 
 
 @pytest.fixture
-def fake_evictor() -> AsyncIterator[FakeEvictor]:  # type: ignore[misc]
+def fake_evictor() -> Iterator[FakeEvictor]:
     from kongming.datasource.router import get_pool_evictor
 
     fake = FakeEvictor()
     app.dependency_overrides[get_pool_evictor] = lambda: fake
-    yield fake  # type: ignore[misc]
+    yield fake
     app.dependency_overrides.pop(get_pool_evictor, None)
 
 

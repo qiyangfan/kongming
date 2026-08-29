@@ -83,6 +83,7 @@ class RagRepo(Protocol):
         self, *, tenant_id: str, tenant_key: str, datasource_key: str
     ) -> list[str]:
         """可扫描 schema 集合(040:上传存在性校验与枚举端点候选源,与内省同源)。"""
+        ...
 
     async def column_comments(
         self, *, tenant_id: str, datasource_key: str
@@ -93,6 +94,7 @@ class RagRepo(Protocol):
     ) -> dict[tuple[str, str], tuple[str, str]]:
         """(schema_name, table_name) → (source_type, alias)——二元键防跨 schema
         同名表互遮(042)。"""
+        ...
 
     async def delete_stale_entries(
         self, *, tenant_id: str, datasource_key: str, keep: list[tuple[str, str]]
@@ -101,6 +103,7 @@ class RagRepo(Protocol):
 
         keep=本次扫描集 [(schema_name, table_name)];扫描集外人工/反馈行
         只计数不删(不可逆资产交人工裁决)。"""
+        ...
 
     async def recall_vector(
         self, *, tenant_id: str, datasource_key: str, vector: list[float]

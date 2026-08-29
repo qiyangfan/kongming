@@ -4,9 +4,10 @@
 消息要素回显经 /chat/query 真实落库路径验证。
 安全面:未认证 401、无权限 403、越权/跨租户/不存在统一 404、级联删除。
 """
+# pyright: reportPrivateUsage=false
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import Iterator
 
 import pytest
 from httpx import AsyncClient
@@ -33,14 +34,14 @@ from tests.test_chat_query import (
 
 
 @pytest.fixture
-def fake_agent() -> AsyncIterator[dict[str, FakeAgent]]:  # type: ignore[misc]
+def fake_agent() -> Iterator[dict[str, FakeAgent]]:
     holder: dict[str, FakeAgent] = {}
 
     def _factory() -> FakeAgent:
         return holder["agent"]
 
     app.dependency_overrides[get_agent_client] = _factory
-    yield holder  # type: ignore[misc]
+    yield holder
     app.dependency_overrides.pop(get_agent_client, None)
 
 
@@ -197,7 +198,7 @@ async def test_messages_of_other_user_404(
     assert r.status_code == 404  # 不存在与越权同形
 
 
-async def _dev_role_id(s: AsyncSession) -> object:
+async def _dev_role_id(s: AsyncSession) -> str:
     return (
         await s.execute(text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'"))
     ).scalar_one()

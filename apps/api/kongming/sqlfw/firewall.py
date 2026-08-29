@@ -7,6 +7,7 @@ sqlglot 天然保留多方言升级空间(ADR-001 诚实标注)。
 
 import sqlglot
 from sqlglot import exp
+from sqlglot.errors import SqlglotError
 
 # 允许的读语句类型(SELECT 系);任何写/DDL/事务控制一律 BLOCK
 _READONLY_ROOTS = (exp.Select, exp.Union, exp.Subquery)
@@ -64,7 +65,7 @@ class Verdict:
 def check(sql: str) -> Verdict:
     try:
         statements = sqlglot.parse(sql, dialect="postgres")
-    except sqlglot.errors.SqlglotError as e:
+    except SqlglotError as e:
         # ParseError 与 TokenError(未闭合引号/非法 token)同族,均为语法类拒绝
         return Verdict(False, f"PARSE_ERROR: {e}")
 
@@ -109,7 +110,7 @@ def check_schema_scope(sql: str, allowed_schemas: set[str]) -> Verdict:
     """
     try:
         statements = sqlglot.parse(sql, dialect="postgres")
-    except sqlglot.errors.SqlglotError as e:
+    except SqlglotError as e:
         return Verdict(False, f"PARSE_ERROR: {e}")
     # PG 语义:仅未加引号的「引用侧」折叠小写;schema 名本身大小写精确,
     # 白名单不折叠(否则大写 tenant_key 会误放行其小写双胞胎 schema)
@@ -142,7 +143,7 @@ def check_reserved_tables(sql: str) -> Verdict:
     引用会被 CTE 豁免误跳过,R2 评审实证);非保留 CTE 名引用与表函数放行。"""
     try:
         statements = sqlglot.parse(sql, dialect="postgres")
-    except sqlglot.errors.SqlglotError as e:
+    except SqlglotError as e:
         return Verdict(False, f"PARSE_ERROR: {e}")
     for st in statements:
         if st is None:

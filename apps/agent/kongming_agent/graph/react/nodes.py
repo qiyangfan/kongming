@@ -12,6 +12,7 @@
 
 import json
 import logging
+from typing import cast
 
 from kongming_agent import deps
 from kongming_agent.apiclient import ToolExecuteOutcome
@@ -54,8 +55,9 @@ async def react_llm(state: ReactState) -> dict[str, object]:
         messages = [
             {
                 "role": "user",
+                # 入口 state 恒写入 question(_initial_react_state);缺键属编程错误
                 "content": initial_user_prompt(
-                    state["question"],
+                    state["question"],  # pyright: ignore[reportTypedDictNotRequiredAccess]
                     state.get("history", [])[-5:],
                     state.get("memory_hint", ""),
                 ),
@@ -136,9 +138,10 @@ async def tool_dispatch(state: ReactState) -> dict[str, object]:
             }
             outcome_status = "rejected"
         else:
+            # 入口 state 恒含 trace_id/tenant_key(_initial_react_state 写入)
             outcome = await deps.get_api().tool_execute(
-                trace_id=state["trace_id"],
-                tenant_key=state["tenant_key"],
+                trace_id=state["trace_id"],  # pyright: ignore[reportTypedDictNotRequiredAccess]
+                tenant_key=state["tenant_key"],  # pyright: ignore[reportTypedDictNotRequiredAccess]
                 datasource_key=state.get("datasource_key", "default"),
                 user_id=state.get("user_id"),
                 tool_name=call.name,
@@ -195,10 +198,12 @@ def _result_digest(obs: dict[str, object]) -> str:
     result = obs.get("result")
     if not isinstance(result, dict):
         return str(obs.get("status") or "")
-    if "row_count" in result:
-        return f"查询完成,共 {result.get('row_count')} 行"
-    if "announcement_id" in result:
-        return "公告已发布" if result.get("created") else "公告已存在(幂等)"
+    # isinstance 收窄产物键型仍 Unknown,守卫后 cast 再用
+    typed = cast("dict[str, object]", result)
+    if "row_count" in typed:
+        return f"查询完成,共 {typed.get('row_count')} 行"
+    if "announcement_id" in typed:
+        return "公告已发布" if typed.get("created") else "公告已存在(幂等)"
     return str(obs.get("status") or "")
 
 
@@ -217,10 +222,12 @@ def _observe(outcome: ToolExecuteOutcome) -> dict[str, object]:
     # execute_sql 大结果集截断(rows 只喂前 N 行)
     rows_val = result.get("rows")
     if isinstance(rows_val, list):
+        # isinstance 收窄产物元素型仍 Unknown,cast 后再切(运行时同一对象)
+        rows_typed = cast("list[object]", rows_val)
         trimmed = {
             **result,
-            "rows": rows_val[:MAX_OBSERVE_ROWS],
-            "rows_truncated": len(rows_val) > MAX_OBSERVE_ROWS,
+            "rows": rows_typed[:MAX_OBSERVE_ROWS],
+            "rows_truncated": len(rows_typed) > MAX_OBSERVE_ROWS,
         }
         return {"status": "executed", "result": trimmed}
     return {"status": "executed", "result": result}
@@ -238,8 +245,19 @@ def _capture_execution(
     out["last_execution"] = ExecutionResult(
         verdict=str(result.get("verdict") or "ERROR"),
         reason=reason if isinstance(reason, str) else None,
-        columns=[str(c) for c in columns] if isinstance(columns, list) else [],
-        rows=[list(r) for r in rows if isinstance(r, list)] if isinstance(rows, list) else [],
+        # isinstance 收窄产物元素型仍 Unknown,cast 收窄(cast 运行时恒等)
+        columns=(
+            [str(c) for c in cast("list[object]", columns)]
+            if isinstance(columns, list)
+            else []
+        ),
+        rows=[
+            list(cast("list[object]", r))
+            for r in cast("list[object]", rows)
+            if isinstance(r, list)
+        ]
+        if isinstance(rows, list)
+        else [],
         duration_ms=int(duration) if isinstance(duration, (int, float)) else 0,
     )
     if call.args:
@@ -263,8 +281,8 @@ def finalize(state: ReactState) -> dict[str, object]:
             capped["execution"] = execution
             capped["summary"] = ""
             capped["stats"] = compute_stats(execution.columns, execution.rows)
-            if state.get("last_sql"):
-                capped["generated_sql"] = state["last_sql"]
+            if last_sql := state.get("last_sql"):
+                capped["generated_sql"] = last_sql
         return capped
     if execution is None:
         # 无 SQL 执行的纯文本回答:成功终态,空结果集
@@ -276,6 +294,6 @@ def finalize(state: ReactState) -> dict[str, object]:
         "stats": stats,
         "retry_count": rounds,
     }
-    if state.get("last_sql"):
-        out["generated_sql"] = state["last_sql"]
+    if last_sql := state.get("last_sql"):
+        out["generated_sql"] = last_sql
     return out

@@ -5,9 +5,11 @@
 引用形态——客户端不可提交裸 SQL,服务端构造 EXPLAIN (FORMAT JSON),永不 ANALYZE;
 归属 404/权限 403/无 SQL 400/动态源快照路由全覆盖;审计记 EXPLAIN 形态可回放。
 """
+# pyright: reportPrivateUsage=false
 
 import uuid
 from collections.abc import AsyncIterator
+from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
@@ -32,7 +34,7 @@ DS_SCHEMA = "ds_explain"  # 动态源快照证物 schema(同实例异 schema 形
 
 
 @pytest.fixture(scope="module", autouse=True)
-async def _biz() -> AsyncIterator[None]:
+async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     """默认租户 schema 与动态源 schema 各造一张计划证物表(EXPLAIN 不返回行,
     行数据无关断言——造行仅为规划器统计信息真实)。"""
     async with get_engine().begin() as conn:
@@ -230,7 +232,7 @@ async def test_explain_happy_path_returns_plan_tree(
     assert body["success"] is True
     plan = body["plan"]
     assert isinstance(plan, list) and plan, "EXPLAIN (FORMAT JSON) 顶层为数组"
-    node = plan[0]["Plan"]
+    node = cast("dict[str, Any]", plan[0]["Plan"])
     assert node["Node Type"]  # 如 Seq Scan
     assert "Total Cost" in node and "Plan Rows" in node
     # 审计:sql_text=EXPLAIN 形态(可回放),verdict=PASS

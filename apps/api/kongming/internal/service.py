@@ -114,8 +114,8 @@ def _json_cell(v: object) -> object:
 class ExecResult:
     verdict: str  # PASS / BLOCKED / ERROR
     reason: str | None = None
-    columns: list[str] = field(default_factory=list)
-    rows: list[list[object]] = field(default_factory=list)
+    columns: list[str] = field(default_factory=list[str])
+    rows: list[list[object]] = field(default_factory=list[list[object]])
     row_count: int = 0
     duration_ms: int = 0
 

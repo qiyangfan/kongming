@@ -4,6 +4,7 @@ import hashlib
 import logging
 import secrets
 import uuid
+from typing import cast
 
 from kongming.bot.models import (
     BOT_KEY_PATTERN,
@@ -70,7 +71,11 @@ class BotService:
         records_raw = reply.get("usage_records")
         if not isinstance(records_raw, list) or not records_raw:
             return
-        records = [dict(r) for r in records_raw if isinstance(r, dict)]
+        records = [
+            dict(cast("dict[str, object]", r))
+            for r in cast("list[object]", records_raw)
+            if isinstance(r, dict)
+        ]
         if not records:
             return
         try:
@@ -106,8 +111,12 @@ class BotService:
         bot_key = str(payload["bot_key"])
         if not BOT_KEY_PATTERN.fullmatch(bot_key):
             raise InvalidBotKey(bot_key)
-        raw_tools = payload.get("tools") or []
-        tools = [str(t) for t in raw_tools] if isinstance(raw_tools, list) else []
+        raw_tools: object = payload.get("tools") or []
+        tools = (
+            [str(t) for t in cast("list[object]", raw_tools)]
+            if isinstance(raw_tools, list)
+            else []
+        )
         mcp_names = await self._mcp_names(tenant_id)
         allowed = tools_for_perms(await self._perms.list_codes(user_id), mcp_names)
         validate_tool_subset(tools, allowed, registered_names=self._registered_names(mcp_names))
@@ -160,7 +169,7 @@ class BotService:
         mcp_names = await self._mcp_names(tenant_id)
         allowed_names = tools_for_perms(creator_perms, mcp_names)
         raw = row.get("tools")
-        raw_bot_tools = raw if isinstance(raw, list) else []
+        raw_bot_tools = cast("list[object]", raw) if isinstance(raw, list) else []
         bot_tools = [str(t) for t in raw_bot_tools if str(t) in allowed_names]
         tools = [
             dict(s) for s in filter_specs(creator_perms) if s["name"] in set(bot_tools)

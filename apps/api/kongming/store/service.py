@@ -1,7 +1,7 @@
 """store 用例编排(033):上架治理(归属+护栏)+发现+互动+直跑。
 零框架(宪法 Article II);bot 行读取经组合根注入的 BotReader 端口。"""
 
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from kongming.store.ports import StoreRepo
 
@@ -172,8 +172,12 @@ class StoreService:
     async def rate(
         self, *, tenant_id: str, bot_key: str, user_id: str, score: int
     ) -> None:
-        if not isinstance(score, int) or isinstance(score, bool) or not 1 <= score <= 5:
+        # isinstance 运行时防线保留(cast 断开静态流分析):标注仅约束静态,
+        # 绕过路由层 pydantic 的调用面可能传入 float/bool,删除会放行 3.5 落库(行为变化)
+        raw_score = cast(object, score)
+        if not isinstance(raw_score, int) or isinstance(raw_score, bool) or not 1 <= raw_score <= 5:
             raise StoreValidationError("评分须为 1-5 整数")
+        score = raw_score
         row = await self._repo.store_get(tenant_id=tenant_id, bot_key=bot_key)
         if row is None:
             raise StoreNotFound(bot_key)

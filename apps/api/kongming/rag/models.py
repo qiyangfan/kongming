@@ -33,8 +33,9 @@ class TableBlock:
 
     table_name: str
     table_comment: str = ""
-    columns_comment: dict[str, str] = field(default_factory=dict)
-    sample_queries: list[str] = field(default_factory=list)
+    # default_factory 走参数化泛型别名(bare dict/list 推断出 Unknown 元素)
+    columns_comment: dict[str, str] = field(default_factory=dict[str, str])
+    sample_queries: list[str] = field(default_factory=list[str])
     alias: str = ""  # 037:业务称谓别名
 
 
@@ -70,7 +71,8 @@ class IntrospectedTable:
     schema_name: str
     table_name: str
     table_comment: str
-    columns_comment: dict[str, str] = field(default_factory=dict)  # name -> type(纯结构形态)
+    # name -> type(纯结构形态);default_factory 走参数化别名(bare dict 推断 Unknown 元素)
+    columns_comment: dict[str, str] = field(default_factory=dict[str, str])
 
 
 @dataclass(frozen=True)

@@ -10,13 +10,14 @@ POST /query/stream(同图流式 SSE,017)+ /internal/embedding(批量向量化)+
 
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import cast
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langgraph.errors import GraphRecursionError
 from pydantic import BaseModel, Field
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from kongming_agent import deps
 from kongming_agent.describer import (
@@ -46,7 +47,10 @@ app = FastAPI(
 
 
 @app.middleware("http")
-async def require_internal_token(request: Request, call_next):  # type: ignore[no-untyped-def]
+async def require_internal_token(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
     if request.url.path == "/healthz":  # 存活探针豁免
         return await call_next(request)
     token = request.headers.get("X-Internal-Token", "")
@@ -215,16 +219,18 @@ async def extract_memory_endpoint(req: ExtractMemoryIn) -> ExtractMemoryOut:
     parsed = parse_summary_json(raw)
     out: list[dict[str, str]] = []
     memories_raw = parsed.get("memories")
-    for item in memories_raw if isinstance(memories_raw, list) else []:
+    # isinstance 收窄产物元素型仍 Unknown,守卫后 cast 再用(判定序不变)
+    for item in cast("list[object]", memories_raw if isinstance(memories_raw, list) else []):
+        typed = cast("dict[str, object]", item) if isinstance(item, dict) else None
         if (
-            isinstance(item, dict)
-            and isinstance(item.get("content"), str)
-            and item["content"].strip()
+            typed is not None
+            and isinstance(typed.get("content"), str)
+            and cast("str", typed["content"]).strip()
         ):
             out.append(
                 {
-                    "content": item["content"].strip()[:500],
-                    "category": str(item.get("category") or "general")[:32],
+                    "content": cast("str", typed["content"]).strip()[:500],
+                    "category": str(typed.get("category") or "general")[:32],
                 }
             )
     return ExtractMemoryOut(memories=out[:3])
@@ -306,7 +312,14 @@ def _initial_state(req: QueryIn) -> AgentState:
 async def _run_graph(req: QueryIn) -> dict[str, object]:
     """图执行 + LLM 故障收敛(同步/流式同口径:key 缺失/超时等友好返回)。"""
     try:
-        final: dict[str, object] = await get_graph().ainvoke(_initial_state(req))
+        graph = get_graph()
+        # langgraph 成员签名自带库侧 Unknown,访问点豁免;运行时即 dict(边界 cast)
+        final = cast(
+            "dict[str, object]",
+            await graph.ainvoke(  # pyright: ignore[reportUnknownMemberType]
+                _initial_state(req)
+            ),
+        )
     except LlmError:
         # LLM 故障(key 缺失/超时/协议异常):链路无法推进,友好返回不裸 500
         return {"llm_unavailable": True}
@@ -347,8 +360,9 @@ def _build_query_out(final: dict[str, object]) -> QueryOut:
         ),
         verdict=verdict,
         summary=summary if isinstance(summary, str) else "",
-        insights=insights if isinstance(insights, list) else [],
-        stats=stats if isinstance(stats, dict) else {},
+        # isinstance 守卫后 cast 收窄(守卫产物元素/键型仍 Unknown;cast 运行时恒等)
+        insights=cast("list[dict[str, str]]", insights) if isinstance(insights, list) else [],
+        stats=cast("dict[str, object]", stats) if isinstance(stats, dict) else {},
         columns=execution.columns if isinstance(execution, ExecutionResult) else [],
         rows=execution.rows if isinstance(execution, ExecutionResult) else [],
         sql=sql if isinstance(sql, str) else "",
@@ -383,20 +397,24 @@ async def query_stream(req: QueryIn) -> StreamingResponse:
     async def gen() -> AsyncIterator[str]:
         final: dict[str, object] = {}
         try:
-            async for mode, chunk in get_graph().astream(
+            graph = get_graph()
+            # langgraph 成员签名自带库侧 Unknown,访问点豁免;chunk 守卫后收窄
+            async for mode, chunk in graph.astream(  # pyright: ignore[reportUnknownMemberType]
                 state, stream_mode=["updates", "custom"]
             ):
                 if mode == "custom":
-                    ev = chunk if isinstance(chunk, dict) else {}
+                    ev = cast("dict[str, object]", chunk) if isinstance(chunk, dict) else {}
                     event = str(ev.get("event") or "")
                     if event:
                         yield _sse_frame(
                             event, json.dumps(ev.get("data"), ensure_ascii=False)
                         )
                 elif isinstance(chunk, dict):
-                    for delta in chunk.values():
+                    typed = cast("dict[str, object]", chunk)
+                    for delta in typed.values():
                         if isinstance(delta, dict):
-                            final.update(delta)  # updates 累积=终态 state
+                            # updates 累积=终态 state
+                            final.update(cast("dict[str, object]", delta))
         except LlmError:
             yield _sse_frame(
                 "result",
@@ -463,9 +481,14 @@ def _initial_react_state(req: QueryReactIn) -> ReactState:
 async def _run_react(req: QueryReactIn) -> dict[str, object]:
     """ReAct 图执行 + 故障收敛(与 _run_graph 同口径)。"""
     try:
-        final: dict[str, object] = await get_react_graph().ainvoke(
-            _initial_react_state(req),
-            config={"recursion_limit": react_recursion_limit()},
+        graph = get_react_graph()
+        # langgraph 成员签名自带库侧 Unknown,访问点豁免;运行时即 dict(边界 cast)
+        final = cast(
+            "dict[str, object]",
+            await graph.ainvoke(  # pyright: ignore[reportUnknownMemberType]
+                _initial_react_state(req),
+                config={"recursion_limit": react_recursion_limit()},
+            ),
         )
     except GraphRecursionError:
         # 图步数兜底(不应触发:轮次上限先于 recursion_limit 收束)
@@ -533,22 +556,25 @@ async def query_react_stream(req: QueryReactIn) -> StreamingResponse:
             state = _initial_react_state(req)
             final: dict[str, object] = {}
             try:
-                async for mode, chunk in get_react_graph().astream(
+                graph = get_react_graph()
+                # langgraph 成员签名自带库侧 Unknown,访问点豁免;chunk 守卫后收窄
+                async for mode, chunk in graph.astream(  # pyright: ignore[reportUnknownMemberType]
                     state,
                     stream_mode=["updates", "custom"],
                     config={"recursion_limit": react_recursion_limit()},
                 ):
                     if mode == "custom":
-                        ev = chunk if isinstance(chunk, dict) else {}
+                        ev = cast("dict[str, object]", chunk) if isinstance(chunk, dict) else {}
                         event = str(ev.get("event") or "")
                         if event:
                             yield _sse_frame(
                                 event, json.dumps(ev.get("data"), ensure_ascii=False)
                             )
                     elif isinstance(chunk, dict):
-                        for delta in chunk.values():
+                        typed = cast("dict[str, object]", chunk)
+                        for delta in typed.values():
                             if isinstance(delta, dict):
-                                final.update(delta)
+                                final.update(cast("dict[str, object]", delta))
             except LlmError:
                 unavailable = _build_query_out({"llm_unavailable": True})
                 unavailable.usage_records = collector  # 038⑨:异常终态携带已收集记录

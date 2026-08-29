@@ -1,6 +1,8 @@
 """024 知识分流 agent 侧测试(nodes 直调)。"""
 
-from kongming_agent.graph.state import AgentState
+from typing import cast
+
+from kongming_agent.graph.state import AgentState, ExecutionResult
 
 
 def test_doc_answer_routing() -> None:
@@ -50,9 +52,11 @@ async def test_doc_answer_node_terminal() -> None:
         )
     finally:
         deps.get_llm, deps.get_api = old_llm, old_api  # type: ignore[assignment]
-    assert out["execution"].verdict == "PASS"
-    assert out["execution"].rows == []
-    assert "7 天内" in out["summary"]
+    # doc_answer 返回 dict[str, object],键值按生产代码实型收窄(值实为下述类型)
+    execution = cast("ExecutionResult", out["execution"])
+    assert execution.verdict == "PASS"
+    assert execution.rows == []
+    assert "7 天内" in cast("str", out["summary"])
     assert "generated_sql" not in out
 
 

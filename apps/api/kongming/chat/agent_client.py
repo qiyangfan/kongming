@@ -8,7 +8,7 @@
 import logging
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -30,48 +30,78 @@ class AgentReply:
     success: bool
     verdict: str | None = None
     summary: str = ""
-    insights: list[dict[str, str]] = field(default_factory=list)
-    stats: dict[str, object] = field(default_factory=dict)
-    columns: list[str] = field(default_factory=list)
-    rows: list[list[object]] = field(default_factory=list)
+    # default_factory 用带参泛型别名:裸 list/dict 工厂在 pyright strict 下产物 Unknown
+    insights: list[dict[str, str]] = field(default_factory=list[dict[str, str]])
+    stats: dict[str, object] = field(default_factory=dict[str, object])
+    columns: list[str] = field(default_factory=list[str])
+    rows: list[list[object]] = field(default_factory=list[list[object]])
     sql: str = ""
     retry_count: int = 0
     error: str | None = None
     # 035:bot 链路请求内同步采集(纯增;/query_react 响应携带,空=旧版 agent)
-    usage_records: list[dict[str, object]] = field(default_factory=list)
+    usage_records: list[dict[str, object]] = field(
+        default_factory=list[dict[str, object]]
+    )
+
+
+def _obj_dict(value: object) -> dict[str, object] | None:
+    """dict 守卫 + 键型收窄(httpx resp.json() 的 Any 在 strict 下传播 Unknown,
+    边界处一次收窄;isinstance 守卫语义与裸 dict 检查一致)。"""
+    return cast(dict[str, object], value) if isinstance(value, dict) else None
 
 
 def parse_agent_reply(data: dict[str, object]) -> AgentReply:
     """agent 终态报文 → AgentReply(同步响应/流式 result 帧共用,单一定义防漂移)。"""
     verdict = data.get("verdict")
     error = data.get("error")
+    retry = data.get("retry_count")
     insights_raw = data.get("insights")
     stats_raw = data.get("stats")
     columns_raw = data.get("columns")
     rows_raw = data.get("rows")
     usage_raw = data.get("usage_records")
+
+    insights: list[dict[str, str]] = []
+    if isinstance(insights_raw, list):
+        # isinstance 收窄产物为 list[Unknown],cast 一次再迭代(运行时不变)
+        for item in cast(list[object], insights_raw):
+            entry = _obj_dict(item)
+            if entry is not None:
+                insights.append(
+                    {"type": str(entry.get("type", "")), "text": str(entry.get("text", ""))}
+                )
+    stats = dict(cast(dict[str, object], stats_raw)) if isinstance(stats_raw, dict) else {}
+    columns = (
+        [str(c) for c in cast(list[object], columns_raw)]
+        if isinstance(columns_raw, list)
+        else []
+    )
+    rows = (
+        [list(cast(list[object], r)) for r in cast(list[object], rows_raw)]
+        if isinstance(rows_raw, list)
+        else []
+    )
+    usage_records = (
+        [
+            dict(entry)
+            for item in cast(list[object], usage_raw)
+            if (entry := _obj_dict(item)) is not None
+        ]
+        if isinstance(usage_raw, list)
+        else []
+    )
     return AgentReply(
         success=bool(data.get("success")),
         verdict=verdict if isinstance(verdict, str) else None,
         summary=str(data.get("summary") or ""),
-        insights=[
-            {"type": str(i.get("type", "")), "text": str(i.get("text", ""))}
-            for i in insights_raw
-            if isinstance(insights_raw, list) and isinstance(i, dict)
-        ]
-        if isinstance(insights_raw, list)
-        else [],
-        stats=dict(stats_raw) if isinstance(stats_raw, dict) else {},
-        columns=[str(c) for c in columns_raw] if isinstance(columns_raw, list) else [],
-        rows=[list(r) for r in rows_raw] if isinstance(rows_raw, list) else [],
+        insights=insights,
+        stats=stats,
+        columns=columns,
+        rows=rows,
         sql=str(data.get("sql") or ""),
-        retry_count=retry if isinstance(retry := data.get("retry_count"), int) else 0,
+        retry_count=retry if isinstance(retry, int) else 0,
         error=error if isinstance(error, str) else None,
-        usage_records=(
-            [dict(r) for r in usage_raw if isinstance(r, dict)]
-            if isinstance(usage_raw, list)
-            else []
-        ),
+        usage_records=usage_records,
     )
 
 
@@ -194,17 +224,17 @@ class AgentClient:
             log.warning("建议生成回调非 200: HTTP %s", resp.status_code)
             return []
         try:
-            data = resp.json()
+            data = _obj_dict(resp.json())
         except (ValueError, TypeError, AttributeError) as e:
             # 200 但报文非 JSON(如中间层注入 HTML):同不可达收敛,不裸 500
             log.warning("建议生成响应解析失败: %s", e)
             return []
-        if not isinstance(data, dict) or data.get("generated") is not True:
+        if data is None or data.get("generated") is not True:
             return []
         raw = data.get("questions")
         if not isinstance(raw, list):
             return []
-        return raw
+        return cast(list[str], raw)
 
     @staticmethod
     def _payload(
@@ -295,10 +325,15 @@ class AgentClient:
         if resp.status_code != 200:
             return []
         try:
-            data = resp.json()
-            return [str(m) for m in data.get("models") or []]
+            data = _obj_dict(resp.json())
         except (ValueError, TypeError):
             return []
+        if data is None:
+            return []
+        models: object = data.get("models") or []  # 注解 object:裸 or [] 产物 Unknown
+        if not isinstance(models, list):
+            return []  # 畸形报文 fail-closed(契约:失败返回空,不向模型校验路径抛)
+        return [str(m) for m in cast(list[object], models)]
 
     async def extract_memory(self, *, question: str, answer: str) -> list[dict[str, str]]:
         """隐式记忆提取(022):agent /internal/extract-memory 回调;
@@ -318,16 +353,20 @@ class AgentClient:
             log.warning("记忆提取非 200: HTTP %s", resp.status_code)
             return []
         try:
-            data = resp.json()
-            items = data.get("memories") or []
-            return [
-                {"content": str(i["content"]), "category": str(i.get("category") or "general")}
-                for i in items
-                if isinstance(i, dict) and isinstance(i.get("content"), str)
-            ]
-        except (ValueError, TypeError, KeyError) as e:
+            data = _obj_dict(resp.json())
+        except (ValueError, TypeError, AttributeError) as e:
             log.warning("记忆提取响应解析失败: %s", e)
             return []
+        if data is None:
+            return []
+        items: object = data.get("memories") or []  # 注解 object:裸 or [] 产物 Unknown
+        if not isinstance(items, list):
+            return []  # 畸形报文静默收敛(契约:任何失败返回空,永不抛)
+        return [
+            {"content": str(entry["content"]), "category": str(entry.get("category") or "general")}
+            for item in cast(list[object], items)
+            if (entry := _obj_dict(item)) is not None and isinstance(entry.get("content"), str)
+        ]
 
     async def rewrite_title(self, *, question: str) -> str | None:
         """会话标题改写(010):后台任务兜底语义——任何失败(不可达/非 200/降级
@@ -346,11 +385,11 @@ class AgentClient:
             log.warning("标题改写非 200: HTTP %s", resp.status_code)
             return None
         try:
-            data = resp.json()
-            if not data.get("rewritten"):
-                return None  # agent 侧降级(LLM 失败/输出非法)
-            title = str(data.get("title") or "").strip()
+            data = _obj_dict(resp.json())
         except (ValueError, TypeError, AttributeError) as e:
             log.warning("标题改写响应解析失败: %s", e)
             return None
+        if data is None or not data.get("rewritten"):
+            return None  # agent 侧降级(LLM 失败/输出非法)
+        title = str(data.get("title") or "").strip()
         return title or None

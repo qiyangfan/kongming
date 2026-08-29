@@ -11,6 +11,7 @@ prompt 为 039 全新撰写(非上游资产);遵守全角标点纪律。与 titl
 import json
 import logging
 import re
+from typing import cast
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -90,7 +91,8 @@ def _parse_json_loose(raw: str) -> dict[str, object]:
             raise SuggestError("LLM 输出非 JSON") from None
     if not isinstance(parsed, dict):
         raise SuggestError("LLM 输出非 JSON 对象")
-    return parsed
+    # isinstance 收窄产物 dict[Unknown, Unknown] 仍报,守卫后收窄键型
+    return cast("dict[str, object]", parsed)
 
 
 async def suggest_questions(digest: str, llm: LlmClient) -> list[str]:

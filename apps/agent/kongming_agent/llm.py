@@ -9,8 +9,9 @@ import contextvars
 import json
 import logging
 import time
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from openai import AsyncOpenAI
 from openai.types.chat import (
@@ -69,7 +70,7 @@ class ToolChatReply:
     """chat_with_tools 应答:content 与 tool_calls 至多一个有语义(互斥由 ReAct 判定)。"""
 
     content: str | None = None
-    tool_calls: list[LlmToolCall] = field(default_factory=list)
+    tool_calls: list[LlmToolCall] = field(default_factory=list[LlmToolCall])
 
 
 class LlmClient:
@@ -79,7 +80,9 @@ class LlmClient:
     def __init__(
         self,
         settings: Settings,
-        usage_reporter: object | None = None,  # async callable(list[dict]),fire-and-forget
+        usage_reporter: (
+            Callable[[list[dict[str, object]]], Coroutine[Any, Any, None]] | None
+        ) = None,  # async callable(list[dict]),fire-and-forget
     ) -> None:
         self._model = settings.llm_model
         self._client: AsyncOpenAI | None = None
@@ -185,7 +188,7 @@ class LlmClient:
         035:收集器在场(bot 链路)只收集不上报——唯一上报口=响应携带。
         038:status/latency_ms 补全——失败调用(超时/断连/协议错)同样
         落记录(失败率可见),usage 缺失不再丢弃(记 0)。"""
-        record = {
+        record: dict[str, object] = {
             "trace_id": trace_id,
             "tenant_key": tenant_key,
             "model": model,
@@ -205,7 +208,7 @@ class LlmClient:
         try:
             import asyncio
 
-            task_obj = asyncio.create_task(self._reporter([record]))  # type: ignore[operator]
+            task_obj = asyncio.create_task(self._reporter([record]))
             # 防 GC(后台任务强引用,完成即摘;010 同款)
             _BACKGROUND_REPORTS.add(task_obj)
             task_obj.add_done_callback(_BACKGROUND_REPORTS.discard)
@@ -432,7 +435,8 @@ class LlmClient:
                 continue
             raw = tc.function.arguments or ""
             try:
-                parsed = json.loads(raw) if raw.strip() else {}
+                # json.loads 返回 Any,显式注解约束到 LlmToolCall.args 契约型
+                parsed: dict[str, object] | None = json.loads(raw) if raw.strip() else {}
                 if not isinstance(parsed, dict):
                     parsed = None  # 标量/数组畸形 → 喂回自纠
             except json.JSONDecodeError:

@@ -22,6 +22,7 @@ class McpCaller(Protocol):
 
     async def handshake(self, *, endpoint: str, headers: dict[str, str]) -> int:
         """initialize+tools/list 探测(连通性测试);返回发现工具数。"""
+        ...
 
     async def list_tools(
         self, *, endpoint: str, headers: dict[str, str]
@@ -36,6 +37,7 @@ class McpCaller(Protocol):
         args: dict[str, Any],
     ) -> dict[str, Any]:
         """tools/call;返回 {content, truncated, original_size}。"""
+        ...
 
 
 class McpRepo(Protocol):

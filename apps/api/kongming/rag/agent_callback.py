@@ -8,6 +8,7 @@ enriched=False 降级),不裸抛——辅助路失败不阻断主链路(上游�
 import hashlib
 import json
 import logging
+from typing import cast
 
 import httpx
 from redis.asyncio import Redis
@@ -68,9 +69,10 @@ class AgentRagClient:
                 except ValueError:
                     missing.append(i)  # 坏缓存按未命中重取
                     continue
-                # 维度漂移(换模型未 bump v1 前缀)按未命中重取,防插入报维度错
-                if isinstance(v, list) and len(v) == self._dim:
-                    vectors[i] = v
+                # 维度漂移(换模型未 bump v1 前缀)按未命中重取,防插入报维度错;
+                # 自有缓存回读(写入侧 json.dumps(list[list[float]])),此处仅收窄形态
+                if isinstance(v, list) and len(cast("list[float]", v)) == self._dim:
+                    vectors[i] = cast("list[float]", v)
                 else:
                     missing.append(i)
             else:
@@ -94,7 +96,8 @@ class AgentRagClient:
             data = resp.json()
         except ValueError as e:  # 200 但非 JSON(网关回 HTML 等)——同降级语义
             raise EmbeddingError(f"embedding 响应非 JSON: {e}") from e
-        vectors = data.get("vectors") or []
+        # agent 契约:vectors 为 list[list[float]];非数值元素由下方 float() 原样报错
+        vectors = cast("list[list[float]]", data.get("vectors") or [])
         if len(vectors) != len(texts):
             raise EmbeddingError("embedding 返回数量与请求不符")
         out = [[float(x) for x in v] for v in vectors]
@@ -135,9 +138,14 @@ class AgentRagClient:
             table_name=block.table_name,
             table_comment=str(data.get("table_comment") or block.table_comment),
             columns_comment={
-                str(k): str(v) for k, v in (data.get("columns_comment") or {}).items()
+                str(k): str(v)
+                for k, v in cast(
+                    "dict[str, object]", data.get("columns_comment") or {}
+                ).items()
             },
-            sample_queries=[str(s) for s in data.get("sample_queries") or []],
+            sample_queries=[
+                str(s) for s in cast("list[object]", data.get("sample_queries") or [])
+            ],
             # 037:透传即清洗(库内值与消费值一致,审查循环 B6)
             alias=clean_alias(str(data.get("alias") or "")),
         )

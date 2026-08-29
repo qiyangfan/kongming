@@ -18,7 +18,7 @@ SCHEMA = "tenant_metatest"
 
 
 @pytest.fixture(scope="module", autouse=True)
-async def _biz() -> AsyncIterator[None]:
+async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     async with get_engine().begin() as conn:
         await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
         await conn.execute(

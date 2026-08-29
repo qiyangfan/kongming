@@ -3,6 +3,7 @@
 SQL 审计/操作日志分页筛选+倒序+详情完整 sql_text;行级可见性(非 ALL
 强制本人,传值被覆盖;详情 403 同形);无权限 403。真实 PG。
 """
+# pyright: reportPrivateUsage=false
 
 import json
 import uuid

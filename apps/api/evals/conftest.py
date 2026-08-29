@@ -19,7 +19,7 @@
 import os
 import urllib.parse
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import asyncpg
 import httpx
@@ -53,18 +53,21 @@ def _load_yaml_cases() -> list[dict[str, Any]]:
     cases: list[dict[str, Any]] = []
     for yml in sorted(EVAL_DIR.glob("*.yaml")):
         with open(yml, encoding="utf-8") as f:
-            loaded = yaml.safe_load(f) or []
+            # PyYAML 无 py.typed,safe_load 推断为 Unknown:先收口为 object 再走 isinstance 校验
+            loaded = cast("object", yaml.safe_load(f) or [])
         if not isinstance(loaded, list):
             raise pytest.UsageError(f"{yml.name}: 顶层必须是题目列表(误写成单条 dict?)")
-        for c in loaded:
+        # isinstance 对 object 收窄产物是 list[Unknown],逐条前显式 cast 定型
+        for c in cast("list[object]", loaded):
             if not isinstance(c, dict):
                 raise pytest.UsageError(f"{yml.name}: 条目必须是映射(误写了注释行?)")
-            cases.append(c)
+            cases.append(cast("dict[str, Any]", c))
     return cases
 
 
-def _tenant_of(case: dict[str, Any]) -> str:
-    """租户:显式 tenant 字段优先,否则 id 前缀推断(sakila_001 → sakila)。"""
+def _tenant_of(case: dict[str, Any]) -> str:  # pyright: ignore[reportUnusedFunction]
+    """租户:显式 tenant 字段优先,否则 id 前缀推断(sakila_001 → sakila)。
+    供 test_eval 跨模块导入使用;pyright 不把跨文件引用计入访问,故行级豁免。"""
     return str(case.get("tenant") or case["id"].split("_")[0])
 
 
@@ -83,7 +86,7 @@ async def _login() -> str:
             "/auth/login", json={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD}
         )
     r.raise_for_status()
-    _token_cache = r.json()["access_token"]
+    _token_cache = cast("str", r.json()["access_token"])
     return _token_cache
 
 
@@ -152,12 +155,15 @@ async def exec_sql(
 ) -> tuple[list[str], list[tuple[Any, ...]]]:
     """直连执行(gold_sql;asyncpg 原生类型,匹配器 canon_cell 归一化)。
     database=用例级 gold_database 字段(动态源独立库直连),None=控制面库。"""
-    conn = await asyncpg.connect(_pg_dsn(database))
+    # asyncpg 无 py.typed:模块成员推断部分 Unknown,须在表达式级 cast("Any", …) 收口
+    # (仅显式 Any 标注挡不住——赋值会把声明窄化回 Unknown)
+    conn = await cast("Any", asyncpg).connect(_pg_dsn(database))
     try:
         stmt = await conn.prepare(sql)
-        cols = [a.name for a in stmt.get_attributes()]
-        rows = await stmt.fetch()
-        return cols, [tuple(r) for r in rows]
+        attrs = cast("list[Any]", stmt.get_attributes())
+        cols = [str(a.name) for a in attrs]
+        rows = cast("list[Any]", await stmt.fetch())
+        return cols, [cast("tuple[Any, ...]", r) for r in rows]
     finally:
         await conn.close()
 

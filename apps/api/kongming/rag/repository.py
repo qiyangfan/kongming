@@ -31,7 +31,7 @@ from kongming.rag.models import (
 from kongming.sqlfw.firewall import RESERVED_TABLE_NAMES, RESERVED_TABLE_PREFIXES
 
 
-def _vec_literal(vector: list[float]) -> str:
+def vec_literal(vector: list[float]) -> str:
     """向量 → pgvector 字面量 '[v1,v2,…]'(绑定参数传输,驱动参数化)。"""
     return "[" + ",".join(repr(float(x)) for x in vector) + "]"
 
@@ -87,7 +87,7 @@ class RagRepository:
         别名召回静默失效;人工精修路径 embedding 传 None 时保留既有向量
         (清向量会使该表退出向量召回)。
         """
-        vec = _vec_literal(embedding) if embedding else None
+        vec = vec_literal(embedding) if embedding else None
         cols_text = " ".join(f"{k} {v}" for k, v in columns_comment.items())
         # 生效别名(单一定义):保留分支命中→既有别名;否则→传入别名。
         # alias 列、tsv、tsv 参数四处引用保持一致(EXCLUDED.alias=:alias 值)。
@@ -350,7 +350,7 @@ class RagRepository:
                 {
                     "t": tenant_id,
                     "d": datasource_key,
-                    "vec": _vec_literal(vector),
+                    "vec": vec_literal(vector),
                     "k": RECALL_TOP_K,
                 },
             )
@@ -390,7 +390,7 @@ class RagRepository:
                 {
                     "t": tenant_id,
                     "d": datasource_key,
-                    "vec": _vec_literal(vector),
+                    "vec": vec_literal(vector),
                     "k": RECALL_TOP_K,
                 },
             )
@@ -434,7 +434,7 @@ class RagRepository:
         (0007 唯一索引支撑);embedding 失败传 None 时保留旧向量(旧向量语义
         仍有效,清空会使该行退出向量召回);同事务上限淘汰该维度最旧行。
         """
-        vec = _vec_literal(embedding) if embedding else None
+        vec = vec_literal(embedding) if embedding else None
         await self._s.execute(
             text(
                 "INSERT INTO rag.query_history"

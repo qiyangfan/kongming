@@ -3,8 +3,11 @@
 覆盖:创建越权工具子集拒/运行时权限求交(回收即失效)/护栏审核拒发布/
 api-key 生命周期(明文一次/撤销 401/scopes)/公开页 404 同形/OpenAI 形态。
 """
+# pyright: reportPrivateUsage=false
 
-from collections.abc import AsyncIterator
+
+from collections.abc import Iterator
+from typing import cast
 
 import pytest
 from httpx import AsyncClient
@@ -35,7 +38,7 @@ class FakeAgent:
 
 
 @pytest.fixture
-def fake_agent() -> AsyncIterator[dict[str, FakeAgent]]:  # type: ignore[misc]
+def fake_agent() -> Iterator[dict[str, FakeAgent]]:
     holder: dict[str, FakeAgent] = {}
     app.dependency_overrides[get_agent_client] = lambda: holder["agent"]
     yield holder
@@ -65,9 +68,13 @@ BOT_PAYLOAD = {
 
 
 async def test_create_bot_and_run_public(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
-    uid, token = await _user(client, session, make_user, "bot_a")
+    _uid, token = await _user(client, session, make_user, "bot_a")
     fake_agent["agent"] = FakeAgent()
     r = await client.post("/system/bots", headers=_auth(token), json=BOT_PAYLOAD)
     assert r.status_code == 201
@@ -84,7 +91,9 @@ async def test_create_bot_and_run_public(
     # agent 收到的 tools 含注入 schema,bot_system_prompt 携带
     call = fake_agent["agent"].calls[0]
     assert call["bot_system_prompt"] == "你是售后客服助手"
-    tool_names = {t["name"] for t in call["tools"]}  # type: ignore[union-attr]
+    tool_names = {
+        t["name"] for t in cast("list[dict[str, object]]", call["tools"])
+    }
     assert tool_names == {"execute_sql", "rag_retrieve"}
 
 
@@ -115,10 +124,14 @@ async def test_bot_prompt_guardrail_rejected(
 
 
 async def test_runtime_perm_revoke_intersection(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     """运行时求交:创建者 tool:sql:execute 被回收后,注入工具集不含 execute_sql。"""
-    uid, token = await _user(client, session, make_user, "bot_revoke")
+    _uid, token = await _user(client, session, make_user, "bot_revoke")
     fake_agent["agent"] = FakeAgent()
     r = await client.post("/system/bots", headers=_auth(token), json=BOT_PAYLOAD)
     assert r.status_code == 201
@@ -138,14 +151,21 @@ async def test_runtime_perm_revoke_intersection(
     fake_agent["agent"].calls.clear()
     r2 = await client.post("/bot/after_sale/chat", json={"question": "查商品"})
     assert r2.status_code == 200
-    tool_names = {t["name"] for t in fake_agent["agent"].calls[0]["tools"]}  # type: ignore[union-attr]
+    calls = fake_agent["agent"].calls
+    tool_names = {
+        t["name"] for t in cast("list[dict[str, object]]", calls[0]["tools"])
+    }
     assert tool_names == {"rag_retrieve"}  # execute_sql 被剔除(零同步)
 
 
 async def test_api_key_lifecycle(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
-    uid, token = await _user(client, session, make_user, "bot_key")
+    _uid, token = await _user(client, session, make_user, "bot_key")
     fake_agent["agent"] = FakeAgent()
     r = await client.post("/system/bots", headers=_auth(token), json=BOT_PAYLOAD)
     bot_id = r.json()["id"]
@@ -197,7 +217,11 @@ async def test_public_page_404_when_not_public(
 
 
 async def test_run_empty_tools_fails_fast(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     """零工具 Bot 运行闸:求交后工具集为空 → fail-fast 友好错误,
     不发起 LLM 调用(伪调用假应答根治;治本闸②)。"""
@@ -245,7 +269,11 @@ async def test_bot_others_404(
 
 
 async def test_r1_h1_model_validation(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     """R1-H1:model 非注册表名拒绝(fail-closed;agent 替身返回空注册表)。"""
     _, token = await _user(client, session, make_user, "bot_model")
@@ -283,7 +311,11 @@ async def test_r1_h3_bot_key_global_unique(
 
 
 async def test_r1_m2_confirm_tools_excluded(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     """R1-M2:Bot 渠道剔除需确认写工具(公告权限授予创建者后仍不注入)。"""
     uid, token = await _user(client, session, make_user, "bot_m2")
@@ -307,13 +339,20 @@ async def test_r1_m2_confirm_tools_excluded(
         f"/system/bots/{r.json()['id']}", headers=_auth(token), json={"is_public": True}
     )
     await client.post("/bot/m2/chat", json={"question": "发公告"})
-    tool_names = {t["name"] for t in fake_agent["agent"].calls[0]["tools"]}  # type: ignore[union-attr]
+    calls = fake_agent["agent"].calls
+    tool_names = {
+        t["name"] for t in cast("list[dict[str, object]]", calls[0]["tools"])
+    }
     assert "create_system_announcement" not in tool_names
     assert "execute_sql" in tool_names
 
 
 async def test_r1_m1_openai_required_fields(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     """R1-M1:OpenAI 响应含 created/model(SDK 必填)。"""
     _, token = await _user(client, session, make_user, "bot_sdk")

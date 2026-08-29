@@ -6,7 +6,7 @@
 
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 # 与 datasource key 同款形态(008);fullmatch 判定在领域层(尾换行绕过教训)
 SERVER_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
@@ -30,14 +30,15 @@ def has_redos_pattern(schema: dict[str, Any]) -> bool:
     while stack:
         node = stack.pop()
         if isinstance(node, dict):
-            for k, v in node.items():
+            # isinstance 收窄产物键型未知,收窄键型后再遍历(仅类型断言)
+            for k, v in cast("dict[str, object]", node).items():
                 if k == "pattern" and isinstance(v, str):
                     if len(v) > _PATTERN_LEN_CAP or _NESTED_QUANTIFIER_RE.search(v):
                         return True
                 else:
                     stack.append(v)
         elif isinstance(node, list):
-            stack.extend(node)
+            stack.extend(cast("list[object]", node))
     return False
 
 
@@ -86,7 +87,8 @@ class ServerConfig:
     endpoint: str
     enabled: bool
     header_keys: list[str]  # 仅键名(值掩码 ***)
-    tools: list[dict[str, Any]] = field(default_factory=list)
+    # default_factory 走参数化泛型别名(bare list 推断出 Unknown 元素)
+    tools: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
     last_sync_at: str | None = None
     last_sync_error: str = ""
 
@@ -108,7 +110,7 @@ def merge_discovered(
     序),全名超 64 字符跳过(R1-A4)——均记入告警。_seen 供跨 server
     合并调用方传入(目录聚合时),单 server 同步时为空。
     """
-    seen = _seen if _seen is not None else set()
+    seen = _seen if _seen is not None else set[str]()
     entries: list[dict[str, Any]] = []
     conflicts: list[str] = []
     for t in discovered:

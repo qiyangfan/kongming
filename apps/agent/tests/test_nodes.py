@@ -4,6 +4,8 @@
 拼装与降级、SQL 清洗、selfheal 错误喂回、预检四规则、三态映射、洞察降级链。
 """
 
+from typing import cast
+
 import pytest
 
 from kongming_agent import deps
@@ -262,7 +264,7 @@ async def test_generate_history_sql_section_placement(monkeypatch: pytest.Monkey
     await nodes.generate(
         _state(schema_hint="表 t(a)", history_sql="SELECT count(*) FROM t")
     )
-    system, user, _ = fake.calls[0]
+    _, user, _ = fake.calls[0]
     assert "历史成功 SQL" in user
     assert user.index("可用表结构") < user.index("参考历史成功 SQL") < user.index("生成 SQL")
     assert "SELECT count(*) FROM t" in user
@@ -545,7 +547,8 @@ def test_compute_stats_numeric_and_bool() -> None:
 def test_parse_summary_json(raw: str, summary: str, n_insights: int) -> None:
     parsed = nodes.parse_summary_json(raw)
     assert parsed.get("summary", "") == summary
-    assert len(parsed.get("insights", [])) == n_insights
+    # insights 值型为 object,按生产代码实型(list)收窄
+    assert len(cast("list[object]", parsed.get("insights", []))) == n_insights
 
 
 def test_fallback_summary() -> None:
@@ -566,7 +569,8 @@ async def test_summarize_llm_failure_degrades(monkeypatch: pytest.MonkeyPatch) -
     out = await nodes.summarize(_state(execution=exe))
     assert out["insights"] == []
     assert "qty" in str(out["summary"])  # stats 兜底
-    assert out["stats"]["qty_max"] == 7
+    # stats 值型为 object,按生产代码实型(dict)收窄
+    assert cast("dict[str, object]", out["stats"])["qty_max"] == 7
 
 
 async def test_summarize_non_json_degrades_to_fallback(
@@ -585,7 +589,7 @@ async def test_summarize_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     out = await nodes.summarize(_state(execution=exe))
     assert out["summary"] == "库存共 30 件"
     assert out["insights"] == [{"type": "max", "text": "连弩最多"}]
-    assert out["stats"]["qty_max"] == 30
+    assert cast("dict[str, object]", out["stats"])["qty_max"] == 30
 
 
 async def test_summarize_context_grounded_with_stats(monkeypatch: pytest.MonkeyPatch) -> None:

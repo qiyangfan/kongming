@@ -8,6 +8,7 @@ import asyncio
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 API_ROOT = Path(__file__).resolve().parent.parent
 
@@ -58,6 +59,9 @@ from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 from alembic import command  # noqa: E402
 from kongming.db import get_sessionmaker  # noqa: E402
 from kongming.redis_client import get_redis  # noqa: E402
+
+if TYPE_CHECKING:
+    from kongming.auth.models import NormalizedProfile
 
 TEST_DB = "kongming_test"
 
@@ -119,11 +123,12 @@ def _admin_url() -> str:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _migrated_db() -> None:
-    """会话级:缺库则建 + 程序化 alembic upgrade head。"""
+def _migrated_db() -> None:  # pyright: ignore[reportUnusedFunction]
+    """会话级:缺库则建 + 程序化 alembic upgrade head(pytest 按名发现,非引用访问)。"""
 
     async def _ensure() -> None:
-        conn = await asyncpg.connect(_admin_url())
+        # asyncpg 无 py.typed:模块成员推断部分 Unknown,表达式级 cast 收口
+        conn = await cast("Any", asyncpg).connect(_admin_url())
         try:
             exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname=$1", TEST_DB)
             if not exists:
@@ -138,12 +143,13 @@ def _migrated_db() -> None:
 
 
 @pytest.fixture(autouse=True)
-async def _clean(_migrated_db: None) -> AsyncIterator[None]:
-    """用例级隔离:TRUNCATE 全部身份/审计表 + Redis 库清空。"""
+async def _clean(_migrated_db: None) -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
+    """用例级隔离:TRUNCATE 全部身份/审计表 + Redis 库清空(pytest 按名发现)。"""
     async with get_sessionmaker()() as s:
         await s.execute(text(f"TRUNCATE {', '.join(TRUNCATED)} CASCADE"))
         await s.commit()
-    await get_redis().flushdb()
+    # redis-py flushdb 返回类型标注不全,实例经 cast 收口
+    await cast("Any", get_redis()).flushdb()
     yield
 
 
@@ -208,11 +214,13 @@ def make_user(session: AsyncSession) -> MakeUser:
 
 
 @pytest.fixture
-def fake_provider(monkeypatch: pytest.MonkeyPatch) -> Callable[[str, object], None]:
+def fake_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[[str, "NormalizedProfile"], None]:
     """联邦 HTTP 交换替身:把 name 为 key 的 provider 换成返回固定 profile 的假插件。
 
     真插件的 code→token→profile 外呼不进测试;授权 URL 由假插件原样携带 state 返回,
-    走通 start→callback 全链路。
+    走通 start→callback 全链路。NormalizedProfile 仅类型引用,运行时走惰性导入。
     """
     from kongming.auth import providers
     from kongming.auth.models import NormalizedProfile

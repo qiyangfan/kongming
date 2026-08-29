@@ -24,6 +24,7 @@ gen=链路响应 JSON 归一化类型),比较前统一过 canon_cell(数值 roun
 
 import math
 import uuid
+from collections.abc import Sequence
 from datetime import date, datetime, time
 from decimal import Decimal
 
@@ -46,7 +47,7 @@ def canon_cell(v: object) -> object:
     return v
 
 
-def _canon_rows(rows: list[list[object]] | list[Row]) -> list[Row]:
+def _canon_rows(rows: Sequence[Sequence[object]]) -> list[Row]:
     return [tuple(canon_cell(v) for v in row) for row in rows]
 
 
@@ -66,7 +67,7 @@ def _safe_sort_key(row: Row) -> tuple[tuple[bool, str, object], ...]:
 
 
 def result_set_equal(
-    gold_rows: list[list[object]] | list[Row], gen_rows: list[list[object]] | list[Row]
+    gold_rows: Sequence[Sequence[object]], gen_rows: Sequence[Sequence[object]]
 ) -> bool:
     """Execution Match(严格):归一化后 multiset 精确相等(排序无关)。"""
     a = _canon_rows(gold_rows)
@@ -75,8 +76,8 @@ def result_set_equal(
 
 
 def rows_approx_equal(
-    gold_rows: list[list[object]] | list[Row],
-    gen_rows: list[list[object]] | list[Row],
+    gold_rows: Sequence[Sequence[object]],
+    gen_rows: Sequence[Sequence[object]],
     ordered: bool,
 ) -> bool:
     """行集合近似等值(数值已 canon 至 1e-6):ordered 保序,否则 multiset。"""
@@ -96,7 +97,7 @@ def columns_compatible(gold_cols: list[str], gen_cols: list[str]) -> bool:
 
 
 def project_rows(
-    cols: list[str], rows: list[list[object]] | list[Row], target_cols: list[str]
+    cols: list[str], rows: Sequence[Sequence[object]], target_cols: list[str]
 ) -> list[Row] | None:
     """rows 按列名投影到 target_cols(大小写不敏感,按 target 顺序重排)——
     gold ⊂ gen 时元数不同无法逐行比;缺列返回 None(防御)。"""
@@ -110,7 +111,7 @@ def project_rows(
     return [tuple(row[i] for i in idx) for row in rows]
 
 
-def numeric_multiset(rows: list[list[object]] | list[Row]) -> list[float]:
+def numeric_multiset(rows: Sequence[Sequence[object]]) -> list[float]:
     """提取结果集全部数值元素(排除 bool)round 1e-6 后排序——容忍列投影/
     聚合别名差异的核心口径。"""
     nums: list[float] = []
@@ -127,9 +128,9 @@ def numeric_multiset(rows: list[list[object]] | list[Row]) -> list[float]:
 
 def result_set_loose_match(
     gold_cols: list[str],
-    gold_rows: list[list[object]] | list[Row],
+    gold_rows: Sequence[Sequence[object]],
     gen_cols: list[str],
-    gen_rows: list[list[object]] | list[Row],
+    gen_rows: Sequence[Sequence[object]],
     gold_ordered: bool = False,
 ) -> bool:
     """Execution Match(宽松,黄金指标):路径 1 列等价+投影行近似,路径 2

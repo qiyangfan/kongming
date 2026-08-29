@@ -4,7 +4,8 @@
 安全面:未认证 401、无权限 403、撤销立即生效、租户白名单、会话归属同形 404。
 """
 
-from collections.abc import AsyncIterator
+
+from collections.abc import Iterator
 
 import pytest
 from httpx import AsyncClient
@@ -42,14 +43,14 @@ class FakeAgent:
 
 
 @pytest.fixture
-def fake_agent() -> AsyncIterator[FakeAgent]:  # type: ignore[misc]
+def fake_agent() -> Iterator[dict[str, FakeAgent]]:
     holder: dict[str, FakeAgent] = {}
 
     def _factory() -> FakeAgent:
         return holder["agent"]
 
     app.dependency_overrides[get_agent_client] = _factory
-    yield holder  # type: ignore[misc]
+    yield holder
     app.dependency_overrides.pop(get_agent_client, None)
 
 
@@ -176,7 +177,7 @@ async def test_no_perm_403(
 async def test_perm_revoke_effective_immediately(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    uid, token = await _user_with_chat_perm(client, session, make_user, "revoked")
+    _uid, token = await _user_with_chat_perm(client, session, make_user, "revoked")
     await session.execute(
         text(
             "DELETE FROM public.sys_role_permission rp"
@@ -441,7 +442,7 @@ async def test_error_maps_failed(
 
 async def test_no_data_maps_neutral_status(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser,
-    fake_agent: dict[FakeAgent],
+    fake_agent: dict[str, FakeAgent],
 ) -> None:
     """044:verdict=NO_DATA → 消息第四态;summary 承载中性文案,error 空无产物卡。"""
     _, token = await _user_with_chat_perm(client, session, make_user)

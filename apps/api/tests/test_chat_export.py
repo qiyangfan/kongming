@@ -5,8 +5,10 @@
 枚举收口)、响应头 Content-Disposition 时间戳文件名、文件体可读回、
 租户白名单复校 403。
 """
+# pyright: reportPrivateUsage=false
 
 import io
+from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
@@ -60,8 +62,7 @@ def test_xlsx_bold_header_widths_and_types() -> None:
         max_rows=100,
     )
     assert truncated is False
-    wb = load_workbook(io.BytesIO(content))
-    ws = wb.active
+    ws = cast('Any', load_workbook(io.BytesIO(content)).active)
     assert ws.title == "查询结果"
     assert ws["A1"].value == "名称" and ws["A1"].font.bold is True  # 表头加粗
     assert ws["B2"].value == 30 and isinstance(ws["B2"].value, int)  # 数值原生
@@ -75,7 +76,7 @@ def test_xlsx_bold_header_widths_and_types() -> None:
 def test_xlsx_truncation() -> None:
     content, truncated = to_xlsx(["a"], [[1], [2], [3]], max_rows=1)
     assert truncated is True
-    ws = load_workbook(io.BytesIO(content)).active
+    ws = cast('Any', load_workbook(io.BytesIO(content)).active)
     assert ws.max_row == 2  # 表头 + 1 数据行
 
 
@@ -86,7 +87,7 @@ def test_xlsx_illegal_control_chars_stripped() -> None:
     """PG text 允许 \\x01 等控制字符;openpyxl 遇之抛 IllegalCharacterError(裸 500
     实证)——文本化时剥除,不再 500。"""
     content, _ = to_xlsx(["x"], [["a\x01b\x0bc"]], max_rows=10)
-    ws = load_workbook(io.BytesIO(content)).active
+    ws = cast('Any', load_workbook(io.BytesIO(content)).active)
     assert ws["A2"].value == "abc"
 
 
@@ -196,7 +197,7 @@ async def test_export_xlsx_response_shape(
     assert r.status_code == 200
     assert "spreadsheetml" in r.headers["content-type"]
     assert ".xlsx" in r.headers["content-disposition"]
-    ws = load_workbook(io.BytesIO(r.content)).active
+    ws = cast('Any', load_workbook(io.BytesIO(r.content)).active)
     assert ws["A1"].value == "name" and ws["A2"].value == "连弩"
 
 
@@ -257,12 +258,12 @@ async def test_export_audit_logged(
 
 
 async def test_export_audit_failure_not_blocking(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, monkeypatch
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """审计写失败不阻断导出(audit spec 铁律,与 004 SqlAuditWriter 同语义)。"""
     from kongming.auth.repository import SqlOperLogRepo
 
-    async def _boom(self, *a, **kw):  # type: ignore[no-untyped-def]
+    async def _boom(self: object, *a: object, **kw: object) -> None:
         raise RuntimeError("oper_log down")
 
     monkeypatch.setattr(SqlOperLogRepo, "add", _boom)

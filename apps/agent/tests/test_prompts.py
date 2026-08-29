@@ -69,7 +69,7 @@ def test_sql_gen_projection_id_discipline() -> None:
 
 def test_prompts_exception_log_046_registered() -> None:
     """046 增量已在 prompts.py 文件头例外清单登记(prompt 资产纪律)。"""
-    assert "046 projection-id-discipline" in prompts.__doc__
+    assert "046 projection-id-discipline" in (prompts.__doc__ or "")
 
 
 def test_sql_gen_column_level_sentinel() -> None:
@@ -126,7 +126,9 @@ def test_summarize_alias_alignment_rules() -> None:
     # 双规则共存(018 事实性 + 037 称谓)
     assert "不得外推到不可见数据" in prompts.SUMMARIZE_SYSTEM
     # 例外清单登记(文件头):037 增量已登记
-    assert "SUMMARIZE_SYSTEM 称谓对齐规则(2026-08-24,037 entity-alias)" in prompts.__doc__
+    assert "SUMMARIZE_SYSTEM 称谓对齐规则(2026-08-24,037 entity-alias)" in (
+        prompts.__doc__ or ""
+    )
 
 
 def test_sql_gen_table_scope_discipline() -> None:
@@ -142,7 +144,7 @@ def test_sql_gen_table_scope_discipline() -> None:
 
 def test_prompts_exception_log_043_registered() -> None:
     """043 增量已在 prompts.py 文件头例外清单登记(prompt 资产纪律)。"""
-    assert "043 generation-discipline" in prompts.__doc__
+    assert "043 generation-discipline" in (prompts.__doc__ or "")
 
 
 def test_fullwidth_discipline_no_stray_halfwidth_comma() -> None:

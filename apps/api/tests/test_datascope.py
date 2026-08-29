@@ -19,7 +19,7 @@ BIZ_SCHEMA = "tenant_ds"
 
 
 @pytest.fixture(scope="module", autouse=True)
-async def _biz_schema() -> AsyncIterator[None]:
+async def _biz_schema() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     """业务侧造数:带/不带过滤列的表各一,模块结束即毁。"""
     async with get_engine().begin() as conn:
         await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{BIZ_SCHEMA}"'))

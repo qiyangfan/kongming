@@ -10,13 +10,13 @@ from kongming.auth.providers.github import GitHubProvider
 from kongming.auth.providers.google import GoogleProvider
 from kongming.auth.providers.wecom import WecomProvider
 
-REGISTRY: dict[str, OAuthProvider] = {
-    p.key: p
-    for p in (
-        GitHubProvider(),
-        GoogleProvider(),
-        WecomProvider(),
-        DingTalkProvider(),
-        FeishuProvider(),
-    )
-}
+# 显式宽型中间变量:dict 不变,具体 provider 元组推导直赋宽型会被 pyright 拒
+_providers: tuple[OAuthProvider, ...] = (
+    GitHubProvider(),
+    GoogleProvider(),
+    WecomProvider(),
+    DingTalkProvider(),
+    FeishuProvider(),
+)
+
+REGISTRY: dict[str, OAuthProvider] = {p.key: p for p in _providers}

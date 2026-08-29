@@ -86,7 +86,7 @@ class UserCreateIn(BaseModel):
     status: UserStatus = "ACTIVE"
     dept_id: uuid.UUID | None = None
     tenant_id: uuid.UUID
-    role_ids: list[uuid.UUID] = Field(default_factory=list)
+    role_ids: list[uuid.UUID] = Field(default_factory=list[uuid.UUID])
 
 
 class UserUpdateIn(BaseModel):
@@ -97,7 +97,7 @@ class UserUpdateIn(BaseModel):
     status: UserStatus
     dept_id: uuid.UUID | None = None
     tenant_id: uuid.UUID
-    role_ids: list[uuid.UUID] = Field(default_factory=list)
+    role_ids: list[uuid.UUID] = Field(default_factory=list[uuid.UUID])
     password: str | None = Field(default=None, min_length=8, max_length=128)
 
 
@@ -191,7 +191,7 @@ class DeptNodeOut(BaseModel):
     tenant_id: str
     sort: int
     status: str
-    children: list["DeptNodeOut"] = Field(default_factory=list)
+    children: list["DeptNodeOut"] = Field(default_factory=list["DeptNodeOut"])
 
 
 class TenantOut(BaseModel):
@@ -523,7 +523,7 @@ _STATUS_BY_TYPE: tuple[tuple[type[SystemError], int], ...] = (
 
 def register_system_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(IntegrityError)
-    async def _integrity(request: Request, e: IntegrityError) -> JSONResponse:
+    async def _(request: Request, e: IntegrityError) -> JSONResponse:
         # 仅收敛管理面路径的并发唯一约束竞态(username/role_key 先查后插窗口);
         # 其他域维持 500 语义(与未注册本 handler 时的默认行为等价),证据留日志
         if request.url.path.startswith("/api/system") or request.url.path.startswith("/system"):
@@ -533,6 +533,6 @@ def register_system_error_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
     @app.exception_handler(SystemError)
-    async def _system_error(_: Request, e: SystemError) -> JSONResponse:
+    async def _(_: Request, e: SystemError) -> JSONResponse:
         code = next((c for t, c in _STATUS_BY_TYPE if isinstance(e, t)), 400)
         return JSONResponse(status_code=code, content={"detail": str(e)})

@@ -9,10 +9,9 @@
 """
 
 import httpx
-from authlib.integrations.httpx_client import AsyncOAuth2Client
 
 from kongming.auth.models import NormalizedProfile, ProviderExchangeFailed
-from kongming.auth.providers.base import OAuthProviderBase, resp_json
+from kongming.auth.providers.base import OAuthClient, OAuthProviderBase, resp_json
 from kongming.config import Settings
 
 
@@ -55,7 +54,7 @@ class DingTalkProvider(OAuthProviderBase):
         )
         return url
 
-    async def fetch_raw_profile(self, client: AsyncOAuth2Client) -> NormalizedProfile:
+    async def fetch_raw_profile(self, client: OAuthClient) -> NormalizedProfile:
         raise NotImplementedError("钉钉 token 为 JSON 请求体,走 fetch_profile 覆写")
 
     async def fetch_profile(

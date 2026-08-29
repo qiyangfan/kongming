@@ -25,7 +25,7 @@ class InputVerdict:
 
     blocked: bool
     processed: list[str]  # 与输入 texts 同序(脱敏后)
-    hits: list[GuardrailHit] = field(default_factory=list)
+    hits: list[GuardrailHit] = field(default_factory=list[GuardrailHit])
 
 
 class GuardrailService:

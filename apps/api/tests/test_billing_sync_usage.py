@@ -1,8 +1,10 @@
 """035 请求内同步采集测试(测试先行):bot 链路用量随响应回传→api 请求内
 落库(bot_id/tenant 归属/seq 幂等);落库失败不阻断应答;非 bot 渠道
 fire-and-forget 零回归。"""
+# pyright: reportPrivateUsage=false
 
-from collections.abc import AsyncIterator
+
+from collections.abc import Iterator
 
 import pytest
 from httpx import AsyncClient
@@ -44,7 +46,7 @@ class FakeAgentUsage:
 
 
 @pytest.fixture
-def fake_agent_usage() -> AsyncIterator[dict[str, FakeAgentUsage]]:  # type: ignore[misc]
+def fake_agent_usage() -> Iterator[dict[str, FakeAgentUsage]]:
     holder: dict[str, FakeAgentUsage] = {}
     app.dependency_overrides[get_agent_client] = lambda: holder["agent"]
     yield holder

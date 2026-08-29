@@ -1,5 +1,6 @@
 """032 team-workspace 测试:角色边界矩阵/可见性过滤/归属变更/团队记忆
 (测试先行,安全类)。"""
+# pyright: reportPrivateUsage=false
 
 from httpx import AsyncClient
 from sqlalchemy import text
@@ -143,7 +144,7 @@ async def test_bot_visibility_by_team(
     from tests.test_bot import BOT_PAYLOAD
 
     users = await _mk_users(client, session, make_user)
-    owner_uid, owner_token = users["tm_owner"]
+    _owner_uid, owner_token = users["tm_owner"]
     member_uid, member_token = users["tm_member"]
     _, viewer_token = users["tm_viewer"]
     _, out_token = users["tm_out"]
@@ -461,7 +462,7 @@ async def test_team_memory_write_and_recall(
     _, owner_token = users["tm_owner"]
     member_uid, member_token = users["tm_member"]
     viewer_uid, viewer_token = users["tm_viewer"]
-    out_uid, out_token = users["tm_out"]
+    out_uid, _out_token = users["tm_out"]
     rid = (
         await session.execute(
             text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'")
@@ -533,7 +534,7 @@ async def test_team_bot_key_revoke_requires_can_manage(
     from tests.test_bot import BOT_PAYLOAD
 
     users = await _mk_users(client, session, make_user)
-    owner_uid, owner_token = users["tm_owner"]
+    _owner_uid, owner_token = users["tm_owner"]
     _, viewer_token = users["tm_viewer"]
     tid = await _mk_team(client, owner_token)
     await client.post(

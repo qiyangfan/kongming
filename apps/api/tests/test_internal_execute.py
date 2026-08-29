@@ -3,9 +3,11 @@
 真实 PG:租户 schema 双造数证路由隔离;审计断言直查 sys_sql_audit;
 内部令牌 middleware 回归;三态 verdict(PASS/BLOCKED/ERROR)全覆盖。
 """
+# pyright: reportPrivateUsage=false
 
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
 import pytest
 from httpx import AsyncClient
@@ -22,7 +24,7 @@ SCHEMA_B = "tenant_itb"
 
 
 @pytest.fixture(scope="module", autouse=True)
-async def _biz() -> AsyncIterator[None]:
+async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     """两租户同名表不同数据:search_path 路由隔离的活证。"""
     async with get_engine().begin() as conn:
         for schema, mark in ((SCHEMA_A, "A"), (SCHEMA_B, "B")):
@@ -90,7 +92,7 @@ async def _bind_role(s: AsyncSession, user_id: str, role_id: str) -> None:
     await s.commit()
 
 
-async def _audits(s: AsyncSession, trace_id: str) -> list[dict]:
+async def _audits(s: AsyncSession, trace_id: str) -> list[dict[str, Any]]:
     rows = (
         await s.execute(
             text("SELECT * FROM public.sys_sql_audit WHERE trace_id = :t"),
@@ -100,8 +102,8 @@ async def _audits(s: AsyncSession, trace_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def _payload(tenant_key: str, sql: str, **kw: object) -> dict:
-    base = {
+def _payload(tenant_key: str, sql: str, **kw: object) -> dict[str, Any]:
+    base: dict[str, Any] = {
         "trace_id": f"tr-{uuid.uuid4().hex[:12]}",
         "tenant_key": tenant_key,
         "sql_text": sql,
@@ -392,14 +394,16 @@ async def test_rewrite_recheck_blocks_tainted_sql(
 ) -> None:
     """清单 10 后半:改写产物复检——改写被污染(注DDL)时防火墙复检拒执行。"""
     from kongming.datascope import rewrite
+    from kongming.datascope.models import ScopeFilter
 
     uid = await make_user("exec-taint")
     tid = await _mk_tenant(session, "ita")
     await _bind_tenant(session, uid, tid)
     await _bind_role(session, uid, await _mk_role(session, "IE_TAINT", "SELF"))
-    monkeypatch.setattr(
-        rewrite, "apply_filter", lambda sql, flt: ("DROP TABLE goods", {})
-    )
+    def _taint(sql: str, flt: ScopeFilter) -> tuple[str, dict[str, object]]:
+        return ("DROP TABLE goods", {})
+
+    monkeypatch.setattr(rewrite, "apply_filter", _taint)
     p = _payload("ita", "SELECT mark FROM goods", user_id=uid)
     resp = await client.post("/internal/sql/execute", json=p, headers=INTERNAL)
     body = resp.json()

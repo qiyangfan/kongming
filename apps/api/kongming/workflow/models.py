@@ -8,7 +8,7 @@
 import copy
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 NODE_TYPES = ("sql", "http", "condition", "loop", "transform", "agent")
 
@@ -44,8 +44,9 @@ class DefinitionConflictError(Exception):
 class NodeDef:
     id: str
     type: str
-    config: dict[str, Any] = field(default_factory=dict)
-    depends_on: list[str] = field(default_factory=list)
+    # default_factory 走参数化泛型别名(bare dict/list 推断出 Unknown 元素)
+    config: dict[str, Any] = field(default_factory=dict[str, Any])
+    depends_on: list[str] = field(default_factory=list[str])
 
 
 def _parse_nodes(definition: dict[str, Any]) -> list[NodeDef]:
@@ -53,9 +54,10 @@ def _parse_nodes(definition: dict[str, Any]) -> list[NodeDef]:
     if not isinstance(raw, list) or not raw:
         raise DagValidationError("definition.nodes 必须是非空数组")
     nodes: list[NodeDef] = []
-    for i, item in enumerate(raw):
-        if not isinstance(item, dict):
+    for i, raw_item in enumerate(cast("list[object]", raw)):
+        if not isinstance(raw_item, dict):
             raise DagValidationError(f"nodes[{i}] 非对象")
+        item = cast("dict[str, object]", raw_item)
         nid = str(item.get("id") or "").strip()
         if not nid:
             raise DagValidationError(f"nodes[{i}] 缺 id")
@@ -66,8 +68,10 @@ def _parse_nodes(definition: dict[str, Any]) -> list[NodeDef]:
             NodeDef(
                 id=nid,
                 type=ntype,
-                config=config if isinstance(config, dict) else {},
-                depends_on=[str(d) for d in deps] if isinstance(deps, list) else [],
+                config=cast("dict[str, Any]", config) if isinstance(config, dict) else {},
+                depends_on=[str(d) for d in cast("list[object]", deps)]
+                if isinstance(deps, list)
+                else [],
             )
         )
     return nodes
@@ -151,11 +155,11 @@ def validate_dag(
 def resolve_ref(ref: str, context: dict[str, Any]) -> Any:
     """引用解析:点路径逐层走字典(node_id.outputs.a.b / _loop.item);
     不存在 → None(渲染层转空串,不炸)。"""
-    cur: Any = context
+    cur: object = context
     for part in ref.split("."):
         if not isinstance(cur, dict):
             return None
-        cur = cur.get(part)
+        cur = cast("dict[str, object]", cur).get(part)
     return cur
 
 
@@ -174,9 +178,12 @@ def render_template(template: Any, context: dict[str, Any]) -> Any:
             template,
         )
     if isinstance(template, dict):
-        return {k: render_template(v, context) for k, v in template.items()}
+        return {
+            k: render_template(v, context)
+            for k, v in cast("dict[object, object]", template).items()
+        }
     if isinstance(template, list):
-        return [render_template(v, context) for v in template]
+        return [render_template(v, context) for v in cast("list[object]", template)]
     return template
 
 

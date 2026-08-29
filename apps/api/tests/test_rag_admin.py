@@ -5,13 +5,15 @@
 datasource 校验同形 400/非法 schema_name 400/上传块数上限/审计落库/
 覆盖优先级(自动不覆盖人工)/幂等 upsert。
 """
+# pyright: reportPrivateUsage=false
 
 import hashlib
 import math
 from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING, cast
 
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +21,9 @@ from kongming.auth.seed import seed_all
 from kongming.config import get_settings
 from kongming.rag.agent_callback import AgentRagClient
 from tests.conftest import MakeUser
+
+if TYPE_CHECKING:
+    from kongming.rag.models import TableBlock
 from tests.test_chat_query import _auth, _bind, _default_tenant_id, _login
 
 RAG = "/system/rag"
@@ -26,7 +31,7 @@ EMB_DIM = 1536
 
 
 @pytest.fixture(scope="module", autouse=True)
-async def _biz() -> AsyncIterator[None]:
+async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     """tenant_default 业务表(default 源内省的活数据)。"""
     from kongming.db import get_engine
 
@@ -69,19 +74,20 @@ def fake_agent(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         return [_fake_vector(t) for t in texts]
 
     async def fake_describe(
-        self: AgentRagClient, block: object, schema_name: str
+        self: AgentRagClient, block: "TableBlock", schema_name: str
     ) -> tuple[bool, object]:
         from kongming.rag.models import TableBlock
 
-        state["described"] = state.get("described", []) + [block.table_name]  # type: ignore[operator]
+        described = cast("list[str]", state.get("described", []))
+        state["described"] = described + [block.table_name]
         if not state["enrich"]:
             return False, block
-        b = block if isinstance(block, TableBlock) else block
+        b = block
         return True, TableBlock(
-            table_name=b.table_name,  # type: ignore[attr-defined]
-            table_comment=f"AI:{b.table_name}",  # type: ignore[attr-defined]
+            table_name=b.table_name,
+            table_comment=f"AI:{b.table_name}",
             columns_comment={
-                k: f"{v} 中文说明" for k, v in b.columns_comment.items()  # type: ignore[attr-defined]
+                k: f"{v} 中文说明" for k, v in b.columns_comment.items()
             },
             sample_queries=["SELECT count(*) FROM x.y GROUP BY 1"],
             alias=str(state.get("alias") or ""),  # 037:可控 AI 提炼别名
@@ -124,7 +130,7 @@ async def _upload(
     datasource_key: str = "default",
     schema_name: str = "tenant_default",
     tenant: str | None = None,
-) -> object:
+) -> Response:
     headers = _auth(token)
     if tenant is not None:
         headers = {**headers, "X-Tenant-Id": tenant}
@@ -254,10 +260,13 @@ async def test_upload_no_table_blocks_400(
     assert "##" in r.json()["detail"]
 
 
-def _make_pdf() -> bytes:
+def _make_pdf() -> bytes:  # pyright: ignore[reportUnusedFunction]
     """代码构造最小合法 PDF(pypdf 空文档写出,单页文本)。"""
+    import importlib
+
     from pypdf import PdfWriter
-    from pypdf._text_extraction import layout  # noqa: F401  # 触发布局模块加载(无副作用)
+
+    importlib.import_module("pypdf._text_extraction.layout")  # 触发布局模块加载(无副作用)
 
     w = PdfWriter()
     w.add_blank_page(width=200, height=200)
@@ -655,7 +664,8 @@ async def test_fetch_metadata_reconciles_stale_entries(
             )
         )
     ).scalar_one()
-    assert (audit or {}).get("removed", 0) >= 1  # 审计可溯
+    # 审计可溯;cast 仅定型,运行时不变
+    assert cast("dict[str, int]", audit or {}).get("removed", 0) >= 1
 
 
 async def test_fetch_metadata_cross_schema_same_name_no_shadow(

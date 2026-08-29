@@ -3,12 +3,14 @@
 覆盖:introspection 幂等/manual 守卫/无 FK 不猜;指标 CRUD 唯一约束;
 enrich 注入收窄与命中;级联删除;管理端点 403。
 """
+# pyright: reportPrivateUsage=false
 
 import uuid
 from collections.abc import AsyncIterator
+from typing import Any, cast
 
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +24,7 @@ SCHEMA = "tenant_sem"
 
 
 @pytest.fixture(scope="module", autouse=True)
-async def _biz() -> AsyncIterator[None]:
+async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     """带 FK 的两表(orders→customers)+无 FK 表,供 introspection。"""
     async with get_engine().begin() as conn:
         await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))  # noqa: S608  # 模块常量
@@ -104,6 +106,7 @@ async def test_introspect_idempotent_and_no_guess(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     token = await _admin(client, session)
+    r: Response
     for _ in range(2):
         r = await client.post(
             "/system/semantic/relations/introspect",
@@ -111,7 +114,7 @@ async def test_introspect_idempotent_and_no_guess(
             json={"datasource_key": "default"},
         )
         assert r.status_code == 200
-    assert r.json()["relations"] >= 1  # orders→customers FK 被扫描到
+    assert r.json()["relations"] >= 1  # pyright: ignore[reportPossiblyUnboundVariable]  # range(2) 恒迭代,r 必已绑定;orders→customers FK 被扫描到
     rows = (
         await session.execute(
             text("SELECT source_table, target_table, source FROM rag.table_relations")
@@ -337,18 +340,24 @@ async def test_r1_h1_multi_column_fk_paired_correctly(
         headers={"Authorization": f"Bearer {token}", "X-Tenant-Id": "sem"},
         json={"datasource_key": "default"},
     )
-    row = (
-        await session.execute(
-            text(
-                "SELECT join_keys FROM rag.table_relations"
-                " WHERE source_table LIKE '%child_mc'"
+    # Row 成员访问带 Unknown,cast Any 定型(运行时不变)
+    row = cast(
+        "Any",
+        (
+            await session.execute(
+                text(
+                    "SELECT join_keys FROM rag.table_relations"
+                    " WHERE source_table LIKE '%child_mc'"
+                )
             )
-        )
-    ).one()
-    keys = (
-        row.join_keys
+        ).one(),
+    )
+    # join_keys 文本/list 双形态,cast 定型元素为映射(运行时不变)
+    keys = cast(
+        "list[dict[str, Any]]",
+        row.join_keys  # pyright: ignore[reportUnknownMemberType]
         if isinstance(row.join_keys, list)
-        else __import__("json").loads(row.join_keys)
+        else __import__("json").loads(row.join_keys),
     )
     pairs = {(k["left_col"], k["right_col"]) for k in keys}
     assert pairs == {("x", "a"), ("y", "b")}

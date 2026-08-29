@@ -336,6 +336,6 @@ _STATUS_BY_TYPE: tuple[tuple[type[DatasourceError], int], ...] = (
 
 def register_datasource_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(DatasourceError)
-    async def _datasource_error(_: Request, e: DatasourceError) -> JSONResponse:
+    async def _(_: Request, e: DatasourceError) -> JSONResponse:
         code = next((c for t, c in _STATUS_BY_TYPE if isinstance(e, t)), 400)
         return JSONResponse(status_code=code, content={"detail": str(e)})

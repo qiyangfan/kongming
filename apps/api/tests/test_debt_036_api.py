@@ -1,5 +1,6 @@
 """036 清偿包 api 侧测试(测试先行):孤儿附件清理/team_id 回传/
 收藏切换原子化。"""
+# pyright: reportPrivateUsage=false
 
 import asyncio
 
@@ -86,7 +87,7 @@ async def test_bot_list_out_has_team_id(
 ) -> None:
     """spec「归属字段回传」:Bot 列表响应含 team_id(团队资源=团队 id,
     个人=null)。"""
-    uid, token = await _user(client, session, make_user, "d36_b")
+    _uid, token = await _user(client, session, make_user, "d36_b")
     team_id, admin = await _mk_team_full(client, session, key="d36b")
     bot_id = await _mk_store_bot(client, token)
     r = await client.post(

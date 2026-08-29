@@ -6,6 +6,9 @@
 - 重试耗尽→fail:图必然终止(不依赖 recursion_limit)。
 """
 
+from collections.abc import Callable
+from typing import Any, cast
+
 import pytest
 
 from kongming_agent import deps
@@ -71,9 +74,22 @@ class ScriptedApi:
         return self.outcomes.pop(0)
 
 
+# 测试夹具形态:按脚本装配 deps 的替身工厂(每用例一组 LLM 应答+执行结果)
+Harness = Callable[[list[str], list[SqlExecuteOutcome]], tuple[ScriptedLlm, ScriptedApi]]
+
+
+async def _invoke(state: AgentState) -> dict[str, Any]:
+    """get_graph().ainvoke 成员型 strict 下部分未知(LangGraph 泛型),
+    测试边界一次收窄为终态 state dict(自构造 state,键型已知)。"""
+    graph = cast("Any", get_graph())
+    return cast("dict[str, Any]", await graph.ainvoke(state))
+
+
 @pytest.fixture
-def harness(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
-    def _make(llm_answers: list[str], api_outcomes: list[SqlExecuteOutcome]):  # type: ignore[no-untyped-def]
+def harness(monkeypatch: pytest.MonkeyPatch) -> Harness:
+    def _make(
+        llm_answers: list[str], api_outcomes: list[SqlExecuteOutcome]
+    ) -> tuple[ScriptedLlm, ScriptedApi]:
         llm = ScriptedLlm(llm_answers)
         api = ScriptedApi(api_outcomes)
         monkeypatch.setattr(deps, "get_llm", lambda: llm)
@@ -95,12 +111,12 @@ def _initial() -> AgentState:
     }
 
 
-async def test_first_round_pass(harness) -> None:  # type: ignore[no-untyped-def]
+async def test_first_round_pass(harness: Harness) -> None:
     llm, api = harness(
         ["商品总库存", "SELECT sum(qty) FROM goods", '{"summary":"共 30"}'],
         [SqlExecuteOutcome(verdict="PASS", columns=["sum"], rows=[[30]])],
     )
-    final = await get_graph().ainvoke(_initial())
+    final = await _invoke(_initial())
     assert final["execution"].verdict == "PASS"
     assert final["summary"] == "共 30"
     assert final["retry_count"] == 0
@@ -109,7 +125,7 @@ async def test_first_round_pass(harness) -> None:  # type: ignore[no-untyped-def
     assert "tenant_default.goods" in llm.users[1]  # schema 提示拼入 generate
 
 
-async def test_error_selfheal_then_pass(harness) -> None:  # type: ignore[no-untyped-def]
+async def test_error_selfheal_then_pass(harness: Harness) -> None:
     llm, api = harness(
         [
             "商品总库存",
@@ -123,7 +139,7 @@ async def test_error_selfheal_then_pass(harness) -> None:  # type: ignore[no-unt
     )
     # 第二次 generate 由 selfheal 喂回错误后产生正确 SQL——脚本第二位让给 selfheal 后的 generate
     llm.answers.insert(2, "SELECT sum(qty) FROM goods")
-    final = await get_graph().ainvoke(_initial())
+    final = await _invoke(_initial())
     assert final["execution"].verdict == "PASS"
     assert final["retry_count"] == 1
     assert api.calls == 2
@@ -131,22 +147,22 @@ async def test_error_selfheal_then_pass(harness) -> None:  # type: ignore[no-unt
     assert "column qtyy does not exist" in llm.users[2]
 
 
-async def test_blocked_never_retries(harness) -> None:  # type: ignore[no-untyped-def]
+async def test_blocked_never_retries(harness: Harness) -> None:
     llm, api = harness(
         ["删除商品", "DELETE FROM goods"],  # validate 本地即拦,execute 根本不会被调
         [],
     )
-    final = await get_graph().ainvoke(_initial())
+    final = await _invoke(_initial())
     assert final["end_reason"] == "blocked"
     assert final["retry_count"] == 0  # 权限类不耗配额
     assert api.calls == 0
     assert len(llm.users) == 2  # understand + generate,summarize 不跑
 
 
-async def test_sentinel_short_circuit_zero_execution(harness) -> None:  # type: ignore[no-untyped-def]
+async def test_sentinel_short_circuit_zero_execution(harness: Harness) -> None:
     """043:知识未覆盖哨兵短路——零执行零重试,失败终态带用户友好文案。"""
     llm, api = harness(["员工总数", "NO_RELEVANT_TABLE"], [])
-    final = await get_graph().ainvoke(_initial())
+    final = await _invoke(_initial())
     assert final["end_reason"] == "no_data"
     assert final["generated_sql"] == ""
     assert final["error"] == _NO_DATA_ERROR
@@ -156,7 +172,7 @@ async def test_sentinel_short_circuit_zero_execution(harness) -> None:  # type: 
 
 
 async def test_sentinel_after_does_not_exist_guides_then_terminates(
-    harness,  # type: ignore[no-untyped-def]
+    harness: Harness,
 ) -> None:
     """043:首轮编表执行报 does-not-exist → 喂回附清单引导 → 二轮哨兵短路不再连败。"""
     llm, api = harness(
@@ -164,7 +180,7 @@ async def test_sentinel_after_does_not_exist_guides_then_terminates(
         [SqlExecuteOutcome(verdict="ERROR", reason='relation "public.staff" does not exist')],
     )
     llm.answers.insert(2, "NO_RELEVANT_TABLE")  # 二轮经引导后如实说明
-    final = await get_graph().ainvoke(_initial())
+    final = await _invoke(_initial())
     assert final["end_reason"] == "no_data"
     assert api.calls == 1  # 二轮短路,零新增执行
     assert "所引用的表或列不在『可用表结构』清单中" in llm.users[2]  # 喂回引导在位
@@ -173,13 +189,13 @@ async def test_sentinel_after_does_not_exist_guides_then_terminates(
     assert "summary" not in final
 
 
-async def test_retry_exhaustion_terminates(harness) -> None:  # type: ignore[no-untyped-def]
-    llm, api = harness(
+async def test_retry_exhaustion_terminates(harness: Harness) -> None:
+    _, api = harness(
         ["商品总库存"] + ["SELECT sum(qtyy) FROM goods"] * (MAX_RETRY + 1),
         [SqlExecuteOutcome(verdict="ERROR", reason="column qtyy does not exist")]
         * (MAX_RETRY + 1),
     )
-    final = await get_graph().ainvoke(_initial())
+    final = await _invoke(_initial())
     assert final["execution"].verdict == "ERROR"
     assert final["retry_count"] == MAX_RETRY  # 每轮经 selfheal 计数,耗尽即终止
     assert api.calls == MAX_RETRY + 1

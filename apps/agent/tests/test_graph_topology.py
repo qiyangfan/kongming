@@ -5,6 +5,9 @@
 005 起权限类(BLOCKED)从 execute/validate 直接终态,不进 selfheal、不耗配额。
 """
 
+# pyright: reportPrivateUsage=false
+# 测试惯例:路由函数为模块私有实现细节,测试直引锁死拓扑契约(仓库约定,不改名)
+
 from kongming_agent.graph.build import (
     MAX_RETRY,
     _after_execute,

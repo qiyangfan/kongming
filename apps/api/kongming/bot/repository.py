@@ -108,7 +108,7 @@ class SqlBotRepo:
             "name", "system_prompt", "tools", "datasource_key",
             "model", "enabled", "is_public",
         }
-        sets = []
+        sets: list[str] = []
         params: dict[str, Any] = {"i": bot_id}
         for k, v in fields.items():
             if k not in allowed:

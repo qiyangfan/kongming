@@ -3,10 +3,12 @@
 FakeAgent 替身记录 react_tools 透传;pending 聚合用真实 sys_tool_audit 行
 (PENDING_CONFIRM 经独立事务提交,聚合读取独立短会话——与生产同形态)。
 """
+# pyright: reportPrivateUsage=false
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import Callable, Coroutine, Iterator
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
@@ -35,7 +37,10 @@ class FakeAgent:
 
     async def query_stream(self, **kw: object) -> None:
         self.stream_calls.append(kw)
-        on_frame = kw["on_frame"]
+        # 生产签名 StreamFrameHandler = Callable[[str, str], Coroutine[Any, Any, None]]
+        on_frame = cast(
+            "Callable[[str, str], Coroutine[Any, Any, None]]", kw["on_frame"]
+        )
         # 019 流式:tool_call 帧 + result 帧(终态与同步同构 JSON)
         import dataclasses
 
@@ -90,7 +95,7 @@ class _PendingInsertAgent(FakeAgent):
 
 
 @pytest.fixture
-def fake_agent() -> AsyncIterator[dict[str, FakeAgent]]:  # type: ignore[misc]
+def fake_agent() -> Iterator[dict[str, FakeAgent]]:
     holder: dict[str, FakeAgent] = {}
     app.dependency_overrides[get_agent_client] = lambda: holder["agent"]
     yield holder
@@ -115,7 +120,11 @@ async def _user(
 
 
 async def test_default_recipe_sends_no_tools(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     _, token = await _user(client, session, make_user, "am_recipe")
     fake_agent["agent"] = FakeAgent()
@@ -127,7 +136,11 @@ async def test_default_recipe_sends_no_tools(
 
 
 async def test_react_injects_authorized_tools(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     _, token = await _user(client, session, make_user, "am_react")
     fake_agent["agent"] = FakeAgent()
@@ -137,8 +150,10 @@ async def test_react_injects_authorized_tools(
         headers=_auth(token),
     )
     assert r.status_code == 200
-    tools = fake_agent["agent"].calls[0]["react_tools"]
-    assert isinstance(tools, list) and len(tools) == 3  # DEVELOPER 只读三件套
+    tools_any = fake_agent["agent"].calls[0]["react_tools"]
+    tools = cast("list[dict[str, Any]]", tools_any)
+    # isinstance 守卫保持在原始对象上(运行时语义不变)
+    assert isinstance(tools_any, list) and len(tools) == 3  # DEVELOPER 只读三件套
     names = {t["name"] for t in tools}
     assert names == {"validate_sql", "execute_sql", "rag_retrieve"}
     # 注入 schema 形态:name/description/parameters/write/require_confirm
@@ -148,7 +163,11 @@ async def test_react_injects_authorized_tools(
 
 
 async def test_react_no_tool_perms_injects_empty(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     """无工具权限点用户走 react:注入空工具集(退化纯文本,不报错)。"""
     await seed_all(session, get_settings())
@@ -170,7 +189,11 @@ async def test_react_no_tool_perms_injects_empty(
 
 
 async def test_invalid_agent_mode_422(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     _, token = await _user(client, session, make_user, "am_bad")
     fake_agent["agent"] = FakeAgent()
@@ -183,7 +206,11 @@ async def test_invalid_agent_mode_422(
 
 
 async def test_pending_tool_calls_aggregated(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     """写工具挂起:响应 pending_tool_calls 聚合本 trace 的 PENDING_CONFIRM 行。"""
     _, token = await _user(client, session, make_user, "am_pending")
@@ -202,7 +229,11 @@ async def test_pending_tool_calls_aggregated(
 
 
 async def test_pending_empty_on_recipe(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     _, token = await _user(client, session, make_user, "am_empty")
     fake_agent["agent"] = FakeAgent()
@@ -213,7 +244,11 @@ async def test_pending_empty_on_recipe(
 
 
 async def test_react_stream_tool_call_frames(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     """流式 react:tool_call 事件在白名单内透传,result 终态照常。"""
     _, token = await _user(client, session, make_user, "am_stream")
@@ -228,4 +263,7 @@ async def test_react_stream_tool_call_frames(
     assert events.count("tool_call") == 2  # running + done 透传
     assert events[-1] == "result"
     stream_kw = fake_agent["agent"].stream_calls[0]
-    assert isinstance(stream_kw["react_tools"], list) and len(stream_kw["react_tools"]) == 3
+    # cast 仅定型,收窄后的成员访问不再带 Unknown(运行时不变)
+    assert isinstance(stream_kw["react_tools"], list) and len(
+        cast("list[object]", stream_kw["react_tools"])
+    ) == 3

@@ -246,15 +246,15 @@ async def oauth_callback(provider: str, req: CallbackRequest, svc: Service) -> T
 
 def register_auth_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(LoginFailed)
-    async def _login_failed(_: Request, e: LoginFailed) -> JSONResponse:
+    async def _(_: Request, e: LoginFailed) -> JSONResponse:
         return JSONResponse(status_code=401, content={"detail": "用户名或密码错误"})
 
     @app.exception_handler(AccountDisabled)
-    async def _disabled(_: Request, e: AccountDisabled) -> JSONResponse:
+    async def _(_: Request, e: AccountDisabled) -> JSONResponse:
         return JSONResponse(status_code=403, content={"detail": "账号已禁用"})
 
     @app.exception_handler(AccountLocked)
-    async def _locked(_: Request, e: AccountLocked) -> JSONResponse:
+    async def _(_: Request, e: AccountLocked) -> JSONResponse:
         return JSONResponse(
             status_code=429,
             content={"detail": str(e)},
@@ -262,25 +262,25 @@ def register_auth_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(TokenInvalid)
-    async def _token_invalid(_: Request, e: TokenInvalid) -> JSONResponse:
+    async def _(_: Request, e: TokenInvalid) -> JSONResponse:
         return JSONResponse(status_code=401, content={"detail": str(e) or "令牌无效或已失效"})
 
     @app.exception_handler(StateInvalid)
-    async def _state_invalid(_: Request, e: StateInvalid) -> JSONResponse:
+    async def _(_: Request, e: StateInvalid) -> JSONResponse:
         return JSONResponse(status_code=401, content={"detail": str(e) or "state 无效或已过期"})
 
     @app.exception_handler(ProviderNotFound)
-    async def _provider_not_found(_: Request, e: ProviderNotFound) -> JSONResponse:
+    async def _(_: Request, e: ProviderNotFound) -> JSONResponse:
         return JSONResponse(status_code=404, content={"detail": str(e)})
 
     @app.exception_handler(CurrentPasswordWrong)
-    async def _current_wrong(_: Request, e: CurrentPasswordWrong) -> JSONResponse:
+    async def _(_: Request, e: CurrentPasswordWrong) -> JSONResponse:
         return JSONResponse(status_code=400, content={"detail": str(e)})
 
     @app.exception_handler(NoLocalPassword)
-    async def _no_local(_: Request, e: NoLocalPassword) -> JSONResponse:
+    async def _(_: Request, e: NoLocalPassword) -> JSONResponse:
         return JSONResponse(status_code=400, content={"detail": str(e)})
 
     @app.exception_handler(AuthError)
-    async def _auth_fallback(_: Request, e: AuthError) -> JSONResponse:
+    async def _(_: Request, e: AuthError) -> JSONResponse:
         return JSONResponse(status_code=400, content={"detail": str(e)})

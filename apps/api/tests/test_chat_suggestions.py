@@ -6,10 +6,12 @@
 (连接信息变更/删除失效,仅改 name 不失效)。
 suggestor 与 schema 摘要经依赖替身注入(不触真实 LLM/业务库内省)。
 """
+# pyright: reportPrivateUsage=false
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import Iterator
+from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
@@ -50,7 +52,7 @@ class FakeSuggestor:
         self.digests.append(digest)
         if self.delay:
             await asyncio.sleep(self.delay)
-        return list(self.questions)
+        return cast("list[str]", list(self.questions))
 
 
 class FakeOverview:
@@ -68,7 +70,7 @@ class FakeOverview:
 
 
 @pytest.fixture
-def suggestor() -> AsyncIterator[FakeSuggestor]:
+def suggestor() -> Iterator[FakeSuggestor]:
     fake = FakeSuggestor()
     app.dependency_overrides[get_suggestor] = lambda: fake
     yield fake
@@ -76,7 +78,7 @@ def suggestor() -> AsyncIterator[FakeSuggestor]:
 
 
 @pytest.fixture
-def overview() -> AsyncIterator[FakeOverview]:
+def overview() -> Iterator[FakeOverview]:
     fake = FakeOverview()
     app.dependency_overrides[get_schema_overview] = lambda: fake
     yield fake
@@ -326,7 +328,9 @@ async def test_concurrent_first_visit_generates_once(
 # ---- datasource 管理变更级联失效(039 缓存生命周期) ----
 
 
-def _update_body(row: dict[str, object], tenant_id: str, **over: object) -> dict:
+def _update_body(
+    row: dict[str, object], tenant_id: str, **over: object
+) -> dict[str, Any]:
     body: dict[str, object] = {
         "datasource_key": row["datasource_key"],
         "tenant_id": tenant_id,
@@ -441,6 +445,8 @@ def test_agent_client_degrades_on_bad_reply(monkeypatch: pytest.MonkeyPatch) -> 
             return self._payload
 
     class _Client:
+        resp: _Resp
+
         def __init__(self, **_kw: object) -> None:
             pass
 
@@ -451,13 +457,13 @@ def test_agent_client_degrades_on_bad_reply(monkeypatch: pytest.MonkeyPatch) -> 
             return None
 
         async def post(self, _path: str, **_kw: object) -> _Resp:
-            return self.resp  # type: ignore[attr-defined]
+            return self.resp
 
     captured: dict[str, _Resp] = {}
 
     def _factory(**kw: object) -> _Client:
         c = _Client(**kw)
-        c.resp = captured["resp"]  # type: ignore[attr-defined]
+        c.resp = captured["resp"]
         return c
 
     monkeypatch.setattr("kongming.chat.agent_client.httpx.AsyncClient", _factory)

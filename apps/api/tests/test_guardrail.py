@@ -4,9 +4,11 @@
 凭证脱敏)、工具意图审核(写工具 burst 拦截/阈值调整/双审计)、fail-closed
 (配置故障从严)、管理面(规则清单/启停生效/审计分页/403/行级可见性)。
 """
+# pyright: reportPrivateUsage=false
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from httpx import AsyncClient
@@ -40,7 +42,7 @@ class FakeAgent:
 
 
 @pytest.fixture
-def fake_agent() -> AsyncIterator[dict[str, FakeAgent]]:  # type: ignore[misc]
+def fake_agent() -> Iterator[dict[str, FakeAgent]]:
     holder: dict[str, FakeAgent] = {}
     app.dependency_overrides[get_agent_client] = lambda: holder["agent"]
     yield holder
@@ -74,7 +76,11 @@ async def _guard_audits(
 
 
 async def test_input_injection_blocked_no_agent_call(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     _, token = await _user(client, session, make_user, "gd_inj")
     fake_agent["agent"] = FakeAgent()
@@ -101,7 +107,11 @@ async def test_input_injection_blocked_no_agent_call(
 
 
 async def test_input_pii_masked_passes(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     _, token = await _user(client, session, make_user, "gd_pii")
     fake_agent["agent"] = FakeAgent()
@@ -123,7 +133,11 @@ async def test_input_pii_masked_passes(
 
 
 async def test_clean_input_zero_audit(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     _, token = await _user(client, session, make_user, "gd_clean")
     fake_agent["agent"] = FakeAgent()
@@ -138,7 +152,11 @@ async def test_clean_input_zero_audit(
 
 
 async def test_output_sysprompt_leak_replaced(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     _, token = await _user(client, session, make_user, "gd_leak")
     fake_agent["agent"] = FakeAgent(
@@ -160,7 +178,11 @@ async def test_output_sysprompt_leak_replaced(
 
 
 async def test_output_cred_masked(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     _, token = await _user(client, session, make_user, "gd_cred")
     fake_agent["agent"] = FakeAgent(
@@ -225,7 +247,7 @@ async def test_intent_second_write_blocked_dual_audit(
     """同 trace 第二次写工具调用:意图审核拒绝 + guardrail/tool 双审计。"""
     uid, _ = await _mk_tool_user(session, make_user, "gd_burst")
     trace = f"tr-{uuid.uuid4().hex[:12]}"
-    args = {"title": "公告一", "content": "内容一"}
+    args: dict[str, Any] = {"title": "公告一", "content": "内容一"}
     r1 = await client.post(
         "/internal/tool/execute",
         headers=INTERNAL,
@@ -293,7 +315,11 @@ async def _admin(client: AsyncClient, s: AsyncSession) -> str:
 
 
 async def test_rules_list_and_toggle(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     token = await _admin(client, session)
     r = await client.get("/system/guardrails/rules", headers=_auth(token))
@@ -486,7 +512,11 @@ async def test_r1_l8_invalid_override_400(
 
 
 async def test_r1_l9_sql_field_filtered(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str,
+    FakeAgent],
 ) -> None:
     """R1-L9:sql 字段含系统提示词特征片段(注释藏私)时被输出护栏清空。"""
     _, token = await _user(client, session, make_user, "gd_sql")

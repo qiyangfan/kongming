@@ -1,5 +1,7 @@
 """describer 润色测试(009):prompt 形态/输出清洗防御/降级契约/端点行为。"""
 
+from collections.abc import Generator
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -14,6 +16,9 @@ from kongming_agent.describer import (
 from kongming_agent.llm import LlmClient, LlmError
 from kongming_agent.main import app
 from kongming_agent.settings import Settings
+
+# 端点测试夹具注入形态:yield (TestClient, 真 LlmClient, monkeypatch) 三元组
+ClientFixture = tuple[TestClient, LlmClient, pytest.MonkeyPatch]
 
 
 class StubLlm:
@@ -224,7 +229,7 @@ def test_invalid_table_name_rejected() -> None:
                     schema_name="s",
                     columns=[ColumnSpec(name="a", type="int")],
                 ),
-                StubLlm([]),
+                StubLlm([]),  # pyright: ignore[reportArgumentType]  # 测试替身与 LlmClient 鸭子类型兼容(签名子集)
             )
         )
 
@@ -233,7 +238,7 @@ def test_invalid_table_name_rejected() -> None:
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+def client(monkeypatch: pytest.MonkeyPatch) -> Generator[ClientFixture]:
     settings = Settings(
         internal_token="test-internal-token",  # noqa: S106  # 测试令牌,非凭证
         llm_api_key="k",
@@ -249,7 +254,7 @@ def _headers() -> dict[str, str]:
     return {"X-Internal-Token": "test-internal-token"}
 
 
-def test_describe_table_endpoint_enriched(client) -> None:  # type: ignore[no-untyped-def]
+def test_describe_table_endpoint_enriched(client: ClientFixture) -> None:
     c, _, mp = client
 
     class FakeLlm(StubLlm):
@@ -273,7 +278,7 @@ def test_describe_table_endpoint_enriched(client) -> None:  # type: ignore[no-un
     assert data["table_comment"] == "影片表"
 
 
-def test_describe_table_endpoint_degrades_not_5xx(client) -> None:  # type: ignore[no-untyped-def]
+def test_describe_table_endpoint_degrades_not_5xx(client: ClientFixture) -> None:
     """润色失败:enriched=False + 200,api 侧按表降级不阻断整批。"""
     c, _, _ = client
     resp = c.post(

@@ -37,14 +37,14 @@ class ScopeContext:
 
     data_scope: str
     user_id: str
-    dept_ids: list[str] = field(default_factory=list)  # DEPT 系有效部门集(含递归)
+    dept_ids: list[str] = field(default_factory=list[str])  # DEPT 系有效部门集(含递归)
 
 
 @dataclass(frozen=True)
 class ScopeFilter:
     type: FilterType
     column: str | None = None
-    values: list[str] = field(default_factory=list)
+    values: list[str] = field(default_factory=list[str])
     skip_reason: str | None = None
 
 
@@ -53,7 +53,7 @@ class AppliedSQL:
     """改写产物:SQL + 绑定参数 + 降级告警(落审计/日志用)。"""
 
     sql: str
-    params: dict[str, object] = field(default_factory=dict)
+    params: dict[str, object] = field(default_factory=dict[str, object])
     warning: str | None = None
 
 

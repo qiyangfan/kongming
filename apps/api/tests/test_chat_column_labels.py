@@ -4,9 +4,10 @@
 columns 等长对齐——qualified 列按别名定表精确溯源,裸列唯一命中才用,
 跨表语义冲突/无有效中文注释/表达式列回退原列名;解析失败整列回退(fail-open)。
 """
+# pyright: reportPrivateUsage=false
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -17,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kongming.chat.models import resolve_column_labels
 from kongming.chat.router import get_agent_client
 from kongming.main import app
+from tests.conftest import MakeUser
 from tests.test_chat_query import FakeAgent, _auth, _pass_reply, _user_with_chat_perm
 
 # ============ 纯函数(SQL 投影溯源) ============
@@ -121,7 +123,7 @@ def test_star_projection_falls_back_entirely() -> None:
 
 
 @pytest.fixture
-def labels_agent() -> AsyncIterator[dict[str, Any]]:  # type: ignore[misc]
+def labels_agent() -> Iterator[dict[str, Any]]:
     """scripted agent 替身(自持装配):成功应答带 columns/rows。"""
     holder: dict[str, Any] = {}
 
@@ -145,8 +147,8 @@ async def _ask(client: AsyncClient, token: str) -> dict[str, object]:
 async def test_labels_fallback_then_hit_with_persist(
     client: AsyncClient,
     session: AsyncSession,
-    make_user,
-    labels_agent,
+    make_user: MakeUser,
+    labels_agent: dict[str, Any],
 ) -> None:
     """无注释行→回退原列名;插入注释→业务标签;落库 result_json 同源携带。"""
     _, token = await _user_with_chat_perm(client, session, make_user, "qa40")
@@ -204,8 +206,8 @@ async def test_labels_fallback_then_hit_with_persist(
 async def test_column_comments_tenant_schema_overrides_public(
     client: AsyncClient,
     session: AsyncSession,
-    make_user,
-    labels_agent,
+    make_user: MakeUser,
+    labels_agent: dict[str, Any],
 ) -> None:
     """同名表跨 schema(default 源 tenant_<key> 与 public 并存):注释取
     租户 schema 胜出——覆盖方向必须确定,不得随查询计划漂移。"""

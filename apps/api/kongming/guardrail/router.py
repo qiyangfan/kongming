@@ -16,18 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kongming.auth.router import current_user, require_perm
 from kongming.db import get_session
 from kongming.guardrail.models import MASKERS
-from kongming.guardrail.repository import SqlGuardrailAuditWriter, SqlGuardrailRepo
+from kongming.guardrail.repository import SqlGuardrailRepo
 from kongming.guardrail.rules import REGISTRY
-from kongming.guardrail.service import GuardrailService
 from kongming.toolcall.repository import user_has_all_scope
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/system/guardrails", tags=["guardrail"])
-
-
-def _get_service(session: Annotated[AsyncSession, Depends(get_session)]) -> GuardrailService:
-    return GuardrailService(SqlGuardrailRepo(session), SqlGuardrailAuditWriter())
 
 
 # ── 规则清单(注册表 + 覆盖合并视图) ──

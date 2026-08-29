@@ -4,9 +4,11 @@
 清空/feedback_time 最新)/correctedSql 防火墙整体拒/纠错沉淀 query_history
 (会话快照数据源)/审计同事务。
 """
+# pyright: reportPrivateUsage=false
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from httpx import AsyncClient
@@ -27,7 +29,7 @@ from tests.test_chat_sessions import _mk_session
 
 
 @pytest.fixture
-def fake_agent() -> AsyncIterator[FakeAgent]:  # type: ignore[misc]
+def fake_agent() -> Iterator[dict[str, FakeAgent]]:
     """agent 面 dependency_overrides 替身(与 test_chat_query 同形态,模块私有不可跨用)。"""
     from kongming.chat.router import get_agent_client
     from kongming.main import app
@@ -38,7 +40,7 @@ def fake_agent() -> AsyncIterator[FakeAgent]:  # type: ignore[misc]
         return holder["agent"]
 
     app.dependency_overrides[get_agent_client] = _factory
-    yield holder  # type: ignore[misc]
+    yield holder
     app.dependency_overrides.pop(get_agent_client, None)
 
 
@@ -69,7 +71,7 @@ async def _mk_user_msg(s: AsyncSession, session_id: str, question: str) -> None:
     await s.commit()
 
 
-async def _feedback_row(s: AsyncSession, mid: str) -> dict:
+async def _feedback_row(s: AsyncSession, mid: str) -> dict[str, Any]:
     row = (
         await s.execute(
             text(
@@ -99,7 +101,7 @@ async def _setup(s: AsyncSession, client: AsyncClient, make_user: MakeUser, name
 async def test_submit_up_success_with_audit(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    uid, token, _, _, mid = await _setup(session, client, make_user, "fb-up")
+    _uid, token, _, _, mid = await _setup(session, client, make_user, "fb-up")
     r = await client.post(
         f"/chat/messages/{mid}/feedback", json={"rating": "UP"}, headers=_auth(token)
     )
@@ -156,7 +158,7 @@ async def test_submit_down_with_comment_and_sql(
 async def test_submit_cross_user_403_same_shape(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    _, token, tid, _, mid = await _setup(session, client, make_user, "fb-owner")
+    _, _token, _tid, _, mid = await _setup(session, client, make_user, "fb-owner")
     # 另一用户(绑同租户)对他人消息反馈 → 403 同形(不区分不存在与无权)
     _, token_b = await _user_with_chat_perm(client, session, make_user, "fb-other")
     r = await client.post(
@@ -198,7 +200,7 @@ async def test_submit_user_message_400(
 async def test_submit_no_perm_403(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    uid, token, _, _, mid = await _setup(session, client, make_user, "fb-noperm-owner")
+    uid, _token, _, _, mid = await _setup(session, client, make_user, "fb-noperm-owner")
     # 无角色用户(只绑租户,无 chat:feedback:submit)
     from tests.test_chat_query import _login
 
@@ -338,7 +340,10 @@ async def test_submit_cross_tenant_schema_sql_rejected(
 
 
 async def test_query_response_contains_message_id(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, FakeAgent],
 ) -> None:
     """014 messageId 打通:实时响应 message_id 与库内 assistant 消息一致,
     datasource_key=执行快照;persist=false 时 message_id 为 null(spec)。"""

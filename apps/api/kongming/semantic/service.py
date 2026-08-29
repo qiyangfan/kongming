@@ -1,6 +1,7 @@
 """semantic 用例编排(023):introspection/注入组装/CRUD。零框架纪律。"""
 
 import logging
+from typing import cast
 
 from kongming.semantic.models import (
     MetricDef,
@@ -110,7 +111,7 @@ class SemanticService:
             MetricDef(
                 metric_name=str(r["metric_name"]),
                 sql_template=str(r["sql_template"]),
-                business_terms=[str(t) for t in r["business_terms"] or []],
+                business_terms=[str(t) for t in cast("list[object]", r["business_terms"] or [])],
                 enabled=bool(r["enabled"]),
             )
             for r in metric_rows

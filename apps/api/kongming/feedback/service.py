@@ -65,7 +65,7 @@ class InvolvedTable:
 
 @dataclass(frozen=True)
 class InvolvedTablesView:
-    tables: list[InvolvedTable] = field(default_factory=list)
+    tables: list[InvolvedTable] = field(default_factory=list[InvolvedTable])
     parse_error: bool = False
 
 

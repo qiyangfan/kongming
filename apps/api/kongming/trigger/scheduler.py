@@ -9,23 +9,34 @@
 import asyncio
 import datetime as dt
 import time
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import structlog
+
+from kongming.trigger.service import TriggerService
 
 log = structlog.get_logger()
 
 _TICK_SEC = 30
 
+# 服务工厂:每次调用开独立会话,返回 (TriggerService, 关闭回调)
+_ServiceFactory = Callable[[], Awaitable[tuple[TriggerService, Callable[[], Awaitable[None]]]]]
+
 
 class TriggerScheduler:
     """30s tick 扫描;running 集合防同触发器并发堆积。"""
 
-    def __init__(self, service_factory: object) -> None:
-        # service_factory: async callable() → (TriggerService, 关闭回调)
+    def __init__(self, service_factory: _ServiceFactory | None) -> None:
+        # None=工厂未注入(lifespan start 前),tick 直接空转;
         # 每个 tick/执行独立会话(015/017 短事务先例)
         self._factory = service_factory
         self._running: dict[str, asyncio.Task[None]] = {}
         self._task: asyncio.Task[None] | None = None
+
+    def attach_factory(self, factory: _ServiceFactory) -> None:
+        """lifespan 注入服务工厂(构造后一次性接线)。"""
+        self._factory = factory
 
     def start(self) -> None:
         self._task = asyncio.create_task(self._loop())
@@ -54,7 +65,7 @@ class TriggerScheduler:
 
     async def _tick(self) -> None:
         factory = self._factory
-        if not callable(factory):
+        if factory is None:
             return
         svc, close = await factory()
         try:
@@ -88,7 +99,7 @@ class TriggerScheduler:
 
     async def _fire_then_mark(self, trigger_id: str) -> None:
         factory = self._factory
-        if not callable(factory):
+        if factory is None:
             return
         svc, close = await factory()
         fired_iso = ""
@@ -122,9 +133,9 @@ class TriggerScheduler:
             await close()
             self._running.pop(trigger_id, None)
 
-    async def _record_skipped(self, row: dict, reason: str) -> None:  # type: ignore[type-arg]
+    async def _record_skipped(self, row: dict[str, Any], reason: str) -> None:
         factory = self._factory
-        if not callable(factory):
+        if factory is None:
             return
         svc, close = await factory()
         try:

@@ -5,10 +5,12 @@
 传输失败 error 终态+FAILED 落库/persist=false/前段校验失败常规 JSON/
 断线续存(直调 service:前端不消费,后台任务照常落库)/心跳分支/SSE 解码器。
 """
+# pyright: reportPrivateUsage=false
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import Callable, Coroutine, Iterator
+from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
@@ -61,14 +63,16 @@ class StreamFakeAgent:
     async def query(self, **kw: object) -> AgentReply:
         return self.reply
 
-    async def query_stream(self, *, on_frame: object, **kw: object) -> None:
+    async def query_stream(
+        self, *, on_frame: Callable[[str, str], Coroutine[Any, Any, None]], **kw: object
+    ) -> None:
         self.stream_calls.append(kw)
         if self.boom:
             raise AgentUnavailable("connect failed")
         if self.crash:
             raise RuntimeError("unexpected mid-stream crash")
         for event, data in self.frames:
-            await on_frame(event, data)  # type: ignore[operator]
+            await on_frame(event, data)
         if self.crash_after_frames:
             raise AgentUnavailable("connection reset after terminal frame")
 
@@ -93,14 +97,14 @@ def _frames_for(reply: AgentReply) -> list[tuple[str, str]]:
 
 
 @pytest.fixture
-def fake_agent() -> AsyncIterator[dict[str, StreamFakeAgent]]:
+def fake_agent() -> Iterator[dict[str, StreamFakeAgent]]:
     holder: dict[str, StreamFakeAgent] = {}
 
     def _factory() -> StreamFakeAgent:
         return holder["agent"]
 
     app.dependency_overrides[get_agent_client] = _factory
-    yield holder  # type: ignore[misc]
+    yield holder
     app.dependency_overrides.pop(get_agent_client, None)
 
 
@@ -181,7 +185,7 @@ async def test_stream_happy_path_full_relay(
     reply = _pass_reply()
     first_agent = StreamFakeAgent(_frames_for(reply), reply=reply)
     _install(fake_agent, first_agent)
-    uid, token = await _user_with_chat_perm(client, session, make_user, "stream1")
+    _uid, token = await _user_with_chat_perm(client, session, make_user, "stream1")
     r = await client.post(
         "/chat/query/stream", json={"question": "有多少商品"}, headers=_auth(token)
     )
@@ -476,7 +480,7 @@ async def test_disconnect_continues_to_terminal(
     """断线续存:前端断开(不消费 queue)后后台任务照常消费至终态并落库。"""
     reply = _pass_reply()
     _install(fake_agent, StreamFakeAgent(_frames_for(reply), reply=reply))
-    uid, token = await _user_with_chat_perm(client, session, make_user, "stream6")
+    uid, _token = await _user_with_chat_perm(client, session, make_user, "stream6")
     # 手工组装 service(不经 HTTP;stream_store_factory 与组合根同构)
     agent = fake_agent["agent"]
     from kongming.chat.router import _stream_store_factory  # 组合根工厂复用
@@ -484,12 +488,12 @@ async def test_disconnect_continues_to_terminal(
     async with get_sessionmaker()() as s:
         svc = ChatService(
             ChatRepository(s),
-            agent,  # type: ignore[arg-type]
+            cast("Any", agent),
             SqlDatasourceRepo(s),
             None,
             None,
             None,
-            _stream_store_factory(agent),  # type: ignore[arg-type]
+            _stream_store_factory(cast("Any", agent)),
         )
         handle = await svc.start_stream(
             user_id=uid,
@@ -524,7 +528,8 @@ async def test_relay_gen_heartbeat_on_idle(monkeypatch: pytest.MonkeyPatch) -> N
     """空闲超时发心跳注释行;帧到达即转发;None 收束。"""
     monkeypatch.setattr(chat_router, "STREAM_HEARTBEAT_SEC", 0.05)
     q: asyncio.Queue[tuple[str, object] | None] = asyncio.Queue()
-    handle = StreamHandle(queue=q, task=None)  # type: ignore[arg-type]
+    # task 允许None 后接,cast 对齐标注(运行时不变)
+    handle = StreamHandle(queue=q, task=cast("asyncio.Task[None]", None))
     await q.put(("stage", {"node": "understand", "status": "running", "retry_count": 0}))
 
     async def _late_terminate() -> None:

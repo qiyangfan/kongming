@@ -113,10 +113,10 @@ class _FakeClient:
 
 class _Recorder:
     def __init__(self, *, boom: bool = False) -> None:
-        self.records: list[dict] = []
+        self.records: list[dict[str, object]] = []
         self.boom = boom
 
-    async def __call__(self, records: list[dict]) -> None:
+    async def __call__(self, records: list[dict[str, object]]) -> None:
         if self.boom:
             raise RuntimeError("api 不可达")
         self.records.extend(records)

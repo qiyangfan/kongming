@@ -6,6 +6,7 @@
 - 飞书:v2 token 用 client_id/client_secret(JSON);官方支持 PKCE(S256);union_id 同理
 """
 
+from typing import cast
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -32,7 +33,9 @@ def test_wecom_normalize_full_detail() -> None:
         "avatar": "https://wework.qpic.cn/head/a.jpg",
         "email": "zhangsan@corp.example",
     }
-    p = wecom.normalize(userinfo, detail)
+    p = wecom.normalize(
+        cast("dict[str, object]", userinfo), cast("dict[str, object]", detail)
+    )
     assert p.external_id == "ZhangSan"
     assert p.username == "ZhangSan"
     assert p.display_name == "张三"
@@ -44,7 +47,7 @@ def test_wecom_normalize_full_detail() -> None:
 def test_wecom_normalize_degrades_without_detail() -> None:
     """无通讯录权限取不到详档:display_name 降级为 UserId,登录链路不断。"""
     userinfo = {"errcode": 0, "errmsg": "ok", "userid": "ZhangSan"}
-    p = wecom.normalize(userinfo, None)
+    p = wecom.normalize(cast("dict[str, object]", userinfo), None)
     assert p.external_id == "ZhangSan"
     assert p.username == "ZhangSan"
     assert p.display_name == "ZhangSan"
@@ -55,7 +58,9 @@ def test_wecom_normalize_degrades_on_detail_error() -> None:
     """详档返回业务错误(如 60011 无权限)同样走降级分支。"""
     userinfo = {"errcode": 0, "errmsg": "ok", "userid": "ZhangSan"}
     detail = {"errcode": 60011, "errmsg": "no privilege to access/modify contact"}
-    p = wecom.normalize(userinfo, detail)
+    p = wecom.normalize(
+        cast("dict[str, object]", userinfo), cast("dict[str, object]", detail)
+    )
     assert p.external_id == "ZhangSan"
     assert p.display_name == "ZhangSan"
     assert p.avatar_url is None
@@ -73,7 +78,7 @@ def test_dingtalk_normalize_uses_union_id() -> None:
         "mobile": "13800000000",
         "stateCode": "86",
     }
-    p = dingtalk.normalize(me)
+    p = dingtalk.normalize(cast("dict[str, object]", me))
     assert p.external_id == "uni-abc"  # 跨应用稳定标识,不用 openId(防同企业多应用身份分裂)
     assert p.username == "孔明"
     assert p.display_name == "孔明"
@@ -102,7 +107,7 @@ def test_feishu_normalize_prefers_en_name_for_username() -> None:
         "user_id": "e33ggbyz",
         "email": "zhuge@example.com",
     }
-    p = feishu.normalize(data)
+    p = feishu.normalize(cast("dict[str, object]", data))
     assert p.external_id == "on_yyy"  # union_id,不用 open_id(防多应用身份分裂)
     assert p.username == "Zhuge Liang"  # username 取 en_name
     assert p.display_name == "诸葛亮"
@@ -112,7 +117,7 @@ def test_feishu_normalize_prefers_en_name_for_username() -> None:
 
 def test_feishu_normalize_en_name_empty_falls_back_to_name() -> None:
     data = {"name": "诸葛亮", "en_name": "", "union_id": "on_yyy"}
-    p = feishu.normalize(data)
+    p = feishu.normalize(cast("dict[str, object]", data))
     assert p.external_id == "on_yyy"
     assert p.username == "诸葛亮"  # en_name 缺失兜底 name
     assert p.display_name == "诸葛亮"

@@ -8,12 +8,12 @@ api-key 鉴权:X-Api-Key(025 同款)或 Authorization: Bearer(MCP 客户端
 
 import json
 import logging
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
 
-from kongming.bot.router import _get_service  # 025 组合根复用(装配层)
+from kongming.bot.router import get_bot_service  # 025 组合根复用(装配层)
 from kongming.bot.service import ApiKeyInvalid, BotNotFound, BotService
 
 log = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ def _extract_key(authorization: str | None, x_api_key: str | None) -> str | None
 @router.post("/mcp")
 async def mcp_endpoint(
     request: Request,
-    svc: Annotated[BotService, Depends(_get_service)],
+    svc: Annotated[BotService, Depends(get_bot_service)],
     authorization: Annotated[str | None, Header()] = None,
     x_api_key: Annotated[str | None, Header()] = None,
 ) -> Response:
@@ -58,9 +58,10 @@ async def mcp_endpoint(
     if len(raw) > _BODY_MAX_BYTES:
         return JSONResponse(status_code=413, content={"detail": "PAYLOAD_TOO_LARGE"})
     try:
-        request_body: dict[str, Any] = json.loads(raw)
-        if not isinstance(request_body, dict):
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
             raise ValueError("not an object")
+        request_body = cast("dict[str, Any]", parsed)
     except (ValueError, UnicodeDecodeError):
         return _error(None, -32700, "Parse error")
     # notifications/*(MCP 生命周期通告):无 id,202 空响应
@@ -114,12 +115,18 @@ async def mcp_endpoint(
         params = request_body.get("params")
         if not isinstance(params, dict):
             return _error(rpc_id, -32602, "缺 params")
+        # isinstance 收窄产物键型未知,收窄键型后再取值(仅类型断言)
+        params = cast("dict[str, Any]", params)
         name = str(params.get("name") or "")
         if name != f"bot__{bot_key}":
             # 其他 key/租户的 Bot 不可见不可调用(同形未知工具)
             return _error(rpc_id, -32602, "未知工具")
         args = params.get("arguments")
-        question = str(args.get("question") or "") if isinstance(args, dict) else ""
+        question = (
+            str(cast("dict[str, Any]", args).get("question") or "")
+            if isinstance(args, dict)
+            else ""
+        )
         if not question.strip():
             return _error(rpc_id, -32602, "question 为空")
         if len(question) > 2000:

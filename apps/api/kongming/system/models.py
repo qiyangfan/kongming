@@ -67,7 +67,7 @@ class DeptNode:
     """部门树节点(全量行加载后内存组树,部门量级小)。"""
 
     dept: Dept
-    children: list["DeptNode"] = field(default_factory=list)
+    children: list["DeptNode"] = field(default_factory=list["DeptNode"])
 
 
 @dataclass(frozen=True)

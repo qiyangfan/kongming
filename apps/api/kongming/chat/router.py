@@ -9,10 +9,10 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response
@@ -387,7 +387,7 @@ def _stream_store_factory(agent: AgentClient) -> StreamStoreFactory:
     请求作用域会话随 SSE 响应取消而关闭,后台任务落库不得复用。"""
 
     @asynccontextmanager
-    async def _open() -> AsyncIterator[StreamStore]:
+    async def _open() -> AsyncGenerator[StreamStore]:
         async with get_sessionmaker()() as s:
             yield StreamStore(
                 repo=ChatRepository(s),
@@ -410,7 +410,9 @@ class ChatQueryIn(BaseModel):
     # 019:Agent 内核选择(纯增,缺省 recipe 零回归);react=ReAct 工具调用内核
     agent_mode: Literal["recipe", "react"] = "recipe"
     # 030:图片附件引用(纯增,≤3;归属校验在 service)
-    attachment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=3)
+    attachment_ids: list[uuid.UUID] = Field(
+        default_factory=list[uuid.UUID], max_length=3
+    )
 
 
 class ChartOut(BaseModel):
@@ -490,7 +492,12 @@ def _out(o: ChatOutcome) -> ChatQueryOut:
             ArtifactOut(
                 type=str(a.get("type") or ""),
                 content=str(a.get("content") or ""),
-                metadata=dict(_meta) if isinstance(_meta := a.get("metadata"), dict) else {},
+                metadata=(
+                    # isinstance 守卫后 cast 收窄键型(mcp client 同款;运行时不变)
+                    dict(cast("dict[str, object]", _meta))
+                    if isinstance(_meta := a.get("metadata"), dict)
+                    else {}
+                ),
             )
             for a in o.artifacts
         ],
@@ -805,16 +812,16 @@ class ChartInfoOut(BaseModel):
 
 
 class MessageResultOut(BaseModel):
-    columns: list[str] = Field(default_factory=list)
-    rows: list[list[object]] = Field(default_factory=list)
-    insights: list[dict[str, str]] = Field(default_factory=list)
-    stats: dict[str, object] = Field(default_factory=dict)
+    columns: list[str] = Field(default_factory=list[str])
+    rows: list[list[object]] = Field(default_factory=list[list[object]])
+    insights: list[dict[str, str]] = Field(default_factory=list[dict[str, str]])
+    stats: dict[str, object] = Field(default_factory=dict[str, object])
     chart: ChartInfoOut
     error: str | None = None
     # 026(纯增):类型化产物
     artifacts: list[ArtifactOut] = []
     # 041(纯增):呈现层列标签(空=历史存量档,回退 columns)
-    column_labels: list[str] = Field(default_factory=list)
+    column_labels: list[str] = Field(default_factory=list[str])
 
 
 class SessionMessageOut(BaseModel):
@@ -850,7 +857,12 @@ def _msg_out(m: SessionMessage) -> SessionMessageOut:
                 ArtifactOut(
                     type=str(a.get("type") or ""),
                     content=str(a.get("content") or ""),
-                    metadata=dict(_meta) if isinstance(_meta := a.get("metadata"), dict) else {},
+                    metadata=(
+                        # isinstance 守卫后 cast 收窄键型(与 _out 同款;运行时不变)
+                        dict(cast("dict[str, object]", _meta))
+                        if isinstance(_meta := a.get("metadata"), dict)
+                        else {}
+                    ),
                 )
                 for a in r.artifacts
             ],
@@ -1032,7 +1044,9 @@ class ExportIn(BaseModel):
 
     format: Literal["csv", "xlsx"]
     columns: list[str] = Field(min_length=1, max_length=200)
-    rows: list[list[object]] = Field(default_factory=list, max_length=10000)
+    rows: list[list[object]] = Field(
+        default_factory=list[list[object]], max_length=10000
+    )
 
 
 @router.post(

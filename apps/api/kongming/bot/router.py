@@ -7,7 +7,7 @@ OpenAI 兼容 API(api-key 鉴权)。
 import logging
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -145,7 +145,7 @@ class _McpDynamicToolLister:
         return await self._svc.list_dynamic_tools(tenant_id=tenant_id)
 
 
-def _get_service(
+def get_bot_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     agent: Annotated[AgentClient, Depends(get_agent_client)],
 ) -> BotService:
@@ -248,7 +248,9 @@ def _bot_out(r: dict[str, object]) -> BotOut:
         name=str(r["name"]),
         system_prompt=str(r["system_prompt"]),
         tools=(
-            [str(t) for t in r["tools"]] if isinstance(r["tools"], list) else []
+            [str(t) for t in cast("list[object]", r["tools"])]
+            if isinstance(r["tools"], list)
+            else []
         ),
         datasource_key=str(r["datasource_key"]),
         model=None if r["model"] is None else str(r["model"]),
@@ -285,7 +287,7 @@ async def create_bot(
     req: BotIn,
     user: Annotated[dict[str, object], Depends(current_user)],
     _: Annotated[None, Depends(require_perm("chat:execute"))],
-    svc: Annotated[BotService, Depends(_get_service)],
+    svc: Annotated[BotService, Depends(get_bot_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
@@ -320,7 +322,7 @@ async def update_bot(
     user: Annotated[dict[str, object], Depends(current_user)],
     _: Annotated[None, Depends(require_perm("chat:execute"))],
     session: Annotated[AsyncSession, Depends(get_session)],
-    svc: Annotated[BotService, Depends(_get_service)],
+    svc: Annotated[BotService, Depends(get_bot_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
     from kongming.bot.repository import SqlBotRepo
@@ -369,26 +371,26 @@ async def update_bot(
     # R1-H2:编辑路径 datasource/model 复校
     if "datasource_key" in fields and str(fields["datasource_key"]) != "default":
         try:
-            await svc._assert_datasource(tid, str(fields["datasource_key"]))  # noqa: SLF001
+            await svc._assert_datasource(tid, str(fields["datasource_key"]))  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
         except InvalidBotKey as e:
             raise HTTPException(status_code=400, detail=str(e)) from None
     if "model" in fields:
-        available = await svc._runner.list_models()  # noqa: SLF001
+        available = await svc._runner.list_models()  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
         if str(fields["model"]) not in available:
             raise HTTPException(status_code=400, detail="模型未注册") from None
     # 编辑越权与审核:tools/system_prompt 变更时复校
     if "tools" in fields:
         # 审查循环 F3:与 create 同口径——须含 MCP 动态工具集,否则含
         # mcp__ 工具的 Bot 任何一次带 tools 的更新都被静态注册表误拒(工具集被冻结)
-        mcp_names = await svc._mcp_names(tid)  # noqa: SLF001
+        mcp_names = await svc._mcp_names(tid)  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
         allowed = tools_for_perms(
             await SqlPermRepo(session).list_codes(str(user["sub"])), mcp_names
         )
         try:
             validate_tool_subset(
-                [str(t) for t in fields["tools"] or []],
+                [str(t) for t in cast("list[object]", fields["tools"] or [])],
                 allowed,
-                registered_names=svc._registered_names(mcp_names),  # noqa: SLF001
+                registered_names=svc._registered_names(mcp_names),  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
             )
         except ToolSubsetViolation as e:
             raise HTTPException(status_code=400, detail=str(e)) from None
@@ -494,7 +496,7 @@ async def create_key(
     user: Annotated[dict[str, object], Depends(current_user)],
     _: Annotated[None, Depends(require_perm("chat:execute"))],
     session: Annotated[AsyncSession, Depends(get_session)],
-    svc: Annotated[BotService, Depends(_get_service)],
+    svc: Annotated[BotService, Depends(get_bot_service)],
     name: str = "default",
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
@@ -652,7 +654,7 @@ class BotChatOut(BaseModel):
 async def bot_chat_public(
     bot_key: str,
     req: BotChatIn,
-    svc: Annotated[BotService, Depends(_get_service)],
+    svc: Annotated[BotService, Depends(get_bot_service)],
 ) -> BotChatOut:
     """web 嵌入公开端点(免登录):is_public+enabled 闸;护栏与工具防御全量。"""
     try:
@@ -684,7 +686,7 @@ class OpenAiChatIn(BaseModel):
 )
 async def openai_chat(
     req: OpenAiChatIn,
-    svc: Annotated[BotService, Depends(_get_service)],
+    svc: Annotated[BotService, Depends(get_bot_service)],
     x_api_key: Annotated[str | None, Header()] = None,
 ) -> object:
     """OpenAI 兼容端点:api-key 鉴权(scopes 限 bot);取最后一条 user 消息。

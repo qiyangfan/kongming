@@ -9,7 +9,7 @@
 
 import logging
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, cast
 
 import httpx
 
@@ -26,8 +26,8 @@ class SqlExecuteOutcome:
 
     verdict: Verdict
     reason: str | None = None
-    columns: list[str] = field(default_factory=list)
-    rows: list[list[object]] = field(default_factory=list)
+    columns: list[str] = field(default_factory=list[str])
+    rows: list[list[object]] = field(default_factory=list[list[object]])
     duration_ms: int = 0
 
 
@@ -61,7 +61,7 @@ class RagContext:
     history_sql: str = ""
     relations_hint: str = ""
     metric_hints: str = ""
-    doc_hints: list[dict[str, str]] = field(default_factory=list)  # 024 文档段
+    doc_hints: list[dict[str, str]] = field(default_factory=list[dict[str, str]])  # 024 文档段
 
 
 @dataclass(frozen=True)
@@ -109,13 +109,17 @@ class ApiClient:
             return SqlExecuteOutcome(
                 verdict="ERROR", reason=f"控制面拒绝(HTTP {resp.status_code})"
             )
-        data = resp.json()
+        # httpx resp.json() 返回 Any,边界处一次收窄(运行时即 dict,cast 零行为变化)
+        data = cast("dict[str, object]", resp.json())
         return SqlExecuteOutcome(
-            verdict=data["verdict"],
-            reason=data.get("reason"),
-            columns=list(data.get("columns") or []),
-            rows=[list(r) for r in data.get("rows") or []],
-            duration_ms=int(data.get("duration_ms") or 0),
+            verdict=cast("Verdict", data["verdict"]),
+            reason=cast("str | None", data.get("reason")),
+            columns=list(cast("list[str]", data.get("columns") or [])),
+            rows=[
+                list(cast("list[object]", r))
+                for r in cast("list[object]", data.get("rows") or [])
+            ],
+            duration_ms=int(cast("int | float | str", data.get("duration_ms")) or 0),
         )
 
     async def fetch_schema(
@@ -133,7 +137,7 @@ class ApiClient:
         if resp.status_code != 200:
             log.warning("fetch_schema 被拒(HTTP %s)", resp.status_code)
             return None
-        data = resp.json()
+        data = cast("dict[str, object]", resp.json())
         tables = [
             MetaTable(
                 schema=str(t.get("schema") or ""),
@@ -145,10 +149,10 @@ class ApiClient:
                         data_type=str(c.get("data_type") or ""),
                         comment=str(c.get("comment") or ""),
                     )
-                    for c in t.get("columns") or []
+                    for c in cast("list[dict[str, object]]", t.get("columns") or [])
                 ],
             )
-            for t in data.get("tables") or []
+            for t in cast("list[dict[str, object]]", data.get("tables") or [])
         ]
         return SchemaMeta(tables=tables, truncated=bool(data.get("truncated")))
 
@@ -173,7 +177,7 @@ class ApiClient:
             log.warning("rag_retrieve 被拒(HTTP %s)", resp.status_code)
             return None
         try:
-            data = resp.json()
+            data = cast("dict[str, object]", resp.json())
         except ValueError:
             # 200 但非 JSON(网关回 HTML 错误页等):按失败回退内省,不裸抛
             # (013 挂账⑮;docstring「任何失败返回 None」自此兑现)
@@ -186,10 +190,10 @@ class ApiClient:
             metric_hints=str(data.get("metric_hints") or ""),
             doc_hints=[
                 {
-                    "source_ref": str(h.get("source_ref") or ""),
-                    "content": str(h.get("content") or ""),
+                    "source_ref": str(cast("dict[str, object]", h).get("source_ref") or ""),
+                    "content": str(cast("dict[str, object]", h).get("content") or ""),
                 }
-                for h in data.get("doc_hints") or []
+                for h in cast("list[object]", data.get("doc_hints") or [])
                 if isinstance(h, dict)
             ],
         )
@@ -239,15 +243,19 @@ class ApiClient:
                 status="error", reason=f"控制面拒绝(HTTP {resp.status_code})"
             )
         try:
-            data = resp.json()
+            data = cast("dict[str, object]", resp.json())
         except ValueError:
             log.warning("tool_execute 响应非 JSON,按错误观察喂回")
             return ToolExecuteOutcome(status="error", reason="控制面响应畸形")
+        # 守卫后收窄:isinstance(dict) 产物键型仍 Unknown,cast 后再入构造
+        result_raw = data.get("result")
         return ToolExecuteOutcome(
             status=str(data.get("status") or "error"),
-            reason=data.get("reason"),
-            result=data.get("result") if isinstance(data.get("result"), dict) else None,
-            confirm_id=data.get("confirm_id"),
+            reason=cast("str | None", data.get("reason")),
+            result=cast("dict[str, object]", result_raw)
+            if isinstance(result_raw, dict)
+            else None,
+            confirm_id=cast("str | None", data.get("confirm_id")),
         )
 
     async def attachment_content(

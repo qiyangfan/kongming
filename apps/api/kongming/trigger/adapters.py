@@ -4,7 +4,7 @@ custom:整 payload 透传;github:X-GitHub-Event + push/pull_request/issues
 提要({event, repo, ref, summary})。
 """
 
-from typing import Any
+from typing import Any, cast
 
 from kongming.trigger.models import CronError
 
@@ -24,25 +24,29 @@ def normalize(adapter: str, payload: dict[str, Any], event_header: str = "") -> 
         summary = ""
         repo_raw = payload.get("repository")
         if isinstance(repo_raw, dict):
-            repo = str(repo_raw.get("full_name") or "")
+            # isinstance 收窄产物键型未知,收窄键型后再取值(仅类型断言)
+            repo_d = cast("dict[str, object]", repo_raw)
+            repo = str(repo_d.get("full_name") or "")
         if event == "push":
             ref = str(payload.get("ref") or "")
             commits = payload.get("commits")
-            n = len(commits) if isinstance(commits, list) else 0
+            n = len(cast("list[object]", commits)) if isinstance(commits, list) else 0
             pusher = ""
             if isinstance(payload.get("pusher"), dict):
-                pusher = str(payload["pusher"].get("name") or "")
+                pusher = str(cast("dict[str, object]", payload["pusher"]).get("name") or "")
             summary = f"push {n} commits by {pusher}"
         elif event == "pull_request":
             pr = payload.get("pull_request")
             if isinstance(pr, dict):
-                ref = str(pr.get("number") or "")
-                summary = f"PR #{ref} {pr.get('title', '')}"
+                pr_d = cast("dict[str, object]", pr)
+                ref = str(pr_d.get("number") or "")
+                summary = f"PR #{ref} {pr_d.get('title', '')}"
         elif event == "issues":
             issue = payload.get("issue")
             if isinstance(issue, dict):
-                ref = str(issue.get("number") or "")
-                summary = f"issue #{ref} {issue.get('title', '')}"
+                issue_d = cast("dict[str, object]", issue)
+                ref = str(issue_d.get("number") or "")
+                summary = f"issue #{ref} {issue_d.get('title', '')}"
         if not event:
             raise AdapterError("缺 X-GitHub-Event 头")
         return {"event": event, "repo": repo, "ref": ref, "summary": summary}

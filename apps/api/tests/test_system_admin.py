@@ -4,8 +4,10 @@
 安全面:无权限 403+审计、内置角色防删、role_key 不可改、超管/自删/自禁
 保护、角色/部门删除前置校验、禁用用户令牌即时失效、部门防成环。
 """
+# pyright: reportPrivateUsage=false
 
 import uuid as uuidlib
+from typing import Any
 
 import pytest
 from httpx import AsyncClient
@@ -470,7 +472,8 @@ async def test_username_uniqueness_with_soft_delete(
     """用户名唯一=过滤软删(软删记录不占名,rbac spec)。"""
     _, token = await _admin(client, session, make_user)
     tid = await _default_tenant_id(session)
-    body = {
+    # "role_ids": [] 使推断含 list[Unknown],显式 Any 值域
+    body: dict[str, Any] = {
         "username": "dup",
         "password": "Initial#2026",
         "nickname": "重复",
@@ -495,7 +498,7 @@ async def test_create_user_unknown_refs_rejected(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     _, token = await _admin(client, session, make_user)
-    base = {
+    base: dict[str, Any] = {
         "username": "badrefs",
         "password": "Initial#2026",
         "nickname": "坏引用",
@@ -542,7 +545,9 @@ async def test_create_user_unknown_refs_rejected(
 
 # ============ 履约:角色与权限绑定 ============
 
-async def _role_by_key(client: AsyncClient, token: str, key: str) -> dict:
+async def _role_by_key(
+    client: AsyncClient, token: str, key: str
+) -> dict[str, Any]:
     r = await client.get("/system/roles", headers=_auth(token))
     return next(x for x in r.json() if x["role_key"] == key)
 

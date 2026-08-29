@@ -1,6 +1,8 @@
 """026 conversation-artifacts 测试:derive 纯函数 + rerun 安全矩阵(测试先行)。"""
+# pyright: reportPrivateUsage=false
 
 from collections.abc import AsyncIterator
+from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
@@ -17,7 +19,7 @@ SCHEMA = "tenant_art"
 
 
 @pytest.fixture(scope="module", autouse=True)
-async def _biz() -> AsyncIterator[None]:
+async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     async with get_engine().begin() as conn:
         await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))  # noqa: S608
         await conn.execute(
@@ -50,11 +52,12 @@ def test_derive_artifacts_full() -> None:
         summary="共 2 种",
         datasource_key="default",
     )
-    types = [a["type"] for a in out]
+    artifacts = cast("list[dict[str, Any]]", out)
+    types = [a["type"] for a in artifacts]
     assert types == ["sql", "chart", "document"]
-    assert out[0]["content"] == "SELECT 1"
-    assert out[1]["metadata"]["chart"]["type"] == "bar"
-    assert out[2]["content"] == "共 2 种"
+    assert artifacts[0]["content"] == "SELECT 1"
+    assert artifacts[1]["metadata"]["chart"]["type"] == "bar"
+    assert artifacts[2]["content"] == "共 2 种"
 
 
 def test_derive_artifacts_empty() -> None:
@@ -287,10 +290,10 @@ async def test_rerun_output_guardrail_applied(
 
     svc = ChatService(
         ChatRepository(session),
-        None,  # type: ignore[arg-type]  # rerun 路径不触 agent
+        cast("Any", None),  # rerun 路径不触 agent
         SqlDatasourceRepo(session),
-        guardrail=_MockGuardrail(),  # type: ignore[arg-type]
-        runner=_MockRunner(),  # type: ignore[arg-type]
+        guardrail=_MockGuardrail(),
+        runner=cast("Any", _MockRunner()),
     )
     out = await svc.rerun_artifact(
         user_id=uid, tenant_key="art", message_id=mid, sql="SELECT name FROM goods"

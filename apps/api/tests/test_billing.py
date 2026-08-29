@@ -1,5 +1,6 @@
 """034 developer-portal-billing 测试:配额判定纯函数/网关切面(超额 429/
 未超放行/预警/零回归)/套餐生效/月首出账/隔离(测试先行,安全类)。"""
+# pyright: reportPrivateUsage=false
 
 from httpx import AsyncClient
 from sqlalchemy import text
@@ -91,7 +92,7 @@ async def test_gateway_quota_exceeded_429(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """spec「超额 fail-closed 拒绝」:当月 token 超限 → 429 不执行。"""
-    uid, token, api_key = await _user_with_key(client, session, make_user, "bl_q1")
+    _uid, _token, api_key = await _user_with_key(client, session, make_user, "bl_q1")
     tenant_id = await _default_tenant_id(session)
     await _insert_usage(session, str(tenant_id), tokens=1000)
     await _set_policy(client, str(tenant_id), "TOKENS", limit=500)
@@ -108,7 +109,7 @@ async def test_gateway_under_limit_pass_and_zero_regression(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """spec「未超放行」+「未配置零回归」:无策略请求照常。"""
-    _, token, api_key = await _user_with_key(client, session, make_user, "bl_p1")
+    _, _token, api_key = await _user_with_key(client, session, make_user, "bl_p1")
     # 零策略零套餐:照常(agent 可达性决定 200/5xx 但非 429)
     r = await client.post(
         "/v1/chat/completions",
@@ -131,7 +132,7 @@ async def test_gateway_warn_header(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """spec「未超放行并预警」:达 80% 标记 X-Quota-Warning,不拒绝。"""
-    _, token, api_key = await _user_with_key(client, session, make_user, "bl_w1")
+    _, _token, api_key = await _user_with_key(client, session, make_user, "bl_w1")
     tenant_id = await _default_tenant_id(session)
     await _insert_usage(session, str(tenant_id), tokens=850)
     await _set_policy(client, str(tenant_id), "TOKENS", limit=1000, warn=80)
@@ -149,7 +150,7 @@ async def test_plan_quota_takes_effect(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """spec「套餐配额生效」:绑套餐后按套餐值判定(0 token 配额即拒)。"""
-    uid, token, api_key = await _user_with_key(client, session, make_user, "bl_plan")
+    _uid, _token, api_key = await _user_with_key(client, session, make_user, "bl_plan")
     tenant_id = await _default_tenant_id(session)
     # 创建月 10 token 套餐并绑定 → 有任一历史用量即超(先插一行用量)
     from kongming.billing.repository import SqlBillingRepo
@@ -229,7 +230,7 @@ async def test_invoice_tenant_isolation(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """spec「账单明细隔离」:他租户查询 404。"""
-    uid, token, _ = await _user_with_key(client, session, make_user, "bl_iso")
+    _uid, token, _ = await _user_with_key(client, session, make_user, "bl_iso")
     tenant_id = await _default_tenant_id(session)
     # 他租户账单(手工落)
     from kongming.billing.repository import SqlBillingRepo
@@ -255,7 +256,7 @@ async def test_quota_reject_audit_written(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """R1-S1 回归:429 后 sys_oper_log 有 billing.quota_reject 行。"""
-    _, token, api_key = await _user_with_key(client, session, make_user, "bl_a1")
+    _, _token, api_key = await _user_with_key(client, session, make_user, "bl_a1")
     tenant_id = await _default_tenant_id(session)
     await _insert_usage(session, str(tenant_id), tokens=1000)
     await _set_policy(client, str(tenant_id), "TOKENS", limit=500)
@@ -317,7 +318,7 @@ async def test_invoice_cross_tenant_404(
     """R1-A7/spec「账单明细隔离」:他租户用户查账单 404 同形。"""
     from tests.test_toolcall import _mk_tenant
 
-    uid, token, api_key = await _user_with_key(client, session, make_user, "bl_x1")
+    _uid, _token, _api_key = await _user_with_key(client, session, make_user, "bl_x1")
     tenant_id = await _default_tenant_id(session)
     from kongming.billing.repository import SqlBillingRepo
     from kongming.db import get_sessionmaker
@@ -355,7 +356,7 @@ async def test_portal_usage_aggregation(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """spec「开发者查看用量」:门户聚合三维+策略+套餐。"""
-    uid, token, _ = await _user_with_key(client, session, make_user, "bl_pu")
+    _uid, token, _ = await _user_with_key(client, session, make_user, "bl_pu")
     tenant_id = await _default_tenant_id(session)
     await _insert_usage(session, str(tenant_id), tokens=500)
     await _set_policy(client, str(tenant_id), "TOKENS", limit=1000)

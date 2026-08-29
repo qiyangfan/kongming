@@ -1,10 +1,12 @@
 """联邦登录(auth spec「联邦登录(连接器形态)」):options/start/state/404 全链路。"""
 
 import asyncio
+from collections.abc import Callable
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.models import NormalizedProfile
 from kongming.config import get_settings
@@ -68,7 +70,11 @@ async def _start_and_callback(client: AsyncClient, provider: str, state: str | N
 
 
 async def test_callback_success_issues_platform_tokens(
-    client: AsyncClient, fake_provider, session
+    client: AsyncClient,
+    fake_provider: Callable[[str,
+    NormalizedProfile],
+    None],
+    session: AsyncSession,
 ) -> None:
 
     from kongming.auth.seed import seed_all
@@ -88,7 +94,11 @@ async def test_callback_success_issues_platform_tokens(
     assert r.json()["username"].startswith("octocat")
 
 
-async def test_callback_reused_state_rejected(client: AsyncClient, fake_provider, session) -> None:
+async def test_callback_reused_state_rejected(
+    client: AsyncClient,
+    fake_provider: Callable[[str, NormalizedProfile], None],
+    session: AsyncSession,
+) -> None:
     from kongming.auth.seed import seed_all
 
     await seed_all(session, get_settings())
@@ -101,14 +111,20 @@ async def test_callback_reused_state_rejected(client: AsyncClient, fake_provider
     assert second.status_code == 401
 
 
-async def test_callback_forged_state_rejected(client: AsyncClient, fake_provider) -> None:
+async def test_callback_forged_state_rejected(
+    client: AsyncClient, fake_provider: Callable[[str, NormalizedProfile], None]
+) -> None:
     fake_provider("github", PROFILE)
     r = await _start_and_callback(client, "github", state="forged-state")
     assert r.status_code == 401
 
 
 async def test_callback_expired_state_rejected(
-    client: AsyncClient, fake_provider, monkeypatch: pytest.MonkeyPatch
+    client: AsyncClient,
+    fake_provider: Callable[[str,
+    NormalizedProfile],
+    None],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_provider("github", PROFILE)
     monkeypatch.setattr(get_settings(), "auth_state_ttl_sec", 1)

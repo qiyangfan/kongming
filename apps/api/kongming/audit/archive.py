@@ -16,8 +16,10 @@ import uuid as _uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 from sqlalchemy import text
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -149,11 +151,14 @@ async def _run_archive_locked(
     # manifest 写盘成功(或已完整)才删除;删除失败保留文件(下轮重删)
     deleted = 0
     for table in _TABLES:
-        res = await session.execute(
-            text(f"DELETE FROM public.{table} WHERE created_at < :cutoff"),  # noqa: S608  # 常量表名
-            {"cutoff": cutoff},
+        res = cast(
+            "CursorResult[Any]",
+            await session.execute(
+                text(f"DELETE FROM public.{table} WHERE created_at < :cutoff"),  # noqa: S608  # 常量表名
+                {"cutoff": cutoff},
+            ),
         )
-        deleted += res.rowcount  # type: ignore[attr-defined]
+        deleted += res.rowcount
     await session.commit()
     return ArchiveResult(
         exported=exported,

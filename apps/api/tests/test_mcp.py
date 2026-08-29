@@ -3,11 +3,12 @@
 
 假 MCP server=进程内 ASGI 应用(无外部网络;httpx ASGITransport 注入)。
 """
+# pyright: reportPrivateUsage=false
 
 import json
 import uuid
-from collections.abc import AsyncIterator
-from typing import Any
+from collections.abc import Iterator, MutableMapping
+from typing import Any, cast
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -53,7 +54,9 @@ _FAKE_TOOLS = [
 ]
 
 
-async def _fake_mcp_app(scope: dict, receive: Any, send: Any) -> None:  # noqa: ANN001, ANN202  # ASGI 裸签名
+async def _fake_mcp_app(
+    scope: MutableMapping[str, Any], receive: Any, send: Any
+) -> None:  # noqa: ANN001, ANN202  # ASGI 裸签名
     assert scope["type"] == "http"
     body = b""
     while True:
@@ -67,6 +70,7 @@ async def _fake_mcp_app(scope: dict, receive: Any, send: Any) -> None:  # noqa: 
         import asyncio
 
         await asyncio.sleep(2)  # 客户端 0.2s 超时先于其完成
+    req: dict[str, Any]
     try:
         req = json.loads(body or b"{}")
     except json.JSONDecodeError:
@@ -82,9 +86,9 @@ async def _fake_mcp_app(scope: dict, receive: Any, send: Any) -> None:  # noqa: 
     elif method == "tools/list":
         result = {"tools": _FAKE_TOOLS}
     elif method == "tools/call":
-        params = req.get("params") or {}
+        params = cast("dict[str, Any]", req.get("params") or {})
         name = params.get("name")
-        args = params.get("arguments") or {}
+        args = cast("dict[str, Any]", params.get("arguments") or {})
         if headers.get("x-test-big"):
             result = {
                 "content": [{"type": "text", "text": "y" * (1100 * 1024)}],
@@ -151,7 +155,7 @@ def _fake_caller(timeout: float = 15) -> Any:
     from kongming.mcp.client import HttpMcpCaller
 
     return HttpMcpCaller(
-        timeout_sec=timeout, transport=ASGITransport(app=_fake_mcp_app)  # type: ignore[arg-type]
+        timeout_sec=cast('int', timeout), transport=ASGITransport(app=_fake_mcp_app)
     )
 
 
@@ -337,7 +341,7 @@ def _override_mcp_service() -> None:
         def __init__(self, s: AsyncSession) -> None:
             self._r = SqlOperLogRepo(s)
 
-        async def log(self, *, action: str, target: str, detail: dict) -> None:
+        async def log(self, *, action: str, target: str, detail: dict[str, Any]) -> None:
             await self._r.add(None, action, target, detail)
 
     def _factory(s: AsyncSession = Depends(get_session)) -> McpService:  # noqa: B008
@@ -558,7 +562,8 @@ async def test_execute_mcp_readonly_tool(
         _clear_toolcall_override()
     body = r.json()
     assert body["status"] == "executed", body
-    assert "读到: /etc/hosts" in (body["result"] or {}).get("content", "")
+    # cast 仅定型 Any-or-dict 并集,运行时不变
+    assert "读到: /etc/hosts" in cast("dict[str, str]", body["result"] or {}).get("content", "")
 
 
 async def test_execute_unannotated_goes_confirm(
@@ -769,7 +774,7 @@ async def test_intent_count_includes_mcp_write(session: AsyncSession) -> None:
 
 
 @pytest.fixture
-def fake_agent() -> AsyncIterator[dict]:  # type: ignore[type-arg]
+def fake_agent() -> Iterator[dict[str, Any]]:
     """025 同款 agent 替身注入(test_bot 的 fixture 为其模块私有,此处自建)。"""
     from kongming.chat.router import get_agent_client
     from kongming.main import app
@@ -782,7 +787,10 @@ def fake_agent() -> AsyncIterator[dict]:  # type: ignore[type-arg]
 
 
 async def _bot_with_key(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, Any],
 ) -> str:
     from tests.test_bot import BOT_PAYLOAD, FakeAgent, _user
 
@@ -802,7 +810,10 @@ async def _bot_with_key(
 
 
 async def test_mcp_inbound_full_chain(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, Any],
 ) -> None:
     """spec「完整调用链」:initialize → tools/list(恰 1 个绑定 Bot)→
     tools/call(channel=mcp 审计)。"""
@@ -837,7 +848,10 @@ async def test_mcp_inbound_full_chain(
 
 
 async def test_mcp_inbound_invalid_key_and_unknown_method(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, Any],
 ) -> None:
     plain = await _bot_with_key(client, session, make_user, fake_agent)
     r = await client.post(
@@ -874,7 +888,10 @@ async def test_mcp_inbound_invalid_key_and_unknown_method(
 
 
 async def test_mcp_inbound_question_cap_and_error_surface(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser, fake_agent: dict
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, Any],
 ) -> None:
     """R1-A3/A7:question 超 2000 拒(-32602);Bot 失败轮透 error+isError。"""
     plain = await _bot_with_key(client, session, make_user, fake_agent)
@@ -901,7 +918,7 @@ async def test_mcp_inbound_question_cap_and_error_surface(
         async def rewrite_title(self, *, question: str) -> None:
             return None
 
-    fake_agent["agent"] = _FailAgent()  # type: ignore[assignment]
+    fake_agent["agent"] = _FailAgent()
     r2 = await client.post(
         "/mcp",
         headers={"X-Api-Key": plain},
@@ -920,7 +937,7 @@ def test_has_redos_pattern_detection() -> None:
     即被识别降级;合法 pattern 不误伤。"""
     from kongming.mcp.models import has_redos_pattern
 
-    def _schema(pattern: str) -> dict:
+    def _schema(pattern: str) -> dict[str, Any]:
         return {"type": "object", "properties": {"x": {"type": "string", "pattern": pattern}}}
 
     assert has_redos_pattern(_schema("(a+)+b"))

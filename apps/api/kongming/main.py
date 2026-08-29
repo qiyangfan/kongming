@@ -7,12 +7,13 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI, Request
-from starlette.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import JSONResponse, Response
 
 from kongming.attachment.router import chat_router as attachment_chat_router
 from kongming.attachment.router import internal_router as attachment_internal_router
@@ -100,7 +101,7 @@ async def _monthly_invoice_loop() -> None:
             from kongming.billing.service import BillingService
 
             class _InvOper:
-                def __init__(self, s) -> None:  # type: ignore[no-untyped-def]
+                def __init__(self, s: AsyncSession) -> None:
                     self._r = SqlOperLogRepo(s)
 
                 async def log(self, *, action: str, target: str, detail: dict[str, object]) -> None:
@@ -142,7 +143,7 @@ async def _payment_expire_loop() -> None:
             from kongming.billing.service import BillingService
 
             class _ExpOper:
-                def __init__(self, s) -> None:  # type: ignore[no-untyped-def]
+                def __init__(self, s: AsyncSession) -> None:
                     self._r = SqlOperLogRepo(s)
 
                 async def log(self, *, action: str, target: str, detail: dict[str, object]) -> None:
@@ -190,7 +191,7 @@ async def _attachment_cleanup_loop() -> None:
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
     """启动即播种(幂等,rbac spec「种子数据」);DB 不可达则拒启(控制面 fail-closed)。
     启动试构造凭证 cipher:非法密钥(坏 base64/非 16/32 字节)即拒启——
     prod 缺配已由 config fail-closed 拦截,非法值同属不可服务状态(R1-S3:
@@ -271,7 +272,9 @@ async def healthz() -> dict[str, str]:
 
 
 @app.middleware("http")
-async def guard_internal_channel(request: Request, call_next):  # type: ignore[no-untyped-def]
+async def guard_internal_channel(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     """/internal/* 必须带内部令牌;缺失/错误直接 403(命名:守门,而非拒绝未知)。
     注意:middleware 中抛 HTTPException 不会被异常处理器捕获(会变 500),须返回响应。"""
     if request.url.path.startswith("/internal"):

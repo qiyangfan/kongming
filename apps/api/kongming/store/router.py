@@ -6,7 +6,7 @@
 
 import logging
 import uuid
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -67,7 +67,7 @@ class _StoreRunner:
     async def run(
         self, *, bot_key: str, question: str, tenant_id: str, channel: str
     ) -> tuple[bool, str, str]:
-        from kongming.bot.router import _get_service as _bot_factory
+        from kongming.bot.router import get_bot_service as _bot_factory
         from kongming.chat.router import get_agent_client
         from kongming.db import get_sessionmaker
 
@@ -99,7 +99,7 @@ class _StoreToolLister:
     async def resolve_runnable(
         self, *, creator_id: str, tenant_id: str, row: dict[str, Any]
     ) -> list[dict[str, Any]]:
-        from kongming.bot.router import _get_service as _bot_factory
+        from kongming.bot.router import get_bot_service as _bot_factory
         from kongming.chat.router import get_agent_client
 
         svc = _bot_factory(self._s, get_agent_client())
@@ -308,8 +308,8 @@ async def store_detail(
     base = _store_out(row)
     return StoreBotDetailOut(
         **base.model_dump(),
-        suggestions=[str(x) for x in row.get("suggestions") or []],
-        tools=[str(x) for x in row.get("tools") or []],
+        suggestions=[str(x) for x in cast("list[object]", row.get("suggestions") or [])],
+        tools=[str(x) for x in cast("list[object]", row.get("tools") or [])],
         my_rating=row.get("my_rating"),
     )
 

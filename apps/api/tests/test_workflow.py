@@ -1,5 +1,6 @@
 """029 workflow-orchestration 测试:DAG 校验/引擎(mock runner)/SSRF 矩阵/
 HTTP 链路安全矩阵(测试先行,安全类)。"""
+# pyright: reportPrivateUsage=false
 
 import asyncio
 from collections.abc import AsyncIterator
@@ -30,7 +31,7 @@ SCHEMA = "tenant_wf"
 
 
 @pytest.fixture(scope="module", autouse=True)
-async def _biz() -> AsyncIterator[None]:
+async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     """workflow 测试租户业务 schema(sql 节点真执行活数据)。"""
     async with get_engine().begin() as conn:
         await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))  # noqa: S608  # 模块常量
@@ -129,7 +130,7 @@ def test_compare_ops() -> None:
 
 
 class _MockSql:
-    def __init__(self, verdict: str = "PASS", rows: list | None = None) -> None:  # type: ignore[type-arg]
+    def __init__(self, verdict: str = "PASS", rows: list[dict[str, Any]] | None = None) -> None:
         self._v = verdict
         self._rows = rows if rows is not None else [["连弩"]]
         self.calls: list[str] = []
@@ -425,14 +426,14 @@ async def test_ssrf_domain_resolves_private(monkeypatch: pytest.MonkeyPatch) -> 
     """域名解析到私网即拒(重绑定面);解析到公网放行。"""
     import kongming.workflow.http_runner as hr
 
-    async def _fake_private(host: str, port: int) -> list:
+    async def _fake_private(host: str, port: int) -> list[tuple[object, ...]]:
         return [(None, None, None, None, ("192.168.0.1", port))]
 
     monkeypatch.setattr(hr, "_resolve", _fake_private)
     with pytest.raises(SsrFBlocked, match="拒绝段"):
         await hr.assert_url_allowed("http://internal.example/x")
 
-    async def _fake_public(host: str, port: int) -> list:
+    async def _fake_public(host: str, port: int) -> list[tuple[object, ...]]:
         return [(None, None, None, None, ("93.184.216.34", port))]
 
     monkeypatch.setattr(hr, "_resolve", _fake_public)
@@ -607,7 +608,7 @@ async def test_pinned_transport_rewrites_host(monkeypatch: pytest.MonkeyPatch) -
 
     captured: dict[str, object] = {}
 
-    async def fake_handle(self, request):  # type: ignore[no-untyped-def]
+    async def fake_handle(self: object, request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
         captured["host"] = request.headers.get("Host")
         captured["sni"] = request.extensions.get("sni_hostname")

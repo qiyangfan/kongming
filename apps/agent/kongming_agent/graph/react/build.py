@@ -70,9 +70,16 @@ def react_stage_wrapper(name: str, fn: Any) -> Any:  # noqa: ANN401 —— 与 0
 def get_react_graph():  # type: ignore[no-untyped-def]
     """编译产物单例(无状态,可跨请求共享;与 get_graph 并列)。"""
     g = StateGraph(ReactState)
-    g.add_node("react", react_stage_wrapper("react", nodes.react_llm))
-    g.add_node("tool_dispatch", react_stage_wrapper("tool_dispatch", nodes.tool_dispatch))
-    g.add_node("finalize", react_stage_wrapper("finalize", nodes.finalize))
+    # langgraph add_node/compile 签名自带库侧 Unknown(泛型未闭合),访问点豁免
+    g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
+        "react", react_stage_wrapper("react", nodes.react_llm)
+    )
+    g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
+        "tool_dispatch", react_stage_wrapper("tool_dispatch", nodes.tool_dispatch)
+    )
+    g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
+        "finalize", react_stage_wrapper("finalize", nodes.finalize)
+    )
     g.add_edge(START, "react")
     g.add_conditional_edges(
         "react", _after_react, {"tools": "tool_dispatch", "done": "finalize"}
@@ -81,7 +88,8 @@ def get_react_graph():  # type: ignore[no-untyped-def]
         "tool_dispatch", _after_dispatch, {"react": "react", "done": "finalize"}
     )
     g.add_edge("finalize", END)
-    return g.compile()
+    # langgraph 库侧签名含 Unknown,访问点豁免(运行时即编译产物)
+    return g.compile()  # pyright: ignore[reportUnknownMemberType]
 
 
 def react_recursion_limit() -> int:

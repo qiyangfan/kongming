@@ -30,8 +30,9 @@ def _store_error_boundary[**P, R](
 
     只加在 service 容错段覆盖的写方法与 commit 上;读路径不加
     (service 不容错,原异常冒出维持 500 既定语义)。
-    返回类型保持 Coroutine:与 Protocol 的 async def 成员结构化匹配
-    (Awaitable 宽形态会被 mypy 判不兼容)。
+    返回类型保持 typing.Coroutine:mypy 仅认此形态;pyright 对 async def
+    成员推导 CoroutineType,故 ports 侧对应成员以 def+Coroutine 显式
+    形态声明(两侧类型系统对该组合均精确匹配)。
     """
 
     @functools.wraps(fn)

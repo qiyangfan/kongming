@@ -4,10 +4,9 @@ email_verified 直接来自 userinfo;username 取 email 本地部分(sub 兜底�
 account_link 的用户名去重负责)。
 """
 
-from authlib.integrations.httpx_client import AsyncOAuth2Client
 
 from kongming.auth.models import NormalizedProfile
-from kongming.auth.providers.base import OAuthProviderBase
+from kongming.auth.providers.base import OAuthClient, OAuthProviderBase
 from kongming.config import Settings
 
 
@@ -28,7 +27,7 @@ class GoogleProvider(OAuthProviderBase):
     def redirect_uri(self, s: Settings) -> str:
         return s.google_redirect_uri
 
-    async def fetch_raw_profile(self, client: AsyncOAuth2Client) -> NormalizedProfile:
+    async def fetch_raw_profile(self, client: OAuthClient) -> NormalizedProfile:
         resp = await client.get("https://openidconnect.googleapis.com/v1/userinfo")
         resp.raise_for_status()
         raw: dict[str, object] = resp.json()

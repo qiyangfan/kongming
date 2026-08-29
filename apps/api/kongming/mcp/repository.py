@@ -23,7 +23,8 @@ def _mask_keys(headers_cipher: str, cipher: AesGcmCipher) -> list[str]:
         raw = json.loads(cipher.decrypt(headers_cipher))
     except Exception:  # noqa: BLE001  # 密钥轮换/损坏:查询面降级
         return []
-    return [str(k) for k in raw] if isinstance(raw, dict) else []
+    # isinstance 收窄产物键型未知,收窄键型后仅取键名(仅类型断言)
+    return [str(k) for k in cast("dict[str, object]", raw)] if isinstance(raw, dict) else []
 
 
 class SqlMcpRepo:

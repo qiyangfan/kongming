@@ -9,7 +9,7 @@ data 行。大小闸:流式读取超 1MB 即中断(截断标记由调用方语�
 
 import asyncio
 import json
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import structlog
@@ -64,7 +64,7 @@ class HttpMcpCaller:
         params: dict[str, Any] | None,
         rpc_id: int,
     ) -> dict[str, Any]:
-        payload = {"jsonrpc": "2.0", "id": rpc_id, "method": method}
+        payload: dict[str, object] = {"jsonrpc": "2.0", "id": rpc_id, "method": method}
         if params is not None:
             payload["params"] = params
         req_headers = {
@@ -121,8 +121,11 @@ class HttpMcpCaller:
                     candidate = json.loads(ev)
                 except json.JSONDecodeError:
                     continue
-                if isinstance(candidate, dict) and candidate.get("id") == rpc_id:
-                    body = candidate
+                if not isinstance(candidate, dict):
+                    continue
+                typed = cast("dict[str, Any]", candidate)
+                if typed.get("id") == rpc_id:
+                    body = typed
             if body is None:
                 raise McpCallError("protocol", "SSE 帧中无匹配响应")
         else:
@@ -132,18 +135,23 @@ class HttpMcpCaller:
                 raise McpCallError("protocol", f"响应非 JSON: {text[:80]}") from e
             if not isinstance(parsed, dict):
                 raise McpCallError("protocol", "响应非 JSON-RPC 对象")
-            if parsed.get("id") != rpc_id:
+            body = cast("dict[str, Any]", parsed)
+            if body.get("id") != rpc_id:
                 # R1-T2:与 SSE 形态同判据(两形态接受面对齐)
                 raise McpCallError("protocol", "响应 id 不匹配")
-            body = parsed
         if "error" in body:
-            err = body["error"]
-            msg = err.get("message", "?") if isinstance(err, dict) else str(err)
+            # JSON-RPC error 字段契约上为对象;dict | object 联合使 isinstance
+            # 收窄产物键型已知(dict[str, Any])
+            err: dict[str, Any] | object = body["error"]
+            # 预放宽的 object 别名:isinstance 不污染其类型,else 支路 str() 不带 Unknown
+            err_text: object = err
+            err_d = cast("dict[str, Any]", err) if isinstance(err, dict) else None
+            msg = err_d.get("message", "?") if err_d is not None else str(err_text)
             raise McpCallError("remote", str(msg)[:300])
         result = body.get("result")
         if not isinstance(result, dict):
             raise McpCallError("protocol", "缺 result 字段")
-        return result
+        return cast("dict[str, Any]", result)
 
     async def handshake(self, *, endpoint: str, headers: dict[str, str]) -> int:
         await self._rpc(
@@ -201,19 +209,27 @@ class HttpMcpCaller:
         if not isinstance(raw, list):
             raise McpCallError("protocol", "tools/list 缺 tools 数组")
         out: list[DiscoveredTool] = []
-        for item in raw:
-            if not isinstance(item, dict) or not item.get("name"):
+        for raw_item in cast("list[object]", raw):
+            # isinstance 收窄产物键型未知,收窄键型后再判 name(仅类型断言)
+            if (
+                not isinstance(raw_item, dict)
+                or not cast("dict[str, object]", raw_item).get("name")
+            ):
                 continue  # 畸形条目跳过(宁缺毋滥,不炸整表)
+            item = cast("dict[str, Any]", raw_item)
             hints = item.get("annotations")
+            hints_d = cast("dict[str, Any]", hints) if isinstance(hints, dict) else None
             read_only = bool(
-                isinstance(hints, dict) and hints.get("readOnlyHint") is True
+                hints_d is not None and hints_d.get("readOnlyHint") is True
             )  # fail-closed:未标注=写
             schema = item.get("inputSchema")
             out.append(
                 DiscoveredTool(
                     name=str(item["name"]),
                     description=str(item.get("description") or ""),
-                    schema=schema if isinstance(schema, dict) else {"type": "object"},
+                    schema=cast("dict[str, Any]", schema)
+                    if isinstance(schema, dict)
+                    else {"type": "object"},
                     read_only=read_only,
                 )
             )
@@ -237,8 +253,11 @@ class HttpMcpCaller:
         content = result.get("content")
         texts: list[str] = []
         if isinstance(content, list):
-            for part in content:
-                if isinstance(part, dict) and part.get("type") == "text":
+            for raw_part in cast("list[object]", content):
+                if not isinstance(raw_part, dict):
+                    continue
+                part = cast("dict[str, Any]", raw_part)
+                if part.get("type") == "text":
                     texts.append(str(part.get("text") or ""))
         joined = "\n".join(texts) if texts else json.dumps(result, ensure_ascii=False)
         # 语义截断(spec「超大结果截断」):截断附标记,原始大小回传

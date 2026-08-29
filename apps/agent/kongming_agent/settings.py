@@ -8,6 +8,7 @@ ADR-002 纪律:本文件(以及整个 apps/agent)**不存在任何数据库配�
 import json
 import logging
 from dataclasses import dataclass, field
+from typing import cast
 from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,7 +25,7 @@ class ModelEntry:
     base_url: str
     api_key: str = field(repr=False)
     model: str = ""
-    capabilities: list[str] = field(default_factory=list)
+    capabilities: list[str] = field(default_factory=list[str])
     price_input: float | None = None  # 每百万 tokens 单价(可选)
     price_output: float | None = None
     max_image_mb: float | None = None  # 036⑦:图片体积上限(vision 模型;None=缺省)
@@ -82,10 +83,12 @@ class Settings(BaseSettings):
             return {}
         allowed = self.allowed_hosts()
         out: dict[str, ModelEntry] = {}
-        for i, item in enumerate(raw):
-            if not isinstance(item, dict):
+        # env JSON 边界:isinstance 守卫后收窄键型,下游 get 全部可推断
+        for i, raw_item in enumerate(cast("list[object]", raw)):
+            if not isinstance(raw_item, dict):
                 log.warning("注册表条目 %d 非对象,剔除", i)
                 continue
+            item = cast("dict[str, object]", raw_item)
             name = str(item.get("name") or "")
             base_url = str(item.get("base_url") or "")
             api_key = str(item.get("api_key") or "")
@@ -101,8 +104,8 @@ class Settings(BaseSettings):
                 log.warning("注册表条目 %s 主机 %s 不在白名单,拒配", name, host)
                 continue
             # 计价字段类型校验(R1-L7:字符串等脏数据剔除,不落 dataclass)
-            price_in = item.get("price_input")
-            price_out = item.get("price_output")
+            price_in = cast("int | float | str | None", item.get("price_input"))
+            price_out = cast("int | float | str | None", item.get("price_output"))
             try:
                 price_in = float(price_in) if price_in is not None else None
                 price_out = float(price_out) if price_out is not None else None
@@ -111,7 +114,7 @@ class Settings(BaseSettings):
                 price_in = price_out = None
             # 036⑦:图片上限(畸形剔除该字段)
             max_image_mb: float | None = None
-            raw_mimb = item.get("max_image_mb")
+            raw_mimb = cast("int | float | str | None", item.get("max_image_mb"))
             if raw_mimb is not None:
                 try:
                     max_image_mb = float(raw_mimb)
@@ -125,7 +128,7 @@ class Settings(BaseSettings):
                 base_url=base_url,
                 api_key=api_key,
                 model=model or name,
-                capabilities=[str(c) for c in item.get("capabilities") or []],
+                capabilities=[str(c) for c in cast("list[object]", item.get("capabilities") or [])],
                 price_input=price_in,
                 price_output=price_out,
                 max_image_mb=max_image_mb,
@@ -143,7 +146,9 @@ class Settings(BaseSettings):
             return {}
         if not isinstance(raw, dict):
             return {}
-        return {str(k): str(v) for k, v in raw.items()}
+        # isinstance 收窄产物 dict[Unknown, Unknown] 仍报,守卫后收窄键型
+        typed = cast("dict[str, object]", raw)
+        return {str(k): str(v) for k, v in typed.items()}
 
     def allowed_hosts(self) -> set[str]:
         """出口白名单:显式配置 + 主模型/embedding 供应商主机(缺省兼容)。"""

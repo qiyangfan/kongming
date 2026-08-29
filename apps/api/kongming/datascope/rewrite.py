@@ -10,8 +10,9 @@
 """
 
 import sqlglot
-from sqlglot import exp
+from sqlglot import Expr, exp
 from sqlglot.dialects.postgres import Postgres
+from sqlglot.errors import ParseError
 
 from kongming.datascope.models import FilterType, ScopeFilter
 
@@ -35,7 +36,7 @@ def extract_main_table_ref(sql: str) -> tuple[str, str | None] | None:
     """
     try:
         parsed = sqlglot.parse_one(sql, dialect="postgres")
-    except sqlglot.errors.ParseError:
+    except ParseError:
         return None
     if not isinstance(parsed, exp.Select):
         return None
@@ -71,7 +72,7 @@ def apply_filter(sql: str, flt: ScopeFilter) -> tuple[str, dict[str, object]]:
         placeholders.append(exp.Placeholder(this=name))
         params[name] = value
     column = exp.column(flt.column or "", table=qualifier or None)
-    predicate: exp.Expression
+    predicate: Expr
     if flt.type is FilterType.USER_EQ:
         predicate = exp.EQ(this=column, expression=placeholders[0])
     else:  # DEPT_IN

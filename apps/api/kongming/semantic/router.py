@@ -6,7 +6,7 @@
 
 import logging
 import uuid
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -279,7 +279,7 @@ async def list_metrics(
             id=str(r["id"]),
             metric_name=str(r["metric_name"]),
             sql_template=str(r["sql_template"]),
-            business_terms=[str(t) for t in r["business_terms"] or []],
+            business_terms=[str(t) for t in cast("list[object]", r["business_terms"] or [])],
             enabled=bool(r["enabled"]),
             updated_at=str(r["updated_at"]),
         )

@@ -8,6 +8,8 @@
 import hashlib
 import json
 import logging
+from collections.abc import AsyncIterator, Callable
+from typing import cast
 
 from redis.asyncio import Redis
 
@@ -47,9 +49,11 @@ class ContextCache:
             return None
         if not isinstance(data, dict):
             return None
+        # isinstance 收窄产物键型未知,收窄键型后再取值(仅类型断言)
+        typed = cast("dict[str, object]", data)
         return RagContext(
-            schema_hint=str(data.get("schema_hint") or ""),
-            history_sql=str(data.get("history_sql") or ""),
+            schema_hint=str(typed.get("schema_hint") or ""),
+            history_sql=str(typed.get("history_sql") or ""),
         )
 
     async def set(
@@ -75,7 +79,13 @@ class ContextCache:
             return
         pattern = f"{_CTX_PREFIX}{tenant_id}:{datasource_key}:*"
         try:
-            keys = [key async for key in self._redis.scan_iter(match=pattern, count=_SCAN_COUNT)]
+            # redis-py scan_iter 签名 kwargs 未注解(strict 判部分未知):成员
+            # 访问行豁免,经 cast 收窄为「返回文本键迭代器」的可调用后使用
+            it = cast(
+                "Callable[..., AsyncIterator[str]]",
+                self._redis.scan_iter,  # pyright: ignore[reportUnknownMemberType]  # redis-py 未注解
+            )
+            keys = [key async for key in it(match=pattern, count=_SCAN_COUNT)]
             if keys:
                 await self._redis.delete(*keys)
         except Exception:  # noqa: BLE001

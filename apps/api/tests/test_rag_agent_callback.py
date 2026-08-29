@@ -2,6 +2,7 @@
 模块级单例工厂;embed/describe 业务语义由 test_rag_admin/test_rag_recall
 类级补丁覆盖,此处只锁复用形态。
 """
+# pyright: reportPrivateUsage=false
 
 import httpx
 

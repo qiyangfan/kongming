@@ -57,15 +57,33 @@ def get_graph():  # type: ignore[no-untyped-def]
     g = StateGraph(AgentState)
     # 017 流式:节点挂 stage_wrapper(事件发射点;非流式调用静默跳过零行为变化,
     # nodes.py 业务实现零改动——prompt 资产纪律)
-    g.add_node("understand", stage_wrapper("understand", nodes.understand))
-    g.add_node("retrieve", stage_wrapper("retrieve", nodes.retrieve))
-    g.add_node("generate", stage_wrapper("generate", nodes.generate))
-    g.add_node("validate", stage_wrapper("validate", nodes.validate))
-    g.add_node("execute", stage_wrapper("execute", nodes.execute))
-    g.add_node("selfheal", stage_wrapper("selfheal", nodes.selfheal))
-    g.add_node("summarize", stage_wrapper("summarize", nodes.summarize))
+    # langgraph add_node/compile 签名自带库侧 Unknown(泛型未闭合),访问点豁免
+    g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
+        "understand", stage_wrapper("understand", nodes.understand)
+    )
+    g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
+        "retrieve", stage_wrapper("retrieve", nodes.retrieve)
+    )
+    g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
+        "generate", stage_wrapper("generate", nodes.generate)
+    )
+    g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
+        "validate", stage_wrapper("validate", nodes.validate)
+    )
+    g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
+        "execute", stage_wrapper("execute", nodes.execute)
+    )
+    g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
+        "selfheal", stage_wrapper("selfheal", nodes.selfheal)
+    )
+    g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
+        "summarize", stage_wrapper("summarize", nodes.summarize)
+    )
 
-    g.add_node("doc_answer", stage_wrapper("doc_answer", nodes.doc_answer))  # 024
+    # 024
+    g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
+        "doc_answer", stage_wrapper("doc_answer", nodes.doc_answer)
+    )
 
     g.add_edge(START, "understand")
     g.add_edge("understand", "retrieve")
@@ -92,7 +110,8 @@ def get_graph():  # type: ignore[no-untyped-def]
         {"retry": "generate", "fail": END},
     )
     g.add_edge("summarize", END)
-    return g.compile()
+    # langgraph 库侧签名含 Unknown,访问点豁免(运行时即编译产物)
+    return g.compile()  # pyright: ignore[reportUnknownMemberType]
 
 
 def build():  # type: ignore[no-untyped-def]

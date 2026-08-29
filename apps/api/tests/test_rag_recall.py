@@ -1,7 +1,9 @@
 """rag 内部召回端点测试(009):三路召回/双过滤隔离/缓存/降级/chat 回写闭环。"""
+# pyright: reportPrivateUsage=false
 
 import hashlib
 import math
+from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
@@ -175,7 +177,7 @@ async def test_recall_alias_hits_and_hint_carries_alias(
     schema_hint 表说明段含「goods(商品表)」形态(rag delta 场景)。"""
     from kongming.redis_client import get_redis
 
-    await get_redis().flushdb()
+    await cast("Any", get_redis()).flushdb()
     tid = await _ensure_default_tenant(session)
     # goods 的 embedding 文本拼入 alias「商品表」——问句同文本,余弦距离 0 必中
     await _seed_knowledge(session, tid, ds="default", table="goods",
@@ -259,7 +261,7 @@ async def test_recall_empty_returns_blank(
     (冒烟实证改进:降级空结果入缓存会让恢复后服务 TTL 窗口内持续返回空)。"""
     from kongming.redis_client import get_redis
 
-    await get_redis().flushdb()
+    await cast("Any", get_redis()).flushdb()
     await _ensure_default_tenant(session)
     r = await client.post(
         "/internal/rag/retrieve",
@@ -274,7 +276,7 @@ async def test_recall_empty_returns_blank(
         "metric_hints": "",
         "doc_hints": [],  # 024 纯增文档段(空)
     }
-    keys = [k async for k in get_redis().scan_iter(match="km:ragctx:*")]
+    keys = [k async for k in cast("Any", get_redis()).scan_iter(match="km:ragctx:*")]
     assert keys == []  # 空结果不写缓存(下次请求重试全链路)
 
 
@@ -285,7 +287,7 @@ async def test_recall_history_only_result_cached(
     (R2-S1 口径:api 认为纯 history 命中是有效结果)。"""
     from kongming.redis_client import get_redis
 
-    await get_redis().flushdb()
+    await cast("Any", get_redis()).flushdb()
     tid = await _ensure_default_tenant(session)
     await _seed_history(
         session, tid, ds="default", question="客户邮箱", sql="SELECT email FROM c"
@@ -299,7 +301,7 @@ async def test_recall_history_only_result_cached(
     body = r.json()
     assert body["schema_hint"] == ""
     assert "SELECT email FROM c" in body["history_sql"]
-    keys = [k async for k in get_redis().scan_iter(match="km:ragctx:*")]
+    keys = [k async for k in cast("Any", get_redis()).scan_iter(match="km:ragctx:*")]
     assert len(keys) == 1  # 纯 history 形态照常入缓存
 
 
@@ -310,7 +312,7 @@ async def test_emb_cache_dim_drift_treated_as_miss(
     from kongming.rag.agent_callback import _emb_key
     from kongming.redis_client import get_redis
 
-    await get_redis().flushdb()
+    await cast("Any", get_redis()).flushdb()
     tid = await _ensure_default_tenant(session)
     await _seed_knowledge(session, tid, ds="default", table="payment",
                           comment="支付", embed_text="支付记录")
@@ -354,13 +356,13 @@ async def test_recall_ctx_cache_roundtrip(
     """ctx 缓存:同问句二次召回命中缓存(内容一致)。"""
     from kongming.redis_client import get_redis
 
-    await get_redis().flushdb()
+    await cast("Any", get_redis()).flushdb()
     tid = await _ensure_default_tenant(session)
     await _seed_knowledge(session, tid, ds="default", table="payment",
                           comment="支付表", embed_text="支付 payment")
     q = {"tenant_key": "default", "question": "支付记录"}
     r1 = await client.post("/internal/rag/retrieve", json=q, headers=INTERNAL)
-    keys = [k async for k in get_redis().scan_iter(match="km:ragctx:*")]
+    keys = [k async for k in cast("Any", get_redis()).scan_iter(match="km:ragctx:*")]
     assert len(keys) == 1  # 已写缓存
     r2 = await client.post("/internal/rag/retrieve", json=q, headers=INTERNAL)
     assert r1.json() == r2.json()
@@ -375,13 +377,13 @@ async def test_recall_ctx_evicted_on_delete(
     from kongming.redis_client import get_redis
     from tests.test_chat_query import _login
 
-    await get_redis().flushdb()
+    await cast("Any", get_redis()).flushdb()
     tid = await _ensure_default_tenant(session)
     await _seed_knowledge(session, tid, ds="default", table="staff",
                           comment="员工表", embed_text="员工 staff")
     q = {"tenant_key": "default", "question": "员工"}
     await client.post("/internal/rag/retrieve", json=q, headers=INTERNAL)
-    assert [k async for k in get_redis().scan_iter(match="km:ragctx:*")]
+    assert [k async for k in cast("Any", get_redis()).scan_iter(match="km:ragctx:*")]
 
     # 管理面删除该条 → 缓存被失效
     await seed_all(session, get_settings())
@@ -395,7 +397,7 @@ async def test_recall_ctx_evicted_on_delete(
 
     r = await client.delete(f"/system/rag/tables/{kid}", headers=_auth(token))
     assert r.status_code == 204
-    assert not [k async for k in get_redis().scan_iter(match="km:ragctx:*")]  # 已失效
+    assert not [k async for k in cast("Any", get_redis()).scan_iter(match="km:ragctx:*")]  # 已失效
 
 
 async def test_ctx_evict_scoped_to_tenant(
@@ -404,7 +406,7 @@ async def test_ctx_evict_scoped_to_tenant(
     """失效范围精确:A 租户知识删除只清 A 的 ctx 缓存,B 租户缓存不受扰(spec)。"""
     from kongming.redis_client import get_redis
 
-    await get_redis().flushdb()
+    await cast("Any", get_redis()).flushdb()
     a = await _ensure_default_tenant(session)
     b = await _mk_tenant(session, "tenant_b2")
     await _seed_knowledge(session, a, ds="default", table="t_a", comment="A", embed_text="共享问句")
@@ -413,7 +415,7 @@ async def test_ctx_evict_scoped_to_tenant(
     qb = {"tenant_key": "tenant_b2", "question": "共享问句"}
     await client.post("/internal/rag/retrieve", json=q, headers=INTERNAL)
     await client.post("/internal/rag/retrieve", json=qb, headers=INTERNAL)
-    keys_before = sorted([k async for k in get_redis().scan_iter(match="km:ragctx:*")])
+    keys_before = sorted([k async for k in cast("Any", get_redis()).scan_iter(match="km:ragctx:*")])
     assert len(keys_before) == 2  # 两租户各一条
 
     # 删除 A 租户条目(管理面)→ 仅 A 缓存失效
@@ -430,7 +432,7 @@ async def test_ctx_evict_scoped_to_tenant(
     ).scalar_one()
     r = await client.delete(f"/system/rag/tables/{kid}", headers=_auth(token))
     assert r.status_code == 204
-    keys_after = sorted([k async for k in get_redis().scan_iter(match="km:ragctx:*")])
+    keys_after = sorted([k async for k in cast("Any", get_redis()).scan_iter(match="km:ragctx:*")])
     assert len(keys_after) == 1  # B 租户缓存保留
     # 剩余键的租户段 = B(键名含租户 id)
     import re as _re
@@ -469,7 +471,10 @@ async def test_chat_success_writes_query_history(
         rows=[[2]],
         sql="SELECT count(*) FROM goods",
     )
-    monkeypatch.setattr(AgentClient, "query", lambda self, **kw: _areply(reply))
+    def _fake_query(self: AgentClient, **kw: object) -> object:  # noqa: ARG001
+        return _areply(reply)
+
+    monkeypatch.setattr(AgentClient, "query", _fake_query)
     _, token = await _user_with_chat_perm(client, session, make_user)
     r = await client.post(
         "/chat/query",
@@ -498,7 +503,10 @@ async def test_chat_rejected_no_writeback(
     from tests.test_chat_query import _auth, _user_with_chat_perm
 
     reply = AgentReply(success=False, verdict="BLOCKED", sql="DELETE FROM goods")
-    monkeypatch.setattr(AgentClient, "query", lambda self, **kw: _areply(reply))
+    def _fake_query(self: AgentClient, **kw: object) -> object:  # noqa: ARG001
+        return _areply(reply)
+
+    monkeypatch.setattr(AgentClient, "query", _fake_query)
     _, token = await _user_with_chat_perm(client, session, make_user)
     await client.post("/chat/query", json={"question": "删数据"}, headers=_auth(token))
     n = (await session.execute(text("SELECT count(*) FROM rag.query_history"))).scalar_one()
@@ -518,7 +526,10 @@ async def test_writeback_failure_does_not_break_chat(
 
     reply = AgentReply(success=True, verdict="PASS", columns=["n"], rows=[[1]],
                        sql="SELECT 1", summary="ok")
-    monkeypatch.setattr(AgentClient, "query", lambda self, **kw: _areply(reply))
+    def _fake_query(self: AgentClient, **kw: object) -> object:  # noqa: ARG001
+        return _areply(reply)
+
+    monkeypatch.setattr(AgentClient, "query", _fake_query)
 
     async def boom(self: RagService, **kw: object) -> None:
         raise RuntimeError("回写故障")

@@ -1,5 +1,7 @@
 """rag 纯函数测试(009):切块解析/RRF/优先级/提示构造(embedding 文本公式)。"""
 
+from typing import Any
+
 from kongming.rag.models import (
     KnowledgeEntry,
     RecallHit,
@@ -117,7 +119,7 @@ def test_priority_ordering() -> None:
 
 
 def _entry(**over: object) -> KnowledgeEntry:
-    base: dict[str, object] = {
+    base: dict[str, Any] = {
         "id": "x",
         "tenant_id": "t",
         "datasource_key": "default",
@@ -130,7 +132,7 @@ def _entry(**over: object) -> KnowledgeEntry:
         "updated_at": None,
     }
     base.update(over)
-    return KnowledgeEntry(**base)  # type: ignore[arg-type]
+    return KnowledgeEntry(**base)
 
 
 def test_build_schema_hint_shape() -> None:
