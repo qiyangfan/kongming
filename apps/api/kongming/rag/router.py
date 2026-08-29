@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +29,7 @@ from kongming.rag.models import (
     DatasourceInvalid,
     EmptyDocument,
     InvalidSchemaName,
+    SchemaNotAllowed,
     TableBlock,
     TableNameTooLong,
     TooManyBlocks,
@@ -104,7 +105,7 @@ async def upload_document(
     # 校验序:租户白名单复校先于文件读取(未绑定租户者不消耗解析资源;复审 R5)
     try:
         resolved2 = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
-        tenant_id = resolved2[0]
+        tenant_id, tenant_key = resolved2
     except TenantForbiddenApi:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
 
@@ -138,6 +139,7 @@ async def upload_document(
         tables = await svc.upload_blocks(
             actor_id=str(user["sub"]),
             tenant_id=tenant_id,
+            tenant_key=tenant_key,
             datasource_key=datasource_key,
             schema_name=schema_name,
             blocks=blocks,
@@ -146,7 +148,42 @@ async def upload_document(
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
     except DatasourceInvalid:
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
+    except SchemaNotAllowed:
+        raise HTTPException(status_code=400, detail="SCHEMA_NOT_ALLOWED") from None
     return UploadOut(tables=tables)
+
+
+# ============ 可扫描 schema 枚举(040:上传表单候选源,与内省/上传闸同源) ============
+
+
+class SchemasOut(BaseModel):
+    datasource_key: str
+    schemas: list[str]
+
+
+@router.get(
+    "/schemas",
+    response_model=SchemasOut,
+    dependencies=[Depends(require_perm("system:rag:manage"))],
+)
+async def list_allowed_schemas(
+    datasource_key: Annotated[str, Query(pattern=r"^[a-z][a-z0-9_]{1,63}$")],
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Annotated[RagService, Depends(_get_service)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> SchemasOut:
+    try:
+        tenant_id, tenant_key = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
+        schemas = await svc.allowed_schemas(
+            tenant_id=tenant_id,
+            tenant_key=tenant_key,
+            datasource_key=datasource_key,
+        )
+    except TenantForbiddenApi:
+        raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
+    except DatasourceInvalid:
+        raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
+    return SchemasOut(datasource_key=datasource_key, schemas=schemas)
 
 
 # ============ 知识列表/删除 ============
@@ -316,6 +353,7 @@ class FetchOut(BaseModel):
     found: int
     enriched: int
     skipped: int
+    removed: int  # 042:对账删除的扫描集外自动来源行数
 
 
 class ReindexOut(BaseModel):
@@ -347,7 +385,10 @@ async def fetch_metadata(
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
     except DatasourceInvalid:
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
-    return FetchOut(found=result.found, enriched=result.enriched, skipped=result.skipped)
+    return FetchOut(
+        found=result.found, enriched=result.enriched, skipped=result.skipped,
+        removed=result.removed,
+    )
 
 
 @router.post(

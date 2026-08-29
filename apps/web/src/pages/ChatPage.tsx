@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -127,6 +128,9 @@ function toSyntheticMessage(out: ChatQueryOut): SessionMessageOut {
       // 026:终态快照携带产物卡(与历史回显 MessageResultOut.artifacts 同形),
       // 缺档空数组 → assistant-card 回落既有形态,与读档重算兜底口径一致
       artifacts: out.artifacts ?? [],
+      // 041:呈现层列标签快照同源(与 artifacts/attachments 同款先例)——
+      // 漏带会使快照期表头物理名、历史 refetch 后闪变业务名(评审实锤)
+      column_labels: out.column_labels ?? [],
     },
     rating: null,
     corrected_sql: null,
@@ -476,20 +480,28 @@ export default function ChatPage() {
 
       <div className="border-t border-border bg-background px-4 py-3">
         <div className="mx-auto max-w-3xl">
-          {/* 019:Agent 内核开关(自主工具调用=ReAct;缺省 recipe 零回归) */}
+          {/* 019:Agent 内核开关(自主工具调用=ReAct;缺省 recipe 零回归);
+              UI 命名「运筹模式」与空态文案「运筹帷幄之事,交给军师」同源,实现术语不入用户文案 */}
           <div className="mb-2 flex items-center justify-end gap-2">
             <Switch
               id="agent-mode"
               checked={agentMode === "react"}
               onCheckedChange={(on) => setAgentMode(on ? "react" : "recipe")}
-              aria-label="自主工具调用模式"
+              aria-label="运筹模式"
             />
-            <Label
-              htmlFor="agent-mode"
-              className="cursor-pointer text-xs text-muted-foreground"
-            >
-              自主工具调用(ReAct)
-            </Label>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Label
+                  htmlFor="agent-mode"
+                  className="cursor-pointer text-xs text-muted-foreground"
+                >
+                  运筹模式
+                </Label>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-72">
+                AI 将自主规划步骤、调用工具求解,适合复杂问题;日常提问无需开启。
+              </TooltipContent>
+            </Tooltip>
           </div>
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 pb-1">

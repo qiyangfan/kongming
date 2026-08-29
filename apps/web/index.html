@@ -5,6 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Kongming · 问计于数据</title>
+    <script>
+      // 防 FOUC(040 theme-switch):首帧绘制前按「localStorage 手动值 → 系统偏好」
+      // 挂 .dark 到 <html>。契约与 src/lib/theme-store.ts 的 resolveTheme 同源
+      // (key km-theme、同优先级),改动必须双侧同步。
+      (function () {
+        try {
+          var t = localStorage.getItem("km-theme");
+          var dark =
+            t === "dark" ||
+            (t !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

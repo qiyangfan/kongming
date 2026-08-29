@@ -21,7 +21,12 @@ from typing import Any
 
 from kongming.chat.agent_client import AgentClient, AgentReply, AgentUnavailable, parse_agent_reply
 from kongming.chat.export import to_csv, to_xlsx
-from kongming.chat.models import ChartSuggestion, derive_artifacts, suggest_chart
+from kongming.chat.models import (
+    ChartSuggestion,
+    derive_artifacts,
+    resolve_column_labels,
+    suggest_chart,
+)
 from kongming.chat.ports import (
     AttachmentChecker,
     ChatRepo,
@@ -36,7 +41,7 @@ from kongming.chat.ports import (
     ToolSpecProvider,
 )
 from kongming.datasource.ports import DatasourceChecker
-from kongming.rag.ports import QueryHistoryWriter
+from kongming.rag.ports import ColumnCommentReader, QueryHistoryWriter
 
 log = logging.getLogger(__name__)
 
@@ -120,6 +125,9 @@ class ChatOutcome:
     attachments: list[dict[str, object]] = field(default_factory=list)
     # 022:本论为显式记忆短路(R1-M2:隐式提取任务据此排除,防同内容重复落 IMPLICIT)
     memory_shortcut: bool = False
+    # 041:呈现层列标签(与 columns 等长对齐;未命中回退原始列名;
+    # 空列表=未接线/查询失败,消费方回退 columns)
+    column_labels: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -143,6 +151,8 @@ class MessageResult:
     error: str | None = None
     # 026:类型化产物(读档优先,缺档按要素重算)
     artifacts: list[dict[str, object]] = field(default_factory=list)
+    # 041:呈现层列标签(读档优先;存量档缺失→空列表,消费方回退 columns)
+    column_labels: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -219,6 +229,7 @@ class ChatService:
         implicit_memory_task: (  # 022:隐式提取任务(组合根绑定;None=不触发)
             "Callable[..., Coroutine[Any, Any, None]] | None"
         ) = None,
+        column_comments: ColumnCommentReader | None = None,  # 041:列标签(可选注入)
     ) -> None:
         self._repo = repo
         self._agent = agent
@@ -234,6 +245,7 @@ class ChatService:
         self._runner = runner
         self._attachment_checker = attachment_checker
         self._implicit_memory_task = implicit_memory_task
+        self._column_comments = column_comments
 
     @property
     def agent_for_tasks(self) -> AgentClient:
@@ -786,6 +798,23 @@ class ChatService:
         except Exception:  # noqa: BLE001  # 断线续存落库兜底:不阻断终态帧下发
             log.warning("流式 FAILED 终态落库异常 session=%s", p.sid, exc_info=True)
 
+    async def _resolve_labels(
+        self, *, tenant_id: str, datasource_key: str, columns: list[str], sql: str
+    ) -> list[str]:
+        """呈现层列标签(041 双轨制):按 SQL 投影溯源列注释→业务标签,
+        溯源不了→回退原始列名。端口未接线/查询异常→空列表(消费方回退
+        columns)——标签永不阻断问答主链路,与 pending_tools 聚合同款容错。"""
+        if not columns or self._column_comments is None:
+            return []
+        try:
+            table_comments = await self._column_comments.column_comments(
+                tenant_id=tenant_id, datasource_key=datasource_key
+            )
+        except Exception:  # noqa: BLE001  # 标签增强永不阻断主流程
+            log.warning("列注释查询异常(标签回退原始列名)", exc_info=True)
+            return []
+        return resolve_column_labels(columns, table_comments, sql)
+
     async def _finalize_reply(
         self,
         *,
@@ -837,6 +866,17 @@ class ChatService:
         chart = (
             suggest_chart(reply.columns, reply.rows) if reply.success else ChartSuggestion("none")
         )
+        # 041:呈现层列标签(仅成功有结果集时;物理名/显示名双轨,SQL 不动)
+        column_labels = (
+            await self._resolve_labels(
+                tenant_id=tenant_id,
+                datasource_key=datasource_key,
+                columns=reply.columns,
+                sql=sql_text,
+            )
+            if reply.success
+            else []
+        )
         error: str | None = None
         if status == "REJECTED":
             error = blocked_friendly(error_raw)
@@ -857,6 +897,7 @@ class ChatService:
                 result_json = json.dumps(
                     {
                         "columns": reply.columns,
+                        "column_labels": column_labels,  # 041
                         "rows": reply.rows,
                         "insights": insights,
                         "stats": reply.stats,
@@ -927,6 +968,7 @@ class ChatService:
             tenant_id=tenant_id,
             artifacts=[dict(a) for a in artifacts],
             attachments=[dict(a) for a in attachments or []],
+            column_labels=column_labels,
         )
 
     async def _finalize_unavailable(
@@ -1243,6 +1285,11 @@ class ChatService:
                 chart=chart,
                 error=error,
                 artifacts=artifacts,
+                column_labels=(  # 041 读档;存量档缺失→空(消费方回退 columns)
+                    [str(x) for x in lb_raw]
+                    if isinstance(lb_raw := d.get("column_labels"), list)
+                    else []
+                ),
             )
         question = row.get("question")
         summary = row.get("summary")

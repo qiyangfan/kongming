@@ -28,3 +28,18 @@ class SemanticRepo(Protocol):
     async def list_metrics(
         self, *, tenant_id: str, datasource_key: str
     ) -> list[dict[str, Any]]: ...
+
+    async def add_relation(
+        self, *, tenant_id: str, datasource_key: str, rel: dict[str, Any]
+    ) -> str: ...
+
+
+class KnowledgeTableLookup(Protocol):
+    """知识条目表存在性(040:手工关系写边界闸;实现=rag 知识仓储查询)。
+
+    schema_table 为「schema.table」形态;引用知识条目外的表在召回
+    relations_hint 中永不命中(静默死配置),故创建期即拒。"""
+
+    async def knowledge_table_exists(
+        self, *, tenant_id: str, datasource_key: str, schema_table: str
+    ) -> bool: ...

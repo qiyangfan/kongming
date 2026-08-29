@@ -98,7 +98,7 @@ export function SessionSidebar({ onNavigate }: { onNavigate?: () => void }) {
         ) : (
           groups.map((g) => (
             <div key={g.label} className="mb-1">
-              <p className="px-2 pt-1 pb-0.5 text-[10px] font-medium text-muted-foreground">
+              <p className="px-2 pt-1 pb-0.5 text-3xs font-medium text-muted-foreground">
                 {g.label}
               </p>
               <ul className="space-y-0.5 pr-2">
@@ -121,7 +121,7 @@ export function SessionSidebar({ onNavigate }: { onNavigate?: () => void }) {
                       <span className="min-w-0 flex-1 truncate" title={s.title}>
                         {s.title}
                       </span>
-                      <span className="shrink-0 text-[10px] text-muted-foreground group-hover:invisible">
+                      <span className="shrink-0 text-3xs text-muted-foreground group-hover:invisible">
                         {timeLabel(s.updated_at)}
                       </span>
                     </Link>
@@ -308,7 +308,7 @@ function DeleteDialog({
             「{session.title}」及其全部消息将被移除,此步不可挽回。
           </AlertDialogDescription>
         </AlertDialogHeader>
-        {failed && <p className="text-sm text-destructive">删除未成,请稍后再试。</p>}
+        {failed && <p className="text-sm text-destructive" role="alert">删除未成,请稍后再试。</p>}
         <AlertDialogFooter>
           {/* busy 期禁用取消(013,010 挂账⑤):删除请求已发出,
               「再想想」可点会误导用户以为请求被撤回(spec「删除进行中取消不可用」) */}

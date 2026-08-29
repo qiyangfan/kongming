@@ -10,7 +10,13 @@ from typing import Any, Protocol
 
 from kongming.trigger.adapters import AdapterError, normalize
 from kongming.trigger.models import CronError, next_fire, parse_cron
-from kongming.trigger.ports import Notifier, SecretCipher, TargetRunner, TriggerRepo
+from kongming.trigger.ports import (
+    Notifier,
+    SecretCipher,
+    TargetChecker,
+    TargetRunner,
+    TriggerRepo,
+)
 
 TG_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _TZ = dt.timezone(dt.timedelta(hours=8))  # Asia/Shanghai(design O5 挂账可配)
@@ -27,6 +33,10 @@ class TriggerNotFound(Exception):
 
 class TriggerKeyTaken(Exception):
     """同租户 tg_key 冲突(409 语义,R1-S2)。"""
+
+
+class TargetNotFound(Exception):
+    """target_key 在当前租户对应目标域不存在(040 写边界闸,400 TARGET_NOT_FOUND)。"""
 
 
 class WebhookRejected(Exception):
@@ -50,12 +60,14 @@ class TriggerService:
         runner: TargetRunner | None,
         notifier: Notifier | None = None,
         oper: TriggerOperLogger | None = None,
+        target_checker: TargetChecker | None = None,
     ) -> None:
         self._repo = repo
         self._cipher = cipher
         self._runner = runner
         self._notifier = notifier
         self._oper = oper
+        self._target_checker = target_checker
 
     async def _audit(self, action: str, target: str, detail: dict[str, object]) -> None:
         if self._oper is not None:
@@ -110,6 +122,12 @@ class TriggerService:
             except CronError as e:
                 # R1-S1a:计算失败(永不触发/366 天外)同属保存期 400
                 raise TriggerValidationError(str(e)) from e
+        # 040 写边界闸:目标不存在即 400,防拼错目标静默挂到运行期才暴露
+        if self._target_checker is not None and not await self._target_checker.target_exists(
+            target_type=target_type, target_key=target_key,
+            tenant_id=tenant_id, creator_id=created_by,
+        ):
+            raise TargetNotFound(target_key)
         # R1-S2:重名预检(唯一索引兜底之外的友好 409,与 datasource 同范式)
         if await self._repo.get(tenant_id=tenant_id, tg_key=tg_key) is not None:
             raise TriggerKeyTaken(tg_key)
@@ -155,6 +173,18 @@ class TriggerService:
                 kw["next_fire_at"] = next_fire(str(cron_expr), _now()).isoformat()
             except CronError as e:
                 raise TriggerValidationError(str(e)) from e
+        # 040:仅目标变更时重校验——目标已删的存量触发器仍可停用/改非目标字段
+        new_tt = str(kw.get("target_type", row["target_type"]))
+        new_tk = str(kw.get("target_key", row["target_key"]))
+        if (
+            self._target_checker is not None
+            and (new_tt != str(row["target_type"]) or new_tk != str(row["target_key"]))
+            and not await self._target_checker.target_exists(
+                target_type=new_tt, target_key=new_tk,
+                tenant_id=tenant_id, creator_id=str(row["created_by"]),
+            )
+        ):
+            raise TargetNotFound(new_tk)
         if not await self._repo.update(trigger_id=trigger_id, tenant_id=tenant_id, **kw):
             raise TriggerNotFound(trigger_id)
         await self._audit("trigger.update", str(row["tg_key"]), {})

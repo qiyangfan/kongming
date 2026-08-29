@@ -86,7 +86,7 @@ function ChangePasswordForm() {
                 autoComplete="new-password"
               />
             </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
             <Button type="submit" disabled={pending} className="w-full">
               {pending ? "提交中…" : "确认修改"}
             </Button>

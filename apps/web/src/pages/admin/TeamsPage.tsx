@@ -24,6 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FieldLabel } from "@/components/field-label";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -138,8 +139,7 @@ export default function TeamsPage() {
         </Button>
       </div>
       <p className="text-sm text-muted-foreground">
-        团队=资源组+成员角色(负责人/成员/观察者):Bot 与工作流可归属团队共享,
-        团队记忆成员共识双路召回;个人资源仅创建者(零回归)。
+        把助手、工作流等资源归属到团队,成员按角色共用(负责人/成员/观察者);团队记忆由成员共同维护。
       </p>
 
       <div className="rounded-lg border">
@@ -223,7 +223,12 @@ export default function TeamsPage() {
             }}
           >
             <div className="space-y-1.5">
-              <Label htmlFor="team-key">标识(team_key)</Label>
+              <FieldLabel
+                htmlFor="team-key"
+                help="小写字母开头,创建后不可改。"
+              >
+                标识
+              </FieldLabel>
               <Input
                 id="team-key"
                 value={form.teamKey}

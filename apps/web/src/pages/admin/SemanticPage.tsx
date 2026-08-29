@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Layers, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Layers, Loader2, Plus, RefreshCw, Trash2, X } from "lucide-react";
 
 import {
   AlertDialog,
@@ -19,6 +19,13 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import {
@@ -32,6 +39,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { QueryErrorAlert } from "@/components/query-error";
 import { useDatasource } from "@/lib/datasource-store";
+import { ragApi } from "@/lib/rag-api";
 import {
   addRelation,
   deleteMetric,
@@ -49,14 +57,42 @@ export default function SemanticPage() {
   const [tab, setTab] = useState<"relations" | "metrics">("relations");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // 关系表单
+  // 关系表单(040:表/列改知识条目候选下拉;join 键改键对行,替代手输「左=右」CSV)
   const [srcTable, setSrcTable] = useState("");
   const [tgtTable, setTgtTable] = useState("");
-  const [joinCol, setJoinCol] = useState("");
+  const [joinPairs, setJoinPairs] = useState<{ left: string; right: string }[]>([
+    { left: "", right: "" },
+  ]);
   // 指标表单
   const [mName, setMName] = useState("");
   const [mTpl, setMTpl] = useState("");
   const [mTerms, setMTerms] = useState("");
+
+  // 040:候选表清单=当前数据源知识条目(引用条目外的表后端 400 拒;后端页大小
+  // 上限 100,全页遍历取全,安全帽 5 页=500 表)
+  const knowledge = useQuery({
+    queryKey: ["semantic", "knowledge", ds],
+    queryFn: async () => {
+      const first = await ragApi.page(1, 100, ds);
+      const items = [...first.items];
+      const pages = Math.min(Math.ceil(first.total / 100), 5);
+      for (let p = 2; p <= pages; p++) {
+        items.push(...(await ragApi.page(p, 100, ds)).items);
+      }
+      return items;
+    },
+    enabled: tab === "relations",
+  });
+  const tableOptions = (knowledge.data ?? []).map((i) => ({
+    value: `${i.schema_name}.${i.table_name}`,
+    label: i.alias
+      ? `${i.alias}(${i.schema_name}.${i.table_name})`
+      : `${i.schema_name}.${i.table_name}`,
+  }));
+  const columnsOf = (ref: string) =>
+    (knowledge.data ?? [])
+      .filter((i) => `${i.schema_name}.${i.table_name}` === ref)
+      .flatMap((i) => Object.keys(i.columns_comment));
 
   const relations = useQuery({
     queryKey: ["semantic", "relations", ds],
@@ -81,22 +117,27 @@ export default function SemanticPage() {
     mutationFn: () =>
       addRelation({
         datasource_key: ds,
-        source_table: srcTable.trim(),
-        target_table: tgtTable.trim(),
-        join_keys: joinCol
-          .split(",")
-          .map((pair) => pair.split("="))
-          .filter((kv) => kv.length === 2 && kv[0].trim() && kv[1].trim())
-          .map((kv) => ({ left_col: kv[0].trim(), right_col: kv[1].trim() })),
+        source_table: srcTable,
+        target_table: tgtTable,
+        join_keys: joinPairs
+          .filter((p) => p.left.trim() && p.right.trim())
+          .map((p) => ({ left_col: p.left.trim(), right_col: p.right.trim() })),
       }),
     onSuccess: () => {
       setSrcTable("");
       setTgtTable("");
-      setJoinCol("");
+      setJoinPairs([{ left: "", right: "" }]);
       setError(null);
       void qc.invalidateQueries({ queryKey: ["semantic", "relations", ds] });
     },
-    onError: (e) => setError(e instanceof Error ? e.message : "保存失败"),
+    onError: (e) => {
+      // 040 写边界闸 detail 映射(黑话禁入用户文案)
+      const reason =
+        e.message === "RELATION_TABLE_UNKNOWN"
+          ? "引用的表不在知识条目中,请先在知识库扫描/上传该表"
+          : e.message;
+      setError(e instanceof Error ? reason : "保存失败");
+    },
   });
 
   const saveMetric = useMutation({
@@ -161,7 +202,7 @@ export default function SemanticPage() {
         <div>
           <h2 className="text-lg font-semibold">语义层</h2>
           <p className="text-sm text-muted-foreground">
-            表关系(JOIN path)与指标口径,注入生成链路;当前数据源:{ds}
+            教军师理解业务:表之间的关联关系与业务指标的计算口径,让回答贴合业务含义。当前数据源:{ds}
           </p>
         </div>
         <ToggleGroup
@@ -192,7 +233,7 @@ export default function SemanticPage() {
               ) : (
                 <RefreshCw className="size-3.5" aria-hidden />
               )}
-              扫描外键关系
+              扫描表关联
             </Button>
           </div>
           <div className="rounded-lg border border-border">
@@ -201,7 +242,7 @@ export default function SemanticPage() {
                 <TableRow>
                   <TableHead>左表</TableHead>
                   <TableHead>右表</TableHead>
-                  <TableHead>JOIN 键</TableHead>
+                  <TableHead>关联字段</TableHead>
                   <TableHead>来源</TableHead>
                   <TableHead className="w-16">操作</TableHead>
                 </TableRow>
@@ -222,7 +263,7 @@ export default function SemanticPage() {
                 ) : (relations.data?.length ?? 0) === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
-                      暂无关系——点「扫描外键关系」或手工新增
+                      暂无关系——点「扫描表关联」或手工新增
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -239,7 +280,7 @@ export default function SemanticPage() {
                       </TableCell>
                       <TableCell>
                         <Badge variant={r.source === "manual" ? "default" : "secondary"}>
-                          {r.source === "manual" ? "手工" : "内省"}
+                          {r.source === "manual" ? "手工" : "自动扫描"}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -264,27 +305,183 @@ export default function SemanticPage() {
               </TableBody>
             </Table>
           </div>
-          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border p-3">
-            <div className="space-y-1">
-              <Label className="text-xs">左表(schema.table)</Label>
-              <Input value={srcTable} onChange={(e) => setSrcTable(e.target.value)} className="w-52" placeholder="tenant_x.orders" />
+          <div className="space-y-2 rounded-lg border border-border p-3">
+            {knowledge.isError && (
+              <p className="text-xs text-destructive" role="alert">
+                知识条目加载失败,无法选择关联表,请刷新重试
+              </p>
+            )}
+            <div className="flex flex-wrap items-end gap-3">
+              {/* 040:表引用改知识条目下拉(展示业务别名,候选与后端存在性闸同源) */}
+              <div className="space-y-1">
+                <Label className="text-xs">左表(知识条目)</Label>
+                <Select
+                  value={srcTable}
+                  onValueChange={(v) => {
+                    setSrcTable(v);
+                    setJoinPairs([{ left: "", right: "" }]); // 换表清键对(列集随表变)
+                  }}
+                  disabled={knowledge.isPending}
+                >
+                  <SelectTrigger aria-label="左表" className="w-56">
+                    <SelectValue placeholder={
+                      knowledge.isError
+                        ? "候选加载失败"
+                        : knowledge.isPending
+                          ? "加载中…"
+                          : tableOptions.length
+                            ? "选择左表"
+                            : "暂无知识条目"
+                    } />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tableOptions.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">右表(知识条目)</Label>
+                <Select
+                  value={tgtTable}
+                  onValueChange={(v) => {
+                    setTgtTable(v);
+                    setJoinPairs([{ left: "", right: "" }]);
+                  }}
+                  disabled={knowledge.isPending}
+                >
+                  <SelectTrigger aria-label="右表" className="w-56">
+                    <SelectValue placeholder={
+                      knowledge.isError
+                        ? "候选加载失败"
+                        : knowledge.isPending
+                          ? "加载中…"
+                          : tableOptions.length
+                            ? "选择右表"
+                            : "暂无知识条目"
+                    } />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tableOptions.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                size="sm"
+                disabled={
+                  !srcTable ||
+                  !tgtTable ||
+                  !joinPairs.some((p) => p.left.trim() && p.right.trim()) ||
+                  addRel.isPending
+                }
+                onClick={() => addRel.mutate()}
+              >
+                <Plus className="size-3.5" aria-hidden />
+                新增关系
+              </Button>
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs">右表</Label>
-              <Input value={tgtTable} onChange={(e) => setTgtTable(e.target.value)} className="w-52" placeholder="tenant_x.customers" />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">JOIN 键(左=右)</Label>
-              <Input value={joinCol} onChange={(e) => setJoinCol(e.target.value)} className="w-52" placeholder="customer_id=id" />
-            </div>
-            <Button
-              size="sm"
-              disabled={!srcTable.trim() || !tgtTable.trim() || !joinCol.includes("=") || addRel.isPending}
-              onClick={() => addRel.mutate()}
-            >
-              <Plus className="size-3.5" aria-hidden />
-              新增关系
-            </Button>
+            {/* JOIN 键对行(多列复合键=多行);表条目缺列清单时该侧降级手输 */}
+            {srcTable && tgtTable && (
+              <div className="space-y-2">
+                {joinPairs.map((pair, idx) => {
+                  const srcCols = columnsOf(srcTable);
+                  const tgtCols = columnsOf(tgtTable);
+                  return (
+                    <div key={idx} className="flex items-center gap-2">
+                      <span className="w-14 text-xs text-muted-foreground">
+                        {idx === 0 ? "关联字段" : `字段 ${idx + 1}`}
+                      </span>
+                      {srcCols.length > 0 ? (
+                        <Select
+                          value={pair.left}
+                          onValueChange={(v) =>
+                            setJoinPairs((ps) => ps.map((p, i) => (i === idx ? { ...p, left: v } : p)))
+                          }
+                        >
+                          <SelectTrigger aria-label={`左列 ${idx + 1}`} className="w-44">
+                            <SelectValue placeholder="左表列" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {srcCols.map((c) => (
+                              <SelectItem key={c} value={c}>
+                                {c}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Input
+                          aria-label={`左列 ${idx + 1}`}
+                          value={pair.left}
+                          onChange={(e) =>
+                            setJoinPairs((ps) => ps.map((p, i) => (i === idx ? { ...p, left: e.target.value } : p)))
+                          }
+                          className="w-44"
+                          placeholder="左表列(条目缺列清单,手输)"
+                        />
+                      )}
+                      <span className="text-xs text-muted-foreground">=</span>
+                      {tgtCols.length > 0 ? (
+                        <Select
+                          value={pair.right}
+                          onValueChange={(v) =>
+                            setJoinPairs((ps) => ps.map((p, i) => (i === idx ? { ...p, right: v } : p)))
+                          }
+                        >
+                          <SelectTrigger aria-label={`右列 ${idx + 1}`} className="w-44">
+                            <SelectValue placeholder="右表列" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {tgtCols.map((c) => (
+                              <SelectItem key={c} value={c}>
+                                {c}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Input
+                          aria-label={`右列 ${idx + 1}`}
+                          value={pair.right}
+                          onChange={(e) =>
+                            setJoinPairs((ps) => ps.map((p, i) => (i === idx ? { ...p, right: e.target.value } : p)))
+                          }
+                          className="w-44"
+                          placeholder="右表列(条目缺列清单,手输)"
+                        />
+                      )}
+                      {joinPairs.length > 1 && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`移除键对 ${idx + 1}`}
+                          onClick={() => setJoinPairs((ps) => ps.filter((_, i) => i !== idx))}
+                        >
+                          <X className="size-3.5" aria-hidden />
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })}
+                <div>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => setJoinPairs((ps) => [...ps, { left: "", right: "" }])}
+                  >
+                    <Plus className="size-3.5" aria-hidden />
+                    添加关联字段(多字段组合)
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       ) : (
@@ -295,7 +492,7 @@ export default function SemanticPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>指标</TableHead>
-                  <TableHead>口径(仅 prompt 参考,不会执行)</TableHead>
+                  <TableHead>口径(仅供 AI 参考,不会执行)</TableHead>
                   <TableHead>触发词</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead className="w-16">操作</TableHead>
@@ -366,7 +563,7 @@ export default function SemanticPage() {
               <Input value={mName} onChange={(e) => setMName(e.target.value)} className="w-40" placeholder="复购率" />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">口径 SQL 片段(仅 prompt 注入)</Label>
+              <Label className="text-xs">计算口径(SQL 片段,供 AI 参考)</Label>
               <Input value={mTpl} onChange={(e) => setMTpl(e.target.value)} className="w-96" placeholder="COUNT(DISTINCT customer_id) / ..." />
             </div>
             <div className="space-y-1">
@@ -398,7 +595,7 @@ export default function SemanticPage() {
               删除{delTarget?.kind === "rel" ? "表关系" : "指标"}「{delTarget?.name}」?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              删除后生成链路不再注入该{delTarget?.kind === "rel" ? "JOIN 关系" : "指标口径"}。
+              删除后,AI 生成回答时不再参考该{delTarget?.kind === "rel" ? "表关联" : "指标口径"}。
             </AlertDialogDescription>
           </AlertDialogHeader>
           {delTarget?.error && (

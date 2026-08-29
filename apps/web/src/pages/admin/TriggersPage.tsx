@@ -45,6 +45,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { QueryErrorAlert } from "@/components/query-error";
+import { SchedulePicker } from "@/components/schedule-picker";
 import {
   createTrigger,
   deleteTrigger,
@@ -54,6 +55,10 @@ import {
   updateTrigger,
   type TriggerItem,
 } from "@/lib/trigger-api";
+import { cronPreview } from "@/lib/trigger-api";
+import { useDebounced } from "@/hooks/use-debounced";
+import { listWorkflows } from "@/lib/workflow-api";
+import { api } from "@/lib/api";
 
 const PAGE_SIZE = 10;
 
@@ -97,6 +102,26 @@ export default function TriggersPage() {
   const [toggleError, setToggleError] = useState<Record<string, string>>({});
 
   const triggers = useQuery({ queryKey: ["admin", "triggers"], queryFn: listTriggers });
+  // 040:目标候选(封闭集合,按类型联动;自由输入拼错会挂到运行期才暴露)。
+  // 弹窗打开时才拉取,候选随 form.targetType 切换取用。
+  const workflows = useQuery({
+    queryKey: ["admin", "workflow"],
+    queryFn: listWorkflows,
+    enabled: form !== null,
+  });
+  const bots = useQuery({
+    queryKey: ["bots"],
+    queryFn: () => api.get<{ bot_key: string; name: string }[]>("/system/bots"),
+    enabled: form !== null,
+  });
+
+  // 040·11:cron 预览(400ms 防抖;空表达式不查,弹窗关闭 form=null 停查)
+  const cronExprD = useDebounced(form?.cronExpr ?? "", 400);
+  const cronFires = useQuery({
+    queryKey: ["admin", "cron-preview", cronExprD],
+    queryFn: () => cronPreview(cronExprD),
+    enabled: form !== null && form.type === "CRON" && cronExprD.trim() !== "",
+  });
   const runs = useQuery({
     queryKey: ["admin", "trigger-runs", historyOf?.id, historyPage],
     queryFn: () => pageTriggerRuns(historyOf!.id, historyPage, PAGE_SIZE),
@@ -139,7 +164,14 @@ export default function TriggersPage() {
       }
       invalidate();
     },
-    onError: (e) => setFormError(e instanceof Error ? e.message : "保存失败"),
+    onError: (e) => {
+      // 040 写边界闸 detail 映射(黑话禁入用户文案)
+      const reason =
+        e.message === "TARGET_NOT_FOUND"
+          ? "目标不存在(可能已删除),请重新选择"
+          : e.message;
+      setFormError(e instanceof Error ? reason : "保存失败");
+    },
   });
 
   const toggle = useMutation({
@@ -179,8 +211,8 @@ export default function TriggersPage() {
         </Button>
       </div>
       <p className="text-sm text-muted-foreground">
-        cron 定时(五字段,日/周仅其一可为 *)或 webhook 入站(HMAC 签名+
-        随机路径)触发工作流/Bot;目标以创建者身份经全套防御执行。
+        定时调度(常用频率点选,或高级 cron 表达式)或 webhook 入站(HMAC 签名
+        +随机路径)触发工作流/Bot;目标以创建者身份经全套防御执行。
       </p>
 
       <div className="rounded-lg border">
@@ -348,7 +380,7 @@ export default function TriggersPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="CRON">cron 定时</SelectItem>
+                        <SelectItem value="CRON">定时调度</SelectItem>
                         <SelectItem value="WEBHOOK">webhook 入站</SelectItem>
                       </SelectContent>
                     </Select>
@@ -359,7 +391,8 @@ export default function TriggersPage() {
                   <Select
                     value={form.targetType}
                     onValueChange={(v) =>
-                      setForm({ ...form, targetType: v as "workflow" | "bot" })
+                      // 040:类型切换即清空目标——两类候选键不通用,防跨域残留
+                      setForm({ ...form, targetType: v as "workflow" | "bot", targetKey: "" })
                     }
                   >
                     <SelectTrigger aria-label="目标类型">
@@ -367,41 +400,84 @@ export default function TriggersPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="workflow">工作流</SelectItem>
-                      <SelectItem value="bot">Bot</SelectItem>
+                      <SelectItem value="bot">助手</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="tg-target">目标标识</Label>
-                  <Input
-                    id="tg-target"
+                  <Label>目标{form.targetType === "workflow" ? "(工作流)" : "(助手)"}</Label>
+                  {/* 040:自由输入改候选下拉(候选=对应域可见清单);
+                      编辑回显时目标已删则注入禁用占位项,防「打开即保存」静默改值 */}
+                  <Select
                     value={form.targetKey}
-                    onChange={(e) => setForm({ ...form, targetKey: e.target.value })}
-                    className="font-mono"
-                    placeholder="wf_key / bot_key"
-                  />
+                    onValueChange={(v) => setForm({ ...form, targetKey: v })}
+                  >
+                    <SelectTrigger aria-label="目标">
+                      <SelectValue placeholder={form.targetType === "workflow" ? "选择工作流" : "选择助手"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {form.targetType === "workflow"
+                        ? (workflows.data ?? []).map((w) => (
+                            <SelectItem key={w.wf_key} value={w.wf_key}>
+                              {w.name}({w.wf_key})
+                            </SelectItem>
+                          ))
+                        : (bots.data ?? []).map((b) => (
+                            <SelectItem key={b.bot_key} value={b.bot_key}>
+                              {b.name}({b.bot_key})
+                            </SelectItem>
+                          ))}
+                      {/* 候选加载中/失败时不判「已删除」——data 未到或缺失会把
+                          正常目标误标(R1 实锤:编辑回显闪现误读) */}
+                      {form.targetKey !== "" &&
+                        !(form.targetType === "workflow"
+                          ? workflows.isPending || workflows.isError
+                          : bots.isPending || bots.isError) &&
+                        !(form.targetType === "workflow"
+                          ? (workflows.data ?? []).some((w) => w.wf_key === form.targetKey)
+                          : (bots.data ?? []).some((b) => b.bot_key === form.targetKey)) && (
+                          <SelectItem value={form.targetKey} disabled>
+                            (已删除){form.targetKey}
+                          </SelectItem>
+                        )}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               {form.type === "CRON" && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="tg-cron">cron 表达式</Label>
-                    <Input
-                      id="tg-cron"
-                      value={form.cronExpr}
-                      onChange={(e) => setForm({ ...form, cronExpr: e.target.value })}
-                      className="font-mono"
-                    />
-                  </div>
+                <div className="space-y-3">
+                  <SchedulePicker
+                    value={form.cronExpr}
+                    onChange={(cronExpr) => setForm({ ...form, cronExpr })}
+                  />
                   <div className="space-y-1.5">
                     <Label htmlFor="tg-interval">最小间隔(秒)</Label>
                     <Input
                       id="tg-interval"
                       value={form.minInterval}
                       onChange={(e) => setForm({ ...form, minInterval: e.target.value })}
-                      className="font-mono"
+                      className="w-32 font-mono"
                     />
                   </div>
+                  {/* 040·11:接下来 3 次预览(防抖;非法表达式红色原因,与保存期同口径)。
+                      旧表达式结果不展示:防抖窗口内 data 落后于输入,仅当防抖值与
+                      当前输入一致才呈现(R1 实锤:防旧值被当现值误读) */}
+                  {form.cronExpr.trim() !== "" && (
+                    <p
+                      role={cronFires.isError ? "alert" : undefined}
+                      className={
+                        cronFires.isError
+                          ? "text-xs text-destructive"
+                          : "text-xs text-muted-foreground"
+                      }
+                    >
+                      {cronFires.isError
+                        ? `cron 无法计算:${cronFires.error instanceof Error ? cronFires.error.message : "表达式非法"}`
+                        : cronFires.data && form.cronExpr.trim() === cronExprD
+                          ? `接下来 3 次:${cronFires.data.next.join("、")}`
+                          : "预览计算中…"}
+                    </p>
+                  )}
                 </div>
               )}
               {form.type === "WEBHOOK" && form.id === null && (
@@ -451,7 +527,7 @@ export default function TriggersPage() {
                 </p>
               )}
               <DialogFooter>
-                <Button type="submit" disabled={save.isPending}>
+                <Button type="submit" disabled={save.isPending || !form.targetKey}>
                   {save.isPending && <Loader2 className="animate-spin" aria-hidden />}
                   保存
                 </Button>

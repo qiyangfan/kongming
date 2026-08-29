@@ -5,9 +5,17 @@ import { api } from "./api";
 
 export type TriggerItem = components["schemas"]["TriggerOut"];
 export type TriggerRunItem = components["schemas"]["TriggerRunOut"];
+export type CronPreviewOut = components["schemas"]["CronPreviewOut"];
 
 export function listTriggers(): Promise<TriggerItem[]> {
   return api.get<TriggerItem[]>("/system/triggers");
+}
+
+/** 040·11:cron 预览(接下来 3 次触发;非法表达式 400 附可读原因) */
+export function cronPreview(expr: string): Promise<CronPreviewOut> {
+  return api.get(
+    `/system/triggers/cron-preview?expr=${encodeURIComponent(expr)}`,
+  );
 }
 
 export function createTrigger(body: Record<string, unknown>): Promise<{

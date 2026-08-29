@@ -16,14 +16,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kongming.auth.router import current_user, require_perm
 from kongming.db import get_session
 from kongming.semantic.repository import SqlSemanticRepo
-from kongming.semantic.service import SemanticService
+from kongming.semantic.service import RelationTableUnknown, SemanticService
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/system/semantic", tags=["semantic"])
 
 _PG_NAME = r"^[a-zA-Z_][a-zA-Z0-9_]*$"  # PG 标识符(表名段)
-_TABLE_REF = r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$"  # 审查循环 B4:表引用(一或两段)
+# 040:手工关系表引用须两段限定名(schema.table)——知识条目与内省关系恒两段,
+# 单段在存在性闸下必拒(静默死配置),语法层即拒语义更准(422 早失败于 400)
+_TABLE_REF = r"^[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*$"
+
+
+class _RagKnowledgeLookup:
+    """KnowledgeTableLookup 绑定(040):实现=rag 知识仓储存在性查询。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        from kongming.rag.repository import RagRepository
+
+        self._repo = RagRepository(session)
+
+    async def knowledge_table_exists(
+        self, *, tenant_id: str, datasource_key: str, schema_table: str
+    ) -> bool:
+        return await self._repo.knowledge_table_exists(
+            tenant_id=tenant_id, datasource_key=datasource_key, schema_table=schema_table
+        )
 
 
 async def _tenant_id(
@@ -211,16 +229,19 @@ async def add_relation(
     await _assert_datasource_usable(
         session, tenant_id=tid, datasource_key=req.datasource_key
     )
-    row_id = await SqlSemanticRepo(session).add_relation(
-        tenant_id=tid,
-        datasource_key=req.datasource_key,
-        rel={
-            "source_table": req.source_table,
-            "target_table": req.target_table,
-            "join_keys": req.join_keys,
-        },
-    )
-    await session.commit()
+    svc = SemanticService(SqlSemanticRepo(session), _RagKnowledgeLookup(session))
+    try:
+        row_id = await svc.add_relation(
+            tenant_id=tid,
+            datasource_key=req.datasource_key,
+            source_table=req.source_table,
+            target_table=req.target_table,
+            join_keys=req.join_keys,
+        )
+    except RelationTableUnknown:
+        raise HTTPException(
+            status_code=400, detail="RELATION_TABLE_UNKNOWN"
+        ) from None
     return {"id": row_id}
 
 

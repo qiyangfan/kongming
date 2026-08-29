@@ -49,7 +49,7 @@ export default function BotPublicPage() {
     <div className="mx-auto flex min-h-screen max-w-2xl flex-col px-4 py-6">
       <header className="mb-4 text-center">
         <h1 className="text-lg font-semibold tracking-wide">智能助手</h1>
-        <p className="text-xs text-muted-foreground">由孔明 Kongming Bot 驱动</p>
+        <p className="text-xs text-muted-foreground">万事,问孔明。</p>
       </header>
       <div className="flex-1 space-y-4 overflow-y-auto">
         {rounds.length === 0 && (

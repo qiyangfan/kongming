@@ -127,6 +127,17 @@ def test_prompt_full_width_punctuation() -> None:
                     )
 
 
+def test_prompt_quality_rules_in_place() -> None:
+    """建议质量规则标识在位(039 实证缺陷防回退):跨表拼接与占位表述两条
+    曾分别导致 varchar=uuid 执行失败与占位符问句,断言防手滑删规则。"""
+    from kongming_agent import suggester
+
+    template = suggester._USER_PROMPT_TEMPLATE
+    assert "互不相关" in template  # 禁不相关表拼接(跨表强join实证缺陷)
+    assert "系统类表与业务表" in template
+    assert "占位表述" in template  # 禁「指定值」类占位问句
+
+
 # ============ 端点行为 ============
 
 

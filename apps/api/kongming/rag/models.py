@@ -188,6 +188,10 @@ class InvalidSchemaName(RagError):
     """schema_name 非合法 PG 标识符。"""
 
 
+class SchemaNotAllowed(RagError):
+    """schema_name 语法合法但不在该数据源可扫描集合(040 写边界闸)。"""
+
+
 class EmptyDocument(RagError):
     """文档不含任何 `## 表名` 形态表块。"""
 

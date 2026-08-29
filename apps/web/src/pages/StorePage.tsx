@@ -92,7 +92,7 @@ export default function StorePage() {
       setAnswer((m) => ({
         ...m,
         [bot.id]: out.success
-          ? out.summary || "(空应答)"
+          ? out.summary || "(助手未返回内容)"
           : out.error || "运行失败",
       }));
     } catch (e) {
@@ -108,8 +108,8 @@ export default function StorePage() {
   return (
     <div className="space-y-4 px-6 py-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold">Bot 商店</h1>
-        <div className="flex items-center gap-2">
+        <h1 className="text-lg font-semibold">助手商店</h1>
+        <div className="flex flex-wrap items-center gap-2">
           <form
             className="flex items-center gap-1"
             onSubmit={(e) => {
@@ -120,7 +120,7 @@ export default function StorePage() {
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="搜索名称/标识/提示词…"
+              placeholder="搜索助手…"
               className="w-56"
               aria-label="搜索商店"
             />
@@ -160,7 +160,7 @@ export default function StorePage() {
         <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden />
       ) : ((tab === "all" ? bots.data : favorites.data) ?? []).length === 0 ? (
         <p className="py-12 text-center text-sm text-muted-foreground">
-          {tab === "all" ? "货架空空——上架你的第一个 Bot 吧。" : "还没有收藏——点心形即可。"}
+          {tab === "all" ? "货架空空——上架第一位助手吧。" : "还没有收藏——点心形即可。"}
         </p>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -223,7 +223,7 @@ export default function StorePage() {
         <DialogContent className="max-w-lg">
           {/* R1-B4:DialogHeader 恒渲染(加载/错误态也有 Title,读屏可识别对话框) */}
           <DialogHeader>
-            <DialogTitle>{detail.data?.name ?? "Bot 详情"}</DialogTitle>
+            <DialogTitle>{detail.data?.name ?? "助手详情"}</DialogTitle>
             <DialogDescription className="font-mono text-xs">
               {detail.data ? detail.data.bot_key : detailKey}
             </DialogDescription>

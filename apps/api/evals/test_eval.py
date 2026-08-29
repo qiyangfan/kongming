@@ -51,9 +51,12 @@ async def _eval_single(case: dict[str, Any]) -> tuple[bool, bool, bool]:
     expected_tables = set(case.get("expected_tables", []))
     gold_ordered = "order by" in gold_sql.lower()
 
-    # gold 执行(失败=评估集本身有误,直接 fail)
+    # gold 执行(失败=评估集本身有误,直接 fail);
+    # gold_database=动态源题直连其独立业务库(与生成侧动态路由同落点)
     try:
-        gold_cols, gold_rows = await exec_sql(gold_sql)
+        gold_cols, gold_rows = await exec_sql(
+            gold_sql, database=case.get("gold_database")
+        )
     except Exception as e:  # noqa: BLE001  # asyncpg 异常族统一收敛评估集错误
         pytest.fail(f"[{case['id']}] gold_sql 执行失败(评估集本身有误): {e}")
 

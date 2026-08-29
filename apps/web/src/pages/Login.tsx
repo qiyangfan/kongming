@@ -110,13 +110,13 @@ export default function Login() {
     }
   }
 
-  async function federatedLogin(provider: string) {
+  async function federatedLogin(provider: string, displayName: string) {
     setError(null);
     try {
       const { authorize_url } = await api.get<StartOut>(`/auth/${provider}/start`);
       window.location.href = authorize_url;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "联邦登录发起失败");
+      setError(err instanceof Error ? err.message : `${displayName} 登录未完成,请稍后再试`);
     }
   }
 
@@ -136,7 +136,7 @@ export default function Login() {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="username"
-                placeholder="username"
+                placeholder="请输入用户名"
               />
             </div>
             <div className="space-y-2">
@@ -147,10 +147,10 @@ export default function Login() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
-                placeholder="••••••"
+                placeholder="请输入密码"
               />
             </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
             <Button type="submit" disabled={pending} className="w-full">
               {pending ? "登录中…" : "登录"}
             </Button>
@@ -170,7 +170,7 @@ export default function Login() {
                       key={p.provider}
                       variant="outline"
                       className="w-full"
-                      onClick={() => void federatedLogin(p.provider)}
+                      onClick={() => void federatedLogin(p.provider, p.display_name)}
                     >
                       {Mark && <Mark />}
                       使用 {p.display_name} 继续

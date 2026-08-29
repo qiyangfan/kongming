@@ -26,6 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { ScrollFade } from "@/components/scroll-fade";
 import { QueryErrorAlert } from "@/components/query-error";
 import { operLogPage, sqlAuditPage } from "@/lib/audit-api";
 import { systemApi } from "@/lib/system-api";
@@ -168,7 +169,7 @@ export default function AuditPage() {
                   setTraceId(e.target.value);
                   setPage(1);
                 }}
-                placeholder="链路追踪"
+                placeholder="调用链路 ID"
                 className="w-52 font-mono text-xs"
               />
             </div>
@@ -226,7 +227,7 @@ export default function AuditPage() {
       </div>
 
       {/* 分页表 */}
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <ScrollFade className="overflow-x-auto rounded-lg border border-border">
         <Table>
           <TableHeader>
             {section === "sql" ? (
@@ -259,7 +260,7 @@ export default function AuditPage() {
             )}
           </TableBody>
         </Table>
-      </div>
+      </ScrollFade>
 
       <div className="flex items-center justify-between text-sm text-muted-foreground">
         <span>共 {total ?? 0} 条</span>
@@ -403,7 +404,7 @@ function OperRows({
             <TableCell className="font-mono text-xs">{it.ip ?? "—"}</TableCell>
             <TableCell className="text-right">
               <Button variant="ghost" size="xs" onClick={() => setExpanded(expanded === it.id ? null : it.id)}>
-                {expanded === it.id ? "收起" : "detail"}
+                {expanded === it.id ? "收起" : "详情"}
               </Button>
             </TableCell>
           </TableRow>

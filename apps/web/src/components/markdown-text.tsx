@@ -15,7 +15,7 @@ function renderInline(text: string): ReactNode[] {
   return text.split(INLINE_RE).map((part, i) => {
     if (part.length > 2 && part.startsWith("`") && part.endsWith("`")) {
       return (
-        <code key={i} className="rounded bg-muted/70 px-1 py-0.5 font-mono text-[0.85em]">
+        <code key={i} className="rounded bg-muted/70 px-1 py-0.5 font-mono text-code-inline">
           {part.slice(1, -1)}
         </code>
       );
@@ -37,7 +37,7 @@ const OL_RE = /^\d{1,3}[.)]\s+(.*)$/;
 
 const HEADING_CLASS: Record<number, string> = {
   1: "text-base font-semibold",
-  2: "text-[15px] font-semibold",
+  2: "text-md font-semibold",
   3: "text-sm font-semibold",
 };
 

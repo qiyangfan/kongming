@@ -5,9 +5,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import ReactECharts from "echarts-for-react";
 import { Link } from "react-router";
 import { Loader2 } from "lucide-react";
+
+import { ScrollFade } from "@/components/scroll-fade";
+
+import { EChart, themedTooltip } from "@/lib/echarts";
+import { useTheme } from "@/lib/theme-store";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,7 +67,52 @@ function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
+type FeedbackTrendPoint = Awaited<ReturnType<typeof feedbackOverview>>["trend"][number];
+
+/* 趋势折线(theme 经 key 作用于本组件:切主题整体重挂,option 重读 token 色板) */
+function FeedbackTrendChart({ trend }: { trend: FeedbackTrendPoint[] }) {
+  const option = useMemo(() => {
+    const axisColor = cssVar("--muted-foreground");
+    const lineColor = cssVar("--border");
+    const axisCommon = {
+      axisLabel: { color: axisColor },
+      axisLine: { lineStyle: { color: lineColor } },
+    };
+    return {
+      tooltip: { trigger: "axis" as const, ...themedTooltip() },
+      legend: { bottom: 0, left: "center", textStyle: { color: axisColor } },
+      grid: { left: 12, right: 16, top: 24, bottom: 28, containLabel: true },
+      xAxis: {
+        type: "category" as const,
+        data: trend.map((t) => t.day.slice(5)), // MM-DD 省宽
+        ...axisCommon,
+      },
+      yAxis: { type: "value" as const, minInterval: 1, ...axisCommon },
+      series: [
+        {
+          name: "赞",
+          type: "line" as const,
+          data: trend.map((t) => t.up),
+          smooth: true,
+          itemStyle: { color: cssVar("--ring") },
+          lineStyle: { color: cssVar("--ring"), width: 2 },
+        },
+        {
+          name: "踩",
+          type: "line" as const,
+          data: trend.map((t) => t.down),
+          smooth: true,
+          itemStyle: { color: cssVar("--primary") },
+          lineStyle: { color: cssVar("--primary"), width: 2 },
+        },
+      ],
+    };
+  }, [trend]);
+  return <EChart option={option} notMerge lazyUpdate style={{ height: 220, width: "100%" }} opts={{ renderer: "canvas" }} />;
+}
+
 export default function FeedbackPage() {
+  const { theme } = useTheme();
   const { user } = useAuth();
   const canHandle = hasPerm(user, "system:feedback:handle");
   const [days, setDays] = useState(30);
@@ -119,45 +168,6 @@ export default function FeedbackPage() {
     }
   }, [list.data, page]);
 
-  const trendOption = useMemo(() => {
-    const trend = overview.data?.trend ?? [];
-    const axisColor = cssVar("--muted-foreground");
-    const lineColor = cssVar("--border");
-    const axisCommon = {
-      axisLabel: { color: axisColor },
-      axisLine: { lineStyle: { color: lineColor } },
-    };
-    return {
-      tooltip: { trigger: "axis" as const },
-      legend: { bottom: 0, left: "center", textStyle: { color: axisColor } },
-      grid: { left: 12, right: 16, top: 24, bottom: 28, containLabel: true },
-      xAxis: {
-        type: "category" as const,
-        data: trend.map((t) => t.day.slice(5)), // MM-DD 省宽
-        ...axisCommon,
-      },
-      yAxis: { type: "value" as const, minInterval: 1, ...axisCommon },
-      series: [
-        {
-          name: "赞",
-          type: "line" as const,
-          data: trend.map((t) => t.up),
-          smooth: true,
-          itemStyle: { color: cssVar("--ring") },
-          lineStyle: { color: cssVar("--ring"), width: 2 },
-        },
-        {
-          name: "踩",
-          type: "line" as const,
-          data: trend.map((t) => t.down),
-          smooth: true,
-          itemStyle: { color: cssVar("--primary") },
-          lineStyle: { color: cssVar("--primary"), width: 2 },
-        },
-      ],
-    };
-  }, [overview.data]);
-
   const ov = overview.data;
   const totalPages = Math.max(1, Math.ceil((list.data?.total ?? 0) / PAGE_SIZE));
 
@@ -189,13 +199,7 @@ export default function FeedbackPage() {
         {overview.isError ? (
           <QueryErrorAlert />
         ) : (
-          <ReactECharts
-            option={trendOption}
-            notMerge
-            lazyUpdate
-            style={{ height: 220, width: "100%" }}
-            opts={{ renderer: "canvas" }}
-          />
+          <FeedbackTrendChart key={theme} trend={overview.data?.trend ?? []} />
         )}
       </div>
 
@@ -272,7 +276,7 @@ export default function FeedbackPage() {
       </div>
 
       {/* 明细分页表 */}
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <ScrollFade className="overflow-x-auto rounded-lg border border-border">
         <Table>
           <TableHeader>
             <TableRow>
@@ -343,7 +347,7 @@ export default function FeedbackPage() {
             )}
           </TableBody>
         </Table>
-      </div>
+      </ScrollFade>
 
       <div className="flex items-center justify-between text-sm text-muted-foreground">
         <span>共 {list.data?.total ?? 0} 条</span>
@@ -451,7 +455,16 @@ function FeedbackDetailDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-1">
+        {/* 040:包 form 对齐既有弹窗范式——备注框是 Textarea,Enter 为换行
+            不触发表单隐式提交,键盘提交如需要应另行加 Cmd/Ctrl+Enter(挂账) */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!canHandle || save.isPending) return;
+            save.mutate();
+          }}
+        >
+          <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-1">
           <section>
             <h3 className="mb-1 text-xs font-medium text-muted-foreground">问句</h3>
             <p className="text-sm">{item.question ?? "—"}</p>
@@ -540,12 +553,13 @@ function FeedbackDetailDialog({
 
         {canHandle && (
           <DialogFooter>
-            <Button onClick={() => save.mutate()} disabled={save.isPending}>
+            <Button type="submit" disabled={save.isPending}>
               {save.isPending && <Loader2 className="animate-spin" aria-hidden />}
               保存处置
             </Button>
           </DialogFooter>
         )}
+        </form>
       </DialogContent>
     </Dialog>
   );

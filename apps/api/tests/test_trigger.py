@@ -203,8 +203,9 @@ async def test_webhook_disabled_and_oversize(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """S4 缺口:禁用 webhook 401;body 超限 413。"""
-    _, token = await _trigger_admin(client, session, make_user, "tg_ds1")
+    uid_ds, token = await _trigger_admin(client, session, make_user, "tg_ds1")
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}
+    await _mk_workflow(session, creator_id=uid_ds)  # 040:目标存在性闸对齐
     r = await client.post(
         "/system/triggers", headers=h,
         json={"tg_key": "dshook", "name": "禁", "type": "WEBHOOK",
@@ -290,7 +291,7 @@ _CRON_BODY = {
 async def test_trigger_crud_and_cron_validation(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    _, token = await _trigger_admin(client, session, make_user, "tg_admin1")
+    uid, token = await _trigger_admin(client, session, make_user, "tg_admin1")
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}
     # 非法 cron 400
     r = await client.post(
@@ -298,6 +299,7 @@ async def test_trigger_crud_and_cron_validation(
         json={**_CRON_BODY, "tg_key": "bad", "name": "坏", "cron_expr": "61 * * * *"},
     )
     assert r.status_code == 400
+    await _mk_workflow(session, creator_id=uid)  # 040:目标存在性闸对齐
     # 合法创建,next_fire_at 预计算
     r2 = await client.post(
         "/system/triggers", headers=h,
@@ -428,3 +430,201 @@ async def test_webhook_github_adapter_normalizes(
         headers={"X-Signature": sig, "X-GitHub-Event": "push"},
     )
     assert r2.status_code == 202
+
+
+# ============ 040 目标存在性闸 ============
+
+
+async def test_trigger_unknown_target_400(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """目标不存在:create 400 TARGET_NOT_FOUND,不落库不进调度(写边界闸)。"""
+    _, token = await _trigger_admin(client, session, make_user, "tg_040a")
+    h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}
+    r = await client.post(
+        "/system/triggers", headers=h,
+        json={**_CRON_BODY, "tg_key": "ghost040", "name": "悬空目标"},
+    )
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "TARGET_NOT_FOUND"
+    n = (
+        await session.execute(
+            text("SELECT count(*) FROM public.sys_trigger_definition WHERE tg_key='ghost040'")
+        )
+    ).scalar_one()
+    assert n == 0
+
+
+async def test_trigger_update_change_target_revalidates(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """update 改指不存在目标:400 TARGET_NOT_FOUND,原值不变。"""
+    uid, token = await _trigger_admin(client, session, make_user, "tg_040b")
+    h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}
+    await _mk_workflow(session, creator_id=uid)
+    r = await client.post(
+        "/system/triggers", headers=h,
+        json={**_CRON_BODY, "tg_key": "upd040", "name": "日报"},
+    )
+    assert r.status_code == 201, r.text
+    tid = r.json()["id"]
+    r2 = await client.put(
+        f"/system/triggers/{tid}", headers=h,
+        json={"name": "日报", "target_type": "workflow", "target_key": "nope040",
+              "cron_expr": "0 9 * * *", "min_interval_sec": 60,
+              "adapter": "custom", "notify_url": "", "secret": ""},
+    )
+    assert r2.status_code == 400, r2.text
+    assert r2.json()["detail"] == "TARGET_NOT_FOUND"
+    row = (
+        await session.execute(
+            text(
+                "SELECT target_key FROM public.sys_trigger_definition"
+                " WHERE tg_key='upd040'"
+            )
+        )
+    ).scalar_one()
+    assert row == "echo"  # 原值不变
+
+
+async def test_trigger_orphan_still_manageable(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """目标已删的存量触发器:停用/改非目标字段/删除均放行(止损路径不堵)。"""
+    uid, token = await _trigger_admin(client, session, make_user, "tg_040c")
+    h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}
+    await _mk_workflow(session, creator_id=uid)
+    r = await client.post(
+        "/system/triggers", headers=h,
+        json={**_CRON_BODY, "tg_key": "orphan040", "name": "孤儿"},
+    )
+    assert r.status_code == 201, r.text
+    tid = r.json()["id"]
+    await session.execute(
+        text("DELETE FROM public.sys_workflow_def WHERE wf_key='echo' AND tenant_id="
+             "(SELECT id FROM public.sys_tenant WHERE tenant_key='tg')")
+    )
+    await session.commit()
+    r2 = await client.post(f"/system/triggers/{tid}/disable", headers=h)
+    assert r2.status_code == 200
+    r3 = await client.put(
+        f"/system/triggers/{tid}", headers=h,
+        json={"name": "改名", "target_type": "workflow", "target_key": "echo",
+              "cron_expr": "0 9 * * *", "min_interval_sec": 60,
+              "adapter": "custom", "notify_url": "", "secret": ""},
+    )
+    assert r3.status_code == 200  # 目标未变:不重校验,止损不被堵
+    r4 = await client.delete(f"/system/triggers/{tid}", headers=h)
+    assert r4.status_code == 200
+
+
+# ============ 040·11 cron 预览 ============
+
+
+async def test_cron_preview_three_fires(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """合法表达式:返回按时间递增的 3 次触发时刻(Asia/Shanghai)。"""
+    _, token = await _trigger_admin(client, session, make_user, "tg_040pv")
+    r = await client.get(
+        "/system/triggers/cron-preview",
+        params={"expr": "0 9 * * *"},
+        headers={"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"},
+    )
+    assert r.status_code == 200, r.text
+    fires = r.json()["next"]
+    assert len(fires) == 3
+    assert fires == sorted(fires)  # 时间递增
+    assert len(set(fires)) == 3  # 无重复
+
+
+async def test_cron_preview_invalid_400(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """非法表达式:400 附可读原因(与创建期校验同口径)。"""
+    _, token = await _trigger_admin(client, session, make_user, "tg_040pv2")
+    r = await client.get(
+        "/system/triggers/cron-preview",
+        params={"expr": "61 * * * *"},
+        headers={"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"},
+    )
+    assert r.status_code == 400
+    assert "越界" in r.json()["detail"]  # 61 越分钟域上界,与创建期同文案
+
+
+async def test_trigger_team_workflow_target_allowed(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """040 回归(R1 实锤):团队 workflow(他人创建、自己在成员集)在前端
+    候选可选,存在性闸必须同口径放行——checker 缺 team_ids 时创建必 400。"""
+    uid, token = await _trigger_admin(client, session, make_user, "tg_040team")
+    h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}
+    tid = (
+        await session.execute(
+            text("SELECT id FROM public.sys_tenant WHERE tenant_key='tg'")
+        )
+    ).scalar_one()
+    # 他人创建的团队 workflow + uid 为团队成员(MEMBER):
+    # created_by 取 seed_all 播的 admin(≠触发器创建者),确保只靠 team 口径可见
+    owner_id = (
+        await session.execute(
+            text("SELECT id FROM public.sys_user WHERE username='admin' LIMIT 1")
+        )
+    ).scalar_one()
+    await session.execute(
+        text(
+            "DELETE FROM public.sys_workflow_def WHERE wf_key='teamecho040'"
+            " AND tenant_id=CAST(:t AS uuid)"
+        ),
+        {"t": str(tid)},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO public.sys_team (id, tenant_id, team_key, name, created_by)"
+            " VALUES (gen_random_uuid(), CAST(:t AS uuid), 'tm040', '组',"
+            "         CAST(:o AS uuid))"
+            " ON CONFLICT (tenant_id, team_key) DO NOTHING"
+        ),
+        {"t": str(tid), "o": str(owner_id)},
+    )
+    team_id = (
+        await session.execute(
+            text(
+                "SELECT id FROM public.sys_team"
+                " WHERE tenant_id=CAST(:t AS uuid) AND team_key='tm040'"
+            ),
+            {"t": str(tid)},
+        )
+    ).scalar_one()
+    await session.execute(
+        text(
+            "INSERT INTO public.sys_team_member (team_id, user_id, role)"
+            " VALUES (CAST(:tm AS uuid), CAST(:u AS uuid), 'MEMBER')"
+            " ON CONFLICT (team_id, user_id) DO NOTHING"
+        ),
+        {"tm": str(team_id), "u": str(uid)},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO public.sys_workflow_def"
+            " (id, tenant_id, wf_key, name, version, definition, created_by, team_id)"
+            " VALUES (gen_random_uuid(), CAST(:t AS uuid), 'teamecho040', '团队回显', 1,"
+            "         CAST(:d AS jsonb), CAST(:o AS uuid), CAST(:tm AS uuid))"
+        ),
+        {
+            "t": str(tid),
+            "o": str(owner_id),
+            "tm": str(team_id),
+            "d": json.dumps(
+                {"nodes": [{"id": "t", "type": "transform",
+                            "config": {"template": "{{inputs}}"}}]}
+            ),
+        },
+    )
+    await session.commit()
+    r = await client.post(
+        "/system/triggers", headers=h,
+        json={**_CRON_BODY, "tg_key": "team040", "name": "团队目标",
+              "target_key": "teamecho040"},
+    )
+    assert r.status_code == 201, r.text  # 团队成员挂团队 workflow:闸不得误拒

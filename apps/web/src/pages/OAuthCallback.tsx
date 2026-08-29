@@ -25,7 +25,7 @@ export default function OAuthCallback() {
     const code = params.get("code");
     const state = params.get("state");
     if (!provider || !code || !state) {
-      setError("回调参数缺失(缺少 code/state)");
+      setError("登录未完成,请返回登录页重试");
       return;
     }
     void (async () => {
@@ -34,7 +34,7 @@ export default function OAuthCallback() {
         await acceptTokens(pair);
         navigate("/", { replace: true });
       } catch (err) {
-        setError(err instanceof Error ? err.message : "联邦登录失败");
+        setError(err instanceof Error ? err.message : "登录未完成,请稍后再试");
       }
     })();
   }, [provider, params, acceptTokens, navigate]);
@@ -43,7 +43,7 @@ export default function OAuthCallback() {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-grad-from via-grad-mid to-grad-end">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>联邦登录</CardTitle>
+          <CardTitle>第三方登录</CardTitle>
           <CardDescription>
             {error ? "登录未完成" : "正在完成登录…"}
           </CardDescription>
@@ -51,7 +51,7 @@ export default function OAuthCallback() {
         <CardContent className="space-y-4">
           {error ? (
             <>
-              <p className="text-sm text-destructive">{error}</p>
+              <p className="text-sm text-destructive" role="alert">{error}</p>
               <Link to="/login" className={cn(buttonVariants({ variant: "outline" }), "w-full")}>
                 返回登录页
               </Link>

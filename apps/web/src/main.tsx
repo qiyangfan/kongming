@@ -1,17 +1,17 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { StrictMode } from "react";
+import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
 
 import { AppLayout } from "@/components/app-layout";
 import { PermRoute } from "@/components/perm-route";
+import { Skeleton } from "@/components/ui/skeleton";
 import AdminLayout from "@/pages/admin/AdminLayout";
 import DatasourcesPage from "@/pages/admin/DatasourcesPage";
 import DeptsPage from "@/pages/admin/DeptsPage";
 import RolesPage from "@/pages/admin/RolesPage";
 import UsersPage from "@/pages/admin/UsersPage";
 import RagPage from "@/pages/admin/RagPage";
-import FeedbackPage from "@/pages/admin/FeedbackPage";
 import AuditPage from "@/pages/admin/AuditPage";
 import ToolsPage from "@/pages/admin/ToolsPage";
 import MemoryPage from "@/pages/MemoryPage";
@@ -27,13 +27,25 @@ import McpPage from "@/pages/admin/McpPage";
 import WorkflowsPage from "@/pages/admin/WorkflowsPage";
 import TriggersPage from "@/pages/admin/TriggersPage";
 import TeamsPage from "@/pages/admin/TeamsPage";
-import UsagePage from "@/pages/admin/UsagePage";
 import ChangePassword from "@/pages/ChangePassword";
 import ChatPage from "@/pages/ChatPage";
 import Login from "@/pages/Login";
 import OAuthCallback from "@/pages/OAuthCallback";
 import { NotFoundPage } from "@/pages/error-pages";
 import "./index.css";
+
+/* 图表统计页懒加载(echarts 体积治理):引擎 chunk 只在进入对应页面时拉取,
+   与聊天侧图表共享同一按需 chunk;Suspense 兜骨架防跳变 */
+const FeedbackPage = lazy(() => import("@/pages/admin/FeedbackPage"));
+const UsagePage = lazy(() => import("@/pages/admin/UsagePage"));
+
+function RouteSuspenseFallback() {
+  return (
+    <div className="p-4">
+      <Skeleton className="h-96 w-full" />
+    </div>
+  );
+}
 
 /* 4xx 客户端错误(401 已由刷新链路处理)重试无意义:只对 5xx/网络错误重试两次 */
 const queryClient = new QueryClient({
@@ -154,7 +166,9 @@ const router = createBrowserRouter([
             path: "feedback",
             element: (
               <PermRoute perm="system:feedback:view">
-                <FeedbackPage />
+                <Suspense fallback={<RouteSuspenseFallback />}>
+                  <FeedbackPage />
+                </Suspense>
               </PermRoute>
             ),
           },
@@ -242,7 +256,9 @@ const router = createBrowserRouter([
             path: "usage",
             element: (
               <PermRoute perm="system:llm-usage:view">
-                <UsagePage />
+                <Suspense fallback={<RouteSuspenseFallback />}>
+                  <UsagePage />
+                </Suspense>
               </PermRoute>
             ),
           },

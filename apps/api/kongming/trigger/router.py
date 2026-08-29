@@ -5,6 +5,7 @@
 先例);创建者身份(权限放大面=节点级防御以创建者逐层复校,029 立约)。
 """
 
+import datetime as dt
 import logging
 import uuid
 from typing import Annotated, Any
@@ -20,9 +21,11 @@ from kongming.chat.repository import ChatRepository
 from kongming.config import get_settings
 from kongming.datasource.cipher import get_cipher
 from kongming.db import get_session, get_sessionmaker
+from kongming.trigger.models import CronError, next_fire
 from kongming.trigger.repository import SqlTriggerRepo
 from kongming.trigger.scheduler import TriggerScheduler
 from kongming.trigger.service import (
+    TargetNotFound,
     TriggerKeyTaken,
     TriggerNotFound,
     TriggerService,
@@ -68,12 +71,44 @@ def _make_service(session: AsyncSession, actor_id: str | None = None) -> Trigger
         async def log(self, *, action: str, target: str, detail: dict[str, object]) -> None:
             await SqlOperLogRepo(session).add(actor_id, action, target, detail)
 
+    class _TargetCheckerImpl:
+        """040 目标存在性(与前端候选同源,与派发期同口径):
+        workflow=创建者视角可见集合(032 归属过滤:个人创建 + 所在团队,
+        与 workflow 列表端点同源同参);bot=租户级存在。"""
+
+        async def target_exists(
+            self, *, target_type: str, target_key: str, tenant_id: str, creator_id: str
+        ) -> bool:
+            if target_type == "workflow":
+                from kongming.team.repository import SqlTeamRepo
+                from kongming.workflow.repository import SqlWorkflowRepo
+
+                # 团队口径(R1 实锤回归):前端候选=list_workflows(team_ids=
+                # 角色映射键集),缺 team_ids 则他人创建的团队 workflow 在候选
+                # 可选、提交必拒——checker 与候选必须同源
+                roles = await SqlTeamRepo(session).role_map(user_id=creator_id)
+                rows = await SqlWorkflowRepo(session).list_latest(
+                    tenant_id=tenant_id,
+                    user_id=creator_id,
+                    team_ids=list(roles.keys()),
+                )
+                return any(r["wf_key"] == target_key for r in rows)
+            from kongming.bot.repository import SqlBotRepo
+
+            return (
+                await SqlBotRepo(session).get_by_key(
+                    tenant_id=tenant_id, bot_key=target_key
+                )
+                is not None
+            )
+
     return TriggerService(
         repo=SqlTriggerRepo(session),
         cipher=get_cipher(settings.datasource_encrypt_key),
         runner=_TargetRunnerImpl(),
         notifier=_HttpxNotifier(),
         oper=_Oper(),
+        target_checker=_TargetCheckerImpl(),
     )
 
 
@@ -130,6 +165,12 @@ class _TargetRunnerImpl:
                             {"t": tenant_id},
                         )
                     ).scalar_one()
+                    # R1 实锤对齐:派发期可见性与 checker 同口径——创建者是触发器
+                    # 创建者,团队 workflow 成员(经 member_roles)可执行;缺此参
+                    # 则团队目标 _assert_visible 恒 False,创建成功派发必败
+                    from kongming.team.repository import SqlTeamRepo
+
+                    member_roles = await SqlTeamRepo(s).role_map(user_id=creator_id)
                     svc = WorkflowService(
                         repo=SqlWorkflowRepo(s),
                         sql=_InternalSqlRunner(s),
@@ -143,6 +184,7 @@ class _TargetRunnerImpl:
                         user_id=creator_id,
                         inputs=inputs,
                         version=None,
+                        member_roles=member_roles,
                         # 审查循环 B3:cron/webhook 均系统触发,
                         # MANUAL 仅留给人工端点
                         trigger_source="API",
@@ -303,6 +345,31 @@ def _row_out(row: dict[str, Any]) -> dict[str, Any]:
 # ── 管理端点 ──
 
 
+class CronPreviewOut(BaseModel):
+    """040·11 cron 预览(与创建/调度同源的解析计算,前端防抖消费)。"""
+
+    next: list[str]
+
+
+@router.get("/cron-preview", response_model=CronPreviewOut)
+async def cron_preview(
+    expr: Annotated[str, Query(max_length=64)],
+    user: Annotated[dict[str, object], Depends(current_user)],
+    _: Annotated[None, Depends(require_perm(MANAGE))],
+) -> CronPreviewOut:
+    """接下来 3 次触发时刻(单次看不出日历跳跃类缺陷,036 教训);
+    非法表达式 400 附原文案——与创建期校验同口径,禁第二套 cron 语义。"""
+    try:
+        fire = dt.datetime.now(dt.timezone(dt.timedelta(hours=8)))  # Asia/Shanghai(与服务层同钟)
+        fires: list[str] = []
+        for _i in range(3):
+            fire = next_fire(expr, fire)
+            fires.append(fire.isoformat())
+    except CronError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    return CronPreviewOut(next=fires)
+
+
 @router.post("", status_code=201, dependencies=[Depends(require_perm(MANAGE))])
 async def create_trigger(
     body: TriggerIn,
@@ -330,6 +397,8 @@ async def create_trigger(
         await session.commit()
     except TriggerValidationError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
+    except TargetNotFound:
+        raise HTTPException(status_code=400, detail="TARGET_NOT_FOUND") from None
     except TriggerKeyTaken:
         raise HTTPException(status_code=409, detail="TRIGGER_KEY_TAKEN") from None
     return out
@@ -372,6 +441,8 @@ async def update_trigger(
         await session.commit()
     except TriggerValidationError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
+    except TargetNotFound:
+        raise HTTPException(status_code=400, detail="TARGET_NOT_FOUND") from None
     except TriggerNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     return {"ok": True}

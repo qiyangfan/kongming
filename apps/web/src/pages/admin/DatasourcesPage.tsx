@@ -25,6 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FieldLabel } from "@/components/field-label";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -218,7 +219,7 @@ export default function DatasourcesPage() {
   const submit = () => {
     setFormError("");
     if (creating && !/^[a-z][a-z0-9_]{1,63}$/.test(form.datasourceKey.trim())) {
-      return setFormError("数据源键须为小写蛇形(小写字母起头,2..64 位)");
+      return setFormError("数据源键须以小写字母开头,可含数字与下划线,长度 2 到 64 个字符");
     }
     if (!form.name.trim()) return setFormError("名称不可为空");
     if (!form.tenantId) return setFormError("必须选择归属租户");
@@ -388,12 +389,17 @@ export default function DatasourcesPage() {
           >
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
-                <Label htmlFor="ds-key">数据源键</Label>
+                <FieldLabel
+                  htmlFor="ds-key"
+                  help="小写字母开头,可含数字与下划线;创建后不可改。"
+                >
+                  数据源键
+                </FieldLabel>
                 <Input
                   id="ds-key"
                   value={form.datasourceKey}
                   disabled={!creating}
-                  placeholder="如 sakila(创建后不可改)"
+                  placeholder="如 sakila"
                   onChange={(e) => setForm({ ...form, datasourceKey: e.target.value })}
                 />
               </div>
@@ -482,7 +488,8 @@ export default function DatasourcesPage() {
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
               />
               <p className="text-xs text-muted-foreground">
-                请使用只读账号;行级过滤(数据范围)依赖目标库表的 create_by 列。
+                请使用只读账号。如需按部门控制数据可见范围,业务表须有记录创建人的
+                create_by 字段。
               </p>
             </div>
             <label className="flex items-center gap-2 text-sm">
@@ -490,7 +497,7 @@ export default function DatasourcesPage() {
                 checked={form.readonly}
                 onCheckedChange={(checked) => setForm({ ...form, readonly: checked === true })}
               />
-              只读数据源(语义登记;平台侧另有连接级只读+防火墙双闸)
+              只读数据源(仅登记供 AI 问答查询;平台侧另有连接级只读保护)
             </label>
             {testResult && (
               <p
@@ -537,7 +544,7 @@ export default function DatasourcesPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>删除数据源 {deleting?.datasource_key}?</AlertDialogTitle>
             <AlertDialogDescription>
-              删除为物理删除:连接池立即失效,后续对该数据源的查询一律拒绝。此操作不可恢复。
+              删除立即生效且不可恢复:删除后,使用该数据源的问答将直接报错。
             </AlertDialogDescription>
           </AlertDialogHeader>
           {remove.isError && (

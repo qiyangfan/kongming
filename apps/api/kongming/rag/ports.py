@@ -27,6 +27,17 @@ class QueryHistoryWriter(Protocol):
     ) -> None: ...
 
 
+class ColumnCommentReader(Protocol):
+    """列注释读取窄端口(041 呈现层列标签;chat 域消费;实现=RagService)。
+
+    返回 {表名: {列名: 注释原文(含 PG 类型前缀,剥离在呈现纯函数内)}}——
+    单数据源注释集量级(数十表×数十列),整集返回免 SQL 解析与按表查询。"""
+
+    async def column_comments(
+        self, *, tenant_id: str, datasource_key: str
+    ) -> dict[str, dict[str, str]]: ...
+
+
 class TableDescriberPort(Protocol):
     """表元数据润色(api→agent /internal/describe-table;enriched=False 即降级纯结构)。"""
 
@@ -68,9 +79,28 @@ class RagRepo(Protocol):
 
     async def delete_all_for_datasource(self, *, tenant_id: str, datasource_key: str) -> int: ...
 
+    async def allowed_schemas(
+        self, *, tenant_id: str, tenant_key: str, datasource_key: str
+    ) -> list[str]:
+        """可扫描 schema 集合(040:上传存在性校验与枚举端点候选源,与内省同源)。"""
+
+    async def column_comments(
+        self, *, tenant_id: str, datasource_key: str
+    ) -> dict[str, dict[str, str]]: ...
+
     async def list_source_and_alias(
         self, *, tenant_id: str, datasource_key: str
-    ) -> dict[str, tuple[str, str]]: ...
+    ) -> dict[tuple[str, str], tuple[str, str]]:
+        """(schema_name, table_name) → (source_type, alias)——二元键防跨 schema
+        同名表互遮(042)。"""
+
+    async def delete_stale_entries(
+        self, *, tenant_id: str, datasource_key: str, keep: list[tuple[str, str]]
+    ) -> tuple[int, int]:
+        """042 对账:删除扫描集外的自动来源登记行,返回 (removed, manual_orphans)。
+
+        keep=本次扫描集 [(schema_name, table_name)];扫描集外人工/反馈行
+        只计数不删(不可逆资产交人工裁决)。"""
 
     async def recall_vector(
         self, *, tenant_id: str, datasource_key: str, vector: list[float]

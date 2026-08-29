@@ -49,7 +49,7 @@ export function SqlArtifactCard({
     if (busy || !messageId) return;
     const sqlText = draft.trim();
     if (!sqlText) {
-      setError("SQL 为空,无可执行。");
+      setError("SQL 为空,无法执行。");
       return;
     }
     setBusy(true);
@@ -150,7 +150,7 @@ export function ChartArtifactCard({
             aria-hidden
           />
           <SlidersHorizontal className="size-3.5" aria-hidden />
-          调参
+          设置
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="grid grid-cols-1 gap-2 px-2 pt-1 pb-2 sm:grid-cols-3">
@@ -218,7 +218,7 @@ export function DocumentCard({ content }: { content: string }) {
 
   return (
     <div className="space-y-1">
-      <div className="px-1 text-[15px] leading-relaxed text-foreground">
+      <div className="px-1 text-md leading-relaxed text-foreground">
         <MarkdownText text={content} />
       </div>
       <div className="flex items-center gap-2">

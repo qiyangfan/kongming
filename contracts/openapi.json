@@ -2150,6 +2150,65 @@
         }
       }
     },
+    "/system/rag/schemas": {
+      "get": {
+        "tags": [
+          "rag"
+        ],
+        "summary": "List Allowed Schemas",
+        "operationId": "list_allowed_schemas_system_rag_schemas_get",
+        "parameters": [
+          {
+            "name": "datasource_key",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+              "title": "Datasource Key"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemasOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/system/rag/tables": {
       "get": {
         "tags": [
@@ -6897,6 +6956,50 @@
         }
       }
     },
+    "/system/triggers/cron-preview": {
+      "get": {
+        "tags": [
+          "trigger"
+        ],
+        "summary": "Cron Preview",
+        "description": "接下来 3 次触发时刻(单次看不出日历跳跃类缺陷,036 教训);\n非法表达式 400 附原文案——与创建期校验同口径,禁第二套 cron 语义。",
+        "operationId": "cron_preview_system_triggers_cron_preview_get",
+        "parameters": [
+          {
+            "name": "expr",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Expr"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CronPreviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/system/triggers": {
       "post": {
         "tags": [
@@ -10675,6 +10778,14 @@
             "type": "array",
             "title": "Attachments",
             "default": []
+          },
+          "column_labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Column Labels",
+            "default": []
           }
         },
         "type": "object",
@@ -10693,6 +10804,23 @@
           "error"
         ],
         "title": "ChatQueryOut"
+      },
+      "CronPreviewOut": {
+        "properties": {
+          "next": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Next"
+          }
+        },
+        "type": "object",
+        "required": [
+          "next"
+        ],
+        "title": "CronPreviewOut",
+        "description": "040·11 cron 预览(与创建/调度同源的解析计算,前端防抖消费)。"
       },
       "DatasourceActionIn": {
         "properties": {
@@ -11561,13 +11689,18 @@
           "skipped": {
             "type": "integer",
             "title": "Skipped"
+          },
+          "removed": {
+            "type": "integer",
+            "title": "Removed"
           }
         },
         "type": "object",
         "required": [
           "found",
           "enriched",
-          "skipped"
+          "skipped",
+          "removed"
         ],
         "title": "FetchOut"
       },
@@ -12709,6 +12842,13 @@
             "type": "array",
             "title": "Artifacts",
             "default": []
+          },
+          "column_labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Column Labels"
           }
         },
         "type": "object",
@@ -13691,14 +13831,14 @@
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*(\\.[a-zA-Z_][a-zA-Z0-9_]*)?$",
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*\\.[a-zA-Z_][a-zA-Z0-9_]*$",
             "title": "Source Table"
           },
           "target_table": {
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
-            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*(\\.[a-zA-Z_][a-zA-Z0-9_]*)?$",
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*\\.[a-zA-Z_][a-zA-Z0-9_]*$",
             "title": "Target Table"
           },
           "join_keys": {
@@ -14115,6 +14255,27 @@
           "enabled"
         ],
         "title": "RuleUpdateIn"
+      },
+      "SchemasOut": {
+        "properties": {
+          "datasource_key": {
+            "type": "string",
+            "title": "Datasource Key"
+          },
+          "schemas": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Schemas"
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasource_key",
+          "schemas"
+        ],
+        "title": "SchemasOut"
       },
       "SessionItemOut": {
         "properties": {

@@ -61,6 +61,18 @@ class TargetRunner(Protocol):
     ) -> tuple[bool, str, str]: ...
 
 
+class TargetChecker(Protocol):
+    """目标存在性(040):创建/改指时写边界 fail-fast。
+
+    workflow=创建者视角可见集合(与前端候选同源,与派发期 032 可见性同口径);
+    bot=租户级存在(与派发期 get_by_key 同口径)。实现见 router 组合根。
+    """
+
+    async def target_exists(
+        self, *, target_type: str, target_key: str, tenant_id: str, creator_id: str
+    ) -> bool: ...
+
+
 class SecretCipher(Protocol):
     """密钥加解密(008 cipher 反转)。"""
 

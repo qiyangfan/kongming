@@ -18,11 +18,15 @@ from kongming.datasource.resolver import DatasourceInvalid, resolve_for_read
 from kongming.db import uuid7
 from kongming.internal.executor import get_or_create_engine
 from kongming.rag.models import (
+    AUTOMATED_SOURCE_TYPES,
     QUERY_HISTORY_CAP,
     RECALL_TOP_K,
     IntrospectedTable,
     KnowledgeEntry,
     RecallHit,
+)
+from kongming.rag.models import (
+    DatasourceInvalid as RagDatasourceInvalid,
 )
 from kongming.sqlfw.firewall import RESERVED_TABLE_NAMES, RESERVED_TABLE_PREFIXES
 
@@ -142,13 +146,16 @@ class RagRepository:
 
     async def list_source_and_alias(
         self, *, tenant_id: str, datasource_key: str
-    ) -> dict[str, tuple[str, str]]:
-        """表名 → (source_type, alias)——优先级判定与生效别名(R1-S1:embedding
-        文本须以生效别名参与,与 alias 列/tsv 同源),一次读免二次往返。"""
+    ) -> dict[tuple[str, str], tuple[str, str]]:
+        """(schema_name, table_name) → (source_type, alias)——优先级判定与生效
+        别名(R1-S1:embedding 文本须以生效别名参与,与 alias 列/tsv 同源),
+        一次读免二次往返;042 二元键:default 源合法范围含两个 schema
+        (tenant_<key> + public),一元键会让跨 schema 同名表互遮。"""
         rows = (
             await self._s.execute(
                 text(
-                    "SELECT table_name, source_type, COALESCE(alias, '') AS alias"
+                    "SELECT schema_name, table_name, source_type,"
+                    " COALESCE(alias, '') AS alias"
                     " FROM rag.table_descriptions"
                     " WHERE tenant_id = :t AND datasource_key = :d"
                 ),
@@ -156,7 +163,61 @@ class RagRepository:
             )
         ).all()
         return {
-            str(r.table_name): (str(r.source_type), str(r.alias or ""))
+            (str(r.schema_name), str(r.table_name)): (str(r.source_type), str(r.alias or ""))
+            for r in rows
+        }
+
+    async def delete_stale_entries(
+        self, *, tenant_id: str, datasource_key: str, keep: list[tuple[str, str]]
+    ) -> tuple[int, int]:
+        """042 对账(登记=现实):删扫描集外自动来源行,人工/反馈行只计数不删
+        (不可逆资产交人工裁决,service 层告警)。keep 空集=该范围已无表,全删
+        自动行;静态 SQL 双形态(keep 有/无),禁字符串拼 keep 集。"""
+        sources = sorted(AUTOMATED_SOURCE_TYPES)
+        base = (
+            "FROM rag.table_descriptions"
+            " WHERE tenant_id = :t AND datasource_key = :d"
+            " AND source_type = ANY(CAST(:sources AS text[]))"
+        )
+        params: dict[str, object] = {"t": tenant_id, "d": datasource_key, "sources": sources}
+        if keep:
+            base += (
+                " AND NOT EXISTS (SELECT 1 FROM unnest("
+                " CAST(:schemas AS text[]), CAST(:tables AS text[])) AS k(s, n)"
+                " WHERE k.s = schema_name AND k.n = table_name)"
+            )
+            params["schemas"] = [s for s, _ in keep]
+            params["tables"] = [t for _, t in keep]
+        orphans = int(
+            (
+                await self._s.execute(text(f"SELECT count(*) {base}"), params)  # noqa: S608  # base 为本文件常量片段+绑定参数
+            ).scalar_one()
+        )
+        deleted = (await self._s.execute(text(f"DELETE {base} RETURNING 1"), params)).all()  # noqa: S608
+        return len(deleted), orphans
+
+    async def column_comments(
+        self, *, tenant_id: str, datasource_key: str
+    ) -> dict[str, dict[str, str]]:
+        """表名 → 列注释(041 呈现层列标签)。注释原文含 PG 类型前缀
+        (fetch-metadata 形态,类型段同时是 LLM 生成输入),剥离在 chat
+        呈现纯函数内,此处不丢信息。"""
+        rows = (
+            await self._s.execute(
+                text(
+                    "SELECT table_name, columns_comment"
+                    " FROM rag.table_descriptions"
+                    " WHERE tenant_id = :t AND datasource_key = :d"
+                    " ORDER BY CASE WHEN schema_name = 'public' THEN 0 ELSE 1 END"
+                ),
+                {"t": tenant_id, "d": datasource_key},
+            )
+        ).all()
+        # 同名表跨 schema(default 源合法并存 tenant_<key> 与 public)时
+        # 字典后写覆盖:排序保证 public 先读、租户 schema 后写胜出——
+        # 标签取「本租户」注释,方向确定(R1 实锤:无序覆盖方向随计划漂移)
+        return {
+            str(r.table_name): dict(r.columns_comment or {})
             for r in rows
         }
 
@@ -449,7 +510,7 @@ class RagRepository:
         """default=本库 [tenant_<key>, public];动态源=resolver 校验+动态池限
         [default_schema](业务库连接是基础设施职责,归仓储层)。"""
         if datasource_key == "default":
-            return await _introspect_all_on(self._s, [f"tenant_{tenant_key}", "public"])
+            return await _introspect_all_on(self._s, allowed_schemas_for(tenant_key, None))
         try:
             row, plain = await resolve_for_read(
                 self._s, tenant_id=tenant_id, datasource_key=datasource_key
@@ -468,7 +529,59 @@ class RagRepository:
             ),
         )
         async with engine.connect() as conn:
-            return await _introspect_all_on(conn, [row.default_schema])
+            return await _introspect_all_on(
+                conn, allowed_schemas_for(tenant_key, row.default_schema)
+            )
+
+    async def allowed_schemas(
+        self, *, tenant_id: str, tenant_key: str, datasource_key: str
+    ) -> list[str]:
+        """可扫描 schema 集合(040:枚举端点/上传存在性闸,与内省同源同口径)。
+
+        动态源经 resolver 校验;resolver 的 DatasourceInvalid(resolver 模块
+        自有同名类,与 rag 领域错误非一类)在此翻译为 rag 领域错误出港,
+        调用方只认域错误——与 introspect_all 的 LookupError 翻译同哲学。
+        """
+        if datasource_key == "default":
+            return allowed_schemas_for(tenant_key, None)
+        try:
+            row, _plain = await resolve_for_read(
+                self._s, tenant_id=tenant_id, datasource_key=datasource_key
+            )
+        except DatasourceInvalid:
+            raise RagDatasourceInvalid(datasource_key) from None
+        return allowed_schemas_for(tenant_key, row.default_schema)
+
+    async def knowledge_table_exists(
+        self, *, tenant_id: str, datasource_key: str, schema_table: str
+    ) -> bool:
+        """知识条目表存在性(040:semantic 域手工关系闸经端口消费)。
+
+        schema_table 形态「schema.table」(rsplit 拆解——表名不含点,
+        PG 未加引号标识符语义);形态不合法即不存在。"""
+        schema_name, sep, table_name = schema_table.rpartition(".")
+        if not sep or not schema_name or not table_name:
+            return False
+        row = (
+            await self._s.execute(
+                text(
+                    "SELECT 1 FROM rag.table_descriptions"
+                    " WHERE tenant_id = :t AND datasource_key = :d"
+                    " AND schema_name = :sn AND table_name = :tn LIMIT 1"
+                ),
+                {"t": tenant_id, "d": datasource_key, "sn": schema_name, "tn": table_name},
+            )
+        ).scalar_one_or_none()
+        return row is not None
+
+
+def allowed_schemas_for(tenant_key: str, default_schema: str | None) -> list[str]:
+    """可扫描 schema 集合唯一计算点(040):default 源=路由约定
+    [tenant_<key>, public](物理 schema 随租户首查创建,枚举先行于建表合法);
+    动态源=[default_schema]。内省/枚举端点/上传校验三方共用,禁另起口径。"""
+    if default_schema is None:
+        return [f"tenant_{tenant_key}", "public"]
+    return [default_schema]
 
 
 async def _introspect_all_on(

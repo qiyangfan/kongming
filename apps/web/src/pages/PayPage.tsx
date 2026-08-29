@@ -75,7 +75,7 @@ export default function PayPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">收银台</h1>
         <Badge variant="outline" className="font-normal">
-          Mock 模拟环境 · 无真实资金
+          模拟环境 · 无真实资金
         </Badge>
       </div>
 
@@ -103,7 +103,7 @@ export default function PayPage() {
                 <QrCode className="size-24 text-muted-foreground" aria-hidden />
               </div>
               <p className="text-xs text-muted-foreground">
-                这是模拟收款码——点击下方按钮模拟支付结果,与真实通道回调同链路。
+                这是模拟收款码,仅作演示。点击下方按钮可模拟支付成功或失败。
               </p>
               <div className="flex justify-center gap-2">
                 <Button
@@ -167,7 +167,7 @@ export default function PayPage() {
 
       <p className="text-center text-sm">
         <Link to="/portal" className="text-primary underline-offset-4 hover:underline">
-          返回开发者门户
+          返回门户
         </Link>
       </p>
     </div>

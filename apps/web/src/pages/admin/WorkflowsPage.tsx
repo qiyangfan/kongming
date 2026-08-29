@@ -31,6 +31,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FieldLabel } from "@/components/field-label";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusSwitch } from "@/components/status-switch";
@@ -197,11 +198,8 @@ export default function WorkflowsPage() {
         </Button>
       </div>
       <p className="text-sm text-muted-foreground">
-        JSON DAG 编排:节点类型 sql/http/condition/loop/transform/agent,依赖经
-        depends_on 声明;同名再保存即新版本(旧版本冻结)。SQL 走只读防御、
-        HTTP 有 SSRF 防护、agent 以运行者权限执行。引用写法
-        {"{{节点id.outputs.字段}}"}(不支持数组下标;loop 的 items_ref 填裸路径,
-        不带大括号)。
+        用 JSON 定义多步骤自动任务:可编排 SQL 查询、HTTP 调用、条件分支、循环与 AI
+        步骤;同名保存自动产生新版本,旧版本冻结。
       </p>
 
       <div className="rounded-lg border">
@@ -325,10 +323,12 @@ export default function WorkflowsPage() {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>
-              {editing?.wfKey ? `编辑工作流(保存即新版本)` : "新建工作流"}
+              {editing?.wfKey ? "编辑工作流" : "新建工作流"}
             </DialogTitle>
             <DialogDescription>
-              同名标识再保存自动产生新版本;旧版本冻结不可改。
+              同名标识再保存自动产生新版本;旧版本冻结不可改。节点输出用
+              {"{{节点id.outputs.字段}}"} 引用(不支持数组下标;loop 的 items_ref
+              填不带大括号的裸路径)。
             </DialogDescription>
           </DialogHeader>
           {editing && (
@@ -341,7 +341,12 @@ export default function WorkflowsPage() {
             >
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="wf-key">标识(wf_key)</Label>
+                  <FieldLabel
+                    htmlFor="wf-key"
+                    help="小写字母开头;同名标识保存即产生新版本,创建后不可改。"
+                  >
+                    标识
+                  </FieldLabel>
                   <Input
                     id="wf-key"
                     value={editing.wfKey}

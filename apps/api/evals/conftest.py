@@ -3,7 +3,8 @@
 评估器以进程外工具形态运行(eval spec「评估运行形态」):
 - 生成侧:登录 → POST /chat/query(persist=false,不落业务数据),完整链路
   (认证→租户→RAG 召回→生成→执行→洞察)与真实用户同路径;
-- gold 侧:asyncpg 直连目标库(显式 schema 限定,同控制面 DSN);
+- gold 侧:asyncpg 直连目标库(显式 schema 限定,同控制面 DSN;
+  动态数据源题按 gold_database 直连其独立业务库);
 - 比对:matchers 严格/宽松双分(匹配器单测进默认门禁,本文件只做编排)。
 
 运行(需评估环境:双进程+示例数据集+LLM 凭证):
@@ -16,6 +17,7 @@
 """
 
 import os
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -122,15 +124,21 @@ async def call_chat(
 # ============ gold 直连执行 ============
 
 
-def _pg_dsn() -> str:
+def _pg_dsn(database: str | None = None) -> str:
     """gold 直连 DSN:KM_EVAL_PG_DSN 显式优先(独立 gold 库场景),缺省自
-    控制面 DSN(settings)派生 → asyncpg 形态(剥 sqlalchemy +asyncpg 前缀)。"""
+    控制面 DSN(settings)派生 → asyncpg 形态(剥 sqlalchemy +asyncpg 前缀)。
+    database 非 None 时替换 URL 库段——动态数据源题 gold 直连其独立业务库
+    (如 sakila_ext),与生成侧动态路由(search_path=default_schema)同一落点。"""
     url = os.getenv("KM_EVAL_PG_DSN") or _control_plane_dsn()
-    if url.startswith("postgresql+asyncpg://"):
-        return "postgresql://" + url[len("postgresql+asyncpg://"):]
-    if url.startswith("postgresql://"):
-        return url
-    raise pytest.UsageError(f"不识别的 DSN 形态: {url[:40]}…")
+    dsn = url
+    if dsn.startswith("postgresql+asyncpg://"):
+        dsn = "postgresql://" + dsn[len("postgresql+asyncpg://"):]
+    elif not dsn.startswith("postgresql://"):
+        raise pytest.UsageError(f"不识别的 DSN 形态: {url[:40]}…")
+    if database is not None:
+        parts = urllib.parse.urlsplit(dsn)
+        dsn = urllib.parse.urlunsplit(parts._replace(path=f"/{database}"))
+    return dsn
 
 
 def _control_plane_dsn() -> str:
@@ -139,9 +147,12 @@ def _control_plane_dsn() -> str:
     return get_settings().database_url
 
 
-async def exec_sql(sql: str) -> tuple[list[str], list[tuple[Any, ...]]]:
-    """直连执行(gold_sql;asyncpg 原生类型,匹配器 canon_cell 归一化)。"""
-    conn = await asyncpg.connect(_pg_dsn())
+async def exec_sql(
+    sql: str, database: str | None = None
+) -> tuple[list[str], list[tuple[Any, ...]]]:
+    """直连执行(gold_sql;asyncpg 原生类型,匹配器 canon_cell 归一化)。
+    database=用例级 gold_database 字段(动态源独立库直连),None=控制面库。"""
+    conn = await asyncpg.connect(_pg_dsn(database))
     try:
         stmt = await conn.prepare(sql)
         cols = [a.name for a in stmt.get_attributes()]

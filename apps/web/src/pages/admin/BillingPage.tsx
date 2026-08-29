@@ -84,7 +84,7 @@ function parseNonNegInt(raw: string): number | null {
 
 /** 套餐数值行内校验错误文案(创建/编辑共用) */
 const PLAN_NUM_ERROR =
-  "额度须为非负整数(≤2147483647);单价须为非负金额,最多 3 位小数";
+  "额度须为 0 到 21 亿之间的整数;单价须为非负金额,最多 3 位小数";
 
 /** 单价以「元」录入(精度 0.001 元=1 厘),提交转整数厘;亚厘四舍五入 */
 function parseNonNegYuanLi(raw: string): number | null {
@@ -246,8 +246,8 @@ export default function BillingPage() {
       if (limit === null || warn === null) {
         throw new Error(
           policyForm.dimension === "COST"
-            ? "上限须为非负金额(最多 3 位小数);预警须为非负整数(≤2147483647)"
-            : "上限/预警须为非负整数(≤2147483647)",
+            ? "上限须为非负金额(最多 3 位小数);预警须为 0 到 21 亿的整数"
+            : "上限/预警须为 0 到 21 亿的整数",
         );
       }
       return upsertPolicy({
@@ -309,7 +309,7 @@ export default function BillingPage() {
               <TableRow>
                 <TableHead>标识</TableHead>
                 <TableHead>名称</TableHead>
-                <TableHead>月 token</TableHead>
+                <TableHead>月 Token</TableHead>
                 <TableHead>月调用</TableHead>
                 <TableHead>计费单价</TableHead>
                 <TableHead className="text-right">操作</TableHead>
@@ -330,7 +330,12 @@ export default function BillingPage() {
                   <TableCell>{p.monthly_tokens.toLocaleString()}</TableCell>
                   <TableCell>{p.monthly_calls.toLocaleString()}</TableCell>
                   <TableCell>
-                    ¥{li2yuan(p.price_per_mtok)}/千 token + ¥{li2yuan(p.price_per_call)}/次
+                    <div className="space-y-0.5">
+                      <p>每千 Token ¥{li2yuan(p.price_per_mtok)}</p>
+                      <p className="text-muted-foreground">
+                        每次调用 ¥{li2yuan(p.price_per_call)}
+                      </p>
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
@@ -393,8 +398,8 @@ export default function BillingPage() {
           <Input
             value={planForm.monthly_tokens}
             onChange={(e) => setPlanForm({ ...planForm, monthly_tokens: e.target.value })}
-            placeholder="月 token(0 不限)"
-            aria-label="月 token"
+            placeholder="月 Token(0 不限)"
+            aria-label="月 Token"
           />
           <Input
             value={planForm.monthly_calls}
@@ -405,8 +410,8 @@ export default function BillingPage() {
           <Input
             value={planForm.price_per_mtok}
             onChange={(e) => setPlanForm({ ...planForm, price_per_mtok: e.target.value })}
-            placeholder="每千 token 单价(元,如 0.002)"
-            aria-label="千 token 单价"
+            placeholder="每千 Token 单价(元,如 0.002)"
+            aria-label="千 Token 单价"
           />
           <div className="flex gap-2">
             <Input
@@ -448,8 +453,8 @@ export default function BillingPage() {
                 value={tenantPlan.data?.id ?? undefined}
                 onValueChange={(v) => bind.mutate(v === "_none" ? null : v)}
               >
-                <SelectTrigger className="w-40" aria-label="绑套餐">
-                  <SelectValue placeholder="绑套餐…" />
+                <SelectTrigger className="w-40" aria-label="选择套餐">
+                  <SelectValue placeholder="选择套餐…" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="_none">解绑</SelectItem>
@@ -495,7 +500,7 @@ export default function BillingPage() {
                         <TableCell className="text-xs">
                           {p.scope === "BOT" ? (
                             <Badge variant="outline" className="font-normal">
-                              BOT:{(bots.data ?? []).find((b) => b.id === p.scope_ref)?.bot_key ?? p.scope_ref?.slice(0, 8)}
+                              助手:{(bots.data ?? []).find((b) => b.id === p.scope_ref)?.bot_key ?? p.scope_ref?.slice(0, 8)}
                             </Badge>
                           ) : (
                             <Badge variant="secondary" className="font-normal">租户</Badge>
@@ -546,19 +551,19 @@ export default function BillingPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="TENANT">租户</SelectItem>
-                    <SelectItem value="BOT">BOT</SelectItem>
+                    <SelectItem value="BOT">助手</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               {policyForm.scope === "BOT" && (
                 <div className="space-y-1">
-                  <Label className="text-xs">Bot</Label>
+                  <Label className="text-xs">助手</Label>
                   <Select
                     value={policyForm.scope_ref}
                     onValueChange={(v) => setPolicyForm({ ...policyForm, scope_ref: v })}
                   >
-                    <SelectTrigger className="w-40" aria-label="选择 Bot">
-                      <SelectValue placeholder="选择 Bot" />
+                    <SelectTrigger className="w-40" aria-label="选择助手">
+                      <SelectValue placeholder="选择助手" />
                     </SelectTrigger>
                     <SelectContent>
                       {(bots.data ?? []).map((b) => (
@@ -737,11 +742,11 @@ export default function BillingPage() {
             />
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <Label className="text-xs">月 token(0 不限)</Label>
+                <Label className="text-xs">月 Token(0 不限)</Label>
                 <Input
                   value={editForm.monthly_tokens}
                   onChange={(e) => setEditForm({ ...editForm, monthly_tokens: e.target.value })}
-                  aria-label="月 token"
+                  aria-label="月 Token"
                 />
               </div>
               <div>
@@ -753,11 +758,11 @@ export default function BillingPage() {
                 />
               </div>
               <div>
-                <Label className="text-xs">千 token 单价(元)</Label>
+                <Label className="text-xs">千 Token 单价(元)</Label>
                 <Input
                   value={editForm.price_per_mtok}
                   onChange={(e) => setEditForm({ ...editForm, price_per_mtok: e.target.value })}
-                  aria-label="千 token 单价"
+                  aria-label="千 Token 单价"
                 />
               </div>
               <div>

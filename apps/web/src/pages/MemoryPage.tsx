@@ -130,7 +130,7 @@ export default function MemoryPage() {
             我的记忆
           </h2>
           <p className="text-sm text-muted-foreground">
-            孔明跨会话记住的偏好与事实;隐式记忆(系统自动沉淀)可编辑确认或删除。
+            孔明在对话中记住的偏好与事实;「隐式记忆」为系统自动沉淀,可编辑确认或删除。
           </p>
         </div>
         <Button size="sm" variant="outline" onClick={doExport}>
@@ -228,7 +228,7 @@ export default function MemoryPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>编辑记忆</DialogTitle>
-            <DialogDescription>保存即视为确认(隐式记忆转为已认可),并重新计算召回向量。</DialogDescription>
+            <DialogDescription>保存即视为确认,这条隐式记忆将转为「已认可」。</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
@@ -279,7 +279,7 @@ export default function MemoryPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>删除这条记忆?</AlertDialogTitle>
             <AlertDialogDescription>
-              「{removing?.content}」删除后不可恢复,后续问答不再召回。
+              「{removing?.content}」删除后不可恢复,孔明后续回答不再参考这条记忆。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -339,7 +339,7 @@ function TeamMemoryWrite() {
           id="tm-content"
           value={content}
           onChange={(e) => setContent(e.target.value)}
-          placeholder="偏好/口径/约定…"
+          placeholder="偏好/规则/约定…"
           maxLength={500}
         />
       </div>

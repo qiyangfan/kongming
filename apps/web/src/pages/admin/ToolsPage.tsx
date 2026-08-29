@@ -81,7 +81,7 @@ export default function ToolsPage() {
       <div>
         <h2 className="text-lg font-semibold">工具</h2>
         <p className="text-sm text-muted-foreground">
-          ReAct 内核可调用的内置工具注册表,与每次工具执行的审计台账。
+          AI 可使用的内置工具清单,以及每次工具执行的审计记录。
         </p>
       </div>
 

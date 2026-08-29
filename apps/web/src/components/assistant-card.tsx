@@ -44,19 +44,29 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 
-/* 生成类型的 result 字段皆可选:本地归一化收窄 */
-function ResultTable({ columns, rows }: { columns: string[]; rows: unknown[][] }) {
+/* 生成类型的 result 字段皆可选:本地归一化收窄。
+   labels=呈现层列标签(041 双轨):表头显示业务名,悬停 title 保留物理列名。 */
+function ResultTable({
+  columns,
+  rows,
+  labels,
+}: {
+  columns: string[];
+  rows: unknown[][];
+  labels?: string[];
+}) {
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-sm">
         <thead className="bg-muted/50">
           <tr>
-            {columns.map((c) => (
+            {columns.map((c, i) => (
               <th
-                key={c}
+                key={`${c}-${i}`}
+                title={c}
                 className="px-3 py-2 text-left font-medium whitespace-nowrap text-muted-foreground"
               >
-                {c}
+                {labels?.[i] || c}
               </th>
             ))}
           </tr>
@@ -99,6 +109,7 @@ function normalize(msg: SessionMessageOut): {
   stats: Record<string, unknown>;
   chart: { type: string; x: string | null; y: string | null };
   artifacts: ArtifactOut[];
+  columnLabels: string[];
 } {
   const r = msg.result;
   return {
@@ -112,6 +123,7 @@ function normalize(msg: SessionMessageOut): {
       y: r?.chart?.y ?? null,
     },
     artifacts: r?.artifacts ?? [],
+    columnLabels: r?.column_labels ?? [],
   };
 }
 
@@ -122,7 +134,7 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
         <ShieldOff className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
         <div>
           <p className="font-medium text-foreground">
-            {msg.error ?? "该查询已被安全策略拦下"}
+            {msg.error ?? "此问被安全护栏拦下"}
           </p>
           {msg.summary && <p className="mt-1 text-muted-foreground">{msg.summary}</p>}
         </div>
@@ -141,7 +153,11 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
             已产出结果集作参考附带(EXPLAIN 入口同步可达) */}
         {partial.columns.length > 0 && (
           <>
-            <ResultTable columns={partial.columns} rows={partial.rows} />
+            <ResultTable
+              columns={partial.columns}
+              rows={partial.rows}
+              labels={partial.columnLabels}
+            />
             {msg.sql && msg.id && <ExplainCollapsible messageId={msg.id} />}
           </>
         )}
@@ -161,7 +177,7 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
         <DocumentCard content={docArt.content} />
       ) : (
         msg.summary && (
-          <p className="px-1 text-[15px] leading-relaxed text-foreground">{msg.summary}</p>
+          <p className="px-1 text-md leading-relaxed text-foreground">{msg.summary}</p>
         )
       )}
 
@@ -180,11 +196,19 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
       )}
 
       {result.columns.length > 0 && (
-        <ResultTable columns={result.columns} rows={result.rows} />
+        <ResultTable
+          columns={result.columns}
+          rows={result.rows}
+          labels={result.columnLabels}
+        />
       )}
 
       {result.columns.length > 0 && (
-        <ExportButtons columns={result.columns} rows={result.rows} />
+        <ExportButtons
+          columns={result.columns}
+          rows={result.rows}
+          labels={result.columnLabels}
+        />
       )}
 
       {sqlArt ? (
@@ -426,8 +450,17 @@ function FeedbackDialog({
   );
 }
 
-/* 结果导出(010):所见即所导(传展示中的 columns+rows);失败行内提示不炸卡片 */
-function ExportButtons({ columns, rows }: { columns: string[]; rows: unknown[][] }) {
+/* 结果导出(010):所见即所导(传展示中的 columns+rows);失败行内提示不炸卡片。
+   041:表头列按呈现标签合成(labels 优先回退物理名),与表格所见一致。 */
+function ExportButtons({
+  columns,
+  rows,
+  labels,
+}: {
+  columns: string[];
+  rows: unknown[][];
+  labels?: string[];
+}) {
   const [busy, setBusy] = useState<"csv" | "xlsx" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -436,7 +469,8 @@ function ExportButtons({ columns, rows }: { columns: string[]; rows: unknown[][]
     setBusy(format);
     setError(null);
     try {
-      await exportResult(format, columns, rows);
+      const shown = columns.map((c, i) => labels?.[i] || c);
+      await exportResult(format, shown, rows);
     } catch (err) {
       setError(err instanceof Error ? err.message : "导出未成,请稍后再试。");
     }

@@ -45,6 +45,8 @@ async def _biz() -> AsyncIterator[None]:
                 " id uuid PRIMARY KEY)"
             )
         )
+        # 注:身份表(含租户)由 conftest._clean 用例级 TRUNCATE(知识条目经
+        # tenant FK 级联同清)——租户/知识条目播种在 _admin 内逐用例完成。
     yield
     async with get_engine().begin() as conn:
         await conn.execute(text(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE'))  # noqa: S608
@@ -76,6 +78,21 @@ async def _admin(client: AsyncClient, s: AsyncSession) -> str:
         ),
         {"u": str(admin_id), "t": str(tid)},
     )
+    # 040:关系存在性闸的候选源——为 sem 租户播三表知识条目(幂等;
+    # 引用知识条目外的表在写边界被拒,故引用表须先有条目)
+    for tb in ("orders", "customers", "orphan"):
+        await s.execute(
+            text(
+                "INSERT INTO rag.table_descriptions"
+                " (id, tenant_id, datasource_key, schema_name, table_name,"
+                "  table_comment, columns_comment, source_type)"
+                " VALUES (gen_random_uuid(), :t, 'default', :sn, :tb, '说明', '{}',"
+                "         'MANUAL_UPLOAD')"
+                " ON CONFLICT (tenant_id, datasource_key, schema_name, table_name)"
+                " DO NOTHING"
+            ),
+            {"t": str(tid), "sn": SCHEMA, "tb": tb},
+        )
     await s.commit()
     return await _login(client, "admin", "admin123")
 
@@ -410,3 +427,38 @@ async def test_r1_m1_manual_takeover_flips_source(
         )
     ).one()
     assert row2.source == "manual"
+
+
+# ============ 040 手工关系存在性闸 ============
+
+
+async def test_manual_relation_unknown_table_400(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """引用知识条目外的表:400 RELATION_TABLE_UNKNOWN,不落库(写边界闸)。
+
+    拼错的表(schema.table)在召回 relations_hint 中永不命中,是静默死配置;
+    闸后错误在创建期即暴露。"""
+    token = await _admin(client, session)
+    headers = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "sem"}
+    r = await client.post(
+        "/system/semantic/relations",
+        headers=headers,
+        json={
+            "datasource_key": "default",
+            "source_table": f"{SCHEMA}.orders",
+            "target_table": f"{SCHEMA}.oders",  # 拼写缺 s:无知识条目
+            "join_keys": [{"left_col": "customer_id", "right_col": "id"}],
+        },
+    )
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "RELATION_TABLE_UNKNOWN"
+    n = (
+        await session.execute(
+            text(
+                "SELECT count(*) FROM rag.table_relations"
+                " WHERE target_table LIKE '%oders'"
+            )
+        )
+    ).scalar_one()
+    assert n == 0

@@ -10,12 +10,17 @@ export type UploadOut = components["schemas"]["UploadOut"];
 export type FetchOut = components["schemas"]["FetchOut"];
 export type ReindexOut = components["schemas"]["ReindexOut"];
 export type EditTableIn = components["schemas"]["EditTableIn"];
+export type SchemasOut = components["schemas"]["SchemasOut"];
 
 export const ragApi = {
   page: (page: number, size: number, datasourceKey: string) =>
     api.get<KnowledgePageOut>(
       `/system/rag/tables?page=${page}&size=${size}` +
         (datasourceKey ? `&datasource_key=${encodeURIComponent(datasourceKey)}` : ""),
+    ),
+  allowedSchemas: (datasourceKey: string) =>
+    api.get<SchemasOut>(
+      `/system/rag/schemas?datasource_key=${encodeURIComponent(datasourceKey)}`,
     ),
   upload: (file: File, datasourceKey: string, schemaName: string) => {
     const form = new FormData();

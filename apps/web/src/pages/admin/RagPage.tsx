@@ -49,12 +49,18 @@ import { datasourceApi } from "@/lib/datasource-api";
 import { api } from "@/lib/api";
 import { ragApi, type KnowledgeItemOut } from "@/lib/rag-api";
 import type { components } from "@/lib/api-types.gen";
-import { FileText, Loader2 as LoaderIcon, Trash2 as TrashIcon, Upload } from "lucide-react";
+import {
+  CircleHelp,
+  FileText,
+  Loader2 as LoaderIcon,
+  Trash2 as TrashIcon,
+  Upload,
+} from "lucide-react";
 
 const PAGE_SIZE = 10;
 
 const SOURCE_LABEL: Record<string, string> = {
-  INTROSPECTION: "内省",
+  INTROSPECTION: "自动扫描",
   AI_GENERATED: "AI 润色",
   MANUAL_UPLOAD: "人工上传",
   MANUAL_EDIT: "人工精修",
@@ -69,7 +75,7 @@ export default function RagPage() {
   const [page, setPage] = useState(1);
   const [dsFilter, setDsFilter] = useState("");
   const [actionDs, setActionDs] = useState("");
-  const [uploadSchema, setUploadSchema] = useState("public");
+  const [uploadSchema, setUploadSchema] = useState("");
   const [uploadDs, setUploadDs] = useState("default");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +91,20 @@ export default function RagPage() {
     queryKey: ["rag", "ds-options"],
     queryFn: datasourceApi.options,
   });
+
+  // 040:可扫描 schema 集合(上传表单候选源,随上传数据源联动)
+  const schemas = useQuery({
+    queryKey: ["rag", "schemas", uploadDs],
+    queryFn: () => ragApi.allowedSchemas(uploadDs),
+  });
+
+  // 已选 schema 不在新数据源集合(换源/集合变化)时回落到首项
+  useEffect(() => {
+    const list = schemas.data?.schemas;
+    if (list && list.length > 0 && !list.includes(uploadSchema)) {
+      setUploadSchema(list[0]);
+    }
+  }, [schemas.data, uploadSchema]);
 
   const list = useQuery({
     queryKey: ["rag", "tables", page, dsFilter],
@@ -103,7 +123,12 @@ export default function RagPage() {
       invalidate();
     },
     onError: (e: Error) => {
-      setError(`上传失败:${e.message}`);
+      // 040 写边界闸 detail 映射(黑话禁入用户文案)
+      const reason =
+        e.message === "SCHEMA_NOT_ALLOWED"
+          ? "schema 不在该数据源的可扫描集合"
+          : e.message;
+      setError(`上传失败:${reason}`);
       setNotice(null);
     },
   });
@@ -148,6 +173,7 @@ export default function RagPage() {
     onSuccess: (out) => {
       const parts = [`发现 ${out.found} 张表,已生成 ${out.enriched} 张的说明`];
       if (out.skipped > 0) parts.push(`${out.skipped} 张人工精修未覆盖`);
+      if (out.removed > 0) parts.push(`清理 ${out.removed} 条失效条目`);
       setNotice(`扫描完成:${parts.join(",")}`);
       setError(null);
       invalidate();
@@ -255,7 +281,24 @@ export default function RagPage() {
       )}
 
       <section className="rounded-lg border p-4 space-y-3">
-        <h2 className="text-sm font-medium">上传表说明文档</h2>
+        <div className="flex items-center gap-1">
+          <h2 className="text-sm font-medium">表说明</h2>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-5 text-muted-foreground hover:text-foreground"
+                aria-label="什么是表说明"
+              >
+                <CircleHelp className="size-3.5" aria-hidden />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-72">
+              {"教 AI 认识数据表——字段含义、业务别名、示例问题。可上传文档补充,或用「重建索引」自动扫描生成。"}
+            </TooltipContent>
+          </Tooltip>
+        </div>
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
             <Label htmlFor="rag-upload-ds">数据源</Label>
@@ -274,16 +317,57 @@ export default function RagPage() {
           </div>
           <div className="space-y-1">
             <Label htmlFor="rag-upload-schema">schema</Label>
-            <Input
-              id="rag-upload-schema"
+            {/* 040:自由输入改封闭集合选择框(候选=可扫描 schema,与扫描/上传闸同源) */}
+            <Select
               value={uploadSchema}
-              onChange={(e) => setUploadSchema(e.target.value)}
-              className="w-40"
-              placeholder="tenant_default"
-            />
+              onValueChange={setUploadSchema}
+              disabled={schemas.isPending || schemas.isError}
+            >
+              <SelectTrigger id="rag-upload-schema" className="w-40">
+                <SelectValue
+                  placeholder={
+                    schemas.isError
+                      ? "候选加载失败"
+                      : schemas.isPending
+                        ? "加载中…"
+                        : "选择 schema"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {(schemas.data?.schemas ?? []).map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {schemas.isError && (
+              <p className="text-xs text-destructive" role="alert">
+                schema 候选加载失败,请刷新重试
+              </p>
+            )}
           </div>
           <div className="space-y-1">
-            <Label htmlFor="rag-upload-file">文件(md/txt/pdf/docx,≤1MB/10MB)</Label>
+            <Label htmlFor="rag-upload-file" className="flex items-center gap-1">
+              文件(Markdown/TXT/PDF/Word)
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-5 text-muted-foreground hover:text-foreground"
+                    aria-label="支持的文件格式与大小限制"
+                  >
+                    <CircleHelp className="size-3.5" aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-72">
+                  支持 Markdown / TXT / PDF / Word 文档,文本类不超过 1MB,PDF 和
+                  Word 不超过 10MB。
+                </TooltipContent>
+              </Tooltip>
+            </Label>
             {/* 隐藏 file input=不可见管道元素(样式铁律豁免);Button 触发 */}
             <input
               ref={fileRef}
@@ -302,14 +386,16 @@ export default function RagPage() {
             <Button
               variant="outline"
               onClick={() => fileRef.current?.click()}
-              disabled={upload.isPending}
+              disabled={
+                upload.isPending || schemas.isPending || !uploadSchema
+              }
             >
               {upload.isPending ? "上传中…" : "选择文件并上传"}
             </Button>
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          文档按 `## 表名` 二级标题分块;同表重复上传覆盖更新。PDF/Word 解析为纯文本后走同链路。
+          上传后文档会按表格自动整理拆分;同一张表重复上传,新内容会覆盖旧内容。
         </p>
       </section>
 
@@ -516,8 +602,8 @@ export default function RagPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>删除知识条目?</AlertDialogTitle>
             <AlertDialogDescription>
-              将删除表 {deleteTarget?.schema_name}.{deleteTarget?.table_name} 的知识条目
-              (硬删,后续召回不再命中)。此操作不可撤销。
+              将删除表 {deleteTarget?.schema_name}.{deleteTarget?.table_name} 的知识条目,
+              删除后 AI 问答不再引用;此操作不可恢复。
             </AlertDialogDescription>
           </AlertDialogHeader>
           {remove.isError && (
@@ -544,7 +630,7 @@ export default function RagPage() {
             <AlertDialogTitle>重建索引?</AlertDialogTitle>
             <AlertDialogDescription>
               将清空数据源「{actionDs || "default"}」在该租户的全部表说明并重新扫描
-              (含 LLM 润色)——人工上传/精修的条目也会被清掉,回到自动生成基线。
+              (含 AI 润色)——人工上传/精修的条目也会被清掉,回到自动生成基线。
               大库耗时较长,请耐心等待。
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -613,7 +699,25 @@ function DocumentsSection({ datasource }: { datasource: string }) {
   return (
     <section className="rounded-lg border p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-medium">业务文档(政策/流程/口径)</h2>
+        <div className="flex items-center gap-1">
+          <h2 className="text-sm font-medium">知识文档</h2>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-5 text-muted-foreground hover:text-foreground"
+                aria-label="什么是知识文档"
+              >
+                <CircleHelp className="size-3.5" aria-hidden />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-72">
+              存放政策、流程、规范等资料,支持 Markdown / TXT / PDF /
+              Word。上传后用户问到相关内容,AI 直接按文档回答并标注出处,不查数据库。
+            </TooltipContent>
+          </Tooltip>
+        </div>
         <Button
           variant="outline"
           size="sm"
@@ -643,7 +747,7 @@ function DocumentsSection({ datasource }: { datasource: string }) {
           </div>
         ) : (docs.data?.length ?? 0) === 0 ? (
           <p className="py-4 text-center text-xs text-muted-foreground">
-            暂无业务文档——上传后知识型问题(是什么/政策/流程)将直接按文档回答
+            暂无文档——上传后,AI 遇到政策、流程类问题会直接按文档内容回答(标注出处)
           </p>
         ) : (
           docs.data?.map((d: DocItem) => (

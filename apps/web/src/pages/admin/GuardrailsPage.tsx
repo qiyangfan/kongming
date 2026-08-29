@@ -128,7 +128,7 @@ export default function GuardrailsPage() {
       <div>
         <h2 className="text-lg font-semibold">护栏</h2>
         <p className="text-sm text-muted-foreground">
-          prompt 安全护栏规则(输入 injection/PII、输出泄漏、工具意图)与触发审计台账。
+          AI 问答的安全防线:拦截诱导攻击、保护敏感信息、管控高危操作。可调整规则并查看触发记录。
         </p>
       </div>
 

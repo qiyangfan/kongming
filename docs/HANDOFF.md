@@ -9,15 +9,24 @@
 
 ## 当前状态(2026-08-29)
 
-- 001–039 + backlog-settlement 全部归档,**活动变更为零**;上游 41 域
-  全覆盖(nl2sql-data-platform 知识资产平移收官)。
+- 001–039 + backlog-settlement 归档后,041(呈现层列标签双轨)、
+  040×2(闭集输入闸 / web 主题切换,并行会话产出)、042(fetch-metadata
+  对账语义)已全部落地随批提交;**042 已归档**(specs 已同步);
+  `changes/` 余 040 两目录工件待其会话收口归档。上游 41 域全覆盖。
+- **待用户拍板(042 事故定性后立项)**:043 生成纪律——default 租户
+  知识未覆盖时 LLM 凭先验编表(实证:同题编 public.staff 连败 4 次)。
+  根因两处 prompt 缺口:`_EMPTY_HINT`「请基于问题尽力生成」教唆编表 +
+  `SQL_GEN_SYSTEM` 无「仅限所给表、未覆盖如实说明」纪律。方案四件:
+  空结构文案改如实说明 / 表范围纪律条 / 哨兵 NO_RELEVANT_TABLE 短路
+  (不执行不自愈)/ does-not-exist 自愈喂回附引导。落点 agent 面
+  prompts/nodes + chat 呈现兼容,测试先行。
 - **待用户裁决(039 评审期上报)**:`public.user_memory` 无 create_by 列
   →datascope SELF 降级不过滤→default 源可 SQL 读他人记忆;建议
   RESERVED_TABLE_NAMES 收编该表,裁决后终态化(进「挂账终态」节)。
 - 工作区/提交状态以 `git status` 与 `git log` 为唯一事实源
   (规约:文档不写提交哈希、不谈提交形态)。
 - **开放挂账=零**(backlog-settlement 终态化裁决,见「挂账终态」节)。
-- 下一棒:按需新域(用户/市场输入驱动)或部署域,无既定排期项。
+- 下一棒:043(已立项待拍板)或按需新域,无既定排期项。
 
 ## 新会话开工指引
 
@@ -63,9 +72,13 @@
    rental 16044/customer 599)与 olist(orders 99441/items 112650)两
    租户已注册绑定 admin;`tenant_default.goods` 小表 4 行 + smoke-self
    用户(SELF 域,密码 `Smoke#2026`)+ `sys_datasource` 行 sakila_dyn
-   (同实例异 schema 动态源)+ 5 个联邦账号(漆阳帆-dingtalk 等)——
-   均为回归活数据。示例数据源文件 `.example-data/`(已 gitignore),
-   装载管线 `infra/example-data/load.sh`(幂等)。
+   (同实例**异库**动态源,指向独立库 `sakila_ext`——外部业务库形态,
+   不复用 tenant_sakila 租户 schema;装载随 load.sh 第 6 步)+ 5 个联邦
+   账号(漆阳帆-dingtalk 等)——均为回归活数据。示例数据源文件
+   `.example-data/`(已 gitignore),装载管线 `infra/example-data/load.sh`
+   (幂等)。存量环境 sakila_dyn 仍指旧形态(同库 tenant_sakila)的,
+   手工一行迁到新落点:`UPDATE public.sys_datasource SET database='sakila_ext',
+   default_schema='public' WHERE datasource_key='sakila_dyn';`(密码不变)。
 9. 企微联调:ngrok 免费域名与其可信域名校验不兼容;用 cloudflared 快速
    隧道或正式域名;应用可信 IP 白名单随家宽漂移重配。
 
@@ -137,6 +150,12 @@ zhparser、知识库团队归属(出处 032①)。
 流程与门禁:
 - make check 后台跑必须看 **make-exit 行**(包装 shell 的 exit code 是
   最后一条命令的,曾有整库迁移炸了仍假绿的实证)。
+- **共享测试库并行 pytest 互锁**:两个 pytest 同时跑会零 CPU 挂死
+  (非卡测试)——先停自己那份错峰重跑判归属;单挂用例先单独重跑再定性。
+- **知识层事故定性先核租户/数据源维度**:default 源是共享路径(各租户
+  各自登记同 key 知识),按 datasource_key 查到的行未必属于事发租户;
+  042 曾据此误判「残留毒知识」两轮修正——真实根因在生成层(LLM 凭
+  先验编表),rag 召回隔离本身无恙。
 - **勿跑 ruff format**(全仓非 format 管理,误跑产生海量格式噪音)。
 - 测试模块真建只读池的,teardown 必须 `dispose_read_engines()`(池残留
   污染后续模块断言);测试 override 禁裸开 get_sessionmaker(耗尽主池)。

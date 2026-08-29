@@ -51,7 +51,7 @@ import {
 
 const DATA_SCOPES: { value: DataScopeValue; label: string }[] = [
   { value: "ALL", label: "全部数据" },
-  { value: "CUSTOM", label: "自定义(预留)" },
+  { value: "CUSTOM", label: "自定义(暂未开放)" },
   { value: "DEPT_AND_BELOW", label: "本部门及以下" },
   { value: "DEPT", label: "仅本部门" },
   { value: "SELF", label: "仅本人" },
@@ -59,8 +59,8 @@ const DATA_SCOPES: { value: DataScopeValue; label: string }[] = [
 
 const SQL_SCOPES: { value: SqlScopeValue; label: string }[] = [
   { value: "SELECT_ONLY", label: "只读查询" },
-  { value: "READ_DDL", label: "只读+DDL" },
-  { value: "DML_DDL", label: "读写+DDL" },
+  { value: "READ_DDL", label: "只读+可改表结构" },
+  { value: "DML_DDL", label: "可读写+改表结构" },
 ];
 
 type RoleForm = {
@@ -424,7 +424,7 @@ export default function RolesPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>删除角色 {deleting?.role_key}?</AlertDialogTitle>
             <AlertDialogDescription>
-              仍绑定未软删用户的角色会被拒绝;删除后其权限绑定一并清除。
+              仍有账号在使用的角色无法删除;删除后其权限配置一并清除。
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteError && (

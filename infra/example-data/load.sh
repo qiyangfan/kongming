@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # 示例数据集装载(sakila + olist)→ Kongming dev 库。
+# sakila 装两份:tenant_sakila schema(租户路径)+ 独立库 sakila_ext
+# (动态数据源 sakila_dyn 的数据体,外部业务库形态——不复用租户 schema,
+#  避免同一份数据出现"工作空间 + 动态源"双入口)。
 # 幂等:已装载则跳过数据(注释/租户注册可重放)。
 # 用法:infra/example-data/load.sh(需 kongming-postgres-1 容器在跑)
 set -euo pipefail
@@ -12,7 +15,7 @@ PSQL=(podman exec -i "$CT" psql -U kongming -d kongming -v ON_ERROR_STOP=1 -q)
 [ -d "$DATA/sakila" ] || { echo "缺 $DATA/sakila"; exit 1; }
 [ -d "$DATA/olist" ] || { echo "缺 $DATA/olist"; exit 1; }
 
-echo "== 1/5 sakila schema → tenant_sakila"
+echo "== 1/6 sakila schema → tenant_sakila"
 sakila_tables=$("${PSQL[@]}" -tA -c \
   "SELECT count(*) FROM information_schema.tables
    WHERE table_schema='tenant_sakila' AND table_type IN ('BASE TABLE','VIEW')")
@@ -33,14 +36,14 @@ fi
 
 sakila_rows=$("${PSQL[@]}" -tA -c "SELECT count(*) FROM tenant_sakila.film")
 if [ "$sakila_rows" = "0" ]; then
-  echo "== 2/5 sakila 数据(231k 行 INSERT,约一两分钟)"
+  echo "== 2/6 sakila 数据(231k 行 INSERT,约一两分钟)"
   sed -e 's/SET search_path = public, pg_catalog;/SET search_path = tenant_sakila, pg_catalog;/' \
       "$DATA/sakila/postgres-sakila-insert-data.sql" | "${PSQL[@]}"
 else
-  echo "== 2/5 sakila 数据已存在(film=$sakila_rows 行),跳过"
+  echo "== 2/6 sakila 数据已存在(film=$sakila_rows 行),跳过"
 fi
 
-echo "== 3/5 olist 建表 + COPY"
+echo "== 3/6 olist 建表 + COPY"
 "${PSQL[@]}" -c "CREATE SCHEMA IF NOT EXISTS tenant_olist"
 "${PSQL[@]}" -c "SET search_path = tenant_olist" -f - < "$ROOT/infra/example-data/olist-schema.sql"
 # 文件名 → 表名
@@ -67,10 +70,10 @@ for pair in "${pairs[@]}"; do
     < "$DATA/olist/$csv"
 done
 
-echo "== 4/5 中文注释(两租户)"
+echo "== 4/6 中文注释(两租户)"
 "${PSQL[@]}" -f - < "$ROOT/infra/example-data/comments.sql"
 
-echo "== 5/5 租户注册 + admin 绑定"
+echo "== 5/6 租户注册 + admin 绑定"
 "${PSQL[@]}" <<'SQL'
 INSERT INTO public.sys_tenant (id, tenant_key, tenant_name, status)
 SELECT gen_random_uuid(), k, n, 'ACTIVE'
@@ -81,6 +84,34 @@ SELECT u.id, t.id FROM public.sys_user u, public.sys_tenant t
 WHERE u.username = 'admin' AND t.tenant_key IN ('sakila', 'olist')
 ON CONFLICT DO NOTHING;
 SQL
+
+echo "== 6/6 sakila → 独立库 sakila_ext(动态源 sakila_dyn 数据体,外部库形态)"
+ext_exists=$("${PSQL[@]}" -tA -c "SELECT count(*) FROM pg_database WHERE datname='sakila_ext'")
+if [ "$ext_exists" = "0" ]; then
+  "${PSQL[@]}" -c "CREATE DATABASE sakila_ext OWNER kongming"
+fi
+PSQL_EXT=(podman exec -i "$CT" psql -U kongming -d sakila_ext -v ON_ERROR_STOP=1 -q)
+ext_tables=$("${PSQL_EXT[@]}" -tA -c \
+  "SELECT count(*) FROM information_schema.tables
+   WHERE table_schema='public' AND table_type IN ('BASE TABLE','VIEW')")
+if [ "$ext_tables" -ge 21 ]; then
+  echo "    sakila_ext 已有 $ext_tables 个对象,schema 段跳过"
+else
+  # 外部库原生落在 public schema:search_path 维持 dump 原样,仅剥超管专属语句
+  # (OWNER/LANGUAGE/GRANT/REVOKE);public schema 注释保留(独立业务库语义成立)
+  sed -e '/OWNER TO postgres;/d' \
+      -e '/PROCEDURAL LANGUAGE/d' \
+      -e '/^GRANT /d' \
+      -e '/^REVOKE /d' \
+      "$DATA/sakila/postgres-sakila-schema.sql" | "${PSQL_EXT[@]}"
+fi
+ext_rows=$("${PSQL_EXT[@]}" -tA -c "SELECT count(*) FROM public.film")
+if [ "$ext_rows" = "0" ]; then
+  echo "==    sakila_ext 数据(231k 行 INSERT,约一两分钟)"
+  "${PSQL_EXT[@]}" < "$DATA/sakila/postgres-sakila-insert-data.sql"
+else
+  echo "    sakila_ext 数据已存在(film=$ext_rows 行),跳过"
+fi
 
 echo "完成。行数速览:"
 "${PSQL[@]}" -tA -c "
@@ -100,3 +131,8 @@ public_leak=$("${PSQL[@]}" -tA -c \
 [ "$sakila_tables" -ge 21 ] || { echo "FAIL: tenant_sakila 仅 $sakila_tables 个对象"; exit 1; }
 [ "$public_leak" = "0" ] || { echo "FAIL: sakila 表漏进 public($public_leak 张)"; exit 1; }
 echo "OK: tenant_sakila $sakila_tables 个对象,public 零泄漏"
+ext_tables=$("${PSQL_EXT[@]}" -tA -c \
+  "SELECT count(*) FROM information_schema.tables
+   WHERE table_schema='public' AND table_type IN ('BASE TABLE','VIEW')")
+[ "$ext_tables" -ge 21 ] || { echo "FAIL: sakila_ext 仅 $ext_tables 个对象"; exit 1; }
+echo "OK: sakila_ext $ext_tables 个对象(独立库)"

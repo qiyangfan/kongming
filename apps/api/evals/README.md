@@ -45,6 +45,7 @@ podman exec kongming-redis-1 redis-cli --scan --pattern 'km:ragctx:*' | xargs -r
 
 用例字段:`id`(tenant 前缀推断租户)/`question`/`gold_sql`/
 `expected_tables`/`category`;可选 `tenant`/`datasource_key`(动态路径)/
+`gold_database`(gold 直连独立业务库,动态源题用)/
 `expect_reject`(预期拒绝,无 gold_sql)/`smoke`。
 
 ## gold_sql 编写规范(新用例必守)

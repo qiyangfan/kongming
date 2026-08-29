@@ -20,6 +20,7 @@ from kongming.rag.models import (
     IntrospectedTable,
     KnowledgeEntry,
     RagContext,
+    SchemaNotAllowed,
     TableBlock,
     build_embedding_text,
     build_history_sql,
@@ -40,6 +41,7 @@ class FetchResult:
     found: int
     enriched: int
     skipped: int
+    removed: int = 0  # 042:对账删除的扫描集外自动来源行数
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,7 @@ class RagService:
         *,
         actor_id: str,
         tenant_id: str,
+        tenant_key: str,
         datasource_key: str,
         schema_name: str,
         blocks: list[TableBlock],
@@ -95,9 +98,16 @@ class RagService:
         """解析后的表块批量落库(MANUAL_UPLOAD;人工显式操作=显式覆盖,不受优先级限;
         alias 例外——parser 无别名语法,清空非用户显式意图,upsert 只补空不改非空)。"""
         await self._require_usable_datasource(tenant_id, datasource_key)
+        # 040 写边界闸:语法合法 ≠ 集合成员,越界 schema 的条目永不命中召回,
+        # 错误会后置到提问期——存在性校验先于 embedding 等贵活
+        allowed = await self._repo.allowed_schemas(
+            tenant_id=tenant_id, tenant_key=tenant_key, datasource_key=datasource_key
+        )
+        if schema_name not in allowed:
+            raise SchemaNotAllowed(schema_name)
         # 审查循环 F1:embedding 文本须以「生效别名」参与(与 alias 列/tsv 同源
         # ——upsert 保留既有非空 alias 时,无别名文本的新向量会使别名向量召回
-        # 静默退化);与 _ingest 同款预读
+        # 静默退化);与 _ingest 同款预读,042 二元键只读本 schema 同名表
         existing = await self._repo.list_source_and_alias(
             tenant_id=tenant_id, datasource_key=datasource_key
         )
@@ -107,7 +117,7 @@ class RagService:
                     b.table_name,
                     b.table_comment,
                     b.columns_comment,
-                    alias=(existing.get(b.table_name, ("", ""))[1] or b.alias),
+                    alias=(existing.get((schema_name, b.table_name), ("", ""))[1] or b.alias),
                 )
                 for b in blocks
             ]
@@ -325,14 +335,26 @@ class RagService:
         tables: list[IntrospectedTable],
         action: str = "rag.fetch_metadata",
     ) -> FetchResult:
-        """润色→优先级 upsert→审计→commit→缓存失效。"""
+        """润色→优先级 upsert→对账→审计→commit→缓存失效(042:登记=现实)。"""
         if not tables:
+            # 空扫描集=该范围已无表:同样对账清零自动登记(keep=∅);
+            # 内省连接失败走异常路径,不会进到这里误删
+            removed, manual_orphans = await self._repo.delete_stale_entries(
+                tenant_id=tenant_id, datasource_key=datasource_key, keep=[]
+            )
+            if manual_orphans:
+                log.warning(
+                    "对账保留扫描集外人工条目 %d 行(交人工裁决): tenant=%s ds=%s",
+                    manual_orphans, tenant_id, datasource_key,
+                )
             await self._repo.log_oper(
-                actor_id, action, datasource_key, {"found": 0, "enriched": 0, "skipped": 0}
+                actor_id, action, datasource_key,
+                {"found": 0, "enriched": 0, "skipped": 0, "removed": removed,
+                 "manual_orphans": manual_orphans, "datasource_key": datasource_key},
             )
             await self._repo.commit()
             await self._cache.evict(tenant_id, datasource_key)
-            return FetchResult(found=0, enriched=0, skipped=0)
+            return FetchResult(found=0, enriched=0, skipped=0, removed=removed)
 
         # 逐表润色(并发上限;单表失败降级纯结构不阻断整批)
         sem = asyncio.Semaphore(_DESCRIBE_CONCURRENCY)
@@ -359,7 +381,7 @@ class RagService:
         skipped = 0
         for t, (enriched, block) in zip(tables, described, strict=True):
             incoming = "AI_GENERATED" if enriched else "INTROSPECTION"
-            prior = existing.get(block.table_name)
+            prior = existing.get((t.schema_name, block.table_name))  # 042 二元键
             if prior is not None and not can_automated_overwrite(prior[0], incoming):
                 skipped += 1
                 continue
@@ -391,6 +413,17 @@ class RagService:
             if enriched:
                 enriched_count += 1
 
+        # 042 对账(与 upsert 同事务):删扫描集外的自动来源登记,人工/反馈行
+        # 保留告警;keep=全量扫描集(含被优先级 skip 的表——其现实存在,登记不删)
+        keep = [(t.schema_name, b.table_name) for t, (_, b) in zip(tables, described, strict=True)]
+        removed, manual_orphans = await self._repo.delete_stale_entries(
+            tenant_id=tenant_id, datasource_key=datasource_key, keep=keep
+        )
+        if manual_orphans:
+            log.warning(
+                "对账保留扫描集外人工条目 %d 行(交人工裁决): tenant=%s ds=%s",
+                manual_orphans, tenant_id, datasource_key,
+            )
         await self._repo.log_oper(
             actor_id,
             action,
@@ -399,12 +432,24 @@ class RagService:
                 "found": len(tables),
                 "enriched": enriched_count,
                 "skipped": skipped,
+                "removed": removed,
+                "manual_orphans": manual_orphans,
                 "datasource_key": datasource_key,
             },
         )
         await self._repo.commit()
         await self._cache.evict(tenant_id, datasource_key)
-        return FetchResult(found=len(tables), enriched=enriched_count, skipped=skipped)
+        return FetchResult(
+            found=len(tables), enriched=enriched_count, skipped=skipped, removed=removed
+        )
+
+    async def allowed_schemas(
+        self, *, tenant_id: str, tenant_key: str, datasource_key: str
+    ) -> list[str]:
+        """可扫描 schema 集合(040 枚举端点;与内省/上传闸同源,集合计算在仓储层)。"""
+        return await self._repo.allowed_schemas(
+            tenant_id=tenant_id, tenant_key=tenant_key, datasource_key=datasource_key
+        )
 
     async def _require_usable_datasource(self, tenant_id: str, datasource_key: str) -> None:
         """default 免校验(内置路径);非 default 存在+启用+归属(同形,防探测)。"""
@@ -510,3 +555,14 @@ class RagService:
         except Exception:  # noqa: BLE001  # 回写永不阻断主流程
             log.warning("query_history 回写失败(不阻断主流程)", exc_info=True)
             await self._repo.rollback()
+
+    # ============ 列注释读取(041 呈现层列标签) ============
+
+    async def column_comments(
+        self, *, tenant_id: str, datasource_key: str
+    ) -> dict[str, dict[str, str]]:
+        """ColumnCommentReader 端口实现:表名 → 列注释原文(整集一次读,
+        单数据源注释集量级小;剥离与映射在 chat 呈现纯函数内)。"""
+        return await self._repo.column_comments(
+            tenant_id=tenant_id, datasource_key=datasource_key
+        )

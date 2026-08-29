@@ -61,16 +61,17 @@ function rowCostLi(
   );
 }
 
-/** 计费公式文案:单价代入算式,替代裸单价展示(用户可自行验算) */
-function formulaText(u: UsageDetail): string {
+/** 计费公式文案:单价代入算式,替代裸单价展示(用户可自行验算)。
+ *  每个计费项独占一行——窄容器里自然折行断点不可控(可能断在单价/等号中间),主动断行钉在语义边界 */
+function formulaLines(u: UsageDetail): string[] {
   const tokens = u.total_tokens ?? 0;
   const calls = u.total_calls ?? 0;
   const tokenFee = Math.floor((tokens * (u.price_per_mtok ?? 0)) / 1000);
-  return (
-    `按用量计费:Token ${tokens.toLocaleString()} × ¥${li2yuan(u.price_per_mtok ?? 0)}/千 = ` +
-    `¥${li2yuan(tokenFee)};调用 ${calls.toLocaleString()} 次 × ¥${li2yuan(u.price_per_call ?? 0)}` +
-    ` = ¥${li2yuan(calls * (u.price_per_call ?? 0))}`
-  );
+  return [
+    "按用量计费:",
+    `Token ${tokens.toLocaleString()} × ¥${li2yuan(u.price_per_mtok ?? 0)}/千 = ¥${li2yuan(tokenFee)}`,
+    `调用 ${calls.toLocaleString()} 次 × ¥${li2yuan(u.price_per_call ?? 0)} = ¥${li2yuan(calls * (u.price_per_call ?? 0))}`,
+  ];
 }
 
 function UsageBar({
@@ -184,7 +185,7 @@ export default function PortalPage() {
   return (
     <div className="space-y-5 px-6 py-5">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">开发者门户</h1>
+        <h1 className="text-lg font-semibold">用量与密钥</h1>
         {usage.data?.plan && (
           <Badge variant="secondary" className="font-normal">
             套餐:{usage.data.plan.name}
@@ -222,12 +223,12 @@ export default function PortalPage() {
               format={li2yuan}
             />
             <div className="space-y-1 pt-2">
-              <p className="text-xs font-medium text-muted-foreground">我的 api-key(仅列有效)</p>
+              <p className="text-xs font-medium text-muted-foreground">我的 API 密钥(仅显示生效中)</p>
               {keys.isError ? (
                 <QueryErrorAlert />
               ) : (keys.data ?? []).length === 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  暂无——在 Bot 详情「创建密钥」生成。
+                  还没有密钥,到「管理 → 助手」页,在助手列表中点「创建密钥」。
                 </p>
               ) : (
                 <ul className="space-y-0.5 text-xs text-muted-foreground">
@@ -330,16 +331,15 @@ export default function PortalPage() {
           {detail && (
             <div className="space-y-3 text-sm">
               <p>
-                金额:<strong>¥{li2yuan(detail.amount)}</strong> · 状态{" "}
-                {INVOICE_STATUS_TEXT[detail.status] ?? detail.status}
+                金额:<strong>¥{li2yuan(detail.amount)}</strong> · 状态:{INVOICE_STATUS_TEXT[detail.status] ?? detail.status}
               </p>
               {(usageOf(detail).by_model ?? []).length > 0 && (
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>模型</TableHead>
-                      <TableHead>输入 token</TableHead>
-                      <TableHead>输出 token</TableHead>
+                      <TableHead>输入 Token</TableHead>
+                      <TableHead>输出 Token</TableHead>
                       <TableHead>调用次数</TableHead>
                       <TableHead className="text-right">费用</TableHead>
                     </TableRow>
@@ -360,11 +360,9 @@ export default function PortalPage() {
                 </Table>
               )}
               <div className="space-y-1 text-xs text-muted-foreground">
-                <p>
-                  合计 {usageOf(detail).total_tokens?.toLocaleString() ?? "0"} tokens ·{" "}
-                  {usageOf(detail).total_calls ?? 0} 次调用
-                </p>
-                <p>{formulaText(usageOf(detail))}</p>
+                {formulaLines(usageOf(detail)).map((line) => (
+                  <p key={line}>{line}</p>
+                ))}
               </div>
             </div>
           )}

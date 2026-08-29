@@ -26,7 +26,7 @@ function BrandMark() {
       </span>
       <span className="flex min-w-0 flex-col">
         <span className="text-base font-semibold tracking-widest text-foreground">孔明</span>
-        <span className="truncate text-[11px] text-muted-foreground">万事,问孔明。</span>
+        <span className="truncate text-2xs text-muted-foreground">万事,问孔明。</span>
       </span>
     </Link>
   );

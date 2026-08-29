@@ -659,6 +659,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/rag/schemas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Allowed Schemas */
+        get: operations["list_allowed_schemas_system_rag_schemas_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/rag/tables": {
         parameters: {
             query?: never;
@@ -1753,6 +1770,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/triggers/cron-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cron Preview
+         * @description 接下来 3 次触发时刻(单次看不出日历跳跃类缺陷,036 教训);
+         *     非法表达式 400 附原文案——与创建期校验同口径,禁第二套 cron 语义。
+         */
+        get: operations["cron_preview_system_triggers_cron_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/triggers": {
         parameters: {
             query?: never;
@@ -2793,6 +2831,19 @@ export interface components {
             attachments: {
                 [key: string]: unknown;
             }[];
+            /**
+             * Column Labels
+             * @default []
+             */
+            column_labels: string[];
+        };
+        /**
+         * CronPreviewOut
+         * @description 040·11 cron 预览(与创建/调度同源的解析计算,前端防抖消费)。
+         */
+        CronPreviewOut: {
+            /** Next */
+            next: string[];
         };
         /** DatasourceActionIn */
         DatasourceActionIn: {
@@ -3127,6 +3178,8 @@ export interface components {
             enriched: number;
             /** Skipped */
             skipped: number;
+            /** Removed */
+            removed: number;
         };
         /** GuardrailAuditItem */
         GuardrailAuditItem: {
@@ -3544,6 +3597,8 @@ export interface components {
              * @default []
              */
             artifacts: components["schemas"]["ArtifactOut"][];
+            /** Column Labels */
+            column_labels?: string[];
         };
         /** MetaColumnOut */
         MetaColumnOut: {
@@ -4102,6 +4157,13 @@ export interface components {
             action?: ("blocked" | "masked") | null;
             /** Threshold */
             threshold?: number | null;
+        };
+        /** SchemasOut */
+        SchemasOut: {
+            /** Datasource Key */
+            datasource_key: string;
+            /** Schemas */
+            schemas: string[];
         };
         /** SessionItemOut */
         SessionItemOut: {
@@ -6649,6 +6711,39 @@ export interface operations {
             };
         };
     };
+    list_allowed_schemas_system_rag_schemas_get: {
+        parameters: {
+            query: {
+                datasource_key: string;
+            };
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchemasOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_tables_system_rag_tables_get: {
         parameters: {
             query?: {
@@ -9104,6 +9199,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cron_preview_system_triggers_cron_preview_get: {
+        parameters: {
+            query: {
+                expr: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CronPreviewOut"];
                 };
             };
             /** @description Validation Error */

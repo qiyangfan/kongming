@@ -9,14 +9,57 @@ from kongming.semantic.models import (
     format_relations_hint,
     match_metrics,
 )
-from kongming.semantic.ports import FkIntrospector, SemanticRepo
+from kongming.semantic.ports import FkIntrospector, KnowledgeTableLookup, SemanticRepo
 
 log = logging.getLogger(__name__)
 
 
+class RelationTableUnknown(Exception):
+    """手工关系引用知识条目外的表(040 写边界闸,400 RELATION_TABLE_UNKNOWN)。"""
+
+
 class SemanticService:
-    def __init__(self, repo: SemanticRepo) -> None:
+    def __init__(
+        self,
+        repo: SemanticRepo,
+        knowledge: KnowledgeTableLookup | None = None,
+    ) -> None:
         self._repo = repo
+        self._knowledge = knowledge
+
+    async def add_relation(
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        source_table: str,
+        target_table: str,
+        join_keys: list[dict[str, str]],
+    ) -> str:
+        """手工关系(040 自 router 归位:用例逻辑入服务层)。
+
+        写边界闸:source/target 均须为既有知识条目——引用条目外的表在召回
+        relations_hint 中永不命中(静默死配置),创建期即拒。通过后落库
+        source=manual 并提交。"""
+        if self._knowledge is not None:
+            for st in (source_table, target_table):
+                if not await self._knowledge.knowledge_table_exists(
+                    tenant_id=tenant_id,
+                    datasource_key=datasource_key,
+                    schema_table=st,
+                ):
+                    raise RelationTableUnknown(st)
+        row_id = await self._repo.add_relation(
+            tenant_id=tenant_id,
+            datasource_key=datasource_key,
+            rel={
+                "source_table": source_table,
+                "target_table": target_table,
+                "join_keys": join_keys,
+            },
+        )
+        await self._repo.commit()
+        return row_id
 
     async def introspect(
         self, *, tenant_id: str, datasource_key: str, introspector: FkIntrospector

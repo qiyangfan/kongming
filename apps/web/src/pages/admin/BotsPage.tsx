@@ -3,10 +3,13 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Copy, Key, Loader2, Plus } from "lucide-react";
+import { Bot, Check, Copy, Key, Loader2, Plus } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { publishBot, unpublishBot } from "@/lib/store-api";
+import { toolList } from "@/lib/toolcall-api";
 import { attachResource, listMyTeams } from "@/lib/team-api";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FieldLabel } from "@/components/field-label";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -89,12 +93,13 @@ export default function BotsPage() {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
   const [keyShown, setKeyShown] = useState<string | null>(null);
+  const [keyCopied, setKeyCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     bot_key: "",
     name: "",
     system_prompt: "",
-    tools: "execute_sql,rag_retrieve",
+    tools: ["execute_sql", "rag_retrieve"],
   });
 
   const bots = useQuery({
@@ -102,17 +107,29 @@ export default function BotsPage() {
     queryFn: () => api.get<BotItem[]>("/system/bots"),
   });
 
+  // 040:工具多选候选源=注册表(封闭集合;CSV 手输拼错会被 resolve_tools 静默求交丢弃)
+  const registry = useQuery({ queryKey: ["toolcall", "registry"], queryFn: toolList });
+
+  const toggleTool = (name: string) => {
+    setForm((f) => ({
+      ...f,
+      tools: f.tools.includes(name)
+        ? f.tools.filter((t) => t !== name)
+        : [...f.tools, name],
+    }));
+  };
+
   const create = useMutation({
     mutationFn: () =>
       api.post<{ id: string }>("/system/bots", {
         bot_key: form.bot_key.trim(),
         name: form.name.trim(),
         system_prompt: form.system_prompt.trim(),
-        tools: form.tools.split(",").map((t) => t.trim()).filter(Boolean),
+        tools: form.tools,
       }),
     onSuccess: () => {
       setCreating(false);
-      setForm({ bot_key: "", name: "", system_prompt: "", tools: "execute_sql,rag_retrieve" });
+      setForm({ bot_key: "", name: "", system_prompt: "", tools: ["execute_sql", "rag_retrieve"] });
       setError(null);
       void qc.invalidateQueries({ queryKey: ["bots"] });
     },
@@ -137,14 +154,14 @@ export default function BotsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Bot</h2>
+          <h2 className="text-lg font-semibold">助手</h2>
           <p className="text-sm text-muted-foreground">
-            自定义助手:系统提示 + 工具子集 + 数据源;可公开发布为嵌入页与 OpenAI 兼容 API。
+            创建自定义助手:设定人设与守则、勾选工具、绑定数据源;可上架商店,或以 API 供外部系统调用。
           </p>
         </div>
         <Button size="sm" onClick={() => setCreating(true)}>
           <Plus className="size-3.5" aria-hidden />
-          新建 Bot
+          新建助手
         </Button>
       </div>
 
@@ -154,7 +171,7 @@ export default function BotsPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Bot</TableHead>
+              <TableHead>助手</TableHead>
               <TableHead>工具</TableHead>
               <TableHead>数据源</TableHead>
               <TableHead>启用</TableHead>
@@ -178,7 +195,7 @@ export default function BotsPage() {
             ) : (bots.data?.length ?? 0) === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
-                  暂无 Bot——新建一个专属助手
+                  暂无助手——新建一个专属助手
                 </TableCell>
               </TableRow>
             ) : (
@@ -279,14 +296,33 @@ export default function BotsPage() {
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>新建 Bot</DialogTitle>
+            <DialogTitle>新建助手</DialogTitle>
             <DialogDescription>
-              工具子集不得超过你当前被授予的工具权限;系统提示经安全审核。
+              可勾选的工具不超过你被授予的权限;助手的人设与守则会经安全审核。
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
+          <form
+            className="space-y-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (
+                !form.bot_key.trim() ||
+                !form.name.trim() ||
+                !form.system_prompt.trim() ||
+                create.isPending
+              ) {
+                return;
+              }
+              create.mutate();
+            }}
+          >
             <div className="space-y-1.5">
-              <Label htmlFor="bot-key">标识(小写蛇形)</Label>
+              <FieldLabel
+                htmlFor="bot-key"
+                help="小写字母开头,可含数字与下划线;创建后不可改。"
+              >
+                标识
+              </FieldLabel>
               <Input id="bot-key" value={form.bot_key} onChange={(e) => setForm({ ...form, bot_key: e.target.value })} placeholder="after_sale" />
             </div>
             <div className="space-y-1.5">
@@ -294,25 +330,64 @@ export default function BotsPage() {
               <Input id="bot-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="售后助手" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="bot-prompt">系统提示</Label>
+              <Label htmlFor="bot-prompt">人设与守则</Label>
               <Textarea id="bot-prompt" value={form.system_prompt} onChange={(e) => setForm({ ...form, system_prompt: e.target.value })} placeholder="你是售后客服助手…" rows={4} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="bot-tools">工具(逗号分隔)</Label>
-              <Input id="bot-tools" value={form.tools} onChange={(e) => setForm({ ...form, tools: e.target.value })} placeholder="execute_sql,rag_retrieve" />
+              <FieldLabel help="从清单勾选该助手可用的工具;不勾选时,助手仅对话,不执行任何操作。">
+                可用工具
+              </FieldLabel>
+              {/* 040:CSV 手输改注册表勾选——封闭集合消灭拼错工具名被求交静默丢弃 */}
+              <ScrollArea className="h-40 rounded-md border p-2">
+                <div className="space-y-1 pr-2">
+                  {(registry.data?.tools ?? []).map((t) => (
+                    <label
+                      key={t.name}
+                      className="flex cursor-pointer items-start gap-2 rounded px-1 py-1 hover:bg-muted/60"
+                    >
+                      <Checkbox
+                        checked={form.tools.includes(t.name)}
+                        onCheckedChange={() => toggleTool(t.name)}
+                        className="mt-0.5"
+                        aria-label={`工具 ${t.name}`}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1.5">
+                          <span className="font-mono text-xs font-medium">{t.name}</span>
+                          <Badge variant={t.write ? "destructive" : "secondary"}>
+                            {t.write ? "写" : "只读"}
+                          </Badge>
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground" title={t.description}>
+                          {t.description}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                  {registry.isError ? (
+                    <p className="py-4 text-center text-xs text-destructive" role="alert">
+                      工具清单加载失败,请关闭后重试
+                    </p>
+                  ) : (
+                    registry.isPending && (
+                      <p className="py-4 text-center text-xs text-muted-foreground">清单加载中…</p>
+                    )
+                  )}
+                </div>
+              </ScrollArea>
             </div>
             {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCreating(false)}>取消</Button>
-            <Button
-              disabled={!form.bot_key.trim() || !form.name.trim() || !form.system_prompt.trim() || create.isPending}
-              onClick={() => create.mutate()}
-            >
-              {create.isPending && <Loader2 className="animate-spin" aria-hidden />}
-              创建
-            </Button>
-          </DialogFooter>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setCreating(false)}>取消</Button>
+              <Button
+                type="submit"
+                disabled={!form.bot_key.trim() || !form.name.trim() || !form.system_prompt.trim() || create.isPending}
+              >
+                {create.isPending && <Loader2 className="animate-spin" aria-hidden />}
+                创建
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -328,10 +403,19 @@ export default function BotsPage() {
             <Button
               size="icon"
               variant="outline"
-              aria-label="复制"
-              onClick={() => keyShown && void navigator.clipboard.writeText(keyShown)}
+              aria-label={keyCopied ? "已复制" : "复制"}
+              onClick={() => {
+                if (!keyShown) return;
+                void navigator.clipboard.writeText(keyShown);
+                setKeyCopied(true);
+                window.setTimeout(() => setKeyCopied(false), 2000);
+              }}
             >
-              <Copy className="size-3.5" aria-hidden />
+              {keyCopied ? (
+                <Check className="size-3.5" aria-hidden />
+              ) : (
+                <Copy className="size-3.5" aria-hidden />
+              )}
             </Button>
           </div>
           <DialogFooter>
@@ -351,7 +435,7 @@ export default function BotsPage() {
           <DialogHeader>
             <DialogTitle>变更归属</DialogTitle>
             <DialogDescription>
-              将 Bot 归属到团队后,团队成员按角色共享(观察者可见可运行/
+              将助手归属到团队后,团队成员按角色共享(观察者可见可运行/
               成员可编辑/负责人全权);仅目标团队负责人可执行。
             </DialogDescription>
           </DialogHeader>
@@ -399,7 +483,7 @@ export default function BotsPage() {
             <DialogTitle>上架到商店</DialogTitle>
             <DialogDescription>
               欢迎语与建议问题将展示在商店卡片与详情页(建议问题点击即问)。
-              上架内容经安全护栏审核,替换形态会被拒。
+              上架内容会经安全审核,含诱导性或违规内容将被拒绝。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">

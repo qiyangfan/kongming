@@ -6,9 +6,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import ReactECharts from "echarts-for-react";
 import { Activity, Database, Sparkles, Wrench } from "lucide-react";
 
+import { EChart, themedTooltip } from "@/lib/echarts";
+import { useTheme } from "@/lib/theme-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -94,7 +95,62 @@ function kindStatusLabel(kind: string, status: string): string {
   return table[status] ?? status;
 }
 
+type UsageTrendPoint = Awaited<ReturnType<typeof usageTrend>>["points"][number];
+
+/* 按天趋势(theme 经 key 作用于本组件:切主题整体重挂,option 重读 token 色板) */
+function UsageTrendChart({ points }: { points: UsageTrendPoint[] }) {
+  const option = useMemo(() => {
+    const axisColor = cssVar("--muted-foreground");
+    const lineColor = cssVar("--border");
+    const axisCommon = {
+      axisLabel: { color: axisColor },
+      axisLine: { lineStyle: { color: lineColor } },
+    };
+    return {
+      tooltip: { trigger: "axis" as const, ...themedTooltip() },
+      legend: { bottom: 0, left: "center", textStyle: { color: axisColor } },
+      grid: { left: 12, right: 16, top: 24, bottom: 28, containLabel: true },
+      xAxis: {
+        type: "category" as const,
+        data: points.map((p) => p.date.slice(5)), // MM-DD 省宽
+        ...axisCommon,
+      },
+      yAxis: [
+        { type: "value" as const, minInterval: 1, ...axisCommon },
+        { type: "value" as const, ...axisCommon },
+      ],
+      series: [
+        {
+          name: "调用",
+          type: "line" as const,
+          data: points.map((p) => p.calls),
+          smooth: true,
+          itemStyle: { color: cssVar("--ring") },
+          lineStyle: { color: cssVar("--ring"), width: 2 },
+        },
+        {
+          name: "失败",
+          type: "line" as const,
+          data: points.map((p) => p.calls_error),
+          smooth: true,
+          itemStyle: { color: cssVar("--primary") },
+          lineStyle: { color: cssVar("--primary"), width: 2 },
+        },
+        {
+          name: "Token",
+          type: "bar" as const,
+          yAxisIndex: 1,
+          data: points.map((p) => p.total_tokens),
+          itemStyle: { color: cssVar("--accent-foreground"), opacity: 0.35 },
+        },
+      ],
+    };
+  }, [points]);
+  return <EChart option={option} notMerge style={{ height: 240 }} />;
+}
+
 export default function UsagePage() {
+  const { theme } = useTheme();
   const [days, setDays] = useState(30);
   const [model, setModel] = useState("");
   const [task, setTask] = useState("");
@@ -149,6 +205,16 @@ export default function UsagePage() {
     }
   }, [list.data, page]);
 
+  // 040·11:筛选候选自 summary 维度行派生(去重排序;summary 本页已在拉)
+  const modelOptions = useMemo(
+    () => Array.from(new Set((summary.data?.items ?? []).map((i) => i.model))).sort(),
+    [summary.data],
+  );
+  const taskOptions = useMemo(
+    () => Array.from(new Set((summary.data?.items ?? []).map((i) => i.task))).sort(),
+    [summary.data],
+  );
+
   const totals = useMemo(() => {
     const items = summary.data?.items ?? [];
     const calls = items.reduce((a, i) => a + i.calls, 0);
@@ -170,55 +236,6 @@ export default function UsagePage() {
     };
   }, [summary.data]);
 
-  const trendOption = useMemo(() => {
-    const points = trend.data?.points ?? [];
-    const axisColor = cssVar("--muted-foreground");
-    const lineColor = cssVar("--border");
-    const axisCommon = {
-      axisLabel: { color: axisColor },
-      axisLine: { lineStyle: { color: lineColor } },
-    };
-    return {
-      tooltip: { trigger: "axis" as const },
-      legend: { bottom: 0, left: "center", textStyle: { color: axisColor } },
-      grid: { left: 12, right: 16, top: 24, bottom: 28, containLabel: true },
-      xAxis: {
-        type: "category" as const,
-        data: points.map((p) => p.date.slice(5)), // MM-DD 省宽
-        ...axisCommon,
-      },
-      yAxis: [
-        { type: "value" as const, minInterval: 1, ...axisCommon },
-        { type: "value" as const, ...axisCommon },
-      ],
-      series: [
-        {
-          name: "调用",
-          type: "line" as const,
-          data: points.map((p) => p.calls),
-          smooth: true,
-          itemStyle: { color: cssVar("--ring") },
-          lineStyle: { color: cssVar("--ring"), width: 2 },
-        },
-        {
-          name: "失败",
-          type: "line" as const,
-          data: points.map((p) => p.calls_error),
-          smooth: true,
-          itemStyle: { color: cssVar("--primary") },
-          lineStyle: { color: cssVar("--primary"), width: 2 },
-        },
-        {
-          name: "tokens",
-          type: "bar" as const,
-          yAxisIndex: 1,
-          data: points.map((p) => p.total_tokens),
-          itemStyle: { color: cssVar("--accent-foreground"), opacity: 0.35 },
-        },
-      ],
-    };
-  }, [trend.data]);
-
   const totalPages = Math.max(1, Math.ceil((list.data?.total ?? 0) / PAGE_SIZE));
 
   return (
@@ -226,7 +243,7 @@ export default function UsagePage() {
       <div>
         <h2 className="text-lg font-semibold">模型用量</h2>
         <p className="text-sm text-muted-foreground">
-          LLM 调用的用量、成败与延迟——看穿每一次问卦背后的模型开销。
+          模型调用的用量、成败与延迟——看穿每一次问卦背后的开销。
         </p>
       </div>
 
@@ -239,7 +256,7 @@ export default function UsagePage() {
           error={summary.isError}
         />
         <StatCard
-          label="总 tokens"
+          label="总 Token"
           value={fmtTokens(totals.tokens)}
           loading={summary.isLoading}
           error={summary.isError}
@@ -263,7 +280,8 @@ export default function UsagePage() {
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-sm font-medium">按天趋势</h3>
           <Select value={String(days)} onValueChange={(v) => setDays(Number(v))}>
-            <SelectTrigger className="h-8 w-24">
+            {/* w-28 下限:装下最宽项「近 30 天」(w-24 时文本预算 48px<53px 被裁) */}
+            <SelectTrigger className="h-8 w-28">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -280,7 +298,7 @@ export default function UsagePage() {
         ) : trend.isError ? (
           <QueryErrorAlert text="趋势加载失败" />
         ) : (
-          <ReactECharts option={trendOption} notMerge style={{ height: 240 }} />
+          <UsageTrendChart key={theme} points={trend.data?.points ?? []} />
         )}
       </div>
 
@@ -342,31 +360,51 @@ export default function UsagePage() {
       {/* 明细分页 */}
       <div className="rounded-lg border bg-card">
         <div className="flex flex-wrap items-end gap-3 border-b px-4 py-3">
+          {/* 040·11:模型/任务筛选换 Select——候选自既有 summary 响应派生
+              (每行自带 model/task 维度,纯前端零契约),消灭手拼精确匹配串 */}
           <div className="space-y-1">
             <Label className="text-xs">模型</Label>
-            <Input
-              className="h-8 w-36"
-              placeholder="如 qwen-plus"
-              maxLength={64}
-              value={model}
-              onChange={(e) => {
-                setModel(e.target.value);
+            <Select
+              value={model || "ALL"}
+              onValueChange={(v) => {
+                setModel(v === "ALL" ? "" : v);
                 setPage(1);
               }}
-            />
+            >
+              <SelectTrigger className="h-8 w-40" aria-label="模型筛选">
+                <SelectValue placeholder="全部模型" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">全部模型</SelectItem>
+                {modelOptions.map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {m}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-1">
             <Label className="text-xs">任务</Label>
-            <Input
-              className="h-8 w-28"
-              placeholder="如 SQL_GEN"
-              maxLength={24}
-              value={task}
-              onChange={(e) => {
-                setTask(e.target.value);
+            <Select
+              value={task || "ALL"}
+              onValueChange={(v) => {
+                setTask(v === "ALL" ? "" : v);
                 setPage(1);
               }}
-            />
+            >
+              <SelectTrigger className="h-8 w-36" aria-label="任务筛选">
+                <SelectValue placeholder="全部任务" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">全部任务</SelectItem>
+                {taskOptions.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-1">
             <Label className="text-xs">状态</Label>
@@ -521,7 +559,7 @@ export default function UsagePage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Activity className="size-4" />
-              trace 时间线
+              调用链路
             </DialogTitle>
             <DialogDescription className="font-mono text-xs break-all">
               {timelineTrace}
@@ -533,7 +571,7 @@ export default function UsagePage() {
             <QueryErrorAlert text="时间线加载失败" />
           ) : (timeline.data?.events ?? []).length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">
-              该 trace 下无事件
+              该链路暂无事件
             </div>
           ) : (
             <ol className="space-y-2 border-l pl-4">

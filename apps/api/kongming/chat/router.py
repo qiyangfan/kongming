@@ -181,6 +181,7 @@ def get_chat_service(
         _InternalExecuteRunner(session),  # 026 再执行
         attachment_checker=_AttachmentChecker(session),  # 030(关键字传参防错位)
         implicit_memory_task=extract_memory_task,  # 022 隐式提取(组合根绑定)
+        column_comments=get_rag_service(session),  # 041 列标签(同一 RagService 的窄端口视角)
     )
 
 
@@ -456,6 +457,8 @@ class ChatQueryOut(BaseModel):
     artifacts: list["ArtifactOut"] = []
     # 030(纯增):附件引用摘要(空数组零回归)
     attachments: list[dict[str, object]] = []
+    # 041(纯增):呈现层列标签,与 columns 等长对齐(空=未接线/历史存量,回退 columns)
+    column_labels: list[str] = []
 
 
 def _out(o: ChatOutcome) -> ChatQueryOut:
@@ -491,6 +494,7 @@ def _out(o: ChatOutcome) -> ChatQueryOut:
             )
             for a in o.artifacts
         ],
+        column_labels=o.column_labels,
     )
 
 
@@ -809,6 +813,9 @@ class MessageResultOut(BaseModel):
     error: str | None = None
     # 026(纯增):类型化产物
     artifacts: list[ArtifactOut] = []
+    # 041(纯增):呈现层列标签(空=历史存量档,回退 columns)
+    column_labels: list[str] = Field(default_factory=list)
+
 
 class SessionMessageOut(BaseModel):
     id: str
@@ -838,6 +845,7 @@ def _msg_out(m: SessionMessage) -> SessionMessageOut:
             stats=r.stats,
             chart=ChartInfoOut(type=r.chart.type, x=r.chart.x, y=r.chart.y),
             error=r.error,
+            column_labels=r.column_labels,
             artifacts=[
                 ArtifactOut(
                     type=str(a.get("type") or ""),

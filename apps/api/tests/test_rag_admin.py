@@ -30,6 +30,8 @@ async def _biz() -> AsyncIterator[None]:
     """tenant_default 业务表(default 源内省的活数据)。"""
     from kongming.db import get_engine
 
+    # 注:身份表(含租户)由 conftest._clean 用例级 TRUNCATE,租户/用户播种
+    # 须在测试内经 _admin_token(内含 seed_all)完成——勿上提至模块 fixture。
     async with get_engine().begin() as conn:
         await conn.execute(
             text("CREATE SCHEMA IF NOT EXISTS tenant_default")
@@ -370,19 +372,19 @@ async def test_upload_unsupported_type_400(
 
 async def _seed_one(
     session: AsyncSession, tenant_id: str, table: str, *, ds: str = "default",
-    source: str = "MANUAL_UPLOAD", alias: str = "",
+    source: str = "MANUAL_UPLOAD", alias: str = "", schema: str = "tenant_default",
 ) -> str:
-    """直插一条知识(arrange 独立于被测实现;037:可控 alias)。"""
+    """直插一条知识(arrange 独立于被测实现;037 可控 alias;042 可控 schema)。"""
     tid = (
         await session.execute(
             text(
                 "INSERT INTO rag.table_descriptions"
                 " (id, tenant_id, datasource_key, schema_name, table_name,"
                 "  table_comment, columns_comment, sample_queries, source_type, alias)"
-                " VALUES (gen_random_uuid(), :t, :d, 'tenant_default', :n,"
+                " VALUES (gen_random_uuid(), :t, :d, :sn, :n,"
                 "  'c', '{}', '[]', :st, NULLIF(:al, '')) RETURNING id"
             ),
-            {"t": tenant_id, "d": ds, "n": table, "st": source, "al": alias},
+            {"t": tenant_id, "d": ds, "sn": schema, "n": table, "st": source, "al": alias},
         )
     ).scalar_one()
     await session.commit()
@@ -603,6 +605,113 @@ async def test_fetch_alias_overwrite_priority(
     ).mappings().one()
     assert row3["alias"] == "手编商品表"
     assert row3["source_type"] == "MANUAL_EDIT"
+
+
+# ============ 042 扫描对账(登记=现实) ============
+
+
+async def test_fetch_metadata_reconciles_stale_entries(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
+) -> None:
+    """042 对账:扫描集外自动来源孤儿删除(removed 计数+审计);人工孤儿保留。"""
+    token = await _admin_token(client, session)
+    tid = await _default_tenant_id(session)
+    # 事故形态复刻:扫描范围外(tenant_sakila)的自动来源残留 + 人工资产
+    stale_auto = await _seed_one(
+        session, tid, "staff", schema="tenant_sakila", source="AI_GENERATED"
+    )
+    await _seed_one(
+        session, tid, "legacy", schema="tenant_sakila", source="MANUAL_EDIT"
+    )
+    r = await client.post(
+        f"{RAG}/fetch-metadata", json={"datasource_key": "default"}, headers=_auth(token)
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["removed"] >= 1  # 契约字段(042)
+    gone = (
+        await session.execute(
+            text("SELECT count(*) FROM rag.table_descriptions WHERE id = :i"),
+            {"i": stale_auto},
+        )
+    ).scalar_one()
+    assert gone == 0  # 自动来源孤儿被对账删除
+    kept = (
+        await session.execute(
+            text(
+                "SELECT source_type FROM rag.table_descriptions"
+                " WHERE tenant_id = :t AND schema_name = 'tenant_sakila'"
+                " AND table_name = 'legacy'"
+            ),
+            {"t": tid},
+        )
+    ).scalar_one()
+    assert kept == "MANUAL_EDIT"  # 扫描集外人工条目保留(交人工裁决)
+    audit = (
+        await session.execute(
+            text(
+                "SELECT detail FROM sys_oper_log WHERE action = 'rag.fetch_metadata'"
+                " ORDER BY created_at DESC LIMIT 1"
+            )
+        )
+    ).scalar_one()
+    assert (audit or {}).get("removed", 0) >= 1  # 审计可溯
+
+
+async def test_fetch_metadata_cross_schema_same_name_no_shadow(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
+) -> None:
+    """042:优先级判定以 (schema, table) 二元定位——跨 schema 同名表不互遮。
+
+    一元键形态下两行共占一个 dict 槽,tenant_default.goods(MANUAL_EDIT)
+    的整行保护会被 public.goods 的自动来源身份误顶替(覆盖或漏 skip 视
+    行序而定)——二元化后各自归位。
+    """
+    token = await _admin_token(client, session)
+    tid = await _default_tenant_id(session)
+    await _seed_one(session, tid, "goods", schema="tenant_default", source="MANUAL_EDIT")
+    # public.goods 须真实存在(对账 keep=真实扫描集——知识行无表支撑会被
+    # 当孤儿删掉,那是对账语义而非遮蔽);建真实表使 (public, goods) 入 keep
+    from kongming.db import get_engine
+
+    async with get_engine().begin() as conn:
+        await conn.execute(
+            text("CREATE TABLE public.goods (id int primary key, name text)")
+        )
+    try:
+        await session.execute(
+            text(
+                "INSERT INTO rag.table_descriptions"
+                " (id, tenant_id, datasource_key, schema_name, table_name,"
+                "  table_comment, columns_comment, sample_queries, source_type)"
+                " VALUES (gen_random_uuid(), :t, 'default', 'public', 'goods',"
+                "  'OLD', '{}', '[]', 'AI_GENERATED')"
+            ),
+            {"t": tid},
+        )
+        await session.commit()
+        r = await client.post(
+            f"{RAG}/fetch-metadata",
+            json={"datasource_key": "default"}, headers=_auth(token),
+        )
+        assert r.status_code == 200, r.text
+    finally:
+        async with get_engine().begin() as conn:
+            await conn.execute(text("DROP TABLE IF EXISTS public.goods"))
+    rows = (
+        await session.execute(
+            text(
+                "SELECT schema_name, table_comment, source_type"
+                " FROM rag.table_descriptions WHERE table_name = 'goods'"
+                " ORDER BY schema_name"
+            )
+        )
+    ).all()
+    by_schema = {r.schema_name: r for r in rows}
+    assert by_schema["tenant_default"].source_type == "MANUAL_EDIT"  # 整行保护不破
+    assert by_schema["tenant_default"].table_comment == "c"
+    assert by_schema["public"].source_type == "AI_GENERATED"  # 扫描集内正常更新
+    assert by_schema["public"].table_comment == "AI:goods"    # 未被误 skip
 
 
 # ============ 037 表说明编辑(alias 与 table_comment 同面) ============
@@ -920,3 +1029,142 @@ async def test_reindex_preserving_existing_on_prefetch_failure(
         await session.execute(text("SELECT count(*) FROM rag.table_descriptions"))
     ).scalar_one()
     assert after == before  # 既有条目零损失(删写事务从未进入)
+
+
+# ============ 040 可扫描 schema 枚举与上传存在性闸 ============
+
+
+async def _mk_ds_row(
+    session: AsyncSession, key: str, tenant_id: str, *, default_schema: str
+) -> None:
+    """040 测试用动态数据源行(default_schema 可指定;密码同 _mk_ds 口径)。
+
+    先删后插:共享测试库并发会话/重跑下幂等(040 实测教训)。
+    """
+    from kongming.config import get_settings
+    from kongming.datasource.cipher import get_cipher
+
+    enc = get_cipher(get_settings().datasource_encrypt_key).encrypt("kongming")
+    await session.execute(
+        text("DELETE FROM public.sys_datasource WHERE datasource_key = :k"), {"k": key}
+    )
+    await session.execute(
+        text(
+            "INSERT INTO public.sys_datasource"
+            " (id, datasource_key, name, tenant_id, host, port, database, username,"
+            "  password_enc, default_schema, status)"
+            " VALUES (gen_random_uuid(), :k, :k, :t, '127.0.0.1', 5432, 'kongming_test',"
+            "         'kongming', :pe, :ds, 'ACTIVE')"
+        ),
+        {"k": key, "t": tenant_id, "pe": enc, "ds": default_schema},
+    )
+    await session.commit()
+
+
+async def _mk_tenant_idem(session: AsyncSession, key: str) -> str:
+    """先删后建的幂等租户(共享库重跑护栏;返回 tenant_id)。"""
+    await session.execute(
+        text("DELETE FROM public.sys_tenant WHERE tenant_key = :k"), {"k": key}
+    )
+    tid = (
+        await session.execute(
+            text(
+                "INSERT INTO public.sys_tenant (id, tenant_key, tenant_name, status)"
+                " VALUES (gen_random_uuid(), :k, :k, 'ACTIVE') RETURNING id"
+            ),
+            {"k": key},
+        )
+    ).scalar_one()
+    await session.commit()
+    return str(tid)
+
+
+async def test_schemas_default_source(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
+) -> None:
+    """default 源:路由约定 schema 集合 [tenant_<key>, public](与内省同源)。"""
+    token = await _admin_token(client, session)
+    r = await client.get(
+        f"{RAG}/schemas", params={"datasource_key": "default"}, headers=_auth(token)
+    )
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "datasource_key": "default",
+        "schemas": ["tenant_default", "public"],
+    }
+
+
+async def test_schemas_dynamic_source(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
+) -> None:
+    """动态源:resolver 校验后取 [default_schema] 单元素集合。"""
+    token = await _admin_token(client, session)  # 先播种(_clean 每用例清身份表)
+    await _mk_ds_row(
+        session, "dynsch040", await _default_tenant_id(session), default_schema="sales"
+    )
+    r = await client.get(
+        f"{RAG}/schemas", params={"datasource_key": "dynsch040"}, headers=_auth(token)
+    )
+    assert r.status_code == 200, r.text
+    assert r.json() == {"datasource_key": "dynsch040", "schemas": ["sales"]}
+
+
+async def test_schemas_unusable_same_shape_400(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
+) -> None:
+    """不存在/越租户数据源:同形 400(不区分,防 key 探测)。"""
+
+    token = await _admin_token(client, session)
+    r = await client.get(
+        f"{RAG}/schemas", params={"datasource_key": "ghost_ds"}, headers=_auth(token)
+    )
+    assert r.status_code == 400
+    assert r.json()["detail"] == "DATASOURCE_INVALID"
+
+    other_tid = await _mk_tenant_idem(session, "sch040-other")
+    await _mk_ds_row(session, "othersch040", other_tid, default_schema="sales")
+    r = await client.get(
+        f"{RAG}/schemas", params={"datasource_key": "othersch040"}, headers=_auth(token)
+    )
+    assert r.status_code == 400  # 越租户同形 400,非 404
+
+
+async def test_schemas_requires_perm(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    token = await _noperm_user(client, session, make_user)
+    r = await client.get(
+        f"{RAG}/schemas", params={"datasource_key": "default"}, headers=_auth(token)
+    )
+    assert r.status_code == 403
+
+
+async def test_upload_schema_not_in_set_400(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
+) -> None:
+    """语法合法但不在可扫描集合:400 SCHEMA_NOT_ALLOWED,不落库(写边界闸)。"""
+    token = await _admin_token(client, session)
+    r = await _upload(
+        client, token, content=_md("film040x"), schema_name="tenant_others"
+    )
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "SCHEMA_NOT_ALLOWED"
+    n = (
+        await session.execute(
+            text(
+                "SELECT count(*) FROM rag.table_descriptions"
+                " WHERE schema_name = 'tenant_others'"
+            )
+        )
+    ).scalar_one()
+    assert n == 0
+
+
+async def test_upload_schema_public_member_ok(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
+) -> None:
+    """集合内合法成员(public)照常上传。"""
+    token = await _admin_token(client, session)
+    r = await _upload(client, token, content=_md("film040ok"), schema_name="public")
+    assert r.status_code == 200, r.text
+    assert r.json()["tables"] == ["film040ok"]

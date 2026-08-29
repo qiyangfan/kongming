@@ -205,7 +205,7 @@ export default function DeptsPage() {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          部门支撑「本部门/本部门及以下」数据范围的行级过滤。
+          部门用于划定数据可见范围(如「本部门」「本部门及以下」)。
         </p>
         <Button
           size="sm"
@@ -343,7 +343,7 @@ export default function DeptsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>删除部门 {deleting?.dept_name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              存在子部门或仍绑定未软删用户的部门会被拒绝删除。
+              仍有子部门或有账号在使用的部门无法删除。
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteError && (
