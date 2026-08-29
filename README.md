@@ -32,17 +32,21 @@
 
 ## 架构一页纸
 
-```
-                    ┌───────────────────────────┐
-  React SPA ───────▶│  apps/api   控制面(持凭证) │
-  (apps/web)  JWT   │  FastAPI · RBAC · SQL 防火墙│──── PostgreSQL 17 + pgvector
-                    │  审计 · 数据源注册          │──── Redis 8
-                    └──────────┬────────────────┘
-                     内部令牌   │ ▲ 回调 /internal/sql/execute(唯一执行路径)
-                    ┌──────────▼────────────────┐
-                    │  apps/agent Agent 面(零凭证)│──▶ LLM(通义/DeepSeek 可切)
-                    │  LangGraph · RAG · selfheal │
-                    └───────────────────────────┘
+```mermaid
+flowchart LR
+    web["React SPA · apps/web"] -->|"JWT"| api
+    api["apps/api · 控制面(持凭证)<br/>FastAPI · RBAC · SQL 防火墙<br/>审计 · 数据源注册"]
+    agent["apps/agent · Agent 面<br/>零凭证<br/>LangGraph · RAG · selfheal"]
+    api -->|"内部令牌"| agent
+    agent -->|"回调 /internal/sql/execute<br/>(唯一执行路径)"| api
+    api --> pg[("PostgreSQL 17 + pgvector")]
+    api --> redis[("Redis 8")]
+    agent --> llm["LLM(通义 / DeepSeek 可切)"]
+
+    classDef proc fill:#faf3ee,stroke:#8f2d2f,stroke-width:1.2px,color:#3d2b28
+    classDef ext fill:#f5f2ec,stroke:#8a8577,color:#3d2b28
+    class web,api,agent proc
+    class pg,redis,llm ext
 ```
 
 **信任边界 = 进程边界**(ADR-002):Agent 进程里不存在任何数据库凭证;
