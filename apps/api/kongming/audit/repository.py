@@ -34,7 +34,7 @@ class AuditRepository:
         "SELECT a.id, a.trace_id, a.user_id, a.tenant_id, a.datasource_key,"
         " a.question, a.sql_text, a.verdict, a.block_reason, a.row_count,"
         " a.duration_ms, a.created_at, u.nickname AS user_nickname,"
-        " t.tenant_key"
+        " u.username AS user_username, t.tenant_key"
         " FROM public.sys_sql_audit a"
         " LEFT JOIN public.sys_user u ON u.id = a.user_id"
         " JOIN public.sys_tenant t ON t.id = a.tenant_id"
@@ -158,7 +158,8 @@ class AuditRepository:
             await self._s.execute(
                 text(
                     "SELECT o.id, o.user_id, o.action, o.target, o.detail, o.ip,"  # noqa: S608  # 常量模板,参数化绑定
-                    " o.created_at, u.nickname AS user_nickname"
+                    " o.created_at, u.nickname AS user_nickname,"
+                    " u.username AS user_username"
                     " FROM public.sys_oper_log o"
                     " LEFT JOIN public.sys_user u ON u.id = o.user_id"
                     + self._OPER_WHERE

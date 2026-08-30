@@ -121,7 +121,13 @@ export function SessionSidebar({ onNavigate }: { onNavigate?: () => void }) {
                       <span className="min-w-0 flex-1 truncate" title={s.title}>
                         {s.title}
                       </span>
-                      <span className="shrink-0 text-3xs text-muted-foreground group-hover:invisible">
+                      {/* 时间止步于行尾保留区之外:按钮独占 right-1+size-6=28px
+                          固定槽,时间 mr-7(28px)在 Link 内容盒内提前收束、右缘
+                          恒落槽外(Link 自身 pr-2 再让出 8px 呼吸)——按钮显现
+                          只盖空白,与时间无共槽可能;旧「同槽互换」范式下按钮
+                          transition-all 渐隐而时间瞬时回归,移开鼠标必有一瞬
+                          重叠,不可缝补 */}
+                      <span className="mr-7 shrink-0 text-3xs text-muted-foreground">
                         {timeLabel(s.updated_at)}
                       </span>
                     </Link>

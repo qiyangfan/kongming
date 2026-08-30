@@ -259,8 +259,12 @@ async def test_messages_echo_order_and_shape(
     assert first["sql"] == "SELECT name, qty FROM goods"
     assert first["result"]["columns"] == ["name", "qty"]
     assert first["result"]["rows"][0] == ["连弩", 30]
-    assert first["result"]["chart"]["type"] == "pie"
+    # 049:qty 裸列不可加 pie 被闸 → 首候选 bar;候选随档读出
+    assert first["result"]["chart"]["type"] == "bar"
     assert first["result"]["chart"]["x"] == "name"  # x/y 完整(006 补存)
+    assert first["result"]["chart_candidates"] == [
+        {"type": "bar", "x": "name", "y": ["qty"], "series": None}
+    ]
     rejected = msgs[3]
     assert rejected["status"] == "REJECTED"
     assert "非只读" in rejected["error"]
@@ -270,7 +274,8 @@ async def test_messages_legacy_result_json_recomputed(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """存量兼容:005 形态 result_json(裸 chartType,无 x/y/error)→
-    回显以 suggest_chart 确定性重算补全 x/y(落库输入=原始输入)。"""
+    回显以 suggest_charts 确定性重算补全(落库输入=原始输入,重算=原始输出);
+    旧档按当前规则重算:qty 裸列不可加 → 首候选 bar(不再是旧规则的 pie)。"""
     uid, token = await _user_with_chat_perm(client, session, make_user, "legacy")
     tid = await _default_tenant_id(session)
     sid = await _mk_session(session, user_id=uid, tenant_id=tid)
@@ -299,14 +304,17 @@ async def test_messages_legacy_result_json_recomputed(
     assert r.status_code == 200
     m = r.json()[1]
     chart = m["result"]["chart"]
-    assert (chart["type"], chart["x"], chart["y"]) == ("pie", "name", "qty")  # 重算补全
+    assert (chart["type"], chart["x"], chart["y"]) == ("bar", "name", "qty")  # 重算补全
+    assert m["result"]["chart_candidates"] == [
+        {"type": "bar", "x": "name", "y": ["qty"], "series": None}
+    ]
     assert m["error"] is None  # 存量无 error → null,前端通用文案兜底
 
 
 async def test_messages_legacy_result_json_recomputed_scatter(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """011:双数值旧档回显重算得 scatter(与查询落库路径共享 suggest_chart)。"""
+    """049:双度量旧档回显重算得 scatter(与查询落库路径共享 suggest_charts)。"""
     uid, token = await _user_with_chat_perm(client, session, make_user, "legacysc")
     tid = await _default_tenant_id(session)
     sid = await _mk_session(session, user_id=uid, tenant_id=tid)

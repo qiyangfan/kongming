@@ -164,7 +164,7 @@ class FeedbackRepository:
     _PAGE_SELECT = (
         "SELECT m.id AS message_id, m.session_id, m.rating, m.feedback_comment,"
         " m.corrected_sql, m.feedback_status, m.feedback_time, m.sql_text,"
-        " s.user_id, u.nickname AS user_nickname,"
+        " s.user_id, u.nickname AS user_nickname, u.username AS user_username,"
         " s.tenant_id, t.tenant_key, s.datasource_key,"
         " (SELECT q.question FROM public.chat_message q"
         "  WHERE q.session_id = m.session_id AND q.role = 'USER'"

@@ -112,6 +112,9 @@ if [ "$ext_rows" = "0" ]; then
 else
   echo "    sakila_ext 数据已存在(film=$ext_rows 行),跳过"
 fi
+# 中文注释:上游 dump 无列注释,LLM schema 提示与 041 列标签均依赖它(独立库可重放)
+echo "==    sakila_ext 中文注释"
+"${PSQL_EXT[@]}" -f - < "$ROOT/infra/example-data/comments-ext.sql"
 
 echo "完成。行数速览:"
 "${PSQL[@]}" -tA -c "

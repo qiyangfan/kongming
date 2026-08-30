@@ -423,6 +423,16 @@ class ChartOut(BaseModel):
     y: str | None = None
 
 
+class ChartCandidateOut(BaseModel):
+    """图表候选(049 纯增):候选自带完整绑定,y 为值列(多度量多系列),
+    series 为系列维(分组柱/时序多系列)。既有 chart 字段保留=首候选展平。"""
+
+    type: str
+    x: str | None = None
+    y: list[str] = []
+    series: str | None = None
+
+
 class ArtifactOut(BaseModel):
     """类型化产物(026):type ∈ sql/chart/document。"""
 
@@ -450,6 +460,8 @@ class ChatQueryOut(BaseModel):
     rows: list[list[object]]
     sql: str
     chart: ChartOut
+    # 049(纯增):有序图表候选(空=查询失败/不适配;首候选即上方 chart)
+    chart_candidates: list[ChartCandidateOut] = []
     retry_count: int
     error: str | None
     # 047(纯增):原始技术错误(FAILED 携带;前端折叠「技术详情」,缺省隐藏)
@@ -480,6 +492,10 @@ def _out(o: ChatOutcome) -> ChatQueryOut:
         rows=o.rows,
         sql=o.sql,
         chart=ChartOut(type=o.chart.type, x=o.chart.x, y=o.chart.y),
+        chart_candidates=[
+            ChartCandidateOut(type=c.type, x=c.x, y=list(c.y), series=c.series)
+            for c in o.chart_candidates
+        ],
         retry_count=o.retry_count,
         error=o.error,
         error_detail=o.error_detail,
@@ -822,6 +838,8 @@ class MessageResultOut(BaseModel):
     insights: list[dict[str, str]] = Field(default_factory=list[dict[str, str]])
     stats: dict[str, object] = Field(default_factory=dict[str, object])
     chart: ChartInfoOut
+    # 049(纯增):有序图表候选(存量档缺失→空,前端回落单图 chart)
+    chart_candidates: list[ChartCandidateOut] = []
     error: str | None = None
     # 047(纯增):原始技术错误(存量档缺失→None,前端不渲染折叠块)
     error_detail: str | None = None
@@ -860,6 +878,10 @@ def _msg_out(m: SessionMessage) -> SessionMessageOut:
             insights=r.insights,
             stats=r.stats,
             chart=ChartInfoOut(type=r.chart.type, x=r.chart.x, y=r.chart.y),
+            chart_candidates=[
+                ChartCandidateOut(type=c.type, x=c.x, y=list(c.y), series=c.series)
+                for c in r.chart_candidates
+            ],
             error=r.error,
             error_detail=r.error_detail,
             column_labels=r.column_labels,

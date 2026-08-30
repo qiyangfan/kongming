@@ -31,6 +31,7 @@ import { QueryErrorAlert } from "@/components/query-error";
 import { operLogPage, sqlAuditPage } from "@/lib/audit-api";
 import { systemApi } from "@/lib/system-api";
 import { endExclusive } from "@/lib/date-utils";
+import { displayUser } from "@/lib/display-user";
 
 const PAGE_SIZE = 20;
 
@@ -322,7 +323,9 @@ function SqlRows({
         <Fragment key={it.id}>
           <TableRow>
             <TableCell className="whitespace-nowrap text-muted-foreground">{fmtTime(it.created_at)}</TableCell>
-            <TableCell className="max-w-32 truncate" title={it.user_nickname ?? undefined}>{it.user_nickname ?? it.user_id?.slice(0, 8) ?? "系统"}</TableCell>
+            <TableCell className="max-w-32 truncate" title={it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}>
+              {it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}
+            </TableCell>
             <TableCell>{it.tenant_key}</TableCell>
             <TableCell>{it.datasource_key}</TableCell>
             <TableCell className="max-w-56 truncate" title={it.question ?? undefined}>{it.question ?? "—"}</TableCell>
@@ -398,7 +401,9 @@ function OperRows({
         <Fragment key={it.id}>
           <TableRow>
             <TableCell className="whitespace-nowrap text-muted-foreground">{fmtTime(it.created_at)}</TableCell>
-            <TableCell className="max-w-32 truncate" title={it.user_nickname ?? undefined}>{it.user_nickname ?? it.user_id?.slice(0, 8) ?? "系统"}</TableCell>
+            <TableCell className="max-w-32 truncate" title={it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}>
+              {it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}
+            </TableCell>
             <TableCell className="font-mono text-xs">{it.action}</TableCell>
             <TableCell className="max-w-48 truncate font-mono text-xs" title={it.target ?? undefined}>{it.target ?? "—"}</TableCell>
             <TableCell className="font-mono text-xs">{it.ip ?? "—"}</TableCell>

@@ -42,11 +42,14 @@ podman exec kongming-redis-1 redis-cli --scan --pattern 'km:ragctx:*' | xargs -r
 | `olist.yaml` | olist 单轮 16 题(smoke ×2) |
 | `sakila_multi_turn.yaml` / `olist_multi_turn.yaml` | 多轮 turns[](6+4 case) |
 | `datasource.yaml` | 动态数据源(sakila_dyn 显式 key ×3 + 跨租户拒绝 ×1) |
+| `default.yaml` | default 数据源负例(实体领域错配,expect_no_data ×2) |
 
 用例字段:`id`(tenant 前缀推断租户)/`question`/`gold_sql`/
 `expected_tables`/`category`;可选 `tenant`/`datasource_key`(动态路径)/
 `gold_database`(gold 直连独立业务库,动态源题用)/
-`expect_reject`(预期拒绝,无 gold_sql)/`smoke`。
+`expect_reject`(预期拒绝,无 gold_sql)/
+`expect_no_data`(预期哨兵短路 NO_DATA:success=false+verdict=NO_DATA+
+SQL 空=零执行,与 expect_reject 的 HTTP 拒绝不同形;不计严格分)/`smoke`。
 
 ## gold_sql 编写规范(新用例必守)
 
@@ -116,6 +119,12 @@ podman exec kongming-redis-1 redis-cli --scan --pattern 'km:ragctx:*' | xargs -r
 | 2026-08-22 | 019 ReAct 内核等价性(KM_EVAL_AGENT_MODE=react;rag_retrieve 工具内回退内省修复后) | — | react smoke 5/5 | — | — | — |
 | 2026-08-30 | 047 检索治理(视图不入知识+多轮召回历史继承+文档分流多轮门槛+自愈分类喂回+建议缓存级联失效+文案用户化);伴随知识 AI 再生成与存量视图/保留表条目对账清偿(sakila_mt_001 t2 gold 投影对齐规则 3/9 明细附名) | 34/48 (71%) | 47/48 (98%) | 11/12 (92%) | 4/4 | 45/48 (94%) |
 | 2026-08-30 | 048 聚合追问与去重护栏(understand 聚合口径显式化+构造条件复述、规则 5 聚合追问单行汇总、规则 9 对应关系组合去重+反例、olist_mt_003 t2 题面消歧「客户记录数」);三靶点收口:018 漏 DISTINCT/olist_mt_006 聚合口径丢失(3/3)/olist_mt_003 | 35/48 (73%) | 48/48 (100%) | 12/12 (100%) | 4/4 | 46/48 (96%) |
+| 2026-08-30 | 051 实体核对判据(规则 10 表级哨兵操作化+对位反例)+负例集 default.yaml ×2(expect_no_data,001 进 smoke;负例不计严格分,分母 +2)——正例零误伤,哨兵短路 ×3 轮稳定 | 34/50 (68%)* | 50/50 (100%) | 12/12 (100%) | 4/4 | 49/50 (98%) |
+| 2026-08-30 | 051 收尾 sakila_ext 中文注释补齐+重扫(知识变更,基线纪律复跑,同日二采;多轮未复跑与知识变更无涉)——宽松/动态持平零劣化,严格/表命中 ±1 属采样波动 | 35/50 (70%)* | 50/50 (100%) | — | 4/4 | 48/50 (96%) |
+
+> **051 注记**(2026-08-30):*严格分母含 2 题负例(expect_no_data 不计
+> 严格分);按正例口径对照为 34/48,与 048 基线 35 的 ±1 属 top-N 并列
+> 采样波动(宽松门禁两轮均满分)。
 
 > **019 注记**(2026-08-22):`KM_EVAL_AGENT_MODE=react` 环境变量使同一
 > 评估集经 ReAct 内核跑(请求携带 agent_mode=react;缺省 recipe 口径不变)。

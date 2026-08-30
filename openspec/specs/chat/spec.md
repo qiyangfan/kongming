@@ -143,48 +143,99 @@ chat_session + chat_message 持久化对话历史,首次问答自动新建会话
 
 ### Requirement: 图表可视化
 
-图表区支持 bar/line/pie/scatter 四种类型切换,按列特征推断默认类型
-(推断优先级:首列日期→line;存在两个数值列(任意位置)→scatter;
-否则按首列基数走 pie/bar——低基数≤8 类→pie、≤50→bar),图表可下载 PNG。
+图表区按后端候选列表渲染。控制面对每个成功结果按列角色画像(temporal/dimension/
+measure)与结果形状推断出**有序图表候选(0~3 个)**:整数标识列(如 store_id)与期间列
+(如 year)SHALL 恒判定为维度、丧失度量资格;每个候选 SHALL 自带完整绑定(类型+x 轴列+
+值列+可选系列维),类型 ∈ bar/line/pie/scatter(枚举不扩充);默认呈现排名最高候选;
+零候选(明细形状/不适配)SHALL NOT 渲染图表卡(表格即答案)。图表可下载 PNG。
 
-手动切换为当前结果卡片内的本地状态:切换只改变系列形态,不改变图表
-建议的 x/y 列映射(映射恒定);页面刷新或新消息进入后回落到后端建议
-类型。scatter 渲染按 x 列全数值探测分流:x 列全部可数值化时渲染数值-
-数值散点,否则退化为类目轴点图,不因非数值丢点致整图空白。
+切换器 SHALL 只渲染候选(每类型至多一项);单候选时 SHALL 隐藏切换器仅留下载按钮。
+手动切换为当前结果卡片内的本地状态:切换 SHALL 加载所候选的完整绑定(映射随候选,
+不再跨类型共享单一 x/y 映射);页面刷新或新消息进入后 SHALL 回落到后端首候选。
+scatter 渲染按 x 列全数值探测分流:x 列全部可数值化时渲染数值-数值散点(值轴 scale,
+不含零起点),否则退化为类目轴点图,不因非数值丢点致整图空白(存量档兼容路径保留)。
 
-#### Scenario: 多类型图表切换
-- GIVEN 查询返回可可视化的结果
-- WHEN 结果展示
-- THEN 图表区支持 bar/line/pie/scatter 四种类型切换
-- AND 切换不改变 x/y 列映射,仅改变系列形态
-
-#### Scenario: 切换状态回落
-- GIVEN 用户已手动切换图表类型
-- WHEN 页面刷新或同卡片新结果进入
-- THEN 图表类型回落到后端建议类型
+分组柱状图:结果形状为两维+单一度量时,SHALL 以低基数维作系列(逐系列着色)、高基数维
+作 x 轴(分组柱);时间维+分类维(低基数)+度量的时序分组 SHALL 以多系列 line 表达。
+多度量:单一分类维附多个度量时,bar/line SHALL 以度量为多系列(y 列表)并呈现图例。
+pie 资格闸:仅当存在单一低基数分类维(基数≤8 且标签唯一)+单一度量、该度量为可加聚合
+(计数/求和类)且值全非负时,pie 方可进入候选;否则 SHALL NOT 推荐 pie。
 
 #### Scenario: 图表类型推断
-推断优先级:首列日期 → line;否则存在两个数值列(任意位置)→ scatter;
-否则按首列基数走 pie/bar。
-- GIVEN 结果首列含日期
-- WHEN 推断默认类型
-- THEN 默认 line(时序趋势)
-- GIVEN 结果存在两个数值列(任意位置,含标识列前置形态)
-- THEN 默认 scatter(散点),x/y 取前两个数值列
-- GIVEN 结果首列为低基数分类(≤8 类)且仅一个数值列
-- THEN 默认 pie(占比)
+
+推断优先级:列角色画像(标识列/期间列恒为维度)之后,按形状映射有序候选。
+- GIVEN 结果含日期/时间维且存在度量
+- WHEN 推断候选
+- THEN 默认 line(x=时间列);另含低基数分类维时候选为多系列 line(系列=分类维)
+- GIVEN 结果无分类维且恰有两个度量列(如片长与租金)
+- WHEN 推断候选
+- THEN scatter 候选(x/y=两度量),数值-数值散点渲染,值轴 scale
+- GIVEN 结果为单一分类维(基数≤8,标签唯一)+单一可加非负度量
+- WHEN 推断候选
+- THEN 候选为 bar 为主、pie 为辅(排序在 bar 之后)
+- GIVEN 结果为单一分类维(基数 9~50)+度量
+- WHEN 推断候选
+- THEN 仅 bar 候选
+- GIVEN 结果为两维分组+单一度量(低基数维≤8、高基数维≤50)
+- WHEN 推断候选
+- THEN 分组柱状图候选(系列=低基数维,x=高基数维)
+- GIVEN 结果任一维基数>50(明细推定)、单度量无维、两维多度量或维数≥3
+- WHEN 推断候选
+- THEN 零候选,不渲染图表卡,数据表即完整答案
+
+#### Scenario: 多类型图表切换
+- GIVEN 查询返回可可视化的结果且候选数≥2
+- WHEN 结果展示
+- THEN 图表区切换器只渲染候选类型(每类型至多一项),默认选中首候选
+- AND 切换加载所候选的完整绑定(x/y/系列随候选),不跨类型共享单一映射
+
+#### Scenario: 单候选隐藏切换器
+- GIVEN 某结果的候选仅 1 个
+- WHEN 图表卡渲染
+- THEN 不显示类型切换器,仅保留下载按钮
+
+#### Scenario: 分组柱系列按类目对齐
+- GIVEN 两维分组结果中各系列的类目行序不一致(或缺某组合)
+- WHEN 渲染分组柱
+- THEN 类目轴为 x 唯一值全集,每系列取数按类目对号入座(缺组合空位)
+- AND 柱体占满整个类目轴,SHALL NOT 出现柱体挤在半轴或值归属错类目
+
+#### Scenario: 标识列不作为度量(碎刻度根除)
+- GIVEN 结果为两维分组(如 store_id×category×count),store_id 为整型标识列
+- WHEN 推断候选
+- THEN store_id 恒为维度,SHALL NOT 产生以标识列为 x 轴度量的 scatter 建议
+- AND 候选为分组柱状图(系列=低基数维),x 轴不再出现小数碎刻度
+
+#### Scenario: 多度量系列
+- GIVEN 结果为单一分类维+两个度量
+- WHEN 渲染 bar 候选
+- THEN 两度量作两个系列呈现并显示图例
+
+#### Scenario: 时序分组多系列
+- GIVEN 结果为时间维+低基数分类维+度量(如各门店按月销售额)
+- WHEN 推断候选
+- THEN line 候选以分类维为系列多系列渲染
 
 #### Scenario: scatter 退化渲染
-- GIVEN 用户手动切换到 scatter 且 x 列含非数值
+- GIVEN 渲染 scatter 且 x 列含非数值(存量档旧建议形态)
 - WHEN 渲染
 - THEN 退化为类目轴点图,不因非数值丢点致整图空白
+
+#### Scenario: 切换状态回落
+- GIVEN 用户已手动切换到非首候选
+- WHEN 页面刷新或同卡片新结果进入
+- THEN 图表类型回落到后端首候选,并加载该候选的绑定
+
+#### Scenario: 存量档兼容
+- GIVEN 历史消息仅存单一 chart(type/x/y,无候选列表)
+- WHEN 回显渲染
+- THEN 按存量单一图表渲染不报错;缺档重算路径 SHALL 产出候选列表
 
 #### Scenario: 下载图表 PNG
 - GIVEN 图表已渲染
 - WHEN 点击下载
 - THEN 生成 PNG(背景取当前主题卡片底色,非透明)并由浏览器下载
   「图表-<时间戳>.png」
-
 ### Requirement: 多轮上下文后端补全
 
 显式 history 优先:请求携带非空 history 时直接使用;未携带或为空且
@@ -615,3 +666,33 @@ chat_message.status SHALL 支持第四态 `NO_DATA`:agent verdict=NO_DATA
 - GIVEN PASS/BLOCKED/ERROR 三类既有终态
 - WHEN 终态组装与落库
 - THEN 映射与呈现行为与引入前逐字一致
+### Requirement: 结果统计呈现
+
+查询结果的统计徽标 SHALL 面向用户呈现可读文案:控制面在落库与返回前 SHALL 将
+统计键映射为用户可读形态——行数键呈现「行数」;「列名_max/_min/_avg」形态键在
+列名唯一命中结果列时,SHALL 以该列的呈现层列标签(041 双轨制单源)映射为
+「{列标签} 最高/最低/均值」;列名歧义或未命中时 SHALL 保留原键(不劣化回退)。
+读档回显路径 SHALL 对存量档再应用一次映射(幂等:已映射键与非统计形态键原样
+保留),存量英文键自然升级,SHALL NOT 要求数据回填。统计徽标呈现 SHALL NOT 暴露
+内部标识列/期间列的统计(资格过滤在 Agent 面统计生成处完成,见 nl2sql-agent
+「结果智能分析」)。
+
+#### Scenario: 统计键经列标签中文化
+- GIVEN 结果列 inventory_count 带列标签「库存数量」,stats 含 inventory_count_max=181
+- WHEN 结果落库与返回
+- THEN 徽标呈现「库存数量 最高 181」,SHALL NOT 出现 inventory_count_max 原键
+
+#### Scenario: 行数键中文化
+- GIVEN stats 含 rows 键
+- WHEN 结果落库与返回
+- THEN 呈现「行数 {n}」
+
+#### Scenario: 列未命中保留原键
+- GIVEN stats 含某键而键前缀在结果列中无对应列(异源键/畸形档)
+- WHEN 应用键映射
+- THEN SHALL 保留原键(不劣化回退)
+
+#### Scenario: 存量档读档归一(幂等)
+- GIVEN 历史消息 stats 含英文键 inventory_count_max(落库早于本变更)
+- WHEN 回显渲染
+- THEN 读档映射后呈现中文形态,无需数据回填;已中文化键 SHALL NOT 被二次改写

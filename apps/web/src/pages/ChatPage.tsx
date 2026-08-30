@@ -133,6 +133,9 @@ function toSyntheticMessage(out: ChatQueryOut): SessionMessageOut {
       insights: out.insights,
       stats: out.stats,
       chart: out.chart,
+      // 049:候选快照同源(与 041 column_labels 同款先例)——漏带会使快照期
+      // 回落单图绑定、历史 refetch 后切换到候选绑定,产生一次视觉跳变
+      chart_candidates: out.chart_candidates ?? [],
       error: out.error,
       error_detail: out.error_detail ?? null, // 047 同源
       // 026:终态快照携带产物卡(与历史回显 MessageResultOut.artifacts 同形),

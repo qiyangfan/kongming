@@ -2733,6 +2733,24 @@ export interface components {
             /** New Password */
             new_password: string;
         };
+        /**
+         * ChartCandidateOut
+         * @description 图表候选(049 纯增):候选自带完整绑定,y 为值列(多度量多系列),
+         *     series 为系列维(分组柱/时序多系列)。既有 chart 字段保留=首候选展平。
+         */
+        ChartCandidateOut: {
+            /** Type */
+            type: string;
+            /** X */
+            x?: string | null;
+            /**
+             * Y
+             * @default []
+             */
+            y: string[];
+            /** Series */
+            series?: string | null;
+        };
         /** ChartInfoOut */
         ChartInfoOut: {
             /** Type */
@@ -2803,6 +2821,11 @@ export interface components {
             /** Sql */
             sql: string;
             chart: components["schemas"]["ChartOut"];
+            /**
+             * Chart Candidates
+             * @default []
+             */
+            chart_candidates: components["schemas"]["ChartCandidateOut"][];
             /** Retry Count */
             retry_count: number;
             /** Error */
@@ -3144,6 +3167,8 @@ export interface components {
             user_id: string;
             /** User Nickname */
             user_nickname: string | null;
+            /** User Username */
+            user_username?: string | null;
             /** Tenant Id */
             tenant_id: string;
             /** Tenant Key */
@@ -3592,6 +3617,11 @@ export interface components {
                 [key: string]: unknown;
             };
             chart: components["schemas"]["ChartInfoOut"];
+            /**
+             * Chart Candidates
+             * @default []
+             */
+            chart_candidates: components["schemas"]["ChartCandidateOut"][];
             /** Error */
             error?: string | null;
             /** Error Detail */
@@ -3708,6 +3738,8 @@ export interface components {
             user_id: string | null;
             /** User Nickname */
             user_nickname: string | null;
+            /** User Username */
+            user_username?: string | null;
             /** Action */
             action: string;
             /** Target */
@@ -4226,6 +4258,8 @@ export interface components {
             user_id: string | null;
             /** User Nickname */
             user_nickname: string | null;
+            /** User Username */
+            user_username?: string | null;
             /** Tenant Id */
             tenant_id: string;
             /** Tenant Key */

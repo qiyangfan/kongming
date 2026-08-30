@@ -53,6 +53,7 @@ import {
 } from "@/lib/feedback-api";
 import { hasPerm } from "@/lib/nav";
 import { systemApi } from "@/lib/system-api";
+import { displayUser } from "@/lib/display-user";
 
 const PAGE_SIZE = 20;
 
@@ -316,7 +317,9 @@ export default function FeedbackPage() {
                   <TableCell className="whitespace-nowrap text-muted-foreground">
                     {item.feedback_time ? item.feedback_time.slice(0, 16).replace("T", " ") : "—"}
                   </TableCell>
-                  <TableCell className="max-w-32 truncate" title={item.user_nickname ?? undefined}>{item.user_nickname ?? item.user_id.slice(0, 8)}</TableCell>
+                  <TableCell className="max-w-32 truncate" title={displayUser(item.user_nickname, item.user_username)}>
+                    {displayUser(item.user_nickname, item.user_username)}
+                  </TableCell>
                   <TableCell>{item.tenant_key}</TableCell>
                   <TableCell>{item.datasource_key}</TableCell>
                   <TableCell>
@@ -450,7 +453,7 @@ function FeedbackDetailDialog({
         <DialogHeader>
           <DialogTitle>反馈详情</DialogTitle>
           <DialogDescription>
-            {item.user_nickname ?? item.user_id.slice(0, 8)} · {item.tenant_key} ·{" "}
+            {displayUser(item.user_nickname, item.user_username)} · {item.tenant_key} ·{" "}
             {item.datasource_key}
           </DialogDescription>
         </DialogHeader>

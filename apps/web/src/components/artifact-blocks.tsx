@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 
 import { ChartView, type ChartDatum, type ChartTune } from "@/components/chart-view";
+import type { ChartSpec } from "@/components/chart-shared";
 import { MarkdownText } from "@/components/markdown-text";
 import { rerunArtifact } from "@/lib/chat-api";
 import { Button } from "@/components/ui/button";
@@ -129,20 +130,28 @@ export function SqlArtifactCard({
 /* chart 卡调参面板(spec「图表调参重绘」):标题/轴名本地 state 透传
    ChartView 即时重绘,零网络调用;类型切换沿用 ChartView 内建 toggle */
 export function ChartArtifactCard({
-  chart,
+  candidates,
   data,
+  labels,
 }: {
-  chart: { type: string; x: string | null; y: string | null };
+  candidates: ChartSpec[];
   data: ChartDatum;
+  labels?: string[];
 }) {
   const [tune, setTune] = useState<ChartTune>({ title: "", xName: "", yName: "" });
+  // 041 双轨:调参占位同用列标签,与图表轴呈现一致(缺失回退物理列名)
+  const colLabel = (col?: string | null): string | null => {
+    if (!col) return null;
+    const i = data.columns.indexOf(col);
+    return i >= 0 ? labels?.[i] || col : col;
+  };
   // R1-F6:同页多张 chart 卡,id 硬编码会重复(点 Label 聚焦到首卡);
   // useId 后缀保证每卡唯一
   const uid = useId();
 
   return (
     <div className="rounded-lg border border-border bg-card px-2 py-1">
-      <ChartView chart={chart} data={data} tune={tune} />
+      <ChartView candidates={candidates} data={data} tune={tune} labels={labels} />
       <Collapsible>
         <CollapsibleTrigger className="group flex items-center gap-1 px-2 pb-1 text-xs text-muted-foreground hover:text-foreground">
           <ChevronRight
@@ -176,7 +185,7 @@ export function ChartArtifactCard({
                 value={tune.xName}
                 onChange={(e) => setTune((t) => ({ ...t, xName: e.target.value }))}
                 maxLength={30}
-                placeholder={chart.x ?? "留空不显示"}
+                placeholder={colLabel(candidates[0]?.x) ?? "留空不显示"}
                 className="h-8 text-xs"
               />
             </div>
@@ -189,7 +198,7 @@ export function ChartArtifactCard({
                 value={tune.yName}
                 onChange={(e) => setTune((t) => ({ ...t, yName: e.target.value }))}
                 maxLength={30}
-                placeholder={chart.y ?? "留空不显示"}
+                placeholder={colLabel(candidates[0]?.y[0]) ?? "留空不显示"}
                 className="h-8 text-xs"
               />
             </div>

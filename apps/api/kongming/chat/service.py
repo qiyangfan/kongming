@@ -22,10 +22,12 @@ from typing import Any, cast
 from kongming.chat.agent_client import AgentClient, AgentReply, AgentUnavailable, parse_agent_reply
 from kongming.chat.export import to_csv, to_xlsx
 from kongming.chat.models import (
+    ChartCandidate,
     ChartSuggestion,
     derive_artifacts,
+    humanize_stats,
     resolve_column_labels,
-    suggest_chart,
+    suggest_charts,
 )
 from kongming.chat.ports import (
     AttachmentChecker,
@@ -110,6 +112,8 @@ class ChatOutcome:
     rows: list[list[object]] = field(default_factory=list[list[object]])
     sql: str = ""
     chart: ChartSuggestion = field(default_factory=lambda: ChartSuggestion("none"))
+    # 049:有序图表候选(首候选即 chart;落库/契约纯增,存量零回归)
+    chart_candidates: list[ChartCandidate] = field(default_factory=list[ChartCandidate])
     retry_count: int = 0
     error: str | None = None
     # 047:原始技术错误(FAILED 时携带;error 为用户语言,细节经前端折叠披露)
@@ -158,6 +162,8 @@ class MessageResult:
     insights: list[dict[str, str]] = field(default_factory=list[dict[str, str]])
     stats: dict[str, object] = field(default_factory=dict[str, object])
     chart: ChartSuggestion = field(default_factory=lambda: ChartSuggestion("none"))
+    # 049:有序图表候选(读档优先;存量档缺失→空,消费方回落单图 chart)
+    chart_candidates: list[ChartCandidate] = field(default_factory=list[ChartCandidate])
     error: str | None = None
     # 047:原始技术错误(读档;存量档缺失→None,前端不渲染折叠块)
     error_detail: str | None = None
@@ -886,8 +892,17 @@ class ChatService:
             ]
             error_raw = filtered[1 + n_ins] or None
             sql_text = filtered[2 + n_ins]
+        # 049:形状→有序候选(纯函数,含 sql 供 pie 可加闸);首候选展平为存量
+        # 「默认单图」,chart 字段语义不变
+        chart_candidates = (
+            suggest_charts(reply.columns, reply.rows, sql=sql_text)
+            if reply.success
+            else []
+        )
         chart = (
-            suggest_chart(reply.columns, reply.rows) if reply.success else ChartSuggestion("none")
+            chart_candidates[0].as_default()
+            if chart_candidates
+            else ChartSuggestion("none")
         )
         # 041:呈现层列标签(仅成功有结果集时;物理名/显示名双轨,SQL 不动)
         column_labels = (
@@ -900,6 +915,9 @@ class ChatService:
             if reply.success
             else []
         )
+        # 050:统计键用户可读化(041 标签单源;落库即事实源,回显读档幂等再应用)
+        stats = humanize_stats(reply.stats, reply.columns, column_labels)
+
         error: str | None = None
         error_detail: str | None = None
         if status == "REJECTED":
@@ -938,8 +956,17 @@ class ChatService:
                         "column_labels": column_labels,  # 041
                         "rows": reply.rows,
                         "insights": insights,
-                        "stats": reply.stats,
+                        "stats": stats,
                         "chart": {"type": chart.type, "x": chart.x, "y": chart.y},
+                        "chart_candidates": [  # 049 随档(回显读档即事实源)
+                            {
+                                "type": c.type,
+                                "x": c.x,
+                                "y": list(c.y),
+                                "series": c.series,
+                            }
+                            for c in chart_candidates
+                        ],
                         "artifacts": artifacts,  # 026
                         "error": error,
                         "error_detail": error_detail,  # 047 原始技术错误随档
@@ -994,11 +1021,12 @@ class ChatService:
             verdict=reply.verdict,
             summary=summary,
             insights=insights,
-            stats=reply.stats,
+            stats=stats,
             columns=reply.columns,
             rows=reply.rows,
             sql=sql_text,
             chart=chart,
+            chart_candidates=chart_candidates,
             retry_count=reply.retry_count,
             error=error,
             error_detail=error_detail,
@@ -1263,8 +1291,8 @@ class ChatService:
 
     @staticmethod
     def _to_message(row: dict[str, object]) -> SessionMessage:
-        """行 → 回显项;result_json 读档优先,存量(005 形态)缺失 x/y/error 时
-        以 suggest_chart 纯函数确定性重算补全(落库输入=原始输入,重算=原始输出)。"""
+        """行 → 回显项;result_json 读档优先,存量(仅单图/005 形态)缺失候选时
+        以 suggest_charts 纯函数确定性重算补全(落库输入=原始输入,重算=原始输出)。"""
         role = str(row["role"])
         result: MessageResult | None = None
         error: str | None = None
@@ -1296,11 +1324,39 @@ class ChatService:
                 else []
             )
             ins_raw = d.get("insights")
+            # 049:候选读档优先;存量档(仅单图/005 形态)回落解析,缺档重算
+            cands_raw = d.get("chart_candidates")
+            chart_candidates: list[ChartCandidate] = []
+            if isinstance(cands_raw, list):
+                for c in cast("list[object]", cands_raw):
+                    if not isinstance(c, dict):
+                        continue
+                    cd = cast("dict[str, object]", c)
+                    type_raw = cd.get("type")
+                    if not isinstance(type_raw, str):
+                        continue
+                    y_raw_list = cd.get("y")
+                    x_c = cd.get("x")
+                    series_raw = cd.get("series")
+                    chart_candidates.append(
+                        ChartCandidate(
+                            type=type_raw,
+                            x=None if x_c is None else str(x_c),
+                            y=(
+                                tuple(str(v) for v in cast("list[object]", y_raw_list))
+                                if isinstance(y_raw_list, list)
+                                else ()
+                            ),
+                            series=None if series_raw is None else str(series_raw),
+                        )
+                    )
             chart_raw = d.get("chart")
             # isinstance 守卫后 cast 收窄键型(mcp client 同款;守卫语义与顺序不变)
             chart_d = cast("dict[str, object]", chart_raw) if isinstance(chart_raw, dict) else None
-            if chart_d is not None and chart_d.get("type"):
-                # 取值局部化:与原双 .get 表达式同值同判(is None 判 None 语义不变)
+            if chart_candidates:
+                chart = chart_candidates[0].as_default()
+            elif chart_d is not None and chart_d.get("type"):
+                # 存量单图档(049 前):按档渲染单图,候选置空(前端回落单图绑定)
                 x_raw = chart_d.get("x")
                 y_raw = chart_d.get("y")
                 chart = ChartSuggestion(
@@ -1309,8 +1365,15 @@ class ChatService:
                     y=None if y_raw is None else str(y_raw),
                 )
             else:
-                # 存量兼容:005 只存 chartType(无 x/y)
-                chart = suggest_chart(cols, rws)
+                # 存量兼容:005 只存 chartType(无 x/y)/缺档 → 纯函数重算
+                chart_candidates = suggest_charts(
+                    cols, rws, sql=str(row.get("sql_text") or "")
+                )
+                chart = (
+                    chart_candidates[0].as_default()
+                    if chart_candidates
+                    else ChartSuggestion("none")
+                )
             err_raw = d.get("error")
             error = str(err_raw) if err_raw is not None else None
             # 047 读档:原始技术错误(存量档缺失→None)
@@ -1318,6 +1381,19 @@ class ChatService:
             if err_detail_raw is not None:
                 error_detail = str(err_detail_raw)
             stats_raw = d.get("stats")
+            # 050:labels 先行读出供统计键归一;存量英文键幂等升级
+            col_labels = (
+                [str(x) for x in cast("list[object]", lb_raw)]
+                if isinstance(lb_raw := d.get("column_labels"), list)
+                else []
+            )
+            stats_h = (
+                humanize_stats(
+                    dict(cast("dict[str, object]", stats_raw)), cols, col_labels
+                )
+                if isinstance(stats_raw, dict)
+                else {}
+            )
             # 026:artifacts 读档;缺档(026 前存量)按要素确定性重算
             art_raw = d.get("artifacts")
             if isinstance(art_raw, list):
@@ -1348,20 +1424,13 @@ class ChatService:
                     if isinstance(ins_raw, list)
                     else []
                 ),
-                stats=(
-                    dict(cast("dict[str, object]", stats_raw))
-                    if isinstance(stats_raw, dict)
-                    else {}
-                ),
+                stats=stats_h,
                 chart=chart,
+                chart_candidates=chart_candidates,
                 error=error,
                 error_detail=error_detail,
                 artifacts=artifacts,
-                column_labels=(  # 041 读档;存量档缺失→空(消费方回退 columns)
-                    [str(x) for x in cast("list[object]", lb_raw)]
-                    if isinstance(lb_raw := d.get("column_labels"), list)
-                    else []
-                ),
+                column_labels=col_labels,  # 041 读档;存量档缺失→空(消费方回退 columns)
             )
         question = row.get("question")
         summary = row.get("summary")

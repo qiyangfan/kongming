@@ -1,13 +1,13 @@
-"""chat 领域模型(零框架,宪法 Article II):图表配置建议纯函数。
+"""chat 领域模型(零框架,宪法 Article II):图表候选推荐纯函数(049)。
 
-推断规则(chat spec「图表可视化」):
-- 首列日期/时间 → line(时序趋势);
-- 存在两个数值列(任意位置)→ scatter(x/y=前两个数值列;
-  011 吸收列序解耦——prompt 会给明细附标识列,数值列未必在首列);
-- 首列低基数分类(≤8 类)+ 有数值列 → pie(占比);
-- 首列分类 + 有数值列(基数 ≤50) → bar;
-- 其余(明细/无数值列/首列为唯一数值列) → none。
-基数 >50 推定为明细行,不强加图表。
+列角色画像(temporal/dimension/measure)→ 结果形状 → 有序图表候选(0~3 个,
+每类型至多一个;候选自带 x/y/series 绑定),参照 Tableau「Show Me」思路:
+- temporal 维(值形态日期/期间列名)→ line(时序;附低基数分类维则多系列);
+- 单分类维 + 度量 → bar 为主;pie 过「可加聚合 + 标签唯一 + 值非负」闸后为辅;
+- 两分类维 + 单度量 → 分组柱状图(bar + series=低基数维);
+- 双度量无维 → scatter;明细/不适配形状 → 零候选(表格即答案)。
+标识列(store_id 类)与期间列(year 类)恒为维度、丧失度量资格——散点 x 轴按
+值处理离散 id 产生的碎刻度从根因消除,而非对个例打补丁。
 """
 
 import datetime as dt
@@ -19,10 +19,14 @@ from typing import TypedDict
 import sqlglot
 from sqlglot import exp
 
-_PIE_MAX_CARDINALITY = 8  # 低基数分类上界(chat spec)
+_PIE_MAX_CARDINALITY = 8  # pie/低基数系列维上界(chat spec)
 _BAR_MAX_CARDINALITY = 50  # 超此基数推定明细,不配图
+_MAX_Y_COLUMNS = 3  # 多度量 y 截断(图例可读性)
 
 _DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}")
+# 标识列名信号:num 后缀刻意不入——中文库 order_num(订单数)类计数量是度量
+_ID_NAME = re.compile(r"(?:^|_)(?:id|no|code)$|^id_")
+_PERIOD_NAMES = {"year", "quarter", "month", "week", "day"}
 
 
 @dataclass(frozen=True)
@@ -37,11 +41,27 @@ class Suggestion:
 
 @dataclass(frozen=True)
 class ChartSuggestion:
-    """type: line / bar / pie / scatter / none;x/y 为列名(none 时为空)。"""
+    """存量「默认单图」值对象(049 起由首候选展平):type ∈ line/bar/pie/scatter/none;
+    x/y 为列名(none 时为空)。落库 chart 键与契约 chart 字段形态不变。"""
 
     type: str
     x: str | None = None
     y: str | None = None
+
+
+@dataclass(frozen=True)
+class ChartCandidate:
+    """图表候选(049):type ∈ line/bar/pie/scatter;y 为值列(多度量多系列),
+    series 为系列维(分组柱/时序多系列),无则 None。"""
+
+    type: str
+    x: str | None = None
+    y: tuple[str, ...] = ()
+    series: str | None = None
+
+    def as_default(self) -> ChartSuggestion:
+        """展平为存量「默认单图」值对象(y 取首列;落库/契约 chart 形态不变)。"""
+        return ChartSuggestion(self.type, x=self.x, y=self.y[0] if self.y else None)
 
 
 def _is_temporal(v: object) -> bool:
@@ -55,36 +75,195 @@ def _is_numeric(v: object) -> bool:
     return isinstance(v, (int, float, Decimal)) and not isinstance(v, bool)
 
 
-def suggest_chart(columns: list[str], rows: list[list[object]]) -> ChartSuggestion:
-    if len(columns) < 2 or not rows:
-        return ChartSuggestion("none")
-    first_vals = [r[0] for r in rows if len(r) > 0]
-    if not first_vals:
-        return ChartSuggestion("none")
-    # 全列扫描(含首列):scatter 双数值判定不依赖列序(标识列可在任意位置)
-    numeric_cols = [
+_ROLE_TEMPORAL = "temporal"
+_ROLE_DIMENSION = "dimension"
+_ROLE_MEASURE = "measure"
+
+
+def _is_dense_sequence(vals: list[object]) -> bool:
+    """整数稠密序列(min∈{0,1}、连续、distinct≤16、max≤64)→ 维度信号
+    (无名形态的小值域枚举/序号兜底;阈值刻意收紧,design D1)。"""
+    ints = [v for v in vals if isinstance(v, int) and not isinstance(v, bool)]
+    if not ints or len(ints) != len(vals):
+        return False
+    distinct = set(ints)
+    if not 1 < len(distinct) <= 16:
+        return False
+    lo, hi = min(ints), max(ints)
+    return lo in (0, 1) and hi <= 64 and hi - lo + 1 == len(distinct)
+
+
+def _profile_columns(columns: list[str], rows: list[list[object]]) -> list[str]:
+    """列角色画像(design D1,先中先停):temporal(值形态)→ 期间列/标识列
+    (名称信号)→ measure(其余非 bool 数值)→ dimension(分类)。
+    整数稠密序列兜底仅当降维后仍剩至少一个度量才落地——防小值域计数列被
+    降维后度量集归零,把本可配图的结果打成零候选。"""
+    roles: list[str] = []
+    for i, name in enumerate(columns):
+        vals = [r[i] for r in rows if len(r) > i]
+        lowered = name.lower()
+        if vals and all(_is_temporal(v) for v in vals):
+            roles.append(_ROLE_TEMPORAL)
+        elif lowered in _PERIOD_NAMES or _ID_NAME.search(lowered):
+            roles.append(_ROLE_DIMENSION)
+        elif any(_is_numeric(v) for v in vals):
+            roles.append(_ROLE_MEASURE)
+        else:
+            roles.append(_ROLE_DIMENSION)
+    dense = [
         i
-        for i in range(len(columns))
-        if any(_is_numeric(r[i]) for r in rows if len(r) > i)
+        for i, role in enumerate(roles)
+        if role == _ROLE_MEASURE
+        and _is_dense_sequence([r[i] for r in rows if len(r) > i])
     ]
-    if not numeric_cols:
-        return ChartSuggestion("none")
-    if all(_is_temporal(v) for v in first_vals):
-        # temporal 首列自身非数值,y 必在其后
-        return ChartSuggestion("line", x=columns[0], y=columns[numeric_cols[0]])
-    if len(numeric_cols) >= 2:
-        return ChartSuggestion(
-            "scatter", x=columns[numeric_cols[0]], y=columns[numeric_cols[1]]
+    total_measures = sum(1 for r in roles if r == _ROLE_MEASURE)
+    if dense and len(dense) < total_measures:
+        for i in dense:
+            roles[i] = _ROLE_DIMENSION
+    return roles
+
+
+def _additive_outputs(sql: str) -> set[str]:
+    """可加聚合(COUNT/SUM)的输出列名(未别名取 PG 默认列名);空 SQL/解析
+    失败 → 空集(fail-closed,pie 是锦上添花,排除比误推更符合「宁缺毋滥」)。"""
+    if not sql.strip():
+        return set()
+    try:
+        stmt = next(
+            (
+                s
+                for s in sqlglot.parse(sql, read="postgres")
+                if isinstance(s, exp.Select)
+            ),
+            None,
         )
-    if 0 in numeric_cols:
-        return ChartSuggestion("none")  # 仅首列数值:单个数值列不成对,不猜
-    y = columns[numeric_cols[0]]
-    cardinality = len({str(v) for v in first_vals})
-    if cardinality <= _PIE_MAX_CARDINALITY:
-        return ChartSuggestion("pie", x=columns[0], y=y)
-    if cardinality <= _BAR_MAX_CARDINALITY:
-        return ChartSuggestion("bar", x=columns[0], y=y)
-    return ChartSuggestion("none")
+        if stmt is None:
+            return set()
+        out: set[str] = set()
+        for p in stmt.selects:
+            inner = p.this if isinstance(p, exp.Alias) else p
+            if isinstance(inner, exp.Count):
+                out.add((p.alias or "count").lower())
+            elif isinstance(inner, exp.Sum):
+                out.add((p.alias or "sum").lower())
+        return out
+    except Exception:  # noqa: BLE001  # 任何解析异常按不可加处理(标签永不阻断同款)
+        return set()
+
+
+def suggest_charts(
+    columns: list[str], rows: list[list[object]], sql: str = ""
+) -> list[ChartCandidate]:
+    """结果形状 → 有序图表候选(design D3;纯函数,同步/流式/回显三路径同源,
+    回显缺档按同输入重算)。维基数=行集内 distinct 值数;零候选=不配图。"""
+    if len(columns) < 2 or not rows:
+        return []
+
+    def card(i: int) -> int:
+        return len({str(r[i]) for r in rows if len(r) > i})
+
+    roles = _profile_columns(columns, rows)
+    temporal = [i for i, r in enumerate(roles) if r == _ROLE_TEMPORAL]
+    dims = [i for i, r in enumerate(roles) if r == _ROLE_DIMENSION]
+    measures = [i for i, r in enumerate(roles) if r == _ROLE_MEASURE]
+    if not measures:
+        return []
+    y_cols = tuple(columns[i] for i in measures[:_MAX_Y_COLUMNS])
+
+    if temporal:
+        t = temporal[0]
+        if not dims:
+            return [ChartCandidate("line", x=columns[t], y=y_cols)]
+        if len(dims) == 1 and card(dims[0]) <= _PIE_MAX_CARDINALITY:
+            return [
+                ChartCandidate(
+                    "line", x=columns[t], y=y_cols, series=columns[dims[0]]
+                )
+            ]
+        return []  # T+多维/高基数维:粒度超单图表达,宁缺毋滥
+
+    if len(dims) == 1:
+        di = dims[0]
+        if card(di) > _BAR_MAX_CARDINALITY:
+            return []
+        cands = [ChartCandidate("bar", x=columns[di], y=y_cols)]
+        first = columns[measures[0]]
+        labels = {str(r[di]) for r in rows if len(r) > di}
+        vals = [r[measures[0]] for r in rows if len(r) > measures[0]]
+        if (
+            card(di) <= _PIE_MAX_CARDINALITY
+            and len(labels) == len(rows)  # 标签唯一(GROUP BY 键语义)
+            and columns[di].lower() not in _PERIOD_NAMES  # 期间维(年份)非构成整体
+            and first.lower() in _additive_outputs(sql)  # 可加聚合才谈构成
+            and all(
+                isinstance(v, (int, float, Decimal))
+                and not isinstance(v, bool)
+                and v >= 0
+                for v in vals
+            )
+        ):
+            cands.append(ChartCandidate("pie", x=columns[di], y=(first,)))
+        return cands
+
+    if len(dims) == 2 and len(measures) == 1:
+        low, high = sorted(dims, key=card)
+        # 分组柱语义闸:x 标签须跨系列重复(真 GROUP BY 形状);小表明细行
+        # 标签唯一(每行一个 x 值),分组柱退化成逐行摆柱,零候选
+        if (
+            card(low) <= _PIE_MAX_CARDINALITY
+            and card(high) <= _BAR_MAX_CARDINALITY
+            and card(high) < len(rows)
+        ):
+            return [
+                ChartCandidate(
+                    "bar", x=columns[high], y=y_cols, series=columns[low]
+                )
+            ]
+        return []
+
+    if not dims and len(measures) >= 2:
+        return [
+            ChartCandidate(
+                "scatter", x=columns[measures[0]], y=(columns[measures[1]],)
+            )
+        ]
+    return []  # 两维多度量/≥3 维等:任何单图必失真,表格即答案
+
+
+# ============ 050 结果统计键名用户化 ============
+
+_STAT_KIND_CN = {"max": "最高", "min": "最低", "avg": "均值"}
+
+
+def humanize_stats(
+    stats: dict[str, object], columns: list[str], labels: list[str]
+) -> dict[str, object]:
+    """统计键 → 用户可读形态(纯函数,幂等):rows→「行数」;「{列}_max/_min/_avg」
+    在列名唯一命中结果列时→「{列标签} 最高/最低/均值」(041 列标签单源;标签
+    缺失回退物理列名);歧义/未命中保留原键 fail-open。已中文化键不匹配
+    「列_后缀」形态,二次应用原样保留(存量档读档归一路径依赖此幂等性)。"""
+    out: dict[str, object] = {}
+    lowered = [c.lower() for c in columns]
+    for k, v in stats.items():
+        if k == "rows":
+            out["行数"] = v
+            continue
+        mapped = False
+        for suffix, cn in _STAT_KIND_CN.items():
+            mark = f"_{suffix}"
+            if not k.endswith(mark):
+                continue
+            col = k[: -len(mark)].lower()
+            hits = [i for i, c in enumerate(lowered) if c == col]
+            if len(hits) == 1:
+                i = hits[0]
+                label = labels[i] if i < len(labels) and labels[i] else columns[i]
+                out[f"{label} {cn}"] = v
+                mapped = True
+            break  # 一键至多匹配一种后缀,未命中即原样保留
+        if not mapped:
+            out[k] = v
+    return out
 
 
 # ============ 026 conversation-artifacts:产物派生纯函数 ============

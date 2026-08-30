@@ -589,6 +589,22 @@ def test_compute_stats_numeric_and_bool() -> None:
     assert "name_max" not in stats
 
 
+def test_compute_stats_excludes_identifier_and_period_columns() -> None:
+    """050:标识/期间列与整数稠密序列不具备度量资格,不产出统计键。"""
+    # store_id 名称信号+稠密序列;year 期间词;cnt 正常度量保留
+    stats = nodes.compute_stats(
+        ["store_id", "year", "cnt"],
+        [[1, 2005, 64], [2, 2006, 58], [1, 2005, 61]],
+    )
+    assert stats["rows"] == 3
+    assert "store_id_max" not in stats and "store_id_avg" not in stats
+    assert "year_max" not in stats and "year_min" not in stats
+    assert stats["cnt_max"] == 64 and stats["cnt_min"] == 58 and stats["cnt_avg"] == 61.0
+    # 大值域整数(年龄类)不受稠密规则误伤
+    stats = nodes.compute_stats(["age"], [[18], [35], [60]])
+    assert stats["age_max"] == 60 and stats["age_min"] == 18
+
+
 @pytest.mark.parametrize(
     ("raw", "summary", "n_insights"),
     [

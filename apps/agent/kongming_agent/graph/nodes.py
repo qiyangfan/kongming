@@ -446,8 +446,36 @@ async def doc_answer(state: AgentState) -> dict[str, object]:
     }
 
 
+# 标识列名信号与期间词:与 api 侧 049 图表列角色画像同规则(跨进程各自落地的
+# 纯值面小规则,注释互引防漂移;num 后缀刻意不入——order_num 类计数量是度量)
+_STAT_ID_NAME = re.compile(r"(?:^|_)(?:id|no|code)$|^id_")
+_STAT_PERIOD_NAMES = {"year", "quarter", "month", "week", "day"}
+
+
+def _is_stat_worthy(col: str, values: list[int | float]) -> bool:
+    """列是否具备统计度量资格(050):标识/期间名称信号,或整数稠密序列
+    (起点 0/1、连续、1<去重数≤16、上界≤64)的列无统计语义,不产出
+    max/min/avg——内部 id 不进统计、不喂 LLM、不上前端徽标。"""
+    lowered = col.lower()
+    if _STAT_ID_NAME.search(lowered) or lowered in _STAT_PERIOD_NAMES:
+        return False
+    ints = [v for v in values if isinstance(v, int)]
+    if ints and len(ints) == len(values):
+        distinct = set(ints)
+        lo, hi = min(ints), max(ints)
+        if (
+            1 < len(distinct) <= 16
+            and lo in (0, 1)
+            and hi <= 64
+            and hi - lo + 1 == len(distinct)
+        ):
+            return False
+    return True
+
+
 def compute_stats(columns: list[str], rows: list[list[object]]) -> dict[str, object]:
-    """本地确定性统计:行数 + 数值列 max/min/avg(显式排除 bool)。"""
+    """本地确定性统计:行数 + 具备度量资格的数值列 max/min/avg(显式排除 bool;
+    标识/期间列经 _is_stat_worthy 排除,050)。"""
     stats: dict[str, object] = {"rows": len(rows)}
     if not columns or not rows:
         return stats
@@ -459,7 +487,7 @@ def compute_stats(columns: list[str], rows: list[list[object]]) -> dict[str, obj
             v = row[ci]
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 values.append(v)
-        if values:
+        if values and _is_stat_worthy(col, values):
             stats[f"{col}_max"] = max(values)
             stats[f"{col}_min"] = min(values)
             stats[f"{col}_avg"] = round(sum(values) / len(values), 2)

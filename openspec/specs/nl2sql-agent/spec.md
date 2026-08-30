@@ -178,6 +178,8 @@ summarize 节点输出结构化洞察:summary(一句话)+ insights[](聚合洞�
 
 摘要 SHALL 称谓对齐:summarize 喂给 LLM 的上下文 SHALL 含所涉表的业务称谓别名(alias,随召回 schema_hint 段注入);summary 与 insights 提及数据实体时 SHALL 使用业务称谓——用户用语优先,其次所给别名;SHALL NOT 只写物理表名,SHALL NOT 出现 schema 全限定名;首次提及可以「业务名(物理名)」并注;别名缺失时回退表说明中的中文名称;SHALL NOT 编造别名(与「数值结论不外推」同构的事实性约束)。
 
+**统计 SHALL 具备度量资格(050)**:本地确定性统计对数值列的取舍 SHALL 经列角色判定——列名为标识形态(`id/no/code` 后缀)或期间词(year/quarter/month/week/day)、或整数取值呈小值域稠密序列(起点 0/1、连续、去重数≤16、上界≤64)的列,SHALL NOT 产出 max/min/avg 统计(标识与期间量无统计语义);过滤同时作用于喂给 LLM 的上下文与回传结果,SHALL NOT 在洞察文本中对标识/期间列给出均值类结论。bool 列 SHALL NOT 进入数值统计(既有语义保持)。
+
 #### Scenario: 聚合结果结构化洞察
 - GIVEN 查询返回分组聚合结果
 - WHEN summarize 节点执行
@@ -188,6 +190,17 @@ summarize 节点输出结构化洞察:summary(一句话)+ insights[](聚合洞�
 - GIVEN 查询返回 50 行分组聚合结果
 - WHEN summarize 节点构造 LLM 上下文
 - THEN 上下文含结果行数、本地计算的数值列统计(max/min/avg)与前 5 行预览
+
+#### Scenario: 标识列不进统计(050)
+- GIVEN 结果含整型标识列 store_id(取值 1/2)与度量列 inventory_count
+- WHEN compute_stats 执行
+- THEN stats 含 inventory_count 的 max/min/avg,SHALL NOT 出现 store_id 的任何统计键
+- AND 喂给 LLM 的上下文同样不含标识列统计,洞察 SHALL NOT 出现「门店 ID 均值」类结论
+
+#### Scenario: 期间列不进统计(050)
+- GIVEN 结果含整型期间列 year(取值 2005/2006)
+- WHEN compute_stats 执行
+- THEN SHALL NOT 出现 year_max/year_min/year_avg 统计键
 
 #### Scenario: 数值结论不外推(005 冒烟观察)
 - GIVEN 结果集 >5 行,前 5 行不含全局最大值
@@ -495,15 +508,20 @@ SHALL NOT 成为引入其中不存在的表的依据);可用表结构未覆盖�
 提示 MUST 显式声明该哨兵为「只输出 SQL」规则的唯一例外。「未覆盖」SHALL
 为两级:可用表结构中无支撑本问题的表(表级),或问句所需关键信息项(排序/
 筛选/统计所依据的列)不存在且无法由现有列合理推导(列级)——列级缺口
-SHALL NOT 以其他列近似顶替冒充答案。空表结构占位文案 MUST NOT 诱导臆测
-(不得出现「尽力生成」类表述),SHALL 与哨兵机制联动。generate 节点 SHALL
-识别哨兵输出(去除包裹标记后大小写不敏感全等比较)并短路终止:不进入本地
-预检与执行、不进入 selfheal 重试(零执行、零 LLM 重试消耗),以用户友好
-文案收敛为失败终态——文案 SHALL 面向用户说明「未找到回答该问题所需的
-数据,可切换数据源或调整问法」,且 SHALL NOT 携带表名、schema 名或内部
-术语。上次执行错误为「表或列不存在」类时,喂回生成环节的修正上下文
-SHALL 附「所引表或列不在可用表结构清单中,清单确无所需数据只输出哨兵」
-的引导。
+SHALL NOT 以其他列近似顶替冒充答案。**表级「支撑」SHALL 以实体核对为
+判据(051):问题核心业务实体(具体业务名词,如门店/影片/客户/订单)必须
+能在可用表结构的表说明或列语义中找到对应,方为支撑;「任何表都可 COUNT
+行数或按某列分组」SHALL NOT 构成相关依据,把问题量词(库存数量/个数)读成
+对任意表的计数、把任意文本列读成问题中的分类维度,均属硬凑;该判据的
+自我合理化形态 SHALL 以对位反例形式在提示词中点名。**空表结构占位文案
+MUST NOT 诱导臆测(不得出现「尽力生成」类表述),SHALL 与哨兵机制联动。
+generate 节点 SHALL 识别哨兵输出(去除包裹标记后大小写不敏感全等比较)并
+短路终止:不进入本地预检与执行、不进入 selfheal 重试(零执行、零 LLM
+重试消耗),以用户友好文案收敛为失败终态——文案 SHALL 面向用户说明
+「未找到回答该问题所需的数据,可切换数据源或调整问法」,且 SHALL NOT
+携带表名、schema 名或内部术语。上次执行错误为「表或列不存在」类时,
+喂回生成环节的修正上下文 SHALL 附「所引表或列不在可用表结构清单中,
+清单确无所需数据只输出哨兵」的引导。
 
 #### Scenario: 知识未覆盖哨兵短路(零执行零重试)
 
@@ -511,6 +529,15 @@ SHALL 附「所引表或列不在可用表结构清单中,清单确无所需数�
 - WHEN 模型输出哨兵 NO_RELEVANT_TABLE
 - THEN 请求终止,不发起 SQL 执行、不进 selfheal(sys_sql_audit 零新增执行记录)
 - AND 响应为失败终态,error 为「未找到回答该问题所需的数据,可切换数据源或调整问法」类友好文案
+
+#### Scenario: 实体领域错配不硬凑选表(051)
+
+- GIVEN 问题「每个门店库存中各影片分类的库存数量」而可用表结构仅商品表
+  (名称/创建人等列,无门店/影片/分类语义)
+- WHEN generate 环节执行
+- THEN 模型输出哨兵短路(零执行零重试),SHALL NOT 把创建人列当影片分类
+  分组、把任意 COUNT 当库存凑答案
+- AND 洞察层不再出现「分类值为账号或 UUID」类事后质量提示(前置弃答后无结果集)
 
 #### Scenario: 列级缺口如实说明(046)
 
@@ -553,7 +580,6 @@ SHALL 附「所引表或列不在可用表结构清单中,清单确无所需数�
 - GIVEN 可用表结构覆盖问题所需数据
 - WHEN 正常生成 SQL
 - THEN 生成、预检、执行、汇总链路行为与引入前逐字一致(纪律条不误伤正常生成)
-
 ### Requirement: QueryOut 响应终态判别
 
 `/query` 响应的 `verdict` SHALL 为四态:`PASS`(执行成功)/ `BLOCKED`

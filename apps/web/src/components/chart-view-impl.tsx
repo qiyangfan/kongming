@@ -1,9 +1,3 @@
-/* 图表渲染实现(web-nav spec「结果图表渲染」+ 011 图表增强):
-   bar/line/pie/scatter 四类型;scatter 双形态(x 列全数值→数值散点,否则退化类目
-   点图——value 轴遇 NaN 静默丢点为上游实证坑);手动切换=卡片本地状态,映射恒定,
-   prop 变更回落建议类型;色板从设计 token 派生(铁律 6,禁硬编码)。
-   本文件是懒加载动态目标(echarts 引擎不进首屏主包),对外经由 chart-view.tsx 壳。 */
-
 import { useMemo, useRef } from "react";
 import { ChartColumn, ChartLine, ChartPie, ChartScatter, ImageDown } from "lucide-react";
 
@@ -11,12 +5,15 @@ import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { EChart, themedTooltip } from "@/lib/echarts";
 import type { ChartDatum, ChartSpec, ChartTune, ChartType } from "@/components/chart-shared";
-import { CHART_TYPES } from "@/components/chart-shared";
+import { uniqueTypes } from "@/components/chart-shared";
 
 export interface ChartViewProps {
-  chart: ChartSpec;
+  /** 有序图表候选(049):每个候选自带完整绑定,活动绑定=同类型首个候选 */
+  candidates: ChartSpec[];
   data: ChartDatum;
   tune?: ChartTune;
+  /** 041 呈现层列标签(缺失/未命中回退物理列名)——多度量系列名用它,禁裸物理名直达用户 */
+  labels?: string[];
   /** 当前图表类型(状态提升至 chart-view 壳:主题重挂不丢用户手动选择,040) */
   activeType: ChartType;
   onActiveTypeChange: (t: ChartType) => void;
@@ -66,20 +63,30 @@ function formatTemporalLabels(labels: string[]): string[] {
   });
 }
 
-export default function ChartViewImpl({ chart, data, tune, activeType, onActiveTypeChange }: ChartViewProps) {
+export default function ChartViewImpl({
+  candidates,
+  data,
+  tune,
+  labels,
+  activeType,
+  onActiveTypeChange,
+}: ChartViewProps) {
   const palette = useMemo(chartPalette, []);
   const axisColor = useMemo(() => cssVar("--muted-foreground"), []);
   const lineColor = useMemo(() => cssVar("--border"), []);
   const chartRef = useRef<EChart>(null);
+  const toggleTypes = useMemo(() => uniqueTypes(candidates), [candidates]);
 
   const option = useMemo(() => {
-    const xi = chart.x ? data.columns.indexOf(chart.x) : 0;
-    const yi = chart.y ? data.columns.indexOf(chart.y) : 1;
-    const labels = formatTemporalLabels(data.rows.map((r) => String(r[xi] ?? "")));
-    const values = data.rows.map((r) => {
-      const v = r[yi];
-      return typeof v === "number" ? v : Number(v);
-    });
+    // 活动绑定:同类型取首个候选(切换类型即切换其完整 x/y/系列映射)
+    const binding = candidates.find((c) => c.type === activeType) ?? candidates[0];
+    const xi = binding.x ? data.columns.indexOf(binding.x) : 0;
+    const yNames = binding.y.length > 0 ? binding.y : [data.columns[1] ?? ""];
+    const yIdxs = yNames
+      .map((n) => data.columns.indexOf(n))
+      .filter((i) => i >= 0);
+    const useYIdxs = yIdxs.length > 0 ? yIdxs : [1];
+    const xLabels = formatTemporalLabels(data.rows.map((r) => String(r[xi] ?? "")));
     const axisCommon = {
       axisLabel: { color: axisColor },
       axisLine: { lineStyle: { color: lineColor } },
@@ -102,6 +109,11 @@ export default function ChartViewImpl({ chart, data, tune, activeType, onActiveT
     const yNameOpt = tune?.yName ? { name: tune.yName, nameTextStyle: { color: axisColor } } : {};
 
     if (activeType === "pie") {
+      // pie 恒单 y(候选生成保证;异常多 y 时取首个)
+      const values = data.rows.map((r) => {
+        const v = r[useYIdxs[0]];
+        return typeof v === "number" ? v : Number(v);
+      });
       return {
         ...titleOpt,
         tooltip: { trigger: "item", ...tooltipCommon },
@@ -111,7 +123,7 @@ export default function ChartViewImpl({ chart, data, tune, activeType, onActiveT
             type: "pie",
             radius: ["38%", "66%"],
             center: ["50%", "44%"],
-            data: labels.map((name, i) => ({ name, value: values[i] })),
+            data: xLabels.map((name, i) => ({ name, value: values[i] })),
             color: palette,
             label: { show: false },
             labelLine: { show: false },
@@ -119,6 +131,7 @@ export default function ChartViewImpl({ chart, data, tune, activeType, onActiveT
         ],
       };
     }
+
     const grid = {
       left: 12,
       right: 16,
@@ -126,7 +139,9 @@ export default function ChartViewImpl({ chart, data, tune, activeType, onActiveT
       bottom: 8,
       containLabel: true,
     };
+
     if (activeType === "scatter") {
+      const yi = useYIdxs[0];
       const xNumeric =
         data.rows.length > 0 && data.rows.every((r) => isNumericCell(r[xi]));
       if (xNumeric) {
@@ -140,7 +155,7 @@ export default function ChartViewImpl({ chart, data, tune, activeType, onActiveT
             // y=null 空值点 echarts 不渲染,无 tooltip 触发,?? "—" 纯防御
             formatter: (p: unknown) => {
               const v = (p as { value: [number, number | null] }).value;
-              return `${chart.x ?? "x"}: ${v[0]}<br/>${chart.y ?? "y"}: ${v[1] ?? "—"}`;
+              return `${binding.x ?? "x"}: ${v[0]}<br/>${binding.y[0] ?? "y"}: ${v[1] ?? "—"}`;
             },
           },
           // scale:true:轴不含零起点,窄区间远离 0 的数据不挤角(散点看分布)
@@ -160,43 +175,125 @@ export default function ChartViewImpl({ chart, data, tune, activeType, onActiveT
         };
       }
       // 退化:类目轴点图(一行非数值即整体退化,宁退化不丢点;
-      // y 沿用 values 的 null→0 既有语义,与 bar/line 同构)
+      // y 沿用单系列的 Number() 既有语义,与 bar/line 同构)
+      const values = data.rows.map((r) => {
+        const v = r[yi];
+        return typeof v === "number" ? v : Number(v);
+      });
       return {
         ...titleOpt,
         grid,
         tooltip: { trigger: "axis", ...tooltipCommon },
-        xAxis: { type: "category", data: labels, ...xNameOpt, ...axisCommon },
+        xAxis: { type: "category", data: xLabels, ...xNameOpt, ...axisCommon },
         yAxis: { type: "value", ...yNameOpt, ...axisCommon },
         series: [
           { type: "scatter", data: values, itemStyle: { color: palette[0] } },
         ],
       };
     }
+
+    // bar/line:多系列=系列维绑定(分组柱/时序多系列)或多度量(y 列表);
+    // 分组/多度量空值映 null(稀疏组合不落零柱),单系列沿用 Number() 既有语义
+    const si = binding.series ? data.columns.indexOf(binding.series) : -1;
+    // 分组系列:类目轴=x 唯一值全集(首次出现序),各系列按「系列值×类目」
+    // 对号取数、缺组合补 null——若逐行过滤,系列数据下标≠类目下标,会产生
+    // 柱体挤半轴与值归属错类目(049 实测缺陷,用户肉眼抓出)
+    const hasSeries = si >= 0;
+    const rawCats = [...new Set(data.rows.map((r) => String(r[xi] ?? "")))];
+    const axisCats = formatTemporalLabels(rawCats);
+    // 类目轴标签分级(050 实测反馈):抽样显示是 echarts 防重叠默认,但柱状图
+    // 不给全类目名=读者只能靠 tooltip 认柱——少量全显横排、中量旋转全显、
+    // 大量(>24)才交回 echarts 自动抽稀
+    const catCount = hasSeries ? axisCats.length : xLabels.length;
+    const catLabelOpt =
+      catCount <= 12
+        ? { interval: 0 }
+        : catCount <= 24
+          ? { interval: 0, rotate: 35 }
+          : {};
+    let seriesList: { name?: string; data: (number | null)[] }[];
+    if (hasSeries) {
+      const lookup = new Map<string, number | null>();
+      for (const r of data.rows) {
+        const v = r[useYIdxs[0]];
+        lookup.set(
+          `${String(r[si] ?? "")}||${String(r[xi] ?? "")}`,
+          isNumericCell(v) ? Number(v) : null,
+        );
+      }
+      const seriesVals = [...new Set(data.rows.map((r) => String(r[si] ?? "")))];
+      seriesList = seriesVals.map((sv) => ({
+        name: sv,
+        data: rawCats.map((cat) => lookup.get(`${sv}||${cat}`) ?? null),
+      }));
+    } else if (useYIdxs.length > 1) {
+      seriesList = useYIdxs.map((yi) => ({
+        // 041 双轨:系列名经列标签(缺失回退物理列名),不裸投物理名
+        name: labels?.[yi] || data.columns[yi],
+        data: data.rows.map((r) => {
+          const v = r[yi];
+          return isNumericCell(v) ? Number(v) : null;
+        }),
+      }));
+    } else {
+      seriesList = [
+        {
+          data: data.rows.map((r) => {
+            const v = r[useYIdxs[0]];
+            return typeof v === "number" ? v : Number(v);
+          }),
+        },
+      ];
+    }
+    const multi = seriesList.length > 1;
+    const legendOpt = multi
+      ? { legend: { bottom: 0, left: "center", textStyle: { color: axisColor } } }
+      : {};
+    // 底部图例占位:压 8px 底距为 28px,防图例与轴标签重叠
+    const gridFinal = multi ? { ...grid, bottom: 28 } : grid;
+    // 全整数量测(计数类)→ minInterval 1:小值域不产生 0.5/1.5 半数碎刻度
+    const allInts = seriesList.every((s) =>
+      s.data.every((v) => v === null || Number.isInteger(v)),
+    );
     return {
       ...titleOpt,
-      grid,
+      ...legendOpt,
+      grid: gridFinal,
       tooltip: { trigger: "axis", ...tooltipCommon },
-      xAxis: { type: "category", data: labels, ...xNameOpt, ...axisCommon },
-      yAxis: { type: "value", ...yNameOpt, ...axisCommon },
-      series: [
+      xAxis: {
+        type: "category",
+        data: hasSeries ? axisCats : xLabels,
+        axisLabel: { ...catLabelOpt, ...axisCommon.axisLabel },
+        ...xNameOpt,
+        axisLine: axisCommon.axisLine,
+      },
+      yAxis: {
+        type: "value",
+        ...(allInts ? { minInterval: 1 } : {}),
+        ...yNameOpt,
+        ...axisCommon,
+      },
+      series: seriesList.map((s, k) =>
         activeType === "line"
           ? {
               type: "line",
-              data: values,
+              name: s.name,
+              data: s.data,
               smooth: true,
-              itemStyle: { color: palette[0] },
-              lineStyle: { color: palette[0], width: 2 },
+              itemStyle: { color: palette[k % palette.length] },
+              lineStyle: { color: palette[k % palette.length], width: 2 },
             }
           : {
               type: "bar",
-              data: values,
-              itemStyle: { color: palette[0], borderRadius: [3, 3, 0, 0] },
+              name: s.name,
+              data: s.data,
+              itemStyle: { color: palette[k % palette.length], borderRadius: [3, 3, 0, 0] },
               barMaxWidth: 40,
             },
-      ],
+      ),
     };
     // tune 基元展开入依赖(标题/轴名一改即重算重绘,026 调参语义)
-  }, [activeType, chart, data, palette, axisColor, lineColor, tune?.title, tune?.xName, tune?.yName]);
+  }, [candidates, activeType, data, labels, palette, axisColor, lineColor, tune?.title, tune?.xName, tune?.yName]);
 
   function downloadPng(): void {
     const inst = chartRef.current?.getEchartsInstance();
@@ -220,26 +317,33 @@ export default function ChartViewImpl({ chart, data, tune, activeType, onActiveT
 
   return (
     <div>
-      <div className="flex items-center justify-between px-2 pt-1">
-        <ToggleGroup
-          type="single"
-          value={activeType}
-          onValueChange={(v) => {
-            if (v) onActiveTypeChange(v as ChartType); // 单选恒保留一个激活(取消选中不回空)
-          }}
-          variant="outline"
-          size="sm"
-          aria-label="图表类型"
-        >
-          {CHART_TYPES.map((t) => {
-            const { label, Icon } = TYPE_META[t];
-            return (
-              <ToggleGroupItem key={t} value={t} aria-label={label} title={label}>
-                <Icon aria-hidden />
-              </ToggleGroupItem>
-            );
-          })}
-        </ToggleGroup>
+      <div
+        className={`flex items-center px-2 pt-1 ${
+          toggleTypes.length > 1 ? "justify-between" : "justify-end"
+        }`}
+      >
+        {/* 单候选隐藏切换器(spec 049):只渲染候选类型,顺序=候选序 */}
+        {toggleTypes.length > 1 && (
+          <ToggleGroup
+            type="single"
+            value={activeType}
+            onValueChange={(v) => {
+              if (v) onActiveTypeChange(v as ChartType); // 单选恒保留一个激活(取消选中不回空)
+            }}
+            variant="outline"
+            size="sm"
+            aria-label="图表类型"
+          >
+            {toggleTypes.map((t) => {
+              const { label, Icon } = TYPE_META[t];
+              return (
+                <ToggleGroupItem key={t} value={t} aria-label={label} title={label}>
+                  <Icon aria-hidden />
+                </ToggleGroupItem>
+              );
+            })}
+          </ToggleGroup>
+        )}
         <Button
           variant="ghost"
           size="icon-xs"

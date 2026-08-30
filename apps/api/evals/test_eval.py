@@ -48,6 +48,22 @@ async def _eval_single(case: dict[str, Any]) -> tuple[bool, bool, bool]:
         )
         return False, True, True  # 拒绝用例不计 strict(防虚增),pass 由断言保证
 
+    if case.get("expect_no_data"):
+        # 负例(051):问题实体与可用表领域错配,预期哨兵短路 NO_DATA——
+        # 业务终态(200+success=False+verdict=NO_DATA),非 expect_reject 的
+        # HTTP 拒绝;SQL 为空=零执行硬断言
+        r = await call_chat(question, tenant, datasource_key=datasource_key)
+        r.raise_for_status()
+        body = r.json()
+        assert not body.get("success") and body.get("verdict") == "NO_DATA", (
+            f"\n[{case['id']}] 预期哨兵短路 NO_DATA,实际 success={body.get('success')} "
+            f"verdict={body.get('verdict')}\n  question: {question}\n  gen_sql: {body.get('sql')}"
+        )
+        assert not body.get("sql"), (
+            f"[{case['id']}] NO_DATA 应零执行,却生成了 SQL: {body.get('sql')}"
+        )
+        return False, True, True  # 同拒绝用例口径:不计 strict,pass 由断言保证
+
     gold_sql = str(case["gold_sql"])
     expected_tables = set(case.get("expected_tables", []))
     gold_ordered = "order by" in gold_sql.lower()

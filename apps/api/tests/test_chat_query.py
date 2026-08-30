@@ -226,7 +226,11 @@ async def test_happy_path_auto_session_and_messages(
     assert body["success"] is True and body["verdict"] == "PASS"
     assert body["summary"] == "共 2 种商品"
     assert body["columns"] == ["name", "qty"] and body["rows"][0] == ["连弩", 30]
-    assert body["chart"]["type"] == "pie"  # 低基数分类 + 数值
+    # 049:低基数分类+数值 → 首候选 bar;qty 裸列不可加(非 COUNT/SUM)pie 被闸
+    assert body["chart"]["type"] == "bar"
+    assert [c["type"] for c in body["chart_candidates"]] == ["bar"]
+    # 050:统计键经 humanize(rows→行数;qty_max→物理名回退形态「qty 最高」)
+    assert body["stats"] == {"行数": 2, "qty 最高": 30}
     assert body["insights"] == [{"type": "max", "text": "连弩最多"}]
 
     sid = body["session_id"]
@@ -512,78 +516,196 @@ async def test_rejected_reserved_table_copy_neutral(
     assert blocked_friendly("GUARDRAIL:x") == "内容未通过安全检查,请调整后重试"
 
 
-def test_chart_suggestion_rules() -> None:
+def test_chart_candidates_rules() -> None:
+    """049 图表候选:列角色画像→形状→有序候选(chat spec「图表可视化」)。"""
     import datetime as dt
 
-    from kongming.chat.models import suggest_chart
+    from kongming.chat.models import suggest_charts
 
-    # 首列日期 → line
-    c = suggest_chart(["day", "n"], [[dt.date(2026, 8, 1), 1], [dt.date(2026, 8, 2), 2]])
-    assert (c.type, c.x, c.y) == ("line", "day", "n")
-    # 低基数分类(≤8)+ 数值 → pie
-    c = suggest_chart(["name", "n"], [["a", 1], ["b", 2]])
-    assert c.type == "pie"
-    # 基数 9~50 分类 + 数值 → bar
-    c = suggest_chart(["name", "n"], [[f"n{i}", i] for i in range(20)])
-    assert c.type == "bar"
-    # 高基数(明细推定)→ none
-    c = suggest_chart(["name", "n"], [[f"n{i}", i] for i in range(60)])
-    assert c.type == "none"
-    # 无数值列 → none
-    assert suggest_chart(["a", "b"], [["x", "y"]]).type == "none"
-    # 单列 → none
-    assert suggest_chart(["n"], [[1], [2]]).type == "none"
-    # bool 不算数值
-    assert suggest_chart(["name", "flag"], [["a", True]]).type == "none"
+    # 首列日期 → line 唯一候选
+    c = suggest_charts(
+        ["day", "n"],
+        [[dt.date(2026, 8, 1), 1], [dt.date(2026, 8, 2), 2]],
+        "SELECT day, COUNT(*) AS n FROM x GROUP BY day",
+    )
+    assert [(i.type, i.x, i.y, i.series) for i in c] == [("line", "day", ("n",), None)]
+    # 单维低基数 + COUNT 别名(可加)→ bar 主、pie 辅
+    c = suggest_charts(
+        ["name", "cnt"], [["a", 1], ["b", 2]],
+        "SELECT name, COUNT(*) AS cnt FROM x GROUP BY name",
+    )
+    assert [i.type for i in c] == ["bar", "pie"]
+    # 无 sql → 可加性 fail-closed,pie 排除
+    assert [i.type for i in suggest_charts(["name", "cnt"], [["a", 1], ["b", 2]])] == ["bar"]
+    # AVG 不可加 → 仅 bar
+    c = suggest_charts(
+        ["name", "v"], [["a", 4.5], ["b", 3.2]],
+        "SELECT name, AVG(len) AS v FROM x GROUP BY name",
+    )
+    assert [i.type for i in c] == ["bar"]
+    # 负值 → pie 排除
+    c = suggest_charts(
+        ["name", "cnt"], [["a", -1], ["b", 2]],
+        "SELECT name, COUNT(*) AS cnt FROM x GROUP BY name",
+    )
+    assert [i.type for i in c] == ["bar"]
+    # 期间维(年份)非构成整体 → pie 排除
+    c = suggest_charts(
+        ["year", "cnt"], [[2005, 10], [2006, 12]],
+        "SELECT year, COUNT(*) AS cnt FROM x GROUP BY year",
+    )
+    assert [i.type for i in c] == ["bar"]
+    # 基数 9~50 → 仅 bar
+    c = suggest_charts(
+        ["name", "cnt"], [[f"n{i}", i] for i in range(20)],
+        "SELECT name, COUNT(*) AS cnt FROM x GROUP BY name",
+    )
+    assert [i.type for i in c] == ["bar"]
+    # 高基数(明细推定)→ 零候选
+    assert suggest_charts(
+        ["name", "cnt"], [[f"n{i}", i] for i in range(60)], "SELECT name FROM x"
+    ) == []
+    # 无度量列/单列 → 零候选
+    assert suggest_charts(["a", "b"], [["x", "y"]], "SELECT a, b FROM t") == []
+    assert suggest_charts(["n"], [[1], [2]], "SELECT n FROM t") == []
+    # bool 不算度量
+    assert suggest_charts(["name", "flag"], [["a", True]], "SELECT name, flag FROM t") == []
 
 
-def test_chart_suggestion_scatter() -> None:
-    """011 图表增强:双数值列 → scatter(chat spec「图表可视化」推断补全)。"""
-    import datetime as dt
+def test_chart_candidates_identifier_dims() -> None:
+    """049:标识列/期间列恒为维度(碎刻度根除),两维分组→分组柱状图。"""
+    from kongming.chat.models import suggest_charts
+
+    sql = (
+        "SELECT i.store_id, c.name, COUNT(*) AS count FROM inventory i"
+        " JOIN category c ON 1=1 GROUP BY 1, 2"
+    )
+    rows: list[list[object]] = [
+        [1, "Action", 64], [1, "Animation", 66], [2, "Action", 43], [2, "Family", 58],
+    ]
+    c = suggest_charts(["store_id", "name", "count"], rows, sql)
+    # 门店×分类:分组柱状图(系列=低基数维 store_id),不再出现 x=标识列的 scatter
+    assert [(i.type, i.x, i.y, i.series) for i in c] == [("bar", "name", ("count",), "store_id")]
+    # 小表明细(每行唯一 x 标签)分组柱退化 → 零候选(标签重复闸)
+    c = suggest_charts(
+        ["id", "title", "length"], [[1, "A", 120], [2, "B", 86]],
+        "SELECT id, title, length FROM film",
+    )
+    assert c == []
+    # 标识列单维+可加度量 → bar 主、pie 辅(门店库存构成是合法 part-of-whole)
+    c = suggest_charts(
+        ["store_id", "cnt"], [[1, 64], [2, 58]],
+        "SELECT store_id, COUNT(*) AS cnt FROM x GROUP BY store_id",
+    )
+    assert [i.type for i in c] == ["bar", "pie"]
+    # 稠密序列兜底:仅当降维后仍剩度量才生效(唯一小计数列不被降维)
+    c = suggest_charts(
+        ["name", "cnt"], [[f"n{i}", i] for i in range(1, 7)],
+        "SELECT name, COUNT(*) AS cnt FROM x GROUP BY name",
+    )
+    assert [i.type for i in c] == ["bar", "pie"]
+    # 时序+低基数分类维 → 多系列 line(系列=分类维)
+    c = suggest_charts(
+        ["day", "store", "cnt"], [["2025-07-01", 1, 10], ["2025-07-01", 2, 11]],
+        "SELECT day, store, COUNT(*) AS cnt FROM x GROUP BY 1, 2",
+    )
+    assert [(i.type, i.x, i.y, i.series) for i in c] == [("line", "day", ("cnt",), "store")]
+
+
+def test_chart_candidates_multi_measure_scatter() -> None:
+    """049:双度量散点与多度量系列(y 列表);011 列序解耦语义保留。"""
     from decimal import Decimal
 
-    from kongming.chat.models import suggest_chart
+    from kongming.chat.models import suggest_charts
 
-    # 双数值列 → scatter,x=首列,y=首个数值列
-    c = suggest_chart(["price", "rental"], [[9.9, 2], [4.5, 3]])
-    assert (c.type, c.x, c.y) == ("scatter", "price", "rental")
-    # y 跳过非数值列取首个数值列
-    c = suggest_chart(["x", "label", "y"], [[1, "t", 2], [3, "u", 4]])
-    assert (c.type, c.x, c.y) == ("scatter", "x", "y")
-    # Decimal 双数值 → scatter
-    c = suggest_chart(["a", "b"], [[Decimal("1.5"), 2]])
-    assert c.type == "scatter"
-    # 首列含 None 行的双数值 → scatter(行级容错,any 语义;x/y 取法仍须锁定)
-    c = suggest_chart(["a", "b"], [[None, 1], [2.5, 3]])
-    assert (c.type, c.x, c.y) == ("scatter", "a", "b")
-    # 首列数值但无第二数值列 → none 维持(单数值列不猜)
-    assert suggest_chart(["n", "name"], [[1, "a"], [2, "b"]]).type == "none"
-    # 首列 temporal 优先 line,不被 scatter 分支截胡
-    c = suggest_chart(["day", "n"], [[dt.date(2026, 8, 1), 1], [dt.date(2026, 8, 2), 2]])
-    assert c.type == "line"
+    # 双度量无维 → scatter(x/y=前两度量)
+    c = suggest_charts(
+        ["price", "rental"], [[9.9, 2], [4.5, 3]], "SELECT price, rental FROM t"
+    )
+    assert [(i.type, i.x, i.y) for i in c] == [("scatter", "price", ("rental",))]
+    # Decimal 双度量 → scatter
+    c = suggest_charts(["a", "b"], [[Decimal("1.5"), 2]], "SELECT a, b FROM t")
+    assert [i.type for i in c] == ["scatter"]
+    # 首列含 None 行的双度量 → scatter(行级容错,any 语义)
+    c = suggest_charts(["a", "b"], [[None, 1], [2.5, 3]], "SELECT a, b FROM t")
+    assert [(i.type, i.x, i.y) for i in c] == [("scatter", "a", ("b",))]
+    # 多度量单维 → bar 多 y 系列 + pie(首度量可加)
+    c = suggest_charts(
+        ["name", "a", "b"], [["x", 1, 2], ["y", 3, 4]],
+        "SELECT name, SUM(x) AS a, SUM(y) AS b FROM t GROUP BY name",
+    )
+    assert [(i.type, i.x, i.y) for i in c] == [("bar", "name", ("a", "b")), ("pie", "name", ("a",))]
+    # 双度量无维 y 截前二;多度量单维 y 截前 3
+    c = suggest_charts(
+        ["m1", "m2", "m3", "m4"], [[1, 2, 3, 4]], "SELECT m1, m2, m3, m4 FROM t"
+    )
+    assert len(c) == 1 and c[0].type == "scatter" and c[0].y == ("m2",)
+    assert c[0].x == "m1"
 
 
-def test_chart_suggestion_scatter_any_position() -> None:
-    """011 吸收(可读性修缮):scatter 判定解耦列序——prompt 让 LLM 附带标识列
-    (名称/标题)后,双数值列可能不在前两列,推断按「任意位置的前两个数值列」取。"""
-    from kongming.chat.models import suggest_chart
+def test_humanize_stats() -> None:
+    """050:统计键用户可读化(041 标签单源;歧义 fail-open;幂等)。"""
+    from kongming.chat.models import humanize_stats
 
-    # 标识列在前,双数值在后 → scatter,x/y=两个数值列(标识列不入图)
-    c = suggest_chart(["title", "length", "rental_rate"], [["a", 86, 0.99], ["b", 48, 4.99]])
-    assert (c.type, c.x, c.y) == ("scatter", "length", "rental_rate")
-    # 单数值列 + 前置标识列(低基数)→ 走分类路径(pie),不误判
-    c = suggest_chart(["title", "length"], [["a", 86], ["b", 48]])
-    assert (c.type, c.x, c.y) == ("pie", "title", "length")
-    # 单数值列 + 高基数标识列 → bar
-    c = suggest_chart(["title", "length"], [[f"t{i}", i] for i in range(20)])
-    assert (c.type, c.x, c.y) == ("bar", "title", "length")
-    # 数值列在前的既有形态零回归
-    c = suggest_chart(["length", "rental_rate"], [[86, 0.99], [48, 4.99]])
-    assert (c.type, c.x, c.y) == ("scatter", "length", "rental_rate")
-    # 双度量聚合形态(R2-F1):[分类, count, avg] 双数值列 → scatter 优先于 pie/bar
-    # (手动切换器可一键回 pie/bar;推断优先级已进 011 delta spec)
-    c = suggest_chart(
+    stats: dict[str, object] = {
+        "rows": 3,
+        "inventory_count_max": 181,
+        "inventory_count_min": 110,
+        "inventory_count_avg": 143.16,
+        "store_id_max": 2,
+    }
+    # 列标签单源:标签缺失回退物理列名;标识列统计已在 agent 侧过滤,此处仅验映射
+    out = humanize_stats(stats, ["inventory_count", "store_id"],
+                         ["库存数量", "store_id"])
+    assert out["行数"] == 3
+    assert out["库存数量 最高"] == 181 and out["库存数量 最低"] == 110
+    assert out["库存数量 均值"] == 143.16
+    assert "inventory_count_max" not in out
+    assert out["store_id 最高"] == 2  # 标签缺失回退物理列名
+    # 列未命中(stats 键在结果列中无对应列)→ 保留原键 fail-open
+    out = humanize_stats({"legacy_key_max": 1}, ["qty"], [])
+    assert out["legacy_key_max"] == 1
+    # 幂等:已中文化键二次应用原样保留(存量档读档归一路径)
+    once = humanize_stats({"rows": 2, "qty_max": 30}, ["qty"], [])
+    twice = humanize_stats(once, ["qty"], [])
+    assert twice == {"行数": 2, "qty 最高": 30}
+
+
+def test_chart_candidates_dim_priority() -> None:
+    """049:类目维在场时比较类图型(bar)优先于散点;散点仅服务双度量无维形态
+    (吸收 011 列序解耦——标识/名称列在任意位置都不进度量池)。"""
+    from kongming.chat.models import suggest_charts
+
+    # [名称, 片长, 租金] → bar 多度量系列(类目比较优先),散点不再截胡
+    c = suggest_charts(
+        ["title", "length", "rental_rate"], [["a", 86, 0.99], ["b", 48, 4.99]],
+        "SELECT title, length, rental_rate FROM film",
+    )
+    assert [(i.type, i.x, i.y) for i in c] == [("bar", "title", ("length", "rental_rate"))]
+    # 单度量+分类维(无 sql 可加面)→ 仅 bar
+    c = suggest_charts(
+        ["title", "length"], [["a", 86], ["b", 48]], "SELECT title, length FROM film"
+    )
+    assert [i.type for i in c] == ["bar"]
+    # 高基数类目(20)→ 仍 bar
+    c = suggest_charts(
+        ["title", "length"], [[f"t{i}", i] for i in range(20)],
+        "SELECT title, length FROM film",
+    )
+    assert [(i.type, i.x, i.y) for i in c] == [("bar", "title", ("length",))]
+    # 纯双度量(无类目维)→ scatter,度量列序无关
+    c = suggest_charts(
+        ["length", "rental_rate"], [[86, 0.99], [48, 4.99]],
+        "SELECT length, rental_rate FROM film",
+    )
+    assert [(i.type, i.x, i.y) for i in c] == [("scatter", "length", ("rental_rate",))]
+    # 聚合形态 [分类, count, avg]:bar 多度量为主,cnt 可加给 pie(首度量),avg 不升散点
+    c = suggest_charts(
         ["rating", "cnt", "avg"],
         [["PG", 194, 2.1], ["R", 195, 2.3], ["G", 178, 2.0], ["PG-13", 223, 2.2]],
+        "SELECT rating, COUNT(*) AS cnt, AVG(length) AS avg FROM film GROUP BY rating",
     )
-    assert (c.type, c.x, c.y) == ("scatter", "cnt", "avg")
+    assert [(i.type, i.x, i.y) for i in c] == [
+        ("bar", "rating", ("cnt", "avg")),
+        ("pie", "rating", ("cnt",)),
+    ]

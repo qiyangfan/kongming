@@ -10519,6 +10519,50 @@
         ],
         "title": "ChangePasswordRequest"
       },
+      "ChartCandidateOut": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "x": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X"
+          },
+          "y": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Y",
+            "default": []
+          },
+          "series": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "ChartCandidateOut",
+        "description": "图表候选(049 纯增):候选自带完整绑定,y 为值列(多度量多系列),\nseries 为系列维(分组柱/时序多系列)。既有 chart 字段保留=首候选展平。"
+      },
       "ChartInfoOut": {
         "properties": {
           "type": {
@@ -10722,6 +10766,14 @@
           },
           "chart": {
             "$ref": "#/components/schemas/ChartOut"
+          },
+          "chart_candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ChartCandidateOut"
+            },
+            "type": "array",
+            "title": "Chart Candidates",
+            "default": []
           },
           "retry_count": {
             "type": "integer",
@@ -11562,6 +11614,17 @@
               }
             ],
             "title": "User Nickname"
+          },
+          "user_username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Username"
           },
           "tenant_id": {
             "type": "string",
@@ -12835,6 +12898,14 @@
           "chart": {
             "$ref": "#/components/schemas/ChartInfoOut"
           },
+          "chart_candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ChartCandidateOut"
+            },
+            "type": "array",
+            "title": "Chart Candidates",
+            "default": []
+          },
           "error": {
             "anyOf": [
               {
@@ -13146,6 +13217,17 @@
               }
             ],
             "title": "User Nickname"
+          },
+          "user_username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Username"
           },
           "action": {
             "type": "string",
@@ -14493,6 +14575,17 @@
               }
             ],
             "title": "User Nickname"
+          },
+          "user_username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Username"
           },
           "tenant_id": {
             "type": "string",

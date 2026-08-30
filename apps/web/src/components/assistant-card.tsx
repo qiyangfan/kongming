@@ -22,6 +22,8 @@ import {
   DocumentCard,
   SqlArtifactCard,
 } from "@/components/artifact-blocks";
+import type { ChartSpec } from "@/components/chart-shared";
+import { normalizeBinding } from "@/components/chart-shared";
 import type { ArtifactOut } from "@/lib/chat-api";
 import type { SessionMessageOut } from "@/lib/api";
 import { explainPlan, exportResult } from "@/lib/chat-api";
@@ -108,21 +110,35 @@ function normalize(msg: SessionMessageOut): {
   rows: unknown[][];
   insights: { [key: string]: string }[];
   stats: Record<string, unknown>;
-  chart: { type: string; x: string | null; y: string | null };
+  chartBindings: ChartSpec[];
   artifacts: ArtifactOut[];
   columnLabels: string[];
 } {
   const r = msg.result;
+  // 049:候选优先(绑定随候选);存量档(仅单图)经 normalizeBinding 收为
+  // 单元素绑定数组,两代档同构进渲染层;type=none → 空数组(不配图)
+  const rawCands = r?.chart_candidates ?? [];
+  const chartBindings: ChartSpec[] =
+    rawCands.length > 0
+      ? rawCands.map((c) => ({
+          type: c.type,
+          x: c.x ?? null,
+          y: c.y ?? [],
+          series: c.series ?? null,
+        }))
+      : [
+          normalizeBinding({
+            type: r?.chart?.type ?? "none",
+            x: r?.chart?.x ?? null,
+            y: r?.chart?.y ?? null,
+          }),
+        ].filter((b): b is ChartSpec => b !== null);
   return {
     columns: r?.columns ?? [],
     rows: r?.rows ?? [],
     insights: r?.insights ?? [],
     stats: r?.stats ?? {},
-    chart: {
-      type: r?.chart?.type ?? "none",
-      x: r?.chart?.x ?? null,
-      y: r?.chart?.y ?? null,
-    },
+    chartBindings,
     artifacts: r?.artifacts ?? [],
     columnLabels: r?.column_labels ?? [],
   };
@@ -212,16 +228,21 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
         )
       )}
 
-      {chartArt && result.columns.length > 0 ? (
+      {chartArt && result.columns.length > 0 && result.chartBindings.length > 0 ? (
         <ChartArtifactCard
-          chart={result.chart}
+          candidates={result.chartBindings}
           data={{ columns: result.columns, rows: result.rows }}
+          labels={result.columnLabels}
         />
       ) : (
-        result.chart.type !== "none" &&
+        result.chartBindings.length > 0 &&
         result.columns.length > 0 && (
           <div className="rounded-lg border border-border bg-card px-2 py-1">
-            <ChartView chart={result.chart} data={{ columns: result.columns, rows: result.rows }} />
+            <ChartView
+              candidates={result.chartBindings}
+              data={{ columns: result.columns, rows: result.rows }}
+              labels={result.columnLabels}
+            />
           </div>
         )
       )}
