@@ -26,6 +26,32 @@ def test_doc_answer_routing() -> None:
     assert route_after_retrieve(state3) == "generate"
 
 
+def test_doc_answer_routing_multiturn_gate() -> None:
+    """047:多轮会话仅泛系系词「是什么」命中时不分流文档(数据追问防劫持)。"""
+    from kongming_agent.graph.nodes import route_after_retrieve
+
+    base: AgentState = {
+        "trace_id": "t",
+        "tenant_key": "sakila",
+        "question": "这些影片各自的分类是什么",
+        "schema_hint": "tenant_sakila.film(...)",
+        "doc_hints": [{"source_ref": "公告.md §1", "content": "x"}],
+    }
+    # 多轮 + 仅系词命中 → generate(浏览器实测复现的劫持形态)
+    multi: AgentState = {**base, "history": ["查询租金最高的5部影片"]}  # type: ignore[assignment]
+    assert route_after_retrieve(multi) == "generate"
+    # 多轮 + 强文档词命中 → 照旧分流(历史在场不压倒显式文档意图)
+    strong: AgentState = {
+        **base,
+        "question": "这些政策的适用口径是什么",
+        "history": ["查询租金最高的5部影片"],  # type: ignore[assignment]
+    }
+    assert route_after_retrieve(strong) == "doc_answer"
+    # 单轮 + 仅系词命中 → 024 语义不变(分流)
+    single: AgentState = {**base, "history": []}  # type: ignore[assignment]
+    assert route_after_retrieve(single) == "doc_answer"
+
+
 async def test_doc_answer_node_terminal() -> None:
     from kongming_agent import deps
     from kongming_agent.graph import nodes

@@ -82,6 +82,8 @@ def get_rag_service(session: AsyncSession) -> RagService:
         embedder=client,
         describer=client,
         cache=ContextCache(get_redis()),
+        # 047:知识写路径级联失效建议缓存(DELETE 同事务,rag commit 收口)
+        suggestion_evictor=SuggestionRepository(session),
     )
 
 
@@ -450,6 +452,8 @@ class ChatQueryOut(BaseModel):
     chart: ChartOut
     retry_count: int
     error: str | None
+    # 047(纯增):原始技术错误(FAILED 携带;前端折叠「技术详情」,缺省隐藏)
+    error_detail: str | None = None
     # 014 messageId 打通(纯增):assistant 落库消息 id(反馈提交引用)+执行数据源快照
     message_id: str | None = None
     datasource_key: str = "default"
@@ -478,6 +482,7 @@ def _out(o: ChatOutcome) -> ChatQueryOut:
         chart=ChartOut(type=o.chart.type, x=o.chart.x, y=o.chart.y),
         retry_count=o.retry_count,
         error=o.error,
+        error_detail=o.error_detail,
         message_id=o.message_id,
         datasource_key=o.datasource_key,
         pending_tool_calls=[
@@ -818,6 +823,8 @@ class MessageResultOut(BaseModel):
     stats: dict[str, object] = Field(default_factory=dict[str, object])
     chart: ChartInfoOut
     error: str | None = None
+    # 047(纯增):原始技术错误(存量档缺失→None,前端不渲染折叠块)
+    error_detail: str | None = None
     # 026(纯增):类型化产物
     artifacts: list[ArtifactOut] = []
     # 041(纯增):呈现层列标签(空=历史存量档,回退 columns)
@@ -832,6 +839,8 @@ class SessionMessageOut(BaseModel):
     sql: str | None = None
     status: str
     error: str | None = None
+    # 047(纯增):原始技术错误(FAILED 回显;web 折叠「技术详情」)
+    error_detail: str | None = None
     result: MessageResultOut | None = None
     # 014 messageId 打通(纯增):assistant 消息反馈状态回显(user 消息恒 None)
     rating: str | None = None
@@ -852,6 +861,7 @@ def _msg_out(m: SessionMessage) -> SessionMessageOut:
             stats=r.stats,
             chart=ChartInfoOut(type=r.chart.type, x=r.chart.x, y=r.chart.y),
             error=r.error,
+            error_detail=r.error_detail,
             column_labels=r.column_labels,
             artifacts=[
                 ArtifactOut(
@@ -875,6 +885,7 @@ def _msg_out(m: SessionMessage) -> SessionMessageOut:
         sql=m.sql,
         status=m.status,
         error=m.error,
+        error_detail=m.error_detail,
         result=result,
         rating=m.rating,
         corrected_sql=m.corrected_sql,

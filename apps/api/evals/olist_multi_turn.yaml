@@ -22,7 +22,10 @@
   turns:
     - question: 每个州的客户数量
       gold_sql: SELECT customer_state, COUNT(*) FROM tenant_olist.customers GROUP BY customer_state
-    - question: 按客户数从多到少排序,只看前5名
+    - question: 按客户记录数从多到少排序,只看前5名
+      # 048 消歧:「客户数」在 customers 表(一 unique 客户多行)上有 COUNT(*)
+      # 与 COUNT(DISTINCT customer_unique_id) 两读(018 olist_mt_005 t2 同款
+      # 先例)——「记录数」显式对齐 COUNT(*),gold 语义不变
       gold_sql: SELECT customer_state, COUNT(*) FROM tenant_olist.customers GROUP BY customer_state ORDER BY COUNT(*) DESC, customer_state LIMIT 5
 
 - id: olist_multiturn_004

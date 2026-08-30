@@ -10738,6 +10738,17 @@
             ],
             "title": "Error"
           },
+          "error_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Detail"
+          },
           "message_id": {
             "anyOf": [
               {
@@ -12835,6 +12846,17 @@
             ],
             "title": "Error"
           },
+          "error_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Detail"
+          },
           "artifacts": {
             "items": {
               "$ref": "#/components/schemas/ArtifactOut"
@@ -13978,6 +14000,15 @@
             "maxLength": 2000,
             "minLength": 1,
             "title": "Question"
+          },
+          "history": {
+            "items": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "type": "array",
+            "maxItems": 3,
+            "title": "History"
           }
         },
         "type": "object",
@@ -14358,6 +14389,17 @@
               }
             ],
             "title": "Error"
+          },
+          "error_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Detail"
           },
           "result": {
             "anyOf": [

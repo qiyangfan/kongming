@@ -668,6 +668,84 @@ async def test_fetch_metadata_reconciles_stale_entries(
     assert cast("dict[str, int]", audit or {}).get("removed", 0) >= 1
 
 
+async def test_fetch_metadata_excludes_views_from_scan(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
+) -> None:
+    """047:内省收录限基表——视图不入扫描集;存量视图登记由对账清偿。
+
+    视图行扇出使聚合失真(film_list 实证)、样例 SQL 挤占召回 top-K 使
+    维度表缺位(sakila_021 实证)——收录即引入歧义,基表可完整表达视图。
+    """
+    token = await _admin_token(client, session)
+    tid = await _default_tenant_id(session)
+    from kongming.db import get_engine
+
+    async with get_engine().begin() as conn:
+        await conn.execute(
+            text("CREATE TABLE IF NOT EXISTS public.vw_base (id int primary key)")
+        )
+        await conn.execute(
+            text(
+                "CREATE OR REPLACE VIEW public.vw_view"
+                " AS SELECT * FROM public.vw_base"
+            )
+        )
+    # 存量视图登记(AI_GENERATED=自动来源)——旧收录形态产物
+    view_row = await _seed_one(
+        session, tid, "vw_view", schema="public", source="AI_GENERATED"
+    )
+    try:
+        r = await client.post(
+            f"{RAG}/fetch-metadata", json={"datasource_key": "default"}, headers=_auth(token)
+        )
+        assert r.status_code == 200, r.text
+        gone = await session.execute(
+            text("SELECT count(*) FROM rag.table_descriptions WHERE id = :i"),
+            {"i": view_row},
+        )
+        assert gone.scalar_one() == 0  # 视图登记被对账清偿(扫描集只含基表)
+        base_kept = await session.execute(
+            text(
+                "SELECT count(*) FROM rag.table_descriptions"
+                " WHERE tenant_id = :t AND schema_name = 'public'"
+                " AND table_name = 'vw_base'"
+            ),
+            {"t": tid},
+        )
+        assert base_kept.scalar_one() == 1  # 基表照常收录
+    finally:
+        async with get_engine().begin() as conn:
+            await conn.execute(text("DROP VIEW IF EXISTS public.vw_view"))
+            await conn.execute(text("DROP TABLE IF EXISTS public.vw_base"))
+
+
+async def test_fetch_metadata_evicts_suggestion_cache(
+    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
+) -> None:
+    """047:知识写路径级联失效建议缓存——存量建议不随治理自动失效会持续
+    推荐已被排除的问题(保留表收编后 default 源建议撞墙 3/5 实证)。"""
+    token = await _admin_token(client, session)
+    tid = await _default_tenant_id(session)
+    await session.execute(
+        text(
+            "INSERT INTO public.chat_suggestion"
+            " (id, tenant_id, datasource_key, questions)"
+            " VALUES (gen_random_uuid(), :t, 'default',"
+            " CAST('[\"用户记忆中置信度大于0.8的记录共有多少条\"]' AS jsonb))"
+        ),
+        {"t": tid},
+    )
+    await session.commit()
+    r = await client.post(
+        f"{RAG}/fetch-metadata", json={"datasource_key": "default"}, headers=_auth(token)
+    )
+    assert r.status_code == 200, r.text
+    n = await session.execute(
+        text("SELECT count(*) FROM public.chat_suggestion WHERE datasource_key = 'default'")
+    )
+    assert n.scalar_one() == 0  # 该数据源建议缓存被同事务级联失效
+
+
 async def test_fetch_metadata_cross_schema_same_name_no_shadow(
     client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
 ) -> None:

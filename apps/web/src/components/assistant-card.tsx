@@ -163,7 +163,22 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
       <div className="space-y-3">
         <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
           <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
-          <p className="text-foreground">{msg.error ?? "查询失败,请换个问法试试"}</p>
+          <div className="min-w-0">
+            <p className="text-foreground">{msg.error ?? "查询执行失败,请调整问法后重试"}</p>
+            {/* 047:原始技术错误折叠披露(honest+可排障+不吓人;存量消息无此档) */}
+            {msg.error_detail && (
+              <Collapsible>
+                <CollapsibleTrigger className="mt-1 text-2xs text-muted-foreground underline-offset-2 hover:underline">
+                  技术详情
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <pre className="mt-1.5 max-h-40 overflow-auto rounded-md bg-background p-2 font-mono text-3xs break-all whitespace-pre-wrap text-muted-foreground">
+                    {msg.error_detail}
+                  </pre>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
+          </div>
         </div>
         {/* R2-F2:触顶等形态携带的部分结果不丢弃——错误优先呈现,
             已产出结果集作参考附带(EXPLAIN 入口同步可达) */}

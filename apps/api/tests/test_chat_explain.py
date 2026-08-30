@@ -300,7 +300,8 @@ async def test_explain_reserved_table_blocked(
     assert r.status_code == 200
     body = r.json()
     assert body["success"] is False
-    assert "不允许的表" in body["error"]
+    # 047 文案中性化(不责备用户),拦截语义不变
+    assert "不允许查询" in body["error"]
 
 
 async def test_explain_dynamic_datasource_snapshot(

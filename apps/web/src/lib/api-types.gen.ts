@@ -2807,6 +2807,8 @@ export interface components {
             retry_count: number;
             /** Error */
             error: string | null;
+            /** Error Detail */
+            error_detail?: string | null;
             /** Message Id */
             message_id?: string | null;
             /**
@@ -3592,6 +3594,8 @@ export interface components {
             chart: components["schemas"]["ChartInfoOut"];
             /** Error */
             error?: string | null;
+            /** Error Detail */
+            error_detail?: string | null;
             /**
              * Artifacts
              * @default []
@@ -4049,6 +4053,8 @@ export interface components {
             datasource_key: string;
             /** Question */
             question: string;
+            /** History */
+            history?: string[];
         };
         /** RetrieveOut */
         RetrieveOut: {
@@ -4193,6 +4199,8 @@ export interface components {
             status: string;
             /** Error */
             error?: string | null;
+            /** Error Detail */
+            error_detail?: string | null;
             result?: components["schemas"]["MessageResultOut"] | null;
             /** Rating */
             rating?: string | null;

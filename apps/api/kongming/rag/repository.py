@@ -593,7 +593,10 @@ async def _introspect_all_on(
             text(
                 "SELECT table_schema, table_name FROM information_schema.tables"
                 " WHERE table_schema = ANY(CAST(:schemas AS text[]))"
-                " AND table_type IN ('BASE TABLE', 'VIEW')"
+                # 047:收录限基表——视图是基表派生物,行扇出使聚合失真
+                # (film_list AVG 实证),样例 SQL 挤占召回 top-K 使维度表
+                # 缺位;基表可完整表达视图可表达的一切查询
+                " AND table_type = 'BASE TABLE'"
                 " ORDER BY table_schema, table_name"
             ),
             {"schemas": schemas},

@@ -3,6 +3,7 @@
 覆盖(nl2sql/nl2sql-agent spec):指代消解 prompt 组装与 5 轮截断、schema 提示
 拼装与降级、SQL 清洗、selfheal 错误喂回、预检四规则、三态映射、洞察降级链。
 """
+# pyright: reportPrivateUsage=false
 
 from typing import cast
 
@@ -376,6 +377,58 @@ async def test_generate_selfheal_dne_error_appends_table_guidance(
     assert '上次生成的 SQL 有误：relation "public.staff" Does Not Exist' in user
     assert "所引用的表或列不在『可用表结构』清单中" in user
     assert "只输出 NO_RELEVANT_TABLE" in user
+
+
+def test_selfheal_guidance_missing_from_clause() -> None:
+    """047:未定义别名(missing FROM-clause)→ 补 JOIN/改别名指令(017 事故形态)。"""
+    g = nodes._selfheal_guidance('missing FROM-clause entry for table "s"')
+    assert "s" in g
+    assert "JOIN" in g or "别名" in g
+    assert "NO_RELEVANT_TABLE" not in g  # 别名错可修,不是弃答出口
+
+
+def test_selfheal_guidance_column_vs_relation() -> None:
+    """047:列不存在→列纪律(不引向表哨兵);表不存在→哨兵出口;其余→空。"""
+    col = nodes._selfheal_guidance('column "email" does not exist')
+    assert "列" in col
+    assert "只输出 NO_RELEVANT_TABLE" not in col  # 表存在,出口是改列不是弃答
+    rel = nodes._selfheal_guidance('relation "public.staff" does not exist')
+    assert "NO_RELEVANT_TABLE" in rel
+    # 函数/类型等关系以外的 does-not-exist:泛化喂回,不误引弃答出口
+    assert nodes._selfheal_guidance('function "foo(integer)" does not exist') == ""
+    assert nodes._selfheal_guidance('type "q Quarter" does not exist') == ""
+    assert nodes._selfheal_guidance("syntax error at or near") == ""
+
+
+async def test_generate_selfheal_alias_error_gets_targeted_guidance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """047:sakila_017 事故端到端——别名错进 generate 喂回获得针对性指令。"""
+    fake = FakeLlm(["SELECT 1"])
+    _install(monkeypatch, fake, FakeApi())
+    await nodes.generate(
+        _state(
+            schema_hint="表 tenant_sakila.inventory(i)",
+            error='missing FROM-clause entry for table "s"',
+        )
+    )
+    user = fake.calls[0][1]
+    assert "上次生成的 SQL 有误" in user
+    assert "JOIN" in user or "别名" in user
+
+
+async def test_generate_selfheal_column_error_no_sentinel_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """047:列不存在喂回不携带表哨兵出口(否则模型弃答可答之题)。"""
+    fake = FakeLlm(["SELECT 1"])
+    _install(monkeypatch, fake, FakeApi())
+    await nodes.generate(
+        _state(schema_hint="表 t(a)", error='column "email" does not exist')
+    )
+    user = fake.calls[0][1]
+    assert "不得用其他列近似顶替" in user or "清单内" in user
+    assert "只输出 NO_RELEVANT_TABLE" not in user
 
 
 async def test_generate_selfheal_other_error_feedback_unchanged(

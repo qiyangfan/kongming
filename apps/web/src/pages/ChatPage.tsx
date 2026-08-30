@@ -126,6 +126,7 @@ function toSyntheticMessage(out: ChatQueryOut): SessionMessageOut {
     sql: out.sql || null,
     status,
     error: out.error,
+    error_detail: out.error_detail ?? null, // 047:技术详情折叠(快照与回显同源)
     result: {
       columns: out.columns,
       rows: out.rows,
@@ -133,6 +134,7 @@ function toSyntheticMessage(out: ChatQueryOut): SessionMessageOut {
       stats: out.stats,
       chart: out.chart,
       error: out.error,
+      error_detail: out.error_detail ?? null, // 047 同源
       // 026:终态快照携带产物卡(与历史回显 MessageResultOut.artifacts 同形),
       // 缺档空数组 → assistant-card 回落既有形态,与读档重算兜底口径一致
       artifacts: out.artifacts ?? [],

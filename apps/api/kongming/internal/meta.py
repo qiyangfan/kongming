@@ -68,7 +68,10 @@ async def _introspect(
             text(
                 "SELECT table_schema, table_name FROM information_schema.tables"
                 " WHERE table_schema = ANY(CAST(:schemas AS text[]))"
-                " AND table_type IN ('BASE TABLE', 'VIEW')"
+                # 047:与 knowledge 收录同口径,限基表——内省结果直连生成
+                # 上下文(ReAct 内省回退)与元数据呈现,视图行扇出与列缺失
+                # 形态对两条消费面同样有毒
+                " AND table_type = 'BASE TABLE'"
                 " ORDER BY table_schema, table_name"
             ),
             {"schemas": schemas},

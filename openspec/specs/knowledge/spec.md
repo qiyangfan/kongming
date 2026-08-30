@@ -88,12 +88,23 @@ fetch-metadata 收口时 SHALL 执行对账:该 (租户, 数据源) 下
 响应体 SHALL 含 `removed` 字段(本次对账删除行数)。
 **登记优先级判定与生效别名预读 SHALL 以 (schema_name, table_name)
 二元键定位既有行**——同一数据源范围内跨 schema 同名表不得互相遮蔽。
+**扫描集收录范围 SHALL 限基表(`table_type = 'BASE TABLE'`):视图
+SHALL NOT 进入表结构知识**(047:视图是基表派生物,行扇出使聚合失真
+——film_list AVG 被库存份数加权实证;视图样例 SQL 挤占召回 top-K 使
+维度表缺位实证;基表可完整表达视图可表达的一切查询,收录即引入歧义)。
+存量视图/保留表自动来源登记由本对账自动清偿,无需专门清理程序。
 
 #### Scenario: 扫描集外自动来源孤儿被对账删除
 - GIVEN default 源存在扫描范围之外的自动来源登记(如旧形态 tenant_sakila.staff,AI_GENERATED)
 - WHEN 对 default 源执行 fetch-metadata(扫描集=[tenant_default, public])
 - THEN tenant_sakila.staff 登记行被删除,removed 计数含该行
 - AND 审计 detail 记 removed;检索缓存被失效
+
+#### Scenario: 存量视图登记被对账清偿
+- GIVEN 知识库存在视图登记行(如 tenant_sakila.film_list,AI_GENERATED)
+- WHEN 对该数据源执行 fetch-metadata(扫描集只含基表)
+- THEN 该视图登记行被删除(自动来源孤儿),removed 计数含该行
+- AND 召回与生成上下文不再出现视图条目
 
 #### Scenario: 扫描集外人工条目保留并告警
 - GIVEN 扫描范围之外存在 MANUAL_EDIT 登记行
@@ -110,6 +121,8 @@ fetch-metadata 收口时 SHALL 执行对账:该 (租户, 数据源) 下
 - GIVEN 目标数据源连接失败
 - WHEN fetch-metadata 执行
 - THEN 请求失败,既有登记行全部保留(不误删)
+
+## ADDED Requirements
 
 ### Requirement: reindex(按数据源重建)
 
@@ -172,3 +185,17 @@ SHALL 清空人工精修条目回到自动生成基线(与 fetch-metadata 的优
 - WHEN 修改 alias 为「订单表」并保存
 - THEN 落库 alias=「订单表」,source_type=MANUAL_EDIT;后续召回与
   摘要称谓以「订单表」为准
+
+### Requirement: 知识写路径级联失效建议缓存
+
+知识写路径(上传/编辑/删除/fetch-metadata/reindex)SHALL 在失效检索
+缓存的同时级联失效该数据源的建议问题缓存(与 ctx 缓存失效同点、同一
+业务事务,039 datasource 级联先例同范式)——表结构知识变化(收录收窄/
+对账清偿/人工治理)若不失效建议缓存,存量建议会持续推荐已被治理排除
+的问题(047 实证:保留表收编后 default 源建议仍推荐撞墙题 3/5)。
+
+#### Scenario: fetch-metadata 对账清偿后建议缓存同步失效
+- GIVEN default 源存在存量建议缓存(含已被治理排除的问题)
+- WHEN 对 default 源执行 fetch-metadata 触发对账删除
+- THEN 该数据源的建议缓存被同事务删除
+- AND 下次访问按新知识状态重新生成建议

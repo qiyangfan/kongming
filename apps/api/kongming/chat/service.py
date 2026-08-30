@@ -64,7 +64,8 @@ def blocked_friendly(reason: str | None) -> str:
     if r.startswith("DATA_SCOPE"):
         return "该查询超出您的数据范围,暂不支持"
     if r.startswith("RESERVED_TABLE"):
-        return "该查询访问了不允许的表,已被拒绝"
+        # 047:中性不责备——常见成因是模型越界而非用户过错
+        return "该问题涉及的数据不允许查询,请调整问法或咨询管理员"
     return "该查询涉及非只读操作,已被拒绝"
 
 
@@ -111,6 +112,8 @@ class ChatOutcome:
     chart: ChartSuggestion = field(default_factory=lambda: ChartSuggestion("none"))
     retry_count: int = 0
     error: str | None = None
+    # 047:原始技术错误(FAILED 时携带;error 为用户语言,细节经前端折叠披露)
+    error_detail: str | None = None
     # 014 messageId 打通:assistant 落库消息 id(反馈提交引用;不落库路径 None)
     # 与本次执行的数据源快照(会话快照同源口径)
     message_id: str | None = None
@@ -156,6 +159,8 @@ class MessageResult:
     stats: dict[str, object] = field(default_factory=dict[str, object])
     chart: ChartSuggestion = field(default_factory=lambda: ChartSuggestion("none"))
     error: str | None = None
+    # 047:原始技术错误(读档;存量档缺失→None,前端不渲染折叠块)
+    error_detail: str | None = None
     # 026:类型化产物(读档优先,缺档按要素重算)
     artifacts: list[dict[str, object]] = field(
         default_factory=list[dict[str, object]]
@@ -175,6 +180,8 @@ class SessionMessage:
     sql: str | None = None
     status: str = "SUCCESS"
     error: str | None = None
+    # 047:原始技术错误(FAILED 回显;web 折叠「技术详情」)
+    error_detail: str | None = None
     result: MessageResult | None = None
     # 014 反馈状态回显(assistant 消息;user 消息恒 None)
     rating: str | None = None
@@ -894,6 +901,7 @@ class ChatService:
             else []
         )
         error: str | None = None
+        error_detail: str | None = None
         if status == "REJECTED":
             error = blocked_friendly(error_raw)
         elif status == "NO_DATA":
@@ -904,7 +912,9 @@ class ChatService:
             )
             error = None
         elif status == "FAILED":
-            error = f"查询失败:{error_raw}" if error_raw else "查询失败,请换个问法试试"
+            # 047:用户语言进 error,原始技术错误进 error_detail(web 折叠披露)
+            error = "查询执行失败,请调整问法后重试"
+            error_detail = error_raw
 
         # 026:产物派生(三路径同源);044:如实说明不派生产物卡
         # (derive_artifacts 对非空 summary 会派生 document 卡,NO_DATA 跳过)
@@ -932,6 +942,7 @@ class ChatService:
                         "chart": {"type": chart.type, "x": chart.x, "y": chart.y},
                         "artifacts": artifacts,  # 026
                         "error": error,
+                        "error_detail": error_detail,  # 047 原始技术错误随档
                     },
                     ensure_ascii=False,
                     default=str,
@@ -990,6 +1001,7 @@ class ChatService:
             chart=chart,
             retry_count=reply.retry_count,
             error=error,
+            error_detail=error_detail,
             message_id=mid,
             datasource_key=datasource_key,
             pending_tool_calls=pending,
@@ -1256,6 +1268,7 @@ class ChatService:
         role = str(row["role"])
         result: MessageResult | None = None
         error: str | None = None
+        error_detail: str | None = None
         rj = row.get("result_json")
         if role == "ASSISTANT" and rj:
             try:
@@ -1300,6 +1313,10 @@ class ChatService:
                 chart = suggest_chart(cols, rws)
             err_raw = d.get("error")
             error = str(err_raw) if err_raw is not None else None
+            # 047 读档:原始技术错误(存量档缺失→None)
+            err_detail_raw = d.get("error_detail")
+            if err_detail_raw is not None:
+                error_detail = str(err_detail_raw)
             stats_raw = d.get("stats")
             # 026:artifacts 读档;缺档(026 前存量)按要素确定性重算
             art_raw = d.get("artifacts")
@@ -1338,6 +1355,7 @@ class ChatService:
                 ),
                 chart=chart,
                 error=error,
+                error_detail=error_detail,
                 artifacts=artifacts,
                 column_labels=(  # 041 读档;存量档缺失→空(消费方回退 columns)
                     [str(x) for x in cast("list[object]", lb_raw)]
@@ -1370,6 +1388,7 @@ class ChatService:
             sql=None if sql_text is None else str(sql_text),
             status=str(row["status"]),
             error=error,
+            error_detail=error_detail,
             result=result,
             rating=None if rating is None else str(rating),
             corrected_sql=None if corrected_sql is None else str(corrected_sql),

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from kongming.rag.cache import ContextCache
 from kongming.rag.models import (
+    RECALL_TOP_K,
     DatasourceInvalid,
     IntrospectedTable,
     KnowledgeEntry,
@@ -28,12 +29,19 @@ from kongming.rag.models import (
     can_automated_overwrite,
     rrf_fuse,
 )
-from kongming.rag.ports import EmbeddingError, EmbeddingPort, RagRepo, TableDescriberPort
+from kongming.rag.ports import (
+    EmbeddingError,
+    EmbeddingPort,
+    RagRepo,
+    SuggestionCacheEvictor,
+    TableDescriberPort,
+)
 
 log = logging.getLogger(__name__)
 
 _DESCRIBE_CONCURRENCY = 4  # 逐表润色并发上限(防 LLM 端打爆)
 _EMBED_BATCH = 64          # embed 单批上限(agent 端点契约)
+_RECALL_TOTAL_CAP = RECALL_TOP_K * 2  # 047:多轮继承合并总量封顶
 
 
 @dataclass(frozen=True)
@@ -63,11 +71,20 @@ class RagService:
         embedder: EmbeddingPort,
         describer: TableDescriberPort,
         cache: ContextCache,
+        suggestion_evictor: SuggestionCacheEvictor | None = None,
     ) -> None:
         self._repo = repo
         self._embedder = embedder
         self._describer = describer
         self._cache = cache
+        self._suggestion_evictor = suggestion_evictor
+
+    async def _evict_suggestions(self, datasource_key: str) -> None:
+        """047:建议缓存级联失效(知识写路径;DELETE 与业务写同事务,由
+        本次 commit 一并收口)。未注入(轻量装配/既有测试)时零行为。"""
+        if self._suggestion_evictor is None:
+            return
+        await self._suggestion_evictor.delete_by_datasource(datasource_key)
 
     # ============ 租户上下文(与 chat/options 同构:显式查白名单,缺省默认租户) ============
 
@@ -142,6 +159,7 @@ class RagService:
             {"schema_name": schema_name, "tables": [b.table_name for b in blocks],
              "datasource_key": datasource_key},
         )
+        await self._evict_suggestions(datasource_key)  # 047 级联失效(同事务)
         await self._repo.commit()
         await self._cache.evict(tenant_id, datasource_key)
         return [b.table_name for b in blocks]
@@ -169,6 +187,7 @@ class RagService:
         await self._repo.log_oper(
             actor_id, "rag.delete", table_id, {"table_name": target.table_name}
         )
+        await self._evict_suggestions(target.datasource_key)  # 047 级联失效(同事务)
         await self._repo.commit()
         await self._cache.evict(tenant_id, target.datasource_key)
         return target
@@ -225,6 +244,7 @@ class RagService:
                 "table_comment": table_comment[:200],
             },
         )
+        await self._evict_suggestions(target.datasource_key)  # 047 级联失效(同事务)
         await self._repo.commit()
         await self._cache.evict(tenant_id, target.datasource_key)
         return await self._repo.find_table(tenant_id=tenant_id, table_id=table_id)
@@ -322,6 +342,7 @@ class RagService:
                 "datasource_key": datasource_key,
             },
         )
+        await self._evict_suggestions(datasource_key)  # 047 级联失效(同事务)
         await self._repo.commit()
         await self._cache.evict(tenant_id, datasource_key)
         return ReindexResult(deleted=deleted, rebuilt=len(tables), enriched=enriched_count)
@@ -352,6 +373,7 @@ class RagService:
                 {"found": 0, "enriched": 0, "skipped": 0, "removed": removed,
                  "manual_orphans": manual_orphans, "datasource_key": datasource_key},
             )
+            await self._evict_suggestions(datasource_key)  # 047 级联失效(同事务)
             await self._repo.commit()
             await self._cache.evict(tenant_id, datasource_key)
             return FetchResult(found=0, enriched=0, skipped=0, removed=removed)
@@ -437,6 +459,7 @@ class RagService:
                 "datasource_key": datasource_key,
             },
         )
+        await self._evict_suggestions(datasource_key)  # 047 级联失效(同事务)
         await self._repo.commit()
         await self._cache.evict(tenant_id, datasource_key)
         return FetchResult(
@@ -475,18 +498,31 @@ class RagService:
     # ============ 召回(内部端点) ============
 
     async def recall(
-        self, *, tenant_key: str, datasource_key: str, question: str
+        self,
+        *,
+        tenant_key: str,
+        datasource_key: str,
+        question: str,
+        history: list[str] | None = None,
     ) -> RagContext:
         """三路召回:ctx 缓存→embedding→向量/全文/历史→RRF 融合。
 
         tenant+datasource 双过滤;embedding 失败降级纯全文路;不连业务库。
+        047 多轮继承:history 非空时以末条历史问句独立召回一路(上轮依赖表
+        是本轮查询的确定性上下文,不依赖向量相似度),去重合并——主路序在
+        前、总量封顶 2×RECALL_TOP_K;ctx 缓存键并入历史指纹(同问句不同
+        上下文不互串);history 空(单轮)时与单路召回逐字节同形。
         """
         tenant_id = await self._repo.tenant_id_by_key(tenant_key)
         if tenant_id is None:
             raise LookupError(tenant_key)  # router 映射 404(与 meta 通道同语义)
         await self._require_usable_datasource(tenant_id, datasource_key)
 
-        cached = await self._cache.get(tenant_id, datasource_key, question)
+        prior = (history or [])[-1].strip() if history else ""
+        # 键材料作为 question 参数传入——派生(hash)逻辑留在 cache 内部
+        key_material = f"{question}\x1f{prior}" if prior else question
+
+        cached = await self._cache.get(tenant_id, datasource_key, key_material)
         if cached is not None:
             return cached
 
@@ -497,18 +533,41 @@ class RagService:
             log.warning("召回 embedding 失败,降级纯全文路")
 
         vector_hits = []
-        history: list[str] = []
+        fewshot_sqls: list[str] = []
         if vector is not None:
             vector_hits = await self._repo.recall_vector(
                 tenant_id=tenant_id, datasource_key=datasource_key, vector=vector
             )
-            history = await self._repo.recall_history(
+            fewshot_sqls = await self._repo.recall_history(
                 tenant_id=tenant_id, datasource_key=datasource_key, vector=vector
             )
         fulltext_hits = await self._repo.recall_fulltext(
             tenant_id=tenant_id, datasource_key=datasource_key, question=question
         )
         fused = rrf_fuse([vector_hits, fulltext_hits])
+        if prior and prior != question:
+            prior_vector: list[float] | None = None
+            try:
+                prior_vector = (await self._embedder.embed([prior]))[0]
+            except EmbeddingError:
+                log.warning("继承路 embedding 失败,降级纯全文路")
+            prior_vec_hits = (
+                await self._repo.recall_vector(
+                    tenant_id=tenant_id, datasource_key=datasource_key, vector=prior_vector
+                )
+                if prior_vector is not None
+                else []
+            )
+            prior_ft_hits = await self._repo.recall_fulltext(
+                tenant_id=tenant_id, datasource_key=datasource_key, question=prior
+            )
+            seen = {(h.schema_name, h.table_name) for h in fused}
+            fused = fused + [
+                h
+                for h in rrf_fuse([prior_vec_hits, prior_ft_hits])
+                if (h.schema_name, h.table_name) not in seen
+            ]
+            fused = fused[:_RECALL_TOTAL_CAP]
         entries = await self._repo.fetch_entries(
             tenant_id=tenant_id,
             datasource_key=datasource_key,
@@ -516,12 +575,12 @@ class RagService:
         )
         ctx = RagContext(
             schema_hint=build_schema_hint(entries),
-            history_sql=build_history_sql(history),
+            history_sql=build_history_sql(fewshot_sqls),
         )
         # 空结果不写缓存:降级形态(embedding 失败/知识为空)缓存会让恢复后的
         # 服务在 TTL 窗口内持续返回空提示——空结果无缓存价值,下次请求重试全链路
         if ctx.schema_hint or ctx.history_sql:
-            await self._cache.set(tenant_id, datasource_key, question, ctx)
+            await self._cache.set(tenant_id, datasource_key, key_material, ctx)
         return ctx
 
     # ============ 回写(成功 SQL) ============

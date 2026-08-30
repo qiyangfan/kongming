@@ -8,7 +8,7 @@ NL2SQL 核心链路的能力深化:多轮上下文全链路打通(前端→控�
 
 ### Requirement: 多轮上下文链路打通(命脉级)
 
-前端攒最近 5 轮 user 问句,控制面全链路透传 history 到 Agent 面,understand 节点用历史做指代消解与省略补全;不传 history 时向后兼容。指代消解 SHALL 保真:补全后的问句保留上轮全部限定条件(筛选/排序/数量限制/聚合口径),「这些/它们/上面提到的」SHALL 解析为对上轮结果集或上轮主体的追问,只补全语义 SHALL NOT 新增或篡改条件。
+前端攒最近 5 轮 user 问句,控制面全链路透传 history 到 Agent 面,understand 节点用历史做指代消解与省略补全;不传 history 时向后兼容。指代消解 SHALL 保真:补全后的问句保留上轮全部限定条件(筛选/排序/数量限制/聚合口径),「这些/它们/上面提到的」SHALL 解析为对上轮结果集或上轮主体的追问,只补全语义 SHALL NOT 新增或篡改条件。**聚合追问 SHALL 显式汇总口径:追问上一轮整体的总量/总额/合计(「总共/合计/一共…多少」形态)时,补全后的问题 SHALL 明确为对上轮结果整体的单一聚合口径(如「这 10 个订单的支付总金额合计是多少」),SHALL NOT 改写为逐行明细口径**(048:改写问句的逐行/整体两读是 mt_006 聚合口径丢失的首因,聚合追问是多轮最高频真实问法)。
 
 #### Scenario: 前端攒历史问句传后端
 - GIVEN 用户已进行 2 轮对话
@@ -36,6 +36,13 @@ NL2SQL 核心链路的能力深化:多轮上下文全链路打通(前端→控�
 - THEN 补全后的问句保留「租赁次数最多的前 5 位」限定(解析为对该结果集的追问),
   不退化为「所有客户的邮箱」
 
+#### Scenario: 聚合追问补全为单一汇总口径(048)
+- GIVEN 第 1 轮为「运费总额最高的前 10 个订单及其运费总额」
+- WHEN 第 2 轮问「这些订单的支付总金额是多少」
+- THEN 补全后的问题为整体聚合口径(如「这 10 个订单的支付总金额合计是多少」),
+  生成 SQL 输出单行 SUM 汇总
+- AND SHALL NOT 输出逐单明细行代替总额
+
 #### Scenario: 指代消解不新增条件
 - GIVEN 第 1 轮为「查询所有评分 NC-17 的影片」
 - WHEN 第 2 轮问「其中租金大于 3 美元的有哪些」
@@ -55,7 +62,7 @@ NL2SQL 核心链路的能力深化:多轮上下文全链路打通(前端→控�
 
 generate 节点的系统提示必须强化:多表 JOIN 用显式连接条件(非隐式逗号 join)、聚合维度识别(GROUP BY + AVG/COUNT)、PostgreSQL 方言(ILIKE)、时间窗用 interval/DATE_TRUNC(非硬编码日期);且不影响单表简单查询。
 
-统计/明细边界 SHALL 显式化:含 GROUP BY 或聚合函数(COUNT/AVG/SUM/MAX/MIN)的查询一律视为统计查询,SHALL NOT 加 LIMIT——用户明确要求 top-N/前 N 名时除外(此时按统计键排序后 LIMIT);仅逐行返回业务实体的明细查询才适用默认 LIMIT 100 保护。排序键可能并列时 SHALL 追加主键等唯一列作第二排序键,保证结果可复现(DISTINCT 去重查询除外,见投影纪律)。聚合小数值(AVG/比率/除法结果)SHALL 用 ROUND(…, 2) 统一舍入口径,禁止裸 ::numeric 截断或全精度直出。投影 SHALL 完备:问题点名的每个信息项(名称/数量/金额等)都必须出现在 SELECT 投影中;ID/编号列 SHALL NOT 替代名称列(用户点名编号或 ID 作排序键时可附加,名称列必须在投影中)。技术主键等代理键 SHALL 默认不进 SELECT 投影——用户未点名时投影不含 ID 列,用户明确点名 ID/编号时才投影(点名不拦);行标识需要机器可核对编号时 SHALL 优先业务编号列(订单号/编号类面向用户的列)而非代理主键。DISTINCT 去重查询 SHALL NOT 追加投影外的唯一列作排序键(SELECT DISTINCT 语义下 ORDER BY 列必须在投影内,主键入投影则去重失效),排序键 SHALL 取已在投影中的列,并列可能让位于去重语义。一对多 JOIN 后统计实体数量 SHALL 用 COUNT(DISTINCT 实体主键) 去重,防止扇出膨胀;JOIN 产生完全重复的明细行 SHALL 用 DISTINCT 去重。用户请求写操作(增/删/改)时 SHALL 只生成查看相关数据现状的只读 SELECT,SHALL NOT 生成 WHERE FALSE 等规避形态假装完成。
+统计/明细边界 SHALL 显式化:含 GROUP BY 或聚合函数(COUNT/AVG/SUM/MAX/MIN)的查询一律视为统计查询,SHALL NOT 加 LIMIT——用户明确要求 top-N/前 N 名时除外(此时按统计键排序后 LIMIT);仅逐行返回业务实体的明细查询才适用默认 LIMIT 100 保护。排序键可能并列时 SHALL 追加主键等唯一列作第二排序键,保证结果可复现(DISTINCT 去重查询除外,见投影纪律)。聚合小数值(AVG/比率/除法结果)SHALL 用 ROUND(…, 2) 统一舍入口径,禁止裸 ::numeric 截断或全精度直出。投影 SHALL 完备:问题点名的每个信息项(名称/数量/金额等)都必须出现在 SELECT 投影中;ID/编号列 SHALL NOT 替代名称列(用户点名编号或 ID 作排序键时可附加,名称列必须在投影中)。技术主键等代理键 SHALL 默认不进 SELECT 投影——用户未点名时投影不含 ID 列,用户明确点名 ID/编号时才投影(点名不拦);行标识需要机器可核对编号时 SHALL 优先业务编号列(订单号/编号类面向用户的列)而非代理主键。DISTINCT 去重查询 SHALL NOT 追加投影外的唯一列作排序键(SELECT DISTINCT 语义下 ORDER BY 列必须在投影内,主键入投影则去重失效),排序键 SHALL 取已在投影中的列,并列可能让位于去重语义。一对多 JOIN 后统计实体数量 SHALL 用 COUNT(DISTINCT 实体主键) 去重,防止扇出膨胀;JOIN 产生完全重复的明细行 SHALL 用 DISTINCT 去重;**「对应关系/名录」类明细经一对多 JOIN 后投影列组合重复(如同分类下多部影片重复出现同一演员)时亦 SHALL DISTINCT 去重——重复的对应行是噪声,不因问题未提「去重」而放行**(048:sakila_018 稳定失分靶点)。**追问上一轮整体的总量/总额/合计(「总共/合计/一共」)时 SHALL 输出对结果整体的单一聚合行(SUM/COUNT 等),SHALL NOT 逐行明细**(048:聚合口径丢失靶点,与 understand 显式汇总口径双层互锁)。用户请求写操作(增/删/改)时 SHALL 只生成查看相关数据现状的只读 SELECT,SHALL NOT 生成 WHERE FALSE 等规避形态假装完成。
 
 #### Scenario: 多表 join 连接条件推导
 - GIVEN 问题「查询每个客户租过的所有影片」(需 4 表连接)
@@ -125,10 +132,23 @@ generate 节点的系统提示必须强化:多表 JOIN 用显式连接条件(非
 - WHEN generate 节点执行
 - THEN SQL 用 DISTINCT 消除完全重复行
 
+#### Scenario: 对应关系类明细的组合去重(048)
+- GIVEN 问题「演员与影片分类的对应关系前 100 条」(actor×film×category 一对多链,
+  同一演员在同分类多部影片使投影组合重复)
+- WHEN generate 节点执行
+- THEN SQL 用 SELECT DISTINCT 去重,前 100 条不含重复对应行
+- AND 排序键保持在投影内(与 DISTINCT 排序例外兼容)
+
 #### Scenario: 一对多 JOIN 去重计数(016 失败归因⑤)
 - GIVEN 问题「有多少客户租过影片」(rental 一对多扇出)
 - WHEN generate 节点执行
 - THEN SQL 用 COUNT(DISTINCT customer_id) 或等价去重形态,不按 rental 行数计数
+
+#### Scenario: 聚合追问输出单行汇总(048)
+- GIVEN 多轮追问「这些订单的支付总金额是多少」(上轮为 top-10 明细)
+- WHEN generate 节点执行
+- THEN SQL 输出对上轮结果集整体的单一 SUM 聚合行
+- AND SHALL NOT 返回逐单明细行代替总额
 
 #### Scenario: 写操作请求诚实处理(005/006 冒烟观察)
 - GIVEN 用户问题为「删除 name 为 X 的商品」(写操作请求)
@@ -208,7 +228,15 @@ SHALL 回退实时内省兜底(005 过渡形态保留为兜底——新租户/�
 零质量回归);③内省亦失败时 SHALL 降级为空提示并提示 LLM「无法获取表结构」
 ——不误导、不硬编码全表,生成失败属可接受降级。历史成功 SQL SHALL 由
 generate 节点以独立「参考历史成功 SQL」段拼入用户提示(仅非空时;系统提示
-模板资产不变),其示例优先级高于表说明内嵌示例。
+模板资产不变),其示例优先级高于表说明内嵌示例。**请求携带多轮 history 时,
+SHALL 以最近一条历史问句独立执行一路向量+全文召回,将其命中按序合并进融合
+结果(主路命中优先,重复 (schema,table) 去重,总量封顶 2×top-K)**——多轮
+追问经 understand 改写后语义完整,但召回对改写问句仍可能丢失上轮依赖表
+(047 实证:追问「他们各自的邮箱」召回缺排名依据表 rental,模型越界引用
+清单外表/列);上轮命中表是本轮查询的确定性上下文,继承 SHALL 是结构性行为
+而非依赖向量相似度。ctx 缓存键 SHALL 并入历史指纹(末条历史问句),同问句
+不同上下文 SHALL NOT 互串缓存。history 为空(单轮)时行为与单路召回逐字节
+同形。
 
 #### Scenario: 过渡形态内省全量提示
 - GIVEN 该租户+数据源知识库无任何表说明(新租户/未扫描),或召回服务不可用
@@ -239,9 +267,31 @@ generate 节点以独立「参考历史成功 SQL」段拼入用户提示(仅非
 - THEN 含「参考历史成功 SQL」段(位于表结构提示之后),系统提示模板不变
 - AND 无历史命中时该段不出现,提示形态与 005 一致
 
+#### Scenario: 多轮追问继承上轮依赖表(047)
+- GIVEN 第一轮问句「查询租赁次数最多的前 5 位客户」命中 customer/rental
+- WHEN 第二轮追问「他们各自的邮箱是什么」(history 携带第一轮问句),
+  本轮主路召回未命中 rental
+- THEN 合并结果包含 rental(继承路补入)
+- AND 生成 SQL 不再引用『可用表结构』清单之外的表
+
+#### Scenario: 继承不重复且封顶(047)
+- GIVEN 主路与继承路命中大量重叠表
+- WHEN 合并
+- THEN 重复 (schema, table) 只保留主路位次,总量不超过 2×top-K
+
+#### Scenario: 单轮零回归(047)
+- GIVEN 请求不携带 history
+- WHEN 召回
+- THEN 与单路召回行为一致(不发起继承路,缓存键与现状相同)
+
+#### Scenario: 同问句不同上下文缓存不互串(047)
+- GIVEN 同一问句分别以 history=[A] 与 history=[B] 请求
+- WHEN 召回
+- THEN 两次使用不同缓存键,各自命中各自的上下文
+
 ### Requirement: selfheal 错误分类(省 LLM 配额)
 
-selfheal 按错误类型分类:权限/防火墙拦截类直接终止不重试;语法/执行错误才重试,节省 LLM 配额。
+selfheal 按错误类型分类:权限/防火墙拦截类直接终止不重试;语法/执行错误才重试,节省 LLM 配额。**generate 组装喂回时 SHALL 按 PG 错误形态附加针对性修正指令**(047:泛化「请修正」使机械错同因连败,实证 missing FROM-clause 重试 2 轮同错):`missing FROM-clause entry for table "X"` → 指示补 X 的 JOIN 或改用已定义别名、不得引用『可用表结构』之外的表;`column "…" does not exist` → 指示只用清单内列并核对拼写、缺口径列不得近似顶替(046 列级哨兵的喂回镜像,SHALL NOT 引向表哨兵出口);`relation "…" does not exist` → 指示核对清单、确无数据只输出 NO_RELEVANT_TABLE(043 出口收窄到关系类);其余形态维持泛化喂回。
 
 #### Scenario: 权限拦截不重试
 - GIVEN 生成的 SQL 被防火墙拦截(FORBIDDEN_DML)
@@ -253,6 +303,24 @@ selfheal 按错误类型分类:权限/防火墙拦截类直接终止不重试;�
 - WHEN execute 失败
 - THEN 进入 selfheal 重试(retry_count < MAX_RETRY),重试耗尽才终止
 
+#### Scenario: 未定义别名错误获得针对性指令(047)
+- GIVEN 上一轮 SQL 执行失败,error 含 `missing FROM-clause entry for table "s"`
+- WHEN generate 组装喂回
+- THEN user 提示附加「补 JOIN 或改用已有别名」类修正指令
+- AND SHALL NOT 附加 NO_RELEVANT_TABLE 哨兵出口(别名错可修,不是弃答出口)
+
+#### Scenario: 列不存在不误引表哨兵(047)
+- GIVEN error 含 `column "email" does not exist`
+- WHEN generate 组装喂回
+- THEN 指令为列纪律(只用清单内列、核对拼写、不得近似顶替)
+- AND 不出现「只输出 NO_RELEVANT_TABLE」指引(表存在,出口是改列不是弃答)
+
+#### Scenario: 表不存在保持哨兵出口(047)
+- GIVEN error 含 `relation "public.staff" does not exist`
+- WHEN generate 组装喂回
+- THEN 指令含「核对清单;确无数据只输出 NO_RELEVANT_TABLE」
+- AND 关系类以外的 does-not-exist 形态(函数/类型等)维持泛化喂回,
+  SHALL NOT 误引表哨兵出口
 
 ### Requirement: 流式事件发射(自定义流通道)
 
@@ -389,7 +457,7 @@ generate 节点 SHALL 在用户提示中拼接 relations_hint/metric_hints 非�
 
 ### Requirement: 文档通道与知识分流节点
 
-retrieve 节点 SHALL 在三路召回之外并行取文档通道检索结果(doc_hints:父块全文+source_ref 列表;零命中为空);分流判定(规则词表+schema 空+文档非空)成立时进入 doc_answer 节点直接产出文本答案(summary=回答,无 SQL),否则走既有链路。doc_answer 的提示 SHALL 只含问句与文档段(全新撰写资产),答案 SHALL 以文档内容为准并标注 source_ref;文档段超限时按序截断。既有节点链路与 prompt 资产 SHALL NOT 变化;文档通道失败 SHALL 降级为空(既不影响 schema 通道)。
+retrieve 节点 SHALL 在三路召回之外并行取文档通道检索结果(doc_hints:父块全文+source_ref 列表;零命中为空);分流判定(规则词表+schema 空+文档非空)成立时进入 doc_answer 节点直接产出文本答案(summary=回答,无 SQL),否则走既有链路。doc_answer 的提示 SHALL 只含问句与文档段(全新撰写资产),答案 SHALL 以文档内容为准并标注 source_ref;文档段超限时按序截断。既有节点链路与 prompt 资产 SHALL NOT 变化;文档通道失败 SHALL 降级为空(既不影响 schema 通道)。**分流 SHALL 具多轮门槛:会话历史在场(history 非空)时,若问题仅由泛系系词「是什么」命中知识意图词表(强文档词——政策/流程/口径/定义/规范/制度/办法/怎么规定/为什么——零命中)SHALL NOT 分流,回 generate**(047 实证:多轮数据追问「这些影片各自的分类是什么」被文档通道劫持,用户得到「文档中未提及」;会话在场本身即数据语境,泛系系词不足以证明文档意图)。无历史(单轮)时分流行为与 024 语义逐字一致;036④ 附件分流条件不变。
 
 #### Scenario: 分流节点零 SQL 面
 
@@ -402,6 +470,21 @@ retrieve 节点 SHALL 在三路召回之外并行取文档通道检索结果(doc
 - GIVEN 文档检索服务异常
 - WHEN retrieve 执行
 - THEN doc_hints 为空,链路按无文档处理(与 024 之前一致)
+
+#### Scenario: 多轮数据追问不被文档劫持(047)
+- GIVEN 租户已有文档命中能力,会话存在上轮数据问答
+- WHEN 当前问题为「这些影片各自的分类是什么」(仅「是什么」命中)
+- THEN 路由 generate,生成 SQL 回答(不进 doc_answer)
+
+#### Scenario: 多轮强文档词照旧分流(047)
+- GIVEN 会话存在历史,文档命中非空
+- WHEN 当前问题为「这些政策的适用口径是什么」(命中强词 政策/口径)
+- THEN 路由 doc_answer
+
+#### Scenario: 单轮 024 语义不变(047)
+- GIVEN 无历史,文档命中非空
+- WHEN 问题为「退货政策是什么」
+- THEN 路由 doc_answer(与 024 行为一致)
 
 ### Requirement: 表范围纪律与如实说明短路
 

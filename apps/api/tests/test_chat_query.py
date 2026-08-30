@@ -477,6 +477,41 @@ async def test_no_data_maps_neutral_status(
     assert row["artifacts"] == []  # 如实说明不派生产物卡(asyncpg 已反序列化 jsonb)
 
 
+async def test_failed_friendly_error_with_detail(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser,
+    fake_agent: dict[str, FakeAgent],
+) -> None:
+    """047:FAILED 文案用户语言,原始技术错误迁移 error_detail(响应+落档)。"""
+    _, token = await _user_with_chat_perm(client, session, make_user)
+    raw = 'missing FROM-clause entry for table "s"'
+    reply = AgentReply(success=False, verdict="ERROR", error=raw, retry_count=2)
+    _install(fake_agent, FakeAgent(reply))
+    r = await client.post(
+        "/chat/query",
+        json={"question": "查询每个门店库存中各影片分类的库存数量", "persist": False},
+        headers=_auth(token),
+    )
+    body = r.json()
+    assert body["verdict"] == "ERROR"
+    assert body["error"] == "查询执行失败,请调整问法后重试"  # 用户语言
+    assert body["error_detail"] == raw  # 原始错误原文(技术详情)
+
+
+async def test_rejected_reserved_table_copy_neutral(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser,
+    fake_agent: dict[str, FakeAgent],
+) -> None:
+    """047:保留表拦截文案中性化——不责备用户(模型越界是常见成因)。"""
+    from kongming.chat.service import blocked_friendly
+
+    assert blocked_friendly("RESERVED_TABLE:user_memory") == (
+        "该问题涉及的数据不允许查询,请调整问法或咨询管理员"
+    )
+    # 其余分态语义不动
+    assert blocked_friendly("DATA_SCOPE:x") == "该查询超出您的数据范围,暂不支持"
+    assert blocked_friendly("GUARDRAIL:x") == "内容未通过安全检查,请调整后重试"
+
+
 def test_chart_suggestion_rules() -> None:
     import datetime as dt
 

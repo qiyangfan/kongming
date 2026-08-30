@@ -157,19 +157,25 @@ class ApiClient:
         return SchemaMeta(tables=tables, truncated=bool(data.get("truncated")))
 
     async def rag_retrieve(
-        self, *, tenant_key: str, datasource_key: str, question: str
+        self,
+        *,
+        tenant_key: str,
+        datasource_key: str,
+        question: str,
+        history: list[str] | None = None,
     ) -> RagContext | None:
         """三路召回(009):问句用 understand 产出的改写问句(语义完整);
-       任何失败返回 None(retrieve 回退实时内省,不抛错)。"""
+        047 多轮继承:history 末条走继承路补上轮依赖表;任何失败返回
+        None(retrieve 回退实时内省,不抛错)。"""
+        payload: dict[str, object] = {
+            "tenant_key": tenant_key,
+            "datasource_key": datasource_key,
+            "question": question,
+        }
+        if history:
+            payload["history"] = history
         try:
-            resp = await self._post(
-                "/internal/rag/retrieve",
-                {
-                    "tenant_key": tenant_key,
-                    "datasource_key": datasource_key,
-                    "question": question,
-                },
-            )
+            resp = await self._post("/internal/rag/retrieve", payload)
         except httpx.HTTPError as e:
             log.warning("rag_retrieve 回调异常: %s", e)
             return None

@@ -4,7 +4,8 @@ service 零框架:持久化/内省/租户解析/数据源校验全部经端口;
 repo 实现见 repository.py(SQLAlchemy + 动态池内省编排)。
 """
 
-from typing import Protocol
+from collections.abc import Coroutine
+from typing import Any, Protocol
 
 from kongming.rag.models import IntrospectedTable, KnowledgeEntry, RecallHit, TableBlock
 
@@ -36,6 +37,19 @@ class ColumnCommentReader(Protocol):
     async def column_comments(
         self, *, tenant_id: str, datasource_key: str
     ) -> dict[str, dict[str, str]]: ...
+
+
+class SuggestionCacheEvictor(Protocol):
+    """建议问题缓存级联失效窄端口(047:知识写路径消费;实现=chat 域
+    SuggestionRepository,结构化匹配;datasource 域同名端口的实现亦兼容)。
+
+    DELETE 语句在知识写路径的业务事务内执行,由 rag commit 一并收口
+    (039 datasource 级联先例同范式)——表结构知识变更(收录收窄/对账
+    清偿/人工治理)若不失效建议缓存,存量建议会持续推荐已被治理排除的
+    问题。实现侧经 _store_error_boundary 装饰,协议成员以 def+Coroutine
+    形态声明(装饰器产物与 pyright 的协议匹配既定解法)。"""
+
+    def delete_by_datasource(self, datasource_key: str) -> Coroutine[Any, Any, None]: ...
 
 
 class TableDescriberPort(Protocol):

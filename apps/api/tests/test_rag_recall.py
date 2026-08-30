@@ -151,6 +151,99 @@ async def test_recall_vector_and_history(
     assert "SELECT email FROM tenant_default.customer" in body["history_sql"]
 
 
+async def test_recall_history_inherits_prior_tables(
+    client: AsyncClient, session: AsyncSession, fake_embed: None
+) -> None:
+    """047 多轮继承:追问主路召回缺上轮依赖表,继承路(history 末条)补入。
+
+    复刻 mt_005 事故形态:追问「他们各自的邮箱」主路召回被填充表占满,
+    行为表 rental 只与上轮问句相似——无继承即缺表,模型越界引用清单外表。
+    """
+    from kongming.redis_client import get_redis
+
+    await cast("Any", get_redis()).flushdb()
+    tid = await _ensure_default_tenant(session)
+    q = "他们各自的邮箱是什么"
+    # 6 张填充表:向量=追问同种子(距离 0),占满主路 top-5
+    for i in range(6):
+        await _seed_knowledge(session, tid, ds="default", table=f"filler{i}",
+                              comment="填充", embed_text=q)
+    # rental 只与上轮问句相似(主路必缺位;继承路距离 0 必中)
+    await _seed_knowledge(session, tid, ds="default", table="rental",
+                          comment="租赁记录", embed_text="查询租赁次数最多的前5位客户")
+    r = await client.post(
+        "/internal/rag/retrieve",
+        json={"tenant_key": "default", "question": q,
+              "history": ["查询租赁次数最多的前5位客户"]},
+        headers=INTERNAL,
+    )
+    assert r.status_code == 200, r.text
+    hint = r.json()["schema_hint"]
+    assert "rental" in hint  # 继承路补入上轮依赖表
+
+
+async def test_recall_history_merge_caps_and_dedupes(
+    client: AsyncClient, session: AsyncSession, fake_embed: None
+) -> None:
+    """047:继承路只补主路未含的表,总量封顶 2×top-K=10。"""
+    from kongming.redis_client import get_redis
+
+    await cast("Any", get_redis()).flushdb()
+    tid = await _ensure_default_tenant(session)
+    q = "主路问句"
+    p = "继承路问句"
+    for i in range(6):
+        await _seed_knowledge(session, tid, ds="default", table=f"main{i}",
+                              comment="主路", embed_text=q)
+    for i in range(6):
+        await _seed_knowledge(session, tid, ds="default", table=f"prior{i}",
+                              comment="继承", embed_text=p)
+    r = await client.post(
+        "/internal/rag/retrieve",
+        json={"tenant_key": "default", "question": q, "history": [p]},
+        headers=INTERNAL,
+    )
+    hint = r.json()["schema_hint"]
+    tables = [ln for ln in hint.splitlines() if ln.startswith("tenant_default.")]
+    assert len(tables) <= 10  # 封顶
+    main_hit = sum(1 for t in tables if t.startswith("tenant_default.main"))
+    prior_hit = sum(1 for t in tables if t.startswith("tenant_default.prior"))
+    assert main_hit == 5  # 主路满额优先
+    assert 1 <= prior_hit <= 5  # 继承路补入且不超预算
+
+
+async def test_recall_history_cache_key_splits_on_context(
+    client: AsyncClient, session: AsyncSession, fake_embed: None
+) -> None:
+    """047:同问句不同 history 缓存不互串(键并入历史指纹)。"""
+    from kongming.redis_client import get_redis
+
+    await cast("Any", get_redis()).flushdb()
+    tid = await _ensure_default_tenant(session)
+    q = "他们各自的邮箱是什么"
+    for i in range(6):
+        await _seed_knowledge(session, tid, ds="default", table=f"filler{i}",
+                              comment="填充", embed_text=q)
+    await _seed_knowledge(session, tid, ds="default", table="rental_a",
+                          comment="租赁A", embed_text="上轮问句A")
+    await _seed_knowledge(session, tid, ds="default", table="rental_b",
+                          comment="租赁B", embed_text="上轮问句B")
+    r1 = await client.post(
+        "/internal/rag/retrieve",
+        json={"tenant_key": "default", "question": q, "history": ["上轮问句A"]},
+        headers=INTERNAL,
+    )
+    r2 = await client.post(
+        "/internal/rag/retrieve",
+        json={"tenant_key": "default", "question": q, "history": ["上轮问句B"]},
+        headers=INTERNAL,
+    )
+    assert "rental_a" in r1.json()["schema_hint"]
+    # r2 若误读 r1 的缓存,继承路只会补 rental_a——rental_b 出现即证缓存按
+    # 历史指纹分叉(rental_a 是否再现属继承路向量相似度的合法形态,不钉)
+    assert "rental_b" in r2.json()["schema_hint"]
+
+
 async def test_recall_fulltext_exact_table_promoted(
     client: AsyncClient, session: AsyncSession, fake_embed: None
 ) -> None:

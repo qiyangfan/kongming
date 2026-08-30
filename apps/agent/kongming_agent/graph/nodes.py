@@ -112,6 +112,9 @@ async def retrieve(state: AgentState) -> dict[str, object]:
         tenant_key=state["tenant_key"],  # pyright: ignore[reportTypedDictNotRequiredAccess]
         datasource_key=datasource_key,
         question=question,
+        # 047 多轮继承:最近 3 条历史透传(api 侧取末条走继承路补上轮依赖表);
+        # 单轮为空列表,回调体不携带该键,链路与单轮逐字节同形
+        history=list(state.get("history") or [])[-3:],
     )
     # 历史 SQL 独立于表说明命中(R2-S1):「知识未抓取但 query_history 已有成功
     # 记录」的真实形态下,schema 空回退内省、history 照常作 few-shot,不整体丢弃。
@@ -163,6 +166,42 @@ def clean_sql(raw: str) -> str:
 
 
 # ── 节点3:SQL 生成 ──
+
+
+def _selfheal_guidance(error: str) -> str:
+    """自愈喂回分类(047):按 PG 错误形态生成针对性修正指令。
+
+    043 旧行为对一切 does-not-exist 附表哨兵出口——列不存在会被引向弃答
+    (表存在,出口是改列);泛化「请修正」使机械错同因连败(017 实证:
+    missing FROM-clause 重试 2 轮同错)。纯函数,优先级自上而下:别名→
+    列→关系;哨兵出口仅关系类(表/列以外的 does-not-exist 如函数/类型,
+    维持泛化喂回,不误引弃答出口)。
+    """
+    low = error.lower()
+    m = re.search(r'missing from-clause entry for table "([^"]+)"', low)
+    if m:
+        return (
+            f"SQL 引用了「{m.group(1)}」但 FROM/JOIN 中并没有定义这个别名——"
+            "为其补充对应表的 JOIN,或改用 FROM/JOIN 中已有的别名；"
+            "只引用『可用表结构』清单中存在的表。"
+        )
+    if re.search(r'column "[^"]+" .*does not exist', low) or (
+        low.startswith('column "') and "does not exist" in low
+    ):
+        return (
+            "引用的列不在所引用表的『可用表结构』清单中——只使用清单内的列名"
+            "并核对拼写；若该表确无支撑问句口径的列，不得用其他列近似顶替。"
+        )
+    if re.search(r'relation "[^"]+" .*does not exist', low) or (
+        low.startswith('relation "') and "does not exist" in low
+    ):
+        return (
+            "所引用的表或列不在『可用表结构』清单中——核对清单；"
+            "若清单确无所需数据，只输出 NO_RELEVANT_TABLE。"
+        )
+    return ""
+
+
 async def generate(state: AgentState) -> dict[str, object]:
     # 下标:入口 state 恒写入 question(缺键属编程错误),保留下标求值序
     question = state.get("resolved_question")
@@ -188,15 +227,12 @@ async def generate(state: AgentState) -> dict[str, object]:
     extra = ""
     error = state.get("error") or ""
     if error:
-        # 自愈:把上次错误喂回 LLM
+        # 自愈:把上次错误喂回 LLM;047 按错误形态附加针对性修正指令
+        # (别名/列/表分类;列错不引向表哨兵出口,机械错不再同因连败)
         extra = f"\n\n上次生成的 SQL 有误：{error}\n请修正。"
-        # 043:表不存在类错误=编表先验复发,附清单引导给哨兵出口,
-        # 杜绝同因连败空转烧 LLM 配额(PG UndefinedTable 报错定式,大小写不敏感)
-        if "does not exist" in error.lower():
-            extra += (
-                "所引用的表或列不在『可用表结构』清单中——核对清单；"
-                "若清单确无所需数据，只输出 NO_RELEVANT_TABLE。"
-            )
+        guidance = _selfheal_guidance(error)
+        if guidance:
+            extra += guidance
     user = (
         f"问题：{question}\n\n{memory_part}可用表结构：\n"
         f"{schema_hint}{semantic_part}{history_part}{extra}\n\n生成 SQL："
@@ -303,6 +339,11 @@ KNOWLEDGE_INTENT_WORDS = (
     "是什么", "为什么", "政策", "流程", "口径", "定义", "规范", "制度", "办法", "怎么规定",
 )
 
+# 047:强文档意图词表——「是什么」是泛系系词,数据追问(「这些影片各自的
+# 分类是什么」)与文档问句同形;多轮会话在场时仅系词命中不分流(结构性
+# 条件替代指代词表,036 弱信号词表两犯教训)
+DOC_STRONG_INTENT_WORDS = tuple(w for w in KNOWLEDGE_INTENT_WORDS if w != "是什么")
+
 # 036④:SQL 强意图词表(纯图片问题分流否决信号)——只收**几乎只在
 # 问库出现**的强信号;通用量词(多少/数量/平均/最高/哪个)不收
 # (真链路冒烟抓回:「这张图里哪个分类最高?数量是多少?」问图也带
@@ -319,6 +360,11 @@ def is_knowledge_intent(question: str) -> bool:
     return any(w in question for w in KNOWLEDGE_INTENT_WORDS)
 
 
+def is_strong_doc_intent(question: str) -> bool:
+    """047:强文档意图判定(纯函数)——泛系系词之外的显式文档词。"""
+    return any(w in question for w in DOC_STRONG_INTENT_WORDS)
+
+
 def is_sql_intent(question: str) -> bool:
     """036④:SQL 强意图判定(纯函数)——附件在场时命中即否决直答分流
     (「带图默认问图,带库词走 SQL」)。"""
@@ -329,13 +375,18 @@ def route_after_retrieve(state: AgentState) -> str:
     """分流判定(spec「知识分流」):知识意图 + 文档命中即分流;
     schema 是否命中不作条件(024 冒烟实证:知识问题常有 schema 模糊命中,
     双条件过严——「退货政策是什么」召回 rental 表说明致不分流)。
-    036④:附件在场且无 SQL 强意图→直答分流(纯图片问题不硬走 SQL)。"""
+    036④:附件在场且无 SQL 强意图→直答分流(纯图片问题不硬走 SQL)。
+    047:多轮会话在场时,仅泛系系词「是什么」命中意图词表不分流——会话
+    本身即数据语境,泛系系词不足以证明文档意图(浏览器实测:数据追问
+    「这些影片各自的分类是什么」被文档通道劫持);强文档词照旧分流。"""
     doc_hints = state.get("doc_hints") or []
     # 下标:入口 state 恒写入 question(缺键属编程错误),保留下标求值序
     question = state.get("resolved_question")
     if not question:
         question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
     if doc_hints and is_knowledge_intent(question):
+        if state.get("history") and not is_strong_doc_intent(question):
+            return "generate"
         return "doc_answer"
     if state.get("has_attachments") and not is_sql_intent(question):
         return "doc_answer"

@@ -12,7 +12,9 @@
       # 018 修订:外层排序对齐多轮追问保序语义(gen 保真规则保留上轮排序——
       # 按上轮排名 rental_rate DESC, film_id 序展示;子查询 ORDER BY 触发保序
       # 判定,外层 c.name 与 gen 排名序必错位)
-      gold_sql: SELECT c.name FROM tenant_sakila.category c JOIN tenant_sakila.film_category fc ON c.category_id = fc.category_id JOIN tenant_sakila.film f ON fc.film_id = f.film_id WHERE f.film_id IN (SELECT film_id FROM tenant_sakila.film ORDER BY rental_rate DESC, film_id LIMIT 5) ORDER BY f.rental_rate DESC, f.film_id
+      # 047 对齐:gold 投影补片名(明细附标识名称列=规则 3/9 既立约行为,
+      # 纯分类名投影与「这些影片」的行标识诉求相悖)——投影形态对齐,非迁就
+      gold_sql: SELECT f.title, c.name FROM tenant_sakila.category c JOIN tenant_sakila.film_category fc ON c.category_id = fc.category_id JOIN tenant_sakila.film f ON fc.film_id = f.film_id WHERE f.film_id IN (SELECT film_id FROM tenant_sakila.film ORDER BY rental_rate DESC, film_id LIMIT 5) ORDER BY f.rental_rate DESC, f.film_id
 
 - id: sakila_multiturn_002
   category: multi_turn

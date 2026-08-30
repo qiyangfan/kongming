@@ -156,3 +156,40 @@ def test_fullwidth_discipline_no_stray_halfwidth_comma() -> None:
     ):
         assert not re.findall(r"[一-鿿],[一-鿿]", text)
         assert "\\n" not in text  # 字面反斜杠 n=转义失败,应为真换行
+
+
+def test_sql_gen_aggregate_followup_single_row() -> None:
+    """048 聚合追问:整体总量/总额/合计输出单一聚合行,不得逐行明细。"""
+    assert "追问整体总量/总额/合计（\"总共/合计/一共\"）时输出单一聚合行" in (
+        prompts.SQL_GEN_SYSTEM
+    )
+    assert "不得逐行明细" in prompts.SQL_GEN_SYSTEM
+
+
+def test_sql_gen_correspondence_distinct() -> None:
+    """048 对应关系去重:一对多 JOIN 后投影组合重复必须 DISTINCT(018 靶点)。"""
+    assert "「对应关系/名录/哪些」类明细经一对多 JOIN 后投影列组合重复" in (
+        prompts.SQL_GEN_SYSTEM
+    )
+    assert "重复的对应行是噪声" in prompts.SQL_GEN_SYSTEM
+    assert "❌ 「对应关系/名录」类查询经一对多 JOIN 后不去重" in prompts.SQL_GEN_SYSTEM
+
+
+def test_understand_aggregate_followup_explicit() -> None:
+    """048:understand 对聚合追问的补全必须显式单一汇总口径。"""
+    assert "单一汇总口径" in prompts.UNDERSTAND_MULTI_SYSTEM
+    assert "不得补全为逐行明细口径" in prompts.UNDERSTAND_MULTI_SYSTEM
+    assert "完整复述该结果集的构造条件" in prompts.UNDERSTAND_MULTI_SYSTEM
+    assert '也不得用其他集合（如"最近的订单"）替换' in prompts.UNDERSTAND_MULTI_SYSTEM
+    # 既有钉句存活(保真规则与输出约定零扰动)
+    assert "补全必须保留上一轮的全部限定条件（筛选/排序/数量限制/聚合口径）" in (
+        prompts.UNDERSTAND_MULTI_SYSTEM
+    )
+    assert "只输出补全后的问题（一行），不要解释，不要重复历史。" in (
+        prompts.UNDERSTAND_MULTI_SYSTEM
+    )
+
+
+def test_prompts_exception_log_048_registered() -> None:
+    """048 增量已在 prompts.py 文件头例外清单登记(prompt 资产纪律)。"""
+    assert "048 followup-quality-guard" in (prompts.__doc__ or "")

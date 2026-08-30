@@ -225,7 +225,23 @@ message_id(assistant 落库消息 id,供反馈提交引用;persist=false 或无�
 影响(feedback spec「messageId 打通」)。消息落库 status 三态映射:
 verdict=PASS → SUCCESS;verdict=BLOCKED → REJECTED;verdict=ERROR 或重试
 耗尽 → FAILED。Agent 面不可达/超时时 SHALL 返回友好错误并落 FAILED 消息
-(persist=true 时),不裸 500。
+(persist=true 时),不裸 500。**047 修订(文案与错误细节数据面):**
+
+REJECTED 状态 SHALL 以 `blocked_friendly` 按 reason 分态产出用户文案;
+RESERVED_TABLE 分态文案 SHALL 中性、不责备用户、给出可行动指引
+(「该问题涉及的数据不允许查询,请调整问法或咨询管理员」)——保留表
+拦截的常见成因是模型越界而非用户过错,文案不得使用「访问了不允许的
+表,已被拒绝」类归责表述。其余分态(GUARDRAIL/DATA_SCOPE/非只读)
+语义准确维持原文。
+
+FAILED 状态 `error` SHALL 为用户语言友好文案(「查询执行失败,请调整
+问法后重试」),原始技术错误 SHALL 迁移至响应新增字段
+`error_detail: str | None`(纯增,缺省 null;老调用方零感知);result_json
+落库同步携带 error_detail,流式 result 帧与同步响应同构携带。前端 SHALL
+以友好文案为主呈现,`error_detail` 非空时以折叠「技术详情」披露原始
+错误(honest + 可排障 + 不吓人);error_detail 为 null(含存量消息)
+SHALL 不渲染折叠块。NO_DATA 中性形态(044,见「消息状态第四态」
+requirement)与 REJECTED 其余分态不动。
 
 #### Scenario: 有权限用户提问成功
 - GIVEN 已登录用户角色含 chat:execute,租户 default 已绑定
@@ -266,6 +282,24 @@ verdict=PASS → SUCCESS;verdict=BLOCKED → REJECTED;verdict=ERROR 或重试
 - WHEN 生成响应
 - THEN 按列特征给出 chart 建议:首列日期/时间类型→line;低基数分类(≤8 类)
   +数值→pie;类别列+数值列→bar;明细或无数值列→none
+
+#### Scenario: 保留表拦截文案中性(047)
+- GIVEN 链路生成 SQL 引用保留表被拒(reason 含 RESERVED_TABLE)
+- WHEN 响应组装
+- THEN error 为「该问题涉及的数据不允许查询,请调整问法或咨询管理员」
+- AND 不含「访问了不允许的表」归责表述
+
+#### Scenario: FAILED 友好文案+技术细节分离(047)
+- GIVEN 链路执行失败,原始错误为 PG 报错(如 missing FROM-clause ...)
+- WHEN 响应组装
+- THEN error=「查询执行失败,请调整问法后重试」
+- AND error_detail=原始 PG 报错全文
+- AND 流式与同步两通道字段同构
+
+#### Scenario: 存量消息不渲染折叠块(047)
+- GIVEN 落库消息 result_json 无 error_detail 字段
+- WHEN 前端回显 FAILED 消息
+- THEN 呈现友好 error 文案,不渲染「技术详情」折叠块
 
 ### Requirement: 会话列表与消息历史端点
 

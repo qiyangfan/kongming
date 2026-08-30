@@ -33,6 +33,12 @@ async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction
         await conn.execute(
             text(f'CREATE TABLE IF NOT EXISTS "{SCHEMA}".armor (id uuid PRIMARY KEY)')
         )
+        # 047:视图不入内省(收录收窄 BASE TABLE 的证物)
+        await conn.execute(text(f'DROP VIEW IF EXISTS "{SCHEMA}".arms_view'))
+        await conn.execute(
+            # noqa 证明:SCHEMA 为测试模块常量,非外部输入
+            text(f'CREATE VIEW "{SCHEMA}".arms_view AS SELECT * FROM "{SCHEMA}".arms'),  # noqa: S608
+        )
         # 另一个租户的 schema(边界证物:不应出现在 metatest 的内省结果)
         await conn.execute(text('CREATE SCHEMA IF NOT EXISTS "tenant_other"'))
         await conn.execute(
@@ -106,6 +112,8 @@ async def test_introspection_with_comments(client: AsyncClient, session: AsyncSe
     assert ("public", "sys_user") not in by_name
     assert ("public", "chat_message") not in by_name
     assert ("public", "user_identities") not in by_name
+    # 047:视图不入内省(便捷视图行扇出/列缺失对生成上下文有毒)
+    assert (SCHEMA, "arms_view") not in by_name
 
 
 async def test_truncation_marked(

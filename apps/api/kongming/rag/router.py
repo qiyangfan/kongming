@@ -52,11 +52,15 @@ MAX_TABLE_BLOCKS = 500  # 单文档表块上限(防大文档切块风暴,design 
 def get_rag_service(session: AsyncSession) -> RagService:
     """RagService 公共组合根(019 toolcall 复用同源;013 单例工厂同调)。"""
     client = get_agent_rag_client(get_redis())  # 013:进程内单例,连接池跨请求复用
+    from kongming.chat.repository import SuggestionRepository
+
     return RagService(
         RagRepository(session),
         embedder=client,
         describer=client,
         cache=ContextCache(get_redis()),
+        # 047:知识写路径级联失效建议缓存(DELETE 同事务,rag commit 收口)
+        suggestion_evictor=SuggestionRepository(session),
     )
 
 
@@ -426,6 +430,10 @@ class RetrieveIn(BaseModel):
     tenant_key: str = Field(min_length=1, max_length=64)
     datasource_key: str = Field(default="default", pattern=r"^[a-z][a-z0-9_]{1,63}$")
     question: str = Field(min_length=1, max_length=2000)
+    # 047 多轮继承:最近历史问句(≤3 条,取末条走继承路;单轮缺省零回归)
+    history: list[Annotated[str, Field(max_length=2000)]] = Field(
+        default_factory=list, max_length=3
+    )
 
 
 class RetrieveOut(BaseModel):
@@ -449,6 +457,7 @@ async def rag_retrieve(
             tenant_key=req.tenant_key,
             datasource_key=req.datasource_key,
             question=req.question,
+            history=req.history,  # 047 多轮继承
         )
     except LookupError:
         raise HTTPException(status_code=404, detail="TENANT_NOT_FOUND") from None
