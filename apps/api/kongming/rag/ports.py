@@ -5,9 +5,17 @@ repo 实现见 repository.py(SQLAlchemy + 动态池内省编排)。
 """
 
 from collections.abc import Coroutine
+from datetime import datetime
 from typing import Any, Protocol
 
-from kongming.rag.models import IntrospectedTable, KnowledgeEntry, RecallHit, TableBlock
+from kongming.rag.models import (
+    FailureSignal,
+    HistoryOverview,
+    IntrospectedTable,
+    KnowledgeEntry,
+    RecallHit,
+    TableBlock,
+)
 
 
 class EmbeddingError(Exception):
@@ -168,3 +176,24 @@ class RagRepo(Protocol):
     async def introspect_all(
         self, *, tenant_id: str, tenant_key: str, datasource_key: str
     ) -> list[IntrospectedTable]: ...
+
+    # ---- 052 知识覆盖报告(只读聚合输入;零写入零 LLM) ----
+
+    async def list_all_entries(
+        self, *, tenant_id: str, datasource_key: str
+    ) -> list[KnowledgeEntry]:
+        """该 (租户, 数据源) 全量登记条目(无分页;治理面整集盘点)。"""
+        ...
+
+    async def failure_signals(
+        self, *, tenant_id: str, datasource_key: str, since: datetime
+    ) -> list[FailureSignal]:
+        """失败信号投影(chat_message 只读跨域,feedback 先例同范式;
+        按 created_at 降序,行数受应用层上限约束)。"""
+        ...
+
+    async def history_overview(
+        self, *, tenant_id: str, datasource_key: str
+    ) -> HistoryOverview:
+        """few-shot 通道概况:成功沉淀条数/去重问题数/上限占用。"""
+        ...

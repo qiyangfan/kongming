@@ -745,6 +745,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/rag/coverage-report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Coverage Report */
+        get: operations["coverage_report_system_rag_coverage_report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/rag/retrieve": {
         parameters: {
             query?: never;
@@ -2862,6 +2879,32 @@ export interface components {
              */
             column_labels: string[];
         };
+        /** CoverageReportOut */
+        CoverageReportOut: {
+            /** Datasource Key */
+            datasource_key: string;
+            /** Unregistered Tables */
+            unregistered_tables: components["schemas"]["SchemaTableOut"][];
+            /** Unregistered Total */
+            unregistered_total: number;
+            /** Structure Only Tables */
+            structure_only_tables: components["schemas"]["SchemaTableOut"][];
+            /** Structure Only Total */
+            structure_only_total: number;
+            /** Missing Columns */
+            missing_columns: components["schemas"]["MissingColumnsOut"][];
+            /** Missing Columns Total */
+            missing_columns_total: number;
+            /** No Sample Tables */
+            no_sample_tables: components["schemas"]["SchemaTableOut"][];
+            /** No Sample Total */
+            no_sample_total: number;
+            history: components["schemas"]["HistoryOverviewOut"];
+            /** Failure Clusters */
+            failure_clusters: components["schemas"]["FailureClusterOut"][];
+            /** Failure Cluster Total */
+            failure_cluster_total: number;
+        };
         /**
          * CronPreviewOut
          * @description 040·11 cron 预览(与创建/调度同源的解析计算,前端防抖消费)。
@@ -3133,6 +3176,24 @@ export interface components {
             /** Rows */
             rows?: unknown[][];
         };
+        /** FailureClusterOut */
+        FailureClusterOut: {
+            /** Question */
+            question: string;
+            /** Count */
+            count: number;
+            /** Last Status */
+            last_status: string;
+            /**
+             * Last Seen
+             * Format: date-time
+             */
+            last_seen: string;
+            /** Rating */
+            rating: string;
+            /** Has Corrected Sql */
+            has_corrected_sql: boolean;
+        };
         /** FeedbackIn */
         FeedbackIn: {
             /**
@@ -3280,6 +3341,15 @@ export interface components {
             status: string;
             /** Note */
             note: string | null;
+        };
+        /** HistoryOverviewOut */
+        HistoryOverviewOut: {
+            /** Success Count */
+            success_count: number;
+            /** Distinct Questions */
+            distinct_questions: number;
+            /** Cap */
+            cap: number;
         };
         /** IntrospectIn */
         IntrospectIn: {
@@ -3707,6 +3777,17 @@ export interface components {
             enabled: boolean;
             /** Updated At */
             updated_at: string;
+        };
+        /** MissingColumnsOut */
+        MissingColumnsOut: {
+            /** Schema Name */
+            schema_name: string;
+            /** Table Name */
+            table_name: string;
+            /** Missing */
+            missing: string[];
+            /** Missing Count */
+            missing_count: number;
         };
         /** MockSimulateIn */
         MockSimulateIn: {
@@ -4195,6 +4276,13 @@ export interface components {
             action?: ("blocked" | "masked") | null;
             /** Threshold */
             threshold?: number | null;
+        };
+        /** SchemaTableOut */
+        SchemaTableOut: {
+            /** Schema Name */
+            schema_name: string;
+            /** Table Name */
+            table_name: string;
         };
         /** SchemasOut */
         SchemasOut: {
@@ -6946,6 +7034,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReindexOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    coverage_report_system_rag_coverage_report_get: {
+        parameters: {
+            query: {
+                datasource_key: string;
+            };
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageReportOut"];
                 };
             };
             /** @description Validation Error */

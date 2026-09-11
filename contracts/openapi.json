@@ -2532,6 +2532,65 @@
         }
       }
     },
+    "/system/rag/coverage-report": {
+      "get": {
+        "tags": [
+          "rag"
+        ],
+        "summary": "Coverage Report",
+        "operationId": "coverage_report_system_rag_coverage_report_get",
+        "parameters": [
+          {
+            "name": "datasource_key",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+              "title": "Datasource Key"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoverageReportOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/internal/rag/retrieve": {
       "post": {
         "tags": [
@@ -10868,6 +10927,88 @@
         ],
         "title": "ChatQueryOut"
       },
+      "CoverageReportOut": {
+        "properties": {
+          "datasource_key": {
+            "type": "string",
+            "title": "Datasource Key"
+          },
+          "unregistered_tables": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaTableOut"
+            },
+            "type": "array",
+            "title": "Unregistered Tables"
+          },
+          "unregistered_total": {
+            "type": "integer",
+            "title": "Unregistered Total"
+          },
+          "structure_only_tables": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaTableOut"
+            },
+            "type": "array",
+            "title": "Structure Only Tables"
+          },
+          "structure_only_total": {
+            "type": "integer",
+            "title": "Structure Only Total"
+          },
+          "missing_columns": {
+            "items": {
+              "$ref": "#/components/schemas/MissingColumnsOut"
+            },
+            "type": "array",
+            "title": "Missing Columns"
+          },
+          "missing_columns_total": {
+            "type": "integer",
+            "title": "Missing Columns Total"
+          },
+          "no_sample_tables": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaTableOut"
+            },
+            "type": "array",
+            "title": "No Sample Tables"
+          },
+          "no_sample_total": {
+            "type": "integer",
+            "title": "No Sample Total"
+          },
+          "history": {
+            "$ref": "#/components/schemas/HistoryOverviewOut"
+          },
+          "failure_clusters": {
+            "items": {
+              "$ref": "#/components/schemas/FailureClusterOut"
+            },
+            "type": "array",
+            "title": "Failure Clusters"
+          },
+          "failure_cluster_total": {
+            "type": "integer",
+            "title": "Failure Cluster Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasource_key",
+          "unregistered_tables",
+          "unregistered_total",
+          "structure_only_tables",
+          "structure_only_total",
+          "missing_columns",
+          "missing_columns_total",
+          "no_sample_tables",
+          "no_sample_total",
+          "history",
+          "failure_clusters",
+          "failure_cluster_total"
+        ],
+        "title": "CoverageReportOut"
+      },
       "CronPreviewOut": {
         "properties": {
           "next": {
@@ -11511,6 +11652,45 @@
         "title": "ExportIn",
         "description": "所见即所导(010 design D3):前端传已展示的 columns+rows,不重跑 SQL。\n\nrows 传输层上限=R1 评审修复:截断发生在 JSON 解析之后,挡不住请求体本身\n的内存放大;max_length 在解析期即拒(422),service 层截断保留为双闸。"
       },
+      "FailureClusterOut": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "last_status": {
+            "type": "string",
+            "title": "Last Status"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Seen"
+          },
+          "rating": {
+            "type": "string",
+            "title": "Rating"
+          },
+          "has_corrected_sql": {
+            "type": "boolean",
+            "title": "Has Corrected Sql"
+          }
+        },
+        "type": "object",
+        "required": [
+          "question",
+          "count",
+          "last_status",
+          "last_seen",
+          "rating",
+          "has_corrected_sql"
+        ],
+        "title": "FailureClusterOut"
+      },
       "FeedbackIn": {
         "properties": {
           "rating": {
@@ -11996,6 +12176,29 @@
           "note"
         ],
         "title": "HandleOut"
+      },
+      "HistoryOverviewOut": {
+        "properties": {
+          "success_count": {
+            "type": "integer",
+            "title": "Success Count"
+          },
+          "distinct_questions": {
+            "type": "integer",
+            "title": "Distinct Questions"
+          },
+          "cap": {
+            "type": "integer",
+            "title": "Cap"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success_count",
+          "distinct_questions",
+          "cap"
+        ],
+        "title": "HistoryOverviewOut"
       },
       "IntrospectIn": {
         "properties": {
@@ -13127,6 +13330,37 @@
           "updated_at"
         ],
         "title": "MetricOut"
+      },
+      "MissingColumnsOut": {
+        "properties": {
+          "schema_name": {
+            "type": "string",
+            "title": "Schema Name"
+          },
+          "table_name": {
+            "type": "string",
+            "title": "Table Name"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing"
+          },
+          "missing_count": {
+            "type": "integer",
+            "title": "Missing Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "schema_name",
+          "table_name",
+          "missing",
+          "missing_count"
+        ],
+        "title": "MissingColumnsOut"
       },
       "MockSimulateIn": {
         "properties": {
@@ -14368,6 +14602,24 @@
           "enabled"
         ],
         "title": "RuleUpdateIn"
+      },
+      "SchemaTableOut": {
+        "properties": {
+          "schema_name": {
+            "type": "string",
+            "title": "Schema Name"
+          },
+          "table_name": {
+            "type": "string",
+            "title": "Table Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "schema_name",
+          "table_name"
+        ],
+        "title": "SchemaTableOut"
       },
       "SchemasOut": {
         "properties": {

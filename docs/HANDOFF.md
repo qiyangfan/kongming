@@ -7,9 +7,9 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
-## 当前状态(2026-08-30)
+## 当前状态(2026-09-11)
 
-- 001–051 + backlog-settlement 已全部归档(活动变更清零)。上游 41 域
+- 001–052 + backlog-settlement 已全部归档(活动变更清零)。上游 41 域
   全覆盖。近期批次:2026-08-29 四连(043 生成纪律规则 10+哨兵短路/
   044 NO_DATA 四态中性形态/045 保留表收编 user_memory/046 投影 id
   收敛+列级哨兵);2026-08-30 二连(047 检索治理/048 聚合追问与去重
@@ -19,7 +19,13 @@
   统计资格过滤+humanize_stats 键名中文化+displayUser 昵称→用户名→
   已注销回退链,user_username 契约纯增]/051 实体核对判据[规则 10 表级
   哨兵操作化+对位反例,evals expect_no_data 负例形态+default.yaml ×2,
-  001 进 smoke])**。
+  001 进 smoke])**;**2026-09-11(052 知识覆盖报告[GET
+  /system/rag/coverage-report:四类空白确定性盘点=零覆盖表/纯结构登记/
+  缺标签列/失败问题簇+few-shot 概况,零 LLM 零写入纯读、封顶计数如实,
+  失败簇读 chat_message 四态∪差评∪纠正 SQL 跨域只读(feedback 先例),
+  内省失败不产出半份报告;契约纯增 coverage-report;LLM Wiki gap
+  detection 方法论移植、其生成式编译已否决——非确定性生成物入知识面
+  与 041/051 毒知识同源])**。
 - 051 收尾同批:query_history goods 硬凑毒沉淀清偿(精确 id,保留合法
   语义行);infra/example-data 新增 comments-ext.sql(sakila_ext 独立库
   中文注释,**只能对 sakila_ext 执行**,严禁混入 comments.sql 在 kongming
@@ -90,6 +96,11 @@
    default_schema='public' WHERE datasource_key='sakila_dyn';`(密码不变)。
 9. 企微联调:ngrok 免费域名与其可信域名校验不兼容;用 cloudflared 快速
    隧道或正式域名;应用可信 IP 白名单随家宽漂移重配。
+10. **仓库迁移后旧 venv 假健康**:apps/*/.venv 若建于旧绝对路径
+    (如 ~/kongming),迁到 ~/workspace/kongming 后入口脚本 shebang 全
+    失效——`uv sync` 仍显示 Checked(假健康),`uv run pytest` 报
+    Failed to spawn。处置:`rm -rf apps/*/.venv && uv sync` 重建
+    (venv 为可再生构建产物,2026-09-11 052 实证)。
 
 ## 命令速查
 
@@ -158,7 +169,9 @@ zhparser、知识库团队归属(出处 032①)。
 
 流程与门禁:
 - make check 后台跑必须看 **make-exit 行**(包装 shell 的 exit code 是
-  最后一条命令的,曾有整库迁移炸了仍假绿的实证)。
+  最后一条命令的,曾有整库迁移炸了仍假绿的实证);后台命令内自拼
+  `echo MAKE-EXIT:$?` 同样会假绿——用 `make …; echo EXIT:$?` 同行或
+  前台直跑。pyright 全量含 tests/,只对 kongming/ 子集跑绿不代表门禁绿。
 - **共享测试库并行 pytest 互锁**:两个 pytest 同时跑会零 CPU 挂死
   (非卡测试)——先停自己那份错峰重跑判归属;单挂用例先单独重跑再定性。
 - **知识层事故定性先核租户/数据源维度**:default 源是共享路径(各租户

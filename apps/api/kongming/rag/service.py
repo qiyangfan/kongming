@@ -13,16 +13,20 @@
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from kongming.rag.cache import ContextCache
 from kongming.rag.models import (
+    COVERAGE_FAILURE_WINDOW_DAYS,
     RECALL_TOP_K,
+    CoverageReport,
     DatasourceInvalid,
     IntrospectedTable,
     KnowledgeEntry,
     RagContext,
     SchemaNotAllowed,
     TableBlock,
+    build_coverage_report,
     build_embedding_text,
     build_history_sql,
     build_schema_hint,
@@ -624,4 +628,39 @@ class RagService:
         单数据源注释集量级小;剥离与映射在 chat 呈现纯函数内)。"""
         return await self._repo.column_comments(
             tenant_id=tenant_id, datasource_key=datasource_key
+        )
+
+    # ============ 知识覆盖报告(052;确定性纯聚合) ============
+
+    async def coverage_report(
+        self, *, tenant_id: str, tenant_key: str, datasource_key: str
+    ) -> CoverageReport:
+        """四类空白盘点(零覆盖表/纯结构登记/缺标签列/失败问题簇)+ few-shot
+        概况。确定性纯聚合契约:零 LLM(不触 embedder/describer)、零写入、
+        无缓存;内省失败整体失败不产出半份报告(宁缺毋错,042 对账同口径
+        ——半份报告会被误读为「登记完备」)。"""
+        await self._require_usable_datasource(tenant_id, datasource_key)
+        try:
+            tables = await self._repo.introspect_all(
+                tenant_id=tenant_id, tenant_key=tenant_key, datasource_key=datasource_key
+            )
+        except LookupError:
+            raise DatasourceInvalid(datasource_key) from None
+        entries = await self._repo.list_all_entries(
+            tenant_id=tenant_id, datasource_key=datasource_key
+        )
+        signals = await self._repo.failure_signals(
+            tenant_id=tenant_id,
+            datasource_key=datasource_key,
+            since=datetime.now(UTC) - timedelta(days=COVERAGE_FAILURE_WINDOW_DAYS),
+        )
+        overview = await self._repo.history_overview(
+            tenant_id=tenant_id, datasource_key=datasource_key
+        )
+        return build_coverage_report(
+            datasource_key=datasource_key,
+            tables=tables,
+            entries=entries,
+            signals=signals,
+            history=overview,
         )

@@ -30,6 +30,7 @@ from kongming.rag.models import (
     EmptyDocument,
     InvalidSchemaName,
     SchemaNotAllowed,
+    SchemaTablePair,
     TableBlock,
     TableNameTooLong,
     TooManyBlocks,
@@ -420,6 +421,116 @@ async def reindex(
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
     return ReindexOut(
         deleted=result.deleted, rebuilt=result.rebuilt, enriched=result.enriched
+    )
+
+
+# ============ 知识覆盖报告(052;只读确定性纯聚合) ============
+
+
+class SchemaTableOut(BaseModel):
+    schema_name: str
+    table_name: str
+
+
+class MissingColumnsOut(BaseModel):
+    schema_name: str
+    table_name: str
+    missing: list[str]
+    missing_count: int
+
+
+class FailureClusterOut(BaseModel):
+    question: str
+    count: int
+    last_status: str
+    last_seen: datetime
+    rating: str
+    has_corrected_sql: bool
+
+
+class HistoryOverviewOut(BaseModel):
+    success_count: int
+    distinct_questions: int
+    cap: int
+
+
+class CoverageReportOut(BaseModel):
+    datasource_key: str
+    unregistered_tables: list[SchemaTableOut]
+    unregistered_total: int
+    structure_only_tables: list[SchemaTableOut]
+    structure_only_total: int
+    missing_columns: list[MissingColumnsOut]
+    missing_columns_total: int
+    no_sample_tables: list[SchemaTableOut]
+    no_sample_total: int
+    history: HistoryOverviewOut
+    failure_clusters: list[FailureClusterOut]
+    failure_cluster_total: int
+
+
+def _st(pairs: list[SchemaTablePair]) -> list[SchemaTableOut]:
+    return [
+        SchemaTableOut(schema_name=p.schema_name, table_name=p.table_name) for p in pairs
+    ]
+
+
+@router.get(
+    "/coverage-report",
+    response_model=CoverageReportOut,
+    dependencies=[Depends(require_perm("system:rag:manage"))],
+)
+async def coverage_report(
+    datasource_key: Annotated[str, Query(pattern=r"^[a-z][a-z0-9_]{1,63}$")],
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Annotated[RagService, Depends(_get_service)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> CoverageReportOut:
+    try:
+        tenant_id, tenant_key = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
+        report = await svc.coverage_report(
+            tenant_id=tenant_id, tenant_key=tenant_key, datasource_key=datasource_key
+        )
+    except TenantForbiddenApi:
+        raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
+    except DatasourceInvalid:
+        # 含内省失败(整体失败,不产出半份报告;与 fetch-metadata 同形)
+        raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
+    return CoverageReportOut(
+        datasource_key=report.datasource_key,
+        unregistered_tables=_st(report.unregistered_tables),
+        unregistered_total=report.unregistered_total,
+        structure_only_tables=_st(report.structure_only_tables),
+        structure_only_total=report.structure_only_total,
+        missing_columns=[
+            MissingColumnsOut(
+                schema_name=m.schema_name,
+                table_name=m.table_name,
+                missing=m.missing,
+                missing_count=m.missing_count,
+            )
+            for m in report.missing_columns
+        ],
+        missing_columns_total=report.missing_columns_total,
+        no_sample_tables=_st(report.no_sample_tables),
+        no_sample_total=report.no_sample_total,
+        history=HistoryOverviewOut(
+            success_count=report.history.success_count,
+            distinct_questions=report.history.distinct_questions,
+            cap=report.history.cap,
+        ),
+        failure_clusters=[
+            FailureClusterOut(
+                question=c.question,
+                count=c.count,
+                last_status=c.last_status,
+                last_seen=c.last_seen,
+                rating=c.rating,
+                has_corrected_sql=c.has_corrected_sql,
+            )
+            for c in report.failure_clusters
+        ],
+        failure_cluster_total=report.failure_cluster_total,
     )
 
 
