@@ -9,6 +9,13 @@
 
 ## 当前状态(2026-09-11)
 
+- **muniu 网关接线完成(ADR-007,2026-09-11)**:agent 面 LLM 出口已全部指向
+  muniu 网关(127.0.0.1:8787;主模型/embedding/vision 注册表 `.env` 三处切换),
+  直连冒烟、e2e 问答(verdict PASS)、网关计量与计价实证全过;供应商真实 key
+  已收敛到 muniu 侧。**灰度一周进行中(自 2026-09-11 起计时)**:每日对账
+  (muniu 仓 `scripts/reconcile.sql`,差异 ≤1%),期满达标 ADR-007 转「已接受」;
+  回滚=`.env` 三处改回直连(切换前备份 /tmp/.km-agent-env-pre-muniu.bak,
+  重启即失)。运行细节见「环境事实」11。
 - 001–052 + backlog-settlement 已全部归档(活动变更清零)。上游 41 域
   全覆盖。近期批次:2026-08-29 四连(043 生成纪律规则 10+哨兵短路/
   044 NO_DATA 四态中性形态/045 保留表收编 user_memory/046 投影 id
@@ -101,6 +108,17 @@
     失效——`uv sync` 仍显示 Checked(假健康),`uv run pytest` 报
     Failed to spawn。处置:`rm -rf apps/*/.venv && uv sync` 重建
     (venv 为可再生构建产物,2026-09-11 052 实证)。
+11. **muniu 网关(ADR-007,agent 面 LLM 唯一出口)**:127.0.0.1:8787,
+    **podman 后台容器形态**(muniu 仓 `make dev-up` 起/`dev-down` 停/
+    `dev-status` 查;宿主交叉编译+scratch 镜像,不依赖 registry 与代理)。
+    ⚠ 计量库在 podman **命名卷 muniu-data**(SQLite WAL 在 virtiofs 挂载上
+    会 I/O error),宿主查询走 muniu 仓 `make dev-sql`(拷出+sqlite3,
+    对账 reconcile.sql 用法不变);容器日志 `podman logs muniu-gateway`。
+    ⚠ 切换后 agent `.env` 的 KM_AGENT_LLM_API_KEY 已是 muniu 的 mk- key
+    而非 dashscope key;上游 key 真值经 muniu 仓 `.env.local`(gitignore)
+    注入容器,重签 key 需同步 agent `.env` 两处(主 key+registry qwen-vl
+    条目)并重启 agent。管理面/控制台同端口 8787(admin token=本地 dev 值
+    `muniu-dev-admin-token`,与 KM_INTERNAL_TOKEN 同级,仅本机)。
 
 ## 命令速查
 
@@ -133,6 +151,7 @@ make contracts      # 导出 OpenAPI + 生成前端类型(改 api 后必跑)
 | prompt 质量 | 生成/理解/摘要三层规则(统计不加 LIMIT/tiebreaker/ROUND/投影完备+技术主键默认不进投影/列级哨兵两级如实说明/指代保真/事实性接地);prompt 文本迭代经验=点名自我合理化的反例比抽象纪律条遵从度高;gold 规范十条与生成侧互锁 | nl2sql-agent spec |
 | Bot/商业化 | Bot 定义+权限逐请求求交;OpenAI 兼容端点;BOT 维度配额+mock 支付闭环(核销单点 reconcile);团队归属可见性纯函数 | custom-agent + payment + team spec |
 | 多模型/观测 | 注册表 env JSON+任务路由+出口白名单;用量采集 fire-and-forget+bot 收集器双通道;失败调用也采集(status/latency) | multi-model-routing + observability spec |
+| LLM 网关 | agent 面 LLM 出口(主模型/embedding/vision 注册表)统一经 muniu(127.0.0.1:8787,OpenAI 兼容),供应商 key 收敛 muniu 单点;回滚=.env 三处改回直连,零成本 | ADR-007 |
 | 挂账治理 | 开放挂账=零;新发现项一律给终态(修/关闭/条件触发/产品登记),不留无排期「随域延后」 | backlog-settlement 终态块 |
 
 ## 挂账终态(开放挂账=零,2026-08-25 backlog-settlement 裁决)
