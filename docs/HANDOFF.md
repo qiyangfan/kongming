@@ -7,8 +7,22 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
-## 当前状态(2026-09-11)
+## 当前状态(2026-09-12)
 
+- **053 SQL 安全引擎接入实现完成(2026-09-12,进入影子观察期)**:引擎独立
+  新仓 `~/longzhong/km-sqlguard`(Python 单遍,与内置路径同源 sqlglot AST;
+  v0.1.2 wheel 经 kongming 仓根 `vendor/` 快照引入两进程),api/agent 默认
+  shadow 模式(内置权威,引擎并行判定只记录)。**冒烟证据(2026-09-12)**:
+  流式问答「商品总共有多少个」全链路 PASS(答案 4,与 goods 4 行一致),
+  两进程启动行 `SQLGUARD 管线 mode=shadow,活跃引擎=km-sqlguard
+  version=0.1.2,启动自检通过`,请求期零 ENGINE_FALLBACK 零影子不一致,
+  sys_sql_audit 落 PASS 行;对拍基线 121 例(sqlfw/datascope/evals 冻结,
+  `apps/api/scripts/export_sqlguard_fixtures.py` 重复运行 diff 为空)引擎
+  回放零不一致。切主 = 两进程 `.env` 置 `KM_SQLGUARD_MODE=primary`
+  (agent 前缀 `KM_AGENT_SQLGUARD_MODE`)+ 重启;影子不一致归零且 ≥1 周
+  无 ENGINE_FALLBACK 后归档。深嵌套默认上限 32(实测 256 不可行,
+  引擎实现形态改 Python 等实施期修订见 change design「Decisions(实施期
+  修订)」节)。
 - **muniu 网关接线完成(ADR-007,2026-09-11)**:agent 面 LLM 出口已全部指向
   muniu 网关(127.0.0.1:8787;主模型/embedding/vision 注册表 `.env` 三处切换),
   直连冒烟、e2e 问答(verdict PASS)、网关计量与计价实证全过;供应商真实 key
@@ -119,6 +133,14 @@
     注入容器,重签 key 需同步 agent `.env` 两处(主 key+registry qwen-vl
     条目)并重启 agent。管理面/控制台同端口 8787(admin token=本地 dev 值
     `muniu-dev-admin-token`,与 KM_INTERNAL_TOKEN 同级,仅本机)。
+12. **km-sqlguard 引擎仓**(`~/longzhong/km-sqlguard`,053):SQL 安全引擎,
+    uv 工程(`make check`/`make build`)。升版流程:仓内改版本号 →
+    `uv build` → 拷 `dist/km_sqlguard-<版>-py3-none-any.whl` 到 kongming
+    `vendor/` → 两进程 pyproject 改 `==<版>` 与 `[tool.uv.sources]` 路径 →
+    `uv lock && uv sync`。**同名 wheel 换内容会被 uv 按路径缓存的元数据坑
+    (哈希 mismatch 拒装)——必须升版本号,勿覆写同版 wheel**;常驻
+    `uv run uvicorn` 服务持有 uv 缓存锁时 `uv cache clean` 会超时,升版
+    号路线可绕开。
 
 ## 命令速查
 
@@ -187,6 +209,9 @@ zhparser、知识库团队归属(出处 032①)。
 ## 关键教训精选(代码里看不出来的操作知识)
 
 流程与门禁:
+- 会话级 alembic upgrade 的 `fileConfig`(disable_existing_loggers)会把
+  **收集期已 import** 的模块 logger 置 disabled——新测试用 caplog 断言日志,
+  夹具里先把目标 logger `disabled = False`(053 test_sqlfw_engine 实证)。
 - make check 后台跑必须看 **make-exit 行**(包装 shell 的 exit code 是
   最后一条命令的,曾有整库迁移炸了仍假绿的实证);后台命令内自拼
   `echo MAKE-EXIT:$?` 同样会假绿——用 `make …; echo EXIT:$?` 同行或

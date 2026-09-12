@@ -198,6 +198,10 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
     此前请求期才炸 500)。teardown:只读执行池全量清理(008 接线)+
     每日归档调度任务(015)。"""
     get_cipher(get_settings().datasource_encrypt_key)
+    from kongming.sqlfw import guard  # 053:SQL 安全引擎启动自检(失败告警降级,不阻断)
+
+    guard.configure(get_settings().sqlguard_mode)
+    guard.startup_self_check()
     async with get_sessionmaker()() as session:
         await seed_all(session, get_settings())
     archive_task = asyncio.create_task(_daily_archive_loop())

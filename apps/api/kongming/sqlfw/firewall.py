@@ -1,13 +1,16 @@
-"""SQL 防火墙(sqlglot AST,纵深防御第 4 层)。
+"""SQL 防火墙(sqlglot AST,纵深防御第 4 层)——053 起为薄适配层。
 
 原则:AST 白名单而非正则黑名单。Agent 产出的 SQL 必须经此校验,
-verdict 落审计表。方言当前 PG-only(datasource spec 为 PG-only),
-sqlglot 天然保留多方言升级空间(ADR-001 诚实标注)。
+verdict 落审计表。方言当前 PG-only(datasource spec 为 PG-only)。
+
+053 单遍引擎接入:本模块保留**内置路径**的判定规则体(check_statements 等,
+与切换前实现一比一),公开函数委托 guard 门(模式化:builtin/shadow/primary,
+见 guard.py)。判定语义与 reason 字符串与引擎切换前逐字一致。
 """
 
-import sqlglot
-from sqlglot import exp
-from sqlglot.errors import SqlglotError
+from sqlglot import Expr, exp
+
+from kongming.sqlfw.guard import parse_guarded
 
 # 允许的读语句类型(SELECT 系);任何写/DDL/事务控制一律 BLOCK
 _READONLY_ROOTS = (exp.Select, exp.Union, exp.Subquery)
@@ -50,9 +53,6 @@ _FORBIDDEN_FUNCS = frozenset(
 )
 
 
-
-
-
 class Verdict:
     def __init__(self, passed: bool, reason: str | None = None) -> None:
         self.passed = passed
@@ -62,13 +62,10 @@ class Verdict:
         return f"Verdict(passed={self.passed}, reason={self.reason!r})"
 
 
-def check(sql: str) -> Verdict:
-    try:
-        statements = sqlglot.parse(sql, dialect="postgres")
-    except SqlglotError as e:
-        # ParseError 与 TokenError(未闭合引号/非法 token)同族,均为语法类拒绝
-        return Verdict(False, f"PARSE_ERROR: {e}")
+# ── 内置路径规则体(与切换前实现一比一;吃共享解析产物,不再自行 parse)──
 
+
+def check_statements(statements: list[Expr | None]) -> Verdict:
     if not statements or any(st is None for st in statements):
         return Verdict(False, "EMPTY_STATEMENT")
 
@@ -99,7 +96,9 @@ def check(sql: str) -> Verdict:
     return Verdict(True)
 
 
-def check_schema_scope(sql: str, allowed_schemas: set[str]) -> Verdict:
+def check_schema_scope_statements(
+    statements: list[Expr | None], allowed_schemas: set[str]
+) -> Verdict:
     """schema 维度白名单:显式限定的表引用仅允许落在 allowed_schemas 内。
 
     search_path 只约束未限定名的解析——`SELECT * FROM tenant_b.t` 可跨租户读
@@ -108,10 +107,6 @@ def check_schema_scope(sql: str, allowed_schemas: set[str]) -> Verdict:
     - 表函数(generate_series 等,无表名):放行;
     - 三段式引用(catalog 非空):拒绝(PG 不支持跨库,出现即异常形态)。
     """
-    try:
-        statements = sqlglot.parse(sql, dialect="postgres")
-    except SqlglotError as e:
-        return Verdict(False, f"PARSE_ERROR: {e}")
     # PG 语义:仅未加引号的「引用侧」折叠小写;schema 名本身大小写精确,
     # 白名单不折叠(否则大写 tenant_key 会误放行其小写双胞胎 schema)
     for st in statements:
@@ -133,18 +128,12 @@ def check_schema_scope(sql: str, allowed_schemas: set[str]) -> Verdict:
     return Verdict(True)
 
 
-
-
-def check_reserved_tables(sql: str) -> Verdict:
+def check_reserved_tables_statements(statements: list[Expr | None]) -> Verdict:
     """保留表拒读:任何表引用的末段名命中保留前缀/名即拒绝(不限定 schema 也拦——
     裸名经 search_path 落到 public 控制表,是最危险形态)。
     CTE 别名命中保留名同样拒(否则遮蔽形态绕过:WITH sys_user AS (SELECT FROM
     public.sys_user) SELECT FROM sys_user——PG 里 CTE 名只遮蔽裸名,体内限定名
     引用会被 CTE 豁免误跳过,R2 评审实证);非保留 CTE 名引用与表函数放行。"""
-    try:
-        statements = sqlglot.parse(sql, dialect="postgres")
-    except SqlglotError as e:
-        return Verdict(False, f"PARSE_ERROR: {e}")
     for st in statements:
         if st is None:
             continue
@@ -164,3 +153,18 @@ def check_reserved_tables(sql: str) -> Verdict:
             if name.startswith(RESERVED_TABLE_PREFIXES) or name in RESERVED_TABLE_NAMES:
                 return Verdict(False, f"RESERVED_TABLE: {table.name}")
     return Verdict(True)
+
+
+# ── 公开 API(薄适配:委托 guard 门,模式语义见 guard.py)──────────────
+
+
+def check(sql: str) -> Verdict:
+    return parse_guarded(sql).check()
+
+
+def check_schema_scope(sql: str, allowed_schemas: set[str]) -> Verdict:
+    return parse_guarded(sql).check_schema_scope(allowed_schemas)
+
+
+def check_reserved_tables(sql: str) -> Verdict:
+    return parse_guarded(sql).check_reserved_tables()

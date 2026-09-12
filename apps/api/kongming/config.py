@@ -115,6 +115,10 @@ class Settings(BaseSettings):
     # mcp-interop(028):出站调用超时(秒;响应 1MB 闸在 client 常量)
     mcp_outbound_timeout_sec: int = Field(default=15, ge=1, le=120)
 
+    # SQL 安全引擎(053):builtin | shadow | primary;默认影子(内置权威,
+    # 引擎只对拍观测)。切换期行为契约零变更;引擎缺失/异常自动降级不阻断。
+    sqlguard_mode: str = "shadow"
+
     def fail_closed_checks(self) -> None:
         """prod 环境缺敏感配置直接拒启(dev 宽松以便本地起步)。"""
         if self.environment != "prod":

@@ -25,7 +25,13 @@ dependencies = [
     "python-multipart>=0.0.32",
     "openpyxl>=3.1.5",
     "jsonschema>=4.23",             # 019 工具参数 JSON Schema 校验(L4)
+    "km-sqlguard==0.1.2",           # 053 SQL 安全引擎(单遍解析;vendor wheel 快照)
 ]
+
+# 053:引擎为独立仓(km-sqlguard)产物,以 vendor wheel 快照引入(免发布面);
+# 升版 = 引擎仓 uv build 后换 vendor wheel 提交并同步本声明
+[tool.uv.sources]
+km-sqlguard = { path = "../../vendor/km_sqlguard-0.1.2-py3-none-any.whl" }
 
 [dependency-groups]
 dev = [

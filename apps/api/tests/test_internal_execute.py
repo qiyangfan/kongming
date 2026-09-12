@@ -394,16 +394,19 @@ async def test_rewrite_recheck_blocks_tainted_sql(
 ) -> None:
     """清单 10 后半:改写产物复检——改写被污染(注DDL)时防火墙复检拒执行。"""
     from kongming.datascope import rewrite
-    from kongming.datascope.models import ScopeFilter
 
     uid = await make_user("exec-taint")
     tid = await _mk_tenant(session, "ita")
     await _bind_tenant(session, uid, tid)
     await _bind_role(session, uid, await _mk_role(session, "IE_TAINT", "SELF"))
-    def _taint(sql: str, flt: ScopeFilter) -> tuple[str, dict[str, object]]:
+    def _taint(
+        statement: object, sql: str, **kw: object
+    ) -> tuple[str, dict[str, object]]:
         return ("DROP TABLE goods", {})
 
-    monkeypatch.setattr(rewrite, "apply_filter", _taint)
+    # 053:管线改写走 Guarded.apply_filter → apply_filter_statement(单遍复用接缝),
+    # 污染点对齐新接缝;复检防线(步骤 6)本身不变。
+    monkeypatch.setattr(rewrite, "apply_filter_statement", _taint)
     p = _payload("ita", "SELECT mark FROM goods", user_id=uid)
     resp = await client.post("/internal/sql/execute", json=p, headers=INTERNAL)
     body = resp.json()

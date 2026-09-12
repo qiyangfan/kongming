@@ -39,6 +39,11 @@ log = logging.getLogger(__name__)
 _settings = Settings()
 _settings.fail_closed_checks()
 
+# 053:SQL 安全引擎启动自检(validate 预检解析底座;失败告警降级 builtin,不阻断)
+from kongming_agent import sqlguard  # noqa: E402
+
+sqlguard.startup_self_check(_settings.sqlguard_mode)
+
 app = FastAPI(
     title="Kongming Agent",
     version="0.1.0",

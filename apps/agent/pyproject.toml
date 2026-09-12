@@ -13,7 +13,12 @@ dependencies = [
     "httpx>=0.28",                   # 回调控制面
     "sqlglot>=26.0",                 # validate 节点本地 AST 预检(纯解析,无 IO)
     "structlog>=24.4",
+    "km-sqlguard==0.1.2",            # 053 SQL 安全引擎(validate 预检单遍解析;vendor wheel)
 ]
+
+# 053:引擎独立仓(km-sqlguard)产物,vendor wheel 快照引入;升版 = 换 wheel 同步声明
+[tool.uv.sources]
+km-sqlguard = { path = "../../vendor/km_sqlguard-0.1.2-py3-none-any.whl" }
 
 [dependency-groups]
 dev = [

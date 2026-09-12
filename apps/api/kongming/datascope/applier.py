@@ -10,6 +10,7 @@
 
 import logging
 import uuid
+from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
@@ -24,6 +25,9 @@ from kongming.datascope.models import (
 )
 from kongming.datascope.repository import SqlDataScopeRepo, probe_column_type
 
+if TYPE_CHECKING:
+    from kongming.sqlfw.guard import Guarded
+
 log = logging.getLogger(__name__)
 
 
@@ -34,8 +38,13 @@ async def apply(
     user_id: str,
     tenant_schemas: list[str],
     sql: str,
+    guarded: "Guarded | None" = None,
 ) -> AppliedSQL:
-    """按 user_id 的有效 data_scope 改写 sql;降级带 warning,fail-closed 抛异常。"""
+    """按 user_id 的有效 data_scope 改写 sql;降级带 warning,fail-closed 抛异常。
+
+    guarded(053 单遍复用):调用方已对该 SQL 建立的单遍解析产物;缺省时
+    内部独立解析(行为不变)。
+    """
     repo = SqlDataScopeRepo(session)
 
     user_exists, dept_id = await repo.user_dept_id(user_id)
@@ -65,7 +74,9 @@ async def apply(
     data_type: str | None = None
     if scope in ("DEPT", "DEPT_AND_BELOW", "SELF"):
         target_column = COL_DEPT_ID if scope in ("DEPT", "DEPT_AND_BELOW") else COL_CREATE_BY
-        ref = rewrite.extract_main_table_ref(sql)
+        ref = (
+            guarded.main_table_ref() if guarded is not None else rewrite.extract_main_table_ref(sql)
+        )
         if ref is None:
             warn = f"data_scope={scope}: 无法提取主表名(UNION/子查询 FROM),降级为不过滤"
             log.warning("%s (user_id=%s)", warn, user_id)
@@ -88,7 +99,10 @@ async def apply(
             log.warning("%s (user_id=%s)", flt.skip_reason, user_id)
         return AppliedSQL(sql=sql, warning=flt.skip_reason)
 
-    new_sql, params = rewrite.apply_filter(sql, flt)
+    if guarded is not None:
+        new_sql, params = guarded.apply_filter(flt.type.value, flt.column, flt.values)
+    else:
+        new_sql, params = rewrite.apply_filter(sql, flt)
     # uuid 列绑 UUID 对象,其余列绑 str(探测 data_type 保证类型匹配)
     out_params: dict[str, object] = (
         {k: uuid.UUID(str(v)) for k, v in params.items()} if data_type == "uuid" else params

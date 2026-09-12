@@ -11,11 +11,7 @@ import logging
 import re
 from typing import cast
 
-import sqlglot
-from sqlglot import exp
-from sqlglot.errors import SqlglotError
-
-from kongming_agent import deps
+from kongming_agent import deps, sqlguard
 from kongming_agent.apiclient import SchemaMeta
 from kongming_agent.graph.prompts import (
     SQL_GEN_SYSTEM,
@@ -31,9 +27,6 @@ log = logging.getLogger(__name__)
 MAX_HISTORY = 5  # 多轮上下文截断(nl2sql spec:平衡 token 与连贯性)
 
 MAX_RETRY = 2  # 重试上限(初始尝试不计):nl2sql spec「重试次数 < 上限(默认 2)」
-
-# 与 api 防火墙只读根一致(sqlfw/firewall.py _READONLY_ROOTS)
-_READONLY_ROOTS = (exp.Select, exp.Union, exp.Subquery)
 
 # 043 生成纪律:空结构占位文案与哨兵机制联动(如实说明,严禁教唆编表)
 _EMPTY_HINT = (
@@ -254,32 +247,13 @@ async def generate(state: AgentState) -> dict[str, object]:
 
 
 # ── 节点4:本地预检(轻量四规则;权威校验在 api 防火墙,不复刻)──
+# 053:解析走 km-sqlguard 引擎适配(模式化:影子对拍/切主/降级),判定语义不变
 def validate(state: AgentState) -> dict[str, object]:
     sql = state.get("generated_sql") or ""
-    result: ValidationResult
     if not sql.strip():
         result = ValidationResult(passed=False, reason="EMPTY_SQL")
     else:
-        try:
-            statements = [st for st in sqlglot.parse(sql, dialect="postgres") if st is not None]
-        except SqlglotError as e:
-            # ParseError 与 TokenError(未闭合引号等)同族,均为可重试的语法类失败
-            result = ValidationResult(passed=False, reason=f"PARSE_ERROR: {e}")
-        else:
-            if not statements:
-                result = ValidationResult(passed=False, reason="EMPTY_SQL")
-            elif len(statements) > 1:
-                # LLM 输出形态问题,值得 selfheal 重试
-                result = ValidationResult(passed=False, reason="MULTI_STATEMENT")
-            elif not isinstance(statements[0], _READONLY_ROOTS):
-                # 写操作/DDL:权限类,prompt 已明令禁止,重试只会再犯——直接终态
-                result = ValidationResult(
-                    passed=False,
-                    permission_block=True,
-                    reason=f"BLOCKED_ROOT: {type(statements[0]).__name__}",
-                )
-            else:
-                result = ValidationResult(passed=True)
+        result = sqlguard.validate(sql)
     out: dict[str, object] = {"validation": result}
     if not result.passed and result.permission_block:
         out["end_reason"] = "blocked"

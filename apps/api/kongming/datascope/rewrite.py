@@ -9,6 +9,9 @@
 - 命名参数经方言子类保留 :name 风格(postgres 方言默认渲 pyformat)。
 """
 
+from collections.abc import Sequence
+from typing import cast
+
 import sqlglot
 from sqlglot import Expr, exp
 from sqlglot.dialects.postgres import Postgres
@@ -28,6 +31,17 @@ class _NamedParamPG(Postgres):
             return f":{expression.name}"
 
 
+def extract_main_table_statement(statement: Expr | None) -> tuple[str, str | None] | None:
+    """语句级主表提取(吃共享解析产物,053 单遍复用;语义同 extract_main_table_ref)。"""
+    if not isinstance(statement, exp.Select):
+        return None
+    from_ = statement.args.get("from_")
+    if from_ is None or not isinstance(from_.this, exp.Table):
+        return None
+    table = from_.this
+    return table.name, (table.db or None)
+
+
 def extract_main_table_ref(sql: str) -> tuple[str, str | None] | None:
     """最外层 Select 的 FROM 为裸表时返回 (表名, 显式 schema 或 None);
 
@@ -38,13 +52,7 @@ def extract_main_table_ref(sql: str) -> tuple[str, str | None] | None:
         parsed = sqlglot.parse_one(sql, dialect="postgres")
     except ParseError:
         return None
-    if not isinstance(parsed, exp.Select):
-        return None
-    from_ = parsed.args.get("from_")
-    if from_ is None or not isinstance(from_.this, exp.Table):
-        return None
-    table = from_.this
-    return table.name, (table.db or None)
+    return extract_main_table_statement(cast("Expr | None", parsed))
 
 
 def extract_main_table(sql: str) -> str | None:
@@ -53,13 +61,20 @@ def extract_main_table(sql: str) -> str | None:
     return None if ref is None else ref[0]
 
 
-def apply_filter(sql: str, flt: ScopeFilter) -> tuple[str, dict[str, object]]:
-    """按意图改写:谓词 AND 进最外层 WHERE。SKIP 原样返回;产物 = (SQL, 绑定参数)。"""
-    if flt.type in (FilterType.SKIP, FilterType.UNSUPPORTED):
+def apply_filter_statement(
+    statement: Expr | None,
+    sql: str,
+    *,
+    filter_type: str,
+    column: str | None,
+    values: Sequence[object],
+) -> tuple[str, dict[str, object]]:
+    """语句级改写(吃共享解析产物,053 单遍复用;语义同 apply_filter)。"""
+    if filter_type in (FilterType.SKIP.value, FilterType.UNSUPPORTED.value):
         return sql, {}
-    parsed = sqlglot.parse_one(sql, dialect="postgres")
-    if not isinstance(parsed, exp.Select):
+    if not isinstance(statement, exp.Select):
         return sql, {}
+    parsed = statement
     from_ = parsed.args.get("from_")
     if from_ is None or not isinstance(from_.this, exp.Table):
         return sql, {}
@@ -67,18 +82,32 @@ def apply_filter(sql: str, flt: ScopeFilter) -> tuple[str, dict[str, object]]:
 
     params: dict[str, object] = {}
     placeholders: list[exp.Placeholder] = []
-    for i, value in enumerate(flt.values):
+    for i, value in enumerate(values):
         name = f"{_PARAM_PREFIX}{i}"
         placeholders.append(exp.Placeholder(this=name))
         params[name] = value
-    column = exp.column(flt.column or "", table=qualifier or None)
+    col = exp.column(column or "", table=qualifier or None)
     predicate: Expr
-    if flt.type is FilterType.USER_EQ:
-        predicate = exp.EQ(this=column, expression=placeholders[0])
+    if filter_type == FilterType.USER_EQ.value:
+        predicate = exp.EQ(this=col, expression=placeholders[0])
     else:  # DEPT_IN
-        predicate = exp.In(this=column, expressions=placeholders)
+        predicate = exp.In(this=col, expressions=placeholders)
 
     existing = parsed.args.get("where")
     combined = exp.And(this=existing.this, expression=predicate) if existing else predicate
     parsed.set("where", exp.Where(this=combined))
     return parsed.sql(dialect=_NamedParamPG), params
+
+
+def apply_filter(sql: str, flt: ScopeFilter) -> tuple[str, dict[str, object]]:
+    """按意图改写:谓词 AND 进最外层 WHERE。SKIP 原样返回;产物 = (SQL, 绑定参数)。"""
+    if flt.type in (FilterType.SKIP, FilterType.UNSUPPORTED):
+        return sql, {}
+    parsed = sqlglot.parse_one(sql, dialect="postgres")
+    return apply_filter_statement(
+        cast("Expr | None", parsed),
+        sql,
+        filter_type=flt.type.value,
+        column=flt.column,
+        values=flt.values,
+    )

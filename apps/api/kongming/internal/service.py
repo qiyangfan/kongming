@@ -35,7 +35,7 @@ from kongming.datasource.cipher import get_cipher
 from kongming.datasource.models import CredentialUndecryptable
 from kongming.datasource.repository import SqlDatasourceRepo
 from kongming.internal.executor import get_or_create_engine
-from kongming.sqlfw.firewall import check, check_reserved_tables, check_schema_scope
+from kongming.sqlfw import guard
 
 log = logging.getLogger(__name__)
 
@@ -249,8 +249,9 @@ async def _prepare(  # noqa: PLR0913 —— 请求字段平铺,编排前段
         except Exception as e:
             return await _fin("ERROR", sql_text, _error_summary(e))
 
-    # 4. 防火墙初检(原 SQL)
-    first = check(sql_text)
+    # 4. 防火墙初检(原 SQL;单遍解析:初检/改写结构共享同一 Guarded,053)
+    src = guard.parse_guarded(sql_text)
+    first = src.check()
     if not first.passed:
         return await _fin("BLOCKED", sql_text, first.reason or "BLOCKED")
 
@@ -266,6 +267,7 @@ async def _prepare(  # noqa: PLR0913 —— 请求字段平铺,编排前段
                     user_id=user_id,
                     tenant_schemas=[route_schema, "public"],
                     sql=sql_text,
+                    guarded=src,
                 )
         except DataScopeUnsupported as e:
             return await _fin("BLOCKED", sql_text, f"DATA_SCOPE_UNSUPPORTED: {e.reason}")
@@ -276,14 +278,16 @@ async def _prepare(  # noqa: PLR0913 —— 请求字段平铺,编排前段
             log.warning("data_scope 降级: %s (trace_id=%s)", applied.warning, trace_id)
 
     # 6. 改写产物复检:防火墙 + 保留表拒读 + schema 边界(纵深防御,datascope spec 清单 10)
-    second = check(applied.sql)
+    #    改写产物为新文本,单遍复用同一 Guarded(053)
+    out = guard.parse_guarded(applied.sql)
+    second = out.check()
     if not second.passed:
         log.error("改写产物未过防火墙复检 trace_id=%s reason=%s", trace_id, second.reason)
         return await _fin("BLOCKED", applied.sql, f"POST_REWRITE: {second.reason}")
-    reserved = check_reserved_tables(applied.sql)
+    reserved = out.check_reserved_tables()
     if not reserved.passed:
         return await _fin("BLOCKED", applied.sql, reserved.reason or "RESERVED_TABLE")
-    scope_verdict = check_schema_scope(applied.sql, {route_schema, "public"})
+    scope_verdict = out.check_schema_scope({route_schema, "public"})
     if not scope_verdict.passed:
         return await _fin("BLOCKED", applied.sql, scope_verdict.reason or "CROSS_SCHEMA")
 

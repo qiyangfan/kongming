@@ -9,6 +9,10 @@ from kongming_agent.settings import Settings
 def _settings(**env: str) -> Settings:
     import os
 
+    # 环境隔离:白名单显式钉住(dashscope),不随本机 .env 的主模型 base_url
+    # 漂移(muniu 网关切换后 allowed_hosts 含 127.0.0.1,dashscope 条目会被
+    # 拒配致断言环境依赖性失败);调用方显式传入 model_allowed_hosts 时不覆盖。
+    env.setdefault("model_allowed_hosts", "dashscope.aliyuncs.com")
     old = {k: os.environ.get(f"KM_AGENT_{k.upper()}") for k in env}
     for k, v in env.items():
         os.environ[f"KM_AGENT_{k.upper()}"] = v

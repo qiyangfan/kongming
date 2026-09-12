@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     model_routes_json: str = ""
     model_allowed_hosts: str = ""  # 逗号分隔;缺省=主模型 base_url 主机
 
+    # SQL 安全引擎(053):builtin | shadow | primary;默认影子(内置权威,
+    # 引擎只对拍观测)。validate 预检纯解析无 IO,引擎缺失/异常自动降级不阻断。
+    sqlguard_mode: str = "shadow"
+
     # 036⑦:主模型图片体积上限(MB;注册表条目 max_image_mb 可覆盖)
     llm_max_image_mb: float = 10.0
 

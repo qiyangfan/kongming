@@ -529,12 +529,27 @@ wheels = [
 ]
 
 [[package]]
+name = "km-sqlguard"
+version = "0.1.2"
+source = { path = "../../vendor/km_sqlguard-0.1.2-py3-none-any.whl" }
+dependencies = [
+    { name = "sqlglot" },
+]
+wheels = [
+    { filename = "km_sqlguard-0.1.2-py3-none-any.whl", hash = "sha256:1cf17f78bb67d21137be4e22201e24b1996af277f884c33e0150964576c101a9" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "sqlglot", specifier = ">=26.0" }]
+
+[[package]]
 name = "kongming-agent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "km-sqlguard" },
     { name = "langgraph" },
     { name = "openai" },
     { name = "pydantic" },
@@ -558,6 +573,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.28" },
+    { name = "km-sqlguard", path = "../../vendor/km_sqlguard-0.1.2-py3-none-any.whl" },
     { name = "langgraph", specifier = ">=0.2.60" },
     { name = "openai", specifier = ">=1.60" },
     { name = "pydantic", specifier = ">=2.10" },
