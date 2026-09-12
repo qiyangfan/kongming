@@ -2,7 +2,7 @@
 
 日期: 2026-09-11
 
-状态: 已切换,灰度中(2026-09-11 三处 `.env` 切换完成,直连冒烟/e2e 问答/网关计量与计价实证全过;灰度一周每日对账达标后转「已接受」。muniu 侧论证原稿见 muniu 仓库 docs/kongming-adr-draft.md)
+状态: 已切换,灰度中(2026-09-11 三处 `.env` 切换完成,直连冒烟/e2e 问答/网关计量与计价实证全过;灰度一周正常使用无故障后转「已接受」,月末上游账单量级核对一次。muniu 侧论证原稿见 muniu 仓库 docs/kongming-adr-draft.md)
 
 ## 背景
 
@@ -40,7 +40,7 @@ muniu 提供:多上游路由与 failover(首 token 边界语义)、per-key RPM/T
 1. muniu 侧建租户 `kongming` 与专用 key(`muniu` 仓库 `scripts/bootstrap-kongming.sh`;起步 rpm 120,按现有用量 ×2 回填);
 2. 模型别名对齐(`muniu` 仓库 `docs/kongming-alignment.md`,2026-09-11 已回填:qwen-plus / qwen-vl-max / text-embedding-v2,别名与上游模型名直通);
 3. kongming 侧切换仅三处:`KM_AGENT_LLM_BASE_URL` → `http://127.0.0.1:8787/v1`、`KM_AGENT_LLM_API_KEY` → mk- key、注册表 qwen-vl 条目的 base_url/api_key 同步;embedding 与白名单零改动;
-4. 灰度一周(每日对账,muniu `scripts/reconcile.sql`,差异 >1% 立案)→ 全量 → 本 ADR 转「已接受」;
+4. 灰度一周(2026-09-12 修订:个人本地项目低流量,生产式「每日对账,差异 ≤1%」不适用——分母近零且上游账单天级延迟;判据改为**一周内正常使用无 5xx/无挂起/问答行为无回归,月末与上游 dashscope 账单做一次量级核对**;muniu `scripts/reconcile.sql` 保留作按需自检工具)→ 全量 → 本 ADR 转「已接受」;
 5. 回滚路径:`.env` 三处改回原直连值即恢复,muniu 无状态参与,回滚零成本。
 
 ## 后果
