@@ -59,15 +59,19 @@ async def _export_table(session: AsyncSession, table: str, cutoff: datetime, pat
         offset = 0
         while True:
             batch = (
-                await session.execute(
-                    text(
-                        f"SELECT * FROM public.{table}"  # noqa: S608  # 常量表名(内部两表)
-                        " WHERE created_at < :cutoff ORDER BY created_at ASC, id ASC"
-                        " LIMIT :lim OFFSET :off"
-                    ),
-                    {"cutoff": cutoff, "lim": _FETCH_BATCH, "off": offset},
+                (
+                    await session.execute(
+                        text(
+                            f"SELECT * FROM public.{table}"  # noqa: S608  # 常量表名(内部两表)
+                            " WHERE created_at < :cutoff ORDER BY created_at ASC, id ASC"
+                            " LIMIT :lim OFFSET :off"
+                        ),
+                        {"cutoff": cutoff, "lim": _FETCH_BATCH, "off": offset},
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
             if not batch:
                 break
             for r in batch:
@@ -86,9 +90,7 @@ async def run_archive(
     → 库内删除。同日重跑幂等(manifest 完整且窗口覆盖则跳过导出仅补删);
     全程持进程锁(并发交错=文件损坏且删除后不可恢复,R1-S3)。"""
     async with _archive_lock:
-        return await _run_archive_locked(
-            session, days=days, archive_dir=archive_dir, now=now
-        )
+        return await _run_archive_locked(session, days=days, archive_dir=archive_dir, now=now)
 
 
 async def _run_archive_locked(
@@ -112,8 +114,7 @@ async def _run_archive_locked(
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             ok = (
                 all(
-                    (wdir / f["name"]).exists()
-                    and _sha256_file(wdir / f["name"]) == f["sha256"]
+                    (wdir / f["name"]).exists() and _sha256_file(wdir / f["name"]) == f["sha256"]
                     for f in manifest.get("files", [])
                 )
                 and len(manifest.get("files", [])) == len(_TABLES)
@@ -132,9 +133,7 @@ async def _run_archive_locked(
         for table in _TABLES:
             path = wdir / f"{table}.jsonl.gz"
             rows = await _export_table(session, table, cutoff, path)
-            manifest_files.append(
-                {"name": path.name, "sha256": _sha256_file(path), "rows": rows}
-            )
+            manifest_files.append({"name": path.name, "sha256": _sha256_file(path), "rows": rows})
             exported += rows
             files.append(path.name)
         manifest = {
@@ -177,9 +176,7 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-async def run_restore(
-    session: AsyncSession, *, archive_dir: str, window_dir: str
-) -> RestoreResult:
+async def run_restore(session: AsyncSession, *, archive_dir: str, window_dir: str) -> RestoreResult:
     """重导入:manifest SHA-256 逐文件校验(不符即拒)→ 逐行 INSERT
     ON CONFLICT DO NOTHING(id 幂等)。window_dir 须为合法目录名(端点已收口)。
     值侧按 information_schema 列类型做客户端转换(asyncpg 按 CAST 声明在
@@ -198,10 +195,7 @@ async def run_restore(
         with gzip.open(path, "rt", encoding="utf-8") as gz:
             for line in gz:
                 row = json.loads(line)
-                params = {
-                    c: _coerce(v, col_types.get((table, c), "text"))
-                    for c, v in row.items()
-                }
+                params = {c: _coerce(v, col_types.get((table, c), "text")) for c, v in row.items()}
                 cols = list(params)
                 inserted = (
                     await session.execute(

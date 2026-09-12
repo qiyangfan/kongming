@@ -29,7 +29,11 @@ class MemoryRepo(Protocol):
     async def mark_dormant_lazy(self, *, user_id: str, tenant_id: str) -> None: ...
 
     async def recall(
-        self, *, user_id: str, tenant_id: str, vector: list[float],
+        self,
+        *,
+        user_id: str,
+        tenant_id: str,
+        vector: list[float],
         team_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]: ...
 

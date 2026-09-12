@@ -13,9 +13,7 @@ class PaymentChannel(Protocol):
 
     def new_trade_no(self) -> str: ...
 
-    def sign_payload(
-        self, *, payment_id: str, trade_no: str, result: str, amount: int
-    ) -> str: ...
+    def sign_payload(self, *, payment_id: str, trade_no: str, result: str, amount: int) -> str: ...
 
     def verify(
         self, *, payment_id: str, trade_no: str, result: str, amount: int, sign: str
@@ -24,8 +22,14 @@ class PaymentChannel(Protocol):
 
 class BillingRepo(Protocol):
     async def upsert_policy(
-        self, *, tenant_id: str, dimension: str, limit_value: int, warn_pct: int,
-        scope: str = "TENANT", scope_ref: str | None = None,
+        self,
+        *,
+        tenant_id: str,
+        dimension: str,
+        limit_value: int,
+        warn_pct: int,
+        scope: str = "TENANT",
+        scope_ref: str | None = None,
     ) -> None: ...
 
     async def list_policies(self, *, tenant_id: str) -> list[dict[str, Any]]: ...
@@ -58,13 +62,9 @@ class BillingRepo(Protocol):
 
     async def month_call_count(self, *, tenant_id: str, month: str) -> int: ...
 
-    async def month_bot_token_usage(
-        self, *, tenant_id: str, bot_id: str, month: str
-    ) -> int: ...
+    async def month_bot_token_usage(self, *, tenant_id: str, bot_id: str, month: str) -> int: ...
 
-    async def month_usage_by_model(
-        self, *, tenant_id: str, month: str
-    ) -> list[dict[str, Any]]: ...
+    async def month_usage_by_model(self, *, tenant_id: str, month: str) -> list[dict[str, Any]]: ...
 
     async def insert_invoice(
         self, *, tenant_id: str, period: str, usage_json: dict[str, Any], amount: int
@@ -72,9 +72,7 @@ class BillingRepo(Protocol):
 
     async def list_invoices(self, *, tenant_id: str) -> list[dict[str, Any]]: ...
 
-    async def get_invoice(
-        self, *, invoice_id: str, tenant_id: str
-    ) -> dict[str, Any] | None: ...
+    async def get_invoice(self, *, invoice_id: str, tenant_id: str) -> dict[str, Any] | None: ...
 
     async def get_invoice_admin(self, *, invoice_id: str) -> dict[str, Any] | None: ...
 
@@ -87,7 +85,12 @@ class BillingRepo(Protocol):
     # ── 支付单(035) ──
 
     async def insert_payment_if_pending(
-        self, *, invoice_id: str, tenant_id: str, channel: str, amount: int,
+        self,
+        *,
+        invoice_id: str,
+        tenant_id: str,
+        channel: str,
+        amount: int,
         expires_at: Any,
     ) -> str | None: ...
 
@@ -111,8 +114,6 @@ class BillingRepo(Protocol):
 
     async def expire_payment_if_overdue(self, *, payment_id: str) -> bool: ...
 
-    async def latest_payment_for_invoice(
-        self, *, invoice_id: str
-    ) -> dict[str, Any] | None: ...
+    async def latest_payment_for_invoice(self, *, invoice_id: str) -> dict[str, Any] | None: ...
 
     async def commit(self) -> None: ...

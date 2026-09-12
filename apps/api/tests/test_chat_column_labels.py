@@ -43,9 +43,7 @@ def test_qualified_column_resolves_via_alias() -> None:
         " FROM customer c JOIN payment p ON p.customer_id = c.customer_id"
         " GROUP BY c.customer_id, c.first_name"
     )
-    labels = resolve_column_labels(
-        ["customer_id", "first_name", "total"], _COMMENTS, sql
-    )
+    labels = resolve_column_labels(["customer_id", "first_name", "total"], _COMMENTS, sql)
     assert labels == ["客户唯一标识符", "客户名字", "total"]
 
 
@@ -110,13 +108,12 @@ def test_star_projection_falls_back_entirely() -> None:
     # 贴到星号展开列上——SELECT *, amount 实证第 2 列错得「支付金额」。
     # 宁缺毋错:整体回退物理名(纯 SELECT * 同口径)。
     sql = "SELECT *, amount FROM payment"
-    labels = resolve_column_labels(
-        ["customer_id", "amount", "amount"], _COMMENTS, sql
-    )
+    labels = resolve_column_labels(["customer_id", "amount", "amount"], _COMMENTS, sql)
     assert labels == ["customer_id", "amount", "amount"]
-    assert resolve_column_labels(
-        ["customer_id", "amount"], _COMMENTS, "SELECT * FROM payment"
-    ) == ["customer_id", "amount"]
+    assert resolve_column_labels(["customer_id", "amount"], _COMMENTS, "SELECT * FROM payment") == [
+        "customer_id",
+        "amount",
+    ]
 
 
 # ============ 全栈(真实 rag repo;agent 替身) ============
@@ -137,9 +134,7 @@ def labels_agent() -> Iterator[dict[str, Any]]:
 
 
 async def _ask(client: AsyncClient, token: str) -> dict[str, object]:
-    r = await client.post(
-        "/chat/query", json={"question": "各商品库存"}, headers=_auth(token)
-    )
+    r = await client.post("/chat/query", json={"question": "各商品库存"}, headers=_auth(token))
     assert r.status_code == 200
     return r.json()
 
@@ -152,9 +147,7 @@ async def test_labels_fallback_then_hit_with_persist(
 ) -> None:
     """无注释行→回退原列名;插入注释→业务标签;落库 result_json 同源携带。"""
     _, token = await _user_with_chat_perm(client, session, make_user, "qa40")
-    tid = await session.execute(
-        text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'")
-    )
+    tid = await session.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'"))
     tenant_id = str(tid.scalar_one())
 
     # 先删后插(共享测试库幂等):本测试插入的 goods 注释行不得残留污染重跑
@@ -244,9 +237,7 @@ async def test_column_comments_tenant_schema_overrides_public(
         {"t": tid},
     )
     await session.commit()
-    comments = await RagRepository(session).column_comments(
-        tenant_id=tid, datasource_key="default"
-    )
+    comments = await RagRepository(session).column_comments(tenant_id=tid, datasource_key="default")
     assert comments["goods"] == {"name": "varchar 租户名"}  # 租户 schema 胜出
     # 清理:不残留本次插入的 goods 行(防污染其他用例)
     await session.execute(

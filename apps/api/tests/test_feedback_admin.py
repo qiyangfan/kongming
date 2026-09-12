@@ -100,15 +100,19 @@ async def test_handle_status_success_with_audit(
     assert r.status_code == 200
     assert r.json() == {"status": "ADOPTED", "note": "已排期精修"}
     row = (
-        await session.execute(
-            text(
-                "SELECT feedback_status, feedback_handler IS NOT NULL AS has_handler,"
-                " feedback_handle_time IS NOT NULL AS has_time, feedback_handle_note"
-                " FROM public.chat_message WHERE id=:i"
-            ),
-            {"i": mid},
+        (
+            await session.execute(
+                text(
+                    "SELECT feedback_status, feedback_handler IS NOT NULL AS has_handler,"
+                    " feedback_handle_time IS NOT NULL AS has_time, feedback_handle_note"
+                    " FROM public.chat_message WHERE id=:i"
+                ),
+                {"i": mid},
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert row["feedback_status"] == "ADOPTED"
     assert row["has_handler"] is True
     assert row["has_time"] is True
@@ -128,13 +132,9 @@ async def test_handle_invalid_status_400(
     tid = await _default_tenant_id(session)
     uid = await make_user("fbh-inv")
     mid = await _mk_feedback_msg(session, user_id=uid, tenant_id=tid)
-    r = await client.put(
-        f"/feedback/{mid}/status", json={"status": "NONE"}, headers=_auth(token)
-    )
+    r = await client.put(f"/feedback/{mid}/status", json={"status": "NONE"}, headers=_auth(token))
     assert r.status_code == 400  # NONE 不可写(仅 PENDING/ADOPTED/REJECTED/DISMISSED)
-    r = await client.put(
-        f"/feedback/{mid}/status", json={"status": "BOGUS"}, headers=_auth(token)
-    )
+    r = await client.put(f"/feedback/{mid}/status", json={"status": "BOGUS"}, headers=_auth(token))
     assert r.status_code == 400
 
 
@@ -251,9 +251,7 @@ async def test_resubmit_clears_handle_columns(
     (防「新 PENDING + 陈旧处置者」组合)。"""
     token = await _admin_token(client, session)
     tid = await _default_tenant_id(session)
-    uid, token_u = await _view_user(
-        client, session, make_user, "fbh-resub", "chat:feedback:submit"
-    )
+    uid, token_u = await _view_user(client, session, make_user, "fbh-resub", "chat:feedback:submit")
     mid = await _mk_feedback_msg(session, user_id=uid, tenant_id=tid)
     await client.put(
         f"/feedback/{mid}/status",
@@ -265,14 +263,18 @@ async def test_resubmit_clears_handle_columns(
     )
     assert r.status_code == 200
     row = (
-        await session.execute(
-            text(
-                "SELECT feedback_status, feedback_handler, feedback_handle_time,"
-                " feedback_handle_note FROM public.chat_message WHERE id=:i"
-            ),
-            {"i": mid},
+        (
+            await session.execute(
+                text(
+                    "SELECT feedback_status, feedback_handler, feedback_handle_time,"
+                    " feedback_handle_note FROM public.chat_message WHERE id=:i"
+                ),
+                {"i": mid},
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert row["feedback_status"] == "PENDING"
     assert row["feedback_handler"] is None
     assert row["feedback_handle_time"] is None
@@ -318,8 +320,7 @@ async def test_involved_tables_extract_and_match(
         user_id=uid,
         tenant_id=tid,
         sql_text=(
-            "SELECT g.name FROM tenant_default.goods g"
-            " JOIN tenant_default.goods g2 ON g.id=g2.id"
+            "SELECT g.name FROM tenant_default.goods g JOIN tenant_default.goods g2 ON g.id=g2.id"
         ),
         corrected_sql="WITH x AS (SELECT 1) SELECT count(*) FROM tenant_default.goods",
     )
@@ -370,7 +371,11 @@ async def test_overview_counts_and_trend_zero_fill(
     now = datetime.now(UTC)
     await _mk_feedback_msg(session, user_id=uid, tenant_id=tid, rating="UP", feedback_time=now)
     await _mk_feedback_msg(
-        session, user_id=uid, tenant_id=tid, rating="DOWN", corrected_sql="SELECT 1",
+        session,
+        user_id=uid,
+        tenant_id=tid,
+        rating="DOWN",
+        corrected_sql="SELECT 1",
         feedback_time=now - timedelta(days=1),
     )
     # 未反馈消息(无 feedback_time)不计入口径
@@ -422,11 +427,23 @@ async def test_page_filters_and_order(
     tid = await _default_tenant_id(session)
     uid = await make_user("fbp-owner")
     now = datetime.now(UTC)
-    m1 = await _mk_feedback_msg(session, user_id=uid, tenant_id=tid, rating="UP",
-                                feedback_time=now - timedelta(hours=2), question="第一问")
-    m2 = await _mk_feedback_msg(session, user_id=uid, tenant_id=tid, rating="DOWN",
-                                corrected_sql="SELECT 1", feedback_time=now - timedelta(hours=1),
-                                question="第二问")
+    m1 = await _mk_feedback_msg(
+        session,
+        user_id=uid,
+        tenant_id=tid,
+        rating="UP",
+        feedback_time=now - timedelta(hours=2),
+        question="第一问",
+    )
+    m2 = await _mk_feedback_msg(
+        session,
+        user_id=uid,
+        tenant_id=tid,
+        rating="DOWN",
+        corrected_sql="SELECT 1",
+        feedback_time=now - timedelta(hours=1),
+        question="第二问",
+    )
     r = await client.get("/feedback/page", headers=_auth(token))
     assert r.status_code == 200
     body = r.json()
@@ -451,16 +468,19 @@ async def test_page_feedback_status_filter(
     tid = await _default_tenant_id(session)
     uid = await make_user("fbp-fst")
     mid = await _mk_feedback_msg(session, user_id=uid, tenant_id=tid)
-    r = await client.get("/feedback/page", params={"feedback_status": "PENDING"},
-                         headers=_auth(token))
+    r = await client.get(
+        "/feedback/page", params={"feedback_status": "PENDING"}, headers=_auth(token)
+    )
     assert [i["message_id"] for i in r.json()["items"]] == [mid]
-    r = await client.get("/feedback/page", params={"feedback_status": "ADOPTED"},
-                         headers=_auth(token))
+    r = await client.get(
+        "/feedback/page", params={"feedback_status": "ADOPTED"}, headers=_auth(token)
+    )
     assert r.json()["total"] == 0
     # 处置后可见
     await client.put(f"/feedback/{mid}/status", json={"status": "ADOPTED"}, headers=_auth(token))
-    r = await client.get("/feedback/page", params={"feedback_status": "ADOPTED"},
-                         headers=_auth(token))
+    r = await client.get(
+        "/feedback/page", params={"feedback_status": "ADOPTED"}, headers=_auth(token)
+    )
     assert r.json()["total"] == 1
 
 
@@ -480,9 +500,7 @@ async def test_page_visibility_self_forced(
     r = await client.get("/feedback/page", headers=_auth(token_self))
     assert [i["message_id"] for i in r.json()["items"]] == [mid_own]
     # 显式传 userId=他人:被覆盖仍只见自己(spec)
-    r = await client.get(
-        "/feedback/page", params={"user_id": uid_other}, headers=_auth(token_self)
-    )
+    r = await client.get("/feedback/page", params={"user_id": uid_other}, headers=_auth(token_self))
     assert [i["message_id"] for i in r.json()["items"]] == [mid_own]
     # 超管传 userId 生效
     r = await client.get(

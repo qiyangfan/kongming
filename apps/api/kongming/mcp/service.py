@@ -24,9 +24,7 @@ class McpOperLogger(Protocol):
 
 def _validate_key(server_key: str) -> None:
     if not SERVER_KEY_RE.fullmatch(server_key):
-        raise McpValidationError(
-            "server_key 须为小写字母开头的字母/数字/下划线(2-64 位)"
-        )
+        raise McpValidationError("server_key 须为小写字母开头的字母/数字/下划线(2-64 位)")
 
 
 def _validate_endpoint(endpoint: str) -> None:

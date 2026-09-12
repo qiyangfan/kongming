@@ -78,9 +78,16 @@ def check_statements(statements: list[Expr | None]) -> Verdict:
                 return Verdict(False, "BLOCKED_INTO")
         # 语句内禁止出现任何写/DDL 节点(嵌套也拦)
         for forbidden in (
-            exp.Insert, exp.Update, exp.Delete, exp.Merge,
-            exp.Create, exp.Drop, exp.Alter, exp.Command,
-            exp.Grant, exp.TruncateTable,
+            exp.Insert,
+            exp.Update,
+            exp.Delete,
+            exp.Merge,
+            exp.Create,
+            exp.Drop,
+            exp.Alter,
+            exp.Command,
+            exp.Grant,
+            exp.TruncateTable,
         ):
             if st.find(forbidden):
                 return Verdict(False, f"BLOCKED_NODE: {forbidden.__name__}")

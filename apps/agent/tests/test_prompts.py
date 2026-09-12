@@ -100,9 +100,7 @@ def test_understand_fidelity_rules() -> None:
 
 
 def test_summarize_factuality_rules() -> None:
-    assert "数值结论以所给统计与可见数据行为准，不得外推到不可见数据" in (
-        prompts.SUMMARIZE_SYSTEM
-    )
+    assert "数值结论以所给统计与可见数据行为准，不得外推到不可见数据" in (prompts.SUMMARIZE_SYSTEM)
     assert "必须如实说明未执行写操作，不得声称删除/更新/插入成功" in prompts.SUMMARIZE_SYSTEM
     # 既有 JSON 格式约定保值
     assert '{"summary":"一句话总结","insights":[{"type":"类型","text":"发现"}]}' in (
@@ -112,9 +110,7 @@ def test_summarize_factuality_rules() -> None:
 
 def test_summarize_alias_alignment_rules() -> None:
     """037 称谓对齐规则在位,且与 018 事实性规则共存(互锁不互斥)。"""
-    assert "称谓对齐规则：提及数据实体时必须使用业务称谓别名(alias)" in (
-        prompts.SUMMARIZE_SYSTEM
-    )
+    assert "称谓对齐规则：提及数据实体时必须使用业务称谓别名(alias)" in (prompts.SUMMARIZE_SYSTEM)
     assert "用户用语优先，其次所给别名" in prompts.SUMMARIZE_SYSTEM
     assert "禁止只写物理表名" in prompts.SUMMARIZE_SYSTEM
     assert "禁止出现schema全限定名" in prompts.SUMMARIZE_SYSTEM
@@ -126,9 +122,7 @@ def test_summarize_alias_alignment_rules() -> None:
     # 双规则共存(018 事实性 + 037 称谓)
     assert "不得外推到不可见数据" in prompts.SUMMARIZE_SYSTEM
     # 例外清单登记(文件头):037 增量已登记
-    assert "SUMMARIZE_SYSTEM 称谓对齐规则(2026-08-24,037 entity-alias)" in (
-        prompts.__doc__ or ""
-    )
+    assert "SUMMARIZE_SYSTEM 称谓对齐规则(2026-08-24,037 entity-alias)" in (prompts.__doc__ or "")
 
 
 def test_sql_gen_table_scope_discipline() -> None:
@@ -160,17 +154,13 @@ def test_fullwidth_discipline_no_stray_halfwidth_comma() -> None:
 
 def test_sql_gen_aggregate_followup_single_row() -> None:
     """048 聚合追问:整体总量/总额/合计输出单一聚合行,不得逐行明细。"""
-    assert "追问整体总量/总额/合计（\"总共/合计/一共\"）时输出单一聚合行" in (
-        prompts.SQL_GEN_SYSTEM
-    )
+    assert '追问整体总量/总额/合计（"总共/合计/一共"）时输出单一聚合行' in (prompts.SQL_GEN_SYSTEM)
     assert "不得逐行明细" in prompts.SQL_GEN_SYSTEM
 
 
 def test_sql_gen_correspondence_distinct() -> None:
     """048 对应关系去重:一对多 JOIN 后投影组合重复必须 DISTINCT(018 靶点)。"""
-    assert "「对应关系/名录/哪些」类明细经一对多 JOIN 后投影列组合重复" in (
-        prompts.SQL_GEN_SYSTEM
-    )
+    assert "「对应关系/名录/哪些」类明细经一对多 JOIN 后投影列组合重复" in (prompts.SQL_GEN_SYSTEM)
     assert "重复的对应行是噪声" in prompts.SQL_GEN_SYSTEM
     assert "❌ 「对应关系/名录」类查询经一对多 JOIN 后不去重" in prompts.SQL_GEN_SYSTEM
 

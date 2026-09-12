@@ -71,9 +71,7 @@ async def upload_attachment(
     # 非默认租户下「上传→引用」必 404(归属校验按当前租户,附件却绑默认)
     chat_repo = ChatRepository(session)
     if x_tenant_id is not None:
-        bound = await chat_repo.find_bound_tenant(
-            user_id=str(user["sub"]), tenant_key=x_tenant_id
-        )
+        bound = await chat_repo.find_bound_tenant(user_id=str(user["sub"]), tenant_key=x_tenant_id)
         tenant = (bound, x_tenant_id) if bound is not None else None
     else:
         tenant = await chat_repo.find_default_tenant(user_id=str(user["sub"]))
@@ -102,9 +100,7 @@ async def upload_attachment(
         with contextlib.suppress(Exception):
             await repo.delete_file(att_id, mime)
         raise
-    return AttachmentOut(
-        attachment_id=att_id, filename=filename, mime=mime, size_bytes=len(buf)
-    )
+    return AttachmentOut(attachment_id=att_id, filename=filename, mime=mime, size_bytes=len(buf))
 
 
 @internal_router.get("/{att_id}/content")
@@ -124,9 +120,7 @@ async def read_attachment_content(
     except ValueError:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     repo = SqlAttachmentRepo(session)
-    tid = await ChatRepository(session).find_bound_tenant(
-        user_id=user_id, tenant_key=tenant_key
-    )
+    tid = await ChatRepository(session).find_bound_tenant(user_id=user_id, tenant_key=tenant_key)
     if tid is None:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     row = await repo.find_owned(att_id=att_id, tenant_id=str(tid), user_id=user_id)

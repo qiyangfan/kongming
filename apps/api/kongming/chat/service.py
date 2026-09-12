@@ -124,19 +124,13 @@ class ChatOutcome:
     datasource_key: str = "default"
     # 019 tool-calling:本次问答产生的待确认写工具调用(前端渲染确认卡;
     # 缺省空列表,老调用方零感知)
-    pending_tool_calls: list[dict[str, object]] = field(
-        default_factory=list[dict[str, object]]
-    )
+    pending_tool_calls: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
     # 022:本次问答的租户 id(隐式记忆后台任务用;不序列化进响应模型)
     tenant_id: str = ""
     # 026:类型化产物(派生自 sql/chart/summary;空数组零回归)
-    artifacts: list[dict[str, object]] = field(
-        default_factory=list[dict[str, object]]
-    )
+    artifacts: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
     # 030:附件引用摘要(filename/mime/size;空数组零回归)
-    attachments: list[dict[str, object]] = field(
-        default_factory=list[dict[str, object]]
-    )
+    attachments: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
     # 022:本论为显式记忆短路(R1-M2:隐式提取任务据此排除,防同内容重复落 IMPLICIT)
     memory_shortcut: bool = False
     # 041:呈现层列标签(与 columns 等长对齐;未命中回退原始列名;
@@ -168,9 +162,7 @@ class MessageResult:
     # 047:原始技术错误(读档;存量档缺失→None,前端不渲染折叠块)
     error_detail: str | None = None
     # 026:类型化产物(读档优先,缺档按要素重算)
-    artifacts: list[dict[str, object]] = field(
-        default_factory=list[dict[str, object]]
-    )
+    artifacts: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
     # 041:呈现层列标签(读档优先;存量档缺失→空列表,消费方回退 columns)
     column_labels: list[str] = field(default_factory=list[str])
 
@@ -194,9 +186,7 @@ class SessionMessage:
     corrected_sql: str | None = None
     feedback_comment: str | None = None
     # 030:附件引用摘要(回显徽标;空数组=无附件)
-    attachments: list[dict[str, object]] = field(
-        default_factory=list[dict[str, object]]
-    )
+    attachments: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
 
 
 @dataclass(frozen=True)
@@ -414,9 +404,7 @@ class ChatService:
         )
         return dataclasses.replace(outcome, memory_shortcut=True)
 
-    async def _recall_memory_hint(
-        self, *, user_id: str, tenant_id: str, question: str
-    ) -> str:
+    async def _recall_memory_hint(self, *, user_id: str, tenant_id: str, question: str) -> str:
         """记忆召回(022):失败/未接线/空召回 → 空串(零回归)。"""
         if self._memory is None:
             return ""
@@ -895,15 +883,9 @@ class ChatService:
         # 049:形状→有序候选(纯函数,含 sql 供 pie 可加闸);首候选展平为存量
         # 「默认单图」,chart 字段语义不变
         chart_candidates = (
-            suggest_charts(reply.columns, reply.rows, sql=sql_text)
-            if reply.success
-            else []
+            suggest_charts(reply.columns, reply.rows, sql=sql_text) if reply.success else []
         )
-        chart = (
-            chart_candidates[0].as_default()
-            if chart_candidates
-            else ChartSuggestion("none")
-        )
+        chart = chart_candidates[0].as_default() if chart_candidates else ChartSuggestion("none")
         # 041:呈现层列标签(仅成功有结果集时;物理名/显示名双轨,SQL 不动)
         column_labels = (
             await self._resolve_labels(
@@ -925,8 +907,7 @@ class ChatService:
         elif status == "NO_DATA":
             # 044:中性形态——说明文案经 summary 传达(过护栏),不走错误包装
             summary = (
-                error_raw
-                or "当前数据源未找到回答该问题所需的数据,可切换数据源或调整问法后重试"
+                error_raw or "当前数据源未找到回答该问题所需的数据,可切换数据源或调整问法后重试"
             )
             error = None
         elif status == "FAILED":
@@ -991,12 +972,7 @@ class ChatService:
 
         # 成功 SQL 回写 query_history(009):最终 SUCCESS 判定后;独立 try 不阻断;
         # persist=False 为测试通道不触发;空结果的成功查询同样回写(不依赖行数)。
-        if (
-            reply.success
-            and persist
-            and history_writer is not None
-            and reply.sql.strip()
-        ):
+        if reply.success and persist and history_writer is not None and reply.sql.strip():
             try:
                 await history_writer.writeback(
                     tenant_id=tenant_id,
@@ -1166,9 +1142,7 @@ class ChatService:
             media_type, ext = "text/csv; charset=utf-8", "csv"
         else:
             content, truncated = to_xlsx(columns, rows, max_rows=max_rows)
-            media_type = (
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             ext = "xlsx"
         if truncated:
             log.warning("导出行数截断: %d → %d 行", len(rows), max_rows)
@@ -1366,9 +1340,7 @@ class ChatService:
                 )
             else:
                 # 存量兼容:005 只存 chartType(无 x/y)/缺档 → 纯函数重算
-                chart_candidates = suggest_charts(
-                    cols, rws, sql=str(row.get("sql_text") or "")
-                )
+                chart_candidates = suggest_charts(cols, rws, sql=str(row.get("sql_text") or ""))
                 chart = (
                     chart_candidates[0].as_default()
                     if chart_candidates
@@ -1388,9 +1360,7 @@ class ChatService:
                 else []
             )
             stats_h = (
-                humanize_stats(
-                    dict(cast("dict[str, object]", stats_raw)), cols, col_labels
-                )
+                humanize_stats(dict(cast("dict[str, object]", stats_raw)), cols, col_labels)
                 if isinstance(stats_raw, dict)
                 else {}
             )

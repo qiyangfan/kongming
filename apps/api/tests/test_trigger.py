@@ -40,8 +40,17 @@ def test_cron_all_forms() -> None:
 
 
 def test_cron_rejects() -> None:
-    for bad in ("", "0 9 * *", "0 9 * * * *", "61 * * * *", "0 9 1 * 1",
-                "a b c d e", "0 9 * * 8", "*/0 * * * *", "5-1 * * * *"):
+    for bad in (
+        "",
+        "0 9 * *",
+        "0 9 * * * *",
+        "61 * * * *",
+        "0 9 1 * 1",
+        "a b c d e",
+        "0 9 * * 8",
+        "*/0 * * * *",
+        "5-1 * * * *",
+    ):
         with pytest.raises(CronError):
             parse_cron(bad)
 
@@ -144,13 +153,15 @@ async def test_scheduler_min_interval_skips() -> None:
     """spec「最小间隔保护」:刚触发过的行记 SKIPPED 且不执行。"""
     recent = dt.datetime.now(dt.UTC)
     svc = _StubService(
-        [{
-            "id": "t1",
-            "tenant_id": "ten",
-            "cron_expr": "0 9 * * *",
-            "last_fired_at": recent,
-            "min_interval_sec": 60,
-        }]
+        [
+            {
+                "id": "t1",
+                "tenant_id": "ten",
+                "cron_expr": "0 9 * * *",
+                "last_fired_at": recent,
+                "min_interval_sec": 60,
+            }
+        ]
     )
     sched = _scheduler_with(svc)
     await sched._tick()  # noqa: SLF001  # 直测 tick(测试专用入口)
@@ -162,19 +173,19 @@ async def test_scheduler_min_interval_skips() -> None:
 async def test_scheduler_in_progress_skips() -> None:
     """spec「并发不堆积」:进行中再到期记 SKIPPED。"""
     svc = _StubService(
-        [{
-            "id": "t2",
-            "tenant_id": "ten",
-            "cron_expr": "0 9 * * *",
-            "last_fired_at": None,
-            "min_interval_sec": 0,
-        }]
+        [
+            {
+                "id": "t2",
+                "tenant_id": "ten",
+                "cron_expr": "0 9 * * *",
+                "last_fired_at": None,
+                "min_interval_sec": 0,
+            }
+        ]
     )
     sched = _scheduler_with(svc)
     # 占位 Future 模拟在途执行,cast 对齐 Task 形态(运行时不变)
-    sched._running["t2"] = cast(
-        "asyncio.Task[None]", asyncio.get_running_loop().create_future()
-    )  # noqa: SLF001
+    sched._running["t2"] = cast("asyncio.Task[None]", asyncio.get_running_loop().create_future())  # noqa: SLF001
     await sched._tick()  # noqa: SLF001
     assert svc.fired == []
     assert svc.skipped == ["前次执行进行中"]
@@ -184,13 +195,15 @@ async def test_scheduler_cron_recalc_failure_stops() -> None:
     """R1-S1 回归:cron 重算失败 → 落 FAILED+next_fire 置 NULL(止损),
     不吞成「不推进」触发风暴。"""
     svc = _StubService(
-        [{
-            "id": "t3",
-            "tenant_id": "ten",
-            "cron_expr": "0 0 29 2 *",
-            "last_fired_at": None,
-            "min_interval_sec": 0,
-        }]
+        [
+            {
+                "id": "t3",
+                "tenant_id": "ten",
+                "cron_expr": "0 0 29 2 *",
+                "last_fired_at": None,
+                "min_interval_sec": 0,
+            }
+        ]
     )
     sched = _scheduler_with(svc)
     import kongming.trigger.models as models_mod
@@ -218,18 +231,23 @@ async def test_webhook_disabled_and_oversize(
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}
     await _mk_workflow(session, creator_id=uid_ds)  # 040:目标存在性闸对齐
     r = await client.post(
-        "/system/triggers", headers=h,
-        json={"tg_key": "dshook", "name": "禁", "type": "WEBHOOK",
-              "target_type": "workflow", "target_key": "echo", "secret": "s3cr"},
+        "/system/triggers",
+        headers=h,
+        json={
+            "tg_key": "dshook",
+            "name": "禁",
+            "type": "WEBHOOK",
+            "target_type": "workflow",
+            "target_key": "echo",
+            "secret": "s3cr",
+        },
     )
     path = r.json()["webhook_path"]
     tid = r.json()["id"]
     await client.post(f"/system/triggers/{tid}/disable", headers=h)
     payload = b'{"a":1}'
     sig = hmac_mod.new(b"s3cr", payload, hashlib.sha256).hexdigest()
-    r2 = await client.post(
-        f"/webhooks/{path}", content=payload, headers={"X-Signature": sig}
-    )
+    r2 = await client.post(f"/webhooks/{path}", content=payload, headers={"X-Signature": sig})
     assert r2.status_code == 401
     r3 = await client.post(
         f"/webhooks/{path}",
@@ -268,9 +286,7 @@ async def _mk_workflow(
         )
     ).scalar_one()
     if creator_id is None:
-        creator_id = (
-            await s.execute(text("SELECT id FROM public.sys_user LIMIT 1"))
-        ).scalar_one()
+        creator_id = (await s.execute(text("SELECT id FROM public.sys_user LIMIT 1"))).scalar_one()
     uid = creator_id
     await s.execute(
         text(
@@ -283,8 +299,7 @@ async def _mk_workflow(
             "t": str(tid),
             "u": str(uid),
             "d": json.dumps(
-                {"nodes": [{"id": "t", "type": "transform",
-                            "config": {"template": "{{inputs}}"}}]}
+                {"nodes": [{"id": "t", "type": "transform", "config": {"template": "{{inputs}}"}}]}
             ),
         },
     )
@@ -306,14 +321,16 @@ async def test_trigger_crud_and_cron_validation(
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}
     # 非法 cron 400
     r = await client.post(
-        "/system/triggers", headers=h,
+        "/system/triggers",
+        headers=h,
         json={**_CRON_BODY, "tg_key": "bad", "name": "坏", "cron_expr": "61 * * * *"},
     )
     assert r.status_code == 400
     await _mk_workflow(session, creator_id=uid)  # 040:目标存在性闸对齐
     # 合法创建,next_fire_at 预计算
     r2 = await client.post(
-        "/system/triggers", headers=h,
+        "/system/triggers",
+        headers=h,
         json={**_CRON_BODY, "tg_key": "daily", "name": "日报"},
     )
     assert r2.status_code == 201, r2.text
@@ -350,10 +367,14 @@ async def test_webhook_signature_matrix(
     await _mk_workflow(session, creator_id=uid_wh1)
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}
     r = await client.post(
-        "/system/triggers", headers=h,
+        "/system/triggers",
+        headers=h,
         json={
-            "tg_key": "hook", "name": "钩子", "type": "WEBHOOK",
-            "target_type": "workflow", "target_key": "echo",
+            "tg_key": "hook",
+            "name": "钩子",
+            "type": "WEBHOOK",
+            "target_type": "workflow",
+            "target_key": "echo",
             "secret": "topsecret123",
         },
     )
@@ -408,8 +429,7 @@ async def test_webhook_signature_matrix(
     assert r4.status_code == 401
     import uuid as _u
 
-    r5 = await client.post(f"/webhooks/{_u.uuid4()}", content=payload,
-                           headers={"X-Signature": sig})
+    r5 = await client.post(f"/webhooks/{_u.uuid4()}", content=payload, headers={"X-Signature": sig})
     assert r5.status_code in (401, 404)
 
 
@@ -421,23 +441,31 @@ async def test_webhook_github_adapter_normalizes(
     await _mk_workflow(session, creator_id=uid_gh1)
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}
     r = await client.post(
-        "/system/triggers", headers=h,
+        "/system/triggers",
+        headers=h,
         json={
-            "tg_key": "ghhook", "name": "GH", "type": "WEBHOOK",
-            "target_type": "workflow", "target_key": "echo",
-            "secret": "ghsecret", "adapter": "github",
+            "tg_key": "ghhook",
+            "name": "GH",
+            "type": "WEBHOOK",
+            "target_type": "workflow",
+            "target_key": "echo",
+            "secret": "ghsecret",
+            "adapter": "github",
         },
     )
     path = r.json()["webhook_path"]
-    payload = json.dumps({
-        "ref": "refs/heads/main",
-        "repository": {"full_name": "o/r"},
-        "commits": [{}],
-        "pusher": {"name": "qiuye"},
-    }).encode()
+    payload = json.dumps(
+        {
+            "ref": "refs/heads/main",
+            "repository": {"full_name": "o/r"},
+            "commits": [{}],
+            "pusher": {"name": "qiuye"},
+        }
+    ).encode()
     sig = hmac_mod.new(b"ghsecret", payload, hashlib.sha256).hexdigest()
     r2 = await client.post(
-        f"/webhooks/{path}", content=payload,
+        f"/webhooks/{path}",
+        content=payload,
         headers={"X-Signature": sig, "X-GitHub-Event": "push"},
     )
     assert r2.status_code == 202
@@ -453,7 +481,8 @@ async def test_trigger_unknown_target_400(
     _, token = await _trigger_admin(client, session, make_user, "tg_040a")
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}
     r = await client.post(
-        "/system/triggers", headers=h,
+        "/system/triggers",
+        headers=h,
         json={**_CRON_BODY, "tg_key": "ghost040", "name": "悬空目标"},
     )
     assert r.status_code == 400, r.text
@@ -474,25 +503,31 @@ async def test_trigger_update_change_target_revalidates(
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}
     await _mk_workflow(session, creator_id=uid)
     r = await client.post(
-        "/system/triggers", headers=h,
+        "/system/triggers",
+        headers=h,
         json={**_CRON_BODY, "tg_key": "upd040", "name": "日报"},
     )
     assert r.status_code == 201, r.text
     tid = r.json()["id"]
     r2 = await client.put(
-        f"/system/triggers/{tid}", headers=h,
-        json={"name": "日报", "target_type": "workflow", "target_key": "nope040",
-              "cron_expr": "0 9 * * *", "min_interval_sec": 60,
-              "adapter": "custom", "notify_url": "", "secret": ""},
+        f"/system/triggers/{tid}",
+        headers=h,
+        json={
+            "name": "日报",
+            "target_type": "workflow",
+            "target_key": "nope040",
+            "cron_expr": "0 9 * * *",
+            "min_interval_sec": 60,
+            "adapter": "custom",
+            "notify_url": "",
+            "secret": "",
+        },
     )
     assert r2.status_code == 400, r2.text
     assert r2.json()["detail"] == "TARGET_NOT_FOUND"
     row = (
         await session.execute(
-            text(
-                "SELECT target_key FROM public.sys_trigger_definition"
-                " WHERE tg_key='upd040'"
-            )
+            text("SELECT target_key FROM public.sys_trigger_definition WHERE tg_key='upd040'")
         )
     ).scalar_one()
     assert row == "echo"  # 原值不变
@@ -506,23 +541,34 @@ async def test_trigger_orphan_still_manageable(
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}
     await _mk_workflow(session, creator_id=uid)
     r = await client.post(
-        "/system/triggers", headers=h,
+        "/system/triggers",
+        headers=h,
         json={**_CRON_BODY, "tg_key": "orphan040", "name": "孤儿"},
     )
     assert r.status_code == 201, r.text
     tid = r.json()["id"]
     await session.execute(
-        text("DELETE FROM public.sys_workflow_def WHERE wf_key='echo' AND tenant_id="
-             "(SELECT id FROM public.sys_tenant WHERE tenant_key='tg')")
+        text(
+            "DELETE FROM public.sys_workflow_def WHERE wf_key='echo' AND tenant_id="
+            "(SELECT id FROM public.sys_tenant WHERE tenant_key='tg')"
+        )
     )
     await session.commit()
     r2 = await client.post(f"/system/triggers/{tid}/disable", headers=h)
     assert r2.status_code == 200
     r3 = await client.put(
-        f"/system/triggers/{tid}", headers=h,
-        json={"name": "改名", "target_type": "workflow", "target_key": "echo",
-              "cron_expr": "0 9 * * *", "min_interval_sec": 60,
-              "adapter": "custom", "notify_url": "", "secret": ""},
+        f"/system/triggers/{tid}",
+        headers=h,
+        json={
+            "name": "改名",
+            "target_type": "workflow",
+            "target_key": "echo",
+            "cron_expr": "0 9 * * *",
+            "min_interval_sec": 60,
+            "adapter": "custom",
+            "notify_url": "",
+            "secret": "",
+        },
     )
     assert r3.status_code == 200  # 目标未变:不重校验,止损不被堵
     r4 = await client.delete(f"/system/triggers/{tid}", headers=h)
@@ -571,16 +617,12 @@ async def test_trigger_team_workflow_target_allowed(
     uid, token = await _trigger_admin(client, session, make_user, "tg_040team")
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}
     tid = (
-        await session.execute(
-            text("SELECT id FROM public.sys_tenant WHERE tenant_key='tg'")
-        )
+        await session.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='tg'"))
     ).scalar_one()
     # 他人创建的团队 workflow + uid 为团队成员(MEMBER):
     # created_by 取 seed_all 播的 admin(≠触发器创建者),确保只靠 team 口径可见
     owner_id = (
-        await session.execute(
-            text("SELECT id FROM public.sys_user WHERE username='admin' LIMIT 1")
-        )
+        await session.execute(text("SELECT id FROM public.sys_user WHERE username='admin' LIMIT 1"))
     ).scalar_one()
     await session.execute(
         text(
@@ -627,15 +669,14 @@ async def test_trigger_team_workflow_target_allowed(
             "o": str(owner_id),
             "tm": str(team_id),
             "d": json.dumps(
-                {"nodes": [{"id": "t", "type": "transform",
-                            "config": {"template": "{{inputs}}"}}]}
+                {"nodes": [{"id": "t", "type": "transform", "config": {"template": "{{inputs}}"}}]}
             ),
         },
     )
     await session.commit()
     r = await client.post(
-        "/system/triggers", headers=h,
-        json={**_CRON_BODY, "tg_key": "team040", "name": "团队目标",
-              "target_key": "teamecho040"},
+        "/system/triggers",
+        headers=h,
+        json={**_CRON_BODY, "tg_key": "team040", "name": "团队目标", "target_key": "teamecho040"},
     )
     assert r.status_code == 201, r.text  # 团队成员挂团队 workflow:闸不得误拒

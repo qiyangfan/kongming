@@ -74,7 +74,7 @@ def observations() -> list[dict[str, object]]:
 
 
 def _load_engine() -> Any:  # noqa: ANN401
-    """惰性加载 km-sqlguard;缺失只告警一次,不阻断(消费方降级内置)。"""
+    """惰性加载 liannu;缺失只告警一次,不阻断(消费方降级内置)。"""
     global _engine_loaded
     if _engine is not None:
         return _engine
@@ -82,10 +82,10 @@ def _load_engine() -> Any:  # noqa: ANN401
         return None
     _engine_loaded = True
     try:
-        import km_sqlguard
+        import liannu
 
-        log.info("SQLGUARD 引擎已加载 version=%s", km_sqlguard.__version__)
-        return km_sqlguard
+        log.info("SQLGUARD 引擎已加载 version=%s", liannu.__version__)
+        return liannu
     except ImportError as e:
         log.warning("SQLGUARD 引擎不可用,管线以内置路径运行: %s", e)
         return None
@@ -109,7 +109,7 @@ def startup_self_check() -> bool:
         return False
     # 灰度态显性可见(默认 WARNING 级根日志可读;builtin 稳态无此行)
     log.warning(
-        "SQLGUARD 管线 mode=%s,活跃引擎=km-sqlguard version=%s,启动自检通过",
+        "SQLGUARD 管线 mode=%s,活跃引擎=liannu version=%s,启动自检通过",
         _mode,
         detail,
     )
@@ -301,9 +301,7 @@ class Guarded:
         bp = self._builtin()
         if bp.parse_error is not None:
             return None
-        return rewrite.extract_main_table_statement(
-            bp.statements[0] if bp.statements else None
-        )
+        return rewrite.extract_main_table_statement(bp.statements[0] if bp.statements else None)
 
     def apply_filter(
         self, filter_type: str, column: str | None, values: Sequence[object]

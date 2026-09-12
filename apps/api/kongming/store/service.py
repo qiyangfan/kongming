@@ -92,9 +92,7 @@ class StoreService:
         if not await self._tool_lister.resolve_runnable(
             creator_id=str(row["created_by"]), tenant_id=tenant_id, row=row
         ):
-            raise StoreValidationError(
-                "该助手未配置可用工具,不能上架,请先为 Bot 配置工具"
-            )
+            raise StoreValidationError("该助手未配置可用工具,不能上架,请先为 Bot 配置工具")
         if len(greeting) > 500:
             raise StoreValidationError("greeting 超 500 字符")
         suggestions = [str(s)[:200] for s in suggestions[:5]]
@@ -118,9 +116,7 @@ class StoreService:
         )
         await self._repo.commit()
 
-    async def unpublish(
-        self, *, bot_id: str, tenant_id: str, can_manage: bool
-    ) -> None:
+    async def unpublish(self, *, bot_id: str, tenant_id: str, can_manage: bool) -> None:
         if not can_manage:
             raise StoreForbidden("仅创建者或归属团队 OWNER 可下架")
         row = await self._bot_reader.get_bot(bot_id=bot_id, tenant_id=tenant_id)
@@ -139,14 +135,10 @@ class StoreService:
         )
 
     async def get_detail(self, *, tenant_id: str, bot_key: str, user_id: str) -> dict[str, Any]:
-        row = await self._repo.store_get(
-            tenant_id=tenant_id, bot_key=bot_key, user_id=user_id
-        )
+        row = await self._repo.store_get(tenant_id=tenant_id, bot_key=bot_key, user_id=user_id)
         if row is None:
             raise StoreNotFound(bot_key)
-        row["my_rating"] = await self._repo.my_rating(
-            user_id=user_id, bot_id=str(row["id"])
-        )
+        row["my_rating"] = await self._repo.my_rating(user_id=user_id, bot_id=str(row["id"]))
         return row
 
     # ── 互动 ──
@@ -169,9 +161,7 @@ class StoreService:
     async def my_favorites(self, *, tenant_id: str, user_id: str) -> list[dict[str, Any]]:
         return await self._repo.my_favorites(tenant_id=tenant_id, user_id=user_id)
 
-    async def rate(
-        self, *, tenant_id: str, bot_key: str, user_id: str, score: int
-    ) -> None:
+    async def rate(self, *, tenant_id: str, bot_key: str, user_id: str, score: int) -> None:
         # isinstance 运行时防线保留(cast 断开静态流分析):标注仅约束静态,
         # 绕过路由层 pydantic 的调用面可能传入 float/bool,删除会放行 3.5 落库(行为变化)
         raw_score = cast(object, score)
@@ -188,9 +178,7 @@ class StoreService:
 
     # ── 直跑 ──
 
-    async def run(
-        self, *, tenant_id: str, bot_key: str, question: str
-    ) -> dict[str, Any]:
+    async def run(self, *, tenant_id: str, bot_key: str, question: str) -> dict[str, Any]:
         row = await self._repo.store_get(tenant_id=tenant_id, bot_key=bot_key)
         if row is None:
             raise StoreNotFound(bot_key)

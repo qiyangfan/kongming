@@ -7,6 +7,7 @@ import { Bot, Check, Copy, Key, Loader2, Plus } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { PageHeader } from "@/components/page-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { publishBot, unpublishBot } from "@/lib/store-api";
 import { toolList } from "@/lib/toolcall-api";
@@ -113,9 +114,7 @@ export default function BotsPage() {
   const toggleTool = (name: string) => {
     setForm((f) => ({
       ...f,
-      tools: f.tools.includes(name)
-        ? f.tools.filter((t) => t !== name)
-        : [...f.tools, name],
+      tools: f.tools.includes(name) ? f.tools.filter((t) => t !== name) : [...f.tools, name],
     }));
   };
 
@@ -152,20 +151,22 @@ export default function BotsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">助手</h2>
-          <p className="text-sm text-muted-foreground">
-            创建自定义助手:设定人设与守则、勾选工具、绑定数据源;可上架商店,或以 API 供外部系统调用。
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setCreating(true)}>
-          <Plus className="size-3.5" aria-hidden />
-          新建助手
-        </Button>
-      </div>
+      <PageHeader
+        title="助手"
+        description="创建自定义助手:设定人设与守则、勾选工具、绑定数据源;可上架商店,或以 API 供外部系统调用。"
+        actions={
+          <Button size="sm" onClick={() => setCreating(true)}>
+            <Plus className="size-3.5" aria-hidden />
+            新建助手
+          </Button>
+        }
+      />
 
-      {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
+      {error && (
+        <p className="text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      )}
 
       <div className="rounded-lg border border-border">
         <Table>
@@ -183,7 +184,10 @@ export default function BotsPage() {
             {bots.isLoading ? (
               <TableRow>
                 <TableCell colSpan={6} className="py-6 text-center">
-                  <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />
+                  <Loader2
+                    className="mx-auto size-4 animate-spin text-muted-foreground"
+                    aria-hidden
+                  />
                 </TableCell>
               </TableRow>
             ) : bots.isError ? (
@@ -204,10 +208,23 @@ export default function BotsPage() {
                   <TableCell>
                     <span className="flex items-center gap-1.5">
                       <Bot className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                      <span className="max-w-40 truncate font-medium" title={b.name}>{b.name}</span>
-                      <span className="max-w-28 truncate font-mono text-xs text-muted-foreground" title={b.bot_key}>{b.bot_key}</span>
+                      <span className="max-w-40 truncate font-medium" title={b.name}>
+                        {b.name}
+                      </span>
+                      <span
+                        className="max-w-28 truncate font-mono text-xs text-muted-foreground"
+                        title={b.bot_key}
+                      >
+                        {b.bot_key}
+                      </span>
                       {b.team_id && (
-                        <Badge variant="outline" className="max-w-32 font-normal" title={(myTeams.data ?? []).find((t) => t.id === b.team_id)?.name ?? "团队"}>
+                        <Badge
+                          variant="outline"
+                          className="max-w-32"
+                          title={
+                            (myTeams.data ?? []).find((t) => t.id === b.team_id)?.name ?? "团队"
+                          }
+                        >
                           <span className="truncate">
                             {(myTeams.data ?? []).find((t) => t.id === b.team_id)?.name ?? "团队"}
                           </span>
@@ -215,10 +232,16 @@ export default function BotsPage() {
                       )}
                     </span>
                   </TableCell>
-                  <TableCell className="max-w-56 truncate font-mono text-xs" title={b.tools.length ? b.tools.join(", ") : undefined}>
+                  <TableCell
+                    className="max-w-56 truncate font-mono text-xs"
+                    title={b.tools.length ? b.tools.join(", ") : undefined}
+                  >
                     {b.tools.length ? b.tools.join(", ") : "—"}
                   </TableCell>
-                  <TableCell className="max-w-32 truncate text-xs" title={b.datasource_key ?? undefined}>
+                  <TableCell
+                    className="max-w-32 truncate text-xs"
+                    title={b.datasource_key ?? undefined}
+                  >
                     {b.datasource_key}
                   </TableCell>
                   <TableCell>
@@ -234,11 +257,17 @@ export default function BotsPage() {
                       <Switch
                         checked={b.is_public}
                         disabled={patch.isPending}
-                        onCheckedChange={(on) => patch.mutate({ id: b.id, fields: { is_public: on } })}
+                        onCheckedChange={(on) =>
+                          patch.mutate({ id: b.id, fields: { is_public: on } })
+                        }
                         aria-label={`公开 ${b.name}`}
                       />
                       {b.is_public && (
-                        <Badge variant="outline" className="max-w-28 font-mono text-xs" title={`/bot/${b.bot_key}`}>
+                        <Badge
+                          variant="outline"
+                          className="max-w-28 font-mono text-xs"
+                          title={`/bot/${b.bot_key}`}
+                        >
                           <span className="truncate">/bot/{b.bot_key}</span>
                         </Badge>
                       )}
@@ -317,21 +346,34 @@ export default function BotsPage() {
             }}
           >
             <div className="space-y-1.5">
-              <FieldLabel
-                htmlFor="bot-key"
-                help="小写字母开头,可含数字与下划线;创建后不可改。"
-              >
+              <FieldLabel htmlFor="bot-key" help="小写字母开头,可含数字与下划线;创建后不可改。">
                 标识
               </FieldLabel>
-              <Input id="bot-key" value={form.bot_key} onChange={(e) => setForm({ ...form, bot_key: e.target.value })} placeholder="after_sale" />
+              <Input
+                id="bot-key"
+                value={form.bot_key}
+                onChange={(e) => setForm({ ...form, bot_key: e.target.value })}
+                placeholder="after_sale"
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="bot-name">名称</Label>
-              <Input id="bot-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="售后助手" />
+              <Input
+                id="bot-name"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="售后助手"
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="bot-prompt">人设与守则</Label>
-              <Textarea id="bot-prompt" value={form.system_prompt} onChange={(e) => setForm({ ...form, system_prompt: e.target.value })} placeholder="你是售后客服助手…" rows={4} />
+              <Textarea
+                id="bot-prompt"
+                value={form.system_prompt}
+                onChange={(e) => setForm({ ...form, system_prompt: e.target.value })}
+                placeholder="你是售后客服助手…"
+                rows={4}
+              />
             </div>
             <div className="space-y-1.5">
               <FieldLabel help="从清单勾选该助手可用的工具;不勾选时,助手仅对话,不执行任何操作。">
@@ -358,7 +400,10 @@ export default function BotsPage() {
                             {t.write ? "写" : "只读"}
                           </Badge>
                         </span>
-                        <span className="block truncate text-xs text-muted-foreground" title={t.description}>
+                        <span
+                          className="block truncate text-xs text-muted-foreground"
+                          title={t.description}
+                        >
                           {t.description}
                         </span>
                       </span>
@@ -376,12 +421,23 @@ export default function BotsPage() {
                 </div>
               </ScrollArea>
             </div>
-            {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
+            {error && (
+              <p className="text-xs text-destructive" role="alert">
+                {error}
+              </p>
+            )}
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setCreating(false)}>取消</Button>
+              <Button type="button" variant="outline" onClick={() => setCreating(false)}>
+                取消
+              </Button>
               <Button
                 type="submit"
-                disabled={!form.bot_key.trim() || !form.name.trim() || !form.system_prompt.trim() || create.isPending}
+                disabled={
+                  !form.bot_key.trim() ||
+                  !form.name.trim() ||
+                  !form.system_prompt.trim() ||
+                  create.isPending
+                }
               >
                 {create.isPending && <Loader2 className="animate-spin" aria-hidden />}
                 创建
@@ -460,10 +516,7 @@ export default function BotsPage() {
             )}
           </div>
           <DialogFooter>
-            <Button
-              onClick={() => attach.mutate()}
-              disabled={attach.isPending || !attachTeam}
-            >
+            <Button onClick={() => attach.mutate()} disabled={attach.isPending || !attachTeam}>
               {attach.isPending && <Loader2 className="animate-spin" aria-hidden />}
               确认变更
             </Button>

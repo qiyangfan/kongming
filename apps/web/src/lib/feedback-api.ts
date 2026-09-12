@@ -14,18 +14,12 @@ export type FeedbackPageOut = components["schemas"]["FeedbackPageOut"];
 export type FeedbackPageItemOut = components["schemas"]["FeedbackPageItemOut"];
 
 /** 反馈提交(014):rating 必传;comment/corrected_sql null=保持现值,空串=清空 */
-export function submitFeedback(
-  messageId: string,
-  payload: FeedbackIn,
-): Promise<FeedbackOut> {
+export function submitFeedback(messageId: string, payload: FeedbackIn): Promise<FeedbackOut> {
   return api.post<FeedbackOut>(`/chat/messages/${messageId}/feedback`, payload);
 }
 
 /** 处置(feedback-refine):status 四态;note null=保持,空串=清空 */
-export function handleFeedback(
-  messageId: string,
-  payload: HandleIn,
-): Promise<HandleOut> {
+export function handleFeedback(messageId: string, payload: HandleIn): Promise<HandleOut> {
   return api.put<HandleOut>(`/feedback/${messageId}/status`, payload);
 }
 

@@ -131,9 +131,7 @@ class DatasourceChecker(Protocol):
 class SemanticCleaner(Protocol):
     """023:数据源删除级联清理语义层(关系+指标;同事务,spec 立约)。"""
 
-    async def delete_by_datasource(
-        self, *, tenant_id: str, datasource_key: str
-    ) -> None: ...
+    async def delete_by_datasource(self, *, tenant_id: str, datasource_key: str) -> None: ...
 
 
 class RagCtxEvictor(Protocol):

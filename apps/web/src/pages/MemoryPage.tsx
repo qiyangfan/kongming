@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { StatusBadge, type StatusMeta } from "@/components/status-badge";
 import {
   Select,
   SelectContent,
@@ -50,9 +51,14 @@ import type { components } from "@/lib/api-types.gen";
 // 036⑥:消费生成类型(ADR-005,禁手写;team_id 回传已在生成类型)
 type MemoryItem = components["schemas"]["MemoryItemOut"];
 
-const SOURCE_LABELS: Record<string, string> = {
-  EXPLICIT: "显式",
-  IMPLICIT: "隐式",
+// 值 → 徽章统一走 StatusBadge(宪法 Article 6)
+const SOURCE_META: StatusMeta = {
+  EXPLICIT: { label: "显式", variant: "default" },
+  IMPLICIT: { label: "隐式", variant: "secondary" },
+};
+const DORMANT_META: StatusMeta = {
+  ACTIVE: { label: "活跃", variant: "secondary" },
+  DORMANT: { label: "休眠", variant: "outline" },
 };
 
 export default function MemoryPage() {
@@ -65,7 +71,7 @@ export default function MemoryPage() {
   // 036⑥:归属徽标(team_id→团队名映射;032 已铺清单 query)
   const myTeams = useQuery({ queryKey: ["admin", "teams"], queryFn: listMyTeams });
   const teamName = (id: string | null | undefined) =>
-    id ? (myTeams.data ?? []).find((t) => t.id === id)?.name ?? "团队" : null;
+    id ? ((myTeams.data ?? []).find((t) => t.id === id)?.name ?? "团队") : null;
 
   const list = useQuery({
     queryKey: ["memory"],
@@ -107,12 +113,12 @@ export default function MemoryPage() {
     // 审查循环 B5:失败零提示+unhandled rejection
     try {
       const data = await api.get<object[]>("/memory/export");
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `我的记忆-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a); // Safari 纪律(010):锚点入 DOM+延迟 revoke
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `我的记忆-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a); // Safari 纪律(010):锚点入 DOM+延迟 revoke
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -165,7 +171,10 @@ export default function MemoryPage() {
             ) : list.isLoading ? (
               <TableRow>
                 <TableCell colSpan={7} className="py-8 text-center">
-                  <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />
+                  <Loader2
+                    className="mx-auto size-4 animate-spin text-muted-foreground"
+                    aria-hidden
+                  />
                 </TableCell>
               </TableRow>
             ) : (list.data?.items.length ?? 0) === 0 ? (
@@ -177,16 +186,21 @@ export default function MemoryPage() {
             ) : (
               list.data?.items.map((m) => (
                 <TableRow key={m.id}>
-                  <TableCell className="max-w-md truncate text-sm" title={m.content}>{m.content}</TableCell>
+                  <TableCell className="max-w-md truncate text-sm" title={m.content}>
+                    {m.content}
+                  </TableCell>
                   <TableCell className="text-xs">{m.category}</TableCell>
                   <TableCell>
-                    <Badge variant={m.source === "EXPLICIT" ? "default" : "secondary"}>
-                      {SOURCE_LABELS[m.source] ?? m.source}
-                    </Badge>
+                    {/* source 契约为宽 string:未知值回落 secondary,与原 else 分支等价 */}
+                    <StatusBadge meta={SOURCE_META} value={m.source} fallbackVariant="secondary" />
                   </TableCell>
                   <TableCell>
                     {m.team_id ? (
-                      <Badge variant="outline" className="max-w-32 font-normal" title={teamName(m.team_id) ?? undefined}>
+                      <Badge
+                        variant="outline"
+                        className="max-w-32"
+                        title={teamName(m.team_id) ?? undefined}
+                      >
                         <span className="truncate">{teamName(m.team_id)}</span>
                       </Badge>
                     ) : (
@@ -195,15 +209,16 @@ export default function MemoryPage() {
                   </TableCell>
                   <TableCell className="text-xs">{m.confidence.toFixed(2)}</TableCell>
                   <TableCell>
-                    {m.dormant ? (
-                      <Badge variant="outline">休眠</Badge>
-                    ) : (
-                      <Badge variant="secondary">活跃</Badge>
-                    )}
+                    <StatusBadge meta={DORMANT_META} value={m.dormant ? "DORMANT" : "ACTIVE"} />
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
-                      <Button size="icon" variant="ghost" onClick={() => openEdit(m)} aria-label="编辑">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => openEdit(m)}
+                        aria-label="编辑"
+                      >
                         <Pencil className="size-3.5" aria-hidden />
                       </Button>
                       <Button
@@ -250,11 +265,15 @@ export default function MemoryPage() {
               />
             </div>
             {error && (
-              <p className="text-xs text-destructive" role="alert">{error}</p>
+              <p className="text-xs text-destructive" role="alert">
+                {error}
+              </p>
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditing(null)}>取消</Button>
+            <Button variant="outline" onClick={() => setEditing(null)}>
+              取消
+            </Button>
             <Button
               disabled={!editContent.trim() || update.isPending}
               onClick={() =>
@@ -345,7 +364,10 @@ function TeamMemoryWrite() {
       </div>
       <div className="w-44 space-y-1">
         <Label>归属</Label>
-        <Select value={teamId || "_personal"} onValueChange={(v) => setTeamId(v === "_personal" ? "" : v)}>
+        <Select
+          value={teamId || "_personal"}
+          onValueChange={(v) => setTeamId(v === "_personal" ? "" : v)}
+        >
           <SelectTrigger aria-label="归属">
             <SelectValue />
           </SelectTrigger>
@@ -364,7 +386,10 @@ function TeamMemoryWrite() {
         写入
       </Button>
       {(error || note) && (
-        <p role="alert" className={`text-sm ${error ? "text-destructive" : "text-muted-foreground"}`}>
+        <p
+          role="alert"
+          className={`text-sm ${error ? "text-destructive" : "text-muted-foreground"}`}
+        >
           {error || note}
         </p>
       )}

@@ -6,10 +6,12 @@ import { Fragment, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Loader2, ScrollText } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/page-header";
+import { Pagination } from "@/components/pagination";
+import { StatusBadge, type StatusMeta } from "@/components/status-badge";
 import {
   Select,
   SelectContent,
@@ -35,7 +37,7 @@ import { displayUser } from "@/lib/display-user";
 
 const PAGE_SIZE = 20;
 
-const VERDICT_META: Record<string, { label: string; variant: "default" | "secondary" | "outline" }> = {
+const VERDICT_META: StatusMeta = {
   PASS: { label: "通过", variant: "default" },
   BLOCKED: { label: "拦截", variant: "secondary" },
   ERROR: { label: "失败", variant: "outline" },
@@ -97,45 +99,50 @@ export default function AuditPage() {
   }, [section]);
   useEffect(() => {
     const t = section === "sql" ? sqlList.data?.total : operList.data?.total;
-    if (t !== undefined && t > 0 && page > 1 && (section === "sql" ? sqlList.data?.items.length : operList.data?.items.length) === 0) {
+    if (
+      t !== undefined &&
+      t > 0 &&
+      page > 1 &&
+      (section === "sql" ? sqlList.data?.items.length : operList.data?.items.length) === 0
+    ) {
       setPage((p) => p - 1);
     }
   }, [sqlList.data, operList.data, page, section]);
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">审计</h2>
-          <p className="text-sm text-muted-foreground">
-            谁问了什么、谁改过什么——SQL 审计与操作日志的可视化台账。
-          </p>
-        </div>
-        <ToggleGroup
-          type="single"
-          value={section}
-          onValueChange={(v) => {
-            if (v) setSection(v as "sql" | "oper");
-          }}
-          variant="outline"
-          size="sm"
-          aria-label="审计分区"
-        >
-          <ToggleGroupItem value="sql" aria-label="SQL 审计">
-            <ScrollText aria-hidden /> SQL 审计
-          </ToggleGroupItem>
-          <ToggleGroupItem value="oper" aria-label="操作日志">
-            <ChevronRight aria-hidden /> 操作日志
-          </ToggleGroupItem>
-        </ToggleGroup>
-      </div>
+      <PageHeader
+        title="审计"
+        description="谁问了什么、谁改过什么——SQL 审计与操作日志的可视化台账。"
+        actions={
+          <ToggleGroup
+            type="single"
+            value={section}
+            onValueChange={(v) => {
+              if (v) setSection(v as "sql" | "oper");
+            }}
+            variant="outline"
+            size="sm"
+            aria-label="审计分区"
+          >
+            <ToggleGroupItem value="sql" aria-label="SQL 审计">
+              <ScrollText aria-hidden /> SQL 审计
+            </ToggleGroupItem>
+            <ToggleGroupItem value="oper" aria-label="操作日志">
+              <ChevronRight aria-hidden /> 操作日志
+            </ToggleGroupItem>
+          </ToggleGroup>
+        }
+      />
 
       {/* 筛选区 */}
       <div className="flex flex-wrap items-end gap-3">
         {section === "sql" ? (
           <>
             <div className="space-y-1">
-              <Label htmlFor="audit-tenant-filter" className="text-xs text-muted-foreground">租户</Label>
+              <Label htmlFor="audit-tenant-filter" className="text-xs text-muted-foreground">
+                租户
+              </Label>
               <Select
                 value={tenantId || "ALL"}
                 onValueChange={(v) => {
@@ -159,7 +166,9 @@ export default function AuditPage() {
               {/* R1-F2:listTenants 挂 user:manage(页面守卫是 audit:view,
                   权限错配时 403)——失败显式禁用+提示,不静默 */}
               {tenants.isError && (
-                <p role="alert" className="text-xs text-destructive">租户筛选不可用</p>
+                <p role="alert" className="text-xs text-destructive">
+                  租户筛选不可用
+                </p>
               )}
             </div>
             <div className="space-y-1">
@@ -176,8 +185,16 @@ export default function AuditPage() {
             </div>
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">判定</Label>
-              <Select value={verdict || "ALL"} onValueChange={(v) => { setVerdict(v === "ALL" ? "" : v); setPage(1); }}>
-                <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+              <Select
+                value={verdict || "ALL"}
+                onValueChange={(v) => {
+                  setVerdict(v === "ALL" ? "" : v);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="w-28">
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ALL">全部</SelectItem>
                   <SelectItem value="PASS">通过</SelectItem>
@@ -255,26 +272,23 @@ export default function AuditPage() {
           </TableHeader>
           <TableBody>
             {section === "sql" ? (
-              <SqlRows loading={sqlList.isLoading} items={sqlList.data?.items ?? []} error={sqlList.isError} />
+              <SqlRows
+                loading={sqlList.isLoading}
+                items={sqlList.data?.items ?? []}
+                error={sqlList.isError}
+              />
             ) : (
-              <OperRows loading={operList.isLoading} items={operList.data?.items ?? []} error={operList.isError} />
+              <OperRows
+                loading={operList.isLoading}
+                items={operList.data?.items ?? []}
+                error={operList.isError}
+              />
             )}
           </TableBody>
         </Table>
       </ScrollFade>
 
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span>共 {total ?? 0} 条</span>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="xs" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-            上一页
-          </Button>
-          <span>{page} / {totalPages}</span>
-          <Button variant="outline" size="xs" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
-            下一页
-          </Button>
-        </div>
-      </div>
+      <Pagination page={page} pageCount={totalPages} total={total ?? 0} onPageChange={setPage} />
     </div>
   );
 }
@@ -313,7 +327,9 @@ function SqlRows({
   if (items.length === 0) {
     return (
       <TableRow>
-        <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">暂无审计记录。</TableCell>
+        <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+          暂无审计记录。
+        </TableCell>
       </TableRow>
     );
   }
@@ -322,21 +338,32 @@ function SqlRows({
       {items.map((it) => (
         <Fragment key={it.id}>
           <TableRow>
-            <TableCell className="whitespace-nowrap text-muted-foreground">{fmtTime(it.created_at)}</TableCell>
-            <TableCell className="max-w-32 truncate" title={it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}>
+            <TableCell className="whitespace-nowrap text-muted-foreground">
+              {fmtTime(it.created_at)}
+            </TableCell>
+            <TableCell
+              className="max-w-32 truncate"
+              title={it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}
+            >
               {it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}
             </TableCell>
             <TableCell>{it.tenant_key}</TableCell>
             <TableCell>{it.datasource_key}</TableCell>
-            <TableCell className="max-w-56 truncate" title={it.question ?? undefined}>{it.question ?? "—"}</TableCell>
-            <TableCell>
-              <Badge variant={VERDICT_META[it.verdict]?.variant ?? "outline"}>
-                {VERDICT_META[it.verdict]?.label ?? it.verdict}
-              </Badge>
+            <TableCell className="max-w-56 truncate" title={it.question ?? undefined}>
+              {it.question ?? "—"}
             </TableCell>
-            <TableCell className="tabular-nums">{it.duration_ms != null ? `${it.duration_ms}ms` : "—"}</TableCell>
+            <TableCell>
+              <StatusBadge meta={VERDICT_META} value={it.verdict} />
+            </TableCell>
+            <TableCell className="tabular-nums">
+              {it.duration_ms != null ? `${it.duration_ms}ms` : "—"}
+            </TableCell>
             <TableCell className="text-right">
-              <Button variant="ghost" size="xs" onClick={() => setExpanded(expanded === it.id ? null : it.id)}>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => setExpanded(expanded === it.id ? null : it.id)}
+              >
                 {expanded === it.id ? "收起" : "SQL"}
               </Button>
             </TableCell>
@@ -350,7 +377,9 @@ function SqlRows({
                 {it.block_reason && (
                   <p className="mt-1 text-xs text-muted-foreground">拦截原因:{it.block_reason}</p>
                 )}
-                <p className="mt-1 font-mono text-xs text-muted-foreground">trace_id: {it.trace_id}</p>
+                <p className="mt-1 font-mono text-xs text-muted-foreground">
+                  trace_id: {it.trace_id}
+                </p>
               </TableCell>
             </TableRow>
           )}
@@ -391,7 +420,9 @@ function OperRows({
   if (items.length === 0) {
     return (
       <TableRow>
-        <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">暂无操作记录。</TableCell>
+        <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+          暂无操作记录。
+        </TableCell>
       </TableRow>
     );
   }
@@ -400,15 +431,29 @@ function OperRows({
       {items.map((it) => (
         <Fragment key={it.id}>
           <TableRow>
-            <TableCell className="whitespace-nowrap text-muted-foreground">{fmtTime(it.created_at)}</TableCell>
-            <TableCell className="max-w-32 truncate" title={it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}>
+            <TableCell className="whitespace-nowrap text-muted-foreground">
+              {fmtTime(it.created_at)}
+            </TableCell>
+            <TableCell
+              className="max-w-32 truncate"
+              title={it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}
+            >
               {it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}
             </TableCell>
             <TableCell className="font-mono text-xs">{it.action}</TableCell>
-            <TableCell className="max-w-48 truncate font-mono text-xs" title={it.target ?? undefined}>{it.target ?? "—"}</TableCell>
+            <TableCell
+              className="max-w-48 truncate font-mono text-xs"
+              title={it.target ?? undefined}
+            >
+              {it.target ?? "—"}
+            </TableCell>
             <TableCell className="font-mono text-xs">{it.ip ?? "—"}</TableCell>
             <TableCell className="text-right">
-              <Button variant="ghost" size="xs" onClick={() => setExpanded(expanded === it.id ? null : it.id)}>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => setExpanded(expanded === it.id ? null : it.id)}
+              >
                 {expanded === it.id ? "收起" : "详情"}
               </Button>
             </TableCell>

@@ -32,9 +32,7 @@ class ToolSubsetViolation(Exception):
     """工具子集越权(超出创建者权限对应工具集)。"""
 
 
-def tools_for_perms(
-    perm_codes: list[str], mcp_names: Collection[str] = ()
-) -> set[str]:
+def tools_for_perms(perm_codes: list[str], mcp_names: Collection[str] = ()) -> set[str]:
     """权限点集 → 可用工具名集(注册表反查)。
     028:mcp_names=租户已注册 MCP 工具全名集(调用方供);持 tool:mcp:use
     才并入口径(与执行面 L2 同判据)。"""
@@ -53,9 +51,7 @@ def validate_tool_subset(
     未注册名同拒(防幽灵工具)。028:registered=静态注册表 ∪ MCP 快照名集
     (缺省纯静态,025 既有调用点兼容)。"""
     registered = (
-        set(registered_names)
-        if registered_names is not None
-        else set(TOOL_REGISTRY.keys())
+        set(registered_names) if registered_names is not None else set(TOOL_REGISTRY.keys())
     )
     unknown = [t for t in bot_tools if t not in registered]
     if unknown:

@@ -233,8 +233,7 @@ def test_rewrite_with_subquery_keeps_outer_predicate() -> None:
     """清单 8 子查询形态:WHERE 子查询保留,过滤谓词 AND 进最外层且限定主表别名。"""
     flt = models.ScopeFilter(type=models.FilterType.DEPT_IN, column="dept_id", values=["d1"])
     original = (
-        "SELECT c.name FROM customer c "
-        "WHERE c.id IN (SELECT customer_id FROM rental WHERE id > 10)"
+        "SELECT c.name FROM customer c WHERE c.id IN (SELECT customer_id FROM rental WHERE id > 10)"
     )
     sql, params = rewrite.apply_filter(original, flt)
     assert "IN (SELECT" in sql  # 原子查询原样保留

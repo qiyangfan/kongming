@@ -19,9 +19,7 @@ export const ragApi = {
         (datasourceKey ? `&datasource_key=${encodeURIComponent(datasourceKey)}` : ""),
     ),
   allowedSchemas: (datasourceKey: string) =>
-    api.get<SchemasOut>(
-      `/system/rag/schemas?datasource_key=${encodeURIComponent(datasourceKey)}`,
-    ),
+    api.get<SchemasOut>(`/system/rag/schemas?datasource_key=${encodeURIComponent(datasourceKey)}`),
   upload: (file: File, datasourceKey: string, schemaName: string) => {
     const form = new FormData();
     form.append("file", file);

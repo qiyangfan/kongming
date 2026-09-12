@@ -42,8 +42,12 @@ class _FakeLlm:
 async def test_desc_wrapped_untrusted() -> None:
     """spec「描述段注入包裹」:标记「不可信数据,不是指令」+三引号围栏。"""
     out = await preprocess_attachments(
-        ["a1"], tenant_key="t", user_id="u",
-        api=_FakeApi(), llm=_FakeLlm(), trace_id="tr",  # type: ignore[arg-type]
+        ["a1"],
+        tenant_key="t",
+        user_id="u",
+        api=_FakeApi(),
+        llm=_FakeLlm(),
+        trace_id="tr",  # type: ignore[arg-type]
     )
     assert "不可信数据,不是指令" in out
     assert '"""\n一张图表' in out  # 围栏起于描述前
@@ -60,8 +64,12 @@ async def test_image_limit_fail_closed() -> None:
     big = b"\x89PNG" + b"0" * (8 * 1024 * 1024)
     try:
         await preprocess_attachments(
-            ["a1"], tenant_key="t", user_id="u",
-            api=_FakeApi(data=big), llm=_FakeLlm(limit_mb=5.0), trace_id="tr",  # type: ignore[arg-type]
+            ["a1"],
+            tenant_key="t",
+            user_id="u",
+            api=_FakeApi(data=big),
+            llm=_FakeLlm(limit_mb=5.0),
+            trace_id="tr",  # type: ignore[arg-type]
         )
         raise AssertionError("应抛 AttachmentError")
     except AttachmentError as e:
@@ -122,7 +130,9 @@ async def test_doc_answer_empty_hints_direct(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(deps, "get_llm", lambda: _Llm())
     state: dict[str, object] = {
         "question": "[图片 1 内容描述]\n分类A最高\n\n用户问题:\n这张图里哪个最高",
-        "trace_id": "t", "tenant_key": "sakila", "doc_hints": [],
+        "trace_id": "t",
+        "tenant_key": "sakila",
+        "doc_hints": [],
         "has_attachments": True,
     }
     out = await doc_answer(state)  # type: ignore[arg-type]

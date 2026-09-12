@@ -64,9 +64,7 @@ async def _mk_tenant(s: AsyncSession, key: str) -> str:
     return str(tid)
 
 
-async def _mk_ds(
-    s: AsyncSession, key: str, tenant_id: str, *, status: str = "ACTIVE"
-) -> None:
+async def _mk_ds(s: AsyncSession, key: str, tenant_id: str, *, status: str = "ACTIVE") -> None:
     enc = get_cipher(get_settings().datasource_encrypt_key).encrypt("kongming")
     await s.execute(
         text(
@@ -90,9 +88,7 @@ async def test_dynamic_meta_limited_to_default_schema(
 ) -> None:
     tid = await _mk_tenant(session, "mta")
     await _mk_ds(session, "metadyn", tid)
-    r = await client.post(
-        "/internal/meta/schema", json=_req("mta", "metadyn"), headers=INTERNAL
-    )
+    r = await client.post("/internal/meta/schema", json=_req("mta", "metadyn"), headers=INTERNAL)
     assert r.status_code == 200
     body = r.json()
     by_name = {(t["schema"], t["name"]): t for t in body["tables"]}
@@ -104,22 +100,16 @@ async def test_dynamic_meta_limited_to_default_schema(
     assert all(schema == SCHEMA for schema, _ in by_name)
 
 
-async def test_dynamic_meta_reserved_excluded(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_dynamic_meta_reserved_excluded(client: AsyncClient, session: AsyncSession) -> None:
     tid = await _mk_tenant(session, "mta")
     await _mk_ds(session, "metarsv", tid)
-    r = await client.post(
-        "/internal/meta/schema", json=_req("mta", "metarsv"), headers=INTERNAL
-    )
+    r = await client.post("/internal/meta/schema", json=_req("mta", "metarsv"), headers=INTERNAL)
     names = [t["name"] for t in r.json()["tables"]]
     assert "sys_cfg" not in names  # 保留表排除同一判定
     assert "arms" in names
 
 
-async def test_dynamic_meta_invalid_same_shape(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_dynamic_meta_invalid_same_shape(client: AsyncClient, session: AsyncSession) -> None:
     """不存在/禁用/越属 → 同形 400,不返回任何 schema 信息。"""
     tid = await _mk_tenant(session, "mta")
     tid_b = await _mk_tenant(session, "mtb")
@@ -140,9 +130,7 @@ async def test_dynamic_meta_truncation_still_works(
     tid = await _mk_tenant(session, "mta")
     await _mk_ds(session, "metatrunc", tid)
     monkeypatch.setattr(get_settings(), "meta_schema_max_tables", 1)
-    r = await client.post(
-        "/internal/meta/schema", json=_req("mta", "metatrunc"), headers=INTERNAL
-    )
+    r = await client.post("/internal/meta/schema", json=_req("mta", "metatrunc"), headers=INTERNAL)
     body = r.json()
     assert body["truncated"] is True
     assert len(body["tables"]) == 1

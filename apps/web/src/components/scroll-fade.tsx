@@ -43,8 +43,7 @@ export function useScrollableX(ref: RefObject<HTMLElement | null>) {
   return edge;
 }
 
-const fadeCls =
-  "pointer-events-none absolute inset-y-0 z-10 w-6 from-background to-transparent";
+const fadeCls = "pointer-events-none absolute inset-y-0 z-10 w-6 from-background to-transparent";
 
 /* 渐隐层两缘(供自滚动宿主复用);包裹模式由 ScrollFade 内部自挂 */
 export function FadeEdges({ left, right }: { left: boolean; right: boolean }) {

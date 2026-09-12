@@ -34,9 +34,7 @@ async def _ensure_tenant(s: AsyncSession) -> None:
     await s.commit()
 
 
-async def _mk_audit_row(
-    s: AsyncSession, *, days_ago: int, trace_id: str = "trace-x"
-) -> None:
+async def _mk_audit_row(s: AsyncSession, *, days_ago: int, trace_id: str = "trace-x") -> None:
     await _ensure_tenant(s)
     await s.execute(
         text(
@@ -71,18 +69,14 @@ async def _count(s: AsyncSession, table: str, where: str = "") -> int:
     )
 
 
-async def test_archive_export_delete_and_window_kept(
-    session: AsyncSession, tmp_path: Path
-) -> None:
+async def test_archive_export_delete_and_window_kept(session: AsyncSession, tmp_path: Path) -> None:
     """超窗导出+删除;窗口内(180 天内)保留;manifest 含 SHA-256/行数。"""
     await _mk_audit_row(session, days_ago=200, trace_id="old-a")
     await _mk_audit_row(session, days_ago=10, trace_id="new-a")  # 窗口内
     await _mk_oper_row(session, days_ago=200)
     await _mk_oper_row(session, days_ago=5)  # 窗口内
 
-    result = await run_archive(
-        session, days=180, archive_dir=str(tmp_path), now=_NOW
-    )
+    result = await run_archive(session, days=180, archive_dir=str(tmp_path), now=_NOW)
     assert result.exported == 2  # 每表 1 条超窗
     assert result.deleted == 2
     assert sorted(result.files) == ["sys_oper_log.jsonl.gz", "sys_sql_audit.jsonl.gz"]
@@ -153,9 +147,7 @@ async def test_archive_failure_not_blocking_audit_write(
     blocker = tmp_path / "blocker"
     blocker.write_text("not a dir")  # mkdir 撞文件 → NotADirectoryError
     with pytest.raises(OSError):
-        await run_archive(
-            session, days=180, archive_dir=str(blocker / "sub"), now=_NOW
-        )
+        await run_archive(session, days=180, archive_dir=str(blocker / "sub"), now=_NOW)
     # 审计写入照常(独立短事务,与归档互不影响)
     writer = SqlAuditWriter()
     await writer.record(
@@ -164,9 +156,7 @@ async def test_archive_failure_not_blocking_audit_write(
             user_id=None,
             tenant_id=str(
                 (
-                    await session.execute(
-                        text("SELECT id FROM public.sys_tenant LIMIT 1")
-                    )
+                    await session.execute(text("SELECT id FROM public.sys_tenant LIMIT 1"))
                 ).scalar_one()
             ),
             datasource_key="default",
@@ -175,10 +165,7 @@ async def test_archive_failure_not_blocking_audit_write(
             verdict="PASS",
         )
     )
-    assert (
-        await _count(session, "sys_sql_audit", "WHERE trace_id='post-failure'")
-        == 1
-    )
+    assert await _count(session, "sys_sql_audit", "WHERE trace_id='post-failure'") == 1
 
 
 # ============ R1 修复直证 ============
@@ -208,9 +195,7 @@ async def test_archive_shrink_days_reexports_not_skip(
     assert r3.skipped_export is True
 
 
-async def test_archive_concurrent_serialized(
-    session: AsyncSession, tmp_path: Path
-) -> None:
+async def test_archive_concurrent_serialized(session: AsyncSession, tmp_path: Path) -> None:
     """R1-S3:并发两次 run_archive 进程内锁串行——无交错损坏,manifest 完整。"""
     import asyncio
 

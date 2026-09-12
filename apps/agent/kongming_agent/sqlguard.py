@@ -1,6 +1,6 @@
 """agent 面 validate 预检的引擎适配(053):单遍解析 + 模式化 + 请求级降级。
 
-引擎(km-sqlguard,进程内纯计算,零凭证零 IO——ADR-002 不受影响)贡献
+引擎(liannu,进程内纯计算,零凭证零 IO——ADR-002 不受影响)贡献
 单遍解析;validate 判定逻辑(EMPTY_SQL/MULTI_STATEMENT/只读根)在本模块
 本地派生,语义与切换前逐字一致。纯解析无 IO 的节点契约不变。
 
@@ -69,10 +69,10 @@ def _load_engine() -> Any:
         return None
     _engine_loaded = True
     try:
-        import km_sqlguard
+        import liannu
 
-        log.info("SQLGUARD 引擎已加载 version=%s", km_sqlguard.__version__)
-        return cast("object", km_sqlguard)
+        log.info("SQLGUARD 引擎已加载 version=%s", liannu.__version__)
+        return cast("object", liannu)
     except ImportError as e:
         log.warning("SQLGUARD 引擎不可用,validate 以内置路径运行: %s", e)
         return None
@@ -97,7 +97,7 @@ def startup_self_check(mode: str = DEFAULT_MODE, engine: object | None = None) -
         return False
     # 灰度态显性可见(默认 WARNING 级根日志可读;builtin 稳态无此行)
     log.warning(
-        "SQLGUARD 管线 mode=%s,活跃引擎=km-sqlguard version=%s,启动自检通过",
+        "SQLGUARD 管线 mode=%s,活跃引擎=liannu version=%s,启动自检通过",
         _mode,
         detail,
     )

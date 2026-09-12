@@ -54,9 +54,7 @@ _FAKE_TOOLS = [
 ]
 
 
-async def _fake_mcp_app(
-    scope: MutableMapping[str, Any], receive: Any, send: Any
-) -> None:  # noqa: ANN001, ANN202  # ASGI 裸签名
+async def _fake_mcp_app(scope: MutableMapping[str, Any], receive: Any, send: Any) -> None:  # noqa: ANN001, ANN202  # ASGI 裸签名
     assert scope["type"] == "http"
     body = b""
     while True:
@@ -155,7 +153,7 @@ def _fake_caller(timeout: float = 15) -> Any:
     from kongming.mcp.client import HttpMcpCaller
 
     return HttpMcpCaller(
-        timeout_sec=cast('int', timeout), transport=ASGITransport(app=_fake_mcp_app)
+        timeout_sec=cast("int", timeout), transport=ASGITransport(app=_fake_mcp_app)
     )
 
 
@@ -201,7 +199,7 @@ def test_merge_discovered_overlong_skipped() -> None:
 
 
 def test_sse_events_parse() -> None:
-    text = "event: message\ndata: {\"a\":1}\n\n: comment\ndata: {\"b\":\ndata: 2}\n\n"
+    text = 'event: message\ndata: {"a":1}\n\n: comment\ndata: {"b":\ndata: 2}\n\n'
     assert _sse_events(text) == ['{"a":1}', '{"b":\n2}']
     assert _sse_events("") == []
 
@@ -243,9 +241,7 @@ async def test_client_timeout_classification() -> None:
 
     caller = HttpMcpCaller(transport=_TimeoutTransport())
     with pytest.raises(McpCallError) as ei:
-        await caller.call(
-            endpoint="http://fake/mcp", headers={}, tool_name="read_thing", args={}
-        )
+        await caller.call(endpoint="http://fake/mcp", headers={}, tool_name="read_thing", args={})
     assert ei.value.kind == "timeout"
 
 
@@ -307,9 +303,7 @@ async def test_client_json_id_mismatch_rejected() -> None:
 
     caller = HttpMcpCaller(transport=_WrongIdTransport())
     with pytest.raises(McpCallError, match="id 不匹配"):
-        await caller.call(
-            endpoint="http://fake/mcp", headers={}, tool_name="x", args={}
-        )
+        await caller.call(endpoint="http://fake/mcp", headers={}, tool_name="x", args={})
 
 
 # ── 管理面(HTTP + 覆写 caller) ──
@@ -389,8 +383,7 @@ async def test_admin_crud_masked_and_cipher_at_rest(
         # 密文落库:库内无明文
         cipher_text = (
             await session.execute(
-                text("SELECT headers_cipher FROM public.sys_mcp_server"
-                     " WHERE id=CAST(:i AS uuid)"),
+                text("SELECT headers_cipher FROM public.sys_mcp_server WHERE id=CAST(:i AS uuid)"),
                 {"i": row["id"]},
             )
         ).scalar_one()
@@ -459,9 +452,7 @@ async def test_admin_key_fullmatch_bypass(
 # ── 执行链(覆写 toolcall 组合根,resolver+caller 都走假 server) ──
 
 
-async def _tool_user(
-    s: AsyncSession, make_user: MakeUser, name: str, codes: list[str]
-) -> str:
+async def _tool_user(s: AsyncSession, make_user: MakeUser, name: str, codes: list[str]) -> str:
     uid = await make_user(name)
     rid = await _mk_role_with_perms(s, f"role_{name}", codes)
     tid_str = await _mk_tenant_once(s)
@@ -573,9 +564,7 @@ async def test_execute_unannotated_goes_confirm(
     确认后真执行(动态解析重放不误拒)。"""
     _, token = await _mcp_admin(client, session, make_user, "mcp_exec2")
     await _register_fake_server(client, token)
-    uid = await _tool_user(
-        session, make_user, "mcp_u2", ["tool:mcp:use", "chat:execute"]
-    )
+    uid = await _tool_user(session, make_user, "mcp_u2", ["tool:mcp:use", "chat:execute"])
     sid = await _mk_session(session, uid, "mcp")
     token_u = await _login(client, "mcp_u2")
     _override_toolcall()
@@ -618,9 +607,7 @@ async def test_execute_without_perm_denied(
         r = await client.post(
             "/internal/tool/execute",
             headers=INTERNAL,
-            json=_req(
-                "mcp__fs__read_thing", {"path": "/a"}, user_id=uid, tenant_key="mcp"
-            ),
+            json=_req("mcp__fs__read_thing", {"path": "/a"}, user_id=uid, tenant_key="mcp"),
         )
     finally:
         _clear_toolcall_override()
@@ -650,9 +637,7 @@ async def test_disabled_server_tool_unregistered(
         r2 = await client.post(
             "/internal/tool/execute",
             headers=INTERNAL,
-            json=_req(
-                "mcp__fs__read_thing", {"path": "/a"}, user_id=uid, tenant_key="mcp"
-            ),
+            json=_req("mcp__fs__read_thing", {"path": "/a"}, user_id=uid, tenant_key="mcp"),
         )
     finally:
         _clear_toolcall_override()
@@ -668,14 +653,10 @@ async def test_tools_catalog_merges_mcp(
     await _register_fake_server(client, token)
     # 目录端点要 system:tool:manage——本用户加授
     uid = (
-        await session.execute(
-            text("SELECT id FROM public.sys_user WHERE username='mcp_cat1'")
-        )
+        await session.execute(text("SELECT id FROM public.sys_user WHERE username='mcp_cat1'"))
     ).scalar_one()
     rid = (
-        await session.execute(
-            text("SELECT id FROM public.sys_role WHERE role_key='role_mcp_cat1'")
-        )
+        await session.execute(text("SELECT id FROM public.sys_role WHERE role_key='role_mcp_cat1'"))
     ).scalar_one()
     pid = (
         await session.execute(
@@ -747,12 +728,8 @@ async def test_intent_count_includes_mcp_write(session: AsyncSession) -> None:
     from kongming.toolcall.repository import SqlToolCallRepo
 
     await seed_all(session, get_settings())
-    tid = (
-        await session.execute(text("SELECT id FROM public.sys_tenant LIMIT 1"))
-    ).scalar_one()
-    uid = (
-        await session.execute(text("SELECT id FROM public.sys_user LIMIT 1"))
-    ).scalar_one()
+    tid = (await session.execute(text("SELECT id FROM public.sys_tenant LIMIT 1"))).scalar_one()
+    uid = (await session.execute(text("SELECT id FROM public.sys_user LIMIT 1"))).scalar_one()
     trace = f"tr-{uuid.uuid4().hex[:12]}"
     for name in ("create_system_announcement", "mcp__fs__write_thing", "mcp__x__y"):
         await session.execute(
@@ -764,9 +741,7 @@ async def test_intent_count_includes_mcp_write(session: AsyncSession) -> None:
             {"t": trace, "u": str(uid), "t2": str(tid), "n": name},
         )
     await session.commit()
-    n = await SqlToolCallRepo(session).count_write_calls(
-        trace, ["create_system_announcement"]
-    )
+    n = await SqlToolCallRepo(session).count_write_calls(trace, ["create_system_announcement"])
     assert n == 3  # 静态 1 + mcp__ 前缀 2(left() 前缀口径)
 
 
@@ -899,9 +874,10 @@ async def test_mcp_inbound_question_cap_and_error_surface(
         "/mcp",
         headers={"X-Api-Key": plain},
         json={
-            "jsonrpc": "2.0", "id": 5, "method": "tools/call",
-            "params": {"name": "bot__after_sale",
-                       "arguments": {"question": "长" * 2001}},
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {"name": "bot__after_sale", "arguments": {"question": "长" * 2001}},
         },
     )
     assert r.json()["error"]["code"] == -32602
@@ -923,7 +899,9 @@ async def test_mcp_inbound_question_cap_and_error_surface(
         "/mcp",
         headers={"X-Api-Key": plain},
         json={
-            "jsonrpc": "2.0", "id": 6, "method": "tools/call",
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
             "params": {"name": "bot__after_sale", "arguments": {"question": "在吗"}},
         },
     )

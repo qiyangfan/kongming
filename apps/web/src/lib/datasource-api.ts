@@ -20,8 +20,7 @@ export const datasourceApi = {
       `/system/datasource?page=${page}&size=${size}&keyword=${encodeURIComponent(keyword)}`,
     ),
   create: (body: DatasourceCreateIn) => api.post<CreatedId>("/system/datasource", body),
-  update: (id: string, body: DatasourceUpdateIn) =>
-    api.put<void>(`/system/datasource/${id}`, body),
+  update: (id: string, body: DatasourceUpdateIn) => api.put<void>(`/system/datasource/${id}`, body),
   enable: (id: string) => api.post<void>(`/system/datasource/${id}/enable`, {}),
   disable: (id: string) => api.post<void>(`/system/datasource/${id}/disable`, {}),
   remove: (id: string) => api.delete<void>(`/system/datasource/${id}`),

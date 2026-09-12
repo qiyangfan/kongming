@@ -93,17 +93,21 @@ class ChatRepository:
         """执行计划定位(010):消息 JOIN 会话做归属收口(不存在/越权同形 None);
         顺带取会话落库的 datasource_key(快照语义,非切换器实时值,010 design D2)。"""
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT m.id, m.sql_text, m.session_id, s.datasource_key"
-                    " FROM public.chat_message m"
-                    " JOIN public.chat_session s ON s.id = m.session_id"
-                    " WHERE m.id = :mid AND s.user_id = :u AND s.tenant_id = :t"
-                    " AND m.role = 'ASSISTANT'"  # 审查循环 B5:锚定 assistant 产出消息
-                ),
-                {"mid": message_id, "u": user_id, "t": tenant_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT m.id, m.sql_text, m.session_id, s.datasource_key"
+                        " FROM public.chat_message m"
+                        " JOIN public.chat_session s ON s.id = m.session_id"
+                        " WHERE m.id = :mid AND s.user_id = :u AND s.tenant_id = :t"
+                        " AND m.role = 'ASSISTANT'"  # 审查循环 B5:锚定 assistant 产出消息
+                    ),
+                    {"mid": message_id, "u": user_id, "t": tenant_id},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return None if row is None else dict(row)
 
     @_store_error_boundary
@@ -123,25 +127,29 @@ class ChatRepository:
         :kw = '' 短路使空白词零行为变更(与 system/datasource 域同构)。
         """
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, title, updated_at FROM public.chat_session s"
-                    " WHERE s.user_id = :u AND s.tenant_id = :t"
-                    " AND (:kw = '' OR s.title ILIKE :p ESCAPE '\\'"
-                    " OR EXISTS (SELECT 1 FROM public.chat_message m"
-                    "            WHERE m.session_id = s.id AND m.role = 'USER'"
-                    "            AND m.question ILIKE :p ESCAPE '\\'))"
-                    " ORDER BY updated_at DESC, id DESC LIMIT :n"
-                ),
-                {
-                    "u": user_id,
-                    "t": tenant_id,
-                    "kw": keyword,
-                    "p": like_pattern(keyword),
-                    "n": limit,
-                },
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, title, updated_at FROM public.chat_session s"
+                        " WHERE s.user_id = :u AND s.tenant_id = :t"
+                        " AND (:kw = '' OR s.title ILIKE :p ESCAPE '\\'"
+                        " OR EXISTS (SELECT 1 FROM public.chat_message m"
+                        "            WHERE m.session_id = s.id AND m.role = 'USER'"
+                        "            AND m.question ILIKE :p ESCAPE '\\'))"
+                        " ORDER BY updated_at DESC, id DESC LIMIT :n"
+                    ),
+                    {
+                        "u": user_id,
+                        "t": tenant_id,
+                        "kw": keyword,
+                        "p": like_pattern(keyword),
+                        "n": limit,
+                    },
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [
             {"id": str(r["id"]), "title": str(r["title"]), "updated_at": r["updated_at"]}
             for r in rows
@@ -154,15 +162,19 @@ class ChatRepository:
         """重命名(010):归属校验并入 UPDATE 的 WHERE(原子,无先查后改窗口),
         同时刷新 updated_at(与上游 renameSession 同构);未命中返回 None。"""
         row = (
-            await self._s.execute(
-                text(
-                    "UPDATE public.chat_session SET title = :title, updated_at = now()"
-                    " WHERE id = :id AND user_id = :u AND tenant_id = :t"
-                    " RETURNING id, title, updated_at"
-                ),
-                {"title": title, "id": session_id, "u": user_id, "t": tenant_id},
+            (
+                await self._s.execute(
+                    text(
+                        "UPDATE public.chat_session SET title = :title, updated_at = now()"
+                        " WHERE id = :id AND user_id = :u AND tenant_id = :t"
+                        " RETURNING id, title, updated_at"
+                    ),
+                    {"title": title, "id": session_id, "u": user_id, "t": tenant_id},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         if row is None:
             return None
         return {
@@ -220,19 +232,23 @@ class ChatRepository:
         026 增会话 datasource_key(JOIN 会话快照,artifacts 重算兜底用);
         030 增 attachments(附件摘要回显)。"""
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT m.id, m.role, m.question, m.sql_text, m.result_json,"
-                    " m.summary, m.status, m.rating, m.corrected_sql, m.feedback_comment,"
-                    " m.attachments, s.datasource_key"
-                    " FROM public.chat_message m"
-                    " JOIN public.chat_session s ON s.id = m.session_id"
-                    " WHERE m.session_id = :s"
-                    " ORDER BY m.created_at ASC, m.id ASC"
-                ),
-                {"s": session_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT m.id, m.role, m.question, m.sql_text, m.result_json,"
+                        " m.summary, m.status, m.rating, m.corrected_sql, m.feedback_comment,"
+                        " m.attachments, s.datasource_key"
+                        " FROM public.chat_message m"
+                        " JOIN public.chat_session s ON s.id = m.session_id"
+                        " WHERE m.session_id = :s"
+                        " ORDER BY m.created_at ASC, m.id ASC"
+                    ),
+                    {"s": session_id},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     @_store_error_boundary
@@ -290,15 +306,19 @@ class ChatRepository:
         id(UUID v7)作 tiebreak:同事务/同毫秒多行时序仍确定。
         """
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT question FROM public.chat_message"
-                    " WHERE session_id = :s AND role = 'USER' AND question IS NOT NULL"
-                    " ORDER BY created_at DESC, id DESC LIMIT :n"
-                ),
-                {"s": session_id, "n": limit},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT question FROM public.chat_message"
+                        " WHERE session_id = :s AND role = 'USER' AND question IS NOT NULL"
+                        " ORDER BY created_at DESC, id DESC LIMIT :n"
+                    ),
+                    {"s": session_id, "n": limit},
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [str(q) for q in reversed(rows)]
 
     @_store_error_boundary
@@ -324,15 +344,19 @@ class SuggestionRepository:
 
     async def find(self, *, tenant_id: str, datasource_key: str) -> Suggestion | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT tenant_id, datasource_key, questions"
-                    " FROM public.chat_suggestion"
-                    " WHERE tenant_id=:t AND datasource_key=:k"
-                ),
-                {"t": tenant_id, "k": datasource_key},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT tenant_id, datasource_key, questions"
+                        " FROM public.chat_suggestion"
+                        " WHERE tenant_id=:t AND datasource_key=:k"
+                    ),
+                    {"t": tenant_id, "k": datasource_key},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         if row is None:
             return None
         return Suggestion(

@@ -38,9 +38,7 @@ class FakeAgent:
     async def query_stream(self, **kw: object) -> None:
         self.stream_calls.append(kw)
         # 生产签名 StreamFrameHandler = Callable[[str, str], Coroutine[Any, Any, None]]
-        on_frame = cast(
-            "Callable[[str, str], Coroutine[Any, Any, None]]", kw["on_frame"]
-        )
+        on_frame = cast("Callable[[str, str], Coroutine[Any, Any, None]]", kw["on_frame"])
         # 019 流式:tool_call 帧 + result 帧(终态与同步同构 JSON)
         import dataclasses
 
@@ -87,9 +85,7 @@ class _PendingInsertAgent(FakeAgent):
     async def _tenant_id(s: AsyncSession) -> str:
         return str(
             (
-                await s.execute(
-                    text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'")
-                )
+                await s.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'"))
             ).scalar_one()
         )
 
@@ -123,14 +119,11 @@ async def test_default_recipe_sends_no_tools(
     client: AsyncClient,
     session: AsyncSession,
     make_user: MakeUser,
-    fake_agent: dict[str,
-    FakeAgent],
+    fake_agent: dict[str, FakeAgent],
 ) -> None:
     _, token = await _user(client, session, make_user, "am_recipe")
     fake_agent["agent"] = FakeAgent()
-    r = await client.post(
-        "/chat/query", json={"question": "有多少商品"}, headers=_auth(token)
-    )
+    r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
     assert r.status_code == 200
     assert fake_agent["agent"].calls[0]["react_tools"] is None  # 老链路零改动
 
@@ -139,8 +132,7 @@ async def test_react_injects_authorized_tools(
     client: AsyncClient,
     session: AsyncSession,
     make_user: MakeUser,
-    fake_agent: dict[str,
-    FakeAgent],
+    fake_agent: dict[str, FakeAgent],
 ) -> None:
     _, token = await _user(client, session, make_user, "am_react")
     fake_agent["agent"] = FakeAgent()
@@ -166,8 +158,7 @@ async def test_react_no_tool_perms_injects_empty(
     client: AsyncClient,
     session: AsyncSession,
     make_user: MakeUser,
-    fake_agent: dict[str,
-    FakeAgent],
+    fake_agent: dict[str, FakeAgent],
 ) -> None:
     """无工具权限点用户走 react:注入空工具集(退化纯文本,不报错)。"""
     await seed_all(session, get_settings())
@@ -192,8 +183,7 @@ async def test_invalid_agent_mode_422(
     client: AsyncClient,
     session: AsyncSession,
     make_user: MakeUser,
-    fake_agent: dict[str,
-    FakeAgent],
+    fake_agent: dict[str, FakeAgent],
 ) -> None:
     _, token = await _user(client, session, make_user, "am_bad")
     fake_agent["agent"] = FakeAgent()
@@ -209,8 +199,7 @@ async def test_pending_tool_calls_aggregated(
     client: AsyncClient,
     session: AsyncSession,
     make_user: MakeUser,
-    fake_agent: dict[str,
-    FakeAgent],
+    fake_agent: dict[str, FakeAgent],
 ) -> None:
     """写工具挂起:响应 pending_tool_calls 聚合本 trace 的 PENDING_CONFIRM 行。"""
     _, token = await _user(client, session, make_user, "am_pending")
@@ -232,14 +221,11 @@ async def test_pending_empty_on_recipe(
     client: AsyncClient,
     session: AsyncSession,
     make_user: MakeUser,
-    fake_agent: dict[str,
-    FakeAgent],
+    fake_agent: dict[str, FakeAgent],
 ) -> None:
     _, token = await _user(client, session, make_user, "am_empty")
     fake_agent["agent"] = FakeAgent()
-    r = await client.post(
-        "/chat/query", json={"question": "有多少商品"}, headers=_auth(token)
-    )
+    r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
     assert r.json()["pending_tool_calls"] == []
 
 
@@ -247,8 +233,7 @@ async def test_react_stream_tool_call_frames(
     client: AsyncClient,
     session: AsyncSession,
     make_user: MakeUser,
-    fake_agent: dict[str,
-    FakeAgent],
+    fake_agent: dict[str, FakeAgent],
 ) -> None:
     """流式 react:tool_call 事件在白名单内透传,result 终态照常。"""
     _, token = await _user(client, session, make_user, "am_stream")
@@ -264,6 +249,7 @@ async def test_react_stream_tool_call_frames(
     assert events[-1] == "result"
     stream_kw = fake_agent["agent"].stream_calls[0]
     # cast 仅定型,收窄后的成员访问不再带 Unknown(运行时不变)
-    assert isinstance(stream_kw["react_tools"], list) and len(
-        cast("list[object]", stream_kw["react_tools"])
-    ) == 3
+    assert (
+        isinstance(stream_kw["react_tools"], list)
+        and len(cast("list[object]", stream_kw["react_tools"])) == 3
+    )

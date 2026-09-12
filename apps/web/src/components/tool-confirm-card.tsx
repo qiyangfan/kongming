@@ -87,9 +87,7 @@ export function ToolConfirmCard({ pending, sessionId, onAllResolved }: ToolConfi
             <Button
               size="sm"
               disabled={decide.isPending}
-              onClick={() =>
-                decide.mutate({ confirm_id: p.confirm_id, decision: "confirm" })
-              }
+              onClick={() => decide.mutate({ confirm_id: p.confirm_id, decision: "confirm" })}
             >
               {decide.isPending && <Loader2 className="animate-spin" aria-hidden />}
               确认执行
@@ -98,9 +96,7 @@ export function ToolConfirmCard({ pending, sessionId, onAllResolved }: ToolConfi
               size="sm"
               variant="outline"
               disabled={decide.isPending}
-              onClick={() =>
-                decide.mutate({ confirm_id: p.confirm_id, decision: "reject" })
-              }
+              onClick={() => decide.mutate({ confirm_id: p.confirm_id, decision: "reject" })}
             >
               拒绝
             </Button>

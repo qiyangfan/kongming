@@ -70,16 +70,20 @@ class SqlAttachmentRepo:
     ) -> dict[str, Any] | None:
         """归属校验视图(引用前置);已消费亦返回(状态由调用方判)。"""
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT id, tenant_id, user_id, filename, mime, size_bytes, status"
-                    " FROM public.sys_attachment"
-                    " WHERE id=CAST(:i AS uuid) AND tenant_id=CAST(:t AS uuid)"
-                    " AND user_id=CAST(:u AS uuid)"
-                ),
-                {"i": att_id, "t": tenant_id, "u": user_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, tenant_id, user_id, filename, mime, size_bytes, status"
+                        " FROM public.sys_attachment"
+                        " WHERE id=CAST(:i AS uuid) AND tenant_id=CAST(:t AS uuid)"
+                        " AND user_id=CAST(:u AS uuid)"
+                    ),
+                    {"i": att_id, "t": tenant_id, "u": user_id},
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
         return dict(row) if row else None
 
     async def consume_and_read(
@@ -88,16 +92,20 @@ class SqlAttachmentRepo:
         """一次性消费(内部端点):UPLOADED 且租户命中 → 置 CONSUMED +
         删文件 + 读 bytes 返回;否则 None。行锁防并发双取(FOR UPDATE)。"""
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT id, filename, mime, size_bytes, status"
-                    " FROM public.sys_attachment"
-                    " WHERE id=CAST(:i AS uuid) AND tenant_id=CAST(:t AS uuid)"
-                    " FOR UPDATE"
-                ),
-                {"i": att_id, "t": tenant_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, filename, mime, size_bytes, status"
+                        " FROM public.sys_attachment"
+                        " WHERE id=CAST(:i AS uuid) AND tenant_id=CAST(:t AS uuid)"
+                        " FOR UPDATE"
+                    ),
+                    {"i": att_id, "t": tenant_id},
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
         if row is None or row["status"] != "UPLOADED":
             return None
         path = _path(str(row["id"]), str(row["mime"]))

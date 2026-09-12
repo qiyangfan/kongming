@@ -25,10 +25,10 @@ COL_DEPT_ID = "dept_id"
 
 
 class FilterType(Enum):
-    SKIP = "SKIP"                    # 不改写(ALL / 安全降级)
-    USER_EQ = "USER_EQ"              # create_by = 用户
-    DEPT_IN = "DEPT_IN"              # dept_id IN (部门集)
-    UNSUPPORTED = "UNSUPPORTED"      # fail-closed(CUSTOM / 未知值)
+    SKIP = "SKIP"  # 不改写(ALL / 安全降级)
+    USER_EQ = "USER_EQ"  # create_by = 用户
+    DEPT_IN = "DEPT_IN"  # dept_id IN (部门集)
+    UNSUPPORTED = "UNSUPPORTED"  # fail-closed(CUSTOM / 未知值)
 
 
 @dataclass(frozen=True)

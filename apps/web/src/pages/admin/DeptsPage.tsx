@@ -17,6 +17,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { FormRow } from "@/components/form-row";
 import {
   Dialog,
   DialogContent,
@@ -25,7 +26,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -80,7 +80,10 @@ function TreeRow({
     >
       {hasChildren ? (
         <CollapsibleTrigger className="text-muted-foreground hover:text-foreground">
-          <ChevronRight className="size-4 transition-transform [[data-state=open]>&]:rotate-90" aria-hidden />
+          <ChevronRight
+            className="size-4 transition-transform [[data-state=open]>&]:rotate-90"
+            aria-hidden
+          />
         </CollapsibleTrigger>
       ) : (
         <span className="size-4" />
@@ -94,12 +97,7 @@ function TreeRow({
       <Button variant="ghost" size="sm" onClick={() => onEdit(node)}>
         编辑
       </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="text-destructive hover:text-destructive"
-        onClick={() => onDelete(node)}
-      >
+      <Button variant="ghost-destructive" size="sm" onClick={() => onDelete(node)}>
         删除
       </Button>
     </div>
@@ -226,7 +224,9 @@ export default function DeptsPage() {
       )}
 
       <div className="rounded-md border">
-        {depts.isPending && <p className="p-4 text-center text-sm text-muted-foreground">加载中…</p>}
+        {depts.isPending && (
+          <p className="p-4 text-center text-sm text-muted-foreground">加载中…</p>
+        )}
         {depts.data?.length === 0 && (
           <p className="p-4 text-center text-sm text-muted-foreground">
             暂无部门,点击右上角「新建部门」开始。
@@ -260,12 +260,15 @@ export default function DeptsPage() {
         ))}
       </div>
 
-      <Dialog open={creating || editing !== null} onOpenChange={(open) => {
-        if (!open) {
-          setCreating(false);
-          setEditing(null);
-        }
-      }}>
+      <Dialog
+        open={creating || editing !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCreating(false);
+            setEditing(null);
+          }
+        }}
+      >
         <DialogContent aria-describedby={undefined} className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>{creating ? "新建部门" : `编辑部门 ${editing?.dept_name}`}</DialogTitle>
@@ -282,16 +285,14 @@ export default function DeptsPage() {
               submit();
             }}
           >
-            <div className="grid gap-1.5">
-              <Label htmlFor="d-name">名称</Label>
+            <FormRow label="名称" htmlFor="d-name">
               <Input
                 id="d-name"
                 value={form.deptName}
                 onChange={(e) => setForm({ ...form, deptName: e.target.value })}
               />
-            </div>
-            <div className="grid gap-1.5">
-              <Label>上级部门</Label>
+            </FormRow>
+            <FormRow label="上级部门">
               <Select
                 value={form.parentId || "root"}
                 onValueChange={(v) => setForm({ ...form, parentId: v === "root" ? "" : v })}
@@ -309,16 +310,15 @@ export default function DeptsPage() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="d-sort">排序</Label>
+            </FormRow>
+            <FormRow label="排序" htmlFor="d-sort">
               <Input
                 id="d-sort"
                 type="number"
                 value={form.sort}
                 onChange={(e) => setForm({ ...form, sort: Number(e.target.value) || 0 })}
               />
-            </div>
+            </FormRow>
             <DialogFooter>
               <Button
                 type="button"

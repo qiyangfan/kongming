@@ -12,11 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Database, Wrench, X } from "lucide-react";
 
 import type { StreamStageOut, StreamToolCallOut } from "@/lib/api";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 const STAGE_LABELS: Record<string, string> = {
   understand: "理解问题",
@@ -256,9 +252,7 @@ export function StreamCard({ stages, sql, summary, toolCalls = [] }: StreamCardP
       )}
 
       {summary && (
-        <p className="animate-in fade-in px-1 text-md leading-relaxed text-foreground">
-          {summary}
-        </p>
+        <p className="animate-in fade-in px-1 text-md leading-relaxed text-foreground">{summary}</p>
       )}
     </div>
   );

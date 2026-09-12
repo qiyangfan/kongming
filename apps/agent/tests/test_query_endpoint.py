@@ -37,8 +37,14 @@ class _Api:
 
     async def fetch_schema(self, **kw: object) -> SchemaMeta:
         return SchemaMeta(
-            tables=[MetaTable(schema="tenant_default", name="goods", comment="", columns=[
-                MetaColumn(name="qty", data_type="int", comment="")])],
+            tables=[
+                MetaTable(
+                    schema="tenant_default",
+                    name="goods",
+                    comment="",
+                    columns=[MetaColumn(name="qty", data_type="int", comment="")],
+                )
+            ],
             truncated=False,
         )
 

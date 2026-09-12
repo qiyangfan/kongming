@@ -54,9 +54,7 @@ def stage_wrapper(name: str, fn: AsyncNodeFn | SyncNodeFn) -> Any:
             },
         )
         result = fn(state)
-        out: dict[str, object] = (
-            await result if inspect.isawaitable(result) else result
-        )
+        out: dict[str, object] = await result if inspect.isawaitable(result) else result
         # selfheal 返回新 retry_count(本次重试序号);其余节点沿用 state 当前值
         retry = (
             out.get("retry_count")

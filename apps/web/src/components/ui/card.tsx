@@ -24,7 +24,8 @@ const CardTitle = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivE
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn("text-2xl font-semibold leading-none tracking-tight", className)}
+      /* text-lg 为 shadcn 默认:页面标题(h2 text-lg/xl)层级必须 ≥ 卡片标题(宪法 Article 7) */
+      className={cn("text-lg font-semibold leading-none tracking-tight", className)}
       {...props}
     />
   ),

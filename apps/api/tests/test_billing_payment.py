@@ -21,7 +21,10 @@ from tests.test_chat_query import _default_tenant_id
 
 
 async def _mk_invoice(
-    s: AsyncSession, tenant_id: str, amount: int = 12345, status: str = "PENDING",
+    s: AsyncSession,
+    tenant_id: str,
+    amount: int = 12345,
+    status: str = "PENDING",
     period: str = "2026-07",
 ) -> str:
     rid = (
@@ -48,11 +51,15 @@ def _sign(payment_id: str, trade_no: str, result: str, amount: int) -> str:
 
 async def _payment_row(s: AsyncSession, payment_id: str) -> dict[str, Any]:
     row = (
-        await s.execute(
-            text("SELECT * FROM public.sys_payment WHERE id=CAST(:i AS uuid)"),
-            {"i": payment_id},
+        (
+            await s.execute(
+                text("SELECT * FROM public.sys_payment WHERE id=CAST(:i AS uuid)"),
+                {"i": payment_id},
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     return dict(row)
 
 
@@ -60,10 +67,7 @@ async def _oper_count(s: AsyncSession, action: str, target: str) -> int:
     return int(
         (
             await s.execute(
-                text(
-                    "SELECT count(*) FROM public.sys_oper_log"
-                    " WHERE action=:a AND target=:t"
-                ),
+                text("SELECT count(*) FROM public.sys_oper_log WHERE action=:a AND target=:t"),
                 {"a": action, "t": target},
             )
         ).scalar_one()
@@ -241,8 +245,11 @@ async def test_callback_valid_signature(
     r = await client.post(
         "/billing/payments/callback/MOCK",
         json={
-            "payment_id": pid, "trade_no": "mock-cb0001", "result": "SUCCESS",
-            "amount": 12345, "sign": _sign(pid, "mock-cb0001", "SUCCESS", 12345),
+            "payment_id": pid,
+            "trade_no": "mock-cb0001",
+            "result": "SUCCESS",
+            "amount": 12345,
+            "sign": _sign(pid, "mock-cb0001", "SUCCESS", 12345),
         },
     )
     assert r.status_code == 200, r.text
@@ -251,8 +258,11 @@ async def test_callback_valid_signature(
     r2 = await client.post(
         "/billing/payments/callback/MOCK",
         json={
-            "payment_id": pid, "trade_no": "mock-cb0001", "result": "SUCCESS",
-            "amount": 12345, "sign": _sign(pid, "mock-cb0001", "SUCCESS", 12345),
+            "payment_id": pid,
+            "trade_no": "mock-cb0001",
+            "result": "SUCCESS",
+            "amount": 12345,
+            "sign": _sign(pid, "mock-cb0001", "SUCCESS", 12345),
         },
     )
     assert r2.status_code == 200 and r2.json()["idempotent"] is True
@@ -271,8 +281,11 @@ async def test_callback_bad_signature_401(
     r = await client.post(
         "/billing/payments/callback/MOCK",
         json={
-            "payment_id": pid, "trade_no": "mock-evil", "result": "SUCCESS",
-            "amount": 12345, "sign": "f" * 64,
+            "payment_id": pid,
+            "trade_no": "mock-evil",
+            "result": "SUCCESS",
+            "amount": 12345,
+            "sign": "f" * 64,
         },
     )
     assert r.status_code == 401
@@ -292,8 +305,11 @@ async def test_callback_amount_mismatch_400(
     r = await client.post(
         "/billing/payments/callback/MOCK",
         json={
-            "payment_id": pid, "trade_no": "mock-am1", "result": "SUCCESS",
-            "amount": 1, "sign": _sign(pid, "mock-am1", "SUCCESS", 1),
+            "payment_id": pid,
+            "trade_no": "mock-am1",
+            "result": "SUCCESS",
+            "amount": 1,
+            "sign": _sign(pid, "mock-am1", "SUCCESS", 1),
         },
     )
     assert r.status_code == 400
@@ -307,7 +323,10 @@ async def test_callback_unknown_channel_404(client: AsyncClient) -> None:
         "/billing/payments/callback/WECHAT",
         json={
             "payment_id": "00000000-0000-0000-0000-000000000001",
-            "trade_no": "x", "result": "SUCCESS", "amount": 1, "sign": "y",
+            "trade_no": "x",
+            "result": "SUCCESS",
+            "amount": 1,
+            "sign": "y",
         },
     )
     assert r.status_code == 404
@@ -427,7 +446,8 @@ async def test_portal_payment_cross_tenant_404(
     assert (await client.post(f"/portal/payments/{pid}/cancel", headers=h)).status_code == 404
     assert (
         await client.post(
-            f"/portal/payments/{pid}/mock-simulate", headers=h,
+            f"/portal/payments/{pid}/mock-simulate",
+            headers=h,
             json={"result": "SUCCESS"},
         )
     ).status_code == 404
@@ -456,7 +476,9 @@ async def test_mock_channel_closed() -> None:
 
 
 async def test_create_payment_race_returns_open_payment(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser,
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """R1-A1:并发双击——条件插入被部分唯一索引拦(模拟返回 None)时,
@@ -496,7 +518,8 @@ async def test_create_payment_race_returns_open_payment(
 
 
 async def test_cond_insert_unique_violation_converges(
-    client: AsyncClient, session: AsyncSession,
+    client: AsyncClient,
+    session: AsyncSession,
 ) -> None:
     """R1-A1(repo 级直证):PENDING 账单已有 CREATED 单时,不取消直接
     条件插入→唯一违例经 SAVEPOINT 收敛 None(会话不被污染可续用)。"""
@@ -514,13 +537,19 @@ async def test_cond_insert_unique_violation_converges(
             __import__("datetime").timezone.utc
         ) + __import__("datetime").timedelta(minutes=30)
         rid1 = await repo.insert_payment_if_pending(
-            invoice_id=inv, tenant_id=str(tid), channel="MOCK",
-            amount=100, expires_at=expires,
+            invoice_id=inv,
+            tenant_id=str(tid),
+            channel="MOCK",
+            amount=100,
+            expires_at=expires,
         )
         assert rid1 is not None
         rid2 = await repo.insert_payment_if_pending(  # 撞 ux_sys_payment_invoice_open
-            invoice_id=inv, tenant_id=str(tid), channel="MOCK",
-            amount=100, expires_at=expires,
+            invoice_id=inv,
+            tenant_id=str(tid),
+            channel="MOCK",
+            amount=100,
+            expires_at=expires,
         )
         assert rid2 is None
         # 会话未被 IntegrityError 污染:后续语句照常
@@ -541,17 +570,18 @@ async def test_reconcile_invoice_not_pending_alerts(
     pid = (await client.post(f"/portal/invoices/{inv}/payments", headers=h)).json()["id"]
     # 模拟竞态窗:账单已被另一路径置 PAID(单仍在途)
     await session.execute(
-        text(
-            "UPDATE public.sys_invoice SET status='PAID' WHERE id=CAST(:v AS uuid)"
-        ),
+        text("UPDATE public.sys_invoice SET status='PAID' WHERE id=CAST(:v AS uuid)"),
         {"v": inv},
     )
     await session.commit()
     r = await client.post(
         "/billing/payments/callback/MOCK",
         json={
-            "payment_id": pid, "trade_no": "mock-race1", "result": "SUCCESS",
-            "amount": 12345, "sign": _sign(pid, "mock-race1", "SUCCESS", 12345),
+            "payment_id": pid,
+            "trade_no": "mock-race1",
+            "result": "SUCCESS",
+            "amount": 12345,
+            "sign": _sign(pid, "mock-race1", "SUCCESS", 12345),
         },
     )
     assert r.status_code == 200 and r.json()["status"] == "PAID"

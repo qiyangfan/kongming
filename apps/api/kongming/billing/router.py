@@ -79,9 +79,7 @@ def _pay_http(e: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=str(e))
 
 
-async def _tenant_or_403(
-    user: dict[str, object], session: AsyncSession, header: str | None
-) -> str:
+async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header: str | None) -> str:
     repo = ChatRepository(session)
     uid = str(user["sub"])
     if header is not None:
@@ -219,8 +217,7 @@ class PolicyIn(BaseModel):
     scope_ref: uuid.UUID | None = None
 
 
-@router.post("/billing/policies", status_code=201,
-             dependencies=[Depends(require_perm(MANAGE))])
+@router.post("/billing/policies", status_code=201, dependencies=[Depends(require_perm(MANAGE))])
 async def upsert_policy(
     body: PolicyIn,
     user: Annotated[dict[str, object], Depends(current_user)],
@@ -255,8 +252,11 @@ async def upsert_policy(
     return {"ok": True}
 
 
-@router.get("/billing/policies", response_model=list[PolicyOut],
-            dependencies=[Depends(require_perm(MANAGE))])
+@router.get(
+    "/billing/policies",
+    response_model=list[PolicyOut],
+    dependencies=[Depends(require_perm(MANAGE))],
+)
 async def list_policies(
     _: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -278,17 +278,14 @@ async def list_policies(
     ]
 
 
-@router.delete("/billing/policies/{policy_id}",
-               dependencies=[Depends(require_perm(MANAGE))])
+@router.delete("/billing/policies/{policy_id}", dependencies=[Depends(require_perm(MANAGE))])
 async def delete_policy(
     policy_id: str,
     _: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
     tenant_id: Annotated[str, Query(min_length=1)],
 ) -> dict[str, bool]:
-    if not await SqlBillingRepo(session).delete_policy(
-        policy_id=policy_id, tenant_id=tenant_id
-    ):
+    if not await SqlBillingRepo(session).delete_policy(policy_id=policy_id, tenant_id=tenant_id):
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     # R1-A4:删配额=解除防线,与 upsert 审计对称
     user2 = _
@@ -308,8 +305,7 @@ class PlanIn(BaseModel):
     price_per_call: int = Field(default=0, ge=0)
 
 
-@router.post("/billing/plans", status_code=201,
-             dependencies=[Depends(require_perm(MANAGE))])
+@router.post("/billing/plans", status_code=201, dependencies=[Depends(require_perm(MANAGE))])
 async def create_plan(
     body: PlanIn,
     user: Annotated[dict[str, object], Depends(current_user)],
@@ -324,8 +320,9 @@ async def create_plan(
     return {"id": rid}
 
 
-@router.get("/billing/plans", response_model=list[PlanOut],
-            dependencies=[Depends(require_perm(MANAGE))])
+@router.get(
+    "/billing/plans", response_model=list[PlanOut], dependencies=[Depends(require_perm(MANAGE))]
+)
 async def list_plans(
     _: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -353,8 +350,7 @@ class PlanPatchIn(BaseModel):
     price_per_call: int = Field(default=0, ge=0)
 
 
-@router.patch("/billing/plans/{plan_id}",
-              dependencies=[Depends(require_perm(MANAGE))])
+@router.patch("/billing/plans/{plan_id}", dependencies=[Depends(require_perm(MANAGE))])
 async def update_plan(
     plan_id: str,
     body: PlanPatchIn,
@@ -373,8 +369,7 @@ async def update_plan(
     return {"ok": True}
 
 
-@router.delete("/billing/plans/{plan_id}",
-               dependencies=[Depends(require_perm(MANAGE))])
+@router.delete("/billing/plans/{plan_id}", dependencies=[Depends(require_perm(MANAGE))])
 async def delete_plan(
     plan_id: str,
     user: Annotated[dict[str, object], Depends(current_user)],
@@ -396,8 +391,11 @@ class TenantBriefOut(BaseModel):
     tenant_name: str
 
 
-@router.get("/billing/tenants", response_model=list[TenantBriefOut],
-            dependencies=[Depends(require_perm(MANAGE))])
+@router.get(
+    "/billing/tenants",
+    response_model=list[TenantBriefOut],
+    dependencies=[Depends(require_perm(MANAGE))],
+)
 async def list_tenants_brief(
     _: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -406,7 +404,8 @@ async def list_tenants_brief(
     rows = await SqlBillingRepo(session).list_tenants_brief()
     return [
         TenantBriefOut(
-            id=str(r["id"]), tenant_key=str(r["tenant_key"]),
+            id=str(r["id"]),
+            tenant_key=str(r["tenant_key"]),
             tenant_name=str(r["tenant_name"]),
         )
         for r in rows
@@ -419,8 +418,9 @@ class BotBriefOut(BaseModel):
     name: str
 
 
-@router.get("/billing/bots", response_model=list[BotBriefOut],
-            dependencies=[Depends(require_perm(MANAGE))])
+@router.get(
+    "/billing/bots", response_model=list[BotBriefOut], dependencies=[Depends(require_perm(MANAGE))]
+)
 async def list_bots_brief(
     _: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -430,13 +430,15 @@ async def list_bots_brief(
     与租户清单同解耦原则)。"""
     rows = await SqlBillingRepo(session).list_bots_brief(tenant_id=tenant_id)
     return [
-        BotBriefOut(id=str(r["id"]), bot_key=str(r["bot_key"]), name=str(r["name"]))
-        for r in rows
+        BotBriefOut(id=str(r["id"]), bot_key=str(r["bot_key"]), name=str(r["name"])) for r in rows
     ]
 
 
-@router.get("/billing/tenants/{tenant_id}/plan", response_model=PlanOut | None,
-            dependencies=[Depends(require_perm(MANAGE))])
+@router.get(
+    "/billing/tenants/{tenant_id}/plan",
+    response_model=PlanOut | None,
+    dependencies=[Depends(require_perm(MANAGE))],
+)
 async def get_tenant_plan(
     tenant_id: str,
     _: Annotated[dict[str, object], Depends(current_user)],
@@ -494,8 +496,11 @@ async def bind_plan(
     return {"ok": True}
 
 
-@router.get("/billing/invoices", response_model=InvoiceAdminPageOut,
-            dependencies=[Depends(require_perm(MANAGE))])
+@router.get(
+    "/billing/invoices",
+    response_model=InvoiceAdminPageOut,
+    dependencies=[Depends(require_perm(MANAGE))],
+)
 async def page_all_invoices(
     _: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -503,9 +508,7 @@ async def page_all_invoices(
     size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> InvoiceAdminPageOut:
     """035 挂账⑧:管理面账单分页(弃 LIMIT 200);行附最新支付单状态。"""
-    rows, total = await SqlBillingRepo(session).page_all_invoices(
-        page=page, size=size
-    )
+    rows, total = await SqlBillingRepo(session).page_all_invoices(page=page, size=size)
     return InvoiceAdminPageOut(
         items=[
             InvoiceAdminOut(
@@ -515,9 +518,7 @@ async def page_all_invoices(
                 amount=int(r["amount"]),
                 status=str(r["status"]),
                 created_at=r["created_at"].isoformat() if r.get("created_at") else None,
-                payment_status=(
-                    str(r["payment_status"]) if r.get("payment_status") else None
-                ),
+                payment_status=(str(r["payment_status"]) if r.get("payment_status") else None),
             )
             for r in rows
         ],
@@ -530,8 +531,9 @@ async def page_all_invoices(
 # ── 门户(自助,限自己租户) ──
 
 
-@router.get("/portal/usage", response_model=PortalUsageOut,
-            dependencies=[Depends(require_perm(PORTAL))])
+@router.get(
+    "/portal/usage", response_model=PortalUsageOut, dependencies=[Depends(require_perm(PORTAL))]
+)
 async def portal_usage(
     user: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -573,8 +575,9 @@ async def portal_usage(
     )
 
 
-@router.get("/portal/keys", response_model=list[PortalKeyOut],
-            dependencies=[Depends(require_perm(PORTAL))])
+@router.get(
+    "/portal/keys", response_model=list[PortalKeyOut], dependencies=[Depends(require_perm(PORTAL))]
+)
 async def portal_keys(
     user: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -586,33 +589,38 @@ async def portal_keys(
     from sqlalchemy import text as _text
 
     rows = (
-        await session.execute(
-            _text(
-                "SELECT k.id, b.bot_key, k.name, k.created_at, k.last_used_at"
-                " FROM public.sys_api_key k"
-                " JOIN public.sys_bot_definition b ON b.id=k.bot_id"
-                " WHERE k.tenant_id=CAST(:t AS uuid) AND k.revoked_at IS NULL"
-                " ORDER BY k.created_at DESC"
-            ),
-            {"t": tenant_id},
+        (
+            await session.execute(
+                _text(
+                    "SELECT k.id, b.bot_key, k.name, k.created_at, k.last_used_at"
+                    " FROM public.sys_api_key k"
+                    " JOIN public.sys_bot_definition b ON b.id=k.bot_id"
+                    " WHERE k.tenant_id=CAST(:t AS uuid) AND k.revoked_at IS NULL"
+                    " ORDER BY k.created_at DESC"
+                ),
+                {"t": tenant_id},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return [
         PortalKeyOut(
             id=str(r["id"]),
             bot_key=str(r["bot_key"]),
             name=str(r["name"]),
             created_at=r["created_at"].isoformat() if r.get("created_at") else None,
-            last_used_at=(
-                r["last_used_at"].isoformat() if r.get("last_used_at") else None
-            ),
+            last_used_at=(r["last_used_at"].isoformat() if r.get("last_used_at") else None),
         )
         for r in rows
     ]
 
 
-@router.get("/portal/invoices", response_model=list[InvoiceOut],
-            dependencies=[Depends(require_perm(PORTAL))])
+@router.get(
+    "/portal/invoices",
+    response_model=list[InvoiceOut],
+    dependencies=[Depends(require_perm(PORTAL))],
+)
 async def portal_invoices(
     user: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -632,9 +640,11 @@ async def portal_invoices(
     ]
 
 
-@router.get("/portal/invoices/{invoice_id}",
-            response_model=InvoiceDetailOut,
-            dependencies=[Depends(require_perm(PORTAL))])
+@router.get(
+    "/portal/invoices/{invoice_id}",
+    response_model=InvoiceDetailOut,
+    dependencies=[Depends(require_perm(PORTAL))],
+)
 async def portal_invoice_detail(
     invoice_id: str,
     user: Annotated[dict[str, object], Depends(current_user)],
@@ -642,9 +652,7 @@ async def portal_invoice_detail(
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> InvoiceDetailOut:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
-    row = await SqlBillingRepo(session).get_invoice(
-        invoice_id=invoice_id, tenant_id=tenant_id
-    )
+    row = await SqlBillingRepo(session).get_invoice(invoice_id=invoice_id, tenant_id=tenant_id)
     if row is None:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     return InvoiceDetailOut(
@@ -660,9 +668,12 @@ async def portal_invoice_detail(
 # ── 门户支付(035) ──
 
 
-@router.post("/portal/invoices/{invoice_id}/payments", status_code=201,
-             response_model=PaymentOut,
-             dependencies=[Depends(require_perm(PORTAL))])
+@router.post(
+    "/portal/invoices/{invoice_id}/payments",
+    status_code=201,
+    response_model=PaymentOut,
+    dependencies=[Depends(require_perm(PORTAL))],
+)
 async def create_payment(
     invoice_id: str,
     user: Annotated[dict[str, object], Depends(current_user)],
@@ -674,14 +685,16 @@ async def create_payment(
     try:
         row = await svc.create_payment(invoice_id=invoice_id, tenant_id=tenant_id)
         await session.commit()
-    except (BillingNotFound, PaymentConflict, PaymentChannelClosed,
-            BillingValidationError) as e:
+    except (BillingNotFound, PaymentConflict, PaymentChannelClosed, BillingValidationError) as e:
         raise _pay_http(e) from None
     return _payment_out(row)
 
 
-@router.get("/portal/payments/{payment_id}", response_model=PaymentOut,
-            dependencies=[Depends(require_perm(PORTAL))])
+@router.get(
+    "/portal/payments/{payment_id}",
+    response_model=PaymentOut,
+    dependencies=[Depends(require_perm(PORTAL))],
+)
 async def get_portal_payment(
     payment_id: str,
     user: Annotated[dict[str, object], Depends(current_user)],
@@ -698,8 +711,7 @@ async def get_portal_payment(
     return _payment_out(row)
 
 
-@router.post("/portal/payments/{payment_id}/cancel",
-             dependencies=[Depends(require_perm(PORTAL))])
+@router.post("/portal/payments/{payment_id}/cancel", dependencies=[Depends(require_perm(PORTAL))])
 async def cancel_payment(
     payment_id: str,
     user: Annotated[dict[str, object], Depends(current_user)],
@@ -716,9 +728,11 @@ async def cancel_payment(
     return {"ok": True}
 
 
-@router.post("/portal/payments/{payment_id}/mock-simulate",
-             response_model=ReconcileOut,
-             dependencies=[Depends(require_perm(PORTAL))])
+@router.post(
+    "/portal/payments/{payment_id}/mock-simulate",
+    response_model=ReconcileOut,
+    dependencies=[Depends(require_perm(PORTAL))],
+)
 async def mock_simulate(
     payment_id: str,
     body: MockSimulateIn,
@@ -743,8 +757,7 @@ async def mock_simulate(
 # ── 统一回调(035;无登录态,验签即鉴权,031 webhook 同构) ──
 
 
-@router.post("/billing/payments/callback/{channel}",
-             response_model=ReconcileOut)
+@router.post("/billing/payments/callback/{channel}", response_model=ReconcileOut)
 async def payment_callback(
     channel: str,
     body: CallbackIn,
@@ -753,13 +766,20 @@ async def payment_callback(
     svc = _svc(session)
     try:
         out = await svc.reconcile_payment(
-            channel=channel.upper(), payment_id=str(body.payment_id),
-            trade_no=body.trade_no, result=body.result, amount=body.amount,
+            channel=channel.upper(),
+            payment_id=str(body.payment_id),
+            trade_no=body.trade_no,
+            result=body.result,
+            amount=body.amount,
             sign=body.sign,
         )
         await session.commit()
-    except (BillingNotFound, PaymentBadSignature, PaymentChannelClosed,
-            BillingValidationError) as e:
+    except (
+        BillingNotFound,
+        PaymentBadSignature,
+        PaymentChannelClosed,
+        BillingValidationError,
+    ) as e:
         # 拒前落审计(034 R1-S1 同款:伪签/金额不符审计须持久,不随 4xx 回滚)
         await session.commit()
         raise _pay_http(e) from None
@@ -769,8 +789,7 @@ async def payment_callback(
 # ── 管理面:账单作废(035) ──
 
 
-@router.post("/billing/invoices/{invoice_id}/void",
-             dependencies=[Depends(require_perm(MANAGE))])
+@router.post("/billing/invoices/{invoice_id}/void", dependencies=[Depends(require_perm(MANAGE))])
 async def void_invoice(
     invoice_id: str,
     user: Annotated[dict[str, object], Depends(current_user)],

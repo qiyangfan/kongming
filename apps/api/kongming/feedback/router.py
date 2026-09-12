@@ -301,9 +301,7 @@ async def page(
                 session_id=str(r["session_id"]),
                 user_id=str(r["user_id"]),
                 user_nickname=None if r["user_nickname"] is None else str(r["user_nickname"]),
-                user_username=(
-                    None if r["user_username"] is None else str(r["user_username"])
-                ),
+                user_username=(None if r["user_username"] is None else str(r["user_username"])),
                 tenant_id=str(r["tenant_id"]),
                 tenant_key=str(r["tenant_key"]),
                 datasource_key=str(r["datasource_key"]),

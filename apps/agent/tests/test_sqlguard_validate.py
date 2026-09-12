@@ -28,7 +28,7 @@ def _reset() -> Generator[None]:  # pyright: ignore[reportUnusedFunction]
 
 
 class _FakeArtifact:
-    """假引擎产物:解析门三态 + 语句列表(与 km_sqlguard.GuardArtifact 同构)。"""
+    """假引擎产物:解析门三态 + 语句列表(与 liannu.GuardArtifact 同构)。"""
 
     def __init__(
         self,

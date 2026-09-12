@@ -130,9 +130,7 @@ class WorkflowService:
         R1-S2:编辑闸(对他人/非成员工作流存新版本=劫持,创建者或 MEMBER+
         才放行);新版本继承上一版 team_id(防团队工作流失守)。"""
         if not WF_KEY_RE.fullmatch(wf_key):
-            raise WorkflowValidationError(
-                "wf_key 须为小写字母开头的字母/数字/下划线(2-64 位)"
-            )
+            raise WorkflowValidationError("wf_key 须为小写字母开头的字母/数字/下划线(2-64 位)")
         if not name.strip() or len(name) > 128:
             raise WorkflowValidationError("名称非空且 ≤128 字符")
         try:
@@ -157,18 +155,14 @@ class WorkflowService:
             )
         except DefinitionConflictError as e:
             raise WorkflowConflict(wf_key) from e
-        await self._audit(
-            "workflow.save", wf_key, {"version": version, "name": name.strip()}
-        )
+        await self._audit("workflow.save", wf_key, {"version": version, "name": name.strip()})
         return {"wf_key": wf_key, "version": version}
 
     async def list_workflows(
         self, *, tenant_id: str, user_id: str = "", team_ids: list[str] | None = None
     ) -> list[dict[str, Any]]:
         """032:归属过滤(user_id 非空时启用;空=管理面全量)。"""
-        return await self._repo.list_latest(
-            tenant_id=tenant_id, user_id=user_id, team_ids=team_ids
-        )
+        return await self._repo.list_latest(tenant_id=tenant_id, user_id=user_id, team_ids=team_ids)
 
     async def get_workflow(
         self,
@@ -198,9 +192,7 @@ class WorkflowService:
         if latest is None:
             raise WorkflowNotFound(wf_key)
         self._assert_editable(latest, user_id=user_id, member_roles=member_roles)
-        await self._repo.set_enabled(
-            def_id=str(latest["id"]), tenant_id=tenant_id, enabled=enabled
-        )
+        await self._repo.set_enabled(def_id=str(latest["id"]), tenant_id=tenant_id, enabled=enabled)
         await self._audit(
             "workflow.enable" if enabled else "workflow.disable", wf_key, {"enabled": enabled}
         )
@@ -238,9 +230,7 @@ class WorkflowService:
     ) -> dict[str, Any]:
         """执行编排:定义解析(版本/启用)→ 引擎 → run 落库(终态全落)。"""
         if version is not None:
-            row = await self._repo.get_def(
-                tenant_id=tenant_id, wf_key=wf_key, version=version
-            )
+            row = await self._repo.get_def(tenant_id=tenant_id, wf_key=wf_key, version=version)
         else:
             row = await self._repo.latest_def(tenant_id=tenant_id, wf_key=wf_key)
         if row is None:
@@ -311,9 +301,7 @@ class WorkflowService:
             self._assert_visible(latest, user_id=user_id, member_roles=member_roles)
         # R1-提示1:历史不随定义删除而不可读(def 删后仍可查;
         # 租户隔离由查询条件保证,不存在即空列表)
-        return await self._repo.page_runs(
-            tenant_id=tenant_id, wf_key=wf_key, page=page, size=size
-        )
+        return await self._repo.page_runs(tenant_id=tenant_id, wf_key=wf_key, page=page, size=size)
 
     async def get_run(
         self,
@@ -329,6 +317,4 @@ class WorkflowService:
         latest = await self._repo.latest_def(tenant_id=tenant_id, wf_key=wf_key)
         if latest is not None:
             self._assert_visible(latest, user_id=user_id, member_roles=member_roles)
-        return await self._repo.get_run(
-            tenant_id=tenant_id, wf_key=wf_key, run_id=run_id
-        )
+        return await self._repo.get_run(tenant_id=tenant_id, wf_key=wf_key, run_id=run_id)

@@ -6,7 +6,25 @@
 
 import { useRef } from "react";
 import { NavLink, Outlet } from "react-router";
-import { Activity, BookOpen, Bot, Cable, Receipt, Workflow, Zap, UsersRound, Building2, Database, Layers, MessageSquareHeart, ScrollText, ShieldCheck, ShieldAlert, Users, Wrench } from "lucide-react";
+import {
+  Activity,
+  BookOpen,
+  Bot,
+  Cable,
+  Receipt,
+  Workflow,
+  Zap,
+  UsersRound,
+  Building2,
+  Database,
+  Layers,
+  MessageSquareHeart,
+  ScrollText,
+  ShieldCheck,
+  ShieldAlert,
+  Users,
+  Wrench,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { FadeEdges, useScrollableX } from "@/components/scroll-fade";

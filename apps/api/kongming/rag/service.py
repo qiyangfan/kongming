@@ -44,7 +44,7 @@ from kongming.rag.ports import (
 log = logging.getLogger(__name__)
 
 _DESCRIBE_CONCURRENCY = 4  # 逐表润色并发上限(防 LLM 端打爆)
-_EMBED_BATCH = 64          # embed 单批上限(agent 端点契约)
+_EMBED_BATCH = 64  # embed 单批上限(agent 端点契约)
 _RECALL_TOTAL_CAP = RECALL_TOP_K * 2  # 047:多轮继承合并总量封顶
 
 
@@ -160,8 +160,11 @@ class RagService:
             actor_id,
             "rag.upload",
             datasource_key,
-            {"schema_name": schema_name, "tables": [b.table_name for b in blocks],
-             "datasource_key": datasource_key},
+            {
+                "schema_name": schema_name,
+                "tables": [b.table_name for b in blocks],
+                "datasource_key": datasource_key,
+            },
         )
         await self._evict_suggestions(datasource_key)  # 047 级联失效(同事务)
         await self._repo.commit()
@@ -370,12 +373,22 @@ class RagService:
             if manual_orphans:
                 log.warning(
                     "对账保留扫描集外人工条目 %d 行(交人工裁决): tenant=%s ds=%s",
-                    manual_orphans, tenant_id, datasource_key,
+                    manual_orphans,
+                    tenant_id,
+                    datasource_key,
                 )
             await self._repo.log_oper(
-                actor_id, action, datasource_key,
-                {"found": 0, "enriched": 0, "skipped": 0, "removed": removed,
-                 "manual_orphans": manual_orphans, "datasource_key": datasource_key},
+                actor_id,
+                action,
+                datasource_key,
+                {
+                    "found": 0,
+                    "enriched": 0,
+                    "skipped": 0,
+                    "removed": removed,
+                    "manual_orphans": manual_orphans,
+                    "datasource_key": datasource_key,
+                },
             )
             await self._evict_suggestions(datasource_key)  # 047 级联失效(同事务)
             await self._repo.commit()
@@ -416,9 +429,7 @@ class RagService:
 
         vectors = await self._embed_quietly(
             [
-                build_embedding_text(
-                    b.table_name, b.table_comment, b.columns_comment, alias=ea
-                )
+                build_embedding_text(b.table_name, b.table_comment, b.columns_comment, alias=ea)
                 for _, _, b, ea in to_write
             ]
         )
@@ -448,7 +459,9 @@ class RagService:
         if manual_orphans:
             log.warning(
                 "对账保留扫描集外人工条目 %d 行(交人工裁决): tenant=%s ds=%s",
-                manual_orphans, tenant_id, datasource_key,
+                manual_orphans,
+                tenant_id,
+                datasource_key,
             )
         await self._repo.log_oper(
             actor_id,
@@ -626,9 +639,7 @@ class RagService:
     ) -> dict[str, dict[str, str]]:
         """ColumnCommentReader 端口实现:表名 → 列注释原文(整集一次读,
         单数据源注释集量级小;剥离与映射在 chat 呈现纯函数内)。"""
-        return await self._repo.column_comments(
-            tenant_id=tenant_id, datasource_key=datasource_key
-        )
+        return await self._repo.column_comments(tenant_id=tenant_id, datasource_key=datasource_key)
 
     # ============ 知识覆盖报告(052;确定性纯聚合) ============
 

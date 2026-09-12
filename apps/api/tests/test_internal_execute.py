@@ -94,11 +94,15 @@ async def _bind_role(s: AsyncSession, user_id: str, role_id: str) -> None:
 
 async def _audits(s: AsyncSession, trace_id: str) -> list[dict[str, Any]]:
     rows = (
-        await s.execute(
-            text("SELECT * FROM public.sys_sql_audit WHERE trace_id = :t"),
-            {"t": trace_id},
+        (
+            await s.execute(
+                text("SELECT * FROM public.sys_sql_audit WHERE trace_id = :t"),
+                {"t": trace_id},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return [dict(r) for r in rows]
 
 
@@ -121,9 +125,7 @@ async def test_unknown_tenant_rejected(client: AsyncClient, session: AsyncSessio
     )
     assert resp.status_code == 404
     # 请求本身非法(无可审计主体):全表零审计行(按库表级断言,非按 trace_id 恒真断言)
-    count = (
-        await session.execute(text("SELECT COUNT(*) FROM public.sys_sql_audit"))
-    ).scalar_one()
+    count = (await session.execute(text("SELECT COUNT(*) FROM public.sys_sql_audit"))).scalar_one()
     assert count == 0
 
 
@@ -184,9 +186,7 @@ async def test_system_call_executes_in_tenant_schema(
     assert {r[0] for r in body["rows"]} == {"A"}  # 命中 ita 而非 itb
 
 
-async def test_schema_isolation_between_tenants(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_schema_isolation_between_tenants(client: AsyncClient, session: AsyncSession) -> None:
     await _mk_tenant(session, "ita")
     await _mk_tenant(session, "itb")
     for key, mark in (("ita", "A"), ("itb", "B")):
@@ -224,9 +224,7 @@ async def test_connection_readonly(client: AsyncClient, session: AsyncSession) -
 # ============ 三态 verdict + 审计落库 ============
 
 
-async def test_blocked_write_statement_audited(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_blocked_write_statement_audited(client: AsyncClient, session: AsyncSession) -> None:
     await _mk_tenant(session, "ita")
     p = _payload("ita", "DELETE FROM goods", question="删数据")
     resp = await client.post("/internal/sql/execute", json=p, headers=INTERNAL)
@@ -399,9 +397,8 @@ async def test_rewrite_recheck_blocks_tainted_sql(
     tid = await _mk_tenant(session, "ita")
     await _bind_tenant(session, uid, tid)
     await _bind_role(session, uid, await _mk_role(session, "IE_TAINT", "SELF"))
-    def _taint(
-        statement: object, sql: str, **kw: object
-    ) -> tuple[str, dict[str, object]]:
+
+    def _taint(statement: object, sql: str, **kw: object) -> tuple[str, dict[str, object]]:
         return ("DROP TABLE goods", {})
 
     # 053:管线改写走 Guarded.apply_filter → apply_filter_statement(单遍复用接缝),

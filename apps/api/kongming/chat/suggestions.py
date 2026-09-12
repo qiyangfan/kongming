@@ -64,9 +64,7 @@ class SuggestionsService:
         self._overview = overview
         self._suggestor = suggestor
 
-    async def _resolve_tenant(
-        self, user_id: str, tenant_key: str | None
-    ) -> tuple[str, str]:
+    async def _resolve_tenant(self, user_id: str, tenant_key: str | None) -> tuple[str, str]:
         """语义同 ChatService._resolve_tenant:显式查白名单,缺省取默认租户。"""
         if tenant_key is not None:
             tenant_id = await self._tenants.find_bound_tenant(
@@ -92,9 +90,7 @@ class SuggestionsService:
         ):
             return []
 
-        cached = await self._suggestions.find(
-            tenant_id=tenant_id, datasource_key=datasource_key
-        )
+        cached = await self._suggestions.find(tenant_id=tenant_id, datasource_key=datasource_key)
         if cached is not None:
             return cached.questions
 
@@ -106,9 +102,7 @@ class SuggestionsService:
 
         # 并发防击穿:同租户同源串行化,取锁后复查(后到者直接命中)
         await self._suggestions.lock(f"{tenant_id}:{datasource_key}")
-        cached = await self._suggestions.find(
-            tenant_id=tenant_id, datasource_key=datasource_key
-        )
+        cached = await self._suggestions.find(tenant_id=tenant_id, datasource_key=datasource_key)
         if cached is not None:
             # rollback 即释放事务级咨询锁(不留到请求收尾,防长持锁)
             await self._suggestions.rollback()

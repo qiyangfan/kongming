@@ -98,9 +98,7 @@ class SqlLlmUsageRepo:
         await self._s.commit()
         return inserted
 
-    async def summary(
-        self, *, start: object = None, end: object = None
-    ) -> list[dict[str, Any]]:
+    async def summary(self, *, start: object = None, end: object = None) -> list[dict[str, Any]]:
         """按租户+模型+任务聚合(时间范围可选;tenant 未反解归 unknown)。
         038:补失败次数与延迟统计——延迟仅 SUCCESS 且 latency_ms 非空参与
         (失败耗时语义归时间线,聚合指标保持成功口径干净;无样本组 avg 为
@@ -115,27 +113,31 @@ class SqlLlmUsageRepo:
             params["end"] = end
         where = " AND ".join(conditions)
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT COALESCE(t.tenant_key, 'unknown') AS tenant_key,"  # noqa: S608  # 多行拼接含 f-string(条件片段常量)
-                    "       u.model, u.task, count(*) AS calls,"
-                    "       count(*) FILTER (WHERE u.status = 'ERROR') AS calls_error,"
-                    "       sum(u.prompt_tokens) AS prompt_tokens,"
-                    "       sum(u.completion_tokens) AS completion_tokens,"
-                    "       sum(u.total_tokens) AS total_tokens,"
-                    "       round(avg(u.latency_ms) FILTER"
-                    "         (WHERE u.status = 'SUCCESS' AND u.latency_ms IS NOT NULL))"
-                    "         ::integer AS latency_ms_avg,"
-                    "       max(u.latency_ms) FILTER"
-                    "         (WHERE u.status = 'SUCCESS' AND u.latency_ms IS NOT NULL)"
-                    "         AS latency_ms_max"
-                    " FROM public.sys_llm_usage u"
-                    f" LEFT JOIN public.sys_tenant t ON t.id = u.tenant_id WHERE {where}"  # noqa: S608  # 条件片段为常量
-                    " GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
-                ),
-                params,
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT COALESCE(t.tenant_key, 'unknown') AS tenant_key,"  # noqa: S608  # 多行拼接含 f-string(条件片段常量)
+                        "       u.model, u.task, count(*) AS calls,"
+                        "       count(*) FILTER (WHERE u.status = 'ERROR') AS calls_error,"
+                        "       sum(u.prompt_tokens) AS prompt_tokens,"
+                        "       sum(u.completion_tokens) AS completion_tokens,"
+                        "       sum(u.total_tokens) AS total_tokens,"
+                        "       round(avg(u.latency_ms) FILTER"
+                        "         (WHERE u.status = 'SUCCESS' AND u.latency_ms IS NOT NULL))"
+                        "         ::integer AS latency_ms_avg,"
+                        "       max(u.latency_ms) FILTER"
+                        "         (WHERE u.status = 'SUCCESS' AND u.latency_ms IS NOT NULL)"
+                        "         AS latency_ms_max"
+                        " FROM public.sys_llm_usage u"
+                        f" LEFT JOIN public.sys_tenant t ON t.id = u.tenant_id WHERE {where}"  # noqa: S608  # 条件片段为常量
+                        " GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
+                    ),
+                    params,
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def trend(self, *, days: int) -> list[dict[str, Any]]:
@@ -144,33 +146,37 @@ class SqlLlmUsageRepo:
         R1-B2:JOIN 附窗口下界范围谓词(created_at 可裸走时间索引);
         范围条件 MUST 在 ON 内而非 WHERE——WHERE 会把无匹配的补零桶过滤掉。"""
         rows = (
-            await self._s.execute(
-                text(
-                    "WITH bounds AS ("
-                    "  SELECT (date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai')"
-                    "          ::date - (:days - 1)) AS start_d,"
-                    "         date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai')"
-                    "           ::date AS end_d"
-                    "), day_series AS ("
-                    "  SELECT generate_series(b.start_d, b.end_d, '1 day')::date AS d,"
-                    "         b.start_d"
-                    "  FROM bounds b"
-                    ")"
-                    "SELECT to_char(ds.d, 'YYYY-MM-DD') AS date,"
-                    "       count(u.id) AS calls,"
-                    "       count(u.id) FILTER (WHERE u.status = 'ERROR') AS calls_error,"
-                    "       COALESCE(sum(u.total_tokens), 0) AS total_tokens"
-                    " FROM day_series ds"
-                    " LEFT JOIN public.sys_llm_usage u"
-                    "   ON date_trunc('day', u.created_at AT TIME ZONE 'Asia/Shanghai')"
-                    "      ::date = ds.d"
-                    "  AND u.created_at >= ds.start_d::timestamp"
-                    "      AT TIME ZONE 'Asia/Shanghai'"
-                    " GROUP BY ds.d ORDER BY ds.d"
-                ),
-                {"days": days},
+            (
+                await self._s.execute(
+                    text(
+                        "WITH bounds AS ("
+                        "  SELECT (date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai')"
+                        "          ::date - (:days - 1)) AS start_d,"
+                        "         date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai')"
+                        "           ::date AS end_d"
+                        "), day_series AS ("
+                        "  SELECT generate_series(b.start_d, b.end_d, '1 day')::date AS d,"
+                        "         b.start_d"
+                        "  FROM bounds b"
+                        ")"
+                        "SELECT to_char(ds.d, 'YYYY-MM-DD') AS date,"
+                        "       count(u.id) AS calls,"
+                        "       count(u.id) FILTER (WHERE u.status = 'ERROR') AS calls_error,"
+                        "       COALESCE(sum(u.total_tokens), 0) AS total_tokens"
+                        " FROM day_series ds"
+                        " LEFT JOIN public.sys_llm_usage u"
+                        "   ON date_trunc('day', u.created_at AT TIME ZONE 'Asia/Shanghai')"
+                        "      ::date = ds.d"
+                        "  AND u.created_at >= ds.start_d::timestamp"
+                        "      AT TIME ZONE 'Asia/Shanghai'"
+                        " GROUP BY ds.d ORDER BY ds.d"
+                    ),
+                    {"days": days},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def page(
@@ -218,34 +224,42 @@ class SqlLlmUsageRepo:
             ).scalar_one()
         )
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT u.id, u.trace_id,"  # noqa: S608  # 多行拼接含 f-string(条件片段常量)
-                    " COALESCE(t.tenant_key, 'unknown') AS tenant_key,"
-                    " u.model, u.task, u.status, u.bot_id,"
-                    " u.prompt_tokens, u.completion_tokens, u.total_tokens,"
-                    " u.latency_ms, u.created_at"
-                    " FROM public.sys_llm_usage u"
-                    f" LEFT JOIN public.sys_tenant t ON t.id = u.tenant_id WHERE {where}"
-                    " ORDER BY u.created_at DESC, u.id DESC"
-                    " LIMIT :limit OFFSET :offset"
-                ),
-                params,
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT u.id, u.trace_id,"  # noqa: S608  # 多行拼接含 f-string(条件片段常量)
+                        " COALESCE(t.tenant_key, 'unknown') AS tenant_key,"
+                        " u.model, u.task, u.status, u.bot_id,"
+                        " u.prompt_tokens, u.completion_tokens, u.total_tokens,"
+                        " u.latency_ms, u.created_at"
+                        " FROM public.sys_llm_usage u"
+                        f" LEFT JOIN public.sys_tenant t ON t.id = u.tenant_id WHERE {where}"
+                        " ORDER BY u.created_at DESC, u.id DESC"
+                        " LIMIT :limit OFFSET :offset"
+                    ),
+                    params,
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return total, [dict(r) for r in rows]
 
     async def list_by_trace(self, *, trace_id: str) -> list[dict[str, Any]]:
         """038:trace 时间线 LLM 事件(时间升序;稳定序 tiebreak=id)。"""
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT model, task, status, prompt_tokens, completion_tokens,"
-                    " total_tokens, latency_ms, created_at"
-                    " FROM public.sys_llm_usage WHERE trace_id = :tid"
-                    " ORDER BY created_at ASC, id ASC"
-                ),
-                {"tid": trace_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT model, task, status, prompt_tokens, completion_tokens,"
+                        " total_tokens, latency_ms, created_at"
+                        " FROM public.sys_llm_usage WHERE trace_id = :tid"
+                        " ORDER BY created_at ASC, id ASC"
+                    ),
+                    {"tid": trace_id},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]

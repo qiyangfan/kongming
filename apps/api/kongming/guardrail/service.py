@@ -211,7 +211,7 @@ class GuardrailService:
         try:
             configs = await self._configs()
             cfg = next((c for c in configs if c.rule.name == "write_burst"), None)
-            threshold = (cfg.threshold if cfg and cfg.threshold is not None else 1)
+            threshold = cfg.threshold if cfg and cfg.threshold is not None else 1
             enabled = cfg.enabled if cfg else True
             if enabled and write_attempts >= threshold:
                 await self._record_hits(

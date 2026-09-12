@@ -17,11 +17,7 @@ import {
 } from "lucide-react";
 
 import { ChartView } from "@/components/chart-view";
-import {
-  ChartArtifactCard,
-  DocumentCard,
-  SqlArtifactCard,
-} from "@/components/artifact-blocks";
+import { ChartArtifactCard, DocumentCard, SqlArtifactCard } from "@/components/artifact-blocks";
 import type { ChartSpec } from "@/components/chart-shared";
 import { normalizeBinding } from "@/components/chart-shared";
 import type { ArtifactOut } from "@/lib/chat-api";
@@ -32,11 +28,7 @@ import { useAuth } from "@/lib/auth-store";
 import { hasPerm } from "@/lib/nav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -91,7 +83,9 @@ function ResultTable({
                   <td
                     key={j}
                     className="max-w-80 truncate px-3 py-1.5 text-foreground"
-                    title={cell === null || cell === undefined ? undefined : String(cell) || undefined}
+                    title={
+                      cell === null || cell === undefined ? undefined : String(cell) || undefined
+                    }
                   >
                     {cell === null || cell === undefined ? "—" : String(cell)}
                   </td>
@@ -150,9 +144,7 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
       <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
         <ShieldOff className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
         <div>
-          <p className="font-medium text-foreground">
-            {msg.error ?? "此问被安全护栏拦下"}
-          </p>
+          <p className="font-medium text-foreground">{msg.error ?? "此问被安全护栏拦下"}</p>
           {msg.summary && <p className="mt-1 text-muted-foreground">{msg.summary}</p>}
         </div>
       </div>
@@ -223,9 +215,7 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
       {docArt ? (
         <DocumentCard content={docArt.content} />
       ) : (
-        msg.summary && (
-          <p className="px-1 text-md leading-relaxed text-foreground">{msg.summary}</p>
-        )
+        msg.summary && <p className="px-1 text-md leading-relaxed text-foreground">{msg.summary}</p>
       )}
 
       {chartArt && result.columns.length > 0 && result.chartBindings.length > 0 ? (
@@ -248,19 +238,11 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
       )}
 
       {result.columns.length > 0 && (
-        <ResultTable
-          columns={result.columns}
-          rows={result.rows}
-          labels={result.columnLabels}
-        />
+        <ResultTable columns={result.columns} rows={result.rows} labels={result.columnLabels} />
       )}
 
       {result.columns.length > 0 && (
-        <ExportButtons
-          columns={result.columns}
-          rows={result.rows}
-          labels={result.columnLabels}
-        />
+        <ExportButtons columns={result.columns} rows={result.rows} labels={result.columnLabels} />
       )}
 
       {sqlArt ? (
@@ -303,7 +285,7 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
       {result.stats && Object.keys(result.stats).length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {Object.entries(result.stats).map(([k, v]) => (
-            <Badge key={k} variant="secondary" className="font-normal">
+            <Badge key={k} variant="secondary">
               {k} {String(v)}
             </Badge>
           ))}
@@ -533,12 +515,7 @@ function ExportButtons({
   return (
     <div className="flex items-center gap-1.5">
       <span className="text-xs text-muted-foreground">导出</span>
-      <Button
-        variant="ghost"
-        size="xs"
-        onClick={() => void run("csv")}
-        disabled={busy !== null}
-      >
+      <Button variant="ghost" size="xs" onClick={() => void run("csv")} disabled={busy !== null}>
         {busy === "csv" ? (
           <Loader2 className="animate-spin" aria-hidden />
         ) : (
@@ -546,12 +523,7 @@ function ExportButtons({
         )}
         CSV
       </Button>
-      <Button
-        variant="ghost"
-        size="xs"
-        onClick={() => void run("xlsx")}
-        disabled={busy !== null}
-      >
+      <Button variant="ghost" size="xs" onClick={() => void run("xlsx")} disabled={busy !== null}>
         {busy === "xlsx" ? (
           <Loader2 className="animate-spin" aria-hidden />
         ) : (

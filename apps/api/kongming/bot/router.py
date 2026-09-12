@@ -293,9 +293,7 @@ async def create_bot(
 ) -> dict[str, str]:
     tid = await _tenant_of(session, str(user["sub"]), x_tenant_id)
     try:
-        bot_id = await svc.create(
-            user_id=str(user["sub"]), tenant_id=tid, payload=req.model_dump()
-        )
+        bot_id = await svc.create(user_id=str(user["sub"]), tenant_id=tid, payload=req.model_dump())
     except InvalidBotKey:
         raise HTTPException(status_code=400, detail="INVALID_BOT_KEY") from None
     except ToolSubsetViolation as e:
@@ -347,7 +345,8 @@ async def update_bot(
         creator_id=str(row["created_by"]),
         user_id=str(user["sub"]),
         member_role=await _team_role(
-            session, str(user["sub"]),
+            session,
+            str(user["sub"]),
             None if row["team_id"] is None else str(row["team_id"]),
         ),
     ):
@@ -363,7 +362,8 @@ async def update_bot(
             creator_id=str(row["created_by"]),
             user_id=str(user["sub"]),
             member_role=await _team_role(
-                session, str(user["sub"]),
+                session,
+                str(user["sub"]),
                 None if row["team_id"] is None else str(row["team_id"]),
             ),
         ):
@@ -463,7 +463,8 @@ async def delete_bot(
         creator_id=str(row["created_by"]),
         user_id=str(user["sub"]),
         member_role=await _team_role(
-            session, str(user["sub"]),
+            session,
+            str(user["sub"]),
             None if row["team_id"] is None else str(row["team_id"]),
         ),
     ):
@@ -521,7 +522,8 @@ async def create_key(
         creator_id=str(row["created_by"]),
         user_id=str(user["sub"]),
         member_role=await _team_role(
-            session, str(user["sub"]),
+            session,
+            str(user["sub"]),
             None if row["team_id"] is None else str(row["team_id"]),
         ),
     ):
@@ -565,7 +567,8 @@ async def list_keys(
         creator_id=str(row["created_by"]),
         user_id=str(user["sub"]),
         member_role=await _team_role(
-            session, str(user["sub"]),
+            session,
+            str(user["sub"]),
             None if row["team_id"] is None else str(row["team_id"]),
         ),
     ):
@@ -599,9 +602,7 @@ async def revoke_key(
     # 归属:key 的 bot 属本人或超管
     row = (
         await session.execute(
-            text(
-                "SELECT bot_id FROM public.sys_api_key WHERE id=:i AND tenant_id=:t"
-            ),
+            text("SELECT bot_id FROM public.sys_api_key WHERE id=:i AND tenant_id=:t"),
             {"i": str(key_id), "t": tid},
         )
     ).scalar_one_or_none()
@@ -625,7 +626,8 @@ async def revoke_key(
         creator_id=str(bot["created_by"]),
         user_id=str(user["sub"]),
         member_role=await _team_role(
-            session, str(user["sub"]),
+            session,
+            str(user["sub"]),
             None if bot["team_id"] is None else str(bot["team_id"]),
         ),
     ):
@@ -658,9 +660,7 @@ async def bot_chat_public(
 ) -> BotChatOut:
     """web 嵌入公开端点(免登录):is_public+enabled 闸;护栏与工具防御全量。"""
     try:
-        out = await svc.run(
-            bot_key=bot_key, question=req.question, channel="web_embed"
-        )
+        out = await svc.run(bot_key=bot_key, question=req.question, channel="web_embed")
     except BotNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     return BotChatOut(
@@ -697,9 +697,7 @@ async def openai_chat(
         key_info = await svc.resolve_api_key(x_api_key)
     except ApiKeyInvalid:
         raise HTTPException(status_code=401, detail="API_KEY_INVALID") from None
-    question = next(
-        (m.content for m in reversed(req.messages) if m.role == "user"), ""
-    )
+    question = next((m.content for m in reversed(req.messages) if m.role == "user"), "")
     if not question.strip():
         raise HTTPException(status_code=400, detail="EMPTY_QUESTION") from None
     # 034:配额切面(执行前 fail-closed;无策略无套餐=零判定零回归)
@@ -729,9 +727,7 @@ async def openai_chat(
         if not allowed:
             await qs.commit()  # R1-S1:拒前落审计
     if not allowed:
-        raise HTTPException(
-            status_code=429, detail=f"QUOTA_EXCEEDED: {dimension}"
-        ) from None
+        raise HTTPException(status_code=429, detail=f"QUOTA_EXCEEDED: {dimension}") from None
     try:
         out = await svc.run(
             bot_key=str(key_info["bot_key"]),

@@ -58,11 +58,15 @@ async def resolve_tenant(session: AsyncSession, tenant_key: str) -> str:
     019 抽共用:internal 执行前段与 toolcall 六层防御 L1 同调(防线单一事实源)。
     """
     tenant = (
-        await session.execute(
-            text("SELECT id, status FROM public.sys_tenant WHERE tenant_key = :k"),
-            {"k": tenant_key},
+        (
+            await session.execute(
+                text("SELECT id, status FROM public.sys_tenant WHERE tenant_key = :k"),
+                {"k": tenant_key},
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if tenant is None or tenant["status"] != "ACTIVE":
         raise TenantNotFound(tenant_key)
     return str(tenant["id"])
@@ -74,10 +78,7 @@ async def assert_user_bound(
     """用户-租户绑定复校(019 抽共用;系统调用豁免语义由调用方决定,本函数恒校验)。"""
     bound = (
         await session.execute(
-            text(
-                "SELECT 1 FROM public.sys_user_tenant"
-                " WHERE user_id = :u AND tenant_id = :t"
-            ),
+            text("SELECT 1 FROM public.sys_user_tenant WHERE user_id = :u AND tenant_id = :t"),
             {"u": user_id, "t": tenant_id},
         )
     ).scalar_one_or_none()
@@ -291,9 +292,7 @@ async def _prepare(  # noqa: PLR0913 —— 请求字段平铺,编排前段
     if not scope_verdict.passed:
         return await _fin("BLOCKED", applied.sql, scope_verdict.reason or "CROSS_SCHEMA")
 
-    return _Prepared(
-        tenant_id=tenant_id, engine=engine, route_schema=route_schema, applied=applied
-    )
+    return _Prepared(tenant_id=tenant_id, engine=engine, route_schema=route_schema, applied=applied)
 
 
 async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口

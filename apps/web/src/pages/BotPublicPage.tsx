@@ -6,6 +6,7 @@ import { Loader2, SendHorizontal } from "lucide-react";
 import { useParams } from "react-router";
 
 import { Button } from "@/components/ui/button";
+import { ChatBubble } from "@/components/chat-bubble";
 import { Textarea } from "@/components/ui/textarea";
 import type { components } from "@/lib/api-types.gen";
 
@@ -53,22 +54,20 @@ export default function BotPublicPage() {
       </header>
       <div className="flex-1 space-y-4 overflow-y-auto">
         {rounds.length === 0 && (
-          <p className="pt-16 text-center text-sm text-muted-foreground">
-            直接提问即可
-          </p>
+          <p className="pt-16 text-center text-sm text-muted-foreground">直接提问即可</p>
         )}
         {rounds.map((r, i) => (
           <div key={i} className="space-y-2">
             <div className="flex justify-end">
-              <p className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2 text-sm text-primary-foreground">
-                {r.q}
-              </p>
+              <ChatBubble role="user">{r.q}</ChatBubble>
             </div>
-            <p className="rounded-lg bg-muted/50 px-4 py-2.5 text-sm leading-relaxed">{r.a}</p>
+            <ChatBubble role="assistant">{r.a}</ChatBubble>
           </div>
         ))}
         {error && (
-          <p className="text-sm text-destructive" role="alert">{error}</p>
+          <p className="text-sm text-destructive" role="alert">
+            {error}
+          </p>
         )}
       </div>
       <div className="mt-4 flex items-end gap-2">
@@ -86,8 +85,17 @@ export default function BotPublicPage() {
           className="max-h-32 min-h-10 resize-none"
           aria-label="提问"
         />
-        <Button size="icon" disabled={!draft.trim() || asking} onClick={() => void ask()} aria-label="发送">
-          {asking ? <Loader2 className="animate-spin" aria-hidden /> : <SendHorizontal aria-hidden />}
+        <Button
+          size="icon"
+          disabled={!draft.trim() || asking}
+          onClick={() => void ask()}
+          aria-label="发送"
+        >
+          {asking ? (
+            <Loader2 className="animate-spin" aria-hidden />
+          ) : (
+            <SendHorizontal aria-hidden />
+          )}
         </Button>
       </div>
     </div>

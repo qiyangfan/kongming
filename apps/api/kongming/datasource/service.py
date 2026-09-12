@@ -59,9 +59,7 @@ class DatasourceService:
 
     # ---- 分页(全局视角:X-Tenant-Id 无语义,与身份治理同惯例) ----
 
-    async def page(
-        self, *, page: int, size: int, keyword: str
-    ) -> tuple[int, list[Datasource]]:
+    async def page(self, *, page: int, size: int, keyword: str) -> tuple[int, list[Datasource]]:
         kw = keyword.strip()
         total = await self._repo.count(kw)
         items = await self._repo.list_page(kw, size, (page - 1) * size)
@@ -246,9 +244,7 @@ class DatasourceService:
             try:
                 plain = self._cipher.decrypt(enc)
             except CredentialUndecryptable:
-                return TestConnectionResult(
-                    ok=False, reason="凭证不可用:请重新填写密码后保存再试"
-                )
+                return TestConnectionResult(ok=False, reason="凭证不可用:请重新填写密码后保存再试")
         return await self._tester.test(
             host=host, port=port, database=database, username=username, password=plain
         )

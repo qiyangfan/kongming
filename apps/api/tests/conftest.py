@@ -163,9 +163,7 @@ async def session() -> AsyncIterator[AsyncSession]:
 async def client() -> AsyncIterator[AsyncClient]:
     from kongming.main import app
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
 
 

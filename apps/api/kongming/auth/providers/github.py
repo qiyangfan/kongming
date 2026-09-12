@@ -4,7 +4,6 @@ email 取 /user/emails 中 primary 条目及其 verified 标记——只有已�
 才允许 account_link 关联既有账号(spec「联邦账号关联与自动建号」)。
 """
 
-
 from kongming.auth.models import NormalizedProfile
 from kongming.auth.providers.base import OAuthClient, OAuthProviderBase
 from kongming.config import Settings

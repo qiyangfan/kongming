@@ -14,9 +14,7 @@ from tests.test_chat_query import _default_tenant_id
 from tests.test_rag_admin import _admin_token
 
 
-async def _make_bot_and_key(
-    client: AsyncClient, token: str, tag: str
-) -> tuple[str, str]:
+async def _make_bot_and_key(client: AsyncClient, token: str, tag: str) -> tuple[str, str]:
     # bot_key 租户内唯一:_user_with_key 已建 BOT_PAYLOAD 原键,本 helper 加后缀
     payload = {**BOT_PAYLOAD, "bot_key": f"{BOT_PAYLOAD['bot_key']}_{tag}"}
     r = await client.post(
@@ -40,15 +38,17 @@ async def _set_bot_policy(
     async with get_sessionmaker()() as s:
         repo = SqlBillingRepo(s)
         await repo.upsert_policy(
-            tenant_id=tenant_id, dimension=dimension, limit_value=limit,
-            warn_pct=warn, scope="BOT", scope_ref=bot_id,
+            tenant_id=tenant_id,
+            dimension=dimension,
+            limit_value=limit,
+            warn_pct=warn,
+            scope="BOT",
+            scope_ref=bot_id,
         )
         await repo.commit()
 
 
-async def _insert_bot_usage(
-    s: AsyncSession, tenant_id: str, bot_id: str, tokens: int
-) -> None:
+async def _insert_bot_usage(s: AsyncSession, tenant_id: str, bot_id: str, tokens: int) -> None:
     await s.execute(
         text(
             "INSERT INTO public.sys_llm_usage"
@@ -57,8 +57,13 @@ async def _insert_bot_usage(
             " VALUES (gen_random_uuid(), :tr, CAST(:t AS uuid), CAST(:b AS uuid),"
             "         'qwen-plus', 'REACT', :p, :c, 0)"
         ),
-        {"tr": f"tr-{bot_id[:8]}-x", "t": tenant_id, "b": bot_id,
-         "p": tokens // 2, "c": tokens - tokens // 2},
+        {
+            "tr": f"tr-{bot_id[:8]}-x",
+            "t": tenant_id,
+            "b": bot_id,
+            "p": tokens // 2,
+            "c": tokens - tokens // 2,
+        },
     )
     await s.commit()
 
@@ -128,9 +133,7 @@ async def test_bot_deleted_policy_zero_hit_401(
     bot_id, api_key = await _make_bot_and_key(client, token, tag="d1")
     tid = await _default_tenant_id(session)
     await _set_bot_policy(str(tid), bot_id, "TOKENS", limit=1)
-    rd = await client.delete(
-        f"/system/bots/{bot_id}", headers={"Authorization": f"Bearer {token}"}
-    )
+    rd = await client.delete(f"/system/bots/{bot_id}", headers={"Authorization": f"Bearer {token}"})
     assert rd.status_code in (200, 204), rd.text
     r = await client.post(
         "/v1/chat/completions",
@@ -186,8 +189,11 @@ async def test_calls_dimension_bot_scope_rejected(
         "/billing/policies",
         headers={"Authorization": f"Bearer {admin}"},
         json={
-            "tenant_id": str(tid), "dimension": "CALLS", "limit_value": 10,
-            "scope": "BOT", "scope_ref": bot_id,
+            "tenant_id": str(tid),
+            "dimension": "CALLS",
+            "limit_value": 10,
+            "scope": "BOT",
+            "scope_ref": bot_id,
         },
     )
     assert r.status_code == 400
@@ -213,8 +219,11 @@ async def test_cross_tenant_scope_ref_404(
         "/billing/policies",
         headers={"Authorization": f"Bearer {admin}"},
         json={
-            "tenant_id": other_tenant, "dimension": "TOKENS", "limit_value": 10,
-            "scope": "BOT", "scope_ref": bot_id,  # Bot 属 default 非 othert3
+            "tenant_id": other_tenant,
+            "dimension": "TOKENS",
+            "limit_value": 10,
+            "scope": "BOT",
+            "scope_ref": bot_id,  # Bot 属 default 非 othert3
         },
     )
     assert r.status_code == 404

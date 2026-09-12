@@ -36,6 +36,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { StatusSwitch } from "@/components/status-switch";
+import { PageHeader } from "@/components/page-header";
 import {
   Table,
   TableBody,
@@ -94,7 +95,9 @@ export default function TriggersPage() {
   const qc = useQueryClient();
   const [form, setForm] = useState<FormState | null>(null);
   const [formError, setFormError] = useState("");
-  const [created, setCreated] = useState<{ webhook_path: string | null; secret?: string } | null>(null);
+  const [created, setCreated] = useState<{ webhook_path: string | null; secret?: string } | null>(
+    null,
+  );
   const [deleting, setDeleting] = useState<TriggerItem | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const [historyOf, setHistoryOf] = useState<TriggerItem | null>(null);
@@ -139,8 +142,7 @@ export default function TriggersPage() {
         target_key: form.targetKey.trim(),
         cron_expr: form.type === "CRON" ? form.cronExpr.trim() : null,
         // R1-T9:|| 60 会吞掉合法的 0(ge=0 后端允许);空串才回退
-        min_interval_sec:
-          form.minInterval.trim() === "" ? 60 : Number(form.minInterval),
+        min_interval_sec: form.minInterval.trim() === "" ? 60 : Number(form.minInterval),
         adapter: form.adapter,
         notify_url: form.notifyUrl.trim(),
       };
@@ -167,9 +169,7 @@ export default function TriggersPage() {
     onError: (e) => {
       // 040 写边界闸 detail 映射(黑话禁入用户文案)
       const reason =
-        e.message === "TARGET_NOT_FOUND"
-          ? "目标不存在(可能已删除),请重新选择"
-          : e.message;
+        e.message === "TARGET_NOT_FOUND" ? "目标不存在(可能已删除),请重新选择" : e.message;
       setFormError(e instanceof Error ? reason : "保存失败");
     },
   });
@@ -203,16 +203,21 @@ export default function TriggersPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">触发器</h1>
-        <Button onClick={() => { setForm(EMPTY_FORM); setFormError(""); }}>
-          <Plus aria-hidden />
-          新建触发器
-        </Button>
-      </div>
-      <p className="text-sm text-muted-foreground">
-        定时调度(常用频率点选,或高级 cron 表达式)或 webhook 触发(外部系统调用专属地址即运行)工作流/助手;执行时以创建者身份经过完整安全校验。
-      </p>
+      <PageHeader
+        title="触发器"
+        description="定时调度(常用频率点选,或高级 cron 表达式)或 webhook 触发(外部系统调用专属地址即运行)工作流/助手;执行时以创建者身份经过完整安全校验。"
+        actions={
+          <Button
+            onClick={() => {
+              setForm(EMPTY_FORM);
+              setFormError("");
+            }}
+          >
+            <Plus aria-hidden />
+            新建触发器
+          </Button>
+        }
+      />
 
       <div className="rounded-lg border">
         <Table>
@@ -244,9 +249,7 @@ export default function TriggersPage() {
                 <TableRow key={row.id}>
                   <TableCell className="font-mono text-xs">{row.tg_key}</TableCell>
                   <TableCell>
-                    <Badge variant="secondary" className="font-normal">
-                      {row.type}
-                    </Badge>
+                    <Badge variant="secondary">{row.type}</Badge>
                   </TableCell>
                   <TableCell className="text-xs">
                     {row.target_type}:{row.target_key}
@@ -254,7 +257,9 @@ export default function TriggersPage() {
                   <TableCell className="max-w-56 truncate font-mono text-xs">
                     {row.type === "CRON" ? (
                       <>
-                        <span className="block truncate" title={row.cron_expr ?? undefined}>{row.cron_expr}</span>
+                        <span className="block truncate" title={row.cron_expr ?? undefined}>
+                          {row.cron_expr}
+                        </span>
                         {row.next_fire_at && (
                           <p className="whitespace-normal text-muted-foreground">
                             下次 {new Date(row.next_fire_at).toLocaleString()}
@@ -262,7 +267,9 @@ export default function TriggersPage() {
                         )}
                       </>
                     ) : (
-                      <span className="block truncate" title={`/webhooks/${row.webhook_path}`}>/webhooks/{row.webhook_path}</span>
+                      <span className="block truncate" title={`/webhooks/${row.webhook_path}`}>
+                        /webhooks/{row.webhook_path}
+                      </span>
                     )}
                   </TableCell>
                   <TableCell>
@@ -312,7 +319,10 @@ export default function TriggersPage() {
                         variant="ghost"
                         size="icon-xs"
                         aria-label={`删除 ${row.name}`}
-                        onClick={() => { setDeleting(row); setDeleteError(""); }}
+                        onClick={() => {
+                          setDeleting(row);
+                          setDeleteError("");
+                        }}
                       >
                         <Trash2 aria-hidden />
                       </Button>
@@ -371,9 +381,7 @@ export default function TriggersPage() {
                     <Label>类型</Label>
                     <Select
                       value={form.type}
-                      onValueChange={(v) =>
-                        setForm({ ...form, type: v as "CRON" | "WEBHOOK" })
-                      }
+                      onValueChange={(v) => setForm({ ...form, type: v as "CRON" | "WEBHOOK" })}
                     >
                       <SelectTrigger aria-label="类型">
                         <SelectValue />
@@ -412,7 +420,9 @@ export default function TriggersPage() {
                     onValueChange={(v) => setForm({ ...form, targetKey: v })}
                   >
                     <SelectTrigger aria-label="目标">
-                      <SelectValue placeholder={form.targetType === "workflow" ? "选择工作流" : "选择助手"} />
+                      <SelectValue
+                        placeholder={form.targetType === "workflow" ? "选择工作流" : "选择助手"}
+                      />
                     </SelectTrigger>
                     <SelectContent>
                       {form.targetType === "workflow"
@@ -495,9 +505,7 @@ export default function TriggersPage() {
                     <Label>请求数据格式</Label>
                     <Select
                       value={form.adapter}
-                      onValueChange={(v) =>
-                        setForm({ ...form, adapter: v as "custom" | "github" })
-                      }
+                      onValueChange={(v) => setForm({ ...form, adapter: v as "custom" | "github" })}
                     >
                       <SelectTrigger aria-label="请求数据格式">
                         <SelectValue />
@@ -551,9 +559,7 @@ export default function TriggersPage() {
                 URL: {location.origin}/webhooks/{created.webhook_path}
               </p>
               {created.secret && (
-                <p className="break-all font-mono text-xs">
-                  密钥: {created.secret}
-                </p>
+                <p className="break-all font-mono text-xs">密钥: {created.secret}</p>
               )}
               <p className="text-xs text-muted-foreground">
                 签名: X-Signature = hex(hmac_sha256(密钥, 请求体))
@@ -581,19 +587,14 @@ export default function TriggersPage() {
             ) : (
               (runs.data?.items ?? []).map((r) => (
                 <div key={r.id} className="rounded-md border px-3 py-2 text-sm">
-                  <Badge
-                    variant={r.status === "SUCCESS" ? "secondary" : "destructive"}
-                    className="font-normal"
-                  >
+                  <Badge variant={r.status === "SUCCESS" ? "secondary" : "destructive"}>
                     {r.status}
                   </Badge>
                   <span className="ml-2 text-xs text-muted-foreground">
                     {r.duration_ms}ms ·{" "}
                     {r.created_at ? new Date(r.created_at).toLocaleString() : ""}
                   </span>
-                  {r.error && (
-                    <p className="mt-1 text-xs text-destructive">{r.error}</p>
-                  )}
+                  {r.error && <p className="mt-1 text-xs text-destructive">{r.error}</p>}
                 </div>
               ))
             )}

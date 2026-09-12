@@ -33,10 +33,7 @@ import {
 function Stars({ value }: { value: number }) {
   return (
     <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
-      <Star
-        className={`size-3.5 ${value >= 3 ? "fill-primary text-primary" : ""}`}
-        aria-hidden
-      />
+      <Star className={`size-3.5 ${value >= 3 ? "fill-primary text-primary" : ""}`} aria-hidden />
       {value > 0 ? value.toFixed(1) : "—"}
     </span>
   );
@@ -91,9 +88,7 @@ export default function StorePage() {
       // R1-S2:直接展示应答正文(无会话不产生「去看对话」语义)
       setAnswer((m) => ({
         ...m,
-        [bot.id]: out.success
-          ? out.summary || "(助手未返回内容)"
-          : out.error || "运行失败",
+        [bot.id]: out.success ? out.summary || "(助手未返回内容)" : out.error || "运行失败",
       }));
     } catch (e) {
       setAnswer((m) => ({
@@ -232,24 +227,20 @@ export default function StorePage() {
           {detail.data && (
             <>
               <div className="space-y-3">
-                {detail.data.greeting && (
-                  <p className="text-sm">{detail.data.greeting}</p>
-                )}
+                {detail.data.greeting && <p className="text-sm">{detail.data.greeting}</p>}
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">
                   <Stars value={detail.data.avg_score} />
                   <span>{detail.data.rating_count} 人评</span>
                   <span>{detail.data.use_count} 次使用</span>
                   <span>{detail.data.fav_count} 收藏</span>
                   {detail.data.my_rating && (
-                    <Badge variant="secondary" className="font-normal">
-                      我评 {detail.data.my_rating} 星
-                    </Badge>
+                    <Badge variant="secondary">我评 {detail.data.my_rating} 星</Badge>
                   )}
                 </div>
                 {(detail.data.tools ?? []).length > 0 && (
                   <div className="flex flex-wrap gap-1">
                     {detail.data.tools.map((t) => (
-                      <Badge key={t} variant="outline" className="font-mono font-normal">
+                      <Badge key={t} variant="outline" className="font-mono">
                         {t}
                       </Badge>
                     ))}

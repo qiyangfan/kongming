@@ -14,10 +14,12 @@ export type UsageTimelineOut = components["schemas"]["UsageTimelineOut"];
 export type TimelineEvent = components["schemas"]["TimelineEvent"];
 
 /** 汇总(租户+模型+任务;时间范围可选) */
-export function usageSummary(params: {
-  start?: string;
-  end?: string;
-} = {}): Promise<UsageSummaryOut> {
+export function usageSummary(
+  params: {
+    start?: string;
+    end?: string;
+  } = {},
+): Promise<UsageSummaryOut> {
   const qs = new URLSearchParams();
   if (params.start) qs.set("start", params.start);
   if (params.end) qs.set("end", params.end);

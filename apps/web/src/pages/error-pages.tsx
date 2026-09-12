@@ -46,10 +46,6 @@ export function ForbiddenPage() {
 
 export function NotFoundPage() {
   return (
-    <ErrorShell
-      icon={Compass}
-      title="未见此处"
-      hint="此地不在舆图之上。回到对话,继续问计。"
-    />
+    <ErrorShell icon={Compass} title="未见此处" hint="此地不在舆图之上。回到对话,继续问计。" />
   );
 }

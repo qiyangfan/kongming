@@ -139,13 +139,9 @@ class AgentRagClient:
             table_comment=str(data.get("table_comment") or block.table_comment),
             columns_comment={
                 str(k): str(v)
-                for k, v in cast(
-                    "dict[str, object]", data.get("columns_comment") or {}
-                ).items()
+                for k, v in cast("dict[str, object]", data.get("columns_comment") or {}).items()
             },
-            sample_queries=[
-                str(s) for s in cast("list[object]", data.get("sample_queries") or [])
-            ],
+            sample_queries=[str(s) for s in cast("list[object]", data.get("sample_queries") or [])],
             # 037:透传即清洗(库内值与消费值一致,审查循环 B6)
             alias=clean_alias(str(data.get("alias") or "")),
         )

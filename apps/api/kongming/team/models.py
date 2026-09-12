@@ -28,9 +28,7 @@ class TeamForbidden(TeamError):
     """403(成员但角色不足)。"""
 
 
-def visible(
-    *, team_id: str | None, creator_id: str, user_id: str, member_role: str | None
-) -> bool:
+def visible(*, team_id: str | None, creator_id: str, user_id: str, member_role: str | None) -> bool:
     """可见性:个人资源仅创建者;团队资源成员即可见(角色不分)。"""
     if creator_id == user_id:
         return True

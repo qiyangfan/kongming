@@ -96,9 +96,7 @@ def _make_service(session: AsyncSession, actor_id: str | None = None) -> Trigger
             from kongming.bot.repository import SqlBotRepo
 
             return (
-                await SqlBotRepo(session).get_by_key(
-                    tenant_id=tenant_id, bot_key=target_key
-                )
+                await SqlBotRepo(session).get_by_key(tenant_id=tenant_id, bot_key=target_key)
                 is not None
             )
 
@@ -159,8 +157,7 @@ class _TargetRunnerImpl:
                     tkey = (
                         await s.execute(
                             _text(
-                                "SELECT tenant_key FROM public.sys_tenant"
-                                " WHERE id=CAST(:t AS uuid)"
+                                "SELECT tenant_key FROM public.sys_tenant WHERE id=CAST(:t AS uuid)"
                             ),
                             {"t": tenant_id},
                         )
@@ -266,9 +263,7 @@ class TriggerUpdateIn(BaseModel):
     secret: str = Field(default="", max_length=256)
 
 
-async def _tenant_or_403(
-    user: dict[str, object], session: AsyncSession, header: str | None
-) -> str:
+async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header: str | None) -> str:
     repo = ChatRepository(session)
     uid = str(user["sub"])
     if header is not None:
@@ -326,19 +321,13 @@ def _row_out(row: dict[str, Any]) -> dict[str, Any]:
         "target_key": row["target_key"],
         "cron_expr": row.get("cron_expr"),
         "min_interval_sec": row["min_interval_sec"],
-        "webhook_path": (
-            str(row["webhook_path"]) if row.get("webhook_path") else None
-        ),
+        "webhook_path": (str(row["webhook_path"]) if row.get("webhook_path") else None),
         "adapter": row["adapter"],
         "notify_url": row.get("notify_url") or "",
         "enabled": bool(row["enabled"]),
         "has_secret": bool(row.get("secret_cipher")),
-        "last_fired_at": (
-            row["last_fired_at"].isoformat() if row.get("last_fired_at") else None
-        ),
-        "next_fire_at": (
-            row["next_fire_at"].isoformat() if row.get("next_fire_at") else None
-        ),
+        "last_fired_at": (row["last_fired_at"].isoformat() if row.get("last_fired_at") else None),
+        "next_fire_at": (row["next_fire_at"].isoformat() if row.get("next_fire_at") else None),
     }
 
 
@@ -573,9 +562,7 @@ async def webhook_inbound(
             if row is None or not row["enabled"]:
                 raise WebhookRejected(path)
             svc.verify_signature(row=row, body=body, signature=effective_sig)
-            inputs = svc.normalize_inputs(
-                row=row, body=body, event_header=x_github_event or ""
-            )
+            inputs = svc.normalize_inputs(row=row, body=body, event_header=x_github_event or "")
         except WebhookRejected:
             return JSONResponse(status_code=401, content={"detail": "REJECTED"})
         task = asyncio.create_task(_fire_background(dict(row), inputs))

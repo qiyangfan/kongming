@@ -9,20 +9,22 @@
 
 ## 当前状态(2026-09-12)
 
-- **053 SQL 安全引擎接入实现完成(2026-09-12,进入影子观察期)**:引擎独立
-  新仓 `~/longzhong/km-sqlguard`(Python 单遍,与内置路径同源 sqlglot AST;
-  v0.1.2 wheel 经 kongming 仓根 `vendor/` 快照引入两进程),api/agent 默认
-  shadow 模式(内置权威,引擎并行判定只记录)。**冒烟证据(2026-09-12)**:
-  流式问答「商品总共有多少个」全链路 PASS(答案 4,与 goods 4 行一致),
-  两进程启动行 `SQLGUARD 管线 mode=shadow,活跃引擎=km-sqlguard
-  version=0.1.2,启动自检通过`,请求期零 ENGINE_FALLBACK 零影子不一致,
-  sys_sql_audit 落 PASS 行;对拍基线 121 例(sqlfw/datascope/evals 冻结,
-  `apps/api/scripts/export_sqlguard_fixtures.py` 重复运行 diff 为空)引擎
-  回放零不一致。切主 = 两进程 `.env` 置 `KM_SQLGUARD_MODE=primary`
-  (agent 前缀 `KM_AGENT_SQLGUARD_MODE`)+ 重启;影子不一致归零且 ≥1 周
-  无 ENGINE_FALLBACK 后归档。深嵌套默认上限 32(实测 256 不可行,
-  引擎实现形态改 Python 等实施期修订见 change design「Decisions(实施期
-  修订)」节)。
+- **053 SQL 安全引擎接入实现完成(2026-09-12,进入影子观察期)**:引擎为
+  本仓 monorepo 共享包 `packages/liannu`(连弩;Python 单遍,与内置路径同源
+  sqlglot AST,v0.1.2;两进程 uv path 依赖引入,**2026-09-12 晚由独立仓
+  km-sqlguard + vendor wheel 并入,vendor 机制退役**——独立性检验五问
+  不占,迁移验证=引擎 21 例全绿+121 例现算与冻结基线逐字节一致),
+  api/agent 默认 shadow 模式(内置权威,引擎并行判定只记录)。**冒烟证据
+  (2026-09-12)**:流式问答「商品总共有多少个」全链路 PASS(答案 4,与
+  goods 4 行一致),两进程启动行 `SQLGUARD 管线 mode=shadow,活跃引擎=
+  liannu version=0.1.2,启动自检通过`,请求期零 ENGINE_FALLBACK 零影子
+  不一致,sys_sql_audit 落 PASS 行;对拍基线 121 例(sqlfw/datascope/
+  evals 冻结,`apps/api/scripts/export_sqlguard_fixtures.py` 重复运行
+  diff 为空)引擎回放零不一致。切主 = 两进程 `.env` 置
+  `KM_SQLGUARD_MODE=primary`(agent 前缀 `KM_AGENT_SQLGUARD_MODE`)+
+  重启;影子不一致归零且 ≥1 周无 ENGINE_FALLBACK 后归档。深嵌套默认
+  上限 32(实测 256 不可行,引擎实现形态改 Python、仓库形态并入 monorepo
+  等实施期修订见 change design「Decisions(实施期修订)」节)。
 - **muniu 网关接线完成(ADR-007,2026-09-11)**:agent 面 LLM 出口已全部指向
   muniu 网关(127.0.0.1:8787;主模型/embedding/vision 注册表 `.env` 三处切换),
   直连冒烟、e2e 问答(verdict PASS)、网关计量与计价实证全过;供应商真实 key
@@ -133,14 +135,12 @@
     注入容器,重签 key 需同步 agent `.env` 两处(主 key+registry qwen-vl
     条目)并重启 agent。管理面/控制台同端口 8787(admin token=本地 dev 值
     `muniu-dev-admin-token`,与 KM_INTERNAL_TOKEN 同级,仅本机)。
-12. **km-sqlguard 引擎仓**(`~/longzhong/km-sqlguard`,053):SQL 安全引擎,
-    uv 工程(`make check`/`make build`)。升版流程:仓内改版本号 →
-    `uv build` → 拷 `dist/km_sqlguard-<版>-py3-none-any.whl` 到 kongming
-    `vendor/` → 两进程 pyproject 改 `==<版>` 与 `[tool.uv.sources]` 路径 →
-    `uv lock && uv sync`。**同名 wheel 换内容会被 uv 按路径缓存的元数据坑
-    (哈希 mismatch 拒装)——必须升版本号,勿覆写同版 wheel**;常驻
-    `uv run uvicorn` 服务持有 uv 缓存锁时 `uv cache clean` 会超时,升版
-    号路线可绕开。
+12. **liannu 引擎共享包**(`packages/liannu`,053;原独立仓 km-sqlguard 已并入):
+    SQL 安全引擎,uv path 依赖。升版流程:包内 `pyproject.toml` 改版本号 →
+    同步两进程 `pyproject.toml` 的 `==<版>` 声明 → `uv lock && uv sync`
+    (path 依赖 editable 生效,无 wheel 缓存坑);对拍基线回放走根
+    `make check` 的 `liannu-check`。历史教训仍有效:**常驻 `uv run uvicorn`
+    服务持有 uv 缓存锁时 `uv cache clean` 会超时**——升版本号路线可绕开。
 
 ## 命令速查
 

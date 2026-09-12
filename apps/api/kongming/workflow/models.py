@@ -91,9 +91,7 @@ def validate_dag(
         if n.id in seen:
             raise DagValidationError(f"节点 id 重复: {n.id}")
         if not _NODE_ID_RE.fullmatch(n.id):
-            raise DagValidationError(
-                f"节点 id 形态非法(仅字母/数字/下划线): {n.id}"
-            )
+            raise DagValidationError(f"节点 id 形态非法(仅字母/数字/下划线): {n.id}")
         if n.id in _reserved:
             raise DagValidationError(f"节点 id 撞保留名/外层节点: {n.id}")
         seen.add(n.id)
@@ -119,9 +117,7 @@ def validate_dag(
             if isinstance(body, list) and body:
                 validate_dag(
                     {"nodes": body},
-                    _reserved=frozenset(
-                        set(_reserved) | {x.id for x in nodes}
-                    ),
+                    _reserved=frozenset(set(_reserved) | {x.id for x in nodes}),
                 )
     ids = {n.id for n in nodes}
     for n in nodes:
@@ -173,8 +169,11 @@ def render_template(template: Any, context: dict[str, Any]) -> Any:
             # 深拷贝:全引用直通不共享可变引用(上下文不可变语义严格化)
             return copy.deepcopy(value)
         return _REF_RE.sub(
-            lambda m: "" if resolve_ref(m.group(1), context) is None
-            else str(resolve_ref(m.group(1), context)),
+            lambda m: (
+                ""
+                if resolve_ref(m.group(1), context) is None
+                else str(resolve_ref(m.group(1), context))
+            ),
             template,
         )
     if isinstance(template, dict):

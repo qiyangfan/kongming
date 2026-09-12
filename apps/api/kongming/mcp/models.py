@@ -69,7 +69,7 @@ def parse_qualified(name: str) -> tuple[str, str] | None:
     server_key 形态校验(不含 __),tool 名允许任意非空残余。"""
     if not name.startswith(MCP_NAME_PREFIX):
         return None
-    rest = name[len(MCP_NAME_PREFIX):]
+    rest = name[len(MCP_NAME_PREFIX) :]
     key, sep, tool = rest.partition("__")
     if not sep or not tool or not SERVER_KEY_RE.fullmatch(key):
         return None

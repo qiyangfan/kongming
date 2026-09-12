@@ -138,9 +138,7 @@ class ToolSpecProvider(Protocol):
     实现侧形态:权限点集查询 + 注册表过滤,独立短会话(同步/流式路径通用)。
     """
 
-    async def authorized_tools(
-        self, user_id: str, tenant_id: str
-    ) -> list[dict[str, object]]: ...
+    async def authorized_tools(self, user_id: str, tenant_id: str) -> list[dict[str, object]]: ...
 
 
 class PendingToolReader(Protocol):

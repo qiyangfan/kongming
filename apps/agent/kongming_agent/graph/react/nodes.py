@@ -120,8 +120,10 @@ async def tool_dispatch(state: ReactState) -> dict[str, object]:
         )
         sig = ""
         if call.args is not None:
-            sig = call.name + "|" + json.dumps(
-                call.args, ensure_ascii=False, sort_keys=True, default=str
+            sig = (
+                call.name
+                + "|"
+                + json.dumps(call.args, ensure_ascii=False, sort_keys=True, default=str)
             )
         if call.args is None:
             # 参数 JSON 畸形:不回调,直接观察喂回 LLM 自纠
@@ -247,14 +249,10 @@ def _capture_execution(
         reason=reason if isinstance(reason, str) else None,
         # isinstance 收窄产物元素型仍 Unknown,cast 收窄(cast 运行时恒等)
         columns=(
-            [str(c) for c in cast("list[object]", columns)]
-            if isinstance(columns, list)
-            else []
+            [str(c) for c in cast("list[object]", columns)] if isinstance(columns, list) else []
         ),
         rows=[
-            list(cast("list[object]", r))
-            for r in cast("list[object]", rows)
-            if isinstance(r, list)
+            list(cast("list[object]", r)) for r in cast("list[object]", rows) if isinstance(r, list)
         ]
         if isinstance(rows, list)
         else [],

@@ -95,9 +95,7 @@ class _Engine:
         if time.monotonic() > self._deadline:
             raise _DeadlineExceeded("全局超时")
 
-    async def execute_node(
-        self, node: NodeDef, context: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def execute_node(self, node: NodeDef, context: dict[str, Any]) -> dict[str, Any]:
         """单节点执行(循环子段复用);返回 outputs(未冻结,调用方冻结)。"""
         self._tick()
         cfg = node.config
@@ -126,16 +124,10 @@ class _Engine:
                 raise NodeFailed(f"非法 method: {method}")
             raw_headers = cfg.get("headers")
             headers: dict[str, Any] = (
-                render_template(raw_headers, context)
-                if isinstance(raw_headers, dict)
-                else {}
+                render_template(raw_headers, context) if isinstance(raw_headers, dict) else {}
             )
             body_raw = cfg.get("body")
-            body = (
-                str(render_template(body_raw, context))
-                if body_raw is not None
-                else None
-            )
+            body = str(render_template(body_raw, context)) if body_raw is not None else None
             try:
                 result = await self._http.run_http(
                     url=url,
@@ -198,9 +190,7 @@ class _Engine:
         if max_iter < 1:
             raise NodeFailed("loop.max_iterations 须 ≥1")
         if len(items) > max_iter:
-            raise NodeFailed(
-                f"循环数组 {len(items)} 项超上限 {max_iter}(硬顶 {_HARD_ITER_CAP})"
-            )
+            raise NodeFailed(f"循环数组 {len(items)} 项超上限 {max_iter}(硬顶 {_HARD_ITER_CAP})")
         collected: list[Any] = []
         sub_by_id = {n.id: n for n in body_nodes}
         for idx, item in enumerate(items):
@@ -277,9 +267,7 @@ def _topo_order(nodes: list[NodeDef]) -> list[NodeDef]:
     return out
 
 
-def _should_skip(
-    node: NodeDef, context: dict[str, Any], by_id: dict[str, NodeDef]
-) -> bool:
+def _should_skip(node: NodeDef, context: dict[str, Any], by_id: dict[str, NodeDef]) -> bool:
     """跳过判定:任一依赖 SKIPPED 传播;条件门仅当依赖是 condition 节点
     (按本节点 config.on[缺省 "true"] 与 dep.outputs.result 比对)——
     其他类型节点产出 bool 型 result 键不触发选路(B2-B6 收紧)。"""

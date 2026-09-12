@@ -3,7 +3,6 @@
 fire-and-forget 零回归。"""
 # pyright: reportPrivateUsage=false
 
-
 from collections.abc import Iterator
 
 import pytest
@@ -32,12 +31,26 @@ class FakeAgentUsage:
             verdict="PASS",
             summary="Bot 应答",
             usage_records=[
-                {"trace_id": tid, "tenant_key": "sakila", "model": "qwen-plus",
-                 "task": "REACT", "prompt_tokens": 100, "completion_tokens": 40,
-                 "total_tokens": 140, "seq": 0},
-                {"trace_id": tid, "tenant_key": "sakila", "model": "qwen-plus",
-                 "task": "SUMMARIZE", "prompt_tokens": 60, "completion_tokens": 20,
-                 "total_tokens": 80, "seq": 1},
+                {
+                    "trace_id": tid,
+                    "tenant_key": "sakila",
+                    "model": "qwen-plus",
+                    "task": "REACT",
+                    "prompt_tokens": 100,
+                    "completion_tokens": 40,
+                    "total_tokens": 140,
+                    "seq": 0,
+                },
+                {
+                    "trace_id": tid,
+                    "tenant_key": "sakila",
+                    "model": "qwen-plus",
+                    "task": "SUMMARIZE",
+                    "prompt_tokens": 60,
+                    "completion_tokens": 20,
+                    "total_tokens": 80,
+                    "seq": 1,
+                },
             ],
         )
 
@@ -54,7 +67,9 @@ def fake_agent_usage() -> Iterator[dict[str, FakeAgentUsage]]:
 
 
 async def test_bot_run_usage_synced_with_bot_id(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser,
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
     fake_agent_usage: dict[str, FakeAgentUsage],
 ) -> None:
     """spec「bot 链路请求内同步落库」:响应返回时用量已落库(bot_id/seq 正确)。"""
@@ -69,16 +84,20 @@ async def test_bot_run_usage_synced_with_bot_id(
     # 035 R1-S2:bot 链路 runner 置 collect_usage=True(按调用方挂载直证)
     assert fake_agent_usage["agent"].calls[0].get("collect_usage") is True
     rows = (
-        await session.execute(
-            text(
-                "SELECT model, task, seq, bot_id IS NOT NULL AS has_bot,"
-                " tenant_id IS NOT NULL AS has_tenant,"
-                " prompt_tokens, completion_tokens"
-                " FROM public.sys_llm_usage WHERE bot_id IS NOT NULL"
-                " ORDER BY seq"
+        (
+            await session.execute(
+                text(
+                    "SELECT model, task, seq, bot_id IS NOT NULL AS has_bot,"
+                    " tenant_id IS NOT NULL AS has_tenant,"
+                    " prompt_tokens, completion_tokens"
+                    " FROM public.sys_llm_usage WHERE bot_id IS NOT NULL"
+                    " ORDER BY seq"
+                )
             )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     assert len(rows) == 2
     assert rows[0]["task"] == "REACT" and rows[0]["seq"] == 0
     assert rows[1]["task"] == "SUMMARIZE" and rows[1]["seq"] == 1
@@ -87,7 +106,8 @@ async def test_bot_run_usage_synced_with_bot_id(
 
 
 async def test_bot_usage_insert_idempotent_on_retry(
-    client: AsyncClient, session: AsyncSession,
+    client: AsyncClient,
+    session: AsyncSession,
 ) -> None:
     """spec「重试冲突按唯一约束静默去重」:同 (trace_id,seq) 重插不炸不重复。"""
     import uuid as _uuid
@@ -101,8 +121,15 @@ async def test_bot_usage_insert_idempotent_on_retry(
     await seed_all(session, get_settings())
     tid = await _default_tenant_id(session)
     records = [
-        {"trace_id": "tr-idem-1", "model": "qwen-plus", "task": "REACT",
-         "prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3, "seq": 0},
+        {
+            "trace_id": "tr-idem-1",
+            "model": "qwen-plus",
+            "task": "REACT",
+            "prompt_tokens": 1,
+            "completion_tokens": 2,
+            "total_tokens": 3,
+            "seq": 0,
+        },
     ]
     bot_id = str(_uuid.uuid4())
     async with get_sessionmaker()() as s:
@@ -113,10 +140,7 @@ async def test_bot_usage_insert_idempotent_on_retry(
     cnt = int(
         (
             await session.execute(
-                text(
-                    "SELECT count(*) FROM public.sys_llm_usage"
-                    " WHERE trace_id='tr-idem-1'"
-                )
+                text("SELECT count(*) FROM public.sys_llm_usage WHERE trace_id='tr-idem-1'")
             )
         ).scalar_one()
     )
@@ -124,8 +148,11 @@ async def test_bot_usage_insert_idempotent_on_retry(
 
 
 async def test_bot_usage_sink_failure_never_blocks(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser,
-    fake_agent_usage: dict[str, FakeAgentUsage], monkeypatch: pytest.MonkeyPatch,
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent_usage: dict[str, FakeAgentUsage],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """spec「落库失败不阻断」:sink 异常,应答照常(失败仅日志)。"""
     from kongming.llmusage.repository import SqlLlmUsageRepo

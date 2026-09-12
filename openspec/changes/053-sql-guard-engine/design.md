@@ -81,8 +81,17 @@
    每次降级 ENGINE_FALLBACK 含 sql/check/异常类别 + 影子不一致含双方
    判定)+ 进程内计数器(fallback/mismatch/shadow);不改 `sys_sql_audit`
    表(提案硬约束:无 schema 变更),verdict 语义照旧落表。
+6. **仓库形态:独立引擎仓并入本仓 monorepo(2026-09-12),vendor wheel 退役。**
+   独立仓的支柱(独立构建矩阵/独立发版/独立门面)全部绑定在已否决的 Rust
+   路线上;Python 化后按独立性检验逐项不占:耦合面为代码语义耦合(reason
+   逐字一致/fixture 源于本仓测试资产)、无外部消费方、无独立部署形态、
+   演进由本仓需求驱动、无独立故障域——单一消费方内部库独立成仓属过早
+   抽象,且 vendor wheel 快照带来三个跨仓同步点(reason 契约/fixture 导出/
+   换 wheel 提交)。并入 `packages/liannu`(uv path 依赖)后三点清零、
+   sqlglot 版本天然对齐。迁移验证:引擎 21 例在 api 环境全绿;121 例基线
+   由导出脚本现算与冻结值逐字节一致;`make check` 全量通过。
 
 ## Open Questions
 
-- wheel 分发:私有 PyPI 还是 git 直接依赖?倾向后者(个人项目免发布面),开工时定。
-- abi3 目标版本随 kongming Python 3.13 锁定 cp313-abi3 还是宽 abi3,引擎仓开工时定。
+(无——原两条随路线收敛消解:wheel 分发→monorepo path 依赖;abi3 目标版本
+随 Rust 路线一并消除。)

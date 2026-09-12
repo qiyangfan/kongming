@@ -44,9 +44,7 @@ class _RagKnowledgeLookup:
         )
 
 
-async def _tenant_id(
-    session: AsyncSession, user_id: str, tenant_key: str | None
-) -> str:
+async def _tenant_id(session: AsyncSession, user_id: str, tenant_key: str | None) -> str:
     """与 memory/chat 同构的租户解析(ACTIVE+default 优先+tiebreak)。
     SQL 单一真理源=kongming.tenant.resolve_tenant(B1-B10 收口)。"""
     from kongming.tenant import resolve_tenant
@@ -65,14 +63,17 @@ async def _assert_datasource_usable(
     if datasource_key == "default":
         return
     row = (
-        await session.execute(
-            text(
-                "SELECT status, tenant_id FROM public.sys_datasource"
-                " WHERE datasource_key = :k"
-            ),
-            {"k": datasource_key},
+        (
+            await session.execute(
+                text(
+                    "SELECT status, tenant_id FROM public.sys_datasource WHERE datasource_key = :k"
+                ),
+                {"k": datasource_key},
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if row is None or row["status"] != "ACTIVE" or str(row["tenant_id"]) != tenant_id:
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
 
@@ -120,6 +121,7 @@ class MetricIn(BaseModel):
 
 class _DefaultIntrospector:
     """default 源:控制面会话直查(目标 schema 集 tenant_<key>+public)。"""
+
     # 023 v1 仅支持 default 源的 introspection;动态源 introspection 随
     # 真实外部 PG 数据源接入评估(design 挂账)
     def __init__(self, session: AsyncSession, tenant_key: str) -> None:
@@ -128,31 +130,35 @@ class _DefaultIntrospector:
 
     async def fetch_fk_pairs(self, *, schemas: list[str]) -> list[dict[str, object]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT fk.table_schema, fk.table_name, fk.column_name,"
-                    "       pk.table_schema AS f_schema, pk.table_name AS f_table,"
-                    "       pk.column_name AS f_col, fk.constraint_name,"
-                    "       fk.ordinal_position"
-                    " FROM information_schema.table_constraints tc"
-                    " JOIN information_schema.key_column_usage fk"
-                    "   ON tc.constraint_name=fk.constraint_name"
-                    "  AND tc.table_schema=fk.table_schema"
-                    " JOIN information_schema.referential_constraints rc"
-                    "   ON tc.constraint_name=rc.constraint_name"
-                    "  AND tc.constraint_schema=rc.constraint_schema"
-                    " JOIN information_schema.key_column_usage pk"
-                    "   ON rc.unique_constraint_name=pk.constraint_name"
-                    "  AND rc.unique_constraint_schema=pk.constraint_schema"
-                    # R1-H1:列序配对(多列 FK 不笛卡尔积):被引用侧序号=
-                    # 引用侧的 position_in_unique_constraint
-                    "  AND pk.ordinal_position = fk.position_in_unique_constraint"
-                    " WHERE tc.constraint_type='FOREIGN KEY'"
-                    "   AND fk.table_schema = ANY(:ss)"
-                ),
-                {"ss": self._schemas},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT fk.table_schema, fk.table_name, fk.column_name,"
+                        "       pk.table_schema AS f_schema, pk.table_name AS f_table,"
+                        "       pk.column_name AS f_col, fk.constraint_name,"
+                        "       fk.ordinal_position"
+                        " FROM information_schema.table_constraints tc"
+                        " JOIN information_schema.key_column_usage fk"
+                        "   ON tc.constraint_name=fk.constraint_name"
+                        "  AND tc.table_schema=fk.table_schema"
+                        " JOIN information_schema.referential_constraints rc"
+                        "   ON tc.constraint_name=rc.constraint_name"
+                        "  AND tc.constraint_schema=rc.constraint_schema"
+                        " JOIN information_schema.key_column_usage pk"
+                        "   ON rc.unique_constraint_name=pk.constraint_name"
+                        "  AND rc.unique_constraint_schema=pk.constraint_schema"
+                        # R1-H1:列序配对(多列 FK 不笛卡尔积):被引用侧序号=
+                        # 引用侧的 position_in_unique_constraint
+                        "  AND pk.ordinal_position = fk.position_in_unique_constraint"
+                        " WHERE tc.constraint_type='FOREIGN KEY'"
+                        "   AND fk.table_schema = ANY(:ss)"
+                    ),
+                    {"ss": self._schemas},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [
             {
                 "source_table": f"{r['table_schema']}.{r['table_name']}",
@@ -226,9 +232,7 @@ async def add_relation(
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
-    await _assert_datasource_usable(
-        session, tenant_id=tid, datasource_key=req.datasource_key
-    )
+    await _assert_datasource_usable(session, tenant_id=tid, datasource_key=req.datasource_key)
     svc = SemanticService(SqlSemanticRepo(session), _RagKnowledgeLookup(session))
     try:
         row_id = await svc.add_relation(
@@ -239,9 +243,7 @@ async def add_relation(
             join_keys=req.join_keys,
         )
     except RelationTableUnknown:
-        raise HTTPException(
-            status_code=400, detail="RELATION_TABLE_UNKNOWN"
-        ) from None
+        raise HTTPException(status_code=400, detail="RELATION_TABLE_UNKNOWN") from None
     return {"id": row_id}
 
 
@@ -254,9 +256,7 @@ async def delete_relation(
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
-    ok = await SqlSemanticRepo(session).delete_relation(
-        relation_id=str(relation_id), tenant_id=tid
-    )
+    ok = await SqlSemanticRepo(session).delete_relation(relation_id=str(relation_id), tenant_id=tid)
     if not ok:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     await session.commit()
@@ -271,9 +271,7 @@ async def list_metrics(
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> list[MetricOut]:
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
-    rows = await SqlSemanticRepo(session).list_metrics(
-        tenant_id=tid, datasource_key=datasource_key
-    )
+    rows = await SqlSemanticRepo(session).list_metrics(tenant_id=tid, datasource_key=datasource_key)
     return [
         MetricOut(
             id=str(r["id"]),
@@ -296,9 +294,7 @@ async def upsert_metric(
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
-    await _assert_datasource_usable(
-        session, tenant_id=tid, datasource_key=req.datasource_key
-    )
+    await _assert_datasource_usable(session, tenant_id=tid, datasource_key=req.datasource_key)
     row_id = await SqlSemanticRepo(session).upsert_metric(
         tenant_id=tid,
         datasource_key=req.datasource_key,

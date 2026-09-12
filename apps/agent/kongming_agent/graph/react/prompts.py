@@ -47,9 +47,7 @@ def build_react_system(bot_system_prompt: str, *, has_tools: bool) -> str:
     return bot + "\n\n" + discipline
 
 
-def initial_user_prompt(
-    question: str, history: list[str], memory_hint: str = ""
-) -> str:
+def initial_user_prompt(question: str, history: list[str], memory_hint: str = "") -> str:
     """首轮 user 消息:多轮历史(旧→新)+ 当前问题(与 8 节点图 history 语义同构);
     022:memory_hint 非空时追加「已知信息」段(控制面注入)。"""
     memory_part = f"{memory_hint.strip()}\n\n" if memory_hint.strip() else ""

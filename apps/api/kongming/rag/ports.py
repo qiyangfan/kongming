@@ -63,9 +63,7 @@ class SuggestionCacheEvictor(Protocol):
 class TableDescriberPort(Protocol):
     """表元数据润色(api→agent /internal/describe-table;enriched=False 即降级纯结构)。"""
 
-    async def describe(
-        self, block: TableBlock, schema_name: str
-    ) -> tuple[bool, TableBlock]: ...
+    async def describe(self, block: TableBlock, schema_name: str) -> tuple[bool, TableBlock]: ...
 
 
 class RagRepo(Protocol):
@@ -192,8 +190,6 @@ class RagRepo(Protocol):
         按 created_at 降序,行数受应用层上限约束)。"""
         ...
 
-    async def history_overview(
-        self, *, tenant_id: str, datasource_key: str
-    ) -> HistoryOverview:
+    async def history_overview(self, *, tenant_id: str, datasource_key: str) -> HistoryOverview:
         """few-shot 通道概况:成功沉淀条数/去重问题数/上限占用。"""
         ...

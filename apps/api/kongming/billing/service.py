@@ -102,14 +102,22 @@ class BillingService:
             if "TOKENS" in bot_pols:
                 bp = bot_pols["TOKENS"]
                 vb = check_quota(
-                    used=bot_tokens, limit=int(bp["limit_value"]),
-                    warn_pct=int(bp["warn_pct"]), dimension="TOKENS",
+                    used=bot_tokens,
+                    limit=int(bp["limit_value"]),
+                    warn_pct=int(bp["warn_pct"]),
+                    dimension="TOKENS",
                 )
                 if not vb.allowed:
                     await self._audit(
-                        "billing.quota_reject", tenant_id,
-                        {"scope": "BOT", "bot_id": str(bot_id), "dimension": "TOKENS",
-                         "used": bot_tokens, "limit": int(bp["limit_value"])},
+                        "billing.quota_reject",
+                        tenant_id,
+                        {
+                            "scope": "BOT",
+                            "bot_id": str(bot_id),
+                            "dimension": "TOKENS",
+                            "used": bot_tokens,
+                            "limit": int(bp["limit_value"]),
+                        },
                     )
                     return False, "BOT:TOKENS", ""
                 if vb.warn and int(bp["limit_value"]) > 0:
@@ -121,14 +129,22 @@ class BillingService:
                     tokens=bot_tokens, calls=0, price_per_mtok=pm, price_per_call=0
                 )
                 vc = check_quota(
-                    used=bot_cost, limit=int(bp["limit_value"]),
-                    warn_pct=int(bp["warn_pct"]), dimension="COST",
+                    used=bot_cost,
+                    limit=int(bp["limit_value"]),
+                    warn_pct=int(bp["warn_pct"]),
+                    dimension="COST",
                 )
                 if not vc.allowed:
                     await self._audit(
-                        "billing.quota_reject", tenant_id,
-                        {"scope": "BOT", "bot_id": str(bot_id), "dimension": "COST",
-                         "used": bot_cost, "limit": int(bp["limit_value"])},
+                        "billing.quota_reject",
+                        tenant_id,
+                        {
+                            "scope": "BOT",
+                            "bot_id": str(bot_id),
+                            "dimension": "COST",
+                            "used": bot_cost,
+                            "limit": int(bp["limit_value"]),
+                        },
                     )
                     return False, "BOT:COST", ""
                 if vc.warn:
@@ -137,11 +153,15 @@ class BillingService:
         tokens = await self._repo.month_token_usage(tenant_id=tenant_id, month=month)
         calls = await self._repo.month_call_count(tenant_id=tenant_id, month=month)
         # 限额解析:策略优先,套餐兜底(0=不限)
-        token_limit = int(policies["TOKENS"]["limit_value"]) if "TOKENS" in policies else (
-            int(plan["monthly_tokens"]) if plan else 0
+        token_limit = (
+            int(policies["TOKENS"]["limit_value"])
+            if "TOKENS" in policies
+            else (int(plan["monthly_tokens"]) if plan else 0)
         )
-        call_limit = int(policies["CALLS"]["limit_value"]) if "CALLS" in policies else (
-            int(plan["monthly_calls"]) if plan else 0
+        call_limit = (
+            int(policies["CALLS"]["limit_value"])
+            if "CALLS" in policies
+            else (int(plan["monthly_calls"]) if plan else 0)
         )
         cost_limit = int(policies["COST"]["limit_value"]) if "COST" in policies else 0
 
@@ -149,21 +169,19 @@ class BillingService:
         def _wp(dim: str) -> int:
             return int(policies[dim]["warn_pct"]) if dim in policies else 80
 
-        vt = check_quota(
-            used=tokens, limit=token_limit, warn_pct=_wp("TOKENS"), dimension="TOKENS"
-        )
+        vt = check_quota(used=tokens, limit=token_limit, warn_pct=_wp("TOKENS"), dimension="TOKENS")
         if not vt.allowed:
             await self._audit(
-                "billing.quota_reject", tenant_id,
+                "billing.quota_reject",
+                tenant_id,
                 {"dimension": "TOKENS", "used": tokens, "limit": token_limit},
             )
             return False, "TOKENS", ""
-        vc = check_quota(
-            used=calls, limit=call_limit, warn_pct=_wp("CALLS"), dimension="CALLS"
-        )
+        vc = check_quota(used=calls, limit=call_limit, warn_pct=_wp("CALLS"), dimension="CALLS")
         if not vc.allowed:
             await self._audit(
-                "billing.quota_reject", tenant_id,
+                "billing.quota_reject",
+                tenant_id,
                 {"dimension": "CALLS", "used": calls, "limit": call_limit},
             )
             return False, "CALLS", ""
@@ -171,15 +189,12 @@ class BillingService:
         if cost_limit > 0:
             pm = int(plan["price_per_mtok"]) if plan else 0
             pc = int(plan["price_per_call"]) if plan else 0
-            cost = estimate_cost(
-                tokens=tokens, calls=calls, price_per_mtok=pm, price_per_call=pc
-            )
-            vcost = check_quota(
-                used=cost, limit=cost_limit, warn_pct=_wp("COST"), dimension="COST"
-            )
+            cost = estimate_cost(tokens=tokens, calls=calls, price_per_mtok=pm, price_per_call=pc)
+            vcost = check_quota(used=cost, limit=cost_limit, warn_pct=_wp("COST"), dimension="COST")
             if not vcost.allowed:
                 await self._audit(
-                    "billing.quota_reject", tenant_id,
+                    "billing.quota_reject",
+                    tenant_id,
                     {"dimension": "COST", "used": cost, "limit": cost_limit},
                 )
                 return False, "COST", ""
@@ -195,8 +210,14 @@ class BillingService:
     # ── 配置 ──
 
     async def upsert_policy(
-        self, *, tenant_id: str, dimension: str, limit_value: int, warn_pct: int,
-        scope: str = "TENANT", scope_ref: str | None = None,
+        self,
+        *,
+        tenant_id: str,
+        dimension: str,
+        limit_value: int,
+        warn_pct: int,
+        scope: str = "TENANT",
+        scope_ref: str | None = None,
     ) -> None:
         if dimension not in ("TOKENS", "CALLS", "COST"):
             raise BillingValidationError("dimension 须为 TOKENS/CALLS/COST")
@@ -212,9 +233,7 @@ class BillingService:
                 raise BillingValidationError("CALLS 维度不支持 BOT 级配额")
             if not scope_ref:
                 raise BillingValidationError("BOT 级须指定 scope_ref(bot_id)")
-            if not await self._repo.bot_exists_in_tenant(
-                bot_id=scope_ref, tenant_id=tenant_id
-            ):
+            if not await self._repo.bot_exists_in_tenant(bot_id=scope_ref, tenant_id=tenant_id):
                 raise BillingNotFound("BOT_NOT_FOUND")
         else:
             scope_ref = None  # TENANT 强制空(CHECK 互斥;防脏数据)
@@ -227,9 +246,9 @@ class BillingService:
             scope_ref=scope_ref,
         )
         await self._audit(
-            "billing.policy.upsert", tenant_id,
-            {"dimension": dimension, "limit": limit_value,
-             "scope": scope, "scope_ref": scope_ref},
+            "billing.policy.upsert",
+            tenant_id,
+            {"dimension": dimension, "limit": limit_value, "scope": scope, "scope_ref": scope_ref},
         )
 
     async def create_plan(self, **kw: Any) -> str:
@@ -251,9 +270,7 @@ class BillingService:
         created = 0
         for tenant in tenants:
             tid = str(tenant["id"])
-            by_model = await self._repo.month_usage_by_model(
-                tenant_id=tid, month=period
-            )
+            by_model = await self._repo.month_usage_by_model(tenant_id=tid, month=period)
             if not by_model:
                 continue  # 零用量不出账
             tokens = await self._repo.month_token_usage(tenant_id=tid, month=period)
@@ -261,9 +278,7 @@ class BillingService:
             plan = await self._repo.get_tenant_plan(tenant_id=tid)
             pm = int(plan["price_per_mtok"]) if plan else 0
             pc = int(plan["price_per_call"]) if plan else 0
-            amount = estimate_cost(
-                tokens=tokens, calls=calls, price_per_mtok=pm, price_per_call=pc
-            )
+            amount = estimate_cost(tokens=tokens, calls=calls, price_per_mtok=pm, price_per_call=pc)
             rid = await self._repo.insert_invoice(
                 tenant_id=tid,
                 period=period,
@@ -302,9 +317,7 @@ class BillingService:
         policies = await self._repo.list_policies(tenant_id=tenant_id)
         pm = int(plan["price_per_mtok"]) if plan else 0
         pc = int(plan["price_per_call"]) if plan else 0
-        cost = estimate_cost(
-            tokens=tokens, calls=calls, price_per_mtok=pm, price_per_call=pc
-        )
+        cost = estimate_cost(tokens=tokens, calls=calls, price_per_mtok=pm, price_per_call=pc)
         return {
             "month": month,
             "tokens": tokens,
@@ -327,15 +340,24 @@ class BillingService:
                 raise BillingValidationError(f"{k} 须 ≥0")
         await self._repo.update_plan(plan_id=plan_id, **kw)
         await self._audit(
-            "billing.plan.update", str(old["plan_key"]),
-            {"before": {"name": old["name"], "monthly_tokens": int(old["monthly_tokens"]),
-                        "monthly_calls": int(old["monthly_calls"]),
-                        "price_per_mtok": int(old["price_per_mtok"]),
-                        "price_per_call": int(old["price_per_call"])},
-             "after": {"name": kw["name"], "monthly_tokens": kw["monthly_tokens"],
-                       "monthly_calls": kw["monthly_calls"],
-                       "price_per_mtok": kw["price_per_mtok"],
-                       "price_per_call": kw["price_per_call"]}},
+            "billing.plan.update",
+            str(old["plan_key"]),
+            {
+                "before": {
+                    "name": old["name"],
+                    "monthly_tokens": int(old["monthly_tokens"]),
+                    "monthly_calls": int(old["monthly_calls"]),
+                    "price_per_mtok": int(old["price_per_mtok"]),
+                    "price_per_call": int(old["price_per_call"]),
+                },
+                "after": {
+                    "name": kw["name"],
+                    "monthly_tokens": kw["monthly_tokens"],
+                    "monthly_calls": kw["monthly_calls"],
+                    "price_per_mtok": kw["price_per_mtok"],
+                    "price_per_call": kw["price_per_call"],
+                },
+            },
         )
 
     async def delete_plan(self, *, plan_id: str) -> None:
@@ -345,9 +367,7 @@ class BillingService:
         if await self._repo.count_plan_bindings(plan_id=plan_id) > 0:
             raise PaymentConflict("PLAN_IN_USE")
         await self._repo.delete_plan(plan_id=plan_id)
-        await self._audit(
-            "billing.plan.delete", str(old["plan_key"]), {"name": old["name"]}
-        )
+        await self._audit("billing.plan.delete", str(old["plan_key"]), {"name": old["name"]})
 
     # ── 支付闭环(035) ──
 
@@ -371,9 +391,7 @@ class BillingService:
         # 旧在途单:过期的惰性置 EXPIRED(审计),剩余置 CANCELLED(重付语义)
         old_open = await self._repo.latest_payment_for_invoice(invoice_id=invoice_id)
         if old_open is not None and old_open["status"] == "CREATED":
-            if await self._repo.expire_payment_if_overdue(
-                payment_id=str(old_open["id"])
-            ):
+            if await self._repo.expire_payment_if_overdue(payment_id=str(old_open["id"])):
                 await self._audit(
                     "payment.expired", str(old_open["id"]), {"invoice_id": invoice_id}
                 )
@@ -384,50 +402,41 @@ class BillingService:
             )
         expires = dt.datetime.now(dt.UTC) + dt.timedelta(minutes=self._ttl)
         rid = await self._repo.insert_payment_if_pending(
-            invoice_id=invoice_id, tenant_id=tenant_id, channel=ch.key,
-            amount=int(inv["amount"]), expires_at=expires,
+            invoice_id=invoice_id,
+            tenant_id=tenant_id,
+            channel=ch.key,
+            amount=int(inv["amount"]),
+            expires_at=expires,
         )
         if rid is None:
             # 并发分流:账单已非 PENDING(被支付/作废)→409;仍有在途单
             # (并发双击本方取消未覆盖)→幂等返回现有单
-            cur = await self._repo.get_invoice(
-                invoice_id=invoice_id, tenant_id=tenant_id
-            )
+            cur = await self._repo.get_invoice(invoice_id=invoice_id, tenant_id=tenant_id)
             if cur is None or not can_create_payment(str(cur["status"])):
-                raise PaymentConflict(
-                    f"INVOICE_{cur['status'] if cur else 'NOT_FOUND'}"
-                )
-            open_pay = await self._repo.latest_payment_for_invoice(
-                invoice_id=invoice_id
-            )
+                raise PaymentConflict(f"INVOICE_{cur['status'] if cur else 'NOT_FOUND'}")
+            open_pay = await self._repo.latest_payment_for_invoice(invoice_id=invoice_id)
             if open_pay is not None and open_pay["status"] == "CREATED":
                 return dict(open_pay)
             raise PaymentConflict("INVOICE_RACE")  # 理论不可达(防御)
         await self._audit(
-            "payment.create", rid,
-            {"invoice_id": invoice_id, "amount": int(inv["amount"]),
-             "channel": ch.key},
+            "payment.create",
+            rid,
+            {"invoice_id": invoice_id, "amount": int(inv["amount"]), "channel": ch.key},
         )
         row = await self._repo.get_payment(payment_id=rid)
         if row is None:  # 同事务刚插入,理论不可达;显式异常代 assert(S101)
             raise BillingNotFound("PAYMENT_VANISHED")
         return dict(row)
 
-    async def get_portal_payment(
-        self, *, payment_id: str, tenant_id: str
-    ) -> dict[str, Any]:
+    async def get_portal_payment(self, *, payment_id: str, tenant_id: str) -> dict[str, Any]:
         """门户查询(归属复校+惰性过期)。"""
-        pay = await self._repo.get_payment_for_tenant(
-            payment_id=payment_id, tenant_id=tenant_id
-        )
+        pay = await self._repo.get_payment_for_tenant(payment_id=payment_id, tenant_id=tenant_id)
         if pay is None:
             raise BillingNotFound("NOT_FOUND")
         if pay["status"] == "CREATED" and await self._repo.expire_payment_if_overdue(
             payment_id=payment_id
         ):
-            await self._audit(
-                "payment.expired", payment_id, {"invoice_id": str(pay["invoice_id"])}
-            )
+            await self._audit("payment.expired", payment_id, {"invoice_id": str(pay["invoice_id"])})
             pay = await self._repo.get_payment(payment_id=payment_id)
             if pay is None:  # 刚置 EXPIRED 的行,理论不可达(S101)
                 raise BillingNotFound("PAYMENT_VANISHED")
@@ -438,13 +447,20 @@ class BillingService:
         if not await self._repo.cas_cancel_payment(payment_id=payment_id):
             raise PaymentConflict(f"PAYMENT_{pay['status']}")
         await self._audit(
-            "payment.cancel", payment_id,
+            "payment.cancel",
+            payment_id,
             {"invoice_id": str(pay["invoice_id"]), "reason": "user"},
         )
 
     async def reconcile_payment(
-        self, *, channel: str, payment_id: str, trade_no: str,
-        result: str, amount: int, sign: str,
+        self,
+        *,
+        channel: str,
+        payment_id: str,
+        trade_no: str,
+        result: str,
+        amount: int,
+        sign: str,
     ) -> dict[str, Any]:
         """**唯一核销点**(design D1):两入口(mock-simulate/callback)汇聚。
         验签→金额复核→惰性过期→CAS→invoice 同事务联动→审计;
@@ -455,16 +471,18 @@ class BillingService:
         if pay is None:
             raise BillingNotFound("NOT_FOUND")
         if not ch.verify(
-            payment_id=payment_id, trade_no=trade_no, result=result,
-            amount=amount, sign=sign,
+            payment_id=payment_id,
+            trade_no=trade_no,
+            result=result,
+            amount=amount,
+            sign=sign,
         ):
-            await self._audit(
-                "payment.bad_signature", payment_id, {"channel": channel}
-            )
+            await self._audit("payment.bad_signature", payment_id, {"channel": channel})
             raise PaymentBadSignature("BAD_SIGNATURE")
         if int(amount) != int(pay["amount"]):
             await self._audit(
-                "payment.amount_mismatch", payment_id,
+                "payment.amount_mismatch",
+                payment_id,
                 {"expected": int(pay["amount"]), "got": int(amount)},
             )
             raise BillingValidationError("AMOUNT_MISMATCH")
@@ -472,35 +490,37 @@ class BillingService:
         if pay["status"] == "CREATED" and await self._repo.expire_payment_if_overdue(
             payment_id=payment_id
         ):
-            await self._audit(
-                "payment.expired", payment_id, {"invoice_id": str(pay["invoice_id"])}
-            )
+            await self._audit("payment.expired", payment_id, {"invoice_id": str(pay["invoice_id"])})
             pay["status"] = "EXPIRED"
         if result == "FAILURE":
             if pay["status"] == "CREATED":
-                await self._audit(
-                    "payment.failed", payment_id, {"trade_no": trade_no}
-                )
-            return {"idempotent": pay["status"] != "CREATED",
-                    "status": str(pay["status"])}
+                await self._audit("payment.failed", payment_id, {"trade_no": trade_no})
+            return {"idempotent": pay["status"] != "CREATED", "status": str(pay["status"])}
         ok = await self._repo.cas_pay(payment_id=payment_id, trade_no=trade_no)
         if not ok:
             # R1-T2:幂等败者重读——并发双回调败者拿到的快照可能已陈旧
             fresh = await self._repo.get_payment(payment_id=payment_id)
-            return {"idempotent": True,
-                    "status": str(fresh["status"]) if fresh else str(pay["status"])}
+            return {
+                "idempotent": True,
+                "status": str(fresh["status"]) if fresh else str(pay["status"]),
+            }
         linked = await self._repo.mark_invoice_paid(invoice_id=str(pay["invoice_id"]))
         if not linked:
             # R1-S1:单已 PAID 而账单非 PENDING(极端并发:作废/重复支付窗)——
             # 钱已收,静默当正常不可取,落异常审计给运维信号
             await self._audit(
-                "payment.invoice_not_pending", payment_id,
+                "payment.invoice_not_pending",
+                payment_id,
                 {"invoice_id": str(pay["invoice_id"]), "trade_no": trade_no},
             )
         await self._audit(
-            "payment.paid", payment_id,
-            {"invoice_id": str(pay["invoice_id"]), "trade_no": trade_no,
-             "amount": int(pay["amount"])},
+            "payment.paid",
+            payment_id,
+            {
+                "invoice_id": str(pay["invoice_id"]),
+                "trade_no": trade_no,
+                "amount": int(pay["amount"]),
+            },
         )
         return {"idempotent": False, "status": "PAID"}
 
@@ -513,12 +533,18 @@ class BillingService:
         pay = await self.get_portal_payment(payment_id=payment_id, tenant_id=tenant_id)
         trade_no = ch.new_trade_no()
         sign = ch.sign_payload(
-            payment_id=payment_id, trade_no=trade_no, result=result,
+            payment_id=payment_id,
+            trade_no=trade_no,
+            result=result,
             amount=int(pay["amount"]),
         )
         return await self.reconcile_payment(
-            channel=ch.key, payment_id=payment_id, trade_no=trade_no,
-            result=result, amount=int(pay["amount"]), sign=sign,
+            channel=ch.key,
+            payment_id=payment_id,
+            trade_no=trade_no,
+            result=result,
+            amount=int(pay["amount"]),
+            sign=sign,
         )
 
     async def void_invoice(self, *, invoice_id: str) -> None:
@@ -531,9 +557,13 @@ class BillingService:
         if not await self._repo.cas_void_invoice(invoice_id=invoice_id):
             raise PaymentConflict(f"INVOICE_{inv['status']}")
         await self._audit(
-            "billing.invoice.void", invoice_id,
-            {"period": str(inv["period"]), "amount": int(inv["amount"]),
-             "open_payments_cancelled": cancelled},
+            "billing.invoice.void",
+            invoice_id,
+            {
+                "period": str(inv["period"]),
+                "amount": int(inv["amount"]),
+                "open_payments_cancelled": cancelled,
+            },
         )
 
     async def expire_overdue_payments(self) -> int:
@@ -541,7 +571,8 @@ class BillingService:
         rows = await self._repo.expire_overdue_payments()
         for r in rows:
             await self._audit(
-                "payment.expired", str(r["id"]),
+                "payment.expired",
+                str(r["id"]),
                 {"invoice_id": str(r["invoice_id"]), "via": "sweeper"},
             )
         return len(rows)

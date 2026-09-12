@@ -248,9 +248,7 @@ async def usage_timeline(
                 "name": f"{r['model']}/{r['task']}",
                 "status": str(r["status"]),
                 "tokens": int(r["total_tokens"]),
-                "latency_ms": (
-                    int(r["latency_ms"]) if r["latency_ms"] is not None else None
-                ),
+                "latency_ms": (int(r["latency_ms"]) if r["latency_ms"] is not None else None),
                 "ts": r["created_at"],
             }
         )
@@ -261,9 +259,7 @@ async def usage_timeline(
                 "name": str(r["tool_name"]),
                 "status": str(r["status"]),
                 "tokens": None,
-                "latency_ms": (
-                    int(r["duration_ms"]) if r["duration_ms"] is not None else None
-                ),
+                "latency_ms": (int(r["duration_ms"]) if r["duration_ms"] is not None else None),
                 "ts": r["created_at"],
             }
         )
@@ -275,9 +271,7 @@ async def usage_timeline(
                 "name": str(r["datasource_key"]),
                 "status": str(r["verdict"]),
                 "tokens": None,
-                "latency_ms": (
-                    int(r["duration_ms"]) if r["duration_ms"] is not None else None
-                ),
+                "latency_ms": (int(r["duration_ms"]) if r["duration_ms"] is not None else None),
                 "ts": r["created_at"],
             }
         )

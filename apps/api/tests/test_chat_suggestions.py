@@ -328,9 +328,7 @@ async def test_concurrent_first_visit_generates_once(
 # ---- datasource 管理变更级联失效(039 缓存生命周期) ----
 
 
-def _update_body(
-    row: dict[str, object], tenant_id: str, **over: object
-) -> dict[str, Any]:
+def _update_body(row: dict[str, object], tenant_id: str, **over: object) -> dict[str, Any]:
     body: dict[str, object] = {
         "datasource_key": row["datasource_key"],
         "tenant_id": tenant_id,
@@ -376,10 +374,14 @@ async def test_connection_change_evicts_cache(
     assert len(await _cache_rows(session, "sugev")) == 1
 
     row = (
-        await session.execute(
-            text("SELECT * FROM public.sys_datasource WHERE datasource_key='sugev'")
+        (
+            await session.execute(
+                text("SELECT * FROM public.sys_datasource WHERE datasource_key='sugev'")
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     dsid = await _ds_id(session, "sugev")
 
     # 仅改 name:缓存保留

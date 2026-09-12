@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/page-header";
 import {
   Select,
   SelectContent,
@@ -125,9 +126,7 @@ export default function RagPage() {
     onError: (e: Error) => {
       // 040 写边界闸 detail 映射(黑话禁入用户文案)
       const reason =
-        e.message === "SCHEMA_NOT_ALLOWED"
-          ? "schema 不在该数据源的可扫描集合"
-          : e.message;
+        e.message === "SCHEMA_NOT_ALLOWED" ? "schema 不在该数据源的可扫描集合" : e.message;
       setError(`上传失败:${reason}`);
       setNotice(null);
     },
@@ -228,53 +227,52 @@ export default function RagPage() {
           </Button>
         </div>
       )}
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">知识库</h1>
-        <div className="flex items-center gap-2">
-          <Select value={actionDs || "default"} onValueChange={setActionDs}>
-            <SelectTrigger className="w-40">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(options ?? []).map((o) => (
-                <SelectItem key={o.datasource_key} value={o.datasource_key}>
-                  {o.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                onClick={() => fetchMeta.mutate()}
-                disabled={fetchMeta.isPending}
-              >
-                {fetchMeta.isPending ? "扫描中…" : "扫描数据源"}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-72">
-              读取该数据源的表结构,由 AI 生成每张表的业务说明并保存到知识库(耗时较长);人工精修的条目不会被覆盖。
-            </TooltipContent>
-          </Tooltip>
-          <Button
-            variant="destructive"
-            onClick={() => setReindexOpen(true)}
-            disabled={reindex.isPending}
-          >
-            重建索引
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="知识库"
+        actions={
+          <div className="flex items-center gap-2">
+            <Select value={actionDs || "default"} onValueChange={setActionDs}>
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(options ?? []).map((o) => (
+                  <SelectItem key={o.datasource_key} value={o.datasource_key}>
+                    {o.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  onClick={() => fetchMeta.mutate()}
+                  disabled={fetchMeta.isPending}
+                >
+                  {fetchMeta.isPending ? "扫描中…" : "扫描数据源"}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-72">
+                读取该数据源的表结构,由 AI
+                生成每张表的业务说明并保存到知识库(耗时较长);人工精修的条目不会被覆盖。
+              </TooltipContent>
+            </Tooltip>
+            <Button
+              variant="destructive"
+              onClick={() => setReindexOpen(true)}
+              disabled={reindex.isPending}
+            >
+              重建索引
+            </Button>
+          </div>
+        }
+      />
 
       {(error || notice) && (
         <p
           role="alert"
-          className={
-            error
-              ? "text-sm text-destructive"
-              : "text-sm text-muted-foreground"
-          }
+          className={error ? "text-sm text-destructive" : "text-sm text-muted-foreground"}
         >
           {error ?? notice}
         </p>
@@ -295,7 +293,9 @@ export default function RagPage() {
               </Button>
             </TooltipTrigger>
             <TooltipContent className="max-w-72">
-              {"教 AI 认识数据表——字段含义、业务别名、示例问题。可上传文档补充,或用「重建索引」自动扫描生成。"}
+              {
+                "教 AI 认识数据表——字段含义、业务别名、示例问题。可上传文档补充,或用「重建索引」自动扫描生成。"
+              }
             </TooltipContent>
           </Tooltip>
         </div>
@@ -326,11 +326,7 @@ export default function RagPage() {
               <SelectTrigger id="rag-upload-schema" className="w-40">
                 <SelectValue
                   placeholder={
-                    schemas.isError
-                      ? "候选加载失败"
-                      : schemas.isPending
-                        ? "加载中…"
-                        : "选择 schema"
+                    schemas.isError ? "候选加载失败" : schemas.isPending ? "加载中…" : "选择 schema"
                   }
                 />
               </SelectTrigger>
@@ -363,8 +359,7 @@ export default function RagPage() {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent className="max-w-72">
-                  支持 Markdown / TXT / PDF / Word 文档,文本类不超过 1MB,PDF 和
-                  Word 不超过 10MB。
+                  支持 Markdown / TXT / PDF / Word 文档,文本类不超过 1MB,PDF 和 Word 不超过 10MB。
                 </TooltipContent>
               </Tooltip>
             </Label>
@@ -386,9 +381,7 @@ export default function RagPage() {
             <Button
               variant="outline"
               onClick={() => fileRef.current?.click()}
-              disabled={
-                upload.isPending || schemas.isPending || !uploadSchema
-              }
+              disabled={upload.isPending || schemas.isPending || !uploadSchema}
             >
               {upload.isPending ? "上传中…" : "选择文件并上传"}
             </Button>
@@ -465,19 +458,10 @@ export default function RagPage() {
                 {new Date(item.updated_at).toLocaleString("zh-CN")}
               </TableCell>
               <TableCell className="text-right">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => openEdit(item)}
-                >
+                <Button variant="ghost" size="sm" onClick={() => openEdit(item)}>
                   编辑
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-destructive hover:text-destructive"
-                  onClick={() => setDeleteTarget(item)}
-                >
+                <Button variant="ghost-destructive" size="sm" onClick={() => setDeleteTarget(item)}>
                   删除
                 </Button>
               </TableCell>
@@ -602,8 +586,8 @@ export default function RagPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>删除知识条目?</AlertDialogTitle>
             <AlertDialogDescription>
-              将删除表 {deleteTarget?.schema_name}.{deleteTarget?.table_name} 的知识条目,
-              删除后 AI 问答不再引用;此操作不可恢复。
+              将删除表 {deleteTarget?.schema_name}.{deleteTarget?.table_name} 的知识条目, 删除后 AI
+              问答不再引用;此操作不可恢复。
             </AlertDialogDescription>
           </AlertDialogHeader>
           {remove.isError && (
@@ -629,9 +613,8 @@ export default function RagPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>重建索引?</AlertDialogTitle>
             <AlertDialogDescription>
-              将清空数据源「{actionDs || "default"}」在该租户的全部表说明并重新扫描
-              (含 AI 润色)——人工上传/精修的条目也会被清掉,回到自动生成基线。
-              大库耗时较长,请耐心等待。
+              将清空数据源「{actionDs || "default"}」在该租户的全部表说明并重新扫描 (含 AI
+              润色)——人工上传/精修的条目也会被清掉,回到自动生成基线。 大库耗时较长,请耐心等待。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -663,7 +646,7 @@ function DocumentsSection({ datasource }: { datasource: string }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [removing, setRemoving] = useState<DocItem | null>(null);  // R1-L7
+  const [removing, setRemoving] = useState<DocItem | null>(null); // R1-L7
   const [delErr, setDelErr] = useState<string | null>(null);
   const docs = useQuery({
     queryKey: ["rag-docs", datasource],
@@ -713,8 +696,8 @@ function DocumentsSection({ datasource }: { datasource: string }) {
               </Button>
             </TooltipTrigger>
             <TooltipContent className="max-w-72">
-              存放政策、流程、规范等资料,支持 Markdown / TXT / PDF /
-              Word。上传后用户问到相关内容,AI 直接按文档回答并标注出处,不查数据库。
+              存放政策、流程、规范等资料,支持 Markdown / TXT / PDF / Word。上传后用户问到相关内容,AI
+              直接按文档回答并标注出处,不查数据库。
             </TooltipContent>
           </Tooltip>
         </div>
@@ -724,7 +707,11 @@ function DocumentsSection({ datasource }: { datasource: string }) {
           disabled={busy}
           onClick={() => fileRef.current?.click()}
         >
-          {busy ? <LoaderIcon className="animate-spin" aria-hidden /> : <Upload className="size-3.5" aria-hidden />}
+          {busy ? (
+            <LoaderIcon className="animate-spin" aria-hidden />
+          ) : (
+            <Upload className="size-3.5" aria-hidden />
+          )}
           上传文档
         </Button>
         <input
@@ -739,7 +726,11 @@ function DocumentsSection({ datasource }: { datasource: string }) {
           }}
         />
       </div>
-      {err && <p className="text-xs text-destructive" role="alert">{err}</p>}
+      {err && (
+        <p className="text-xs text-destructive" role="alert">
+          {err}
+        </p>
+      )}
       <div className="divide-y">
         {docs.isLoading ? (
           <div className="py-4 text-center">
@@ -785,7 +776,11 @@ function DocumentsSection({ datasource }: { datasource: string }) {
               删除后其全部知识块移除,知识问答不再引用该文档。
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {delErr && <p className="text-xs text-destructive" role="alert">{delErr}</p>}
+          {delErr && (
+            <p className="text-xs text-destructive" role="alert">
+              {delErr}
+            </p>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={delDoc.isPending}>再想想</AlertDialogCancel>
             <AlertDialogAction

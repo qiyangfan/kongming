@@ -44,9 +44,7 @@ class AesGcmCipher:
             except binascii.Error as e:
                 raise ValueError("KM_DATASOURCE_ENCRYPT_KEY 须为 base64") from e
             if len(key_bytes) not in (16, 32):
-                raise ValueError(
-                    "KM_DATASOURCE_ENCRYPT_KEY 解码后须为 16/32 字节(AES-128/256)"
-                )
+                raise ValueError("KM_DATASOURCE_ENCRYPT_KEY 解码后须为 16/32 字节(AES-128/256)")
         self._aes = AESGCM(key_bytes)
 
     def encrypt(self, plain: str) -> str:

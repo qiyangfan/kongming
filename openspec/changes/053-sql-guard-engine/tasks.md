@@ -34,3 +34,8 @@
 
 - [x] 7.1 import-linter 契约核查(agent 零凭证约束不放宽)+ `make check` 全量;验证:make check 全绿。
 - [x] 7.2 手工冒烟:一次完整 NL2SQL 问答链路(流式),审计日志确认单次解析与活跃引擎记录;验证:冒烟证据贴 HANDOFF。
+
+## 8. 仓库形态合并(2026-09-12;独立仓 → packages/liannu,见 design 修订 6)
+
+- [x] 8.1 引擎代码并入 `packages/liannu/`(源码+tests+冻结 fixture 原样迁移,包名定名连弩 liannu);验证:引擎 21 例在 api 环境全绿。
+- [x] 8.2 两进程依赖切 uv path 依赖,import 改 `liannu`,fixture 导出脚本输出路径改仓内,vendor wheel 退役;验证:导出现算与冻结基线逐字节一致;`make check` 全量通过(api ruff/mypy 覆盖引擎代码,新增 liannu-check 目标)。

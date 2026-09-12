@@ -124,9 +124,7 @@ async def describe_table(spec: TableSpec, llm: LlmClient) -> DescribedTable:
     )
 
     try:
-        raw = await llm.chat(
-            _SYSTEM_PROMPT, user_prompt, temperature=0.1, task="DESCRIBE"
-        )
+        raw = await llm.chat(_SYSTEM_PROMPT, user_prompt, temperature=0.1, task="DESCRIBE")
     except LlmError as e:
         raise DescribeError(f"LLM 调用失败: {e}") from e
     data = _parse_json_loose(raw)

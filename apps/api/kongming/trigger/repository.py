@@ -84,38 +84,47 @@ class SqlTriggerRepo:
 
     async def get(self, *, tenant_id: str, tg_key: str) -> dict[str, Any] | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT * FROM public.sys_trigger_definition"
-                    " WHERE tenant_id=CAST(:t AS uuid) AND tg_key=:k"
-                ),
-                {"t": tenant_id, "k": tg_key},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT * FROM public.sys_trigger_definition"
+                        " WHERE tenant_id=CAST(:t AS uuid) AND tg_key=:k"
+                    ),
+                    {"t": tenant_id, "k": tg_key},
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
         return dict(row) if row else None
 
     async def get_by_id(self, *, trigger_id: str) -> dict[str, Any] | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT * FROM public.sys_trigger_definition"
-                    " WHERE id=CAST(:i AS uuid)"
-                ),
-                {"i": trigger_id},
+            (
+                await self._s.execute(
+                    text("SELECT * FROM public.sys_trigger_definition WHERE id=CAST(:i AS uuid)"),
+                    {"i": trigger_id},
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
         return dict(row) if row else None
 
     async def list_all(self, *, tenant_id: str) -> list[dict[str, Any]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT * FROM public.sys_trigger_definition"
-                    " WHERE tenant_id=CAST(:t AS uuid) ORDER BY created_at DESC, id DESC"
-                ),
-                {"t": tenant_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT * FROM public.sys_trigger_definition"
+                        " WHERE tenant_id=CAST(:t AS uuid) ORDER BY created_at DESC, id DESC"
+                    ),
+                    {"t": tenant_id},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def set_enabled(self, *, trigger_id: str, tenant_id: str, enabled: bool) -> bool:
@@ -146,27 +155,35 @@ class SqlTriggerRepo:
 
     async def find_by_webhook_path(self, *, path: str) -> dict[str, Any] | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT * FROM public.sys_trigger_definition"
-                    " WHERE webhook_path=CAST(:p AS uuid)"
-                ),
-                {"p": path},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT * FROM public.sys_trigger_definition"
+                        " WHERE webhook_path=CAST(:p AS uuid)"
+                    ),
+                    {"p": path},
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
         return dict(row) if row else None
 
     async def list_due_cron(self, *, now_iso: str) -> list[dict[str, Any]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT * FROM public.sys_trigger_definition"
-                    " WHERE type='CRON' AND enabled AND next_fire_at IS NOT NULL"
-                    " AND next_fire_at <= CAST(:now AS timestamptz)"
-                ),
-                {"now": _ts(now_iso)},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT * FROM public.sys_trigger_definition"
+                        " WHERE type='CRON' AND enabled AND next_fire_at IS NOT NULL"
+                        " AND next_fire_at <= CAST(:now AS timestamptz)"
+                    ),
+                    {"now": _ts(now_iso)},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def mark_fired(
@@ -226,15 +243,19 @@ class SqlTriggerRepo:
             ).scalar_one()
         )
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT * FROM public.sys_trigger_run"
-                    " WHERE tenant_id=CAST(:t AS uuid) AND trigger_id=CAST(:g AS uuid)"
-                    " ORDER BY created_at DESC, id DESC LIMIT :lim OFFSET :off"
-                ),
-                {"t": tenant_id, "g": trigger_id, "lim": size, "off": (page - 1) * size},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT * FROM public.sys_trigger_run"
+                        " WHERE tenant_id=CAST(:t AS uuid) AND trigger_id=CAST(:g AS uuid)"
+                        " ORDER BY created_at DESC, id DESC LIMIT :lim OFFSET :off"
+                    ),
+                    {"t": tenant_id, "g": trigger_id, "lim": size, "off": (page - 1) * size},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return total, [dict(r) for r in rows]
 
     async def commit(self) -> None:

@@ -93,9 +93,7 @@ class TriggerScheduler:
             task = asyncio.create_task(self._fire_then_mark(tid))
             self._running[tid] = task
             # R1-T2:收割异常(防 "never retrieved" 噪音)
-            task.add_done_callback(
-                lambda t: t.exception() if not t.cancelled() else None
-            )
+            task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
     async def _fire_then_mark(self, trigger_id: str) -> None:
         factory = self._factory
@@ -124,9 +122,7 @@ class TriggerScheduler:
                         trigger_id=trigger_id,
                         reason="cron 下次触发计算失败,调度已停止(请检查表达式)",
                     )
-            await svc.mark_fired(
-                trigger_id=trigger_id, last_fired_iso=fired_iso, next_fire_iso=nxt
-            )
+            await svc.mark_fired(trigger_id=trigger_id, last_fired_iso=fired_iso, next_fire_iso=nxt)
         except Exception:
             log.warning("trigger 执行异常 id=%s", trigger_id, exc_info=True)
         finally:

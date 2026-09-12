@@ -13,9 +13,7 @@ export function listTriggers(): Promise<TriggerItem[]> {
 
 /** 040·11:cron 预览(接下来 3 次触发;非法表达式 400 附可读原因) */
 export function cronPreview(expr: string): Promise<CronPreviewOut> {
-  return api.get(
-    `/system/triggers/cron-preview?expr=${encodeURIComponent(expr)}`,
-  );
+  return api.get(`/system/triggers/cron-preview?expr=${encodeURIComponent(expr)}`);
 }
 
 export function createTrigger(body: Record<string, unknown>): Promise<{
@@ -26,10 +24,7 @@ export function createTrigger(body: Record<string, unknown>): Promise<{
   return api.post("/system/triggers", body);
 }
 
-export function updateTrigger(
-  id: string,
-  body: Record<string, unknown>,
-): Promise<{ ok: boolean }> {
+export function updateTrigger(id: string, body: Record<string, unknown>): Promise<{ ok: boolean }> {
   return api.put(`/system/triggers/${id}`, body);
 }
 

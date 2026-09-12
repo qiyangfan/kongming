@@ -15,11 +15,5 @@ def uuid7() -> uuid.UUID:
     ts_ms = time.time_ns() // 1_000_000
     rand_a = int.from_bytes(os.urandom(2), "big") & 0x0FFF
     rand_b = int.from_bytes(os.urandom(8), "big") & 0x3FFFFFFFFFFFFFFF
-    value = (
-        ((ts_ms & 0xFFFFFFFFFFFF) << 80)
-        | (0x7 << 76)
-        | (rand_a << 64)
-        | (0x2 << 62)
-        | rand_b
-    )
+    value = ((ts_ms & 0xFFFFFFFFFFFF) << 80) | (0x7 << 76) | (rand_a << 64) | (0x2 << 62) | rand_b
     return uuid.UUID(int=value)

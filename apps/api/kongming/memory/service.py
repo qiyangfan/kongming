@@ -172,18 +172,12 @@ class MemoryService:
         )
         if not ok:
             raise MemoryNotFound(memory_id)
-        await self._oper.add(
-            user_id=user_id, action="memory.update", target=memory_id, detail={}
-        )
+        await self._oper.add(user_id=user_id, action="memory.update", target=memory_id, detail={})
         await self._repo.commit()  # R1-H1
 
     async def delete_mine(self, *, memory_id: str, user_id: str, tenant_id: str) -> None:
-        ok = await self._repo.delete_mine(
-            memory_id=memory_id, user_id=user_id, tenant_id=tenant_id
-        )
+        ok = await self._repo.delete_mine(memory_id=memory_id, user_id=user_id, tenant_id=tenant_id)
         if not ok:
             raise MemoryNotFound(memory_id)
-        await self._oper.add(
-            user_id=user_id, action="memory.delete", target=memory_id, detail={}
-        )
+        await self._oper.add(user_id=user_id, action="memory.delete", target=memory_id, detail={})
         await self._repo.commit()  # R1-H1

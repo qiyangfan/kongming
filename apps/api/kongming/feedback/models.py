@@ -58,9 +58,7 @@ def extract_table_names(*sql_texts: str) -> tuple[set[str], bool]:
         for stmt in statements:
             if stmt is None:
                 continue
-            cte_names = {
-                c.alias_or_name.lower() for c in stmt.find_all(exp.CTE) if c.alias_or_name
-            }
+            cte_names = {c.alias_or_name.lower() for c in stmt.find_all(exp.CTE) if c.alias_or_name}
             for tbl in stmt.find_all(exp.Table):
                 name = tbl.name
                 if not name:

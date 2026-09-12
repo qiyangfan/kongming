@@ -183,11 +183,11 @@ def test_clean_alias_defense() -> None:
     """R1-F1 纵深:结构性违禁字符(括号/换行/竖线)置空;空白折叠。"""
     from kongming.rag.models import clean_alias
 
-    assert clean_alias("  商品 表 ") == "商品 表"      # 折叠空白
+    assert clean_alias("  商品 表 ") == "商品 表"  # 折叠空白
     assert clean_alias("商品表") == "商品表"
-    assert clean_alias("a\nfake.table(q)") == ""       # 伪表名注入形态
-    assert clean_alias("商品(表)") == ""               # ASCII 括号
-    assert clean_alias("商品（表）") == ""              # 全角括号
+    assert clean_alias("a\nfake.table(q)") == ""  # 伪表名注入形态
+    assert clean_alias("商品(表)") == ""  # ASCII 括号
+    assert clean_alias("商品（表）") == ""  # 全角括号
     assert clean_alias("商品|表") == ""
 
 

@@ -13,6 +13,7 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
   }
@@ -20,10 +21,11 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
 
 :root {
   color-scheme: light;
+
   /* 语义 token:主色朱砂(武侯祠红墙,庄重决断);鎏金仅点睛;中性色配黛瓦青灰 */
   --background: #fbfaf7; /* 宣纸白(微暖,非冷白) */
   --foreground: #1f2933; /* 青墨字 */
-  --card: #ffffff;
+  --card: #fff;
   --card-foreground: #1f2933;
   --primary: #8f2d2f; /* 红墙朱砂:深沉庄重,非高唤醒亮红 */
   --primary-foreground: #fdf9f0; /* 宣纸白 */
@@ -34,7 +36,11 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
   --accent: #f5edda; /* 宣纸米黄 */
   --accent-foreground: #6b2424; /* 深朱 */
   --destructive: #dc2626; /* 错误语义用鲜红,与朱砂 primary 靠明度区分 */
-  --destructive-foreground: #ffffff;
+  --destructive-foreground: #fff;
+  --success: #15803d; /* 成功语义:入账/绑定完成等正向反馈(词汇表对齐宪法 Article 3) */
+  --success-foreground: #fff;
+  --warning: #b45309; /* 警告语义:待支付/降级等中间态提示 */
+  --warning-foreground: #fff;
   --border: #dfe3de; /* 青灰线 */
   --input: #dfe3de;
   --ring: #c9a063; /* 鎏金点睛:匾额之金,哑光不炫 */
@@ -42,6 +48,7 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
 
 .dark {
   color-scheme: dark;
+
   --background: #0e1416; /* 黛墨夜 */
   --foreground: #eef0ec;
   --card: #151d20; /* 黛瓦暗面 */
@@ -55,7 +62,11 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
   --accent: #2a2018; /* 暗金底 */
   --accent-foreground: #dcc08a;
   --destructive: #ef4444;
-  --destructive-foreground: #ffffff;
+  --destructive-foreground: #fff;
+  --success: #4ade80; /* 暗底提亮一档的可读绿 */
+  --success-foreground: #052e16;
+  --warning: #fbbf24;
+  --warning-foreground: #451a03;
   --border: #2a363a;
   --input: #2a363a;
   --ring: #c9a063;
@@ -63,8 +74,8 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
 
 @theme inline {
   --font-sans:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC",
-    "Microsoft YaHei", sans-serif;
+    -apple-system, blinkmacsystemfont, "Segoe UI", roboto, "PingFang SC", "Microsoft YaHei",
+    sans-serif;
 
   /* 字号刻度补充:内建 xs/sm/base 档位间的中间档(等值收编自业务字面量,
      业务代码字号只许引用此类,禁再写 text-[NNpx] 字面量) */
@@ -78,6 +89,7 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
+
   /* 浮层别名:下拉/确认框等 portal 浮层与卡片同族(docs/brand.md) */
   --color-popover: var(--card);
   --color-popover-foreground: var(--card-foreground);
@@ -91,6 +103,10 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -115,6 +131,7 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
       transform: scale(1);
       opacity: 0.7;
     }
+
     75%,
     100% {
       transform: scale(2.4);
@@ -126,6 +143,7 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
     0% {
       background-position: 200% center;
     }
+
     100% {
       background-position: -200% center;
     }

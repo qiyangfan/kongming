@@ -125,9 +125,7 @@ class UserPageOut(BaseModel):
 
 class RoleCreateIn(BaseModel):
     # 大写蛇形约定(与内置角色同风格),拒绝空白/小写近形变体(R4)
-    role_key: str = Field(
-        min_length=2, max_length=100, pattern=r"^[A-Z][A-Z0-9_]+$"
-    )
+    role_key: str = Field(min_length=2, max_length=100, pattern=r"^[A-Z][A-Z0-9_]+$")
     role_name: str = Field(min_length=1, max_length=100)
     data_scope: DataScope = "SELF"
     sql_scope: SqlScope = "SELECT_ONLY"
@@ -137,9 +135,7 @@ class RoleCreateIn(BaseModel):
 class RoleUpdateIn(BaseModel):
     """role_key 必须与原值一致(不可改,领域校验 400)。"""
 
-    role_key: str = Field(
-        min_length=2, max_length=100, pattern=r"^[A-Z][A-Z0-9_]+$"
-    )
+    role_key: str = Field(min_length=2, max_length=100, pattern=r"^[A-Z][A-Z0-9_]+$")
     role_name: str = Field(min_length=1, max_length=100)
     data_scope: DataScope
     sql_scope: SqlScope

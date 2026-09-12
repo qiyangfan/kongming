@@ -46,9 +46,7 @@ def react_stage_wrapper(name: str, fn: Any) -> Any:  # noqa: ANN401 —— 与 0
         )
         result = fn(state)
         # finalize 为同步 def(与 017 validate/selfheal 同款双形态兼容)
-        out: dict[str, object] = (
-            await result if inspect.isawaitable(result) else result
-        )
+        out: dict[str, object] = await result if inspect.isawaitable(result) else result
         emit_event(
             "stage",
             {
@@ -81,9 +79,7 @@ def get_react_graph():  # type: ignore[no-untyped-def]
         "finalize", react_stage_wrapper("finalize", nodes.finalize)
     )
     g.add_edge(START, "react")
-    g.add_conditional_edges(
-        "react", _after_react, {"tools": "tool_dispatch", "done": "finalize"}
-    )
+    g.add_conditional_edges("react", _after_react, {"tools": "tool_dispatch", "done": "finalize"})
     g.add_conditional_edges(
         "tool_dispatch", _after_dispatch, {"react": "react", "done": "finalize"}
     )

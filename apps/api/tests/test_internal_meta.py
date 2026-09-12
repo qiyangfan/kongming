@@ -67,9 +67,7 @@ async def test_requires_internal_token(client: AsyncClient) -> None:
 
 
 async def test_unknown_tenant_404(client: AsyncClient, session: AsyncSession) -> None:
-    r = await client.post(
-        "/internal/meta/schema", json={"tenant_key": "ghost"}, headers=INTERNAL
-    )
+    r = await client.post("/internal/meta/schema", json={"tenant_key": "ghost"}, headers=INTERNAL)
     assert r.status_code == 404
 
 

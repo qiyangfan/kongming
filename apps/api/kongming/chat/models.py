@@ -113,8 +113,7 @@ def _profile_columns(columns: list[str], rows: list[list[object]]) -> list[str]:
     dense = [
         i
         for i, role in enumerate(roles)
-        if role == _ROLE_MEASURE
-        and _is_dense_sequence([r[i] for r in rows if len(r) > i])
+        if role == _ROLE_MEASURE and _is_dense_sequence([r[i] for r in rows if len(r) > i])
     ]
     total_measures = sum(1 for r in roles if r == _ROLE_MEASURE)
     if dense and len(dense) < total_measures:
@@ -130,11 +129,7 @@ def _additive_outputs(sql: str) -> set[str]:
         return set()
     try:
         stmt = next(
-            (
-                s
-                for s in sqlglot.parse(sql, read="postgres")
-                if isinstance(s, exp.Select)
-            ),
+            (s for s in sqlglot.parse(sql, read="postgres") if isinstance(s, exp.Select)),
             None,
         )
         if stmt is None:
@@ -175,11 +170,7 @@ def suggest_charts(
         if not dims:
             return [ChartCandidate("line", x=columns[t], y=y_cols)]
         if len(dims) == 1 and card(dims[0]) <= _PIE_MAX_CARDINALITY:
-            return [
-                ChartCandidate(
-                    "line", x=columns[t], y=y_cols, series=columns[dims[0]]
-                )
-            ]
+            return [ChartCandidate("line", x=columns[t], y=y_cols, series=columns[dims[0]])]
         return []  # T+多维/高基数维:粒度超单图表达,宁缺毋滥
 
     if len(dims) == 1:
@@ -196,9 +187,7 @@ def suggest_charts(
             and columns[di].lower() not in _PERIOD_NAMES  # 期间维(年份)非构成整体
             and first.lower() in _additive_outputs(sql)  # 可加聚合才谈构成
             and all(
-                isinstance(v, (int, float, Decimal))
-                and not isinstance(v, bool)
-                and v >= 0
+                isinstance(v, (int, float, Decimal)) and not isinstance(v, bool) and v >= 0
                 for v in vals
             )
         ):
@@ -214,19 +203,11 @@ def suggest_charts(
             and card(high) <= _BAR_MAX_CARDINALITY
             and card(high) < len(rows)
         ):
-            return [
-                ChartCandidate(
-                    "bar", x=columns[high], y=y_cols, series=columns[low]
-                )
-            ]
+            return [ChartCandidate("bar", x=columns[high], y=y_cols, series=columns[low])]
         return []
 
     if not dims and len(measures) >= 2:
-        return [
-            ChartCandidate(
-                "scatter", x=columns[measures[0]], y=(columns[measures[1]],)
-            )
-        ]
+        return [ChartCandidate("scatter", x=columns[measures[0]], y=(columns[measures[1]],))]
     return []  # 两维多度量/≥3 维等:任何单图必失真,表格即答案
 
 
@@ -367,11 +348,7 @@ def resolve_column_labels(
         return labels
     try:
         stmt = next(
-            (
-                s
-                for s in sqlglot.parse(sql, read="postgres")
-                if isinstance(s, exp.Select)
-            ),
+            (s for s in sqlglot.parse(sql, read="postgres") if isinstance(s, exp.Select)),
             None,
         )
         if stmt is None:

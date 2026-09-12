@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StatusSwitch } from "@/components/status-switch";
+import { FormRow } from "@/components/form-row";
 import {
   Dialog,
   DialogContent,
@@ -25,7 +26,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Pagination } from "@/components/pagination";
 import {
   Select,
   SelectContent,
@@ -290,8 +291,12 @@ export default function UsersPage() {
           )}
           {users.data?.items.map((u) => (
             <TableRow key={u.id}>
-              <TableCell className="max-w-40 truncate font-medium" title={u.username}>{u.username}</TableCell>
-              <TableCell className="max-w-32 truncate" title={u.nickname}>{u.nickname}</TableCell>
+              <TableCell className="max-w-40 truncate font-medium" title={u.username}>
+                {u.username}
+              </TableCell>
+              <TableCell className="max-w-32 truncate" title={u.nickname}>
+                {u.nickname}
+              </TableCell>
               <TableCell>
                 <StatusSwitch
                   active={u.status === "ACTIVE"}
@@ -314,7 +319,9 @@ export default function UsersPage() {
                   )}
                 </div>
               </TableCell>
-              <TableCell className="max-w-32 truncate" title={u.dept_name ?? undefined}>{u.dept_name ?? "—"}</TableCell>
+              <TableCell className="max-w-32 truncate" title={u.dept_name ?? undefined}>
+                {u.dept_name ?? "—"}
+              </TableCell>
               <TableCell className="text-muted-foreground">
                 {new Date(u.created_at).toLocaleDateString("zh-CN")}
               </TableCell>
@@ -333,12 +340,7 @@ export default function UsersPage() {
                 >
                   重置密码
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-destructive hover:text-destructive"
-                  onClick={() => setDeleting(u)}
-                >
+                <Button variant="ghost-destructive" size="sm" onClick={() => setDeleting(u)}>
                   删除
                 </Button>
               </TableCell>
@@ -354,32 +356,17 @@ export default function UsersPage() {
         </TableBody>
       </Table>
 
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span>共 {total} 条</span>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-            上一页
-          </Button>
-          <span>
-            {page} / {pages}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page >= pages}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            下一页
-          </Button>
-        </div>
-      </div>
+      <Pagination page={page} pageCount={pages} total={total} onPageChange={setPage} />
 
-      <Dialog open={creating || editing !== null} onOpenChange={(open) => {
-        if (!open) {
-          setCreating(false);
-          setEditing(null);
-        }
-      }}>
+      <Dialog
+        open={creating || editing !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCreating(false);
+            setEditing(null);
+          }
+        }}
+      >
         <DialogContent aria-describedby={undefined} className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{creating ? "新建用户" : `编辑用户 ${form.username}`}</DialogTitle>
@@ -397,45 +384,38 @@ export default function UsersPage() {
             }}
           >
             {creating && (
-              <div className="grid gap-1.5">
-                <Label htmlFor="u-username">用户名</Label>
+              <FormRow label="用户名" htmlFor="u-username">
                 <Input
                   id="u-username"
                   value={form.username}
                   onChange={(e) => setForm({ ...form, username: e.target.value })}
                 />
-              </div>
+              </FormRow>
             )}
-            <div className="grid gap-1.5">
-              <Label htmlFor="u-password">
-                密码{editing ? "(留空不改)" : ""}
-              </Label>
+            <FormRow label={`密码${editing ? "(留空不改)" : ""}`} htmlFor="u-password">
               <Input
                 id="u-password"
                 type="password"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
               />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="u-nickname">昵称</Label>
+            </FormRow>
+            <FormRow label="昵称" htmlFor="u-nickname">
               <Input
                 id="u-nickname"
                 value={form.nickname}
                 onChange={(e) => setForm({ ...form, nickname: e.target.value })}
               />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="u-email">邮箱(可空)</Label>
+            </FormRow>
+            <FormRow label="邮箱(可空)" htmlFor="u-email">
               <Input
                 id="u-email"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
               />
-            </div>
+            </FormRow>
             <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5">
-                <Label>状态</Label>
+              <FormRow label="状态">
                 <Select
                   value={form.status}
                   onValueChange={(v) => setForm({ ...form, status: v as FormState["status"] })}
@@ -448,9 +428,8 @@ export default function UsersPage() {
                     <SelectItem value="DISABLED">禁用</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="grid gap-1.5">
-                <Label>租户</Label>
+              </FormRow>
+              <FormRow label="租户">
                 <Select
                   value={form.tenantId}
                   onValueChange={(v) => setForm({ ...form, tenantId: v })}
@@ -466,10 +445,9 @@ export default function UsersPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
+              </FormRow>
             </div>
-            <div className="grid gap-1.5">
-              <Label>部门(可空)</Label>
+            <FormRow label="部门(可空)">
               <Select
                 value={form.deptId || "none"}
                 onValueChange={(v) => setForm({ ...form, deptId: v === "none" ? "" : v })}
@@ -486,9 +464,8 @@ export default function UsersPage() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            <div className="grid gap-1.5">
-              <Label>角色(可多选)</Label>
+            </FormRow>
+            <FormRow label="角色(可多选)">
               <div className="space-y-1.5 rounded-md border p-2">
                 {(roles.data ?? []).map((r: RoleOut) => (
                   <label key={r.id} className="flex items-center gap-2 text-sm">
@@ -507,7 +484,7 @@ export default function UsersPage() {
                   </label>
                 ))}
               </div>
-            </div>
+            </FormRow>
             <DialogFooter>
               <Button
                 type="button"
@@ -546,13 +523,14 @@ export default function UsersPage() {
               reset.mutate();
             }}
           >
-            <Label htmlFor="u-reset">新密码(重置后强制首登改密)</Label>
-            <Input
-              id="u-reset"
-              type="password"
-              value={resetPw}
-              onChange={(e) => setResetPw(e.target.value)}
-            />
+            <FormRow label="新密码(重置后强制首登改密)" htmlFor="u-reset">
+              <Input
+                id="u-reset"
+                type="password"
+                value={resetPw}
+                onChange={(e) => setResetPw(e.target.value)}
+              />
+            </FormRow>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setResetting(null)}>
                 取消

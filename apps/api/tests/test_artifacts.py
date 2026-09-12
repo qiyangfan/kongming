@@ -121,9 +121,7 @@ async def test_rerun_happy_path(
 ) -> None:
     await seed_all(session, get_settings())
     uid = await make_user("art_run")
-    rid = await session.execute(
-        text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'")
-    )
+    rid = await session.execute(text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'"))
     await _bind(session, "sys_user_role", uid, str(rid.scalar_one()))
     _, mid = await _mk_session_with_sql(session, uid)
     # DEVELOPER=data_scope SELF(create_by=本人):行主改为本用户,
@@ -146,8 +144,10 @@ async def test_rerun_happy_path(
     # 新消息落库且不覆盖原消息
     n = (
         await session.execute(
-            text("SELECT count(*) FROM public.chat_message WHERE session_id="
-                 " (SELECT session_id FROM public.chat_message WHERE id=:m)"),
+            text(
+                "SELECT count(*) FROM public.chat_message WHERE session_id="
+                " (SELECT session_id FROM public.chat_message WHERE id=:m)"
+            ),
             {"m": mid},
         )
     ).scalar_one()
@@ -223,9 +223,7 @@ async def test_rerun_other_user_404(
     await _bind(session, "sys_user_role", uid_b, str(rid))
     # B 绑定同租户(过租户解析),走到消息归属校验 → 越权同形 404
     art_tid = (
-        await session.execute(
-            text("SELECT id FROM public.sys_tenant WHERE tenant_key='art'")
-        )
+        await session.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='art'"))
     ).scalar_one()
     await _bind(session, "sys_user_tenant", uid_b, str(art_tid))
     await session.commit()
@@ -238,9 +236,7 @@ async def test_rerun_other_user_404(
     assert r.status_code == 404
 
 
-async def test_rerun_output_guardrail_applied(
-    session: AsyncSession, make_user: MakeUser
-) -> None:
+async def test_rerun_output_guardrail_applied(session: AsyncSession, make_user: MakeUser) -> None:
     """R1-F7/F5 直证:rerun 输出经 020 护栏(脱敏落到响应/落库/产物卡),
     且护栏审计 trace_id 非空(执行与护栏同一 trace)。service 级直调,
     runner/mock 护栏替代六层执行(过检面由 happy path 覆盖)。"""
@@ -314,4 +310,3 @@ async def test_rerun_output_guardrail_applied(
         )
     ).scalar_one()
     assert stored == "SELECT name FROM ***"
-

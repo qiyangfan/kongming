@@ -7,9 +7,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/page-header";
+import { Pagination } from "@/components/pagination";
+import { StatusBadge, type StatusMeta } from "@/components/status-badge";
 import {
   Select,
   SelectContent,
@@ -27,11 +29,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { QueryErrorAlert } from "@/components/query-error";
-import {
-  guardrailAuditPage,
-  guardrailRules,
-  updateGuardrailRule,
-} from "@/lib/guardrail-api";
+import { guardrailAuditPage, guardrailRules, updateGuardrailRule } from "@/lib/guardrail-api";
 
 const PAGE_SIZE = 20;
 
@@ -41,7 +39,7 @@ const TYPE_LABELS: Record<string, string> = {
   tool_intent: "工具意图",
 };
 
-const ACTION_META: Record<string, { label: string; variant: "default" | "secondary" }> = {
+const ACTION_META: StatusMeta = {
   blocked: { label: "拦截", variant: "secondary" },
   masked: { label: "脱敏", variant: "default" },
 };
@@ -125,12 +123,10 @@ export default function GuardrailsPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">护栏</h2>
-        <p className="text-sm text-muted-foreground">
-          AI 问答的安全防线:拦截诱导攻击、保护敏感信息、管控高危操作。可调整规则并查看触发记录。
-        </p>
-      </div>
+      <PageHeader
+        title="护栏"
+        description="AI 问答的安全防线:拦截诱导攻击、保护敏感信息、管控高危操作。可调整规则并查看触发记录。"
+      />
 
       <div className="rounded-lg border border-border">
         <Table>
@@ -154,7 +150,10 @@ export default function GuardrailsPage() {
             ) : rules.isLoading ? (
               <TableRow>
                 <TableCell colSpan={6} className="py-6 text-center">
-                  <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />
+                  <Loader2
+                    className="mx-auto size-4 animate-spin text-muted-foreground"
+                    aria-hidden
+                  />
                 </TableCell>
               </TableRow>
             ) : (
@@ -162,15 +161,24 @@ export default function GuardrailsPage() {
                 <TableRow key={r.name}>
                   <TableCell className="font-mono text-xs font-medium">
                     <span className="flex items-center gap-1.5">
-                      <ShieldCheck className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                      <span className="truncate" title={r.name}>{r.name}</span>
+                      <ShieldCheck
+                        className="size-3.5 shrink-0 text-muted-foreground"
+                        aria-hidden
+                      />
+                      <span className="truncate" title={r.name}>
+                        {r.name}
+                      </span>
                       {r.overridden && (
-                        <Badge variant="outline" className="shrink-0">已调整</Badge>
+                        <Badge variant="outline" className="shrink-0">
+                          已调整
+                        </Badge>
                       )}
                     </span>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="secondary">{TYPE_LABELS[r.guardrail_type] ?? r.guardrail_type}</Badge>
+                    <Badge variant="secondary">
+                      {TYPE_LABELS[r.guardrail_type] ?? r.guardrail_type}
+                    </Badge>
                   </TableCell>
                   <TableCell>
                     {r.maskable ? (
@@ -185,7 +193,7 @@ export default function GuardrailsPage() {
                         }
                         disabled={editMeta.isPending}
                       >
-                        <SelectTrigger className="h-7 w-24" aria-label={`${r.name} 动作`}>
+                        <SelectTrigger size="sm" className="w-24" aria-label={`${r.name} 动作`}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -194,12 +202,14 @@ export default function GuardrailsPage() {
                         </SelectContent>
                       </Select>
                     ) : (
-                      <Badge variant={ACTION_META[r.action]?.variant ?? "default"}>
-                        {ACTION_META[r.action]?.label ?? r.action}
-                      </Badge>
+                      // action 契约窄联合;未知值回落 default,与原 ?? "default" 等价
+                      <StatusBadge meta={ACTION_META} value={r.action} fallbackVariant="default" />
                     )}
                   </TableCell>
-                  <TableCell className="max-w-md truncate text-sm text-muted-foreground" title={r.description}>
+                  <TableCell
+                    className="max-w-md truncate text-sm text-muted-foreground"
+                    title={r.description}
+                  >
                     {r.description}
                   </TableCell>
                   <TableCell className="text-xs">
@@ -209,7 +219,8 @@ export default function GuardrailsPage() {
                         min={1}
                         max={100}
                         defaultValue={r.threshold ?? 1}
-                        className="h-7 w-20"
+                        size="sm"
+                        className="w-20"
                         aria-label={`${r.name} 阈值`}
                         disabled={editMeta.isPending}
                         onBlur={(e) => {
@@ -231,9 +242,7 @@ export default function GuardrailsPage() {
                     <Switch
                       checked={r.enabled}
                       disabled={toggle.isPending}
-                      onCheckedChange={(on) =>
-                        toggle.mutate({ name: r.name, enabled: on })
-                      }
+                      onCheckedChange={(on) => toggle.mutate({ name: r.name, enabled: on })}
                       aria-label={`启用 ${r.name}`}
                     />
                   </TableCell>
@@ -244,29 +253,49 @@ export default function GuardrailsPage() {
         </Table>
       </div>
       {toggleError && (
-        <p className="text-xs text-destructive" role="alert">{toggleError}</p>
+        <p className="text-xs text-destructive" role="alert">
+          {toggleError}
+        </p>
       )}
 
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-foreground">触发审计</h3>
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
-            <Label htmlFor="gr-type" className="text-xs">层</Label>
-            <Select value={ftype || "__all__"} onValueChange={(v) => { setFtype(v === "__all__" ? "" : v); setPage(1); }}>
+            <Label htmlFor="gr-type" className="text-xs">
+              层
+            </Label>
+            <Select
+              value={ftype || "__all__"}
+              onValueChange={(v) => {
+                setFtype(v === "__all__" ? "" : v);
+                setPage(1);
+              }}
+            >
               <SelectTrigger id="gr-type" className="w-36" aria-label="按层筛选">
                 <SelectValue placeholder="全部" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all__">全部</SelectItem>
                 {Object.entries(TYPE_LABELS).map(([k, l]) => (
-                  <SelectItem key={k} value={k}>{l}</SelectItem>
+                  <SelectItem key={k} value={k}>
+                    {l}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-1">
-            <Label htmlFor="gr-action" className="text-xs">动作</Label>
-            <Select value={faction || "__all__"} onValueChange={(v) => { setFaction(v === "__all__" ? "" : v); setPage(1); }}>
+            <Label htmlFor="gr-action" className="text-xs">
+              动作
+            </Label>
+            <Select
+              value={faction || "__all__"}
+              onValueChange={(v) => {
+                setFaction(v === "__all__" ? "" : v);
+                setPage(1);
+              }}
+            >
               <SelectTrigger id="gr-action" className="w-36" aria-label="按动作筛选">
                 <SelectValue placeholder="全部" />
               </SelectTrigger>
@@ -278,14 +307,34 @@ export default function GuardrailsPage() {
             </Select>
           </div>
           <div className="space-y-1">
-            <Label htmlFor="gr-start" className="text-xs">开始日期</Label>
-            <Input id="gr-start" type="date" value={startDate}
-              onChange={(e) => { setStartDate(e.target.value); setPage(1); }} className="w-40" />
+            <Label htmlFor="gr-start" className="text-xs">
+              开始日期
+            </Label>
+            <Input
+              id="gr-start"
+              type="date"
+              value={startDate}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                setPage(1);
+              }}
+              className="w-40"
+            />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="gr-end" className="text-xs">结束日期</Label>
-            <Input id="gr-end" type="date" value={endDate}
-              onChange={(e) => { setEndDate(e.target.value); setPage(1); }} className="w-40" />
+            <Label htmlFor="gr-end" className="text-xs">
+              结束日期
+            </Label>
+            <Input
+              id="gr-end"
+              type="date"
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                setPage(1);
+              }}
+              className="w-40"
+            />
           </div>
         </div>
 
@@ -310,7 +359,10 @@ export default function GuardrailsPage() {
               ) : audit.isLoading ? (
                 <TableRow>
                   <TableCell colSpan={5} className="py-6 text-center">
-                    <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />
+                    <Loader2
+                      className="mx-auto size-4 animate-spin text-muted-foreground"
+                      aria-hidden
+                    />
                   </TableCell>
                 </TableRow>
               ) : audit.data?.items.length === 0 ? (
@@ -322,17 +374,22 @@ export default function GuardrailsPage() {
               ) : (
                 audit.data?.items.map((it) => (
                   <TableRow key={it.id}>
-                    <TableCell className="text-xs text-muted-foreground">{fmtTime(it.created_at)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {fmtTime(it.created_at)}
+                    </TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{TYPE_LABELS[it.guardrail_type] ?? it.guardrail_type}</Badge>
+                      <Badge variant="secondary">
+                        {TYPE_LABELS[it.guardrail_type] ?? it.guardrail_type}
+                      </Badge>
                     </TableCell>
                     <TableCell className="font-mono text-xs">{it.rule_name}</TableCell>
                     <TableCell>
-                      <Badge variant={ACTION_META[it.action]?.variant ?? "default"}>
-                        {ACTION_META[it.action]?.label ?? it.action}
-                      </Badge>
+                      <StatusBadge meta={ACTION_META} value={it.action} fallbackVariant="default" />
                     </TableCell>
-                    <TableCell className="max-w-96 truncate text-xs text-muted-foreground" title={it.content_digest || undefined}>
+                    <TableCell
+                      className="max-w-96 truncate text-xs text-muted-foreground"
+                      title={it.content_digest || undefined}
+                    >
                       {it.content_digest || "—"}
                     </TableCell>
                   </TableRow>
@@ -342,18 +399,12 @@ export default function GuardrailsPage() {
           </Table>
         </div>
 
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>共 {audit.data?.total ?? 0} 条</span>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-              上一页
-            </Button>
-            <span>{page} / {totalPages}</span>
-            <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
-              下一页
-            </Button>
-          </div>
-        </div>
+        <Pagination
+          page={page}
+          pageCount={totalPages}
+          total={audit.data?.total ?? 0}
+          onPageChange={setPage}
+        />
       </div>
     </div>
   );

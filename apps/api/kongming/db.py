@@ -34,4 +34,3 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     """FastAPI 依赖:请求级会话。只读路径由用例自行决定 commit/rollback。"""
     async with get_sessionmaker()() as session:
         yield session
-

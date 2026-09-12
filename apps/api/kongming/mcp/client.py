@@ -99,9 +99,7 @@ class HttpMcpCaller:
         try:
             # R1-A2:全程预算——httpx.Timeout 是单次操作超时,慢滴响应
             # (每 10s 一字节)永不触发;wait_for 包整个交换守「15s」字面语义
-            text, ctype = await asyncio.wait_for(
-                _do_request(), timeout=self._timeout + 1
-            )
+            text, ctype = await asyncio.wait_for(_do_request(), timeout=self._timeout + 1)
         except TimeoutError as e:
             raise McpCallError("timeout", f"全程超 {self._timeout + 1}s") from e
         except httpx.TimeoutException as e:
@@ -169,9 +167,7 @@ class HttpMcpCaller:
         tools = await self.list_tools(endpoint=endpoint, headers=headers)
         return len(tools)
 
-    async def _notify_initialized(
-        self, endpoint: str, headers: dict[str, str]
-    ) -> None:
+    async def _notify_initialized(self, endpoint: str, headers: dict[str, str]) -> None:
         """R1-A6:initialized 通告(fire-and-forget)——官方 SDK 有态 server
         在通告前可能拒绝后续请求;无态 server 回 202/404/405 皆容忍。
         会话头(Mcp-Session-Id)不协商(v1 无态形态,design D5)。"""
@@ -198,12 +194,13 @@ class HttpMcpCaller:
         except Exception:  # noqa: BLE001  # 通告失败不阻断握手(无态兼容面)
             log.debug("initialized 通告未被接受(无态形态继续)", exc_info=True)
 
-    async def list_tools(
-        self, *, endpoint: str, headers: dict[str, str]
-    ) -> list[DiscoveredTool]:
+    async def list_tools(self, *, endpoint: str, headers: dict[str, str]) -> list[DiscoveredTool]:
         result = await self._rpc(
-            endpoint=endpoint, headers=headers, method="tools/list",
-            params=None, rpc_id=2,
+            endpoint=endpoint,
+            headers=headers,
+            method="tools/list",
+            params=None,
+            rpc_id=2,
         )
         raw = result.get("tools")
         if not isinstance(raw, list):
@@ -211,9 +208,8 @@ class HttpMcpCaller:
         out: list[DiscoveredTool] = []
         for raw_item in cast("list[object]", raw):
             # isinstance 收窄产物键型未知,收窄键型后再判 name(仅类型断言)
-            if (
-                not isinstance(raw_item, dict)
-                or not cast("dict[str, object]", raw_item).get("name")
+            if not isinstance(raw_item, dict) or not cast("dict[str, object]", raw_item).get(
+                "name"
             ):
                 continue  # 畸形条目跳过(宁缺毋滥,不炸整表)
             item = cast("dict[str, Any]", raw_item)
@@ -264,9 +260,7 @@ class HttpMcpCaller:
         original_size = len(joined.encode("utf-8"))
         truncated = original_size > _CONTENT_CAP
         if truncated:
-            joined = joined.encode("utf-8")[:_CONTENT_CAP].decode(
-                "utf-8", errors="ignore"
-            )
+            joined = joined.encode("utf-8")[:_CONTENT_CAP].decode("utf-8", errors="ignore")
         return {
             "content": joined,
             "is_error": bool(result.get("isError")),

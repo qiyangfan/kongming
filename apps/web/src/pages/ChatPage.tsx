@@ -12,6 +12,7 @@ import { Feather, Loader2, Paperclip, SendHorizontal, TriangleAlert, X } from "l
 import { useNavigate, useParams } from "react-router";
 
 import { AssistantCard } from "@/components/assistant-card";
+import { ChatBubble } from "@/components/chat-bubble";
 import { StreamCard, mergeToolCall } from "@/components/stream-card";
 import { ToolConfirmCard } from "@/components/tool-confirm-card";
 import { Button } from "@/components/ui/button";
@@ -52,8 +53,7 @@ function EmptyState({
         </span>
         <h2 className="text-xl font-semibold tracking-widest text-foreground">万事,问孔明。</h2>
         <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
-          数据之事,直问即可。问库存、问销量、问趋势——
-          运筹帷幄之事,交给军师。
+          数据之事,直问即可。问库存、问销量、问趋势—— 运筹帷幄之事,交给军师。
         </p>
       </div>
       {/* 039 冷启动建议:加载骨架/空清单或失败静默隐藏(不阻塞品牌空态) */}
@@ -108,14 +108,13 @@ function AttachmentBadge({ items }: { items: { [key: string]: unknown }[] }) {
 
 function toSyntheticMessage(out: ChatQueryOut): SessionMessageOut {
   // 044 四态:NO_DATA=知识未覆盖如实说明(中性,非失败)
-  const status =
-    out.success
-      ? "SUCCESS"
-      : out.verdict === "BLOCKED"
-        ? "REJECTED"
-        : out.verdict === "NO_DATA"
-          ? "NO_DATA"
-          : "FAILED";
+  const status = out.success
+    ? "SUCCESS"
+    : out.verdict === "BLOCKED"
+      ? "REJECTED"
+      : out.verdict === "NO_DATA"
+        ? "NO_DATA"
+        : "FAILED";
   return {
     // message_id 缺失(落库容错分支)置空串:FeedbackActions 的 !msg.id 守卫
     // 与 EXPLAIN 入口({msg.sql && ...}同上)天然不渲染,避免非 UUID 直传 422(R3-B2)
@@ -148,7 +147,7 @@ function toSyntheticMessage(out: ChatQueryOut): SessionMessageOut {
     rating: null,
     corrected_sql: null,
     feedback_comment: null,
-    attachments: out.attachments ?? [],  // 030:终态快照同源
+    attachments: out.attachments ?? [], // 030:终态快照同源
   };
 }
 
@@ -164,9 +163,7 @@ export default function ChatPage() {
   const navigate = useNavigate();
   const [draft, setDraft] = useState("");
   const [streaming, setStreaming] = useState<StreamingState | null>(null);
-  const [finalized, setFinalized] = useState<{ question: string; out: ChatQueryOut } | null>(
-    null,
-  );
+  const [finalized, setFinalized] = useState<{ question: string; out: ChatQueryOut } | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
   const agentMode = useAgentMode((s) => s.mode);
   const setAgentMode = useAgentMode((s) => s.setMode);
@@ -179,9 +176,11 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   // 流发起时的上下文(守卫基准):迟到事件与当前不一致即丢弃(防串上下文)
-  const streamCtxRef = useRef<
-    { sid: string | null; tenant: string | null; ds: string | null } | null
-  >(null);
+  const streamCtxRef = useRef<{
+    sid: string | null;
+    tenant: string | null;
+    ds: string | null;
+  } | null>(null);
   // 本流自建会话的导航标记(R2-B2:取消闸豁免依据)
   const selfNavigatedRef = useRef<string | null>(null);
   // navigate/invalidate 回调里读最新值的稳定引用(sid 归一 null:useParams
@@ -311,9 +310,7 @@ export default function ChatPage() {
   }
 
   // 030:附件状态(已上传附件 chips;发送后清空)
-  const [attachments, setAttachments] = useState<
-    { id: string; filename: string }[]
-  >([]);
+  const [attachments, setAttachments] = useState<{ id: string; filename: string }[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -329,10 +326,7 @@ export default function ChatPage() {
     setAskError(null);
     try {
       const out = await uploadAttachment(file);
-      setAttachments((prev) => [
-        ...prev,
-        { id: out.attachment_id, filename: out.filename },
-      ]);
+      setAttachments((prev) => [...prev, { id: out.attachment_id, filename: out.filename }]);
     } catch (err) {
       setAskError(err instanceof Error ? err.message : "附件上传未成,请稍后再试。");
     } finally {
@@ -428,9 +422,7 @@ export default function ChatPage() {
               {messages.data?.map((m) =>
                 m.role === "USER" ? (
                   <div key={m.id} className="flex flex-col items-end gap-1">
-                    <p className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2 text-sm leading-relaxed text-primary-foreground">
-                      {m.question}
-                    </p>
+                    <ChatBubble role="user">{m.question}</ChatBubble>
                     <AttachmentBadge items={m.attachments ?? []} />
                   </div>
                 ) : (
@@ -442,9 +434,7 @@ export default function ChatPage() {
               {finalized && !streaming && (
                 <>
                   <div className="flex flex-col items-end gap-1">
-                    <p className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2 text-sm text-primary-foreground">
-                      {finalized.question}
-                    </p>
+                    <ChatBubble role="user">{finalized.question}</ChatBubble>
                     <AttachmentBadge items={finalized.out.attachments ?? []} />
                   </div>
                   <div className="max-w-full">
@@ -455,9 +445,7 @@ export default function ChatPage() {
               {streaming && (
                 <>
                   <div className="flex justify-end">
-                    <p className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2 text-sm text-primary-foreground">
-                      {streaming.question}
-                    </p>
+                    <ChatBubble role="user">{streaming.question}</ChatBubble>
                   </div>
                   <div className="max-w-full">
                     <StreamCard
@@ -481,7 +469,9 @@ export default function ChatPage() {
                   <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
                   <div>
                     <p className="text-foreground">此问未能送达:{askError}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">问句已回到输入框,可重试。</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      问句已回到输入框,可重试。
+                    </p>
                   </div>
                 </div>
               )}
@@ -519,16 +509,14 @@ export default function ChatPage() {
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 pb-1">
               {attachments.map((a) => (
-                <Badge key={a.id} variant="secondary" className="font-normal">
+                <Badge key={a.id} variant="secondary">
                   <Paperclip className="size-3" aria-hidden />
                   {a.filename}
                   <Button
                     variant="ghost"
                     size="icon-xs"
                     aria-label={`移除附件 ${a.filename}`}
-                    onClick={() =>
-                      setAttachments((prev) => prev.filter((x) => x.id !== a.id))
-                    }
+                    onClick={() => setAttachments((prev) => prev.filter((x) => x.id !== a.id))}
                   >
                     <X aria-hidden />
                   </Button>
@@ -561,31 +549,31 @@ export default function ChatPage() {
               )}
             </Button>
             <Textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void submit();
-              }
-            }}
-            placeholder="问计于数据,如问计于孔明…"
-            rows={1}
-            className="max-h-40 min-h-10 resize-none"
-            aria-label="提问"
-          />
-          <Button
-            size="icon"
-            onClick={() => void submit()}
-            disabled={!draft.trim() || uploading || streaming !== null}
-            aria-label="发送"
-          >
-            {streaming ? (
-              <Loader2 className="animate-spin" aria-hidden />
-            ) : (
-              <SendHorizontal aria-hidden />
-            )}
-          </Button>
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void submit();
+                }
+              }}
+              placeholder="问计于数据,如问计于孔明…"
+              rows={1}
+              className="max-h-40 min-h-10 resize-none"
+              aria-label="提问"
+            />
+            <Button
+              size="icon"
+              onClick={() => void submit()}
+              disabled={!draft.trim() || uploading || streaming !== null}
+              aria-label="发送"
+            >
+              {streaming ? (
+                <Loader2 className="animate-spin" aria-hidden />
+              ) : (
+                <SendHorizontal aria-hidden />
+              )}
+            </Button>
           </div>
         </div>
       </div>

@@ -61,13 +61,14 @@ class SqlMemoryRepo:
         团队记忆[team_id 非空],同向量距离混排 top-K)。"""
         if team_ids:
             params: dict[str, Any] = {
-                "u": user_id, "t": tenant_id,
-                "vec": _vec_literal(vector), "k": RECALL_TOP_K,
+                "u": user_id,
+                "t": tenant_id,
+                "vec": _vec_literal(vector),
+                "k": RECALL_TOP_K,
                 "tids": team_ids,
             }
         else:
-            params = {"u": user_id, "t": tenant_id,
-                      "vec": _vec_literal(vector), "k": RECALL_TOP_K}
+            params = {"u": user_id, "t": tenant_id, "vec": _vec_literal(vector), "k": RECALL_TOP_K}
         if team_ids:
             sql = (
                 "SELECT id, content, category, confidence, source"
@@ -86,15 +87,10 @@ class SqlMemoryRepo:
                 " AND dormant = false AND embedding IS NOT NULL"
                 " ORDER BY embedding <=> CAST(:vec AS vector) LIMIT :k"
             )
-        rows = (
-            await self._s.execute(text(sql), params)
-        ).mappings().all()
+        rows = (await self._s.execute(text(sql), params)).mappings().all()
         if rows:
             await self._s.execute(
-                text(
-                    "UPDATE public.user_memory SET last_hit_at = now()"
-                    " WHERE id = ANY(:ids)"
-                ),
+                text("UPDATE public.user_memory SET last_hit_at = now() WHERE id = ANY(:ids)"),
                 {"ids": [r["id"] for r in rows]},
             )
         return [dict(r) for r in rows]
@@ -150,16 +146,20 @@ class SqlMemoryRepo:
 
     async def list_mine(self, *, user_id: str, tenant_id: str) -> list[dict[str, Any]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, content, category, confidence, source, dormant,"
-                    "       last_hit_at, created_at, team_id"
-                    " FROM public.user_memory WHERE user_id=:u AND tenant_id=:t"
-                    " ORDER BY created_at DESC"
-                ),
-                {"u": user_id, "t": tenant_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, content, category, confidence, source, dormant,"
+                        "       last_hit_at, created_at, team_id"
+                        " FROM public.user_memory WHERE user_id=:u AND tenant_id=:t"
+                        " ORDER BY created_at DESC"
+                    ),
+                    {"u": user_id, "t": tenant_id},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def update_mine(

@@ -39,9 +39,7 @@ class _BotReader:
         self._r = SqlBotRepo(session)
 
     async def get_bot(self, *, bot_id: str, tenant_id: str) -> dict[str, Any] | None:
-        return await self._r.get_mine(
-            bot_id=bot_id, tenant_id=tenant_id, user_id="", is_admin=True
-        )
+        return await self._r.get_mine(bot_id=bot_id, tenant_id=tenant_id, user_id="", is_admin=True)
 
 
 class _StoreGuardrail:
@@ -103,9 +101,7 @@ class _StoreToolLister:
         from kongming.chat.router import get_agent_client
 
         svc = _bot_factory(self._s, get_agent_client())
-        return await svc.resolve_tools(
-            creator_id=creator_id, tenant_id=tenant_id, row=row
-        )
+        return await svc.resolve_tools(creator_id=creator_id, tenant_id=tenant_id, row=row)
 
 
 def _svc(session: AsyncSession) -> StoreService:
@@ -118,9 +114,7 @@ def _svc(session: AsyncSession) -> StoreService:
     )
 
 
-async def _tenant_or_403(
-    user: dict[str, object], session: AsyncSession, header: str | None
-) -> str:
+async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header: str | None) -> str:
     repo = ChatRepository(session)
     uid = str(user["sub"])
     if header is not None:
@@ -204,8 +198,11 @@ class PublishIn(BaseModel):
     suggestions: list[str] = Field(default_factory=list, max_length=5)
 
 
-@router.post("/system/bots/{bot_id}/publish", status_code=200,
-             dependencies=[Depends(require_perm("chat:execute"))])
+@router.post(
+    "/system/bots/{bot_id}/publish",
+    status_code=200,
+    dependencies=[Depends(require_perm("chat:execute"))],
+)
 async def publish_bot(
     bot_id: uuid.UUID,
     body: PublishIn,
@@ -237,15 +234,16 @@ async def publish_bot(
     # J7:上架审计(025 bot.* 先例)
     from kongming.auth.repository import SqlOperLogRepo
 
-    await SqlOperLogRepo(session).add(
-        str(user["sub"]), "bot.publish", str(bot_id), {}
-    )
+    await SqlOperLogRepo(session).add(str(user["sub"]), "bot.publish", str(bot_id), {})
     await session.commit()
     return {"ok": True}
 
 
-@router.post("/system/bots/{bot_id}/unpublish", status_code=200,
-             dependencies=[Depends(require_perm("chat:execute"))])
+@router.post(
+    "/system/bots/{bot_id}/unpublish",
+    status_code=200,
+    dependencies=[Depends(require_perm("chat:execute"))],
+)
 async def unpublish_bot(
     bot_id: uuid.UUID,
     user: Annotated[dict[str, object], Depends(current_user)],
@@ -264,9 +262,7 @@ async def unpublish_bot(
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     from kongming.auth.repository import SqlOperLogRepo
 
-    await SqlOperLogRepo(session).add(
-        str(user["sub"]), "bot.unpublish", str(bot_id), {}
-    )
+    await SqlOperLogRepo(session).add(str(user["sub"]), "bot.unpublish", str(bot_id), {})
     await session.commit()
     return {"ok": True}
 
@@ -274,8 +270,9 @@ async def unpublish_bot(
 # ── 商店面 ──
 
 
-@router.get("/store/bots", response_model=list[StoreBotOut],
-            dependencies=[Depends(require_perm(RUN))])
+@router.get(
+    "/store/bots", response_model=list[StoreBotOut], dependencies=[Depends(require_perm(RUN))]
+)
 async def store_list(
     user: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -290,8 +287,11 @@ async def store_list(
     return [_store_out(r) for r in rows]
 
 
-@router.get("/store/bots/{bot_key}", response_model=StoreBotDetailOut,
-            dependencies=[Depends(require_perm(RUN))])
+@router.get(
+    "/store/bots/{bot_key}",
+    response_model=StoreBotDetailOut,
+    dependencies=[Depends(require_perm(RUN))],
+)
 async def store_detail(
     bot_key: str,
     user: Annotated[dict[str, object], Depends(current_user)],
@@ -351,8 +351,9 @@ async def remove_favorite(
     return {"favorited": favorited}
 
 
-@router.get("/store/favorites", response_model=list[StoreBotOut],
-            dependencies=[Depends(require_perm(RUN))])
+@router.get(
+    "/store/favorites", response_model=list[StoreBotOut], dependencies=[Depends(require_perm(RUN))]
+)
 async def my_favorites(
     user: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -361,9 +362,7 @@ async def my_favorites(
     """与 /store/bots 同构的 StoreBotOut(含 favorited/fav_count,前端心形
     填充与收藏计数同源);列表本身即本人收藏,favorited 恒 TRUE。"""
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
-    rows = await _svc(session).my_favorites(
-        tenant_id=tenant_id, user_id=str(user["sub"])
-    )
+    rows = await _svc(session).my_favorites(tenant_id=tenant_id, user_id=str(user["sub"]))
     return [_store_out(r) for r in rows]
 
 
@@ -399,8 +398,11 @@ class StoreRunIn(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
 
 
-@router.post("/store/bots/{bot_key}/run", response_model=StoreRunOut,
-            dependencies=[Depends(require_perm(RUN))])
+@router.post(
+    "/store/bots/{bot_key}/run",
+    response_model=StoreRunOut,
+    dependencies=[Depends(require_perm(RUN))],
+)
 async def store_run(
     bot_key: str,
     body: StoreRunIn,
@@ -410,9 +412,7 @@ async def store_run(
 ) -> StoreRunOut:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     try:
-        out = await _svc(session).run(
-            tenant_id=tenant_id, bot_key=bot_key, question=body.question
-        )
+        out = await _svc(session).run(tenant_id=tenant_id, bot_key=bot_key, question=body.question)
     except StoreNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     return StoreRunOut(

@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/page-header";
 import { StatusSwitch } from "@/components/status-switch";
 import {
   Table,
@@ -168,9 +169,7 @@ export default function McpPage() {
         const r = await syncMcpServer(row.id);
         note(
           row.id,
-          r.ok
-            ? `同步完成,注册 ${r.tools ?? 0} 个工具`
-            : `同步失败(${r.kind}):${r.detail}`,
+          r.ok ? `同步完成,注册 ${r.tools ?? 0} 个工具` : `同步失败(${r.kind}):${r.detail}`,
         );
         invalidate();
       }
@@ -197,17 +196,21 @@ export default function McpPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">MCP 服务</h1>
-        <Button onClick={() => { setForm(EMPTY_FORM); setFormError(""); }}>
-          <Plus aria-hidden />
-          接入 MCP 服务
-        </Button>
-      </div>
-      <p className="text-sm text-muted-foreground">
-        外部 MCP server 的工具经桥接进入平台工具集(无 readOnlyHint 标注的工具按
-        写工具走人工确认);自定义请求头加密落库,任何界面不回显明文。
-      </p>
+      <PageHeader
+        title="MCP 服务"
+        description="外部 MCP server 的工具经桥接进入平台工具集(无 readOnlyHint 标注的工具按写工具走人工确认);自定义请求头加密落库,任何界面不回显明文。"
+        actions={
+          <Button
+            onClick={() => {
+              setForm(EMPTY_FORM);
+              setFormError("");
+            }}
+          >
+            <Plus aria-hidden />
+            接入 MCP 服务
+          </Button>
+        }
+      />
 
       <div className="rounded-lg border">
         <Table>
@@ -238,16 +241,19 @@ export default function McpPage() {
               (servers.data ?? []).map((row) => (
                 <TableRow key={row.id}>
                   <TableCell className="font-mono text-xs">{row.server_key}</TableCell>
-                  <TableCell className="max-w-40 truncate" title={row.name}>{row.name}</TableCell>
+                  <TableCell className="max-w-40 truncate" title={row.name}>
+                    {row.name}
+                  </TableCell>
                   <TableCell className="max-w-56 truncate font-mono text-xs" title={row.endpoint}>
                     {row.endpoint}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="secondary" className="font-normal">
-                      {row.tools.length} 个
-                    </Badge>
+                    <Badge variant="secondary">{row.tools.length} 个</Badge>
                     {row.last_sync_error && (
-                      <p className="mt-1 max-w-52 truncate text-xs text-destructive" title={row.last_sync_error}>
+                      <p
+                        className="mt-1 max-w-52 truncate text-xs text-destructive"
+                        title={row.last_sync_error}
+                      >
                         {row.last_sync_error}
                       </p>
                     )}
@@ -264,13 +270,9 @@ export default function McpPage() {
                   <TableCell>
                     <StatusSwitch
                       active={row.enabled}
-                      pending={
-                        toggle.isPending && toggle.variables?.row.id === row.id
-                      }
+                      pending={toggle.isPending && toggle.variables?.row.id === row.id}
                       error={toggleError[row.id] || null}
-                      onToggle={() =>
-                        toggle.mutate({ row, enabled: !row.enabled })
-                      }
+                      onToggle={() => toggle.mutate({ row, enabled: !row.enabled })}
                       ariaLabel={`启停 ${row.name}`}
                     />
                   </TableCell>
@@ -309,7 +311,10 @@ export default function McpPage() {
                         variant="ghost"
                         size="icon-xs"
                         aria-label={`删除 ${row.name}`}
-                        onClick={() => { setDeleting(row); setDeleteError(""); }}
+                        onClick={() => {
+                          setDeleting(row);
+                          setDeleteError("");
+                        }}
                       >
                         <Trash2 aria-hidden />
                       </Button>

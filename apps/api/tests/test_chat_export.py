@@ -62,7 +62,7 @@ def test_xlsx_bold_header_widths_and_types() -> None:
         max_rows=100,
     )
     assert truncated is False
-    ws = cast('Any', load_workbook(io.BytesIO(content)).active)
+    ws = cast("Any", load_workbook(io.BytesIO(content)).active)
     assert ws.title == "查询结果"
     assert ws["A1"].value == "名称" and ws["A1"].font.bold is True  # 表头加粗
     assert ws["B2"].value == 30 and isinstance(ws["B2"].value, int)  # 数值原生
@@ -76,7 +76,7 @@ def test_xlsx_bold_header_widths_and_types() -> None:
 def test_xlsx_truncation() -> None:
     content, truncated = to_xlsx(["a"], [[1], [2], [3]], max_rows=1)
     assert truncated is True
-    ws = cast('Any', load_workbook(io.BytesIO(content)).active)
+    ws = cast("Any", load_workbook(io.BytesIO(content)).active)
     assert ws.max_row == 2  # 表头 + 1 数据行
 
 
@@ -87,7 +87,7 @@ def test_xlsx_illegal_control_chars_stripped() -> None:
     """PG text 允许 \\x01 等控制字符;openpyxl 遇之抛 IllegalCharacterError(裸 500
     实证)——文本化时剥除,不再 500。"""
     content, _ = to_xlsx(["x"], [["a\x01b\x0bc"]], max_rows=10)
-    ws = cast('Any', load_workbook(io.BytesIO(content)).active)
+    ws = cast("Any", load_workbook(io.BytesIO(content)).active)
     assert ws["A2"].value == "abc"
 
 
@@ -197,7 +197,7 @@ async def test_export_xlsx_response_shape(
     assert r.status_code == 200
     assert "spreadsheetml" in r.headers["content-type"]
     assert ".xlsx" in r.headers["content-disposition"]
-    ws = cast('Any', load_workbook(io.BytesIO(r.content)).active)
+    ws = cast("Any", load_workbook(io.BytesIO(r.content)).active)
     assert ws["A1"].value == "name" and ws["A2"].value == "连弩"
 
 
@@ -245,13 +245,17 @@ async def test_export_audit_logged(
     )
     assert r.status_code == 200
     row = (
-        await session.execute(
-            text(
-                "SELECT action, detail FROM public.sys_oper_log"
-                " WHERE action='chat.export' ORDER BY created_at DESC LIMIT 1"
+        (
+            await session.execute(
+                text(
+                    "SELECT action, detail FROM public.sys_oper_log"
+                    " WHERE action='chat.export' ORDER BY created_at DESC LIMIT 1"
+                )
             )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert row["detail"]["fmt"] == "csv"
     assert row["detail"]["rows"] == 2
     assert row["detail"]["truncated"] is False

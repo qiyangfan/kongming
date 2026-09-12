@@ -58,9 +58,7 @@ export function listPlans(): Promise<PlanItem[]> {
   return api.get<PlanItem[]>("/billing/plans");
 }
 
-export function createPlan(
-  body: components["schemas"]["PlanIn"],
-): Promise<{ id: string }> {
+export function createPlan(body: components["schemas"]["PlanIn"]): Promise<{ id: string }> {
   return api.post("/billing/plans", body);
 }
 

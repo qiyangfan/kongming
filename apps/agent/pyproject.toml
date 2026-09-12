@@ -13,22 +13,33 @@ dependencies = [
     "httpx>=0.28",                   # 回调控制面
     "sqlglot>=26.0",                 # validate 节点本地 AST 预检(纯解析,无 IO)
     "structlog>=24.4",
-    "km-sqlguard==0.1.2",            # 053 SQL 安全引擎(validate 预检单遍解析;vendor wheel)
+    "liannu==0.1.2",                 # 053 SQL 安全引擎(validate 预检单遍解析;monorepo 共享包)
 ]
 
-# 053:引擎独立仓(km-sqlguard)产物,vendor wheel 快照引入;升版 = 换 wheel 同步声明
+# 053:引擎为本仓共享包(packages/liannu,连弩),以 uv path 依赖引入;
+# 升版 = packages/liannu/pyproject.toml 改版本号并同步本声明
 [tool.uv.sources]
-km-sqlguard = { path = "../../vendor/km_sqlguard-0.1.2-py3-none-any.whl" }
+liannu = { path = "../../packages/liannu" }
 
 [dependency-groups]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.25",
+    "pytest-cov>=7.0",
     "ruff>=0.9",
     "mypy>=1.14",
     "import-linter>=2.2",
     "pyright>=1.1.411",
 ]
+
+# 覆盖率门禁(JaCoCo 同位):branch 模式 + fail_under 一票否决,阈值只升不降
+[tool.coverage.run]
+source = ["kongming_agent"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 70
 
 [tool.ruff]
 line-length = 100

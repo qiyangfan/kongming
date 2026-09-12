@@ -21,11 +21,7 @@ import type { ChartSpec } from "@/components/chart-shared";
 import { MarkdownText } from "@/components/markdown-text";
 import { rerunArtifact } from "@/lib/chat-api";
 import { Button } from "@/components/ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,13 +30,7 @@ import { Textarea } from "@/components/ui/textarea";
    当前草稿交服务端复检执行;结果作为新消息出现在会话尾部(不覆盖本卡)。
    messageId 缺失(017 乐观快照容错分支空串)时不渲染执行入口——非 UUID
    直传会 422 白点(与 EXPLAIN/反馈同一守卫判据) */
-export function SqlArtifactCard({
-  messageId,
-  sql,
-}: {
-  messageId: string;
-  sql: string;
-}) {
+export function SqlArtifactCard({ messageId, sql }: { messageId: string; sql: string }) {
   const qc = useQueryClient();
   const [draft, setDraft] = useState(sql);
   const [busy, setBusy] = useState(false);
@@ -88,17 +78,8 @@ export function SqlArtifactCard({
           />
           <div className="flex items-center gap-2">
             {messageId && (
-              <Button
-                variant="outline"
-                size="xs"
-                onClick={() => void run()}
-                disabled={busy}
-              >
-                {busy ? (
-                  <Loader2 className="animate-spin" aria-hidden />
-                ) : (
-                  <Play aria-hidden />
-                )}
+              <Button variant="outline" size="xs" onClick={() => void run()} disabled={busy}>
+                {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Play aria-hidden />}
                 重新执行
               </Button>
             )}
@@ -238,11 +219,7 @@ export function DocumentCard({ content }: { content: string }) {
           aria-label="复制答案"
           className="text-muted-foreground"
         >
-          {copied ? (
-            <Check className="text-primary" aria-hidden />
-          ) : (
-            <Copy aria-hidden />
-          )}
+          {copied ? <Check className="text-primary" aria-hidden /> : <Copy aria-hidden />}
           {copied ? "已复制" : "复制"}
         </Button>
         {error && (

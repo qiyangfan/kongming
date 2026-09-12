@@ -2,7 +2,7 @@
 
 宪法 Article III 测试先行:安全管线行为契约(影子不改判、降级不失败、
 深嵌套受控、单遍解析)以测试钉死。引擎以 duck-typing 假件注入
-(仅需 .passed/.reason 与 km_sqlguard.Verdict 同构)。
+(仅需 .passed/.reason 与 liannu.Verdict 同构)。
 """
 
 import logging
@@ -182,7 +182,7 @@ def test_primary_engine_parse_boom_falls_back(
 
 def test_deep_nested_controlled_error_in_primary() -> None:
     """超限深嵌套:受控 DEPTH_EXCEEDED 拒绝,而非 RecursionError 栈溢出。"""
-    guard.configure("primary", engine=None)  # 真实引擎(km_sqlguard 已安装时)
+    guard.configure("primary", engine=None)  # 真实引擎(liannu 已安装时)
     v = firewall.check(DEEP)
     assert not v.passed
     assert v.reason is not None and v.reason.startswith("DEPTH_EXCEEDED")

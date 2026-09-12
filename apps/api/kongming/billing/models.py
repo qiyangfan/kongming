@@ -44,24 +44,18 @@ class QuotaVerdict:
     limit: int
 
 
-def check_quota(
-    *, used: int, limit: int, warn_pct: int, dimension: Dimension
-) -> QuotaVerdict:
+def check_quota(*, used: int, limit: int, warn_pct: int, dimension: Dimension) -> QuotaVerdict:
     """单维判定(纯函数):limit<=0 视为不限(放行无预警)。"""
     if limit <= 0:
         return QuotaVerdict(allowed=True, warn=False, dimension="", used=used, limit=0)
     if used >= limit:
-        return QuotaVerdict(
-            allowed=False, warn=True, dimension=dimension, used=used, limit=limit
-        )
+        return QuotaVerdict(allowed=False, warn=True, dimension=dimension, used=used, limit=limit)
     warn = used * 100 >= limit * warn_pct
     return QuotaVerdict(
         allowed=True, warn=warn, dimension=dimension if warn else "", used=used, limit=limit
     )
 
 
-def estimate_cost(
-    *, tokens: int, calls: int, price_per_mtok: int, price_per_call: int
-) -> int:
+def estimate_cost(*, tokens: int, calls: int, price_per_mtok: int, price_per_call: int) -> int:
     """成本估算(整数厘):token/1000×单价 + 次数×单价(向下取整)。"""
     return (tokens * price_per_mtok) // 1000 + calls * price_per_call

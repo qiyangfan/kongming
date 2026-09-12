@@ -10,9 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-async def bound_tenant_id(
-    session: AsyncSession, *, user_id: str, tenant_key: str
-) -> str | None:
+async def bound_tenant_id(session: AsyncSession, *, user_id: str, tenant_key: str) -> str | None:
     """显式租户白名单校验:命中(绑定+ACTIVE)返回 tenant_id,否则 None。"""
     tid = (
         await session.execute(
@@ -27,24 +25,26 @@ async def bound_tenant_id(
     return None if tid is None else str(tid)
 
 
-async def default_tenant(
-    session: AsyncSession, *, user_id: str
-) -> tuple[str, str] | None:
+async def default_tenant(session: AsyncSession, *, user_id: str) -> tuple[str, str] | None:
     """用户默认租户:default 优先,否则最早授予(multitenant spec);
     返回 (tenant_id, tenant_key);t.id tiebreak 保证同刻双授确定性收口
     (与 datasource 域同名查询逐字同构,008 R2-N1)。"""
     row = (
-        await session.execute(
-            text(
-                "SELECT t.id, t.tenant_key FROM public.sys_tenant t"
-                " JOIN public.sys_user_tenant ut ON ut.tenant_id = t.id"
-                " WHERE ut.user_id = :u AND t.status = 'ACTIVE'"
-                " ORDER BY (t.tenant_key = 'default') DESC, ut.granted_at ASC, t.id"
-                " LIMIT 1"
-            ),
-            {"u": user_id},
+        (
+            await session.execute(
+                text(
+                    "SELECT t.id, t.tenant_key FROM public.sys_tenant t"
+                    " JOIN public.sys_user_tenant ut ON ut.tenant_id = t.id"
+                    " WHERE ut.user_id = :u AND t.status = 'ACTIVE'"
+                    " ORDER BY (t.tenant_key = 'default') DESC, ut.granted_at ASC, t.id"
+                    " LIMIT 1"
+                ),
+                {"u": user_id},
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     return None if row is None else (str(row["id"]), str(row["tenant_key"]))
 
 

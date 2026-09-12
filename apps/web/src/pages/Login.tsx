@@ -150,7 +150,11 @@ export default function Login() {
                 placeholder="请输入密码"
               />
             </div>
-            {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
+            {error && (
+              <p className="text-sm text-destructive" role="alert">
+                {error}
+              </p>
+            )}
             <Button type="submit" disabled={pending} className="w-full">
               {pending ? "登录中…" : "登录"}
             </Button>

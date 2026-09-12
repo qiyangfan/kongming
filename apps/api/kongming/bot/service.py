@@ -62,9 +62,7 @@ class BotService:
         self._dynamic_tools = dynamic_tools
         self._usage_sink = usage_sink
 
-    async def _sink_usage(
-        self, reply: dict[str, object], *, tenant_id: str, bot_id: str
-    ) -> None:
+    async def _sink_usage(self, reply: dict[str, object], *, tenant_id: str, bot_id: str) -> None:
         """035:请求内同步落用量(计费基准);失败仅日志不阻断应答。"""
         if self._usage_sink is None:
             return
@@ -79,13 +77,14 @@ class BotService:
         if not records:
             return
         try:
-            await self._usage_sink.insert_bot_usage(
-                records, tenant_id=tenant_id, bot_id=bot_id
-            )
+            await self._usage_sink.insert_bot_usage(records, tenant_id=tenant_id, bot_id=bot_id)
         except Exception:
             log.warning(
                 "bot 用量落库失败(不阻断应答): tenant=%s bot=%s 条数=%d",
-                tenant_id, bot_id, len(records), exc_info=True,
+                tenant_id,
+                bot_id,
+                len(records),
+                exc_info=True,
             )
 
     async def _mcp_names(self, tenant_id: str) -> list[str]:
@@ -105,17 +104,13 @@ class BotService:
 
     # ── CRUD ──
 
-    async def create(
-        self, *, user_id: str, tenant_id: str, payload: dict[str, object]
-    ) -> str:
+    async def create(self, *, user_id: str, tenant_id: str, payload: dict[str, object]) -> str:
         bot_key = str(payload["bot_key"])
         if not BOT_KEY_PATTERN.fullmatch(bot_key):
             raise InvalidBotKey(bot_key)
         raw_tools: object = payload.get("tools") or []
         tools = (
-            [str(t) for t in cast("list[object]", raw_tools)]
-            if isinstance(raw_tools, list)
-            else []
+            [str(t) for t in cast("list[object]", raw_tools)] if isinstance(raw_tools, list) else []
         )
         mcp_names = await self._mcp_names(tenant_id)
         allowed = tools_for_perms(await self._perms.list_codes(user_id), mcp_names)
@@ -145,9 +140,7 @@ class BotService:
             is_public=bool(payload.get("is_public", False)),
             created_by=user_id,
         )
-        await self._oper.add(
-            user_id, "bot.create", bot_key, {"datasource_key": ds_key}
-        )
+        await self._oper.add(user_id, "bot.create", bot_key, {"datasource_key": ds_key})
         await self._repo.commit()
         return row_id
 
@@ -171,17 +164,12 @@ class BotService:
         raw = row.get("tools")
         raw_bot_tools = cast("list[object]", raw) if isinstance(raw, list) else []
         bot_tools = [str(t) for t in raw_bot_tools if str(t) in allowed_names]
-        tools = [
-            dict(s) for s in filter_specs(creator_perms) if s["name"] in set(bot_tools)
-        ]
+        tools = [dict(s) for s in filter_specs(creator_perms) if s["name"] in set(bot_tools)]
         # R1-M2:Bot 渠道无确认交互(公开页/OpenAI 无会话)——剔除需确认的写工具,
         # 防确认死信+LLM 谎称卡片已弹出
         from kongming.toolcall.registry import REGISTRY as _TOOL_REG
 
-        tools = [
-            t for t in tools
-            if not _TOOL_REG[str(t["name"])].require_confirm
-        ]
+        tools = [t for t in tools if not _TOOL_REG[str(t["name"])].require_confirm]
         # 028:MCP 工具补入(filter_specs 只覆盖静态集);写工具同 R1-M2
         # 剔除(无 readOnlyHint=require_confirm,Bot 渠道确认死信)
         mcp_wanted = {t for t in bot_tools if t.startswith("mcp__")}
@@ -302,9 +290,7 @@ class BotService:
             "rows": reply.get("rows") or [],
             "stats": reply.get("stats") or {},
             "retry_count": (
-                int(str(reply.get("retry_count")))
-                if reply.get("retry_count") is not None
-                else 0
+                int(str(reply.get("retry_count"))) if reply.get("retry_count") is not None else 0
             ),
             "error": filtered[1] or None,
         }

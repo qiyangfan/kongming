@@ -110,9 +110,7 @@ class SqlSystemRepo:
         )
         return int(n or 0)
 
-    async def list_users(
-        self, keyword: str, limit: int, offset: int
-    ) -> list[UserListItem]:
+    async def list_users(self, keyword: str, limit: int, offset: int) -> list[UserListItem]:
         rows = (
             await self._s.execute(
                 text(
@@ -142,22 +140,23 @@ class SqlSystemRepo:
 
     async def get_user(self, user_id: str) -> dict[str, Any] | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT id, username, email, nickname, status, dept_id, password_hash"
-                    " FROM public.sys_user WHERE id=:i AND deleted_at IS NULL"
-                ),
-                {"i": user_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, username, email, nickname, status, dept_id, password_hash"
+                        " FROM public.sys_user WHERE id=:i AND deleted_at IS NULL"
+                    ),
+                    {"i": user_id},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return dict(row) if row else None
 
     async def username_taken(self, username: str) -> bool:
         n = await self._s.scalar(
-            text(
-                "SELECT count(*) FROM public.sys_user"
-                " WHERE username=:u AND deleted_at IS NULL"
-            ),
+            text("SELECT count(*) FROM public.sys_user WHERE username=:u AND deleted_at IS NULL"),
             {"u": username},
         )
         return int(n or 0) > 0
@@ -324,14 +323,18 @@ class SqlSystemRepo:
 
     async def get_role(self, role_id: str) -> dict[str, Any] | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT id, role_key, role_name, data_scope, sql_scope, sort"
-                    " FROM public.sys_role WHERE id=:i"
-                ),
-                {"i": role_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, role_key, role_name, data_scope, sql_scope, sort"
+                        " FROM public.sys_role WHERE id=:i"
+                    ),
+                    {"i": role_id},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return dict(row) if row else None
 
     async def role_key_taken(self, role_key: str) -> bool:
@@ -451,14 +454,18 @@ class SqlSystemRepo:
 
     async def get_dept(self, dept_id: str) -> Dept | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT id, parent_id, dept_name, tenant_id, sort, status"
-                    " FROM public.sys_dept WHERE id=:i"
-                ),
-                {"i": dept_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, parent_id, dept_name, tenant_id, sort, status"
+                        " FROM public.sys_dept WHERE id=:i"
+                    ),
+                    {"i": dept_id},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return _to_dept(dict(row)) if row else None
 
     async def insert_dept(
@@ -507,10 +514,7 @@ class SqlSystemRepo:
 
     async def dept_has_active_users(self, dept_id: str) -> bool:
         n = await self._s.scalar(
-            text(
-                "SELECT count(*) FROM public.sys_user"
-                " WHERE dept_id=:i AND deleted_at IS NULL"
-            ),
+            text("SELECT count(*) FROM public.sys_user WHERE dept_id=:i AND deleted_at IS NULL"),
             {"i": dept_id},
         )
         return int(n or 0) > 0
@@ -521,8 +525,7 @@ class SqlSystemRepo:
         rows = (
             await self._s.execute(
                 text(
-                    "SELECT id, tenant_key, tenant_name FROM public.sys_tenant"
-                    " ORDER BY tenant_key"
+                    "SELECT id, tenant_key, tenant_name FROM public.sys_tenant ORDER BY tenant_key"
                 )
             )
         ).mappings()
@@ -542,4 +545,3 @@ class SqlSystemRepo:
 
     async def rollback(self) -> None:
         await self._s.rollback()
-

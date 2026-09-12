@@ -60,6 +60,7 @@ class SandboxUnavailableError(Exception):
     """027:沙箱未启用(组合根未注入 runner 时的 handler 收敛;
     经分发兜底映射 ERROR+审计,不裸 500)。"""
 
+
 # SQL 类工具的 sql 参数语义预检(L4 的一部分):JSON Schema 管结构,sqlglot
 # 根节点判定管「必须是只读语句形态」——DROP 在到达防火墙前即被参数校验层
 # 拒绝(spec scenario 字面语义)。R1-S2:首关键字白名单改为 AST 根判定——
@@ -92,9 +93,7 @@ def validate_args(tool: ToolDef, args: dict[str, object]) -> str | None:
         sql = args.get(sql_param)
         if isinstance(sql, str) and sql.strip():
             try:
-                stmts = [
-                    st for st in sqlglot.parse(sql, dialect="postgres") if st is not None
-                ]
+                stmts = [st for st in sqlglot.parse(sql, dialect="postgres") if st is not None]
             except (SqlglotError, RecursionError):
                 # 语法畸形:放行下游(防火墙 ParseError 语义接管);RecursionError
                 # 继承 RuntimeError 不在 SqlglotError 族——深嵌套括号曾逃逸
@@ -235,9 +234,7 @@ class ToolCallService:
                 tool_write=True,
                 write_attempts=attempts,
             ):
-                return await _finish(
-                    "REJECTED", reason="GUARDRAIL_BLOCKED: 工具意图审核未通过"
-                )
+                return await _finish("REJECTED", reason="GUARDRAIL_BLOCKED: 工具意图审核未通过")
 
         # L4:参数 JSON Schema + 语义预检
         arg_err = validate_args(tool, args)
@@ -328,9 +325,7 @@ class ToolCallService:
         if tool.name.startswith("mcp__"):
             if self._mcp is None:
                 raise LookupError("MCP 出站执行未接线(部署缺陷)")
-            return await self._mcp.call(
-                tenant_id=tenant_id, qualified=tool.name, args=args
-            )
+            return await self._mcp.call(tenant_id=tenant_id, qualified=tool.name, args=args)
         if tool.name == "run_python_code":
             return await self._run_python_code(
                 args,

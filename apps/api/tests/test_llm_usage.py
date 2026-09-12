@@ -78,9 +78,7 @@ async def test_report_persists_and_resolves_tenant(
     assert {r.task for r in rows} == {"SQL_GEN", "SUMMARIZE"}
 
 
-async def test_report_unknown_tenant_null(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_report_unknown_tenant_null(client: AsyncClient, session: AsyncSession) -> None:
     await seed_all(session, get_settings())
     r = await client.post(
         "/internal/llm-usage", headers=INTERNAL, json=_records(tenant_key="ghost")
@@ -105,15 +103,11 @@ async def test_report_validation_422(client: AsyncClient) -> None:
     assert r2.status_code == 422
 
 
-async def test_summary_aggregates(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_summary_aggregates(client: AsyncClient, session: AsyncSession) -> None:
     await seed_all(session, get_settings())
     await client.post("/internal/llm-usage", headers=INTERNAL, json=_records())
     token = await _login(client, "admin", "admin123")
-    r = await client.get(
-        "/system/llm-usage/summary", headers={"Authorization": f"Bearer {token}"}
-    )
+    r = await client.get("/system/llm-usage/summary", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
     items = r.json()["items"]
     assert len(items) == 2
@@ -134,17 +128,14 @@ async def test_summary_forbidden(
     ).scalar_one()
     await _bind(session, "sys_user_tenant", uid, str(tid))
     token = await _login(client, "usage_plain")
-    r = await client.get(
-        "/system/llm-usage/summary", headers={"Authorization": f"Bearer {token}"}
-    )
+    r = await client.get("/system/llm-usage/summary", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 403
+
 
 # ========== 038 agent-observability ==========
 
 
-async def _seed_usage_rows(
-    s: AsyncSession, rows: list[dict[str, Any]]
-) -> None:
+async def _seed_usage_rows(s: AsyncSession, rows: list[dict[str, Any]]) -> None:
     for r in rows:
         await s.execute(
             text(
@@ -159,9 +150,7 @@ async def _seed_usage_rows(
     await s.commit()
 
 
-async def test_report_persists_latency_status(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_report_persists_latency_status(client: AsyncClient, session: AsyncSession) -> None:
     """038:上报含 latency_ms/status 落库(失败调用也上报,usage=0)。"""
     await seed_all(session, get_settings())
     payload = {
@@ -183,58 +172,70 @@ async def test_report_persists_latency_status(
     assert r.status_code == 200
     row = (
         await session.execute(
-            text(
-                "SELECT latency_ms, status FROM public.sys_llm_usage"
-                " WHERE trace_id='tr-038a'"
-            )
+            text("SELECT latency_ms, status FROM public.sys_llm_usage WHERE trace_id='tr-038a'")
         )
     ).one()
     assert row.latency_ms == 30001
     assert row.status == "ERROR"
 
 
-async def test_report_backcompat_defaults(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_report_backcompat_defaults(client: AsyncClient, session: AsyncSession) -> None:
     """038:旧 agent 上报(无新字段)缺省 SUCCESS/NULL latency,兼容窗口。"""
     await seed_all(session, get_settings())
     r = await client.post("/internal/llm-usage", headers=INTERNAL, json=_records())
     assert r.status_code == 200
     rows = (
         await session.execute(
-            text(
-                "SELECT status, latency_ms FROM public.sys_llm_usage"
-                " WHERE trace_id='tr-u1'"
-            )
+            text("SELECT status, latency_ms FROM public.sys_llm_usage WHERE trace_id='tr-u1'")
         )
     ).all()
     assert len(rows) == 2
     assert all(r.status == "SUCCESS" and r.latency_ms is None for r in rows)
 
 
-async def test_summary_error_and_latency_stats(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_summary_error_and_latency_stats(client: AsyncClient, session: AsyncSession) -> None:
     """038:calls_error 计数;延迟统计仅 SUCCESS 参与(ERROR 的 30001 不入)。"""
     await seed_all(session, get_settings())
     await _seed_usage_rows(
         session,
         [
-            {"tr": "tr-038b", "m": "qwen-plus", "task": "SQL_GEN",
-             "pt": 10, "ct": 5, "tt": 15, "lat": 100, "st": "SUCCESS",
-             "ca": datetime.now(UTC)},
-            {"tr": "tr-038b", "m": "qwen-plus", "task": "SQL_GEN",
-             "pt": 10, "ct": 5, "tt": 15, "lat": 300, "st": "SUCCESS",
-             "ca": datetime.now(UTC)},
-            {"tr": "tr-038b", "m": "qwen-plus", "task": "SQL_GEN",
-             "pt": 0, "ct": 0, "tt": 0, "lat": 30001, "st": "ERROR",
-             "ca": datetime.now(UTC)},
+            {
+                "tr": "tr-038b",
+                "m": "qwen-plus",
+                "task": "SQL_GEN",
+                "pt": 10,
+                "ct": 5,
+                "tt": 15,
+                "lat": 100,
+                "st": "SUCCESS",
+                "ca": datetime.now(UTC),
+            },
+            {
+                "tr": "tr-038b",
+                "m": "qwen-plus",
+                "task": "SQL_GEN",
+                "pt": 10,
+                "ct": 5,
+                "tt": 15,
+                "lat": 300,
+                "st": "SUCCESS",
+                "ca": datetime.now(UTC),
+            },
+            {
+                "tr": "tr-038b",
+                "m": "qwen-plus",
+                "task": "SQL_GEN",
+                "pt": 0,
+                "ct": 0,
+                "tt": 0,
+                "lat": 30001,
+                "st": "ERROR",
+                "ca": datetime.now(UTC),
+            },
         ],
     )
     token = await _login(client, "admin", "admin123")
-    r = await client.get(
-        "/system/llm-usage/summary", headers={"Authorization": f"Bearer {token}"}
-    )
+    r = await client.get("/system/llm-usage/summary", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
     item = next(i for i in r.json()["items"] if i["task"] == "SQL_GEN")
     assert item["calls"] == 3
@@ -243,17 +244,23 @@ async def test_summary_error_and_latency_stats(
     assert item["latency_ms_max"] == 300
 
 
-async def test_trend_pads_zero_days(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_trend_pads_zero_days(client: AsyncClient, session: AsyncSession) -> None:
     """038:趋势逐天补零(桶数=days;今天桶含刚落记录)。"""
     await seed_all(session, get_settings())
     await _seed_usage_rows(
         session,
         [
-            {"tr": "tr-038c", "m": "qwen-plus", "task": "CHAT",
-             "pt": 1, "ct": 1, "tt": 2, "lat": 50, "st": "SUCCESS",
-             "ca": datetime.now(UTC)},
+            {
+                "tr": "tr-038c",
+                "m": "qwen-plus",
+                "task": "CHAT",
+                "pt": 1,
+                "ct": 1,
+                "tt": 2,
+                "lat": 50,
+                "st": "SUCCESS",
+                "ca": datetime.now(UTC),
+            },
         ],
     )
     token = await _login(client, "admin", "admin123")
@@ -282,21 +289,22 @@ async def test_trend_days_bounds(client: AsyncClient, session: AsyncSession) -> 
     assert r.status_code == 422
 
 
-async def test_page_filters_and_total(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_page_filters_and_total(client: AsyncClient, session: AsyncSession) -> None:
     """038:明细分页——status/trace_id 筛选、倒序、total 一致。"""
     await seed_all(session, get_settings())
     base = {"m": "qwen-plus", "task": "SUMMARIZE", "pt": 1, "ct": 1, "tt": 2}
     await _seed_usage_rows(
         session,
         [
-            {**base, "tr": "tr-038d", "lat": 10, "st": "SUCCESS",
-             "ca": datetime.now(UTC)},
-            {**base, "tr": "tr-038d", "lat": None, "st": "ERROR",
-             "ca": datetime.now(UTC)},
-            {**base | {"task": "SQL_GEN"}, "tr": "tr-038e", "lat": 5,
-             "st": "SUCCESS", "ca": datetime.now(UTC)},
+            {**base, "tr": "tr-038d", "lat": 10, "st": "SUCCESS", "ca": datetime.now(UTC)},
+            {**base, "tr": "tr-038d", "lat": None, "st": "ERROR", "ca": datetime.now(UTC)},
+            {
+                **base | {"task": "SQL_GEN"},
+                "tr": "tr-038e",
+                "lat": 5,
+                "st": "SUCCESS",
+                "ca": datetime.now(UTC),
+            },
         ],
     )
     token = await _login(client, "admin", "admin123")
@@ -326,9 +334,7 @@ async def test_page_filters_and_total(
     assert r3.json()["total"] == 1
 
 
-async def test_timeline_merges_three_tables(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_timeline_merges_three_tables(client: AsyncClient, session: AsyncSession) -> None:
     """038:时间线按 trace 聚 LLM+TOOL+SQL 三路事件,时间升序。"""
     await seed_all(session, get_settings())
     tid = (
@@ -341,8 +347,17 @@ async def test_timeline_merges_three_tables(
     await _seed_usage_rows(
         session,
         [
-            {"tr": trace, "m": "qwen-plus", "task": "REACT", "pt": 10, "ct": 5,
-             "tt": 15, "lat": 800, "st": "SUCCESS", "ca": datetime.now(UTC)},
+            {
+                "tr": trace,
+                "m": "qwen-plus",
+                "task": "REACT",
+                "pt": 10,
+                "ct": 5,
+                "tt": 15,
+                "lat": 800,
+                "st": "SUCCESS",
+                "ca": datetime.now(UTC),
+            },
         ],
     )
     await session.execute(
@@ -414,17 +429,12 @@ async def test_new_endpoints_forbidden(
     await _bind(session, "sys_user_tenant", uid, str(tid))
     token = await _login(client, "usage_plain2")
     hdr = {"Authorization": f"Bearer {token}"}
+    assert (await client.get("/system/llm-usage/trend", headers=hdr)).status_code == 403
+    assert (await client.get("/system/llm-usage/page", headers=hdr)).status_code == 403
     assert (
-        await client.get("/system/llm-usage/trend", headers=hdr)
+        await client.get("/system/llm-usage/timeline", params={"trace_id": "x"}, headers=hdr)
     ).status_code == 403
-    assert (
-        await client.get("/system/llm-usage/page", headers=hdr)
-    ).status_code == 403
-    assert (
-        await client.get(
-            "/system/llm-usage/timeline", params={"trace_id": "x"}, headers=hdr
-        )
-    ).status_code == 403
+
 
 # ========== 038 R1 评审补测 ==========
 
@@ -437,39 +447,47 @@ async def test_summary_all_error_group_null_latency(
     await _seed_usage_rows(
         session,
         [
-            {"tr": "tr-038f", "m": "qwen-plus", "task": "TITLER",
-             "pt": 0, "ct": 0, "tt": 0, "lat": 5000, "st": "ERROR",
-             "ca": datetime.now(UTC)},
-            {"tr": "tr-038f", "m": "qwen-plus", "task": "TITLER",
-             "pt": 0, "ct": 0, "tt": 0, "lat": 6000, "st": "ERROR",
-             "ca": datetime.now(UTC)},
+            {
+                "tr": "tr-038f",
+                "m": "qwen-plus",
+                "task": "TITLER",
+                "pt": 0,
+                "ct": 0,
+                "tt": 0,
+                "lat": 5000,
+                "st": "ERROR",
+                "ca": datetime.now(UTC),
+            },
+            {
+                "tr": "tr-038f",
+                "m": "qwen-plus",
+                "task": "TITLER",
+                "pt": 0,
+                "ct": 0,
+                "tt": 0,
+                "lat": 6000,
+                "st": "ERROR",
+                "ca": datetime.now(UTC),
+            },
         ],
     )
     token = await _login(client, "admin", "admin123")
-    r = await client.get(
-        "/system/llm-usage/summary", headers={"Authorization": f"Bearer {token}"}
-    )
-    item = next(
-        i for i in r.json()["items"] if i["task"] == "TITLER"
-    )
+    r = await client.get("/system/llm-usage/summary", headers={"Authorization": f"Bearer {token}"})
+    item = next(i for i in r.json()["items"] if i["task"] == "TITLER")
     assert item["calls"] == 2
     assert item["calls_error"] == 2
     assert item["latency_ms_avg"] is None  # ERROR 不入延迟统计
     assert item["latency_ms_max"] is None
 
 
-async def test_bot_sink_persists_new_columns(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_bot_sink_persists_new_columns(client: AsyncClient, session: AsyncSession) -> None:
     """R1-B4(design 承诺):bot 请求内同步通道(insert_bot_usage_batch)
     落 latency_ms/status——收集器 ERROR 记录经 sink 可达落库。"""
     from kongming.llmusage.repository import SqlLlmUsageRepo
 
     await seed_all(session, get_settings())
     tid = (
-        await session.execute(
-            text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'")
-        )
+        await session.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'"))
     ).scalar_one()
     repo = SqlLlmUsageRepo(session)
     inserted = await repo.insert_bot_usage_batch(
@@ -492,19 +510,14 @@ async def test_bot_sink_persists_new_columns(
     assert inserted == 1
     row = (
         await session.execute(
-            text(
-                "SELECT latency_ms, status FROM public.sys_llm_usage"
-                " WHERE trace_id='tr-sink-038'"
-            )
+            text("SELECT latency_ms, status FROM public.sys_llm_usage WHERE trace_id='tr-sink-038'")
         )
     ).one()
     assert row.latency_ms == 1234
     assert row.status == "ERROR"
 
 
-async def test_trend_cross_month_bucketing(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_trend_cross_month_bucketing(client: AsyncClient, session: AsyncSession) -> None:
     """R1-B4(design 承诺):跨月窗口——上月日期行归上月桶,不溢进今天桶。"""
     await seed_all(session, get_settings())
     # 构造 35 天前±12h 的沪时日期(R2-F1:固定回退避开午夜边界;
@@ -515,9 +528,17 @@ async def test_trend_cross_month_bucketing(
     await _seed_usage_rows(
         session,
         [
-            {"tr": "tr-038g", "m": "qwen-plus", "task": "CHAT",
-             "pt": 5, "ct": 5, "tt": 10, "lat": 30, "st": "SUCCESS",
-             "ca": last_month - timedelta(hours=8)},  # 存回 UTC
+            {
+                "tr": "tr-038g",
+                "m": "qwen-plus",
+                "task": "CHAT",
+                "pt": 5,
+                "ct": 5,
+                "tt": 10,
+                "lat": 30,
+                "st": "SUCCESS",
+                "ca": last_month - timedelta(hours=8),
+            },  # 存回 UTC
         ],
     )
     token = await _login(client, "admin", "admin123")
@@ -536,31 +557,33 @@ async def test_trend_cross_month_bucketing(
     assert bucket["date"].endswith(last_month.strftime("-%m-%d"))
 
 
-async def test_page_deep_offset_and_bounds(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_page_deep_offset_and_bounds(client: AsyncClient, session: AsyncSession) -> None:
     """R1-B4:深翻页越界空页 total 不变;days 上下界合法。"""
     await seed_all(session, get_settings())
     await _seed_usage_rows(
         session,
         [
-            {"tr": "tr-038h", "m": "qwen-plus", "task": "CHAT",
-             "pt": 1, "ct": 1, "tt": 2, "lat": 5, "st": "SUCCESS",
-             "ca": datetime.now(UTC)},
+            {
+                "tr": "tr-038h",
+                "m": "qwen-plus",
+                "task": "CHAT",
+                "pt": 1,
+                "ct": 1,
+                "tt": 2,
+                "lat": 5,
+                "st": "SUCCESS",
+                "ca": datetime.now(UTC),
+            },
         ],
     )
     token = await _login(client, "admin", "admin123")
     hdr = {"Authorization": f"Bearer {token}"}
-    r = await client.get(
-        "/system/llm-usage/page", params={"page": 999}, headers=hdr
-    )
+    r = await client.get("/system/llm-usage/page", params={"page": 999}, headers=hdr)
     body = r.json()
     assert body["total"] >= 1
     assert body["rows"] == []
     for days in (1, 90):
-        r_days = await client.get(
-            "/system/llm-usage/trend", params={"days": days}, headers=hdr
-        )
+        r_days = await client.get("/system/llm-usage/trend", params={"days": days}, headers=hdr)
         assert r_days.status_code == 200
         assert len(r_days.json()["points"]) == days
 

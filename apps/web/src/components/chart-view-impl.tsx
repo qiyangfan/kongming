@@ -4,6 +4,7 @@ import { ChartColumn, ChartLine, ChartPie, ChartScatter, ImageDown } from "lucid
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { EChart, themedTooltip } from "@/lib/echarts";
+import { cssVar } from "@/lib/utils";
 import type { ChartDatum, ChartSpec, ChartTune, ChartType } from "@/components/chart-shared";
 import { uniqueTypes } from "@/components/chart-shared";
 
@@ -28,12 +29,13 @@ const TYPE_META: Record<ChartType, { label: string; Icon: typeof ChartColumn }> 
 
 /* 从 CSS token 派生图表色板:朱砂打底、鎏金点睛、青灰过渡,惜色如金;
    只用面向数据的 token,前景文字色不入系列(浅色底上近不可见) */
-function cssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
 function chartPalette(): string[] {
-  return [cssVar("--primary"), cssVar("--ring"), cssVar("--accent-foreground"), cssVar("--muted-foreground")];
+  return [
+    cssVar("--primary"),
+    cssVar("--ring"),
+    cssVar("--accent-foreground"),
+    cssVar("--muted-foreground"),
+  ];
 }
 
 /* 空值显式排除:JS Number(null)===0 / Number("")===0 会把空单元格误判为数值 0;
@@ -82,9 +84,7 @@ export default function ChartViewImpl({
     const binding = candidates.find((c) => c.type === activeType) ?? candidates[0];
     const xi = binding.x ? data.columns.indexOf(binding.x) : 0;
     const yNames = binding.y.length > 0 ? binding.y : [data.columns[1] ?? ""];
-    const yIdxs = yNames
-      .map((n) => data.columns.indexOf(n))
-      .filter((i) => i >= 0);
+    const yIdxs = yNames.map((n) => data.columns.indexOf(n)).filter((i) => i >= 0);
     const useYIdxs = yIdxs.length > 0 ? yIdxs : [1];
     const xLabels = formatTemporalLabels(data.rows.map((r) => String(r[xi] ?? "")));
     const axisCommon = {
@@ -142,8 +142,7 @@ export default function ChartViewImpl({
 
     if (activeType === "scatter") {
       const yi = useYIdxs[0];
-      const xNumeric =
-        data.rows.length > 0 && data.rows.every((r) => isNumericCell(r[xi]));
+      const xNumeric = data.rows.length > 0 && data.rows.every((r) => isNumericCell(r[xi]));
       if (xNumeric) {
         return {
           ...titleOpt,
@@ -186,9 +185,7 @@ export default function ChartViewImpl({
         tooltip: { trigger: "axis", ...tooltipCommon },
         xAxis: { type: "category", data: xLabels, ...xNameOpt, ...axisCommon },
         yAxis: { type: "value", ...yNameOpt, ...axisCommon },
-        series: [
-          { type: "scatter", data: values, itemStyle: { color: palette[0] } },
-        ],
+        series: [{ type: "scatter", data: values, itemStyle: { color: palette[0] } }],
       };
     }
 
@@ -206,11 +203,7 @@ export default function ChartViewImpl({
     // 大量(>24)才交回 echarts 自动抽稀
     const catCount = hasSeries ? axisCats.length : xLabels.length;
     const catLabelOpt =
-      catCount <= 12
-        ? { interval: 0 }
-        : catCount <= 24
-          ? { interval: 0, rotate: 35 }
-          : {};
+      catCount <= 12 ? { interval: 0 } : catCount <= 24 ? { interval: 0, rotate: 35 } : {};
     let seriesList: { name?: string; data: (number | null)[] }[];
     if (hasSeries) {
       const lookup = new Map<string, number | null>();
@@ -252,9 +245,7 @@ export default function ChartViewImpl({
     // 底部图例占位:压 8px 底距为 28px,防图例与轴标签重叠
     const gridFinal = multi ? { ...grid, bottom: 28 } : grid;
     // 全整数量测(计数类)→ minInterval 1:小值域不产生 0.5/1.5 半数碎刻度
-    const allInts = seriesList.every((s) =>
-      s.data.every((v) => v === null || Number.isInteger(v)),
-    );
+    const allInts = seriesList.every((s) => s.data.every((v) => v === null || Number.isInteger(v)));
     return {
       ...titleOpt,
       ...legendOpt,
@@ -293,7 +284,18 @@ export default function ChartViewImpl({
       ),
     };
     // tune 基元展开入依赖(标题/轴名一改即重算重绘,026 调参语义)
-  }, [candidates, activeType, data, labels, palette, axisColor, lineColor, tune?.title, tune?.xName, tune?.yName]);
+  }, [
+    candidates,
+    activeType,
+    data,
+    labels,
+    palette,
+    axisColor,
+    lineColor,
+    tune?.title,
+    tune?.xName,
+    tune?.yName,
+  ]);
 
   function downloadPng(): void {
     const inst = chartRef.current?.getEchartsInstance();

@@ -505,7 +505,5 @@ async def get_run(
         duration_ms=int(r["duration_ms"]),
         node_runs=list(r["node_runs"] or []),
         inputs=dict(r["inputs"] or {}),
-        created_at=(
-            r["created_at"].isoformat() if r.get("created_at") else None
-        ),
+        created_at=(r["created_at"].isoformat() if r.get("created_at") else None),
     )

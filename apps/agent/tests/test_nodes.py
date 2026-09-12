@@ -262,9 +262,7 @@ async def test_generate_history_sql_section_placement(monkeypatch: pytest.Monkey
     """历史成功 SQL 段(009):位于表结构之后;系统模板不动;无命中不出现。"""
     fake = FakeLlm(["SELECT 1"])
     _install(monkeypatch, fake, FakeApi())
-    await nodes.generate(
-        _state(schema_hint="表 t(a)", history_sql="SELECT count(*) FROM t")
-    )
+    await nodes.generate(_state(schema_hint="表 t(a)", history_sql="SELECT count(*) FROM t"))
     _, user, _ = fake.calls[0]
     assert "历史成功 SQL" in user
     assert user.index("可用表结构") < user.index("参考历史成功 SQL") < user.index("生成 SQL")
@@ -298,7 +296,8 @@ async def test_generate_history_survives_selfheal_error(
         ("```\nSELECT 1\n```", "SELECT 1"),
         ("  SELECT 1  ", "SELECT 1"),
         ("SQL\nSELECT 1", "SELECT 1"),
-    ])
+    ],
+)
 def test_clean_sql(raw: str, expected: str) -> None:
     assert nodes.clean_sql(raw) == expected
 
@@ -423,9 +422,7 @@ async def test_generate_selfheal_column_error_no_sentinel_exit(
     """047:列不存在喂回不携带表哨兵出口(否则模型弃答可答之题)。"""
     fake = FakeLlm(["SELECT 1"])
     _install(monkeypatch, fake, FakeApi())
-    await nodes.generate(
-        _state(schema_hint="表 t(a)", error='column "email" does not exist')
-    )
+    await nodes.generate(_state(schema_hint="表 t(a)", error='column "email" does not exist'))
     user = fake.calls[0][1]
     assert "不得用其他列近似顶替" in user or "清单内" in user
     assert "只输出 NO_RELEVANT_TABLE" not in user
@@ -609,10 +606,11 @@ def test_compute_stats_excludes_identifier_and_period_columns() -> None:
     ("raw", "summary", "n_insights"),
     [
         ('{"summary":"共3行","insights":[{"type":"max","text":"最多"}]}', "共3行", 1),
-        ("```json\n{\"summary\":\"包标记\"}\n```", "包标记", 0),
+        ('```json\n{"summary":"包标记"}\n```', "包标记", 0),
         ('前缀废话 {"summary":"嵌在文里"} 后缀', "嵌在文里", 0),
         ("完全不是 JSON", "", 0),
-    ])
+    ],
+)
 def test_parse_summary_json(raw: str, summary: str, n_insights: int) -> None:
     parsed = nodes.parse_summary_json(raw)
     assert parsed.get("summary", "") == summary

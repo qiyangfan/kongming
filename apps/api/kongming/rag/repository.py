@@ -220,10 +220,7 @@ class RagRepository:
         # 同名表跨 schema(default 源合法并存 tenant_<key> 与 public)时
         # 字典后写覆盖:排序保证 public 先读、租户 schema 后写胜出——
         # 标签取「本租户」注释,方向确定(R1 实锤:无序覆盖方向随计划漂移)
-        return {
-            str(r.table_name): dict(r.columns_comment or {})
-            for r in rows
-        }
+        return {str(r.table_name): dict(r.columns_comment or {}) for r in rows}
 
     async def list_tables(
         self,
@@ -284,16 +281,20 @@ class RagRepository:
     async def find_table(self, *, tenant_id: str, table_id: str) -> KnowledgeEntry | None:
         """单条取(租户归属限定;不命中=None→同形 404)。"""
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT id, datasource_key, schema_name, table_name, table_comment,"
-                    " columns_comment, sample_queries, source_type, updated_at,"
-                    " COALESCE(alias, '') AS alias"
-                    " FROM rag.table_descriptions WHERE id = :id AND tenant_id = :t"
-                ),
-                {"id": table_id, "t": tenant_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, datasource_key, schema_name, table_name, table_comment,"
+                        " columns_comment, sample_queries, source_type, updated_at,"
+                        " COALESCE(alias, '') AS alias"
+                        " FROM rag.table_descriptions WHERE id = :id AND tenant_id = :t"
+                    ),
+                    {"id": table_id, "t": tenant_id},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         if row is None:
             return None
         return KnowledgeEntry(
@@ -475,9 +476,7 @@ class RagRepository:
 
     # ============ 租户解析(与 chat/options 白名单复校同构) ============
 
-    async def resolve_bound_tenant(
-        self, user_id: str, tenant_key: str
-    ) -> tuple[str, str] | None:
+    async def resolve_bound_tenant(self, user_id: str, tenant_key: str) -> tuple[str, str] | None:
         repo = SqlDatasourceRepo(self._s)
         tenant_id = await repo.find_bound_tenant(user_id, tenant_key)
         return (tenant_id, tenant_key) if tenant_id is not None else None
@@ -494,8 +493,7 @@ class RagRepository:
         v = (
             await self._s.execute(
                 text(
-                    "SELECT id FROM public.sys_tenant"
-                    " WHERE tenant_key = :k AND status = 'ACTIVE'"
+                    "SELECT id FROM public.sys_tenant WHERE tenant_key = :k AND status = 'ACTIVE'"
                 ),
                 {"k": tenant_key},
             )
@@ -642,9 +640,7 @@ class RagRepository:
             for r in rows
         ]
 
-    async def history_overview(
-        self, *, tenant_id: str, datasource_key: str
-    ) -> HistoryOverview:
+    async def history_overview(self, *, tenant_id: str, datasource_key: str) -> HistoryOverview:
         """few-shot 通道概况:仅 SUCCESS(召回同口径);计数一次聚合完成。"""
         row = (
             await self._s.execute(

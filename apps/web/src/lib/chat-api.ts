@@ -88,7 +88,6 @@ export async function exportResult(
   const ts = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   const fallback = `查询结果-${ts.getFullYear()}${pad(ts.getMonth() + 1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}.${format}`;
-  const filename =
-    parseDispositionFilename(resp.headers.get("content-disposition")) ?? fallback;
+  const filename = parseDispositionFilename(resp.headers.get("content-disposition")) ?? fallback;
   downloadBlob(blob, filename);
 }

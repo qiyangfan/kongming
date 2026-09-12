@@ -41,9 +41,16 @@ async def test_collector_present_collects_only() -> None:
     assert collector[0]["trace_id"] == "t1" and collector[0]["tenant_key"] == "sakila"
     # 038:补 status/latency_ms(采集补全;bot sink 侧同步透传)
     assert set(collector[0]) == {
-        "trace_id", "tenant_key", "model", "task",
-        "prompt_tokens", "completion_tokens", "total_tokens", "seq",
-        "status", "latency_ms",
+        "trace_id",
+        "tenant_key",
+        "model",
+        "task",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "seq",
+        "status",
+        "latency_ms",
     }
 
 

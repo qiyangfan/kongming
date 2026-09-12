@@ -22,16 +22,20 @@ async def cleanup_orphan_attachments(session: AsyncSession) -> int:
     from sqlalchemy import text
 
     rows = (
-        await session.execute(
-            text(
-                "DELETE FROM public.sys_attachment"
-                " WHERE status='UPLOADED'"
-                " AND created_at < now() - make_interval(hours => :h)"
-                " RETURNING id, mime"
-            ),
-            {"h": _ORPHAN_HOURS},
+        (
+            await session.execute(
+                text(
+                    "DELETE FROM public.sys_attachment"
+                    " WHERE status='UPLOADED'"
+                    " AND created_at < now() - make_interval(hours => :h)"
+                    " RETURNING id, mime"
+                ),
+                {"h": _ORPHAN_HOURS},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     await session.commit()
     deleted = 0
     for r in rows:

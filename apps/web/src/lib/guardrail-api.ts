@@ -28,15 +28,11 @@ export interface GuardrailAuditParams {
   end?: string;
 }
 
-export function guardrailAuditPage(
-  params: GuardrailAuditParams,
-): Promise<GuardrailAuditPageOut> {
+export function guardrailAuditPage(params: GuardrailAuditParams): Promise<GuardrailAuditPageOut> {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === "" || v === null) continue;
     qs.set(k, String(v));
   }
-  return api.get<GuardrailAuditPageOut>(
-    `/system/guardrails/audit/page${qs.size ? `?${qs}` : ""}`,
-  );
+  return api.get<GuardrailAuditPageOut>(`/system/guardrails/audit/page${qs.size ? `?${qs}` : ""}`);
 }

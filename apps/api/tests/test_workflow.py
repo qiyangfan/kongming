@@ -52,12 +52,12 @@ async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction
     async with get_engine().begin() as conn:
         await conn.execute(text(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE'))  # noqa: S608  # 模块常量
 
+
 # ── validate_dag 全分支 ──
 
 
 def _t_node(nid: str, deps: list[str] | None = None) -> dict[str, Any]:
-    return {"id": nid, "type": "transform", "config": {"template": "x"},
-            "depends_on": deps or []}
+    return {"id": nid, "type": "transform", "config": {"template": "x"}, "depends_on": deps or []}
 
 
 def test_dag_valid() -> None:
@@ -67,9 +67,7 @@ def test_dag_valid() -> None:
 
 def test_dag_cycle_named() -> None:
     with pytest.raises(DagValidationError, match="环"):
-        validate_dag(
-            {"nodes": [_t_node("a", ["b"]), _t_node("b", ["a"])]}
-        )
+        validate_dag({"nodes": [_t_node("a", ["b"]), _t_node("b", ["a"])]})
 
 
 def test_dag_orphan() -> None:
@@ -188,10 +186,18 @@ async def test_engine_happy_chain() -> None:
     out = await _run(
         [
             {"id": "q", "type": "sql", "config": {"sql": "SELECT name FROM goods"}},
-            {"id": "t", "type": "transform",
-             "config": {"template": "首行: {{q.outputs.rows}}"}, "depends_on": ["q"]},
-            {"id": "ai", "type": "agent",
-             "config": {"instruction": "解读 {{t.outputs.value}}"}, "depends_on": ["t"]},
+            {
+                "id": "t",
+                "type": "transform",
+                "config": {"template": "首行: {{q.outputs.rows}}"},
+                "depends_on": ["q"],
+            },
+            {
+                "id": "ai",
+                "type": "agent",
+                "config": {"instruction": "解读 {{t.outputs.value}}"},
+                "depends_on": ["t"],
+            },
         ],
         agent=agent,
     )
@@ -206,12 +212,19 @@ async def test_engine_condition_routing() -> None:
     sql = _MockSql()
     out = await _run(
         [
-            {"id": "c", "type": "condition",
-             "config": {"left": "1", "op": ">", "right": "2"}},
-            {"id": "yes", "type": "sql", "config": {"sql": "SELECT 1"},
-             "depends_on": ["c"]},  # 缺省 on="true"
-            {"id": "no", "type": "sql", "config": {"sql": "SELECT 2", "on": "false"},
-             "depends_on": ["c"]},
+            {"id": "c", "type": "condition", "config": {"left": "1", "op": ">", "right": "2"}},
+            {
+                "id": "yes",
+                "type": "sql",
+                "config": {"sql": "SELECT 1"},
+                "depends_on": ["c"],
+            },  # 缺省 on="true"
+            {
+                "id": "no",
+                "type": "sql",
+                "config": {"sql": "SELECT 2", "on": "false"},
+                "depends_on": ["c"],
+            },
         ],
         sql=sql,
     )
@@ -225,10 +238,13 @@ async def test_engine_fail_fast_snapshot() -> None:
     out = await _run(
         [
             {"id": "ok", "type": "transform", "config": {"template": "done"}},
-            {"id": "bad", "type": "sql", "config": {"sql": "DROP TABLE x"},
-             "depends_on": ["ok"]},
-            {"id": "never", "type": "transform", "config": {"template": "x"},
-             "depends_on": ["bad"]},
+            {"id": "bad", "type": "sql", "config": {"sql": "DROP TABLE x"}, "depends_on": ["ok"]},
+            {
+                "id": "never",
+                "type": "transform",
+                "config": {"template": "x"},
+                "depends_on": ["bad"],
+            },
         ],
         sql=_MockSql(verdict="BLOCKED"),
     )
@@ -242,20 +258,35 @@ async def test_engine_loop_cap() -> None:
     """spec「循环上限保护」:数组超上限即 FAILED,不无限循环。"""
     out = await run_dag(
         validate_dag(
-            {"nodes": [
-                {"id": "src", "type": "transform",
-                 "config": {"template": "{{inputs.arr}}"}},
-                {"id": "lp", "type": "loop",
-                 "config": {"items_ref": "src.outputs.value",
-                            "body": [{"id": "one", "type": "transform",
-                                      "config": {"template": "{{_loop.item}}"}}],
-                            "max_iterations": 3},
-                 "depends_on": ["src"]},
-            ]}
+            {
+                "nodes": [
+                    {"id": "src", "type": "transform", "config": {"template": "{{inputs.arr}}"}},
+                    {
+                        "id": "lp",
+                        "type": "loop",
+                        "config": {
+                            "items_ref": "src.outputs.value",
+                            "body": [
+                                {
+                                    "id": "one",
+                                    "type": "transform",
+                                    "config": {"template": "{{_loop.item}}"},
+                                }
+                            ],
+                            "max_iterations": 3,
+                        },
+                        "depends_on": ["src"],
+                    },
+                ]
+            }
         ),
         {"arr": [1, 2, 3, 4, 5]},
-        sql=_MockSql(), http=_MockHttp(), agent=_MockAgent(),
-        trace_id="t", tenant_key="wf", user_id="u",
+        sql=_MockSql(),
+        http=_MockHttp(),
+        agent=_MockAgent(),
+        trace_id="t",
+        tenant_key="wf",
+        user_id="u",
     )
     assert out.status == "FAILED"
     assert "超上限" in out.error
@@ -264,20 +295,35 @@ async def test_engine_loop_cap() -> None:
 async def test_engine_loop_collects() -> None:
     out = await run_dag(
         validate_dag(
-            {"nodes": [
-                {"id": "src", "type": "transform",
-                 "config": {"template": "{{inputs.arr}}"}},
-                {"id": "lp", "type": "loop",
-                 "config": {"items_ref": "src.outputs.value",
-                            "body": [{"id": "one", "type": "transform",
-                                      "config": {"template": "项-{{_loop.item}}"}}],
-                            "max_iterations": 10},
-                 "depends_on": ["src"]},
-            ]}
+            {
+                "nodes": [
+                    {"id": "src", "type": "transform", "config": {"template": "{{inputs.arr}}"}},
+                    {
+                        "id": "lp",
+                        "type": "loop",
+                        "config": {
+                            "items_ref": "src.outputs.value",
+                            "body": [
+                                {
+                                    "id": "one",
+                                    "type": "transform",
+                                    "config": {"template": "项-{{_loop.item}}"},
+                                }
+                            ],
+                            "max_iterations": 10,
+                        },
+                        "depends_on": ["src"],
+                    },
+                ]
+            }
         ),
         {"arr": ["a", "b"]},
-        sql=_MockSql(), http=_MockHttp(), agent=_MockAgent(),
-        trace_id="t", tenant_key="wf", user_id="u",
+        sql=_MockSql(),
+        http=_MockHttp(),
+        agent=_MockAgent(),
+        trace_id="t",
+        tenant_key="wf",
+        user_id="u",
     )
     assert out.status == "SUCCESS"
     lp = next(nr for nr in out.node_runs if nr.node_id == "lp")
@@ -286,14 +332,14 @@ async def test_engine_loop_collects() -> None:
 
 async def test_engine_timeout_and_step_limit() -> None:
     """spec「全局超时与步数上限」:慢节点被预算中断;步数超顶上界。"""
+
     class _SlowHttp:
         async def run_http(self, **kw: Any) -> dict[str, Any]:
             await asyncio.sleep(5)
             return {"status": 200, "body": ""}
 
     out = await _run(
-        [{"id": "h", "type": "http",
-          "config": {"url": "http://example.com", "method": "GET"}}],
+        [{"id": "h", "type": "http", "config": {"url": "http://example.com", "method": "GET"}}],
         http=_SlowHttp(),
         timeout_sec=1,
     )
@@ -301,8 +347,12 @@ async def test_engine_timeout_and_step_limit() -> None:
 
     out2 = await _run(
         [
-            {"id": f"n{i}", "type": "transform", "config": {"template": "x"},
-             "depends_on": [f"n{i-1}"] if i else []}
+            {
+                "id": f"n{i}",
+                "type": "transform",
+                "config": {"template": "x"},
+                "depends_on": [f"n{i - 1}"] if i else [],
+            }
             for i in range(10)
         ],
         step_cap=3,
@@ -313,8 +363,13 @@ async def test_engine_timeout_and_step_limit() -> None:
 async def test_engine_ssrf_node_failed() -> None:
     """spec「SSRF 防护」:拒绝即节点 FAILED(fail-fast),run FAILED。"""
     out = await _run(
-        [{"id": "h", "type": "http",
-          "config": {"url": "http://169.254.169.254/latest", "method": "GET"}}],
+        [
+            {
+                "id": "h",
+                "type": "http",
+                "config": {"url": "http://169.254.169.254/latest", "method": "GET"},
+            }
+        ],
         http=_MockHttp(blocked=True),
     )
     assert out.status == "FAILED"
@@ -331,8 +386,7 @@ async def test_engine_unknown_exception_converges() -> None:
             raise httpx.ConnectError("refused")
 
     out = await _run(
-        [{"id": "h", "type": "http",
-          "config": {"url": "http://example.com", "method": "GET"}}],
+        [{"id": "h", "type": "http", "config": {"url": "http://example.com", "method": "GET"}}],
         http=_BoomHttp(),
     )
     assert out.status == "FAILED"
@@ -345,29 +399,47 @@ async def test_engine_loop_body_skip_routing() -> None:
     sql = _MockSql()
     out = await run_dag(
         validate_dag(
-            {"nodes": [
-                {"id": "src", "type": "transform",
-                 "config": {"template": "{{inputs.arr}}"}},
-                {"id": "lp", "type": "loop",
-                 "config": {"items_ref": "src.outputs.value",
+            {
+                "nodes": [
+                    {"id": "src", "type": "transform", "config": {"template": "{{inputs.arr}}"}},
+                    {
+                        "id": "lp",
+                        "type": "loop",
+                        "config": {
+                            "items_ref": "src.outputs.value",
                             "body": [
-                                {"id": "c", "type": "condition",
-                                 "config": {"left": "{{_loop.item}}", "op": ">",
-                                            "right": "1"}},
-                                {"id": "big", "type": "sql",
-                                 "config": {"sql": "SELECT 'big'"},
-                                 "depends_on": ["c"]},
-                                {"id": "small", "type": "sql",
-                                 "config": {"sql": "SELECT 'small'", "on": "false"},
-                                 "depends_on": ["c"]},
+                                {
+                                    "id": "c",
+                                    "type": "condition",
+                                    "config": {"left": "{{_loop.item}}", "op": ">", "right": "1"},
+                                },
+                                {
+                                    "id": "big",
+                                    "type": "sql",
+                                    "config": {"sql": "SELECT 'big'"},
+                                    "depends_on": ["c"],
+                                },
+                                {
+                                    "id": "small",
+                                    "type": "sql",
+                                    "config": {"sql": "SELECT 'small'", "on": "false"},
+                                    "depends_on": ["c"],
+                                },
                             ],
-                            "max_iterations": 10},
-                 "depends_on": ["src"]},
-            ]}
+                            "max_iterations": 10,
+                        },
+                        "depends_on": ["src"],
+                    },
+                ]
+            }
         ),
         {"arr": [2, 1]},
-        sql=sql, http=_MockHttp(), agent=_MockAgent(),
-        trace_id="t", tenant_key="wf", user_id="u",
+        sql=sql,
+        http=_MockHttp(),
+        agent=_MockAgent(),
+        trace_id="t",
+        tenant_key="wf",
+        user_id="u",
     )
     assert out.status == "SUCCESS"
     assert sql.calls == ["SELECT 'big'", "SELECT 'small'"]
@@ -377,14 +449,23 @@ async def test_engine_loop_body_id_collision_fails() -> None:
     """R1-J1:body 节点 id 撞外层 → 保存期校验拒绝(引擎深防御 NodeFailed)。"""
     with pytest.raises(DagValidationError, match="撞保留名/外层节点"):
         validate_dag(
-            {"nodes": [
-                {"id": "src", "type": "transform", "config": {"template": "x"}},
-                {"id": "lp", "type": "loop",
-                 "config": {"items_ref": "src.outputs.value", "max_iterations": 3,
-                            "body": [{"id": "src", "type": "transform",
-                                      "config": {"template": "y"}}]},
-                 "depends_on": ["src"]},
-            ]}
+            {
+                "nodes": [
+                    {"id": "src", "type": "transform", "config": {"template": "x"}},
+                    {
+                        "id": "lp",
+                        "type": "loop",
+                        "config": {
+                            "items_ref": "src.outputs.value",
+                            "max_iterations": 3,
+                            "body": [
+                                {"id": "src", "type": "transform", "config": {"template": "y"}}
+                            ],
+                        },
+                        "depends_on": ["src"],
+                    },
+                ]
+            }
         )
 
 
@@ -444,7 +525,10 @@ async def test_ssrf_domain_resolves_private(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 async def _wf_user(
-    client: AsyncClient, s: AsyncSession, make_user: MakeUser, name: str,
+    client: AsyncClient,
+    s: AsyncSession,
+    make_user: MakeUser,
+    name: str,
     codes: list[str],
 ) -> tuple[str, str]:
     await seed_all(s, get_settings())
@@ -460,8 +544,12 @@ async def _wf_user(
 _SQL_WF = {
     "nodes": [
         {"id": "q", "type": "sql", "config": {"sql": "SELECT name FROM goods"}},
-        {"id": "t", "type": "transform",
-         "config": {"template": "行数 {{q.outputs.row_count}}"}, "depends_on": ["q"]},
+        {
+            "id": "t",
+            "type": "transform",
+            "config": {"template": "行数 {{q.outputs.row_count}}"},
+            "depends_on": ["q"],
+        },
     ]
 }
 
@@ -470,18 +558,18 @@ async def test_workflow_crud_version_freeze(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """spec「版本冻结」:再保存产生新版本,旧版本不可改。"""
-    _, token = await _wf_user(
-        client, session, make_user, "wf_admin1", ["system:workflow:manage"]
-    )
+    _, token = await _wf_user(client, session, make_user, "wf_admin1", ["system:workflow:manage"])
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "wf"}
     r = await client.post(
-        "/system/workflow", headers=h,
+        "/system/workflow",
+        headers=h,
         json={"wf_key": "daily", "name": "日报", "definition": _SQL_WF},
     )
     assert r.status_code == 201, r.text
     assert r.json()["version"] == 1
     r2 = await client.post(
-        "/system/workflow", headers=h,
+        "/system/workflow",
+        headers=h,
         json={"wf_key": "daily", "name": "日报v2", "definition": _SQL_WF},
     )
     assert r2.json()["version"] == 2
@@ -490,15 +578,28 @@ async def test_workflow_crud_version_freeze(
     assert [v["version"] for v in r3.json()["versions"]] == [2, 1]
     # 环校验 400 指出环节点
     r4 = await client.post(
-        "/system/workflow", headers=h,
-        json={"wf_key": "cyclic", "name": "环", "definition": {
-            "nodes": [
-                {"id": "a", "type": "transform", "config": {"template": "x"},
-                 "depends_on": ["b"]},
-                {"id": "b", "type": "transform", "config": {"template": "y"},
-                 "depends_on": ["a"]},
-            ]
-        }},
+        "/system/workflow",
+        headers=h,
+        json={
+            "wf_key": "cyclic",
+            "name": "环",
+            "definition": {
+                "nodes": [
+                    {
+                        "id": "a",
+                        "type": "transform",
+                        "config": {"template": "x"},
+                        "depends_on": ["b"],
+                    },
+                    {
+                        "id": "b",
+                        "type": "transform",
+                        "config": {"template": "y"},
+                        "depends_on": ["a"],
+                    },
+                ]
+            },
+        },
     )
     assert r4.status_code == 400
     assert "环" in r4.json()["detail"]
@@ -510,12 +611,16 @@ async def test_workflow_run_and_history(
     """spec「手动触发并落历史」:run 返回节点快照,历史分页可见;
     sql 节点 SELF 行级复校(goods 无本人行 → row_count 0)。"""
     _, token = await _wf_user(
-        client, session, make_user, "wf_run1",
+        client,
+        session,
+        make_user,
+        "wf_run1",
         ["system:workflow:manage", "workflow:execute", "tool:sql:execute"],
     )
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "wf"}
     await client.post(
-        "/system/workflow", headers=h,
+        "/system/workflow",
+        headers=h,
         json={"wf_key": "inv", "name": "库存", "definition": _SQL_WF},
     )
     r = await client.post("/system/workflow/inv/run", headers=h, json={"inputs": {}})
@@ -536,21 +641,27 @@ async def test_workflow_disabled_blocks_explicit_old_version(
     """R1-S2:disable 后显式 version=旧 也 409(旧版本随新版本自动失活,
     启用闸恒只作用最新版本)。"""
     _, token = await _wf_user(
-        client, session, make_user, "wf_s2",
+        client,
+        session,
+        make_user,
+        "wf_s2",
         ["system:workflow:manage", "workflow:execute", "tool:sql:execute"],
     )
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "wf"}
     await client.post(
-        "/system/workflow", headers=h,
+        "/system/workflow",
+        headers=h,
         json={"wf_key": "ver_gate", "name": "闸", "definition": _SQL_WF},
     )
     await client.post(  # v2(v1 自动失活)
-        "/system/workflow", headers=h,
+        "/system/workflow",
+        headers=h,
         json={"wf_key": "ver_gate", "name": "闸v2", "definition": _SQL_WF},
     )
     await client.post("/system/workflow/ver_gate/disable", headers=h)
     r = await client.post(
-        "/system/workflow/ver_gate/run", headers=h,
+        "/system/workflow/ver_gate/run",
+        headers=h,
         json={"inputs": {}, "version": 1},
     )
     assert r.status_code == 409
@@ -561,20 +672,22 @@ async def test_workflow_perms_and_isolation(
 ) -> None:
     """spec:无 workflow:execute 403;跨租户 404 同形;禁用 409。"""
     _, token = await _wf_user(
-        client, session, make_user, "wf_iso1",
+        client,
+        session,
+        make_user,
+        "wf_iso1",
         ["system:workflow:manage", "workflow:execute"],
     )
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "wf"}
     await client.post(
-        "/system/workflow", headers=h,
+        "/system/workflow",
+        headers=h,
         json={"wf_key": "guarded", "name": "守", "definition": _SQL_WF},
     )
     # 无执行权限
     uid2 = await make_user("wf_noexec")
     tid = (
-        await session.execute(
-            text("SELECT id FROM public.sys_tenant WHERE tenant_key='wf'")
-        )
+        await session.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='wf'"))
     ).scalar_one()
     await _bind(session, "sys_user_tenant", uid2, str(tid))
     await session.commit()

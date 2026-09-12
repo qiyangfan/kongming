@@ -17,6 +17,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { FormRow } from "@/components/form-row";
 import {
   Dialog,
   DialogContent,
@@ -25,7 +26,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -167,9 +167,7 @@ export default function RolesPage() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          多角色用户:权限点取并集,数据范围取最宽松。
-        </p>
+        <p className="text-sm text-muted-foreground">多角色用户:权限点取并集,数据范围取最宽松。</p>
         <Button
           size="sm"
           onClick={() => {
@@ -205,7 +203,9 @@ export default function RolesPage() {
             <TableRow key={r.id}>
               <TableCell className="max-w-40 truncate font-medium">
                 <span className="flex items-center gap-1.5">
-                  <span title={r.role_key} className="truncate">{r.role_key}</span>
+                  <span title={r.role_key} className="truncate">
+                    {r.role_key}
+                  </span>
                   {r.builtin && (
                     <Badge variant="secondary" className="shrink-0">
                       内置
@@ -213,9 +213,15 @@ export default function RolesPage() {
                   )}
                 </span>
               </TableCell>
-              <TableCell className="max-w-40 truncate" title={r.role_name}>{r.role_name}</TableCell>
-              <TableCell>{DATA_SCOPES.find((d) => d.value === r.data_scope)?.label ?? r.data_scope}</TableCell>
-              <TableCell>{SQL_SCOPES.find((s) => s.value === r.sql_scope)?.label ?? r.sql_scope}</TableCell>
+              <TableCell className="max-w-40 truncate" title={r.role_name}>
+                {r.role_name}
+              </TableCell>
+              <TableCell>
+                {DATA_SCOPES.find((d) => d.value === r.data_scope)?.label ?? r.data_scope}
+              </TableCell>
+              <TableCell>
+                {SQL_SCOPES.find((s) => s.value === r.sql_scope)?.label ?? r.sql_scope}
+              </TableCell>
               <TableCell>{r.sort}</TableCell>
               <TableCell>{r.perm_ids.length} 项</TableCell>
               <TableCell className="text-right">
@@ -248,9 +254,8 @@ export default function RolesPage() {
                   权限
                 </Button>
                 <Button
-                  variant="ghost"
+                  variant="ghost-destructive"
                   size="sm"
-                  className="text-destructive hover:text-destructive"
                   disabled={r.builtin}
                   title={r.builtin ? "内置角色不可删除" : undefined}
                   onClick={() => {
@@ -266,12 +271,15 @@ export default function RolesPage() {
         </TableBody>
       </Table>
 
-      <Dialog open={creating || editing !== null} onOpenChange={(open) => {
-        if (!open) {
-          setCreating(false);
-          setEditing(null);
-        }
-      }}>
+      <Dialog
+        open={creating || editing !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCreating(false);
+            setEditing(null);
+          }
+        }}
+      >
         <DialogContent aria-describedby={undefined} className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{creating ? "新建角色" : `编辑角色 ${form.roleKey}`}</DialogTitle>
@@ -288,29 +296,24 @@ export default function RolesPage() {
               submit();
             }}
           >
-            <div className="grid gap-1.5">
-              <Label htmlFor="r-key">角色键</Label>
+            <FormRow label="角色键" htmlFor="r-key">
               <Input
                 id="r-key"
                 value={form.roleKey}
                 disabled={editing !== null}
                 onChange={(e) => setForm({ ...form, roleKey: e.target.value })}
               />
-              {editing && (
-                <p className="text-muted-foreground text-xs">角色键创建后不可修改</p>
-              )}
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="r-name">名称</Label>
+              {editing && <p className="text-muted-foreground text-xs">角色键创建后不可修改</p>}
+            </FormRow>
+            <FormRow label="名称" htmlFor="r-name">
               <Input
                 id="r-name"
                 value={form.roleName}
                 onChange={(e) => setForm({ ...form, roleName: e.target.value })}
               />
-            </div>
+            </FormRow>
             <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5">
-                <Label>数据范围</Label>
+              <FormRow label="数据范围">
                 <Select
                   value={form.dataScope}
                   onValueChange={(v) => setForm({ ...form, dataScope: v as DataScopeValue })}
@@ -326,9 +329,8 @@ export default function RolesPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="grid gap-1.5">
-                <Label>SQL 范围</Label>
+              </FormRow>
+              <FormRow label="SQL 范围">
                 <Select
                   value={form.sqlScope}
                   onValueChange={(v) => setForm({ ...form, sqlScope: v as SqlScopeValue })}
@@ -344,17 +346,16 @@ export default function RolesPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
+              </FormRow>
             </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="r-sort">排序</Label>
+            <FormRow label="排序" htmlFor="r-sort">
               <Input
                 id="r-sort"
                 type="number"
                 value={form.sort}
                 onChange={(e) => setForm({ ...form, sort: Number(e.target.value) || 0 })}
               />
-            </div>
+            </FormRow>
             <DialogFooter>
               <Button
                 type="button"

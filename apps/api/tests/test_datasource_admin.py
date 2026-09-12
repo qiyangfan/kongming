@@ -67,10 +67,14 @@ async def _create(
 
 async def _row(s: AsyncSession, key: str) -> dict[str, Any]:
     row = (
-        await s.execute(
-            text("SELECT * FROM public.sys_datasource WHERE datasource_key=:k"), {"k": key}
+        (
+            await s.execute(
+                text("SELECT * FROM public.sys_datasource WHERE datasource_key=:k"), {"k": key}
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     return dict(row)
 
 
@@ -154,9 +158,7 @@ async def test_create_encrypts_password_and_dto_clean(
     assert row["status"] == "ACTIVE"
 
     # 分页 DTO 不含任何敏感字段(全局视角:X-Tenant-Id 无语义,他租户数据源同样列出)
-    r = await client.get(
-        DS, headers={**_auth(token), "X-Tenant-Id": "nonexistent-tenant"}
-    )
+    r = await client.get(DS, headers={**_auth(token), "X-Tenant-Id": "nonexistent-tenant"})
     assert r.status_code == 200
     page = r.json()
     assert page["total"] == 1
@@ -206,9 +208,7 @@ async def test_default_schema_injection_rejected(
 ) -> None:
     _, token = await _admin(client, session, make_user)
     tid = await _default_tenant_id(session)
-    r = await client.post(
-        DS, json=_body(tid, default_schema=bad_schema), headers=_auth(token)
-    )
+    r = await client.post(DS, json=_body(tid, default_schema=bad_schema), headers=_auth(token))
     assert r.status_code == 400, bad_schema
     n = await session.execute(text("SELECT count(*) FROM public.sys_datasource"))
     assert int(n.scalar_one()) == 0
@@ -320,13 +320,17 @@ async def test_enable_disable_evict_and_audit(
     assert fake_evictor.evicted == ["extdb", "extdb"]
 
     rows = (
-        await session.execute(
-            text(
-                "SELECT action FROM public.sys_oper_log"
-                " WHERE action LIKE 'datasource.%' ORDER BY created_at, id"
+        (
+            await session.execute(
+                text(
+                    "SELECT action FROM public.sys_oper_log"
+                    " WHERE action LIKE 'datasource.%' ORDER BY created_at, id"
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert [str(a) for a in rows] == [
         "datasource.create",
         "datasource.disable",
@@ -413,9 +417,7 @@ async def test_options_default_first_and_scoped(
     assert all("host" not in o and "username" not in o for o in opts)  # 不含连接信息
 
     # 显式切换到未绑定租户 → 403(与 chat 租户白名单同构)
-    r = await client.get(
-        f"{DS}/options", headers={**_auth(token), "X-Tenant-Id": "ds-opt"}
-    )
+    r = await client.get(f"{DS}/options", headers={**_auth(token), "X-Tenant-Id": "ds-opt"})
     assert r.status_code == 403
 
 

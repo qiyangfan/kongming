@@ -225,14 +225,10 @@ class FeedbackService:
         views = [
             InvolvedTable(
                 table_name=name,
-                schema_name=(
-                    str(by_name[name]["schema_name"]) if name in by_name else ""
-                ),
+                schema_name=(str(by_name[name]["schema_name"]) if name in by_name else ""),
                 datasource_key=ds_key,
                 has_knowledge=name in by_name,
-                knowledge_id=(
-                    str(by_name[name]["id"]) if name in by_name else None
-                ),
+                knowledge_id=(str(by_name[name]["id"]) if name in by_name else None),
             )
             for name in sorted(tables)
         ]

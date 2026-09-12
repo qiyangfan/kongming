@@ -6,7 +6,6 @@
 """
 # pyright: reportPrivateUsage=false
 
-
 from collections.abc import Iterator
 from typing import cast
 
@@ -87,8 +86,7 @@ async def test_explicit_memory_short_circuit(
     client: AsyncClient,
     session: AsyncSession,
     make_user: MakeUser,
-    fake_agent: dict[str,
-    FakeAgent],
+    fake_agent: dict[str, FakeAgent],
 ) -> None:
     _uid, token = await _user(client, session, make_user, "mem_exp")
     fake_agent["agent"] = FakeAgent()
@@ -101,15 +99,9 @@ async def test_explicit_memory_short_circuit(
     assert body["success"] is True
     assert "已记住" in body["summary"]
     assert fake_agent["agent"].calls == []  # 未走 agent
-    n = (
-        await session.execute(text("SELECT count(*) FROM public.user_memory"))
-    ).scalar_one()
+    n = (await session.execute(text("SELECT count(*) FROM public.user_memory"))).scalar_one()
     assert n == 1
-    row = (
-        await session.execute(
-            text("SELECT source, confidence FROM public.user_memory")
-        )
-    ).one()
+    row = (await session.execute(text("SELECT source, confidence FROM public.user_memory"))).one()
     assert row.source == "EXPLICIT" and float(row.confidence) == 1.0
 
 
@@ -117,8 +109,7 @@ async def test_explicit_memory_sensitive_rejected(
     client: AsyncClient,
     session: AsyncSession,
     make_user: MakeUser,
-    fake_agent: dict[str,
-    FakeAgent],
+    fake_agent: dict[str, FakeAgent],
 ) -> None:
     _, token = await _user(client, session, make_user, "mem_pii")
     fake_agent["agent"] = FakeAgent()
@@ -130,9 +121,7 @@ async def test_explicit_memory_sensitive_rejected(
     body = r.json()
     assert body["success"] is False
     assert "不予记忆" in (body["error"] or "")
-    n = (
-        await session.execute(text("SELECT count(*) FROM public.user_memory"))
-    ).scalar_one()
+    n = (await session.execute(text("SELECT count(*) FROM public.user_memory"))).scalar_one()
     assert n == 0
     # 操作日志落拒绝
     n2 = (
@@ -147,17 +136,14 @@ async def test_recall_hint_injected(
     client: AsyncClient,
     session: AsyncSession,
     make_user: MakeUser,
-    fake_agent: dict[str,
-    FakeAgent],
+    fake_agent: dict[str, FakeAgent],
 ) -> None:
     """召回注入:有向量记忆时 agent 请求体带 memory_hint(embedding 走 009 通道,
     测试库无 agent——embedding 失败降级无注入;此处直证降级形态零回归)。"""
     uid, token = await _user(client, session, make_user, "mem_recall")
     await _insert_memory(session, user_id=uid, content="偏好月度口径")
     fake_agent["agent"] = FakeAgent()
-    r = await client.post(
-        "/chat/query", json={"question": "有多少商品"}, headers=_auth(token)
-    )
+    r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
     assert r.json()["success"] is True
     # 测试环境无真 agent embedding:降级空 hint(或缺省)——零回归语义
     hint = fake_agent["agent"].calls[0].get("memory_hint")
@@ -208,9 +194,7 @@ async def test_memory_cross_user_404(
     uid_a, _ = await _user(client, session, make_user, "mem_a")
     _, token_b = await _user(client, session, make_user, "mem_b")
     mid = await _insert_memory(session, user_id=uid_a, content="A 的偏好")
-    r = await client.patch(
-        f"/memory/{mid}", headers=_auth(token_b), json={"content": "篡改"}
-    )
+    r = await client.patch(f"/memory/{mid}", headers=_auth(token_b), json={"content": "篡改"})
     assert r.status_code == 404
     r2 = await client.delete(f"/memory/{mid}", headers=_auth(token_b))
     assert r2.status_code == 404
@@ -288,7 +272,6 @@ async def test_implicit_form_dedup_and_sensitive(
     assert float(cast("float", rows[0]["confidence"])) == 0.5
 
 
-
 # ============ R1-L1:召回核心路径直证(预置向量字面量) ============
 
 
@@ -356,8 +339,7 @@ async def test_recall_dual_filter_and_hit_refresh(session: AsyncSession) -> None
     hit = (
         await session.execute(
             text(
-                "SELECT last_hit_at IS NOT NULL FROM public.user_memory"
-                " WHERE content='A在T1的记忆'"
+                "SELECT last_hit_at IS NOT NULL FROM public.user_memory WHERE content='A在T1的记忆'"
             )
         )
     ).scalar_one()
@@ -377,8 +359,7 @@ async def test_r1_h1_operlog_persisted_on_success(
     client: AsyncClient,
     session: AsyncSession,
     make_user: MakeUser,
-    fake_agent: dict[str,
-    FakeAgent],
+    fake_agent: dict[str, FakeAgent],
 ) -> None:
     """R1-H1:显式形成成功路径的 memory.create 操作日志落库(同事务)。"""
     _, token = await _user(client, session, make_user, "mem_oplog")
@@ -399,8 +380,7 @@ async def test_r1_h2_injection_memory_rejected(
     client: AsyncClient,
     session: AsyncSession,
     make_user: MakeUser,
-    fake_agent: dict[str,
-    FakeAgent],
+    fake_agent: dict[str, FakeAgent],
 ) -> None:
     """R1-H2:injection 内容的显式记忆拒绝落库(跨会话注入通道封堵)。"""
     _, token = await _user(client, session, make_user, "mem_inj")
@@ -411,9 +391,7 @@ async def test_r1_h2_injection_memory_rejected(
         headers=_auth(token),
     )
     assert r.json()["success"] is False
-    n = (
-        await session.execute(text("SELECT count(*) FROM public.user_memory"))
-    ).scalar_one()
+    n = (await session.execute(text("SELECT count(*) FROM public.user_memory"))).scalar_one()
     assert n == 0
 
 

@@ -44,6 +44,7 @@ def _patch_agent(monkeypatch: pytest.MonkeyPatch, sql: str) -> None:
 
     fut: Future[object] = Future()
     fut.set_result(_reply(sql))
+
     def _fake_query(self: AgentClient, **kw: object) -> Future[object]:  # noqa: ARG001
         return fut
 
@@ -62,11 +63,7 @@ async def _rows(s: AsyncSession) -> list[dict[str, object]]:
     return cast(
         "list[dict[str, object]]",
         list(
-            (
-                await s.execute(
-                    text("SELECT question, sql_text, embedding FROM rag.query_history")
-                )
-            )
+            (await s.execute(text("SELECT question, sql_text, embedding FROM rag.query_history")))
             .mappings()
             .all(),
         ),

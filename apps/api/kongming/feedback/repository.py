@@ -33,34 +33,42 @@ class FeedbackRepository:
         """归属收口:消息 JOIN 会话 JOIN 租户,user_id+tenant_id 双匹配(同形 None);
         顺带取防火墙 schema 边界(default 源=tenant_<key>,动态源=default_schema)。"""
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT m.id, m.role, m.session_id, m.created_at,"
-                    " s.datasource_key, m.corrected_sql, t.tenant_key,"
-                    " coalesce(ds.default_schema, 'tenant_' || t.tenant_key) AS scope_schema"
-                    " FROM public.chat_message m"
-                    " JOIN public.chat_session s ON s.id = m.session_id"
-                    " JOIN public.sys_tenant t ON t.id = s.tenant_id"
-                    " LEFT JOIN public.sys_datasource ds"
-                    "   ON ds.datasource_key = s.datasource_key AND ds.tenant_id = s.tenant_id"
-                    " WHERE m.id = :mid AND s.user_id = :u AND s.tenant_id = :t"
-                ),
-                {"mid": message_id, "u": user_id, "t": tenant_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT m.id, m.role, m.session_id, m.created_at,"
+                        " s.datasource_key, m.corrected_sql, t.tenant_key,"
+                        " coalesce(ds.default_schema, 'tenant_' || t.tenant_key) AS scope_schema"
+                        " FROM public.chat_message m"
+                        " JOIN public.chat_session s ON s.id = m.session_id"
+                        " JOIN public.sys_tenant t ON t.id = s.tenant_id"
+                        " LEFT JOIN public.sys_datasource ds"
+                        "   ON ds.datasource_key = s.datasource_key AND ds.tenant_id = s.tenant_id"
+                        " WHERE m.id = :mid AND s.user_id = :u AND s.tenant_id = :t"
+                    ),
+                    {"mid": message_id, "u": user_id, "t": tenant_id},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return None if row is None else dict(row)
 
     async def lock_feedback_row(self, *, message_id: str) -> dict[str, object] | None:
         """FOR UPDATE 读现反馈值:并发提交同一消息行锁串行(spec 幂等覆盖)。"""
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT rating, feedback_comment, corrected_sql"
-                    " FROM public.chat_message WHERE id = :mid FOR UPDATE"
-                ),
-                {"mid": message_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT rating, feedback_comment, corrected_sql"
+                        " FROM public.chat_message WHERE id = :mid FOR UPDATE"
+                    ),
+                    {"mid": message_id},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return None if row is None else dict(row)
 
     async def submit_feedback(
@@ -127,21 +135,25 @@ class FeedbackRepository:
         防对任意消息处置产生「状态非 NONE 但 feedback_time 空」的幽灵行;
         涉及表定位维持宽松(零反馈消息的 SQL 也可定位)。"""
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT m.id, m.session_id, m.role, m.sql_text, m.corrected_sql,"
-                    " m.rating, m.feedback_comment, m.feedback_status,"
-                    " m.feedback_handle_note, m.feedback_time, m.created_at,"
-                    " s.user_id, s.tenant_id, s.datasource_key"
-                    " FROM public.chat_message m"
-                    " JOIN public.chat_session s ON s.id = m.session_id"
-                    " WHERE m.id = :mid"
-                    " AND (CAST(:vis AS uuid) IS NULL OR s.user_id = CAST(:vis AS uuid))"
-                    " AND (NOT :rf OR (m.role = 'ASSISTANT' AND m.feedback_time IS NOT NULL))"
-                ),
-                {"mid": message_id, "vis": vis_user_id, "rf": require_feedback},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT m.id, m.session_id, m.role, m.sql_text, m.corrected_sql,"
+                        " m.rating, m.feedback_comment, m.feedback_status,"
+                        " m.feedback_handle_note, m.feedback_time, m.created_at,"
+                        " s.user_id, s.tenant_id, s.datasource_key"
+                        " FROM public.chat_message m"
+                        " JOIN public.chat_session s ON s.id = m.session_id"
+                        " WHERE m.id = :mid"
+                        " AND (CAST(:vis AS uuid) IS NULL OR s.user_id = CAST(:vis AS uuid))"
+                        " AND (NOT :rf OR (m.role = 'ASSISTANT' AND m.feedback_time IS NOT NULL))"
+                    ),
+                    {"mid": message_id, "vis": vis_user_id, "rf": require_feedback},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return None if row is None else dict(row)
 
     async def handle_status(
@@ -219,23 +231,30 @@ class FeedbackRepository:
         total = int(
             (
                 await self._s.execute(
-                    text("SELECT count(*) FROM public.chat_message m"  # noqa: S608  # 常量模板,参数化绑定
-                         " JOIN public.chat_session s ON s.id = m.session_id"
-                         " JOIN public.sys_user u ON u.id = s.user_id"
-                         " JOIN public.sys_tenant t ON t.id = s.tenant_id" + self._PAGE_WHERE),
+                    text(
+                        "SELECT count(*) FROM public.chat_message m"  # noqa: S608  # 常量模板,参数化绑定
+                        " JOIN public.chat_session s ON s.id = m.session_id"
+                        " JOIN public.sys_user u ON u.id = s.user_id"
+                        " JOIN public.sys_tenant t ON t.id = s.tenant_id" + self._PAGE_WHERE
+                    ),
                     params,
                 )
             ).scalar_one()
         )
         rows = (
-            await self._s.execute(
-                text(
-                    self._PAGE_SELECT + self._PAGE_WHERE  # noqa: S608  # 常量模板,参数化绑定
-                    + " ORDER BY m.feedback_time DESC, m.id DESC LIMIT :lim OFFSET :off"
-                ),
-                params,
+            (
+                await self._s.execute(
+                    text(
+                        self._PAGE_SELECT
+                        + self._PAGE_WHERE  # noqa: S608  # 常量模板,参数化绑定
+                        + " ORDER BY m.feedback_time DESC, m.id DESC LIMIT :lim OFFSET :off"
+                    ),
+                    params,
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return total, [dict(r) for r in rows]
 
     async def overview_feedback(
@@ -256,40 +275,48 @@ class FeedbackRepository:
         )
         params = {"vis": vis_user_id, "tid": tenant_id, "ds": datasource_key, "days": days}
         agg = (
-            await self._s.execute(
-                text(
-                    "SELECT count(*) AS total,"  # noqa: S608  # 常量模板,参数化绑定
-                    " count(*) FILTER (WHERE m.rating = 'UP') AS up_count,"
-                    " count(*) FILTER (WHERE m.rating = 'DOWN') AS down_count,"
-                    " count(*) FILTER (WHERE m.corrected_sql IS NOT NULL"
-                    "   AND m.corrected_sql <> '') AS corrected_count"
-                    " FROM public.chat_message m"
-                    " JOIN public.chat_session s ON s.id = m.session_id" + base_where
-                ),
-                params,
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT count(*) AS total,"  # noqa: S608  # 常量模板,参数化绑定
+                        " count(*) FILTER (WHERE m.rating = 'UP') AS up_count,"
+                        " count(*) FILTER (WHERE m.rating = 'DOWN') AS down_count,"
+                        " count(*) FILTER (WHERE m.corrected_sql IS NOT NULL"
+                        "   AND m.corrected_sql <> '') AS corrected_count"
+                        " FROM public.chat_message m"
+                        " JOIN public.chat_session s ON s.id = m.session_id" + base_where
+                    ),
+                    params,
+                )
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
         trend_rows = (
-            await self._s.execute(
-                text(
-                    "SELECT to_char(d.day, 'YYYY-MM-DD') AS day,"
-                    " count(m.id) FILTER (WHERE m.rating = 'UP') AS up,"
-                    " count(m.id) FILTER (WHERE m.rating = 'DOWN') AS down"
-                    " FROM generate_series("
-                    "   (now() AT TIME ZONE 'Asia/Shanghai')::date - (:days - 1),"
-                    "   (now() AT TIME ZONE 'Asia/Shanghai')::date, interval '1 day') AS d(day)"
-                    " LEFT JOIN (public.chat_message m JOIN public.chat_session s"
-                    "   ON s.id = m.session_id)"
-                    "   ON m.role = 'ASSISTANT' AND m.feedback_time IS NOT NULL"
-                    "  AND (m.feedback_time AT TIME ZONE 'Asia/Shanghai')::date = d.day"
-                    "  AND (CAST(:vis AS uuid) IS NULL OR s.user_id = CAST(:vis AS uuid))"
-                    "  AND (CAST(:tid AS uuid) IS NULL OR s.tenant_id = CAST(:tid AS uuid))"
-                    "  AND (CAST(:ds AS text) IS NULL OR s.datasource_key = CAST(:ds AS text))"
-                    " GROUP BY d.day ORDER BY d.day"
-                ),
-                params,
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT to_char(d.day, 'YYYY-MM-DD') AS day,"
+                        " count(m.id) FILTER (WHERE m.rating = 'UP') AS up,"
+                        " count(m.id) FILTER (WHERE m.rating = 'DOWN') AS down"
+                        " FROM generate_series("
+                        "   (now() AT TIME ZONE 'Asia/Shanghai')::date - (:days - 1),"
+                        "   (now() AT TIME ZONE 'Asia/Shanghai')::date, interval '1 day') AS d(day)"
+                        " LEFT JOIN (public.chat_message m JOIN public.chat_session s"
+                        "   ON s.id = m.session_id)"
+                        "   ON m.role = 'ASSISTANT' AND m.feedback_time IS NOT NULL"
+                        "  AND (m.feedback_time AT TIME ZONE 'Asia/Shanghai')::date = d.day"
+                        "  AND (CAST(:vis AS uuid) IS NULL OR s.user_id = CAST(:vis AS uuid))"
+                        "  AND (CAST(:tid AS uuid) IS NULL OR s.tenant_id = CAST(:tid AS uuid))"
+                        "  AND (CAST(:ds AS text) IS NULL OR s.datasource_key = CAST(:ds AS text))"
+                        " GROUP BY d.day ORDER BY d.day"
+                    ),
+                    params,
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         total = int(agg["total"])
         down = int(agg["down_count"])
         return {
@@ -311,15 +338,19 @@ class FeedbackRepository:
         if not table_names:
             return []
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, schema_name, table_name FROM rag.table_descriptions"
-                    " WHERE tenant_id = :t AND datasource_key = :ds"
-                    " AND table_name = ANY(CAST(:names AS text[]))"
-                ),
-                {"t": tenant_id, "ds": datasource_key, "names": table_names},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, schema_name, table_name FROM rag.table_descriptions"
+                        " WHERE tenant_id = :t AND datasource_key = :ds"
+                        " AND table_name = ANY(CAST(:names AS text[]))"
+                    ),
+                    {"t": tenant_id, "ds": datasource_key, "names": table_names},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     # ============ 审计/事务 ============

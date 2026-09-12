@@ -23,10 +23,19 @@ ToolStatus = Literal[
 
 # 参数摘要中值须脱敏的键名(小写比对)——凭证类字段永不进审计/日志;
 # 审查循环 F3:MCP 动态工具参数名不受控,白名单须覆盖常见凭证命名族
-_SENSITIVE_ARG_KEYS = frozenset({
-    "password", "passwd", "secret", "token", "api_key", "apikey",
-    "authorization", "credential", "private_key",
-})
+_SENSITIVE_ARG_KEYS = frozenset(
+    {
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "api_key",
+        "apikey",
+        "authorization",
+        "credential",
+        "private_key",
+    }
+)
 
 ARGS_DIGEST_MAX = 500  # 审计用参数摘要截断上限
 

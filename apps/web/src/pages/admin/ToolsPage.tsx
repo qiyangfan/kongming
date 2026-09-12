@@ -7,9 +7,11 @@ import { useQuery } from "@tanstack/react-query";
 import { Loader2, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/page-header";
+import { Pagination } from "@/components/pagination";
+import { StatusBadge, type StatusMeta } from "@/components/status-badge";
 import {
   Select,
   SelectContent,
@@ -31,7 +33,7 @@ import { endExclusive } from "@/lib/date-utils";
 
 const PAGE_SIZE = 20;
 
-const STATUS_META: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" }> = {
+const STATUS_META: StatusMeta = {
   EXECUTED: { label: "已执行", variant: "default" },
   REJECTED: { label: "已拒绝", variant: "secondary" },
   ERROR: { label: "失败", variant: "destructive" },
@@ -78,12 +80,7 @@ export default function ToolsPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">工具</h2>
-        <p className="text-sm text-muted-foreground">
-          AI 可使用的内置工具清单,以及每次工具执行的审计记录。
-        </p>
-      </div>
+      <PageHeader title="工具" description="AI 可使用的内置工具清单,以及每次工具执行的审计记录。" />
 
       {/* 注册表清单(只读) */}
       <div className="rounded-lg border border-border">
@@ -106,7 +103,10 @@ export default function ToolsPage() {
             ) : tools.isLoading ? (
               <TableRow>
                 <TableCell colSpan={4} className="py-6 text-center">
-                  <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />
+                  <Loader2
+                    className="mx-auto size-4 animate-spin text-muted-foreground"
+                    aria-hidden
+                  />
                 </TableCell>
               </TableRow>
             ) : (
@@ -118,7 +118,10 @@ export default function ToolsPage() {
                       {t.name}
                     </span>
                   </TableCell>
-                  <TableCell className="max-w-md truncate text-sm text-muted-foreground" title={t.description}>
+                  <TableCell
+                    className="max-w-md truncate text-sm text-muted-foreground"
+                    title={t.description}
+                  >
                     {t.description}
                   </TableCell>
                   <TableCell className="font-mono text-xs">{t.perm_code}</TableCell>
@@ -142,10 +145,15 @@ export default function ToolsPage() {
         <h3 className="text-sm font-semibold text-foreground">执行审计</h3>
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
-            <Label htmlFor="flt-tool" className="text-xs">工具</Label>
+            <Label htmlFor="flt-tool" className="text-xs">
+              工具
+            </Label>
             <Select
               value={toolName || "__all__"}
-              onValueChange={(v) => { setToolName(v === "__all__" ? "" : v); setPage(1); }}
+              onValueChange={(v) => {
+                setToolName(v === "__all__" ? "" : v);
+                setPage(1);
+              }}
             >
               <SelectTrigger id="flt-tool" className="w-52" aria-label="按工具筛选">
                 <SelectValue placeholder="全部工具" />
@@ -153,16 +161,23 @@ export default function ToolsPage() {
               <SelectContent>
                 <SelectItem value="__all__">全部工具</SelectItem>
                 {tools.data?.tools.map((t) => (
-                  <SelectItem key={t.name} value={t.name}>{t.name}</SelectItem>
+                  <SelectItem key={t.name} value={t.name}>
+                    {t.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-1">
-            <Label htmlFor="flt-status" className="text-xs">状态</Label>
+            <Label htmlFor="flt-status" className="text-xs">
+              状态
+            </Label>
             <Select
               value={status || "__all__"}
-              onValueChange={(v) => { setStatus(v === "__all__" ? "" : v); setPage(1); }}
+              onValueChange={(v) => {
+                setStatus(v === "__all__" ? "" : v);
+                setPage(1);
+              }}
             >
               <SelectTrigger id="flt-status" className="w-40" aria-label="按状态筛选">
                 <SelectValue placeholder="全部状态" />
@@ -170,20 +185,42 @@ export default function ToolsPage() {
               <SelectContent>
                 <SelectItem value="__all__">全部状态</SelectItem>
                 {Object.entries(STATUS_META).map(([k, m]) => (
-                  <SelectItem key={k} value={k}>{m.label}</SelectItem>
+                  <SelectItem key={k} value={k}>
+                    {m.label}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-1">
-            <Label htmlFor="flt-start" className="text-xs">开始日期</Label>
-            <Input id="flt-start" type="date" value={startDate}
-              onChange={(e) => { setStartDate(e.target.value); setPage(1); }} className="w-40" />
+            <Label htmlFor="flt-start" className="text-xs">
+              开始日期
+            </Label>
+            <Input
+              id="flt-start"
+              type="date"
+              value={startDate}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                setPage(1);
+              }}
+              className="w-40"
+            />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="flt-end" className="text-xs">结束日期</Label>
-            <Input id="flt-end" type="date" value={endDate}
-              onChange={(e) => { setEndDate(e.target.value); setPage(1); }} className="w-40" />
+            <Label htmlFor="flt-end" className="text-xs">
+              结束日期
+            </Label>
+            <Input
+              id="flt-end"
+              type="date"
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                setPage(1);
+              }}
+              className="w-40"
+            />
           </div>
         </div>
 
@@ -209,7 +246,10 @@ export default function ToolsPage() {
               ) : audit.isLoading ? (
                 <TableRow>
                   <TableCell colSpan={6} className="py-6 text-center">
-                    <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />
+                    <Loader2
+                      className="mx-auto size-4 animate-spin text-muted-foreground"
+                      aria-hidden
+                    />
                   </TableCell>
                 </TableRow>
               ) : audit.data?.items.length === 0 ? (
@@ -226,11 +266,12 @@ export default function ToolsPage() {
                     </TableCell>
                     <TableCell className="font-mono text-xs">{it.tool_name}</TableCell>
                     <TableCell>
-                      <Badge variant={STATUS_META[it.status]?.variant ?? "outline"}>
-                        {STATUS_META[it.status]?.label ?? it.status}
-                      </Badge>
+                      <StatusBadge meta={STATUS_META} value={it.status} />
                     </TableCell>
-                    <TableCell className="max-w-72 truncate text-xs text-muted-foreground" title={it.args_digest || undefined}>
+                    <TableCell
+                      className="max-w-72 truncate text-xs text-muted-foreground"
+                      title={it.args_digest || undefined}
+                    >
                       {it.args_digest || "—"}
                     </TableCell>
                     <TableCell className="text-xs">
@@ -246,18 +287,12 @@ export default function ToolsPage() {
           </Table>
         </div>
 
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>共 {audit.data?.total ?? 0} 条</span>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-              上一页
-            </Button>
-            <span>{page} / {totalPages}</span>
-            <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
-              下一页
-            </Button>
-          </div>
-        </div>
+        <Pagination
+          page={page}
+          pageCount={totalPages}
+          total={audit.data?.total ?? 0}
+          onPageChange={setPage}
+        />
       </div>
     </div>
   );

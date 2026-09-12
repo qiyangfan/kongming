@@ -127,9 +127,7 @@ async def test_introspect_idempotent_and_no_guess(
     assert not any("orphan" in r.source_table or "orphan" in r.target_table for r in rows)
 
 
-async def test_manual_relation_not_overwritten(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_manual_relation_not_overwritten(client: AsyncClient, session: AsyncSession) -> None:
     token = await _admin(client, session)
     # 手工加一条(库内无此 FK)
     r = await client.post(
@@ -151,10 +149,7 @@ async def test_manual_relation_not_overwritten(
     )
     row = (
         await session.execute(
-            text(
-                "SELECT source FROM rag.table_relations"
-                " WHERE target_table LIKE '%orphan'"
-            )
+            text("SELECT source FROM rag.table_relations WHERE target_table LIKE '%orphan'")
         )
     ).one()
     assert row.source == "manual"
@@ -163,9 +158,7 @@ async def test_manual_relation_not_overwritten(
 # ============ 指标 CRUD ============
 
 
-async def test_metric_upsert_and_uniqueness(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_metric_upsert_and_uniqueness(client: AsyncClient, session: AsyncSession) -> None:
     token = await _admin(client, session)
     headers = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "sem"}
     r1 = await client.post(
@@ -175,8 +168,7 @@ async def test_metric_upsert_and_uniqueness(
             "datasource_key": "default",
             "metric_name": "复购率",
             "sql_template": (
-                "COUNT(DISTINCT customer_id) /"
-                " COUNT(DISTINCT date_trunc('month', created_at))"
+                "COUNT(DISTINCT customer_id) / COUNT(DISTINCT date_trunc('month', created_at))"
             ),
             "business_terms": ["复购"],
         },
@@ -194,9 +186,7 @@ async def test_metric_upsert_and_uniqueness(
         },
     )
     assert r2.status_code == 201
-    rows = await client.get(
-        "/system/semantic/metrics?datasource_key=default", headers=headers
-    )
+    rows = await client.get("/system/semantic/metrics?datasource_key=default", headers=headers)
     metrics = rows.json()
     assert len([m for m in metrics if m["metric_name"] == "复购率"]) == 1
     assert metrics[0]["sql_template"] == "新口径"
@@ -346,8 +336,7 @@ async def test_r1_h1_multi_column_fk_paired_correctly(
         (
             await session.execute(
                 text(
-                    "SELECT join_keys FROM rag.table_relations"
-                    " WHERE source_table LIKE '%child_mc'"
+                    "SELECT join_keys FROM rag.table_relations WHERE source_table LIKE '%child_mc'"
                 )
             )
         ).one(),
@@ -464,10 +453,7 @@ async def test_manual_relation_unknown_table_400(
     assert r.json()["detail"] == "RELATION_TABLE_UNKNOWN"
     n = (
         await session.execute(
-            text(
-                "SELECT count(*) FROM rag.table_relations"
-                " WHERE target_table LIKE '%oders'"
-            )
+            text("SELECT count(*) FROM rag.table_relations WHERE target_table LIKE '%oders'")
         )
     ).scalar_one()
     assert n == 0

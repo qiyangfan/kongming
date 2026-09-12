@@ -132,9 +132,7 @@ class _RagServiceAdapter:
             if tid is None:
                 return {"relations_hint": "", "metric_hints": ""}
             tables = _re.findall(r"^([\w]+\.[\w]+)\(", schema_hint, _re.M)
-            relations_hint, metric_hints = await SemanticService(
-                SqlSemanticRepo(self._s)
-            ).enrich(
+            relations_hint, metric_hints = await SemanticService(SqlSemanticRepo(self._s)).enrich(
                 tenant_id=str(tid),
                 datasource_key=datasource_key,
                 question=question,
@@ -316,9 +314,7 @@ class _McpToolCaller:
     async def call(
         self, *, tenant_id: str, qualified: str, args: dict[str, object]
     ) -> dict[str, object]:
-        return await self._svc.call_tool(
-            tenant_id=tenant_id, qualified=qualified, args=args
-        )
+        return await self._svc.call_tool(tenant_id=tenant_id, qualified=qualified, args=args)
 
 
 def _get_service(session: Annotated[AsyncSession, Depends(get_session)]) -> ToolCallService:
@@ -341,8 +337,6 @@ def _get_service(session: Annotated[AsyncSession, Depends(get_session)]) -> Tool
     )
 
 
-
-
 async def _mcp_tenant_or_none(
     user: dict[str, object], session: AsyncSession, header: str | None
 ) -> str | None:
@@ -352,6 +346,7 @@ async def _mcp_tenant_or_none(
         return await repo.find_bound_tenant(user_id=uid, tenant_key=header)
     default = await repo.find_default_tenant(user_id=uid)
     return None if default is None else str(default[0])
+
 
 # ── 内部面:通用工具执行回调 ──
 

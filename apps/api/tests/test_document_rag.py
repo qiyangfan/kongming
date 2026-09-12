@@ -1,7 +1,6 @@
 """024 document-rag 测试:分块/上传幂等/检索隔离/知识分流两路。"""
 # pyright: reportPrivateUsage=false
 
-
 import pytest
 from httpx import AsyncClient, Response
 from sqlalchemy import text
@@ -63,9 +62,7 @@ async def _admin(client: AsyncClient, s: AsyncSession) -> str:
     return await _login(client, "admin", "admin123")
 
 
-async def test_upload_and_idempotent(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_upload_and_idempotent(client: AsyncClient, session: AsyncSession) -> None:
     token = await _admin(client, session)
     headers = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "default"}
     r: Response
@@ -92,9 +89,7 @@ async def test_upload_and_idempotent(
     assert any(r.chunk_level == "CHILD" and r.has_parent for r in rows)
     assert not any(r.chunk_level == "PARENT" and r.has_vec for r in rows)
     # 文档列表
-    r2 = await client.get(
-        "/system/document/documents?datasource_key=default", headers=headers
-    )
+    r2 = await client.get("/system/document/documents?datasource_key=default", headers=headers)
     assert r2.status_code == 200
     assert any(d["doc_name"] == "退货政策.md" for d in r2.json())
 
@@ -120,9 +115,7 @@ async def test_doc_admin_forbidden(
     ).scalar_one()
     await _bind(session, "sys_user_tenant", uid, str(tid))
     token = await _login(client, "doc_plain")
-    r = await client.get(
-        "/system/document/documents", headers={"Authorization": f"Bearer {token}"}
-    )
+    r = await client.get("/system/document/documents", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 403
 
 

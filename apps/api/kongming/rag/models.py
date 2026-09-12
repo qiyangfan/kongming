@@ -231,7 +231,7 @@ COVERAGE_LIST_CAP = 200
 COVERAGE_MISSING_COLS_CAP = 100
 COVERAGE_FAILURE_CLUSTER_CAP = 50
 COVERAGE_FAILURE_WINDOW_DAYS = 30  # 失败信号回看窗口
-COVERAGE_FAILURE_ROW_LIMIT = 500   # 聚合读取行数上限(内存防线,归并在应用层)
+COVERAGE_FAILURE_ROW_LIMIT = 500  # 聚合读取行数上限(内存防线,归并在应用层)
 
 
 class SchemaTablePair(NamedTuple):
@@ -350,11 +350,7 @@ def find_missing_column_labels(
 
 def find_no_sample_tables(entries: list[KnowledgeEntry]) -> list[SchemaTablePair]:
     """示例缺口:示例 SQL 为空的登记表(含纯结构登记)。"""
-    return [
-        SchemaTablePair(e.schema_name, e.table_name)
-        for e in entries
-        if not e.sample_queries
-    ]
+    return [SchemaTablePair(e.schema_name, e.table_name) for e in entries if not e.sample_queries]
 
 
 def normalize_question(question: str) -> str:

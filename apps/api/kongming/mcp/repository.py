@@ -128,14 +128,18 @@ class SqlMcpRepo:
 
     async def _get_row(self, *, server_id: str, tenant_id: str) -> dict[str, Any] | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT * FROM public.sys_mcp_server"
-                    " WHERE id=CAST(:i AS uuid) AND tenant_id=CAST(:t AS uuid)"
-                ),
-                {"i": server_id, "t": tenant_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT * FROM public.sys_mcp_server"
+                        " WHERE id=CAST(:i AS uuid) AND tenant_id=CAST(:t AS uuid)"
+                    ),
+                    {"i": server_id, "t": tenant_id},
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
         return dict(row) if row else None
 
     async def get(self, *, server_id: str, tenant_id: str) -> dict[str, Any] | None:
@@ -148,14 +152,18 @@ class SqlMcpRepo:
 
     async def list_masked(self, *, tenant_id: str) -> list[dict[str, Any]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT * FROM public.sys_mcp_server"
-                    " WHERE tenant_id=CAST(:t AS uuid) ORDER BY created_at DESC, id DESC"
-                ),
-                {"t": tenant_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT * FROM public.sys_mcp_server"
+                        " WHERE tenant_id=CAST(:t AS uuid) ORDER BY created_at DESC, id DESC"
+                    ),
+                    {"t": tenant_id},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         out: list[dict[str, Any]] = []
         for r in rows:
             d = dict(r)
@@ -185,33 +193,41 @@ class SqlMcpRepo:
     ) -> dict[str, Any] | None:
         """动态解析:按注册全名找启用 server(快照 JSONB @> 包含查询)。"""
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT * FROM public.sys_mcp_server"
-                    " WHERE tenant_id=CAST(:t AS uuid) AND enabled"
-                    " AND tools @> CAST(:q AS jsonb)"
-                    " LIMIT 1"
-                ),
-                {"t": tenant_id, "q": json.dumps([{"qualified": qualified}])},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT * FROM public.sys_mcp_server"
+                        " WHERE tenant_id=CAST(:t AS uuid) AND enabled"
+                        " AND tools @> CAST(:q AS jsonb)"
+                        " LIMIT 1"
+                    ),
+                    {"t": tenant_id, "q": json.dumps([{"qualified": qualified}])},
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
         return dict(row) if row else None
 
     async def list_enabled(self, *, tenant_id: str) -> list[dict[str, Any]]:
         """动态目录面:启用 server 的行(含快照;headers 密文原样,
         调用方不得回显——目录组装只取 tools 快照)。"""
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, tenant_id, server_key, name, endpoint, enabled, tools,"
-                    " last_sync_at, last_sync_error"
-                    " FROM public.sys_mcp_server"
-                    " WHERE tenant_id=CAST(:t AS uuid) AND enabled"
-                    " ORDER BY created_at ASC, id ASC"
-                ),
-                {"t": tenant_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, tenant_id, server_key, name, endpoint, enabled, tools,"
+                        " last_sync_at, last_sync_error"
+                        " FROM public.sys_mcp_server"
+                        " WHERE tenant_id=CAST(:t AS uuid) AND enabled"
+                        " ORDER BY created_at ASC, id ASC"
+                    ),
+                    {"t": tenant_id},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def get_call_target(
@@ -226,24 +242,32 @@ class SqlMcpRepo:
         # 两常量 SQL 分叉(不拼字符串,S608 零争议;enabled 列由分支字面量)
         if require_enabled:
             row = (
-                await self._s.execute(
-                    text(
-                        "SELECT endpoint, headers_cipher FROM public.sys_mcp_server"
-                        " WHERE tenant_id=CAST(:t AS uuid) AND server_key=:k AND enabled"
-                    ),
-                    {"t": tenant_id, "k": server_key},
+                (
+                    await self._s.execute(
+                        text(
+                            "SELECT endpoint, headers_cipher FROM public.sys_mcp_server"
+                            " WHERE tenant_id=CAST(:t AS uuid) AND server_key=:k AND enabled"
+                        ),
+                        {"t": tenant_id, "k": server_key},
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
         else:
             row = (
-                await self._s.execute(
-                    text(
-                        "SELECT endpoint, headers_cipher FROM public.sys_mcp_server"
-                        " WHERE tenant_id=CAST(:t AS uuid) AND server_key=:k"
-                    ),
-                    {"t": tenant_id, "k": server_key},
+                (
+                    await self._s.execute(
+                        text(
+                            "SELECT endpoint, headers_cipher FROM public.sys_mcp_server"
+                            " WHERE tenant_id=CAST(:t AS uuid) AND server_key=:k"
+                        ),
+                        {"t": tenant_id, "k": server_key},
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
         if row is None:
             return None
         headers: dict[str, str] = {}

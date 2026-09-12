@@ -80,6 +80,7 @@ class SecretCipher(Protocol):
 
     def decrypt(self, encoded: str) -> str: ...
 
+
 class Notifier(Protocol):
     """出站通知(031):实现侧 httpx+SSRF 判定(029 拒绝段复用);
     check_url 在 post 前由 service 调用。"""

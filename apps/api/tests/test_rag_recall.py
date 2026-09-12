@@ -75,8 +75,18 @@ async def _seed_knowledge(
             " DO UPDATE SET embedding = EXCLUDED.embedding, tsv = EXCLUDED.tsv,"
             "  alias = EXCLUDED.alias"
         ),
-        {"t": tenant_id, "d": ds, "s": schema_name, "n": table, "c": comment, "vec": vec,
-         "n_t": table, "c_t": comment or " ", "a_t": alias or " ", "a": alias},
+        {
+            "t": tenant_id,
+            "d": ds,
+            "s": schema_name,
+            "n": table,
+            "c": comment,
+            "vec": vec,
+            "n_t": table,
+            "c_t": comment or " ",
+            "a_t": alias or " ",
+            "a": alias,
+        },
     )
     await s.commit()
 
@@ -129,12 +139,16 @@ async def test_recall_vector_and_history(
 ) -> None:
     tid = await _ensure_default_tenant(session)
     # customer 向量=问句同种子(余弦距离 0,必居首);film 用无关种子
-    await _seed_knowledge(session, tid, ds="default", table="customer",
-                          comment="客户表", embed_text="查询所有客户")
-    await _seed_knowledge(session, tid, ds="default", table="film",
-                          comment="影片表", embed_text="影片电影 movie film")
+    await _seed_knowledge(
+        session, tid, ds="default", table="customer", comment="客户表", embed_text="查询所有客户"
+    )
+    await _seed_knowledge(
+        session, tid, ds="default", table="film", comment="影片表", embed_text="影片电影 movie film"
+    )
     await _seed_history(
-        session, tid, ds="default",
+        session,
+        tid,
+        ds="default",
         question="查询所有客户的邮箱",
         sql="SELECT email FROM tenant_default.customer",
     )
@@ -166,15 +180,21 @@ async def test_recall_history_inherits_prior_tables(
     q = "他们各自的邮箱是什么"
     # 6 张填充表:向量=追问同种子(距离 0),占满主路 top-5
     for i in range(6):
-        await _seed_knowledge(session, tid, ds="default", table=f"filler{i}",
-                              comment="填充", embed_text=q)
+        await _seed_knowledge(
+            session, tid, ds="default", table=f"filler{i}", comment="填充", embed_text=q
+        )
     # rental 只与上轮问句相似(主路必缺位;继承路距离 0 必中)
-    await _seed_knowledge(session, tid, ds="default", table="rental",
-                          comment="租赁记录", embed_text="查询租赁次数最多的前5位客户")
+    await _seed_knowledge(
+        session,
+        tid,
+        ds="default",
+        table="rental",
+        comment="租赁记录",
+        embed_text="查询租赁次数最多的前5位客户",
+    )
     r = await client.post(
         "/internal/rag/retrieve",
-        json={"tenant_key": "default", "question": q,
-              "history": ["查询租赁次数最多的前5位客户"]},
+        json={"tenant_key": "default", "question": q, "history": ["查询租赁次数最多的前5位客户"]},
         headers=INTERNAL,
     )
     assert r.status_code == 200, r.text
@@ -193,11 +213,13 @@ async def test_recall_history_merge_caps_and_dedupes(
     q = "主路问句"
     p = "继承路问句"
     for i in range(6):
-        await _seed_knowledge(session, tid, ds="default", table=f"main{i}",
-                              comment="主路", embed_text=q)
+        await _seed_knowledge(
+            session, tid, ds="default", table=f"main{i}", comment="主路", embed_text=q
+        )
     for i in range(6):
-        await _seed_knowledge(session, tid, ds="default", table=f"prior{i}",
-                              comment="继承", embed_text=p)
+        await _seed_knowledge(
+            session, tid, ds="default", table=f"prior{i}", comment="继承", embed_text=p
+        )
     r = await client.post(
         "/internal/rag/retrieve",
         json={"tenant_key": "default", "question": q, "history": [p]},
@@ -222,12 +244,15 @@ async def test_recall_history_cache_key_splits_on_context(
     tid = await _ensure_default_tenant(session)
     q = "他们各自的邮箱是什么"
     for i in range(6):
-        await _seed_knowledge(session, tid, ds="default", table=f"filler{i}",
-                              comment="填充", embed_text=q)
-    await _seed_knowledge(session, tid, ds="default", table="rental_a",
-                          comment="租赁A", embed_text="上轮问句A")
-    await _seed_knowledge(session, tid, ds="default", table="rental_b",
-                          comment="租赁B", embed_text="上轮问句B")
+        await _seed_knowledge(
+            session, tid, ds="default", table=f"filler{i}", comment="填充", embed_text=q
+        )
+    await _seed_knowledge(
+        session, tid, ds="default", table="rental_a", comment="租赁A", embed_text="上轮问句A"
+    )
+    await _seed_knowledge(
+        session, tid, ds="default", table="rental_b", comment="租赁B", embed_text="上轮问句B"
+    )
     r1 = await client.post(
         "/internal/rag/retrieve",
         json={"tenant_key": "default", "question": q, "history": ["上轮问句A"]},
@@ -250,10 +275,17 @@ async def test_recall_fulltext_exact_table_promoted(
     """精确表名 bed_bath_table:全文路命中并经 RRF 提权(spec 场景)。"""
     tid = await _ensure_default_tenant(session)
     # 向量种子让 customer 看起来最相似;bed_bath_table 的向量偏移
-    await _seed_knowledge(session, tid, ds="default", table="customer",
-                          comment="客户", embed_text="查询所有客户")
-    await _seed_knowledge(session, tid, ds="default", table="bed_bath_table",
-                          comment="床浴表", embed_text="zzz 无关语义")
+    await _seed_knowledge(
+        session, tid, ds="default", table="customer", comment="客户", embed_text="查询所有客户"
+    )
+    await _seed_knowledge(
+        session,
+        tid,
+        ds="default",
+        table="bed_bath_table",
+        comment="床浴表",
+        embed_text="zzz 无关语义",
+    )
     r = await client.post(
         "/internal/rag/retrieve",
         json={"tenant_key": "default", "question": "查询 bed_bath_table 数据"},
@@ -273,11 +305,18 @@ async def test_recall_alias_hits_and_hint_carries_alias(
     await cast("Any", get_redis()).flushdb()
     tid = await _ensure_default_tenant(session)
     # goods 的 embedding 文本拼入 alias「商品表」——问句同文本,余弦距离 0 必中
-    await _seed_knowledge(session, tid, ds="default", table="goods",
-                          comment="商品基础信息", embed_text="商品表有多少种商品",
-                          alias="商品表")
-    await _seed_knowledge(session, tid, ds="default", table="film",
-                          comment="影片表", embed_text="影片电影 movie film")
+    await _seed_knowledge(
+        session,
+        tid,
+        ds="default",
+        table="goods",
+        comment="商品基础信息",
+        embed_text="商品表有多少种商品",
+        alias="商品表",
+    )
+    await _seed_knowledge(
+        session, tid, ds="default", table="film", comment="影片表", embed_text="影片电影 movie film"
+    )
     r = await client.post(
         "/internal/rag/retrieve",
         json={"tenant_key": "default", "question": "商品表有多少种商品"},
@@ -301,12 +340,15 @@ async def test_recall_tenant_isolation(
     """双过滤:他租户/他数据源同名表不串(rag spec 隔离场景)。"""
     a = await _ensure_default_tenant(session)
     b = await _mk_tenant(session, "tenant_b")
-    await _seed_knowledge(session, a, ds="default", table="orders",
-                          comment="A租户订单", embed_text="订单 orders")
-    await _seed_knowledge(session, b, ds="default", table="orders",
-                          comment="B租户订单", embed_text="订单 orders")
-    await _seed_knowledge(session, a, ds="other_ds", table="orders",
-                          comment="A租户他源订单", embed_text="订单 orders")
+    await _seed_knowledge(
+        session, a, ds="default", table="orders", comment="A租户订单", embed_text="订单 orders"
+    )
+    await _seed_knowledge(
+        session, b, ds="default", table="orders", comment="B租户订单", embed_text="订单 orders"
+    )
+    await _seed_knowledge(
+        session, a, ds="other_ds", table="orders", comment="A租户他源订单", embed_text="订单 orders"
+    )
     r = await client.post(
         "/internal/rag/retrieve",
         json={"tenant_key": "default", "question": "订单"},
@@ -314,7 +356,7 @@ async def test_recall_tenant_isolation(
     )
     hint = r.json()["schema_hint"]
     assert "A租户订单" in hint
-    assert "B租户订单" not in hint      # 跨租户不串
+    assert "B租户订单" not in hint  # 跨租户不串
     assert "A租户他源订单" not in hint  # 跨数据源不串
 
 
@@ -336,8 +378,9 @@ async def test_recall_usable_dynamic_datasource_ok(
         ),
         {"i": ds_id, "t": tid},
     )
-    await _seed_knowledge(session, tid, ds="smoke_ds", table="orders",
-                          comment="订单", embed_text="订单")
+    await _seed_knowledge(
+        session, tid, ds="smoke_ds", table="orders", comment="订单", embed_text="订单"
+    )
     r = await client.post(
         "/internal/rag/retrieve",
         json={"tenant_key": "default", "datasource_key": "smoke_ds", "question": "订单"},
@@ -382,9 +425,7 @@ async def test_recall_history_only_result_cached(
 
     await cast("Any", get_redis()).flushdb()
     tid = await _ensure_default_tenant(session)
-    await _seed_history(
-        session, tid, ds="default", question="客户邮箱", sql="SELECT email FROM c"
-    )
+    await _seed_history(session, tid, ds="default", question="客户邮箱", sql="SELECT email FROM c")
     r = await client.post(
         "/internal/rag/retrieve",
         json={"tenant_key": "default", "question": "客户邮箱"},
@@ -407,8 +448,9 @@ async def test_emb_cache_dim_drift_treated_as_miss(
 
     await cast("Any", get_redis()).flushdb()
     tid = await _ensure_default_tenant(session)
-    await _seed_knowledge(session, tid, ds="default", table="payment",
-                          comment="支付", embed_text="支付记录")
+    await _seed_knowledge(
+        session, tid, ds="default", table="payment", comment="支付", embed_text="支付记录"
+    )
     # 手插坏维度缓存(8 维)——命中后应被防线识别并重取真向量
     await get_redis().set(_emb_key("支付记录"), "[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]")
     r = await client.post(
@@ -432,8 +474,9 @@ async def test_recall_embedding_failure_degrades_fulltext(
 
     monkeypatch.setattr(AgentRagClient, "embed", boom)
     tid = await _ensure_default_tenant(session)
-    await _seed_knowledge(session, tid, ds="default", table="inventory",
-                          comment="库存", embed_text="库存")
+    await _seed_knowledge(
+        session, tid, ds="default", table="inventory", comment="库存", embed_text="库存"
+    )
     r = await client.post(
         "/internal/rag/retrieve",
         json={"tenant_key": "default", "question": "库存"},
@@ -451,8 +494,9 @@ async def test_recall_ctx_cache_roundtrip(
 
     await cast("Any", get_redis()).flushdb()
     tid = await _ensure_default_tenant(session)
-    await _seed_knowledge(session, tid, ds="default", table="payment",
-                          comment="支付表", embed_text="支付 payment")
+    await _seed_knowledge(
+        session, tid, ds="default", table="payment", comment="支付表", embed_text="支付 payment"
+    )
     q = {"tenant_key": "default", "question": "支付记录"}
     r1 = await client.post("/internal/rag/retrieve", json=q, headers=INTERNAL)
     keys = [k async for k in cast("Any", get_redis()).scan_iter(match="km:ragctx:*")]
@@ -472,8 +516,9 @@ async def test_recall_ctx_evicted_on_delete(
 
     await cast("Any", get_redis()).flushdb()
     tid = await _ensure_default_tenant(session)
-    await _seed_knowledge(session, tid, ds="default", table="staff",
-                          comment="员工表", embed_text="员工 staff")
+    await _seed_knowledge(
+        session, tid, ds="default", table="staff", comment="员工表", embed_text="员工 staff"
+    )
     q = {"tenant_key": "default", "question": "员工"}
     await client.post("/internal/rag/retrieve", json=q, headers=INTERNAL)
     assert [k async for k in cast("Any", get_redis()).scan_iter(match="km:ragctx:*")]
@@ -519,9 +564,7 @@ async def test_ctx_evict_scoped_to_tenant(
     await seed_all(session, get_settings())
     token = await _login(client, "admin", "admin123")
     kid = (
-        await session.execute(
-            text("SELECT id FROM rag.table_descriptions WHERE table_name='t_a'")
-        )
+        await session.execute(text("SELECT id FROM rag.table_descriptions WHERE table_name='t_a'"))
     ).scalar_one()
     r = await client.delete(f"/system/rag/tables/{kid}", headers=_auth(token))
     assert r.status_code == 204
@@ -564,6 +607,7 @@ async def test_chat_success_writes_query_history(
         rows=[[2]],
         sql="SELECT count(*) FROM goods",
     )
+
     def _fake_query(self: AgentClient, **kw: object) -> object:  # noqa: ARG001
         return _areply(reply)
 
@@ -576,10 +620,10 @@ async def test_chat_success_writes_query_history(
     )
     assert r.status_code == 200 and r.json()["success"]
     row = (
-        await session.execute(
-            text("SELECT question, sql_text, status FROM rag.query_history")
-        )
-    ).mappings().one()
+        (await session.execute(text("SELECT question, sql_text, status FROM rag.query_history")))
+        .mappings()
+        .one()
+    )
     assert row["question"] == "有多少商品"  # 原始问句(非改写)
     assert row["sql_text"] == "SELECT count(*) FROM goods"
     assert row["status"] == "SUCCESS"
@@ -596,6 +640,7 @@ async def test_chat_rejected_no_writeback(
     from tests.test_chat_query import _auth, _user_with_chat_perm
 
     reply = AgentReply(success=False, verdict="BLOCKED", sql="DELETE FROM goods")
+
     def _fake_query(self: AgentClient, **kw: object) -> object:  # noqa: ARG001
         return _areply(reply)
 
@@ -617,8 +662,10 @@ async def test_writeback_failure_does_not_break_chat(
     from kongming.rag.service import RagService
     from tests.test_chat_query import _auth, _user_with_chat_perm
 
-    reply = AgentReply(success=True, verdict="PASS", columns=["n"], rows=[[1]],
-                       sql="SELECT 1", summary="ok")
+    reply = AgentReply(
+        success=True, verdict="PASS", columns=["n"], rows=[[1]], sql="SELECT 1", summary="ok"
+    )
+
     def _fake_query(self: AgentClient, **kw: object) -> object:  # noqa: ARG001
         return _areply(reply)
 

@@ -149,7 +149,7 @@ def _parse_sse(text: str) -> list[tuple[str, dict[str, object]]]:
 def test_sse_decoder_basic_frame() -> None:
     d = SseDecoder()
     assert d.feed("event: stage") is None
-    assert d.feed("data: {\"node\":\"a\"}") is None
+    assert d.feed('data: {"node":"a"}') is None
     assert d.feed("") == ("stage", '{"node":"a"}')
     assert d.feed("") is None  # 连续空行跳过
 
@@ -363,9 +363,7 @@ async def test_stream_tail_error_after_result_no_double_write(
     # 库内该会话 assistant 恰一条 SUCCESS,无 FAILED 叠加
     sid = frames[-1][1]["session_id"]
     rows = await session.execute(
-        text(
-            "SELECT status FROM public.chat_message WHERE session_id=:s AND role='ASSISTANT'"
-        ),
+        text("SELECT status FROM public.chat_message WHERE session_id=:s AND role='ASSISTANT'"),
         {"s": sid},
     )
     assert [str(x[0]) for x in rows] == ["SUCCESS"]
@@ -390,9 +388,7 @@ async def test_stream_duplicate_result_frame_idempotent(
     assert [e for e, _ in frames].count("result") == 1
     sid = frames[-1][1]["session_id"]
     rows = await session.execute(
-        text(
-            "SELECT status FROM public.chat_message WHERE session_id=:s AND role='ASSISTANT'"
-        ),
+        text("SELECT status FROM public.chat_message WHERE session_id=:s AND role='ASSISTANT'"),
         {"s": sid},
     )
     assert [str(x[0]) for x in rows] == ["SUCCESS"]  # 恰一条
@@ -407,9 +403,7 @@ async def test_stream_persist_false_nothing_written(
     reply = _pass_reply()
     _install(fake_agent, StreamFakeAgent(_frames_for(reply), reply=reply))
     _, token = await _user_with_chat_perm(client, session, make_user, "stream4")
-    before = (
-        await session.execute(text("SELECT count(*) FROM public.chat_session"))
-    ).scalar_one()
+    before = (await session.execute(text("SELECT count(*) FROM public.chat_session"))).scalar_one()
     r = await client.post(
         "/chat/query/stream",
         json={"question": "有多少商品", "persist": False},
@@ -418,9 +412,7 @@ async def test_stream_persist_false_nothing_written(
     frames = _parse_sse(r.text)
     assert frames[-1][1]["message_id"] is None
     assert frames[-1][1]["session_id"] is None
-    after = (
-        await session.execute(text("SELECT count(*) FROM public.chat_session"))
-    ).scalar_one()
+    after = (await session.execute(text("SELECT count(*) FROM public.chat_session"))).scalar_one()
     assert after == before  # 零会话零消息
 
 

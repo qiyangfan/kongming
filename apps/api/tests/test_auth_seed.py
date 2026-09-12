@@ -16,8 +16,10 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
     ).all()
     assert [(r.role_key, r.sort) for r in roles] == [("SUPER_ADMIN", 1), ("DEVELOPER", 2)]
     perms = (
-        await session.execute(text("SELECT perm_code FROM public.sys_permission ORDER BY 1"))
-    ).scalars().all()
+        (await session.execute(text("SELECT perm_code FROM public.sys_permission ORDER BY 1")))
+        .scalars()
+        .all()
+    )
     assert perms == [
         "bot:run",
         "chat:execute",
@@ -49,8 +51,8 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
         "workflow:execute",
     ]
     tenants = (
-        await session.execute(text("SELECT tenant_key FROM public.sys_tenant"))
-    ).scalars().all()
+        (await session.execute(text("SELECT tenant_key FROM public.sys_tenant"))).scalars().all()
+    )
     assert tenants == ["default"]
     admin = (
         await session.execute(
@@ -95,15 +97,19 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
     # 推荐绑定(只增不摘):DEVELOPER 增量获得 chat:execute(005)+chat:feedback:submit(014)
     # + 019 只读三件套(公告写工具不推,显式授予制)
     dev_perms = (
-        await session.execute(
-            text(
-                "SELECT p.perm_code FROM public.sys_role_permission rp"
-                " JOIN public.sys_role r ON r.id=rp.role_id"
-                " JOIN public.sys_permission p ON p.id=rp.permission_id"
-                " WHERE r.role_key='DEVELOPER' ORDER BY 1"
+        (
+            await session.execute(
+                text(
+                    "SELECT p.perm_code FROM public.sys_role_permission rp"
+                    " JOIN public.sys_role r ON r.id=rp.role_id"
+                    " JOIN public.sys_permission p ON p.id=rp.permission_id"
+                    " WHERE r.role_key='DEVELOPER' ORDER BY 1"
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert list(dev_perms) == [
         "bot:run",
         "chat:execute",

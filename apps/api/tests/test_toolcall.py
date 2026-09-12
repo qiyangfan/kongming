@@ -149,11 +149,15 @@ def _req(tool: str, args: dict[str, object], **kw: object) -> dict[str, object]:
 
 async def _tool_audits(s: AsyncSession, trace_id: str) -> list[dict[str, object]]:
     rows = (
-        await s.execute(
-            text("SELECT * FROM public.sys_tool_audit WHERE trace_id = :t"),
-            {"t": trace_id},
+        (
+            await s.execute(
+                text("SELECT * FROM public.sys_tool_audit WHERE trace_id = :t"),
+                {"t": trace_id},
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return [dict(r) for r in rows]
 
 
@@ -461,9 +465,7 @@ async def _mk_session(s: AsyncSession, user_id: str, tenant_key: str = "tc") -> 
     return str(sid)
 
 
-async def _pending_confirm(
-    client: AsyncClient, s: AsyncSession, user_id: str
-) -> tuple[str, str]:
+async def _pending_confirm(client: AsyncClient, s: AsyncSession, user_id: str) -> tuple[str, str]:
     """经内部端点挂起一条公告写工具,返回 (confirm_id, trace_id)。"""
     req = _req(
         "create_system_announcement",
@@ -641,9 +643,7 @@ async def test_confirm_perm_revoked_rejected(
     require_perm(chat:execute) 先行 403,测不到确认路径的复校)。
     """
     uid = await _user_with_tools(session, make_user, "tc_revoke", ["chat:execute"])
-    rid_ann = await _mk_role_with_perms(
-        session, "role_tc_revoke_ann", ["tool:announcement:create"]
-    )
+    rid_ann = await _mk_role_with_perms(session, "role_tc_revoke_ann", ["tool:announcement:create"])
     await _bind(session, "sys_user_role", uid, rid_ann)
     sid = await _mk_session(session, uid)
     confirm_id, _ = await _pending_confirm(client, session, uid)
@@ -726,9 +726,7 @@ async def test_audit_page_filters(
     body = r.json()
     assert body["total"] >= 2
     # 按工具名筛选
-    r2 = await client.get(
-        "/system/tools/audit/page?tool_name=validate_sql", headers=_auth(token)
-    )
+    r2 = await client.get("/system/tools/audit/page?tool_name=validate_sql", headers=_auth(token))
     assert all(it["tool_name"] == "validate_sql" for it in r2.json()["items"])
     # 按状态筛选
     r3 = await client.get("/system/tools/audit/page?status=REJECTED", headers=_auth(token))
@@ -815,9 +813,7 @@ async def test_confirm_after_unbind_tenant_403(
     sid = await _mk_session(session, uid)
     confirm_id, _ = await _pending_confirm(client, session, uid)
     # 解绑租户(chat_session 历史归属仍在——复校必须查 sys_user_tenant 当前绑定)
-    await session.execute(
-        text("DELETE FROM public.sys_user_tenant WHERE user_id=:u"), {"u": uid}
-    )
+    await session.execute(text("DELETE FROM public.sys_user_tenant WHERE user_id=:u"), {"u": uid})
     await session.commit()
     token = await _login(client, "tc_unbind")
     r = await client.post(

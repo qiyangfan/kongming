@@ -44,7 +44,7 @@ def sanitize_title(raw: str) -> str:
     t = " ".join(raw.split())
     for prefix in _LABEL_PREFIXES:
         if t.startswith(prefix):
-            t = t[len(prefix):]
+            t = t[len(prefix) :]
             break
     t = t.strip(_WRAPPERS).strip()
     return t[:_MAX_TITLE_LEN]

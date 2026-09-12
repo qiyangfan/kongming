@@ -29,9 +29,7 @@ def test_prod_mock_secret_dev_placeholder_rejected() -> None:
 
 
 def test_prod_mock_secret_explicit_passes() -> None:
-    s = Settings(
-        **cast("dict[str, Any]", {**_PROD_KW, "billing_mock_secret": "prod-real-secret"})
-    )
+    s = Settings(**cast("dict[str, Any]", {**_PROD_KW, "billing_mock_secret": "prod-real-secret"}))
     s.fail_closed_checks()  # 不抛
 
 

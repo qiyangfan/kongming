@@ -5,7 +5,7 @@
 
 用法(apps/api 下):
     uv run python scripts/export_sqlguard_fixtures.py [输出路径]
-默认输出 ../../km-sqlguard/tests/fixtures/kongming_baseline.json。
+默认输出 packages/liannu/tests/fixtures/kongming_baseline.json(仓内共享包)。
 
 确定性约定:用例按固定序排列,JSON sort_keys + 稳定缩进,同输入同字节。
 """
@@ -23,8 +23,8 @@ from kongming.datascope import rewrite  # noqa: E402
 from kongming.datascope.models import FilterType, ScopeFilter  # noqa: E402
 from kongming.sqlfw import firewall  # noqa: E402
 
-DEFAULT_OUT = Path(__file__).resolve().parents[4] / (
-    "km-sqlguard/tests/fixtures/kongming_baseline.json"
+DEFAULT_OUT = Path(__file__).resolve().parents[2] / (
+    "packages/liannu/tests/fixtures/kongming_baseline.json"
 )
 
 # ── 用例源 1:sqlfw 防火墙三闸(与 tests/test_sqlfw_firewall.py 同源)──────
@@ -80,8 +80,11 @@ SCOPE_BLOCK = [
     "SELECT * FROM (SELECT * FROM tenant_itb.goods) t",
 ]
 TWIN_ALLOWED = ["tenant_Sakila", "public"]
-TWIN_CASES = ['SELECT * FROM "tenant_Sakila".goods', "SELECT * FROM tenant_sakila.goods",
-              "SELECT * FROM tenant_Sakila.goods"]
+TWIN_CASES = [
+    'SELECT * FROM "tenant_Sakila".goods',
+    "SELECT * FROM tenant_sakila.goods",
+    "SELECT * FROM tenant_Sakila.goods",
+]
 
 RESERVED_BLOCK = [
     "SELECT username, password_hash FROM sys_user",
@@ -122,8 +125,7 @@ REWRITE_SQLS = [
     "SELECT * FROM customer c WHERE c.id > 1",
     "SELECT c.name, COUNT(r.id) FROM customer c "
     "JOIN rental r ON c.id = r.customer_id GROUP BY c.name",
-    "SELECT c.name FROM customer c "
-    "WHERE c.id IN (SELECT customer_id FROM rental WHERE id > 10)",
+    "SELECT c.name FROM customer c WHERE c.id IN (SELECT customer_id FROM rental WHERE id > 10)",
     "SELECT 1 UNION SELECT 2",  # 取不到主表:改写跳过形态
     "SELECT 1;",
 ]
@@ -213,9 +215,7 @@ def _eval_gold_sqls() -> list[tuple[str, str]]:
     evals_dir = Path(__file__).resolve().parent.parent / "evals"
     out: list[tuple[str, str]] = []
     for yml in sorted(evals_dir.glob("*.yaml")):
-        data = cast(
-            "list[object] | None", yaml.safe_load(yml.read_text(encoding="utf-8"))
-        )
+        data = cast("list[object] | None", yaml.safe_load(yml.read_text(encoding="utf-8")))
         for item in data or []:
             if not isinstance(item, dict):
                 continue

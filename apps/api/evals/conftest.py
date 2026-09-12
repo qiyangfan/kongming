@@ -35,9 +35,7 @@ AGENT_MODE = os.getenv("KM_EVAL_AGENT_MODE", "recipe")
 CHAT_TIMEOUT = 150.0  # agent_timeout_sec=120 覆盖全图 + 网络余量
 
 if not ADMIN_PASSWORD:
-    pytest.skip(
-        "缺 KM_EVAL_ADMIN_PASSWORD(评估环境登录凭证);设置后重跑", allow_module_level=True
-    )
+    pytest.skip("缺 KM_EVAL_ADMIN_PASSWORD(评估环境登录凭证);设置后重跑", allow_module_level=True)
 
 
 # ============ 评估集加载 ============
@@ -135,7 +133,7 @@ def _pg_dsn(database: str | None = None) -> str:
     url = os.getenv("KM_EVAL_PG_DSN") or _control_plane_dsn()
     dsn = url
     if dsn.startswith("postgresql+asyncpg://"):
-        dsn = "postgresql://" + dsn[len("postgresql+asyncpg://"):]
+        dsn = "postgresql://" + dsn[len("postgresql+asyncpg://") :]
     elif not dsn.startswith("postgresql://"):
         raise pytest.UsageError(f"不识别的 DSN 形态: {url[:40]}…")
     if database is not None:

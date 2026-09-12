@@ -106,9 +106,7 @@ class ApiClient:
         if resp.status_code != 200:
             # 租户非法/绑定失败/数据源不支持等 HTTP 拒绝:重试无意义但语义非权限拦截,
             # 收敛 ERROR 让 selfheal 走有限重试后终止(计数即保护)
-            return SqlExecuteOutcome(
-                verdict="ERROR", reason=f"控制面拒绝(HTTP {resp.status_code})"
-            )
+            return SqlExecuteOutcome(verdict="ERROR", reason=f"控制面拒绝(HTTP {resp.status_code})")
         # httpx resp.json() 返回 Any,边界处一次收窄(运行时即 dict,cast 零行为变化)
         data = cast("dict[str, object]", resp.json())
         return SqlExecuteOutcome(
@@ -116,8 +114,7 @@ class ApiClient:
             reason=cast("str | None", data.get("reason")),
             columns=list(cast("list[str]", data.get("columns") or [])),
             rows=[
-                list(cast("list[object]", r))
-                for r in cast("list[object]", data.get("rows") or [])
+                list(cast("list[object]", r)) for r in cast("list[object]", data.get("rows") or [])
             ],
             duration_ms=int(cast("int | float | str", data.get("duration_ms")) or 0),
         )
@@ -245,9 +242,7 @@ class ApiClient:
             log.warning("tool_execute 回调异常: %s", e)
             return ToolExecuteOutcome(status="error", reason=f"控制面不可达: {e}")
         if resp.status_code != 200:
-            return ToolExecuteOutcome(
-                status="error", reason=f"控制面拒绝(HTTP {resp.status_code})"
-            )
+            return ToolExecuteOutcome(status="error", reason=f"控制面拒绝(HTTP {resp.status_code})")
         try:
             data = cast("dict[str, object]", resp.json())
         except ValueError:
@@ -258,9 +253,7 @@ class ApiClient:
         return ToolExecuteOutcome(
             status=str(data.get("status") or "error"),
             reason=cast("str | None", data.get("reason")),
-            result=cast("dict[str, object]", result_raw)
-            if isinstance(result_raw, dict)
-            else None,
+            result=cast("dict[str, object]", result_raw) if isinstance(result_raw, dict) else None,
             confirm_id=cast("str | None", data.get("confirm_id")),
         )
 

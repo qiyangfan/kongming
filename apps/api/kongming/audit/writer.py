@@ -13,8 +13,8 @@ from kongming.db import get_sessionmaker
 
 log = logging.getLogger(__name__)
 
-_TRACE_ID_MAX = 64        # sys_sql_audit.trace_id VARCHAR(64)
-_REASON_MAX = 200         # block_reason VARCHAR(200)
+_TRACE_ID_MAX = 64  # sys_sql_audit.trace_id VARCHAR(64)
+_REASON_MAX = 200  # block_reason VARCHAR(200)
 
 
 class SqlAuditWriter:

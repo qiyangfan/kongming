@@ -214,9 +214,7 @@ class _MemoryAdapter:
                 SqlOperLogRepo(s),
                 _TeamRolesAdapter(),
             )
-            return await svc.recall_hint(
-                user_id=user_id, tenant_id=tenant_id, question=question
-            )
+            return await svc.recall_hint(user_id=user_id, tenant_id=tenant_id, question=question)
 
     async def explicit_intent(self, question: str) -> str | None:
         from kongming.memory.models import extract_explicit_intent
@@ -275,9 +273,7 @@ class _AttachmentChecker:
         # R1-F3:去重保序——同 id 重复引用过检后第二次取件必 404
         # (一次性消费),整轮 fail-closed 且文案误导
         for att_id in dict.fromkeys(ids):
-            row = await self._repo.find_owned(
-                att_id=att_id, tenant_id=tenant_id, user_id=user_id
-            )
+            row = await self._repo.find_owned(att_id=att_id, tenant_id=tenant_id, user_id=user_id)
             if row is None or row["status"] != "UPLOADED":
                 return None
             out.append(
@@ -295,9 +291,7 @@ class _RegistryToolSpecProvider:
     """ReAct 注入工具的唯一真理源(019):权限点集查询 + toolcall 注册表过滤。
     028:合并租户 MCP 动态工具(持 tool:mcp:use 才可见——与执行面 L2 同判据)。"""
 
-    async def authorized_tools(
-        self, user_id: str, tenant_id: str
-    ) -> list[dict[str, object]]:
+    async def authorized_tools(self, user_id: str, tenant_id: str) -> list[dict[str, object]]:
         from kongming.toolcall.registry import filter_specs
 
         async with get_sessionmaker()() as s:
@@ -412,9 +406,7 @@ class ChatQueryIn(BaseModel):
     # 019:Agent 内核选择(纯增,缺省 recipe 零回归);react=ReAct 工具调用内核
     agent_mode: Literal["recipe", "react"] = "recipe"
     # 030:图片附件引用(纯增,≤3;归属校验在 service)
-    attachment_ids: list[uuid.UUID] = Field(
-        default_factory=list[uuid.UUID], max_length=3
-    )
+    attachment_ids: list[uuid.UUID] = Field(default_factory=list[uuid.UUID], max_length=3)
 
 
 class ChartOut(BaseModel):
@@ -583,9 +575,7 @@ _SUGGEST_TABLE_CAP = 30  # 摘要表数封顶(meta 自身另有 max_tables,双�
 _SUGGEST_DIGEST_CHARS = 12_000  # 摘要字符封顶(防巨库撑爆生成 prompt)
 
 
-def _render_schema_digest(
-    tables: list[MetaTableOut], truncated: bool
-) -> str:
+def _render_schema_digest(tables: list[MetaTableOut], truncated: bool) -> str:
     """内省结果 → 结构摘要文本(仅元数据,零行数据,ADR-002)。"""
     lines: list[str] = []
     for t in tables[:_SUGGEST_TABLE_CAP]:
@@ -667,9 +657,7 @@ async def chat_suggestions(
     user: Annotated[dict[str, object], Depends(current_user)],
     svc: Annotated[SuggestionsService, Depends(get_suggestions_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
-    datasource_key: Annotated[
-        str, Query(pattern=r"^[a-z][a-z0-9_]{1,63}$")
-    ] = "default",
+    datasource_key: Annotated[str, Query(pattern=r"^[a-z][a-z0-9_]{1,63}$")] = "default",
 ) -> SuggestionsOut:
     try:
         items = await svc.list_suggestions(
@@ -730,8 +718,12 @@ class StreamToolCallOut(BaseModel):
 _STREAM_RESPONSES: dict[int | str, dict[str, Any]] = {
     200: {
         "model": (
-            StreamStageOut | StreamSqlOut | StreamSummaryOut
-            | StreamToolCallOut | StreamErrorOut | ChatQueryOut
+            StreamStageOut
+            | StreamSqlOut
+            | StreamSummaryOut
+            | StreamToolCallOut
+            | StreamErrorOut
+            | ChatQueryOut
         ),
         "description": (
             "SSE 事件流:stage/sql/summary/tool_call 过程事件逐帧下发;result=data 与同步"
@@ -974,7 +966,9 @@ async def list_sessions(
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
     return [
         SessionItemOut(
-            id=s.id, title=s.title, updated_at=s.updated_at  # type: ignore[arg-type]
+            id=s.id,
+            title=s.title,
+            updated_at=s.updated_at,  # type: ignore[arg-type]
         )
         for s in rows
     ]
@@ -1015,7 +1009,9 @@ async def rename_session(
     except InvalidTitle:
         raise HTTPException(status_code=400, detail="TITLE_INVALID") from None
     return SessionItemOut(
-        id=s.id, title=s.title, updated_at=s.updated_at  # type: ignore[arg-type]
+        id=s.id,
+        title=s.title,
+        updated_at=s.updated_at,  # type: ignore[arg-type]
     )
 
 
@@ -1077,9 +1073,7 @@ class ExportIn(BaseModel):
 
     format: Literal["csv", "xlsx"]
     columns: list[str] = Field(min_length=1, max_length=200)
-    rows: list[list[object]] = Field(
-        default_factory=list[list[object]], max_length=10000
-    )
+    rows: list[list[object]] = Field(default_factory=list[list[object]], max_length=10000)
 
 
 @router.post(

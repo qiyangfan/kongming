@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StatusSwitch } from "@/components/status-switch";
+import { FormRow } from "@/components/form-row";
 import {
   Dialog,
   DialogContent,
@@ -25,9 +26,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { FieldLabel } from "@/components/field-label";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Pagination } from "@/components/pagination";
 import {
   Select,
   SelectContent,
@@ -295,13 +295,20 @@ export default function DatasourcesPage() {
           )}
           {datasources.data?.items.map((d) => (
             <TableRow key={d.id}>
-              <TableCell className="max-w-32 truncate font-medium" title={d.datasource_key}>{d.datasource_key}</TableCell>
-              <TableCell className="max-w-32 truncate" title={d.name}>{d.name}</TableCell>
+              <TableCell className="max-w-32 truncate font-medium" title={d.datasource_key}>
+                {d.datasource_key}
+              </TableCell>
+              <TableCell className="max-w-32 truncate" title={d.name}>
+                {d.name}
+              </TableCell>
               <TableCell className="max-w-40 truncate" title={`${d.tenant_name}(${d.tenant_key})`}>
                 {d.tenant_name}({d.tenant_key})
               </TableCell>
               <TableCell className="text-muted-foreground">
-                <span className="block max-w-56 truncate" title={`${d.host}:${d.port}/${d.database}`}>
+                <span
+                  className="block max-w-56 truncate"
+                  title={`${d.host}:${d.port}/${d.database}`}
+                >
                   {d.host}:{d.port}/{d.database}
                 </span>
               </TableCell>
@@ -319,12 +326,7 @@ export default function DatasourcesPage() {
                 <Button variant="ghost" size="sm" onClick={() => openEdit(d)}>
                   编辑
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-destructive hover:text-destructive"
-                  onClick={() => setDeleting(d)}
-                >
+                <Button variant="ghost-destructive" size="sm" onClick={() => setDeleting(d)}>
                   删除
                 </Button>
               </TableCell>
@@ -340,25 +342,7 @@ export default function DatasourcesPage() {
         </TableBody>
       </Table>
 
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span>共 {total} 条</span>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-            上一页
-          </Button>
-          <span>
-            {page} / {pages}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page >= pages}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            下一页
-          </Button>
-        </div>
-      </div>
+      <Pagination page={page} pageCount={pages} total={total} onPageChange={setPage} />
 
       <Dialog
         open={creating || editing !== null}
@@ -388,13 +372,11 @@ export default function DatasourcesPage() {
             }}
           >
             <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5">
-                <FieldLabel
-                  htmlFor="ds-key"
-                  help="小写字母开头,可含数字与下划线;创建后不可改。"
-                >
-                  数据源键
-                </FieldLabel>
+              <FormRow
+                label="数据源键"
+                htmlFor="ds-key"
+                help="小写字母开头,可含数字与下划线;创建后不可改。"
+              >
                 <Input
                   id="ds-key"
                   value={form.datasourceKey}
@@ -402,19 +384,17 @@ export default function DatasourcesPage() {
                   placeholder="如 sakila"
                   onChange={(e) => setForm({ ...form, datasourceKey: e.target.value })}
                 />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="ds-name">名称</Label>
+              </FormRow>
+              <FormRow label="名称" htmlFor="ds-name">
                 <Input
                   id="ds-name"
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                 />
-              </div>
+              </FormRow>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5">
-                <Label>归属租户</Label>
+              <FormRow label="归属租户">
                 <Select
                   value={form.tenantId}
                   disabled={!creating}
@@ -431,56 +411,50 @@ export default function DatasourcesPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="ds-schema">默认 schema</Label>
+              </FormRow>
+              <FormRow label="默认 schema" htmlFor="ds-schema">
                 <Input
                   id="ds-schema"
                   value={form.defaultSchema}
                   disabled={!creating}
                   onChange={(e) => setForm({ ...form, defaultSchema: e.target.value })}
                 />
-              </div>
+              </FormRow>
             </div>
             <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-2 grid gap-1.5">
-                <Label htmlFor="ds-host">主机</Label>
+              <FormRow label="主机" htmlFor="ds-host" className="col-span-2">
                 <Input
                   id="ds-host"
                   value={form.host}
                   onChange={(e) => setForm({ ...form, host: e.target.value })}
                 />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="ds-port">端口</Label>
+              </FormRow>
+              <FormRow label="端口" htmlFor="ds-port">
                 <Input
                   id="ds-port"
                   inputMode="numeric"
                   value={form.port}
                   onChange={(e) => setForm({ ...form, port: e.target.value })}
                 />
-              </div>
+              </FormRow>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="ds-database">库名</Label>
+              <FormRow label="库名" htmlFor="ds-database">
                 <Input
                   id="ds-database"
                   value={form.database}
                   onChange={(e) => setForm({ ...form, database: e.target.value })}
                 />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="ds-username">用户名</Label>
+              </FormRow>
+              <FormRow label="用户名" htmlFor="ds-username">
                 <Input
                   id="ds-username"
                   value={form.username}
                   onChange={(e) => setForm({ ...form, username: e.target.value })}
                 />
-              </div>
+              </FormRow>
             </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="ds-password">密码{editing ? "(留空不改)" : ""}</Label>
+            <FormRow label={`密码${editing ? "(留空不改)" : ""}`} htmlFor="ds-password">
               <Input
                 id="ds-password"
                 type="password"
@@ -488,10 +462,9 @@ export default function DatasourcesPage() {
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
               />
               <p className="text-xs text-muted-foreground">
-                请使用只读账号。如需按部门控制数据可见范围,业务表须有记录创建人的
-                create_by 字段。
+                请使用只读账号。如需按部门控制数据可见范围,业务表须有记录创建人的 create_by 字段。
               </p>
-            </div>
+            </FormRow>
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
                 checked={form.readonly}
@@ -501,7 +474,9 @@ export default function DatasourcesPage() {
             </label>
             {testResult && (
               <p
-                className={testResult.ok ? "text-sm text-muted-foreground" : "text-destructive text-sm"}
+                className={
+                  testResult.ok ? "text-sm text-muted-foreground" : "text-destructive text-sm"
+                }
                 role="status"
               >
                 {testResult.ok ? "连接成功" : `连接失败:${testResult.reason}`}

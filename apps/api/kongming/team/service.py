@@ -28,9 +28,7 @@ class TeamService:
         if self._oper is not None:
             await self._oper.log(action=action, target=target, detail=detail)
 
-    async def create(
-        self, *, tenant_id: str, team_key: str, name: str, created_by: str
-    ) -> str:
+    async def create(self, *, tenant_id: str, team_key: str, name: str, created_by: str) -> str:
         if not TEAM_KEY_RE.fullmatch(team_key):
             raise TeamValidationError("team_key 须为小写字母开头的字母/数字/下划线(2-64 位)")
         if not name.strip() or len(name) > 128:
@@ -50,9 +48,7 @@ class TeamService:
     async def list_mine(self, *, tenant_id: str, user_id: str) -> list[dict[str, Any]]:
         return await self._repo.list_my_teams(tenant_id=tenant_id, user_id=user_id)
 
-    async def get_with_members(
-        self, *, tenant_id: str, team_id: str
-    ) -> dict[str, Any]:
+    async def get_with_members(self, *, tenant_id: str, team_id: str) -> dict[str, Any]:
         team = await self._repo.get_team(tenant_id=tenant_id, team_id=team_id)
         if team is None:
             raise TeamNotFound(team_id)
@@ -75,18 +71,14 @@ class TeamService:
             raise TeamNotFound(team_id)
         await self._audit("team.delete", team_id, {})
 
-    async def add_member(
-        self, *, tenant_id: str, team_id: str, user_id: str, role: str
-    ) -> None:
+    async def add_member(self, *, tenant_id: str, team_id: str, user_id: str, role: str) -> None:
         if role not in ROLES:
             raise TeamValidationError(f"role 须为 {'/'.join(ROLES)}")
         if await self._repo.get_team(tenant_id=tenant_id, team_id=team_id) is None:
             raise TeamNotFound(team_id)
         # 审查循环 B7:无 FK 的成员表须校验候选真实存在且属当前租户,
         # 否则幽灵行落库且成员列表(JOIN sys_user)永不可见
-        if not await self._repo.user_active_in_tenant(
-            tenant_id=tenant_id, user_id=user_id
-        ):
+        if not await self._repo.user_active_in_tenant(tenant_id=tenant_id, user_id=user_id):
             raise TeamValidationError("用户不存在或不属于当前租户")
         await self._repo.upsert_member(team_id=team_id, user_id=user_id, role=role)
         await self._audit("team.member.add", team_id, {"user_id": user_id, "role": role})
@@ -151,9 +143,7 @@ class TeamService:
             tenant_id=tenant_id,
         ):
             raise TeamNotFound(resource_id)
-        await self._audit(
-            "team.attach", team_id, {"type": resource_type, "resource": resource_id}
-        )
+        await self._audit("team.attach", team_id, {"type": resource_type, "resource": resource_id})
 
     async def role_map(self, *, user_id: str) -> dict[str, str]:
         return await self._repo.role_map(user_id=user_id)

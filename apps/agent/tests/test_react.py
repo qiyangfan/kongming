@@ -159,7 +159,12 @@ async def test_react_full_loop(_patch) -> None:  # type: ignore[no-untyped-def]
     assert call["tenant_key"] == "default"
     assert call["user_id"] == "u-1"
     assert set(call.keys()) <= {
-        "trace_id", "tenant_key", "datasource_key", "user_id", "tool_name", "args",
+        "trace_id",
+        "tenant_key",
+        "datasource_key",
+        "user_id",
+        "tool_name",
+        "args",
         "channel",  # 025
     }
     # LLM 第二轮收到的 messages 含 tool 观察(行数据在观察内)
@@ -344,7 +349,8 @@ def _collector_spy(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 
 
 async def test_collect_usage_default_off(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch  # type: ignore[valid-type]
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,  # type: ignore[valid-type]
 ) -> None:
     """035 R1-S2:collect_usage 缺省 False → 端点不挂收集器(chat 同步
     react/workflow 走 fire-and-forget 旧路,用量不整丢)。"""
@@ -357,14 +363,13 @@ async def test_collect_usage_default_off(
 
 
 async def test_collect_usage_on_collects(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch  # type: ignore[valid-type]
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,  # type: ignore[valid-type]
 ) -> None:
     """035 R1-S2:collect_usage=True(bot 链路)→ 端点挂收集器,响应携带明细。"""
     calls = _collector_spy(monkeypatch)
     async with client as c:
-        resp = await c.post(
-            "/query_react", json=_react_payload(collect_usage=True), headers=TOKEN
-        )
+        resp = await c.post("/query_react", json=_react_payload(collect_usage=True), headers=TOKEN)
     assert resp.status_code == 200
     assert len(calls) == 1
 
@@ -377,8 +382,17 @@ async def test_query_react_happy_path(client: AsyncClient) -> None:  # type: ign
     # 与 /query 逐字段同构;035 纯增 usage_records(bot 链路同步采集明细,
     # 本端点挂收集器——替身 LLM 无 usage 属性时为空列表)
     assert set(body.keys()) == {
-        "success", "verdict", "summary", "insights", "stats",
-        "columns", "rows", "sql", "retry_count", "error", "usage_records",
+        "success",
+        "verdict",
+        "summary",
+        "insights",
+        "stats",
+        "columns",
+        "rows",
+        "sql",
+        "retry_count",
+        "error",
+        "usage_records",
     }
     assert body["success"] is True and body["verdict"] == "PASS"
     assert body["summary"] == "结果是 1。"
@@ -396,9 +410,7 @@ async def test_query_react_llm_unavailable(monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setattr(deps, "get_llm", lambda: _BoomLlm())
     monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post("/query_react", json=_react_payload(), headers=TOKEN)
     body = resp.json()
     assert resp.status_code == 200
@@ -416,16 +428,13 @@ async def test_query_react_stream_events(client: AsyncClient) -> None:  # type: 
     # tool_call running→done 成对;stage 成对;summary 与 result 终态
     assert "tool_call" in events
     tool_frames = [
-        ln[6:] for ln in text.splitlines()
-        if ln.startswith("data: ") and '"tool_name"' in ln
+        ln[6:] for ln in text.splitlines() if ln.startswith("data: ") and '"tool_name"' in ln
     ]
     statuses = [json.loads(f)["status"] for f in tool_frames]
     assert statuses == ["running", "done"]
     assert events[-1] == "result"
     # result 终态字段同构
-    result_data = [
-        ln[6:] for ln in text.splitlines() if ln.startswith("data: ")
-    ][-1]
+    result_data = [ln[6:] for ln in text.splitlines() if ln.startswith("data: ")][-1]
     final = json.loads(result_data)
     assert final["success"] is True and final["summary"] == "结果是 1。"
 
@@ -482,6 +491,7 @@ async def test_react_blocked_sql_not_deduped(_patch) -> None:  # type: ignore[no
 
 
 # ============ 纯函数 ============
+
 
 def test_build_react_system_bot_injection() -> None:
     """025:Bot 身份段替换默认身份,内核纪律后缀完整保留;空=逐字零回归。"""

@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     jwt_private_key_pem: str | None = None
     jwt_public_key_pem: str | None = None
     jwt_issuer: str = "kongming"
-    access_token_ttl_sec: int = Field(default=900, ge=1)        # 15min
+    access_token_ttl_sec: int = Field(default=900, ge=1)  # 15min
     refresh_token_ttl_sec: int = Field(default=7 * 24 * 3600, ge=1)
 
     # 内部服务令牌:api ↔ agent 通道(与用户 JWT 分离,ADR-002)

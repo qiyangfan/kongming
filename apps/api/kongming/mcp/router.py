@@ -53,9 +53,7 @@ def _resolve_tenant(
     return repo.find_default_tenant(user_id=uid), None
 
 
-async def _tenant_or_403(
-    user: dict[str, object], session: AsyncSession, header: str | None
-) -> str:
+async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header: str | None) -> str:
     pending, explicit = _resolve_tenant(user, session, header)
     found = await pending
     if found is None:
@@ -140,9 +138,7 @@ def _dict_or_empty(v: Any) -> dict[str, Any]:
 def _row_out(row: dict[str, Any]) -> McpServerOut:
     tools_raw = cast("list[object]", row.get("tools") or [])
     # isinstance 守卫保留:先过滤出 dict 形态条目,再收窄键型供字段读取(仅类型断言)
-    tools_entries: list[dict[str, Any]] = [
-        e for e in tools_raw if isinstance(e, dict)
-    ]
+    tools_entries: list[dict[str, Any]] = [e for e in tools_raw if isinstance(e, dict)]
     return McpServerOut(
         id=str(row["id"]),
         server_key=str(row["server_key"]),
@@ -160,9 +156,7 @@ def _row_out(row: dict[str, Any]) -> McpServerOut:
             )
             for e in tools_entries
         ],
-        last_sync_at=(
-            row["last_sync_at"].isoformat() if row.get("last_sync_at") else None
-        ),
+        last_sync_at=(row["last_sync_at"].isoformat() if row.get("last_sync_at") else None),
         last_sync_error=str(row.get("last_sync_error") or ""),
     )
 
@@ -182,7 +176,8 @@ async def list_servers(
 
 
 @router.post(
-    "", status_code=201,
+    "",
+    status_code=201,
     response_model=McpServerOut,
     dependencies=[Depends(require_perm(MANAGE))],
 )
@@ -314,9 +309,7 @@ async def test_server(
 ) -> McpTestOut:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     try:
-        return McpTestOut(
-            **await svc.test_connection(server_id=server_id, tenant_id=tenant_id)
-        )
+        return McpTestOut(**await svc.test_connection(server_id=server_id, tenant_id=tenant_id))
     except McpServerNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
 

@@ -25,8 +25,13 @@ class StubLlm:
         self.max_tokens_seen: int | None = None
 
     async def chat(
-        self, system: str, user: str, *, temperature: float = 0.2,
-        max_tokens: int | None = None, **_kw: object,
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.2,
+        max_tokens: int | None = None,
+        **_kw: object,
     ) -> str:
         self.calls.append((system, user))
         self.max_tokens_seen = max_tokens
@@ -42,7 +47,7 @@ class StubLlm:
 
 
 def test_sanitize_strips_wrapping_quotes_and_newlines() -> None:
-    assert sanitize_title('  「月度销售复盘」\n') == "月度销售复盘"
+    assert sanitize_title("  「月度销售复盘」\n") == "月度销售复盘"
     assert sanitize_title('"库存分析"') == "库存分析"
     assert sanitize_title("《季度财报》") == "季度财报"
     assert sanitize_title("第一行\n第二行") == "第一行 第二行"  # 换行折叠为单空格

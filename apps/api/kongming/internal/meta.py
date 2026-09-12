@@ -59,9 +59,7 @@ class MetaSchemaOut(BaseModel):
     truncated: bool
 
 
-async def _introspect(
-    conn: AsyncSession | AsyncConnection, schemas: list[str]
-) -> MetaSchemaOut:
+async def _introspect(conn: AsyncSession | AsyncConnection, schemas: list[str]) -> MetaSchemaOut:
     """按 schema 集内省表/列/注释(保留表排除+上限截断;默认与动态路径共用)。"""
     table_rows = (
         await conn.execute(
@@ -125,9 +123,7 @@ async def _introspect(
     for schema, name in sorted(kept):
         tables.setdefault((schema, name), MetaTableOut(schema=schema, name=name, columns=[]))
 
-    return MetaSchemaOut(
-        tables=[tables[k] for k in sorted(tables)], truncated=truncated
-    )
+    return MetaSchemaOut(tables=[tables[k] for k in sorted(tables)], truncated=truncated)
 
 
 @router.post("/meta/schema", response_model=MetaSchemaOut)
@@ -137,9 +133,7 @@ async def meta_schema(
     # 租户解析:与执行路由同一 fail-closed 语义(未知/禁用同形 404)
     tenant_id = (
         await session.execute(
-            text(
-                "SELECT id FROM public.sys_tenant WHERE tenant_key = :k AND status = 'ACTIVE'"
-            ),
+            text("SELECT id FROM public.sys_tenant WHERE tenant_key = :k AND status = 'ACTIVE'"),
             {"k": req.tenant_key},
         )
     ).scalar_one_or_none()

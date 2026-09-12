@@ -51,9 +51,7 @@ def _get_service(
     )
 
 
-async def _tenant_id(
-    session: AsyncSession, user_id: str, tenant_key: str | None
-) -> str:
+async def _tenant_id(session: AsyncSession, user_id: str, tenant_key: str | None) -> str:
     """X-Tenant-Id 白名单复校(与 chat._resolve_tenant 同构);缺省取默认。
     SQL 单一真理源=kongming.tenant.resolve_tenant(B1-B10 收口)。"""
     from kongming.tenant import resolve_tenant
@@ -116,9 +114,7 @@ async def create_memory(
         from kongming.team.repository import SqlTeamRepo
 
         # R1-J5:团队必须属于当前租户(跨租户写入 404 同形)
-        team = await SqlTeamRepo(session).get_team(
-            tenant_id=tid, team_id=body.team_id
-        )
+        team = await SqlTeamRepo(session).get_team(tenant_id=tid, team_id=body.team_id)
         if team is None:
             raise HTTPException(status_code=404, detail="NOT_FOUND") from None
         role = await SqlTeamRepo(session).get_member_role(
@@ -190,9 +186,7 @@ async def delete_memory(
 ) -> None:
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
     try:
-        await svc.delete_mine(
-            memory_id=str(memory_id), user_id=str(user["sub"]), tenant_id=tid
-        )
+        await svc.delete_mine(memory_id=str(memory_id), user_id=str(user["sub"]), tenant_id=tid)
     except MemoryNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
 

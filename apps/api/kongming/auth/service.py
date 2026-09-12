@@ -178,9 +178,7 @@ class AuthService:
         此前 session 仅有只读查询,commit 不会意外提交业务写。若未来在
         权限校验前引入写型依赖(配额预扣等),须重新评估此处 commit 语义。
         """
-        await self._uow.operlog.add(
-            user_id, "perm_denied", perm_code, {"path": path}
-        )
+        await self._uow.operlog.add(user_id, "perm_denied", perm_code, {"path": path})
         await self._uow.commit()
 
     # ---- 自助改密 ----
@@ -207,9 +205,7 @@ class AuthService:
         return p
 
     def oauth_options(self) -> list[tuple[str, str]]:
-        return [
-            (p.key, p.display_name) for p in self._registry.values() if p.configured(self._s)
-        ]
+        return [(p.key, p.display_name) for p in self._registry.values() if p.configured(self._s)]
 
     async def oauth_start(self, provider_key: str) -> str:
         p = self._provider(provider_key)
@@ -239,9 +235,7 @@ class AuthService:
         user = await self._account_link(p.key, profile)
         if not user.active:
             raise AccountDisabled("账号已禁用")
-        await self._uow.operlog.add(
-            user.id, "auth.login", user.username, {"provider": p.key}
-        )
+        await self._uow.operlog.add(user.id, "auth.login", user.username, {"provider": p.key})
         await self._uow.commit()
         return await self._issue_pair(user)
 

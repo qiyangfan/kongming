@@ -52,9 +52,7 @@ export function scheduleToCron(s: Schedule): string {
   const step = (n: number) => (n === 1 ? "*" : `*/${n}`);
   switch (s.kind) {
     case "interval":
-      return s.unit === "minute"
-        ? `${step(s.n)} * * * *`
-        : `0 ${step(s.n)} * * *`;
+      return s.unit === "minute" ? `${step(s.n)} * * * *` : `0 ${step(s.n)} * * *`;
     case "hourly":
       return `${s.minute} * * * *`;
     case "daily":

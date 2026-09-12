@@ -5,10 +5,7 @@ import { cn } from "@/lib/utils";
 
 /* Radix 统一走聚合包(shadcn 新版默认),消除 @radix-ui/react-* 双轨导入 */
 
-function Label({
-  className,
-  ...props
-}: React.ComponentProps<typeof LabelPrimitive.Root>) {
+function Label({ className, ...props }: React.ComponentProps<typeof LabelPrimitive.Root>) {
   return (
     <LabelPrimitive.Root
       data-slot="label"

@@ -21,6 +21,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/page-header";
+import { Pagination } from "@/components/pagination";
+import { StatCard } from "@/components/stat-card";
+import { StatusBadge, type StatusMeta } from "@/components/status-badge";
 import {
   Select,
   SelectContent,
@@ -47,12 +51,9 @@ import {
 import { useDebounced } from "@/hooks/use-debounced";
 import { QueryErrorAlert } from "@/components/query-error";
 import { systemApi } from "@/lib/system-api";
+import { cssVar } from "@/lib/utils";
 
 const PAGE_SIZE = 20;
-
-function cssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
 
 function fmtMs(v: number | null | undefined): string {
   if (v === null || v === undefined) return "—";
@@ -87,6 +88,12 @@ const VERDICT_LABEL: Record<string, string> = {
 const LLM_STATUS_LABEL: Record<string, string> = {
   SUCCESS: "成功",
   ERROR: "失败",
+};
+
+// 明细表状态列(值 → 徽章统一走 StatusBadge)
+const LLM_STATUS_META: StatusMeta = {
+  SUCCESS: { label: "成功", variant: "secondary" },
+  ERROR: { label: "失败", variant: "destructive" },
 };
 
 function kindStatusLabel(kind: string, status: string): string {
@@ -238,41 +245,22 @@ export default function UsagePage() {
 
   const totalPages = Math.max(1, Math.ceil((list.data?.total ?? 0) / PAGE_SIZE));
 
+  /** 汇总卡数值加载/错误态折叠(R1-B3:loading 显 …、错误显 —,不逐卡 role=alert) */
+  const usageStat = (v: string) => (summary.isLoading ? "…" : summary.isError ? "—" : v);
+
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">模型用量</h2>
-        <p className="text-sm text-muted-foreground">
-          模型调用的用量、成败与延迟——看穿每一次问卦背后的开销。
-        </p>
-      </div>
+      <PageHeader
+        title="模型用量"
+        description="模型调用的用量、成败与延迟——看穿每一次问卦背后的开销。"
+      />
 
-      {/* 汇总卡 */}
+      {/* 汇总卡(R1-B3:卡级错误不逐卡 role=alert,数值降 …/— 示错;区块级错误条由消费区承载) */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard
-          label="总调用"
-          value={String(totals.calls)}
-          loading={summary.isLoading}
-          error={summary.isError}
-        />
-        <StatCard
-          label="总 Token"
-          value={fmtTokens(totals.tokens)}
-          loading={summary.isLoading}
-          error={summary.isError}
-        />
-        <StatCard
-          label="失败率"
-          value={`${(totals.errorRate * 100).toFixed(1)}%`}
-          loading={summary.isLoading}
-          error={summary.isError}
-        />
-        <StatCard
-          label="平均延迟"
-          value={fmtMs(totals.latAvg)}
-          loading={summary.isLoading}
-          error={summary.isError}
-        />
+        <StatCard label="总调用" value={usageStat(String(totals.calls))} />
+        <StatCard label="总 Token" value={usageStat(fmtTokens(totals.tokens))} />
+        <StatCard label="失败率" value={usageStat(`${(totals.errorRate * 100).toFixed(1)}%`)} />
+        <StatCard label="平均延迟" value={usageStat(fmtMs(totals.latAvg))} />
       </div>
 
       {/* 趋势 */}
@@ -281,7 +269,7 @@ export default function UsagePage() {
           <h3 className="text-sm font-medium">按天趋势</h3>
           <Select value={String(days)} onValueChange={(v) => setDays(Number(v))}>
             {/* w-28 下限:装下最宽项「近 30 天」(w-24 时文本预算 48px<53px 被裁) */}
-            <SelectTrigger className="h-8 w-28">
+            <SelectTrigger size="sm" className="w-28">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -324,7 +312,9 @@ export default function UsagePage() {
             {(summary.data?.items ?? []).map((i, idx) => (
               <TableRow key={idx}>
                 <TableCell className="text-muted-foreground">{i.tenant_key}</TableCell>
-                <TableCell className="max-w-40 truncate font-medium" title={i.model}>{i.model}</TableCell>
+                <TableCell className="max-w-40 truncate font-medium" title={i.model}>
+                  {i.model}
+                </TableCell>
                 <TableCell>{i.task}</TableCell>
                 <TableCell className="text-right">{i.calls}</TableCell>
                 <TableCell className="text-right">
@@ -371,7 +361,7 @@ export default function UsagePage() {
                 setPage(1);
               }}
             >
-              <SelectTrigger className="h-8 w-40" aria-label="模型筛选">
+              <SelectTrigger size="sm" className="w-40" aria-label="模型筛选">
                 <SelectValue placeholder="全部模型" />
               </SelectTrigger>
               <SelectContent>
@@ -393,7 +383,7 @@ export default function UsagePage() {
                 setPage(1);
               }}
             >
-              <SelectTrigger className="h-8 w-36" aria-label="任务筛选">
+              <SelectTrigger size="sm" className="w-36" aria-label="任务筛选">
                 <SelectValue placeholder="全部任务" />
               </SelectTrigger>
               <SelectContent>
@@ -415,7 +405,7 @@ export default function UsagePage() {
                 setPage(1);
               }}
             >
-              <SelectTrigger className="h-8 w-24">
+              <SelectTrigger size="sm" className="w-24">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -426,7 +416,9 @@ export default function UsagePage() {
             </Select>
           </div>
           <div className="space-y-1">
-            <Label htmlFor="usage-tenant-filter" className="text-xs">租户</Label>
+            <Label htmlFor="usage-tenant-filter" className="text-xs">
+              租户
+            </Label>
             <Select
               value={tenantId || "ALL"}
               onValueChange={(v) => {
@@ -435,7 +427,7 @@ export default function UsagePage() {
               }}
               disabled={tenants.isError}
             >
-              <SelectTrigger id="usage-tenant-filter" className="h-8 w-32">
+              <SelectTrigger id="usage-tenant-filter" size="sm" className="w-32">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -450,13 +442,16 @@ export default function UsagePage() {
             {/* R1-F2:listTenants 挂 user:manage(页面守卫是 llm-usage:view,
                 权限错配时 403)——失败显式禁用+提示,不静默 */}
             {tenants.isError && (
-              <p role="alert" className="text-xs text-destructive">租户筛选不可用</p>
+              <p role="alert" className="text-xs text-destructive">
+                租户筛选不可用
+              </p>
             )}
           </div>
           <div className="space-y-1">
             <Label className="text-xs">trace_id</Label>
             <Input
-              className="h-8 w-44"
+              size="sm"
+              className="w-44"
               placeholder="精确匹配"
               maxLength={64}
               value={traceId}
@@ -488,26 +483,26 @@ export default function UsagePage() {
                   {new Date(r.created_at).toLocaleString()}
                 </TableCell>
                 <TableCell className="text-muted-foreground">{r.tenant_key}</TableCell>
-                <TableCell className="max-w-40 truncate font-medium" title={r.model}>{r.model}</TableCell>
+                <TableCell className="max-w-40 truncate font-medium" title={r.model}>
+                  {r.model}
+                </TableCell>
                 <TableCell>{r.task}</TableCell>
                 <TableCell>
-                  {r.status === "ERROR" ? (
-                    <Badge variant="destructive">失败</Badge>
-                  ) : (
-                    <Badge variant="secondary">成功</Badge>
-                  )}
+                  <StatusBadge meta={LLM_STATUS_META} value={r.status} />
                 </TableCell>
                 <TableCell className="text-right">{fmtTokens(r.total_tokens)}</TableCell>
                 <TableCell className="text-right">{fmtMs(r.latency_ms)}</TableCell>
-                <TableCell className="max-w-32 truncate font-mono text-xs text-muted-foreground" title={r.trace_id ?? undefined}>
+                <TableCell
+                  className="max-w-32 truncate font-mono text-xs text-muted-foreground"
+                  title={r.trace_id ?? undefined}
+                >
                   {r.trace_id ?? "—"}
                 </TableCell>
                 <TableCell>
                   {r.trace_id && (
                     <Button
                       variant="ghost"
-                      size="sm"
-                      className="h-7 px-2"
+                      size="xs"
                       onClick={() => setTimelineTrace(r.trace_id ?? null)}
                     >
                       <Activity className="size-3.5" />
@@ -533,28 +528,20 @@ export default function UsagePage() {
             )}
           </TableBody>
         </Table>
-        <div className="flex items-center justify-between border-t px-4 py-2 text-sm text-muted-foreground">
-          <span>
-            共 {list.data?.total ?? 0} 条 · 第 {page}/{totalPages} 页
-          </span>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-              上一页
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              下一页
-            </Button>
-          </div>
-        </div>
+        <Pagination
+          page={page}
+          pageCount={totalPages}
+          total={list.data?.total ?? 0}
+          onPageChange={setPage}
+          className="border-t px-4 py-2"
+        />
       </div>
 
       {/* 时间线对话框 */}
-      <Dialog open={timelineTrace !== null} onOpenChange={(open) => !open && setTimelineTrace(null)}>
+      <Dialog
+        open={timelineTrace !== null}
+        onOpenChange={(open) => !open && setTimelineTrace(null)}
+      >
         <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -570,9 +557,7 @@ export default function UsagePage() {
           ) : timeline.isError ? (
             <QueryErrorAlert text="时间线加载失败" />
           ) : (timeline.data?.events ?? []).length === 0 ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">
-              该链路暂无事件
-            </div>
+            <div className="py-8 text-center text-sm text-muted-foreground">该链路暂无事件</div>
           ) : (
             <ol className="space-y-2 border-l pl-4">
               {(timeline.data?.events ?? []).map((e, idx) => (
@@ -582,29 +567,6 @@ export default function UsagePage() {
           )}
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  loading,
-  error,
-}: {
-  label: string;
-  value: string | undefined;
-  loading: boolean;
-  error?: boolean;
-}) {
-  return (
-    <div className="rounded-lg border bg-card p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-xl font-semibold tabular-nums">
-        {loading ? "…" : error ? "—" : (value ?? "—")}
-      </div>
-      {/* R1-B3:卡级错误不再逐卡 role=alert(读屏重复播报);数值降 "—" 示错,
-          区块级错误条由消费区(趋势/明细)承载 */}
     </div>
   );
 }

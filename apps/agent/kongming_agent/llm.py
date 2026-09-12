@@ -38,8 +38,8 @@ _ROUTE_MISS_WARNED: set[tuple[str, str]] = set()
 # 035:request 级 usage 收集器(bot 链路请求内同步采集)——在场时 _report
 # 只收集不上报(bot 渠道唯一上报口=响应携带,与 fire-and-forget 不双写);
 # 缺省(chat/recipe/titler 等)保持 021 fire-and-forget 零回归。
-_USAGE_COLLECTOR: contextvars.ContextVar[list[dict[str, object]] | None] = (
-    contextvars.ContextVar("km_usage_collector", default=None)
+_USAGE_COLLECTOR: contextvars.ContextVar[list[dict[str, object]] | None] = contextvars.ContextVar(
+    "km_usage_collector", default=None
 )
 
 
@@ -462,9 +462,7 @@ class LlmClient:
             batch = texts[start : start + self._emb_batch_size]
             t0 = time.monotonic()
             try:
-                resp = await self._emb_client.embeddings.create(
-                    model=self._emb_model, input=batch
-                )
+                resp = await self._emb_client.embeddings.create(model=self._emb_model, input=batch)
             except Exception as e:
                 self._report(
                     task="EMBED",
@@ -488,9 +486,7 @@ class LlmClient:
                     status="ERROR",
                     latency_ms=int((time.monotonic() - t0) * 1000),
                 )
-                raise LlmError(
-                    f"embeddings 应答畸形: 期望 {len(batch)} 条实得 {len(data)}"
-                )
+                raise LlmError(f"embeddings 应答畸形: 期望 {len(batch)} 条实得 {len(data)}")
             # 021:embedding 用量同通道上报(不参与模型路由,009 立约)
             self._report(
                 task="EMBED",

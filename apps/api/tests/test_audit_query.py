@@ -88,10 +88,22 @@ async def test_sql_page_filters_and_order(
     token = await _admin_token(client, session)
     tid = await _default_tenant_id(session)
     now = datetime.now(UTC)
-    a1 = await _mk_audit(session, user_id=None, tenant_id=tid, verdict="PASS",
-                         trace_id="trace-aaa", created_at=now - timedelta(hours=2))
-    a2 = await _mk_audit(session, user_id=None, tenant_id=tid, verdict="BLOCKED",
-                         trace_id="trace-bbb", created_at=now - timedelta(hours=1))
+    a1 = await _mk_audit(
+        session,
+        user_id=None,
+        tenant_id=tid,
+        verdict="PASS",
+        trace_id="trace-aaa",
+        created_at=now - timedelta(hours=2),
+    )
+    a2 = await _mk_audit(
+        session,
+        user_id=None,
+        tenant_id=tid,
+        verdict="BLOCKED",
+        trace_id="trace-bbb",
+        created_at=now - timedelta(hours=1),
+    )
     r = await client.get("/audit/sql/page", headers=_auth(token))
     assert r.status_code == 200
     body = r.json()
@@ -286,13 +298,17 @@ async def test_reset_password_detail_never_contains_password(
     )
     assert r.status_code in (200, 204)
     row = (
-        await session.execute(
-            text(
-                "SELECT detail FROM public.sys_oper_log"
-                " WHERE action='user.reset_password' ORDER BY created_at DESC LIMIT 1"
+        (
+            await session.execute(
+                text(
+                    "SELECT detail FROM public.sys_oper_log"
+                    " WHERE action='user.reset_password' ORDER BY created_at DESC LIMIT 1"
+                )
             )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     detail = dict(row["detail"]) if isinstance(row["detail"], dict) else {}
     detail_text = json.dumps(detail, ensure_ascii=False)
     assert "Sup3rSecret!" not in detail_text  # 明文密码永不入 detail

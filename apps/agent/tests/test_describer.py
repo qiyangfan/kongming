@@ -59,9 +59,7 @@ def _spec() -> TableSpec:
 
 
 async def test_prompt_shape_upstream_verbatim() -> None:
-    llm = StubLlm(
-        ['{"table_comment":"影片表","columns_comment":{},"sample_queries":[]}']
-    )
+    llm = StubLlm(['{"table_comment":"影片表","columns_comment":{},"sample_queries":[]}'])
     await describe_table(_spec(), llm)  # type: ignore[arg-type]
     system, user = llm.calls[0]
     assert system.startswith("你是数据库文档专家。根据给定的 PostgreSQL 表结构，")
@@ -82,10 +80,7 @@ async def test_prompt_shape_upstream_verbatim() -> None:
 async def test_alias_produced_from_same_call() -> None:
     """alias 随润色同一次 LLM 调用产出(prompt 含要求;输出可解析)。"""
     llm = StubLlm(
-        [
-            '{"table_comment":"商品信息","columns_comment":{},'
-            '"sample_queries":[],"alias":"商品表"}'
-        ]
+        ['{"table_comment":"商品信息","columns_comment":{},"sample_queries":[],"alias":"商品表"}']
     )
     out = await describe_table(_spec(), llm)  # type: ignore[arg-type]
     assert out.alias == "商品表"
@@ -119,13 +114,19 @@ async def test_alias_structural_chars_degrade_empty() -> None:
     import json as _json
 
     for dirty in ("a\nfake.table(q)", "商品(表)", "商品|表"):
-        llm = StubLlm([
-            _json.dumps(
-                {"table_comment": "影片表", "columns_comment": {},
-                 "sample_queries": [], "alias": dirty},
-                ensure_ascii=False,
-            )
-        ])
+        llm = StubLlm(
+            [
+                _json.dumps(
+                    {
+                        "table_comment": "影片表",
+                        "columns_comment": {},
+                        "sample_queries": [],
+                        "alias": dirty,
+                    },
+                    ensure_ascii=False,
+                )
+            ]
+        )
         out = await describe_table(_spec(), llm)  # type: ignore[arg-type]
         assert out.alias == ""
 
@@ -188,13 +189,13 @@ async def test_all_empty_output_degrades() -> None:
 async def test_llm_failure_raises_describe_error() -> None:
     class BoomLlm(StubLlm):
         async def chat(
-        self,
-        system: str,
-        user: str,
-        *,
-        temperature: float = 0.2,
-        **_kw: object,  # 021:task/trace_id/tenant_key 吸收
-    ) -> str:
+            self,
+            system: str,
+            user: str,
+            *,
+            temperature: float = 0.2,
+            **_kw: object,  # 021:task/trace_id/tenant_key 吸收
+        ) -> str:
             raise LlmError("LLM 调用失败: 模拟故障")
 
     with pytest.raises(DescribeError):
@@ -260,8 +261,12 @@ def test_describe_table_endpoint_enriched(client: ClientFixture) -> None:
     class FakeLlm(StubLlm):
         pass
 
-    fake = FakeLlm(['{"table_comment":"影片表","columns_comment":{"film_id":"integer ID"},'
-                    '"sample_queries":["SELECT 1"]}'])
+    fake = FakeLlm(
+        [
+            '{"table_comment":"影片表","columns_comment":{"film_id":"integer ID"},'
+            '"sample_queries":["SELECT 1"]}'
+        ]
+    )
     mp.setattr(deps, "get_llm", lambda: fake)
     resp = c.post(
         "/internal/describe-table",

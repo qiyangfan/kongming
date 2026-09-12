@@ -62,13 +62,17 @@ class SqlGuardrailRepo:
 
     async def list_overrides(self) -> dict[str, dict[str, Any]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT rule_name, enabled, action, threshold, updated_by, updated_at"
-                    " FROM public.sys_guardrail_rule"
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT rule_name, enabled, action, threshold, updated_by, updated_at"
+                        " FROM public.sys_guardrail_rule"
+                    )
                 )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return {str(r["rule_name"]): dict(r) for r in rows}
 
     async def upsert_override(
@@ -137,14 +141,18 @@ class SqlGuardrailRepo:
             )
         ).scalar_one()
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, trace_id, user_id, tenant_id, guardrail_type,"  # noqa: S608  # 多行拼接含 f-string(条件片段常量)
-                    "       rule_name, action, content_digest, created_at"
-                    f" FROM public.sys_guardrail_audit WHERE {where}"
-                    " ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset"
-                ),
-                {**params, "limit": size, "offset": (page - 1) * size},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, trace_id, user_id, tenant_id, guardrail_type,"  # noqa: S608  # 多行拼接含 f-string(条件片段常量)
+                        "       rule_name, action, content_digest, created_at"
+                        f" FROM public.sys_guardrail_audit WHERE {where}"
+                        " ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset"
+                    ),
+                    {**params, "limit": size, "offset": (page - 1) * size},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows], int(total)

@@ -153,9 +153,15 @@ async def test_task_routing_and_usage_report() -> None:
     assert len(recorder.records) == 2
     for rec in recorder.records:
         assert set(rec) == {
-            "trace_id", "tenant_key", "model", "task",
-            "prompt_tokens", "completion_tokens", "total_tokens",
-            "status", "latency_ms",
+            "trace_id",
+            "tenant_key",
+            "model",
+            "task",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "status",
+            "latency_ms",
         }
         assert rec["prompt_tokens"] == 11 and rec["total_tokens"] == 18
         assert rec["status"] == "SUCCESS"
@@ -205,9 +211,15 @@ async def test_failure_call_reported_as_error() -> None:
     rec = recorder.records[0]
     # R1-B4:失败路径字段集全键钉(与成功路径同构防线)
     assert set(rec) == {
-        "trace_id", "tenant_key", "model", "task",
-        "prompt_tokens", "completion_tokens", "total_tokens",
-        "status", "latency_ms",
+        "trace_id",
+        "tenant_key",
+        "model",
+        "task",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "status",
+        "latency_ms",
     }
     assert rec["status"] == "ERROR"
     assert rec["prompt_tokens"] == 0 and rec["total_tokens"] == 0

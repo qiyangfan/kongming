@@ -53,35 +53,47 @@ class SqlUserRepo:
 
     async def get_by_username(self, username: str) -> User | None:
         row = (
-            await self._s.execute(
-                text(
-                    f"SELECT {_USER_COLS} FROM public.sys_user"  # noqa: S608  # 常量列清单
-                    " WHERE username=:u AND deleted_at IS NULL"
-                ),
-                {"u": username},
+            (
+                await self._s.execute(
+                    text(
+                        f"SELECT {_USER_COLS} FROM public.sys_user"  # noqa: S608  # 常量列清单
+                        " WHERE username=:u AND deleted_at IS NULL"
+                    ),
+                    {"u": username},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return _to_user(dict(row)) if row else None
 
     async def get_by_id(self, user_id: str) -> User | None:
         row = (
-            await self._s.execute(
-                text(f"SELECT {_USER_COLS} FROM public.sys_user WHERE id=:i"),  # noqa: S608
-                {"i": user_id},
+            (
+                await self._s.execute(
+                    text(f"SELECT {_USER_COLS} FROM public.sys_user WHERE id=:i"),  # noqa: S608
+                    {"i": user_id},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return _to_user(dict(row)) if row else None
 
     async def get_by_email(self, email: str) -> User | None:
         row = (
-            await self._s.execute(
-                text(
-                    f"SELECT {_USER_COLS} FROM public.sys_user"  # noqa: S608
-                    " WHERE email=:e AND deleted_at IS NULL ORDER BY created_at LIMIT 1"
-                ),
-                {"e": email},
+            (
+                await self._s.execute(
+                    text(
+                        f"SELECT {_USER_COLS} FROM public.sys_user"  # noqa: S608
+                        " WHERE email=:e AND deleted_at IS NULL ORDER BY created_at LIMIT 1"
+                    ),
+                    {"e": email},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return _to_user(dict(row)) if row else None
 
     async def create(self, user: User) -> None:
@@ -123,14 +135,18 @@ class SqlRoleRepo:
 
     async def get_by_key(self, role_key: str) -> Role | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT id, role_key, role_name, data_scope, sql_scope"
-                    " FROM public.sys_role WHERE role_key=:k"
-                ),
-                {"k": role_key},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, role_key, role_name, data_scope, sql_scope"
+                        " FROM public.sys_role WHERE role_key=:k"
+                    ),
+                    {"k": role_key},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return _to_role(dict(row)) if row else None
 
     async def insert(self, role: Role) -> None:
@@ -151,15 +167,19 @@ class SqlRoleRepo:
 
     async def list_role_keys(self, user_id: str) -> list[str]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT r.role_key FROM public.sys_role r"
-                    " JOIN public.sys_user_role ur ON ur.role_id=r.id WHERE ur.user_id=:u"
-                    " ORDER BY r.sort, r.role_key"
-                ),
-                {"u": user_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT r.role_key FROM public.sys_role r"
+                        " JOIN public.sys_user_role ur ON ur.role_id=r.id WHERE ur.user_id=:u"
+                        " ORDER BY r.sort, r.role_key"
+                    ),
+                    {"u": user_id},
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [str(k) for k in rows]
 
     async def bind_user(self, user_id: str, role_id: str) -> None:
@@ -189,14 +209,8 @@ class SqlTenantRepo:
         self._s = s
 
     async def get_by_key(self, tenant_key: str) -> Tenant | None:
-        row = (
-            await self._s.execute(
-                text(
-                    "SELECT id, tenant_key, tenant_name FROM public.sys_tenant WHERE tenant_key=:k"
-                ),
-                {"k": tenant_key},
-            )
-        ).mappings().one_or_none()
+        stmt = text("SELECT id, tenant_key, tenant_name FROM public.sys_tenant WHERE tenant_key=:k")
+        row = (await self._s.execute(stmt, {"k": tenant_key})).mappings().one_or_none()
         return _to_tenant(dict(row)) if row else None
 
     async def insert(self, tenant: Tenant) -> None:
@@ -210,15 +224,19 @@ class SqlTenantRepo:
 
     async def list_for_user(self, user_id: str) -> list[Tenant]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT t.id, t.tenant_key, t.tenant_name FROM public.sys_tenant t"
-                    " JOIN public.sys_user_tenant ut ON ut.tenant_id=t.id WHERE ut.user_id=:u"
-                    " ORDER BY t.tenant_key"
-                ),
-                {"u": user_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT t.id, t.tenant_key, t.tenant_name FROM public.sys_tenant t"
+                        " JOIN public.sys_user_tenant ut ON ut.tenant_id=t.id WHERE ut.user_id=:u"
+                        " ORDER BY t.tenant_key"
+                    ),
+                    {"u": user_id},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [_to_tenant(dict(r)) for r in rows]
 
     async def bind_user(self, user_id: str, tenant_id: str) -> None:
@@ -237,16 +255,20 @@ class SqlPermRepo:
 
     async def list_codes(self, user_id: str) -> list[str]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT DISTINCT p.perm_code FROM public.sys_permission p"
-                    " JOIN public.sys_role_permission rp ON rp.permission_id=p.id"
-                    " JOIN public.sys_user_role ur ON ur.role_id=rp.role_id"
-                    " WHERE ur.user_id=:u ORDER BY p.perm_code"
-                ),
-                {"u": user_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT DISTINCT p.perm_code FROM public.sys_permission p"
+                        " JOIN public.sys_role_permission rp ON rp.permission_id=p.id"
+                        " JOIN public.sys_user_role ur ON ur.role_id=rp.role_id"
+                        " WHERE ur.user_id=:u ORDER BY p.perm_code"
+                    ),
+                    {"u": user_id},
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [str(c) for c in rows]
 
     async def insert_missing(self, perms: list[tuple[str, str, int]]) -> None:

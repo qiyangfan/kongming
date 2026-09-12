@@ -24,7 +24,9 @@ export type CreatedId = { id: string };
 
 export const systemApi = {
   listUsers: (page: number, size: number, keyword: string) =>
-    api.get<UserPageOut>(`/system/users?page=${page}&size=${size}&keyword=${encodeURIComponent(keyword)}`),
+    api.get<UserPageOut>(
+      `/system/users?page=${page}&size=${size}&keyword=${encodeURIComponent(keyword)}`,
+    ),
   createUser: (body: UserCreateIn) => api.post<CreatedId>("/system/users", body),
   updateUser: (id: string, body: UserUpdateIn) => api.put<void>(`/system/users/${id}`, body),
   resetPassword: (id: string, newPassword: string) =>

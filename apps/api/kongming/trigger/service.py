@@ -124,8 +124,10 @@ class TriggerService:
                 raise TriggerValidationError(str(e)) from e
         # 040 写边界闸:目标不存在即 400,防拼错目标静默挂到运行期才暴露
         if self._target_checker is not None and not await self._target_checker.target_exists(
-            target_type=target_type, target_key=target_key,
-            tenant_id=tenant_id, creator_id=created_by,
+            target_type=target_type,
+            target_key=target_key,
+            tenant_id=tenant_id,
+            creator_id=created_by,
         ):
             raise TargetNotFound(target_key)
         # R1-S2:重名预检(唯一索引兜底之外的友好 409,与 datasource 同范式)
@@ -180,8 +182,10 @@ class TriggerService:
             self._target_checker is not None
             and (new_tt != str(row["target_type"]) or new_tk != str(row["target_key"]))
             and not await self._target_checker.target_exists(
-                target_type=new_tt, target_key=new_tk,
-                tenant_id=tenant_id, creator_id=str(row["created_by"]),
+                target_type=new_tt,
+                target_key=new_tk,
+                tenant_id=tenant_id,
+                creator_id=str(row["created_by"]),
             )
         ):
             raise TargetNotFound(new_tk)
@@ -304,9 +308,7 @@ class TriggerService:
         )
         await self._repo.commit()
 
-    async def _fire(
-        self, row: dict[str, Any], *, inputs: dict[str, Any], channel: str
-    ) -> None:
+    async def _fire(self, row: dict[str, Any], *, inputs: dict[str, Any], channel: str) -> None:
         """目标执行+run 落库+出站通知。任何失败收敛 FAILED 落库。"""
         started = _now()
         status = "SUCCESS"

@@ -5,7 +5,6 @@
 """
 # pyright: reportPrivateUsage=false
 
-
 from collections.abc import Iterator
 
 import pytest
@@ -69,9 +68,7 @@ async def _mk_ds(s: AsyncSession, key: str, tenant_id: str, *, status: str = "AC
 
 
 async def _session_count(s: AsyncSession) -> int:
-    return int(
-        (await s.execute(text("SELECT count(*) FROM public.chat_session"))).scalar_one()
-    )
+    return int((await s.execute(text("SELECT count(*) FROM public.chat_session"))).scalar_one())
 
 
 async def test_forged_disabled_cross_tenant_same_shape(
@@ -148,10 +145,10 @@ async def test_valid_key_passes_through(
     assert r.status_code == 200, r.text
     assert agent.calls[0]["datasource_key"] == "chatdyn"  # 透传(凭证不出控制面)
     row = (
-        await session.execute(
-            text("SELECT datasource_key, user_id FROM public.chat_session")
-        )
-    ).mappings().one()
+        (await session.execute(text("SELECT datasource_key, user_id FROM public.chat_session")))
+        .mappings()
+        .one()
+    )
     assert row["datasource_key"] == "chatdyn"
     assert str(row["user_id"]) == uid
 
@@ -179,8 +176,6 @@ async def test_default_key_unchanged(
     agent = FakeAgent()
     _install(fake_agent, agent)
     _, token = await _user_with_chat_perm(client, session, make_user)
-    r = await client.post(
-        "/chat/query", json={"question": "有多少商品"}, headers=_auth(token)
-    )
+    r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
     assert r.status_code == 200
     assert agent.calls[0]["datasource_key"] == "default"

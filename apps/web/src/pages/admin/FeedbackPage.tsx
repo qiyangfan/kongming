@@ -26,6 +26,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/page-header";
+import { Pagination } from "@/components/pagination";
+import { StatCard } from "@/components/stat-card";
+import { StatusBadge, type StatusMeta } from "@/components/status-badge";
 import {
   Select,
   SelectContent,
@@ -53,20 +57,23 @@ import {
 } from "@/lib/feedback-api";
 import { hasPerm } from "@/lib/nav";
 import { systemApi } from "@/lib/system-api";
+import { cssVar } from "@/lib/utils";
 import { displayUser } from "@/lib/display-user";
 
 const PAGE_SIZE = 20;
 
-const STATUS_META: Record<string, { label: string; variant: "default" | "secondary" | "outline" }> = {
+const STATUS_META: StatusMeta = {
   PENDING: { label: "待处置", variant: "outline" },
   ADOPTED: { label: "已采纳", variant: "default" },
   REJECTED: { label: "已驳回", variant: "secondary" },
   DISMISSED: { label: "已忽略", variant: "secondary" },
 };
 
-function cssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
+// 评分列(值 → 徽章统一走 StatusBadge;非 UP/DOWN 显示 —)
+const RATING_META: StatusMeta = {
+  UP: { label: "有用", variant: "secondary" },
+  DOWN: { label: "不准确", variant: "default" },
+};
 
 type FeedbackTrendPoint = Awaited<ReturnType<typeof feedbackOverview>>["trend"][number];
 
@@ -109,7 +116,15 @@ function FeedbackTrendChart({ trend }: { trend: FeedbackTrendPoint[] }) {
       ],
     };
   }, [trend]);
-  return <EChart option={option} notMerge lazyUpdate style={{ height: 220, width: "100%" }} opts={{ renderer: "canvas" }} />;
+  return (
+    <EChart
+      option={option}
+      notMerge
+      lazyUpdate
+      style={{ height: 220, width: "100%" }}
+      opts={{ renderer: "canvas" }}
+    />
+  );
 }
 
 export default function FeedbackPage() {
@@ -172,27 +187,27 @@ export default function FeedbackPage() {
   const ov = overview.data;
   const totalPages = Math.max(1, Math.ceil((list.data?.total ?? 0) / PAGE_SIZE));
 
+  /** 统计卡数值加载/错误态折叠(R1-B3:loading 显 …、错误显 —) */
+  const fbStat = (v: number | string | undefined) =>
+    overview.isLoading ? "…" : overview.isError ? "—" : (v ?? 0);
+
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">反馈分析</h2>
-        <p className="text-sm text-muted-foreground">
-          用户反馈的统计与明细——处置反馈、沉淀纠错,让军师越答越准。
-        </p>
-      </div>
+      <PageHeader
+        title="反馈分析"
+        description="用户反馈的统计与明细——处置反馈、沉淀纠错,让军师越答越准。"
+      />
 
-      {/* 统计卡(feedback-analytics spec) */}
+      {/* 统计卡(feedback-analytics spec;R1-B3:卡级错误不逐卡 role=alert,数值降 …/— 示错) */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <StatCard label="反馈总数" value={ov?.total} loading={overview.isLoading} error={overview.isError} />
-        <StatCard label="有用(赞)" value={ov?.up_count} loading={overview.isLoading} error={overview.isError} />
-        <StatCard label="不准确(踩)" value={ov?.down_count} loading={overview.isLoading} error={overview.isError} />
+        <StatCard label="反馈总数" value={fbStat(ov?.total)} />
+        <StatCard label="有用(赞)" value={fbStat(ov?.up_count)} />
+        <StatCard label="不准确(踩)" value={fbStat(ov?.down_count)} />
         <StatCard
           label="差评率"
-          value={ov ? `${(ov.down_rate * 100).toFixed(1)}%` : undefined}
-          loading={overview.isLoading}
-          error={overview.isError}
+          value={fbStat(ov ? `${(ov.down_rate * 100).toFixed(1)}%` : undefined)}
         />
-        <StatCard label="带纠错" value={ov?.corrected_count} loading={overview.isLoading} error={overview.isError} />
+        <StatCard label="带纠错" value={fbStat(ov?.corrected_count)} />
       </div>
 
       {/* 趋势折线(token 色板) */}
@@ -208,8 +223,16 @@ export default function FeedbackPage() {
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">评分</Label>
-          <Select value={rating || "ALL"} onValueChange={(v) => { setRating(v === "ALL" ? "" : v); setPage(1); }}>
-            <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+          <Select
+            value={rating || "ALL"}
+            onValueChange={(v) => {
+              setRating(v === "ALL" ? "" : v);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-28">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">全部</SelectItem>
               <SelectItem value="UP">有用</SelectItem>
@@ -219,8 +242,16 @@ export default function FeedbackPage() {
         </div>
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">处置状态</Label>
-          <Select value={status || "ALL"} onValueChange={(v) => { setStatus(v === "ALL" ? "" : v); setPage(1); }}>
-            <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+          <Select
+            value={status || "ALL"}
+            onValueChange={(v) => {
+              setStatus(v === "ALL" ? "" : v);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-28">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">全部</SelectItem>
               <SelectItem value="PENDING">待处置</SelectItem>
@@ -233,12 +264,22 @@ export default function FeedbackPage() {
         {tenants.isSuccess && (
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">租户</Label>
-            <Select value={tenantId || "ALL"} onValueChange={(v) => { setTenantId(v === "ALL" ? "" : v); setPage(1); }}>
-              <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+            <Select
+              value={tenantId || "ALL"}
+              onValueChange={(v) => {
+                setTenantId(v === "ALL" ? "" : v);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="ALL">全部</SelectItem>
                 {tenants.data.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>{t.tenant_name}</SelectItem>
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.tenant_name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -246,12 +287,22 @@ export default function FeedbackPage() {
         )}
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">数据源</Label>
-          <Select value={dsKey || "ALL"} onValueChange={(v) => { setDsKey(v === "ALL" ? "" : v); setPage(1); }}>
-            <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+          <Select
+            value={dsKey || "ALL"}
+            onValueChange={(v) => {
+              setDsKey(v === "ALL" ? "" : v);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">全部</SelectItem>
               {(dsOptions.data ?? []).map((o) => (
-                <SelectItem key={o.datasource_key} value={o.datasource_key}>{o.name}</SelectItem>
+                <SelectItem key={o.datasource_key} value={o.datasource_key}>
+                  {o.name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -259,7 +310,9 @@ export default function FeedbackPage() {
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">时间范围</Label>
           <Select value={String(days)} onValueChange={(v) => setDays(Number(v))}>
-            <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-28">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="7">近 7 天</SelectItem>
               <SelectItem value="30">近 30 天</SelectItem>
@@ -270,7 +323,10 @@ export default function FeedbackPage() {
         <label className="flex items-center gap-2 pb-1.5 text-sm">
           <Checkbox
             checked={onlyCorrected}
-            onCheckedChange={(c) => { setOnlyCorrected(c === true); setPage(1); }}
+            onCheckedChange={(c) => {
+              setOnlyCorrected(c === true);
+              setPage(1);
+            }}
           />
           仅看带纠错
         </label>
@@ -317,16 +373,18 @@ export default function FeedbackPage() {
                   <TableCell className="whitespace-nowrap text-muted-foreground">
                     {item.feedback_time ? item.feedback_time.slice(0, 16).replace("T", " ") : "—"}
                   </TableCell>
-                  <TableCell className="max-w-32 truncate" title={displayUser(item.user_nickname, item.user_username)}>
+                  <TableCell
+                    className="max-w-32 truncate"
+                    title={displayUser(item.user_nickname, item.user_username)}
+                  >
                     {displayUser(item.user_nickname, item.user_username)}
                   </TableCell>
                   <TableCell>{item.tenant_key}</TableCell>
                   <TableCell>{item.datasource_key}</TableCell>
                   <TableCell>
-                    {item.rating === "UP" ? (
-                      <Badge variant="secondary">有用</Badge>
-                    ) : item.rating === "DOWN" ? (
-                      <Badge>不准确</Badge>
+                    {/* rating 为窄联合:有值才出徽章,空值保持纯文本「—」(与原三元 else 分支等价) */}
+                    {item.rating ? (
+                      <StatusBadge meta={RATING_META} value={item.rating} />
                     ) : (
                       "—"
                     )}
@@ -334,11 +392,11 @@ export default function FeedbackPage() {
                   <TableCell className="max-w-56 truncate" title={item.question ?? undefined}>
                     {item.question ?? "—"}
                   </TableCell>
-                  <TableCell>{item.corrected_sql ? <Badge variant="outline">带纠错</Badge> : "—"}</TableCell>
                   <TableCell>
-                    <Badge variant={STATUS_META[item.feedback_status]?.variant ?? "outline"}>
-                      {STATUS_META[item.feedback_status]?.label ?? item.feedback_status}
-                    </Badge>
+                    {item.corrected_sql ? <Badge variant="outline">带纠错</Badge> : "—"}
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge meta={STATUS_META} value={item.feedback_status} />
                   </TableCell>
                   <TableCell className="text-right">
                     <Button variant="ghost" size="xs" onClick={() => setDetail(item)}>
@@ -352,30 +410,12 @@ export default function FeedbackPage() {
         </Table>
       </ScrollFade>
 
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span>共 {list.data?.total ?? 0} 条</span>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="xs"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => p - 1)}
-          >
-            上一页
-          </Button>
-          <span>
-            {page} / {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            size="xs"
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            下一页
-          </Button>
-        </div>
-      </div>
+      <Pagination
+        page={page}
+        pageCount={totalPages}
+        total={list.data?.total ?? 0}
+        onPageChange={setPage}
+      />
 
       {detail && (
         <FeedbackDetailDialog
@@ -389,28 +429,6 @@ export default function FeedbackPage() {
           }}
         />
       )}
-    </div>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  loading,
-  error,
-}: {
-  label: string;
-  value: number | string | undefined;
-  loading: boolean;
-  error?: boolean;
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums">
-        {loading ? "…" : error ? "—" : (value ?? 0)}
-      </p>
-      {/* R1-B3:卡级错误不再逐卡 role=alert(读屏重复播报);数值降 "—" 示错 */}
     </div>
   );
 }
@@ -448,7 +466,12 @@ function FeedbackDetailDialog({
   });
 
   return (
-    <Dialog open onOpenChange={(o) => { if (!o && !save.isPending) onClose(); }}>
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o && !save.isPending) onClose();
+      }}
+    >
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>反馈详情</DialogTitle>
@@ -468,100 +491,100 @@ function FeedbackDetailDialog({
           }}
         >
           <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-1">
-          <section>
-            <h3 className="mb-1 text-xs font-medium text-muted-foreground">问句</h3>
-            <p className="text-sm">{item.question ?? "—"}</p>
-          </section>
-          <section>
-            <h3 className="mb-1 text-xs font-medium text-muted-foreground">原始 SQL</h3>
-            <pre className="overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed">
-              {item.sql_text ?? "—"}
-            </pre>
-          </section>
-          <section>
-            <h3 className="mb-1 text-xs font-medium text-muted-foreground">纠错 SQL</h3>
-            <pre className="overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed">
-              {item.corrected_sql ?? "—"}
-            </pre>
-          </section>
-          <section>
-            <h3 className="mb-1 text-xs font-medium text-muted-foreground">留言</h3>
-            <p className="text-sm">{item.feedback_comment ?? "—"}</p>
-          </section>
+            <section>
+              <h3 className="mb-1 text-xs font-medium text-muted-foreground">问句</h3>
+              <p className="text-sm">{item.question ?? "—"}</p>
+            </section>
+            <section>
+              <h3 className="mb-1 text-xs font-medium text-muted-foreground">原始 SQL</h3>
+              <pre className="overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed">
+                {item.sql_text ?? "—"}
+              </pre>
+            </section>
+            <section>
+              <h3 className="mb-1 text-xs font-medium text-muted-foreground">纠错 SQL</h3>
+              <pre className="overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed">
+                {item.corrected_sql ?? "—"}
+              </pre>
+            </section>
+            <section>
+              <h3 className="mb-1 text-xs font-medium text-muted-foreground">留言</h3>
+              <p className="text-sm">{item.feedback_comment ?? "—"}</p>
+            </section>
 
-          <section>
-            <h3 className="mb-1 text-xs font-medium text-muted-foreground">涉及表</h3>
-            {tables.isLoading ? (
-              <p className="text-xs text-muted-foreground">
-                <Loader2 className="inline size-3 animate-spin" aria-hidden /> 定位中…
-              </p>
-            ) : tables.data?.parse_error ? (
-              <p className="text-xs text-muted-foreground">
-                SQL 解析失败,请手动前往知识库编辑。
-              </p>
-            ) : (tables.data?.tables.length ?? 0) === 0 ? (
-              <p className="text-xs text-muted-foreground">未定位到表。</p>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2">
-                {tables.data?.tables.map((t) => (
-                  <span key={t.table_name} className="inline-flex items-center gap-1.5">
-                    <Badge variant="outline">{t.table_name}</Badge>
-                    {t.has_knowledge && (
-                      <Button variant="link" size="xs" asChild>
-                        <Link to={`/admin/rag?table=${encodeURIComponent(t.table_name)}`}>
-                          编辑知识
-                        </Link>
-                      </Button>
-                    )}
-                  </span>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {canHandle && (
-            <section className="space-y-3 rounded-lg border border-border p-3">
-              <h3 className="text-xs font-medium text-muted-foreground">处置</h3>
-              <div className="flex items-end gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">状态</Label>
-                  <Select value={status} onValueChange={setStatus}>
-                    <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="PENDING">待处置</SelectItem>
-                      <SelectItem value="ADOPTED">已采纳</SelectItem>
-                      <SelectItem value="REJECTED">已驳回</SelectItem>
-                      <SelectItem value="DISMISSED">已忽略</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex-1 space-y-1">
-                  <Label className="text-xs">处理备注</Label>
-                  <Input
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder="处置说明(可留空)"
-                    maxLength={500}
-                  />
-                </div>
-              </div>
-              {error && (
-                <p role="alert" className="text-xs text-destructive">
-                  {error}
+            <section>
+              <h3 className="mb-1 text-xs font-medium text-muted-foreground">涉及表</h3>
+              {tables.isLoading ? (
+                <p className="text-xs text-muted-foreground">
+                  <Loader2 className="inline size-3 animate-spin" aria-hidden /> 定位中…
                 </p>
+              ) : tables.data?.parse_error ? (
+                <p className="text-xs text-muted-foreground">SQL 解析失败,请手动前往知识库编辑。</p>
+              ) : (tables.data?.tables.length ?? 0) === 0 ? (
+                <p className="text-xs text-muted-foreground">未定位到表。</p>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  {tables.data?.tables.map((t) => (
+                    <span key={t.table_name} className="inline-flex items-center gap-1.5">
+                      <Badge variant="outline">{t.table_name}</Badge>
+                      {t.has_knowledge && (
+                        <Button variant="link" size="xs" asChild>
+                          <Link to={`/admin/rag?table=${encodeURIComponent(t.table_name)}`}>
+                            编辑知识
+                          </Link>
+                        </Button>
+                      )}
+                    </span>
+                  ))}
+                </div>
               )}
             </section>
-          )}
-        </div>
 
-        {canHandle && (
-          <DialogFooter>
-            <Button type="submit" disabled={save.isPending}>
-              {save.isPending && <Loader2 className="animate-spin" aria-hidden />}
-              保存处置
-            </Button>
-          </DialogFooter>
-        )}
+            {canHandle && (
+              <section className="space-y-3 rounded-lg border border-border p-3">
+                <h3 className="text-xs font-medium text-muted-foreground">处置</h3>
+                <div className="flex items-end gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">状态</Label>
+                    <Select value={status} onValueChange={setStatus}>
+                      <SelectTrigger className="w-32">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="PENDING">待处置</SelectItem>
+                        <SelectItem value="ADOPTED">已采纳</SelectItem>
+                        <SelectItem value="REJECTED">已驳回</SelectItem>
+                        <SelectItem value="DISMISSED">已忽略</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-xs">处理备注</Label>
+                    <Input
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder="处置说明(可留空)"
+                      maxLength={500}
+                    />
+                  </div>
+                </div>
+                {error && (
+                  <p role="alert" className="text-xs text-destructive">
+                    {error}
+                  </p>
+                )}
+              </section>
+            )}
+          </div>
+
+          {canHandle && (
+            <DialogFooter>
+              <Button type="submit" disabled={save.isPending}>
+                {save.isPending && <Loader2 className="animate-spin" aria-hidden />}
+                保存处置
+              </Button>
+            </DialogFooter>
+          )}
         </form>
       </DialogContent>
     </Dialog>

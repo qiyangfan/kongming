@@ -51,8 +51,9 @@ async def _mk_dept(s: AsyncSession, name: str, parent_id: str | None = None) -> 
 
 async def _role_id(s: AsyncSession, key: str) -> str:
     return str(
-        (await s.execute(text("SELECT id FROM public.sys_role WHERE role_key=:k"), {"k": key}))
-        .scalar_one()
+        (
+            await s.execute(text("SELECT id FROM public.sys_role WHERE role_key=:k"), {"k": key})
+        ).scalar_one()
     )
 
 
@@ -423,10 +424,7 @@ async def test_user_crud_flow(
     assert r.status_code == 204
     after = (
         await session.execute(
-            text(
-                "SELECT password_hash, nickname, dept_id, email FROM public.sys_user"
-                " WHERE id=:i"
-            ),
+            text("SELECT password_hash, nickname, dept_id, email FROM public.sys_user WHERE id=:i"),
             {"i": uid},
         )
     ).one()
@@ -486,9 +484,7 @@ async def test_username_uniqueness_with_soft_delete(
     r = await client.post("/system/users", json=body, headers=_auth(token))
     assert r.status_code == 409
     # 软删后同名可建
-    await session.execute(
-        text("UPDATE public.sys_user SET deleted_at=now() WHERE username='dup'")
-    )
+    await session.execute(text("UPDATE public.sys_user SET deleted_at=now() WHERE username='dup'"))
     await session.commit()
     r = await client.post("/system/users", json=body, headers=_auth(token))
     assert r.status_code == 201
@@ -545,13 +541,10 @@ async def test_create_user_unknown_refs_rejected(
 
 # ============ 履约:角色与权限绑定 ============
 
-async def _role_by_key(
-    client: AsyncClient, token: str, key: str
-) -> dict[str, Any]:
+
+async def _role_by_key(client: AsyncClient, token: str, key: str) -> dict[str, Any]:
     r = await client.get("/system/roles", headers=_auth(token))
     return next(x for x in r.json() if x["role_key"] == key)
-
-
 
 
 async def test_role_crud_and_perm_binding(
@@ -647,8 +640,6 @@ async def test_role_crud_and_perm_binding(
     # 删除自建角色
     r = await client.delete(f"/system/roles/{rid}", headers=_auth(token))
     assert r.status_code == 204
-
-
 
 
 # ============ 履约:部门与租户 ============
@@ -865,10 +856,17 @@ async def test_write_operations_audited(
     )
     actions = {str(r[0]) for r in rows}
     expected = {
-        "user.create", "user.update", "user.reset_password", "user.delete",
-        "user.enable", "user.disable",
-        "role.create", "role.bind_perms", "role.delete",
-        "dept.create", "dept.delete",
+        "user.create",
+        "user.update",
+        "user.reset_password",
+        "user.delete",
+        "user.enable",
+        "user.disable",
+        "role.create",
+        "role.bind_perms",
+        "role.delete",
+        "dept.create",
+        "dept.delete",
     }
     assert expected <= actions, f"缺失审计动作:{expected - actions}"
 
@@ -952,16 +950,12 @@ async def test_keyword_like_metachars_escaped(
     _, token = await _admin(client, session, make_user, "boss4")
     # 「50%」不转义时 % 是通配符,会同时命中 sale50pct/sale50%;
     # 转义后仅字面含「50%」的行命中
-    r = await client.get(
-        "/system/users", params={"keyword": "50%"}, headers=_auth(token)
-    )
+    r = await client.get("/system/users", params={"keyword": "50%"}, headers=_auth(token))
     assert r.status_code == 200
     names = [i["username"] for i in r.json()["items"]]
     assert names == ["sale50%"]
     # 「user_a」不转义时 _ 通配任意单字符,命中 user_a/userxa;转义后仅字面命中
-    r = await client.get(
-        "/system/users", params={"keyword": "user_a"}, headers=_auth(token)
-    )
+    r = await client.get("/system/users", params={"keyword": "user_a"}, headers=_auth(token))
     names = [i["username"] for i in r.json()["items"]]
     assert names == ["user_a"]
 
@@ -999,9 +993,7 @@ async def test_disable_user_revokes_refresh(
     assert r.status_code == 204
     # 状态已翻转
     status = (
-        await session.execute(
-            text("SELECT status FROM public.sys_user WHERE id=:i"), {"i": uid}
-        )
+        await session.execute(text("SELECT status FROM public.sys_user WHERE id=:i"), {"i": uid})
     ).scalar_one()
     assert status == "DISABLED"
     # 禁用即吊销:旧 refresh 不可续换(与改密踢下线对称)
@@ -1029,15 +1021,11 @@ async def test_enable_user_restores_login(
     _, token = await _admin(client, session, make_user, "boss6")
     r = await client.post(f"/system/users/{uid}/disable", headers=_auth(token))
     assert r.status_code == 204
-    r = await client.post(
-        "/auth/login", json={"username": "victim5", "password": "Passw0rd!"}
-    )
+    r = await client.post("/auth/login", json={"username": "victim5", "password": "Passw0rd!"})
     assert r.status_code == 403  # 禁用后登录被拒
     r = await client.post(f"/system/users/{uid}/enable", headers=_auth(token))
     assert r.status_code == 204
-    r = await client.post(
-        "/auth/login", json={"username": "victim5", "password": "Passw0rd!"}
-    )
+    r = await client.post("/auth/login", json={"username": "victim5", "password": "Passw0rd!"})
     assert r.status_code == 200  # 启用后恢复(密码未动)
     n = await session.execute(
         text("SELECT count(*) FROM public.sys_oper_log WHERE action='user.enable'")
@@ -1097,13 +1085,9 @@ async def test_status_toggle_protections(
     assert r.status_code == 409
     # 超管账号(settings.admin_username)禁用
     real_admin_id = (
-        await session.execute(
-            text("SELECT id FROM public.sys_user WHERE username='admin'")
-        )
+        await session.execute(text("SELECT id FROM public.sys_user WHERE username='admin'"))
     ).scalar_one()
-    r = await client.post(
-        f"/system/users/{real_admin_id}/disable", headers=_auth(token)
-    )
+    r = await client.post(f"/system/users/{real_admin_id}/disable", headers=_auth(token))
     assert r.status_code == 409
     # 不存在
     r = await client.post(f"/system/users/{uuidlib.uuid4()}/disable", headers=_auth(token))

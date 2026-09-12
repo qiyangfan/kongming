@@ -71,9 +71,7 @@ async def _start_and_callback(client: AsyncClient, provider: str, state: str | N
 
 async def test_callback_success_issues_platform_tokens(
     client: AsyncClient,
-    fake_provider: Callable[[str,
-    NormalizedProfile],
-    None],
+    fake_provider: Callable[[str, NormalizedProfile], None],
     session: AsyncSession,
 ) -> None:
 
@@ -121,9 +119,7 @@ async def test_callback_forged_state_rejected(
 
 async def test_callback_expired_state_rejected(
     client: AsyncClient,
-    fake_provider: Callable[[str,
-    NormalizedProfile],
-    None],
+    fake_provider: Callable[[str, NormalizedProfile], None],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_provider("github", PROFILE)

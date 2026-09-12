@@ -21,12 +21,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -61,12 +56,17 @@ import {
   voidInvoice,
   type PlanItem,
 } from "@/lib/billing-api";
-import {
-  DIM_TEXT,
-  INVOICE_STATUS_TEXT,
-  PAYMENT_STATUS_TEXT,
-} from "@/lib/billing-labels";
+import { DIM_TEXT, PAYMENT_STATUS_TEXT } from "@/lib/billing-labels";
 import { li2yuan, li2yuanInput } from "@/lib/money";
+import { StatusBadge, type StatusMeta } from "@/components/status-badge";
+
+// 发票状态 → StatusBadge(管理端维持原「一律 secondary」密度;未知值回落 secondary 等价;
+// label 与 lib/billing-labels 的 INVOICE_STATUS_TEXT 对齐)
+const INVOICE_STATUS_META: StatusMeta = {
+  PENDING: { label: "待支付", variant: "secondary" },
+  PAID: { label: "已支付", variant: "secondary" },
+  VOID: { label: "已作废", variant: "secondary" },
+};
 
 /**
  * 价格列(DB INTEGER)超 int32 的输入放行会在落库时 500,故统一取 INT32 上限;
@@ -83,8 +83,7 @@ function parseNonNegInt(raw: string): number | null {
 }
 
 /** 套餐数值行内校验错误文案(创建/编辑共用) */
-const PLAN_NUM_ERROR =
-  "额度须为 0 到 21 亿之间的整数;单价须为非负金额,最多 3 位小数";
+const PLAN_NUM_ERROR = "额度须为 0 到 21 亿之间的整数;单价须为非负金额,最多 3 位小数";
 
 /** 单价以「元」录入(精度 0.001 元=1 厘),提交转整数厘;亚厘四舍五入 */
 function parseNonNegYuanLi(raw: string): number | null {
@@ -110,8 +109,11 @@ export default function BillingPage() {
   const setTenantId = (v: string) => {
     setTenantIdRaw(v);
     setPolicyForm({
-      dimension: "TOKENS", limit_value: "0", warn_pct: "80",
-      scope: "TENANT", scope_ref: "",
+      dimension: "TOKENS",
+      limit_value: "0",
+      warn_pct: "80",
+      scope: "TENANT",
+      scope_ref: "",
     });
     setPolicyError("");
   };
@@ -136,7 +138,10 @@ export default function BillingPage() {
   const [voidError, setVoidError] = useState("");
   const PAGE_SIZE = 20;
 
-  const tenants = useQuery({ queryKey: ["admin", "billing", "tenants"], queryFn: listBillingTenants });
+  const tenants = useQuery({
+    queryKey: ["admin", "billing", "tenants"],
+    queryFn: listBillingTenants,
+  });
   const plans = useQuery({ queryKey: ["admin", "billing", "plans"], queryFn: listPlans });
   const policies = useQuery({
     queryKey: ["admin", "billing", "policies", tenantId],
@@ -176,8 +181,12 @@ export default function BillingPage() {
       }
       // 显式展开守卫后字段(Record 展开会丢字面量类型,契约收紧后 tsc 报错——
       // 审查循环 F1 直证:手写 Record 曾让缺字段静默通过)
-      const [monthly_tokens, monthly_calls, price_per_mtok, price_per_call] =
-        values as [number, number, number, number];
+      const [monthly_tokens, monthly_calls, price_per_mtok, price_per_call] = values as [
+        number,
+        number,
+        number,
+        number,
+      ];
       return createPlan({
         plan_key: planForm.plan_key.trim(),
         name: planForm.name.trim(),
@@ -208,8 +217,12 @@ export default function BillingPage() {
       if (values.some((n) => n === null)) {
         throw new Error(PLAN_NUM_ERROR);
       }
-      const [monthly_tokens, monthly_calls, price_per_mtok, price_per_call] =
-        values as [number, number, number, number];
+      const [monthly_tokens, monthly_calls, price_per_mtok, price_per_call] = values as [
+        number,
+        number,
+        number,
+        number,
+      ];
       return updatePlan(editPlan.id, {
         name: editForm.name.trim(),
         monthly_tokens,
@@ -324,52 +337,54 @@ export default function BillingPage() {
                 </TableRow>
               ) : (
                 (plans.data ?? []).map((p) => (
-                <TableRow key={p.id}>
-                  <TableCell className="font-mono text-xs">{p.plan_key}</TableCell>
-                  <TableCell className="max-w-40 truncate" title={p.name}>{p.name}</TableCell>
-                  <TableCell>{p.monthly_tokens.toLocaleString()}</TableCell>
-                  <TableCell>{p.monthly_calls.toLocaleString()}</TableCell>
-                  <TableCell>
-                    <div className="space-y-0.5">
-                      <p>每千 Token ¥{li2yuan(p.price_per_mtok)}</p>
-                      <p className="text-muted-foreground">
-                        每次调用 ¥{li2yuan(p.price_per_call)}
-                      </p>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label={`编辑套餐 ${p.plan_key}`}
-                      onClick={() => {
-                        setEditPlan(p);
-                        setEditForm({
-                          plan_key: p.plan_key,
-                          name: p.name,
-                          monthly_tokens: String(p.monthly_tokens),
-                          monthly_calls: String(p.monthly_calls),
-                          price_per_mtok: li2yuanInput(p.price_per_mtok),
-                          price_per_call: li2yuanInput(p.price_per_call),
-                        });
-                        setEditError("");
-                      }}
-                    >
-                      <Pencil aria-hidden />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label={`删除套餐 ${p.plan_key}`}
-                      onClick={() => {
-                        setDeletePlanTarget(p);
-                        setDeletePlanError("");
-                      }}
-                    >
-                      <Trash2 aria-hidden />
-                    </Button>
-                  </TableCell>
-                </TableRow>
+                  <TableRow key={p.id}>
+                    <TableCell className="font-mono text-xs">{p.plan_key}</TableCell>
+                    <TableCell className="max-w-40 truncate" title={p.name}>
+                      {p.name}
+                    </TableCell>
+                    <TableCell>{p.monthly_tokens.toLocaleString()}</TableCell>
+                    <TableCell>{p.monthly_calls.toLocaleString()}</TableCell>
+                    <TableCell>
+                      <div className="space-y-0.5">
+                        <p>每千 Token ¥{li2yuan(p.price_per_mtok)}</p>
+                        <p className="text-muted-foreground">
+                          每次调用 ¥{li2yuan(p.price_per_call)}
+                        </p>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={`编辑套餐 ${p.plan_key}`}
+                        onClick={() => {
+                          setEditPlan(p);
+                          setEditForm({
+                            plan_key: p.plan_key,
+                            name: p.name,
+                            monthly_tokens: String(p.monthly_tokens),
+                            monthly_calls: String(p.monthly_calls),
+                            price_per_mtok: li2yuanInput(p.price_per_mtok),
+                            price_per_call: li2yuanInput(p.price_per_call),
+                          });
+                          setEditError("");
+                        }}
+                      >
+                        <Pencil aria-hidden />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={`删除套餐 ${p.plan_key}`}
+                        onClick={() => {
+                          setDeletePlanTarget(p);
+                          setDeletePlanError("");
+                        }}
+                      >
+                        <Trash2 aria-hidden />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
                 ))
               )}
             </TableBody>
@@ -421,7 +436,11 @@ export default function BillingPage() {
               aria-label="次单价"
             />
             <Button type="submit" disabled={create.isPending}>
-              {create.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Plus aria-hidden />}
+              {create.isPending ? (
+                <Loader2 className="animate-spin" aria-hidden />
+              ) : (
+                <Plus aria-hidden />
+              )}
             </Button>
           </div>
         </form>
@@ -499,17 +518,17 @@ export default function BillingPage() {
                       <TableRow key={p.id}>
                         <TableCell className="text-xs">
                           {p.scope === "BOT" ? (
-                            <Badge variant="outline" className="font-normal">
-                              助手:{(bots.data ?? []).find((b) => b.id === p.scope_ref)?.bot_key ?? p.scope_ref?.slice(0, 8)}
+                            <Badge variant="outline">
+                              助手:
+                              {(bots.data ?? []).find((b) => b.id === p.scope_ref)?.bot_key ??
+                                p.scope_ref?.slice(0, 8)}
                             </Badge>
                           ) : (
-                            <Badge variant="secondary" className="font-normal">租户</Badge>
+                            <Badge variant="secondary">租户</Badge>
                           )}
                         </TableCell>
                         <TableCell>
-                          <Badge variant="secondary" className="font-normal">
-                            {DIM_TEXT[p.dimension] ?? p.dimension}
-                          </Badge>
+                          <Badge variant="secondary">{DIM_TEXT[p.dimension] ?? p.dimension}</Badge>
                         </TableCell>
                         <TableCell>
                           {p.dimension === "COST"
@@ -613,7 +632,9 @@ export default function BillingPage() {
               </div>
               <Button
                 type="submit"
-                disabled={upsert.isPending || (policyForm.scope === "BOT" && policyForm.scope_ref === "")}
+                disabled={
+                  upsert.isPending || (policyForm.scope === "BOT" && policyForm.scope_ref === "")
+                }
               >
                 {upsert.isPending && <Loader2 className="animate-spin" aria-hidden />}
                 保存
@@ -667,9 +688,7 @@ export default function BillingPage() {
                     <TableCell className="font-mono text-xs">{inv.period}</TableCell>
                     <TableCell>¥{li2yuan(inv.amount)}</TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className="font-normal">
-                        {INVOICE_STATUS_TEXT[inv.status] ?? inv.status}
-                      </Badge>
+                      <StatusBadge meta={INVOICE_STATUS_META} value={inv.status} fallbackVariant="secondary" />
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {inv.payment_status

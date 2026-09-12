@@ -33,9 +33,7 @@ def test_wecom_normalize_full_detail() -> None:
         "avatar": "https://wework.qpic.cn/head/a.jpg",
         "email": "zhangsan@corp.example",
     }
-    p = wecom.normalize(
-        cast("dict[str, object]", userinfo), cast("dict[str, object]", detail)
-    )
+    p = wecom.normalize(cast("dict[str, object]", userinfo), cast("dict[str, object]", detail))
     assert p.external_id == "ZhangSan"
     assert p.username == "ZhangSan"
     assert p.display_name == "张三"
@@ -58,9 +56,7 @@ def test_wecom_normalize_degrades_on_detail_error() -> None:
     """详档返回业务错误(如 60011 无权限)同样走降级分支。"""
     userinfo = {"errcode": 0, "errmsg": "ok", "userid": "ZhangSan"}
     detail = {"errcode": 60011, "errmsg": "no privilege to access/modify contact"}
-    p = wecom.normalize(
-        cast("dict[str, object]", userinfo), cast("dict[str, object]", detail)
-    )
+    p = wecom.normalize(cast("dict[str, object]", userinfo), cast("dict[str, object]", detail))
     assert p.external_id == "ZhangSan"
     assert p.display_name == "ZhangSan"
     assert p.avatar_url is None

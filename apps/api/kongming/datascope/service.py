@@ -56,6 +56,4 @@ def resolve(ctx: ScopeContext, column_exists: bool) -> ScopeFilter:
                 skip_reason=f"目标表无 {COL_CREATE_BY} 列,data_scope=SELF 降级为不过滤",
             )
         return ScopeFilter(type=FilterType.USER_EQ, column=COL_CREATE_BY, values=[ctx.user_id])
-    return ScopeFilter(
-        type=FilterType.UNSUPPORTED, skip_reason=f"未知 data_scope 值: {scope}"
-    )
+    return ScopeFilter(type=FilterType.UNSUPPORTED, skip_reason=f"未知 data_scope 值: {scope}")

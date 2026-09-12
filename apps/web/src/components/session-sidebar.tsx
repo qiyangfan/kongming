@@ -115,7 +115,10 @@ export function SessionSidebar({ onNavigate }: { onNavigate?: () => void }) {
                       }
                     >
                       <MessageSquare
-                        className={"size-3.5 shrink-0 " + (s.id === activeId ? "text-primary" : "text-muted-foreground")}
+                        className={
+                          "size-3.5 shrink-0 " +
+                          (s.id === activeId ? "text-primary" : "text-muted-foreground")
+                        }
                         aria-hidden
                       />
                       <span className="min-w-0 flex-1 truncate" title={s.title}>
@@ -175,7 +178,12 @@ function SessionActions({ session, isActive }: { session: SessionItemOut; isActi
       </DropdownMenu>
       {/* 对话框挂菜单外(Radix 焦点陷阱冲突规避),受控开合 */}
       <RenameDialog session={session} open={renameOpen} onOpenChange={setRenameOpen} />
-      <DeleteDialog session={session} isActive={isActive} open={deleteOpen} onOpenChange={setDeleteOpen} />
+      <DeleteDialog
+        session={session}
+        isActive={isActive}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+      />
     </>
   );
 }
@@ -314,7 +322,11 @@ function DeleteDialog({
             「{session.title}」及其全部消息将被移除,此步不可挽回。
           </AlertDialogDescription>
         </AlertDialogHeader>
-        {failed && <p className="text-sm text-destructive" role="alert">删除未成,请稍后再试。</p>}
+        {failed && (
+          <p className="text-sm text-destructive" role="alert">
+            删除未成,请稍后再试。
+          </p>
+        )}
         <AlertDialogFooter>
           {/* busy 期禁用取消(013,010 挂账⑤):删除请求已发出,
               「再想想」可点会误导用户以为请求被撤回(spec「删除进行中取消不可用」) */}

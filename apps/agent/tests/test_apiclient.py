@@ -21,9 +21,7 @@ async def test_rag_retrieve_non_json_200_returns_none(
         return httpx.Response(200, content=b"<html>Bad Gateway</html>")
 
     monkeypatch.setattr(ApiClient, "_post", fake_post)
-    result = await client.rag_retrieve(
-        tenant_key="t", datasource_key="default", question="q"
-    )
+    result = await client.rag_retrieve(tenant_key="t", datasource_key="default", question="q")
     assert result is None
 
 
@@ -34,14 +32,10 @@ async def test_rag_retrieve_valid_json_still_parsed(
     client = ApiClient(Settings())
 
     async def fake_post(self: ApiClient, path: str, payload: dict[str, object]) -> httpx.Response:
-        return httpx.Response(
-            200, json={"schema_hint": "film 表:电影", "history_sql": "SELECT 1"}
-        )
+        return httpx.Response(200, json={"schema_hint": "film 表:电影", "history_sql": "SELECT 1"})
 
     monkeypatch.setattr(ApiClient, "_post", fake_post)
-    result = await client.rag_retrieve(
-        tenant_key="t", datasource_key="default", question="q"
-    )
+    result = await client.rag_retrieve(tenant_key="t", datasource_key="default", question="q")
     assert result is not None
     assert result.schema_hint == "film 表:电影"
     assert result.history_sql == "SELECT 1"

@@ -44,14 +44,14 @@ export default function OAuthCallback() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>第三方登录</CardTitle>
-          <CardDescription>
-            {error ? "登录未完成" : "正在完成登录…"}
-          </CardDescription>
+          <CardDescription>{error ? "登录未完成" : "正在完成登录…"}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {error ? (
             <>
-              <p className="text-sm text-destructive" role="alert">{error}</p>
+              <p className="text-sm text-destructive" role="alert">
+                {error}
+              </p>
               <Link to="/login" className={cn(buttonVariants({ variant: "outline" }), "w-full")}>
                 返回登录页
               </Link>

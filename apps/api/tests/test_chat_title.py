@@ -6,7 +6,6 @@ update_title_if_current 条件回写(竞态双闸)。失败保持截断标题,�
 """
 # pyright: reportPrivateUsage=false
 
-
 from collections.abc import Iterator
 
 import pytest
@@ -162,9 +161,7 @@ async def test_title_not_rewritten_on_blocked_round(
 # ============ R2-S2:条件写竞态落败直证 ============
 
 
-async def test_update_title_if_current_rowcount(
-    session: AsyncSession, make_user: MakeUser
-) -> None:
+async def test_update_title_if_current_rowcount(session: AsyncSession, make_user: MakeUser) -> None:
     """仓储层:expected 匹配更新 1 行;不匹配(已被改名)0 行且标题不动。"""
     from kongming.auth.seed import seed_all
     from kongming.chat.repository import ChatRepository

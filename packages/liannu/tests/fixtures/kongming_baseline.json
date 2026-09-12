@@ -1,0 +1,2806 @@
+{
+  "cases": [
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "customer",
+            null
+          ]
+        }
+      },
+      "id": "fw_pass_00",
+      "sql": "SELECT * FROM customer"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "customer",
+            null
+          ]
+        }
+      },
+      "id": "fw_pass_01",
+      "sql": "SELECT c.name, COUNT(r.id) FROM customer c JOIN rental r ON c.id = r.customer_id GROUP BY c.name"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "fw_pass_02",
+      "sql": "SELECT 1"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "fw_pass_03",
+      "sql": "SELECT * FROM (SELECT * FROM customer) t"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "fw_pass_04",
+      "sql": "SELECT * FROM customer UNION SELECT * FROM customer"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "top",
+            null
+          ]
+        }
+      },
+      "id": "fw_pass_05",
+      "sql": "WITH top AS (SELECT id FROM film LIMIT 5) SELECT * FROM top"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": false,
+          "reason": "BLOCKED_ROOT: Delete"
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "fw_block_00",
+      "sql": "DELETE FROM customer WHERE id = 1"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": false,
+          "reason": "BLOCKED_ROOT: Update"
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "fw_block_01",
+      "sql": "UPDATE customer SET name = 'x'"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": false,
+          "reason": "BLOCKED_ROOT: Insert"
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "fw_block_02",
+      "sql": "INSERT INTO customer VALUES (1)"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": false,
+          "reason": "BLOCKED_ROOT: Drop"
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "fw_block_03",
+      "sql": "DROP TABLE customer"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": false,
+          "reason": "BLOCKED_ROOT: Create"
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "fw_block_04",
+      "sql": "CREATE TABLE t (id int)"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": false,
+          "reason": "BLOCKED_ROOT: Alter"
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "fw_block_05",
+      "sql": "ALTER TABLE customer ADD COLUMN x int"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": false,
+          "reason": "BLOCKED_ROOT: TruncateTable"
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "fw_block_06",
+      "sql": "TRUNCATE TABLE customer"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": false,
+          "reason": "BLOCKED_ROOT: Grant"
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "fw_block_07",
+      "sql": "GRANT SELECT ON customer TO public"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": false,
+          "reason": "BLOCKED_ROOT: Drop"
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "fw_block_08",
+      "sql": "SELECT 1; DROP TABLE customer"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": false,
+          "reason": "BLOCKED_INTO"
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "customer",
+            null
+          ]
+        }
+      },
+      "id": "fw_block_09",
+      "sql": "SELECT * INTO t2 FROM customer"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": false,
+          "reason": "BLOCKED_INTO"
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "s",
+            null
+          ]
+        }
+      },
+      "id": "fw_block_10",
+      "sql": "WITH s AS (SELECT * FROM customer) SELECT * INTO t2 FROM s"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": false,
+          "reason": "BLOCKED_NODE: Delete"
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "gone",
+            null
+          ]
+        }
+      },
+      "id": "fw_block_11",
+      "sql": "WITH gone AS (DELETE FROM customer RETURNING *) SELECT * FROM gone"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": false,
+          "reason": "PARSE_ERROR: Expected table name but got <Token token_type: TokenType.WHERE, text: WHERE, line: 1, col: 17, start: 12, end: 16, comments: []>. Line 1, Col: 17.\n  SELECT FROM \u001b[4mWHERE\u001b[0m"
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "PARSE_ERROR: Expected table name but got <Token token_type: TokenType.WHERE, text: WHERE, line: 1, col: 17, start: 12, end: 16, comments: []>. Line 1, Col: 17.\n  SELECT FROM \u001b[4mWHERE\u001b[0m"
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "fw_block_12",
+      "sql": "SELECT FROM WHERE"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": false,
+          "reason": "EMPTY_STATEMENT"
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "fw_block_13",
+      "sql": ""
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": false,
+          "reason": "PARSE_ERROR: Error tokenizing 'SELECT * FROM goods WHERE name ILIKE '%连'"
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "PARSE_ERROR: Error tokenizing 'SELECT * FROM goods WHERE name ILIKE '%连'"
+        }
+      },
+      "id": "fw_block_14",
+      "sql": "SELECT * FROM goods WHERE name ILIKE '%连弩"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "fw_block_15",
+      "sql": "SELECT 1;"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_ita",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            null
+          ]
+        }
+      },
+      "id": "scope_pass_00",
+      "sql": "SELECT * FROM goods"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_ita",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            "public"
+          ]
+        }
+      },
+      "id": "scope_pass_01",
+      "sql": "SELECT * FROM public.goods"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_ita",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            "tenant_ita"
+          ]
+        }
+      },
+      "id": "scope_pass_02",
+      "sql": "SELECT * FROM tenant_ita.goods"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_ita",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            "PUBLIC"
+          ]
+        }
+      },
+      "id": "scope_pass_03",
+      "sql": "SELECT * FROM PUBLIC.goods"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_ita",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            "Tenant_Ita"
+          ]
+        }
+      },
+      "id": "scope_pass_04",
+      "sql": "SELECT * FROM Tenant_Ita.goods"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_ita",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            "tenant_ita"
+          ]
+        }
+      },
+      "id": "scope_pass_05",
+      "sql": "SELECT * FROM \"tenant_ita\".goods"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_ita",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "x",
+            null
+          ]
+        }
+      },
+      "id": "scope_pass_06",
+      "sql": "WITH x AS (SELECT 1) SELECT * FROM x"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_ita",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "",
+            null
+          ]
+        }
+      },
+      "id": "scope_pass_07",
+      "sql": "SELECT * FROM generate_series(1, 5)"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_ita",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            "tenant_ita"
+          ]
+        }
+      },
+      "id": "scope_pass_08",
+      "sql": "SELECT * FROM tenant_ita.goods g JOIN public.t t ON g.id = t.id"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_ita",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": false,
+          "reason": "CROSS_SCHEMA: tenant_itb"
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            "tenant_itb"
+          ]
+        }
+      },
+      "id": "scope_block_00",
+      "sql": "SELECT * FROM tenant_itb.goods"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_ita",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": false,
+          "reason": "CROSS_SCHEMA: pg_catalog"
+        },
+        "main_table_ref": {
+          "ref": [
+            "pg_tables",
+            "pg_catalog"
+          ]
+        }
+      },
+      "id": "scope_block_01",
+      "sql": "SELECT * FROM pg_catalog.pg_tables"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_ita",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": false,
+          "reason": "CROSS_SCHEMA: information_schema"
+        },
+        "main_table_ref": {
+          "ref": [
+            "columns",
+            "information_schema"
+          ]
+        }
+      },
+      "id": "scope_block_02",
+      "sql": "SELECT * FROM information_schema.columns"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_ita",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": false,
+          "reason": "CROSS_SCHEMA: other_db"
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            "tenant_ita"
+          ]
+        }
+      },
+      "id": "scope_block_03",
+      "sql": "SELECT * FROM other_db.tenant_ita.goods"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_ita",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": false,
+          "reason": "CROSS_SCHEMA: Tenant_Ita"
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            "Tenant_Ita"
+          ]
+        }
+      },
+      "id": "scope_block_04",
+      "sql": "SELECT * FROM \"Tenant_Ita\".goods"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_ita",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": false,
+          "reason": "CROSS_SCHEMA: tenant_itb"
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            null
+          ]
+        }
+      },
+      "id": "scope_block_05",
+      "sql": "SELECT * FROM goods g JOIN tenant_itb.orders o ON g.id = o.id"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_ita",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": false,
+          "reason": "CROSS_SCHEMA: tenant_itb"
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "scope_block_06",
+      "sql": "SELECT * FROM (SELECT * FROM tenant_itb.goods) t"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_Sakila",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            "tenant_Sakila"
+          ]
+        }
+      },
+      "id": "scope_twin_00",
+      "sql": "SELECT * FROM \"tenant_Sakila\".goods"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_Sakila",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": false,
+          "reason": "CROSS_SCHEMA: tenant_sakila"
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "scope_twin_01",
+      "sql": "SELECT * FROM tenant_sakila.goods"
+    },
+    {
+      "allowed_schemas": [
+        "tenant_Sakila",
+        "public"
+      ],
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "check_schema_scope": {
+          "passed": false,
+          "reason": "CROSS_SCHEMA: tenant_Sakila"
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            "tenant_Sakila"
+          ]
+        }
+      },
+      "id": "scope_twin_02",
+      "sql": "SELECT * FROM tenant_Sakila.goods"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: sys_user"
+        },
+        "main_table_ref": {
+          "ref": [
+            "sys_user",
+            null
+          ]
+        }
+      },
+      "id": "res_block_00",
+      "sql": "SELECT username, password_hash FROM sys_user"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: sys_user"
+        },
+        "main_table_ref": {
+          "ref": [
+            "sys_user",
+            "public"
+          ]
+        }
+      },
+      "id": "res_block_01",
+      "sql": "SELECT * FROM public.sys_user"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: SYS_USER"
+        },
+        "main_table_ref": {
+          "ref": [
+            "SYS_USER",
+            null
+          ]
+        }
+      },
+      "id": "res_block_02",
+      "sql": "SELECT * FROM SYS_USER"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: chat_message"
+        },
+        "main_table_ref": {
+          "ref": [
+            "chat_message",
+            null
+          ]
+        }
+      },
+      "id": "res_block_03",
+      "sql": "SELECT * FROM chat_message"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: user_identities"
+        },
+        "main_table_ref": {
+          "ref": [
+            "user_identities",
+            null
+          ]
+        }
+      },
+      "id": "res_block_04",
+      "sql": "SELECT * FROM user_identities"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: alembic_version"
+        },
+        "main_table_ref": {
+          "ref": [
+            "alembic_version",
+            null
+          ]
+        }
+      },
+      "id": "res_block_05",
+      "sql": "SELECT * FROM alembic_version"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: user_memory"
+        },
+        "main_table_ref": {
+          "ref": [
+            "user_memory",
+            null
+          ]
+        }
+      },
+      "id": "res_block_06",
+      "sql": "SELECT content FROM user_memory"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: user_memory"
+        },
+        "main_table_ref": {
+          "ref": [
+            "user_memory",
+            "public"
+          ]
+        }
+      },
+      "id": "res_block_07",
+      "sql": "SELECT * FROM public.user_memory"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: user_memory"
+        },
+        "main_table_ref": {
+          "ref": [
+            "m",
+            null
+          ]
+        }
+      },
+      "id": "res_block_08",
+      "sql": "WITH m AS (SELECT content FROM public.user_memory) SELECT * FROM m"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: user_memory"
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            "tenant_default"
+          ]
+        }
+      },
+      "id": "res_block_09",
+      "sql": "SELECT * FROM tenant_default.goods g JOIN user_memory u ON true"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: sys_user"
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            "tenant_default"
+          ]
+        }
+      },
+      "id": "res_block_10",
+      "sql": "SELECT * FROM tenant_default.goods g JOIN sys_user u ON true"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: sys_user"
+        },
+        "main_table_ref": {
+          "ref": [
+            "sys_user",
+            null
+          ]
+        }
+      },
+      "id": "res_block_11",
+      "sql": "WITH sys_user AS (SELECT password_hash FROM public.sys_user) SELECT * FROM sys_user"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: sys_user"
+        },
+        "main_table_ref": {
+          "ref": [
+            "g",
+            null
+          ]
+        }
+      },
+      "id": "res_block_12",
+      "sql": "WITH g AS (SELECT password_hash FROM public.sys_user) SELECT * FROM g"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: sys_x"
+        },
+        "main_table_ref": {
+          "ref": [
+            "sys_x",
+            null
+          ]
+        }
+      },
+      "id": "res_block_13",
+      "sql": "WITH sys_x AS (SELECT 1) SELECT * FROM sys_x"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: rag.query_history"
+        },
+        "main_table_ref": {
+          "ref": [
+            "query_history",
+            "rag"
+          ]
+        }
+      },
+      "id": "res_block_14",
+      "sql": "SELECT question, sql_text FROM rag.query_history"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: rag.table_descriptions"
+        },
+        "main_table_ref": {
+          "ref": [
+            "table_descriptions",
+            "rag"
+          ]
+        }
+      },
+      "id": "res_block_15",
+      "sql": "SELECT * FROM rag.table_descriptions"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: rag.query_history"
+        },
+        "main_table_ref": {
+          "ref": [
+            "query_history",
+            "rag"
+          ]
+        }
+      },
+      "id": "res_block_16",
+      "sql": "SELECT * FROM \"rag\".query_history"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: rag.query_history"
+        },
+        "main_table_ref": {
+          "ref": [
+            "g",
+            null
+          ]
+        }
+      },
+      "id": "res_block_17",
+      "sql": "WITH g AS (SELECT * FROM rag.query_history) SELECT * FROM g"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": false,
+          "reason": "RESERVED_TABLE: rag.table_descriptions"
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            "tenant_default"
+          ]
+        }
+      },
+      "id": "res_block_18",
+      "sql": "SELECT * FROM tenant_default.goods g JOIN rag.table_descriptions t ON true"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            null
+          ]
+        }
+      },
+      "id": "res_pass_00",
+      "sql": "SELECT id, name FROM goods"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "goods",
+            "tenant_default"
+          ]
+        }
+      },
+      "id": "res_pass_01",
+      "sql": "SELECT * FROM tenant_default.goods"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "g",
+            null
+          ]
+        }
+      },
+      "id": "res_pass_02",
+      "sql": "WITH g AS (SELECT 1) SELECT * FROM g"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "top5",
+            null
+          ]
+        }
+      },
+      "id": "res_pass_03",
+      "sql": "WITH top5 AS (SELECT id FROM goods LIMIT 5) SELECT * FROM top5"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "",
+            null
+          ]
+        }
+      },
+      "id": "res_pass_04",
+      "sql": "SELECT * FROM generate_series(1, 3)"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "query_history",
+            "tenant_default"
+          ]
+        }
+      },
+      "id": "res_pass_05",
+      "sql": "SELECT * FROM tenant_default.query_history"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "table_descriptions",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "res_pass_06",
+      "sql": "SELECT * FROM tenant_sakila.table_descriptions"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "apply_filters": [
+          {
+            "column": "create_by",
+            "filter_type": "USER_EQ",
+            "params": {
+              "km_ds_0": "u-1"
+            },
+            "sql": "SELECT mark FROM customer WHERE customer.create_by = :km_ds_0",
+            "values": [
+              "u-1"
+            ]
+          },
+          {
+            "column": "dept_id",
+            "filter_type": "DEPT_IN",
+            "params": {
+              "km_ds_0": "d1",
+              "km_ds_1": "d2"
+            },
+            "sql": "SELECT mark FROM customer WHERE customer.dept_id IN (:km_ds_0, :km_ds_1)",
+            "values": [
+              "d1",
+              "d2"
+            ]
+          }
+        ],
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "customer",
+            null
+          ]
+        }
+      },
+      "id": "rewrite_00",
+      "sql": "SELECT mark FROM customer"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "apply_filters": [
+          {
+            "column": "create_by",
+            "filter_type": "USER_EQ",
+            "params": {
+              "km_ds_0": "u-1"
+            },
+            "sql": "SELECT * FROM customer WHERE customer.create_by = :km_ds_0",
+            "values": [
+              "u-1"
+            ]
+          },
+          {
+            "column": "dept_id",
+            "filter_type": "DEPT_IN",
+            "params": {
+              "km_ds_0": "d1",
+              "km_ds_1": "d2"
+            },
+            "sql": "SELECT * FROM customer WHERE customer.dept_id IN (:km_ds_0, :km_ds_1)",
+            "values": [
+              "d1",
+              "d2"
+            ]
+          }
+        ],
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "customer",
+            null
+          ]
+        }
+      },
+      "id": "rewrite_01",
+      "sql": "SELECT * FROM customer"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "apply_filters": [
+          {
+            "column": "create_by",
+            "filter_type": "USER_EQ",
+            "params": {
+              "km_ds_0": "u-1"
+            },
+            "sql": "SELECT * FROM customer AS c WHERE c.id > 1 AND c.create_by = :km_ds_0",
+            "values": [
+              "u-1"
+            ]
+          },
+          {
+            "column": "dept_id",
+            "filter_type": "DEPT_IN",
+            "params": {
+              "km_ds_0": "d1",
+              "km_ds_1": "d2"
+            },
+            "sql": "SELECT * FROM customer AS c WHERE c.id > 1 AND c.dept_id IN (:km_ds_0, :km_ds_1)",
+            "values": [
+              "d1",
+              "d2"
+            ]
+          }
+        ],
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "customer",
+            null
+          ]
+        }
+      },
+      "id": "rewrite_02",
+      "sql": "SELECT * FROM customer c WHERE c.id > 1"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "apply_filters": [
+          {
+            "column": "create_by",
+            "filter_type": "USER_EQ",
+            "params": {
+              "km_ds_0": "u-1"
+            },
+            "sql": "SELECT c.name, COUNT(r.id) FROM customer AS c JOIN rental AS r ON c.id = r.customer_id WHERE c.create_by = :km_ds_0 GROUP BY c.name",
+            "values": [
+              "u-1"
+            ]
+          },
+          {
+            "column": "dept_id",
+            "filter_type": "DEPT_IN",
+            "params": {
+              "km_ds_0": "d1",
+              "km_ds_1": "d2"
+            },
+            "sql": "SELECT c.name, COUNT(r.id) FROM customer AS c JOIN rental AS r ON c.id = r.customer_id WHERE c.dept_id IN (:km_ds_0, :km_ds_1) GROUP BY c.name",
+            "values": [
+              "d1",
+              "d2"
+            ]
+          }
+        ],
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "customer",
+            null
+          ]
+        }
+      },
+      "id": "rewrite_03",
+      "sql": "SELECT c.name, COUNT(r.id) FROM customer c JOIN rental r ON c.id = r.customer_id GROUP BY c.name"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "apply_filters": [
+          {
+            "column": "create_by",
+            "filter_type": "USER_EQ",
+            "params": {
+              "km_ds_0": "u-1"
+            },
+            "sql": "SELECT c.name FROM customer AS c WHERE c.id IN (SELECT customer_id FROM rental WHERE id > 10) AND c.create_by = :km_ds_0",
+            "values": [
+              "u-1"
+            ]
+          },
+          {
+            "column": "dept_id",
+            "filter_type": "DEPT_IN",
+            "params": {
+              "km_ds_0": "d1",
+              "km_ds_1": "d2"
+            },
+            "sql": "SELECT c.name FROM customer AS c WHERE c.id IN (SELECT customer_id FROM rental WHERE id > 10) AND c.dept_id IN (:km_ds_0, :km_ds_1)",
+            "values": [
+              "d1",
+              "d2"
+            ]
+          }
+        ],
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "customer",
+            null
+          ]
+        }
+      },
+      "id": "rewrite_04",
+      "sql": "SELECT c.name FROM customer c WHERE c.id IN (SELECT customer_id FROM rental WHERE id > 10)"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "apply_filters": [
+          {
+            "column": "create_by",
+            "filter_type": "USER_EQ",
+            "params": {},
+            "sql": "SELECT 1 UNION SELECT 2",
+            "values": [
+              "u-1"
+            ]
+          },
+          {
+            "column": "dept_id",
+            "filter_type": "DEPT_IN",
+            "params": {},
+            "sql": "SELECT 1 UNION SELECT 2",
+            "values": [
+              "d1",
+              "d2"
+            ]
+          }
+        ],
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "rewrite_05",
+      "sql": "SELECT 1 UNION SELECT 2"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "apply_filters": [
+          {
+            "column": "create_by",
+            "filter_type": "USER_EQ",
+            "params": {},
+            "sql": "SELECT 1;",
+            "values": [
+              "u-1"
+            ]
+          },
+          {
+            "column": "dept_id",
+            "filter_type": "DEPT_IN",
+            "params": {},
+            "sql": "SELECT 1;",
+            "values": [
+              "d1",
+              "d2"
+            ]
+          }
+        ],
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": null
+        }
+      },
+      "id": "rewrite_06",
+      "sql": "SELECT 1;"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "film",
+            null
+          ]
+        }
+      },
+      "id": "eval_datasource_074",
+      "sql": "SELECT COUNT(*) FROM film"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "category",
+            null
+          ]
+        }
+      },
+      "id": "eval_datasource_075",
+      "sql": "SELECT c.name, COUNT(*) FROM category c JOIN film_category fc ON c.category_id = fc.category_id GROUP BY c.name"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "payment",
+            null
+          ]
+        }
+      },
+      "id": "eval_datasource_076",
+      "sql": "SELECT c.first_name, c.last_name, SUM(p.amount) FROM payment p JOIN customer c ON p.customer_id = c.customer_id GROUP BY c.customer_id, c.first_name, c.last_name"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "orders",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_077",
+      "sql": "SELECT COUNT(*) FROM tenant_olist.orders"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "order_payments",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_078",
+      "sql": "SELECT payment_type, SUM(payment_value) FROM tenant_olist.order_payments GROUP BY payment_type"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "customers",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_079",
+      "sql": "SELECT customer_city FROM tenant_olist.customers ORDER BY customer_id LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "orders",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_080",
+      "sql": "SELECT DISTINCT order_status FROM tenant_olist.orders"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "sellers",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_081",
+      "sql": "SELECT seller_city FROM tenant_olist.sellers ORDER BY seller_id LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "orders",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_082",
+      "sql": "SELECT order_id FROM tenant_olist.orders WHERE order_status = 'shipped' ORDER BY order_id LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "order_reviews",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_083",
+      "sql": "SELECT review_id FROM tenant_olist.order_reviews WHERE review_score = 5 ORDER BY review_id LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "products",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_084",
+      "sql": "SELECT product_id FROM tenant_olist.products WHERE product_weight_g > 10000 ORDER BY product_id LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "orders",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_085",
+      "sql": "SELECT order_status, COUNT(*) FROM tenant_olist.orders GROUP BY order_status"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "order_reviews",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_086",
+      "sql": "SELECT ROUND(AVG(review_score), 2) FROM tenant_olist.order_reviews"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "customers",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_087",
+      "sql": "SELECT customer_state, COUNT(*) FROM tenant_olist.customers GROUP BY customer_state"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "order_payments",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_088",
+      "sql": "SELECT payment_installments, COUNT(*) FROM tenant_olist.order_payments GROUP BY payment_installments"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "order_items",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_089",
+      "sql": "SELECT order_id, SUM(freight_value) FROM tenant_olist.order_items GROUP BY order_id ORDER BY SUM(freight_value) DESC, order_id LIMIT 10"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "products",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_090",
+      "sql": "SELECT t.product_category_name_english, COUNT(*) FROM tenant_olist.products p JOIN tenant_olist.category_translation t ON p.product_category_name = t.product_category_name GROUP BY t.product_category_name_english"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "orders",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_091",
+      "sql": "SELECT o.order_id, p.payment_type, p.payment_value FROM tenant_olist.orders o JOIN tenant_olist.order_payments p ON o.order_id = p.order_id ORDER BY o.order_id, p.payment_sequential LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "orders",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_092",
+      "sql": "SELECT o.order_status, ROUND(AVG(r.review_score), 2) FROM tenant_olist.orders o JOIN tenant_olist.order_reviews r ON o.order_id = r.order_id GROUP BY o.order_status"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "orders",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_093",
+      "sql": "SELECT c.customer_city, COUNT(*) FROM tenant_olist.orders o JOIN tenant_olist.customers c ON o.customer_id = c.customer_id GROUP BY c.customer_city ORDER BY COUNT(*) DESC, c.customer_city LIMIT 10"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "order_items",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_094",
+      "sql": "SELECT p.product_category_name, ROUND(AVG(i.price), 2), ROUND(AVG(i.freight_value), 2) FROM tenant_olist.order_items i JOIN tenant_olist.products p ON i.product_id = p.product_id GROUP BY p.product_category_name"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "sellers",
+            "tenant_olist"
+          ]
+        }
+      },
+      "id": "eval_olist_095",
+      "sql": "SELECT seller_city, COUNT(*) FROM tenant_olist.sellers GROUP BY seller_city"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "film",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_096",
+      "sql": "SELECT COUNT(*) FROM tenant_sakila.film"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "category",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_097",
+      "sql": "SELECT c.name, COUNT(*) FROM tenant_sakila.category c JOIN tenant_sakila.film_category fc ON c.category_id = fc.category_id GROUP BY c.name"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "customer",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_098",
+      "sql": "SELECT email FROM tenant_sakila.customer ORDER BY customer_id LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "category",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_099",
+      "sql": "SELECT name FROM tenant_sakila.category"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "store",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_100",
+      "sql": "SELECT store_id FROM tenant_sakila.store"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "film",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_101",
+      "sql": "SELECT title FROM tenant_sakila.film WHERE rating = 'NC-17' ORDER BY film_id LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "film",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_102",
+      "sql": "SELECT title FROM tenant_sakila.film WHERE rental_rate > 3 ORDER BY film_id LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "film",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_103",
+      "sql": "SELECT title FROM tenant_sakila.film WHERE length > 120 ORDER BY film_id LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "payment",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_104",
+      "sql": "SELECT c.first_name, c.last_name, SUM(p.amount) FROM tenant_sakila.payment p JOIN tenant_sakila.customer c ON p.customer_id = c.customer_id GROUP BY c.customer_id, c.first_name, c.last_name"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "rental",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_105",
+      "sql": "SELECT c.first_name, c.last_name, COUNT(*) FROM tenant_sakila.rental r JOIN tenant_sakila.customer c ON r.customer_id = c.customer_id GROUP BY c.customer_id, c.first_name, c.last_name ORDER BY COUNT(*) DESC, c.customer_id LIMIT 5"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "inventory",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_106",
+      "sql": "SELECT store_id, COUNT(*) FROM tenant_sakila.inventory GROUP BY store_id"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "rental",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_107",
+      "sql": "SELECT c.first_name, c.last_name, COUNT(*) FROM tenant_sakila.rental r JOIN tenant_sakila.customer c ON r.customer_id = c.customer_id GROUP BY c.customer_id, c.first_name, c.last_name"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "film",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_108",
+      "sql": "SELECT ROUND(AVG(rental_rate), 2) FROM tenant_sakila.film"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "actor",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_109",
+      "sql": "SELECT a.first_name, a.last_name, COUNT(*) FROM tenant_sakila.actor a JOIN tenant_sakila.film_actor fa ON a.actor_id = fa.actor_id GROUP BY a.actor_id, a.first_name, a.last_name"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "film",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_110",
+      "sql": "SELECT f.title, c.name FROM tenant_sakila.film f JOIN tenant_sakila.film_category fc ON f.film_id = fc.film_id JOIN tenant_sakila.category c ON fc.category_id = c.category_id ORDER BY f.film_id LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "customer",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_111",
+      "sql": "SELECT r.customer_id, c.first_name || ' ' || c.last_name AS customer_name, f.title FROM tenant_sakila.customer c JOIN tenant_sakila.rental r ON c.customer_id = r.customer_id JOIN tenant_sakila.inventory i ON r.inventory_id = i.inventory_id JOIN tenant_sakila.film f ON i.film_id = f.film_id ORDER BY r.customer_id, f.title LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "actor",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_112",
+      "sql": "SELECT a.first_name, a.last_name, f.title FROM tenant_sakila.actor a JOIN tenant_sakila.film_actor fa ON a.actor_id = fa.actor_id JOIN tenant_sakila.film f ON fa.film_id = f.film_id ORDER BY a.actor_id, f.film_id LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "payment",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_113",
+      "sql": "SELECT c.first_name, c.last_name, f.title, p.amount FROM tenant_sakila.payment p JOIN tenant_sakila.rental r ON p.rental_id = r.rental_id JOIN tenant_sakila.inventory i ON r.inventory_id = i.inventory_id JOIN tenant_sakila.film f ON i.film_id = f.film_id JOIN tenant_sakila.customer c ON p.customer_id = c.customer_id ORDER BY p.payment_id LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "inventory",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_114",
+      "sql": "SELECT i.store_id, c.name, COUNT(*) FROM tenant_sakila.inventory i JOIN tenant_sakila.film_category fc ON i.film_id = fc.film_id JOIN tenant_sakila.category c ON fc.category_id = c.category_id GROUP BY i.store_id, c.name"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "actor",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_115",
+      "sql": "SELECT DISTINCT c.name, a.actor_id, a.first_name, a.last_name FROM tenant_sakila.actor a JOIN tenant_sakila.film_actor fa ON a.actor_id = fa.actor_id JOIN tenant_sakila.film_category fc ON fa.film_id = fc.film_id JOIN tenant_sakila.category c ON fc.category_id = c.category_id ORDER BY c.name, a.actor_id LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "customer",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_116",
+      "sql": "SELECT r.customer_id, c.first_name || ' ' || c.last_name AS customer_name, f.title, ca.name FROM tenant_sakila.customer c JOIN tenant_sakila.rental r ON c.customer_id = r.customer_id JOIN tenant_sakila.inventory i ON r.inventory_id = i.inventory_id JOIN tenant_sakila.film f ON i.film_id = f.film_id JOIN tenant_sakila.film_category fc ON f.film_id = fc.film_id JOIN tenant_sakila.category ca ON fc.category_id = ca.category_id ORDER BY r.customer_id, f.title, ca.name LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "payment",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_117",
+      "sql": "SELECT c.first_name, c.last_name, f.title, ca.name, p.amount FROM tenant_sakila.payment p JOIN tenant_sakila.rental r ON p.rental_id = r.rental_id JOIN tenant_sakila.inventory i ON r.inventory_id = i.inventory_id JOIN tenant_sakila.film f ON i.film_id = f.film_id JOIN tenant_sakila.film_category fc ON f.film_id = fc.film_id JOIN tenant_sakila.category ca ON fc.category_id = ca.category_id JOIN tenant_sakila.customer c ON p.customer_id = c.customer_id ORDER BY p.payment_id LIMIT 100"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "film",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_118",
+      "sql": "SELECT c.name, ROUND(AVG(f.rental_rate), 2) FROM tenant_sakila.film f JOIN tenant_sakila.film_category fc ON f.film_id = fc.film_id JOIN tenant_sakila.category c ON fc.category_id = c.category_id GROUP BY c.name"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "category",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_119",
+      "sql": "SELECT c.name, COUNT(*) AS cnt FROM tenant_sakila.category c JOIN tenant_sakila.film_category fc ON c.category_id = fc.category_id GROUP BY c.name ORDER BY cnt DESC, c.name LIMIT 1"
+    },
+    {
+      "allowed_schemas": null,
+      "expect": {
+        "check": {
+          "passed": true,
+          "reason": null
+        },
+        "check_reserved_tables": {
+          "passed": true,
+          "reason": null
+        },
+        "main_table_ref": {
+          "ref": [
+            "rental",
+            "tenant_sakila"
+          ]
+        }
+      },
+      "id": "eval_sakila_120",
+      "sql": "SELECT COUNT(DISTINCT customer_id) FROM tenant_sakila.rental"
+    }
+  ],
+  "depth_cases": [
+    {
+      "expect_reason_prefix": "DEPTH_EXCEEDED",
+      "id": "depth_subq_40_default",
+      "max_depth": null,
+      "sql": "SELECT * FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM ( FROM (t))))))))))))))))))))))))))))))))))))))))"
+    },
+    {
+      "expect_reason_prefix": "DEPTH_EXCEEDED",
+      "id": "depth_expr_60_prescan_bypassed",
+      "max_depth": 200,
+      "sql": "SELECT abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(abs(1))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))"
+    }
+  ],
+  "generator": "kongming apps/api/scripts/export_sqlguard_fixtures.py",
+  "schema_version": 1
+}

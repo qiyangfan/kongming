@@ -40,9 +40,7 @@ def _svc(session: AsyncSession, actor_id: str | None = None) -> TeamService:
     return TeamService(SqlTeamRepo(session), _Oper(session, actor_id) if actor_id else None)
 
 
-async def _tenant_or_403(
-    user: dict[str, object], session: AsyncSession, header: str | None
-) -> str:
+async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header: str | None) -> str:
     repo = ChatRepository(session)
     uid = str(user["sub"])
     if header is not None:
@@ -66,9 +64,7 @@ async def _require_owner_or_manage(
     perms = await SqlPermRepo(session).list_codes(str(user["sub"]))
     if MANAGE in set(perms):
         return
-    role = await SqlTeamRepo(session).get_member_role(
-        team_id=team_id, user_id=str(user["sub"])
-    )
+    role = await SqlTeamRepo(session).get_member_role(team_id=team_id, user_id=str(user["sub"]))
     if role != "OWNER":
         raise HTTPException(status_code=403, detail="TEAM_OWNER_REQUIRED")
 
@@ -174,12 +170,8 @@ async def get_team(
     # R1-J7:成员关系过滤(与 docstring 一致)——非成员且无 manage 404 同形
     from kongming.auth.repository import SqlPermRepo
 
-    role = await SqlTeamRepo(session).get_member_role(
-        team_id=team_id, user_id=str(user["sub"])
-    )
-    if role is None and MANAGE not in set(
-        await SqlPermRepo(session).list_codes(str(user["sub"]))
-    ):
+    role = await SqlTeamRepo(session).get_member_role(team_id=team_id, user_id=str(user["sub"]))
+    if role is None and MANAGE not in set(await SqlPermRepo(session).list_codes(str(user["sub"]))):
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     try:
         out = await svc.get_with_members(tenant_id=tenant_id, team_id=team_id)
@@ -228,9 +220,7 @@ async def delete_team(
 ) -> dict[str, bool]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     try:
-        await _svc(session, str(user["sub"])).delete(
-            tenant_id=tenant_id, team_id=team_id
-        )
+        await _svc(session, str(user["sub"])).delete(tenant_id=tenant_id, team_id=team_id)
         await session.commit()
     except TeamNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
@@ -315,9 +305,7 @@ async def attach_resource(
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
-    role = await SqlTeamRepo(session).get_member_role(
-        team_id=team_id, user_id=str(user["sub"])
-    )
+    role = await SqlTeamRepo(session).get_member_role(team_id=team_id, user_id=str(user["sub"]))
     # 资源创建者反查(bot/workflow 两表)
     from sqlalchemy import text as _text
 

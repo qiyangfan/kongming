@@ -22,8 +22,7 @@ def test_visibility_matrix() -> None:
     assert visible(team_id=None, creator_id="c", user_id="x", member_role=None) is False
     # 团队资源:成员即可见(角色不分)
     for role in ("VIEWER", "MEMBER", "OWNER"):
-        assert visible(team_id="t", creator_id="c", user_id="m",
-                       member_role=role) is True
+        assert visible(team_id="t", creator_id="c", user_id="m", member_role=role) is True
     assert visible(team_id="t", creator_id="c", user_id="m", member_role=None) is False
     # 编辑:MEMBER+
     assert can_edit(team_id="t", creator_id="c", user_id="m", member_role="VIEWER") is False
@@ -108,9 +107,7 @@ async def test_team_crud_and_member_management(
     assert r3.status_code == 403
     # 末位 OWNER 保护:先移除自己(唯一 OWNER)→ 409
     owner_uid = users["tm_owner"][0]
-    r4 = await client.delete(
-        f"/system/teams/{tid}/members/{owner_uid}", headers=_h(owner_token)
-    )
+    r4 = await client.delete(f"/system/teams/{tid}/members/{owner_uid}", headers=_h(owner_token))
     assert r4.status_code == 409
     # 我所在的团队(成员关系过滤)
     r5 = await client.get("/system/teams", headers=_h(viewer_token))
@@ -162,16 +159,12 @@ async def test_bot_visibility_by_team(
     # 给 owner 建 bot(需 DEVELOPER 权限——tm_owner 的角色只有 team:manage,
     # 补 chat:execute 系列)
     rid = (
-        await session.execute(
-            text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'")
-        )
+        await session.execute(text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'"))
     ).scalar_one()
     for uid, _ in users.values():
         await _bind(session, "sys_user_role", uid, str(rid))
     await session.commit()
-    r = await client.post(
-        "/system/bots", headers=_h(owner_token), json=BOT_PAYLOAD
-    )
+    r = await client.post("/system/bots", headers=_h(owner_token), json=BOT_PAYLOAD)
     bot_id = r.json()["id"]
     # 归属变更到团队
     r2 = await client.post(
@@ -192,9 +185,7 @@ async def test_bot_visibility_by_team(
     r3 = await client.get("/system/bots", headers=_h(viewer_token))
     assert any(b["id"] == bot_id for b in r3.json())
     # VIEWER 编辑被拒(403)
-    r4 = await client.put(
-        f"/system/bots/{bot_id}", headers=_h(viewer_token), json={"name": "改名"}
-    )
+    r4 = await client.put(f"/system/bots/{bot_id}", headers=_h(viewer_token), json={"name": "改名"})
     assert r4.status_code == 403
     # MEMBER 可编辑
     r5 = await client.put(
@@ -204,9 +195,7 @@ async def test_bot_visibility_by_team(
     # 非成员列表不含+编辑 404 同形
     r6 = await client.get("/system/bots", headers=_h(out_token))
     assert all(b["id"] != bot_id for b in r6.json())
-    r7 = await client.put(
-        f"/system/bots/{bot_id}", headers=_h(out_token), json={"name": "x"}
-    )
+    r7 = await client.put(f"/system/bots/{bot_id}", headers=_h(out_token), json={"name": "x"})
     assert r7.status_code in (403, 404)
 
 
@@ -219,9 +208,7 @@ async def test_workflow_visibility_by_team(
     member_uid, member_token = users["tm_member"]
     _, out_token = users["tm_out"]
     rid = (
-        await session.execute(
-            text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'")
-        )
+        await session.execute(text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'"))
     ).scalar_one()
     # outsider 也绑(workflow:execute 是运行端点门槛;可见性 404 须先过权限闸)
     for uid in (owner_uid, member_uid, users["tm_out"][0]):
@@ -231,10 +218,15 @@ async def test_workflow_visibility_by_team(
     await _bind(session, "sys_user_role", owner_uid, prid)
     await session.commit()
     r = await client.post(
-        "/system/workflow", headers=_h(owner_token),
-        json={"wf_key": "tv", "name": "可见性", "definition": {
-            "nodes": [{"id": "t", "type": "transform", "config": {"template": "x"}}]
-        }},
+        "/system/workflow",
+        headers=_h(owner_token),
+        json={
+            "wf_key": "tv",
+            "name": "可见性",
+            "definition": {
+                "nodes": [{"id": "t", "type": "transform", "config": {"template": "x"}}]
+            },
+        },
     )
     assert r.status_code == 201, r.text
     tid = await _mk_team(client, owner_token)
@@ -245,9 +237,7 @@ async def test_workflow_visibility_by_team(
     )
     # 归属
     wf_row = (
-        await session.execute(
-            text("SELECT id FROM public.sys_workflow_def WHERE wf_key='tv'")
-        )
+        await session.execute(text("SELECT id FROM public.sys_workflow_def WHERE wf_key='tv'"))
     ).scalar_one()
     r2 = await client.post(
         f"/system/teams/{tid}/attach",
@@ -259,13 +249,11 @@ async def test_workflow_visibility_by_team(
     r3 = await client.get("/system/workflow", headers=_h(owner_token))
     assert any(w["wf_key"] == "tv" for w in r3.json())
     # MEMBER(workflow:execute)可运行团队工作流(可见性放行)
-    r4 = await client.post("/system/workflow/tv/run", headers=_h(member_token),
-                           json={"inputs": {}})
+    r4 = await client.post("/system/workflow/tv/run", headers=_h(member_token), json={"inputs": {}})
     assert r4.status_code == 200, r4.text
     assert r4.json()["status"] == "SUCCESS"
     # 非成员触发 404 同形
-    r6 = await client.post("/system/workflow/tv/run", headers=_h(out_token),
-                           json={"inputs": {}})
+    r6 = await client.post("/system/workflow/tv/run", headers=_h(out_token), json={"inputs": {}})
     assert r6.status_code == 404
 
 
@@ -281,9 +269,7 @@ async def test_attach_cross_tenant_rejected(
 
     dtid = await _default_tenant_id(session)
     rid = (
-        await session.execute(
-            text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'")
-        )
+        await session.execute(text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'"))
     ).scalar_one()
     await _bind(session, "sys_user_role", owner_uid, str(rid))
     await _bind(session, "sys_user_tenant", owner_uid, dtid)
@@ -322,19 +308,22 @@ async def test_workflow_new_version_gate_and_inherit(
     for uid in (owner_uid, member_uid, users["tm_out"][0]):
         await _bind(session, "sys_user_role", uid, prid)
     rid = (
-        await session.execute(
-            text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'")
-        )
+        await session.execute(text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'"))
     ).scalar_one()
     for uid in (owner_uid, member_uid, users["tm_out"][0]):
         await _bind(session, "sys_user_role", uid, str(rid))
     await session.commit()
     # owner 建工作流并挂团队
     r = await client.post(
-        "/system/workflow", headers=_h(owner_token),
-        json={"wf_key": "gate", "name": "闸", "definition": {
-            "nodes": [{"id": "t", "type": "transform", "config": {"template": "x"}}]
-        }},
+        "/system/workflow",
+        headers=_h(owner_token),
+        json={
+            "wf_key": "gate",
+            "name": "闸",
+            "definition": {
+                "nodes": [{"id": "t", "type": "transform", "config": {"template": "x"}}]
+            },
+        },
     )
     assert r.status_code == 201, r.text
     tid = await _mk_team(client, owner_token)
@@ -344,9 +333,7 @@ async def test_workflow_new_version_gate_and_inherit(
         json={"user_id": member_uid, "role": "MEMBER"},
     )
     wf_row = (
-        await session.execute(
-            text("SELECT id FROM public.sys_workflow_def WHERE wf_key='gate'")
-        )
+        await session.execute(text("SELECT id FROM public.sys_workflow_def WHERE wf_key='gate'"))
     ).scalar_one()
     await client.post(
         f"/system/teams/{tid}/attach",
@@ -355,26 +342,33 @@ async def test_workflow_new_version_gate_and_inherit(
     )
     # 非成员存新版本 → 403(编辑闸)
     r2 = await client.post(
-        "/system/workflow", headers=_h(out_token),
-        json={"wf_key": "gate", "name": "闸v2", "definition": {
-            "nodes": [{"id": "t", "type": "transform", "config": {"template": "y"}}]
-        }},
+        "/system/workflow",
+        headers=_h(out_token),
+        json={
+            "wf_key": "gate",
+            "name": "闸v2",
+            "definition": {
+                "nodes": [{"id": "t", "type": "transform", "config": {"template": "y"}}]
+            },
+        },
     )
     assert r2.status_code == 403
     # MEMBER 存新版本 → 201 且继承 team_id
     r3 = await client.post(
-        "/system/workflow", headers=_h(member_token),
-        json={"wf_key": "gate", "name": "闸v2", "definition": {
-            "nodes": [{"id": "t", "type": "transform", "config": {"template": "y"}}]
-        }},
+        "/system/workflow",
+        headers=_h(member_token),
+        json={
+            "wf_key": "gate",
+            "name": "闸v2",
+            "definition": {
+                "nodes": [{"id": "t", "type": "transform", "config": {"template": "y"}}]
+            },
+        },
     )
     assert r3.status_code == 201, r3.text
     new_team = (
         await session.execute(
-            text(
-                "SELECT team_id FROM public.sys_workflow_def"
-                " WHERE wf_key='gate' AND version=2"
-            )
+            text("SELECT team_id FROM public.sys_workflow_def WHERE wf_key='gate' AND version=2")
         )
     ).scalar_one()
     assert str(new_team) == tid
@@ -413,9 +407,7 @@ async def test_left_team_member_not_recalled(
     _, owner_token = users["tm_owner"]
     member_uid, member_token = users["tm_member"]
     rid = (
-        await session.execute(
-            text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'")
-        )
+        await session.execute(text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'"))
     ).scalar_one()
     await _bind(session, "sys_user_role", member_uid, str(rid))
     await session.commit()
@@ -426,7 +418,8 @@ async def test_left_team_member_not_recalled(
         json={"user_id": member_uid, "role": "MEMBER"},
     )
     r = await client.post(
-        "/memory", headers=_h(member_token),
+        "/memory",
+        headers=_h(member_token),
         json={"content": "离队后不应召回的口径", "team_id": tid},
     )
     assert r.status_code == 201
@@ -436,8 +429,7 @@ async def test_left_team_member_not_recalled(
         headers=_h(owner_token),
         json={"user_id": users["tm_owner"][0], "role": "OWNER"},
     )
-    r2 = await client.delete(f"/system/teams/{tid}/members/{member_uid}",
-                             headers=_h(owner_token))
+    r2 = await client.delete(f"/system/teams/{tid}/members/{member_uid}", headers=_h(owner_token))
     assert r2.status_code == 200
     # SQL 语义直证:个人分支(team_id IS NULL)不再命中该行
     n = (
@@ -464,9 +456,7 @@ async def test_team_memory_write_and_recall(
     viewer_uid, viewer_token = users["tm_viewer"]
     out_uid, _out_token = users["tm_out"]
     rid = (
-        await session.execute(
-            text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'")
-        )
+        await session.execute(text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'"))
     ).scalar_one()
     for uid in (member_uid, viewer_uid, out_uid):
         await _bind(session, "sys_user_role", uid, str(rid))
@@ -484,13 +474,15 @@ async def test_team_memory_write_and_recall(
     )
     # VIEWER 写入拒
     r = await client.post(
-        "/memory", headers=_h(viewer_token),
+        "/memory",
+        headers=_h(viewer_token),
         json={"content": "GMV 口径不含退款", "team_id": tid},
     )
     assert r.status_code == 403
     # MEMBER 写入可
     r2 = await client.post(
-        "/memory", headers=_h(member_token),
+        "/memory",
+        headers=_h(member_token),
         json={"content": "GMV 口径不含退款", "team_id": tid},
     )
     assert r2.status_code == 201, r2.text
@@ -543,25 +535,21 @@ async def test_team_bot_key_revoke_requires_can_manage(
         json={"user_id": users["tm_viewer"][0], "role": "VIEWER"},
     )
     rid = (
-        await session.execute(
-            text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'")
-        )
+        await session.execute(text("SELECT id FROM public.sys_role WHERE role_key='DEVELOPER'"))
     ).scalar_one()
     for uid, _ in users.values():
         await _bind(session, "sys_user_role", uid, str(rid))
     await session.commit()
-    bot_id = (
-        await client.post("/system/bots", headers=_h(owner_token), json=BOT_PAYLOAD)
-    ).json()["id"]
+    bot_id = (await client.post("/system/bots", headers=_h(owner_token), json=BOT_PAYLOAD)).json()[
+        "id"
+    ]
     await client.post(
         f"/system/teams/{tid}/attach",
         headers=_h(owner_token),
         json={"resource_type": "bot", "resource_id": bot_id},
     )
     key_id = (
-        await client.post(
-            f"/system/bots/{bot_id}/keys?name=k", headers=_h(owner_token)
-        )
+        await client.post(f"/system/bots/{bot_id}/keys?name=k", headers=_h(owner_token))
     ).json()["id"]
     # VIEWER 可见团队 Bot(get_mine 命中),但吊销须 can_manage → 403
     r = await client.delete(f"/system/bots/keys/{key_id}", headers=_h(viewer_token))

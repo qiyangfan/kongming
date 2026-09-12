@@ -38,8 +38,13 @@ class StubLlm:
         self.task_seen: object = None
 
     async def chat(
-        self, system: str, user: str, *, temperature: float = 0.2,
-        max_tokens: int | None = None, **kw: object,
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.2,
+        max_tokens: int | None = None,
+        **kw: object,
     ) -> str:
         self.calls.append((system, user))
         self.task_seen = kw.get("task")
@@ -101,11 +106,7 @@ def test_unparseable_output_raises() -> None:
 
 def test_all_invalid_items_raises() -> None:
     with pytest.raises(SuggestError):
-        _run(
-            suggest_questions(
-                _DIGEST, cast("LlmClient", StubLlm('{"questions": ["", "   "]}'))
-            )
-        )
+        _run(suggest_questions(_DIGEST, cast("LlmClient", StubLlm('{"questions": ["", "   "]}'))))
 
 
 def test_success_returns_cleaned_and_uses_suggest_task() -> None:
@@ -132,7 +133,7 @@ def test_prompt_full_width_punctuation() -> None:
             if ch in (",", ".") and 0 < i < len(prompt) - 1:
                 if _is_han(prompt[i - 1]) and _is_han(prompt[i + 1]):
                     pytest.fail(
-                        f"prompt 出现汉字间半角标点 {ch!r}: {prompt[max(0, i - 6):i + 6]}"
+                        f"prompt 出现汉字间半角标点 {ch!r}: {prompt[max(0, i - 6) : i + 6]}"
                     )
 
 
@@ -155,9 +156,7 @@ def test_endpoint_ok(monkeypatch: pytest.MonkeyPatch) -> None:
         deps, "get_llm", lambda: StubLlm('{"questions": ["共有多少商品？", "最近趋势如何？"]}')
     )
     client = TestClient(app)
-    r = client.post(
-        "/internal/suggest-questions", json={"digest": _DIGEST}, headers=INTERNAL
-    )
+    r = client.post("/internal/suggest-questions", json={"digest": _DIGEST}, headers=INTERNAL)
     assert r.status_code == 200
     body = r.json()
     assert body["generated"] is True
@@ -167,9 +166,7 @@ def test_endpoint_ok(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_endpoint_llm_failure_degrades(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(deps, "get_llm", lambda: StubLlm(boom=True))
     client = TestClient(app)
-    r = client.post(
-        "/internal/suggest-questions", json={"digest": _DIGEST}, headers=INTERNAL
-    )
+    r = client.post("/internal/suggest-questions", json={"digest": _DIGEST}, headers=INTERNAL)
     assert r.status_code == 200  # 降级不 5xx
     assert r.json() == {"questions": [], "generated": False}
 
@@ -183,7 +180,5 @@ def test_endpoint_requires_internal_token() -> None:
 def test_endpoint_blank_digest_422(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(deps, "get_llm", lambda: StubLlm("x"))
     client = TestClient(app)
-    r = client.post(
-        "/internal/suggest-questions", json={"digest": ""}, headers=INTERNAL
-    )
+    r = client.post("/internal/suggest-questions", json={"digest": ""}, headers=INTERNAL)
     assert r.status_code == 422

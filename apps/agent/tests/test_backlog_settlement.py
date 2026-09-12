@@ -38,15 +38,17 @@ def _tool_completion(*, content: str | None, tool_name: str | None, call_id: str
             ChatCompletionMessageFunctionToolCall(
                 id=call_id,
                 type="function",
-                function=Function(
-                    name=tool_name, arguments=json.dumps({"sql": "SELECT 1"})
-                ),
+                function=Function(name=tool_name, arguments=json.dumps({"sql": "SELECT 1"})),
             )
         ]
     msg = ChatCompletionMessage(role="assistant", content=content, tool_calls=tool_calls)  # pyright: ignore[reportArgumentType]  # SDK 存根 list 不变型,Function 子类实参运行时安全
     choice = Choice(index=0, message=msg, finish_reason="tool_calls" if tool_name else "stop")
     return ChatCompletion(
-        id="cmpl-x", choices=[choice], created=1, model="fake", object="chat.completion",
+        id="cmpl-x",
+        choices=[choice],
+        created=1,
+        model="fake",
+        object="chat.completion",
         usage=CompletionUsage(prompt_tokens=11, completion_tokens=7, total_tokens=18),
     )
 
@@ -139,12 +141,8 @@ async def test_attachment_error_carries_usage_records(
     monkeypatch.setattr(llm_mod, "set_usage_collector", _spy_set)
     from httpx import ASGITransport
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
-        resp = await c.post(
-            "/query_react", json=_react_payload(collect_usage=True), headers=TOKEN
-        )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post("/query_react", json=_react_payload(collect_usage=True), headers=TOKEN)
     assert resp.status_code == 200
     body = resp.json()
     assert body["success"] is False and body["error"]
@@ -176,11 +174,10 @@ async def test_stream_attachment_error_carries_usage_records(
     monkeypatch.setattr(llm_mod, "set_usage_collector", _spy_set)
     from httpx import ASGITransport
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post(
-            "/query_react/stream", json=_react_payload(collect_usage=True),
+            "/query_react/stream",
+            json=_react_payload(collect_usage=True),
             headers=TOKEN,
         )
     assert resp.status_code == 200
@@ -239,4 +236,3 @@ async def test_llm_pool_rebuilt_on_fingerprint_change(
     finally:
         d.reset_llm_cache()
         monkeypatch.delenv("KM_AGENT_LLM_API_KEY", raising=False)
-

@@ -166,7 +166,5 @@ async def mcp_endpoint(
                 },
             )
         text = str(out.get("summary") or "")
-        return _result(
-            rpc_id, {"content": [{"type": "text", "text": text}], "isError": False}
-        )
+        return _result(rpc_id, {"content": [{"type": "text", "text": text}], "isError": False})
     return _error(rpc_id, -32601, f"方法不存在: {method[:60]}")

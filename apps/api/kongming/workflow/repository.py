@@ -76,29 +76,35 @@ class SqlWorkflowRepo:
 
     async def latest_def(self, *, tenant_id: str, wf_key: str) -> dict[str, Any] | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT * FROM public.sys_workflow_def"
-                    " WHERE tenant_id=CAST(:t AS uuid) AND wf_key=:k"
-                    " ORDER BY version DESC LIMIT 1"
-                ),
-                {"t": tenant_id, "k": wf_key},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT * FROM public.sys_workflow_def"
+                        " WHERE tenant_id=CAST(:t AS uuid) AND wf_key=:k"
+                        " ORDER BY version DESC LIMIT 1"
+                    ),
+                    {"t": tenant_id, "k": wf_key},
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
         return dict(row) if row else None
 
-    async def get_def(
-        self, *, tenant_id: str, wf_key: str, version: int
-    ) -> dict[str, Any] | None:
+    async def get_def(self, *, tenant_id: str, wf_key: str, version: int) -> dict[str, Any] | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT * FROM public.sys_workflow_def"
-                    " WHERE tenant_id=CAST(:t AS uuid) AND wf_key=:k AND version=:v"
-                ),
-                {"t": tenant_id, "k": wf_key, "v": version},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT * FROM public.sys_workflow_def"
+                        " WHERE tenant_id=CAST(:t AS uuid) AND wf_key=:k AND version=:v"
+                    ),
+                    {"t": tenant_id, "k": wf_key, "v": version},
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
         return dict(row) if row else None
 
     async def list_latest(
@@ -127,16 +133,20 @@ class SqlWorkflowRepo:
 
     async def list_versions(self, *, tenant_id: str, wf_key: str) -> list[dict[str, Any]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, wf_key, name, version, enabled, created_at"
-                    " FROM public.sys_workflow_def"
-                    " WHERE tenant_id=CAST(:t AS uuid) AND wf_key=:k"
-                    " ORDER BY version DESC"
-                ),
-                {"t": tenant_id, "k": wf_key},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, wf_key, name, version, enabled, created_at"
+                        " FROM public.sys_workflow_def"
+                        " WHERE tenant_id=CAST(:t AS uuid) AND wf_key=:k"
+                        " ORDER BY version DESC"
+                    ),
+                    {"t": tenant_id, "k": wf_key},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def set_enabled(self, *, def_id: str, tenant_id: str, enabled: bool) -> bool:
@@ -219,38 +229,44 @@ class SqlWorkflowRepo:
         # R1-提示3:列表剥 node_runs.outputs(快照可含 64KB body/千行,
         # 全量回传会膨胀到数十 MB);status/error/duration 保留
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, tenant_id, wf_key, version, trigger_source, inputs,"
-                    " status, error, duration_ms, created_at,"
-                    " (SELECT jsonb_agg(jsonb_set(e, '{outputs}', 'null'::jsonb))"
-                    "  FROM jsonb_array_elements(node_runs) e) AS node_runs"
-                    " FROM public.sys_workflow_run"
-                    " WHERE tenant_id=CAST(:t AS uuid) AND wf_key=:k"
-                    " ORDER BY created_at DESC, id DESC LIMIT :lim OFFSET :off"
-                ),
-                {"t": tenant_id, "k": wf_key, "lim": size, "off": (page - 1) * size},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, tenant_id, wf_key, version, trigger_source, inputs,"
+                        " status, error, duration_ms, created_at,"
+                        " (SELECT jsonb_agg(jsonb_set(e, '{outputs}', 'null'::jsonb))"
+                        "  FROM jsonb_array_elements(node_runs) e) AS node_runs"
+                        " FROM public.sys_workflow_run"
+                        " WHERE tenant_id=CAST(:t AS uuid) AND wf_key=:k"
+                        " ORDER BY created_at DESC, id DESC LIMIT :lim OFFSET :off"
+                    ),
+                    {"t": tenant_id, "k": wf_key, "lim": size, "off": (page - 1) * size},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return total, [dict(r) for r in rows]
 
-    async def get_run(
-        self, *, tenant_id: str, wf_key: str, run_id: str
-    ) -> dict[str, Any] | None:
+    async def get_run(self, *, tenant_id: str, wf_key: str, run_id: str) -> dict[str, Any] | None:
         """run 详情(029⑤ 清偿):完整快照含 outputs(列表剥除防膨胀,
         详情按需取);不存在/跨租户 None 同形。"""
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT id, tenant_id, wf_key, version, trigger_source, inputs,"
-                    " status, error, duration_ms, node_runs, created_at"
-                    " FROM public.sys_workflow_run"
-                    " WHERE tenant_id=CAST(:t AS uuid) AND wf_key=:k"
-                    "   AND id=CAST(:r AS uuid)"
-                ),
-                {"t": tenant_id, "k": wf_key, "r": run_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, tenant_id, wf_key, version, trigger_source, inputs,"
+                        " status, error, duration_ms, node_runs, created_at"
+                        " FROM public.sys_workflow_run"
+                        " WHERE tenant_id=CAST(:t AS uuid) AND wf_key=:k"
+                        "   AND id=CAST(:r AS uuid)"
+                    ),
+                    {"t": tenant_id, "k": wf_key, "r": run_id},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return None if row is None else dict(row)
 
     async def commit(self) -> None:

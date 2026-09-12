@@ -42,9 +42,7 @@ class _Llm:
 
 class _Api:
     def __init__(self, outcome: SqlExecuteOutcome | None = None) -> None:
-        self.outcome = outcome or SqlExecuteOutcome(
-            verdict="PASS", columns=["qty"], rows=[[30]]
-        )
+        self.outcome = outcome or SqlExecuteOutcome(verdict="PASS", columns=["qty"], rows=[[30]])
 
     async def rag_retrieve(self, **kw: object) -> RagContext | None:
         return None
@@ -66,11 +64,9 @@ class _Api:
         return self.outcome
 
 
-def _client(
-    monkeypatch: pytest.MonkeyPatch, llm: _Llm, api: _Api | None = None
-) -> AsyncClient:
+def _client(monkeypatch: pytest.MonkeyPatch, llm: _Llm, api: _Api | None = None) -> AsyncClient:
     monkeypatch.setattr(deps, "get_llm", lambda: llm)
-    monkeypatch.setattr(deps, "get_api", lambda: (api or _Api()))
+    monkeypatch.setattr(deps, "get_api", lambda: api or _Api())
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
@@ -201,9 +197,7 @@ async def test_stream_validate_rejected_no_sql_event(
         for i, (e, d) in enumerate(frames)
         if e == "stage" and d.get("node") == "validate" and d.get("status") == "done"
     ]
-    sql_between_first = any(
-        e == "sql" for e, _ in frames[validate_dones[0] : validate_dones[1]]
-    )
+    sql_between_first = any(e == "sql" for e, _ in frames[validate_dones[0] : validate_dones[1]])
     assert not sql_between_first
     assert events.count("sql") == 1
     # 终态 result 成功(重试一次后 PASS)
@@ -221,9 +215,7 @@ async def test_stream_permission_block_no_sql_no_selfheal(
     frames = _parse_sse(resp.text)
     events = [e for e, _ in frames]
     assert "sql" not in events
-    assert all(
-        not (e == "stage" and d.get("node") == "selfheal") for e, d in frames
-    )
+    assert all(not (e == "stage" and d.get("node") == "selfheal") for e, d in frames)
     assert events[-1] == "result"
     assert frames[-1][1]["verdict"] == "BLOCKED"
     assert frames[-1][1]["success"] is False

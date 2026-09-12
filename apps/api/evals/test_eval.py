@@ -71,9 +71,7 @@ async def _eval_single(case: dict[str, Any]) -> tuple[bool, bool, bool]:
     # gold 执行(失败=评估集本身有误,直接 fail);
     # gold_database=动态源题直连其独立业务库(与生成侧动态路由同落点)
     try:
-        gold_cols, gold_rows = await exec_sql(
-            gold_sql, database=case.get("gold_database")
-        )
+        gold_cols, gold_rows = await exec_sql(gold_sql, database=case.get("gold_database"))
     except Exception as e:  # noqa: BLE001  # asyncpg 异常族统一收敛评估集错误
         pytest.fail(f"[{case['id']}] gold_sql 执行失败(评估集本身有误): {e}")
 
@@ -118,9 +116,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         metafunc.parametrize("smoke_case", selected, ids=[str(c["id"]) for c in selected])
     if "multiturn_case" in metafunc.fixturenames:
         selected = [c for c in cases if "turns" in c]
-        metafunc.parametrize(
-            "multiturn_case", selected, ids=[str(c["id"]) for c in selected]
-        )
+        metafunc.parametrize("multiturn_case", selected, ids=[str(c["id"]) for c in selected])
 
 
 @pytest.mark.smoke
@@ -151,9 +147,7 @@ async def test_full_all(all_cases: list[dict[str, Any]]) -> None:
     }
     details: list[str] = []
     for case in single:
-        is_ds = case.get("datasource_key") or str(case.get("category", "")).startswith(
-            "datasource"
-        )
+        is_ds = case.get("datasource_key") or str(case.get("category", "")).startswith("datasource")
         try:
             strict, _loose, recalled = await _eval_single(case)
             results["pass"] += 1
@@ -212,9 +206,7 @@ async def test_multiturn(multiturn_case: dict[str, Any]) -> None:
         except Exception as e:  # noqa: BLE001
             pytest.fail(f"[{case_id} turn{i}] gold_sql 执行失败(评估集有误): {e}")
         try:
-            r = await call_chat(
-                question, _tenant_of(multiturn_case), history=history or None
-            )
+            r = await call_chat(question, _tenant_of(multiturn_case), history=history or None)
             r.raise_for_status()
             body = r.json()
         except Exception as e:  # noqa: BLE001

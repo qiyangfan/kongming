@@ -29,59 +29,71 @@ class SqlTeamRepo:
 
     async def get_team(self, *, tenant_id: str, team_id: str) -> dict[str, Any] | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT * FROM public.sys_team"
-                    " WHERE id=CAST(:i AS uuid) AND tenant_id=CAST(:t AS uuid)"
-                ),
-                {"i": team_id, "t": tenant_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT * FROM public.sys_team"
+                        " WHERE id=CAST(:i AS uuid) AND tenant_id=CAST(:t AS uuid)"
+                    ),
+                    {"i": team_id, "t": tenant_id},
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
         return dict(row) if row else None
 
-    async def get_team_by_key(
-        self, *, tenant_id: str, team_key: str
-    ) -> dict[str, Any] | None:
+    async def get_team_by_key(self, *, tenant_id: str, team_key: str) -> dict[str, Any] | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT * FROM public.sys_team"
-                    " WHERE tenant_id=CAST(:t AS uuid) AND team_key=:k"
-                ),
-                {"t": tenant_id, "k": team_key},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT * FROM public.sys_team"
+                        " WHERE tenant_id=CAST(:t AS uuid) AND team_key=:k"
+                    ),
+                    {"t": tenant_id, "k": team_key},
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
         return dict(row) if row else None
 
     async def list_teams(self, *, tenant_id: str) -> list[dict[str, Any]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT * FROM public.sys_team WHERE tenant_id=CAST(:t AS uuid)"
-                    " ORDER BY created_at DESC, id DESC"
-                ),
-                {"t": tenant_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT * FROM public.sys_team WHERE tenant_id=CAST(:t AS uuid)"
+                        " ORDER BY created_at DESC, id DESC"
+                    ),
+                    {"t": tenant_id},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def list_my_teams(self, *, tenant_id: str, user_id: str) -> list[dict[str, Any]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT t.* FROM public.sys_team t"
-                    " JOIN public.sys_team_member m ON m.team_id=t.id"
-                    " WHERE t.tenant_id=CAST(:t AS uuid) AND m.user_id=CAST(:u AS uuid)"
-                    " ORDER BY t.created_at DESC, t.id DESC"
-                ),
-                {"t": tenant_id, "u": user_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT t.* FROM public.sys_team t"
+                        " JOIN public.sys_team_member m ON m.team_id=t.id"
+                        " WHERE t.tenant_id=CAST(:t AS uuid) AND m.user_id=CAST(:u AS uuid)"
+                        " ORDER BY t.created_at DESC, t.id DESC"
+                    ),
+                    {"t": tenant_id, "u": user_id},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
-    async def update_team(
-        self, *, tenant_id: str, team_id: str, name: str
-    ) -> bool:
+    async def update_team(self, *, tenant_id: str, team_id: str, name: str) -> bool:
         res = cast(
             "CursorResult[object]",
             await self._s.execute(
@@ -115,17 +127,21 @@ class SqlTeamRepo:
 
     async def list_members(self, *, team_id: str) -> list[dict[str, Any]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT m.user_id, m.role, m.created_at, u.username"
-                    " FROM public.sys_team_member m"
-                    " JOIN public.sys_user u ON u.id=m.user_id"
-                    " WHERE m.team_id=CAST(:t AS uuid)"
-                    " ORDER BY m.created_at ASC, m.user_id ASC"
-                ),
-                {"t": team_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT m.user_id, m.role, m.created_at, u.username"
+                        " FROM public.sys_team_member m"
+                        " JOIN public.sys_user u ON u.id=m.user_id"
+                        " WHERE m.team_id=CAST(:t AS uuid)"
+                        " ORDER BY m.created_at ASC, m.user_id ASC"
+                    ),
+                    {"t": team_id},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def get_member_role(self, *, team_id: str, user_id: str) -> str | None:
@@ -213,7 +229,11 @@ class SqlTeamRepo:
     _MEMORY_TABLE = "public.user_memory"
 
     async def attach_resource(
-        self, *, resource_type: str, resource_id: str, team_id: str | None,
+        self,
+        *,
+        resource_type: str,
+        resource_id: str,
+        team_id: str | None,
         tenant_id: str,
     ) -> bool:
         """归属变更;R1-S1:UPDATE 带租户条件(跨租户资源零命中→404)。"""

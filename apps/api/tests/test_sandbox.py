@@ -34,6 +34,7 @@ from tests.test_toolcall import (
 SCHEMA = "tenant_sbx"
 SANDBOX_IMAGE = "kongming-sandbox:dev"
 
+
 @pytest.fixture(scope="module", autouse=True)
 async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     """沙箱测试租户业务 schema(data_sql 真执行活数据,与 test_toolcall 同形态)。"""
@@ -57,9 +58,7 @@ async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction
         await conn.execute(text(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE'))  # noqa: S608  # 模块常量
 
 
-async def _sbx_user(
-    s: AsyncSession, make_user: MakeUser, username: str, codes: list[str]
-) -> str:
+async def _sbx_user(s: AsyncSession, make_user: MakeUser, username: str, codes: list[str]) -> str:
     """造一个绑 sbx 租户+指定权限角色的用户(租户业务 schema=tenant_sbx)。"""
     uid = await make_user(username)
     rid = await _mk_role_with_perms(s, f"role_{username}", codes)
@@ -80,12 +79,22 @@ def test_perm_filter_gates_schema() -> None:
     names_with = [t["name"] for t in filter_specs({"tool:code:execute"})]
     assert "run_python_code" in names_with
     # 既有四工具零回归(spec「与既有工具零回归」)
-    all_names = [t["name"] for t in filter_specs(
-        {"tool:sql:validate", "tool:sql:execute", "tool:rag:retrieve",
-         "tool:announcement:create"}
-    )]
+    all_names = [
+        t["name"]
+        for t in filter_specs(
+            {
+                "tool:sql:validate",
+                "tool:sql:execute",
+                "tool:rag:retrieve",
+                "tool:announcement:create",
+            }
+        )
+    ]
     assert all_names == [
-        "validate_sql", "execute_sql", "rag_retrieve", "create_system_announcement",
+        "validate_sql",
+        "execute_sql",
+        "rag_retrieve",
+        "create_system_announcement",
     ]
 
 
@@ -109,11 +118,19 @@ def test_validate_args_code_and_data_sql() -> None:
 
 
 def test_parse_outcome_success() -> None:
-    body = {"status": "SUCCESS", "stdout": "hi", "error": None,
-            "images": ["YmFzZTY0"], "data_rows": 3, "data_cols": 2}
+    body = {
+        "status": "SUCCESS",
+        "stdout": "hi",
+        "error": None,
+        "images": ["YmFzZTY0"],
+        "data_rows": 3,
+        "data_cols": 2,
+    }
     out = _parse_outcome(
         stdout_text=f"noise\n__KM_RESULT__{json.dumps(body)}",
-        stderr_tail="", exit_code=0, duration_ms=12,
+        stderr_tail="",
+        exit_code=0,
+        duration_ms=12,
     )
     assert out.status == "SUCCESS" and out.stdout == "hi"
     assert out.images == ["YmFzZTY0"] and out.data_rows == 3 and out.data_cols == 2
@@ -123,9 +140,7 @@ def test_parse_outcome_fake_protocol_line_loses() -> None:
     """代码伪造的协议行必在真协议行之前——宿主只认最后一行。"""
     fake = "__KM_RESULT__" + json.dumps({"status": "SUCCESS", "stdout": "pwned"})
     real = "__KM_RESULT__" + json.dumps({"status": "ERROR", "error": "boom"})
-    out = _parse_outcome(
-        stdout_text=f"{fake}\n{real}", stderr_tail="", exit_code=1, duration_ms=5
-    )
+    out = _parse_outcome(stdout_text=f"{fake}\n{real}", stderr_tail="", exit_code=1, duration_ms=5)
     assert out.status == "ERROR" and out.error == "boom"
 
 
@@ -136,8 +151,10 @@ def test_parse_outcome_oom_137() -> None:
 
 def test_parse_outcome_missing_protocol() -> None:
     out = _parse_outcome(
-        stdout_text="partial output", stderr_tail="exec: python: not found",
-        exit_code=127, duration_ms=3,
+        stdout_text="partial output",
+        stderr_tail="exec: python: not found",
+        exit_code=127,
+        duration_ms=3,
     )
     assert out.status == "ERROR" and "not found" in (out.error or "")
 
@@ -154,7 +171,9 @@ def test_parse_outcome_forged_fields_converge() -> None:
     body = {"status": "SUCCESS", "data_rows": "abc", "data_cols": None}
     out = _parse_outcome(
         stdout_text=f"__KM_RESULT__{json.dumps(body)}",
-        stderr_tail="", exit_code=0, duration_ms=3,
+        stderr_tail="",
+        exit_code=0,
+        duration_ms=3,
     )
     assert out.status == "ERROR" and out.error == "沙箱协议行畸形"
 
@@ -165,7 +184,9 @@ def test_parse_outcome_images_host_recheck() -> None:
     body = {"status": "SUCCESS", "images": ["aW1n", big, "c2Vjb25k", 123]}
     out = _parse_outcome(
         stdout_text=f"__KM_RESULT__{json.dumps(body)}",
-        stderr_tail="", exit_code=0, duration_ms=3,
+        stderr_tail="",
+        exit_code=0,
+        duration_ms=3,
     )
     assert out.status == "SUCCESS"
     assert out.images == ["aW1n"]  # 超容与超额均剔除(123 非 str 亦剔除)
@@ -193,8 +214,11 @@ class _RecordingSandbox:
         rows = cast("list[object]", (data or {}).get("rows") or [])
         cols = cast("list[object]", (data or {}).get("columns") or [])
         proj: dict[str, object] = {
-            "status": "SUCCESS", "stdout": "ok", "error": None,
-            "images_count": 0, "duration_ms": 7,
+            "status": "SUCCESS",
+            "stdout": "ok",
+            "error": None,
+            "images_count": 0,
+            "duration_ms": 7,
         }
         if data is not None:
             proj["injected"] = f"已注入 df({len(rows)}×{len(cols)})"
@@ -234,7 +258,7 @@ def _override_service(sandbox: object | None) -> None:  # noqa: ANN401
             rag_retriever=_RagServiceAdapter(s),
             reply_store=_ChatReplyStore(s),
             intent=None,
-            sandbox=cast('SandboxExecutor | None', sandbox),
+            sandbox=cast("SandboxExecutor | None", sandbox),
             rate_limit_per_minute=600,
             confirm_ttl_minutes=15,
         )
@@ -279,8 +303,11 @@ async def test_disabled_converges_error(
             "/internal/tool/execute",
             headers=INTERNAL,
             json=_req(
-                "run_python_code", {"code": "print(1)"},
-                user_id=uid, trace_id=trace, tenant_key="sbx",
+                "run_python_code",
+                {"code": "print(1)"},
+                user_id=uid,
+                trace_id=trace,
+                tenant_key="sbx",
             ),
         )
     finally:
@@ -318,13 +345,13 @@ async def test_happy_path_injects_df(
         _clear_override()
     body = r.json()
     assert body["status"] == "executed"
-    result = cast('dict[str, Any]', body["result"] or {})
+    result = cast("dict[str, Any]", body["result"] or {})
     # SELF 行级:goods 仅 create_by='someone' 行,本人不可见 → 0×1
     assert result.get("injected") == "已注入 df(0×1)"
     assert len(sandbox.calls) == 1
     data = sandbox.calls[0]["data"]
-    assert isinstance(data, dict) and cast('dict[str, object]', data).get("columns") == ["name"]
-    assert cast('dict[str, object]', data).get("rows") == []  # 行级权限同构直证
+    assert isinstance(data, dict) and cast("dict[str, object]", data).get("columns") == ["name"]
+    assert cast("dict[str, object]", data).get("rows") == []  # 行级权限同构直证
 
 
 async def test_data_sql_blocked_no_sandbox(
@@ -350,7 +377,7 @@ async def test_data_sql_blocked_no_sandbox(
         _clear_override()
     body = r.json()
     assert body["status"] == "executed"  # 工具层执行成功,业务结果为取数拒绝
-    result = cast('dict[str, Any]', body["result"] or {})
+    result = cast("dict[str, Any]", body["result"] or {})
     assert result.get("status") == "ERROR"
     assert result.get("verdict") == "BLOCKED"
     assert sandbox.calls == []  # 沙箱未启动
@@ -373,8 +400,10 @@ async def test_inject_over_1mb_rejected(
             headers=INTERNAL,
             json=_req(
                 "run_python_code",
-                {"code": "print(1)",
-                 "data_sql": "SELECT repeat('x', 1100) AS pad FROM generate_series(1, 1000)"},
+                {
+                    "code": "print(1)",
+                    "data_sql": "SELECT repeat('x', 1100) AS pad FROM generate_series(1, 1000)",
+                },
                 user_id=uid,
                 tenant_key="sbx",
             ),
@@ -383,7 +412,7 @@ async def test_inject_over_1mb_rejected(
         _clear_override()
         await session.commit()
     body = r.json()
-    result = cast('dict[str, Any]', body["result"] or {})
+    result = cast("dict[str, Any]", body["result"] or {})
     assert result.get("status") == "ERROR"
     assert "上限" in str(result.get("error"))
     assert sandbox.calls == []
@@ -404,15 +433,17 @@ async def test_inject_gate_counts_bytes_cjk(
             headers=INTERNAL,
             json=_req(
                 "run_python_code",
-                {"code": "print(1)",
-                 "data_sql": "SELECT repeat('孔', 600) AS pad FROM generate_series(1, 1000)"},
+                {
+                    "code": "print(1)",
+                    "data_sql": "SELECT repeat('孔', 600) AS pad FROM generate_series(1, 1000)",
+                },
                 user_id=uid,
                 tenant_key="sbx",
             ),
         )
     finally:
         _clear_override()
-    result = cast('dict[str, Any]', (r.json())["result"] or {})
+    result = cast("dict[str, Any]", (r.json())["result"] or {})
     assert result.get("status") == "ERROR"
     assert "上限" in str(result.get("error"))
     assert sandbox.calls == []
@@ -434,38 +465,50 @@ async def test_audit_record_fields(session: AsyncSession) -> None:
             return self._o
 
     await seed_all(session, get_settings())
-    tid = (
-        await session.execute(text("SELECT id FROM public.sys_tenant LIMIT 1"))
-    ).scalar_one()
-    uid = (
-        await session.execute(text("SELECT id FROM public.sys_user LIMIT 1"))
-    ).scalar_one()
+    tid = (await session.execute(text("SELECT id FROM public.sys_tenant LIMIT 1"))).scalar_one()
+    uid = (await session.execute(text("SELECT id FROM public.sys_user LIMIT 1"))).scalar_one()
     cases = [
-        SandboxOutcome(status="SUCCESS", stdout="done", data_rows=5, data_cols=2,
-                       duration_ms=33, exit_code=0),
+        SandboxOutcome(
+            status="SUCCESS", stdout="done", data_rows=5, data_cols=2, duration_ms=33, exit_code=0
+        ),
         SandboxOutcome(status="ERROR", error="traceback…", duration_ms=12, exit_code=1),
         SandboxOutcome(status="TIMEOUT", error="执行超 30s 上限已终止", duration_ms=30001),
-        SandboxOutcome(status="RESOURCE_LIMIT", error="资源超限已终止(内存配额)",
-                       duration_ms=800, exit_code=137),
+        SandboxOutcome(
+            status="RESOURCE_LIMIT",
+            error="资源超限已终止(内存配额)",
+            duration_ms=800,
+            exit_code=137,
+        ),
     ]
     for oc in cases:
         svc = SandboxService(runner=_MockRunner(oc), writer=SqlSandboxRunRepo())
         proj = await svc.execute(
-            code="print(1)", data={"columns": ["a"], "rows": [[1]]},
+            code="print(1)",
+            data={"columns": ["a"], "rows": [[1]]},
             trace_id=f"tr-{uuid.uuid4().hex[:12]}",
-            user_id=str(uid), tenant_id=str(tid),
+            user_id=str(uid),
+            tenant_id=str(tid),
         )
         assert proj["status"] == oc.status
         assert proj["injected"] == f"已注入 df({oc.data_rows}×{oc.data_cols})"
     rows = (
-        await session.execute(
-            text("SELECT status, data_rows, data_cols, stdout_tail, error_tail,"
-                 " duration_ms, exit_code, code_text FROM public.sys_sandbox_run"
-                 " ORDER BY created_at, id")
+        (
+            await session.execute(
+                text(
+                    "SELECT status, data_rows, data_cols, stdout_tail, error_tail,"
+                    " duration_ms, exit_code, code_text FROM public.sys_sandbox_run"
+                    " ORDER BY created_at, id"
+                )
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     assert [r["status"] for r in rows[-4:]] == [
-        "SUCCESS", "ERROR", "TIMEOUT", "RESOURCE_LIMIT",
+        "SUCCESS",
+        "ERROR",
+        "TIMEOUT",
+        "RESOURCE_LIMIT",
     ]
     first = rows[-4]
     assert first["data_rows"] == 5 and first["data_cols"] == 2
@@ -483,7 +526,8 @@ def _image_ready() -> bool:
         return False
     r = subprocess.run(  # noqa: S603  # 二进制经 which 解析,参数常量
         [_PODMAN, "image", "inspect", SANDBOX_IMAGE],
-        capture_output=True, check=False,
+        capture_output=True,
+        check=False,
     )
     return r.returncode == 0
 
@@ -532,9 +576,7 @@ async def test_podman_memory_limit() -> None:
     from kongming.sandbox.runner import PodmanSandboxRunner
 
     runner = PodmanSandboxRunner(image=SANDBOX_IMAGE, timeout_sec=30, mem_mb=128)
-    out = await runner.run(
-        code="x = bytearray(512 * 1024 * 1024)\nprint(len(x))", data=None
-    )
+    out = await runner.run(code="x = bytearray(512 * 1024 * 1024)\nprint(len(x))", data=None)
     assert out.status == "RESOURCE_LIMIT"
 
 
@@ -577,6 +619,8 @@ async def test_podman_no_residue() -> None:
     await runner.run(code="raise ValueError('x')", data=None)
     r = subprocess.run(  # noqa: S603, ASYNC221  # which 解析+参数常量;测试收尾一次性同步调用
         [_PODMAN or "podman", "ps", "-a", "--format", "{{.Names}}"],
-        capture_output=True, check=False, text=True,
+        capture_output=True,
+        check=False,
+        text=True,
     )
     assert "km-sbx-" not in r.stdout

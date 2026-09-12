@@ -55,9 +55,7 @@ async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction
                 )
             )
         # public 回退段证物(search_path=default_schema, public 两段)
-        await conn.execute(
-            text("CREATE TABLE IF NOT EXISTS public.pub_goods (mark varchar(8))")
-        )
+        await conn.execute(text("CREATE TABLE IF NOT EXISTS public.pub_goods (mark varchar(8))"))
         await conn.execute(text("DELETE FROM public.pub_goods"))
         await conn.execute(text("INSERT INTO public.pub_goods (mark) VALUES ('PUB')"))
         # 动态 schema 内的保留名表(内省排除判定证物,任务组 5 消费)
@@ -137,9 +135,7 @@ def _payload(tenant_key: str, sql: str, **kw: object) -> dict[str, Any]:
 async def _audit_reasons(s: AsyncSession, trace_id: str) -> list[str]:
     rows = (
         await s.execute(
-            text(
-                "SELECT verdict, block_reason FROM public.sys_sql_audit WHERE trace_id=:t"
-            ),
+            text("SELECT verdict, block_reason FROM public.sys_sql_audit WHERE trace_id=:t"),
             {"t": trace_id},
         )
     ).all()
@@ -257,9 +253,7 @@ async def test_dynamic_self_scope_rewrite(
     assert reasons == ["PASS:None"]
 
 
-async def test_dynamic_defense_layers_hold(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_dynamic_defense_layers_hold(client: AsyncClient, session: AsyncSession) -> None:
     """防火墙/保留表/危险函数/schema 边界在动态源同拦(与默认路径完全一致)。"""
     tid = await _mk_tenant(session, "dta")
     await _mk_ds(session, "dyndef", tid)

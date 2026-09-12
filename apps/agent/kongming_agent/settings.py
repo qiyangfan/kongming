@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     # 供应商时 embeddings API 不存在,RAG 会静默全量失败;缺省回退 llm_* 组,
     # dashscope 兼容端点常驻 embedding 能力。
     embedding_base_url: str | None = None  # None=回退 llm_base_url
-    embedding_api_key: str | None = None   # None=回退 llm_api_key
+    embedding_api_key: str | None = None  # None=回退 llm_api_key
     embedding_model: str = "text-embedding-v2"
     embedding_timeout_sec: float = 30.0
     embedding_max_texts: int = 64  # 单请求文本上限(防单请求打爆)
@@ -180,6 +180,4 @@ class Settings(BaseSettings):
         registry = self.parse_registry()
         for task, name in self.parse_routes().items():
             if name not in registry:
-                log.warning(
-                    "路由目标不在注册表,将静默回退主模型: task=%s target=%s", task, name
-                )
+                log.warning("路由目标不在注册表,将静默回退主模型: task=%s target=%s", task, name)

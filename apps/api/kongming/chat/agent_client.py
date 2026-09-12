@@ -39,9 +39,7 @@ class AgentReply:
     retry_count: int = 0
     error: str | None = None
     # 035:bot 链路请求内同步采集(纯增;/query_react 响应携带,空=旧版 agent)
-    usage_records: list[dict[str, object]] = field(
-        default_factory=list[dict[str, object]]
-    )
+    usage_records: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
 
 
 def _obj_dict(value: object) -> dict[str, object] | None:
@@ -72,9 +70,7 @@ def parse_agent_reply(data: dict[str, object]) -> AgentReply:
                 )
     stats = dict(cast(dict[str, object], stats_raw)) if isinstance(stats_raw, dict) else {}
     columns = (
-        [str(c) for c in cast(list[object], columns_raw)]
-        if isinstance(columns_raw, list)
-        else []
+        [str(c) for c in cast(list[object], columns_raw)] if isinstance(columns_raw, list) else []
     )
     rows = (
         [list(cast(list[object], r)) for r in cast(list[object], rows_raw)]
@@ -214,9 +210,7 @@ class AgentClient:
                 timeout=self._timeout,
                 headers=self._headers,
             ) as client:
-                resp = await client.post(
-                    "/internal/suggest-questions", json={"digest": digest}
-                )
+                resp = await client.post("/internal/suggest-questions", json={"digest": digest})
         except httpx.HTTPError as e:
             log.warning("建议生成回调异常: %s", e)
             return []
@@ -375,9 +369,7 @@ class AgentClient:
             async with httpx.AsyncClient(
                 base_url=self._base, timeout=30.0, headers=self._headers
             ) as client:
-                resp = await client.post(
-                    "/internal/rewrite-title", json={"question": question}
-                )
+                resp = await client.post("/internal/rewrite-title", json={"question": question})
         except httpx.HTTPError as e:
             log.warning("标题改写回调异常: %s", e)
             return None

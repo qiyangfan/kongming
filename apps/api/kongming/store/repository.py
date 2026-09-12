@@ -17,8 +17,7 @@ _SORT_SQL = {
 # 收藏态/计数子查询单源(别名统一 f2;store_list/store_get 上下文 f 空闲,
 # my_favorites 的 f 被主查询占用——三处共用,防改一漏二)
 _FAV_COUNT_SQL = (
-    " (SELECT count(*) FROM public.sys_bot_favorite f2"
-    "  WHERE f2.bot_id=b.id) AS fav_count"
+    " (SELECT count(*) FROM public.sys_bot_favorite f2  WHERE f2.bot_id=b.id) AS fav_count"
 )
 _FAVORITED_SQL = (
     " EXISTS(SELECT 1 FROM public.sys_bot_favorite f2"
@@ -72,7 +71,8 @@ class SqlStoreRepo:
             " AVG(r.score) AS avg_score,"
             " COUNT(r.id) AS rating_count,"
             + _FAV_COUNT_SQL
-            + ", " + _FAVORITED_SQL
+            + ", "
+            + _FAVORITED_SQL
             + " FROM public.sys_bot_definition b"
             " LEFT JOIN public.sys_bot_rating r ON r.bot_id=b.id"
             " WHERE b.tenant_id=CAST(:t AS uuid)"
@@ -87,33 +87,42 @@ class SqlStoreRepo:
             params["kw"] = like_pattern(keyword)
         # S608 说明:base 为两常量分支拼接,_SORT_SQL 为常量枚举,值全绑定
         rows = (
-            await self._s.execute(
-                text(base + f" GROUP BY b.id ORDER BY {order}"),  # noqa: S608
-                params,
+            (
+                await self._s.execute(
+                    text(base + f" GROUP BY b.id ORDER BY {order}"),  # noqa: S608
+                    params,
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def store_get(
         self, *, tenant_id: str, bot_key: str, user_id: str = ""
     ) -> dict[str, Any] | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT b.*,"  # noqa: S608  常量段拼接,值全绑定
-                    " AVG(r.score) AS avg_score,"
-                    " COUNT(r.id) AS rating_count,"
-                    + _FAV_COUNT_SQL
-                    + ", " + _FAVORITED_SQL
-                    + " FROM public.sys_bot_definition b"
-                    " LEFT JOIN public.sys_bot_rating r ON r.bot_id=b.id"
-                    " WHERE b.tenant_id=CAST(:t AS uuid) AND b.bot_key=:k"
-                    " AND b.published_at IS NOT NULL AND b.enabled"
-                    " GROUP BY b.id"
-                ),
-                {"t": tenant_id, "k": bot_key, "fu": user_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT b.*,"  # noqa: S608  常量段拼接,值全绑定
+                        " AVG(r.score) AS avg_score,"
+                        " COUNT(r.id) AS rating_count,"
+                        + _FAV_COUNT_SQL
+                        + ", "
+                        + _FAVORITED_SQL
+                        + " FROM public.sys_bot_definition b"
+                        " LEFT JOIN public.sys_bot_rating r ON r.bot_id=b.id"
+                        " WHERE b.tenant_id=CAST(:t AS uuid) AND b.bot_key=:k"
+                        " AND b.published_at IS NOT NULL AND b.enabled"
+                        " GROUP BY b.id"
+                    ),
+                    {"t": tenant_id, "k": bot_key, "fu": user_id},
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
         return dict(row) if row else None
 
     # ── 收藏 ──
@@ -147,31 +156,33 @@ class SqlStoreRepo:
 
     async def my_favorites(self, *, tenant_id: str, user_id: str) -> list[dict[str, Any]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT b.id, b.bot_key, b.name, b.greeting, b.use_count,"  # noqa: S608  常量段拼接,值全绑定
-                    " b.published_at,"
-                    " COALESCE(AVG(r.score), 0) AS avg_score, COUNT(r.id) AS rating_count,"
-                    + _FAV_COUNT_SQL
-                    + ", TRUE AS favorited"
-                    " FROM public.sys_bot_favorite f"
-                    " JOIN public.sys_bot_definition b ON b.id=f.bot_id"
-                    " LEFT JOIN public.sys_bot_rating r ON r.bot_id=b.id"
-                    " WHERE f.tenant_id=CAST(:t AS uuid) AND f.user_id=CAST(:u AS uuid)"
-                    " AND b.tenant_id=CAST(:t AS uuid)"
-                    " AND b.published_at IS NOT NULL AND b.enabled"
-                    " GROUP BY b.id ORDER BY MAX(f.created_at) DESC"
-                ),
-                {"t": tenant_id, "u": user_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT b.id, b.bot_key, b.name, b.greeting, b.use_count,"  # noqa: S608  常量段拼接,值全绑定
+                        " b.published_at,"
+                        " COALESCE(AVG(r.score), 0) AS avg_score, COUNT(r.id) AS rating_count,"
+                        + _FAV_COUNT_SQL
+                        + ", TRUE AS favorited"
+                        " FROM public.sys_bot_favorite f"
+                        " JOIN public.sys_bot_definition b ON b.id=f.bot_id"
+                        " LEFT JOIN public.sys_bot_rating r ON r.bot_id=b.id"
+                        " WHERE f.tenant_id=CAST(:t AS uuid) AND f.user_id=CAST(:u AS uuid)"
+                        " AND b.tenant_id=CAST(:t AS uuid)"
+                        " AND b.published_at IS NOT NULL AND b.enabled"
+                        " GROUP BY b.id ORDER BY MAX(f.created_at) DESC"
+                    ),
+                    {"t": tenant_id, "u": user_id},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     # ── 评分 ──
 
-    async def upsert_rating(
-        self, *, tenant_id: str, user_id: str, bot_id: str, score: int
-    ) -> None:
+    async def upsert_rating(self, *, tenant_id: str, user_id: str, bot_id: str, score: int) -> None:
         await self._s.execute(
             text(
                 "INSERT INTO public.sys_bot_rating"

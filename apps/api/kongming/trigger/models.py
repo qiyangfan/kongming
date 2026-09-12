@@ -11,11 +11,11 @@
 import datetime as dt
 
 _CRON_BOUNDS = [
-    (0, 59),   # 分
-    (0, 23),   # 时
-    (1, 31),   # 日
-    (1, 12),   # 月
-    (0, 7),    # 周(0/7=周日)
+    (0, 59),  # 分
+    (0, 23),  # 时
+    (1, 31),  # 日
+    (1, 12),  # 月
+    (0, 7),  # 周(0/7=周日)
 ]
 
 
@@ -100,9 +100,7 @@ def next_fire(expr: str, after: dt.datetime) -> dt.datetime:
             if nxt is not None:
                 cur = cur.replace(month=nxt, day=1, hour=0, minute=0)
             else:  # 回绕到次年最小月
-                cur = cur.replace(
-                    year=cur.year + 1, month=min(month), day=1, hour=0, minute=0
-                )
+                cur = cur.replace(year=cur.year + 1, month=min(month), day=1, hour=0, minute=0)
             continue
         if not (cur.day in dom and _dow(cur) in dow):
             cur = (cur + dt.timedelta(days=1)).replace(hour=0, minute=0)

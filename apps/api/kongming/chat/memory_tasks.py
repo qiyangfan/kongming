@@ -38,8 +38,6 @@ async def extract_memory_task(
                 get_agent_rag_client(get_redis()),
                 SqlOperLogRepo(s),
             )
-            await svc.form_implicit(
-                user_id=user_id, tenant_id=tenant_id, candidates=candidates
-            )
+            await svc.form_implicit(user_id=user_id, tenant_id=tenant_id, candidates=candidates)
     except Exception:
         log.warning("隐式记忆任务异常(不阻断)", exc_info=True)

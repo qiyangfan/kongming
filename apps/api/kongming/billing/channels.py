@@ -23,9 +23,7 @@ class MockChannel:
         """通道侧交易号(mock 前缀可辨识)。"""
         return f"mock-{uuid.uuid4().hex[:16]}"
 
-    def sign_payload(
-        self, *, payment_id: str, trade_no: str, result: str, amount: int
-    ) -> str:
+    def sign_payload(self, *, payment_id: str, trade_no: str, result: str, amount: int) -> str:
         """回调报文签名:{payment_id}.{trade_no}.{result}.{amount}。"""
         msg = f"{payment_id}.{trade_no}.{result}.{amount}".encode()
         return hmac.new(self._secret, msg, hashlib.sha256).hexdigest()

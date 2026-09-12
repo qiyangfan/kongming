@@ -109,9 +109,7 @@ async def _monthly_invoice_loop() -> None:
 
             async with get_sessionmaker()() as s:
                 # R1-S1:出账审计注入(generate 内部 commit 连带落库)
-                n = await BillingService(
-                    SqlBillingRepo(s), _InvOper(s)
-                ).generate_monthly_invoices()
+                n = await BillingService(SqlBillingRepo(s), _InvOper(s)).generate_monthly_invoices()
             if n:
                 log.info("月首出账完成: %d 条", n)
         except asyncio.CancelledError:
@@ -150,9 +148,7 @@ async def _payment_expire_loop() -> None:
                     await self._r.add(None, action, target, detail)
 
             async with get_sessionmaker()() as s:
-                n = await BillingService(
-                    SqlBillingRepo(s), _ExpOper(s)
-                ).expire_overdue_payments()
+                n = await BillingService(SqlBillingRepo(s), _ExpOper(s)).expire_overdue_payments()
                 await s.commit()
             if n:
                 log.info("支付单过期兜底: %d 单置 EXPIRED", n)
@@ -218,7 +214,10 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
         attach_task.cancel()
         # R1-B2:收割防 pending 残留
         await asyncio.gather(
-            archive_task, billing_task, expire_task, attach_task,
+            archive_task,
+            billing_task,
+            expire_task,
+            attach_task,
             return_exceptions=True,
         )
         await stop_trigger_scheduler()

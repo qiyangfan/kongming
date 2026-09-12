@@ -60,8 +60,12 @@ def test_generate_normal_goes_to_validate() -> None:
 
 def test_retry_exhaustion_terminates() -> None:
     """预算耗尽由 selfheal 标 end_reason(计数=实际发起的重试次数),路由收束 fail。"""
-    assert _after_selfheal({"execution": FAILED, "retry_count": MAX_RETRY,
-                            "end_reason": "retry_exhausted"}) == "fail"
+    assert (
+        _after_selfheal(
+            {"execution": FAILED, "retry_count": MAX_RETRY, "end_reason": "retry_exhausted"}
+        )
+        == "fail"
+    )
 
 
 def test_retry_only_via_selfheal_counting() -> None:

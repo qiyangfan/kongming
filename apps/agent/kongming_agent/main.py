@@ -123,9 +123,7 @@ async def describe_table_endpoint(req: DescribeTableIn) -> DescribeTableOut:
         table_name=req.table_name,
         schema_name=req.schema_name,
         table_comment=req.table_comment,
-        columns=[
-            ColumnSpec(name=c.name, type=c.type, comment=c.comment) for c in req.columns
-        ],
+        columns=[ColumnSpec(name=c.name, type=c.type, comment=c.comment) for c in req.columns],
     )
     try:
         described = await describe_table(spec, deps.get_llm())
@@ -195,8 +193,6 @@ class ExtractMemoryIn(BaseModel):
 
 class ExtractMemoryOut(BaseModel):
     memories: list[dict[str, str]] = []  # [{content, category}] ≤3;空=无值得记忆
-
-
 
 
 @app.get("/internal/models", tags=["internal"])
@@ -359,9 +355,7 @@ def _build_query_out(final: dict[str, object]) -> QueryOut:
     has_error = isinstance(error, str) and bool(error)
     return QueryOut(
         success=(
-            isinstance(execution, ExecutionResult)
-            and execution.verdict == "PASS"
-            and not has_error
+            isinstance(execution, ExecutionResult) and execution.verdict == "PASS" and not has_error
         ),
         verdict=verdict,
         summary=summary if isinstance(summary, str) else "",
@@ -393,6 +387,7 @@ async def query_stream(req: QueryIn) -> StreamingResponse:
     except AttachmentError as e:
         # 预处理失败:单 result 终态帧收敛(与 LLM 故障同口径,不裸 500)
         fail = _build_query_out({"error": str(e), "success": False})
+
         async def _fail_gen() -> AsyncIterator[str]:
             yield _sse_frame("result", fail.model_dump_json())
 
@@ -411,9 +406,7 @@ async def query_stream(req: QueryIn) -> StreamingResponse:
                     ev = cast("dict[str, object]", chunk) if isinstance(chunk, dict) else {}
                     event = str(ev.get("event") or "")
                     if event:
-                        yield _sse_frame(
-                            event, json.dumps(ev.get("data"), ensure_ascii=False)
-                        )
+                        yield _sse_frame(event, json.dumps(ev.get("data"), ensure_ascii=False))
                 elif isinstance(chunk, dict):
                     typed = cast("dict[str, object]", chunk)
                     for delta in typed.values():
@@ -572,9 +565,7 @@ async def query_react_stream(req: QueryReactIn) -> StreamingResponse:
                         ev = cast("dict[str, object]", chunk) if isinstance(chunk, dict) else {}
                         event = str(ev.get("event") or "")
                         if event:
-                            yield _sse_frame(
-                                event, json.dumps(ev.get("data"), ensure_ascii=False)
-                            )
+                            yield _sse_frame(event, json.dumps(ev.get("data"), ensure_ascii=False))
                     elif isinstance(chunk, dict):
                         typed = cast("dict[str, object]", chunk)
                         for delta in typed.values():
@@ -587,9 +578,7 @@ async def query_react_stream(req: QueryReactIn) -> StreamingResponse:
                 return
             except GraphRecursionError:
                 # 图步数兜底(R1-S4:与同步同口径的结构化错误,不走泛异常)
-                capped = _build_query_out(
-                    {"error": "工具调用步数超限,请缩小问题范围后重试"}
-                )
+                capped = _build_query_out({"error": "工具调用步数超限,请缩小问题范围后重试"})
                 capped.usage_records = collector  # 异常终态同携带
                 yield _sse_frame("result", capped.model_dump_json())
                 return

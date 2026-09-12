@@ -10,9 +10,7 @@ class TeamRepo(Protocol):
 
     async def get_team(self, *, tenant_id: str, team_id: str) -> dict[str, Any] | None: ...
 
-    async def get_team_by_key(
-        self, *, tenant_id: str, team_key: str
-    ) -> dict[str, Any] | None: ...
+    async def get_team_by_key(self, *, tenant_id: str, team_key: str) -> dict[str, Any] | None: ...
 
     async def list_teams(self, *, tenant_id: str) -> list[dict[str, Any]]: ...
 
@@ -37,7 +35,11 @@ class TeamRepo(Protocol):
     async def count_owners(self, *, team_id: str) -> int: ...
 
     async def attach_resource(
-        self, *, resource_type: str, resource_id: str, team_id: str | None,
+        self,
+        *,
+        resource_type: str,
+        resource_id: str,
+        team_id: str | None,
         tenant_id: str,
     ) -> bool: ...
 

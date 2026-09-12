@@ -33,9 +33,7 @@ _TIMEOUT = 15
 
 async def _resolve(host: str, port: int) -> list[Any]:
     """模块级解析入口(测试可 monkeypatch;loop.getaddrinfo 直调不可 patch)。"""
-    return await asyncio.get_running_loop().getaddrinfo(
-        host, port, type=socket.SOCK_STREAM
-    )
+    return await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
 
 
 _CGNAT = ipaddress.ip_network("100.64.0.0/10")  # R1-J7:共享段(云内网/Tailscale)
@@ -136,9 +134,7 @@ class HttpNodeRunner:
             follow_redirects=False,
             transport=_PinnedTransport(pinned),
         ) as client:
-            async with client.stream(
-                method, url, headers=headers, content=body
-            ) as resp:
+            async with client.stream(method, url, headers=headers, content=body) as resp:
                 buf = bytearray()
                 async for chunk in resp.aiter_bytes(65536):
                     buf.extend(chunk)

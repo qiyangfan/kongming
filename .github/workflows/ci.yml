@@ -45,13 +45,14 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --frozen
+      - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run mypy kongming
       - run: uv run lint-imports
       # baseline 迁移对 km_readonly 无条件 GRANT(0001),角色由 pg-init 创建;
       # 本地 compose 挂载同款 init 脚本,CI 此处与其同构(单源,不复制 SQL)
       - run: psql "postgres://kongming:kongming@localhost:5432/kongming" -v ON_ERROR_STOP=1 -f ../../infra/pg-init/001-readonly-role.sql
-      - run: uv run pytest -q
+      - run: uv run pytest -q --cov
 
   # ── 门禁 2:Agent 面(Python,零凭证纪律) ────────────────
   agent:
@@ -66,12 +67,31 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --frozen
+      - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run mypy kongming_agent
       - run: uv run lint-imports
-      - run: uv run pytest -q
+      - run: uv run pytest -q --cov
 
-  # ── 门禁 3:前端(TypeScript) ────────────────────────────
+  # ── 门禁 3:连弩引擎(packages/liannu 独立包) ────────────
+  liannu:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/liannu
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy liannu
+      - run: uv run pytest -q --cov
+
+  # ── 门禁 4:前端(TypeScript) ────────────────────────────
   web:
     runs-on: ubuntu-latest
     defaults:
@@ -84,15 +104,17 @@ jobs:
           version: 11
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "24"
           cache: pnpm
           cache-dependency-path: apps/web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
+      - run: pnpm lint:css
+      - run: pnpm format:check
       - run: pnpm build
 
-  # ── 门禁 4:契约漂移(ADR-005) ──────────────────────────
+  # ── 门禁 5:契约漂移(ADR-005) ──────────────────────────
   # 重新导出 OpenAPI 后 diff,防"改了代码忘了导出契约"
   contracts:
     runs-on: ubuntu-latest

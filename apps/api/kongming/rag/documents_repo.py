@@ -23,14 +23,18 @@ class SqlDocumentRepo:
         self, *, tenant_id: str, datasource_key: str, doc_name: str
     ) -> dict[str, Any] | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT id, content_hash FROM rag.documents"
-                    " WHERE tenant_id=:t AND datasource_key=:d AND doc_name=:n"
-                ),
-                {"t": tenant_id, "d": datasource_key, "n": doc_name},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, content_hash FROM rag.documents"
+                        " WHERE tenant_id=:t AND datasource_key=:d AND doc_name=:n"
+                    ),
+                    {"t": tenant_id, "d": datasource_key, "n": doc_name},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return None if row is None else dict(row)
 
     async def replace_document(
@@ -102,19 +106,21 @@ class SqlDocumentRepo:
             )
         return doc_id
 
-    async def list_documents(
-        self, *, tenant_id: str, datasource_key: str
-    ) -> list[dict[str, Any]]:
+    async def list_documents(self, *, tenant_id: str, datasource_key: str) -> list[dict[str, Any]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, doc_name, block_count, content_hash, updated_at"
-                    " FROM rag.documents WHERE tenant_id=:t AND datasource_key=:d"
-                    " ORDER BY updated_at DESC"
-                ),
-                {"t": tenant_id, "d": datasource_key},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, doc_name, block_count, content_hash, updated_at"
+                        " FROM rag.documents WHERE tenant_id=:t AND datasource_key=:d"
+                        " ORDER BY updated_at DESC"
+                    ),
+                    {"t": tenant_id, "d": datasource_key},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def delete_document(self, *, doc_id: str, tenant_id: str) -> bool:
@@ -128,16 +134,20 @@ class SqlDocumentRepo:
 
     async def list_chunks(self, *, doc_id: str, tenant_id: str) -> list[dict[str, Any]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, chunk_level, seq, source_ref, content,"
-                    "       embedding IS NOT NULL AS has_embedding"
-                    " FROM rag.document_chunks WHERE document_id=:i AND tenant_id=:t"
-                    " ORDER BY seq"
-                ),
-                {"i": doc_id, "t": tenant_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, chunk_level, seq, source_ref, content,"
+                        "       embedding IS NOT NULL AS has_embedding"
+                        " FROM rag.document_chunks WHERE document_id=:i AND tenant_id=:t"
+                        " ORDER BY seq"
+                    ),
+                    {"i": doc_id, "t": tenant_id},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def delete_by_datasource(self, *, tenant_id: str, datasource_key: str) -> None:
@@ -153,48 +163,58 @@ class SqlDocumentRepo:
         self, *, tenant_id: str, datasource_key: str, vector: list[float], top_k: int
     ) -> list[dict[str, Any]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, parent_id, source_ref FROM rag.document_chunks"
-                    " WHERE tenant_id=:t AND datasource_key=:d AND chunk_level='CHILD'"
-                    "   AND embedding IS NOT NULL"
-                    " ORDER BY embedding <=> CAST(:vec AS vector) LIMIT :k"
-                ),
-                {"t": tenant_id, "d": datasource_key, "vec": vec_literal(vector), "k": top_k},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, parent_id, source_ref FROM rag.document_chunks"
+                        " WHERE tenant_id=:t AND datasource_key=:d AND chunk_level='CHILD'"
+                        "   AND embedding IS NOT NULL"
+                        " ORDER BY embedding <=> CAST(:vec AS vector) LIMIT :k"
+                    ),
+                    {"t": tenant_id, "d": datasource_key, "vec": vec_literal(vector), "k": top_k},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def recall_children_fulltext(
         self, *, tenant_id: str, datasource_key: str, question: str, top_k: int
     ) -> list[dict[str, Any]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, parent_id, source_ref FROM rag.document_chunks"
-                    " WHERE tenant_id=:t AND datasource_key=:d AND chunk_level='CHILD'"
-                    "   AND tsv @@ plainto_tsquery('simple', :q)"
-                    # R1-M3:相关度排序(009 同款,此前 LIMIT 取任意行)
-                    " ORDER BY ts_rank(tsv, plainto_tsquery('simple', :q)) DESC"
-                    " LIMIT :k"
-                ),
-                {"t": tenant_id, "d": datasource_key, "q": question, "k": top_k},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, parent_id, source_ref FROM rag.document_chunks"
+                        " WHERE tenant_id=:t AND datasource_key=:d AND chunk_level='CHILD'"
+                        "   AND tsv @@ plainto_tsquery('simple', :q)"
+                        # R1-M3:相关度排序(009 同款,此前 LIMIT 取任意行)
+                        " ORDER BY ts_rank(tsv, plainto_tsquery('simple', :q)) DESC"
+                        " LIMIT :k"
+                    ),
+                    {"t": tenant_id, "d": datasource_key, "q": question, "k": top_k},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
-    async def fetch_parents(
-        self, *, tenant_id: str, parent_ids: list[str]
-    ) -> list[dict[str, Any]]:
+    async def fetch_parents(self, *, tenant_id: str, parent_ids: list[str]) -> list[dict[str, Any]]:
         if not parent_ids:
             return []
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, source_ref, content FROM rag.document_chunks"
-                    " WHERE id = ANY(:ids) AND tenant_id=:t AND chunk_level='PARENT'"
-                ),
-                {"ids": parent_ids, "t": tenant_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, source_ref, content FROM rag.document_chunks"
+                        " WHERE id = ANY(:ids) AND tenant_id=:t AND chunk_level='PARENT'"
+                    ),
+                    {"ids": parent_ids, "t": tenant_id},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]

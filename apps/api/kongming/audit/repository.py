@@ -52,15 +52,19 @@ class AuditRepository:
     async def list_sql_by_trace(self, trace_id: str) -> list[dict[str, Any]]:
         """038 观测域:trace 时间线 SQL 事件(时间升序稳定序)。"""
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, verdict, duration_ms, datasource_key, created_at"
-                    " FROM public.sys_sql_audit WHERE trace_id = :t"
-                    " ORDER BY created_at ASC, id ASC"
-                ),
-                {"t": trace_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, verdict, duration_ms, datasource_key, created_at"
+                        " FROM public.sys_sql_audit WHERE trace_id = :t"
+                        " ORDER BY created_at ASC, id ASC"
+                    ),
+                    {"t": trace_id},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def sql_page(
@@ -90,30 +94,41 @@ class AuditRepository:
         total = int(
             (
                 await self._s.execute(
-                    text("SELECT count(*) FROM public.sys_sql_audit a"  # noqa: S608  # 常量模板,参数化绑定
-                         " JOIN public.sys_tenant t ON t.id = a.tenant_id" + self._SQL_WHERE),
+                    text(
+                        "SELECT count(*) FROM public.sys_sql_audit a"  # noqa: S608  # 常量模板,参数化绑定
+                        " JOIN public.sys_tenant t ON t.id = a.tenant_id" + self._SQL_WHERE
+                    ),
                     params,
                 )
             ).scalar_one()
         )
         rows = (
-            await self._s.execute(
-                text(
-                    self._SQL_COLS + self._SQL_WHERE  # noqa: S608  # 常量模板,参数化绑定
-                    + " ORDER BY a.created_at DESC, a.id DESC LIMIT :lim OFFSET :off"
-                ),
-                params,
+            (
+                await self._s.execute(
+                    text(
+                        self._SQL_COLS
+                        + self._SQL_WHERE  # noqa: S608  # 常量模板,参数化绑定
+                        + " ORDER BY a.created_at DESC, a.id DESC LIMIT :lim OFFSET :off"
+                    ),
+                    params,
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return total, [dict(r) for r in rows]
 
     async def sql_detail(self, *, audit_id: str) -> dict[str, object] | None:
         row = (
-            await self._s.execute(
-                text(self._SQL_COLS + " WHERE a.id = CAST(:id AS uuid)"),  # noqa: S608  # 常量模板
-                {"id": audit_id},
+            (
+                await self._s.execute(
+                    text(self._SQL_COLS + " WHERE a.id = CAST(:id AS uuid)"),  # noqa: S608  # 常量模板
+                    {"id": audit_id},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return None if row is None else dict(row)
 
     # ============ 操作日志 ============
@@ -155,19 +170,23 @@ class AuditRepository:
             ).scalar_one()
         )
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT o.id, o.user_id, o.action, o.target, o.detail, o.ip,"  # noqa: S608  # 常量模板,参数化绑定
-                    " o.created_at, u.nickname AS user_nickname,"
-                    " u.username AS user_username"
-                    " FROM public.sys_oper_log o"
-                    " LEFT JOIN public.sys_user u ON u.id = o.user_id"
-                    + self._OPER_WHERE
-                    + " ORDER BY o.created_at DESC, o.id DESC LIMIT :lim OFFSET :off"
-                ),
-                params,
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT o.id, o.user_id, o.action, o.target, o.detail, o.ip,"  # noqa: S608  # 常量模板,参数化绑定
+                        " o.created_at, u.nickname AS user_nickname,"
+                        " u.username AS user_username"
+                        " FROM public.sys_oper_log o"
+                        " LEFT JOIN public.sys_user u ON u.id = o.user_id"
+                        + self._OPER_WHERE
+                        + " ORDER BY o.created_at DESC, o.id DESC LIMIT :lim OFFSET :off"
+                    ),
+                    params,
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return total, [dict(r) for r in rows]
 
     # ============ 事务 ============

@@ -183,8 +183,7 @@ def _me_out(info: MeInfo) -> MeOut:
         role_keys=info.role_keys,
         perm_codes=info.perm_codes,
         tenants=[
-            TenantRefOut(tenant_key=t.tenant_key, tenant_name=t.tenant_name)
-            for t in info.tenants
+            TenantRefOut(tenant_key=t.tenant_key, tenant_name=t.tenant_name) for t in info.tenants
         ],
         must_change_password=info.must_change_password,
     )

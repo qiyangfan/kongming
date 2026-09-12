@@ -43,13 +43,19 @@ async def test_orphan_attachment_cleanup(
     uid = await make_user("d36_att")
     repo = SqlAttachmentRepo(session)
     old_id = await repo.insert(
-        tenant_id=str(tid), user_id=uid, filename="old.png",
-        mime="image/png", size_bytes=4,
+        tenant_id=str(tid),
+        user_id=uid,
+        filename="old.png",
+        mime="image/png",
+        size_bytes=4,
     )
     await repo.write_file(old_id, "image/png", b"1234")
     new_id = await repo.insert(
-        tenant_id=str(tid), user_id=uid, filename="new.png",
-        mime="image/png", size_bytes=4,
+        tenant_id=str(tid),
+        user_id=uid,
+        filename="new.png",
+        mime="image/png",
+        size_bytes=4,
     )
     await repo.write_file(new_id, "image/png", b"5678")
     await session.execute(
@@ -96,9 +102,7 @@ async def test_bot_list_out_has_team_id(
         json={"resource_type": "bot", "resource_id": bot_id},
     )
     assert r.status_code == 200, r.text
-    r2 = await client.get(
-        "/system/bots", headers={"Authorization": f"Bearer {token}"}
-    )
+    r2 = await client.get("/system/bots", headers={"Authorization": f"Bearer {token}"})
     mine = [b for b in r2.json() if b["id"] == bot_id]
     assert mine and mine[0]["team_id"] == team_id
     # 个人 Bot 回传 null(换键防撞)
@@ -109,9 +113,7 @@ async def test_bot_list_out_has_team_id(
     )
     assert r_new.status_code == 201, r_new.text
     bot2 = str(r_new.json()["id"])
-    r3 = await client.get(
-        "/system/bots", headers={"Authorization": f"Bearer {token}"}
-    )
+    r3 = await client.get("/system/bots", headers={"Authorization": f"Bearer {token}"})
     personal = [b for b in r3.json() if b["id"] == bot2]
     assert personal and personal[0]["team_id"] is None
 
@@ -180,4 +182,3 @@ async def test_favorite_set_semantics_concurrent(
     )
     assert all(r.json()["favorited"] is False for r in results2)
     assert (await client.get("/store/favorites", headers=h)).json() == []
-

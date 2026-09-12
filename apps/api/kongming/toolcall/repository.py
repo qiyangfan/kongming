@@ -92,11 +92,15 @@ class SqlToolCallRepo:
         """L1 租户解析(fail-closed;SQL 与 internal/service.resolve_tenant 同源——
         零框架契约下 service 不可 import internal,仓储层各持一份为先例形态)。"""
         row = (
-            await self._s.execute(
-                text("SELECT id, status FROM public.sys_tenant WHERE tenant_key = :k"),
-                {"k": tenant_key},
+            (
+                await self._s.execute(
+                    text("SELECT id, status FROM public.sys_tenant WHERE tenant_key = :k"),
+                    {"k": tenant_key},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         if row is None or row["status"] != "ACTIVE":
             raise TenantNotFound(tenant_key)
         return str(row["id"])
@@ -106,10 +110,7 @@ class SqlToolCallRepo:
 
         bound = (
             await self._s.execute(
-                text(
-                    "SELECT 1 FROM public.sys_user_tenant"
-                    " WHERE user_id = :u AND tenant_id = :t"
-                ),
+                text("SELECT 1 FROM public.sys_user_tenant WHERE user_id = :u AND tenant_id = :t"),
                 {"u": user_id, "t": tenant_id},
             )
         ).scalar_one_or_none()
@@ -141,15 +142,19 @@ class SqlToolCallRepo:
 
     async def get_for_update(self, confirm_id: str) -> PendingConfirm | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT id, user_id, tenant_id, tool_name, args_json,"
-                    "       idempotency_key, expires_at, status"
-                    " FROM public.sys_tool_audit WHERE id = :i FOR UPDATE"
-                ),
-                {"i": confirm_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, user_id, tenant_id, tool_name, args_json,"
+                        "       idempotency_key, expires_at, status"
+                        " FROM public.sys_tool_audit WHERE id = :i FOR UPDATE"
+                    ),
+                    {"i": confirm_id},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         if row is None:
             return None
         return PendingConfirm(
@@ -181,9 +186,7 @@ class SqlToolCallRepo:
             {"st": status, "clr": clear_reason, "i": confirm_id},
         )
 
-    async def find_announcement(
-        self, *, tenant_id: str, idempotency_key: str
-    ) -> str | None:
+    async def find_announcement(self, *, tenant_id: str, idempotency_key: str) -> str | None:
         """按幂等键反查公告(R1-S1:重复确认幂等回放返回首次执行结果)。"""
         row = (
             await self._s.execute(
@@ -196,21 +199,23 @@ class SqlToolCallRepo:
         ).scalar_one_or_none()
         return None if row is None else str(row)
 
-    async def list_pending_by_trace(
-        self, trace_id: str
-    ) -> list[dict[str, Any]]:
+    async def list_pending_by_trace(self, trace_id: str) -> list[dict[str, Any]]:
         """chat 响应聚合 pending_tool_calls:本 trace 下仍待确认(未过期)的调用。"""
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, tool_name, args_digest FROM public.sys_tool_audit"
-                    " WHERE trace_id = :t AND status = 'PENDING_CONFIRM'"
-                    "   AND (expires_at IS NULL OR expires_at > now())"
-                    " ORDER BY created_at"
-                ),
-                {"t": trace_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, tool_name, args_digest FROM public.sys_tool_audit"
+                        " WHERE trace_id = :t AND status = 'PENDING_CONFIRM'"
+                        "   AND (expires_at IS NULL OR expires_at > now())"
+                        " ORDER BY created_at"
+                    ),
+                    {"t": trace_id},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [
             {
                 "confirm_id": str(r["id"]),
@@ -223,16 +228,20 @@ class SqlToolCallRepo:
     async def list_by_trace(self, trace_id: str) -> list[dict[str, Any]]:
         """038 观测域:trace 时间线 TOOL 事件(全部状态;时间升序稳定序)。"""
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT tool_name, status, duration_ms, created_at"
-                    " FROM public.sys_tool_audit"
-                    " WHERE trace_id = :t"
-                    " ORDER BY created_at ASC, id ASC"
-                ),
-                {"t": trace_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT tool_name, status, duration_ms, created_at"
+                        " FROM public.sys_tool_audit"
+                        " WHERE trace_id = :t"
+                        " ORDER BY created_at ASC, id ASC"
+                    ),
+                    {"t": trace_id},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def insert_announcement(
@@ -319,17 +328,21 @@ class SqlToolCallRepo:
             )
         ).scalar_one()
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, trace_id, user_id, tenant_id, tool_name, args_digest,"  # noqa: S608  # 多行拼接含 f-string(条件片段常量)
-                    "       status, error_reason, duration_ms, datasource_key,"
-                    "       idempotency_key, expires_at, created_at"
-                    f" FROM public.sys_tool_audit WHERE {where}"
-                    " ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset"
-                ),
-                {**params, "limit": size, "offset": (page - 1) * size},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, trace_id, user_id, tenant_id, tool_name, args_digest,"  # noqa: S608  # 多行拼接含 f-string(条件片段常量)
+                        "       status, error_reason, duration_ms, datasource_key,"
+                        "       idempotency_key, expires_at, created_at"
+                        f" FROM public.sys_tool_audit WHERE {where}"
+                        " ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset"
+                    ),
+                    {**params, "limit": size, "offset": (page - 1) * size},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows], int(total)
 
 

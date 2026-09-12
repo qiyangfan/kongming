@@ -9,12 +9,7 @@ import { Loader2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -34,6 +29,15 @@ import {
 } from "@/lib/billing-api";
 import { DIM_TEXT, INVOICE_STATUS_TEXT } from "@/lib/billing-labels";
 import { li2yuan } from "@/lib/money";
+import { StatusBadge, type StatusMeta } from "@/components/status-badge";
+
+// 发票状态 → StatusBadge(未知值回落 outline,与原「非 PENDING 即 outline」等价;
+// label 与 lib/billing-labels 的 INVOICE_STATUS_TEXT 对齐)
+const INVOICE_STATUS_META: StatusMeta = {
+  PENDING: { label: "待支付", variant: "secondary" },
+  PAID: { label: "已支付", variant: "outline" },
+  VOID: { label: "已作废", variant: "outline" },
+};
 
 /** 明细 usage_json 形状(服务端固定结构;生成类型为 generic object,
  *  本地收窄——与服务端 usage_json 组装处逐字段对应) */
@@ -138,10 +142,8 @@ export default function PortalPage() {
   const keys = useQuery({ queryKey: ["portal", "keys"], queryFn: listPortalKeys });
 
   const policies = usage.data?.policies ?? [];
-  const limitOf = (dim: string) =>
-    policies.find((p) => p.dimension === dim)?.limit_value ?? 0;
-  const warnOf = (dim: string) =>
-    policies.find((p) => p.dimension === dim)?.warn_pct ?? 80;
+  const limitOf = (dim: string) => policies.find((p) => p.dimension === dim)?.limit_value ?? 0;
+  const warnOf = (dim: string) => policies.find((p) => p.dimension === dim)?.warn_pct ?? 80;
 
   const [detailError, setDetailError] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
@@ -186,17 +188,11 @@ export default function PortalPage() {
     <div className="space-y-5 px-6 py-5">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">用量与密钥</h1>
-        {usage.data?.plan && (
-          <Badge variant="secondary" className="font-normal">
-            套餐:{usage.data.plan.name}
-          </Badge>
-        )}
+        {usage.data?.plan && <Badge variant="secondary">套餐:{usage.data.plan.name}</Badge>}
       </div>
 
       <section className="space-y-3 rounded-lg border border-border p-4">
-        <h2 className="text-sm font-medium">
-          当期用量({usage.data?.month ?? "…"})
-        </h2>
+        <h2 className="text-sm font-medium">当期用量({usage.data?.month ?? "…"})</h2>
         {usage.isError ? (
           <QueryErrorAlert />
         ) : usage.isLoading ? (
@@ -223,7 +219,9 @@ export default function PortalPage() {
               format={li2yuan}
             />
             <div className="space-y-1 pt-2">
-              <p className="text-xs font-medium text-muted-foreground">我的 API 密钥(仅显示生效中)</p>
+              <p className="text-xs font-medium text-muted-foreground">
+                我的 API 密钥(仅显示生效中)
+              </p>
               {keys.isError ? (
                 <QueryErrorAlert />
               ) : (keys.data ?? []).length === 0 ? (
@@ -278,12 +276,7 @@ export default function PortalPage() {
                     <TableCell className="font-mono text-xs">{inv.period}</TableCell>
                     <TableCell>¥{li2yuan(inv.amount)}</TableCell>
                     <TableCell>
-                      <Badge
-                        variant={inv.status === "PENDING" ? "secondary" : "outline"}
-                        className="font-normal"
-                      >
-                        {INVOICE_STATUS_TEXT[inv.status] ?? inv.status}
-                      </Badge>
+                      <StatusBadge meta={INVOICE_STATUS_META} value={inv.status} />
                     </TableCell>
                     <TableCell className="text-right">
                       {inv.status === "PENDING" && (
@@ -331,7 +324,8 @@ export default function PortalPage() {
           {detail && (
             <div className="space-y-3 text-sm">
               <p>
-                金额:<strong>¥{li2yuan(detail.amount)}</strong> · 状态:{INVOICE_STATUS_TEXT[detail.status] ?? detail.status}
+                金额:<strong>¥{li2yuan(detail.amount)}</strong> · 状态:
+                {INVOICE_STATUS_TEXT[detail.status] ?? detail.status}
               </p>
               {(usageOf(detail).by_model ?? []).length > 0 && (
                 <Table>
@@ -347,7 +341,9 @@ export default function PortalPage() {
                   <TableBody>
                     {(usageOf(detail).by_model ?? []).map((m) => (
                       <TableRow key={m.model}>
-                        <TableCell className="max-w-40 truncate font-mono text-xs" title={m.model}>{m.model}</TableCell>
+                        <TableCell className="max-w-40 truncate font-mono text-xs" title={m.model}>
+                          {m.model}
+                        </TableCell>
                         <TableCell>{m.prompt.toLocaleString()}</TableCell>
                         <TableCell>{m.completion.toLocaleString()}</TableCell>
                         <TableCell>{m.calls}</TableCell>

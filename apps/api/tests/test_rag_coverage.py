@@ -118,16 +118,25 @@ def test_cluster_merge_and_last_status() -> None:
     base = datetime(2026, 9, 1, 12, 0, 0)
     signals = [
         FailureSignal(
-            question="每个门店的库存数量", status="FAILED", rating="",
-            has_corrected_sql=False, created_at=base,
+            question="每个门店的库存数量",
+            status="FAILED",
+            rating="",
+            has_corrected_sql=False,
+            created_at=base,
         ),
         FailureSignal(
-            question="每个门店的库存数量 ", status="NO_DATA", rating="",
-            has_corrected_sql=False, created_at=base + timedelta(hours=1),
+            question="每个门店的库存数量 ",
+            status="NO_DATA",
+            rating="",
+            has_corrected_sql=False,
+            created_at=base + timedelta(hours=1),
         ),
         FailureSignal(
-            question="各分类销售额", status="SUCCESS", rating="DOWN",
-            has_corrected_sql=False, created_at=base,
+            question="各分类销售额",
+            status="SUCCESS",
+            rating="DOWN",
+            has_corrected_sql=False,
+            created_at=base,
         ),
     ]
     clusters, total = cluster_failure_signals(signals)
@@ -146,12 +155,18 @@ def test_cluster_tiebreak_on_desc_input() -> None:
     signals = [
         # 首行=最新插入(id 更大;同事务 now() 并列的真实形态)
         FailureSignal(
-            question="每个门店的库存数量", status="NO_DATA", rating="",
-            has_corrected_sql=False, created_at=same,
+            question="每个门店的库存数量",
+            status="NO_DATA",
+            rating="",
+            has_corrected_sql=False,
+            created_at=same,
         ),
         FailureSignal(
-            question="每个门店的库存数量", status="FAILED", rating="",
-            has_corrected_sql=False, created_at=same,
+            question="每个门店的库存数量",
+            status="FAILED",
+            rating="",
+            has_corrected_sql=False,
+            created_at=same,
         ),
     ]
     clusters, total = cluster_failure_signals(signals)
@@ -164,8 +179,11 @@ def test_cluster_cap_and_total() -> None:
     base = datetime(2026, 9, 1)
     signals = [
         FailureSignal(
-            question=f"问题 {i}", status="FAILED", rating="",
-            has_corrected_sql=False, created_at=base + timedelta(minutes=i),
+            question=f"问题 {i}",
+            status="FAILED",
+            rating="",
+            has_corrected_sql=False,
+            created_at=base + timedelta(minutes=i),
         )
         for i in range(COVERAGE_FAILURE_CLUSTER_CAP + 5)
     ]
@@ -225,10 +243,7 @@ async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction
             )
         )
         await conn.execute(
-            text(
-                "CREATE TABLE IF NOT EXISTS tenant_default.stock"
-                " (id int primary key, note text)"
-            )
+            text("CREATE TABLE IF NOT EXISTS tenant_default.stock (id int primary key, note text)")
         )
     yield
     async with get_engine().begin() as conn:
@@ -256,8 +271,15 @@ async def _seed_entry(
             " VALUES (gen_random_uuid(), :t, :d, :sn, :n, 'c',"
             "  CAST(:cols AS jsonb), CAST(:samples AS jsonb), :st)"
         ),
-        {"t": tenant_id, "d": ds, "sn": schema, "n": table, "cols": columns_comment,
-         "samples": sample_queries, "st": source},
+        {
+            "t": tenant_id,
+            "d": ds,
+            "sn": schema,
+            "n": table,
+            "cols": columns_comment,
+            "samples": sample_queries,
+            "st": source,
+        },
     )
     await session.commit()
 
@@ -314,8 +336,9 @@ async def _seed_history(session: AsyncSession, tenant_id: str, question: str) ->
 
 
 async def _get_report(client: AsyncClient, token: str) -> tuple[int, dict[str, Any]]:
-    r = await client.get(f"{RAG}/coverage-report", params={"datasource_key": "default"},
-                         headers=_auth(token))
+    r = await client.get(
+        f"{RAG}/coverage-report", params={"datasource_key": "default"}, headers=_auth(token)
+    )
     return r.status_code, cast("dict[str, Any]", r.json())
 
 
@@ -323,8 +346,9 @@ async def test_coverage_report_no_perm_403(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     token = await _noperm_user(client, session, make_user)
-    r = await client.get(f"{RAG}/coverage-report", params={"datasource_key": "default"},
-                         headers=_auth(token))
+    r = await client.get(
+        f"{RAG}/coverage-report", params={"datasource_key": "default"}, headers=_auth(token)
+    )
     assert r.status_code == 403
 
 
@@ -332,8 +356,9 @@ async def test_coverage_report_bad_datasource_same_shape_400(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     token = await _admin_token(client, session)
-    r = await client.get(f"{RAG}/coverage-report", params={"datasource_key": "no_such"},
-                         headers=_auth(token))
+    r = await client.get(
+        f"{RAG}/coverage-report", params={"datasource_key": "no_such"}, headers=_auth(token)
+    )
     assert r.status_code == 400
     assert r.json()["detail"] == "DATASOURCE_INVALID"
 
@@ -345,7 +370,9 @@ async def test_coverage_report_happy_path(
     mine = await _default_tenant_id(session)
     # 登记:goods 缺 create_by 标签+示例 SQL 空;legacy 纯结构降级
     await _seed_entry(
-        session, mine, "goods",
+        session,
+        mine,
+        "goods",
         columns_comment='{"id": "int 主键", "name": "名称"}',
     )
     await _seed_entry(session, mine, "legacy", source="INTROSPECTION")
@@ -354,28 +381,45 @@ async def test_coverage_report_happy_path(
     await _seed_history(session, mine, "各分类的销售额")
     # 失败信号:同题归并 ×2(最近 NO_DATA)/差评/跨租户不可见/窗外不收
     await _seed_session_msg(
-        session, tenant_id=mine, datasource_key="default",
-        question="每个门店的库存数量", status="FAILED",
+        session,
+        tenant_id=mine,
+        datasource_key="default",
+        question="每个门店的库存数量",
+        status="FAILED",
         age=timedelta(hours=1),
     )
     await _seed_session_msg(
-        session, tenant_id=mine, datasource_key="default",
-        question=" 每个门店的库存数量", status="NO_DATA",
+        session,
+        tenant_id=mine,
+        datasource_key="default",
+        question=" 每个门店的库存数量",
+        status="NO_DATA",
     )
     await _seed_session_msg(
-        session, tenant_id=mine, datasource_key="default",
-        question="帮我导出全部订单", status="SUCCESS", rating="DOWN",
+        session,
+        tenant_id=mine,
+        datasource_key="default",
+        question="帮我导出全部订单",
+        status="SUCCESS",
+        rating="DOWN",
     )
     await _seed_session_msg(
-        session, tenant_id=mine, datasource_key="default",
-        question="31 天前的失败题", status="FAILED", age=timedelta(days=31),
+        session,
+        tenant_id=mine,
+        datasource_key="default",
+        question="31 天前的失败题",
+        status="FAILED",
+        age=timedelta(days=31),
     )
     from tests.test_datasource_admin import _mk_tenant
 
     other = await _mk_tenant(session, "covothert")
     await _seed_session_msg(
-        session, tenant_id=other, datasource_key="default",
-        question="他租户的失败题", status="FAILED",
+        session,
+        tenant_id=other,
+        datasource_key="default",
+        question="他租户的失败题",
+        status="FAILED",
     )
 
     code, body = await _get_report(client, token)

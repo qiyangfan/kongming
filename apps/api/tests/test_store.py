@@ -49,9 +49,7 @@ async def test_publish_governance(
     # 新建默认未上架:列表与详情均不可见(含创建者视角)
     r = await client.get("/store/bots", headers={"Authorization": f"Bearer {token_a}"})
     assert all(b["id"] != bot_id for b in r.json())
-    r0 = await client.get(
-        "/store/bots/store_bot", headers={"Authorization": f"Bearer {token_a}"}
-    )
+    r0 = await client.get("/store/bots/store_bot", headers={"Authorization": f"Bearer {token_a}"})
     assert r0.status_code == 404
     # 非归属者上架 403
     r2 = await client.post(
@@ -132,17 +130,11 @@ async def test_discovery_search_sort_detail(
         headers={"Authorization": f"Bearer {token}"},
         json={"greeting": "销售问题问我", "suggestions": ["本月 GMV"]},
     )
-    r = await client.get(
-        "/store/bots?q=销售", headers={"Authorization": f"Bearer {token}"}
-    )
+    r = await client.get("/store/bots?q=销售", headers={"Authorization": f"Bearer {token}"})
     assert any(b["id"] == bot_id for b in r.json())
-    r2 = await client.get(
-        "/store/bots?q=不存在词xyz", headers={"Authorization": f"Bearer {token}"}
-    )
+    r2 = await client.get("/store/bots?q=不存在词xyz", headers={"Authorization": f"Bearer {token}"})
     assert all(b["id"] != bot_id for b in r2.json())
-    r3 = await client.get(
-        "/store/bots/store_bot", headers={"Authorization": f"Bearer {token}"}
-    )
+    r3 = await client.get("/store/bots/store_bot", headers={"Authorization": f"Bearer {token}"})
     d = r3.json()
     assert d["greeting"] == "销售问题问我"
     assert d["suggestions"] == ["本月 GMV"]
@@ -166,9 +158,7 @@ async def test_favorite_and_rating(
         "/store/bots/store_bot/favorite", headers={"Authorization": f"Bearer {token}"}
     )
     assert r.json()["favorited"] is True
-    favs = await client.get(
-        "/store/favorites", headers={"Authorization": f"Bearer {token}"}
-    )
+    favs = await client.get("/store/favorites", headers={"Authorization": f"Bearer {token}"})
     assert len(favs.json()) == 1
     # 收藏列表项同构 StoreBotOut:favorited 恒 TRUE(前端心形填充依据)、
     # fav_count 全局计数(缺陷修复:曾缺字段致「我的收藏」页红心不亮)
@@ -176,9 +166,7 @@ async def test_favorite_and_rating(
     assert favs.json()[0]["fav_count"] == 1
     # 详情接口 favorited 同源真实(曾恒 false 的同根缺陷)
     d_fav = (
-        await client.get(
-            "/store/bots/store_bot", headers={"Authorization": f"Bearer {token}"}
-        )
+        await client.get("/store/bots/store_bot", headers={"Authorization": f"Bearer {token}"})
     ).json()
     assert d_fav["favorited"] is True
     r2 = await client.post(
@@ -209,17 +197,13 @@ async def test_favorite_and_rating(
     assert r4.status_code == 200
     n = (
         await session.execute(
-            text(
-                "SELECT count(*) FROM public.sys_bot_rating WHERE bot_id=CAST(:b AS uuid)"
-            ),
+            text("SELECT count(*) FROM public.sys_bot_rating WHERE bot_id=CAST(:b AS uuid)"),
             {"b": bot_id},
         )
     ).scalar_one()
     assert n == 1  # 一人一评(upsert 不产生第二条;按 bot 过滤免跨测试计数)
     d = (
-        await client.get(
-            "/store/bots/store_bot", headers={"Authorization": f"Bearer {token}"}
-        )
+        await client.get("/store/bots/store_bot", headers={"Authorization": f"Bearer {token}"})
     ).json()
     assert d["my_rating"] == 3 and d["avg_score"] == 3.0 and d["rating_count"] == 1
     # 非法分值 422(传输层 ge/le 闸;领域层 400 双闸在 service)
@@ -249,9 +233,7 @@ async def test_favorite_list_only_published(
         f"/system/bots/{bot_id}/unpublish",
         headers={"Authorization": f"Bearer {token}"},
     )
-    favs = await client.get(
-        "/store/favorites", headers={"Authorization": f"Bearer {token}"}
-    )
+    favs = await client.get("/store/favorites", headers={"Authorization": f"Bearer {token}"})
     assert favs.json() == []
     # 重新上架自动回归
     await client.post(
@@ -259,9 +241,7 @@ async def test_favorite_list_only_published(
         headers={"Authorization": f"Bearer {token}"},
         json={"greeting": "hi"},
     )
-    favs2 = await client.get(
-        "/store/favorites", headers={"Authorization": f"Bearer {token}"}
-    )
+    favs2 = await client.get("/store/favorites", headers={"Authorization": f"Bearer {token}"})
     assert len(favs2.json()) == 1
 
 
@@ -286,10 +266,7 @@ async def test_store_run_counts_usage(
     if r.json()["success"]:
         n = (
             await session.execute(
-                text(
-                    "SELECT use_count FROM public.sys_bot_definition"
-                    " WHERE id=CAST(:i AS uuid)"
-                ),
+                text("SELECT use_count FROM public.sys_bot_definition WHERE id=CAST(:i AS uuid)"),
                 {"i": bot_id},
             )
         ).scalar_one()
@@ -297,10 +274,7 @@ async def test_store_run_counts_usage(
     # 无 use_count 上报参数(契约面直证:塞入字段被忽略而非计数)
     before = (
         await session.execute(
-            text(
-                "SELECT use_count FROM public.sys_bot_definition"
-                " WHERE id=CAST(:i AS uuid)"
-            ),
+            text("SELECT use_count FROM public.sys_bot_definition WHERE id=CAST(:i AS uuid)"),
             {"i": bot_id},
         )
     ).scalar_one()
@@ -311,10 +285,7 @@ async def test_store_run_counts_usage(
     )
     after = (
         await session.execute(
-            text(
-                "SELECT use_count FROM public.sys_bot_definition"
-                " WHERE id=CAST(:i AS uuid)"
-            ),
+            text("SELECT use_count FROM public.sys_bot_definition WHERE id=CAST(:i AS uuid)"),
             {"i": bot_id},
         )
     ).scalar_one()

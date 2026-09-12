@@ -87,7 +87,7 @@ def _parse_outcome(
             exit_code=exit_code,
         )
     try:
-        parsed = json.loads(last_line[len(PROTOCOL_PREFIX):])
+        parsed = json.loads(last_line[len(PROTOCOL_PREFIX) :])
         if not isinstance(parsed, dict):
             raise ValueError("协议体非对象")
         body = cast("dict[str, Any]", parsed)
@@ -146,18 +146,31 @@ class PodmanSandboxRunner:
 
     def _argv(self, name: str) -> list[str]:
         return [
-            "podman", "run", "--rm", "-i",
-            "--network", "none",
+            "podman",
+            "run",
+            "--rm",
+            "-i",
+            "--network",
+            "none",
             "--read-only",
-            "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m",  # noqa: S108  # 容器内挂载点非宿主临时文件
-            "--memory", f"{self._mem}m",
-            "--cpus", str(self._cpus),
-            "--pids-limit", "64",
-            "--cap-drop", "ALL",
-            "--security-opt", "no-new-privileges",
-            "--user", "1000",
-            "--stop-timeout", "1",
-            "--name", name,
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=16m",  # noqa: S108  # 容器内挂载点非宿主临时文件
+            "--memory",
+            f"{self._mem}m",
+            "--cpus",
+            str(self._cpus),
+            "--pids-limit",
+            "64",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--user",
+            "1000",
+            "--stop-timeout",
+            "1",
+            "--name",
+            name,
             self._image,
         ]
 
@@ -168,7 +181,9 @@ class PodmanSandboxRunner:
         立即终止,须 podman kill 容器本体)。"""
         with contextlib.suppress(Exception):
             killer = await asyncio.create_subprocess_exec(
-                "podman", "kill", name,
+                "podman",
+                "kill",
+                name,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -176,9 +191,9 @@ class PodmanSandboxRunner:
 
     async def run(self, *, code: str, data: dict[str, object] | None) -> SandboxOutcome:
         started = time.monotonic()
-        payload = json.dumps(
-            {"code": code, "data": data}, ensure_ascii=False, default=str
-        ).encode("utf-8")[:_STDIN_CAP]
+        payload = json.dumps({"code": code, "data": data}, ensure_ascii=False, default=str).encode(
+            "utf-8"
+        )[:_STDIN_CAP]
         name = f"km-sbx-{uuid.uuid4().hex[:8]}"
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -195,6 +210,7 @@ class PodmanSandboxRunner:
                 error=f"沙箱启动失败: {e}",
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
+
         async def _exchange() -> tuple[bytes, bytes]:
             # 写 stdin → 关闭 → 双侧有界读(R1-S1)。容器引导脚本先读尽
             # stdin 再执行,写侧不会与读侧死锁;子早夭则 drain 断管
@@ -221,9 +237,7 @@ class PodmanSandboxRunner:
                 raise
 
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(
-                _exchange(), timeout=self._timeout
-            )
+            stdout_b, stderr_b = await asyncio.wait_for(_exchange(), timeout=self._timeout)
         except TimeoutError:
             await self._kill_container(name)  # 先杀容器本体(conmon 托管)
             with contextlib.suppress(ProcessLookupError):

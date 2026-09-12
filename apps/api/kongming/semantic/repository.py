@@ -44,20 +44,22 @@ class SqlSemanticRepo:
             )
         return len(rels)
 
-    async def list_relations(
-        self, *, tenant_id: str, datasource_key: str
-    ) -> list[dict[str, Any]]:
+    async def list_relations(self, *, tenant_id: str, datasource_key: str) -> list[dict[str, Any]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, source_table, target_table, join_keys, source, updated_at"
-                    " FROM rag.table_relations"
-                    " WHERE tenant_id=:t AND datasource_key=:d"
-                    " ORDER BY source_table, target_table"
-                ),
-                {"t": tenant_id, "d": datasource_key},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, source_table, target_table, join_keys, source, updated_at"
+                        " FROM rag.table_relations"
+                        " WHERE tenant_id=:t AND datasource_key=:d"
+                        " ORDER BY source_table, target_table"
+                    ),
+                    {"t": tenant_id, "d": datasource_key},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def relations_within(
@@ -69,16 +71,20 @@ class SqlSemanticRepo:
         if not tables:
             return []
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT source_table, target_table, join_keys, source"
-                    " FROM rag.table_relations"
-                    " WHERE tenant_id=:t AND datasource_key=:d"
-                    "   AND source_table = ANY(:ts) AND target_table = ANY(:ts)"
-                ),
-                {"t": tenant_id, "d": datasource_key, "ts": tables},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT source_table, target_table, join_keys, source"
+                        " FROM rag.table_relations"
+                        " WHERE tenant_id=:t AND datasource_key=:d"
+                        "   AND source_table = ANY(:ts) AND target_table = ANY(:ts)"
+                    ),
+                    {"t": tenant_id, "d": datasource_key, "ts": tables},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def add_relation(
@@ -113,10 +119,7 @@ class SqlSemanticRepo:
     async def delete_relation(self, *, relation_id: str, tenant_id: str) -> bool:
         hit = (
             await self._s.execute(
-                text(
-                    "DELETE FROM rag.table_relations WHERE id=:i AND tenant_id=:t"
-                    " RETURNING id"
-                ),
+                text("DELETE FROM rag.table_relations WHERE id=:i AND tenant_id=:t RETURNING id"),
                 {"i": relation_id, "t": tenant_id},
             )
         ).scalar_one_or_none()
@@ -129,9 +132,7 @@ class SqlSemanticRepo:
             {"t": tenant_id, "d": datasource_key},
         )
         await self._s.execute(
-            text(
-                "DELETE FROM rag.metric_definitions WHERE tenant_id=:t AND datasource_key=:d"
-            ),
+            text("DELETE FROM rag.metric_definitions WHERE tenant_id=:t AND datasource_key=:d"),
             {"t": tenant_id, "d": datasource_key},
         )
 
@@ -139,15 +140,19 @@ class SqlSemanticRepo:
 
     async def list_metrics(self, *, tenant_id: str, datasource_key: str) -> list[dict[str, Any]]:
         rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, metric_name, sql_template, business_terms, enabled, updated_at"
-                    " FROM rag.metric_definitions"
-                    " WHERE tenant_id=:t AND datasource_key=:d ORDER BY metric_name"
-                ),
-                {"t": tenant_id, "d": datasource_key},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, metric_name, sql_template, business_terms, enabled, updated_at"
+                        " FROM rag.metric_definitions"
+                        " WHERE tenant_id=:t AND datasource_key=:d ORDER BY metric_name"
+                    ),
+                    {"t": tenant_id, "d": datasource_key},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [dict(r) for r in rows]
 
     async def upsert_metric(
@@ -177,12 +182,12 @@ class SqlSemanticRepo:
             )
         ).scalar_one()
         return str(row_id)
+
     async def delete_metric(self, *, metric_id: str, tenant_id: str) -> bool:
         hit = (
             await self._s.execute(
                 text(
-                    "DELETE FROM rag.metric_definitions WHERE id=:i AND tenant_id=:t"
-                    " RETURNING id"
+                    "DELETE FROM rag.metric_definitions WHERE id=:i AND tenant_id=:t RETURNING id"
                 ),
                 {"i": metric_id, "t": tenant_id},
             )

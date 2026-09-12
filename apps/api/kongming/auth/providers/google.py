@@ -4,7 +4,6 @@ email_verified 直接来自 userinfo;username 取 email 本地部分(sub 兜底�
 account_link 的用户名去重负责)。
 """
 
-
 from kongming.auth.models import NormalizedProfile
 from kongming.auth.providers.base import OAuthClient, OAuthProviderBase
 from kongming.config import Settings

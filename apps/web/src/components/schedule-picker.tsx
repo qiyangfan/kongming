@@ -89,10 +89,7 @@ export function SchedulePicker({ value, onChange }: SchedulePickerProps) {
     onPick: (v: number) => void,
     width: string,
   ) => (
-    <Select
-      value={String(current)}
-      onValueChange={guardNum(onPick)}
-    >
+    <Select value={String(current)} onValueChange={guardNum(onPick)}>
       <SelectTrigger aria-label={label} className={width}>
         <SelectValue />
       </SelectTrigger>
@@ -114,7 +111,13 @@ export function SchedulePicker({ value, onChange }: SchedulePickerProps) {
         return (
           <>
             <span>每小时第</span>
-            {numSelect("分钟", MINUTE_OPTIONS, schedule.minute, (minute) => emit({ ...schedule, minute }), "w-20")}
+            {numSelect(
+              "分钟",
+              MINUTE_OPTIONS,
+              schedule.minute,
+              (minute) => emit({ ...schedule, minute }),
+              "w-20",
+            )}
             <span>分触发</span>
           </>
         );
@@ -122,9 +125,21 @@ export function SchedulePicker({ value, onChange }: SchedulePickerProps) {
         return (
           <>
             <span>每天</span>
-            {numSelect("小时", HOUR_OPTIONS, schedule.hour, (hour) => emit({ ...schedule, hour }), "w-20")}
+            {numSelect(
+              "小时",
+              HOUR_OPTIONS,
+              schedule.hour,
+              (hour) => emit({ ...schedule, hour }),
+              "w-20",
+            )}
             <span>时</span>
-            {numSelect("分钟", MINUTE_OPTIONS, schedule.minute, (minute) => emit({ ...schedule, minute }), "w-20")}
+            {numSelect(
+              "分钟",
+              MINUTE_OPTIONS,
+              schedule.minute,
+              (minute) => emit({ ...schedule, minute }),
+              "w-20",
+            )}
             <span>分触发</span>
           </>
         );
@@ -147,9 +162,21 @@ export function SchedulePicker({ value, onChange }: SchedulePickerProps) {
                 ))}
               </SelectContent>
             </Select>
-            {numSelect("小时", HOUR_OPTIONS, schedule.hour, (hour) => emit({ ...schedule, hour }), "w-20")}
+            {numSelect(
+              "小时",
+              HOUR_OPTIONS,
+              schedule.hour,
+              (hour) => emit({ ...schedule, hour }),
+              "w-20",
+            )}
             <span>时</span>
-            {numSelect("分钟", MINUTE_OPTIONS, schedule.minute, (minute) => emit({ ...schedule, minute }), "w-20")}
+            {numSelect(
+              "分钟",
+              MINUTE_OPTIONS,
+              schedule.minute,
+              (minute) => emit({ ...schedule, minute }),
+              "w-20",
+            )}
             <span>分触发</span>
           </>
         );
@@ -157,9 +184,21 @@ export function SchedulePicker({ value, onChange }: SchedulePickerProps) {
         return (
           <>
             <span>周一至周五</span>
-            {numSelect("小时", HOUR_OPTIONS, schedule.hour, (hour) => emit({ ...schedule, hour }), "w-20")}
+            {numSelect(
+              "小时",
+              HOUR_OPTIONS,
+              schedule.hour,
+              (hour) => emit({ ...schedule, hour }),
+              "w-20",
+            )}
             <span>时</span>
-            {numSelect("分钟", MINUTE_OPTIONS, schedule.minute, (minute) => emit({ ...schedule, minute }), "w-20")}
+            {numSelect(
+              "分钟",
+              MINUTE_OPTIONS,
+              schedule.minute,
+              (minute) => emit({ ...schedule, minute }),
+              "w-20",
+            )}
             <span>分触发</span>
           </>
         );
@@ -167,11 +206,29 @@ export function SchedulePicker({ value, onChange }: SchedulePickerProps) {
         return (
           <>
             <span>每月</span>
-            {numSelect("日期", MONTH_DAY_OPTIONS, schedule.monthDay, (monthDay) => emit({ ...schedule, monthDay }), "w-20")}
+            {numSelect(
+              "日期",
+              MONTH_DAY_OPTIONS,
+              schedule.monthDay,
+              (monthDay) => emit({ ...schedule, monthDay }),
+              "w-20",
+            )}
             <span>日</span>
-            {numSelect("小时", HOUR_OPTIONS, schedule.hour, (hour) => emit({ ...schedule, hour }), "w-20")}
+            {numSelect(
+              "小时",
+              HOUR_OPTIONS,
+              schedule.hour,
+              (hour) => emit({ ...schedule, hour }),
+              "w-20",
+            )}
             <span>时</span>
-            {numSelect("分钟", MINUTE_OPTIONS, schedule.minute, (minute) => emit({ ...schedule, minute }), "w-20")}
+            {numSelect(
+              "分钟",
+              MINUTE_OPTIONS,
+              schedule.minute,
+              (minute) => emit({ ...schedule, minute }),
+              "w-20",
+            )}
             <span>分触发</span>
           </>
         );
@@ -184,10 +241,7 @@ export function SchedulePicker({ value, onChange }: SchedulePickerProps) {
     <div className="space-y-3">
       <div className="space-y-1.5">
         <Label htmlFor="tg-schedule">调度频率</Label>
-        <Select
-          value={expert ? EXPERT_KEY : scheduleToKey(schedule)}
-          onValueChange={pick}
-        >
+        <Select value={expert ? EXPERT_KEY : scheduleToKey(schedule)} onValueChange={pick}>
           <SelectTrigger id="tg-schedule" aria-label="调度频率" className="w-full">
             <SelectValue />
           </SelectTrigger>
@@ -223,7 +277,9 @@ export function SchedulePicker({ value, onChange }: SchedulePickerProps) {
             autoComplete="off"
             placeholder="分 时 日 月 周,如 0 9 * * 1-5"
           />
-          <p className="text-xs text-muted-foreground">五字段:分 时 日 月 周;日与周仅其一可为 *。</p>
+          <p className="text-xs text-muted-foreground">
+            五字段:分 时 日 月 周;日与周仅其一可为 *。
+          </p>
         </div>
       ) : (
         params !== null && (

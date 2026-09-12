@@ -52,10 +52,7 @@ export function deleteWorkflow(key: string): Promise<{ ok: boolean }> {
   return api.delete(`/system/workflow/${key}`);
 }
 
-export function runWorkflow(
-  key: string,
-  inputs: Record<string, unknown>,
-): Promise<WorkflowRunOut> {
+export function runWorkflow(key: string, inputs: Record<string, unknown>): Promise<WorkflowRunOut> {
   return api.post(`/system/workflow/${key}/run`, { inputs });
 }
 

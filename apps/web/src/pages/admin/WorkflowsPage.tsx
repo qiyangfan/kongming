@@ -18,11 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +30,8 @@ import {
 import { FieldLabel } from "@/components/field-label";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/page-header";
+import { StatusBadge, type StatusMeta } from "@/components/status-badge";
 import { StatusSwitch } from "@/components/status-switch";
 import {
   Table,
@@ -69,11 +67,12 @@ const TEMPLATE = `{
   ]
 }`;
 
-const STATUS_TEXT: Record<string, string> = {
-  SUCCESS: "成功",
-  FAILED: "失败",
-  TIMEOUT: "超时",
-  STEP_LIMIT: "超步数",
+// run 状态 → 徽章统一走 StatusBadge(未知值回落 destructive,保持原「非 SUCCESS 一律红」语义)
+const RUN_STATUS_META: StatusMeta = {
+  SUCCESS: { label: "成功", variant: "secondary" },
+  FAILED: { label: "失败", variant: "destructive" },
+  TIMEOUT: { label: "超时", variant: "destructive" },
+  STEP_LIMIT: { label: "超步数", variant: "destructive" },
 };
 
 export default function WorkflowsPage() {
@@ -185,22 +184,21 @@ export default function WorkflowsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">工作流</h1>
-        <Button
-          onClick={() => {
-            setEditing({ origKey: null, wfKey: "", name: "", defText: TEMPLATE });
-            setFormError("");
-          }}
-        >
-          <Plus aria-hidden />
-          新建工作流
-        </Button>
-      </div>
-      <p className="text-sm text-muted-foreground">
-        用 JSON 定义多步骤自动任务:可编排 SQL 查询、HTTP 调用、条件分支、循环与 AI
-        步骤;同名保存自动产生新版本,旧版本冻结。
-      </p>
+      <PageHeader
+        title="工作流"
+        description="用 JSON 定义多步骤自动任务:可编排 SQL 查询、HTTP 调用、条件分支、循环与 AI 步骤;同名保存自动产生新版本,旧版本冻结。"
+        actions={
+          <Button
+            onClick={() => {
+              setEditing({ origKey: null, wfKey: "", name: "", defText: TEMPLATE });
+              setFormError("");
+            }}
+          >
+            <Plus aria-hidden />
+            新建工作流
+          </Button>
+        }
+      />
 
       <div className="rounded-lg border">
         <Table>
@@ -231,11 +229,11 @@ export default function WorkflowsPage() {
               (workflows.data ?? []).map((row) => (
                 <TableRow key={row.id}>
                   <TableCell className="font-mono text-xs">{row.wf_key}</TableCell>
-                  <TableCell className="max-w-40 truncate" title={row.name}>{row.name}</TableCell>
+                  <TableCell className="max-w-40 truncate" title={row.name}>
+                    {row.name}
+                  </TableCell>
                   <TableCell>
-                    <Badge variant="secondary" className="font-normal">
-                      v{row.version}
-                    </Badge>
+                    <Badge variant="secondary">v{row.version}</Badge>
                   </TableCell>
                   <TableCell>
                     {Array.isArray((row.definition as { nodes?: unknown[] }).nodes)
@@ -322,9 +320,7 @@ export default function WorkflowsPage() {
       >
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>
-              {editing?.wfKey ? "编辑工作流" : "新建工作流"}
-            </DialogTitle>
+            <DialogTitle>{editing?.wfKey ? "编辑工作流" : "新建工作流"}</DialogTitle>
             <DialogDescription>
               同名标识再保存自动产生新版本;旧版本冻结不可改。节点输出用
               {"{{节点id.outputs.字段}}"} 引用(不支持数组下标;loop 的 items_ref
@@ -424,19 +420,14 @@ export default function WorkflowsPage() {
               <div className="space-y-1 rounded-md border p-3 text-sm">
                 <p>
                   结果:
-                  <Badge
-                    variant={runResult.status === "SUCCESS" ? "secondary" : "destructive"}
-                    className="ml-1 font-normal"
-                  >
-                    {STATUS_TEXT[runResult.status] ?? runResult.status}
-                  </Badge>
+                  <span className="ml-1">
+                    <StatusBadge meta={RUN_STATUS_META} value={runResult.status} fallbackVariant="destructive" />
+                  </span>
                   <span className="ml-2 text-xs text-muted-foreground">
                     v{runResult.version} · {runResult.duration_ms}ms
                   </span>
                 </p>
-                {runResult.error && (
-                  <p className="text-xs text-destructive">{runResult.error}</p>
-                )}
+                {runResult.error && <p className="text-xs text-destructive">{runResult.error}</p>}
                 {nodeRunsOf(runResult).map((nr) => (
                   <p key={nr.node_id} className="text-xs text-muted-foreground">
                     {nr.node_id}: {nr.status}
@@ -474,9 +465,7 @@ export default function WorkflowsPage() {
             {runs.isError ? (
               <QueryErrorAlert />
             ) : (runs.data?.items ?? []).length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">
-                暂无运行记录。
-              </p>
+              <p className="py-6 text-center text-sm text-muted-foreground">暂无运行记录。</p>
             ) : (
               (runs.data?.items ?? []).map((r) => (
                 <Collapsible key={r.id}>
@@ -487,12 +476,7 @@ export default function WorkflowsPage() {
                           className="size-3.5 transition-transform group-data-[state=open]:rotate-90"
                           aria-hidden
                         />
-                        <Badge
-                          variant={r.status === "SUCCESS" ? "secondary" : "destructive"}
-                          className="font-normal"
-                        >
-                          {STATUS_TEXT[r.status] ?? r.status}
-                        </Badge>
+                        <StatusBadge meta={RUN_STATUS_META} value={r.status} fallbackVariant="destructive" />
                         <span className="text-xs text-muted-foreground">
                           v{r.version} · {r.trigger_source} · {r.duration_ms}ms ·{" "}
                           {r.created_at ? new Date(r.created_at).toLocaleString() : ""}
@@ -500,8 +484,8 @@ export default function WorkflowsPage() {
                       </CollapsibleTrigger>
                       <Button
                         variant="outline"
-                        size="sm"
-                        className="h-7 shrink-0"
+                        size="xs"
+                        className="shrink-0"
                         onClick={() => setDetailRunId(r.id)}
                       >
                         详情
@@ -524,9 +508,7 @@ export default function WorkflowsPage() {
                             >
                               {nr.status}
                             </span>
-                            {nr.error && (
-                              <span className="text-destructive"> — {nr.error}</span>
-                            )}
+                            {nr.error && <span className="text-destructive"> — {nr.error}</span>}
                           </div>
                         ))}
                       </div>
@@ -586,12 +568,7 @@ export default function WorkflowsPage() {
           ) : runDetail.data ? (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2 text-sm">
-                <Badge
-                  variant={runDetail.data.status === "SUCCESS" ? "secondary" : "destructive"}
-                  className="font-normal"
-                >
-                  {STATUS_TEXT[runDetail.data.status] ?? runDetail.data.status}
-                </Badge>
+                <StatusBadge meta={RUN_STATUS_META} value={runDetail.data.status} fallbackVariant="destructive" />
                 <span className="text-xs text-muted-foreground">
                   v{runDetail.data.version} · 触发源 {runDetail.data.trigger_source} ·{" "}
                   {runDetail.data.duration_ms}ms
@@ -616,26 +593,22 @@ export default function WorkflowsPage() {
                     outputsRaw == null
                       ? null
                       : outputsRaw.length > 64 * 1024
-                        ? outputsRaw.slice(0, 64 * 1024) + "\n…(截断,共 " + outputsRaw.length + " 字符)"
+                        ? outputsRaw.slice(0, 64 * 1024) +
+                          "\n…(截断,共 " +
+                          outputsRaw.length +
+                          " 字符)"
                         : outputsRaw;
                   return (
                     <div key={nr.node_id || i} className="rounded-md border px-3 py-2">
                       <div className="flex flex-wrap items-center gap-2 text-sm">
                         <span className="font-mono text-xs">{nr.node_id}</span>
-                        <Badge
-                          variant={nr.status === "FAILED" ? "destructive" : "secondary"}
-                          className="font-normal"
-                        >
+                        <Badge variant={nr.status === "FAILED" ? "destructive" : "secondary"}>
                           {nr.status}
                         </Badge>
                         {nr.duration_ms !== undefined && (
-                          <span className="text-xs text-muted-foreground">
-                            {nr.duration_ms}ms
-                          </span>
+                          <span className="text-xs text-muted-foreground">{nr.duration_ms}ms</span>
                         )}
-                        {nr.error && (
-                          <span className="text-xs text-destructive">{nr.error}</span>
-                        )}
+                        {nr.error && <span className="text-xs text-destructive">{nr.error}</span>}
                       </div>
                       {outputs !== null && (
                         <Collapsible>

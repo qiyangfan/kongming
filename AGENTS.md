@@ -84,3 +84,23 @@ specs/baseline 为准;上游 specs 取材指引见 docs/roadmap.md。
 | 数据库表结构 | docs/adr/004 + apps/api/alembic/versions/0001_baseline.py(演进走新迁移) |
 | 前后端契约/加接口 | docs/adr/005 + make contracts |
 | 任何"要不要引入 X" | docs/adr/001(含否决清单)+ openspec/constitution.md |
+
+## 前端宪法(隆中聚合层单源)
+
+web 前端统一遵循聚合目录 `../FRONTEND-CONSTITUTION.md`(Article 0–10);本节为执行摘要,冲突时以宪法为准。
+
+- 元原则:**用组件不用手搓;用默认不胡乱覆盖;用 token 不用魔法值。**
+- 色彩:只引用 index.css 语义 token(含 success/warning),禁 `#hex`/Tailwind 字面色板;
+  图表取色走 `lib/utils.ts` 的 `cssVar()`。暗色是一级公民:**新增 token 必须同时给 `.dark` 值**,
+  组件禁新增 `dark:` 硬编码色(Article 3/10)。
+- 组件:基础交互件一律 `components/ui/`,业务代码禁裸 `<button>/<input>/<select>/<textarea>`;
+  破坏性操作必须 AlertDialog 确认(禁 window.confirm);≥2 处同类 UI 必须抽公共组件;
+  同一覆盖 ≥3 处收编进组件默认值(Article 1/2)。
+- 页面骨架只用标准件:PageHeader / FormRow / FieldLabel / Pagination / StatCard / StatusBadge /
+  QueryErrorAlert / EmptyState,禁每页手搓骨架;间距只用 Tailwind 刻度,禁任意值间距与
+  inline style 的 margin/padding/width(Article 4/6)。
+- 响应式:md 为折叠点(窄屏 Sheet 抽屉范式),表格滚动由 ui/Table 自带 overflow-x-auto,
+  页面级网格必须带折降断点;多屏验收 = 375/768/1280 三档不横向溢出(Article 9)。
+- ui/ 与共享组件是双仓标准件(与 jinguan 逐字节一致;theme-store 例外:同构不同 key):
+  **先改本仓再同步** → 聚合目录 `bash ../scripts/sync-frontend-standard.sh`。
+- 收尾门禁:`pnpm typecheck && pnpm lint` + 宪法 Article 8 自检 grep + 亮暗两态走查改动页。

@@ -72,16 +72,20 @@ class SqlDatasourceRepo:
 
     async def get(self, ds_id: str) -> Datasource | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT d.*, t.tenant_key, t.tenant_name"
-                    " FROM public.sys_datasource d"
-                    " JOIN public.sys_tenant t ON t.id = d.tenant_id"
-                    " WHERE d.id=:i"
-                ),
-                {"i": ds_id},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT d.*, t.tenant_key, t.tenant_name"
+                        " FROM public.sys_datasource d"
+                        " JOIN public.sys_tenant t ON t.id = d.tenant_id"
+                        " WHERE d.id=:i"
+                    ),
+                    {"i": ds_id},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return _to_datasource(dict(row)) if row else None
 
     async def get_password_enc(self, ds_id: str) -> str | None:
@@ -99,9 +103,7 @@ class SqlDatasourceRepo:
 
     async def tenant_active(self, tenant_id: str) -> bool:
         n = await self._s.scalar(
-            text(
-                "SELECT count(*) FROM public.sys_tenant WHERE id=:i AND status='ACTIVE'"
-            ),
+            text("SELECT count(*) FROM public.sys_tenant WHERE id=:i AND status='ACTIVE'"),
             {"i": tenant_id},
         )
         return int(n or 0) > 0
@@ -180,30 +182,30 @@ class SqlDatasourceRepo:
 
     async def update_status(self, ds_id: str, status: str) -> None:
         await self._s.execute(
-            text(
-                "UPDATE public.sys_datasource SET status=:st, updated_at=now() WHERE id=:i"
-            ),
+            text("UPDATE public.sys_datasource SET status=:st, updated_at=now() WHERE id=:i"),
             {"st": status, "i": ds_id},
         )
 
     async def delete(self, ds_id: str) -> None:
-        await self._s.execute(
-            text("DELETE FROM public.sys_datasource WHERE id=:i"), {"i": ds_id}
-        )
+        await self._s.execute(text("DELETE FROM public.sys_datasource WHERE id=:i"), {"i": ds_id})
 
     # ---- 执行面 ----
 
     async def find_for_execute(self, datasource_key: str) -> ResolvedDatasource | None:
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT datasource_key, tenant_id, host, port, database, username,"
-                    " password_enc, default_schema, status"
-                    " FROM public.sys_datasource WHERE datasource_key=:k"
-                ),
-                {"k": datasource_key},
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT datasource_key, tenant_id, host, port, database, username,"
+                        " password_enc, default_schema, status"
+                        " FROM public.sys_datasource WHERE datasource_key=:k"
+                    ),
+                    {"k": datasource_key},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         if row is None:
             return None
         return ResolvedDatasource(

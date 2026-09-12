@@ -27,6 +27,7 @@ import {
 import { FieldLabel } from "@/components/field-label";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/page-header";
 import {
   Select,
   SelectContent,
@@ -131,16 +132,21 @@ export default function TeamsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">团队</h1>
-        <Button onClick={() => { setCreating(true); setFormError(""); }}>
-          <Plus aria-hidden />
-          新建团队
-        </Button>
-      </div>
-      <p className="text-sm text-muted-foreground">
-        把助手、工作流等资源归属到团队,成员按角色共用(负责人/成员/观察者);团队记忆由成员共同维护。
-      </p>
+      <PageHeader
+        title="团队"
+        description="把助手、工作流等资源归属到团队,成员按角色共用(负责人/成员/观察者);团队记忆由成员共同维护。"
+        actions={
+          <Button
+            onClick={() => {
+              setCreating(true);
+              setFormError("");
+            }}
+          >
+            <Plus aria-hidden />
+            新建团队
+          </Button>
+        }
+      />
 
       <div className="rounded-lg border">
         <Table>
@@ -169,7 +175,9 @@ export default function TeamsPage() {
               (teams.data ?? []).map((row) => (
                 <TableRow key={row.id}>
                   <TableCell className="font-mono text-xs">{row.team_key}</TableCell>
-                  <TableCell className="max-w-40 truncate" title={row.name}>{row.name}</TableCell>
+                  <TableCell className="max-w-40 truncate" title={row.name}>
+                    {row.name}
+                  </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {row.created_at ? new Date(row.created_at).toLocaleDateString() : ""}
                   </TableCell>
@@ -190,7 +198,10 @@ export default function TeamsPage() {
                         variant="ghost"
                         size="icon-xs"
                         aria-label={`删除 ${row.name}`}
-                        onClick={() => { setDeleting(row); setDeleteError(""); }}
+                        onClick={() => {
+                          setDeleting(row);
+                          setDeleteError("");
+                        }}
                       >
                         <Trash2 aria-hidden />
                       </Button>
@@ -223,10 +234,7 @@ export default function TeamsPage() {
             }}
           >
             <div className="space-y-1.5">
-              <FieldLabel
-                htmlFor="team-key"
-                help="小写字母开头,创建后不可改。"
-              >
+              <FieldLabel htmlFor="team-key" help="小写字母开头,创建后不可改。">
                 标识
               </FieldLabel>
               <Input
@@ -287,13 +295,15 @@ export default function TeamsPage() {
               <TableBody>
                 {(detail.data?.members ?? []).map((m) => (
                   <TableRow key={m.user_id}>
-                    <TableCell className="max-w-40 truncate text-sm" title={m.username}>{m.username}</TableCell>
+                    <TableCell className="max-w-40 truncate text-sm" title={m.username}>
+                      {m.username}
+                    </TableCell>
                     <TableCell>
                       <Select
                         value={m.role}
                         onValueChange={(v) => changeRole.mutate({ userId: m.user_id, role: v })}
                       >
-                        <SelectTrigger className="h-7 w-28" aria-label={`角色 ${m.username}`}>
+                        <SelectTrigger size="sm" className="w-28" aria-label={`角色 ${m.username}`}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -347,9 +357,7 @@ export default function TeamsPage() {
                       .filter(
                         (u) =>
                           // 036⑧:按 user_id 语义键排除(username 可改会漏排)
-                          !(detail.data?.members ?? []).some(
-                            (m) => m.user_id === u.id,
-                          ),
+                          !(detail.data?.members ?? []).some((m) => m.user_id === u.id),
                       )
                       .map((u) => (
                         <SelectItem key={u.id} value={u.id}>
@@ -398,8 +406,7 @@ export default function TeamsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>删除团队「{deleting?.name}」?</AlertDialogTitle>
             <AlertDialogDescription>
-              成员关系解除;归属团队的 Bot/工作流自动回到个人(创建者可见,不丢资源)。
-              此操作不可恢复。
+              成员关系解除;归属团队的 Bot/工作流自动回到个人(创建者可见,不丢资源)。 此操作不可恢复。
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteError && (

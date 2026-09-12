@@ -95,9 +95,7 @@ def get_graph():  # type: ignore[no-untyped-def]
     )
     g.add_edge("doc_answer", END)
     # 043:generate→validate 改条件边(哨兵短路直达 fail;见 _after_generate)
-    g.add_conditional_edges(
-        "generate", _after_generate, {"validate": "validate", "fail": END}
-    )
+    g.add_conditional_edges("generate", _after_generate, {"validate": "validate", "fail": END})
     g.add_conditional_edges(
         "validate", _after_validate, {"execute": "execute", "selfheal": "selfheal", "fail": END}
     )

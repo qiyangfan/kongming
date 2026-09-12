@@ -192,8 +192,7 @@ async def test_sentinel_after_does_not_exist_guides_then_terminates(
 async def test_retry_exhaustion_terminates(harness: Harness) -> None:
     _, api = harness(
         ["商品总库存"] + ["SELECT sum(qtyy) FROM goods"] * (MAX_RETRY + 1),
-        [SqlExecuteOutcome(verdict="ERROR", reason="column qtyy does not exist")]
-        * (MAX_RETRY + 1),
+        [SqlExecuteOutcome(verdict="ERROR", reason="column qtyy does not exist")] * (MAX_RETRY + 1),
     )
     final = await _invoke(_initial())
     assert final["execution"].verdict == "ERROR"

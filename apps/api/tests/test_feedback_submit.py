@@ -73,15 +73,19 @@ async def _mk_user_msg(s: AsyncSession, session_id: str, question: str) -> None:
 
 async def _feedback_row(s: AsyncSession, mid: str) -> dict[str, Any]:
     row = (
-        await s.execute(
-            text(
-                "SELECT rating, feedback_comment, corrected_sql, feedback_status,"
-                " feedback_time IS NOT NULL AS has_time"
-                " FROM public.chat_message WHERE id=:i"
-            ),
-            {"i": mid},
+        (
+            await s.execute(
+                text(
+                    "SELECT rating, feedback_comment, corrected_sql, feedback_status,"
+                    " feedback_time IS NOT NULL AS has_time"
+                    " FROM public.chat_message WHERE id=:i"
+                ),
+                {"i": mid},
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     return dict(row)
 
 
@@ -113,10 +117,16 @@ async def test_submit_up_success_with_audit(
     assert row["feedback_status"] == "PENDING"  # 状态机 NONE→PENDING
     assert row["has_time"] is True
     oper = (
-        await session.execute(
-            text("SELECT action, target FROM public.sys_oper_log WHERE action='feedback.submit'"),
+        (
+            await session.execute(
+                text(
+                    "SELECT action, target FROM public.sys_oper_log WHERE action='feedback.submit'"
+                ),
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert oper["target"] == mid
 
 
@@ -139,13 +149,17 @@ async def test_submit_down_with_comment_and_sql(
     assert row["feedback_comment"] == "数量不对"
     # 纠错沉淀:问句=同会话该消息前最近 user 问句,数据源=会话快照
     hist = (
-        await session.execute(
-            text(
-                "SELECT question, sql_text, datasource_key, status FROM rag.query_history"
-                " WHERE sql_text LIKE '%goods%'"
-            ),
+        (
+            await session.execute(
+                text(
+                    "SELECT question, sql_text, datasource_key, status FROM rag.query_history"
+                    " WHERE sql_text LIKE '%goods%'"
+                ),
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     assert len(hist) == 1
     assert hist[0]["question"] == "有多少种商品"
     assert hist[0]["datasource_key"] == "default"
@@ -185,9 +199,7 @@ async def test_submit_user_message_400(
     await _mk_user_msg(session, sid, "用户问句")
     user_mid = (
         await session.execute(
-            text(
-                "SELECT id FROM public.chat_message WHERE session_id=:s AND role='USER'"
-            ),
+            text("SELECT id FROM public.chat_message WHERE session_id=:s AND role='USER'"),
             {"s": sid},
         )
     ).scalar_one()
@@ -302,9 +314,7 @@ async def test_submit_delete_sql_rejected_atomically(
     row = await _feedback_row(session, mid)
     assert row["rating"] is None  # 整体拒:反馈列不落
     assert row["feedback_status"] == "NONE"
-    n = (
-        await session.execute(text("SELECT count(*) FROM rag.query_history"))
-    ).scalar_one()
+    n = (await session.execute(text("SELECT count(*) FROM rag.query_history"))).scalar_one()
     assert n == 0  # query_history 无变化
 
 
@@ -365,10 +375,7 @@ async def test_query_response_contains_message_id(
     assert body["datasource_key"] == "default"
     db_mid = (
         await session.execute(
-            text(
-                "SELECT id FROM public.chat_message"
-                " WHERE session_id=:s AND role='ASSISTANT'"
-            ),
+            text("SELECT id FROM public.chat_message WHERE session_id=:s AND role='ASSISTANT'"),
             {"s": body["session_id"]},
         )
     ).scalar_one()

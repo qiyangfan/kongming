@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/page-header";
 import {
   Table,
   TableBody,
@@ -146,7 +147,10 @@ export default function SemanticPage() {
         datasource_key: ds,
         metric_name: mName.trim(),
         sql_template: mTpl.trim(),
-        business_terms: mTerms.split(/[,，]/).map((t) => t.trim()).filter(Boolean),
+        business_terms: mTerms
+          .split(/[,，]/)
+          .map((t) => t.trim())
+          .filter(Boolean),
         enabled: true,
       }),
     onSuccess: () => {
@@ -179,7 +183,13 @@ export default function SemanticPage() {
       void qc.invalidateQueries({ queryKey: ["semantic", "relations", ds] });
     },
     // 审查循环 F3:失败零反馈=用户无从得知未删成;对话框内回显
-    onError: (e) => setDelTarget({ kind: "rel", id: "", name: "", error: e instanceof Error ? e.message : "删除失败" }),
+    onError: (e) =>
+      setDelTarget({
+        kind: "rel",
+        id: "",
+        name: "",
+        error: e instanceof Error ? e.message : "删除失败",
+      }),
   });
   const delMetric = useMutation({
     mutationFn: (id: string) => deleteMetric(id),
@@ -187,7 +197,13 @@ export default function SemanticPage() {
       setDelTarget(null);
       void qc.invalidateQueries({ queryKey: ["semantic", "metrics", ds] });
     },
-    onError: (e) => setDelTarget({ kind: "metric", id: "", name: "", error: e instanceof Error ? e.message : "删除失败" }),
+    onError: (e) =>
+      setDelTarget({
+        kind: "metric",
+        id: "",
+        name: "",
+        error: e instanceof Error ? e.message : "删除失败",
+      }),
   });
   const [delTarget, setDelTarget] = useState<{
     kind: "rel" | "metric";
@@ -198,25 +214,31 @@ export default function SemanticPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">语义层</h2>
-          <p className="text-sm text-muted-foreground">
-            教军师理解业务:表之间的关联关系与业务指标的计算口径,让回答贴合业务含义。当前数据源:{ds}
-          </p>
-        </div>
-        <ToggleGroup
-          type="single"
-          value={tab}
-          onValueChange={(v) => v && setTab(v as "relations" | "metrics")}
-        >
-          <ToggleGroupItem value="relations">表关系</ToggleGroupItem>
-          <ToggleGroupItem value="metrics">指标口径</ToggleGroupItem>
-        </ToggleGroup>
-      </div>
+      <PageHeader
+        title="语义层"
+        description={`教军师理解业务:表之间的关联关系与业务指标的计算口径,让回答贴合业务含义。当前数据源:${ds}`}
+        actions={
+          <ToggleGroup
+            type="single"
+            value={tab}
+            onValueChange={(v) => v && setTab(v as "relations" | "metrics")}
+          >
+            <ToggleGroupItem value="relations">表关系</ToggleGroupItem>
+            <ToggleGroupItem value="metrics">指标口径</ToggleGroupItem>
+          </ToggleGroup>
+        }
+      />
 
-      {notice && <p className="text-xs text-primary" role="status">{notice}</p>}
-      {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
+      {notice && (
+        <p className="text-xs text-primary" role="status">
+          {notice}
+        </p>
+      )}
+      {error && (
+        <p className="text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      )}
 
       {tab === "relations" ? (
         <div className="space-y-3">
@@ -257,25 +279,43 @@ export default function SemanticPage() {
                 ) : relations.isLoading ? (
                   <TableRow>
                     <TableCell colSpan={5} className="py-6 text-center">
-                      <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />
+                      <Loader2
+                        className="mx-auto size-4 animate-spin text-muted-foreground"
+                        aria-hidden
+                      />
                     </TableCell>
                   </TableRow>
                 ) : (relations.data?.length ?? 0) === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
+                    <TableCell
+                      colSpan={5}
+                      className="py-6 text-center text-sm text-muted-foreground"
+                    >
                       暂无关系——点「扫描表关联」或手工新增
                     </TableCell>
                   </TableRow>
                 ) : (
                   relations.data?.map((r) => (
                     <TableRow key={r.id}>
-                      <TableCell className="max-w-48 truncate font-mono text-xs" title={r.source_table}>
+                      <TableCell
+                        className="max-w-48 truncate font-mono text-xs"
+                        title={r.source_table}
+                      >
                         {r.source_table}
                       </TableCell>
-                      <TableCell className="max-w-48 truncate font-mono text-xs" title={r.target_table}>
+                      <TableCell
+                        className="max-w-48 truncate font-mono text-xs"
+                        title={r.target_table}
+                      >
                         {r.target_table}
                       </TableCell>
-                      <TableCell className="max-w-40 truncate font-mono text-xs" title={r.join_keys.map((k) => `${k.left_col}=${k.right_col}`).join(", ") || undefined}>
+                      <TableCell
+                        className="max-w-40 truncate font-mono text-xs"
+                        title={
+                          r.join_keys.map((k) => `${k.left_col}=${k.right_col}`).join(", ") ||
+                          undefined
+                        }
+                      >
                         {r.join_keys.map((k) => `${k.left_col}=${k.right_col}`).join(", ")}
                       </TableCell>
                       <TableCell>
@@ -324,15 +364,17 @@ export default function SemanticPage() {
                   disabled={knowledge.isPending}
                 >
                   <SelectTrigger aria-label="左表" className="w-56">
-                    <SelectValue placeholder={
-                      knowledge.isError
-                        ? "候选加载失败"
-                        : knowledge.isPending
-                          ? "加载中…"
-                          : tableOptions.length
-                            ? "选择左表"
-                            : "暂无知识条目"
-                    } />
+                    <SelectValue
+                      placeholder={
+                        knowledge.isError
+                          ? "候选加载失败"
+                          : knowledge.isPending
+                            ? "加载中…"
+                            : tableOptions.length
+                              ? "选择左表"
+                              : "暂无知识条目"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     {tableOptions.map((o) => (
@@ -354,15 +396,17 @@ export default function SemanticPage() {
                   disabled={knowledge.isPending}
                 >
                   <SelectTrigger aria-label="右表" className="w-56">
-                    <SelectValue placeholder={
-                      knowledge.isError
-                        ? "候选加载失败"
-                        : knowledge.isPending
-                          ? "加载中…"
-                          : tableOptions.length
-                            ? "选择右表"
-                            : "暂无知识条目"
-                    } />
+                    <SelectValue
+                      placeholder={
+                        knowledge.isError
+                          ? "候选加载失败"
+                          : knowledge.isPending
+                            ? "加载中…"
+                            : tableOptions.length
+                              ? "选择右表"
+                              : "暂无知识条目"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     {tableOptions.map((o) => (
@@ -402,7 +446,9 @@ export default function SemanticPage() {
                         <Select
                           value={pair.left}
                           onValueChange={(v) =>
-                            setJoinPairs((ps) => ps.map((p, i) => (i === idx ? { ...p, left: v } : p)))
+                            setJoinPairs((ps) =>
+                              ps.map((p, i) => (i === idx ? { ...p, left: v } : p)),
+                            )
                           }
                         >
                           <SelectTrigger aria-label={`左列 ${idx + 1}`} className="w-44">
@@ -421,7 +467,9 @@ export default function SemanticPage() {
                           aria-label={`左列 ${idx + 1}`}
                           value={pair.left}
                           onChange={(e) =>
-                            setJoinPairs((ps) => ps.map((p, i) => (i === idx ? { ...p, left: e.target.value } : p)))
+                            setJoinPairs((ps) =>
+                              ps.map((p, i) => (i === idx ? { ...p, left: e.target.value } : p)),
+                            )
                           }
                           className="w-44"
                           placeholder="左表列(条目缺列清单,手输)"
@@ -432,7 +480,9 @@ export default function SemanticPage() {
                         <Select
                           value={pair.right}
                           onValueChange={(v) =>
-                            setJoinPairs((ps) => ps.map((p, i) => (i === idx ? { ...p, right: v } : p)))
+                            setJoinPairs((ps) =>
+                              ps.map((p, i) => (i === idx ? { ...p, right: v } : p)),
+                            )
                           }
                         >
                           <SelectTrigger aria-label={`右列 ${idx + 1}`} className="w-44">
@@ -451,7 +501,9 @@ export default function SemanticPage() {
                           aria-label={`右列 ${idx + 1}`}
                           value={pair.right}
                           onChange={(e) =>
-                            setJoinPairs((ps) => ps.map((p, i) => (i === idx ? { ...p, right: e.target.value } : p)))
+                            setJoinPairs((ps) =>
+                              ps.map((p, i) => (i === idx ? { ...p, right: e.target.value } : p)),
+                            )
                           }
                           className="w-44"
                           placeholder="右表列(条目缺列清单,手输)"
@@ -508,25 +560,40 @@ export default function SemanticPage() {
                 ) : metrics.isLoading ? (
                   <TableRow>
                     <TableCell colSpan={5} className="py-6 text-center">
-                      <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />
+                      <Loader2
+                        className="mx-auto size-4 animate-spin text-muted-foreground"
+                        aria-hidden
+                      />
                     </TableCell>
                   </TableRow>
                 ) : (metrics.data?.length ?? 0) === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
+                    <TableCell
+                      colSpan={5}
+                      className="py-6 text-center text-sm text-muted-foreground"
+                    >
                       暂无指标——在下方新增
                     </TableCell>
                   </TableRow>
                 ) : (
                   metrics.data?.map((m) => (
                     <TableRow key={m.id}>
-                      <TableCell className="max-w-32 truncate text-sm font-medium" title={m.metric_name}>
+                      <TableCell
+                        className="max-w-32 truncate text-sm font-medium"
+                        title={m.metric_name}
+                      >
                         {m.metric_name}
                       </TableCell>
-                      <TableCell className="max-w-md truncate font-mono text-xs text-muted-foreground" title={m.sql_template}>
+                      <TableCell
+                        className="max-w-md truncate font-mono text-xs text-muted-foreground"
+                        title={m.sql_template}
+                      >
                         {m.sql_template}
                       </TableCell>
-                      <TableCell className="max-w-32 truncate text-xs" title={m.business_terms.join(", ") || undefined}>
+                      <TableCell
+                        className="max-w-32 truncate text-xs"
+                        title={m.business_terms.join(", ") || undefined}
+                      >
                         {m.business_terms.join(", ")}
                       </TableCell>
                       <TableCell>
@@ -560,15 +627,30 @@ export default function SemanticPage() {
           <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border p-3">
             <div className="space-y-1">
               <Label className="text-xs">指标名</Label>
-              <Input value={mName} onChange={(e) => setMName(e.target.value)} className="w-40" placeholder="复购率" />
+              <Input
+                value={mName}
+                onChange={(e) => setMName(e.target.value)}
+                className="w-40"
+                placeholder="复购率"
+              />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">计算口径(SQL 片段,供 AI 参考)</Label>
-              <Input value={mTpl} onChange={(e) => setMTpl(e.target.value)} className="w-96" placeholder="COUNT(DISTINCT customer_id) / ..." />
+              <Input
+                value={mTpl}
+                onChange={(e) => setMTpl(e.target.value)}
+                className="w-96"
+                placeholder="COUNT(DISTINCT customer_id) / ..."
+              />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">触发词(逗号分隔)</Label>
-              <Input value={mTerms} onChange={(e) => setMTerms(e.target.value)} className="w-48" placeholder="复购,回头率" />
+              <Input
+                value={mTerms}
+                onChange={(e) => setMTerms(e.target.value)}
+                className="w-48"
+                placeholder="复购,回头率"
+              />
             </div>
             <Button
               size="sm"
@@ -599,7 +681,9 @@ export default function SemanticPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           {delTarget?.error && (
-            <p className="text-sm text-destructive" role="alert">{delTarget.error}</p>
+            <p className="text-sm text-destructive" role="alert">
+              {delTarget.error}
+            </p>
           )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={delRel.isPending || delMetric.isPending}>

@@ -189,9 +189,7 @@ async def test_monthly_invoice_idempotent(
     tenant_id = await _default_tenant_id(session)
     # 上月用量(to_char 对齐上月)
     prev = (
-        await session.execute(
-            text("SELECT to_char(now() - interval '1 month', 'YYYY-MM')")
-        )
+        await session.execute(text("SELECT to_char(now() - interval '1 month', 'YYYY-MM')"))
     ).scalar_one()
     await session.execute(
         text(
@@ -213,14 +211,18 @@ async def test_monthly_invoice_idempotent(
     ).all()
     print("INVOICES:", all_rows, "prev:", prev)
     row = (
-        await session.execute(
-            text(
-                "SELECT amount, usage_json FROM public.sys_invoice"
-                " WHERE tenant_id=CAST(:t AS uuid) AND period=:p"
-            ),
-            {"t": str(tenant_id), "p": prev},
+        (
+            await session.execute(
+                text(
+                    "SELECT amount, usage_json FROM public.sys_invoice"
+                    " WHERE tenant_id=CAST(:t AS uuid) AND period=:p"
+                ),
+                {"t": str(tenant_id), "p": prev},
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert isinstance(row["amount"], int)
     assert row["usage_json"]["total_tokens"] == 1000
     assert row["usage_json"]["by_model"][0]["model"] == "qwen-plus"
@@ -239,15 +241,15 @@ async def test_invoice_tenant_isolation(
     async with get_sessionmaker()() as s:
         repo = SqlBillingRepo(s)
         rid = await repo.insert_invoice(
-            tenant_id=str(tenant_id), period="2026-07",
-            usage_json={"total_tokens": 1}, amount=1,
+            tenant_id=str(tenant_id),
+            period="2026-07",
+            usage_json={"total_tokens": 1},
+            amount=1,
         )
         await repo.commit()
     # 另一租户用户查询(无该租户绑定 → 403;绑定 default 才能过——
     # 此用例验证同租户可见,跨租户 404 由 SQL 租户条件保证)
-    r = await client.get(
-        f"/portal/invoices/{rid}", headers={"Authorization": f"Bearer {token}"}
-    )
+    r = await client.get(f"/portal/invoices/{rid}", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200  # 同租户可见(明细含 usage_json)
     assert r.json()["usage_json"]["total_tokens"] == 1
 
@@ -268,10 +270,7 @@ async def test_quota_reject_audit_written(
     assert r.status_code == 429
     n = (
         await session.execute(
-            text(
-                "SELECT count(*) FROM public.sys_oper_log"
-                " WHERE action='billing.quota_reject'"
-            )
+            text("SELECT count(*) FROM public.sys_oper_log WHERE action='billing.quota_reject'")
         )
     ).scalar_one()
     assert n >= 1
@@ -306,9 +305,7 @@ async def test_month_boundary_shanghai_bucket(
     )
     await session.commit()
     async with get_sessionmaker()() as s:
-        used = await SqlBillingRepo(s).month_token_usage(
-            tenant_id=str(tenant_id), month=month
-        )
+        used = await SqlBillingRepo(s).month_token_usage(tenant_id=str(tenant_id), month=month)
     assert used >= 70  # CST 月初用量归入当月(UTC 分桶会漏掉)
 
 
@@ -326,8 +323,10 @@ async def test_invoice_cross_tenant_404(
     async with get_sessionmaker()() as s:
         repo = SqlBillingRepo(s)
         rid = await repo.insert_invoice(
-            tenant_id=str(tenant_id), period="2026-06",
-            usage_json={"total_tokens": 1}, amount=1,
+            tenant_id=str(tenant_id),
+            period="2026-06",
+            usage_json={"total_tokens": 1},
+            amount=1,
         )
         await repo.commit()
     # 第二租户用户(绑他租户,未绑 default)
@@ -346,9 +345,7 @@ async def test_invoice_cross_tenant_404(
     )
     assert r.status_code == 404
     # default 视角也 404(未绑定)
-    r2 = await client.get(
-        f"/portal/invoices/{rid}", headers={"Authorization": f"Bearer {token_b}"}
-    )
+    r2 = await client.get(f"/portal/invoices/{rid}", headers={"Authorization": f"Bearer {token_b}"})
     assert r2.status_code in (403, 404)
 
 
@@ -360,9 +357,7 @@ async def test_portal_usage_aggregation(
     tenant_id = await _default_tenant_id(session)
     await _insert_usage(session, str(tenant_id), tokens=500)
     await _set_policy(client, str(tenant_id), "TOKENS", limit=1000)
-    r = await client.get(
-        "/portal/usage", headers={"Authorization": f"Bearer {token}"}
-    )
+    r = await client.get("/portal/usage", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
     body = r.json()
     assert body["tokens"] == 500

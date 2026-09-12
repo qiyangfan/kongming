@@ -215,9 +215,7 @@ class SystemService:
         await self._repo.commit()
         await self._revoke_refresh(user_id)
 
-    def _assert_disable_allowed(
-        self, current: Mapping[str, object], actor_id: str
-    ) -> None:
+    def _assert_disable_allowed(self, current: Mapping[str, object], actor_id: str) -> None:
         """禁用保护单点(012 F10):编辑路径与专用端点同调,防两份漂移。"""
         if str(current["id"]) == actor_id:
             raise SelfDisable("不可禁用自己的账号")
@@ -320,9 +318,7 @@ class SystemService:
         )
         await self._repo.commit()
 
-    async def bind_role_perms(
-        self, *, actor_id: str, role_id: str, perm_ids: list[str]
-    ) -> None:
+    async def bind_role_perms(self, *, actor_id: str, role_id: str, perm_ids: list[str]) -> None:
         current = await self._repo.get_role(role_id)
         if current is None:
             raise RoleNotFound("角色不存在")
@@ -404,9 +400,7 @@ class SystemService:
             sort=sort,
             status=status,
         )
-        await self._repo.log_oper(
-            actor_id, "dept.update", dept_name, {"dept_id": dept_id}
-        )
+        await self._repo.log_oper(actor_id, "dept.update", dept_name, {"dept_id": dept_id})
         await self._repo.commit()
 
     async def delete_dept(self, *, actor_id: str, dept_id: str) -> None:
@@ -418,9 +412,7 @@ class SystemService:
         if await self._repo.dept_has_active_users(dept_id):
             raise DeptInUse("部门仍绑定未软删用户,不可删除")
         await self._repo.delete_dept(dept_id)
-        await self._repo.log_oper(
-            actor_id, "dept.delete", current.dept_name, {"dept_id": dept_id}
-        )
+        await self._repo.log_oper(actor_id, "dept.delete", current.dept_name, {"dept_id": dept_id})
         await self._repo.commit()
 
     # ---- 租户(只读清单) ----

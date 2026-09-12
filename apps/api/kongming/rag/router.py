@@ -391,7 +391,9 @@ async def fetch_metadata(
     except DatasourceInvalid:
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
     return FetchOut(
-        found=result.found, enriched=result.enriched, skipped=result.skipped,
+        found=result.found,
+        enriched=result.enriched,
+        skipped=result.skipped,
         removed=result.removed,
     )
 
@@ -419,9 +421,7 @@ async def reindex(
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
     except DatasourceInvalid:
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
-    return ReindexOut(
-        deleted=result.deleted, rebuilt=result.rebuilt, enriched=result.enriched
-    )
+    return ReindexOut(deleted=result.deleted, rebuilt=result.rebuilt, enriched=result.enriched)
 
 
 # ============ 知识覆盖报告(052;只读确定性纯聚合) ============
@@ -470,9 +470,7 @@ class CoverageReportOut(BaseModel):
 
 
 def _st(pairs: list[SchemaTablePair]) -> list[SchemaTableOut]:
-    return [
-        SchemaTableOut(schema_name=p.schema_name, table_name=p.table_name) for p in pairs
-    ]
+    return [SchemaTableOut(schema_name=p.schema_name, table_name=p.table_name) for p in pairs]
 
 
 @router.get(
@@ -594,9 +592,7 @@ async def rag_retrieve(
             # 删「表 x.y」死路径——该形态只存在于 agent 侧内省回退,不经此处)
             tables = _re.findall(r"^([\w]+\.[\w]+)\(", ctx.schema_hint, _re.M)
             tables = list(dict.fromkeys(tables))
-            relations_hint, metric_hints = await SemanticService(
-                SqlSemanticRepo(session)
-            ).enrich(
+            relations_hint, metric_hints = await SemanticService(SqlSemanticRepo(session)).enrich(
                 tenant_id=str(tid_row),
                 datasource_key=req.datasource_key,
                 question=req.question,
@@ -652,9 +648,7 @@ def _doc_name_sensitive(name: str) -> bool:
     from kongming.guardrail.rules import REGISTRY
 
     for rule in REGISTRY:
-        if rule.guardrail_type == "input" and rule.name.startswith(
-            ("pii_", "cred_", "inj_")
-        ):
+        if rule.guardrail_type == "input" and rule.name.startswith(("pii_", "cred_", "inj_")):
             # inj_ 一并拦(R1-B2:文件名经 source_ref 进召回文本→LLM 提示词,
             # injection 短语文件名与 PII 同为入口防线)
             if rule.pattern and re.search(rule.pattern, name):
@@ -681,14 +675,17 @@ async def _assert_doc_datasource(
     if datasource_key == "default":
         return
     row = (
-        await session.execute(
-            text(
-                "SELECT status, tenant_id FROM public.sys_datasource"
-                " WHERE datasource_key = :k"
-            ),
-            {"k": datasource_key},
+        (
+            await session.execute(
+                text(
+                    "SELECT status, tenant_id FROM public.sys_datasource WHERE datasource_key = :k"
+                ),
+                {"k": datasource_key},
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if row is None or row["status"] != "ACTIVE" or str(row["tenant_id"]) != tenant_id:
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
 
@@ -757,9 +754,7 @@ async def upload_doc(
 
     svc = _get_service(session)
     tenant_id = await _doc_tenant(session, svc, str(user["sub"]), x_tenant_id)
-    await _assert_doc_datasource(
-        session, tenant_id=tenant_id, datasource_key=datasource_key
-    )
+    await _assert_doc_datasource(session, tenant_id=tenant_id, datasource_key=datasource_key)
     settings = get_settings()
     ext = supported_extension(file.filename or "")
     if ext is None:

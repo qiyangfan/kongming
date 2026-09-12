@@ -35,8 +35,7 @@ export function ChartView({
   // 依赖取基元(首候选类型+绑定指纹)+react-query 缓存内稳定数组引用
   // (structural sharing),不能依赖外层内联组装的包装对象——否则父组件
   // 无关重渲染(如输入框逐键)会误重置
-  const firstType =
-    candidates.length > 0 ? normalizeType(candidates[0].type) : "bar";
+  const firstType = candidates.length > 0 ? normalizeType(candidates[0].type) : "bar";
   const fingerprint = candidates
     .map((c) => `${c.type}:${c.x ?? ""}:${c.y.join(",")}:${c.series ?? ""}`)
     .join("|");

@@ -28,4 +28,3 @@ def sniff_mime(head: bytes) -> str | None:
                 continue
             return mime
     return None
-

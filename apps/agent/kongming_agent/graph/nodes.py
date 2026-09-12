@@ -57,9 +57,7 @@ async def understand(state: AgentState) -> dict[str, object]:
     if history:
         system = UNDERSTAND_MULTI_SYSTEM
         history_text = "\n".join(f"第{i + 1}轮：{q}" for i, q in enumerate(history))
-        prompt = (
-            f"历史问题：\n{history_text}\n\n当前问题：{question}" "\n\n补全后的完整问题："
-        )
+        prompt = f"历史问题：\n{history_text}\n\n当前问题：{question}\n\n补全后的完整问题："
     else:
         system = UNDERSTAND_SINGLE_SYSTEM
         prompt = f"用户问题：{question}\n请输出改写后的清晰问题（一行）。"
@@ -247,7 +245,7 @@ async def generate(state: AgentState) -> dict[str, object]:
 
 
 # ── 节点4:本地预检(轻量四规则;权威校验在 api 防火墙,不复刻)──
-# 053:解析走 km-sqlguard 引擎适配(模式化:影子对拍/切主/降级),判定语义不变
+# 053:解析走 liannu 引擎适配(模式化:影子对拍/切主/降级),判定语义不变
 def validate(state: AgentState) -> dict[str, object]:
     sql = state.get("generated_sql") or ""
     if not sql.strip():
@@ -310,7 +308,16 @@ def selfheal(state: AgentState) -> dict[str, object]:
 
 # 知识型意图词表(规则初判;误分流只影响答法无数据副作用,spec)
 KNOWLEDGE_INTENT_WORDS = (
-    "是什么", "为什么", "政策", "流程", "口径", "定义", "规范", "制度", "办法", "怎么规定",
+    "是什么",
+    "为什么",
+    "政策",
+    "流程",
+    "口径",
+    "定义",
+    "规范",
+    "制度",
+    "办法",
+    "怎么规定",
 )
 
 # 047:强文档意图词表——「是什么」是泛系系词,数据追问(「这些影片各自的
@@ -323,9 +330,21 @@ DOC_STRONG_INTENT_WORDS = tuple(w for w in KNOWLEDGE_INTENT_WORDS if w != "是�
 # (真链路冒烟抓回:「这张图里哪个分类最高?数量是多少?」问图也带
 # 「数量」,列入即误否决分流=答非所问复发)
 SQL_INTENT_WORDS = (
-    "数据", "数据库", "表里", "表中", "库中", "统计", "查询",
-    "列出", "显示", "排名", "SQL", "sql",
-    "sakila", "olist", "default",
+    "数据",
+    "数据库",
+    "表里",
+    "表中",
+    "库中",
+    "统计",
+    "查询",
+    "列出",
+    "显示",
+    "排名",
+    "SQL",
+    "sql",
+    "sakila",
+    "olist",
+    "default",
 )
 
 
@@ -391,9 +410,7 @@ async def doc_answer(state: AgentState) -> dict[str, object]:
         else:
             resolved = state.get("resolved_question")
             question = resolved or state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
-        parts = [
-            f"来源 {h['source_ref']}:\n{h['content'][:1500]}" for h in doc_hints[:5]
-        ]
+        parts = [f"来源 {h['source_ref']}:\n{h['content'][:1500]}" for h in doc_hints[:5]]
         system = DOC_ANSWER_SYSTEM
         user = f"问题:{question}\n\n文档内容:\n" + "\n\n".join(parts) + "\n\n回答:"
     else:
@@ -437,12 +454,7 @@ def _is_stat_worthy(col: str, values: list[int | float]) -> bool:
     if ints and len(ints) == len(values):
         distinct = set(ints)
         lo, hi = min(ints), max(ints)
-        if (
-            1 < len(distinct) <= 16
-            and lo in (0, 1)
-            and hi <= 64
-            and hi - lo + 1 == len(distinct)
-        ):
+        if 1 < len(distinct) <= 16 and lo in (0, 1) and hi <= 64 and hi - lo + 1 == len(distinct):
             return False
     return True
 
@@ -481,9 +493,7 @@ _HINT_HEADER_RE = re.compile(r"^[A-Za-z_]\w*\.[A-Za-z_]\w*\(")
 
 def _table_hint_lines(schema_hint: str) -> str:
     """取 schema_hint 的召回形态表头行(含业务称谓别名与表说明)。"""
-    return "\n".join(
-        ln for ln in schema_hint.splitlines() if _HINT_HEADER_RE.match(ln)
-    )
+    return "\n".join(ln for ln in schema_hint.splitlines() if _HINT_HEADER_RE.match(ln))
 
 
 def parse_summary_json(raw: str) -> dict[str, object]:
@@ -530,9 +540,7 @@ def _normalize_insights(raw: object) -> list[dict[str, str]]:
         # isinstance 收窄产物键型仍 Unknown,守卫后 cast 再用(判定序不变)
         typed = cast("dict[str, object]", item) if isinstance(item, dict) else None
         if typed is not None and isinstance(typed.get("text"), str):
-            out.append(
-                {"type": str(typed.get("type", "")), "text": cast("str", typed["text"])}
-            )
+            out.append({"type": str(typed.get("type", "")), "text": cast("str", typed["text"])})
     return out
 
 
