@@ -688,7 +688,11 @@ export default function BillingPage() {
                     <TableCell className="font-mono text-xs">{inv.period}</TableCell>
                     <TableCell>¥{li2yuan(inv.amount)}</TableCell>
                     <TableCell>
-                      <StatusBadge meta={INVOICE_STATUS_META} value={inv.status} fallbackVariant="secondary" />
+                      <StatusBadge
+                        meta={INVOICE_STATUS_META}
+                        value={inv.status}
+                        fallbackVariant="secondary"
+                      />
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {inv.payment_status

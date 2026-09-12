@@ -383,11 +383,7 @@ export default function FeedbackPage() {
                   <TableCell>{item.datasource_key}</TableCell>
                   <TableCell>
                     {/* rating 为窄联合:有值才出徽章,空值保持纯文本「—」(与原三元 else 分支等价) */}
-                    {item.rating ? (
-                      <StatusBadge meta={RATING_META} value={item.rating} />
-                    ) : (
-                      "—"
-                    )}
+                    {item.rating ? <StatusBadge meta={RATING_META} value={item.rating} /> : "—"}
                   </TableCell>
                   <TableCell className="max-w-56 truncate" title={item.question ?? undefined}>
                     {item.question ?? "—"}

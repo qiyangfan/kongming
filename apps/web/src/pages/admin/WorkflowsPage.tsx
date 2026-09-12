@@ -421,7 +421,11 @@ export default function WorkflowsPage() {
                 <p>
                   结果:
                   <span className="ml-1">
-                    <StatusBadge meta={RUN_STATUS_META} value={runResult.status} fallbackVariant="destructive" />
+                    <StatusBadge
+                      meta={RUN_STATUS_META}
+                      value={runResult.status}
+                      fallbackVariant="destructive"
+                    />
                   </span>
                   <span className="ml-2 text-xs text-muted-foreground">
                     v{runResult.version} · {runResult.duration_ms}ms
@@ -476,7 +480,11 @@ export default function WorkflowsPage() {
                           className="size-3.5 transition-transform group-data-[state=open]:rotate-90"
                           aria-hidden
                         />
-                        <StatusBadge meta={RUN_STATUS_META} value={r.status} fallbackVariant="destructive" />
+                        <StatusBadge
+                          meta={RUN_STATUS_META}
+                          value={r.status}
+                          fallbackVariant="destructive"
+                        />
                         <span className="text-xs text-muted-foreground">
                           v{r.version} · {r.trigger_source} · {r.duration_ms}ms ·{" "}
                           {r.created_at ? new Date(r.created_at).toLocaleString() : ""}
@@ -568,7 +576,11 @@ export default function WorkflowsPage() {
           ) : runDetail.data ? (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2 text-sm">
-                <StatusBadge meta={RUN_STATUS_META} value={runDetail.data.status} fallbackVariant="destructive" />
+                <StatusBadge
+                  meta={RUN_STATUS_META}
+                  value={runDetail.data.status}
+                  fallbackVariant="destructive"
+                />
                 <span className="text-xs text-muted-foreground">
                   v{runDetail.data.version} · 触发源 {runDetail.data.trigger_source} ·{" "}
                   {runDetail.data.duration_ms}ms
