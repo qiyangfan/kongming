@@ -2505,6 +2505,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/billing/cost-reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cost Reconciliation
+         * @description 牌价轨与 muniu credit 成本轨的窗口量级核对(对 muniu HANDOFF 6b 的
+         *     谱系修订见 change design:不直推、不下线自有牌价,消除的是「无对账」)。
+         */
+        get: operations["cost_reconciliation_system_billing_cost_reconciliation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -2878,6 +2899,39 @@ export interface components {
              * @default []
              */
             column_labels: string[];
+        };
+        /**
+         * CostTrack
+         * @description 成本轨(muniu credit 口径)。available=False 时 reason 必非空。
+         */
+        CostTrack: {
+            /** Available */
+            available: boolean;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            /**
+             * Requests
+             * @default 0
+             */
+            requests: number;
+            /**
+             * Prompt Tokens
+             * @default 0
+             */
+            prompt_tokens: number;
+            /**
+             * Completion Tokens
+             * @default 0
+             */
+            completion_tokens: number;
+            /**
+             * Cost Credits
+             * @default 0
+             */
+            cost_credits: number;
         };
         /** CoverageReportOut */
         CoverageReportOut: {
@@ -4081,6 +4135,34 @@ export interface components {
             idempotent: boolean;
             /** Status */
             status: string;
+        };
+        /** ReconciliationReport */
+        ReconciliationReport: {
+            /** Window Days */
+            window_days: number;
+            /** Window Since */
+            window_since: string;
+            /** Product Tokens */
+            product_tokens: number;
+            /** Product Invoice Li */
+            product_invoice_li: number;
+            cost: components["schemas"]["CostTrack"];
+            /** Cost Li Equiv */
+            cost_li_equiv?: number | null;
+            /** Deviation Ratio */
+            deviation_ratio?: number | null;
+            /** Threshold */
+            threshold: number;
+            /**
+             * Alert
+             * @default false
+             */
+            alert: boolean;
+            /**
+             * Annotations
+             * @default []
+             */
+            annotations: string[];
         };
         /** RefreshRequest */
         RefreshRequest: {
@@ -11032,6 +11114,37 @@ export interface operations {
                     "application/json": {
                         [key: string]: boolean;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cost_reconciliation_system_billing_cost_reconciliation_get: {
+        parameters: {
+            query?: {
+                window_days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconciliationReport"];
                 };
             };
             /** @description Validation Error */

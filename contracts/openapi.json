@@ -9892,6 +9892,52 @@
         }
       }
     },
+    "/system/billing/cost-reconciliation": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Cost Reconciliation",
+        "description": "牌价轨与 muniu credit 成本轨的窗口量级核对(对 muniu HANDOFF 6b 的\n谱系修订见 change design:不直推、不下线自有牌价,消除的是「无对账」)。",
+        "operationId": "cost_reconciliation_system_billing_cost_reconciliation_get",
+        "parameters": [
+          {
+            "name": "window_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 90,
+              "minimum": 1,
+              "default": 7,
+              "title": "Window Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/healthz": {
       "get": {
         "tags": [
@@ -10926,6 +10972,45 @@
           "error"
         ],
         "title": "ChatQueryOut"
+      },
+      "CostTrack": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          },
+          "requests": {
+            "type": "integer",
+            "title": "Requests",
+            "default": 0
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens",
+            "default": 0
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens",
+            "default": 0
+          },
+          "cost_credits": {
+            "type": "integer",
+            "title": "Cost Credits",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "available"
+        ],
+        "title": "CostTrack",
+        "description": "成本轨(muniu credit 口径)。available=False 时 reason 必非空。"
       },
       "CoverageReportOut": {
         "properties": {
@@ -14121,6 +14206,78 @@
           "status"
         ],
         "title": "ReconcileOut"
+      },
+      "ReconciliationReport": {
+        "properties": {
+          "window_days": {
+            "type": "integer",
+            "title": "Window Days"
+          },
+          "window_since": {
+            "type": "string",
+            "title": "Window Since"
+          },
+          "product_tokens": {
+            "type": "integer",
+            "title": "Product Tokens"
+          },
+          "product_invoice_li": {
+            "type": "integer",
+            "title": "Product Invoice Li"
+          },
+          "cost": {
+            "$ref": "#/components/schemas/CostTrack"
+          },
+          "cost_li_equiv": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Li Equiv"
+          },
+          "deviation_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deviation Ratio"
+          },
+          "threshold": {
+            "type": "number",
+            "title": "Threshold"
+          },
+          "alert": {
+            "type": "boolean",
+            "title": "Alert",
+            "default": false
+          },
+          "annotations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Annotations",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "window_days",
+          "window_since",
+          "product_tokens",
+          "product_invoice_li",
+          "cost",
+          "threshold"
+        ],
+        "title": "ReconciliationReport"
       },
       "RefreshRequest": {
         "properties": {
