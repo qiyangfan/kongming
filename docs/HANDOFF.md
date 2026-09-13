@@ -300,4 +300,4 @@ SQL/PG:
 | agent 静态+测试 | `make agent-check`(同上结构) | `agent` | 同左全序(pyright 同批补齐) | 无 |
 | liannu 引擎 | `make liannu-check`(ruff+mypy+pytest,含对拍基线回放) | `liannu` | 同左 | 无 |
 | web | `make web-check`(tsc+eslint+stylelint+prettier) | `web` | 同左 | 无(前端无单测,三仓共知短板) |
-| 契约漂移 | `make contracts` 后 diff 产物 | `contracts` | 导出+diff | 无 |
+| 契约漂移 | `make contracts-check`(已并入 check;055 教训后补齐) | `contracts` | `make -C ../.. contracts-check`(单源) | 无 |
