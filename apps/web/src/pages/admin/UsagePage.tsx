@@ -52,14 +52,9 @@ import { useDebounced } from "@/hooks/use-debounced";
 import { QueryErrorAlert } from "@/components/query-error";
 import { systemApi } from "@/lib/system-api";
 import { cssVar } from "@/lib/utils";
+import { formatDateTime, formatDuration } from "@/lib/datetime";
 
 const PAGE_SIZE = 20;
-
-function fmtMs(v: number | null | undefined): string {
-  if (v === null || v === undefined) return "—";
-  if (v >= 1000) return `${(v / 1000).toFixed(1)}s`;
-  return `${v}ms`;
-}
 
 function fmtTokens(v: number): string {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
@@ -68,6 +63,13 @@ function fmtTokens(v: number): string {
 }
 
 const KIND_ICON = { LLM: Sparkles, TOOL: Wrench, SQL: Database } as const;
+
+// 事件类型中文(时间线黑话直出克星);未收录值回退原值
+const KIND_LABELS: Record<string, string> = {
+  LLM: "模型调用",
+  TOOL: "工具",
+  SQL: "SQL",
+};
 
 const TOOL_STATUS_LABEL: Record<string, string> = {
   EXECUTED: "已执行",
@@ -258,9 +260,9 @@ export default function UsagePage() {
       {/* 汇总卡(R1-B3:卡级错误不逐卡 role=alert,数值降 …/— 示错;区块级错误条由消费区承载) */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="总调用" value={usageStat(String(totals.calls))} />
-        <StatCard label="总 Token" value={usageStat(fmtTokens(totals.tokens))} />
+        <StatCard label="Tokens 总量" value={usageStat(fmtTokens(totals.tokens))} />
         <StatCard label="失败率" value={usageStat(`${(totals.errorRate * 100).toFixed(1)}%`)} />
-        <StatCard label="平均延迟" value={usageStat(fmtMs(totals.latAvg))} />
+        <StatCard label="平均延迟" value={usageStat(formatDuration(totals.latAvg))} />
       </div>
 
       {/* 趋势 */}
@@ -303,7 +305,7 @@ export default function UsagePage() {
               <TableHead>任务</TableHead>
               <TableHead className="text-right">调用</TableHead>
               <TableHead className="text-right">失败</TableHead>
-              <TableHead className="text-right">tokens</TableHead>
+              <TableHead className="text-right">Tokens</TableHead>
               <TableHead className="text-right">平均延迟</TableHead>
               <TableHead className="text-right">最大延迟</TableHead>
             </TableRow>
@@ -325,8 +327,8 @@ export default function UsagePage() {
                   )}
                 </TableCell>
                 <TableCell className="text-right">{fmtTokens(i.total_tokens)}</TableCell>
-                <TableCell className="text-right">{fmtMs(i.latency_ms_avg)}</TableCell>
-                <TableCell className="text-right">{fmtMs(i.latency_ms_max)}</TableCell>
+                <TableCell className="text-right">{formatDuration(i.latency_ms_avg)}</TableCell>
+                <TableCell className="text-right">{formatDuration(i.latency_ms_max)}</TableCell>
               </TableRow>
             ))}
             {!summary.isLoading && summary.isError && (
@@ -448,7 +450,7 @@ export default function UsagePage() {
             )}
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">trace_id</Label>
+            <Label className="text-xs">链路 ID</Label>
             <Input
               size="sm"
               className="w-44"
@@ -470,9 +472,9 @@ export default function UsagePage() {
               <TableHead>模型</TableHead>
               <TableHead>任务</TableHead>
               <TableHead>状态</TableHead>
-              <TableHead className="text-right">tokens</TableHead>
+              <TableHead className="text-right">Tokens</TableHead>
               <TableHead className="text-right">延迟</TableHead>
-              <TableHead>trace</TableHead>
+              <TableHead>链路</TableHead>
               <TableHead className="w-20"></TableHead>
             </TableRow>
           </TableHeader>
@@ -480,7 +482,7 @@ export default function UsagePage() {
             {(list.data?.rows ?? []).map((r) => (
               <TableRow key={r.id}>
                 <TableCell className="whitespace-nowrap text-muted-foreground">
-                  {new Date(r.created_at).toLocaleString()}
+                  {formatDateTime(r.created_at)}
                 </TableCell>
                 <TableCell className="text-muted-foreground">{r.tenant_key}</TableCell>
                 <TableCell className="max-w-40 truncate font-medium" title={r.model}>
@@ -491,7 +493,7 @@ export default function UsagePage() {
                   <StatusBadge meta={LLM_STATUS_META} value={r.status} />
                 </TableCell>
                 <TableCell className="text-right">{fmtTokens(r.total_tokens)}</TableCell>
-                <TableCell className="text-right">{fmtMs(r.latency_ms)}</TableCell>
+                <TableCell className="text-right">{formatDuration(r.latency_ms)}</TableCell>
                 <TableCell
                   className="max-w-32 truncate font-mono text-xs text-muted-foreground"
                   title={r.trace_id ?? undefined}
@@ -548,7 +550,10 @@ export default function UsagePage() {
               <Activity className="size-4" />
               调用链路
             </DialogTitle>
-            <DialogDescription className="font-mono text-xs break-all">
+            <DialogDescription
+              className="max-w-full truncate font-mono text-xs"
+              title={timelineTrace ?? undefined}
+            >
               {timelineTrace}
             </DialogDescription>
           </DialogHeader>
@@ -597,13 +602,13 @@ function TimelineItem({ event }: { event: TimelineEvent }) {
           <span className="text-xs text-muted-foreground">{fmtTokens(event.tokens)} tokens</span>
         )}
         {event.latency_ms !== null && (
-          <span className="text-xs text-muted-foreground">{fmtMs(event.latency_ms)}</span>
+          <span className="text-xs text-muted-foreground">{formatDuration(event.latency_ms)}</span>
         )}
-        <span className="ml-auto text-xs text-muted-foreground">
-          {new Date(event.ts).toLocaleString()}
-        </span>
+        <span className="ml-auto text-xs text-muted-foreground">{formatDateTime(event.ts)}</span>
       </div>
-      <div className="mt-0.5 text-xs text-muted-foreground">{event.kind}</div>
+      <div className="mt-0.5 text-xs text-muted-foreground">
+        {KIND_LABELS[event.kind] ?? event.kind}
+      </div>
     </li>
   );
 }

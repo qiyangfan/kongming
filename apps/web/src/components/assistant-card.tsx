@@ -21,7 +21,7 @@ import { ChartArtifactCard, DocumentCard, SqlArtifactCard } from "@/components/a
 import type { ChartSpec } from "@/components/chart-shared";
 import { normalizeBinding } from "@/components/chart-shared";
 import type { ArtifactOut } from "@/lib/chat-api";
-import type { SessionMessageOut } from "@/lib/api";
+import { humanizeErrorText, type SessionMessageOut } from "@/lib/api";
 import { explainPlan, exportResult } from "@/lib/chat-api";
 import { submitFeedback } from "@/lib/feedback-api";
 import { useAuth } from "@/lib/auth-store";
@@ -144,7 +144,9 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
       <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
         <ShieldOff className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
         <div>
-          <p className="font-medium text-foreground">{msg.error ?? "此问被安全护栏拦下"}</p>
+          <p className="font-medium text-foreground">
+            {msg.error ? humanizeErrorText(msg.error) : "此问被安全护栏拦下"}
+          </p>
           {msg.summary && <p className="mt-1 text-muted-foreground">{msg.summary}</p>}
         </div>
       </div>
@@ -172,7 +174,9 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
         <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
           <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
           <div className="min-w-0">
-            <p className="text-foreground">{msg.error ?? "查询执行失败,请调整问法后重试"}</p>
+            <p className="text-foreground">
+              {msg.error ? humanizeErrorText(msg.error) : "查询执行失败,请调整问法后重试"}
+            </p>
             {/* 047:原始技术错误折叠披露(honest+可排障+不吓人;存量消息无此档) */}
             {msg.error_detail && (
               <Collapsible>

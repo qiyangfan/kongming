@@ -4,7 +4,13 @@
 
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { api, type OptionsOut, type StartOut, type TokenPairOut } from "../lib/api";
+import {
+  api,
+  humanizeErrorText,
+  type OptionsOut,
+  type StartOut,
+  type TokenPairOut,
+} from "../lib/api";
 import { useAuth } from "../lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -104,7 +110,7 @@ export default function Login() {
       await acceptTokens(pair);
       navigate("/", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "登录失败");
+      setError(err instanceof Error ? humanizeErrorText(err.message) : "登录失败");
     } finally {
       setPending(false);
     }
@@ -116,7 +122,11 @@ export default function Login() {
       const { authorize_url } = await api.get<StartOut>(`/auth/${provider}/start`);
       window.location.href = authorize_url;
     } catch (err) {
-      setError(err instanceof Error ? err.message : `${displayName} 登录未完成,请稍后再试`);
+      setError(
+        err instanceof Error
+          ? humanizeErrorText(err.message)
+          : `${displayName} 登录未完成,请稍后再试`,
+      );
     }
   }
 

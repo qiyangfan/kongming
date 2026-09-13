@@ -59,6 +59,7 @@ import { hasPerm } from "@/lib/nav";
 import { systemApi } from "@/lib/system-api";
 import { cssVar } from "@/lib/utils";
 import { displayUser } from "@/lib/display-user";
+import { formatDateTime } from "@/lib/datetime";
 
 const PAGE_SIZE = 20;
 
@@ -371,7 +372,7 @@ export default function FeedbackPage() {
               list.data?.items.map((item) => (
                 <TableRow key={item.message_id}>
                   <TableCell className="whitespace-nowrap text-muted-foreground">
-                    {item.feedback_time ? item.feedback_time.slice(0, 16).replace("T", " ") : "—"}
+                    {formatDateTime(item.feedback_time)}
                   </TableCell>
                   <TableCell
                     className="max-w-32 truncate"
@@ -472,7 +473,7 @@ function FeedbackDetailDialog({
         <DialogHeader>
           <DialogTitle>反馈详情</DialogTitle>
           <DialogDescription>
-            {displayUser(item.user_nickname, item.user_username)} · {item.tenant_key} ·{" "}
+            {displayUser(item.user_nickname, item.user_username)} · 租户 {item.tenant_key} · 数据源{" "}
             {item.datasource_key}
           </DialogDescription>
         </DialogHeader>

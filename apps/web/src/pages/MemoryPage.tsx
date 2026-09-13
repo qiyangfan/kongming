@@ -28,6 +28,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge, type StatusMeta } from "@/components/status-badge";
+import { formatDate } from "@/lib/datetime";
 import {
   Select,
   SelectContent,
@@ -60,6 +61,15 @@ const DORMANT_META: StatusMeta = {
   ACTIVE: { label: "活跃", variant: "secondary" },
   DORMANT: { label: "休眠", variant: "outline" },
 };
+
+// 分类中文(后端现为 free-form,内置仅 general;未收录值回退原值)
+const CATEGORY_LABELS: Record<string, string> = {
+  general: "通用",
+};
+
+function categoryLabel(c: string): string {
+  return CATEGORY_LABELS[c] ?? c;
+}
 
 export default function MemoryPage() {
   const qc = useQueryClient();
@@ -117,7 +127,7 @@ export default function MemoryPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `我的记忆-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `我的记忆-${formatDate(new Date())}.json`;
       document.body.appendChild(a); // Safari 纪律(010):锚点入 DOM+延迟 revoke
       a.click();
       a.remove();
@@ -189,7 +199,7 @@ export default function MemoryPage() {
                   <TableCell className="max-w-md truncate text-sm" title={m.content}>
                     {m.content}
                   </TableCell>
-                  <TableCell className="text-xs">{m.category}</TableCell>
+                  <TableCell className="text-xs">{categoryLabel(m.category)}</TableCell>
                   <TableCell>
                     {/* source 契约为宽 string:未知值回落 secondary,与原 else 分支等价 */}
                     <StatusBadge meta={SOURCE_META} value={m.source} fallbackVariant="secondary" />
@@ -207,7 +217,7 @@ export default function MemoryPage() {
                       <span className="text-xs text-muted-foreground">个人</span>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs">{m.confidence.toFixed(2)}</TableCell>
+                  <TableCell className="text-xs">{Math.round(m.confidence * 100)}%</TableCell>
                   <TableCell>
                     <StatusBadge meta={DORMANT_META} value={m.dormant ? "DORMANT" : "ACTIVE"} />
                   </TableCell>

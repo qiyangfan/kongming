@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ChatBubble } from "@/components/chat-bubble";
 import { Textarea } from "@/components/ui/textarea";
 import type { components } from "@/lib/api-types.gen";
+import { humanizeErrorText } from "@/lib/api";
 
 // ADR-005:消费生成契约(审查循环 F1:手写接口使 tsc 对后端字段漂移零感知)
 type BotChatReply = components["schemas"]["BotChatOut"];
@@ -35,12 +36,22 @@ export default function BotPublicPage() {
         setError("该助手不存在或未公开。");
         return;
       }
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) {
+        // 页面自有 fetch(不经 lib/api):解析 detail 后交单源转译(错误码/HTTP 状态 → 中文)
+        let detail: string | null = null;
+        try {
+          const body = (await resp.json()) as { detail?: unknown };
+          if (typeof body.detail === "string") detail = body.detail;
+        } catch {
+          /* 非 JSON 响应,走状态码兜底 */
+        }
+        throw new Error(detail ?? `HTTP ${resp.status}`);
+      }
       const data = (await resp.json()) as BotChatReply;
       setRounds((prev) => [...prev, { q, a: data.summary || data.error || "无答复" }]);
       setDraft("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "服务异常,请稍后重试");
+      setError(humanizeErrorText(e instanceof Error ? e.message : null));
     } finally {
       setAsking(false);
     }

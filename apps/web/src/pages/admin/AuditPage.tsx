@@ -30,10 +30,12 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ScrollFade } from "@/components/scroll-fade";
 import { QueryErrorAlert } from "@/components/query-error";
+import { DateRangeQuick } from "@/components/date-range-quick";
 import { operLogPage, sqlAuditPage } from "@/lib/audit-api";
 import { systemApi } from "@/lib/system-api";
 import { endExclusive } from "@/lib/date-utils";
 import { displayUser } from "@/lib/display-user";
+import { formatDateTime, formatDuration } from "@/lib/datetime";
 
 const PAGE_SIZE = 20;
 
@@ -42,11 +44,6 @@ const VERDICT_META: StatusMeta = {
   BLOCKED: { label: "拦截", variant: "secondary" },
   ERROR: { label: "失败", variant: "outline" },
 };
-
-function fmtTime(v: string | null | undefined): string {
-  // 本地时区呈现(R1-B3:UTC 原文直出对账差 8 小时,与 RagPage 对齐)
-  return v ? new Date(v).toLocaleString("zh-CN", { hour12: false }) : "—";
-}
 
 export default function AuditPage() {
   const [section, setSection] = useState<"sql" | "oper">("sql");
@@ -172,7 +169,7 @@ export default function AuditPage() {
               )}
             </div>
             <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">trace_id</Label>
+              <Label className="text-xs text-muted-foreground">链路 ID</Label>
               <Input
                 value={traceId}
                 onChange={(e) => {
@@ -213,7 +210,7 @@ export default function AuditPage() {
                 setAction(e.target.value);
                 setPage(1);
               }}
-              placeholder="如 user.create"
+              placeholder="输入操作代码筛选,如 user.create"
               className="w-52 font-mono text-xs"
             />
           </div>
@@ -242,6 +239,13 @@ export default function AuditPage() {
             className="w-36"
           />
         </div>
+        <DateRangeQuick
+          onPick={(s, e) => {
+            setStartDate(s);
+            setEndDate(e);
+            setPage(1);
+          }}
+        />
       </div>
 
       {/* 分页表 */}
@@ -339,7 +343,7 @@ function SqlRows({
         <Fragment key={it.id}>
           <TableRow>
             <TableCell className="whitespace-nowrap text-muted-foreground">
-              {fmtTime(it.created_at)}
+              {formatDateTime(it.created_at, { seconds: true })}
             </TableCell>
             <TableCell
               className="max-w-32 truncate"
@@ -355,9 +359,7 @@ function SqlRows({
             <TableCell>
               <StatusBadge meta={VERDICT_META} value={it.verdict} />
             </TableCell>
-            <TableCell className="tabular-nums">
-              {it.duration_ms != null ? `${it.duration_ms}ms` : "—"}
-            </TableCell>
+            <TableCell className="tabular-nums">{formatDuration(it.duration_ms)}</TableCell>
             <TableCell className="text-right">
               <Button
                 variant="ghost"
@@ -377,8 +379,11 @@ function SqlRows({
                 {it.block_reason && (
                   <p className="mt-1 text-xs text-muted-foreground">拦截原因:{it.block_reason}</p>
                 )}
-                <p className="mt-1 font-mono text-xs text-muted-foreground">
-                  trace_id: {it.trace_id}
+                <p
+                  className="mt-1 max-w-full truncate font-mono text-xs text-muted-foreground"
+                  title={it.trace_id ?? undefined}
+                >
+                  链路 ID:{it.trace_id ?? "—"}
                 </p>
               </TableCell>
             </TableRow>
@@ -432,7 +437,7 @@ function OperRows({
         <Fragment key={it.id}>
           <TableRow>
             <TableCell className="whitespace-nowrap text-muted-foreground">
-              {fmtTime(it.created_at)}
+              {formatDateTime(it.created_at, { seconds: true })}
             </TableCell>
             <TableCell
               className="max-w-32 truncate"
@@ -461,6 +466,8 @@ function OperRows({
           {expanded === it.id && (
             <TableRow>
               <TableCell colSpan={6} className="bg-muted/30">
+                {/* 管理排查场景保留原始 JSON;标题说明数据形态 */}
+                <p className="mb-1 text-xs font-medium text-muted-foreground">原始数据(JSON)</p>
                 <pre className="overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed">
                   {JSON.stringify(it.detail ?? {}, null, 2)}
                 </pre>

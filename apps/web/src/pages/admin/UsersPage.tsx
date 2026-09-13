@@ -49,6 +49,8 @@ import {
   type TenantOut,
   type UserItemOut,
 } from "@/lib/system-api";
+import { roleLabel } from "@/lib/role-labels";
+import { formatDate } from "@/lib/datetime";
 
 const PAGE_SIZE = 10;
 
@@ -313,7 +315,7 @@ export default function UsersPage() {
                   ) : (
                     u.role_keys.map((k) => (
                       <Badge key={k} variant="outline">
-                        {k}
+                        {roleLabel(k)}
                       </Badge>
                     ))
                   )}
@@ -322,9 +324,7 @@ export default function UsersPage() {
               <TableCell className="max-w-32 truncate" title={u.dept_name ?? undefined}>
                 {u.dept_name ?? "—"}
               </TableCell>
-              <TableCell className="text-muted-foreground">
-                {new Date(u.created_at).toLocaleDateString("zh-CN")}
-              </TableCell>
+              <TableCell className="text-muted-foreground">{formatDate(u.created_at)}</TableCell>
               <TableCell className="text-right">
                 <Button variant="ghost" size="sm" onClick={() => openEdit(u)}>
                   编辑

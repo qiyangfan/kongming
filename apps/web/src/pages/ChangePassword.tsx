@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { Protected } from "@/components/protected";
-import { api, clearTokens } from "../lib/api";
+import { api, clearTokens, humanizeErrorText } from "../lib/api";
 import { useAuth } from "../lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,7 +37,7 @@ function ChangePasswordForm() {
       clearTokens();
       navigate("/login", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "改密失败");
+      setError(err instanceof Error ? humanizeErrorText(err.message) : "改密失败");
     } finally {
       setPending(false);
     }

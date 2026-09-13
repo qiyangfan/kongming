@@ -30,6 +30,7 @@ import {
 import { DIM_TEXT, INVOICE_STATUS_TEXT } from "@/lib/billing-labels";
 import { li2yuan } from "@/lib/money";
 import { StatusBadge, type StatusMeta } from "@/components/status-badge";
+import { formatDate, formatNumber } from "@/lib/datetime";
 
 // 发票状态 → StatusBadge(未知值回落 outline,与原「非 PENDING 即 outline」等价;
 // label 与 lib/billing-labels 的 INVOICE_STATUS_TEXT 对齐)
@@ -73,8 +74,8 @@ function formulaLines(u: UsageDetail): string[] {
   const tokenFee = Math.floor((tokens * (u.price_per_mtok ?? 0)) / 1000);
   return [
     "按用量计费:",
-    `Token ${tokens.toLocaleString()} × ¥${li2yuan(u.price_per_mtok ?? 0)}/千 = ¥${li2yuan(tokenFee)}`,
-    `调用 ${calls.toLocaleString()} 次 × ¥${li2yuan(u.price_per_call ?? 0)} = ¥${li2yuan(calls * (u.price_per_call ?? 0))}`,
+    `Token ${formatNumber(tokens)} × ¥${li2yuan(u.price_per_mtok ?? 0)}/千 = ¥${li2yuan(tokenFee)}`,
+    `调用 ${formatNumber(calls)} 次 × ¥${li2yuan(u.price_per_call ?? 0)} = ¥${li2yuan(calls * (u.price_per_call ?? 0))}`,
   ];
 }
 
@@ -92,7 +93,7 @@ function UsageBar({
   /** 值格式化(如金额维度传 li2yuan 转元);缺省千分位整数 */
   format?: (n: number) => string;
 }) {
-  const fmt = format ?? ((n: number) => n.toLocaleString());
+  const fmt = format ?? formatNumber;
   if (limit <= 0) {
     return (
       <div className="space-y-1">
@@ -233,9 +234,7 @@ export default function PortalPage() {
                   {(keys.data ?? []).map((k) => (
                     <li key={k.id} className="font-mono">
                       {k.bot_key}:{k.name}
-                      {k.last_used_at
-                        ? `(最近用 ${new Date(k.last_used_at).toLocaleDateString()})`
-                        : "(未使用)"}
+                      {k.last_used_at ? `(最近用 ${formatDate(k.last_used_at)})` : "(未使用)"}
                     </li>
                   ))}
                 </ul>
@@ -344,9 +343,9 @@ export default function PortalPage() {
                         <TableCell className="max-w-40 truncate font-mono text-xs" title={m.model}>
                           {m.model}
                         </TableCell>
-                        <TableCell>{m.prompt.toLocaleString()}</TableCell>
-                        <TableCell>{m.completion.toLocaleString()}</TableCell>
-                        <TableCell>{m.calls}</TableCell>
+                        <TableCell>{formatNumber(m.prompt)}</TableCell>
+                        <TableCell>{formatNumber(m.completion)}</TableCell>
+                        <TableCell>{formatNumber(m.calls)}</TableCell>
                         <TableCell className="text-right">
                           ¥{li2yuan(rowCostLi(m, usageOf(detail)))}
                         </TableCell>

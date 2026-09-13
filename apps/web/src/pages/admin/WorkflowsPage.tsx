@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { QueryErrorAlert } from "@/components/query-error";
+import { formatDateTime, formatDuration } from "@/lib/datetime";
 import {
   deleteWorkflow,
   listWorkflows,
@@ -67,12 +68,25 @@ const TEMPLATE = `{
   ]
 }`;
 
-// run 状态 → 徽章统一走 StatusBadge(未知值回落 destructive,保持原「非 SUCCESS 一律红」语义)
+// run/节点状态 → 徽章统一走 StatusBadge(未知值回落 destructive,保持原「非 SUCCESS 一律红」
+// 语义);SKIPPED 为节点级状态(条件门控/依赖跳过),run 终态不出现
 const RUN_STATUS_META: StatusMeta = {
   SUCCESS: { label: "成功", variant: "secondary" },
   FAILED: { label: "失败", variant: "destructive" },
   TIMEOUT: { label: "超时", variant: "destructive" },
   STEP_LIMIT: { label: "超步数", variant: "destructive" },
+  SKIPPED: { label: "已跳过", variant: "outline" },
+};
+
+/** 节点状态中文(与 RUN_STATUS_META 同源);未收录值回退原值 */
+function nodeStatusLabel(s: string): string {
+  return RUN_STATUS_META[s]?.label ?? s;
+}
+
+// 触发源中文(后端枚举:MANUAL 人工端点 / API 外部通道);未收录值回退原值
+const TRIGGER_SOURCE_LABELS: Record<string, string> = {
+  MANUAL: "手动触发",
+  API: "API 触发",
 };
 
 export default function WorkflowsPage() {
@@ -428,13 +442,13 @@ export default function WorkflowsPage() {
                     />
                   </span>
                   <span className="ml-2 text-xs text-muted-foreground">
-                    v{runResult.version} · {runResult.duration_ms}ms
+                    v{runResult.version} · {formatDuration(runResult.duration_ms)}
                   </span>
                 </p>
                 {runResult.error && <p className="text-xs text-destructive">{runResult.error}</p>}
                 {nodeRunsOf(runResult).map((nr) => (
                   <p key={nr.node_id} className="text-xs text-muted-foreground">
-                    {nr.node_id}: {nr.status}
+                    {nr.node_id}: {nodeStatusLabel(nr.status)}
                     {nr.error ? ` — ${nr.error}` : ""}
                   </p>
                 ))}
@@ -486,8 +500,9 @@ export default function WorkflowsPage() {
                           fallbackVariant="destructive"
                         />
                         <span className="text-xs text-muted-foreground">
-                          v{r.version} · {r.trigger_source} · {r.duration_ms}ms ·{" "}
-                          {r.created_at ? new Date(r.created_at).toLocaleString() : ""}
+                          v{r.version} ·{" "}
+                          {TRIGGER_SOURCE_LABELS[r.trigger_source] ?? r.trigger_source} ·{" "}
+                          {formatDuration(r.duration_ms)} · {formatDateTime(r.created_at)}
                         </span>
                       </CollapsibleTrigger>
                       <Button
@@ -514,7 +529,7 @@ export default function WorkflowsPage() {
                                   : "text-muted-foreground"
                               }
                             >
-                              {nr.status}
+                              {nodeStatusLabel(nr.status)}
                             </span>
                             {nr.error && <span className="text-destructive"> — {nr.error}</span>}
                           </div>
@@ -562,8 +577,11 @@ export default function WorkflowsPage() {
         <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>运行详情</DialogTitle>
-            <DialogDescription className="font-mono text-xs break-all">
-              {detailRunId}
+            <DialogDescription
+              className="max-w-full truncate font-mono text-xs"
+              title={detailRunId ?? undefined}
+            >
+              运行 ID:{detailRunId}
             </DialogDescription>
           </DialogHeader>
           {runDetail.isLoading ? (
@@ -582,10 +600,12 @@ export default function WorkflowsPage() {
                   fallbackVariant="destructive"
                 />
                 <span className="text-xs text-muted-foreground">
-                  v{runDetail.data.version} · 触发源 {runDetail.data.trigger_source} ·{" "}
-                  {runDetail.data.duration_ms}ms
+                  v{runDetail.data.version} · 触发源{" "}
+                  {TRIGGER_SOURCE_LABELS[runDetail.data.trigger_source] ??
+                    runDetail.data.trigger_source}{" "}
+                  · {formatDuration(runDetail.data.duration_ms)}
                   {runDetail.data.created_at
-                    ? ` · ${new Date(runDetail.data.created_at).toLocaleString()}`
+                    ? ` · ${formatDateTime(runDetail.data.created_at)}`
                     : ""}
                 </span>
               </div>
@@ -614,11 +634,15 @@ export default function WorkflowsPage() {
                     <div key={nr.node_id || i} className="rounded-md border px-3 py-2">
                       <div className="flex flex-wrap items-center gap-2 text-sm">
                         <span className="font-mono text-xs">{nr.node_id}</span>
-                        <Badge variant={nr.status === "FAILED" ? "destructive" : "secondary"}>
-                          {nr.status}
-                        </Badge>
+                        <StatusBadge
+                          meta={RUN_STATUS_META}
+                          value={nr.status}
+                          fallbackVariant="secondary"
+                        />
                         {nr.duration_ms !== undefined && (
-                          <span className="text-xs text-muted-foreground">{nr.duration_ms}ms</span>
+                          <span className="text-xs text-muted-foreground">
+                            {formatDuration(nr.duration_ms)}
+                          </span>
                         )}
                         {nr.error && <span className="text-xs text-destructive">{nr.error}</span>}
                       </div>
@@ -629,7 +653,7 @@ export default function WorkflowsPage() {
                               className="size-3 transition-transform group-data-[state=open]:rotate-90"
                               aria-hidden
                             />
-                            outputs
+                            输出
                           </CollapsibleTrigger>
                           <CollapsibleContent>
                             <pre className="mt-1 max-h-64 overflow-auto rounded-md bg-muted/60 p-2 text-xs leading-relaxed">

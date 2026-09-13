@@ -11,8 +11,14 @@ import { api, type PendingToolCallOut, type ToolConfirmOut } from "@/lib/api";
 import { useDatasource } from "@/lib/datasource-store";
 import { useTenant } from "@/lib/tenant-store";
 
+/* 工具名 → 中文短语(与 apps/api toolcall/registry.py 内置注册表对齐;
+   MCP 动态工具等未收录名回退显示原名)。 */
 const TOOL_LABELS: Record<string, string> = {
+  validate_sql: "校验 SQL",
+  execute_sql: "执行 SQL 查询",
+  rag_retrieve: "检索知识库",
   create_system_announcement: "发布系统公告",
+  run_python_code: "运行 Python 分析代码",
 };
 
 interface ToolConfirmCardProps {

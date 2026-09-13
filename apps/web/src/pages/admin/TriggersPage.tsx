@@ -36,6 +36,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { StatusSwitch } from "@/components/status-switch";
+import { StatusBadge, type StatusMeta } from "@/components/status-badge";
 import { PageHeader } from "@/components/page-header";
 import {
   Table,
@@ -60,8 +61,30 @@ import { cronPreview } from "@/lib/trigger-api";
 import { useDebounced } from "@/hooks/use-debounced";
 import { listWorkflows } from "@/lib/workflow-api";
 import { api } from "@/lib/api";
+import { formatDateTime, formatDuration } from "@/lib/datetime";
 
 const PAGE_SIZE = 10;
+
+// 触发器类型中文(列表徽章与表单下拉同源;后端枚举仅 CRON/WEBHOOK)
+const TYPE_LABELS: Record<string, string> = {
+  CRON: "定时调度",
+  WEBHOOK: "webhook 触发",
+};
+
+// 执行状态中文(后端枚举:成功/失败/间隔节流跳过);未收录值回退原值
+const RUN_STATUS_META: StatusMeta = {
+  SUCCESS: { label: "成功", variant: "secondary" },
+  FAILED: { label: "失败", variant: "destructive" },
+  SKIPPED: { label: "已跳过", variant: "outline" },
+};
+
+// 最小间隔快捷档(点击填入对应秒数)
+const INTERVAL_PRESETS: { label: string; seconds: number }[] = [
+  { label: "1 分钟", seconds: 60 },
+  { label: "5 分钟", seconds: 300 },
+  { label: "15 分钟", seconds: 900 },
+  { label: "1 小时", seconds: 3600 },
+];
 
 type FormState = {
   id: string | null;
@@ -167,10 +190,8 @@ export default function TriggersPage() {
       invalidate();
     },
     onError: (e) => {
-      // 040 写边界闸 detail 映射(黑话禁入用户文案)
-      const reason =
-        e.message === "TARGET_NOT_FOUND" ? "目标不存在(可能已删除),请重新选择" : e.message;
-      setFormError(e instanceof Error ? reason : "保存失败");
+      // 写边界闸 detail(TARGET_NOT_FOUND 等)已上收 lib/api 单源转译为中文
+      setFormError(e instanceof Error ? e.message : "保存失败");
     },
   });
 
@@ -249,7 +270,7 @@ export default function TriggersPage() {
                 <TableRow key={row.id}>
                   <TableCell className="font-mono text-xs">{row.tg_key}</TableCell>
                   <TableCell>
-                    <Badge variant="secondary">{row.type}</Badge>
+                    <Badge variant="secondary">{TYPE_LABELS[row.type] ?? row.type}</Badge>
                   </TableCell>
                   <TableCell className="text-xs">
                     {row.target_type}:{row.target_key}
@@ -262,7 +283,7 @@ export default function TriggersPage() {
                         </span>
                         {row.next_fire_at && (
                           <p className="whitespace-normal text-muted-foreground">
-                            下次 {new Date(row.next_fire_at).toLocaleString()}
+                            下次 {formatDateTime(row.next_fire_at)}
                           </p>
                         )}
                       </>
@@ -387,8 +408,11 @@ export default function TriggersPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="CRON">定时调度</SelectItem>
-                        <SelectItem value="WEBHOOK">webhook 触发</SelectItem>
+                        {Object.entries(TYPE_LABELS).map(([k, label]) => (
+                          <SelectItem key={k} value={k}>
+                            {label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -467,6 +491,22 @@ export default function TriggersPage() {
                       onChange={(e) => setForm({ ...form, minInterval: e.target.value })}
                       className="w-32 font-mono"
                     />
+                    <div className="flex flex-wrap gap-1">
+                      {INTERVAL_PRESETS.map((p) => (
+                        <Button
+                          key={p.seconds}
+                          type="button"
+                          variant="outline"
+                          size="xs"
+                          onClick={() => setForm({ ...form, minInterval: String(p.seconds) })}
+                        >
+                          {p.label}
+                        </Button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      两次触发之间的最小间隔秒数;间隔内的重复触发会跳过不执行。
+                    </p>
                   </div>
                   {/* 040·11:接下来 3 次预览(防抖;非法表达式红色原因,与保存期同口径)。
                       旧表达式结果不展示:防抖窗口内 data 落后于输入,仅当防抖值与
@@ -483,7 +523,7 @@ export default function TriggersPage() {
                       {cronFires.isError
                         ? `cron 无法计算:${cronFires.error instanceof Error ? cronFires.error.message : "表达式非法"}`
                         : cronFires.data && form.cronExpr.trim() === cronExprD
-                          ? `接下来 3 次:${cronFires.data.next.join("、")}`
+                          ? `接下来 3 次:${cronFires.data.next.map((s) => formatDateTime(s)).join("、")}`
                           : "预览计算中…"}
                     </p>
                   )}
@@ -511,8 +551,8 @@ export default function TriggersPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="custom">custom(原始 JSON)</SelectItem>
-                        <SelectItem value="github">github(GitHub 格式)</SelectItem>
+                        <SelectItem value="custom">自定义(手写 JSON)</SelectItem>
+                        <SelectItem value="github">GitHub(Webhook 载荷)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -562,7 +602,7 @@ export default function TriggersPage() {
                 <p className="break-all font-mono text-xs">密钥: {created.secret}</p>
               )}
               <p className="text-xs text-muted-foreground">
-                签名: X-Signature = hex(hmac_sha256(密钥, 请求体))
+                签名校验:请求头 X-Signature 的值为 HMAC-SHA256(密钥, 请求体) 的十六进制串。
               </p>
             </div>
           )}
@@ -587,12 +627,13 @@ export default function TriggersPage() {
             ) : (
               (runs.data?.items ?? []).map((r) => (
                 <div key={r.id} className="rounded-md border px-3 py-2 text-sm">
-                  <Badge variant={r.status === "SUCCESS" ? "secondary" : "destructive"}>
-                    {r.status}
-                  </Badge>
+                  <StatusBadge
+                    meta={RUN_STATUS_META}
+                    value={r.status}
+                    fallbackVariant="destructive"
+                  />
                   <span className="ml-2 text-xs text-muted-foreground">
-                    {r.duration_ms}ms ·{" "}
-                    {r.created_at ? new Date(r.created_at).toLocaleString() : ""}
+                    {formatDuration(r.duration_ms)} · {formatDateTime(r.created_at)}
                   </span>
                   {r.error && <p className="mt-1 text-xs text-destructive">{r.error}</p>}
                 </div>

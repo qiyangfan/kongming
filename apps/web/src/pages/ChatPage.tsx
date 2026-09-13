@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import {
   api,
+  humanizeErrorText,
   streamChatQuery,
   type ChatQueryOut,
   type SessionMessageOut,
@@ -468,7 +469,7 @@ export default function ChatPage() {
                 <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
                   <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
                   <div>
-                    <p className="text-foreground">此问未能送达:{askError}</p>
+                    <p className="text-foreground">此问未能送达:{humanizeErrorText(askError)}</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       问句已回到输入框,可重试。
                     </p>

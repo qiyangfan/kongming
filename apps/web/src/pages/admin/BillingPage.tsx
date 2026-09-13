@@ -59,6 +59,7 @@ import {
 import { DIM_TEXT, PAYMENT_STATUS_TEXT } from "@/lib/billing-labels";
 import { li2yuan, li2yuanInput } from "@/lib/money";
 import { StatusBadge, type StatusMeta } from "@/components/status-badge";
+import { formatNumber } from "@/lib/datetime";
 
 // 发票状态 → StatusBadge(管理端维持原「一律 secondary」密度;未知值回落 secondary 等价;
 // label 与 lib/billing-labels 的 INVOICE_STATUS_TEXT 对齐)
@@ -342,8 +343,8 @@ export default function BillingPage() {
                     <TableCell className="max-w-40 truncate" title={p.name}>
                       {p.name}
                     </TableCell>
-                    <TableCell>{p.monthly_tokens.toLocaleString()}</TableCell>
-                    <TableCell>{p.monthly_calls.toLocaleString()}</TableCell>
+                    <TableCell>{formatNumber(p.monthly_tokens)}</TableCell>
+                    <TableCell>{formatNumber(p.monthly_calls)}</TableCell>
                     <TableCell>
                       <div className="space-y-0.5">
                         <p>每千 Token ¥{li2yuan(p.price_per_mtok)}</p>
@@ -514,40 +515,48 @@ export default function BillingPage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    (policies.data ?? []).map((p) => (
-                      <TableRow key={p.id}>
-                        <TableCell className="text-xs">
-                          {p.scope === "BOT" ? (
-                            <Badge variant="outline">
-                              助手:
-                              {(bots.data ?? []).find((b) => b.id === p.scope_ref)?.bot_key ??
-                                p.scope_ref?.slice(0, 8)}
+                    (policies.data ?? []).map((p) => {
+                      const botKey = (bots.data ?? []).find((b) => b.id === p.scope_ref)?.bot_key;
+                      return (
+                        <TableRow key={p.id}>
+                          <TableCell className="text-xs">
+                            {p.scope === "BOT" ? (
+                              botKey ? (
+                                <Badge variant="outline">助手:{botKey}</Badge>
+                              ) : (
+                                // 候选清单未含(已删除/跨页)时不露 UUID,hover 可得原 id
+                                <Badge variant="outline" title={p.scope_ref ?? undefined}>
+                                  未知助手
+                                </Badge>
+                              )
+                            ) : (
+                              <Badge variant="secondary">租户</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="secondary">
+                              {DIM_TEXT[p.dimension] ?? p.dimension}
                             </Badge>
-                          ) : (
-                            <Badge variant="secondary">租户</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="secondary">{DIM_TEXT[p.dimension] ?? p.dimension}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          {p.dimension === "COST"
-                            ? `¥${li2yuan(p.limit_value)}`
-                            : p.limit_value.toLocaleString()}
-                        </TableCell>
-                        <TableCell>{p.warn_pct}%</TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            aria-label={`删除 ${DIM_TEXT[p.dimension] ?? p.dimension} 策略`}
-                            onClick={() => setDeletePolicyId(p.id)}
-                          >
-                            <Trash2 aria-hidden />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
+                          </TableCell>
+                          <TableCell>
+                            {p.dimension === "COST"
+                              ? `¥${li2yuan(p.limit_value)}`
+                              : formatNumber(p.limit_value)}
+                          </TableCell>
+                          <TableCell>{p.warn_pct}%</TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              aria-label={`删除 ${DIM_TEXT[p.dimension] ?? p.dimension} 策略`}
+                              onClick={() => setDeletePolicyId(p.id)}
+                            >
+                              <Trash2 aria-hidden />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>

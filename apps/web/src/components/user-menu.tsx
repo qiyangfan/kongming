@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/lib/auth-store";
+import { roleLabel } from "@/lib/role-labels";
 import { useTheme } from "@/lib/theme-store";
 
 export function UserMenu() {
@@ -39,7 +40,7 @@ export function UserMenu() {
         <DropdownMenuLabel className="flex flex-col gap-0.5">
           <span className="truncate">{name}</span>
           <span className="truncate text-xs font-normal text-muted-foreground">
-            {user?.role_keys.length ? user.role_keys.join(" / ") : "无角色"}
+            {user?.role_keys.length ? user.role_keys.map(roleLabel).join(" / ") : "无角色"}
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />

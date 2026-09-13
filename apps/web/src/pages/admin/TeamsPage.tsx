@@ -55,6 +55,7 @@ import {
   type TeamItem,
 } from "@/lib/team-api";
 import { systemApi } from "@/lib/system-api";
+import { formatDate } from "@/lib/datetime";
 
 export default function TeamsPage() {
   const qc = useQueryClient();
@@ -179,7 +180,7 @@ export default function TeamsPage() {
                     {row.name}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    {row.created_at ? new Date(row.created_at).toLocaleDateString() : ""}
+                    {formatDate(row.created_at)}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">

@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { Loader2 } from "lucide-react";
-import { api, type TokenPairOut } from "../lib/api";
+import { api, humanizeErrorText, type TokenPairOut } from "../lib/api";
 import { useAuth } from "../lib/auth-store";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,7 +34,7 @@ export default function OAuthCallback() {
         await acceptTokens(pair);
         navigate("/", { replace: true });
       } catch (err) {
-        setError(err instanceof Error ? err.message : "登录未完成,请稍后再试");
+        setError(err instanceof Error ? humanizeErrorText(err.message) : "登录未完成,请稍后再试");
       }
     })();
   }, [provider, params, acceptTokens, navigate]);

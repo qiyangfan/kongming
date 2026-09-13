@@ -29,7 +29,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { QueryErrorAlert } from "@/components/query-error";
+import { DateRangeQuick } from "@/components/date-range-quick";
 import { guardrailAuditPage, guardrailRules, updateGuardrailRule } from "@/lib/guardrail-api";
+import { endExclusive } from "@/lib/date-utils";
+import { formatDateTime } from "@/lib/datetime";
 
 const PAGE_SIZE = 20;
 
@@ -43,17 +46,6 @@ const ACTION_META: StatusMeta = {
   blocked: { label: "拦截", variant: "secondary" },
   masked: { label: "脱敏", variant: "default" },
 };
-
-function fmtTime(v: string | null | undefined): string {
-  return v ? new Date(v).toLocaleString("zh-CN", { hour12: false }) : "—";
-}
-
-/** 结束日期 → 排他上界次日零点(019 R1-D1 同款) */
-function endExclusive(date: string): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString();
-}
 
 export default function GuardrailsPage() {
   const qc = useQueryClient();
@@ -336,6 +328,13 @@ export default function GuardrailsPage() {
               className="w-40"
             />
           </div>
+          <DateRangeQuick
+            onPick={(s, e) => {
+              setStartDate(s);
+              setEndDate(e);
+              setPage(1);
+            }}
+          />
         </div>
 
         <div className="rounded-lg border border-border">
@@ -375,7 +374,7 @@ export default function GuardrailsPage() {
                 audit.data?.items.map((it) => (
                   <TableRow key={it.id}>
                     <TableCell className="text-xs text-muted-foreground">
-                      {fmtTime(it.created_at)}
+                      {formatDateTime(it.created_at, { seconds: true })}
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary">

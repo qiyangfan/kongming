@@ -94,35 +94,117 @@ export function tryRefresh(): Promise<boolean> {
   return refreshing;
 }
 
-function doFetch(path: string, init?: RequestInit): Promise<Response> {
+async function doFetch(path: string, init?: RequestInit): Promise<Response> {
   // multipart(FormData)不设 Content-Type——浏览器须自动生成 boundary,手设会致
   // 服务端解析不出表单字段(009 冒烟实证);JSON 请求显式声明
   const isForm = init?.body instanceof FormData;
-  return fetch(`${BASE}${path}`, {
-    ...init,
-    headers: {
-      ...(isForm ? {} : { "Content-Type": "application/json" }),
-      ...tenantHeader(),
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      ...init?.headers,
-    },
-  });
+  try {
+    return await fetch(`${BASE}${path}`, {
+      ...init,
+      headers: {
+        ...(isForm ? {} : { "Content-Type": "application/json" }),
+        ...tenantHeader(),
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...init?.headers,
+      },
+    });
+  } catch (err) {
+    // 主动取消(流式 abort)原样透传,不冒充网络错误
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    // fetch reject 的 TypeError 文案是浏览器英文("Failed to fetch" 等),不示人
+    const e = new Error("网络连接失败,请检查网络后重试") as Error & { raw?: string };
+    e.raw = err instanceof Error ? err.message : String(err);
+    throw e;
+  }
 }
 
-async function toStatusError(resp: Response): Promise<Error & { status?: number }> {
-  // 优先取 FastAPI {detail} 文案,原始 JSON 体不直接抛给用户
-  let detail = `HTTP ${resp.status}`;
+/* ============ 错误文案转译(人类可读单源) ============ */
+
+/** HTTP 状态 → 用户文案(detail 不可用/英文技术文案时的兜底) */
+const HTTP_MESSAGES: Record<number, string> = {
+  400: "请求有误,请检查后重试",
+  401: "登录已过期,请重新登录",
+  403: "没有执行此操作的权限",
+  404: "目标不存在或已被删除",
+  409: "内容有冲突,请刷新后重试",
+  422: "提交的内容未通过校验,请检查后重试",
+  429: "操作过于频繁,请稍后再试",
+  500: "服务开小差了,请稍后重试",
+  502: "服务暂不可用,请稍后重试",
+  503: "服务维护中,请稍后重试",
+  504: "服务响应超时,请稍后重试",
+};
+
+/** 后端业务错误码 → 用户文案(语义确定的才收录;未收录码原样保留)。
+ *  码全集以 apps/api 各 router 的 `detail="XXX"` 为唯一事实源,禁前端臆造。 */
+const ERROR_CODE_LABELS: Record<string, string> = {
+  SCHEMA_NOT_ALLOWED: "当前工作空间没有该数据表的访问权限,请联系管理员在数据源中授权",
+  TARGET_NOT_FOUND: "目标不存在(可能已删除),请重新选择",
+  TRIGGER_KEY_TAKEN: "该触发器标识已被占用,请换一个",
+  WORKFLOW_CONFLICT: "工作流已被其他操作更新,请刷新后重试",
+  WORKFLOW_DISABLED: "该工作流已停用,请先启用后再运行",
+  TENANT_FORBIDDEN: "没有此工作空间的访问权限,请切换工作空间或联系管理员",
+  DATASOURCE_INVALID: "数据源不可用或无权访问,请切换后重试",
+  BOT_NOT_FOUND: "该助手不存在或未公开",
+  SESSION_NOT_FOUND: "该会话不存在或已被删除",
+  TEAM_OWNER_REQUIRED: "仅团队所有者可执行此操作",
+  TEAM_ROLE_FORBIDDEN: "当前团队角色无权执行此操作",
+  EMPTY_QUESTION: "问题不能为空",
+  TITLE_INVALID: "会话标题不合法,请调整后重试",
+  SENSITIVE_CONTENT: "内容包含敏感信息,请调整后重试",
+  MEMORY_SENSITIVE: "记忆内容包含敏感信息,请调整后重试",
+  UNSUPPORTED_FILE_TYPE: "不支持的文件类型",
+  DOCUMENT_TOO_LARGE: "文档过大",
+  ATTACHMENT_TOO_LARGE: "附件过大",
+  ATTACHMENT_EMPTY: "附件内容为空",
+  ATTACHMENT_TYPE_INVALID: "附件类型不支持",
+};
+
+/** 错误码形态:大写字母开头,仅大写字母/数字/下划线,≥3 位 */
+const ERROR_CODE_RE = /^[A-Z][A-Z0-9_]{2,}$/;
+/** CJK 字符:后端中文自然语直接示人 */
+const CJK_RE = /[\u4e00-\u9fff]/;
+/** 浏览器网络异常文案(各浏览器措辞不一,兜中文) */
+const NETWORK_ERR_RE = /failed to fetch|load failed|network ?error|internet connection/i;
+
+/** 带状态码的 detail → 用户文案(错误码查表;中文原样;英文技术文案以状态码兜底) */
+function detailForUser(status: number, detail: string | null): string {
+  if (detail == null || detail === "") return HTTP_MESSAGES[status] ?? "请求失败,请稍后重试";
+  if (ERROR_CODE_RE.test(detail)) return ERROR_CODE_LABELS[detail] ?? detail;
+  if (CJK_RE.test(detail)) return detail;
+  return HTTP_MESSAGES[status] ?? "请求失败,请稍后重试";
+}
+
+/** 已落地的错误文本 → 用户文案(SSE 事件/页面自有 fetch 等不经 toStatusError
+ *  的通道复用):"HTTP 500" 形态与错误码形态转中文,其余原样返回(幂等)。 */
+export function humanizeErrorText(s: string | null | undefined): string {
+  if (s == null || s === "") return "请求失败,请稍后重试";
+  const http = /^HTTP (\d{3})$/.exec(s);
+  if (http) return HTTP_MESSAGES[Number(http[1])] ?? "请求失败,请稍后重试";
+  if (NETWORK_ERR_RE.test(s)) return "网络连接失败,请检查网络后重试";
+  if (ERROR_CODE_RE.test(s)) return ERROR_CODE_LABELS[s] ?? s;
+  if (CJK_RE.test(s)) return s;
+  return s;
+}
+
+async function toStatusError(resp: Response): Promise<Error & { status?: number; raw?: string }> {
+  // 优先取 FastAPI {detail} 文案,原始 JSON 体不直接抛给用户;raw 留档供技术详情
+  let detail: string | null = null;
   try {
     const body: unknown = await resp.json();
     if (body && typeof body === "object" && "detail" in body) {
       const d = (body as { detail: unknown }).detail;
-      detail = typeof d === "string" ? d : detail;
+      if (typeof d === "string") detail = d;
     }
   } catch {
-    /* 非 JSON 响应,保留 HTTP 状态码文案 */
+    /* 非 JSON 响应,走状态码兜底文案 */
   }
-  const err = new Error(detail) as Error & { status?: number };
+  const err = new Error(detailForUser(resp.status, detail)) as Error & {
+    status?: number;
+    raw?: string;
+  };
   err.status = resp.status;
+  err.raw = detail ?? undefined;
   return err;
 }
 

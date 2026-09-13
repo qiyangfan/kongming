@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { formatDateTime } from "@/lib/datetime";
 import { PageHeader } from "@/components/page-header";
 import {
   Select,
@@ -124,10 +125,8 @@ export default function RagPage() {
       invalidate();
     },
     onError: (e: Error) => {
-      // 040 写边界闸 detail 映射(黑话禁入用户文案)
-      const reason =
-        e.message === "SCHEMA_NOT_ALLOWED" ? "schema 不在该数据源的可扫描集合" : e.message;
-      setError(`上传失败:${reason}`);
+      // 写边界闸 detail(SCHEMA_NOT_ALLOWED 等)已上收 lib/api 单源转译为中文
+      setError(`上传失败:${e.message}`);
       setNotice(null);
     },
   });
@@ -455,7 +454,7 @@ export default function RagPage() {
                 </Badge>
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">
-                {new Date(item.updated_at).toLocaleString("zh-CN")}
+                {formatDateTime(item.updated_at)}
               </TableCell>
               <TableCell className="text-right">
                 <Button variant="ghost" size="sm" onClick={() => openEdit(item)}>

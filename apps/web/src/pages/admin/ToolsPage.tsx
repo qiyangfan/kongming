@@ -28,8 +28,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { QueryErrorAlert } from "@/components/query-error";
+import { DateRangeQuick } from "@/components/date-range-quick";
 import { toolAuditPage, toolList } from "@/lib/toolcall-api";
 import { endExclusive } from "@/lib/date-utils";
+import { formatDateTime, formatDuration } from "@/lib/datetime";
 
 const PAGE_SIZE = 20;
 
@@ -42,10 +44,6 @@ const STATUS_META: StatusMeta = {
   CONFIRM_REJECTED: { label: "已拒绝确认", variant: "secondary" },
   CONFIRM_EXPIRED: { label: "确认过期", variant: "secondary" },
 };
-
-function fmtTime(v: string | null | undefined): string {
-  return v ? new Date(v).toLocaleString("zh-CN", { hour12: false }) : "—";
-}
 
 export default function ToolsPage() {
   const [page, setPage] = useState(1);
@@ -222,6 +220,13 @@ export default function ToolsPage() {
               className="w-40"
             />
           </div>
+          <DateRangeQuick
+            onPick={(s, e) => {
+              setStartDate(s);
+              setEndDate(e);
+              setPage(1);
+            }}
+          />
         </div>
 
         <div className="rounded-lg border border-border">
@@ -262,7 +267,7 @@ export default function ToolsPage() {
                 audit.data?.items.map((it) => (
                   <TableRow key={it.id}>
                     <TableCell className="text-xs text-muted-foreground">
-                      {fmtTime(it.created_at)}
+                      {formatDateTime(it.created_at, { seconds: true })}
                     </TableCell>
                     <TableCell className="font-mono text-xs">{it.tool_name}</TableCell>
                     <TableCell>
@@ -275,9 +280,7 @@ export default function ToolsPage() {
                       {it.args_digest || "—"}
                     </TableCell>
                     <TableCell className="text-xs">
-                      {it.duration_ms !== null && it.duration_ms !== undefined
-                        ? `${it.duration_ms}ms`
-                        : "—"}
+                      {formatDuration(it.duration_ms ?? null)}
                     </TableCell>
                     <TableCell className="text-xs">{it.datasource_key ?? "—"}</TableCell>
                   </TableRow>

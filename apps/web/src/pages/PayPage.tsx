@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { li2yuan } from "@/lib/money";
 import { cancelPayment, getInvoiceDetail, getPayment, mockSimulate } from "@/lib/billing-api";
+import { formatDateTime } from "@/lib/datetime";
 
 const TERMINAL = new Set(["PAID", "CANCELLED", "EXPIRED"]);
 
@@ -113,7 +114,7 @@ export default function PayPage() {
               <CheckCircle2 className="mx-auto size-10 text-primary" aria-hidden />
               <p className="font-medium">支付成功</p>
               <p className="text-xs text-muted-foreground">
-                交易号 {pay.trade_no} · {pay.paid_at ? new Date(pay.paid_at).toLocaleString() : ""}
+                交易号 {pay.trade_no} · {formatDateTime(pay.paid_at)}
               </p>
             </div>
           )}
