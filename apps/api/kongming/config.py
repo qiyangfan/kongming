@@ -119,6 +119,12 @@ class Settings(BaseSettings):
     # 引擎只对拍观测)。切换期行为契约零变更;引擎缺失/异常自动降级不阻断。
     sqlguard_mode: str = "shadow"
 
+    # 成本对账旁路(055):muniu 管理面只读访问,凭证环境变量注入,
+    # 不落库不入日志;token 空 = 对账端点报告「未配置」。
+    muniu_admin_base_url: str = "http://127.0.0.1:8787"
+    muniu_admin_token: str = ""
+    cost_reconcile_threshold: float = Field(default=0.2, ge=0.0, le=1.0)
+
     def fail_closed_checks(self) -> None:
         """prod 环境缺敏感配置直接拒启(dev 宽松以便本地起步)。"""
         if self.environment != "prod":

@@ -48,6 +48,8 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run mypy kongming
+      # pyright 与本地 make api-check 同参(054:本地/CI 门禁等价)
+      - run: uv run pyright
       - run: uv run lint-imports
       # baseline 迁移对 km_readonly 无条件 GRANT(0001),角色由 pg-init 创建;
       # 本地 compose 挂载同款 init 脚本,CI 此处与其同构(单源,不复制 SQL)
@@ -70,6 +72,8 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run mypy kongming_agent
+      # pyright 与本地 make agent-check 同参(054:本地/CI 门禁等价)
+      - run: uv run pyright
       - run: uv run lint-imports
       - run: uv run pytest -q --cov
 

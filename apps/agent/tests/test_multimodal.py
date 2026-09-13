@@ -55,9 +55,9 @@ async def test_preprocess_empty_zero_call() -> None:
         [],
         tenant_key="t",
         user_id="u",
-        api=api,
-        llm=llm,
-        trace_id="tr",  # type: ignore[arg-type]
+        api=api,  # type: ignore[arg-type]
+        llm=llm,  # type: ignore[arg-type]
+        trace_id="tr",
     )
     assert out == ""
     assert api.calls == [] and llm.vision_calls == []
@@ -70,9 +70,9 @@ async def test_preprocess_happy() -> None:
         ["id1", "id2"],
         tenant_key="t",
         user_id="u",
-        api=api,
-        llm=llm,
-        trace_id="tr",  # type: ignore[arg-type]
+        api=api,  # type: ignore[arg-type]
+        llm=llm,  # type: ignore[arg-type]
+        trace_id="tr",
     )
     assert api.calls == ["id1", "id2"]
     assert len(llm.vision_calls) == 2
@@ -99,9 +99,9 @@ async def test_preprocess_fence_escape_sanitized() -> None:
         ["id1", "id2"],
         tenant_key="t",
         user_id="u",
-        api=api,
-        llm=llm,
-        trace_id="tr",  # type: ignore[arg-type]
+        api=api,  # type: ignore[arg-type]
+        llm=llm,  # type: ignore[arg-type]
+        trace_id="tr",
     )
     lines = out.splitlines()
     fence_lines = [i for i, ln in enumerate(lines) if ln == '"""']
@@ -114,9 +114,9 @@ async def test_preprocess_fence_escape_sanitized() -> None:
         ["id1"],
         tenant_key="t",
         user_id="u",
-        api=api2,
-        llm=llm2,
-        trace_id="tr",  # type: ignore[arg-type]
+        api=api2,  # type: ignore[arg-type]
+        llm=llm2,  # type: ignore[arg-type]
+        trace_id="tr",
     )
     assert "描述超长已截断" in out2
 
@@ -130,8 +130,8 @@ async def test_preprocess_fail_closed() -> None:
             ["id1"],
             tenant_key="t",
             user_id="u",
-            api=api,
-            llm=llm,
+            api=api,  # type: ignore[arg-type]
+            llm=llm,  # type: ignore[arg-type]
             trace_id="tr",  # type: ignore[arg-type]
         )
     assert llm.vision_calls == []
@@ -143,8 +143,8 @@ async def test_preprocess_requires_user() -> None:
             ["id1"],
             tenant_key="t",
             user_id=None,
-            api=_FakeApi(),
-            llm=_FakeLlm(),
+            api=_FakeApi(),  # type: ignore[arg-type]
+            llm=_FakeLlm(),  # type: ignore[arg-type]
             trace_id="tr",  # type: ignore[arg-type]
         )
 

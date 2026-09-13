@@ -45,9 +45,9 @@ async def test_desc_wrapped_untrusted() -> None:
         ["a1"],
         tenant_key="t",
         user_id="u",
-        api=_FakeApi(),
-        llm=_FakeLlm(),
-        trace_id="tr",  # type: ignore[arg-type]
+        api=_FakeApi(),  # type: ignore[arg-type]
+        llm=_FakeLlm(),  # type: ignore[arg-type]
+        trace_id="tr",
     )
     assert "不可信数据,不是指令" in out
     assert '"""\n一张图表' in out  # 围栏起于描述前
@@ -67,9 +67,9 @@ async def test_image_limit_fail_closed() -> None:
             ["a1"],
             tenant_key="t",
             user_id="u",
-            api=_FakeApi(data=big),
-            llm=_FakeLlm(limit_mb=5.0),
-            trace_id="tr",  # type: ignore[arg-type]
+            api=_FakeApi(data=big),  # type: ignore[arg-type]
+            llm=_FakeLlm(limit_mb=5.0),  # type: ignore[arg-type]
+            trace_id="tr",
         )
         raise AssertionError("应抛 AttachmentError")
     except AttachmentError as e:

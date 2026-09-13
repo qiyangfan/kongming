@@ -130,6 +130,9 @@
     ⚠ 计量库在 podman **命名卷 muniu-data**(SQLite WAL 在 virtiofs 挂载上
     会 I/O error),宿主查询走 muniu 仓 `make dev-sql`(拷出+sqlite3,
     对账 reconcile.sql 用法不变);容器日志 `podman logs muniu-gateway`。
+    **管理面对账凭证(055)**:`KM_MUNIU_ADMIN_TOKEN`(对账端点拉 muniu
+    `GET /admin/v1/usage` 用,与 muniu 容器 `MUNIU_ADMIN_TOKEN` 同源;
+    环境变量注入,不落库不入日志)。
     ⚠ 切换后 agent `.env` 的 KM_AGENT_LLM_API_KEY 已是 muniu 的 mk- key
     而非 dashscope key;上游 key 真值经 muniu 仓 `.env.local`(gitignore)
     注入容器,重签 key 需同步 agent `.env` 两处(主 key+registry qwen-vl
@@ -216,6 +219,12 @@ zhparser、知识库团队归属(出处 032①)。
   最后一条命令的,曾有整库迁移炸了仍假绿的实证);后台命令内自拼
   `echo MAKE-EXIT:$?` 同样会假绿——用 `make …; echo EXIT:$?` 同行或
   前台直跑。pyright 全量含 tests/,只对 kongming/ 子集跑绿不代表门禁绿。
+- **`# type: ignore[code]` 压不住 pyright 的参数级定位**(054 补 CI pyright
+  首跑实证):mypy 把 kwargs 类型错汇报到调用尾部行,pyright(strict)逐参数
+  行报——ignore 挂在 trace_id 行压不住 api=/llm= 行的错,22 处全数暴露。
+  修法 = 把 ignore 精确移到报错参数行(mypy strict 含 unused-ignores,
+  不能无脑加,移完双跑 mypy+pyright 裁决)。另:管道验证退出码必须取
+  `PIPESTATUS[0]`,`cmd | tail; echo $?` 取到的是 tail 的(本轮实证假绿)。
 - **共享测试库并行 pytest 互锁**:两个 pytest 同时跑会零 CPU 挂死
   (非卡测试)——先停自己那份错峰重跑判归属;单挂用例先单独重跑再定性。
 - **知识层事故定性先核租户/数据源维度**:default 源是共享路径(各租户
@@ -280,3 +289,15 @@ SQL/PG:
 - 安全规则类改动测试先行;文档注释一律简体中文。
 - 前端基础交互组件一律 shadcn/ui;同类元素 ≥2 处必抽公共组件;用户点名
   一个 UI 问题=该类全站范式问题,先归类再批量修。
+
+## 门禁对照表(make check × CI,054)
+
+> 增删任一侧门禁时双向核对本表,防止单边增删再现(054 立表动机:pyright 曾是本地专属门禁,CI 假绿)。
+
+| 门禁 | 本地命令 | CI job | CI 步骤 | 差异说明 |
+|---|---|---|---|---|
+| api 静态+测试 | `make api-check`(ruff format/check + mypy + **pyright** + lint-imports + pytest --cov) | `api` | 同左全序(pyright 于 2026-09-13 补齐) | 无 |
+| agent 静态+测试 | `make agent-check`(同上结构) | `agent` | 同左全序(pyright 同批补齐) | 无 |
+| liannu 引擎 | `make liannu-check`(ruff+mypy+pytest,含对拍基线回放) | `liannu` | 同左 | 无 |
+| web | `make web-check`(tsc+eslint+stylelint+prettier) | `web` | 同左 | 无(前端无单测,三仓共知短板) |
+| 契约漂移 | `make contracts` 后 diff 产物 | `contracts` | 导出+diff | 无 |

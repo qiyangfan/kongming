@@ -18,6 +18,12 @@ from kongming.auth.repository import SqlOperLogRepo
 from kongming.auth.router import current_user, require_perm
 from kongming.billing.channels import MockChannel
 from kongming.billing.ports import PaymentChannel
+from kongming.billing.reconciliation import (
+    ReconciliationReport,
+    build_report,
+    collect_local_usage,
+    fetch_muniu_cost,
+)
 from kongming.billing.repository import SqlBillingRepo
 from kongming.billing.service import (
     BillingNotFound,
@@ -802,3 +808,45 @@ async def void_invoice(
     except (BillingNotFound, PaymentConflict) as e:
         raise _pay_http(e) from None
     return {"ok": True}
+
+
+# ── 成本对账(055,只读旁路):任何失败显式标注,不影响计费主链路 ──
+
+
+@router.get(
+    "/system/billing/cost-reconciliation",
+    response_model=ReconciliationReport,
+    dependencies=[Depends(require_perm(MANAGE))],
+)
+async def cost_reconciliation(
+    user: Annotated[dict[str, object], Depends(current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    window_days: Annotated[int, Query(ge=1, le=90)] = 7,
+) -> ReconciliationReport:
+    """牌价轨与 muniu credit 成本轨的窗口量级核对(对 muniu HANDOFF 6b 的
+    谱系修订见 change design:不直推、不下线自有牌价,消除的是「无对账」)。"""
+    cfg = get_settings()
+    cost = await fetch_muniu_cost(
+        cfg.muniu_admin_base_url, cfg.muniu_admin_token, window_days=window_days
+    )
+    product_tokens, invoice_li = await collect_local_usage(session, window_days=window_days)
+    report = build_report(
+        window_days=window_days,
+        product_tokens=product_tokens,
+        product_invoice_li=invoice_li,
+        cost=cost,
+        threshold=cfg.cost_reconcile_threshold,
+    )
+    if report.alert:
+        await SqlOperLogRepo(session).add(
+            str(user["sub"]),
+            "billing.cost_reconciliation.alert",
+            "muniu",
+            {
+                "window_days": window_days,
+                "deviation_ratio": report.deviation_ratio,
+                "threshold": report.threshold,
+            },
+        )
+        await session.commit()
+    return report
