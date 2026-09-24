@@ -222,7 +222,7 @@ def fake_provider(
     """
     from kongming.auth import providers
 
-    def _install(key: str, profile: NormalizedProfile) -> None:
+    def _install(key: str, profile: "NormalizedProfile") -> None:
         class _Fake:
             pkce = False
             display_name = key.title()
@@ -240,7 +240,7 @@ def fake_provider(
 
             async def fetch_profile(
                 self, settings: object, *, code: str, code_verifier: str | None = None
-            ) -> NormalizedProfile:
+            ) -> "NormalizedProfile":
                 return profile
 
         monkeypatch.setitem(providers.REGISTRY, key, _Fake())
