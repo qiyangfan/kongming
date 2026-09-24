@@ -7,7 +7,6 @@
 # pyright: reportPrivateUsage=false
 
 from collections.abc import Iterator
-from typing import cast
 
 import pytest
 from httpx import AsyncClient

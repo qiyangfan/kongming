@@ -7,6 +7,7 @@ Revises: 0028_chat_no_data_status
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0029"
