@@ -62,6 +62,10 @@ class RagContext:
     relations_hint: str = ""
     metric_hints: str = ""
     doc_hints: list[dict[str, str]] = field(default_factory=list[dict[str, str]])  # 024 文档段
+    # 056 skill-pack 投影段(空串=零包零回归)
+    skill_terms: str = ""
+    skill_examples: str = ""
+    skill_persona: str = ""
 
 
 @dataclass(frozen=True)
@@ -191,6 +195,9 @@ class ApiClient:
             history_sql=str(data.get("history_sql") or ""),
             relations_hint=str(data.get("relations_hint") or ""),
             metric_hints=str(data.get("metric_hints") or ""),
+            skill_terms=str(data.get("skill_terms") or ""),
+            skill_examples=str(data.get("skill_examples") or ""),
+            skill_persona=str(data.get("skill_persona") or ""),
             doc_hints=[
                 {
                     "source_ref": str(cast("dict[str, object]", h).get("source_ref") or ""),

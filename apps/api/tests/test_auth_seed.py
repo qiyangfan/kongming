@@ -37,6 +37,7 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
         "system:rag:manage",
         "system:role:manage",
         "system:semantic:manage",
+        "system:skill:manage",
         "system:team:manage",
         "system:tool:manage",
         "system:trigger:manage",
@@ -44,6 +45,7 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
         "system:workflow:manage",
         "tool:announcement:create",
         "tool:code:execute",
+        "tool:compute",
         "tool:mcp:use",
         "tool:rag:retrieve",
         "tool:sql:execute",
@@ -93,7 +95,7 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
                 " WHERE r.role_key='SUPER_ADMIN'"
             )
         )
-    ).scalar_one() == 28  # +…/033 bot:run/034 developer:portal/billing:manage
+    ).scalar_one() == 30  # +…/057 tool:compute/056 system:skill:manage
     # 推荐绑定(只增不摘):DEVELOPER 增量获得 chat:execute(005)+chat:feedback:submit(014)
     # + 019 只读三件套(公告写工具不推,显式授予制)
     dev_perms = (
@@ -115,6 +117,7 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
         "chat:execute",
         "chat:feedback:submit",
         "developer:portal",
+        "tool:compute",
         "tool:rag:retrieve",
         "tool:sql:execute",
         "tool:sql:validate",
@@ -132,12 +135,13 @@ async def test_seed_idempotent_on_repeat(session: AsyncSession) -> None:
     assert await _count("public.sys_user") == 1
     assert await _count("public.sys_role") == 2
     # …019 工具 5 点+027/028/029/031/032 各增
-    assert await _count("public.sys_permission") == 28
+    assert await _count("public.sys_permission") == 30
     assert await _count("public.sys_tenant") == 1
     assert await _count("public.sys_user_role") == 1
     assert await _count("public.sys_user_tenant") == 1
     # 超管 28 + DEVELOPER 推荐 8(029/033/034 进推荐集)
-    assert await _count("public.sys_role_permission") == 36
+    # 超管 30 + DEVELOPER 推荐 9
+    assert await _count("public.sys_role_permission") == 39
 
 
 async def test_seed_with_env_password_not_forced_to_change(

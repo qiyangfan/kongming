@@ -553,6 +553,10 @@ class RetrieveOut(BaseModel):
     metric_hints: str = ""
     # 024 文档段(纯增;空=无命中,双通道隔离)
     doc_hints: list[dict[str, str]] = []
+    # 056 skill-pack 投影段(纯增;空=零包零回归)
+    skill_terms: str = ""
+    skill_examples: str = ""
+    skill_persona: str = ""
 
 
 @internal_router.post("/retrieve", response_model=RetrieveOut)
@@ -627,12 +631,38 @@ async def rag_retrieve(
             )
     except Exception:
         log.warning("文档检索组装失败(降级空)", exc_info=True)
+    # 056:skill-pack 合并投影(零包=空段;失败降级不阻断)
+    skill_terms = skill_examples = skill_persona = ""
+    try:
+        from kongming.skillpack.repository import SqlSkillPackRepo
+        from kongming.skillpack.service import SkillPackService
+
+        tid3 = (
+            await session.execute(
+                text("SELECT id FROM public.sys_tenant WHERE tenant_key=:k AND status='ACTIVE'"),
+                {"k": req.tenant_key},
+            )
+        ).scalar_one_or_none()
+        if tid3:
+            proj = await SkillPackService(SqlSkillPackRepo(session)).projection(
+                tenant_id=str(tid3), datasource_key=req.datasource_key
+            )
+            skill_terms, skill_examples, skill_persona = (
+                proj.skill_terms,
+                proj.skill_examples,
+                proj.skill_persona,
+            )
+    except Exception:
+        log.warning("skill-pack 投影组装失败(降级空)", exc_info=True)
     return RetrieveOut(
         schema_hint=ctx.schema_hint,
         history_sql=ctx.history_sql,
         relations_hint=relations_hint,
         metric_hints=metric_hints,
         doc_hints=doc_hints,
+        skill_terms=skill_terms,
+        skill_examples=skill_examples,
+        skill_persona=skill_persona,
     )
 
 

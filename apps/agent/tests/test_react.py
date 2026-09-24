@@ -490,6 +490,159 @@ async def test_react_blocked_sql_not_deduped(_patch) -> None:  # type: ignore[no
     assert final["last_execution"].verdict == "BLOCKED"
 
 
+async def test_react_compute_delta_local_and_whitelist(_patch) -> None:  # type: ignore[no-untyped-def]
+    """057:compute_delta 本地执行;入参 ∈ 白名单则成功并回写 compute_values。"""
+    llm = FakeLlm(
+        [
+            ToolChatReply(
+                tool_calls=[
+                    _call("execute_sql", {"sql": "SELECT v FROM t"}),
+                    _call("compute_delta", {"base": 80, "target": 100}, "c2"),
+                ]
+            ),
+            ToolChatReply(content="增长 25%。"),
+        ]
+    )
+    api = FakeApi(
+        [
+            ToolExecuteOutcome(
+                status="executed",
+                result={
+                    "verdict": "PASS",
+                    "columns": ["v"],
+                    "rows": [[80], [100]],
+                    "row_count": 2,
+                },
+            )
+        ]
+    )
+    _patch(llm, api)
+    final = await _ainvoke(_state())
+    assert len(api.tool_calls) == 1  # compute 不回调控制面
+    assert final["summary"] == "增长 25%。"
+    assert 25.0 in cast("list[float]", final.get("compute_values") or [])
+
+
+async def test_react_compute_rejects_out_of_whitelist(_patch) -> None:  # type: ignore[no-untyped-def]
+    """057:编造基数拒绝执行,不产生输出值,观察喂回纠正指引。"""
+    llm = FakeLlm(
+        [
+            ToolChatReply(
+                tool_calls=[
+                    _call("execute_sql", {"sql": "SELECT v FROM t"}),
+                    _call("compute_share", {"part": 50, "total": 100}, "c2"),
+                ]
+            ),
+            ToolChatReply(content="无法计算占比。"),
+        ]
+    )
+    api = FakeApi(
+        [
+            ToolExecuteOutcome(
+                status="executed",
+                result={"verdict": "PASS", "columns": ["v"], "rows": [[25], [100]], "row_count": 2},
+            )
+        ]
+    )
+    _patch(llm, api)
+    final = await _ainvoke(_state())
+    tool_msgs = _tool_contents(llm.calls[1]["messages"])
+    assert "白名单" in tool_msgs[-1]
+    assert final["summary"] == "无法计算占比。"
+
+
+async def test_react_finalize_strips_heart_calculated_rate(_patch) -> None:  # type: ignore[no-untyped-def]
+    """057:finalize 同口径——心算增长率句剥离,合法句保留。"""
+    llm = FakeLlm(
+        [
+            ToolChatReply(tool_calls=[_call("execute_sql", {"sql": "SELECT v FROM t"})]),
+            ToolChatReply(content="由 80 变为 100。环比增长 25%。"),
+        ]
+    )
+    api = FakeApi(
+        [
+            ToolExecuteOutcome(
+                status="executed",
+                result={"verdict": "PASS", "columns": ["v"], "rows": [[80], [100]], "row_count": 2},
+            )
+        ]
+    )
+    _patch(llm, api)
+    final = await _ainvoke(_state())
+    summary = str(final["summary"])
+    assert "25%" not in summary
+    assert "80" in summary or "100" in summary
+
+
+async def test_react_finalize_all_stripped_falls_back_not_raw(_patch) -> None:  # type: ignore[no-untyped-def]
+    """057:审计剥空时不得回退未审原文(会放行非法数字),走 stats 兜底。"""
+    llm = FakeLlm(
+        [
+            ToolChatReply(tool_calls=[_call("execute_sql", {"sql": "SELECT v FROM t"})]),
+            ToolChatReply(content="环比增长 25%。"),
+        ]
+    )
+    api = FakeApi(
+        [
+            ToolExecuteOutcome(
+                status="executed",
+                result={"verdict": "PASS", "columns": ["v"], "rows": [[80], [100]], "row_count": 2},
+            )
+        ]
+    )
+    _patch(llm, api)
+    final = await _ainvoke(_state())
+    summary = str(final["summary"])
+    assert "25%" not in summary
+    assert "增长" not in summary
+    assert summary  # 仍有确定性兜底文案
+
+
+async def test_react_todo_honesty_on_partial_failure(_patch) -> None:  # type: ignore[no-untyped-def]
+    """058:多子目标一失败——收口不得全称完成,须披露未完成。"""
+    llm = FakeLlm(
+        [
+            ToolChatReply(
+                tool_calls=[
+                    _call("execute_sql", {"sql": "SELECT 1"}, "c1"),
+                    _call("execute_sql", {"sql": "SELECT 2"}, "c2"),
+                ]
+            ),
+            ToolChatReply(content="以上已全部完成。第一项结果 1。"),
+        ]
+    )
+    api = FakeApi(
+        [
+            ToolExecuteOutcome(
+                status="executed",
+                result={"verdict": "PASS", "columns": ["v"], "rows": [[1]], "row_count": 1},
+            ),
+            ToolExecuteOutcome(
+                status="executed",
+                result={"verdict": "ERROR", "reason": "syntax error"},
+            ),
+        ]
+    )
+    _patch(llm, api)
+    final = await _ainvoke(_state(question="华东销售额是多少？华北呢？"))
+    summary = str(final["summary"])
+    assert "已全部完成" not in summary
+    assert "未完成事项" in summary
+    todos = cast("list[dict[str, str]]", final.get("todos") or [])
+    assert any(t.get("status") == "DONE" for t in todos)
+    assert any(t.get("status") != "DONE" for t in todos)
+
+
+async def test_react_single_goal_no_todos_zero_regression(_patch) -> None:  # type: ignore[no-untyped-def]
+    """058:单目标简单问不建账本,收口原文。"""
+    llm = FakeLlm([ToolChatReply(content="共有 4 件商品。")])
+    api = FakeApi()
+    _patch(llm, api)
+    final = await _ainvoke(_state(question="商品总共有多少个"))
+    assert final["summary"] == "共有 4 件商品。"
+    assert final.get("todos") in (None, [])
+
+
 # ============ 纯函数 ============
 
 

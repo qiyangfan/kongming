@@ -118,6 +118,11 @@ RESERVED_BLOCK = [
     "SELECT * FROM public.user_memory",  # 显式限定
     "WITH m AS (SELECT content FROM public.user_memory) SELECT * FROM m",  # CTE 遮蔽
     "SELECT * FROM tenant_default.goods g JOIN user_memory u ON true",  # JOIN 夹带
+    # 059:user_prefs 闭合偏好表同理收编保留表
+    "SELECT prefs FROM user_prefs",
+    "SELECT * FROM public.user_prefs",
+    "WITH p AS (SELECT * FROM public.user_prefs) SELECT * FROM p",
+    "SELECT * FROM tenant_default.goods g JOIN user_prefs p ON true",
     "SELECT * FROM tenant_default.goods g JOIN sys_user u ON true",  #  JOIN 夹带
     # CTE 遮蔽形态(R2 评审实证绕过):体内限定名引用不得被 CTE 豁免吞掉
     "WITH sys_user AS (SELECT password_hash FROM public.sys_user) SELECT * FROM sys_user",

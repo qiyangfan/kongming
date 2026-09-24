@@ -7,8 +7,22 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
-## 当前状态(2026-09-12)
+## 当前状态(2026-09-24)
 
+- **056–059 批量落地+评审循环修复,已归档(2026-09-24)**:056 skill-pack
+  (垂类内容包四段契约/按数据源启停/合并投影封顶/`skill_` 保留前缀/
+  `system:skill:manage`;fewshot SQL 只作提示文本);057 numeric-grounding
+  (派生量白名单+确定性审计剥离+compute_delta/compute_share 本地执行,
+  `tool:compute`);058 react-todo-honesty(多子目标 Todo 诚实账本,预算
+  退出不批量 DONE);059 user-preference-memory(`user_prefs` 闭合槽位,
+  隐式只写槽位 patch、显式分流槽位/NOTE、偏好注入带「可忽略/不约束
+  数据范围」前缀)。同批评审循环坐实并修复 12 处缺陷(审计剥空回退未审
+  原文、asyncpg jsonb 回 str 导致 prefs/skillpack 读空、metrics 重启用
+  自冲突、PrefsIn 未知键静默丢弃、时间列 str 排序错序、059 注入/路由
+  假完成等),契约已再生。**059 MemoryPage 槽位编辑 UI 仍未开工**(任务
+  3.4 显式阻塞,前端待做)。
+- **054 gates-env-parity:本地全绿,待本次 push 后盯 CI(含 pyright 步骤)
+  转绿再归档**;053 仍在 SQLGuard 影子观察期(切主条件见下)。
 - **053 SQL 安全引擎接入实现完成(2026-09-12,进入影子观察期)**:引擎为
   本仓 monorepo 共享包 `packages/liannu`(连弩;Python 单遍,与内置路径同源
   sqlglot AST,v0.1.2;两进程 uv path 依赖引入,**2026-09-12 晚由独立仓
@@ -32,8 +46,8 @@
   (muniu 仓 `scripts/reconcile.sql`,差异 ≤1%),期满达标 ADR-007 转「已接受」;
   回滚=`.env` 三处改回直连(切换前备份 /tmp/.km-agent-env-pre-muniu.bak,
   重启即失)。运行细节见「环境事实」11。
-- 001–052 + backlog-settlement 已全部归档(活动变更清零)。上游 41 域
-  全覆盖。近期批次:2026-08-29 四连(043 生成纪律规则 10+哨兵短路/
+- 001–052 + backlog-settlement 已全部归档;055–059 已于 2026-09-24 归档
+  (活动变更仅剩 053 影子观察、054 待 CI)。上游 41 域全覆盖。近期批次:2026-08-29 四连(043 生成纪律规则 10+哨兵短路/
   044 NO_DATA 四态中性形态/045 保留表收编 user_memory/046 投影 id
   收敛+列级哨兵);2026-08-30 二连(047 检索治理/048 聚合追问与去重
   护栏);**2026-08-30 三连(049 图表候选化[列角色画像+suggest_charts
@@ -64,7 +78,8 @@
 - 工作区/提交状态以 `git status` 与 `git log` 为唯一事实源
   (规约:文档不写提交哈希、不谈提交形态)。
 - **开放挂账=零**(backlog-settlement 终态化裁决,见「挂账终态」节)。
-- 下一棒:按需新域,无既定排期项。
+- 下一棒:054 CI 绿后归档;053 影子达标后切主;可选做 059 MemoryPage
+  槽位编辑 UI;其余按需新域,无既定排期项。
 
 ## 新会话开工指引
 
@@ -239,6 +254,14 @@ zhparser、知识库团队归属(出处 032①)。
   变号,每月固定日期必挂;用固定回退天数±半日)。
 - ruff noqa 对多行隐式字符串拼接须挂块首物理行。
 - 改 api 后契约必须重生成并提交;运行时与入库 openapi 逐对象比对防漂移。
+- **asyncpg 读 json/jsonb 常回 str**(system.parse_json_agg 先例):text()
+  裸读必须归一化解码,`isinstance(dict)` 直接丢会静默读成空(056/059
+  评审实证 prefs/skillpack content 双双中招)。
+- **禁用不删指标 + 启用前同名冲突检测 ⇒ 重启用自冲突**:冲突判定须按
+  「同名且定义一致=幂等放行」,否则第一次启用成功、第二次永远 409
+  (056 skillpack metrics 实证)。
+- **任务勾选 ≠ 代码落地**:059 的注入通道/显式路由曾全勾但 `preference_hint`
+  零调用方、extract 仍吐自由文本——收口验收必须跑通链路,不能只看 tasks。
 
 LLM/异步/协议:
 - 工具回调通道 status 恒 executed,**业务 verdict 在 result 内**(去重/

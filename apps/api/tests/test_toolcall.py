@@ -362,6 +362,33 @@ async def test_validate_sql_handler(
     assert bad.json()["status"] == "rejected"
 
 
+async def test_compute_handlers_pure_math(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """057:compute_delta/compute_share 控制面纯计算 handler(工作流等通道)。"""
+    uid = await _user_with_tools(session, make_user, "tc_compute", ["tool:compute"])
+    ok = await client.post(
+        "/internal/tool/execute",
+        headers=INTERNAL,
+        json=_req("compute_delta", {"base": 80, "target": 100}, user_id=uid),
+    )
+    assert ok.json()["status"] == "executed"
+    assert ok.json()["result"]["delta_pct"] == 25.0
+    share = await client.post(
+        "/internal/tool/execute",
+        headers=INTERNAL,
+        json=_req("compute_share", {"part": 25, "total": 100}, user_id=uid),
+    )
+    assert share.json()["status"] == "executed"
+    assert share.json()["result"]["share_pct"] == 25.0
+    zero = await client.post(
+        "/internal/tool/execute",
+        headers=INTERNAL,
+        json=_req("compute_delta", {"base": 0, "target": 1}, user_id=uid),
+    )
+    assert zero.json()["result"]["status"] == "error"
+
+
 async def test_execute_sql_handler_pass(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
@@ -682,6 +709,7 @@ async def test_tools_list_admin(
     tools = r.json()["tools"]
     names = {t["name"] for t in tools}
     assert {"validate_sql", "execute_sql", "rag_retrieve", "create_system_announcement"} <= names
+    assert {"compute_delta", "compute_share"} <= names  # 057
     ann = next(t for t in tools if t["name"] == "create_system_announcement")
     assert ann["write"] is True and ann["require_confirm"] is True
     assert ann["perm_code"] == "tool:announcement:create"

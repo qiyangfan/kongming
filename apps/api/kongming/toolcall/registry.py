@@ -110,6 +110,46 @@ REGISTRY: dict[str, ToolDef] = {
         write=False,
         require_confirm=False,
     ),
+    # 057 numeric-grounding:确定性派生量(禁 LLM 心算);Agent 面本地执行并
+    # 校验入参 ∈ 本轮数值白名单;控制面 handler 供工作流等通道复用同公式
+    "compute_delta": ToolDef(
+        name="compute_delta",
+        description=(
+            "计算增幅百分比 (target-base)/|base|*100。入参必须是本轮查询结果"
+            "或统计中已出现的数字;返回 delta_pct 与入参快照,结果可写入结论"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "base": {"type": "number", "description": "基期数值(须来自结果/统计)"},
+                "target": {"type": "number", "description": "本期数值(须来自结果/统计)"},
+            },
+            "required": ["base", "target"],
+            "additionalProperties": False,
+        },
+        perm_code="tool:compute",
+        write=False,
+        require_confirm=False,
+    ),
+    "compute_share": ToolDef(
+        name="compute_share",
+        description=(
+            "计算占比 part/total(返回小数 share 与 share_pct)。入参必须是本轮"
+            "查询结果或统计中已出现的数字;结果可写入结论"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "part": {"type": "number", "description": "部分值(须来自结果/统计)"},
+                "total": {"type": "number", "description": "总体值(须来自结果/统计)"},
+            },
+            "required": ["part", "total"],
+            "additionalProperties": False,
+        },
+        perm_code="tool:compute",
+        write=False,
+        require_confirm=False,
+    ),
 }
 
 

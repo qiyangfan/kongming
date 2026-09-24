@@ -62,6 +62,10 @@ PERMISSIONS: list[tuple[str, str, int]] = [
     # 034 billing:开发者门户(自助门面)+ 计费管理面(仅超管)
     ("developer:portal", "开发者门户", 27),
     ("system:billing:manage", "计费管理", 28),
+    # 057 numeric-grounding:确定性派生量计算(只读纯函数;进 DEVELOPER 推荐集)
+    ("tool:compute", "工具-数值计算", 29),
+    # 056 skill-pack:垂类内容包管理面(仅 SUPER_ADMIN)
+    ("system:skill:manage", "Skill包管理", 30),
 ]
 
 ROLES: list[tuple[str, str, str, str, int]] = [
@@ -80,6 +84,8 @@ ROLE_RECOMMENDED_PERMS: dict[str, list[str]] = {
         "tool:sql:validate",
         "tool:sql:execute",
         "tool:rag:retrieve",
+        # 057:确定性派生量计算(只读,与 SQL 只读三件套同哲学)
+        "tool:compute",
         # 029:工作流执行(节点级防御逐层复校)
         "workflow:execute",
         # 033:商店消费面(与 chat:execute 同哲学)

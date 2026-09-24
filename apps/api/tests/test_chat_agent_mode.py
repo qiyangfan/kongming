@@ -145,9 +145,15 @@ async def test_react_injects_authorized_tools(
     tools_any = fake_agent["agent"].calls[0]["react_tools"]
     tools = cast("list[dict[str, Any]]", tools_any)
     # isinstance 守卫保持在原始对象上(运行时语义不变)
-    assert isinstance(tools_any, list) and len(tools) == 3  # DEVELOPER 只读三件套
+    assert isinstance(tools_any, list) and len(tools) == 5  # DEVELOPER 只读三件套+057 compute 两件
     names = {t["name"] for t in tools}
-    assert names == {"validate_sql", "execute_sql", "rag_retrieve"}
+    assert names == {
+        "validate_sql",
+        "execute_sql",
+        "rag_retrieve",
+        "compute_delta",
+        "compute_share",
+    }
     # 注入 schema 形态:name/description/parameters/write/require_confirm
     for t in tools:
         assert t["description"] and t["parameters"]["type"] == "object"
@@ -251,5 +257,5 @@ async def test_react_stream_tool_call_frames(
     # cast 仅定型,收窄后的成员访问不再带 Unknown(运行时不变)
     assert (
         isinstance(stream_kw["react_tools"], list)
-        and len(cast("list[object]", stream_kw["react_tools"])) == 3
+        and len(cast("list[object]", stream_kw["react_tools"])) == 5  # 三件套+compute 两件
     )

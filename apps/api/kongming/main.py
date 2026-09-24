@@ -46,6 +46,7 @@ from kongming.rag.router import doc_router as rag_doc_router
 from kongming.rag.router import internal_router as rag_internal_router
 from kongming.rag.router import router as rag_router
 from kongming.semantic.router import router as semantic_router
+from kongming.skillpack.router import router as skillpack_router
 from kongming.store.router import router as store_router
 from kongming.system.router import register_system_error_handlers
 from kongming.system.router import router as system_router
@@ -251,6 +252,7 @@ app.include_router(guardrail_router)
 app.include_router(llmusage_internal_router)
 app.include_router(llmusage_router)
 app.include_router(memory_router)
+app.include_router(skillpack_router)
 app.include_router(bot_router)
 app.include_router(bot_public_router)
 app.include_router(semantic_router)

@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.repository import SqlOperLogRepo
@@ -28,6 +28,7 @@ from kongming.redis_client import get_redis
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/memory", tags=["memory"])
+
 
 
 def _get_service(
@@ -72,6 +73,58 @@ class MemoryItemOut(BaseModel):
     last_hit_at: str | None
     created_at: str
     team_id: str | None = None  # 036⑥:归属回传(None=个人;契约纯增)
+    kind: str = "memory"  # 059:列表分组(kind=category;契约纯增)
+    legacy: bool = False  # 059:true=停写前 IMPLICIT 自由文本
+
+
+class PrefsIn(BaseModel):
+    # 059 闭合 schema:未知键 422(与 put_prefs.reject_unknown_keys 同语义)
+    model_config = ConfigDict(extra="forbid")
+
+    preferred_datasource: str | None = None
+    default_time_range: str | None = None
+    metric_aliases: list[str] | None = None
+    chart_pref: str | None = None
+    language: str | None = None
+    timezone: str | None = None
+    display_style: str | None = None
+
+
+class PrefsOut(BaseModel):
+    prefs: dict[str, object]
+
+
+@router.get("/prefs", response_model=PrefsOut)
+async def get_memory_prefs(
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Annotated[MemoryService, Depends(_get_service)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> PrefsOut:
+    """059:读取本人闭合偏好槽位。"""
+    from kongming.memory.prefs import SLOT_KEYS
+
+    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    prefs = await svc.get_prefs(user_id=str(user["sub"]), tenant_id=tid)
+    return PrefsOut(prefs={k: prefs[k] for k in SLOT_KEYS if k in prefs})
+
+
+@router.put("/prefs", response_model=PrefsOut)
+async def put_memory_prefs(
+    body: PrefsIn,
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Annotated[MemoryService, Depends(_get_service)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> PrefsOut:
+    """059:覆盖更新闭合槽位;未知键拒绝(闭合 schema)。"""
+    raw = {k: v for k, v in body.model_dump().items() if v is not None}
+    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    try:
+        prefs = await svc.put_prefs(user_id=str(user["sub"]), tenant_id=tid, raw=raw)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    return PrefsOut(prefs=prefs)
 
 
 class MemoryListOut(BaseModel):
@@ -81,16 +134,19 @@ class MemoryListOut(BaseModel):
 def _item(r: dict[str, object]) -> MemoryItemOut:
     last_hit = r["last_hit_at"]
     created = r["created_at"]
+    category = str(r["category"])
     return MemoryItemOut(
         id=str(r["id"]),
         content=str(r["content"]),
-        category=str(r["category"]),
+        category=category,
         confidence=float(str(r["confidence"])),
         source=str(r["source"]),
         dormant=bool(r["dormant"]),
         last_hit_at=last_hit.isoformat() if isinstance(last_hit, datetime) else None,
         created_at=created.isoformat() if isinstance(created, datetime) else str(created),
         team_id=str(r["team_id"]) if r.get("team_id") else None,  # 036⑥
+        kind=category,
+        legacy=str(r.get("source") or "").upper() == "IMPLICIT",
     )
 
 
@@ -128,6 +184,8 @@ async def create_memory(
             tenant_id=tid,
             content=body.content,
             team_id=body.team_id,
+            # 管理端显式建条目:不走槽位分流(否则条目从列表消失)
+            route_slot=False,
         )
         await session.commit()
     except SensitiveContentRejected:

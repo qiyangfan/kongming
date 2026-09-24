@@ -31,6 +31,9 @@ class ReactState(TypedDict, total=False):
     executed_sigs: NotRequired[list[str]]  # 重复熔断:已成功调用的 工具|参数 签名集
     final_answer: NotRequired[str]  # LLM 最终文本答案
     error: NotRequired[str]  # 轮次上限触顶等终态错误
+    compute_values: NotRequired[list[float]]  # 057:本轮计算工具返回值(入白名单)
+    numeric_whitelist: NotRequired[list[float]]  # 057:本轮数值白名单(compute 入参校验)
+    todos: NotRequired[list[dict[str, str]]]  # 058:多步目标账本(仅 Agent 内部)
     # finalize 终态键(与 8 节点图 AgentState 同名字段同构,_build_query_out 直读)
     execution: NotRequired[ExecutionResult]
     summary: NotRequired[str]

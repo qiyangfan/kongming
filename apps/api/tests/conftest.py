@@ -221,7 +221,6 @@ def fake_provider(
     走通 start→callback 全链路。NormalizedProfile 仅类型引用,运行时走惰性导入。
     """
     from kongming.auth import providers
-    from kongming.auth.models import NormalizedProfile
 
     def _install(key: str, profile: NormalizedProfile) -> None:
         class _Fake:

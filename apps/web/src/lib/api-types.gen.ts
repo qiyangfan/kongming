@@ -1241,6 +1241,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/prefs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Memory Prefs
+         * @description 059:读取本人闭合偏好槽位。
+         */
+        get: operations["get_memory_prefs_memory_prefs_get"];
+        /**
+         * Put Memory Prefs
+         * @description 059:覆盖更新闭合槽位;未知键拒绝(闭合 schema)。
+         */
+        put: operations["put_memory_prefs_memory_prefs_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory": {
         parameters: {
             query?: never;
@@ -1292,6 +1316,75 @@ export interface paths {
         get: operations["export_memory_memory_export_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/skill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Packs */
+        get: operations["list_packs_system_skill_get"];
+        put?: never;
+        /** Create Pack */
+        post: operations["create_pack_system_skill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/skill/{pack_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Pack */
+        get: operations["get_pack_system_skill__pack_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/skill/{pack_id}/retire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retire Pack */
+        post: operations["retire_pack_system_skill__pack_id__retire_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/skill/{pack_id}/bind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bind Pack */
+        post: operations["bind_pack_system_skill__pack_id__bind_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2620,6 +2713,13 @@ export interface components {
             /** Size Bytes */
             size_bytes: number;
         };
+        /** BindIn */
+        BindIn: {
+            /** Datasource Key */
+            datasource_key: string;
+            /** Enabled */
+            enabled: boolean;
+        };
         /** BindPlanIn */
         BindPlanIn: {
             /** Tenant Id */
@@ -3710,6 +3810,16 @@ export interface components {
             created_at: string;
             /** Team Id */
             team_id?: string | null;
+            /**
+             * Kind
+             * @default memory
+             */
+            kind: string;
+            /**
+             * Legacy
+             * @default false
+             */
+            legacy: boolean;
         };
         /** MemoryListOut */
         MemoryListOut: {
@@ -3918,6 +4028,89 @@ export interface components {
             /** Trend */
             trend: components["schemas"]["TrendItemOut"][];
         };
+        /** PackCreateIn */
+        PackCreateIn: {
+            /** Pack Key */
+            pack_key: string;
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Glossary
+             * @default []
+             */
+            glossary: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Fewshots
+             * @default []
+             */
+            fewshots: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Persona
+             * @default
+             */
+            persona: string;
+            /**
+             * Metrics
+             * @default []
+             */
+            metrics: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** PackDetailOut */
+        PackDetailOut: {
+            /** Id */
+            id: string;
+            /** Pack Key */
+            pack_key: string;
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+            /** Description */
+            description: string;
+            /** Status */
+            status: string;
+            /** Content */
+            content: {
+                [key: string]: unknown;
+            };
+            /** Bindings */
+            bindings: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** PackListOut */
+        PackListOut: {
+            /** Items */
+            items: components["schemas"]["PackOut"][];
+        };
+        /** PackOut */
+        PackOut: {
+            /** Id */
+            id: string;
+            /** Pack Key */
+            pack_key: string;
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+            /** Description */
+            description: string;
+            /** Status */
+            status: string;
+        };
         /** PaymentOut */
         PaymentOut: {
             /** Id */
@@ -4107,6 +4300,30 @@ export interface components {
             policies: components["schemas"]["PolicyOut"][];
             plan?: components["schemas"]["PlanOut"] | null;
         };
+        /** PrefsIn */
+        PrefsIn: {
+            /** Preferred Datasource */
+            preferred_datasource?: string | null;
+            /** Default Time Range */
+            default_time_range?: string | null;
+            /** Metric Aliases */
+            metric_aliases?: string[] | null;
+            /** Chart Pref */
+            chart_pref?: string | null;
+            /** Language */
+            language?: string | null;
+            /** Timezone */
+            timezone?: string | null;
+            /** Display Style */
+            display_style?: string | null;
+        };
+        /** PrefsOut */
+        PrefsOut: {
+            /** Prefs */
+            prefs: {
+                [key: string]: unknown;
+            };
+        };
         /** ProviderOption */
         ProviderOption: {
             /** Provider */
@@ -4274,6 +4491,21 @@ export interface components {
             doc_hints: {
                 [key: string]: string;
             }[];
+            /**
+             * Skill Terms
+             * @default
+             */
+            skill_terms: string;
+            /**
+             * Skill Examples
+             * @default
+             */
+            skill_examples: string;
+            /**
+             * Skill Persona
+             * @default
+             */
+            skill_persona: string;
         };
         /** RoleCreateIn */
         RoleCreateIn: {
@@ -8051,6 +8283,72 @@ export interface operations {
             };
         };
     };
+    get_memory_prefs_memory_prefs_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrefsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_memory_prefs_memory_prefs_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrefsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrefsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_memory_memory_get: {
         parameters: {
             query?: never;
@@ -8206,6 +8504,173 @@ export interface operations {
                         [key: string]: unknown;
                     }[];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_packs_system_skill_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_pack_system_skill_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PackCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_pack_system_skill__pack_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                pack_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retire_pack_system_skill__pack_id__retire_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                pack_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bind_pack_system_skill__pack_id__bind_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                pack_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

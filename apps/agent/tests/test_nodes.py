@@ -659,6 +659,34 @@ async def test_summarize_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cast("dict[str, object]", out["stats"])["qty_max"] == 30
 
 
+async def test_summarize_strips_unwhitelisted_growth_rate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """057:心算派生量句剥离;合法白名单句保留;stats 不动。"""
+    answer = '{"summary":"由 80 变为 100。环比增长 25%。","insights":[]}'
+    _install(monkeypatch, FakeLlm([answer]), FakeApi())
+    exe = ExecutionResult(verdict="PASS", columns=["y", "v"], rows=[[2023, 80], [2024, 100]])
+    out = await nodes.summarize(_state(execution=exe))
+    summary = str(out["summary"])
+    assert "25%" not in summary
+    assert "80" in summary or "100" in summary
+    stats = cast("dict[str, object]", out["stats"])
+    assert stats["rows"] == 2
+
+
+async def test_summarize_allows_computed_growth_rate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """057:计算工具返回值入白名单后允许写增长率。"""
+    answer = '{"summary":"增长 25%。","insights":[]}'
+    _install(monkeypatch, FakeLlm([answer]), FakeApi())
+    exe = ExecutionResult(verdict="PASS", columns=["v"], rows=[[80], [100]])
+    state = _state(execution=exe)
+    state["compute_values"] = [25.0]
+    out = await nodes.summarize(state)
+    assert out["summary"] == "增长 25%。"
+
+
 async def test_summarize_context_grounded_with_stats(monkeypatch: pytest.MonkeyPatch) -> None:
     """018:喂给 LLM 的上下文含总行数+本地统计+前5行(摘要数值接地)。"""
     fake = FakeLlm(['{"summary":"x"}'])

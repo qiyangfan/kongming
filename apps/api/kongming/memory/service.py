@@ -6,6 +6,7 @@
 import logging
 from typing import Protocol
 
+from kongming.memory import prefs as prefs_mod
 from kongming.memory.models import contains_sensitive, extract_explicit_intent
 from kongming.memory.ports import Embedder, MemoryOperLogger, MemoryRepo
 
@@ -66,7 +67,11 @@ class MemoryService:
             return ""
         if not rows:
             return ""
-        lines = [f"- {r['content']}" for r in rows]
+        lines: list[str] = []
+        for r in rows:
+            # 059:NOTE 标注段(显式自由文本),与偏好/事实可区分
+            mark = "[note] " if str(r.get("category") or "").lower() == "note" else ""
+            lines.append(f"- {mark}{r['content']}")
         return "关于这位用户的已知信息:\n" + "\n".join(lines)
 
     async def explicit_intent(self, question: str) -> str | None:
@@ -80,9 +85,13 @@ class MemoryService:
         tenant_id: str,
         content: str,
         team_id: str | None = None,  # 032:团队记忆(成员校验在 router)
+        route_slot: bool = True,
     ) -> None:
         """显式形成:敏感拒落;embedding 失败降级无向量(可后续编辑补)。
-        032:team_id 非空=团队记忆(隐式提取维持仅个人,team_id NULL)。"""
+        032:team_id 非空=团队记忆(隐式提取维持仅个人,team_id NULL)。
+        059:route_slot=True(聊天「记住…」短路)时槽位语义写 user_prefs、
+        其余落 NOTE;管理端 POST /memory 传 False——用户显式建记忆条目,
+        不得被槽位分流吞掉而从列表消失。"""
         if contains_sensitive(content):
             await self._oper.add(
                 user_id=user_id,
@@ -93,12 +102,23 @@ class MemoryService:
             # 拒绝日志先落库再抛(组合根同会话:不 commit 会被异常回滚带走)
             await self._repo.commit()
             raise SensitiveContentRejected(content[:50])
+        category = "general"
+        if route_slot:
+            slot_hit = prefs_mod.parse_explicit_slot(content)
+            if slot_hit is not None:
+                key, val = slot_hit
+                ok = await self.apply_implicit_patch(
+                    user_id=user_id, tenant_id=tenant_id, raw={key: val}
+                )
+                if ok:
+                    return
+            category = "note"
         vector = await self._embed_quietly([content])
         await self._repo.insert(
             user_id=user_id,
             tenant_id=tenant_id,
             content=content,
-            category="general",
+            category=category,
             confidence=1.0,
             source="EXPLICIT",
             vector=vector,
@@ -110,38 +130,43 @@ class MemoryService:
         await self._repo.commit()  # R1-H1:operlog 同事务落库(add 后必 commit)
 
     async def form_implicit(
-        self, *, user_id: str, tenant_id: str, candidates: list[dict[str, str]]
+        self, *, user_id: str, tenant_id: str, candidates: list[dict[str, object]]
     ) -> int:
-        """隐式落库(后台任务):逐条敏感检测+去重;返回落库条数。"""
-        saved = 0
+        """059:隐式只写槽位 patch,不再落自由文本 user_memory。
+
+        停止 IMPLICIT 自由文本(脏记忆比无记忆更伤);候选按槽位 patch
+        合并进 user_prefs;空 patch 不落库。返回写入槽位数。
+        """
+        raw: dict[str, object] = {}
         for c in candidates[:3]:
-            content = (c.get("content") or "").strip()[:500]
-            if not content or contains_sensitive(content):
-                continue
-            if await self._repo.exists_identical(
-                user_id=user_id, tenant_id=tenant_id, content=content
-            ):
-                continue
-            vector = await self._embed_quietly([content])
-            await self._repo.insert(
-                user_id=user_id,
-                tenant_id=tenant_id,
-                content=content,
-                category=(c.get("category") or "general")[:32],
-                confidence=0.5,
-                source="IMPLICIT",
-                vector=vector,
-            )
-            saved += 1
-        if saved:
-            await self._oper.add(
-                user_id=user_id,
-                action="memory.create",
-                target=None,
-                detail={"source": "IMPLICIT", "count": saved},
-            )
-            await self._repo.commit()  # R1-H1
-        return saved
+            for k, v in c.items():
+                if k in prefs_mod.SLOT_KEYS and v not in (None, ""):
+                    if isinstance(v, str) and contains_sensitive(v):
+                        continue
+                    if isinstance(v, list) and any(
+                        contains_sensitive(str(x)) for x in v if x is not None
+                    ):
+                        continue
+                    raw[k] = v
+            # 兼容抽取结果以 content 承载槽位 JSON 的形态
+            content = str(c.get("content") or "").strip()
+            if content.startswith("{") and content.endswith("}"):
+                import json as _json
+
+                try:
+                    obj = _json.loads(content)
+                except Exception:
+                    obj = {}
+                if isinstance(obj, dict):
+                    for k, v in obj.items():
+                        if k in prefs_mod.SLOT_KEYS and v not in (None, ""):
+                            if isinstance(v, str) and contains_sensitive(v):
+                                continue
+                            raw[k] = v
+        ok = await self.apply_implicit_patch(
+            user_id=user_id, tenant_id=tenant_id, raw=raw
+        )
+        return 1 if ok else 0
 
     # ── 自管理(数据主权=本人本租户) ──
 
@@ -181,3 +206,60 @@ class MemoryService:
             raise MemoryNotFound(memory_id)
         await self._oper.add(user_id=user_id, action="memory.delete", target=memory_id, detail={})
         await self._repo.commit()  # R1-H1
+
+
+    # ── 059 user_prefs 闭合偏好槽位 ──
+
+    async def get_prefs(self, *, user_id: str, tenant_id: str) -> dict[str, object]:
+        return await self._repo.get_prefs(user_id=user_id, tenant_id=tenant_id)
+
+    async def put_prefs(
+        self, *, user_id: str, tenant_id: str, raw: dict[str, object]
+    ) -> dict[str, object]:
+        err = prefs_mod.reject_unknown_keys(raw)
+        if err:
+            raise ValueError(err)
+        patch = prefs_mod.normalize_patch(raw)
+        current = await self._repo.get_prefs(user_id=user_id, tenant_id=tenant_id)
+        merged = prefs_mod.merge_prefs(current, patch.values)
+        await self._repo.upsert_prefs(
+            user_id=user_id, tenant_id=tenant_id, prefs=merged
+        )
+        await self._oper.add(
+            user_id=user_id,
+            action="memory.prefs.update",
+            target=None,
+            detail={"keys": sorted(patch.values.keys())},
+        )
+        await self._repo.commit()
+        return merged
+
+    async def apply_implicit_patch(
+        self, *, user_id: str, tenant_id: str, raw: dict[str, object]
+    ) -> bool:
+        """隐式抽取只写槽位 patch;空 patch 不落库。"""
+        patch = prefs_mod.extract_slot_patch_from_implicit(raw)
+        if patch.is_empty():
+            return False
+        current = await self._repo.get_prefs(user_id=user_id, tenant_id=tenant_id)
+        merged = prefs_mod.merge_prefs(current, patch.values)
+        await self._repo.upsert_prefs(
+            user_id=user_id, tenant_id=tenant_id, prefs=merged
+        )
+        await self._oper.add(
+            user_id=user_id,
+            action="memory.prefs.implicit",
+            target=None,
+            detail={"keys": sorted(patch.values.keys())},
+        )
+        await self._repo.commit()
+        return True
+
+    async def preference_hint(self, *, user_id: str, tenant_id: str) -> str:
+        """059:偏好注入段(可忽略/不约束数据范围);失败降级空串。"""
+        try:
+            prefs = await self._repo.get_prefs(user_id=user_id, tenant_id=tenant_id)
+            return prefs_mod.build_preference_hint(prefs)
+        except Exception:
+            log.warning("偏好注入组装失败(降级无注入)", exc_info=True)
+            return ""

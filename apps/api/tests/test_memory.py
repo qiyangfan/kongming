@@ -265,11 +265,10 @@ async def test_implicit_form_dedup_and_sensitive(
             {"content": "密码 abc123 手机 13812345678"},  # 敏感
         ],
     )
-    assert saved == 1
+    # 059:隐式只写槽位 patch,自由文本候选不再是落库单位
+    assert saved == 0
     rows = await svc.list_mine(user_id=uid, tenant_id=tid)
-    assert len(rows) == 1
-    assert rows[0]["source"] == "IMPLICIT"
-    assert float(cast("float", rows[0]["confidence"])) == 0.5
+    assert rows == []  # 停止 IMPLICIT 自由文本落库
 
 
 # ============ R1-L1:召回核心路径直证(预置向量字面量) ============

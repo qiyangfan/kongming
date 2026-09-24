@@ -4,6 +4,7 @@
 chat 404 同形(不存在/越权不区分)。
 """
 
+import json
 import logging
 from typing import Any
 
@@ -206,3 +207,50 @@ class SqlMemoryRepo:
             )
         ).scalar_one_or_none()
         return hit is not None
+
+
+    # ── 059 user_prefs 闭合偏好槽位 ──
+
+    async def get_prefs(self, *, user_id: str, tenant_id: str) -> dict[str, object]:
+        row = (
+            await self._s.execute(
+                text(
+                    "SELECT prefs FROM public.user_prefs"
+                    " WHERE user_id=:u AND tenant_id=:t"
+                ),
+                {"u": user_id, "t": tenant_id},
+            )
+        ).scalar_one_or_none()
+        if isinstance(row, dict):
+            return row
+        # asyncpg 对 json/jsonb 常返回 str(与 system.parse_json_agg 同口径);
+        # 直接丢弃会导致偏好永远读成空,必须归一化
+        if isinstance(row, (str, bytes)):
+            try:
+                obj = json.loads(row)
+            except (TypeError, ValueError):
+                return {}
+            return dict(obj) if isinstance(obj, dict) else {}
+        return {}
+
+    async def upsert_prefs(
+        self, *, user_id: str, tenant_id: str, prefs: dict[str, object]
+    ) -> dict[str, object]:
+        await self._s.execute(
+            text(
+                """
+                INSERT INTO public.user_prefs
+                  (id, user_id, tenant_id, prefs, updated_at, created_at)
+                VALUES (:i, :u, :t, CAST(:p AS jsonb), now(), now())
+                ON CONFLICT (user_id, tenant_id)
+                DO UPDATE SET prefs = CAST(:p AS jsonb), updated_at = now()
+                """
+            ),
+            {
+                "i": str(uuid7()),
+                "u": user_id,
+                "t": tenant_id,
+                "p": json.dumps(prefs, ensure_ascii=False),
+            },
+        )
+        return prefs

@@ -329,8 +329,8 @@ class AgentClient:
             return []  # 畸形报文 fail-closed(契约:失败返回空,不向模型校验路径抛)
         return [str(m) for m in cast(list[object], models)]
 
-    async def extract_memory(self, *, question: str, answer: str) -> list[dict[str, str]]:
-        """隐式记忆提取(022):agent /internal/extract-memory 回调;
+    async def extract_memory(self, *, question: str, answer: str) -> list[dict[str, object]]:
+        """隐式偏好提取(059):agent /internal/extract-memory 回调槽位 patch;
         任何失败收敛空列表(后台任务静默跳过)。"""
         try:
             async with httpx.AsyncClient(
@@ -356,11 +356,17 @@ class AgentClient:
         items: object = data.get("memories") or []  # 注解 object:裸 or [] 产物 Unknown
         if not isinstance(items, list):
             return []  # 畸形报文静默收敛(契约:任何失败返回空,永不抛)
-        return [
-            {"content": str(entry["content"]), "category": str(entry.get("category") or "general")}
-            for item in cast(list[object], items)
-            if (entry := _obj_dict(item)) is not None and isinstance(entry.get("content"), str)
-        ]
+        out: list[dict[str, object]] = []
+        for item in cast(list[object], items):
+            entry = _obj_dict(item)
+            if entry is None:
+                continue
+            kept = {
+                str(k): v for k, v in entry.items() if v is not None and v != "" and v != []
+            }
+            if kept:
+                out.append(kept)
+        return out
 
     async def rewrite_title(self, *, question: str) -> str | None:
         """会话标题改写(010):后台任务兜底语义——任何失败(不可达/非 200/降级

@@ -192,7 +192,8 @@ class ExtractMemoryIn(BaseModel):
 
 
 class ExtractMemoryOut(BaseModel):
-    memories: list[dict[str, str]] = []  # [{content, category}] ≤3;空=无值得记忆
+    # 059:槽位 patch 形态 [{preferred_datasource:"…"}];metric_aliases 可为数组
+    memories: list[dict[str, object]] = []  # ≤3;空=无值得写入槽位
 
 
 @app.get("/internal/models", tags=["internal"])
@@ -218,22 +219,20 @@ async def extract_memory_endpoint(req: ExtractMemoryIn) -> ExtractMemoryOut:
     except LlmError:
         return ExtractMemoryOut()
     parsed = parse_summary_json(raw)
-    out: list[dict[str, str]] = []
+    out: list[dict[str, object]] = []
     memories_raw = parsed.get("memories")
     # isinstance 收窄产物元素型仍 Unknown,守卫后 cast 再用(判定序不变)
     for item in cast("list[object]", memories_raw if isinstance(memories_raw, list) else []):
         typed = cast("dict[str, object]", item) if isinstance(item, dict) else None
-        if (
-            typed is not None
-            and isinstance(typed.get("content"), str)
-            and cast("str", typed["content"]).strip()
-        ):
-            out.append(
-                {
-                    "content": cast("str", typed["content"]).strip()[:500],
-                    "category": str(typed.get("category") or "general")[:32],
-                }
-            )
+        if typed is None:
+            continue
+        kept = {
+            str(k): v
+            for k, v in typed.items()
+            if v is not None and v != "" and v != []
+        }
+        if kept:
+            out.append(kept)
     return ExtractMemoryOut(memories=out[:3])
 
 

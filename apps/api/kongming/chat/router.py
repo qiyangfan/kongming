@@ -216,6 +216,21 @@ class _MemoryAdapter:
             )
             return await svc.recall_hint(user_id=user_id, tenant_id=tenant_id, question=question)
 
+    async def preference_hint(self, *, user_id: str, tenant_id: str) -> str:
+        from kongming.memory.repository import SqlMemoryRepo
+        from kongming.memory.service import MemoryService
+        from kongming.rag.agent_callback import get_agent_rag_client
+        from kongming.redis_client import get_redis
+
+        async with get_sessionmaker()() as s:
+            svc = MemoryService(
+                SqlMemoryRepo(s),
+                get_agent_rag_client(get_redis()),
+                SqlOperLogRepo(s),
+                _TeamRolesAdapter(),
+            )
+            return await svc.preference_hint(user_id=user_id, tenant_id=tenant_id)
+
     async def explicit_intent(self, question: str) -> str | None:
         from kongming.memory.models import extract_explicit_intent
 
@@ -241,7 +256,7 @@ class _MemoryAdapter:
         return True
 
     async def form_implicit(
-        self, *, user_id: str, tenant_id: str, candidates: list[dict[str, str]]
+        self, *, user_id: str, tenant_id: str, candidates: list[dict[str, object]]
     ) -> int:
         from kongming.memory.repository import SqlMemoryRepo
         from kongming.memory.service import MemoryService

@@ -108,6 +108,15 @@ def test_summarize_factuality_rules() -> None:
     )
 
 
+def test_summarize_numeric_grounding_rules() -> None:
+    """057:白名单/派生量禁心算/trend 门槛已入 SUMMARIZE_SYSTEM,例外清单已登记。"""
+    assert "只写白名单数字" in prompts.SUMMARIZE_SYSTEM
+    assert "派生量不得心算写入" in prompts.SUMMARIZE_SYSTEM
+    assert "宁省略，不编造" in prompts.SUMMARIZE_SYSTEM
+    assert "type=trend 仅在结果不少于 3 期" in prompts.SUMMARIZE_SYSTEM
+    assert "057 numeric-grounding" in (prompts.__doc__ or "")
+
+
 def test_summarize_alias_alignment_rules() -> None:
     """037 称谓对齐规则在位,且与 018 事实性规则共存(互锁不互斥)。"""
     assert "称谓对齐规则：提及数据实体时必须使用业务称谓别名(alias)" in (prompts.SUMMARIZE_SYSTEM)

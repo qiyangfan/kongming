@@ -46,9 +46,13 @@ class AgentState(TypedDict, total=False):
     summary: NotRequired[str]
     insights: NotRequired[list[dict[str, str]]]
     stats: NotRequired[dict[str, object]]
+    compute_values: NotRequired[list[float]]  # 057:本轮计算工具返回值(入白名单)
     end_reason: NotRequired[str]  # 终态分类(blocked 等)
     memory_hint: NotRequired[str]  # 022:召回的用户已知信息段(控制面注入)
     relations_hint: NotRequired[str]  # 023:召回集合内 JOIN path 段
     metric_hints: NotRequired[str]  # 023:命中指标口径段
+    skill_terms: NotRequired[str]  # 056:Skill Pack 术语段
+    skill_examples: NotRequired[str]  # 056:黄金示例段(禁令前缀)
+    skill_persona: NotRequired[str]  # 056:人设段
     doc_hints: NotRequired[list[dict[str, str]]]  # 024:文档段(source_ref+content)
     has_attachments: NotRequired[bool]  # 036④:本轮含图片附件(直答分流信号)

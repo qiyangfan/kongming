@@ -11,7 +11,7 @@ import logging
 import re
 from typing import cast
 
-from kongming_agent import deps, sqlguard
+from kongming_agent import deps, numeric, sqlguard
 from kongming_agent.apiclient import SchemaMeta
 from kongming_agent.graph.prompts import (
     SQL_GEN_SYSTEM,
@@ -118,6 +118,9 @@ async def retrieve(state: AgentState) -> dict[str, object]:
             "relations_hint": ctx.relations_hint,
             "metric_hints": ctx.metric_hints,
             "doc_hints": doc_hints,
+            "skill_terms": ctx.skill_terms,
+            "skill_examples": ctx.skill_examples,
+            "skill_persona": ctx.skill_persona,
         }
     # 回退:005 过渡形态(实时内省)——新租户/未抓取知识/召回服务失败零质量回归。
     meta = await deps.get_api().fetch_schema(
@@ -134,6 +137,9 @@ async def retrieve(state: AgentState) -> dict[str, object]:
             out0["relations_hint"] = ctx.relations_hint
             out0["metric_hints"] = ctx.metric_hints
             out0["doc_hints"] = list(ctx.doc_hints)
+            out0["skill_terms"] = ctx.skill_terms
+            out0["skill_examples"] = ctx.skill_examples
+            out0["skill_persona"] = ctx.skill_persona
         return out0
     out: dict[str, object] = {
         "schema_hint": format_schema_hint(meta),
@@ -145,6 +151,9 @@ async def retrieve(state: AgentState) -> dict[str, object]:
         out["relations_hint"] = ctx.relations_hint
         out["metric_hints"] = ctx.metric_hints
         out["doc_hints"] = list(ctx.doc_hints)
+        out["skill_terms"] = ctx.skill_terms
+        out["skill_examples"] = ctx.skill_examples
+        out["skill_persona"] = ctx.skill_persona
     return out
 
 
@@ -215,6 +224,13 @@ async def generate(state: AgentState) -> dict[str, object]:
     # 高于表说明内嵌示例(强 few-shot);系统模板资产零改动,只动 user 拼接。
     history_sql = (state.get("history_sql") or "").strip()
     history_part = f"\n\n参考历史成功 SQL：\n{history_sql}" if history_sql else ""
+    # 056 skill-pack 三段(可空;零段零痕迹零回归)
+    skill_terms = (state.get("skill_terms") or "").strip()
+    skill_examples = (state.get("skill_examples") or "").strip()
+    _st = f"业务术语参考：\n{skill_terms}" if skill_terms else ""
+    _se = f"问法示例：\n{skill_examples}" if skill_examples else ""
+    _skill = "\n\n".join(x for x in (_st, _se) if x)
+    skill_part = f"\n\n{_skill}" if _skill else ""
     extra = ""
     error = state.get("error") or ""
     if error:
@@ -226,7 +242,7 @@ async def generate(state: AgentState) -> dict[str, object]:
             extra += guidance
     user = (
         f"问题：{question}\n\n{memory_part}可用表结构：\n"
-        f"{schema_hint}{semantic_part}{history_part}{extra}\n\n生成 SQL："
+        f"{schema_hint}{semantic_part}{skill_part}{history_part}{extra}\n\n生成 SQL："
     )
     sql = await deps.get_llm().chat(
         SQL_GEN_SYSTEM,
@@ -461,7 +477,8 @@ def _is_stat_worthy(col: str, values: list[int | float]) -> bool:
 
 def compute_stats(columns: list[str], rows: list[list[object]]) -> dict[str, object]:
     """本地确定性统计:行数 + 具备度量资格的数值列 max/min/avg(显式排除 bool;
-    标识/期间列经 _is_stat_worthy 排除,050)。"""
+    标识/期间列经 _is_stat_worthy 排除,050)。
+    057:末两行环比/末值占比等派生量在时间列启发式成功时并入;失败不产出。"""
     stats: dict[str, object] = {"rows": len(rows)}
     if not columns or not rows:
         return stats
@@ -477,6 +494,10 @@ def compute_stats(columns: list[str], rows: list[list[object]]) -> dict[str, obj
             stats[f"{col}_max"] = max(values)
             stats[f"{col}_min"] = min(values)
             stats[f"{col}_avg"] = round(sum(values) / len(values), 2)
+    derived = numeric.precompute_derived_stats(columns, rows)
+    for key, val in derived.items():
+        # 不覆盖已有 max/min/avg 语义;派生键独立命名(delta_pct/share_pct)
+        stats.setdefault(key, val)
     return stats
 
 
@@ -567,6 +588,10 @@ async def summarize(state: AgentState) -> dict[str, object]:
     table_hint = _table_hint_lines(schema_hint)
     if table_hint:
         context += f"\n所涉表(表名(业务称谓别名) 列 -- 表说明)：\n{table_hint}"
+    # 056:人设段注入 summarize(只影响表述风格与禁令,不改安全纪律)
+    skill_persona = (state.get("skill_persona") or "").strip()
+    if skill_persona:
+        context += f"\n回答风格与禁令(仅风格,不得臆测编表或放宽只读约束)：\n{skill_persona}"
     context += "\n\n生成 JSON："
     summary = ""
     insights: list[dict[str, str]] = []
@@ -586,4 +611,19 @@ async def summarize(state: AgentState) -> dict[str, object]:
         log.warning("summarize LLM 调用失败,降级 stats 兜底", exc_info=True)
     if not summary:
         summary = fallback_summary(stats)
-    return {"summary": summary, "insights": insights, "stats": stats}
+    # 057 数值纪律收口:确定性审计剥离非白名单数值句(不重试 LLM、不动 stats)
+    compute_values = state.get("compute_values") or []
+    audited = numeric.audit_summarize_output(
+        summary,
+        insights,
+        columns=execution.columns,
+        rows=execution.rows,
+        stats=stats,
+        compute_values=compute_values,
+        structural=[float(len(execution.rows)), float(numeric.PREVIEW_ROWS)],
+    )
+    return {
+        "summary": audited.summary or fallback_summary(stats),
+        "insights": audited.insights,
+        "stats": stats,
+    }

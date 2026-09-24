@@ -405,16 +405,25 @@ class ChatService:
         return dataclasses.replace(outcome, memory_shortcut=True)
 
     async def _recall_memory_hint(self, *, user_id: str, tenant_id: str, question: str) -> str:
-        """记忆召回(022):失败/未接线/空召回 → 空串(零回归)。"""
+        """记忆召回(022)+ 偏好注入(059):失败/未接线/空 → 不注入(零回归)。"""
         if self._memory is None:
             return ""
+        parts: list[str] = []
         try:
-            return await self._memory.recall_hint(
+            mem = await self._memory.recall_hint(
                 user_id=user_id, tenant_id=tenant_id, question=question
             )
+            if mem:
+                parts.append(mem)
         except Exception:  # noqa: BLE001  # 召回永不阻断问答主链路
             log.warning("记忆召回异常(降级无注入)", exc_info=True)
-            return ""
+        try:
+            pref = await self._memory.preference_hint(user_id=user_id, tenant_id=tenant_id)
+            if pref:
+                parts.append(pref)
+        except Exception:  # noqa: BLE001  # 偏好注入永不阻断问答主链路
+            log.warning("偏好注入异常(降级无注入)", exc_info=True)
+        return "\n\n".join(parts)
 
     async def _guard_input(
         self,

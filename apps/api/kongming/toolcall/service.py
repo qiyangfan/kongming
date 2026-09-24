@@ -76,6 +76,47 @@ _SQL_PARAM_BY_TOOL: dict[str, str] = {
 }
 
 
+def _compute_delta(args: dict[str, object]) -> dict[str, object]:
+    """057:增幅百分比 (target-base)/|base|*100;零副作用纯计算。
+
+    入参白名单校验在 Agent 面(唯一持有本轮结果/stats 白名单);本 handler
+    供工作流等控制面通道复用同一公式,不做跨请求白名单臆测。
+    """
+    base = args.get("base")
+    target = args.get("target")
+    if not isinstance(base, (int, float)) or isinstance(base, bool):
+        return {"status": "error", "reason": "base 必须是数值"}
+    if not isinstance(target, (int, float)) or isinstance(target, bool):
+        return {"status": "error", "reason": "target 必须是数值"}
+    if base == 0:
+        return {"status": "error", "reason": "base=0,无法计算增幅"}
+    pct = (float(target) - float(base)) / abs(float(base)) * 100.0
+    return {
+        "status": "executed",
+        "delta_pct": round(pct, 4),
+        "inputs": {"base": float(base), "target": float(target)},
+    }
+
+
+def _compute_share(args: dict[str, object]) -> dict[str, object]:
+    """057:占比 part/total;与 _compute_delta 同哲学。"""
+    part = args.get("part")
+    total = args.get("total")
+    if not isinstance(part, (int, float)) or isinstance(part, bool):
+        return {"status": "error", "reason": "part 必须是数值"}
+    if not isinstance(total, (int, float)) or isinstance(total, bool):
+        return {"status": "error", "reason": "total 必须是数值"}
+    if total == 0:
+        return {"status": "error", "reason": "total=0,无法计算占比"}
+    ratio = float(part) / float(total)
+    return {
+        "status": "executed",
+        "share": round(ratio, 6),
+        "share_pct": round(ratio * 100.0, 4),
+        "inputs": {"part": float(part), "total": float(total)},
+    }
+
+
 def validate_args(tool: ToolDef, args: dict[str, object]) -> str | None:
     """L4 参数校验(纯函数):JSON Schema 结构校验 + SQL 工具语义预检。"""
     try:
@@ -344,6 +385,10 @@ class ToolCallService:
                 idempotency_key=idem or "",
             )
             return {"announcement_id": ann_id, "created": created}
+        if tool.name == "compute_delta":
+            return _compute_delta(args)
+        if tool.name == "compute_share":
+            return _compute_share(args)
         raise LookupError(f"无 handler 的工具: {tool.name}")  # 注册表与分发漂移防御
 
     async def _run_python_code(

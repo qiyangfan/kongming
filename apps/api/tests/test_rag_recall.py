@@ -411,6 +411,9 @@ async def test_recall_empty_returns_blank(
         "relations_hint": "",  # 023 纯增语义段(空)
         "metric_hints": "",
         "doc_hints": [],  # 024 纯增文档段(空)
+        "skill_terms": "",  # 056 纯增 skill 段(空=零包零回归)
+        "skill_examples": "",
+        "skill_persona": "",
     }
     keys = [k async for k in cast("Any", get_redis()).scan_iter(match="km:ragctx:*")]
     assert keys == []  # 空结果不写缓存(下次请求重试全链路)
