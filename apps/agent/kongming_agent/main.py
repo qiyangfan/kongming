@@ -226,11 +226,7 @@ async def extract_memory_endpoint(req: ExtractMemoryIn) -> ExtractMemoryOut:
         typed = cast("dict[str, object]", item) if isinstance(item, dict) else None
         if typed is None:
             continue
-        kept = {
-            str(k): v
-            for k, v in typed.items()
-            if v is not None and v != "" and v != []
-        }
+        kept = {str(k): v for k, v in typed.items() if v is not None and v != "" and v != []}
         if kept:
             out.append(kept)
     return ExtractMemoryOut(memories=out[:3])

@@ -25,8 +25,7 @@ SLOT_KEYS: tuple[str, ...] = (
 _LIST_SLOTS = frozenset({"metric_aliases"})
 
 _INJECT_PREFIX = (
-    "以下为用户偏好默认值,可忽略;不得作为 WHERE/数据范围约束,"
-    "不得静默改写业务过滤条件。"
+    "以下为用户偏好默认值,可忽略;不得作为 WHERE/数据范围约束,不得静默改写业务过滤条件。"
 )
 
 _EXPLICIT_SLOT_HINTS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -90,9 +89,7 @@ def normalize_patch(raw: Mapping[str, object]) -> PrefsPatch:
     return PrefsPatch(values=out)
 
 
-def merge_prefs(
-    current: Mapping[str, object], patch: Mapping[str, object]
-) -> dict[str, object]:
+def merge_prefs(current: Mapping[str, object], patch: Mapping[str, object]) -> dict[str, object]:
     """覆盖更新语义:patch 键覆盖 current;未提及键保留。"""
     merged = dict(current)
     for k, v in patch.items():

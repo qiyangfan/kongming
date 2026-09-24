@@ -30,7 +30,6 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/memory", tags=["memory"])
 
 
-
 def _get_service(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> MemoryService:

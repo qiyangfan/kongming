@@ -163,9 +163,7 @@ class MemoryService:
                             if isinstance(v, str) and contains_sensitive(v):
                                 continue
                             raw[k] = v
-        ok = await self.apply_implicit_patch(
-            user_id=user_id, tenant_id=tenant_id, raw=raw
-        )
+        ok = await self.apply_implicit_patch(user_id=user_id, tenant_id=tenant_id, raw=raw)
         return 1 if ok else 0
 
     # ── 自管理(数据主权=本人本租户) ──
@@ -207,7 +205,6 @@ class MemoryService:
         await self._oper.add(user_id=user_id, action="memory.delete", target=memory_id, detail={})
         await self._repo.commit()  # R1-H1
 
-
     # ── 059 user_prefs 闭合偏好槽位 ──
 
     async def get_prefs(self, *, user_id: str, tenant_id: str) -> dict[str, object]:
@@ -222,9 +219,7 @@ class MemoryService:
         patch = prefs_mod.normalize_patch(raw)
         current = await self._repo.get_prefs(user_id=user_id, tenant_id=tenant_id)
         merged = prefs_mod.merge_prefs(current, patch.values)
-        await self._repo.upsert_prefs(
-            user_id=user_id, tenant_id=tenant_id, prefs=merged
-        )
+        await self._repo.upsert_prefs(user_id=user_id, tenant_id=tenant_id, prefs=merged)
         await self._oper.add(
             user_id=user_id,
             action="memory.prefs.update",
@@ -243,9 +238,7 @@ class MemoryService:
             return False
         current = await self._repo.get_prefs(user_id=user_id, tenant_id=tenant_id)
         merged = prefs_mod.merge_prefs(current, patch.values)
-        await self._repo.upsert_prefs(
-            user_id=user_id, tenant_id=tenant_id, prefs=merged
-        )
+        await self._repo.upsert_prefs(user_id=user_id, tenant_id=tenant_id, prefs=merged)
         await self._oper.add(
             user_id=user_id,
             action="memory.prefs.implicit",

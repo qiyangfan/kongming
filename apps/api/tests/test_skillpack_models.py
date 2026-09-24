@@ -27,9 +27,7 @@ class TestParseAndValidate:
         assert len(c.metrics) == 1
 
     def test_parse_drops_malformed(self) -> None:
-        c = m.parse_content(
-            {"glossary": [{"definition": "无词"}], "fewshots": [{"question": "q"}]}
-        )
+        c = m.parse_content({"glossary": [{"definition": "无词"}], "fewshots": [{"question": "q"}]})
         assert c.glossary == [] and c.fewshots == []
 
 
@@ -75,9 +73,10 @@ class TestProjection:
             ["GMV", "aov"],
         )
         assert conflicts == ["gmv"]
-        assert m.metric_name_conflicts(
-            [m.MetricSpec(metric_name="new", sql_template="x")], ["gmv"]
-        ) == []
+        assert (
+            m.metric_name_conflicts([m.MetricSpec(metric_name="new", sql_template="x")], ["gmv"])
+            == []
+        )
 
     def test_metric_reenable_same_definition_idempotent(self) -> None:
         """同名同定义=幂等重启用放行;定义不一致才冲突(禁用不删指标后重启用)。"""

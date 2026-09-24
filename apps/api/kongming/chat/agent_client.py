@@ -361,9 +361,7 @@ class AgentClient:
             entry = _obj_dict(item)
             if entry is None:
                 continue
-            kept = {
-                str(k): v for k, v in entry.items() if v is not None and v != "" and v != []
-            }
+            kept = {str(k): v for k, v in entry.items() if v is not None and v != "" and v != []}
             if kept:
                 out.append(kept)
         return out

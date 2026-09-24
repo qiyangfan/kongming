@@ -208,16 +208,12 @@ class SqlMemoryRepo:
         ).scalar_one_or_none()
         return hit is not None
 
-
     # ── 059 user_prefs 闭合偏好槽位 ──
 
     async def get_prefs(self, *, user_id: str, tenant_id: str) -> dict[str, object]:
         row = (
             await self._s.execute(
-                text(
-                    "SELECT prefs FROM public.user_prefs"
-                    " WHERE user_id=:u AND tenant_id=:t"
-                ),
+                text("SELECT prefs FROM public.user_prefs WHERE user_id=:u AND tenant_id=:t"),
                 {"u": user_id, "t": tenant_id},
             )
         ).scalar_one_or_none()

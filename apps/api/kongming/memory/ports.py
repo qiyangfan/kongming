@@ -72,4 +72,3 @@ class MemoryRepo(Protocol):
     async def upsert_prefs(
         self, *, user_id: str, tenant_id: str, prefs: dict[str, object]
     ) -> dict[str, object]: ...
-
