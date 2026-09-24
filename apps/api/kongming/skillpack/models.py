@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import cast
 
 GLOSSARY_CAP = 50
 FEWSHOTS_CAP = 10
@@ -21,7 +22,7 @@ PACK_STATUS = ("ACTIVE", "RETIRED")
 @dataclass
 class GlossaryItem:
     term: str
-    aliases: list[str] = field(default_factory=list)
+    aliases: list[str] = field(default_factory=list[str])
     definition: str = ""
     hint: str = ""
 
@@ -36,15 +37,15 @@ class Fewshot:
 class MetricSpec:
     metric_name: str
     sql_template: str
-    business_terms: list[str] = field(default_factory=list)
+    business_terms: list[str] = field(default_factory=list[str])
 
 
 @dataclass
 class SkillPackContent:
-    glossary: list[GlossaryItem] = field(default_factory=list)
-    fewshots: list[Fewshot] = field(default_factory=list)
+    glossary: list[GlossaryItem] = field(default_factory=list[GlossaryItem])
+    fewshots: list[Fewshot] = field(default_factory=list[Fewshot])
     persona: str = ""
-    metrics: list[MetricSpec] = field(default_factory=list)
+    metrics: list[MetricSpec] = field(default_factory=list[MetricSpec])
 
 
 def validate_manifest(pack_key: str, name: str, version: str) -> str | None:
@@ -60,14 +61,23 @@ def validate_manifest(pack_key: str, name: str, version: str) -> str | None:
 def _as_json_mapping(val: object) -> dict[str, object]:
     """json/jsonb 经 asyncpg 常返回 str(与 system.parse_json_agg 同口径)。"""
     if isinstance(val, Mapping):
-        return dict(val)
+        raw = cast("Mapping[object, object]", val)
+        return {str(k): v for k, v in raw.items()}
     if isinstance(val, (str, bytes)):
         try:
             obj = json.loads(val)
         except (TypeError, ValueError):
             return {}
-        return dict(obj) if isinstance(obj, Mapping) else {}
+        if isinstance(obj, Mapping):
+            raw = cast("Mapping[object, object]", obj)
+            return {str(k): v for k, v in raw.items()}
+        return {}
     return {}
+
+
+def _field_str(m: Mapping[str, object], key: str, *, cap: int = 0) -> str:
+    s = str(m.get(key) or "").strip()
+    return s[:cap] if cap else s
 
 
 def parse_content(raw: object) -> SkillPackContent:
@@ -77,42 +87,43 @@ def parse_content(raw: object) -> SkillPackContent:
     for item in _as_list(data.get("glossary")):
         if not isinstance(item, Mapping):
             continue
-        term = str(item.get("term") or "").strip()
+        m = cast("Mapping[str, object]", item)
+        term = _field_str(m, "term")
         if not term:
             continue
-        aliases = [str(a).strip() for a in _as_list(item.get("aliases")) if str(a).strip()]
+        aliases = [str(a).strip() for a in _as_list(m.get("aliases")) if str(a).strip()]
         glossary.append(
             GlossaryItem(
                 term=term,
                 aliases=aliases[:10],
-                definition=str(item.get("definition") or "")[:500],
-                hint=str(item.get("hint") or "")[:500],
+                definition=_field_str(m, "definition", cap=500),
+                hint=_field_str(m, "hint", cap=500),
             )
         )
     fewshots: list[Fewshot] = []
     for item in _as_list(data.get("fewshots")):
         if not isinstance(item, Mapping):
             continue
-        q = str(item.get("question") or "").strip()
-        sql = str(item.get("sql") or "").strip()
+        m = cast("Mapping[str, object]", item)
+        q = _field_str(m, "question")
+        sql = _field_str(m, "sql")
         if q and sql:
             fewshots.append(Fewshot(question=q[:500], sql=sql[:2000]))
-    persona = str(data.get("persona") or "").strip()[:2000]
+    persona = _field_str(data, "persona", cap=2000)
     metrics: list[MetricSpec] = []
     for item in _as_list(data.get("metrics")):
         if not isinstance(item, Mapping):
             continue
-        n = str(item.get("metric_name") or "").strip()
-        tpl = str(item.get("sql_template") or "").strip()
+        m = cast("Mapping[str, object]", item)
+        n = _field_str(m, "metric_name")
+        tpl = _field_str(m, "sql_template")
         if n and tpl:
             metrics.append(
                 MetricSpec(
                     metric_name=n[:128],
                     sql_template=tpl[:2000],
                     business_terms=[
-                        str(t).strip()
-                        for t in _as_list(item.get("business_terms"))
-                        if str(t).strip()
+                        str(t).strip() for t in _as_list(m.get("business_terms")) if str(t).strip()
                     ][:20],
                 )
             )
@@ -121,7 +132,7 @@ def parse_content(raw: object) -> SkillPackContent:
 
 def _as_list(val: object) -> list[object]:
     if isinstance(val, Sequence) and not isinstance(val, (str, bytes)):
-        return list(val)
+        return list(cast("Sequence[object]", val))
     return []
 
 
@@ -202,7 +213,7 @@ def metric_name_conflicts(
     for r in existing:
         if isinstance(r, str):
             exist[r.lower()] = None
-        elif isinstance(r, Mapping):
+        else:
             name = str(r.get("metric_name") or "").lower()
             if name:
                 exist[name] = r
@@ -211,12 +222,12 @@ def metric_name_conflicts(
         key = m.metric_name.lower()
         if key not in exist:
             continue
-        row = exist[key]
-        if row is None:
+        hit = exist[key]
+        if hit is None:
             out.append(m.metric_name)
             continue
-        same_tpl = str(row.get("sql_template") or "") == m.sql_template
-        same_terms = {str(t) for t in _as_list(row.get("business_terms"))} == set(m.business_terms)
+        same_tpl = str(hit.get("sql_template") or "") == m.sql_template
+        same_terms = {str(t) for t in _as_list(hit.get("business_terms"))} == set(m.business_terms)
         if not (same_tpl and same_terms):
             out.append(m.metric_name)
     return out

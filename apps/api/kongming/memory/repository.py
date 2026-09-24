@@ -6,7 +6,7 @@ chat 404 同形(不存在/越权不区分)。
 
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -218,7 +218,7 @@ class SqlMemoryRepo:
             )
         ).scalar_one_or_none()
         if isinstance(row, dict):
-            return row
+            return {str(k): v for k, v in cast("dict[str, object]", row).items()}
         # asyncpg 对 json/jsonb 常返回 str(与 system.parse_json_agg 同口径);
         # 直接丢弃会导致偏好永远读成空,必须归一化
         if isinstance(row, (str, bytes)):
@@ -226,7 +226,9 @@ class SqlMemoryRepo:
                 obj = json.loads(row)
             except (TypeError, ValueError):
                 return {}
-            return dict(obj) if isinstance(obj, dict) else {}
+            if isinstance(obj, dict):
+                return {str(k): v for k, v in cast("dict[str, object]", obj).items()}
+            return {}
         return {}
 
     async def upsert_prefs(

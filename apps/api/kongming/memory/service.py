@@ -4,7 +4,7 @@
 """
 
 import logging
-from typing import Protocol
+from typing import Protocol, cast
 
 from kongming.memory import prefs as prefs_mod
 from kongming.memory.models import contains_sensitive, extract_explicit_intent
@@ -144,7 +144,7 @@ class MemoryService:
                     if isinstance(v, str) and contains_sensitive(v):
                         continue
                     if isinstance(v, list) and any(
-                        contains_sensitive(str(x)) for x in v if x is not None
+                        contains_sensitive(str(x)) for x in cast("list[object]", v) if x is not None
                     ):
                         continue
                     raw[k] = v
@@ -158,7 +158,7 @@ class MemoryService:
                 except Exception:
                     obj = {}
                 if isinstance(obj, dict):
-                    for k, v in obj.items():
+                    for k, v in cast("dict[str, object]", obj).items():
                         if k in prefs_mod.SLOT_KEYS and v not in (None, ""):
                             if isinstance(v, str) and contains_sensitive(v):
                                 continue

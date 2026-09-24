@@ -103,7 +103,7 @@ class SqlSkillPackRepo:
         content: dict[str, Any] | None = None,
         status: str | None = None,
     ) -> bool:
-        sets = []
+        sets: list[str] = []
         params: dict[str, Any] = {"i": pack_id, "t": tenant_id}
         if name is not None:
             sets.append("name=:n")

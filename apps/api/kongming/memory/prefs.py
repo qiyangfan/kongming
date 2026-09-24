@@ -10,6 +10,7 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import cast
 
 # 闭合槽位 schema(v1;演进走变更,不开自由文本)
 SLOT_KEYS: tuple[str, ...] = (
@@ -44,7 +45,7 @@ _EXPLICIT_SLOT_HINTS: tuple[tuple[re.Pattern[str], str], ...] = (
 class PrefsPatch:
     """槽位补丁:只含合法槽位键;未知键在 normalize 阶段丢弃。"""
 
-    values: dict[str, object] = field(default_factory=dict)
+    values: dict[str, object] = field(default_factory=dict[str, object])
 
     def is_empty(self) -> bool:
         return not self.values
@@ -69,11 +70,11 @@ def normalize_patch(raw: Mapping[str, object]) -> PrefsPatch:
                     except (TypeError, ValueError):
                         parsed = None
                     if isinstance(parsed, list):
-                        items_in = list(parsed)
+                        items_in = list(cast("list[object]", parsed))
                 elif s:
                     items_in = [x for x in re.split(r"[,，、|]", s) if x.strip()]
             elif isinstance(val, Sequence) and not isinstance(val, (str, bytes)):
-                items_in = list(val)
+                items_in = list(cast("Sequence[object]", val))
             items = [str(x).strip() for x in items_in if str(x).strip()]
             if items:
                 out[key] = items[:20]
@@ -116,7 +117,7 @@ def build_preference_hint(prefs: Mapping[str, object]) -> str:
         if val is None or val == "" or val == []:
             continue
         if isinstance(val, Sequence) and not isinstance(val, (str, bytes)):
-            text = "、".join(str(x) for x in val)
+            text = "、".join(str(x) for x in cast("Sequence[object]", val))
         else:
             text = str(val)
         lines.append(f"- {key}: {text}")
@@ -142,7 +143,7 @@ def extract_slot_patch_from_implicit(raw: Mapping[str, object]) -> PrefsPatch:
         if isinstance(val, str) and is_free_text_fact(val):
             continue
         if key in _LIST_SLOTS and isinstance(val, Sequence) and not isinstance(val, (str, bytes)):
-            items = [str(x) for x in val if not is_free_text_fact(str(x))]
+            items = [str(x) for x in cast("Sequence[object]", val) if not is_free_text_fact(str(x))]
             cleaned[key] = items
             continue
         cleaned[key] = val

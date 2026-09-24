@@ -100,7 +100,7 @@ async def list_packs(
 ) -> PackListOut:
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
     rows = await _service(session).list(tenant_id=tid)
-    items = []
+    items: list[PackOut] = []
     for r in rows:
         items.append(
             PackOut(
