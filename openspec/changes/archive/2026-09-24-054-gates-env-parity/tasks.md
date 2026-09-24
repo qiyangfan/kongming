@@ -17,4 +17,7 @@
 ## 3. 文档与收口
 
 - [x] 3.1 HANDOFF 门禁小节补「make check × CI」对照表(api/agent/liannu/web/contracts 五行,列:本地命令、CI job、CI 步骤、差异说明),pyright 行标注本次补齐。
-- [!] 3.2 `make check` 全绿(2026-09-13 本地全绿:api 896+agent 209+liannu 21,pyright 0 errors);push 后盯 CI 至绿(含新 pyright 步骤);归档本变更。【阻塞:push 需用户逐次指令(git 铁律),CI 首跑验证与归档待用户 push 后继续】
+- [x] 3.2 `make check` 全绿(2026-09-13 本地全绿:api 896+agent 209+liannu 21,pyright 0 errors);push 后盯 CI 至绿(含新 pyright 步骤);归档本变更。
+  【2026-09-24 收口】CI 实跑绿(run 36016385961:api/agent/liannu/web/contracts 五路
+  通过,含 pyright 步骤);同批顺手修掉 pyright 严格面与 ruff format/check 门禁
+  (056–059 新代码),CI 假绿面闭合。归档本变更。
