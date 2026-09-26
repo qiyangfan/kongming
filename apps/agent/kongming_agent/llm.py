@@ -1,8 +1,9 @@
-"""LLM 客户端(openai 兼容协议,通义/DeepSeek 改环境变量即切换,nl2sql spec)。
+"""LLM 客户端(多协议出站:openai 兼容 / anthropic / openai Responses,ADR-008)。
 
 ADR-002 注记:LLM key 是 agent 面唯一持有的外部凭证(非数据凭证)。
 纪律:同步 request/response,无自写重试——selfheal 是链路唯一重试机制。
-019 新增 chat_with_tools(ReAct 内核):tools 参数原生透传,无自写协议层。
+019 chat_with_tools(ReAct 内核):tools 参数原生透传;openai 通道保持既有
+路径行为等价,anthropic/responses 通道经 llm_protocol 翻译层收敛。
 """
 
 import contextvars
@@ -20,13 +21,19 @@ from openai.types.chat import (
     ChatCompletionMessageParam,
 )
 
-from kongming_agent.settings import Settings
+from kongming_agent.llm_protocol import (
+    PROTOCOL_ANTHROPIC,
+    PROTOCOL_OPENAI,
+    PROTOCOL_RESPONSES,
+    AnthropicClient,
+    ProtocolReply,
+    responses_create,
+)
+from kongming_agent.llm_protocol import LlmError as LlmError  # 显式 re-export
+from kongming_agent.llm_protocol import LlmToolCall as LlmToolCall  # 显式 re-export
+from kongming_agent.settings import DEFAULT_PROTOCOL, VALID_PROTOCOLS, Settings
 
 log = logging.getLogger(__name__)
-
-
-class LlmError(Exception):
-    """LLM 调用失败(key 缺失/网络/超时/协议异常)的统一出口。"""
 
 
 # usage 上报后台任务强引用集(防 GC;完成即摘)
@@ -56,16 +63,6 @@ def reset_usage_collector(
 
 
 @dataclass(frozen=True)
-class LlmToolCall:
-    """LLM 产出的单次工具调用;args 解析失败时 args=None + raw_args 原文(喂回自纠)。"""
-
-    call_id: str
-    name: str
-    args: dict[str, object] | None
-    raw_args: str = ""
-
-
-@dataclass(frozen=True)
 class ToolChatReply:
     """chat_with_tools 应答:content 与 tool_calls 至多一个有语义(互斥由 ReAct 判定)。"""
 
@@ -85,25 +82,44 @@ class LlmClient:
         ) = None,  # async callable(list[dict]),fire-and-forget
     ) -> None:
         self._model = settings.llm_model
-        self._client: AsyncOpenAI | None = None
+        # 多协议(ADR-008):主模型协议(畸形值已在 fail_closed_checks 告警回退;
+        # 此处兜底归一,防未跑启动检查的直构场景)
+        self._protocol = (
+            settings.llm_protocol if settings.llm_protocol in VALID_PROTOCOLS else DEFAULT_PROTOCOL
+        )
+        self._client: AsyncOpenAI | AnthropicClient | None = None
         if settings.llm_api_key:
-            self._client = AsyncOpenAI(
-                api_key=settings.llm_api_key,
-                base_url=settings.llm_base_url,
-                timeout=settings.llm_timeout_sec,
-            )
+            if self._protocol == PROTOCOL_ANTHROPIC:
+                self._client = AnthropicClient(
+                    base_url=settings.llm_base_url,
+                    api_key=settings.llm_api_key,
+                    timeout_sec=settings.llm_timeout_sec,
+                )
+            else:
+                # openai 与 responses 共用 AsyncOpenAI 客户端(通道在调用期分支)
+                self._client = AsyncOpenAI(
+                    api_key=settings.llm_api_key,
+                    base_url=settings.llm_base_url,
+                    timeout=settings.llm_timeout_sec,
+                )
         # 021 注册表池(主模型恒为 default;畸形/白名单外条目已在 parse 期剔除)
-        self._pool: dict[str, tuple[AsyncOpenAI, str]] = {}
+        # 多协议(ADR-008):池条目携带协议 (client, model, protocol)
+        self._pool: dict[str, tuple[AsyncOpenAI | AnthropicClient, str, str]] = {}
         self._image_limits: dict[str, float] = {}  # 036⑦:条目图片上限
         for name, entry in settings.parse_registry().items():
-            self._pool[name] = (
-                AsyncOpenAI(
+            if entry.protocol == PROTOCOL_ANTHROPIC:
+                entry_client: AsyncOpenAI | AnthropicClient = AnthropicClient(
+                    base_url=entry.base_url,
+                    api_key=entry.api_key,
+                    timeout_sec=settings.llm_timeout_sec,
+                )
+            else:
+                entry_client = AsyncOpenAI(
                     api_key=entry.api_key,
                     base_url=entry.base_url,
                     timeout=settings.llm_timeout_sec,
-                ),
-                entry.model,
-            )
+                )
+            self._pool[name] = (entry_client, entry.model, entry.protocol)
             if entry.max_image_mb is not None:
                 self._image_limits[name] = entry.max_image_mb
         self._routes = settings.parse_routes()
@@ -126,10 +142,10 @@ class LlmClient:
     async def aclose(self) -> None:
         """021① 清偿:显式关闭全部客户端(主/注册表池/embedding)——
         deps 指纹变更重建时调用,连接关闭不再依赖 GC 时机。"""
-        clients: list[AsyncOpenAI] = []
+        clients: list[AsyncOpenAI | AnthropicClient] = []
         if self._client is not None:
             clients.append(self._client)
-        clients.extend(c for c, _ in self._pool.values())
+        clients.extend(c for c, _, _ in self._pool.values())
         if self._emb_client is not None:
             clients.append(self._emb_client)
         for c in clients:
@@ -149,14 +165,16 @@ class LlmClient:
 
     def _resolve(
         self, task: str | None, model_override: str | None = None
-    ) -> tuple[AsyncOpenAI | None, str]:
-        """025:model_override(Bot 配置)优先于任务路由;注册表未命中告警回退。"""
+    ) -> tuple[AsyncOpenAI | AnthropicClient | None, str, str]:
         """任务路由(021,单点):路由表命中注册表→该客户端;否则主模型零回归。
-        R1-M1:路由目标不在注册表时告警一次(按 task+name 去重防刷屏)。"""
+        025:model_override(Bot 配置)优先于任务路由;注册表未命中告警回退;
+        R1-M1:路由目标不在注册表时告警一次(按 task+name 去重防刷屏)。
+        多协议(ADR-008):返回 (client, model, protocol)——openai/responses 条目
+        持 AsyncOpenAI 客户端,anthropic 条目持 AnthropicClient。"""
         if model_override:
             if model_override in self._pool:
-                client, model = self._pool[model_override]
-                return client, model
+                client, model, protocol = self._pool[model_override]
+                return client, model, protocol
             marker = ("__override__", model_override)
             if marker not in _ROUTE_MISS_WARNED:
                 _ROUTE_MISS_WARNED.add(marker)
@@ -165,13 +183,100 @@ class LlmClient:
             name = self._routes.get(task)
             if name:
                 if name in self._pool:
-                    client, model = self._pool[name]
-                    return client, model
+                    client, model, protocol = self._pool[name]
+                    return client, model, protocol
                 marker = (task, name)
                 if marker not in _ROUTE_MISS_WARNED:
                     _ROUTE_MISS_WARNED.add(marker)
                     log.warning("任务 %s 路由目标 %s 不在注册表,回退主模型", task, name)
-        return self._client, self._model
+        return self._client, self._model, self._protocol
+
+    async def _protocol_create(
+        self,
+        client: AsyncOpenAI | AnthropicClient,
+        protocol: str,
+        *,
+        model: str,
+        messages: list[dict[str, object]],
+        tools: list[dict[str, object]],
+        temperature: float,
+        max_tokens: int | None = None,
+    ) -> ProtocolReply:
+        """anthropic / responses 协议出站单点(ADR-008 设计决策 2):翻译与
+        错误映射收敛在 llm_protocol,此处只选路;usage 归一 ProtocolReply.usage
+        回 _report。openai 协议不经此函数(既有路径零回归)。"""
+        if protocol == PROTOCOL_ANTHROPIC:
+            if not isinstance(client, AnthropicClient):
+                raise LlmError("anthropic 协议条目的客户端形态异常(配置/池不一致)")
+            # temperature 语义不适用于 anthropic(SDK 1.8.0 类型面已移除该参数)
+            return await client.create(
+                model=model, messages=messages, tools=tools, max_tokens=max_tokens
+            )
+        if protocol == PROTOCOL_RESPONSES:
+            if not isinstance(client, AsyncOpenAI):
+                raise LlmError("responses 协议条目的客户端形态异常(配置/池不一致)")
+            return await responses_create(
+                client,
+                model=model,
+                messages=messages,
+                tools=tools,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        raise LlmError(f"未知出站协议: {protocol}")
+
+    async def _chat_via_protocol(
+        self,
+        client: AsyncOpenAI | AnthropicClient,
+        protocol: str,
+        *,
+        model: str,
+        system: str,
+        user: object,  # str(chat)或 vision content-parts 列表
+        temperature: float,
+        max_tokens: int | None,
+        task: str,
+        trace_id: str | None,
+        tenant_key: str | None,
+    ) -> str:
+        """anthropic / responses 条目的 chat / chat_vision 通道(ADR-008):
+        翻译出站 → usage 归一回 _report;调用失败/应答畸形收敛 LlmError 并按
+        既有 ERROR 采集口径落记录(038)。"""
+        messages: list[dict[str, object]] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        t0 = time.monotonic()
+        try:
+            reply = await self._protocol_create(
+                client,
+                protocol,
+                model=model,
+                messages=messages,
+                tools=[],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        except Exception as e:
+            self._report(
+                task=task,
+                model=model,
+                trace_id=trace_id,
+                tenant_key=tenant_key,
+                usage=None,
+                status="ERROR",
+                latency_ms=int((time.monotonic() - t0) * 1000),
+            )
+            raise LlmError(f"LLM 调用失败: {e}") from e
+        self._report(
+            task=task,
+            model=model,
+            trace_id=trace_id,
+            tenant_key=tenant_key,
+            usage=reply.usage,
+            latency_ms=int((time.monotonic() - t0) * 1000),
+        )
+        return reply.content or ""
 
     def _report(
         self,
@@ -226,9 +331,24 @@ class LlmClient:
         trace_id: str | None = None,  # 021:用量采集贯穿
         tenant_key: str | None = None,  # 021:用量租户维度(api 反解)
     ) -> str:
-        client, model = self._resolve(task)
+        client, model, protocol = self._resolve(task)
         if client is None:
             raise LlmError("KM_AGENT_LLM_API_KEY 未配置")
+        if protocol != PROTOCOL_OPENAI:
+            return await self._chat_via_protocol(
+                client,
+                protocol,
+                model=model,
+                system=system,
+                user=user,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                task=task or "CHAT",
+                trace_id=trace_id,
+                tenant_key=tenant_key,
+            )
+        # protocol 分支已保证 openai 通道持 AsyncOpenAI(或测试替身);cast 仅收窄
+        client = cast("AsyncOpenAI", client)
         # max_tokens 缺省不传(供应商默认),仅轻量端点(如标题改写)显式封顶(010);
         # 分支写法:openai 类型 None ≠ 省略,**kwargs 过不了 mypy 重载
         messages: list[ChatCompletionMessageParam] = [
@@ -296,12 +416,35 @@ class LlmClient:
         """vision 调用(030):content parts=[text, image_url(data-url)];
         task="vision" 经 021 路由到多模态模型;未配回退主模型(文本模型
         供应商报错即 LlmError,调用方 fail-closed)。"""
-        client, model = self._resolve(task)
+        client, model, protocol = self._resolve(task)
         if client is None:
             raise LlmError("KM_AGENT_LLM_API_KEY 未配置")
-        content: list[dict[str, object]] = [{"type": "text", "text": user}]
+        if protocol != PROTOCOL_OPENAI:
+            content: list[dict[str, object]] = [{"type": "text", "text": user}]
+            for mime, b64 in images:
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime};base64,{b64}"},
+                    }
+                )
+            return await self._chat_via_protocol(
+                client,
+                protocol,
+                model=model,
+                system=system,
+                user=content,
+                temperature=0.2,
+                max_tokens=None,
+                task=task or "VISION",
+                trace_id=trace_id,
+                tenant_key=tenant_key,
+            )
+        # protocol 分支已保证 openai 通道持 AsyncOpenAI(或测试替身);cast 仅收窄
+        client = cast("AsyncOpenAI", client)
+        content_parts: list[dict[str, object]] = [{"type": "text", "text": user}]
         for mime, b64 in images:
-            content.append(
+            content_parts.append(
                 {
                     "type": "image_url",
                     "image_url": {"url": f"data:{mime};base64,{b64}"},
@@ -309,7 +452,7 @@ class LlmClient:
             )
         messages: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": system},
-            {"role": "user", "content": content},  # type: ignore[list-item,misc]
+            {"role": "user", "content": content_parts},  # type: ignore[list-item,misc]
         ]
         t0 = time.monotonic()
         try:
@@ -370,9 +513,48 @@ class LlmClient:
         tool_call 的 arguments(JSON 字符串)解析失败不抛错——args=None +
         raw_args 原文,由 ReAct 节点收敛为「参数畸形」观察喂回 LLM 自纠。
         """
-        client, model = self._resolve(task, model_override)
+        client, model, protocol = self._resolve(task, model_override)
         if client is None:
             raise LlmError("KM_AGENT_LLM_API_KEY 未配置")
+        if protocol != PROTOCOL_OPENAI:
+            # 多协议(ADR-008):消息史原样翻译出站,应答回 ProtocolReply → 既有返回结构
+            protocol_messages: list[dict[str, object]] = [
+                {"role": "system", "content": system},
+                *[dict(m) for m in messages],
+            ]
+            t0 = time.monotonic()
+            try:
+                reply = await self._protocol_create(
+                    client,
+                    protocol,
+                    model=model,
+                    messages=protocol_messages,
+                    tools=tools,
+                    temperature=temperature,
+                    max_tokens=None,
+                )
+            except Exception as e:
+                self._report(
+                    task=task or "CHAT_TOOLS",
+                    model=model,
+                    trace_id=trace_id,
+                    tenant_key=tenant_key,
+                    usage=None,
+                    status="ERROR",
+                    latency_ms=int((time.monotonic() - t0) * 1000),
+                )
+                raise LlmError(f"LLM 调用失败: {e}") from e
+            self._report(
+                task=task or "CHAT_TOOLS",
+                model=model,
+                trace_id=trace_id,
+                tenant_key=tenant_key,
+                usage=reply.usage,
+                latency_ms=int((time.monotonic() - t0) * 1000),
+            )
+            return ToolChatReply(content=reply.content, tool_calls=reply.tool_calls)
+        # protocol 分支已保证 openai 通道持 AsyncOpenAI(或测试替身);cast 仅收窄
+        client = cast("AsyncOpenAI", client)
         full_messages: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": system},
             *messages,

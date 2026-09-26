@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
+from openai import AsyncOpenAI
 
 import kongming_agent.deps as deps
 import kongming_agent.llm as llm_mod
@@ -232,6 +233,7 @@ async def test_llm_pool_rebuilt_on_fingerprint_change(
 
         for _ in range(5):
             await asyncio.sleep(0)  # 让 fire-and-forget aclose task 跑完
+        assert isinstance(c1._client, AsyncOpenAI)  # 主模型缺省 openai 通道(收窄取 is_closed)
         assert c1._client.is_closed()  # 旧实例已关
     finally:
         d.reset_llm_cache()

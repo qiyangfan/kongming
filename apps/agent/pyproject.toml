@@ -9,7 +9,8 @@ dependencies = [
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
     "langgraph>=0.2.60",
-    "openai>=1.60",                  # 兼容通义/DeepSeek 的 openai 协议客户端
+    "openai>=1.66",                  # 兼容通义/DeepSeek 的 openai 协议客户端(下限含 responses API)
+    "anthropic>=1.8",                # 多协议出站(ADR-008):anthropic Messages 官方 SDK(测试以 httpx2 注入)
     "httpx>=0.28",                   # 回调控制面
     "sqlglot>=26.0",                 # validate 节点本地 AST 预检(纯解析,无 IO)
     "structlog>=24.4",
@@ -30,6 +31,9 @@ dev = [
     "mypy>=1.14",
     "import-linter>=2.2",
     "pyright>=1.1.411",
+    # 协议集成测试 MockTransport 直接 import(anthropic 的 HTTP 栈,原为传递
+    # 依赖——显式声明防上游换栈时测试无征兆断)
+    "httpx2>=2.10",
 ]
 
 # 覆盖率门禁(JaCoCo 同位):branch 模式 + fail_under 一票否决,阈值只升不降

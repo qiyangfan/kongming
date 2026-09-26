@@ -15,6 +15,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 log = logging.getLogger(__name__)
 
+# 多协议出站(multi-protocol-llm,ADR-008):出站协议取值域单源。
+# 缺省 openai = 引入前行为逐字回放;条目畸形值剔除告警,主模型畸形值回退 openai。
+VALID_PROTOCOLS: tuple[str, ...] = ("openai", "anthropic", "responses")
+DEFAULT_PROTOCOL = "openai"
+
 
 @dataclass(frozen=True)
 class ModelEntry:
@@ -29,6 +34,7 @@ class ModelEntry:
     price_input: float | None = None  # 每百万 tokens 单价(可选)
     price_output: float | None = None
     max_image_mb: float | None = None  # 036⑦:图片体积上限(vision 模型;None=缺省)
+    protocol: str = DEFAULT_PROTOCOL  # 出站协议(ADR-008):openai|anthropic|responses
 
 
 class Settings(BaseSettings):
@@ -72,6 +78,9 @@ class Settings(BaseSettings):
 
     # 036⑦:主模型图片体积上限(MB;注册表条目 max_image_mb 可覆盖)
     llm_max_image_mb: float = 10.0
+
+    # 多协议出站(ADR-008):主模型出站协议;非法值启动期告警回退 openai
+    llm_protocol: str = DEFAULT_PROTOCOL
 
     def parse_registry(self) -> dict[str, ModelEntry]:
         """注册表解析(fail-closed):畸形条目告警剔除;重名拒;白名单外拒配。"""
@@ -127,6 +136,11 @@ class Settings(BaseSettings):
                 except (TypeError, ValueError):
                     log.warning("注册表条目 %s max_image_mb 畸形,剔除该字段", name)
                     max_image_mb = None
+            # 多协议(ADR-008):protocol 取值域外 = 与缺字段同级,单条目剔除告警
+            protocol = str(item.get("protocol") or DEFAULT_PROTOCOL)
+            if protocol not in VALID_PROTOCOLS:
+                log.warning("注册表条目 %s protocol 非法: %s,剔除该条目", name, protocol)
+                continue
             out[name] = ModelEntry(
                 name=name,
                 base_url=base_url,
@@ -136,6 +150,7 @@ class Settings(BaseSettings):
                 price_input=price_in,
                 price_output=price_out,
                 max_image_mb=max_image_mb,
+                protocol=protocol,
             )
         return out
 
@@ -181,3 +196,8 @@ class Settings(BaseSettings):
         for task, name in self.parse_routes().items():
             if name not in registry:
                 log.warning("路由目标不在注册表,将静默回退主模型: task=%s target=%s", task, name)
+        # 多协议(ADR-008):主模型 protocol 非法 = 告警回退 openai,不拒启
+        # (与「主模型 base_url 不在白名单只告警不拒」的既有兼容口径一致)
+        if self.llm_protocol not in VALID_PROTOCOLS:
+            log.warning("KM_AGENT_LLM_PROTOCOL 非法: %s,回退 openai", self.llm_protocol)
+            self.llm_protocol = DEFAULT_PROTOCOL

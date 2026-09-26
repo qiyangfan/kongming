@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from kongming_agent.llm import LlmClient
 from kongming_agent.settings import Settings
 
@@ -13,6 +15,8 @@ def _settings(**env: str) -> Settings:
     # 漂移(muniu 网关切换后 allowed_hosts 含 127.0.0.1,dashscope 条目会被
     # 拒配致断言环境依赖性失败);调用方显式传入 model_allowed_hosts 时不覆盖。
     env.setdefault("model_allowed_hosts", "dashscope.aliyuncs.com")
+    # 同理钉协议缺省,不读本机 .env 的 KM_AGENT_LLM_PROTOCOL
+    env.setdefault("llm_protocol", "openai")
     old = {k: os.environ.get(f"KM_AGENT_{k.upper()}") for k in env}
     for k, v in env.items():
         os.environ[f"KM_AGENT_{k.upper()}"] = v
@@ -135,10 +139,10 @@ async def test_task_routing_and_usage_report() -> None:
     )
     recorder = _Recorder()
     client = LlmClient(s, usage_reporter=recorder)
-    # 替换客户端为替身(主模型与 coder 两个)
+    # 替换客户端为替身(主模型与 coder 两个;池条目多协议形态 (client, model, protocol))
     main_comp, coder_comp = _FakeCompletions(), _FakeCompletions()
     client._client = _FakeClient(main_comp)  # type: ignore[assignment]
-    client._pool["coder"] = (_FakeClient(coder_comp), "qwen-coder-plus")  # type: ignore[assignment]
+    client._pool["coder"] = (_FakeClient(coder_comp), "qwen-coder-plus", "openai")  # type: ignore[assignment]
 
     await client.chat("s", "u", task="SQL_GEN", trace_id="t1", tenant_key="sakila")
     await client.chat("s", "u", task="SUMMARIZE", trace_id="t2")  # 未配路由→主模型
@@ -290,3 +294,51 @@ async def test_success_without_usage_still_reported() -> None:
     assert len(recorder.records) == 1
     assert recorder.records[0]["status"] == "SUCCESS"
     assert recorder.records[0]["total_tokens"] == 0
+
+
+# ── 多协议出站(multi-protocol-llm):条目/主模型协议声明与 fail-closed 校验 ──
+
+
+def test_protocol_defaults_openai() -> None:
+    """缺省零回归:条目未声明 protocol 与显式 openai 一致;主模型 env 缺省 openai。"""
+    s = _settings(model_registry_json=REG)
+    out = s.parse_registry()
+    assert all(e.protocol == "openai" for e in out.values())
+    assert s.llm_protocol == "openai"
+    s2 = _settings(model_registry_json=REG, llm_protocol="openai")
+    assert all(e.protocol == "openai" for e in s2.parse_registry().values())
+    assert s2.llm_protocol == "openai"
+
+
+def test_registry_invalid_protocol_entry_dropped(caplog: pytest.LogCaptureFixture) -> None:
+    """条目 protocol 取值域外 = 与缺字段同级 fail-closed:剔除告警,其余条目可用。"""
+    import logging
+
+    logging.getLogger("kongming_agent.settings").disabled = False
+    reg = json.loads(REG)
+    reg.append(
+        {
+            "name": "weird",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "api_key": "sk-x",
+            "model": "m1",
+            "protocol": "grpc",
+        }
+    )
+    s = _settings(model_registry_json=json.dumps(reg))
+    with caplog.at_level("WARNING", logger="kongming_agent.settings"):
+        out = s.parse_registry()
+    assert set(out) == {"coder", "fast"}  # 仅畸形条目剔除,不裸崩
+    assert any("protocol" in r.getMessage() for r in caplog.records)
+
+
+def test_main_model_invalid_protocol_falls_back(caplog: pytest.LogCaptureFixture) -> None:
+    """主模型 KM_AGENT_LLM_PROTOCOL 非法:启动告警并回退 openai,不拒启。"""
+    import logging
+
+    logging.getLogger("kongming_agent.settings").disabled = False
+    s = _settings(llm_protocol="grpc")
+    with caplog.at_level("WARNING", logger="kongming_agent.settings"):
+        s.fail_closed_checks()
+    assert s.llm_protocol == "openai"
+    assert any("KM_AGENT_LLM_PROTOCOL" in r.getMessage() for r in caplog.records)
