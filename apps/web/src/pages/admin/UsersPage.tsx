@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StatusSwitch } from "@/components/status-switch";
+import { DataView } from "@/components/data-view";
 import { FormRow } from "@/components/form-row";
 import {
   Dialog,
@@ -27,6 +28,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Pagination } from "@/components/pagination";
+import { ErrorAlert } from "@/components/error-alert";
+import { PageHeader } from "@/components/page-header";
 import {
   Select,
   SelectContent,
@@ -34,14 +37,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   systemApi,
   type DeptNodeOut,
@@ -236,6 +231,15 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-3">
+      <PageHeader
+        title="用户"
+        description="租户成员账号管理:搜索、新建,分配角色与部门,启用停用。"
+        actions={
+          <Button size="sm" onClick={openCreate}>
+            新建用户
+          </Button>
+        }
+      />
       <div className="flex items-center gap-2">
         <Input
           value={keyword}
@@ -259,102 +263,98 @@ export default function UsersPage() {
         >
           搜索
         </Button>
-        <div className="flex-1" />
-        <Button size="sm" onClick={openCreate}>
-          新建用户
-        </Button>
       </div>
 
-      {users.isError && (
-        <p className="text-destructive text-sm" role="alert">
-          用户列表加载失败:{(users.error as Error).message}
-        </p>
-      )}
+      {users.isError && <ErrorAlert text={`用户列表加载失败:${(users.error as Error).message}`} />}
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>用户名</TableHead>
-            <TableHead>昵称</TableHead>
-            <TableHead>状态</TableHead>
-            <TableHead>角色</TableHead>
-            <TableHead>部门</TableHead>
-            <TableHead>创建时间</TableHead>
-            <TableHead className="text-right">操作</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {users.isPending && (
-            <TableRow>
-              <TableCell colSpan={7} className="text-center text-muted-foreground">
-                加载中…
-              </TableCell>
-            </TableRow>
-          )}
-          {users.data?.items.map((u) => (
-            <TableRow key={u.id}>
-              <TableCell className="max-w-40 truncate font-medium" title={u.username}>
+      <DataView
+        rows={users.data?.items ?? []}
+        rowKey={(u) => u.id}
+        isLoading={users.isPending}
+        isEmpty={!users.isPending && users.data?.items.length === 0}
+        emptyText="无匹配用户"
+        columns={[
+          {
+            key: "username",
+            header: "用户名",
+            cardPriority: 1,
+            render: (u) => (
+              <span className="block max-w-40 truncate font-medium" title={u.username}>
                 {u.username}
-              </TableCell>
-              <TableCell className="max-w-32 truncate" title={u.nickname}>
+              </span>
+            ),
+          },
+          {
+            key: "nickname",
+            header: "昵称",
+            cardPriority: 2,
+            render: (u) => (
+              <span className="block max-w-32 truncate" title={u.nickname}>
                 {u.nickname}
-              </TableCell>
-              <TableCell>
-                <StatusSwitch
-                  active={u.status === "ACTIVE"}
-                  pending={toggle.isPending}
-                  error={!toggle.isPending && toggleId === u.id ? toggleErr : null}
-                  onToggle={() => toggle.mutate(u)}
-                  ariaLabel={`${u.username} 启用状态`}
-                />
-              </TableCell>
-              <TableCell>
-                <div className="flex flex-wrap gap-1">
-                  {u.role_keys.length === 0 ? (
-                    <span className="text-muted-foreground text-sm">—</span>
-                  ) : (
-                    u.role_keys.map((k) => (
-                      <Badge key={k} variant="outline">
-                        {roleLabel(k)}
-                      </Badge>
-                    ))
-                  )}
-                </div>
-              </TableCell>
-              <TableCell className="max-w-32 truncate" title={u.dept_name ?? undefined}>
+              </span>
+            ),
+          },
+          {
+            key: "status",
+            header: "状态",
+            cardPriority: 3,
+            render: (u) => (
+              <StatusSwitch
+                active={u.status === "ACTIVE"}
+                pending={toggle.isPending}
+                error={!toggle.isPending && toggleId === u.id ? toggleErr : null}
+                onToggle={() => toggle.mutate(u)}
+                ariaLabel={`${u.username} 启用状态`}
+              />
+            ),
+          },
+          {
+            key: "role_keys",
+            header: "角色",
+            cardPriority: 4,
+            render: (u) => (
+              <div className="flex flex-wrap gap-1">
+                {u.role_keys.length === 0 ? (
+                  <span className="text-muted-foreground text-sm">—</span>
+                ) : (
+                  u.role_keys.map((k) => (
+                    <Badge key={k} variant="outline">
+                      {roleLabel(k)}
+                    </Badge>
+                  ))
+                )}
+              </div>
+            ),
+          },
+          {
+            key: "dept_name",
+            header: "部门",
+            render: (u) => (
+              <span className="block max-w-32 truncate" title={u.dept_name ?? undefined}>
                 {u.dept_name ?? "—"}
-              </TableCell>
-              <TableCell className="text-muted-foreground">{formatDate(u.created_at)}</TableCell>
-              <TableCell className="text-right">
-                <Button variant="ghost" size="sm" onClick={() => openEdit(u)}>
-                  编辑
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setResetError("");
-                    setResetPw("");
-                    setResetting(u);
-                  }}
-                >
-                  重置密码
-                </Button>
-                <Button variant="ghost-destructive" size="sm" onClick={() => setDeleting(u)}>
-                  删除
-                </Button>
-              </TableCell>
-            </TableRow>
-          ))}
-          {users.data && users.data.items.length === 0 && (
-            <TableRow>
-              <TableCell colSpan={7} className="text-center text-muted-foreground">
-                无匹配用户
-              </TableCell>
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
+              </span>
+            ),
+          },
+          {
+            key: "created_at",
+            header: "创建时间",
+            cellClassName: "text-muted-foreground",
+            render: (u) => formatDate(u.created_at),
+          },
+        ]}
+        actions={[
+          { label: "编辑", onSelect: openEdit },
+          {
+            label: "重置密码",
+            onSelect: (u) => {
+              setResetError("");
+              setResetPw("");
+              setResetting(u);
+            },
+          },
+          { label: "删除", destructive: true, onSelect: setDeleting },
+        ]}
+      />
 
       <Pagination page={page} pageCount={pages} total={total} onPageChange={setPage} />
 

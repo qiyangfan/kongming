@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Layers, Loader2, Plus, RefreshCw, Trash2, X } from "lucide-react";
+import { Layers, Loader2, Plus, RefreshCw, X } from "lucide-react";
 
 import {
   AlertDialog,
@@ -29,16 +29,9 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/page-header";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { DataView } from "@/components/data-view";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { QueryErrorAlert } from "@/components/query-error";
+import { ErrorAlert } from "@/components/error-alert";
 import { useDatasource } from "@/lib/datasource-store";
 import { ragApi } from "@/lib/rag-api";
 import {
@@ -258,93 +251,81 @@ export default function SemanticPage() {
               扫描表关联
             </Button>
           </div>
-          <div className="rounded-lg border border-border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>左表</TableHead>
-                  <TableHead>右表</TableHead>
-                  <TableHead>关联字段</TableHead>
-                  <TableHead>来源</TableHead>
-                  <TableHead className="w-16">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {relations.isError ? (
-                  <TableRow>
-                    <TableCell colSpan={5}>
-                      <QueryErrorAlert />
-                    </TableCell>
-                  </TableRow>
-                ) : relations.isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="py-6 text-center">
-                      <Loader2
-                        className="mx-auto size-4 animate-spin text-muted-foreground"
-                        aria-hidden
-                      />
-                    </TableCell>
-                  </TableRow>
-                ) : (relations.data?.length ?? 0) === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={5}
-                      className="py-6 text-center text-sm text-muted-foreground"
-                    >
-                      暂无关系——点「扫描表关联」或手工新增
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  relations.data?.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell
-                        className="max-w-48 truncate font-mono text-xs"
-                        title={r.source_table}
-                      >
-                        {r.source_table}
-                      </TableCell>
-                      <TableCell
-                        className="max-w-48 truncate font-mono text-xs"
-                        title={r.target_table}
-                      >
-                        {r.target_table}
-                      </TableCell>
-                      <TableCell
-                        className="max-w-40 truncate font-mono text-xs"
-                        title={
-                          r.join_keys.map((k) => `${k.left_col}=${k.right_col}`).join(", ") ||
-                          undefined
-                        }
-                      >
-                        {r.join_keys.map((k) => `${k.left_col}=${k.right_col}`).join(", ")}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={r.source === "manual" ? "default" : "secondary"}>
-                          {r.source === "manual" ? "手工" : "自动扫描"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {/* R1-L4:introspection 行只读(proposal 立约),仅手工行可删 */}
-                        {r.source === "manual" && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            disabled={delRel.isPending}
-                            onClick={() =>
-                              setDelTarget({ kind: "rel", id: r.id, name: r.source_table })
-                            }
-                            aria-label="删除关系"
-                          >
-                            <Trash2 className="size-3.5" aria-hidden />
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
+          {relations.isError && <ErrorAlert />}
+          <DataView
+            rows={relations.data ?? []}
+            rowKey={(r) => r.id}
+            isLoading={relations.isPending}
+            isEmpty={!relations.isPending && relations.data?.length === 0}
+            emptyText="暂无关系——点「扫描表关联」或手工新增"
+            columns={[
+              {
+                key: "source_table",
+                header: "左表",
+                cardPriority: 1,
+                cellClassName: "font-mono text-xs",
+                render: (r) => (
+                  <span
+                    className="block max-w-48 truncate font-mono text-xs"
+                    title={r.source_table}
+                  >
+                    {r.source_table}
+                  </span>
+                ),
+              },
+              {
+                key: "target_table",
+                header: "右表",
+                cardPriority: 2,
+                cellClassName: "font-mono text-xs",
+                render: (r) => (
+                  <span
+                    className="block max-w-48 truncate font-mono text-xs"
+                    title={r.target_table}
+                  >
+                    {r.target_table}
+                  </span>
+                ),
+              },
+              {
+                key: "join_keys",
+                header: "关联字段",
+                cardPriority: 3,
+                cellClassName: "font-mono text-xs",
+                render: (r) => (
+                  <span
+                    className="block max-w-40 truncate font-mono text-xs"
+                    title={
+                      r.join_keys.map((k) => `${k.left_col}=${k.right_col}`).join(", ") || undefined
+                    }
+                  >
+                    {r.join_keys.map((k) => `${k.left_col}=${k.right_col}`).join(", ")}
+                  </span>
+                ),
+              },
+              {
+                key: "source",
+                header: "来源",
+                cardPriority: 4,
+                render: (r) => (
+                  <Badge variant={r.source === "manual" ? "default" : "secondary"}>
+                    {r.source === "manual" ? "手工" : "自动扫描"}
+                  </Badge>
+                ),
+              },
+            ]}
+            actions={[
+              {
+                label: "删除",
+                destructive: true,
+                // R1-L4:仅手工行渲染删除(introspection 行只读)
+                isVisible: (r) => r.source === "manual",
+                onSelect: (r) => {
+                  setDelTarget({ kind: "rel", id: r.id, name: r.source_table });
+                },
+              },
+            ]}
+          />
           <div className="space-y-2 rounded-lg border border-border p-3">
             {knowledge.isError && (
               <p className="text-xs text-destructive" role="alert">
@@ -539,91 +520,75 @@ export default function SemanticPage() {
       ) : (
         <div className="space-y-3">
           <h3 className="text-sm font-semibold">指标口径</h3>
-          <div className="rounded-lg border border-border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>指标</TableHead>
-                  <TableHead>口径(仅供 AI 参考,不会执行)</TableHead>
-                  <TableHead>触发词</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead className="w-16">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {metrics.isError ? (
-                  <TableRow>
-                    <TableCell colSpan={5}>
-                      <QueryErrorAlert />
-                    </TableCell>
-                  </TableRow>
-                ) : metrics.isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="py-6 text-center">
-                      <Loader2
-                        className="mx-auto size-4 animate-spin text-muted-foreground"
-                        aria-hidden
-                      />
-                    </TableCell>
-                  </TableRow>
-                ) : (metrics.data?.length ?? 0) === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={5}
-                      className="py-6 text-center text-sm text-muted-foreground"
-                    >
-                      暂无指标——在下方新增
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  metrics.data?.map((m) => (
-                    <TableRow key={m.id}>
-                      <TableCell
-                        className="max-w-32 truncate text-sm font-medium"
-                        title={m.metric_name}
-                      >
-                        {m.metric_name}
-                      </TableCell>
-                      <TableCell
-                        className="max-w-md truncate font-mono text-xs text-muted-foreground"
-                        title={m.sql_template}
-                      >
-                        {m.sql_template}
-                      </TableCell>
-                      <TableCell
-                        className="max-w-32 truncate text-xs"
-                        title={m.business_terms.join(", ") || undefined}
-                      >
-                        {m.business_terms.join(", ")}
-                      </TableCell>
-                      <TableCell>
-                        {/* R1-L4:启停切换(upsert 带原值,不重置其他字段) */}
-                        <Switch
-                          checked={m.enabled}
-                          disabled={toggleMetric.isPending}
-                          onCheckedChange={(on) => toggleMetric.mutate({ m, enabled: on })}
-                          aria-label={`启停 ${m.metric_name}`}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          disabled={delMetric.isPending}
-                          onClick={() =>
-                            setDelTarget({ kind: "metric", id: m.id, name: m.metric_name })
-                          }
-                          aria-label="删除指标"
-                        >
-                          <Trash2 className="size-3.5" aria-hidden />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
+          {metrics.isError && <ErrorAlert />}
+          <DataView
+            rows={metrics.data ?? []}
+            rowKey={(m) => m.id}
+            isLoading={metrics.isPending}
+            isEmpty={!metrics.isPending && metrics.data?.length === 0}
+            emptyText="暂无指标——在下方新增"
+            columns={[
+              {
+                key: "metric_name",
+                header: "指标",
+                cardPriority: 1,
+                cellClassName: "text-sm font-medium",
+                render: (m) => (
+                  <span
+                    className="block max-w-32 truncate text-sm font-medium"
+                    title={m.metric_name}
+                  >
+                    {m.metric_name}
+                  </span>
+                ),
+              },
+              {
+                key: "sql_template",
+                header: "口径(仅供 AI 参考,不会执行)",
+                cellClassName: "font-mono text-xs text-muted-foreground",
+                render: (m) => (
+                  <span className="block max-w-md truncate" title={m.sql_template}>
+                    {m.sql_template}
+                  </span>
+                ),
+              },
+              {
+                key: "business_terms",
+                header: "触发词",
+                cardPriority: 3,
+                cellClassName: "text-xs",
+                render: (m) => (
+                  <span
+                    className="block max-w-32 truncate"
+                    title={m.business_terms.join(", ") || undefined}
+                  >
+                    {m.business_terms.join(", ")}
+                  </span>
+                ),
+              },
+              {
+                key: "enabled",
+                header: "状态",
+                cardPriority: 2,
+                render: (m) => (
+                  // R1-L4:启停切换(upsert 带原值,不重置其他字段)
+                  <Switch
+                    checked={m.enabled}
+                    disabled={toggleMetric.isPending}
+                    onCheckedChange={(on) => toggleMetric.mutate({ m, enabled: on })}
+                    aria-label={`启停 ${m.metric_name}`}
+                  />
+                ),
+              },
+            ]}
+            actions={[
+              {
+                label: "删除",
+                destructive: true,
+                onSelect: (m) => setDelTarget({ kind: "metric", id: m.id, name: m.metric_name }),
+              },
+            ]}
+          />
           <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border p-3">
             <div className="space-y-1">
               <Label className="text-xs">指标名</Label>

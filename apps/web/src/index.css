@@ -12,6 +12,11 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
 @layer base {
   * {
     @apply border-border outline-ring/50;
+
+    /* 移动基线(mobile-experience B1.1):触控不闪斑;滚动容器到边缘不牵动
+       整页(嵌套滚动隔离,spec「触控与安全区基线」) */
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: contain;
   }
 
   body {
@@ -19,8 +24,41 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
   }
 }
 
+/* 安全区工具类(mobile-experience B1.1):贴边区避让全面屏 Home 指示条/刘海。
+   BottomNav/对话输入区/全屏表单 Footer 消费 pb-safe;横屏 刘海侧用 pl/pr-safe。
+   壳层内容区预留导航避让高度的 pb-safe-nav 在 B2.1 BottomNav 接入时一并落地。 */
+@utility pb-safe {
+  padding-bottom: var(--kb-safe-bottom);
+}
+
+@utility pl-safe {
+  padding-left: env(safe-area-inset-left, 0);
+}
+
+@utility pr-safe {
+  padding-right: env(safe-area-inset-right, 0);
+}
+
+/* 顶部贴边区避让(刘海/状态栏):消费方为壳层内容列(app-layout 单点,页面
+   不自行感知)与不经过壳层的 portal 浮层(全屏 dialog 关闭钮/会话抽屉)。 */
+@utility pt-safe {
+  padding-top: var(--kb-safe-top);
+}
+
+/* 壳层内容区底部避让(B2.1):BottomNav 总高 = 外层 pb-safe + 内层行 h-16
+   (bottom-nav.tsx 同源;安全区 padding 与行高不同元素,互不挤占内容区);
+   仅窄屏由 AppLayout 消费,md+ 不预留。 */
+@utility pb-safe-nav {
+  padding-bottom: calc(4rem + var(--kb-safe-bottom));
+}
+
 :root {
   color-scheme: light;
+
+  /* 移动基线安全区(mobile-experience B1.1):全面屏 Home 指示条/刘海避让,
+     缺省 0px 非全面屏零影响 */
+  --kb-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --kb-safe-top: env(safe-area-inset-top, 0px);
 
   /* 语义 token:主色朱砂(武侯祠红墙,庄重决断);鎏金仅点睛;中性色配黛瓦青灰 */
   --background: #fbfaf7; /* 宣纸白(微暖,非冷白) */

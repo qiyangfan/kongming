@@ -44,6 +44,7 @@
 | 数据 | TanStack Query(服务端状态)+ Zustand(客户端状态) |
 | 路由 | React Router v7 |
 | 图表 | ECharts(echarts-for-react) |
+| 内容渲染 | react-markdown + remark-gfm + remark-breaks(文档卡 Markdown;不解析原始 HTML,成熟库优先不自研 tokenizer,ADR-009) |
 | 品牌图标 | simple-icons(联邦 logo 等多品牌场景,ADR-006;单个图标可内联官方 SVG) |
 | 契约 | openapi-typescript 生成,禁手写 API 类型(ADR-005) |
 

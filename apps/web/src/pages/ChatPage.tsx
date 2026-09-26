@@ -12,6 +12,7 @@ import { Feather, Loader2, Paperclip, SendHorizontal, TriangleAlert, X } from "l
 import { useNavigate, useParams } from "react-router";
 
 import { AssistantCard } from "@/components/assistant-card";
+import { SessionDrawer } from "@/components/session-drawer";
 import { ChatBubble } from "@/components/chat-bubble";
 import { StreamCard, mergeToolCall } from "@/components/stream-card";
 import { ToolConfirmCard } from "@/components/tool-confirm-card";
@@ -403,6 +404,11 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {/* 窄屏页头(mobile-experience B2.3):会话抽屉唯一入口;宽屏侧栏常驻不渲染 */}
+      <header className="flex items-center gap-2 border-b border-border px-3 py-2 md:hidden">
+        <SessionDrawer />
+        <span className="text-sm font-medium tracking-widest text-foreground">孔明</span>
+      </header>
       <ScrollArea className="min-h-0 flex-1">
         <div className="mx-auto max-w-3xl space-y-5 px-4 py-6">
           {messages.isLoading && sessionId && !finalized ? (
@@ -482,30 +488,52 @@ export default function ChatPage() {
         </div>
       </ScrollArea>
 
-      <div className="border-t border-border bg-background px-4 py-3">
+      {/* 输入区(mobile-experience B4.1):mb-3 与 BottomNav 呼吸分隔;
+          底部安全区由导航层统一避让(bottom-nav pb-safe),此处不再叠加 */}
+      <div className="mb-3 border-t border-border bg-background px-4 py-3 md:mb-0">
         <div className="mx-auto max-w-3xl">
           {/* 019:Agent 内核开关(自主工具调用=ReAct;缺省 recipe 零回归);
               UI 命名「运筹模式」与空态文案「运筹帷幄之事,交给军师」同源,实现术语不入用户文案 */}
-          <div className="mb-2 flex items-center justify-end gap-2">
-            <Switch
-              id="agent-mode"
-              checked={agentMode === "react"}
-              onCheckedChange={(on) => setAgentMode(on ? "react" : "recipe")}
-              aria-label="运筹模式"
-            />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Label
-                  htmlFor="agent-mode"
-                  className="cursor-pointer text-xs text-muted-foreground"
-                >
-                  运筹模式
-                </Label>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-72">
-                AI 将自主规划步骤、调用工具求解,适合复杂问题;日常提问无需开启。
-              </TooltipContent>
-            </Tooltip>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            {/* 附件钮置于工具行左位:输入行只留 [输入框|发送],水平间距以容器
+                px-4 为单源;热区盒 24px(图标几何居中仅 4px),触控面经伪元素补至 40px */}
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="after:-inset-2"
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading || streaming !== null}
+              aria-label="添加图片附件"
+              title="添加图片(png/jpg/webp/gif,≤10MB)"
+            >
+              {/* 图标显式钉 size-4(icon-xs 默认 12px 经 :not 排除),与发送键同大 */}
+              {uploading ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+              ) : (
+                <Paperclip className="size-4" aria-hidden />
+              )}
+            </Button>
+            <div className="flex items-center gap-2">
+              <Switch
+                id="agent-mode"
+                checked={agentMode === "react"}
+                onCheckedChange={(on) => setAgentMode(on ? "react" : "recipe")}
+                aria-label="运筹模式"
+              />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Label
+                    htmlFor="agent-mode"
+                    className="cursor-pointer text-xs text-muted-foreground"
+                  >
+                    运筹模式
+                  </Label>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-72">
+                  AI 将自主规划步骤、调用工具求解,适合复杂问题;日常提问无需开启。
+                </TooltipContent>
+              </Tooltip>
+            </div>
           </div>
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 pb-1">
@@ -535,20 +563,6 @@ export default function ChatPage() {
               tabIndex={-1}
               onChange={(e) => void onPickFile(e)}
             />
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => fileRef.current?.click()}
-              disabled={uploading || streaming !== null}
-              aria-label="添加图片附件"
-              title="添加图片(png/jpg/webp/gif,≤10MB)"
-            >
-              {uploading ? (
-                <Loader2 className="animate-spin" aria-hidden />
-              ) : (
-                <Paperclip aria-hidden />
-              )}
-            </Button>
             <Textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}

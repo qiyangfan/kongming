@@ -18,6 +18,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FormRow } from "@/components/form-row";
+import { ErrorAlert } from "@/components/error-alert";
+import { PageHeader } from "@/components/page-header";
 import {
   Dialog,
   DialogContent,
@@ -33,14 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { DataView } from "@/components/data-view";
 import {
   systemApi,
   type DataScopeValue,
@@ -166,110 +161,110 @@ export default function RolesPage() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">多角色用户:权限点取并集,数据范围取最宽松。</p>
-        <Button
-          size="sm"
-          onClick={() => {
-            setForm(EMPTY);
-            setFormError("");
-            setCreating(true);
-          }}
-        >
-          新建角色
-        </Button>
-      </div>
+      <PageHeader
+        title="角色"
+        description="多角色用户:权限点取并集,数据范围取最宽松。"
+        actions={
+          <Button
+            size="sm"
+            onClick={() => {
+              setForm(EMPTY);
+              setFormError("");
+              setCreating(true);
+            }}
+          >
+            新建角色
+          </Button>
+        }
+      />
 
-      {roles.isError && (
-        <p className="text-destructive text-sm" role="alert">
-          角色列表加载失败:{(roles.error as Error).message}
-        </p>
-      )}
+      {roles.isError && <ErrorAlert text={`角色列表加载失败:${(roles.error as Error).message}`} />}
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>角色键</TableHead>
-            <TableHead>名称</TableHead>
-            <TableHead>数据范围</TableHead>
-            <TableHead>SQL 范围</TableHead>
-            <TableHead>排序</TableHead>
-            <TableHead>权限点</TableHead>
-            <TableHead className="text-right">操作</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {roles.data?.map((r) => (
-            <TableRow key={r.id}>
-              <TableCell className="max-w-40 truncate font-medium">
-                <span className="flex items-center gap-1.5">
-                  <span title={r.role_key} className="truncate">
-                    {r.role_key}
-                  </span>
-                  {r.builtin && (
-                    <Badge variant="secondary" className="shrink-0">
-                      内置
-                    </Badge>
-                  )}
+      <DataView
+        rows={roles.data ?? []}
+        rowKey={(r) => r.id}
+        isLoading={roles.isPending}
+        isEmpty={!roles.isPending && (roles.data?.length ?? 0) === 0}
+        emptyText="暂无角色"
+        columns={[
+          {
+            key: "role_key",
+            header: "角色键",
+            cardPriority: 1,
+            render: (r) => (
+              <span className="flex max-w-40 items-center gap-1.5 font-medium">
+                <span title={r.role_key} className="truncate">
+                  {r.role_key}
                 </span>
-              </TableCell>
-              <TableCell className="max-w-40 truncate" title={r.role_name}>
+                {r.builtin && (
+                  <Badge variant="secondary" className="shrink-0">
+                    内置
+                  </Badge>
+                )}
+              </span>
+            ),
+          },
+          {
+            key: "role_name",
+            header: "名称",
+            cardPriority: 2,
+            render: (r) => (
+              <span className="block max-w-40 truncate" title={r.role_name}>
                 {r.role_name}
-              </TableCell>
-              <TableCell>
-                {DATA_SCOPES.find((d) => d.value === r.data_scope)?.label ?? r.data_scope}
-              </TableCell>
-              <TableCell>
-                {SQL_SCOPES.find((s) => s.value === r.sql_scope)?.label ?? r.sql_scope}
-              </TableCell>
-              <TableCell>{r.sort}</TableCell>
-              <TableCell>{r.perm_ids.length} 项</TableCell>
-              <TableCell className="text-right">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setForm({
-                      roleKey: r.role_key,
-                      roleName: r.role_name,
-                      dataScope: r.data_scope as DataScopeValue,
-                      sqlScope: r.sql_scope as SqlScopeValue,
-                      sort: r.sort,
-                    });
-                    setFormError("");
-                    setEditing(r);
-                  }}
-                >
-                  编辑
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setBoundIds(r.perm_ids);
-                    setBindError("");
-                    setBinding(r);
-                  }}
-                >
-                  权限
-                </Button>
-                <Button
-                  variant="ghost-destructive"
-                  size="sm"
-                  disabled={r.builtin}
-                  title={r.builtin ? "内置角色不可删除" : undefined}
-                  onClick={() => {
-                    setDeleteError("");
-                    setDeleting(r);
-                  }}
-                >
-                  删除
-                </Button>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+              </span>
+            ),
+          },
+          {
+            key: "data_scope",
+            header: "数据范围",
+            cardPriority: 3,
+            render: (r) => DATA_SCOPES.find((d) => d.value === r.data_scope)?.label ?? r.data_scope,
+          },
+          {
+            key: "sql_scope",
+            header: "SQL 范围",
+            cardPriority: 4,
+            render: (r) => SQL_SCOPES.find((s) => s.value === r.sql_scope)?.label ?? r.sql_scope,
+          },
+          { key: "sort", header: "排序", render: (r) => r.sort },
+          { key: "perm_ids", header: "权限点", render: (r) => `${r.perm_ids.length} 项` },
+        ]}
+        actions={[
+          {
+            label: "编辑",
+            onSelect: (r) => {
+              setForm({
+                roleKey: r.role_key,
+                roleName: r.role_name,
+                dataScope: r.data_scope as DataScopeValue,
+                sqlScope: r.sql_scope as SqlScopeValue,
+                sort: r.sort,
+              });
+              setFormError("");
+              setEditing(r);
+            },
+          },
+          {
+            label: "权限",
+            onSelect: (r) => {
+              setBoundIds(r.perm_ids);
+              setBindError("");
+              setBinding(r);
+            },
+          },
+          {
+            label: "删除",
+            destructive: true,
+            // 内置角色不可删除:行级禁用承接可视反馈与拦截(原按钮 title 文案)
+            isDisabled: (r) => r.builtin,
+            disabledReason: "内置角色不可删除",
+            onSelect: (r) => {
+              setDeleteError("");
+              setDeleting(r);
+            },
+          },
+        ]}
+      />
 
       <Dialog
         open={creating || editing !== null}

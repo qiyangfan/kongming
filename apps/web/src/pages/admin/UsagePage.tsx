@@ -11,7 +11,7 @@ import { Activity, Database, Sparkles, Wrench } from "lucide-react";
 import { EChart, themedTooltip } from "@/lib/echarts";
 import { useTheme } from "@/lib/theme-store";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { DataView } from "@/components/data-view";
 import {
   Dialog,
   DialogContent,
@@ -22,6 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
 import { Pagination } from "@/components/pagination";
 import { StatCard } from "@/components/stat-card";
 import { StatusBadge, type StatusMeta } from "@/components/status-badge";
@@ -33,14 +34,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   usagePage,
   usageSummary,
   usageTimeline,
@@ -49,7 +42,7 @@ import {
 } from "@/lib/usage-api";
 
 import { useDebounced } from "@/hooks/use-debounced";
-import { QueryErrorAlert } from "@/components/query-error";
+import { ErrorAlert } from "@/components/error-alert";
 import { systemApi } from "@/lib/system-api";
 import { cssVar } from "@/lib/utils";
 import { formatDateTime, formatDuration } from "@/lib/datetime";
@@ -286,7 +279,7 @@ export default function UsagePage() {
             加载中…
           </div>
         ) : trend.isError ? (
-          <QueryErrorAlert text="趋势加载失败" />
+          <ErrorAlert text="趋势加载失败" />
         ) : (
           <UsageTrendChart key={theme} points={trend.data?.points ?? []} />
         )}
@@ -297,56 +290,76 @@ export default function UsagePage() {
         <div className="border-b px-4 py-3">
           <h3 className="text-sm font-medium">模型 × 任务</h3>
         </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>租户</TableHead>
-              <TableHead>模型</TableHead>
-              <TableHead>任务</TableHead>
-              <TableHead className="text-right">调用</TableHead>
-              <TableHead className="text-right">失败</TableHead>
-              <TableHead className="text-right">Tokens</TableHead>
-              <TableHead className="text-right">平均延迟</TableHead>
-              <TableHead className="text-right">最大延迟</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(summary.data?.items ?? []).map((i, idx) => (
-              <TableRow key={idx}>
-                <TableCell className="text-muted-foreground">{i.tenant_key}</TableCell>
-                <TableCell className="max-w-40 truncate font-medium" title={i.model}>
+        {/* 汇总加载失败:错误条置于表区上方,DataView 只管加载/空态 */}
+        {!summary.isLoading && summary.isError && (
+          <div className="px-4 py-3">
+            <ErrorAlert text="汇总加载失败" />
+          </div>
+        )}
+        {/* 纯展示表(无行操作):不传 actions;rowKey 取分组维度三元组 */}
+        <DataView
+          rows={summary.data?.items ?? []}
+          rowKey={(i) => `${i.tenant_key}-${i.model}-${i.task}`}
+          isLoading={summary.isLoading}
+          isEmpty={!summary.isLoading && !summary.isError && summary.data?.items.length === 0}
+          emptyText="暂无用量记录"
+          columns={[
+            {
+              key: "tenant_key",
+              header: "租户",
+              cellClassName: "text-muted-foreground",
+            },
+            {
+              key: "model",
+              header: "模型",
+              cardPriority: 1,
+              render: (i) => (
+                <span className="block max-w-40 truncate font-medium" title={i.model}>
                   {i.model}
-                </TableCell>
-                <TableCell>{i.task}</TableCell>
-                <TableCell className="text-right">{i.calls}</TableCell>
-                <TableCell className="text-right">
-                  {i.calls_error > 0 ? (
-                    <Badge variant="destructive">{i.calls_error}</Badge>
-                  ) : (
-                    <span className="text-muted-foreground">0</span>
-                  )}
-                </TableCell>
-                <TableCell className="text-right">{fmtTokens(i.total_tokens)}</TableCell>
-                <TableCell className="text-right">{formatDuration(i.latency_ms_avg)}</TableCell>
-                <TableCell className="text-right">{formatDuration(i.latency_ms_max)}</TableCell>
-              </TableRow>
-            ))}
-            {!summary.isLoading && summary.isError && (
-              <TableRow>
-                <TableCell colSpan={8}>
-                  <QueryErrorAlert text="汇总加载失败" />
-                </TableCell>
-              </TableRow>
-            )}
-            {!summary.isLoading && !summary.isError && (summary.data?.items ?? []).length === 0 && (
-              <TableRow>
-                <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
-                  暂无用量记录
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+                </span>
+              ),
+            },
+            { key: "task", header: "任务", cardPriority: 2 },
+            {
+              key: "calls",
+              header: "调用",
+              cardPriority: 3,
+              cellClassName: "text-right",
+              render: (i) => i.calls,
+            },
+            {
+              key: "calls_error",
+              header: "失败",
+              cardPriority: 4,
+              cellClassName: "text-right",
+              render: (i) =>
+                i.calls_error > 0 ? (
+                  <Badge variant="destructive">{i.calls_error}</Badge>
+                ) : (
+                  <span className="text-muted-foreground">0</span>
+                ),
+            },
+            {
+              key: "total_tokens",
+              header: "Tokens",
+              cardPriority: 5,
+              cellClassName: "text-right",
+              render: (i) => fmtTokens(i.total_tokens),
+            },
+            {
+              key: "latency_ms_avg",
+              header: "平均延迟",
+              cellClassName: "text-right",
+              render: (i) => formatDuration(i.latency_ms_avg),
+            },
+            {
+              key: "latency_ms_max",
+              header: "最大延迟",
+              cellClassName: "text-right",
+              render: (i) => formatDuration(i.latency_ms_max),
+            },
+          ]}
+        />
       </div>
 
       {/* 明细分页 */}
@@ -464,72 +477,85 @@ export default function UsagePage() {
             />
           </div>
         </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>时间</TableHead>
-              <TableHead>租户</TableHead>
-              <TableHead>模型</TableHead>
-              <TableHead>任务</TableHead>
-              <TableHead>状态</TableHead>
-              <TableHead className="text-right">Tokens</TableHead>
-              <TableHead className="text-right">延迟</TableHead>
-              <TableHead>链路</TableHead>
-              <TableHead className="w-20"></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(list.data?.rows ?? []).map((r) => (
-              <TableRow key={r.id}>
-                <TableCell className="whitespace-nowrap text-muted-foreground">
-                  {formatDateTime(r.created_at)}
-                </TableCell>
-                <TableCell className="text-muted-foreground">{r.tenant_key}</TableCell>
-                <TableCell className="max-w-40 truncate font-medium" title={r.model}>
+        {/* 明细加载失败:错误条置于表区上方,DataView 只管加载/空态 */}
+        {!list.isLoading && list.isError && (
+          <div className="px-4 py-3">
+            <ErrorAlert text="明细加载失败" />
+          </div>
+        )}
+        <DataView
+          rows={list.data?.rows ?? []}
+          rowKey={(r) => r.id}
+          isLoading={list.isLoading}
+          isEmpty={!list.isLoading && !list.isError && list.data?.rows.length === 0}
+          emptyText="无匹配记录"
+          columns={[
+            {
+              key: "created_at",
+              header: "时间",
+              cardPriority: 2,
+              cellClassName: "whitespace-nowrap text-muted-foreground",
+              render: (r) => formatDateTime(r.created_at),
+            },
+            {
+              key: "tenant_key",
+              header: "租户",
+              cellClassName: "text-muted-foreground",
+            },
+            {
+              key: "model",
+              header: "模型",
+              cardPriority: 1,
+              render: (r) => (
+                <span className="block max-w-40 truncate font-medium" title={r.model}>
                   {r.model}
-                </TableCell>
-                <TableCell>{r.task}</TableCell>
-                <TableCell>
-                  <StatusBadge meta={LLM_STATUS_META} value={r.status} />
-                </TableCell>
-                <TableCell className="text-right">{fmtTokens(r.total_tokens)}</TableCell>
-                <TableCell className="text-right">{formatDuration(r.latency_ms)}</TableCell>
-                <TableCell
-                  className="max-w-32 truncate font-mono text-xs text-muted-foreground"
+                </span>
+              ),
+            },
+            { key: "task", header: "任务", cardPriority: 4 },
+            {
+              key: "status",
+              header: "状态",
+              cardPriority: 3,
+              render: (r) => <StatusBadge meta={LLM_STATUS_META} value={r.status} />,
+            },
+            {
+              key: "total_tokens",
+              header: "Tokens",
+              cardPriority: 5,
+              cellClassName: "text-right",
+              render: (r) => fmtTokens(r.total_tokens),
+            },
+            {
+              key: "latency_ms",
+              header: "延迟",
+              cellClassName: "text-right",
+              render: (r) => formatDuration(r.latency_ms),
+            },
+            {
+              key: "trace_id",
+              header: "链路",
+              render: (r) => (
+                <span
+                  className="block max-w-32 truncate font-mono text-xs text-muted-foreground"
                   title={r.trace_id ?? undefined}
                 >
                   {r.trace_id ?? "—"}
-                </TableCell>
-                <TableCell>
-                  {r.trace_id && (
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => setTimelineTrace(r.trace_id ?? null)}
-                    >
-                      <Activity className="size-3.5" />
-                      时间线
-                    </Button>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-            {!list.isLoading && list.isError && (
-              <TableRow>
-                <TableCell colSpan={9}>
-                  <QueryErrorAlert text="明细加载失败" />
-                </TableCell>
-              </TableRow>
-            )}
-            {!list.isLoading && !list.isError && (list.data?.rows ?? []).length === 0 && (
-              <TableRow>
-                <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
-                  无匹配记录
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+                </span>
+              ),
+            },
+          ]}
+          actions={[
+            {
+              label: "时间线",
+              // 与原条件渲染同口径:无 trace_id 的行不渲染该操作
+              isVisible: (r) => Boolean(r.trace_id),
+              onSelect: (r) => {
+                if (r.trace_id) setTimelineTrace(r.trace_id);
+              },
+            },
+          ]}
+        />
         <Pagination
           page={page}
           pageCount={totalPages}
@@ -560,9 +586,9 @@ export default function UsagePage() {
           {timeline.isLoading ? (
             <div className="py-8 text-center text-sm text-muted-foreground">加载中…</div>
           ) : timeline.isError ? (
-            <QueryErrorAlert text="时间线加载失败" />
+            <ErrorAlert text="时间线加载失败" />
           ) : (timeline.data?.events ?? []).length === 0 ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">该链路暂无事件</div>
+            <EmptyState>该链路暂无事件</EmptyState>
           ) : (
             <ol className="space-y-2 border-l pl-4">
               {(timeline.data?.events ?? []).map((e, idx) => (
@@ -589,7 +615,7 @@ function TimelineItem({ event }: { event: TimelineEvent }) {
   return (
     <li className="relative rounded-md border bg-card p-3 pl-9">
       <span
-        className={`absolute left-[-1.35rem] top-3 flex size-5 items-center justify-center rounded-full border bg-card ${
+        className={`absolute -left-5.5 top-3 flex size-5 items-center justify-center rounded-full border bg-card ${
           isErr ? "text-destructive" : "text-muted-foreground"
         }`}
       >

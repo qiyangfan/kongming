@@ -17,7 +17,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { QueryErrorAlert } from "@/components/query-error";
+import { EmptyState } from "@/components/empty-state";
+import { ErrorAlert } from "@/components/error-alert";
 import {
   addFavorite,
   getStoreBot,
@@ -150,13 +151,13 @@ export default function StorePage() {
       </div>
 
       {(tab === "all" ? bots.isError : favorites.isError) ? (
-        <QueryErrorAlert />
+        <ErrorAlert />
       ) : (tab === "all" ? bots.isLoading : favorites.isLoading) ? (
         <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden />
       ) : ((tab === "all" ? bots.data : favorites.data) ?? []).length === 0 ? (
-        <p className="py-12 text-center text-sm text-muted-foreground">
+        <EmptyState>
           {tab === "all" ? "货架空空——上架第一位助手吧。" : "还没有收藏——点心形即可。"}
-        </p>
+        </EmptyState>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {((tab === "all" ? bots.data : favorites.data) ?? []).map((b) => (
@@ -223,7 +224,7 @@ export default function StorePage() {
               {detail.data ? detail.data.bot_key : detailKey}
             </DialogDescription>
           </DialogHeader>
-          {detail.isError && <QueryErrorAlert />}
+          {detail.isError && <ErrorAlert />}
           {detail.data && (
             <>
               <div className="space-y-3">

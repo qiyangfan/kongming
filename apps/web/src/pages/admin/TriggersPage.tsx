@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 
 import {
   AlertDialog,
@@ -27,7 +27,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -35,18 +34,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { EmptyState } from "@/components/empty-state";
 import { StatusSwitch } from "@/components/status-switch";
 import { StatusBadge, type StatusMeta } from "@/components/status-badge";
+import { FormRow } from "@/components/form-row";
 import { PageHeader } from "@/components/page-header";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { QueryErrorAlert } from "@/components/query-error";
+import { DataView } from "@/components/data-view";
+import { ErrorAlert } from "@/components/error-alert";
 import { SchedulePicker } from "@/components/schedule-picker";
 import {
   createTrigger,
@@ -240,121 +234,109 @@ export default function TriggersPage() {
         }
       />
 
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>标识</TableHead>
-              <TableHead>类型</TableHead>
-              <TableHead>目标</TableHead>
-              <TableHead>调度/地址</TableHead>
-              <TableHead>启用</TableHead>
-              <TableHead className="text-right">操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {triggers.isError ? (
-              <TableRow>
-                <TableCell colSpan={6}>
-                  <QueryErrorAlert />
-                </TableCell>
-              </TableRow>
-            ) : (triggers.data ?? []).length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                  尚未配置触发器。
-                </TableCell>
-              </TableRow>
-            ) : (
-              (triggers.data ?? []).map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell className="font-mono text-xs">{row.tg_key}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{TYPE_LABELS[row.type] ?? row.type}</Badge>
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    {row.target_type}:{row.target_key}
-                  </TableCell>
-                  <TableCell className="max-w-56 truncate font-mono text-xs">
-                    {row.type === "CRON" ? (
-                      <>
-                        <span className="block truncate" title={row.cron_expr ?? undefined}>
-                          {row.cron_expr}
-                        </span>
-                        {row.next_fire_at && (
-                          <p className="whitespace-normal text-muted-foreground">
-                            下次 {formatDateTime(row.next_fire_at)}
-                          </p>
-                        )}
-                      </>
-                    ) : (
-                      <span className="block truncate" title={`/webhooks/${row.webhook_path}`}>
-                        /webhooks/{row.webhook_path}
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <StatusSwitch
-                      active={row.enabled}
-                      pending={toggle.isPending && toggle.variables?.row.id === row.id}
-                      error={toggleError[row.id] || null}
-                      onToggle={() => toggle.mutate({ row, enabled: !row.enabled })}
-                      ariaLabel={`启停 ${row.name}`}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => {
-                          setHistoryOf(row);
-                          setHistoryPage(1);
-                        }}
-                      >
-                        历史
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => {
-                          setForm({
-                            id: row.id,
-                            tgKey: row.tg_key,
-                            name: row.name,
-                            type: row.type as "CRON" | "WEBHOOK",
-                            targetType: row.target_type as "workflow" | "bot",
-                            targetKey: row.target_key,
-                            cronExpr: row.cron_expr ?? "0 9 * * *",
-                            minInterval: String(row.min_interval_sec),
-                            adapter: row.adapter as "custom" | "github",
-                            notifyUrl: row.notify_url,
-                            secret: "",
-                          });
-                          setFormError("");
-                        }}
-                      >
-                        编辑
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`删除 ${row.name}`}
-                        onClick={() => {
-                          setDeleting(row);
-                          setDeleteError("");
-                        }}
-                      >
-                        <Trash2 aria-hidden />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      {triggers.isError && <ErrorAlert />}
+
+      <DataView
+        rows={triggers.data ?? []}
+        rowKey={(row) => row.id}
+        isLoading={triggers.isPending}
+        isEmpty={!triggers.isPending && !triggers.isError && (triggers.data ?? []).length === 0}
+        emptyText="尚未配置触发器。"
+        columns={[
+          {
+            key: "tg_key",
+            header: "标识",
+            cardPriority: 1,
+            cellClassName: "font-mono text-xs",
+            render: (row) => row.tg_key,
+          },
+          {
+            key: "type",
+            header: "类型",
+            cardPriority: 4,
+            render: (row) => <Badge variant="secondary">{TYPE_LABELS[row.type] ?? row.type}</Badge>,
+          },
+          {
+            key: "target",
+            header: "目标",
+            cellClassName: "text-xs",
+            render: (row) => `${row.target_type}:${row.target_key}`,
+          },
+          {
+            key: "schedule",
+            header: "调度/地址",
+            cardPriority: 3,
+            cellClassName: "max-w-56 truncate font-mono text-xs",
+            render: (row) =>
+              row.type === "CRON" ? (
+                <>
+                  <span className="block truncate" title={row.cron_expr ?? undefined}>
+                    {row.cron_expr}
+                  </span>
+                  {row.next_fire_at && (
+                    <p className="whitespace-normal text-muted-foreground">
+                      下次 {formatDateTime(row.next_fire_at)}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <span className="block truncate" title={`/webhooks/${row.webhook_path}`}>
+                  /webhooks/{row.webhook_path}
+                </span>
+              ),
+          },
+          {
+            key: "enabled",
+            header: "启用",
+            cardPriority: 2,
+            render: (row) => (
+              <StatusSwitch
+                active={row.enabled}
+                pending={toggle.isPending && toggle.variables?.row.id === row.id}
+                error={toggleError[row.id] || null}
+                onToggle={() => toggle.mutate({ row, enabled: !row.enabled })}
+                ariaLabel={`启停 ${row.name}`}
+              />
+            ),
+          },
+        ]}
+        actions={[
+          {
+            label: "历史",
+            onSelect: (row) => {
+              setHistoryOf(row);
+              setHistoryPage(1);
+            },
+          },
+          {
+            label: "编辑",
+            onSelect: (row) => {
+              setForm({
+                id: row.id,
+                tgKey: row.tg_key,
+                name: row.name,
+                type: row.type as "CRON" | "WEBHOOK",
+                targetType: row.target_type as "workflow" | "bot",
+                targetKey: row.target_key,
+                cronExpr: row.cron_expr ?? "0 9 * * *",
+                minInterval: String(row.min_interval_sec),
+                adapter: row.adapter as "custom" | "github",
+                notifyUrl: row.notify_url,
+                secret: "",
+              });
+              setFormError("");
+            },
+          },
+          {
+            label: "删除",
+            destructive: true,
+            onSelect: (row) => {
+              setDeleting(row);
+              setDeleteError("");
+            },
+          },
+        ]}
+      />
 
       {/* 新建/编辑 */}
       <Dialog
@@ -377,8 +359,7 @@ export default function TriggersPage() {
               }}
             >
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="tg-key">标识</Label>
+                <FormRow label="标识" htmlFor="tg-key">
                   <Input
                     id="tg-key"
                     value={form.tgKey}
@@ -386,20 +367,18 @@ export default function TriggersPage() {
                     onChange={(e) => setForm({ ...form, tgKey: e.target.value })}
                     className="font-mono"
                   />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="tg-name">名称</Label>
+                </FormRow>
+                <FormRow label="名称" htmlFor="tg-name">
                   <Input
                     id="tg-name"
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
                   />
-                </div>
+                </FormRow>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {form.id === null && (
-                  <div className="space-y-1.5">
-                    <Label>类型</Label>
+                  <FormRow label="类型">
                     <Select
                       value={form.type}
                       onValueChange={(v) => setForm({ ...form, type: v as "CRON" | "WEBHOOK" })}
@@ -415,10 +394,9 @@ export default function TriggersPage() {
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
+                  </FormRow>
                 )}
-                <div className="space-y-1.5">
-                  <Label>目标类型</Label>
+                <FormRow label="目标类型">
                   <Select
                     value={form.targetType}
                     onValueChange={(v) =>
@@ -434,9 +412,8 @@ export default function TriggersPage() {
                       <SelectItem value="bot">助手</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>目标{form.targetType === "workflow" ? "(工作流)" : "(助手)"}</Label>
+                </FormRow>
+                <FormRow label={`目标${form.targetType === "workflow" ? "(工作流)" : "(助手)"}`}>
                   {/* 040:自由输入改候选下拉(候选=对应域可见清单);
                       编辑回显时目标已删则注入禁用占位项,防「打开即保存」静默改值 */}
                   <Select
@@ -475,7 +452,7 @@ export default function TriggersPage() {
                         )}
                     </SelectContent>
                   </Select>
-                </div>
+                </FormRow>
               </div>
               {form.type === "CRON" && (
                 <div className="space-y-3">
@@ -483,8 +460,7 @@ export default function TriggersPage() {
                     value={form.cronExpr}
                     onChange={(cronExpr) => setForm({ ...form, cronExpr })}
                   />
-                  <div className="space-y-1.5">
-                    <Label htmlFor="tg-interval">最小间隔(秒)</Label>
+                  <FormRow label="最小间隔(秒)" htmlFor="tg-interval">
                     <Input
                       id="tg-interval"
                       value={form.minInterval}
@@ -507,7 +483,7 @@ export default function TriggersPage() {
                     <p className="text-xs text-muted-foreground">
                       两次触发之间的最小间隔秒数;间隔内的重复触发会跳过不执行。
                     </p>
-                  </div>
+                  </FormRow>
                   {/* 040·11:接下来 3 次预览(防抖;非法表达式红色原因,与保存期同口径)。
                       旧表达式结果不展示:防抖窗口内 data 落后于输入,仅当防抖值与
                       当前输入一致才呈现(R1 实锤:防旧值被当现值误读) */}
@@ -531,8 +507,7 @@ export default function TriggersPage() {
               )}
               {form.type === "WEBHOOK" && form.id === null && (
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="tg-secret">签名密钥(留空自动生成)</Label>
+                  <FormRow label="签名密钥(留空自动生成)" htmlFor="tg-secret">
                     <Input
                       id="tg-secret"
                       value={form.secret}
@@ -540,9 +515,8 @@ export default function TriggersPage() {
                       className="font-mono"
                       type="password"
                     />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>请求数据格式</Label>
+                  </FormRow>
+                  <FormRow label="请求数据格式">
                     <Select
                       value={form.adapter}
                       onValueChange={(v) => setForm({ ...form, adapter: v as "custom" | "github" })}
@@ -555,11 +529,10 @@ export default function TriggersPage() {
                         <SelectItem value="github">GitHub(Webhook 载荷)</SelectItem>
                       </SelectContent>
                     </Select>
-                  </div>
+                  </FormRow>
                 </div>
               )}
-              <div className="space-y-1.5">
-                <Label htmlFor="tg-notify">执行完成后通知地址(可空)</Label>
+              <FormRow label="执行完成后通知地址(可空)" htmlFor="tg-notify">
                 <Input
                   id="tg-notify"
                   value={form.notifyUrl}
@@ -567,7 +540,7 @@ export default function TriggersPage() {
                   className="font-mono text-xs"
                   placeholder="https://example.com/hook(执行结果发送到此地址;仅接受公网地址)"
                 />
-              </div>
+              </FormRow>
               {formError && (
                 <p role="alert" className="text-sm text-destructive">
                   {formError}
@@ -621,9 +594,9 @@ export default function TriggersPage() {
           </DialogHeader>
           <div className="max-h-96 space-y-2 overflow-y-auto">
             {runs.isError ? (
-              <QueryErrorAlert />
+              <ErrorAlert />
             ) : (runs.data?.items ?? []).length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">暂无记录。</p>
+              <EmptyState>暂无记录。</EmptyState>
             ) : (
               (runs.data?.items ?? []).map((r) => (
                 <div key={r.id} className="rounded-md border px-3 py-2 text-sm">

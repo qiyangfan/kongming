@@ -10,6 +10,7 @@ import { AlertTriangle, CheckCircle2, Loader2, QrCode, XCircle } from "lucide-re
 
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { ErrorAlert } from "@/components/error-alert";
 import { li2yuan } from "@/lib/money";
 import { cancelPayment, getInvoiceDetail, getPayment, mockSimulate } from "@/lib/billing-api";
 import { formatDateTime } from "@/lib/datetime";
@@ -69,14 +70,12 @@ export default function PayPage() {
       {payment.isLoading ? (
         <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden />
       ) : payment.isError || !pay ? (
-        <p role="alert" className="text-sm text-destructive">
-          支付单不存在或不可见。
-        </p>
+        <ErrorAlert text="支付单不存在或不可见。" />
       ) : (
         <section className="space-y-4 rounded-lg border border-border p-6 text-center">
           <div className="space-y-1">
             <p className="text-sm text-muted-foreground">账单周期 {invoice.data?.period ?? "…"}</p>
-            <p className="text-3xl font-semibold">¥{li2yuan(pay.amount)}</p>
+            <p className="text-3xl font-semibold tabular-nums">¥{li2yuan(pay.amount)}</p>
           </div>
 
           {pay.status === "CREATED" && (

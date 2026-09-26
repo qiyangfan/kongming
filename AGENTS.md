@@ -97,10 +97,19 @@ web 前端统一遵循聚合目录 `../FRONTEND-CONSTITUTION.md`(Article 0–10)
   破坏性操作必须 AlertDialog 确认(禁 window.confirm);≥2 处同类 UI 必须抽公共组件;
   同一覆盖 ≥3 处收编进组件默认值(Article 1/2)。
 - 页面骨架只用标准件:PageHeader / FormRow / FieldLabel / Pagination / StatCard / StatusBadge /
-  QueryErrorAlert / EmptyState,禁每页手搓骨架;间距只用 Tailwind 刻度,禁任意值间距与
+  ErrorAlert / EmptyState,禁每页手搓骨架;间距只用 Tailwind 刻度,禁任意值间距与
   inline style 的 margin/padding/width(Article 4/6)。
-- 响应式:md 为折叠点(窄屏 Sheet 抽屉范式),表格滚动由 ui/Table 自带 overflow-x-auto,
-  页面级网格必须带折降断点;多屏验收 = 375/768/1280 三档不横向溢出(Article 9)。
+- 响应式(移动优先,mobile-experience 域):无前缀基线即窄屏形态,`md:` 单一
+  折叠点恢复桌面;壳层窄屏 = BottomNav + 管理层进(/admin 索引页)+ 会话抽屉
+  (入口在对话区页头),不复刻侧栏;结构化列表一律 `DataView` 双形态标准件
+  (md+ 表格 / md- 卡片,行操作窄屏收溢出菜单),新建/编辑对话框窄屏全屏承载
+  (ui/dialog 基类单点收编,AlertDialog 维持居中小卡);问答结果表等动态列
+  豁免卡片化,保留卡片内横滚;贴边区消费安全区工具类(pb-safe 等),验收档 =
+  375(主)/768/1280 三档 + 亮暗两态(Article 9)。
+  备注(设计 D7):聚合目录 `../FRONTEND-CONSTITUTION.md` 与
+  `../scripts/sync-frontend-standard.sh` 均在原位,同步机制照下条执行;
+  本变更新增的共享组件(data-view/empty-state/error-alert/bottom-nav 等)
+  尚未收录进双仓标准件清单,是否双仓收编待 owner 裁定,先行修改源=本仓。
 - ui/ 与共享组件是双仓标准件(与 jinguan 逐字节一致;theme-store 例外:同构不同 key):
   **先改本仓再同步** → 聚合目录 `bash ../scripts/sync-frontend-standard.sh`。
 - 收尾门禁:`pnpm typecheck && pnpm lint` + 宪法 Article 8 自检 grep + 亮暗两态走查改动页。

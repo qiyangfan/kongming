@@ -14,10 +14,21 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { MoreHorizontal } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { FormRow } from "@/components/form-row";
+import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
+import { ErrorAlert } from "@/components/error-alert";
 import {
   Dialog,
   DialogContent,
@@ -88,18 +99,37 @@ function TreeRow({
       ) : (
         <span className="size-4" />
       )}
-      <span className="flex-1 text-sm font-medium">{node.dept_name}</span>
+      <span className="min-w-0 flex-1 truncate text-sm font-medium">{node.dept_name}</span>
       {node.status === "DISABLED" && <Badge variant="secondary">停用</Badge>}
-      <span className="text-muted-foreground text-xs">#{node.sort}</span>
-      <Button variant="ghost" size="sm" onClick={() => onAddChild(node)}>
-        加子级
-      </Button>
-      <Button variant="ghost" size="sm" onClick={() => onEdit(node)}>
-        编辑
-      </Button>
-      <Button variant="ghost-destructive" size="sm" onClick={() => onDelete(node)}>
-        删除
-      </Button>
+      <span className="shrink-0 text-muted-foreground text-xs">#{node.sort}</span>
+      {/* 行操作(mobile-experience B5.4):宽屏行内按钮保留;窄屏收溢出菜单 */}
+      <div className="hidden items-center gap-1 md:flex">
+        <Button variant="ghost" size="sm" onClick={() => onAddChild(node)}>
+          加子级
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => onEdit(node)}>
+          编辑
+        </Button>
+        <Button variant="ghost-destructive" size="sm" onClick={() => onDelete(node)}>
+          删除
+        </Button>
+      </div>
+      <div className="md:hidden">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon-sm" aria-label={`${node.dept_name} 行操作`}>
+              <MoreHorizontal aria-hidden />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => onAddChild(node)}>加子级</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onEdit(node)}>编辑</DropdownMenuItem>
+            <DropdownMenuItem variant="destructive" onSelect={() => onDelete(node)}>
+              删除
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </div>
   );
   if (!hasChildren) return row;
@@ -201,37 +231,30 @@ export default function DeptsPage() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          部门用于划定数据可见范围(如「本部门」「本部门及以下」)。
-        </p>
-        <Button
-          size="sm"
-          onClick={() => {
-            setForm(EMPTY);
-            setFormError("");
-            setCreating(true);
-          }}
-        >
-          新建部门
-        </Button>
-      </div>
+      <PageHeader
+        title="部门"
+        description="部门用于划定数据可见范围(如「本部门」「本部门及以下」)。"
+        actions={
+          <Button
+            size="sm"
+            onClick={() => {
+              setForm(EMPTY);
+              setFormError("");
+              setCreating(true);
+            }}
+          >
+            新建部门
+          </Button>
+        }
+      />
 
-      {depts.isError && (
-        <p className="text-destructive text-sm" role="alert">
-          部门树加载失败:{(depts.error as Error).message}
-        </p>
-      )}
+      {depts.isError && <ErrorAlert text={`部门树加载失败:${(depts.error as Error).message}`} />}
 
       <div className="rounded-md border">
         {depts.isPending && (
           <p className="p-4 text-center text-sm text-muted-foreground">加载中…</p>
         )}
-        {depts.data?.length === 0 && (
-          <p className="p-4 text-center text-sm text-muted-foreground">
-            暂无部门,点击右上角「新建部门」开始。
-          </p>
-        )}
+        {depts.data?.length === 0 && <EmptyState>暂无部门,点击右上角「新建部门」开始。</EmptyState>}
         {(depts.data ?? []).map((n) => (
           <TreeRow
             key={n.id}

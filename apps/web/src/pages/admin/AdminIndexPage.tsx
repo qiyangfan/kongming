@@ -1,0 +1,49 @@
+/* 管理索引页(mobile-experience B2.2 层进式):窄屏直达 /admin 先呈现索引,
+   按权限列出全部子页入口(与 AdminLayout 侧栏同一 ADMIN_NAV 单源),点击进入
+   子页、子页顶部可返回;宽屏(md+)维持既有「重定向默认子页」现状不渲染。 */
+
+import { NavLink, Navigate } from "react-router";
+
+import { useMediaQuery } from "@/lib/use-media-query";
+import { ADMIN_NAV } from "@/lib/admin-nav";
+import { useAuth } from "@/lib/auth-store";
+import { hasPerm } from "@/lib/nav";
+import { cn } from "@/lib/utils";
+
+export default function AdminIndexPage() {
+  const user = useAuth((s) => s.user);
+  const visible = ADMIN_NAV.filter((item) => hasPerm(user, item.perm));
+  const isWide = useMediaQuery("(min-width: 768px)");
+
+  // 窄屏无任何可见板块时同样重定向:交由 /admin/users 的 PermRoute 落 403
+  // 兜底页,与宽屏同态,避免无权限者看到一张空索引卡
+  if (isWide || visible.length === 0) {
+    return <Navigate to="/admin/users" replace />;
+  }
+
+  return (
+    <div className="mx-auto max-w-3xl p-4">
+      <h1 className="text-lg font-semibold text-foreground">管理</h1>
+      <p className="mt-1 text-sm text-muted-foreground">选择要管理的板块</p>
+      <nav aria-label="管理索引" className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {visible.map(({ to, label, icon: Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            className={({ isActive }) =>
+              cn(
+                "flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-sm transition-colors",
+                isActive
+                  ? "border-ring bg-secondary font-medium text-secondary-foreground"
+                  : "text-foreground hover:bg-secondary/60",
+              )
+            }
+          >
+            <Icon className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+            {label}
+          </NavLink>
+        ))}
+      </nav>
+    </div>
+  );
+}

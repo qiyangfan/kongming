@@ -10,15 +10,8 @@ import { Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { QueryErrorAlert } from "@/components/query-error";
+import { DataView } from "@/components/data-view";
+import { ErrorAlert } from "@/components/error-alert";
 import {
   createPayment,
   getInvoiceDetail,
@@ -195,7 +188,7 @@ export default function PortalPage() {
       <section className="space-y-3 rounded-lg border border-border p-4">
         <h2 className="text-sm font-medium">当期用量({usage.data?.month ?? "…"})</h2>
         {usage.isError ? (
-          <QueryErrorAlert />
+          <ErrorAlert />
         ) : usage.isLoading ? (
           <Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden />
         ) : (
@@ -224,20 +217,41 @@ export default function PortalPage() {
                 我的 API 密钥(仅显示生效中)
               </p>
               {keys.isError ? (
-                <QueryErrorAlert />
-              ) : (keys.data ?? []).length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  还没有密钥,到「管理 → 助手」页,在助手列表中点「创建密钥」。
-                </p>
+                <ErrorAlert />
               ) : (
-                <ul className="space-y-0.5 text-xs text-muted-foreground">
-                  {(keys.data ?? []).map((k) => (
-                    <li key={k.id} className="font-mono">
-                      {k.bot_key}:{k.name}
-                      {k.last_used_at ? `(最近用 ${formatDate(k.last_used_at)})` : "(未使用)"}
-                    </li>
-                  ))}
-                </ul>
+                <DataView
+                  rows={keys.data ?? []}
+                  rowKey={(k) => k.id}
+                  isLoading={keys.isPending}
+                  isEmpty={!keys.isPending && keys.data?.length === 0}
+                  emptyText="还没有密钥,到「管理 → 助手」页,在助手列表中点「创建密钥」。"
+                  columns={[
+                    {
+                      key: "bot_key",
+                      header: "密钥",
+                      cardPriority: 1,
+                      render: (k) => (
+                        <span className="font-mono text-xs text-muted-foreground">{k.bot_key}</span>
+                      ),
+                    },
+                    {
+                      key: "name",
+                      header: "名称",
+                      cardPriority: 2,
+                      render: (k) => (
+                        <span className="text-xs text-muted-foreground">{k.name}</span>
+                      ),
+                    },
+                    {
+                      key: "last_used_at",
+                      header: "最近使用",
+                      cardPriority: 3,
+                      cellClassName: "text-xs text-muted-foreground",
+                      render: (k) =>
+                        k.last_used_at ? `最近用 ${formatDate(k.last_used_at)}` : "未使用",
+                    },
+                  ]}
+                />
               )}
             </div>
           </>
@@ -246,58 +260,55 @@ export default function PortalPage() {
 
       <section className="space-y-2">
         <h2 className="text-sm font-medium">账单</h2>
-        <div className="rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>周期</TableHead>
-                <TableHead>金额(元)</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {invoices.isError ? (
-                <TableRow>
-                  <TableCell colSpan={4}>
-                    <QueryErrorAlert />
-                  </TableCell>
-                </TableRow>
-              ) : (invoices.data ?? []).length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
-                    暂无账单(每月 1 日出账)。
-                  </TableCell>
-                </TableRow>
-              ) : (
-                (invoices.data ?? []).map((inv) => (
-                  <TableRow key={inv.id}>
-                    <TableCell className="font-mono text-xs">{inv.period}</TableCell>
-                    <TableCell>¥{li2yuan(inv.amount)}</TableCell>
-                    <TableCell>
-                      <StatusBadge meta={INVOICE_STATUS_META} value={inv.status} />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {inv.status === "PENDING" && (
-                        <Button
-                          variant="outline"
-                          size="xs"
-                          disabled={payingId === inv.id}
-                          onClick={() => void goPay(inv.id)}
-                        >
-                          {payingId === inv.id && <Loader2 className="animate-spin" aria-hidden />}
-                          去支付
-                        </Button>
-                      )}
-                      <Button variant="ghost" size="xs" onClick={() => void openDetail(inv.id)}>
-                        明细
+        {invoices.isError && <ErrorAlert />}
+        {/* 外框仅在宽屏保留(md- 卡片形态裸露,与 DataView 样板口径一致) */}
+        <div className="md:rounded-lg md:border">
+          <DataView
+            rows={invoices.data ?? []}
+            rowKey={(inv) => inv.id}
+            isLoading={invoices.isPending}
+            isEmpty={!invoices.isPending && invoices.data?.length === 0}
+            emptyText="暂无账单(每月 1 日出账)。"
+            columns={[
+              {
+                key: "period",
+                header: "周期",
+                cardPriority: 1,
+                render: (inv) => <span className="font-mono text-xs">{inv.period}</span>,
+              },
+              {
+                key: "amount",
+                header: "金额(元)",
+                headClassName: "text-right",
+                cellClassName: "text-right tabular-nums",
+                cardPriority: 2,
+                render: (inv) => `¥${li2yuan(inv.amount)}`,
+              },
+              {
+                key: "status",
+                header: "状态",
+                cardPriority: 3,
+                render: (inv) => (
+                  <div className="flex items-center gap-2">
+                    <StatusBadge meta={INVOICE_STATUS_META} value={inv.status} />
+                    {/* 去支付仅 PENDING 可见;DataViewAction 无按行条件,故挂状态列而非 actions */}
+                    {inv.status === "PENDING" && (
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        disabled={payingId === inv.id}
+                        onClick={() => void goPay(inv.id)}
+                      >
+                        {payingId === inv.id && <Loader2 className="animate-spin" aria-hidden />}
+                        去支付
                       </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                    )}
+                  </div>
+                ),
+              },
+            ]}
+            actions={[{ label: "明细", onSelect: (inv) => void openDetail(inv.id) }]}
+          />
         </div>
         {payError && (
           <p role="alert" className="text-sm text-destructive">
@@ -327,32 +338,36 @@ export default function PortalPage() {
                 {INVOICE_STATUS_TEXT[detail.status] ?? detail.status}
               </p>
               {(usageOf(detail).by_model ?? []).length > 0 && (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>模型</TableHead>
-                      <TableHead>输入 Token</TableHead>
-                      <TableHead>输出 Token</TableHead>
-                      <TableHead>调用次数</TableHead>
-                      <TableHead className="text-right">费用</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(usageOf(detail).by_model ?? []).map((m) => (
-                      <TableRow key={m.model}>
-                        <TableCell className="max-w-40 truncate font-mono text-xs" title={m.model}>
+                <DataView
+                  rows={usageOf(detail).by_model ?? []}
+                  rowKey={(m) => m.model}
+                  columns={[
+                    {
+                      key: "model",
+                      header: "模型",
+                      cardPriority: 1,
+                      render: (m) => (
+                        <span className="block max-w-40 truncate font-mono text-xs" title={m.model}>
                           {m.model}
-                        </TableCell>
-                        <TableCell>{formatNumber(m.prompt)}</TableCell>
-                        <TableCell>{formatNumber(m.completion)}</TableCell>
-                        <TableCell>{formatNumber(m.calls)}</TableCell>
-                        <TableCell className="text-right">
-                          ¥{li2yuan(rowCostLi(m, usageOf(detail)))}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                        </span>
+                      ),
+                    },
+                    { key: "prompt", header: "输入 Token", render: (m) => formatNumber(m.prompt) },
+                    {
+                      key: "completion",
+                      header: "输出 Token",
+                      render: (m) => formatNumber(m.completion),
+                    },
+                    { key: "calls", header: "调用次数", render: (m) => formatNumber(m.calls) },
+                    {
+                      key: "cost",
+                      header: "费用",
+                      headClassName: "text-right",
+                      cellClassName: "text-right",
+                      render: (m) => `¥${li2yuan(rowCostLi(m, usageOf(detail)))}`,
+                    },
+                  ]}
+                />
               )}
               <div className="space-y-1 text-xs text-muted-foreground">
                 {formulaLines(usageOf(detail)).map((line) => (

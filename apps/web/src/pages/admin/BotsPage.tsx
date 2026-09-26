@@ -3,10 +3,12 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Check, Copy, Key, Loader2, Plus } from "lucide-react";
+import { Bot, Check, Copy, Loader2, Plus } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DataView } from "@/components/data-view";
+import { FormRow } from "@/components/form-row";
 import { PageHeader } from "@/components/page-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { publishBot, unpublishBot } from "@/lib/store-api";
@@ -21,9 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { FieldLabel } from "@/components/field-label";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -32,18 +32,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types.gen";
-import { QueryErrorAlert } from "@/components/query-error";
+import { ErrorAlert } from "@/components/error-alert";
 
 // 036⑥:消费生成类型(ADR-005,禁手写;team_id 回传已在生成类型)
 type BotItem = components["schemas"]["BotOut"];
@@ -168,158 +160,139 @@ export default function BotsPage() {
         </p>
       )}
 
-      <div className="rounded-lg border border-border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>助手</TableHead>
-              <TableHead>工具</TableHead>
-              <TableHead>数据源</TableHead>
-              <TableHead>启用</TableHead>
-              <TableHead>公开</TableHead>
-              <TableHead className="w-28">密钥</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {bots.isLoading ? (
-              <TableRow>
-                <TableCell colSpan={6} className="py-6 text-center">
-                  <Loader2
-                    className="mx-auto size-4 animate-spin text-muted-foreground"
-                    aria-hidden
-                  />
-                </TableCell>
-              </TableRow>
-            ) : bots.isError ? (
-              <TableRow>
-                <TableCell colSpan={6}>
-                  <QueryErrorAlert />
-                </TableCell>
-              </TableRow>
-            ) : (bots.data?.length ?? 0) === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
-                  暂无助手——新建一个专属助手
-                </TableCell>
-              </TableRow>
-            ) : (
-              bots.data?.map((b) => (
-                <TableRow key={b.id}>
-                  <TableCell>
-                    <span className="flex items-center gap-1.5">
-                      <Bot className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                      <span className="max-w-40 truncate font-medium" title={b.name}>
-                        {b.name}
-                      </span>
-                      <span
-                        className="max-w-28 truncate font-mono text-xs text-muted-foreground"
-                        title={b.bot_key}
-                      >
-                        {b.bot_key}
-                      </span>
-                      {b.team_id && (
-                        <Badge
-                          variant="outline"
-                          className="max-w-32"
-                          title={
-                            (myTeams.data ?? []).find((t) => t.id === b.team_id)?.name ?? "团队"
-                          }
-                        >
-                          <span className="truncate">
-                            {(myTeams.data ?? []).find((t) => t.id === b.team_id)?.name ?? "团队"}
-                          </span>
-                        </Badge>
-                      )}
-                    </span>
-                  </TableCell>
-                  <TableCell
-                    className="max-w-56 truncate font-mono text-xs"
-                    title={b.tools.length ? b.tools.join(", ") : undefined}
+      {bots.isError && <ErrorAlert />}
+
+      <DataView
+        rows={bots.data ?? []}
+        rowKey={(b) => b.id}
+        isLoading={bots.isPending}
+        isEmpty={!bots.isPending && !bots.isError && (bots.data ?? []).length === 0}
+        emptyText="暂无助手——新建一个专属助手"
+        columns={[
+          {
+            key: "name",
+            header: "助手",
+            cardPriority: 1,
+            render: (b) => (
+              <span className="flex items-center gap-1.5">
+                <Bot className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="max-w-40 truncate font-medium" title={b.name}>
+                  {b.name}
+                </span>
+                <span
+                  className="max-w-28 truncate font-mono text-xs text-muted-foreground"
+                  title={b.bot_key}
+                >
+                  {b.bot_key}
+                </span>
+                {b.team_id && (
+                  <Badge
+                    variant="outline"
+                    className="max-w-32"
+                    title={(myTeams.data ?? []).find((t) => t.id === b.team_id)?.name ?? "团队"}
                   >
-                    {b.tools.length ? b.tools.join(", ") : "—"}
-                  </TableCell>
-                  <TableCell
-                    className="max-w-32 truncate text-xs"
-                    title={b.datasource_key ?? undefined}
-                  >
-                    {b.datasource_key}
-                  </TableCell>
-                  <TableCell>
-                    <Switch
-                      checked={b.enabled}
-                      disabled={patch.isPending}
-                      onCheckedChange={(on) => patch.mutate({ id: b.id, fields: { enabled: on } })}
-                      aria-label={`启用 ${b.name}`}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <span className="flex items-center gap-1.5">
-                      <Switch
-                        checked={b.is_public}
-                        disabled={patch.isPending}
-                        onCheckedChange={(on) =>
-                          patch.mutate({ id: b.id, fields: { is_public: on } })
-                        }
-                        aria-label={`公开 ${b.name}`}
-                      />
-                      {b.is_public && (
-                        <Badge
-                          variant="outline"
-                          className="max-w-28 font-mono text-xs"
-                          title={`/bot/${b.bot_key}`}
-                        >
-                          <span className="truncate">/bot/{b.bot_key}</span>
-                        </Badge>
-                      )}
+                    <span className="truncate">
+                      {(myTeams.data ?? []).find((t) => t.id === b.team_id)?.name ?? "团队"}
                     </span>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={createKey.isPending}
-                        onClick={() => createKey.mutate(b.id)}
-                      >
-                        <Key className="size-3.5" aria-hidden />
-                        创建密钥
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setAttaching(b.id);
-                          setAttachError("");
-                        }}
-                        aria-label={`归属 ${b.name}`}
-                      >
-                        归属
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={publish.isPending}
-                        onClick={() => {
-                          if (b.published_at !== null) {
-                            publish.mutate({ id: b.id, published: true });
-                          } else {
-                            setPubGreeting("");
-                            setPubSuggestions("");
-                            setPubTarget(b.id);
-                          }
-                        }}
-                        aria-label={`${b.published_at !== null ? "下架" : "上架"} ${b.name}`}
-                      >
-                        {b.published_at !== null ? "下架" : "上架"}
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+                  </Badge>
+                )}
+              </span>
+            ),
+          },
+          {
+            key: "tools",
+            header: "工具",
+            cardPriority: 4,
+            render: (b) => (
+              <span
+                className="block max-w-56 truncate font-mono text-xs"
+                title={b.tools.length ? b.tools.join(", ") : undefined}
+              >
+                {b.tools.length ? b.tools.join(", ") : "—"}
+              </span>
+            ),
+          },
+          {
+            key: "datasource_key",
+            header: "数据源",
+            render: (b) => (
+              <span
+                className="block max-w-32 truncate text-xs"
+                title={b.datasource_key ?? undefined}
+              >
+                {b.datasource_key}
+              </span>
+            ),
+          },
+          {
+            key: "enabled",
+            header: "启用",
+            cardPriority: 2,
+            render: (b) => (
+              <Switch
+                checked={b.enabled}
+                disabled={patch.isPending}
+                onCheckedChange={(on) => patch.mutate({ id: b.id, fields: { enabled: on } })}
+                aria-label={`启用 ${b.name}`}
+              />
+            ),
+          },
+          {
+            key: "is_public",
+            header: "公开",
+            cardPriority: 3,
+            render: (b) => (
+              <span className="flex items-center gap-1.5">
+                <Switch
+                  checked={b.is_public}
+                  disabled={patch.isPending}
+                  onCheckedChange={(on) => patch.mutate({ id: b.id, fields: { is_public: on } })}
+                  aria-label={`公开 ${b.name}`}
+                />
+                {b.is_public && (
+                  <Badge
+                    variant="outline"
+                    className="max-w-28 font-mono text-xs"
+                    title={`/bot/${b.bot_key}`}
+                  >
+                    <span className="truncate">/bot/{b.bot_key}</span>
+                  </Badge>
+                )}
+              </span>
+            ),
+          },
+        ]}
+        actions={[
+          {
+            label: "创建密钥",
+            onSelect: (b) => {
+              // 与原按钮 disabled={createKey.isPending} 同口径
+              if (!createKey.isPending) createKey.mutate(b.id);
+            },
+          },
+          {
+            label: "归属",
+            onSelect: (b) => {
+              setAttaching(b.id);
+              setAttachError("");
+            },
+          },
+          {
+            // 行级文案:已上架行展示「下架」,未上架行展示「上架」
+            label: (b) => (b.published_at !== null ? "下架" : "上架"),
+            onSelect: (b) => {
+              if (publish.isPending) return;
+              if (b.published_at !== null) {
+                publish.mutate({ id: b.id, published: true });
+              } else {
+                setPubGreeting("");
+                setPubSuggestions("");
+                setPubTarget(b.id);
+              }
+            },
+          },
+        ]}
+      />
 
       {/* 创建对话框 */}
       <Dialog open={creating} onOpenChange={setCreating}>
@@ -345,28 +318,27 @@ export default function BotsPage() {
               create.mutate();
             }}
           >
-            <div className="space-y-1.5">
-              <FieldLabel htmlFor="bot-key" help="小写字母开头,可含数字与下划线;创建后不可改。">
-                标识
-              </FieldLabel>
+            <FormRow
+              label="标识"
+              htmlFor="bot-key"
+              help="小写字母开头,可含数字与下划线;创建后不可改。"
+            >
               <Input
                 id="bot-key"
                 value={form.bot_key}
                 onChange={(e) => setForm({ ...form, bot_key: e.target.value })}
                 placeholder="after_sale"
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="bot-name">名称</Label>
+            </FormRow>
+            <FormRow label="名称" htmlFor="bot-name">
               <Input
                 id="bot-name"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder="售后助手"
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="bot-prompt">人设与守则</Label>
+            </FormRow>
+            <FormRow label="人设与守则" htmlFor="bot-prompt">
               <Textarea
                 id="bot-prompt"
                 value={form.system_prompt}
@@ -374,11 +346,11 @@ export default function BotsPage() {
                 placeholder="你是售后客服助手…"
                 rows={4}
               />
-            </div>
-            <div className="space-y-1.5">
-              <FieldLabel help="从清单勾选该助手可用的工具;不勾选时,助手仅对话,不执行任何操作。">
-                可用工具
-              </FieldLabel>
+            </FormRow>
+            <FormRow
+              label="可用工具"
+              help="从清单勾选该助手可用的工具;不勾选时,助手仅对话,不执行任何操作。"
+            >
               {/* 040:CSV 手输改注册表勾选——封闭集合消灭拼错工具名被求交静默丢弃 */}
               <ScrollArea className="h-40 rounded-md border p-2">
                 <div className="space-y-1 pr-2">
@@ -410,9 +382,7 @@ export default function BotsPage() {
                     </label>
                   ))}
                   {registry.isError ? (
-                    <p className="py-4 text-center text-xs text-destructive" role="alert">
-                      工具清单加载失败,请关闭后重试
-                    </p>
+                    <ErrorAlert text="工具清单加载失败,请关闭后重试" />
                   ) : (
                     registry.isPending && (
                       <p className="py-4 text-center text-xs text-muted-foreground">清单加载中…</p>
@@ -420,7 +390,7 @@ export default function BotsPage() {
                   )}
                 </div>
               </ScrollArea>
-            </div>
+            </FormRow>
             {error && (
               <p className="text-xs text-destructive" role="alert">
                 {error}
@@ -495,8 +465,7 @@ export default function BotsPage() {
               成员可编辑/负责人全权);仅目标团队负责人可执行。
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <Label>归属团队</Label>
+          <FormRow label="归属团队">
             <Select value={attachTeam} onValueChange={setAttachTeam}>
               <SelectTrigger aria-label="归属团队">
                 <SelectValue placeholder="选择团队" />
@@ -514,7 +483,7 @@ export default function BotsPage() {
                 {attachError}
               </p>
             )}
-          </div>
+          </FormRow>
           <DialogFooter>
             <Button onClick={() => attach.mutate()} disabled={attach.isPending || !attachTeam}>
               {attach.isPending && <Loader2 className="animate-spin" aria-hidden />}
@@ -540,8 +509,7 @@ export default function BotsPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <div className="space-y-1">
-              <Label htmlFor="pub-greeting">欢迎语</Label>
+            <FormRow label="欢迎语" htmlFor="pub-greeting">
               <Textarea
                 id="pub-greeting"
                 rows={2}
@@ -550,9 +518,8 @@ export default function BotsPage() {
                 onChange={(e) => setPubGreeting(e.target.value)}
                 placeholder="如:我是订单分析助手,可以直接问我销量问题"
               />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="pub-suggestions">建议问题(每行一条,至多 5 条)</Label>
+            </FormRow>
+            <FormRow label="建议问题(每行一条,至多 5 条)" htmlFor="pub-suggestions">
               <Textarea
                 id="pub-suggestions"
                 rows={3}
@@ -560,7 +527,7 @@ export default function BotsPage() {
                 onChange={(e) => setPubSuggestions(e.target.value)}
                 placeholder={"上月销量最高的商品是什么\n各状态的订单有多少"}
               />
-            </div>
+            </FormRow>
           </div>
           {publish.isError && (
             <p className="text-sm text-destructive" role="alert">

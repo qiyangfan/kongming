@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Cable, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Loader2, Plus, Trash2 } from "lucide-react";
 
 import {
   AlertDialog,
@@ -27,17 +27,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FormRow } from "@/components/form-row";
 import { PageHeader } from "@/components/page-header";
 import { StatusSwitch } from "@/components/status-switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { QueryErrorAlert } from "@/components/query-error";
+import { DataView } from "@/components/data-view";
+import { ErrorAlert } from "@/components/error-alert";
 import {
   createMcpServer,
   deleteMcpServer,
@@ -212,120 +206,109 @@ export default function McpPage() {
         }
       />
 
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>标识</TableHead>
-              <TableHead>名称</TableHead>
-              <TableHead>Endpoint</TableHead>
-              <TableHead>工具</TableHead>
-              <TableHead>启用</TableHead>
-              <TableHead className="text-right">操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {servers.isError ? (
-              <TableRow>
-                <TableCell colSpan={6}>
-                  <QueryErrorAlert />
-                </TableCell>
-              </TableRow>
-            ) : (servers.data ?? []).length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                  尚未接入 MCP 服务。
-                </TableCell>
-              </TableRow>
-            ) : (
-              (servers.data ?? []).map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell className="font-mono text-xs">{row.server_key}</TableCell>
-                  <TableCell className="max-w-40 truncate" title={row.name}>
-                    {row.name}
-                  </TableCell>
-                  <TableCell className="max-w-56 truncate font-mono text-xs" title={row.endpoint}>
-                    {row.endpoint}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{row.tools.length} 个</Badge>
-                    {row.last_sync_error && (
-                      <p
-                        className="mt-1 max-w-52 truncate text-xs text-destructive"
-                        title={row.last_sync_error}
-                      >
-                        {row.last_sync_error}
-                      </p>
-                    )}
-                    {rowNote[row.id] && (
-                      <p
-                        className="mt-1 max-w-72 truncate text-xs text-muted-foreground"
-                        title={rowNote[row.id]}
-                        role="status"
-                      >
-                        {rowNote[row.id]}
-                      </p>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <StatusSwitch
-                      active={row.enabled}
-                      pending={toggle.isPending && toggle.variables?.row.id === row.id}
-                      error={toggleError[row.id] || null}
-                      onToggle={() => toggle.mutate({ row, enabled: !row.enabled })}
-                      ariaLabel={`启停 ${row.name}`}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        disabled={busyKey !== null}
-                        onClick={() => void runAction(row, "test")}
-                      >
-                        {busyKey === `${row.id}:test` ? (
-                          <Loader2 className="animate-spin" aria-hidden />
-                        ) : (
-                          <Cable aria-hidden />
-                        )}
-                        测试
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        disabled={busyKey !== null}
-                        onClick={() => void runAction(row, "sync")}
-                      >
-                        {busyKey === `${row.id}:sync` ? (
-                          <Loader2 className="animate-spin" aria-hidden />
-                        ) : (
-                          <RefreshCw aria-hidden />
-                        )}
-                        同步
-                      </Button>
-                      <Button variant="ghost" size="xs" onClick={() => openEdit(row)}>
-                        编辑
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`删除 ${row.name}`}
-                        onClick={() => {
-                          setDeleting(row);
-                          setDeleteError("");
-                        }}
-                      >
-                        <Trash2 aria-hidden />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      {servers.isError && <ErrorAlert />}
+
+      <DataView
+        rows={servers.data ?? []}
+        rowKey={(row) => row.id}
+        isLoading={servers.isPending}
+        isEmpty={!servers.isPending && !servers.isError && (servers.data ?? []).length === 0}
+        emptyText="尚未接入 MCP 服务。"
+        columns={[
+          {
+            key: "server_key",
+            header: "标识",
+            cardPriority: 4,
+            cellClassName: "font-mono text-xs",
+            render: (row) => row.server_key,
+          },
+          {
+            key: "name",
+            header: "名称",
+            cardPriority: 1,
+            render: (row) => (
+              <span className="block max-w-40 truncate" title={row.name}>
+                {row.name}
+              </span>
+            ),
+          },
+          {
+            key: "endpoint",
+            header: "Endpoint",
+            cardPriority: 2, // 连接标识(服务地址)窄屏卡片可见
+            render: (row) => (
+              <span className="block max-w-56 truncate font-mono text-xs" title={row.endpoint}>
+                {row.endpoint}
+              </span>
+            ),
+          },
+          {
+            key: "tools",
+            header: "工具",
+            cardPriority: 3,
+            render: (row) => (
+              <>
+                <Badge variant="secondary">{row.tools.length} 个</Badge>
+                {row.last_sync_error && (
+                  <p
+                    className="mt-1 max-w-52 truncate text-xs text-destructive"
+                    title={row.last_sync_error}
+                  >
+                    {row.last_sync_error}
+                  </p>
+                )}
+                {rowNote[row.id] && (
+                  <p
+                    className="mt-1 max-w-72 truncate text-xs text-muted-foreground"
+                    title={rowNote[row.id]}
+                    role="status"
+                  >
+                    {rowNote[row.id]}
+                  </p>
+                )}
+              </>
+            ),
+          },
+          {
+            key: "enabled",
+            header: "启用",
+            cardPriority: 2,
+            render: (row) => (
+              <StatusSwitch
+                active={row.enabled}
+                pending={toggle.isPending && toggle.variables?.row.id === row.id}
+                error={toggleError[row.id] || null}
+                onToggle={() => toggle.mutate({ row, enabled: !row.enabled })}
+                ariaLabel={`启停 ${row.name}`}
+              />
+            ),
+          },
+        ]}
+        actions={[
+          {
+            // 行级禁用:测试/同步共用 busyKey,任一进行中即冻结全部行操作
+            label: "测试",
+            isDisabled: () => busyKey !== null,
+            disabledReason: "操作进行中",
+            onSelect: (row) => void runAction(row, "test"),
+          },
+          {
+            label: "同步",
+            isDisabled: () => busyKey !== null,
+            disabledReason: "操作进行中",
+            onSelect: (row) => void runAction(row, "sync"),
+          },
+          { label: "编辑", onSelect: openEdit },
+          {
+            label: "删除",
+            destructive: true,
+            onSelect: (row) => {
+              setDeleting(row);
+              setDeleteError("");
+            },
+          },
+        ]}
+      />
 
       {/* 新建/编辑对话框 */}
       <Dialog
@@ -347,8 +330,7 @@ export default function McpPage() {
                 save.mutate();
               }}
             >
-              <div className="space-y-1.5">
-                <Label htmlFor="mcp-key">标识(server_key)</Label>
+              <FormRow label="标识(server_key)" htmlFor="mcp-key">
                 <Input
                   id="mcp-key"
                   value={form.serverKey}
@@ -357,17 +339,15 @@ export default function McpPage() {
                   placeholder="小写字母开头,如 fs"
                   className="font-mono"
                 />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="mcp-name">名称</Label>
+              </FormRow>
+              <FormRow label="名称" htmlFor="mcp-name">
                 <Input
                   id="mcp-name"
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                 />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="mcp-endpoint">Endpoint(Streamable HTTP)</Label>
+              </FormRow>
+              <FormRow label="Endpoint(Streamable HTTP)" htmlFor="mcp-endpoint">
                 <Input
                   id="mcp-endpoint"
                   value={form.endpoint}
@@ -375,7 +355,7 @@ export default function McpPage() {
                   placeholder="https://example.com/mcp"
                   className="font-mono text-xs"
                 />
-              </div>
+              </FormRow>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <Label>自定义请求头</Label>

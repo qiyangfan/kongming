@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Loader2, Play, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, Loader2, Plus } from "lucide-react";
 
 import {
   AlertDialog,
@@ -27,22 +27,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { FieldLabel } from "@/components/field-label";
+import { EmptyState } from "@/components/empty-state";
+import { FormRow } from "@/components/form-row";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge, type StatusMeta } from "@/components/status-badge";
 import { StatusSwitch } from "@/components/status-switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { DataView } from "@/components/data-view";
 import { Textarea } from "@/components/ui/textarea";
-import { QueryErrorAlert } from "@/components/query-error";
+import { ErrorAlert } from "@/components/error-alert";
 import { formatDateTime, formatDuration } from "@/lib/datetime";
 import {
   deleteWorkflow,
@@ -214,115 +207,103 @@ export default function WorkflowsPage() {
         }
       />
 
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>标识</TableHead>
-              <TableHead>名称</TableHead>
-              <TableHead>版本</TableHead>
-              <TableHead>节点数</TableHead>
-              <TableHead>启用</TableHead>
-              <TableHead className="text-right">操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {workflows.isError ? (
-              <TableRow>
-                <TableCell colSpan={6}>
-                  <QueryErrorAlert />
-                </TableCell>
-              </TableRow>
-            ) : (workflows.data ?? []).length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                  尚未定义工作流。
-                </TableCell>
-              </TableRow>
-            ) : (
-              (workflows.data ?? []).map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell className="font-mono text-xs">{row.wf_key}</TableCell>
-                  <TableCell className="max-w-40 truncate" title={row.name}>
-                    {row.name}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">v{row.version}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    {Array.isArray((row.definition as { nodes?: unknown[] }).nodes)
-                      ? ((row.definition as { nodes?: unknown[] }).nodes as unknown[]).length
-                      : 0}
-                  </TableCell>
-                  <TableCell>
-                    <StatusSwitch
-                      active={row.enabled}
-                      pending={toggle.isPending && toggle.variables?.row.wf_key === row.wf_key}
-                      error={toggleError[row.wf_key] || null}
-                      onToggle={() => toggle.mutate({ row, enabled: !row.enabled })}
-                      ariaLabel={`启停 ${row.name}`}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        disabled={!row.enabled}
-                        onClick={() => {
-                          setRunning(row);
-                          setRunInputs("{}");
-                          setRunResult(null);
-                          setRunError("");
-                        }}
-                      >
-                        <Play aria-hidden />
-                        运行
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => {
-                          setEditing({
-                            origKey: row.wf_key,
-                            wfKey: row.wf_key,
-                            name: row.name,
-                            defText: JSON.stringify(row.definition, null, 2),
-                          });
-                          setFormError("");
-                        }}
-                      >
-                        编辑
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => {
-                          setHistoryOf(row);
-                          setHistoryPage(1);
-                        }}
-                      >
-                        历史
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`删除 ${row.name}`}
-                        onClick={() => {
-                          setDeleting(row);
-                          setDeleteError("");
-                        }}
-                      >
-                        <Trash2 aria-hidden />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      {workflows.isError && <ErrorAlert />}
+
+      <DataView
+        rows={workflows.data ?? []}
+        rowKey={(row) => row.id}
+        isLoading={workflows.isPending}
+        isEmpty={!workflows.isPending && !workflows.isError && (workflows.data ?? []).length === 0}
+        emptyText="尚未定义工作流。"
+        columns={[
+          {
+            key: "wf_key",
+            header: "标识",
+            cellClassName: "font-mono text-xs",
+            render: (row) => row.wf_key,
+          },
+          {
+            key: "name",
+            header: "名称",
+            cardPriority: 1,
+            render: (row) => (
+              <span className="block max-w-40 truncate" title={row.name}>
+                {row.name}
+              </span>
+            ),
+          },
+          {
+            key: "version",
+            header: "版本",
+            cardPriority: 3,
+            render: (row) => <Badge variant="secondary">v{row.version}</Badge>,
+          },
+          {
+            key: "nodes",
+            header: "节点数",
+            cardPriority: 4,
+            render: (row) =>
+              Array.isArray((row.definition as { nodes?: unknown[] }).nodes)
+                ? ((row.definition as { nodes?: unknown[] }).nodes as unknown[]).length
+                : 0,
+          },
+          {
+            key: "enabled",
+            header: "启用",
+            cardPriority: 2,
+            render: (row) => (
+              <StatusSwitch
+                active={row.enabled}
+                pending={toggle.isPending && toggle.variables?.row.wf_key === row.wf_key}
+                error={toggleError[row.wf_key] || null}
+                onToggle={() => toggle.mutate({ row, enabled: !row.enabled })}
+                ariaLabel={`启停 ${row.name}`}
+              />
+            ),
+          },
+        ]}
+        actions={[
+          {
+            label: "运行",
+            // 与原按钮 disabled={!row.enabled} 同口径,行级禁用承接拦截
+            isDisabled: (row) => !row.enabled,
+            disabledReason: "已停用的工作流不可运行",
+            onSelect: (row) => {
+              setRunning(row);
+              setRunInputs("{}");
+              setRunResult(null);
+              setRunError("");
+            },
+          },
+          {
+            label: "编辑",
+            onSelect: (row) => {
+              setEditing({
+                origKey: row.wf_key,
+                wfKey: row.wf_key,
+                name: row.name,
+                defText: JSON.stringify(row.definition, null, 2),
+              });
+              setFormError("");
+            },
+          },
+          {
+            label: "历史",
+            onSelect: (row) => {
+              setHistoryOf(row);
+              setHistoryPage(1);
+            },
+          },
+          {
+            label: "删除",
+            destructive: true,
+            onSelect: (row) => {
+              setDeleting(row);
+              setDeleteError("");
+            },
+          },
+        ]}
+      />
 
       {/* 新建/编辑(JSON 编辑器) */}
       <Dialog
@@ -350,13 +331,11 @@ export default function WorkflowsPage() {
               }}
             >
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <FieldLabel
-                    htmlFor="wf-key"
-                    help="小写字母开头;同名标识保存即产生新版本,创建后不可改。"
-                  >
-                    标识
-                  </FieldLabel>
+                <FormRow
+                  label="标识"
+                  htmlFor="wf-key"
+                  help="小写字母开头;同名标识保存即产生新版本,创建后不可改。"
+                >
                   <Input
                     id="wf-key"
                     value={editing.wfKey}
@@ -366,18 +345,16 @@ export default function WorkflowsPage() {
                     disabled={editing.origKey !== null}
                     aria-disabled={editing.origKey !== null}
                   />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="wf-name">名称</Label>
+                </FormRow>
+                <FormRow label="名称" htmlFor="wf-name">
                   <Input
                     id="wf-name"
                     value={editing.name}
                     onChange={(e) => setEditing({ ...editing, name: e.target.value })}
                   />
-                </div>
+                </FormRow>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="wf-def">定义(JSON DAG)</Label>
+              <FormRow label="定义(JSON DAG)" htmlFor="wf-def">
                 <Textarea
                   id="wf-def"
                   value={editing.defText}
@@ -385,7 +362,7 @@ export default function WorkflowsPage() {
                   rows={14}
                   className="font-mono text-xs leading-relaxed"
                 />
-              </div>
+              </FormRow>
               {formError && (
                 <p role="alert" className="text-sm text-destructive">
                   {formError}
@@ -415,8 +392,7 @@ export default function WorkflowsPage() {
             <DialogTitle>运行「{running?.name}」</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="wf-inputs">输入(inputs JSON)</Label>
+            <FormRow label="输入(inputs JSON)" htmlFor="wf-inputs">
               <Textarea
                 id="wf-inputs"
                 value={runInputs}
@@ -424,7 +400,7 @@ export default function WorkflowsPage() {
                 rows={3}
                 className="font-mono text-xs"
               />
-            </div>
+            </FormRow>
             {runError && (
               <p role="alert" className="text-sm text-destructive">
                 {runError}
@@ -481,9 +457,9 @@ export default function WorkflowsPage() {
           </DialogHeader>
           <div className="max-h-96 space-y-2 overflow-y-auto">
             {runs.isError ? (
-              <QueryErrorAlert />
+              <ErrorAlert />
             ) : (runs.data?.items ?? []).length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">暂无运行记录。</p>
+              <EmptyState>暂无运行记录。</EmptyState>
             ) : (
               (runs.data?.items ?? []).map((r) => (
                 <Collapsible key={r.id}>
@@ -590,7 +566,7 @@ export default function WorkflowsPage() {
               加载中…
             </div>
           ) : runDetail.isError ? (
-            <QueryErrorAlert />
+            <ErrorAlert />
           ) : runDetail.data ? (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2 text-sm">

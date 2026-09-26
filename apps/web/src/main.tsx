@@ -7,6 +7,7 @@ import { AppLayout } from "@/components/app-layout";
 import { PermRoute } from "@/components/perm-route";
 import { Skeleton } from "@/components/ui/skeleton";
 import AdminLayout from "@/pages/admin/AdminLayout";
+import AdminIndexPage from "@/pages/admin/AdminIndexPage";
 import DatasourcesPage from "@/pages/admin/DatasourcesPage";
 import DeptsPage from "@/pages/admin/DeptsPage";
 import RolesPage from "@/pages/admin/RolesPage";
@@ -121,7 +122,7 @@ const router = createBrowserRouter([
         path: "admin",
         element: <AdminLayout />,
         children: [
-          { index: true, element: <Navigate to="/admin/users" replace /> },
+          { index: true, element: <AdminIndexPage /> },
           {
             path: "users",
             element: (

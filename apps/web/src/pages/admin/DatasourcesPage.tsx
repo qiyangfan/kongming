@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StatusSwitch } from "@/components/status-switch";
+import { DataView } from "@/components/data-view";
 import { FormRow } from "@/components/form-row";
 import {
   Dialog,
@@ -28,6 +29,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Pagination } from "@/components/pagination";
+import { PageHeader } from "@/components/page-header";
+import { ErrorAlert } from "@/components/error-alert";
 import {
   Select,
   SelectContent,
@@ -35,14 +38,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   datasourceApi,
   type DatasourceItemOut,
@@ -238,6 +233,15 @@ export default function DatasourcesPage() {
 
   return (
     <div className="space-y-3">
+      <PageHeader
+        title="数据源"
+        description="外部数据库连接的注册与管理;支持连通性测试与启停。"
+        actions={
+          <Button size="sm" onClick={openCreate}>
+            注册数据源
+          </Button>
+        }
+      />
       <div className="flex items-center gap-2">
         <Input
           value={keyword}
@@ -261,86 +265,85 @@ export default function DatasourcesPage() {
         >
           搜索
         </Button>
-        <div className="flex-1" />
-        <Button size="sm" onClick={openCreate}>
-          注册数据源
-        </Button>
       </div>
 
       {datasources.isError && (
-        <p className="text-destructive text-sm" role="alert">
-          数据源列表加载失败:{(datasources.error as Error).message}
-        </p>
+        <ErrorAlert text={`数据源列表加载失败:${(datasources.error as Error).message}`} />
       )}
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>键</TableHead>
-            <TableHead>名称</TableHead>
-            <TableHead>归属租户</TableHead>
-            <TableHead>连接</TableHead>
-            <TableHead>默认 schema</TableHead>
-            <TableHead>状态</TableHead>
-            <TableHead className="text-right">操作</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {datasources.isPending && (
-            <TableRow>
-              <TableCell colSpan={7} className="text-center text-muted-foreground">
-                加载中…
-              </TableCell>
-            </TableRow>
-          )}
-          {datasources.data?.items.map((d) => (
-            <TableRow key={d.id}>
-              <TableCell className="max-w-32 truncate font-medium" title={d.datasource_key}>
+      <DataView
+        rows={datasources.data?.items ?? []}
+        rowKey={(d) => d.id}
+        isLoading={datasources.isPending}
+        isEmpty={!datasources.isPending && datasources.data?.items.length === 0}
+        emptyText="暂无数据源"
+        columns={[
+          {
+            key: "datasource_key",
+            header: "键",
+            cardPriority: 1,
+            render: (d) => (
+              <span className="block max-w-32 truncate font-medium" title={d.datasource_key}>
                 {d.datasource_key}
-              </TableCell>
-              <TableCell className="max-w-32 truncate" title={d.name}>
+              </span>
+            ),
+          },
+          {
+            key: "name",
+            header: "名称",
+            cardPriority: 2,
+            render: (d) => (
+              <span className="block max-w-32 truncate" title={d.name}>
                 {d.name}
-              </TableCell>
-              <TableCell className="max-w-40 truncate" title={`${d.tenant_name}(${d.tenant_key})`}>
+              </span>
+            ),
+          },
+          {
+            key: "tenant_name",
+            header: "归属租户",
+            cardPriority: 3,
+            render: (d) => (
+              <span className="block max-w-40 truncate" title={`${d.tenant_name}(${d.tenant_key})`}>
                 {d.tenant_name}({d.tenant_key})
-              </TableCell>
-              <TableCell className="text-muted-foreground">
-                <span
-                  className="block max-w-56 truncate"
-                  title={`${d.host}:${d.port}/${d.database}`}
-                >
-                  {d.host}:{d.port}/{d.database}
-                </span>
-              </TableCell>
-              <TableCell>{d.default_schema}</TableCell>
-              <TableCell>
-                <StatusSwitch
-                  active={d.status === "ACTIVE"}
-                  pending={toggle.isPending}
-                  error={!toggle.isPending && toggleId === d.id && toggleError ? toggleError : null}
-                  onToggle={() => toggle.mutate(d)}
-                  ariaLabel={`${d.name} 启用状态`}
-                />
-              </TableCell>
-              <TableCell className="text-right">
-                <Button variant="ghost" size="sm" onClick={() => openEdit(d)}>
-                  编辑
-                </Button>
-                <Button variant="ghost-destructive" size="sm" onClick={() => setDeleting(d)}>
-                  删除
-                </Button>
-              </TableCell>
-            </TableRow>
-          ))}
-          {datasources.data && datasources.data.items.length === 0 && (
-            <TableRow>
-              <TableCell colSpan={7} className="text-center text-muted-foreground">
-                暂无数据源
-              </TableCell>
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
+              </span>
+            ),
+          },
+          {
+            key: "host",
+            header: "连接",
+            cardPriority: 2, // 连接标识(host:port/库)窄屏卡片可见
+            cellClassName: "text-muted-foreground",
+            render: (d) => (
+              <span className="block max-w-56 truncate" title={`${d.host}:${d.port}/${d.database}`}>
+                {d.host}:{d.port}/{d.database}
+              </span>
+            ),
+          },
+          {
+            key: "default_schema",
+            header: "默认 schema",
+            render: (d) => d.default_schema,
+          },
+          {
+            key: "status",
+            header: "状态",
+            cardPriority: 4,
+            render: (d) => (
+              <StatusSwitch
+                active={d.status === "ACTIVE"}
+                pending={toggle.isPending}
+                error={!toggle.isPending && toggleId === d.id && toggleError ? toggleError : null}
+                onToggle={() => toggle.mutate(d)}
+                ariaLabel={`${d.name} 启用状态`}
+              />
+            ),
+          },
+        ]}
+        actions={[
+          { label: "编辑", onSelect: openEdit },
+          { label: "删除", destructive: true, onSelect: setDeleting },
+        ]}
+      />
 
       <Pagination page={page} pageCount={pages} total={total} onPageChange={setPage} />
 

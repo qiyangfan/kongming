@@ -7,8 +7,33 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
-## 当前状态(2026-09-24)
+## 当前状态(2026-09-26)
 
+- **双变更落地+评审循环修复,已归档(2026-09-26)**:`multi-protocol-llm`
+  (agent 面三协议出站 openai|anthropic|responses,条目级 protocol 字段,
+  anthropic 走官方 SDK 1.8.0——类型面已无 temperature,双头鉴权,翻译层
+  收敛 llm_protocol.py,缺省零回归;ADR-008 立法)+ `mobile-experience-redesign`
+  (移动优先重设计:BottomNav/管理层进/会话抽屉三件套,DataView 表格/卡片
+  双形态标准件收编 17 管理页+门户/记忆,dialog 窄屏全屏化,安全区/触控基线
+  壳层单点化;AGENTS.md 响应式条款重写)。评审循环两轮:首轮坐实 2 P0
+  (桌面对话框 inset-0 残留压成 50vh 贴底、BottomNav 安全区双计)+5 P1+
+  agent 7 项+工件失实 10 处(tanstack 谎报→自研列模型 D3 修订留痕、
+  react-markdown 补立法 ADR-009、Non-goals 缺失等)全部修复;二轮专审
+  15/15 通过零新增。四门禁绿(api 925/agent 287/web/contracts),
+  375/1280 三档浏览器目验过。specs 已同步(multi-model-routing 增 protocol
+  语义+「多协议出站适配」;web-nav 应用壳/响应式外壳两条款;新建
+  mobile-experience 域)。**遗留**:muniu 网关(8787)未运行,anthropic/
+  responses 条目的流式问答 LLM 腿未端到端验(单测/集成钉已绿);根
+  `apps/web/vite.config.smoke.ts` 为临时冒烟件(硬编码本机绝对路径),
+  不入库,可删。
+- **供应商预设目录 + ADR-007 定位修订(2026-09-26,文档级)**:用户裁决 muniu
+  降级为可选端点(类 ollama,不强制经网关)→ ADR-007 状态行与文末「修订」节
+  留痕,现网 muniu 形态部署不变;`docs/model-providers.md` 官方端点预设目录
+  (OpenAI 兼容表 / Anthropic 分支消费路径 / muniu·ollama 条目,与 muniu 仓
+  `docs/provider-presets.md` 交叉核对,2026-09-26 版)+ B 节三协议直连口径;
+  `.env.example` 模型段改双形态(官方直连缺省示例 + muniu 注释可选)+
+  `KM_AGENT_LLM_PROTOCOL` 示例。注意:muniu 仓有并行会话在施工
+  (internal/presets + anthropic 入站协议 + 控制台预设页,未提交)。
 - **056–059 批量落地+评审循环修复,已归档(2026-09-24)**:056 skill-pack
   (垂类内容包四段契约/按数据源启停/合并投影封顶/`skill_` 保留前缀/
   `system:skill:manage`;fewshot SQL 只作提示文本);057 numeric-grounding
@@ -48,7 +73,8 @@
   (muniu 仓 `scripts/reconcile.sql`,差异 ≤1%),期满达标 ADR-007 转「已接受」;
   回滚=`.env` 三处改回直连(切换前备份 /tmp/.km-agent-env-pre-muniu.bak,
   重启即失)。运行细节见「环境事实」11。
-- 001–052 + backlog-settlement 已全部归档;054–059 已于 2026-09-24 归档
+- 001–052 + backlog-settlement 已全部归档;054–059 已于 2026-09-24 归档;
+  multi-protocol-llm 与 mobile-experience-redesign 已于 2026-09-26 归档
   (活动变更仅剩 053 影子观察)。上游 41 域全覆盖。近期批次:2026-08-29 四连(043 生成纪律规则 10+哨兵短路/
   044 NO_DATA 四态中性形态/045 保留表收编 user_memory/046 投影 id
   收敛+列级哨兵);2026-08-30 二连(047 检索治理/048 聚合追问与去重
@@ -81,7 +107,8 @@
   (规约:文档不写提交哈希、不谈提交形态)。
 - **开放挂账=零**(backlog-settlement 终态化裁决,见「挂账终态」节)。
 - 下一棒:053 影子达标后切主并归档;可选做 059 MemoryPage 槽位编辑 UI;
-  其余按需新域,无既定排期项。
+  补验 anthropic/responses 条目端到端流式问答(起 muniu 网关或配真实
+  分支端点);其余按需新域,无既定排期项。
 
 ## 新会话开工指引
 
@@ -102,7 +129,10 @@
 1. **本机是 podman 不是 docker**:`docker` 只是交互 shell 的 alias,
    非交互命令一律用 `podman`。
 2. **标准端口**:api **8000** / agent **8001** / web dev **5173** /
-   postgres **5432** / redis **6379**。
+   postgres **5432** / redis **6379**。⚠ 本机 6379/8000 被上游项目占用:
+   Kongming compose redis 实映射 **6380**(.env 带密码);给 pytest 手传
+   KM_REDIS_URL 必须带密码(无密码 6380 → AuthenticationError,2026-09-26
+   实证),api 冒烟常让到 **18000**(8000 归上游)。
 3. **本地环境冷启动**(幂等,任何"连不上/端口不对"先跑这个):
    ```bash
    make up                                 # podman compose 起 postgres+redis
@@ -141,7 +171,7 @@
     失效——`uv sync` 仍显示 Checked(假健康),`uv run pytest` 报
     Failed to spawn。处置:`rm -rf apps/*/.venv && uv sync` 重建
     (venv 为可再生构建产物,2026-09-11 052 实证)。
-11. **muniu 网关(ADR-007,agent 面 LLM 唯一出口)**:127.0.0.1:8787,
+11. **muniu 网关(ADR-007,2026-09-26 修订后为可选端点;官方直连一等公民)**:127.0.0.1:8787,
     **podman 后台容器形态**(muniu 仓 `make dev-up` 起/`dev-down` 停/
     `dev-status` 查;宿主交叉编译+scratch 镜像,不依赖 registry 与代理)。
     ⚠ 计量库在 podman **命名卷 muniu-data**(SQLite WAL 在 virtiofs 挂载上
@@ -192,8 +222,9 @@ make contracts      # 导出 OpenAPI + 生成前端类型(改 api 后必跑)
 | 评估体系 | Execution Match 双分引擎;宽松=黄金指标且不惩罚序错;evals 进程外工具 testpaths 隔离;query_history 幂等治理 | eval + ai-eval spec |
 | prompt 质量 | 生成/理解/摘要三层规则(统计不加 LIMIT/tiebreaker/ROUND/投影完备+技术主键默认不进投影/列级哨兵两级如实说明/指代保真/事实性接地);prompt 文本迭代经验=点名自我合理化的反例比抽象纪律条遵从度高;gold 规范十条与生成侧互锁 | nl2sql-agent spec |
 | Bot/商业化 | Bot 定义+权限逐请求求交;OpenAI 兼容端点;BOT 维度配额+mock 支付闭环(核销单点 reconcile);团队归属可见性纯函数 | custom-agent + payment + team spec |
-| 多模型/观测 | 注册表 env JSON+任务路由+出口白名单;用量采集 fire-and-forget+bot 收集器双通道;失败调用也采集(status/latency) | multi-model-routing + observability spec |
-| LLM 网关 | agent 面 LLM 出口(主模型/embedding/vision 注册表)统一经 muniu(127.0.0.1:8787,OpenAI 兼容),供应商 key 收敛 muniu 单点;回滚=.env 三处改回直连,零成本 | ADR-007 |
+| 多模型/观测 | 注册表 env JSON(条目级 protocol:openai/anthropic/responses)+任务路由+出口白名单;协议翻译层单点收敛(llm_protocol.py);用量采集 fire-and-forget+bot 收集器双通道;失败调用也采集(status/latency) | multi-model-routing + observability spec + ADR-008 |
+| LLM 网关 | muniu(127.0.0.1:8787,OpenAI 兼容)为可选端点,官方直连一等公民;供应商 key 仍可收敛 muniu 单点;回滚=.env 三处改回直连,零成本 | ADR-007(2026-09-26 修订) |
+| 前端 Markdown 渲染 | 文档卡收编 react-markdown+remark-gfm/breaks;不解析原始 HTML、无 dangerouslySetInnerHTML | ADR-009 |
 | 挂账治理 | 开放挂账=零;新发现项一律给终态(修/关闭/条件触发/产品登记),不留无排期「随域延后」 | backlog-settlement 终态块 |
 
 ## 挂账终态(开放挂账=零,2026-08-25 backlog-settlement 裁决)
@@ -306,6 +337,15 @@ SQL/PG:
 - `useParams` 无参数=undefined,与流发起的 `?? null` 不同——守卫比较前
   必须归一(新会话首问死锁根因)。
 - HMR/Fast Refresh 保留组件本地 state,评审读数以 fresh navigate 后为准。
+- Tailwind v4 任意值 `calc()` 的 `+` 两侧必须写 `_`(转空格),否则整条
+  声明静默无效(2026-09-26 dialog 关闭钮实证)。
+- 绝对定位 `inset-0` 基类做响应式改型,sm: 只还原 top/left 会残留
+  right/bottom——top:50%+bottom:0+height:auto ⇒ 50vh 贴底;四元式必须
+  成组还原(桌面对话框全面破版实证)。
+- border-box 下 `h-16` 与 `pb-safe` 同元素 = 安全区吃掉内容高度;安全区
+  padding 与固定行高必须分层(外层吃安全区、内层行高)。
+- 图标尺寸覆写别和 `[&_svg:not([class*='size-'])]` 规则打特异性——svg
+  上显式钉 `size-*` 即被其 :not 排除,必胜。
 
 ## 铁律提醒(全局,详见 ~/.zcode/AGENTS.md 与仓库 AGENTS.md)
 

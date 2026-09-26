@@ -1,22 +1,24 @@
 /* 应用壳(web-nav spec「应用壳结构」+「响应式外壳」):
-   侧栏(品牌区/新对话/会话列表/导航区/用户区)+ 内容区 Outlet;
-   md 以下侧栏收抽屉。认证分流由 Protected 承担,权限分流由子路由 PermRoute 承担。 */
+   宽屏侧栏(品牌区/新对话/会话列表/导航区/用户区)常驻 + 内容区 Outlet;
+   窄屏不复刻侧栏——能力导航由 BottomNav 承载(mobile-experience B2.1),
+   会话列表经对话区页头的会话抽屉唤出(B2.3)。
+   认证分流由 Protected 承担,权限分流由子路由 PermRoute 承担。 */
 
-import { useState } from "react";
 import { Link, Outlet } from "react-router";
-import { Feather, Menu, Plus } from "lucide-react";
+import { Feather, Plus } from "lucide-react";
 
 import { Protected } from "@/components/protected";
+import { BottomNav } from "@/components/bottom-nav";
 import { DatasourceSwitcher } from "@/components/datasource-switcher";
 import { SessionSidebar } from "@/components/session-sidebar";
 import { TenantSwitcher } from "@/components/tenant-switcher";
 import { UserMenu } from "@/components/user-menu";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useAuth } from "@/lib/auth-store";
 import { visibleNav } from "@/lib/nav";
 import { useTenant } from "@/lib/tenant-store";
+import { cn } from "@/lib/utils";
 
 function BrandMark() {
   return (
@@ -83,8 +85,11 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 export function AppLayout() {
-  const [open, setOpen] = useState(false);
   const { current } = useTenant();
+  const user = useAuth((s) => s.user);
+  // 安全区避让单源:顶部(pt-safe)/底部(pb-safe-nav)都在壳层消费,页面不自行
+  // 感知;底部预留与 BottomNav 渲染条件同源,空态不渲染时不留幽灵避让带
+  const showNav = visibleNav(user).length > 0;
 
   return (
     <Protected>
@@ -94,26 +99,18 @@ export function AppLayout() {
           <SidebarBody />
         </aside>
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex items-center gap-2 border-b border-border px-3 py-2 md:hidden">
-            <Sheet open={open} onOpenChange={setOpen}>
-              <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="打开菜单">
-                  <Menu aria-hidden />
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="left" showCloseButton={false} className="w-72 p-0">
-                <SheetTitle className="sr-only">导航菜单</SheetTitle>
-                <SidebarBody onNavigate={() => setOpen(false)} />
-              </SheetContent>
-            </Sheet>
-            <span className="text-sm font-medium tracking-widest text-foreground">孔明</span>
-          </header>
-
+        <div
+          className={cn(
+            "flex min-w-0 flex-1 flex-col pt-safe md:pt-0",
+            showNav && "pb-safe-nav md:pb-0",
+          )}
+        >
           <main className="min-h-0 flex-1">
             <Outlet />
           </main>
         </div>
+
+        <BottomNav />
       </div>
     </Protected>
   );

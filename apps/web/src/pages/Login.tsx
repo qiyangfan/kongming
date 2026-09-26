@@ -15,7 +15,7 @@ import { useAuth } from "../lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormRow } from "@/components/form-row";
 
 /* 品牌 mark 数据驱动(ADR-006 品牌条款):simple-icons 覆盖 GitHub/Google/微信系;
    钉钉/飞书 simple-icons 未收录,按例外条款内联官方 mark(单品牌缺失豁免)。 */
@@ -139,8 +139,7 @@ export default function Login() {
         </CardHeader>
         <CardContent className="space-y-4">
           <form onSubmit={submit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="username">用户名</Label>
+            <FormRow label="用户名" htmlFor="username">
               <Input
                 id="username"
                 value={username}
@@ -148,9 +147,8 @@ export default function Login() {
                 autoComplete="username"
                 placeholder="请输入用户名"
               />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">密码</Label>
+            </FormRow>
+            <FormRow label="密码" htmlFor="password">
               <Input
                 id="password"
                 type="password"
@@ -159,7 +157,7 @@ export default function Login() {
                 autoComplete="current-password"
                 placeholder="请输入密码"
               />
-            </div>
+            </FormRow>
             {error && (
               <p className="text-sm text-destructive" role="alert">
                 {error}

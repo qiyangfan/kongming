@@ -1,12 +1,12 @@
 /* 审计页(015,audit spec「SQL 审计查询」「操作日志」):SQL 审计/操作日志
-   双区(toggle-group 切换)+筛选+分页+行内展开详情(完整 sql_text/detail)。
-   只读页面(归档运维经 API/调度,不在 UI)。权限点 system:audit:view。 */
+   双区(toggle-group 切换)+筛选+分页,双表走 DataView 标准件(行详情收进
+   actions,经对话框查看完整 sql_text/detail)。只读页面(归档运维经 API/
+   调度,不在 UI)。权限点 system:audit:view。 */
 
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Loader2, ScrollText } from "lucide-react";
+import { ChevronRight, ScrollText } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/page-header";
@@ -19,18 +19,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { ScrollFade } from "@/components/scroll-fade";
-import { QueryErrorAlert } from "@/components/query-error";
+import { DataView } from "@/components/data-view";
+import { ErrorAlert } from "@/components/error-alert";
 import { DateRangeQuick } from "@/components/date-range-quick";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { operLogPage, sqlAuditPage } from "@/lib/audit-api";
 import { systemApi } from "@/lib/system-api";
 import { endExclusive } from "@/lib/date-utils";
@@ -54,6 +47,10 @@ export default function AuditPage() {
   const [tenantId, setTenantId] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  // 行详情对话框(DataView 契约不承载行间展开行,宽窄屏统一走对话框)
+  const [detail, setDetail] = useState<
+    { kind: "sql"; item: SqlItem } | { kind: "oper"; item: OperItem } | null
+  >(null);
 
   const sqlList = useQuery({
     queryKey: ["audit", "sql", page, traceId, verdict, startDate, endDate, tenantId],
@@ -248,234 +245,167 @@ export default function AuditPage() {
         />
       </div>
 
-      {/* 分页表 */}
-      <ScrollFade className="overflow-x-auto rounded-lg border border-border">
-        <Table>
-          <TableHeader>
-            {section === "sql" ? (
-              <TableRow>
-                <TableHead>时间</TableHead>
-                <TableHead>用户</TableHead>
-                <TableHead>租户</TableHead>
-                <TableHead>数据源</TableHead>
-                <TableHead>问句</TableHead>
-                <TableHead>判定</TableHead>
-                <TableHead>耗时</TableHead>
-                <TableHead className="text-right">详情</TableHead>
-              </TableRow>
-            ) : (
-              <TableRow>
-                <TableHead>时间</TableHead>
-                <TableHead>用户</TableHead>
-                <TableHead>动作</TableHead>
-                <TableHead>目标</TableHead>
-                <TableHead>IP</TableHead>
-                <TableHead className="text-right">详情</TableHead>
-              </TableRow>
-            )}
-          </TableHeader>
-          <TableBody>
-            {section === "sql" ? (
-              <SqlRows
-                loading={sqlList.isLoading}
-                items={sqlList.data?.items ?? []}
-                error={sqlList.isError}
-              />
-            ) : (
-              <OperRows
-                loading={operList.isLoading}
-                items={operList.data?.items ?? []}
-                error={operList.isError}
-              />
-            )}
-          </TableBody>
-        </Table>
-      </ScrollFade>
+      {/* 查询失败:错误条置于表区上方(UsersPage 同口径),DataView 只管加载/空态 */}
+      {section === "sql" && sqlList.isError && <ErrorAlert />}
+      {section === "oper" && operList.isError && <ErrorAlert />}
+
+      {/* 分页表(双区各自接 DataView;列序与原表格逐列保真) */}
+      {section === "sql" ? (
+        <DataView
+          rows={sqlList.data?.items ?? []}
+          rowKey={(it) => it.id}
+          isLoading={sqlList.isPending}
+          isEmpty={!sqlList.isPending && sqlList.data?.items.length === 0}
+          emptyText="暂无审计记录。"
+          columns={[
+            {
+              key: "created_at",
+              header: "时间",
+              cardPriority: 2,
+              cellClassName: "whitespace-nowrap text-muted-foreground",
+              render: (it) => formatDateTime(it.created_at, { seconds: true }),
+            },
+            {
+              key: "user",
+              header: "用户",
+              cardPriority: 3,
+              render: (it) => (
+                <span
+                  className="block max-w-32 truncate"
+                  title={it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}
+                >
+                  {it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}
+                </span>
+              ),
+            },
+            { key: "tenant_key", header: "租户" },
+            { key: "datasource_key", header: "数据源" },
+            {
+              key: "question",
+              header: "问句",
+              cardPriority: 1,
+              render: (it) => (
+                <span className="block max-w-56 truncate" title={it.question ?? undefined}>
+                  {it.question ?? "—"}
+                </span>
+              ),
+            },
+            {
+              key: "verdict",
+              header: "判定",
+              cardPriority: 4,
+              render: (it) => <StatusBadge meta={VERDICT_META} value={it.verdict} />,
+            },
+            {
+              key: "duration_ms",
+              header: "耗时",
+              cardPriority: 5,
+              cellClassName: "tabular-nums",
+              render: (it) => formatDuration(it.duration_ms),
+            },
+          ]}
+          actions={[{ label: "SQL", onSelect: (it) => setDetail({ kind: "sql", item: it }) }]}
+        />
+      ) : (
+        <DataView
+          rows={operList.data?.items ?? []}
+          rowKey={(it) => it.id}
+          isLoading={operList.isPending}
+          isEmpty={!operList.isPending && operList.data?.items.length === 0}
+          emptyText="暂无操作记录。"
+          columns={[
+            {
+              key: "created_at",
+              header: "时间",
+              cardPriority: 2,
+              cellClassName: "whitespace-nowrap text-muted-foreground",
+              render: (it) => formatDateTime(it.created_at, { seconds: true }),
+            },
+            {
+              key: "user",
+              header: "用户",
+              cardPriority: 3,
+              render: (it) => (
+                <span
+                  className="block max-w-32 truncate"
+                  title={it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}
+                >
+                  {it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}
+                </span>
+              ),
+            },
+            {
+              key: "action",
+              header: "动作",
+              cardPriority: 1,
+              cellClassName: "font-mono text-xs",
+              render: (it) => <span className="font-mono text-xs">{it.action}</span>,
+            },
+            {
+              key: "target",
+              header: "目标",
+              cardPriority: 4,
+              render: (it) => (
+                <span
+                  className="block max-w-48 truncate font-mono text-xs"
+                  title={it.target ?? undefined}
+                >
+                  {it.target ?? "—"}
+                </span>
+              ),
+            },
+            {
+              key: "ip",
+              header: "IP",
+              cardPriority: 5,
+              cellClassName: "font-mono text-xs",
+              render: (it) => it.ip ?? "—",
+            },
+          ]}
+          actions={[{ label: "详情", onSelect: (it) => setDetail({ kind: "oper", item: it }) }]}
+        />
+      )}
 
       <Pagination page={page} pageCount={totalPages} total={total ?? 0} onPageChange={setPage} />
+
+      {/* 行详情对话框:SQL 正文/拦截原因/链路 ID 与操作日志原始 JSON */}
+      <Dialog open={detail !== null} onOpenChange={(open) => !open && setDetail(null)}>
+        <DialogContent aria-describedby={undefined} className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{detail?.kind === "sql" ? "SQL 详情" : "操作详情"}</DialogTitle>
+          </DialogHeader>
+          {detail?.kind === "sql" && (
+            <div>
+              <pre className="overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed">
+                {detail.item.sql_text}
+              </pre>
+              {detail.item.block_reason && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  拦截原因:{detail.item.block_reason}
+                </p>
+              )}
+              <p
+                className="mt-1 max-w-full truncate font-mono text-xs text-muted-foreground"
+                title={detail.item.trace_id ?? undefined}
+              >
+                链路 ID:{detail.item.trace_id ?? "—"}
+              </p>
+            </div>
+          )}
+          {detail?.kind === "oper" && (
+            <div>
+              {/* 管理排查场景保留原始 JSON;标题说明数据形态 */}
+              <p className="mb-1 text-xs font-medium text-muted-foreground">原始数据(JSON)</p>
+              <pre className="overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed">
+                {JSON.stringify(detail.item.detail ?? {}, null, 2)}
+              </pre>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
 type SqlItem = NonNullable<Awaited<ReturnType<typeof sqlAuditPage>>["items"][number]>;
 type OperItem = NonNullable<Awaited<ReturnType<typeof operLogPage>>["items"][number]>;
-
-function SqlRows({
-  loading,
-  items,
-  error,
-}: {
-  loading: boolean;
-  items: SqlItem[];
-  error?: boolean;
-}) {
-  const [expanded, setExpanded] = useState<string | null>(null);
-  if (error) {
-    return (
-      <TableRow>
-        <TableCell colSpan={8} className="py-8">
-          <QueryErrorAlert />
-        </TableCell>
-      </TableRow>
-    );
-  }
-  if (loading) {
-    return (
-      <TableRow>
-        <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
-          <Loader2 className="inline size-4 animate-spin" aria-hidden /> 加载中…
-        </TableCell>
-      </TableRow>
-    );
-  }
-  if (items.length === 0) {
-    return (
-      <TableRow>
-        <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
-          暂无审计记录。
-        </TableCell>
-      </TableRow>
-    );
-  }
-  return (
-    <>
-      {items.map((it) => (
-        <Fragment key={it.id}>
-          <TableRow>
-            <TableCell className="whitespace-nowrap text-muted-foreground">
-              {formatDateTime(it.created_at, { seconds: true })}
-            </TableCell>
-            <TableCell
-              className="max-w-32 truncate"
-              title={it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}
-            >
-              {it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}
-            </TableCell>
-            <TableCell>{it.tenant_key}</TableCell>
-            <TableCell>{it.datasource_key}</TableCell>
-            <TableCell className="max-w-56 truncate" title={it.question ?? undefined}>
-              {it.question ?? "—"}
-            </TableCell>
-            <TableCell>
-              <StatusBadge meta={VERDICT_META} value={it.verdict} />
-            </TableCell>
-            <TableCell className="tabular-nums">{formatDuration(it.duration_ms)}</TableCell>
-            <TableCell className="text-right">
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => setExpanded(expanded === it.id ? null : it.id)}
-              >
-                {expanded === it.id ? "收起" : "SQL"}
-              </Button>
-            </TableCell>
-          </TableRow>
-          {expanded === it.id && (
-            <TableRow>
-              <TableCell colSpan={8} className="bg-muted/30">
-                <pre className="overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed">
-                  {it.sql_text}
-                </pre>
-                {it.block_reason && (
-                  <p className="mt-1 text-xs text-muted-foreground">拦截原因:{it.block_reason}</p>
-                )}
-                <p
-                  className="mt-1 max-w-full truncate font-mono text-xs text-muted-foreground"
-                  title={it.trace_id ?? undefined}
-                >
-                  链路 ID:{it.trace_id ?? "—"}
-                </p>
-              </TableCell>
-            </TableRow>
-          )}
-        </Fragment>
-      ))}
-    </>
-  );
-}
-
-function OperRows({
-  loading,
-  items,
-  error,
-}: {
-  loading: boolean;
-  items: OperItem[];
-  error?: boolean;
-}) {
-  const [expanded, setExpanded] = useState<string | null>(null);
-  if (error) {
-    return (
-      <TableRow>
-        <TableCell colSpan={6} className="py-8">
-          <QueryErrorAlert />
-        </TableCell>
-      </TableRow>
-    );
-  }
-  if (loading) {
-    return (
-      <TableRow>
-        <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-          <Loader2 className="inline size-4 animate-spin" aria-hidden /> 加载中…
-        </TableCell>
-      </TableRow>
-    );
-  }
-  if (items.length === 0) {
-    return (
-      <TableRow>
-        <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-          暂无操作记录。
-        </TableCell>
-      </TableRow>
-    );
-  }
-  return (
-    <>
-      {items.map((it) => (
-        <Fragment key={it.id}>
-          <TableRow>
-            <TableCell className="whitespace-nowrap text-muted-foreground">
-              {formatDateTime(it.created_at, { seconds: true })}
-            </TableCell>
-            <TableCell
-              className="max-w-32 truncate"
-              title={it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}
-            >
-              {it.user_id ? displayUser(it.user_nickname, it.user_username) : "系统"}
-            </TableCell>
-            <TableCell className="font-mono text-xs">{it.action}</TableCell>
-            <TableCell
-              className="max-w-48 truncate font-mono text-xs"
-              title={it.target ?? undefined}
-            >
-              {it.target ?? "—"}
-            </TableCell>
-            <TableCell className="font-mono text-xs">{it.ip ?? "—"}</TableCell>
-            <TableCell className="text-right">
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => setExpanded(expanded === it.id ? null : it.id)}
-              >
-                {expanded === it.id ? "收起" : "详情"}
-              </Button>
-            </TableCell>
-          </TableRow>
-          {expanded === it.id && (
-            <TableRow>
-              <TableCell colSpan={6} className="bg-muted/30">
-                {/* 管理排查场景保留原始 JSON;标题说明数据形态 */}
-                <p className="mb-1 text-xs font-medium text-muted-foreground">原始数据(JSON)</p>
-                <pre className="overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed">
-                  {JSON.stringify(it.detail ?? {}, null, 2)}
-                </pre>
-              </TableCell>
-            </TableRow>
-          )}
-        </Fragment>
-      ))}
-    </>
-  );
-}

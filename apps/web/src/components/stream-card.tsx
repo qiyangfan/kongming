@@ -87,7 +87,7 @@ export interface StreamCardProps {
 
 /** 轴上圆点:done 实心/running 叠呼吸光环/rejected 红;工具子节点小一档仍居轴心 */
 function AxisDot({ status, small = false }: { status: string; small?: boolean }) {
-  const size = small ? "size-[7px]" : "size-[11px]";
+  const size = small ? "size-2" : "size-3";
   const color =
     status === "rejected"
       ? "bg-destructive"
@@ -113,7 +113,7 @@ function Track({ tail, running }: { tail: boolean; running: boolean }) {
   return (
     <span
       aria-hidden
-      className={`absolute top-4 bottom-0 left-[5px] w-px ${
+      className={`absolute top-4 bottom-0 left-1.5 w-px -translate-x-1/2 ${
         tail && running ? "bg-gradient-to-b from-border to-transparent" : "bg-border"
       }`}
     />
@@ -185,7 +185,7 @@ export function StreamCard({ stages, sql, summary, toolCalls = [] }: StreamCardP
                 <Track tail={tail} running={running} />
                 <AxisDot status={s.status} />
                 <span
-                  className={`mt-[3px] text-xs ${
+                  className={`mt-1 text-xs ${
                     running
                       ? "animate-shimmer bg-gradient-to-r from-muted-foreground/50 via-foreground to-muted-foreground/50 bg-[length:200%_100%] bg-clip-text font-medium text-transparent"
                       : "text-muted-foreground"
@@ -210,7 +210,7 @@ export function StreamCard({ stages, sql, summary, toolCalls = [] }: StreamCardP
                 aria-label={t.tool_name}
               >
                 <Track tail={tail} running={running} />
-                <span className="ml-[2px] mt-[5px]">
+                <span className="ml-0.5 mt-1">
                   <AxisDot status={t.status} small />
                 </span>
                 <span className="flex min-w-0 items-center gap-1.5">

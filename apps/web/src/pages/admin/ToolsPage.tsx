@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Wrench } from "lucide-react";
+import { Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/page-header";
 import { Pagination } from "@/components/pagination";
 import { StatusBadge, type StatusMeta } from "@/components/status-badge";
+import { DataView } from "@/components/data-view";
 import {
   Select,
   SelectContent,
@@ -19,15 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { QueryErrorAlert } from "@/components/query-error";
+import { ErrorAlert } from "@/components/error-alert";
 import { DateRangeQuick } from "@/components/date-range-quick";
 import { toolAuditPage, toolList } from "@/lib/toolcall-api";
 import { endExclusive } from "@/lib/date-utils";
@@ -81,62 +74,57 @@ export default function ToolsPage() {
       <PageHeader title="工具" description="AI 可使用的内置工具清单,以及每次工具执行的审计记录。" />
 
       {/* 注册表清单(只读) */}
-      <div className="rounded-lg border border-border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>工具</TableHead>
-              <TableHead>描述</TableHead>
-              <TableHead>权限点</TableHead>
-              <TableHead>属性</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {tools.isError ? (
-              <TableRow>
-                <TableCell colSpan={4}>
-                  <QueryErrorAlert />
-                </TableCell>
-              </TableRow>
-            ) : tools.isLoading ? (
-              <TableRow>
-                <TableCell colSpan={4} className="py-6 text-center">
-                  <Loader2
-                    className="mx-auto size-4 animate-spin text-muted-foreground"
-                    aria-hidden
-                  />
-                </TableCell>
-              </TableRow>
-            ) : (
-              tools.data?.tools.map((t) => (
-                <TableRow key={t.name}>
-                  <TableCell className="font-mono text-xs font-medium">
-                    <span className="flex items-center gap-1.5">
-                      <Wrench className="size-3.5 text-muted-foreground" aria-hidden />
-                      {t.name}
-                    </span>
-                  </TableCell>
-                  <TableCell
-                    className="max-w-md truncate text-sm text-muted-foreground"
-                    title={t.description}
-                  >
-                    {t.description}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{t.perm_code}</TableCell>
-                  <TableCell>
-                    <span className="flex gap-1">
-                      <Badge variant={t.write ? "destructive" : "secondary"}>
-                        {t.write ? "写" : "只读"}
-                      </Badge>
-                      {t.require_confirm && <Badge variant="outline">需确认</Badge>}
-                    </span>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      {tools.isError && <ErrorAlert />}
+      <DataView
+        rows={tools.data?.tools ?? []}
+        rowKey={(t) => t.name}
+        isLoading={tools.isPending}
+        isEmpty={!tools.isPending && tools.data?.tools.length === 0}
+        emptyText="暂无注册工具"
+        columns={[
+          {
+            key: "name",
+            header: "工具",
+            cardPriority: 1,
+            cellClassName: "font-mono text-xs font-medium",
+            render: (t) => (
+              <span className="flex items-center gap-1.5 font-mono text-xs font-medium">
+                <Wrench className="size-3.5 text-muted-foreground" aria-hidden />
+                {t.name}
+              </span>
+            ),
+          },
+          {
+            key: "description",
+            header: "描述",
+            cardPriority: 3,
+            cellClassName: "text-sm text-muted-foreground",
+            render: (t) => (
+              <span className="block max-w-md truncate" title={t.description}>
+                {t.description}
+              </span>
+            ),
+          },
+          {
+            key: "perm_code",
+            header: "权限点",
+            cellClassName: "font-mono text-xs",
+          },
+          {
+            key: "write",
+            header: "属性",
+            cardPriority: 2,
+            render: (t) => (
+              <span className="flex gap-1">
+                <Badge variant={t.write ? "destructive" : "secondary"}>
+                  {t.write ? "写" : "只读"}
+                </Badge>
+                {t.require_confirm && <Badge variant="outline">需确认</Badge>}
+              </span>
+            ),
+          },
+        ]}
+      />
 
       {/* 执行审计 */}
       <div className="space-y-3">
@@ -229,66 +217,60 @@ export default function ToolsPage() {
           />
         </div>
 
-        <div className="rounded-lg border border-border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>时间</TableHead>
-                <TableHead>工具</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>参数摘要</TableHead>
-                <TableHead>耗时</TableHead>
-                <TableHead>数据源</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {audit.isError ? (
-                <TableRow>
-                  <TableCell colSpan={6}>
-                    <QueryErrorAlert />
-                  </TableCell>
-                </TableRow>
-              ) : audit.isLoading ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-6 text-center">
-                    <Loader2
-                      className="mx-auto size-4 animate-spin text-muted-foreground"
-                      aria-hidden
-                    />
-                  </TableCell>
-                </TableRow>
-              ) : audit.data?.items.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
-                    暂无工具执行记录
-                  </TableCell>
-                </TableRow>
-              ) : (
-                audit.data?.items.map((it) => (
-                  <TableRow key={it.id}>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {formatDateTime(it.created_at, { seconds: true })}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{it.tool_name}</TableCell>
-                    <TableCell>
-                      <StatusBadge meta={STATUS_META} value={it.status} />
-                    </TableCell>
-                    <TableCell
-                      className="max-w-72 truncate text-xs text-muted-foreground"
-                      title={it.args_digest || undefined}
-                    >
-                      {it.args_digest || "—"}
-                    </TableCell>
-                    <TableCell className="text-xs">
-                      {formatDuration(it.duration_ms ?? null)}
-                    </TableCell>
-                    <TableCell className="text-xs">{it.datasource_key ?? "—"}</TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+        {audit.isError && <ErrorAlert />}
+        <DataView
+          rows={audit.data?.items ?? []}
+          rowKey={(it) => it.id}
+          isLoading={audit.isPending}
+          isEmpty={!audit.isPending && audit.data?.items.length === 0}
+          emptyText="暂无工具执行记录"
+          columns={[
+            {
+              key: "created_at",
+              header: "时间",
+              cardPriority: 2,
+              cellClassName: "text-xs text-muted-foreground",
+              render: (it) => formatDateTime(it.created_at, { seconds: true }),
+            },
+            {
+              key: "tool_name",
+              header: "工具",
+              cardPriority: 1,
+              cellClassName: "font-mono text-xs",
+              render: (it) => <span className="font-mono text-xs">{it.tool_name}</span>,
+            },
+            {
+              key: "status",
+              header: "状态",
+              cardPriority: 3,
+              render: (it) => <StatusBadge meta={STATUS_META} value={it.status} />,
+            },
+            {
+              key: "args_digest",
+              header: "参数摘要",
+              cellClassName: "text-xs text-muted-foreground",
+              render: (it) => (
+                <span className="block max-w-72 truncate" title={it.args_digest || undefined}>
+                  {it.args_digest || "—"}
+                </span>
+              ),
+            },
+            {
+              key: "duration_ms",
+              header: "耗时",
+              cardPriority: 5,
+              cellClassName: "text-xs",
+              render: (it) => formatDuration(it.duration_ms ?? null),
+            },
+            {
+              key: "datasource_key",
+              header: "数据源",
+              cardPriority: 4,
+              cellClassName: "text-xs",
+              render: (it) => it.datasource_key ?? "—",
+            },
+          ]}
+        />
 
         <Pagination
           page={page}

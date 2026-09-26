@@ -28,8 +28,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FormRow } from "@/components/form-row";
 import { formatDateTime } from "@/lib/datetime";
 import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
+import { DataView } from "@/components/data-view";
 import {
   Select,
   SelectContent,
@@ -37,14 +40,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { datasourceApi } from "@/lib/datasource-api";
@@ -414,74 +409,83 @@ export default function RagPage() {
         <span className="text-sm text-muted-foreground">共 {total} 条</span>
       </div>
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>数据源</TableHead>
-            <TableHead>schema</TableHead>
-            <TableHead>表名</TableHead>
-            <TableHead>业务称谓</TableHead>
-            <TableHead>说明</TableHead>
-            <TableHead>来源</TableHead>
-            <TableHead>更新时间</TableHead>
-            <TableHead className="text-right">操作</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {(list.data?.items ?? []).map((item) => (
-            <TableRow
-              key={item.id}
-              className={item.table_name === locateTable ? "bg-accent/50" : undefined}
-            >
-              <TableCell className="font-mono text-xs">{item.datasource_key}</TableCell>
-              <TableCell className="font-mono text-xs">{item.schema_name}</TableCell>
-              <TableCell className="font-mono text-xs">{item.table_name}</TableCell>
-              <TableCell className="text-xs">
-                {item.alias ? (
-                  <Badge variant="outline" className="max-w-40" title={item.alias}>
-                    <span className="truncate">{item.alias}</span>
-                  </Badge>
-                ) : (
-                  <span className="text-muted-foreground">—</span>
-                )}
-              </TableCell>
-              <TableCell className="max-w-64 truncate" title={item.table_comment}>
-                {item.table_comment}
-              </TableCell>
-              <TableCell>
-                <Badge variant="secondary">
-                  {SOURCE_LABEL[item.source_type] ?? item.source_type}
+      <DataView
+        rows={list.data?.items ?? []}
+        rowKey={(item) => item.id}
+        isLoading={list.isPending}
+        isEmpty={!list.isPending && list.data?.items.length === 0}
+        emptyText="暂无知识条目——可在右上角对数据源执行「扫描数据源」"
+        columns={[
+          {
+            key: "datasource_key",
+            header: "数据源",
+            cellClassName: "font-mono text-xs",
+          },
+          {
+            key: "schema_name",
+            header: "schema",
+            cellClassName: "font-mono text-xs",
+          },
+          {
+            key: "table_name",
+            header: "表名",
+            cardPriority: 1,
+            cellClassName: "font-mono text-xs",
+            // ?table= 定位行高亮:DataView 无行级 className 口径,降为标题单元格高亮
+            render: (item) =>
+              item.table_name === locateTable ? (
+                <span className="bg-accent/50 px-1 font-mono text-xs">{item.table_name}</span>
+              ) : (
+                <span className="font-mono text-xs">{item.table_name}</span>
+              ),
+          },
+          {
+            key: "alias",
+            header: "业务称谓",
+            cardPriority: 4,
+            cellClassName: "text-xs",
+            render: (item) =>
+              item.alias ? (
+                <Badge variant="outline" className="max-w-40" title={item.alias}>
+                  <span className="truncate">{item.alias}</span>
                 </Badge>
-              </TableCell>
-              <TableCell className="text-xs text-muted-foreground">
-                {formatDateTime(item.updated_at)}
-              </TableCell>
-              <TableCell className="text-right">
-                <Button variant="ghost" size="sm" onClick={() => openEdit(item)}>
-                  编辑
-                </Button>
-                <Button variant="ghost-destructive" size="sm" onClick={() => setDeleteTarget(item)}>
-                  删除
-                </Button>
-              </TableCell>
-            </TableRow>
-          ))}
-          {list.isPending && (
-            <TableRow>
-              <TableCell colSpan={8} className="text-center text-muted-foreground">
-                加载中…
-              </TableCell>
-            </TableRow>
-          )}
-          {!list.isPending && (list.data?.items ?? []).length === 0 && (
-            <TableRow>
-              <TableCell colSpan={8} className="text-center text-muted-foreground">
-                暂无知识条目——可在右上角对数据源执行「扫描数据源」
-              </TableCell>
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              ),
+          },
+          {
+            key: "table_comment",
+            header: "说明",
+            cellClassName: "max-w-64 truncate",
+            render: (item) => (
+              <span className="block truncate" title={item.table_comment}>
+                {item.table_comment}
+              </span>
+            ),
+          },
+          {
+            key: "source_type",
+            header: "来源",
+            cardPriority: 2,
+            render: (item) => (
+              <Badge variant="secondary">
+                {SOURCE_LABEL[item.source_type] ?? item.source_type}
+              </Badge>
+            ),
+          },
+          {
+            key: "updated_at",
+            header: "更新时间",
+            cardPriority: 3,
+            cellClassName: "text-xs text-muted-foreground",
+            render: (item) => formatDateTime(item.updated_at),
+          },
+        ]}
+        actions={[
+          { label: "编辑", onSelect: openEdit },
+          { label: "删除", destructive: true, onSelect: setDeleteTarget },
+        ]}
+      />
 
       <div className="flex items-center justify-end gap-2">
         <Button
@@ -521,8 +525,7 @@ export default function RagPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <div className="space-y-1">
-              <Label htmlFor="rag-edit-comment">表说明</Label>
+            <FormRow label="表说明" htmlFor="rag-edit-comment">
               <Textarea
                 id="rag-edit-comment"
                 value={editComment}
@@ -531,9 +534,8 @@ export default function RagPage() {
                 onChange={(e) => setEditComment(e.target.value)}
                 placeholder="一句话中文表说明"
               />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="rag-edit-alias">业务称谓别名</Label>
+            </FormRow>
+            <FormRow label="业务称谓别名" htmlFor="rag-edit-alias">
               <Input
                 id="rag-edit-alias"
                 value={editAlias}
@@ -544,7 +546,7 @@ export default function RagPage() {
               <p className="text-xs text-muted-foreground">
                 摘要与洞察将以此称谓提及该表(用户用语优先);留空时回退表说明中的中文名称。
               </p>
-            </div>
+            </FormRow>
           </div>
           {edit.isError && (
             <p className="text-sm text-destructive" role="alert">
@@ -736,9 +738,9 @@ function DocumentsSection({ datasource }: { datasource: string }) {
             <LoaderIcon className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />
           </div>
         ) : (docs.data?.length ?? 0) === 0 ? (
-          <p className="py-4 text-center text-xs text-muted-foreground">
+          <EmptyState>
             暂无文档——上传后,AI 遇到政策、流程类问题会直接按文档内容回答(标注出处)
-          </p>
+          </EmptyState>
         ) : (
           docs.data?.map((d: DocItem) => (
             <div key={d.id} className="flex items-center gap-2 py-2 text-sm">

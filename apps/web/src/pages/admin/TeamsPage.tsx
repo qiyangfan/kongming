@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, Trash2, Users } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 
 import {
   AlertDialog,
@@ -24,9 +24,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { FieldLabel } from "@/components/field-label";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FormRow } from "@/components/form-row";
 import { PageHeader } from "@/components/page-header";
 import {
   Select,
@@ -35,15 +35,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { QueryErrorAlert } from "@/components/query-error";
+import { DataView } from "@/components/data-view";
+import { ErrorAlert } from "@/components/error-alert";
 import {
   addTeamMember,
   changeTeamMemberRole,
@@ -149,71 +142,58 @@ export default function TeamsPage() {
         }
       />
 
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>标识</TableHead>
-              <TableHead>名称</TableHead>
-              <TableHead>创建时间</TableHead>
-              <TableHead className="text-right">操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {teams.isError ? (
-              <TableRow>
-                <TableCell colSpan={4}>
-                  <QueryErrorAlert />
-                </TableCell>
-              </TableRow>
-            ) : (teams.data ?? []).length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
-                  尚未加入任何团队。
-                </TableCell>
-              </TableRow>
-            ) : (
-              (teams.data ?? []).map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell className="font-mono text-xs">{row.team_key}</TableCell>
-                  <TableCell className="max-w-40 truncate" title={row.name}>
-                    {row.name}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {formatDate(row.created_at)}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => {
-                          setManaging(row);
-                          setMemberError("");
-                        }}
-                      >
-                        <Users aria-hidden />
-                        成员
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`删除 ${row.name}`}
-                        onClick={() => {
-                          setDeleting(row);
-                          setDeleteError("");
-                        }}
-                      >
-                        <Trash2 aria-hidden />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      {teams.isError && <ErrorAlert />}
+
+      <DataView
+        rows={teams.data ?? []}
+        rowKey={(row) => row.id}
+        isLoading={teams.isPending}
+        isEmpty={!teams.isPending && !teams.isError && (teams.data ?? []).length === 0}
+        emptyText="尚未加入任何团队。"
+        columns={[
+          {
+            key: "team_key",
+            header: "标识",
+            cardPriority: 3,
+            cellClassName: "font-mono text-xs",
+            render: (row) => row.team_key,
+          },
+          {
+            key: "name",
+            header: "名称",
+            cardPriority: 1,
+            render: (row) => (
+              <span className="block max-w-40 truncate" title={row.name}>
+                {row.name}
+              </span>
+            ),
+          },
+          {
+            key: "created_at",
+            header: "创建时间",
+            cardPriority: 2,
+            cellClassName: "text-xs text-muted-foreground",
+            render: (row) => formatDate(row.created_at),
+          },
+        ]}
+        actions={[
+          {
+            label: "成员",
+            onSelect: (row) => {
+              setManaging(row);
+              setMemberError("");
+            },
+          },
+          {
+            label: "删除",
+            destructive: true,
+            onSelect: (row) => {
+              setDeleting(row);
+              setDeleteError("");
+            },
+          },
+        ]}
+      />
 
       {/* 新建 */}
       <Dialog
@@ -234,10 +214,7 @@ export default function TeamsPage() {
               create.mutate();
             }}
           >
-            <div className="space-y-1.5">
-              <FieldLabel htmlFor="team-key" help="小写字母开头,创建后不可改。">
-                标识
-              </FieldLabel>
+            <FormRow label="标识" htmlFor="team-key" help="小写字母开头,创建后不可改。">
               <Input
                 id="team-key"
                 value={form.teamKey}
@@ -245,15 +222,14 @@ export default function TeamsPage() {
                 className="font-mono"
                 placeholder="小写字母开头"
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="team-name">名称</Label>
+            </FormRow>
+            <FormRow label="名称" htmlFor="team-name">
               <Input
                 id="team-name"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
-            </div>
+            </FormRow>
             {formError && (
               <p role="alert" className="text-sm text-destructive">
                 {formError}
@@ -284,59 +260,60 @@ export default function TeamsPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            {detail.isError && <QueryErrorAlert />}
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>用户</TableHead>
-                  <TableHead>角色</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(detail.data?.members ?? []).map((m) => (
-                  <TableRow key={m.user_id}>
-                    <TableCell className="max-w-40 truncate text-sm" title={m.username}>
+            {detail.isError && <ErrorAlert />}
+            <DataView
+              rows={detail.data?.members ?? []}
+              rowKey={(m) => m.user_id}
+              columns={[
+                {
+                  key: "username",
+                  header: "用户",
+                  cardPriority: 1,
+                  render: (m) => (
+                    <span className="block max-w-40 truncate text-sm" title={m.username}>
                       {m.username}
-                    </TableCell>
-                    <TableCell>
-                      <Select
-                        value={m.role}
-                        onValueChange={(v) => changeRole.mutate({ userId: m.user_id, role: v })}
-                      >
-                        <SelectTrigger size="sm" className="w-28" aria-label={`角色 ${m.username}`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="OWNER">负责人</SelectItem>
-                          <SelectItem value="MEMBER">成员</SelectItem>
-                          <SelectItem value="VIEWER">观察者</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant={memberConfirm === m.user_id ? "destructive" : "ghost"}
-                        size="icon-xs"
-                        aria-label={`移除 ${m.username}${memberConfirm === m.user_id ? "(再次点击确认)" : ""}`}
-                        disabled={removeMember.isPending}
-                        onClick={() => {
-                          // 审查循环 B6:移除成员补二次确认(首击选中,再击执行)
-                          if (memberConfirm === m.user_id) {
-                            setMemberConfirm(null);
-                            removeMember.mutate(m.user_id);
-                          } else {
-                            setMemberConfirm(m.user_id);
-                          }
-                        }}
-                      >
-                        <Trash2 aria-hidden />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                    </span>
+                  ),
+                },
+                {
+                  key: "role",
+                  header: "角色",
+                  cardPriority: 2,
+                  render: (m) => (
+                    <Select
+                      value={m.role}
+                      onValueChange={(v) => changeRole.mutate({ userId: m.user_id, role: v })}
+                    >
+                      <SelectTrigger size="sm" className="w-28" aria-label={`角色 ${m.username}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="OWNER">负责人</SelectItem>
+                        <SelectItem value="MEMBER">成员</SelectItem>
+                        <SelectItem value="VIEWER">观察者</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ),
+                },
+              ]}
+              actions={[
+                {
+                  // 审查循环 B6:移除成员二次确认(首击选中,再击执行),武装态
+                  // 经行级 label 可视;挂起期仍以 onSelect 守卫兜底
+                  label: (m) => (memberConfirm === m.user_id ? "再次点击确认移除" : "移除"),
+                  destructive: true,
+                  onSelect: (m) => {
+                    if (removeMember.isPending) return;
+                    if (memberConfirm === m.user_id) {
+                      setMemberConfirm(null);
+                      removeMember.mutate(m.user_id);
+                    } else {
+                      setMemberConfirm(m.user_id);
+                    }
+                  },
+                },
+              ]}
+            />
             <form
               className="flex items-end gap-2 border-t pt-3"
               onSubmit={(e) => {

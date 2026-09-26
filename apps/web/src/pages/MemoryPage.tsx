@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Brain, Download, Loader2, Pencil, Trash2 } from "lucide-react";
+import { Brain, Download, Loader2 } from "lucide-react";
 
 import {
   AlertDialog,
@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FormRow } from "@/components/form-row";
 import { StatusBadge, type StatusMeta } from "@/components/status-badge";
 import { formatDate } from "@/lib/datetime";
 import {
@@ -36,15 +37,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { QueryErrorAlert } from "@/components/query-error";
+import { DataView } from "@/components/data-view";
+import { ErrorAlert } from "@/components/error-alert";
 import { api } from "@/lib/api";
 import { listMyTeams } from "@/lib/team-api";
 import type { components } from "@/lib/api-types.gen";
@@ -158,94 +152,78 @@ export default function MemoryPage() {
       {/* 032:团队记忆写入(个人记忆走对话「请记住」同路径) */}
       <TeamMemoryWrite />
 
-      <div className="rounded-lg border border-border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>内容</TableHead>
-              <TableHead>分类</TableHead>
-              <TableHead>来源</TableHead>
-              <TableHead>归属</TableHead>
-              <TableHead>置信度</TableHead>
-              <TableHead>状态</TableHead>
-              <TableHead className="w-24">操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {list.isError ? (
-              <TableRow>
-                <TableCell colSpan={7}>
-                  <QueryErrorAlert />
-                </TableCell>
-              </TableRow>
-            ) : list.isLoading ? (
-              <TableRow>
-                <TableCell colSpan={7} className="py-8 text-center">
-                  <Loader2
-                    className="mx-auto size-4 animate-spin text-muted-foreground"
-                    aria-hidden
-                  />
-                </TableCell>
-              </TableRow>
-            ) : (list.data?.items.length ?? 0) === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
-                  还没有记忆——在对话里说「请记住:…」即可沉淀
-                </TableCell>
-              </TableRow>
-            ) : (
-              list.data?.items.map((m) => (
-                <TableRow key={m.id}>
-                  <TableCell className="max-w-md truncate text-sm" title={m.content}>
-                    {m.content}
-                  </TableCell>
-                  <TableCell className="text-xs">{categoryLabel(m.category)}</TableCell>
-                  <TableCell>
-                    {/* source 契约为宽 string:未知值回落 secondary,与原 else 分支等价 */}
-                    <StatusBadge meta={SOURCE_META} value={m.source} fallbackVariant="secondary" />
-                  </TableCell>
-                  <TableCell>
-                    {m.team_id ? (
-                      <Badge
-                        variant="outline"
-                        className="max-w-32"
-                        title={teamName(m.team_id) ?? undefined}
-                      >
-                        <span className="truncate">{teamName(m.team_id)}</span>
-                      </Badge>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">个人</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-xs">{Math.round(m.confidence * 100)}%</TableCell>
-                  <TableCell>
-                    <StatusBadge meta={DORMANT_META} value={m.dormant ? "DORMANT" : "ACTIVE"} />
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => openEdit(m)}
-                        aria-label="编辑"
-                      >
-                        <Pencil className="size-3.5" aria-hidden />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => setRemoving(m)}
-                        aria-label="删除"
-                      >
-                        <Trash2 className="size-3.5" aria-hidden />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+      {list.isError && <ErrorAlert />}
+      {/* 外框仅在宽屏保留(md- 卡片形态裸露,与 DataView 样板口径一致) */}
+      <div className="md:rounded-lg md:border md:border-border">
+        <DataView
+          rows={list.data?.items ?? []}
+          rowKey={(m) => m.id}
+          isLoading={list.isPending}
+          isEmpty={!list.isPending && list.data?.items.length === 0}
+          emptyText="还没有记忆——在对话里说「请记住:…」即可沉淀"
+          columns={[
+            {
+              key: "content",
+              header: "内容",
+              cardPriority: 1,
+              render: (m) => (
+                <span className="block max-w-md truncate text-sm" title={m.content}>
+                  {m.content}
+                </span>
+              ),
+            },
+            {
+              key: "category",
+              header: "分类",
+              cellClassName: "text-xs",
+              render: (m) => categoryLabel(m.category),
+            },
+            {
+              key: "source",
+              header: "来源",
+              cardPriority: 2,
+              // source 契约为宽 string:未知值回落 secondary,与原 else 分支等价
+              render: (m) => (
+                <StatusBadge meta={SOURCE_META} value={m.source} fallbackVariant="secondary" />
+              ),
+            },
+            {
+              key: "team_id",
+              header: "归属",
+              cardPriority: 4,
+              render: (m) =>
+                m.team_id ? (
+                  <Badge
+                    variant="outline"
+                    className="max-w-32"
+                    title={teamName(m.team_id) ?? undefined}
+                  >
+                    <span className="truncate">{teamName(m.team_id)}</span>
+                  </Badge>
+                ) : (
+                  <span className="text-xs text-muted-foreground">个人</span>
+                ),
+            },
+            {
+              key: "confidence",
+              header: "置信度",
+              cellClassName: "text-xs",
+              render: (m) => `${Math.round(m.confidence * 100)}%`,
+            },
+            {
+              key: "dormant",
+              header: "状态",
+              cardPriority: 3,
+              render: (m) => (
+                <StatusBadge meta={DORMANT_META} value={m.dormant ? "DORMANT" : "ACTIVE"} />
+              ),
+            },
+          ]}
+          actions={[
+            { label: "编辑", onSelect: openEdit },
+            { label: "删除", destructive: true, onSelect: setRemoving },
+          ]}
+        />
       </div>
 
       {/* 编辑对话框 */}
@@ -256,24 +234,22 @@ export default function MemoryPage() {
             <DialogDescription>保存即视为确认,这条隐式记忆将转为「已认可」。</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="mem-content">内容</Label>
+            <FormRow label="内容" htmlFor="mem-content">
               <Input
                 id="mem-content"
                 value={editContent}
                 onChange={(e) => setEditContent(e.target.value)}
                 maxLength={500}
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="mem-category">分类</Label>
+            </FormRow>
+            <FormRow label="分类" htmlFor="mem-category">
               <Input
                 id="mem-category"
                 value={editCategory}
                 onChange={(e) => setEditCategory(e.target.value)}
                 maxLength={32}
               />
-            </div>
+            </FormRow>
             {error && (
               <p className="text-xs text-destructive" role="alert">
                 {error}
@@ -356,7 +332,7 @@ function TeamMemoryWrite() {
 
   return (
     <form
-      className="flex items-end gap-2 rounded-lg border border-border p-3"
+      className="flex flex-col gap-2 rounded-lg border border-border p-3 md:flex-row md:items-end"
       onSubmit={(e) => {
         e.preventDefault();
         if (content.trim()) write.mutate();
@@ -372,7 +348,8 @@ function TeamMemoryWrite() {
           maxLength={500}
         />
       </div>
-      <div className="w-44 space-y-1">
+      {/* 窄屏全宽折行,md+ 恢复固定 44 宽 */}
+      <div className="w-full space-y-1 md:w-44">
         <Label>归属</Label>
         <Select
           value={teamId || "_personal"}

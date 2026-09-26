@@ -7,7 +7,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 
 import {
   AlertDialog,
@@ -23,7 +23,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -31,15 +30,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { QueryErrorAlert } from "@/components/query-error";
+import { DataView } from "@/components/data-view";
+import { ErrorAlert } from "@/components/error-alert";
 import {
   bindPlan,
   createPlan,
@@ -59,6 +51,8 @@ import {
 import { DIM_TEXT, PAYMENT_STATUS_TEXT } from "@/lib/billing-labels";
 import { li2yuan, li2yuanInput } from "@/lib/money";
 import { StatusBadge, type StatusMeta } from "@/components/status-badge";
+import { PageHeader } from "@/components/page-header";
+import { FormRow } from "@/components/form-row";
 import { formatNumber } from "@/lib/datetime";
 
 // 发票状态 → StatusBadge(管理端维持原「一律 secondary」密度;未知值回落 secondary 等价;
@@ -313,84 +307,84 @@ export default function BillingPage() {
 
   return (
     <div className="space-y-5">
-      <h1 className="text-lg font-semibold">计费</h1>
+      <PageHeader title="计费" description="套餐定价、租户配额策略与全部账单。" />
 
       <section className="space-y-3 rounded-lg border border-border p-4">
         <h2 className="text-sm font-medium">套餐</h2>
-        <div className="rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>标识</TableHead>
-                <TableHead>名称</TableHead>
-                <TableHead>月 Token</TableHead>
-                <TableHead>月调用</TableHead>
-                <TableHead>计费单价</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {plans.isError ? (
-                <TableRow>
-                  <TableCell colSpan={6}>
-                    <QueryErrorAlert />
-                  </TableCell>
-                </TableRow>
-              ) : (
-                (plans.data ?? []).map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell className="font-mono text-xs">{p.plan_key}</TableCell>
-                    <TableCell className="max-w-40 truncate" title={p.name}>
-                      {p.name}
-                    </TableCell>
-                    <TableCell>{formatNumber(p.monthly_tokens)}</TableCell>
-                    <TableCell>{formatNumber(p.monthly_calls)}</TableCell>
-                    <TableCell>
-                      <div className="space-y-0.5">
-                        <p>每千 Token ¥{li2yuan(p.price_per_mtok)}</p>
-                        <p className="text-muted-foreground">
-                          每次调用 ¥{li2yuan(p.price_per_call)}
-                        </p>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`编辑套餐 ${p.plan_key}`}
-                        onClick={() => {
-                          setEditPlan(p);
-                          setEditForm({
-                            plan_key: p.plan_key,
-                            name: p.name,
-                            monthly_tokens: String(p.monthly_tokens),
-                            monthly_calls: String(p.monthly_calls),
-                            price_per_mtok: li2yuanInput(p.price_per_mtok),
-                            price_per_call: li2yuanInput(p.price_per_call),
-                          });
-                          setEditError("");
-                        }}
-                      >
-                        <Pencil aria-hidden />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`删除套餐 ${p.plan_key}`}
-                        onClick={() => {
-                          setDeletePlanTarget(p);
-                          setDeletePlanError("");
-                        }}
-                      >
-                        <Trash2 aria-hidden />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+        {plans.isError && <ErrorAlert />}
+        <DataView
+          rows={plans.data ?? []}
+          rowKey={(p) => p.id}
+          isLoading={plans.isPending}
+          isEmpty={!plans.isPending && (plans.data?.length ?? 0) === 0}
+          emptyText="暂无套餐"
+          columns={[
+            {
+              key: "plan_key",
+              header: "标识",
+              cardPriority: 2,
+              render: (p) => <span className="font-mono text-xs">{p.plan_key}</span>,
+            },
+            {
+              key: "name",
+              header: "名称",
+              cardPriority: 1,
+              render: (p) => (
+                <span className="block max-w-40 truncate" title={p.name}>
+                  {p.name}
+                </span>
+              ),
+            },
+            {
+              key: "monthly_tokens",
+              header: "月 Token",
+              cardPriority: 3,
+              render: (p) => formatNumber(p.monthly_tokens),
+            },
+            {
+              key: "monthly_calls",
+              header: "月调用",
+              cardPriority: 4,
+              render: (p) => formatNumber(p.monthly_calls),
+            },
+            {
+              key: "price",
+              header: "计费单价",
+              cardPriority: 5,
+              render: (p) => (
+                <div className="space-y-0.5">
+                  <p>每千 Token ¥{li2yuan(p.price_per_mtok)}</p>
+                  <p className="text-muted-foreground">每次调用 ¥{li2yuan(p.price_per_call)}</p>
+                </div>
+              ),
+            },
+          ]}
+          actions={[
+            {
+              label: "编辑",
+              onSelect: (p) => {
+                setEditPlan(p);
+                setEditForm({
+                  plan_key: p.plan_key,
+                  name: p.name,
+                  monthly_tokens: String(p.monthly_tokens),
+                  monthly_calls: String(p.monthly_calls),
+                  price_per_mtok: li2yuanInput(p.price_per_mtok),
+                  price_per_call: li2yuanInput(p.price_per_call),
+                });
+                setEditError("");
+              },
+            },
+            {
+              label: "删除",
+              destructive: true,
+              onSelect: (p) => {
+                setDeletePlanTarget(p);
+                setDeletePlanError("");
+              },
+            },
+          ]}
+        />
         <form
           className="grid grid-cols-2 gap-2 sm:grid-cols-6"
           onSubmit={(e) => {
@@ -490,77 +484,71 @@ export default function BillingPage() {
         </div>
         {tenantId && (
           <>
-            <div className="rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>范围</TableHead>
-                    <TableHead>维度</TableHead>
-                    <TableHead>上限(0=不限)</TableHead>
-                    <TableHead>预警%</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {policies.isError ? (
-                    <TableRow>
-                      <TableCell colSpan={5}>
-                        <QueryErrorAlert />
-                      </TableCell>
-                    </TableRow>
-                  ) : (policies.data ?? []).length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="py-6 text-center text-muted-foreground">
-                        无策略(不限量)
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    (policies.data ?? []).map((p) => {
-                      const botKey = (bots.data ?? []).find((b) => b.id === p.scope_ref)?.bot_key;
-                      return (
-                        <TableRow key={p.id}>
-                          <TableCell className="text-xs">
-                            {p.scope === "BOT" ? (
-                              botKey ? (
-                                <Badge variant="outline">助手:{botKey}</Badge>
-                              ) : (
-                                // 候选清单未含(已删除/跨页)时不露 UUID,hover 可得原 id
-                                <Badge variant="outline" title={p.scope_ref ?? undefined}>
-                                  未知助手
-                                </Badge>
-                              )
-                            ) : (
-                              <Badge variant="secondary">租户</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="secondary">
-                              {DIM_TEXT[p.dimension] ?? p.dimension}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            {p.dimension === "COST"
-                              ? `¥${li2yuan(p.limit_value)}`
-                              : formatNumber(p.limit_value)}
-                          </TableCell>
-                          <TableCell>{p.warn_pct}%</TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant="ghost"
-                              size="icon-xs"
-                              aria-label={`删除 ${DIM_TEXT[p.dimension] ?? p.dimension} 策略`}
-                              onClick={() => setDeletePolicyId(p.id)}
-                            >
-                              <Trash2 aria-hidden />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+            {policies.isError && <ErrorAlert />}
+            <DataView
+              rows={policies.data ?? []}
+              rowKey={(p) => p.id}
+              isLoading={policies.isPending}
+              isEmpty={!policies.isPending && (policies.data?.length ?? 0) === 0}
+              emptyText="无策略(不限量)"
+              columns={[
+                {
+                  key: "scope",
+                  header: "范围",
+                  cardPriority: 1,
+                  cellClassName: "text-xs",
+                  render: (p) => {
+                    const botKey = (bots.data ?? []).find((b) => b.id === p.scope_ref)?.bot_key;
+                    return p.scope === "BOT" ? (
+                      botKey ? (
+                        <Badge variant="outline">助手:{botKey}</Badge>
+                      ) : (
+                        // 候选清单未含(已删除/跨页)时不露 UUID,hover 可得原 id
+                        <Badge variant="outline" title={p.scope_ref ?? undefined}>
+                          未知助手
+                        </Badge>
+                      )
+                    ) : (
+                      <Badge variant="secondary">租户</Badge>
+                    );
+                  },
+                },
+                {
+                  key: "dimension",
+                  header: "维度",
+                  cardPriority: 2,
+                  render: (p) => (
+                    <Badge variant="secondary">{DIM_TEXT[p.dimension] ?? p.dimension}</Badge>
+                  ),
+                },
+                {
+                  key: "limit_value",
+                  header: "上限(0=不限)",
+                  cardPriority: 3,
+                  headClassName: "text-right",
+                  cellClassName: "text-right tabular-nums",
+                  render: (p) =>
+                    p.dimension === "COST"
+                      ? `¥${li2yuan(p.limit_value)}`
+                      : formatNumber(p.limit_value),
+                },
+                {
+                  key: "warn_pct",
+                  header: "预警%",
+                  cardPriority: 4,
+                  headClassName: "text-right",
+                  cellClassName: "text-right tabular-nums",
+                  render: (p) => `${p.warn_pct}%`,
+                },
+              ]}
+              actions={[
+                {
+                  label: "删除",
+                  destructive: true,
+                  onSelect: (p) => setDeletePolicyId(p.id),
+                },
+              ]}
+            />
             <form
               className="flex items-end gap-2"
               onSubmit={(e) => {
@@ -568,8 +556,7 @@ export default function BillingPage() {
                 upsert.mutate();
               }}
             >
-              <div className="space-y-1">
-                <Label className="text-xs">范围</Label>
+              <FormRow label="范围">
                 <Select
                   value={policyForm.scope}
                   onValueChange={(v) => setPolicyForm({ ...policyForm, scope: v, scope_ref: "" })}
@@ -582,10 +569,9 @@ export default function BillingPage() {
                     <SelectItem value="BOT">助手</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
+              </FormRow>
               {policyForm.scope === "BOT" && (
-                <div className="space-y-1">
-                  <Label className="text-xs">助手</Label>
+                <FormRow label="助手">
                   <Select
                     value={policyForm.scope_ref}
                     onValueChange={(v) => setPolicyForm({ ...policyForm, scope_ref: v })}
@@ -601,44 +587,42 @@ export default function BillingPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
+                </FormRow>
               )}
-              <Select
-                value={policyForm.dimension}
-                onValueChange={(v) =>
-                  // 维度切换=单位语义失效(token/次/元),上限清零重录,防跨单位误提交
-                  setPolicyForm({ ...policyForm, dimension: v, limit_value: "0" })
-                }
-              >
-                <SelectTrigger className="w-32" aria-label="维度">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="TOKENS">{DIM_TEXT.TOKENS}</SelectItem>
-                  <SelectItem value="CALLS">{DIM_TEXT.CALLS}</SelectItem>
-                  <SelectItem value="COST">{DIM_TEXT.COST}</SelectItem>
-                </SelectContent>
-              </Select>
-              <div className="space-y-1">
-                <Label className="text-xs">
-                  上限{policyForm.dimension === "COST" ? "(元)" : ""}
-                </Label>
+              <FormRow label="维度">
+                <Select
+                  value={policyForm.dimension}
+                  onValueChange={(v) =>
+                    // 维度切换=单位语义失效(token/次/元),上限清零重录,防跨单位误提交
+                    setPolicyForm({ ...policyForm, dimension: v, limit_value: "0" })
+                  }
+                >
+                  <SelectTrigger className="w-32" aria-label="维度">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="TOKENS">{DIM_TEXT.TOKENS}</SelectItem>
+                    <SelectItem value="CALLS">{DIM_TEXT.CALLS}</SelectItem>
+                    <SelectItem value="COST">{DIM_TEXT.COST}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FormRow>
+              <FormRow label={`上限${policyForm.dimension === "COST" ? "(元)" : ""}`}>
                 <Input
                   value={policyForm.limit_value}
                   onChange={(e) => setPolicyForm({ ...policyForm, limit_value: e.target.value })}
                   placeholder={policyForm.dimension === "COST" ? "如 10.00" : "如 100000"}
                   aria-label="上限"
                 />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">预警%</Label>
+              </FormRow>
+              <FormRow label="预警%">
                 <Input
                   value={policyForm.warn_pct}
                   onChange={(e) => setPolicyForm({ ...policyForm, warn_pct: e.target.value })}
                   className="w-20"
                   aria-label="预警百分比"
                 />
-              </div>
+              </FormRow>
               <Button
                 type="submit"
                 disabled={
@@ -665,69 +649,68 @@ export default function BillingPage() {
 
       <section className="space-y-2 rounded-lg border border-border p-4">
         <h2 className="text-sm font-medium">全部账单</h2>
-        <div className="rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>租户</TableHead>
-                <TableHead>周期</TableHead>
-                <TableHead>金额(元)</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>支付单</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {invoices.isError ? (
-                <TableRow>
-                  <TableCell colSpan={6}>
-                    <QueryErrorAlert />
-                  </TableCell>
-                </TableRow>
-              ) : (invoices.data?.items ?? []).length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-6 text-center text-muted-foreground">
-                    暂无账单
-                  </TableCell>
-                </TableRow>
-              ) : (
-                (invoices.data?.items ?? []).map((inv) => (
-                  <TableRow key={inv.id}>
-                    <TableCell className="font-mono text-xs">{inv.tenant_key}</TableCell>
-                    <TableCell className="font-mono text-xs">{inv.period}</TableCell>
-                    <TableCell>¥{li2yuan(inv.amount)}</TableCell>
-                    <TableCell>
-                      <StatusBadge
-                        meta={INVOICE_STATUS_META}
-                        value={inv.status}
-                        fallbackVariant="secondary"
-                      />
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {inv.payment_status
-                        ? (PAYMENT_STATUS_TEXT[inv.payment_status] ?? inv.payment_status)
-                        : "—"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {inv.status === "PENDING" && (
-                        <Button
-                          variant="ghost"
-                          size="xs"
-                          onClick={() => {
-                            setVoidTarget(inv.id);
-                            setVoidError("");
-                          }}
-                        >
-                          作废
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+        {invoices.isError && <ErrorAlert />}
+        <DataView
+          rows={invoices.data?.items ?? []}
+          rowKey={(inv) => inv.id}
+          isLoading={invoices.isPending}
+          isEmpty={!invoices.isPending && (invoices.data?.items.length ?? 0) === 0}
+          emptyText="暂无账单"
+          columns={[
+            {
+              key: "tenant_key",
+              header: "租户",
+              cardPriority: 1,
+              render: (inv) => <span className="font-mono text-xs">{inv.tenant_key}</span>,
+            },
+            {
+              key: "period",
+              header: "周期",
+              cardPriority: 2,
+              render: (inv) => <span className="font-mono text-xs">{inv.period}</span>,
+            },
+            {
+              key: "amount",
+              header: "金额(元)",
+              cardPriority: 3,
+              headClassName: "text-right",
+              cellClassName: "text-right tabular-nums",
+              render: (inv) => `¥${li2yuan(inv.amount)}`,
+            },
+            {
+              key: "status",
+              header: "状态",
+              cardPriority: 4,
+              render: (inv) => (
+                <StatusBadge
+                  meta={INVOICE_STATUS_META}
+                  value={inv.status}
+                  fallbackVariant="secondary"
+                />
+              ),
+            },
+            {
+              key: "payment_status",
+              header: "支付单",
+              cellClassName: "text-xs text-muted-foreground",
+              render: (inv) =>
+                inv.payment_status
+                  ? (PAYMENT_STATUS_TEXT[inv.payment_status] ?? inv.payment_status)
+                  : "—",
+            },
+          ]}
+          actions={[
+            {
+              label: "作废",
+              // 与原口径一致:仅 PENDING 账单可作废(非 PENDING 行不渲染该操作)
+              isVisible: (inv) => inv.status === "PENDING",
+              onSelect: (inv) => {
+                setVoidTarget(inv.id);
+                setVoidError("");
+              },
+            },
+          ]}
+        />
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">
             共 {invoices.data?.total ?? 0} 条 · 第 {page}/{totalPages} 页
@@ -766,45 +749,42 @@ export default function BillingPage() {
               update.mutate();
             }}
           >
-            <Label className="text-xs">名称</Label>
-            <Input
-              value={editForm.name}
-              onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-              aria-label="套餐名称"
-            />
+            <FormRow label="名称">
+              <Input
+                value={editForm.name}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                aria-label="套餐名称"
+              />
+            </FormRow>
             <div className="grid grid-cols-2 gap-2">
-              <div>
-                <Label className="text-xs">月 Token(0 不限)</Label>
+              <FormRow label="月 Token(0 不限)">
                 <Input
                   value={editForm.monthly_tokens}
                   onChange={(e) => setEditForm({ ...editForm, monthly_tokens: e.target.value })}
                   aria-label="月 Token"
                 />
-              </div>
-              <div>
-                <Label className="text-xs">月调用(0 不限)</Label>
+              </FormRow>
+              <FormRow label="月调用(0 不限)">
                 <Input
                   value={editForm.monthly_calls}
                   onChange={(e) => setEditForm({ ...editForm, monthly_calls: e.target.value })}
                   aria-label="月调用"
                 />
-              </div>
-              <div>
-                <Label className="text-xs">千 Token 单价(元)</Label>
+              </FormRow>
+              <FormRow label="千 Token 单价(元)">
                 <Input
                   value={editForm.price_per_mtok}
                   onChange={(e) => setEditForm({ ...editForm, price_per_mtok: e.target.value })}
                   aria-label="千 Token 单价"
                 />
-              </div>
-              <div>
-                <Label className="text-xs">每次调用单价(元)</Label>
+              </FormRow>
+              <FormRow label="每次调用单价(元)">
                 <Input
                   value={editForm.price_per_call}
                   onChange={(e) => setEditForm({ ...editForm, price_per_call: e.target.value })}
                   aria-label="次单价"
                 />
-              </div>
+              </FormRow>
             </div>
             {editError && (
               <p role="alert" className="text-sm text-destructive">

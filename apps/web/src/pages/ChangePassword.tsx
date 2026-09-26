@@ -9,7 +9,7 @@ import { useAuth } from "../lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormRow } from "@/components/form-row";
 
 function ChangePasswordForm() {
   const navigate = useNavigate();
@@ -54,8 +54,7 @@ function ChangePasswordForm() {
         </CardHeader>
         <CardContent>
           <form onSubmit={submit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="current">当前密码</Label>
+            <FormRow label="当前密码" htmlFor="current">
               <Input
                 id="current"
                 type="password"
@@ -63,9 +62,8 @@ function ChangePasswordForm() {
                 onChange={(e) => setCurrent(e.target.value)}
                 autoComplete="current-password"
               />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="next">新密码</Label>
+            </FormRow>
+            <FormRow label="新密码" htmlFor="next">
               <Input
                 id="next"
                 type="password"
@@ -73,9 +71,8 @@ function ChangePasswordForm() {
                 onChange={(e) => setNext(e.target.value)}
                 autoComplete="new-password"
               />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="confirm">确认新密码</Label>
+            </FormRow>
+            <FormRow label="确认新密码" htmlFor="confirm">
               <Input
                 id="confirm"
                 type="password"
@@ -83,7 +80,7 @@ function ChangePasswordForm() {
                 onChange={(e) => setConfirm(e.target.value)}
                 autoComplete="new-password"
               />
-            </div>
+            </FormRow>
             {error && (
               <p className="text-sm text-destructive" role="alert">
                 {error}

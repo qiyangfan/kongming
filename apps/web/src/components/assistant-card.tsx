@@ -51,7 +51,11 @@ function ResultTable({
   labels?: string[];
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-border">
+    <div
+      // 结果表豁免卡片化(设计决策 D6,动态列):窄屏保留横滚;overscroll-x-contain
+      // 使横向滑动手势到此为止、不牵动页面纵向滚动(B4.1 手势隔离)
+      className="overflow-x-auto overscroll-x-contain rounded-lg border border-border"
+    >
       <table className="w-full text-sm">
         <thead className="bg-muted/50">
           <tr>

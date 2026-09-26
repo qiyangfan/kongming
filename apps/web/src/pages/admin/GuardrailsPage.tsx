@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/page-header";
 import { Pagination } from "@/components/pagination";
 import { StatusBadge, type StatusMeta } from "@/components/status-badge";
+import { DataView } from "@/components/data-view";
 import {
   Select,
   SelectContent,
@@ -20,15 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { QueryErrorAlert } from "@/components/query-error";
+import { ErrorAlert } from "@/components/error-alert";
 import { DateRangeQuick } from "@/components/date-range-quick";
 import { guardrailAuditPage, guardrailRules, updateGuardrailRule } from "@/lib/guardrail-api";
 import { endExclusive } from "@/lib/date-utils";
@@ -120,130 +113,126 @@ export default function GuardrailsPage() {
         description="AI 问答的安全防线:拦截诱导攻击、保护敏感信息、管控高危操作。可调整规则并查看触发记录。"
       />
 
-      <div className="rounded-lg border border-border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>规则</TableHead>
-              <TableHead>层</TableHead>
-              <TableHead>动作</TableHead>
-              <TableHead>描述</TableHead>
-              <TableHead>阈值</TableHead>
-              <TableHead>启用</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rules.isError ? (
-              <TableRow>
-                <TableCell colSpan={6}>
-                  <QueryErrorAlert />
-                </TableCell>
-              </TableRow>
-            ) : rules.isLoading ? (
-              <TableRow>
-                <TableCell colSpan={6} className="py-6 text-center">
-                  <Loader2
-                    className="mx-auto size-4 animate-spin text-muted-foreground"
-                    aria-hidden
-                  />
-                </TableCell>
-              </TableRow>
-            ) : (
-              rules.data?.rules.map((r) => (
-                <TableRow key={r.name}>
-                  <TableCell className="font-mono text-xs font-medium">
-                    <span className="flex items-center gap-1.5">
-                      <ShieldCheck
-                        className="size-3.5 shrink-0 text-muted-foreground"
-                        aria-hidden
-                      />
-                      <span className="truncate" title={r.name}>
-                        {r.name}
-                      </span>
-                      {r.overridden && (
-                        <Badge variant="outline" className="shrink-0">
-                          已调整
-                        </Badge>
-                      )}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">
-                      {TYPE_LABELS[r.guardrail_type] ?? r.guardrail_type}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {r.maskable ? (
-                      <Select
-                        value={r.action}
-                        onValueChange={(v) =>
-                          editMeta.mutate({
-                            name: r.name,
-                            enabled: r.enabled,
-                            action: v as "blocked" | "masked",
-                          })
-                        }
-                        disabled={editMeta.isPending}
-                      >
-                        <SelectTrigger size="sm" className="w-24" aria-label={`${r.name} 动作`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="blocked">拦截</SelectItem>
-                          <SelectItem value="masked">脱敏</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      // action 契约窄联合;未知值回落 default,与原 ?? "default" 等价
-                      <StatusBadge meta={ACTION_META} value={r.action} fallbackVariant="default" />
-                    )}
-                  </TableCell>
-                  <TableCell
-                    className="max-w-md truncate text-sm text-muted-foreground"
-                    title={r.description}
-                  >
-                    {r.description}
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    {r.guardrail_type === "tool_intent" ? (
-                      <Input
-                        type="number"
-                        min={1}
-                        max={100}
-                        defaultValue={r.threshold ?? 1}
-                        size="sm"
-                        className="w-20"
-                        aria-label={`${r.name} 阈值`}
-                        disabled={editMeta.isPending}
-                        onBlur={(e) => {
-                          const v = Number.parseInt(e.target.value, 10);
-                          if (Number.isFinite(v) && v >= 1 && v <= 100 && v !== r.threshold) {
-                            editMeta.mutate({
-                              name: r.name,
-                              enabled: r.enabled,
-                              threshold: v,
-                            });
-                          }
-                        }}
-                      />
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Switch
-                      checked={r.enabled}
-                      disabled={toggle.isPending}
-                      onCheckedChange={(on) => toggle.mutate({ name: r.name, enabled: on })}
-                      aria-label={`启用 ${r.name}`}
-                    />
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      {rules.isError && <ErrorAlert />}
+      <DataView
+        rows={rules.data?.rules ?? []}
+        rowKey={(r) => r.name}
+        isLoading={rules.isPending}
+        isEmpty={!rules.isPending && rules.data?.rules.length === 0}
+        emptyText="暂无护栏规则"
+        columns={[
+          {
+            key: "name",
+            header: "规则",
+            cardPriority: 1,
+            cellClassName: "font-mono text-xs font-medium",
+            render: (r) => (
+              <span className="flex items-center gap-1.5">
+                <ShieldCheck className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="truncate" title={r.name}>
+                  {r.name}
+                </span>
+                {r.overridden && (
+                  <Badge variant="outline" className="shrink-0">
+                    已调整
+                  </Badge>
+                )}
+              </span>
+            ),
+          },
+          {
+            key: "guardrail_type",
+            header: "层",
+            cardPriority: 2,
+            render: (r) => (
+              <Badge variant="secondary">{TYPE_LABELS[r.guardrail_type] ?? r.guardrail_type}</Badge>
+            ),
+          },
+          {
+            key: "action",
+            header: "动作",
+            cardPriority: 3,
+            render: (r) =>
+              r.maskable ? (
+                <Select
+                  value={r.action}
+                  onValueChange={(v) =>
+                    editMeta.mutate({
+                      name: r.name,
+                      enabled: r.enabled,
+                      action: v as "blocked" | "masked",
+                    })
+                  }
+                  disabled={editMeta.isPending}
+                >
+                  <SelectTrigger size="sm" className="w-24" aria-label={`${r.name} 动作`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="blocked">拦截</SelectItem>
+                    <SelectItem value="masked">脱敏</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : (
+                // action 契约窄联合;未知值回落 default,与原 ?? "default" 等价
+                <StatusBadge meta={ACTION_META} value={r.action} fallbackVariant="default" />
+              ),
+          },
+          {
+            key: "description",
+            header: "描述",
+            cellClassName: "text-sm text-muted-foreground",
+            render: (r) => (
+              <span className="block max-w-md truncate" title={r.description}>
+                {r.description}
+              </span>
+            ),
+          },
+          {
+            key: "threshold",
+            header: "阈值",
+            cellClassName: "text-xs",
+            render: (r) =>
+              r.guardrail_type === "tool_intent" ? (
+                <Input
+                  type="number"
+                  min={1}
+                  max={100}
+                  defaultValue={r.threshold ?? 1}
+                  size="sm"
+                  className="w-20"
+                  aria-label={`${r.name} 阈值`}
+                  disabled={editMeta.isPending}
+                  onBlur={(e) => {
+                    const v = Number.parseInt(e.target.value, 10);
+                    if (Number.isFinite(v) && v >= 1 && v <= 100 && v !== r.threshold) {
+                      editMeta.mutate({
+                        name: r.name,
+                        enabled: r.enabled,
+                        threshold: v,
+                      });
+                    }
+                  }}
+                />
+              ) : (
+                "—"
+              ),
+          },
+          {
+            key: "enabled",
+            header: "启用",
+            cardPriority: 4,
+            render: (r) => (
+              <Switch
+                checked={r.enabled}
+                disabled={toggle.isPending}
+                onCheckedChange={(on) => toggle.mutate({ name: r.name, enabled: on })}
+                aria-label={`启用 ${r.name}`}
+              />
+            ),
+          },
+        ]}
+      />
       {toggleError && (
         <p className="text-xs text-destructive" role="alert">
           {toggleError}
@@ -337,66 +326,58 @@ export default function GuardrailsPage() {
           />
         </div>
 
-        <div className="rounded-lg border border-border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>时间</TableHead>
-                <TableHead>层</TableHead>
-                <TableHead>规则</TableHead>
-                <TableHead>动作</TableHead>
-                <TableHead>内容摘要(脱敏)</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {audit.isError ? (
-                <TableRow>
-                  <TableCell colSpan={5}>
-                    <QueryErrorAlert />
-                  </TableCell>
-                </TableRow>
-              ) : audit.isLoading ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="py-6 text-center">
-                    <Loader2
-                      className="mx-auto size-4 animate-spin text-muted-foreground"
-                      aria-hidden
-                    />
-                  </TableCell>
-                </TableRow>
-              ) : audit.data?.items.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
-                    暂无护栏触发记录
-                  </TableCell>
-                </TableRow>
-              ) : (
-                audit.data?.items.map((it) => (
-                  <TableRow key={it.id}>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {formatDateTime(it.created_at, { seconds: true })}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">
-                        {TYPE_LABELS[it.guardrail_type] ?? it.guardrail_type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{it.rule_name}</TableCell>
-                    <TableCell>
-                      <StatusBadge meta={ACTION_META} value={it.action} fallbackVariant="default" />
-                    </TableCell>
-                    <TableCell
-                      className="max-w-96 truncate text-xs text-muted-foreground"
-                      title={it.content_digest || undefined}
-                    >
-                      {it.content_digest || "—"}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+        {audit.isError && <ErrorAlert />}
+        <DataView
+          rows={audit.data?.items ?? []}
+          rowKey={(it) => it.id}
+          isLoading={audit.isPending}
+          isEmpty={!audit.isPending && audit.data?.items.length === 0}
+          emptyText="暂无护栏触发记录"
+          columns={[
+            {
+              key: "created_at",
+              header: "时间",
+              cardPriority: 2,
+              cellClassName: "text-xs text-muted-foreground",
+              render: (it) => formatDateTime(it.created_at, { seconds: true }),
+            },
+            {
+              key: "guardrail_type",
+              header: "层",
+              cardPriority: 3,
+              render: (it) => (
+                <Badge variant="secondary">
+                  {TYPE_LABELS[it.guardrail_type] ?? it.guardrail_type}
+                </Badge>
+              ),
+            },
+            {
+              key: "rule_name",
+              header: "规则",
+              cardPriority: 1,
+              cellClassName: "font-mono text-xs",
+              render: (it) => <span className="font-mono text-xs">{it.rule_name}</span>,
+            },
+            {
+              key: "action",
+              header: "动作",
+              cardPriority: 4,
+              render: (it) => (
+                <StatusBadge meta={ACTION_META} value={it.action} fallbackVariant="default" />
+              ),
+            },
+            {
+              key: "content_digest",
+              header: "内容摘要(脱敏)",
+              cellClassName: "text-xs text-muted-foreground",
+              render: (it) => (
+                <span className="block max-w-96 truncate" title={it.content_digest || undefined}>
+                  {it.content_digest || "—"}
+                </span>
+              ),
+            },
+          ]}
+        />
 
         <Pagination
           page={page}

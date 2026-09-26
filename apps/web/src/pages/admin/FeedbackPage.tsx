@@ -8,8 +8,6 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { Loader2 } from "lucide-react";
 
-import { ScrollFade } from "@/components/scroll-fade";
-
 import { EChart, themedTooltip } from "@/lib/echarts";
 import { useTheme } from "@/lib/theme-store";
 
@@ -26,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DataView } from "@/components/data-view";
 import { PageHeader } from "@/components/page-header";
 import { Pagination } from "@/components/pagination";
 import { StatCard } from "@/components/stat-card";
@@ -37,15 +36,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { QueryErrorAlert } from "@/components/query-error";
+import { ErrorAlert } from "@/components/error-alert";
 import { useAuth } from "@/lib/auth-store";
 import { datasourceApi } from "@/lib/datasource-api";
 import {
@@ -214,7 +205,7 @@ export default function FeedbackPage() {
       {/* 趋势折线(token 色板) */}
       <div className="rounded-lg border border-border bg-card px-2 py-1">
         {overview.isError ? (
-          <QueryErrorAlert />
+          <ErrorAlert />
         ) : (
           <FeedbackTrendChart key={theme} trend={overview.data?.trend ?? []} />
         )}
@@ -334,78 +325,68 @@ export default function FeedbackPage() {
       </div>
 
       {/* 明细分页表 */}
-      <ScrollFade className="overflow-x-auto rounded-lg border border-border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>时间</TableHead>
-              <TableHead>用户</TableHead>
-              <TableHead>租户</TableHead>
-              <TableHead>数据源</TableHead>
-              <TableHead>评分</TableHead>
-              <TableHead>问句</TableHead>
-              <TableHead>纠错</TableHead>
-              <TableHead>处置状态</TableHead>
-              <TableHead className="text-right">操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {list.isError ? (
-              <TableRow>
-                <TableCell colSpan={9}>
-                  <QueryErrorAlert />
-                </TableCell>
-              </TableRow>
-            ) : list.isLoading ? (
-              <TableRow>
-                <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
-                  <Loader2 className="inline size-4 animate-spin" aria-hidden /> 加载中…
-                </TableCell>
-              </TableRow>
-            ) : (list.data?.items.length ?? 0) === 0 ? (
-              <TableRow>
-                <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
-                  暂无反馈——问答卡片右下角即可赞踩。
-                </TableCell>
-              </TableRow>
-            ) : (
-              list.data?.items.map((item) => (
-                <TableRow key={item.message_id}>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">
-                    {formatDateTime(item.feedback_time)}
-                  </TableCell>
-                  <TableCell
-                    className="max-w-32 truncate"
-                    title={displayUser(item.user_nickname, item.user_username)}
-                  >
-                    {displayUser(item.user_nickname, item.user_username)}
-                  </TableCell>
-                  <TableCell>{item.tenant_key}</TableCell>
-                  <TableCell>{item.datasource_key}</TableCell>
-                  <TableCell>
-                    {/* rating 为窄联合:有值才出徽章,空值保持纯文本「—」(与原三元 else 分支等价) */}
-                    {item.rating ? <StatusBadge meta={RATING_META} value={item.rating} /> : "—"}
-                  </TableCell>
-                  <TableCell className="max-w-56 truncate" title={item.question ?? undefined}>
-                    {item.question ?? "—"}
-                  </TableCell>
-                  <TableCell>
-                    {item.corrected_sql ? <Badge variant="outline">带纠错</Badge> : "—"}
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge meta={STATUS_META} value={item.feedback_status} />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="xs" onClick={() => setDetail(item)}>
-                      详情
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </ScrollFade>
+      {list.isError && <ErrorAlert />}
+      <DataView
+        rows={list.data?.items ?? []}
+        rowKey={(item) => item.message_id}
+        isLoading={list.isLoading}
+        isEmpty={!list.isLoading && !list.isError && (list.data?.items.length ?? 0) === 0}
+        emptyText="暂无反馈——问答卡片右下角即可赞踩。"
+        columns={[
+          {
+            key: "feedback_time",
+            header: "时间",
+            cardPriority: 3,
+            cellClassName: "whitespace-nowrap text-muted-foreground",
+            render: (item) => formatDateTime(item.feedback_time),
+          },
+          {
+            key: "user",
+            header: "用户",
+            cardPriority: 2,
+            render: (item) => (
+              <span
+                className="block max-w-32 truncate"
+                title={displayUser(item.user_nickname, item.user_username)}
+              >
+                {displayUser(item.user_nickname, item.user_username)}
+              </span>
+            ),
+          },
+          { key: "tenant_key", header: "租户", render: (item) => item.tenant_key },
+          { key: "datasource_key", header: "数据源", render: (item) => item.datasource_key },
+          {
+            key: "rating",
+            header: "评分",
+            cardPriority: 4,
+            // rating 为窄联合:有值才出徽章,空值保持纯文本「—」(与原三元 else 分支等价)
+            render: (item) =>
+              item.rating ? <StatusBadge meta={RATING_META} value={item.rating} /> : "—",
+          },
+          {
+            key: "question",
+            header: "问句",
+            cardPriority: 1,
+            render: (item) => (
+              <span className="block max-w-56 truncate" title={item.question ?? undefined}>
+                {item.question ?? "—"}
+              </span>
+            ),
+          },
+          {
+            key: "corrected_sql",
+            header: "纠错",
+            render: (item) => (item.corrected_sql ? <Badge variant="outline">带纠错</Badge> : "—"),
+          },
+          {
+            key: "feedback_status",
+            header: "处置状态",
+            cardPriority: 5,
+            render: (item) => <StatusBadge meta={STATUS_META} value={item.feedback_status} />,
+          },
+        ]}
+        actions={[{ label: "详情", onSelect: setDetail }]}
+      />
 
       <Pagination
         page={page}
