@@ -2,7 +2,7 @@
 
 日期: 2026-09-11
 
-状态: 已切换,灰度中(2026-09-11 三处 `.env` 切换完成,直连冒烟/e2e 问答/网关计量与计价实证全过;灰度一周正常使用无故障后转「已接受」,月末上游账单量级核对一次。muniu 侧论证原稿见 muniu 仓库 docs/kongming-adr-draft.md)
+状态: 已接受;定位已修订(2026-09-26,见文末「修订」)——muniu 降级为**可选端点之一**,不再作为 agent 面强制统一出口;当前部署仍走 muniu 形态,灰度结论不变(2026-09-11 三处 `.env` 切换完成,直连冒烟/e2e 问答/网关计量与计价实证全过;muniu 侧论证原稿见 muniu 仓库 docs/kongming-adr-draft.md)
 
 ## 背景
 
@@ -55,3 +55,12 @@ muniu 提供:多上游路由与 failover(首 token 边界语义)、per-key RPM/T
 - **对 muniu HANDOFF「下一步 6b」原裁决的修订**:原裁决为「kongming 实现 ingest 接收端点接收 muniu usage 推送 + 下线自有模型计价」。本 ADR 修订为**只读旁路对账**(理由三条):①muniu 计量汇为单 sink 插拔,ingest 通道已归控制面锦官且跨仓联调闭环,为对账改数据面投递拓扑代价与收益不成比例;②锦官按 key 归账用户并驱动钱包,kongming 若并行接收同批行将形成第二套归账真相,对账问题递归;③kongming 租户身份与锦官用户身份未统一,自有牌价计费是租户产品能力,「下线」超出了成本可见的原始诉求。
 - 落地:`GET /system/billing/cost-reconciliation`(管理面只读)——muniu `GET /admin/v1/usage`(credit 口径)与 `sys_llm_usage`/`sys_invoice` 同期汇总并列,偏差率超阈值(缺省 ±0.2)落审计告警;成本侧不可用时报告显式标注,不影响计费主链路。muniu 侧零开发、零契约变更。
 - 长期演进:锦官统一身份后,牌价/成本/钱包在控制面合流,对账升级为从锦官取数(muniu HANDOFF 6b 的最终归宿)。
+
+## 修订(2026-09-26):muniu 是可选端点,不是强制出口
+
+用户裁决:不应强制 kongming 按经 muniu 走;muniu 的定位是一个**类似反代中转站的自建端点选项**(类比 ollama),部署者可在官方直连端点与 muniu 之间自由选择。原「agent 面全部 LLM 出口统一指向 muniu」的表述**废止**。
+
+- **技术事实不变**:agent 面配置层(`llm_base_url`/`MODEL_REGISTRY_JSON`)本就接受任意 OpenAI 兼容端点,官方直连从来是一等公民——原 ADR 收敛的是「默认部署形态」,不是能力边界。本修订把这一事实升格为架构口径,并补齐选型参考。
+- **选型参考**:`docs/model-providers.md` 官方端点预设目录——各家官方 OpenAI 兼容端点、各家 Anthropic 分支端点(消费路径说明)、muniu 与 ollama 等「自建网关/本地推理」类条目。选 muniu 的理由仍是原 ADR 的三项成本(密钥收敛/统一计量/failover);不选时这三项成本自担,零架构阻碍。
+- **现网不动**:当前部署仍是 muniu 形态,灰度与月末对账照旧;`.env` 三处改回直连即回官方形态,切换成本与原回滚路径一致。
+- **供应商侧配套**:官方端点清单与各家 Plan 订阅端点红线以 muniu 仓 `docs/provider-presets.md` 为交叉核对源(2026-09-26 版)。
