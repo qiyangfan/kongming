@@ -31,8 +31,6 @@ class ModelEntry:
     api_key: str = field(repr=False)
     model: str = ""
     capabilities: list[str] = field(default_factory=list[str])
-    price_input: float | None = None  # 每百万 tokens 单价(可选)
-    price_output: float | None = None
     max_image_mb: float | None = None  # 036⑦:图片体积上限(vision 模型;None=缺省)
     protocol: str = DEFAULT_PROTOCOL  # 出站协议(ADR-008):openai|anthropic|responses
 
@@ -41,6 +39,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="KM_AGENT_", extra="ignore")
 
     app_name: str = "kongming-agent"
+    log_level: str = "INFO"  # 061:运行日志级别
 
     # LLM(可切换:通义/DeepSeek/任何 openai 兼容端点)
     llm_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -116,15 +115,7 @@ class Settings(BaseSettings):
             if host not in allowed:
                 log.warning("注册表条目 %s 主机 %s 不在白名单,拒配", name, host)
                 continue
-            # 计价字段类型校验(R1-L7:字符串等脏数据剔除,不落 dataclass)
-            price_in = cast("int | float | str | None", item.get("price_input"))
-            price_out = cast("int | float | str | None", item.get("price_output"))
-            try:
-                price_in = float(price_in) if price_in is not None else None
-                price_out = float(price_out) if price_out is not None else None
-            except (TypeError, ValueError):
-                log.warning("注册表条目 %s 计价畸形,剔除计价字段", name)
-                price_in = price_out = None
+            # 075:计价字段已移除(零读点死配置);未知键静默忽略,不拒配
             # 036⑦:图片上限(畸形剔除该字段)
             max_image_mb: float | None = None
             raw_mimb = cast("int | float | str | None", item.get("max_image_mb"))
@@ -147,8 +138,6 @@ class Settings(BaseSettings):
                 api_key=api_key,
                 model=model or name,
                 capabilities=[str(c) for c in cast("list[object]", item.get("capabilities") or [])],
-                price_input=price_in,
-                price_output=price_out,
                 max_image_mb=max_image_mb,
                 protocol=protocol,
             )

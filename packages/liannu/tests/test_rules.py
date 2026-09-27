@@ -156,3 +156,13 @@ def test_reserved_tables_cases() -> None:
     for sql in RESERVED_PASS:
         v = parse(sql).check_reserved_tables()
         assert v.passed, f"{sql!r} 应放行,实际 {v!r}"
+
+
+def test_reserved_list_is_authoritative_members() -> None:
+    """067:清单成员收编 skill_/user_prefs(与 api 历史拦截行为对齐)。"""
+    from liannu import rules
+
+    assert "skill_" in rules.RESERVED_TABLE_PREFIXES
+    assert "user_prefs" in rules.RESERVED_TABLE_NAMES
+    assert "sys_" in rules.RESERVED_TABLE_PREFIXES
+    assert "chat_" in rules.RESERVED_TABLE_PREFIXES

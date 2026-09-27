@@ -15,15 +15,14 @@ ERROR 带 stderr 尾。实现零抛出(端口契约)。
 import asyncio
 import contextlib
 import json
+import logging
 import time
 import uuid
 from typing import Any, cast
 
-import structlog
-
 from kongming.sandbox.models import PROTOCOL_PREFIX, SandboxOutcome
 
-log = structlog.get_logger()
+log = logging.getLogger(__name__)
 
 # 容器内 runner 读 stdin 的 JSON 载荷宿主侧上限(与 service 1MB 闸双闸,
 # 运行器独立可用时仍自保);stderr 收集上限(防恶意 stderr 刷屏撑内存)

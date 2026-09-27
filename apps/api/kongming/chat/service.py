@@ -44,6 +44,7 @@ from kongming.chat.ports import (
 )
 from kongming.datasource.ports import DatasourceChecker
 from kongming.rag.ports import ColumnCommentReader, QueryHistoryWriter
+from kongming.trace import ensure_trace_id
 
 log = logging.getLogger(__name__)
 
@@ -338,7 +339,7 @@ class ChatService:
             if attachments is None:
                 raise AttachmentNotFound(",".join(attachment_ids))
 
-        trace_id = uuid.uuid4().hex
+        trace_id = ensure_trace_id()  # 061:与响应头 X-Trace-Id / 用量落库同一值
         if sid is not None:
             await self._repo.insert_message(
                 session_id=sid,
@@ -1197,7 +1198,7 @@ class ChatService:
             return await self._finalize_unavailable(
                 sid=None, repo=self._repo, datasource_key=ds_key
             )
-        trace_id = uuid.uuid4().hex  # 执行与输出护栏审计同一 trace(R1-F5)
+        trace_id = ensure_trace_id()  # 061:执行与输出护栏审计同一 trace(R1-F5)
         result = await self._runner.run(
             trace_id=trace_id,
             tenant_key=resolved_key,

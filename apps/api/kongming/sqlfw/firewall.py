@@ -6,53 +6,22 @@ verdict 落审计表。方言当前 PG-only(datasource spec 为 PG-only)。
 053 单遍引擎接入:本模块保留**内置路径**的判定规则体(check_statements 等,
 与切换前实现一比一),公开函数委托 guard 门(模式化:builtin/shadow/primary,
 见 guard.py)。判定语义与 reason 字符串与引擎切换前逐字一致。
+
+067:保留表/只读根/危险函数清单唯一定义在 liannu.rules,本模块只 re-export
+(消费方 internal/meta、rag/repository 引用面零改动)。禁止在此再写字面值。
 """
 
+from liannu import rules as _rules
 from sqlglot import Expr, exp
 
 from kongming.sqlfw.guard import parse_guarded
 
-# 允许的读语句类型(SELECT 系);任何写/DDL/事务控制一律 BLOCK
-_READONLY_ROOTS = (exp.Select, exp.Union, exp.Subquery)
-
-# 控制面保留表(005 评审实证:public 在 search_path 内,LLM 可猜中表名直读
-# sys_user.password_hash / sys_datasource 密文 / chat_message 他人对话)。
-# 前缀 + 精确名双形态;按未加引号即折叠小写的 PG 语义,一律小写比对。
-# 保留前缀平台级生效:租户 schema 由平台开通,不接受 sys_/chat_ 同名表。
-RESERVED_TABLE_PREFIXES = ("sys_", "chat_", "skill_")
-# user_memory(045,039 评审上报):022 用户长期记忆表,归属列 user_id 非
-# create_by,datascope SELF/DEPT 域对其安全降级不过滤(不构成防线,spec 明文),
-# 建表时漏同步收编曾构成 default 源读全库记忆的开放通路;记忆正当通路=召回
-# 注入(memory_hint)与 /memory API,均不经执行路由。
-RESERVED_TABLE_NAMES = frozenset(
-    {"alembic_version", "user_identities", "user_memory", "user_prefs"}
-)
-
-# 保留 schema(009 评审 B2):rag 知识两表含全租户问句/成功 SQL/表结构,
-# 显式限定名(rag.query_history)不受 search_path 约束,按表引用的 schema 段拒;
-# 两表末段名不进 RESERVED_TABLE_NAMES——query_history 等是常见业务表名,
-# 末段名保留会误伤真实业务库(rag 不在任何执行 search_path 内,裸名无通路)。
-RESERVED_SCHEMA_NAMES = frozenset({"rag"})
-
-# 危险函数拒用(R3 侧报实证:SELECT pg_read_file(...) 经 Select 根全链路过,
-# dev 库 kongming 为 superuser 时可读服务器文件;pg_sleep 属资源滥用)。
-# 按 sqlglot 归一化函数名小写比对;只读系统函数(current_setting 等)不在列。
-_FORBIDDEN_FUNCS = frozenset(
-    {
-        "pg_read_file",
-        "pg_read_binary_file",
-        "pg_ls_dir",
-        "pg_ls_logdir",
-        "pg_ls_waldir",
-        "pg_stat_file",
-        "lo_import",
-        "lo_export",
-        "set_config",
-        "pg_sleep",
-        "dblink",
-        "dblink_connect",
-    }
-)
+# 067:清单唯一定义在 liannu.rules;此处显式 re-export(消费方引用面零改动)
+RESERVED_TABLE_PREFIXES = _rules.RESERVED_TABLE_PREFIXES
+RESERVED_TABLE_NAMES = _rules.RESERVED_TABLE_NAMES
+RESERVED_SCHEMA_NAMES = _rules.RESERVED_SCHEMA_NAMES
+_READONLY_ROOTS = _rules.READONLY_ROOTS
+_FORBIDDEN_FUNCS = _rules.FORBIDDEN_FUNCS
 
 
 class Verdict:

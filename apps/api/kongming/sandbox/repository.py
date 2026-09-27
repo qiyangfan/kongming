@@ -1,14 +1,15 @@
 """sandbox 审计存储(027):独立短事务(与 019 AuditWriter 同款——
 get_sessionmaker 独立会话,不占请求事务,失败仅日志返回 None)。"""
 
-import structlog
+import logging
+
 from sqlalchemy import text
 
 from kongming.db import get_sessionmaker
 from kongming.sandbox.models import SandboxOutcome
 from kongming.uuid7 import uuid7
 
-log = structlog.get_logger()
+log = logging.getLogger(__name__)
 
 _TAIL = 2000
 

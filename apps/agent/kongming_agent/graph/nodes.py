@@ -9,6 +9,7 @@ generate 读到 error 即拼「上次生成的 SQL 有误」喂回 LLM(自愈闭
 import json
 import logging
 import re
+import threading
 from typing import cast
 
 from kongming_agent import deps, numeric, sqlguard
@@ -40,6 +41,80 @@ _NO_DATA_SENTINEL = "NO_RELEVANT_TABLE"
 _NO_DATA_ERROR = "当前数据源未找到回答该问题所需的数据,可切换数据源或调整问法后重试"
 
 
+# ── 071 对话复语直通(闭合词表 + 全等判定,零依赖纯数据/纯函数)──
+# 规范化:去首尾与内部空白、去中英文句读、拉丁字母小写。
+# 全等匹配,SHALL NOT 包含/前缀/语义相似——"取消订单""确认切换"照常补全。
+_PUNCT_RE = re.compile(r"[\s,。，、！？!?,.;:；：…\-—_\"'“”‘’()（）\[\]【】/\\~·「」『』《》〈〉]+")
+
+# 闭合词表(规范化形态;随代码发布,不做管理台热配)。三类:
+# 否定/终止 · 应答/致谢 · 招呼。多词英文条目去空格后入表(never mind→nevermind)。
+DIALOGUE_REPLY_WORDS: frozenset[str] = frozenset(
+    {
+        # 否定/终止
+        "不用了",
+        "不需要",
+        "不必",
+        "算了",
+        "取消",
+        "终止",
+        "停",
+        "no",
+        "nope",
+        "cancel",
+        "nevermind",
+        # 应答/致谢
+        "好的",
+        "好",
+        "知道了",
+        "明白",
+        "收到",
+        "谢谢",
+        "多谢",
+        "thanks",
+        "thankyou",
+        "gotit",
+        "ok",
+        "okay",
+        "nothanks",  # 「NO, thanks」形态(spec 场景:句读大小写变体)
+        "nothankyou",
+        # 招呼
+        "你好",
+        "您好",
+        "hi",
+        "hello",
+        "hey",
+    }
+)
+
+
+def normalize_dialogue_reply(text: str) -> str:
+    """复语规范化(纯函数):去首尾与内部空白、去中英文句读、拉丁字母小写。"""
+    return _PUNCT_RE.sub("", text).lower()
+
+
+def is_dialogue_reply(question: str) -> bool:
+    """复语判定(纯函数):规范化后全等于闭合词表成员。"""
+    return normalize_dialogue_reply(question) in DIALOGUE_REPLY_WORDS
+
+
+# 复语直通可观测计数(sqlguard.snapshot_stats 同款形态;零新采集通道)
+_passthrough_lock = threading.Lock()
+_passthrough_stats = {"dialogue_reply_passthrough_total": 0}
+
+
+def snapshot_passthrough_stats() -> dict[str, int]:
+    """复语直通命中计数快照(可观测:词表宽严调整依据)。"""
+    with _passthrough_lock:
+        return dict(_passthrough_stats)
+
+
+def _note_dialogue_passthrough(trace_id: str | None) -> None:
+    """命中入账 + 随 trace 日志下发(复用既有日志关联通道,零新采集)。"""
+    with _passthrough_lock:
+        _passthrough_stats["dialogue_reply_passthrough_total"] += 1
+    log.info("071 复语直通命中 trace_id=%s", trace_id)
+
+
 def _is_no_data_sentinel(raw: str) -> bool:
     """哨兵识别(纯函数):剥包裹标记后大小写折叠全等;子串出现不触发
     (夹在解释句中的哨兵按普通输出走既有防御链,防火墙兜底)。"""
@@ -53,6 +128,16 @@ def _is_no_data_sentinel(raw: str) -> bool:
 async def understand(state: AgentState) -> dict[str, object]:
     # 入口 state 恒写入 question(main._initial_state);缺键属编程错误,保留下标
     question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+    # 071:复语直通——零模型调用、零检索、零执行,按既有第四态收敛;
+    # 不设补全问句(迫使 retrieve/generate 不推进),判定只看当前问句与 history 无关
+    if is_dialogue_reply(question):
+        _note_dialogue_passthrough(state.get("trace_id"))
+        return {
+            "end_reason": "no_data",
+            "error": _NO_DATA_ERROR,
+            # 直通计数随 trace 下发(复用 QueryOut.stats 既有通道,零新采集)
+            "stats": {"dialogue_reply_passthrough": 1},
+        }
     history = state.get("history", [])[-MAX_HISTORY:]
     if history:
         system = UNDERSTAND_MULTI_SYSTEM

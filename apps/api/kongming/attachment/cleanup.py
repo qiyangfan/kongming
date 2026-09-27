@@ -6,13 +6,14 @@ lifespan 每日薄壳调用(015/031/034/035 同款独立短会话);删行优先
 (行已删,不再被引用;design D3)。
 """
 
-import structlog
+import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.attachment.models import EXT_BY_MIME
 from kongming.attachment.repository import ATTACH_DIR
 
-log = structlog.get_logger()
+log = logging.getLogger(__name__)
 
 _ORPHAN_HOURS = 24
 

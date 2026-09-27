@@ -8,15 +8,14 @@
 
 import asyncio
 import datetime as dt
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-import structlog
-
 from kongming.trigger.service import TriggerService
 
-log = structlog.get_logger()
+log = logging.getLogger(__name__)
 
 _TICK_SEC = 30
 

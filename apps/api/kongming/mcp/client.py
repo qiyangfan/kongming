@@ -9,10 +9,10 @@ data 行。大小闸:流式读取超 1MB 即中断(截断标记由调用方语�
 
 import asyncio
 import json
+import logging
 from typing import Any, cast
 
 import httpx
-import structlog
 
 from kongming.mcp.models import DiscoveredTool
 from kongming.mcp.ports import McpCallError
@@ -23,7 +23,7 @@ _CONTENT_CAP = 1 * 1024 * 1024  # 结果内容截断(design D4:截断附标记�
 _TRANSPORT_CAP = 8 * 1024 * 1024
 _PROTOCOL_VERSION = "2025-03-26"
 
-log = structlog.get_logger()
+log = logging.getLogger(__name__)
 
 
 def _sse_events(text: str) -> list[str]:

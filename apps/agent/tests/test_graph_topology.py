@@ -13,6 +13,7 @@ from kongming_agent.graph.build import (
     _after_execute,
     _after_generate,
     _after_selfheal,
+    _after_understand,
     _after_validate,
 )
 from kongming_agent.graph.state import ExecutionResult, ValidationResult
@@ -70,3 +71,21 @@ def test_retry_exhaustion_terminates() -> None:
 
 def test_retry_only_via_selfheal_counting() -> None:
     assert _after_selfheal({"execution": FAILED, "retry_count": 0}) == "retry"
+
+
+# ---- 071:understand 复语直通条件边(与 043 generate→validate 同构)----
+
+
+def test_understand_passthrough_short_circuit_goes_fail() -> None:
+    """071:复语直通短路产物(end_reason=no_data)直达 fail 终态,不进 retrieve/generate。"""
+    assert _after_understand({"end_reason": "no_data"}) == "fail"
+
+
+def test_understand_normal_goes_to_retrieve() -> None:
+    """数据查询路径节点序列不变:正常问句照常 understand→retrieve。"""
+    assert _after_understand({}) == "retrieve"
+
+
+def test_understand_blocked_end_reason_also_fails() -> None:
+    """条件边以 end_reason 存在与否收束(与 _after_generate 同构),不只认 no_data。"""
+    assert _after_understand({"end_reason": "blocked"}) == "fail"

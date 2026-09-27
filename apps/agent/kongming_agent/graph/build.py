@@ -19,6 +19,14 @@ from kongming_agent.graph.streams import stage_wrapper
 __all__ = ["MAX_RETRY", "build", "get_graph"]
 
 
+def _after_understand(state: AgentState) -> str:
+    """071:复语直通短路产物(end_reason=no_data)直达失败终态——
+    零检索零生成零执行;正常问句照常进 retrieve(与 043 _after_generate 同构)。"""
+    if state.get("end_reason"):
+        return "fail"
+    return "retrieve"
+
+
 def _after_generate(state: AgentState) -> str:
     """043:generate 输出哨兵短路产物(end_reason=no_data)直达失败终态——
     零执行零重试;正常产物照常进本地预检。"""
@@ -86,7 +94,8 @@ def get_graph():  # type: ignore[no-untyped-def]
     )
 
     g.add_edge(START, "understand")
-    g.add_edge("understand", "retrieve")
+    # 071:understand→retrieve 改条件边(复语直通直达 fail;与 043 generate→validate 同构)
+    g.add_conditional_edges("understand", _after_understand, {"retrieve": "retrieve", "fail": END})
     # 024:知识分流(知识意图+文档命中即分流;否则既有 generate;spec 修订后口径)
     g.add_conditional_edges(
         "retrieve",

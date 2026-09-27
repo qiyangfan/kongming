@@ -58,8 +58,45 @@ def configure(mode: str, engine: object | None = None) -> None:
         _engine_loaded = engine is not None
 
 
+# 测试别名(与语义等价;configure 为公开 API)
+set_mode = configure
+
+
 def effective_mode() -> str:
     return _mode
+
+
+def _reserved_lists_match(engine_rules: object) -> bool:
+    """引擎清单成员集合与权威(liannu.rules)一致?
+
+    067:切主前必过。mismatch 归零不构成清单一致的证据(评估集不保证触达
+    skill_/user_prefs),必须显式比成员。窄于权威 → 视为引擎不可用。
+    """
+    from liannu import rules as authority
+
+    def _members(obj: object, name: str) -> frozenset[str] | tuple[str, ...] | None:
+        return getattr(obj, name, None)
+
+    try:
+        for attr in (
+            "RESERVED_TABLE_PREFIXES",
+            "RESERVED_TABLE_NAMES",
+            "RESERVED_SCHEMA_NAMES",
+            "READONLY_ROOTS",
+            "FORBIDDEN_FUNCS",
+        ):
+            a = _members(authority, attr)
+            b = _members(engine_rules, attr)
+            if b is None:
+                return False
+            if isinstance(a, frozenset):
+                if frozenset(b) != a:
+                    return False
+            elif tuple(b) != tuple(a or ()):
+                return False
+    except Exception:
+        return False
+    return True
 
 
 def snapshot_stats() -> dict[str, int]:
@@ -92,7 +129,8 @@ def _load_engine() -> Any:  # noqa: ANN401
 
 
 def startup_self_check() -> bool:
-    """启动自检(任务 3.1):版本 + 冒烟解析;失败告警降级 builtin,不阻断启动。"""
+    """启动自检(任务 3.1):版本 + 冒烟解析 + 保留清单成员校验(067);
+    失败告警降级 builtin,不阻断启动。"""
     if _mode == MODE_BUILTIN:
         # builtin 模式引擎不参与:不触发引擎加载(缺失也不该有告警噪音)
         log.info("SQLGUARD 管线以内置路径运行 mode=builtin")
@@ -106,6 +144,11 @@ def startup_self_check() -> bool:
     if not ok:
         log.warning("SQLGUARD 引擎自检失败(%s),降级 builtin(不阻断)", detail)
         _downgrade(f"self-check failed: {detail}")
+        return False
+    # 067:清单窄于权威 → 引擎不可用(mismatch 归零不是清单一致的证据)
+    if not _reserved_lists_match(engine):
+        log.warning("SQLGUARD 引擎保留清单窄于权威,降级 builtin(067)")
+        _downgrade("reserved lists narrower than authority")
         return False
     # 灰度态显性可见(默认 WARNING 级根日志可读;builtin 稳态无此行)
     log.warning(

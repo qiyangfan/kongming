@@ -1,7 +1,9 @@
-"""防火墙判定规则(与消费方 kongming sqlfw 一比一移植,语义与 reason 逐字一致)。
+"""防火墙判定规则——保留表/只读根/危险函数清单的**唯一定义处**(067)。
 
 原则:AST 白名单而非正则黑名单。函数签名吃「已解析的语句列表」
 (单遍解析产物),不再自行 parse——解析与深度门在 artifact 层。
+消费方(kongming sqlfw / agent sqlguard)一律 import 本模块常量,
+禁止第二处字面值定义(对象恒等断言守护,见 test_reserved_single_source)。
 """
 
 from sqlglot import exp
@@ -11,9 +13,12 @@ from liannu.verdict import Verdict
 # 允许的读语句类型(SELECT 系);任何写/DDL/事务控制一律 BLOCK
 READONLY_ROOTS = (exp.Select, exp.Union, exp.Subquery)
 
-# 控制面保留表(前缀 + 精确名双形态;按未加引号即折叠小写的 PG 语义,一律小写比对)
-RESERVED_TABLE_PREFIXES = ("sys_", "chat_")
-RESERVED_TABLE_NAMES = frozenset({"alembic_version", "user_identities", "user_memory"})
+# 控制面保留表(前缀 + 精确名双形态;按未加引号即折叠小写的 PG 语义,一律小写比对)。
+# skill_(056)/user_prefs(059)已收编——与 api 历史实际拦截行为对齐,不放宽不收紧。
+RESERVED_TABLE_PREFIXES = ("sys_", "chat_", "skill_")
+RESERVED_TABLE_NAMES = frozenset(
+    {"alembic_version", "user_identities", "user_memory", "user_prefs"}
+)
 
 # 保留 schema:显式限定名(rag.query_history)不受 search_path 约束,按 schema 段拒
 RESERVED_SCHEMA_NAMES = frozenset({"rag"})

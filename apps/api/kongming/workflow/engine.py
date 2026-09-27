@@ -8,11 +8,10 @@ forEach 循环(迭代上限硬顶);全局超时(deadline 逐节点检查)+步数
 
 import asyncio
 import copy
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, cast
-
-import structlog
 
 from kongming.workflow.models import (
     DagValidationError,
@@ -23,7 +22,7 @@ from kongming.workflow.models import (
 )
 from kongming.workflow.ports import AgentRunner, HttpRunner, SqlRunner, SsrFBlocked
 
-log = structlog.get_logger()
+log = logging.getLogger(__name__)
 
 _HARD_ITER_CAP = 100  # 循环迭代硬顶(spec)
 

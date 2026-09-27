@@ -178,7 +178,7 @@ confidence 最高,类别为笔记),SHALL NOT 进入槽位。笔记可用于召�
 系统 SHALL 停止新增自由文本隐式记忆;存量隐式记忆默认不注入,自管理页
 可见并可删除(标注 LEGACY)。用户 SHALL 可查看/编辑/清空本人偏好槽位;
 操作对象限本人本租户,越权 404 同形。偏好与笔记的管理操作 SHALL 落
-操作日志。控制面保留表清单 SHALL 含 `user_prefs`,数据面执行路由 SHALL
+操作日志。控制面保留表清单(唯一权威枚举见 sql-execution 域)SHALL 含 `user_prefs`;数据面执行路由 SHALL
 拒绝引用。
 
 #### Scenario: 存量隐式不注入

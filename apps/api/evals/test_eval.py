@@ -11,17 +11,44 @@
   - smoke(-m smoke):约 5 题,评估环境显式触发,全过才绿
   - full(-m full):全部单轮题(含动态数据源组),统计+阈值
   - multiturn(-m multiturn):多轮上下文题(指代/省略/排序延续/过滤追加)
+
+073:运行首行携带 prompt 资产指纹;与上次基线跨指纹时显式标注不可比
+(SHALL NOT 静默套用劣化红线)。
 """
 # pyright: reportPrivateUsage=false
 
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
 import pytest
 from conftest import _load_yaml_cases, _tenant_of, call_chat, exec_sql, gen_tables
 from matchers import result_set_equal, result_set_loose_match
+from prompt_fingerprint import (
+    fetch_prompt_fingerprint,
+    format_cross_fingerprint_note,
+    format_fingerprint_line,
+    load_baseline_fingerprint,
+    save_baseline_fingerprint,
+)
 
 FULL_PASS_FLOOR = 0.6  # 全量宽松及格线(上游 010+ 基线 76-78%,留采样波动余量)
+
+# 会话级指纹(取一次,首行打印 + 四组分数同屏;073)
+_current_fingerprint: str | None = None
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _prompt_fingerprint_report() -> Iterator[None]:  # pyright: ignore[reportUnusedFunction]
+    """评估运行首行打印 prompt 指纹(073);会话结束时跨指纹标注 + 记基线。"""
+    global _current_fingerprint
+    _current_fingerprint = fetch_prompt_fingerprint()
+    print(format_fingerprint_line(_current_fingerprint), flush=True)
+    yield
+    note = format_cross_fingerprint_note(_current_fingerprint, load_baseline_fingerprint())
+    if note:
+        print(note, flush=True)
+    save_baseline_fingerprint(_current_fingerprint)
 
 
 async def _eval_single(case: dict[str, Any]) -> tuple[bool, bool, bool]:
@@ -171,12 +198,18 @@ async def test_full_all(all_cases: list[dict[str, Any]]) -> None:
     pass_rate = results["pass"] / total if total else 0.0
     strict_rate = results["strict_pass"] / total if total else 0.0
     recall_rate = results["recall_hit"] / total if total else 0.0
+    fp_display = _current_fingerprint or "指纹不可得"
     print(
         f"\n=== 评估统计: 宽松 {results['pass']}/{total} ({pass_rate:.0%})"
         f" | 严格 {results['strict_pass']}/{total} ({strict_rate:.0%})"
         f" | 表命中 {results['recall_hit']}/{total} ({recall_rate:.0%})"
-        f" | 动态数据源 {results['ds_pass']}/{results['ds_total']} ==="
+        f" | 动态数据源 {results['ds_pass']}/{results['ds_total']}"
+        f" | prompt 指纹 {fp_display} ==="
     )
+    # 073:跨指纹比对显式标注不可比(四组分数后;SHALL NOT 静默套用劣化红线)
+    cross_note = format_cross_fingerprint_note(_current_fingerprint, load_baseline_fingerprint())
+    if cross_note:
+        print(cross_note)
     for d in details:
         print(d)
     assert pass_rate >= FULL_PASS_FLOOR, (

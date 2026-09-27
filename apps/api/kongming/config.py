@@ -11,9 +11,15 @@ class Settings(BaseSettings):
 
     app_name: str = "kongming-api"
     environment: str = "dev"  # dev | prod
+    log_level: str = "INFO"  # 061:运行日志级别
 
     database_url: str = "postgresql+asyncpg://kongming:kongming@localhost:5432/kongming"
     redis_url: str = "redis://localhost:6379/0"
+
+    # 074 连接池弹性:缺省 5/5/关 与历史行为一致;pool_recycle_sec=0 表示不换代
+    db_pool_size: int = Field(default=5, ge=1)
+    db_max_overflow: int = Field(default=5, ge=0)
+    db_pool_recycle_sec: int = Field(default=0, ge=0)  # 0=关闭;>0 为连接最大存活秒
 
     # JWT(ADR-003:RS256,私钥签发、公钥验签;prod 必须显式提供)
     jwt_private_key_pem: str | None = None

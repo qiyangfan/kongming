@@ -64,10 +64,13 @@ async def react_llm(state: ReactState) -> dict[str, object]:
                 ),
             }
         ]
-    # 能力-契约一致:纪律段随注入工具集选择(空=无工具纪律段,禁伪调用)
+    # 能力-契约一致(079):纪律段按注入工具集派生——空=无工具纪律段,
+    # 全套件=历史逐字,裁剪集=不教模型调用未注入的工具
+    _tools = state.get("tools") or []
     system_prompt = build_react_system(
         state.get("bot_system_prompt") or "",
-        has_tools=bool(state.get("tools")),
+        has_tools=bool(_tools),
+        tool_names=[str(t.get("name") or "") for t in _tools],
     )
     reply = await deps.get_llm().chat_with_tools(
         system_prompt,

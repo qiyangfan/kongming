@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 import sqlglot
-from sqlglot import exp
+from liannu.rules import READONLY_ROOTS
 from sqlglot.errors import SqlglotError
 
 from kongming_agent.graph.state import ValidationResult
@@ -30,8 +30,8 @@ MODE_PRIMARY = "primary"
 _MODES = (MODE_BUILTIN, MODE_SHADOW, MODE_PRIMARY)
 DEFAULT_MODE = MODE_SHADOW
 
-# 与 api 防火墙只读根一致(sqlfw/firewall.py)
-_READONLY_ROOTS = (exp.Select, exp.Union, exp.Subquery)
+# 067:只读根清单唯一定义在 liannu.rules(上方 import);公开 re-export 供恒等断言
+_READONLY_ROOTS = READONLY_ROOTS
 
 _lock = threading.Lock()
 _mode = DEFAULT_MODE

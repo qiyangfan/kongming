@@ -134,3 +134,13 @@ jobs:
       - run: uv sync --frozen
       # 单源:与本地 make check 同一目标(055 教训——两处手写曾单边漂移)
       - run: make -C ../.. contracts-check
+
+  # ── 门禁 6:镜像构建(060;不推送,防 Dockerfile/路径依赖断裂静默) ──
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build api image
+        run: docker build -f infra/api.Dockerfile -t kongming-api:ci .
+      - name: Build agent image
+        run: docker build -f infra/agent.Dockerfile -t kongming-agent:ci .

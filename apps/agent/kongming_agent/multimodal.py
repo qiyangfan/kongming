@@ -8,14 +8,13 @@
 """
 
 import base64
+import logging
 from dataclasses import dataclass
-
-import structlog
 
 from kongming_agent.apiclient import ApiClient
 from kongming_agent.llm import LlmClient
 
-log = structlog.get_logger()
+log = logging.getLogger(__name__)
 
 _VISION_PROMPT = (
     "你是数据报表解读助手。请用简体中文详细描述这张图片的内容:"

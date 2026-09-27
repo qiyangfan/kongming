@@ -22,7 +22,16 @@ __all__ = ["get_engine", "get_sessionmaker", "get_session", "uuid7"]
 
 @lru_cache
 def get_engine() -> AsyncEngine:
-    return create_async_engine(get_settings().database_url, pool_size=5, max_overflow=5)
+    s = get_settings()
+    # 074:pool_pre_ping 检出前存活校验(对端掐断连接不再变成间歇 500);
+    # 容量与换代周期可配,缺省 5/5/关 与历史行为零差异
+    return create_async_engine(
+        s.database_url,
+        pool_size=s.db_pool_size,
+        max_overflow=s.db_max_overflow,
+        pool_pre_ping=True,
+        pool_recycle=s.db_pool_recycle_sec or -1,
+    )
 
 
 @lru_cache

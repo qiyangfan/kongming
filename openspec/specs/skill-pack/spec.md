@@ -78,8 +78,8 @@ SHALL NOT 被系统直接执行。
 
 系统 SHALL 提供管理面端点:包列表/详情/创建/更新/退休、绑定启停。
 操作 SHALL 落操作日志。列表 SHALL 按当前租户过滤;包内容查询 SHALL
-受租户双过滤,跨租户读取 SHALL 404 同形。控制面保留表清单 SHALL 含
-`skill_` 前缀表(与 sys_/chat_ 同哲学),数据面执行路由 SHALL 拒绝引用。
+受租户双过滤,跨租户读取 SHALL 404 同形。控制面保留表清单(唯一权威枚举见 sql-execution 域)SHALL 含
+`skill_` 前缀表;数据面执行路由 SHALL 拒绝引用(清单成员不在本域重复声明)。
 
 #### Scenario: 管理鉴权与租户隔离
 

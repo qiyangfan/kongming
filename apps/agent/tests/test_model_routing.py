@@ -342,3 +342,38 @@ def test_main_model_invalid_protocol_falls_back(caplog: pytest.LogCaptureFixture
         s.fail_closed_checks()
     assert s.llm_protocol == "openai"
     assert any("KM_AGENT_LLM_PROTOCOL" in r.getMessage() for r in caplog.records)
+
+
+# ── 075:计价字段死配置清除(未知键忽略,不拒配)──
+
+
+def test_legacy_price_keys_ignored_not_rejected() -> None:
+    """条目携带 price_input/price_output 时正常生效,与未知键同形态。"""
+    reg = json.dumps(
+        [
+            {
+                "name": "legacy",
+                "base_url": "https://dashscope.aliyuncs.com/v1",
+                "api_key": "k",
+                "price_input": 0.8,
+                "price_output": 2.0,
+            }
+        ]
+    )
+    s = _settings(model_registry_json=reg)
+    out = s.parse_registry()
+    assert "legacy" in out
+    assert out["legacy"].model == "legacy"
+    # 075:ModelEntry 不再含计价字段
+    assert not hasattr(out["legacy"], "price_input")
+    assert not hasattr(out["legacy"], "price_output")
+
+
+def test_model_entry_has_no_price_fields() -> None:
+    from dataclasses import fields
+
+    from kongming_agent.settings import ModelEntry
+
+    names = {f.name for f in fields(ModelEntry)}
+    assert "price_input" not in names
+    assert "price_output" not in names

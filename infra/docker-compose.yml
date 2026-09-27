@@ -19,8 +19,10 @@ services:
 
   redis:
     image: redis:8-alpine
+    restart: unless-stopped
     ports:
-      - "6379:6379"
+      # 主机端口可配:本机 podman-machine gvproxy 常占 6379,缺省 6380 避撞
+      - "${KM_REDIS_HOST_PORT:-6380}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -28,34 +30,50 @@ services:
 
   api:
     build:
-      context: ../apps/api
-      dockerfile: ../../infra/api.Dockerfile
+      context: ..
+      dockerfile: infra/api.Dockerfile
     environment:
       KM_ENVIRONMENT: dev
       KM_DATABASE_URL: postgresql+asyncpg://kongming:${KM_DB_PASSWORD}@postgres:5432/kongming
       KM_REDIS_URL: redis://redis:6379/0
       KM_INTERNAL_TOKEN: ${KM_INTERNAL_TOKEN:?KM_INTERNAL_TOKEN required}
+      # 071/073 评估实测:api 必须指向 agent 服务名,缺省 localhost 会在容器内指到自己
+      KM_AGENT_BASE_URL: http://agent:8001
     ports:
-      - "8000:8000"
+      - "${KM_API_HOST_PORT:-8000}:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
 
   agent:
     build:
-      context: ../apps/agent
-      dockerfile: ../../infra/agent.Dockerfile
+      context: ..
+      dockerfile: infra/agent.Dockerfile
     environment:
       # ADR-002:此处刻意没有任何 DATABASE/DB_PASSWORD 变量——构造级保证
       KM_AGENT_LLM_API_KEY: ${KM_AGENT_LLM_API_KEY:?}
       KM_AGENT_LLM_BASE_URL: ${KM_AGENT_LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      # 宿主机上的 muniu/ollama 等本地网关用 host.containers.internal
+      # (容器内 localhost 指容器自身;具体基址仍由 .env/环境变量决定)
       KM_AGENT_LLM_MODEL: ${KM_AGENT_LLM_MODEL:-qwen-plus}
       KM_AGENT_API_BASE_URL: http://api:8000
       KM_AGENT_INTERNAL_TOKEN: ${KM_INTERNAL_TOKEN:?KM_INTERNAL_TOKEN required}
     ports:
-      - "8001:8001"
+      - "${KM_AGENT_HOST_PORT:-8001}:8001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     depends_on:
-      - api
+      api: { condition: service_healthy }
 
 volumes:
   pg_data:

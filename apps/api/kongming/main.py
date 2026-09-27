@@ -13,7 +13,10 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI, Request
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as _Req
 from starlette.responses import JSONResponse, Response
+from starlette.responses import Response as _Resp
 
 from kongming.attachment.router import chat_router as attachment_chat_router
 from kongming.attachment.router import internal_router as attachment_internal_router
@@ -39,6 +42,7 @@ from kongming.internal.meta import router as internal_meta_router
 from kongming.internal.router import router as internal_router
 from kongming.llmusage.router import internal_router as llmusage_internal_router
 from kongming.llmusage.router import router as llmusage_router
+from kongming.logging_setup import setup_logging
 from kongming.mcp.inbound import router as mcp_inbound_router
 from kongming.mcp.router import router as mcp_router
 from kongming.memory.router import router as memory_router
@@ -54,6 +58,7 @@ from kongming.team.router import router as team_router
 from kongming.toolcall.router import chat_router as toolcall_chat_router
 from kongming.toolcall.router import internal_router as toolcall_internal_router
 from kongming.toolcall.router import router as toolcall_router
+from kongming.trace import get_trace_id, new_trace_id, set_trace_id
 from kongming.trigger.router import router as trigger_router
 from kongming.trigger.router import start_scheduler as start_trigger_scheduler
 from kongming.trigger.router import stop_scheduler as stop_trigger_scheduler
@@ -225,6 +230,8 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
         await dispose_read_engines()
 
 
+setup_logging(level=get_settings().log_level, json_logs=get_settings().environment == "prod")
+
 app = FastAPI(
     title="Kongming API",
     version="0.1.0",
@@ -233,6 +240,22 @@ app = FastAPI(
 )
 # 015 ip 链路:client host 经 contextvar 横切至操作日志写入(调用点零改动)
 app.add_middleware(ClientIpMiddleware)
+
+# 061:响应头回落 X-Trace-Id(与用量/审计/trace 时间线同一值;缺省生成)
+
+
+class _TraceIdMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: _Req, call_next):  # type: ignore[no-untyped-def]
+        # 061:入站头透传,否则生成一次;chat/用量/审计与响应头用同一 contextvar 值
+        tid = request.headers.get("X-Trace-Id") or new_trace_id()
+        set_trace_id(tid)
+        request.state.trace_id = tid
+        response: _Resp = await call_next(request)
+        response.headers["X-Trace-Id"] = get_trace_id() or tid
+        return response
+
+
+app.add_middleware(_TraceIdMiddleware)
 app.include_router(auth_router)
 app.include_router(internal_router)
 app.include_router(internal_meta_router)

@@ -90,6 +90,11 @@ mise install                  # python 3.13 + node 24(或自备)
 # 基础设施
 docker compose -f infra/docker-compose.yml up -d postgres redis
 
+# 完整栈镜像(build context = 仓库根,060 修复路径依赖)
+docker build -f infra/api.Dockerfile -t kongming-api:dev .
+docker build -f infra/agent.Dockerfile -t kongming-agent:dev .
+# 或:docker compose -f infra/docker-compose.yml up -d --build api agent
+
 # 控制面(含 Alembic baseline 建库)
 cd apps/api && uv sync && uv run alembic upgrade head
 uv run uvicorn kongming.main:app --port 8000

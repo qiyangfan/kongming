@@ -2,14 +2,26 @@
 
 from liannu.artifact import GuardArtifact, GuardError
 from liannu.depth import DEFAULT_MAX_DEPTH, max_paren_depth
+from liannu.rules import (
+    FORBIDDEN_FUNCS,
+    READONLY_ROOTS,
+    RESERVED_SCHEMA_NAMES,
+    RESERVED_TABLE_NAMES,
+    RESERVED_TABLE_PREFIXES,
+)
 from liannu.verdict import Verdict
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 __all__ = [
     "DEFAULT_MAX_DEPTH",
+    "FORBIDDEN_FUNCS",
     "GuardArtifact",
     "GuardError",
+    "READONLY_ROOTS",
+    "RESERVED_SCHEMA_NAMES",
+    "RESERVED_TABLE_NAMES",
+    "RESERVED_TABLE_PREFIXES",
     "Verdict",
     "__version__",
     "max_paren_depth",

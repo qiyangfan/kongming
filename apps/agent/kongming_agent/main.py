@@ -32,6 +32,8 @@ from kongming_agent.graph.react import get_react_graph, react_recursion_limit
 from kongming_agent.graph.react.state import ReactState
 from kongming_agent.graph.state import AgentState, ExecutionResult, ValidationResult
 from kongming_agent.llm import LlmError
+from kongming_agent.logging_setup import setup_logging
+from kongming_agent.prompt_fingerprint import prompt_fingerprint
 from kongming_agent.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -43,6 +45,8 @@ _settings.fail_closed_checks()
 from kongming_agent import sqlguard  # noqa: E402
 
 sqlguard.startup_self_check(_settings.sqlguard_mode)
+
+setup_logging(level=_settings.log_level, json_logs=False)
 
 app = FastAPI(
     title="Kongming Agent",
@@ -200,6 +204,21 @@ class ExtractMemoryOut(BaseModel):
 async def list_models() -> dict[str, list[str]]:
     """021 注册表模型名(025 Bot model 校验用;agent 唯一真理源)。"""
     return {"models": sorted(Settings().parse_registry().keys())}
+
+
+class PromptFingerprintOut(BaseModel):
+    """prompt 资产内容指纹(073;评估跨版本可比性判定)。"""
+
+    prompt_fingerprint: str
+
+
+@app.get("/internal/prompt-fingerprint", response_model=PromptFingerprintOut, tags=["internal"])
+async def prompt_fingerprint_endpoint() -> PromptFingerprintOut:
+    """073:prompt 资产全集内容指纹(控制面/评估器可取;069 共用同一纯函数)。
+
+    受既有 X-Internal-Token 中间件守门(ADR-002 不变);纯函数直算,零状态。
+    """
+    return PromptFingerprintOut(prompt_fingerprint=prompt_fingerprint())
 
 
 @app.post("/internal/extract-memory", response_model=ExtractMemoryOut, tags=["internal"])

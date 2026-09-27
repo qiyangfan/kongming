@@ -50,8 +50,10 @@ class ScriptedApi:
     def __init__(self, outcomes: list[SqlExecuteOutcome]) -> None:
         self.outcomes = list(outcomes)
         self.calls = 0
+        self.rag_calls = 0
 
     async def rag_retrieve(self, **kw: object) -> RagContext | None:
+        self.rag_calls += 1
         return None  # 零命中回退内省(009 回归路径)
 
     async def fetch_schema(self, **kw: object) -> SchemaMeta:
@@ -199,3 +201,52 @@ async def test_retry_exhaustion_terminates(harness: Harness) -> None:
     assert final["retry_count"] == MAX_RETRY  # 每轮经 selfheal 计数,耗尽即终止
     assert api.calls == MAX_RETRY + 1
     assert "summary" not in final  # 失败路径不出洞察
+
+
+# ---- 071:对话复语直通(零模型/零检索/零执行,第四态收敛)----
+
+
+async def test_dialogue_reply_passthrough_zero_calls(harness: Harness) -> None:
+    """071:复语「不用了」直通——不发起补全、不检索、不生成、不执行。"""
+    llm, api = harness([], [])  # 脚本为空:任何 LLM/execute 调用即炸
+    state = _initial()
+    state["question"] = "不用了"
+    state["history"] = ["有多少商品"]
+    final = await _invoke(state)
+    assert final["end_reason"] == "no_data"  # 既有第四态,不新增终态取值
+    assert final["error"] == _NO_DATA_ERROR
+    assert llm.users == []  # UNDERSTAND/SQL_GEN/SUMMARIZE 全未发起
+    assert api.calls == 0  # 零执行(sys_sql_audit 零新增记录)
+    assert api.rag_calls == 0  # 零检索回调
+    assert "generated_sql" not in final or final.get("generated_sql", "") == ""
+    assert "summary" not in final
+
+
+async def test_dialogue_reply_greeting_first_turn(harness: Harness) -> None:
+    """071:单轮无历史首句「你好」同样直通。"""
+    llm, api = harness([], [])
+    state = _initial()
+    state["question"] = "你好"
+    state["history"] = []
+    final = await _invoke(state)
+    assert final["end_reason"] == "no_data"
+    assert llm.users == []
+    assert api.calls == 0
+
+
+async def test_dialogue_reply_not_blocked_by_prefix_query(harness: Harness) -> None:
+    """071:复语起头的真实问法「取消订单的门店有哪些」照常走数据查询路径。"""
+    llm, api = harness(
+        [
+            "取消订单的门店有哪些",
+            "SELECT store FROM orders WHERE status='cancelled'",
+            '{"summary":"1 家"}',
+        ],
+        [SqlExecuteOutcome(verdict="PASS", columns=["store"], rows=[["S1"]])],
+    )
+    state = _initial()
+    state["question"] = "取消订单的门店有哪些"
+    final = await _invoke(state)
+    assert final.get("end_reason") != "no_data"
+    assert len(llm.users) >= 2  # understand + generate 正常发起
+    assert api.calls == 1  # 照常执行

@@ -7,6 +7,26 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
+## 当前状态(2026-09-27)
+
+- **九变更落地+评审循环修复,已归档(2026-09-27)**:060 镜像构建修复
+  (多阶段 context=仓库根、`.dockerignore`、CI images 门禁、CMD 三网段
+  逗号拼接——原独立 argv 是潜伏缺陷)、061 日志单源(dictConfig 双格式、
+  7 模块 structlog→stdlib、X-Trace-Id 经 `kongming.trace` contextvar 与
+  chat/用量同值)、065 eval-nightly、067 保留表清单单源(liannu.rules
+  五组唯一定义+对象恒等断言+引擎自检清单校验)、071 对话复语直通
+  (闭合词表全等判定,零 LLM/检索/执行)、073 prompt 指纹、074 连接池
+  弹性+compose healthcheck/restart、075 计价死字段清除、079 ReAct
+  纪律段按工具集派生。评审循环坐实 3 处真缺陷并修复:全套件纪律段
+  漂移(锚测试自比掩盖)、X-Trace-Id 与 trace_id 不同值、写能力断言
+  措辞过粗。四门禁绿(api 958/agent 377/liannu 22/web/contracts)。
+  **评估实测**:smoke 6/6、full 1/1、multiturn 10/12(2 例多轮生成质量
+  差异记入基线)。`.example-data` 已灌入;sakila_dyn 归属 default 租户。
+- **并发写入清理(2026-09-27)**:删重复变更 2 个(doc-answer-citations、
+  turn-status-observability)、重编号 3 个(stream→078/react→079/
+  prompt-budget→080)、统一 multi-model 与 ai-eval 两处 MODIFIED 整块
+  为合并终态(后 sync 不丢改动)。
+
 ## 当前状态(2026-09-26)
 
 - **双变更落地+评审循环修复,已归档(2026-09-26)**:`multi-protocol-llm`
@@ -63,7 +83,10 @@
   evals 冻结,`apps/api/scripts/export_sqlguard_fixtures.py` 重复运行
   diff 为空)引擎回放零不一致。切主 = 两进程 `.env` 置
   `KM_SQLGUARD_MODE=primary`(agent 前缀 `KM_AGENT_SQLGUARD_MODE`)+
-  重启;影子不一致归零且 ≥1 周无 ENGINE_FALLBACK 后归档。深嵌套默认
+  重启;**067 补前置**:保留清单对象恒等断言绿(test_reserved_single_source)
+  且引擎自检含清单成员校验,否则降级 builtin——「影子不一致归零」只是
+  必要条件非充分(评估集不保证触达 skill_/user_prefs);清单一致 +
+  ≥1 周无 ENGINE_FALLBACK 后归档。深嵌套默认
   上限 32(实测 256 不可行,引擎实现形态改 Python、仓库形态并入 monorepo
   等实施期修订见 change design「Decisions(实施期修订)」节)。
 - **muniu 网关接线完成(ADR-007,2026-09-11)**:agent 面 LLM 出口已全部指向
@@ -106,9 +129,10 @@
 - 工作区/提交状态以 `git status` 与 `git log` 为唯一事实源
   (规约:文档不写提交哈希、不谈提交形态)。
 - **开放挂账=零**(backlog-settlement 终态化裁决,见「挂账终态」节)。
-- 下一棒:053 影子达标后切主并归档;可选做 059 MemoryPage 槽位编辑 UI;
-  补验 anthropic/responses 条目端到端流式问答(起 muniu 网关或配真实
-  分支端点);其余按需新域,无既定排期项。
+- 下一棒:053 影子达标后切主并归档(清单一致断言已是前置);
+  活动变更 12 个(062/063/064/066/068/069/070/072/076/077/078/080)
+  均未开工,按 060→067 同法逐个实现;可选 059 MemoryPage UI、
+  anthropic/responses 端到端流式验证。
 
 ## 新会话开工指引
 
@@ -150,7 +174,9 @@
    `pkill -f "kongming/apps/web"`。改完代码要重启服务才生效。
 6. 本地 dev:基础设施走 `make up`,两个 Python 服务直接
    `uv run uvicorn ...`,web `pnpm dev`(compose 的 api/agent 服务留完整
-   部署用)。
+   部署用;**060 已修好镜像构建**:build context=仓库根,多阶段 + 根
+   `.dockerignore`,`podman build -f infra/{api,agent}.Dockerfile .` 可过,
+   CI 第 6 门禁 `images` 两镜像构建不推送)。
 7. **浏览器实测**:ZCode IAB 面板对本机 guest 会卡死——GUI 测试一律用
    Playwright MCP 工具组(`mcp__plugin_playwright_playwright__*`)。
 8. **dev 库活数据**:admin 密码 `Kongming#2026`;sakila(film 1000/

@@ -1,0 +1,15 @@
+# 060:镜像构建卫生——禁止宿主机 venv/缓存/密钥/上传件烤进镜像层
+.venv/
+**/.venv/
+node_modules/
+dist/
+.git/
+apps/api/var/
+**/__pycache__/
+.env
+*.pem
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+**/.coverage
