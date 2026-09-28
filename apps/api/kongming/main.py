@@ -46,6 +46,7 @@ from kongming.logging_setup import setup_logging
 from kongming.mcp.inbound import router as mcp_inbound_router
 from kongming.mcp.router import router as mcp_router
 from kongming.memory.router import router as memory_router
+from kongming.quality.router import router as quality_router
 from kongming.rag.router import doc_router as rag_doc_router
 from kongming.rag.router import internal_router as rag_internal_router
 from kongming.rag.router import router as rag_router
@@ -266,6 +267,7 @@ app.include_router(rag_router)
 app.include_router(rag_internal_router)
 app.include_router(rag_doc_router)
 app.include_router(feedback_chat_router)
+app.include_router(quality_router)
 app.include_router(feedback_router)
 app.include_router(audit_router)
 app.include_router(toolcall_internal_router)

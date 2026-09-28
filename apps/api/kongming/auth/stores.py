@@ -121,5 +121,10 @@ class RedisOAuthStateStore:
         raw = await self._r.getdel(_OSTATE + state)
         if raw is None:
             return None
-        data: dict[str, str] = json.loads(raw)
+        try:
+            data: dict[str, str] = json.loads(raw)
+        except ValueError:
+            # 值损坏(外部写入/序列化漂移)= state 无效——归一 None 让调用方
+            # 走既有 StateInvalid 拒绝(401 语义),不把存储损坏泄漏成 500
+            return None
         return data

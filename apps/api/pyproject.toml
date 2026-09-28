@@ -151,6 +151,12 @@ source_modules = ["kongming.audit.models", "kongming.audit.service", "kongming.a
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
 [[tool.importlinter.contracts]]
+name = "quality 领域模型/用例/端口不依赖框架(宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = ["kongming.quality.service", "kongming.quality.ports"]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
 name = "feedback 领域模型/用例/端口不依赖框架(宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [

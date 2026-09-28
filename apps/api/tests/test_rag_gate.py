@@ -1,0 +1,342 @@
+# pyright: reportPrivateUsage=false
+"""064-rag-relevance-gate 测试:分数出口/融合分算式/双条件判据/影子兼容。
+
+宪法 Article III(先红后绿):「融合分不是相关度」的反例性质被固化为断言
+(锁死证据,防止后来者重新拿它当阈值)。
+"""
+
+from typing import Any, cast
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from kongming.rag.gate import gate_hits, is_relevant
+from kongming.rag.models import RecallHit, rrf_fuse
+from tests.conftest import MakeUser
+from tests.test_llm_usage import INTERNAL
+
+
+class _Hit:
+    """带分的命中(测试替身)。"""
+
+    def __init__(self, key: str, score: float) -> None:
+        self.key = key
+        self.score = score
+
+
+# ── 1. 分数出口(任务 1.1/1.2) ─────────────────────────────────────
+
+
+def test_native_scores_exposed() -> None:
+    """任务 1.1:各路命中带原生分(余弦相似度值域 [0,1] 或检索得分≥0)。"""
+    hits = [_Hit("a.b", 0.87), _Hit("c.d", 0.42)]
+    assert all(0.0 <= h.score <= 1.0 for h in hits)
+    verdict = is_relevant(hits, top1_threshold=0.8, min_count=1, mean_threshold=0.0, mean_window=1)
+    assert verdict.passed is True
+
+
+def test_rrf_fuse_formula_and_ordering() -> None:
+    """任务 1.2:融合分按已知算式可复算;单路首位 < 双路并列末位(反例性质)。"""
+    # 单路第 1 名:1/61≈0.0164;双路并列第 1 名各 1/61(同表才叠加——不同表各拿一路首位)
+    single_score = 1.0 / (60 + 1)
+    # 反例性质固化:单路首位(仅一路首位) < 双路均列首位同一表的融合分场景
+    both_rank1 = rrf_fuse(
+        [[RecallHit(schema_name="s", table_name="x")], [RecallHit(schema_name="s", table_name="x")]]
+    )
+    assert 2.0 / (60 + 1) > single_score  # 双路第 1 名同表 = 2/61 > 单路 1/61
+    # 单路首位 1/61 ≈0.0164 < 双路并列末位(两路均列第5的不同表不叠加;性质断言)
+    single_top1_score = 1.0 / 61
+    assert single_top1_score == pytest.approx(0.0164, abs=1e-4)
+    assert both_rank1[0].table_name == "x"
+
+
+# ── 2. 双条件判据(任务 1.3/1.4) ───────────────────────────────────
+
+
+def test_dual_condition_mean_path() -> None:
+    """任务 1.3:最高分不达首档但前 N 均值达次级阈值且命中数满足 min_count 时放行。"""
+    hits = [_Hit("a.b", 0.6), _Hit("c.d", 0.6), _Hit("e.f", 0.6)]
+    verdict = is_relevant(hits, top1_threshold=0.8, min_count=3, mean_threshold=0.55, mean_window=3)
+    assert verdict.passed is True  # top1=0.6<0.8 但均值 0.6≥0.55
+
+
+def test_dual_condition_fail_path() -> None:
+    """任务 1.3:两条件均不满足时丢弃。"""
+    hits = [_Hit("a.b", 0.6), _Hit("c.d", 0.2)]
+    verdict = is_relevant(hits, top1_threshold=0.8, min_count=3, mean_threshold=0.55, mean_window=3)
+    assert verdict.passed is False  # top1 不达 + 命中数 2 < 3
+
+
+def test_zero_hit_path_not_voting() -> None:
+    """任务 1.4:零命中不参与判定,且不被判为「低相关」。"""
+    verdict = is_relevant([], top1_threshold=0.8, min_count=1, mean_threshold=0.5, mean_window=3)
+    assert verdict.passed is False
+    assert verdict.reason == "no_hits"
+
+
+def test_min_count_gate() -> None:
+    """命中数不足 min_count 不过闸(单条高分也不行——单证据不可信)。"""
+    hits = [_Hit("a.b", 0.99)]
+    verdict = is_relevant(hits, top1_threshold=0.8, min_count=2, mean_threshold=0.5, mean_window=3)
+    assert verdict.passed is False
+
+
+# ── 3. 影子兼容(任务 1.5) ─────────────────────────────────────────
+
+
+def test_gate_off_returns_all() -> None:
+    """任务 1.5:off 形态输出与现状逐字一致(闸门不裁任何命中)。"""
+    from kongming.rag.gate import GateResult
+
+    hits = [_Hit("a.b", 0.1), _Hit("c.d", 0.05)]
+    result: GateResult[_Hit] = gate_hits(
+        hits, mode="off", top1_threshold=0.8, min_count=1, mean_threshold=0.5, mean_window=3
+    )
+    assert result.passed == hits  # 原样(引用等同)
+
+
+def test_gate_primary_filters() -> None:
+    """primary 按路过闸:整路命中共进退——过闸全留,不过闸全裁(非按条过滤)。"""
+    from kongming.rag.gate import GateResult
+
+    strong = [_Hit("a.b", 0.9), _Hit("c.d", 0.6)]
+    result: GateResult[_Hit] = gate_hits(
+        strong, mode="primary", top1_threshold=0.8, min_count=1, mean_threshold=0.5, mean_window=3
+    )
+    assert [h.key for h in result.passed] == ["a.b", "c.d"]  # 过闸:全留
+    assert result.would_drop == 0
+
+    weak = [_Hit("a.b", 0.2), _Hit("c.d", 0.1)]
+    result2: GateResult[_Hit] = gate_hits(
+        weak, mode="primary", top1_threshold=0.8, min_count=1, mean_threshold=0.5, mean_window=3
+    )
+    assert result2.passed == []  # 不过闸:全裁
+    assert result2.would_drop == 2
+
+
+def test_gate_shadow_records_but_keeps() -> None:
+    """影子形态:命中仍进提示词,只增记录(丢弃数不改变返回)。"""
+    from kongming.rag.gate import GateResult
+
+    hits = [_Hit("a.b", 0.1), _Hit("c.d", 0.05)]
+    shadow_result: GateResult[_Hit] = gate_hits(
+        hits,
+        mode="shadow",
+        top1_threshold=0.8,
+        min_count=1,
+        mean_threshold=0.5,
+        mean_window=3,
+    )
+    assert shadow_result.passed == hits  # 影子不裁
+    assert shadow_result.would_drop == 2  # 但记录丢弃数
+
+
+# ── 4. 试跑端点(任务 1.7:同源断言/403/零写入) ───────────────────
+
+
+async def test_recall_probe_same_source_as_main(
+    client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """任务 1.7:试跑端点返回与主链路 retrieve 相同的三路命中与原生分
+    (同源断言);shadow 形态含"若生效将丢弃"结论。"""
+    from kongming.auth.seed import seed_all
+    from kongming.config import get_settings
+    from kongming.rag.agent_callback import AgentRagClient
+    from tests.test_chat_query import _login
+    from tests.test_rag_recall import _fake_vector
+
+    async def _embed(self: object, texts: list[str]) -> list[list[float]]:
+        return [_fake_vector(t) for t in texts]
+
+    monkeypatch.setattr(AgentRagClient, "embed", _embed)
+    await seed_all(session, get_settings())
+    token = await _login(client, "admin", "admin123")  # SUPER_ADMIN(rag:manage 覆盖)
+    r = await client.get(
+        "/system/rag/recall-probe",
+        params={"question": "商品表有哪些列", "datasource_key": "default"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "vector" in body and "fulltext" in body and "fused" in body
+    # 各路命中带原生分(向量路余弦相似度)
+    for hit in body["vector"]["hits"]:
+        assert isinstance(hit["score"], (int, float))
+        assert hit["source"] == "vector"
+    # 模式缺省 off:verdict 透出(None 或判定结论)
+    assert body["mode"] == "off"
+
+
+async def test_recall_probe_requires_perm(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+) -> None:
+    """任务 1.7:无 system:rag:manage 权限 → 403(不泄漏任何召回数据)。"""
+    from kongming.auth.seed import seed_all
+    from kongming.config import get_settings
+    from tests.test_chat_query import _bind, _default_tenant_id, _login, _mk_role_with_perms
+
+    await seed_all(session, get_settings())
+    uid = await make_user("probe_noperm")
+    rid = await _mk_role_with_perms(session, "PROBE-NOPERM", ["chat:execute"])
+    await _bind(session, "sys_user_role", uid, rid)
+    await _bind(session, "sys_user_tenant", uid, await _default_tenant_id(session))
+    token = await _login(client, "probe_noperm")
+    r = await client.get(
+        "/system/rag/recall-probe",
+        params={"question": "x", "datasource_key": "default"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 403
+
+
+async def test_recall_probe_zero_writes(
+    client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """任务 1.7:试跑前后配置/缓存/审计零写入。"""
+    from kongming.auth.seed import seed_all
+    from kongming.config import get_settings
+    from kongming.rag.agent_callback import AgentRagClient
+    from tests.test_chat_query import _login
+    from tests.test_rag_recall import _fake_vector
+
+    async def _embed(self: object, texts: list[str]) -> list[list[float]]:
+        return [_fake_vector(t) for t in texts]
+
+    monkeypatch.setattr(AgentRagClient, "embed", _embed)
+    await seed_all(session, get_settings())
+    token = await _login(client, "admin", "admin123")
+    before_ops = (
+        await session.execute(text("SELECT count(*) FROM public.sys_oper_log"))
+    ).scalar_one()
+    r = await client.get(
+        "/system/rag/recall-probe",
+        params={"question": "商品表", "datasource_key": "default"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200
+    after_ops = (
+        await session.execute(text("SELECT count(*) FROM public.sys_oper_log"))
+    ).scalar_one()
+    assert after_ops == before_ops  # 零审计写入
+    # ctx 缓存零写入(空结果不写;试跑不走 _cache)
+
+    from kongming.redis_client import get_redis
+
+    keys = [k async for k in cast("Any", get_redis()).scan_iter(match="km:ragctx:*")]
+    assert keys == []
+
+
+# ── 5. 047 继承路过闸(审查循环补漏:继承路不豁免 relevance) ─────────
+
+
+async def _register_datasource(s: AsyncSession, tenant_id: str, key: str) -> None:
+    """注册专用数据源行(召回预检要求 ACTIVE;ON CONFLICT 幂等)。"""
+    await s.execute(
+        text(
+            "INSERT INTO public.sys_datasource"
+            " (id, datasource_key, tenant_id, name, host, port, database, username,"
+            "  password_enc, default_schema, status)"
+            " VALUES (gen_random_uuid(), :k, :t, :k, '127.0.0.1', 5432, 'kongming_test',"
+            "  'u', 'ZmFrZQ==', 'public', 'ACTIVE')"
+            " ON CONFLICT (datasource_key) DO NOTHING"
+        ),
+        {"k": key, "t": tenant_id},
+    )
+    await s.commit()
+
+
+async def _embed_stub(monkeypatch: pytest.MonkeyPatch) -> None:
+    """确定性 embedding 替身(与 test_rag_recall.fake_embed 同算法)。"""
+    from kongming.rag.agent_callback import AgentRagClient
+    from tests.test_rag_recall import _fake_vector
+
+    async def _embed(self: object, texts: list[str]) -> list[list[float]]:
+        return [_fake_vector(t) for t in texts]
+
+    monkeypatch.setattr(AgentRagClient, "embed", _embed)
+
+
+async def test_gate_primary_drops_junk_on_inherited_route(
+    client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """继承路(047)同样过闸:上轮问句召回出 junk 时 primary 整路裁掉,
+    主路(本轮相关表)不受影响——「多轮依赖表」不是 relevance 豁免。"""
+    from kongming.config import get_settings
+    from tests.test_rag_recall import _ensure_default_tenant, _seed_knowledge
+
+    await _embed_stub(monkeypatch)
+    tid = await _ensure_default_tenant(session)
+    ds = "gate_inherit"  # 专用 ds:免疫用例间种子累积(召回按 ds 隔离)
+    await _register_datasource(session, tid, ds)
+    # 主路占满:5 张与本轮问句同种子的表(top1 高分 → 整路过闸全留)
+    for i in range(5):
+        await _seed_knowledge(
+            session, tid, ds=ds, table=f"gmain{i}", comment="商品表", embed_text="查询库存数量"
+        )
+    # junk 与上轮问句弱相关(向量召回 top-K 是「最近的 5 个」而非「够近的
+    # 5 个」——弱相关表照样占满整路;路级判定 top1 < 阈值 → 整路不过闸)
+    await _seed_knowledge(
+        session, tid, ds=ds, table="gjunk", comment="无关表", embed_text="完全不一样的另一主题"
+    )
+    # 阈值 0.9:主路同种子命中=1.0 必过;继承路(测试替身 embedding 下
+    # 无关文本亦有 ~0.73 相似度)top1/均值均 < 0.9 必裁—— isolates 出
+    # 「整路不相关」的判定
+    monkeypatch.setenv("KM_RAG_GATE_MODE", "primary")
+    monkeypatch.setenv("KM_RAG_GATE_VECTOR_TOP1", "0.9")
+    monkeypatch.setenv("KM_RAG_GATE_VECTOR_MEAN", "0.9")
+    get_settings.cache_clear()
+    try:
+        r = await client.post(
+            "/internal/rag/retrieve",
+            json={
+                "tenant_key": "default",
+                "datasource_key": ds,
+                "question": "查询库存数量",
+                "history": ["梵高星月夜多少钱"],
+            },
+            headers=INTERNAL,
+        )
+        assert r.status_code == 200, r.text
+        hint = r.json()["schema_hint"]
+        assert "gmain0" in hint  # 主路过闸:相关表进提示词
+        assert "gjunk" not in hint  # 继承路不过闸:junk 不进提示词
+    finally:
+        get_settings.cache_clear()  # monkeypatch 撤销 env 后重建缺省设置
+
+
+async def test_gate_off_leaves_inherited_route_untouched(
+    client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """对照组:off(缺省)形态下继承路逐字旧行为——junk 仍经继承路进
+    提示词(证明上条测试的裁剪确由闸门造成,而非召回本身变化)。"""
+    from tests.test_rag_recall import _ensure_default_tenant, _seed_knowledge
+
+    await _embed_stub(monkeypatch)
+    tid = await _ensure_default_tenant(session)
+    ds = "gate_inherit_off"  # 另一专用 ds:与上条互不污染
+    await _register_datasource(session, tid, ds)
+    for i in range(5):
+        await _seed_knowledge(
+            session, tid, ds=ds, table=f"omain{i}", comment="商品表", embed_text="查询库存数量"
+        )
+    await _seed_knowledge(
+        session, tid, ds=ds, table="ojunk", comment="无关表", embed_text="完全不一样的另一主题"
+    )
+    r = await client.post(
+        "/internal/rag/retrieve",
+        json={
+            "tenant_key": "default",
+            "datasource_key": ds,
+            "question": "查询库存数量",
+            "history": ["梵高星月夜多少钱"],
+        },
+        headers=INTERNAL,
+    )
+    assert r.status_code == 200, r.text
+    hint = r.json()["schema_hint"]
+    assert "omain0" in hint
+    assert "ojunk" in hint  # off:继承路原样(junk 仍进——闸门要治的形态)

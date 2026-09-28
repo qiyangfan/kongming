@@ -410,6 +410,7 @@ async def test_recall_empty_returns_blank(
         "history_sql": "",
         "relations_hint": "",  # 023 纯增语义段(空)
         "metric_hints": "",
+        "metric_hits": [],  # 076 纯增结构化口径命中(空)
         "doc_hints": [],  # 024 纯增文档段(空)
         "skill_terms": "",  # 056 纯增 skill 段(空=零包零回归)
         "skill_examples": "",

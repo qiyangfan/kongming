@@ -294,6 +294,14 @@ FAILED 状态 `error` SHALL 为用户语言友好文案(「查询执行失败,�
 SHALL 不渲染折叠块。NO_DATA 中性形态(044,见「消息状态第四态」
 requirement)与 REJECTED 其余分态不动。
 
+**069 修订(轮次质量信号落库)**:persist=true 时,assistant 消息落库 SHALL
+增加四个管理面诊断字段:`trace_id`(与执行审计/用量记录的关联键)、
+`retry_count`(如实记录,无重试为 0)、`resolved_question`(仅多轮指代消解
+实际发生、改写结果与原问题不同时非空,单轮 SHALL 为空)、`prompt_version`
+(agent prompt 资产指纹);存量消息四字段为 null/0,SHALL NOT 回算。四字段
+SHALL NOT 进入用户响应与流式终态事件(query-streaming「逐字段同构」契约
+不含管理面诊断字段)。
+
 #### Scenario: 有权限用户提问成功
 - GIVEN 已登录用户角色含 chat:execute,租户 default 已绑定
 - WHEN 提交问题(无 session_id)
@@ -696,3 +704,32 @@ chat_message.status SHALL 支持第四态 `NO_DATA`:agent verdict=NO_DATA
 - GIVEN 历史消息 stats 含英文键 inventory_count_max(落库早于本变更)
 - WHEN 回显渲染
 - THEN 读档映射后呈现中文形态,无需数据回填;已中文化键 SHALL NOT 被二次改写
+
+#### Scenario: 轮次质量信号落库(069)
+- GIVEN 一次 persist=true 的多轮问答(指代消解发生,selfheal 触发 1 次)
+- WHEN 终态落库
+- THEN assistant 消息含 trace_id、retry_count=1、resolved_question(改写后自包含问题)、prompt_version(非空)
+
+#### Scenario: 单轮不写改写问题(069)
+- GIVEN 一次 persist=true 的单轮问答
+- WHEN 终态落库
+- THEN resolved_question 为空,retry_count 与 prompt_version 如实记录
+
+#### Scenario: 诊断字段不进用户契约(069)
+- GIVEN 同一请求的同步响应与流式 result 终态事件
+- WHEN 字段比对
+- THEN 用户响应与 SSE 均不含 trace_id/resolved_question/prompt_version 三字段
+- AND 同步与流式仍逐字段一致(query-streaming 契约不破)
+
+#### Scenario: persist=false 无质量信号(069)
+- GIVEN persist=false 的问答调用
+- WHEN 终态返回
+- THEN 不落消息、无质量信号记录,响应契约与本修订前一致
+
+### Requirement: 口径依据持久化与回显
+
+数据问答终态与消息档 SHALL 纯增指标命中列表(标识/名称/口径表达式/修订时间;仅语义层命中非空时)。同步响应、流式终态与历史回显三路径 SHALL 同源(同一序列化点);存量消息档缺失该键 SHALL 回空,SHALL NOT 反查指标表重算(口径是链路输入,不可由终态反推)。
+
+### Requirement: 文档道回答的结构化来源
+
+问答响应与消息历史 SHALL 携带该轮的结构化来源列表(`sources`),每项含引用键、来源标识与文档名快照。该列表 SHALL 由净化后的回答正文单向投影:正文存活的每个引用标记对应一项——SHALL NOT 出现"列表有条目而正文无标注"或反之的幽灵不一致。来源 SHALL 只包含本轮真实下发过的文档块,SHALL NOT 回查文档表补全(名称为提问时点快照)。字段为纯增:缺省空列表;SQL 道 SHALL 恒为空;存量消息(无该字段)按无来源呈现,SHALL NOT 影响四态终态语义。

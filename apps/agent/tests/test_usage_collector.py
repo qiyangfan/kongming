@@ -51,6 +51,7 @@ async def test_collector_present_collects_only() -> None:
         "seq",
         "status",
         "latency_ms",
+        "protocol",  # 077:出站协议归因
     }
 
 

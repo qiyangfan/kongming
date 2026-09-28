@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kongming.audit.context import client_ip_var
 from kongming.auth.repository import SqlOperLogRepo, SqlPermRepo
 from kongming.auth.router import current_user, require_perm
 from kongming.bot.models import (
@@ -29,8 +30,12 @@ from kongming.bot.service import (
     GuardrailRejected,
 )
 from kongming.chat.agent_client import AgentClient
+from kongming.chat.costgate import ChatCostGate, ChatRateLimited
 from kongming.chat.router import get_agent_client
+from kongming.config import get_settings
 from kongming.db import get_session, get_sessionmaker
+from kongming.redis_client import get_redis
+from kongming.toolcall.ratelimit import RedisRateLimiter
 from kongming.toolcall.repository import user_has_all_scope
 
 log = logging.getLogger(__name__)
@@ -143,6 +148,16 @@ class _McpDynamicToolLister:
 
     async def list_dynamic(self, *, tenant_id: str) -> list[dict[str, object]]:
         return await self._svc.list_dynamic_tools(tenant_id=tenant_id)
+
+
+def _build_bot_rate_gate() -> ChatCostGate:
+    """062:公开嵌入面速率闸(仅 (bot_key, ip) 分钟级;无用户/租户维度),
+    复用 chat 域零框架闸模块(单一 fail-open 口径,不复制限流逻辑)。"""
+    settings = get_settings()
+    return ChatCostGate(
+        limiter=RedisRateLimiter(get_redis()),
+        bot_rate_per_minute=settings.bot_chat_rate_per_minute,
+    )
 
 
 def get_bot_service(
@@ -354,7 +369,9 @@ async def update_bot(
     fields = {k: v for k, v in req.model_dump().items() if v is not None}
     # R1-J4:公开发布(is_public false→true)=创建者或 OWNER 全权——
     # MEMBER 可编辑但不可把团队 Bot 暴露到免登录公网渠道
-    if fields.get("is_public") is True and row["is_public"] is not True:
+    # 类型化 bool(|None):真值判断即语义——is True/is not True 字面量恒等
+    # 比较对 bool 是冗余噪音,且对"truthy 非 True 值"零容忍反成脆弱点
+    if fields.get("is_public") and not row["is_public"]:
         from kongming.team.models import can_manage as _cm4
 
         if not _cm4(
@@ -415,7 +432,7 @@ async def update_bot(
         if filtered[0] != str(fields["name"]):
             raise HTTPException(status_code=400, detail="GUARDRAIL_REJECTED") from None
     # L7:system_prompt 变更或开启公开(is_public=true)均重审
-    if "system_prompt" in fields or fields.get("is_public") is True:
+    if "system_prompt" in fields or fields.get("is_public"):
         prompt_to_check = str(fields.get("system_prompt") or row["system_prompt"])
         try:
             await svc.validate_prompt(
@@ -652,13 +669,24 @@ class BotChatOut(BaseModel):
     error: str | None = None
 
 
-@public_router.post("/bot/{bot_key}/chat", response_model=BotChatOut)
+@public_router.post(
+    "/bot/{bot_key}/chat",
+    response_model=BotChatOut,
+    responses={429: {"description": "速率超限(062;detail=CHAT_RATE_LIMITED,X-Quota-Warning 预警)"}},
+)
 async def bot_chat_public(
     bot_key: str,
     req: BotChatIn,
     svc: Annotated[BotService, Depends(get_bot_service)],
 ) -> BotChatOut:
-    """web 嵌入公开端点(免登录):is_public+enabled 闸;护栏与工具防御全量。"""
+    """web 嵌入公开端点(免登录):is_public+enabled 闸;护栏与工具防御全量。
+    062:(助手标识, 客户端 IP) 维度速率闸——该面无用户/租户维度可用,IP 取自
+    ClientIpMiddleware contextvar(经 --forwarded-allow-ips 约束,非客户端可
+    伪造),fail-open(Redis 不可用放行,与 019 工具限流同口径)。"""
+    try:
+        await _build_bot_rate_gate().check_bot(bot_key=bot_key, client_ip=client_ip_var.get())
+    except ChatRateLimited:
+        raise HTTPException(status_code=429, detail="CHAT_RATE_LIMITED") from None
     try:
         out = await svc.run(bot_key=bot_key, question=req.question, channel="web_embed")
     except BotNotFound:

@@ -158,6 +158,9 @@ const ERROR_CODE_LABELS: Record<string, string> = {
   ATTACHMENT_TOO_LARGE: "附件过大",
   ATTACHMENT_EMPTY: "附件内容为空",
   ATTACHMENT_TYPE_INVALID: "附件类型不支持",
+  // 062 问答成本控制:速率/配额/读数失败(429/503)
+  CHAT_RATE_LIMITED: "提问太频繁了,请稍后再试",
+  CHAT_QUOTA_EXCEEDED: "已达到当前套餐的问答配额上限,请升级套餐或联系管理员",
 };
 
 /** 错误码形态:大写字母开头,仅大写字母/数字/下划线,≥3 位 */
@@ -257,8 +260,9 @@ export interface StreamHandlers {
   onError?: (d: StreamErrorOut) => void;
 }
 
-/** 解析一个 SSE 帧块(event:/data: 行;注释行忽略)并分发;畸形 data 静默跳帧 */
-function dispatchSseBlock(block: string, handlers: StreamHandlers): boolean {
+/** 解析一个 SSE 帧块(event:/data: 行;注释行忽略)并分发;畸形 data 静默跳帧。
+ *  导出供 066 vitest 纯函数断言(分帧边界/跳帧)。 */
+export function dispatchSseBlock(block: string, handlers: StreamHandlers): boolean {
   let event = "";
   const dataLines: string[] = [];
   for (const line of block.split("\n")) {

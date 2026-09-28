@@ -51,6 +51,9 @@ class AgentState(TypedDict, total=False):
     memory_hint: NotRequired[str]  # 022:召回的用户已知信息段(控制面注入)
     relations_hint: NotRequired[str]  # 023:召回集合内 JOIN path 段
     metric_hints: NotRequired[str]  # 023:命中指标口径段
+    metric_hits: NotRequired[list[dict[str, str | None]]]  # 076:结构化口径命中(空=无命中)
+    # 068:文档道结构化来源(citation_key/source_ref/doc_name;空=SQL 道/无命中)
+    sources: NotRequired[list[dict[str, str]]]
     skill_terms: NotRequired[str]  # 056:Skill Pack 术语段
     skill_examples: NotRequired[str]  # 056:黄金示例段(禁令前缀)
     skill_persona: NotRequired[str]  # 056:人设段

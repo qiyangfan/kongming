@@ -17,6 +17,9 @@ class MetricDef:
     sql_template: str
     business_terms: list[str] = field(default_factory=list[str])
     enabled: bool = True
+    # 076(纯增):口径依据透出(仓储 SQL 已 SELECT,此前被丢)
+    metric_id: str = ""
+    updated_at: object | None = None
 
 
 def format_relations_hint(relations: list[TableRelation]) -> str:
@@ -50,3 +53,40 @@ def match_metrics(question: str, metrics: list[MetricDef], top_k: int = 5) -> li
         if any(t and t in question for t in terms):
             hits.append(m)
     return hits[:top_k]
+
+
+@dataclass(frozen=True)
+class MetricHit:
+    """语义层命中的结构化投影(076):标识/名称/口径表达式/修订时间。
+    提示词文字段由此列表派生(单一来源,杜绝两处口径漂移)。"""
+
+    metric_id: str
+    metric_name: str
+    sql_template: str
+    updated_at: str | None = None
+
+    def as_dict(self) -> dict[str, object]:
+        """契约/落库投影(datetime → ISO 串;None 透传)。"""
+        updated = self.updated_at  # 已为 str | None(调用方构造时归一)
+        return {
+            "metric_id": self.metric_id,
+            "metric_name": self.metric_name,
+            "sql_template": self.sql_template,
+            "updated_at": updated,
+        }
+
+
+def project_metric_hits(hits: list[MetricDef]) -> list[MetricHit]:
+    """命中域对象 → 结构化投影(纯函数)。"""
+    out: list[MetricHit] = []
+    for m in hits:
+        updated = None if m.updated_at is None else str(m.updated_at)
+        out.append(
+            MetricHit(
+                metric_id=m.metric_id,
+                metric_name=m.metric_name,
+                sql_template=m.sql_template,
+                updated_at=updated,
+            )
+        )
+    return out

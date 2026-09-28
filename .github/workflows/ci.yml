@@ -53,7 +53,9 @@ jobs:
       - run: uv run lint-imports
       # baseline 迁移对 km_readonly 无条件 GRANT(0001),角色由 pg-init 创建;
       # 本地 compose 挂载同款 init 脚本,CI 此处与其同构(单源,不复制 SQL)
-      - run: psql "postgres://kongming:kongming@localhost:5432/kongming" -v ON_ERROR_STOP=1 -f ../../infra/pg-init/001-readonly-role.sql
+      - run: >
+          psql "postgres://kongming:kongming@localhost:5432/kongming"
+          -v ON_ERROR_STOP=1 -f ../../infra/pg-init/001-readonly-role.sql
       - run: uv run pytest -q --cov
 
   # ── 门禁 2:Agent 面(Python,零凭证纪律) ────────────────
@@ -113,6 +115,7 @@ jobs:
           cache-dependency-path: apps/web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      - run: pnpm test:run
       - run: pnpm lint
       - run: pnpm lint:css
       - run: pnpm format:check

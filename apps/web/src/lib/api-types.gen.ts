@@ -762,6 +762,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/rag/recall-probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Recall Probe
+         * @description 064:召回试跑(只读):三路命中及各自原生分、融合分、双条件判定结论。
+         *
+         *     零副作用:SHALL NOT 修改配置、SHALL NOT 落库、SHALL NOT 触发召回缓存
+         *     失效(不走 ctx 缓存)。影子形态含"若生效将丢弃"记录。两个高频场景:
+         *     上传表说明后验证可召回性;影子期标定阈值(不等真实流量)。
+         */
+        get: operations["recall_probe_system_rag_recall_probe_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/rag/retrieve": {
         parameters: {
             query?: never;
@@ -861,6 +885,48 @@ export interface paths {
         put?: never;
         /** Submit Feedback */
         post: operations["submit_feedback_chat_messages__message_id__feedback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/chat-quality/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Quality Summary
+         * @description 轮次质量总览:四态占比/率值 + 按天趋势(≤90 天补零)+ 数据源切片 +
+         *     prompt 版本切片;租户按权限收敛(observability 域口径,不做行级按用户拆分)。
+         */
+        get: operations["quality_summary_system_chat_quality_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/chat-quality/page": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Quality Page
+         * @description 轮次明细分页(时间倒序):状态/数据源/时间范围筛选;NO_DATA 轮次首次
+         *     拥有可见形态(该形态无执行、无审计行,此前任何观测面不可见)。
+         */
+        get: operations["quality_page_system_chat_quality_page_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1477,6 +1543,9 @@ export interface paths {
         /**
          * Bot Chat Public
          * @description web 嵌入公开端点(免登录):is_public+enabled 闸;护栏与工具防御全量。
+         *     062:(助手标识, 客户端 IP) 维度速率闸——该面无用户/租户维度可用,IP 取自
+         *     ClientIpMiddleware contextvar(经 --forwarded-allow-ips 约束,非客户端可
+         *     伪造),fail-open(Redis 不可用放行,与 019 工具限流同口径)。
          */
         post: operations["bot_chat_public_bot__bot_key__chat_post"];
         delete?: never;
@@ -2999,6 +3068,16 @@ export interface components {
              * @default []
              */
             column_labels: string[];
+            /**
+             * Metric Hits
+             * @default []
+             */
+            metric_hits: components["schemas"]["MetricHitOut"][];
+            /**
+             * Sources
+             * @default []
+             */
+            sources: components["schemas"]["SourceOut"][];
         };
         /**
          * CostTrack
@@ -3867,6 +3946,10 @@ export interface components {
             artifacts: components["schemas"]["ArtifactOut"][];
             /** Column Labels */
             column_labels?: string[];
+            /** Metric Hits */
+            metric_hits?: components["schemas"]["MetricHitOut"][];
+            /** Sources */
+            sources?: components["schemas"]["SourceOut"][];
         };
         /** MetaColumnOut */
         MetaColumnOut: {
@@ -3910,6 +3993,20 @@ export interface components {
             comment: string;
             /** Columns */
             columns: components["schemas"]["MetaColumnOut"][];
+        };
+        /**
+         * MetricHitOut
+         * @description 076(纯增):语义层口径命中(标识/名称/口径表达式/修订时间)。
+         */
+        MetricHitOut: {
+            /** Metric Id */
+            metric_id: string;
+            /** Metric Name */
+            metric_name: string;
+            /** Sql Template */
+            sql_template: string;
+            /** Updated At */
+            updated_at?: string | null;
         };
         /** MetricIn */
         MetricIn: {
@@ -4341,6 +4438,121 @@ export interface components {
             /** Suggestions */
             suggestions?: string[];
         };
+        /** QualityOverviewOut */
+        QualityOverviewOut: {
+            /** Total */
+            total: number;
+            /** Success */
+            success: number;
+            /** No Data */
+            no_data: number;
+            /** Blocked */
+            blocked: number;
+            /** Failed */
+            failed: number;
+            /** No Data Rate */
+            no_data_rate: number;
+            /** Blocked Rate */
+            blocked_rate: number;
+            /** Failed Rate */
+            failed_rate: number;
+            /** Selfheal Rate */
+            selfheal_rate: number;
+            /** Down Rate */
+            down_rate: number;
+            /** Avg Tokens */
+            avg_tokens: number;
+        };
+        /** QualityPageOut */
+        QualityPageOut: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["QualityRoundItemOut"][];
+        };
+        /** QualityPromptSliceRow */
+        QualityPromptSliceRow: {
+            /** Prompt Version */
+            prompt_version: string;
+            /** Rounds */
+            rounds: number;
+            /** Success */
+            success: number;
+            /** No Data */
+            no_data: number;
+            /** Blocked */
+            blocked: number;
+            /** Failed */
+            failed: number;
+        };
+        /** QualityRoundItemOut */
+        QualityRoundItemOut: {
+            /** Id */
+            id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Question */
+            question?: string | null;
+            /** Resolved Question */
+            resolved_question?: string | null;
+            /** Status */
+            status: string;
+            /** Retry Count */
+            retry_count: number;
+            /** Rating */
+            rating?: string | null;
+            /** Trace Id */
+            trace_id?: string | null;
+            /** Prompt Version */
+            prompt_version?: string | null;
+            /** Datasource Key */
+            datasource_key: string;
+        };
+        /** QualitySliceRow */
+        QualitySliceRow: {
+            /** Datasource Key */
+            datasource_key: string;
+            /** Rounds */
+            rounds: number;
+            /** Success */
+            success: number;
+            /** No Data */
+            no_data: number;
+            /** Blocked */
+            blocked: number;
+            /** Failed */
+            failed: number;
+        };
+        /** QualitySummaryOut */
+        QualitySummaryOut: {
+            overview: components["schemas"]["QualityOverviewOut"];
+            /** Trend */
+            trend: components["schemas"]["QualityTrendPoint"][];
+            /** By Datasource */
+            by_datasource: components["schemas"]["QualitySliceRow"][];
+            /** By Prompt Version */
+            by_prompt_version: components["schemas"]["QualityPromptSliceRow"][];
+            /** Days */
+            days: number;
+        };
+        /** QualityTrendPoint */
+        QualityTrendPoint: {
+            /** Date */
+            date: string;
+            /** Rounds */
+            rounds: number;
+            /** Success */
+            success: number;
+            /** No Data */
+            no_data: number;
+            /** Blocked */
+            blocked: number;
+            /** Failed */
+            failed: number;
+        };
         /** RatingIn */
         RatingIn: {
             /** Score */
@@ -4484,6 +4696,11 @@ export interface components {
              * @default
              */
             metric_hints: string;
+            /**
+             * Metric Hits
+             * @default []
+             */
+            metric_hits: components["schemas"]["MetricHitOut"][];
             /**
              * Doc Hints
              * @default []
@@ -4649,6 +4866,24 @@ export interface components {
             attachments: {
                 [key: string]: unknown;
             }[];
+        };
+        /**
+         * SourceOut
+         * @description 068(纯增):文档道来源条目(引用键/来源标识/文档名快照)。
+         */
+        SourceOut: {
+            /** Citation Key */
+            citation_key: string;
+            /**
+             * Source Ref
+             * @default
+             */
+            source_ref: string;
+            /**
+             * Doc Name
+             * @default
+             */
+            doc_name: string;
         };
         /** SqlAuditItemOut */
         SqlAuditItemOut: {
@@ -4925,6 +5160,21 @@ export interface components {
              * @default
              */
             result_digest: string;
+        };
+        /**
+         * StreamTraceOut
+         * @description trace 事件 data:agent 侧诊断信号(内部运维口径,不渲染进用户答案)。
+         *
+         *     063 表预筛/064 召回闸门/068 引用净化/080 装配预算共用本通道;
+         *     fields 为自由映射(键集随能力演进,前向兼容);node=发起节点名。
+         */
+        StreamTraceOut: {
+            /** Node */
+            node: string;
+            /** Fields */
+            fields: {
+                [key: string]: unknown;
+            };
         };
         /**
          * SuggestionsOut
@@ -5405,6 +5655,8 @@ export interface components {
              * @enum {string}
              */
             status: "SUCCESS" | "ERROR";
+            /** Protocol */
+            protocol?: string | null;
         };
         /** UsageReportIn */
         UsageReportIn: {
@@ -5432,6 +5684,8 @@ export interface components {
             status: string;
             /** Bot Id */
             bot_id?: string | null;
+            /** Protocol */
+            protocol?: string | null;
             /** Prompt Tokens */
             prompt_tokens: number;
             /** Completion Tokens */
@@ -6029,6 +6283,20 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description 速率/配额超限(062;detail=CHAT_RATE_LIMITED / CHAT_QUOTA_EXCEEDED,响应头 X-Quota-Warning 预警) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 配额读数失败(062 fail-closed;detail=CHAT_QUOTA_UNAVAILABLE) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     chat_suggestions_chat_suggestions_get: {
@@ -6079,14 +6347,14 @@ export interface operations {
             };
         };
         responses: {
-            /** @description SSE 事件流:stage/sql/summary/tool_call 过程事件逐帧下发;result=data 与同步 /chat/query 响应逐字段一致;error=传输层/意外失败终态;注释行(: ping)为心跳 */
+            /** @description SSE 事件流:stage/sql/summary/tool_call/trace 过程事件逐帧下发;result=data 与同步 /chat/query 响应逐字段一致;error=传输层/意外失败终态;trace=agent 诊断信号(预筛/闸门/净化/预算,不渲染进用户答案);注释行(: ping)为心跳 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": components["schemas"]["StreamStageOut"] | components["schemas"]["StreamSqlOut"] | components["schemas"]["StreamSummaryOut"] | components["schemas"]["StreamToolCallOut"] | components["schemas"]["StreamErrorOut"] | components["schemas"]["ChatQueryOut"];
-                    "application/json": components["schemas"]["StreamStageOut"] | components["schemas"]["StreamSqlOut"] | components["schemas"]["StreamSummaryOut"] | components["schemas"]["StreamToolCallOut"] | components["schemas"]["StreamErrorOut"] | components["schemas"]["ChatQueryOut"];
+                    "text/event-stream": components["schemas"]["StreamStageOut"] | components["schemas"]["StreamSqlOut"] | components["schemas"]["StreamSummaryOut"] | components["schemas"]["StreamToolCallOut"] | components["schemas"]["StreamErrorOut"] | components["schemas"]["StreamTraceOut"] | components["schemas"]["ChatQueryOut"];
+                    "application/json": components["schemas"]["StreamStageOut"] | components["schemas"]["StreamSqlOut"] | components["schemas"]["StreamSummaryOut"] | components["schemas"]["StreamToolCallOut"] | components["schemas"]["StreamErrorOut"] | components["schemas"]["StreamTraceOut"] | components["schemas"]["ChatQueryOut"];
                 };
             };
             /** @description Validation Error */
@@ -6097,6 +6365,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description 速率/配额超限(062;detail=CHAT_RATE_LIMITED / CHAT_QUOTA_EXCEEDED,响应头 X-Quota-Warning 预警) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 配额读数失败(062 fail-closed;detail=CHAT_QUOTA_UNAVAILABLE) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -7394,6 +7676,42 @@ export interface operations {
             };
         };
     };
+    recall_probe_system_rag_recall_probe_get: {
+        parameters: {
+            query: {
+                question: string;
+                datasource_key: string;
+            };
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     rag_retrieve_internal_rag_retrieve_post: {
         parameters: {
             query?: never;
@@ -7596,6 +7914,77 @@ export interface operations {
             };
         };
     };
+    quality_summary_system_chat_quality_summary_get: {
+        parameters: {
+            query?: {
+                tenant_id?: string | null;
+                days?: number;
+                start?: string | null;
+                end?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualitySummaryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    quality_page_system_chat_quality_page_get: {
+        parameters: {
+            query?: {
+                tenant_id?: string | null;
+                status?: string | null;
+                datasource_key?: string | null;
+                start?: string | null;
+                end?: string | null;
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityPageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     handle_feedback_feedback__message_id__status_put: {
         parameters: {
             query?: never;
@@ -7628,6 +8017,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description 070:ADOPTED 晋升不可用(embedding 失败等);处置整体回滚,detail=SAMPLE_PROMOTION_UNAVAILABLE */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -8157,6 +8553,7 @@ export interface operations {
             query?: {
                 start?: string | null;
                 end?: string | null;
+                protocol?: string | null;
             };
             header?: never;
             path?: never;
@@ -8225,6 +8622,7 @@ export interface operations {
                 status?: ("SUCCESS" | "ERROR") | null;
                 trace_id?: string | null;
                 tenant_id?: string | null;
+                protocol?: string | null;
             };
             header?: never;
             path?: never;
@@ -8950,6 +9348,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description 速率超限(062;detail=CHAT_RATE_LIMITED,X-Quota-Warning 预警) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

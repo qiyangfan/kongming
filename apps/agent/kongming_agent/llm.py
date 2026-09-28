@@ -1,20 +1,26 @@
 """LLM 客户端(多协议出站:openai 兼容 / anthropic / openai Responses,ADR-008)。
 
 ADR-002 注记:LLM key 是 agent 面唯一持有的外部凭证(非数据凭证)。
-纪律:同步 request/response,无自写重试——selfheal 是链路唯一重试机制。
 019 chat_with_tools(ReAct 内核):tools 参数原生透传;openai 通道保持既有
 路径行为等价,anthropic/responses 通道经 llm_protocol 翻译层收敛。
+
+072 出站韧性:四个出站点统一经 _resilient_call 接入——瞬时故障(连接建立
+失败/读超时/408/429/5xx)按退避重发(尝试预算 ≤3,按上层 agent_timeout_sec
+反推),瞬时故障耗尽后单层降级(任务路由目标 → 主模型 → 显式 fallback 条目,
+Bot model_override 不降级),用量每尝试一条(失败率与重试成本可见)。
 """
 
 import contextvars
 import json
 import logging
 import time
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any, Literal, cast
 
 from openai import AsyncOpenAI
+from openai.types import CreateEmbeddingResponse
 from openai.types.chat import (
     ChatCompletionFunctionToolParam,
     ChatCompletionMessageFunctionToolCall,
@@ -31,9 +37,15 @@ from kongming_agent.llm_protocol import (
 )
 from kongming_agent.llm_protocol import LlmError as LlmError  # 显式 re-export
 from kongming_agent.llm_protocol import LlmToolCall as LlmToolCall  # 显式 re-export
+from kongming_agent.retry import call_with_retry, is_transient_error
 from kongming_agent.settings import DEFAULT_PROTOCOL, VALID_PROTOCOLS, Settings
 
 log = logging.getLogger(__name__)
+
+# 072:出站目标三元组(协议客户端, 实际模型名, 出站协议);_resolve 产物客户端可为
+# None(未配 key),降级链解析后过滤
+Target = tuple["AsyncOpenAI | AnthropicClient", str, str]
+ResolvedTarget = tuple["AsyncOpenAI | AnthropicClient | None", str, str]
 
 
 # usage 上报后台任务强引用集(防 GC;完成即摘)
@@ -70,9 +82,15 @@ class ToolChatReply:
     tool_calls: list[LlmToolCall] = field(default_factory=list[LlmToolCall])
 
 
+def _same_target(a: ResolvedTarget, b: ResolvedTarget) -> bool:
+    """同目标判定(降级链去重):客户端实例 + 模型名 + 协议三元一致。"""
+    return a[0] is not None and b[0] is not None and a[0] is b[0] and a[1] == b[1] and a[2] == b[2]
+
+
 class LlmClient:
     """薄封装:chat 文本问答 + tool_calls(019)+ embeddings;
-    021:多模型注册表池 + 任务级路由(缺省主模型零回归)+ 用量采集上报。"""
+    021:多模型注册表池 + 任务级路由(缺省主模型零回归)+ 用量采集上报;
+    072:瞬时重试 + 单层降级(见 _resilient_call)。"""
 
     def __init__(
         self,
@@ -106,6 +124,7 @@ class LlmClient:
         # 多协议(ADR-008):池条目携带协议 (client, model, protocol)
         self._pool: dict[str, tuple[AsyncOpenAI | AnthropicClient, str, str]] = {}
         self._image_limits: dict[str, float] = {}  # 036⑦:条目图片上限
+        self._pool_windows: dict[str, int] = {}  # 080:条目上下文窗口
         for name, entry in settings.parse_registry().items():
             if entry.protocol == PROTOCOL_ANTHROPIC:
                 entry_client: AsyncOpenAI | AnthropicClient = AnthropicClient(
@@ -122,6 +141,8 @@ class LlmClient:
             self._pool[name] = (entry_client, entry.model, entry.protocol)
             if entry.max_image_mb is not None:
                 self._image_limits[name] = entry.max_image_mb
+            if entry.context_window is not None:
+                self._pool_windows[name] = entry.context_window
         self._routes = settings.parse_routes()
         self._reporter = usage_reporter
         self._default_image_limit_mb = settings.llm_max_image_mb
@@ -138,6 +159,21 @@ class LlmClient:
                 base_url=emb_base,
                 timeout=settings.embedding_timeout_sec,
             )
+        # 072 出站韧性:尝试预算与退避参数(design D4:总尝试上限含降级目标)
+        self._max_attempts = max(1, settings.llm_max_attempts)
+        self._retry_base_ms = settings.llm_retry_base_ms
+        self._retry_max_wait_ms = settings.llm_retry_max_wait_ms
+        # 080 装配预算:窗口 − 预留输出 − 安全边际
+        self._default_window = settings.prompt_context_window_default
+        self._budget_reserve = (
+            settings.prompt_reserved_output_tokens + settings.prompt_safety_margin_tokens
+        )
+        # 072 降级条目:名称入实例,目标按当前池解析(与 _resolve 同口径,
+        # 启动期 fail_closed_checks 已告警校验;条目被剔除/不存在 → 降级关闭,
+        # 不拒启——design D3)
+        self._fallback_name = (settings.llm_fallback_entry or "").strip()
+        if self._fallback_name and self._fallback_name not in self._pool:
+            log.warning("降级条目 %s 不在注册表,视为未配置(降级关闭)", self._fallback_name)
 
     async def aclose(self) -> None:
         """021① 清偿:显式关闭全部客户端(主/注册表池/embedding)——
@@ -162,6 +198,19 @@ class LlmClient:
             if name and name in self._image_limits:
                 return self._image_limits[name]
         return self._default_image_limit_mb
+
+    def context_window(self, task: str | None = None) -> int:
+        """080:该 task 生效模型的上下文窗口——路由命中条目声明值优先,
+        未声明回退全局缺省(窗口只用于装配预算,不出现在任何响应中)。"""
+        if task:
+            name = self._routes.get(task)
+            if name and name in self._pool_windows:
+                return self._pool_windows[name]
+        return self._default_window
+
+    def prompt_budget(self, task: str | None = None) -> int:
+        """080:送模型前的提示词 token 预算 = 窗口 − 预留输出 − 安全边际。"""
+        return max(1024, self.context_window(task) - self._budget_reserve)
 
     def _resolve(
         self, task: str | None, model_override: str | None = None
@@ -190,6 +239,76 @@ class LlmClient:
                     _ROUTE_MISS_WARNED.add(marker)
                     log.warning("任务 %s 路由目标 %s 不在注册表,回退主模型", task, name)
         return self._client, self._model, self._protocol
+
+    def _degrade_chain(self, task: str | None, model_override: str | None) -> list[ResolvedTarget]:
+        """072 降级链(design D3):主目标(路由/override)→ 主模型(若不同)→
+        fallback 条目(若配置且不重复)。Bot model_override 不降级(D7:
+        显式选择的模型与计价不容被静默替换)。"""
+        primary = self._resolve(task, model_override)
+        if model_override:
+            return [primary]
+        chain: list[ResolvedTarget] = [primary]
+        main: ResolvedTarget = (
+            self._client,
+            self._model,
+            self._protocol,
+        )
+        if not _same_target(primary, main):
+            chain.append(main)
+        if self._fallback_name:
+            fallback = self._pool.get(self._fallback_name)
+            if fallback is not None and not any(
+                _same_target(t, cast("ResolvedTarget", fallback)) for t in chain if t[0] is not None
+            ):
+                chain.append(fallback)
+        return chain
+
+    async def _resilient_call(
+        self,
+        *,
+        task: str | None,
+        model_override: str | None,
+        trace_id: str | None,
+        tenant_key: str | None,
+        call_target: Callable[[AsyncOpenAI | AnthropicClient, str, str], Awaitable[Any]],
+    ) -> Any:
+        """072 韧性单点:链上目标依次尝试,瞬时故障按退避重发,耗尽才降级;
+        主目标分得预算大头(总预算 − 下游目标各保留 1 次),下游不再重试。
+        用量每尝试一条由 call_target 内部自报(实际模型名即该次尝试的模型)。"""
+        chain = self._degrade_chain(task, model_override)
+        primary_client = chain[0][0]
+        if primary_client is None:
+            raise LlmError("KM_AGENT_LLM_API_KEY 未配置")
+        # 下游目标客户端 None(未配 key 的池条目不可能出现;主模型 None = 全局无 key,
+        # 已被上面的 primary 检查覆盖)——防御性过滤
+        usable: list[Target] = [cast("Target", chain[0])] + [
+            cast("Target", t) for t in chain[1:] if t[0] is not None
+        ]
+        primary_attempts = max(1, self._max_attempts - (len(usable) - 1))
+        last_exc: BaseException | None = None
+        for idx, (_client, model, protocol) in enumerate(usable):
+            attempts = primary_attempts if idx == 0 else 1
+            try:
+                return await call_with_retry(
+                    partial(call_target, _client, model, protocol),
+                    max_attempts=attempts,
+                    base_delay_ms=self._retry_base_ms,
+                    max_wait_ms=self._retry_max_wait_ms,
+                )
+            except Exception as e:  # noqa: BLE001  分类后决定降级或上抛
+                if idx + 1 < len(usable) and is_transient_error(e):
+                    log.warning(
+                        "LLM 出站目标 %s(%s) 瞬时故障耗尽(尝试 %d 次),降级下一目标: %s",
+                        model,
+                        protocol,
+                        attempts,
+                        e,
+                    )
+                    last_exc = e
+                    continue
+                raise
+        assert last_exc is not None  # noqa: S101  循环必已 return 或 raise(类型收窄)
+        raise last_exc
 
     async def _protocol_create(
         self,
@@ -241,7 +360,8 @@ class LlmClient:
     ) -> str:
         """anthropic / responses 条目的 chat / chat_vision 通道(ADR-008):
         翻译出站 → usage 归一回 _report;调用失败/应答畸形收敛 LlmError 并按
-        既有 ERROR 采集口径落记录(038)。"""
+        既有 ERROR 采集口径落记录(038)。072:每次尝试一条 usage(由外层重试
+        循环逐次调用本函数,模型名取当次目标)。"""
         messages: list[dict[str, object]] = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -266,6 +386,7 @@ class LlmClient:
                 usage=None,
                 status="ERROR",
                 latency_ms=int((time.monotonic() - t0) * 1000),
+                protocol=protocol,
             )
             raise LlmError(f"LLM 调用失败: {e}") from e
         self._report(
@@ -275,6 +396,7 @@ class LlmClient:
             tenant_key=tenant_key,
             usage=reply.usage,
             latency_ms=int((time.monotonic() - t0) * 1000),
+            protocol=protocol,
         )
         return reply.content or ""
 
@@ -288,6 +410,7 @@ class LlmClient:
         usage: object | None,
         status: Literal["SUCCESS", "ERROR"] = "SUCCESS",  # 038:失败调用也采集
         latency_ms: int | None = None,  # 038:调用耗时(毫秒)
+        protocol: str = DEFAULT_PROTOCOL,  # 077:出站协议归因(三通道各透传)
     ) -> None:
         """用量采集(021):fire-and-forget,任何失败仅日志不阻断主链路。
         035:收集器在场(bot 链路)只收集不上报——唯一上报口=响应携带。
@@ -303,6 +426,7 @@ class LlmClient:
             "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
             "status": status,
             "latency_ms": latency_ms,
+            "protocol": protocol,  # 077:api 侧落库(内部契约,不进 OpenAPI)
         }
         collector = _USAGE_COLLECTOR.get()
         if collector is not None:
@@ -331,77 +455,101 @@ class LlmClient:
         trace_id: str | None = None,  # 021:用量采集贯穿
         tenant_key: str | None = None,  # 021:用量租户维度(api 反解)
     ) -> str:
-        client, model, protocol = self._resolve(task)
-        if client is None:
-            raise LlmError("KM_AGENT_LLM_API_KEY 未配置")
-        if protocol != PROTOCOL_OPENAI:
-            return await self._chat_via_protocol(
-                client,
-                protocol,
-                model=model,
-                system=system,
-                user=user,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                task=task or "CHAT",
-                trace_id=trace_id,
-                tenant_key=tenant_key,
-            )
-        # protocol 分支已保证 openai 通道持 AsyncOpenAI(或测试替身);cast 仅收窄
-        client = cast("AsyncOpenAI", client)
-        # max_tokens 缺省不传(供应商默认),仅轻量端点(如标题改写)显式封顶(010);
-        # 分支写法:openai 类型 None ≠ 省略,**kwargs 过不了 mypy 重载
-        messages: list[ChatCompletionMessageParam] = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ]
-        t0 = time.monotonic()
-        try:
-            if max_tokens is None:
-                resp = await client.chat.completions.create(
-                    model=model, messages=messages, temperature=temperature
-                )
-            else:
-                resp = await client.chat.completions.create(
+
+        async def call_target(
+            client: AsyncOpenAI | AnthropicClient,
+            model: str,
+            protocol: str,
+        ) -> str:
+            if protocol != PROTOCOL_OPENAI:
+                return await self._chat_via_protocol(
+                    client,
+                    protocol,
                     model=model,
-                    messages=messages,
+                    system=system,
+                    user=user,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    task=task or "CHAT",
+                    trace_id=trace_id,
+                    tenant_key=tenant_key,
                 )
-        except Exception as e:
-            self._report(
-                task=task or "CHAT",
-                model=model,
-                trace_id=trace_id,
-                tenant_key=tenant_key,
-                usage=None,
-                status="ERROR",
-                latency_ms=int((time.monotonic() - t0) * 1000),
-            )
-            raise LlmError(f"LLM 调用失败: {e}") from e
-        try:
-            content = (resp.choices[0].message.content or "").strip()
-        except (IndexError, AttributeError, TypeError) as e:
-            # R1-B2:应答畸形(空 choices 等)=供应商协议错,同样归 ERROR 采集
+            # protocol 分支已保证 openai 通道持 AsyncOpenAI(或测试替身);cast 仅收窄
+            oai = cast("AsyncOpenAI", client)
+            # max_tokens 缺省不传(供应商默认),仅轻量端点(如标题改写)显式封顶(010);
+            # 分支写法:openai 类型 None ≠ 省略,**kwargs 过不了 mypy 重载
+            messages: list[ChatCompletionMessageParam] = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ]
+            t0 = time.monotonic()
+            try:
+                if max_tokens is None:
+                    resp = await oai.chat.completions.create(
+                        model=model, messages=messages, temperature=temperature
+                    )
+                else:
+                    resp = await oai.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                    )
+            except Exception:
+                # 072:每尝试一条 ERROR 记录,随后原异常上抛(分类/降级/重试由
+                # _resilient_call 统一裁决)——最终失败仍收敛 LlmError(见下)
+                self._report(
+                    task=task or "CHAT",
+                    model=model,
+                    trace_id=trace_id,
+                    tenant_key=tenant_key,
+                    usage=None,
+                    status="ERROR",
+                    latency_ms=int((time.monotonic() - t0) * 1000),
+                    protocol=PROTOCOL_OPENAI,
+                )
+                raise
+            try:
+                content = (resp.choices[0].message.content or "").strip()
+            except (IndexError, AttributeError, TypeError) as e:
+                # R1-B2:应答畸形(空 choices 等)=供应商协议错,同样归 ERROR 采集
+                self._report(
+                    task=task or "CHAT",
+                    model=model,
+                    trace_id=trace_id,
+                    tenant_key=tenant_key,
+                    usage=resp.usage,
+                    status="ERROR",
+                    latency_ms=int((time.monotonic() - t0) * 1000),
+                    protocol=PROTOCOL_OPENAI,
+                )
+                raise LlmError(f"LLM 应答畸形: {e}") from e
             self._report(
                 task=task or "CHAT",
                 model=model,
                 trace_id=trace_id,
                 tenant_key=tenant_key,
                 usage=resp.usage,
-                status="ERROR",
                 latency_ms=int((time.monotonic() - t0) * 1000),
+                protocol=PROTOCOL_OPENAI,
             )
-            raise LlmError(f"LLM 应答畸形: {e}") from e
-        self._report(
-            task=task or "CHAT",
-            model=model,
-            trace_id=trace_id,
-            tenant_key=tenant_key,
-            usage=resp.usage,
-            latency_ms=int((time.monotonic() - t0) * 1000),
-        )
-        return content
+            return content
+
+        try:
+            return cast(
+                "str",
+                await self._resilient_call(
+                    task=task,
+                    model_override=None,
+                    trace_id=trace_id,
+                    tenant_key=tenant_key,
+                    call_target=call_target,
+                ),
+            )
+        except LlmError:
+            raise
+        except Exception as e:
+            raise LlmError(f"LLM 调用失败: {e}") from e
 
     async def chat_vision(
         self,
@@ -416,83 +564,105 @@ class LlmClient:
         """vision 调用(030):content parts=[text, image_url(data-url)];
         task="vision" 经 021 路由到多模态模型;未配回退主模型(文本模型
         供应商报错即 LlmError,调用方 fail-closed)。"""
-        client, model, protocol = self._resolve(task)
-        if client is None:
-            raise LlmError("KM_AGENT_LLM_API_KEY 未配置")
-        if protocol != PROTOCOL_OPENAI:
-            content: list[dict[str, object]] = [{"type": "text", "text": user}]
+
+        async def call_target(
+            client: AsyncOpenAI | AnthropicClient,
+            model: str,
+            protocol: str,
+        ) -> str:
+            if protocol != PROTOCOL_OPENAI:
+                content: list[dict[str, object]] = [{"type": "text", "text": user}]
+                for mime, b64 in images:
+                    content.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime};base64,{b64}"},
+                        }
+                    )
+                return await self._chat_via_protocol(
+                    client,
+                    protocol,
+                    model=model,
+                    system=system,
+                    user=content,
+                    temperature=0.2,
+                    max_tokens=None,
+                    task=task or "VISION",
+                    trace_id=trace_id,
+                    tenant_key=tenant_key,
+                )
+            # protocol 分支已保证 openai 通道持 AsyncOpenAI(或测试替身);cast 仅收窄
+            oai = cast("AsyncOpenAI", client)
+            content_parts: list[dict[str, object]] = [{"type": "text", "text": user}]
             for mime, b64 in images:
-                content.append(
+                content_parts.append(
                     {
                         "type": "image_url",
                         "image_url": {"url": f"data:{mime};base64,{b64}"},
                     }
                 )
-            return await self._chat_via_protocol(
-                client,
-                protocol,
-                model=model,
-                system=system,
-                user=content,
-                temperature=0.2,
-                max_tokens=None,
-                task=task or "VISION",
-                trace_id=trace_id,
-                tenant_key=tenant_key,
-            )
-        # protocol 分支已保证 openai 通道持 AsyncOpenAI(或测试替身);cast 仅收窄
-        client = cast("AsyncOpenAI", client)
-        content_parts: list[dict[str, object]] = [{"type": "text", "text": user}]
-        for mime, b64 in images:
-            content_parts.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{mime};base64,{b64}"},
-                }
-            )
-        messages: list[ChatCompletionMessageParam] = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": content_parts},  # type: ignore[list-item,misc]
-        ]
-        t0 = time.monotonic()
-        try:
-            resp = await client.chat.completions.create(
-                model=model, messages=messages, temperature=0.2
-            )
-        except Exception as e:
-            self._report(
-                task=task or "VISION",
-                model=model,
-                trace_id=trace_id,
-                tenant_key=tenant_key,
-                usage=None,
-                status="ERROR",
-                latency_ms=int((time.monotonic() - t0) * 1000),
-            )
-            raise LlmError(f"vision 调用失败: {e}") from e
-        try:
-            text = resp.choices[0].message.content or ""
-        except (IndexError, AttributeError, TypeError) as e:
-            # R1-B2:应答畸形=供应商协议错,同样归 ERROR 采集
+            messages: list[ChatCompletionMessageParam] = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": content_parts},  # type: ignore[list-item,misc]
+            ]
+            t0 = time.monotonic()
+            try:
+                resp = await oai.chat.completions.create(
+                    model=model, messages=messages, temperature=0.2
+                )
+            except Exception:
+                self._report(
+                    task=task or "VISION",
+                    model=model,
+                    trace_id=trace_id,
+                    tenant_key=tenant_key,
+                    usage=None,
+                    status="ERROR",
+                    latency_ms=int((time.monotonic() - t0) * 1000),
+                    protocol=PROTOCOL_OPENAI,
+                )
+                raise
+            try:
+                text = resp.choices[0].message.content or ""
+            except (IndexError, AttributeError, TypeError) as e:
+                # R1-B2:应答畸形=供应商协议错,同样归 ERROR 采集
+                self._report(
+                    task=task or "VISION",
+                    model=model,
+                    trace_id=trace_id,
+                    tenant_key=tenant_key,
+                    usage=resp.usage,
+                    status="ERROR",
+                    latency_ms=int((time.monotonic() - t0) * 1000),
+                    protocol=PROTOCOL_OPENAI,
+                )
+                raise LlmError(f"vision 应答畸形: {e}") from e
             self._report(
                 task=task or "VISION",
                 model=model,
                 trace_id=trace_id,
                 tenant_key=tenant_key,
                 usage=resp.usage,
-                status="ERROR",
                 latency_ms=int((time.monotonic() - t0) * 1000),
+                protocol=PROTOCOL_OPENAI,
             )
-            raise LlmError(f"vision 应答畸形: {e}") from e
-        self._report(
-            task=task or "VISION",
-            model=model,
-            trace_id=trace_id,
-            tenant_key=tenant_key,
-            usage=resp.usage,
-            latency_ms=int((time.monotonic() - t0) * 1000),
-        )
-        return text
+            return text
+
+        try:
+            return cast(
+                "str",
+                await self._resilient_call(
+                    task=task,
+                    model_override=None,
+                    trace_id=trace_id,
+                    tenant_key=tenant_key,
+                    call_target=call_target,
+                ),
+            )
+        except LlmError:
+            raise
+        except Exception as e:
+            raise LlmError(f"vision 调用失败: {e}") from e
 
     async def chat_with_tools(
         self,
@@ -512,28 +682,77 @@ class LlmClient:
         不再调用工具时 tool_calls 为空、content 为最终答案。
         tool_call 的 arguments(JSON 字符串)解析失败不抛错——args=None +
         raw_args 原文,由 ReAct 节点收敛为「参数畸形」观察喂回 LLM 自纠。
+        072:model_override 目标瞬时可重试但不降级(D7)。
         """
-        client, model, protocol = self._resolve(task, model_override)
-        if client is None:
-            raise LlmError("KM_AGENT_LLM_API_KEY 未配置")
-        if protocol != PROTOCOL_OPENAI:
-            # 多协议(ADR-008):消息史原样翻译出站,应答回 ProtocolReply → 既有返回结构
-            protocol_messages: list[dict[str, object]] = [
+
+        async def call_target(
+            client: AsyncOpenAI | AnthropicClient,
+            model: str,
+            protocol: str,
+        ) -> ToolChatReply:
+            if protocol != PROTOCOL_OPENAI:
+                # 多协议(ADR-008):消息史原样翻译出站,应答回 ProtocolReply → 既有返回结构
+                protocol_messages: list[dict[str, object]] = [
+                    {"role": "system", "content": system},
+                    *[dict(m) for m in messages],
+                ]
+                t0 = time.monotonic()
+                try:
+                    reply = await self._protocol_create(
+                        client,
+                        protocol,
+                        model=model,
+                        messages=protocol_messages,
+                        tools=tools,
+                        temperature=temperature,
+                        max_tokens=None,
+                    )
+                except Exception as e:
+                    self._report(
+                        task=task or "CHAT_TOOLS",
+                        model=model,
+                        trace_id=trace_id,
+                        tenant_key=tenant_key,
+                        usage=None,
+                        status="ERROR",
+                        latency_ms=int((time.monotonic() - t0) * 1000),
+                        protocol=protocol,
+                    )
+                    raise LlmError(f"LLM 调用失败: {e}") from e
+                self._report(
+                    task=task or "CHAT_TOOLS",
+                    model=model,
+                    trace_id=trace_id,
+                    tenant_key=tenant_key,
+                    usage=reply.usage,
+                    latency_ms=int((time.monotonic() - t0) * 1000),
+                    protocol=protocol,
+                )
+                return ToolChatReply(content=reply.content, tool_calls=reply.tool_calls)
+            # protocol 分支已保证 openai 通道持 AsyncOpenAI(或测试替身);cast 仅收窄
+            oai = cast("AsyncOpenAI", client)
+            full_messages: list[ChatCompletionMessageParam] = [
                 {"role": "system", "content": system},
-                *[dict(m) for m in messages],
+                *messages,
             ]
             t0 = time.monotonic()
             try:
-                reply = await self._protocol_create(
-                    client,
-                    protocol,
-                    model=model,
-                    messages=protocol_messages,
-                    tools=tools,
-                    temperature=temperature,
-                    max_tokens=None,
-                )
-            except Exception as e:
+                # tools 有无两分支(openai 重载对 **kwargs 展开不过 mypy;同 chat 的
+                # max_tokens 分支写法先例);dict 列表结构与 ChatCompletionFunctionToolParam
+                # (TypedDict)对齐,cast 收窄给 mypy
+                if tools:
+                    resp = await oai.chat.completions.create(
+                        model=model,
+                        messages=full_messages,
+                        temperature=temperature,
+                        tools=cast("list[ChatCompletionFunctionToolParam]", tools),
+                        tool_choice="auto",
+                    )
+                else:
+                    resp = await oai.chat.completions.create(
+                        model=model, messages=full_messages, temperature=temperature
+                    )
+            except Exception:
                 self._report(
                     task=task or "CHAT_TOOLS",
                     model=model,
@@ -542,98 +761,75 @@ class LlmClient:
                     usage=None,
                     status="ERROR",
                     latency_ms=int((time.monotonic() - t0) * 1000),
+                    protocol=PROTOCOL_OPENAI,
                 )
-                raise LlmError(f"LLM 调用失败: {e}") from e
-            self._report(
-                task=task or "CHAT_TOOLS",
-                model=model,
-                trace_id=trace_id,
-                tenant_key=tenant_key,
-                usage=reply.usage,
-                latency_ms=int((time.monotonic() - t0) * 1000),
-            )
-            return ToolChatReply(content=reply.content, tool_calls=reply.tool_calls)
-        # protocol 分支已保证 openai 通道持 AsyncOpenAI(或测试替身);cast 仅收窄
-        client = cast("AsyncOpenAI", client)
-        full_messages: list[ChatCompletionMessageParam] = [
-            {"role": "system", "content": system},
-            *messages,
-        ]
-        t0 = time.monotonic()
-        try:
-            # tools 有无两分支(openai 重载对 **kwargs 展开不过 mypy;同 chat 的
-            # max_tokens 分支写法先例);dict 列表结构与 ChatCompletionFunctionToolParam
-            # (TypedDict)对齐,cast 收窄给 mypy
-            if tools:
-                resp = await client.chat.completions.create(
+                raise
+            try:
+                msg = resp.choices[0].message
+            except (IndexError, AttributeError, TypeError) as e:
+                # R1-B2:应答畸形(空 choices 等)=供应商协议错,同样归 ERROR 采集
+                self._report(
+                    task=task or "CHAT_TOOLS",
                     model=model,
-                    messages=full_messages,
-                    temperature=temperature,
-                    tools=cast("list[ChatCompletionFunctionToolParam]", tools),
-                    tool_choice="auto",
+                    trace_id=trace_id,
+                    tenant_key=tenant_key,
+                    usage=resp.usage,
+                    status="ERROR",
+                    latency_ms=int((time.monotonic() - t0) * 1000),
+                    protocol=PROTOCOL_OPENAI,
                 )
-            else:
-                resp = await client.chat.completions.create(
-                    model=model, messages=full_messages, temperature=temperature
-                )
-        except Exception as e:
-            self._report(
-                task=task or "CHAT_TOOLS",
-                model=model,
-                trace_id=trace_id,
-                tenant_key=tenant_key,
-                usage=None,
-                status="ERROR",
-                latency_ms=int((time.monotonic() - t0) * 1000),
-            )
-            raise LlmError(f"LLM 调用失败: {e}") from e
-        try:
-            msg = resp.choices[0].message
-        except (IndexError, AttributeError, TypeError) as e:
-            # R1-B2:应答畸形(空 choices 等)=供应商协议错,同样归 ERROR 采集
+                raise LlmError(f"LLM 应答畸形: {e}") from e
             self._report(
                 task=task or "CHAT_TOOLS",
                 model=model,
                 trace_id=trace_id,
                 tenant_key=tenant_key,
                 usage=resp.usage,
-                status="ERROR",
                 latency_ms=int((time.monotonic() - t0) * 1000),
+                protocol=PROTOCOL_OPENAI,
             )
-            raise LlmError(f"LLM 应答畸形: {e}") from e
-        self._report(
-            task=task or "CHAT_TOOLS",
-            model=model,
-            trace_id=trace_id,
-            tenant_key=tenant_key,
-            usage=resp.usage,
-            latency_ms=int((time.monotonic() - t0) * 1000),
-        )
-        calls: list[LlmToolCall] = []
-        for tc in msg.tool_calls or []:
-            # SDK 联合类型:function 工具调用与 custom 工具调用;本内核只产出
-            # function 形态(custom 无 function 属性,跳过——防御未知供应商形态)
-            if not isinstance(tc, ChatCompletionMessageFunctionToolCall):
-                continue
-            raw = tc.function.arguments or ""
-            try:
-                # json.loads 返回 Any,显式注解约束到 LlmToolCall.args 契约型
-                parsed: dict[str, object] | None = json.loads(raw) if raw.strip() else {}
-                if not isinstance(parsed, dict):
-                    parsed = None  # 标量/数组畸形 → 喂回自纠
-            except json.JSONDecodeError:
-                parsed = None
-            calls.append(
-                LlmToolCall(call_id=tc.id, name=tc.function.name, args=parsed, raw_args=raw)
+            calls: list[LlmToolCall] = []
+            for tc in msg.tool_calls or []:
+                # SDK 联合类型:function 工具调用与 custom 工具调用;本内核只产出
+                # function 形态(custom 无 function 属性,跳过——防御未知供应商形态)
+                if not isinstance(tc, ChatCompletionMessageFunctionToolCall):
+                    continue
+                raw = tc.function.arguments or ""
+                try:
+                    # json.loads 返回 Any,显式注解约束到 LlmToolCall.args 契约型
+                    parsed: dict[str, object] | None = json.loads(raw) if raw.strip() else {}
+                    if not isinstance(parsed, dict):
+                        parsed = None  # 标量/数组畸形 → 喂回自纠
+                except json.JSONDecodeError:
+                    parsed = None
+                calls.append(
+                    LlmToolCall(call_id=tc.id, name=tc.function.name, args=parsed, raw_args=raw)
+                )
+            content = (msg.content or "").strip() or None
+            return ToolChatReply(content=content, tool_calls=calls)
+
+        try:
+            return cast(
+                "ToolChatReply",
+                await self._resilient_call(
+                    task=task,
+                    model_override=model_override,
+                    trace_id=trace_id,
+                    tenant_key=tenant_key,
+                    call_target=call_target,
+                ),
             )
-        content = (msg.content or "").strip() or None
-        return ToolChatReply(content=content, tool_calls=calls)
+        except LlmError:
+            raise
+        except Exception as e:
+            raise LlmError(f"LLM 调用失败: {e}") from e
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """批量向量化(009;openai 兼容 embeddings API)。
 
         供应商单批条数受限(dashscope text-embedding-v2=25,冒烟实证 28 条整批被拒),
         内部按 embedding_batch_size 切分多次调用后拼接。
+        072:每批独立重试预算(瞬时故障),每尝试一条 usage。
         """
         if self._emb_client is None:
             raise LlmError("embedding/LLM API key 均未配置")
@@ -642,18 +838,33 @@ class LlmClient:
         out: list[list[float]] = []
         for start in range(0, len(texts), self._emb_batch_size):
             batch = texts[start : start + self._emb_batch_size]
-            t0 = time.monotonic()
+
+            async def call_emb(batch: list[str] = batch) -> CreateEmbeddingResponse:
+                t0 = time.monotonic()
+                try:
+                    return await self._emb_client.embeddings.create(  # type: ignore[union-attr]
+                        model=self._emb_model, input=batch
+                    )
+                except Exception:
+                    self._report(
+                        task="EMBED",
+                        model=self._emb_model,
+                        trace_id=None,
+                        usage=None,
+                        status="ERROR",
+                        latency_ms=int((time.monotonic() - t0) * 1000),
+                        protocol=PROTOCOL_OPENAI,
+                    )
+                    raise
+
             try:
-                resp = await self._emb_client.embeddings.create(model=self._emb_model, input=batch)
-            except Exception as e:
-                self._report(
-                    task="EMBED",
-                    model=self._emb_model,
-                    trace_id=None,
-                    usage=None,
-                    status="ERROR",
-                    latency_ms=int((time.monotonic() - t0) * 1000),
+                resp = await call_with_retry(
+                    call_emb,
+                    max_attempts=self._max_attempts,
+                    base_delay_ms=self._retry_base_ms,
+                    max_wait_ms=self._retry_max_wait_ms,
                 )
+            except Exception as e:
                 raise LlmError(f"embeddings 调用失败: {e}") from e
             # 按 index 归位(API 不保证返回有序);R1-B2:条数/index 集合缺失
             # 或重复=应答畸形(静默拼接会致调用方向量错位),归 ERROR 采集后
@@ -666,7 +877,8 @@ class LlmClient:
                     trace_id=None,
                     usage=getattr(resp, "usage", None),
                     status="ERROR",
-                    latency_ms=int((time.monotonic() - t0) * 1000),
+                    latency_ms=0,
+                    protocol=PROTOCOL_OPENAI,
                 )
                 raise LlmError(f"embeddings 应答畸形: 期望 {len(batch)} 条实得 {len(data)}")
             # 021:embedding 用量同通道上报(不参与模型路由,009 立约)
@@ -675,7 +887,8 @@ class LlmClient:
                 model=self._emb_model,
                 trace_id=None,
                 usage=getattr(resp, "usage", None),
-                latency_ms=int((time.monotonic() - t0) * 1000),
+                latency_ms=0,
+                protocol=PROTOCOL_OPENAI,
             )  # tenant 维度不适用(009 embedding 独立通道)
             out.extend(d.embedding for d in data)
         return out

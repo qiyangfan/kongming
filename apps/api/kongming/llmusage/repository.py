@@ -37,9 +37,9 @@ class SqlLlmUsageRepo:
                 text(
                     "INSERT INTO public.sys_llm_usage"
                     " (id, trace_id, tenant_id, model, task, prompt_tokens,"
-                    "  completion_tokens, total_tokens, latency_ms, status)"
+                    "  completion_tokens, total_tokens, latency_ms, status, protocol)"
                     " VALUES (:id, :trace_id, CAST(:tenant_id AS uuid), :model, :task,"
-                    "         :pt, :ct, :tt, :latency_ms, :status)"
+                    "         :pt, :ct, :tt, :latency_ms, :status, :proto)"
                 ),
                 {
                     "id": str(uuid7()),
@@ -52,6 +52,7 @@ class SqlLlmUsageRepo:
                     "tt": r.get("total_tokens", 0),
                     "latency_ms": r.get("latency_ms"),
                     "status": r.get("status") or "SUCCESS",
+                    "proto": r.get("protocol"),
                 },
             )
         await self._s.commit()
@@ -71,10 +72,10 @@ class SqlLlmUsageRepo:
                 text(
                     "INSERT INTO public.sys_llm_usage"
                     " (id, trace_id, tenant_id, bot_id, model, task, prompt_tokens,"
-                    "  completion_tokens, total_tokens, seq, latency_ms, status)"
+                    "  completion_tokens, total_tokens, seq, latency_ms, status, protocol)"
                     " VALUES (:id, :trace_id, CAST(:tenant_id AS uuid),"
                     "         CAST(:bot_id AS uuid), :model, :task,"
-                    "         :pt, :ct, :tt, :seq, :latency_ms, :status)"
+                    "         :pt, :ct, :tt, :seq, :latency_ms, :status, :proto)"
                     " ON CONFLICT (trace_id, seq)"
                     " WHERE trace_id IS NOT NULL AND bot_id IS NOT NULL"
                     " DO NOTHING"
@@ -92,17 +93,21 @@ class SqlLlmUsageRepo:
                     "seq": int(r.get("seq", 0) or 0),
                     "latency_ms": r.get("latency_ms"),
                     "status": r.get("status") or "SUCCESS",
+                    "proto": r.get("protocol"),
                 },
             )
             inserted += getattr(res, "rowcount", 0) or 0
         await self._s.commit()
         return inserted
 
-    async def summary(self, *, start: object = None, end: object = None) -> list[dict[str, Any]]:
+    async def summary(
+        self, *, start: object = None, end: object = None, protocol: str | None = None
+    ) -> list[dict[str, Any]]:
         """按租户+模型+任务聚合(时间范围可选;tenant 未反解归 unknown)。
         038:补失败次数与延迟统计——延迟仅 SUCCESS 且 latency_ms 非空参与
         (失败耗时语义归时间线,聚合指标保持成功口径干净;无样本组 avg 为
-        None、max 为 None)。"""
+        None、max 为 None)。077:protocol 为过滤型筛选(不新增分组键)
+        ——同名模型跨协议条目流量可拆分,不过滤时与现状逐字一致。"""
         conditions = ["1=1"]
         params: dict[str, object] = {}
         if start:
@@ -111,6 +116,9 @@ class SqlLlmUsageRepo:
         if end:
             conditions.append("u.created_at < :end")
             params["end"] = end
+        if protocol:
+            conditions.append("u.protocol = :protocol")
+            params["protocol"] = protocol
         where = " AND ".join(conditions)
         rows = (
             (
@@ -189,8 +197,10 @@ class SqlLlmUsageRepo:
         status: str | None = None,
         trace_id: str | None = None,
         tenant_id: str | None = None,
+        protocol: str | None = None,
     ) -> tuple[int, list[dict[str, Any]]]:
         """038:明细分页(created_at 倒序;model/task/status/trace_id/tenant 筛选)。
+        077:protocol 过滤 + 行含 protocol 列(null 行原样返回不炸)。
         返回 (total, rows);tenant 未反解归 unknown(展示口径);租户筛选经
         u.tenant_id 直滤——该租户全部行均返回,含 tenant_key 反解失败展示为
         unknown 的行(展示 unknown ≠ 无 tenant_id,038③ 清偿口径)。"""
@@ -211,6 +221,9 @@ class SqlLlmUsageRepo:
         if tenant_id:
             conditions.append("u.tenant_id = CAST(:tenant_id AS uuid)")
             params["tenant_id"] = tenant_id
+        if protocol:
+            conditions.append("u.protocol = :protocol")
+            params["protocol"] = protocol
         where = " AND ".join(conditions)
         total = int(
             (
@@ -231,7 +244,7 @@ class SqlLlmUsageRepo:
                         " COALESCE(t.tenant_key, 'unknown') AS tenant_key,"
                         " u.model, u.task, u.status, u.bot_id,"
                         " u.prompt_tokens, u.completion_tokens, u.total_tokens,"
-                        " u.latency_ms, u.created_at"
+                        " u.latency_ms, u.created_at, u.protocol"
                         " FROM public.sys_llm_usage u"
                         f" LEFT JOIN public.sys_tenant t ON t.id = u.tenant_id WHERE {where}"
                         " ORDER BY u.created_at DESC, u.id DESC"

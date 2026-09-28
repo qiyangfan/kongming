@@ -102,3 +102,87 @@ verdict/时间)三类事件,按发生时间升序拼装为单一事件流返回�
 - GIVEN 多租户用量记录(tenant 反解失败者归 unknown)
 - WHEN 查询汇总
 - THEN 分组按租户呈现,unknown 单列,不跨租户混算
+
+### Requirement: 轮次质量观测
+
+系统 SHALL 提供问答轮次的质量观测面。轮次终态落库(persist=true)时 SHALL 记录
+四个质量信号:trace_id(与 LLM 用量/SQL 执行审计的关联键)、selfheal 重试次数、
+指代消解后的改写问题、prompt 版本指纹;其中改写问题 SHALL 仅在多轮指代消解
+实际发生(改写结果与原问题不同)时非空。四信号为管理面诊断字段,SHALL NOT 进入
+用户响应与流式终态事件。
+
+系统 SHALL 提供质量汇总端点:按时间范围(上限 90 天)返回轮次四态
+(SUCCESS/REJECTED/NO_DATA/FAILED)占比、selfheal 率、点踩率与平均 token,
+SHALL 提供按天趋势(Asia/Shanghai 日历日,逐日补零,口径与用量趋势一致),
+SHALL 提供数据源切片与 prompt 版本切片。系统 SHALL 提供质量明细分页端点:
+按状态、数据源、时间范围筛选,每行含时间、问题、改写问题、状态、重试次数、
+用户评分、trace_id。NO_DATA 轮次(无 SQL 执行、不落执行审计)SHALL 在汇总与
+明细中可见——该形态今日在任何观测面不可见。汇总与明细端点 SHALL 以
+`system:chat-quality:view` 权限点保护(仅 SUPER_ADMIN 种子覆盖),无权限返回
+403。观测查询 MUST NOT 影响采集通道与主链路;观测聚合 SHALL 按租户维度收敛,
+SHALL NOT 提供按用户行级切分(与「观测面数据边界」既定立约一致)。
+
+#### Scenario: 多轮轮次落库改写问题与重试次数
+
+- GIVEN 一次多轮问答(指代消解发生且 selfheal 触发 1 次),persist=true
+- WHEN 轮次终态落库
+- THEN assistant 消息含 trace_id、retry_count=1、resolved_question 为改写后的自包含问题
+- AND 该轮次在质量明细分页中可见
+
+#### Scenario: 单轮不写改写问题
+
+- GIVEN 一次无历史上下文的单轮问答,persist=true
+- WHEN 轮次终态落库
+- THEN resolved_question 为空(无改写发生),retry_count 如实记录(无重试为 0)
+
+#### Scenario: NO_DATA 轮次可观
+
+- GIVEN 某时间窗口内发生过知识未覆盖(NO_DATA)轮次——此类轮次无 SQL 执行、不落执行审计
+- WHEN 查询质量汇总或明细分页
+- THEN NO_DATA 计入四态占比与趋势,明细可定位到具体轮次
+
+#### Scenario: 趋势按天补零
+
+- GIVEN 查询窗口内某天无任何问答
+- WHEN 查询按天趋势
+- THEN 该天返回零值桶,桶数与窗口天数一致,日期口径为 Asia/Shanghai
+
+#### Scenario: 数据源切片定位质量洼地
+
+- GIVEN 同一时间窗内多个数据源各有轮次
+- WHEN 查询质量汇总
+- THEN 按数据源返回四态切分行,可定位未覆盖率高的数据源
+
+#### Scenario: 无权限不泄漏聚合
+
+- GIVEN 查询方角色不含 system:chat-quality:view
+- WHEN 访问质量汇总或明细端点
+- THEN 返回 403,不返回任何聚合数据
+
+### Requirement: 用量协议归因
+
+LLM 用量记录 SHALL 落 `protocol` 列,取值域与多模型注册表出站协议单源一致
+(`openai` | `anthropic` | `responses`;ADR-008,不新造枚举)。每次调用(含失败
+尝试)SHALL 各带其出站协议;未携带(旧版本 agent 上报)SHALL 落 null 并正常受理。
+明细分页与汇总 SHALL 支持按 protocol 过滤(过滤型,不新增分组维度);不过滤时
+计数 SHALL 与引入前逐字一致。明细返回行 SHALL 含 protocol 列(null 展示口径
+为「-」,不回算、不推断——model 名不可可靠映射协议)。protocol 为归因维度,
+SHALL NOT 接入成本估算轨(075 三条成本口径纪律;归因不等于计价)。
+
+#### Scenario: 三通道用量可分
+
+- GIVEN 注册表两条目(model 同名、protocol 分别为 openai 与 responses)各发生调用
+- WHEN 查询用量明细并按 protocol 筛选
+- THEN 两股流量分别返回,同名 model 不再混为一行
+
+#### Scenario: 失败尝试同样归属协议
+
+- GIVEN 某 anthropic 条目的调用以 ERROR 终态
+- WHEN 查询该协议用量
+- THEN ERROR 行可见且 protocol=anthropic(失败率与额外成本可见)
+
+#### Scenario: 存量行 null 不透出
+
+- GIVEN 升级前的历史用量行(protocol 为 null)
+- WHEN 查询用量明细
+- THEN 该行正常返回,protocol 列展示「-」,SHALL NOT 回算或推断

@@ -159,6 +159,8 @@ export default function UsagePage() {
   const [status, setStatus] = useState("");
   const [traceId, setTraceId] = useState("");
   const [tenantId, setTenantId] = useState("");
+  // 077:出站协议筛选(openai/anthropic/responses)
+  const [protocol, setProtocol] = useState("");
   const [page, setPage] = useState(1);
   const [timelineTrace, setTimelineTrace] = useState<string | null>(null);
 
@@ -180,7 +182,7 @@ export default function UsagePage() {
     queryFn: systemApi.listTenants,
   });
   const list = useQuery({
-    queryKey: ["usage", "page", page, modelQ, taskQ, status, traceIdQ, tenantId],
+    queryKey: ["usage", "page", page, modelQ, taskQ, status, traceIdQ, tenantId, protocol],
     queryFn: () =>
       usagePage({
         page,
@@ -190,6 +192,7 @@ export default function UsagePage() {
         ...(status ? { status: status as "SUCCESS" | "ERROR" } : {}),
         ...(traceIdQ ? { trace_id: traceIdQ } : {}),
         ...(tenantId ? { tenant_id: tenantId } : {}),
+        ...(protocol ? { protocol } : {}),
       }),
   });
   const timeline = useQuery({
@@ -463,6 +466,26 @@ export default function UsagePage() {
             )}
           </div>
           <div className="space-y-1">
+            <Label className="text-xs">协议</Label>
+            <Select
+              value={protocol || "ALL"}
+              onValueChange={(v) => {
+                setProtocol(v === "ALL" ? "" : v);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger size="sm" className="w-32" aria-label="协议筛选">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">全部</SelectItem>
+                <SelectItem value="openai">openai</SelectItem>
+                <SelectItem value="anthropic">anthropic</SelectItem>
+                <SelectItem value="responses">responses</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
             <Label className="text-xs">链路 ID</Label>
             <Input
               size="sm"
@@ -513,6 +536,13 @@ export default function UsagePage() {
               ),
             },
             { key: "task", header: "任务", cardPriority: 4 },
+            {
+              key: "protocol",
+              header: "协议",
+              cellClassName: "text-muted-foreground",
+              // 077:null(存量行/旧版上报)展示「-」,不回算不推断
+              render: (r) => r.protocol ?? "—",
+            },
             {
               key: "status",
               header: "状态",

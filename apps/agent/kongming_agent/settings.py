@@ -33,6 +33,9 @@ class ModelEntry:
     capabilities: list[str] = field(default_factory=list[str])
     max_image_mb: float | None = None  # 036⑦:图片体积上限(vision 模型;None=缺省)
     protocol: str = DEFAULT_PROTOCOL  # 出站协议(ADR-008):openai|anthropic|responses
+    # 080:上下文窗口(装配预算输入;None=未声明→回退全局缺省)。进程内配置,
+    # 不出现在任何响应/管理面输出(与 api_key 同级的私密性口径)
+    context_window: int | None = None
 
 
 class Settings(BaseSettings):
@@ -80,6 +83,24 @@ class Settings(BaseSettings):
 
     # 多协议出站(ADR-008):主模型出站协议;非法值启动期告警回退 openai
     llm_protocol: str = DEFAULT_PROTOCOL
+
+    # 生成提示词装配预算(080):窗口缺省值 + 预留输出 + 安全边际;
+    # 预算 = 窗口 − 预留输出 − 安全边际(条目级 context_window 优先)
+    prompt_context_window_default: int = 32768
+    prompt_reserved_output_tokens: int = 4096
+    prompt_safety_margin_tokens: int = 1024
+
+    # 表级预筛(063):问题+资产驱动的表结构收敛;关闭=全量注入(基线回退)
+    schema_prune: bool = True
+    schema_prune_top_n: int = 12
+
+    # 出站韧性(072):瞬时故障重试与单层降级。attempt 预算按上层
+    # agent_timeout_sec=120 反推(design D4:最坏 2×30s + 退避 + 1×30s)
+    llm_max_attempts: int = 3  # 单次业务调用总尝试上限(含降级目标)
+    llm_retry_base_ms: int = 500  # 退避基数(指数+全量 jitter)
+    llm_retry_max_wait_ms: int = 5000  # 退避上限(Retry-After 亦截断到此)
+    # 降级条目:主模型也瞬时故障耗尽后降级到该注册表条目;空=关闭(design D3)
+    llm_fallback_entry: str = ""
 
     def parse_registry(self) -> dict[str, ModelEntry]:
         """注册表解析(fail-closed):畸形条目告警剔除;重名拒;白名单外拒配。"""
@@ -132,6 +153,18 @@ class Settings(BaseSettings):
             if protocol not in VALID_PROTOCOLS:
                 log.warning("注册表条目 %s protocol 非法: %s,剔除该条目", name, protocol)
                 continue
+            # 080:上下文窗口——畸形(非正数/不可解析)按未声明处理并告警,
+            # SHALL NOT 拒配整条目(窗口只用于预算收敛,不构成安全边界)
+            context_window: int | None = None
+            raw_cw = item.get("context_window")
+            if raw_cw is not None:
+                try:
+                    cw = int(cast("int | float | str", raw_cw))
+                    if cw <= 0:
+                        raise ValueError("非正数")
+                    context_window = cw
+                except (TypeError, ValueError):
+                    log.warning("注册表条目 %s context_window 畸形,按未声明处理", name)
             out[name] = ModelEntry(
                 name=name,
                 base_url=base_url,
@@ -140,6 +173,7 @@ class Settings(BaseSettings):
                 capabilities=[str(c) for c in cast("list[object]", item.get("capabilities") or [])],
                 max_image_mb=max_image_mb,
                 protocol=protocol,
+                context_window=context_window,
             )
         return out
 
@@ -190,3 +224,8 @@ class Settings(BaseSettings):
         if self.llm_protocol not in VALID_PROTOCOLS:
             log.warning("KM_AGENT_LLM_PROTOCOL 非法: %s,回退 openai", self.llm_protocol)
             self.llm_protocol = DEFAULT_PROTOCOL
+        # 072:降级条目启动期校验——不在注册表(或条目被剔除)则告警并视为
+        # 未配置(降级链关闭,主模型自身重试照常);不拒启
+        fallback = (self.llm_fallback_entry or "").strip()
+        if fallback and fallback not in registry:
+            log.warning("KM_AGENT_LLM_FALLBACK_ENTRY %s 不在注册表,视为未配置(降级关闭)", fallback)

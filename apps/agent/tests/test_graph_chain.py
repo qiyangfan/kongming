@@ -26,6 +26,9 @@ _NO_DATA_ERROR = "当前数据源未找到回答该问题所需的数据,可切�
 
 
 class ScriptedLlm:
+    def prompt_budget(self, task: str | None = None) -> int:
+        return 1_000_000  # 080:测试替身恒宽预算(收敛行为由纯函数测试覆盖)
+
     """按调用序出答案:understand/generate(/selfheal 后再 generate)/summarize。"""
 
     def __init__(self, answers: list[str]) -> None:

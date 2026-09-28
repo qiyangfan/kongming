@@ -24,22 +24,28 @@ from kongming.feedback.service import (
     InvalidCorrectedSql,
     InvalidHandleStatus,
     MessageNotAssistant,
+    SamplePromotionUnavailable,
     TenantForbidden,
 )
 
 chat_router = APIRouter(prefix="/chat", tags=["chat"])
 router = APIRouter(prefix="/feedback", tags=["feedback"])
 
+# 070:_FeedbackSampleGate 组合根实现依赖下列真名——运行时导入(3.13 在函数
+# 签名定义时求值注解+except 子句动态取名;3.14 PEP 649 惰性注解曾把该 latent
+# bug 在测试 venv 掩盖,pyright 亦因类型检查态可见而静默——故此处必须运行时可解析)
+from kongming.rag.ports import EmbeddingError, EmbeddingPort  # noqa: E402
+from kongming.rag.repository import RagRepository  # noqa: E402
+from kongming.rag.service import RagService  # noqa: E402
+
 
 def get_feedback_service(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> FeedbackService:
-    """组合根:history_writer=rag 回写端口(纠错沉淀复用 009 通道;
-    组合形态与 chat/router.get_rag_service 同构,组合根上移随 009 挂账⑧)。"""
+    """组合根:rag 客户端只服务 070 样本闸门(embedding + ctx 失效);
+    组合形态与 chat/router.get_rag_service 同构,组合根上移随 009 挂账⑧。"""
     from kongming.rag.agent_callback import get_agent_rag_client
     from kongming.rag.cache import ContextCache
-    from kongming.rag.repository import RagRepository
-    from kongming.rag.service import RagService
     from kongming.redis_client import get_redis
 
     client = get_agent_rag_client(get_redis())
@@ -49,7 +55,60 @@ def get_feedback_service(
         describer=client,
         cache=ContextCache(get_redis()),
     )
-    return FeedbackService(FeedbackRepository(session), history_writer=rag)
+    return FeedbackService(
+        FeedbackRepository(session),
+        sample_gate=_FeedbackSampleGate(RagRepository(session), client, rag),
+    )
+
+
+class _FeedbackSampleGate:
+    """070:纠错样本启停组合根实现(FeedbackSampleGate 窄端口)。
+
+    - promote/disable 与反馈处置共用同一请求会话(同事务原子性,组合根
+      保证);仓储方法不自行 commit,由 FeedbackService.commit 收口;
+    - embedding 经 rag 客户端(与 009 回写同一出口);EmbeddingError → 本域
+      SamplePromotionUnavailable(503),晋升/停用失败不产生部分提交;
+    - 缓存失效:晋升/停用提交后按 (租户, 数据源) 精确失效 ctx 缓存。
+    """
+
+    def __init__(
+        self,
+        repo: RagRepository,
+        embedder: EmbeddingPort,
+        rag: RagService,
+    ) -> None:
+        self._repo = repo
+        self._embedder = embedder
+        self._rag = rag
+
+    async def promote(
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        question: str,
+        sql_text: str,
+        feedback_message_id: str,
+    ) -> None:
+        try:
+            vector = (await self._embedder.embed([question]))[0]
+        except EmbeddingError as e:
+            raise SamplePromotionUnavailable(str(e)) from e
+        await self._repo.promote_feedback_sample(
+            tenant_id=tenant_id,
+            datasource_key=datasource_key,
+            question=question,
+            sql_text=sql_text,
+            feedback_message_id=feedback_message_id,
+            embedding=vector,
+        )
+
+    async def disable(self, *, feedback_message_id: str) -> None:
+        await self._repo.disable_feedback_samples(feedback_message_id=feedback_message_id)
+
+    async def evict(self, *, tenant_id: str, datasource_key: str) -> None:
+        """070 任务 3.6:晋升/停用提交后 ctx 缓存按租户+数据源精确失效。"""
+        await self._rag.evict_ctx(tenant_id, datasource_key)
 
 
 # ============ 反馈提交(feedback spec;/chat 前缀) ============
@@ -120,6 +179,14 @@ class HandleOut(BaseModel):
     "/{message_id}/status",
     response_model=HandleOut,
     dependencies=[Depends(require_perm("system:feedback:handle"))],
+    responses={
+        503: {
+            "description": (
+                "070:ADOPTED 晋升不可用(embedding 失败等);处置整体回滚,"
+                "detail=SAMPLE_PROMOTION_UNAVAILABLE"
+            )
+        }
+    },
 )
 async def handle_feedback(
     req: HandleIn,
@@ -136,6 +203,10 @@ async def handle_feedback(
         )
     except InvalidHandleStatus:
         raise HTTPException(status_code=400, detail="HANDLE_STATUS_INVALID") from None
+    except SamplePromotionUnavailable:
+        # 070:ADOPTED 晋升不可用(embedding 失败等)——503,处置整体回滚
+        # (反馈状态/审计/query_history 无部分提交,契约显式声明)
+        raise HTTPException(status_code=503, detail="SAMPLE_PROMOTION_UNAVAILABLE") from None
     except FeedbackNotFound:
         raise HTTPException(status_code=404, detail="FEEDBACK_NOT_FOUND") from None
     return HandleOut(status=req.status, note=merged_note)

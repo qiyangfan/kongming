@@ -276,15 +276,20 @@ class ChatRepository:
         summary: str | None = None,
         status: str,
         attachments: list[dict[str, object]] | None = None,  # 030
+        trace_id: str | None = None,  # 069:轮次质量信号(三表关联键)
+        retry_count: int = 0,  # 069
+        resolved_question: str | None = None,  # 069:仅多轮改写实际发生时非空
+        prompt_version: str | None = None,  # 069:agent prompt 资产指纹
     ) -> str:
         mid = str(uuid7())
         await self._s.execute(
             text(
                 "INSERT INTO public.chat_message"
                 " (id, session_id, role, question, sql_text, result_json, summary,"
-                "  status, attachments)"
+                "  status, attachments, trace_id, retry_count, resolved_question,"
+                "  prompt_version)"
                 " VALUES (:id, :s, :role, :q, :sql, :rj, :sum, :st,"
-                "         CAST(:att AS jsonb))"
+                "         CAST(:att AS jsonb), :tid, :rc, :rq, :pv)"
             ),
             {
                 "id": mid,
@@ -296,6 +301,10 @@ class ChatRepository:
                 "sum": summary,
                 "st": status,
                 "att": json.dumps(attachments or [], ensure_ascii=False),
+                "tid": trace_id,
+                "rc": retry_count,
+                "rq": resolved_question,
+                "pv": prompt_version,
             },
         )
         return mid

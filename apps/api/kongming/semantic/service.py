@@ -5,10 +5,12 @@ from typing import cast
 
 from kongming.semantic.models import (
     MetricDef,
+    MetricHit,
     TableRelation,
     format_metric_hints,
     format_relations_hint,
     match_metrics,
+    project_metric_hits,
 )
 from kongming.semantic.ports import FkIntrospector, KnowledgeTableLookup, SemanticRepo
 
@@ -86,8 +88,11 @@ class SemanticService:
 
     async def enrich(
         self, *, tenant_id: str, datasource_key: str, question: str, tables: list[str]
-    ) -> tuple[str, str]:
-        """召回注入段组装(spec:仅召回集合内关系 + 命中指标 top-5)。"""
+    ) -> tuple[str, str, list[MetricHit]]:
+        """召回注入段组装(spec:仅召回集合内关系 + 命中指标 top-5)。
+
+        076:命中列表不再丢弃——结构化投影(标识/名称/口径/修订时间)与派生
+        文字段同源返回;文字段 SHALL 由结构化命中派生(单一来源)。"""
         relations: list[TableRelation] = []
         # 非空即查(023①:单表自引用 FK 也注入——ANY(:ts) 天然收窄,单表
         # 集合只命中自引用行,多表行为不变)
@@ -113,8 +118,14 @@ class SemanticService:
                 sql_template=str(r["sql_template"]),
                 business_terms=[str(t) for t in cast("list[object]", r["business_terms"] or [])],
                 enabled=bool(r["enabled"]),
+                metric_id=str(r["id"]),
+                updated_at=r["updated_at"],
             )
             for r in metric_rows
         ]
         hits = match_metrics(question, metrics)
-        return format_relations_hint(relations), format_metric_hints(hits)
+        return (
+            format_relations_hint(relations),
+            format_metric_hints(hits),
+            project_metric_hits(hits),
+        )

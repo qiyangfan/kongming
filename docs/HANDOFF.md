@@ -7,6 +7,42 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
+## 当前状态(2026-09-28)
+
+- **十二变更落地+053 切主,全部已归档(2026-09-28)**:活动变更清零。
+  062 问答成本控制(登录面速率 fail-open+配额 fail-closed 双闸、bot 面
+  IP 维度速率闸、用量索引 0031);063 相关表预筛(共现加权打分 top-12,
+  实测大 schema prompt -35.4%、Recall@K 6/6);064 召回相关度闸门
+  (原生分出 SQL、双条件判据、off 缺省、试跑端点、047 继承路同闸);
+  066 前端分包+vitest 架网(入口 104 kB,60 例);068 文档道引用契约
+  (确定性引用键+编造净化+ sources 纯增);069 轮次质量观测(四信号列
+  0032+/admin/quality);070 纠错 SQL 审核后晋升(0034 来源/准入态,
+  同事务晋升,实测四类存量治理);072 agent 出站韧性(双层分类纯函数+
+  降级链,mock 实测 429 Retry-After/503);076 口径依据透出;077 用量
+  协议归因(0033 protocol 列);078 流式交互(近底跟随/显式停止/有界
+  恢复);080 提示词装配预算(分段优先级收敛+可归因终态,估算/实测
+  1.30 保守余量)。**053 切主已执行**:两进程 `KM_SQLGUARD_MODE=primary`
+  (agent 前缀 `KM_AGENT_`),容器日志实证 mode=primary+liannu 0.1.3+
+  启动自检通过,真实问答流量零 ENGINE_FALLBACK(0.1.2→0.1.3 漂移消解)。
+- **全量评审循环(两轮)坐实并修复 9 处缺陷**:3.13/3.14 注解求值差异
+  掩盖的 TYPE_CHECKING latent bug(feedback 组合根 3.13 直接 NameError,
+  新增 AST 防回归测试)、gate 影子观测算了就丢、suffix 引用键与
+  sources 双向幽灵(违 chat spec)、prune 输出序与 080 首位豁免/ trace
+  不一致、feedback 070 死代码、quality 口径注释与 rated 死列、
+  064 继承路未过闸、bot `is True` 字面量比较、auth oauth state 损坏
+  JSON 无兜底。Semgrep/ast-grep 377 条辅助发现按类裁断:注入面
+  (常量+绑定参数,3 处 f-string 逐个验实质)与 int()/Protocol 存根为
+  规则误报,仅 auth state 一处真修复。五门禁全绿(api 1029/agent 459/
+  liannu 22/web 60+build/contracts 无漂移)。
+- **环境实测(2026-09-28,冒烟栈)**:容器形态 api:18080/agent:18081
+  (端口理由见「环境事实」2),LLM 出口=DASHSCOPE_API_KEY(dashscope
+  qwen-plus 兼容端点),SQLGuard primary。真实问答全链路(生成→闸门→
+  执行→答案卡)浏览器 10/10 走查过(playwright+系统 Chrome,路由经
+  `VITE_API_PROXY_TARGET` 真代理);冒烟数据=`kongming_smoke` 库(26 表)
+  + smoke 账号(SUPER_ADMIN)+ smoke_ds/smoke_ds2 数据源(可随时清理,
+  自明命名)。**注意**:本机 admin 密码非缺省(容器 env 自管),冒烟一律
+  自建账号(`_mk` 范式见 tests),勿猜勿改现有凭据。
+
 ## 当前状态(2026-09-27)
 
 - **九变更落地+评审循环修复,已归档(2026-09-27)**:060 镜像构建修复
@@ -70,25 +106,18 @@
   (api/agent 与 make check 同参),`.env.example` 对齐 muniu 网关与
   SQLGUARD 模式开关;「make check × CI」对照表入本文门禁节。CI 实跑绿
   (含 pyright)后归档,「本地绿 CI 假绿」面闭合。
-- **053 仍在 SQLGuard 影子观察期(切主条件见下)**:引擎为
+- **053 SQLGuard 已切主并归档(2026-09-28,见顶栏)**:引擎为
   本仓 monorepo 共享包 `packages/liannu`(连弩;Python 单遍,与内置路径同源
-  sqlglot AST,v0.1.2;两进程 uv path 依赖引入,**2026-09-12 晚由独立仓
+  sqlglot AST,现版本 **0.1.3**;两进程 uv path 依赖引入,**2026-09-12 晚由独立仓
   km-sqlguard + vendor wheel 并入,vendor 机制退役**——独立性检验五问
-  不占,迁移验证=引擎 21 例全绿+121 例现算与冻结基线逐字节一致),
-  api/agent 默认 shadow 模式(内置权威,引擎并行判定只记录)。**冒烟证据
-  (2026-09-12)**:流式问答「商品总共有多少个」全链路 PASS(答案 4,与
-  goods 4 行一致),两进程启动行 `SQLGUARD 管线 mode=shadow,活跃引擎=
-  liannu version=0.1.2,启动自检通过`,请求期零 ENGINE_FALLBACK 零影子
-  不一致,sys_sql_audit 落 PASS 行;对拍基线 121 例(sqlfw/datascope/
-  evals 冻结,`apps/api/scripts/export_sqlguard_fixtures.py` 重复运行
-  diff 为空)引擎回放零不一致。切主 = 两进程 `.env` 置
-  `KM_SQLGUARD_MODE=primary`(agent 前缀 `KM_AGENT_SQLGUARD_MODE`)+
-  重启;**067 补前置**:保留清单对象恒等断言绿(test_reserved_single_source)
-  且引擎自检含清单成员校验,否则降级 builtin——「影子不一致归零」只是
-  必要条件非充分(评估集不保证触达 skill_/user_prefs);清单一致 +
-  ≥1 周无 ENGINE_FALLBACK 后归档。深嵌套默认
-  上限 32(实测 256 不可行,引擎实现形态改 Python、仓库形态并入 monorepo
-  等实施期修订见 change design「Decisions(实施期修订)」节)。
+  不占,迁移验证=引擎 21 例全绿+121 例现算与冻结基线逐字节一致)。
+  历史影子期证据(2026-09-12,shadow 形态):流式问答「商品总共有多少个」
+  全链路 PASS,两进程 `SQLGUARD 管线 mode=shadow…version=0.1.2,启动自检通过`,
+  请求期零 ENGINE_FALLBACK 零影子不一致,对拍基线 121 例回放零不一致。
+  切主=两进程 export `KM_SQLGUARD_MODE=primary`(agent 前缀
+  `KM_AGENT_SQLGUARD_MODE`)+ 重启;**两 apps 无 .env 文件**(find 实证,
+  HANDOFF §4 旧记载作废),export 只需改启动环境,无凭证文件可碰。
+  本机以 compose override 文件(/tmp,不入库)注入 env 重建容器完成切主。
 - **muniu 网关接线完成(ADR-007,2026-09-11)**:agent 面 LLM 出口已全部指向
   muniu 网关(127.0.0.1:8787;主模型/embedding/vision 注册表 `.env` 三处切换),
   直连冒烟、e2e 问答(verdict PASS)、网关计量与计价实证全过;供应商真实 key
@@ -96,24 +125,12 @@
   (muniu 仓 `scripts/reconcile.sql`,差异 ≤1%),期满达标 ADR-007 转「已接受」;
   回滚=`.env` 三处改回直连(切换前备份 /tmp/.km-agent-env-pre-muniu.bak,
   重启即失)。运行细节见「环境事实」11。
-- 001–052 + backlog-settlement 已全部归档;054–059 已于 2026-09-24 归档;
-  multi-protocol-llm 与 mobile-experience-redesign 已于 2026-09-26 归档
-  (活动变更仅剩 053 影子观察)。上游 41 域全覆盖。近期批次:2026-08-29 四连(043 生成纪律规则 10+哨兵短路/
-  044 NO_DATA 四态中性形态/045 保留表收编 user_memory/046 投影 id
-  收敛+列级哨兵);2026-08-30 二连(047 检索治理/048 聚合追问与去重
-  护栏);**2026-08-30 三连(049 图表候选化[列角色画像+suggest_charts
-  有序候选 ≤3,契约纯增 chart_candidates,两维分组→分组柱状图,pie
-  可加闸,标识/期间列恒为维度]/050 内部 id 暴露治理[compute_stats
-  统计资格过滤+humanize_stats 键名中文化+displayUser 昵称→用户名→
-  已注销回退链,user_username 契约纯增]/051 实体核对判据[规则 10 表级
-  哨兵操作化+对位反例,evals expect_no_data 负例形态+default.yaml ×2,
-  001 进 smoke])**;**2026-09-11(052 知识覆盖报告[GET
-  /system/rag/coverage-report:四类空白确定性盘点=零覆盖表/纯结构登记/
-  缺标签列/失败问题簇+few-shot 概况,零 LLM 零写入纯读、封顶计数如实,
-  失败簇读 chat_message 四态∪差评∪纠正 SQL 跨域只读(feedback 先例),
-  内省失败不产出半份报告;契约纯增 coverage-report;LLM Wiki gap
-  detection 方法论移植、其生成式编译已否决——非确定性生成物入知识面
-  与 041/051 毒知识同源])**。
+- 001–081 已全部归档(053–080 于 2026-09-28 归档)。上游 41 域全覆盖。
+  近期批次:2026-08-29 四连(043 生成纪律规则 10+哨兵短路/044 NO_DATA
+  四态中性形态/045 保留表收编 user_memory/046 投影 id 收敛+列级哨兵);
+  2026-08-30 二连(047 检索治理/048 聚合追问与去重护栏);
+  **2026-08-30 三连(049 图表候选化/050 内部 id 暴露治理/051 实体核对判据)**;
+  **2026-09-11(052 知识覆盖报告)**。
 - 051 收尾同批:query_history goods 硬凑毒沉淀清偿(精确 id,保留合法
   语义行);infra/example-data 新增 comments-ext.sql(sakila_ext 独立库
   中文注释,**只能对 sakila_ext 执行**,严禁混入 comments.sql 在 kongming
@@ -129,16 +146,23 @@
 - 工作区/提交状态以 `git status` 与 `git log` 为唯一事实源
   (规约:文档不写提交哈希、不谈提交形态)。
 - **开放挂账=零**(backlog-settlement 终态化裁决,见「挂账终态」节)。
-- 下一棒:053 影子达标后切主并归档(清单一致断言已是前置);
-  活动变更 12 个(062/063/064/066/068/069/070/072/076/077/078/080)
-  均未开工,按 060→067 同法逐个实现;可选 059 MemoryPage UI、
-  anthropic/responses 端到端流式验证。
+- 下一棒(按条件触发,均非阻塞):
+  1. 070 4.5/064 3.2 的评估集对拍(067→065 评估门禁+真实语料流量;
+     064「路径翻转」证据需更大语料,当前评估集上 LLM 本就诚实走 NO_DATA);
+  2. 078 selfheal 冒烟(需可稳定构造失败 SQL 的问法,冒烟库干净难复现);
+  3. 059 MemoryPage 槽位编辑 UI(任务 3.4,前端);
+  4. anthropic/responses 条目流式问答端到端(需 muniu 或官方端点运行);
+  5. 064 生产阈值切换决策(初值已标定:vector top1=0.30/mean3=0.28,
+     双档必须成对配置——mean 缺省 0.0 会使判据恒真;缺省保持 off)。
 
 ## 新会话开工指引
 
 1. 先读本文与 `AGENTS.md`;动敏感区前按 AGENTS.md「前置阅读」表读对应 ADR。
 2. 功能开发走 openspec 流程(`/opsx:propose` → apply → archive);
    提案必须有 Non-goals;一次只保持一个活动实施变更。
+   **归档前若 specs 已手工同步,必须 `openspec archive <c> --skip-specs -y`**
+   ——否则 delta 双套用被拒(「already exists」),且 069 式 MODIFIED delta
+   会误删当前 spec 场景(工具拒绝是对的,见 2026-09-28 归档实证)。
 3. 质量底线:安全规则类(SQL 防火墙/RBAC/租户)测试先行;收工前
    `make check` 全绿 + 冒烟记录;改 api 路由/模型必跑 `make contracts`
    并提交产物;GET 端点必须挂 response_model(ADR-005,已两犯)。
@@ -153,10 +177,13 @@
 1. **本机是 podman 不是 docker**:`docker` 只是交互 shell 的 alias,
    非交互命令一律用 `podman`。
 2. **标准端口**:api **8000** / agent **8001** / web dev **5173** /
-   postgres **5432** / redis **6379**。⚠ 本机 6379/8000 被上游项目占用:
-   Kongming compose redis 实映射 **6380**(.env 带密码);给 pytest 手传
-   KM_REDIS_URL 必须带密码(无密码 6380 → AuthenticationError,2026-09-26
-   实证),api 冒烟常让到 **18000**(8000 归上游)。
+   postgres **5432** / redis **6379**。⚠ 本机 6379/8000 被上游项目占用
+   (8000=上游 mock 容器 `docker-compose-local-mock-1`):Kongming compose
+   redis 实映射 **6380**(.env 带密码);给 pytest 手传 KM_REDIS_URL 必须
+   带密码(无密码 6380 → AuthenticationError,2026-09-26 实证),api/agent
+   冒烟让到 **18080/18081**(或原生 18000/8001)。compose 的 redis 若与
+   手工 6380 容器撞宿主机端口,override `KM_REDIS_HOST_PORT=6399` 避让
+   (容器内仍走服务名 `redis:6379`,测试用 6380 不受影响)。
 3. **本地环境冷启动**(幂等,任何"连不上/端口不对"先跑这个):
    ```bash
    make up                                 # podman compose 起 postgres+redis
@@ -164,28 +191,44 @@
    ```
    pg 数据持久化在 compose 卷 `kongming_pg_data`;删卷/重置属破坏性操作,
    须用户明确授权。
-4. 三处 `.env` 已配好(不入库):根(占位密钥)、`apps/api/.env`
-   (`KM_INTERNAL_TOKEN=dev-internal-token`)、`apps/agent/.env`
-   (**LLM key 已配真值,dashscope qwen-plus**——冒烟/演示即开即用,
-   注意勿提交、勿打印)。
-5. 可能的后台进程:api(8000)/agent(8001)/web(5173);另有 ngrok 固定
-   域名隧道与用户自建 cloudflared 服务(不属本项目,别动)。日志
-   /tmp/km-*.log;重启本项目进程前先 `pkill -f "uvicorn kongming"`、
-   `pkill -f "kongming/apps/web"`。改完代码要重启服务才生效。
-6. 本地 dev:基础设施走 `make up`,两个 Python 服务直接
-   `uv run uvicorn ...`,web `pnpm dev`(compose 的 api/agent 服务留完整
-   部署用;**060 已修好镜像构建**:build context=仓库根,多阶段 + 根
-   `.dockerignore`,`podman build -f infra/{api,agent}.Dockerfile .` 可过,
-   CI 第 6 门禁 `images` 两镜像构建不推送)。
-7. **浏览器实测**:ZCode IAB 面板对本机 guest 会卡死——GUI 测试一律用
-   Playwright MCP 工具组(`mcp__plugin_playwright_playwright__*`)。
-8. **dev 库活数据**:admin 密码 `Kongming#2026`;sakila(film 1000/
-   rental 16044/customer 599)与 olist(orders 99441/items 112650)两
-   租户已注册绑定 admin;`tenant_default.goods` 小表 4 行 + smoke-self
-   用户(SELF 域,密码 `Smoke#2026`)+ `sys_datasource` 行 sakila_dyn
-   (同实例**异库**动态源,指向独立库 `sakila_ext`——外部业务库形态,
-   不复用 tenant_sakila 租户 schema;装载随 load.sh 第 6 步)+ 5 个联邦
-   账号(漆阳帆-dingtalk 等)——均为回归活数据。示例数据源文件
+4. **两 apps 无 .env 文件**(2026-09-28 find 实证,旧版本文档作废):
+   `apps/api/.env`、`apps/agent/.env` 均不存在;settings 的
+   `env_file=".env"` 是 cwd 相对,读取不到即纯环境变量。根 `.env` 只供
+   `make up`/compose 插值用。**推论**:两进程 KM_* 全来自启动 shell export
+   或容器 env——切模式(如 SQLGuard primary)只需改启动环境,无凭证文件
+   可碰;要持久化才自建 `apps/<app>/.env`(pydantic 自读,二选一)。
+5. **冒烟栈现役形态(2026-09-28)**:podman compose 容器
+   `kongming-api-1`(18080)/`kongming-agent-1`(18081),env 由
+   override 文件注入(示例:`/tmp/smoke-primary.yml` 置
+   `KM_SQLGUARD_MODE=primary` 等;`podman compose -f infra/docker-compose.yml
+   -f <override> up -d api agent`)。宿主机 gvproxy 转发 18080/18081。
+   **本轮凭据一律来自容器 env(根 .env),勿读勿打印**;从现有容器提
+   env 到新 compose 调用可用 `podman inspect <c> --format '{{range
+   .Config.Env}}...'`(值不回显,直接 export 给子进程)。
+   LLM 冒烟出口=`DASHSCOPE_API_KEY` 环境变量(dashscope 兼容端点,
+   qwen-plus + text-embedding-v2)。
+6. 可能的后台进程:compose 容器(见 5)、web dev 多实例(5173/5174 属
+   用户其他项目,**别 kill 错**——按 `ps -p <pid> -o command=` 确认
+   kongming 再动手);日志 /tmp/km-*.log。
+7. **浏览器实测**:ZCode IAB 面板对本机 guest 会卡死——GUI 测试用
+   Playwright。本机无 MCP playwright 时的可用形态(2026-09-28 实证):
+   `npx playwright install chromium` 下载会停滞,改用在装 Chrome 153 +
+   `chromium.launch({ channel: "chrome", headless: true })` 免下载;
+   web 的 `/api` 代理目标可用环境变量 `VITE_API_PROXY_TARGET` 覆盖
+   (066 收尾新增,缺省 8000 不变)指向冒烟端口,免改仓库配置。
+   React 受控 textarea 用 `fill()` 即可;流式答案断言要排除问题气泡
+   自身的文字(关键词假阳性实证)。
+8. **dev 库活数据**:admin 密码以容器 env 为准(**非**缺省 admin123,
+   2026-09-28 登录实证);冒烟账号自建范式:`SqlUnitOfWork` + SUPER_ADMIN
+   角色绑定 + 默认租户(本轮 smoke/smoke-pass-123 即此形态,可删)。
+   sakila(film 1000/rental 16044/customer 599)与 oist(orders 99441/
+   items 112650)两租户已注册绑定 admin;`tenant_default.goods` 小表
+   4 行 + smoke-self 用户(SELF 域,密码 `Smoke#2026`)+ `sys_datasource`
+   行 sakila_dyn(同实例**异库**动态源,指向独立库 `sakila_ext`——外部
+   业务库形态,不复用 tenant_sakila 租户 schema;装载随 load.sh 第 6 步)
+   + 5 个联邦账号(漆阳帆-dingtalk 等)——均为回归活数据。冒烟库
+   `kongming_smoke`(26 表:smoke_goods/smoke_orders + 24 张 filler)
+   为 063/064/080 实测建的隔离库,可整库 drop。示例数据源文件
    `.example-data/`(已 gitignore),装载管线 `infra/example-data/load.sh`
    (幂等)。存量环境 sakila_dyn 仍指旧形态(同库 tenant_sakila)的,
    手工一行迁到新落点:`UPDATE public.sys_datasource SET database='sakila_ext',
@@ -221,15 +264,16 @@
 ## 命令速查
 
 ```bash
-make check          # 全门禁(api/agent ruff+mypy+lint-imports+pytest + web tsc+eslint)
+make check          # 全门禁(api/agent/liannu/web + contracts)
 make contracts      # 导出 OpenAPI + 生成前端类型(改 api 后必跑)
 # 服务: apps/api → uv run uvicorn kongming.main:app --port 8000
 #       apps/agent → uv run uvicorn kongming_agent.main:app --port 8001
-#       apps/web → pnpm dev(5173,proxy /api → 8000)
+#       apps/web → pnpm dev(5173,proxy /api → 8000;VITE_API_PROXY_TARGET 可覆盖)
 # 迁移: apps/api → uv run alembic upgrade head
 # 评估: KM_EVAL_ADMIN_PASSWORD=… uv run pytest evals -m smoke|full|multiturn
 #      (evals/ 不进默认收集,无凭证整层 skip)
 # 冒烟: curl 127.0.0.1:8000/healthz;curl 127.0.0.1:8001/healthz
+# 容器冒烟栈: podman compose -f infra/docker-compose.yml -f <override> up -d api agent
 ```
 
 ## 已定死的决策(不再议,引用即终)
@@ -321,6 +365,24 @@ zhparser、知识库团队归属(出处 032①)。
   (056 skillpack metrics 实证)。
 - **任务勾选 ≠ 代码落地**:059 的注入通道/显式路由曾全勾但 `preference_hint`
   零调用方、extract 仍吐自由文本——收口验收必须跑通链路,不能只看 tasks。
+- **Python 3.14(PEP 649)惰性注解会掩盖 TYPE_CHECKING latent bug**
+  (070 实证):只在 TYPE_CHECKING 导入、却在函数签名注解/except 子句
+  取用的名字,3.14 测试 venv 永不求值(全绿),3.13 容器 import 即
+  NameError;pyright 也因类型态可见而静默。防线= AST 断言「定义时
+  求值位置禁现 TYPE_CHECKING 专有名」(tests/test_module_import_py313.py),
+  组合根类签名注解/except 名必须运行时导入。
+- **假 embedding 兜底签名下的相似度分布不可当真值**(064 标定实证):
+  hash 种子向量对无关文本也有 ~0.7 相似度——闸门阈值标定必须用真实
+  embedding 实采(试跑端点),fake 分布会得出错误阈值。
+- **openspec archive 前 specs 已手工同步 ⇒ 必须 `--skip-specs`**
+  (2026-09-28 实证):全量 archive 会 delta 双套用被拒(「already
+  exists」);且 069 式 MODIFIED delta 替换整块会误删当前 spec 已有
+  场景(工具拒绝属实名防卫)。specs 以 apply 期手工同步为終态。
+- **冒烟栈注入 env 用 compose override 文件(/tmp,不入库)**,宿主机
+  8000/6380 被上游占用时让到 18080/18081/6399;从旧容器提 env 用
+  `podman inspect ... '{{range .Config.Env}}'` 回接子进程,值不回显。
+- **浏览器断言防问题气泡假阳性**:流式答案关键词(如「库存」)可能命中
+  用户问题自身——断言前先把问题文本从正文剥掉再看。
 
 LLM/异步/协议:
 - 工具回调通道 status 恒 executed,**业务 verdict 在 result 内**(去重/
@@ -372,6 +434,9 @@ SQL/PG:
   padding 与固定行高必须分层(外层吃安全区、内层行高)。
 - 图标尺寸覆写别和 `[&_svg:not([class*='size-'])]` 规则打特异性——svg
   上显式钉 `size-*` 即被其 :not 排除,必胜。
+- StrictMode 双 effect 只在 dev 出现,别据 dev 现象定性生产 bug;
+  真代理拓扑(`VITE_API_PROXY_TARGET` 或 route.fetch 中继)二选一做
+  冒烟,中继 fulfill 对 SSE 有缓冲语义,答案渲染验证以真代理为准。
 
 ## 铁律提醒(全局,详见 ~/.zcode/AGENTS.md 与仓库 AGENTS.md)
 
@@ -390,5 +455,5 @@ SQL/PG:
 | api 静态+测试 | `make api-check`(ruff format/check + mypy + **pyright** + lint-imports + pytest --cov) | `api` | 同左全序(pyright 于 2026-09-13 补齐) | 无 |
 | agent 静态+测试 | `make agent-check`(同上结构) | `agent` | 同左全序(pyright 同批补齐) | 无 |
 | liannu 引擎 | `make liannu-check`(ruff+mypy+pytest,含对拍基线回放) | `liannu` | 同左 | 无 |
-| web | `make web-check`(tsc+eslint+stylelint+prettier) | `web` | 同左 | 无(前端无单测,三仓共知短板) |
+| web | `make web-check`(tsc+eslint+stylelint+prettier;**vitest 于 066 接入 CI `test:run`,60 例**) | `web` | 同左(066 补齐前端单测短板) | 无 |
 | 契约漂移 | `make contracts-check`(已并入 check;055 教训后补齐) | `contracts` | `make -C ../.. contracts-check`(单源) | 无 |

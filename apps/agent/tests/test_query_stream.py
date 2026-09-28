@@ -24,6 +24,9 @@ TOKEN = {"X-Internal-Token": "test-internal-token"}
 
 
 class _Llm:
+    def prompt_budget(self, task: str | None = None) -> int:
+        return 1_000_000  # 080:测试替身恒宽预算(收敛行为由纯函数测试覆盖)
+
     def __init__(self, answers: list[str]) -> None:
         self.answers = list(answers)
 
@@ -251,6 +254,9 @@ async def test_stream_empty_result_summary_still_emitted(
 
 
 class _BoomLlm:
+    def prompt_budget(self, task: str | None = None) -> int:
+        return 1_000_000  # 080:测试替身恒宽预算(收敛行为由纯函数测试覆盖)
+
     """非 LlmError 的意外异常(评审 R3:图意外异常收敛 error 终态)。"""
 
     async def chat(

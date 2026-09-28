@@ -233,7 +233,7 @@ async def test_enrich_narrowed_to_recalled(session: AsyncSession) -> None:
     await session.commit()
     svc = SemanticService(repo)
     # 召回只含 orders/customers → 只出一条关系
-    rel_hint, met_hint = await svc.enrich(
+    rel_hint, met_hint, hits = await svc.enrich(
         tenant_id=tid,
         datasource_key="default",
         question="复购率怎么算",
@@ -242,8 +242,13 @@ async def test_enrich_narrowed_to_recalled(session: AsyncSession) -> None:
     assert "s.orders JOIN s.customers" in rel_hint
     assert "payments" not in rel_hint  # 收窄:召回集合外不进
     assert "复购率" in met_hint
+    # 076:结构化命中与文字段同源(标识/名称/口径/修订时间)
+    assert len(hits) == 1
+    assert hits[0].metric_name == "复购率"
+    assert hits[0].sql_template == "count(distinct c)/count(distinct m)"
+    assert hits[0].metric_id
     # 单表召回无关系段
-    rel2, _ = await svc.enrich(
+    rel2, _, _ = await svc.enrich(
         tenant_id=tid, datasource_key="default", question="多少订单", tables=["s.orders"]
     )
     assert rel2 == ""

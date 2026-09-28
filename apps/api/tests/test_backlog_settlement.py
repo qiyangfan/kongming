@@ -543,7 +543,7 @@ async def test_semantic_self_ref_fk_enriched(client: AsyncClient, session: Async
     from kongming.semantic.service import SemanticService
 
     svc = SemanticService(SqlSemanticRepo(session))
-    rel, _metric = await svc.enrich(
+    rel, _metric, _hits = await svc.enrich(
         tenant_id=tid,
         datasource_key="default",
         question="商品层级",

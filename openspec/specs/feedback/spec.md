@@ -22,6 +22,10 @@ handle_note),防「新 PENDING + 陈旧处置者」组合;
 操作日志 `feedback.submit` 与业务同事务落 sys_oper_log(动作清单含
 messageId 与 rating,不记 comment/correctedSql 内容——内容可经明细分页查)。
 
+**070 修订(样本准入后移)**:提交路径 SHALL NOT 将 correctedSql 写入可召回的
+query_history——样本准入经 ADOPTED 处置(见 feedback-refine);校验失败
+SHALL 整体拒绝且不改变已晋升样本(既有原子契约不变)。
+
 #### Scenario: 提交反馈并记操作日志
 - GIVEN 用户持有权限点 chat:feedback:submit
 - WHEN 提交 {rating: 'UP'|'DOWN', comment?(≤500), correctedSql?(≤4000)}

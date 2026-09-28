@@ -166,6 +166,7 @@ async def test_task_routing_and_usage_report() -> None:
             "total_tokens",
             "status",
             "latency_ms",
+            "protocol",  # 077:出站协议归因
         }
         assert rec["prompt_tokens"] == 11 and rec["total_tokens"] == 18
         assert rec["status"] == "SUCCESS"
@@ -203,7 +204,12 @@ async def test_failure_call_reported_as_error() -> None:
 
     from kongming_agent.llm import LlmError
 
-    s = _settings(llm_api_key="sk-main")
+    # 072:读超时属瞬时故障——重试满预算(3 次),每尝试一条 usage(不再合并)
+    s = _settings(
+        llm_api_key="sk-main",
+        llm_retry_base_ms="1",
+        llm_retry_max_wait_ms="1",
+    )
     recorder = _Recorder()
     client = LlmClient(s, usage_reporter=recorder)
     client._client = _FakeClient(_BoomCompletions())  # type: ignore[assignment]
@@ -211,7 +217,8 @@ async def test_failure_call_reported_as_error() -> None:
         await client.chat("s", "u", task="SQL_GEN", trace_id="tr-fail")
     await asyncio.sleep(0)
     await asyncio.sleep(0)
-    assert len(recorder.records) == 1
+    assert len(recorder.records) == 3
+    assert all(r["status"] == "ERROR" for r in recorder.records)
     rec = recorder.records[0]
     # R1-B4:失败路径字段集全键钉(与成功路径同构防线)
     assert set(rec) == {
@@ -224,6 +231,7 @@ async def test_failure_call_reported_as_error() -> None:
         "total_tokens",
         "status",
         "latency_ms",
+        "protocol",  # 077:出站协议归因
     }
     assert rec["status"] == "ERROR"
     assert rec["prompt_tokens"] == 0 and rec["total_tokens"] == 0

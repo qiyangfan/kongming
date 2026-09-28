@@ -60,10 +60,17 @@ class KnowledgeEntry:
 
 @dataclass(frozen=True)
 class RecallHit:
-    """单路召回命中(rank 从 1 起;RRF 输入形态)。"""
+    """单路召回命中(rank 从 1 起;RRF 输入形态)。
+
+    064:score=该路原生分(向量/历史路=余弦相似度 `1-(embedding<=>v)`,
+    全文路=ts_rank 检索得分)——RRF 融合分只用于排序与观测,相关度判据
+    落在各路原生分上;source=来源路标识(vector/fulltext/history)。
+    """
 
     table_name: str
     schema_name: str = ""
+    score: float = 0.0
+    source: str = ""
 
 
 @dataclass(frozen=True)
@@ -276,6 +283,16 @@ class MissingColumnsEntry:
     table_name: str
     missing: list[str]
     missing_count: int
+
+
+@dataclass(frozen=True)
+class HistorySample:
+    """query_history 历史路候选(070:来源透出;064:原生分透出)。"""
+
+    question: str
+    sql_text: str
+    source_type: str  # EXECUTION | FEEDBACK
+    score: float = 0.0  # 064:历史路余弦相似度(1-(embedding<=>v))
 
 
 @dataclass(frozen=True)

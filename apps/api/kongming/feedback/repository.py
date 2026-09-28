@@ -60,7 +60,7 @@ class FeedbackRepository:
             (
                 await self._s.execute(
                     text(
-                        "SELECT rating, feedback_comment, corrected_sql"
+                        "SELECT rating, feedback_comment, corrected_sql, feedback_status"
                         " FROM public.chat_message WHERE id = :mid FOR UPDATE"
                     ),
                     {"mid": message_id},

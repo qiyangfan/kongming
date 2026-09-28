@@ -313,3 +313,61 @@ few-shot 召回位;embedding 计算失败时 SHALL 保留该行旧向量(旧向�
 - GIVEN 该租户+数据源无关系与指标
 - WHEN 召回
 - THEN 响应 relations_hint/metric_hints 为空串,schema_hint/history_sql 语义不变
+
+### Requirement: 反馈纠错样本来源受控召回
+
+历史 SQL few-shot SHALL 区分真实执行成功样本、反馈纠错样本和来源未知的存量样本。执行成功样本保持现有 tenant + datasource 隔离与同问句幂等覆盖语义。反馈纠错样本 SHALL 仅在来源反馈状态为 ADOPTED 时可召回;PENDING、REJECTED、DISMISSED、重新提交待处置的反馈样本以及来源无法证明的 LEGACY 样本 SHALL NOT 进入提示词。
+
+执行成功样本和反馈纠错样本 SHALL 使用互不冲突的身份键。同问句存在启用反馈样本时,历史路 SHALL 优先返回最近一次采纳的纠错 SQL;否则 SHALL 返回最近一次执行成功 SQL。一次召回对同一原始问句最多返回一条 SQL。
+
+反馈样本状态变化提交后,RAG SHALL 精确失效目标 tenant + datasource 的检索上下文缓存;缓存不可用时遵循既有 fail-open 与 TTL 边界。
+
+#### Scenario: 反馈未采纳时不召回
+
+- GIVEN correctedSql 对应反馈状态为 PENDING、REJECTED 或 DISMISSED
+- WHEN 历史 SQL 路召回
+- THEN correctedSql 不进入 few-shot
+
+#### Scenario: 同问句反馈样本优先
+
+- GIVEN 同一问句同时存在执行成功样本与已采纳反馈样本
+- WHEN 历史 SQL 路召回
+- THEN 返回最近一次采纳的纠错 SQL,且同一问句至多一条
+
+### Requirement: 召回相关度闸门
+
+RAG 召回 SHALL 支持问题驱动的相关度闸门(影子先行,可回退)。判据 SHALL 落在各路原生相似度上(向量路=余弦相似度,全文路=检索得分),SHALL NOT 以 RRF 融合分充当相关度判据(融合值由命中路数与名次决定,与相似度无关)。闸门判据为双条件:`(过闸命中数 ≥ min_count ∧ 该路 top1 ≥ 该路阈值)` 或 `(过闸命中数 ≥ min_count ∧ 前 N 均值 ≥ 次级阈值)`。阈值 SHALL 按路独立可配(量纲不共用);命中数为 0 的路 SHALL NOT 参与判定(零命中不投票)。闸门 SHALL 覆盖进入提示词的全部召回路——含 047 多轮继承路(上轮问句独立召回路):「多轮依赖表」是继承机制的存在理由,SHALL NOT 构成 relevance 豁免,junk 依赖表与 junk 主路命中同样稀释提示词。全路零命中或全部不过闸时 SHALL 维持既有"知识不足"路径,不新增终态、不改响应信封。模式 SHALL 支持 off|shadow|primary:shadow 只记录不改变返回;primary 不过闸整路裁掉后重融合。闸门触发、各路分数分布、被闸命中数与生效阈值 SHALL 可观测,SHALL NOT 静默降质。
+
+#### Scenario: 单条差一点但多条印证时放行
+
+- GIVEN 某路 top1 未达首档阈值,但前 N 均值达次级阈值且命中数满足 min_count
+- WHEN 闸门判定
+- THEN 该路过闸(专治"单条差一点、多条互相印证"的真实相关形态)
+
+#### Scenario: 零命中不投票
+
+- GIVEN 某路零命中
+- WHEN 闸门判定
+- THEN 该路不参与判定,SHALL NOT 被判为"低相关"
+
+#### Scenario: 融合分禁作相关度
+
+- GIVEN 单路首位命中(1/61≈0.0164)与双路并列末位(2/65≈0.0308)
+- WHEN 对比融合分
+- THEN 后者数值更高但相关性更弱——融合分 SHALL NOT 作为相关度阈值
+
+### Requirement: 召回试跑
+
+系统 SHALL 提供管理台只读试跑端点(输入问题+可选数据源;返回三路命中及各自原生分、融合分、双条件判定结论)。试跑以当前生效阈值为判定基准,SHALL 零副作用:不修改配置、不落库、不触发召回缓存失效。权限复用既有知识管理权限点,不新增权限点。试跑 SHALL 与主链路召回共用同一判定纯函数(同源),使"上传表说明后能否被召回"可在影子期验证,不等真实流量。
+
+#### Scenario: 试跑与主链路同源
+
+- GIVEN 同一问题
+- WHEN 分别经试跑端点与主链路召回
+- THEN 三路命中与原生分一致(同一判定纯函数)
+
+#### Scenario: 试跑零写入
+
+- GIVEN 一次试跑调用
+- WHEN 调用完成
+- THEN 配置、审计、召回缓存均零写入

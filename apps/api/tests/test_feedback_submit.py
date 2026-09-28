@@ -147,23 +147,13 @@ async def test_submit_down_with_comment_and_sql(
     assert r.json()["corrected_sql"] == "SELECT count(*) FROM tenant_default.goods"
     row = await _feedback_row(session, mid)
     assert row["feedback_comment"] == "数量不对"
-    # 纠错沉淀:问句=同会话该消息前最近 user 问句,数据源=会话快照
+    # 070:提交路径不再写 query_history(审核后晋升——PENDING 态不可召回)
     hist = (
-        (
-            await session.execute(
-                text(
-                    "SELECT question, sql_text, datasource_key, status FROM rag.query_history"
-                    " WHERE sql_text LIKE '%goods%'"
-                ),
-            )
+        await session.execute(
+            text("SELECT count(*) FROM rag.query_history WHERE sql_text LIKE '%goods%'")
         )
-        .mappings()
-        .all()
-    )
-    assert len(hist) == 1
-    assert hist[0]["question"] == "有多少种商品"
-    assert hist[0]["datasource_key"] == "default"
-    assert hist[0]["status"] == "SUCCESS"
+    ).scalar_one()
+    assert hist == 0
 
 
 # ============ 归属与角色约束 ============
@@ -273,18 +263,21 @@ async def test_submit_idempotent_merge_semantics(
         )
     ).scalar_one()
     assert t2 >= t1
-    # 清空纠错不删已沉淀的 query_history 行(spec)
+    # 070:提交路径不写 query_history(审核后晋升);三态合并语义不变,
+    # 「样本停用后保留行」由处置路径测试覆盖
     n = (
         await session.execute(
             text("SELECT count(*) FROM rag.query_history WHERE sql_text LIKE '%goods%'")
         )
     ).scalar_one()
-    assert n == 1
+    assert n == 0
 
 
-async def test_submit_same_sql_no_duplicate_history(
+async def test_submit_same_sql_no_history_write(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
+    """070:重复提交相同 correctedSql 同样零沉淀(提交路径不经召回);
+    同反馈消息的样本准入=ADOPTED 时一次晋升(幂等键 message_id)。"""
     _, token, _, _, mid = await _setup(session, client, make_user, "fb-dup")
     payload = {"rating": "DOWN", "corrected_sql": "SELECT 2 FROM tenant_default.goods"}
     for _ in range(2):
@@ -295,7 +288,7 @@ async def test_submit_same_sql_no_duplicate_history(
             text("SELECT count(*) FROM rag.query_history WHERE sql_text LIKE '%SELECT 2%'")
         )
     ).scalar_one()
-    assert n == 1  # 相同 correctedSql 不重复新增
+    assert n == 0
 
 
 # ============ 防火墙整体拒 ============

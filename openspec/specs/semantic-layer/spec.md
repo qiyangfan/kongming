@@ -62,6 +62,8 @@
 
 RAG 召回响应 SHALL 纯增:relations_hint(仅召回表集合内的两两 JOIN path 文字描述;召回为空则不携带)与 metric_hints(问句命中 business_terms/metric_name 的启用指标,top-5,含 sql_template 文字);Agent 面 generate 节点 SHALL 在用户提示中拼接两段(系统提示模板不变),并遵循「JOIN 优先依据 relations_hint、口径优先依据 metric_hints」的引导;无数据时零注入,行为与引入前逐字一致。
 
+**076 修订(结构化命中透出)**:召回响应除既有文字段外 SHALL 纯增 `metric_hits` 结构化列表(metric_id / metric_name / sql_template / updated_at);文字段 SHALL 由该列表派生(单一来源,杜绝两处口径漂移)。
+
 #### Scenario: 注入收窄到召回集合
 
 - GIVEN 数据源有 20 张表的关系,本次召回 2 表
@@ -73,6 +75,12 @@ RAG 召回响应 SHALL 纯增:relations_hint(仅召回表集合内的两两 JOIN
 - GIVEN 启用指标「复购率」含 sql_template
 - WHEN 用户问「各品类复购率」
 - THEN metric_hints 含该指标口径文字,generate 提示携带
+
+#### Scenario: 结构化命中与文字段同源
+
+- GIVEN 问句命中若干启用指标
+- WHEN 召回响应组装
+- THEN metric_hits 列表与 metric_hints 文字段同批同源(文字段恰为列表派生)
 
 ### Requirement: 语义层管理与权限
 

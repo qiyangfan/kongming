@@ -535,3 +535,41 @@ async def test_relay_gen_heartbeat_on_idle(monkeypatch: pytest.MonkeyPatch) -> N
     await terminator
     assert out[0].startswith("event: stage\n")
     assert out.count(": ping\n\n") >= 2  # 空闲窗口跨过多个心跳间隔
+
+
+async def test_stream_trace_event_relayed(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, StreamFakeAgent],
+) -> None:
+    """trace 诊断帧(080 预算/063 预筛/064 闸门/068 净化共用通道)白名单透传,
+    不侵入 result 终态与用户响应契约(内部诊断信号,前端按未知事件忽略)。"""
+    reply = _pass_reply()
+    frames = _frames_for(reply)
+    # 在 summary 之后、result 之前插入 trace 帧
+    idx = next(i for i, (e, _) in enumerate(frames) if e == "result")
+    frames.insert(
+        idx,
+        (
+            "trace",
+            json.dumps(
+                {
+                    "node": "generate",
+                    "fields": {"kind": "prompt_budget", "cut": {"schema_hint": 3}},
+                }
+            ),
+        ),
+    )
+    _install(fake_agent, StreamFakeAgent(frames, reply=reply))
+    _uid, token = await _user_with_chat_perm(client, session, make_user, "stream-tr")
+    r = await client.post(
+        "/chat/query/stream", json={"question": "有多少商品"}, headers=_auth(token)
+    )
+    assert r.status_code == 200
+    parsed = _parse_sse(r.text)
+    events = [e for e, _ in parsed]
+    assert "trace" in events
+    assert events[-1] == "result" and events.count("result") == 1
+    trace_data = next(d for e, d in parsed if e == "trace")
+    assert trace_data["node"] == "generate"

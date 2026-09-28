@@ -3,18 +3,33 @@
    接管)+ 新会话品牌空态(下方建议问句 chips,点击即问)。路由参数 sessionId
    是会话选择的单源(刷新/直达天然成立)。
    错误路径:流异常回填草稿并提示;会话被他端删除(404)时收敛回新建态。
-   取消语义:切会话/新建/切租户/数据源切换/卸载时中止在途流,迟到事件按
-   发起上下文守卫丢弃,不写入新上下文(017)。 */
+   取消语义(078):切会话/新建/切租户/数据源切换/卸载时中止在途流;流式期间
+   提供显式「停止接收」入口——前端中止读取,控制面仍跑完落库(既有契约:
+   主动取消不等同于后端中止),故文案只称"不再接收/后台完成",禁"已取消"。
+   滚动跟随(078):近底才自动贴底(阈值近底判定纯函数),用户上滚查看历史/
+   长结果表时不被拽回;出现「回到底部」浮标,点击即回底并恢复跟随。
+   中流刷新/停止后:末条为 USER 即触发有界恢复回查(控制面保证写终态行),
+   应答自行出现;预算耗尽即停,不无限轮询。 */
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Feather, Loader2, Paperclip, SendHorizontal, TriangleAlert, X } from "lucide-react";
+import {
+  ArrowDown,
+  Feather,
+  Info,
+  Loader2,
+  Paperclip,
+  SendHorizontal,
+  StopCircle,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 import { useNavigate, useParams } from "react-router";
 
 import { AssistantCard } from "@/components/assistant-card";
 import { SessionDrawer } from "@/components/session-drawer";
 import { ChatBubble } from "@/components/chat-bubble";
-import { StreamCard, mergeToolCall } from "@/components/stream-card";
+import { StreamingTurn } from "@/components/streaming-turn";
 import { ToolConfirmCard } from "@/components/tool-confirm-card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -24,18 +39,17 @@ import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  api,
-  humanizeErrorText,
-  streamChatQuery,
-  type ChatQueryOut,
-  type SessionMessageOut,
-  type StreamStageOut,
-  type StreamToolCallOut,
-} from "@/lib/api";
+import { api, humanizeErrorText, type ChatQueryOut, type SessionMessageOut } from "@/lib/api";
 import { useAgentMode } from "@/lib/agent-mode-store";
 import { getSuggestions, uploadAttachment } from "@/lib/chat-api";
 import { useDatasource } from "@/lib/datasource-store";
+import {
+  RECOVERY_POLL_BUDGET_MS,
+  RECOVERY_POLL_INTERVAL_MS,
+  recoveryExpired,
+  needsTurnRecovery,
+} from "@/lib/recovery-poll";
+import { isNearBottom } from "@/lib/scroll-follow";
 import { useTenant } from "@/lib/tenant-store";
 
 function EmptyState({
@@ -83,14 +97,6 @@ function EmptyState({
       )}
     </div>
   );
-}
-
-interface StreamingState {
-  question: string;
-  stages: StreamStageOut[];
-  sql: string | null;
-  summary: string;
-  toolCalls: StreamToolCallOut[];
 }
 
 /** 终态快照(R1-B1):result 到达即由 ChatQueryOut 乐观构造本轮消息渲染,
@@ -153,8 +159,35 @@ function toSyntheticMessage(out: ChatQueryOut): SessionMessageOut {
   };
 }
 
+/* 078 任务 2:历史消息项按数据字段 memo——比较器只比 msg 引用(react-query
+   结构共享保证未变消息引用稳定),回调身份/内联对象不参与比较;过程事件不再
+   广播到页面级 state,本组件不再随每个流事件重渲染。 */
+const MessageRow = memo(function MessageRow({ m }: { m: SessionMessageOut }) {
+  if (m.role === "USER") {
+    return (
+      <div className="flex flex-col items-end gap-1">
+        <ChatBubble role="user">{m.question}</ChatBubble>
+        <AttachmentBadge items={m.attachments ?? []} />
+      </div>
+    );
+  }
+  return (
+    <div className="max-w-full">
+      <AssistantCard msg={m} />
+    </div>
+  );
+});
+
 function isStatus(err: unknown, status: number): boolean {
   return (err as Error & { status?: number }).status === status;
+}
+
+/** 在途流暂停态(078):发起时一次性创建,过程事件不再经它广播 */
+interface StreamingTurnStart {
+  question: string;
+  body: unknown;
+  attSnapshot: { id: string; filename: string }[];
+  ac: AbortController;
 }
 
 export default function ChatPage() {
@@ -164,9 +197,11 @@ export default function ChatPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [draft, setDraft] = useState("");
-  const [streaming, setStreaming] = useState<StreamingState | null>(null);
+  const [streaming, setStreaming] = useState<StreamingTurnStart | null>(null);
   const [finalized, setFinalized] = useState<{ question: string; out: ChatQueryOut } | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
+  // 078 任务 3:主动停止接收后的口径提示(禁"已取消"类误导措辞)
+  const [stoppedNotice, setStoppedNotice] = useState(false);
   const agentMode = useAgentMode((s) => s.mode);
   const setAgentMode = useAgentMode((s) => s.setMode);
   // 019 待确认写工具(独立于 finalized 快照:快照退位由历史接管后确认卡
@@ -175,7 +210,6 @@ export default function ChatPage() {
     pending: ChatQueryOut["pending_tool_calls"];
     sessionId: string;
   } | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   // 流发起时的上下文(守卫基准):迟到事件与当前不一致即丢弃(防串上下文)
   const streamCtxRef = useRef<{
@@ -193,6 +227,14 @@ export default function ChatPage() {
   tenantRef.current = current;
   const dsRef = useRef(datasource);
   dsRef.current = datasource;
+  // 078 任务 1:滚动容器视口引用 + 近底跟随状态。视口经 ScrollArea Root 探
+  // data-slot 取得(不改双仓标准件 ui/scroll-area.tsx;Radix 隐藏原生滚动条,
+  // 判定不能挂 window)
+  const scrollRootRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [followBottom, setFollowBottom] = useState(true);
+  // 强制贴底标记:切会话/用户主动提问时消费(内容 effect 先于跟随判定)
+  const forceBottomRef = useRef(false);
 
   const messages = useQuery({
     // 键含租户+数据源双维度:切换即换档,不跨上下文残留
@@ -232,6 +274,7 @@ export default function ChatPage() {
     setStreaming(null);
     setFinalized(null);
     setAskError(null);
+    setStoppedNotice(false);
     setPendingConfirm(null); // 切换上下文丢弃待确认入口(瞬态语义)
   }, [sessionId, current, datasource]);
   useEffect(
@@ -250,10 +293,76 @@ export default function ChatPage() {
     }
   }, [messages.data, finalized]);
 
-  // 新旧消息变化后贴底(提问/切换会话/回显)
+  // 078 任务 1:视口引用挂载后取一次(ScrollArea 常驻,分支切换不卸载)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.data?.length, streaming, sessionId]);
+    const root = scrollRootRef.current;
+    if (!root) return;
+    viewportRef.current = root.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]');
+  }, []);
+
+  // 078 任务 1:滚动监听只翻转布尔(状态更新限于变化帧,防每帧 setState)
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const near = isNearBottom(el.scrollTop, el.scrollHeight, el.clientHeight);
+      setFollowBottom((prev) => (prev === near ? prev : near));
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // 078 任务 1:切换会话强制贴底(用户主动进入,从最新开始读)
+  useEffect(() => {
+    forceBottomRef.current = true;
+    setFollowBottom(true);
+  }, [sessionId]);
+
+  // 078 任务 1:新旧消息/在途占位变化后——近底才跟随;非跟随即让用户留在
+  // 原处(浮标提示可回底)。双 rAF:等 React 提交 + 布局完成再度量。
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const force = forceBottomRef.current;
+    forceBottomRef.current = false;
+    if (!followBottom && !force) return;
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => {
+        el.scrollTo({ top: el.scrollHeight, behavior: force ? "auto" : "smooth" });
+      });
+    });
+    return () => {
+      cancelAnimationFrame(outer);
+      cancelAnimationFrame(inner);
+    };
+  }, [messages.data, streaming, followBottom, sessionId]);
+
+  // 078 任务 3:有界恢复回查——末条 USER 且无 ASSISTANT(中流刷新/停止接收)
+  // 即服务端有轮次在收尾;budget 跨数据变更累计(防每次 refetch 重置变无限轮询),
+  // 终态出现或超时即停;离开路由由 cleanup 兜底(无残留轮询)。
+  const recoveryDeadlineRef = useRef(0);
+  useEffect(() => {
+    if (!sessionId) return;
+    if (!needsTurnRecovery(messages.data)) {
+      recoveryDeadlineRef.current = 0;
+      return;
+    }
+    if (recoveryDeadlineRef.current === 0) {
+      recoveryDeadlineRef.current = Date.now() + RECOVERY_POLL_BUDGET_MS;
+    }
+    const timer = window.setInterval(() => {
+      void messages.refetch();
+      if (recoveryExpired(recoveryDeadlineRef.current, Date.now())) {
+        window.clearInterval(timer);
+        recoveryDeadlineRef.current = 0;
+      }
+    }, RECOVERY_POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+    // refetch 身份在 react-query v5 查询实例级稳定,无需整体 messages 依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, messages.data, messages.refetch]);
 
   /** 守卫:流回调仅在「流的发起上下文 == 当前上下文」时生效(迟到即丢弃) */
   function inOriginCtx(): boolean {
@@ -269,6 +378,7 @@ export default function ChatPage() {
   function finalizeOk(out: ChatQueryOut, question: string): void {
     if (!inOriginCtx()) return;
     setStreaming(null);
+    setStoppedNotice(false);
     setAskError(null);
     // 019:待确认调用独立留存(快照退位不带走确认入口);
     // ?? [] 兜底:前后端版本错位(滚动部署)缺键时不炸(R1-D3)
@@ -350,66 +460,58 @@ export default function ChatPage() {
     setAttachments([]);
     if (fromDraft) setDraft("");
     setAskError(null);
+    setStoppedNotice(false);
     setFinalized(null); // 新一轮提问顶掉上一轮快照
     const ac = new AbortController();
     abortRef.current = ac;
     streamCtxRef.current = { sid: sessionId ?? null, tenant: current, ds: datasource };
-    setStreaming({ question: q, stages: [], sql: null, summary: "", toolCalls: [] });
-    try {
-      await streamChatQuery(
-        {
-          question: q,
-          datasource_key: datasource, // 选中的数据源随查询发送(008)
-          agent_mode: agentMode, // 019:ReAct 内核开关(缺省 recipe 零回归)
-          ...(attIds.length ? { attachment_ids: attIds } : {}), // 030
-          ...(sessionId ? { session_id: sessionId } : {}),
-        },
-        {
-          onStage: (d) => {
-            if (!inOriginCtx()) return;
-            setStreaming((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    stages: [...prev.stages, d],
-                  }
-                : prev,
-            );
-          },
-          onSql: (d) => {
-            if (!inOriginCtx()) return;
-            setStreaming((prev) => (prev ? { ...prev, sql: d.sql } : prev));
-          },
-          onSummary: (d) => {
-            if (!inOriginCtx()) return;
-            // 打字机:逐事件追加(契约语义;当前实现为单条完整 delta)
-            setStreaming((prev) => (prev ? { ...prev, summary: prev.summary + d.delta } : prev));
-          },
-          onToolCall: (d) => {
-            if (!inOriginCtx()) return;
-            setStreaming((prev) =>
-              prev ? { ...prev, toolCalls: mergeToolCall(prev.toolCalls, d) } : prev,
-            );
-          },
-          onResult: (out) => finalizeOk(out, q),
-          onError: (d) => finalizeError(d.error, q, attSnapshot),
-        },
-        ac.signal,
-      );
-    } catch (err) {
-      if (ac.signal.aborted) return; // 主动取消:静默(呈现已被取消闸清理)
-      finalizeError(err instanceof Error ? err.message : "问答服务异常", q);
+    // 078:在途态一次性创建(占位只插一次);过程事件由 StreamingTurn 自持,
+    // 不再经页面级 state 逐事件广播
+    setStreaming({
+      question: q,
+      ac,
+      attSnapshot,
+      body: {
+        question: q,
+        datasource_key: datasource, // 选中的数据源随查询发送(008)
+        agent_mode: agentMode, // 019:ReAct 内核开关(缺省 recipe 零回归)
+        ...(attIds.length ? { attachment_ids: attIds } : {}), // 030
+        ...(sessionId ? { session_id: sessionId } : {}),
+      },
+    });
+    // 主动提问:强制贴底(用户明确要从最新开始看本轮)
+    forceBottomRef.current = true;
+    setFollowBottom(true);
+  }
+
+  /** 078 任务 3:停止接收——中止前端读取;控制面仍跑完落库(既有契约),
+   *  文案只述"不再接收/后台完成",问句回框可重发 */
+  function stopStreaming(): void {
+    const s = streaming;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    streamCtxRef.current = null;
+    setStreaming(null);
+    if (s) {
+      setDraft((prev) => (prev.trim() ? prev : s.question));
+      setStoppedNotice(true);
     }
   }
 
+  // 078 任务 2.3:快照消息 useMemo 稳定引用(finalized 对象仅在轮次边界变)
+  const finalizedMsg = useMemo(
+    () => (finalized ? toSyntheticMessage(finalized.out) : null),
+    [finalized],
+  );
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
       {/* 窄屏页头(mobile-experience B2.3):会话抽屉唯一入口;宽屏侧栏常驻不渲染 */}
       <header className="flex items-center gap-2 border-b border-border px-3 py-2 md:hidden">
         <SessionDrawer />
         <span className="text-sm font-medium tracking-widest text-foreground">孔明</span>
       </header>
-      <ScrollArea className="min-h-0 flex-1">
+      <ScrollArea ref={scrollRootRef} className="min-h-0 flex-1">
         <div className="mx-auto max-w-3xl space-y-5 px-4 py-6">
           {messages.isLoading && sessionId && !finalized ? (
             <div className="space-y-3">
@@ -426,26 +528,17 @@ export default function ChatPage() {
             </div>
           ) : (
             <>
-              {messages.data?.map((m) =>
-                m.role === "USER" ? (
-                  <div key={m.id} className="flex flex-col items-end gap-1">
-                    <ChatBubble role="user">{m.question}</ChatBubble>
-                    <AttachmentBadge items={m.attachments ?? []} />
-                  </div>
-                ) : (
-                  <div key={m.id} className="max-w-full">
-                    <AssistantCard msg={m} />
-                  </div>
-                ),
-              )}
-              {finalized && !streaming && (
+              {messages.data?.map((m) => (
+                <MessageRow key={m.id} m={m} />
+              ))}
+              {finalized && !streaming && finalizedMsg && (
                 <>
                   <div className="flex flex-col items-end gap-1">
                     <ChatBubble role="user">{finalized.question}</ChatBubble>
                     <AttachmentBadge items={finalized.out.attachments ?? []} />
                   </div>
                   <div className="max-w-full">
-                    <AssistantCard msg={toSyntheticMessage(finalized.out)} />
+                    <AssistantCard msg={finalizedMsg} />
                   </div>
                 </>
               )}
@@ -455,11 +548,13 @@ export default function ChatPage() {
                     <ChatBubble role="user">{streaming.question}</ChatBubble>
                   </div>
                   <div className="max-w-full">
-                    <StreamCard
-                      stages={streaming.stages}
-                      sql={streaming.sql}
-                      summary={streaming.summary}
-                      toolCalls={streaming.toolCalls}
+                    <StreamingTurn
+                      body={streaming.body}
+                      signal={streaming.ac.signal}
+                      onResult={(out) => finalizeOk(out, streaming.question)}
+                      onError={(message) =>
+                        finalizeError(message, streaming.question, streaming.attSnapshot)
+                      }
                     />
                   </div>
                 </>
@@ -470,6 +565,21 @@ export default function ChatPage() {
                   sessionId={pendingConfirm.sessionId}
                   onAllResolved={() => setPendingConfirm(null)}
                 />
+              )}
+              {/* 078 任务 3:停止接收后的口径呈现——禁"已取消/已停止生成"类误导措辞 */}
+              {stoppedNotice && (
+                <div
+                  className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm"
+                  role="status"
+                >
+                  <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <div>
+                    <p className="text-foreground">已不再接收本轮输出。</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      该轮问答仍在后台完成,可稍后回看;问句已回到输入框,也可立即重发。
+                    </p>
+                  </div>
+                </div>
               )}
               {askError && (
                 <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
@@ -484,9 +594,30 @@ export default function ChatPage() {
               )}
             </>
           )}
-          <div ref={bottomRef} />
         </div>
       </ScrollArea>
+
+      {/* 078 任务 1.4:回到底部浮标——非跟随时出现;到达底部(滚动监听翻转
+          followBottom)或点击回底后消失 */}
+      {!followBottom && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-28 z-10 flex justify-center">
+          <Button
+            variant="secondary"
+            size="sm"
+            className="pointer-events-auto rounded-full shadow-md"
+            aria-label="回到底部"
+            onClick={() => {
+              forceBottomRef.current = true;
+              setFollowBottom(true);
+              const el = viewportRef.current;
+              el?.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+            }}
+          >
+            <ArrowDown aria-hidden />
+            回到底部
+          </Button>
+        </div>
+      )}
 
       {/* 输入区(mobile-experience B4.1):mb-3 与 BottomNav 呼吸分隔;
           底部安全区由导航层统一避让(bottom-nav pb-safe),此处不再叠加 */}
@@ -577,18 +708,28 @@ export default function ChatPage() {
               className="max-h-40 min-h-10 resize-none"
               aria-label="提问"
             />
-            <Button
-              size="icon"
-              onClick={() => void submit()}
-              disabled={!draft.trim() || uploading || streaming !== null}
-              aria-label="发送"
-            >
-              {streaming ? (
-                <Loader2 className="animate-spin" aria-hidden />
-              ) : (
+            {/* 078 任务 3.1:流式期间发送位切换为显式「停止接收」——
+                中止读取并立即释放输入;服务端不中止(契约口径),文案对齐 */}
+            {streaming ? (
+              <Button
+                size="icon"
+                variant="outline"
+                onClick={stopStreaming}
+                aria-label="停止接收本轮输出"
+                title="停止接收本轮输出(该轮仍在后台完成)"
+              >
+                <StopCircle aria-hidden />
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                onClick={() => void submit()}
+                disabled={!draft.trim() || uploading}
+                aria-label="发送"
+              >
                 <SendHorizontal aria-hidden />
-              )}
-            </Button>
+              </Button>
+            )}
           </div>
         </div>
       </div>

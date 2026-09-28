@@ -1,44 +1,49 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { lazy, StrictMode, Suspense } from "react";
+import { lazy, type ReactNode, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
 
 import { AppLayout } from "@/components/app-layout";
 import { PermRoute } from "@/components/perm-route";
 import { Skeleton } from "@/components/ui/skeleton";
-import AdminLayout from "@/pages/admin/AdminLayout";
-import AdminIndexPage from "@/pages/admin/AdminIndexPage";
-import DatasourcesPage from "@/pages/admin/DatasourcesPage";
-import DeptsPage from "@/pages/admin/DeptsPage";
-import RolesPage from "@/pages/admin/RolesPage";
-import UsersPage from "@/pages/admin/UsersPage";
-import RagPage from "@/pages/admin/RagPage";
-import AuditPage from "@/pages/admin/AuditPage";
-import ToolsPage from "@/pages/admin/ToolsPage";
-import MemoryPage from "@/pages/MemoryPage";
-import PortalPage from "@/pages/PortalPage";
-import PayPage from "@/pages/PayPage";
-import StorePage from "@/pages/StorePage";
-import BillingPage from "@/pages/admin/BillingPage";
-import BotPublicPage from "@/pages/BotPublicPage";
-import GuardrailsPage from "@/pages/admin/GuardrailsPage";
-import SemanticPage from "@/pages/admin/SemanticPage";
-import BotsPage from "@/pages/admin/BotsPage";
-import McpPage from "@/pages/admin/McpPage";
-import WorkflowsPage from "@/pages/admin/WorkflowsPage";
-import TriggersPage from "@/pages/admin/TriggersPage";
-import TeamsPage from "@/pages/admin/TeamsPage";
 import ChangePassword from "@/pages/ChangePassword";
-import ChatPage from "@/pages/ChatPage";
 import Login from "@/pages/Login";
 import OAuthCallback from "@/pages/OAuthCallback";
 import { NotFoundPage } from "@/pages/error-pages";
 import "./index.css";
 
-/* 图表统计页懒加载(echarts 体积治理):引擎 chunk 只在进入对应页面时拉取,
-   与聊天侧图表共享同一按需 chunk;Suspense 兜骨架防跳变 */
+/* 路由懒加载(066 体积治理):非首屏路由一律 lazy()+路由级 Suspense。
+   例外保持静态导入的两类:
+   - /login(未认证落地首屏,AuthenticationShell 直达)
+   - /bot/:botKey(公开嵌入入口,外站 iframe 直达,任何 chunk 瀑布都是转化损失)
+   其余页面(含 OAuthCallback/ChangePassword)均非常驻首屏,懒加载收益大于白检窗口。 */
+
+const MemoryPage = lazy(() => import("@/pages/MemoryPage"));
+const PortalPage = lazy(() => import("@/pages/PortalPage"));
+const PayPage = lazy(() => import("@/pages/PayPage"));
+const StorePage = lazy(() => import("@/pages/StorePage"));
+const ChatPage = lazy(() => import("@/pages/ChatPage"));
+const BotPublicPage = lazy(() => import("@/pages/BotPublicPage"));
+const AdminLayout = lazy(() => import("@/pages/admin/AdminLayout"));
+const AdminIndexPage = lazy(() => import("@/pages/admin/AdminIndexPage"));
+const DatasourcesPage = lazy(() => import("@/pages/admin/DatasourcesPage"));
+const DeptsPage = lazy(() => import("@/pages/admin/DeptsPage"));
+const RolesPage = lazy(() => import("@/pages/admin/RolesPage"));
+const UsersPage = lazy(() => import("@/pages/admin/UsersPage"));
+const RagPage = lazy(() => import("@/pages/admin/RagPage"));
+const AuditPage = lazy(() => import("@/pages/admin/AuditPage"));
+const ToolsPage = lazy(() => import("@/pages/admin/ToolsPage"));
 const FeedbackPage = lazy(() => import("@/pages/admin/FeedbackPage"));
+const BillingPage = lazy(() => import("@/pages/admin/BillingPage"));
+const GuardrailsPage = lazy(() => import("@/pages/admin/GuardrailsPage"));
+const SemanticPage = lazy(() => import("@/pages/admin/SemanticPage"));
+const BotsPage = lazy(() => import("@/pages/admin/BotsPage"));
+const McpPage = lazy(() => import("@/pages/admin/McpPage"));
+const WorkflowsPage = lazy(() => import("@/pages/admin/WorkflowsPage"));
+const TriggersPage = lazy(() => import("@/pages/admin/TriggersPage"));
+const TeamsPage = lazy(() => import("@/pages/admin/TeamsPage"));
 const UsagePage = lazy(() => import("@/pages/admin/UsagePage"));
+const QualityPage = lazy(() => import("@/pages/admin/QualityPage"));
 
 function RouteSuspenseFallback() {
   return (
@@ -46,6 +51,11 @@ function RouteSuspenseFallback() {
       <Skeleton className="h-96 w-full" />
     </div>
   );
+}
+
+/** 路由级 Suspense 包装(沿用既有 RouteSuspenseFallback 范式,禁新建骨架件)。 */
+function el(node: ReactNode): ReactNode {
+  return <Suspense fallback={<RouteSuspenseFallback />}>{node}</Suspense>;
 }
 
 /* 4xx 客户端错误(401 已由刷新链路处理)重试无意义:只对 5xx/网络错误重试两次 */
@@ -67,205 +77,209 @@ const router = createBrowserRouter([
   { path: "/change-password", element: <ChangePassword /> },
   {
     path: "/",
-    element: <AppLayout />,
+    element: el(<AppLayout />),
     children: [
       { index: true, element: <Navigate to="/chat" replace /> },
       {
         path: "chat",
-        element: (
+        element: el(
           <PermRoute perm="chat:execute">
             <ChatPage />
-          </PermRoute>
+          </PermRoute>,
         ),
       },
       {
         path: "chat/:sessionId",
-        element: (
+        element: el(
           <PermRoute perm="chat:execute">
             <ChatPage />
-          </PermRoute>
+          </PermRoute>,
         ),
       },
       {
         path: "portal",
-        element: (
+        element: el(
           <PermRoute perm="developer:portal">
             <PortalPage />
-          </PermRoute>
+          </PermRoute>,
         ),
       },
       {
         path: "portal/pay/:paymentId",
-        element: (
+        element: el(
           <PermRoute perm="developer:portal">
             <PayPage />
-          </PermRoute>
+          </PermRoute>,
         ),
       },
       {
         path: "store",
-        element: (
+        element: el(
           <PermRoute perm="bot:run">
             <StorePage />
-          </PermRoute>
+          </PermRoute>,
         ),
       },
       {
         path: "memory",
-        element: (
+        element: el(
           <PermRoute perm="chat:execute">
             <MemoryPage />
-          </PermRoute>
+          </PermRoute>,
         ),
       },
       {
         path: "admin",
-        element: <AdminLayout />,
+        element: el(<AdminLayout />),
         children: [
-          { index: true, element: <AdminIndexPage /> },
+          { index: true, element: el(<AdminIndexPage />) },
           {
             path: "users",
-            element: (
+            element: el(
               <PermRoute perm="system:user:manage">
                 <UsersPage />
-              </PermRoute>
+              </PermRoute>,
             ),
           },
           {
             path: "roles",
-            element: (
+            element: el(
               <PermRoute perm="system:role:manage">
                 <RolesPage />
-              </PermRoute>
+              </PermRoute>,
             ),
           },
           {
             path: "depts",
-            element: (
+            element: el(
               <PermRoute perm="system:user:manage">
                 <DeptsPage />
-              </PermRoute>
+              </PermRoute>,
             ),
           },
           {
             path: "datasources",
-            element: (
+            element: el(
               <PermRoute perm="system:datasource:manage">
                 <DatasourcesPage />
-              </PermRoute>
+              </PermRoute>,
             ),
           },
           {
             path: "rag",
-            element: (
+            element: el(
               <PermRoute perm="system:rag:manage">
                 <RagPage />
-              </PermRoute>
+              </PermRoute>,
             ),
           },
           {
             path: "feedback",
-            element: (
+            element: el(
               <PermRoute perm="system:feedback:view">
-                <Suspense fallback={<RouteSuspenseFallback />}>
-                  <FeedbackPage />
-                </Suspense>
-              </PermRoute>
+                <FeedbackPage />
+              </PermRoute>,
             ),
           },
           {
             path: "audit",
-            element: (
+            element: el(
               <PermRoute perm="system:audit:view">
                 <AuditPage />
-              </PermRoute>
+              </PermRoute>,
             ),
           },
           {
             path: "tools",
-            element: (
+            element: el(
               <PermRoute perm="system:tool:manage">
                 <ToolsPage />
-              </PermRoute>
+              </PermRoute>,
             ),
           },
           {
             path: "guardrails",
-            element: (
+            element: el(
               <PermRoute perm="system:guardrail:manage">
                 <GuardrailsPage />
-              </PermRoute>
+              </PermRoute>,
             ),
           },
           {
             path: "semantic",
-            element: (
+            element: el(
               <PermRoute perm="system:semantic:manage">
                 <SemanticPage />
-              </PermRoute>
+              </PermRoute>,
             ),
           },
           {
             path: "mcp",
-            element: (
+            element: el(
               <PermRoute perm="system:mcp:manage">
                 <McpPage />
-              </PermRoute>
+              </PermRoute>,
             ),
           },
           {
             path: "workflow",
-            element: (
+            element: el(
               <PermRoute perm="system:workflow:manage">
                 <WorkflowsPage />
-              </PermRoute>
+              </PermRoute>,
             ),
           },
           {
             path: "triggers",
-            element: (
+            element: el(
               <PermRoute perm="system:trigger:manage">
                 <TriggersPage />
-              </PermRoute>
+              </PermRoute>,
             ),
           },
           {
             path: "billing",
-            element: (
+            element: el(
               <PermRoute perm="system:billing:manage">
                 <BillingPage />
-              </PermRoute>
+              </PermRoute>,
             ),
           },
           {
             path: "teams",
-            element: (
+            element: el(
               <PermRoute perm="system:team:manage">
                 <TeamsPage />
-              </PermRoute>
+              </PermRoute>,
             ),
           },
           {
             path: "bots",
-            element: (
+            element: el(
               <PermRoute perm="chat:execute">
                 <BotsPage />
-              </PermRoute>
+              </PermRoute>,
             ),
           },
           {
             path: "usage",
-            element: (
+            element: el(
               <PermRoute perm="system:llm-usage:view">
-                <Suspense fallback={<RouteSuspenseFallback />}>
-                  <UsagePage />
-                </Suspense>
-              </PermRoute>
+                <UsagePage />
+              </PermRoute>,
+            ),
+          },
+          {
+            path: "quality",
+            element: el(
+              <PermRoute perm="system:chat-quality:view">
+                <QualityPage />
+              </PermRoute>,
             ),
           },
         ],
       },
-      { path: "*", element: <NotFoundPage /> },
+      { path: "*", element: el(<NotFoundPage />) },
     ],
   },
   {

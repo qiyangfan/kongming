@@ -392,6 +392,13 @@ async def test_query_react_happy_path(client: AsyncClient) -> None:  # type: ign
         "sql",
         "retry_count",
         "error",
+        # 069:管理面诊断信号(纯增;随 QueryOut 回传 api 落 chat_message)
+        "resolved_question",
+        "prompt_version",
+        # 076:语义层口径命中(纯增;空=无命中)
+        "metric_hits",
+        # 068:文档道结构化来源(纯增;空=SQL 道/无命中)
+        "sources",
         "usage_records",
     }
     assert body["success"] is True and body["verdict"] == "PASS"

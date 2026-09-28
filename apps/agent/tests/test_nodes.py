@@ -30,6 +30,9 @@ class FakeLlm:
         self.boom = boom
         self.calls: list[tuple[str, str, float]] = []
 
+    def prompt_budget(self, task: str | None = None) -> int:
+        return 1_000_000  # 080:测试替身恒宽预算(收敛行为由纯函数测试覆盖)
+
     async def chat(
         self,
         system: str,

@@ -66,6 +66,8 @@ PERMISSIONS: list[tuple[str, str, int]] = [
     ("tool:compute", "工具-数值计算", 29),
     # 056 skill-pack:垂类内容包管理面(仅 SUPER_ADMIN)
     ("system:skill:manage", "Skill包管理", 30),
+    # 069 chat-quality-observability:轮次质量观测(仅 SUPER_ADMIN)
+    ("system:chat-quality:view", "问答质量查看", 31),
 ]
 
 ROLES: list[tuple[str, str, str, str, int]] = [

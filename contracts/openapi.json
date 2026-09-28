@@ -420,6 +420,12 @@
               }
             }
           },
+          "429": {
+            "description": "速率/配额超限(062;detail=CHAT_RATE_LIMITED / CHAT_QUOTA_EXCEEDED,响应头 X-Quota-Warning 预警)"
+          },
+          "503": {
+            "description": "配额读数失败(062 fail-closed;detail=CHAT_QUOTA_UNAVAILABLE)"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -530,7 +536,7 @@
         },
         "responses": {
           "200": {
-            "description": "SSE 事件流:stage/sql/summary/tool_call 过程事件逐帧下发;result=data 与同步 /chat/query 响应逐字段一致;error=传输层/意外失败终态;注释行(: ping)为心跳",
+            "description": "SSE 事件流:stage/sql/summary/tool_call/trace 过程事件逐帧下发;result=data 与同步 /chat/query 响应逐字段一致;error=传输层/意外失败终态;trace=agent 诊断信号(预筛/闸门/净化/预算,不渲染进用户答案);注释行(: ping)为心跳",
             "content": {
               "text/event-stream": {
                 "schema": {
@@ -549,6 +555,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/StreamErrorOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StreamTraceOut"
                     },
                     {
                       "$ref": "#/components/schemas/ChatQueryOut"
@@ -575,6 +584,9 @@
                       "$ref": "#/components/schemas/StreamErrorOut"
                     },
                     {
+                      "$ref": "#/components/schemas/StreamTraceOut"
+                    },
+                    {
                       "$ref": "#/components/schemas/ChatQueryOut"
                     }
                   ],
@@ -582,6 +594,12 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "速率/配额超限(062;detail=CHAT_RATE_LIMITED / CHAT_QUOTA_EXCEEDED,响应头 X-Quota-Warning 预警)"
+          },
+          "503": {
+            "description": "配额读数失败(062 fail-closed;detail=CHAT_QUOTA_UNAVAILABLE)"
           },
           "422": {
             "description": "Validation Error",
@@ -2591,6 +2609,79 @@
         }
       }
     },
+    "/system/rag/recall-probe": {
+      "get": {
+        "tags": [
+          "rag"
+        ],
+        "summary": "Recall Probe",
+        "description": "064:召回试跑(只读):三路命中及各自原生分、融合分、双条件判定结论。\n\n零副作用:SHALL NOT 修改配置、SHALL NOT 落库、SHALL NOT 触发召回缓存\n失效(不走 ctx 缓存)。影子形态含\"若生效将丢弃\"记录。两个高频场景:\n上传表说明后验证可召回性;影子期标定阈值(不等真实流量)。",
+        "operationId": "recall_probe_system_rag_recall_probe_get",
+        "parameters": [
+          {
+            "name": "question",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000,
+              "title": "Question"
+            }
+          },
+          {
+            "name": "datasource_key",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+              "title": "Datasource Key"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Recall Probe System Rag Recall Probe Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/internal/rag/retrieve": {
       "post": {
         "tags": [
@@ -2937,6 +3028,245 @@
         }
       }
     },
+    "/system/chat-quality/summary": {
+      "get": {
+        "tags": [
+          "chat-quality"
+        ],
+        "summary": "Quality Summary",
+        "description": "轮次质量总览:四态占比/率值 + 按天趋势(≤90 天补零)+ 数据源切片 +\nprompt 版本切片;租户按权限收敛(observability 域口径,不做行级按用户拆分)。",
+        "operationId": "quality_summary_system_chat_quality_summary_get",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 90,
+              "minimum": 1,
+              "default": 30,
+              "title": "Days"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualitySummaryOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/chat-quality/page": {
+      "get": {
+        "tags": [
+          "chat-quality"
+        ],
+        "summary": "Quality Page",
+        "description": "轮次明细分页(时间倒序):状态/数据源/时间范围筛选;NO_DATA 轮次首次\n拥有可见形态(该形态无执行、无审计行,此前任何观测面不可见)。",
+        "operationId": "quality_page_system_chat_quality_page_get",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(SUCCESS|FAILED|REJECTED|NO_DATA)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "datasource_key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Datasource Key"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityPageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/feedback/{message_id}/status": {
       "put": {
         "tags": [
@@ -2976,6 +3306,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "070:ADOPTED 晋升不可用(embedding 失败等);处置整体回滚,detail=SAMPLE_PROMOTION_UNAVAILABLE"
           },
           "422": {
             "description": "Validation Error",
@@ -4299,6 +4632,23 @@
               ],
               "title": "End"
             }
+          },
+          {
+            "name": "protocol",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 16
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Protocol"
+            }
           }
         ],
         "responses": {
@@ -4488,6 +4838,23 @@
                 }
               ],
               "title": "Tenant Id"
+            }
+          },
+          {
+            "name": "protocol",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 16
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Protocol"
             }
           }
         ],
@@ -5644,7 +6011,7 @@
           "bot-public"
         ],
         "summary": "Bot Chat Public",
-        "description": "web 嵌入公开端点(免登录):is_public+enabled 闸;护栏与工具防御全量。",
+        "description": "web 嵌入公开端点(免登录):is_public+enabled 闸;护栏与工具防御全量。\n062:(助手标识, 客户端 IP) 维度速率闸——该面无用户/租户维度可用,IP 取自\nClientIpMiddleware contextvar(经 --forwarded-allow-ips 约束,非客户端可\n伪造),fail-open(Redis 不可用放行,与 019 工具限流同口径)。",
         "operationId": "bot_chat_public_bot__bot_key__chat_post",
         "parameters": [
           {
@@ -5677,6 +6044,9 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "速率超限(062;detail=CHAT_RATE_LIMITED,X-Quota-Warning 预警)"
           },
           "422": {
             "description": "Validation Error",
@@ -11362,6 +11732,22 @@
             "type": "array",
             "title": "Column Labels",
             "default": []
+          },
+          "metric_hits": {
+            "items": {
+              "$ref": "#/components/schemas/MetricHitOut"
+            },
+            "type": "array",
+            "title": "Metric Hits",
+            "default": []
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceOut"
+            },
+            "type": "array",
+            "title": "Sources",
+            "default": []
           }
         },
         "type": "object",
@@ -13648,6 +14034,20 @@
             },
             "type": "array",
             "title": "Column Labels"
+          },
+          "metric_hits": {
+            "items": {
+              "$ref": "#/components/schemas/MetricHitOut"
+            },
+            "type": "array",
+            "title": "Metric Hits"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceOut"
+            },
+            "type": "array",
+            "title": "Sources"
           }
         },
         "type": "object",
@@ -13751,6 +14151,41 @@
           "columns"
         ],
         "title": "MetaTableOut"
+      },
+      "MetricHitOut": {
+        "properties": {
+          "metric_id": {
+            "type": "string",
+            "title": "Metric Id"
+          },
+          "metric_name": {
+            "type": "string",
+            "title": "Metric Name"
+          },
+          "sql_template": {
+            "type": "string",
+            "title": "Sql Template"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric_id",
+          "metric_name",
+          "sql_template"
+        ],
+        "title": "MetricHitOut",
+        "description": "076(纯增):语义层口径命中(标识/名称/口径表达式/修订时间)。"
       },
       "MetricIn": {
         "properties": {
@@ -14867,6 +15302,334 @@
         "type": "object",
         "title": "PublishIn"
       },
+      "QualityOverviewOut": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "success": {
+            "type": "integer",
+            "title": "Success"
+          },
+          "no_data": {
+            "type": "integer",
+            "title": "No Data"
+          },
+          "blocked": {
+            "type": "integer",
+            "title": "Blocked"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          },
+          "no_data_rate": {
+            "type": "number",
+            "title": "No Data Rate"
+          },
+          "blocked_rate": {
+            "type": "number",
+            "title": "Blocked Rate"
+          },
+          "failed_rate": {
+            "type": "number",
+            "title": "Failed Rate"
+          },
+          "selfheal_rate": {
+            "type": "number",
+            "title": "Selfheal Rate"
+          },
+          "down_rate": {
+            "type": "number",
+            "title": "Down Rate"
+          },
+          "avg_tokens": {
+            "type": "number",
+            "title": "Avg Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "success",
+          "no_data",
+          "blocked",
+          "failed",
+          "no_data_rate",
+          "blocked_rate",
+          "failed_rate",
+          "selfheal_rate",
+          "down_rate",
+          "avg_tokens"
+        ],
+        "title": "QualityOverviewOut"
+      },
+      "QualityPageOut": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QualityRoundItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "QualityPageOut"
+      },
+      "QualityPromptSliceRow": {
+        "properties": {
+          "prompt_version": {
+            "type": "string",
+            "title": "Prompt Version"
+          },
+          "rounds": {
+            "type": "integer",
+            "title": "Rounds"
+          },
+          "success": {
+            "type": "integer",
+            "title": "Success"
+          },
+          "no_data": {
+            "type": "integer",
+            "title": "No Data"
+          },
+          "blocked": {
+            "type": "integer",
+            "title": "Blocked"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt_version",
+          "rounds",
+          "success",
+          "no_data",
+          "blocked",
+          "failed"
+        ],
+        "title": "QualityPromptSliceRow"
+      },
+      "QualityRoundItemOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question"
+          },
+          "resolved_question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Question"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "retry_count": {
+            "type": "integer",
+            "title": "Retry Count"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "datasource_key": {
+            "type": "string",
+            "title": "Datasource Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "status",
+          "retry_count",
+          "datasource_key"
+        ],
+        "title": "QualityRoundItemOut"
+      },
+      "QualitySliceRow": {
+        "properties": {
+          "datasource_key": {
+            "type": "string",
+            "title": "Datasource Key"
+          },
+          "rounds": {
+            "type": "integer",
+            "title": "Rounds"
+          },
+          "success": {
+            "type": "integer",
+            "title": "Success"
+          },
+          "no_data": {
+            "type": "integer",
+            "title": "No Data"
+          },
+          "blocked": {
+            "type": "integer",
+            "title": "Blocked"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasource_key",
+          "rounds",
+          "success",
+          "no_data",
+          "blocked",
+          "failed"
+        ],
+        "title": "QualitySliceRow"
+      },
+      "QualitySummaryOut": {
+        "properties": {
+          "overview": {
+            "$ref": "#/components/schemas/QualityOverviewOut"
+          },
+          "trend": {
+            "items": {
+              "$ref": "#/components/schemas/QualityTrendPoint"
+            },
+            "type": "array",
+            "title": "Trend"
+          },
+          "by_datasource": {
+            "items": {
+              "$ref": "#/components/schemas/QualitySliceRow"
+            },
+            "type": "array",
+            "title": "By Datasource"
+          },
+          "by_prompt_version": {
+            "items": {
+              "$ref": "#/components/schemas/QualityPromptSliceRow"
+            },
+            "type": "array",
+            "title": "By Prompt Version"
+          },
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "overview",
+          "trend",
+          "by_datasource",
+          "by_prompt_version",
+          "days"
+        ],
+        "title": "QualitySummaryOut"
+      },
+      "QualityTrendPoint": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "rounds": {
+            "type": "integer",
+            "title": "Rounds"
+          },
+          "success": {
+            "type": "integer",
+            "title": "Success"
+          },
+          "no_data": {
+            "type": "integer",
+            "title": "No Data"
+          },
+          "blocked": {
+            "type": "integer",
+            "title": "Blocked"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "rounds",
+          "success",
+          "no_data",
+          "blocked",
+          "failed"
+        ],
+        "title": "QualityTrendPoint"
+      },
       "RatingIn": {
         "properties": {
           "score": {
@@ -15203,6 +15966,14 @@
             "type": "string",
             "title": "Metric Hints",
             "default": ""
+          },
+          "metric_hits": {
+            "items": {
+              "$ref": "#/components/schemas/MetricHitOut"
+            },
+            "type": "array",
+            "title": "Metric Hits",
+            "default": []
           },
           "doc_hints": {
             "items": {
@@ -15660,6 +16431,30 @@
           "status"
         ],
         "title": "SessionMessageOut"
+      },
+      "SourceOut": {
+        "properties": {
+          "citation_key": {
+            "type": "string",
+            "title": "Citation Key"
+          },
+          "source_ref": {
+            "type": "string",
+            "title": "Source Ref",
+            "default": ""
+          },
+          "doc_name": {
+            "type": "string",
+            "title": "Doc Name",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "citation_key"
+        ],
+        "title": "SourceOut",
+        "description": "068(纯增):文档道来源条目(引用键/来源标识/文档名快照)。"
       },
       "SqlAuditItemOut": {
         "properties": {
@@ -16255,6 +17050,26 @@
         ],
         "title": "StreamToolCallOut",
         "description": "tool_call 事件 data(019 tool-calling):工具调用进度。\n\nstatus ∈ running/done/rejected(confirm_required 以 done 下发,result_digest\n含「待确认」);args_digest/result_digest 为截断摘要(审计同源口径)。"
+      },
+      "StreamTraceOut": {
+        "properties": {
+          "node": {
+            "type": "string",
+            "title": "Node"
+          },
+          "fields": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node",
+          "fields"
+        ],
+        "title": "StreamTraceOut",
+        "description": "trace 事件 data:agent 侧诊断信号(内部运维口径,不渲染进用户答案)。\n\n063 表预筛/064 召回闸门/068 引用净化/080 装配预算共用本通道;\nfields 为自由映射(键集随能力演进,前向兼容);node=发起节点名。"
       },
       "SuggestionsOut": {
         "properties": {
@@ -17496,6 +18311,18 @@
             ],
             "title": "Status",
             "default": "SUCCESS"
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol"
           }
         },
         "type": "object",
@@ -17579,6 +18406,17 @@
               }
             ],
             "title": "Bot Id"
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol"
           },
           "prompt_tokens": {
             "type": "integer",

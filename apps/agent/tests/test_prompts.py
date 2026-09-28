@@ -192,3 +192,17 @@ def test_understand_aggregate_followup_explicit() -> None:
 def test_prompts_exception_log_048_registered() -> None:
     """048 增量已在 prompts.py 文件头例外清单登记(prompt 资产纪律)。"""
     assert "048 followup-quality-guard" in (prompts.__doc__ or "")
+
+
+def test_doc_answer_citation_discipline() -> None:
+    """068 任务 3.3:doc_prompt 纪律段增量钉死(引用键标注/禁包装/禁自造)。"""
+    from kongming_agent.graph.doc_prompt import DOC_ANSWER_SYSTEM
+
+    # 规则 2:句末标注【引用键】且与下发来源逐字一致
+    assert "【引用键】" in DOC_ANSWER_SYSTEM
+    assert "逐字一致" in DOC_ANSWER_SYSTEM
+    # 规则 4:禁包装形态、禁自造未下发键
+    assert "来源：" in DOC_ANSWER_SYSTEM  # 禁令点名(全角冒号)
+    assert "SHALL NOT" in DOC_ANSWER_SYSTEM
+    # 旧形态已移除(文档名 §段落标注法退役)
+    assert "[文档名 §段落]" not in DOC_ANSWER_SYSTEM

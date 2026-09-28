@@ -37,6 +37,8 @@ class UsageRecordIn(BaseModel):
     # 038:缺省兼容旧 agent 上报(滚动升级窗口)
     latency_ms: int | None = Field(default=None, ge=0)
     status: Literal["SUCCESS", "ERROR"] = "SUCCESS"
+    # 077:出站协议归因(openai|anthropic|responses;缺省 None=旧版 agent 上报)
+    protocol: str | None = Field(default=None, max_length=16)
 
 
 class UsageReportIn(BaseModel):
@@ -67,6 +69,7 @@ async def report_usage(
                 "total_tokens": r.total_tokens,
                 "latency_ms": r.latency_ms,
                 "status": r.status,
+                "protocol": r.protocol,
             }
             for r in req.records
         ]
@@ -97,8 +100,10 @@ async def usage_summary(
     session: Annotated[AsyncSession, Depends(get_session)],
     start: Annotated[datetime | None, Query()] = None,
     end: Annotated[datetime | None, Query()] = None,
+    # 077:协议过滤(过滤型,不新增分组键;空=不过滤,计数与现状逐字一致)
+    protocol: Annotated[str | None, Query(max_length=16)] = None,
 ) -> UsageSummaryOut:
-    rows = await SqlLlmUsageRepo(session).summary(start=start, end=end)
+    rows = await SqlLlmUsageRepo(session).summary(start=start, end=end, protocol=protocol)
     return UsageSummaryOut(
         items=[
             UsageSummaryItem(
@@ -162,6 +167,8 @@ class UsageRow(BaseModel):
     task: str
     status: str
     bot_id: str | None = None
+    # 077:出站协议(null=存量行/旧版上报,原样展示「-」,不回算不推断)
+    protocol: str | None = None
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
@@ -186,6 +193,8 @@ async def usage_page(
     trace_id: Annotated[str | None, Query(max_length=64)] = None,
     # 038③:租户筛选(uuid 直滤);R1-F1:UUID 类型闸防非法值 500
     tenant_id: Annotated[uuid.UUID | None, Query()] = None,
+    # 077:协议筛选(过滤型;空=不过滤)
+    protocol: Annotated[str | None, Query(max_length=16)] = None,
 ) -> UsagePageOut:
     total, rows = await SqlLlmUsageRepo(session).page(
         limit=size,
@@ -195,6 +204,7 @@ async def usage_page(
         status=status,
         trace_id=trace_id,
         tenant_id=str(tenant_id) if tenant_id is not None else None,
+        protocol=protocol,
     )
     return UsagePageOut(
         total=total,
@@ -212,6 +222,7 @@ async def usage_page(
                 total_tokens=int(r["total_tokens"]),
                 latency_ms=(int(r["latency_ms"]) if r["latency_ms"] is not None else None),
                 created_at=r["created_at"],
+                protocol=(str(r["protocol"]) if r["protocol"] is not None else None),
             )
             for r in rows
         ],

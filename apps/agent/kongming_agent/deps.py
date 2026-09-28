@@ -43,6 +43,15 @@ def _fingerprint(s: Settings) -> tuple[str, ...]:
         str(s.embedding_max_texts),
         str(s.embedding_batch_size),
         str(s.llm_max_image_mb),
+        # 072 出站韧性:重试预算/退避/降级条目影响 LlmClient 行为,一并入指纹
+        str(s.llm_max_attempts),
+        str(s.llm_retry_base_ms),
+        str(s.llm_retry_max_wait_ms),
+        s.llm_fallback_entry,
+        # 080:装配预算参数影响 generate 收敛行为
+        str(s.prompt_context_window_default),
+        str(s.prompt_reserved_output_tokens),
+        str(s.prompt_safety_margin_tokens),
         s.api_base_url,
         str(s.api_timeout_sec),
         s.internal_token or "",

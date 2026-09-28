@@ -14,16 +14,20 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from kongming.rag.cache import ContextCache
+from kongming.rag.gate import gate_hits
 from kongming.rag.models import (
     COVERAGE_FAILURE_WINDOW_DAYS,
     RECALL_TOP_K,
     CoverageReport,
     DatasourceInvalid,
+    HistorySample,
     IntrospectedTable,
     KnowledgeEntry,
     RagContext,
+    RecallHit,
     SchemaNotAllowed,
     TableBlock,
     build_coverage_report,
@@ -45,7 +49,15 @@ log = logging.getLogger(__name__)
 
 _DESCRIBE_CONCURRENCY = 4  # 逐表润色并发上限(防 LLM 端打爆)
 _EMBED_BATCH = 64  # embed 单批上限(agent 端点契约)
-_RECALL_TOTAL_CAP = RECALL_TOP_K * 2  # 047:多轮继承合并总量封顶
+_RECALL_TOTAL_CAP = RECALL_TOP_K * 2
+
+# 064:off 形态下不进判定的阈值占位(gate_hits 对 "off" 短路,零值仅满足签名)
+_GATE_UNUSED: dict[str, Any] = {
+    "top1_threshold": 0.0,
+    "min_count": 1,
+    "mean_threshold": 0.0,
+    "mean_window": 3,
+}  # 047:多轮继承合并总量封顶
 
 
 @dataclass(frozen=True)
@@ -76,12 +88,44 @@ class RagService:
         describer: TableDescriberPort,
         cache: ContextCache,
         suggestion_evictor: SuggestionCacheEvictor | None = None,
+        gate_settings: Any = None,  # 064:闸门配置(Settings;None=off 零回归)
     ) -> None:
         self._repo = repo
         self._embedder = embedder
         self._describer = describer
         self._cache = cache
         self._suggestion_evictor = suggestion_evictor
+        self._gate = gate_settings
+        # 064:按路影子观测(main=主路 / prior=047 继承路);recall 消费后原样
+        # 下发日志,shadow 形态不静默
+        self._last_gate_trace: dict[str, object] = {}
+
+    def _gate_configs(self) -> tuple[str, dict[str, Any], dict[str, Any]] | None:
+        """064:闸门配置提取单点(mode + 两路判据参数;off/未注入=None)。
+
+        主链路 _apply_gate 与试跑端点 recall_probe 共用——阈值口径两处
+        一致,禁各起一套 getattr。向量路/全文路量纲不同(余弦相似度 vs
+        ts_rank),阈值按路独立;min_count/mean_window 为路无关参数共用。"""
+        if self._gate is None:
+            return None
+        mode = str(getattr(self._gate, "rag_gate_mode", "off"))
+        if mode == "off":
+            return None
+        shared: dict[str, Any] = {
+            "min_count": int(getattr(self._gate, "rag_gate_min_count", 1)),
+            "mean_window": int(getattr(self._gate, "rag_gate_mean_window", 3)),
+        }
+        vec = {
+            "top1_threshold": float(getattr(self._gate, "rag_gate_vector_top1", 0.0)),
+            "mean_threshold": float(getattr(self._gate, "rag_gate_vector_mean", 0.0)),
+            **shared,
+        }
+        ft = {
+            "top1_threshold": float(getattr(self._gate, "rag_gate_fulltext_top1", 0.0)),
+            "mean_threshold": float(getattr(self._gate, "rag_gate_fulltext_mean", 0.0)),
+            **shared,
+        }
+        return mode, vec, ft
 
     async def _evict_suggestions(self, datasource_key: str) -> None:
         """047:建议缓存级联失效(知识写路径;DELETE 与业务写同事务,由
@@ -514,6 +558,36 @@ class RagService:
 
     # ============ 召回(内部端点) ============
 
+    def _apply_gate(
+        self,
+        route: str,
+        vector_hits: list[RecallHit],
+        fulltext_hits: list[RecallHit],
+    ) -> tuple[list[RecallHit], list[RecallHit]] | None:
+        """064:按路闸门消费(纯函数管道;off/未注入=None 零行为)。
+
+        route=main|prior(047 继承路同样过闸——闸门判据是路级相关性,
+        继承路的命中同样是余弦/ts_rank 原生分,"多轮依赖表"不构成
+        relevance 豁免:junk 依赖表一样稀释提示词)。
+        primary:不过闸整路裁掉(过闸全留);shadow:全部保留,would_drop
+        记 trace(可观测,不静默降质)。零命中路不投票(空集:off/shadow
+        原样/primary 空集即空集)。
+        """
+        configs = self._gate_configs()
+        if configs is None:
+            return None
+        mode, vec_cfg, ft_cfg = configs
+        vec = gate_hits(vector_hits, mode=mode, **vec_cfg)
+        ft = gate_hits(fulltext_hits, mode=mode, **ft_cfg)
+        self._last_gate_trace[route] = {
+            "mode": mode,
+            "vector": vec.verdict.as_dict() if vec.verdict else None,
+            "vector_would_drop": vec.would_drop,
+            "fulltext": ft.verdict.as_dict() if ft.verdict else None,
+            "fulltext_would_drop": ft.would_drop,
+        }
+        return vec.passed, ft.passed
+
     async def recall(
         self,
         *,
@@ -555,12 +629,29 @@ class RagService:
             vector_hits = await self._repo.recall_vector(
                 tenant_id=tenant_id, datasource_key=datasource_key, vector=vector
             )
-            fewshot_sqls = await self._repo.recall_history(
+            # 070:同问句候选去重——优先 ADOPTED 反馈纠错样本(候选已仅含
+            # 启用态,FEEDBACK 即 ADOPTED),无反馈样本回退执行成功样本;
+            # 保持候选相似度序(去见重后取前 K)
+            candidates = await self._repo.recall_history(
                 tenant_id=tenant_id, datasource_key=datasource_key, vector=vector
             )
+            by_question: dict[str, HistorySample] = {}
+            for cand in candidates:
+                kept = by_question.get(cand.question)
+                if kept is None or (
+                    cand.source_type == "FEEDBACK" and kept.source_type != "FEEDBACK"
+                ):
+                    by_question[cand.question] = cand
+            fewshot_sqls = [c.sql_text for c in by_question.values()][:RECALL_TOP_K]
         fulltext_hits = await self._repo.recall_fulltext(
             tenant_id=tenant_id, datasource_key=datasource_key, question=question
         )
+        # 064:相关度闸门——各按本路原生分独立判定(vector=余弦相似度/
+        # fulltext=ts_rank,量纲不共用);off(缺省)零行为;shadow 只记录
+        # would_drop;primary 不过闸整路裁掉后重融合
+        gate_notes = self._apply_gate("main", vector_hits, fulltext_hits)
+        if gate_notes is not None:
+            vector_hits, fulltext_hits = gate_notes
         fused = rrf_fuse([vector_hits, fulltext_hits])
         if prior and prior != question:
             prior_vector: list[float] | None = None
@@ -578,6 +669,12 @@ class RagService:
             prior_ft_hits = await self._repo.recall_fulltext(
                 tenant_id=tenant_id, datasource_key=datasource_key, question=prior
             )
+            # 064:继承路同样过闸(与主路同一判据同一阈值口径——"多轮依赖
+            # 表"不是 relevance 豁免;junk 依赖表一样稀释提示词)。off 时
+            # 零行为;shadow 记 would_drop;primary 不过闸整路裁掉
+            prior_gate = self._apply_gate("prior", prior_vec_hits, prior_ft_hits)
+            if prior_gate is not None:
+                prior_vec_hits, prior_ft_hits = prior_gate
             seen = {(h.schema_name, h.table_name) for h in fused}
             fused = fused + [
                 h
@@ -585,6 +682,12 @@ class RagService:
                 if (h.schema_name, h.table_name) not in seen
             ]
             fused = fused[:_RECALL_TOTAL_CAP]
+        if self._last_gate_trace:
+            # 064 影子观测:各路 verdict(生效阈值/判定归因/命中原生分)与
+            # would_drop 按路(main/prior)下发——曾只打 {"gate":"applied"}
+            # 把观测数据算了就丢,shadow 形态退化为不可观测,违背「SHALL NOT
+            # 静默降质」
+            log.info("召回闸门 trace 观测 notes=%s", self._last_gate_trace)
         entries = await self._repo.fetch_entries(
             tenant_id=tenant_id,
             datasource_key=datasource_key,
@@ -599,6 +702,90 @@ class RagService:
         if ctx.schema_hint or ctx.history_sql:
             await self._cache.set(tenant_id, datasource_key, key_material, ctx)
         return ctx
+
+    async def recall_probe(
+        self,
+        *,
+        tenant_key: str,
+        datasource_key: str,
+        question: str,
+    ) -> dict[str, object]:
+        """064 任务 2.6:召回试跑投影(只读验证面,零副作用)。
+
+        与主链路 retrieve 相同的三路召回 + 闸门判定纯函数(gate_hits)——
+        返回三路命中及各自原生分、融合分、双条件判定结论;影子形态下含
+        "若生效将丢弃"记录。SHALL NOT 修改配置/落库/触发召回缓存失效
+        (不走 _cache;不写任何表)。
+        """
+        tenant_id = await self._repo.tenant_id_by_key(tenant_key)
+        if tenant_id is None:
+            raise LookupError(tenant_key)
+        await self._require_usable_datasource(tenant_id, datasource_key)
+        vector: list[float] | None = None
+        try:
+            vector = (await self._embedder.embed([question]))[0]
+        except EmbeddingError:
+            log.warning("试跑 embedding 失败(降级纯全文路)")
+        vector_hits = (
+            await self._repo.recall_vector(
+                tenant_id=tenant_id, datasource_key=datasource_key, vector=vector
+            )
+            if vector is not None
+            else []
+        )
+        fulltext_hits = await self._repo.recall_fulltext(
+            tenant_id=tenant_id, datasource_key=datasource_key, question=question
+        )
+        fused = rrf_fuse([vector_hits, fulltext_hits])
+        # 闸门判定(与主链路同一配置单点+同一纯函数;off 形态 verdict=None,
+        # 原样透出;would_drop 影子记录)
+        configs = self._gate_configs()
+        if configs is None:
+            # off 形态:阈值不进判定(gate_hits 对 "off" 原样短路),零值仅
+            # 满足签名;verdict=None/would_drop=0 即"未启用"的透出形态
+            mode, vec_cfg, ft_cfg = "off", dict(_GATE_UNUSED), dict(_GATE_UNUSED)
+        else:
+            mode, vec_cfg, ft_cfg = configs
+        vec_gate = gate_hits(vector_hits, mode=mode, **vec_cfg)
+        ft_gate = gate_hits(fulltext_hits, mode=mode, **ft_cfg)
+        return {
+            "question": question,
+            "mode": mode,
+            "vector": {
+                "hits": [
+                    {
+                        "schema_name": h.schema_name,
+                        "table_name": h.table_name,
+                        "score": round(h.score, 6),
+                        "source": h.source,
+                    }
+                    for h in vector_hits
+                ],
+                "verdict": vec_gate.verdict.as_dict() if vec_gate.verdict else None,
+                "would_drop": vec_gate.would_drop,
+            },
+            "fulltext": {
+                "hits": [
+                    {
+                        "schema_name": h.schema_name,
+                        "table_name": h.table_name,
+                        "score": round(h.score, 6),
+                        "source": h.source,
+                    }
+                    for h in fulltext_hits
+                ],
+                "verdict": ft_gate.verdict.as_dict() if ft_gate.verdict else None,
+                "would_drop": ft_gate.would_drop,
+            },
+            "fused": [
+                {
+                    "schema_name": h.schema_name,
+                    "table_name": h.table_name,
+                    "score": round(h.score, 6),
+                }
+                for h in fused
+            ],
+        }
 
     # ============ 回写(成功 SQL) ============
 
@@ -631,6 +818,11 @@ class RagService:
         except Exception:  # noqa: BLE001  # 回写永不阻断主流程
             log.warning("query_history 回写失败(不阻断主流程)", exc_info=True)
             await self._repo.rollback()
+
+    async def evict_ctx(self, tenant_id: str, datasource_key: str) -> None:
+        """070:样本准入变更后 ctx 缓存按租户+数据源精确失效(复用语义:
+        few-shot 样本进出召回会改变同问句的召回产物,缓存须同步)。"""
+        await self._cache.evict(tenant_id, datasource_key)
 
     # ============ 列注释读取(041 呈现层列标签) ============
 

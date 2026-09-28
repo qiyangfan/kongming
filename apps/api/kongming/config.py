@@ -84,6 +84,17 @@ class Settings(BaseSettings):
     # 内部元数据通道:租户 schema 内省表数上限(防 prompt 膨胀)
     meta_schema_max_tables: int = Field(default=50, ge=1)
 
+    # 064 召回相关度闸门:off(缺省,零回归)| shadow(只记录)| primary(裁剪)。
+    # 阈值按路独立(向量=余弦相似度 / 全文=ts_rank 量纲不同,不共用);
+    # 缺省值保守(不裁),由影子阶段分布标定后调整。
+    rag_gate_mode: str = "off"
+    rag_gate_vector_top1: float = Field(default=0.0, ge=0.0)
+    rag_gate_vector_mean: float = Field(default=0.0, ge=0.0)
+    rag_gate_fulltext_top1: float = Field(default=0.0, ge=0.0)
+    rag_gate_fulltext_mean: float = Field(default=0.0, ge=0.0)
+    rag_gate_min_count: int = Field(default=1, ge=1)
+    rag_gate_mean_window: int = Field(default=3, ge=1)
+
     # rag 上传上限(009):文本类/PDF·Word 分档字节上限
     rag_text_upload_max_bytes: int = Field(default=1024 * 1024, ge=1024)
     rag_binary_upload_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024)
@@ -109,6 +120,18 @@ class Settings(BaseSettings):
     # 写工具确认窗口(分钟)
     tool_rate_limit_per_minute: int = Field(default=60, ge=1)
     tool_confirm_ttl_minutes: int = Field(default=15, ge=1)
+
+    # 问答成本控制(062):登录用户问答面分钟级速率((租户,用户) 维度)+ 租户
+    # 日/月按次配额(已用量=sys_llm_usage 行数,含失败尝试——038 既有口径);
+    # 公开嵌入面(助手标识, 客户端 IP) 维度速率。0=不限(关闭该闸)
+    chat_rate_per_minute: int = Field(default=20, ge=0)
+    chat_quota_daily_calls: int = Field(default=500, ge=0)
+    chat_quota_monthly_calls: int = Field(default=10000, ge=0)
+    bot_chat_rate_per_minute: int = Field(default=30, ge=0)
+
+    # 问答结果行数上限(062):chat 面 SQL 执行行数统一配置(取代 inline 魔数,
+    # 与导出路径 export_max_rows 同语义不同阀:结果表渲染上限远低于导出)
+    chat_result_max_rows: int = Field(default=1000, ge=1)
 
     # cloud-code-sandbox(027):默认关闭——开启且宿主 podman 可用才接 runner;
     # 镜像名/超时/内存/CPU 限额进容器参数(常量拼装,design D1)

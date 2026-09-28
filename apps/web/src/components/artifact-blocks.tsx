@@ -22,6 +22,12 @@ import { MarkdownText } from "@/components/markdown-text";
 import { rerunArtifact } from "@/lib/chat-api";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  CitationSourcesPanel,
+  renderWithCitations,
+  useCitationHighlight,
+  type CitationSource,
+} from "@/components/citation-panel";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -190,10 +196,19 @@ export function ChartArtifactCard({
   );
 }
 
-/* document 卡(spec):Markdown 渲染(子集,原始 HTML 不解析)+ 一键复制 */
-export function DocumentCard({ content }: { content: string }) {
+/* document 卡(spec):Markdown 渲染(子集,原始 HTML 不解析)+ 一键复制。
+   068:文档道引用——正文角标(【引用键】→ 短显徽章,点击定位来源条目高亮)+
+   来源可折叠列表;sources 空(历史消息/纯图片路径)零渲染 */
+export function DocumentCard({
+  content,
+  sources = [],
+}: {
+  content: string;
+  sources?: CitationSource[];
+}) {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { activeKey, highlight } = useCitationHighlight();
 
   async function copy(): Promise<void> {
     setError(null);
@@ -209,8 +224,14 @@ export function DocumentCard({ content }: { content: string }) {
   return (
     <div className="space-y-1">
       <div className="px-1 text-md leading-relaxed text-foreground">
-        <MarkdownText text={content} />
+        {sources.length > 0 ? (
+          <CitedDocumentText content={content} sources={sources} onCite={highlight} />
+        ) : (
+          <MarkdownText text={content} />
+        )}
       </div>
+      {/* 068:来源区(与正文角标同 источник) */}
+      <CitationSourcesPanel sources={sources} activeKey={activeKey} />
       <div className="flex items-center gap-2">
         <Button
           variant="ghost"
@@ -228,6 +249,44 @@ export function DocumentCard({ content }: { content: string }) {
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+/** 068:带引用的文档正文(按空行分段;每段内【合法键】渲染角标)。
+ *  段内渲染:整段若非 Markdown 结构(纯文本段)直接替换标记;含 Markdown
+ *  结构的段(列表/标题等)仍整段走 MarkdownText——角标仅覆盖纯文本段,
+ *  净化后的合法键集中在陈述句(引用形态),列表项内引用为罕见形态可降级。 */
+function CitedDocumentText({
+  content,
+  sources,
+  onCite,
+}: {
+  content: string;
+  sources: CitationSource[];
+  onCite: (key: string) => void;
+}) {
+  const paragraphs = content.split(/\n\s*\n/);
+  return (
+    <div className="space-y-2">
+      {paragraphs.map((para, i) => {
+        const parts = renderWithCitations(para, sources, onCite);
+        const hasMark = parts.some((p) => typeof p !== "string");
+        if (!hasMark) {
+          // 无引用段:原样 Markdown 渲染(保留表格/列表等结构)
+          return <MarkdownText key={i} text={para} />;
+        }
+        // 含引用段:parts 中字符串段按 MarkdownText 渲染不可行(混合节点)——
+        // 该段整体按富文本段渲染:字符串段直接输出(段落语义由 Markdown
+        // 结构稀少保证;引用句绝大多数为纯陈述句)
+        return (
+          <p key={i} className="leading-relaxed">
+            {parts.map((p, j) =>
+              typeof p === "string" ? <span key={j}>{p}</span> : <span key={j}>{p}</span>,
+            )}
+          </p>
+        );
+      })}
     </div>
   );
 }

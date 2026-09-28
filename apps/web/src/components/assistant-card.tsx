@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router";
 import {
   ChevronRight,
   Database,
@@ -10,6 +11,7 @@ import {
   Info,
   Lightbulb,
   Loader2,
+  Ruler,
   ShieldOff,
   ThumbsDown,
   ThumbsUp,
@@ -21,6 +23,7 @@ import { ChartArtifactCard, DocumentCard, SqlArtifactCard } from "@/components/a
 import type { ChartSpec } from "@/components/chart-shared";
 import { normalizeBinding } from "@/components/chart-shared";
 import type { ArtifactOut } from "@/lib/chat-api";
+import { formatDateTime } from "@/lib/datetime";
 import { humanizeErrorText, type SessionMessageOut } from "@/lib/api";
 import { explainPlan, exportResult } from "@/lib/chat-api";
 import { submitFeedback } from "@/lib/feedback-api";
@@ -111,6 +114,13 @@ function normalize(msg: SessionMessageOut): {
   chartBindings: ChartSpec[];
   artifacts: ArtifactOut[];
   columnLabels: string[];
+  metricHits: {
+    metric_id: string;
+    metric_name: string;
+    sql_template: string;
+    updated_at?: string | null;
+  }[];
+  sources: { citation_key: string; source_ref?: string; doc_name?: string }[];
 } {
   const r = msg.result;
   // 049:候选优先(绑定随候选);存量档(仅单图)经 normalizeBinding 收为
@@ -139,6 +149,19 @@ function normalize(msg: SessionMessageOut): {
     chartBindings,
     artifacts: r?.artifacts ?? [],
     columnLabels: r?.column_labels ?? [],
+    // 076:口径依据(纯增;空=无命中/存量档零回归)
+    metricHits: (r?.metric_hits ?? []).map((m) => ({
+      metric_id: m.metric_id,
+      metric_name: m.metric_name,
+      sql_template: m.sql_template,
+      updated_at: m.updated_at,
+    })),
+    // 068:文档道来源(纯增;空=SQL 道/存量档零回归)
+    sources: (r?.sources ?? []).map((x) => ({
+      citation_key: x.citation_key,
+      source_ref: x.source_ref,
+      doc_name: x.doc_name,
+    })),
   };
 }
 
@@ -221,7 +244,7 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
   return (
     <div className="space-y-3">
       {docArt ? (
-        <DocumentCard content={docArt.content} />
+        <DocumentCard content={docArt.content} sources={result.sources} />
       ) : (
         msg.summary && <p className="px-1 text-md leading-relaxed text-foreground">{msg.summary}</p>
       )}
@@ -278,6 +301,10 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
       {msg.sql && msg.id && <ExplainCollapsible messageId={msg.id} />}
       {/* msg.id 守卫(017 乐观快照容错分支 id 可能为空串):
           无落库 id 则无执行计划可查,渲染会 422 白点 */}
+
+      {/* 076:口径依据面板(语义层命中可见——治理投资的价值链最后一环);
+          无命中/存量档零渲染;指标名跳 /admin/semantic 定位定义 */}
+      {result.metricHits.length > 0 && <MetricProvenancePanel hits={result.metricHits} />}
 
       {(result.insights?.length ?? 0) > 0 && (
         <div className="space-y-1">
@@ -652,4 +679,54 @@ function formatPlanNode(node: Record<string, unknown>, depth: number): string {
     }
   }
   return lines.join("\n");
+}
+
+/* 076:口径依据折叠面板(指标名 + 口径表达式 + 修订时间)。取色全走 token
+   (Article 8);指标名为语义层管理页定位链接(system:semantic:manage 守卫,
+   无权限时 router 兜 403——不按权限隐藏,避免"看不见≠不存在"误导)。 */
+function MetricProvenancePanel({
+  hits,
+}: {
+  hits: {
+    metric_id: string;
+    metric_name: string;
+    sql_template: string;
+    updated_at?: string | null;
+  }[];
+}) {
+  const navigate = useNavigate();
+  return (
+    <Collapsible>
+      <CollapsibleTrigger className="group flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+        <ChevronRight
+          className="size-3.5 transition-transform group-data-[state=open]:rotate-90"
+          aria-hidden
+        />
+        <Ruler className="size-3.5" aria-hidden />
+        口径依据({hits.length})
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <ul className="mt-1.5 space-y-2 rounded-md border border-border bg-muted/40 p-3">
+          {hits.map((h) => (
+            <li key={h.metric_id || h.metric_name} className="space-y-0.5">
+              <Button
+                variant="link"
+                size="xs"
+                className="h-auto p-0 text-xs font-medium"
+                onClick={() => navigate("/admin/semantic")}
+              >
+                {h.metric_name}
+              </Button>
+              <p className="font-mono text-xs text-muted-foreground">{h.sql_template}</p>
+              {h.updated_at && (
+                <p className="text-2xs text-muted-foreground">
+                  修订于 {formatDateTime(h.updated_at)}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      </CollapsibleContent>
+    </Collapsible>
+  );
 }

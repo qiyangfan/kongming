@@ -118,3 +118,29 @@ class FeedbackRepo(Protocol):
 
     async def commit(self) -> None: ...
     async def rollback(self) -> None: ...
+
+
+class FeedbackSampleGate(Protocol):
+    """070 纠错样本启停窄端口(领域 service 不直接依赖 SQLAlchemy/Redis)。
+
+    promote:ADOPTED 时把纠错 SQL 晋升为可召回样本(含 embedding;
+    embedding 不可用 SHALL 抛 PromotionUnavailable——调用方收敛 503,
+    与反馈处置同事务,无部分提交);disable:暂停召回(非 ADOPTED/重复
+    提交的旧样本;行保留作来源审计,不删)。
+    """
+
+    async def promote(
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        question: str,
+        sql_text: str,
+        feedback_message_id: str,
+    ) -> None: ...
+
+    async def disable(self, *, feedback_message_id: str) -> None: ...
+
+    async def evict(self, *, tenant_id: str, datasource_key: str) -> None:
+        """晋升/停用提交后 ctx 缓存精确失效(租户+数据源;提交后调用)。"""
+        ...

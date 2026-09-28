@@ -6,6 +6,7 @@
 
 import hashlib
 import logging
+import re
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
@@ -75,6 +76,18 @@ async def upload_document(
     return doc_id, len(chunks), False
 
 
+def derive_citation_key(*, parent_id: str, doc_name: str) -> str:
+    """068:稳定引用键(确定性派生;纯函数)。
+
+    形态=可读前缀(文档名去扩展名)+ `-` + 定长哈希后缀(父块主键 SHA-256
+    前 4 位十六进制)。同一父块任何一次召回派生结果恒定(与命中名次/路数/
+    请求次序无关);由主键派生故改名/重切块不改变键(历史引用不腐坏)。
+    """
+    hasher = hashlib.sha256(parent_id.encode("utf-8")).hexdigest()[:4].upper()
+    prefix = re.sub(r"\.[^.]+$", "", doc_name).strip() or "文档"
+    return f"{prefix}-{hasher}"
+
+
 async def retrieve_docs(
     repo: SqlDocumentRepo,
     embedder: EmbeddingPort,
@@ -121,11 +134,22 @@ async def retrieve_docs(
                 break
         parents = await repo.fetch_parents(tenant_id=tenant_id, parent_ids=parent_ids)
         by_id = {str(p["id"]): p for p in parents}
-        return [
-            {"source_ref": str(by_id[pid]["source_ref"]), "content": str(by_id[pid]["content"])}
-            for pid in parent_ids
-            if pid in by_id
-        ]
+        out: list[dict[str, str]] = []
+        for pid in parent_ids:
+            if pid not in by_id:
+                continue
+            p = by_id[pid]
+            ref = str(p["source_ref"])
+            # 068:citation_key 由父块主键派生(改名/重切块不改变键)
+            key = derive_citation_key(parent_id=pid, doc_name=ref.split(" §")[0])
+            out.append(
+                {
+                    "citation_key": key,
+                    "source_ref": ref,
+                    "content": str(p["content"]),
+                }
+            )
+        return out
     except Exception:
         log.warning("文档检索失败(降级空)", exc_info=True)
         return []

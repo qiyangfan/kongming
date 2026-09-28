@@ -611,3 +611,135 @@ async def test_report_invalid_status_and_negative_latency_422(
         json={"records": [{**base, "latency_ms": -1}]},
     )
     assert r2.status_code == 422
+
+
+# ============ 077 出站协议归因 ============
+
+
+def _records_protocol() -> dict[str, Any]:
+    """两条同名 model、不同 protocol 的上报(混同拆分场景)。"""
+    return {
+        "records": [
+            {
+                "trace_id": "tr-p1",
+                "tenant_key": "default",
+                "model": "qwen-plus",
+                "task": "SQL_GEN",
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "protocol": "openai",
+            },
+            {
+                "trace_id": "tr-p1",
+                "tenant_key": "default",
+                "model": "qwen-plus",
+                "task": "SQL_GEN",
+                "prompt_tokens": 20,
+                "completion_tokens": 5,
+                "total_tokens": 25,
+                "status": "ERROR",
+                "protocol": "responses",
+            },
+        ]
+    }
+
+
+async def test_report_protocol_persisted(client: AsyncClient, session: AsyncSession) -> None:
+    """agent→api 上报携带 protocol;三通道透传落库;未携带落 null 不报错。"""
+    await seed_all(session, get_settings())
+    r = await client.post("/internal/llm-usage", headers=INTERNAL, json=_records_protocol())
+    assert r.status_code == 200
+    rows = (
+        await session.execute(
+            text(
+                "SELECT protocol, status FROM public.sys_llm_usage"
+                " WHERE trace_id='tr-p1' ORDER BY total_tokens"
+            )
+        )
+    ).all()
+    assert [r.protocol for r in rows] == ["openai", "responses"]
+    # 未携带 protocol 的旧版上报:落 null,不报错(滚动升级窗口)
+    r2 = await client.post("/internal/llm-usage", headers=INTERNAL, json=_records())
+    assert r2.status_code == 200
+    n = (
+        await session.execute(
+            text("SELECT count(*) FROM public.sys_llm_usage WHERE protocol IS NULL")
+        )
+    ).scalar_one()
+    assert n == 2
+
+
+async def test_page_protocol_filter_and_column(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """任务 1.2:明细分页按 protocol 筛选只返回该协议行;同名 model 两条目
+    流量可拆分;返回行含 protocol 列(null 行不炸)。"""
+    await seed_all(session, get_settings())
+    await client.post("/internal/llm-usage", headers=INTERNAL, json=_records_protocol())
+    await client.post("/internal/llm-usage", headers=INTERNAL, json=_records())
+    token = await _admin_token(client, session)
+    r = await client.get(
+        "/system/llm-usage/page?protocol=openai",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200
+    protos = {row["protocol"] for row in r.json()["rows"]}
+    assert protos == {"openai"}  # 只返回 openai 行(responses 行被过滤)
+    r2 = await client.get(
+        "/system/llm-usage/page?protocol=responses",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r2.status_code == 200
+    assert all(row["protocol"] == "responses" for row in r2.json()["rows"])
+
+
+async def test_summary_protocol_filter(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """任务 1.3:汇总按 protocol 过滤后 tokens/calls 计数只含该协议;
+    不过滤时与现状逐字一致(零回归);无权限 403。"""
+    await seed_all(session, get_settings())
+    await client.post("/internal/llm-usage", headers=INTERNAL, json=_records_protocol())
+    token = await _admin_token(client, session)
+    auth = {"Authorization": f"Bearer {token}"}
+    unfiltered = await client.get("/system/llm-usage/summary", headers=auth)
+    assert unfiltered.status_code == 200
+    calls_all = sum(i["calls"] for i in unfiltered.json()["items"])
+    filtered = await client.get("/system/llm-usage/summary?protocol=responses", headers=auth)
+    assert filtered.status_code == 200
+    calls_openai = sum(i["calls"] for i in filtered.json()["items"])
+    assert calls_openai == 1  # responses 行仅 1 条(ERROR 行同样计入)
+    assert calls_all == 2
+    # 无 system:llm-usage:view → 403(既有守门,聚合零泄漏)
+    uid = await make_user("usage_noperm_p")
+    rid = await _mkdir_role(client, session, "USG-NOPERM-P", [])
+    await _bind(session, "sys_user_role", uid, rid)
+    await _bind(session, "sys_user_tenant", uid, await _default_tenant_id(session))
+    token2 = await _login(client, "usage_noperm_p")
+    r403 = await client.get(
+        "/system/llm-usage/summary?protocol=openai",
+        headers={"Authorization": f"Bearer {token2}"},
+    )
+    assert r403.status_code == 403
+
+
+async def _mkdir_role(client: AsyncClient, s: AsyncSession, role_key: str, perms: list[str]) -> str:
+    rid = (
+        await s.execute(
+            text(
+                "INSERT INTO public.sys_role (id, role_key, role_name, data_scope)"
+                " VALUES (gen_random_uuid(), :k, :k, 'SELF') RETURNING id"
+            ),
+            {"k": role_key},
+        )
+    ).scalar_one()
+    return str(rid)
+
+
+async def _default_tenant_id(s: AsyncSession) -> str:
+    return str(
+        (
+            await s.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'"))
+        ).scalar_one()
+    )

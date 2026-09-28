@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from kongming.chat.agent_client import AgentClient, AgentReply, AgentUnavailable, parse_agent_reply
+from kongming.chat.costgate import ChatCostGate as ChatCostGate
 from kongming.chat.export import to_csv, to_xlsx
 from kongming.chat.models import (
     ChartCandidate,
@@ -132,6 +133,10 @@ class ChatOutcome:
     artifacts: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
     # 030:附件引用摘要(filename/mime/size;空数组零回归)
     attachments: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
+    # 076:语义层口径命中(链路输入;随 result_json 落库+回显;空=无命中)
+    metric_hits: list[dict[str, str | None]] = field(default_factory=list[dict[str, str | None]])
+    # 068:文档道结构化来源(净化后正文存活标记投影;随 result_json 落库+回显)
+    sources: list[dict[str, str]] = field(default_factory=list[dict[str, str]])
     # 022:本论为显式记忆短路(R1-M2:隐式提取任务据此排除,防同内容重复落 IMPLICIT)
     memory_shortcut: bool = False
     # 041:呈现层列标签(与 columns 等长对齐;未命中回退原始列名;
@@ -166,6 +171,10 @@ class MessageResult:
     artifacts: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
     # 041:呈现层列标签(读档优先;存量档缺失→空列表,消费方回退 columns)
     column_labels: list[str] = field(default_factory=list[str])
+    # 076:语义层口径命中(读档优先;存量档缺失→空,不反查指标表重算)
+    metric_hits: list[dict[str, str | None]] = field(default_factory=list[dict[str, str | None]])
+    # 068:文档道来源(读档优先;存量档缺失→空;名称快照不回查文档表)
+    sources: list[dict[str, str]] = field(default_factory=list[dict[str, str]])
 
 
 @dataclass(frozen=True)
@@ -245,6 +254,7 @@ class ChatService:
             "Callable[..., Coroutine[Any, Any, None]] | None"
         ) = None,
         column_comments: ColumnCommentReader | None = None,  # 041:列标签(可选注入)
+        cost_gate: ChatCostGate | None = None,  # 062:成本双闸(可选注入)
     ) -> None:
         self._repo = repo
         self._agent = agent
@@ -261,6 +271,7 @@ class ChatService:
         self._attachment_checker = attachment_checker
         self._implicit_memory_task = implicit_memory_task
         self._column_comments = column_comments
+        self._cost_gate = cost_gate
 
     @property
     def agent_for_tasks(self) -> AgentClient:
@@ -295,6 +306,11 @@ class ChatService:
         """问答前段(同步/流式共用唯一实现):租户→数据源预检→会话→history→
         trace_id;USER 消息落库也在此(流式路径须在 SSE 响应开始前完成)。"""
         tenant_id, resolved_key = await self._resolve_tenant(user_id, tenant_key)
+
+        # 062:成本双闸(速率+配额)——租户解析后、烧 LLM 前 fail-fast;
+        # 未注入=不启用(部署缺配时零回归,不阻断主链路)
+        if self._cost_gate is not None:
+            await self._cost_gate.check_login(tenant_id=tenant_id, user_id=user_id)
 
         # 数据源入口预检(008 design D8):非 default 校验存在+启用+归属当前租户,
         # fail-fast 同形 400——不进 LLM 链路、不建会话;连接信息不出控制面(ADR-002)
@@ -682,8 +698,9 @@ class ChatService:
                 elif event == "error":
                     # agent 意外异常帧:等价传输层失败,由 api 统一收敛(不透传)
                     error_text = AGENT_UNAVAILABLE_TEXT
-                elif event in ("stage", "sql", "summary", "tool_call"):
-                    # 过程事件白名单透传(R1-R6:事件名/形状由 api 收口;019 增 tool_call);
+                elif event in ("stage", "sql", "summary", "tool_call", "trace"):
+                    # 过程事件白名单透传(R1-R6:事件名/形状由 api 收口;019 增 tool_call;
+                    # trace=063/064/068/080 诊断信号通道,不进用户响应只作观测);
                     # 单帧畸形跳过不中断(上游同款容错)
                     try:
                         data = json.loads(data_json)
@@ -959,12 +976,17 @@ class ChatService:
                             for c in chart_candidates
                         ],
                         "artifacts": artifacts,  # 026
+                        "metric_hits": reply.metric_hits,  # 076 口径依据随档
+                        "sources": reply.sources,  # 068 文档道来源随档
                         "error": error,
                         "error_detail": error_detail,  # 047 原始技术错误随档
                     },
                     ensure_ascii=False,
                     default=str,
                 )
+                # 069:四质量信号随终态单点落库(trace_id 已在函数签名;
+                # resolved_question 仅 agent 实际改写且非空时携带;prompt_version
+                # 随每轮 QueryOut 回传;同步/流式共用本出口,零分叉)
                 mid = await repo.insert_message(
                     session_id=sid,
                     role="ASSISTANT",
@@ -973,6 +995,10 @@ class ChatService:
                     summary=summary or None,
                     status=status,
                     attachments=attachments,
+                    trace_id=trace_id or None,
+                    retry_count=reply.retry_count,
+                    resolved_question=reply.resolved_question,
+                    prompt_version=reply.prompt_version,
                 )
                 await self._persist_touch_quietly(repo, sid)
             except ChatStoreError:
@@ -1023,6 +1049,8 @@ class ChatService:
             artifacts=[dict(a) for a in artifacts],
             attachments=[dict(a) for a in attachments or []],
             column_labels=column_labels,
+            metric_hits=reply.metric_hits,
+            sources=reply.sources,
         )
 
     async def _finalize_unavailable(
@@ -1411,6 +1439,37 @@ class ChatService:
                 error_detail=error_detail,
                 artifacts=artifacts,
                 column_labels=col_labels,  # 041 读档;存量档缺失→空(消费方回退 columns)
+                metric_hits=(  # 076 读档;存量档缺失→空,SHALL NOT 反查指标表重算
+                    [
+                        {
+                            "metric_id": str(hd.get("metric_id") or ""),
+                            "metric_name": str(hd.get("metric_name") or ""),
+                            "sql_template": str(hd.get("sql_template") or ""),
+                            "updated_at": (
+                                str(hd["updated_at"]) if hd.get("updated_at") is not None else None
+                            ),
+                        }
+                        for h in cast("list[object]", mh_raw)
+                        if isinstance(h, dict)
+                        for hd in [cast("dict[str, object]", h)]
+                    ]
+                    if isinstance(mh_raw := d.get("metric_hits"), list)
+                    else []
+                ),
+                sources=(  # 068 读档;存量档缺失→空;名称为提问时点快照
+                    [
+                        {
+                            "citation_key": str(sd.get("citation_key") or ""),
+                            "source_ref": str(sd.get("source_ref") or ""),
+                            "doc_name": str(sd.get("doc_name") or ""),
+                        }
+                        for si in cast("list[object]", src_raw)
+                        if isinstance(si, dict)
+                        for sd in [cast("dict[str, object]", si)]
+                    ]
+                    if isinstance(src_raw := d.get("sources"), list)
+                    else []
+                ),
             )
         question = row.get("question")
         summary = row.get("summary")

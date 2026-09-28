@@ -24,6 +24,13 @@ from kongming.attachment.repository import SqlAttachmentRepo
 from kongming.auth.repository import SqlOperLogRepo, SqlPermRepo
 from kongming.auth.router import current_user, require_perm
 from kongming.chat.agent_client import AgentClient
+from kongming.chat.costgate import (
+    ChatCostGate,
+    ChatQuotaExceeded,
+    ChatQuotaUnavailable,
+    ChatRateLimited,
+    quota_warn_var,
+)
 from kongming.chat.memory_tasks import extract_memory_task
 from kongming.chat.ports import (
     ExplainOutcome,
@@ -59,6 +66,8 @@ from kongming.internal.meta import MetaTableOut
 from kongming.rag.cache import ContextCache
 from kongming.rag.repository import RagRepository
 from kongming.rag.service import RagService
+from kongming.redis_client import get_redis
+from kongming.toolcall.ratelimit import RedisRateLimiter
 from kongming.toolcall.repository import SqlToolCallRepo
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -84,6 +93,8 @@ def get_rag_service(session: AsyncSession) -> RagService:
         cache=ContextCache(get_redis()),
         # 047:知识写路径级联失效建议缓存(DELETE 同事务,rag commit 收口)
         suggestion_evictor=SuggestionRepository(session),
+        # 064:召回闸门配置(off 缺省零回归)
+        gate_settings=get_settings(),
     )
 
 
@@ -139,6 +150,7 @@ class _InternalExecuteRunner:
         sql_text: str,
         user_id: str,
     ) -> SqlRunOutcome:
+        # 062:行数上限配置化(与导出 export_max_rows 同语义不同阀;缺省 1000 行为不变)
         try:
             return await internal_service.execute(
                 self._s,
@@ -148,13 +160,64 @@ class _InternalExecuteRunner:
                 sql_text=sql_text,
                 user_id=user_id,
                 question=None,
-                limit=1000,
+                limit=get_settings().chat_result_max_rows,
             )
         except internal_service.InvalidDatasource as e:
             # 竞态兜底(chat 已预检):禁用/删除发生在预检与执行之间(与 explain 适配器同范式)
             raise InvalidDatasource(str(e)) from e
         except (internal_service.TenantNotFound, internal_service.TenantBindingForbidden) as e:
             raise TenantForbidden(str(e)) from e
+
+
+class _ChatUsageCounter:
+    """062:租户窗口调用计数适配(独立短会话——闸判定不占用请求作用域会话)。
+
+    口径:sys_llm_usage 行数按 created_at >= 窗口起点 count(含失败尝试行;
+    038「失败调用也采集」既有语义,072 重试后仍成立)。
+    """
+
+    async def count_calls(
+        self, *, tenant_id: str, day_start: object, month_start: object
+    ) -> tuple[int, int]:
+        from sqlalchemy import text as _text
+
+        async with get_sessionmaker()() as s:
+            row = (
+                await s.execute(
+                    _text(
+                        "SELECT"
+                        " COUNT(*) FILTER (WHERE created_at >= :d) AS day_calls,"
+                        " COUNT(*) FILTER (WHERE created_at >= :m) AS month_calls"
+                        " FROM public.sys_llm_usage WHERE tenant_id = CAST(:t AS uuid)"
+                    ),
+                    {"t": tenant_id, "d": day_start, "m": month_start},
+                )
+            ).one()
+        return int(row[0]), int(row[1])
+
+
+def _build_cost_gate() -> ChatCostGate:
+    """062:成本双闸组合根(limiter=Redis 固定窗口;counter=上条适配;
+    oper=SqlOperLogRepo 独立短会话;参数取自 settings,0=不限)。"""
+    settings = get_settings()
+
+    class _Oper:
+        """审计注入(SqlOperLogRepo 独立短会话;bot 面 _QuotaOper 同范式)。"""
+
+        async def log(self, *, action: str, target: str, detail: dict[str, object]) -> None:
+            from kongming.auth.repository import SqlOperLogRepo
+
+            async with get_sessionmaker()() as s:
+                await SqlOperLogRepo(s).add(None, action, target, detail)
+
+    return ChatCostGate(
+        limiter=RedisRateLimiter(get_redis()),
+        counter=_ChatUsageCounter(),
+        oper_logger=_Oper(),
+        rate_per_minute=settings.chat_rate_per_minute,
+        quota_daily_calls=settings.chat_quota_daily_calls,
+        quota_monthly_calls=settings.chat_quota_monthly_calls,
+    )
 
 
 def get_chat_service(
@@ -184,6 +247,7 @@ def get_chat_service(
         attachment_checker=_AttachmentChecker(session),  # 030(关键字传参防错位)
         implicit_memory_task=extract_memory_task,  # 022 隐式提取(组合根绑定)
         column_comments=get_rag_service(session),  # 041 列标签(同一 RagService 的窄端口视角)
+        cost_gate=_build_cost_gate(),  # 062 成本双闸(速率+配额)
     )
 
 
@@ -456,6 +520,23 @@ class PendingToolCallOut(BaseModel):
     args_digest: str = ""
 
 
+class MetricHitOut(BaseModel):
+    """076(纯增):语义层口径命中(标识/名称/口径表达式/修订时间)。"""
+
+    metric_id: str
+    metric_name: str
+    sql_template: str
+    updated_at: str | None = None
+
+
+class SourceOut(BaseModel):
+    """068(纯增):文档道来源条目(引用键/来源标识/文档名快照)。"""
+
+    citation_key: str
+    source_ref: str = ""
+    doc_name: str = ""
+
+
 class ChatQueryOut(BaseModel):
     session_id: str | None
     success: bool
@@ -484,6 +565,10 @@ class ChatQueryOut(BaseModel):
     attachments: list[dict[str, object]] = []
     # 041(纯增):呈现层列标签,与 columns 等长对齐(空=未接线/历史存量,回退 columns)
     column_labels: list[str] = []
+    # 076(纯增):语义层口径命中(空=无命中;链路输入透出,老 agent 零回归)
+    metric_hits: list[MetricHitOut] = []
+    # 068(纯增):文档道来源(空=SQL 道/无命中;老 agent 零回归)
+    sources: list[SourceOut] = []
 
 
 def _out(o: ChatOutcome) -> ChatQueryOut:
@@ -530,6 +615,23 @@ def _out(o: ChatOutcome) -> ChatQueryOut:
             for a in o.artifacts
         ],
         column_labels=o.column_labels,
+        metric_hits=[
+            MetricHitOut(
+                metric_id=str(m.get("metric_id") or ""),
+                metric_name=str(m.get("metric_name") or ""),
+                sql_template=str(m.get("sql_template") or ""),
+                updated_at=(str(m["updated_at"]) if m.get("updated_at") is not None else None),
+            )
+            for m in o.metric_hits
+        ],
+        sources=[
+            SourceOut(
+                citation_key=str(s.get("citation_key") or ""),
+                source_ref=str(s.get("source_ref") or ""),
+                doc_name=str(s.get("doc_name") or ""),
+            )
+            for s in o.sources
+        ],
     )
 
 
@@ -537,12 +639,22 @@ def _out(o: ChatOutcome) -> ChatQueryOut:
     "/query",
     response_model=ChatQueryOut,
     dependencies=[Depends(require_perm("chat:execute"))],
+    responses={
+        429: {
+            "description": (
+                "速率/配额超限(062;detail=CHAT_RATE_LIMITED / CHAT_QUOTA_EXCEEDED,"
+                "响应头 X-Quota-Warning 预警)"
+            )
+        },
+        503: {"description": "配额读数失败(062 fail-closed;detail=CHAT_QUOTA_UNAVAILABLE)"},
+    },
 )
 async def chat_query(
     req: ChatQueryIn,
     user: Annotated[dict[str, object], Depends(current_user)],
     svc: Annotated[ChatService, Depends(get_chat_service)],
     background: BackgroundTasks,
+    response: Response,
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> ChatQueryOut:
     try:
@@ -559,6 +671,16 @@ async def chat_query(
         )
     except TenantForbidden:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
+    except ChatRateLimited:
+        raise HTTPException(status_code=429, detail="CHAT_RATE_LIMITED") from None
+    except ChatQuotaExceeded as e:
+        raise HTTPException(
+            status_code=429,
+            detail=f"CHAT_QUOTA_EXCEEDED: {e.warn or 'CHAT_QUOTA'}",
+            headers={"X-Quota-Warning": e.warn} if e.warn else None,
+        ) from None
+    except ChatQuotaUnavailable:
+        raise HTTPException(status_code=503, detail="CHAT_QUOTA_UNAVAILABLE") from None
     except AttachmentNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     except SessionNotFound:
@@ -581,6 +703,10 @@ async def chat_query(
                 answer=outcome.summary,
                 agent=svc.agent_for_tasks,
             )
+    # 062:达配额预警线回落 X-Quota-Warning(不拒绝;与 034 网关切面同口径)
+    warn = quota_warn_var.get()
+    if warn:
+        response.headers["X-Quota-Warning"] = warn
     return _out(outcome)
 
 
@@ -728,6 +854,17 @@ class StreamToolCallOut(BaseModel):
     result_digest: str = ""
 
 
+class StreamTraceOut(BaseModel):
+    """trace 事件 data:agent 侧诊断信号(内部运维口径,不渲染进用户答案)。
+
+    063 表预筛/064 召回闸门/068 引用净化/080 装配预算共用本通道;
+    fields 为自由映射(键集随能力演进,前向兼容);node=发起节点名。
+    """
+
+    node: str
+    fields: dict[str, Any]
+
+
 # model 键使 FastAPI 把全部事件模型注册进 components(ADR-005 类型生成可达),
 # content 键描述 SSE 事件流的真实形态(6 类事件 data 的 oneOf)
 _STREAM_RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -738,11 +875,13 @@ _STREAM_RESPONSES: dict[int | str, dict[str, Any]] = {
             | StreamSummaryOut
             | StreamToolCallOut
             | StreamErrorOut
+            | StreamTraceOut
             | ChatQueryOut
         ),
         "description": (
-            "SSE 事件流:stage/sql/summary/tool_call 过程事件逐帧下发;result=data 与同步"
-            " /chat/query 响应逐字段一致;error=传输层/意外失败终态;注释行(: ping)为心跳"
+            "SSE 事件流:stage/sql/summary/tool_call/trace 过程事件逐帧下发;result=data 与同步"
+            " /chat/query 响应逐字段一致;error=传输层/意外失败终态;trace=agent 诊断信号"
+            "(预筛/闸门/净化/预算,不渲染进用户答案);注释行(: ping)为心跳"
         ),
         "content": {
             "text/event-stream": {
@@ -753,6 +892,7 @@ _STREAM_RESPONSES: dict[int | str, dict[str, Any]] = {
                         {"$ref": "#/components/schemas/StreamSummaryOut"},
                         {"$ref": "#/components/schemas/StreamToolCallOut"},
                         {"$ref": "#/components/schemas/StreamErrorOut"},
+                        {"$ref": "#/components/schemas/StreamTraceOut"},
                         {"$ref": "#/components/schemas/ChatQueryOut"},
                     ]
                 }
@@ -788,7 +928,16 @@ async def _relay_gen(handle: StreamHandle) -> AsyncIterator[str]:
     "/query/stream",
     dependencies=[Depends(require_perm("chat:execute"))],
     response_class=StreamingResponse,
-    responses=_STREAM_RESPONSES,
+    responses={
+        **_STREAM_RESPONSES,
+        429: {
+            "description": (
+                "速率/配额超限(062;detail=CHAT_RATE_LIMITED / CHAT_QUOTA_EXCEEDED,"
+                "响应头 X-Quota-Warning 预警)"
+            )
+        },
+        503: {"description": "配额读数失败(062 fail-closed;detail=CHAT_QUOTA_UNAVAILABLE)"},
+    },
 )
 async def chat_query_stream(
     req: ChatQueryIn,
@@ -810,6 +959,16 @@ async def chat_query_stream(
         )
     except TenantForbidden:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
+    except ChatRateLimited:
+        raise HTTPException(status_code=429, detail="CHAT_RATE_LIMITED") from None
+    except ChatQuotaExceeded as e:
+        raise HTTPException(
+            status_code=429,
+            detail=f"CHAT_QUOTA_EXCEEDED: {e.warn or 'CHAT_QUOTA'}",
+            headers={"X-Quota-Warning": e.warn} if e.warn else None,
+        ) from None
+    except ChatQuotaUnavailable:
+        raise HTTPException(status_code=503, detail="CHAT_QUOTA_UNAVAILABLE") from None
     except AttachmentNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     except SessionNotFound:
@@ -817,10 +976,15 @@ async def chat_query_stream(
     except InvalidDatasource:
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
     # 前段校验失败在流开始前以常规 JSON 错误响应(query-streaming spec「防线同构」)
+    # 062:达预警线的 X-Quota-Warning 随流响应头回落(不拒绝)
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    warn = quota_warn_var.get()
+    if warn:
+        headers["X-Quota-Warning"] = warn
     return StreamingResponse(
         _relay_gen(handle),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers=headers,
     )
 
 
@@ -854,6 +1018,10 @@ class MessageResultOut(BaseModel):
     artifacts: list[ArtifactOut] = []
     # 041(纯增):呈现层列标签(空=历史存量档,回退 columns)
     column_labels: list[str] = Field(default_factory=list[str])
+    # 076(纯增):口径依据(空=无命中/存量档;由正文消息单向派生,回显不重算)
+    metric_hits: list[MetricHitOut] = Field(default_factory=list[MetricHitOut])
+    # 068(纯增):文档道来源(空=SQL 道/存量档;名称快照不回查文档表)
+    sources: list[SourceOut] = Field(default_factory=list[SourceOut])
 
 
 class SessionMessageOut(BaseModel):
@@ -892,6 +1060,23 @@ def _msg_out(m: SessionMessage) -> SessionMessageOut:
             error=r.error,
             error_detail=r.error_detail,
             column_labels=r.column_labels,
+            metric_hits=[
+                MetricHitOut(
+                    metric_id=str(m.get("metric_id") or ""),
+                    metric_name=str(m.get("metric_name") or ""),
+                    sql_template=str(m.get("sql_template") or ""),
+                    updated_at=(str(m["updated_at"]) if m.get("updated_at") is not None else None),
+                )
+                for m in r.metric_hits
+            ],
+            sources=[
+                SourceOut(
+                    citation_key=str(s.get("citation_key") or ""),
+                    source_ref=str(s.get("source_ref") or ""),
+                    doc_name=str(s.get("doc_name") or ""),
+                )
+                for s in r.sources
+            ],
             artifacts=[
                 ArtifactOut(
                     type=str(a.get("type") or ""),

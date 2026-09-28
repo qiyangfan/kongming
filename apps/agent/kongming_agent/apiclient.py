@@ -9,10 +9,18 @@
 
 import logging
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Literal, cast
 
 import httpx
 
+from kongming_agent.retry import (
+    CALLBACK_MAX_ATTEMPTS,
+    CALLBACK_RETRY_BASE_MS,
+    CALLBACK_RETRY_MAX_WAIT_MS,
+    call_with_retry,
+    is_connect_phase_error,
+)
 from kongming_agent.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -53,14 +61,27 @@ class SchemaMeta:
 
 
 @dataclass(frozen=True)
+class MetricHit:
+    """语义层口径命中(076 纯增):标识/名称/口径表达式/修订时间。
+    与 metric_hints 文字段同源(api 侧派生),零凭证透传。"""
+
+    metric_id: str = ""
+    metric_name: str = ""
+    sql_template: str = ""
+    updated_at: str | None = None
+
+
+@dataclass(frozen=True)
 class RagContext:
     """/internal/rag/retrieve 召回结果(009)。schema_hint 空=零命中(回退内省)。
-    023 纯增:relations_hint/metric_hints 语义段(空串=无注入)。"""
+    023 纯增:relations_hint/metric_hints 语义段(空串=无注入)。
+    076 纯增:metric_hits 结构化口径命中(空=无命中)。"""
 
     schema_hint: str
     history_sql: str = ""
     relations_hint: str = ""
     metric_hints: str = ""
+    metric_hits: list[MetricHit] = field(default_factory=list[MetricHit])  # 076
     doc_hints: list[dict[str, str]] = field(default_factory=list[dict[str, str]])  # 024 文档段
     # 056 skill-pack 投影段(空串=零包零回归)
     skill_terms: str = ""
@@ -190,11 +211,30 @@ class ApiClient:
             # (013 挂账⑮;docstring「任何失败返回 None」自此兑现)
             log.warning("rag_retrieve 响应非 JSON,回退实时内省")
             return None
+        hits_raw = data.get("metric_hits")
+        hits: list[MetricHit] = []
+        if isinstance(hits_raw, list):
+            for h in cast("list[object]", hits_raw):
+                if not isinstance(h, dict):
+                    continue
+                hm = cast("dict[str, object]", h)
+                hits.append(
+                    MetricHit(
+                        metric_id=str(hm.get("metric_id") or ""),
+                        metric_name=str(hm.get("metric_name") or ""),
+                        sql_template=str(hm.get("sql_template") or ""),
+                        updated_at=(
+                            str(hm["updated_at"]) if hm.get("updated_at") is not None else None
+                        ),
+                    )
+                )
+        data_get = data.get
         return RagContext(
-            schema_hint=str(data.get("schema_hint") or ""),
-            history_sql=str(data.get("history_sql") or ""),
-            relations_hint=str(data.get("relations_hint") or ""),
-            metric_hints=str(data.get("metric_hints") or ""),
+            schema_hint=str(data_get("schema_hint") or ""),
+            history_sql=str(data_get("history_sql") or ""),
+            relations_hint=str(data_get("relations_hint") or ""),
+            metric_hints=str(data_get("metric_hints") or ""),
+            metric_hits=hits,
             skill_terms=str(data.get("skill_terms") or ""),
             skill_examples=str(data.get("skill_examples") or ""),
             skill_persona=str(data.get("skill_persona") or ""),
@@ -209,9 +249,10 @@ class ApiClient:
         )
 
     async def report_usage(self, records: list[dict[str, object]]) -> None:
-        """LLM 用量上报(021):fire-and-forget;任何失败仅日志(统计口径非计费)。"""
+        """LLM 用量上报(021):fire-and-forget;任何失败仅日志(统计口径非计费)。
+        072:不走 _post 重试包装——重复落库,任何失败都不重发。"""
         try:
-            resp = await self._post("/internal/llm-usage", {"records": records})
+            resp = await self._post_once("/internal/llm-usage", {"records": records})
             if resp.status_code != 200:
                 log.warning("usage 上报非 200: HTTP %s(丢弃)", resp.status_code)
         except Exception as e:  # noqa: BLE001  # 上报永不阻断主链路
@@ -231,9 +272,10 @@ class ApiClient:
         """通用工具执行回调(019):agent 只传工具名/参数/上下文,零凭证(ADR-002)。
 
         HTTP 层异常(超时/断连/5xx)收敛 status=error 喂回 LLM,不裸抛。
+        072:不走 _post 重试包装——工具副作用不假定幂等,任何失败都不重发。
         """
         try:
-            resp = await self._post(
+            resp = await self._post_once(
                 "/internal/tool/execute",
                 {
                     "trace_id": trace_id,
@@ -268,15 +310,13 @@ class ApiClient:
         self, att_id: str, *, tenant_key: str, user_id: str
     ) -> tuple[str, bytes] | None:
         """030:一次性取附件内容(内部端点绑定复校+消费语义);
-        404/异常 → None(由调用方 fail-closed 文案化)。"""
+        404/异常 → None(由调用方 fail-closed 文案化)。072:同 _post 的
+        连接层分层重试口径(读超时=已送达,不重发)。"""
         try:
-            async with httpx.AsyncClient(
-                base_url=self._base, timeout=self._timeout, headers=self._headers
-            ) as client:
-                resp = await client.get(
-                    f"/internal/attachment/{att_id}/content",
-                    params={"tenant_key": tenant_key, "user_id": user_id},
-                )
+            resp = await self._get_retryable(
+                f"/internal/attachment/{att_id}/content",
+                params={"tenant_key": tenant_key, "user_id": user_id},
+            )
         except httpx.HTTPError as e:
             log.warning("附件取用异常: %s", e)
             return None
@@ -285,7 +325,36 @@ class ApiClient:
         return resp.headers.get("content-type", "image/png").split(";")[0], resp.content
 
     async def _post(self, path: str, payload: dict[str, object]) -> httpx.Response:
+        """控制面 POST(只读类回调入口;072 分层重试):仅**连接层未送达**失败
+        按回调预算快重试(design D2——读超时=已送达,执行副作用不可假定幂等,
+        不重发;5xx 语义上亦已送达)。report_usage/tool_execute 走 _post_once
+        (任何失败都不重试)。"""
+        return await call_with_retry(
+            partial(self._post_once, path, payload),
+            max_attempts=CALLBACK_MAX_ATTEMPTS,
+            base_delay_ms=CALLBACK_RETRY_BASE_MS,
+            max_wait_ms=CALLBACK_RETRY_MAX_WAIT_MS,
+            is_transient=is_connect_phase_error,
+        )
+
+    async def _post_once(self, path: str, payload: dict[str, object]) -> httpx.Response:
         async with httpx.AsyncClient(
             base_url=self._base, timeout=self._timeout, headers=self._headers
         ) as client:
             return await client.post(path, json=payload)
+
+    async def _get_retryable(self, path: str, params: dict[str, str]) -> httpx.Response:
+        """控制面 GET(030 附件取用;同 _post 的连接层分层重试口径)。"""
+        return await call_with_retry(
+            partial(self._get_once, path, params),
+            max_attempts=CALLBACK_MAX_ATTEMPTS,
+            base_delay_ms=CALLBACK_RETRY_BASE_MS,
+            max_wait_ms=CALLBACK_RETRY_MAX_WAIT_MS,
+            is_transient=is_connect_phase_error,
+        )
+
+    async def _get_once(self, path: str, params: dict[str, str]) -> httpx.Response:
+        async with httpx.AsyncClient(
+            base_url=self._base, timeout=self._timeout, headers=self._headers
+        ) as client:
+            return await client.get(path, params=params)

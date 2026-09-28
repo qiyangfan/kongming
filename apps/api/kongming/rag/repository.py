@@ -25,6 +25,7 @@ from kongming.rag.models import (
     RECALL_TOP_K,
     FailureSignal,
     HistoryOverview,
+    HistorySample,
     IntrospectedTable,
     KnowledgeEntry,
     RecallHit,
@@ -343,11 +344,17 @@ class RagRepository:
     async def recall_vector(
         self, *, tenant_id: str, datasource_key: str, vector: list[float]
     ) -> list[RecallHit]:
-        """向量路:pgvector 余弦距离 <=>(topK)。"""
+        """向量路:pgvector 余弦距离 <=>(topK)。
+
+        064:SELECT 回原生分 `1-(embedding<=>v)`(余弦相似度,值域约 [0,1];
+        表达式仅算一次并同时用于排序与返回——ORDER BY 子查询消重复计算)。
+        """
         rows = (
             await self._s.execute(
                 text(
-                    "SELECT schema_name, table_name FROM rag.table_descriptions"
+                    "SELECT schema_name, table_name,"
+                    " 1 - (embedding <=> CAST(:vec AS vector)) AS score"
+                    " FROM rag.table_descriptions"
                     " WHERE tenant_id = :t AND datasource_key = :d"
                     " AND embedding IS NOT NULL"
                     " ORDER BY embedding <=> CAST(:vec AS vector) LIMIT :k"
@@ -360,16 +367,29 @@ class RagRepository:
                 },
             )
         ).all()
-        return [RecallHit(schema_name=r.schema_name, table_name=r.table_name) for r in rows]
+        return [
+            RecallHit(
+                schema_name=r.schema_name,
+                table_name=r.table_name,
+                score=float(r.score),
+                source="vector",
+            )
+            for r in rows
+        ]
 
     async def recall_fulltext(
         self, *, tenant_id: str, datasource_key: str, question: str
     ) -> list[RecallHit]:
-        """全文路:tsv @@ plainto_tsquery('simple',…),ts_rank 近似 BM25。"""
+        """全文路:tsv @@ plainto_tsquery('simple',…),ts_rank 近似 BM25。
+
+        064:SELECT 回 ts_rank 得分(与 ORDER BY 同口径,消现状重复计算)。
+        """
         rows = (
             await self._s.execute(
                 text(
-                    "SELECT schema_name, table_name FROM rag.table_descriptions"
+                    "SELECT schema_name, table_name,"
+                    " ts_rank(tsv, plainto_tsquery('simple', :q)) AS score"
+                    " FROM rag.table_descriptions"
                     " WHERE tenant_id = :t AND datasource_key = :d"
                     " AND tsv @@ plainto_tsquery('simple', :q)"
                     " ORDER BY ts_rank(tsv, plainto_tsquery('simple', :q)) DESC"
@@ -378,29 +398,53 @@ class RagRepository:
                 {"t": tenant_id, "d": datasource_key, "q": question, "k": RECALL_TOP_K},
             )
         ).all()
-        return [RecallHit(schema_name=r.schema_name, table_name=r.table_name) for r in rows]
+        return [
+            RecallHit(
+                schema_name=r.schema_name,
+                table_name=r.table_name,
+                score=float(r.score),
+                source="fulltext",
+            )
+            for r in rows
+        ]
 
     async def recall_history(
         self, *, tenant_id: str, datasource_key: str, vector: list[float]
-    ) -> list[str]:
-        """历史路:问句向量相似,仅 SUCCESS;返回 sql_text(独立强 few-shot 通道)。"""
+    ) -> list[HistorySample]:
+        """历史路:问句向量相似的**可用样本** sql_text(独立强 few-shot 通道)。
+
+        070:候选=(EXECUTION | FEEDBACK)且 recall_enabled(LEGACY/未启用退出
+        召回);同问句候选经 service 去重(优先 ADOPTED 反馈样本)后取前 K。
+        多取 3 倍候选供去重(同问句多来源在 top-K 内仍可保住最优)。"""
         rows = (
             await self._s.execute(
                 text(
-                    "SELECT sql_text FROM rag.query_history"
+                    "SELECT question, sql_text, source_type,"
+                    " 1 - (embedding <=> CAST(:vec AS vector)) AS score"
+                    " FROM rag.query_history"
                     " WHERE tenant_id = :t AND datasource_key = :d"
-                    " AND status = 'SUCCESS' AND embedding IS NOT NULL"
+                    " AND status = 'SUCCESS' AND recall_enabled"
+                    " AND source_type IN ('EXECUTION', 'FEEDBACK')"
+                    " AND embedding IS NOT NULL"
                     " ORDER BY embedding <=> CAST(:vec AS vector) LIMIT :k"
                 ),
                 {
                     "t": tenant_id,
                     "d": datasource_key,
                     "vec": vec_literal(vector),
-                    "k": RECALL_TOP_K,
+                    "k": RECALL_TOP_K * 3,
                 },
             )
         ).all()
-        return [str(r.sql_text) for r in rows]
+        return [
+            HistorySample(
+                question=str(r.question),
+                sql_text=str(r.sql_text),
+                source_type=str(r.source_type),
+                score=float(r.score),
+            )
+            for r in rows
+        ]
 
     async def fetch_entries(
         self, *, tenant_id: str, datasource_key: str, keys: list[tuple[str, str]]
@@ -424,6 +468,62 @@ class RagRepository:
             out.extend(self._to_entry(r, tenant_id) for r in rows)
         return out
 
+    # ============ 070 反馈样本晋升/停用(与处置同事务,不自行 commit) ============
+
+    async def promote_feedback_sample(
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        question: str,
+        sql_text: str,
+        feedback_message_id: str,
+        embedding: list[float] | None,
+    ) -> None:
+        """纠错 SQL 晋升为可召回样本(FEEDBACK,recall_enabled=TRUE)。
+
+        幂等键=(tenant_id, feedback_message_id) 部分唯一索引:同一反馈的
+        重复晋升覆盖(最新纠错);与执行样本(同问句 EXECUTION)并存不互覆盖
+        ——070「同问句异来源并存,召回按优先级择优」。"""
+        vec = vec_literal(embedding) if embedding else None
+        await self._s.execute(
+            text(
+                "INSERT INTO rag.query_history"
+                " (id, tenant_id, datasource_key, question, sql_text, status,"
+                "  source_type, recall_enabled, feedback_message_id, embedding,"
+                "  created_at)"
+                " VALUES (:id, :t, :d, :q, :sql, 'SUCCESS', 'FEEDBACK', TRUE,"
+                "         CAST(:mid AS uuid), CAST(:vec AS vector), now())"
+                " ON CONFLICT (tenant_id, feedback_message_id)"
+                "   WHERE source_type = 'FEEDBACK'"
+                "   AND feedback_message_id IS NOT NULL DO UPDATE SET"
+                "  sql_text = EXCLUDED.sql_text,"
+                "  embedding = COALESCE(EXCLUDED.embedding, query_history.embedding),"
+                "  status = 'SUCCESS', recall_enabled = TRUE, created_at = now()"
+            ),
+            {
+                "id": str(uuid7()),
+                "t": tenant_id,
+                "d": datasource_key,
+                "q": question,
+                "sql": sql_text,
+                "mid": feedback_message_id,
+                "vec": vec,
+            },
+        )
+
+    async def disable_feedback_samples(self, *, feedback_message_id: str) -> None:
+        """停用该反馈消息关联的样本(PENDING/REJECTED/DISMISSED/重复提交的
+        旧样本:退出召回;行保留(来源审计),SHALL NOT 删)。"""
+        await self._s.execute(
+            text(
+                "UPDATE rag.query_history SET recall_enabled = FALSE"
+                " WHERE source_type = 'FEEDBACK'"
+                " AND feedback_message_id = CAST(:mid AS uuid)"
+            ),
+            {"mid": feedback_message_id},
+        )
+
     # ============ 回写 ============
 
     async def insert_history(
@@ -444,12 +544,15 @@ class RagRepository:
             text(
                 "INSERT INTO rag.query_history"
                 " (id, tenant_id, datasource_key, question, sql_text, status,"
-                "  embedding, created_at)"
-                " VALUES (:id, :t, :d, :q, :sql, 'SUCCESS', CAST(:vec AS vector), now())"
-                " ON CONFLICT (tenant_id, datasource_key, md5(question)) DO UPDATE SET"
+                "  source_type, recall_enabled, embedding, created_at)"
+                " VALUES (:id, :t, :d, :q, :sql, 'SUCCESS', 'EXECUTION', TRUE,"
+                "         CAST(:vec AS vector), now())"
+                # 070:执行样本幂等目标=部分唯一索引(谓词须逐字匹配)
+                " ON CONFLICT (tenant_id, datasource_key, md5(question))"
+                "   WHERE source_type = 'EXECUTION' DO UPDATE SET"
                 "  sql_text = EXCLUDED.sql_text,"
                 "  embedding = COALESCE(EXCLUDED.embedding, query_history.embedding),"
-                "  status = 'SUCCESS', created_at = now()"
+                "  status = 'SUCCESS', recall_enabled = TRUE, created_at = now()"
             ),
             {
                 "id": str(uuid7()),

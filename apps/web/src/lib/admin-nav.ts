@@ -49,4 +49,5 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { to: "/admin/billing", label: "计费", icon: Receipt, perm: "system:billing:manage" },
   { to: "/admin/bots", label: "助手", icon: Bot, perm: "chat:execute" },
   { to: "/admin/usage", label: "用量", icon: Activity, perm: "system:llm-usage:view" },
+  { to: "/admin/quality", label: "问答质量", icon: Activity, perm: "system:chat-quality:view" },
 ];

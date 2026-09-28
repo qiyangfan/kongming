@@ -545,6 +545,9 @@ async def test_anthropic_entry_react_round_trip() -> None:
         model_routes_json='{"REACT": "glm-coding"}',
         model_allowed_hosts="test.local",
         llm_api_key="sk-main",
+        # 072:500/连接超时属瞬时故障,重试满预算;退避钉 1ms 防真等
+        llm_retry_base_ms="1",
+        llm_retry_max_wait_ms="1",
     )
     reporter = _Reporter()
     llm = LlmClient(settings, usage_reporter=reporter)
@@ -718,6 +721,9 @@ async def test_anthropic_entry_failure_reported_as_error() -> None:
         model_routes_json='{"REACT": "glm-coding"}',
         model_allowed_hosts="test.local",
         llm_api_key="sk-main",
+        # 072:500/连接超时属瞬时故障,重试满预算;退避钉 1ms 防真等
+        llm_retry_base_ms="1",
+        llm_retry_max_wait_ms="1",
     )
     reporter = _Reporter()
     llm = LlmClient(settings, usage_reporter=reporter)
@@ -735,7 +741,9 @@ async def test_anthropic_entry_failure_reported_as_error() -> None:
         await llm.chat("s", "u", task="REACT", trace_id="tr-fail")
     await asyncio.sleep(0)
     await asyncio.sleep(0)
-    assert len(reporter.records) == 1
+    # 072:瞬时故障(500)重试满预算,每尝试一条 ERROR 记录
+    assert len(reporter.records) == 3
+    assert all(r["status"] == "ERROR" for r in reporter.records)
     rec = reporter.records[0]
     assert rec["status"] == "ERROR"
     assert rec["prompt_tokens"] == 0 and rec["total_tokens"] == 0

@@ -10,10 +10,13 @@ import json
 import logging
 import re
 import threading
+from collections.abc import Sequence
 from typing import cast
 
 from kongming_agent import deps, numeric, sqlguard
-from kongming_agent.apiclient import SchemaMeta
+from kongming_agent.apiclient import MetricHit, SchemaMeta
+from kongming_agent.graph.budget import Segment, converge
+from kongming_agent.graph.citations import sanitize_citations
 from kongming_agent.graph.prompts import (
     SQL_GEN_SYSTEM,
     SUMMARIZE_SYSTEM,
@@ -21,7 +24,107 @@ from kongming_agent.graph.prompts import (
     UNDERSTAND_SINGLE_SYSTEM,
 )
 from kongming_agent.graph.state import AgentState, ExecutionResult, ValidationResult
+from kongming_agent.graph.streams import emit_event
+from kongming_agent.graph.table_prune import prune_schema
 from kongming_agent.llm import LlmError
+from kongming_agent.settings import Settings
+
+# 080:装配预算分段优先级(0=不可切;小者先裁)。schema/history 殿后(无表结构
+# = 无 SQL 可生成);relations/metric 先行(与表结构信息部分冗余)
+_PRI_RELATIONS = 1
+_PRI_METRIC = 2
+_PRI_MEMORY = 3
+_PRI_SKILL_TERMS = 4
+_PRI_SKILL_EXAMPLES = 5
+_PRI_HISTORY_SQL = 6
+_PRI_SCHEMA = 7
+
+
+def assemble_generate_user_prompt(
+    *,
+    question: str,
+    memory_hint: str,
+    schema_hint: str,
+    relations_hint: str,
+    metric_hints: str,
+    skill_terms: str,
+    skill_examples: str,
+    history_sql: str,
+    extra: str,
+    budget_tokens: int,
+) -> tuple[str, dict[str, int], int]:
+    """generate 的 user 提示八段装配 + 080 预算收敛(纯函数,可单测)。
+
+    预算内:输出与既有装配逻辑逐字一致(零回归锚);超限:按优先级从尾部收敛
+    (schema/history 首位豁免);不可切段(纪律段 system/问句/selfheal 喂回)
+    本身超预算 → PromptBudgetExceeded。返回 (user 文本, 裁切记录, 估算 tokens)。
+    """
+    segments = [
+        # 纪律段(system)参与预算估算但不在 user 文本内;不可切
+        Segment("system", SQL_GEN_SYSTEM),
+        Segment("question", f"问题：{question}"),
+        Segment("memory", memory_hint, priority=_PRI_MEMORY),
+        Segment("schema_hint", schema_hint, priority=_PRI_SCHEMA, lines=True, keep_head=1),
+        Segment("relations", relations_hint, priority=_PRI_RELATIONS),
+        Segment("metric", metric_hints, priority=_PRI_METRIC),
+        Segment("skill_terms", skill_terms, priority=_PRI_SKILL_TERMS, lines=True),
+        # 示例段首行=禁令前缀(fewshot SQL 仅文本不执行),必须保留
+        Segment(
+            "skill_examples", skill_examples, priority=_PRI_SKILL_EXAMPLES, lines=True, keep_head=1
+        ),
+        Segment("history_sql", history_sql, priority=_PRI_HISTORY_SQL, lines=True, keep_head=1),
+        # selfheal 喂回与哨兵引导:自愈语义属正确性,收敛后仍完整
+        Segment("selfheal", extra),
+    ]
+    result = converge(segments, budget_tokens)
+    texts = {s.key: s.text for s in result.segments}
+    # 装配格式与 080 前逐字同构(空段零痕迹;收敛后空文本走同一条件分支)
+    memory_part = f"{texts['memory']}\n\n" if texts["memory"] else ""
+    _rel = f"表关系参考：\n{texts['relations']}" if texts["relations"] else ""
+    _met = f"指标口径参考：\n{texts['metric']}" if texts["metric"] else ""
+    _semantic = "\n\n".join(x for x in (_rel, _met) if x)
+    semantic_part = f"\n\n{_semantic}" if _semantic else ""
+    _st = f"业务术语参考：\n{texts['skill_terms']}" if texts["skill_terms"] else ""
+    _se = f"问法示例：\n{texts['skill_examples']}" if texts["skill_examples"] else ""
+    _skill = "\n\n".join(x for x in (_st, _se) if x)
+    skill_part = f"\n\n{_skill}" if _skill else ""
+    history_part = f"\n\n参考历史成功 SQL：\n{texts['history_sql']}" if texts["history_sql"] else ""
+    user = (
+        f"问题：{question}\n\n{memory_part}可用表结构：\n"
+        f"{texts['schema_hint']}{semantic_part}{skill_part}{history_part}"
+        f"{texts['selfheal']}\n\n生成 SQL："
+    )
+    return user, result.cut, result.estimated_tokens
+
+
+def legacy_generate_user_prompt(
+    *,
+    question: str,
+    memory_hint: str,
+    schema_hint: str,
+    relations_hint: str,
+    metric_hints: str,
+    skill_terms: str,
+    skill_examples: str,
+    history_sql: str,
+    extra: str,
+) -> str:
+    """080 引入前的装配逻辑原样(测试零回归锚:预算充足时两侧逐字一致)。"""
+    memory_part = f"{memory_hint}\n\n" if memory_hint else ""
+    _rel = f"表关系参考：\n{relations_hint}" if relations_hint else ""
+    _met = f"指标口径参考：\n{metric_hints}" if metric_hints else ""
+    _semantic = "\n\n".join(x for x in (_rel, _met) if x)
+    semantic_part = f"\n\n{_semantic}" if _semantic else ""
+    _st = f"业务术语参考：\n{skill_terms}" if skill_terms else ""
+    _se = f"问法示例：\n{skill_examples}" if skill_examples else ""
+    _skill = "\n\n".join(x for x in (_st, _se) if x)
+    skill_part = f"\n\n{_skill}" if _skill else ""
+    history_part = f"\n\n参考历史成功 SQL：\n{history_sql}" if history_sql else ""
+    return (
+        f"问题：{question}\n\n{memory_part}可用表结构：\n"
+        f"{schema_hint}{semantic_part}{skill_part}{history_part}{extra}\n\n生成 SQL："
+    )
+
 
 log = logging.getLogger(__name__)
 
@@ -176,6 +279,19 @@ def format_schema_hint(meta: SchemaMeta) -> str:
     return "\n".join(lines)
 
 
+def _metric_hit_dicts(hits: Sequence[MetricHit]) -> list[dict[str, str | None]]:
+    """076:MetricHit 域对象 → state 字典投影(纯函数;空列表=零命中)。"""
+    return [
+        {
+            "metric_id": h.metric_id,
+            "metric_name": h.metric_name,
+            "sql_template": h.sql_template,
+            "updated_at": h.updated_at,
+        }
+        for h in hits
+    ]
+
+
 # ── 节点2:schema 提示获取(009:RAG 召回优先,零命中/失败回退实时内省兜底)──
 async def retrieve(state: AgentState) -> dict[str, object]:
     datasource_key = state.get("datasource_key", "default")
@@ -196,12 +312,15 @@ async def retrieve(state: AgentState) -> dict[str, object]:
     # 记录」的真实形态下,schema 空回退内省、history 照常作 few-shot,不整体丢弃。
     history_sql = ctx.history_sql if ctx is not None else ""
     doc_hints = list(ctx.doc_hints) if ctx is not None else []
+    # 076:结构化口径命中(空=无命中;与 metric_hints 文字段同源)
+    metric_hits = _metric_hit_dicts(ctx.metric_hits) if ctx is not None else []
     if ctx is not None and ctx.schema_hint.strip():
         return {
             "schema_hint": ctx.schema_hint,
             "history_sql": history_sql,
             "relations_hint": ctx.relations_hint,
             "metric_hints": ctx.metric_hints,
+            "metric_hits": metric_hits,
             "doc_hints": doc_hints,
             "skill_terms": ctx.skill_terms,
             "skill_examples": ctx.skill_examples,
@@ -221,11 +340,40 @@ async def retrieve(state: AgentState) -> dict[str, object]:
         if ctx is not None:
             out0["relations_hint"] = ctx.relations_hint
             out0["metric_hints"] = ctx.metric_hints
+            out0["metric_hits"] = _metric_hit_dicts(ctx.metric_hits)
             out0["doc_hints"] = list(ctx.doc_hints)
             out0["skill_terms"] = ctx.skill_terms
             out0["skill_examples"] = ctx.skill_examples
             out0["skill_persona"] = ctx.skill_persona
         return out0
+    # 063:表级预筛(问题+术语/示例/指标共现加权打分,top-N)。零命中=空表
+    # 集 → 既有哨兵形态(不新增终态);关闭开关(对拍/应急)= 全量注入逐字回退。
+    settings = Settings()
+    if settings.schema_prune:
+        assets = "\n\n".join(
+            x
+            for x in (
+                ctx.skill_terms if ctx is not None else "",
+                ctx.skill_examples if ctx is not None else "",
+                ctx.metric_hints if ctx is not None else "",
+            )
+            if x
+        )
+        original_count = len(meta.tables)
+        meta, hits = prune_schema(question, meta, assets=assets, top_n=settings.schema_prune_top_n)
+        emit_event(
+            "trace",
+            {
+                "node": "retrieve",
+                "fields": {
+                    "kind": "table_prune",
+                    "kept": [h.table for h in hits],
+                    "cut_count": original_count - len(hits),
+                    "scores": {h.table: h.score for h in hits},
+                    "sources": {h.table: list(h.sources) for h in hits},
+                },
+            },
+        )
     out: dict[str, object] = {
         "schema_hint": format_schema_hint(meta),
         "history_sql": history_sql,
@@ -235,6 +383,7 @@ async def retrieve(state: AgentState) -> dict[str, object]:
     if ctx is not None:
         out["relations_hint"] = ctx.relations_hint
         out["metric_hints"] = ctx.metric_hints
+        out["metric_hits"] = _metric_hit_dicts(ctx.metric_hits)
         out["doc_hints"] = list(ctx.doc_hints)
         out["skill_terms"] = ctx.skill_terms
         out["skill_examples"] = ctx.skill_examples
@@ -297,25 +446,15 @@ async def generate(state: AgentState) -> dict[str, object]:
         schema_hint = _EMPTY_HINT
     # 022:记忆段(用户已知信息)位于表结构之前;空则形态与引入前逐字一致
     memory_hint = (state.get("memory_hint") or "").strip()
-    memory_part = f"{memory_hint}\n\n" if memory_hint else ""
     # 023 语义段:表关系/指标口径位于表结构之后、历史 SQL 之前;空则零痕迹
     relations_hint = (state.get("relations_hint") or "").strip()
     metric_hints = (state.get("metric_hints") or "").strip()
-    _rel = f"表关系参考：\n{relations_hint}" if relations_hint else ""
-    _met = f"指标口径参考：\n{metric_hints}" if metric_hints else ""
-    _semantic = "\n\n".join(x for x in (_rel, _met) if x)
-    semantic_part = f"\n\n{_semantic}" if _semantic else ""
     # 历史成功 SQL 段(009):召回命中时拼在表结构之后——人类验证过的 SQL 置信度
     # 高于表说明内嵌示例(强 few-shot);系统模板资产零改动,只动 user 拼接。
     history_sql = (state.get("history_sql") or "").strip()
-    history_part = f"\n\n参考历史成功 SQL：\n{history_sql}" if history_sql else ""
-    # 056 skill-pack 三段(可空;零段零痕迹零回归)
+    # 056 skill-pack 两段(可空;零段零痕迹零回归)
     skill_terms = (state.get("skill_terms") or "").strip()
     skill_examples = (state.get("skill_examples") or "").strip()
-    _st = f"业务术语参考：\n{skill_terms}" if skill_terms else ""
-    _se = f"问法示例：\n{skill_examples}" if skill_examples else ""
-    _skill = "\n\n".join(x for x in (_st, _se) if x)
-    skill_part = f"\n\n{_skill}" if _skill else ""
     extra = ""
     error = state.get("error") or ""
     if error:
@@ -325,11 +464,38 @@ async def generate(state: AgentState) -> dict[str, object]:
         guidance = _selfheal_guidance(error)
         if guidance:
             extra += guidance
-    user = (
-        f"问题：{question}\n\n{memory_part}可用表结构：\n"
-        f"{schema_hint}{semantic_part}{skill_part}{history_part}{extra}\n\n生成 SQL："
+    # 080:装配预算(窗口 − 预留输出 − 安全边际,按 SQL_GEN 生效模型解析)。
+    # 预算内逐字零回归;超限按段优先级收敛(证据尾端首位豁免/纪律与问句不截);
+    # 触发即随 trace 事件下发(可观测,SHALL NOT 静默降质);不可切段本身超预算
+    # → PromptBudgetExceeded(如实失败分支,可归因)
+    llm = deps.get_llm()
+    budget = llm.prompt_budget("SQL_GEN")
+    user, cut, estimated = assemble_generate_user_prompt(
+        question=question,
+        memory_hint=memory_hint,
+        schema_hint=schema_hint,
+        relations_hint=relations_hint,
+        metric_hints=metric_hints,
+        skill_terms=skill_terms,
+        skill_examples=skill_examples,
+        history_sql=history_sql,
+        extra=extra,
+        budget_tokens=budget,
     )
-    sql = await deps.get_llm().chat(
+    if cut:
+        emit_event(
+            "trace",
+            {
+                "node": "generate",
+                "fields": {
+                    "kind": "prompt_budget",
+                    "budget_tokens": budget,
+                    "estimated_tokens": estimated,
+                    "cut": cut,
+                },
+            },
+        )
+    sql = await llm.chat(
         SQL_GEN_SYSTEM,
         user,
         temperature=0.1,
@@ -511,7 +677,11 @@ async def doc_answer(state: AgentState) -> dict[str, object]:
         else:
             resolved = state.get("resolved_question")
             question = resolved or state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
-        parts = [f"来源 {h['source_ref']}:\n{h['content'][:1500]}" for h in doc_hints[:5]]
+        # 068:注入段标注=引用键(与净化合法集同源;source_ref 仅作块头说明)
+        parts = [
+            f"来源 {h.get('citation_key') or h['source_ref']}:\n{h['content'][:1500]}"
+            for h in doc_hints[:5]
+        ]
         system = DOC_ANSWER_SYSTEM
         user = f"问题:{question}\n\n文档内容:\n" + "\n\n".join(parts) + "\n\n回答:"
     else:
@@ -530,11 +700,47 @@ async def doc_answer(state: AgentState) -> dict[str, object]:
         trace_id=state.get("trace_id"),
         tenant_key=state.get("tenant_key"),
     )
+    summary = answer or "文档中未提及相关内容。"
+    sources: list[dict[str, object]] = []
+    if doc_hints:
+        # 068:确定性净化(零模型;与 057 numeric 收口同位置)——合法键集取自
+        # 截断前的完整命中集(注入段 top-5/字符上限裁剪不得误杀真引用)
+        legal_keys = [str(h.get("citation_key") or "") for h in doc_hints]
+        legal_keys = [k for k in legal_keys if k]
+        result = sanitize_citations(summary, legal_keys)
+        summary = result.text
+        # sources 投影(api 侧落库;存活键 → 命中集元数据回填)
+        by_key = {str(h.get("citation_key") or ""): h for h in doc_hints}
+        for key in result.surviving_keys:
+            hit = by_key.get(key)
+            if hit is None:
+                continue
+            sources.append(
+                {
+                    "citation_key": key,
+                    "source_ref": str(hit.get("source_ref") or ""),
+                    "doc_name": str(hit.get("source_ref") or "").split(" §")[0],
+                }
+            )
+        # 被剥离计数随 trace 下发(可观测;净化在输出护栏前完成)
+        if result.stripped:
+            emit_event(
+                "trace",
+                {
+                    "node": "doc_answer",
+                    "fields": {
+                        "kind": "citation_sanitize",
+                        "stripped": result.stripped,
+                        "surviving": list(result.surviving_keys),
+                    },
+                },
+            )
     return {
         "execution": ExecutionResult(verdict="PASS", columns=[], rows=[]),
-        "summary": answer or "文档中未提及相关内容。",
+        "summary": summary,
         "insights": [],
         "stats": {},
+        "sources": sources,  # 068:结构化来源(空=SQL 道/无命中)
     }
 
 

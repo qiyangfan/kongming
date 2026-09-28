@@ -1,0 +1,668 @@
+# pyright: reportPrivateUsage=false
+"""070-feedback-sql-promotion-gate 全栈测试(安全规则类,先红后绿)。
+
+核心契约:提交不进召回(PENDING 不可见)→ ADOPTED 才晋升(同问句异来源
+并存、幂等键=反馈消息)→ 转出/重提即停用 → 晋升失败 503 无部分提交。
+真实 PG/Redis;embedding 经 agent 替身(失败可编排)。
+"""
+
+import uuid
+from pathlib import Path
+from typing import Any, cast
+
+import httpx
+import pytest
+from httpx import AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from tests.conftest import MakeUser
+from tests.test_chat_query import _auth, _bind, _default_tenant_id, _login
+from tests.test_feedback_admin import _mk_feedback_msg
+from tests.test_rag_admin import _admin_token
+
+pytestmark = pytest.mark.usefixtures("fake_agent")
+
+API_ROOT = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture
+def fake_agent(monkeypatch: pytest.MonkeyPatch):
+    """agent 替身 + embedding 可用(晋升路径的向量注入点)。
+
+    070 晋升链路经 /internal/embedding 取向量——测试面 monkeypatch
+    AgentRagClient.embed(与 test_rag_admin 同范式),503 用例在用例内
+    临时替换为故障 embed。
+    """
+    from kongming.chat.router import get_agent_client
+    from kongming.main import app
+    from kongming.rag.agent_callback import AgentRagClient
+    from tests.test_chat_stream import StreamFakeAgent
+    from tests.test_rag_recall import _fake_vector
+
+    async def _embed(self: object, texts: list[str]) -> list[list[float]]:
+        return [_fake_vector(t) for t in texts]
+
+    monkeypatch.setattr(AgentRagClient, "embed", _embed)
+
+    holder: dict[str, StreamFakeAgent] = {}
+
+    def _factory() -> StreamFakeAgent:
+        return holder["agent"]
+
+    app.dependency_overrides[get_agent_client] = _factory
+    yield holder
+    app.dependency_overrides.pop(get_agent_client, None)
+
+
+async def _uid_of(s: AsyncSession) -> str:
+    return str(
+        (
+            await s.execute(text("SELECT id FROM public.sys_user WHERE username='admin'"))
+        ).scalar_one()
+    )
+
+
+async def _tid(s: AsyncSession) -> str:
+    return str(
+        (
+            await s.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'"))
+        ).scalar_one()
+    )
+
+
+async def _count_history(s: AsyncSession, like: str) -> int:
+    return int(
+        (
+            await s.execute(
+                text("SELECT count(*) FROM rag.query_history WHERE sql_text LIKE :p"),
+                {"p": like},
+            )
+        ).scalar_one()
+    )
+
+
+async def _adopt(
+    client: AsyncClient, token: str, mid: str, status: str = "ADOPTED"
+) -> httpx.Response:
+    return await client.put(
+        f"/feedback/{mid}/status",
+        json={"status": status},
+        headers=_auth(token),
+    )
+
+
+# ── 1. 提交不进召回(任务 1.1) ─────────────────────────────────────
+
+
+async def test_submit_pending_no_history(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """任务 1.1:correctedSql 提交后 PENDING、反馈与审计正常,query_history
+    零写入(样本准入后移——提交路径不经召回)。"""
+    from kongming.auth.seed import seed_all
+    from kongming.config import get_settings
+
+    await seed_all(session, get_settings())
+    uid, token = await _user_token(client, session, make_user, "p1u")
+    tid = await _tid(session)
+    mid = await _mk_feedback_msg(
+        session, user_id=uid, tenant_id=tid, corrected_sql="SELECT count(*) FROM goods"
+    )
+    r = await client.post(
+        f"/chat/messages/{mid}/feedback",
+        json={"rating": "DOWN", "corrected_sql": "SELECT count(*) FROM goods"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    row = (
+        (
+            await session.execute(
+                text("SELECT feedback_status FROM public.chat_message WHERE id=:i"),
+                {"i": mid},
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert row["feedback_status"] == "PENDING"
+    assert await _count_history(session, "%count(*)%") == 0
+
+
+async def _user_token(
+    client: AsyncClient, s: AsyncSession, make_user: MakeUser, username: str
+) -> tuple[str, str]:
+    uid = await make_user(username)
+    from tests.test_chat_query import _mk_role_with_perms
+
+    rid = await _mk_role_with_perms(s, f"P-{username}", ["chat:execute", "chat:feedback:submit"])
+    await _bind(s, "sys_user_role", uid, rid)
+    await _bind(s, "sys_user_tenant", uid, await _default_tenant_id(s))
+    return uid, await _login(client, username)
+
+
+# ── 2. ADOPTED 晋升与幂等(任务 1.4) ───────────────────────────────
+
+
+async def test_adopted_promotes_sample(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """任务 1.4:ADOPTED + 非空 correctedSql 幂等晋升(FEEDBACK,可召回)。"""
+    token = await _admin_token(client, session)
+    uid = await _uid_of(session)
+    tid = await _tid(session)
+    mid = await _mk_feedback_msg(
+        session,
+        user_id=uid,
+        tenant_id=tid,
+        corrected_sql="SELECT count(*) FROM tenant_default.goods WHERE qty > 5",
+        question="库存大于 5 的商品有几种",
+    )
+    r = await _adopt(client, token, mid)
+    assert r.status_code == 200
+    rows = (
+        (
+            await session.execute(
+                text(
+                    "SELECT source_type, recall_enabled, feedback_message_id, question,"
+                    " sql_text FROM rag.query_history WHERE sql_text LIKE '%qty%'"  # noqa: S608
+                )
+            )
+        )
+        .mappings()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0]["source_type"] == "FEEDBACK"
+    assert rows[0]["recall_enabled"] is True
+    assert str(rows[0]["feedback_message_id"]) == mid
+    assert rows[0]["question"] == "库存大于 5 的商品有几种"
+    # 幂等:重复 ADOPTED 仍一条(同反馈消息覆盖,不增行)
+    r2 = await _adopt(client, token, mid)
+    assert r2.status_code == 200
+    assert await _count_history(session, "%qty%") == 1
+
+
+async def test_adopted_empty_sql_no_sample(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """任务 1.4:ADOPTED + 空 correctedSql 不创建样本。"""
+    token = await _admin_token(client, session)
+    uid = await _uid_of(session)
+    tid = await _tid(session)
+    mid = await _mk_feedback_msg(session, user_id=uid, tenant_id=tid, corrected_sql=None)
+    r = await _adopt(client, token, mid)
+    assert r.status_code == 200
+    assert (await session.execute(text("SELECT count(*) FROM rag.query_history"))).scalar_one() == 0
+
+
+async def test_pending_rejected_dismissed_no_recall(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """任务 1.5:PENDING/REJECTED/DISMISSED 均不召回(无样本产生)。"""
+    token = await _admin_token(client, session)
+    uid = await _uid_of(session)
+    tid = await _tid(session)
+    for i, status in enumerate(("PENDING", "REJECTED", "DISMISSED")):
+        mid = await _mk_feedback_msg(
+            session,
+            user_id=uid,
+            tenant_id=tid,
+            corrected_sql=f"SELECT {i} FROM goods",  # noqa: S608  测试夹具文本,不入任何查询
+        )
+        r = await _adopt(client, token, mid, status=status)
+        assert r.status_code == 200
+    assert (await session.execute(text("SELECT count(*) FROM rag.query_history"))).scalar_one() == 0
+
+
+async def test_adopted_then_transition_disables(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """任务 1.5:从 ADOPTED 转出后样本停用(行保留,recall_enabled=FALSE)。"""
+    token = await _admin_token(client, session)
+    uid = await _uid_of(session)
+    tid = await _tid(session)
+    mid = await _mk_feedback_msg(
+        session,
+        user_id=uid,
+        tenant_id=tid,
+        corrected_sql="SELECT sum(amount) FROM orders",
+    )
+    assert (await _adopt(client, token, mid)).status_code == 200
+    assert await _count_history(session, "%sum(amount)%") == 1
+    r = await _adopt(client, token, mid, status="REJECTED")
+    assert r.status_code == 200
+    row = (
+        (
+            await session.execute(
+                text(
+                    "SELECT source_type, recall_enabled FROM rag.query_history"
+                    " WHERE sql_text LIKE '%sum(amount)%'"
+                )
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert row["source_type"] == "FEEDBACK"
+    assert row["recall_enabled"] is False  # 停用不删行(来源审计)
+    # 重新 ADOPTED 可再启用(幂等晋升复onna)
+    r2 = await _adopt(client, token, mid)
+    assert r2.status_code == 200
+    enabled = (
+        (
+            await session.execute(
+                text(
+                    "SELECT recall_enabled FROM rag.query_history"
+                    " WHERE sql_text LIKE '%sum(amount)%'"
+                )
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert enabled["recall_enabled"] is True
+
+
+async def test_resubmit_after_adopted_disables(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """任务 1.3:重复提交(现值 ADOPTED)重置 PENDING 并停用 messageId 关联的
+    旧样本(同一事务)。"""
+    token = await _admin_token(client, session)
+    uid = await _uid_of(session)
+    tid = await _tid(session)
+    mid = await _mk_feedback_msg(
+        session,
+        user_id=uid,
+        tenant_id=tid,
+        corrected_sql="SELECT 42 FROM dual",
+    )
+    assert (await _adopt(client, token, mid)).status_code == 200
+    assert await _count_history(session, "%42%") == 1
+    # 归属同租户/本人的用户重新提交(直写状态列再走提交端点不合规;
+    # 提交端点需消息归属该作者——此处直接以 admin 同一用户提交)
+    r = await client.post(
+        f"/chat/messages/{mid}/feedback",
+        json={"rating": "UP", "corrected_sql": "SELECT 43 FROM dual"},
+        headers=_auth(await _login(client, "admin", "admin123")),
+    )
+    assert r.status_code == 200
+    row = (
+        (
+            await session.execute(
+                text("SELECT feedback_status FROM public.chat_message WHERE id=:i"),
+                {"i": mid},
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert row["feedback_status"] == "PENDING"
+    disabled = (
+        (
+            await session.execute(
+                text("SELECT recall_enabled FROM rag.query_history WHERE sql_text LIKE '%42%'")  # noqa: S608
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert disabled["recall_enabled"] is False
+
+
+# ── 3. 同问句异来源并存与召回优先(任务 1.7) ───────────────────────
+
+
+async def test_same_question_two_sources_coexist(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """任务 1.7:同问句执行样本与反馈样本并存;幂等键分离互不覆盖。"""
+    from kongming.auth.seed import seed_all
+    from kongming.config import get_settings
+    from kongming.rag.repository import RagRepository
+
+    await seed_all(session, get_settings())
+    tid = await _tid(session)
+    # 执行样本(009 通道直插,同问句)
+    async with session:
+        repo = RagRepository(session)
+        await repo.insert_history(
+            tenant_id=tid,
+            datasource_key="default",
+            question="库存大于 5 的商品有几种",
+            sql_text="SELECT count(*) FROM goods WHERE qty > 5",
+            embedding=None,
+        )
+        # 反馈样本(070 通道晋升,同问句不同 SQL)
+        await repo.promote_feedback_sample(
+            tenant_id=tid,
+            datasource_key="default",
+            question="库存大于 5 的商品有几种",
+            sql_text="SELECT count(*) FROM tenant_default.goods WHERE qty >= 5",
+            feedback_message_id=str(uuid.uuid4()),
+            embedding=None,
+        )
+        await session.commit()
+    rows = (
+        (
+            await session.execute(
+                text(
+                    "SELECT sql_text, source_type FROM rag.query_history"
+                    " WHERE question='库存大于 5 的商品有几种' ORDER BY source_type"
+                )
+            )
+        )
+        .mappings()
+        .all()
+    )
+    assert len(rows) == 2
+    assert [r["source_type"] for r in rows] == ["EXECUTION", "FEEDBACK"]
+
+
+async def test_recall_prefers_feedback_sample(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """任务 1.7:召回对同问句候选去重——优先 ADOPTED 反馈样本,无则执行样本。"""
+    from kongming.auth.seed import seed_all
+    from kongming.config import get_settings
+    from kongming.rag.models import HistorySample
+    from kongming.rag.service import RagService
+
+    await seed_all(session, get_settings())
+    tid = await _tid(session)
+    question = "库存大于 5 的商品有几种"
+    candidates = [
+        HistorySample(question=question, sql_text="EXEC-SQL", source_type="EXECUTION"),
+        HistorySample(question=question, sql_text="FEEDBACK-SQL", source_type="FEEDBACK"),
+    ]
+
+    class _Repo:
+        async def recall_history(self, *_a: object, **_kw: object) -> list[HistorySample]:
+            return candidates
+
+        async def recall_vector(self, *_a: object, **_kw: object) -> list[object]:
+            return []
+
+        async def recall_fulltext(self, *_a: object, **_kw: object) -> list[object]:
+            return []
+
+        async def tenant_id_by_key(self, tenant_key: str) -> str:
+            return tid
+
+        async def datasource_usable(self, *_a: object, **_kw: object) -> bool:
+            return True
+
+        async def fetch_entries(self, *_a: object, **_kw: object) -> list[object]:
+            return []
+
+    class _Cache:
+        async def get(self, *_a: object, **_kw: object) -> None:
+            return None
+
+        async def set(self, *_a: object, **_kw: object) -> None:
+            return None
+
+    class _Embedder:
+        async def embed(self, texts: list[str]) -> list[list[float]]:
+            return [[0.1] * 4 for _ in texts]
+
+    svc = RagService(_Repo(), embedder=_Embedder(), describer=None, cache=_Cache())  # type: ignore[arg-type]
+    ctx = await cast("Any", svc).recall(
+        tenant_key="default", datasource_key="default", question=question
+    )
+    # 反馈样本优先;执行样本被同问句去重(≤ RECALL_TOP_K 条)
+    assert ctx.history_sql == "FEEDBACK-SQL"
+
+
+# ── 4. 晋升失败 503 无部分提交(任务 1.6) ──────────────────────────
+
+
+async def test_promotion_failure_503_no_partial(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """任务 1.6:embedding 晋升失败返回 503;反馈状态、审计、query_history
+    均无部分提交(ADOPTED 前状态保持)。"""
+    from kongming.feedback import router as fb_router
+    from kongming.rag.ports import EmbeddingError
+
+    token = await _admin_token(client, session)
+    uid = await _uid_of(session)
+    tid = await _tid(session)
+    mid = await _mk_feedback_msg(
+        session,
+        user_id=uid,
+        tenant_id=tid,
+        corrected_sql="SELECT 7 FROM goods",
+    )
+
+    orig_init = fb_router._FeedbackSampleGate.__init__
+
+    def _boom_init(self: object, repo: object, embedder: object, rag: object) -> None:
+        orig_init(self, repo, _BoomEmbedder(), rag)  # type: ignore[arg-type]
+
+    class _BoomEmbedder:
+        async def embed(self, texts: list[str]) -> list[list[float]]:
+            raise EmbeddingError("agent down")
+
+    monkeypatch.setattr(fb_router._FeedbackSampleGate, "__init__", _boom_init)
+    r = await client.put(
+        f"/feedback/{mid}/status", json={"status": "ADOPTED"}, headers=_auth(token)
+    )
+    assert r.status_code == 503
+    assert r.json()["detail"] == "SAMPLE_PROMOTION_UNAVAILABLE"
+    # 无部分提交:状态仍 PENDING、零样本、零审计
+    st = (
+        (
+            await session.execute(
+                text("SELECT feedback_status FROM public.chat_message WHERE id=:i"),
+                {"i": mid},
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert st["feedback_status"] == "PENDING"
+    assert await _count_history(session, "%7%") == 0
+    n_audit = (
+        await session.execute(
+            text("SELECT count(*) FROM public.sys_oper_log WHERE action='feedback.handle'")
+        )
+    ).scalar_one()
+    assert n_audit == 0
+
+
+# ── 5. 缓存精确失效(任务 3.6) ─────────────────────────────────────
+
+
+async def test_promote_evicts_ctx_cache(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """任务 3.6:晋升提交后 ctx 缓存按租户+数据源精确失效。"""
+    from kongming.feedback import router as fb_router
+
+    calls: list[tuple[str, str]] = []
+    orig = fb_router._FeedbackSampleGate.evict
+
+    async def _spy(self: object, *, tenant_id: str, datasource_key: str) -> None:
+        calls.append((tenant_id, datasource_key))
+        await orig(self, tenant_id=tenant_id, datasource_key=datasource_key)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(fb_router._FeedbackSampleGate, "evict", _spy)
+    token = await _admin_token(client, session)
+    uid = await _uid_of(session)
+    tid = await _tid(session)
+    mid = await _mk_feedback_msg(
+        session,
+        user_id=uid,
+        tenant_id=tid,
+        corrected_sql="SELECT 99 FROM goods",
+    )
+    r = await _adopt(client, token, mid)
+    assert r.status_code == 200
+    assert calls == [(tid, "default")]
+
+
+# ── 6. 防火墙整体拒原子性(任务 1.2 既有契约复核) ──────────────────
+
+
+async def test_firewall_reject_keeps_state(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """任务 1.2:correctedSql 被防火墙拒 → 整体回滚,既有执行样本与反馈
+    状态零变动(与 014 原子契约一致,070 未削弱)。"""
+    token = await _admin_token(client, session)
+    uid = await _uid_of(session)
+    tid = await _tid(session)
+    # 先造一个 ADOPTED 样本( Baseline )
+    mid_ok = await _mk_feedback_msg(
+        session,
+        user_id=uid,
+        tenant_id=tid,
+        corrected_sql="SELECT count(*) FROM goods",
+    )
+    assert (await _adopt(client, token, mid_ok)).status_code == 200
+    before = await _count_history(session, "%count(*)%")
+    # 危险 SQL 提交 → 400 整体拒
+    mid_bad = await _mk_feedback_msg(
+        session,
+        user_id=uid,
+        tenant_id=tid,
+        corrected_sql=None,
+    )
+    r = await client.post(
+        f"/chat/messages/{mid_bad}/feedback",
+        json={"rating": "DOWN", "corrected_sql": "DELETE FROM goods"},
+        headers=_auth(await _login(client, "admin", "admin123")),
+    )
+    assert r.status_code == 400
+    # 零新增、Baseline 不变
+    assert await _count_history(session, "%count(*)%") == before
+    st = (
+        (
+            await session.execute(
+                text("SELECT feedback_status FROM public.chat_message WHERE id=:i"),
+                {"i": mid_bad},
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert st["feedback_status"] == "PENDING"
+
+
+# ── 7. 迁移契约(任务 2.4:约束/索引/来源恢复/downgrade) ────────────
+
+
+async def test_migration_0034_schema_contract(session: AsyncSession) -> None:
+    """任务 2.4:0034 落地后 schema 契约在位(列/CHECK/部分唯一索引/
+    幂等索引/召回过滤索引);存量行(测试库为迁移后写入)EXECUTION 语义正确。"""
+    from kongming.auth.seed import seed_all
+    from kongming.config import get_settings
+
+    await seed_all(session, get_settings())
+    tid = await _tid(session)
+    from kongming.rag.repository import RagRepository
+
+    repo = RagRepository(session)
+    await repo.insert_history(
+        tenant_id=tid,
+        datasource_key="default",
+        question="q-mig",
+        sql_text="SELECT 1",
+        embedding=None,
+    )
+    await session.commit()
+    row = (
+        (
+            await session.execute(
+                text(
+                    "SELECT source_type, recall_enabled, feedback_message_id"
+                    " FROM rag.query_history WHERE question='q-mig'"
+                )
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert row["source_type"] == "EXECUTION"
+    assert row["recall_enabled"] is True
+    assert row["feedback_message_id"] is None
+    # 部分唯一索引:执行样本同问句幂等(ON CONFLICT 目标在位)
+    await repo.insert_history(
+        tenant_id=tid,
+        datasource_key="default",
+        question="q-mig",
+        sql_text="SELECT 2",
+        embedding=None,
+    )
+    await session.commit()
+    n = (
+        await session.execute(text("SELECT count(*) FROM rag.query_history WHERE question='q-mig'"))
+    ).scalar_one()
+    assert n == 1  # 覆盖不增行
+    # LEGACY 来源退出召回(recall_history 候选仅 EXECUTION|FEEDBACK)
+    await session.execute(
+        text(
+            "UPDATE rag.query_history SET source_type='LEGACY', recall_enabled=FALSE"
+            " WHERE question='q-mig'"
+        )
+    )
+    await session.commit()
+    hits = await repo.recall_history(tenant_id=tid, datasource_key="default", vector=[0.1])
+    assert all(h.question != "q-mig" for h in hits)
+    # CHECK 约束在位(非法来源拒写)
+    with pytest.raises(Exception):  # noqa: B017,S101  # CHECK 违约即抛(DBAPIError)
+        await session.execute(
+            text(
+                "INSERT INTO rag.query_history"
+                " (id, tenant_id, datasource_key, question, sql_text, status,"
+                "  source_type, recall_enabled)"
+                " VALUES (gen_random_uuid(), :t, 'default', 'bad', 'SELECT 0',"
+                "  'SUCCESS', 'UNKNOWN', TRUE)"
+            ),
+            {"t": tid},
+        )
+    await session.rollback()
+
+
+async def test_migration_0034_downgrade_roundtrip(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """任务 2.4:downgrade 往返(up 后 down 再 up 契约复现)。"""
+    from alembic.config import Config
+
+    from alembic import command
+    from kongming.auth.seed import seed_all
+    from kongming.config import get_settings
+
+    await seed_all(session, get_settings())
+    import asyncio
+
+    cfg = Config(str(API_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(API_ROOT / "alembic"))
+    # env.py 内部 asyncio.run:跑事件循环内直调会冲突,经线程隔离
+    await asyncio.to_thread(command.downgrade, cfg, "0033")
+    has_col = (
+        await session.execute(
+            text(
+                "SELECT count(*) FROM information_schema.columns"
+                " WHERE table_schema='rag' AND table_name='query_history'"
+                " AND column_name='source_type'"
+            )
+        )
+    ).scalar_one()
+    assert has_col == 0
+    import asyncio
+
+    await asyncio.to_thread(command.upgrade, cfg, "0034")
+    has_col2 = (
+        await session.execute(
+            text(
+                "SELECT count(*) FROM information_schema.columns"
+                " WHERE table_schema='rag' AND table_name='query_history'"
+                " AND column_name='source_type'"
+            )
+        )
+    ).scalar_one()
+    assert has_col2 == 1

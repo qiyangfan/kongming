@@ -40,6 +40,7 @@ export interface UsagePageParams {
   status?: "SUCCESS" | "ERROR";
   trace_id?: string;
   tenant_id?: string; // 038③:租户筛选(uuid 直滤)
+  protocol?: string; // 077:出站协议筛选(过滤型)
 }
 
 /** 明细分页(created_at 倒序;五类筛选) */

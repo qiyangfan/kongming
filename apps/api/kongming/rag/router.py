@@ -9,7 +9,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field, field_validator
@@ -20,6 +20,10 @@ from kongming.auth.router import current_user, require_perm
 from kongming.config import get_settings
 from kongming.datasource.models import PG_IDENTIFIER_PATTERN
 from kongming.db import get_session
+
+if TYPE_CHECKING:
+    from kongming.semantic.models import MetricHit
+
 from kongming.rag.agent_callback import get_agent_rag_client
 from kongming.rag.cache import ContextCache
 from kongming.rag.chunker import EmptyDocument as DocEmpty
@@ -62,6 +66,8 @@ def get_rag_service(session: AsyncSession) -> RagService:
         cache=ContextCache(get_redis()),
         # 047:知识写路径级联失效建议缓存(DELETE 同事务,rag commit 收口)
         suggestion_evictor=SuggestionRepository(session),
+        # 064:召回闸门配置(off 缺省零回归)
+        gate_settings=get_settings(),
     )
 
 
@@ -545,13 +551,25 @@ class RetrieveIn(BaseModel):
     )
 
 
+class MetricHitOut(BaseModel):
+    """076(纯增):语义层口径命中(标识/名称/口径表达式/修订时间)。"""
+
+    metric_id: str
+    metric_name: str
+    sql_template: str
+    updated_at: str | None = None
+
+
 class RetrieveOut(BaseModel):
     schema_hint: str
     history_sql: str
     # 023 语义段(纯增;空串=无注入,agent 零回归)
     relations_hint: str = ""
     metric_hints: str = ""
-    # 024 文档段(纯增;空=无命中,双通道隔离)
+    # 076(纯增):结构化口径命中(与 metric_hints 同源;空=无命中)
+    metric_hits: list[MetricHitOut] = []
+    # 024 文档段(纯增;空=无命中,双通道隔离)。
+    # 068:每项纯增 citation_key(稳定引用键;由父块主键派生)
     doc_hints: list[dict[str, str]] = []
     # 056 skill-pack 投影段(纯增;空=零包零回归)
     skill_terms: str = ""
@@ -579,6 +597,7 @@ async def rag_retrieve(
     # 023:语义段组装(召回表集合收窄;失败降级空串不影响召回主链路)
     relations_hint = ""
     metric_hints = ""
+    metric_hits_objs: list[MetricHit] = []
     try:
         import re as _re
 
@@ -596,7 +615,9 @@ async def rag_retrieve(
             # 删「表 x.y」死路径——该形态只存在于 agent 侧内省回退,不经此处)
             tables = _re.findall(r"^([\w]+\.[\w]+)\(", ctx.schema_hint, _re.M)
             tables = list(dict.fromkeys(tables))
-            relations_hint, metric_hints = await SemanticService(SqlSemanticRepo(session)).enrich(
+            relations_hint, metric_hints, metric_hits_objs = await SemanticService(
+                SqlSemanticRepo(session)
+            ).enrich(
                 tenant_id=str(tid_row),
                 datasource_key=req.datasource_key,
                 question=req.question,
@@ -654,16 +675,58 @@ async def rag_retrieve(
             )
     except Exception:
         log.warning("skill-pack 投影组装失败(降级空)", exc_info=True)
+    metric_hits_out = [
+        MetricHitOut(
+            metric_id=h.metric_id,
+            metric_name=h.metric_name,
+            sql_template=h.sql_template,
+            updated_at=h.updated_at,
+        )
+        for h in metric_hits_objs
+    ]
     return RetrieveOut(
         schema_hint=ctx.schema_hint,
         history_sql=ctx.history_sql,
         relations_hint=relations_hint,
         metric_hints=metric_hints,
+        metric_hits=metric_hits_out,  # 076(纯增):结构化口径命中
         doc_hints=doc_hints,
         skill_terms=skill_terms,
         skill_examples=skill_examples,
         skill_persona=skill_persona,
     )
+
+
+@router.get(
+    "/recall-probe",
+    dependencies=[Depends(require_perm("system:rag:manage"))],
+)
+async def recall_probe(
+    question: Annotated[str, Query(min_length=1, max_length=2000)],
+    datasource_key: Annotated[str, Query(pattern=r"^[a-z][a-z0-9_]{1,63}$")],
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Annotated[RagService, Depends(_get_service)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> dict[str, object]:
+    """064:召回试跑(只读):三路命中及各自原生分、融合分、双条件判定结论。
+
+    零副作用:SHALL NOT 修改配置、SHALL NOT 落库、SHALL NOT 触发召回缓存
+    失效(不走 ctx 缓存)。影子形态含"若生效将丢弃"记录。两个高频场景:
+    上传表说明后验证可召回性;影子期标定阈值(不等真实流量)。
+    """
+    try:
+        _tenant_id, tenant_key = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
+        return await svc.recall_probe(
+            tenant_key=tenant_key,
+            datasource_key=datasource_key,
+            question=question,
+        )
+    except TenantForbiddenApi:
+        raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
+    except DatasourceInvalid:
+        raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
+    except LookupError:
+        raise HTTPException(status_code=404, detail="TENANT_NOT_FOUND") from None
 
 
 # ============ 024 document-rag:文档管理端点 ============

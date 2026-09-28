@@ -74,6 +74,10 @@ class ChatRepo(Protocol):
         summary: str | None = None,
         status: str,
         attachments: list[dict[str, object]] | None = None,  # 030
+        trace_id: str | None = None,  # 069:轮次质量信号(可选,纯增)
+        retry_count: int = 0,  # 069
+        resolved_question: str | None = None,  # 069
+        prompt_version: str | None = None,  # 069
     ) -> Coroutine[Any, Any, str]: ...
     async def recent_user_questions(self, session_id: str, *, limit: int = 5) -> list[str]: ...
     def commit(self) -> Coroutine[Any, Any, None]: ...

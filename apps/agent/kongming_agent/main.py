@@ -26,6 +26,7 @@ from kongming_agent.describer import (
     TableSpec,
     describe_table,
 )
+from kongming_agent.graph.budget import PromptBudgetExceeded
 from kongming_agent.graph.build import get_graph
 from kongming_agent.graph.extract_prompt import EXTRACT_MEMORY_SYSTEM
 from kongming_agent.graph.react import get_react_graph, react_recursion_limit
@@ -40,6 +41,10 @@ log = logging.getLogger(__name__)
 
 _settings = Settings()
 _settings.fail_closed_checks()
+
+# 069:prompt 资产指纹(启动期一次计算,073 纯函数同源;任一字变化即换指纹,
+# 跨重启稳定)——随每轮 QueryOut 携带,api 侧落 chat_message.prompt_version
+_PROMPT_VERSION = prompt_fingerprint()
 
 # 053:SQL 安全引擎启动自检(validate 预检解析底座;失败告警降级 builtin,不阻断)
 from kongming_agent import sqlguard  # noqa: E402
@@ -278,6 +283,14 @@ class QueryOut(BaseModel):
     sql: str = ""
     retry_count: int = 0
     error: str | None = None
+    # 069:管理面诊断信号(api 侧落 chat_message;纯增,单轮无改写时 None)
+    resolved_question: str | None = None
+    # 069:prompt 资产指纹(启动期计算;073 纯函数同源,前 8 位)
+    prompt_version: str | None = None
+    # 076:语义层口径命中(纯增;空=无命中;api 侧随 result_json 落库+回显)
+    metric_hits: list[dict[str, str | None]] = []
+    # 068:文档道结构化来源(纯增;空=SQL 道/无命中;落库+回显)
+    sources: list[dict[str, str]] = []
     # 035:bot 链路请求内同步采集(纯增;仅 /query_react 挂收集器时非空)
     usage_records: list[dict[str, object]] = []
 
@@ -338,6 +351,10 @@ async def _run_graph(req: QueryIn) -> dict[str, object]:
     except LlmError:
         # LLM 故障(key 缺失/超时/协议异常):链路无法推进,友好返回不裸 500
         return {"llm_unavailable": True}
+    except PromptBudgetExceeded:
+        # 080:提示词装配超预算(不可切段本身超窗)——可归因失败,禁假托
+        # 「服务暂不可用」(真实原因是我方装配,运维按服务故障查不到东西)
+        return {"prompt_budget_exceeded": True}
     return final
 
 
@@ -345,6 +362,17 @@ def _build_query_out(final: dict[str, object]) -> QueryOut:
     """终态构造(同步/流式共用,单一定义防字段漂移;nl2sql-agent spec)。"""
     if final.get("llm_unavailable"):
         return QueryOut(success=False, error="LLM 服务暂不可用,请稍后重试")
+    if final.get("prompt_budget_exceeded"):
+        # 080:如实归因——不可切段(纪律/问句/自愈喂回)本身已超模型窗口,
+        # 自动收敛救不回来的配置型失败
+        return QueryOut(
+            success=False,
+            verdict="ERROR",
+            error=(
+                "本轮问题的上下文已超出模型可处理范围(自动收敛后仍无法容纳),"
+                "请缩小问题范围,或联系管理员调整模型上下文窗口配置"
+            ),
+        )
     execution = final.get("execution")
     validation = final.get("validation")
     verdict: str | None
@@ -364,6 +392,21 @@ def _build_query_out(final: dict[str, object]) -> QueryOut:
     sql = final.get("generated_sql", "")
     retry = final.get("retry_count", 0)
     error = final.get("error")
+    # 069:resolved_question 仅多轮改写实际发生且有 history 时非空
+    # (understand 直通路径 state 该键即原问句,单轮/直通不背诊断信号)
+    resolved_q = final.get("resolved_question")
+    resolved = resolved_q if isinstance(resolved_q, str) and resolved_q else None
+    question_raw = final.get("question")
+    if resolved is not None and isinstance(question_raw, str) and resolved == question_raw:
+        resolved = None  # 未发生改写(恒等)——诊断信号只记实际改写
+    # 076:口径命中(链路输入,零凭证透传;存量/无命中=空)
+    hits_raw = final.get("metric_hits")
+    metric_hits = (
+        cast("list[dict[str, str | None]]", hits_raw) if isinstance(hits_raw, list) else []
+    )
+    # 068:文档道来源(净化后正文的存活标记投影;空=SQL 道/无命中)
+    sources_raw = final.get("sources")
+    sources = cast("list[dict[str, str]]", sources_raw) if isinstance(sources_raw, list) else []
     # error 非空 ⇒ 恒非成功终态(轮次触顶携带部分结果的形态:execution
     # 可能 PASS 但 error 优先——A-B6;其余既有形态 error 与非 PASS 并存,零影响)
     has_error = isinstance(error, str) and bool(error)
@@ -372,6 +415,10 @@ def _build_query_out(final: dict[str, object]) -> QueryOut:
             isinstance(execution, ExecutionResult) and execution.verdict == "PASS" and not has_error
         ),
         verdict=verdict,
+        resolved_question=resolved,
+        prompt_version=_PROMPT_VERSION,
+        metric_hits=metric_hits,
+        sources=sources,
         summary=summary if isinstance(summary, str) else "",
         # isinstance 守卫后 cast 收窄(守卫产物元素/键型仍 Unknown;cast 运行时恒等)
         insights=cast("list[dict[str, str]]", insights) if isinstance(insights, list) else [],
@@ -431,6 +478,12 @@ async def query_stream(req: QueryIn) -> StreamingResponse:
             yield _sse_frame(
                 "result",
                 _build_query_out({"llm_unavailable": True}).model_dump_json(),
+            )
+            return
+        except PromptBudgetExceeded:
+            yield _sse_frame(
+                "result",
+                _build_query_out({"prompt_budget_exceeded": True}).model_dump_json(),
             )
             return
         except Exception:

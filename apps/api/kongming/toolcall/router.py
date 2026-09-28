@@ -132,7 +132,9 @@ class _RagServiceAdapter:
             if tid is None:
                 return {"relations_hint": "", "metric_hints": ""}
             tables = _re.findall(r"^([\w]+\.[\w]+)\(", schema_hint, _re.M)
-            relations_hint, metric_hints = await SemanticService(SqlSemanticRepo(self._s)).enrich(
+            relations_hint, metric_hints, _mhits = await SemanticService(
+                SqlSemanticRepo(self._s)
+            ).enrich(
                 tenant_id=str(tid),
                 datasource_key=datasource_key,
                 question=question,

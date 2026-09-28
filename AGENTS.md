@@ -19,12 +19,12 @@ openspec/     spec-driven 工作流:config.yaml 硬约束 + constitution.md 宪�
 ## 常用命令
 
 ```bash
-make check          # 全量质量门禁 = api/agent 各自 ruff+mypy+pytest + web tsc+eslint
+make check          # 全量质量门禁 = api/agent 各自 ruff+mypy+pytest + web tsc+test+eslint
 make contracts      # 导出 OpenAPI → 生成前端类型;改了 api 路由/模型后必跑并提交产物
 make up / down      # compose 起/停 postgres redis
 # apps/api:  uv sync && uv run alembic upgrade head && uv run uvicorn kongming.main:app --port 8000
 # apps/agent: uv sync && uv run uvicorn kongming_agent.main:app --port 8001
-# apps/web:  pnpm install && pnpm dev   (typecheck= tsc -b;lint= eslint)
+# apps/web:  pnpm install && pnpm dev   (typecheck= tsc -b;lint= eslint;test= vitest run 纯函数)
 ```
 
 ## 架构铁律(违反即返工)

@@ -11,6 +11,7 @@ from typing import Any, Protocol
 from kongming.rag.models import (
     FailureSignal,
     HistoryOverview,
+    HistorySample,
     IntrospectedTable,
     KnowledgeEntry,
     RecallHit,
@@ -135,7 +136,7 @@ class RagRepo(Protocol):
 
     async def recall_history(
         self, *, tenant_id: str, datasource_key: str, vector: list[float]
-    ) -> list[str]: ...
+    ) -> list[HistorySample]: ...
 
     async def fetch_entries(
         self, *, tenant_id: str, datasource_key: str, keys: list[tuple[str, str]]
@@ -150,6 +151,21 @@ class RagRepo(Protocol):
         sql_text: str,
         embedding: list[float] | None,
     ) -> None: ...
+
+    # ---- 070 反馈样本晋升/停用(与反馈处置同事务;调用方负责 commit) ----
+
+    async def promote_feedback_sample(
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        question: str,
+        sql_text: str,
+        feedback_message_id: str,
+        embedding: list[float] | None,
+    ) -> None: ...
+
+    async def disable_feedback_samples(self, *, feedback_message_id: str) -> None: ...
 
     async def log_oper(
         self, user_id: str | None, action: str, target: str | None, detail: dict[str, object]

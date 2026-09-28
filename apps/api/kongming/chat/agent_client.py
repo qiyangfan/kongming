@@ -38,6 +38,13 @@ class AgentReply:
     sql: str = ""
     retry_count: int = 0
     error: str | None = None
+    # 069:管理面诊断信号(纯增;仅落库,不进用户响应/SSE——逐字段同构契约不破)
+    resolved_question: str | None = None
+    prompt_version: str | None = None
+    # 076:语义层口径命中(纯增;随 result_json 落库+回显,不进 SSE 用户事件)
+    metric_hits: list[dict[str, str | None]] = field(default_factory=list[dict[str, str | None]])
+    # 068:文档道结构化来源(纯增;随 result_json 落库+回显;SQL 道恒空)
+    sources: list[dict[str, str]] = field(default_factory=list[dict[str, str]])
     # 035:bot 链路请求内同步采集(纯增;/query_react 响应携带,空=旧版 agent)
     usage_records: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
 
@@ -48,11 +55,64 @@ def _obj_dict(value: object) -> dict[str, object] | None:
     return cast(dict[str, object], value) if isinstance(value, dict) else None
 
 
+def _metric_hits_of(raw: object) -> list[dict[str, str | None]]:
+    """076:QueryOut.metric_hits → AgentReply 载荷(守卫收窄;dict 且键全 str)。"""
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, str | None]] = []
+    for item in cast("list[object]", raw):
+        if not isinstance(item, dict):
+            continue
+        d = cast("dict[str, object]", item)
+        mid = d.get("metric_id")
+        name = d.get("metric_name")
+        tpl = d.get("sql_template")
+        updated = d.get("updated_at")
+        if not isinstance(mid, str) or not isinstance(name, str):
+            continue  # 畸形条目跳过(不阻断解析)
+        out.append(
+            {
+                "metric_id": mid,
+                "metric_name": name,
+                "sql_template": tpl if isinstance(tpl, str) else "",
+                "updated_at": updated if isinstance(updated, str) else None,
+            }
+        )
+    return out
+
+
+def _sources_of(raw: object) -> list[dict[str, str]]:
+    """068:QueryOut.sources → AgentReply 载荷(守卫收窄;缺 citation_key 跳过)。"""
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, str]] = []
+    for item in cast("list[object]", raw):
+        if not isinstance(item, dict):
+            continue
+        d = cast("dict[str, object]", item)
+        key = d.get("citation_key")
+        if not isinstance(key, str) or not key:
+            continue
+        out.append(
+            {
+                "citation_key": key,
+                "source_ref": str(d.get("source_ref") or ""),
+                "doc_name": str(d.get("doc_name") or ""),
+            }
+        )
+    return out
+
+
 def parse_agent_reply(data: dict[str, object]) -> AgentReply:
     """agent 终态报文 → AgentReply(同步响应/流式 result 帧共用,单一定义防漂移)。"""
     verdict = data.get("verdict")
     error = data.get("error")
     retry = data.get("retry_count")
+    # 069:诊断信号解析(旧版 agent 无该键 → None,零回归)
+    resolved_question = data.get("resolved_question")
+    prompt_version = data.get("prompt_version")
+    metric_hits_raw = data.get("metric_hits")
+    sources_raw = data.get("sources")
     insights_raw = data.get("insights")
     stats_raw = data.get("stats")
     columns_raw = data.get("columns")
@@ -97,6 +157,11 @@ def parse_agent_reply(data: dict[str, object]) -> AgentReply:
         sql=str(data.get("sql") or ""),
         retry_count=retry if isinstance(retry, int) else 0,
         error=error if isinstance(error, str) else None,
+        # 069:诊断信号(旧版 agent 缺键 → None)
+        resolved_question=resolved_question if isinstance(resolved_question, str) else None,
+        prompt_version=prompt_version if isinstance(prompt_version, str) else None,
+        metric_hits=_metric_hits_of(metric_hits_raw),
+        sources=_sources_of(sources_raw),
         usage_records=usage_records,
     )
 

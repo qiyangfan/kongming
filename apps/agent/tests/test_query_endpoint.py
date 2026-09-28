@@ -17,6 +17,9 @@ TOKEN = {"X-Internal-Token": "test-internal-token"}
 
 
 class _Llm:
+    def prompt_budget(self, task: str | None = None) -> int:
+        return 1_000_000  # 080:测试替身恒宽预算(收敛行为由纯函数测试覆盖)
+
     def __init__(self, answers: list[str]) -> None:
         self.answers = list(answers)
 
