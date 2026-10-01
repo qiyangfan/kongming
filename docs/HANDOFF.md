@@ -32,8 +32,10 @@
   deptIds 原样提交」是缺陷——保留回显值才是正确侧(清空会撞上 083 的空集合拒绝)。
 - **086 授权状态单一闸落地并归档(2026-10-01)**:上一条登记的两条「待裁决」已由 owner 裁决,归档件
   `openspec/changes/archive/2026-10-01-086-authz-status-single-gate/`。裁定的口径是两句,别读反:
-  ①**角色启用状态是一道贯穿「一切按主体取授权面」的闸**,不是 datascope 独有的——原先 5 个读取点里只有
-  `user_role_scopes` 读 `sys_role.status`,权限点联查与四处 `data_scope='ALL'` 判定都不读,禁用一个 ALL
+  ①**角色启用状态是一道贯穿「一切按主体取授权面」的闸**,不是 datascope 独有的——本批前这样的读取
+  共 7 处,只有 datascope 的 `user_role_scopes` 与 083 起的 `custom_dept_ids` 两处带闸,其余 5 处
+  (权限点联查 + 审计/反馈/工具调用/质量四处 `data_scope='ALL'` 判定)都不读 `sys_role.status`,
+  禁用一个 ALL
   角色于是同时得到「数据范围侧消失→降级为不过滤」和「可见面侧照旧放宽」两个相反结果,即反向 fail-open。
   现 `auth/repository.py::SqlPermRepo.list_codes`(改为联 `sys_role` 并带 `r.status='ACTIVE'`)、
   `audit/`、`feedback/`、`toolcall/repository.py::user_has_all_scope`、`quality/repository.py::SqlQualityRepo.user_has_scope_all`
@@ -41,7 +43,8 @@
   `log.warning` 一行再抛 `DataScopeUnsupported`,`DataScopeUnsupported` 的 docstring 顺势扩为
   「无法确定行级可见面的统称」(4 种触发形态)。第 5 处(quality)是评审 R2 才扫出来的:R1 按记忆列的
   「三处 ALL 判定」清单不完整,**枚举读取点要按 SQL 片段 grep(`sys_user_role`/`sys_role_permission`
-  的联查处),不能靠列清单**。②**`sys_dept.status` 退出行级可见性判定**——删掉 `dept_and_below` CTE 里
+  的联查处),不能靠列清单**。另有一处**已核不缺陷**并登记以免重复排查:`auth/repository.py::list_role_keys`
+  不带宽谓词,它是角色名呈现面(鉴权一律走 `perm_codes`,实测无授权用途)——若日后被用来取授权面须同闸。②**`sys_dept.status` 退出行级可见性判定**——删掉 `dept_and_below` CTE 里
   那两处 `status='ACTIVE'`(而不是把 DEPT/CUSTOM 补齐成过滤),裁定的分支理由与实证面记在「挂账终态」节,
   并由 `datascope` 一条 MUST NOT 场景 + `test_dept_and_below_includes_disabled_dept` 钉住。
   用例:`tests/test_role_status_gate.py`(同一角色图上 ACTIVE/DISABLED 各跑通 4 处 ALL 判定,新增按角色
@@ -49,8 +52,10 @@
   且 `GET /system/users` 403,即功能面同闸)、`test_datascope.py` 三条(清单 13/14/15:未知主体、仅有
   停用角色、停用部门仍在子树内)。spec 侧 `rbac` 加「未启用角色不授予权限点」场景、`datascope` 加两条
   新需求。**门禁**:`KM_REDIS_URL=redis://localhost:6380/15 uv run pytest -q --cov` 自 086 后重跑过一遍,
-  **1071 passed / 6 skipped,覆盖率 72.94%**(`apps/api` 直跑 `uv run pytest -q --cov`,未走 `make api-check`
-  的 ruff/mypy 段——那两段本批未破,上一批已全绿);`--specs --strict` 33 通过/12 失败——失败项全是既有中文
+  **1071 passed / 6 skipped**,覆盖率是 **72.9% 级**——该套件带 pytest-randomly,三次实测
+  72.93/72.94/72.95 微抖,别把它写成到点的断言;`make api-check` 的各段(ruff format/check、mypy、
+  pyright、lint-imports、pytest)本批逐段跑过且全绿,其中自查抓到 applier 模块 docstring 一条
+  148 字符长行报 E501——重跑门禁才有,注释与文档不作证据;`--specs --strict` 33 通过/12 失败——失败项全是既有中文
   标题缺 RFC2119 关键词那笔债,单查 `datascope` 只剩关键词警告(086 新增段自带 SHALL/MUST NOT,未新增
   失败项);`--changes --strict` 归档后活动件为零。
 - **本机跑 api 门禁的端口坑(2026-10-01 复现)**:宿主 6379 现被上游 `docker-compose-local-redis-1`
@@ -363,11 +368,13 @@ UI(API 已备场景低频)/D-B7 进度条动态 style(原裁接受)。
 - **禁用角色让行级可见范围反向放宽 → 角色状态升为授权读取的统一闸**:裁的是「**一切**按主体取授权面的
   读取都必须 `sys_role.status='ACTIVE'`」,而不是只补 applier 那条「无启用角色」分支。理由:`datascope`
   主规格早就把范围解释成「用户**启用**角色的并集」,而功能权限点(`SqlPermRepo.list_codes`)、审计/反馈/
-  工具调用的全范围判定、quality 的 `user_has_scope_all` 四侧都不看角色状态——同一事实两套口径,禁用角色
+  工具调用的全范围判定、quality 的 `user_has_scope_all` 五侧都不看角色状态——同一事实两套口径,禁用角色
   就成了「功能权限留着、数据范围反而放到全表」的反向杠杆。一处真相要求所有读取同源,故 5 个站点一并加
-  过滤(第 5 处 `quality/repository.py` 是评审 R2 才扫出来的,前三处清单当时判为完整)。配套把「主体不可
+  过滤(第 5 处 `quality/repository.py` 是评审 R2 才扫出来的,前三处清单当时判为完整;datascope 侧的
+  `user_role_scopes` 与 083 起的 `custom_dept_ids` 本就带闸,补齐后全仓 7 处同闸)。配套把「主体不可
   确定」统一为 fail-closed:用户不存在/已删除、无启用角色,都在 applier 抛 `DataScopeUnsupported` 并
-  `log.warning`,原先的「降级为不过滤」分支只剩「主表无法定位」这一种合法触发。
+  `log.warning`。`FilterType.SKIP` 的「降级为不过滤」只保留**结构性**成因(主表无法定位、目标列不存在),
+  它们与「主体解析不出可见面」是两类事实,前者由 `datascope` 主规格自定场景钉着,不是 fail-open。
 - **`sys_dept.status` 退出行级可见性判定**:裁的是「**删掉**递归 CTE 里那两处
   `status='ACTIVE'`」,而不是把 DEPT/CUSTOM 补齐成过滤。三档里 DEPT(本人部门)与 CUSTOM(角色配置集合)
   本就按字面生效、083 主规格写明「按字面生效」,只有 `DEPT_AND_BELOW` 的 CTE 是唯一异类;统一到「过滤」
