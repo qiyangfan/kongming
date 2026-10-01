@@ -115,6 +115,15 @@ class ConfirmNotFound(Exception):
     """待确认记录不存在/不属当前用户/已处理:404 同形,不暴露存在性。"""
 
 
+class KnowledgeSourceError(Exception):
+    """081:个人知识库检索失败(分类随 message 前缀上浮:unreachable/protocol)。
+
+    unreachable=连接层未送达(拒连/连接超时/accept 后无响应关连;实现侧已按
+    只读分层重试一次);protocol=响应类错误(非 2xx/报文畸形/读超时)。
+    分发兜底映射 ERROR + 审计,agent 据实降级为观察,不编造检索结果。
+    """
+
+
 @dataclass(frozen=True)
 class ToolAuditEntry:
     """工具执行审计写入载荷(领域层纯数据;仓储落 sys_tool_audit)。"""

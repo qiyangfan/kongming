@@ -92,6 +92,29 @@ async def _bind_role(s: AsyncSession, user_id: str, role_id: str) -> None:
     await s.commit()
 
 
+async def _mk_dept(s: AsyncSession, tenant_id: str) -> str:
+    did = (
+        await s.execute(
+            text(
+                "INSERT INTO public.sys_dept (id, dept_name, tenant_id)"
+                " VALUES (gen_random_uuid(), :n, :t) RETURNING id"
+            ),
+            {"n": f"d-{uuid.uuid4().hex[:6]}", "t": tenant_id},
+        )
+    ).scalar_one()
+    await s.commit()
+    return str(did)
+
+
+async def _set_role_depts(s: AsyncSession, role_id: str, dept_ids: list[str]) -> None:
+    for d in dept_ids:
+        await s.execute(
+            text("INSERT INTO public.sys_role_dept (role_id, dept_id) VALUES (:r, :d)"),
+            {"r": role_id, "d": d},
+        )
+    await s.commit()
+
+
 async def _audits(s: AsyncSession, trace_id: str) -> list[dict[str, Any]]:
     rows = (
         (
@@ -326,9 +349,10 @@ async def test_self_scope_rewritten_sql_audited(
     assert uid not in rows[0]["sql_text"]  # 值绑定参数,不入文本
 
 
-async def test_custom_scope_fail_closed_blocked(
+async def test_custom_scope_without_depts_fail_closed_blocked(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
+    """CUSTOM 但未配置角色部门集合(历史数据/旁路写入)→ 仍 fail-closed BLOCKED。"""
     uid = await make_user("exec-custom")
     tid = await _mk_tenant(session, "ita")
     await _bind_tenant(session, uid, tid)
@@ -341,6 +365,67 @@ async def test_custom_scope_fail_closed_blocked(
     rows = await _audits(session, p["trace_id"])
     assert len(rows) == 1 and rows[0]["verdict"] == "BLOCKED"
     assert "DATA_SCOPE" in (rows[0]["block_reason"] or "")
+
+
+async def test_custom_scope_with_depts_filters_by_in(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """CUSTOM 配置部门集合 → 按 dept_id IN (集合) 放行(等价「显式集合的 DEPT IN」)。"""
+    uid = await make_user("exec-custom-in")
+    tid = await _mk_tenant(session, "ita")
+    await _bind_tenant(session, uid, tid)
+    rid = await _mk_role(session, "IE_CUSTOM_IN", "CUSTOM")
+    await _bind_role(session, uid, rid)
+    d1 = await _mk_dept(session, tid)
+    d2 = await _mk_dept(session, tid)
+    d3 = await _mk_dept(session, tid)
+    await _set_role_depts(session, rid, [d1, d2])
+    # 专属业务表(不污染 goods 的既有行数断言):3 行落集合内部门,2 行落集合外
+    async with get_engine().begin() as conn:
+        await conn.execute(
+            text(
+                f'CREATE TABLE IF NOT EXISTS "{SCHEMA_A}".dept_order ('  # noqa: S608  # 模块常量
+                " id uuid PRIMARY KEY, mark varchar(8), dept_id uuid)"
+            )
+        )
+        await conn.execute(text(f'DELETE FROM "{SCHEMA_A}".dept_order'))  # noqa: S608
+        for dept in (d1, d1, d2, d3, d3):
+            await conn.execute(
+                text(
+                    f'INSERT INTO "{SCHEMA_A}".dept_order (id, mark, dept_id)'  # noqa: S608
+                    " VALUES (gen_random_uuid(), 'x', :d)"
+                ),
+                {"d": dept},
+            )
+    p = _payload("ita", "SELECT mark FROM dept_order", user_id=uid)
+    resp = await client.post("/internal/sql/execute", json=p, headers=INTERNAL)
+    body = resp.json()
+    assert body["verdict"] == "PASS", body
+    assert body["row_count"] == 3  # 只返回集合内部门的行
+    rows = await _audits(session, p["trace_id"])
+    assert "dept_id" in rows[0]["sql_text"]  # 改写后形态落审计
+    assert d1 not in rows[0]["sql_text"]  # 值走绑定参数,不入 SQL 文本
+
+
+async def test_custom_scope_no_dept_column_degrades_like_dept(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """CUSTOM 有集合但表无部门列 → 与 DEPT 同源安全降级(不改写、放行、告警可观测)。"""
+    uid = await make_user("exec-custom-nc")
+    tid = await _mk_tenant(session, "ita")
+    await _bind_tenant(session, uid, tid)
+    rid = await _mk_role(session, "IE_CUSTOM_NC", "CUSTOM")
+    await _bind_role(session, uid, rid)
+    await _set_role_depts(session, rid, [await _mk_dept(session, tid)])
+    p = _payload(
+        "ita", "SELECT mark FROM goods WHERE create_by = 'someone'", user_id=uid
+    )  # goods 无 dept_id
+    resp = await client.post("/internal/sql/execute", json=p, headers=INTERNAL)
+    body = resp.json()
+    assert body["verdict"] == "PASS"
+    assert body["row_count"] == 5  # 降级为不过滤(沿用上游裁定)
+    rows = await _audits(session, p["trace_id"])
+    assert rows[0]["sql_text"] == "SELECT mark FROM goods WHERE create_by = 'someone'"
 
 
 async def test_cross_tenant_schema_reference_blocked(

@@ -101,6 +101,17 @@ class SqlExecutor(Protocol):
     ) -> dict[str, object]: ...
 
 
+class KnowledgeSearchPort(Protocol):
+    """081:外部个人知识库检索(siku localhost /api/search)。
+
+    实现侧(组合根)负责 HTTP 出站、超时、连接层单次重试与错误分类;
+    领域只消费「命中列表」,失败经 KnowledgeSourceError 上浮分类
+    (分发兜底映射 ERROR + 审计,不裸崩)。
+    """
+
+    async def search(self, *, query: str, top_k: int) -> list[dict[str, object]]: ...
+
+
 class SandboxExecutor(Protocol):
     """run_python_code 工具委托(027):沙箱执行+审计(实现侧 sandbox 域)。
     data=None 纯计算;非 None={"columns","rows"}(六层防御取数结果,

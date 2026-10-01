@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI, Request
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as _Req
@@ -56,6 +57,7 @@ from kongming.store.router import router as store_router
 from kongming.system.router import register_system_error_handlers
 from kongming.system.router import router as system_router
 from kongming.team.router import router as team_router
+from kongming.toolcall import registry as tool_registry
 from kongming.toolcall.router import chat_router as toolcall_chat_router
 from kongming.toolcall.router import internal_router as toolcall_internal_router
 from kongming.toolcall.router import router as toolcall_router
@@ -193,6 +195,32 @@ async def _attachment_cleanup_loop() -> None:
         await asyncio.sleep(20 * 3600)
 
 
+async def _knowledge_endpoint(session: AsyncSession) -> str | None:
+    """081/082:个人知识库端点注册条件;多租户仅告警不拒绝(082 单租户闸降级)。
+
+    1. 未配置 KM_SIKU_BASE_URL → None(零回归缺省);
+    2. 主机非 localhost 白名单 → None + 告警(fail-closed,防个人 vault 外露);
+    3. 多租户部署:告警后照常返回(注册发生)。个人知识源无租户语义,多租户下
+       所有租户共享同一检索面——081 曾据此拒注册,被 owner 环境事实证否
+       (开发库 3 租户时功能静默消失;多租户生产场景被 owner 明确排除),
+       降级为显性告警:功能可用性与残留风险都不隐藏(design D1)。
+    """
+    url = (get_settings().siku_base_url or "").strip()
+    if not url:
+        return None
+    if not tool_registry.is_local_base_url(url):
+        log.warning("KM_SIKU_BASE_URL 主机非 localhost 白名单,knowledge_search 工具不注册")
+        return None
+    count = (await session.execute(text("SELECT COUNT(*) FROM public.sys_tenant"))).scalar_one()
+    if count > 1:
+        log.warning(
+            "多租户部署(租户数=%d):knowledge_search 已注册,但个人知识源无租户隔离,"
+            "所有租户共享同一检索面(v1 定位个人单租户部署)",
+            count,
+        )
+    return url
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
     """启动即播种(幂等,rbac spec「种子数据」);DB 不可达则拒启(控制面 fail-closed)。
@@ -207,6 +235,7 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
     guard.startup_self_check()
     async with get_sessionmaker()() as session:
         await seed_all(session, get_settings())
+        tool_registry.activate(tool_registry.build_registry(await _knowledge_endpoint(session)))
     archive_task = asyncio.create_task(_daily_archive_loop())
     billing_task = asyncio.create_task(_monthly_invoice_loop())  # 034:月首出账薄壳
     expire_task = asyncio.create_task(_payment_expire_loop())  # 035:支付单过期兜底

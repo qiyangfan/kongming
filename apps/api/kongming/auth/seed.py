@@ -68,6 +68,9 @@ PERMISSIONS: list[tuple[str, str, int]] = [
     ("system:skill:manage", "Skill包管理", 30),
     # 069 chat-quality-observability:轮次质量观测(仅 SUPER_ADMIN)
     ("system:chat-quality:view", "问答质量查看", 31),
+    # 081 external-knowledge:个人知识库检索(显式授予制,不进 DEVELOPER 推荐集——
+    # 单租户个人部署由 SUPER_ADMIN 自动覆盖;多租户场景告警但不拒注册,082)
+    ("tool:knowledge:search", "工具-个人知识库检索", 32),
 ]
 
 ROLES: list[tuple[str, str, str, str, int]] = [

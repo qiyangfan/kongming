@@ -26,6 +26,7 @@ from sqlglot.errors import SqlglotError
 from kongming.sqlfw.firewall import check as sql_check
 from kongming.toolcall.models import (
     ConfirmNotFound,
+    KnowledgeSourceError,
     ToolAuditEntry,
     ToolDef,
     ToolOutcome,
@@ -37,6 +38,7 @@ from kongming.toolcall.ports import (
     ConfirmReplyStore,
     DynamicToolResolver,
     IntentReviewer,
+    KnowledgeSearchPort,
     McpToolCaller,
     PermReader,
     RagRetriever,
@@ -45,7 +47,7 @@ from kongming.toolcall.ports import (
     SqlExecutor,
     ToolRepo,
 )
-from kongming.toolcall.registry import REGISTRY, get_tool
+from kongming.toolcall.registry import effective, get_tool
 
 log = logging.getLogger(__name__)
 
@@ -175,6 +177,7 @@ class ToolCallService:
         sandbox: SandboxExecutor | None = None,  # 027:沙箱执行(未注入=未启用)
         resolver: DynamicToolResolver | None = None,  # 028:动态工具(MCP,未注入=纯静态)
         mcp_caller: McpToolCaller | None = None,  # 028:MCP 出站执行
+        knowledge: KnowledgeSearchPort | None = None,  # 081:个人知识库(未注入=工具未注册)
         *,
         rate_limit_per_minute: int,
         confirm_ttl_minutes: int,
@@ -190,6 +193,7 @@ class ToolCallService:
         self._sandbox = sandbox
         self._resolver = resolver
         self._mcp = mcp_caller
+        self._knowledge = knowledge
         self._rate_limit = rate_limit_per_minute
         self._confirm_ttl = confirm_ttl_minutes
 
@@ -266,7 +270,7 @@ class ToolCallService:
         # L4 之前:工具意图审核(020,spec「意图审核先于参数校验」)——
         # 同 trace 写工具调用超阈值 fail-closed 拒绝,双审计落库
         if tool.write and self._intent is not None:
-            write_tools = [d.name for d in REGISTRY.values() if d.write]
+            write_tools = [d.name for d in effective().values() if d.write]
             attempts = await self._repo.count_write_calls(trace_id, write_tools)
             if not await self._intent.allow(
                 trace_id=trace_id,
@@ -367,6 +371,32 @@ class ToolCallService:
             if self._mcp is None:
                 raise LookupError("MCP 出站执行未接线(部署缺陷)")
             return await self._mcp.call(tenant_id=tenant_id, qualified=tool.name, args=args)
+        if tool.name == "knowledge_search":
+            # 081:注册表已过两道注册条件才可能到达此处;端口缺失=装配漂移,
+            # 收敛 KnowledgeSourceError(分发兜底 ERROR,不裸崩)
+            if self._knowledge is None:
+                raise KnowledgeSourceError("unreachable: 知识库检索未接线(部署缺陷)")
+            # 缺省 5 与注册表 schema description 标注一致;L4 已校验 ∈[1,10],
+            # 此处按非布尔 int 收窄(L4 之外的纵深一层)
+            top_k = args.get("top_k")
+            hits = await self._knowledge.search(
+                query=str(args["query"]),
+                top_k=top_k if isinstance(top_k, int) and not isinstance(top_k, bool) else 5,
+            )
+            # 观察整形:只透出文本与来源锚点(分数/内部 id 不进 LLM 上下文),
+            # 空结果如实表达(count=0),由 LLM 决定改走他路或据实回答
+            return {
+                "count": len(hits),
+                "hits": [
+                    {
+                        "source_name": hit.get("source_name"),
+                        "note_path": hit.get("note_path"),
+                        "anchor": hit.get("anchor"),
+                        "text": hit.get("text"),
+                    }
+                    for hit in hits
+                ],
+            }
         if tool.name == "run_python_code":
             return await self._run_python_code(
                 args,

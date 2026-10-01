@@ -11,9 +11,11 @@
 import logging
 import shutil
 import uuid
+from contextlib import suppress
 from datetime import datetime
 from typing import Annotated, Any, Literal, cast
 
+import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,13 +37,14 @@ from kongming.sandbox.runner import PodmanSandboxRunner
 from kongming.sandbox.service import SandboxService
 from kongming.toolcall.models import (
     ConfirmNotFound,
+    KnowledgeSourceError,
     TenantBindingForbidden,
     TenantNotFound,
     ToolDef,
     ToolOutcome,
 )
 from kongming.toolcall.ratelimit import RedisRateLimiter
-from kongming.toolcall.registry import REGISTRY
+from kongming.toolcall.registry import REGISTRY, is_local_base_url
 from kongming.toolcall.repository import (
     SqlToolCallRepo,
     ToolAuditWriter,
@@ -283,6 +286,86 @@ def _build_mcp_service(session: AsyncSession) -> McpService:
     )
 
 
+class _SikuKnowledgeClient:
+    """081 KnowledgeSearchPort 绑定:控制面出站 siku localhost /api/search。
+
+    错误分类(spec「失败降级为观察」,两档):
+    - unreachable=未完整取得响应(拒连/连接超时/accept 后关连/读中断):
+      连接层未送达,重试至多一次(design D6 只读分层);
+    - protocol=已送达但响应不合格(非 2xx/报文畸形/读超时):不重试。
+    均收敛 KnowledgeSourceError 上浮(分发兜底 ERROR + 审计)。
+    """
+
+    def __init__(self, *, base_url: str, timeout_ms: int) -> None:
+        self._base = base_url.rstrip("/")
+        self._timeout = httpx.Timeout(timeout_ms / 1000)
+
+    async def search(self, *, query: str, top_k: int) -> list[dict[str, object]]:
+        payload = {"query": query, "top_k": top_k}
+        last: Exception | None = None
+        # 未完整取得响应族(httpx  NetworkError 家族 + 协议层无响应关连)。
+        # 注意:拒连在 macOS anyio 后端实际以 ReadError 浮现(不是 ConnectError),
+        # 故按语义而非具体异常名归纳;读超时(TimeoutException)先于本族被捕获
+        # ——「请求已送达、响应未按期」归 protocol,不重试。
+        undelivered = (
+            httpx.ConnectError,
+            httpx.ConnectTimeout,
+            httpx.RemoteProtocolError,
+            httpx.ReadError,
+            httpx.WriteError,
+            httpx.CloseError,
+        )
+        # 每次调用独立客户端(与既有出站同形态);拒连后 aclose 自身可能抛
+        # BrokenResource→ReadError(清理噪声),压制之——不掩盖主结果/主错误
+        client = httpx.AsyncClient(timeout=self._timeout)
+        try:
+            for attempt in (1, 2):  # 连接层至多两次(首次 + 一次重试)
+                try:
+                    resp = await client.post(f"{self._base}/api/search", json=payload)
+                    resp.raise_for_status()
+                    body: object = resp.json()
+                    if not isinstance(body, dict):
+                        raise KnowledgeSourceError("protocol: 检索响应缺 results 列表")
+                    raw: object = cast("dict[str, object]", body).get("results")
+                    if not isinstance(raw, list):
+                        raise KnowledgeSourceError("protocol: 检索响应缺 results 列表")
+                    # 非 dict 命中静默过滤(siku 契约保证 dict;cast 仅为定型)
+                    return [
+                        cast("dict[str, object]", item)
+                        for item in cast("list[object]", raw)
+                        if isinstance(item, dict)
+                    ]
+                except undelivered as e:
+                    last = e
+                    if attempt == 1:
+                        continue
+                except httpx.TimeoutException as e:
+                    raise KnowledgeSourceError(f"protocol: 检索读超时({type(e).__name__})") from e
+                except httpx.HTTPStatusError as e:
+                    raise KnowledgeSourceError(
+                        f"protocol: 上游 HTTP {e.response.status_code}"
+                    ) from e
+                except (ValueError, TypeError) as e:  # 报文畸形(JSON 解码/结构)
+                    raise KnowledgeSourceError(f"protocol: 响应报文畸形({type(e).__name__})") from e
+                except httpx.TransportError as e:  # 传输层未枚举残族(防 httpx 分层演进逃逸)
+                    last = e
+                    if attempt == 1:
+                        continue
+            raise KnowledgeSourceError(f"unreachable: 知识库拒连({type(last).__name__})") from last
+        finally:
+            with suppress(Exception):  # 关连清理噪声(见上行注释)
+                await client.aclose()
+
+
+def _build_knowledge_client() -> _SikuKnowledgeClient | None:
+    """081:端点未配置或主机非 localhost 白名单 → None(工具不注册,端口不会被调)。"""
+    settings = get_settings()
+    url = (settings.siku_base_url or "").strip()
+    if not url or not is_local_base_url(url):
+        return None
+    return _SikuKnowledgeClient(base_url=url, timeout_ms=settings.siku_timeout_ms)
+
+
 class _McpDynamicResolver:
     """028 DynamicToolResolver 绑定:快照命中 → fail-closed ToolDef。"""
 
@@ -334,6 +417,7 @@ def _get_service(session: Annotated[AsyncSession, Depends(get_session)]) -> Tool
         sandbox=_build_sandbox(),  # 027
         resolver=_McpDynamicResolver(mcp_svc),  # 028
         mcp_caller=_McpToolCaller(mcp_svc),  # 028
+        knowledge=_build_knowledge_client(),  # 081(未配置=None)
         rate_limit_per_minute=settings.tool_rate_limit_per_minute,
         confirm_ttl_minutes=settings.tool_confirm_ttl_minutes,
     )

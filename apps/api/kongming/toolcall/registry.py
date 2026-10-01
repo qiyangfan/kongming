@@ -3,8 +3,14 @@
 唯一真理源纪律:Agent 面不维护独立工具 schema——控制面在调用 ReAct 端点时
 按调用方授权集过滤本表注入(filter_specs);新增/变更工具只改本文件。
 零框架纪律:本模块不 import fastapi/sqlalchemy/redis。
+
+部署级可选内置工具(081 external-knowledge):REGISTRY 是静态基表(常驻工具,
+零回归缺省);build_registry(settings 条件) 产出有效表,启动时 activate。
+条件不满足的工具不进有效表——对调用方与 Agent 面「从未存在」(spec
+「部署级注册条件」)。
 """
 
+import urllib.parse
 from collections.abc import Collection
 
 from kongming.toolcall.models import ToolDef, ToolSpec
@@ -153,10 +159,86 @@ REGISTRY: dict[str, ToolDef] = {
 }
 
 
+# 081 external-knowledge:个人知识库检索工具(部署级可选;注册条件两道:
+# 端点已配置 + localhost 白名单;多租户仅告警不拒绝,见 main.lifespan,082)
+_KNOWLEDGE_TOOL = ToolDef(
+    name="knowledge_search",
+    description=(
+        "检索个人本地知识库(siku)中的文档:业务口径、规范、笔记等非结构化"
+        "资料。数据库里查得到的结构性数据不要用它;返回命中文本与来源"
+        "锚点(note_path/anchor),答案引用时须带上锚点"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "description": "检索问句(自然语言)",
+            },
+            "top_k": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10,
+                "description": "返回命中条数(缺省 5)",
+            },
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    },
+    perm_code="tool:knowledge:search",
+    write=False,
+    require_confirm=False,
+)
+
+# localhost 等价主机集(fail-closed 白名单;host.docker.internal 是 compose
+# 部署形态下容器到宿主机的 localhost 等价形式,design D3)
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "host.docker.internal", "::1", "[::1]"})
+
+
+def is_local_base_url(url: str) -> bool:
+    """081:端点主机是否在 localhost 白名单(纯函数;畸形 URL/非 http(s) 一律 False)。"""
+    try:
+        parsed = urllib.parse.urlparse(url.strip())
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    return (parsed.hostname or "").lower() in _LOCAL_HOSTS
+
+
+def build_registry(knowledge_base_url: str | None) -> dict[str, ToolDef]:
+    """081:有效注册表装配(确定性纯函数:同入参同结果)。
+
+    knowledge_base_url 非空且过 localhost 白名单才追加 knowledge_search;
+    调用方(main.lifespan)负责多租户告警,本函数只做端点级判定。
+    """
+    registry = dict(REGISTRY)
+    if knowledge_base_url and is_local_base_url(knowledge_base_url):
+        registry[_KNOWLEDGE_TOOL.name] = _KNOWLEDGE_TOOL
+    return registry
+
+
+# 有效表:缺省=静态基表(未 activate 的测试/导入路径零回归);activate 后
+# filter_specs/get_tool 及其余直接读表点经 effective() 消费
+_active_registry: dict[str, ToolDef] = REGISTRY
+
+
+def activate(registry: dict[str, ToolDef]) -> None:
+    """启动装配入口(main.lifespan 调用一次;测试可 activate 后还原)。"""
+    global _active_registry  # noqa: PLW0603 —— 进程级单次装配,组合根模式
+    _active_registry = registry
+
+
+def effective() -> dict[str, ToolDef]:
+    return _active_registry
+
+
 def filter_specs(perm_codes: Collection[str]) -> list[ToolSpec]:
     """按调用方权限点集过滤出可注入 Agent 面的工具 schema(空集→空列表,退化语义)。"""
-    return [d.spec() for d in REGISTRY.values() if d.perm_code in perm_codes]
+    return [d.spec() for d in _active_registry.values() if d.perm_code in perm_codes]
 
 
 def get_tool(name: str) -> ToolDef | None:
-    return REGISTRY.get(name)
+    return _active_registry.get(name)

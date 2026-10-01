@@ -144,6 +144,12 @@ class Settings(BaseSettings):
     # mcp-interop(028):出站调用超时(秒;响应 1MB 闸在 client 常量)
     mcp_outbound_timeout_sec: int = Field(default=15, ge=1, le=120)
 
+    # 081 external-knowledge:个人本地知识库(siku)检索端点。空=knowledge_search
+    # 工具不注册(零回归);非空须过 localhost 白名单(registry.is_local_base_url)
+    # 才生效(端点+localhost 白名单两道注册条件;多租户仅告警,082 降闸)
+    siku_base_url: str = ""
+    siku_timeout_ms: int = Field(default=5000, ge=1, le=60000)
+
     # SQL 安全引擎(053):builtin | shadow | primary;默认影子(内置权威,
     # 引擎只对拍观测)。切换期行为契约零变更;引擎缺失/异常自动降级不阻断。
     sqlguard_mode: str = "shadow"
