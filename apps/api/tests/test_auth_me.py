@@ -65,6 +65,55 @@ async def test_me_soft_deleted_user_rejected_live(
     assert r.status_code == 401
 
 
+async def test_me_perms_exclude_disabled_role(
+    client: AsyncClient, make_user: MakeUser, session: AsyncSession
+) -> None:
+    """未启用角色不授予功能权限——与数据范围侧同一道闸(086)。
+
+    原实现只让 `status` 影响数据范围解析、不影响权限点联查,于是「禁用角色」这个
+    治理动作的实际后果是:权限照旧、行级过滤整条消失 → 可见面反而放宽成全表。
+    两侧同闸后,禁用的效果只能是收紧。
+    """
+    await seed_all(session, get_settings())
+    uid = await make_user("half", "Passw0rd!")
+    rid = (
+        await session.execute(
+            text(
+                "INSERT INTO public.sys_role (id, role_key, role_name, data_scope)"
+                " VALUES (gen_random_uuid(), 'R_HALF', 'R_HALF', 'SELF') RETURNING id"
+            )
+        )
+    ).scalar_one()
+    pid = (
+        await session.execute(
+            text("SELECT id FROM public.sys_permission WHERE perm_code = 'system:user:manage'")
+        )
+    ).scalar_one()
+    await session.execute(
+        text("INSERT INTO public.sys_role_permission (role_id, permission_id) VALUES (:r, :p)"),
+        {"r": rid, "p": pid},
+    )
+    await session.execute(
+        text("INSERT INTO public.sys_user_role (user_id, role_id) VALUES (:u, :r)"),
+        {"u": uid, "r": rid},
+    )
+    await session.commit()
+
+    pair = await _login(client, "half", "Passw0rd!")
+    headers = {"Authorization": f"Bearer {pair['access_token']}"}
+    body = (await client.get("/auth/me", headers=headers)).json()
+    assert "system:user:manage" in body["perm_codes"]
+
+    await session.execute(
+        text("UPDATE public.sys_role SET status = 'DISABLED' WHERE id = :r"), {"r": rid}
+    )
+    await session.commit()
+
+    after = (await client.get("/auth/me", headers=headers)).json()
+    assert after["perm_codes"] == [], "禁用角色的权限点必须一并失效"
+    assert (await client.get("/system/users", headers=headers)).status_code == 403
+
+
 async def test_me_without_token_401(client: AsyncClient) -> None:
     assert (await client.get("/auth/me")).status_code == 401
 

@@ -85,14 +85,14 @@ async def _mk_dept(s: AsyncSession, tenant_id: str, name: str, parent_id: str | 
     return str(did)
 
 
-async def _mk_role(s: AsyncSession, key: str, scope: str) -> str:
+async def _mk_role(s: AsyncSession, key: str, scope: str, status: str = "ACTIVE") -> str:
     rid = (
         await s.execute(
             text(
-                "INSERT INTO public.sys_role (id, role_key, role_name, data_scope)"
-                " VALUES (gen_random_uuid(), :k, :k, :ds) RETURNING id"
+                "INSERT INTO public.sys_role (id, role_key, role_name, data_scope, status)"
+                " VALUES (gen_random_uuid(), :k, :k, :ds, :st) RETURNING id"
             ),
-            {"k": key, "ds": scope},
+            {"k": key, "ds": scope, "st": status},
         )
     ).scalar_one()
     await s.commit()
@@ -394,6 +394,53 @@ async def test_apply_custom_fail_closed(session: AsyncSession) -> None:  # 清�
     await _bind_role(session, uid, await _mk_role(session, "R_CUSTOM", "CUSTOM"))
     with pytest.raises(models.DataScopeUnsupported):
         await _apply(session, uid, "SELECT * FROM biz_order")
+
+
+async def test_apply_unknown_subject_fail_closed(session: AsyncSession) -> None:  # 清单 13
+    """主体查不到(用户不存在/已删除)→ fail-closed,不得原样放行。
+
+    原分支是「降级为不过滤 + warning」:一个解析不出身份的 user_id 因此能读全表,
+    等于把它当超管使——与同文件里 CUSTOM 空集合必须拒绝的方向自相矛盾。
+    """
+    with pytest.raises(models.DataScopeUnsupported):
+        await _apply(session, str(uuid.uuid4()), "SELECT * FROM biz_order")
+
+
+async def test_apply_only_disabled_role_fail_closed(session: AsyncSession) -> None:  # 清单 14
+    """用户只绑非 ACTIVE 角色 → 无任何可见面,拒绝执行。
+
+    此前此处正是 fail-open 的落点:数据范围侧按 status 收敛成空集,而功能权限侧不看
+    status(086 已把 `list_codes` 同闸),「禁用角色」这个治理动作反而让行过滤整条消失。
+    现在两侧同闸,且空 scopes 直接拒绝——治理动作的效果只能是收紧,不能是放宽。
+    """
+    uid = await _mk_user_with_dept(session, "ds-ruledout", None)
+    await _bind_role(session, uid, await _mk_role(session, "R_OFF_ALL", "ALL", status="DISABLED"))
+    with pytest.raises(models.DataScopeUnsupported):
+        await _apply(session, uid, "SELECT * FROM biz_order")
+
+
+async def test_dept_and_below_includes_disabled_dept(session: AsyncSession) -> None:  # 清单 15
+    """部门启停不参与行级可见性判定(086 裁决)。
+
+    原实现只有这条递归 CTE 过滤 `status='ACTIVE'`,而 DEPT(本人部门)与 CUSTOM
+    (角色配置集合)都按字面生效:同一个标志一半路径读、一半不读——停用中间节点会让
+    「本部门及以下」的负责人凭空看不见整棵子树,而把同一部门写进 CUSTOM 集合却照样可见。
+    口径统一为「都不读」:范围只由 data_scope + 所属部门 + 树结构决定。
+    """
+    from kongming.datascope.repository import SqlDataScopeRepo
+
+    tid = await _mk_tenant(session, "ds-deptstatus")
+    a = await _mk_dept(session, tid, "A", None)
+    b = await _mk_dept(session, tid, "B", a)
+    c = await _mk_dept(session, tid, "C", b)
+    await session.execute(
+        text("UPDATE public.sys_dept SET status = 'DISABLED' WHERE id IN (:b, :c)"),
+        {"b": b, "c": c},
+    )
+    await session.commit()
+
+    ids = set(await SqlDataScopeRepo(session).dept_and_below(a))
+    assert {a, b, c} <= ids, "停用部门及其子孙必须仍在递归范围内"
 
 
 async def test_apply_custom_two_depts_in_rewrite(session: AsyncSession) -> None:  # 清单 11

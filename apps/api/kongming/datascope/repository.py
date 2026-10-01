@@ -75,7 +75,13 @@ class SqlDataScopeRepo:
         return [str(x) for x in rows]
 
     async def dept_and_below(self, dept_id: str) -> list[str]:
-        """递归 CTE 查本部门及全部子孙(含自身;仅启用部门)。
+        """递归 CTE 查本部门及全部子孙(含自身)。
+
+        不按 `sys_dept.status` 过滤(086 裁决):**部门启停是组织呈现标志,不参与行级
+        可见性判定**——数据范围只由「角色的 data_scope + 用户所属部门 + 树结构」决定。
+        原实现这里过滤 ACTIVE、而 DEPT(本人部门)与 CUSTOM(角色配置集合)都按字面生效,
+        同一标志一半路径读一半不读:停用中间节点会让「本部门及以下」的负责人凭空看不见
+        整棵子树,而同样的部门若写在 CUSTOM 集合里却照样可见。口径统一为「都不读」。
 
         UNION(去重)而非 UNION ALL:脏数据成环(A↔B)时去重即达不动点终止,
         防递归不收敛挂起控制面连接(评审实证 UNION ALL 环会跑到超时)。
@@ -85,11 +91,10 @@ class SqlDataScopeRepo:
                 await self._s.execute(
                     text(
                         "WITH RECURSIVE sub AS ("
-                        "  SELECT id FROM public.sys_dept WHERE id = :d AND status = 'ACTIVE'"
+                        "  SELECT id FROM public.sys_dept WHERE id = :d"
                         "  UNION"
                         "  SELECT d.id FROM public.sys_dept d"
                         "  JOIN sub s ON d.parent_id = s.id"
-                        "  WHERE d.status = 'ACTIVE'"
                         ") SELECT id FROM sub"
                     ),
                     {"d": dept_id},

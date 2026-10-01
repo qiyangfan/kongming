@@ -19,9 +19,11 @@ class AuditRepository:
         v = (
             await self._s.execute(
                 text(
+                    # 未启用角色的 data_scope 不兑现(与 datascope.user_role_scopes 同闸):
+                    # 停用角色即失去 ALL,不得留作可见面放宽的暗道
                     "SELECT bool_or(r.data_scope = 'ALL') FROM public.sys_role r"
                     " JOIN public.sys_user_role ur ON ur.role_id = r.id"
-                    " WHERE ur.user_id = :u"
+                    " WHERE ur.user_id = :u AND r.status = 'ACTIVE'"
                 ),
                 {"u": user_id},
             )

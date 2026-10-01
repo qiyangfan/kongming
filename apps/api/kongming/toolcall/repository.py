@@ -347,13 +347,16 @@ class SqlToolCallRepo:
 
 
 async def user_has_all_scope(session: AsyncSession, user_id: str) -> bool:
-    """行级可见性判定(与 014 feedback 同口径):角色集含 data_scope=ALL 即 True。"""
+    """行级可见性判定(与 014 feedback 同口径):角色集含 data_scope=ALL 即 True。
+
+    未启用角色的 data_scope 不兑现——与 datascope.user_role_scopes 同闸(086)。
+    """
     val = (
         await session.execute(
             text(
                 "SELECT bool_or(r.data_scope = 'ALL') FROM public.sys_role r"
                 " JOIN public.sys_user_role ur ON ur.role_id = r.id"
-                " WHERE ur.user_id = :u"
+                " WHERE ur.user_id = :u AND r.status = 'ACTIVE'"
             ),
             {"u": user_id},
         )

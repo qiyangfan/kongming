@@ -1,7 +1,8 @@
 """data_scope 应用编排:上下文汇聚(角色/部门/集合/列探测)→ 意图 → 改写。
 
 对应上游 DataScopeApplier 的职责落点(infrastructure 性质):
-- 用户不存在/无启用角色 → 安全降级(沿用上游裁定,告警可观测);
+- 用户不存在/无启用角色 → fail-closed 抛 DataScopeUnsupported(086:主体解析不出可见面时,
+  「不过滤」等价于把未知折算成最大权限,不再沿用上游的降级裁定);
 - ALL 提前退出(最常见路径,不做列探测);
 - DEPT 系先解有效部门集(DEPT 单部门 / DEPT_AND_BELOW 递归 CTE);
 - CUSTOM 先解角色自定义部门集合(启用角色并集,不递归)→ 与 DEPT 系同一 IN 改写;
@@ -50,15 +51,20 @@ async def apply(
 
     user_exists, dept_id = await repo.user_dept_id(user_id)
     if not user_exists:
-        warn = "data_scope: 用户不存在或已删除,降级为不过滤"
-        log.warning("%s (user_id=%s)", warn, user_id)
-        return AppliedSQL(sql=sql, warning=warn)
+        # fail-closed:身份解析不出来就无法确定可见面。「降级为不过滤」等于
+        # 把一个查不到主体的 user_id 当超管使——086 收口(与 CUSTOM 空集合同一判据方向)
+        log.warning("data_scope: 用户不存在或已删除,fail-closed 拒绝 (user_id=%s)", user_id)
+        raise DataScopeUnsupported(
+            "data_scope: 用户不存在或已删除,无法确定数据范围,fail-closed 拒绝"
+        )
 
     scopes = await repo.user_role_scopes(user_id)
     if not scopes:
-        warn = "data_scope: 用户无启用角色,降级为不过滤"
-        log.warning("%s (user_id=%s)", warn, user_id)
-        return AppliedSQL(sql=sql, warning=warn)
+        # fail-closed:无启用角色=没有任何一行数据被授权可见。功能权限面已按角色
+        # status 同闸(086),正常链路走不到这里;留着降级分支就是留一条「治理动作
+        # 反向放宽可见面」的暗道(禁用角色曾使 scopes 变空而权限仍在)
+        log.warning("data_scope: 用户无启用角色,fail-closed 拒绝 (user_id=%s)", user_id)
+        raise DataScopeUnsupported("data_scope: 用户无启用角色,无法确定数据范围,fail-closed 拒绝")
 
     scope = service.most_permissive(scopes)
     if scope == "ALL":

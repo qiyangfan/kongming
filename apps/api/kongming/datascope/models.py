@@ -61,7 +61,12 @@ class AppliedSQL:
 
 
 class DataScopeUnsupported(Exception):
-    """data_scope=CUSTOM 但无部门集合(或未知值):fail-closed,不降级(spec 设计决策)。"""
+    """无法确定行级可见面,fail-closed 拒绝执行(spec 设计决策)。
+
+    触发形态:主体查不到(用户不存在/已删除)、无任何启用角色、`data_scope=CUSTOM`
+    但角色未配置部门集合、未知 `data_scope` 值。共同点是无法回答「这个人能看哪些行」,
+    此时返回原样 SQL 等于按超管放行——禁止降级为不过滤。
+    """
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)

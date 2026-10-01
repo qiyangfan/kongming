@@ -258,9 +258,14 @@ class SqlPermRepo:
             (
                 await self._s.execute(
                     text(
+                        # 未启用角色不授予任何权限(与 datascope 的「启用角色」闸同一口径):
+                        # 此前这里不看 r.status,而行级过滤按 status 收敛——把角色置为 DISABLED
+                        # 会让功能权限原样保留、数据范围解析为空却「降级为不过滤」,
+                        # 即治理动作反向放宽可见面(086 收口)
                         "SELECT DISTINCT p.perm_code FROM public.sys_permission p"
                         " JOIN public.sys_role_permission rp ON rp.permission_id=p.id"
                         " JOIN public.sys_user_role ur ON ur.role_id=rp.role_id"
+                        " JOIN public.sys_role r ON r.id=ur.role_id AND r.status='ACTIVE'"
                         " WHERE ur.user_id=:u ORDER BY p.perm_code"
                     ),
                     {"u": user_id},

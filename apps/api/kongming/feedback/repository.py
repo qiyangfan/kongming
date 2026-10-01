@@ -114,13 +114,16 @@ class FeedbackRepository:
     # ============ 管理面 ============
 
     async def user_has_scope_all(self, *, user_id: str) -> bool:
-        """角色集含 data_scope=ALL 即 True(无角色 None→False,降级收紧)。"""
+        """角色集含 data_scope=ALL 即 True(无角色 None→False,降级收紧)。
+
+        未启用角色的 data_scope 不兑现——与 datascope.user_role_scopes 同闸(086)。
+        """
         v = (
             await self._s.execute(
                 text(
                     "SELECT bool_or(r.data_scope = 'ALL') FROM public.sys_role r"
                     " JOIN public.sys_user_role ur ON ur.role_id = r.id"
-                    " WHERE ur.user_id = :u"
+                    " WHERE ur.user_id = :u AND r.status = 'ACTIVE'"
                 ),
                 {"u": user_id},
             )

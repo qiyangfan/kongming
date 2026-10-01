@@ -238,14 +238,18 @@ class SqlQualityRepo:
 
     async def user_has_scope_all(self, *, user_id: str) -> bool:
         """data_scope=ALL 判定(audit 域同款查询:角色经 sys_user_role 关联,
-        bool_or 覆盖多角色并集;多角色时任一 ALL 即全域可见)。"""
+        bool_or 覆盖多角色并集;多角色时任一 ALL 即全域可见)。
+
+        与 audit/feedback/toolcall 同一道启用闸(086):非启用角色的 ALL 不兑现——
+        本判定直接决定跨租户全量可见,漏闸等于留一条「禁用角色反而放宽观测面」的暗道。
+        """
         row = (
             await self._s.execute(
                 text(
                     "SELECT bool_or(r.data_scope = 'ALL')"  # noqa: S608
                     " FROM public.sys_role r"  # noqa: S608
                     " JOIN public.sys_user_role ur ON ur.role_id = r.id"  # noqa: S608
-                    " WHERE ur.user_id = :u"  # noqa: S608
+                    " WHERE ur.user_id = :u AND r.status = 'ACTIVE'"  # noqa: S608
                 ),
                 {"u": user_id},
             )
