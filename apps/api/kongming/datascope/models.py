@@ -11,7 +11,9 @@ from typing import Literal
 DataScope = Literal["ALL", "CUSTOM", "DEPT", "DEPT_AND_BELOW", "SELF"]
 
 # 宽松序(值越小越宽松):与上游 SMALLINT 1~5 的 MIN 语义逐档对应。
-# CUSTOM 排第二——未实现,命中即 fail-closed(rbac spec:多角色取最宽松)。
+# CUSTOM 排第二——宽严取决于角色自定义的部门集合(集合不可枚举,故不落在
+# DEPT 与 DEPT_AND_BELOW 之间任意一档);命中它即按集合并集过滤,
+# 集合为空则 fail-closed(rbac spec:多角色取最宽松)。
 PERMISSIVENESS: dict[str, int] = {
     "ALL": 0,
     "CUSTOM": 1,
@@ -27,8 +29,8 @@ COL_DEPT_ID = "dept_id"
 class FilterType(Enum):
     SKIP = "SKIP"  # 不改写(ALL / 安全降级)
     USER_EQ = "USER_EQ"  # create_by = 用户
-    DEPT_IN = "DEPT_IN"  # dept_id IN (部门集)
-    UNSUPPORTED = "UNSUPPORTED"  # fail-closed(CUSTOM / 未知值)
+    DEPT_IN = "DEPT_IN"  # dept_id IN (部门集;DEPT 系与 CUSTOM 共用同一 IN 语义)
+    UNSUPPORTED = "UNSUPPORTED"  # fail-closed(CUSTOM 空集合 / 未知值)
 
 
 @dataclass(frozen=True)
@@ -37,7 +39,8 @@ class ScopeContext:
 
     data_scope: str
     user_id: str
-    dept_ids: list[str] = field(default_factory=list[str])  # DEPT 系有效部门集(含递归)
+    # DEPT 系有效部门集(含递归)/ CUSTOM 的角色部门集合并集
+    dept_ids: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -58,7 +61,7 @@ class AppliedSQL:
 
 
 class DataScopeUnsupported(Exception):
-    """data_scope=CUSTOM(或未知值):fail-closed,不降级(spec 设计决策)。"""
+    """data_scope=CUSTOM 但无部门集合(或未知值):fail-closed,不降级(spec 设计决策)。"""
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)

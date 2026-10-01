@@ -1,5 +1,6 @@
 /* 角色管理页(web-admin spec「角色管理页」):表格+创建/编辑
-   (roleKey 创建后不可改,dataScope/sqlScope 下拉)+权限绑定面板
+   (roleKey 创建后不可改,dataScope/sqlScope 下拉;dataScope=CUSTOM 时同表单内
+   多选部门集合,非 CUSTOM 不显示也不发该字段)+权限绑定面板
    (按命名空间分组复选,覆盖式保存)+内置角色删除禁用。 */
 
 import { useMemo, useState } from "react";
@@ -16,7 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+import { CheckList } from "@/components/check-list";
 import { FormRow } from "@/components/form-row";
 import { ErrorAlert } from "@/components/error-alert";
 import { PageHeader } from "@/components/page-header";
@@ -36,6 +37,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DataView } from "@/components/data-view";
+import { flattenDeptTree } from "@/lib/dept-tree";
+import { deptIdsForScope, deptScopeError } from "@/lib/role-scope";
 import {
   systemApi,
   type DataScopeValue,
@@ -46,7 +49,7 @@ import {
 
 const DATA_SCOPES: { value: DataScopeValue; label: string }[] = [
   { value: "ALL", label: "全部数据" },
-  { value: "CUSTOM", label: "自定义(暂未开放)" },
+  { value: "CUSTOM", label: "自定义部门" },
   { value: "DEPT_AND_BELOW", label: "本部门及以下" },
   { value: "DEPT", label: "仅本部门" },
   { value: "SELF", label: "仅本人" },
@@ -64,6 +67,8 @@ type RoleForm = {
   dataScope: DataScopeValue;
   sqlScope: SqlScopeValue;
   sort: number;
+  /** dataScope=CUSTOM 的自定义部门集合(其余范围不显示、不发) */
+  deptIds: string[];
 };
 
 const EMPTY: RoleForm = {
@@ -72,7 +77,15 @@ const EMPTY: RoleForm = {
   dataScope: "SELF",
   sqlScope: "SELECT_ONLY",
   sort: 0,
+  deptIds: [],
 };
+
+/** 数据范围列回显:CUSTOM 带上集合规模(未配置的坏数据也一眼可见) */
+function scopeLabel(row: RoleOut): string {
+  const base = DATA_SCOPES.find((d) => d.value === row.data_scope)?.label ?? row.data_scope;
+  if (row.data_scope !== "CUSTOM") return base;
+  return `${base} · ${(row.data_scope_dept_ids ?? []).length} 部门`;
+}
 
 /** 权限点按 permCode 首段(命名空间)分组(rbac spec「权限点清单查询」) */
 function groupPerms(perms: PermOut[]): [string, PermOut[]][] {
@@ -98,6 +111,18 @@ export default function RolesPage() {
 
   const roles = useQuery({ queryKey: ["admin", "roles"], queryFn: systemApi.listRoles });
   const perms = useQuery({ queryKey: ["admin", "perms"], queryFn: systemApi.listPerms });
+  // 部门候选与部门管理页同源端点(/system/depts),不另开数据面
+  const depts = useQuery({ queryKey: ["admin", "depts"], queryFn: systemApi.listDepts });
+  const deptOptions = useMemo(
+    () =>
+      flattenDeptTree(depts.data).map((d) => ({
+        id: d.id,
+        label: `${"　".repeat(d.depth)}${d.label}`,
+        // 缩进只服务视觉层级,悬浮回读必须给原始部门名
+        title: d.label,
+      })),
+    [depts.data],
+  );
 
   const create = useMutation({
     mutationFn: () =>
@@ -107,6 +132,7 @@ export default function RolesPage() {
         data_scope: form.dataScope,
         sql_scope: form.sqlScope,
         sort: form.sort,
+        data_scope_dept_ids: deptIdsForScope(form.dataScope, form.deptIds),
       }),
     onSuccess: () => {
       setCreating(false);
@@ -123,6 +149,7 @@ export default function RolesPage() {
         data_scope: form.dataScope,
         sql_scope: form.sqlScope,
         sort: form.sort,
+        data_scope_dept_ids: deptIdsForScope(form.dataScope, form.deptIds),
       }),
     onSuccess: () => {
       setEditing(null);
@@ -155,6 +182,8 @@ export default function RolesPage() {
     setFormError("");
     if (creating && !form.roleKey.trim()) return setFormError("角色键不可为空");
     if (!form.roleName.trim()) return setFormError("角色名称不可为空");
+    const scopeErr = deptScopeError(form.dataScope, form.deptIds);
+    if (scopeErr) return setFormError(scopeErr);
     if (creating) create.mutate();
     else update.mutate();
   };
@@ -218,7 +247,7 @@ export default function RolesPage() {
             key: "data_scope",
             header: "数据范围",
             cardPriority: 3,
-            render: (r) => DATA_SCOPES.find((d) => d.value === r.data_scope)?.label ?? r.data_scope,
+            render: (r) => scopeLabel(r),
           },
           {
             key: "sql_scope",
@@ -239,6 +268,7 @@ export default function RolesPage() {
                 dataScope: r.data_scope as DataScopeValue,
                 sqlScope: r.sql_scope as SqlScopeValue,
                 sort: r.sort,
+                deptIds: r.data_scope_dept_ids ?? [],
               });
               setFormError("");
               setEditing(r);
@@ -343,6 +373,41 @@ export default function RolesPage() {
                 </Select>
               </FormRow>
             </div>
+            {form.dataScope === "CUSTOM" && (
+              <FormRow label="自定义部门" htmlFor="r-depts">
+                {depts.isPending ? (
+                  <p className="text-muted-foreground text-sm">部门加载中…</p>
+                ) : depts.isError ? (
+                  // 候选读不出来 ≠ 没有部门:空态会把人支去新建,而真实成因常是缺少读部门
+                  // 所需的权限(部门列表挂在 system:user:manage 下)。查询错误态按 web-nav
+                  // spec 走共享件 ErrorAlert,动作件并列在其外(该件只收 text 单参)
+                  <div className="space-y-1">
+                    <ErrorAlert
+                      text={`部门列表加载失败:${(depts.error as Error).message}。已配置的部门集合保持不变(仍可保存);要增删部门请重试,或改用具备「用户与部门」权限的账号。`}
+                    />
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="xs"
+                      className="px-0"
+                      onClick={() => void depts.refetch()}
+                    >
+                      重试
+                    </Button>
+                  </div>
+                ) : (
+                  <CheckList
+                    options={deptOptions}
+                    selected={form.deptIds}
+                    onChange={(ids) => setForm({ ...form, deptIds: ids })}
+                    emptyText="暂无部门,请先到「部门」页新建"
+                  />
+                )}
+                <p className="text-muted-foreground text-xs">
+                  只放行所选部门的数据,不含其下级部门(要含下级请选「本部门及以下」)。
+                </p>
+              </FormRow>
+            )}
             <FormRow label="排序" htmlFor="r-sort">
               <Input
                 id="r-sort"
@@ -382,24 +447,15 @@ export default function RolesPage() {
           )}
           <div className="max-h-80 space-y-3 overflow-y-auto">
             {grouped.map(([ns, list]) => (
-              <div key={ns} className="space-y-1.5">
+              <div key={ns} className="min-w-0 space-y-1.5">
                 <p className="text-muted-foreground text-xs font-medium">{ns}</p>
-                <div className="space-y-1 rounded-md border p-2">
-                  {list.map((p) => (
-                    <label key={p.id} className="flex items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={boundIds.includes(p.id)}
-                        onCheckedChange={(checked) =>
-                          setBoundIds((ids) =>
-                            checked ? [...ids, p.id] : ids.filter((x) => x !== p.id),
-                          )
-                        }
-                      />
-                      {p.perm_name}
-                      <span className="text-muted-foreground text-xs">{p.perm_code}</span>
-                    </label>
-                  ))}
-                </div>
+                <CheckList
+                  className="max-h-none"
+                  options={list.map((p) => ({ id: p.id, label: p.perm_name, hint: p.perm_code }))}
+                  selected={boundIds}
+                  onChange={setBoundIds}
+                  emptyText="该命名空间无权限点"
+                />
               </div>
             ))}
           </div>

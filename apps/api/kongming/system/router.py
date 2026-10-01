@@ -25,6 +25,7 @@ from kongming.redis_client import get_redis
 from kongming.system.models import (
     AdminAccountProtected,
     BuiltinRoleProtected,
+    CustomDeptScopeInvalid,
     DeptInUse,
     DeptNode,
     DeptNotFound,
@@ -130,6 +131,8 @@ class RoleCreateIn(BaseModel):
     data_scope: DataScope = "SELF"
     sql_scope: SqlScope = "SELECT_ONLY"
     sort: int = 0
+    # None=键缺失(既有客户端兼容);CUSTOM 时缺失由 service 显式拒绝
+    data_scope_dept_ids: list[uuid.UUID] | None = None
 
 
 class RoleUpdateIn(BaseModel):
@@ -140,6 +143,7 @@ class RoleUpdateIn(BaseModel):
     data_scope: DataScope
     sql_scope: SqlScope
     sort: int
+    data_scope_dept_ids: list[uuid.UUID] | None = None
 
 
 class RolePermsIn(BaseModel):
@@ -156,6 +160,8 @@ class RoleOut(BaseModel):
     sort: int
     builtin: bool
     perm_ids: list[str]
+    # data_scope=CUSTOM 的自定义部门集合(纯增字段,既有客户端可忽略;非 CUSTOM 恒空)
+    data_scope_dept_ids: list[str]
 
 
 class PermOut(BaseModel):
@@ -221,6 +227,7 @@ def _map_role(r: RoleListItem) -> RoleOut:
         sort=r.sort,
         builtin=r.builtin,
         perm_ids=r.perm_ids,
+        data_scope_dept_ids=r.dept_ids,
     )
 
 
@@ -242,6 +249,11 @@ def _map_dept(n: DeptNode) -> DeptNodeOut:
 
 def _map_tenant(t: TenantItem) -> TenantOut:
     return TenantOut(id=t.id, tenant_key=t.tenant_key, tenant_name=t.tenant_name)
+
+
+def _dept_ids_in(req: RoleCreateIn | RoleUpdateIn) -> list[str] | None:
+    """None(键缺失)与 [](显式空)分开下传;搭配规则由 service 判。"""
+    return None if req.data_scope_dept_ids is None else [str(d) for d in req.data_scope_dept_ids]
 
 
 # ---- 用户管理(权限点 system:user:manage) ----
@@ -368,6 +380,7 @@ async def create_role(req: RoleCreateIn, user: UserClaims, svc: Service) -> dict
         data_scope=req.data_scope,
         sql_scope=req.sql_scope,
         sort=req.sort,
+        dept_ids=_dept_ids_in(req),
     )
     return {"id": role_id}
 
@@ -388,6 +401,7 @@ async def update_role(
         data_scope=req.data_scope,
         sql_scope=req.sql_scope,
         sort=req.sort,
+        dept_ids=_dept_ids_in(req),
     )
 
 
@@ -514,6 +528,7 @@ _STATUS_BY_TYPE: tuple[tuple[type[SystemError], int], ...] = (
     (UnknownPermId, 400),
     (UnknownTenantId, 400),
     (UnknownDeptId, 400),
+    (CustomDeptScopeInvalid, 400),
 )
 
 

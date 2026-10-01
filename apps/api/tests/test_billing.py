@@ -187,10 +187,11 @@ async def test_monthly_invoice_idempotent(
 
     await seed_all(session, get_settings())  # 重建 default 租户(TRUNCATED 已清)
     tenant_id = await _default_tenant_id(session)
-    # 上月用量(to_char 对齐上月)
-    prev = (
-        await session.execute(text("SELECT to_char(now() - interval '1 month', 'YYYY-MM')"))
-    ).scalar_one()
+    # 上月用量:月份必须与产品同一时源(BillingService._prev_month 用固定 +8 口径,
+    # 而库时钟是 UTC——每月 1 日 00:00~08:00 两者跨月不一致,用量会写进产品不出账的月份)
+    from kongming.billing.service import _prev_month
+
+    prev = _prev_month()
     await session.execute(
         text(
             "INSERT INTO public.sys_llm_usage"

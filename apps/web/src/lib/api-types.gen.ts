@@ -4747,6 +4747,8 @@ export interface components {
              * @default 0
              */
             sort: number;
+            /** Data Scope Dept Ids */
+            data_scope_dept_ids?: string[] | null;
         };
         /** RoleOut */
         RoleOut: {
@@ -4766,6 +4768,8 @@ export interface components {
             builtin: boolean;
             /** Perm Ids */
             perm_ids: string[];
+            /** Data Scope Dept Ids */
+            data_scope_dept_ids: string[];
         };
         /** RolePermsIn */
         RolePermsIn: {
@@ -4793,6 +4797,8 @@ export interface components {
             sql_scope: "SELECT_ONLY" | "READ_DDL" | "DML_DDL";
             /** Sort */
             sort: number;
+            /** Data Scope Dept Ids */
+            data_scope_dept_ids?: string[] | null;
         };
         /** RuleListOut */
         RuleListOut: {

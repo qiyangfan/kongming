@@ -655,7 +655,9 @@ async def test_migration_0034_downgrade_roundtrip(
     assert has_col == 0
     import asyncio
 
-    await asyncio.to_thread(command.upgrade, cfg, "0034")
+    # 必须回到 head(而非钉死 0034):停在旧版本会把其后的迁移留在回滚态,
+    # 导致其后每个用例的 TRUNCATE 撞上不存在的表
+    await asyncio.to_thread(command.upgrade, cfg, "head")
     has_col2 = (
         await session.execute(
             text(

@@ -54,6 +54,7 @@ def _to_user_item(row: dict[str, Any]) -> UserListItem:
 
 def _to_role_item(row: dict[str, Any]) -> RoleListItem:
     perms = parse_json_agg(row.get("perm_ids") or [])
+    depts = parse_json_agg(row.get("dept_ids") or [])
     return RoleListItem(
         id=str(row["id"]),
         role_key=str(row["role_key"]),
@@ -63,6 +64,7 @@ def _to_role_item(row: dict[str, Any]) -> RoleListItem:
         sort=int(row["sort"]),
         builtin=str(row["role_key"]) in ("SUPER_ADMIN", "DEVELOPER"),
         perm_ids=[str(p) for p in perms],
+        dept_ids=[str(d) for d in depts],
     )
 
 
@@ -304,18 +306,37 @@ class SqlSystemRepo:
         )
         return int(n or 0) > 0
 
+    async def depts_exist(self, dept_ids: list[str]) -> list[str]:
+        if not dept_ids:
+            return []
+        rows = await self._s.execute(
+            text("SELECT id FROM public.sys_dept WHERE id = ANY(:ids)"),
+            {"ids": dept_ids},
+        )
+        return [str(r[0]) for r in rows]
+
     # ---- 角色 ----
 
     async def list_roles(self) -> list[RoleListItem]:
+        # 两个一对多聚合各走 LATERAL(单查询,避免双 JOIN 的笛卡儿积把集合乘重复);
+        # 聚合内 ORDER BY id:回显顺序确定(整包替换语义下顺序本无语义,但契约面要可预期)
         rows = (
             await self._s.execute(
                 text(
                     "SELECT r.id, r.role_key, r.role_name, r.data_scope, r.sql_scope, r.sort,"
-                    " coalesce(json_agg(rp.permission_id)"
-                    "           FILTER (WHERE rp.permission_id IS NOT NULL), '[]') AS perm_ids"
+                    " coalesce(p.perm_ids, '[]') AS perm_ids,"
+                    " coalesce(d.dept_ids, '[]') AS dept_ids"
                     " FROM public.sys_role r"
-                    " LEFT JOIN public.sys_role_permission rp ON rp.role_id = r.id"
-                    " GROUP BY r.id ORDER BY r.sort NULLS LAST, r.role_key"
+                    " LEFT JOIN LATERAL ("
+                    "   SELECT json_agg(rp.permission_id ORDER BY rp.permission_id)"
+                    "     AS perm_ids FROM public.sys_role_permission rp"
+                    "   WHERE rp.role_id = r.id"
+                    " ) p ON TRUE"
+                    " LEFT JOIN LATERAL ("
+                    "   SELECT json_agg(rd.dept_id ORDER BY rd.dept_id) AS dept_ids"
+                    "   FROM public.sys_role_dept rd WHERE rd.role_id = r.id"
+                    " ) d ON TRUE"
+                    " ORDER BY r.sort NULLS LAST, r.role_key"
                 )
             )
         ).mappings()
@@ -393,9 +414,12 @@ class SqlSystemRepo:
         )
 
     async def delete_role(self, role_id: str) -> None:
-        # 级联清理绑定(无 FK ON DELETE,显式两删;前置校验已挡「有用户绑定」)
+        # 级联清理绑定(无 FK ON DELETE,显式三删;前置校验已挡「有用户绑定」)
         await self._s.execute(
             text("DELETE FROM public.sys_role_permission WHERE role_id=:i"), {"i": role_id}
+        )
+        await self._s.execute(
+            text("DELETE FROM public.sys_role_dept WHERE role_id=:i"), {"i": role_id}
         )
         await self._s.execute(
             text("DELETE FROM public.sys_user_role WHERE role_id=:i"), {"i": role_id}
@@ -424,6 +448,20 @@ class SqlSystemRepo:
                     " VALUES (:r, :p) ON CONFLICT DO NOTHING"
                 ),
                 {"r": role_id, "p": pid},
+            )
+
+    async def rebind_role_depts(self, role_id: str, dept_ids: list[str]) -> None:
+        """CUSTOM 部门集合整包替换:先删后插(与 rebind_role_perms 同构,空集合=清空)。"""
+        await self._s.execute(
+            text("DELETE FROM public.sys_role_dept WHERE role_id=:i"), {"i": role_id}
+        )
+        for did in dept_ids:
+            await self._s.execute(
+                text(
+                    "INSERT INTO public.sys_role_dept (role_id, dept_id)"
+                    " VALUES (:r, :d) ON CONFLICT DO NOTHING"
+                ),
+                {"r": role_id, "d": did},
             )
 
     # ---- 权限点 ----

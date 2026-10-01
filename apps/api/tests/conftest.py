@@ -75,6 +75,7 @@ TRUNCATED = (
     "public.sys_sql_audit",
     "public.user_identities",
     "public.sys_role_permission",
+    "public.sys_role_dept",
     "public.sys_user_role",
     "public.sys_user_tenant",
     "public.sys_permission",

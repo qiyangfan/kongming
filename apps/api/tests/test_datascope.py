@@ -107,6 +107,17 @@ async def _bind_role(s: AsyncSession, user_id: str, role_id: str) -> None:
     await s.commit()
 
 
+async def _set_role_depts(s: AsyncSession, role_id: str, dept_ids: list[str]) -> None:
+    """CUSTOM 部门集合直插(整包替换语义与仓储实现同构,arrange 独立于被测)。"""
+    await s.execute(text("DELETE FROM public.sys_role_dept WHERE role_id=:r"), {"r": role_id})
+    for d in dept_ids:
+        await s.execute(
+            text("INSERT INTO public.sys_role_dept (role_id, dept_id) VALUES (:r, :d)"),
+            {"r": role_id, "d": d},
+        )
+    await s.commit()
+
+
 async def _mk_user_with_dept(s: AsyncSession, username: str, dept_id: str | None) -> str:
     uid = (
         await s.execute(
@@ -133,9 +144,28 @@ def test_resolve_all_skip() -> None:  # 清单 1:ALL 不改写
     assert flt.type is models.FilterType.SKIP
 
 
-def test_resolve_custom_unsupported() -> None:  # 清单 9:CUSTOM fail-closed
+def test_resolve_custom_without_depts_unsupported() -> None:  # 清单 9:CUSTOM 空集合 fail-closed
     flt = service.resolve(_ctx("CUSTOM"), column_exists=True)
     assert flt.type is models.FilterType.UNSUPPORTED
+
+
+def test_resolve_custom_empty_beats_column_degrade() -> None:
+    """空集合的 fail-closed 优先于「表无列降级」——禁把拒绝漂成不过滤(fail-open)。"""
+    flt = service.resolve(_ctx("CUSTOM"), column_exists=False)
+    assert flt.type is models.FilterType.UNSUPPORTED
+
+
+def test_resolve_custom_with_depts_in_filter() -> None:  # 清单 11 意图层
+    flt = service.resolve(_ctx("CUSTOM", dept_ids=["d1", "d2"]), column_exists=True)
+    assert flt.type is models.FilterType.DEPT_IN
+    assert flt.column == "dept_id"
+    assert flt.values == ["d1", "d2"]
+
+
+def test_resolve_custom_no_column_degrade() -> None:  # 清单 12 意图层(与 DEPT 同源降级)
+    flt = service.resolve(_ctx("CUSTOM", dept_ids=["d1"]), column_exists=False)
+    assert flt.type is models.FilterType.SKIP
+    assert flt.skip_reason is not None
 
 
 def test_resolve_unknown_scope_unsupported() -> None:
@@ -359,10 +389,91 @@ async def test_dept_cycle_terminates(session: AsyncSession) -> None:
 
 
 async def test_apply_custom_fail_closed(session: AsyncSession) -> None:  # 清单 9
+    """CUSTOM 但角色未配置部门集合(历史数据/旁路写入)→ fail-closed 拒绝。"""
     uid = await _mk_user_with_dept(session, "ds-custom", None)
     await _bind_role(session, uid, await _mk_role(session, "R_CUSTOM", "CUSTOM"))
     with pytest.raises(models.DataScopeUnsupported):
         await _apply(session, uid, "SELECT * FROM biz_order")
+
+
+async def test_apply_custom_two_depts_in_rewrite(session: AsyncSession) -> None:  # 清单 11
+    """CUSTOM 配置两个部门 → 改写为 dept_id IN (集合),与 DEPT_AND_BELOW 同一 IN 语义。"""
+    tid = await _mk_tenant(session, "ds-t11")
+    d1 = await _mk_dept(session, tid, "d1", None)
+    d2 = await _mk_dept(session, tid, "d2", None)
+    uid = await _mk_user_with_dept(session, "ds-custom-2", None)  # 用户自身无部门也要生效
+    rid = await _mk_role(session, "R_CUSTOM_2", "CUSTOM")
+    await _bind_role(session, uid, rid)
+    await _set_role_depts(session, rid, [d1, d2])
+    out = await _apply(session, uid, "SELECT * FROM biz_order")
+    assert "dept_id" in out.sql and out.warning is None
+    assert set(out.params.values()) == {uuid.UUID(d1), uuid.UUID(d2)}
+
+
+async def test_apply_custom_union_over_roles(session: AsyncSession) -> None:
+    """多角色均为 CUSTOM 时部门集合取并集(与「权限点取并集」同授权语义)。"""
+    tid = await _mk_tenant(session, "ds-t11u")
+    d1 = await _mk_dept(session, tid, "d1", None)
+    d2 = await _mk_dept(session, tid, "d2", None)
+    uid = await _mk_user_with_dept(session, "ds-custom-union", None)
+    r1 = await _mk_role(session, "R_CUSTOM_U1", "CUSTOM")
+    r2 = await _mk_role(session, "R_CUSTOM_U2", "CUSTOM")
+    await _bind_role(session, uid, r1)
+    await _bind_role(session, uid, r2)
+    await _set_role_depts(session, r1, [d1])
+    await _set_role_depts(session, r2, [d2])
+    out = await _apply(session, uid, "SELECT * FROM biz_order")
+    assert set(out.params.values()) == {uuid.UUID(d1), uuid.UUID(d2)}
+
+
+async def test_apply_custom_not_recursive(session: AsyncSession) -> None:  # 清单 13
+    """CUSTOM 集合不递归子部门(递归是 DEPT_AND_BELOW 的语义,两者职责不混)。"""
+    tid = await _mk_tenant(session, "ds-t13")
+    parent = await _mk_dept(session, tid, "P", None)
+    child = await _mk_dept(session, tid, "C", parent)
+    grand = await _mk_dept(session, tid, "G", child)
+    uid = await _mk_user_with_dept(session, "ds-custom-nr", None)
+    rid = await _mk_role(session, "R_CUSTOM_NR", "CUSTOM")
+    await _bind_role(session, uid, rid)
+    await _set_role_depts(session, rid, [parent])
+    out = await _apply(session, uid, "SELECT * FROM biz_order")
+    assert list(out.params.values()) == [uuid.UUID(parent)]  # 子/孙部门不入集合
+    assert uuid.UUID(child) not in set(out.params.values())
+    assert uuid.UUID(grand) not in set(out.params.values())
+
+
+async def test_apply_custom_no_column_degrade(session: AsyncSession) -> None:  # 清单 12
+    """表无部门列时与 DEPT 同源安全降级(不改写 + 告警),不抛语法错。"""
+    tid = await _mk_tenant(session, "ds-t12")
+    d1 = await _mk_dept(session, tid, "d1", None)
+    uid = await _mk_user_with_dept(session, "ds-custom-nc", None)
+    rid = await _mk_role(session, "R_CUSTOM_NC", "CUSTOM")
+    await _bind_role(session, uid, rid)
+    await _set_role_depts(session, rid, [d1])
+    out = await _apply(session, uid, "SELECT * FROM biz_ref")  # biz_ref 无 dept_id
+    assert out.sql == "SELECT * FROM biz_ref"
+    assert out.params == {}
+    assert out.warning is not None
+
+
+async def test_apply_custom_only_active_roles(session: AsyncSession) -> None:
+    """禁用角色的部门集合不参与并集(与 user_role_scopes 的 ACTIVE 闸同口径)。"""
+    tid = await _mk_tenant(session, "ds-t14")
+    d1 = await _mk_dept(session, tid, "d1", None)
+    d2 = await _mk_dept(session, tid, "d2", None)
+    uid = await _mk_user_with_dept(session, "ds-custom-off", None)
+    active = await _mk_role(session, "R_CUSTOM_ON", "CUSTOM")
+    off = await _mk_role(session, "R_CUSTOM_OFF", "CUSTOM")
+    await session.execute(
+        text("UPDATE public.sys_role SET status='DISABLED' WHERE id=:i"), {"i": off}
+    )
+    await _bind_role(session, uid, active)
+    await _bind_role(session, uid, off)
+    await _set_role_depts(session, active, [d1])
+    await _set_role_depts(session, off, [d2])
+    await session.commit()
+    out = await _apply(session, uid, "SELECT * FROM biz_order")
+    assert list(out.params.values()) == [uuid.UUID(d1)]
 
 
 async def test_apply_uuid_column_binds_uuid(session: AsyncSession) -> None:
@@ -380,6 +491,20 @@ async def test_apply_union_degrade(session: AsyncSession) -> None:
     out = await _apply(session, uid, "SELECT id FROM biz_ref UNION SELECT id FROM biz_order")
     assert "create_by" not in out.sql
     assert out.warning is not None
+
+
+async def test_apply_custom_empty_rejects_before_union_degrade(
+    session: AsyncSession,
+) -> None:  # 清单 10(判据先于降级)
+    """CUSTOM 空集合 + 主表不可定位:必须拒绝,不得落入「降级为不过滤」返回全量。
+
+    与上一条对照才有意义——`test_apply_custom_fail_closed` 用的是可定位主表,
+    即使把 fail-closed 判定挪到列探测/降级之后它照样绿;本用例钉的正是**顺序**。
+    """
+    uid = await _mk_user_with_dept(session, "ds-custom-union-empty", None)
+    await _bind_role(session, uid, await _mk_role(session, "R_CUSTOM_UNION", "CUSTOM"))
+    with pytest.raises(models.DataScopeUnsupported):
+        await _apply(session, uid, "SELECT id FROM biz_ref UNION SELECT id FROM biz_order")
 
 
 async def test_apply_explicit_schema_probe_not_crossed(session: AsyncSession) -> None:

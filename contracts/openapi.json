@@ -16050,6 +16050,21 @@
             "type": "integer",
             "title": "Sort",
             "default": 0
+          },
+          "data_scope_dept_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Scope Dept Ids"
           }
         },
         "type": "object",
@@ -16095,6 +16110,13 @@
             },
             "type": "array",
             "title": "Perm Ids"
+          },
+          "data_scope_dept_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Data Scope Dept Ids"
           }
         },
         "type": "object",
@@ -16106,7 +16128,8 @@
           "sql_scope",
           "sort",
           "builtin",
-          "perm_ids"
+          "perm_ids",
+          "data_scope_dept_ids"
         ],
         "title": "RoleOut"
       },
@@ -16169,6 +16192,21 @@
           "sort": {
             "type": "integer",
             "title": "Sort"
+          },
+          "data_scope_dept_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Scope Dept Ids"
           }
         },
         "type": "object",

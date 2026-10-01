@@ -1,4 +1,4 @@
-"""datascope 仓储:角色 scope / 用户部门 / 递归部门树 / 业务库列探测。
+"""datascope 仓储:角色 scope / 用户部门 / CUSTOM 部门集合 / 递归部门树 / 业务库列探测。
 
 控制面查询(sys_role/sys_user/sys_dept)走控制 session;
 列存在性探测走业务库连接(执行目标库,默认路径即本库,动态池插槽预留)。
@@ -47,6 +47,32 @@ class SqlDataScopeRepo:
         if row is None:
             return False, None
         return True, (None if row["dept_id"] is None else str(row["dept_id"]))
+
+    async def custom_dept_ids(self, user_id: str) -> list[str]:
+        """该用户全部启用角色中 data_scope=CUSTOM 的部门集合(取并集,去重排序)。
+
+        与 user_role_scopes 同一 ACTIVE 闸:禁用角色的集合不兑现。并集而非交集
+        对齐 rbac「权限点取并集 + data_scope 取最宽松」的授权语义——授予即兑现。
+        集合本身不递归子部门(递归是 DEPT_AND_BELOW 的语义,两者职责不混)。
+        """
+        rows = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT DISTINCT rd.dept_id FROM public.sys_role_dept rd"
+                        " JOIN public.sys_role r ON r.id = rd.role_id"
+                        " JOIN public.sys_user_role ur ON ur.role_id = r.id"
+                        " WHERE ur.user_id = :u AND r.status = 'ACTIVE'"
+                        " AND r.data_scope = 'CUSTOM'"
+                        " ORDER BY rd.dept_id"
+                    ),
+                    {"u": user_id},
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [str(x) for x in rows]
 
     async def dept_and_below(self, dept_id: str) -> list[str]:
         """递归 CTE 查本部门及全部子孙(含自身;仅启用部门)。

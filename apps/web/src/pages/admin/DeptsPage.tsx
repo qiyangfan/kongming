@@ -44,6 +44,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { flattenDeptTree } from "@/lib/dept-tree";
 import { systemApi, type DeptNodeOut } from "@/lib/system-api";
 
 type DeptForm = {
@@ -57,16 +58,6 @@ const EMPTY: DeptForm = { parentId: "", deptName: "", sort: 0, tenantId: "" };
 
 /* 树形缩进用预定义类数组(禁内联 style;深度超限取模兜底) */
 const DEPTH_PADS = ["pl-2", "pl-8", "pl-14", "pl-20", "pl-26", "pl-32"];
-
-function flatten(
-  nodes: DeptNodeOut[] | undefined,
-  depth = 0,
-): { id: string; label: string; depth: number }[] {
-  return (nodes ?? []).flatMap((n) => [
-    { id: n.id, label: n.dept_name, depth },
-    ...flatten(n.children, depth + 1),
-  ]);
-}
 
 function TreeRow({
   node,
@@ -210,7 +201,7 @@ export default function DeptsPage() {
 
   // 父部门候选:编辑时排除自身与后代(端点亦校验,前端先行避免明显环)
   const parentCandidates = (() => {
-    const all = flatten(depts.data ?? []);
+    const all = flattenDeptTree(depts.data);
     if (!editing) return all;
     const excluded = new Set<string>([editing.id]);
     const collect = (nodes?: DeptNodeOut[]) =>

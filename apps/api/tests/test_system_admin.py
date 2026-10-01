@@ -642,6 +642,198 @@ async def test_role_crud_and_perm_binding(
     assert r.status_code == 204
 
 
+# ============ 履约:角色 CUSTOM 自定义部门集合(datascope CUSTOM) ============
+
+
+async def _dept_rows(session: AsyncSession, role_id: str) -> list[str]:
+    rows = await session.execute(
+        text("SELECT dept_id FROM public.sys_role_dept WHERE role_id=:r ORDER BY dept_id"),
+        {"r": role_id},
+    )
+    return [str(x[0]) for x in rows]
+
+
+async def test_role_custom_dept_ids_roundtrip_and_replace(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """CUSTOM 读写往返保部门集合;再提交即整包替换(与权限绑定覆盖式语义同构)。"""
+    _, token = await _admin(client, session, make_user)
+    d1, d2 = await _mk_dept(session, "自定义部1"), await _mk_dept(session, "自定义部2")
+    r = await client.post(
+        "/system/roles",
+        json={
+            "role_key": "CUSTOMER_OPS",
+            "role_name": "客户运营",
+            "data_scope": "CUSTOM",
+            "sql_scope": "SELECT_ONLY",
+            "sort": 3,
+            "data_scope_dept_ids": [d1, d2],
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+    role = await _role_by_key(client, token, "CUSTOMER_OPS")
+    assert set(role["data_scope_dept_ids"]) == {d1, d2}
+    assert set(await _dept_rows(session, rid)) == {d1, d2}
+
+    # 整包替换:只留 d2,d1 必须消失(先删后插,不留半个集合)
+    r = await client.put(
+        f"/system/roles/{rid}",
+        json={
+            "role_key": "CUSTOMER_OPS",
+            "role_name": "客户运营",
+            "data_scope": "CUSTOM",
+            "sql_scope": "SELECT_ONLY",
+            "sort": 3,
+            "data_scope_dept_ids": [d2],
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 204, r.text
+    assert (await _role_by_key(client, token, "CUSTOMER_OPS"))["data_scope_dept_ids"] == [d2]
+    assert await _dept_rows(session, rid) == [d2]
+
+    # 切走 CUSTOM:集合清空(不留「配了部门却不生效」的隐性状态)
+    r = await client.put(
+        f"/system/roles/{rid}",
+        json={
+            "role_key": "CUSTOMER_OPS",
+            "role_name": "客户运营",
+            "data_scope": "DEPT",
+            "sql_scope": "SELECT_ONLY",
+            "sort": 3,
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 204, r.text
+    assert (await _role_by_key(client, token, "CUSTOMER_OPS"))["data_scope_dept_ids"] == []
+    assert await _dept_rows(session, rid) == []
+
+
+async def test_role_custom_requires_non_empty_dept_set(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """CUSTOM 缺集合(空数组或键缺失)→ 400 显式拒绝,不落一个「查询必被拒」的角色。"""
+    _, token = await _admin(client, session, make_user)
+    base = {"role_key": "EMPTY_CUSTOM", "role_name": "空自定义", "data_scope": "CUSTOM"}
+    r = await client.post("/system/roles", json={**base, "sort": 0}, headers=_auth(token))
+    assert r.status_code == 400
+    r = await client.post(
+        "/system/roles", json={**base, "sort": 0, "data_scope_dept_ids": []}, headers=_auth(token)
+    )
+    assert r.status_code == 400
+    assert (
+        await session.execute(text("SELECT 1 FROM public.sys_role WHERE role_key='EMPTY_CUSTOM'"))
+    ).scalar_one_or_none() is None
+
+
+async def test_role_custom_unknown_dept_rejected(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    _, token = await _admin(client, session, make_user)
+    d1 = await _mk_dept(session, "存在的部")
+    r = await client.post(
+        "/system/roles",
+        json={
+            "role_key": "GHOST_DEPT",
+            "role_name": "幽灵部门",
+            "data_scope": "CUSTOM",
+            "sort": 0,
+            "data_scope_dept_ids": [d1, str(uuidlib.uuid4())],
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 400
+    assert "不存在" in r.json()["detail"]
+    assert (
+        await session.execute(text("SELECT 1 FROM public.sys_role WHERE role_key='GHOST_DEPT'"))
+    ).scalar_one_or_none() is None
+
+
+async def test_role_non_custom_with_dept_ids_rejected(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """非 CUSTOM 却带非空部门集合 → 显式拒绝(不静默忽略)。"""
+    _, token = await _admin(client, session, make_user)
+    d1 = await _mk_dept(session, "本部门")
+    r = await client.post(
+        "/system/roles",
+        json={
+            "role_key": "MIXED_SCOPE",
+            "role_name": "错配",
+            "data_scope": "DEPT",
+            "sort": 0,
+            "data_scope_dept_ids": [d1],
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 400
+    rid = await _role_id(session, "DEVELOPER")
+    r = await client.put(
+        f"/system/roles/{rid}",
+        json={
+            "role_key": "DEVELOPER",
+            "role_name": "开发者",
+            "data_scope": "SELF",
+            "sql_scope": "SELECT_ONLY",
+            "sort": 1,
+            "data_scope_dept_ids": [d1],
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 400
+
+
+async def test_dept_referenced_by_role_delete_conflicts(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """FK 完整性优先:被 CUSTOM 角色引用的部门不可删(409,部门保留)。"""
+    _, token = await _admin(client, session, make_user)
+    d1 = await _mk_dept(session, "被引用的部")
+    r = await client.post(
+        "/system/roles",
+        json={
+            "role_key": "REF_DEPT",
+            "role_name": "引用部门",
+            "data_scope": "CUSTOM",
+            "sort": 0,
+            "data_scope_dept_ids": [d1],
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 201, r.text
+    r = await client.delete(f"/system/depts/{d1}", headers=_auth(token))
+    assert r.status_code == 409
+    assert (
+        await session.execute(text("SELECT 1 FROM public.sys_dept WHERE id=:i"), {"i": d1})
+    ).scalar_one_or_none() is not None
+
+
+async def test_role_delete_clears_custom_dept_rows(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """删角色级联清理部门集合(与既有 user_role/role_permission 显式清理同构)。"""
+    _, token = await _admin(client, session, make_user)
+    d1 = await _mk_dept(session, "待清理的部")
+    r = await client.post(
+        "/system/roles",
+        json={
+            "role_key": "TO_PURGE",
+            "role_name": "待删",
+            "data_scope": "CUSTOM",
+            "sort": 0,
+            "data_scope_dept_ids": [d1],
+        },
+        headers=_auth(token),
+    )
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+    r = await client.delete(f"/system/roles/{rid}", headers=_auth(token))
+    assert r.status_code == 204
+    assert await _dept_rows(session, rid) == []
+
+
 # ============ 履约:部门与租户 ============
 
 

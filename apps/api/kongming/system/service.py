@@ -13,6 +13,7 @@ from kongming.system.models import (
     BUILTIN_ROLE_KEYS,
     AdminAccountProtected,
     BuiltinRoleProtected,
+    CustomDeptScopeInvalid,
     Dept,
     DeptInUse,
     DeptNode,
@@ -262,9 +263,11 @@ class SystemService:
         data_scope: str,
         sql_scope: str,
         sort: int,
+        dept_ids: list[str] | None = None,
     ) -> str:
         if await self._repo.role_key_taken(role_key):
             raise RoleKeyTaken(f"角色键 {role_key} 已存在")
+        target_depts = await self._resolve_custom_depts(data_scope, dept_ids)
         role_id = str(uuid7())
         await self._repo.insert_role(
             role_id=role_id,
@@ -274,6 +277,7 @@ class SystemService:
             sql_scope=sql_scope,
             sort=sort,
         )
+        await self._repo.rebind_role_depts(role_id, target_depts)
         await self._repo.log_oper(actor_id, "role.create", role_key, {"role_id": role_id})
         await self._repo.commit()
         return role_id
@@ -288,12 +292,14 @@ class SystemService:
         data_scope: str,
         sql_scope: str,
         sort: int,
+        dept_ids: list[str] | None = None,
     ) -> None:
         current = await self._repo.get_role(role_id)
         if current is None:
             raise RoleNotFound("角色不存在")
         if str(current["role_key"]) != role_key:
             raise RoleKeyImmutable("role_key 创建后不可修改")
+        target_depts = await self._resolve_custom_depts(data_scope, dept_ids)
         await self._repo.update_role(
             role_id,
             role_name=role_name,
@@ -301,8 +307,31 @@ class SystemService:
             sql_scope=sql_scope,
             sort=sort,
         )
+        await self._repo.rebind_role_depts(role_id, target_depts)
         await self._repo.log_oper(actor_id, "role.update", role_key, {"role_id": role_id})
         await self._repo.commit()
+
+    async def _resolve_custom_depts(self, data_scope: str, dept_ids: list[str] | None) -> list[str]:
+        """CUSTOM ↔ 部门集合搭配校验,返回落库目标集合(整包替换语义)。
+
+        三条规则(spec datascope/rbac):
+        - CUSTOM 且集合为空(键缺失或显式空数组)→ 拒:否则落一个「每次查询必被拒」的角色;
+        - CUSTOM 且含不存在的部门 → UnknownDeptId(与用户绑部门同一族异常);
+        - 非 CUSTOM 却带非空集合 → 拒:静默忽略会留下「配了部门却不生效」的隐性状态。
+        非 CUSTOM 恒返回空集合 → rebind 即清空,库里不残留。
+        """
+        ids = dept_ids or []
+        if data_scope != "CUSTOM":
+            if ids:
+                raise CustomDeptScopeInvalid("data_scope 非 CUSTOM 时不可指定部门集合")
+            return []
+        if not ids:
+            raise CustomDeptScopeInvalid("data_scope=CUSTOM 必须至少选择一个部门")
+        existing = await self._repo.depts_exist(ids)
+        missing = sorted(set(ids) - set(existing))
+        if missing:
+            raise UnknownDeptId(f"部门不存在:{', '.join(missing)}")
+        return sorted(set(ids))
 
     async def delete_role(self, *, actor_id: str, role_id: str) -> None:
         current = await self._repo.get_role(role_id)

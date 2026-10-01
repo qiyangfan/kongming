@@ -7,8 +7,41 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
-## 当前状态(2026-09-28)
+## 当前状态(2026-10-01)
 
+- **083 data_scope=CUSTOM 落地并归档(2026-10-01)**:CUSTOM 由「已登记未实现 + 选了必被拒」变为
+  「按角色部门集合并集 IN 过滤」(不递归子部门;空集合仍 fail-closed,且判定已提到列探测与
+  「主表不可定位→降级」之前,堵掉一条潜在 fail-open)。存储走关联表 `sys_role_dept`(0035,
+  复合主键+两侧 FK+dept 索引),契约纯增 `data_scope_dept_ids`。归档件
+  `openspec/changes/archive/2026-10-01-083-data-scope-custom/`(§6 记实机走查全过程)。**已实机走查**
+  (真 api + 真库 + 一次性账号):空集合被拦并 `role=alert` 报「自定义范围需至少选择一个部门」、勾选落库一行、重开回显、
+  改回 SELF 后面板消失且**不发该字段**且库内集合行归零。走查抓出并修掉两条新组件缺陷:部门行高 20px→44px(B1.2 触控热区)、超长部门名截断无 `title` 不可回读(同组件服务既有权限面板,32 行同步受益)。**同批另修一条基线缺陷(084,已归档)**:`--input` 原被抄成 `--border` 同值,控件边界亮色仅 1.24:1、暗色 1.49:1——未勾选的复选框近乎隐身。改为独立取值(亮 `#808c86`/暗 `#62767c`,实测 3.35/3.58:1),jinguan 同值、muniu 按松烟色板另算(`#7c8781`/`#6b7a6f`,实测 3.72:1);`--border` hairline 不动。口径已入 `FRONTEND-CONSTITUTION.md` Article 3(两语义不得同值 + 控件边界 ≥3:1 + 改色板须重算),spec 落 `theme-switch`。**084 的影响面判错,已由 085(已归档)纠偏**:那句「消费方只有 6 个控件」只数了 `border-input`,漏了同一 token 还喂 `bg-input/30`(暗色控件内底)与 `data-[state=unchecked]:bg-input`(Switch 未勾选轨道,**不带 `dark:`,亮色同样生效**,本仓 5 个真实消费方含 status-switch 启用/停用)——结果是未勾选开关轨道被一起提亮成实心灰条,关闭态读起来像开启态。修法是把第三个语义拆出去:`--input-fill`(muniu `--color-input-fill`)取 084 拆分前的原值,11 处填充类改指 `bg-input-fill*`,描边值不动。**教训**:改 token 前判影响面要按**变量名的一切消费类** grep(`bg-input` 与 `border-input` 同源),按语义同名类数会漏;而 `bg-*` 类拼错或 token 未注册时 Tailwind 静默不生成规则,tsc/eslint/stylelint 全都查不出来,接线只能靠 `vite build` 产物 CSS 逐条确认。**留档不改**:亮色聚焦环 `--ring` 对白底 2.31:1,属品牌色决策。
+- **083/084 评审迭代循环(2026-10-01,R1→R2 一轮收敛,独立子代理复核报 4 项候选)**:确认真缺陷 2 项、
+  登记待裁决 2 项。**修**:①角色表单的部门候选查询失败被渲染成空态「暂无部门,请先到「部门」页新建」
+  ——`/system/depts` 挂 `system:user:manage` 而角色页只要求 `system:role:manage`,且任何瞬时失败都会
+  把人支去新建;现按 web-nav spec「查询错误态必须复用共享件、不得手写副本」改为 `ErrorAlert` + 并列
+  `refetch` 重试按钮(该件只收 `text` 单参,动作件放它外面),并明示
+  「已配置集合保持不变(仍可保存)」——不清集合是刻意的:候选读不出来时保留回显值比清空安全,
+  清空后服务端会按 083 的空集合 fail-closed 直接拒(不会静默放宽)。②083 主规格判据清单第 10 条
+  「判定先于主表不可定位→降级」在 apply 层**没有用例钉住**:原 `test_apply_custom_fail_closed` 用可定位
+  主表,把 fail-closed 判定挪到降级分支之后它照样绿;补 `test_apply_custom_empty_rejects_before_union_degrade`
+  (UNION + CUSTOM 空集合),红灯实证:挪位后仅这条红(旧用例仍绿),复原后 datascope 39/39、api-check 1066 passed
+  且覆盖率 72.85%。**登记待裁决**:禁用角色使可见范围反向放宽(权限点解析不看角色状态,与 datascope 侧
+  不同口径)、`sys_dept.status` 在 DEPT/CUSTOM 不过滤而 DEPT_AND_BELOW 过滤——两条都属授权口径变更,
+  不由代码评审单方面定,详见「挂账终态」节。**排除的臆断 1 项**:称「部门候选读取失败时仍把陈旧
+  deptIds 原样提交」是缺陷——保留回显值才是正确侧(清空会撞上 083 的空集合拒绝)。
+- **本机跑 api 门禁的端口坑(2026-10-01 复现)**:宿主 6379 现被上游 `docker-compose-local-redis-1`
+  (带 requirepass)占用,而 `tests/conftest.py` 的缺省是 `redis://localhost:6379/15` → 直接
+  `uv run pytest` 会在 fixture 期报 `redis.exceptions.AuthenticationError`(**与代码无关**)。
+  绕行:从 `apps/api` 跑时带 `KM_REDIS_URL=redis://localhost:6380/15`(kongming 自己的 redis)。
+- **两条既有测试陷阱(已修,后来者勿再踩)**:① `tests/test_feedback_promotion.py` 的迁移往返用例
+  `downgrade("0033")` 后只 `upgrade("0034")`——head 前移后它会把库永久留在 head 之下,其后每个用例的
+  `TRUNCATE` 撞 `UndefinedTableError`(本次实测 518 个 error 的唯一成因),规则是**回 head 不回版本号**;
+  ② `tests/test_billing.py` 出账用例的「上月」原取库时钟(UTC),而 `BillingService._prev_month()`
+  写死 +8——每月 1 日 00:00~08:00(北京时间)两者跨月错位,断言必红,规则是**测试用产品同一时源**。
+- **门禁口径补记**:`make contracts-check` 末段 `git diff --exit-code contracts/openapi.json` 在
+  「产物已更新但未提交」状态必报差(该闸按提交后语义设计),本地等价证明是
+  「重新 export + 重新 `contracts:gen` 后 web-check 与 tsc 仍全绿」。
 - **十二变更落地+053 切主,全部已归档(2026-09-28)**:活动变更清零。
   062 问答成本控制(登录面速率 fail-open+配额 fail-closed 双闸、bot 面
   IP 维度速率闸、用量索引 0031);063 相关表预筛(共现加权打分 top-12,
@@ -297,13 +330,28 @@ make contracts      # 导出 OpenAPI + 生成前端类型(改 api 后必跑)
 | 前端 Markdown 渲染 | 文档卡收编 react-markdown+remark-gfm/breaks;不解析原始 HTML、无 dangerouslySetInnerHTML | ADR-009 |
 | 挂账治理 | 开放挂账=零;新发现项一律给终态(修/关闭/条件触发/产品登记),不留无排期「随域延后」 | backlog-settlement 终态块 |
 
-## 挂账终态(开放挂账=零,2026-08-25 backlog-settlement 裁决)
+## 挂账终态(开放挂账=零,2026-08-25 backlog-settlement 裁决;2026-10-01 评审循环新增两条「待 owner 裁决」登记,见本节末)
 
 **明确关闭(结案)**:A-B10 confirm 硬熔断(write_burst 写闸实证兜底)/
 B2-B9 http 响应头闸(h11 16KB 默认兜底已实证+注释固化)/审计页 user 筛选
 UI(API 已备场景低频)/D-B7 进度条动态 style(原裁接受)。
 
-**条件触发登记(触发即评估,非开放债务)**:
+   **条件触发登记(触发即评估,非开放债务)**:
+- **【新增·待 owner 裁决方向】禁用角色会让行级可见范围反向放宽**:数据权限解析
+  (`datascope/repository.py::user_role_scopes`)按 `sys_role.status='ACTIVE'` 过滤,
+  而权限点解析(`auth/repository.py::SqlPermRepo.list_codes`,联 `sys_role_permission`)**不看角色状态**。
+  于是「把角色置为 DISABLED」这一治理动作的实际效果是:用户仍过 `require_perm`(功能权限没丢),
+  但 `user_role_scopes` 返回空 → 命中 applier 的「无启用角色,降级为不过滤」分支 → **全表可读**。
+  属 fail-open,方向与 083 立的「杜绝 fail-open」相反。存量缺陷(非 083 引入),且修法要动授权口径:
+  裁「权限点解析也按 ACTIVE 过滤」(禁用角色=功能与数据双停,一处真相)还是「无启用角色改为拒绝」。
+  本机无任何产品入口能禁用角色(仅旁路 SQL 可造此状态,`tests/test_datascope.py` 即该形态),
+  故为潜伏面。触发=上线「角色启停」功能或任何按 status 治理的流程。
+- **【新增·口径待裁】`sys_dept.status` 的三种范围语义不齐**:`DEPT_AND_BELOW` 的递归 CTE 显式
+  只走 `status='ACTIVE'`,而 `DEPT`(取本人部门)与 `CUSTOM`(083 取角色配置集合)都按字面生效、
+  不过滤停用部门——**停用某部门后,经 DEPT/CUSTOM 授权的用户仍可读其数据**。083 spec 写的是
+  「按字面生效:不递归、不自动含本人部门」,未裁定 status,故现行为不算违宪;
+  但「部门停用=该部门数据停止对外可见」若是治理预期,则三档应统一过滤。属产品语义裁决,
+  不由代码评审单方面定。触发=治理口径清单成文或出现「停用部门但数据仍可查」的报障。
 - 注入拆字/全角变体绕过:触发=出现真实绕过事件或规模化信号。
 - 支付回调先查单后验签探测面:触发=接真实公网支付通道。
 - MCP 远端错误文案反射面收紧:触发=生态滥用信号。

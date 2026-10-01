@@ -1,10 +1,11 @@
-"""data_scope 应用编排:上下文汇聚(角色/部门/列探测)→ 意图 → 改写。
+"""data_scope 应用编排:上下文汇聚(角色/部门/集合/列探测)→ 意图 → 改写。
 
 对应上游 DataScopeApplier 的职责落点(infrastructure 性质):
 - 用户不存在/无启用角色 → 安全降级(沿用上游裁定,告警可观测);
 - ALL 提前退出(最常见路径,不做列探测);
 - DEPT 系先解有效部门集(DEPT 单部门 / DEPT_AND_BELOW 递归 CTE);
-- CUSTOM/未知值 → DataScopeUnsupported(fail-closed,spec 铁律);
+- CUSTOM 先解角色自定义部门集合(启用角色并集,不递归)→ 与 DEPT 系同一 IN 改写;
+  集合为空则在任何降级分支之前 fail-closed 抛 DataScopeUnsupported(spec 铁律);
 - 绑定值按探测列类型绑 UUID/str(PG 无 uuid=text 算子)。
 """
 
@@ -63,17 +64,26 @@ async def apply(
     if scope == "ALL":
         return AppliedSQL(sql=sql)
 
-    # DEPT 系解有效部门集;SELF 无需部门
+    # DEPT 系解有效部门集(CUSTOM 解角色集合,SELF 无需部门)
     dept_ids: list[str] = []
-    if scope == "DEPT" and dept_id is not None:
+    if scope == "CUSTOM":
+        dept_ids = await repo.custom_dept_ids(user_id)
+    elif scope == "DEPT" and dept_id is not None:
         dept_ids = [dept_id]
     elif scope == "DEPT_AND_BELOW" and dept_id is not None:
         dept_ids = await repo.dept_and_below(dept_id)
 
-    # 列探测(仅 DEPT 系/SELF 需要;CUSTOM/未知值直接交 resolve 判 UNSUPPORTED)
+    ctx = ScopeContext(data_scope=scope, user_id=user_id, dept_ids=dept_ids)
+    # fail-closed 判据先于列探测与「主表不可定位→降级」:CUSTOM 空集合禁漂成不过滤
+    reason = service.unsupported_reason(ctx)
+    if reason is not None:
+        raise DataScopeUnsupported(reason)
+
+    # 列探测(DEPT 系与 CUSTOM 探 dept_id,SELF 探 create_by)
+    dept_family = scope in ("DEPT", "DEPT_AND_BELOW", "CUSTOM")
     data_type: str | None = None
-    if scope in ("DEPT", "DEPT_AND_BELOW", "SELF"):
-        target_column = COL_DEPT_ID if scope in ("DEPT", "DEPT_AND_BELOW") else COL_CREATE_BY
+    if dept_family or scope == "SELF":
+        target_column = COL_DEPT_ID if dept_family else COL_CREATE_BY
         ref = (
             guarded.main_table_ref() if guarded is not None else rewrite.extract_main_table_ref(sql)
         )
@@ -88,11 +98,10 @@ async def apply(
             biz_conn, schemas=probe_schemas, table=table, column=target_column
         )
 
-    flt = service.resolve(
-        ScopeContext(data_scope=scope, user_id=user_id, dept_ids=dept_ids),
-        column_exists=data_type is not None,
-    )
+    flt = service.resolve(ctx, column_exists=data_type is not None)
     if flt.type is FilterType.UNSUPPORTED:
+        # 纵深防线(构造上已被上方 unsupported_reason 拦死):意图若为 UNSUPPORTED
+        # 却走到这里,绝不允许继续改写——改写会退化为「不过滤」即 fail-open
         raise DataScopeUnsupported(flt.skip_reason or "DATA_SCOPE_UNSUPPORTED")
     if flt.type is FilterType.SKIP:
         if flt.skip_reason:

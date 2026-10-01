@@ -42,6 +42,8 @@ class RoleListItem:
     sort: int
     builtin: bool
     perm_ids: list[str]
+    # data_scope=CUSTOM 的自定义部门集合(sys_role_dept;非 CUSTOM 恒空)
+    dept_ids: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -159,3 +161,11 @@ class UnknownTenantId(SystemError):
 
 class UnknownDeptId(SystemError):
     """dept_id 不存在。"""
+
+
+class CustomDeptScopeInvalid(SystemError):
+    """data_scope 与部门集合搭配不合法(CUSTOM 缺集合 / 非 CUSTOM 带集合)。
+
+    与 UnknownDeptId 分家:后者判「部门不存在」,本类判「两者不该同时出现」——
+    合并会让用户读到与真实原因相反的文案(配了部门却不生效的隐性状态由此而生)。
+    """
