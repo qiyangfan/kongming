@@ -134,7 +134,7 @@ export default function Login() {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-grad-from via-grad-mid to-grad-end">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>孔明 Kongming</CardTitle>
+          <CardTitle as="h2">孔明 Kongming</CardTitle>
           <CardDescription>问计于数据,如问计于孔明</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

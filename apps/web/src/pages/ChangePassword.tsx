@@ -47,7 +47,7 @@ function ChangePasswordForm() {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-grad-from via-grad-mid to-grad-end">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>修改密码</CardTitle>
+          <CardTitle as="h2">修改密码</CardTitle>
           <CardDescription>
             {user?.must_change_password ? "首次登录须先修改初始密码" : "修改后所有设备需重新登录"}
           </CardDescription>

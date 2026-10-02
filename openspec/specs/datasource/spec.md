@@ -143,7 +143,7 @@ datasource_key 与租户归属创建后 SHALL NOT 可修改(009 起 008 已兑�
 
 ### Requirement: RAG datasource 维度
 
-知识条目以 (tenant, datasource_key, schema_name, table_name) 唯一;三路召回、query_history、审计均按 tenant + datasource_key 双过滤;Agent 回调透传 datasourceKey(标识符非凭证);知识上传与查询入口对 datasourceKey 做存在+启用+归属校验。
+知识条目 SHALL 以 (tenant, datasource_key, schema_name, table_name) 唯一;三路召回、query_history、审计均 SHALL 按 tenant + datasource_key 双过滤;Agent 回调 SHALL 透传 datasourceKey(标识符非凭证);知识上传与查询入口 MUST 对 datasourceKey 做存在+启用+归属校验。
 
 #### Scenario: 知识与历史双过滤隔离
 - GIVEN 多租户多数据源的知识与历史 SQL

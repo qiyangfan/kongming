@@ -1,0 +1,3 @@
+# 纯 spec 措辞/结构治理件:修正直接手工同步进主规格(见 proposal「Capabilities」节),
+# 不携带 delta 工件,归档走 --skip-specs(工具对零 delta change 的既定申报路线)。
+skip_specs: true

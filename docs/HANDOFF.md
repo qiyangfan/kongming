@@ -7,6 +7,25 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
+## 当前状态(2026-10-02,CardTitle 落地归档 + spec strict 债清零)
+
+- **CardTitle 标题语义已落地并归档(change `2026-10-02-card-title-heading-semantics`,2026-10-02)**:
+  `ui/CardTitle` 增 `as?: "h2"|"h3"|"h4"` 默认 h3 渲染真实标题元素,视觉配方一字节未动(react-dom/server
+  守卫 5 例先红后绿钉死,零新依赖、零 jsdom——`.test.ts` 内 createElement 书写,vitest 网不收 tsx);
+  三处认证入口(Login/ChangePassword/OAuthCallback)传 `as="h2"`。验证:web-check+vitest 86/86+
+  vite build 产物抽验(压缩产物内默认 h3+配方逐字节在)+真 api 18000 浏览器三页 heading 大纲抽查
+  (单条页面级 h2、无跳档);delta 已并入主规格 `web-nav` 且单域 strict 通过,归档走 `--skip-specs`。
+  跨仓对齐(jinguan 13 处/muniu 3 处)待 sync 脚本执行,登记见聚合层 HANDOFF(条件触发,非本仓阻塞)。
+- **spec strict 存量债已清零(change `2026-10-02-spec-strict-wording-debt`,同日归档)**:
+  `openspec validate --specs --strict` 自 33/45 → **45/45**。12 域 49 处修正(44 关键词升格+4 新增 Scenario+1 结构规范化)全部是措辞/结构债、
+  零行为变更:44 条 Requirement 正文注入 SHALL/MUST/SHALL NOT(ai-eval 5/audit 1/datascope 6/
+  datasource 1/eval 2/knowledge 1/multitenant 4/nl2sql 6/rbac 15/web-admin 3),chat 两条需求
+  (口径依据/文档道来源)补从正文派生的 Scenario 块,runtime-resilience 把当年 074 以 delta 形态
+  (`## ADDED Requirements`)直接躺进主规格目录的文件转回规范形态(`# 能力域`+Purpose+Requirements,
+  原文逐字保留)。修正直接手工同步进主规格,change 零 delta(`.openspec.yaml` 声明 `skip_specs`)。
+  **新基线**:strict 门禁自此全绿,「12 项失败是既有债」的每轮复述作废;后续只有新 delta 自身
+  须过 strict 的既有纪律。超长文本 INFO 级提示多域仍存(不影响判定),按冻结裁决未处理。
+
 ## 当前状态(2026-10-02)
 
 - **087 偏好自管理落地并归档(2026-10-02)**:承接 059 任务 3.4 前端遗留 + 后端删除/清空/并发语义,

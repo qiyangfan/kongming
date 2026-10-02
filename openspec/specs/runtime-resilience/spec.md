@@ -1,6 +1,13 @@
-# runtime-resilience spec delta(074-runtime-connection-hygiene)
+# runtime-resilience 能力域
 
-## ADDED Requirements
+## Purpose
+
+运行时韧性契约:控制面数据库连接池的坏连接防御与容量治理、部署栈(控制面/agent
+面/缓存)的就绪依赖与自愈。只约定「故障不得以失败请求形式暴露给用户」与
+「部署编排的就绪顺序」两类行为;故障的分类处置(重试上限、降级链)见
+nl2sql-agent 与 runtime 相关域。
+
+## Requirements
 
 ### Requirement: 数据库连接池弹性
 

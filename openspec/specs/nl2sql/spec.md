@@ -9,7 +9,7 @@ NL2SQL 核心能力:将自然语言问句转换为 SQL 并执行,返回结构化
 
 ### Requirement: NL2SQL 查询端到端
 
-系统接收已认证用户的自然语言问句,经 Agent 处理后返回查询结果。
+系统 SHALL 接收已认证用户的自然语言问句,经 Agent 处理后返回查询结果。
 
 受影响权限层级: 接口权限(`chat:execute`) + SQL 操作权限(SELECT_ONLY)
 
@@ -30,7 +30,7 @@ NL2SQL 核心能力:将自然语言问句转换为 SQL 并执行,返回结构化
 
 ### Requirement: SQL 操作权限强制只读
 
-系统拒绝任何非 SELECT 语句,无论 LLM 生成什么。校验基于 SQL AST,非正则匹配。
+系统 SHALL 拒绝任何非 SELECT 语句,无论 LLM 生成什么。校验 SHALL 基于 SQL AST,非正则匹配。
 
 #### Scenario: LLM 生成了 DELETE 语句
 - GIVEN Agent 生成了「DELETE FROM customer WHERE ...」
@@ -52,7 +52,7 @@ NL2SQL 核心能力:将自然语言问句转换为 SQL 并执行,返回结构化
 
 ### Requirement: Agent 自愈重试
 
-当 SQL 生成错误或执行失败时,Agent 基于错误信息自我修正。
+当 SQL 生成错误或执行失败时,Agent SHALL 基于错误信息自我修正。
 
 #### Scenario: SQL 执行时列名错误
 - GIVEN Agent 生成的 SQL 执行报错「column xxx does not exist」
@@ -67,7 +67,7 @@ NL2SQL 核心能力:将自然语言问句转换为 SQL 并执行,返回结构化
 
 ### Requirement: LLM 模型可配置切换
 
-系统支持通过配置切换 LLM 厂商,不改代码。
+系统 SHALL 支持通过配置切换 LLM 厂商,不改代码。
 
 #### Scenario: 从通义千问切换到 DeepSeek
 - GIVEN 默认配置为通义兼容端点
@@ -76,7 +76,7 @@ NL2SQL 核心能力:将自然语言问句转换为 SQL 并执行,返回结构化
 
 ### Requirement: 结果可视化
 
-系统为查询结果生成合适的图表配置。
+系统 SHALL 为查询结果生成合适的图表配置。
 
 #### Scenario: 聚合查询自动配柱状图
 - GIVEN 查询结果是分组聚合(如 top N 客户)
@@ -121,7 +121,7 @@ error 摘要。控制面 SHALL 为回调设置超时上限;Agent 面不可达/�
 
 ### Requirement: 内部接口鉴权(api↔agent)
 
-Agent 面回调控制面的内部接口必须鉴权,防止外部或同网段横向调用。
+Agent 面回调控制面的内部接口 MUST 鉴权,防止外部或同网段横向调用。
 
 #### Scenario: 带正确内部令牌调用
 - GIVEN 两进程共享 INTERNAL_TOKEN 配置

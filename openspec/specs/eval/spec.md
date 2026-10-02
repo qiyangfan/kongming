@@ -31,16 +31,16 @@ NL2SQL 评估体系:gold_sql 与生成 SQL 的匹配规则(列等价 + 行集合
 
 ### Requirement: 评估匹配规则
 
-宽松规则(黄金指标口径)为双路径语义比较:路径一=列名集合相等或 gold 列集
+宽松规则(黄金指标口径)SHALL 为双路径语义比较:路径一=列名集合相等或 gold 列集
 ⊆ 生成列集(大小写不敏感)→ 生成侧按 gold 列名投影 → 行集合近似相等(浮点
 容差 1e-6,NULL 语义一致),gold_sql 含 ORDER BY 时保序比较、否则 multiset
 比较;路径二=gold 数值 multiset ⊆ 生成数值 multiset(容忍聚合别名/投影列名
-不兼容但数值全对)。纯文本结果集(gold 无数值)不走路径二(空集子集恒真
-误判),路径一列名不兼容时回退严格集合等值兜底。已知既定边界:路径二天然
+不兼容但数值全对)。纯文本结果集(gold 无数值)SHALL NOT 走路径二(空集子集恒真
+误判),路径一列名不兼容时 SHALL 回退严格集合等值兜底。已知既定边界:路径二天然
 无序——宽松口径不惩罚序错(值集对即放行,保序仅约束路径一);gold 投影
 数值 id 列而生成侧缺失该数值时路径二判 fail,靠编写规范「投影业务可读列」
-规避。严格规则(结果集 multiset 精确等值)并行输出;基线对照用宽松分,
-回归红线用宽松分不下降(劣化 ≥5pp 逐题溯源)。
+规避。严格规则(结果集 multiset 精确等值)SHALL 并行输出;基线对照 SHALL 用宽松分,
+回归红线 SHALL 用宽松分不下降(劣化 ≥5pp 逐题溯源)。
 
 #### Scenario: 宽松匹配列等价与数值近似
 
@@ -134,7 +134,7 @@ NL2SQL 评估体系:gold_sql 与生成 SQL 的匹配规则(列等价 + 行集合
 
 ### Requirement: gold_sql 编写规范
 
-gold_sql 含 ORDER BY ... LIMIT N 时必须追加唯一列作第二排序键;投影业务可读列(不裸投影 ID);join 新增表必须同步 expected_tables;同题多路径副本必须同步改。
+gold_sql 含 ORDER BY ... LIMIT N 时 MUST 追加唯一列作第二排序键;投影 SHALL 取业务可读列(SHALL NOT 裸投影 ID);join 新增表 MUST 同步 expected_tables;同题多路径副本 MUST 同步改。
 
 #### Scenario: tiebreaker 必加保证行序确定
 - GIVEN gold_sql 含 ORDER BY ... LIMIT N

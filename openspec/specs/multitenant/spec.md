@@ -9,7 +9,7 @@
 
 ### Requirement: 租户白名单真实校验
 
-每次请求按 X-Tenant-Id 头(缺省取用户默认租户)查 sys_user_tenant 真表校验;未命中拒绝。SUPER_ADMIN 不豁免租户白名单。
+每次请求 SHALL 按 X-Tenant-Id 头(缺省取用户默认租户)查 sys_user_tenant 真表校验;未命中 SHALL 拒绝。SUPER_ADMIN SHALL NOT 豁免租户白名单。
 
 #### Scenario: 访问已授权的租户放行
 - GIVEN sys_user_tenant 存在 (用户, sakila) 绑定
@@ -40,7 +40,7 @@
 
 ### Requirement: 租户切换(前端+后端协同)
 
-租户列表来自 sys_user_tenant 查询;切换租户 = 前端更新 X-Tenant-Id 头(每次请求独立校验白名单,无状态,不重签令牌);切换后数据源选项随之刷新。
+租户列表 SHALL 来自 sys_user_tenant 查询;切换租户 = 前端更新 X-Tenant-Id 头(每次请求 SHALL 独立校验白名单,无状态,SHALL NOT 重签令牌);切换后数据源选项随之刷新。
 
 #### Scenario: 查询可切换租户列表
 - GIVEN 用户绑定 sakila 与 olist
@@ -59,7 +59,7 @@
 
 ### Requirement: 按 tenant 路由 schema(数据源层)
 
-查询执行前在同一事务内设置 search_path 至 `tenant_<key>, public`(事务级,不污染连接池);public 始终在列(系统对象与类型可见性)。
+查询执行前 SHALL 在同一事务内设置 search_path 至 `tenant_<key>, public`(事务级,SHALL NOT 污染连接池);public SHALL 始终在列(系统对象与类型可见性)。
 
 #### Scenario: 查询路由到租户 schema
 - GIVEN 当前租户 sakila
@@ -78,7 +78,7 @@
 
 ### Requirement: 多租户数据隔离验证(端到端)
 
-schema 路由切换正确;审计正确记录租户。
+schema 路由切换 SHALL 正确;审计 SHALL 正确记录租户。
 
 #### Scenario: 切换租户后查到对应数据
 - GIVEN 不同租户 schema 有不同业务数据

@@ -159,7 +159,7 @@ SHALL 清空人工精修条目回到自动生成基线(与 fetch-metadata 的优
 
 ### Requirement: 不变式约束
 
-召回/执行链路不变;润色内容只进文本列,不进 SQL 执行路径;手工上传的解析/校验/upsert 行为与既有文档上传一致。
+召回/执行链路 SHALL 保持不变;润色内容 SHALL 只进文本列,SHALL NOT 进 SQL 执行路径;手工上传的解析/校验/upsert 行为 SHALL 与既有文档上传一致。
 
 #### Scenario: 润色内容不进执行路径
 - GIVEN 知识条目含润色内容

@@ -43,7 +43,7 @@ export default function OAuthCallback() {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-grad-from via-grad-mid to-grad-end">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>第三方登录</CardTitle>
+          <CardTitle as="h2">第三方登录</CardTitle>
           <CardDescription>{error ? "登录未完成" : "正在完成登录…"}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

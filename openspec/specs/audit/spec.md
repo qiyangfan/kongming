@@ -8,7 +8,7 @@
 
 ### Requirement: 查询审计落库(完整性与贯穿)
 
-每次 NL2SQL 查询必须落审计:trace_id 贯穿 控制面→Agent→执行 回调;成功、失败、被拦截三类都落库,保证审计完整。
+每次 NL2SQL 查询 MUST 落审计:trace_id MUST 贯穿 控制面→Agent→执行 回调;成功、失败、被拦截三类都 MUST 落库,保证审计完整。
 
 #### Scenario: 成功查询落审计
 - GIVEN 用户执行了一次成功查询

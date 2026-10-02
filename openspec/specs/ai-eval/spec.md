@@ -8,7 +8,7 @@
 
 ### Requirement: 知识元数据质量(字段语义完整)
 
-知识条目的 schema 提示拼接时保留字段中文说明;markdown 解析隔离「示例段」不污染「字段段」。
+知识条目的 schema 提示拼接时 SHALL 保留字段中文说明;markdown 解析 SHALL 隔离「示例段」不污染「字段段」。
 
 #### Scenario: schema 提示保留字段中文说明
 - GIVEN 知识条目 columns_comment = {"customer_id":"客户ID","email":"邮箱"}
@@ -22,7 +22,7 @@
 
 ### Requirement: few-shot 激活
 
-sample_queries 非空时 generate 提示含 few-shot 段(参考示例 SQL);为空时不加该段(降级兼容)。
+sample_queries 非空时 generate 提示 SHALL 含 few-shot 段(参考示例 SQL);为空时 SHALL NOT 加该段(降级兼容)。
 
 #### Scenario: few-shot 注入提示
 - GIVEN 知识条目含示例 SQL
@@ -32,7 +32,7 @@ sample_queries 非空时 generate 提示含 few-shot 段(参考示例 SQL);为�
 
 ### Requirement: Execution Match(黄金指标)
 
-gold_sql 与生成 SQL 都在目标库真实执行,对比结果集判定 pass/fail(排序无关集合相等为基础口径,细则见 eval 域)。
+gold_sql 与生成 SQL SHALL 都在目标库真实执行,对比结果集判定 pass/fail(排序无关集合相等为基础口径,细则见 eval 域)。
 
 #### Scenario: 双路径执行比较
 - GIVEN 评估集有 gold_sql
@@ -41,9 +41,9 @@ gold_sql 与生成 SQL 都在目标库真实执行,对比结果集判定 pass/fa
 
 ### Requirement: Recall@K(召回质量)
 
-统计 gold 表是否在链路实际选表结果内,输出召回率指标——间接口径:以生成 SQL
+评估 SHALL 统计 gold 表是否在链路实际选表结果内,并输出召回率指标——间接口径:以生成 SQL
 涉及的表(抽表时排除 CTE 定义名)是否覆盖 expected_tables 判定命中(表选对
-是召回生效的链路可见结果;召回中间产物不对评估器暴露)。
+是召回生效的链路可见结果;召回中间产物 SHALL NOT 对评估器暴露)。
 
 #### Scenario: 召回率统计
 
@@ -126,7 +126,7 @@ NOT 作为 PR 门禁;smoke 集 SHALL 支持两种运行形态:
 
 ### Requirement: 成功 SQL 回写自学习闭环
 
-成功查询回写 query_history(细则见 rag 域),作为三路召回的强 few-shot 源,形成「评估发现问题 → 知识/few-shot 精修 → 指标提升」闭环。
+成功查询 SHALL 回写 query_history(细则见 rag 域),作为三路召回的强 few-shot 源,形成「评估发现问题 → 知识/few-shot 精修 → 指标提升」闭环。
 
 #### Scenario: 回写后被召回
 - GIVEN 成功查询已回写

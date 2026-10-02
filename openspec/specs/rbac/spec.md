@@ -11,7 +11,7 @@ data_scope 枚举见 datascope 域;sql_scope 枚举: SELECT_ONLY / READ_DDL / DM
 
 ### Requirement: 角色来源真实化
 
-权限判定基于 sys_user_role 真实绑定(非用户名硬编码);认证与授权分离。
+权限判定 SHALL 基于 sys_user_role 真实绑定(SHALL NOT 用户名硬编码);认证与授权分离。
 
 #### Scenario: 登录后令牌携带真实角色
 - GIVEN sys_user_role 存在绑定,角色 role_key='DEVELOPER'
@@ -51,7 +51,7 @@ data_scope 枚举见 datascope 域;sql_scope 枚举: SELECT_ONLY / READ_DDL / DM
 
 ### Requirement: 权限点是随代码发布的契约数据
 
-权限点与代码中的声明一一对应,由应用启动时幂等播种(非运行时 CRUD);运行时新增的权限点匹配不到任何声明是死数据,改删 perm_code 会静默破坏授权。
+权限点 SHALL 与代码中的声明一一对应,SHALL 由应用启动时幂等播种(SHALL NOT 运行时 CRUD);运行时新增的权限点匹配不到任何声明是死数据,改删 perm_code 会静默破坏授权。
 
 #### Scenario: 权限点清单查询
 - GIVEN 权限点多条
@@ -66,7 +66,7 @@ data_scope 枚举见 datascope 域;sql_scope 枚举: SELECT_ONLY / READ_DDL / DM
 
 ### Requirement: 用户管理 CRUD(权限点 system:user:manage)
 
-密码 argon2id 哈希;用户名唯一性软删过滤;删除为软删;首登强制改密标志。
+密码 SHALL 以 argon2id 哈希;用户名唯一性 SHALL 软删过滤;删除 SHALL 为软删;首登强制改密标志。
 
 #### Scenario: 创建用户
 - GIVEN 当前用户角色含 system:user:manage
@@ -96,7 +96,7 @@ data_scope 枚举见 datascope 域;sql_scope 枚举: SELECT_ONLY / READ_DDL / DM
 
 ### Requirement: 角色管理 CRUD(权限点 system:role:manage)
 
-角色含 dataScope/sqlScope;支持角色-权限点绑定/撤销。
+角色 SHALL 含 dataScope/sqlScope;SHALL 支持角色-权限点绑定/撤销。
 
 #### Scenario: 创建角色
 - GIVEN 当前用户有 system:role:manage
@@ -110,7 +110,7 @@ data_scope 枚举见 datascope 域;sql_scope 枚举: SELECT_ONLY / READ_DDL / DM
 
 ### Requirement: 用户-角色绑定与多角色语义
 
-一个用户多角色时:权限点取并集(任一角色授予即放行),data_scope 取最宽松(MIN 序:ALL 最宽)。
+一个用户多角色时:权限点 SHALL 取并集(任一角色授予即放行),data_scope SHALL 取最宽松(MIN 序:ALL 最宽)。
 
 #### Scenario: 给用户分配角色
 - GIVEN 用户与角色存在
@@ -126,7 +126,7 @@ data_scope 枚举见 datascope 域;sql_scope 枚举: SELECT_ONLY / READ_DDL / DM
 
 ### Requirement: 部门管理(支撑 data_scope)
 
-部门管理简化实现,支撑 DEPT/DEPT_AND_BELOW 过滤;部门树用数据库递归 CTE 查询;用户绑定部门。
+部门管理 SHALL 简化实现,支撑 DEPT/DEPT_AND_BELOW 过滤;部门树 SHALL 用数据库递归 CTE 查询;用户 SHALL 绑定部门。
 
 #### Scenario: 部门树递归查询
 - GIVEN 部门层级 A→B→C
@@ -152,7 +152,7 @@ data_scope 枚举见 datascope 域;sql_scope 枚举: SELECT_ONLY / READ_DDL / DM
 
 ### Requirement: sql_scope 字段语义
 
-角色含 sql_scope 字段;SQL 防火墙按当前用户角色的 sql_scope 校验语句类型。
+角色 SHALL 含 sql_scope 字段;SQL 防火墙 SHALL 按当前用户角色的 sql_scope 校验语句类型。
 
 #### Scenario: SELECT_ONLY 全局策略
 - GIVEN 角色sql_scope=SELECT_ONLY
@@ -161,7 +161,7 @@ data_scope 枚举见 datascope 域;sql_scope 枚举: SELECT_ONLY / READ_DDL / DM
 
 ### Requirement: 种子数据
 
-启动时幂等播种最小可用数据:内置角色(SUPER_ADMIN/DEVELOPER)、权限点(与代码声明同源)、超管账号(从环境变量读初始密码)。
+启动时 SHALL 幂等播种最小可用数据:内置角色(SUPER_ADMIN/DEVELOPER)、权限点(与代码声明同源)、超管账号(从环境变量读初始密码)。
 
 #### Scenario: 空库启动播种
 - GIVEN 空库首次启动
@@ -173,7 +173,7 @@ data_scope 枚举见 datascope 域;sql_scope 枚举: SELECT_ONLY / READ_DDL / DM
 
 ### Requirement: 角色继承(可选,评估后定)
 
-角色继承(子角色合并父角色权限)标注可选,实现前评估复杂度(企业实践坑多,前系统亦未启用)。
+角色继承(子角色合并父角色权限)SHALL 标注可选,实现前评估复杂度(企业实践坑多,前系统亦未启用)。
 
 #### Scenario: 父角色权限自动继承(若实现)
 - GIVEN 角色 B 继承角色 A
@@ -182,8 +182,8 @@ data_scope 枚举见 datascope 域;sql_scope 枚举: SELECT_ONLY / READ_DDL / DM
 
 ### Requirement: 用户列表查询(权限点 system:user:manage)
 
-分页返回未软删用户;支持关键字对用户名/昵称不区分大小写包含匹配;
-列表项聚合展示角色键列表、部门名、状态、创建时间。
+SHALL 分页返回未软删用户;SHALL 支持关键字对用户名/昵称不区分大小写包含匹配;
+列表项 SHALL 聚合展示角色键列表、部门名、状态、创建时间。
 
 #### Scenario: 分页与关键字过滤
 - GIVEN 库中存在用户若干,其中用户昵称含「孔明」
@@ -198,9 +198,9 @@ data_scope 枚举见 datascope 域;sql_scope 枚举: SELECT_ONLY / READ_DDL / DM
 
 ### Requirement: 用户启用与禁用(权限点 system:user:manage)
 
-用户编辑支持状态切换(ACTIVE/DISABLED);禁用后该用户登录被拒,
-且既有访问令牌在下一次权限点校验时被拒。系统提供专用启停端点
-(enable/disable),保护规则与编辑路径同构;禁用同时吊销该用户
+用户编辑 SHALL 支持状态切换(ACTIVE/DISABLED);禁用后该用户登录 SHALL 被拒,
+且既有访问令牌 SHALL 在下一次权限点校验时被拒。系统 SHALL 提供专用启停端点
+(enable/disable),保护规则与编辑路径同构;禁用 SHALL 同时吊销该用户
 全部 refresh 家族(与改密踢下线对称,任一禁用路径生效)。
 
 #### Scenario: 禁用用户后令牌立即失效
@@ -234,8 +234,8 @@ data_scope 枚举见 datascope 域;sql_scope 枚举: SELECT_ONLY / READ_DDL / DM
 
 ### Requirement: 部门管理 CRUD(权限点 system:user:manage)
 
-部门为用户管理与行级 data_scope 的支撑数据:树查询(父子层级)、创建
-(名称/父部门/租户/排序)、编辑、删除;删除有前置校验。
+部门为用户管理与行级 data_scope 的支撑数据:SHALL 提供树查询(父子层级)、创建
+(名称/父部门/租户/排序)、编辑、删除;删除 SHALL 有前置校验。
 
 #### Scenario: 部门树查询
 - GIVEN 部门层级 A→B→C
@@ -254,8 +254,8 @@ data_scope 枚举见 datascope 域;sql_scope 枚举: SELECT_ONLY / READ_DDL / DM
 
 ### Requirement: 内置数据保护(权限点不豁免)
 
-管理端点对内置数据有一致性保护:内置角色(SUPER_ADMIN/DEVELOPER)禁删;
-任何角色的 role_key 创建后不可改;超管账号禁删;用户禁删自己。
+管理端点对内置数据 SHALL 有一致性保护:内置角色(SUPER_ADMIN/DEVELOPER)SHALL 禁删;
+任何角色的 role_key 创建后 SHALL 不可改;超管账号 SHALL 禁删;用户 SHALL 禁删自己。
 保护规则按角色键与用户名判定(种子契约),与权限点校验独立。
 
 #### Scenario: 删除内置角色被拒
@@ -280,7 +280,7 @@ data_scope 枚举见 datascope 域;sql_scope 枚举: SELECT_ONLY / READ_DDL / DM
 
 ### Requirement: 角色删除前置校验(权限点 system:role:manage)
 
-删除角色前校验不存在未软删用户的绑定;存在则拒绝,防止悬空授权语义。
+删除角色前 SHALL 校验不存在未软删用户的绑定;存在 SHALL 拒绝,防止悬空授权语义。
 
 #### Scenario: 有用户绑定的角色不可删
 - GIVEN 角色 R 绑定了未软删用户 U
@@ -294,7 +294,7 @@ data_scope 枚举见 datascope 域;sql_scope 枚举: SELECT_ONLY / READ_DDL / DM
 
 ### Requirement: 租户只读清单(权限点 system:user:manage)
 
-创建/编辑用户时需选择租户;提供全部租户的只读清单(id/键/名称),
+创建/编辑用户时 MUST 选择租户;SHALL 提供全部租户的只读清单(id/键/名称),
 租户的新建与编辑属 multitenant 域,不在本能力面。
 
 #### Scenario: 查询租户清单

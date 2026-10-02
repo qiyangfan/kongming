@@ -11,7 +11,7 @@ data_scope 枚举: ALL / CUSTOM / DEPT / DEPT_AND_BELOW / SELF。
 
 ### Requirement: ALL 不改写
 
-data_scope=ALL(全部)时不改写 SQL,原样执行。
+data_scope=ALL(全部)时 SHALL NOT 改写 SQL,原样执行。
 
 #### Scenario: 全部权限 SQL 原样执行
 - GIVEN 当前用户角色 data_scope=ALL
@@ -20,7 +20,7 @@ data_scope=ALL(全部)时不改写 SQL,原样执行。
 
 ### Requirement: SELF 加创建者过滤
 
-data_scope=SELF(仅本人)时加 WHERE 创建者列过滤;业务表无该列时安全降级(不改写 + 审计告警)。
+data_scope=SELF(仅本人)时 SHALL 加 WHERE 创建者列过滤;业务表无该列时 SHALL 安全降级(不改写 + 审计告警)。
 
 #### Scenario: 仅本人加创建者过滤
 - GIVEN data_scope=SELF,当前用户 id=U
@@ -37,7 +37,7 @@ data_scope=SELF(仅本人)时加 WHERE 创建者列过滤;业务表无该列时�
 
 ### Requirement: DEPT 加部门过滤
 
-data_scope=DEPT(本部门)时加 WHERE 部门列过滤;表无部门列时安全降级(同 SELF 降级策略)。
+data_scope=DEPT(本部门)时 SHALL 加 WHERE 部门列过滤;表无部门列时 SHALL 安全降级(同 SELF 降级策略)。
 
 #### Scenario: 本部门加部门过滤
 - GIVEN data_scope=DEPT,用户部门 D
@@ -47,7 +47,7 @@ data_scope=DEPT(本部门)时加 WHERE 部门列过滤;表无部门列时安全�
 
 ### Requirement: DEPT_AND_BELOW 递归加 IN 过滤
 
-data_scope=DEPT_AND_BELOW(本部门及以下)递归查子部门(数据库递归 CTE),加 部门 IN (...) 过滤。
+data_scope=DEPT_AND_BELOW(本部门及以下)SHALL 递归查子部门(数据库递归 CTE),并加 部门 IN (...) 过滤。
 
 #### Scenario: 递归查子部门
 - GIVEN data_scope=DEPT_AND_BELOW,用户部门 D
@@ -81,7 +81,7 @@ data_scope=DEPT_AND_BELOW(本部门及以下)递归查子部门(数据库递归 
 
 ### Requirement: 改写后的 SQL 安全性(纵深防御)
 
-改写基于 SQL AST(非字符串拼接);改写后的 SQL 必须再过一次防火墙校验(防改写引入非法语句);复杂 SQL 在最外层查询注入 WHERE 谓词不破坏原逻辑(过滤列属于 FROM 主表,与原查询投影解耦)。
+改写 SHALL 基于 SQL AST(非字符串拼接);改写后的 SQL MUST 再过一次防火墙校验(防改写引入非法语句);复杂 SQL 在最外层查询注入 WHERE 谓词 SHALL NOT 破坏原逻辑(过滤列属于 FROM 主表,与原查询投影解耦)。
 
 #### Scenario: 改写后再过防火墙
 - GIVEN 改写了 SQL
@@ -101,7 +101,7 @@ data_scope=DEPT_AND_BELOW(本部门及以下)递归查子部门(数据库递归 
 
 ### Requirement: data_scope 仅作用于 NL2SQL 查询链路
 
-data_scope 仅作用于 NL2SQL 查询执行链路;管理接口不套此机制,其权限由权限点控制,两者正交。
+data_scope SHALL 仅作用于 NL2SQL 查询执行链路;管理接口 SHALL NOT 套此机制,其权限由权限点控制,两者正交。
 
 #### Scenario: 管理接口不走 data_scope
 - GIVEN 管理员调用用户管理列表
