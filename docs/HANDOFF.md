@@ -15,7 +15,14 @@
   三处认证入口(Login/ChangePassword/OAuthCallback)传 `as="h2"`。验证:web-check+vitest 86/86+
   vite build 产物抽验(压缩产物内默认 h3+配方逐字节在)+真 api 18000 浏览器三页 heading 大纲抽查
   (单条页面级 h2、无跳档);delta 已并入主规格 `web-nav` 且单域 strict 通过,归档走 `--skip-specs`。
-  跨仓对齐(jinguan 13 处/muniu 3 处)待 sync 脚本执行,登记见聚合层 HANDOFF(条件触发,非本仓阻塞)。
+  跨仓对齐已完成(2026-10-02 聚合层批次三:jinguan sync 逐字节+muniu 手工翻译)。
+- **三仓收敛源头改动(2026-10-02,聚合层批次三;owner 插话「三仓视觉/规范对齐」裁决)**:
+  ①`ui/input.tsx` 合入木牛登记的日期族 display:block 修复(type∈date/datetime-local/time/month/week
+  回退 block 防日历指示器被 flex 排布,余保持 flex);②`ui/badge.tsx` 收编 success/warning 软底
+  状态变体(木牛语义态入单源,15% 弱底);③`ui/alert-dialog.tsx` Content 合入木牛登记的移动端
+  贴底抽屉形态(窄屏 bottom sheet+安全区内边距,sm+ 居中,size 档与动画口径同 dialog)。
+  三处均经 sync 脚本流向 jinguan、muniu 手工翻译,预览复验 0 差异;门禁 vitest 86/86+build 绿,
+  登录页 375 浏览器实测 h2 大纲过。改动落工作区未提交(等 owner 指令)。
 - **spec strict 存量债已清零(change `2026-10-02-spec-strict-wording-debt`,同日归档)**:
   `openspec validate --specs --strict` 自 33/45 → **45/45**。12 域 49 处修正(44 关键词升格+4 新增 Scenario+1 结构规范化)全部是措辞/结构债、
   零行为变更:44 条 Requirement 正文注入 SHALL/MUST/SHALL NOT(ai-eval 5/audit 1/datascope 6/

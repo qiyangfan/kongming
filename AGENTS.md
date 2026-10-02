@@ -103,7 +103,8 @@ web 前端统一遵循聚合目录 `../FRONTEND-CONSTITUTION.md`(Article 0–10)
   折叠点恢复桌面;壳层窄屏 = BottomNav + 管理层进(/admin 索引页)+ 会话抽屉
   (入口在对话区页头),不复刻侧栏;结构化列表一律 `DataView` 双形态标准件
   (md+ 表格 / md- 卡片,行操作窄屏收溢出菜单),新建/编辑对话框窄屏全屏承载
-  (ui/dialog 基类单点收编,AlertDialog 维持居中小卡);问答结果表等动态列
+  (ui/dialog 基类单点收编;AlertDialog 窄屏贴底抽屉、sm+ 居中——2026-10-02 三仓对齐
+  木牛登记形态);问答结果表等动态列
   豁免卡片化,保留卡片内横滚;贴边区消费安全区工具类(pb-safe 等),验收档 =
   375(主)/768/1280 三档 + 亮暗两态(Article 9)。
   备注(设计 D7):聚合目录 `../FRONTEND-CONSTITUTION.md` 与
