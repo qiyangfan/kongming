@@ -320,7 +320,12 @@ class _MemoryAdapter:
         return True
 
     async def form_implicit(
-        self, *, user_id: str, tenant_id: str, candidates: list[dict[str, object]]
+        self,
+        *,
+        user_id: str,
+        tenant_id: str,
+        candidates: list[dict[str, object]],
+        pref_revision: int | None = None,
     ) -> int:
         from kongming.memory.repository import SqlMemoryRepo
         from kongming.memory.service import MemoryService
@@ -335,8 +340,26 @@ class _MemoryAdapter:
                 _TeamRolesAdapter(),
             )
             return await svc.form_implicit(
-                user_id=user_id, tenant_id=tenant_id, candidates=candidates
+                user_id=user_id,
+                tenant_id=tenant_id,
+                candidates=candidates,
+                base_revision=pref_revision,
             )
+
+    async def current_revision(self, *, user_id: str, tenant_id: str) -> int | None:
+        from kongming.memory.repository import SqlMemoryRepo
+        from kongming.memory.service import MemoryService
+        from kongming.rag.agent_callback import get_agent_rag_client
+        from kongming.redis_client import get_redis
+
+        async with get_sessionmaker()() as s:
+            svc = MemoryService(
+                SqlMemoryRepo(s),
+                get_agent_rag_client(get_redis()),
+                SqlOperLogRepo(s),
+                _TeamRolesAdapter(),
+            )
+            return await svc.current_revision(user_id=user_id, tenant_id=tenant_id)
 
 
 class _AttachmentChecker:
@@ -693,8 +716,9 @@ async def chat_query(
     if outcome.success and req.persist and outcome.session_id is not None:
         background.add_task(rewrite_session_title, outcome.session_id, svc.agent_for_tasks)
         # 022 隐式记忆(首 SUCCESS 轮同款触发点;best-effort;
-        # R1-M2:显式短路轮排除——防同内容再落一条 IMPLICIT)
-        if outcome.tenant_id and not outcome.memory_shortcut:
+        # R1-M2:显式短路轮排除——防同内容再落一条 IMPLICIT);
+        # 087:携带准备期人工版本快照,捕获失败(None)不挂任务
+        if outcome.tenant_id and not outcome.memory_shortcut and outcome.pref_revision is not None:
             background.add_task(
                 extract_memory_task,
                 user_id=str(user["sub"]),
@@ -702,6 +726,7 @@ async def chat_query(
                 question=req.question,
                 answer=outcome.summary,
                 agent=svc.agent_for_tasks,
+                pref_revision=outcome.pref_revision,
             )
     # 062:达配额预警线回落 X-Quota-Warning(不拒绝;与 034 网关切面同口径)
     warn = quota_warn_var.get()

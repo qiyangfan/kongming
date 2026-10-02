@@ -1321,11 +1321,15 @@ export interface paths {
         get: operations["get_memory_prefs_memory_prefs_get"];
         /**
          * Put Memory Prefs
-         * @description 059:覆盖更新闭合槽位;未知键拒绝(闭合 schema)。
+         * @description 087:省略字段保留、显式 null 删除槽位、空补丁真无操作;未知键拒绝。
          */
         put: operations["put_memory_prefs_memory_prefs_put"];
         post?: never;
-        delete?: never;
+        /**
+         * Delete Memory Prefs
+         * @description 087:清空本人本租户全部偏好(保留空行;笔记/团队记忆不受影响)。
+         */
+        delete: operations["delete_memory_prefs_memory_prefs_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -8732,6 +8736,37 @@ export interface operations {
                 "application/json": components["schemas"]["PrefsIn"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrefsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_memory_prefs_memory_prefs_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

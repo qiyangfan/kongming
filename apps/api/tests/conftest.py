@@ -90,6 +90,7 @@ TRUNCATED = (
     "public.sys_guardrail_rule",
     "public.sys_llm_usage",
     "public.user_memory",
+    "public.user_prefs",
     "rag.table_relations",
     "rag.metric_definitions",
     "rag.document_chunks",

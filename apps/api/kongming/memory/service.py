@@ -107,7 +107,8 @@ class MemoryService:
             slot_hit = prefs_mod.parse_explicit_slot(content)
             if slot_hit is not None:
                 key, val = slot_hit
-                ok = await self.apply_implicit_patch(
+                # 087:显式聊天写槽位=人工语义(递增人工版本),与隐式补齐分离
+                ok = await self._apply_manual_patch(
                     user_id=user_id, tenant_id=tenant_id, raw={key: val}
                 )
                 if ok:
@@ -130,12 +131,18 @@ class MemoryService:
         await self._repo.commit()  # R1-H1:operlog 同事务落库(add 后必 commit)
 
     async def form_implicit(
-        self, *, user_id: str, tenant_id: str, candidates: list[dict[str, object]]
+        self,
+        *,
+        user_id: str,
+        tenant_id: str,
+        candidates: list[dict[str, object]],
+        base_revision: int | None = None,  # 087:问答准备期捕获的人工版本快照
     ) -> int:
         """059:隐式只写槽位 patch,不再落自由文本 user_memory。
 
         停止 IMPLICIT 自由文本(脏记忆比无记忆更伤);候选按槽位 patch
         合并进 user_prefs;空 patch 不落库。返回写入槽位数。
+        087:base_revision=None(准备期读取失败)→ 整轮放弃(不当作 0)。
         """
         raw: dict[str, object] = {}
         for c in candidates[:3]:
@@ -163,7 +170,9 @@ class MemoryService:
                             if isinstance(v, str) and contains_sensitive(v):
                                 continue
                             raw[k] = v
-        ok = await self.apply_implicit_patch(user_id=user_id, tenant_id=tenant_id, raw=raw)
+        ok = await self.apply_implicit_patch(
+            user_id=user_id, tenant_id=tenant_id, raw=raw, base_revision=base_revision
+        )
         return 1 if ok else 0
 
     # ── 自管理(数据主权=本人本租户) ──
@@ -213,32 +222,81 @@ class MemoryService:
     async def put_prefs(
         self, *, user_id: str, tenant_id: str, raw: dict[str, object]
     ) -> dict[str, object]:
+        """人工 PUT(087 D1):显式 null 删除槽位;省略保留;归一化后既无
+        非空设置也无删除指令=真正无操作(不建行/不增版本/不取消在途提取/
+        不伪造审计),返回当前配置。"""
         err = prefs_mod.reject_unknown_keys(raw)
         if err:
             raise ValueError(err)
-        patch = prefs_mod.normalize_patch(raw)
-        current = await self._repo.get_prefs(user_id=user_id, tenant_id=tenant_id)
-        merged = prefs_mod.merge_prefs(current, patch.values)
-        await self._repo.upsert_prefs(user_id=user_id, tenant_id=tenant_id, prefs=merged)
+        patch = prefs_mod.normalize_put_patch(raw)
+        if patch.is_empty():
+            return await self._repo.get_prefs(user_id=user_id, tenant_id=tenant_id)
+        merged, _rev = await self._repo.merge_prefs_manual(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            values=patch.values,
+            deletes=sorted(patch.deletes),
+        )
         await self._oper.add(
             user_id=user_id,
             action="memory.prefs.update",
             target=None,
-            detail={"keys": sorted(patch.values.keys())},
+            detail={"keys": sorted(set(patch.values) | set(patch.deletes))},
         )
         await self._repo.commit()
         return merged
 
-    async def apply_implicit_patch(
+    async def clear_prefs(self, *, user_id: str, tenant_id: str) -> dict[str, object]:
+        """清空全部偏好(087):保留空行且递增版本(防旧任务复活);仅影响
+        偏好,笔记/团队记忆不受影响。"""
+        prefs, _rev = await self._repo.clear_prefs_manual(user_id=user_id, tenant_id=tenant_id)
+        await self._oper.add(user_id=user_id, action="memory.prefs.clear", target=None, detail={})
+        await self._repo.commit()
+        return prefs
+
+    async def _apply_manual_patch(
         self, *, user_id: str, tenant_id: str, raw: dict[str, object]
     ) -> bool:
-        """隐式抽取只写槽位 patch;空 patch 不落库。"""
+        """聊天显式写槽位(087):人工合并语义;空补丁不落库。"""
+        patch = prefs_mod.normalize_put_patch(raw)
+        if patch.is_empty():
+            return False
+        await self._repo.merge_prefs_manual(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            values=patch.values,
+            deletes=sorted(patch.deletes),
+        )
+        await self._oper.add(
+            user_id=user_id,
+            action="memory.prefs.update",
+            target=None,
+            detail={"keys": sorted(set(patch.values) | set(patch.deletes))},
+        )
+        await self._repo.commit()
+        return True
+
+    async def apply_implicit_patch(
+        self,
+        *,
+        user_id: str,
+        tenant_id: str,
+        raw: dict[str, object],
+        base_revision: int | None = None,
+    ) -> bool:
+        """隐式抽取只补缺失槽位(087 D2):人工版本与快照一致才落,只补
+        缺失、不覆盖不删除、不递增人工版本;空 patch 或版本读取失败
+        (None)不落库。"""
+        if base_revision is None:
+            return False
         patch = prefs_mod.extract_slot_patch_from_implicit(raw)
         if patch.is_empty():
             return False
-        current = await self._repo.get_prefs(user_id=user_id, tenant_id=tenant_id)
-        merged = prefs_mod.merge_prefs(current, patch.values)
-        await self._repo.upsert_prefs(user_id=user_id, tenant_id=tenant_id, prefs=merged)
+        applied = await self._repo.fill_prefs_if_revision(
+            user_id=user_id, tenant_id=tenant_id, values=patch.values, base_revision=base_revision
+        )
+        if not applied:
+            return False
         await self._oper.add(
             user_id=user_id,
             action="memory.prefs.implicit",
@@ -247,6 +305,16 @@ class MemoryService:
         )
         await self._repo.commit()
         return True
+
+    async def current_revision(self, *, user_id: str, tenant_id: str) -> int | None:
+        """问答准备期捕获人工版本快照(087):读取失败返回 None——调用方
+        据此跳过本轮自动写入,不得把未知版本当作 0。"""
+        try:
+            _prefs, rev = await self._repo.read_prefs_revision(user_id=user_id, tenant_id=tenant_id)
+            return rev
+        except Exception:
+            log.warning("偏好人工版本读取失败(本轮自动写入将跳过)", exc_info=True)
+            return None
 
     async def preference_hint(self, *, user_id: str, tenant_id: str) -> str:
         """059:偏好注入段(可忽略/不约束数据范围);失败降级空串。"""

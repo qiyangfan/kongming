@@ -4981,7 +4981,7 @@
           "memory"
         ],
         "summary": "Put Memory Prefs",
-        "description": "059:覆盖更新闭合槽位;未知键拒绝(闭合 schema)。",
+        "description": "087:省略字段保留、显式 null 删除槽位、空补丁真无操作;未知键拒绝。",
         "operationId": "put_memory_prefs_memory_prefs_put",
         "parameters": [
           {
@@ -5011,6 +5011,54 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrefsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Delete Memory Prefs",
+        "description": "087:清空本人本租户全部偏好(保留空行;笔记/团队记忆不受影响)。",
+        "operationId": "delete_memory_prefs_memory_prefs_delete",
+        "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",

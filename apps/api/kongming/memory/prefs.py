@@ -43,12 +43,44 @@ _EXPLICIT_SLOT_HINTS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 @dataclass
 class PrefsPatch:
-    """槽位补丁:只含合法槽位键;未知键在 normalize 阶段丢弃。"""
+    """槽位补丁:只含合法槽位键;未知键在 normalize 阶段丢弃。
+
+    087:deletes=显式 null 删除指令(仅人工 PUT/显式聊天产生;隐式提取
+    永不删除,values 与 deletes 均空才是空补丁)。
+    """
 
     values: dict[str, object] = field(default_factory=dict[str, object])
+    deletes: frozenset[str] = frozenset()
 
     def is_empty(self) -> bool:
-        return not self.values
+        return not self.values and not self.deletes
+
+
+def _normalize_slot_value(key: str, val: object) -> object | None:
+    """单槽位值归一化:None=丢弃(空串/空列表/布尔均不落);列表封顶 20 项。"""
+    if key in _LIST_SLOTS:
+        items_in: list[object] = []
+        if isinstance(val, str):
+            s = val.strip()
+            if s.startswith("["):
+                try:
+                    parsed = json.loads(s)
+                except (TypeError, ValueError):
+                    parsed = None
+                if isinstance(parsed, list):
+                    items_in = list(cast("list[object]", parsed))
+            elif s:
+                items_in = [x for x in re.split(r"[,，、|]", s) if x.strip()]
+        elif isinstance(val, Sequence) and not isinstance(val, (str, bytes)):
+            items_in = list(cast("Sequence[object]", val))
+        items = [str(x).strip() for x in items_in if str(x).strip()]
+        return items[:20] if items else None
+    if isinstance(val, bool):
+        return None
+    if isinstance(val, (int, float)):
+        return str(val)
+    s = str(val).strip()
+    return s[:200] if s else None
 
 
 def normalize_patch(raw: Mapping[str, object]) -> PrefsPatch:
@@ -60,43 +92,30 @@ def normalize_patch(raw: Mapping[str, object]) -> PrefsPatch:
         val = raw[key]
         if val is None:
             continue
-        if key in _LIST_SLOTS:
-            items_in: list[object] = []
-            if isinstance(val, str):
-                s = val.strip()
-                if s.startswith("["):
-                    try:
-                        parsed = json.loads(s)
-                    except (TypeError, ValueError):
-                        parsed = None
-                    if isinstance(parsed, list):
-                        items_in = list(cast("list[object]", parsed))
-                elif s:
-                    items_in = [x for x in re.split(r"[,，、|]", s) if x.strip()]
-            elif isinstance(val, Sequence) and not isinstance(val, (str, bytes)):
-                items_in = list(cast("Sequence[object]", val))
-            items = [str(x).strip() for x in items_in if str(x).strip()]
-            if items:
-                out[key] = items[:20]
-            continue
-        if isinstance(val, bool):
-            continue
-        if isinstance(val, (int, float)) and not isinstance(val, bool):
-            out[key] = str(val)
-            continue
-        s = str(val).strip()
-        if s:
-            out[key] = s[:200]
+        normalized = _normalize_slot_value(key, val)
+        if normalized is not None:
+            out[key] = normalized
     return PrefsPatch(values=out)
 
 
-def merge_prefs(current: Mapping[str, object], patch: Mapping[str, object]) -> dict[str, object]:
-    """覆盖更新语义:patch 键覆盖 current;未提及键保留。"""
-    merged = dict(current)
-    for k, v in patch.items():
-        if k in SLOT_KEYS:
-            merged[k] = v
-    return merged
+def normalize_put_patch(raw: Mapping[str, object]) -> PrefsPatch:
+    """人工 PUT 归一化(087 D1):显式 null=删除指令;空串/空列表=丢弃
+    (维持既有空补丁归一化,不表示清空);未知键由调用方先拒绝。
+
+    合并语义(覆盖/删除/保留)由仓储单语句 UPSERT 在库内原子完成。"""
+    out: dict[str, object] = {}
+    deletes: set[str] = set()
+    for key in SLOT_KEYS:
+        if key not in raw:
+            continue
+        val = raw[key]
+        if val is None:
+            deletes.add(key)
+            continue
+        normalized = _normalize_slot_value(key, val)
+        if normalized is not None:
+            out[key] = normalized
+    return PrefsPatch(values=out, deletes=frozenset(deletes))
 
 
 def reject_unknown_keys(raw: Mapping[str, object]) -> str | None:

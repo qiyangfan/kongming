@@ -69,6 +69,23 @@ class MemoryRepo(Protocol):
 
     async def get_prefs(self, *, user_id: str, tenant_id: str) -> dict[str, object]: ...
 
-    async def upsert_prefs(
-        self, *, user_id: str, tenant_id: str, prefs: dict[str, object]
-    ) -> dict[str, object]: ...
+    async def read_prefs_revision(
+        self, *, user_id: str, tenant_id: str
+    ) -> tuple[dict[str, object], int]: ...
+
+    async def merge_prefs_manual(
+        self,
+        *,
+        user_id: str,
+        tenant_id: str,
+        values: dict[str, object],
+        deletes: list[str],
+    ) -> tuple[dict[str, object], int]: ...
+
+    async def clear_prefs_manual(
+        self, *, user_id: str, tenant_id: str
+    ) -> tuple[dict[str, object], int]: ...
+
+    async def fill_prefs_if_revision(
+        self, *, user_id: str, tenant_id: str, values: dict[str, object], base_revision: int
+    ) -> bool: ...

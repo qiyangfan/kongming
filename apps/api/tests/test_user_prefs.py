@@ -22,15 +22,42 @@ class TestNormalizePatch:
     def test_empty_patch_not_written(self) -> None:
         assert p.normalize_patch({"evil": 1, "preferred_datasource": ""}).is_empty()
 
-    def test_merge_overwrite_semantics(self) -> None:
-        cur = {"preferred_datasource": "a", "display_style": "全表"}
-        merged = p.merge_prefs(cur, {"preferred_datasource": "b"})
-        assert merged["preferred_datasource"] == "b"
-        assert merged["display_style"] == "全表"
-
     def test_reject_unknown_keys(self) -> None:
         assert p.reject_unknown_keys({"preferred_datasource": "x"}) is None
         assert "未知" in str(p.reject_unknown_keys({"foo": 1}))
+
+
+class TestPutPatchNormalization:
+    """087 D1:人工 PUT 归一化(显式 null=删除;空串/空列表≠删除)。"""
+
+    def test_explicit_null_is_delete(self) -> None:
+        patch = p.normalize_put_patch({"language": None, "timezone": "UTC"})
+        assert patch.deletes == frozenset({"language"})
+        assert patch.values == {"timezone": "UTC"}
+        assert not patch.is_empty()
+
+    def test_empty_string_and_list_not_delete(self) -> None:
+        patch = p.normalize_put_patch({"language": "", "metric_aliases": []})
+        assert patch.deletes == frozenset()
+        assert patch.values == {}
+        assert patch.is_empty()
+
+    def test_omitted_keys_absent(self) -> None:
+        patch = p.normalize_put_patch({"language": "zh"})
+        assert "timezone" not in patch.values
+        assert "timezone" not in patch.deletes
+
+    def test_null_on_any_slot_is_valid_instruction(self) -> None:
+        patch = p.normalize_put_patch({k: None for k in p.SLOT_KEYS})
+        assert patch.deletes == frozenset(p.SLOT_KEYS)
+        assert patch.values == {}
+        assert not patch.is_empty()
+
+    def test_implicit_patch_never_deletes(self) -> None:
+        # 隐式提取通道:None 值直接丢弃,不产生删除指令
+        patch = p.extract_slot_patch_from_implicit({"language": None, "chart_pref": "bar"})
+        assert patch.deletes == frozenset()
+        assert patch.values == {"chart_pref": "bar"}
 
 
 class TestImplicitExtraction:

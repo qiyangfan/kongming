@@ -208,22 +208,20 @@ class SqlMemoryRepo:
         ).scalar_one_or_none()
         return hit is not None
 
-    # ── 059 user_prefs 闭合偏好槽位 ──
+    # ── 059 user_prefs 闭合偏好槽位;087 增内部人工版本 manual_revision ──
 
     async def get_prefs(self, *, user_id: str, tenant_id: str) -> dict[str, object]:
-        row = (
-            await self._s.execute(
-                text("SELECT prefs FROM public.user_prefs WHERE user_id=:u AND tenant_id=:t"),
-                {"u": user_id, "t": tenant_id},
-            )
-        ).scalar_one_or_none()
-        if isinstance(row, dict):
-            return {str(k): v for k, v in cast("dict[str, object]", row).items()}
-        # asyncpg 对 json/jsonb 常返回 str(与 system.parse_json_agg 同口径);
-        # 直接丢弃会导致偏好永远读成空,必须归一化
-        if isinstance(row, (str, bytes)):
+        prefs, _rev = await self.read_prefs_revision(user_id=user_id, tenant_id=tenant_id)
+        return prefs
+
+    @staticmethod
+    def _parse_prefs_column(value: object) -> dict[str, object]:
+        """json/jsonb 列归一化(asyncpg 常回 str,与 system.parse_json_agg 同口径)。"""
+        if isinstance(value, dict):
+            return {str(k): v for k, v in cast("dict[str, object]", value).items()}
+        if isinstance(value, (str, bytes)):
             try:
-                obj = json.loads(row)
+                obj = json.loads(value)
             except (TypeError, ValueError):
                 return {}
             if isinstance(obj, dict):
@@ -231,24 +229,109 @@ class SqlMemoryRepo:
             return {}
         return {}
 
-    async def upsert_prefs(
-        self, *, user_id: str, tenant_id: str, prefs: dict[str, object]
-    ) -> dict[str, object]:
-        await self._s.execute(
-            text(
-                """
-                INSERT INTO public.user_prefs
-                  (id, user_id, tenant_id, prefs, updated_at, created_at)
-                VALUES (:i, :u, :t, CAST(:p AS jsonb), now(), now())
-                ON CONFLICT (user_id, tenant_id)
-                DO UPDATE SET prefs = CAST(:p AS jsonb), updated_at = now()
-                """
-            ),
-            {
-                "i": str(uuid7()),
-                "u": user_id,
-                "t": tenant_id,
-                "p": json.dumps(prefs, ensure_ascii=False),
-            },
-        )
-        return prefs
+    async def read_prefs_revision(
+        self, *, user_id: str, tenant_id: str
+    ) -> tuple[dict[str, object], int]:
+        """读取 (prefs, manual_revision);行不存在=已知版本 0(非未知态)。"""
+        row = (
+            await self._s.execute(
+                text(
+                    "SELECT prefs, manual_revision FROM public.user_prefs"
+                    " WHERE user_id=:u AND tenant_id=:t"
+                ),
+                {"u": user_id, "t": tenant_id},
+            )
+        ).one_or_none()
+        if row is None:
+            return {}, 0
+        return self._parse_prefs_column(row[0]), int(row[1])
+
+    async def merge_prefs_manual(
+        self, *, user_id: str, tenant_id: str, values: dict[str, object], deletes: list[str]
+    ) -> tuple[dict[str, object], int]:
+        """人工短事务合并(087 D2):单语句 UPSERT 行锁内基于最新 prefs 合并并
+        递增 manual_revision;调用方保证 values/deletes 已归一化且非全空。"""
+        row = (
+            await self._s.execute(
+                text(
+                    """
+                    INSERT INTO public.user_prefs
+                      (id, user_id, tenant_id, prefs, manual_revision, updated_at, created_at)
+                    VALUES (:i, :u, :t,
+                            (CAST(:p AS jsonb) - CAST(:dels AS text[])), 1, now(), now())
+                    ON CONFLICT (user_id, tenant_id) DO UPDATE SET
+                      prefs = ((public.user_prefs.prefs::jsonb || CAST(:p AS jsonb))
+                               - CAST(:dels AS text[])),
+                      manual_revision = public.user_prefs.manual_revision + 1,
+                      updated_at = now()
+                    RETURNING prefs, manual_revision
+                    """
+                ),
+                {
+                    "i": str(uuid7()),
+                    "u": user_id,
+                    "t": tenant_id,
+                    "p": json.dumps(values, ensure_ascii=False),
+                    "dels": deletes,
+                },
+            )
+        ).one()
+        return self._parse_prefs_column(row[0]), int(row[1])
+
+    async def clear_prefs_manual(
+        self, *, user_id: str, tenant_id: str
+    ) -> tuple[dict[str, object], int]:
+        """清空(087):保留空行且已空仍递增版本——旧任务不得因重建行回到
+        版本 0 而复活偏好。"""
+        row = (
+            await self._s.execute(
+                text(
+                    """
+                    INSERT INTO public.user_prefs
+                      (id, user_id, tenant_id, prefs, manual_revision, updated_at, created_at)
+                    VALUES (:i, :u, :t, '{}'::jsonb, 1, now(), now())
+                    ON CONFLICT (user_id, tenant_id) DO UPDATE SET
+                      prefs = '{}'::jsonb,
+                      manual_revision = public.user_prefs.manual_revision + 1,
+                      updated_at = now()
+                    RETURNING prefs, manual_revision
+                    """
+                ),
+                {"i": str(uuid7()), "u": user_id, "t": tenant_id},
+            )
+        ).one()
+        return self._parse_prefs_column(row[0]), int(row[1])
+
+    async def fill_prefs_if_revision(
+        self, *, user_id: str, tenant_id: str, values: dict[str, object], base_revision: int
+    ) -> bool:
+        """自动补齐(087 D2):人工版本与快照一致才落;只补缺失槽位(已有值
+        不覆盖、永不删除);不一致放弃(无返回行)。自动写入不递增版本。"""
+        row = (
+            await self._s.execute(
+                text(
+                    """
+                    INSERT INTO public.user_prefs
+                      (id, user_id, tenant_id, prefs, manual_revision, updated_at, created_at)
+                    VALUES (:i, :u, :t, CAST(:p AS jsonb), 0, now(), now())
+                    ON CONFLICT (user_id, tenant_id) DO UPDATE SET
+                      prefs = (public.user_prefs.prefs::jsonb || COALESCE((
+                          SELECT jsonb_object_agg(k, v)
+                          FROM jsonb_each(CAST(:p AS jsonb)) AS e(k, v)
+                          WHERE NOT (public.user_prefs.prefs::jsonb ? k)
+                        ), '{}'::jsonb)),
+                      updated_at = now()
+                    WHERE public.user_prefs.manual_revision = :rev
+                    RETURNING manual_revision
+                    """
+                ),
+                {
+                    "i": str(uuid7()),
+                    "u": user_id,
+                    "t": tenant_id,
+                    "p": json.dumps(values, ensure_ascii=False),
+                    "rev": base_revision,
+                },
+            )
+        ).one_or_none()
+        return row is not None

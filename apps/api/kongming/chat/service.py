@@ -139,6 +139,9 @@ class ChatOutcome:
     sources: list[dict[str, str]] = field(default_factory=list[dict[str, str]])
     # 022:本论为显式记忆短路(R1-M2:隐式提取任务据此排除,防同内容重复落 IMPLICIT)
     memory_shortcut: bool = False
+    # 087:问答准备期捕获的偏好人工版本快照(内部携带给隐式提取后台任务,
+    # 与 tenant_id/memory_shortcut 同为不序列化字段;None=捕获失败,任务跳过)
+    pref_revision: int | None = None
     # 041:呈现层列标签(与 columns 等长对齐;未命中回退原始列名;
     # 空列表=未接线/查询失败,消费方回退 columns)
     column_labels: list[str] = field(default_factory=list[str])
@@ -421,10 +424,14 @@ class ChatService:
         )
         return dataclasses.replace(outcome, memory_shortcut=True)
 
-    async def _recall_memory_hint(self, *, user_id: str, tenant_id: str, question: str) -> str:
-        """记忆召回(022)+ 偏好注入(059):失败/未接线/空 → 不注入(零回归)。"""
+    async def _recall_memory_hint(
+        self, *, user_id: str, tenant_id: str, question: str
+    ) -> tuple[str, int | None]:
+        """记忆召回(022)+ 偏好注入(059)+ 人工版本快照捕获(087):
+        失败/未接线/空 → 不注入(零回归);版本捕获失败 → None(本轮自动
+        写入将整体跳过,不当作 0)。任何 LLM 调用之前完成。"""
         if self._memory is None:
-            return ""
+            return "", None
         parts: list[str] = []
         try:
             mem = await self._memory.recall_hint(
@@ -440,7 +447,12 @@ class ChatService:
                 parts.append(pref)
         except Exception:  # noqa: BLE001  # 偏好注入永不阻断问答主链路
             log.warning("偏好注入异常(降级无注入)", exc_info=True)
-        return "\n\n".join(parts)
+        revision: int | None = None
+        try:
+            revision = await self._memory.current_revision(user_id=user_id, tenant_id=tenant_id)
+        except Exception:  # noqa: BLE001  # 版本捕获失败只放弃自动写入
+            log.warning("偏好人工版本捕获异常(本轮自动写入跳过)", exc_info=True)
+        return "\n\n".join(parts), revision
 
     async def _guard_input(
         self,
@@ -530,7 +542,7 @@ class ChatService:
             return await self._guard_blocked_outcome(
                 p, question=question, persist=persist, datasource_key=datasource_key
             )
-        memory_hint = await self._recall_memory_hint(
+        memory_hint, pref_revision = await self._recall_memory_hint(
             user_id=user_id, tenant_id=p.tenant_id, question=question
         )
         try:
@@ -553,7 +565,7 @@ class ChatService:
                 datasource_key=datasource_key,
                 attachments=p.attachments,
             )
-        return await self._finalize_reply(
+        outcome = await self._finalize_reply(
             reply=reply,
             sid=p.sid,
             tenant_id=p.tenant_id,
@@ -566,6 +578,8 @@ class ChatService:
             attachments=p.attachments,
             user_id=user_id,
         )
+        # 087:同步路径经 outcome 携带版本快照给 router 的后台任务
+        return dataclasses.replace(outcome, pref_revision=pref_revision)
 
     # ============ 流式编排(017 query-streaming) ============
 
@@ -627,7 +641,7 @@ class ChatService:
             _BACKGROUND_STREAM_TASKS.add(task)
             task.add_done_callback(_BACKGROUND_STREAM_TASKS.discard)
             return StreamHandle(queue=queue, task=task)
-        memory_hint = await self._recall_memory_hint(
+        memory_hint, pref_revision = await self._recall_memory_hint(
             user_id=user_id, tenant_id=p.tenant_id, question=question
         )
         task = asyncio.create_task(
@@ -643,6 +657,7 @@ class ChatService:
                 attachment_ids=[str(a["id"]) for a in p.attachments or []],
                 eff_history=eff_history,
                 memory_hint=memory_hint,
+                pref_revision=pref_revision,  # 087:后台任务携带版本快照
             )
         )
         _BACKGROUND_STREAM_TASKS.add(task)
@@ -662,6 +677,7 @@ class ChatService:
         react_tools: list[dict[str, object]] | None = None,  # 019
         eff_history: list[str] | None = None,  # 020:护栏脱敏后历史(缺省=prepare 原值)
         memory_hint: str = "",  # 022:记忆注入段
+        pref_revision: int | None = None,  # 087:准备期人工版本快照(透传终态任务)
         attachment_ids: list[str] | None = None,  # 030
     ) -> None:
         """后台消费 agent 流至终态(design §4):过程帧透传;result 帧先落库
@@ -694,6 +710,7 @@ class ChatService:
                         question=orig_question or question,  # 原始问句(回写口径)
                         persist=persist,
                         datasource_key=datasource_key,
+                        pref_revision=pref_revision,
                     )
                 elif event == "error":
                     # agent 意外异常帧:等价传输层失败,由 api 统一收敛(不透传)
@@ -757,6 +774,7 @@ class ChatService:
         question: str,
         persist: bool,
         datasource_key: str,
+        pref_revision: int | None = None,  # 087:准备期人工版本快照
     ) -> ChatOutcome:
         """流式终态落库(独立 StreamStore 会话;断线后照常执行)+标题任务触发。"""
         title_trigger: Callable[[str], Coroutine[Any, Any, None]] | None = None
@@ -802,10 +820,12 @@ class ChatService:
             _BACKGROUND_STREAM_TASKS.add(t)
             t.add_done_callback(_BACKGROUND_STREAM_TASKS.discard)
             # 022 隐式记忆(R1-M3:流式同挂;R1-M2:显式短路轮排除;
-            # 任务经注入传入——service 不可 import memory_tasks(db 链条违契约))
+            # 任务经注入传入——service 不可 import memory_tasks(db 链条违契约));
+            # 087:携带准备期版本快照,捕获失败(None)不挂任务
             if (
                 outcome.tenant_id
                 and not outcome.memory_shortcut
+                and pref_revision is not None
                 and self._implicit_memory_task is not None
             ):
                 t2 = asyncio.create_task(
@@ -815,6 +835,7 @@ class ChatService:
                         question=question,
                         answer=outcome.summary,
                         agent=self._agent,
+                        pref_revision=pref_revision,
                     )
                 )
                 _BACKGROUND_STREAM_TASKS.add(t2)

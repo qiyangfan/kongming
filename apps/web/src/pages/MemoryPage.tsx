@@ -1,9 +1,10 @@
 /* 我的记忆页(022,agent-memory spec「记忆自管理」):本人当前租户记忆的
-   列表/编辑(唤醒)/删除/导出;隐式记忆(IMPLicIT)可确认(编辑即视为认可)。 */
+   列表/编辑(唤醒)/删除/导出;隐式记忆(IMPLicIT)可确认(编辑即视为认可)。
+   087:增偏好区(查看/编辑/单项清除/全部清空),与笔记列表同页分区。 */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Brain, Download, Loader2 } from "lucide-react";
+import { Brain, Download, Loader2, Plus, SlidersHorizontal, X } from "lucide-react";
 
 import {
   AlertDialog,
@@ -41,6 +42,16 @@ import { DataView } from "@/components/data-view";
 import { ErrorAlert } from "@/components/error-alert";
 import { api } from "@/lib/api";
 import { listMyTeams } from "@/lib/team-api";
+import { useTenant } from "@/lib/tenant-store";
+import {
+  PREF_SLOTS,
+  buildPrefsPatch,
+  draftFromPrefs,
+  isEmptyPatch,
+  singleSlotDelete,
+  type PrefsDraft,
+  type PrefsMap,
+} from "@/lib/prefs-form";
 import type { components } from "@/lib/api-types.gen";
 
 // 036⑥:消费生成类型(ADR-005,禁手写;team_id 回传已在生成类型)
@@ -151,6 +162,9 @@ export default function MemoryPage() {
 
       {/* 032:团队记忆写入(个人记忆走对话「请记住」同路径) */}
       <TeamMemoryWrite />
+
+      {/* 087:偏好自管理(本人当前租户;查看/编辑/单项清除/全部清空) */}
+      <PrefsSection />
 
       {list.isError && <ErrorAlert />}
       {/* 外框仅在宽屏保留(md- 卡片形态裸露,与 DataView 样板口径一致) */}
@@ -381,5 +395,251 @@ function TeamMemoryWrite() {
         </p>
       )}
     </form>
+  );
+}
+
+/* 087:偏好自管理区(本人当前租户)。查询与表单按租户分区(query key 含
+   tenant,切租户即新语境);成功操作以服务端响应替换本页偏好(setQueryData
+   在 mutationFn 内执行——闭包在触发时固化租户,在途请求晚归时切了租户
+   也不会把旧语境响应写进新语境缓存),并重播表单草稿。 */
+function PrefsSection() {
+  const qc = useQueryClient();
+  const { current: tenantKey } = useTenant();
+  const queryKey = ["memory", "prefs", tenantKey];
+  const [draft, setDraft] = useState<PrefsDraft>({});
+  const [error, setError] = useState<string | null>(null);
+  const [clearingAll, setClearingAll] = useState(false);
+
+  const prefs = useQuery({
+    queryKey,
+    queryFn: () => api.get<{ prefs: PrefsMap }>("/memory/prefs"),
+  });
+  const server: PrefsMap = prefs.data?.prefs ?? {};
+
+  // 草稿与数据同源重播:切租户/读取成功/写操作响应替换后都回到服务端确认值
+  useEffect(() => {
+    setDraft(draftFromPrefs(prefs.data?.prefs ?? {}));
+  }, [prefs.data]);
+
+  const save = useMutation({
+    // setQueryData 放 mutationFn 内:租户在触发时被闭包固化(见组件头注释)
+    mutationFn: (patch: PrefsMap) =>
+      api.put<{ prefs: PrefsMap }>("/memory/prefs", patch).then((resp) => {
+        qc.setQueryData(["memory", "prefs", tenantKey], resp);
+        return resp;
+      }),
+    onSuccess: () => setError(null),
+    onError: (e) => setError(e instanceof Error ? e.message : "保存失败"),
+  });
+
+  const clearSlot = useMutation({
+    mutationFn: (key: string) =>
+      api.put<{ prefs: PrefsMap }>("/memory/prefs", singleSlotDelete(key)).then((resp) => {
+        qc.setQueryData(["memory", "prefs", tenantKey], resp);
+        return resp;
+      }),
+    onSuccess: () => setError(null),
+    onError: (e) => setError(e instanceof Error ? e.message : "清除失败"),
+  });
+
+  const clearAll = useMutation({
+    mutationFn: () =>
+      api.delete<{ prefs: PrefsMap }>("/memory/prefs").then((resp) => {
+        qc.setQueryData(["memory", "prefs", tenantKey], resp);
+        return resp;
+      }),
+    onSuccess: () => {
+      setClearingAll(false);
+      setError(null);
+    },
+    // 失败保持对话框打开:用户可重试或取消;错误文案同时在对话框内可见
+    onError: (e) => setError(e instanceof Error ? e.message : "清空失败"),
+  });
+
+  function setSlot(key: string, value: string) {
+    setDraft((d) => ({ ...d, [key]: value }));
+  }
+
+  function setAlias(i: number, value: string) {
+    setDraft((d) => {
+      const list = [...(d.metric_aliases as string[])];
+      list[i] = value;
+      return { ...d, metric_aliases: list };
+    });
+  }
+
+  function removeAlias(i: number) {
+    setDraft((d) => ({
+      ...d,
+      metric_aliases: (d.metric_aliases as string[]).filter((_, j) => j !== i),
+    }));
+  }
+
+  function addAlias() {
+    setDraft((d) => ({ ...d, metric_aliases: [...(d.metric_aliases as string[]), ""] }));
+  }
+
+  const pending = save.isPending || clearSlot.isPending || clearAll.isPending;
+  const patch = buildPrefsPatch(server, draft);
+
+  return (
+    <section className="md:rounded-lg md:border md:border-border md:p-4">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div>
+          <h3 className="flex items-center gap-2 text-sm font-semibold">
+            <SlidersHorizontal className="size-4 text-primary" aria-hidden />
+            偏好设置
+          </h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            影响孔明回答的默认值与表达习惯(可忽略,不约束数据范围);留空保存即删除该偏好。
+          </p>
+        </div>
+        {/* 已存偏好才可清空;正在读取时不给危险操作 */}
+        <Button
+          type="button"
+          variant="ghost-destructive"
+          size="sm"
+          disabled={pending || Object.keys(server).length === 0}
+          onClick={() => setClearingAll(true)}
+        >
+          全部清空
+        </Button>
+      </div>
+
+      {prefs.isError ? (
+        // 读取失败显式可见,不用空配置掩盖(087 D3)
+        <div className="space-y-1">
+          <ErrorAlert
+            text={`偏好加载失败:${(prefs.error as Error).message}。笔记与历史偏好不受影响;重试或稍后再来。`}
+          />
+          <Button
+            type="button"
+            variant="link"
+            size="xs"
+            className="px-0"
+            onClick={() => void prefs.refetch()}
+          >
+            重试
+          </Button>
+        </div>
+      ) : prefs.isPending ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+          <Loader2 className="animate-spin" aria-hidden />
+          正在读取偏好…
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {PREF_SLOTS.filter((s) => !s.list).map((slot) => (
+            <div key={slot.key} className="flex items-end gap-2">
+              <FormRow label={slot.label} htmlFor={`pref-${slot.key}`} className="flex-1">
+                <Input
+                  id={`pref-${slot.key}`}
+                  value={(draft[slot.key] as string) ?? ""}
+                  onChange={(e) => setSlot(slot.key, e.target.value)}
+                  disabled={pending}
+                  placeholder="未设置"
+                />
+              </FormRow>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={`清除${slot.label}`}
+                title={`清除${slot.label}`}
+                disabled={pending || !(slot.key in server)}
+                onClick={() => clearSlot.mutate(slot.key)}
+              >
+                <X className="size-4" aria-hidden />
+              </Button>
+            </div>
+          ))}
+
+          {/* metric_aliases 可编辑列表 */}
+          <FormRow label="指标别名" htmlFor="pref-alias-0">
+            <div className="space-y-2">
+              {(draft.metric_aliases as string[]).map((alias, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <Input
+                    id={i === 0 ? "pref-alias-0" : `pref-alias-${i}`}
+                    value={alias}
+                    onChange={(e) => setAlias(i, e.target.value)}
+                    disabled={pending}
+                    placeholder="如 GMV=成交金额"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`删除别名 ${i + 1}`}
+                    title="删除该别名"
+                    disabled={pending}
+                    onClick={() => removeAlias(i)}
+                  >
+                    <X className="size-4" aria-hidden />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={pending}
+                onClick={addAlias}
+              >
+                <Plus className="size-3.5" aria-hidden />
+                添加别名
+              </Button>
+            </div>
+          </FormRow>
+
+          {error && (
+            <p className="text-xs text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              disabled={pending || isEmptyPatch(patch)}
+              onClick={() => save.mutate(patch)}
+            >
+              {save.isPending && <Loader2 className="animate-spin" aria-hidden />}
+              保存偏好
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* 全部清空确认:仅影响偏好,笔记/团队记忆不动 */}
+      <AlertDialog open={clearingAll} onOpenChange={setClearingAll}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>清空全部偏好?</AlertDialogTitle>
+            <AlertDialogDescription>
+              仅清空上方偏好槽位,个人笔记与团队记忆保持不变;清空后孔明的下一问不再注入旧偏好。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {error && (
+            <p className="text-xs text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={clearAll.isPending}>再想想</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={clearAll.isPending}
+              onClick={(e) => {
+                e.preventDefault(); // 等 mutation 结果再收口(失败保持打开)
+                clearAll.mutate();
+              }}
+            >
+              {clearAll.isPending && <Loader2 className="animate-spin" aria-hidden />}
+              清空偏好
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </section>
   );
 }

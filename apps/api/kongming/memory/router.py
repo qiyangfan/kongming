@@ -116,13 +116,27 @@ async def put_memory_prefs(
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> PrefsOut:
-    """059:覆盖更新闭合槽位;未知键拒绝(闭合 schema)。"""
-    raw = {k: v for k, v in body.model_dump().items() if v is not None}
+    """087:省略字段保留、显式 null 删除槽位、空补丁真无操作;未知键拒绝。"""
+    # model_fields_set 区分「显式传 null」与「省略」:仅显式提供的键进 raw
+    raw = {k: v for k, v in body.model_dump().items() if k in body.model_fields_set}
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
     try:
         prefs = await svc.put_prefs(user_id=str(user["sub"]), tenant_id=tid, raw=raw)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+    return PrefsOut(prefs=prefs)
+
+
+@router.delete("/prefs", response_model=PrefsOut)
+async def delete_memory_prefs(
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Annotated[MemoryService, Depends(_get_service)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> PrefsOut:
+    """087:清空本人本租户全部偏好(保留空行;笔记/团队记忆不受影响)。"""
+    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    prefs = await svc.clear_prefs(user_id=str(user["sub"]), tenant_id=tid)
     return PrefsOut(prefs=prefs)
 
 

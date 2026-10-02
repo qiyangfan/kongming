@@ -7,7 +7,40 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
-## 当前状态(2026-10-01)
+## 当前状态(2026-10-02)
+
+- **087 偏好自管理落地并归档(2026-10-02)**:承接 059 任务 3.4 前端遗留 + 后端删除/清空/并发语义,
+  归档件 `openspec/changes/archive/2026-10-02-087-personal-preference-management/`。要点:①PUT
+  `/memory/prefs` 用 `model_fields_set` 区分「省略=保留」与「显式 null=删除」;归一化后既无
+  非空设置也无 null 删除=真无操作(不建行/不增版本/不取消在途提取/不伪造审计);新增同路径
+  DELETE 清空全部(保留空行、已空仍递增版本)。②`user_prefs` 增内部列 `manual_revision`
+  (0036,BIGINT NOT NULL DEFAULT 0,不进公共契约);人工写(页面 PUT+聊天显式写槽位)走单语句
+  UPSERT 短事务合并(行锁内 `(prefs::jsonb||values)-dels`),版本+1;自动提取在问答准备期
+  (任何 LLM 调用前)捕获版本快照,贯穿同步 ChatOutcome 内部字段与流式 `_stream_finalize`,
+  落库 `ON CONFLICT ... WHERE manual_revision=:rev` 版本一致才**只补缺失槽位**(协方差子查询,
+  不覆盖不删除),不一致零行=放弃;版本读取失败=None 整轮跳过(两处调度点均不挂任务)。显式
+  聊天写槽位从 `apply_implicit_patch` 切到人工语义。③MemoryPage 增「偏好设置」区(七槽位表单
+  +metric_aliases 可编辑列表+单项清除发 null+AlertDialog 全部清空),纯逻辑抽 `lib/prefs-form.ts`
+  (11 vitest);查询按租户分区(query key 含 tenant)。**坑**:`user_prefs` 列是 VARCHAR(36)
+  而 `user_memory` 是 uuid——同域两种约定,测试 SQL 的 CAST/子查询要按表对齐;旧 JSON 列是
+  `json` 不是 `jsonb`,操作符前必须 `::jsonb`。**评审(主对话交叉自查,子代理撞用量限额)修掉
+  2 处前端真缺陷**:setQueryData 原在 onSuccess 闭包(取最新渲染 queryKey,在途保存遇切租户会把
+  旧语境响应写进新语境缓存)→挪进 mutationFn 闭包固化租户;清空失败原 onError 关掉 AlertDialog
+  与「失败保持打开」注释矛盾→保持打开并对话框内显示错误。其后按 owner 指令开启独立评审迭代循环
+  复扫全量未提交 diff,另修 2 处文档过时陈述(roadmap「当前提案队列未实施」段随落地移除;
+  「下一棒」087 条目撤除重编号),代码零改动、全量门禁沿用本批全绿结论。**门禁**:`KM_REDIS_URL=…6380/15
+  make api-check` 全绿(1091 passed,cov 73.22%),agent 459/liannu 22/web 81+build 全绿;
+  契约已再生(纯增 DELETE),manual_revision 零泄漏(grep 实证)。**实机冒烟**(真 api 18000+真
+  agent 18001+muniu LLM+Chrome headless playwright-core,宿主 18080/18081 已被上游 energy-ai
+  占用须避让):查看→编辑(含别名)→保存回显→单项清除(它槽不误伤)→AlertDialog 全部清空→
+  两轮真实流式问答后 `GET /memory/prefs` 恒空(Bearer 直连核验——注意直连 api 无 `/api` 前缀,
+  前缀是 web 代理层的)+审计轨迹完整;375/768/1280 亮暗走查过(亮色视觉模型两档无缺陷,暗色
+  计算样式断言)。冒烟账号 `smoke087`(Smoke#2026,SUPER_ADMIN,可删)。**venv 三处旧路径重建**:
+  apps/api、apps/agent、packages/liannu 均为迁移前路径所建(shebang 失效"Failed to spawn"),
+  按 HANDOFF 环境事实 10 逐个 rm+uv sync。
+- **既有规格门禁**:本轮主规格严格校验 33/45,通过之外的 12 项为 ai-eval/audit/chat/datascope/datasource/eval/
+  knowledge/multitenant/nl2sql/rbac/runtime-resilience/web-admin 的 RFC 关键词、Scenario 或 Purpose 问题;
+  在本轮提案写入前已存在,本件不代修或把局部通过记为全仓通过。实施归档前仍须满足必要门禁。
 
 - **083 data_scope=CUSTOM 落地并归档(2026-10-01)**:CUSTOM 由「已登记未实现 + 选了必被拒」变为
   「按角色部门集合并集 IN 过滤」(不递归子部门;空集合仍 fail-closed,且判定已提到列探测与
@@ -211,9 +244,8 @@
   1. 070 4.5/064 3.2 的评估集对拍(067→065 评估门禁+真实语料流量;
      064「路径翻转」证据需更大语料,当前评估集上 LLM 本就诚实走 NO_DATA);
   2. 078 selfheal 冒烟(需可稳定构造失败 SQL 的问法,冒烟库干净难复现);
-  3. 059 MemoryPage 槽位编辑 UI(任务 3.4,前端);
-  4. anthropic/responses 条目流式问答端到端(需 muniu 或官方端点运行);
-  5. 064 生产阈值切换决策(初值已标定:vector top1=0.30/mean3=0.28,
+  3. anthropic/responses 条目流式问答端到端(需 muniu 或官方端点运行);
+  4. 064 生产阈值切换决策(初值已标定:vector top1=0.30/mean3=0.28,
      双档必须成对配置——mean 缺省 0.0 会使判据恒真;缺省保持 off)。
 
 ## 新会话开工指引

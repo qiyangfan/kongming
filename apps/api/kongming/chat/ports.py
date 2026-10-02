@@ -181,7 +181,8 @@ class GuardrailPort(Protocol):
 class MemoryPort(Protocol):
     """用户长期记忆(022/059):chat 域消费面。recall_hint 返回注入段(空串=无注入
     零回归);preference_hint 返回偏好默认值段(可忽略/不约束数据范围);
-    explicit_intent 识别「记住…」;form_explicit/form_implicit 形成。
+    explicit_intent 识别「记住…」;form_explicit/form_implicit 形成;current_revision
+    返回问答准备期的人工版本快照(087;None=读取失败,调用方跳过本轮自动写入)。
     实现侧全部失败降级(仅日志),永不阻断问答主链路。"""
 
     async def recall_hint(self, *, user_id: str, tenant_id: str, question: str) -> str: ...
@@ -193,8 +194,15 @@ class MemoryPort(Protocol):
     async def form_explicit(self, *, user_id: str, tenant_id: str, content: str) -> bool: ...
 
     async def form_implicit(
-        self, *, user_id: str, tenant_id: str, candidates: list[dict[str, object]]
+        self,
+        *,
+        user_id: str,
+        tenant_id: str,
+        candidates: list[dict[str, object]],
+        pref_revision: int | None = None,
     ) -> int: ...
+
+    async def current_revision(self, *, user_id: str, tenant_id: str) -> int | None: ...
 
 
 class SuggestionTenantSource(Protocol):
