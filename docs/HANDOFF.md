@@ -22,7 +22,7 @@
   状态变体(木牛语义态入单源,15% 弱底);③`ui/alert-dialog.tsx` Content 合入木牛登记的移动端
   贴底抽屉形态(窄屏 bottom sheet+安全区内边距,sm+ 居中,size 档与动画口径同 dialog)。
   三处均经 sync 脚本流向 jinguan、muniu 手工翻译,预览复验 0 差异;门禁 vitest 86/86+build 绿,
-  登录页 375 浏览器实测 h2 大纲过。改动落工作区未提交(等 owner 指令)。
+  登录页 375 浏览器实测 h2 大纲过。已提交并推送(800a146,owner 授权,ls-remote 核对一致)。
 - **spec strict 存量债已清零(change `2026-10-02-spec-strict-wording-debt`,同日归档)**:
   `openspec validate --specs --strict` 自 33/45 → **45/45**。12 域 49 处修正(44 关键词升格+4 新增 Scenario+1 结构规范化)全部是措辞/结构债、
   零行为变更:44 条 Requirement 正文注入 SHALL/MUST/SHALL NOT(ai-eval 5/audit 1/datascope 6/
