@@ -33,8 +33,50 @@
   **新基线**:strict 门禁自此全绿,「12 项失败是既有债」的每轮复述作废;后续只有新 delta 自身
   须过 strict 的既有纪律。超长文本 INFO 级提示多域仍存(不影响判定),按冻结裁决未处理。
 
-## 当前状态(2026-10-02)
+## 当前状态(2026-10-10,088-090 归档 + 全量审查循环收口)
 
+- **088-090 三变更已归档,091 保持 active(2026-10-10)**:report-generation(088,16/16)/
+  tool-gateway(089,11/11)/ task-kernel(090,15/15)归档件 `openspec/changes/archive/2026-10-10-*/`;
+  specs 已同步(三个新主规格 + conversation-artifacts MODIFIED),089 主规格带审查期勘误
+  「超时分型:连接超时归连接类可重试/读超时归响应类不重试」且 delta 已回写对齐。
+  **091 multi-agent-orchestration 6/15 保持 active**:v1 交付形态=未接线库模块(编排循环+
+  深度/worker 数/预算三重上限+0040 两表+剧本化测试已交付),持久化/端点/前端/Bot 装配
+  九项接线为下一步。
+- **全量审查迭代循环(四路独立子代理 + 二轮复审)坐实并修复 15 处**(候选 30+,逐条溯源核验):
+  **090 侧**——审批 TTL 清扫绕行(lifespan 直调 repo 漏掉 expire_stale_approvals,生产永不可达)、
+  审批期暂停死锁(approve 守卫放宽 PAUSED + begin_step 任务级 CAS 未命中回滚步骤态按现态给决策)、
+  拒绝审批不派发(假 RUNNING,批准/拒绝都触发派发)、回调超时 600s<墙钟预算 900s(独立
+  agent_task_timeout_sec=960,链路异常收口 INTERRUPTED 可恢复而非谎称 FAILED)、resume 双派发
+  (moved 标志仅真实迁移派发+PLANNING 拒绝+同态不回队)、终态任务迟到回写盲记账(封账+
+  late_step_result 事件)、cancel 不结步骤(批量关闭+steps_cancelled);**spec 级**——「全部 DONE
+  方可 DONE」此前只按「全部终态」实现,api DONE 前置收紧+agent not_done 如实 FAILED(带
+  SKIPPED/FAILED 步骤不再全称完成,收口表述逐项附因)。**088 侧**——会话素材 role 小写错配
+  静默恒空(按 USER 问/ASSISTANT 答落行配对;测试夹具同改真实形态,随机 v4 id 会抖动配对序)、
+  refresh 路径 tenant_key 用原始 header(多租户错 schema,改按租户 id 取权威 key)、GENERATING
+  孤儿行启动清扫、章节按 ord 重排插入会拒合法载荷(改按输入序)。**089 侧**——域治理三端点补
+  路由级回归(403/404/停用后 internal execute 拒+审计带 domain/启用恢复)、清单 bool 穿透 int
+  显式拒绝+非法主机条目剔除、fixture 停用集 finally 还原。**agent 侧**——证据拒绝 422→200
+  携带决策(422 被回调客户端归一 None,拒绝原因曾静默丢失、分支不可达)、步骤 goal>2000 确定性
+  FAILED(截断对齐控制面上限)、规划非 JSON 裸 500(收敛 FAILED 附因)、任务步骤审计
+  channel="task"、collab prompt 上限 f-string 单源、任务级 DONE 收口与 api 同口径。**web 侧**——
+  任务取消/审批拒绝补 AlertDialog(宪法 Article 2)、TasksPage/ReportsPage 错误态伪装空态
+  (ErrorAlert+isEmpty 收紧+末页越界钳制)、详情页 4 处手写 alert 收编 ErrorAlert、报告删除确认钮
+  variant="destructive" 替代手抄样式。
+- **登记待办(非缺陷,不擅改)**:TaskItem 暴露 version、审计读面 domain 列(均对外契约新增,
+  待 owner 裁决);任务列表状态筛选、预算部署级上限(spec 待实施项,090 归档件可查);internal
+  端点畸形 UUID 裸 500(token 闸兜底)、报告 progress 轮询拉全量章节、列表页 GENERATING 不轮询、
+  域启停多副本语义(docstring 已声明进程级,持久化启停属 design 既有裁决的后续变更)。
+- **门禁终态**:api 1155(+10)/agent 488(+2)/liannu 22/web 86 全绿,双 app ruff/mypy/pyright/
+  lint-imports 过(api pyright 曾报 16 项=pyright 版本漂移下既有测试鸭子型注入与类型收窄,
+  按 test_task.py 同款 pragma+isinstance 收窄修复,非回归);契约再生成幂等(重新 export 前后
+  md5 一致=与代码逐字节同步),contracts-check 末段 git diff 在「产物已更新未提交」态必报差
+  属机制性红(本文门禁节既有口径)。**坑**:并发两轮 make check 互踩共享测试库→成片假失败+
+  零 CPU 挂死(共享测试库并行 pytest 互锁的又一形态),先清干净进程再单轮跑。
+- **090 浏览器走查已补(2026-10-09)**:Playwright+系统 Chrome,冒烟账号 smoke088/Smoke#2026,
+  DEV 库播种 walk090a 审批挂起/walk090b 预算暂停:/tasks 与 /tasks/{id} 六组合(375/768/1280×
+  亮暗)横滚溢出 0px、亮暗背景翻转、375 卡片/768+ 表格形态、审批按钮 6/6 在场,截图 12 张
+  /tmp/taskwalk。**坑**:改已应用的迁移文件后测试库/dev 库须重建或回环(kongming_test 重建须经
+  env-postgres 超管装 vector/pgcrypto,kongming 角色无建扩展权)。
 - **087 偏好自管理落地并归档(2026-10-02)**:承接 059 任务 3.4 前端遗留 + 后端删除/清空/并发语义,
   归档件 `openspec/changes/archive/2026-10-02-087-personal-preference-management/`。要点:①PUT
   `/memory/prefs` 用 `model_fields_set` 区分「省略=保留」与「显式 null=删除」;归一化后既无
@@ -117,10 +159,10 @@
   148 字符长行报 E501——重跑门禁才有,注释与文档不作证据;`--specs --strict` 33 通过/12 失败——失败项全是既有中文
   标题缺 RFC2119 关键词那笔债,单查 `datascope` 只剩关键词警告(086 新增段自带 SHALL/MUST NOT,未新增
   失败项);`--changes --strict` 归档后活动件为零。
-- **本机跑 api 门禁的端口坑(2026-10-01 复现)**:宿主 6379 现被上游 `docker-compose-local-redis-1`
-  (带 requirepass)占用,而 `tests/conftest.py` 的缺省是 `redis://localhost:6379/15` → 直接
-  `uv run pytest` 会在 fixture 期报 `redis.exceptions.AuthenticationError`(**与代码无关**)。
-  绕行:从 `apps/api` 跑时带 `KM_REDIS_URL=redis://localhost:6380/15`(kongming 自己的 redis)。
+- **本机跑 api 门禁的端口坑(2026-10-01 复现;2026-10-09 已随环境统一栈退役)**:
+  当年宿主 6379 被带密码的上游 redis 占用、6380 是本仓避让口的口径已作废——
+  现本地环境单源 `~/workspace/env`(pg 5432 / redis 6379 免密),conftest 缺省
+  即正确,跑测试**无需任何 KM_* 注入**(详见「环境事实」2)。
 - **两条既有测试陷阱(已修,后来者勿再踩)**:① `tests/test_feedback_promotion.py` 的迁移往返用例
   `downgrade("0033")` 后只 `upgrade("0034")`——head 前移后它会把库永久留在 head 之下,其后每个用例的
   `TRUNCATE` 撞 `UndefinedTableError`(本次实测 518 个 error 的唯一成因),规则是**回 head 不回版本号**;
@@ -295,21 +337,26 @@
 
 1. **本机是 podman 不是 docker**:`docker` 只是交互 shell 的 alias,
    非交互命令一律用 `podman`。
-2. **标准端口**:api **8000** / agent **8001** / web dev **5173** /
-   postgres **5432** / redis **6379**。⚠ 本机 6379/8000 被上游项目占用
-   (8000=上游 mock 容器 `docker-compose-local-mock-1`):Kongming compose
-   redis 实映射 **6380**(.env 带密码);给 pytest 手传 KM_REDIS_URL 必须
-   带密码(无密码 6380 → AuthenticationError,2026-09-26 实证),api/agent
-   冒烟让到 **18080/18081**(或原生 18000/8001)。compose 的 redis 若与
-   手工 6380 容器撞宿主机端口,override `KM_REDIS_HOST_PORT=6399` 避让
-   (容器内仍走服务名 `redis:6379`,测试用 6380 不受影响)。
+2. **本地基础环境已统一到 `~/workspace/env`(2026-10-09 迁移,替代本仓自带
+   pg/redis)**:api **8000** / agent **8001** / web dev **5173** /
+   postgres **5432**(env-postgres,pg18+pgvector;角色 `kongming/kongming`,
+   库 `kongming` 开发库 + `kongming_test` 测试库)/ redis **6379**
+   (env-redis,免密,测试用 db15)。conftest 与 `config.py` 的缺省连接串
+   与统一栈完全同口径——本地跑测试**无需再注入任何 KM_* 环境变量**;
+   切勿 `set -a` source 根 `.env` 跑 pytest(2026-10-09 实证:KM_INTERNAL_TOKEN
+   真值会盖掉 conftest 测试缺省,内部端点全 403,126 例假败)。api/agent
+   容器冒烟仍让到 **18080/18081**(宿主 8000 属其他项目)。本仓
+   `infra/docker-compose.yml` 的 postgres/redis 服务保留给容器部署形态,
+   本地开发勿再 `make up` 自起(会与 env 栈抢 5432)。历史注:redis 6380
+   免密/带密码口径随独立栈退役作废。
 3. **本地环境冷启动**(幂等,任何"连不上/端口不对"先跑这个):
    ```bash
-   make up                                 # podman compose 起 postgres+redis
-   cd apps/api && uv run alembic upgrade head
+   cd ~/workspace/env && podman compose --profile pg --profile redis up -d
+   cd apps/api && uv run alembic upgrade head      # 开发库迁移(kongming_test 由 conftest 自建)
    ```
-   pg 数据持久化在 compose 卷 `kongming_pg_data`;删卷/重置属破坏性操作,
-   须用户明确授权。
+   pg 数据持久化在 env 栈命名卷 `env_pg-data`;删卷/重置属破坏性操作,
+   须用户明确授权。pgvector/pgcrypto 扩展与只读角色 `km_readonly` 的
+   手工预建口径见 `~/workspace/env/README.md`「项目库登记」。
 4. **两 apps 无 .env 文件**(2026-09-28 find 实证,旧版本文档作废):
    `apps/api/.env`、`apps/agent/.env` 均不存在;settings 的
    `env_file=".env"` 是 cwd 相对,读取不到即纯环境变量。根 `.env` 只供
@@ -518,8 +565,9 @@ zhparser、知识库团队归属(出处 032①)。
   exists」);且 069 式 MODIFIED delta 替换整块会误删当前 spec 已有
   场景(工具拒绝属实名防卫)。specs 以 apply 期手工同步为終态。
 - **冒烟栈注入 env 用 compose override 文件(/tmp,不入库)**,宿主机
-  8000/6380 被上游占用时让到 18080/18081/6399;从旧容器提 env 用
+  8000 被占用时 api/agent 容器让到 18080/18081;从旧容器提 env 用
   `podman inspect ... '{{range .Config.Env}}'` 回接子进程,值不回显。
+  (2026-10-09 起 pg/redis 用统一栈 `~/workspace/env`,6380/6399 避让口径退役。)
 - **浏览器断言防问题气泡假阳性**:流式答案关键词(如「库存」)可能命中
   用户问题自身——断言前先把问题文本从正文剥掉再看。
 
