@@ -30,4 +30,4 @@
 
 - [x] 5.1 浏览器实测:商店「数据参谋」点建议问题 → 应答区显示友好错误(非伪调用文本);请求耗时显著下降(零 LLM)
 - [x] 5.2 有工具 Bot 反向实证:管理后台确认既有带工具 Bot 路径不受影响(测试直证即可,不另建数据)
-- [ ] 5.3 change 工件勾结 + `/opsx:archive` sync 两个 main spec(custom-agent/bot-store)
+- [x] 5.3 change 工件勾结 + `/opsx:archive` sync 两个 main spec(custom-agent/bot-store)（已核验:主规格 custom-agent 含「空工具集使用无工具纪律段」Requirement+Scenario、bot-store 含「Bot 上架与下架治理」,2026-10-09 快照清点时补勾）

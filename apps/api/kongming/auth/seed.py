@@ -71,6 +71,16 @@ PERMISSIONS: list[tuple[str, str, int]] = [
     # 081 external-knowledge:个人知识库检索(显式授予制,不进 DEVELOPER 推荐集——
     # 单租户个人部署由 SUPER_ADMIN 自动覆盖;多租户场景告警但不拒注册,082)
     ("tool:knowledge:search", "工具-个人知识库检索", 32),
+    # 088 report-generation:分析报告(生成/读取/导出;进 DEVELOPER 推荐集——
+    # 取数走既有只读链路逐层复校,无权限放大)
+    ("report:generate", "报告生成", 33),
+    ("report:read", "报告读取", 34),
+    ("report:export", "报告导出", 35),
+    # 090 task-kernel:持久任务(创建/读取/管理;进 DEVELOPER 推荐集——
+    # 步骤执行逐层复校,无权限放大)
+    ("task:create", "任务创建", 36),
+    ("task:read", "任务读取", 37),
+    ("task:manage", "任务管理", 38),
 ]
 
 ROLES: list[tuple[str, str, str, str, int]] = [
@@ -97,6 +107,14 @@ ROLE_RECOMMENDED_PERMS: dict[str, list[str]] = {
         "bot:run",
         # 034:开发者门户(自助门面)
         "developer:portal",
+        # 088:分析报告三件套(生成/读取/导出,与 chat:execute 同哲学)
+        "report:generate",
+        "report:read",
+        "report:export",
+        # 090:持久任务三件套(与 chat:execute 同哲学)
+        "task:create",
+        "task:read",
+        "task:manage",
     ],
 }
 

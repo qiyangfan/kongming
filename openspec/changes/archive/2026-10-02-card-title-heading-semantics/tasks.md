@@ -23,4 +23,4 @@
 
 - [x] 4.1 聚合层 `longzhong/HANDOFF.md` 登记联合修改：jinguan 13 处/muniu 3 处的对齐清单与 sync 脚本执行顺序（design.md D5）。
 - [x] 4.2 主规格 sync 进 `web-nav` 后归档（delta 已随提案写好，`--skip-specs` 纪律适用时按本仓 HANDOFF「归档前 specs 已手工同步」条执行）。
-- [ ] 4.3 两仓对齐完成后，聚合层 HANDOFF 回写「已对齐 + 门禁证据」。
+- [x] 4.3 两仓对齐完成后，聚合层 HANDOFF 回写「已对齐 + 门禁证据」。（已核验:聚合层 HANDOFF 2026-10-02 批次二登记含回写注记「对齐已完成并扩为三仓视觉全面收敛,见批次三;jinguan LoginPage as="h2"、muniu 三处调用点均落地,门禁全绿」,2026-10-09 勾结）

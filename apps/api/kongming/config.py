@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     # Agent 面回调地址
     agent_base_url: str = "http://localhost:8001"
     agent_timeout_sec: float = 120.0  # 覆盖 understand+generate+≤2 次 selfheal+summarize
+    # 088:报告生成=多轮 LLM+多次取数的长任务,独立超时预算(非单轮问答口径)
+    agent_report_timeout_sec: float = Field(default=600.0, gt=0)
+    # 090:任务编排=多步长任务;须 ≥ 任务默认墙钟预算(900s)+ 余量,
+    # 否则合法运行中的任务会被传输层超时误收口
+    agent_task_timeout_sec: float = Field(default=960.0, gt=0)
 
     # 内部元数据通道:租户 schema 内省表数上限(防 prompt 膨胀)
     meta_schema_max_tables: int = Field(default=50, ge=1)
@@ -149,6 +154,9 @@ class Settings(BaseSettings):
     # 才生效(端点+localhost 白名单两道注册条件;多租户仅告警,082 降闸)
     siku_base_url: str = ""
     siku_timeout_ms: int = Field(default=5000, ge=1, le=60000)
+    # 089 工具网关:knowledge 域限流第二维度(租户+用户固定窗口,叠加在
+    # 工具总配额之上;部署级可调)
+    toolgateway_knowledge_quota: int = Field(default=30, ge=1, le=600)
 
     # SQL 安全引擎(053):builtin | shadow | primary;默认影子(内置权威,
     # 引擎只对拍观测)。切换期行为契约零变更;引擎缺失/异常自动降级不阻断。

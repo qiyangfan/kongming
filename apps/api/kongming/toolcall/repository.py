@@ -44,11 +44,11 @@ class ToolAuditWriter:
                         "INSERT INTO public.sys_tool_audit"
                         " (id, trace_id, user_id, tenant_id, tool_name, args_digest,"
                         "  args_json, status, error_reason, duration_ms, datasource_key,"
-                        "  channel, idempotency_key, expires_at)"
+                        "  channel, idempotency_key, expires_at, domain)"
                         " VALUES (:id, :trace_id, :user_id, :tenant_id, :tool_name,"
                         "         :args_digest, CAST(:args_json AS jsonb), :status,"
                         "         :error_reason, :duration_ms, :datasource_key,"
-                        "         :channel, :idempotency_key, :expires_at)"
+                        "         :channel, :idempotency_key, :expires_at, :domain)"
                     ),
                     {
                         "id": row_id,
@@ -67,6 +67,7 @@ class ToolAuditWriter:
                         "duration_ms": entry.duration_ms,
                         "datasource_key": entry.datasource_key,
                         "channel": entry.channel,
+                        "domain": entry.domain,
                         "idempotency_key": entry.idempotency_key,
                         "expires_at": entry.expires_at,
                     },

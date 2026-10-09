@@ -15,7 +15,7 @@ import socket
 import threading
 import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -186,10 +186,43 @@ def _hits_body() -> str:
 
 
 async def _search(stub: _Stub, *, timeout_ms: int = 3000) -> list[dict[str, Any]]:
-    from kongming.toolcall.router import _SikuKnowledgeClient
+    """089 迁移后:出站经网关切面(执行器单次+策略器分类+切面重试)。
+    重试次数/失败文案断言保持与迁移前逐字一致(零回归判据)。"""
+    from kongming.toolgateway.gateway import ToolGateway
+    from kongming.toolgateway.knowledge import KnowledgeExecutor, KnowledgePolicy
+    from kongming.toolgateway.models import load_manifest
 
-    client = _SikuKnowledgeClient(base_url=f"http://127.0.0.1:{stub.port}", timeout_ms=timeout_ms)
-    return await client.search(query="口径", top_k=2)
+    manifest, _ = load_manifest(
+        [
+            {
+                "id": "knowledge",
+                "endpoint": f"http://127.0.0.1:{stub.port}/api/search",
+                "whitelist_hosts": ["127.0.0.1", "localhost"],
+                "timeout_ms": timeout_ms,
+                "quota_per_minute": 60,
+                "redaction": "allowlist:knowledge",
+            }
+        ]
+    )
+    gw = ToolGateway(
+        manifest=manifest,
+        policies={"knowledge": KnowledgePolicy(whitelist_hosts=("127.0.0.1", "localhost"))},
+        executor=KnowledgeExecutor(),
+    )
+    out = await gw.execute(
+        tool_name="knowledge_search",
+        args={"query": "口径", "top_k": 2},
+        domain="knowledge",
+        trace_id="t",
+        tenant_id="tenant",
+        user_id="u",
+    )
+    if out["status"] != "executed":
+        from kongming.toolcall.models import KnowledgeSourceError
+
+        raise KnowledgeSourceError(str(out.get("reason")))
+    result = cast("dict[str, object]", out.get("result") or {})
+    return list(cast("list[dict[str, object]]", result.get("results") or []))
 
 
 async def test_client_hits_passthrough() -> None:
@@ -236,11 +269,39 @@ async def test_client_connection_refused_raises_unreachable() -> None:
     dead_port = probe.getsockname()[1]
     probe.close()
 
-    from kongming.toolcall.router import _SikuKnowledgeClient
+    from kongming.toolgateway.gateway import ToolGateway
+    from kongming.toolgateway.knowledge import KnowledgeExecutor, KnowledgePolicy
+    from kongming.toolgateway.models import load_manifest
 
-    client = _SikuKnowledgeClient(base_url=f"http://127.0.0.1:{dead_port}", timeout_ms=2000)
+    # dead_port 主机仍 127.0.0.1(白名单内),网关放行出站
+    manifest, _ = load_manifest(
+        [
+            {
+                "id": "knowledge",
+                "endpoint": f"http://127.0.0.1:{dead_port}/api/search",
+                "whitelist_hosts": ["127.0.0.1"],
+                "timeout_ms": 2000,
+                "quota_per_minute": 60,
+                "redaction": "allowlist:knowledge",
+            }
+        ]
+    )
+    gw = ToolGateway(
+        manifest=manifest,
+        policies={"knowledge": KnowledgePolicy(whitelist_hosts=("127.0.0.1",))},
+        executor=KnowledgeExecutor(),
+    )
     with pytest.raises(KnowledgeSourceError, match=r"^unreachable:"):
-        await client.search(query="x", top_k=1)
+        out = await gw.execute(
+            tool_name="knowledge_search",
+            args={"query": "x", "top_k": 1},
+            domain="knowledge",
+            trace_id="t",
+            tenant_id="t",
+            user_id="u",
+        )
+        assert out["status"] == "error"
+        raise KnowledgeSourceError(str(out.get("reason")))
 
 
 async def test_client_http_500_no_retry_protocol() -> None:

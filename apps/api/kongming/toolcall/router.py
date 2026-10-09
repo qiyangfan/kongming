@@ -11,11 +11,10 @@
 import logging
 import shutil
 import uuid
-from contextlib import suppress
 from datetime import datetime
+from functools import lru_cache
 from typing import Annotated, Any, Literal, cast
 
-import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,22 +34,25 @@ from kongming.redis_client import get_redis
 from kongming.sandbox.repository import SqlSandboxRunRepo
 from kongming.sandbox.runner import PodmanSandboxRunner
 from kongming.sandbox.service import SandboxService
+from kongming.toolcall import registry
 from kongming.toolcall.models import (
     ConfirmNotFound,
-    KnowledgeSourceError,
     TenantBindingForbidden,
     TenantNotFound,
     ToolDef,
     ToolOutcome,
 )
 from kongming.toolcall.ratelimit import RedisRateLimiter
-from kongming.toolcall.registry import REGISTRY, is_local_base_url
+from kongming.toolcall.registry import LOCAL_HOSTS, REGISTRY, is_local_base_url
 from kongming.toolcall.repository import (
     SqlToolCallRepo,
     ToolAuditWriter,
     user_has_all_scope,
 )
 from kongming.toolcall.service import ConfirmOutcome, ToolCallService
+from kongming.toolgateway.gateway import ToolGateway
+from kongming.toolgateway.knowledge import KnowledgeExecutor, KnowledgePolicy
+from kongming.toolgateway.models import DOMAIN_TOOLS, load_manifest
 
 log = logging.getLogger(__name__)
 
@@ -286,84 +288,77 @@ def _build_mcp_service(session: AsyncSession) -> McpService:
     )
 
 
-class _SikuKnowledgeClient:
-    """081 KnowledgeSearchPort 绑定:控制面出站 siku localhost /api/search。
-
-    错误分类(spec「失败降级为观察」,两档):
-    - unreachable=未完整取得响应(拒连/连接超时/accept 后关连/读中断):
-      连接层未送达,重试至多一次(design D6 只读分层);
-    - protocol=已送达但响应不合格(非 2xx/报文畸形/读超时):不重试。
-    均收敛 KnowledgeSourceError 上浮(分发兜底 ERROR + 审计)。
-    """
-
-    def __init__(self, *, base_url: str, timeout_ms: int) -> None:
-        self._base = base_url.rstrip("/")
-        self._timeout = httpx.Timeout(timeout_ms / 1000)
-
-    async def search(self, *, query: str, top_k: int) -> list[dict[str, object]]:
-        payload = {"query": query, "top_k": top_k}
-        last: Exception | None = None
-        # 未完整取得响应族(httpx  NetworkError 家族 + 协议层无响应关连)。
-        # 注意:拒连在 macOS anyio 后端实际以 ReadError 浮现(不是 ConnectError),
-        # 故按语义而非具体异常名归纳;读超时(TimeoutException)先于本族被捕获
-        # ——「请求已送达、响应未按期」归 protocol,不重试。
-        undelivered = (
-            httpx.ConnectError,
-            httpx.ConnectTimeout,
-            httpx.RemoteProtocolError,
-            httpx.ReadError,
-            httpx.WriteError,
-            httpx.CloseError,
-        )
-        # 每次调用独立客户端(与既有出站同形态);拒连后 aclose 自身可能抛
-        # BrokenResource→ReadError(清理噪声),压制之——不掩盖主结果/主错误
-        client = httpx.AsyncClient(timeout=self._timeout)
-        try:
-            for attempt in (1, 2):  # 连接层至多两次(首次 + 一次重试)
-                try:
-                    resp = await client.post(f"{self._base}/api/search", json=payload)
-                    resp.raise_for_status()
-                    body: object = resp.json()
-                    if not isinstance(body, dict):
-                        raise KnowledgeSourceError("protocol: 检索响应缺 results 列表")
-                    raw: object = cast("dict[str, object]", body).get("results")
-                    if not isinstance(raw, list):
-                        raise KnowledgeSourceError("protocol: 检索响应缺 results 列表")
-                    # 非 dict 命中静默过滤(siku 契约保证 dict;cast 仅为定型)
-                    return [
-                        cast("dict[str, object]", item)
-                        for item in cast("list[object]", raw)
-                        if isinstance(item, dict)
-                    ]
-                except undelivered as e:
-                    last = e
-                    if attempt == 1:
-                        continue
-                except httpx.TimeoutException as e:
-                    raise KnowledgeSourceError(f"protocol: 检索读超时({type(e).__name__})") from e
-                except httpx.HTTPStatusError as e:
-                    raise KnowledgeSourceError(
-                        f"protocol: 上游 HTTP {e.response.status_code}"
-                    ) from e
-                except (ValueError, TypeError) as e:  # 报文畸形(JSON 解码/结构)
-                    raise KnowledgeSourceError(f"protocol: 响应报文畸形({type(e).__name__})") from e
-                except httpx.TransportError as e:  # 传输层未枚举残族(防 httpx 分层演进逃逸)
-                    last = e
-                    if attempt == 1:
-                        continue
-            raise KnowledgeSourceError(f"unreachable: 知识库拒连({type(last).__name__})") from last
-        finally:
-            with suppress(Exception):  # 关连清理噪声(见上行注释)
-                await client.aclose()
-
-
-def _build_knowledge_client() -> _SikuKnowledgeClient | None:
-    """081:端点未配置或主机非 localhost 白名单 → None(工具不注册,端口不会被调)。"""
+def _build_gateway() -> ToolGateway | None:
+    """089:knowledge 域网关装配(端点未配置或主机非白名单 → None,零感知)。
+    清单/策略器/执行器三件齐备才注册;策略器缺失的域不注册(fail-closed)。"""
     settings = get_settings()
     url = (settings.siku_base_url or "").strip()
     if not url or not is_local_base_url(url):
         return None
-    return _SikuKnowledgeClient(base_url=url, timeout_ms=settings.siku_timeout_ms)
+    manifest, warnings = load_manifest(
+        [
+            {
+                "id": "knowledge",
+                "endpoint": url.rstrip("/") + "/api/search",
+                # 白名单单源(审查 P1-2):与注册闸 is_local_base_url 同一主机集,
+                # 否则 host.docker.internal/::1 等部署形态「注册成功但每次必拒」
+                "whitelist_hosts": sorted(LOCAL_HOSTS),
+                "timeout_ms": settings.siku_timeout_ms,
+                "quota_per_minute": settings.toolgateway_knowledge_quota,
+                "redaction": "allowlist:knowledge",
+            }
+        ]
+    )
+    for w in warnings:
+        log.warning("%s", w)
+    if "knowledge" not in manifest:
+        return None
+    return ToolGateway(
+        manifest=manifest,
+        # 策略器白名单从清单派生(单一真理源)
+        policies={
+            "knowledge": KnowledgePolicy(whitelist_hosts=manifest["knowledge"].whitelist_hosts)
+        },
+        executor=KnowledgeExecutor(),
+    )
+
+
+class _GatewayKnowledgeClient:
+    """089 KnowledgeSearchPort 绑定:出站经网关切面(出口校验→限流→出站→
+    脱敏→重试分类),本适配层只做域方言整形(count/hits 观察形态与 081 逐字
+    一致);失败收敛 KnowledgeSourceError(文案零漂移,分发兜底 ERROR+审计)。"""
+
+    def __init__(self, gateway: ToolGateway) -> None:
+        self._gw = gateway
+
+    async def search(self, *, query: str, top_k: int) -> list[dict[str, object]]:
+        from kongming.toolgateway.gateway import KnowledgeSourceError
+
+        out = await self._gw.execute(
+            tool_name="knowledge_search",
+            args={"query": query, "top_k": top_k},
+            domain="knowledge",
+            trace_id="-",  # trace 经工具分发层审计承载;适配层不重复落
+            tenant_id="-",
+            user_id="-",
+        )
+        if out["status"] != "executed":
+            raise KnowledgeSourceError(str(out.get("reason") or "unreachable: 知识库拒连"))
+        result = cast("dict[str, object]", out.get("result") or {})
+        hits = cast("list[dict[str, object]]", result.get("results") or [])
+        return hits
+
+
+@lru_cache(maxsize=1)
+def _get_gateway() -> ToolGateway | None:
+    """089:网关进程单例(停用集合跨请求一致;清单随部署配置,重启复位)。"""
+    return _build_gateway()
+
+
+def _build_knowledge_client() -> _GatewayKnowledgeClient | None:
+    """081/089:端点未配置或主机非 localhost 白名单 → None(工具不注册)。"""
+    gw = _get_gateway()
+    return _GatewayKnowledgeClient(gw) if gw is not None else None
 
 
 class _McpDynamicResolver:
@@ -418,6 +413,7 @@ def _get_service(session: Annotated[AsyncSession, Depends(get_session)]) -> Tool
         resolver=_McpDynamicResolver(mcp_svc),  # 028
         mcp_caller=_McpToolCaller(mcp_svc),  # 028
         knowledge=_build_knowledge_client(),  # 081(未配置=None)
+        knowledge_quota=getattr(get_settings(), "toolgateway_knowledge_quota", None),  # 089 域配额
         rate_limit_per_minute=settings.tool_rate_limit_per_minute,
         confirm_ttl_minutes=settings.tool_confirm_ttl_minutes,
     )
@@ -647,6 +643,62 @@ def _audit_item(r: dict[str, object]) -> ToolAuditItem:
         expires_at=r["expires_at"],  # type: ignore[arg-type]  # datetime|None 直传
         created_at=r["created_at"],  # type: ignore[arg-type]  # datetime 直传
     )
+
+
+# ── 089 域治理面:清单摘要(不含凭证与白名单明细)+ 运行时启停(重启随部署清单复位)──
+
+
+def _summary_ids(gw: ToolGateway | None) -> set[str]:
+    return {str(d["id"]) for d in (gw.summary() if gw else [])}
+
+
+@router.get(
+    "/domains",
+    dependencies=[Depends(require_perm("system:tool:manage"))],
+)
+async def list_domains() -> list[dict[str, object]]:
+    """治理面清单摘要(不含凭证与白名单明细;disabled 反映本进程运行时状态)。"""
+    gw = _get_gateway()
+    return gw.summary() if gw else []
+
+
+def _sync_runtime_disabled() -> None:
+    """停用域 → 其工具从注入集与分发解析同源消失(spec 域治理面场景;
+    DOMAIN_TOOLS 反演域下工具集)。"""
+    gw = _get_gateway()
+    disabled_domains: set[str] = set()
+    if gw is not None:
+        disabled_domains = {str(d["id"]) for d in gw.summary() if bool(d.get("disabled"))}
+    registry.set_runtime_disabled(
+        frozenset(t for t, d in DOMAIN_TOOLS.items() if d in disabled_domains)
+    )
+
+
+@router.post("/domains/{domain_id}/disable", status_code=204)
+async def disable_domain(
+    domain_id: str,
+    _: Annotated[None, Depends(require_perm("system:tool:manage"))],
+) -> None:
+    """停用域(进程内存态:本进程立即生效,重启随部署清单复位;
+    多副本部署需逐副本操作,持久化启停属后续独立变更——design 既有裁决)。"""
+    gw = _get_gateway()
+    if gw is None or domain_id not in _summary_ids(gw):
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    gw.disable(domain_id)
+    _sync_runtime_disabled()
+
+
+@router.post("/domains/{domain_id}/enable", status_code=204)
+async def enable_domain(
+    domain_id: str,
+    _: Annotated[None, Depends(require_perm("system:tool:manage"))],
+) -> None:
+    """启用域(进程内存态,复位口径同 disable)。"""
+    gw = _get_gateway()
+    if gw is None or domain_id not in _summary_ids(gw):
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    gw.enable(domain_id)
+    _sync_runtime_disabled()
 
 
 @router.get("/audit/page", response_model=ToolAuditPageOut)

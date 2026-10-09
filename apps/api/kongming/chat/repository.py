@@ -226,24 +226,35 @@ class ChatRepository:
         )
         return res.rowcount
 
-    async def list_messages(self, *, session_id: str) -> list[dict[str, object]]:
+    async def list_messages(
+        self, *, session_id: str, limit: int | None = None
+    ) -> list[dict[str, object]]:
         """会话全部消息,创建时间升序(id ASC tiebreak,与补全取数对偶);
         014 增 rating/corrected_sql 反馈状态列(回显用);
         026 增会话 datasource_key(JOIN 会话快照,artifacts 重算兜底用);
-        030 增 attachments(附件摘要回显)。"""
+        030 增 attachments(附件摘要回显)。
+        limit(088):有界读取(报告素材摘要等只需尾部的场景防大结果_json 放大);
+        取「最近 limit 条」仍按时间升序返回。None=全量(既有调用方零回归)。"""
+        bounded = " LIMIT :lim" if limit is not None else ""
         rows = (
             (
                 await self._s.execute(
                     text(
-                        "SELECT m.id, m.role, m.question, m.sql_text, m.result_json,"
-                        " m.summary, m.status, m.rating, m.corrected_sql, m.feedback_comment,"
-                        " m.attachments, s.datasource_key"
-                        " FROM public.chat_message m"
-                        " JOIN public.chat_session s ON s.id = m.session_id"
-                        " WHERE m.session_id = :s"
-                        " ORDER BY m.created_at ASC, m.id ASC"
+                        "SELECT id, role, question, sql_text, result_json,"  # noqa: S608 —— bounded 为受控常量片段
+                        " summary, status, rating, corrected_sql, feedback_comment,"
+                        " attachments, datasource_key"
+                        " FROM ("
+                        "  SELECT m.id, m.role, m.question, m.sql_text, m.result_json,"
+                        "   m.summary, m.status, m.rating, m.corrected_sql, m.feedback_comment,"
+                        "   m.attachments, s.datasource_key, m.created_at"
+                        "  FROM public.chat_message m"
+                        "  JOIN public.chat_session s ON s.id = m.session_id"
+                        "  WHERE m.session_id = :s"
+                        "  ORDER BY m.created_at DESC, m.id DESC"
+                        + bounded
+                        + " ) recent ORDER BY created_at ASC, id ASC"
                     ),
-                    {"s": session_id},
+                    ({"s": session_id, "lim": limit} if limit is not None else {"s": session_id}),
                 )
             )
             .mappings()

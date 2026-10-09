@@ -69,6 +69,13 @@ class Settings(BaseSettings):
     # 一批工具执行,超出即强制终止并返回结构化错误)
     max_tool_rounds: int = 8
 
+    # 报告生成编排(088):报告级预算三约束(部署级可配,耗尽即停落 PARTIAL——
+    # 「预算退出诚实」)与快照行数上限(与 api 刷新路径同量级)
+    report_max_llm_calls: int = 30
+    report_max_total_tokens: int = 200_000
+    report_max_seconds: float = 300.0
+    report_snapshot_rows: int = 500
+
     # 多模型(021):注册表/路由表/出口白名单(env JSON;空=单模型零回归)
     model_registry_json: str = ""
     model_routes_json: str = ""

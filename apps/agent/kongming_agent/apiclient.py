@@ -99,6 +99,11 @@ class ToolExecuteOutcome:
     confirm_id: str | None = None
 
 
+def _json_of(resp: httpx.Response) -> dict[str, object] | None:
+    data = resp.json()
+    return cast("dict[str, object]", data) if isinstance(data, dict) else None
+
+
 class ApiClient:
     def __init__(self, settings: Settings) -> None:
         self._base = settings.api_base_url.rstrip("/")
@@ -305,6 +310,105 @@ class ApiClient:
             result=cast("dict[str, object]", result_raw) if isinstance(result_raw, dict) else None,
             confirm_id=cast("str | None", data.get("confirm_id")),
         )
+
+    async def task_plan(
+        self, *, task_id: str, tenant_key: str, steps: list[dict[str, object]]
+    ) -> list[dict[str, object]] | None:
+        """计划回写(090):返回落库后的步骤清单(含 id);被拒返回 None。"""
+        try:
+            resp = await self._post_once(
+                "/internal/task/plan",
+                {"task_id": task_id, "tenant_key": tenant_key, "steps": steps},
+            )
+        except httpx.HTTPError as e:
+            log.warning("task_plan 回调异常: %s", e)
+            return None
+        if resp.status_code == 409:
+            return []  # 步骤已存在(续跑):编排器改读既有清单
+        if resp.status_code != 200:
+            log.warning("task_plan 非 200: HTTP %s", resp.status_code)
+            return None
+        data = _json_of(resp)
+        items = (data or {}).get("steps")
+        out: list[dict[str, object]] = []
+        if isinstance(items, list):
+            out = [dict(cast("dict[str, object]", i)) for i in cast("list[object]", items)]
+        return out
+
+    async def task_steps(self, *, task_id: str, tenant_key: str) -> list[dict[str, object]] | None:
+        """步骤清单读取(续跑路径;任何失败返回 None)。"""
+        try:
+            resp = await self._get_once(
+                "/internal/task/steps",
+                params={"task_id": task_id, "tenant_key": tenant_key},
+            )
+        except httpx.HTTPError as e:
+            log.warning("task_steps 回调异常: %s", e)
+            return None
+        if resp.status_code != 200:
+            return None
+        data = _json_of(resp)
+        items = (data or {}).get("steps")
+        out: list[dict[str, object]] = []
+        if isinstance(items, list):
+            for i in cast("list[object]", items):
+                if isinstance(i, dict):
+                    out.append(cast("dict[str, object]", i))
+        return out
+
+    async def task_step_start(
+        self, *, task_id: str, tenant_key: str, step_id: str
+    ) -> dict[str, object] | None:
+        """步骤启动决策(execute/await_approval/pause/skip);HTTP 层异常=None。"""
+        try:
+            resp = await self._post_once(
+                "/internal/task/step-start",
+                {"task_id": task_id, "tenant_key": tenant_key, "step_id": step_id},
+            )
+        except httpx.HTTPError as e:
+            log.warning("task_step_start 回调异常: %s", e)
+            return None
+        return _json_of(resp) if resp.status_code == 200 else None
+
+    async def task_step_result(self, **kw: object) -> dict[str, object] | None:
+        """步骤结果回写(证据驱动;控制面返回 continue/reject 决策)。"""
+        try:
+            resp = await self._post_once("/internal/task/step-result", dict(kw))
+        except httpx.HTTPError as e:
+            log.warning("task_step_result 回调异常: %s", e)
+            return None
+        return _json_of(resp) if resp.status_code == 200 else None
+
+    async def task_finish(
+        self, *, task_id: str, tenant_key: str, status: str, fail_reason: str | None
+    ) -> bool:
+        """任务终态回写(DONE/FAILED);失败仅日志(终态另有兜底路径)。"""
+        try:
+            resp = await self._post_once(
+                "/internal/task/finish",
+                {
+                    "task_id": task_id,
+                    "tenant_key": tenant_key,
+                    "status": status,
+                    "fail_reason": fail_reason,
+                },
+            )
+            return resp.status_code == 204
+        except httpx.HTTPError as e:
+            log.warning("task_finish 回调异常: %s", e)
+            return False
+
+    async def report_progress(self, *, report_id: str, phase: str) -> None:
+        """报告生成进度回写(088):POST /internal/report/progress。
+        进度是尽力而为信号:任何失败仅日志,不阻断编排主链路,不重发。"""
+        try:
+            resp = await self._post_once(
+                "/internal/report/progress", {"report_id": report_id, "phase": phase}
+            )
+            if resp.status_code != 204 and resp.status_code != 200:
+                log.warning("report_progress 非 2xx: HTTP %s", resp.status_code)
+        except Exception as e:  # noqa: BLE001  # 进度回写永不阻断主链路
+            log.warning("report_progress 失败(忽略): %s", e)
 
     async def attachment_content(
         self, att_id: str, *, tenant_key: str, user_id: str

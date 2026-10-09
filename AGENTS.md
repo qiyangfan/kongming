@@ -21,7 +21,8 @@ openspec/     spec-driven 工作流:config.yaml 硬约束 + constitution.md 宪�
 ```bash
 make check          # 全量质量门禁 = api/agent 各自 ruff+mypy+pytest + web tsc+test+eslint
 make contracts      # 导出 OpenAPI → 生成前端类型;改了 api 路由/模型后必跑并提交产物
-make up / down      # compose 起/停 postgres redis
+# 本地 pg/redis 用统一环境栈 ~/workspace/env(5432/6379,见 docs/HANDOFF.md);
+# make up/down 仅服务容器部署形态,本地开发勿自起(与 env 栈抢 5432)
 # apps/api:  uv sync && uv run alembic upgrade head && uv run uvicorn kongming.main:app --port 8000
 # apps/agent: uv sync && uv run uvicorn kongming_agent.main:app --port 8001
 # apps/web:  pnpm install && pnpm dev   (typecheck= tsc -b;lint= eslint;test= vitest run 纯函数)
@@ -79,6 +80,7 @@ specs/baseline 为准;上游 specs 取材指引见 docs/roadmap.md。
 
 | 改动区域 | 先读 |
 |---|---|
+| 战略/方向规划、新能力立项 | docs/adr/010(AI 五大方向定调)+ docs/roadmap.md 第四梯队 |
 | 认证/登录/用户 | docs/adr/003(自建认证,不用 Keycloak)+ 006(联邦连接器) |
 | api↔agent 交互、部署单元 | docs/adr/002(信任边界) |
 | 数据库表结构 | docs/adr/004 + apps/api/alembic/versions/0001_baseline.py(演进走新迁移) |

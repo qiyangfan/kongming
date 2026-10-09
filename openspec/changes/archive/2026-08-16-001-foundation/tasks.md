@@ -22,10 +22,10 @@
 - [x] 质量门禁:api+agent 各 ruff/mypy strict/import-linter/pytest;web tsc/eslint/build
 - [x] 契约幂等:两次导出 openapi.json 哈希一致
 
-## 遗留(转后续变更)
+## 遗留(转后续变更;均已在后续变更中落地,2026-10-09 快照清点时补勾)
 
-- [ ] 认证闭环(user store + login + auth spec 同步编写)—— 下一个变更
-- [ ] /internal/sql/execute 数据源执行路由(连接池 + data_scope + 审计落库)
-- [ ] Agent 节点 LLM 接线(understand/generate/summarize)
-- [ ] 前端主布局(会话列表 + 对话区 + RBAC 菜单)
-- [ ] 远程仓库与 push(待用户指令)
+- [x] 认证闭环(user store + login + auth spec 同步编写)—— 下一个变更（auth 域包与 specs 已在库）
+- [x] /internal/sql/execute 数据源执行路由(连接池 + data_scope + 审计落库)（chat/toolcall 服务实装,sql-execution spec 在库）
+- [x] Agent 节点 LLM 接线(understand/generate/summarize)（apps/agent graph/nodes.py 实装）
+- [x] 前端主布局(会话列表 + 对话区 + RBAC 菜单)（apps/web 主布局与管理页已落地）
+- [x] 远程仓库与 push(待用户指令)（origin 已配置,HEAD 与远端一致,ls-remote 核验）

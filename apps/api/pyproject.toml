@@ -157,6 +157,28 @@ source_modules = ["kongming.quality.service", "kongming.quality.ports"]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
 [[tool.importlinter.contracts]]
+name = "task 领域模型/用例/端口不依赖框架(宪法 Article II 领域纯净,090)"
+type = "forbidden"
+source_modules = ["kongming.task.models", "kongming.task.service", "kongming.task.ports"]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "toolgateway 领域模型不依赖框架(宪法 Article II 领域纯净,089)"
+type = "forbidden"
+source_modules = ["kongming.toolgateway.models"]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "report 领域模型/用例/端口不依赖框架(宪法 Article II 领域纯净,088)"
+type = "forbidden"
+source_modules = [
+    "kongming.report.models",
+    "kongming.report.service",
+    "kongming.report.ports",
+]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
 name = "feedback 领域模型/用例/端口不依赖框架(宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [

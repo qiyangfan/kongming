@@ -251,7 +251,7 @@ def humanize_stats(
 
 
 class Artifact(TypedDict):
-    """对话产物(026):type ∈ sql/chart/document;content 主内容;metadata 辅助。"""
+    """对话产物(026):type ∈ sql/chart/document/report;content 主内容;metadata 辅助。"""
 
     type: str
     content: str
@@ -259,11 +259,33 @@ class Artifact(TypedDict):
 
 
 def derive_artifacts(
-    *, sql: str, chart: ChartSuggestion, summary: str, datasource_key: str
+    *,
+    sql: str,
+    chart: ChartSuggestion,
+    summary: str,
+    datasource_key: str,
+    report: dict[str, object] | None = None,  # 088:报告轮次纯增(互斥派生)
 ) -> list[Artifact]:
-    """从既有要素确定性派生产物(纯函数,零 LLM):sql 非空→sql 卡;
+    """从既有要素确定性派生产物(纯函数,零 LLM):报告轮次→report 卡
+    (088,互斥于问答三卡——报告轮次不叠加派生);否则 sql 非空→sql 卡;
     chart.type≠none→chart 卡;summary 非空→document 卡。
     派生对同步/流式/回显三路径同源(回显缺档时按要素重算,与 chart 同款)。"""
+    if report is not None:
+        rid = str(report.get("report_id") or "")
+        status = str(report.get("status") or "")
+        title = str(report.get("title") or "")
+        return [
+            Artifact(
+                type="report",
+                # content=标题+终态摘要(partial/failed 如实,不表述为全部完成)
+                content=f"{title}({report.get('summary') or status})",
+                metadata={
+                    "report_id": rid,
+                    "version": report.get("version"),
+                    "status": status,
+                },
+            )
+        ]
     out: list[Artifact] = []
     if sql.strip():
         out.append(

@@ -19,6 +19,10 @@ import "./index.css";
    其余页面(含 OAuthCallback/ChangePassword)均非常驻首屏,懒加载收益大于白检窗口。 */
 
 const MemoryPage = lazy(() => import("@/pages/MemoryPage"));
+const ReportsPage = lazy(() => import("@/pages/ReportsPage"));
+const ReportDetailPage = lazy(() => import("@/pages/ReportDetailPage"));
+const TasksPage = lazy(() => import("@/pages/TasksPage"));
+const TaskDetailPage = lazy(() => import("@/pages/TaskDetailPage"));
 const PortalPage = lazy(() => import("@/pages/PortalPage"));
 const PayPage = lazy(() => import("@/pages/PayPage"));
 const StorePage = lazy(() => import("@/pages/StorePage"));
@@ -117,6 +121,38 @@ const router = createBrowserRouter([
         element: el(
           <PermRoute perm="bot:run">
             <StorePage />
+          </PermRoute>,
+        ),
+      },
+      {
+        path: "tasks",
+        element: el(
+          <PermRoute perm="task:read">
+            <TasksPage />
+          </PermRoute>,
+        ),
+      },
+      {
+        path: "tasks/:taskId",
+        element: el(
+          <PermRoute perm="task:read">
+            <TaskDetailPage />
+          </PermRoute>,
+        ),
+      },
+      {
+        path: "reports",
+        element: el(
+          <PermRoute perm="report:read">
+            <ReportsPage />
+          </PermRoute>,
+        ),
+      },
+      {
+        path: "reports/:reportId",
+        element: el(
+          <PermRoute perm="report:read">
+            <ReportDetailPage />
           </PermRoute>,
         ),
       },

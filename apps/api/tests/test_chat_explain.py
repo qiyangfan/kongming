@@ -20,7 +20,7 @@ from kongming.config import get_settings
 from kongming.datasource.cipher import get_cipher
 from kongming.db import get_engine
 from kongming.internal import executor
-from tests.conftest import MakeUser
+from tests.conftest import MakeUser, db_conn
 from tests.test_chat_query import (
     _auth,
     _bind,
@@ -98,17 +98,28 @@ async def _mk_msg(
 
 async def _mk_ds(s: AsyncSession, key: str, tenant_id: str, *, status: str = "ACTIVE") -> str:
     """直插动态源行(密码经真 cipher 加密,与 008 测试同路径;同实例异 schema)。"""
-    enc = get_cipher(get_settings().datasource_encrypt_key).encrypt("kongming")
+    conn = db_conn()  # 连接参数环境派生(不硬编码端口,见 conftest.db_conn)
+    enc = get_cipher(get_settings().datasource_encrypt_key).encrypt(str(conn["password"]))
     did = (
         await s.execute(
             text(
                 "INSERT INTO public.sys_datasource"
                 " (id, datasource_key, name, tenant_id, host, port, database, username,"
                 "  password_enc, default_schema, status)"
-                " VALUES (gen_random_uuid(), :k, :k, :t, '127.0.0.1', 5432,"
-                " 'kongming_test', 'kongming', :pe, :ds, :st) RETURNING id"
+                " VALUES (gen_random_uuid(), :k, :k, :t, :h, :p,"
+                " :db, :u, :pe, :ds, :st) RETURNING id"
             ),
-            {"k": key, "t": tenant_id, "pe": enc, "ds": DS_SCHEMA, "st": status},
+            {
+                "k": key,
+                "t": tenant_id,
+                "h": conn["host"],
+                "p": conn["port"],
+                "db": conn["database"],
+                "u": conn["username"],
+                "pe": enc,
+                "ds": DS_SCHEMA,
+                "st": status,
+            },
         )
     ).scalar_one()
     await s.commit()

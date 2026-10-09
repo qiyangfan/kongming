@@ -19,8 +19,14 @@ import {
 } from "lucide-react";
 
 import { ChartView } from "@/components/chart-view";
-import { ChartArtifactCard, DocumentCard, SqlArtifactCard } from "@/components/artifact-blocks";
+import {
+  ChartArtifactCard,
+  DocumentCard,
+  ReportArtifactCard,
+  SqlArtifactCard,
+} from "@/components/artifact-blocks";
 import type { ChartSpec } from "@/components/chart-shared";
+import { ResultTable } from "@/components/result-table";
 import { normalizeBinding } from "@/components/chart-shared";
 import type { ArtifactOut } from "@/lib/chat-api";
 import { formatDateTime } from "@/lib/datetime";
@@ -44,68 +50,6 @@ import { Textarea } from "@/components/ui/textarea";
 
 /* 生成类型的 result 字段皆可选:本地归一化收窄。
    labels=呈现层列标签(041 双轨):表头显示业务名,悬停 title 保留物理列名。 */
-function ResultTable({
-  columns,
-  rows,
-  labels,
-}: {
-  columns: string[];
-  rows: unknown[][];
-  labels?: string[];
-}) {
-  return (
-    <div
-      // 结果表豁免卡片化(设计决策 D6,动态列):窄屏保留横滚;overscroll-x-contain
-      // 使横向滑动手势到此为止、不牵动页面纵向滚动(B4.1 手势隔离)
-      className="overflow-x-auto overscroll-x-contain rounded-lg border border-border"
-    >
-      <table className="w-full text-sm">
-        <thead className="bg-muted/50">
-          <tr>
-            {columns.map((c, i) => (
-              <th
-                key={`${c}-${i}`}
-                title={c}
-                className="px-3 py-2 text-left font-medium whitespace-nowrap text-muted-foreground"
-              >
-                {labels?.[i] || c}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td
-                colSpan={Math.max(columns.length, 1)}
-                className="px-3 py-6 text-center text-muted-foreground"
-              >
-                查无数据,秋叶落,结果空。
-              </td>
-            </tr>
-          ) : (
-            rows.map((row, i) => (
-              <tr key={i} className="border-t border-border">
-                {row.map((cell, j) => (
-                  <td
-                    key={j}
-                    className="max-w-80 truncate px-3 py-1.5 text-foreground"
-                    title={
-                      cell === null || cell === undefined ? undefined : String(cell) || undefined
-                    }
-                  >
-                    {cell === null || cell === undefined ? "—" : String(cell)}
-                  </td>
-                ))}
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 function normalize(msg: SessionMessageOut): {
   columns: string[];
   rows: unknown[][];
@@ -238,6 +182,15 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
   const result = normalize(msg);
   // 026:artifacts 非空走类型化产物卡;缺档(026 前存量/persist=false 容错)
   // 全段回落既有形态(spec「无 artifacts 的历史消息按既有形态渲染」)
+  // 088:报告轮次→report 卡独占(互斥于问答三卡,不叠加派生)
+  const reportArt = result.artifacts.find((a) => a.type === "report");
+  if (reportArt) {
+    return (
+      <div className="max-w-full">
+        <ReportArtifactCard content={reportArt.content} metadata={reportArt.metadata} />
+      </div>
+    );
+  }
   const sqlArt = result.artifacts.find((a) => a.type === "sql");
   const chartArt = result.artifacts.find((a) => a.type === "chart");
   const docArt = result.artifacts.find((a) => a.type === "document");

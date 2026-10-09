@@ -71,6 +71,9 @@ TRUNCATED = (
     "public.chat_message",
     "public.chat_session",
     "public.chat_suggestion",
+    "public.report_section",
+    "public.report_version",
+    "public.report",
     "public.sys_oper_log",
     "public.sys_sql_audit",
     "public.user_identities",
@@ -112,11 +115,33 @@ TRUNCATED = (
     "public.sys_billing_plan",
     "public.sys_quota_policy",
     "public.sys_payment",
+    "public.sys_agent_collab_worker",
+    "public.sys_agent_collab_run",
+    "public.sys_agent_task_step",
+    "public.sys_agent_task",
 )
 
 
 def _sync_dsn() -> str:
     return os.environ["KM_DATABASE_URL"].replace("+asyncpg", "")
+
+
+def db_conn() -> dict[str, object]:
+    """从 KM_DATABASE_URL 派生本机测试库连接参数(host/port/user/password/db)。
+
+    动态数据源类用例以「同实例异库/异 schema」形态注册数据源,连接参数不得
+    硬编码——端口布局属环境事实(2026-10-09 实证:硬编码 5432 在本机被其他
+    项目占用后 15 个用例集体假败)。"""
+    from urllib.parse import unquote, urlparse
+
+    p = urlparse(_sync_dsn())
+    return {
+        "host": p.hostname or "localhost",
+        "port": p.port or 5432,
+        "username": p.username or "kongming",
+        "password": unquote(p.password or ""),
+        "database": (p.path or "/").lstrip("/") or "kongming_test",
+    }
 
 
 def _admin_url() -> str:

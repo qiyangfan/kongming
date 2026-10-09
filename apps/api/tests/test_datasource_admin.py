@@ -20,22 +20,26 @@ from kongming.auth.seed import seed_all
 from kongming.config import get_settings
 from kongming.datasource.cipher import get_cipher
 from kongming.main import app
-from tests.conftest import MakeUser
+from tests.conftest import MakeUser, db_conn
 from tests.test_chat_query import _auth, _bind, _default_tenant_id, _login
 from tests.test_system_admin import _admin
+
+# 本机测试库连接参数(环境派生,不硬编码端口——2026-10-09 端口被占 15 例假败教训)
+_CONN = db_conn()
 
 DS = "/system/datasource"
 
 
 def _body(tenant_id: str, **over: object) -> dict[str, Any]:
+    conn = db_conn()  # 连接参数环境派生(不硬编码端口,见 conftest.db_conn)
     body: dict[str, object] = {
         "datasource_key": "extdb",
         "name": "外部库",
         "tenant_id": tenant_id,
-        "host": "127.0.0.1",
-        "port": 5432,
-        "database": "kongming_test",
-        "username": "kongming",
+        "host": conn["host"],
+        "port": conn["port"],
+        "database": conn["database"],
+        "username": conn["username"],
         "password": "secret-pw-1",
         "default_schema": "public",
     }
@@ -488,11 +492,11 @@ async def test_test_connection_ok(
     r = await client.post(
         f"{DS}/test",
         json={
-            "host": "127.0.0.1",
-            "port": 5432,
-            "database": "kongming_test",
-            "username": "kongming",
-            "password": "kongming",
+            "host": _CONN["host"],
+            "port": _CONN["port"],
+            "database": _CONN["database"],
+            "username": _CONN["username"],
+            "password": _CONN["password"],
         },
         headers=_auth(token),
     )
@@ -517,10 +521,10 @@ async def test_test_connection_auth_failure_hides_password(
     r = await client.post(
         f"{DS}/test",
         json={
-            "host": "127.0.0.1",
-            "port": 5432,
-            "database": "kongming_test",
-            "username": "kongming",
+            "host": _CONN["host"],
+            "port": _CONN["port"],
+            "database": _CONN["database"],
+            "username": _CONN["username"],
             "password": "wrong-secret-9",
         },
         headers=_auth(token),
@@ -561,15 +565,15 @@ async def test_test_connection_edit_mode_backfills_password(
     _, token = await _admin(client, session, make_user)
     tid = await _default_tenant_id(session)
     # 注册一个指向测试库自身的真数据源(密码为测试库真实口令)
-    created = await _create(client, token, tid, password="kongming")
+    created = await _create(client, token, tid, password=str(_CONN["password"]))
     r = await client.post(
         f"{DS}/test",
         json={
             "id": created["id"],
-            "host": "127.0.0.1",
-            "port": 5432,
-            "database": "kongming_test",
-            "username": "kongming",
+            "host": _CONN["host"],
+            "port": _CONN["port"],
+            "database": _CONN["database"],
+            "username": _CONN["username"],
             "password": None,  # 留空 → 库存密文补位
         },
         headers=_auth(token),
@@ -594,10 +598,10 @@ async def test_test_connection_undecryptable_credential(
         f"{DS}/test",
         json={
             "id": created["id"],
-            "host": "127.0.0.1",
-            "port": 5432,
-            "database": "kongming_test",
-            "username": "kongming",
+            "host": _CONN["host"],
+            "port": _CONN["port"],
+            "database": _CONN["database"],
+            "username": _CONN["username"],
             "password": None,
         },
         headers=_auth(token),

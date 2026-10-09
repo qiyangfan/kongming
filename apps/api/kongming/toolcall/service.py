@@ -48,6 +48,7 @@ from kongming.toolcall.ports import (
     ToolRepo,
 )
 from kongming.toolcall.registry import effective, get_tool
+from kongming.toolgateway.models import DOMAIN_TOOLS
 
 log = logging.getLogger(__name__)
 
@@ -178,6 +179,7 @@ class ToolCallService:
         resolver: DynamicToolResolver | None = None,  # 028:动态工具(MCP,未注入=纯静态)
         mcp_caller: McpToolCaller | None = None,  # 028:MCP 出站执行
         knowledge: KnowledgeSearchPort | None = None,  # 081:个人知识库(未注入=工具未注册)
+        knowledge_quota: int | None = None,  # 089:域配额(第二维度;None=不限)
         *,
         rate_limit_per_minute: int,
         confirm_ttl_minutes: int,
@@ -194,6 +196,7 @@ class ToolCallService:
         self._resolver = resolver
         self._mcp = mcp_caller
         self._knowledge = knowledge
+        self._knowledge_quota = knowledge_quota
         self._rate_limit = rate_limit_per_minute
         self._confirm_ttl = confirm_ttl_minutes
 
@@ -243,6 +246,7 @@ class ToolCallService:
                     channel=channel,
                     idempotency_key=idem,
                     expires_at=expires_at,
+                    domain=DOMAIN_TOOLS.get(tool_name),
                 )
             )
             # PENDING_CONFIRM 的 confirm_id 只能来自审计行 id;审计写失败则
@@ -307,6 +311,13 @@ class ToolCallService:
                     expires_at=expires,
                     args_json=args,  # 原文留存:确认后重放
                 )
+
+        # 089:域配额第二维度(网关域工具的固定窗口叠加;内置工具不受影响)
+        quota = DOMAIN_TOOLS.get(tool_name) and self._knowledge_quota
+        if quota and not await self._limiter.allow(
+            f"toolgw:{tenant_id}:{user_id}:{tool_name}", limit=quota, window_sec=60
+        ):
+            return await _finish("RATE_LIMITED", reason="RATE_LIMITED: 域配额超限")
 
         # handler 分发(执行期异常收敛 ERROR,防御层兜底)
         try:

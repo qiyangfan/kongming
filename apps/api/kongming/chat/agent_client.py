@@ -171,6 +171,10 @@ class AgentClient:
         self._base = settings.agent_base_url.rstrip("/")
         self._timeout = settings.agent_timeout_sec
         self._headers = {"X-Internal-Token": settings.internal_token or ""}
+        # 088:报告生成是长任务(多轮 LLM+取数),独立超时预算(非单轮问答口径)
+        self._report_timeout = settings.agent_report_timeout_sec
+        # 090:任务编排是多步长任务,超时须覆盖任务墙钟预算上限(见 config)
+        self._task_timeout = settings.agent_task_timeout_sec
 
     async def query(
         self,
@@ -454,3 +458,49 @@ class AgentClient:
             return None  # agent 侧降级(LLM 失败/输出非法)
         title = str(data.get("title") or "").strip()
         return title or None
+
+    async def run_task(self, payload: dict[str, object]) -> dict[str, object] | None:
+        """任务编排回调(090):POST /internal/task-run;长任务独立超时
+        (覆盖任务墙钟预算);不可达/非 200/坏报文返回 None(调用方收敛
+        INTERRUPTED,可显式恢复),不裸抛。"""
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._base,
+                timeout=self._task_timeout,
+                headers=self._headers,
+            ) as client:
+                resp = await client.post("/internal/task-run", json=payload)
+        except httpx.HTTPError as e:
+            log.warning("任务编排回调异常: %s", e)
+            return None
+        if resp.status_code != 200:
+            log.warning("任务编排非 200: HTTP %s", resp.status_code)
+            return None
+        try:
+            return _obj_dict(resp.json())
+        except (ValueError, TypeError, AttributeError) as e:
+            log.warning("任务编排响应解析失败: %s", e)
+            return None
+
+    async def generate_report(self, payload: dict[str, object]) -> dict[str, object] | None:
+        """报告生成编排回调(088):POST /internal/generate-report。
+        长任务(agent 侧多轮 LLM+取数),超时取独立预算;不可达/非 200/坏报文
+        一律返回 None(调用方收敛 FAILED 终态),不裸抛。"""
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._base,
+                timeout=self._report_timeout,
+                headers=self._headers,
+            ) as client:
+                resp = await client.post("/internal/generate-report", json=payload)
+        except httpx.HTTPError as e:
+            log.warning("报告生成回调异常: %s", e)
+            return None
+        if resp.status_code != 200:
+            log.warning("报告生成非 200: HTTP %s", resp.status_code)
+            return None
+        try:
+            return _obj_dict(resp.json())
+        except (ValueError, TypeError, AttributeError) as e:
+            log.warning("报告生成响应解析失败: %s", e)
+            return None

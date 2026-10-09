@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kongming.config import get_settings
 from kongming.datasource.cipher import get_cipher
 from kongming.db import get_engine
+from tests.conftest import db_conn
 
 INTERNAL = {"X-Internal-Token": "test-internal-token"}
 SCHEMA = "ds_meta"
@@ -65,16 +66,27 @@ async def _mk_tenant(s: AsyncSession, key: str) -> str:
 
 
 async def _mk_ds(s: AsyncSession, key: str, tenant_id: str, *, status: str = "ACTIVE") -> None:
-    enc = get_cipher(get_settings().datasource_encrypt_key).encrypt("kongming")
+    conn = db_conn()  # 连接参数环境派生(不硬编码端口,见 conftest.db_conn)
+    enc = get_cipher(get_settings().datasource_encrypt_key).encrypt(str(conn["password"]))
     await s.execute(
         text(
             "INSERT INTO public.sys_datasource"
             " (id, datasource_key, name, tenant_id, host, port, database, username,"
             "  password_enc, default_schema, status)"
-            " VALUES (gen_random_uuid(), :k, :k, :t, '127.0.0.1', 5432, 'kongming_test',"
-            "         'kongming', :pe, :ds, :st)"
+            " VALUES (gen_random_uuid(), :k, :k, :t, :h, :p, :db,"
+            "         :u, :pe, :ds, :st)"
         ),
-        {"k": key, "t": tenant_id, "pe": enc, "ds": SCHEMA, "st": status},
+        {
+            "k": key,
+            "t": tenant_id,
+            "h": conn["host"],
+            "p": conn["port"],
+            "db": conn["database"],
+            "u": conn["username"],
+            "pe": enc,
+            "ds": SCHEMA,
+            "st": status,
+        },
     )
     await s.commit()
 

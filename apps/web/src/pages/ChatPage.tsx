@@ -14,6 +14,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  FileText,
   ArrowDown,
   Feather,
   Info,
@@ -33,6 +34,15 @@ import { StreamingTurn } from "@/components/streaming-turn";
 import { ToolConfirmCard } from "@/components/tool-confirm-card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
@@ -41,7 +51,10 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { api, humanizeErrorText, type ChatQueryOut, type SessionMessageOut } from "@/lib/api";
 import { useAgentMode } from "@/lib/agent-mode-store";
+import { useAuth } from "@/lib/auth-store";
+import { hasPerm } from "@/lib/nav";
 import { getSuggestions, uploadAttachment } from "@/lib/chat-api";
+import { generateReport } from "@/lib/report-api";
 import { useDatasource } from "@/lib/datasource-store";
 import {
   RECOVERY_POLL_BUDGET_MS,
@@ -192,6 +205,17 @@ interface StreamingTurnStart {
 
 export default function ChatPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
+  // 088:会话内一键生成报告(入口 a:既有问答产物为素材;新会话无 sid=直接指令)
+  const canGenerateReport = hasPerm(
+    useAuth((s) => s.user),
+    "report:generate",
+  );
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportInstruction, setReportInstruction] = useState("");
+  const [reportTitle, setReportTitle] = useState("");
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportBusy, setReportBusy] = useState(false);
+
   const { current } = useTenant();
   const datasource = useDatasource((s) => s.current);
   const qc = useQueryClient();
@@ -221,6 +245,29 @@ export default function ChatPage() {
   const selfNavigatedRef = useRef<string | null>(null);
   // navigate/invalidate 回调里读最新值的稳定引用(sid 归一 null:useParams
   // 无参数时为 undefined,与流发起上下文的 null 归一比对——不归一则守卫恒 false)
+  async function submitGenerateReport(): Promise<void> {
+    const instruction = reportInstruction.trim();
+    if (reportBusy || !instruction) return;
+    setReportBusy(true);
+    setReportError(null);
+    try {
+      const out = await generateReport({
+        instruction,
+        datasource_key: datasource,
+        session_id: sessionIdRef.current,
+        title: reportTitle.trim() || null,
+      });
+      setReportOpen(false);
+      setReportInstruction("");
+      setReportTitle("");
+      navigate(`/reports/${out.report_id}`);
+    } catch (e) {
+      setReportError(e instanceof Error ? e.message : "发起生成未成,请稍后再试。");
+    } finally {
+      setReportBusy(false);
+    }
+  }
+
   const sessionIdRef = useRef<string | null>(sessionId ?? null);
   sessionIdRef.current = sessionId ?? null;
   const tenantRef = useRef(current);
@@ -645,6 +692,19 @@ export default function ChatPage() {
               )}
             </Button>
             <div className="flex items-center gap-2">
+              {canGenerateReport && (
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="after:-inset-2"
+                  onClick={() => setReportOpen(true)}
+                  disabled={streaming !== null}
+                  aria-label="生成报告"
+                  title="基于本会话问答生成分析报告"
+                >
+                  <FileText className="size-4" aria-hidden />
+                </Button>
+              )}
               <Switch
                 id="agent-mode"
                 checked={agentMode === "react"}
@@ -666,6 +726,60 @@ export default function ChatPage() {
               </Tooltip>
             </div>
           </div>
+          {/* 088:一键生成报告对话框(入口 a/b 同源;发起后跳报告详情看进度) */}
+          <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>生成分析报告</DialogTitle>
+                <DialogDescription>
+                  {sessionId
+                    ? "以本会话既有问答为素材生成;也可只写指令,由 AI 自主取数。"
+                    : "描述报告目标与数据范围,AI 经问数链路自主取数。"}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label htmlFor="report-instruction">报告要求</Label>
+                  <Textarea
+                    id="report-instruction"
+                    value={reportInstruction}
+                    onChange={(e) => setReportInstruction(e.target.value)}
+                    rows={3}
+                    maxLength={2000}
+                    placeholder={
+                      sessionId ? "例:面向周会,重点讲异常与趋势" : "例:出一份近 30 天销售分析报告"
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="report-title">标题(可选)</Label>
+                  <Input
+                    id="report-title"
+                    value={reportTitle}
+                    onChange={(e) => setReportTitle(e.target.value)}
+                    maxLength={200}
+                    placeholder="留空则由 AI 拟定"
+                  />
+                </div>
+                {reportError && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {reportError}
+                  </p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="ghost" onClick={() => setReportOpen(false)}>
+                  取消
+                </Button>
+                <Button
+                  onClick={() => void submitGenerateReport()}
+                  disabled={reportBusy || !reportInstruction.trim()}
+                >
+                  {reportBusy ? "发起中…" : "发起生成"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 pb-1">
               {attachments.map((a) => (

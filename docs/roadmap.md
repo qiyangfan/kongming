@@ -63,6 +63,30 @@ artifacts(027)⇄ cloud-code-sandbox(029);agent-memory(026)← team-workspace(03
 参考源:`/Users/solvela/nl2sql-data-platform/openspec/specs/<域>/spec.md`
 (剥离 Java/COLA/Keycloak 实现引用后取其行为场景;schema 契约以 Kongming baseline 为准)。
 
+## 第四梯队(AI 五大方向定调,owner 2026-10-09 确认,开工中)
+
+战略定调见 ADR-010「通用为骨、数据为刃」:五大方向是同一执行底盘上的
+**能力归口,不是五个系统**;方向定位与决策依据以 ADR-010 为单源,此处只登记
+地基与开工载体。
+
+| 方向 | 地基(已落地) | 开工载体 |
+|---|---|---|
+| 问数智能体(王牌) | 一梯队 chat/nl2sql/nl2sql-agent + 三梯队 semantic-layer / query-streaming / cloud-code-sandbox | 088 报告生成——数据链路闭环到可交付报告 |
+| 问答智能体 | rag 三路召回 / knowledge / document-rag / agent-memory | 知识侧深化远期登记,开工再立 spec |
+| 通用智能体 | ReAct 内核 / agent-memory / multi-model-routing / prompt-guardrails / cloud-code-sandbox | 089 工具网关(工具广度)+ 090 任务内核(长任务) |
+| 多智能体 | workflow-orchestration(静态 DAG)/ custom-agent | 091 动态协作编排(宿主 = 090 任务内核)——选型指引:步骤可静态枚举→workflow;需运行时拆解/分歧裁决→collab(缺省深度 1,嵌套 opt-in) |
+| 评测智能体 | eval / ai-eval(Execution Match、基线、few-shot 自学习)+ agent-observability | 评测智能体化(持续回归/自动构造评测集)远期登记 |
+
+依赖拓扑:088 / 089 / 090 相互独立、可并行;091 以 090 为宿主殿后。
+
+### 089 工具网关:后续域接入清单(2026-10-09 落地时登记)
+
+网关框架已就绪(域=清单+策略器+执行器;统一出站通道),新域接入=声明清单+实现策略器/执行器。
+后续接入候选(开工时各自立 spec):web 检索域(出口白名单按搜索引擎主机集)、
+HTTP 连接器域(用户自定义端点,白名单/凭证治理面需先立约)、内部系统连接器
+(工单/日历等;写工具走既有确认流)。MCP 出站维持不收编(mcp-interop 自有注册面,
+见 089 Non-goals)。
+
 ## 产品待办登记(backlog-settlement 终态化剥离,2026-08-25)
 
 以下为产品路线待办(非技术债;触发=产品决策,开工时再立 spec):

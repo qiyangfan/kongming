@@ -195,6 +195,17 @@ _KNOWLEDGE_TOOL = ToolDef(
 # localhost 等价主机集(fail-closed 白名单;host.docker.internal 是 compose
 # 部署形态下容器到宿主机的 localhost 等价形式,design D3)
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "host.docker.internal", "::1", "[::1]"})
+LOCAL_HOSTS = _LOCAL_HOSTS  # 组合根白名单单源复用(089 域清单)
+
+# 089:运行时停用工具(网关域停用 → 注入集与分发解析同源消失,与「域从未存在」
+# 同形;进程内生效,重启随部署清单复位)
+_RUNTIME_DISABLED: set[str] = set()
+
+
+def set_runtime_disabled(tool_names: frozenset[str]) -> None:
+    """替换运行时停用集内容(治理面启停端点调用;非增量;容器清空重填)。"""
+    _RUNTIME_DISABLED.clear()
+    _RUNTIME_DISABLED.update(tool_names)
 
 
 def is_local_base_url(url: str) -> bool:
@@ -236,9 +247,16 @@ def effective() -> dict[str, ToolDef]:
 
 
 def filter_specs(perm_codes: Collection[str]) -> list[ToolSpec]:
-    """按调用方权限点集过滤出可注入 Agent 面的工具 schema(空集→空列表,退化语义)。"""
-    return [d.spec() for d in _active_registry.values() if d.perm_code in perm_codes]
+    """按调用方权限点集过滤出可注入 Agent 面的工具 schema(空集→空列表,退化语义);
+    089:运行时停用工具不出现在注入集(与「域从未存在」同形)。"""
+    return [
+        d.spec()
+        for d in _active_registry.values()
+        if d.perm_code in perm_codes and d.name not in _RUNTIME_DISABLED
+    ]
 
 
 def get_tool(name: str) -> ToolDef | None:
+    if name in _RUNTIME_DISABLED:
+        return None  # 停用工具解析即拒(TOOL_NOT_REGISTERED 形,零感知)
     return _active_registry.get(name)

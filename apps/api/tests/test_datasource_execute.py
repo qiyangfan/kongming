@@ -20,9 +20,13 @@ from kongming.config import get_settings
 from kongming.datasource.cipher import get_cipher
 from kongming.db import get_engine
 from kongming.internal import executor
+from tests.conftest import db_conn
 from tests.test_system_admin import _admin
 
 MakeUser = Callable[..., Awaitable[str]]
+
+# 本机测试库连接参数(从 KM_DATABASE_URL 派生,不硬编码端口——环境事实见 conftest.db_conn)
+_CONN = db_conn()
 
 INTERNAL = {"X-Internal-Token": "test-internal-token"}
 SCHEMA = "ds_dyn"  # 动态源 default_schema
@@ -89,12 +93,17 @@ async def _mk_ds(
     schema: str = SCHEMA,
     password: str = "kongming",
     status: str = "ACTIVE",
-    host: str = "127.0.0.1",
-    port: int = 5432,
-    database: str = "kongming_test",
-    username: str = "kongming",
+    host: str = "",
+    port: int = 0,
+    database: str = "",
+    username: str = "",
 ) -> str:
-    """直插数据源行(arrange 独立;密码经真 cipher 加密,与实现同路径)。"""
+    """直插数据源行(arrange 独立;密码经真 cipher 加密,与实现同路径)。
+    连接参数缺省取本机测试库(环境派生,不硬编码端口)。"""
+    host = host or str(_CONN["host"])
+    port = port or int(str(_CONN["port"]))
+    database = database or str(_CONN["database"])
+    username = username or str(_CONN["username"])
     enc = get_cipher(get_settings().datasource_encrypt_key).encrypt(password)
     did = (
         await s.execute(
@@ -327,10 +336,10 @@ async def test_password_change_evicts_and_rebuilds(
                 "datasource_key": "dynpw",
                 "tenant_id": tid,
                 "name": "dynpw",
-                "host": "127.0.0.1",
-                "port": 5432,
-                "database": "kongming_test",
-                "username": "kongming",
+                "host": _CONN["host"],
+                "port": _CONN["port"],
+                "database": _CONN["database"],
+                "username": _CONN["username"],
                 "password": pw,
                 "default_schema": SCHEMA,
             },
@@ -373,10 +382,10 @@ async def test_disable_then_enable_rebuilds_with_latest_info(
             "datasource_key": "dyntoggle",
             "tenant_id": tid,
             "name": "dyntoggle",
-            "host": "127.0.0.1",
-            "port": 5432,
-            "database": "kongming_test",
-            "username": "kongming",
+            "host": _CONN["host"],
+            "port": _CONN["port"],
+            "database": _CONN["database"],
+            "username": _CONN["username"],
             "password": None,
             "default_schema": SCHEMA_V2,
         },
@@ -407,10 +416,10 @@ async def test_name_only_update_keeps_pool(
             "datasource_key": "dynname",
             "tenant_id": tid,
             "name": "改名了",
-            "host": "127.0.0.1",
-            "port": 5432,
-            "database": "kongming_test",
-            "username": "kongming",
+            "host": _CONN["host"],
+            "port": _CONN["port"],
+            "database": _CONN["database"],
+            "username": _CONN["username"],
             "password": None,
             "default_schema": SCHEMA,
         },

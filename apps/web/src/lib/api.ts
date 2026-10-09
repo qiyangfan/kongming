@@ -235,6 +235,16 @@ async function postBlob(path: string, body: unknown): Promise<Response> {
   return resp;
 }
 
+/** GET 文件下载类请求(088 报告 markdown 导出):错误语义与 postBlob 同构 */
+async function getBlob(path: string): Promise<Response> {
+  let resp = await doFetch(path);
+  if (resp.status === 401 && (await tryRefresh())) {
+    resp = await doFetch(path);
+  }
+  if (!resp.ok) throw await toStatusError(resp);
+  return resp;
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body: unknown) =>
@@ -247,6 +257,7 @@ export const api = {
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
   postBlob,
+  getBlob,
 };
 
 /* ============ 流式问答(017 query-streaming) ============ */

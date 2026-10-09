@@ -139,6 +139,7 @@ class ToolAuditEntry:
     duration_ms: int | None = None
     datasource_key: str | None = None
     channel: str = "chat"  # 025:渠道标记(chat/web_embed/api)
+    domain: str | None = None  # 089:域标签(网关域工具非空;内置工具恒 None)
     idempotency_key: str | None = None
     expires_at: datetime | None = None
 

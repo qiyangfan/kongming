@@ -6,11 +6,13 @@
 
 import { useId, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router";
 import {
   Check,
   ChevronRight,
   Copy,
   Database,
+  FileText,
   Loader2,
   Play,
   SlidersHorizontal,
@@ -193,6 +195,30 @@ export function ChartArtifactCard({
         </CollapsibleContent>
       </Collapsible>
     </div>
+  );
+}
+
+/* report 卡(088 report-generation):报告标题+终态摘要,点击进报告详情。
+   partial/failed 摘要由服务端如实给出门数,不前端二次表述。老前端收到未知
+   type 忽略(向后兼容由消费端 switch 行为保证) */
+export function ReportArtifactCard({
+  content,
+  metadata,
+}: {
+  content: string;
+  metadata: Record<string, unknown>;
+}) {
+  const reportId = String(metadata.report_id ?? "");
+  if (!reportId) return null;
+  return (
+    <Link
+      to={`/reports/${reportId}`}
+      className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent"
+    >
+      <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="min-w-0 flex-1 truncate">{content}</span>
+      <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+    </Link>
   );
 }
 

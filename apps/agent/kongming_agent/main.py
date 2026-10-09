@@ -35,7 +35,9 @@ from kongming_agent.graph.state import AgentState, ExecutionResult, ValidationRe
 from kongming_agent.llm import LlmError
 from kongming_agent.logging_setup import setup_logging
 from kongming_agent.prompt_fingerprint import prompt_fingerprint
+from kongming_agent.report_gen import run_report_generation
 from kongming_agent.settings import Settings
+from kongming_agent.task_gen import run_task as run_task_orchestration
 
 log = logging.getLogger(__name__)
 
@@ -224,6 +226,76 @@ async def prompt_fingerprint_endpoint() -> PromptFingerprintOut:
     受既有 X-Internal-Token 中间件守门(ADR-002 不变);纯函数直算,零状态。
     """
     return PromptFingerprintOut(prompt_fingerprint=prompt_fingerprint())
+
+
+class GenerateReportIn(BaseModel):
+    """报告生成编排请求(088;api 报告域后台任务回调,字段=编排素材)。"""
+
+    report_id: str
+    trace_id: str = ""
+    tenant_key: str = "default"
+    datasource_key: str = "default"
+    user_id: str | None = None
+    instruction: str = ""
+    title: str = ""
+    context_digest: str = ""
+
+
+class TaskRunIn(BaseModel):
+    """任务编排请求(090;api 任务域后台派发回调)。"""
+
+    task_id: str
+    trace_root: str = ""
+    tenant_key: str = "default"
+    datasource_key: str = "default"
+    user_id: str | None = None
+    goal: str = ""
+    budget: dict[str, object] = {}
+    tools: list[dict[str, object]] = []
+
+
+@app.post("/internal/task-run", tags=["internal"])
+async def task_run(req: TaskRunIn) -> dict[str, object]:
+    """任务编排(090):规划→逐步执行(单步有界 ReAct,证据驱动)→回写。
+    agent 面零任务持久状态;审批/预算/暂停由控制面回调决策驱动。"""
+
+    async def _run_step(question: str, extra: dict[str, object]) -> dict[str, object]:
+        tools_raw = extra.get("tools")
+        tools = cast("list[dict[str, object]]", tools_raw if isinstance(tools_raw, list) else [])
+        req_inner = QueryReactIn(
+            trace_id=str(req.trace_root or "task"),
+            tenant_key=req.tenant_key,
+            datasource_key=req.datasource_key,
+            user_id=req.user_id,
+            question=question,
+            history=[],
+            tools=tools,
+            channel="task",  # 090:工具执行审计归因到任务编排(区别于交互问答)
+        )
+        return await _run_react(req_inner)
+
+    return await run_task_orchestration(
+        payload=req.model_dump(),
+        llm=deps.get_llm(),
+        api=deps.get_api(),
+        settings=_settings,
+        step_runner=_run_step,
+    )
+
+
+@app.post("/internal/generate-report", tags=["internal"])
+async def generate_report(req: GenerateReportIn) -> dict[str, object]:
+    """报告生成编排(088):规划→逐叶取数(既有工具回调)→逐章撰写→组装。
+
+    长任务:多轮 LLM+多次取数,httpx 侧由 api 以独立长超时等待;编排内部
+    预算三约束(LLM 调用/token/墙钟)耗尽即停,PARTIAL 诚实收口。响应即
+    编排终态载荷(sections 绑定含快照),持久化/版本化/终态落库在 api 侧。"""
+    return await run_report_generation(
+        payload=req.model_dump(),
+        llm=deps.get_llm(),
+        api=deps.get_api(),
+        settings=_settings,
+    )
 
 
 @app.post("/internal/extract-memory", response_model=ExtractMemoryOut, tags=["internal"])

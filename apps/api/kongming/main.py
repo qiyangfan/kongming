@@ -51,11 +51,15 @@ from kongming.quality.router import router as quality_router
 from kongming.rag.router import doc_router as rag_doc_router
 from kongming.rag.router import internal_router as rag_internal_router
 from kongming.rag.router import router as rag_router
+from kongming.report.router import internal_router as report_internal_router
+from kongming.report.router import router as report_router
 from kongming.semantic.router import router as semantic_router
 from kongming.skillpack.router import router as skillpack_router
 from kongming.store.router import router as store_router
 from kongming.system.router import register_system_error_handlers
 from kongming.system.router import router as system_router
+from kongming.task.router import internal_router as task_internal_router
+from kongming.task.router import router as task_router
 from kongming.team.router import router as team_router
 from kongming.toolcall import registry as tool_registry
 from kongming.toolcall.router import chat_router as toolcall_chat_router
@@ -235,6 +239,25 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
     guard.startup_self_check()
     async with get_sessionmaker()() as session:
         await seed_all(session, get_settings())
+        # 090:重启扫描——存量 RUNNING/PLANNING 任务标记 INTERRUPTED(不谎称完成),
+        # 顺带清理挂起超 TTL 的审批步骤(必须经 service:repo 直调会漏掉审批清扫)
+        from kongming.db import get_sessionmaker as _gsm
+        from kongming.task.repository import SqlTaskRepo as _TaskRepo
+        from kongming.task.service import TaskService as _TaskSvc
+
+        async with _gsm()() as _s:
+            n = await _TaskSvc(_TaskRepo(_s)).mark_interrupted_stale()
+            await _s.commit()
+            if n:
+                log.info("启动扫描:%d 个存量任务标记 INTERRUPTED(含超时审批清理)", n)
+        # 088:进程中断滞留 GENERATING 的报告收敛 FAILED(不静默悬挂)
+        from kongming.report.repository import SqlReportRepo as _ReportRepo
+
+        async with _gsm()() as _s:
+            nr = await _ReportRepo(_s).mark_interrupted_failed()
+            await _s.commit()
+            if nr:
+                log.info("启动扫描:%d 个滞留 GENERATING 的报告标记 FAILED", nr)
         tool_registry.activate(tool_registry.build_registry(await _knowledge_endpoint(session)))
     archive_task = asyncio.create_task(_daily_archive_loop())
     billing_task = asyncio.create_task(_monthly_invoice_loop())  # 034:月首出账薄壳
@@ -320,6 +343,10 @@ app.include_router(trigger_webhook_router)
 app.include_router(team_router)
 app.include_router(store_router)
 app.include_router(billing_router)
+app.include_router(report_router)
+app.include_router(report_internal_router)
+app.include_router(task_router)
+app.include_router(task_internal_router)
 register_auth_error_handlers(app)
 register_system_error_handlers(app)
 register_datasource_error_handlers(app)
