@@ -10,6 +10,13 @@ import { ErrorAlert } from "@/components/error-alert";
 import { PageHeader } from "@/components/page-header";
 import { Pagination } from "@/components/pagination";
 import { StatusBadge } from "@/components/status-badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { listTasks, TASK_STATUS_META } from "@/lib/task-api";
 import type { TaskItem } from "@/lib/task-api";
 import { useTenant } from "@/lib/tenant-store";
@@ -20,9 +27,11 @@ export default function TasksPage() {
   const navigate = useNavigate();
   const tenant = useTenant((s) => s.current);
   const [page, setPage] = useState(1);
+  const [status, setStatus] = useState<string>("all");
+  const statusParam = status === "all" ? undefined : status;
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["tasks", tenant, page],
-    queryFn: () => listTasks(page, PAGE_SIZE),
+    queryKey: ["tasks", tenant, page, statusParam],
+    queryFn: () => listTasks(page, PAGE_SIZE, statusParam),
   });
 
   const total = data?.total ?? 0;
@@ -54,7 +63,13 @@ export default function TasksPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 px-4 py-6">
-      <PageHeader title="任务" description="跨请求的持久任务:目标分解为步骤,证据驱动执行" />
+      <PageHeader
+        title="任务"
+        description="跨请求的持久任务:目标分解为步骤,证据驱动执行"
+        actions={
+          <StatusFilter value={status} onChange={(v) => { setStatus(v); setPage(1); }} />
+        }
+      />
       {isError && <ErrorAlert />}
       <DataView
         columns={columns}
@@ -69,5 +84,24 @@ export default function TasksPage() {
         <Pagination page={page} pageCount={pageCount} total={total} onPageChange={setPage} />
       )}
     </div>
+  );
+}
+
+/** 状态筛选(090 spec 待实施项):全部 + 任务状态全集,单选即查。 */
+function StatusFilter(props: { value: string; onChange: (v: string) => void }) {
+  return (
+    <Select value={props.value} onValueChange={props.onChange}>
+      <SelectTrigger aria-label="按状态筛选任务" className="w-36">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">全部状态</SelectItem>
+        {Object.entries(TASK_STATUS_META).map(([value, meta]) => (
+          <SelectItem key={value} value={value}>
+            {meta.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

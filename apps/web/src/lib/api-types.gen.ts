@@ -2978,6 +2978,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{task_id}/steps/{step_id}/collab-topology": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Collab Topology
+         * @description 步骤声明协作拓扑(PENDING 步骤;归一+部署级钳制后落库,声明后该步
+         *     执行即协作)。Bot 绑定校验沿用 Bot 运行时口径(存在/启用/创建者 ACTIVE)。
+         */
+        put: operations["set_collab_topology_tasks__task_id__steps__step_id__collab_topology_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/collab-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Collab Runs
+         * @description 协作运行清单(任务维度,含 worker 账本;协作观测面单源)。
+         */
+        get: operations["list_collab_runs_tasks__task_id__collab_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/task/plan": {
         parameters: {
             query?: never;
@@ -3057,6 +3098,74 @@ export interface paths {
         put?: never;
         /** Task Finish */
         post: operations["task_finish_internal_task_finish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/task/collab-start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Collab Start */
+        post: operations["collab_start_internal_task_collab_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/task/collab-worker-start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Collab Worker Start */
+        post: operations["collab_worker_start_internal_task_collab_worker_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/task/collab-worker-result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Collab Worker Result */
+        post: operations["collab_worker_result_internal_task_collab_worker_result_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/task/collab-finish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Collab Finish */
+        post: operations["collab_finish_internal_task_collab_finish_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3471,6 +3580,165 @@ export interface components {
              * @default []
              */
             sources: components["schemas"]["SourceOut"][];
+        };
+        /** CollabFinishIn */
+        CollabFinishIn: {
+            /** Task Id */
+            task_id: string;
+            /** Tenant Key */
+            tenant_key: string;
+            /** Run Id */
+            run_id: string;
+            /** Verdict */
+            verdict: string;
+            /**
+             * Pending Count
+             * @default 0
+             */
+            pending_count: number;
+            /**
+             * Dissent
+             * @default false
+             */
+            dissent: boolean;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+        };
+        /** CollabRunOut */
+        CollabRunOut: {
+            /** Id */
+            id: string;
+            /** Step Id */
+            step_id: string;
+            /** Topology */
+            topology: {
+                [key: string]: unknown;
+            };
+            /** Status */
+            status: string;
+            /** Verdict */
+            verdict: string | null;
+            /** Depth */
+            depth: number;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Workers */
+            workers?: components["schemas"]["CollabWorkerOut"][];
+        };
+        /** CollabRunsOut */
+        CollabRunsOut: {
+            /** Items */
+            items: components["schemas"]["CollabRunOut"][];
+        };
+        /** CollabStartIn */
+        CollabStartIn: {
+            /** Task Id */
+            task_id: string;
+            /** Tenant Key */
+            tenant_key: string;
+            /** Step Id */
+            step_id: string;
+            /**
+             * Depth
+             * @default 1
+             */
+            depth: number;
+        };
+        /** CollabTopologyIn */
+        CollabTopologyIn: {
+            /** Max Workers */
+            max_workers?: number | null;
+            /**
+             * Critic
+             * @default false
+             */
+            critic: boolean;
+            /** Dispatch */
+            dispatch?: string | null;
+            /** Bot Key */
+            bot_key?: string | null;
+        };
+        /** CollabWorkerOut */
+        CollabWorkerOut: {
+            /** Worker No */
+            worker_no: number;
+            /** Subgoal */
+            subgoal: string;
+            /** Bot Key */
+            bot_key: string | null;
+            /** Status */
+            status: string;
+            /** Conclusion */
+            conclusion: {
+                [key: string]: unknown;
+            } | null;
+            /** Evidence */
+            evidence: {
+                [key: string]: unknown;
+            } | null;
+            /** Usage */
+            usage: {
+                [key: string]: unknown;
+            } | null;
+            /** Trace Id */
+            trace_id: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** CollabWorkerResultIn */
+        CollabWorkerResultIn: {
+            /** Task Id */
+            task_id: string;
+            /** Tenant Key */
+            tenant_key: string;
+            /** Run Id */
+            run_id: string;
+            /** Worker No */
+            worker_no: number;
+            /** Status */
+            status: string;
+            /** Conclusion */
+            conclusion?: {
+                [key: string]: unknown;
+            };
+            /** Evidence */
+            evidence?: {
+                [key: string]: unknown;
+            };
+            /** Usage */
+            usage?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Trace Id
+             * @default
+             */
+            trace_id: string;
+        };
+        /** CollabWorkerStartIn */
+        CollabWorkerStartIn: {
+            /** Task Id */
+            task_id: string;
+            /** Tenant Key */
+            tenant_key: string;
+            /** Run Id */
+            run_id: string;
+            /** Worker No */
+            worker_no: number;
+            /** Subgoal */
+            subgoal: string;
+            /** Bot Key */
+            bot_key?: string | null;
+            /**
+             * Trace Id
+             * @default
+             */
+            trace_id: string;
         };
         /**
          * CostTrack
@@ -3935,6 +4203,8 @@ export interface components {
             task_id: string;
             /** Tenant Key */
             tenant_key: string;
+            /** Epoch */
+            epoch?: number | null;
             /** Status */
             status: string;
             /** Fail Reason */
@@ -5572,6 +5842,10 @@ export interface components {
             checkpoint: {
                 [key: string]: unknown;
             } | null;
+            /** Collab Topology */
+            collab_topology?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** StepResultIn */
         StepResultIn: {
@@ -5581,6 +5855,8 @@ export interface components {
             tenant_key: string;
             /** Step Id */
             step_id: string;
+            /** Epoch */
+            epoch?: number | null;
             /** Status */
             status: string;
             /**
@@ -5614,6 +5890,8 @@ export interface components {
             tenant_key: string;
             /** Step Id */
             step_id: string;
+            /** Epoch */
+            epoch?: number | null;
         };
         /** StoreBotDetailOut */
         StoreBotDetailOut: {
@@ -13210,6 +13488,7 @@ export interface operations {
             query?: {
                 page?: number;
                 size?: number;
+                status?: string | null;
             };
             header?: {
                 "x-tenant-id"?: string | null;
@@ -13446,6 +13725,79 @@ export interface operations {
             };
         };
     };
+    set_collab_topology_tasks__task_id__steps__step_id__collab_topology_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                task_id: string;
+                step_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollabTopologyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_collab_runs_tasks__task_id__collab_runs_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollabRunsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     task_plan_internal_task_plan_post: {
         parameters: {
             query?: never;
@@ -13604,6 +13956,138 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    collab_start_internal_task_collab_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollabStartIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    collab_worker_start_internal_task_collab_worker_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollabWorkerStartIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    collab_worker_result_internal_task_collab_worker_result_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollabWorkerResultIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    collab_finish_internal_task_collab_finish_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollabFinishIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
             };
             /** @description Validation Error */
             422: {

@@ -1,5 +1,6 @@
-"""task 路由(090):公开端点(创建/列表/详情/暂停/恢复/取消/审批)
-+ 内部编排回调(plan/step-start/step-result;X-Internal-Token 闸)。
+"""task 路由(090/091):公开端点(创建/列表/详情/暂停/恢复/取消/审批
++ 协作拓扑声明 + 协作运行查询)+ 内部编排回调(plan/step-start/step-result/
+collab-start/worker-start/worker-result/finish;X-Internal-Token 闸)。
 
 权限点:task:create / task:read / task:manage;归属收口=本人本租户,404 同形。
 执行派发=创建/真实恢复/审批决策时触发一次 agent 编排(拉取式,步间连续,
@@ -27,6 +28,7 @@ from kongming.task.service import (
     TaskInvalidTransition,
     TaskNotFound,
     TaskService,
+    TopologyBotNotFound,
 )
 from kongming.trace import ensure_trace_id
 
@@ -36,8 +38,36 @@ router = APIRouter(prefix="/tasks", tags=["task"])
 internal_router = APIRouter(prefix="/internal/task", tags=["internal"])
 
 
+class _CollabBotResolver:
+    """协作 Bot 运行时解析适配(091;沿用 bot 域运行时口径:租户内存在
+    + 启用 + 创建者用户 ACTIVE;人格与工具子集原样带出,工具交集在执行面收)。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def resolve(self, *, tenant_id: str, bot_key: str) -> dict[str, object] | None:
+        from kongming.bot.repository import SqlBotRepo
+
+        repo = SqlBotRepo(self._s)
+        row = await repo.get_by_key(tenant_id=tenant_id, bot_key=bot_key)
+        if row is None or not bool(row.get("enabled")):
+            return None
+        creator = str(row.get("created_by") or "")
+        if creator and await repo.find_user_status(creator) != "ACTIVE":
+            return None
+        tools_raw = row.get("tools")
+        tools = (
+            [str(t) for t in cast("list[object]", tools_raw)] if isinstance(tools_raw, list) else []
+        )
+        return {
+            "bot_key": bot_key,
+            "system_prompt": str(row.get("system_prompt") or ""),
+            "tools": tools,
+        }
+
+
 def _get_service(session: AsyncSession) -> TaskService:
-    return TaskService(SqlTaskRepo(session))
+    return TaskService(SqlTaskRepo(session), bot_resolver=_CollabBotResolver(session))
 
 
 async def _tenant_id(session: AsyncSession, user_id: str, tenant_key: str | None) -> str:
@@ -90,6 +120,7 @@ class StepOut(BaseModel):
     evidence: dict[str, object] | None
     fail_reason: str | None
     checkpoint: dict[str, object] | None
+    collab_topology: dict[str, object] | None = None
 
 
 class TaskDetailOut(BaseModel):
@@ -99,6 +130,41 @@ class TaskDetailOut(BaseModel):
     budget_config: dict[str, object]
     budget_used: dict[str, object]
     trace_root: str | None = None
+
+
+class CollabWorkerOut(BaseModel):
+    worker_no: int
+    subgoal: str
+    bot_key: str | None
+    status: str
+    conclusion: dict[str, object] | None
+    evidence: dict[str, object] | None
+    usage: dict[str, object] | None
+    trace_id: str | None
+    updated_at: str | None = None
+
+
+class CollabRunOut(BaseModel):
+    id: str
+    step_id: str
+    topology: dict[str, object]
+    status: str
+    verdict: str | None
+    depth: int
+    created_at: str | None = None
+    updated_at: str | None = None
+    workers: list[CollabWorkerOut] = Field(default_factory=list[CollabWorkerOut])
+
+
+class CollabRunsOut(BaseModel):
+    items: list[CollabRunOut]
+
+
+class CollabTopologyIn(BaseModel):
+    max_workers: int | None = Field(default=None, ge=1, le=16)
+    critic: bool = False
+    dispatch: str | None = None
+    bot_key: str | None = Field(default=None, max_length=m.COLLAB_BOT_KEY_MAX)
 
 
 class TaskMutateOut(BaseModel):
@@ -130,6 +196,7 @@ async def create_task(
     trace_root = ensure_trace_id()
     task_id = str(uuid7())
     svc = _get_service(session)
+    s = get_settings()
     await svc.create(
         task_id=task_id,
         tenant_id=tid,
@@ -139,9 +206,15 @@ async def create_task(
         session_id=body.session_id,
         trace_root=trace_root,
         budget=body.budget,
+        # 部署级上限钳制(090 spec「任务级配置 + 部署级上限」)
+        budget_caps={
+            "max_steps": s.task_budget_max_steps,
+            "max_tokens": s.task_budget_max_tokens,
+            "max_seconds": s.task_budget_max_seconds,
+        },
     )
     await session.commit()
-    _schedule_run(task_id=task_id)
+    await _bump_and_schedule(task_id)
     return TaskCreateOut(task_id=task_id, status="PLANNING")
 
 
@@ -156,11 +229,16 @@ async def list_tasks(
     x_tenant_id: Annotated[str | None, Header()] = None,
     page: int = 1,
     size: int = 20,
+    status: str | None = None,
 ) -> TaskPageOut:
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    if status is not None and status not in m.TASK_TRANSITIONS:
+        raise HTTPException(status_code=422, detail="INVALID_STATUS") from None
     svc = _get_service(session)
     p, s = max(1, page), min(100, max(1, size))
-    items, total = await svc.list_tasks(tenant_id=tid, user_id=str(user["sub"]), page=p, size=s)
+    items, total = await svc.list_tasks(
+        tenant_id=tid, user_id=str(user["sub"]), page=p, size=s, status=status
+    )
     return TaskPageOut(items=[_item(r) for r in items], total=total, page=p, size=s)
 
 
@@ -214,7 +292,7 @@ async def resume_task(
 ) -> TaskMutateOut:
     out, moved = await _mutate(task_id, user, session, x_tenant_id, None, op="resume")
     if moved:
-        _schedule_run(task_id=task_id)  # 同态幂等(已 RUNNING)不二次派发,防双执行循环
+        await _bump_and_schedule(task_id)  # 同态幂等(已 RUNNING)不二次派发,防双执行循环
     return out
 
 
@@ -267,8 +345,102 @@ async def approve_step(
     detail = await svc.get_detail(task_id=task_id, tenant_id=tid, user_id=uid)
     # 批准与拒绝都要派发:批准=该步回队重跑;拒绝=跳过该步续跑其余步骤
     # (编排挂起即停,审批决策是循环唯一的再启动口)
-    _schedule_run(task_id=task_id)
+    await _bump_and_schedule(task_id)
     return TaskMutateOut(task_id=task_id, status=str(detail["task"]["status"]))
+
+
+# ── 协作(091):拓扑声明 + 运行查询(挂 task:* 权限体系)──
+
+
+@router.put(
+    "/{task_id}/steps/{step_id}/collab-topology",
+    response_model=dict[str, object],
+    dependencies=[Depends(require_perm("task:manage"))],
+)
+async def set_collab_topology(
+    task_id: str,
+    step_id: str,
+    body: CollabTopologyIn,
+    user: Annotated[dict[str, object], Depends(current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> dict[str, object]:
+    """步骤声明协作拓扑(PENDING 步骤;归一+部署级钳制后落库,声明后该步
+    执行即协作)。Bot 绑定校验沿用 Bot 运行时口径(存在/启用/创建者 ACTIVE)。"""
+    uid = str(user["sub"])
+    _uuid_or_404(task_id)
+    _uuid_or_404(step_id)
+    tid = await _tenant_id(session, uid, x_tenant_id)
+    svc = _get_service(session)
+    try:
+        topo = await svc.set_step_topology(
+            task_id=task_id,
+            step_id=step_id,
+            tenant_id=tid,
+            user_id=uid,
+            raw_topology=body.model_dump(exclude_none=True),
+            max_workers_cap=get_settings().collab_max_workers,
+        )
+        await session.commit()
+    except TaskNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    except TopologyBotNotFound as e:
+        raise HTTPException(status_code=422, detail=f"INVALID_BOT: {e}") from e
+    except TaskConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    return topo
+
+
+@router.get(
+    "/{task_id}/collab-runs",
+    response_model=CollabRunsOut,
+    dependencies=[Depends(require_perm("task:read"))],
+)
+async def list_collab_runs(
+    task_id: str,
+    user: Annotated[dict[str, object], Depends(current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> CollabRunsOut:
+    """协作运行清单(任务维度,含 worker 账本;协作观测面单源)。"""
+    uid = str(user["sub"])
+    _uuid_or_404(task_id)
+    tid = await _tenant_id(session, uid, x_tenant_id)
+    svc = _get_service(session)
+    try:
+        runs = await svc.list_collab_runs(task_id=task_id, tenant_id=tid, user_id=uid)
+    except TaskNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    items: list[CollabRunOut] = []
+    for r in runs:
+        workers = [
+            CollabWorkerOut(
+                worker_no=int(str(w.get("worker_no") or 0)),
+                subgoal=str(w.get("subgoal") or ""),
+                bot_key=cast("str | None", w.get("bot_key")),
+                status=str(w.get("status") or ""),
+                conclusion=cast("dict[str, object] | None", w.get("conclusion")),
+                evidence=cast("dict[str, object] | None", w.get("evidence")),
+                usage=cast("dict[str, object] | None", w.get("usage")),
+                trace_id=cast("str | None", w.get("trace_id")),
+                updated_at=_iso_or_none(w.get("updated_at")),
+            )
+            for w in cast("list[dict[str, Any]]", r.get("workers") or [])
+        ]
+        items.append(
+            CollabRunOut(
+                id=str(r["id"]),
+                step_id=str(r["step_id"]),
+                topology=cast("dict[str, object]", r.get("topology") or {}),
+                status=str(r.get("status") or ""),
+                verdict=cast("str | None", r.get("verdict")),
+                depth=int(str(r.get("depth") or 1)),
+                created_at=_iso_or_none(r.get("created_at")),
+                updated_at=_iso_or_none(r.get("updated_at")),
+                workers=workers,
+            )
+        )
+    return CollabRunsOut(items=items)
 
 
 # ── 内部编排回调(agent 面任务循环回写)──
@@ -291,6 +463,7 @@ async def task_plan(
 ) -> dict[str, object]:
     from kongming.task.models import StepPlan
 
+    _uuid_body_or_404(body.task_id)
     plans = [StepPlan(goal=s.goal, require_confirm=s.require_confirm) for s in body.steps]
     if not plans:
         raise HTTPException(status_code=422, detail="EMPTY_PLAN")
@@ -311,6 +484,7 @@ async def task_steps(
     tenant_key: str,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, object]:
+    _uuid_body_or_404(task_id)
     tenant_id = await _tenant_key_to_id(session, tenant_key)
     # 任务-租户归属校验(同 token 不得横读他租户任务步骤)
     task = await SqlTaskRepo(session).get_task_system(task_id=task_id, tenant_id=tenant_id)
@@ -336,16 +510,18 @@ class StepStartIn(BaseModel):
     task_id: str
     tenant_key: str
     step_id: str
+    epoch: int | None = None
 
 
 @internal_router.post("/step-start")
 async def task_step_start(
     body: StepStartIn, session: Annotated[AsyncSession, Depends(get_session)]
 ) -> dict[str, object]:
+    _uuid_body_or_404(body.task_id, body.step_id)
     tenant_id = await _tenant_key_to_id(session, body.tenant_key)
     try:
         out = await _get_service(session).begin_step(
-            task_id=body.task_id, tenant_id=tenant_id, step_id=body.step_id
+            task_id=body.task_id, tenant_id=tenant_id, step_id=body.step_id, epoch=body.epoch
         )
         await session.commit()
     except TaskNotFound:
@@ -364,6 +540,7 @@ class StepResultIn(BaseModel):
     task_id: str
     tenant_key: str
     step_id: str
+    epoch: int | None = None
     status: str
     summary: str = ""
     evidence: dict[str, object] = Field(default_factory=dict)
@@ -379,6 +556,7 @@ async def task_step_result(
 ) -> dict[str, object]:
     from kongming.task.models import StepPlan, StepResult
 
+    _uuid_body_or_404(body.task_id, body.step_id)
     result = StepResult(
         step_id=body.step_id,
         status=body.status,
@@ -394,7 +572,7 @@ async def task_step_result(
     tenant_id = await _tenant_key_to_id(session, body.tenant_key)
     try:
         decision = await _get_service(session).finish_step(
-            task_id=body.task_id, tenant_id=tenant_id, result=result
+            task_id=body.task_id, tenant_id=tenant_id, result=result, epoch=body.epoch
         )
         await session.commit()
     except TaskNotFound:
@@ -409,6 +587,7 @@ async def task_step_result(
 class FinishIn(BaseModel):
     task_id: str
     tenant_key: str
+    epoch: int | None = None
     status: str
     fail_reason: str | None = None
 
@@ -419,6 +598,7 @@ async def task_finish(
 ) -> None:
     from kongming.task.models import T_DONE, T_FAILED
 
+    _uuid_body_or_404(body.task_id)
     if body.status not in (T_DONE, T_FAILED):
         raise HTTPException(status_code=422, detail="INVALID_FINAL_STATUS")
     tenant_id = await _tenant_key_to_id(session, body.tenant_key)
@@ -428,6 +608,7 @@ async def task_finish(
             tenant_id=tenant_id,
             status=body.status,
             fail_reason=body.fail_reason,
+            epoch=body.epoch,
         )
         await session.commit()
     except TaskNotFound:
@@ -438,6 +619,139 @@ async def task_finish(
         raise HTTPException(status_code=409, detail=str(e)) from e
     except TaskConflict as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+
+
+# ── 内部协作回调(091;agent 面编排回写;拓扑以库内声明为准)──
+
+
+class CollabStartIn(BaseModel):
+    task_id: str
+    tenant_key: str
+    step_id: str
+    depth: int = Field(default=1, ge=1, le=8)
+
+
+@internal_router.post("/collab-start")
+async def collab_start(
+    body: CollabStartIn, session: Annotated[AsyncSession, Depends(get_session)]
+) -> dict[str, object]:
+    _uuid_body_or_404(body.task_id, body.step_id)
+    tenant_id = await _tenant_key_to_id(session, body.tenant_key)
+    try:
+        out = await _get_service(session).collab_start_run(
+            task_id=body.task_id, step_id=body.step_id, tenant_id=tenant_id, depth=body.depth
+        )
+        await session.commit()
+    except TaskNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    except TaskConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    return out
+
+
+class CollabWorkerStartIn(BaseModel):
+    task_id: str
+    tenant_key: str
+    run_id: str
+    worker_no: int = Field(ge=1)
+    subgoal: str = Field(min_length=1, max_length=2000)
+    # 与 0040 列宽同口径(bot_key VARCHAR(64));缺限长则畸形载荷裸 500
+    bot_key: str | None = Field(default=None, max_length=m.COLLAB_BOT_KEY_MAX)
+    trace_id: str = Field(default="", max_length=64)
+
+
+@internal_router.post("/collab-worker-start", status_code=204)
+async def collab_worker_start(
+    body: CollabWorkerStartIn, session: Annotated[AsyncSession, Depends(get_session)]
+) -> None:
+    _uuid_body_or_404(body.task_id, body.run_id)
+    tenant_id = await _tenant_key_to_id(session, body.tenant_key)
+    try:
+        await _get_service(session).collab_worker_start(
+            task_id=body.task_id,
+            run_id=body.run_id,
+            tenant_id=tenant_id,
+            worker_no=body.worker_no,
+            subgoal=body.subgoal,
+            bot_key=body.bot_key,
+            trace_id=body.trace_id,
+        )
+        await session.commit()
+    except TaskNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    except TaskConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+
+
+class CollabWorkerResultIn(BaseModel):
+    task_id: str
+    tenant_key: str
+    run_id: str
+    worker_no: int = Field(ge=1)
+    status: str
+    conclusion: dict[str, object] = Field(default_factory=dict)
+    evidence: dict[str, object] = Field(default_factory=dict)
+    usage: dict[str, object] = Field(default_factory=dict)
+    trace_id: str = Field(default="", max_length=64)
+
+
+@internal_router.post("/collab-worker-result", status_code=204)
+async def collab_worker_result(
+    body: CollabWorkerResultIn, session: Annotated[AsyncSession, Depends(get_session)]
+) -> None:
+    _uuid_body_or_404(body.task_id, body.run_id)
+    tenant_id = await _tenant_key_to_id(session, body.tenant_key)
+    try:
+        await _get_service(session).collab_worker_result(
+            task_id=body.task_id,
+            run_id=body.run_id,
+            tenant_id=tenant_id,
+            worker_no=body.worker_no,
+            status=body.status,
+            conclusion=body.conclusion,
+            evidence=body.evidence,
+            usage=body.usage,
+            trace_id=body.trace_id,
+        )
+        await session.commit()
+    except TaskNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    except TaskConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+
+
+class CollabFinishIn(BaseModel):
+    task_id: str
+    tenant_key: str
+    run_id: str
+    verdict: str
+    pending_count: int = Field(default=0, ge=0)
+    dissent: bool = False
+    summary: str = Field(default="", max_length=8000)
+
+
+@internal_router.post("/collab-finish")
+async def collab_finish(
+    body: CollabFinishIn, session: Annotated[AsyncSession, Depends(get_session)]
+) -> dict[str, object]:
+    _uuid_body_or_404(body.task_id, body.run_id)
+    tenant_id = await _tenant_key_to_id(session, body.tenant_key)
+    try:
+        status = await _get_service(session).collab_finish_run(
+            task_id=body.task_id,
+            run_id=body.run_id,
+            tenant_id=tenant_id,
+            verdict=body.verdict,
+            pending_count=body.pending_count,
+            dissent=body.dissent,
+            summary=body.summary,
+        )
+        await session.commit()
+    except TaskNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    except TaskConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    return {"status": status}
 
 
 async def _tenant_key_to_id(session: AsyncSession, tenant_key: str) -> str:
@@ -466,6 +780,19 @@ def _uuid_or_404(value: str) -> None:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
 
 
+def _uuid_body_or_404(*values: str) -> None:
+    """内部回调请求体 UUID 形校验(091 补齐 B3:畸形串 404 同形,
+    不再穿透到 DBAPI 裸 500;agent 面按回调失败语义收敛)。"""
+    for v in values:
+        _uuid_or_404(v)
+
+
+def _iso_or_none(value: object) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat() if isinstance(value, datetime) else str(value)
+
+
 def _item(r: dict[str, Any]) -> TaskItem:
     created = r["created_at"]
     updated = r["updated_at"]
@@ -492,6 +819,7 @@ def _detail_out(detail: dict[str, Any]) -> TaskDetailOut:
             evidence=cast("dict[str, object] | None", s.get("evidence")),
             fail_reason=cast("str | None", s.get("fail_reason")),
             checkpoint=cast("dict[str, object] | None", s.get("checkpoint")),
+            collab_topology=cast("dict[str, object] | None", s.get("collab_topology")) or None,
         )
         for s in detail["steps"]
     ]
@@ -545,24 +873,41 @@ _GEN_TASKS: set[asyncio.Task[None]] = set()
 
 _TASK_ROW_SQL = (
     "SELECT t.id, t.tenant_id, tn.tenant_key, t.user_id, t.goal, t.budget_config,"
-    "       t.datasource_key, t.trace_root"
+    "       t.datasource_key, t.trace_root, t.dispatch_epoch"
     " FROM public.sys_agent_task t"
     " JOIN public.sys_tenant tn ON tn.id = t.tenant_id"
     " WHERE t.id = CAST(:i AS uuid)"
 )
 
 
-def _schedule_run(*, task_id: str) -> None:
+async def _bump_and_schedule(task_id: str) -> int | None:
+    """真实派发前置:派发代际原子自增,携新代数派发(0042 双执行者闸)。
+    代数失配会拦下旧循环的全部后续回调(begin abort/回写 stale/终态 409)。"""
+
+    async with get_sessionmaker()() as session:
+        epoch = await SqlTaskRepo(session).bump_dispatch_epoch(task_id=task_id)
+        await session.commit()
+    if epoch is None:
+        return None
+    _schedule_run(task_id=task_id, epoch=epoch)
+    return epoch
+
+
+def _schedule_run(*, task_id: str, epoch: int | None = None) -> None:
     """后台派发 agent 任务循环(强引用集防 GC);编排回调自持短会话,
     agent 长任务期间不占池;终态收口全部走 service.finish 白名单
     (编排迟到/用户已取消暂停时拒绝越权改写——终态不复活);
-    agent 未终态化=链路异常 → INTERRUPTED(可显式恢复),不静默滞留。"""
+    agent 未终态化=链路异常 → INTERRUPTED(可显式恢复),不静默滞留;
+    代际失配(STALE)或收口前代数已推进 → 放弃收口(在位派发负责)。"""
 
     async def _run() -> None:
         agent = AgentClient(get_settings())
-        collector = _Collector(agent=agent, task_id=task_id)
+        collector = _Collector(agent=agent, task_id=task_id, epoch=epoch)
         try:
             final = await collector.dispatch()
+            if final == "STALE":
+                log.info("任务编排代际失配退出(新派发接管): task_id=%s", task_id)
+                return
             if final in (m.T_DONE, m.T_FAILED):
                 await collector.finish_whitelisted(final)
             elif final not in (
@@ -594,9 +939,10 @@ def _schedule_run(*, task_id: str) -> None:
 class _Collector:
     """一次后台派发的编排驱动与终态收口(段一会话读行,段二 agent,段三白名单收口)。"""
 
-    def __init__(self, *, agent: AgentClient, task_id: str) -> None:
+    def __init__(self, *, agent: AgentClient, task_id: str, epoch: int | None = None) -> None:
         self._agent = agent
         self._task_id = task_id
+        self._epoch = epoch
 
     async def _read_row(self) -> dict[str, Any] | None:
         from sqlalchemy import text
@@ -626,6 +972,7 @@ class _Collector:
             await session.commit()
         payload: dict[str, object] = {
             "task_id": self._task_id,
+            "epoch": self._epoch or 0,
             "trace_root": str(row["trace_root"] or ""),
             # 租户键以任务行归属为准(header 缺省/他人租户视图不污染回调解析)
             "tenant_key": str(row["tenant_key"] or "default"),
@@ -645,6 +992,14 @@ class _Collector:
         fresh = await self._read_row()
         if fresh is None:
             return
+        if self._epoch is not None and int(fresh.get("dispatch_epoch") or 0) != self._epoch:
+            # 代数已推进(新派发接管):本循环不得收口任务终态
+            log.info(
+                "任务终态收口放弃(派发代际已推进): task_id=%s epoch=%s",
+                self._task_id,
+                self._epoch,
+            )
+            return
         async with get_sessionmaker()() as session:
             try:
                 await TaskService(SqlTaskRepo(session)).finish(
@@ -652,6 +1007,9 @@ class _Collector:
                     tenant_id=str(fresh["tenant_id"]),
                     status=status,
                     fail_reason=reason,
+                    # 与内部 finish 端点同口径:终态收口必须持派发代际,
+                    # service 内闸 + 写入谓词双闸(复核与收口间仍有并发窗口)
+                    epoch=self._epoch,
                 )
                 await session.commit()
             except TaskInvalidTransition as e:

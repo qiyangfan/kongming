@@ -11529,6 +11529,22 @@
             }
           },
           {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
             "name": "x-tenant-id",
             "in": "header",
             "required": false,
@@ -11894,6 +11910,145 @@
         }
       }
     },
+    "/tasks/{task_id}/steps/{step_id}/collab-topology": {
+      "put": {
+        "tags": [
+          "task"
+        ],
+        "summary": "Set Collab Topology",
+        "description": "步骤声明协作拓扑(PENDING 步骤;归一+部署级钳制后落库,声明后该步\n执行即协作)。Bot 绑定校验沿用 Bot 运行时口径(存在/启用/创建者 ACTIVE)。",
+        "operationId": "set_collab_topology_tasks__task_id__steps__step_id__collab_topology_put",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "step_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Step Id"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollabTopologyIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Set Collab Topology Tasks  Task Id  Steps  Step Id  Collab Topology Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tasks/{task_id}/collab-runs": {
+      "get": {
+        "tags": [
+          "task"
+        ],
+        "summary": "List Collab Runs",
+        "description": "协作运行清单(任务维度,含 worker 账本;协作观测面单源)。",
+        "operationId": "list_collab_runs_tasks__task_id__collab_runs_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollabRunsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/internal/task/plan": {
       "post": {
         "tags": [
@@ -12096,6 +12251,160 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/task/collab-start": {
+      "post": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Collab Start",
+        "operationId": "collab_start_internal_task_collab_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollabStartIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Collab Start Internal Task Collab Start Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/task/collab-worker-start": {
+      "post": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Collab Worker Start",
+        "operationId": "collab_worker_start_internal_task_collab_worker_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollabWorkerStartIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/task/collab-worker-result": {
+      "post": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Collab Worker Result",
+        "operationId": "collab_worker_result_internal_task_collab_worker_result_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollabWorkerResultIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/task/collab-finish": {
+      "post": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Collab Finish",
+        "operationId": "collab_finish_internal_task_collab_finish_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollabFinishIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Collab Finish Internal Task Collab Finish Post"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -13211,6 +13520,425 @@
           "error"
         ],
         "title": "ChatQueryOut"
+      },
+      "CollabFinishIn": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "tenant_key": {
+            "type": "string",
+            "title": "Tenant Key"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "verdict": {
+            "type": "string",
+            "title": "Verdict"
+          },
+          "pending_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Pending Count",
+            "default": 0
+          },
+          "dissent": {
+            "type": "boolean",
+            "title": "Dissent",
+            "default": false
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 8000,
+            "title": "Summary",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "tenant_key",
+          "run_id",
+          "verdict"
+        ],
+        "title": "CollabFinishIn"
+      },
+      "CollabRunOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "step_id": {
+            "type": "string",
+            "title": "Step Id"
+          },
+          "topology": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Topology"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          },
+          "depth": {
+            "type": "integer",
+            "title": "Depth"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "workers": {
+            "items": {
+              "$ref": "#/components/schemas/CollabWorkerOut"
+            },
+            "type": "array",
+            "title": "Workers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "step_id",
+          "topology",
+          "status",
+          "verdict",
+          "depth"
+        ],
+        "title": "CollabRunOut"
+      },
+      "CollabRunsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CollabRunOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "CollabRunsOut"
+      },
+      "CollabStartIn": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "tenant_key": {
+            "type": "string",
+            "title": "Tenant Key"
+          },
+          "step_id": {
+            "type": "string",
+            "title": "Step Id"
+          },
+          "depth": {
+            "type": "integer",
+            "maximum": 8.0,
+            "minimum": 1.0,
+            "title": "Depth",
+            "default": 1
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "tenant_key",
+          "step_id"
+        ],
+        "title": "CollabStartIn"
+      },
+      "CollabTopologyIn": {
+        "properties": {
+          "max_workers": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 16.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Workers"
+          },
+          "critic": {
+            "type": "boolean",
+            "title": "Critic",
+            "default": false
+          },
+          "dispatch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatch"
+          },
+          "bot_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Key"
+          }
+        },
+        "type": "object",
+        "title": "CollabTopologyIn"
+      },
+      "CollabWorkerOut": {
+        "properties": {
+          "worker_no": {
+            "type": "integer",
+            "title": "Worker No"
+          },
+          "subgoal": {
+            "type": "string",
+            "title": "Subgoal"
+          },
+          "bot_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Key"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "conclusion": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conclusion"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usage"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "worker_no",
+          "subgoal",
+          "bot_key",
+          "status",
+          "conclusion",
+          "evidence",
+          "usage",
+          "trace_id"
+        ],
+        "title": "CollabWorkerOut"
+      },
+      "CollabWorkerResultIn": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "tenant_key": {
+            "type": "string",
+            "title": "Tenant Key"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "worker_no": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Worker No"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "conclusion": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Conclusion"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Evidence"
+          },
+          "usage": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Usage"
+          },
+          "trace_id": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Trace Id",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "tenant_key",
+          "run_id",
+          "worker_no",
+          "status"
+        ],
+        "title": "CollabWorkerResultIn"
+      },
+      "CollabWorkerStartIn": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "tenant_key": {
+            "type": "string",
+            "title": "Tenant Key"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "worker_no": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Worker No"
+          },
+          "subgoal": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Subgoal"
+          },
+          "bot_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Key"
+          },
+          "trace_id": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Trace Id",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "tenant_key",
+          "run_id",
+          "worker_no",
+          "subgoal"
+        ],
+        "title": "CollabWorkerStartIn"
       },
       "CostTrack": {
         "properties": {
@@ -14406,6 +15134,17 @@
           "tenant_key": {
             "type": "string",
             "title": "Tenant Key"
+          },
+          "epoch": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epoch"
           },
           "status": {
             "type": "string",
@@ -18793,6 +19532,18 @@
               }
             ],
             "title": "Checkpoint"
+          },
+          "collab_topology": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collab Topology"
           }
         },
         "type": "object",
@@ -18821,6 +19572,17 @@
           "step_id": {
             "type": "string",
             "title": "Step Id"
+          },
+          "epoch": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epoch"
           },
           "status": {
             "type": "string",
@@ -18887,6 +19649,17 @@
           "step_id": {
             "type": "string",
             "title": "Step Id"
+          },
+          "epoch": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epoch"
           }
         },
         "type": "object",

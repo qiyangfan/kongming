@@ -76,7 +76,7 @@ orchestrator SHALL 聚合各 worker 结构化结果产出步骤结论:结论 MUS
 
 ### Requirement: 失控防护
 
-协作 SHALL 受三重上限约束,任一触顶即结构化终止:(1) 嵌套深度——协作内派生的子协作层数不超过配置上限(缺省 1,即不嵌套);(2) 并发——同时运行的 worker 数不超过配置上限;(3) 预算——worker 级预算从任务步骤预算继承,不得凭空放大。触顶终止 SHALL 携带已完成 worker 的部分结果与未完成清单(对齐 ReAct 触顶语义与预算退出诚实),SHALL NOT 谎称完成。
+协作 SHALL 受三重上限约束,任一触顶即结构化终止:(1) 嵌套深度——协作内派生的子协作层数不超过配置上限(缺省 1,即不嵌套);(2) 并发——同时运行的 worker 数不超过配置上限;(3) 预算——worker 执行次数预算自拓扑声明与部署上限推导(初派、分歧核实、critic 修订重派计入同一预算池),SHALL NOT 超出部署上限放大;worker token 用量 SHALL 按 worker 归集并计入任务步骤预算,由任务步级预算闸在步骤边界兜底。触顶终止 SHALL 携带已完成 worker 的部分结果与未完成清单(对齐 ReAct 触顶语义与预算退出诚实),SHALL NOT 谎称完成。
 
 #### Scenario: 并发上限生效
 
@@ -84,11 +84,17 @@ orchestrator SHALL 聚合各 worker 结构化结果产出步骤结论:结论 MUS
 - **WHEN** 派发请求
 - **THEN** 拒绝派发或排队等待(实现择一,行为一致),不超限运行
 
-#### Scenario: 预算继承不放大
+#### Scenario: 执行预算饥饿如实披露
 
-- **GIVEN** 任务步骤剩余 token 预算不足以支撑再派一个 worker
-- **WHEN** orchestrator 计划派发
-- **THEN** 不派发,以已有结果部分完成收口,披露未完成子任务
+- **GIVEN** worker 执行次数预算已被初派与核实/修订重派耗尽
+- **WHEN** orchestrator 需再派一个 worker(分歧核实或 critic 重派)
+- **THEN** 不派发并如实标注预算不足,已派发结论照常聚合收口,SHALL NOT 虚报完成
+
+#### Scenario: worker 用量计入任务预算
+
+- **GIVEN** 协作步骤执行中各 worker 消耗 LLM token
+- **WHEN** 步骤收口回写
+- **THEN** worker 用量计入该步骤 token 增量,任务预算闸可据此在后续步骤触发暂停
 
 ### Requirement: 协作观测面
 

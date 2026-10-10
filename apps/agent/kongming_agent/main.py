@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, Response
 
 from kongming_agent import deps
+from kongming_agent.collab_wiring import make_collab_runner
 from kongming_agent.describer import (
     ColumnSpec,
     DescribeError,
@@ -242,9 +243,11 @@ class GenerateReportIn(BaseModel):
 
 
 class TaskRunIn(BaseModel):
-    """任务编排请求(090;api 任务域后台派发回调)。"""
+    """任务编排请求(090;api 任务域后台派发回调)。
+    epoch=派发代际(0042 双执行者闸):编排全程携带,控制面失配即拦。"""
 
     task_id: str
+    epoch: int = 0
     trace_root: str = ""
     tenant_key: str = "default"
     datasource_key: str = "default"
@@ -256,8 +259,9 @@ class TaskRunIn(BaseModel):
 
 @app.post("/internal/task-run", tags=["internal"])
 async def task_run(req: TaskRunIn) -> dict[str, object]:
-    """任务编排(090):规划→逐步执行(单步有界 ReAct,证据驱动)→回写。
-    agent 面零任务持久状态;审批/预算/暂停由控制面回调决策驱动。"""
+    """任务编排(090/091):规划→逐步执行(单步有界 ReAct,证据驱动;
+    声明协作拓扑的步骤走协作编排)→回写。agent 面零任务持久状态;
+    审批/预算/暂停由控制面回调决策驱动。"""
 
     async def _run_step(question: str, extra: dict[str, object]) -> dict[str, object]:
         tools_raw = extra.get("tools")
@@ -274,12 +278,35 @@ async def task_run(req: TaskRunIn) -> dict[str, object]:
         )
         return await _run_react(req_inner)
 
+    # 091 组合根:协作步骤执行器(开账 fail-closed、worker=受限 ReAct、
+    # 账本/用量/trace 归集;装配细节单源在 collab_wiring)。
+    # 适配壳:collab_wiring 以 dict 载荷解耦 QueryReactIn(避免反向依赖本模块)
+    async def _react_adapter(req: object) -> dict[str, object]:
+        if isinstance(req, QueryReactIn):
+            return await _run_react(req)
+        payload = cast("dict[str, object]", req)
+        return await _run_react(QueryReactIn(**payload))  # type: ignore[arg-type]
+
+    collab_runner = make_collab_runner(
+        api=deps.get_api(),
+        llm=deps.get_llm(),
+        settings=_settings,
+        react_runner=_react_adapter,
+        task_id=req.task_id,
+        tenant_key=req.tenant_key,
+        datasource_key=req.datasource_key,
+        user_id=req.user_id,
+        trace_root=str(req.trace_root or ""),
+        tools=cast("list[dict[str, object]]", req.tools or []),
+    )
+
     return await run_task_orchestration(
         payload=req.model_dump(),
         llm=deps.get_llm(),
         api=deps.get_api(),
         settings=_settings,
         step_runner=_run_step,
+        collab_runner=collab_runner,
     )
 
 

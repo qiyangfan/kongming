@@ -32,6 +32,22 @@
 | 服务 | FastAPI(仅内网端口,内部令牌认证) |
 | 纪律 | 进程内禁止任何 DB 凭证(ADR-002),import-linter 守护 |
 
+### 任务/协作部署级上限(090/091;缺省值文档化)
+
+任务预算与多智能体协作的失控防护分两层:任务级/拓扑级配置在创建与声明时
+被部署上限钳制(api 侧单点钳制),agent 侧编排常量+Settings 作为执行面
+最后防线(缺省与 api 同值同源,防配置漂移导致的防护空洞)。
+
+| 配置 | 侧 | 缺省 | 说明 |
+|---|---|---|---|
+| `KM_TASK_BUDGET_MAX_STEPS` | api | 12 | 任务步数上限(任务级 budget 配置不得超过) |
+| `KM_TASK_BUDGET_MAX_TOKENS` | api | 200000 | 任务 token 预算上限 |
+| `KM_TASK_BUDGET_MAX_SECONDS` | api | 900 | 任务墙钟预算上限 |
+| `KM_COLLAB_MAX_WORKERS` | api | 3 | 协作拓扑 worker 数钳制上限 |
+| `KM_AGENT_COLLAB_MAX_WORKERS` | agent | 3 | 编排派发上限(最后防线) |
+| `KM_AGENT_COLLAB_MAX_DEPTH` | agent | 1 | 嵌套深度上限(1=不嵌套,提额须显式配置) |
+| `KM_AGENT_COLLAB_MAX_REVISION_ROUNDS` | agent | 1 | critic 修订轮次上限(轮次尽如实附保留意见) |
+
 ## apps/web — React SPA
 
 | 维度 | 选型 |

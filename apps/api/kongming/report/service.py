@@ -190,6 +190,16 @@ class ReportService:
             sections = await self._repo.get_sections(version_id=str(vmeta["id"]))
         return {"report": report, "version_meta": vmeta, "sections": sections}
 
+    async def get_progress(self, *, report_id: str, tenant_id: str, user_id: str) -> dict[str, Any]:
+        """生成进度轻量读(轮询单源):只读报告行状态,不加载版本元数据与
+        章节全文——进度轮询高频,每次拉全量章节属纯浪费。"""
+        report = await self._require(report_id=report_id, tenant_id=tenant_id, user_id=user_id)
+        return {
+            "report_id": str(report["id"]),
+            "status": str(report["status"]),
+            "phase": str(report["phase"]),
+        }
+
     async def list_versions(
         self, *, report_id: str, tenant_id: str, user_id: str
     ) -> list[dict[str, Any]]:

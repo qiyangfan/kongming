@@ -514,11 +514,11 @@ async def get_progress(
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
     svc = _get_service(session)
     try:
-        detail = await svc.get_detail(report_id=report_id, tenant_id=tid, user_id=str(user["sub"]))
+        # 轻量读:只取报告行状态,不加载版本章节全文(轮询高频路径)
+        p = await svc.get_progress(report_id=report_id, tenant_id=tid, user_id=str(user["sub"]))
     except ReportNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
-    r = detail["report"]
-    return ProgressOut(report_id=report_id, status=str(r["status"]), phase=str(r["phase"]))
+    return ProgressOut(report_id=report_id, status=p["status"], phase=p["phase"])
 
 
 @router.get("/{report_id}/versions", dependencies=[Depends(require_perm("report:read"))])

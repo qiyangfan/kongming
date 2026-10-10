@@ -85,6 +85,12 @@ class Settings(BaseSettings):
     # 090:任务编排=多步长任务;须 ≥ 任务默认墙钟预算(900s)+ 余量,
     # 否则合法运行中的任务会被传输层超时误收口
     agent_task_timeout_sec: float = Field(default=960.0, gt=0)
+    # 090/091:任务预算与协作部署级上限(任务级配置/步骤拓扑声明的硬天花板,
+    # 创建与声明时钳制;缺省=090 预算缺省与 091 编排缺省,零行为漂移)
+    task_budget_max_steps: int = Field(default=12, ge=1)
+    task_budget_max_tokens: int = Field(default=200_000, gt=0)
+    task_budget_max_seconds: int = Field(default=900, gt=0)
+    collab_max_workers: int = Field(default=3, ge=1)
 
     # 内部元数据通道:租户 schema 内省表数上限(防 prompt 膨胀)
     meta_schema_max_tables: int = Field(default=50, ge=1)

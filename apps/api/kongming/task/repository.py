@@ -65,7 +65,7 @@ class SqlTaskRepo:
                     text(
                         "SELECT id, tenant_id, user_id, session_id, goal, status, version,"
                         "       budget_config, budget_used, datasource_key, trace_root,"
-                        "       events, fail_reason, created_at, updated_at"
+                        "       events, fail_reason, dispatch_epoch, created_at, updated_at"
                         " FROM public.sys_agent_task"
                         " WHERE id = CAST(:i AS uuid) AND tenant_id = CAST(:t AS uuid)"
                         "   AND user_id = CAST(:u AS uuid)"
@@ -86,7 +86,7 @@ class SqlTaskRepo:
                     text(
                         "SELECT id, tenant_id, user_id, session_id, goal, status, version,"
                         "       budget_config, budget_used, datasource_key, trace_root,"
-                        "       events, fail_reason, created_at, updated_at"
+                        "       events, fail_reason, dispatch_epoch, created_at, updated_at"
                         " FROM public.sys_agent_task"
                         " WHERE id = CAST(:i AS uuid) AND tenant_id = CAST(:t AS uuid)"
                     ),
@@ -107,8 +107,12 @@ class SqlTaskRepo:
         to_status: str,
         fail_reason: str | None = None,
         event: dict[str, object] | None = None,
+        expect_epoch: int | None = None,
     ) -> bool:
-        """内部回调的状态迁移(编排驱动;白名单校验在 service 层)。"""
+        """内部回调的状态迁移(编排驱动;白名单校验在 service 层)。
+        expect_epoch:派发代际写入谓词(0042)——执行侧写任务态必须带代数入
+        WHERE,否则「读后判断→写」之间并发 bump 会放行旧执行者(读检查与
+        CAS 写不在同一原子操作,仅读侧判失配存在 TOCTOU 窗口)。"""
         sets = ["status = :to", "version = version + 1", "updated_at = now()"]
         params: dict[str, Any] = {
             "i": task_id,
@@ -116,6 +120,10 @@ class SqlTaskRepo:
             "from": from_status,
             "to": to_status,
         }
+        epoch_guard = ""
+        if expect_epoch is not None:
+            epoch_guard = "   AND dispatch_epoch = :ep"
+            params["ep"] = expect_epoch
         if fail_reason is not None:
             sets.append("fail_reason = :fr")
             params["fr"] = fail_reason
@@ -128,7 +136,7 @@ class SqlTaskRepo:
                     "UPDATE public.sys_agent_task SET "  # noqa: S608 —— sets 为受控常量片段
                     + ", ".join(sets)
                     + " WHERE id = CAST(:i AS uuid) AND tenant_id = CAST(:t AS uuid)"
-                    "   AND status = :from RETURNING id"
+                    "   AND status = :from" + epoch_guard + " RETURNING id"
                 ),
                 params,
             )
@@ -136,15 +144,25 @@ class SqlTaskRepo:
         return hit is not None
 
     async def list_tasks(
-        self, *, tenant_id: str, user_id: str, page: int, size: int
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        page: int,
+        size: int,
+        status: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
-        # 全量本人本租户(含终态),按创建时间倒序
+        # 全量本人本租户(含终态),按创建时间倒序;status 合法值由 router 校验
         where = " WHERE tenant_id = CAST(:t AS uuid) AND user_id = CAST(:u AS uuid)"
+        params: dict[str, Any] = {"t": tenant_id, "u": user_id}
+        if status is not None:
+            where += " AND status = :st"
+            params["st"] = status
         total = int(
             (
                 await self._s.execute(
                     text(f"SELECT count(*) FROM public.sys_agent_task{where}"),  # noqa: S608
-                    {"t": tenant_id, "u": user_id},
+                    params,
                 )
             ).scalar_one()
         )
@@ -158,7 +176,7 @@ class SqlTaskRepo:
                         f"{where}"  # noqa: S608
                         " ORDER BY created_at DESC LIMIT :lim OFFSET :off"
                     ),
-                    {"t": tenant_id, "u": user_id, "lim": size, "off": (page - 1) * size},
+                    {**params, "lim": size, "off": (page - 1) * size},
                 )
             )
             .mappings()
@@ -259,7 +277,7 @@ class SqlTaskRepo:
                 await self._s.execute(
                     text(
                         "SELECT id, task_id, ord, goal, status, require_confirm,"
-                        "       evidence, fail_reason, checkpoint, updated_at"
+                        "       evidence, fail_reason, checkpoint, collab_topology, updated_at"
                         " FROM public.sys_agent_task_step"
                         " WHERE task_id = CAST(:t AS uuid) ORDER BY ord"
                     ),
@@ -283,16 +301,25 @@ class SqlTaskRepo:
         checkpoint: dict[str, object] | None = None,
         clear_confirm: bool = False,
         mark_started: bool = False,
+        expect_epoch: int | None = None,
     ) -> bool:
         """步骤状态迁移(CAS,已终态不可改写);命中返回 True。
         clear_confirm:审批通过时一并清除确认标记(一次性闸门,防再挂死循环)。
-        mark_started:起跑时刻落 started_at(墙钟预算的分步计量基准)。"""
+        mark_started:起跑时刻落 started_at(墙钟预算的分步计量基准)。
+        expect_epoch:派发代际写入谓词(0042;经任务行子查询原子复核)——
+        执行侧写步骤态必须带代数,防「读后判断→写」窗口内 resume 回队后
+        旧循环把回队步骤重新占走。"""
         sets = ["status = :to", "updated_at = now()"]
         if clear_confirm:
             sets.append("require_confirm = false")
         if mark_started:
             sets.append("started_at = now()")
         params: dict[str, Any] = {"i": step_id, "t": task_id, "from": from_status, "to": to_status}
+        epoch_guard = ""
+        if expect_epoch is not None:
+            epoch_guard = "   AND :ep = (SELECT dispatch_epoch"
+            epoch_guard += " FROM public.sys_agent_task WHERE id = CAST(:t AS uuid))"
+            params["ep"] = expect_epoch
         if evidence is not None:
             sets.append("evidence = CAST(:ev AS jsonb)")
             params["ev"] = _dump(evidence)
@@ -308,7 +335,7 @@ class SqlTaskRepo:
                     "UPDATE public.sys_agent_task_step SET "  # noqa: S608 —— sets 为受控常量片段
                     + ", ".join(sets)
                     + " WHERE id = CAST(:i AS uuid) AND task_id = CAST(:t AS uuid)"
-                    "   AND status = :from RETURNING id"
+                    "   AND status = :from" + epoch_guard + " RETURNING id"
                 ),
                 params,
             )
@@ -426,6 +453,21 @@ class SqlTaskRepo:
             {"i": task_id, "ev": _dump([event])},
         )
 
+    async def bump_dispatch_epoch(self, *, task_id: str) -> int | None:
+        """派发代际原子自增(每次真实派发前;返回新代数,任务不存在返回 None)。
+        旧编排循环的回调按代数失配被拦——双执行者竞态的结构性闸门。"""
+        row = (
+            await self._s.execute(
+                text(
+                    "UPDATE public.sys_agent_task"
+                    " SET dispatch_epoch = dispatch_epoch + 1, updated_at = now()"
+                    " WHERE id = CAST(:i AS uuid) RETURNING dispatch_epoch"
+                ),
+                {"i": task_id},
+            )
+        ).scalar_one_or_none()
+        return int(row) if row is not None else None
+
     async def lock_task(self, *, task_id: str) -> bool:
         """任务行锁(规划/插步等复合写的串行化闸;事务结束释放)。"""
         row = (
@@ -442,7 +484,8 @@ class SqlTaskRepo:
                 await self._s.execute(
                     text(
                         "SELECT id, task_id, ord, goal, status, require_confirm,"
-                        "       evidence, fail_reason, checkpoint, started_at, updated_at"
+                        "       evidence, fail_reason, checkpoint, collab_topology,"
+                        "       started_at, updated_at"
                         " FROM public.sys_agent_task_step"
                         " WHERE id = CAST(:s AS uuid) AND task_id = CAST(:t AS uuid)"
                     ),
@@ -502,3 +545,268 @@ class SqlTaskRepo:
             .one_or_none()
         )
         return dict(row) if row else None
+
+    # ── 协作拓扑与协作账本(091)──
+
+    async def update_step_topology(
+        self, *, task_id: str, step_id: str, topology: dict[str, object]
+    ) -> bool:
+        """步骤协作拓扑声明(CAS:仅 PENDING 步骤可声明,执行中/终态拒绝)。"""
+        hit = (
+            await self._s.execute(
+                text(
+                    "UPDATE public.sys_agent_task_step"
+                    " SET collab_topology = CAST(:tp AS jsonb), updated_at = now()"
+                    " WHERE id = CAST(:s AS uuid) AND task_id = CAST(:t AS uuid)"
+                    "   AND status = 'PENDING' RETURNING id"
+                ),
+                {"s": step_id, "t": task_id, "tp": _dump(topology)},
+            )
+        ).scalar_one_or_none()
+        return hit is not None
+
+    async def insert_collab_run(
+        self,
+        *,
+        run_id: str,
+        task_id: str,
+        step_id: str,
+        tenant_id: str,
+        topology: dict[str, object],
+        depth: int,
+    ) -> None:
+        await self._s.execute(
+            text(
+                "INSERT INTO public.sys_agent_collab_run"
+                " (id, task_id, step_id, tenant_id, topology, status, depth)"
+                " VALUES (:i, CAST(:t AS uuid), CAST(:s AS uuid), CAST(:tn AS uuid),"
+                "         CAST(:tp AS jsonb), 'RUNNING', :d)"
+            ),
+            {
+                "i": run_id,
+                "t": task_id,
+                "s": step_id,
+                "tn": tenant_id,
+                "tp": _dump(topology),
+                "d": depth,
+            },
+        )
+
+    async def supersede_open_collab_runs(self, *, task_id: str, step_id: str) -> int:
+        """同一 (task, step) 的在途协作运行收敛为 CANCELLED(重跑前清账;
+        在途 worker 一并 SKIPPED——旧账不谎称完成)。返回收敛运行数。"""
+        runs = (
+            await self._s.execute(
+                text(
+                    "UPDATE public.sys_agent_collab_run"
+                    " SET status = 'CANCELLED', verdict = :sup, updated_at = now()"
+                    " WHERE task_id = CAST(:t AS uuid) AND step_id = CAST(:s AS uuid)"
+                    "   AND status = 'RUNNING' RETURNING id"
+                ),
+                {"t": task_id, "s": step_id, "sup": m.VERDICT_SUPERSEDED},
+            )
+        ).fetchall()
+        if runs:
+            await self._s.execute(
+                text(
+                    "UPDATE public.sys_agent_collab_worker w"
+                    " SET status = 'SKIPPED', updated_at = now()"
+                    " FROM public.sys_agent_collab_run r"
+                    " WHERE w.run_id = r.id AND r.task_id = CAST(:t AS uuid)"
+                    "   AND r.step_id = CAST(:s AS uuid)"
+                    "   AND w.status IN ('PENDING','RUNNING')"
+                ),
+                {"t": task_id, "s": step_id},
+            )
+        return len(runs)
+
+    async def cancel_open_collab(self, *, task_id: str) -> int:
+        """任务取消时收敛开放协作账(在途运行 CANCELLED、在途 worker SKIPPED)。"""
+        runs = (
+            await self._s.execute(
+                text(
+                    "UPDATE public.sys_agent_collab_run"
+                    " SET status = 'CANCELLED', updated_at = now()"
+                    " WHERE task_id = CAST(:t AS uuid) AND status = 'RUNNING' RETURNING id"
+                ),
+                {"t": task_id},
+            )
+        ).fetchall()
+        if runs:
+            await self._s.execute(
+                text(
+                    "UPDATE public.sys_agent_collab_worker w"
+                    " SET status = 'SKIPPED', updated_at = now()"
+                    " FROM public.sys_agent_collab_run r"
+                    " WHERE w.run_id = r.id AND r.task_id = CAST(:t AS uuid)"
+                    "   AND w.status IN ('PENDING','RUNNING')"
+                ),
+                {"t": task_id},
+            )
+        return len(runs)
+
+    async def get_collab_run_system(
+        self, *, run_id: str, task_id: str, tenant_id: str
+    ) -> dict[str, Any] | None:
+        """内部回调专用读取(租户过滤;step 归属经 task_id 冗余校验)。"""
+        row = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, task_id, step_id, tenant_id, topology, status, verdict, depth"
+                        " FROM public.sys_agent_collab_run"
+                        " WHERE id = CAST(:r AS uuid) AND task_id = CAST(:t AS uuid)"
+                        "   AND tenant_id = CAST(:tn AS uuid)"
+                    ),
+                    {"r": run_id, "t": task_id, "tn": tenant_id},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return dict(row) if row else None
+
+    async def insert_collab_worker(
+        self,
+        *,
+        run_id: str,
+        worker_no: int,
+        subgoal: str,
+        bot_key: str | None,
+        trace_id: str,
+    ) -> bool:
+        """worker 账落账(唯一键防重派发双行)。运行在途条件并入写入谓词
+        (CAS 风格):先读后写在并发下可把 worker 行挂到刚被收敛的 CANCELLED
+        运行上成幽灵账——收敛不追认迟到的派发。"""
+        hit = (
+            await self._s.execute(
+                text(
+                    "INSERT INTO public.sys_agent_collab_worker"
+                    " (id, run_id, worker_no, subgoal, bot_key, status, trace_id)"
+                    " SELECT :i, r.id, :n, :g, :b, 'RUNNING', :tr"
+                    " FROM public.sys_agent_collab_run r"
+                    " WHERE r.id = CAST(:r AS uuid) AND r.status = 'RUNNING'"
+                    " FOR UPDATE OF r"
+                    " ON CONFLICT (run_id, worker_no) DO NOTHING RETURNING id"
+                ),
+                {
+                    "i": str(uuid7()),
+                    "r": run_id,
+                    "n": worker_no,
+                    "g": subgoal,
+                    "b": bot_key,
+                    "tr": trace_id,
+                },
+            )
+        ).scalar_one_or_none()
+        return hit is not None
+
+    async def skip_open_collab_workers(self, *, run_id: str) -> int:
+        """运行终态收口时收敛在途 worker(结果回写失败/执行中断的行不得
+        永悬 RUNNING——与 supersede/cancel「旧账不谎称完成」同口径)。
+        返回收敛行数。"""
+        rows = (
+            await self._s.execute(
+                text(
+                    "UPDATE public.sys_agent_collab_worker"
+                    " SET status = 'SKIPPED', updated_at = now()"
+                    " WHERE run_id = CAST(:r AS uuid)"
+                    "   AND status IN ('PENDING','RUNNING') RETURNING id"
+                ),
+                {"r": run_id},
+            )
+        ).fetchall()
+        return len(rows)
+
+    async def finish_collab_worker(
+        self,
+        *,
+        run_id: str,
+        worker_no: int,
+        status: str,
+        conclusion: dict[str, object],
+        evidence: dict[str, object],
+        usage: dict[str, object],
+        trace_id: str,
+    ) -> bool:
+        """worker 终态回写(CAS:RUNNING → 终态;迟到回写拒绝)。"""
+        hit = (
+            await self._s.execute(
+                text(
+                    "UPDATE public.sys_agent_collab_worker"
+                    " SET status = :st, conclusion = CAST(:c AS jsonb),"
+                    "     evidence = CAST(:e AS jsonb), usage = CAST(:u AS jsonb),"
+                    "     trace_id = :tr, updated_at = now()"
+                    " WHERE run_id = CAST(:r AS uuid) AND worker_no = :n"
+                    "   AND status = 'RUNNING' RETURNING id"
+                ),
+                {
+                    "r": run_id,
+                    "n": worker_no,
+                    "st": status,
+                    "c": _dump(conclusion),
+                    "e": _dump(evidence),
+                    "u": _dump(usage),
+                    "tr": trace_id,
+                },
+            )
+        ).scalar_one_or_none()
+        return hit is not None
+
+    async def finish_collab_run(self, *, run_id: str, status: str, verdict: str | None) -> bool:
+        """协作运行终态回写(CAS:RUNNING → 终态)。"""
+        hit = (
+            await self._s.execute(
+                text(
+                    "UPDATE public.sys_agent_collab_run"
+                    " SET status = :st, verdict = :v, updated_at = now()"
+                    " WHERE id = CAST(:r AS uuid) AND status = 'RUNNING' RETURNING id"
+                ),
+                {"r": run_id, "st": status, "v": verdict},
+            )
+        ).scalar_one_or_none()
+        return hit is not None
+
+    async def list_collab_runs(self, *, task_id: str) -> list[dict[str, Any]]:
+        """协作运行清单(任务维度,含 worker 行;查询面单源)。"""
+        runs = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, task_id, step_id, topology, status, verdict, depth,"
+                        "       created_at, updated_at"
+                        " FROM public.sys_agent_collab_run"
+                        " WHERE task_id = CAST(:t AS uuid) ORDER BY created_at"
+                    ),
+                    {"t": task_id},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        workers = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT w.id, w.run_id, w.worker_no, w.subgoal, w.bot_key, w.status,"
+                        "       w.conclusion, w.evidence, w.usage, w.trace_id, w.updated_at"
+                        " FROM public.sys_agent_collab_worker w"
+                        " JOIN public.sys_agent_collab_run r ON r.id = w.run_id"
+                        " WHERE r.task_id = CAST(:t AS uuid)"
+                        " ORDER BY w.run_id, w.worker_no"
+                    ),
+                    {"t": task_id},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        by_run: dict[str, list[dict[str, Any]]] = {}
+        for w in workers:
+            by_run.setdefault(str(w["run_id"]), []).append(dict(w))
+        out: list[dict[str, Any]] = []
+        for r in runs:
+            row = dict(r)
+            row["workers"] = by_run.get(str(row["id"]), [])
+            out.append(row)
+        return out

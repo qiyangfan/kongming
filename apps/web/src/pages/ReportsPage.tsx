@@ -15,6 +15,7 @@ import { listReports, REPORT_PHASE_LABEL, REPORT_STATUS_META } from "@/lib/repor
 import type { ReportItem } from "@/lib/report-api";
 
 const PAGE_SIZE = 20;
+const REPORTS_POLL_MS = 2000;
 
 export default function ReportsPage() {
   const navigate = useNavigate();
@@ -23,6 +24,9 @@ export default function ReportsPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["reports", tenant, page],
     queryFn: () => listReports(page, PAGE_SIZE),
+    // 列表页存在生成中报告时轮询刷新(登记待办 B5);全终态即停,零空转
+    refetchInterval: (q) =>
+      (q.state.data?.items ?? []).some((r) => r.status === "GENERATING") ? REPORTS_POLL_MS : false,
   });
 
   const total = data?.total ?? 0;

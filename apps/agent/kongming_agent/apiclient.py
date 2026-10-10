@@ -357,13 +357,18 @@ class ApiClient:
         return out
 
     async def task_step_start(
-        self, *, task_id: str, tenant_key: str, step_id: str
+        self, *, task_id: str, tenant_key: str, step_id: str, epoch: int = 0
     ) -> dict[str, object] | None:
-        """步骤启动决策(execute/await_approval/pause/skip);HTTP 层异常=None。"""
+        """步骤启动决策(execute/await_approval/pause/skip/abort);HTTP 层异常=None。"""
         try:
             resp = await self._post_once(
                 "/internal/task/step-start",
-                {"task_id": task_id, "tenant_key": tenant_key, "step_id": step_id},
+                {
+                    "task_id": task_id,
+                    "tenant_key": tenant_key,
+                    "step_id": step_id,
+                    "epoch": epoch,
+                },
             )
         except httpx.HTTPError as e:
             log.warning("task_step_start 回调异常: %s", e)
@@ -380,7 +385,13 @@ class ApiClient:
         return _json_of(resp) if resp.status_code == 200 else None
 
     async def task_finish(
-        self, *, task_id: str, tenant_key: str, status: str, fail_reason: str | None
+        self,
+        *,
+        task_id: str,
+        tenant_key: str,
+        status: str,
+        fail_reason: str | None,
+        epoch: int = 0,
     ) -> bool:
         """任务终态回写(DONE/FAILED);失败仅日志(终态另有兜底路径)。"""
         try:
@@ -389,6 +400,7 @@ class ApiClient:
                 {
                     "task_id": task_id,
                     "tenant_key": tenant_key,
+                    "epoch": epoch,
                     "status": status,
                     "fail_reason": fail_reason,
                 },
@@ -397,6 +409,122 @@ class ApiClient:
         except httpx.HTTPError as e:
             log.warning("task_finish 回调异常: %s", e)
             return False
+
+    # ── 协作账本回调(091;开账 fail-closed,worker 行/终态尽力而为)──
+
+    async def collab_start(
+        self, *, task_id: str, tenant_key: str, step_id: str, depth: int = 1
+    ) -> dict[str, object] | None:
+        """协作开账(091):返回 {run_id, topology}(拓扑以控制面库内声明为准);
+        开账失败返回 None(调用方 fail-closed——无账不执行,防游离协作面)。"""
+        try:
+            resp = await self._post_once(
+                "/internal/task/collab-start",
+                {
+                    "task_id": task_id,
+                    "tenant_key": tenant_key,
+                    "step_id": step_id,
+                    "depth": depth,
+                },
+            )
+        except httpx.HTTPError as e:
+            log.warning("collab_start 回调异常: %s", e)
+            return None
+        return _json_of(resp) if resp.status_code == 200 else None
+
+    async def collab_worker_start(
+        self,
+        *,
+        task_id: str,
+        tenant_key: str,
+        run_id: str,
+        worker_no: int,
+        subgoal: str,
+        bot_key: str | None,
+        trace_id: str,
+    ) -> bool:
+        """worker 派发落账(091);失败仅日志(账本尽力而为,执行照常)。"""
+        try:
+            resp = await self._post_once(
+                "/internal/task/collab-worker-start",
+                {
+                    "task_id": task_id,
+                    "tenant_key": tenant_key,
+                    "run_id": run_id,
+                    "worker_no": worker_no,
+                    "subgoal": subgoal[:2000],
+                    "bot_key": bot_key,
+                    "trace_id": trace_id[:64],
+                },
+            )
+            return resp.status_code == 204
+        except httpx.HTTPError as e:
+            log.warning("collab_worker_start 回调异常: %s", e)
+            return False
+
+    async def collab_worker_result(
+        self,
+        *,
+        task_id: str,
+        tenant_key: str,
+        run_id: str,
+        worker_no: int,
+        status: str,
+        conclusion: dict[str, object],
+        evidence: dict[str, object],
+        usage: dict[str, object],
+        trace_id: str,
+    ) -> bool:
+        """worker 终态回写(091,用量按 worker 归集);失败仅日志。"""
+        try:
+            resp = await self._post_once(
+                "/internal/task/collab-worker-result",
+                {
+                    "task_id": task_id,
+                    "tenant_key": tenant_key,
+                    "run_id": run_id,
+                    "worker_no": worker_no,
+                    "status": status,
+                    "conclusion": conclusion,
+                    "evidence": evidence,
+                    "usage": usage,
+                    "trace_id": trace_id[:64],
+                },
+            )
+            return resp.status_code == 204
+        except httpx.HTTPError as e:
+            log.warning("collab_worker_result 回调异常: %s", e)
+            return False
+
+    async def collab_finish(
+        self,
+        *,
+        task_id: str,
+        tenant_key: str,
+        run_id: str,
+        verdict: str,
+        pending_count: int,
+        dissent: bool,
+        summary: str,
+    ) -> dict[str, object] | None:
+        """协作运行终态回写(091);失败仅日志(重跑/取消路径收敛账本)。"""
+        try:
+            resp = await self._post_once(
+                "/internal/task/collab-finish",
+                {
+                    "task_id": task_id,
+                    "tenant_key": tenant_key,
+                    "run_id": run_id,
+                    "verdict": verdict,
+                    "pending_count": pending_count,
+                    "dissent": dissent,
+                    "summary": summary[:8000],
+                },
+            )
+        except httpx.HTTPError as e:
+            log.warning("collab_finish 回调异常: %s", e)
+            return None
+        return _json_of(resp) if resp.status_code == 200 else None
 
     async def report_progress(self, *, report_id: str, phase: str) -> None:
         """报告生成进度回写(088):POST /internal/report/progress。

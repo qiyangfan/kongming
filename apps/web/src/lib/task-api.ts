@@ -8,6 +8,9 @@ export type TaskPageOut = components["schemas"]["TaskPageOut"];
 export type TaskDetailOut = components["schemas"]["TaskDetailOut"];
 export type StepOut = components["schemas"]["StepOut"];
 export type TaskMutateOut = components["schemas"]["TaskMutateOut"];
+export type CollabRunOut = components["schemas"]["CollabRunOut"];
+export type CollabRunsOut = components["schemas"]["CollabRunsOut"];
+export type CollabWorkerOut = components["schemas"]["CollabWorkerOut"];
 
 /** 创建任务(异步;202 即返回 PLANNING,详情轮询状态) */
 export function createTask(body: {
@@ -19,12 +22,32 @@ export function createTask(body: {
   return api.post("/tasks", body);
 }
 
-export function listTasks(page: number, size = 20): Promise<TaskPageOut> {
-  return api.get<TaskPageOut>(`/tasks?page=${page}&size=${size}`);
+export function listTasks(page: number, size = 20, status?: string): Promise<TaskPageOut> {
+  const s = status ? `&status=${encodeURIComponent(status)}` : "";
+  return api.get<TaskPageOut>(`/tasks?page=${page}&size=${size}${s}`);
 }
 
 export function getTask(id: string): Promise<TaskDetailOut> {
   return api.get<TaskDetailOut>(`/tasks/${id}`);
+}
+
+/* 协作观测面(091):任务维度协作运行清单(worker 账本+裁决) */
+export function listCollabRuns(id: string): Promise<CollabRunsOut> {
+  return api.get<CollabRunsOut>(`/tasks/${id}/collab-runs`);
+}
+
+/** 步骤声明协作拓扑(PENDING 步骤;归一+部署钳制在服务端) */
+export function setCollabTopology(
+  id: string,
+  stepId: string,
+  body: {
+    max_workers?: number | null;
+    critic?: boolean;
+    dispatch?: string | null;
+    bot_key?: string | null;
+  },
+): Promise<Record<string, unknown>> {
+  return api.put(`/tasks/${id}/steps/${stepId}/collab-topology`, body);
 }
 
 export function pauseTask(id: string, version?: number): Promise<TaskMutateOut> {
@@ -57,4 +80,18 @@ export const TASK_STATUS_META: Record<
   DONE: { label: "已完成", variant: "success" },
   FAILED: { label: "失败", variant: "destructive" },
   CANCELLED: { label: "已取消", variant: "outline" },
+};
+
+/* 协作账本状态呈现(091):运行态与 worker 态共用一族(PARTIAL 为运行独有) */
+export const COLLAB_STATUS_META: Record<
+  string,
+  { label: string; variant: "secondary" | "success" | "warning" | "destructive" | "outline" }
+> = {
+  RUNNING: { label: "进行中", variant: "success" },
+  DONE: { label: "完成", variant: "success" },
+  PARTIAL: { label: "部分完成", variant: "warning" },
+  FAILED: { label: "失败", variant: "destructive" },
+  CANCELLED: { label: "已取消", variant: "outline" },
+  PENDING: { label: "待派发", variant: "secondary" },
+  SKIPPED: { label: "已跳过", variant: "outline" },
 };

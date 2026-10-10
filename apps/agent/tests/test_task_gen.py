@@ -11,7 +11,7 @@ import json
 import pytest
 
 from kongming_agent.settings import Settings
-from kongming_agent.task_gen import run_task
+from kongming_agent.task_gen import _step_outcome, run_task
 
 
 class FakeLlm:
@@ -52,7 +52,7 @@ class FakeApi:
         ]
 
     async def task_step_start(
-        self, *, task_id: str, tenant_key: str, step_id: str
+        self, *, task_id: str, tenant_key: str, step_id: str, epoch: int = 0
     ) -> dict[str, object] | None:
         self.starts.append(step_id)
         return {"decision": "execute"}
@@ -62,7 +62,13 @@ class FakeApi:
         return {"decision": "continue"}
 
     async def task_finish(
-        self, *, task_id: str, tenant_key: str, status: str, fail_reason: str | None
+        self,
+        *,
+        task_id: str,
+        tenant_key: str,
+        status: str,
+        fail_reason: str | None,
+        epoch: int = 0,
     ) -> bool:
         self.finished = {"status": status, "fail_reason": fail_reason}
         return True
@@ -215,7 +221,7 @@ async def test_resume_409_reads_existing_steps() -> None:
             ]
 
         async def task_step_start(
-            self, *, task_id: str, tenant_key: str, step_id: str
+            self, *, task_id: str, tenant_key: str, step_id: str, epoch: int = 0
         ) -> dict[str, object] | None:
             self.starts.append(step_id)
             if step_id == "x1":
@@ -243,7 +249,7 @@ async def test_abort_decision_stops_without_finish() -> None:
 
     class _AbortApi(FakeApi):
         async def task_step_start(
-            self, *, task_id: str, tenant_key: str, step_id: str
+            self, *, task_id: str, tenant_key: str, step_id: str, epoch: int = 0
         ) -> dict[str, object] | None:
             self.starts.append(step_id)
             if len(self.starts) >= 2:
@@ -273,7 +279,13 @@ async def test_finish_rejection_reports_failed_honestly() -> None:
 
     class _RejectApi(FakeApi):
         async def task_finish(
-            self, *, task_id: str, tenant_key: str, status: str, fail_reason: str | None
+            self,
+            *,
+            task_id: str,
+            tenant_key: str,
+            status: str,
+            fail_reason: str | None,
+            epoch: int = 0,
         ) -> bool:
             self.finished = {"status": status, "fail_reason": fail_reason}
             return False  # 控制面 409(状态冲突)
@@ -288,6 +300,62 @@ async def test_finish_rejection_reports_failed_honestly() -> None:
     )
     assert out["final_status"] == "FAILED"
     assert "未确认" in str(out.get("error"))
+
+
+def test_step_outcome_rejects_unearned_pass() -> None:
+    """PASS 不算数的两种形态(090 证据/预算退出口径):finalize 对纯文本直答
+    合成空结果集 PASS → 无工具执行证据 FAILED;轮次触顶兜底(带 error 键,
+    即便途中有过真实结果集)→ 最终结论未产出 FAILED。"""
+    pure_text = {
+        "verdict": "PASS",
+        "summary": "自述完成",
+        "execution": {"columns": [], "rows": []},
+    }
+    status, _ev, fail = _step_outcome(pure_text, "tr")
+    assert status == "FAILED"
+    assert "无工具执行证据" in str(fail)
+
+    capped = {
+        "error": "已达工具调用轮次上限,请缩小问题范围后重试",
+        "execution": {"columns": ["c"], "rows": [["x"]]},
+    }
+    status2, _ev2, fail2 = _step_outcome(capped, "tr")
+    assert status2 == "FAILED"
+    assert "工具调用轮次上限" in str(fail2)
+
+    with_result = {
+        "verdict": "PASS",
+        "summary": "完成",
+        "execution": {"columns": ["c"], "rows": [["x"]]},
+    }
+    status3, _ev3, fail3 = _step_outcome(with_result, "tr")
+    assert status3 == "DONE"
+    assert fail3 is None
+
+
+@pytest.mark.asyncio
+async def test_stale_epoch_exits_silently_without_finish() -> None:
+    """步结果回写返回 stale_epoch(派发代际失配)→ STALE 终态静默退出:
+    不收口任务终态(归属在位派发),后续步骤不再执行。"""
+    llm = FakeLlm([_plan_json({"goal": "s1"}, {"goal": "s2"})])
+
+    class _StaleApi(FakeApi):
+        async def task_step_result(self, **kw: object) -> dict[str, object] | None:
+            self.results.append(dict(kw))
+            return {"decision": "stale_epoch"}
+
+    api = _StaleApi(step_ids=["a", "b"])
+
+    async def runner(question: str, extra: dict[str, object]) -> dict[str, object]:
+        return {"verdict": "PASS", "summary": "ok"}
+
+    out = await run_task(
+        payload=dict(_PAYLOAD), llm=llm, api=api, settings=Settings(), step_runner=runner
+    )
+    assert out["final_status"] == "STALE"
+    assert len(api.results) == 1  # 首步回写即退出
+    assert api.starts == ["a"]  # 后续步骤不再下发
+    assert api.finished is None  # 不收口终态(在位派发负责)
 
 
 @pytest.mark.asyncio

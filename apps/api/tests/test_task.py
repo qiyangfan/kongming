@@ -210,7 +210,7 @@ def _no_dispatch(monkeypatch: pytest.MonkeyPatch) -> list[str]:  # pyright: igno
 
     calls: list[str] = []
 
-    def _record(*, task_id: str) -> None:
+    def _record(*, task_id: str, epoch: int | None = None) -> None:
         calls.append(task_id)
 
     monkeypatch.setattr(task_router, "_schedule_run", _record)

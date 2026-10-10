@@ -7,6 +7,65 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
+## 当前状态(2026-10-10,091 已归档 + 审查循环收口 + 四项契约裁决)
+
+- **091 multi-agent-orchestration 已归档(2026-10-10)**:change 移入
+  `openspec/changes/archive/2026-10-10-091-multi-agent-orchestration/`,delta 六需求
+  已同步主 specs(specs/multi-agent-orchestration/spec.md;「失控防护」预算口径按
+  owner 委托裁决修订为次数口径+步级闸兜底后再同步),活动变更清零,任务 15/15。
+- **审查循环收口(2026-10-10,两轮全覆盖评审,缺陷清零)**:api 侧=collector 收口
+  代际复核读列缺失(兜底收口死路径)、epoch 由「读后判断」改 CAS 写入谓词
+  (transition_task_system/transition_step 增 expect_epoch,begin/step-result/finish
+  执行侧写入全带,finish CAS 未命中显式 409)、collab-start 补任务-租户归属闸、
+  worker 派发改 INSERT...SELECT+FOR UPDATE(运行在途入写,防幽灵账)、
+  collab_finish_run 收敛在途 worker 为 SKIPPED(workers_skipped 事件);agent 侧=
+  worker 执行预算 2n+1(与 api 序号上限同式,解满额拆解饥饿)、worker 用量回注
+  步级 token 账、_react_execution_evidence 证据闸(纯文本直答 PASS 不算数)、
+  critic 轮次 continue(N>1 真实生效)、Bot 空名单=空集 fail-closed;web=runs 轮询
+  收窄(PLANNING/RUNNING/PAUSED)+isError 呈现+事件 key 稳定化+披露双行化;
+  冒烟脚本重写(超时带现场/finally 清场/不假绿)。**终值门禁**:api 1159(+2)/
+  agent 505(+3)/liannu 22/web 86 全绿,openspec strict 本变更 spec 通过。
+- **091 multi-agent-orchestration 九项接线(2026-10-10)**:
+  api 侧=0041 迁移(步骤 collab_topology 列+worker 唯一索引)、拓扑配置面
+  (PUT …/collab-topology,PENDING 闸/Bot 校验/部署钳制)、协作账本 internal 四回调
+  (collab-start/worker-start/worker-result/collab-finish,CAS+租户过滤+事件流)、
+  查询端点(GET …/collab-runs)、cancel 收敛在途协作账、begin_step 决策携带协作载荷
+  (拓扑以库内声明为准,Bot 人格/工具子集经 _CollabBotResolver 按 bot 运行时口径解析);
+  agent 侧=collab_gen 扩展(critic 有限轮修订/分歧核实重派[同计入预算、不参与交叉判定]/
+  parallel 派发/上限参数化)、collab_wiring 组合工厂(开账 fail-closed、worker 人格注入
+  +工具求交、逐 worker trace=trace_root-wN、用量归集)、task_gen 协作分支
+  (聚合结论驱动步骤终态);web=TaskDetail 协作视图(DataView 双形态)+TasksPage 状态
+  筛选+ReportsPage GENERATING 轮询。**部署级上限**:api KM_TASK_BUDGET_MAX_*/
+  KM_COLLAB_MAX_WORKERS(创建/声明钳制)+agent KM_AGENT_COLLAB_*(最后防线),
+  缺省值表见 docs/tech-stack.md「任务/协作部署级上限」。**e2e 双场景过**
+  (apps/api/scripts/e2e_collab_smoke.py):协作全链(task DONE+run DONE+事件全链+
+  用量 84tok/worker)与取消收敛(run CANCELLED+worker SKIPPED)。
+- **090 真实链路缺陷已修(本次 e2e 首驱暴露,应改尽改)**:react 图终态只有
+  `execution`(ExecutionResult)而无 `verdict` 键——090 剧本化测试的假 step_runner
+  带 verdict,真实 `_run_react` 不带,导致真实链路下 `_step_outcome` 恒判 FAILED
+  (090 走查任务实为播种场景,未真实跑完过)。修复=`task_gen._react_verdict`
+  单一定义(兼容假体 verdict 键与真实 execution 形态),步骤终态与协作 worker
+  终态共用;collab_wiring worker 返回归一化终态(原始 state 直传会让聚合裁决恒
+  UNKNOWN)。修复后同链路任务真实 DONE(修复前全 FAILED 实证)。
+- **0042 派发代际(双执行者竞态修复,2026-10-10)**:真实 LLM e2e 暴露 090 结构缺陷——
+  pause 不杀在途编排循环(只在下一步 begin_step 生效),resume 立即派发新循环,
+  真实 LLM 长步骤把竞态窗口放大到必撞(实证:旧循环在途步回写 409 后把任务 FAILED
+  误杀,新循环协作迟到 DONE)。修复=`sys_agent_task.dispatch_epoch`(0042):每次真实
+  派发(创建/恢复/审批)前 `_bump_and_schedule` 原子自增并携代数派发;begin_step/step-result/
+  finish 三回调代数失配即拦(begin→abort 决策/回写→stale_epoch 不写账/终态→409),
+  agent 收 stale_epoch 静默退出(STALE 终态口径),collector 收口前复核代数。
+  epoch=None 兼容(测试内联驱动零回归);mock/快步进掩盖不了此闸(剧本化单测 9+505)。
+- **契约裁决(2026-10-10,owner 委托裁决已定)**:TaskItem 暴露 version——**否决**
+  (version 是服务端乐观锁实现细节,现无客户端消费场景;有真实消费方时随需求立项);
+  审计读面 domain 列——**批准**(toolcall 审计行 089 起已落 domain,读面纯增可选字段
+  投影,随下一批触及审计面的变更搭批落地 + make contracts);internal progress 租户过滤;
+  域启停多副本语义(持久化启停属 design 既有裁决的后续变更)。**环境(2026-10-10 已解)**:LLM 已切 dashscope 直连
+  (owner 确认;根 .env KM_AGENT_LLM_BASE_URL=compatible-mode 端点,API_KEY=本地
+  DASHSCOPE_API_KEY,muniu 网关不再依赖);本地起 agent 仍须
+  `KM_AGENT_INTERNAL_TOKEN=$KM_INTERNAL_TOKEN`(compose 同款映射,pydantic 前缀
+  KM_AGENT_ 读不到裸 KM_INTERNAL_TOKEN);本地全量 .env 不可直接喂 agent
+  (KM_DB_PASSWORD 触发 fail-closed 拒启,是设计行为)。
+
 ## 当前状态(2026-10-02,CardTitle 落地归档 + spec strict 债清零)
 
 - **CardTitle 标题语义已落地并归档(change `2026-10-02-card-title-heading-semantics`,2026-10-02)**:
@@ -62,10 +121,11 @@
   任务取消/审批拒绝补 AlertDialog(宪法 Article 2)、TasksPage/ReportsPage 错误态伪装空态
   (ErrorAlert+isEmpty 收紧+末页越界钳制)、详情页 4 处手写 alert 收编 ErrorAlert、报告删除确认钮
   variant="destructive" 替代手抄样式。
-- **登记待办(非缺陷,不擅改)**:TaskItem 暴露 version、审计读面 domain 列(均对外契约新增,
-  待 owner 裁决);任务列表状态筛选、预算部署级上限(spec 待实施项,090 归档件可查);internal
-  端点畸形 UUID 裸 500(token 闸兜底)、报告 progress 轮询拉全量章节、列表页 GENERATING 不轮询、
-  域启停多副本语义(docstring 已声明进程级,持久化启停属 design 既有裁决的后续变更)。
+- **登记待办(2026-10-10 已裁决,详见「当前状态(2026-10-10,091 接线完成待归档)」节)**:
+  TaskItem 暴露 version(否决)、审计读面 domain 列(批准,搭批落地);任务列表状态筛选、
+  预算部署级上限、internal 端点畸形 UUID 裸 500、报告 progress 轮询拉全量章节、列表页
+  GENERATING 不轮询——均已在 091 批次落地;域启停多副本语义(持久化启停属 design 既有
+  裁决的后续变更)。
 - **门禁终态**:api 1155(+10)/agent 488(+2)/liannu 22/web 86 全绿,双 app ruff/mypy/pyright/
   lint-imports 过(api pyright 曾报 16 项=pyright 版本漂移下既有测试鸭子型注入与类型收窄,
   按 test_task.py 同款 pragma+isinstance 收窄修复,非回归);契约再生成幂等(重新 export 前后

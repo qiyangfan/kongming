@@ -5,7 +5,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 # ── 任务状态机 ──
 
@@ -99,6 +99,13 @@ def normalize_budget(config: dict[str, Any] | None) -> dict[str, int]:
     return out
 
 
+def clamp_budget(normalized: dict[str, int], caps: dict[str, int]) -> dict[str, int]:
+    """预算部署级钳制(090 spec「任务级配置 + 部署级上限」):
+    归一后逐项取 min(任务配置, 部署上限)——部署可收紧也可放大天花板,
+    但任务配置任何情况下不得超过部署上限。"""
+    return {k: max(1, min(v, caps.get(k, v))) for k, v in normalized.items()}
+
+
 def over_budget(used: dict[str, Any], config: dict[str, int]) -> str | None:
     """预算判定纯函数:超限返回原因摘要,未超返回 None(诚实披露依据)。"""
     if int(used.get("steps") or 0) >= config["max_steps"]:
@@ -108,6 +115,83 @@ def over_budget(used: dict[str, Any], config: dict[str, int]) -> str | None:
     if int(used.get("elapsed_ms") or 0) >= config["max_seconds"] * 1000:
         return "时长预算耗尽"
     return None
+
+
+# ── 协作拓扑(091;宿主=任务步骤)──
+
+COLLAB_DISPATCH_SERIAL = "serial"
+COLLAB_DISPATCH_PARALLEL = "parallel"
+COLLAB_DISPATCHES = frozenset({COLLAB_DISPATCH_SERIAL, COLLAB_DISPATCH_PARALLEL})
+# 缺省 worker 数(与 agent 面编排缺省一致;钳制上限来自部署配置)
+COLLAB_DEFAULT_WORKERS = 3
+# 嵌套深度上限(与 agent 面编排常量同值同源语义;缺省不嵌套,协作只由任务步骤发起)
+DEFAULT_MAX_DEPTH = 1
+# bot_key 与 bot 域同口径(小写字母开头,小写字母/数字/下划线)
+COLLAB_BOT_KEY_MAX = 64
+
+
+def normalize_collab_topology(
+    raw: dict[str, Any] | None, *, max_workers_cap: int
+) -> dict[str, object]:
+    """协作拓扑归一 + 部署级钳制(纯函数):非法值回退缺省;
+    max_workers 恒在 [1, max_workers_cap] 内(部署上限单点钳制)。
+    返回恒为合法载荷(库内只存归一结果)。"""
+    cfg = raw if isinstance(raw, dict) else {}
+    raw_workers = cfg.get("max_workers")
+    workers = 0
+    if isinstance(raw_workers, int) and not isinstance(raw_workers, bool):
+        workers = raw_workers
+    if workers < 1:
+        workers = COLLAB_DEFAULT_WORKERS
+    workers = min(max(1, workers), max(1, max_workers_cap))
+    critic = bool(cfg.get("critic"))
+    dispatch = str(cfg.get("dispatch") or COLLAB_DISPATCH_SERIAL)
+    if dispatch not in COLLAB_DISPATCHES:
+        dispatch = COLLAB_DISPATCH_SERIAL
+    raw_bot = cfg.get("bot_key")
+    bot_key = str(raw_bot).strip() if raw_bot else None
+    if bot_key == "":
+        bot_key = None
+    return {
+        "max_workers": workers,
+        "critic": critic,
+        "dispatch": dispatch,
+        "bot_key": bot_key,
+    }
+
+
+def has_collab_topology(step: dict[str, Any]) -> bool:
+    """步骤是否声明协作拓扑(空对象/缺列=普通单 ReAct 步)。"""
+    topo = step.get("collab_topology")
+    if not isinstance(topo, dict):
+        return False
+    return bool(cast("dict[str, object]", topo))
+
+
+# ── 协作账本状态(091;与 0040 两表 CHECK 同源)──
+
+R_RUNNING = "RUNNING"
+R_DONE = "DONE"
+R_FAILED = "FAILED"
+R_PARTIAL = "PARTIAL"
+R_CANCELLED = "CANCELLED"
+
+W_PENDING = "PENDING"
+W_RUNNING = "RUNNING"
+W_DONE = "DONE"
+W_FAILED = "FAILED"
+W_SKIPPED = "SKIPPED"
+
+# 收敛裁决标记(supersede 写入 verdict 列并透出查询面,语义须单源)
+VERDICT_SUPERSEDED = "superseded"
+
+
+def collab_run_status(verdict: str, pending_count: int) -> str:
+    """聚合结论 → 协作运行状态(诚实收口):未派发清单非空 = 部分完成(PARTIAL);
+    裁决 PASS → DONE;否则 FAILED(明细在 verdict/conclusions,不谎称完成)。"""
+    if pending_count > 0:
+        return R_PARTIAL
+    return R_DONE if verdict == "PASS" else R_FAILED
 
 
 # ── 载荷结构 ──

@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     # 一批工具执行,超出即强制终止并返回结构化错误)
     max_tool_rounds: int = 8
 
+    # 多智能体协作(091):部署级上限(与 api 侧拓扑钳制互为双保险;缺省
+    # 与编排常量同值同源——worker 数/嵌套深度/critic 修订轮次)
+    collab_max_workers: int = 3
+    collab_max_depth: int = 1
+    collab_max_revision_rounds: int = 1
+
     # 报告生成编排(088):报告级预算三约束(部署级可配,耗尽即停落 PARTIAL——
     # 「预算退出诚实」)与快照行数上限(与 api 刷新路径同量级)
     report_max_llm_calls: int = 30

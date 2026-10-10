@@ -78,6 +78,9 @@ artifacts(027)⇄ cloud-code-sandbox(029);agent-memory(026)← team-workspace(03
 | 评测智能体 | eval / ai-eval(Execution Match、基线、few-shot 自学习)+ agent-observability | 评测智能体化(持续回归/自动构造评测集)远期登记 |
 
 依赖拓扑:088 / 089 / 090 相互独立、可并行;091 以 090 为宿主殿后。
+**落地状态(2026-10-10)**:088-090 已归档;091 接线完成(拓扑配置面/协作账本/查询端点/
+web 协作视图/端到端冒烟双场景),待归档。任务/协作部署级上限缺省值见 docs/tech-stack.md
+「任务/协作部署级上限」节。
 
 ### 089 工具网关:后续域接入清单(2026-10-09 落地时登记)
 

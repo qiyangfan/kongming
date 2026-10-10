@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, GitBranch, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 
+import { DataView, type DataViewColumn } from "@/components/data-view";
 import { ErrorAlert } from "@/components/error-alert";
 import { MarkdownText } from "@/components/markdown-text";
 import { PageHeader } from "@/components/page-header";
@@ -20,8 +21,22 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getTask, TASK_STATUS_META } from "@/lib/task-api";
+import { COLLAB_STATUS_META, getTask, listCollabRuns, TASK_STATUS_META } from "@/lib/task-api";
+import type { CollabRunOut, CollabWorkerOut } from "@/lib/task-api";
 import { useTenant } from "@/lib/tenant-store";
+
+// 轮询节奏(活动期;终态即停,间隔常量化避免散落字面量)
+const TASK_ACTIVE_POLL_MS = 2000;
+const COLLAB_RUNS_POLL_MS = 4000;
+// 协作运行在途只可能发生在 PLANNING/RUNNING/PAUSED:审批挂起/中断期无执行者;
+// 暂停不杀在途编排循环,PAUSED 下仍可能有收尾中的运行
+const RUNS_ACTIVE_STATUSES = ["PLANNING", "RUNNING", "PAUSED"];
+// 裁决值中文映射(未知值原样透出;superseded=重跑前在途账被收敛的标记)
+const COLLAB_VERDICT_LABELS: Record<string, string> = {
+  PASS: "通过",
+  ERROR: "失败",
+  superseded: "已被重跑接管",
+};
 
 export default function TaskDetailPage() {
   const { taskId = "" } = useParams();
@@ -33,7 +48,22 @@ export default function TaskDetailPage() {
     queryKey: ["task", tenant, taskId],
     queryFn: () => getTask(taskId),
     refetchInterval: (q) =>
-      ["PLANNING", "RUNNING"].includes(q.state.data?.task.status ?? "") ? 2000 : false,
+      ["PLANNING", "RUNNING"].includes(q.state.data?.task.status ?? "")
+        ? TASK_ACTIVE_POLL_MS
+        : false,
+  });
+
+  const active = ["PLANNING", "RUNNING", "AWAITING_APPROVAL", "PAUSED", "INTERRUPTED"].includes(
+    detail.data?.task.status ?? "",
+  );
+  const runs = useQuery({
+    queryKey: ["task-collab-runs", tenant, taskId],
+    queryFn: () => listCollabRuns(taskId),
+    // 仅协作可能在途的任务态轮询刷新;终态/审批挂起/中断一次性读取
+    refetchInterval: RUNS_ACTIVE_STATUSES.includes(detail.data?.task.status ?? "")
+      ? COLLAB_RUNS_POLL_MS
+      : false,
+    retry: false,
   });
 
   function invalidate(): void {
@@ -85,9 +115,6 @@ export default function TaskDetailPage() {
   }
 
   const d = detail.data;
-  const active = ["PLANNING", "RUNNING", "AWAITING_APPROVAL", "PAUSED", "INTERRUPTED"].includes(
-    d.task.status,
-  );
 
   return (
     <div className="mx-auto max-w-4xl space-y-5 px-4 py-6">
@@ -174,6 +201,27 @@ export default function TaskDetailPage() {
         ))}
       </section>
 
+      {/* 协作视图(091):worker 账本 + 裁决;加载失败如实呈现,有账才渲染 */}
+      {runs.isError && <ErrorAlert text="协作账本加载失败,可刷新重试。" />}
+      {runs.data && runs.data.items.length > 0 && (
+        <section className="space-y-2" aria-label="协作">
+          <h3 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+            <GitBranch className="size-4" aria-hidden /> 协作
+          </h3>
+          {runs.data.items.map((run) => {
+            const finEvent = d.events.find((e) => e.kind === "collab_finished" && e.run === run.id);
+            return (
+              <CollabRunCard
+                key={run.id}
+                run={run}
+                // 详情轮询暂停期间事件可能滞后:无事件时不下发臆造的 0
+                pendingCount={typeof finEvent?.pending === "number" ? finEvent.pending : null}
+              />
+            );
+          })}
+        </section>
+      )}
+
       {/* 事件时间线 */}
       <section className="space-y-1" aria-label="事件">
         <h3 className="text-sm font-semibold text-foreground">事件</h3>
@@ -181,13 +229,19 @@ export default function TaskDetailPage() {
           <p className="text-xs text-muted-foreground">暂无事件。</p>
         ) : (
           <ol className="space-y-0.5">
-            {[...d.events].reverse().map((e, i) => (
-              <li key={i} className="text-xs text-muted-foreground">
-                {typeof e.at === "string" ? new Date(e.at).toLocaleString() : ""} —{" "}
-                {String(e.kind ?? "")}
-                {e.reason ? `(${String(e.reason)})` : ""}
-              </li>
-            ))}
+            {/* key 取正序索引(追加式事件流稳定),反转为最新在前 */}
+            {[...d.events]
+              .map((e, i) => (
+                <li
+                  key={`${String(e.at)}-${String(e.kind)}-${i}`}
+                  className="text-xs text-muted-foreground"
+                >
+                  {typeof e.at === "string" ? new Date(e.at).toLocaleString() : ""} —{" "}
+                  {String(e.kind ?? "")}
+                  {e.reason ? `(${String(e.reason)})` : ""}
+                </li>
+              ))
+              .reverse()}
           </ol>
         )}
       </section>
@@ -200,6 +254,91 @@ function ButtonLink() {
     <Link to="/tasks" className="flex items-center gap-1 text-sm text-muted-foreground">
       <ArrowLeft className="size-4" aria-hidden /> 任务列表
     </Link>
+  );
+}
+
+/** 一次协作运行卡片:裁决态 + 分歧/部分完成披露 + worker 账本(DataView 双形态)。 */
+function CollabRunCard({ run, pendingCount }: { run: CollabRunOut; pendingCount: number | null }) {
+  const workerColumns: DataViewColumn<CollabWorkerOut>[] = [
+    {
+      key: "subgoal",
+      header: "子目标",
+      cardPriority: 1,
+      render: (w) => (
+        <span className="font-medium text-foreground">
+          #{w.worker_no} {w.subgoal}
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      header: "状态",
+      cardPriority: 2,
+      render: (w) => (
+        <StatusBadge meta={COLLAB_STATUS_META} value={w.status} fallbackVariant="outline" />
+      ),
+    },
+    {
+      key: "conclusion",
+      header: "结论摘要",
+      render: (w) => {
+        const summary =
+          w.conclusion && typeof w.conclusion.summary === "string" ? w.conclusion.summary : "—";
+        return <span className="line-clamp-2 text-xs text-muted-foreground">{summary}</span>;
+      },
+    },
+    {
+      key: "usage",
+      header: "token",
+      render: (w) =>
+        w.usage && typeof w.usage.total_tokens === "number" ? w.usage.total_tokens : "—",
+    },
+    {
+      key: "trace_id",
+      header: "trace",
+      render: (w) => <span className="font-mono text-xs">{w.trace_id ?? "—"}</span>,
+    },
+  ];
+  const topo = run.topology ?? {};
+  const workers = run.workers ?? [];
+  const hasVerification = workers.some((w) => w.conclusion?.verification);
+  return (
+    <div className="space-y-2 rounded-lg border border-border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusBadge meta={COLLAB_STATUS_META} value={run.status} />
+        {run.verdict && (
+          <span className="text-xs text-muted-foreground">
+            裁决 {COLLAB_VERDICT_LABELS[run.verdict] ?? run.verdict}
+          </span>
+        )}
+        <span className="text-xs text-muted-foreground">
+          {String(topo.max_workers ?? "—")} worker·{String(topo.dispatch ?? "serial")}
+          {topo.critic ? "·critic" : ""}
+        </span>
+      </div>
+      {/* 分歧/部分完成如实披露(不静默调和的呈现面);两态并存时各自成行,
+          事件滞后时缺数不臆造 0 */}
+      {(run.status === "PARTIAL" || pendingCount !== null) && (
+        <p className="flex items-start gap-1.5 text-xs text-warning">
+          <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          存在未派发子目标{pendingCount === null ? "" : `(${pendingCount})`}
+          ,本次运行为部分完成。
+        </p>
+      )}
+      {hasVerification && (
+        <p className="flex items-start gap-1.5 text-xs text-warning">
+          <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          存在 worker 结论分歧,已按核实结果或标注呈现。
+        </p>
+      )}
+      <DataView
+        columns={workerColumns}
+        rows={workers}
+        rowKey={(w) => String(w.worker_no)}
+        isEmpty={workers.length === 0}
+        emptyText="无 worker 账本。"
+      />
+    </div>
   );
 }
 
