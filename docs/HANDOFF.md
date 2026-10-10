@@ -7,7 +7,22 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
-## 当前状态(2026-10-10)
+## 当前状态(2026-10-11)
+
+- **094 web 检索域(联网搜索)现状**:web_search 工具 = 部署级条件注册,
+  `KM_WEBSEARCH_PROVIDER`(tavily|bocha)+ `KM_WEBSEARCH_API_KEY` 齐备才注册;
+  均缺省=域零感知(合法形态);组合残缺(供应商缺 key、仅配 key 缺供应商、
+  供应商非法值):prod 拒启(fail_closed)、dev 启动告警降级。权限 `tool:websearch:search` 显式授予制(不进 DEVELOPER
+  推荐集)。供应商端点与出口白名单在 `toolgateway/models.py::WEBSEARCH_PROVIDERS`
+  代码单源派生(部署不可改端点);新供应商接入=该表加一条 + `websearch.py::
+  _ADAPTERS` 加一条映射。参数边界(500/1–10/缺省 5)同文件常量单源,注册表
+  schema 与策略器共引。观察=检索卡 title/url/snippet(追踪参数剥离、评分不透),
+  域配额与 knowledge 分桶独立(`KM_TOOLGATEWAY_WEBSEARCH_QUOTA`,缺 20/分)。
+  演示需真实检索供应商 key;无 key 时其余能力零影响。
+  **范围外待办(094 评审循环登记)**:`toolgateway/knowledge.py` 执行器 except 链
+  缺 `httpx.DecodingError` 收敛(继承 RequestError 非 TransportError,逃逸后审计
+  error_reason 丢 protocol:/unreachable: 前缀;081 已归档代码,修法照 094
+  websearch.py 同款单列 except)。
 
 - **本机评测演示环境**:env-postgres 已装 tenant_sakila(28 对象)/tenant_olist
   (9 表 CSV)/sakila_ext 独立库 + sakila/olist 租户注册 + admin 绑定;知识已灌
@@ -63,8 +78,8 @@
 - **领域纯净契约**:lint-imports 现为 26 kept / 0 broken——领域用例/模型不得
   import kongming.db(含其 re-export 的 uuid7;纯函数单源在 kongming/uuid7.py,
   领域层直接从那里取)。
-- **门禁现值**:api 1194/agent 527/liannu 23/web 86;ruff/mypy/prettier 清;
-  CI 六 job 绿。
+- **门禁现值**:api 1217/agent 527/liannu 23/web 86;ruff/mypy/prettier 清;
+  pyright latest 双 app 0;CI 六 job 绿。
 - **环境提示**:演示数据在本机(kongming 库 tenant_sakila/tenant_olist +
   sakila_ext 库);admin 密码 KmSmoke#2026a;评测前清 query_history +
   km:ragctx:*(README 纪律)。

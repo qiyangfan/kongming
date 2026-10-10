@@ -81,6 +81,10 @@ PERMISSIONS: list[tuple[str, str, int]] = [
     ("task:create", "任务创建", 36),
     ("task:read", "任务读取", 37),
     ("task:manage", "任务管理", 38),
+    # 094 web-search-domain:联网检索(显式授予制,不进 DEVELOPER 推荐集——
+    # 查询内容外发第三方检索供应商 + API 成本,与 knowledge:search 同哲学;
+    # SUPER_ADMIN 由增量逻辑自动覆盖)
+    ("tool:websearch:search", "工具-联网搜索", 39),
 ]
 
 ROLES: list[tuple[str, str, str, str, int]] = [

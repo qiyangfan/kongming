@@ -124,6 +124,16 @@ class KnowledgeSourceError(Exception):
     """
 
 
+class WebSearchError(Exception):
+    """094:联网检索失败(分类随 message 前缀上浮:unreachable/protocol)。
+
+    unreachable=连接层未送达(重试至多一次);protocol=响应类错误(非 2xx/
+    报文畸形/读超时,不重试)。分发兜底映射 ERROR + 审计,agent 据实降级为
+    观察,不编造检索结果。与 toolgateway.websearch 的执行器侧同名异常为
+    领域单源双副本(审查 P1-1:service 不得传递性引入 httpx,089 裁决)。
+    """
+
+
 @dataclass(frozen=True)
 class ToolAuditEntry:
     """工具执行审计写入载荷(领域层纯数据;仓储落 sys_tool_audit)。"""

@@ -199,6 +199,14 @@ async def _attachment_cleanup_loop() -> None:
         await asyncio.sleep(20 * 3600)
 
 
+def _warn_websearch_misconfiguration() -> None:
+    """094:websearch 组合残缺的 dev 告警降级(prod 由 config.fail_closed_checks
+    拒启;lifespan 调用;测试直调——082 _knowledge_endpoint 同款测试化形态)。"""
+    misconfig = get_settings().websearch_misconfiguration()
+    if misconfig:
+        log.warning("websearch:%s", misconfig)
+
+
 async def _knowledge_endpoint(session: AsyncSession) -> str | None:
     """081/082:个人知识库端点注册条件;多租户仅告警不拒绝(082 单租户闸降级)。
 
@@ -258,7 +266,14 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
             await _s.commit()
             if nr:
                 log.info("启动扫描:%d 个滞留 GENERATING 的报告标记 FAILED", nr)
-        tool_registry.activate(tool_registry.build_registry(await _knowledge_endpoint(session)))
+        _warn_websearch_misconfiguration()  # 094(prod 已拒启;dev 告警降级)
+        tool_registry.activate(
+            tool_registry.build_registry(
+                await _knowledge_endpoint(session),
+                websearch_provider=get_settings().websearch_provider,
+                websearch_api_key=get_settings().websearch_api_key,
+            )
+        )
         # 0044:域启停持久状态装载(重启/多副本以库收敛;无网关静默跳过)
         from kongming.toolcall.router import load_persisted_domain_states as _load_states
 

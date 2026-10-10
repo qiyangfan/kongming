@@ -14,6 +14,13 @@ import urllib.parse
 from collections.abc import Collection
 
 from kongming.toolcall.models import ToolDef, ToolSpec
+from kongming.toolgateway.models import (
+    WEBSEARCH_COUNT_DEFAULT,
+    WEBSEARCH_COUNT_MAX,
+    WEBSEARCH_COUNT_MIN,
+    WEBSEARCH_PROVIDERS,
+    WEBSEARCH_QUERY_MAX_LEN,
+)
 
 _SQL_PARAM_SCHEMA: dict[str, object] = {
     "type": "object",
@@ -197,6 +204,39 @@ _KNOWLEDGE_TOOL = ToolDef(
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "host.docker.internal", "::1", "[::1]"})
 LOCAL_HOSTS = _LOCAL_HOSTS  # 组合根白名单单源复用(089 域清单)
 
+# 094 web-search-domain:联网检索工具(部署级可选;注册条件两道:
+# 供应商在注册表内 + API key 已配置;查询内容外发第三方,显式授予制)
+_WEBSEARCH_TOOL = ToolDef(
+    name="web_search",
+    description=(
+        "联网搜索公开网页:时效性问题、数据库与个人知识库均无据的问题先用它,"
+        "再综合作答。返回检索卡(标题/链接/摘要),引用时须带链接;"
+        "站内结构性数据查本地数据源,不要用它"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": WEBSEARCH_QUERY_MAX_LEN,
+                "description": "搜索问句(自然语言)",
+            },
+            "count": {
+                "type": "integer",
+                "minimum": WEBSEARCH_COUNT_MIN,
+                "maximum": WEBSEARCH_COUNT_MAX,
+                "description": f"返回检索卡条数(缺省 {WEBSEARCH_COUNT_DEFAULT})",
+            },
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    },
+    perm_code="tool:websearch:search",
+    write=False,
+    require_confirm=False,
+)
+
 # 089:运行时停用工具(网关域停用 → 注入集与分发解析同源消失,与「域从未存在」
 # 同形;进程内生效,重启随部署清单复位)
 _RUNTIME_DISABLED: set[str] = set()
@@ -219,15 +259,24 @@ def is_local_base_url(url: str) -> bool:
     return (parsed.hostname or "").lower() in _LOCAL_HOSTS
 
 
-def build_registry(knowledge_base_url: str | None) -> dict[str, ToolDef]:
-    """081:有效注册表装配(确定性纯函数:同入参同结果)。
+def build_registry(
+    knowledge_base_url: str | None,
+    *,
+    websearch_provider: str = "",
+    websearch_api_key: str = "",
+) -> dict[str, ToolDef]:
+    """081/094:有效注册表装配(确定性纯函数:同入参同结果)。
 
     knowledge_base_url 非空且过 localhost 白名单才追加 knowledge_search;
-    调用方(main.lifespan)负责多租户告警,本函数只做端点级判定。
+    websearch 供应商在注册表内且 API key 非空才追加 web_search;
+    调用方(main.lifespan)负责多租户告警与配置残缺告警,本函数只做条件判定。
     """
     registry = dict(REGISTRY)
     if knowledge_base_url and is_local_base_url(knowledge_base_url):
         registry[_KNOWLEDGE_TOOL.name] = _KNOWLEDGE_TOOL
+    provider = (websearch_provider or "").strip().lower()
+    if provider in WEBSEARCH_PROVIDERS and (websearch_api_key or "").strip():
+        registry[_WEBSEARCH_TOOL.name] = _WEBSEARCH_TOOL
     return registry
 
 

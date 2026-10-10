@@ -30,6 +30,7 @@ from kongming.toolcall.models import (
     ToolAuditEntry,
     ToolDef,
     ToolOutcome,
+    WebSearchError,
     args_digest,
     derive_idempotency_key,
 )
@@ -46,9 +47,14 @@ from kongming.toolcall.ports import (
     SandboxExecutor,
     SqlExecutor,
     ToolRepo,
+    WebSearchPort,
 )
 from kongming.toolcall.registry import effective, get_tool
-from kongming.toolgateway.models import DOMAIN_TOOLS
+from kongming.toolgateway.models import (
+    DOMAIN_TOOLS,
+    FAILURE_UNDELIVERED_PREFIX,
+    WEBSEARCH_COUNT_DEFAULT,
+)
 
 log = logging.getLogger(__name__)
 
@@ -180,6 +186,8 @@ class ToolCallService:
         mcp_caller: McpToolCaller | None = None,  # 028:MCP 出站执行
         knowledge: KnowledgeSearchPort | None = None,  # 081:个人知识库(未注入=工具未注册)
         knowledge_quota: int | None = None,  # 089:域配额(第二维度;None=不限)
+        websearch: WebSearchPort | None = None,  # 094:联网检索(未注入=工具未注册)
+        websearch_quota: int | None = None,  # 094:websearch 域配额(与 knowledge 分桶)
         *,
         rate_limit_per_minute: int,
         confirm_ttl_minutes: int,
@@ -196,7 +204,13 @@ class ToolCallService:
         self._resolver = resolver
         self._mcp = mcp_caller
         self._knowledge = knowledge
-        self._knowledge_quota = knowledge_quota
+        self._websearch = websearch
+        # 094:域配额按域分桶(单一配置值当全域值会让新域挤占既有域配额;
+        # knowledge 桶值不变=既有行为零回归)
+        self._domain_quotas: dict[str, int | None] = {
+            "knowledge": knowledge_quota,
+            "websearch": websearch_quota,
+        }
         self._rate_limit = rate_limit_per_minute
         self._confirm_ttl = confirm_ttl_minutes
 
@@ -312,8 +326,9 @@ class ToolCallService:
                     args_json=args,  # 原文留存:确认后重放
                 )
 
-        # 089:域配额第二维度(网关域工具的固定窗口叠加;内置工具不受影响)
-        quota = DOMAIN_TOOLS.get(tool_name) and self._knowledge_quota
+        # 089:域配额第二维度(网关域工具的固定窗口叠加;内置工具不受影响;
+        # 094 起按域分桶,各域配额互不挤占)
+        quota = self._domain_quotas.get(DOMAIN_TOOLS.get(tool_name, ""))
         if quota and not await self._limiter.allow(
             f"toolgw:{tenant_id}:{user_id}:{tool_name}", limit=quota, window_sec=60
         ):
@@ -408,6 +423,22 @@ class ToolCallService:
                     for hit in hits
                 ],
             }
+        if tool.name == "web_search":
+            # 094:注册表已过注册条件(供应商+key 齐备)才可能到达此处;
+            # 端口缺失=装配漂移,收敛 WebSearchError(分发兜底 ERROR,不裸崩)
+            if self._websearch is None:
+                raise WebSearchError(f"{FAILURE_UNDELIVERED_PREFIX} 联网检索未接线(部署缺陷)")
+            # 缺省 5 与注册表 schema description 标注一致;L4 已校验 ∈[1,10],
+            # 此处按非布尔 int 收窄(L4 之外的纵深一层)
+            count = args.get("count")
+            default = WEBSEARCH_COUNT_DEFAULT
+            cards = await self._websearch.search(
+                query=str(args["query"]),
+                count=count if isinstance(count, int) and not isinstance(count, bool) else default,
+            )
+            # 观察整形:检索卡已过策略器 allowlist(评分/追踪参数不入上下文),
+            # 空结果如实表达(count=0),由 LLM 决定改写问句或据实回答
+            return {"count": len(cards), "results": cards}
         if tool.name == "run_python_code":
             return await self._run_python_code(
                 args,

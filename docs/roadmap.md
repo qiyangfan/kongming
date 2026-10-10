@@ -77,22 +77,24 @@ artifacts(027)⇄ cloud-code-sandbox(029);agent-memory(026)← team-workspace(03
 |---|---|---|
 | 问数智能体(王牌) | 一梯队 chat/nl2sql/nl2sql-agent + 三梯队 semantic-layer / query-streaming / cloud-code-sandbox | 088 报告生成——数据链路闭环到可交付报告 |
 | 问答智能体 | rag 三路召回 / knowledge / document-rag / agent-memory / knowledge-qa | 093 知识侧深化(三态意图路由 + 融合问答)——已落地归档 |
-| 通用智能体 | ReAct 内核 / agent-memory / multi-model-routing / prompt-guardrails / cloud-code-sandbox | 089 工具网关(工具广度)+ 090 任务内核(长任务) |
+| 通用智能体 | ReAct 内核 / agent-memory / multi-model-routing / prompt-guardrails / cloud-code-sandbox | 089 工具网关 + 090 任务内核(长任务)+ 094 web 检索域(联网搜索)——工具网关第二域已接入 |
 | 多智能体 | workflow-orchestration(静态 DAG)/ custom-agent | 091 动态协作编排(宿主 = 090 任务内核)——选型指引:步骤可静态枚举→workflow;需运行时拆解/分歧裁决→collab(缺省深度 1,嵌套 opt-in) |
 | 评测智能体 | eval / ai-eval(Execution Match、基线、few-shot 自学习)+ agent-observability / eval-agent | 092 评测智能体化(LLM-as-judge + 评测集自动构造)——已落地归档 |
 
 依赖拓扑:088 / 089 / 090 相互独立、可并行;091 以 090 为宿主殿后。
-**落地状态(2026-10-10)**:088–091 全部归档;093/092 已落地归档(问答=三态意图路由+融合问答,评测=LLM-as-judge+评测集自动构造;五方向全部有落地载体)。(091:拓扑配置面/协作账本/查询端点/
+**落地状态(2026-10-10)**:088–091 全部归档;092/093/094 已落地归档(问答=
+三态意图路由+融合问答,评测=LLM-as-judge+评测集自动构造,通用=web 检索域
+联网搜索;五方向全部有落地载体)。(091:拓扑配置面/协作账本/查询端点/
 web 协作视图/端到端冒烟双场景)。任务/协作部署级上限缺省值见 docs/tech-stack.md
 「任务/协作部署级上限」节。
 
-### 089 工具网关:后续域接入清单(2026-10-09 落地时登记)
+### 089 工具网关:后续域接入清单(2026-10-09 登记更新 2026-10-10)
 
 网关框架已就绪(域=清单+策略器+执行器;统一出站通道),新域接入=声明清单+实现策略器/执行器。
-后续接入候选(开工时各自立 spec):web 检索域(出口白名单按搜索引擎主机集)、
-HTTP 连接器域(用户自定义端点,白名单/凭证治理面需先立约)、内部系统连接器
-(工单/日历等;写工具走既有确认流)。MCP 出站维持不收编(mcp-interop 自有注册面,
-见 089 Non-goals)。
+web 检索域已落地(094:供应商 tavily/bocha,端点与白名单代码单源派生,检索卡脱敏+
+配额独立分桶)。剩余接入候选(开工时各自立 spec):HTTP 连接器域(用户自定义端点,
+白名单/凭证治理面需先立约)、内部系统连接器(工单/日历等;写工具走既有确认流)。
+MCP 出站维持不收编(mcp-interop 自有注册面,见 089 Non-goals)。
 
 ## 产品待办登记(backlog-settlement 终态化剥离,2026-08-25)
 

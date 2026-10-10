@@ -19,9 +19,40 @@ class RetryClass(Enum):
     PROTOCOL = "protocol"
 
 
+# 域失败文案前缀单源(094 评审循环 D4:域执行器收敛文案与网关 _was_delivered
+# 的送达判定共引,防多处字面量漂移;knowledge 域为 081 已归档代码,未收编)
+FAILURE_UNDELIVERED_PREFIX = "unreachable:"
+FAILURE_PROTOCOL_PREFIX = "protocol:"
+
+
 # 工具名 → 域标识单源(审计域标签与域配额闸共用;089 仅 knowledge 收编)。
 # 放 models(零依赖数据),避免 toolcall.service 传递性引入 httpx(审查 P2)。
-DOMAIN_TOOLS: dict[str, str] = {"knowledge_search": "knowledge"}
+DOMAIN_TOOLS: dict[str, str] = {"knowledge_search": "knowledge", "web_search": "websearch"}
+
+
+@dataclass(frozen=True)
+class SearchProvider:
+    """websearch 域检索供应商注册条目(纯数据;协议适配在 websearch.py)。"""
+
+    endpoint: str
+    host: str
+
+
+# 094 websearch 域参数边界单源(注册表 schema 与域策略器/分发缺省共引;
+# 审查 P2-3:防三点人工对齐漂移)
+WEBSEARCH_QUERY_MAX_LEN = 500
+WEBSEARCH_COUNT_MIN = 1
+WEBSEARCH_COUNT_MAX = 10
+WEBSEARCH_COUNT_DEFAULT = 5
+
+# 094 websearch 域:首发供应商注册表(纯数据,config/registry 零 httpx 传递)。
+# 端点由供应商单源派生,部署不可单独改端点(防白名单外端点的组合攻击面)。
+WEBSEARCH_PROVIDERS: dict[str, SearchProvider] = {
+    "tavily": SearchProvider(endpoint="https://api.tavily.com/search", host="api.tavily.com"),
+    "bocha": SearchProvider(
+        endpoint="https://api.bochaai.com/v1/web-search", host="api.bochaai.com"
+    ),
+}
 
 
 class DomainPolicy(Protocol):

@@ -112,6 +112,17 @@ class KnowledgeSearchPort(Protocol):
     async def search(self, *, query: str, top_k: int) -> list[dict[str, object]]: ...
 
 
+class WebSearchPort(Protocol):
+    """094:联网检索(websearch 域,检索供应商经网关出站)。
+
+    实现侧(组合根)负责凭证装配、供应商协议适配、超时与错误分类;
+    领域只消费「检索卡列表」(title/url/snippet),失败经 WebSearchError
+    上浮分类(分发兜底映射 ERROR + 审计,不裸崩)。
+    """
+
+    async def search(self, *, query: str, count: int) -> list[dict[str, object]]: ...
+
+
 class SandboxExecutor(Protocol):
     """run_python_code 工具委托(027):沙箱执行+审计(实现侧 sandbox 域)。
     data=None 纯计算;非 None={"columns","rows"}(六层防御取数结果,

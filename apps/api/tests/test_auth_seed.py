@@ -60,6 +60,8 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
         "tool:rag:retrieve",
         "tool:sql:execute",
         "tool:sql:validate",
+        # 094 新增(仅超管种子覆盖,不进 DEVELOPER 推荐集——显式授予制)
+        "tool:websearch:search",
         "workflow:execute",
     ]
     tenants = (
@@ -108,7 +110,7 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
         # +…/057 tool:compute/056 system:skill:manage/069 system:chat-quality:view
         # /081 tool:knowledge:search
         # /088 report:generate/read/export
-    ).scalar_one() == 38
+    ).scalar_one() == 39
     # 推荐绑定(只增不摘):DEVELOPER 增量获得 chat:execute(005)+chat:feedback:submit(014)
     # + 019 只读三件套(公告写工具不推,显式授予制)
     dev_perms = (
@@ -153,8 +155,8 @@ async def test_seed_idempotent_on_repeat(session: AsyncSession) -> None:
 
     assert await _count("public.sys_user") == 1
     assert await _count("public.sys_role") == 2
-    # …019 工具 5 点+027/028/029/031/032 各增
-    assert await _count("public.sys_permission") == 38
+    # …019 工具 5 点+027/028/029/031/032 各增+094 tool:websearch:search
+    assert await _count("public.sys_permission") == 39
     assert await _count("public.sys_tenant") == 1
     assert await _count("public.sys_user_role") == 1
     assert await _count("public.sys_user_tenant") == 1
@@ -162,8 +164,8 @@ async def test_seed_idempotent_on_repeat(session: AsyncSession) -> None:
     # 超管 30 + DEVELOPER 推荐 9
     # +069 system:chat-quality:view/081 tool:knowledge:search(均仅超管)
     # +088 report:generate/read/export(均仅超管)
-    # 超管 38 全量 + DEVELOPER 推荐 15(088 报告+090 任务三件套进推荐集)
-    assert await _count("public.sys_role_permission") == 53
+    # 超管 39 全量 + DEVELOPER 推荐 15(088 报告+090 任务三件套进推荐集)
+    assert await _count("public.sys_role_permission") == 54
 
 
 async def test_seed_with_env_password_not_forced_to_change(

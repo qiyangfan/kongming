@@ -15,7 +15,13 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from kongming.toolgateway.models import DomainPolicy, DomainSpec, RetryClass
+from kongming.toolgateway.models import (
+    FAILURE_PROTOCOL_PREFIX,
+    FAILURE_UNDELIVERED_PREFIX,
+    DomainPolicy,
+    DomainSpec,
+    RetryClass,
+)
 
 log = logging.getLogger(__name__)
 
@@ -38,10 +44,13 @@ class ToolGateway:
         manifest: dict[str, DomainSpec],
         policies: dict[str, DomainPolicy],
         executor: Executor | None = None,
+        domain_executors: dict[str, Executor] | None = None,
     ) -> None:
         self._domains = manifest
         self._policies = policies
         self._executor = executor
+        # 094:按域专属执行器(缺省回落通道级 executor;既有域不声明=零回归)
+        self._domain_executors = dict(domain_executors) if domain_executors else {}
         self._disabled: set[str] = set()
         self.warnings: list[str] = [
             f"toolgateway: 域 {did} 无策略器实现,未注册" for did in manifest if did not in policies
@@ -51,6 +60,18 @@ class ToolGateway:
 
     def handles(self, domain: str) -> bool:
         return domain in self._domains and domain in self._policies and domain not in self._disabled
+
+    def declared(self, domain: str) -> bool:
+        """域是否已装配(清单+策略器+执行器;不含运行时停用态)。
+
+        端口绑定判「装配」不判「停用」:停用零感知由注册表闸(注入集消失)
+        与执行期拒绝承担,端口绑定不随停用翻转——否则停用瞬间的在途回调会被
+        误标为「未接线(部署缺陷)」审计(审查 P2-1/P2-2)。"""
+        return (
+            domain in self._domains
+            and domain in self._policies
+            and (domain in self._domain_executors or self._executor is not None)
+        )
 
     def quota(self, domain: str) -> int | None:
         spec = self._domains.get(domain)
@@ -100,7 +121,8 @@ class ToolGateway:
         (status ∈ executed/rejected/error + result/reason)。"""
         policy = self._policies.get(domain)
         spec = self._domains.get(domain)
-        if domain in self._disabled or spec is None or policy is None or self._executor is None:
+        executor = self._domain_executors.get(domain) or self._executor
+        if domain in self._disabled or spec is None or policy is None or executor is None:
             # 与「域从未存在」同形:拒绝并按策略分类落审计(由调用方 L5 承担)
             return {"status": "rejected", "reason": f"policy: 域 {domain} 不可用"}
         exit_check = policy.exit_host_allowed
@@ -119,7 +141,7 @@ class ToolGateway:
             exc: Exception | None = None
             response: object = None
             try:
-                response = await self._executor(url=url, payload=dict(args), timeout_s=timeout_s)
+                response = await executor(url=url, payload=dict(args), timeout_s=timeout_s)
                 delivered = True
             except Exception as e:  # noqa: BLE001 —— 分类收敛,不裸抛
                 exc = e
@@ -146,7 +168,14 @@ class ToolGateway:
 
 def _was_delivered(exc: Exception) -> bool:
     """是否「请求已送达」:读超时/HTTP 状态错=已送达;连接族=未送达。
-    判定供策略器分类;具体分类仍由域策略器声明(可覆盖)。"""
+    判定供策略器分类;具体分类仍由域策略器声明(可覆盖)。
+    域收敛异常(081/094 同款前缀)按前缀语义归类,与策略器 classify
+    保持同向(delivered 是一致性兜底信号,重试判定只认前缀分类)。"""
+    text = str(exc)
+    if text.startswith(FAILURE_UNDELIVERED_PREFIX):
+        return False
+    if text.startswith(FAILURE_PROTOCOL_PREFIX):
+        return True
     if isinstance(
         exc,
         (

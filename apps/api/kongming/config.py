@@ -5,6 +5,8 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from kongming.toolgateway.models import WEBSEARCH_PROVIDERS
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="KM_", extra="ignore")
@@ -169,6 +171,13 @@ class Settings(BaseSettings):
     # 工具总配额之上;部署级可调)
     toolgateway_knowledge_quota: int = Field(default=30, ge=1, le=600)
 
+    # 094 web-search-domain:联网检索域(供应商+API key 齐备才注册 web_search;
+    # 均未配置=域零感知,合法缺省)。凭证只存控制面环境变量(ADR-002)
+    websearch_provider: str = ""  # tavily | bocha
+    websearch_api_key: str = ""
+    websearch_timeout_ms: int = Field(default=8000, ge=1, le=30000)
+    toolgateway_websearch_quota: int = Field(default=20, ge=1, le=600)
+
     # SQL 安全引擎(053):builtin | shadow | primary;默认影子(内置权威,
     # 引擎只对拍观测)。切换期行为契约零变更;引擎缺失/异常自动降级不阻断。
     sqlguard_mode: str = "shadow"
@@ -178,6 +187,30 @@ class Settings(BaseSettings):
     muniu_admin_base_url: str = "http://127.0.0.1:8787"
     muniu_admin_token: str = ""
     cost_reconcile_threshold: float = Field(default=0.2, ge=0.0, le=1.0)
+
+    def websearch_misconfiguration(self) -> str | None:
+        """094:websearch 组合配置校验(残缺返回描述,否则 None)。
+
+        prod 由 fail_closed_checks 拒启;dev 由 lifespan 告警降级(域不注册)。
+        均未配置=合法缺省(零感知),不视为残缺。
+        """
+        provider = (self.websearch_provider or "").strip().lower()
+        key = (self.websearch_api_key or "").strip()
+        if not provider:
+            # 只配 key 缺供应商同属残缺(评审循环 D3:排障时「配了 key 却没生效」
+            # 不能无信号)
+            if key:
+                return "KM_WEBSEARCH_API_KEY 已配置但 KM_WEBSEARCH_PROVIDER 缺失,websearch 域不注册"
+            return None
+        if provider not in WEBSEARCH_PROVIDERS:
+            valid = "、".join(sorted(WEBSEARCH_PROVIDERS))
+            return f"KM_WEBSEARCH_PROVIDER 非法值 {provider}(值域:{valid})"
+        if not key:
+            return (
+                f"KM_WEBSEARCH_PROVIDER={provider} 已配置但 KM_WEBSEARCH_API_KEY 缺失,"
+                "websearch 域不注册"
+            )
+        return None
 
     def fail_closed_checks(self) -> None:
         """prod 环境缺敏感配置直接拒启(dev 宽松以便本地起步)。"""
@@ -202,6 +235,11 @@ class Settings(BaseSettings):
                 "prod fail-closed: KM_BILLING_MOCK_ENABLED 开启时"
                 " KM_BILLING_MOCK_SECRET 必须显式配置且不得为 dev 占位值"
             )
+        # 094:websearch 组合残缺(供应商已配缺 key / 供应商非法值)在 prod
+        # 拒启而非静默降级——配置错误必须显式暴露(dev 由 lifespan 告警降级)
+        ws_misconfig = self.websearch_misconfiguration()
+        if ws_misconfig:
+            raise RuntimeError(f"prod fail-closed: {ws_misconfig}")
 
 
 @lru_cache

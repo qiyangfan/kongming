@@ -50,9 +50,16 @@ from kongming.toolcall.repository import (
     user_has_all_scope,
 )
 from kongming.toolcall.service import ConfirmOutcome, ToolCallService
-from kongming.toolgateway.gateway import ToolGateway
+from kongming.toolgateway.gateway import Executor, ToolGateway
 from kongming.toolgateway.knowledge import KnowledgeExecutor, KnowledgePolicy
-from kongming.toolgateway.models import DOMAIN_TOOLS, load_manifest
+from kongming.toolgateway.models import (
+    DOMAIN_TOOLS,
+    FAILURE_UNDELIVERED_PREFIX,
+    WEBSEARCH_PROVIDERS,
+    DomainPolicy,
+    load_manifest,
+)
+from kongming.toolgateway.websearch import WebSearchError, WebSearchExecutor, WebSearchPolicy
 
 log = logging.getLogger(__name__)
 
@@ -289,14 +296,15 @@ def _build_mcp_service(session: AsyncSession) -> McpService:
 
 
 def _build_gateway() -> ToolGateway | None:
-    """089:knowledge 域网关装配(端点未配置或主机非白名单 → None,零感知)。
-    清单/策略器/执行器三件齐备才注册;策略器缺失的域不注册(fail-closed)。"""
+    """089/094:网关域清单装配(各域注册条件独立判定;条件不满足的域不进
+    清单=零感知)。清单/策略器/执行器三件齐备才注册;策略器缺失的域不注册
+    (fail-closed)。全部域条件均不满足 → None(无网关,既有路径零回归)。"""
     settings = get_settings()
+    entries: list[dict[str, object]] = []
+    # knowledge 域(081):端点 + localhost 白名单两道条件
     url = (settings.siku_base_url or "").strip()
-    if not url or not is_local_base_url(url):
-        return None
-    manifest, warnings = load_manifest(
-        [
+    if url and is_local_base_url(url):
+        entries.append(
             {
                 "id": "knowledge",
                 "endpoint": url.rstrip("/") + "/api/search",
@@ -307,19 +315,47 @@ def _build_gateway() -> ToolGateway | None:
                 "quota_per_minute": settings.toolgateway_knowledge_quota,
                 "redaction": "allowlist:knowledge",
             }
-        ]
-    )
+        )
+    # websearch 域(094):供应商在注册表内 + API key 齐备两道条件;
+    # 端点/白名单由供应商单源派生(部署不可单独改端点)
+    provider = (settings.websearch_provider or "").strip().lower()
+    api_key = (settings.websearch_api_key or "").strip()
+    if provider in WEBSEARCH_PROVIDERS and api_key:
+        spec = WEBSEARCH_PROVIDERS[provider]
+        entries.append(
+            {
+                "id": "websearch",
+                "endpoint": spec.endpoint,
+                "whitelist_hosts": [spec.host],
+                "timeout_ms": settings.websearch_timeout_ms,
+                "quota_per_minute": settings.toolgateway_websearch_quota,
+                "redaction": "allowlist:websearch",
+            }
+        )
+    if not entries:
+        return None
+    manifest, warnings = load_manifest(entries)
     for w in warnings:
         log.warning("%s", w)
-    if "knowledge" not in manifest:
-        return None
+    policies: dict[str, DomainPolicy] = {}
+    domain_executors: dict[str, Executor] = {}
+    executor: Executor | None = None
+    if "knowledge" in manifest:
+        # 策略器白名单从清单派生(单一真理源)
+        policies["knowledge"] = KnowledgePolicy(
+            whitelist_hosts=manifest["knowledge"].whitelist_hosts
+        )
+        executor = KnowledgeExecutor()
+    if "websearch" in manifest:
+        policies["websearch"] = WebSearchPolicy(
+            whitelist_hosts=manifest["websearch"].whitelist_hosts
+        )
+        domain_executors["websearch"] = WebSearchExecutor(adapter=provider, api_key=api_key)
     return ToolGateway(
         manifest=manifest,
-        # 策略器白名单从清单派生(单一真理源)
-        policies={
-            "knowledge": KnowledgePolicy(whitelist_hosts=manifest["knowledge"].whitelist_hosts)
-        },
-        executor=KnowledgeExecutor(),
+        policies=policies,
+        executor=executor,
+        domain_executors=domain_executors or None,
     )
 
 
@@ -358,7 +394,38 @@ def _get_gateway() -> ToolGateway | None:
 def _build_knowledge_client() -> _GatewayKnowledgeClient | None:
     """081/089:端点未配置或主机非 localhost 白名单 → None(工具不注册)。"""
     gw = _get_gateway()
-    return _GatewayKnowledgeClient(gw) if gw is not None else None
+    return _GatewayKnowledgeClient(gw) if gw is not None and gw.declared("knowledge") else None
+
+
+class _GatewayWebSearchClient:
+    """094 WebSearchPort 绑定:出站经网关切面(出口校验→限流→出站→脱敏→
+    重试分类),本适配层只做域方言整形(检索卡观察形态);失败收敛
+    WebSearchError(分发兜底 ERROR+审计)。"""
+
+    def __init__(self, gateway: ToolGateway) -> None:
+        self._gw = gateway
+
+    async def search(self, *, query: str, count: int) -> list[dict[str, object]]:
+        out = await self._gw.execute(
+            tool_name="web_search",
+            args={"query": query, "count": count},
+            domain="websearch",
+            trace_id="-",  # trace 经工具分发层审计承载;适配层不重复落
+            tenant_id="-",
+            user_id="-",
+        )
+        if out["status"] != "executed":
+            raise WebSearchError(
+                str(out.get("reason") or f"{FAILURE_UNDELIVERED_PREFIX} 联网检索拒连")
+            )
+        result = cast("dict[str, object]", out.get("result") or {})
+        return cast("list[dict[str, object]]", result.get("results") or [])
+
+
+def _build_websearch_client() -> _GatewayWebSearchClient | None:
+    """094:供应商+API key 任一缺失 → 域不在清单 → None(工具不注册)。"""
+    gw = _get_gateway()
+    return _GatewayWebSearchClient(gw) if gw is not None and gw.declared("websearch") else None
 
 
 class _McpDynamicResolver:
@@ -414,6 +481,8 @@ def _get_service(session: Annotated[AsyncSession, Depends(get_session)]) -> Tool
         mcp_caller=_McpToolCaller(mcp_svc),  # 028
         knowledge=_build_knowledge_client(),  # 081(未配置=None)
         knowledge_quota=getattr(get_settings(), "toolgateway_knowledge_quota", None),  # 089 域配额
+        websearch=_build_websearch_client(),  # 094(未配置=None)
+        websearch_quota=settings.toolgateway_websearch_quota,  # 094 域配额(独立分桶)
         rate_limit_per_minute=settings.tool_rate_limit_per_minute,
         confirm_ttl_minutes=settings.tool_confirm_ttl_minutes,
     )
