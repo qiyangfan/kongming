@@ -8,9 +8,9 @@ import logging
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from kongming.db import uuid7
 from kongming.task import models as m
 from kongming.task.ports import CollabBotResolver, TaskRepo
+from kongming.uuid7 import uuid7  # 纯函数单源直取(领域层不经基础设施 kongming.db)
 
 log = logging.getLogger(__name__)
 
