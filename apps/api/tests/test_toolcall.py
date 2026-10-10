@@ -753,6 +753,10 @@ async def test_audit_page_filters(
     assert r.status_code == 200
     body = r.json()
     assert body["total"] >= 2
+    # 089 裁决落地:域标签读面投影(内置工具恒 None;域工具非空)——存量行
+    # 与老客户端零回归(字段可选)
+    validate_row = next((i for i in body["items"] if i["tool_name"] == "validate_sql"), None)
+    assert validate_row is not None and validate_row["domain"] is None
     # 按工具名筛选
     r2 = await client.get("/system/tools/audit/page?tool_name=validate_sql", headers=_auth(token))
     assert all(it["tool_name"] == "validate_sql" for it in r2.json()["items"])

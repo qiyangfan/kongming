@@ -6,6 +6,7 @@ prompt 资产见 prompts.py(逐字保值);user 模板的全角标点同样与上
 generate 读到 error 即拼「上次生成的 SQL 有误」喂回 LLM(自愈闭环)。
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -16,14 +17,24 @@ from typing import cast
 from kongming_agent import deps, numeric, sqlguard
 from kongming_agent.apiclient import MetricHit, SchemaMeta
 from kongming_agent.graph.budget import Segment, converge
-from kongming_agent.graph.citations import sanitize_citations
+from kongming_agent.graph.citations import sanitize_citations, surviving_markers
+from kongming_agent.graph.doc_prompt import FUSED_ANSWER_SYSTEM, INTENT_ROUTE_SYSTEM
 from kongming_agent.graph.prompts import (
     SQL_GEN_SYSTEM,
     SUMMARIZE_SYSTEM,
     UNDERSTAND_MULTI_SYSTEM,
     UNDERSTAND_SINGLE_SYSTEM,
 )
-from kongming_agent.graph.state import AgentState, ExecutionResult, ValidationResult
+from kongming_agent.graph.state import (
+    INTENT_DATA,
+    INTENT_FUSED,
+    INTENT_KNOWLEDGE,
+    VALID_INTENTS,
+    AgentState,
+    ExecutionResult,
+    ValidationResult,
+    fused_takes_over,
+)
 from kongming_agent.graph.streams import emit_event
 from kongming_agent.graph.table_prune import prune_schema
 from kongming_agent.llm import LlmError
@@ -632,18 +643,31 @@ def is_sql_intent(question: str) -> bool:
 
 
 def route_after_retrieve(state: AgentState) -> str:
-    """分流判定(spec「知识分流」):知识意图 + 文档命中即分流;
+    """分流判定(093 三态路由接管):LLM 路由结论在 state.intent——
+    fused 先走 SQL 通道收口,fused_answer 节点后置联合作答(D4 数据为刃:
+    取数失败不靠文档粉饰);knowledge 走通道确认(D1:意图定通道、检索结果
+    定可用材料),文档未命中照旧走 SQL 链路;data 附件规则保留(036④)。
+    intent 缺席=路由 LLM 失败/超时/低置信已回退:词表分支与 093 前逐字一致
+    (含 047 多轮闸),零回归兜底。
     schema 是否命中不作条件(024 冒烟实证:知识问题常有 schema 模糊命中,
-    双条件过严——「退货政策是什么」召回 rental 表说明致不分流)。
-    036④:附件在场且无 SQL 强意图→直答分流(纯图片问题不硬走 SQL)。
-    047:多轮会话在场时,仅泛系系词「是什么」命中意图词表不分流——会话
-    本身即数据语境,泛系系词不足以证明文档意图(浏览器实测:数据追问
-    「这些影片各自的分类是什么」被文档通道劫持);强文档词照旧分流。"""
+    双条件过严——「退货政策是什么」召回 rental 表说明致不分流)。"""
     doc_hints = state.get("doc_hints") or []
     # 下标:入口 state 恒写入 question(缺键属编程错误),保留下标求值序
     question = state.get("resolved_question")
     if not question:
         question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+    intent = state.get("intent")
+    if intent == INTENT_FUSED:
+        return "generate"
+    if intent == INTENT_KNOWLEDGE:
+        return "doc_answer" if doc_hints else "generate"
+    if intent == INTENT_DATA and state.get("has_attachments") and not is_sql_intent(question):
+        # 036④:附件在场且无 SQL 强意图→直答分流(纯图片问题不硬走 SQL;
+        # LLM 判 data 不推翻附件规则——路由只看文本,看不到附件语义)
+        return "doc_answer"
+    if intent is not None:  # LLM 判定的 data(无附件):直通既有 SQL 链路
+        return "generate"
+    # ── 回退分支(与 093 前逐字一致)──
     if doc_hints and is_knowledge_intent(question):
         if state.get("history") and not is_strong_doc_intent(question):
             return "generate"
@@ -741,6 +765,215 @@ async def doc_answer(state: AgentState) -> dict[str, object]:
         "insights": [],
         "stats": {},
         "sources": sources,  # 068:结构化来源(空=SQL 道/无命中)
+    }
+
+
+# ── 093 三态意图路由(route_intent)+ 融合问答(fused_answer)──
+
+# 093 可观测计数(复语直通 snapshot_stats 同款形态;零新采集通道):
+# 路由回退(LLM 失败/超时/低置信)与融合兜底(生成失败回退纯数据答)
+_intent_lock = threading.Lock()
+_intent_stats = {"intent_route_fallback_total": 0, "fused_answer_fallback_total": 0}
+
+
+def snapshot_intent_route_stats() -> dict[str, int]:
+    """093 回退/兜底计数快照(可观测:prompt 调优与阈值调整依据)。"""
+    with _intent_lock:
+        return dict(_intent_stats)
+
+
+def parse_intent_route(raw: str) -> tuple[str, float, str] | None:
+    """路由 LLM 输出解析(纯函数):JSON {intent, confidence, reason}。
+    intent 越域 / 置信缺失或不可解析 / 置信越界 [0,1] → None(调用方回退词表)。"""
+    parsed = parse_summary_json(raw)
+    intent = str(parsed.get("intent", "")).strip().lower()
+    if intent not in VALID_INTENTS:
+        return None
+    try:
+        confidence = float(cast("float", parsed.get("confidence")))
+    except (TypeError, ValueError):
+        return None
+    if not 0.0 <= confidence <= 1.0:
+        return None
+    return intent, confidence, str(parsed.get("reason", "")).strip()
+
+
+async def route_intent(state: AgentState) -> dict[str, object]:
+    """093 三态意图路由节点(understand 后、检索前):LLM 判定
+    data/knowledge/fused + 置信;超时(缺省 3s)/失败/低置信(缺省 0.7)回退
+    既有规则词表——回退时不写 intent 键,route_after_retrieve 走与 093 前
+    逐字一致的词表分支(含 047 多轮闸,零回归;词表没有融合态,回退态天然
+    保守,design D2)。误判只影响答法,SHALL NOT 产生任何数据副作用(spec)。"""
+    question = state.get("resolved_question")
+    if not question:
+        question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+    settings = Settings()
+    parsed: tuple[str, float, str] | None = None
+    try:
+        raw = await asyncio.wait_for(
+            deps.get_llm().chat(
+                INTENT_ROUTE_SYSTEM,
+                f"用户问题:{question}\n\n输出 JSON:",
+                temperature=0.1,
+                max_tokens=120,
+                task="INTENT_ROUTE",  # 021 任务路由:小模型档(multi-model-routing,缺省主模型)
+                trace_id=state.get("trace_id"),
+                tenant_key=state.get("tenant_key"),
+            ),
+            timeout=settings.intent_route_timeout_sec,
+        )
+        parsed = parse_intent_route(raw)
+    except (LlmError, TimeoutError):
+        parsed = None
+    if parsed is None or parsed[1] < settings.intent_route_min_confidence:
+        with _intent_lock:
+            _intent_stats["intent_route_fallback_total"] += 1
+        emit_event(
+            "trace",
+            {
+                "node": "route_intent",
+                "fields": {
+                    "kind": "intent_route",
+                    "source": "fallback",
+                    "reason": "llm_low_confidence" if parsed is not None else "llm_failed",
+                },
+            },
+        )
+        return {}
+    intent, confidence, reason = parsed
+    emit_event(
+        "trace",
+        {
+            "node": "route_intent",
+            "fields": {
+                "kind": "intent_route",
+                "source": "llm",
+                "intent": intent,
+                "confidence": confidence,
+                "reason": reason,
+            },
+        },
+    )
+    return {
+        "intent": intent,
+        "intent_source": "llm",
+        "intent_confidence": confidence,
+        "intent_reason": reason,
+    }
+
+
+def _note_fused_fallback(trace_id: str | None, reason: str) -> None:
+    """融合兜底入账 + trace 下发(可观测;回退纯数据答是 spec 契约非故障)。"""
+    with _intent_lock:
+        _intent_stats["fused_answer_fallback_total"] += 1
+    emit_event(
+        "trace",
+        {"node": "fused_answer", "fields": {"kind": "fused_answer_fallback", "reason": reason}},
+    )
+    log.info("fused_answer 回退纯数据答 trace_id=%s reason=%s", trace_id, reason)
+
+
+async def fused_answer(state: AgentState) -> dict[str, object]:
+    """093 融合问答节点(summarize 后条件进入):SQL 通道 SUCCESS 且文档命中
+    且结果非空时联合作答——正文=数据结论(接地结果面,057 数值纪律同审计)
+    + 口径解释(【引用键】,068 净化与 sources 投影同机制,合法键=本节点下发
+    父块集);融合正文即洞察位正文(insights 清空,design Open Question 裁定)。
+    与 doc_answer 的 LlmError 上抛语义刻意不同:此处数据答已就绪,spec 明文
+    「生成失败回退纯数据答正文(结果面不丢)」——上抛反而丢掉完整结果面。"""
+    execution = state.get("execution")
+    doc_hints = state.get("doc_hints") or []
+    # 前置复核(_after_summarize 已拦,此处兜底防直调/拓扑改动漏网;判据
+    # 单源=state.fused_takes_over,与条件边/流式抑制三处共用)。execution
+    # 局部再收窄:谓词对类型检查不透明,后续 data_preview/审计直接解引用
+    if not fused_takes_over(state) or execution is None:
+        return {}
+    question = state.get("resolved_question")
+    if not question:
+        question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+    stats = state.get("stats") or {}
+    data_preview = (
+        f"列:{execution.columns}\n总行数:{len(execution.rows)}\n"
+        f"本地统计:{stats}\n前5行:{execution.rows[:5]}"
+    )
+    # 注入段标注=引用键(与净化合法集同源;缺失回退 source_ref 作块头说明)
+    parts = [
+        f"来源 {h.get('citation_key') or h['source_ref']}:\n{h['content'][:1500]}"
+        for h in doc_hints[:5]
+    ]
+    user = (
+        f"问题:{question}\n\n数据结果:\n{data_preview}\n\n文档内容:\n"
+        + "\n\n".join(parts)
+        + "\n\n回答:"
+    )
+    try:
+        answer = await deps.get_llm().chat(
+            FUSED_ANSWER_SYSTEM,
+            user,
+            temperature=0.1,
+            task="FUSED_ANSWER",
+            trace_id=state.get("trace_id"),
+            tenant_key=state.get("tenant_key"),
+        )
+    except LlmError:
+        _note_fused_fallback(state.get("trace_id"), "llm_failed")
+        return {}
+    summary = answer.strip()
+    if not summary:
+        # 空稿同兜底:数据答已在,不伪造融合内容
+        _note_fused_fallback(state.get("trace_id"), "empty_answer")
+        return {}
+    # 068 确定性净化(零模型):合法键集=本节点下发父块集
+    legal_keys = [str(h.get("citation_key") or "") for h in doc_hints]
+    legal_keys = [k for k in legal_keys if k]
+    sanitized = sanitize_citations(summary, legal_keys)
+    summary = sanitized.text
+    by_key = {str(h.get("citation_key") or ""): h for h in doc_hints}
+    if sanitized.stripped:
+        emit_event(
+            "trace",
+            {
+                "node": "fused_answer",
+                "fields": {
+                    "kind": "citation_sanitize",
+                    "stripped": sanitized.stripped,
+                    "surviving": list(sanitized.surviving_keys),
+                },
+            },
+        )
+    # 057 数值纪律收口:融合正文同过确定性审计,白名单=结果面∪stats∪本轮
+    # 计算值∪下发文档内容数字(双依据语义:正文数字须可溯源到数据或文档,
+    # 两者皆非才剥——文档口径数字如「7 天」是合法证据,不得按数据口径误杀)
+    doc_numbers = [t.value for part in parts for t in numeric.extract_numbers(part)]
+    audited = numeric.audit_summarize_output(
+        summary,
+        [],
+        columns=execution.columns,
+        rows=execution.rows,
+        stats=stats,
+        compute_values=[*(state.get("compute_values") or []), *doc_numbers],
+        structural=[float(len(execution.rows)), float(numeric.PREVIEW_ROWS)],
+    )
+    final = audited.summary or fallback_summary(stats)
+    # sources 投影必须以「过审终稿」为准:057 审计会剥句(含被引句),若按
+    # 净化期存活键投影,会出现「列表有条目而正文无标注」的幽灵不一致
+    # (chat/knowledge-qa spec 明文 SHALL NOT)——终稿存活标记重投影,
+    # 全剥回退纯数据答时 sources 自然为空
+    sources: list[dict[str, object]] = []
+    for key in surviving_markers(final):
+        hit = by_key.get(key)
+        if hit is None:
+            continue
+        sources.append(
+            {
+                "citation_key": key,
+                "source_ref": str(hit.get("source_ref") or ""),
+                "doc_name": str(hit.get("source_ref") or "").split(" §")[0],
+            }
+        )
+    return {
+        "summary": final,
+        "insights": [],
+        "sources": sources,
     }
 
 

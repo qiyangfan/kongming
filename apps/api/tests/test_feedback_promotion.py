@@ -384,6 +384,9 @@ async def test_recall_prefers_feedback_sample(
         async def recall_vector(self, *_a: object, **_kw: object) -> list[object]:
             return []
 
+        async def has_knowledge(self, *_a: object, **_kw: object) -> bool:
+            return True  # 064 前置:知识在位,闸门照常评估
+
         async def recall_fulltext(self, *_a: object, **_kw: object) -> list[object]:
             return []
 

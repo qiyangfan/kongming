@@ -15,7 +15,7 @@ from typing import Any
 
 from langgraph.config import get_stream_writer
 
-from kongming_agent.graph.state import AgentState, ValidationResult
+from kongming_agent.graph.state import AgentState, ValidationResult, fused_takes_over
 
 log = logging.getLogger(__name__)
 
@@ -67,10 +67,20 @@ def stage_wrapper(name: str, fn: AsyncNodeFn | SyncNodeFn) -> Any:
             if isinstance(validation, ValidationResult) and validation.passed:
                 # SQL 提前展示:校验通过即下发,内容与终态落库 SQL 一致
                 emit_event("sql", {"sql": state.get("generated_sql") or ""})
-        if name in ("summarize", "doc_answer"):  # 024:知识问答节点同样产出终稿
+        if name in ("summarize", "doc_answer", "fused_answer"):  # 024/093:产出终稿的节点
             summary = out.get("summary")
             if isinstance(summary, str) and summary:
-                emit_event("summary", {"delta": summary})
+                # 093:融合道确定接手时 summarize 的数据稿不下发(融合正文由
+                # fused_answer 单独产出终稿,打字机通道只追加、无替换语义,
+                # 双稿会拼接)。抑制判据=接手谓词单源(state.fused_takes_over,
+                # 与条件边同源)——融合态但退化收口(无行/文档未命中/取数失败)
+                # 时数据稿必须照常下发,否则 query-streaming「兜底文案同样以
+                # summary 事件下发」被吞;fused_answer 兜底回退时不发 summary
+                # 事件,终稿随 result 终态下发
+                if name == "summarize" and fused_takes_over(state):
+                    pass
+                else:
+                    emit_event("summary", {"delta": summary})
         return out
 
     return wrapped

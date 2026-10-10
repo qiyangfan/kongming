@@ -96,11 +96,16 @@ class Settings(BaseSettings):
     meta_schema_max_tables: int = Field(default=50, ge=1)
 
     # 064 召回相关度闸门:off(缺省,零回归)| shadow(只记录)| primary(裁剪)。
-    # 阈值按路独立(向量=余弦相似度 / 全文=ts_rank 量纲不同,不共用);
-    # 缺省值保守(不裁),由影子阶段分布标定后调整。
+    # 阈值按路独立(向量=余弦相似度 / 全文=ts_rank 量纲不同,不共用)。
+    # 向量档已按评估集标定(2026-10-10 对拍:知识在位可答题 top1 最低
+    # 0.683,0.30 有 2.3× 余量、零误拒;成对缺省写入,防「mode 开了而
+    # mean=0 判据恒真」的半开脚枪);全文档量纲未标定,保持 0(=该路不裁,
+    # 非恒真放行——is_relevant 的 mean 恒真只在 top1 档>0 时有语义,两档
+    # 均为 0 即整路不裁)。启用前置已代码化:零知识数据源闸门自动旁路
+    # (zero-knowledge ≠ low-relevance),切换=部署配置 KM_RAG_GATE_MODE。
     rag_gate_mode: str = "off"
-    rag_gate_vector_top1: float = Field(default=0.0, ge=0.0)
-    rag_gate_vector_mean: float = Field(default=0.0, ge=0.0)
+    rag_gate_vector_top1: float = Field(default=0.30, ge=0.0)
+    rag_gate_vector_mean: float = Field(default=0.28, ge=0.0)
     rag_gate_fulltext_top1: float = Field(default=0.0, ge=0.0)
     rag_gate_fulltext_mean: float = Field(default=0.0, ge=0.0)
     rag_gate_min_count: int = Field(default=1, ge=1)

@@ -813,7 +813,7 @@ wheels = [
 
 [[package]]
 name = "liannu"
-version = "0.1.3"
+version = "0.1.4"
 source = { directory = "../../packages/liannu" }
 dependencies = [
     { name = "sqlglot" },

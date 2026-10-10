@@ -79,13 +79,16 @@ class SqlReportRepo:
         )
         return dict(row) if row else None
 
-    async def set_phase(self, *, report_id: str, phase: str) -> None:
+    async def set_phase(self, *, report_id: str, phase: str, tenant_id: str) -> None:
+        """进度回写(091 裁决:锚定租户归属——report_id 归属不匹配即不更新,
+        与 collab-start 任务-租户归属闸同式;跨租户回写静默无效)。"""
         await self._s.execute(
             text(
                 "UPDATE public.report SET phase = :p, updated_at = now()"
                 " WHERE id = CAST(:i AS uuid) AND status = 'GENERATING'"
+                " AND tenant_id = CAST(:t AS uuid)"
             ),
-            {"p": phase, "i": report_id},
+            {"p": phase, "i": report_id, "t": tenant_id},
         )
 
     async def mark_interrupted_failed(self) -> int:

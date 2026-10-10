@@ -137,7 +137,7 @@ async def test_topology_declare_and_begin_step_collab_decision(
     step = await _plan_one_step(client, task_id)
 
     # PENDING 步骤声明拓扑
-    topo = {"max_workers": 3, "critic": True, "dispatch": "parallel"}
+    topo: dict[str, object] = {"max_workers": 3, "critic": True, "dispatch": "parallel"}
     r = await _set_topology(client, token, task_id, step["id"], topo)
     assert r.status_code == 200, r.text
     assert r.json()["max_workers"] == 3

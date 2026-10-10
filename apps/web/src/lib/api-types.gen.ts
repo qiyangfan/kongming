@@ -1175,8 +1175,7 @@ export interface paths {
         put?: never;
         /**
          * Disable Domain
-         * @description 停用域(进程内存态:本进程立即生效,重启随部署清单复位;
-         *     多副本部署需逐副本操作,持久化启停属后续独立变更——design 既有裁决)。
+         * @description 停用域(0044 持久化:本进程立即生效 + 写穿;重启与多副本以库收敛)。
          */
         post: operations["disable_domain_system_tools_domains__domain_id__disable_post"];
         delete?: never;
@@ -1196,7 +1195,7 @@ export interface paths {
         put?: never;
         /**
          * Enable Domain
-         * @description 启用域(进程内存态,复位口径同 disable)。
+         * @description 启用域(0044 持久化,写穿口径同 disable)。
          */
         post: operations["enable_domain_system_tools_domains__domain_id__enable_post"];
         delete?: never;
@@ -3577,9 +3576,9 @@ export interface components {
             metric_hits: components["schemas"]["MetricHitOut"][];
             /**
              * Sources
-             * @default []
+             * @description 结构化来源:纯数据道恒为空;知识道/融合道由净化后正文单向投影,可非空(068/093)
              */
-            sources: components["schemas"]["SourceOut"][];
+            sources?: components["schemas"]["SourceOut"][];
         };
         /** CollabFinishIn */
         CollabFinishIn: {
@@ -4684,7 +4683,10 @@ export interface components {
             column_labels?: string[];
             /** Metric Hits */
             metric_hits?: components["schemas"]["MetricHitOut"][];
-            /** Sources */
+            /**
+             * Sources
+             * @description 结构化来源:纯数据道恒为空;知识道/融合道由净化后正文单向投影,可非空(068/093)
+             */
             sources?: components["schemas"]["SourceOut"][];
         };
         /** MetaColumnOut */
@@ -5182,6 +5184,11 @@ export interface components {
             report_id: string;
             /** Phase */
             phase: string;
+            /**
+             * Tenant Key
+             * @default default
+             */
+            tenant_key: string;
         };
         /** ProgressOut */
         ProgressOut: {
@@ -5715,7 +5722,8 @@ export interface components {
         };
         /**
          * SourceOut
-         * @description 068(纯增):文档道来源条目(引用键/来源标识/文档名快照)。
+         * @description 结构化来源条目(068/093:引用键/来源标识/文档名快照)。
+         *     语义:纯数据道恒为空;知识道与融合道由净化后正文单向投影,可非空。
          */
         SourceOut: {
             /** Citation Key */
@@ -6325,6 +6333,8 @@ export interface components {
             duration_ms: number | null;
             /** Datasource Key */
             datasource_key: string | null;
+            /** Domain */
+            domain?: string | null;
             /** Idempotency Key */
             idempotency_key: string | null;
             /** Expires At */

@@ -141,8 +141,10 @@ async def meta_schema(
         raise HTTPException(status_code=404, detail="TENANT_NOT_FOUND")
 
     if req.datasource_key == "default":
-        # 默认路径:控制面库本库内省(零回归)
-        return await _introspect(session, [f"tenant_{req.tenant_key}", "public"])
+        # 默认路径:仅租户 schema 内省(与执行路由 route_schema 同式)。SHALL NOT
+        # 含 public——平台库 public 是控制面表(judge_run/report/sys_* 族),
+        # 入租户知识即跨域泄漏(生成侧可见即可查;092 供给环境时实测抓到)
+        return await _introspect(session, [f"tenant_{req.tenant_key}"])
 
     # 动态源:存在+启用+归属校验+解密(同形 400 防探测,与执行路由同构;
     # 009 抽 resolver 公共,fetch-metadata 复用)

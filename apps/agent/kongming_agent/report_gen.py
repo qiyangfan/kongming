@@ -67,7 +67,9 @@ class ReportApiPort(Protocol):
         channel: str = "chat",
     ) -> ToolExecuteOutcome: ...
 
-    async def report_progress(self, *, report_id: str, phase: str) -> None: ...
+    async def report_progress(
+        self, *, report_id: str, phase: str, tenant_key: str = "default"
+    ) -> None: ...
 
 
 @dataclass
@@ -556,7 +558,9 @@ class ReportOrchestrator:
     async def _progress(self, report_id: str, phase: str) -> None:
         if not report_id:
             return
-        await self._api.report_progress(report_id=report_id, phase=phase)
+        # 租户锚随载荷(091 裁决:进度回写按租户过滤,api 侧归属闸兜底)
+        tenant_key = str(self._payload.get("tenant_key") or "default")
+        await self._api.report_progress(report_id=report_id, phase=phase, tenant_key=tenant_key)
 
 
 async def run_report_generation(

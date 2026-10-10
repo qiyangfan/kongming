@@ -39,3 +39,36 @@ async def test_rag_retrieve_valid_json_still_parsed(
     assert result is not None
     assert result.schema_hint == "film 表:电影"
     assert result.history_sql == "SELECT 1"
+
+
+async def test_rag_retrieve_doc_hints_citation_key_passthrough(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """068 回归闸:api 下发的 doc_hints citation_key 必须透传进 RagContext——
+    交付时曾漏掉本解析点,键在 agent 面恒缺失(合法键集恒空 → 净化自跳过、
+    来源投影恒空);093 期修复,本用例锁死不再复发。"""
+    client = ApiClient(Settings())
+
+    async def fake_post(self: ApiClient, path: str, payload: dict[str, object]) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "schema_hint": "",
+                "history_sql": "",
+                "doc_hints": [
+                    {
+                        "source_ref": "退货政策.md §2",
+                        "content": "7 天内可退",
+                        "citation_key": "policy-A1B2",
+                    },
+                    {"source_ref": "旧版 api.md §1", "content": "无键命中"},
+                ],
+            },
+        )
+
+    monkeypatch.setattr(ApiClient, "_post", fake_post)
+    result = await client.rag_retrieve(tenant_key="t", datasource_key="default", question="q")
+    assert result is not None
+    assert result.doc_hints[0]["citation_key"] == "policy-A1B2"
+    # 键缺失(旧版 api)=空串:注入段表头与合法键集按既有空值语义回退 source_ref
+    assert result.doc_hints[1]["citation_key"] == ""

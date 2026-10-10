@@ -334,7 +334,7 @@ class SqlToolCallRepo:
                     text(
                         "SELECT id, trace_id, user_id, tenant_id, tool_name, args_digest,"  # noqa: S608  # 多行拼接含 f-string(条件片段常量)
                         "       status, error_reason, duration_ms, datasource_key,"
-                        "       idempotency_key, expires_at, created_at"
+                        "       domain, idempotency_key, expires_at, created_at"
                         f" FROM public.sys_tool_audit WHERE {where}"
                         " ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset"
                     ),
@@ -345,6 +345,28 @@ class SqlToolCallRepo:
             .all()
         )
         return [dict(r) for r in rows], int(total)
+
+
+async def list_domain_states(session: AsyncSession) -> dict[str, bool]:
+    """域启停持久状态(0044):domain_id → disabled。未登记=启用(零回归)。"""
+    rows = (
+        await session.execute(text("SELECT domain_id, disabled FROM public.sys_tool_domain_state"))
+    ).all()
+    return {str(r[0]): bool(r[1]) for r in rows}
+
+
+async def upsert_domain_state(
+    session: AsyncSession, *, domain_id: str, disabled: bool, updated_by: str
+) -> None:
+    await session.execute(
+        text(
+            "INSERT INTO public.sys_tool_domain_state (domain_id, disabled, updated_by)"
+            " VALUES (:d, CAST(:dis AS boolean), :u)"
+            " ON CONFLICT (domain_id) DO UPDATE"
+            " SET disabled = CAST(:dis AS boolean), updated_by = :u, updated_at = now()"
+        ),
+        {"d": domain_id, "dis": disabled, "u": updated_by},
+    )
 
 
 async def user_has_all_scope(session: AsyncSession, user_id: str) -> bool:

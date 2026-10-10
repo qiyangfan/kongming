@@ -130,6 +130,10 @@ class RagRepo(Protocol):
         self, *, tenant_id: str, datasource_key: str, vector: list[float]
     ) -> list[RecallHit]: ...
 
+    async def has_knowledge(self, *, tenant_id: str, datasource_key: str) -> bool:
+        """该数据源是否已灌表知识(064 闸门前置:零知识≠低相关,见 gate 消费点)。"""
+        ...
+
     async def recall_fulltext(
         self, *, tenant_id: str, datasource_key: str, question: str
     ) -> list[RecallHit]: ...

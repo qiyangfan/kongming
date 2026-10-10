@@ -67,7 +67,13 @@ export default function TasksPage() {
         title="任务"
         description="跨请求的持久任务:目标分解为步骤,证据驱动执行"
         actions={
-          <StatusFilter value={status} onChange={(v) => { setStatus(v); setPage(1); }} />
+          <StatusFilter
+            value={status}
+            onChange={(v) => {
+              setStatus(v);
+              setPage(1);
+            }}
+          />
         }
       />
       {isError && <ErrorAlert />}

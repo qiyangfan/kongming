@@ -216,3 +216,20 @@ def test_benign_functions_pass() -> None:
     ):
         v = check(sql)
         assert v.passed, f"{sql!r} 应放行,实际 {v!r}"
+
+
+async def test_reserved_names_block_platform_output_tables() -> None:
+    """092 纵深回归:judge_*/report 族平台产出表任何 schema 形态按名拒读——
+    动态源误指平台库时 scope 白名单(public)拦不住,保留名单是最后一道。"""
+    from kongming.sqlfw.guard import parse_guarded
+
+    for sql in (
+        "SELECT * FROM public.judge_run",
+        "SELECT * FROM judge_run",
+        "SELECT * FROM report",
+        "SELECT * FROM public.report_section",
+        "SELECT * FROM report_version",
+        "WITH r AS (SELECT * FROM report) SELECT * FROM r",
+    ):
+        v = parse_guarded(sql).check_reserved_tables()
+        assert not v.passed, f"{sql} 应被保留表闸拦下: {v.reason}"

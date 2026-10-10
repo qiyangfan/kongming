@@ -16,6 +16,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 
 const STAGE_LABELS: Record<string, string> = {
   understand: "理解问题",
+  route_intent: "意图路由", // 093 三态意图路由(检索前)
   retrieve: "检索表结构",
   generate: "生成 SQL",
   validate: "校验",
@@ -23,6 +24,7 @@ const STAGE_LABELS: Record<string, string> = {
   selfheal: "自愈重试",
   summarize: "总结",
   doc_answer: "知识问答", // 024
+  fused_answer: "融合作答", // 093 融合问答(数据结论 × 文档口径)
   // 019 ReAct 内核节点
   react: "思考与决策",
   tool_dispatch: "工具执行",

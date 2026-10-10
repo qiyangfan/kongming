@@ -13,7 +13,7 @@ dependencies = [
     "anthropic>=1.8",                # 多协议出站(ADR-008):anthropic Messages 官方 SDK(测试以 httpx2 注入)
     "httpx>=0.28",                   # 回调控制面
     "sqlglot>=26.0",                 # validate 节点本地 AST 预检(纯解析,无 IO)
-    "liannu==0.1.3",                 # 053 SQL 安全引擎(validate 预检单遍解析;monorepo 共享包)
+    "liannu==0.1.4",                 # 053 SQL 安全引擎(validate 预检单遍解析;monorepo 共享包)
 ]
 
 # 053:引擎为本仓共享包(packages/liannu,连弩),以 uv path 依赖引入;

@@ -168,3 +168,33 @@
   gold_sql: SELECT COUNT(DISTINCT customer_id) FROM tenant_sakila.rental
   expected_tables: [rental]
   category: aggregate
+
+# ── 092 自动构造并入(三段闸:生成→自洽验证→人审)。生成 5 候选,人审
+# 剔除 2 条:2bd1aee6(与 35ced065 近重复——生成期语义去重漏检,人审兜住)、
+# a91aca63(gold 恒空 0 行/sakila 无 2007 年支付,空 gold 不可判定,同时
+# 换来 validators 的空结果闸);并入 3 条──
+
+- id: 35ced065
+  tenant: sakila
+  question: 列出所有活跃客户的姓名、邮箱和注册日期，按注册日期降序排列，若注册日期相同则按客户ID升序排列，结果限制为100条。
+  gold_sql: SELECT first_name, last_name, email, create_date FROM tenant_sakila.customer WHERE activebool = true ORDER BY
+    create_date DESC, customer_id ASC LIMIT 100
+  expected_tables: [customer]
+  category: single_table
+
+- id: 6183fe4b
+  question: 统计每个国家的城市数量，并按城市数量降序排列，数量相同时按国家名称升序排列
+  # 审查循环修订:追加 country_id 第三键(规范 1 唯一列 tiebreaker;种子数据
+  # 国家名唯一,行集与行序不变)并去尾分号(与全集 25 条存量口径一致)
+  gold_sql: SELECT c.country, COUNT(ci.city_id) AS city_count FROM tenant_sakila.country c JOIN tenant_sakila.city ci ON c.country_id
+    = ci.country_id GROUP BY c.country_id, c.country ORDER BY city_count DESC, c.country ASC, c.country_id ASC
+  expected_tables: [country, city]
+  category: aggregate
+
+- id: 381c7e34
+  question: 列出所有活跃客户的姓名、邮箱以及他们所属门店的经理姓名，按客户姓氏升序排列，结果限制为100条；若姓氏相同，则按客户ID升序排列。
+  gold_sql: SELECT c.first_name, c.last_name, c.email, s.first_name AS manager_first_name, s.last_name AS manager_last_name
+    FROM tenant_sakila.customer c JOIN tenant_sakila.store st ON c.store_id = st.store_id JOIN tenant_sakila.staff s ON st.manager_staff_id
+    = s.staff_id WHERE c.activebool = true ORDER BY c.last_name, c.customer_id LIMIT 100
+  expected_tables: [customer, store, staff]
+  category: join_2table

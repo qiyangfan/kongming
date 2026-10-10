@@ -1,0 +1,77 @@
+- id: 35ced065
+  question: 列出所有活跃客户的姓名、邮箱和注册日期，按注册日期降序排列，若注册日期相同则按客户ID升序排列，结果限制为100条。
+  gold_sql: SELECT first_name, last_name, email, create_date FROM tenant_sakila.customer WHERE activebool = true ORDER BY
+    create_date DESC, customer_id ASC LIMIT 100
+  expected_tables:
+  - tenant_sakila.customer
+  category: single_table
+  validation:
+    exec_ok: true
+    row_count: 100
+    style_failures: []
+    semantic_duplicate: false
+    ok: true
+- id: 6183fe4b
+  question: 统计每个国家的城市数量，并按城市数量降序排列，数量相同时按国家名称升序排列
+  gold_sql: SELECT c.country, COUNT(ci.city_id) AS city_count FROM tenant_sakila.country c JOIN tenant_sakila.city ci ON c.country_id
+    = ci.country_id GROUP BY c.country_id, c.country ORDER BY city_count DESC, c.country ASC;
+  expected_tables:
+  - tenant_sakila.country
+  - tenant_sakila.city
+  category: aggregate
+  validation:
+    exec_ok: true
+    row_count: 109
+    style_failures: []
+    semantic_duplicate: false
+    ok: true
+- id: 2bd1aee6
+  question: 查询所有活跃状态为启用（activebool = true）的客户姓名、邮箱及注册日期，并按注册日期降序排列，结果限制为100条；若注册日期相同，则按customer_id升序排列。
+  gold_sql: SELECT first_name, last_name, email, create_date FROM tenant_sakila.customer WHERE activebool = true ORDER BY
+    create_date DESC, customer_id ASC LIMIT 100
+  expected_tables:
+  - tenant_sakila.customer
+  category: filter
+  validation:
+    exec_ok: true
+    row_count: 100
+    style_failures: []
+    semantic_duplicate: false
+    ok: true
+- id: 381c7e34
+  question: 列出所有活跃客户的姓名、邮箱以及他们所属门店的经理姓名，按客户姓氏升序排列，结果限制为100条；若姓氏相同，则按客户ID升序排列。
+  gold_sql: SELECT c.first_name, c.last_name, c.email, s.first_name AS manager_first_name, s.last_name AS manager_last_name
+    FROM tenant_sakila.customer c JOIN tenant_sakila.store st ON c.store_id = st.store_id JOIN tenant_sakila.staff s ON st.manager_staff_id
+    = s.staff_id WHERE c.activebool = true ORDER BY c.last_name, c.customer_id LIMIT 100
+  expected_tables:
+  - tenant_sakila.customer
+  - tenant_sakila.store
+  - tenant_sakila.staff
+  category: join_2table
+  validation:
+    exec_ok: true
+    row_count: 100
+    style_failures: []
+    semantic_duplicate: false
+    ok: true
+- id: a91aca63
+  question: 请列出所有在2007年1月完成支付、且租借影片的客户姓名（名和姓）、对应员工姓名（名和姓）以及影片标题，按支付时间倒序排列，结果限制为100条，并确保相同支付时间下按payment_id升序排列。
+  gold_sql: SELECT c.first_name AS customer_first_name, c.last_name AS customer_last_name, s.first_name AS staff_first_name,
+    s.last_name AS staff_last_name, f.title FROM tenant_sakila.payment_p2007_01 p JOIN tenant_sakila.customer c ON p.customer_id
+    = c.customer_id JOIN tenant_sakila.staff s ON p.staff_id = s.staff_id JOIN tenant_sakila.rental r ON p.rental_id = r.rental_id
+    JOIN tenant_sakila.inventory i ON r.inventory_id = i.inventory_id JOIN tenant_sakila.film f ON i.film_id = f.film_id ORDER
+    BY p.payment_date DESC, p.payment_id ASC LIMIT 100
+  expected_tables:
+  - tenant_sakila.payment_p2007_01
+  - tenant_sakila.customer
+  - tenant_sakila.staff
+  - tenant_sakila.rental
+  - tenant_sakila.inventory
+  - tenant_sakila.film
+  category: join_3table
+  validation:
+    exec_ok: true
+    row_count: 0
+    style_failures: []
+    semantic_duplicate: false
+    ok: true

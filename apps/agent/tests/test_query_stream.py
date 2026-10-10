@@ -111,8 +111,22 @@ async def test_stream_happy_path_event_sequence(
 ) -> None:
     """成功链路:stage 成对 → sql → summary → result 唯一终态;
     result data 与同步 /query 响应逐字段一致(终态一致性直证)。"""
-    llm = _Llm(["商品总库存", "SELECT sum(qty) FROM goods", '{"summary":"共 30"}'])
-    llm_sync = _Llm(["商品总库存", "SELECT sum(qty) FROM goods", '{"summary":"共 30"}'])
+    llm = _Llm(
+        [
+            "商品总库存",
+            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            "SELECT sum(qty) FROM goods",
+            '{"summary":"共 30"}',
+        ]
+    )
+    llm_sync = _Llm(
+        [
+            "商品总库存",
+            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            "SELECT sum(qty) FROM goods",
+            '{"summary":"共 30"}',
+        ]
+    )
     async with _client(monkeypatch, llm) as c:
         stream_resp = await c.post("/query/stream", json=REQ, headers=TOKEN)
     async with _client(monkeypatch, llm_sync) as c:
@@ -136,8 +150,16 @@ async def test_stream_happy_path_event_sequence(
         if e == "stage" and d.get("node") == "validate" and d.get("status") == "done"
     )
     assert sql_idx == validate_done_idx + 1
-    # 每节点恰好 running/done 各一次
-    for node in ("understand", "retrieve", "generate", "validate", "execute", "summarize"):
+    # 每节点恰好 running/done 各一次(route_intent=093 检索前三态路由)
+    for node in (
+        "understand",
+        "route_intent",
+        "retrieve",
+        "generate",
+        "validate",
+        "execute",
+        "summarize",
+    ):
         stages = [d for e, d in frames if e == "stage" and d.get("node") == node]
         assert [s.get("status") for s in stages] == ["running", "done"], node
     # sql 事件内容=生成的 SQL;summary 事件=完整文案
@@ -178,6 +200,7 @@ async def test_stream_validate_rejected_no_sql_event(
     llm = _Llm(
         [
             "商品总库存",
+            '{"intent":"data","confidence":0.99}',  # 093 route_intent
             "SELECT sum(qty FROM goods",  # 未闭合括号 → PARSE_ERROR
             "SELECT sum(qty) FROM goods",
             '{"summary":"共 30"}',
@@ -212,7 +235,13 @@ async def test_stream_permission_block_no_sql_no_selfheal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """权限类拦截:无 sql 事件、无 selfheal stage,终态 verdict=BLOCKED。"""
-    llm = _Llm(["删掉商品", "DELETE FROM goods"])
+    llm = _Llm(
+        [
+            "删掉商品",
+            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            "DELETE FROM goods",
+        ]
+    )
     async with _client(monkeypatch, llm) as c:
         resp = await c.post("/query/stream", json=REQ, headers=TOKEN)
     frames = _parse_sse(resp.text)
@@ -242,7 +271,14 @@ async def test_stream_empty_result_summary_still_emitted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """执行成功但零行:summarize 兜底「查询无结果。」仍以 summary 事件下发。"""
-    llm = _Llm(["商品总库存", "SELECT sum(qty) FROM goods WHERE 1=0", '{"summary":""}'])
+    llm = _Llm(
+        [
+            "商品总库存",
+            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            "SELECT sum(qty) FROM goods WHERE 1=0",
+            '{"summary":""}',
+        ]
+    )
     api = _Api(outcome=SqlExecuteOutcome(verdict="PASS", columns=["qty"], rows=[]))
     async with _client(monkeypatch, llm, api) as c:
         resp = await c.post("/query/stream", json=REQ, headers=TOKEN)
@@ -251,6 +287,30 @@ async def test_stream_empty_result_summary_still_emitted(
     assert "summary" in events
     summary_idx = events.index("summary")
     assert frames[summary_idx][1]["delta"] == "查询无结果。"
+
+
+async def test_stream_fused_degenerate_still_emits_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """093 流式抑制判据=接手谓词单源:融合态但退化收口(执行 PASS 零行)
+    时,数据兜底稿必须照常以 summary 事件下发(query-streaming「无结果或
+    降级兜底文案 SHALL 同样以 summary 事件形态下发」,无 intent 豁免)——
+    不得因 intent=fused 一刀切吞稿。"""
+    llm = _Llm(
+        [
+            "商品总库存",
+            '{"intent":"fused","confidence":0.99}',  # 093 route_intent
+            "SELECT sum(qty) FROM goods WHERE 1=0",
+            '{"summary":""}',
+        ]
+    )
+    api = _Api(outcome=SqlExecuteOutcome(verdict="PASS", columns=["qty"], rows=[]))
+    async with _client(monkeypatch, llm, api) as c:
+        resp = await c.post("/query/stream", json=REQ, headers=TOKEN)
+    frames = _parse_sse(resp.text)
+    events = [e for e, _ in frames]
+    assert "summary" in events
+    assert frames[events.index("summary")][1]["delta"] == "查询无结果。"
 
 
 class _BoomLlm:

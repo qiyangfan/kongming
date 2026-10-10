@@ -107,6 +107,11 @@ class Settings(BaseSettings):
     schema_prune: bool = True
     schema_prune_top_n: int = 12
 
+    # 三态意图路由(093):LLM 判定超时与置信阈值——超时/失败/低置信即回退
+    # 既有规则词表(词表无融合态,回退态天然保守,最坏退回 093 前行为)
+    intent_route_timeout_sec: float = 3.0
+    intent_route_min_confidence: float = 0.7
+
     # 出站韧性(072):瞬时故障重试与单层降级。attempt 预算按上层
     # agent_timeout_sec=120 反推(design D4:最坏 2×30s + 退避 + 1×30s)
     llm_max_attempts: int = 3  # 单次业务调用总尝试上限(含降级目标)

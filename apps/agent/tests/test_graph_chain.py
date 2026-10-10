@@ -118,7 +118,12 @@ def _initial() -> AgentState:
 
 async def test_first_round_pass(harness: Harness) -> None:
     llm, api = harness(
-        ["商品总库存", "SELECT sum(qty) FROM goods", '{"summary":"共 30"}'],
+        [
+            "商品总库存",
+            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            "SELECT sum(qty) FROM goods",
+            '{"summary":"共 30"}',
+        ],
         [SqlExecuteOutcome(verdict="PASS", columns=["sum"], rows=[[30]])],
     )
     final = await _invoke(_initial())
@@ -126,14 +131,15 @@ async def test_first_round_pass(harness: Harness) -> None:
     assert final["summary"] == "共 30"
     assert final["retry_count"] == 0
     assert api.calls == 1
-    assert len(llm.users) == 3  # understand/generate/summarize 各一次
-    assert "tenant_default.goods" in llm.users[1]  # schema 提示拼入 generate
+    assert len(llm.users) == 4  # route_intent/understand/generate/summarize 各一次
+    assert "tenant_default.goods" in llm.users[2]  # schema 提示拼入 generate
 
 
 async def test_error_selfheal_then_pass(harness: Harness) -> None:
     llm, api = harness(
         [
             "商品总库存",
+            '{"intent":"data","confidence":0.99}',  # 093 route_intent
             "SELECT sum(qtyy) FROM goods",  # 首轮错列名
             '{"summary":"共 30"}',
         ],
@@ -142,37 +148,48 @@ async def test_error_selfheal_then_pass(harness: Harness) -> None:
             SqlExecuteOutcome(verdict="PASS", columns=["sum"], rows=[[30]]),
         ],
     )
-    # 第二次 generate 由 selfheal 喂回错误后产生正确 SQL——脚本第二位让给 selfheal 后的 generate
-    llm.answers.insert(2, "SELECT sum(qty) FROM goods")
+    # 第二次 generate 由 selfheal 喂回错误后产生正确 SQL——脚本第四位让给 selfheal 后的 generate
+    llm.answers.insert(3, "SELECT sum(qty) FROM goods")
     final = await _invoke(_initial())
     assert final["execution"].verdict == "PASS"
     assert final["retry_count"] == 1
     assert api.calls == 2
     # selfheal 把执行错误喂回了第二次 generate
-    assert "column qtyy does not exist" in llm.users[2]
+    assert "column qtyy does not exist" in llm.users[3]
 
 
 async def test_blocked_never_retries(harness: Harness) -> None:
     llm, api = harness(
-        ["删除商品", "DELETE FROM goods"],  # validate 本地即拦,execute 根本不会被调
+        [
+            "删除商品",
+            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            "DELETE FROM goods",
+        ],  # validate 本地即拦,execute 根本不会被调
         [],
     )
     final = await _invoke(_initial())
     assert final["end_reason"] == "blocked"
     assert final["retry_count"] == 0  # 权限类不耗配额
     assert api.calls == 0
-    assert len(llm.users) == 2  # understand + generate,summarize 不跑
+    assert len(llm.users) == 3  # route_intent + understand + generate,summarize 不跑
 
 
 async def test_sentinel_short_circuit_zero_execution(harness: Harness) -> None:
     """043:知识未覆盖哨兵短路——零执行零重试,失败终态带用户友好文案。"""
-    llm, api = harness(["员工总数", "NO_RELEVANT_TABLE"], [])
+    llm, api = harness(
+        [
+            "员工总数",
+            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            "NO_RELEVANT_TABLE",
+        ],
+        [],
+    )
     final = await _invoke(_initial())
     assert final["end_reason"] == "no_data"
     assert final["generated_sql"] == ""
     assert final["error"] == _NO_DATA_ERROR
     assert api.calls == 0  # 短路前零执行(sys_sql_audit 零新增记录)
-    assert len(llm.users) == 2  # understand + generate;无重试、无 summarize
+    assert len(llm.users) == 3  # route_intent + understand + generate;无重试、无 summarize
     assert "summary" not in final  # 失败路径不出洞察
 
 
@@ -181,14 +198,18 @@ async def test_sentinel_after_does_not_exist_guides_then_terminates(
 ) -> None:
     """043:首轮编表执行报 does-not-exist → 喂回附清单引导 → 二轮哨兵短路不再连败。"""
     llm, api = harness(
-        ["员工总数", "SELECT count(*) FROM staff"],  # 首轮凭先验编表
+        [
+            "员工总数",
+            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            "SELECT count(*) FROM staff",
+        ],  # 首轮凭先验编表
         [SqlExecuteOutcome(verdict="ERROR", reason='relation "public.staff" does not exist')],
     )
-    llm.answers.insert(2, "NO_RELEVANT_TABLE")  # 二轮经引导后如实说明
+    llm.answers.insert(3, "NO_RELEVANT_TABLE")  # 二轮经引导后如实说明
     final = await _invoke(_initial())
     assert final["end_reason"] == "no_data"
     assert api.calls == 1  # 二轮短路,零新增执行
-    assert "所引用的表或列不在『可用表结构』清单中" in llm.users[2]  # 喂回引导在位
+    assert "所引用的表或列不在『可用表结构』清单中" in llm.users[3]  # 喂回引导在位
     assert final["error"] == _NO_DATA_ERROR
     assert final["retry_count"] == 1  # 仅首轮后的那一次 selfheal 计数
     assert "summary" not in final
@@ -196,7 +217,9 @@ async def test_sentinel_after_does_not_exist_guides_then_terminates(
 
 async def test_retry_exhaustion_terminates(harness: Harness) -> None:
     _, api = harness(
-        ["商品总库存"] + ["SELECT sum(qtyy) FROM goods"] * (MAX_RETRY + 1),
+        # 093 route_intent(脚本序=调用序:understand 先消费问句)
+        ["商品总库存", '{"intent":"data","confidence":0.99}']
+        + ["SELECT sum(qtyy) FROM goods"] * (MAX_RETRY + 1),
         [SqlExecuteOutcome(verdict="ERROR", reason="column qtyy does not exist")] * (MAX_RETRY + 1),
     )
     final = await _invoke(_initial())
@@ -242,6 +265,7 @@ async def test_dialogue_reply_not_blocked_by_prefix_query(harness: Harness) -> N
     llm, api = harness(
         [
             "取消订单的门店有哪些",
+            '{"intent":"data","confidence":0.99}',  # 093 route_intent
             "SELECT store FROM orders WHERE status='cancelled'",
             '{"summary":"1 家"}',
         ],

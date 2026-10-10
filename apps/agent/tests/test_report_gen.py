@@ -67,7 +67,9 @@ class FakeApi:
             raise AssertionError("FakeApi.outcomes 已空,tool_execute 不应再被调用")
         return self._outcomes.pop(0)
 
-    async def report_progress(self, *, report_id: str, phase: str) -> None:
+    async def report_progress(
+        self, *, report_id: str, phase: str, tenant_key: str = "default"
+    ) -> None:
         self.phases.append(phase)
 
 

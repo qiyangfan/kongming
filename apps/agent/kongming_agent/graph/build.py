@@ -13,7 +13,7 @@ from langgraph.graph import END, START, StateGraph
 
 from kongming_agent.graph import nodes
 from kongming_agent.graph.nodes import MAX_RETRY  # re-export(测试与调用方统一入口)
-from kongming_agent.graph.state import AgentState
+from kongming_agent.graph.state import AgentState, fused_takes_over
 from kongming_agent.graph.streams import stage_wrapper
 
 __all__ = ["MAX_RETRY", "build", "get_graph"]
@@ -21,10 +21,11 @@ __all__ = ["MAX_RETRY", "build", "get_graph"]
 
 def _after_understand(state: AgentState) -> str:
     """071:复语直通短路产物(end_reason=no_data)直达失败终态——
-    零检索零生成零执行;正常问句照常进 retrieve(与 043 _after_generate 同构)。"""
+    零检索零生成零执行;正常问句先经 route_intent(093 检索前三态路由)
+    再进 retrieve(与 043 _after_generate 同构)。"""
     if state.get("end_reason"):
         return "fail"
-    return "retrieve"
+    return "route_intent"
 
 
 def _after_generate(state: AgentState) -> str:
@@ -59,6 +60,14 @@ def _after_selfheal(state: AgentState) -> str:
     return "retry"
 
 
+def _after_summarize(state: AgentState) -> str:
+    """093:融合道接手(判定单源=state.fused_takes_over,与流式抑制/节点
+    前置复核三处共用)→ fused_answer 联合作答;其余形态(数据态/知识态/
+    取数失败/文档未命中/空结果)照旧直接收终态——收口语义数据为刃(D4),
+    此序不可逆。"""
+    return "fused_answer" if fused_takes_over(state) else "end"
+
+
 @lru_cache
 def get_graph():  # type: ignore[no-untyped-def]
     """编译产物单例(无状态,可跨请求共享)。"""
@@ -68,6 +77,10 @@ def get_graph():  # type: ignore[no-untyped-def]
     # langgraph add_node/compile 签名自带库侧 Unknown(泛型未闭合),访问点豁免
     g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
         "understand", stage_wrapper("understand", nodes.understand)
+    )
+    # 093 三态意图路由(检索前轻量分类;失败/低置信回退词表,零回归)
+    g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
+        "route_intent", stage_wrapper("route_intent", nodes.route_intent)
     )
     g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
         "retrieve", stage_wrapper("retrieve", nodes.retrieve)
@@ -92,11 +105,22 @@ def get_graph():  # type: ignore[no-untyped-def]
     g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
         "doc_answer", stage_wrapper("doc_answer", nodes.doc_answer)
     )
+    # 093 融合问答(summarize 后条件进入,见 _after_summarize)
+    g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
+        "fused_answer", stage_wrapper("fused_answer", nodes.fused_answer)
+    )
 
     g.add_edge(START, "understand")
     # 071:understand→retrieve 改条件边(复语直通直达 fail;与 043 generate→validate 同构)
-    g.add_conditional_edges("understand", _after_understand, {"retrieve": "retrieve", "fail": END})
-    # 024:知识分流(知识意图+文档命中即分流;否则既有 generate;spec 修订后口径)
+    # 093:正常问句先经 route_intent(检索前三态路由)再进 retrieve
+    g.add_conditional_edges(
+        "understand",
+        _after_understand,
+        {"route_intent": "route_intent", "fail": END},
+    )
+    g.add_edge("route_intent", "retrieve")
+    # 024:知识分流(093 起判定单源=route_after_retrieve:LLM 三态结论优先,
+    # 缺席回退词表;通道确认仍以检索结果为准)
     g.add_conditional_edges(
         "retrieve",
         nodes.route_after_retrieve,
@@ -116,7 +140,12 @@ def get_graph():  # type: ignore[no-untyped-def]
         _after_selfheal,
         {"retry": "generate", "fail": END},
     )
-    g.add_edge("summarize", END)
+    g.add_conditional_edges(
+        "summarize",
+        _after_summarize,
+        {"fused_answer": "fused_answer", "end": END},
+    )
+    g.add_edge("fused_answer", END)
     # langgraph 库侧签名含 Unknown,访问点豁免(运行时即编译产物)
     return g.compile()  # pyright: ignore[reportUnknownMemberType]
 

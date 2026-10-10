@@ -81,9 +81,10 @@ def test_understand_passthrough_short_circuit_goes_fail() -> None:
     assert _after_understand({"end_reason": "no_data"}) == "fail"
 
 
-def test_understand_normal_goes_to_retrieve() -> None:
-    """数据查询路径节点序列不变:正常问句照常 understand→retrieve。"""
-    assert _after_understand({}) == "retrieve"
+def test_understand_normal_goes_to_route_intent() -> None:
+    """数据查询路径节点序列:正常问句 understand→route_intent(093 检索前三态
+    路由)→retrieve;路由失败在节点内回退,拓扑不因路由增分支。"""
+    assert _after_understand({}) == "route_intent"
 
 
 def test_understand_blocked_end_reason_also_fails() -> None:

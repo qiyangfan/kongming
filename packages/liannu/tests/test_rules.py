@@ -1,6 +1,7 @@
 """规则判定测试:与消费方 kongming 内置测试资产同源(一比一移植的自证)。"""
 
 from liannu import parse
+from liannu.rules import RESERVED_TABLE_NAMES, RESERVED_TABLE_PREFIXES
 
 PASS_CASES = [
     "SELECT * FROM customer",
@@ -166,3 +167,11 @@ def test_reserved_list_is_authoritative_members() -> None:
     assert "user_prefs" in rules.RESERVED_TABLE_NAMES
     assert "sys_" in rules.RESERVED_TABLE_PREFIXES
     assert "chat_" in rules.RESERVED_TABLE_PREFIXES
+
+
+def test_reserved_names_cover_platform_output_tables() -> None:
+    """092 纵深:平台产出表(judge_*/report 族)任何路径形态按名拒读——
+    动态源误指平台库时 scope 白名单(public)拦不住,名单是最后一道。"""
+    assert "judge_" in RESERVED_TABLE_PREFIXES
+    for name in ("report", "report_section", "report_version"):
+        assert name in RESERVED_TABLE_NAMES

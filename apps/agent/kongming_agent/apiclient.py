@@ -247,6 +247,11 @@ class ApiClient:
                 {
                     "source_ref": str(cast("dict[str, object]", h).get("source_ref") or ""),
                     "content": str(cast("dict[str, object]", h).get("content") or ""),
+                    # 068:稳定引用键透传(api 侧由父块主键派生)。068 交付时漏掉
+                    # 本解析点,键在 agent 面恒缺失——合法键集恒空致净化自跳过、
+                    # 来源投影恒空(真实链路缺陷,093 期应改尽改);缺失=空串,
+                    # 注入段表头与合法键集按既有空值语义回退 source_ref
+                    "citation_key": str(cast("dict[str, object]", h).get("citation_key") or ""),
                 }
                 for h in cast("list[object]", data.get("doc_hints") or [])
                 if isinstance(h, dict)
@@ -526,12 +531,15 @@ class ApiClient:
             return None
         return _json_of(resp) if resp.status_code == 200 else None
 
-    async def report_progress(self, *, report_id: str, phase: str) -> None:
+    async def report_progress(
+        self, *, report_id: str, phase: str, tenant_key: str = "default"
+    ) -> None:
         """报告生成进度回写(088):POST /internal/report/progress。
         进度是尽力而为信号:任何失败仅日志,不阻断编排主链路,不重发。"""
         try:
             resp = await self._post_once(
-                "/internal/report/progress", {"report_id": report_id, "phase": phase}
+                "/internal/report/progress",
+                {"report_id": report_id, "phase": phase, "tenant_key": tenant_key},
             )
             if resp.status_code != 204 and resp.status_code != 200:
                 log.warning("report_progress 非 2xx: HTTP %s", resp.status_code)

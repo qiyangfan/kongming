@@ -1,4 +1,4 @@
-# pyright: reportPrivateUsage=false
+# pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownMemberType=false
 """协作接线测试(091 组合根 collab_wiring + task_gen 协作分支,剧本化)。
 
 覆盖:开账 fail-closed(开账被拒不执行,无游离协作面)、全链账本时序
@@ -213,7 +213,7 @@ async def test_collab_runner_bot_persona_and_tool_narrowing() -> None:
         trace_root="tr",
         tools=[{"name": "sql_query"}, {"name": "web_search"}, {"name": "write_tool"}],
     )
-    cfg = {
+    cfg: dict[str, object] = {
         "max_workers": 1,
         "bot": {
             "bot_key": "fin_analyst",
@@ -394,4 +394,5 @@ async def test_task_gen_collab_failed_honest() -> None:
     reason = str(api.results[0]["fail_reason"])
     assert "协作裁决 ERROR" in reason
     assert "预算不足未派发" in reason
+    assert isinstance(api.finished, dict)  # finish 未被调到时显式失败而非 TypeError
     assert str(api.finished["status"]) == "FAILED"

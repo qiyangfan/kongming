@@ -259,6 +259,10 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
             if nr:
                 log.info("启动扫描:%d 个滞留 GENERATING 的报告标记 FAILED", nr)
         tool_registry.activate(tool_registry.build_registry(await _knowledge_endpoint(session)))
+        # 0044:域启停持久状态装载(重启/多副本以库收敛;无网关静默跳过)
+        from kongming.toolcall.router import load_persisted_domain_states as _load_states
+
+        await _load_states()
     archive_task = asyncio.create_task(_daily_archive_loop())
     billing_task = asyncio.create_task(_monthly_invoice_loop())  # 034:月首出账薄壳
     expire_task = asyncio.create_task(_payment_expire_loop())  # 035:支付单过期兜底

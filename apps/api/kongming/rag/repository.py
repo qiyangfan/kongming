@@ -377,6 +377,22 @@ class RagRepository:
             for r in rows
         ]
 
+    async def has_knowledge(self, *, tenant_id: str, datasource_key: str) -> bool:
+        """064 闸门前置:零知识数据源闸门自动旁路——零命中源于「无知识」
+        而非「低相关」,此时裁剪召回会误杀内省回退路径的可答题(sakila_dyn
+        形态,2026-10-10 对拍实证 3/3 误拒)。EXISTS 单点查,零成本。"""
+        row = (
+            await self._s.execute(
+                text(
+                    "SELECT EXISTS ("
+                    " SELECT 1 FROM rag.table_descriptions"
+                    " WHERE tenant_id = :t AND datasource_key = :d)"
+                ),
+                {"t": tenant_id, "d": datasource_key},
+            )
+        ).scalar()
+        return bool(row)
+
     async def recall_fulltext(
         self, *, tenant_id: str, datasource_key: str, question: str
     ) -> list[RecallHit]:

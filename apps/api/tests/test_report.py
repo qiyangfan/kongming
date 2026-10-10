@@ -787,6 +787,17 @@ async def test_progress_and_phase_writeback(
     p2 = await client.get(f"/reports/{rid}/progress", headers=_auth(token))
     assert p2.json()["phase"] == "FETCHING"
 
+    # 091 裁决:进度回写锚定租户归属——不携带/错租户的回写静默无效
+    # (该报告归属 default;tenant_key 指向别处时 UPDATE 不命中,phase 不变)
+    wrong = await client.post(
+        "/internal/report/progress",
+        json={"report_id": rid, "phase": "WRITING", "tenant_key": "olist"},
+        headers=INTERNAL,
+    )
+    assert wrong.status_code == 204  # 同形 204,写侧不命中(不向内部通道回显存在性)
+    p3 = await client.get(f"/reports/{rid}/progress", headers=_auth(token))
+    assert p3.json()["phase"] == "FETCHING"  # 归属闸拦下,phase 未被推进
+
     gate.set()
     await _wait_terminal(client, token, rid)
 

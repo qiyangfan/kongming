@@ -33,6 +33,36 @@ KM_EVAL_ADMIN_PASSWORD=Kongming#2026 uv run pytest evals -m multiturn  # 多轮�
   LLM 凭证走 repository secret(`KM_AGENT_LLM_API_KEY` 等),缺失时 job
   **显式失败**,不静默跳过。job 内置清理 query_history 同题沉淀与 ragctx
   缓存(011 教训)。
+- **judge 抽检层(092)**:smoke 层同时运行 `test_judge.py`(标记
+  `smoke+judge`)——对非确定性产出(报告/任务结论/协作裁决/文本回答)按
+  rubric 抽样评审(每类型 ≥3,存量不足全量,类型空缺如实记录不计失败);
+  通过率落 `judge_run/judge_result` 表并打印进 artifacts,与上次基线
+  (同类型同 rubric 版本最近一次 COMPLETED run)对比,劣化 ≥5pp 判门禁
+  失败(逐对象溯源信息随失败输出);跨 rubric 版本显式标注不可比。
+  judge LLM 凭证=smoke 同款 env(`KM_EVAL_LLM_API_KEY`,缺省回退
+  `KM_AGENT_LLM_API_KEY`),缺失显式失败。rubric 随代码演进
+  (`evals/judge/rubrics.py`,任何维度/权重/模板变更 MUST 递增 VERSION)。
+
+## 评测集自动构造(092)
+
+三段闸:**LLM 生成 → 自洽验证 → 人审并入**;候选落
+`datasets/candidates/<tenant>/`(文件态,不落库),人审是唯一并入路径。
+
+```bash
+cd apps/api
+# ① 生成+自洽验证(gold 直连业务库执行+README 规范校验+语义去重 0.92)
+KM_EVAL_LLM_API_KEY=… KM_DB_PASSWORD=… uv run python -m evals.construct generate \
+  --tenant default --datasource sakila --per-category 2
+# ② 人审:编辑候选 yaml,按 id 圈定通过项(validation.ok=true 才可并入)
+# ③ 并入收口一条命令:移动并入正式评估集 → 全量评估重跑 → 基线行登记
+uv run python -m evals.construct merge --tenant default --ids <id1,id2> \
+  [--no-full-eval] [--reason "…"]
+```
+
+自洽验证四闸:gold 可执行+行数 ≤1000 / 规范校验(tiebreaker、schema 限定、
+非裸 ID 投影、非 SELECT *——README 编写规范操作化,`construct/validators.py`
+与手工新题同一套判定)/ 语义去重(embedding 余弦 ≥0.92 标记重复)/
+id 冲突拒绝。并入后基线行自动登记进本文件基线表(原因=自动构造扩题)。
 
 **评估重复性口径**:评估以 persist=false 运行——不落会话/消息,且不触发
 query_history 回写(回写挂 persist 条件,测试通道不沉淀),dev 库零污染。
@@ -49,8 +79,8 @@ podman exec kongming-redis-1 redis-cli --scan --pattern 'km:ragctx:*' | xargs -r
 
 | 文件 | 内容 |
 |---|---|
-| `sakila.yaml` | sakila 单轮 20 题(smoke ×2) |
-| `olist.yaml` | olist 单轮 16 题(smoke ×2) |
+| `sakila.yaml` | sakila 单轮 28 题(smoke ×2;092 并入 3 题) |
+| `olist.yaml` | olist 单轮 19 题(smoke ×2) |
 | `sakila_multi_turn.yaml` / `olist_multi_turn.yaml` | 多轮 turns[](6+4 case) |
 | `datasource.yaml` | 动态数据源(sakila_dyn 显式 key ×3 + 跨租户拒绝 ×1) |
 | `default.yaml` | default 数据源负例(实体领域错配,expect_no_data ×2) |
@@ -163,6 +193,8 @@ SHA-256 短十六进制前 8 位);历史行未采集记 `—`。两次运行指�
 | 2026-08-30 | 048 聚合追问与去重护栏(understand 聚合口径显式化+构造条件复述、规则 5 聚合追问单行汇总、规则 9 对应关系组合去重+反例、olist_mt_003 t2 题面消歧「客户记录数」);三靶点收口:018 漏 DISTINCT/olist_mt_006 聚合口径丢失(3/3)/olist_mt_003 | 35/48 (73%) | 48/48 (100%) | 12/12 (100%) | 4/4 | 46/48 (96%) | — |
 | 2026-08-30 | 051 实体核对判据(规则 10 表级哨兵操作化+对位反例)+负例集 default.yaml ×2(expect_no_data,001 进 smoke;负例不计严格分,分母 +2)——正例零误伤,哨兵短路 ×3 轮稳定 | 34/50 (68%)* | 50/50 (100%) | 12/12 (100%) | 4/4 | 49/50 (98%) | — |
 | 2026-08-30 | 051 收尾 sakila_ext 中文注释补齐+重扫(知识变更,基线纪律复跑,同日二采;多轮未复跑与知识变更无涉)——宽松/动态持平零劣化,严格/表命中 ±1 属采样波动 | 35/50 (70%)* | 50/50 (100%) | — | 4/4 | 48/50 (96%) | — |
+| 2026-10-10 | 自动构造扩题(092 三段闸人审;5 候选入审、3 条并入后复跑——并入数与剔除理由见 sakila.yaml 头注) | 38/54 (70%) | 53/54 (98%) | — | 4/4 | 46/54 | 340dbcea |
+| 2026-10-10 | 审查循环数据修复后真实复跑(空 gold a91aca63 剔除、schema 限定 expected_tables 裸名化、6183fe4b 补唯一键 tiebreaker;分母 54→53)——上行的表命中/分母被 4 条 qualified gold 污染(判据恒 False),本行为首条真实口径;olist_016 单题宽松落败属 LLM 采样波动 | 34/53 (64%) | 50/53 (94%) | — | 4/4 | 47/53 (89%) | 340dbcea |
 
 > **051 注记**(2026-08-30):*严格分母含 2 题负例(expect_no_data 不计
 > 严格分);按正例口径对照为 34/48,与 048 基线 35 的 ±1 属 top-N 并列

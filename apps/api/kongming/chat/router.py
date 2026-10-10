@@ -553,7 +553,8 @@ class MetricHitOut(BaseModel):
 
 
 class SourceOut(BaseModel):
-    """068(纯增):文档道来源条目(引用键/来源标识/文档名快照)。"""
+    """结构化来源条目(068/093:引用键/来源标识/文档名快照)。
+    语义:纯数据道恒为空;知识道与融合道由净化后正文单向投影,可非空。"""
 
     citation_key: str
     source_ref: str = ""
@@ -590,8 +591,14 @@ class ChatQueryOut(BaseModel):
     column_labels: list[str] = []
     # 076(纯增):语义层口径命中(空=无命中;链路输入透出,老 agent 零回归)
     metric_hits: list[MetricHitOut] = []
-    # 068(纯增):文档道来源(空=SQL 道/无命中;老 agent 零回归)
-    sources: list[SourceOut] = []
+    # 068/093:结构化来源——纯数据道恒为空;知识道与融合道由净化后正文
+    # 单向投影,可非空(老 agent 零回归)
+    sources: Annotated[
+        list[SourceOut],
+        Field(
+            description="结构化来源:纯数据道恒为空;知识道/融合道由净化后正文单向投影,可非空(068/093)"
+        ),
+    ] = Field(default_factory=list[SourceOut])
 
 
 def _out(o: ChatOutcome) -> ChatQueryOut:
@@ -1045,8 +1052,14 @@ class MessageResultOut(BaseModel):
     column_labels: list[str] = Field(default_factory=list[str])
     # 076(纯增):口径依据(空=无命中/存量档;由正文消息单向派生,回显不重算)
     metric_hits: list[MetricHitOut] = Field(default_factory=list[MetricHitOut])
-    # 068(纯增):文档道来源(空=SQL 道/存量档;名称快照不回查文档表)
-    sources: list[SourceOut] = Field(default_factory=list[SourceOut])
+    # 068/093:结构化来源(空=纯数据道/存量档;知识道与融合道可非空;
+    # 名称快照不回查文档表)
+    sources: Annotated[
+        list[SourceOut],
+        Field(
+            description="结构化来源:纯数据道恒为空;知识道/融合道由净化后正文单向投影,可非空(068/093)"
+        ),
+    ] = Field(default_factory=list[SourceOut])
 
 
 class SessionMessageOut(BaseModel):

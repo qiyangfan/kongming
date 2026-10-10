@@ -56,6 +56,10 @@ class ToolGateway:
         spec = self._domains.get(domain)
         return spec.quota_per_minute if spec else None
 
+    def apply_disabled(self, domains: frozenset[str] | set[str]) -> None:
+        """0044:启动装载持久停用集(替换语义;运维意图以库为准)。"""
+        self._disabled = set(domains)
+
     def disable(self, domain: str) -> None:
         self._disabled.add(domain)
 

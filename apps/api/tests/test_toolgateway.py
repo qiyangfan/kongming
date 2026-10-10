@@ -513,6 +513,27 @@ async def test_domain_governance_routes(
     rok = await client.post("/internal/tool/execute", headers=headers, json=req)
     assert rok.status_code == 200 and rok.json()["status"] == "executed", rok.text
 
+    # 0044 持久化:停用写穿入库;「重启」=清网关单例缓存后经启动装载恢复意图
+    await client.post("/system/tools/domains/knowledge/disable", headers=_auth(token_admin))
+    states = (
+        await session.execute(
+            sql_text("SELECT domain_id, disabled FROM public.sys_tool_domain_state")
+        )
+    ).all()
+    assert ("knowledge", True) in [(r[0], bool(r[1])) for r in states]
+    gw.apply_disabled(frozenset())  # 模拟重启(进程内运行时态清零)
+    await router_mod.load_persisted_domain_states()  # lifespan 同款装载
+    assert gw._disabled == {"knowledge"}  # 持久意图随装载恢复
+    # 运行时注册表同步:停用域工具与「域从未存在」同形(注入集消失+分发解析即拒)
+    from kongming.toolcall import registry
+
+    assert registry.get_tool("knowledge_search") is None
+    rrej2 = await client.post("/internal/tool/execute", headers=headers, json=req)
+    assert rrej2.status_code == 200 and rrej2.json()["status"] == "rejected"
+    assert rrej2.json()["reason"] == "TOOL_NOT_REGISTERED", rrej2.text
+    # 清理:恢复启用态(写穿回库+本地生效),不污染同文件后续用例
+    await client.post("/system/tools/domains/knowledge/enable", headers=_auth(token_admin))
+
 
 def test_manifest_invalid_host_entries_dropped() -> None:
     """白名单非法条目(非字符串/空/含路径或通配)剔除;全部非法整域剔除。"""

@@ -57,7 +57,14 @@ class _Api:
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
-    llm = _Llm(["商品总库存", "SELECT sum(qty) FROM goods", '{"summary":"共 30"}'])
+    llm = _Llm(
+        [
+            "商品总库存",
+            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            "SELECT sum(qty) FROM goods",
+            '{"summary":"共 30"}',
+        ]
+    )
     api = _Api()
     monkeypatch.setattr(deps, "get_llm", lambda: llm)
     monkeypatch.setattr(deps, "get_api", lambda: api)

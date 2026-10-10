@@ -11,7 +11,7 @@ from liannu.rules import (
 )
 from liannu.verdict import Verdict
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 __all__ = [
     "DEFAULT_MAX_DEPTH",

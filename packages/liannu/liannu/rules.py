@@ -15,9 +15,18 @@ READONLY_ROOTS = (exp.Select, exp.Union, exp.Subquery)
 
 # 控制面保留表(前缀 + 精确名双形态;按未加引号即折叠小写的 PG 语义,一律小写比对)。
 # skill_(056)/user_prefs(059)已收编——与 api 历史实际拦截行为对齐,不放宽不收紧。
-RESERVED_TABLE_PREFIXES = ("sys_", "chat_", "skill_")
+RESERVED_TABLE_PREFIXES = ("sys_", "chat_", "skill_", "judge_")
 RESERVED_TABLE_NAMES = frozenset(
-    {"alembic_version", "user_identities", "user_memory", "user_prefs"}
+    {
+        "alembic_version",
+        "user_identities",
+        "user_memory",
+        "user_prefs",
+        # 092:平台级产出表不设租户语义,任何路径形态按名拒读(知识/执行双闸兜底)
+        "report",
+        "report_section",
+        "report_version",
+    }
 )
 
 # 保留 schema:显式限定名(rag.query_history)不受 search_path 约束,按 schema 段拒

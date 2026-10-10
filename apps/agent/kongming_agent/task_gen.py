@@ -257,7 +257,7 @@ class TaskOrchestrator:
         return {"final_status": status, "error": reason}
 
 
-def _react_verdict(final: dict[str, object]) -> str:
+def react_verdict(final: dict[str, object]) -> str:
     """react 终态 verdict 单一定义提取:剧本化假体直接带 verdict 键;真实
     _run_react 终态无 verdict,裁决在 execution(ExecutionResult)内——
     090 剧本收口与真实组合根的形态差由此处统一收口(缺陷:真实链路曾恒判失败)。"""
@@ -266,11 +266,11 @@ def _react_verdict(final: dict[str, object]) -> str:
         return v
     execution = final.get("execution")
     if isinstance(execution, dict):
-        return str(execution.get("verdict") or "")
+        return str(cast("dict[str, object]", execution).get("verdict") or "")
     return str(getattr(execution, "verdict", "") or "")
 
 
-def _react_execution_evidence(final: dict[str, object]) -> bool:
+def react_execution_evidence(final: dict[str, object]) -> bool:
     """工具执行证据判定(090 证据口径,单一定义):真实 react 终态的 execution
     载荷须带非空结果集(列或行)方构成完成证据——finalize 对纯文本直答会合成
     空结果集 PASS(graph/react/nodes 兜底),语言模型自述不算数。剧本化假体
@@ -291,7 +291,7 @@ def _step_outcome(
     """react 终态 → 步骤三态(证据驱动):verdict PASS 且有执行结果 → DONE
     (证据=trace+summary+sql);其余 FAILED(原因如实)。无工具执行→FAILED
     (有证据才完成;规划应产出工具可支撑的步骤)。"""
-    verdict = _react_verdict(final)
+    verdict = react_verdict(final)
     summary = str(final.get("summary") or "")
     sql = str(final.get("sql") or final.get("generated_sql") or "")
     evidence: dict[str, object] = {"trace_id": trace_root, "summary": summary[:2000]}
@@ -301,7 +301,7 @@ def _step_outcome(
     # 有过真实结果集,最终结论从未产出——kernel 预算退出语义「不得批量改 DONE」
     error = str(final.get("error") or "")
     if verdict == "PASS" and not error:
-        if not _react_execution_evidence(final):
+        if not react_execution_evidence(final):
             # finalize 对纯文本直答合成空结果集 PASS:自述不构成完成证据(090)
             return "FAILED", evidence, "步骤无工具执行证据(纯文本直答不构成完成)"
         return "DONE", evidence, None

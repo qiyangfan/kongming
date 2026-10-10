@@ -7,6 +7,157 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
+## 当前状态(2026-10-10,阻塞与搁置项清偿:评测演示环境/064 决策/078 冒烟/anthropic 流式/审计与 progress 闸/域启停持久化)
+
+- **本机评测演示环境已重建(解除 092 基线复跑阻塞的根因)**:
+  `infra/example-data/load.sh` 参数化(KM_PG_CONTAINER/KM_PG_USER/KM_PG_PASSWORD;
+  数据段单事务+超管跑——上游 dump 依赖 DISABLE TRIGGER ALL 乱序装载,非超管必拒;
+  ext 段不再硬编码 kongming 角色覆盖,新增业务 schema→kongming 只读授权步);
+  env-postgres 已装 tenant_sakila(28 对象)/tenant_olist(9 表 CSV)/sakila_ext(独立库)
+  + sakila/olist 租户注册 + admin 绑定;**default 路径自动路由 tenant_{tenant_key}
+  schema,租户数据源无需注册**(reserved 保留字)。知识已灌(sakila 21/olist 9)。
+  evals 全层本机可跑:smoke 7/7、**full 宽松 50/53 (94%)**(审查循环口径修正后
+  真实基线,见下)。
+- **092 基线登记与口径修正(审查循环)**:092 批次曾以「4 候选并入、53/54」登记;
+  审查循环实证该口径被污染并已修复——①并入用例 expected_tables 误带 schema 限定
+  (表命中判据=末段名子集 → 4 题恒 False);②a91aca63 为空结果 gold(sakila 无
+  2007 年支付,松严两侧伪通过);③6183fe4b tiebreaker 非唯一列。处置=剔除空 gold
+  (换 validators 空结果闸)+ qualified gold 裸名化 + 补唯一键, sakila.yaml 自 HEAD
+  重建(编写规范注释找回),复跑登记真实基线 **宽松 50/53 (94%) / 严格 34/53 /
+  表命中 47/53**(olist_016 单题波动落败)。管线缺陷同步收口:候选租户章显式携带
+  (内容哈希 id 防前缀误推断 403)、default 路径 DSN 直连兜底、generate 失败批次
+  计数、merge 原子写+拒覆盖人审产物、_datasource_dsn 凭证 URL 编码。
+- **064 跨域泄漏(供给环境实测抓到,三层已修)**:default 路径知识内省含
+  public → 控制面表(judge_run/report 族)灌进租户知识 → 生成可见即可查。
+  修复=①内省只看 tenant_{key}(meta.py);②执行 scope 白名单按路径分流
+  (default 无 public;service.py);③liannu 保留名单补 judge_ 前缀+
+  report/report_section/report_version(动态源误指平台库的最后兜底)。
+  liannu 0.1.3→0.1.4(既定升版协议),回归测试三处(test_internal_meta/
+  test_sqlfw_firewall/test_rules);泄漏知识已对账清偿(fetch-metadata
+  removed=5×2 租户)。
+- **064 阈值对拍+生产决策(070/064 遗留,已决)**:全量评估题过
+  recall-probe 离线标定——知识在位可答题 47 条 top1 最低 **0.683**,0.30 档
+  有 2.3× 余量、零误拒;不可答题 2/2 正确拒。**决策=向量档 0.30/0.28 采纳为
+  配置缺省(成对写入,防 mode 开而 mean=0 判据恒真的半开脚枪);mode 缺省
+  仍 off,切换=部署配置 KM_RAG_GATE_MODE;启用前置已代码化:零知识数据源
+  闸门自动旁路(has_knowledge EXISTS 单点;「没灌知识」≠「低相关」,否则
+  sakila_dyn 类内省回退数据源 3/3 误拒——trace skipped=no_knowledge 如实
+  标注)**。全文档量纲未标定保持 0(该路不裁)。
+- **078 selfheal 真实冒烟(已清)**:改列名构造必错 SQL——retry_count=2、
+  列类喂回、诚实 FAILED+error_detail;还原后 PASS retry_count=0。可复现:
+  ALTER TABLE tenant_sakila.film RENAME COLUMN release_year ⇄ release_year_tmp
+  后问「各上映年份的影片数量分布」。
+- **anthropic 条目流式问答 e2e(已清)**:GLM open.bigmodel.cn/api/anthropic
+  (glm-4.7)注册进模型池+任务路由 → /chat/query/stream 全事件序贯穿协议
+  翻译层,两问 PASS(协议层验收;答案质量属模型侧)。**responses 条目仍外部
+  条件项**:手头无 responses 协议端点(复现形态照 anthropic:注册条目
+  protocol="responses" + 路由)。
+- **审计读面 domain 列(089 裁决批准,已随本批落地)**:ToolAuditItem 纯增
+  可选 domain 投影 + 读查询带列 + make contracts;内置工具行 None 断言。
+- **internal progress 租户过滤(091 裁决,已落地)**:/internal/report/progress
+  携带 tenant_key,写侧归属闸(set_phase 按租户过滤);未知/错配租户静默
+  无效(同形 204,不向内部通道回显存在性);agent 侧随载荷携带;跨租户
+  回写测试锁死。
+- **域启停多副本持久化(091 登记待办,已落地)**:0044 sys_tool_domain_state
+  + 启动装载(lifespan)+ 开关写穿(本地即时生效+库为意图单源;多副本/重启
+  以库收敛);round-trip 测试(停用→模拟重启→装载→仍停用)。
+- **代码审查迭代循环(本会话二轮,全部缺陷已清)**:首轮 4 路并行评审+逐项
+  溯源核验约 20 项、次轮复评再收 9 项;重点修复——agent 融合链 3 处(融合道
+  接手判定单源 `state.fused_takes_over`(条件边/流式抑制/节点前置三处共用,
+  修「融合态退化收口吞 summary 事件」)与 fused sources 按过审终稿重投影
+  (修「列表有条目正文无标注」幽灵不一致));api 3 处(审计读面 domain 列
+  从 SELECT 漏列的死字段修复、域启停启动装载补运行时注册表同步(重启后
+  「同形 TOOL_NOT_REGISTERED」语义回归)、recall-probe 镜像零知识旁路);
+  judge/construct 评审对象按 TaskDetailOut/CollabRunOut 真实契约重写(原
+  装配字段全空喂 judge)、LLM 应答解析收口 JudgeLlmError、维度分档范围校验、
+  tiebreaker 括号深度扫描重写(外层保序判定连带修复函数括号误拦)+ 字面量
+  掩码。judge 对象取数连 Accept 契约的 /tasks/{id} 拿真数据,评审输入不再
+  近空失真。测试合计 api 1194(+3)/agent 527(+2)/liannu 23/web 86 全绿;
+  lint-imports 1=task 域存量(非本批)。
+- **CI 红灯归因与修复(091 批次遗留,本批清零)**:上次推送(091)CI 三 job
+  挂——web `format:check`(TasksPage.tsx 未过 prettier)、api/agent `pyright`。
+  根因=**CI 的 pyright 是最新版(严格 reportUnknown*/reportPrivateUsage 系),
+  本地旧版看不见;091 批次推送前未以 `PYRIGHT_PYTHON_FORCE_VERSION=latest
+  uv run pyright` 对齐**(本地曾以旧版计 41/27 当"存量基线",实为 091 真实
+  回归)。本批修复:web prettier 一处;agent 090/091 文件严格化(collab_gen/
+  collab_wiring/task_gen 的 isinstance-dict 收窄补 cast、main 冗余 cast 删除、
+  `_react_verdict/_react_execution_evidence` 改公开名跨模块复用、测试文件头
+  豁免+两处精确收窄);api e2e_collab_smoke 冒烟脚本按测试文件先例文件头
+  豁免 unknown 类别 + test_task_collab 一处 dict 标注。**双 app latest pyright
+  现=0,ruff/mypy/prettier 全清**。教训:推送前门禁必须含 latest pyright
+  (CI 同款),旧版本数字不算基线。
+- **环境提示**:演示环境数据与租户现已在本机(kongming 库 tenant_sakila/
+  tenant_olist + sakila_ext 库);admin 密码 KmSmoke#2026a;评测前清
+  query_history+km:ragctx(README 纪律)。
+
+
+
+## 当前状态(2026-10-10,092 评测智能体化已归档 + judge/自动构造落地)
+
+- **092 eval-agent 已落地并归档(2026-10-10)**:change 移入
+  `openspec/changes/archive/2026-10-10-092-eval-agent/`,deltas 已同步主 specs
+  (eval-agent 新增 4 需求;ai-eval「CI smoke 守护」整块替换,保留 065/073
+  合并终态备注)。落地面:0043 迁移(judge_run/judge_result 两表,
+  (object_type,object_id) 二元组无业务外键)+ kongming/evalj 域包
+  (models 纯函数:summarize/compare_to_baseline 基线口径;SqlJudgeRepo)+
+  `evals/judge/`(rubrics 四类带 VERSION+指纹 / client=httpx 直连 openai
+  兼容端点零新依赖 / objects 四类取数 / runner 逐对象独立收口+重试一次)+
+  `evals/test_judge.py`(smoke+judge 双标记,随定时门禁运行)+ `evals/construct/`
+  (validators=README 规范操作化 / generate 双连接:知识读控制面库、gold 直连
+  业务库 / merge=并入+全量重跑+基线行登记一条命令)。judge 凭证 env
+  `KM_EVAL_LLM_API_KEY`(回退 KM_AGENT_LLM_API_KEY),缺失显式失败。
+- **真实环境冒烟终值**:judge 门禁实跑两轮——report 型对 3 份真实 088 报告
+  (2 BORDERLINE+1 FAIL,摘录有据:首轮空快照报告被如实判 FAIL,数据源指对
+  sakila 后边界分显著上移=judge 捕捉真实质量信号);answer 型对 3 条知识/
+  融合问句 2/3 PASS;task/collab 本机无 DONE 对象→「类型空缺如实记录不计
+  失败」分支实测;基线对比同 run 内即触发(+0.0pp/提升不触红线)。自动构造
+  实跑:5 候选生成→gold 直连 sakila 执行+规范校验+语义去重→3 过 2 拦
+  (拦因=tiebreaker 违例,规范闸精确命中)→人审圈定 3 条并入 default.yaml
+  (已还原:全量层需 sakila/olist 双租户演示数据,本机单租户环境全量评估
+  不可达,并入管线 fail-closed 拒绝登记基线——机制正确;复跑前置=多租户
+  演示环境,基线行登记逻辑已单测覆盖)。
+- **门禁终值**:api 1188(+29)/agent 525/liannu 22/web 86 全绿;
+  openspec strict 两变更 spec 通过;pyright 本地漂移 41 条全为存量
+  (e2e_collab_smoke 40+test_task_collab 1);lint-imports 1 BROKEN 为
+  task 域存量(HEAD 即有,非本批引入)。
+
+## 当前状态(2026-10-10,093 知识侧深化已归档 + 三态意图路由/融合问答落地)
+
+- **093 knowledge-qa 已落地并归档(2026-10-10)**:change 移入
+  `openspec/changes/archive/2026-10-10-093-knowledge-qa/`,deltas 已同步主 specs
+  (knowledge-qa 新增 3 需求;document-rag「知识分流」与 chat「文档道回答的结构化
+  来源」整块替换)。agent 面=route_intent 节点(understand 后检索前,LLM 三态
+  data/knowledge/fused+置信;超时 `KM_AGENT_INTENT_ROUTE_TIMEOUT_SEC` 缺省 3s/
+  失败/低置信 `KM_AGENT_INTENT_ROUTE_MIN_CONFIDENCE` 缺省 0.7 → 不写 intent 键
+  走逐字词表回退,含 047 多轮闸)+ fused_answer 节点(summarize 后条件进入:
+  intent=fused ∧ SQL PASS ∧ 有行 ∧ 文档命中;正文过 068 净化+057 数值审计,
+  白名单=结果面∪stats∪**下发文档数字**;失败兜底纯数据答,计数
+  `snapshot_intent_route_stats()`)。web=stream 标签两行+AssistantCard 融合分支
+  (sources 非空时正文角标+来源面板与结果面并存,零新组件)。
+- **068 引用键真实链路断线已修(应改尽改,093 期发现)**:api 侧
+  /internal/rag/retrieve 068 起每项 doc_hint 纯增 citation_key,但 agent apiclient
+  解析只保留 source_ref/content——键在 agent 面恒缺失,legal_keys 恒空 → 净化
+  自跳过、sources 投影恒空(单测手造 doc_hints 带键,未覆盖解析点)。修复=
+  apiclient 透传 citation_key(缺失=空串,回退 source_ref 语义不变),回归测试
+  test_apiclient::test_rag_retrieve_doc_hints_citation_key_passthrough 锁死。
+  修复后真实链路知识答的引用角标/来源面板首次真正点亮。
+- **冒烟终值(本地栈,dashscope 直连)**:路由用例集 14/14=100%(≥90% 验收线,
+  含长尾「退货都要满足什么条件」与多轮数据追问);三态各 2 问——数据 2/2 PASS、
+  知识 2/2 PASS(引用键+sources 一一对应)、融合 2 问分别验证「双通道并存」
+  (SQL 结果面+正文引用【退货政策-23CA】+sources,亮暗两态 DOM 走查 12/12)
+  与「SQL 失败如实弃答」(NO_DATA 终态零文档粉饰,D4 数据为刃)。
+- **环境教训**:本地 dev 库 kongming 此前无表知识(rag.table_descriptions=0),
+  063 表级预筛对中文问句打分恒零 → 保留 0 表 → 生成侧如实 NO_DATA;起栈冒烟前
+  须先 `/system/rag/fetch-metadata` + `/reindex`(本轮回填 sakila 21 表/16 润色)
+  并上传业务文档。admin 密码被我重置为 .env 的 KM_ADMIN_INITIAL_PASSWORD 值并走
+  了一次 /auth/password/change(现密码=该值,带 web 冒烟改密 KmSmoke#2026a——
+  复用前先试后者)。文档库已有「退货政策.md」(sakila/default,可删可复用)。
+- **门禁终值**:agent 525(+20)/api 1159/liannu 22/web 86+build 全绿;
+  openspec strict=knowledge-qa/document-rag/chat 三域 valid(全库 16 项失败=
+  已登记的存量 >500 字符 CLI 漂移假红,零新增);contracts 产物已重生成,
+  contracts-check 在未提交树上按设计红(随批提交转绿)。pyright 本地漂移
+  27 条全在 091 存量文件(collab_gen/collab_wiring/task_gen/main),与本变更无关。
+
 ## 当前状态(2026-10-10,091 已归档 + 审查循环收口 + 四项契约裁决)
 
 - **091 multi-agent-orchestration 已归档(2026-10-10)**:change 移入
@@ -368,13 +519,15 @@
 - 工作区/提交状态以 `git status` 与 `git log` 为唯一事实源
   (规约:文档不写提交哈希、不谈提交形态)。
 - **开放挂账=零**(backlog-settlement 终态化裁决,见「挂账终态」节)。
-- 下一棒(按条件触发,均非阻塞):
-  1. 070 4.5/064 3.2 的评估集对拍(067→065 评估门禁+真实语料流量;
-     064「路径翻转」证据需更大语料,当前评估集上 LLM 本就诚实走 NO_DATA);
-  2. 078 selfheal 冒烟(需可稳定构造失败 SQL 的问法,冒烟库干净难复现);
-  3. anthropic/responses 条目流式问答端到端(需 muniu 或官方端点运行);
-  4. 064 生产阈值切换决策(初值已标定:vector top1=0.30/mean3=0.28,
-     双档必须成对配置——mean 缺省 0.0 会使判据恒真;缺省保持 off)。
+- 下一棒(2026-10-10 清偿后重写;原 4 项中 3 项已闭环,见顶节
+  「阻塞与搁置项清偿」):
+  1. ~~评估集对拍 / 064 决策 / 078 selfheal 冒烟 / anthropic 条目流式~~
+     → 全部已处置;064 主链路切换只剩部署配置 KM_RAG_GATE_MODE=primary
+     (shadow 先行建议不变);
+  2. **responses 条目流式问答 e2e**(唯一余项,外部条件:需 responses
+     协议端点;复现形态=照 anthropic 条目注册 protocol="responses"+路由);
+  3. 064「路径翻转」更大语料证据=shadow 模式运行时自然沉淀(would_drop
+     trace),非独立任务。
 
 ## 新会话开工指引
 

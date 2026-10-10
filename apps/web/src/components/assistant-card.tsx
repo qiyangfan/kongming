@@ -28,6 +28,11 @@ import {
 import type { ChartSpec } from "@/components/chart-shared";
 import { ResultTable } from "@/components/result-table";
 import { normalizeBinding } from "@/components/chart-shared";
+import {
+  CitationSourcesPanel,
+  renderWithCitations,
+  useCitationHighlight,
+} from "@/components/citation-panel";
 import type { ArtifactOut } from "@/lib/chat-api";
 import { formatDateTime } from "@/lib/datetime";
 import { humanizeErrorText, type SessionMessageOut } from "@/lib/api";
@@ -110,6 +115,9 @@ function normalize(msg: SessionMessageOut): {
 }
 
 export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
+  // 093 融合消息:正文引用角标定位来源条目(与 DocumentCard 同机制;
+  // hook 须在条件返回前调用)
+  const { activeKey, highlight } = useCitationHighlight();
   if (msg.status === "REJECTED") {
     return (
       <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
@@ -198,6 +206,15 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
     <div className="space-y-3">
       {docArt ? (
         <DocumentCard content={docArt.content} sources={result.sources} />
+      ) : msg.summary && result.sources.length > 0 ? (
+        /* 093 融合消息并存渲染:正文引用角标 + 来源面板与 SQL 结果面并存
+           (纯数据道 sources 恒空,走下方纯文本分支零回归) */
+        <div className="space-y-2 px-1">
+          <p className="text-md leading-relaxed text-foreground">
+            {renderWithCitations(msg.summary, result.sources, highlight)}
+          </p>
+          <CitationSourcesPanel sources={result.sources} activeKey={activeKey} />
+        </div>
       ) : (
         msg.summary && <p className="px-1 text-md leading-relaxed text-foreground">{msg.summary}</p>
       )}

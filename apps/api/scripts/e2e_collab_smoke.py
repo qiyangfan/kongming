@@ -1,4 +1,5 @@
 # ruff: noqa: S101, S105, ASYNC109 —— 冒烟脚本:断言即验收、口令为本地冒烟账号、超时参数形参
+# pyright: reportUnknownParameterType=false, reportMissingTypeArgument=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """091 端到端冒烟(4.3):建任务→步骤声明协作拓扑(3 worker 并行+critic)
 →恢复→协作编排真实运行→聚合回写→协作账本/事件可查;取消场景收敛在途账。
 

@@ -191,7 +191,7 @@ class CollabOrchestrator:
                 _TOPOLOGY_USER.format(subgoal=subgoal, context=context),
                 temperature=0.2,
             )
-            workers_spec = _parse_topology(topo_raw)
+            workers_spec: list[dict[str, object]] = _parse_topology(topo_raw)
         except Exception as e:  # noqa: BLE001 —— 拆解失败回落单 worker 直执
             log.warning("协作拆解失败,回落单 worker: %s", e)
             workers_spec = [{"subgoal": subgoal}]
@@ -361,8 +361,9 @@ class CollabOrchestrator:
             for item in issues:
                 if not isinstance(item, dict):
                     continue
-                g = str(item.get("subgoal") or "").strip()
-                fb = str(item.get("feedback") or "").strip()
+                issue = cast("dict[str, object]", item)
+                g = str(issue.get("subgoal") or "").strip()
+                fb = str(issue.get("feedback") or "").strip()
                 if g:
                     flagged[g] = fb[:500]
             if not flagged:

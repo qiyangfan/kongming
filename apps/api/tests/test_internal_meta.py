@@ -110,6 +110,11 @@ async def test_introspection_with_comments(client: AsyncClient, session: AsyncSe
     assert ("public", "sys_user") not in by_name
     assert ("public", "chat_message") not in by_name
     assert ("public", "user_identities") not in by_name
+    # 092 跨域泄漏回归闸:非保留名的控制面表(report/judge_run 族)同样不得
+    # 入租户知识——default 路径内省 SHALL 只看租户 schema(public 整体不进;
+    # 修复前 public.report 会被内省进租户 schema 提示,实测抓到)
+    assert ("public", "report") not in by_name
+    assert ("public", "judge_run") not in by_name
     # 047:视图不入内省(便捷视图行扇出/列缺失对生成上下文有毒)
     assert (SCHEMA, "arms_view") not in by_name
 

@@ -4193,7 +4193,7 @@
           "toolcall"
         ],
         "summary": "Disable Domain",
-        "description": "停用域(进程内存态:本进程立即生效,重启随部署清单复位;\n多副本部署需逐副本操作,持久化启停属后续独立变更——design 既有裁决)。",
+        "description": "停用域(0044 持久化:本进程立即生效 + 写穿;重启与多副本以库收敛)。",
         "operationId": "disable_domain_system_tools_domains__domain_id__disable_post",
         "parameters": [
           {
@@ -4229,7 +4229,7 @@
           "toolcall"
         ],
         "summary": "Enable Domain",
-        "description": "启用域(进程内存态,复位口径同 disable)。",
+        "description": "启用域(0044 持久化,写穿口径同 disable)。",
         "operationId": "enable_domain_system_tools_domains__domain_id__enable_post",
         "parameters": [
           {
@@ -13501,7 +13501,7 @@
             },
             "type": "array",
             "title": "Sources",
-            "default": []
+            "description": "结构化来源:纯数据道恒为空;知识道/融合道由净化后正文单向投影,可非空(068/093)"
           }
         },
         "type": "object",
@@ -16454,7 +16454,8 @@
               "$ref": "#/components/schemas/SourceOut"
             },
             "type": "array",
-            "title": "Sources"
+            "title": "Sources",
+            "description": "结构化来源:纯数据道恒为空;知识道/融合道由净化后正文单向投影,可非空(068/093)"
           }
         },
         "type": "object",
@@ -17723,6 +17724,11 @@
           "phase": {
             "type": "string",
             "title": "Phase"
+          },
+          "tenant_key": {
+            "type": "string",
+            "title": "Tenant Key",
+            "default": "default"
           }
         },
         "type": "object",
@@ -19188,7 +19194,7 @@
           "citation_key"
         ],
         "title": "SourceOut",
-        "description": "068(纯增):文档道来源条目(引用键/来源标识/文档名快照)。"
+        "description": "结构化来源条目(068/093:引用键/来源标识/文档名快照)。\n语义:纯数据道恒为空;知识道与融合道由净化后正文单向投影,可非空。"
       },
       "SqlAuditItemOut": {
         "properties": {
@@ -20630,6 +20636,17 @@
               }
             ],
             "title": "Datasource Key"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
           },
           "idempotency_key": {
             "anyOf": [

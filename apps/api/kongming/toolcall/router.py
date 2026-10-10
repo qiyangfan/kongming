@@ -615,6 +615,9 @@ class ToolAuditItem(BaseModel):
     error_reason: str | None
     duration_ms: int | None
     datasource_key: str | None
+    # 089 裁决批准(2026-10-10 随批落地):域标签读面投影(存量行/内置工具
+    # 为 NULL→None);纯增可选,老客户端零回归
+    domain: str | None = None
     idempotency_key: str | None
     expires_at: datetime | None
     created_at: datetime
@@ -639,6 +642,7 @@ def _audit_item(r: dict[str, object]) -> ToolAuditItem:
         error_reason=None if r["error_reason"] is None else str(r["error_reason"]),
         duration_ms=None if r["duration_ms"] is None else int(str(r["duration_ms"])),
         datasource_key=None if r["datasource_key"] is None else str(r["datasource_key"]),
+        domain=None if r.get("domain") is None else str(r["domain"]),
         idempotency_key=None if r["idempotency_key"] is None else str(r["idempotency_key"]),
         expires_at=r["expires_at"],  # type: ignore[arg-type]  # datetime|None 直传
         created_at=r["created_at"],  # type: ignore[arg-type]  # datetime 直传
@@ -674,31 +678,64 @@ def _sync_runtime_disabled() -> None:
     )
 
 
+async def load_persisted_domain_states() -> None:
+    """0044:启动装载持久停用集(lifespan 调用;测试可直调模拟重启)。
+    库为运维意图单源:装载=替换语义;无网关(清单空)静默跳过。
+    装载后同步运行时注册表(_sync_runtime_disabled,与 disable 端点同口径)——
+    否则重启后停用域的工具仍入注入集、分发仍可解析,持久化语义静默降级为
+    「执行期才被网关拒」。"""
+    gw = _get_gateway()
+    if gw is None:
+        return
+    from kongming.db import get_sessionmaker
+    from kongming.toolcall.repository import list_domain_states
+
+    async with get_sessionmaker()() as session:
+        states = await list_domain_states(session)
+    gw.apply_disabled(frozenset(d for d, dis in states.items() if dis))
+    _sync_runtime_disabled()
+
+
 @router.post("/domains/{domain_id}/disable", status_code=204)
 async def disable_domain(
     domain_id: str,
+    user: Annotated[dict[str, object], Depends(current_user)],
     _: Annotated[None, Depends(require_perm("system:tool:manage"))],
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    """停用域(进程内存态:本进程立即生效,重启随部署清单复位;
-    多副本部署需逐副本操作,持久化启停属后续独立变更——design 既有裁决)。"""
+    """停用域(0044 持久化:本进程立即生效 + 写穿;重启与多副本以库收敛)。"""
     gw = _get_gateway()
     if gw is None or domain_id not in _summary_ids(gw):
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     gw.disable(domain_id)
     _sync_runtime_disabled()
+    from kongming.toolcall.repository import upsert_domain_state
+
+    await upsert_domain_state(
+        session, domain_id=domain_id, disabled=True, updated_by=str(user["sub"])
+    )
+    await session.commit()
 
 
 @router.post("/domains/{domain_id}/enable", status_code=204)
 async def enable_domain(
     domain_id: str,
+    user: Annotated[dict[str, object], Depends(current_user)],
     _: Annotated[None, Depends(require_perm("system:tool:manage"))],
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    """启用域(进程内存态,复位口径同 disable)。"""
+    """启用域(0044 持久化,写穿口径同 disable)。"""
     gw = _get_gateway()
     if gw is None or domain_id not in _summary_ids(gw):
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     gw.enable(domain_id)
     _sync_runtime_disabled()
+    from kongming.toolcall.repository import upsert_domain_state
+
+    await upsert_domain_state(
+        session, domain_id=domain_id, disabled=False, updated_by=str(user["sub"])
+    )
+    await session.commit()
 
 
 @router.get("/audit/page", response_model=ToolAuditPageOut)

@@ -563,6 +563,8 @@ class RagService:
         route: str,
         vector_hits: list[RecallHit],
         fulltext_hits: list[RecallHit],
+        *,
+        knowledge_present: bool = True,
     ) -> tuple[list[RecallHit], list[RecallHit]] | None:
         """064:按路闸门消费(纯函数管道;off/未注入=None 零行为)。
 
@@ -575,6 +577,15 @@ class RagService:
         """
         configs = self._gate_configs()
         if configs is None:
+            return None
+        if not knowledge_present:
+            # 064 前置(2026-10-10 对拍裁决):零知识数据源闸门自动旁路——
+            # 零命中源于「无知识」而非「低相关」,裁剪会误杀内省回退可答题;
+            # trace 如实标注,不静默(观测面可分辨两种 off 形态)
+            self._last_gate_trace[route] = {
+                "mode": str(configs[0]),
+                "skipped": "no_knowledge",
+            }
             return None
         mode, vec_cfg, ft_cfg = configs
         vec = gate_hits(vector_hits, mode=mode, **vec_cfg)
@@ -617,6 +628,12 @@ class RagService:
         if cached is not None:
             return cached
 
+        # 064 前置(单点,主/继承两路过闸共用):零知识数据源闸门旁路——
+        # 「没灌知识」与「召回不相关」对闸门同为零命中,语义不可区分
+        knowledge_present = await self._repo.has_knowledge(
+            tenant_id=tenant_id, datasource_key=datasource_key
+        )
+
         vector: list[float] | None = None
         try:
             vector = (await self._embedder.embed([question]))[0]
@@ -649,7 +666,9 @@ class RagService:
         # 064:相关度闸门——各按本路原生分独立判定(vector=余弦相似度/
         # fulltext=ts_rank,量纲不共用);off(缺省)零行为;shadow 只记录
         # would_drop;primary 不过闸整路裁掉后重融合
-        gate_notes = self._apply_gate("main", vector_hits, fulltext_hits)
+        gate_notes = self._apply_gate(
+            "main", vector_hits, fulltext_hits, knowledge_present=knowledge_present
+        )
         if gate_notes is not None:
             vector_hits, fulltext_hits = gate_notes
         fused = rrf_fuse([vector_hits, fulltext_hits])
@@ -672,7 +691,9 @@ class RagService:
             # 064:继承路同样过闸(与主路同一判据同一阈值口径——"多轮依赖
             # 表"不是 relevance 豁免;junk 依赖表一样稀释提示词)。off 时
             # 零行为;shadow 记 would_drop;primary 不过闸整路裁掉
-            prior_gate = self._apply_gate("prior", prior_vec_hits, prior_ft_hits)
+            prior_gate = self._apply_gate(
+                "prior", prior_vec_hits, prior_ft_hits, knowledge_present=knowledge_present
+            )
             if prior_gate is not None:
                 prior_vec_hits, prior_ft_hits = prior_gate
             seen = {(h.schema_name, h.table_name) for h in fused}
@@ -721,6 +742,12 @@ class RagService:
         if tenant_id is None:
             raise LookupError(tenant_key)
         await self._require_usable_datasource(tenant_id, datasource_key)
+        # 064 零知识旁路镜像(与主链路同判据):没灌知识时主链路整路跳闸,
+        # 试跑观测面必须如实反映(否则 primary 形态下 verdict 报 mean_below
+        # 与主链路「旁路」行为相悖,标定与排障被误导)
+        knowledge_present = await self._repo.has_knowledge(
+            tenant_id=tenant_id, datasource_key=datasource_key
+        )
         vector: list[float] | None = None
         try:
             vector = (await self._embedder.embed([question]))[0]
@@ -738,7 +765,7 @@ class RagService:
         )
         fused = rrf_fuse([vector_hits, fulltext_hits])
         # 闸门判定(与主链路同一配置单点+同一纯函数;off 形态 verdict=None,
-        # 原样透出;would_drop 影子记录)
+        # 原样透出;would_drop 影子记录;零知识=闸门未参与,verdict 置空)
         configs = self._gate_configs()
         if configs is None:
             # off 形态:阈值不进判定(gate_hits 对 "off" 原样短路),零值仅
@@ -746,11 +773,13 @@ class RagService:
             mode, vec_cfg, ft_cfg = "off", dict(_GATE_UNUSED), dict(_GATE_UNUSED)
         else:
             mode, vec_cfg, ft_cfg = configs
-        vec_gate = gate_hits(vector_hits, mode=mode, **vec_cfg)
-        ft_gate = gate_hits(fulltext_hits, mode=mode, **ft_cfg)
+        gate_mode = mode if knowledge_present else "off"
+        vec_gate = gate_hits(vector_hits, mode=gate_mode, **vec_cfg)
+        ft_gate = gate_hits(fulltext_hits, mode=gate_mode, **ft_cfg)
         return {
             "question": question,
             "mode": mode,
+            "gate_skipped": None if knowledge_present else "no_knowledge",
             "vector": {
                 "hits": [
                     {

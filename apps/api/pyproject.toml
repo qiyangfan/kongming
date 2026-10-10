@@ -23,7 +23,7 @@ dependencies = [
     "python-multipart>=0.0.32",
     "openpyxl>=3.1.5",
     "jsonschema>=4.23",             # 019 工具参数 JSON Schema 校验(L4)
-    "liannu==0.1.3",                # 053 SQL 安全引擎(单遍解析;monorepo 共享包 packages/liannu)
+    "liannu==0.1.4",                # 053 SQL 安全引擎(单遍解析;monorepo 共享包 packages/liannu)
 ]
 
 # 053:引擎为本仓共享包(packages/liannu,连弩),以 uv path 依赖引入;
@@ -76,6 +76,7 @@ markers = [
     "smoke: 评估集 smoke 子集(约5题,评估环境显式触发)",
     "full: 评估集全量单轮(手动/预发,含动态数据源组)",
     "multiturn: 多轮上下文评估(指代/省略/排序延续/过滤追加)",
+    "judge: judge 抽检层(092,非确定性产出 LLM 评审;随 smoke 层进定时门禁)",
 ]
 
 # authlib 官方存根不完整:AsyncOAuth2Client 的 httpx 继承方法(get/aclose)
@@ -176,6 +177,12 @@ source_modules = [
     "kongming.report.service",
     "kongming.report.ports",
 ]
+forbidden_modules = ["fastapi", "sqlalchemy"]
+
+[[tool.importlinter.contracts]]
+name = "evalj 领域模型不依赖框架(宪法 Article II 领域纯净,092)"
+type = "forbidden"
+source_modules = ["kongming.evalj.models"]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
 [[tool.importlinter.contracts]]

@@ -297,7 +297,7 @@ async def task_run(req: TaskRunIn) -> dict[str, object]:
         datasource_key=req.datasource_key,
         user_id=req.user_id,
         trace_root=str(req.trace_root or ""),
-        tools=cast("list[dict[str, object]]", req.tools or []),
+        tools=req.tools or [],
     )
 
     return await run_task_orchestration(

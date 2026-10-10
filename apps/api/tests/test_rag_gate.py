@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.rag.gate import gate_hits, is_relevant
 from kongming.rag.models import RecallHit, rrf_fuse
+from kongming.rag.service import RagService
 from tests.conftest import MakeUser
 from tests.test_llm_usage import INTERNAL
 
@@ -167,6 +168,44 @@ async def test_recall_probe_same_source_as_main(
         assert hit["source"] == "vector"
     # 模式缺省 off:verdict 透出(None 或判定结论)
     assert body["mode"] == "off"
+
+
+async def test_recall_probe_mirrors_no_knowledge_bypass(
+    client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """试跑面镜像主链路零知识旁路(2026-10-10 对拍裁决):没灌知识时
+    primary 形态下 gate_skipped=no_knowledge、verdict 为 None——观测面不得
+    报 mean_below 与主链路「整路旁路」相悖误导标定。"""
+    from kongming.auth.seed import seed_all
+    from kongming.config import get_settings
+    from tests.test_rag_recall import _ensure_default_tenant
+
+    await _embed_stub(monkeypatch)
+    await seed_all(session, get_settings())
+    tid = await _ensure_default_tenant(session)
+    ds = "gate_probe_nok"  # 专用 ds:不灌任何知识(rag.table_descriptions 零行)
+    await _register_datasource(session, tid, ds)
+    monkeypatch.setenv("KM_RAG_GATE_MODE", "primary")
+    get_settings.cache_clear()
+    try:
+        from tests.test_chat_query import _login
+
+        token = await _login(client, "admin", "admin123")  # SUPER_ADMIN(rag:manage 覆盖)
+        r = await client.get(
+            "/system/rag/recall-probe",
+            params={"question": "商品表有哪些列", "datasource_key": ds},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["mode"] == "primary"
+        assert body["gate_skipped"] == "no_knowledge"
+        assert body["vector"]["verdict"] is None
+        assert body["fulltext"]["verdict"] is None
+        assert body["vector"]["would_drop"] == 0
+        assert body["fulltext"]["would_drop"] == 0
+    finally:
+        get_settings.cache_clear()
 
 
 async def test_recall_probe_requires_perm(
@@ -340,3 +379,51 @@ async def test_gate_off_leaves_inherited_route_untouched(
     hint = r.json()["schema_hint"]
     assert "omain0" in hint
     assert "ojunk" in hint  # off:继承路原样(junk 仍进——闸门要治的形态)
+
+
+def _gate_svc(mode: str, repo: object) -> RagService:
+    """最小闸门服务(repo 只被 recall 用;_apply_gate 直调不触)。"""
+
+    settings = type(
+        "GateSettings",
+        (),
+        {
+            "rag_gate_mode": mode,
+            "rag_gate_vector_top1": 0.30,
+            "rag_gate_vector_mean": 0.28,
+            "rag_gate_fulltext_top1": 0.0,
+            "rag_gate_fulltext_mean": 0.0,
+            "rag_gate_min_count": 1,
+            "rag_gate_mean_window": 3,
+        },
+    )()
+    return RagService(
+        repo=repo,  # type: ignore[arg-type]
+        embedder=None,  # type: ignore[arg-type]
+        describer=None,  # type: ignore[arg-type]
+        cache=None,  # type: ignore[arg-type]
+        gate_settings=settings,
+    )
+
+
+def test_apply_gate_skipped_when_no_knowledge() -> None:
+    """064 前置(2026-10-10 对拍裁决)在 _apply_gate 内部收口,服务层直调
+    验证:零知识数据源闸门自动旁路——「没灌知识」与「召回不相关」对闸门
+    同为零命中,语义不可区分;旁路时 trace 如实标注 skipped=no_knowledge,
+    不静默。"""
+    svc = _gate_svc("primary", repo=None)
+    hits = [cast("RecallHit", _Hit("t1", 0.9))]
+    out = svc._apply_gate("main", hits, [], knowledge_present=False)
+    assert out is None  # 整路旁路:primary 也不裁
+    assert svc._last_gate_trace["main"] == {"mode": "primary", "skipped": "no_knowledge"}
+
+
+def test_apply_gate_applies_when_knowledge_present() -> None:
+    svc = _gate_svc("primary", repo=None)
+    low = [cast("RecallHit", _Hit("t1", 0.05))]
+    out = svc._apply_gate("main", low, [], knowledge_present=True)
+    assert out is not None
+    kept_vec, _kept_ft = out
+    assert kept_vec == []  # 低分裁掉(标定档 0.30 之下)
+    trace = cast("dict[str, object]", svc._last_gate_trace["main"])
+    assert trace["vector_would_drop"] == 1  # gate_hits 计数语义

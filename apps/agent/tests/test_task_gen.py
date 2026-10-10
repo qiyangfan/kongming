@@ -306,7 +306,7 @@ def test_step_outcome_rejects_unearned_pass() -> None:
     """PASS 不算数的两种形态(090 证据/预算退出口径):finalize 对纯文本直答
     合成空结果集 PASS → 无工具执行证据 FAILED;轮次触顶兜底(带 error 键,
     即便途中有过真实结果集)→ 最终结论未产出 FAILED。"""
-    pure_text = {
+    pure_text: dict[str, object] = {
         "verdict": "PASS",
         "summary": "自述完成",
         "execution": {"columns": [], "rows": []},

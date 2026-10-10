@@ -9,6 +9,13 @@ from typing import NotRequired, TypedDict
 
 from pydantic import BaseModel
 
+# 093 三态意图路由取值域单源(常量放 state 纯数据模块:nodes/streams 共引,
+# 避免 streams→nodes 反向依赖成环)
+INTENT_DATA = "data"
+INTENT_KNOWLEDGE = "knowledge"
+INTENT_FUSED = "fused"
+VALID_INTENTS: tuple[str, ...] = (INTENT_DATA, INTENT_KNOWLEDGE, INTENT_FUSED)
+
 
 class ExecutionResult(BaseModel):
     """控制面执行路由三态响应的 state 载体(与 sql-execution spec 对齐)。"""
@@ -59,3 +66,22 @@ class AgentState(TypedDict, total=False):
     skill_persona: NotRequired[str]  # 056:人设段
     doc_hints: NotRequired[list[dict[str, str]]]  # 024:文档段(source_ref+content)
     has_attachments: NotRequired[bool]  # 036④:本轮含图片附件(直答分流信号)
+    # 093:三态意图路由(route_intent 产物)。intent 缺席=LLM 失败/超时/低置信
+    # 已回退——分流判定走与 093 前逐字一致的词表分支(含 047 多轮闸,零回归)
+    intent: NotRequired[str]  # data / knowledge / fused(取值域见 VALID_INTENTS)
+    intent_source: NotRequired[str]  # 判定来源 llm(诊断;只进 trace 不入响应)
+    intent_confidence: NotRequired[float]  # LLM 置信(0~1)
+    intent_reason: NotRequired[str]  # 判定依据一句话(入 trace)
+
+
+def fused_takes_over(state: AgentState) -> bool:
+    """融合道接手判定(093,单源谓词):intent=fused 且 SQL 通道 PASS 且结果
+    非空且文档命中,四条件合取——_after_summarize 条件边、流式 summary 抑制
+    与 fused_answer 前置复核三处共用(判据漂移即「数据稿被吞」或「双稿拼接」,
+    故收敛单点)。"""
+    if state.get("intent") != INTENT_FUSED:
+        return False
+    execution = state.get("execution")
+    if execution is None or execution.verdict != "PASS" or not execution.rows:
+        return False
+    return bool(state.get("doc_hints"))

@@ -688,6 +688,9 @@ async def export_report(
 class ProgressIn(BaseModel):
     report_id: str
     phase: str
+    # 091 裁决落地(2026-10-10):进度回写锚定租户归属——与 collab-start
+    # 同款闸;缺省 default 兼容旧 agent(租户语义在写侧过滤兜底)
+    tenant_key: str = "default"
 
 
 @internal_router.post("/progress", status_code=204)
@@ -695,9 +698,18 @@ async def report_progress(
     body: ProgressIn,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
+    from kongming.internal.service import TenantNotFound
+    from kongming.internal.service import resolve_tenant as _resolve_tenant
     from kongming.report.models import PHASES
 
     if body.phase not in PHASES:
         raise HTTPException(status_code=422, detail="INVALID_PHASE")
-    await SqlReportRepo(session).set_phase(report_id=body.report_id, phase=body.phase)
+    try:
+        tenant_id = await _resolve_tenant(session, body.tenant_key)
+    except TenantNotFound:
+        # 未知租户与归属不匹配同语义:静默无效(同形 204,不向内部通道回显存在性)
+        return
+    await SqlReportRepo(session).set_phase(
+        report_id=body.report_id, phase=body.phase, tenant_id=tenant_id
+    )
     await session.commit()

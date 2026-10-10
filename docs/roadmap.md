@@ -2,7 +2,7 @@
 
 > 来源:nl2sql-data-platform 的 41 个 specs(约 4300 行,经 38 个变更验证的产品蓝图)。
 > 处置原则:**spec 只收有实现对应的行为契约**(openspec 同步可信原则),
-> 远期能力在此登记,开工时再立 spec——避免开局背 4300 行纸面债务。
+> 未开工能力在此登记,开工时再立 spec——避免开局背 4300 行纸面债务。
 
 ## 第一梯队(已平移 ✅ 2026-08-16)
 
@@ -69,17 +69,21 @@ artifacts(027)⇄ cloud-code-sandbox(029);agent-memory(026)← team-workspace(03
 **能力归口,不是五个系统**;方向定位与决策依据以 ADR-010 为单源,此处只登记
 地基与开工载体。
 
+本梯队是**能力展示清单,不是时间表**:本项目为个人学习与能力展示项目,
+未开工方向一律登记为「待立项」并按展示价值排期补齐,不设「远期」档
+(owner 2026-10-10 定调)。
+
 | 方向 | 地基(已落地) | 开工载体 |
 |---|---|---|
 | 问数智能体(王牌) | 一梯队 chat/nl2sql/nl2sql-agent + 三梯队 semantic-layer / query-streaming / cloud-code-sandbox | 088 报告生成——数据链路闭环到可交付报告 |
-| 问答智能体 | rag 三路召回 / knowledge / document-rag / agent-memory | 知识侧深化远期登记,开工再立 spec |
+| 问答智能体 | rag 三路召回 / knowledge / document-rag / agent-memory / knowledge-qa | 093 知识侧深化(三态意图路由 + 融合问答)——已落地归档 |
 | 通用智能体 | ReAct 内核 / agent-memory / multi-model-routing / prompt-guardrails / cloud-code-sandbox | 089 工具网关(工具广度)+ 090 任务内核(长任务) |
 | 多智能体 | workflow-orchestration(静态 DAG)/ custom-agent | 091 动态协作编排(宿主 = 090 任务内核)——选型指引:步骤可静态枚举→workflow;需运行时拆解/分歧裁决→collab(缺省深度 1,嵌套 opt-in) |
-| 评测智能体 | eval / ai-eval(Execution Match、基线、few-shot 自学习)+ agent-observability | 评测智能体化(持续回归/自动构造评测集)远期登记 |
+| 评测智能体 | eval / ai-eval(Execution Match、基线、few-shot 自学习)+ agent-observability / eval-agent | 092 评测智能体化(LLM-as-judge + 评测集自动构造)——已落地归档 |
 
 依赖拓扑:088 / 089 / 090 相互独立、可并行;091 以 090 为宿主殿后。
-**落地状态(2026-10-10)**:088-090 已归档;091 接线完成(拓扑配置面/协作账本/查询端点/
-web 协作视图/端到端冒烟双场景),待归档。任务/协作部署级上限缺省值见 docs/tech-stack.md
+**落地状态(2026-10-10)**:088–091 全部归档;093/092 已落地归档(问答=三态意图路由+融合问答,评测=LLM-as-judge+评测集自动构造;五方向全部有落地载体)。(091:拓扑配置面/协作账本/查询端点/
+web 协作视图/端到端冒烟双场景)。任务/协作部署级上限缺省值见 docs/tech-stack.md
 「任务/协作部署级上限」节。
 
 ### 089 工具网关:后续域接入清单(2026-10-09 落地时登记)

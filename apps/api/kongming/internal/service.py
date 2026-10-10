@@ -257,8 +257,11 @@ async def _prepare(  # noqa: PLR0913 —— 请求字段平铺,编排前段
         return await _fin("BLOCKED", sql_text, first.reason or "BLOCKED")
 
     # 5. data_scope 改写(系统调用豁免;CUSTOM/未知值 fail-closed);
-    #    列探测走执行目标库连接(动态源探测集 {default_schema, public},与 search_path 对齐)
+    #    列探测走执行目标库连接(探测集与 scope 白名单同源:default 路径仅租户
+    #    schema——平台库 public 是控制面表,租户 SQL 不得触;动态源业务库
+    #    业务表落 public,保留 public 与 search_path 对齐)
     applied = AppliedSQL(sql=sql_text)
+    allowed_schemas = {route_schema} if datasource_key == "default" else {route_schema, "public"}
     if user_id is not None:
         try:
             async with engine.connect() as probe_conn:
@@ -266,7 +269,7 @@ async def _prepare(  # noqa: PLR0913 —— 请求字段平铺,编排前段
                     session,
                     probe_conn,
                     user_id=user_id,
-                    tenant_schemas=[route_schema, "public"],
+                    tenant_schemas=sorted(allowed_schemas),
                     sql=sql_text,
                     guarded=src,
                 )
@@ -288,7 +291,7 @@ async def _prepare(  # noqa: PLR0913 —— 请求字段平铺,编排前段
     reserved = out.check_reserved_tables()
     if not reserved.passed:
         return await _fin("BLOCKED", applied.sql, reserved.reason or "RESERVED_TABLE")
-    scope_verdict = out.check_schema_scope({route_schema, "public"})
+    scope_verdict = out.check_schema_scope(allowed_schemas)
     if not scope_verdict.passed:
         return await _fin("BLOCKED", applied.sql, scope_verdict.reason or "CROSS_SCHEMA")
 

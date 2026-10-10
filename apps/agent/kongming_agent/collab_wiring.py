@@ -15,7 +15,7 @@ from kongming_agent.apiclient import ApiClient
 from kongming_agent.collab_gen import WorkerRunner, run_collab
 from kongming_agent.llm import reset_usage_collector, set_usage_collector
 from kongming_agent.settings import Settings
-from kongming_agent.task_gen import _react_execution_evidence, _react_verdict
+from kongming_agent.task_gen import react_execution_evidence, react_verdict
 
 log = logging.getLogger(__name__)
 
@@ -73,9 +73,13 @@ def make_collab_runner(
                 "pending_subgoals": [step_goal],
             }
         topo_raw = opened.get("topology")
-        topo: dict[str, object] = dict(topo_raw) if isinstance(topo_raw, dict) else {}
+        topo: dict[str, object] = (
+            dict(cast("dict[str, object]", topo_raw)) if isinstance(topo_raw, dict) else {}
+        )
         bot_raw = cfg.get("bot")
-        bot: dict[str, object] = dict(bot_raw) if isinstance(bot_raw, dict) else {}
+        bot: dict[str, object] = (
+            dict(cast("dict[str, object]", bot_raw)) if isinstance(bot_raw, dict) else {}
+        )
         persona = str(bot.get("system_prompt") or "")
         bot_key = str(bot.get("bot_key") or "") or None
         worker_tools = _worker_tools(tools, cfg)
@@ -128,8 +132,8 @@ def make_collab_runner(
             }
             usage_totals["llm_calls"] += int(cast("int", usage["llm_calls"]))
             usage_totals["total_tokens"] += int(cast("int", usage["total_tokens"]))
-            w_verdict = _react_verdict(final)
-            if w_verdict == "PASS" and (final.get("error") or not _react_execution_evidence(final)):
+            w_verdict = react_verdict(final)
+            if w_verdict == "PASS" and (final.get("error") or not react_execution_evidence(final)):
                 # 终态带 error(轮次触顶兜底,最终结论未产出)或无执行证据:
                 # PASS 不算数(090 证据/预算退出口径,与步骤闸同源)
                 w_verdict = "ERROR"
