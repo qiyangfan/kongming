@@ -86,6 +86,13 @@
   豁免 unknown 类别 + test_task_collab 一处 dict 标注。**双 app latest pyright
   现=0,ruff/mypy/prettier 全清**。教训:推送前门禁必须含 latest pyright
   (CI 同款),旧版本数字不算基线。
+- **CI 终态(本批收口)**:首轮推送后又暴露 api job lint-imports 硬失败——
+  `kongming.task.service -> kongming.db`(仅用 uuid7 却经基础设施 re-export,
+  091 引入的领域纯净契约违规,本地曾误记「1 broken 存量」)。修复=改从纯函数
+  模块 kongming/uuid7.py 直取(零行为变化);**lint-imports 26 kept / 0 broken,
+  全部 6 job CI 全绿**(本轮两个提交:审查循环主批 + 本条一行修复)。本地
+  曾当作「存量基线」的三处(旧版 pyright 41/27、lint-imports 1 broken)实为
+  091 批次未过 CI 的真实回归——「基线」必须以 CI 同款口径核验后才算数。
 - **环境提示**:演示环境数据与租户现已在本机(kongming 库 tenant_sakila/
   tenant_olist + sakila_ext 库);admin 密码 KmSmoke#2026a;评测前清
   query_history+km:ragctx(README 纪律)。
