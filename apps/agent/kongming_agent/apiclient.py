@@ -190,10 +190,13 @@ class ApiClient:
         datasource_key: str,
         question: str,
         history: list[str] | None = None,
+        user_id: str | None = None,
     ) -> RagContext | None:
         """三路召回(009):问句用 understand 产出的改写问句(语义完整);
         047 多轮继承:history 末条走继承路补上轮依赖表;任何失败返回
-        None(retrieve 回退实时内省,不抛错)。"""
+        None(retrieve 回退实时内省,不抛错)。
+        102:调用者身份随负载透传(可见集合=公共∪所在团队,控制面收敛);
+        缺省不携带=纯公共形态(既有调用零回归)。"""
         payload: dict[str, object] = {
             "tenant_key": tenant_key,
             "datasource_key": datasource_key,
@@ -201,6 +204,8 @@ class ApiClient:
         }
         if history:
             payload["history"] = history
+        if user_id:
+            payload["user_id"] = user_id
         try:
             resp = await self._post("/internal/rag/retrieve", payload)
         except httpx.HTTPError as e:

@@ -1,12 +1,43 @@
-"""store 端口(033):存储反转,用例层零框架依赖(宪法 Article II)。"""
+"""store 端口(033;104 版本化扩展):存储反转,用例层零框架依赖
+(宪法 Article II)。"""
 
 from typing import Any, Protocol
 
 
 class StoreRepo(Protocol):
-    async def publish(
-        self, *, bot_id: str, user_id: str, greeting: str, suggestions: list[str]
-    ) -> None: ...
+    async def current_version(self, *, bot_id: str) -> dict[str, Any] | None:
+        """当前上架版本(id/version_no/snapshot/published_at);未上架 None。"""
+        ...
+
+    async def next_version_no(self, *, bot_id: str) -> int: ...
+
+    async def create_version(
+        self,
+        *,
+        bot_id: str,
+        tenant_id: str,
+        version_no: int,
+        snapshot: dict[str, object],
+        user_id: str,
+    ) -> str:
+        """创建不可变版本快照,返回版本 id(104:快照创建后审核通过才落库)。"""
+        ...
+
+    async def point_current(
+        self, *, bot_id: str, version_id: str, user_id: str, restore_shelf: bool = True
+    ) -> None:
+        """切换当前上架版本指针(纯指针语义,版本无独立状态机)。
+        restore_shelf=True(上架路径)恢复货架标记;False(回滚路径)仅动
+        指针——下架态回滚不得复活货架(spec)。"""
+        ...
+
+    async def evict_overflow_versions(self, *, bot_id: str, cap: int) -> int:
+        """封顶淘汰:非当前版本超上限时淘汰最旧(当前版本恒受保护)。"""
+        ...
+
+    async def version_by_no(self, *, bot_id: str, version_no: int) -> dict[str, Any] | None: ...
+
+    async def list_versions(self, *, bot_id: str) -> list[dict[str, Any]]: ...
 
     async def unpublish(self, *, bot_id: str) -> None: ...
 

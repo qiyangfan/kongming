@@ -49,3 +49,19 @@ export function publishBot(
 export function unpublishBot(id: string): Promise<{ ok: boolean }> {
   return api.post(`/system/bots/${id}/unpublish`, {});
 }
+
+/* ============ 104 版本化上架 ============ */
+
+export type BotVersion = components["schemas"]["BotVersionOut"];
+export type BotSnapshot = components["schemas"]["BotSnapshotOut"];
+
+export function listBotVersions(id: string): Promise<BotVersion[]> {
+  return api.get<BotVersion[]>(`/system/bots/${id}/versions`);
+}
+
+export function rollbackBotVersion(
+  id: string,
+  versionNo: number,
+): Promise<{ ok: boolean; version_no: number }> {
+  return api.post(`/system/bots/${id}/versions/${versionNo}/rollback`, {});
+}

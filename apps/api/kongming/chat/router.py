@@ -58,6 +58,7 @@ from kongming.chat.title_tasks import rewrite_session_title
 from kongming.config import get_settings
 
 if TYPE_CHECKING:
+    from kongming.connector.service import ConnectorService
     from kongming.mcp.service import McpService
 from kongming.datasource.repository import SqlDatasourceRepo
 from kongming.db import get_session, get_sessionmaker
@@ -86,15 +87,17 @@ def get_rag_service(session: AsyncSession) -> RagService:
     from kongming.redis_client import get_redis
 
     client = get_agent_rag_client(get_redis())  # 013:进程内单例,连接池跨请求复用
+    settings = get_settings()
     return RagService(
-        RagRepository(session),
+        # 098:仓储与缓存注入部署分词配置(缺省 simple 零回归)
+        RagRepository(session, ts_config=settings.rag_fulltext_ts_config),
         embedder=client,
         describer=client,
-        cache=ContextCache(get_redis()),
+        cache=ContextCache(get_redis(), ts_config=settings.rag_fulltext_ts_config),
         # 047:知识写路径级联失效建议缓存(DELETE 同事务,rag commit 收口)
         suggestion_evictor=SuggestionRepository(session),
         # 064:召回闸门配置(off 缺省零回归)
-        gate_settings=get_settings(),
+        gate_settings=settings,
     )
 
 
@@ -391,7 +394,9 @@ class _AttachmentChecker:
 
 class _RegistryToolSpecProvider:
     """ReAct 注入工具的唯一真理源(019):权限点集查询 + toolcall 注册表过滤。
-    028:合并租户 MCP 动态工具(持 tool:mcp:use 才可见——与执行面 L2 同判据)。"""
+    028:合并租户 MCP 动态工具(持 tool:mcp:use 才可见——与执行面 L2 同判据)。
+    099:合并租户 HTTP 连接器(持 tool:http:call 才可见;按请求动态装配,
+    注册/启停即时生效;名称/描述过既有输入护栏,BLOCK 拒注入)。"""
 
     async def authorized_tools(self, user_id: str, tenant_id: str) -> list[dict[str, object]]:
         from kongming.toolcall.registry import filter_specs
@@ -416,7 +421,32 @@ class _RegistryToolSpecProvider:
                             "require_confirm": not read_only,
                         }
                     )
+            if "tool:http:call" in codes:
+                specs.extend(
+                    await _build_connector_service_for(s).injection_specs(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        trace_id=f"conn-{uuid.uuid4().hex[:12]}",
+                    )
+                )
         return specs
+
+
+def _build_connector_service_for(session: AsyncSession) -> "ConnectorService":
+    """099 装配(chat 适配层;与 connector 组合根同构)。"""
+    from kongming.connector.repository import SqlConnectorRepo
+    from kongming.connector.router import ConnectorGuardrailAdapter, ConnectorTestCallAuditor
+    from kongming.connector.service import ConnectorService
+    from kongming.datasource.cipher import get_cipher as _cipher
+
+    settings = get_settings()
+    return ConnectorService(
+        SqlConnectorRepo(session, _cipher(settings.datasource_encrypt_key)),
+        _cipher(settings.datasource_encrypt_key),
+        ConnectorGuardrailAdapter(),
+        timeout_max_ms=settings.connector_timeout_max_ms,
+        auditor=ConnectorTestCallAuditor(),
+    )
 
 
 def _build_mcp_service_for(session: AsyncSession) -> "McpService":

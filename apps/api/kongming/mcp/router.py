@@ -89,6 +89,31 @@ class McpToolEntryOut(BaseModel):
     read_only: bool = False
 
 
+class McpResourceEntryOut(BaseModel):
+    """资源清单条目(109;快照面,白名单与详情展示同源)。"""
+
+    uri: str
+    name: str = ""
+    description: str = ""
+    media_type: str = ""
+
+
+class McpPromptArgOut(BaseModel):
+    """模板参数声明(109)。"""
+
+    name: str
+    description: str = ""
+    required: bool = False
+
+
+class McpPromptEntryOut(BaseModel):
+    """提示模板清单条目(109;仅声明,渲染预览实时拉取)。"""
+
+    name: str
+    description: str = ""
+    arguments: list[McpPromptArgOut] = []
+
+
 class McpServerOut(BaseModel):
     id: str
     server_key: str
@@ -97,6 +122,8 @@ class McpServerOut(BaseModel):
     enabled: bool
     header_keys: list[str] = []
     tools: list[McpToolEntryOut] = []
+    resources: list[McpResourceEntryOut] = []
+    prompts: list[McpPromptEntryOut] = []
     last_sync_at: str | None = None
     last_sync_error: str = ""
 
@@ -106,6 +133,8 @@ class McpTestOut(BaseModel):
     kind: str | None = None
     detail: str | None = None
     tools: int | None = None
+    resources: int | None = None
+    prompts: int | None = None
 
 
 class McpSyncOut(BaseModel):
@@ -113,7 +142,27 @@ class McpSyncOut(BaseModel):
     kind: str | None = None
     detail: str | None = None
     tools: int | None = None
+    resources: int | None = None
+    prompts: int | None = None
     conflicts: list[str] | None = None
+
+
+class McpPromptPreviewIn(BaseModel):
+    """模板预览入参(109;按名 + 渲染 arguments)。"""
+
+    name: str = Field(min_length=1, max_length=128)
+    arguments: dict[str, str] = {}
+
+
+class McpPromptPreviewOut(BaseModel):
+    """模板预览出参(109):净化后渲染文本 + 检测/截断标注。"""
+
+    ok: bool
+    text: str = ""
+    truncated: bool = False
+    injection_hits: list[str] = []
+    kind: str | None = None
+    detail: str | None = None
 
 
 class McpServerIn(BaseModel):
@@ -139,6 +188,28 @@ def _row_out(row: dict[str, Any]) -> McpServerOut:
     tools_raw = cast("list[object]", row.get("tools") or [])
     # isinstance 守卫保留:先过滤出 dict 形态条目,再收窄键型供字段读取(仅类型断言)
     tools_entries: list[dict[str, Any]] = [e for e in tools_raw if isinstance(e, dict)]
+    resources_raw = cast("list[object]", row.get("resources") or [])
+    resources_entries: list[dict[str, Any]] = [e for e in resources_raw if isinstance(e, dict)]
+    prompts_raw = cast("list[object]", row.get("prompts") or [])
+    prompts_entries: list[dict[str, Any]] = [e for e in prompts_raw if isinstance(e, dict)]
+    prompts_out: list[McpPromptEntryOut] = []
+    for e in prompts_entries:
+        args_raw = cast("list[object]", e.get("arguments") or [])
+        args_out = [
+            McpPromptArgOut(
+                name=str(a.get("name") or ""),
+                description=str(a.get("description") or ""),
+                required=bool(a.get("required")),
+            )
+            for a in (cast("dict[str, Any]", x) for x in args_raw if isinstance(x, dict))
+        ]
+        prompts_out.append(
+            McpPromptEntryOut(
+                name=str(e.get("name") or ""),
+                description=str(e.get("description") or ""),
+                arguments=args_out,
+            )
+        )
     return McpServerOut(
         id=str(row["id"]),
         server_key=str(row["server_key"]),
@@ -156,6 +227,16 @@ def _row_out(row: dict[str, Any]) -> McpServerOut:
             )
             for e in tools_entries
         ],
+        resources=[
+            McpResourceEntryOut(
+                uri=str(e.get("uri") or ""),
+                name=str(e.get("name") or ""),
+                description=str(e.get("description") or ""),
+                media_type=str(e.get("mime_type") or ""),
+            )
+            for e in resources_entries
+        ],
+        prompts=prompts_out,
         last_sync_at=(row["last_sync_at"].isoformat() if row.get("last_sync_at") else None),
         last_sync_error=str(row.get("last_sync_error") or ""),
     )
@@ -333,3 +414,32 @@ async def sync_server(
     except McpServerNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     return out
+
+
+@router.post(
+    "/{server_id}/prompts/preview",
+    response_model=McpPromptPreviewOut,
+    dependencies=[Depends(require_perm(MANAGE))],
+)
+async def preview_prompt(
+    server_id: str,
+    body: McpPromptPreviewIn,
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Annotated[McpService, Depends(get_mcp_service)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> McpPromptPreviewOut:
+    """模板只读内容预览(109):按名实时拉取渲染结果,注入检测+大小上限;
+    禁止注入任何提示词、非运行时提示来源(spec「模板只读边界」)。"""
+    tenant_id = await _tenant_or_403(user, session, x_tenant_id)
+    try:
+        return McpPromptPreviewOut(
+            **await svc.preview_prompt(
+                server_id=server_id,
+                tenant_id=tenant_id,
+                name=body.name,
+                arguments=body.arguments,
+            )
+        )
+    except McpServerNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None

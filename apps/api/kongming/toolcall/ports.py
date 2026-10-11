@@ -23,8 +23,16 @@ class ToolRepo(Protocol):
         ...
 
     async def mark_status(
-        self, confirm_id: str, status: str, *, clear_reason: bool = False
-    ) -> None: ...
+        self,
+        confirm_id: str,
+        status: str,
+        *,
+        clear_reason: bool = False,
+        args_digest: str | None = None,
+    ) -> None:
+        """状态推进;args_digest 非空时覆写参数摘要(100 创建结果回填,
+        None=不触碰;语义详见仓储实现)。"""
+        ...
 
     async def find_announcement(self, *, tenant_id: str, idempotency_key: str) -> str | None: ...
 
@@ -123,6 +131,25 @@ class WebSearchPort(Protocol):
     async def search(self, *, query: str, count: int) -> list[dict[str, object]]: ...
 
 
+class TicketPort(Protocol):
+    """100:内部工单系统(ticket 域,按「最小工单 API 约定」经网关出站)。
+
+    实现侧(组合根)负责服务凭证装配、约定协议适配、超时与错误分类;
+    领域只消费标准化工单卡(allowlist 字段),失败经 TicketError 上浮分类
+    (分发兜底映射 ERROR + 审计,不裸崩)。
+    """
+
+    async def search(
+        self, *, query: str, status: str | None, limit: int
+    ) -> list[dict[str, object]]: ...
+
+    async def get(self, *, ticket_id: str) -> dict[str, object]: ...
+
+    async def create(
+        self, *, title: str, description: str, priority: str, assignee: str | None
+    ) -> dict[str, object]: ...
+
+
 class SandboxExecutor(Protocol):
     """run_python_code 工具委托(027):沙箱执行+审计(实现侧 sandbox 域)。
     data=None 纯计算;非 None={"columns","rows"}(六层防御取数结果,
@@ -164,6 +191,20 @@ class McpToolCaller(Protocol):
 
     async def call(
         self, *, tenant_id: str, qualified: str, args: dict[str, object]
+    ) -> dict[str, object]: ...
+
+
+class ConnectorToolGate(Protocol):
+    """连接器工具门(099 http-connector-domain;实现侧 connector 域 +
+    网关切面适配):resolve=按租户解析启用连接器为 fail-closed ToolDef
+    (perm_code=tool:http:call,写语义=requires_confirmation);
+    call=经网关切面执行(出口校验→SSRF→出站→分类),失败收敛
+    ConnectorError(分发兜底映射 ERROR + 审计)。"""
+
+    async def resolve(self, *, tenant_id: str, name: str) -> ToolDef | None: ...
+
+    async def call(
+        self, *, tenant_id: str, name: str, args: dict[str, object]
     ) -> dict[str, object]: ...
 
 

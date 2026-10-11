@@ -77,7 +77,10 @@ REGISTRY: list[GuardrailRule] = [
         name="pii_email",
         guardrail_type="input",
         action="masked",
-        pattern=r"[\w.+-]+@[\w-]+\.[\w.]+",
+        # 109:local-part 有界量词({1,64},RFC 5321 上限)——无界 `+` 在
+        # 不含 @ 的大文本(资源内容等外部数据进检测面)上是 O(n²) 灾难性
+        # 回溯(实测 1MB 挂死);有界后 O(64·n) 线性,正常邮箱语义不变
+        pattern=r"[\w.+-]{1,64}@[\w-]+\.[\w.]+",
         description="邮箱脱敏(保留域名)",
     ),
     GuardrailRule(

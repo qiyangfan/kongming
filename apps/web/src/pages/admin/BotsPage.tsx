@@ -1,17 +1,34 @@
 /* Bot 管理页(025,custom-agent spec):列表/创建/编辑/启停/公开开关/
-   api-key 创建(明文一次展示);归属=本人或超管。 */
+   api-key 创建(明文一次展示);归属=本人或超管。
+   104 版本化上架:草稿与在架版本差异提示、重新上架入口、版本历史
+   视图(版本号/上架时间/当前标识/回滚 AlertDialog 确认)。 */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, Check, Copy, Loader2, Plus } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DataView } from "@/components/data-view";
 import { FormRow } from "@/components/form-row";
 import { PageHeader } from "@/components/page-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { publishBot, unpublishBot } from "@/lib/store-api";
+import {
+  BotVersion,
+  listBotVersions,
+  publishBot,
+  rollbackBotVersion,
+  unpublishBot,
+} from "@/lib/store-api";
 import { toolList } from "@/lib/toolcall-api";
 import { attachResource, listMyTeams } from "@/lib/team-api";
 import { Button } from "@/components/ui/button";
@@ -100,8 +117,52 @@ export default function BotsPage() {
     queryFn: () => api.get<BotItem[]>("/system/bots"),
   });
 
+  // 104 版本历史(对话框按需拉取)+ 在架 Bot 的当前版本快照(差异提示单源)
+  const [verTarget, setVerTarget] = useState<string | null>(null); // bot_id
+  const [rollbackNo, setRollbackNo] = useState<number | null>(null);
+  const [rollbackError, setRollbackError] = useState("");
+  const verList = useQuery({
+    queryKey: ["bot-versions", verTarget],
+    queryFn: () => listBotVersions(verTarget!),
+    enabled: verTarget !== null,
+  });
+  const rollback = useMutation({
+    mutationFn: ({ id, no }: { id: string; no: number }) => rollbackBotVersion(id, no),
+    onSuccess: () => {
+      setRollbackNo(null);
+      setRollbackError("");
+      void qc.invalidateQueries({ queryKey: ["bot-versions"] });
+      void qc.invalidateQueries({ queryKey: ["bots"] });
+    },
+    onError: (e) => setRollbackError(e instanceof Error ? e.message : "回滚失败"),
+  });
+
   // 040:工具多选候选源=注册表(封闭集合;CSV 手输拼错会被 resolve_tools 静默求交丢弃)
   const registry = useQuery({ queryKey: ["toolcall", "registry"], queryFn: toolList });
+
+  // 104 差异提示:草稿定义(name/system_prompt/tools)与当前上架版本快照比对
+  // (工具集按集合比较——上架快照保序,但草稿勾选顺序变化不构成实质差异)
+  const publishedIds = (bots.data ?? []).filter((b) => b.published_at !== null).map((b) => b.id);
+  const versionsQ = useQuery({
+    queryKey: ["bot-versions", "map", publishedIds.join(",")],
+    queryFn: async () => {
+      const lists = await Promise.all(publishedIds.map((id) => listBotVersions(id)));
+      return Object.fromEntries(publishedIds.map((id, i) => [id, lists[i]]));
+    },
+    enabled: publishedIds.length > 0,
+    // 评审缓解:N 个在架 Bot = 进页 N 个并发请求(徽标用途),staleTime 内
+    // 复用不重复扇出;根治(批量端点)另行立项,回滚/上架后仍经 invalidate 刷新
+    staleTime: 60_000,
+  });
+  const versionsMap = versionsQ.data ?? {};
+  const versionsOf = (id: string): BotVersion[] => versionsMap[id] ?? [];
+  const draftDiffers = (b: BotItem): boolean => {
+    const cur = versionsOf(b.id).find((v) => v.current);
+    if (!cur) return false;
+    const s = cur.snapshot;
+    const toolsEq = [...b.tools].sort().join(",") === [...s.tools].sort().join(",");
+    return b.name !== s.name || b.system_prompt !== s.system_prompt || !toolsEq;
+  };
 
   const toggleTool = (name: string) => {
     setForm((f) => ({
@@ -196,6 +257,12 @@ export default function BotsPage() {
                     </span>
                   </Badge>
                 )}
+                {/* 104:草稿与在架版本不一致提示(治理补偿:分离是特性,提示防遗忘) */}
+                {b.published_at !== null && draftDiffers(b) && (
+                  <Badge variant="warning" className="shrink-0">
+                    有未上架修改
+                  </Badge>
+                )}
               </span>
             ),
           },
@@ -275,6 +342,25 @@ export default function BotsPage() {
             onSelect: (b) => {
               setAttaching(b.id);
               setAttachError("");
+            },
+          },
+          {
+            // 104:版本历史入口(在架/曾下架均可查;回滚入口在历史视图内)
+            label: "版本历史",
+            onSelect: (b) => {
+              setRollbackError("");
+              setVerTarget(b.id);
+            },
+          },
+          {
+            // 104:草稿与在架版本不一致时的重新上架入口(预填当前版本商店内容)
+            label: "重新上架",
+            isVisible: (b) => b.published_at !== null && draftDiffers(b),
+            onSelect: (b) => {
+              const cur = versionsOf(b.id).find((v) => v.current);
+              setPubGreeting(cur?.snapshot.greeting ?? "");
+              setPubSuggestions(cur?.snapshot.suggestions.join("\n") ?? "");
+              setPubTarget(b.id);
             },
           },
           {
@@ -493,7 +579,8 @@ export default function BotsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 审查循环 B2:上架录入商店展示内容 */}
+      {/* 审查循环 B2:上架录入商店展示内容;104:上架=创建版本快照
+          (内容无变化幂等复用,不产生重复版本) */}
       <Dialog
         open={pubTarget !== null}
         onOpenChange={(open) => {
@@ -504,8 +591,7 @@ export default function BotsPage() {
           <DialogHeader>
             <DialogTitle>上架到商店</DialogTitle>
             <DialogDescription>
-              欢迎语与建议问题将展示在商店卡片与详情页(建议问题点击即问)。
-              上架内容会经安全审核,含诱导性或违规内容将被拒绝。
+              上架会对当前定义与商店内容创建不可变版本快照并经安全审核,商店展示与试运行始终使用「当前上架版本」——之后的草稿修改不影响在架版本,重新上架才生效。欢迎语与建议问题展示在商店卡片与详情页;内容无变化时重复上架不产生新版本。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -547,6 +633,109 @@ export default function BotsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 104:版本历史视图(版本号/上架时间/当前标识/回滚入口) */}
+      <Dialog
+        open={verTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setVerTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>版本历史</DialogTitle>
+            <DialogDescription>
+              每次上架生成一条不可变版本快照;商店始终使用「当前上架版本」。回滚视同上架:按现行安全规则重新审核后切换,通过才生效。
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-96">
+            <div className="space-y-2 pr-2">
+              {verList.isPending && (
+                <p className="py-4 text-center text-xs text-muted-foreground">版本加载中…</p>
+              )}
+              {verList.isError && <ErrorAlert text="版本历史加载失败,请关闭后重试" />}
+              {verList.data?.length === 0 && (
+                <p className="py-4 text-center text-xs text-muted-foreground">
+                  暂无版本——上架后这里会记录每次上架的快照
+                </p>
+              )}
+              {(verList.data ?? []).map((v) => (
+                <div
+                  key={v.version_no}
+                  className="flex items-start justify-between gap-2 rounded-md border p-3"
+                >
+                  <div className="min-w-0">
+                    <p className="flex items-center gap-1.5">
+                      <span className="font-mono text-sm font-medium">v{v.version_no}</span>
+                      {v.current && <Badge variant="default">当前上架版本</Badge>}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {new Date(v.published_at).toLocaleString()} · {v.snapshot.name}
+                      {v.snapshot.greeting ? ` · ${v.snapshot.greeting}` : ""}
+                    </p>
+                  </div>
+                  {v.current ? (
+                    <Button size="sm" variant="outline" disabled>
+                      当前
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={rollback.isPending}
+                      onClick={() => setRollbackNo(v.version_no)}
+                    >
+                      回滚到此版本
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVerTarget(null)}>
+              关闭
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 104:回滚确认(破坏性语义;受控关闭,失败保持开启展示错误) */}
+      <AlertDialog
+        open={rollbackNo !== null}
+        onOpenChange={(open) => {
+          // 进行中不可关闭(评审修复:Esc 中途关框会让回滚失败信息无处渲染,
+          // 用户误以为已生效);未进行中才允许取消
+          if (!open && !rollback.isPending) setRollbackNo(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>回滚到 v{rollbackNo ?? ""}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              回滚会把该历史版本重新指为当前上架版本,商店展示与试运行随之切换(该版本保留在历史中)。回滚按现行安全规则重新审核,审核不通过则拒绝且回滚不生效。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {rollbackError && (
+            <p className="text-destructive text-sm" role="alert">
+              {rollbackError}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={rollback.isPending}>取消</AlertDialogCancel>
+            <Button
+              onClick={() => {
+                if (verTarget && rollbackNo !== null) {
+                  rollback.mutate({ id: verTarget, no: rollbackNo });
+                }
+              }}
+            >
+              {rollback.isPending && <Loader2 className="animate-spin" aria-hidden />}
+              确认回滚
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

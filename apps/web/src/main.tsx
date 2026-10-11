@@ -43,6 +43,7 @@ const GuardrailsPage = lazy(() => import("@/pages/admin/GuardrailsPage"));
 const SemanticPage = lazy(() => import("@/pages/admin/SemanticPage"));
 const BotsPage = lazy(() => import("@/pages/admin/BotsPage"));
 const McpPage = lazy(() => import("@/pages/admin/McpPage"));
+const ConnectorsPage = lazy(() => import("@/pages/admin/ConnectorsPage"));
 const WorkflowsPage = lazy(() => import("@/pages/admin/WorkflowsPage"));
 const TriggersPage = lazy(() => import("@/pages/admin/TriggersPage"));
 const TeamsPage = lazy(() => import("@/pages/admin/TeamsPage"));
@@ -254,6 +255,14 @@ const router = createBrowserRouter([
             element: el(
               <PermRoute perm="system:mcp:manage">
                 <McpPage />
+              </PermRoute>,
+            ),
+          },
+          {
+            path: "connectors",
+            element: el(
+              <PermRoute perm="connector:manage">
+                <ConnectorsPage />
               </PermRoute>,
             ),
           },

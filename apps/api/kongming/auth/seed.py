@@ -85,6 +85,17 @@ PERMISSIONS: list[tuple[str, str, int]] = [
     # 查询内容外发第三方检索供应商 + API 成本,与 knowledge:search 同哲学;
     # SUPER_ADMIN 由增量逻辑自动覆盖)
     ("tool:websearch:search", "工具-联网搜索", 39),
+    # 100 internal-connector-domain:内部工单(读/写分权两点:search 收敛
+    # search/get 读面,manage 收敛 create 写面——读放宽写收紧是内部系统的
+    # 自然授权形态;均显式授予制,不进 DEVELOPER 推荐集;create 的确认流
+    # 独立于权限点,有权限仍需确认;SUPER_ADMIN 由增量逻辑自动覆盖)
+    ("tool:ticket:search", "工具-工单检索", 40),
+    ("tool:ticket:manage", "工具-工单管理", 41),
+    # 099 http-connector-domain:连接器治理面(仅 SUPER_ADMIN)+ 工具调用
+    # (显式授予制,不进 DEVELOPER 推荐集——租户自定义端点出站 + 凭证治理,
+    # 与 websearch 同哲学;SUPER_ADMIN 由增量逻辑自动覆盖)
+    ("connector:manage", "连接器管理", 42),
+    ("tool:http:call", "工具-HTTP连接器调用", 43),
 ]
 
 ROLES: list[tuple[str, str, str, str, int]] = [

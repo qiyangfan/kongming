@@ -172,21 +172,59 @@ class SqlMcpRepo:
         return out
 
     async def save_snapshot(
-        self, *, server_id: str, tenant_id: str, tools: list[dict[str, Any]], error: str
+        self,
+        *,
+        server_id: str,
+        tenant_id: str,
+        tools: list[dict[str, Any]],
+        resources: list[dict[str, Any]],
+        prompts: list[dict[str, Any]],
+        error: str,
     ) -> None:
+        """快照原子替换(109 起含资源/模板清单;失败降级由调用方传旧值)。"""
         await self._s.execute(
             text(
                 "UPDATE public.sys_mcp_server SET tools=CAST(:tools AS jsonb),"
+                " resources=CAST(:resources AS jsonb), prompts=CAST(:prompts AS jsonb),"
                 " last_sync_at=now(), last_sync_error=:e, updated_at=now()"
                 " WHERE id=CAST(:i AS uuid) AND tenant_id=CAST(:t AS uuid)"
             ),
             {
                 "tools": json.dumps(tools, ensure_ascii=False),
+                "resources": json.dumps(resources, ensure_ascii=False),
+                "prompts": json.dumps(prompts, ensure_ascii=False),
                 "e": error[:500],
                 "i": server_id,
                 "t": tenant_id,
             },
         )
+
+    async def get_enabled_resources(
+        self, *, tenant_id: str, server_key: str
+    ) -> list[dict[str, Any]]:
+        """read_resource 执行期的 uri 白名单(109,design D2:来自探测快照)。
+        仅启用 server——禁用/删除竞态 → 空=全拒,与工具目录消失同形。"""
+        if not SERVER_KEY_RE.fullmatch(server_key):
+            return []
+        row = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT resources FROM public.sys_mcp_server"
+                        " WHERE tenant_id=CAST(:t AS uuid) AND server_key=:k AND enabled"
+                    ),
+                    {"t": tenant_id, "k": server_key},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if row is None:
+            return []
+        raw: object = row["resources"]
+        if not isinstance(raw, list):
+            return []
+        return [e for e in cast("list[object]", raw) if isinstance(e, dict)]
 
     async def find_enabled_by_tool(
         self, *, tenant_id: str, qualified: str

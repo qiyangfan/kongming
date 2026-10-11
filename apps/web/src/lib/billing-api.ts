@@ -83,6 +83,18 @@ export function listBillingBots(tenantId: string): Promise<BotBrief[]> {
   return api.get<BotBrief[]>(`/billing/bots?tenant_id=${tenantId}`);
 }
 
+export type UserBrief = components["schemas"]["UserBriefOut"];
+export type TeamBrief = components["schemas"]["TeamBriefOut"];
+
+/** 103:USER/TEAM 级策略选择器清单(挂 billing:manage 自供,与 Bot 清单同解耦原则) */
+export function listBillingUsers(tenantId: string): Promise<UserBrief[]> {
+  return api.get<UserBrief[]>(`/billing/users?tenant_id=${tenantId}`);
+}
+
+export function listBillingTeams(tenantId: string): Promise<TeamBrief[]> {
+  return api.get<TeamBrief[]>(`/billing/teams?tenant_id=${tenantId}`);
+}
+
 export function listPolicies(tenantId: string): Promise<PolicyItem[]> {
   return api.get<PolicyItem[]>(`/billing/policies?tenant_id=${tenantId}`);
 }

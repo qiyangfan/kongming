@@ -1,9 +1,9 @@
 /* 工作流管理页(029 workflow-orchestration spec):
-   定义列表(最新版本)+ JSON 编辑器(保存即结构校验,服务端错误行内反馈;
-   v1 不做拖拽画布——Non-goal)+ 启停 StatusSwitch + 删除受控确认 +
+   定义列表(最新版本)+ 双态定义编辑器(107:可视化画布 ⇄ JSON,保存即结构
+   校验,服务端错误行内反馈并定位画布节点)+ 启停 StatusSwitch + 删除受控确认 +
    运行对话框(inputs JSON)+ run 历史分页(节点状态逐行展开)。 */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Loader2, Plus } from "lucide-react";
 
@@ -36,6 +36,10 @@ import { StatusSwitch } from "@/components/status-switch";
 import { DataView } from "@/components/data-view";
 import { Textarea } from "@/components/ui/textarea";
 import { ErrorAlert } from "@/components/error-alert";
+import {
+  WorkflowDefinitionEditor,
+  type WorkflowDefinitionEditorHandle,
+} from "@/components/workflow/workflow-definition-editor";
 import { formatDateTime, formatDuration } from "@/lib/datetime";
 import {
   deleteWorkflow,
@@ -52,14 +56,8 @@ import {
 
 const PAGE_SIZE = 10;
 
-const TEMPLATE = `{
-  "nodes": [
-    { "id": "q", "type": "sql", "config": { "sql": "SELECT ..." } },
-    { "id": "t", "type": "transform",
-      "config": { "template": "共 {{q.outputs.row_count}} 行" },
-      "depends_on": ["q"] }
-  ]
-}`;
+/** 新建工作流的空定义(画布初始态;JSON 态展示为 {"nodes": []}) */
+const EMPTY_DEFINITION: unknown = { nodes: [] };
 
 // run/节点状态 → 徽章统一走 StatusBadge(未知值回落 destructive,保持原「非 SUCCESS 一律红」
 // 语义);SKIPPED 为节点级状态(条件门控/依赖跳过),run 终态不出现
@@ -84,11 +82,14 @@ const TRIGGER_SOURCE_LABELS: Record<string, string> = {
 
 export default function WorkflowsPage() {
   const qc = useQueryClient();
+  const editorRef = useRef<WorkflowDefinitionEditorHandle | null>(null);
+  // 107:定义编辑交由双态编辑器(画布 ⇄ JSON);页面只持初始定义与布局键
   const [editing, setEditing] = useState<{
     origKey: string | null; // 审查循环 B3:编辑态锁 wf_key(改 key 保存=静默新建另一工作流)
     wfKey: string;
     name: string;
-    defText: string;
+    initialDef: unknown;
+    version: number; // 布局持久化键(新建=0)
   } | null>(null);
   const [formError, setFormError] = useState("");
   const [deleting, setDeleting] = useState<WorkflowItem | null>(null);
@@ -119,20 +120,19 @@ export default function WorkflowsPage() {
 
   const save = useMutation({
     mutationFn: async () => {
-      if (!editing) return;
-      let definition: unknown;
-      try {
-        definition = JSON.parse(editing.defText);
-      } catch (e) {
-        throw new Error(`JSON 解析失败: ${e instanceof Error ? e.message : e}`);
-      }
-      await saveWorkflow({
+      if (!editing || !editorRef.current) throw new Error("编辑态已关闭");
+      // 单一数据源:从编辑器取当前定义(画布投影已同步;JSON 态先过语法解析)
+      const got = editorRef.current.getDefinition();
+      if (!got.ok) throw new Error(got.error);
+      return saveWorkflow({
         wf_key: editing.wfKey.trim(),
         name: editing.name.trim(),
-        definition,
+        definition: got.definition,
       });
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
+      // 布局坐标迁移到新版本键(须在卸载编辑器前完成)
+      editorRef.current?.notifySaved(res.version);
       setEditing(null);
       setFormError("");
       invalidate();
@@ -193,11 +193,17 @@ export default function WorkflowsPage() {
     <div className="space-y-4">
       <PageHeader
         title="工作流"
-        description="用 JSON 定义多步骤自动任务:可编排 SQL 查询、HTTP 调用、条件分支、循环与 AI 步骤;同名保存自动产生新版本,旧版本冻结。"
+        description="用画布拖拽编排多步骤自动任务:SQL 查询、HTTP 调用、条件分支、循环、模板转换与 AI 步骤;同名保存自动产生新版本,旧版本冻结。"
         actions={
           <Button
             onClick={() => {
-              setEditing({ origKey: null, wfKey: "", name: "", defText: TEMPLATE });
+              setEditing({
+                origKey: null,
+                wfKey: "",
+                name: "",
+                initialDef: EMPTY_DEFINITION,
+                version: 0,
+              });
               setFormError("");
             }}
           >
@@ -282,7 +288,8 @@ export default function WorkflowsPage() {
                 origKey: row.wf_key,
                 wfKey: row.wf_key,
                 name: row.name,
-                defText: JSON.stringify(row.definition, null, 2),
+                initialDef: row.definition,
+                version: row.version,
               });
               setFormError("");
             },
@@ -305,7 +312,7 @@ export default function WorkflowsPage() {
         ]}
       />
 
-      {/* 新建/编辑(JSON 编辑器) */}
+      {/* 新建/编辑(107 双态编辑器:画布 ⇄ JSON) */}
       <Dialog
         open={editing !== null}
         onOpenChange={(o) => {
@@ -313,7 +320,7 @@ export default function WorkflowsPage() {
           if (!o) setEditing(null);
         }}
       >
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>{editing?.wfKey ? "编辑工作流" : "新建工作流"}</DialogTitle>
             <DialogDescription>
@@ -354,15 +361,13 @@ export default function WorkflowsPage() {
                   />
                 </FormRow>
               </div>
-              <FormRow label="定义(JSON DAG)" htmlFor="wf-def">
-                <Textarea
-                  id="wf-def"
-                  value={editing.defText}
-                  onChange={(e) => setEditing({ ...editing, defText: e.target.value })}
-                  rows={14}
-                  className="font-mono text-xs leading-relaxed"
-                />
-              </FormRow>
+              <WorkflowDefinitionEditor
+                ref={editorRef}
+                initialDefinition={editing.initialDef}
+                wfKey={editing.wfKey}
+                version={editing.version}
+                errorText={formError}
+              />
               {formError && (
                 <p role="alert" className="text-sm text-destructive">
                   {formError}

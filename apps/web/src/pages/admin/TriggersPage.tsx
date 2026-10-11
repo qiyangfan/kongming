@@ -1,7 +1,7 @@
 /* 触发器管理页(031 triggers-webhooks spec):
    列表(类型/目标/下次触发/启停)+ 新建/编辑对话框(cron 校验经服务端
-   400 行内反馈;webhook 创建后一次性展示 URL 与密钥)+ 删除受控确认 +
-   执行历史分页。 */
+   400 行内反馈;webhook 创建后一次性展示 URL 与密钥;邮件形态配置 IMAP
+   连接与轮询,凭证空框=保持现值)+ 删除受控确认 + 执行历史分页。 */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -34,6 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { EmptyState } from "@/components/empty-state";
 import { StatusSwitch } from "@/components/status-switch";
 import { StatusBadge, type StatusMeta } from "@/components/status-badge";
@@ -59,17 +60,21 @@ import { formatDateTime, formatDuration } from "@/lib/datetime";
 
 const PAGE_SIZE = 10;
 
-// 触发器类型中文(列表徽章与表单下拉同源;后端枚举仅 CRON/WEBHOOK)
+// 触发器类型中文(列表徽章与表单下拉同源;后端枚举 CRON/WEBHOOK/EMAIL)
 const TYPE_LABELS: Record<string, string> = {
   CRON: "定时调度",
   WEBHOOK: "webhook 触发",
+  EMAIL: "邮件触发",
 };
 
-// 执行状态中文(后端枚举:成功/失败/间隔节流跳过);未收录值回退原值
+type TriggerType = "CRON" | "WEBHOOK" | "EMAIL";
+
+// 执行状态中文(后端枚举:成功/失败/间隔节流跳过/挂起重试);未收录值回退原值
 const RUN_STATUS_META: StatusMeta = {
   SUCCESS: { label: "成功", variant: "secondary" },
   FAILED: { label: "失败", variant: "destructive" },
   SKIPPED: { label: "已跳过", variant: "outline" },
+  PENDING: { label: "待重试", variant: "outline" },
 };
 
 // 最小间隔快捷档(点击填入对应秒数)
@@ -84,7 +89,7 @@ type FormState = {
   id: string | null;
   tgKey: string;
   name: string;
-  type: "CRON" | "WEBHOOK";
+  type: TriggerType;
   targetType: "workflow" | "bot";
   targetKey: string;
   cronExpr: string;
@@ -92,6 +97,15 @@ type FormState = {
   adapter: "custom" | "github";
   notifyUrl: string;
   secret: string;
+  maxRetries: string;
+  // 108:邮件形态(凭证仅写入不回显;编辑空框=保持现值)
+  imapHost: string;
+  imapPort: string;
+  imapTls: boolean;
+  imapUser: string;
+  imapPassword: string;
+  imapFolder: string;
+  imapPollInterval: string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -106,7 +120,37 @@ const EMPTY_FORM: FormState = {
   adapter: "custom",
   notifyUrl: "",
   secret: "",
+  maxRetries: "0",
+  imapHost: "",
+  imapPort: "993",
+  imapTls: true,
+  imapUser: "",
+  imapPassword: "",
+  imapFolder: "INBOX",
+  imapPollInterval: "300",
 };
+
+// 108:邮件形态保存前校验(创建须填主机/账号/凭证;编辑凭证空框=保持现值)
+function emailFormInvalid(form: FormState): boolean {
+  const port = Number(form.imapPort);
+  return (
+    form.imapHost.trim() === "" ||
+    form.imapUser.trim() === "" ||
+    (form.id === null && form.imapPassword === "") ||
+    !Number.isInteger(port) ||
+    port < 1 ||
+    port > 65535
+  );
+}
+
+// 101:重试上限解析与值域(0–5;空串=未填按 0;非整数/越界为非法)
+function parseMaxRetries(raw: string): { value: number; invalid: boolean } {
+  const t = raw.trim();
+  if (t === "") return { value: 0, invalid: false };
+  const n = Number(t);
+  const invalid = !Number.isInteger(n) || n < 0 || n > 5;
+  return { value: invalid ? 0 : n, invalid };
+}
 
 export default function TriggersPage() {
   const qc = useQueryClient();
@@ -120,6 +164,8 @@ export default function TriggersPage() {
   const [historyOf, setHistoryOf] = useState<TriggerItem | null>(null);
   const [historyPage, setHistoryPage] = useState(1);
   const [toggleError, setToggleError] = useState<Record<string, string>>({});
+  // 101:重试上限表单校验(0–5;非法禁保存)
+  const retries = parseMaxRetries(form?.maxRetries ?? "0");
 
   const triggers = useQuery({ queryKey: ["admin", "triggers"], queryFn: listTriggers });
   // 040:目标候选(封闭集合,按类型联动;自由输入拼错会挂到运行期才暴露)。
@@ -153,6 +199,7 @@ export default function TriggersPage() {
   const save = useMutation({
     mutationFn: async () => {
       if (!form) return null;
+      const retries = parseMaxRetries(form.maxRetries);
       const payload: Record<string, unknown> = {
         name: form.name.trim(),
         target_type: form.targetType,
@@ -162,7 +209,20 @@ export default function TriggersPage() {
         min_interval_sec: form.minInterval.trim() === "" ? 60 : Number(form.minInterval),
         adapter: form.adapter,
         notify_url: form.notifyUrl.trim(),
+        // 101:失败重试次数上限(0=不重试)
+        max_retries: retries.value,
       };
+      if (form.type === "EMAIL") {
+        // 108:邮件形态配置(凭证空框=后端保持现值;下限封顶在后端)
+        payload.imap_host = form.imapHost.trim();
+        payload.imap_port = Number(form.imapPort);
+        payload.imap_tls = form.imapTls;
+        payload.imap_user = form.imapUser.trim();
+        payload.imap_password = form.imapPassword;
+        payload.imap_folder = form.imapFolder.trim() || "INBOX";
+        payload.imap_poll_interval_sec =
+          form.imapPollInterval.trim() === "" ? 300 : Number(form.imapPollInterval);
+      }
       if (form.id === null) {
         return await createTrigger({
           ...payload,
@@ -220,7 +280,7 @@ export default function TriggersPage() {
     <div className="space-y-4">
       <PageHeader
         title="触发器"
-        description="定时调度(常用频率点选,或高级 cron 表达式)或 webhook 触发(外部系统调用专属地址即运行)工作流/助手;执行时以创建者身份经过完整安全校验。"
+        description="定时调度(常用频率点选,或高级 cron 表达式)、webhook 触发(外部系统调用专属地址即运行)或邮件触发(IMAP 收件箱到达新邮件即运行)工作流/助手;执行时以创建者身份经过完整安全校验。"
         actions={
           <Button
             onClick={() => {
@@ -279,6 +339,17 @@ export default function TriggersPage() {
                     </p>
                   )}
                 </>
+              ) : row.type === "EMAIL" ? (
+                <>
+                  {/* 108:邮件形态展示 IMAP 连接要点(凭证永不回显) */}
+                  <span className="block truncate" title={row.imap_host}>
+                    {row.imap_host}/{row.imap_folder}
+                  </span>
+                  <p className="whitespace-normal text-muted-foreground">
+                    每 {row.imap_poll_interval_sec} 秒轮询
+                    {row.next_fire_at ? ` · 下次 ${formatDateTime(row.next_fire_at)}` : ""}
+                  </p>
+                </>
               ) : (
                 <span className="block truncate" title={`/webhooks/${row.webhook_path}`}>
                   /webhooks/{row.webhook_path}
@@ -315,7 +386,7 @@ export default function TriggersPage() {
                 id: row.id,
                 tgKey: row.tg_key,
                 name: row.name,
-                type: row.type as "CRON" | "WEBHOOK",
+                type: row.type as TriggerType,
                 targetType: row.target_type as "workflow" | "bot",
                 targetKey: row.target_key,
                 cronExpr: row.cron_expr ?? "0 9 * * *",
@@ -323,6 +394,14 @@ export default function TriggersPage() {
                 adapter: row.adapter as "custom" | "github",
                 notifyUrl: row.notify_url,
                 secret: "",
+                maxRetries: String(row.max_retries ?? 0),
+                imapHost: row.imap_host ?? "",
+                imapPort: String(row.imap_port ?? 993),
+                imapTls: row.imap_tls ?? true,
+                imapUser: row.imap_user ?? "",
+                imapPassword: "", // 空框=保持现值(后端口径)
+                imapFolder: row.imap_folder ?? "INBOX",
+                imapPollInterval: String(row.imap_poll_interval_sec ?? 300),
               });
               setFormError("");
             },
@@ -381,7 +460,7 @@ export default function TriggersPage() {
                   <FormRow label="类型">
                     <Select
                       value={form.type}
-                      onValueChange={(v) => setForm({ ...form, type: v as "CRON" | "WEBHOOK" })}
+                      onValueChange={(v) => setForm({ ...form, type: v as TriggerType })}
                     >
                       <SelectTrigger aria-label="类型">
                         <SelectValue />
@@ -505,6 +584,92 @@ export default function TriggersPage() {
                   )}
                 </div>
               )}
+              {form.type === "EMAIL" && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormRow label="IMAP 主机" htmlFor="tg-imap-host">
+                      <Input
+                        id="tg-imap-host"
+                        value={form.imapHost}
+                        onChange={(e) => setForm({ ...form, imapHost: e.target.value })}
+                        className="font-mono"
+                        placeholder="imap.example.com"
+                      />
+                    </FormRow>
+                    <FormRow label="端口" htmlFor="tg-imap-port">
+                      <Input
+                        id="tg-imap-port"
+                        value={form.imapPort}
+                        onChange={(e) => setForm({ ...form, imapPort: e.target.value })}
+                        className="w-28 font-mono"
+                        inputMode="numeric"
+                      />
+                    </FormRow>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormRow label="账号" htmlFor="tg-imap-user">
+                      <Input
+                        id="tg-imap-user"
+                        value={form.imapUser}
+                        onChange={(e) => setForm({ ...form, imapUser: e.target.value })}
+                        className="font-mono"
+                        placeholder="ops@example.com"
+                      />
+                    </FormRow>
+                    <FormRow
+                      label={form.id === null ? "凭证(密码)" : "凭证(留空保持现值)"}
+                      htmlFor="tg-imap-password"
+                    >
+                      {/* 108:凭证任何接口不回显(webhook secret 同口径);
+                          编辑空框=保持现值 */}
+                      <Input
+                        id="tg-imap-password"
+                        value={form.imapPassword}
+                        onChange={(e) => setForm({ ...form, imapPassword: e.target.value })}
+                        className="font-mono"
+                        type="password"
+                      />
+                    </FormRow>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormRow label="文件夹" htmlFor="tg-imap-folder">
+                      <Input
+                        id="tg-imap-folder"
+                        value={form.imapFolder}
+                        onChange={(e) => setForm({ ...form, imapFolder: e.target.value })}
+                        className="font-mono"
+                        placeholder="INBOX"
+                      />
+                    </FormRow>
+                    <FormRow label="轮询间隔(秒)" htmlFor="tg-imap-interval">
+                      <Input
+                        id="tg-imap-interval"
+                        value={form.imapPollInterval}
+                        onChange={(e) => setForm({ ...form, imapPollInterval: e.target.value })}
+                        className="w-32 font-mono"
+                        inputMode="numeric"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        到期即拉取新邮件;低于 30 秒按 30 秒封顶。
+                      </p>
+                    </FormRow>
+                  </div>
+                  <FormRow label="TLS 加密连接" htmlFor="tg-imap-tls">
+                    <Switch
+                      id="tg-imap-tls"
+                      checked={form.imapTls}
+                      onCheckedChange={(checked) => setForm({ ...form, imapTls: checked })}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      默认开启(993 端口);关闭则走明文 143 端口,仅限内网自建服务。
+                    </p>
+                  </FormRow>
+                  <p className="text-xs text-muted-foreground">
+                    新邮件经标准化摘要(发件人/主题/日期/正文预览,过安全护栏)触发目标; 已处理邮件按
+                    UID 游标续传,停用期间的邮件不丢失。
+                  </p>
+                </div>
+              )}
               {form.type === "WEBHOOK" && form.id === null && (
                 <div className="grid grid-cols-2 gap-3">
                   <FormRow label="签名密钥(留空自动生成)" htmlFor="tg-secret">
@@ -532,6 +697,28 @@ export default function TriggersPage() {
                   </FormRow>
                 </div>
               )}
+              <div className="grid grid-cols-2 gap-3">
+                <FormRow label="失败重试上限" htmlFor="tg-max-retries">
+                  <Input
+                    id="tg-max-retries"
+                    value={form.maxRetries}
+                    onChange={(e) => setForm({ ...form, maxRetries: e.target.value })}
+                    className="w-32 font-mono"
+                    inputMode="numeric"
+                    aria-invalid={retries.invalid}
+                  />
+                  <p
+                    role={retries.invalid ? "alert" : undefined}
+                    className={
+                      retries.invalid ? "text-xs text-destructive" : "text-xs text-muted-foreground"
+                    }
+                  >
+                    {retries.invalid
+                      ? "须为 0–5 的整数"
+                      : "执行失败后自动重试的最大次数;0 = 不重试。"}
+                  </p>
+                </FormRow>
+              </div>
               <FormRow label="执行完成后通知地址(可空)" htmlFor="tg-notify">
                 <Input
                   id="tg-notify"
@@ -547,7 +734,15 @@ export default function TriggersPage() {
                 </p>
               )}
               <DialogFooter>
-                <Button type="submit" disabled={save.isPending || !form.targetKey}>
+                <Button
+                  type="submit"
+                  disabled={
+                    save.isPending ||
+                    !form.targetKey ||
+                    retries.invalid ||
+                    (form.type === "EMAIL" && emailFormInvalid(form))
+                  }
+                >
                   {save.isPending && <Loader2 className="animate-spin" aria-hidden />}
                   保存
                 </Button>
@@ -605,9 +800,20 @@ export default function TriggersPage() {
                     value={r.status}
                     fallbackVariant="destructive"
                   />
+                  {/* 101 重试链:attempt>1 标注尝试序号(首跑不标,免噪音) */}
+                  {r.attempt > 1 && (
+                    <Badge variant="outline" className="ml-2">
+                      第 {r.attempt} 次
+                    </Badge>
+                  )}
                   <span className="ml-2 text-xs text-muted-foreground">
                     {formatDuration(r.duration_ms)} · {formatDateTime(r.created_at)}
                   </span>
+                  {r.status === "PENDING" && r.next_retry_at && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      将于 {formatDateTime(r.next_retry_at)} 重试
+                    </p>
+                  )}
                   {r.error && <p className="mt-1 text-xs text-destructive">{r.error}</p>}
                 </div>
               ))

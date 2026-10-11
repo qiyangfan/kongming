@@ -5,7 +5,9 @@ MANUAL_EDIT < FEEDBACK_REFINED——自动来源(扫描/润色)不覆盖更高�
 召回参数与上游同构:topK=5、RRF k=60(query_history 独立强 few-shot 通道不进融合)。
 """
 
+import hashlib
 import re
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, NamedTuple
@@ -43,7 +45,8 @@ class TableBlock:
 
 @dataclass(frozen=True)
 class KnowledgeEntry:
-    """知识条目(管理面/召回视图;永不含向量原始值)。037:新增 alias 业务称谓。"""
+    """知识条目(管理面/召回视图;永不含向量原始值)。037:新增 alias 业务称谓。
+    102:team_id=团队归属(NULL=租户公共),team_name=展示用团队名(列表面)。"""
 
     id: str
     tenant_id: str
@@ -56,6 +59,8 @@ class KnowledgeEntry:
     source_type: str
     updated_at: object
     alias: str = ""  # 037:业务称谓别名
+    team_id: str | None = None  # 102:团队归属(NULL=公共)
+    team_name: str | None = None  # 102:归属团队名(管理面展示;召回面不取)
 
 
 @dataclass(frozen=True)
@@ -98,6 +103,44 @@ def can_automated_overwrite(existing: str, incoming: str) -> bool:
     同级可覆盖(重复扫描幂等更新);人工来源不经过本判定(显式操作即显式覆盖)。
     """
     return SOURCE_TYPE_PRIORITY[incoming] >= SOURCE_TYPE_PRIORITY[existing]
+
+
+# ---- 102 知识条目团队归属(可见集合/写权限判定/缓存指纹:领域纯函数单点) ----
+
+WRITABLE_TEAM_ROLES = frozenset({"OWNER", "MEMBER"})
+
+
+def entry_visible(*, team_id: str | None, caller_team_ids: Collection[str]) -> bool:
+    """知识条目可见集合判定(102):租户公共条目(归属空)恒可见;团队条目仅
+    调用者所在团队可见。孤儿归属(团队已删→成员行连带清空→不在任何调用者
+    集合)与非成员同形不可见,不泄露存在性。召回过滤/缓存键/管理列表三处
+    同一判定,禁另起口径(design Goals)。"""
+    if team_id is None:
+        return True
+    return team_id in caller_team_ids
+
+
+def entry_write_access(*, team_id: str | None, member_role: str | None) -> str:
+    """知识条目写权限三态判定(102):"allowed"=可写;"not_member"=非成员
+    (404 同形,不暴露存在性);"viewer"=VIEWER 只读成员(403——条目在其
+    可见集合内,存在性已知,角色不足如实拒绝)。公共条目=既有权限口径
+    (system:rag:manage 已闸),零额外判定(存量零回归)。"""
+    if team_id is None:
+        return "allowed"
+    if member_role is None:
+        return "not_member"
+    return "allowed" if member_role in WRITABLE_TEAM_ROLES else "viewer"
+
+
+def team_set_fingerprint(team_ids: Collection[str]) -> str:
+    """调用者团队集合确定性指纹(102 缓存键维度):排序后拼接取 sha256 前
+    16 hex;空集=固定串 "public"(纯公共形态,同形用户共享缓存空间)。
+    同集合异序同指纹(排序),异集合异指纹——团队关系变化即指纹变,缓存
+    天然隔离(TTL 吸收旧条目,无需主动清)。"""
+    ids = sorted(team_ids)
+    if not ids:
+        return "public"
+    return hashlib.sha256("\x1f".join(ids).encode("utf-8")).hexdigest()[:16]
 
 
 # 037 alias 结构防御(R1-F1 纵深):括号/换行/竖线会破坏 schema_hint 行结构
@@ -282,7 +325,15 @@ class UnsupportedFileType(RagError):
 
 
 class KnowledgeNotFound(RagError):
-    """知识条目不存在或不属于当前租户(同形,防探测)。"""
+    """知识条目不存在/越租户/团队条目非成员(同形,防探测)。"""
+
+
+# 403
+
+
+class TeamWriteForbidden(RagError):
+    """团队条目写权限不足(VIEWER 只读成员;条目在其可见集合内,角色不足
+    如实 403,与「非成员 404 同形」分立——不向不可见者泄露,不向可见者说谎)。"""
 
 
 # ============ 052 知识覆盖报告(确定性纯聚合;零 LLM 零写入) ============

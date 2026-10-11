@@ -711,6 +711,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/rag/tables/{table_id}/ownership": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Table Ownership
+         * @description 归属变更(102):公共⇄团队原位转移(单一实例,内容不动)。
+         *
+         *     非成员 404 同形(与不存在条目同 detail,不暴露存在性);VIEWER 403;
+         *     变更落审计+精确失效检索缓存。web 侧走受控确认(AlertDialog 明示可见
+         *     范围变化)。
+         */
+        put: operations["set_table_ownership_system_rag_tables__table_id__ownership_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/rag/fetch-metadata": {
         parameters: {
             query?: never;
@@ -776,6 +800,7 @@ export interface paths {
          *     零副作用:SHALL NOT 修改配置、SHALL NOT 落库、SHALL NOT 触发召回缓存
          *     失效(不走 ctx 缓存)。影子形态含"若生效将丢弃"记录。两个高频场景:
          *     上传表说明后验证可召回性;影子期标定阈值(不等真实流量)。
+         *     097:响应模型纯定型(键集=service 现值锁定,判定逻辑零变更)。
          */
         get: operations["recall_probe_system_rag_recall_probe_get"];
         put?: never;
@@ -1830,6 +1855,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/mcp/{server_id}/prompts/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Prompt
+         * @description 模板只读内容预览(109):按名实时拉取渲染结果,注入检测+大小上限;
+         *     禁止注入任何提示词、非运行时提示来源(spec「模板只读边界」)。
+         */
+        post: operations["preview_prompt_system_mcp__server_id__prompts_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mcp": {
         parameters: {
             query?: never;
@@ -2264,6 +2310,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/bots/{bot_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Bot Versions */
+        get: operations["list_bot_versions_system_bots__bot_id__versions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/bots/{bot_id}/versions/{version_no}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rollback Bot Version
+         * @description 回滚=历史版本重新指为当前上架版本(视同上架,按现行护栏重审;
+         *     BLOCK 拒绝指针不动;回滚到当前版本为幂等 no-op)。
+         */
+        post: operations["rollback_bot_version_system_bots__bot_id__versions__version_no__rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/store/bots": {
         parameters: {
             query?: never;
@@ -2488,6 +2572,48 @@ export interface paths {
          *     与租户清单同解耦原则)。
          */
         get: operations["list_bots_brief_billing_bots_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/billing/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Users Brief
+         * @description 103:USER 级策略配置面用户下拉(挂 MANAGE 自供,解耦 user:manage——
+         *     与 Bot 清单同解耦原则;软删用户不列)。
+         */
+        get: operations["list_users_brief_billing_users_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/billing/teams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Teams Brief
+         * @description 103:TEAM 级策略配置面团队下拉(挂 MANAGE 自供,解耦 team:manage——
+         *     与 Bot 清单同解耦原则)。
+         */
+        get: operations["list_teams_brief_billing_teams_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3171,6 +3297,97 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/connectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Connectors */
+        get: operations["list_connectors_system_connectors_get"];
+        put?: never;
+        /** Create Connector */
+        post: operations["create_connector_system_connectors_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/connectors/{connector_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Connector */
+        get: operations["get_connector_system_connectors__connector_id__get"];
+        /** Update Connector */
+        put: operations["update_connector_system_connectors__connector_id__put"];
+        post?: never;
+        /** Delete Connector */
+        delete: operations["delete_connector_system_connectors__connector_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/connectors/{connector_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable Connector */
+        post: operations["enable_connector_system_connectors__connector_id__enable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/connectors/{connector_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable Connector */
+        post: operations["disable_connector_system_connectors__connector_id__disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/connectors/test-call": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Call Connector
+         * @description 测试调用(按当前表单声明真实出站一次;显式确认在 UI 层;落工具审计)。
+         */
+        post: operations["test_call_connector_system_connectors_test_call_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -3317,6 +3534,8 @@ export interface components {
             datasource_key: string;
             /** Schema Name */
             schema_name: string;
+            /** Team Id */
+            team_id?: string | null;
         };
         /** BotBriefOut */
         BotBriefOut: {
@@ -3391,6 +3610,34 @@ export interface components {
             /** Created At */
             created_at: string;
         };
+        /**
+         * BotSnapshotOut
+         * @description 版本快照定型(读侧单源=StoreSnapshotFields 白名单)。
+         */
+        BotSnapshotOut: {
+            /** Name */
+            name: string;
+            /**
+             * Greeting
+             * @default
+             */
+            greeting: string;
+            /**
+             * Suggestions
+             * @default []
+             */
+            suggestions: string[];
+            /**
+             * System Prompt
+             * @default
+             */
+            system_prompt: string;
+            /**
+             * Tools
+             * @default []
+             */
+            tools: string[];
+        };
         /** BotUpdateIn */
         BotUpdateIn: {
             /** Name */
@@ -3407,6 +3654,19 @@ export interface components {
             enabled?: boolean | null;
             /** Is Public */
             is_public?: boolean | null;
+        };
+        /**
+         * BotVersionOut
+         * @description 版本历史项(104):版本号/上架时间/当前标识/快照内容。
+         */
+        BotVersionOut: {
+            /** Version No */
+            version_no: number;
+            /** Published At */
+            published_at: string;
+            /** Current */
+            current: boolean;
+            snapshot: components["schemas"]["BotSnapshotOut"];
         };
         /** CallbackIn */
         CallbackIn: {
@@ -3738,6 +3998,76 @@ export interface components {
              * @default
              */
             trace_id: string;
+        };
+        /** ConnectorIn */
+        ConnectorIn: {
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Method */
+            method: string;
+            /** Path Template */
+            path_template: string;
+            /**
+             * Params
+             * @default []
+             */
+            params: components["schemas"]["ParamDeclIn"][];
+            /** Allowed Hosts */
+            allowed_hosts: string[];
+            /** Auth Type */
+            auth_type: string;
+            /** Auth Secret */
+            auth_secret?: string | null;
+            /** Requires Confirmation */
+            requires_confirmation?: boolean | null;
+            /** Timeout Ms */
+            timeout_ms: number;
+        };
+        /**
+         * ConnectorOut
+         * @description 连接器条目(掩码面;凭证只出形态与尾号掩码,spec「凭证不回显」)。
+         */
+        ConnectorOut: {
+            /** Id */
+            id: string;
+            /** Tenant Id */
+            tenant_id: string;
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Method */
+            method: string;
+            /** Path Template */
+            path_template: string;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            }[];
+            /** Allowed Hosts */
+            allowed_hosts: string[];
+            /** Auth Type */
+            auth_type: string;
+            /** Has Secret */
+            has_secret: boolean;
+            /** Secret Mask */
+            secret_mask: string;
+            /** Requires Confirmation */
+            requires_confirmation: boolean;
+            /** Timeout Ms */
+            timeout_ms: number;
+            /** Enabled */
+            enabled: string;
+            /** Created At */
+            created_at?: unknown;
+            /** Updated At */
+            updated_at?: unknown;
         };
         /**
          * CostTrack
@@ -4437,6 +4767,10 @@ export interface components {
              * @default
              */
             alias: string;
+            /** Team Id */
+            team_id?: string | null;
+            /** Team Name */
+            team_name?: string | null;
         };
         /** KnowledgePageOut */
         KnowledgePageOut: {
@@ -4460,6 +4794,107 @@ export interface components {
         LogoutRequest: {
             /** Refresh Token */
             refresh_token: string;
+        };
+        /**
+         * McpPromptArgOut
+         * @description 模板参数声明(109)。
+         */
+        McpPromptArgOut: {
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Required
+             * @default false
+             */
+            required: boolean;
+        };
+        /**
+         * McpPromptEntryOut
+         * @description 提示模板清单条目(109;仅声明,渲染预览实时拉取)。
+         */
+        McpPromptEntryOut: {
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Arguments
+             * @default []
+             */
+            arguments: components["schemas"]["McpPromptArgOut"][];
+        };
+        /**
+         * McpPromptPreviewIn
+         * @description 模板预览入参(109;按名 + 渲染 arguments)。
+         */
+        McpPromptPreviewIn: {
+            /** Name */
+            name: string;
+            /**
+             * Arguments
+             * @default {}
+             */
+            arguments: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * McpPromptPreviewOut
+         * @description 模板预览出参(109):净化后渲染文本 + 检测/截断标注。
+         */
+        McpPromptPreviewOut: {
+            /** Ok */
+            ok: boolean;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /**
+             * Injection Hits
+             * @default []
+             */
+            injection_hits: string[];
+            /** Kind */
+            kind?: string | null;
+            /** Detail */
+            detail?: string | null;
+        };
+        /**
+         * McpResourceEntryOut
+         * @description 资源清单条目(109;快照面,白名单与详情展示同源)。
+         */
+        McpResourceEntryOut: {
+            /** Uri */
+            uri: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Media Type
+             * @default
+             */
+            media_type: string;
         };
         /** McpServerIn */
         McpServerIn: {
@@ -4499,6 +4934,16 @@ export interface components {
              * @default []
              */
             tools: components["schemas"]["McpToolEntryOut"][];
+            /**
+             * Resources
+             * @default []
+             */
+            resources: components["schemas"]["McpResourceEntryOut"][];
+            /**
+             * Prompts
+             * @default []
+             */
+            prompts: components["schemas"]["McpPromptEntryOut"][];
             /** Last Sync At */
             last_sync_at?: string | null;
             /**
@@ -4531,6 +4976,10 @@ export interface components {
             detail?: string | null;
             /** Tools */
             tools?: number | null;
+            /** Resources */
+            resources?: number | null;
+            /** Prompts */
+            prompts?: number | null;
             /** Conflicts */
             conflicts?: string[] | null;
         };
@@ -4544,6 +4993,10 @@ export interface components {
             detail?: string | null;
             /** Tools */
             tools?: number | null;
+            /** Resources */
+            resources?: number | null;
+            /** Prompts */
+            prompts?: number | null;
         };
         /**
          * McpToolEntryOut
@@ -4872,6 +5325,14 @@ export interface components {
             /** Trend */
             trend: components["schemas"]["TrendItemOut"][];
         };
+        /**
+         * OwnershipIn
+         * @description 102:归属变更请求(team_id 空=转公共;非空=转该团队专属)。
+         */
+        OwnershipIn: {
+            /** Team Id */
+            team_id?: string | null;
+        };
         /** PackCreateIn */
         PackCreateIn: {
             /** Pack Key */
@@ -4954,6 +5415,23 @@ export interface components {
             description: string;
             /** Status */
             status: string;
+        };
+        /** ParamDeclIn */
+        ParamDeclIn: {
+            /** Name */
+            name: string;
+            /** Type */
+            type: string;
+            /**
+             * Required
+             * @default false
+             */
+            required: boolean;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
         };
         /** PaymentOut */
         PaymentOut: {
@@ -5178,6 +5656,110 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /**
+         * ProbeExpansionOut
+         * @description 关系扩展明细(095):enabled=False 或零关系行时 tables 为空表。
+         */
+        ProbeExpansionOut: {
+            /** Enabled */
+            enabled: boolean;
+            /** Tables */
+            tables: components["schemas"]["ProbeExpansionTableOut"][];
+            /** Fused After */
+            fused_after: components["schemas"]["ProbeSchemaTableOut"][];
+        };
+        /**
+         * ProbeExpansionTableOut
+         * @description 补入的扩展表 + 经由关系。
+         */
+        ProbeExpansionTableOut: {
+            /** Schema Name */
+            schema_name: string;
+            /** Table Name */
+            table_name: string;
+            via: components["schemas"]["ProbeExpansionViaOut"];
+        };
+        /**
+         * ProbeExpansionViaOut
+         * @description 扩展经由的关系行(rag.table_relations 行投影)。
+         */
+        ProbeExpansionViaOut: {
+            /** Source Table */
+            source_table: string;
+            /** Target Table */
+            target_table: string;
+            /** Join Keys */
+            join_keys: {
+                [key: string]: string;
+            }[];
+            /** Source */
+            source: string;
+        };
+        /**
+         * ProbeFusedHitOut
+         * @description 融合序命中(RRF 融合分,只用于排序与观测,非相关度)。
+         */
+        ProbeFusedHitOut: {
+            /** Schema Name */
+            schema_name: string;
+            /** Table Name */
+            table_name: string;
+            /** Score */
+            score: number;
+        };
+        /**
+         * ProbeHitOut
+         * @description 单路命中项(score=该路原生分:向量路余弦相似度,全文路 ts_rank)。
+         */
+        ProbeHitOut: {
+            /** Schema Name */
+            schema_name: string;
+            /** Table Name */
+            table_name: string;
+            /** Score */
+            score: number;
+            /** Source */
+            source: string;
+        };
+        /**
+         * ProbeRouteOut
+         * @description 单路(向量/全文)投影:命中明细 + 判定结论 + 被裁命中数。
+         *
+         *     dropped>0 = 该路不过闸整路被裁(恒裁剪形态,命中共进退)。
+         */
+        ProbeRouteOut: {
+            /** Hits */
+            hits: components["schemas"]["ProbeHitOut"][];
+            verdict?: components["schemas"]["ProbeVerdictOut"] | null;
+            /** Dropped */
+            dropped: number;
+        };
+        /**
+         * ProbeSchemaTableOut
+         * @description 两段限定名(扩展后融合集合项)。
+         */
+        ProbeSchemaTableOut: {
+            /** Schema Name */
+            schema_name: string;
+            /** Table Name */
+            table_name: string;
+        };
+        /**
+         * ProbeVerdictOut
+         * @description 闸门判定结论(gate.GateVerdict.as_dict 投影:判定归因与分值观测)。
+         */
+        ProbeVerdictOut: {
+            /** Passed */
+            passed: boolean;
+            /** Reason */
+            reason: string;
+            /** Top1 */
+            top1: number;
+            /** Mean Top N */
+            mean_top_n: number;
+            /** Count */
+            count: number;
+        };
         /** ProgressIn */
         ProgressIn: {
             /** Report Id */
@@ -5335,6 +5917,21 @@ export interface components {
         RatingIn: {
             /** Score */
             score: number;
+        };
+        /**
+         * RecallProbeOut
+         * @description 064 召回试跑响应(只读验证面;键集=service.recall_probe 现值锁定)。
+         */
+        RecallProbeOut: {
+            /** Question */
+            question: string;
+            /** Gate Skipped */
+            gate_skipped?: string | null;
+            expansion: components["schemas"]["ProbeExpansionOut"];
+            vector: components["schemas"]["ProbeRouteOut"];
+            fulltext: components["schemas"]["ProbeRouteOut"];
+            /** Fused */
+            fused: components["schemas"]["ProbeFusedHitOut"][];
         };
         /** ReconcileOut */
         ReconcileOut: {
@@ -5501,6 +6098,8 @@ export interface components {
             question: string;
             /** History */
             history?: string[];
+            /** User Id */
+            user_id?: string | null;
         };
         /** RetrieveOut */
         RetrieveOut: {
@@ -5953,6 +6552,10 @@ export interface components {
             tools: string[];
             /** My Rating */
             my_rating?: number | null;
+            /** Version No */
+            version_no?: number | null;
+            /** Version Published At */
+            version_published_at?: string | null;
         };
         /**
          * StoreBotOut
@@ -6182,6 +6785,15 @@ export interface components {
             /** Steps */
             steps: components["schemas"]["PlanStepIn"][];
         };
+        /** TeamBriefOut */
+        TeamBriefOut: {
+            /** Id */
+            id: string;
+            /** Team Key */
+            team_key: string;
+            /** Name */
+            name: string;
+        };
         /** TeamDetailOut */
         TeamDetailOut: {
             team: components["schemas"]["TeamOut"];
@@ -6207,6 +6819,8 @@ export interface components {
         /**
          * TeamOut
          * @description 032 团队条目(审查循环 D-F2:契约化——曾裸 dict 使前端只能手写类型)。
+         *     102 纯增可选 role:「我所在的团队」形态附带本人角色(OWNER/MEMBER 可写、
+         *     VIEWER 只读,供知识库上传归属候选筛选);manage 面全量列表无此列=None。
          */
         TeamOut: {
             /** Id */
@@ -6217,6 +6831,8 @@ export interface components {
             name: string;
             /** Created At */
             created_at?: string | null;
+            /** Role */
+            role?: string | null;
         };
         /** TeamRenameIn */
         TeamRenameIn: {
@@ -6247,6 +6863,66 @@ export interface components {
             tenant_key: string;
             /** Tenant Name */
             tenant_name: string;
+        };
+        /**
+         * TestCallIn
+         * @description 测试调用入参:当前表单声明 + 可选示例入参;use_saved_secret=True 且
+         *     材料留空时用存量凭证(编辑态先测后存的空框语义)。
+         */
+        TestCallIn: {
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Method */
+            method: string;
+            /** Path Template */
+            path_template: string;
+            /**
+             * Params
+             * @default []
+             */
+            params: components["schemas"]["ParamDeclIn"][];
+            /** Allowed Hosts */
+            allowed_hosts: string[];
+            /** Auth Type */
+            auth_type: string;
+            /** Auth Secret */
+            auth_secret?: string | null;
+            /** Requires Confirmation */
+            requires_confirmation?: boolean | null;
+            /** Timeout Ms */
+            timeout_ms: number;
+            /**
+             * Args
+             * @default {}
+             */
+            args: {
+                [key: string]: unknown;
+            };
+            /**
+             * Use Saved Secret
+             * @default false
+             */
+            use_saved_secret: boolean;
+        };
+        /** TestCallOut */
+        TestCallOut: {
+            /** Ok */
+            ok: boolean;
+            /** Status Code */
+            status_code?: number | null;
+            /**
+             * Body Summary
+             * @default
+             */
+            body_summary: string;
+            /** Failure */
+            failure?: string | null;
+            /** Duration Ms */
+            duration_ms: number;
         };
         /** TestConnectionIn */
         TestConnectionIn: {
@@ -6517,6 +7193,46 @@ export interface components {
              * @default
              */
             secret: string;
+            /**
+             * Max Retries
+             * @default 0
+             */
+            max_retries: number;
+            /**
+             * Imap Host
+             * @default
+             */
+            imap_host: string;
+            /**
+             * Imap Port
+             * @default 993
+             */
+            imap_port: number;
+            /**
+             * Imap Tls
+             * @default true
+             */
+            imap_tls: boolean;
+            /**
+             * Imap User
+             * @default
+             */
+            imap_user: string;
+            /**
+             * Imap Password
+             * @default
+             */
+            imap_password: string;
+            /**
+             * Imap Folder
+             * @default INBOX
+             */
+            imap_folder: string;
+            /**
+             * Imap Poll Interval Sec
+             * @default 300
+             */
+            imap_poll_interval_sec: number;
         };
         /**
          * TriggerOut
@@ -6556,6 +7272,46 @@ export interface components {
             last_fired_at?: string | null;
             /** Next Fire At */
             next_fire_at?: string | null;
+            /**
+             * Max Retries
+             * @default 0
+             */
+            max_retries: number;
+            /**
+             * Imap Host
+             * @default
+             */
+            imap_host: string;
+            /**
+             * Imap Port
+             * @default 993
+             */
+            imap_port: number;
+            /**
+             * Imap Tls
+             * @default true
+             */
+            imap_tls: boolean;
+            /**
+             * Imap User
+             * @default
+             */
+            imap_user: string;
+            /**
+             * Imap Folder
+             * @default INBOX
+             */
+            imap_folder: string;
+            /**
+             * Imap Poll Interval Sec
+             * @default 300
+             */
+            imap_poll_interval_sec: number;
+            /**
+             * Has Imap Credential
+             * @default false
+             */
+            has_imap_credential: boolean;
         };
         /** TriggerRunOut */
         TriggerRunOut: {
@@ -6571,6 +7327,20 @@ export interface components {
             target_run_ref?: string | null;
             /** Created At */
             created_at?: string | null;
+            /**
+             * Attempt
+             * @default 1
+             */
+            attempt: number;
+            /** Retry Of Run Id */
+            retry_of_run_id?: string | null;
+            /** Next Retry At */
+            next_retry_at?: string | null;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
         };
         /** TriggerRunsPageOut */
         TriggerRunsPageOut: {
@@ -6609,6 +7379,46 @@ export interface components {
              * @default
              */
             secret: string;
+            /**
+             * Max Retries
+             * @default 0
+             */
+            max_retries: number;
+            /**
+             * Imap Host
+             * @default
+             */
+            imap_host: string;
+            /**
+             * Imap Port
+             * @default 993
+             */
+            imap_port: number;
+            /**
+             * Imap Tls
+             * @default true
+             */
+            imap_tls: boolean;
+            /**
+             * Imap User
+             * @default
+             */
+            imap_user: string;
+            /**
+             * Imap Password
+             * @default
+             */
+            imap_password: string;
+            /**
+             * Imap Folder
+             * @default INBOX
+             */
+            imap_folder: string;
+            /**
+             * Imap Poll Interval Sec
+             * @default 300
+             */
+            imap_poll_interval_sec: number;
         };
         /** UploadOut */
         UploadOut: {
@@ -6750,6 +7560,15 @@ export interface components {
             calls_error: number;
             /** Total Tokens */
             total_tokens: number;
+        };
+        /** UserBriefOut */
+        UserBriefOut: {
+            /** Id */
+            id: string;
+            /** Username */
+            username: string;
+            /** Nickname */
+            nickname: string;
         };
         /** UserCreateIn */
         UserCreateIn: {
@@ -8489,6 +9308,7 @@ export interface operations {
         parameters: {
             query?: {
                 datasource_key?: string | null;
+                team_scope?: string;
                 page?: number;
                 size?: number;
             };
@@ -8576,6 +9396,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_table_ownership_system_rag_tables__table_id__ownership_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                table_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OwnershipIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeItemOut"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -8711,9 +9568,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RecallProbeOut"];
                 };
             };
             /** @description Validation Error */
@@ -11037,6 +11892,43 @@ export interface operations {
             };
         };
     };
+    preview_prompt_system_mcp__server_id__prompts_preview_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpPromptPreviewIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpPromptPreviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     mcp_endpoint_mcp_post: {
         parameters: {
             query?: never;
@@ -12172,6 +13064,75 @@ export interface operations {
             };
         };
     };
+    list_bot_versions_system_bots__bot_id__versions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                bot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotVersionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rollback_bot_version_system_bots__bot_id__versions__version_no__rollback_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                bot_id: string;
+                version_no: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     store_list_store_bots_get: {
         parameters: {
             query?: {
@@ -12680,6 +13641,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BotBriefOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_users_brief_billing_users_get: {
+        parameters: {
+            query: {
+                tenant_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserBriefOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_teams_brief_billing_teams_get: {
+        parameters: {
+            query: {
+                tenant_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamBriefOut"][];
                 };
             };
             /** @description Validation Error */
@@ -14097,6 +15120,270 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_connectors_system_connectors_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_connector_system_connectors_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectorIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_connector_system_connectors__connector_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_connector_system_connectors__connector_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectorIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_connector_system_connectors__connector_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enable_connector_system_connectors__connector_id__enable_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_connector_system_connectors__connector_id__disable_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_call_connector_system_connectors_test_call_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestCallIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestCallOut"];
                 };
             };
             /** @description Validation Error */

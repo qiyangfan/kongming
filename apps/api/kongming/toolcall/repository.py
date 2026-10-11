@@ -170,21 +170,31 @@ class SqlToolCallRepo:
         )
 
     async def mark_status(
-        self, confirm_id: str, status: str, *, clear_reason: bool = False
+        self,
+        confirm_id: str,
+        status: str,
+        *,
+        clear_reason: bool = False,
+        args_digest: str | None = None,
     ) -> None:
         """状态推进;clear_reason=True 时清空挂起期 error_reason(R1-S3:
         确认成功后 EXECUTED 行不残留「需用户确认」文案)。
 
         审查循环 F3:确认终态推进时同步清空 args_json——重放已完成,原文
-        (可能含 MCP 动态工具的凭证参数)无保留必要,不留 DB/备份侧泄露面。"""
+        (可能含 MCP 动态工具的凭证参数)无保留必要,不留 DB/备份侧泄露面。
+
+        100:args_digest 非空时覆写参数摘要——域执行 handler 把创建结果
+        (目标工单标识)回填入参后,确认终态行摘要携带执行结果(spec
+        「创建结果回填」);None=不触碰(既有调用方零漂移)。"""
         await self._s.execute(
             text(
                 "UPDATE public.sys_tool_audit SET status = :st,"
                 " error_reason = CASE WHEN :clr THEN NULL ELSE error_reason END,"
-                " args_json = NULL"
+                " args_json = NULL,"
+                " args_digest = COALESCE(:dg, args_digest)"
                 " WHERE id = :i"
             ),
-            {"st": status, "clr": clear_reason, "i": confirm_id},
+            {"st": status, "clr": clear_reason, "i": confirm_id, "dg": args_digest},
         )
 
     async def find_announcement(self, *, tenant_id: str, idempotency_key: str) -> str | None:

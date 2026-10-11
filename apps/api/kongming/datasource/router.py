@@ -307,9 +307,9 @@ class _SemanticCleanerAdapter:
         # 024:文档同域级联(chunks 经 FK CASCADE 随 documents 清)
         from kongming.rag.documents_repo import SqlDocumentRepo
 
-        await SqlDocumentRepo(self._session).delete_by_datasource(
-            tenant_id=tenant_id, datasource_key=datasource_key
-        )
+        await SqlDocumentRepo(
+            self._session, ts_config=get_settings().rag_fulltext_ts_config
+        ).delete_by_datasource(tenant_id=tenant_id, datasource_key=datasource_key)
 
 
 class _SuggestionEvictor:

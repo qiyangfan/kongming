@@ -27,7 +27,21 @@ FAILURE_PROTOCOL_PREFIX = "protocol:"
 
 # 工具名 → 域标识单源(审计域标签与域配额闸共用;089 仅 knowledge 收编)。
 # 放 models(零依赖数据),避免 toolcall.service 传递性引入 httpx(审查 P2)。
-DOMAIN_TOOLS: dict[str, str] = {"knowledge_search": "knowledge", "web_search": "websearch"}
+DOMAIN_TOOLS: dict[str, str] = {
+    "knowledge_search": "knowledge",
+    "web_search": "websearch",
+    # 100 internal-connector-domain:工单三工具同域(读写分权在权限点层,
+    # 域标签/配额桶/治理启停均按域粒度)
+    "ticket_search": "ticket",
+    "ticket_get": "ticket",
+    "ticket_create": "ticket",
+}
+
+# 099 http-connector-domain:连接器域单源(域标签/配额桶/审计共用;连接器
+# 工具名为租户行派生的动态形态 http__<key>,与 MCP mcp__<server>__<tool>
+# 同构的下划线口径——LLM 函数名兼容字符集禁冒号)。
+CONNECTOR_DOMAIN = "http"
+CONNECTOR_TOOL_PREFIX = "http__"
 
 
 @dataclass(frozen=True)
@@ -45,6 +59,14 @@ WEBSEARCH_COUNT_MIN = 1
 WEBSEARCH_COUNT_MAX = 10
 WEBSEARCH_COUNT_DEFAULT = 5
 
+# 100 ticket 域参数边界单源(注册表 schema 与域策略器/分发缺省共引,同上口径;
+# 「最小工单 API 约定」单源在 scripts/mock_ticket_server.py 文件头)
+TICKET_QUERY_MAX_LEN = 200
+TICKET_STATUS_MAX_LEN = 32
+TICKET_LIMIT_MIN = 1
+TICKET_LIMIT_MAX = 50
+TICKET_LIMIT_DEFAULT = 10
+
 # 094 websearch 域:首发供应商注册表(纯数据,config/registry 零 httpx 传递)。
 # 端点由供应商单源派生,部署不可单独改端点(防白名单外端点的组合攻击面)。
 WEBSEARCH_PROVIDERS: dict[str, SearchProvider] = {
@@ -56,6 +78,20 @@ WEBSEARCH_PROVIDERS: dict[str, SearchProvider] = {
     # 契约按官方 docs.bigmodel.cn「网络搜索」API 核对于 2026-10-11)
     "zhipu": SearchProvider(
         endpoint="https://open.bigmodel.cn/api/paas/v4/web_search", host="open.bigmodel.cn"
+    ),
+    # 阿里云 AI 搜索开放平台联网搜索(归 OpenSearch 品牌线,实为联网搜索 API
+    # 而非自建索引引擎;契约按官方帮助文档核对于 2026-10-11,105):POST
+    # {host}/v3/openapi/workspaces/{workspace_name}/web-search/{service_id},
+    # 内置服务 ops-web-search-001 + default 空间;鉴权 Bearer 独立 OS- key
+    # (与百炼 sk- 不通用)。host 为账号级实例域名(控制台 API Keys 页查看,
+    # 形如 xxx.platform-<region>.opensearch.aliyuncs.com),下为文档缺省形态
+    # 占位——e2e 接 key 时按控制台实际域名回填本条 endpoint/host 单源。
+    "alibaba_ai_search": SearchProvider(
+        endpoint=(
+            "https://platform-cn-shanghai.opensearch.aliyuncs.com"
+            "/v3/openapi/workspaces/default/web-search/ops-web-search-001"
+        ),
+        host="platform-cn-shanghai.opensearch.aliyuncs.com",
     ),
 }
 
@@ -86,6 +122,31 @@ class DomainSpec:
 
 def _endpoint_host(url: str) -> str:
     return (urlsplit(url).hostname or "").lower()
+
+
+def endpoint_host(url: str) -> str:
+    """端点主机提取(公开薄壳:组合根由部署端点单源派生出口白名单时共用;
+    与 _endpoint_host 同一实现,防白名单派生第二套口径)。"""
+    return _endpoint_host(url)
+
+
+def parse_ticket_endpoint(base: str) -> str | None:
+    """100:KM_TICKET_BASE_URL → 约定根端点(纯函数,注册条件与网关清单声明
+    共用单源;放 models 零依赖数据,防 toolcall.registry 传递性引入 httpx)。
+    非 http(s)/无主机/带 query 或 fragment → None(注册条件不满足);
+    合法 → 去尾部斜杠归一(执行器在其上拼 /tickets 约定路径)。"""
+    text = (base or "").strip()
+    if not text:
+        return None
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return None
+    if parts.query or parts.fragment:
+        return None
+    return text.rstrip("/")
 
 
 def load_manifest(raw: list[dict[str, object]]) -> tuple[dict[str, DomainSpec], list[str]]:

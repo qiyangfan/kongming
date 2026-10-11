@@ -218,6 +218,89 @@ class SqlBillingRepo:
         )
         return [dict(r) for r in rows]
 
+    async def user_exists_in_tenant(self, *, user_id: str, tenant_id: str) -> bool:
+        """USER 级策略 scope_ref 复校(103):用户存在(未软删)且绑定该租户
+        才合法(跨租户/不存在 404)。"""
+        return (
+            await self._s.execute(
+                text(
+                    "SELECT 1 FROM public.sys_user u"
+                    " JOIN public.sys_user_tenant ut ON ut.user_id=u.id"
+                    " WHERE u.id=CAST(:u AS uuid) AND ut.tenant_id=CAST(:t AS uuid)"
+                    " AND u.deleted_at IS NULL"
+                ),
+                {"u": user_id, "t": tenant_id},
+            )
+        ).scalar_one_or_none() is not None
+
+    async def list_users_brief(self, *, tenant_id: str) -> list[dict[str, Any]]:
+        """USER 级策略配置面用户下拉(103):本租户用户简列(挂 MANAGE 自供,
+        解耦 user:manage——与 list_bots_brief 同解耦原则;软删不列)。"""
+        rows = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT u.id, u.username, u.nickname FROM public.sys_user u"
+                        " JOIN public.sys_user_tenant ut ON ut.user_id=u.id"
+                        " WHERE ut.tenant_id=CAST(:t AS uuid) AND u.deleted_at IS NULL"
+                        " ORDER BY u.username"
+                    ),
+                    {"t": tenant_id},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return [dict(r) for r in rows]
+
+    async def team_exists_in_tenant(self, *, team_id: str, tenant_id: str) -> bool:
+        """TEAM 级策略 scope_ref 复校(103):团队属该租户才合法(跨租户 404)。"""
+        return (
+            await self._s.execute(
+                text(
+                    "SELECT 1 FROM public.sys_team"
+                    " WHERE id=CAST(:i AS uuid) AND tenant_id=CAST(:t AS uuid)"
+                ),
+                {"i": team_id, "t": tenant_id},
+            )
+        ).scalar_one_or_none() is not None
+
+    async def list_teams_brief(self, *, tenant_id: str) -> list[dict[str, Any]]:
+        """TEAM 级策略配置面团队下拉(103):本租户团队简列(挂 MANAGE 自供,
+        解耦 team:manage——与 list_bots_brief 同解耦原则)。"""
+        rows = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, team_key, name FROM public.sys_team"
+                        " WHERE tenant_id=CAST(:t AS uuid) ORDER BY team_key"
+                    ),
+                    {"t": tenant_id},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return [dict(r) for r in rows]
+
+    async def bot_scope_info(self, *, bot_id: str, tenant_id: str) -> dict[str, Any] | None:
+        """网关判定归属解析(103):Bot 的 created_by(USER 级命中)与
+        team_id(TEAM 级命中)一次点查;Bot 不在该租户返回 None(防御)。"""
+        row = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT created_by, team_id FROM public.sys_bot_definition"
+                        " WHERE id=CAST(:b AS uuid) AND tenant_id=CAST(:t AS uuid)"
+                    ),
+                    {"b": bot_id, "t": tenant_id},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row else None
+
     async def get_tenant_plan(self, *, tenant_id: str) -> dict[str, Any] | None:
         row = (
             (
@@ -290,6 +373,56 @@ class SqlBillingRepo:
                         "        'YYYY-MM') = :m"
                     ),
                     {"t": tenant_id, "b": bot_id, "m": month},
+                )
+            ).scalar_one()
+        )
+
+    async def month_user_token_usage(self, *, tenant_id: str, user_id: str, month: str) -> int:
+        """当月单用户 token 合计(103 USER 级配额):用量行经 Bot 归属联表
+        解析(usage.bot_id → bot.created_by);用户被软删后聚合归零
+        (策略保留但零命中,不级联)。"""
+        return int(
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT COALESCE(SUM(u.prompt_tokens + u.completion_tokens), 0)"
+                        " FROM public.sys_llm_usage u"
+                        " JOIN public.sys_bot_definition b ON b.id = u.bot_id"
+                        " JOIN public.sys_user su ON su.id = b.created_by"
+                        " WHERE u.tenant_id=CAST(:t AS uuid)"
+                        " AND b.tenant_id=CAST(:t AS uuid)"
+                        " AND b.created_by=CAST(:usr AS uuid)"
+                        " AND su.deleted_at IS NULL"
+                        " AND to_char(u.created_at AT TIME ZONE 'Asia/Shanghai',"
+                        "        'YYYY-MM') = :m"
+                    ),
+                    {"t": tenant_id, "usr": user_id, "m": month},
+                )
+            ).scalar_one()
+        )
+
+    async def month_team_token_usage(self, *, tenant_id: str, team_id: str, month: str) -> int:
+        """当月单团队 token 合计(103 TEAM 级配额):用量行经资源归属联表
+        解析(usage.bot_id → bot.team_id,零用量表 schema 变更);资源换队
+        跟随现归属(联表即定义,当月治理窗口语义);团队被删除后聚合归零
+        (策略保留但零命中,不级联)。"""
+        return int(
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT COALESCE(SUM(u.prompt_tokens + u.completion_tokens), 0)"
+                        " FROM public.sys_llm_usage u"
+                        " JOIN public.sys_bot_definition b ON b.id = u.bot_id"
+                        " WHERE u.tenant_id=CAST(:t AS uuid)"
+                        " AND b.tenant_id=CAST(:t AS uuid)"
+                        " AND b.team_id=CAST(:tm AS uuid)"
+                        " AND EXISTS (SELECT 1 FROM public.sys_team tm"
+                        "             WHERE tm.id=CAST(:tm AS uuid)"
+                        "             AND tm.tenant_id=CAST(:t AS uuid))"
+                        " AND to_char(u.created_at AT TIME ZONE 'Asia/Shanghai',"
+                        "        'YYYY-MM') = :m"
+                    ),
+                    {"t": tenant_id, "tm": team_id, "m": month},
                 )
             ).scalar_one()
         )

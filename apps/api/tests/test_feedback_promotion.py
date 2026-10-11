@@ -441,8 +441,14 @@ async def test_promotion_failure_503_no_partial(
 
     orig_init = fb_router._FeedbackSampleGate.__init__
 
-    def _boom_init(self: object, repo: object, embedder: object, rag: object) -> None:
-        orig_init(self, repo, _BoomEmbedder(), rag)  # type: ignore[arg-type]
+    def _boom_init(
+        self: object,
+        repo: object,
+        embedder: object,
+        rag: object,
+        **kwargs: object,
+    ) -> None:
+        orig_init(self, repo, _BoomEmbedder(), rag, **kwargs)  # type: ignore[arg-type]
 
     class _BoomEmbedder:
         async def embed(self, texts: list[str]) -> list[list[float]]:

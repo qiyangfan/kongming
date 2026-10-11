@@ -319,7 +319,12 @@ class _StubRepo:
         return True
 
     async def recall_fulltext(
-        self, *, tenant_id: str, datasource_key: str, question: str
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        question: str,
+        visible_team_ids: list[str] | None = None,  # 102:协议扩展桩须同步
     ) -> list[Any]:
         from kongming.rag.models import RecallHit
 
@@ -330,7 +335,12 @@ class _StubRepo:
         ]
 
     async def fetch_entries(
-        self, *, tenant_id: str, datasource_key: str, keys: list[tuple[str, str]]
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        keys: list[tuple[str, str]],
+        visible_team_ids: list[str] | None = None,  # 102:协议扩展桩须同步
     ) -> list[Any]:
         from kongming.rag.models import KnowledgeEntry
 

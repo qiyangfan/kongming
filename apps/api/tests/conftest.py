@@ -106,11 +106,13 @@ TRUNCATED = (
     "public.sys_workflow_def",
     "public.sys_attachment",
     "public.sys_trigger_run",
+    "public.sys_trigger_email_cursor",
     "public.sys_trigger_definition",
     "public.sys_team_member",
     "public.sys_team",
     "public.sys_bot_favorite",
     "public.sys_bot_rating",
+    "public.sys_bot_version",
     "public.sys_invoice",
     "public.sys_billing_plan",
     "public.sys_quota_policy",
@@ -119,6 +121,7 @@ TRUNCATED = (
     "public.sys_agent_collab_run",
     "public.sys_agent_task_step",
     "public.sys_agent_task",
+    "public.tool_http_connectors",
 )
 
 

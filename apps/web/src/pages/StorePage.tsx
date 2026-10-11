@@ -238,6 +238,15 @@ export default function StorePage() {
                     <Badge variant="secondary">我评 {detail.data.my_rating} 星</Badge>
                   )}
                 </div>
+                {/* 104:当前上架版本号与上架时间(纯增字段;商店语义=消费该版本快照) */}
+                {detail.data.version_no !== null && detail.data.version_no !== undefined && (
+                  <p className="text-xs text-muted-foreground">
+                    上架版本 v{detail.data.version_no}
+                    {detail.data.version_published_at
+                      ? ` · ${new Date(detail.data.version_published_at).toLocaleString()} 上架`
+                      : ""}
+                  </p>
+                )}
                 {(detail.data.tools ?? []).length > 0 && (
                   <div className="flex flex-wrap gap-1">
                     {detail.data.tools.map((t) => (

@@ -1,4 +1,4 @@
-/* mcp 域 API 封装(028)。类型契约由 ADR-005 管线生成(禁手写)。 */
+/* mcp 域 API 封装(028;109 扩展资源/模板原语)。类型契约由 ADR-005 管线生成(禁手写)。 */
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";
@@ -6,6 +6,9 @@ import { api } from "./api";
 export type McpServerOut = components["schemas"]["McpServerOut"];
 export type McpTestOut = components["schemas"]["McpTestOut"];
 export type McpSyncOut = components["schemas"]["McpSyncOut"];
+export type McpResourceEntryOut = components["schemas"]["McpResourceEntryOut"];
+export type McpPromptEntryOut = components["schemas"]["McpPromptEntryOut"];
+export type McpPromptPreviewOut = components["schemas"]["McpPromptPreviewOut"];
 
 export function listMcpServers(): Promise<McpServerOut[]> {
   return api.get<McpServerOut[]>("/system/mcp");
@@ -41,4 +44,12 @@ export function testMcpServer(id: string): Promise<McpTestOut> {
 
 export function syncMcpServer(id: string): Promise<McpSyncOut> {
   return api.post<McpSyncOut>(`/system/mcp/${id}/sync`, {});
+}
+
+/** 模板按名实时拉取只读预览(109;渲染结果,服务端已过注入检测+大小上限)。 */
+export function previewMcpPrompt(
+  id: string,
+  body: { name: string; arguments: Record<string, string> },
+): Promise<McpPromptPreviewOut> {
+  return api.post<McpPromptPreviewOut>(`/system/mcp/${id}/prompts/preview`, body);
 }

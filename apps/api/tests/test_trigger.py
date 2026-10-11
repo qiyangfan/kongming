@@ -109,9 +109,31 @@ class _StubService:
         self.skipped: list[str] = []
         self.failed: list[str] = []
         self.marked: list[tuple[str, str | None]] = []
+        # 101:重试扫描面(缺省无挂起行;专项断言见 test_trigger_retry.py)
+        self.retried: list[str] = []
+        self.deferred: list[str] = []
 
     async def list_due(self, *, now_iso: str) -> list[dict[str, Any]]:
         return self._rows
+
+    async def list_due_retries(self, *, now_iso: str) -> list[dict[str, Any]]:
+        return []
+
+    async def fire_retry(self, *, run_id: str) -> None:
+        self.retried.append(run_id)
+
+    async def defer_retry(self, *, run_id: str) -> None:
+        self.deferred.append(run_id)
+
+    # 108:邮件轮询扫描面(缺省无到期邮件触发器;专项断言见 test_trigger_email.py)
+    async def list_due_emails(self, *, now_iso: str) -> list[dict[str, Any]]:
+        return []
+
+    async def poll_email(self, *, trigger_id: str) -> None:
+        return None
+
+    async def mark_email_polled(self, *, trigger_id: str, interval_sec: int) -> None:
+        return None
 
     async def fire_cron(self, *, trigger_id: str) -> None:
         self.fired.append(trigger_id)

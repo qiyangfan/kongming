@@ -322,6 +322,16 @@ source_modules = [
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
+[[tool.importlinter.contracts]]
+name = "connector 领域模型/用例/端口不依赖框架(099,宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = [
+    "kongming.connector.models",
+    "kongming.connector.service",
+    "kongming.connector.ports",
+]
+forbidden_modules = ["fastapi", "sqlalchemy", "httpx"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

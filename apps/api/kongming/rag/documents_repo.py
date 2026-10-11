@@ -5,13 +5,18 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kongming.config import DEFAULT_FULLTEXT_TS_CONFIG, validated_fulltext_ts_config
 from kongming.db import uuid7
 from kongming.rag.repository import vec_literal
 
 
 class SqlDocumentRepo:
-    def __init__(self, s: AsyncSession) -> None:
+    def __init__(self, s: AsyncSession, ts_config: str = DEFAULT_FULLTEXT_TS_CONFIG) -> None:
         self._s = s
+        # 098:全文分词配置(白名单校验 fail-fast,组合根注入部署值;缺省 simple
+        # 零回归)。文档写入(replace_document tsv)与检索(recall_children_fulltext)
+        # 共用同一注入值,与 rag 表说明路同配置单源——同库不分词两态
+        self._ts = validated_fulltext_ts_config(ts_config)
 
     async def commit(self) -> None:
         await self._s.commit()
@@ -85,11 +90,13 @@ class SqlDocumentRepo:
             parent_seq = c["parent_seq"]
             await self._s.execute(
                 text(
-                    "INSERT INTO rag.document_chunks"
+                    # S608 豁免:{self._ts} 为白名单校验后的配置名(098 design
+                    # D2/D5,标识符无法绑定参数),其余全部绑定参数
+                    "INSERT INTO rag.document_chunks"  # noqa: S608
                     " (id, document_id, tenant_id, datasource_key, chunk_level,"
                     "  parent_id, seq, source_ref, content, tsv, embedding)"
                     " VALUES (:i, :doc, :t, :d, :lv, :pid, :seq, :ref, :content,"
-                    "  to_tsvector('simple', :content), CAST(:vec AS vector))"
+                    f"  to_tsvector('{self._ts}', :content), CAST(:vec AS vector))"
                 ),
                 {
                     "i": seq_to_id[int(str(c["seq"]))],
@@ -186,11 +193,14 @@ class SqlDocumentRepo:
             (
                 await self._s.execute(
                     text(
-                        "SELECT id, parent_id, source_ref FROM rag.document_chunks"
+                        # S608 豁免:{self._ts} 为白名单校验后的配置名(098 design
+                        # D2/D5,标识符无法绑定参数),其余全部绑定参数
+                        "SELECT id, parent_id, source_ref FROM rag.document_chunks"  # noqa: S608
                         " WHERE tenant_id=:t AND datasource_key=:d AND chunk_level='CHILD'"
-                        "   AND tsv @@ plainto_tsquery('simple', :q)"
-                        # R1-M3:相关度排序(009 同款,此前 LIMIT 取任意行)
-                        " ORDER BY ts_rank(tsv, plainto_tsquery('simple', :q)) DESC"
+                        f"   AND tsv @@ plainto_tsquery('{self._ts}', :q)"
+                        # R1-M3:相关度排序(009 同款,此前 LIMIT 取任意行);
+                        # 分词配置与写入侧同源(self._ts 单点注入,098)
+                        f" ORDER BY ts_rank(tsv, plainto_tsquery('{self._ts}', :q)) DESC"
                         " LIMIT :k"
                     ),
                     {"t": tenant_id, "d": datasource_key, "q": question, "k": top_k},

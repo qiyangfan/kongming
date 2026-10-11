@@ -127,6 +127,7 @@ class FeedbackSampleGate(Protocol):
     embedding 不可用 SHALL 抛 PromotionUnavailable——调用方收敛 503,
     与反馈处置同事务,无部分提交);disable:暂停召回(非 ADOPTED/重复
     提交的旧样本;行保留作来源审计,不删)。
+    102 伴生:caller_user_id=反馈发起者(样本可见集合归属主体;缺省=公共)。
     """
 
     async def promote(
@@ -137,6 +138,7 @@ class FeedbackSampleGate(Protocol):
         question: str,
         sql_text: str,
         feedback_message_id: str,
+        caller_user_id: str | None = None,
     ) -> None: ...
 
     async def disable(self, *, feedback_message_id: str) -> None: ...

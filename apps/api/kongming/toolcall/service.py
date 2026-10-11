@@ -26,7 +26,9 @@ from sqlglot.errors import SqlglotError
 from kongming.sqlfw.firewall import check as sql_check
 from kongming.toolcall.models import (
     ConfirmNotFound,
+    ConnectorError,
     KnowledgeSourceError,
+    TicketError,
     ToolAuditEntry,
     ToolDef,
     ToolOutcome,
@@ -37,6 +39,7 @@ from kongming.toolcall.models import (
 from kongming.toolcall.ports import (
     AuditWriter,
     ConfirmReplyStore,
+    ConnectorToolGate,
     DynamicToolResolver,
     IntentReviewer,
     KnowledgeSearchPort,
@@ -46,13 +49,17 @@ from kongming.toolcall.ports import (
     RateLimiter,
     SandboxExecutor,
     SqlExecutor,
+    TicketPort,
     ToolRepo,
     WebSearchPort,
 )
 from kongming.toolcall.registry import effective, get_tool
 from kongming.toolgateway.models import (
+    CONNECTOR_DOMAIN,
+    CONNECTOR_TOOL_PREFIX,
     DOMAIN_TOOLS,
     FAILURE_UNDELIVERED_PREFIX,
+    TICKET_LIMIT_DEFAULT,
     WEBSEARCH_COUNT_DEFAULT,
 )
 
@@ -188,6 +195,10 @@ class ToolCallService:
         knowledge_quota: int | None = None,  # 089:域配额(第二维度;None=不限)
         websearch: WebSearchPort | None = None,  # 094:联网检索(未注入=工具未注册)
         websearch_quota: int | None = None,  # 094:websearch 域配额(与 knowledge 分桶)
+        ticket: TicketPort | None = None,  # 100:内部工单(未注入=工具未注册)
+        ticket_quota: int | None = None,  # 100:ticket 域配额(独立分桶)
+        connector: ConnectorToolGate | None = None,  # 099:HTTP 连接器(未注入=不可用)
+        connector_quota: int | None = None,  # 099:http 连接器域配额(独立分桶)
         *,
         rate_limit_per_minute: int,
         confirm_ttl_minutes: int,
@@ -205,11 +216,15 @@ class ToolCallService:
         self._mcp = mcp_caller
         self._knowledge = knowledge
         self._websearch = websearch
+        self._ticket = ticket
+        self._connector = connector
         # 094:域配额按域分桶(单一配置值当全域值会让新域挤占既有域配额;
-        # knowledge 桶值不变=既有行为零回归)
+        # knowledge 桶值不变=既有行为零回归;100 ticket / 099 http 桶同口径)
         self._domain_quotas: dict[str, int | None] = {
             "knowledge": knowledge_quota,
             "websearch": websearch_quota,
+            "ticket": ticket_quota,
+            CONNECTOR_DOMAIN: connector_quota,
         }
         self._rate_limit = rate_limit_per_minute
         self._confirm_ttl = confirm_ttl_minutes
@@ -260,7 +275,8 @@ class ToolCallService:
                     channel=channel,
                     idempotency_key=idem,
                     expires_at=expires_at,
-                    domain=DOMAIN_TOOLS.get(tool_name),
+                    # 099:域标签在解析期随工具落定(静态域=映射表;连接器=http)
+                    domain=resolved_domain,
                 )
             )
             # PENDING_CONFIRM 的 confirm_id 只能来自审计行 id;审计写失败则
@@ -277,7 +293,10 @@ class ToolCallService:
                 duration_ms=elapsed,
             )
 
-        tool = await self._resolve_tool(tenant_id=tenant_id, name=tool_name)
+        tool, connector_hit = await self._resolve_tool(tenant_id=tenant_id, name=tool_name)
+        # 域标签:静态域工具(含未注册)恒走映射(既有口径零回归);连接器
+        # 命中覆写为 http(099,审计域标签与配额桶共用)
+        resolved_domain = CONNECTOR_DOMAIN if connector_hit else DOMAIN_TOOLS.get(tool_name)
         if tool is None:
             return await _finish("REJECTED", reason="TOOL_NOT_REGISTERED")
 
@@ -327,10 +346,12 @@ class ToolCallService:
                 )
 
         # 089:域配额第二维度(网关域工具的固定窗口叠加;内置工具不受影响;
-        # 094 起按域分桶,各域配额互不挤占)
-        quota = self._domain_quotas.get(DOMAIN_TOOLS.get(tool_name, ""))
+        # 094 起按域分桶,各域配额互不挤占;099 连接器域标签在解析期落定)。
+        # 桶键=域标签(评审修复:按 tool_name 分桶会让多工具域的实际吞吐
+        # 放大 N 倍,与「域分桶」声明漂移)
+        quota = self._domain_quotas.get(resolved_domain or "")
         if quota and not await self._limiter.allow(
-            f"toolgw:{tenant_id}:{user_id}:{tool_name}", limit=quota, window_sec=60
+            f"toolgw:{tenant_id}:{user_id}:{resolved_domain}", limit=quota, window_sec=60
         ):
             return await _finish("RATE_LIMITED", reason="RATE_LIMITED: 域配额超限")
 
@@ -351,14 +372,22 @@ class ToolCallService:
             return await _finish("ERROR", reason=str(e)[:200])
         return await _finish("EXECUTED", result=result, idem=idem)
 
-    async def _resolve_tool(self, *, tenant_id: str, name: str) -> ToolDef | None:
-        """静态注册表优先;未命中查动态解析(028 MCP 快照,未注入=纯静态)。"""
+    async def _resolve_tool(self, *, tenant_id: str, name: str) -> tuple[ToolDef | None, bool]:
+        """静态注册表优先;连接器域按前缀解析(099,租户行);未命中查动态
+        解析(028 MCP 快照,未注入=纯静态)。
+        返回 (工具定义, 是否连接器工具)——域标签不在解析期落定:静态域工具
+        (含未注册形态)恒走 DOMAIN_TOOLS 映射(零回归口径),仅连接器命中
+        覆写为 http。"""
         tool = get_tool(name)
         if tool is not None:
-            return tool
+            return tool, False
+        if name.startswith(CONNECTOR_TOOL_PREFIX) and self._connector is not None:
+            resolved = await self._connector.resolve(tenant_id=tenant_id, name=name)
+            if resolved is not None:
+                return resolved, True
         if self._resolver is None:
-            return None
-        return await self._resolver.resolve(tenant_id=tenant_id, name=name)
+            return None, False
+        return await self._resolver.resolve(tenant_id=tenant_id, name=name), False
 
     # ── handler 分发 ──
 
@@ -439,6 +468,48 @@ class ToolCallService:
             # 观察整形:检索卡已过策略器 allowlist(评分/追踪参数不入上下文),
             # 空结果如实表达(count=0),由 LLM 决定改写问句或据实回答
             return {"count": len(cards), "results": cards}
+        if tool.name in ("ticket_search", "ticket_get", "ticket_create"):
+            # 100:注册表已过注册条件(端点+凭证齐备)才可能到达此处;
+            # 端口缺失=装配漂移,收敛 TicketError(分发兜底 ERROR,不裸崩)
+            if self._ticket is None:
+                raise TicketError(f"{FAILURE_UNDELIVERED_PREFIX} 工单系统未接线(部署缺陷)")
+            if tool.name == "ticket_search":
+                status = args.get("status")
+                limit = args.get("limit")
+                cards = await self._ticket.search(
+                    query=str(args.get("query") or ""),
+                    status=status.strip() if isinstance(status, str) and status.strip() else None,
+                    limit=(
+                        limit
+                        if isinstance(limit, int) and not isinstance(limit, bool)
+                        else TICKET_LIMIT_DEFAULT
+                    ),
+                )
+                # 观察整形:工单卡已过策略器 allowlist(描述/内部元数据不入上下文),
+                # 空结果如实表达(count=0)
+                return {"count": len(cards), "tickets": cards}
+            if tool.name == "ticket_get":
+                card = await self._ticket.get(ticket_id=str(args["id"]))
+                return {"ticket": card}
+            # 创建:assignee 可省;创建结果回填入参(确认终态审计行参数摘要
+            # 携带目标工单标识,spec「创建结果回填」——回填发生在审计序列化前)
+            assignee = args.get("assignee")
+            card = await self._ticket.create(
+                title=str(args["title"]),
+                description=str(args["description"]),
+                priority=str(args["priority"]),
+                assignee=(
+                    assignee.strip() if isinstance(assignee, str) and assignee.strip() else None
+                ),
+            )
+            args["ticket_id"] = str(card.get("id"))
+            return {"ticket": card}
+        if tool.name.startswith(CONNECTOR_TOOL_PREFIX):
+            # 099:租户连接器经网关切面执行(出口校验→SSRF→出站→分类);
+            # 端口缺失=装配漂移,收敛 ConnectorError(分发兜底 ERROR,不裸崩)
+            if self._connector is None:
+                raise ConnectorError(f"{FAILURE_UNDELIVERED_PREFIX} 连接器未接线(部署缺陷)")
+            return await self._connector.call(tenant_id=tenant_id, name=tool.name, args=dict(args))
         if tool.name == "run_python_code":
             return await self._run_python_code(
                 args,
@@ -575,8 +646,9 @@ class ToolCallService:
         # L1 用户-租户绑定复校(R1-M3:挂起后解绑租户则拒)+ L2 权限点复校 +
         # L4 参数复校;L5 限流不适用(人工低频动作),L3 随 L1,L6 即本路径本身
         await self._repo.assert_bound(user_id=user_id, tenant_id=row.tenant_id)
-        # 028:确认重放同样走动态解析(MCP 写工具确认后不致误拒「权限已变更」)
-        tool = await self._resolve_tool(tenant_id=row.tenant_id, name=row.tool_name)
+        # 028:确认重放同样走动态解析(MCP 写工具确认后不致误拒「权限已变更」);
+        # 099:连接器写工具确认后同源解析
+        tool, _connector_hit = await self._resolve_tool(tenant_id=row.tenant_id, name=row.tool_name)
         perms = await self._perms.list_codes(user_id)
         if tool is None or tool.perm_code not in perms:
             await self._repo.mark_status(row.id, "REJECTED", clear_reason=True)
@@ -594,6 +666,24 @@ class ToolCallService:
             )
             await self._repo.commit()
             return ConfirmOutcome(status="rejected", reason=arg_err)
+
+        # 099/100:确认型工具的域配额在真实出站点判定(执行=确认重放,PENDING
+        # 期不消费;评审修复——require_confirm 提前返回曾使 POST 连接器/
+        # ticket_create 整段绕过域配额)。超限不落终态:确认保留,窗口重置后
+        # 可再次确认(幂等收口仍按 PENDING 复核)。
+        confirm_domain = CONNECTOR_DOMAIN if _connector_hit else DOMAIN_TOOLS.get(row.tool_name)
+        confirm_quota = self._domain_quotas.get(confirm_domain or "")
+        if confirm_quota and not await self._limiter.allow(
+            f"toolgw:{row.tenant_id}:{user_id}:{confirm_domain}",
+            limit=confirm_quota,
+            window_sec=60,
+        ):
+            await self._reply.append_reply(
+                session_id=session_id,
+                content=f"操作「{row.tool_name}」暂时无法执行:域配额超限,请稍后再次确认。",
+            )
+            await self._repo.commit()
+            return ConfirmOutcome(status="error", reason="RATE_LIMITED: 域配额超限")
 
         try:
             result = await self._dispatch(
@@ -615,7 +705,12 @@ class ToolCallService:
             )
             await self._repo.commit()
             return ConfirmOutcome(status="error", reason=str(e)[:200])
-        await self._repo.mark_status(row.id, "EXECUTED", clear_reason=True)
+        # 100:执行后重算参数摘要——域 handler 可把创建结果回填入参
+        # (ticket_create 回填 ticket_id),确认终态行摘要携带执行结果;
+        # 未回填的既有工具重算值与原摘要一致(确定性纯函数),零漂移
+        await self._repo.mark_status(
+            row.id, "EXECUTED", clear_reason=True, args_digest=args_digest(row.args)
+        )
         await self._reply.append_reply(
             session_id=session_id,
             content=f"已执行「{row.tool_name}」:{_announce_summary(row.tool_name, row.args)}",
@@ -640,4 +735,7 @@ def _status_to_confirm_out(status: str) -> str:
 def _announce_summary(tool_name: str, args: dict[str, object]) -> str:
     if tool_name == "create_system_announcement":
         return f"公告「{args.get('title', '')}」已发布。"
+    if tool_name == "ticket_create":
+        # 100:回执带目标工单标识(handler 已把创建结果回填入参)
+        return f"工单已创建(编号 {args.get('ticket_id', '')})。"
     return "执行完成。"

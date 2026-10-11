@@ -3,12 +3,16 @@
 
 目标执行(TargetRunner):独立会话装配 029/025 组合根(015/017 短事务
 先例);创建者身份(权限放大面=节点级防御以创建者逐层复校,029 立约)。
+108:邮件入站——imaplib 标准库客户端绑定 + 输入护栏绑定(组合根);
+凭证任何接口不回显(webhook secret 同口径)。
 """
 
+import asyncio
 import datetime as dt
 import logging
+import re
 import uuid
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -22,6 +26,14 @@ from kongming.config import get_settings
 from kongming.datasource.cipher import get_cipher
 from kongming.db import get_session, get_sessionmaker
 from kongming.trigger.models import CronError, next_fire
+from kongming.trigger.ports import (
+    MailAuthError,
+    MailConnectError,
+    MailError,
+    MailFetch,
+    MailProtocolError,
+    MailRawMessage,
+)
 from kongming.trigger.repository import SqlTriggerRepo
 from kongming.trigger.scheduler import TriggerScheduler
 from kongming.trigger.service import (
@@ -39,6 +51,20 @@ router = APIRouter(prefix="/system/triggers", tags=["trigger"])
 webhook_router = APIRouter(tags=["webhook"])
 
 MANAGE = "system:trigger:manage"
+
+
+def _bot_question(inputs: dict[str, Any]) -> str:
+    """bot 目标指令组装(纯函数,单测钉住)。邮件摘要形态=108 四字段白名单
+    (from/subject/date/text_preview,已过输入护栏)进指令正文;webhook 沿用
+    summary/event 提要;cron 无输入=固定职责指令。"""
+    if "subject" in inputs or "text_preview" in inputs:
+        return (
+            f"邮件触发 | 主题:{inputs.get('subject') or '(无主题)'}\n"
+            f"{inputs.get('text_preview') or ''}"
+        )
+    if inputs:
+        return str(inputs.get("summary") or inputs.get("event") or "定时触发")
+    return "定时触发,请执行你的职责"
 
 
 class _HttpxNotifier:
@@ -62,6 +88,140 @@ class _HttpxNotifier:
                 },
             )
             resp.raise_for_status()
+
+
+class _ImaplibMailClient:
+    """MailClient 绑定(108):imaplib 标准库实现,零新依赖;阻塞 IO 经
+    线程池隔离事件循环。`UID SEARCH UID <n+1>:*` 游标语义 + STATUS 探测
+    UIDVALIDITY;连接/认证/协议错误按端口三类抛出(服务层分类落 FAILED)。"""
+
+    _TIMEOUT_SEC = 10  # 连接/读超时(轮询面不挂调度循环)
+
+    async def fetch_since(
+        self,
+        *,
+        host: str,
+        port: int,
+        tls: bool,
+        user: str,
+        credential: str,
+        folder: str,
+        last_uid: int,
+        limit: int,
+    ) -> MailFetch:
+        return await asyncio.to_thread(
+            self._fetch_sync,
+            host=host,
+            port=port,
+            tls=tls,
+            user=user,
+            credential=credential,
+            folder=folder,
+            last_uid=last_uid,
+            limit=limit,
+        )
+
+    def _fetch_sync(
+        self,
+        *,
+        host: str,
+        port: int,
+        tls: bool,
+        user: str,
+        credential: str,
+        folder: str,
+        last_uid: int,
+        limit: int,
+    ) -> MailFetch:
+        import imaplib
+
+        from kongming.workflow.http_runner import assert_host_allowed_sync
+        from kongming.workflow.ports import SsrFBlocked
+
+        # SSRF 判定(与同文件 notifier 的 assert_url_allowed 同一拒绝段单源):
+        # 用户可配 imap_host 是出站面,私网/元数据地址在连接前关死(分类落
+        # CONNECT_FAILED,不成为内网探测 oracle)
+        try:
+            assert_host_allowed_sync(host, port)
+        except SsrFBlocked as e:
+            raise MailConnectError(f"目标被拒绝: {e}") from e
+        try:
+            conn = (
+                imaplib.IMAP4_SSL(host, port, timeout=self._TIMEOUT_SEC)
+                if tls
+                else imaplib.IMAP4(host, port, timeout=self._TIMEOUT_SEC)
+            )
+        except Exception as e:  # noqa: BLE001  # OSError/ssl/超时统归连接失败
+            raise MailConnectError(f"连接失败: {type(e).__name__}") from e
+        try:
+            try:
+                conn.login(user, credential)
+            except imaplib.IMAP4.error as e:
+                raise MailAuthError(f"认证失败: {e}") from e
+            except OSError as e:
+                raise MailConnectError(f"连接中断: {type(e).__name__}") from e
+            # UIDVALIDITY 探测(STATUS 不扰动选中态;方言差异经正则容错)
+            typ, data = conn.status(folder, "(UIDVALIDITY)")
+            if typ != "OK" or not data or not data[0]:
+                raise MailProtocolError(f"UIDVALIDITY 查询失败: {folder}")
+            m = re.search(rb"UIDVALIDITY\s+(\d+)", bytes(data[0]))
+            if m is None:
+                raise MailProtocolError("UIDVALIDITY 响应不可解析")
+            uidvalidity = int(m.group(1))
+            typ, _sel = conn.select(folder)
+            if typ != "OK":
+                raise MailProtocolError(f"文件夹不可选: {folder}")
+            typ, data = conn.uid("SEARCH", "UID", f"{last_uid + 1}:*")
+            if typ != "OK" or not data:
+                raise MailProtocolError("UID SEARCH 失败")
+            uids = sorted(int(x) for x in bytes(data[0]).split())
+            messages: list[MailRawMessage] = []
+            for uid in [u for u in uids if u > last_uid][:limit]:
+                typ, fdata = conn.uid("FETCH", str(uid), "(RFC822)")
+                if typ != "OK" or not fdata:
+                    raise MailProtocolError(f"UID {uid} 拉取失败")
+                # imaplib 返回形态 (header, bytes) 元组序列:报文体取元组第二位
+                raw = next(
+                    (cast("bytes", part[1]) for part in fdata if isinstance(part, tuple)),
+                    None,
+                )
+                if raw is None:
+                    raise MailProtocolError(f"UID {uid} 响应缺报文段")
+                messages.append(MailRawMessage(uid=uid, data=raw))
+            return MailFetch(uidvalidity=uidvalidity, messages=messages)
+        except (MailError, imaplib.IMAP4.error) as e:
+            if isinstance(e, MailError):
+                raise
+            # 选中/搜索/拉取阶段的协议态错误(IMAP4.error)统归协议失败
+            raise MailProtocolError(f"协议失败: {e}") from e
+        except OSError as e:
+            raise MailConnectError(f"连接中断: {type(e).__name__}") from e
+        finally:
+            try:
+                conn.logout()
+            except Exception:  # noqa: BLE001, S110  # 登出失败不影响已取结果,静默收尾
+                pass
+
+
+class _TriggerInputGuardrail:
+    """输入护栏端口绑定(108):邮件摘要=外部内容,进目标执行前过既有 020
+    护栏;独立短会话读配置,审计经 writer 独立事务(与 chat 面同款装配)。"""
+
+    async def check(
+        self, *, tenant_id: str, user_id: str, texts: list[str]
+    ) -> tuple[bool, list[str]]:
+        from kongming.guardrail.repository import (
+            SqlGuardrailAuditWriter,
+            SqlGuardrailRepo,
+        )
+        from kongming.guardrail.service import GuardrailService
+
+        async with get_sessionmaker()() as s:
+            svc = GuardrailService(SqlGuardrailRepo(s), SqlGuardrailAuditWriter())
+            verdict = await svc.evaluate_input(
+                trace_id=uuid.uuid4().hex, user_id=user_id, tenant_id=tenant_id, texts=texts
+            )
+        return verdict.blocked, verdict.processed
 
 
 def _make_service(session: AsyncSession, actor_id: str | None = None) -> TriggerService:
@@ -107,6 +267,11 @@ def _make_service(session: AsyncSession, actor_id: str | None = None) -> Trigger
         notifier=_HttpxNotifier(),
         oper=_Oper(),
         target_checker=_TargetCheckerImpl(),
+        # 101:部署级固定退避(重试次数上限在触发器行,间隔属部署)
+        retry_backoff_sec=settings.trigger_retry_backoff_sec,
+        # 108:邮件入站客户端与输入护栏(组合根绑定)
+        mail=_ImaplibMailClient(),
+        input_guard=_TriggerInputGuardrail(),
     )
 
 
@@ -200,9 +365,7 @@ class _TargetRunnerImpl:
                 bot_svc = _bot_service_factory(s, _gac())
                 out = await bot_svc.run(
                     bot_key=target_key,
-                    question=str(inputs.get("summary") or inputs.get("event") or "定时触发")
-                    if inputs
-                    else "定时触发,请执行你的职责",
+                    question=_bot_question(inputs),
                     channel=channel,
                     tenant_id_hint=tenant_id,
                 )
@@ -241,7 +404,7 @@ async def stop_scheduler() -> None:
 class TriggerIn(BaseModel):
     tg_key: str = Field(min_length=2, max_length=64)
     name: str = Field(min_length=1, max_length=128)
-    type: str = Field(pattern="^(CRON|WEBHOOK)$")
+    type: str = Field(pattern="^(CRON|WEBHOOK|EMAIL)$")
     target_type: str = Field(pattern="^(workflow|bot)$")
     target_key: str = Field(min_length=1, max_length=64)
     cron_expr: str | None = Field(default=None, max_length=64)
@@ -249,6 +412,16 @@ class TriggerIn(BaseModel):
     adapter: str = Field(default="custom", pattern="^(custom|github)$")
     notify_url: str = Field(default="", max_length=512)
     secret: str = Field(default="", max_length=256)
+    # 101:失败重试次数上限(0–5;0=不重试,缺省零回归)
+    max_retries: int = Field(default=0, ge=0, le=5)
+    # 108:邮件形态配置(凭证明文只进不出,即刻加密落库)
+    imap_host: str = Field(default="", max_length=255)
+    imap_port: int = Field(default=993, ge=1, le=65535)
+    imap_tls: bool = True
+    imap_user: str = Field(default="", max_length=255)
+    imap_password: str = Field(default="", max_length=256)
+    imap_folder: str = Field(default="INBOX", max_length=255)
+    imap_poll_interval_sec: int = Field(default=300, ge=1, le=86400)
 
 
 class TriggerUpdateIn(BaseModel):
@@ -261,6 +434,16 @@ class TriggerUpdateIn(BaseModel):
     notify_url: str = Field(default="", max_length=512)
     # R1-T4:密钥轮换(空=保持现值;更新 webhook 密钥后旧签名即失效)
     secret: str = Field(default="", max_length=256)
+    # 101:失败重试次数上限(0–5;0=不重试,缺省零回归)
+    max_retries: int = Field(default=0, ge=0, le=5)
+    # 108:邮件形态配置(凭证空框=保持现值,与 webhook secret 同口径)
+    imap_host: str = Field(default="", max_length=255)
+    imap_port: int = Field(default=993, ge=1, le=65535)
+    imap_tls: bool = True
+    imap_user: str = Field(default="", max_length=255)
+    imap_password: str = Field(default="", max_length=256)
+    imap_folder: str = Field(default="INBOX", max_length=255)
+    imap_poll_interval_sec: int = Field(default=300, ge=1, le=86400)
 
 
 async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header: str | None) -> str:
@@ -295,6 +478,16 @@ class TriggerOut(BaseModel):
     has_secret: bool
     last_fired_at: str | None = None
     next_fire_at: str | None = None
+    # 101:失败重试次数上限(0=不重试)
+    max_retries: int = 0
+    # 108:邮件形态配置(凭证仅掩码口径,永不回显明文)
+    imap_host: str = ""
+    imap_port: int = 993
+    imap_tls: bool = True
+    imap_user: str = ""
+    imap_folder: str = "INBOX"
+    imap_poll_interval_sec: int = 300
+    has_imap_credential: bool = False
 
 
 class TriggerRunOut(BaseModel):
@@ -304,6 +497,12 @@ class TriggerRunOut(BaseModel):
     duration_ms: int
     target_run_ref: str | None = None
     created_at: str | None = None
+    # 101 重试链:尝试序号 + 首跑关联 + 挂起重试到期时刻
+    attempt: int = 1
+    retry_of_run_id: str | None = None
+    next_retry_at: str | None = None
+    # 108:邮件触发的标准化摘要 JSON(原文不落库,只留白名单摘要)
+    summary: str = ""
 
 
 class TriggerRunsPageOut(BaseModel):
@@ -328,6 +527,15 @@ def _row_out(row: dict[str, Any]) -> dict[str, Any]:
         "has_secret": bool(row.get("secret_cipher")),
         "last_fired_at": (row["last_fired_at"].isoformat() if row.get("last_fired_at") else None),
         "next_fire_at": (row["next_fire_at"].isoformat() if row.get("next_fire_at") else None),
+        "max_retries": int(row.get("max_retries") or 0),
+        # 108:邮件配置回显(凭证仅掩码口径 has_imap_credential)
+        "imap_host": str(row.get("imap_host") or ""),
+        "imap_port": int(row.get("imap_port") or 993),
+        "imap_tls": bool(row.get("imap_tls")),
+        "imap_user": str(row.get("imap_user") or ""),
+        "imap_folder": str(row.get("imap_folder") or "INBOX"),
+        "imap_poll_interval_sec": int(row.get("imap_poll_interval_sec") or 300),
+        "has_imap_credential": bool(row.get("imap_credential")),
     }
 
 
@@ -382,6 +590,14 @@ async def create_trigger(
             notify_url=body.notify_url,
             secret=body.secret,
             created_by=str(user["sub"]),
+            max_retries=body.max_retries,
+            imap_host=body.imap_host,
+            imap_port=body.imap_port,
+            imap_tls=body.imap_tls,
+            imap_user=body.imap_user,
+            imap_password=body.imap_password,
+            imap_folder=body.imap_folder,
+            imap_poll_interval_sec=body.imap_poll_interval_sec,
         )
         await session.commit()
     except TriggerValidationError as e:
@@ -426,6 +642,14 @@ async def update_trigger(
             adapter=body.adapter,
             notify_url=body.notify_url,
             secret=body.secret,
+            max_retries=body.max_retries,
+            imap_host=body.imap_host,
+            imap_port=body.imap_port,
+            imap_tls=body.imap_tls,
+            imap_user=body.imap_user,
+            imap_password=body.imap_password,
+            imap_folder=body.imap_folder,
+            imap_poll_interval_sec=body.imap_poll_interval_sec,
         )
         await session.commit()
     except TriggerValidationError as e:
@@ -519,6 +743,15 @@ async def page_trigger_runs(
                 "duration_ms": r["duration_ms"],
                 "target_run_ref": r["target_run_ref"],
                 "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
+                "attempt": int(r.get("attempt") or 1),
+                "retry_of_run_id": (
+                    str(r["retry_of_run_id"]) if r.get("retry_of_run_id") else None
+                ),
+                "next_retry_at": (
+                    r["next_retry_at"].isoformat() if r.get("next_retry_at") else None
+                ),
+                # 108:标准化摘要 JSON(邮件触发;原文不落库)
+                "summary": str(r.get("summary") or ""),
             }
             for r in rows
         ],

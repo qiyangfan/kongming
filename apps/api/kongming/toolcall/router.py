@@ -23,6 +23,13 @@ from kongming.auth.repository import SqlPermRepo
 from kongming.auth.router import current_user, require_perm
 from kongming.chat.repository import ChatRepository
 from kongming.config import get_settings
+from kongming.connector.models import (
+    build_injection_spec,
+    key_from_tool_name,
+    params_to_schema,
+    row_param_decls,
+)
+from kongming.connector.repository import SqlConnectorRepo
 from kongming.datasource.cipher import get_cipher
 from kongming.db import get_session
 from kongming.internal import service as internal_service
@@ -37,6 +44,7 @@ from kongming.sandbox.service import SandboxService
 from kongming.toolcall import registry
 from kongming.toolcall.models import (
     ConfirmNotFound,
+    ConnectorError,
     TenantBindingForbidden,
     TenantNotFound,
     ToolDef,
@@ -53,12 +61,16 @@ from kongming.toolcall.service import ConfirmOutcome, ToolCallService
 from kongming.toolgateway.gateway import Executor, ToolGateway
 from kongming.toolgateway.knowledge import KnowledgeExecutor, KnowledgePolicy
 from kongming.toolgateway.models import (
+    CONNECTOR_DOMAIN,
     DOMAIN_TOOLS,
     FAILURE_UNDELIVERED_PREFIX,
     WEBSEARCH_PROVIDERS,
     DomainPolicy,
+    endpoint_host,
     load_manifest,
+    parse_ticket_endpoint,
 )
+from kongming.toolgateway.ticket import TicketError, TicketExecutor, TicketPolicy
 from kongming.toolgateway.websearch import WebSearchError, WebSearchExecutor, WebSearchPolicy
 
 log = logging.getLogger(__name__)
@@ -332,6 +344,21 @@ def _build_gateway() -> ToolGateway | None:
                 "redaction": "allowlist:websearch",
             }
         )
+    # ticket 域(100):端点形态合法 + 服务凭证齐备两道条件;端点解析与注册表
+    # 注册条件同源 parse_ticket_endpoint(models 单源),白名单由端点主机派生
+    ticket_key = (settings.ticket_api_key or "").strip()
+    ticket_endpoint = parse_ticket_endpoint(settings.ticket_base_url)
+    if ticket_endpoint and ticket_key:
+        entries.append(
+            {
+                "id": "ticket",
+                "endpoint": ticket_endpoint,
+                "whitelist_hosts": [endpoint_host(ticket_endpoint)],
+                "timeout_ms": settings.ticket_timeout_ms,
+                "quota_per_minute": settings.toolgateway_ticket_quota,
+                "redaction": "allowlist:ticket",
+            }
+        )
     if not entries:
         return None
     manifest, warnings = load_manifest(entries)
@@ -351,6 +378,9 @@ def _build_gateway() -> ToolGateway | None:
             whitelist_hosts=manifest["websearch"].whitelist_hosts
         )
         domain_executors["websearch"] = WebSearchExecutor(adapter=provider, api_key=api_key)
+    if "ticket" in manifest:
+        policies["ticket"] = TicketPolicy(whitelist_hosts=manifest["ticket"].whitelist_hosts)
+        domain_executors["ticket"] = TicketExecutor(api_key=ticket_key)
     return ToolGateway(
         manifest=manifest,
         policies=policies,
@@ -428,6 +458,62 @@ def _build_websearch_client() -> _GatewayWebSearchClient | None:
     return _GatewayWebSearchClient(gw) if gw is not None and gw.declared("websearch") else None
 
 
+class _GatewayTicketClient:
+    """100 TicketPort 绑定:出站经网关切面(出口校验→限流→出站→脱敏→重试
+    分类),本适配层只做域方言整形(工单卡观察形态);失败收敛 TicketError
+    (分发兜底 ERROR+审计)。"""
+
+    def __init__(self, gateway: ToolGateway) -> None:
+        self._gw = gateway
+
+    async def _execute(self, *, tool_name: str, args: dict[str, object]) -> dict[str, object]:
+        out = await self._gw.execute(
+            tool_name=tool_name,
+            args=args,
+            domain="ticket",
+            trace_id="-",  # trace 经工具分发层审计承载;适配层不重复落
+            tenant_id="-",
+            user_id="-",
+        )
+        if out["status"] != "executed":
+            raise TicketError(
+                str(out.get("reason") or f"{FAILURE_UNDELIVERED_PREFIX} 工单系统拒连")
+            )
+        return cast("dict[str, object]", out.get("result") or {})
+
+    async def search(
+        self, *, query: str, status: str | None, limit: int
+    ) -> list[dict[str, object]]:
+        args: dict[str, object] = {"query": query, "limit": limit}
+        if status:
+            args["status"] = status
+        result = await self._execute(tool_name="ticket_search", args=args)
+        return cast("list[dict[str, object]]", result.get("tickets") or [])
+
+    async def get(self, *, ticket_id: str) -> dict[str, object]:
+        # 单查/创建的网关结果即工单卡本身(策略器 allowlist 投影后的单卡形态);
+        # {"ticket": ...} 观察包装在分发层承担,适配层不加第二层
+        return await self._execute(tool_name="ticket_get", args={"id": ticket_id})
+
+    async def create(
+        self, *, title: str, description: str, priority: str, assignee: str | None
+    ) -> dict[str, object]:
+        args: dict[str, object] = {
+            "title": title,
+            "description": description,
+            "priority": priority,
+        }
+        if assignee:
+            args["assignee"] = assignee
+        return await self._execute(tool_name="ticket_create", args=args)
+
+
+def _build_ticket_client() -> _GatewayTicketClient | None:
+    """100:端点+凭证任一缺失 → 域不在清单 → None(工具不注册)。"""
+    gw = _get_gateway()
+    return _GatewayTicketClient(gw) if gw is not None and gw.declared("ticket") else None
+
+
 class _McpDynamicResolver:
     """028 DynamicToolResolver 绑定:快照命中 → fail-closed ToolDef。"""
 
@@ -452,6 +538,70 @@ class _McpDynamicResolver:
         )
 
 
+class _ConnectorToolGate:
+    """099 ConnectorToolGate 绑定:启用连接器行 → fail-closed ToolDef;
+    出站执行经网关切面单域装配(出口校验→SSRF→出站→分类)。凭证仅在
+    get_call_target(唯一明文出口)瞬时装配,不落日志/审计/任何响应。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        settings = get_settings()
+        self._repo = SqlConnectorRepo(session, get_cipher(settings.datasource_encrypt_key))
+        self._quota = settings.toolgateway_http_quota
+
+    def _tool_def(self, row: dict[str, Any], name: str) -> ToolDef:
+        spec = build_injection_spec(row)
+        confirm = bool(row.get("requires_confirmation"))
+        return ToolDef(
+            name=name,
+            description=str(spec["description"]),
+            parameters=params_to_schema(row_param_decls(row)),
+            perm_code="tool:http:call",
+            write=confirm,
+            require_confirm=confirm,
+        )
+
+    async def resolve(self, *, tenant_id: str, name: str) -> ToolDef | None:
+        key = key_from_tool_name(name)
+        if key is None:
+            return None
+        row = await self._repo.find_enabled_by_key(tenant_id=tenant_id, key=key)
+        return None if row is None else self._tool_def(row, name)
+
+    async def call(
+        self, *, tenant_id: str, name: str, args: dict[str, object]
+    ) -> dict[str, object]:
+        from kongming.toolgateway.connector import build_connector_stack
+
+        key = key_from_tool_name(name)
+        if key is None:
+            raise ConnectorError(f"{FAILURE_UNDELIVERED_PREFIX} 连接器工具名形态非法")
+        # 禁用/删除竞态:唯一明文出口返回 None → 「未注册」语义
+        row = await self._repo.get_call_target(tenant_id=tenant_id, key=key)
+        if row is None:
+            raise ConnectorError(f"{FAILURE_UNDELIVERED_PREFIX} 连接器不可用(已停用或删除)")
+        spec, policy, executor = build_connector_stack(
+            row,
+            auth_secret=row.get("auth_secret_plain"),
+            quota_per_minute=self._quota,
+        )
+        gw = ToolGateway(
+            manifest={CONNECTOR_DOMAIN: spec},
+            policies={CONNECTOR_DOMAIN: policy},
+            domain_executors={CONNECTOR_DOMAIN: executor},
+        )
+        out = await gw.execute(
+            tool_name=name,
+            args=args,
+            domain=CONNECTOR_DOMAIN,
+            trace_id="-",  # trace 经工具分发层审计承载;适配层不重复落
+            tenant_id=tenant_id,
+            user_id="-",
+        )
+        if out["status"] != "executed":
+            raise ConnectorError(str(out.get("reason") or "unreachable: 连接器调用失败"))
+        return cast("dict[str, object]", out.get("result") or {})
+
+
 class _McpToolCaller:
     """028 McpToolCaller 绑定(出站执行经 mcp 域服务)。"""
 
@@ -462,6 +612,11 @@ class _McpToolCaller:
         self, *, tenant_id: str, qualified: str, args: dict[str, object]
     ) -> dict[str, object]:
         return await self._svc.call_tool(tenant_id=tenant_id, qualified=qualified, args=args)
+
+
+def _build_connector_gate(session: AsyncSession) -> _ConnectorToolGate:
+    """099 装配缝(测试可 monkeypatch,与 _build_ticket_client 同构)。"""
+    return _ConnectorToolGate(session)
 
 
 def _get_service(session: Annotated[AsyncSession, Depends(get_session)]) -> ToolCallService:
@@ -483,6 +638,10 @@ def _get_service(session: Annotated[AsyncSession, Depends(get_session)]) -> Tool
         knowledge_quota=getattr(get_settings(), "toolgateway_knowledge_quota", None),  # 089 域配额
         websearch=_build_websearch_client(),  # 094(未配置=None)
         websearch_quota=settings.toolgateway_websearch_quota,  # 094 域配额(独立分桶)
+        ticket=_build_ticket_client(),  # 100(未配置=None)
+        ticket_quota=settings.toolgateway_ticket_quota,  # 100 域配额(独立分桶)
+        connector=_build_connector_gate(session),  # 099(行零感知=resolve None)
+        connector_quota=settings.toolgateway_http_quota,  # 099 域配额(独立分桶)
         rate_limit_per_minute=settings.tool_rate_limit_per_minute,
         confirm_ttl_minutes=settings.tool_confirm_ttl_minutes,
     )

@@ -9,9 +9,83 @@
 
 ## 当前状态(2026-10-11)
 
+- **099 HTTP 连接器域(租户级,首个租户级域)现态**:连接器=租户库表行
+  (`tool_http_connectors`,迁移 0051),注入集**按请求按租户动态装配**
+  (注册/编辑/启停即时生效,不要求重启);管理面 `/system/connectors/*`
+  (挂 `connector:manage`,web 管理台→连接器),调用权限 `tool:http:call`
+  (两点均显式授予制,不进 DEVELOPER 推荐集,SUPER_ADMIN 种子自动覆盖);
+  域配额独立分桶(`KM_TOOLGATEWAY_HTTP_QUOTA`,缺 20/分,域标签=http);
+  凭证加密落库复用 008 AES-GCM 单点(webhook secret 同机制),任何接口只出
+  「有无+尾号掩码」,明文仅在出站装配瞬时存在;写语义缺省规则=非 GET 需确认
+  (确认流复用既有写工具闸)/注册可显式覆盖。**出站安全双落点**:注册期校验
+  白名单主机形态+模板主机命中白名单;执行期网关出口校验+029 SSRF 拒绝段
+  (`workflow/http_runner.py::assert_url_allowed`,回环/私网/链路本地/云元数据
+  一律拒,**白名单命中不构成豁免**),重定向不跟随。工具名=`http__<key>`
+  (下划线口径与 MCP 同构,LLM 函数名字符集兼容)。
+  **冒烟配方(需运行栈+LLM;注意 SSRF 拒绝段使 127.0.0.1/内网地址不可做
+  真实出站目标——刻意的,本地 mock 做不了这一步,集成测试是靠放行缝覆盖
+  治理面语义的,见 `tests/test_http_connector.py::allow_local_ssrf`)**:
+  1. 注册:持 `connector:manage` 账号进 管理台→连接器→注册连接器;方法 GET、
+     路径模板 `https://httpbin.org/anything/order-{order_id}`(公网 echo,免自建
+     mock;离线环境可换任一 https echo 端点)、参数 `order_id`(字符串,必填)、
+     白名单 `httpbin.org`、鉴权 bearer+任意材料(凭证核验用)、超时缺省;
+  2. 出站:授予 `tool:http:call` 后问「查一下 order-42」→ 注入集含
+     `http__orders_api`,回调执行,观察=httpbin 回显 JSON 的文本形态
+     (大响应截断标注);测试调用入口(列表行内/表单内)可先于问答验证
+     (显式确认后真实出站一次,展示状态码/摘要/耗时/失败分类,落审计
+     channel=test_call);
+  3. 白名单外拒绝:编辑把白名单改成 `good.example.com`(模板主机随之偏离)
+     → 再问 → 拒不出站,审计 error_reason 前缀 `policy:`;直接把模板主机
+     带外改指内网(如 `http://10.0.0.1/…`)→ SSRF 段拒绝同样 `policy:`
+     (白名单改回含该内网主机也不豁免——存量行兜底语义);
+  4. 凭证掩码核验:列表/详情/创建/更新响应只有 `****尾号` 形态;
+     `SELECT auth_secret_enc FROM public.tool_http_connectors` 为密文;
+  5. 审计核验:`SELECT tool_name,status,domain,error_reason FROM
+     public.sys_tool_audit WHERE domain='http' ORDER BY created_at DESC LIMIT 8;`
+     (失败分类前缀 unreachable/protocol/policy;无 LLM 用量行)。
+- **本机代理截流回环的测试假败坑(2026-10-11 实证)**:本机若开代理/增强模式,
+  对**无监听**的 127.0.0.1 端口的连接会被代理截流并回 HTTP 502(而非拒连)——
+  `tests/test_external_knowledge.py::test_client_connection_refused_raises_unreachable`
+  「关端口=unreachable」前提随之假败(与代码无关;ticket mock 的 curl 需
+  `--noproxy '*'` 同源)。全量套件见此一例失败先查代理再查代码。
+- **100 内部系统连接器域(ticket,预置工单)现态**:第三工具域 = 部署级条件注册,
+  `KM_TICKET_BASE_URL` + `KM_TICKET_API_KEY` 齐备才注册 `ticket_search` /
+  `ticket_get` / `ticket_create` 三工具(端点解析与网关清单声明同源
+  `toolgateway/models.py::parse_ticket_endpoint`,出口白名单由端点主机派生,
+  部署不可单独改白名单);均缺省=域零感知(合法形态);组合残缺(端点缺凭证、
+  凭证缺端点、端点非法):prod 拒启(fail_closed)、dev 启动告警降级。权限
+  `tool:ticket:search`(search/get 读面)与 `tool:ticket:manage`(create 写面)
+  显式授予制(不进 DEVELOPER 推荐集,SUPER_ADMIN 种子自动覆盖);create 缺省
+  需确认(确认流独立于权限点)。域配额独立分桶(`KM_TOOLGATEWAY_TICKET_QUOTA`,
+  缺 20/分)。工单卡观察=allowlist 七键(id/title/status/priority/assignee/
+  created_at/updated_at;描述与工单系统内部元数据不进观察),状态/优先级枚举
+  **原样透传不翻译**(枚举语义在工具描述 prompt 层,design D5)。单查不存在=
+  protocol 类失败友好「工单不存在」;create 确认终态审计行参数摘要回填
+  `ticket_id`(spec「创建结果回填」)。对接面=**「最小工单 API 约定」**(三端点
+  六字段,单一事实源=`apps/api/scripts/mock_ticket_server.py` 文件头);真实
+  系统(Jira/ServiceNow)接入=按约定写门面或加适配层,不为对接差异散落第二套映射。
+  **演示配方(2026-10-11 实跑验证:①②④步 mock 启动/curl/审计面已走通;③真实
+  问答链路待确认——需本地 api+agent 栈与 LLM 凭证)**:
+  1. 起 mock(零依赖标准库单文件,内存态种子 4 条):
+     `cd apps/api && uv run python scripts/mock_ticket_server.py --port 8123
+     --token "$KM_TICKET_API_KEY"`(端口被占直接报错退出;重启即回种子);
+  2. 控制面注入 `KM_TICKET_BASE_URL=http://127.0.0.1:8123` +
+     `KM_TICKET_API_KEY=<与 mock --token 同值>` → 重启 api(dev 缺凭证只告警
+     降级不拒启);curl 三端点冒烟(带 `Authorization: Bearer $KM_TICKET_API_KEY`):
+     `GET /tickets?query=&status=open&limit=2`(注意 --noproxy '*',本机代理
+     截流回环)/`GET /tickets/T-1001`/`POST /tickets`(body title/description/
+     priority[/assignee],201 返回带服务端生成的 id);
+  3. 授予 `tool:ticket:search` 后问**「查一下最近的工单」**(应返回标准化工单卡
+     列表);授予 `tool:ticket:manage` 后问**「给张三建一个优先级高的工单」**
+     (应挂起确认,确认后才创建并回执工单编号;拒绝则工单系统无新单);
+  4. 审计核验:`SELECT tool_name, status, domain, args_digest FROM
+     public.sys_tool_audit WHERE domain='ticket' ORDER BY created_at DESC LIMIT 5;`
+     (create 的 EXECUTED 行 args_digest 含 `"ticket_id"`;凭证值不得出现在
+     日志/审计/失败文案——有专项 grep 断言钉着)。e2e 集成测试与演示共用同一
+     mock 实现(`tests/test_ticket_domain.py` 测试内起停,不依赖手工启动)。
 - **094 web 检索域(联网搜索)现状**:web_search 工具 = 部署级条件注册,
-  `KM_WEBSEARCH_PROVIDER`(tavily|bocha|zhipu)+ `KM_WEBSEARCH_API_KEY` 齐备
-  才注册;zhipu=智谱独立检索 API(与 LLM 同平台,复用 bigmodel key 零额外
+  `KM_WEBSEARCH_PROVIDER`(tavily|bocha|zhipu|alibaba_ai_search)+
+  `KM_WEBSEARCH_API_KEY` 齐备才注册;zhipu=智谱独立检索 API(与 LLM 同平台,复用 bigmodel key 零额外
   注册;search_query 方言硬限 70 字符在装配层截断,域契约 500 不动);
   均缺省=域零感知(合法形态);组合残缺(供应商缺 key、仅配 key 缺供应商、
   供应商非法值):prod 拒启(fail_closed)、dev 启动告警降级。权限
@@ -28,13 +102,51 @@
   (评审循环登记的两条范围外待办已清:knowledge.py DecodingError 收敛与
   前缀收编落地;test_config_failclosed 已钉空 websearch 字段。)
   **检索供应商调查结论(2026-10-11 契约核对)**:主流平台开放「独立检索 REST
-  API」的是少数——智谱(已收编)与阿里云 AI 搜索开放平台(OpenSearch:POST
+  API」的是少数——智谱(已收编)与阿里云 AI 搜索开放平台(归 OpenSearch 品牌线但实为联网搜索 API,开通即用按次计费,勿与「自建索引托管引擎」老产品线混淆;已按两条映射接入 105-alibaba-ai-search-provider:POST
   `{host}/v3/openapi/workspaces/{ws}/web-search/{service_id}`,Bearer 为 `OS-`
   独立 key 与百炼 `sk-` 不通用,请求 {query, top_k, content_type…},响应
-  `result.search_result[]{title,link,snippet,content}`,可适配待有 key/需求时
-  两条映射接入)。DeepSeek(官方文档零 search 端点)、Kimi(仅会话内「内置
+  `result.search_result[]{title,link,snippet,content}`,e2e 待 key,配方见下)。DeepSeek(官方文档零 search 端点)、Kimi(仅会话内「内置
   联网搜索」工具)、豆包/火山方舟(WebSearch 仅为会话请求配置对象)均无独立
   检索 API,不可收编——反证网关域+多供应商适配是正解,检索能力不绑模型选型。
+  **alibaba_ai_search 待 key 验证配方(105)**:①控制台开通 AI 搜索开放平台
+  并建独立 `OS-` key(与百炼 `sk-` 不通用),同时记下实例公网域名——host
+  为账号级(形如 `xxx.platform-<region>.opensearch.aliyuncs.com`,控制台
+  API Keys 页查看),与 `toolgateway/models.py` 注册表占位不一致时先回填该条
+  endpoint/host 单源(白名单由同条派生,仅此一处);②环境变量
+  `KM_WEBSEARCH_PROVIDER=alibaba_ai_search` + `KM_WEBSEARCH_API_KEY` →
+  重启 api(组合残缺 prod 拒启/dev 告警降级);③冒烟:授予
+  `tool:websearch:search` 后问「杭州今日天气怎么样」,应返回检索卡
+  (报 unreachable 前缀=DNS/域名不符,回 ①);④硬限核对:top_k 官方无
+  硬限(域级 1–10 先行,缺省 5)、query 无长度硬限(域级 500,均无需截断)、
+  content_type 固定 snippet——首验核对实际返回条数与 top_k 一致性并回填
+  `test_websearch_domain.py` 夹具。
+- **中文全文检索分词(098)现态与启用配方**:全文路分词配置部署级单值
+  `KM_RAG_FULLTEXT_TS_CONFIG`(白名单 `simple|zhparser`,缺省 simple=零回归;
+  白名单外值与目标库 pg_ts_config 缺失一律 fail-closed 拒启,dev/prod 同、
+  无降级形态——降级=换词法,与存量 tsv 错配)。rag 表说明路与文档全文面
+  写读同源;ctx 缓存键含配置值(换配置天然隔离,无需清缓存);代码单点
+  `kongming/config.py::FULLTEXT_TS_CONFIGS`(白名单放 config 层不落 rag 域包:
+  auth 域经 auth.ports→config 的既有依赖链不得反向触达 kongming.rag,
+  import-linter 契约)。**启用配方(pg18 localenv;localenv-postgres 容器=
+  Debian 12 bookworm,PGDG 源已预配,pg_ts_config 现仅 simple 系)**:
+  1. 容器内装扩展包并重启装载:`podman exec localenv-postgres apt-get update
+     && podman exec localenv-postgres apt-get install -y postgresql-18-zhparser`,
+     然后 `podman restart localenv-postgres`(装包后须重启进程 .so 才装载;
+     PGDG 无包时的备选=源码编译:容器内装 `postgresql-server-dev-18` 与
+     SCWS(`libscws-dev`),`git clone https://github.com/amutu/zhparser`
+     后 `make && make install`);
+  2. 控制面库各建扩展(全文 SQL 只跑控制面库 rag 两表;扩展按库隔离,
+     漏建=该库启动自检拒):开发库 kongming 与测试库 kongming_test 各执行
+     `CREATE EXTENSION zhparser;`(kongming_test 若尚未由 conftest 自建,
+     先建库再执行);
+  3. `export KM_RAG_FULLTEXT_TS_CONFIG=zhparser` → 重启 api(启动自检过才起,
+     自检=查 pg_ts_config,缺失即拒并指回本配方);
+  4. **逐数据源重扫/重建重算存量 tsv**(fetch-metadata / reindex / 文档重新
+     上传)——存量 tsv 是旧分词形态,不重扫=该路检索静默错配;
+  5. **复标全文路阈值**:`KM_RAG_GATE_FULLTEXT_TOP1/MEAN`(064;现恒裁剪
+     形态,改值即生效、无 shadow/primary 切换步)——zhparser 改变 ts_rank
+     量纲,先经 `/system/rag/recall-probe` 试跑采新量纲分布再定档。
+  回退:`KM_RAG_FULLTEXT_TS_CONFIG=simple` + 重启 + 重扫/重建(零 schema 依赖)。
 
 - **本机评测演示环境**:env-postgres 已装 tenant_sakila(28 对象)/tenant_olist
   (9 表 CSV)/sakila_ext 独立库 + sakila/olist 租户注册 + admin 绑定;知识已灌
@@ -50,12 +162,15 @@
   gold_sql 承载);空结果 gold 已被 validators 拒(0 行=不可判定题,错误 SQL
   返回空集即伪通过);ORDER BY…LIMIT 须唯一列 tiebreaker(校验器括号感知,
   函数包键/多参逗号均正确判定,字面量内 order by/limit 字样不误伤)。
-- **064 召回闸现状**:向量档标定缺省 0.30/0.28 成对写入(对拍依据:知识在位
-  可答题 top1 最低 0.683,2.3× 余量零误拒);mode 缺省 off,切换=部署配置
-  KM_RAG_GATE_MODE(shadow 先行)。**启用前置已代码化**:零知识数据源闸门自动
-  旁路(has_knowledge EXISTS 单点;「没灌知识」≠「低相关」,否则 sakila_dyn 类
-  内省回退数据源全量误拒),recall-probe 试跑面同口径(gate_skipped=no_knowledge
-  如实标注);全文档量纲未标定保持 0(该路不裁)。
+- **064 召回闸现状(106 已收编三态,恒生效)**:闸门恒以裁剪形态执行——
+  无 off/shadow/primary 之分,`KM_RAG_GATE_MODE` 配置已删除(已设该变量的
+  部署请显式清理,未知变量虽被配置体系忽略但属误导残留)。向量档标定缺省
+  0.30/0.28 成对写入(对拍依据:知识在位可答题 top1 最低 0.683,2.3× 余量
+  零误拒);**启用前置已代码化**:零知识数据源闸门自动旁路(has_knowledge
+  EXISTS 单点;「没灌知识」≠「低相关」,否则 sakila_dyn 类内省回退数据源
+  全量误拒),recall-probe 试跑面同口径(gate_skipped=no_knowledge 如实
+  标注;响应无 mode 字段,丢弃计数键=dropped);全文档量纲未标定保持 0
+  (该路不裁)。
 - **关系感知召回扩展与评估失败归因(2026-10-05 批,变更 095/096——原提案编号
   088/089 与已归档的 088-094 批撞号,归档件与文档引用已重编号)**:rag 召回
   主结果(三路 RRF+047 继承路)后按已声明表关系一跳扩展——复用
@@ -97,9 +212,14 @@
   失真;LLM 应答解析统一收口 JudgeLlmError(runner 只接它与 JudgeParseError,
   裸异常逃逸会把单对象失败放大成整个 run 中断);维度分档按 rubric「1-N:」
   前缀做范围校验。
-- **流式协议覆盖现状**:anthropic 条目流式 e2e 已通(GLM anthropic 兼容端点,
-  协议层验收);**未完成=responses 条目流式 e2e**(外部条件:需 responses 协议
-  端点;复现形态=照 anthropic 注册条目 protocol="responses"+路由)。
+- **流式协议覆盖现状**:anthropic 与 responses 条目流式 e2e 均已通(协议层验收:
+  ReAct 工具往返+用量归一;responses 于 2026-10-11 经 muniu 桥 `/v1/responses`→
+  dashscope chat 补验)。**百炼直连 responses 端点当前不可用于多轮工具**:其
+  服务端把 function_call_output 翻成 role:'tool' 后被老校验器拒 400,流式/
+  非流式/previous_response_id/换模型四路实证——responses 条目现役上游=muniu 桥,
+  直连待百炼修复。kongming responses 出站已修正为显式形态(role 消息带
+  `type:"message"`+纯文本 part 数组;官方字符串/省略 type 快捷形态 muniu 入站
+  不认,且单测已同步)。
 - **selfheal 冒烟配方**:ALTER TABLE tenant_sakila.film RENAME COLUMN
   release_year ⇄ release_year_tmp 后问「各上映年份的影片数量分布」→
   retry_count=2 诚实 FAILED+列类喂回;还原后 PASS。
@@ -479,8 +599,10 @@
   15/15 通过零新增。四门禁绿(api 925/agent 287/web/contracts),
   375/1280 三档浏览器目验过。specs 已同步(multi-model-routing 增 protocol
   语义+「多协议出站适配」;web-nav 应用壳/响应式外壳两条款;新建
-  mobile-experience 域)。**遗留**:muniu 网关(8787)未运行,anthropic/
-  responses 条目的流式问答 LLM 腿未端到端验(单测/集成钉已绿);根
+  mobile-experience 域)。**遗留**:muniu 网关(8787)未运行时对话冒烟不可用
+  (起法=muniu 仓根 `env $(grep -v '^#' .env.local | grep '=' | xargs) ./bin/muniu`);
+  anthropic/responses 条目的流式问答 LLM 腿已于 2026-10-11 补验通过(见顶节
+  「流式协议覆盖现状」);根
   `apps/web/vite.config.smoke.ts` 为临时冒烟件(硬编码本机绝对路径),
   不入库,可删。
 - **供应商预设目录 + ADR-007 定位修订(2026-09-26,文档级)**:用户裁决 muniu
@@ -553,12 +675,11 @@
 - 下一棒(2026-10-10 清偿后重写;原 4 项中 3 项已闭环,见顶节
   「当前状态(2026-10-10)」):
   1. ~~评估集对拍 / 064 决策 / 078 selfheal 冒烟 / anthropic 条目流式~~
-     → 全部已处置;064 主链路切换只剩部署配置 KM_RAG_GATE_MODE=primary
-     (shadow 先行建议不变);
-  2. **responses 条目流式问答 e2e**(唯一余项,外部条件:需 responses
-     协议端点;复现形态=照 anthropic 条目注册 protocol="responses"+路由);
-  3. 064「路径翻转」更大语料证据=shadow 模式运行时自然沉淀(would_drop
-     trace),非独立任务。
+     → 全部已处置;064 主链路已随 106 收编恒生效(无切换动作、无配置项);
+  2. ~~responses 条目流式问答 e2e~~ → 2026-10-11 经 muniu 桥补验通过;百炼
+     直连多轮工具回放不可用(服务端缺口,见顶节「流式协议覆盖现状」);
+  3. ~~064「路径翻转」更大语料证据=shadow 模式自然沉淀~~ → 随三态收编
+     作废;闸门观测恒走 trace(dropped 按路下发),质量信号以评估集为准。
 
 ## 新会话开工指引
 
@@ -601,6 +722,10 @@
    在网络层截流回环 HTTP——127.0.0.1 任意死端口稳定回无特征 502(2026-10-11
    实证),依赖「连死端口必 ConnectionRefused」的用例(external_knowledge 的
    unreachable 断言)本机无法通过,属环境事实非代码缺陷,CI 无代理环境绿。
+   另:0047 迁移评审期修订为 uuid7 逐行回填(ADR-004 v7 口径;PG 无内置
+   v7 生成,不用 gen_random_uuid 的 v4 形态)——本地开发库在修订前已应用
+   旧版,存量在架 Bot 的 v1 行主键保持 v4,新环境与 kongming_test 从修订版
+   跑全 v7;版本形态混合为已知现态,运行行为无差。
 3. **本地环境冷启动**(幂等,任何"连不上/端口不对"先跑这个):
    ```bash
    cd ~/workspace/localenv && podman compose up -d
@@ -608,12 +733,12 @@
    ```
    pg 数据持久化在 localenv 命名卷 `localenv_postgres-data`;删卷/重置属
    破坏性操作,须用户明确授权。localenv 服务清单与连接信息见其 README。
-4. **两 apps 无 .env 文件**(2026-09-28 find 实证,旧版本文档作废):
-   `apps/api/.env`、`apps/agent/.env` 均不存在;settings 的
-   `env_file=".env"` 是 cwd 相对,读取不到即纯环境变量。根 `.env` 只供
-   `make up`/compose 插值用。**推论**:两进程 KM_* 全来自启动 shell export
-   或容器 env——切模式(如 SQLGuard primary)只需改启动环境,无凭证文件
-   可碰;要持久化才自建 `apps/<app>/.env`(pydantic 自读,二选一)。
+4. **两 apps 的 .env 现态**(2026-10-11 复核,替代 2026-09-28「不存在」
+   旧口径):`apps/api/.env`、`apps/agent/.env` 均已存在;api 侧
+   `KM_REDIS_URL` 为无密码连接串(对 localenv-redis 必 NOAUTH,跑测试仍按
+   第 2 条 export 覆盖)。settings 的 `env_file=".env"` 是 cwd 相对——
+   进程工作目录决定是否读取;根 `.env` 只供 `make up`/compose 插值用。
+   切模式(如 SQLGuard primary)改 .env 或启动 shell export 二选一。
 5. **冒烟栈现役形态(2026-09-28)**:podman compose 容器
    `kongming-api-1`(18080)/`kongming-agent-1`(18081),env 由
    override 文件注入(示例:`/tmp/smoke-primary.yml` 置
@@ -895,3 +1020,45 @@ SQL/PG:
 | liannu 引擎 | `make liannu-check`(ruff+mypy+pytest,含对拍基线回放) | `liannu` | 同左 | 无 |
 | web | `make web-check`(tsc+eslint+stylelint+prettier;**vitest 于 066 接入 CI `test:run`,60 例**) | `web` | 同左(066 补齐前端单测短板) | 无 |
 | 契约漂移 | `make contracts-check`(已并入 check;055 教训后补齐) | `contracts` | `make -C ../.. contracts-check`(单源) | 无 |
+
+## 邮件入站触发器演示配方(108;真实 IMAP 联调待邮箱账号,以下为可复现配方)
+
+> 测试以内存 IMAP 桩全场景覆盖(`apps/api/tests/test_trigger_email.py`,21 例);
+> 真实邮箱端到端联调挂账「待条件」(需可开 IMAP 的邮箱,QQ/163 需授权码,Gmail 需应用专用密码)。
+
+**1. 配置 EMAIL 触发器**(管理面同 webhook;凭证即刻 AES-GCM 加密落库,任何接口不回显):
+
+```bash
+curl -X POST http://127.0.0.1:8000/system/triggers \
+  -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: $TENANT_KEY" \
+  -H "Content-Type: application/json" -d '{
+    "tg_key": "inbox2wf", "name": "审批来信", "type": "EMAIL",
+    "target_type": "workflow", "target_key": "echo",
+    "imap_host": "imap.qq.com", "imap_port": 993, "imap_tls": true,
+    "imap_user": "demo@qq.com", "imap_password": "<授权码>",
+    "imap_folder": "INBOX", "imap_poll_interval_sec": 60
+  }'
+```
+
+轮询间隔下限 30 秒封顶;创建即到期,调度 tick(30s)首个周期开拉。
+
+**2. 发测试邮件**(任一外部邮箱向 `imap_user` 发一封,主题任意);
+
+**3. 触发核验**:
+
+```bash
+# 历史(run 行带标准化摘要 JSON:from/subject/date/text_preview 四字段)
+curl "http://127.0.0.1:8000/system/triggers/<id>/runs?page=1&size=10" \
+  -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: $TENANT_KEY"
+```
+
+```sql
+-- UID 游标(断线/重启续传的凭据;UIDVALIDITY 变更会重置并告警)
+SELECT folder, last_uid, uidvalidity, updated_at
+FROM public.sys_trigger_email_cursor WHERE trigger_id = '<id>';
+-- run 历史:邮件原文/完整正文不落库,只留白名单摘要
+SELECT status, error, summary, created_at
+FROM public.sys_trigger_run WHERE trigger_id = '<id>' ORDER BY created_at DESC LIMIT 5;
+```
+
+排障口径:连接失败/认证失败落 `FAILED` run 且 error 前缀分类(`CONNECT_FAILED`/`AUTH_FAILED`/`PROTOCOL_ERROR`/`CREDENTIAL_ERROR`),按轮询间隔重试不堆积;停用后停轮询、游标保留,重新启用从游标续传(停用期间新邮件不丢)。

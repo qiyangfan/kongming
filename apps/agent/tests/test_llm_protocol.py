@@ -243,7 +243,14 @@ class TestResponsesRequest:
         ]
         req = responses_request(messages=[SYS, USER], tools=tools, temperature=0.2)
         assert req["instructions"] == "你是 SQL 助手"  # system 置顶,不进 input
-        assert req["input"] == [{"role": "user", "content": "有多少商品?"}]
+        # 纯文本统一发 part 数组形态 + type 显式 message(muniu 入站仅认显式形态)
+        assert req["input"] == [
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "有多少商品?"}],
+            }
+        ]
         assert req["tools"] == [
             {
                 "type": "function",
@@ -276,6 +283,7 @@ class TestResponsesRequest:
         msg = {"role": "assistant", "content": "上一轮结论"}
         req = responses_request(messages=[USER, msg], tools=[], temperature=0.1)
         assert _msgs_of(req, "input")[1] == {
+            "type": "message",
             "role": "assistant",
             "content": [{"type": "output_text", "text": "上一轮结论"}],
         }
@@ -314,10 +322,12 @@ class TestResponsesRequest:
         req = responses_request(messages=[assistant_list, user_img], tools=[], temperature=0.1)
         items = _msgs_of(req, "input")
         assert items[0] == {
+            "type": "message",
             "role": "assistant",
             "content": [{"type": "output_text", "text": "答案"}],
         }
         assert items[1] == {
+            "type": "message",
             "role": "user",
             "content": [
                 {"type": "input_text", "text": "看图"},

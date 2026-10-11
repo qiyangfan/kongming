@@ -97,6 +97,38 @@ async def assert_url_allowed(url: str) -> str:
     return pinned
 
 
+def assert_host_allowed_sync(host: str, port: int) -> None:
+    """主机级 SSRF 判定(非 HTTP 出站的同步形态;108 IMAP 消费)。与
+    assert_url_allowed 同一拒绝段单源(_is_denied_ip):字面 IP 直判,
+    域名解析后全量判定(任一地址落拒绝段即拒)。
+
+    同步 getaddrinfo 会阻塞,只供工作线程调用(调用方 _fetch_sync 已经
+    asyncio.to_thread 隔离),勿在事件循环线程直呼。无 HTTP 面的钉扎传输
+    可用(imaplib 无自定义连接工厂),解析-连接间存在理论 rebinding 窗口,
+    由连接超时收敛暴露面;主要攻击面(指向私网/元数据地址)在判定期关死。
+    """
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is not None:
+        if _is_denied_ip(ip):
+            raise SsrFBlocked(f"目标地址在拒绝段: {host}")
+        return
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        raise SsrFBlocked(f"域名解析失败: {host}") from e
+    for info in infos:
+        addr = info[4][0]
+        try:
+            resolved = ipaddress.ip_address(addr)
+        except ValueError:
+            raise SsrFBlocked(f"解析结果非法: {addr}") from None
+        if _is_denied_ip(resolved):
+            raise SsrFBlocked(f"{host} 解析到拒绝段地址: {addr}")
+
+
 class _PinnedTransport(httpx.AsyncHTTPTransport):
     """连接期 DNS 钉扎:URL host 换成判定时的 IP,Host 头/SNI 保原域名。"""
 
@@ -115,6 +147,10 @@ class _PinnedTransport(httpx.AsyncHTTPTransport):
             request.extensions["sni_hostname"] = original.host
             request.url = original.copy_with(host=self._pinned)
         return await super().handle_async_request(request)
+
+
+# 组合根跨域复用别名(099 连接器执行器出站钉扎;registry.LOCAL_HOSTS 同哲学)
+PinnedTransport = _PinnedTransport
 
 
 class HttpNodeRunner:

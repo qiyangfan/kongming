@@ -8,12 +8,13 @@
 import hashlib
 import json
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from typing import cast
 
 from redis.asyncio import Redis
 
-from kongming.rag.models import RagContext
+from kongming.config import DEFAULT_FULLTEXT_TS_CONFIG, validated_fulltext_ts_config
+from kongming.rag.models import RagContext, team_set_fingerprint
 
 log = logging.getLogger(__name__)
 
@@ -22,22 +23,48 @@ _CTX_TTL_SEC = 600
 _SCAN_COUNT = 100
 
 
-def _ctx_key(tenant_id: str, datasource_key: str, question: str) -> str:
+def _ctx_key(
+    tenant_id: str, datasource_key: str, question: str, ts_config: str, team_fp: str = "public"
+) -> str:
+    """键段序:租户/数据源/分词配置/团队集合指纹在 hash 前缀段(失效 SCAN 模式
+    `租户:数据源:*` 跨配置、跨可见集合全收——数据写失效本就应清全部变体),
+    问句材料(含 history/扩展开关等派生键材料)hash 在尾段。
+    102:团队集合指纹段(team_set_fingerprint,空集="public")——不同可见
+    集合的调用者 MUST NOT 互命中;团队关系变化→指纹变→自然隔离(TTL 吸收
+    旧条目),与 098 配置维度同一「键版本化」思路。"""
     digest = hashlib.sha256(question.encode("utf-8")).hexdigest()
-    return f"{_CTX_PREFIX}{tenant_id}:{datasource_key}:{digest}"
+    return f"{_CTX_PREFIX}{tenant_id}:{datasource_key}:{ts_config}:{team_fp}:{digest}"
 
 
 class ContextCache:
-    """fail-open:Redis 不可用时读=未命中、写/失效=放弃(仅告警)。"""
+    """fail-open:Redis 不可用时读=未命中、写/失效=放弃(仅告警)。
 
-    def __init__(self, redis: Redis | None) -> None:
+    098:键纳入分词配置维度(键版本化最简形态)——配置只在启动读、键含配置
+    即天然隔离,不做切换期主动清缓存;否则换配置后 TTL 窗口内会命中异分词
+    形态的旧输出(静默混用)。evict 模式不含配置段,跨配置全失效。
+    102:键纳入调用者团队集合指纹维度(同一思路)——可见集合因用户团队关系
+    而异,键含指纹即天然隔离;evict 模式同样不含指纹段,归属变更后跨集合全失效。
+    """
+
+    def __init__(self, redis: Redis | None, ts_config: str = DEFAULT_FULLTEXT_TS_CONFIG) -> None:
         self._redis = redis
+        self._ts = validated_fulltext_ts_config(ts_config)
 
-    async def get(self, tenant_id: str, datasource_key: str, question: str) -> RagContext | None:
+    async def get(
+        self,
+        tenant_id: str,
+        datasource_key: str,
+        question: str,
+        team_ids: Sequence[str] = (),
+    ) -> RagContext | None:
         if self._redis is None:
             return None
         try:
-            raw = await self._redis.get(_ctx_key(tenant_id, datasource_key, question))
+            raw = await self._redis.get(
+                _ctx_key(
+                    tenant_id, datasource_key, question, self._ts, team_set_fingerprint(team_ids)
+                )
+            )
         except Exception:  # noqa: BLE001
             log.warning("ctx 缓存读失败,按未命中处理", exc_info=True)
             return None
@@ -57,13 +84,20 @@ class ContextCache:
         )
 
     async def set(
-        self, tenant_id: str, datasource_key: str, question: str, ctx: RagContext
+        self,
+        tenant_id: str,
+        datasource_key: str,
+        question: str,
+        ctx: RagContext,
+        team_ids: Sequence[str] = (),
     ) -> None:
         if self._redis is None:
             return
         try:
             await self._redis.set(
-                _ctx_key(tenant_id, datasource_key, question),
+                _ctx_key(
+                    tenant_id, datasource_key, question, self._ts, team_set_fingerprint(team_ids)
+                ),
                 json.dumps(
                     {"schema_hint": ctx.schema_hint, "history_sql": ctx.history_sql},
                     ensure_ascii=False,

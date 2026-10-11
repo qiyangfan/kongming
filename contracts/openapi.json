@@ -2252,6 +2252,17 @@
             }
           },
           {
+            "name": "team_scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(all|public|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "default": "all",
+              "title": "Team Scope"
+            }
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -2418,6 +2429,75 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/rag/tables/{table_id}/ownership": {
+      "put": {
+        "tags": [
+          "rag"
+        ],
+        "summary": "Set Table Ownership",
+        "description": "归属变更(102):公共⇄团队原位转移(单一实例,内容不动)。\n\n非成员 404 同形(与不存在条目同 detail,不暴露存在性);VIEWER 403;\n变更落审计+精确失效检索缓存。web 侧走受控确认(AlertDialog 明示可见\n范围变化)。",
+        "operationId": "set_table_ownership_system_rag_tables__table_id__ownership_put",
+        "parameters": [
+          {
+            "name": "table_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Table Id"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OwnershipIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeItemOut"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -2615,7 +2695,7 @@
           "rag"
         ],
         "summary": "Recall Probe",
-        "description": "064:召回试跑(只读):三路命中及各自原生分、融合分、双条件判定结论。\n\n零副作用:SHALL NOT 修改配置、SHALL NOT 落库、SHALL NOT 触发召回缓存\n失效(不走 ctx 缓存)。影子形态含\"若生效将丢弃\"记录。两个高频场景:\n上传表说明后验证可召回性;影子期标定阈值(不等真实流量)。",
+        "description": "064:召回试跑(只读):三路命中及各自原生分、融合分、双条件判定结论。\n\n零副作用:SHALL NOT 修改配置、SHALL NOT 落库、SHALL NOT 触发召回缓存\n失效(不走 ctx 缓存)。两个高频场景:上传表说明后验证可召回性;闸门\n阈值标定(不等真实流量)。102:召回在调用者可见集合内(公共∪所在团队)。\n097:响应模型纯定型(键集=service 现值锁定,判定逻辑零变更)。",
         "operationId": "recall_probe_system_rag_recall_probe_get",
         "parameters": [
           {
@@ -2662,9 +2742,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Recall Probe System Rag Recall Probe Get"
+                  "$ref": "#/components/schemas/RecallProbeOut"
                 }
               }
             }
@@ -7160,6 +7238,75 @@
         }
       }
     },
+    "/system/mcp/{server_id}/prompts/preview": {
+      "post": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "Preview Prompt",
+        "description": "模板只读内容预览(109):按名实时拉取渲染结果,注入检测+大小上限;\n禁止注入任何提示词、非运行时提示来源(spec「模板只读边界」)。",
+        "operationId": "preview_prompt_system_mcp__server_id__prompts_preview_post",
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Server Id"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpPromptPreviewIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpPromptPreviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/mcp": {
       "post": {
         "tags": [
@@ -9244,6 +9391,140 @@
         }
       }
     },
+    "/system/bots/{bot_id}/versions": {
+      "get": {
+        "tags": [
+          "store"
+        ],
+        "summary": "List Bot Versions",
+        "operationId": "list_bot_versions_system_bots__bot_id__versions_get",
+        "parameters": [
+          {
+            "name": "bot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Bot Id"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BotVersionOut"
+                  },
+                  "title": "Response List Bot Versions System Bots  Bot Id  Versions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/bots/{bot_id}/versions/{version_no}/rollback": {
+      "post": {
+        "tags": [
+          "store"
+        ],
+        "summary": "Rollback Bot Version",
+        "description": "回滚=历史版本重新指为当前上架版本(视同上架,按现行护栏重审;\nBLOCK 拒绝指针不动;回滚到当前版本为幂等 no-op)。",
+        "operationId": "rollback_bot_version_system_bots__bot_id__versions__version_no__rollback_post",
+        "parameters": [
+          {
+            "name": "bot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Bot Id"
+            }
+          },
+          {
+            "name": "version_no",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Version No"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Rollback Bot Version System Bots  Bot Id  Versions  Version No  Rollback Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/store/bots": {
       "get": {
         "tags": [
@@ -10068,6 +10349,102 @@
                     "$ref": "#/components/schemas/BotBriefOut"
                   },
                   "title": "Response List Bots Brief Billing Bots Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/users": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "List Users Brief",
+        "description": "103:USER 级策略配置面用户下拉(挂 MANAGE 自供,解耦 user:manage——\n与 Bot 清单同解耦原则;软删用户不列)。",
+        "operationId": "list_users_brief_billing_users_get",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UserBriefOut"
+                  },
+                  "title": "Response List Users Brief Billing Users Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/teams": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "List Teams Brief",
+        "description": "103:TEAM 级策略配置面团队下拉(挂 MANAGE 自供,解耦 team:manage——\n与 Bot 清单同解耦原则)。",
+        "operationId": "list_teams_brief_billing_teams_get",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TeamBriefOut"
+                  },
+                  "title": "Response List Teams Brief Billing Teams Get"
                 }
               }
             }
@@ -12419,6 +12796,451 @@
         }
       }
     },
+    "/system/connectors": {
+      "get": {
+        "tags": [
+          "connector"
+        ],
+        "summary": "List Connectors",
+        "operationId": "list_connectors_system_connectors_get",
+        "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ConnectorOut"
+                  },
+                  "title": "Response List Connectors System Connectors Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "connector"
+        ],
+        "summary": "Create Connector",
+        "operationId": "create_connector_system_connectors_post",
+        "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectorIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/connectors/{connector_id}": {
+      "get": {
+        "tags": [
+          "connector"
+        ],
+        "summary": "Get Connector",
+        "operationId": "get_connector_system_connectors__connector_id__get",
+        "parameters": [
+          {
+            "name": "connector_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connector Id"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "connector"
+        ],
+        "summary": "Update Connector",
+        "operationId": "update_connector_system_connectors__connector_id__put",
+        "parameters": [
+          {
+            "name": "connector_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connector Id"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectorIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "connector"
+        ],
+        "summary": "Delete Connector",
+        "operationId": "delete_connector_system_connectors__connector_id__delete",
+        "parameters": [
+          {
+            "name": "connector_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connector Id"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/connectors/{connector_id}/enable": {
+      "post": {
+        "tags": [
+          "connector"
+        ],
+        "summary": "Enable Connector",
+        "operationId": "enable_connector_system_connectors__connector_id__enable_post",
+        "parameters": [
+          {
+            "name": "connector_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connector Id"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/connectors/{connector_id}/disable": {
+      "post": {
+        "tags": [
+          "connector"
+        ],
+        "summary": "Disable Connector",
+        "operationId": "disable_connector_system_connectors__connector_id__disable_post",
+        "parameters": [
+          {
+            "name": "connector_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connector Id"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/connectors/test-call": {
+      "post": {
+        "tags": [
+          "connector"
+        ],
+        "summary": "Test Call Connector",
+        "description": "测试调用(按当前表单声明真实出站一次;显式确认在 UI 层;落工具审计)。",
+        "operationId": "test_call_connector_system_connectors_test_call_post",
+        "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestCallIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestCallOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/healthz": {
       "get": {
         "tags": [
@@ -12762,6 +13584,18 @@
           "schema_name": {
             "type": "string",
             "title": "Schema Name"
+          },
+          "team_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Id"
           }
         },
         "type": "object",
@@ -12987,6 +13821,46 @@
         ],
         "title": "BotOut"
       },
+      "BotSnapshotOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "greeting": {
+            "type": "string",
+            "title": "Greeting",
+            "default": ""
+          },
+          "suggestions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Suggestions",
+            "default": []
+          },
+          "system_prompt": {
+            "type": "string",
+            "title": "System Prompt",
+            "default": ""
+          },
+          "tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tools",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "BotSnapshotOut",
+        "description": "版本快照定型(读侧单源=StoreSnapshotFields 白名单)。"
+      },
       "BotUpdateIn": {
         "properties": {
           "name": {
@@ -13076,6 +13950,34 @@
         },
         "type": "object",
         "title": "BotUpdateIn"
+      },
+      "BotVersionOut": {
+        "properties": {
+          "version_no": {
+            "type": "integer",
+            "title": "Version No"
+          },
+          "published_at": {
+            "type": "string",
+            "title": "Published At"
+          },
+          "current": {
+            "type": "boolean",
+            "title": "Current"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/BotSnapshotOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version_no",
+          "published_at",
+          "current",
+          "snapshot"
+        ],
+        "title": "BotVersionOut",
+        "description": "版本历史项(104):版本号/上架时间/当前标识/快照内容。"
       },
       "CallbackIn": {
         "properties": {
@@ -13939,6 +14841,199 @@
           "subgoal"
         ],
         "title": "CollabWorkerStartIn"
+      },
+      "ConnectorIn": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 2,
+            "title": "Key"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "method": {
+            "type": "string",
+            "maxLength": 8,
+            "minLength": 1,
+            "title": "Method"
+          },
+          "path_template": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Path Template"
+          },
+          "params": {
+            "items": {
+              "$ref": "#/components/schemas/ParamDeclIn"
+            },
+            "type": "array",
+            "title": "Params",
+            "default": []
+          },
+          "allowed_hosts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Allowed Hosts"
+          },
+          "auth_type": {
+            "type": "string",
+            "maxLength": 16,
+            "minLength": 1,
+            "title": "Auth Type"
+          },
+          "auth_secret": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auth Secret"
+          },
+          "requires_confirmation": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requires Confirmation"
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Timeout Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "description",
+          "method",
+          "path_template",
+          "allowed_hosts",
+          "auth_type",
+          "timeout_ms"
+        ],
+        "title": "ConnectorIn"
+      },
+      "ConnectorOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "path_template": {
+            "type": "string",
+            "title": "Path Template"
+          },
+          "params": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Params"
+          },
+          "allowed_hosts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Hosts"
+          },
+          "auth_type": {
+            "type": "string",
+            "title": "Auth Type"
+          },
+          "has_secret": {
+            "type": "boolean",
+            "title": "Has Secret"
+          },
+          "secret_mask": {
+            "type": "string",
+            "title": "Secret Mask"
+          },
+          "requires_confirmation": {
+            "type": "boolean",
+            "title": "Requires Confirmation"
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "title": "Timeout Ms"
+          },
+          "enabled": {
+            "type": "string",
+            "title": "Enabled"
+          },
+          "created_at": {
+            "title": "Created At"
+          },
+          "updated_at": {
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "tenant_id",
+          "key",
+          "name",
+          "description",
+          "method",
+          "path_template",
+          "params",
+          "allowed_hosts",
+          "auth_type",
+          "has_secret",
+          "secret_mask",
+          "requires_confirmation",
+          "timeout_ms",
+          "enabled"
+        ],
+        "title": "ConnectorOut",
+        "description": "连接器条目(掩码面;凭证只出形态与尾号掩码,spec「凭证不回显」)。"
       },
       "CostTrack": {
         "properties": {
@@ -15793,6 +16888,28 @@
             "type": "string",
             "title": "Alias",
             "default": ""
+          },
+          "team_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Id"
+          },
+          "team_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Name"
           }
         },
         "type": "object",
@@ -15871,6 +16988,164 @@
         ],
         "title": "LogoutRequest"
       },
+      "McpPromptArgOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "McpPromptArgOut",
+        "description": "模板参数声明(109)。"
+      },
+      "McpPromptEntryOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "arguments": {
+            "items": {
+              "$ref": "#/components/schemas/McpPromptArgOut"
+            },
+            "type": "array",
+            "title": "Arguments",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "McpPromptEntryOut",
+        "description": "提示模板清单条目(109;仅声明,渲染预览实时拉取)。"
+      },
+      "McpPromptPreviewIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "arguments": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Arguments",
+            "default": {}
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "McpPromptPreviewIn",
+        "description": "模板预览入参(109;按名 + 渲染 arguments)。"
+      },
+      "McpPromptPreviewOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "default": ""
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          },
+          "injection_hits": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Injection Hits",
+            "default": []
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "title": "McpPromptPreviewOut",
+        "description": "模板预览出参(109):净化后渲染文本 + 检测/截断标注。"
+      },
+      "McpResourceEntryOut": {
+        "properties": {
+          "uri": {
+            "type": "string",
+            "title": "Uri"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "media_type": {
+            "type": "string",
+            "title": "Media Type",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "uri"
+        ],
+        "title": "McpResourceEntryOut",
+        "description": "资源清单条目(109;快照面,白名单与详情展示同源)。"
+      },
       "McpServerIn": {
         "properties": {
           "server_key": {
@@ -15944,6 +17219,22 @@
             },
             "type": "array",
             "title": "Tools",
+            "default": []
+          },
+          "resources": {
+            "items": {
+              "$ref": "#/components/schemas/McpResourceEntryOut"
+            },
+            "type": "array",
+            "title": "Resources",
+            "default": []
+          },
+          "prompts": {
+            "items": {
+              "$ref": "#/components/schemas/McpPromptEntryOut"
+            },
+            "type": "array",
+            "title": "Prompts",
             "default": []
           },
           "last_sync_at": {
@@ -16049,6 +17340,28 @@
             ],
             "title": "Tools"
           },
+          "resources": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resources"
+          },
+          "prompts": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompts"
+          },
           "conflicts": {
             "anyOf": [
               {
@@ -16108,6 +17421,28 @@
               }
             ],
             "title": "Tools"
+          },
+          "resources": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resources"
+          },
+          "prompts": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompts"
           }
         },
         "type": "object",
@@ -16967,6 +18302,25 @@
         ],
         "title": "OverviewOut"
       },
+      "OwnershipIn": {
+        "properties": {
+          "team_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Id"
+          }
+        },
+        "type": "object",
+        "title": "OwnershipIn",
+        "description": "102:归属变更请求(team_id 空=转公共;非空=转该团队专属)。"
+      },
       "PackCreateIn": {
         "properties": {
           "pack_key": {
@@ -17140,6 +18494,39 @@
           "status"
         ],
         "title": "PackOut"
+      },
+      "ParamDeclIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "maxLength": 16,
+            "minLength": 1,
+            "title": "Type"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": false
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Description",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "ParamDeclIn"
       },
       "PaymentOut": {
         "properties": {
@@ -17444,7 +18831,7 @@
           },
           "scope": {
             "type": "string",
-            "pattern": "^(TENANT|BOT)$",
+            "pattern": "^(TENANT|BOT|USER|TEAM)$",
             "title": "Scope",
             "default": "TENANT"
           },
@@ -17714,6 +19101,232 @@
           "prefs"
         ],
         "title": "PrefsOut"
+      },
+      "ProbeExpansionOut": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/ProbeExpansionTableOut"
+            },
+            "type": "array",
+            "title": "Tables"
+          },
+          "fused_after": {
+            "items": {
+              "$ref": "#/components/schemas/ProbeSchemaTableOut"
+            },
+            "type": "array",
+            "title": "Fused After"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "tables",
+          "fused_after"
+        ],
+        "title": "ProbeExpansionOut",
+        "description": "关系扩展明细(095):enabled=False 或零关系行时 tables 为空表。"
+      },
+      "ProbeExpansionTableOut": {
+        "properties": {
+          "schema_name": {
+            "type": "string",
+            "title": "Schema Name"
+          },
+          "table_name": {
+            "type": "string",
+            "title": "Table Name"
+          },
+          "via": {
+            "$ref": "#/components/schemas/ProbeExpansionViaOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "schema_name",
+          "table_name",
+          "via"
+        ],
+        "title": "ProbeExpansionTableOut",
+        "description": "补入的扩展表 + 经由关系。"
+      },
+      "ProbeExpansionViaOut": {
+        "properties": {
+          "source_table": {
+            "type": "string",
+            "title": "Source Table"
+          },
+          "target_table": {
+            "type": "string",
+            "title": "Target Table"
+          },
+          "join_keys": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Join Keys"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_table",
+          "target_table",
+          "join_keys",
+          "source"
+        ],
+        "title": "ProbeExpansionViaOut",
+        "description": "扩展经由的关系行(rag.table_relations 行投影)。"
+      },
+      "ProbeFusedHitOut": {
+        "properties": {
+          "schema_name": {
+            "type": "string",
+            "title": "Schema Name"
+          },
+          "table_name": {
+            "type": "string",
+            "title": "Table Name"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "schema_name",
+          "table_name",
+          "score"
+        ],
+        "title": "ProbeFusedHitOut",
+        "description": "融合序命中(RRF 融合分,只用于排序与观测,非相关度)。"
+      },
+      "ProbeHitOut": {
+        "properties": {
+          "schema_name": {
+            "type": "string",
+            "title": "Schema Name"
+          },
+          "table_name": {
+            "type": "string",
+            "title": "Table Name"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "schema_name",
+          "table_name",
+          "score",
+          "source"
+        ],
+        "title": "ProbeHitOut",
+        "description": "单路命中项(score=该路原生分:向量路余弦相似度,全文路 ts_rank)。"
+      },
+      "ProbeRouteOut": {
+        "properties": {
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/ProbeHitOut"
+            },
+            "type": "array",
+            "title": "Hits"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProbeVerdictOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dropped": {
+            "type": "integer",
+            "title": "Dropped"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hits",
+          "dropped"
+        ],
+        "title": "ProbeRouteOut",
+        "description": "单路(向量/全文)投影:命中明细 + 判定结论 + 被裁命中数。\n\ndropped>0 = 该路不过闸整路被裁(恒裁剪形态,命中共进退)。"
+      },
+      "ProbeSchemaTableOut": {
+        "properties": {
+          "schema_name": {
+            "type": "string",
+            "title": "Schema Name"
+          },
+          "table_name": {
+            "type": "string",
+            "title": "Table Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "schema_name",
+          "table_name"
+        ],
+        "title": "ProbeSchemaTableOut",
+        "description": "两段限定名(扩展后融合集合项)。"
+      },
+      "ProbeVerdictOut": {
+        "properties": {
+          "passed": {
+            "type": "boolean",
+            "title": "Passed"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "top1": {
+            "type": "number",
+            "title": "Top1"
+          },
+          "mean_top_n": {
+            "type": "number",
+            "title": "Mean Top N"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "passed",
+          "reason",
+          "top1",
+          "mean_top_n",
+          "count"
+        ],
+        "title": "ProbeVerdictOut",
+        "description": "闸门判定结论(gate.GateVerdict.as_dict 投影:判定归因与分值观测)。"
       },
       "ProgressIn": {
         "properties": {
@@ -18142,6 +19755,51 @@
         ],
         "title": "RatingIn"
       },
+      "RecallProbeOut": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "gate_skipped": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gate Skipped"
+          },
+          "expansion": {
+            "$ref": "#/components/schemas/ProbeExpansionOut"
+          },
+          "vector": {
+            "$ref": "#/components/schemas/ProbeRouteOut"
+          },
+          "fulltext": {
+            "$ref": "#/components/schemas/ProbeRouteOut"
+          },
+          "fused": {
+            "items": {
+              "$ref": "#/components/schemas/ProbeFusedHitOut"
+            },
+            "type": "array",
+            "title": "Fused"
+          }
+        },
+        "type": "object",
+        "required": [
+          "question",
+          "expansion",
+          "vector",
+          "fulltext",
+          "fused"
+        ],
+        "title": "RecallProbeOut",
+        "description": "064 召回试跑响应(只读验证面;键集=service.recall_probe 现值锁定)。"
+      },
       "ReconcileOut": {
         "properties": {
           "idempotent": {
@@ -18561,6 +20219,18 @@
             "type": "array",
             "maxItems": 3,
             "title": "History"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
           }
         },
         "type": "object",
@@ -19757,6 +21427,28 @@
               }
             ],
             "title": "My Rating"
+          },
+          "version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version No"
+          },
+          "version_published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Published At"
           }
         },
         "type": "object",
@@ -20219,6 +21911,29 @@
         ],
         "title": "TaskPlanIn"
       },
+      "TeamBriefOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "team_key": {
+            "type": "string",
+            "title": "Team Key"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "team_key",
+          "name"
+        ],
+        "title": "TeamBriefOut"
+      },
       "TeamDetailOut": {
         "properties": {
           "team": {
@@ -20308,6 +22023,17 @@
               }
             ],
             "title": "Created At"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
           }
         },
         "type": "object",
@@ -20317,7 +22043,7 @@
           "name"
         ],
         "title": "TeamOut",
-        "description": "032 团队条目(审查循环 D-F2:契约化——曾裸 dict 使前端只能手写类型)。"
+        "description": "032 团队条目(审查循环 D-F2:契约化——曾裸 dict 使前端只能手写类型)。\n102 纯增可选 role:「我所在的团队」形态附带本人角色(OWNER/MEMBER 可写、\nVIEWER 只读,供知识库上传归属候选筛选);manage 面全量列表无此列=None。"
       },
       "TeamRenameIn": {
         "properties": {
@@ -20397,6 +22123,159 @@
           "tenant_name"
         ],
         "title": "TenantRefOut"
+      },
+      "TestCallIn": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 2,
+            "title": "Key"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "method": {
+            "type": "string",
+            "maxLength": 8,
+            "minLength": 1,
+            "title": "Method"
+          },
+          "path_template": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Path Template"
+          },
+          "params": {
+            "items": {
+              "$ref": "#/components/schemas/ParamDeclIn"
+            },
+            "type": "array",
+            "title": "Params",
+            "default": []
+          },
+          "allowed_hosts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Allowed Hosts"
+          },
+          "auth_type": {
+            "type": "string",
+            "maxLength": 16,
+            "minLength": 1,
+            "title": "Auth Type"
+          },
+          "auth_secret": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auth Secret"
+          },
+          "requires_confirmation": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requires Confirmation"
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Timeout Ms"
+          },
+          "args": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Args",
+            "default": {}
+          },
+          "use_saved_secret": {
+            "type": "boolean",
+            "title": "Use Saved Secret",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "description",
+          "method",
+          "path_template",
+          "allowed_hosts",
+          "auth_type",
+          "timeout_ms"
+        ],
+        "title": "TestCallIn",
+        "description": "测试调用入参:当前表单声明 + 可选示例入参;use_saved_secret=True 且\n材料留空时用存量凭证(编辑态先测后存的空框语义)。"
+      },
+      "TestCallOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "status_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Code"
+          },
+          "body_summary": {
+            "type": "string",
+            "title": "Body Summary",
+            "default": ""
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "title": "Duration Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "duration_ms"
+        ],
+        "title": "TestCallOut"
       },
       "TestConnectionIn": {
         "properties": {
@@ -21028,7 +22907,7 @@
           },
           "type": {
             "type": "string",
-            "pattern": "^(CRON|WEBHOOK)$",
+            "pattern": "^(CRON|WEBHOOK|EMAIL)$",
             "title": "Type"
           },
           "target_type": {
@@ -21078,6 +22957,56 @@
             "maxLength": 256,
             "title": "Secret",
             "default": ""
+          },
+          "max_retries": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 0.0,
+            "title": "Max Retries",
+            "default": 0
+          },
+          "imap_host": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Imap Host",
+            "default": ""
+          },
+          "imap_port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Imap Port",
+            "default": 993
+          },
+          "imap_tls": {
+            "type": "boolean",
+            "title": "Imap Tls",
+            "default": true
+          },
+          "imap_user": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Imap User",
+            "default": ""
+          },
+          "imap_password": {
+            "type": "string",
+            "maxLength": 256,
+            "title": "Imap Password",
+            "default": ""
+          },
+          "imap_folder": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Imap Folder",
+            "default": "INBOX"
+          },
+          "imap_poll_interval_sec": {
+            "type": "integer",
+            "maximum": 86400.0,
+            "minimum": 1.0,
+            "title": "Imap Poll Interval Sec",
+            "default": 300
           }
         },
         "type": "object",
@@ -21180,6 +23109,46 @@
               }
             ],
             "title": "Next Fire At"
+          },
+          "max_retries": {
+            "type": "integer",
+            "title": "Max Retries",
+            "default": 0
+          },
+          "imap_host": {
+            "type": "string",
+            "title": "Imap Host",
+            "default": ""
+          },
+          "imap_port": {
+            "type": "integer",
+            "title": "Imap Port",
+            "default": 993
+          },
+          "imap_tls": {
+            "type": "boolean",
+            "title": "Imap Tls",
+            "default": true
+          },
+          "imap_user": {
+            "type": "string",
+            "title": "Imap User",
+            "default": ""
+          },
+          "imap_folder": {
+            "type": "string",
+            "title": "Imap Folder",
+            "default": "INBOX"
+          },
+          "imap_poll_interval_sec": {
+            "type": "integer",
+            "title": "Imap Poll Interval Sec",
+            "default": 300
+          },
+          "has_imap_credential": {
+            "type": "boolean",
+            "title": "Has Imap Credential",
+            "default": false
           }
         },
         "type": "object",
@@ -21244,6 +23213,38 @@
               }
             ],
             "title": "Created At"
+          },
+          "attempt": {
+            "type": "integer",
+            "title": "Attempt",
+            "default": 1
+          },
+          "retry_of_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of Run Id"
+          },
+          "next_retry_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Retry At"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "default": ""
           }
         },
         "type": "object",
@@ -21330,6 +23331,56 @@
             "maxLength": 256,
             "title": "Secret",
             "default": ""
+          },
+          "max_retries": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 0.0,
+            "title": "Max Retries",
+            "default": 0
+          },
+          "imap_host": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Imap Host",
+            "default": ""
+          },
+          "imap_port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Imap Port",
+            "default": 993
+          },
+          "imap_tls": {
+            "type": "boolean",
+            "title": "Imap Tls",
+            "default": true
+          },
+          "imap_user": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Imap User",
+            "default": ""
+          },
+          "imap_password": {
+            "type": "string",
+            "maxLength": 256,
+            "title": "Imap Password",
+            "default": ""
+          },
+          "imap_folder": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Imap Folder",
+            "default": "INBOX"
+          },
+          "imap_poll_interval_sec": {
+            "type": "integer",
+            "maximum": 86400.0,
+            "minimum": 1.0,
+            "title": "Imap Poll Interval Sec",
+            "default": 300
           }
         },
         "type": "object",
@@ -21753,6 +23804,29 @@
           "total_tokens"
         ],
         "title": "UsageTrendPoint"
+      },
+      "UserBriefOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "nickname": {
+            "type": "string",
+            "title": "Nickname"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "nickname"
+        ],
+        "title": "UserBriefOut"
       },
       "UserCreateIn": {
         "properties": {

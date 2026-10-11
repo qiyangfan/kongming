@@ -1,8 +1,9 @@
 # pyright: reportPrivateUsage=false
-"""064-rag-relevance-gate 测试:分数出口/融合分算式/双条件判据/影子兼容。
+"""064-rag-relevance-gate 测试:分数出口/融合分算式/双条件判据/恒裁剪形态。
 
 宪法 Article III(先红后绿):「融合分不是相关度」的反例性质被固化为断言
-(锁死证据,防止后来者重新拿它当阈值)。
+(锁死证据,防止后来者重新拿它当阈值)。106 收编三态后闸门恒裁剪,
+verdict 恒产出。
 """
 
 from typing import Any, cast
@@ -84,54 +85,29 @@ def test_min_count_gate() -> None:
     assert verdict.passed is False
 
 
-# ── 3. 影子兼容(任务 1.5) ─────────────────────────────────────────
+# ── 3. 闸门消费(106 收编:恒裁剪,无 off/shadow 形态) ────────────────
 
 
-def test_gate_off_returns_all() -> None:
-    """任务 1.5:off 形态输出与现状逐字一致(闸门不裁任何命中)。"""
-    from kongming.rag.gate import GateResult
-
-    hits = [_Hit("a.b", 0.1), _Hit("c.d", 0.05)]
-    result: GateResult[_Hit] = gate_hits(
-        hits, mode="off", top1_threshold=0.8, min_count=1, mean_threshold=0.5, mean_window=3
-    )
-    assert result.passed == hits  # 原样(引用等同)
-
-
-def test_gate_primary_filters() -> None:
-    """primary 按路过闸:整路命中共进退——过闸全留,不过闸全裁(非按条过滤)。"""
+def test_gate_filters_by_route() -> None:
+    """恒裁剪按路过闸:整路命中共进退——过闸全留,不过闸全裁(非按条过滤);
+    verdict 恒产出。"""
     from kongming.rag.gate import GateResult
 
     strong = [_Hit("a.b", 0.9), _Hit("c.d", 0.6)]
     result: GateResult[_Hit] = gate_hits(
-        strong, mode="primary", top1_threshold=0.8, min_count=1, mean_threshold=0.5, mean_window=3
+        strong, top1_threshold=0.8, min_count=1, mean_threshold=0.5, mean_window=3
     )
     assert [h.key for h in result.passed] == ["a.b", "c.d"]  # 过闸:全留
-    assert result.would_drop == 0
+    assert result.dropped == 0
+    assert result.verdict is not None and result.verdict.passed is True
 
     weak = [_Hit("a.b", 0.2), _Hit("c.d", 0.1)]
     result2: GateResult[_Hit] = gate_hits(
-        weak, mode="primary", top1_threshold=0.8, min_count=1, mean_threshold=0.5, mean_window=3
+        weak, top1_threshold=0.8, min_count=1, mean_threshold=0.5, mean_window=3
     )
     assert result2.passed == []  # 不过闸:全裁
-    assert result2.would_drop == 2
-
-
-def test_gate_shadow_records_but_keeps() -> None:
-    """影子形态:命中仍进提示词,只增记录(丢弃数不改变返回)。"""
-    from kongming.rag.gate import GateResult
-
-    hits = [_Hit("a.b", 0.1), _Hit("c.d", 0.05)]
-    shadow_result: GateResult[_Hit] = gate_hits(
-        hits,
-        mode="shadow",
-        top1_threshold=0.8,
-        min_count=1,
-        mean_threshold=0.5,
-        mean_window=3,
-    )
-    assert shadow_result.passed == hits  # 影子不裁
-    assert shadow_result.would_drop == 2  # 但记录丢弃数
+    assert result2.dropped == 2
+    assert result2.verdict is not None and result2.verdict.passed is False
 
 
 # ── 4. 试跑端点(任务 1.7:同源断言/403/零写入) ───────────────────
@@ -166,16 +142,17 @@ async def test_recall_probe_same_source_as_main(
     for hit in body["vector"]["hits"]:
         assert isinstance(hit["score"], (int, float))
         assert hit["source"] == "vector"
-    # 模式缺省 off:verdict 透出(None 或判定结论)
-    assert body["mode"] == "off"
+    # 106 收编:无 mode 字段;verdict 恒产出(有知识)或旁路标注(零知识)
+    assert "mode" not in body
+    assert body["gate_skipped"] in (None, "no_knowledge")
 
 
 async def test_recall_probe_mirrors_no_knowledge_bypass(
     client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """试跑面镜像主链路零知识旁路(2026-10-10 对拍裁决):没灌知识时
-    primary 形态下 gate_skipped=no_knowledge、verdict 为 None——观测面不得
-    报 mean_below 与主链路「整路旁路」相悖误导标定。"""
+    gate_skipped=no_knowledge、verdict 为 None——观测面不得报 mean_below
+    与主链路「整路旁路」相悖误导排障。"""
     from kongming.auth.seed import seed_all
     from kongming.config import get_settings
     from tests.test_rag_recall import _ensure_default_tenant
@@ -185,27 +162,22 @@ async def test_recall_probe_mirrors_no_knowledge_bypass(
     tid = await _ensure_default_tenant(session)
     ds = "gate_probe_nok"  # 专用 ds:不灌任何知识(rag.table_descriptions 零行)
     await _register_datasource(session, tid, ds)
-    monkeypatch.setenv("KM_RAG_GATE_MODE", "primary")
-    get_settings.cache_clear()
-    try:
-        from tests.test_chat_query import _login
+    from tests.test_chat_query import _login
 
-        token = await _login(client, "admin", "admin123")  # SUPER_ADMIN(rag:manage 覆盖)
-        r = await client.get(
-            "/system/rag/recall-probe",
-            params={"question": "商品表有哪些列", "datasource_key": ds},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert r.status_code == 200, r.text
-        body = r.json()
-        assert body["mode"] == "primary"
-        assert body["gate_skipped"] == "no_knowledge"
-        assert body["vector"]["verdict"] is None
-        assert body["fulltext"]["verdict"] is None
-        assert body["vector"]["would_drop"] == 0
-        assert body["fulltext"]["would_drop"] == 0
-    finally:
-        get_settings.cache_clear()
+    token = await _login(client, "admin", "admin123")  # SUPER_ADMIN(rag:manage 覆盖)
+    r = await client.get(
+        "/system/rag/recall-probe",
+        params={"question": "商品表有哪些列", "datasource_key": ds},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "mode" not in body
+    assert body["gate_skipped"] == "no_knowledge"
+    assert body["vector"]["verdict"] is None
+    assert body["fulltext"]["verdict"] is None
+    assert body["vector"]["dropped"] == 0
+    assert body["fulltext"]["dropped"] == 0
 
 
 async def test_recall_probe_requires_perm(
@@ -323,8 +295,7 @@ async def test_gate_primary_drops_junk_on_inherited_route(
     )
     # 阈值 0.9:主路同种子命中=1.0 必过;继承路(测试替身 embedding 下
     # 无关文本亦有 ~0.73 相似度)top1/均值均 < 0.9 必裁—— isolates 出
-    # 「整路不相关」的判定
-    monkeypatch.setenv("KM_RAG_GATE_MODE", "primary")
+    # 「整路不相关」的判定(106:恒生效,无需再开 mode)
     monkeypatch.setenv("KM_RAG_GATE_VECTOR_TOP1", "0.9")
     monkeypatch.setenv("KM_RAG_GATE_VECTOR_MEAN", "0.9")
     get_settings.cache_clear()
@@ -347,48 +318,13 @@ async def test_gate_primary_drops_junk_on_inherited_route(
         get_settings.cache_clear()  # monkeypatch 撤销 env 后重建缺省设置
 
 
-async def test_gate_off_leaves_inherited_route_untouched(
-    client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """对照组:off(缺省)形态下继承路逐字旧行为——junk 仍经继承路进
-    提示词(证明上条测试的裁剪确由闸门造成,而非召回本身变化)。"""
-    from tests.test_rag_recall import _ensure_default_tenant, _seed_knowledge
-
-    await _embed_stub(monkeypatch)
-    tid = await _ensure_default_tenant(session)
-    ds = "gate_inherit_off"  # 另一专用 ds:与上条互不污染
-    await _register_datasource(session, tid, ds)
-    for i in range(5):
-        await _seed_knowledge(
-            session, tid, ds=ds, table=f"omain{i}", comment="商品表", embed_text="查询库存数量"
-        )
-    await _seed_knowledge(
-        session, tid, ds=ds, table="ojunk", comment="无关表", embed_text="完全不一样的另一主题"
-    )
-    r = await client.post(
-        "/internal/rag/retrieve",
-        json={
-            "tenant_key": "default",
-            "datasource_key": ds,
-            "question": "查询库存数量",
-            "history": ["梵高星月夜多少钱"],
-        },
-        headers=INTERNAL,
-    )
-    assert r.status_code == 200, r.text
-    hint = r.json()["schema_hint"]
-    assert "omain0" in hint
-    assert "ojunk" in hint  # off:继承路原样(junk 仍进——闸门要治的形态)
-
-
-def _gate_svc(mode: str, repo: object) -> RagService:
+def _gate_svc(repo: object) -> RagService:
     """最小闸门服务(repo 只被 recall 用;_apply_gate 直调不触)。"""
 
     settings = type(
         "GateSettings",
         (),
         {
-            "rag_gate_mode": mode,
             "rag_gate_vector_top1": 0.30,
             "rag_gate_vector_mean": 0.28,
             "rag_gate_fulltext_top1": 0.0,
@@ -411,19 +347,19 @@ def test_apply_gate_skipped_when_no_knowledge() -> None:
     验证:零知识数据源闸门自动旁路——「没灌知识」与「召回不相关」对闸门
     同为零命中,语义不可区分;旁路时 trace 如实标注 skipped=no_knowledge,
     不静默。"""
-    svc = _gate_svc("primary", repo=None)
+    svc = _gate_svc(repo=None)
     hits = [cast("RecallHit", _Hit("t1", 0.9))]
     out = svc._apply_gate("main", hits, [], knowledge_present=False)
-    assert out is None  # 整路旁路:primary 也不裁
-    assert svc._last_gate_trace["main"] == {"mode": "primary", "skipped": "no_knowledge"}
+    assert out is None  # 整路旁路:恒裁剪形态也不裁
+    assert svc._last_gate_trace["main"] == {"skipped": "no_knowledge"}
 
 
 def test_apply_gate_applies_when_knowledge_present() -> None:
-    svc = _gate_svc("primary", repo=None)
+    svc = _gate_svc(repo=None)
     low = [cast("RecallHit", _Hit("t1", 0.05))]
     out = svc._apply_gate("main", low, [], knowledge_present=True)
     assert out is not None
     kept_vec, _kept_ft = out
     assert kept_vec == []  # 低分裁掉(标定档 0.30 之下)
     trace = cast("dict[str, object]", svc._last_gate_trace["main"])
-    assert trace["vector_would_drop"] == 1  # gate_hits 计数语义
+    assert trace["vector_dropped"] == 1  # gate_hits 计数语义

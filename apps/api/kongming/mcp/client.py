@@ -10,11 +10,18 @@ data 行。大小闸:流式读取超 1MB 即中断(截断标记由调用方语�
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 import httpx
 
-from kongming.mcp.models import DiscoveredTool
+from kongming.mcp.models import (
+    DiscoveredPrompt,
+    DiscoveredResource,
+    DiscoveredTool,
+    ProbeResult,
+    PromptArgument,
+)
 from kongming.mcp.ports import McpCallError
 
 _CONTENT_CAP = 1 * 1024 * 1024  # 结果内容截断(design D4:截断附标记回灌)
@@ -22,6 +29,7 @@ _CONTENT_CAP = 1 * 1024 * 1024  # 结果内容截断(design D4:截断附标记�
 # 传输层须更高硬闸防 DoS——8MB 超即结构化错误(平台不失败)
 _TRANSPORT_CAP = 8 * 1024 * 1024
 _PROTOCOL_VERSION = "2025-03-26"
+_METHOD_NOT_FOUND = -32601  # JSON-RPC 方法不存在(MCP 原语不支持形态,109)
 
 log = logging.getLogger(__name__)
 
@@ -145,14 +153,22 @@ class HttpMcpCaller:
             err_text: object = err
             err_d = cast("dict[str, Any]", err) if isinstance(err, dict) else None
             msg = err_d.get("message", "?") if err_d is not None else str(err_text)
+            # 方法不存在(-32601)= 原语不支持形态(109,design D4):
+            # 独立分类,探测层收敛为「计数 0 不算失败」
+            if err_d is not None and err_d.get("code") == _METHOD_NOT_FOUND:
+                raise McpCallError("unsupported", str(msg)[:300])
             raise McpCallError("remote", str(msg)[:300])
         result = body.get("result")
         if not isinstance(result, dict):
             raise McpCallError("protocol", "缺 result 字段")
         return cast("dict[str, Any]", result)
 
-    async def handshake(self, *, endpoint: str, headers: dict[str, str]) -> int:
-        await self._rpc(
+    async def probe(self, *, endpoint: str, headers: dict[str, str]) -> ProbeResult:
+        """initialize 握手 + 三原语并行探测(109,design D4):能力未声明
+        即时短路(不发请求);方法不存在(-32601)= 不支持计数 0;超时/拒连/
+        协议错 = 结构化失败。「只有工具的简单 server」零感知;三原语并行
+        发起,探测耗时 ≈ 握手 + max(单原语)不随原语数线性叠加。"""
+        init = await self._rpc(
             endpoint=endpoint,
             headers=headers,
             method="initialize",
@@ -164,8 +180,51 @@ class HttpMcpCaller:
             rpc_id=1,
         )
         await self._notify_initialized(endpoint, headers)
-        tools = await self.list_tools(endpoint=endpoint, headers=headers)
-        return len(tools)
+        caps = init.get("capabilities")
+        caps_d = cast("dict[str, Any]", caps) if isinstance(caps, dict) else {}
+
+        probe_failures: dict[str, tuple[str, str]] = {}
+        probe_unsupported: set[str] = set()
+
+        async def _probe(
+            name: str, declared: bool, fetch: Callable[[], Awaitable[list[Any]]]
+        ) -> list[Any]:
+            if not declared:
+                probe_unsupported.add(name)  # 能力未声明:即时短路不发请求
+                return []
+            try:
+                return await fetch()
+            except McpCallError as e:
+                if e.kind == "unsupported" and name != "tools":
+                    # -32601 方法不存在=可选原语不支持,计数 0(109 design D4)
+                    probe_unsupported.add(name)
+                    return []
+                # tools 是核心原语(能力恒声明,宣告过即须能列):tools/list 回
+                # -32601 属协议不当行为,按失败处理——评审修复,原「unsupported」
+                # 分类会让 sync 以 ok=True 原子替换为空工具快照(静默清目录)
+                probe_failures[name] = (e.kind, e.detail)
+                return []
+
+        tools, resources, prompts = await asyncio.gather(
+            _probe("tools", True, lambda: self.list_tools(endpoint=endpoint, headers=headers)),
+            _probe(
+                "resources",
+                "resources" in caps_d,
+                lambda: self.list_resources(endpoint=endpoint, headers=headers),
+            ),
+            _probe(
+                "prompts",
+                "prompts" in caps_d,
+                lambda: self.list_prompts(endpoint=endpoint, headers=headers),
+            ),
+        )
+        return ProbeResult(
+            tools=cast("list[DiscoveredTool]", tools),
+            resources=cast("list[DiscoveredResource]", resources),
+            prompts=cast("list[DiscoveredPrompt]", prompts),
+            failures=probe_failures,
+            unsupported=frozenset(probe_unsupported),
+        )
 
     async def _notify_initialized(self, endpoint: str, headers: dict[str, str]) -> None:
         """R1-A6:initialized 通告(fire-and-forget)——官方 SDK 有态 server
@@ -230,6 +289,150 @@ class HttpMcpCaller:
                 )
             )
         return out
+
+    async def list_resources(
+        self, *, endpoint: str, headers: dict[str, str]
+    ) -> list[DiscoveredResource]:
+        """resources/list 发现(109):畸形条目跳过(宁缺毋滥),uri 必须非空。"""
+        result = await self._rpc(
+            endpoint=endpoint,
+            headers=headers,
+            method="resources/list",
+            params=None,
+            rpc_id=4,
+        )
+        raw = result.get("resources")
+        if not isinstance(raw, list):
+            raise McpCallError("protocol", "resources/list 缺 resources 数组")
+        out: list[DiscoveredResource] = []
+        for raw_item in cast("list[object]", raw):
+            if not isinstance(raw_item, dict):
+                continue
+            item = cast("dict[str, Any]", raw_item)
+            uri = item.get("uri")
+            if not isinstance(uri, str) or not uri:
+                continue  # 畸形条目跳过(白名单语义下 uri 是唯一键)
+            out.append(
+                DiscoveredResource(
+                    uri=uri,
+                    name=str(item.get("name") or ""),
+                    description=str(item.get("description") or ""),
+                    mime_type=str(item.get("mimeType") or ""),
+                )
+            )
+        return out
+
+    async def list_prompts(
+        self, *, endpoint: str, headers: dict[str, str]
+    ) -> list[DiscoveredPrompt]:
+        """prompts/list 发现(109):仅清单(name/description/arguments)。"""
+        result = await self._rpc(
+            endpoint=endpoint,
+            headers=headers,
+            method="prompts/list",
+            params=None,
+            rpc_id=5,
+        )
+        raw = result.get("prompts")
+        if not isinstance(raw, list):
+            raise McpCallError("protocol", "prompts/list 缺 prompts 数组")
+        out: list[DiscoveredPrompt] = []
+        for raw_item in cast("list[object]", raw):
+            if not isinstance(raw_item, dict):
+                continue
+            item = cast("dict[str, Any]", raw_item)
+            pname = item.get("name")
+            if not isinstance(pname, str) or not pname:
+                continue  # 畸形条目跳过(按名拉取的唯一键)
+            args_raw = item.get("arguments")
+            args: list[PromptArgument] = []
+            if isinstance(args_raw, list):
+                for raw_arg in cast("list[object]", args_raw):
+                    if not isinstance(raw_arg, dict):
+                        continue
+                    arg = cast("dict[str, Any]", raw_arg)
+                    arg_name = arg.get("name")
+                    if not isinstance(arg_name, str) or not arg_name:
+                        continue
+                    args.append(
+                        PromptArgument(
+                            name=arg_name,
+                            description=str(arg.get("description") or ""),
+                            required=arg.get("required") is True,
+                        )
+                    )
+            out.append(
+                DiscoveredPrompt(
+                    name=pname,
+                    description=str(item.get("description") or ""),
+                    arguments=tuple(args),
+                )
+            )
+        return out
+
+    async def read_resource(
+        self, *, endpoint: str, headers: dict[str, str], uri: str
+    ) -> dict[str, Any]:
+        """resources/read(109):文本形态限定——blob(二进制)拒绝不进观察;
+        语义截断同 tools/call(1MB 附标记,原始大小回传)。"""
+        result = await self._rpc(
+            endpoint=endpoint,
+            headers=headers,
+            method="resources/read",
+            params={"uri": uri},
+            rpc_id=6,
+        )
+        contents = result.get("contents")
+        if not isinstance(contents, list):
+            raise McpCallError("protocol", "resources/read 缺 contents 数组")
+        texts: list[str] = []
+        for raw_part in cast("list[object]", contents):
+            if not isinstance(raw_part, dict):
+                continue
+            part = cast("dict[str, Any]", raw_part)
+            if "blob" in part:
+                # 内容形态兜底(design Non-goal:二进制资源不进观察)
+                raise McpCallError("remote", "二进制资源不进观察(文本形态限定)")
+            if "text" in part:
+                texts.append(str(part.get("text") or ""))
+        joined = "\n".join(texts)
+        original_size = len(joined.encode("utf-8"))
+        truncated = original_size > _CONTENT_CAP
+        if truncated:
+            joined = joined.encode("utf-8")[:_CONTENT_CAP].decode("utf-8", errors="ignore")
+        return {
+            "content": joined,
+            "truncated": truncated,
+            "original_size": original_size,
+        }
+
+    async def get_prompt(
+        self,
+        *,
+        endpoint: str,
+        headers: dict[str, str],
+        name: str,
+        arguments: dict[str, str],
+    ) -> dict[str, Any]:
+        """prompts/get 按名渲染(109):管理面只读预览的实时数据源,不落库。"""
+        result = await self._rpc(
+            endpoint=endpoint,
+            headers=headers,
+            method="prompts/get",
+            params={"name": name, "arguments": arguments},
+            rpc_id=7,
+        )
+        messages = result.get("messages")
+        if not isinstance(messages, list):
+            raise McpCallError("protocol", "prompts/get 缺 messages 数组")
+        texts: list[str] = []
+        for raw_msg in cast("list[object]", messages):
+            if not isinstance(raw_msg, dict):
+                continue
+            content = cast("dict[str, Any]", raw_msg).get("content")
+            if isinstance(content, dict) and cast("dict[str, Any]", content).get("type") == "text":
+                texts.append(str(cast("dict[str, Any]", content).get("text") or ""))
+        return {"text": "\n\n".join(texts)}
 
     async def call(
         self,

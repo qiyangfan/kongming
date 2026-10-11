@@ -69,7 +69,8 @@ class TriggerScheduler:
         svc, close = await factory()
         try:
             now = dt.datetime.now(dt.timezone(dt.timedelta(hours=8)))
-            due = await svc.list_due(now_iso=now.isoformat())
+            now_iso = now.isoformat()
+            due = await svc.list_due(now_iso=now_iso)
         finally:
             await close()
         for row in due:
@@ -92,6 +93,36 @@ class TriggerScheduler:
             task = asyncio.create_task(self._fire_then_mark(tid))
             self._running[tid] = task
             # R1-T2:收割异常(防 "never retrieved" 噪音)
+            task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+        # 101:到期挂起重试扫描派发(与 cron 同 _running 互斥——重试执行中
+        # cron 到期记 SKIPPED;cron 执行中重试到期则顺延)
+        await self._tick_retries(now_iso=now_iso)
+        # 108:到期邮件触发器轮询派发(轮询间隔独立于 cron 表达式;
+        # 与 cron/重试共享 _running 互斥面,前次未完成记 SKIPPED)
+        await self._tick_emails(now_iso=now_iso)
+
+    async def _tick_retries(self, *, now_iso: str) -> None:
+        """扫描到期挂起重试并派发(101 调度重排):经同一 _running 互斥面,
+        重试与普通触发共享「执行中永不并发」保护。"""
+        factory = self._factory
+        if factory is None:
+            return
+        svc, close = await factory()
+        try:
+            due = await svc.list_due_retries(now_iso=now_iso)
+        finally:
+            await close()
+        for run_row in due:
+            tid = str(run_row["trigger_id"])
+            if tid in self._running:
+                if self._running[tid].done():
+                    del self._running[tid]
+                else:
+                    # 执行中永不并发:挂起重试顺延一个退避间隔(不取消)
+                    await self._defer_retry(run_row)
+                    continue
+            task = asyncio.create_task(self._fire_retry_then_close(tid, str(run_row["id"])))
+            self._running[tid] = task
             task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
     async def _fire_then_mark(self, trigger_id: str) -> None:
@@ -127,6 +158,96 @@ class TriggerScheduler:
         finally:
             await close()
             self._running.pop(trigger_id, None)
+
+    async def _fire_retry_then_close(self, trigger_id: str, run_id: str) -> None:
+        """派发单个到期重试(101):服务侧同路执行+落定+链推进;占用 _running
+        期间 cron 到期由既有保护记 SKIPPED。"""
+        factory = self._factory
+        if factory is None:
+            return
+        svc, close = await factory()
+        try:
+            await svc.fire_retry(run_id=run_id)
+        except Exception:
+            log.warning("trigger 重试派发异常 run=%s", run_id, exc_info=True)
+        finally:
+            await close()
+            self._running.pop(trigger_id, None)
+
+    async def _defer_retry(self, run_row: dict[str, Any]) -> None:
+        """挂起重试顺延(101):撞上在途执行推迟一个退避间隔。"""
+        factory = self._factory
+        if factory is None:
+            return
+        svc, close = await factory()
+        try:
+            await svc.defer_retry(run_id=str(run_row["id"]))
+        finally:
+            await close()
+
+    # ── 邮件入站轮询派发(108) ──
+
+    async def _tick_emails(self, *, now_iso: str) -> None:
+        """到期邮件触发器派发(108):轮询间隔(next_fire_at 节流)到期即轮;
+        前次轮询未完成记 SKIPPED(复用并发保护语义)且节流照推进。"""
+        factory = self._factory
+        if factory is None:
+            return
+        svc, close = await factory()
+        try:
+            due = await svc.list_due_emails(now_iso=now_iso)
+        finally:
+            await close()
+        for row in due:
+            tid = str(row["id"])
+            if tid in self._running:
+                if self._running[tid].done():
+                    del self._running[tid]
+                else:
+                    await self._record_email_skipped(row)
+                    continue
+            task = asyncio.create_task(
+                self._poll_email_then_mark(tid, int(row.get("imap_poll_interval_sec") or 300))
+            )
+            self._running[tid] = task
+            task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+
+    async def _poll_email_then_mark(self, trigger_id: str, interval_sec: int) -> None:
+        """单触发器轮询(108):轮询永不逃逸;节流无论成败照推进
+        (失败按间隔再试,不堆积)。"""
+        factory = self._factory
+        if factory is None:
+            return
+        svc, close = await factory()
+        try:
+            await svc.poll_email(trigger_id=trigger_id)
+        except Exception:
+            log.warning("trigger 邮件轮询异常 id=%s", trigger_id, exc_info=True)
+        finally:
+            try:
+                await svc.mark_email_polled(trigger_id=trigger_id, interval_sec=interval_sec)
+            except Exception:
+                log.warning("trigger 邮件轮询节流推进异常 id=%s", trigger_id, exc_info=True)
+            await close()
+            self._running.pop(trigger_id, None)
+
+    async def _record_email_skipped(self, row: dict[str, Any]) -> None:
+        """前次轮询未完成 → SKIPPED(108):复用并发保护语义;节流推进防
+        每 tick 重复判 SKIPPED。"""
+        factory = self._factory
+        if factory is None:
+            return
+        svc, close = await factory()
+        try:
+            await svc.record_skipped(
+                tenant_id=str(row["tenant_id"]), trigger_id=str(row["id"]), reason="前次轮询进行中"
+            )
+            await svc.mark_email_polled(
+                trigger_id=str(row["id"]),
+                interval_sec=int(row.get("imap_poll_interval_sec") or 300),
+            )
+        finally:
+            await close()
 
     async def _record_skipped(self, row: dict[str, Any], reason: str) -> None:
         factory = self._factory

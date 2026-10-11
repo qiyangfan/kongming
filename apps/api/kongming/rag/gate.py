@@ -11,8 +11,9 @@
   系统性惩罚单路真命中);
 - **零命中不投票**:某路零命中即该路不参与判定,SHALL NOT 把"零命中"
   当"低相关";
-- **影子先行**:shadow 只记录"若闸门生效会丢弃多少",不改变返回
-  (053 灰度范式复用;不新建灰度机制)。
+- **恒生效裁剪**(2026-10-11 owner 裁决收编三态):无生产流量,off/shadow/
+  primary 的标定前提不存在;零误拒对拍已证即直接切,不保留关闭/影子形态。
+  零知识数据源自动旁路在 service 层收口(zero-knowledge ≠ low-relevance)。
 """
 
 from collections.abc import Sequence
@@ -89,47 +90,38 @@ def is_relevant(
 
 @dataclass(frozen=True)
 class GateResult[T]:
-    """影子/主力的闸门消费结果(passed=实际进入提示词的命中;
-    would_drop=影子形态下"若生效将丢弃"的计数)。"""
+    """闸门消费结果(passed=进入提示词的命中——过闸全留;
+    dropped=整路被裁的命中数——不过闸全裁,路级命中共进退)。"""
 
     passed: list[T] = field(default_factory=list[T])
-    would_drop: int = 0
+    dropped: int = 0
     verdict: GateVerdict | None = None
 
 
 def gate_hits[T](
     hits: list[T],
     *,
-    mode: str,  # off | shadow | primary
     top1_threshold: float,
     min_count: int,
     mean_threshold: float,
     mean_window: int,
 ) -> GateResult[T]:
-    """闸门消费(纯函数)。
+    """闸门消费(纯函数,恒裁剪形态)。
 
-    - off:原样返回全部(would_drop=0)——与现状逐字一致(向后兼容);
-    - shadow:全部保留,但记录"若生效将丢弃"数与判定结论;
-    - primary:按判定裁剪(过闸的命中才进提示词);
-    - 零命中路:off/shadow 原样(零命中不投票,不裁);primary 下空集即空集。
+    过闸全留,不过闸整路全裁(非按条过滤);verdict 恒产出
+    (trace/试跑可观测)。零命中路:空集即空集(零命中不投票)。
     """
-    if mode == "off":
-        return GateResult[T](passed=hits, would_drop=0)
-    scored = [(h, getattr(h, "score", 0.0)) for h in hits]
+    scored = [_Score(getattr(h, "score", 0.0)) for h in hits]
     verdict = is_relevant(
-        [_Score(s) for _, s in scored],
+        scored,
         top1_threshold=top1_threshold,
         min_count=min_count,
         mean_threshold=mean_threshold,
         mean_window=mean_window,
     )
-    if mode == "shadow":
-        drop = 0 if verdict.passed else len(hits)
-        return GateResult[T](passed=hits, would_drop=drop, verdict=verdict)
-    # primary
     if verdict.passed:
-        return GateResult[T](passed=hits, would_drop=0, verdict=verdict)
-    return GateResult[T](passed=[], would_drop=len(hits), verdict=verdict)
+        return GateResult[T](passed=hits, dropped=0, verdict=verdict)
+    return GateResult[T](passed=[], dropped=len(hits), verdict=verdict)
 
 
 @dataclass(frozen=True)

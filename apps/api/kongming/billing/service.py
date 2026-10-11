@@ -79,77 +79,52 @@ class BillingService:
     ) -> tuple[bool, str, str]:
         """返回 (allowed, reject_dimension, warn_header_value)。
         无策略且无套餐=零判定(放行,零回归);任一超限=拒+审计。
-        035:BOT 级(scope_ref 命中当前 key 绑定 Bot)与租户级双路独立判定,
-        Bot 级先判先归因(拒绝维度文案带 BOT: 前缀)。"""
+        035:BOT 级(scope_ref 命中当前 key 绑定 Bot)与租户级双路独立判定。
+        103:扩展多路叠加——确定性顺序 TENANT → BOT → USER → TEAM 各自独立
+        判定,任一超限即拒;拒绝维度文案取「先命中的超限路」并带 scope 前缀
+        (租户级保持无前缀,BOT:/USER:/TEAM:),保证同请求拒绝归因稳定可测。
+        USER 级命中=调用 Bot 归属(created_by)该用户;TEAM 级命中=调用 Bot
+        现归属(team_id)该团队(用量联表解析,资源换队跟随现归属;引用目标
+        删除后聚合归零=策略零命中,不级联)。"""
         all_p = await self._repo.list_policies(tenant_id=tenant_id)
         policies = {p["dimension"]: p for p in all_p if p.get("scope") == "TENANT"}
-        bot_pols = {
-            p["dimension"]: p
-            for p in all_p
-            if p.get("scope") == "BOT" and bot_id and str(p.get("scope_ref")) == bot_id
-        }
         plan = await self._repo.get_tenant_plan(tenant_id=tenant_id)
-        # 无任何配置=零判定(spec「未配置零回归」)
-        if not policies and not bot_pols and plan is None:
-            return True, "", ""
         month = _current_month()
+        # ── 命中收集(判定多路化:各路策略互斥命中,零交互) ──
+        bot_pols: dict[str, dict[str, Any]] = {}
+        user_pols: dict[str, dict[str, Any]] = {}
+        team_pols: dict[str, dict[str, Any]] = {}
+        bot_owner: str | None = None
+        bot_team: str | None = None
+        if bot_id:
+            bot_pols = {
+                p["dimension"]: p
+                for p in all_p
+                if p.get("scope") == "BOT" and str(p.get("scope_ref")) == bot_id
+            }
+            info = await self._repo.bot_scope_info(bot_id=bot_id, tenant_id=tenant_id)
+            if info is not None:
+                bot_owner = str(info["created_by"]) if info.get("created_by") else None
+                bot_team = str(info["team_id"]) if info.get("team_id") else None
+            if bot_owner:
+                user_pols = {
+                    p["dimension"]: p
+                    for p in all_p
+                    if p.get("scope") == "USER" and str(p.get("scope_ref")) == bot_owner
+                }
+            if bot_team:
+                team_pols = {
+                    p["dimension"]: p
+                    for p in all_p
+                    if p.get("scope") == "TEAM" and str(p.get("scope_ref")) == bot_team
+                }
+        # 无任何配置=零判定(spec「未配置零回归」)
+        if not policies and not bot_pols and not user_pols and not team_pols and plan is None:
+            return True, "", ""
         warns: list[str] = []
-        # ── Bot 级(035;TOKENS/COST 两维,无套餐兜底=0 不限) ──
-        if bot_pols:
-            bot_tokens = await self._repo.month_bot_token_usage(
-                tenant_id=tenant_id, bot_id=str(bot_id), month=month
-            )
-            if "TOKENS" in bot_pols:
-                bp = bot_pols["TOKENS"]
-                vb = check_quota(
-                    used=bot_tokens,
-                    limit=int(bp["limit_value"]),
-                    warn_pct=int(bp["warn_pct"]),
-                    dimension="TOKENS",
-                )
-                if not vb.allowed:
-                    await self._audit(
-                        "billing.quota_reject",
-                        tenant_id,
-                        {
-                            "scope": "BOT",
-                            "bot_id": str(bot_id),
-                            "dimension": "TOKENS",
-                            "used": bot_tokens,
-                            "limit": int(bp["limit_value"]),
-                        },
-                    )
-                    return False, "BOT:TOKENS", ""
-                if vb.warn and int(bp["limit_value"]) > 0:
-                    warns.append(f"BOT:TOKENS {bot_tokens}/{int(bp['limit_value'])}")
-            if "COST" in bot_pols and int(bot_pols["COST"]["limit_value"]) > 0:
-                bp = bot_pols["COST"]
-                pm = int(plan["price_per_mtok"]) if plan else 0
-                bot_cost = estimate_cost(
-                    tokens=bot_tokens, calls=0, price_per_mtok=pm, price_per_call=0
-                )
-                vc = check_quota(
-                    used=bot_cost,
-                    limit=int(bp["limit_value"]),
-                    warn_pct=int(bp["warn_pct"]),
-                    dimension="COST",
-                )
-                if not vc.allowed:
-                    await self._audit(
-                        "billing.quota_reject",
-                        tenant_id,
-                        {
-                            "scope": "BOT",
-                            "bot_id": str(bot_id),
-                            "dimension": "COST",
-                            "used": bot_cost,
-                            "limit": int(bp["limit_value"]),
-                        },
-                    )
-                    return False, "BOT:COST", ""
-                if vc.warn:
-                    warns.append(f"BOT:COST {bot_cost}/{int(bp['limit_value'])}")
-        # ── 租户级(034 原逻辑,scope=TENANT 行) ──
+        pm_price = int(plan["price_per_mtok"]) if plan else 0
+
+        # ── 路 1:租户级(034 原逻辑,scope=TENANT 行;文案无前缀) ──
         tokens = await self._repo.month_token_usage(tenant_id=tenant_id, month=month)
         calls = await self._repo.month_call_count(tenant_id=tenant_id, month=month)
         # 限额解析:策略优先,套餐兜底(0=不限)
@@ -187,7 +162,7 @@ class BillingService:
             return False, "CALLS", ""
         vcost = None
         if cost_limit > 0:
-            pm = int(plan["price_per_mtok"]) if plan else 0
+            pm = pm_price
             pc = int(plan["price_per_call"]) if plan else 0
             cost = estimate_cost(tokens=tokens, calls=calls, price_per_mtok=pm, price_per_call=pc)
             vcost = check_quota(used=cost, limit=cost_limit, warn_pct=_wp("COST"), dimension="COST")
@@ -198,13 +173,176 @@ class BillingService:
                     {"dimension": "COST", "used": cost, "limit": cost_limit},
                 )
                 return False, "COST", ""
-        # 预警头(任一维达线;R1-A1:COST 分支此前漏算;035:BOT 级 warn 已入列)
+        # 预警头(任一维达线;R1-A1:COST 分支此前漏算)
         if vt.warn and token_limit > 0:
             warns.append(f"TOKENS {tokens}/{token_limit}")
         if vc.warn and call_limit > 0:
             warns.append(f"CALLS {calls}/{call_limit}")
         if vcost is not None and vcost.warn and cost_limit > 0:
             warns.append(f"COST {vcost.used}/{cost_limit}")
+        # ── 路 2:BOT 级(035;TOKENS/COST 两维,无套餐兜底=0 不限) ──
+        if bot_pols:
+            bot_tokens = await self._repo.month_bot_token_usage(
+                tenant_id=tenant_id, bot_id=str(bot_id), month=month
+            )
+            if "TOKENS" in bot_pols:
+                bp = bot_pols["TOKENS"]
+                vb = check_quota(
+                    used=bot_tokens,
+                    limit=int(bp["limit_value"]),
+                    warn_pct=int(bp["warn_pct"]),
+                    dimension="TOKENS",
+                )
+                if not vb.allowed:
+                    await self._audit(
+                        "billing.quota_reject",
+                        tenant_id,
+                        {
+                            "scope": "BOT",
+                            "bot_id": str(bot_id),
+                            "dimension": "TOKENS",
+                            "used": bot_tokens,
+                            "limit": int(bp["limit_value"]),
+                        },
+                    )
+                    return False, "BOT:TOKENS", ""
+                if vb.warn and int(bp["limit_value"]) > 0:
+                    warns.append(f"BOT:TOKENS {bot_tokens}/{int(bp['limit_value'])}")
+            if "COST" in bot_pols and int(bot_pols["COST"]["limit_value"]) > 0:
+                bp = bot_pols["COST"]
+                bot_cost = estimate_cost(
+                    tokens=bot_tokens, calls=0, price_per_mtok=pm_price, price_per_call=0
+                )
+                vc2 = check_quota(
+                    used=bot_cost,
+                    limit=int(bp["limit_value"]),
+                    warn_pct=int(bp["warn_pct"]),
+                    dimension="COST",
+                )
+                if not vc2.allowed:
+                    await self._audit(
+                        "billing.quota_reject",
+                        tenant_id,
+                        {
+                            "scope": "BOT",
+                            "bot_id": str(bot_id),
+                            "dimension": "COST",
+                            "used": bot_cost,
+                            "limit": int(bp["limit_value"]),
+                        },
+                    )
+                    return False, "BOT:COST", ""
+                if vc2.warn:
+                    warns.append(f"BOT:COST {bot_cost}/{int(bp['limit_value'])}")
+        # ── 路 3:USER 级(103;命中=调用 Bot 归属该用户;文案 USER: 前缀) ──
+        if user_pols:
+            user_tokens = await self._repo.month_user_token_usage(
+                tenant_id=tenant_id, user_id=bot_owner or "", month=month
+            )
+            if "TOKENS" in user_pols:
+                up = user_pols["TOKENS"]
+                vu = check_quota(
+                    used=user_tokens,
+                    limit=int(up["limit_value"]),
+                    warn_pct=int(up["warn_pct"]),
+                    dimension="TOKENS",
+                )
+                if not vu.allowed:
+                    await self._audit(
+                        "billing.quota_reject",
+                        tenant_id,
+                        {
+                            "scope": "USER",
+                            "user_id": bot_owner,
+                            "dimension": "TOKENS",
+                            "used": user_tokens,
+                            "limit": int(up["limit_value"]),
+                        },
+                    )
+                    return False, "USER:TOKENS", ""
+                if vu.warn and int(up["limit_value"]) > 0:
+                    warns.append(f"USER:TOKENS {user_tokens}/{int(up['limit_value'])}")
+            if "COST" in user_pols and int(user_pols["COST"]["limit_value"]) > 0:
+                up = user_pols["COST"]
+                user_cost = estimate_cost(
+                    tokens=user_tokens, calls=0, price_per_mtok=pm_price, price_per_call=0
+                )
+                vu2 = check_quota(
+                    used=user_cost,
+                    limit=int(up["limit_value"]),
+                    warn_pct=int(up["warn_pct"]),
+                    dimension="COST",
+                )
+                if not vu2.allowed:
+                    await self._audit(
+                        "billing.quota_reject",
+                        tenant_id,
+                        {
+                            "scope": "USER",
+                            "user_id": bot_owner,
+                            "dimension": "COST",
+                            "used": user_cost,
+                            "limit": int(up["limit_value"]),
+                        },
+                    )
+                    return False, "USER:COST", ""
+                if vu2.warn:
+                    warns.append(f"USER:COST {user_cost}/{int(up['limit_value'])}")
+        # ── 路 4:TEAM 级(103;命中=调用 Bot 现归属该团队;用量联表解析,
+        # 资源换队跟随现归属;团队删除后聚合归零=零命中;文案 TEAM: 前缀) ──
+        if team_pols:
+            team_tokens = await self._repo.month_team_token_usage(
+                tenant_id=tenant_id, team_id=bot_team or "", month=month
+            )
+            if "TOKENS" in team_pols:
+                tp = team_pols["TOKENS"]
+                vt2 = check_quota(
+                    used=team_tokens,
+                    limit=int(tp["limit_value"]),
+                    warn_pct=int(tp["warn_pct"]),
+                    dimension="TOKENS",
+                )
+                if not vt2.allowed:
+                    await self._audit(
+                        "billing.quota_reject",
+                        tenant_id,
+                        {
+                            "scope": "TEAM",
+                            "team_id": bot_team,
+                            "dimension": "TOKENS",
+                            "used": team_tokens,
+                            "limit": int(tp["limit_value"]),
+                        },
+                    )
+                    return False, "TEAM:TOKENS", ""
+                if vt2.warn and int(tp["limit_value"]) > 0:
+                    warns.append(f"TEAM:TOKENS {team_tokens}/{int(tp['limit_value'])}")
+            if "COST" in team_pols and int(team_pols["COST"]["limit_value"]) > 0:
+                tp = team_pols["COST"]
+                team_cost = estimate_cost(
+                    tokens=team_tokens, calls=0, price_per_mtok=pm_price, price_per_call=0
+                )
+                vt3 = check_quota(
+                    used=team_cost,
+                    limit=int(tp["limit_value"]),
+                    warn_pct=int(tp["warn_pct"]),
+                    dimension="COST",
+                )
+                if not vt3.allowed:
+                    await self._audit(
+                        "billing.quota_reject",
+                        tenant_id,
+                        {
+                            "scope": "TEAM",
+                            "team_id": bot_team,
+                            "dimension": "COST",
+                            "used": team_cost,
+                            "limit": int(tp["limit_value"]),
+                        },
+                    )
+                    return False, "TEAM:COST", ""
+                if vt3.warn:
+                    warns.append(f"TEAM:COST {team_cost}/{int(tp['limit_value'])}")
         return True, "", "; ".join(warns)
 
     # ── 配置 ──
@@ -225,18 +363,36 @@ class BillingService:
             raise BillingValidationError("limit_value 须 ≥0(0=不限)")
         if not 1 <= warn_pct <= 100:
             raise BillingValidationError("warn_pct 须 1-100")
-        # 035:scope 校验(BOT 级=该租户内 Bot;CALLS 维无 bot 归属不立约)
-        if scope not in ("TENANT", "BOT"):
-            raise BillingValidationError("scope 须为 TENANT/BOT")
-        if scope == "BOT":
-            if dimension == "CALLS":
-                raise BillingValidationError("CALLS 维度不支持 BOT 级配额")
-            if not scope_ref:
-                raise BillingValidationError("BOT 级须指定 scope_ref(bot_id)")
-            if not await self._repo.bot_exists_in_tenant(bot_id=scope_ref, tenant_id=tenant_id):
-                raise BillingNotFound("BOT_NOT_FOUND")
+        # 035/103:scope 校验(BOT=租户内 Bot;USER=租户内用户;TEAM=租户内
+        # 团队;CALLS 维无资源/用户/团队级归属口径,仅 TENANT 立约)
+        if scope not in ("TENANT", "BOT", "USER", "TEAM"):
+            raise BillingValidationError("scope 须为 TENANT/BOT/USER/TEAM")
+        if scope == "TENANT":
+            scope_ref = None  # 强制空(CHECK 互斥;防脏数据)
         else:
-            scope_ref = None  # TENANT 强制空(CHECK 互斥;防脏数据)
+            if dimension == "CALLS":
+                raise BillingValidationError("CALLS 维度仅支持 TENANT 级配额")
+            if not scope_ref:
+                raise BillingValidationError(f"{scope} 级须指定 scope_ref")
+            exists: bool
+            not_found: str
+            if scope == "BOT":
+                exists = await self._repo.bot_exists_in_tenant(
+                    bot_id=scope_ref, tenant_id=tenant_id
+                )
+                not_found = "BOT_NOT_FOUND"
+            elif scope == "USER":
+                exists = await self._repo.user_exists_in_tenant(
+                    user_id=scope_ref, tenant_id=tenant_id
+                )
+                not_found = "USER_NOT_FOUND"
+            else:  # TEAM
+                exists = await self._repo.team_exists_in_tenant(
+                    team_id=scope_ref, tenant_id=tenant_id
+                )
+                not_found = "TEAM_NOT_FOUND"
+            if not exists:
+                raise BillingNotFound(not_found)
         await self._repo.upsert_policy(
             tenant_id=tenant_id,
             dimension=dimension,

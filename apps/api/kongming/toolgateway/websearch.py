@@ -249,6 +249,50 @@ def _normalize_zhipu(body: dict[str, object]) -> list[dict[str, object]]:
     return cards
 
 
+def _alibaba_request(payload: dict[str, object]) -> dict[str, object]:
+    """alibaba 请求装配:query/count → {query, top_k, content_type}(105)。
+
+    方言固定 content_type=snippet(snippet/summary/mainText 三档中最廉价,
+    域检索卡语义只要摘要,summary/mainText 属增值解析面非本域语义);
+    top_k 官方文档无硬限(缺省 5),域级 1–10 边界由策略器先行约束;
+    query 官方文档无长度硬限(不同于 zhipu 70 截断),域级 500 上限先行约束。
+    鉴权为 Bearer 独立 OS- key(与百炼 sk- 不通用),头形态与出站通道既有
+    Bearer 装配一致——凭证由组合根注入执行器,不在此出现。
+    """
+    query = payload.get("query")
+    count = payload.get("count")
+    body: dict[str, object] = {"query": query, "content_type": "snippet"}
+    if isinstance(count, int) and not isinstance(count, bool):
+        body["top_k"] = count
+    return body
+
+
+def _normalize_alibaba(body: dict[str, object]) -> list[dict[str, object]]:
+    """alibaba 响应归一:result.search_result[].{title,link,snippet,content} → 检索卡。
+
+    字段名 link(非 url)归一为检索卡 url;snippet 缺失回退 content
+    (content_type=snippet 下 content 即摘要,防平台字段漂移吐空卡)。
+    """
+    result = _as_dict(body.get("result"))
+    raw = result.get("search_result") if result is not None else None
+    if not isinstance(raw, list):
+        raise WebSearchError(f"{_PROTOCOL_PREFIX} 检索响应缺 search_result 列表")
+    cards: list[dict[str, object]] = []
+    for item in cast("list[object]", raw):
+        d = _as_dict(item)
+        if d is None:
+            continue
+        url = d.get("link")
+        if not isinstance(url, str) or not url:
+            continue  # 无链接卡片对 LLM 无用,丢弃不透传
+        title = d.get("title") if isinstance(d.get("title"), str) else ""
+        snippet = d.get("snippet") if isinstance(d.get("snippet"), str) else ""
+        if not snippet and isinstance(d.get("content"), str):
+            snippet = d.get("content") or ""
+        cards.append({"title": title, "url": url, "snippet": snippet})
+    return cards
+
+
 # 供应商适配注册表(新供应商=增一条映射,design D1):
 # 请求装配(统一参数→供应商方言)+ 响应归一(供应商报文→统一检索卡)
 _Adapter = tuple[
@@ -259,6 +303,7 @@ _ADAPTERS: dict[str, _Adapter] = {
     "tavily": (_tavily_request, _normalize_tavily),
     "bocha": (_bocha_request, _normalize_bocha),
     "zhipu": (_zhipu_request, _normalize_zhipu),
+    "alibaba_ai_search": (_alibaba_request, _normalize_alibaba),
 }
 
 

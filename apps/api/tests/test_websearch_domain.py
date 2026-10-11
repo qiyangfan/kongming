@@ -38,7 +38,7 @@ from tests.test_external_knowledge import _http_response, _Stub
 
 def test_provider_registry_single_source() -> None:
     """供应商注册表单源:端点/白名单主机成对声明;工具名→域映射收录 websearch。"""
-    assert set(WEBSEARCH_PROVIDERS) == {"tavily", "bocha", "zhipu"}
+    assert set(WEBSEARCH_PROVIDERS) == {"tavily", "bocha", "zhipu", "alibaba_ai_search"}
     tavily = WEBSEARCH_PROVIDERS["tavily"]
     assert tavily.endpoint == "https://api.tavily.com/search"
     assert tavily.host == "api.tavily.com"
@@ -48,10 +48,41 @@ def test_provider_registry_single_source() -> None:
     zhipu = WEBSEARCH_PROVIDERS["zhipu"]
     assert zhipu.endpoint == "https://open.bigmodel.cn/api/paas/v4/web_search"
     assert zhipu.host == "open.bigmodel.cn"
+    alibaba = WEBSEARCH_PROVIDERS["alibaba_ai_search"]
+    assert alibaba.endpoint == (
+        "https://platform-cn-shanghai.opensearch.aliyuncs.com"
+        "/v3/openapi/workspaces/default/web-search/ops-web-search-001"
+    )
+    assert alibaba.host == "platform-cn-shanghai.opensearch.aliyuncs.com"
     assert DOMAIN_TOOLS["web_search"] == "websearch"
     # 数据表与适配表同键(评审 D2:只加数据不加适配会在启动期 ValueError 拒启,
     # fail-closed 够响,但同键断言把漂移挡在测试层)
     assert set(WEBSEARCH_PROVIDERS) == set(_ADAPTERS)
+
+
+def test_provider_manifest_derivation_covers_registry() -> None:
+    """105:域清单端点与出口白名单由供应商单源派生(组合根 _build_gateway 同构
+    入参)——注册表任一供应商(含新增 alibaba)自动进清单,白名单=注册主机
+    精确匹配,无需逐供应商接线。"""
+    for spec in WEBSEARCH_PROVIDERS.values():
+        manifest, warnings = load_manifest(
+            [
+                {
+                    "id": "websearch",
+                    "endpoint": spec.endpoint,
+                    "whitelist_hosts": [spec.host],
+                    "timeout_ms": 3000,
+                    "quota_per_minute": 60,
+                    "redaction": "allowlist:websearch",
+                }
+            ]
+        )
+        assert warnings == []
+        assert manifest["websearch"].endpoint == spec.endpoint
+        assert manifest["websearch"].whitelist_hosts == (spec.host,)
+        policy = WebSearchPolicy(whitelist_hosts=manifest["websearch"].whitelist_hosts)
+        assert policy.exit_host_allowed(spec.host)
+        assert not policy.exit_host_allowed("evil.example.com")
 
 
 # ── 域策略器(纯函数) ──
@@ -357,6 +388,102 @@ async def test_executor_zhipu_malformed_no_retry() -> None:
     assert stub.stub.connections == 1
 
 
+# 官方「联网搜索API参考」响应示例剪裁(105 契约桩夹具,2026-10-11 核对):
+# result.search_result[].{title,link,snippet,content} + position/meta_info 附加字段
+_ALIBABA_SAMPLE_BODY = {
+    "request_id": "5B9F5A24-8F1D-****-B7E2-3C6A1D9E4F02",
+    "latency": 2.3,
+    "usage": {"ops-web-search-001/pro": 1},
+    "result": {
+        "search_result": [
+            {
+                "title": "杭州气象微博",
+                "link": "https://www.hzqx.cn/pc/hztq/",
+                "snippet": "较昨日同期 持平 相对湿度:-% 风力:- 实时数据、未经人工复核",
+                "position": None,
+                "meta_info": {"publishedTime": "2026-08-26T10:55:00+08:00"},
+                "content": "杭州气象微博\n较昨日同期 持平\n相对湿度: -- % 风力: --",
+            },
+            {
+                "title": "杭州7天天气",
+                "link": "https://www.ip.cn/tianqi/zhejiang/hangzhou/7day.html",
+                "snippet": "杭州天气:2026-08-20至2026-08-26 天气预报 中雨转多云 25℃～31℃",
+            },
+            {"title": "无链接", "snippet": "缺 link 卡片应丢弃"},
+        ]
+    },
+}
+
+
+@pytest.mark.asyncio
+async def test_executor_alibaba_adaptation() -> None:
+    """alibaba 适配:OS- 独立 key 的 Bearer 头、方言参数(top_k/content_type=snippet)、
+    result.search_result[].{link→url,snippet} 归一为检索卡(缺 link 卡丢弃,
+    position/meta_info/usage 附加字段不入观察——redact allowlist)。"""
+    stub = _RecordingStub(_http_response(json.dumps(_ALIBABA_SAMPLE_BODY)))
+    try:
+        gw = _gateway_with_websearch(stub.port, "alibaba_ai_search", api_key="OS-test-key")
+        out = await _websearch_once(gw)
+    finally:
+        stub.close()
+    assert out["status"] == "executed", out
+    result = cast("dict[str, object]", out["result"])
+    cards = cast("list[dict[str, object]]", result["results"])
+    assert cards == [
+        {
+            "title": "杭州气象微博",
+            "url": "https://www.hzqx.cn/pc/hztq/",
+            "snippet": "较昨日同期 持平 相对湿度:-% 风力:- 实时数据、未经人工复核",
+        },
+        {
+            "title": "杭州7天天气",
+            "url": "https://www.ip.cn/tianqi/zhejiang/hangzhou/7day.html",
+            "snippet": "杭州天气:2026-08-20至2026-08-26 天气预报 中雨转多云 25℃～31℃",
+        },
+    ]
+    req = stub.seen[0]
+    assert "Authorization: Bearer OS-test-key" in req["headers"]  # OS- 独立 key 形态
+    sent = json.loads(req["body"])
+    assert sent == {"query": "kongming 工具网关", "top_k": 2, "content_type": "snippet"}
+
+
+@pytest.mark.asyncio
+async def test_executor_alibaba_malformed_no_retry() -> None:
+    """alibaba 缺 result.search_result 列表:报文畸形显式按 protocol 收口不重试
+    (不静默吐空)。"""
+    stub = _RecordingStub(_http_response(json.dumps({"request_id": "req-1", "latency": 2.0})))
+    try:
+        gw = _gateway_with_websearch(stub.port, "alibaba_ai_search", api_key="OS-test-key")
+        out = await _websearch_once(gw)
+    finally:
+        stub.close()
+    assert out["status"] == "error"
+    assert str(out["reason"]).startswith("protocol: 检索响应缺 search_result 列表")
+    assert stub.stub.connections == 1
+
+
+@pytest.mark.asyncio
+async def test_executor_alibaba_empty_result_honest() -> None:
+    """alibaba 空结果如实表达:search_result 空表 → executed + 空列表
+    (分发层按列表长度装配 count,空表即计数 0,不编造命中)。"""
+    body = json.dumps(
+        {
+            "request_id": "req-1",
+            "usage": {"ops-web-search-001/pro": 1},
+            "result": {"search_result": []},
+        }
+    )
+    stub = _RecordingStub(_http_response(body))
+    try:
+        gw = _gateway_with_websearch(stub.port, "alibaba_ai_search", api_key="OS-test-key")
+        out = await _websearch_once(gw)
+    finally:
+        stub.close()
+    assert out["status"] == "executed", out
+    result = cast("dict[str, object]", out["result"])
+    assert result["results"] == []
+
+
 @pytest.mark.asyncio
 async def test_executor_protocol_failures_no_retry() -> None:
     """响应类失败(HTTP 500/报文畸形)不重试:单连接即收口。"""
@@ -570,6 +697,9 @@ _PROD_KW: dict[str, Any] = {
     "internal_token": "k",
     "datasource_encrypt_key": "k" * 32,
     "billing_mock_enabled": False,
+    # 100:ticket 组合残缺 prod 拒启——钉空隔离本机 KM_TICKET_*(同上口径)
+    "ticket_base_url": "",
+    "ticket_api_key": "",
 }
 
 

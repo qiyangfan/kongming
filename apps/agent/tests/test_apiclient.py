@@ -72,3 +72,29 @@ async def test_rag_retrieve_doc_hints_citation_key_passthrough(
     assert result.doc_hints[0]["citation_key"] == "policy-A1B2"
     # 键缺失(旧版 api)=空串:注入段表头与合法键集按既有空值语义回退 source_ref
     assert result.doc_hints[1]["citation_key"] == ""
+
+
+async def test_rag_retrieve_user_id_payload_wiring(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """102 接线:user_id 携带时进回调负载;缺省(含 None/空串)不携带该键
+    ——负载与既有形态逐字节同形(可见集合缺省=纯公共,api 侧零回归)。"""
+    client = ApiClient(Settings())
+    captured: list[dict[str, object]] = []
+
+    async def fake_post(self: ApiClient, path: str, payload: dict[str, object]) -> httpx.Response:
+        captured.append(dict(payload))
+        return httpx.Response(200, json={"schema_hint": "", "history_sql": ""})
+
+    monkeypatch.setattr(ApiClient, "_post", fake_post)
+    await client.rag_retrieve(
+        tenant_key="t",
+        datasource_key="default",
+        question="q",
+        user_id="01913b2e-7f2a-7cc2-9a4e-1c50f3e0c9d1",
+    )
+    assert captured[0]["user_id"] == "01913b2e-7f2a-7cc2-9a4e-1c50f3e0c9d1"
+    await client.rag_retrieve(tenant_key="t", datasource_key="default", question="q")
+    assert "user_id" not in captured[1]
+    await client.rag_retrieve(tenant_key="t", datasource_key="default", question="q", user_id=None)
+    assert "user_id" not in captured[2]

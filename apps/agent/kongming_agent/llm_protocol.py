@@ -405,17 +405,20 @@ def _responses_input_items(messages: Sequence[Mapping[str, object]]) -> list[dic
                 p if p.get("type") == "input_image" else {"type": part_type, "text": p["text"]}
                 for p in parts
             ]
-            items.append({"role": role, "content": content_items})
+            # type 显式补 message(role 消息省略 type 虽为官方缺省语义,但 muniu
+            # 入站仅认显式形态——2026-10-11 流式 e2e 实证)
+            items.append({"type": "message", "role": role, "content": content_items})
         elif isinstance(content, str) and content:
-            if role == "assistant":
-                items.append(
-                    {
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": content}],
-                    }
-                )
-            else:
-                items.append({"role": role, "content": content})
+            # 纯文本统一发 part 数组形态(与字符串快捷形态在 Responses 规范内等价,
+            # 对下游兼容面更宽:muniu 入站仅收数组形态——2026-10-11 流式 e2e 实证)
+            text_part_type = "output_text" if role == "assistant" else "input_text"
+            items.append(
+                {
+                    "type": "message",
+                    "role": role,
+                    "content": [{"type": text_part_type, "text": content}],
+                }
+            )
         if role == "assistant" and isinstance(msg.get("tool_calls"), list):
             # assistant 工具调用轮:function_call 项随文本之后按序展开(原文 arguments)
             for tc in cast("list[object]", msg.get("tool_calls")):

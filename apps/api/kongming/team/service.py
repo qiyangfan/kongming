@@ -1,5 +1,11 @@
-"""team 用例编排(032):CRUD+成员管理+归属变更。零框架(宪法 Article II)。"""
+"""team 用例编排(032):CRUD+成员管理+归属变更。零框架(宪法 Article II)。
 
+102:团队删除挂知识公共化后置钩子(KnowledgePublicizer,组合根注入 rag 域
+适配)——名下知识条目归属置空+审计,知识资产不因团队解散丢失;钩子失败
+告警不阻塞删除(FK ON DELETE SET NULL 级联兜底公共化)。
+"""
+
+import logging
 from typing import Any, Protocol
 
 from kongming.team.models import (
@@ -10,6 +16,8 @@ from kongming.team.models import (
 )
 from kongming.team.ports import TeamRepo
 
+log = logging.getLogger(__name__)
+
 
 class TeamForbiddenError(Exception):
     """403(成员但角色不足/末位 OWNER/目标团队非 OWNER)。"""
@@ -19,10 +27,25 @@ class TeamOperLogger(Protocol):
     async def log(self, *, action: str, target: str, detail: dict[str, object]) -> None: ...
 
 
+class KnowledgePublicizer(Protocol):
+    """团队删除后置钩子(102):其名下知识条目公共化(team_id 置空)+审计。
+
+    领域只见协议;实现=组合根注入的 rag 域适配(savepoint 包裹,失败只回滚
+    自身)。抛错由 TeamService 捕获告警,SHALL NOT 阻塞团队删除。"""
+
+    async def publicize(self, *, team_id: str) -> None: ...
+
+
 class TeamService:
-    def __init__(self, repo: TeamRepo, oper: TeamOperLogger | None = None) -> None:
+    def __init__(
+        self,
+        repo: TeamRepo,
+        oper: TeamOperLogger | None = None,
+        knowledge_publicizer: KnowledgePublicizer | None = None,  # 102
+    ) -> None:
         self._repo = repo
         self._oper = oper
+        self._knowledge_publicizer = knowledge_publicizer
 
     async def _audit(self, action: str, target: str, detail: dict[str, object]) -> None:
         if self._oper is not None:
@@ -67,6 +90,17 @@ class TeamService:
     async def delete(self, *, tenant_id: str, team_id: str) -> None:
         # 资源回个人(不丢资源),成员连带清
         await self._repo.clear_team_on_resources(team_id=team_id)
+        # 102:知识条目公共化后置钩子——失败告警不阻塞删除(design D4:
+        # 条目残留按团队不存在=不可见;FK 级联 SET NULL 兜底公共化,不丢资产)
+        if self._knowledge_publicizer is not None:
+            try:
+                await self._knowledge_publicizer.publicize(team_id=team_id)
+            except Exception:  # noqa: BLE001  # 钩子失败 SHALL NOT 阻塞删除
+                log.warning(
+                    "知识条目公共化钩子失败(团队删除继续,级联兜底公共化): team=%s",
+                    team_id,
+                    exc_info=True,
+                )
         if not await self._repo.delete_team(tenant_id=tenant_id, team_id=team_id):
             raise TeamNotFound(team_id)
         await self._audit("team.delete", team_id, {})

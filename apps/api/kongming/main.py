@@ -31,6 +31,7 @@ from kongming.bot.router import public_router as bot_public_router
 from kongming.bot.router import router as bot_router
 from kongming.chat.router import router as chat_router
 from kongming.config import get_settings
+from kongming.connector.router import router as connector_router
 from kongming.datasource.cipher import get_cipher
 from kongming.datasource.router import register_datasource_error_handlers
 from kongming.datasource.router import router as datasource_router
@@ -207,6 +208,14 @@ def _warn_websearch_misconfiguration() -> None:
         log.warning("websearch:%s", misconfig)
 
 
+def _warn_ticket_misconfiguration() -> None:
+    """100:ticket 组合残缺的 dev 告警降级(prod 由 config.fail_closed_checks
+    拒启;lifespan 调用;测试直调——_warn_websearch_misconfiguration 同款)。"""
+    misconfig = get_settings().ticket_misconfiguration()
+    if misconfig:
+        log.warning("ticket:%s", misconfig)
+
+
 async def _knowledge_endpoint(session: AsyncSession) -> str | None:
     """081/082:个人知识库端点注册条件;多租户仅告警不拒绝(082 单租户闸降级)。
 
@@ -246,6 +255,11 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
     guard.configure(get_settings().sqlguard_mode)
     guard.startup_self_check()
     async with get_sessionmaker()() as session:
+        # 098:全文分词配置目标存在性自检(缺失 fail-closed 拒启,prod/dev 同;
+        # 检索配置降级=换词法,与存量 tsv 错配,无安全降级形态)
+        from kongming.rag.repository import assert_fulltext_ts_config_available
+
+        await assert_fulltext_ts_config_available(session, get_settings().rag_fulltext_ts_config)
         await seed_all(session, get_settings())
         # 090:重启扫描——存量 RUNNING/PLANNING 任务标记 INTERRUPTED(不谎称完成),
         # 顺带清理挂起超 TTL 的审批步骤(必须经 service:repo 直调会漏掉审批清扫)
@@ -267,11 +281,14 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
             if nr:
                 log.info("启动扫描:%d 个滞留 GENERATING 的报告标记 FAILED", nr)
         _warn_websearch_misconfiguration()  # 094(prod 已拒启;dev 告警降级)
+        _warn_ticket_misconfiguration()  # 100(同上口径)
         tool_registry.activate(
             tool_registry.build_registry(
                 await _knowledge_endpoint(session),
                 websearch_provider=get_settings().websearch_provider,
                 websearch_api_key=get_settings().websearch_api_key,
+                ticket_base_url=get_settings().ticket_base_url,
+                ticket_api_key=get_settings().ticket_api_key,
             )
         )
         # 0044:域启停持久状态装载(重启/多副本以库收敛;无网关静默跳过)
@@ -366,6 +383,7 @@ app.include_router(report_router)
 app.include_router(report_internal_router)
 app.include_router(task_router)
 app.include_router(task_internal_router)
+app.include_router(connector_router)
 register_auth_error_handlers(app)
 register_system_error_handlers(app)
 register_datasource_error_handlers(app)

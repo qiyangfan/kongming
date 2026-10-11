@@ -5,7 +5,27 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from kongming.toolgateway.models import WEBSEARCH_PROVIDERS
+from kongming.toolgateway.models import WEBSEARCH_PROVIDERS, parse_ticket_endpoint
+
+# 098:全文检索分词配置白名单(部署级单值;rag 表说明路与 document-rag 文档面
+# 同源)。单点在 config 层(域内只消费注入值):配置名是 SQL 标识符无法绑定
+# 参数,内联进 SQL 前必须过白名单——开放任意 ts_config 名是 SQL 注入面与拼错
+# 静默失效的双风险(098 design D2);新分词器=白名单加一项+文档。缺省 simple
+# 零回归。不落 rag 域包:auth 域经 auth.ports→config 的既有依赖链不得反向
+# 触达 kongming.rag(import-linter 契约)。
+FULLTEXT_TS_CONFIGS: tuple[str, ...] = ("simple", "zhparser")
+DEFAULT_FULLTEXT_TS_CONFIG = "simple"
+
+
+def validated_fulltext_ts_config(value: str) -> str:
+    """全文检索分词配置白名单校验闸(值域与缺省单源于此,全仓唯一)。
+
+    合法值原样返回;白名单外值抛 ValueError。config 启动期拒启与仓储/缓存
+    构造期防线(消费方直构未过 settings)共用同一判定,禁另起口径。"""
+    if value not in FULLTEXT_TS_CONFIGS:
+        valid = "、".join(FULLTEXT_TS_CONFIGS)
+        raise ValueError(f"全文检索分词配置非法值 {value}(值域:{valid})")
+    return value
 
 
 class Settings(BaseSettings):
@@ -94,18 +114,22 @@ class Settings(BaseSettings):
     task_budget_max_seconds: int = Field(default=900, gt=0)
     collab_max_workers: int = Field(default=3, ge=1)
 
+    # 104 Bot 商店版本化:版本历史上限(部署级可配,缺省 10);封顶淘汰
+    # 只淘汰最旧的「非当前」版本,当前上架版本恒受保护不淘汰
+    bot_store_version_cap: int = Field(default=10, ge=1)
+
     # 内部元数据通道:租户 schema 内省表数上限(防 prompt 膨胀)
     meta_schema_max_tables: int = Field(default=50, ge=1)
 
-    # 064 召回相关度闸门:off(缺省,零回归)| shadow(只记录)| primary(裁剪)。
-    # 阈值按路独立(向量=余弦相似度 / 全文=ts_rank 量纲不同,不共用)。
-    # 向量档已按评估集标定(2026-10-10 对拍:知识在位可答题 top1 最低
-    # 0.683,0.30 有 2.3× 余量、零误拒;成对缺省写入,防「mode 开了而
-    # mean=0 判据恒真」的半开脚枪);全文档量纲未标定,保持 0(=该路不裁,
-    # 非恒真放行——is_relevant 的 mean 恒真只在 top1 档>0 时有语义,两档
-    # 均为 0 即整路不裁)。启用前置已代码化:零知识数据源闸门自动旁路
-    # (zero-knowledge ≠ low-relevance),切换=部署配置 KM_RAG_GATE_MODE。
-    rag_gate_mode: str = "off"
+    # 064 召回相关度闸门:恒生效裁剪(2026-10-11 owner 裁决收编三态——
+    # 无生产流量,off/shadow/primary 的标定前提不存在;零误拒对拍已证即
+    # 直接切,不保留关闭/影子形态)。阈值按路独立(向量=余弦相似度 /
+    # 全文=ts_rank 量纲不同,不共用)。向量档已按评估集标定(2026-10-10
+    # 对拍:知识在位可答题 top1 最低 0.683,0.30 有 2.3× 余量、零误拒;
+    # 成对写入,防「mean=0 判据恒真」的半开脚枪);全文档量纲未标定,
+    # 保持 0(=该路不裁,非恒真放行——is_relevant 的 mean 恒真只在
+    # top1 档>0 时有语义,两档均为 0 即整路不裁)。启用前置已代码化:
+    # 零知识数据源闸门自动旁路(zero-knowledge ≠ low-relevance)。
     rag_gate_vector_top1: float = Field(default=0.30, ge=0.0)
     rag_gate_vector_mean: float = Field(default=0.28, ge=0.0)
     rag_gate_fulltext_top1: float = Field(default=0.0, ge=0.0)
@@ -119,6 +143,14 @@ class Settings(BaseSettings):
     # embedding 维度(009):缓存/回调向量的程序防线——换模型未 bump 缓存版本
     # 时,旧维度向量命中会被拦为 EmbeddingError(降级),不再 500(R2-R1)
     rag_embedding_dim: int = Field(default=1536, ge=1)
+
+    # 098:全文检索分词配置(部署级单值;rag 表说明路与 document-rag 文档面
+    # 写读同源)。缺省 simple 零回归;白名单(simple/zhparser,值域单源见本
+    # 模块 FULLTEXT_TS_CONFIGS)外值一律拒启(dev/prod 同——降级=换词法,与
+    # 存量 tsv 错配,不存在安全降级形态;启用 zhparser 另需 PG 扩展,安装配方
+    # 见 docs/HANDOFF.md「zhparser 安装配方」)。切换后须重扫/重建重算存量 tsv
+    # 并复标全文路阈值(064 全文路 ts_rank 量纲随分词变化)。
+    rag_fulltext_ts_config: str = DEFAULT_FULLTEXT_TS_CONFIG
 
     # 095 关系感知召回扩展:缺省开启;整项 kill switch=置 false 即回到无扩展
     # 形态(逐字一致,零回归);rag_expand_max 为单轮扩展表上限(0=不扩展)。
@@ -144,6 +176,10 @@ class Settings(BaseSettings):
     # 写工具确认窗口(分钟)
     tool_rate_limit_per_minute: int = Field(default=60, ge=1)
     tool_confirm_ttl_minutes: int = Field(default=15, ge=1)
+
+    # 触发器失败重试(101):退避为部署级固定间隔(design 裁决 3——重试次数
+    # 上限 max_retries 属触发器 owner 决策(0–5,表级),部署只配间隔)
+    trigger_retry_backoff_sec: int = Field(default=60, ge=0)
 
     # 问答成本控制(062):登录用户问答面分钟级速率((租户,用户) 维度)+ 租户
     # 日/月按次配额(已用量=sys_llm_usage 行数,含失败尝试——038 既有口径);
@@ -179,10 +215,25 @@ class Settings(BaseSettings):
 
     # 094 web-search-domain:联网检索域(供应商+API key 齐备才注册 web_search;
     # 均未配置=域零感知,合法缺省)。凭证只存控制面环境变量(ADR-002)
-    websearch_provider: str = ""  # tavily | bocha | zhipu
+    websearch_provider: str = ""  # tavily | bocha | zhipu | alibaba_ai_search
     websearch_api_key: str = ""
     websearch_timeout_ms: int = Field(default=8000, ge=1, le=30000)
     toolgateway_websearch_quota: int = Field(default=20, ge=1, le=600)
+
+    # 100 internal-connector-domain:内部工单域(部署级条件注册:端点+服务凭证
+    # 齐备才注册 ticket 三工具;均缺省=域零感知,合法缺省)。内部系统凭证属
+    # 企业部署事实(服务账号),与 websearch 同谱系,只存控制面环境变量(ADR-002);
+    # 对接面=「最小工单 API 约定」(单源:scripts/mock_ticket_server.py 文件头)
+    ticket_base_url: str = ""
+    ticket_api_key: str = ""
+    ticket_timeout_ms: int = Field(default=5000, ge=1, le=30000)
+    toolgateway_ticket_quota: int = Field(default=20, ge=1, le=600)
+
+    # 099 http-connector-domain:租户级 HTTP 连接器(声明存库行,注入集按请求
+    # 动态装配;凭证加密落库,复用 008 cipher 单点)。注册超时受部署级上限封顶
+    # (spec「超时按注册声明,部署级上限封顶」);配额独立分桶(与既有域互不挤占)
+    toolgateway_http_quota: int = Field(default=20, ge=1, le=600)
+    connector_timeout_max_ms: int = Field(default=15000, ge=100, le=60000)
 
     # SQL 安全引擎(053):builtin | shadow | primary;默认影子(内置权威,
     # 引擎只对拍观测)。切换期行为契约零变更;引擎缺失/异常自动降级不阻断。
@@ -218,6 +269,34 @@ class Settings(BaseSettings):
             )
         return None
 
+    def ticket_misconfiguration(self) -> str | None:
+        """100:ticket 组合配置校验(残缺返回描述,否则 None)。
+
+        prod 由 fail_closed_checks 拒启;dev 由 lifespan 告警降级(域不注册)。
+        均未配置=合法缺省(零感知),不视为残缺。
+        """
+        base = (self.ticket_base_url or "").strip()
+        key = (self.ticket_api_key or "").strip()
+        if not base:
+            if key:
+                return "KM_TICKET_API_KEY 已配置但 KM_TICKET_BASE_URL 缺失,ticket 域不注册"
+            return None
+        if not key:
+            return "KM_TICKET_BASE_URL 已配置但 KM_TICKET_API_KEY 缺失,ticket 域不注册"
+        if parse_ticket_endpoint(base) is None:
+            return f"KM_TICKET_BASE_URL 非法(须为可解析的 http(s) 地址),ticket 域不注册:{base}"
+        return None
+
+    def require_fulltext_ts_config(self) -> str:
+        """098:全文检索分词配置白名单校验,白名单外值 RuntimeError 拒启。
+
+        dev/prod 同(098 design D3:降级=换词法,不存在安全降级形态,不照抄
+        websearch 的 dev 告警降级);get_settings 启动期调用。"""
+        try:
+            return validated_fulltext_ts_config(self.rag_fulltext_ts_config)
+        except ValueError as e:
+            raise RuntimeError(str(e)) from None
+
     def fail_closed_checks(self) -> None:
         """prod 环境缺敏感配置直接拒启(dev 宽松以便本地起步)。"""
         if self.environment != "prod":
@@ -246,10 +325,15 @@ class Settings(BaseSettings):
         ws_misconfig = self.websearch_misconfiguration()
         if ws_misconfig:
             raise RuntimeError(f"prod fail-closed: {ws_misconfig}")
+        # 100:ticket 组合残缺(端点缺凭证/凭证缺端点/端点非法)同口径拒启
+        tk_misconfig = self.ticket_misconfiguration()
+        if tk_misconfig:
+            raise RuntimeError(f"prod fail-closed: {tk_misconfig}")
 
 
 @lru_cache
 def get_settings() -> Settings:
     s = Settings()
     s.fail_closed_checks()
+    s.require_fulltext_ts_config()  # 098:非法分词配置一律拒启(dev/prod 同)
     return s

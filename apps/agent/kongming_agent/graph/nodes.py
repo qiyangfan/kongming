@@ -318,6 +318,9 @@ async def retrieve(state: AgentState) -> dict[str, object]:
         # 047 多轮继承:最近 3 条历史透传(api 侧取末条走继承路补上轮依赖表);
         # 单轮为空列表,回调体不携带该键,链路与单轮逐字节同形
         history=list(state.get("history") or [])[-3:],
+        # 102:调用者身份透传(入口 state 自 chat 请求写入;None=不携带键,
+        # api 侧纯公共形态,零回归)
+        user_id=state.get("user_id"),
     )
     # 历史 SQL 独立于表说明命中(R2-S1):「知识未抓取但 query_history 已有成功
     # 记录」的真实形态下,schema 空回退内省、history 照常作 few-shot,不整体丢弃。

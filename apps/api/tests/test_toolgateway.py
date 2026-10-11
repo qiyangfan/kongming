@@ -63,8 +63,15 @@ def test_domain_without_policy_not_registered() -> None:
 
 
 def test_domain_tools_mapping_single_source() -> None:
-    """工具名→域映射单源(审计域标签与配额闸共用;094 增 websearch 域)。"""
-    assert DOMAIN_TOOLS == {"knowledge_search": "knowledge", "web_search": "websearch"}
+    """工具名→域映射单源(审计域标签与配额闸共用;094 增 websearch 域,
+    100 增 ticket 域三工具)。"""
+    assert DOMAIN_TOOLS == {
+        "knowledge_search": "knowledge",
+        "web_search": "websearch",
+        "ticket_search": "ticket",
+        "ticket_get": "ticket",
+        "ticket_create": "ticket",
+    }
 
 
 # ── 策略器桩 ──

@@ -21,6 +21,9 @@ _PROD_KW: dict[str, Any] = {
     # .env 的 KM_WEBSEARCH_*,防开发者本机配置把既有用例打红(评审循环登记)
     "websearch_provider": "",
     "websearch_api_key": "",
+    # 100:ticket 组合残缺(端点缺凭证等)同口径 prod 拒启——同款钉空隔离
+    "ticket_base_url": "",
+    "ticket_api_key": "",
 }
 
 

@@ -36,8 +36,53 @@ class _Oper:
         await self._r.add(self._a, action, target, detail)
 
 
-def _svc(session: AsyncSession, actor_id: str | None = None) -> TeamService:
-    return TeamService(SqlTeamRepo(session), _Oper(session, actor_id) if actor_id else None)
+class _KnowledgePublicizeAdapter:
+    """102 组合根适配器:团队删除钩子——名下知识条目公共化(归属置空)+审计
+    +受影响范围检索缓存失效。savepoint 包裹:钩子内失败只回滚自身、会话可用,
+    TeamService 捕获后告警并继续删除;FK ON DELETE SET NULL 为级联兜底。"""
+
+    def __init__(self, session: AsyncSession, actor_id: str) -> None:
+        from kongming.rag.repository import RagRepository
+
+        self._s = session
+        self._actor = actor_id
+        self._repo = RagRepository(session)
+
+    async def publicize(self, *, team_id: str) -> None:
+        async with self._s.begin_nested():
+            scopes = await self._repo.publicize_team_entries(team_id=team_id)
+            if not scopes:
+                return
+            await self._repo.log_oper(
+                self._actor,
+                "team.knowledge_publicize",
+                team_id,
+                {"scopes": [f"{t}:{d}" for t, d in scopes], "count": len(scopes)},
+            )
+        # 检索缓存失效(savepoint 外;Redis 侧操作,归属公共化即时生效——
+        # 回填旧值窗口由 TTL 有界吸收,与 rag 写路径 D6 同取舍)
+        from kongming.config import get_settings
+        from kongming.rag.cache import ContextCache
+        from kongming.redis_client import get_redis
+
+        cache = ContextCache(get_redis(), ts_config=get_settings().rag_fulltext_ts_config)
+        for tenant_id, datasource_key in scopes:
+            await cache.evict(tenant_id, datasource_key)
+
+
+def _svc(
+    session: AsyncSession, actor_id: str | None = None, *, publicize_knowledge: bool = False
+) -> TeamService:
+    knowledge_publicizer = (
+        _KnowledgePublicizeAdapter(session, actor_id or "")
+        if publicize_knowledge and actor_id
+        else None
+    )
+    return TeamService(
+        SqlTeamRepo(session),
+        _Oper(session, actor_id) if actor_id else None,
+        knowledge_publicizer,
+    )
 
 
 async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header: str | None) -> str:
@@ -89,12 +134,15 @@ class AttachIn(BaseModel):
 
 
 class TeamOut(BaseModel):
-    """032 团队条目(审查循环 D-F2:契约化——曾裸 dict 使前端只能手写类型)。"""
+    """032 团队条目(审查循环 D-F2:契约化——曾裸 dict 使前端只能手写类型)。
+    102 纯增可选 role:「我所在的团队」形态附带本人角色(OWNER/MEMBER 可写、
+    VIEWER 只读,供知识库上传归属候选筛选);manage 面全量列表无此列=None。"""
 
     id: str
     team_key: str
     name: str
     created_at: str | None = None
+    role: str | None = None
 
 
 class TeamMemberOut(BaseModel):
@@ -114,6 +162,7 @@ def _team_out(row: dict[str, Any]) -> dict[str, Any]:
         "team_key": row["team_key"],
         "name": row["name"],
         "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
+        "role": row.get("role"),  # 102:mine 形态附带;全量列表缺省 None
     }
 
 
@@ -220,7 +269,10 @@ async def delete_team(
 ) -> dict[str, bool]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     try:
-        await _svc(session, str(user["sub"])).delete(tenant_id=tenant_id, team_id=team_id)
+        # 102:挂知识公共化钩子(失败告警不阻塞删除;审计/缓存失效在钩子内)
+        await _svc(session, str(user["sub"]), publicize_knowledge=True).delete(
+            tenant_id=tenant_id, team_id=team_id
+        )
         await session.commit()
     except TeamNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None

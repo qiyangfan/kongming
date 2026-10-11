@@ -218,8 +218,8 @@ class PolicyIn(BaseModel):
     dimension: str = Field(pattern="^(TOKENS|CALLS|COST)$")
     limit_value: int = Field(ge=0)
     warn_pct: int = Field(default=80, ge=1, le=100)
-    # 035:BOT 级配额(scope_ref=BOT 时必填 bot_id)
-    scope: str = Field(default="TENANT", pattern="^(TENANT|BOT)$")
+    # 035/103:多级配额(scope_ref=BOT/USER/TEAM 时必填对应资源 id)
+    scope: str = Field(default="TENANT", pattern="^(TENANT|BOT|USER|TEAM)$")
     scope_ref: uuid.UUID | None = None
 
 
@@ -437,6 +437,56 @@ async def list_bots_brief(
     rows = await SqlBillingRepo(session).list_bots_brief(tenant_id=tenant_id)
     return [
         BotBriefOut(id=str(r["id"]), bot_key=str(r["bot_key"]), name=str(r["name"])) for r in rows
+    ]
+
+
+class UserBriefOut(BaseModel):
+    id: str
+    username: str
+    nickname: str
+
+
+@router.get(
+    "/billing/users",
+    response_model=list[UserBriefOut],
+    dependencies=[Depends(require_perm(MANAGE))],
+)
+async def list_users_brief(
+    _: Annotated[dict[str, object], Depends(current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    tenant_id: Annotated[str, Query(min_length=1)],
+) -> list[UserBriefOut]:
+    """103:USER 级策略配置面用户下拉(挂 MANAGE 自供,解耦 user:manage——
+    与 Bot 清单同解耦原则;软删用户不列)。"""
+    rows = await SqlBillingRepo(session).list_users_brief(tenant_id=tenant_id)
+    return [
+        UserBriefOut(id=str(r["id"]), username=str(r["username"]), nickname=str(r["nickname"]))
+        for r in rows
+    ]
+
+
+class TeamBriefOut(BaseModel):
+    id: str
+    team_key: str
+    name: str
+
+
+@router.get(
+    "/billing/teams",
+    response_model=list[TeamBriefOut],
+    dependencies=[Depends(require_perm(MANAGE))],
+)
+async def list_teams_brief(
+    _: Annotated[dict[str, object], Depends(current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    tenant_id: Annotated[str, Query(min_length=1)],
+) -> list[TeamBriefOut]:
+    """103:TEAM 级策略配置面团队下拉(挂 MANAGE 自供,解耦 team:manage——
+    与 Bot 清单同解耦原则)。"""
+    rows = await SqlBillingRepo(session).list_teams_brief(tenant_id=tenant_id)
+    return [
+        TeamBriefOut(id=str(r["id"]), team_key=str(r["team_key"]), name=str(r["name"]))
+        for r in rows
     ]
 
 

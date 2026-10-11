@@ -8,6 +8,7 @@
 import asyncio
 import logging
 import re
+import uuid as uuidlib
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated
 
@@ -33,15 +34,19 @@ from kongming.rag.models import (
     DatasourceInvalid,
     EmptyDocument,
     InvalidSchemaName,
+    KnowledgeEntry,
+    KnowledgeNotFound,
     SchemaNotAllowed,
     SchemaTablePair,
     TableBlock,
     TableNameTooLong,
+    TeamWriteForbidden,
     TooManyBlocks,
     UnsupportedFileType,
 )
 from kongming.rag.parser import parse_markdown
 from kongming.rag.repository import RagRepository
+from kongming.rag.schemas import RecallProbeOut
 from kongming.rag.service import RagService
 from kongming.rag.service import TenantForbidden as TenantForbiddenApi
 from kongming.redis_client import get_redis
@@ -74,25 +79,49 @@ class _RelationExpansionAdapter:
         )
 
 
+class _TeamMembershipAdapter:
+    """102 组合根适配器:rag 域只见 MemberTeamsReader/MemberRoleReader 窄端口,
+    成员关系查询走 team 域既有仓储(只读消费,team 域零改动;design D3)。
+    team_ids_of_user 角色全收(可见性按「所在团队」判,VIEWER 亦在集合)。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        from kongming.team.repository import SqlTeamRepo
+
+        self._repo = SqlTeamRepo(session)
+
+    async def team_ids_of_user(self, user_id: str) -> list[str]:
+        return list(await self._repo.role_map(user_id=user_id))
+
+    async def role_of(self, tenant_id: str, team_id: str, user_id: str) -> str | None:
+        return await self._repo.get_member_role_in_tenant(
+            tenant_id=tenant_id, team_id=team_id, user_id=user_id
+        )
+
+
 def get_rag_service(session: AsyncSession) -> RagService:
     """RagService 公共组合根(019 toolcall 复用同源;013 单例工厂同调)。"""
     client = get_agent_rag_client(get_redis())  # 013:进程内单例,连接池跨请求复用
     from kongming.chat.repository import SuggestionRepository
 
     settings = get_settings()
+    membership = _TeamMembershipAdapter(session)  # 102:双窄端口共用一适配器
     return RagService(
-        RagRepository(session),
+        # 098:仓储与缓存注入部署分词配置(缺省 simple 零回归)
+        RagRepository(session, ts_config=settings.rag_fulltext_ts_config),
         embedder=client,
         describer=client,
-        cache=ContextCache(get_redis()),
+        cache=ContextCache(get_redis(), ts_config=settings.rag_fulltext_ts_config),
         # 047:知识写路径级联失效建议缓存(DELETE 同事务,rag commit 收口)
         suggestion_evictor=SuggestionRepository(session),
-        # 064:召回闸门配置(off 缺省零回归)
+        # 064:召回闸门配置(Settings 恒注入;None=测试轻量装配)
         gate_settings=settings,
         # 095:关系感知召回扩展(缺省开启;kill switch=rag_expand_enabled)
         relation_expander=_RelationExpansionAdapter(session),
         expand_enabled=settings.rag_expand_enabled,
         expand_max=settings.rag_expand_max,
+        # 102:可见集合/写权限的成员关系端口(只读消费 team 域)
+        member_teams=membership,
+        member_roles=membership,
     )
 
 
@@ -137,6 +166,7 @@ async def upload_document(
     user: Annotated[dict[str, object], Depends(current_user)],
     svc: Annotated[RagService, Depends(_get_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
+    team_id: Annotated[uuidlib.UUID | None, Form()] = None,  # 102:上传归属(缺省公共)
 ) -> UploadOut:
     # 校验序:租户白名单复校先于文件读取(未绑定租户者不消耗解析资源;复审 R5)
     try:
@@ -179,6 +209,7 @@ async def upload_document(
             datasource_key=datasource_key,
             schema_name=schema_name,
             blocks=blocks,
+            team_id=None if team_id is None else str(team_id),  # 102
         )
     except TenantForbiddenApi:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
@@ -186,6 +217,11 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
     except SchemaNotAllowed:
         raise HTTPException(status_code=400, detail="SCHEMA_NOT_ALLOWED") from None
+    except KnowledgeNotFound:
+        # 102:归属目标团队不存在/非成员——同形 404(不暴露团队存在性)
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    except TeamWriteForbidden:
+        raise HTTPException(status_code=403, detail="TEAM_WRITE_FORBIDDEN") from None
     return UploadOut(tables=tables)
 
 
@@ -236,6 +272,9 @@ class KnowledgeItemOut(BaseModel):
     source_type: str
     updated_at: datetime
     alias: str = ""  # 037:业务称谓别名
+    # 102(纯增可选):归属(空=租户公共;team_name 供列表归属列展示)
+    team_id: str | None = None
+    team_name: str | None = None
 
 
 class KnowledgePageOut(BaseModel):
@@ -243,6 +282,12 @@ class KnowledgePageOut(BaseModel):
     total: int
     page: int
     size: int
+
+
+# 102:归属筛选取值(all/public/<team uuid>;pattern 双防——非枚举必须 UUID 形态)
+_TEAM_SCOPE_PATTERN = (
+    r"^(all|public|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+)
 
 
 @router.get(
@@ -255,6 +300,8 @@ async def list_tables(
     svc: Annotated[RagService, Depends(_get_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
     datasource_key: str | None = None,
+    # 102:归属筛选(all=公共∪我所在团队缺省形态 / public=仅公共 / <team_id>=该团队)
+    team_scope: Annotated[str, Query(pattern=_TEAM_SCOPE_PATTERN)] = "all",
     page: Annotated[int, Field(ge=1)] = 1,
     size: Annotated[int, Field(ge=1, le=100)] = 20,
 ) -> KnowledgePageOut:
@@ -268,26 +315,32 @@ async def list_tables(
         datasource_key=datasource_key,
         limit=size,
         offset=(page - 1) * size,
+        caller_user_id=str(user["sub"]),  # 102:可见集合
+        team_scope=team_scope,  # 102:归属筛选
     )
     return KnowledgePageOut(
-        items=[
-            KnowledgeItemOut(
-                id=e.id,
-                datasource_key=e.datasource_key,
-                schema_name=e.schema_name,
-                table_name=e.table_name,
-                table_comment=e.table_comment,
-                columns_comment=e.columns_comment,
-                sample_queries=e.sample_queries,
-                source_type=e.source_type,
-                updated_at=e.updated_at,  # type: ignore[arg-type]
-                alias=e.alias,  # 037
-            )
-            for e in entries
-        ],
+        items=[_knowledge_item_out(e) for e in entries],
         total=total,
         page=page,
         size=size,
+    )
+
+
+def _knowledge_item_out(e: KnowledgeEntry) -> KnowledgeItemOut:
+    """条目 → 响应投影单点(列表/编辑/归属变更共用;102 归属字段纯增)。"""
+    return KnowledgeItemOut(
+        id=e.id,
+        datasource_key=e.datasource_key,
+        schema_name=e.schema_name,
+        table_name=e.table_name,
+        table_comment=e.table_comment,
+        columns_comment=e.columns_comment,
+        sample_queries=e.sample_queries,
+        source_type=e.source_type,
+        updated_at=e.updated_at,  # type: ignore[arg-type]
+        alias=e.alias,  # 037
+        team_id=e.team_id,  # 102
+        team_name=e.team_name,  # 102
     )
 
 
@@ -332,27 +385,66 @@ async def edit_table(
         tenant_id = resolved2[0]
     except TenantForbiddenApi:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
-    result = await svc.edit_table(
-        actor_id=str(user["sub"]),
-        tenant_id=tenant_id,
-        table_id=table_id,
-        table_comment=body.table_comment,
-        alias=body.alias,
-    )
+    try:
+        result = await svc.edit_table(
+            actor_id=str(user["sub"]),
+            tenant_id=tenant_id,
+            table_id=table_id,
+            table_comment=body.table_comment,
+            alias=body.alias,
+        )
+    except KnowledgeNotFound:
+        # 102:团队条目非成员写——与不存在同 detail(404 同形)
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    except TeamWriteForbidden:
+        raise HTTPException(status_code=403, detail="TEAM_WRITE_FORBIDDEN") from None
     if result is None:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
-    return KnowledgeItemOut(
-        id=result.id,
-        datasource_key=result.datasource_key,
-        schema_name=result.schema_name,
-        table_name=result.table_name,
-        table_comment=result.table_comment,
-        columns_comment=result.columns_comment,
-        sample_queries=result.sample_queries,
-        source_type=result.source_type,
-        updated_at=result.updated_at,  # type: ignore[arg-type]
-        alias=result.alias,
-    )
+    return _knowledge_item_out(result)
+
+
+class OwnershipIn(BaseModel):
+    """102:归属变更请求(team_id 空=转公共;非空=转该团队专属)。"""
+
+    team_id: uuidlib.UUID | None = None
+
+
+@router.put(
+    "/tables/{table_id}/ownership",
+    response_model=KnowledgeItemOut,
+    dependencies=[Depends(require_perm("system:rag:manage"))],
+)
+async def set_table_ownership(
+    table_id: str,
+    body: OwnershipIn,
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Annotated[RagService, Depends(_get_service)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> KnowledgeItemOut:
+    """归属变更(102):公共⇄团队原位转移(单一实例,内容不动)。
+
+    非成员 404 同形(与不存在条目同 detail,不暴露存在性);VIEWER 403;
+    变更落审计+精确失效检索缓存。web 侧走受控确认(AlertDialog 明示可见
+    范围变化)。"""
+    try:
+        resolved2 = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
+        tenant_id = resolved2[0]
+    except TenantForbiddenApi:
+        raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
+    try:
+        result = await svc.set_ownership(
+            actor_id=str(user["sub"]),
+            tenant_id=tenant_id,
+            table_id=table_id,
+            team_id=None if body.team_id is None else str(body.team_id),
+        )
+    except KnowledgeNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    except TeamWriteForbidden:
+        raise HTTPException(status_code=403, detail="TEAM_WRITE_FORBIDDEN") from None
+    if result is None:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    return _knowledge_item_out(result)
 
 
 @router.delete(
@@ -371,9 +463,13 @@ async def delete_table(
         tenant_id = resolved2[0]
     except TenantForbiddenApi:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
-    deleted = await svc.delete_table(
-        actor_id=str(user["sub"]), tenant_id=tenant_id, table_id=table_id
-    )
+    try:
+        deleted = await svc.delete_table(
+            actor_id=str(user["sub"]), tenant_id=tenant_id, table_id=table_id
+        )
+    except KnowledgeNotFound:
+        # 102:团队条目非成员写——与不存在同形(不暴露存在性)
+        raise HTTPException(status_code=404, detail="KNOWLEDGE_NOT_FOUND") from None
     if deleted is None:
         raise HTTPException(status_code=404, detail="KNOWLEDGE_NOT_FOUND") from None
 
@@ -518,7 +614,10 @@ async def coverage_report(
     try:
         tenant_id, tenant_key = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
         report = await svc.coverage_report(
-            tenant_id=tenant_id, tenant_key=tenant_key, datasource_key=datasource_key
+            tenant_id=tenant_id,
+            tenant_key=tenant_key,
+            datasource_key=datasource_key,
+            caller_user_id=str(user["sub"]),
         )
     except TenantForbiddenApi:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
@@ -574,6 +673,10 @@ class RetrieveIn(BaseModel):
     history: list[Annotated[str, Field(max_length=2000)]] = Field(
         default_factory=list, max_length=3
     )
+    # 102 纯增可选:调用者身份(端用户 id)——可见集合=公共∪其所在团队;
+    # 缺省(未携带)=纯公共形态,既有回调负载零回归(agent 面无须改动即可
+    # 继续工作;接线后团队条目方进入召回)
+    user_id: uuidlib.UUID | None = None
 
 
 class MetricHitOut(BaseModel):
@@ -614,6 +717,7 @@ async def rag_retrieve(
             datasource_key=req.datasource_key,
             question=req.question,
             history=req.history,  # 047 多轮继承
+            caller_user_id=None if req.user_id is None else str(req.user_id),  # 102
         )
     except LookupError:
         raise HTTPException(status_code=404, detail="TENANT_NOT_FOUND") from None
@@ -669,7 +773,7 @@ async def rag_retrieve(
         ).scalar_one_or_none()
         if tid2:
             doc_hints = await retrieve_docs(
-                SqlDocumentRepo(session),
+                SqlDocumentRepo(session, ts_config=get_settings().rag_fulltext_ts_config),
                 get_agent_rag_client(get_redis()),
                 tenant_id=str(tid2),
                 datasource_key=req.datasource_key,
@@ -724,6 +828,7 @@ async def rag_retrieve(
 
 @router.get(
     "/recall-probe",
+    response_model=RecallProbeOut,
     dependencies=[Depends(require_perm("system:rag:manage"))],
 )
 async def recall_probe(
@@ -732,19 +837,23 @@ async def recall_probe(
     user: Annotated[dict[str, object], Depends(current_user)],
     svc: Annotated[RagService, Depends(_get_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
-) -> dict[str, object]:
+) -> RecallProbeOut:
     """064:召回试跑(只读):三路命中及各自原生分、融合分、双条件判定结论。
 
     零副作用:SHALL NOT 修改配置、SHALL NOT 落库、SHALL NOT 触发召回缓存
-    失效(不走 ctx 缓存)。影子形态含"若生效将丢弃"记录。两个高频场景:
-    上传表说明后验证可召回性;影子期标定阈值(不等真实流量)。
+    失效(不走 ctx 缓存)。两个高频场景:上传表说明后验证可召回性;闸门
+    阈值标定(不等真实流量)。102:召回在调用者可见集合内(公共∪所在团队)。
+    097:响应模型纯定型(键集=service 现值锁定,判定逻辑零变更)。
     """
     try:
         _tenant_id, tenant_key = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
-        return await svc.recall_probe(
-            tenant_key=tenant_key,
-            datasource_key=datasource_key,
-            question=question,
+        return RecallProbeOut.model_validate(
+            await svc.recall_probe(
+                tenant_key=tenant_key,
+                datasource_key=datasource_key,
+                question=question,
+                caller_user_id=str(user["sub"]),
+            )
         )
     except TenantForbiddenApi:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
@@ -837,9 +946,9 @@ async def list_documents(
     svc = _get_service(session)
     tid = await _doc_tenant(session, svc, str(user["sub"]), x_tenant_id)
     await _assert_doc_datasource(session, tenant_id=tid, datasource_key=datasource_key)
-    rows = await SqlDocumentRepo(session).list_documents(
-        tenant_id=tid, datasource_key=datasource_key
-    )
+    rows = await SqlDocumentRepo(
+        session, ts_config=get_settings().rag_fulltext_ts_config
+    ).list_documents(tenant_id=tid, datasource_key=datasource_key)
     return [
         DocumentItemOut(
             id=str(r["id"]),
@@ -899,7 +1008,7 @@ async def upload_doc(
         raise HTTPException(status_code=400, detail="文档解析失败") from None
     try:
         doc_id, blocks, skipped = await upload_document(
-            SqlDocumentRepo(session),
+            SqlDocumentRepo(session, ts_config=get_settings().rag_fulltext_ts_config),
             get_agent_rag_client(get_redis()),
             tenant_id=tenant_id,
             datasource_key=datasource_key,
@@ -927,7 +1036,9 @@ async def delete_doc(
 
     svc = _get_service(session)
     tid = await _doc_tenant(session, svc, str(user["sub"]), x_tenant_id)
-    ok = await SqlDocumentRepo(session).delete_document(doc_id=doc_id, tenant_id=tid)
+    ok = await SqlDocumentRepo(
+        session, ts_config=get_settings().rag_fulltext_ts_config
+    ).delete_document(doc_id=doc_id, tenant_id=tid)
     if not ok:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     await session.commit()
@@ -945,7 +1056,9 @@ async def list_doc_chunks(
 
     svc = _get_service(session)
     tid = await _doc_tenant(session, svc, str(user["sub"]), x_tenant_id)
-    rows = await SqlDocumentRepo(session).list_chunks(doc_id=doc_id, tenant_id=tid)
+    rows = await SqlDocumentRepo(
+        session, ts_config=get_settings().rag_fulltext_ts_config
+    ).list_chunks(doc_id=doc_id, tenant_id=tid)
     return [
         DocumentChunkOut(
             id=str(r["id"]),

@@ -521,6 +521,27 @@ async def test_ssrf_domain_resolves_private(monkeypatch: pytest.MonkeyPatch) -> 
     await hr.assert_url_allowed("http://example.com/x")
 
 
+def test_ssrf_sync_host_allowed_check() -> None:
+    """同步主机级判定(assert_host_allowed_sync,108 IMAP 出站消费):字面
+    与解析落拒绝段即拒(同一拒绝段单源),公网字面放行(不触网)。"""
+    import kongming.workflow.http_runner as hr
+
+    for host in (
+        "127.0.0.1",
+        "10.0.0.5",
+        "192.168.1.1",
+        "169.254.169.254",
+        "0.0.0.0",  # noqa: S104 —— SSRF 拒绝段测试数据,非绑定
+        "100.64.1.1",
+        "localhost",  # 解析为回环 → 拒
+    ):
+        with pytest.raises(SsrFBlocked):
+            hr.assert_host_allowed_sync(host, 993)
+    with pytest.raises(SsrFBlocked, match="解析失败"):
+        hr.assert_host_allowed_sync("nonexistent.invalid", 993)
+    hr.assert_host_allowed_sync("93.184.216.34", 993)
+
+
 # ── HTTP 链路 ──
 
 

@@ -2,7 +2,7 @@
 
 from typing import Any, Protocol
 
-from kongming.mcp.models import DiscoveredTool
+from kongming.mcp.models import ProbeResult
 
 
 class McpCallError(Exception):
@@ -10,23 +10,38 @@ class McpCallError(Exception):
 
     def __init__(self, kind: str, detail: str) -> None:
         super().__init__(f"{kind}: {detail}")
-        self.kind = kind  # timeout / conn / protocol / remote
+        self.kind = kind  # timeout / conn / protocol / remote / unsupported
         self.detail = detail
 
 
 class McpCaller(Protocol):
-    """MCP 出站调用(028):控制面唯一出站点(ADR-002 延伸)。
+    """MCP 出站调用(028;109 扩展三类原语探测与只读消费)。
 
     headers 为调用瞬时解密明文(实现侧与调用方 MUST NOT 落日志/审计)。
     超时/大小闸在实现侧(默认 15s/1MB)。"""
 
-    async def handshake(self, *, endpoint: str, headers: dict[str, str]) -> int:
-        """initialize+tools/list 探测(连通性测试);返回发现工具数。"""
+    async def probe(self, *, endpoint: str, headers: dict[str, str]) -> ProbeResult:
+        """initialize 握手 + 三原语并行探测(109):能力未声明即时短路,
+        方法不存在=不支持计数 0,超时/拒连/协议错=结构化失败(design D4)。"""
         ...
 
-    async def list_tools(
-        self, *, endpoint: str, headers: dict[str, str]
-    ) -> list[DiscoveredTool]: ...
+    async def read_resource(
+        self, *, endpoint: str, headers: dict[str, str], uri: str
+    ) -> dict[str, Any]:
+        """resources/read(109):文本形态限定(blob 拒绝),返回
+        {content, truncated, original_size}。"""
+        ...
+
+    async def get_prompt(
+        self,
+        *,
+        endpoint: str,
+        headers: dict[str, str],
+        name: str,
+        arguments: dict[str, str],
+    ) -> dict[str, Any]:
+        """prompts/get(109):模板按名渲染(管理面预览数据源),返回 {text}。"""
+        ...
 
     async def call(
         self,
@@ -72,8 +87,22 @@ class McpRepo(Protocol):
     async def list_masked(self, *, tenant_id: str) -> list[dict[str, Any]]: ...
 
     async def save_snapshot(
-        self, *, server_id: str, tenant_id: str, tools: list[dict[str, Any]], error: str
+        self,
+        *,
+        server_id: str,
+        tenant_id: str,
+        tools: list[dict[str, Any]],
+        resources: list[dict[str, Any]],
+        prompts: list[dict[str, Any]],
+        error: str,
     ) -> None: ...
+
+    async def get_enabled_resources(
+        self, *, tenant_id: str, server_key: str
+    ) -> list[dict[str, Any]]:
+        """read_resource 执行期的 uri 白名单(109,design D2:来自探测快照);
+        仅启用 server(禁用/删除 → 空=全拒,与工具目录消失同形)。"""
+        ...
 
     async def find_enabled_by_tool(
         self, *, tenant_id: str, qualified: str

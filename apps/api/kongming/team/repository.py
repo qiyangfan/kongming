@@ -76,11 +76,14 @@ class SqlTeamRepo:
         return [dict(r) for r in rows]
 
     async def list_my_teams(self, *, tenant_id: str, user_id: str) -> list[dict[str, Any]]:
+        """我所在的团队(102:附带本人在各团队的角色,供「可写团队」前端筛选
+        ——OWNER/MEMBER 可写、VIEWER 只读;manage 面全量列表无此列)。"""
         rows = (
             (
                 await self._s.execute(
                     text(
-                        "SELECT t.* FROM public.sys_team t"
+                        "SELECT t.*, m.role AS role"
+                        " FROM public.sys_team t"
                         " JOIN public.sys_team_member m ON m.team_id=t.id"
                         " WHERE t.tenant_id=CAST(:t AS uuid) AND m.user_id=CAST(:u AS uuid)"
                         " ORDER BY t.created_at DESC, t.id DESC"
@@ -152,6 +155,24 @@ class SqlTeamRepo:
                     " WHERE team_id=CAST(:t AS uuid) AND user_id=CAST(:u AS uuid)"
                 ),
                 {"t": team_id, "u": user_id},
+            )
+        ).scalar_one_or_none()
+
+    async def get_member_role_in_tenant(
+        self, *, tenant_id: str, team_id: str, user_id: str
+    ) -> str | None:
+        """租户限定版(102 供 rag 写闸消费):角色查询与团队归属租户绑定——
+        跨租户活跃用户不得借他租户团队身份过写闸(spec「指向当前租户内
+        真实团队」;跨租户引用一律按非成员 404 同形处理)。"""
+        return (
+            await self._s.execute(
+                text(
+                    "SELECT m.role FROM public.sys_team_member m"
+                    " JOIN public.sys_team t ON t.id = m.team_id"
+                    " WHERE m.team_id=CAST(:t AS uuid) AND m.user_id=CAST(:u AS uuid)"
+                    " AND t.tenant_id=CAST(:ten AS uuid)"
+                ),
+                {"t": team_id, "u": user_id, "ten": tenant_id},
             )
         ).scalar_one_or_none()
 

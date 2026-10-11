@@ -195,12 +195,16 @@ class BotService:
         *,
         bot_key: str,
         question: str,
-        channel: str,  # web_embed / api / mcp(028)
+        channel: str,  # web_embed / api / mcp(028)/ store(104)
         tenant_id_hint: str | None = None,  # api-key 渠道从 key 行带出
+        definition_override: dict[str, object] | None = None,  # 104:商店直跑消费快照
     ) -> dict[str, object]:
         """Bot 运行时:装载(启用/公开闸)→ 权限求交 → ReAct → 护栏 → 响应。
 
         返回 {success, summary, sql, columns, rows, stats, retry_count, error}。
+        104:definition_override(商店渠道传当前上架版本快照)覆写系统提示词
+        与工具集——货架消费快照而非活定义;公开页/api-key 等既有渠道不传,
+        消费活定义为既有契约(Non-goal 边界)。
         """
         tenant_id = tenant_id_hint
         if tenant_id is None:
@@ -226,8 +230,17 @@ class BotService:
         )
         if blocked:
             return {"success": False, "error": GUARDRAIL_REJECT_TEXT, "summary": ""}
-        # 权限求交与工具裁剪(run/上架闸同源,见 resolve_tools)
-        tools = await self.resolve_tools(creator_id=creator, tenant_id=tenant_id, row=row)
+        # 权限求交与工具裁剪(run/上架闸同源,见 resolve_tools);
+        # 104:商店渠道在快照定义上求交(零工具运行闸口径单源不变)
+        run_row: dict[str, object] = dict(row)
+        if definition_override is not None:
+            sp = definition_override.get("system_prompt")
+            if isinstance(sp, str) and sp:
+                run_row["system_prompt"] = sp
+            tools_override = definition_override.get("tools")
+            if isinstance(tools_override, list):
+                run_row["tools"] = [str(t) for t in cast("list[object]", tools_override)]
+        tools = await self.resolve_tools(creator_id=creator, tenant_id=tenant_id, row=run_row)
         if not tools:
             # 零工具运行闸:无工具进 ReAct 只会产出「文本伪调用」假应答
             # (内核纪律段教模型调工具而模型无工具可调)——必败运行不花
@@ -252,7 +265,7 @@ class BotService:
                 user_id=creator,
                 datasource_key=str(row["datasource_key"]),
                 tools=tools,
-                bot_system_prompt=str(row["system_prompt"]),
+                bot_system_prompt=str(run_row["system_prompt"]),  # 104:商店渠道=快照
                 model=None if row["model"] is None else str(row["model"]),  # R1-H1
                 channel=channel,  # R1-M4
             )

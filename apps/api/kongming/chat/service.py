@@ -1036,6 +1036,8 @@ class ChatService:
                     datasource_key=datasource_key,
                     question=question,  # 原始问句(与审计口径一致)
                     sql_text=reply.sql,
+                    # 102 伴生:样本可见集合=执行主体可见范围(缺省=公共样本)
+                    caller_user_id=user_id or None,
                 )
             except Exception:  # noqa: BLE001  # 回写永不阻断主流程(writeback 内已兜底)
                 log.warning("query_history 回写异常(不阻断)", exc_info=True)

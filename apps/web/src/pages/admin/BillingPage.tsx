@@ -3,7 +3,10 @@
    035:套餐 U/D(绑定中 409 行内可见)+策略删除确认(013 模式)+数值
    受控校验(非法行内报错,禁静默归零)+BOT 级策略(scope/Bot 下拉,
    数据源=billing 自供清单,解耦 user:manage/bot:manage)+账单分页
-   (支付状态列+作废)。 */
+   (支付状态列+作废)。
+   103:scope 扩展 USER/TEAM——范围下拉四项,scope_ref 选择器按 scope
+   切换数据源(助手/用户/团队清单,同 billing:manage 自供口径);
+   CALLS 维度仅租户级(非租户范围提交禁用+行内提示)。 */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -40,6 +43,8 @@ import {
   getTenantPlan,
   listBillingTenants,
   listBillingBots,
+  listBillingUsers,
+  listBillingTeams,
   listPlans,
   listPolicies,
   pageAdminInvoices,
@@ -48,7 +53,7 @@ import {
   voidInvoice,
   type PlanItem,
 } from "@/lib/billing-api";
-import { DIM_TEXT, PAYMENT_STATUS_TEXT } from "@/lib/billing-labels";
+import { DIM_TEXT, PAYMENT_STATUS_TEXT, SCOPE_TEXT } from "@/lib/billing-labels";
 import { li2yuan, li2yuanInput } from "@/lib/money";
 import { StatusBadge, type StatusMeta } from "@/components/status-badge";
 import { PageHeader } from "@/components/page-header";
@@ -146,6 +151,17 @@ export default function BillingPage() {
   const bots = useQuery({
     queryKey: ["admin", "billing", "bots", tenantId],
     queryFn: () => listBillingBots(tenantId),
+    enabled: tenantId !== "",
+  });
+  // 103:USER/TEAM 级策略选择器数据源(挂 billing:manage 自供,同 Bot 清单)
+  const users = useQuery({
+    queryKey: ["admin", "billing", "users", tenantId],
+    queryFn: () => listBillingUsers(tenantId),
+    enabled: tenantId !== "",
+  });
+  const teams = useQuery({
+    queryKey: ["admin", "billing", "teams", tenantId],
+    queryFn: () => listBillingTeams(tenantId),
     enabled: tenantId !== "",
   });
   const invoices = useQuery({
@@ -264,7 +280,7 @@ export default function BillingPage() {
         limit_value: limit,
         warn_pct: warn,
         scope: policyForm.scope,
-        scope_ref: policyForm.scope === "BOT" ? policyForm.scope_ref || null : null,
+        scope_ref: policyForm.scope === "TENANT" ? null : policyForm.scope_ref || null,
       });
     },
     onSuccess: () => {
@@ -498,19 +514,43 @@ export default function BillingPage() {
                   cardPriority: 1,
                   cellClassName: "text-xs",
                   render: (p) => {
-                    const botKey = (bots.data ?? []).find((b) => b.id === p.scope_ref)?.bot_key;
-                    return p.scope === "BOT" ? (
-                      botKey ? (
+                    // 103:USER/TEAM 级以清单数据源回显名称;候选未含(已删除)
+                    // 不露 UUID,hover 可得原 id
+                    if (p.scope === "BOT") {
+                      const botKey = (bots.data ?? []).find((b) => b.id === p.scope_ref)?.bot_key;
+                      return botKey ? (
                         <Badge variant="outline">助手:{botKey}</Badge>
                       ) : (
-                        // 候选清单未含(已删除/跨页)时不露 UUID,hover 可得原 id
                         <Badge variant="outline" title={p.scope_ref ?? undefined}>
                           未知助手
                         </Badge>
-                      )
-                    ) : (
-                      <Badge variant="secondary">租户</Badge>
-                    );
+                      );
+                    }
+                    if (p.scope === "USER") {
+                      const username = (users.data ?? []).find(
+                        (u) => u.id === p.scope_ref,
+                      )?.username;
+                      return username ? (
+                        <Badge variant="outline">用户:{username}</Badge>
+                      ) : (
+                        <Badge variant="outline" title={p.scope_ref ?? undefined}>
+                          未知用户
+                        </Badge>
+                      );
+                    }
+                    if (p.scope === "TEAM") {
+                      const teamKey = (teams.data ?? []).find(
+                        (t) => t.id === p.scope_ref,
+                      )?.team_key;
+                      return teamKey ? (
+                        <Badge variant="outline">团队:{teamKey}</Badge>
+                      ) : (
+                        <Badge variant="outline" title={p.scope_ref ?? undefined}>
+                          未知团队
+                        </Badge>
+                      );
+                    }
+                    return <Badge variant="secondary">租户</Badge>;
                   },
                 },
                 {
@@ -565,24 +605,35 @@ export default function BillingPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="TENANT">租户</SelectItem>
-                    <SelectItem value="BOT">助手</SelectItem>
+                    <SelectItem value="TENANT">{SCOPE_TEXT.TENANT}</SelectItem>
+                    <SelectItem value="BOT">{SCOPE_TEXT.BOT}</SelectItem>
+                    <SelectItem value="USER">{SCOPE_TEXT.USER}</SelectItem>
+                    <SelectItem value="TEAM">{SCOPE_TEXT.TEAM}</SelectItem>
                   </SelectContent>
                 </Select>
               </FormRow>
-              {policyForm.scope === "BOT" && (
-                <FormRow label="助手">
+              {policyForm.scope !== "TENANT" && (
+                <FormRow label={SCOPE_TEXT[policyForm.scope] ?? policyForm.scope}>
                   <Select
                     value={policyForm.scope_ref}
                     onValueChange={(v) => setPolicyForm({ ...policyForm, scope_ref: v })}
                   >
-                    <SelectTrigger className="w-40" aria-label="选择助手">
-                      <SelectValue placeholder="选择助手" />
+                    <SelectTrigger
+                      className="w-40"
+                      aria-label={`选择${SCOPE_TEXT[policyForm.scope] ?? ""}`}
+                    >
+                      <SelectValue placeholder={`选择${SCOPE_TEXT[policyForm.scope] ?? ""}`} />
                     </SelectTrigger>
                     <SelectContent>
-                      {(bots.data ?? []).map((b) => (
-                        <SelectItem key={b.id} value={b.id}>
-                          {b.bot_key}
+                      {/* 103:数据源按 scope 切换(bots/users/teams 清单同口径自供) */}
+                      {(policyForm.scope === "BOT"
+                        ? (bots.data ?? []).map((b) => ({ id: b.id, label: b.bot_key }))
+                        : policyForm.scope === "USER"
+                          ? (users.data ?? []).map((u) => ({ id: u.id, label: u.username }))
+                          : (teams.data ?? []).map((t) => ({ id: t.id, label: t.team_key }))
+                      ).map((o) => (
+                        <SelectItem key={o.id} value={o.id}>
+                          {o.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -626,13 +677,22 @@ export default function BillingPage() {
               <Button
                 type="submit"
                 disabled={
-                  upsert.isPending || (policyForm.scope === "BOT" && policyForm.scope_ref === "")
+                  upsert.isPending ||
+                  (policyForm.scope !== "TENANT" && policyForm.scope_ref === "") ||
+                  // 2.3:CALLS 维度仅租户级(资源/用户/团队级不立约)
+                  (policyForm.scope !== "TENANT" && policyForm.dimension === "CALLS")
                 }
               >
                 {upsert.isPending && <Loader2 className="animate-spin" aria-hidden />}
                 保存
               </Button>
             </form>
+            {policyForm.scope !== "TENANT" && policyForm.dimension === "CALLS" && (
+              <p className="text-xs text-muted-foreground" role="note">
+                提示:「{DIM_TEXT.CALLS}」维度仅支持「{SCOPE_TEXT.TENANT}
+                」范围(调用次数不按资源/用户/团队立约)。
+              </p>
+            )}
             {policyForm.dimension === "COST" && tenantPlan.data == null && (
               <p className="text-xs text-muted-foreground" role="note">
                 提示:该租户未绑定套餐,成本单价按 0 计,「{DIM_TEXT.COST}」上限不会触发限量。

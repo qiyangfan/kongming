@@ -83,9 +83,13 @@ class ToolOutcome:
 
 
 def args_digest(args: dict[str, object]) -> str:
-    """审计用参数摘要(纯函数):敏感键值脱敏 + 定长截断。"""
+    """审计用参数摘要(纯函数):敏感键值脱敏 + 定长截断。
+
+    sort_keys 键序无关(评审修复):确认终态会以 jsonb 读回的 args 重算摘要
+    (toolcall/service confirm 段),jsonb 不保序——不排序则 PENDING 与终态
+    两处摘要系统性不一致,审计不可对照。"""
     masked = {k: ("***" if k.lower() in _SENSITIVE_ARG_KEYS else v) for k, v in args.items()}
-    return json.dumps(masked, ensure_ascii=False, default=str)[:ARGS_DIGEST_MAX]
+    return json.dumps(masked, ensure_ascii=False, sort_keys=True, default=str)[:ARGS_DIGEST_MAX]
 
 
 def derive_idempotency_key(*, user_id: str, tool_name: str, args: dict[str, object]) -> str:
@@ -131,6 +135,28 @@ class WebSearchError(Exception):
     报文畸形/读超时,不重试)。分发兜底映射 ERROR + 审计,agent 据实降级为
     观察,不编造检索结果。与 toolgateway.websearch 的执行器侧同名异常为
     领域单源双副本(审查 P1-1:service 不得传递性引入 httpx,089 裁决)。
+    """
+
+
+class TicketError(Exception):
+    """100:内部工单系统失败(分类随 message 前缀上浮:unreachable/protocol)。
+
+    unreachable=连接层未送达(重试至多一次);protocol=响应类错误(非 2xx/
+    报文畸形/读超时/单查不存在,不重试)。分发兜底映射 ERROR + 审计,agent
+    据实降级为观察,不编造工单结果。与 toolgateway.ticket 的执行器侧同名
+    异常为领域单源双副本(089 裁决同款:service 不得传递性引入 httpx)。
+    """
+
+
+class ConnectorError(Exception):
+    """099:HTTP 连接器失败(分类随 message 前缀上浮:unreachable/protocol/
+    policy)。
+
+    unreachable=连接层未送达(重试至多一次);protocol=响应类错误(非 2xx/
+    报文畸形/读超时/重定向不跟随,不重试);policy=策略类拒绝(SSRF 拒绝段/
+    出口白名单/参数校验,不出站或零重试)。分发兜底映射 ERROR + 审计,agent
+    据实降级为观察,不编造调用结果。与 toolgateway.connector 的执行器侧同名
+    异常为领域单源双副本(089 裁决同款:service 不得传递性引入 httpx)。
     """
 
 

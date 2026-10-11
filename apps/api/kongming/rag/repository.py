@@ -1,12 +1,14 @@
 """rag 仓储(009):rag 两表 SQL + 租户解析 + 全量内省编排(RagRepo 端口实现)。
 
 纪律:向量一律绑定参数 + CAST(:v AS vector) 强转(禁 f-string 拼接序列化向量);
-tsvector 应用层维护(to_tsvector('simple', …),与 embedding 文本内容对齐);
+tsvector 应用层维护(to_tsvector 按部署配置 KM_RAG_FULLTEXT_TS_CONFIG 分词,
+098 白名单单源 kongming.config,与 embedding 文本内容对齐);
 召回查询强制 tenant + datasource 双过滤(rag spec「跨租户+跨数据源隔离」);
 审计复用 auth 域 SqlOperLogRepo(同会话=同事务,007 组合模式)。
 """
 
 import json
+from collections.abc import Sequence
 from datetime import datetime
 
 from sqlalchemy import text
@@ -14,6 +16,7 @@ from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from kongming.auth.repository import SqlOperLogRepo
+from kongming.config import DEFAULT_FULLTEXT_TS_CONFIG, validated_fulltext_ts_config
 from kongming.datasource.repository import SqlDatasourceRepo
 from kongming.datasource.resolver import DatasourceInvalid, resolve_for_read
 from kongming.db import uuid7
@@ -41,6 +44,30 @@ def vec_literal(vector: list[float]) -> str:
     return "[" + ",".join(repr(float(x)) for x in vector) + "]"
 
 
+async def assert_fulltext_ts_config_available(session: AsyncSession, ts_config: str) -> str:
+    """098 启动自检:分词配置目标必须在 pg_ts_config 存在,缺失 fail-closed 拒启。
+
+    检索配置降级不安全(降级=换词法,与存量 tsv 直接错配,098 design D3),
+    故 prod/dev 同拒启,无降级形态;文案明示缺项与安装配方指引。白名单校验
+    先行(先词法后存在性,错误归因不混淆)。lifespan 启动期调用;测试直调。
+    """
+    cfg = validated_fulltext_ts_config(ts_config)
+    hit = (
+        await session.execute(
+            text("SELECT 1 FROM pg_ts_config WHERE cfgname = :c LIMIT 1"),
+            {"c": cfg},
+        )
+    ).scalar_one_or_none()
+    if hit is None:
+        raise RuntimeError(
+            f"全文检索分词配置 {cfg} 在 pg_ts_config 中不存在(分词器未安装,"
+            "如 zhparser 扩展缺失)——检索配置降级会与存量 tsv 错配,拒绝启动;"
+            "安装配方见 docs/HANDOFF.md「zhparser 安装配方(pg18 localenv)」,"
+            "或改配 KM_RAG_FULLTEXT_TS_CONFIG=simple 回退缺省"
+        )
+    return cfg
+
+
 def _is_reserved(table_name: str) -> bool:
     """与 internal/meta._is_reserved 同口径(控制面保留表不入知识库/内省)。"""
     name = table_name.lower()
@@ -48,8 +75,12 @@ def _is_reserved(table_name: str) -> bool:
 
 
 class RagRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, ts_config: str = DEFAULT_FULLTEXT_TS_CONFIG) -> None:
         self._s = session
+        # 098:全文分词配置(白名单校验 fail-fast,组合根注入部署值;缺省 simple
+        # 零回归)。写(upsert tsv)与读(recall_fulltext)共用同一注入值——
+        # 同库不分词两态,写读异配置 = 检索静默错配
+        self._ts = validated_fulltext_ts_config(ts_config)
         self._oper = SqlOperLogRepo(session)  # 审计与业务同会话=同事务(007 组合模式)
 
     # ============ 事务 ============
@@ -80,6 +111,8 @@ class RagRepository:
         source_type: str,
         embedding: list[float] | None,
         alias: str = "",  # 037:业务称谓别名
+        team_id: str | None = None,  # 102:归属值(set_team_id=True 时生效)
+        set_team_id: bool = False,  # 102:False=保留既有归属(缺省零回归)
     ) -> None:
         """四元幂等 upsert;embedding 为 None 时自动来源清空向量(009 降级语义)。
 
@@ -91,7 +124,11 @@ class RagRepository:
         (=既有别名)在 DO UPDATE 内重算,否则派生检索文本与 alias 列不同源,
         别名召回静默失效;人工精修路径 embedding 传 None 时保留既有向量
         (清向量会使该表退出向量召回)。
-        """
+        102 归属:set_team_id=False 时既有 team_id 原位保留(上传不带归属=
+        无归属意图,不静默公共化/改属;新建行落 NULL=公共);set_team_id=True
+        时写入 team_id 值——上传显式选择团队=显式归属;自动来源(fetch/reindex)
+        恒传 set_team_id=True + team_id=None(机器产物一律公共,design D5:
+        团队条目被扫描更新/重建后回公共)。冲突键四元不含归属(单一实例)。"""
         vec = vec_literal(embedding) if embedding else None
         cols_text = " ".join(f"{k} {v}" for k, v in columns_comment.items())
         # 生效别名(单一定义):保留分支命中→既有别名;否则→传入别名。
@@ -104,17 +141,18 @@ class RagRepository:
         await self._s.execute(
             text(
                 # S608 豁免:effective_alias 为本文件内常量片段(非用户输入),
-                # 其余全部为绑定参数——无任何外部字符串拼接
+                # 其余全部为绑定参数——无任何外部字符串拼接;{self._ts} 为
+                # 098 白名单校验后的配置名(标识符无法绑定参数,单源注入)
                 "INSERT INTO rag.table_descriptions"  # noqa: S608
                 " (id, tenant_id, datasource_key, schema_name, table_name,"
                 "  table_comment, columns_comment, sample_queries, source_type,"
-                "  embedding, tsv, alias, created_at, updated_at)"
+                "  embedding, tsv, alias, team_id, created_at, updated_at)"
                 " VALUES (:id, :tenant, :ds, :schema, :table, :comment,"
                 "  CAST(:cols AS jsonb), CAST(:samples AS jsonb), :source,"
                 "  CAST(:vec AS vector),"
-                "  to_tsvector('simple', :table_t || ' ' || :alias_t || ' ' ||"
+                f"  to_tsvector('{self._ts}', :table_t || ' ' || :alias_t || ' ' ||"
                 "  :comment_t || ' ' || :cols_text),"
-                "  :alias, now(), now())"
+                "  :alias, CAST(:team AS uuid), now(), now())"
                 " ON CONFLICT (tenant_id, datasource_key, schema_name, table_name)"
                 " DO UPDATE SET table_comment = EXCLUDED.table_comment,"
                 "  columns_comment = EXCLUDED.columns_comment,"
@@ -123,9 +161,11 @@ class RagRepository:
                 "  embedding = CASE WHEN :source IN ('INTROSPECTION', 'AI_GENERATED')"
                 "   THEN EXCLUDED.embedding"
                 "   ELSE COALESCE(EXCLUDED.embedding, rag.table_descriptions.embedding) END,"
-                "  tsv = to_tsvector('simple', :table_t || ' ' ||"
+                f"  tsv = to_tsvector('{self._ts}', :table_t || ' ' ||"
                 f"  {effective_alias} || ' ' || :comment_t || ' ' || :cols_text),"
                 "  alias = " + effective_alias + ","
+                "  team_id = CASE WHEN :team_set THEN CAST(:team AS uuid)"
+                "   ELSE rag.table_descriptions.team_id END,"
                 "  updated_at = now()"
             ),
             {
@@ -141,6 +181,8 @@ class RagRepository:
                 "vec": vec,
                 "cols_text": cols_text,
                 "alias": alias,
+                "team": team_id,
+                "team_set": set_team_id,
                 # tsv 内容参数与列值参数分开命名(同值不同参):asyncpg 对同一参数
                 # 在 varchar 列与 tsvector 输入两处推断类型会报 AmbiguousParameter
                 "table_t": table_name,
@@ -151,16 +193,17 @@ class RagRepository:
 
     async def list_source_and_alias(
         self, *, tenant_id: str, datasource_key: str
-    ) -> dict[tuple[str, str], tuple[str, str]]:
-        """(schema_name, table_name) → (source_type, alias)——优先级判定与生效
-        别名(R1-S1:embedding 文本须以生效别名参与,与 alias 列/tsv 同源),
-        一次读免二次往返;042 二元键:default 源合法范围含两个 schema
-        (tenant_<key> + public),一元键会让跨 schema 同名表互遮。"""
+    ) -> dict[tuple[str, str], tuple[str, str, str | None]]:
+        """(schema_name, table_name) → (source_type, alias, team_id)——优先级判定
+        与生效别名(R1-S1:embedding 文本须以生效别名参与,与 alias 列/tsv 同源),
+        一次读免二次往返;team_id 供上传写闸判既有条目归属(102)。042 二元键:
+        default 源合法范围含两个 schema(tenant_<key> + public),一元键会让跨
+        schema 同名表互遮。"""
         rows = (
             await self._s.execute(
                 text(
                     "SELECT schema_name, table_name, source_type,"
-                    " COALESCE(alias, '') AS alias"
+                    " COALESCE(alias, '') AS alias, team_id"
                     " FROM rag.table_descriptions"
                     " WHERE tenant_id = :t AND datasource_key = :d"
                 ),
@@ -168,7 +211,11 @@ class RagRepository:
             )
         ).all()
         return {
-            (str(r.schema_name), str(r.table_name)): (str(r.source_type), str(r.alias or ""))
+            (str(r.schema_name), str(r.table_name)): (
+                str(r.source_type),
+                str(r.alias or ""),
+                str(r.team_id) if r.team_id is not None else None,
+            )
             for r in rows
         }
 
@@ -223,6 +270,14 @@ class RagRepository:
         # 标签取「本租户」注释,方向确定(R1 实锤:无序覆盖方向随计划漂移)
         return {str(r.table_name): dict(r.columns_comment or {}) for r in rows}
 
+    # 102:可见集合子句单源(scope 枚举→常量片段;teams 恒绑定参数,无拼接输入)
+    _TEAM_CLAUSE = {
+        "all": "(rd.team_id IS NULL OR rd.team_id::text = ANY(CAST(:teams AS text[])))",
+        "public": "rd.team_id IS NULL",
+        "team": "(rd.team_id::text = :scope_team"
+        " AND rd.team_id::text = ANY(CAST(:teams AS text[])))",
+    }
+
     async def list_tables(
         self,
         *,
@@ -230,34 +285,47 @@ class RagRepository:
         datasource_key: str | None,
         limit: int,
         offset: int,
+        team_scope: str = "all",
+        visible_team_ids: Sequence[str] = (),
     ) -> tuple[list[KnowledgeEntry], int]:
         """管理面列表:updated_at 倒序(id tiebreak);不取向量/tsv 列。
 
-        静态 SQL 两形态(datasource 筛选有/无),不做任何字符串拼接。"""
-        if datasource_key is None:
-            count_sql = "SELECT count(*) FROM rag.table_descriptions WHERE tenant_id = :t"
-            list_sql = (
-                "SELECT id, datasource_key, schema_name, table_name, table_comment,"
-                " columns_comment, sample_queries, source_type, updated_at,"
-                " COALESCE(alias, '') AS alias"
-                " FROM rag.table_descriptions WHERE tenant_id = :t"
-                " ORDER BY updated_at DESC, id DESC LIMIT :lim OFFSET :off"
-            )
-            params: dict[str, object] = {"t": tenant_id}
-        else:
-            count_sql = (
-                "SELECT count(*) FROM rag.table_descriptions"
-                " WHERE tenant_id = :t AND datasource_key = :d"
-            )
-            list_sql = (
-                "SELECT id, datasource_key, schema_name, table_name, table_comment,"
-                " columns_comment, sample_queries, source_type, updated_at,"
-                " COALESCE(alias, '') AS alias"
-                " FROM rag.table_descriptions"
-                " WHERE tenant_id = :t AND datasource_key = :d"
-                " ORDER BY updated_at DESC, id DESC LIMIT :lim OFFSET :off"
-            )
-            params = {"t": tenant_id, "d": datasource_key}
+        静态 SQL 两形态(datasource 筛选有/无),不做任何字符串拼接。
+        102:可见集合=公共 ∪ 调用者团队(teams 绑定参数);team_scope ∈
+        {all, public, <team_id>} 为管理面归属筛选(未知值防御性收窄为
+        team 子句=空集——宁窄勿宽;路由 pattern 已保证正常形态)。
+        """
+        clause = (
+            self._TEAM_CLAUSE[team_scope]
+            if team_scope in self._TEAM_CLAUSE
+            else self._TEAM_CLAUSE["team"]  # 其余=team id(路由 pattern 已保证形态)
+        )
+        params: dict[str, object] = {
+            "t": tenant_id,
+            "teams": list(visible_team_ids),
+            "scope_team": team_scope,
+        }
+        ds_clause = ""
+        if datasource_key is not None:
+            ds_clause = " AND rd.datasource_key = :d"
+            params["d"] = datasource_key
+        count_sql = (
+            "SELECT count(*) FROM rag.table_descriptions rd"  # noqa: S608  # 常量片段+绑定参数
+            " WHERE rd.tenant_id = :t" + ds_clause + " AND " + clause
+        )
+        list_sql = (
+            "SELECT rd.id, rd.datasource_key, rd.schema_name, rd.table_name,"  # noqa: S608  # 同上
+            " rd.table_comment, rd.columns_comment, rd.sample_queries, rd.source_type,"
+            " rd.updated_at, COALESCE(rd.alias, '') AS alias,"
+            " rd.team_id::text AS team_id, st.name AS team_name"
+            " FROM rag.table_descriptions rd"
+            " LEFT JOIN public.sys_team st ON st.id = rd.team_id"
+            " WHERE rd.tenant_id = :t"
+            + ds_clause
+            + " AND "
+            + clause
+            + " ORDER BY rd.updated_at DESC, rd.id DESC LIMIT :lim OFFSET :off"
+        )
         total = (await self._s.execute(text(count_sql), params)).scalar_one()
         rows = (
             await self._s.execute(text(list_sql), {**params, "lim": limit, "off": offset})
@@ -277,6 +345,9 @@ class RagRepository:
             source_type=str(row.source_type),  # type: ignore[attr-defined]
             updated_at=row.updated_at,  # type: ignore[attr-defined]
             alias=str(row.alias or ""),  # type: ignore[attr-defined]  # 037
+            # 102:归属字段(无该投影的调用面 Row 无属性→getattr 缺省公共形态)
+            team_id=getattr(row, "team_id", None),
+            team_name=getattr(row, "team_name", None),
         )
 
     async def find_table(self, *, tenant_id: str, table_id: str) -> KnowledgeEntry | None:
@@ -285,10 +356,13 @@ class RagRepository:
             (
                 await self._s.execute(
                     text(
-                        "SELECT id, datasource_key, schema_name, table_name, table_comment,"
-                        " columns_comment, sample_queries, source_type, updated_at,"
-                        " COALESCE(alias, '') AS alias"
-                        " FROM rag.table_descriptions WHERE id = :id AND tenant_id = :t"
+                        "SELECT rd.id, rd.datasource_key, rd.schema_name, rd.table_name,"
+                        " rd.table_comment, rd.columns_comment, rd.sample_queries,"
+                        " rd.source_type, rd.updated_at, COALESCE(rd.alias, '') AS alias,"
+                        " rd.team_id::text AS team_id, st.name AS team_name"
+                        " FROM rag.table_descriptions rd"
+                        " LEFT JOIN public.sys_team st ON st.id = rd.team_id"
+                        " WHERE rd.id = CAST(:id AS uuid) AND rd.tenant_id = CAST(:t AS uuid)"
                     ),
                     {"id": table_id, "t": tenant_id},
                 )
@@ -310,7 +384,40 @@ class RagRepository:
             source_type=str(row["source_type"]),
             updated_at=row["updated_at"],
             alias=str(row.get("alias") or ""),  # 037
+            team_id=row["team_id"],  # 102
+            team_name=row["team_name"],
         )
+
+    async def set_entry_team(self, *, tenant_id: str, table_id: str, team_id: str | None) -> bool:
+        """归属变更原位置 NULL⇄team_id(102;单一实例,内容与来源标记不动)。"""
+        rows = (
+            await self._s.execute(
+                text(
+                    "UPDATE rag.table_descriptions SET team_id = CAST(:team AS uuid)"
+                    " WHERE id = CAST(:id AS uuid) AND tenant_id = CAST(:t AS uuid)"
+                    " RETURNING id"
+                ),
+                {"id": table_id, "t": tenant_id, "team": team_id},
+            )
+        ).all()
+        return bool(rows)
+
+    async def publicize_team_entries(self, *, team_id: str) -> list[tuple[str, str]]:
+        """团队删除钩子(102):名下条目归属置空(公共化,知识资产不丢失),
+        返回受影响 (tenant_id, datasource_key) 去重范围(供调用方精确失效
+        检索缓存)。团队行本身的删除由调用方随后执行;FK ON DELETE SET NULL
+        为钩子失败时的级联兜底(同语义公共化,无审计)。"""
+        rows = (
+            await self._s.execute(
+                text(
+                    "UPDATE rag.table_descriptions SET team_id = NULL"
+                    " WHERE team_id = CAST(:t AS uuid)"
+                    " RETURNING tenant_id::text AS tenant_id, datasource_key"
+                ),
+                {"t": team_id},
+            )
+        ).all()
+        return sorted({(str(r.tenant_id), str(r.datasource_key)) for r in rows})
 
     async def delete_table(self, *, tenant_id: str, table_id: str) -> bool:
         """硬删单条(RETURNING 计数,与 chat repository 同款)。"""
@@ -342,12 +449,19 @@ class RagRepository:
     # ============ 召回:三路(全部 tenant+ds 双过滤) ============
 
     async def recall_vector(
-        self, *, tenant_id: str, datasource_key: str, vector: list[float]
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        vector: list[float],
+        visible_team_ids: Sequence[str] = (),
     ) -> list[RecallHit]:
         """向量路:pgvector 余弦距离 <=>(topK)。
 
         064:SELECT 回原生分 `1-(embedding<=>v)`(余弦相似度,值域约 [0,1];
         表达式仅算一次并同时用于排序与返回——ORDER BY 子查询消重复计算)。
+        102:可见集合叠加(tenant+ds 双过滤之上的条目级过滤)——公共条目 ∪
+        调用者团队条目;空集合=纯公共形态(存量行为逐字一致,存量行全 NULL)。
         """
         rows = (
             await self._s.execute(
@@ -357,6 +471,7 @@ class RagRepository:
                     " FROM rag.table_descriptions"
                     " WHERE tenant_id = :t AND datasource_key = :d"
                     " AND embedding IS NOT NULL"
+                    " AND (team_id IS NULL OR team_id::text = ANY(CAST(:teams AS text[])))"
                     " ORDER BY embedding <=> CAST(:vec AS vector) LIMIT :k"
                 ),
                 {
@@ -364,6 +479,7 @@ class RagRepository:
                     "d": datasource_key,
                     "vec": vec_literal(vector),
                     "k": RECALL_TOP_K,
+                    "teams": list(visible_team_ids),
                 },
             )
         ).all()
@@ -394,24 +510,41 @@ class RagRepository:
         return bool(row)
 
     async def recall_fulltext(
-        self, *, tenant_id: str, datasource_key: str, question: str
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        question: str,
+        visible_team_ids: Sequence[str] = (),
     ) -> list[RecallHit]:
-        """全文路:tsv @@ plainto_tsquery('simple',…),ts_rank 近似 BM25。
+        """全文路:tsv @@ plainto_tsquery(配置分词,…),ts_rank 近似 BM25。
 
         064:SELECT 回 ts_rank 得分(与 ORDER BY 同口径,消现状重复计算)。
+        分词配置与写入侧同源(self._ts 单点注入,098):配置变更后存量 tsv
+        未重扫前该路命中会静默错配——重扫配方见 docs/HANDOFF.md。
+        102:可见集合叠加(与向量路同款条目级过滤)。
         """
         rows = (
             await self._s.execute(
                 text(
-                    "SELECT schema_name, table_name,"
-                    " ts_rank(tsv, plainto_tsquery('simple', :q)) AS score"
+                    # S608 豁免:{self._ts} 为白名单校验后的配置名(098 design
+                    # D2/D5,标识符无法绑定参数),其余全部绑定参数
+                    "SELECT schema_name, table_name,"  # noqa: S608
+                    f" ts_rank(tsv, plainto_tsquery('{self._ts}', :q)) AS score"
                     " FROM rag.table_descriptions"
                     " WHERE tenant_id = :t AND datasource_key = :d"
-                    " AND tsv @@ plainto_tsquery('simple', :q)"
-                    " ORDER BY ts_rank(tsv, plainto_tsquery('simple', :q)) DESC"
+                    f" AND tsv @@ plainto_tsquery('{self._ts}', :q)"
+                    " AND (team_id IS NULL OR team_id::text = ANY(CAST(:teams AS text[])))"
+                    f" ORDER BY ts_rank(tsv, plainto_tsquery('{self._ts}', :q)) DESC"
                     " LIMIT :k"
                 ),
-                {"t": tenant_id, "d": datasource_key, "q": question, "k": RECALL_TOP_K},
+                {
+                    "t": tenant_id,
+                    "d": datasource_key,
+                    "q": question,
+                    "k": RECALL_TOP_K,
+                    "teams": list(visible_team_ids),
+                },
             )
         ).all()
         return [
@@ -425,13 +558,21 @@ class RagRepository:
         ]
 
     async def recall_history(
-        self, *, tenant_id: str, datasource_key: str, vector: list[float]
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        vector: list[float],
+        visible_team_ids: Sequence[str] = (),
     ) -> list[HistorySample]:
         """历史路:问句向量相似的**可用样本** sql_text(独立强 few-shot 通道)。
 
         070:候选=(EXECUTION | FEEDBACK)且 recall_enabled(LEGACY/未启用退出
         召回);同问句候选经 service 去重(优先 ADOPTED 反馈样本)后取前 K。
-        多取 3 倍候选供去重(同问句多来源在 top-K 内仍可保住最优)。"""
+        多取 3 倍候选供去重(同问句多来源在 top-K 内仍可保住最优)。
+        102 伴生:样本可见集合过滤——公共样本(空集合)恒可见,团队样本
+        仅在调用者所在团队与样本来源集合有交集时进入 few-shot;无身份调用
+        (空集合)只见公共样本,与条目三路同判据。"""
         rows = (
             await self._s.execute(
                 text(
@@ -442,12 +583,15 @@ class RagRepository:
                     " AND status = 'SUCCESS' AND recall_enabled"
                     " AND source_type IN ('EXECUTION', 'FEEDBACK')"
                     " AND embedding IS NOT NULL"
+                    " AND (COALESCE(cardinality(visible_teams), 0) = 0"
+                    "      OR visible_teams && CAST(:teams AS text[]))"
                     " ORDER BY embedding <=> CAST(:vec AS vector) LIMIT :k"
                 ),
                 {
                     "t": tenant_id,
                     "d": datasource_key,
                     "vec": vec_literal(vector),
+                    "teams": list(visible_team_ids),
                     "k": RECALL_TOP_K * 3,
                 },
             )
@@ -463,9 +607,17 @@ class RagRepository:
         ]
 
     async def fetch_entries(
-        self, *, tenant_id: str, datasource_key: str, keys: list[tuple[str, str]]
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        keys: list[tuple[str, str]],
+        visible_team_ids: Sequence[str] = (),
     ) -> list[KnowledgeEntry]:
-        """按 (schema, table) 集取条目内容(四维限定,防同名表跨 schema 串扰)。"""
+        """按 (schema, table) 集取条目内容(四维限定,防同名表跨 schema 串扰)。
+
+        102:同款可见集合过滤——兜底关系扩展(semantic 层不识归属)引入的
+        键,团队条目 MUST NOT 经扩展路进入注入。"""
         out: list[KnowledgeEntry] = []
         for schema, table in keys:
             rows = (
@@ -477,8 +629,15 @@ class RagRepository:
                         " FROM rag.table_descriptions"
                         " WHERE tenant_id = :t AND datasource_key = :d"
                         " AND schema_name = :s AND table_name = :n"
+                        " AND (team_id IS NULL OR team_id::text = ANY(CAST(:teams AS text[])))"
                     ),
-                    {"t": tenant_id, "d": datasource_key, "s": schema, "n": table},
+                    {
+                        "t": tenant_id,
+                        "d": datasource_key,
+                        "s": schema,
+                        "n": table,
+                        "teams": list(visible_team_ids),
+                    },
                 )
             ).all()
             out.extend(self._to_entry(r, tenant_id) for r in rows)
@@ -495,26 +654,30 @@ class RagRepository:
         sql_text: str,
         feedback_message_id: str,
         embedding: list[float] | None,
+        visible_teams: Sequence[str] = (),
     ) -> None:
         """纠错 SQL 晋升为可召回样本(FEEDBACK,recall_enabled=TRUE)。
 
         幂等键=(tenant_id, feedback_message_id) 部分唯一索引:同一反馈的
         重复晋升覆盖(最新纠错);与执行样本(同问句 EXECUTION)并存不互覆盖
-        ——070「同问句异来源并存,召回按优先级择优」。"""
+        ——070「同问句异来源并存,召回按优先级择优」。102 伴生:visible_teams
+        =反馈发起者可见集合(空=公共)。"""
         vec = vec_literal(embedding) if embedding else None
         await self._s.execute(
             text(
                 "INSERT INTO rag.query_history"
                 " (id, tenant_id, datasource_key, question, sql_text, status,"
                 "  source_type, recall_enabled, feedback_message_id, embedding,"
-                "  created_at)"
+                "  visible_teams, created_at)"
                 " VALUES (:id, :t, :d, :q, :sql, 'SUCCESS', 'FEEDBACK', TRUE,"
-                "         CAST(:mid AS uuid), CAST(:vec AS vector), now())"
+                "         CAST(:mid AS uuid), CAST(:vec AS vector),"
+                "         CAST(:teams AS text[]), now())"
                 " ON CONFLICT (tenant_id, feedback_message_id)"
                 "   WHERE source_type = 'FEEDBACK'"
                 "   AND feedback_message_id IS NOT NULL DO UPDATE SET"
                 "  sql_text = EXCLUDED.sql_text,"
                 "  embedding = COALESCE(EXCLUDED.embedding, query_history.embedding),"
+                "  visible_teams = EXCLUDED.visible_teams,"
                 "  status = 'SUCCESS', recall_enabled = TRUE, created_at = now()"
             ),
             {
@@ -525,6 +688,7 @@ class RagRepository:
                 "sql": sql_text,
                 "mid": feedback_message_id,
                 "vec": vec,
+                "teams": sorted(set(visible_teams)),
             },
         )
 
@@ -550,24 +714,29 @@ class RagRepository:
         question: str,
         sql_text: str,
         embedding: list[float] | None,
+        visible_teams: Sequence[str] = (),
     ) -> None:
         """幂等回写(016 治理):同 (tenant, ds, question) 覆盖保留最新成功 SQL
         (0007 唯一索引支撑);embedding 失败传 None 时保留旧向量(旧向量语义
         仍有效,清空会使该行退出向量召回);同事务上限淘汰该维度最旧行。
+        102 伴生:visible_teams=回写时调用者可见集合(排序去重;空=公共),
+        覆盖更新同步刷新(同题重写以最新一次来源为准)。
         """
         vec = vec_literal(embedding) if embedding else None
+        teams = sorted(set(visible_teams))
         await self._s.execute(
             text(
                 "INSERT INTO rag.query_history"
                 " (id, tenant_id, datasource_key, question, sql_text, status,"
-                "  source_type, recall_enabled, embedding, created_at)"
+                "  source_type, recall_enabled, embedding, visible_teams, created_at)"
                 " VALUES (:id, :t, :d, :q, :sql, 'SUCCESS', 'EXECUTION', TRUE,"
-                "         CAST(:vec AS vector), now())"
+                "         CAST(:vec AS vector), CAST(:teams AS text[]), now())"
                 # 070:执行样本幂等目标=部分唯一索引(谓词须逐字匹配)
                 " ON CONFLICT (tenant_id, datasource_key, md5(question))"
                 "   WHERE source_type = 'EXECUTION' DO UPDATE SET"
                 "  sql_text = EXCLUDED.sql_text,"
                 "  embedding = COALESCE(EXCLUDED.embedding, query_history.embedding),"
+                "  visible_teams = EXCLUDED.visible_teams,"
                 "  status = 'SUCCESS', recall_enabled = TRUE, created_at = now()"
             ),
             {
@@ -577,6 +746,7 @@ class RagRepository:
                 "q": question,
                 "sql": sql_text,
                 "vec": vec,
+                "teams": teams,
             },
         )
         # 上限淘汰:保留该维度 created_at 最新的 cap 行(id 作并列 tiebreak)
@@ -698,9 +868,17 @@ class RagRepository:
     # ============ 052 知识覆盖报告(只读聚合输入;零写入零 LLM) ============
 
     async def list_all_entries(
-        self, *, tenant_id: str, datasource_key: str
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        visible_team_ids: Sequence[str] = (),
     ) -> list[KnowledgeEntry]:
-        """该 (租户, 数据源) 全量登记条目(与 fetch_entries 同投影,无分页)。"""
+        """该 (租户, 数据源) 管理读面登记条目(与 fetch_entries 同投影,无分页)。
+
+        102:可见集合单点收敛的第四处(覆盖报告读面)——仅公共条目与
+        调用者所在团队条目进入报告,与列表端点同口径(管理读面不成为
+        团队条目存在性的旁路)。"""
         rows = (
             await self._s.execute(
                 text(
@@ -709,9 +887,10 @@ class RagRepository:
                     " COALESCE(alias, '') AS alias"
                     " FROM rag.table_descriptions"
                     " WHERE tenant_id = :t AND datasource_key = :d"
+                    " AND (team_id IS NULL OR team_id::text = ANY(CAST(:teams AS text[])))"
                     " ORDER BY schema_name, table_name"
                 ),
-                {"t": tenant_id, "d": datasource_key},
+                {"t": tenant_id, "d": datasource_key, "teams": list(visible_team_ids)},
             )
         ).all()
         return [self._to_entry(r, tenant_id) for r in rows]

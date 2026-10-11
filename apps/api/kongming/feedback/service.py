@@ -234,6 +234,8 @@ class FeedbackService:
                 question=question,
                 sql_text=corrected_sql,
                 feedback_message_id=str(msg["id"]),
+                # 102 伴生:样本可见性归属反馈发起者(纠错 SQL 的来源主体)
+                caller_user_id=str(msg["user_id"] or "") or None,
             )
         except SamplePromotionUnavailable:
             raise

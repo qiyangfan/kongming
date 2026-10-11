@@ -1,11 +1,12 @@
-/* MCP 服务管理页(028 mcp-interop spec「配置管理」):
+/* MCP 服务管理页(028 mcp-interop spec「配置管理」;109 扩展原语清单):
    列表(启用态/工具数/同步态)+ 新建/编辑对话框(server_key 创建后不可改;
    headers 键值对编辑——值掩码语义:编辑态留空=保持现值,清空=删除该键)+
-   启停 StatusSwitch + 删除受控确认 + 连通性测试/同步(行内结果)。 */
+   启停 StatusSwitch + 删除受控确认 + 连通性测试/同步(行内结果)+
+   原语清单(工具/资源/模板分区)与模板只读预览(AlertDialog,实时拉取)。 */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Eye, Loader2, Plus, Trash2 } from "lucide-react";
 
 import {
   AlertDialog,
@@ -36,10 +37,13 @@ import {
   createMcpServer,
   deleteMcpServer,
   listMcpServers,
+  previewMcpPrompt,
   setMcpServerEnabled,
   syncMcpServer,
   testMcpServer,
   updateMcpServer,
+  type McpPromptEntryOut,
+  type McpPromptPreviewOut,
   type McpServerOut,
 } from "@/lib/mcp-api";
 
@@ -73,6 +77,13 @@ export default function McpPage() {
   const [deleteError, setDeleteError] = useState("");
   const [rowNote, setRowNote] = useState<Record<string, string>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  // 109:原语清单(工具/资源/模板)与模板只读预览
+  const [primitives, setPrimitives] = useState<McpServerOut | null>(null);
+  const [previewing, setPreviewing] = useState<McpPromptEntryOut | null>(null);
+  const [previewArgs, setPreviewArgs] = useState<Record<string, string>>({});
+  const [previewData, setPreviewData] = useState<McpPromptPreviewOut | null>(null);
+  const [previewError, setPreviewError] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const servers = useQuery({ queryKey: ["admin", "mcp"], queryFn: listMcpServers });
 
@@ -157,13 +168,17 @@ export default function McpPage() {
         const r = await testMcpServer(row.id);
         note(
           row.id,
-          r.ok ? `连通正常,发现 ${r.tools ?? 0} 个工具` : `连通失败(${r.kind}):${r.detail}`,
+          r.ok
+            ? `连通正常:工具 ${r.tools ?? 0} / 资源 ${r.resources ?? 0} / 模板 ${r.prompts ?? 0}`
+            : `连通失败(${r.kind}):${r.detail}`,
         );
       } else {
         const r = await syncMcpServer(row.id);
         note(
           row.id,
-          r.ok ? `同步完成,注册 ${r.tools ?? 0} 个工具` : `同步失败(${r.kind}):${r.detail}`,
+          r.ok
+            ? `同步完成:注册工具 ${r.tools ?? 0} / 资源 ${r.resources ?? 0} / 模板 ${r.prompts ?? 0}`
+            : `同步失败(${r.kind}):${r.detail}`,
         );
         invalidate();
       }
@@ -186,6 +201,27 @@ export default function McpPage() {
       existingKeys: [...row.header_keys],
     });
     setFormError("");
+  }
+
+  function openPreview(prompt: McpPromptEntryOut): void {
+    // 参数缺省空值;required 声明仅供填写参考(缺参由 server 渲染语义兜底)
+    setPreviewArgs(Object.fromEntries((prompt.arguments ?? []).map((a) => [a.name, ""])));
+    setPreviewing(prompt);
+    setPreviewData(null);
+    setPreviewError("");
+  }
+
+  async function runPreview(serverId: string, name: string): Promise<void> {
+    setPreviewLoading(true);
+    setPreviewError("");
+    setPreviewData(null);
+    try {
+      setPreviewData(await previewMcpPrompt(serverId, { name, arguments: previewArgs }));
+    } catch (e) {
+      setPreviewError(e instanceof Error ? e.message : "预览拉取失败");
+    } finally {
+      setPreviewLoading(false);
+    }
   }
 
   return (
@@ -298,6 +334,7 @@ export default function McpPage() {
             disabledReason: "操作进行中",
             onSelect: (row) => void runAction(row, "sync"),
           },
+          { label: "原语清单", onSelect: (row) => setPrimitives(row) },
           { label: "编辑", onSelect: openEdit },
           {
             label: "删除",
@@ -479,6 +516,212 @@ export default function McpPage() {
             >
               {remove.isPending && <Loader2 className="animate-spin" aria-hidden />}
               确认删除
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 原语清单(109):工具/资源/模板分区;清单来自最近一次同步快照 */}
+      <Dialog
+        open={primitives !== null}
+        onOpenChange={(o) => {
+          if (!o) {
+            setPrimitives(null);
+            setPreviewing(null);
+          }
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>原语清单「{primitives?.name}」</DialogTitle>
+          </DialogHeader>
+          {primitives && (
+            <div className="space-y-5">
+              <section>
+                <h3 className="flex items-center gap-2 text-sm font-medium">
+                  工具
+                  <Badge variant="secondary">{primitives.tools.length}</Badge>
+                </h3>
+                {primitives.tools.length === 0 ? (
+                  <p className="mt-1.5 text-xs text-muted-foreground">无(同步后可见)。</p>
+                ) : (
+                  <ul className="mt-1.5 space-y-1.5">
+                    {primitives.tools.map((t) => (
+                      <li key={t.qualified} className="text-xs">
+                        <span className="font-mono">{t.qualified}</span>
+                        {t.read_only && (
+                          <Badge variant="outline" className="ml-1.5">
+                            只读
+                          </Badge>
+                        )}
+                        {t.description && <p className="text-muted-foreground">{t.description}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+              <section>
+                <h3 className="flex items-center gap-2 text-sm font-medium">
+                  资源
+                  <Badge variant="secondary">{primitives.resources.length}</Badge>
+                </h3>
+                {primitives.resources.length === 0 ? (
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    无(server 未提供 resources 原语时如实为 0)。
+                  </p>
+                ) : (
+                  <ul className="mt-1.5 space-y-1.5">
+                    {primitives.resources.map((r) => (
+                      <li key={r.uri} className="text-xs">
+                        <span className="font-mono">{r.uri}</span>
+                        {r.media_type && (
+                          <Badge variant="outline" className="ml-1.5">
+                            {r.media_type}
+                          </Badge>
+                        )}
+                        {r.name && <span className="ml-1.5">{r.name}</span>}
+                        {r.description && <p className="text-muted-foreground">{r.description}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  资源经工具 mcp__{primitives.server_key}__read_resource 读取(uri 白名单约束)。
+                </p>
+              </section>
+              <section>
+                <h3 className="flex items-center gap-2 text-sm font-medium">
+                  提示模板
+                  <Badge variant="secondary">{primitives.prompts.length}</Badge>
+                </h3>
+                {primitives.prompts.length === 0 ? (
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    无(server 未提供 prompts 原语时如实为 0)。
+                  </p>
+                ) : (
+                  <ul className="mt-1.5 space-y-1.5">
+                    {primitives.prompts.map((p) => (
+                      <li key={p.name} className="flex items-start justify-between gap-2 text-xs">
+                        <div className="min-w-0">
+                          <span className="font-mono">{p.name}</span>
+                          {p.description && (
+                            <p className="text-muted-foreground">{p.description}</p>
+                          )}
+                          {(p.arguments ?? []).length > 0 && (
+                            <p className="text-muted-foreground">
+                              参数:
+                              {(p.arguments ?? [])
+                                .map((a) => (a.required ? `${a.name}*` : a.name))
+                                .join(", ")}
+                              (* 为必填)
+                            </p>
+                          )}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          aria-label={`预览模板 ${p.name}`}
+                          onClick={() => openPreview(p)}
+                        >
+                          <Eye aria-hidden />
+                          预览
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setPrimitives(null)}>
+                  关闭
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 模板只读预览(109):按名实时拉取渲染结果,服务端已过注入检测+大小上限;
+          只读展示,不注入任何提示词、非运行时提示来源 */}
+      <AlertDialog
+        open={previewing !== null}
+        onOpenChange={(o) => {
+          if (!o) setPreviewing(null);
+        }}
+      >
+        <AlertDialogContent className="sm:max-w-xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>模板预览「{previewing?.name}」</AlertDialogTitle>
+            <AlertDialogDescription>
+              只读渲染结果(实时拉取,不落库);内容已过注入检测,超 64KB 截断。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {previewing && (previewing.arguments ?? []).length > 0 && (
+            <div className="space-y-2">
+              {(previewing.arguments ?? []).map((a) => (
+                <FormRow
+                  key={a.name}
+                  label={`${a.name}${a.required ? " *" : ""}`}
+                  htmlFor={`pv-${a.name}`}
+                >
+                  <Input
+                    id={`pv-${a.name}`}
+                    value={previewArgs[a.name] ?? ""}
+                    onChange={(e) => setPreviewArgs({ ...previewArgs, [a.name]: e.target.value })}
+                    aria-label={`参数 ${a.name}`}
+                  />
+                </FormRow>
+              ))}
+            </div>
+          )}
+          {previewLoading && (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+              <Loader2 className="animate-spin" aria-hidden />
+              拉取中…
+            </p>
+          )}
+          {previewError && (
+            <p role="alert" className="text-sm text-destructive">
+              {previewError}
+            </p>
+          )}
+          {previewData && !previewData.ok && (
+            <p role="alert" className="text-sm text-destructive">
+              拉取失败({previewData.kind}):{previewData.detail}
+            </p>
+          )}
+          {previewData?.ok && (
+            <div className="space-y-1.5">
+              {previewData.injection_hits.length > 0 && (
+                <p className="text-xs text-destructive">
+                  内容命中注入检测已净化:{previewData.injection_hits.join(", ")}
+                </p>
+              )}
+              {previewData.truncated && (
+                <p className="text-xs text-muted-foreground">内容超 64KB 已截断。</p>
+              )}
+              <pre className="max-h-72 overflow-y-auto rounded-md border bg-muted/40 p-3 text-xs whitespace-pre-wrap">
+                {previewData.text}
+              </pre>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>关闭</AlertDialogCancel>
+            <Button
+              disabled={previewLoading || primitives === null || previewing === null}
+              onClick={() => {
+                if (primitives !== null && previewing !== null) {
+                  void runPreview(primitives.id, previewing.name);
+                }
+              }}
+            >
+              {previewLoading ? (
+                <Loader2 className="animate-spin" aria-hidden />
+              ) : (
+                <Eye aria-hidden />
+              )}
+              {previewData !== null ? "重新拉取" : "拉取预览"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

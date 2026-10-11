@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kongming.auth.router import current_user, require_perm
 from kongming.bot.repository import SqlBotRepo
 from kongming.chat.repository import ChatRepository
+from kongming.config import get_settings
 from kongming.db import get_session
 from kongming.store.repository import SqlStoreRepo
 from kongming.store.service import (
@@ -60,10 +61,31 @@ class _StoreGuardrail:
                 safe_replacement="内容未通过安全检查,已省略。",
             )
 
+    async def check_input(
+        self, *, trace_id: str, user_id: str, tenant_id: str, texts: list[str]
+    ) -> tuple[bool, list[str]]:
+        """输入面判定(104 回滚重审系统提示词;与 bot 域同口径)。"""
+        from kongming.db import get_sessionmaker
+        from kongming.guardrail.repository import SqlGuardrailAuditWriter, SqlGuardrailRepo
+        from kongming.guardrail.service import GuardrailService
+
+        async with get_sessionmaker()() as s:
+            svc = GuardrailService(SqlGuardrailRepo(s), SqlGuardrailAuditWriter())
+            verdict = await svc.evaluate_input(
+                trace_id=trace_id, user_id=user_id, tenant_id=tenant_id, texts=texts
+            )
+        return verdict.blocked, verdict.processed
+
 
 class _StoreRunner:
     async def run(
-        self, *, bot_key: str, question: str, tenant_id: str, channel: str
+        self,
+        *,
+        bot_key: str,
+        question: str,
+        tenant_id: str,
+        channel: str,
+        definition: dict[str, Any] | None = None,
     ) -> tuple[bool, str, str]:
         from kongming.bot.router import get_bot_service as _bot_factory
         from kongming.chat.router import get_agent_client
@@ -79,6 +101,8 @@ class _StoreRunner:
                     question=question,
                     channel=channel,
                     tenant_id_hint=tenant_id,
+                    # 104:商店直跑消费当前上架版本快照(系统提示词/工具集)
+                    definition_override=definition,
                 )
             except BotNotFound:
                 # R1-J1:创建者被禁用(025 状态闸)——收敛友好文案不裸 500
@@ -111,6 +135,7 @@ def _svc(session: AsyncSession) -> StoreService:
         tool_lister=_StoreToolLister(session),
         guardrail=_StoreGuardrail(),
         runner=_StoreRunner(),
+        version_cap=get_settings().bot_store_version_cap,  # 104:封顶上限部署级
     )
 
 
@@ -166,6 +191,27 @@ class StoreBotDetailOut(StoreBotOut):
     suggestions: list[str] = []
     tools: list[str] = []
     my_rating: int | None = None
+    version_no: int | None = None  # 104:当前上架版本号(纯增字段)
+    version_published_at: str | None = None  # 104:当前版本上架时间(纯增字段)
+
+
+class BotSnapshotOut(BaseModel):
+    """版本快照定型(读侧单源=StoreSnapshotFields 白名单)。"""
+
+    name: str
+    greeting: str = ""
+    suggestions: list[str] = []
+    system_prompt: str = ""
+    tools: list[str] = []
+
+
+class BotVersionOut(BaseModel):
+    """版本历史项(104):版本号/上架时间/当前标识/快照内容。"""
+
+    version_no: int
+    published_at: str
+    current: bool
+    snapshot: BotSnapshotOut
 
 
 class StoreRunOut(BaseModel):
@@ -215,7 +261,7 @@ async def publish_bot(
     can = await _can_manage_bot(user, session, row)
     svc = _svc(session)
     try:
-        await svc.publish(
+        out = await svc.publish(
             bot_id=str(bot_id),
             tenant_id=tenant_id,
             user_id=str(user["sub"]),
@@ -231,10 +277,19 @@ async def publish_bot(
         raise HTTPException(status_code=400, detail=str(e)) from None
     except GuardrailRejected as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
-    # J7:上架审计(025 bot.* 先例)
+    # J7:上架审计(025 bot.* 先例);104:幂等复用记「内容无变化」,
+    # 新版本记版本号(spec「内容无变化幂等复用…审计记录内容无变化」)
     from kongming.auth.repository import SqlOperLogRepo
 
-    await SqlOperLogRepo(session).add(str(user["sub"]), "bot.publish", str(bot_id), {})
+    await SqlOperLogRepo(session).add(
+        str(user["sub"]),
+        "bot.publish",
+        str(bot_id),
+        {
+            "content_changed": not bool(out["idempotent"]),
+            "version_no": int(cast("int", out["version_no"])),
+        },
+    )
     await session.commit()
     return {"ok": True}
 
@@ -265,6 +320,104 @@ async def unpublish_bot(
     await SqlOperLogRepo(session).add(str(user["sub"]), "bot.unpublish", str(bot_id), {})
     await session.commit()
     return {"ok": True}
+
+
+def _version_out(r: dict[str, Any]) -> BotVersionOut:
+    """版本行(dict)→ 契约出参;快照读侧定型(BotSnapshotOut 白名单)。"""
+    snap = cast("dict[str, object]", r.get("snapshot") or {})
+    raw_sug = snap.get("suggestions")
+    raw_tools = snap.get("tools")
+    return BotVersionOut(
+        version_no=int(r["version_no"]),
+        published_at=r["published_at"].isoformat(),
+        current=bool(r.get("is_current")),
+        snapshot=BotSnapshotOut(
+            name=str(snap.get("name") or ""),
+            greeting=str(snap.get("greeting") or ""),
+            suggestions=[str(x) for x in cast("list[object]", raw_sug)]
+            if isinstance(raw_sug, list)
+            else [],
+            system_prompt=str(snap.get("system_prompt") or ""),
+            tools=[str(x) for x in cast("list[object]", raw_tools)]
+            if isinstance(raw_tools, list)
+            else [],
+        ),
+    )
+
+
+# ── 版本历史与回滚(104;归属口径与上架治理同) ──
+
+
+@router.get(
+    "/system/bots/{bot_id}/versions",
+    response_model=list[BotVersionOut],
+    dependencies=[Depends(require_perm("chat:execute"))],
+)
+async def list_bot_versions(
+    bot_id: uuid.UUID,
+    user: Annotated[dict[str, object], Depends(current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> list[BotVersionOut]:
+    tenant_id = await _tenant_or_403(user, session, x_tenant_id)
+    row = await _BotReader(session).get_bot(bot_id=str(bot_id), tenant_id=tenant_id)
+    can = await _can_manage_bot(user, session, row)
+    svc = _svc(session)
+    try:
+        rows = await svc.list_versions(bot_id=str(bot_id), tenant_id=tenant_id, can_manage=can)
+    except StoreForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e)) from None
+    except StoreNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    return [_version_out(r) for r in rows]
+
+
+@router.post(
+    "/system/bots/{bot_id}/versions/{version_no}/rollback",
+    dependencies=[Depends(require_perm("chat:execute"))],
+)
+async def rollback_bot_version(
+    bot_id: uuid.UUID,
+    version_no: int,
+    user: Annotated[dict[str, object], Depends(current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> dict[str, object]:
+    """回滚=历史版本重新指为当前上架版本(视同上架,按现行护栏重审;
+    BLOCK 拒绝指针不动;回滚到当前版本为幂等 no-op)。"""
+    tenant_id = await _tenant_or_403(user, session, x_tenant_id)
+    row = await _BotReader(session).get_bot(bot_id=str(bot_id), tenant_id=tenant_id)
+    can = await _can_manage_bot(user, session, row)
+    svc = _svc(session)
+    try:
+        out = await svc.rollback(
+            bot_id=str(bot_id),
+            tenant_id=tenant_id,
+            user_id=str(user["sub"]),
+            version_no=version_no,
+            can_manage=can,
+        )
+    except StoreForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e)) from None
+    except StoreNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    except StoreValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    except GuardrailRejected as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    from kongming.auth.repository import SqlOperLogRepo
+
+    await SqlOperLogRepo(session).add(
+        str(user["sub"]),
+        "bot.version_rollback",
+        str(bot_id),
+        {
+            "version_no": int(cast("int", out["version_no"])),
+            "switched": bool(out["switched"]),
+        },
+    )
+    await session.commit()
+    return {"ok": True, "version_no": int(cast("int", out["version_no"]))}
 
 
 # ── 商店面 ──
@@ -306,11 +459,14 @@ async def store_detail(
     except StoreNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     base = _store_out(row)
+    version_published_at = row.get("version_published_at")
     return StoreBotDetailOut(
         **base.model_dump(),
         suggestions=[str(x) for x in cast("list[object]", row.get("suggestions") or [])],
         tools=[str(x) for x in cast("list[object]", row.get("tools") or [])],
         my_rating=row.get("my_rating"),
+        version_no=None if row.get("version_no") is None else int(row["version_no"]),
+        version_published_at=(version_published_at.isoformat() if version_published_at else None),
     )
 
 

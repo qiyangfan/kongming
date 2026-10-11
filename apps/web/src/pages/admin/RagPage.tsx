@@ -1,6 +1,8 @@
 /* 知识库管理页(web-admin 009 delta):列表(数据源筛选/分页)+ 上传(文件选择
    +数据源/schema)+ 删除受控确认 + 扫描数据源 + 重建索引(受控确认,结果展示)。
-   全部走 shadcn 组件;错误反馈 role=alert;进行中操作禁重复提交。 */
+   102:列表归属列与筛选(公共/我所在的团队)、上传表单归属选择(默认公共,
+   可选我作为 OWNER/MEMBER 的团队)、归属变更受控确认(AlertDialog 明示可见
+   范围变化)。全部走 shadcn 组件;错误反馈 role=alert;进行中操作禁重复提交。 */
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -44,7 +46,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { datasourceApi } from "@/lib/datasource-api";
 import { api } from "@/lib/api";
-import { ragApi, type KnowledgeItemOut } from "@/lib/rag-api";
+import { ragApi, type KnowledgeItemOut, type TeamScope } from "@/lib/rag-api";
+import { listMyTeams } from "@/lib/team-api";
+import { RecallProbePanel } from "@/components/recall-probe-panel";
 import type { components } from "@/lib/api-types.gen";
 import {
   CircleHelp,
@@ -52,6 +56,7 @@ import {
   Loader2 as LoaderIcon,
   Trash2 as TrashIcon,
   Upload,
+  Users as UsersIcon,
 } from "lucide-react";
 
 const PAGE_SIZE = 10;
@@ -74,6 +79,9 @@ export default function RagPage() {
   const [actionDs, setActionDs] = useState("");
   const [uploadSchema, setUploadSchema] = useState("");
   const [uploadDs, setUploadDs] = useState("default");
+  // 102:上传归属(""=公共,否则团队 id)与列表归属筛选
+  const [uploadTeamId, setUploadTeamId] = useState("");
+  const [teamScope, setTeamScope] = useState<TeamScope>("all");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<KnowledgeItemOut | null>(null);
@@ -82,12 +90,21 @@ export default function RagPage() {
   const [editTarget, setEditTarget] = useState<KnowledgeItemOut | null>(null);
   const [editComment, setEditComment] = useState("");
   const [editAlias, setEditAlias] = useState("");
+  // 102 归属变更受控确认(target=条目;destId=确认框内选择的目标归属)
+  const [ownershipTarget, setOwnershipTarget] = useState<KnowledgeItemOut | null>(null);
+  const [ownershipDest, setOwnershipDest] = useState<string>("public");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { data: options } = useQuery({
     queryKey: ["rag", "ds-options"],
     queryFn: datasourceApi.options,
   });
+
+  // 102:我所在的团队(上传归属候选=OWNER/MEMBER 可写团队;筛选用全部所在团队)
+  const myTeams = useQuery({ queryKey: ["teams", "mine"], queryFn: listMyTeams });
+  const writableTeams = (myTeams.data ?? []).filter(
+    (t) => t.role === "OWNER" || t.role === "MEMBER",
+  );
 
   // 040:可扫描 schema 集合(上传表单候选源,随上传数据源联动)
   const schemas = useQuery({
@@ -104,8 +121,8 @@ export default function RagPage() {
   }, [schemas.data, uploadSchema]);
 
   const list = useQuery({
-    queryKey: ["rag", "tables", page, dsFilter],
-    queryFn: () => ragApi.page(page, PAGE_SIZE, dsFilter),
+    queryKey: ["rag", "tables", page, dsFilter, teamScope],
+    queryFn: () => ragApi.page(page, PAGE_SIZE, dsFilter, teamScope),
   });
 
   const invalidate = () => {
@@ -113,7 +130,7 @@ export default function RagPage() {
   };
 
   const upload = useMutation({
-    mutationFn: (file: File) => ragApi.upload(file, uploadDs, uploadSchema),
+    mutationFn: (file: File) => ragApi.upload(file, uploadDs, uploadSchema, uploadTeamId || null),
     onSuccess: (out) => {
       setNotice(`上传成功:${out.tables.join("、")}`);
       setError(null);
@@ -125,6 +142,31 @@ export default function RagPage() {
       setNotice(null);
     },
   });
+
+  // 102:归属变更受控确认(公共⇄团队原位转移;确认后刷新,取消不动)
+  const setOwnership = useMutation({
+    mutationFn: (t: { id: string; teamId: string | null }) => ragApi.setOwnership(t.id, t.teamId),
+    onSuccess: (out) => {
+      setOwnershipTarget(null);
+      setNotice(
+        out.team_name
+          ? `已归属团队「${out.team_name}」:${out.table_name}`
+          : `已转为租户公共:${out.table_name}`,
+      );
+      setError(null);
+      invalidate();
+    },
+    onError: (e: Error) => {
+      setError(`归属变更失败:${e.message}`);
+      setNotice(null);
+    },
+  });
+
+  const openOwnership = (item: KnowledgeItemOut) => {
+    setOwnershipTarget(item);
+    // 预选与现状相对的目标(公共条目→首个可写团队;团队条目→公共)
+    setOwnershipDest(item.team_id ? "public" : (writableTeams[0]?.id ?? "public"));
+  };
 
   const remove = useMutation({
     mutationFn: (id: string) => ragApi.remove(id),
@@ -338,6 +380,26 @@ export default function RagPage() {
               </p>
             )}
           </div>
+          {/* 102:上传归属(默认公共;可选我作为 OWNER/MEMBER 的团队——VIEWER 只读不可选) */}
+          <div className="space-y-1">
+            <Label htmlFor="rag-upload-team">归属</Label>
+            <Select
+              value={uploadTeamId || "public"}
+              onValueChange={(v) => setUploadTeamId(v === "public" ? "" : v)}
+            >
+              <SelectTrigger id="rag-upload-team" className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="public">租户公共</SelectItem>
+                {writableTeams.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="space-y-1">
             <Label htmlFor="rag-upload-file" className="flex items-center gap-1">
               文件(Markdown/TXT/PDF/Word)
@@ -386,7 +448,11 @@ export default function RagPage() {
         </p>
       </section>
 
-      <div className="flex items-center gap-2">
+      {/* 097 召回试跑面板(只读验证面):上传→验证动线同页闭环;
+          数据源选项复用本页 options 查询(props 注入,不重复请求) */}
+      <RecallProbePanel options={options ?? []} />
+
+      <div className="flex flex-wrap items-center gap-2">
         <Select
           value={dsFilter || "all"}
           onValueChange={(v) => {
@@ -402,6 +468,27 @@ export default function RagPage() {
             {(options ?? []).map((o) => (
               <SelectItem key={o.datasource_key} value={o.datasource_key}>
                 {o.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {/* 102:归属筛选(公共/我所在的团队) */}
+        <Select
+          value={teamScope}
+          onValueChange={(v) => {
+            setTeamScope(v as TeamScope);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger className="w-40" aria-label="按归属筛选">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部归属</SelectItem>
+            <SelectItem value="public">租户公共</SelectItem>
+            {(myTeams.data ?? []).map((t) => (
+              <SelectItem key={t.id} value={t.id}>
+                {t.name}
               </SelectItem>
             ))}
           </SelectContent>
@@ -474,6 +561,20 @@ export default function RagPage() {
             ),
           },
           {
+            key: "team_name",
+            header: "归属",
+            cardPriority: 5,
+            render: (item) =>
+              item.team_id ? (
+                <Badge variant="outline" className="max-w-36 gap-1" title={item.team_name ?? ""}>
+                  <UsersIcon className="size-3 shrink-0" aria-hidden />
+                  <span className="truncate">{item.team_name ?? item.team_id}</span>
+                </Badge>
+              ) : (
+                <span className="text-xs text-muted-foreground">公共</span>
+              ),
+          },
+          {
             key: "updated_at",
             header: "更新时间",
             cardPriority: 3,
@@ -483,6 +584,12 @@ export default function RagPage() {
         ]}
         actions={[
           { label: "编辑", onSelect: openEdit },
+          // 102:归属变更入口(公共条目且无可写团队时无处可转,不显入口)
+          {
+            label: "归属",
+            onSelect: openOwnership,
+            isVisible: (item) => Boolean(item.team_id) || writableTeams.length > 0,
+          },
           { label: "删除", destructive: true, onSelect: setDeleteTarget },
         ]}
       />
@@ -615,7 +722,8 @@ export default function RagPage() {
             <AlertDialogTitle>重建索引?</AlertDialogTitle>
             <AlertDialogDescription>
               将清空数据源「{actionDs || "default"}」在该租户的全部表说明并重新扫描 (含 AI
-              润色)——人工上传/精修的条目也会被清掉,回到自动生成基线。 大库耗时较长,请耐心等待。
+              润色)——人工上传/精修的条目也会被清掉,回到自动生成基线; 团队归属的条目将回到公共可见。
+              大库耗时较长,请耐心等待。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -626,6 +734,62 @@ export default function RagPage() {
               onClick={() => reindex.mutate()}
             >
               {reindex.isPending ? "重建中…" : "确认重建"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 102 归属变更受控确认:明示变更后可见范围变化;取消则不动 */}
+      <AlertDialog
+        open={ownershipTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setOwnershipTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>变更归属?</AlertDialogTitle>
+            <AlertDialogDescription>
+              表 {ownershipTarget?.schema_name}.{ownershipTarget?.table_name}
+              ——当前{ownershipTarget?.team_id ? "归属团队专属" : "为租户公共"}。
+              变更后可见范围随之变化:团队专属=仅该团队成员在问答中可见;租户公共=全租户可见。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <FormRow label="目标归属" htmlFor="rag-ownership-dest">
+            <Select value={ownershipDest} onValueChange={setOwnershipDest}>
+              <SelectTrigger id="rag-ownership-dest" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="public">租户公共(全租户可见)</SelectItem>
+                {writableTeams.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.name}(仅团队成员可见)
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FormRow>
+          {setOwnership.isError && (
+            <p className="text-sm text-destructive" role="alert">
+              {(setOwnership.error as Error).message}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <Button
+              disabled={
+                setOwnership.isPending || ownershipDest === (ownershipTarget?.team_id ?? "public")
+              }
+              onClick={() =>
+                ownershipTarget &&
+                setOwnership.mutate({
+                  id: ownershipTarget.id,
+                  teamId: ownershipDest === "public" ? null : ownershipDest,
+                })
+              }
+            >
+              {setOwnership.isPending ? "变更中…" : "确认变更"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

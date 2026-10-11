@@ -1,13 +1,21 @@
 """mcp 用例编排(028):配置 CRUD 校验 + 连通性测试 + 发现同步 +
-动态工具解析 + 出站执行。零框架(宪法 Article II);operlog 经端口。"""
+动态工具解析 + 出站执行。零框架(宪法 Article II);operlog 经端口。
+109:三原语探测(test/sync)、资源快照存库、read_resource 白名单执行
+适配(白名单/文本 mime/截断/注入检测)、模板只读预览(实时拉取)。"""
 
 from typing import Any, Protocol, cast
 
 from kongming.mcp.models import (
+    READ_RESOURCE_TOOL,
     SERVER_KEY_RE,
     McpServerNotFound,
+    is_text_mime,
     merge_discovered,
     parse_qualified,
+    prompt_snapshot,
+    read_resource_tool,
+    resource_snapshot,
+    sanitize_external_text,
 )
 from kongming.mcp.ports import McpCaller, McpCallError, McpRepo
 
@@ -30,6 +38,10 @@ def _validate_key(server_key: str) -> None:
 def _validate_endpoint(endpoint: str) -> None:
     if not endpoint.startswith(("http://", "https://")) or len(endpoint) > 512:
         raise McpValidationError("endpoint 须为 http(s) URL(≤512 字符)")
+
+
+# 109:模板预览文本上限(管理面低频只读动作,UI 形态量级;截断附标注)
+_PREVIEW_CAP = 64 * 1024
 
 
 class McpService:
@@ -122,35 +134,70 @@ class McpService:
     # ── 连通性测试与同步 ──
 
     async def test_connection(self, *, server_id: str, tenant_id: str) -> dict[str, Any]:
+        """握手 + 三原语探测(109)。不支持与原语类端点不可用一律计数 0 不算
+        失败(spec 109 验收句;评审修复——原实现把 resources/prompts 超时/
+        拒连判整体失败);tools 为核心原语,其失败保持整体失败(既有分类)。
+        结构化错误注明原语名,不暴露堆栈/凭证。"""
         row = await self._repo.get(server_id=server_id, tenant_id=tenant_id)
         if row is None:
             raise McpServerNotFound(server_id)
         endpoint, headers = await self._call_target(row, require_enabled=False)
         try:
-            count = await self._caller.handshake(endpoint=endpoint, headers=headers)
+            probe = await self._caller.probe(endpoint=endpoint, headers=headers)
         except McpCallError as e:
-            # 结构化错误,不暴露堆栈/凭证(spec)
+            # 握手失败:结构化错误(design D4 既有分类)
             return {"ok": False, "kind": e.kind, "detail": e.detail}
-        return {"ok": True, "tools": count}
+        if "tools" in probe.failures:
+            kind, detail = probe.failures["tools"]
+            return {"ok": False, "kind": kind, "detail": f"tools: {detail}"}
+        out: dict[str, Any] = {
+            "ok": True,
+            "tools": len(probe.tools),
+            "resources": len(probe.resources),
+            "prompts": len(probe.prompts),
+        }
+        if probe.failures:  # 原语类降级:计数 0 + 注记(排障可见,不算失败)
+            out["detail"] = "原语降级计数 0: " + "; ".join(
+                f"{name}: {detail}" for name, (_, detail) in sorted(probe.failures.items())
+            )
+        return out
 
     async def sync(self, *, server_id: str, tenant_id: str) -> dict[str, Any]:
-        """发现同步:tools/list → 冲突跳过告警 → 快照原子替换;
-        不可达降级记 last_sync_error(spec「断连降级」)。"""
+        """发现同步(109):三原语并行探测 → 快照原子替换(tools + resources
+        + prompts);单原语失败降级保留旧清单(同断连降级口径);
+        资源清单非空 → 前置注册 read_resource 合成工具(design D1/D2)。"""
         row = await self._repo.get(server_id=server_id, tenant_id=tenant_id)
         if row is None:
             raise McpServerNotFound(server_id)
         endpoint, headers = await self._call_target(row, require_enabled=False)
+        old_tools = list(row.get("tools") or [])
+        old_resources = list(row.get("resources") or [])
+        old_prompts = list(row.get("prompts") or [])
         try:
-            discovered = await self._caller.list_tools(endpoint=endpoint, headers=headers)
+            probe = await self._caller.probe(endpoint=endpoint, headers=headers)
         except McpCallError as e:
             err = f"{e.kind}: {e.detail}"[:500]
             await self._repo.save_snapshot(
                 server_id=server_id,
                 tenant_id=tenant_id,
-                tools=list(row.get("tools") or []),  # 保留旧快照(降级)
+                tools=old_tools,
+                resources=old_resources,
+                prompts=old_prompts,
                 error=err,
             )
             return {"ok": False, "kind": e.kind, "detail": e.detail}
+        if "tools" in probe.failures:
+            # 工具(核心原语)失败:整体降级,三快照全保留
+            kind, detail = probe.failures["tools"]
+            await self._repo.save_snapshot(
+                server_id=server_id,
+                tenant_id=tenant_id,
+                tools=old_tools,
+                resources=old_resources,
+                prompts=old_prompts,
+                error=f"{kind}: {detail}"[:500],
+            )
+            return {"ok": False, "kind": kind, "detail": detail}
         # R1-S2:注册时收敛敌意/畸形 JSON Schema——check_schema 不过
         # 降级为 {"type":"object"}(L4 退化为仅结构校验),不合法 schema
         # 进快照会让 validate_args 双路径裸 500(评审实证);
@@ -160,25 +207,58 @@ class McpService:
 
         from kongming.mcp.models import has_redos_pattern
 
-        conflicts: list[str] = []
+        discovered = list(probe.tools)
+        notes: list[str] = []
         for t in discovered:
             try:
                 if has_redos_pattern(t.schema):
                     raise ValueError("回溯型 pattern(ReDoS 面已降级)")
                 _jsv.validator_for(t.schema).check_schema(t.schema)
             except Exception:  # noqa: BLE001  # 敌意面宽收敛,降级即安全
-                conflicts.append(f"schema 非法已降级: {t.name[:40]}")
+                notes.append(f"schema 非法已降级: {t.name[:40]}")
                 t.schema.clear()
                 t.schema.update({"type": "object"})
+        # 资源/模板清单:失败降级保留旧值(单原语失败不整体失败),
+        # 成功/不支持如实替换(同步语义=快照原子替换)
+        resources_out: list[dict[str, Any]]
+        if "resources" in probe.failures:
+            kind, detail = probe.failures["resources"]
+            resources_out = old_resources
+            notes.append(f"原语降级 resources: {kind}: {detail}")
+        else:
+            resources_out = resource_snapshot(probe.resources)
+        prompts_out: list[dict[str, Any]]
+        if "prompts" in probe.failures:
+            kind, detail = probe.failures["prompts"]
+            prompts_out = old_prompts
+            notes.append(f"原语降级 prompts: {kind}: {detail}")
+        else:
+            prompts_out = prompt_snapshot(probe.prompts)
+        # 资源白名单非空 → 前置注册 read_resource 合成工具(先于 server
+        # 自有工具,同名冲突合成方胜——平台治理语义优先);白名单空/不支持
+        # 不注册(目录零噪音,「只有工具的简单 server」零感知)
+        if resources_out:
+            discovered.insert(0, read_resource_tool())
         entries, merge_conflicts = merge_discovered(str(row["server_key"]), discovered)
-        conflicts.extend(merge_conflicts)
+        notes.extend(merge_conflicts)
         error_note = ""
-        if conflicts:
-            error_note = f"注册告警: {', '.join(conflicts)}"[:500]
+        if notes:
+            error_note = f"注册告警: {', '.join(notes)}"[:500]
         await self._repo.save_snapshot(
-            server_id=server_id, tenant_id=tenant_id, tools=entries, error=error_note
+            server_id=server_id,
+            tenant_id=tenant_id,
+            tools=entries,
+            resources=resources_out,
+            prompts=prompts_out,
+            error=error_note,
         )
-        return {"ok": True, "tools": len(entries), "conflicts": conflicts}
+        return {
+            "ok": True,
+            "tools": len(entries),
+            "resources": len(resources_out),
+            "prompts": len(prompts_out),
+            "conflicts": notes,
+        }
 
     async def _call_target(
         self, row: dict[str, Any], *, require_enabled: bool = True
@@ -231,7 +311,8 @@ class McpService:
     async def call_tool(
         self, *, tenant_id: str, qualified: str, args: dict[str, Any]
     ) -> dict[str, Any]:
-        """出站执行(六层防御后主链调用点):解析 → 取明文(瞬时)→ 调用。"""
+        """出站执行(六层防御后主链调用点):解析 → 取明文(瞬时)→ 调用。
+        read_resource 走资源白名单适配(109),其余工具原样出站。"""
         parsed = parse_qualified(qualified)
         if parsed is None:
             raise McpCallError("protocol", "工具名形态非法")
@@ -241,15 +322,94 @@ class McpService:
             raise McpCallError("remote", "工具不可用(已禁用/删除/未注册)")
         # R1-A5:server_key 取 resolve 结果——parse_qualified 按第一个 __
         # 切分,key 内含连续下划线(a__b 合法形态)会被错切
-        target = await self._repo.get_call_target(
-            tenant_id=tenant_id, server_key=str(entry["server_key"])
-        )
+        server_key = str(entry["server_key"])
+        target = await self._repo.get_call_target(tenant_id=tenant_id, server_key=server_key)
         if target is None:
             raise McpCallError("remote", "server 已禁用或删除")
         endpoint, headers = target
+        if tool_name == READ_RESOURCE_TOOL:
+            return await self._call_read_resource(
+                tenant_id=tenant_id,
+                server_key=server_key,
+                endpoint=endpoint,
+                headers=headers,
+                args=args,
+            )
         result = await self._caller.call(
             endpoint=endpoint, headers=headers, tool_name=tool_name, args=args
         )
         if result.get("truncated"):
             result["content"] = str(result["content"]) + "\n…[结果超 1MB 已截断]"
         return result
+
+    async def _call_read_resource(
+        self,
+        *,
+        tenant_id: str,
+        server_key: str,
+        endpoint: str,
+        headers: dict[str, str],
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        """read_resource 执行适配(109,资源内容三层防线):uri 白名单校验
+        (不出站)→ 文本 mime 限定(声明二进制不出站)→ 出站读取 → 截断
+        标注 → 注入检测(既有注入检测面,与工具观察既有防线同构)。"""
+        uri = str(args.get("uri") or "")
+        if not uri.strip():
+            raise McpCallError("protocol", "uri 参数缺失")
+        whitelist = await self._repo.get_enabled_resources(
+            tenant_id=tenant_id, server_key=server_key
+        )
+        hit = next((r for r in whitelist if str(r.get("uri") or "") == uri), None)
+        if hit is None:
+            # 白名单外拒绝:结构化错误观察,不出站(design D2——白名单来自
+            # 最近一次成功探测的资源快照,server 未重同步前新增资源不可读)
+            raise McpCallError("remote", "uri 不在资源白名单(仅限该 server 资源清单内 uri,未出站)")
+        if not is_text_mime(str(hit.get("mime_type") or "")):
+            # 二进制 mime 拒绝(design Non-goal:观察是文本形态)
+            raise McpCallError("remote", "二进制资源不进观察(文本形态限定,未出站)")
+        result = await self._caller.read_resource(endpoint=endpoint, headers=headers, uri=uri)
+        cleaned, hits = sanitize_external_text(str(result.get("content") or ""))
+        if hits:
+            result["sanitized"] = True
+            result["injection_hits"] = hits
+        result["content"] = cleaned
+        if result.get("truncated"):
+            result["content"] = str(result["content"]) + "\n…[结果超 1MB 已截断]"
+        return result
+
+    async def preview_prompt(
+        self,
+        *,
+        server_id: str,
+        tenant_id: str,
+        name: str,
+        arguments: dict[str, str],
+    ) -> dict[str, Any]:
+        """模板按名实时拉取只读预览(109,design D3:渲染带 arguments,快照
+        无法表达,管理面低频动作实时拉取不落库);预览文本过注入检测 +
+        大小上限(截断标注)。只读:不注入任何提示词、非运行时提示来源。"""
+        row = await self._repo.get(server_id=server_id, tenant_id=tenant_id)
+        if row is None:
+            raise McpServerNotFound(server_id)
+        endpoint, headers = await self._call_target(row, require_enabled=False)
+        try:
+            out = await self._caller.get_prompt(
+                endpoint=endpoint, headers=headers, name=name, arguments=arguments
+            )
+        except McpCallError as e:
+            return {"ok": False, "kind": e.kind, "detail": e.detail, "text": ""}
+        text = str(out.get("text") or "")
+        original = len(text.encode("utf-8"))
+        truncated = original > _PREVIEW_CAP
+        if truncated:
+            text = text.encode("utf-8")[:_PREVIEW_CAP].decode("utf-8", errors="ignore")
+        cleaned, hits = sanitize_external_text(text)
+        if truncated:
+            cleaned = f"{cleaned}\n…[预览超 {_PREVIEW_CAP // 1024}KB 已截断]"
+        return {
+            "ok": True,
+            "text": cleaned,
+            "truncated": truncated,
+            "injection_hits": hits,
+        }
