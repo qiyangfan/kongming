@@ -120,6 +120,12 @@ class Settings(BaseSettings):
     # 时,旧维度向量命中会被拦为 EmbeddingError(降级),不再 500(R2-R1)
     rag_embedding_dim: int = Field(default=1536, ge=1)
 
+    # 088 关系感知召回扩展:缺省开启;整项 kill switch=置 false 即回到无扩展
+    # 形态(逐字一致,零回归);rag_expand_max 为单轮扩展表上限(0=不扩展)。
+    # 判据是二值的(关系行在不在),无需 064 式灰度标定,故只做开关+上限。
+    rag_expand_enabled: bool = True
+    rag_expand_max: int = Field(default=2, ge=0)
+
     # 结果导出行数上限(010):截断保护防服务端内存失控(chat spec 默认 10000)
     export_max_rows: int = Field(default=10000, ge=1)
 

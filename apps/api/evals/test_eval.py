@@ -18,10 +18,11 @@
 # pyright: reportPrivateUsage=false
 
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
+from attribution import Attribution, classify_failure, summarize_attributions
 from conftest import _load_yaml_cases, _tenant_of, call_chat, exec_sql, gen_tables
 from matchers import result_set_equal, result_set_loose_match
 from prompt_fingerprint import (
@@ -36,6 +37,22 @@ FULL_PASS_FLOOR = 0.6  # 全量宽松及格线(上游 010+ 基线 76-78%,留采�
 
 # 会话级指纹(取一次,首行打印 + 四组分数同屏;073)
 _current_fingerprint: str | None = None
+
+
+class CaseFailure(AssertionError):
+    """单题失败(089):携带该题的归因产物,full 统计块据它计分类计数。
+
+    AssertionError 子类:smoke 端每题独立断言的既有语义不变。"""
+
+    def __init__(self, msg: str, attribution: Attribution) -> None:
+        super().__init__(msg)
+        self.attribution = attribution
+
+
+def _env_failure_attribution(reason: str) -> Attribution:
+    """评估环境/资产错误(gold 执行失败、链路不可达等)的归因形态:
+    不是链路质量失败,显式落 OTHER 桶(被全量统计捕获的异常题,spec)。"""
+    return Attribution(category="OTHER", reason=f"评估环境/资产错误(非链路质量失败): {reason}")
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -56,6 +73,8 @@ async def _eval_single(case: dict[str, Any]) -> tuple[bool, bool, bool]:
 
     expect_reject 用例:跨租户数据源预期被绑定校验拒绝(fail-closed,
     同形 400 DATASOURCE_INVALID),断言链路失败即通过,不算 Execution Match。
+    089:失败 raise CaseFailure 携带归因产物(NEG_GUARD/结构判据),
+    full 统计块据它计一级分类计数与明细判据。
     """
     question = str(case["question"])
     tenant = _tenant_of(case)
@@ -69,10 +88,24 @@ async def _eval_single(case: dict[str, Any]) -> tuple[bool, bool, bool]:
             # 状态码判定);服务未起时把 deny 题当"拒绝"通过=假绿(/goal R1)
             pytest.fail(f"[{case['id']}] 链路不可达(评估环境未起?): {e}")
         rejected = r.status_code >= 400 or not r.json().get("success", False)
-        assert rejected, (
-            f"\n[{case['id']}] 预期拒绝未生效:tenant={tenant} "
-            f"用 datasource_key={datasource_key} 查询成功\n  question: {question}"
-        )
+        if not rejected:
+            try:
+                body = cast("dict[str, Any]", r.json())
+            except Exception:  # noqa: BLE001
+                body = {}
+            att = classify_failure(
+                question=question,
+                expect_reject=True,
+                success=bool(body.get("success")),
+                verdict=str(body.get("verdict", "")),
+                gen_sql=str(body.get("sql", "")),
+            )
+            raise CaseFailure(
+                f"\n[{case['id']}] 预期拒绝未生效:tenant={tenant} "
+                f"用 datasource_key={datasource_key} 查询成功\n"
+                f"  question: {question}\n  归因: [{att.category}] {att.reason}",
+                att,
+            )
         return False, True, True  # 拒绝用例不计 strict(防虚增),pass 由断言保证
 
     if case.get("expect_no_data"):
@@ -82,13 +115,33 @@ async def _eval_single(case: dict[str, Any]) -> tuple[bool, bool, bool]:
         r = await call_chat(question, tenant, datasource_key=datasource_key)
         r.raise_for_status()
         body = r.json()
-        assert not body.get("success") and body.get("verdict") == "NO_DATA", (
-            f"\n[{case['id']}] 预期哨兵短路 NO_DATA,实际 success={body.get('success')} "
-            f"verdict={body.get('verdict')}\n  question: {question}\n  gen_sql: {body.get('sql')}"
-        )
-        assert not body.get("sql"), (
-            f"[{case['id']}] NO_DATA 应零执行,却生成了 SQL: {body.get('sql')}"
-        )
+        if body.get("success") or body.get("verdict") != "NO_DATA":
+            att = classify_failure(
+                question=question,
+                expect_no_data=True,
+                success=bool(body.get("success")),
+                verdict=str(body.get("verdict", "")),
+                gen_sql=str(body.get("sql", "")),
+            )
+            raise CaseFailure(
+                f"\n[{case['id']}] 预期哨兵短路 NO_DATA,实际 success={body.get('success')} "
+                f"verdict={body.get('verdict')}\n  question: {question}\n"
+                f"  gen_sql: {body.get('sql')}\n  归因: [{att.category}] {att.reason}",
+                att,
+            )
+        if body.get("sql"):
+            att = classify_failure(
+                question=question,
+                expect_no_data=True,
+                success=True,
+                verdict=str(body.get("verdict", "")),
+                gen_sql=str(body.get("sql", "")),
+            )
+            raise CaseFailure(
+                f"[{case['id']}] NO_DATA 应零执行,却生成了 SQL: {body.get('sql')}\n"
+                f"  归因: [{att.category}] {att.reason}",
+                att,
+            )
         return False, True, True  # 同拒绝用例口径:不计 strict,pass 由断言保证
 
     gold_sql = str(case["gold_sql"])
@@ -119,16 +172,33 @@ async def _eval_single(case: dict[str, Any]) -> tuple[bool, bool, bool]:
         not expected_tables or expected_tables.issubset(gen_tables(gen_sql))
     )
 
-    assert loose, (
-        f"\n[{case['id']}] Execution Match 失败(严格={strict})\n"
-        f"  question: {question}\n"
-        f"  gold_sql: {gold_sql}\n"
-        f"  gen_sql:  {gen_sql}\n"
-        f"  gold_rows({len(gold_rows)}): {gold_rows[:3]}\n"
-        f"  gen_rows({len(gen_rows)}):  {gen_rows[:3]}\n"
-        f"  gen_valid={gen_valid} retry={body.get('retry_count')} "
-        f"tables_recalled={recalled}"
-    )
+    if not loose:
+        # 089:确定性归因(纯函数;明细带分类名与判据原文,SHALL NOT 只给结论)
+        att = classify_failure(
+            question=question,
+            gold_sql=gold_sql,
+            gen_sql=gen_sql,
+            success=gen_valid,
+            verdict=str(body.get("verdict", "")),
+            expected_tables=expected_tables,
+            gold_cols=gold_cols,
+            gold_rows=gold_rows,
+            gen_cols=gen_cols,
+            gen_rows=gen_rows,
+        )
+        stage_tag = f"/{att.stage}" if att.stage else ""
+        raise CaseFailure(
+            f"\n[{case['id']}] Execution Match 失败(严格={strict})\n"
+            f"  question: {question}\n"
+            f"  gold_sql: {gold_sql}\n"
+            f"  gen_sql:  {gen_sql}\n"
+            f"  gold_rows({len(gold_rows)}): {gold_rows[:3]}\n"
+            f"  gen_rows({len(gen_rows)}):  {gen_rows[:3]}\n"
+            f"  gen_valid={gen_valid} retry={body.get('retry_count')} "
+            f"tables_recalled={recalled}\n"
+            f"  归因: [{att.category}{stage_tag}] {att.reason} | 信号: {att.signals}",
+            att,
+        )
     return strict, loose, recalled
 
 
@@ -173,6 +243,7 @@ async def test_full_all(all_cases: list[dict[str, Any]]) -> None:
         "ds_total": 0,
     }
     details: list[str] = []
+    attributions: list[tuple[str, Attribution]] = []  # 089:失败归因(题目 id + 分类)
     for case in single:
         is_ds = case.get("datasource_key") or str(case.get("category", "")).startswith("datasource")
         try:
@@ -182,14 +253,18 @@ async def test_full_all(all_cases: list[dict[str, Any]]) -> None:
             results["recall_hit"] += int(recalled)
             if is_ds:
                 results["ds_pass"] += 1
-        except AssertionError as e:
+        except CaseFailure as e:
+            # 089:链路质量失败——归因产物随异常携带(分类/判据原文已入明细)
             details.append(str(e))
+            attributions.append((str(case["id"]), e.attribution))
         except pytest.fail.Exception as e:  # pytest.fail 抛 fail.Exception(即 Failed,
             # BaseException 子类),不进 Exception 网——不接住会中断全量统计
-            # (gold 资产错误/deny 不可达)
+            # (gold 资产错误/deny 不可达);环境/资产错误显式落 OTHER 桶
             details.append(str(e))
+            attributions.append((str(case["id"]), _env_failure_attribution(str(e)[:120])))
         except Exception as e:  # noqa: BLE001  # 单题异常不炸全量(计入失败)
             details.append(f"[{case['id']}] 异常: {e}")
+            attributions.append((str(case["id"]), _env_failure_attribution(f"异常: {e}"[:120])))
         results["total"] += 1
         if is_ds:
             results["ds_total"] += 1
@@ -210,6 +285,10 @@ async def test_full_all(all_cases: list[dict[str, Any]]) -> None:
     cross_note = format_cross_fingerprint_note(_current_fingerprint, load_baseline_fingerprint())
     if cross_note:
         print(cross_note)
+    # 089:失败归因统计块(一级分类计数 + SELECT 层拆分 + OTHER 纪律),
+    # 在四组分数之后增列(spec「失败归因分类」)
+    if attributions:
+        print(summarize_attributions(attributions))
     for d in details:
         print(d)
     assert pass_rate >= FULL_PASS_FLOOR, (
@@ -256,12 +335,27 @@ async def test_multiturn(multiturn_case: dict[str, Any]) -> None:
             gold_cols, gold_rows, gen_cols, gen_rows, "order by" in gold_sql.lower()
         )
         if not loose:
+            # 089:失败轮次以同一纯函数归因(入参足够时;不做跨轮因果追责)
+            att = classify_failure(
+                question=question,
+                gold_sql=gold_sql,
+                gen_sql=gen_sql,
+                success=gen_valid,
+                verdict=str(body.get("verdict", "")),
+                expected_tables=set(turn.get("expected_tables", [])),
+                gold_cols=gold_cols,
+                gold_rows=gold_rows,
+                gen_cols=gen_cols,
+                gen_rows=gen_rows,
+            )
+            stage_tag = f"/{att.stage}" if att.stage else ""
             failures.append(
                 f"\n[{case_id} turn{i}] Execution Match 失败(严格={strict})\n"
                 f"  question: {question}\n  history:  {history}\n"
                 f"  gold_sql: {gold_sql}\n  gen_sql:  {gen_sql}\n"
                 f"  gold_rows({len(gold_rows)}): {gold_rows[:3]}\n"
-                f"  gen_rows({len(gen_rows)}):  {gen_rows[:3]}"
+                f"  gen_rows({len(gen_rows)}):  {gen_rows[:3]}\n"
+                f"  归因: [{att.category}{stage_tag}] {att.reason} | 信号: {att.signals}"
             )
         history.append(question)
 

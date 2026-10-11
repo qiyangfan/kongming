@@ -56,6 +56,29 @@
   旁路(has_knowledge EXISTS 单点;「没灌知识」≠「低相关」,否则 sakila_dyn 类
   内省回退数据源全量误拒),recall-probe 试跑面同口径(gate_skipped=no_knowledge
   如实标注);全文档量纲未标定保持 0(该路不裁)。
+- **关系感知召回扩展与评估失败归因(2026-10-05 批,变更 095/096——原提案编号
+  088/089 与已归档的 088-094 批撞号,归档件与文档引用已重编号)**:rag 召回
+  主结果(三路 RRF+047 继承路)后按已声明表关系一跳扩展——复用
+  `rag.table_relations` 零 schema 变更,缺省开启(`KM_RAG_EXPAND_ENABLED/MAX`),
+  扩展表带 JOIN path 注入、relations_hint 收窄基准=「主召回 ∪ 扩展」;关系写
+  路径(introspection upsert/手工增删/级联清理)经窄端口 `RecallContextEvictor`
+  失效检索缓存,**缓存键并入扩展开关状态**(否则切关后 TTL 窗口命中含扩展旧
+  输出,违背「关停输出逐字一致」)。实证(50 题时代,基线表 2026-10-05 行):
+  同指纹 f05c8028 开/关两轮——关=与 08-30 基线逐项一致(零回归),开=严格
+  +4pp/表命中 +1;冒烟 sakila 配 customer→rental 后真实问答生成
+  `customer INNER JOIN rental` PASS。失败归因=`evals/attribution.py` 九类
+  纯函数,full 统计块+失败明细带判据,multiturn 同函数,12 单测进默认门禁;
+  **判定序裁决点**:spec 字面序 EXEC 在 REJECT/ABSTAIN 前会把 BLOCKED/NO_DATA
+  题(success 恒 false)全吞进 EXEC,实现取「verdict 终态先行」,README 口径
+  节已写明。**未完成项**:095 任务 2.7(SHOULD)web 探针结果展示扩展明细——
+  web 无任何 recall-probe 消费面(`RagPage.tsx` 零消费,064 起即 API-only),
+  补建=全新探针面板,待立项。
+- **召回/评估批编写坑**:`kongming.feedback.models.extract_table_names` 返回
+  末段名小写,与 `expected_tables` 比较前先 `.split(".")[-1].lower()` 折叠
+  (否则 SELECT 层拆分误判);测「形态切换」类缓存语义禁止中途清缓存(kill
+  switch 测试恰在切开关前 flushdb,曾把缓存键缺扩展态的缺陷掩盖);纯函数
+  上限先判 `len(out) >= max` 再 append(max=0 仍补 1 条);evals 用
+  `KM_EVAL_ADMIN_USERNAME/PASSWORD` 自建账号,不必知道 dev 库 admin 真密码。
 - **租户/控制面隔离(三层)**:default 路径知识内省只看 tenant_{key};执行
   scope 白名单按路径分流(default 无 public);liannu 保留名单含 judge_ 前缀+
   report/report_section/report_version——动态源误指平台库按名拒读(最后兜底)。
@@ -517,10 +540,13 @@
   prompt 重启生效之间存在窗口期,事故会重新落库——清理+验证后必须复查
   零残留;sakila_dyn 挂 default 租户(datasource_key 实查,勿按租户 key
   想当然)。
-- 评估基线(evals/README 基线表):2026-08-30——单轮宽松 50/50、严格
-  35/50(含 2 题负例不计严格分)、多轮 12/12、动态 4/4、表命中 48/50。
-  基线纪律触发面已扩至知识/文档变更(08-23 知识再生成+文档灌入晚于旧
-  基线致零提示词变更亦漂移的混杂教训);两轮评估之间须清 ctx 缓存。
+- 评估基线(evals/README 基线表):**2026-10-05(088 扩展开,指纹 f05c8028)**
+  ——单轮宽松 50/50、严格 37/50、动态 4/4、表命中 49/50(多轮未随本批复跑,
+  上值为 08-30 的 12/12);同批对照:扩展关=宽松 50/50、严格 35/50、表命中
+  48/50,与 08-30 基线逐项一致(关停零回归实证)。归因口径(089)同批上线,
+  两轮宽松全过零失败题、归因计数皆空。基线纪律触发面已扩至知识/文档变更
+  (08-23 知识再生成+文档灌入晚于旧基线致零提示词变更亦漂移的混杂教训);
+  两轮评估之间须清 ctx 缓存。
 - 工作区/提交状态以 `git status` 与 `git log` 为唯一事实源
   (规约:文档不写提交哈希、不谈提交形态)。
 - **开放挂账=零**(backlog-settlement 终态化裁决,见「挂账终态」节)。

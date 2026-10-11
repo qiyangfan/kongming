@@ -102,7 +102,12 @@ MCP 出站维持不收编(mcp-interop 自有注册面,见 089 Non-goals)。
 STT/OCR 选型、真实支付通道 Channel 实现、可视化拖拽画布、MCP
 resources/prompts 原语、Bot 版本化上架、个性化推荐、用户/TEAM 维度
 配额、触发器失败重试策略、更多事件源(邮件/Slack)、中文全文 zhparser、
-知识库(rag)团队归属(032①)。
+知识库(rag)团队归属(032①)、
+**指标(metric_definitions)可见性按 data_scope 过滤**——当前指标定义仅
+super-admin 管理、按 tenant+datasource 隔离;跨部门共享知识库时,指标的
+口径定义本身可能含敏感业务信息(如「VIP 客户复购率」的口径暴露客群规则),
+届时应按 data_scope 决定 metric_hints 注入范围。触发条件=team-workspace
+多团队共享数据源上线(2026-10-05 由 088 提案登记,本期不做)。
 
 ## 已被治理文档覆盖,不再立 spec(D 层)
 

@@ -61,6 +61,18 @@ class SuggestionCacheEvictor(Protocol):
     def delete_by_datasource(self, datasource_key: str) -> Coroutine[Any, Any, None]: ...
 
 
+class RelationExpansionPort(Protocol):
+    """关系感知召回扩展窄端口(088;实现=semantic 仓储,组合根注入)。
+
+    只读查询:该租户+数据源内「任一端在 tables 集合内」的已声明关系行
+    ([{source_table, target_table, join_keys, source}]);查询失败由消费方
+    降级为无扩展,不阻断召回主链路。"""
+
+    async def related_tables(
+        self, *, tenant_id: str, datasource_key: str, tables: list[tuple[str, str]]
+    ) -> list[dict[str, Any]]: ...
+
+
 class TableDescriberPort(Protocol):
     """表元数据润色(api→agent /internal/describe-table;enriched=False 即降级纯结构)。"""
 

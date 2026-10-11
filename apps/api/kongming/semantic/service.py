@@ -12,7 +12,12 @@ from kongming.semantic.models import (
     match_metrics,
     project_metric_hits,
 )
-from kongming.semantic.ports import FkIntrospector, KnowledgeTableLookup, SemanticRepo
+from kongming.semantic.ports import (
+    FkIntrospector,
+    KnowledgeTableLookup,
+    RecallContextEvictor,
+    SemanticRepo,
+)
 
 log = logging.getLogger(__name__)
 
@@ -26,9 +31,18 @@ class SemanticService:
         self,
         repo: SemanticRepo,
         knowledge: KnowledgeTableLookup | None = None,
+        recall_ctx_evictor: RecallContextEvictor | None = None,
     ) -> None:
         self._repo = repo
         self._knowledge = knowledge
+        self._recall_ctx_evictor = recall_ctx_evictor
+
+    async def _evict_recall_ctx(self, *, tenant_id: str, datasource_key: str) -> None:
+        """088:关系写提交后失效该租户+数据源的检索上下文缓存(正确性要求,
+        非优化)。实现(ContextCache)自身 fail-open,失效失败只告警。"""
+        if self._recall_ctx_evictor is None:
+            return
+        await self._recall_ctx_evictor.evict(tenant_id, datasource_key)
 
     async def add_relation(
         self,
@@ -43,7 +57,7 @@ class SemanticService:
 
         写边界闸:source/target 均须为既有知识条目——引用条目外的表在召回
         relations_hint 中永不命中(静默死配置),创建期即拒。通过后落库
-        source=manual 并提交。"""
+        source=manual 并提交;提交后失效检索上下文缓存(088)。"""
         if self._knowledge is not None:
             for st in (source_table, target_table):
                 if not await self._knowledge.knowledge_table_exists(
@@ -62,12 +76,27 @@ class SemanticService:
             },
         )
         await self._repo.commit()
+        await self._evict_recall_ctx(tenant_id=tenant_id, datasource_key=datasource_key)
         return row_id
+
+    async def delete_relation(self, *, relation_id: str, tenant_id: str) -> bool:
+        """手工关系删除(088 自 router 归位):不命中返回 False(同形 404 由
+        调用方映射);命中则删除并提交,提交后按被删行数据源精确失效检索
+        上下文缓存(088)。"""
+        datasource_key = await self._repo.delete_relation(
+            relation_id=relation_id, tenant_id=tenant_id
+        )
+        if datasource_key is None:
+            return False
+        await self._repo.commit()
+        await self._evict_recall_ctx(tenant_id=tenant_id, datasource_key=datasource_key)
+        return True
 
     async def introspect(
         self, *, tenant_id: str, datasource_key: str, introspector: FkIntrospector
     ) -> int:
-        """外键扫描幂等 upsert(按约束分组聚合多列 join_keys);返回关系条数。"""
+        """外键扫描幂等 upsert(按约束分组聚合多列 join_keys);返回关系条数。
+        提交后失效检索上下文缓存(088:同问句再召回即见新关系)。"""
         pairs = await introspector.fetch_fk_pairs(schemas=[])
         # 按 (source_table, target_table) 聚合多列外键
         grouped: dict[tuple[str, str], list[dict[str, str]]] = {}
@@ -84,6 +113,7 @@ class SemanticService:
             tenant_id=tenant_id, datasource_key=datasource_key, rels=rels
         )
         await self._repo.commit()
+        await self._evict_recall_ctx(tenant_id=tenant_id, datasource_key=datasource_key)
         return n
 
     async def enrich(

@@ -87,6 +87,33 @@ class SqlSemanticRepo:
         )
         return [dict(r) for r in rows]
 
+    async def relations_touching(
+        self, *, tenant_id: str, datasource_key: str, tables: list[str]
+    ) -> list[dict[str, Any]]:
+        """088 一跳扩展查询:任一端在表集合内即命中(与 relations_within 的
+        差别只在谓词:within=两端均在(注入收窄),touching=任一端在(扩展候选))。
+        双过滤口径(tenant+datasource)与参数化形态同 relations_within;
+        ORDER BY 保证输出序确定(扩展尾附加序可断言)。"""
+        if not tables:
+            return []
+        rows = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT source_table, target_table, join_keys, source"
+                        " FROM rag.table_relations"
+                        " WHERE tenant_id=:t AND datasource_key=:d"
+                        "   AND (source_table = ANY(:ts) OR target_table = ANY(:ts))"
+                        " ORDER BY source_table, target_table"
+                    ),
+                    {"t": tenant_id, "d": datasource_key, "ts": tables},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return [dict(r) for r in rows]
+
     async def add_relation(
         self, *, tenant_id: str, datasource_key: str, rel: dict[str, Any]
     ) -> str:
@@ -116,14 +143,19 @@ class SqlSemanticRepo:
         ).scalar_one()
         return str(row_id)
 
-    async def delete_relation(self, *, relation_id: str, tenant_id: str) -> bool:
-        hit = (
+    async def delete_relation(self, *, relation_id: str, tenant_id: str) -> str | None:
+        """删除命中返回该行的 datasource_key(088:提交后按其精确失效检索
+        缓存),不命中返回 None(同形,防探测)。"""
+        ds = (
             await self._s.execute(
-                text("DELETE FROM rag.table_relations WHERE id=:i AND tenant_id=:t RETURNING id"),
+                text(
+                    "DELETE FROM rag.table_relations WHERE id=:i AND tenant_id=:t"
+                    " RETURNING datasource_key"
+                ),
                 {"i": relation_id, "t": tenant_id},
             )
         ).scalar_one_or_none()
-        return hit is not None
+        return None if ds is None else str(ds)
 
     async def delete_by_datasource(self, *, tenant_id: str, datasource_key: str) -> None:
         """数据源删除级联(spec 立约);metrics 同清。"""

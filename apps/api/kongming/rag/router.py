@@ -54,11 +54,32 @@ internal_router = APIRouter(prefix="/internal/rag", tags=["internal"])
 MAX_TABLE_BLOCKS = 500  # 单文档表块上限(防大文档切块风暴,design D7)
 
 
+class _RelationExpansionAdapter:
+    """088 组合根适配器:rag 域只见 RelationExpansionPort,关系查询走
+    请求会话的 semantic 仓储(域间经端口反转,不直连;047 suggestion_evictor
+    同款纪律)。tables 键序列转两段限定名字符串(关系行存储形态)。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        from kongming.semantic.repository import SqlSemanticRepo
+
+        self._repo = SqlSemanticRepo(session)
+
+    async def related_tables(
+        self, *, tenant_id: str, datasource_key: str, tables: list[tuple[str, str]]
+    ) -> list[dict[str, object]]:
+        return await self._repo.relations_touching(
+            tenant_id=tenant_id,
+            datasource_key=datasource_key,
+            tables=[f"{schema}.{table}" for schema, table in tables],
+        )
+
+
 def get_rag_service(session: AsyncSession) -> RagService:
     """RagService 公共组合根(019 toolcall 复用同源;013 单例工厂同调)。"""
     client = get_agent_rag_client(get_redis())  # 013:进程内单例,连接池跨请求复用
     from kongming.chat.repository import SuggestionRepository
 
+    settings = get_settings()
     return RagService(
         RagRepository(session),
         embedder=client,
@@ -67,7 +88,11 @@ def get_rag_service(session: AsyncSession) -> RagService:
         # 047:知识写路径级联失效建议缓存(DELETE 同事务,rag commit 收口)
         suggestion_evictor=SuggestionRepository(session),
         # 064:召回闸门配置(off 缺省零回归)
-        gate_settings=get_settings(),
+        gate_settings=settings,
+        # 088:关系感知召回扩展(缺省开启;kill switch=rag_expand_enabled)
+        relation_expander=_RelationExpansionAdapter(session),
+        expand_enabled=settings.rag_expand_enabled,
+        expand_max=settings.rag_expand_max,
     )
 
 

@@ -28,6 +28,7 @@ from kongming.rag.models import (
     KnowledgeEntry,
     RagContext,
     RecallHit,
+    RelationExpansion,
     SchemaNotAllowed,
     TableBlock,
     build_coverage_report,
@@ -35,12 +36,14 @@ from kongming.rag.models import (
     build_history_sql,
     build_schema_hint,
     can_automated_overwrite,
+    expand_by_relations,
     rrf_fuse,
 )
 from kongming.rag.ports import (
     EmbeddingError,
     EmbeddingPort,
     RagRepo,
+    RelationExpansionPort,
     SuggestionCacheEvictor,
     TableDescriberPort,
 )
@@ -89,6 +92,9 @@ class RagService:
         cache: ContextCache,
         suggestion_evictor: SuggestionCacheEvictor | None = None,
         gate_settings: Any = None,  # 064:闸门配置(Settings;None=off 零回归)
+        relation_expander: RelationExpansionPort | None = None,  # 088:组合根注入
+        expand_enabled: bool = False,  # 088:构造缺省关(未注入端口的调用方零行为)
+        expand_max: int = 2,
     ) -> None:
         self._repo = repo
         self._embedder = embedder
@@ -96,6 +102,9 @@ class RagService:
         self._cache = cache
         self._suggestion_evictor = suggestion_evictor
         self._gate = gate_settings
+        self._relation_expander = relation_expander
+        self._expand_enabled = expand_enabled
+        self._expand_max = max(0, expand_max)
         # 064:按路影子观测(main=主路 / prior=047 继承路);recall 消费后原样
         # 下发日志,shadow 形态不静默
         self._last_gate_trace: dict[str, object] = {}
@@ -599,6 +608,25 @@ class RagService:
         }
         return vec.passed, ft.passed
 
+    async def _expand_relations(
+        self, *, tenant_id: str, datasource_key: str, keys: list[tuple[str, str]]
+    ) -> list[RelationExpansion]:
+        """088 扩展判定单点(recall 与 recall_probe 共用,试跑同源)。
+
+        配置/端口一票短路先于任何查询(关闭形态零 SQL);查询失败降级为
+        无扩展(与既有语义段降级同口径),SHALL NOT 阻断召回主链路。
+        扩展判定本身是纯函数 expand_by_relations(一跳/去重/上限/尾附加序)。"""
+        if not keys or not self._expand_enabled or self._relation_expander is None:
+            return []
+        try:
+            rows = await self._relation_expander.related_tables(
+                tenant_id=tenant_id, datasource_key=datasource_key, tables=keys
+            )
+        except Exception:  # noqa: BLE001  # 降级为无扩展,主链路不阻断
+            log.warning("关系扩展查询失败(降级无扩展)", exc_info=True)
+            return []
+        return expand_by_relations(keys, rows, max_expand=self._expand_max)
+
     async def recall(
         self,
         *,
@@ -622,7 +650,16 @@ class RagService:
 
         prior = (history or [])[-1].strip() if history else ""
         # 键材料作为 question 参数传入——派生(hash)逻辑留在 cache 内部
-        key_material = f"{question}\x1f{prior}" if prior else question
+        # 088:键并入扩展形态(开/关各自缓存空间)。否则开形态写入的缓存会在
+        # 配置切到关停后的 TTL 窗口内命中,返回含扩展的旧输出——违背「关停
+        # 输出与开启前逐字一致」;关→开同理,新能力在 TTL 窗口内静默不生效
+        # (与关系写后不失效同类的静默漂移,评审 R1 修复)
+        expand_state = (
+            "on" if (self._expand_enabled and self._relation_expander is not None) else "off"
+        )
+        key_material = (
+            f"{question}\x1f{prior}\x1f{expand_state}" if prior else f"{question}\x1f{expand_state}"
+        )
 
         cached = await self._cache.get(tenant_id, datasource_key, key_material)
         if cached is not None:
@@ -709,10 +746,29 @@ class RagService:
             # 把观测数据算了就丢,shadow 形态退化为不可观测,违背「SHALL NOT
             # 静默降质」
             log.info("召回闸门 trace 观测 notes=%s", self._last_gate_trace)
+        # 088:关系感知一跳扩展(主召回确定后、fetch_entries 前;尾附加使
+        # 扩展天然落在最低优先级,080 预算超限时先裁扩展、主召回不动)
+        recalled_keys = [(h.schema_name, h.table_name) for h in fused]
+        expansions = await self._expand_relations(
+            tenant_id=tenant_id, datasource_key=datasource_key, keys=recalled_keys
+        )
+        if expansions:
+            # SHALL NOT 静默:本轮扩展表与经由关系进 trace
+            log.info(
+                "关系扩展 trace: %s",
+                [
+                    {
+                        "table": f"{e.key[0]}.{e.key[1]}",
+                        "via": f"{e.via.get('source_table')}->{e.via.get('target_table')}",
+                    }
+                    for e in expansions
+                ],
+            )
+            recalled_keys = recalled_keys + [e.key for e in expansions]
         entries = await self._repo.fetch_entries(
             tenant_id=tenant_id,
             datasource_key=datasource_key,
-            keys=[(h.schema_name, h.table_name) for h in fused],
+            keys=recalled_keys,
         )
         ctx = RagContext(
             schema_hint=build_schema_hint(entries),
@@ -776,10 +832,36 @@ class RagService:
         gate_mode = mode if knowledge_present else "off"
         vec_gate = gate_hits(vector_hits, mode=gate_mode, **vec_cfg)
         ft_gate = gate_hits(fulltext_hits, mode=gate_mode, **ft_cfg)
+        # 088:试跑同源透出扩展明细(与主链路共用 _expand_relations 单点;
+        # 只读验证面零副作用纪律不变——不写缓存/配置/审计)
+        fused_keys = [(h.schema_name, h.table_name) for h in fused]
+        expansions = await self._expand_relations(
+            tenant_id=tenant_id, datasource_key=datasource_key, keys=fused_keys
+        )
         return {
             "question": question,
             "mode": mode,
             "gate_skipped": None if knowledge_present else "no_knowledge",
+            "expansion": {
+                "enabled": bool(self._expand_enabled and self._relation_expander is not None),
+                "tables": [
+                    {
+                        "schema_name": e.key[0],
+                        "table_name": e.key[1],
+                        "via": {
+                            "source_table": e.via.get("source_table"),
+                            "target_table": e.via.get("target_table"),
+                            "join_keys": e.via.get("join_keys"),
+                            "source": e.via.get("source"),
+                        },
+                    }
+                    for e in expansions
+                ],
+                "fused_after": [
+                    {"schema_name": key[0], "table_name": key[1]}
+                    for key in fused_keys + [e.key for e in expansions]
+                ],
+            },
             "vector": {
                 "hits": [
                     {

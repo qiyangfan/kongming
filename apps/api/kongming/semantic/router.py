@@ -6,7 +6,7 @@
 
 import logging
 import uuid
-from typing import Annotated, cast
+from typing import TYPE_CHECKING, Annotated, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -17,6 +17,9 @@ from kongming.auth.router import current_user, require_perm
 from kongming.db import get_session
 from kongming.semantic.repository import SqlSemanticRepo
 from kongming.semantic.service import RelationTableUnknown, SemanticService
+
+if TYPE_CHECKING:
+    from kongming.rag.cache import ContextCache
 
 log = logging.getLogger(__name__)
 
@@ -170,6 +173,15 @@ class _DefaultIntrospector:
         ]
 
 
+def _recall_ctx_evictor() -> "ContextCache":
+    """088 组合根:关系写路径的检索缓存失效实现=rag ContextCache(适配层
+    组基础设施,service 只见 RecallContextEvictor 端口)。"""
+    from kongming.rag.cache import ContextCache
+    from kongming.redis_client import get_redis
+
+    return ContextCache(get_redis())
+
+
 @router.post("/relations/introspect", response_model=IntrospectOut)
 async def introspect_relations(
     req: IntrospectIn,
@@ -189,7 +201,7 @@ async def introspect_relations(
             text("SELECT tenant_key FROM public.sys_tenant WHERE id=:i"), {"i": tid}
         )
     ).scalar_one()
-    svc = SemanticService(SqlSemanticRepo(session))
+    svc = SemanticService(SqlSemanticRepo(session), recall_ctx_evictor=_recall_ctx_evictor())
     n = await svc.introspect(
         tenant_id=tid,
         datasource_key=req.datasource_key,
@@ -233,7 +245,11 @@ async def add_relation(
 ) -> dict[str, str]:
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
     await _assert_datasource_usable(session, tenant_id=tid, datasource_key=req.datasource_key)
-    svc = SemanticService(SqlSemanticRepo(session), _RagKnowledgeLookup(session))
+    svc = SemanticService(
+        SqlSemanticRepo(session),
+        _RagKnowledgeLookup(session),
+        recall_ctx_evictor=_recall_ctx_evictor(),  # 088:提交后失效检索缓存
+    )
     try:
         row_id = await svc.add_relation(
             tenant_id=tid,
@@ -256,10 +272,12 @@ async def delete_relation(
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
-    ok = await SqlSemanticRepo(session).delete_relation(relation_id=str(relation_id), tenant_id=tid)
+    # 088:删除用例入服务层(commit + 按被删行数据源精确失效检索缓存)
+    ok = await SemanticService(
+        SqlSemanticRepo(session), recall_ctx_evictor=_recall_ctx_evictor()
+    ).delete_relation(relation_id=str(relation_id), tenant_id=tid)
     if not ok:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
-    await session.commit()
 
 
 @router.get("/metrics", response_model=list[MetricOut])

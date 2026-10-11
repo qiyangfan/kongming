@@ -8,7 +8,7 @@ MANUAL_EDIT < FEEDBACK_REFINED——自动来源(扫描/润色)不覆盖更高�
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 # source_type 覆盖优先级(baseline CHECK 枚举,0006 演进后的五态)
 SOURCE_TYPE_PRIORITY: dict[str, int] = {
@@ -179,6 +179,61 @@ def build_schema_hint(entries: list[KnowledgeEntry]) -> str:
 def build_history_sql(sql_texts: list[str]) -> str:
     """历史成功 SQL 拼接(强 few-shot 段;最多 HISTORY_SQL_LIMIT 条)。"""
     return "\n".join(sql_texts[:HISTORY_SQL_LIMIT])
+
+
+# ---- 088 关系感知召回扩展(纯函数;一跳/去重/上限/尾附加) ----
+
+
+@dataclass(frozen=True)
+class RelationExpansion:
+    """单条扩展产物:补入的表键 + 经由的关系行(试跑端点与 trace 透出用)。"""
+
+    key: tuple[str, str]  # (schema_name, table_name)
+    via: dict[str, Any]  # 经由关系行 {source_table, target_table, join_keys, source}
+
+
+def _split_qualified(name: str) -> tuple[str, str] | None:
+    """`schema.table` 两段限定名 → (schema, table);非两段形态返回 None(不参与)。"""
+    parts = name.split(".")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return None
+    return parts[0], parts[1]
+
+
+def expand_by_relations(
+    recalled: list[tuple[str, str]],
+    relations: list[dict[str, Any]],
+    *,
+    max_expand: int,
+) -> list[RelationExpansion]:
+    """按已声明关系一跳扩展(088;纯函数,无 IO)。
+
+    任一端在召回集内的关系行,其对端不在召回集内则补入(方向对称);
+    关系行不存在即零扩展(SHALL NOT 猜测)。已在召回集内的对端不补、
+    不占额度;多条关系指向同表只补一次;输出序=关系行输入序(尾附加序,
+    预算超限时按 080 既有尾部丢弃方向先裁扩展);受 max_expand 上限约束。
+    """
+    recalled_set = set(recalled)
+    out: list[RelationExpansion] = []
+    seen: set[tuple[str, str]] = set()
+    for rel in relations:
+        if len(out) >= max_expand:
+            break  # 上限先于补入判定(max_expand=0 即零扩展)
+        src = _split_qualified(str(rel.get("source_table", "")))
+        dst = _split_qualified(str(rel.get("target_table", "")))
+        if src is None or dst is None:
+            continue  # 非两段限定名的关系行不参与(写入口已保证形态,防御)
+        if src in recalled_set:
+            far = dst
+        elif dst in recalled_set:
+            far = src
+        else:
+            continue  # 两端均在召回集外:不命中
+        if far in recalled_set or far in seen:
+            continue  # 对端已在召回集(不补不占额度)或已被本轮补入
+        seen.add(far)
+        out.append(RelationExpansion(key=far, via=rel))
+    return out
 
 
 # ---- 领域错误(router 统一映射状态码;message 即用户可见文案) ----
