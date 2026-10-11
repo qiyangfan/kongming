@@ -38,13 +38,16 @@ from tests.test_external_knowledge import _http_response, _Stub
 
 def test_provider_registry_single_source() -> None:
     """供应商注册表单源:端点/白名单主机成对声明;工具名→域映射收录 websearch。"""
-    assert set(WEBSEARCH_PROVIDERS) == {"tavily", "bocha"}
+    assert set(WEBSEARCH_PROVIDERS) == {"tavily", "bocha", "zhipu"}
     tavily = WEBSEARCH_PROVIDERS["tavily"]
     assert tavily.endpoint == "https://api.tavily.com/search"
     assert tavily.host == "api.tavily.com"
     bocha = WEBSEARCH_PROVIDERS["bocha"]
     assert bocha.endpoint == "https://api.bochaai.com/v1/web-search"
     assert bocha.host == "api.bochaai.com"
+    zhipu = WEBSEARCH_PROVIDERS["zhipu"]
+    assert zhipu.endpoint == "https://open.bigmodel.cn/api/paas/v4/web_search"
+    assert zhipu.host == "open.bigmodel.cn"
     assert DOMAIN_TOOLS["web_search"] == "websearch"
     # 数据表与适配表同键(评审 D2:只加数据不加适配会在启动期 ValueError 拒启,
     # fail-closed 够响,但同键断言把漂移挡在测试层)
@@ -298,6 +301,60 @@ async def test_executor_bocha_adaptation() -> None:
     ]
     sent = json.loads(stub.seen[0]["body"])
     assert sent["count"] == 2 and sent["summary"] is True
+
+
+@pytest.mark.asyncio
+async def test_executor_zhipu_adaptation() -> None:
+    """zhipu 适配:官方必填方言字段(search_engine/search_intent)、search_query
+    70 字符硬限截断、search_result[].{title,link,content} 归一为检索卡。"""
+    body = json.dumps(
+        {
+            "id": "req-1",
+            "search_result": [
+                {"title": "Z1", "link": "https://z.example/1", "content": "摘要一", "media": "M"},
+                {"title": "Z2", "link": "https://z.example/2", "content": "摘要二", "icon": "i"},
+                {"title": "无链接", "content": "丢弃"},
+            ],
+        }
+    )
+    stub = _RecordingStub(_http_response(body))
+    try:
+        gw = _gateway_with_websearch(stub.port, "zhipu")
+        out = await gw.execute(
+            tool_name="web_search",
+            args={"query": "q" * 100, "count": 2},  # 超方言上限:装配层截断
+            domain="websearch",
+            trace_id="tr-test",
+            tenant_id="t",
+            user_id="u",
+        )
+    finally:
+        stub.close()
+    assert out["status"] == "executed", out
+    result = cast("dict[str, object]", out["result"])
+    cards = cast("list[dict[str, object]]", result["results"])
+    assert cards == [
+        {"title": "Z1", "url": "https://z.example/1", "snippet": "摘要一"},
+        {"title": "Z2", "url": "https://z.example/2", "snippet": "摘要二"},
+    ]
+    sent = json.loads(stub.seen[0]["body"])
+    assert sent["search_engine"] == "search_std" and sent["search_intent"] is False
+    assert sent["search_query"] == "q" * 70  # 方言硬限截断(域契约 500 不动)
+    assert sent["count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_executor_zhipu_malformed_no_retry() -> None:
+    """zhipu 缺 search_result 列表:报文畸形按 protocol 收口不重试。"""
+    stub = _RecordingStub(_http_response(json.dumps({"id": "req-1"})))
+    try:
+        gw = _gateway_with_websearch(stub.port, "zhipu")
+        out = await _websearch_once(gw)
+    finally:
+        stub.close()
+    assert out["status"] == "error"
+    assert str(out["reason"]).startswith("protocol: 检索响应缺 search_result 列表")
+    assert stub.stub.connections == 1
 
 
 @pytest.mark.asyncio

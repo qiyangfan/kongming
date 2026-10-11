@@ -14,13 +14,18 @@ from typing import cast
 import httpx
 
 from kongming.toolgateway.gateway import KnowledgeSourceError
-from kongming.toolgateway.models import RetryClass
+from kongming.toolgateway.models import (
+    FAILURE_PROTOCOL_PREFIX,
+    FAILURE_UNDELIVERED_PREFIX,
+    RetryClass,
+)
 
 # 观察白名单(脱敏策略 allowlist:knowledge)——与迁移前观察整形逐字段一致
 _HIT_FIELDS = ("source_name", "note_path", "anchor", "text")
 
-_UNDELIVERED_PREFIX = "unreachable:"
-_PROTOCOL_PREFIX = "protocol:"
+# 失败文案前缀单源(094 评审循环收编,原 081 本地字面量)
+_UNDELIVERED_PREFIX = FAILURE_UNDELIVERED_PREFIX
+_PROTOCOL_PREFIX = FAILURE_PROTOCOL_PREFIX
 
 
 class KnowledgePolicy:
@@ -127,6 +132,10 @@ class KnowledgeExecutor:
             raise KnowledgeSourceError(f"protocol: 上游 HTTP {e.response.status_code}") from e
         except (ValueError, TypeError) as e:
             raise KnowledgeSourceError(f"protocol: 响应报文畸形({type(e).__name__})") from e
+        except httpx.DecodingError as e:
+            # 解码失败继承 RequestError(非 TransportError),不单列会以裸 httpx
+            # 异常逃逸收敛链、审计 error_reason 丢结构化前缀(094 评审循环 R1 同款)
+            raise KnowledgeSourceError(f"protocol: 检索响应解码失败({type(e).__name__})") from e
         except httpx.TransportError as e:
             # 传输层未枚举残族(防 httpx 分层演进逃逸;081 同款兜底)
             raise KnowledgeSourceError(f"unreachable: 知识库拒连({type(e).__name__})") from e

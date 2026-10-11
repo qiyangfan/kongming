@@ -20,7 +20,7 @@ class RetryClass(Enum):
 
 
 # 域失败文案前缀单源(094 评审循环 D4:域执行器收敛文案与网关 _was_delivered
-# 的送达判定共引,防多处字面量漂移;knowledge 域为 081 已归档代码,未收编)
+# 的送达判定共引,防多处字面量漂移;knowledge 域已随 081 缺口修复一并收编)
 FAILURE_UNDELIVERED_PREFIX = "unreachable:"
 FAILURE_PROTOCOL_PREFIX = "protocol:"
 
@@ -51,6 +51,11 @@ WEBSEARCH_PROVIDERS: dict[str, SearchProvider] = {
     "tavily": SearchProvider(endpoint="https://api.tavily.com/search", host="api.tavily.com"),
     "bocha": SearchProvider(
         endpoint="https://api.bochaai.com/v1/web-search", host="api.bochaai.com"
+    ),
+    # 智谱独立检索 API(与 LLM 同平台,复用已有 bigmodel key 零额外注册;
+    # 契约按官方 docs.bigmodel.cn「网络搜索」API 核对于 2026-10-11)
+    "zhipu": SearchProvider(
+        endpoint="https://open.bigmodel.cn/api/paas/v4/web_search", host="open.bigmodel.cn"
     ),
 }
 

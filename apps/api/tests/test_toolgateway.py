@@ -311,6 +311,43 @@ async def test_connect_timeout_real_executor_unreachable_retry_once() -> None:
     assert len(calls) == 2  # 连接类恰好重试一次
 
 
+@pytest.mark.asyncio
+async def test_decoding_error_real_executor_protocol_no_retry() -> None:
+    """真实执行器 + MockTransport 坏 gzip:解码失败(DecodingError∈RequestError,
+    非 TransportError/ValueError)按 protocol 前缀收口,不裸抛、不重试
+    (094 评审循环 R1 同款缺口的知识域回归)。"""
+    from kongming.toolgateway.knowledge import KnowledgeExecutor, KnowledgePolicy
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"Content-Encoding": "gzip"}, content=b"not-gzip")
+
+    calls: list[int] = []
+
+    class _Counting(KnowledgeExecutor):
+        async def __call__(
+            self, *, url: str, payload: dict[str, object], timeout_s: float
+        ) -> object:
+            calls.append(1)
+            return await super().__call__(url=url, payload=payload, timeout_s=timeout_s)
+
+    gw = ToolGateway(
+        manifest=load_manifest(_raw_manifest())[0],
+        policies={"knowledge": KnowledgePolicy(whitelist_hosts=("127.0.0.1", "localhost"))},
+        executor=_Counting(transport=httpx.MockTransport(_handler)),
+    )
+    out = await gw.execute(
+        tool_name="knowledge_search",
+        args={"query": "x"},
+        domain="knowledge",
+        trace_id="t",
+        tenant_id="t",
+        user_id="u",
+    )
+    assert out["status"] == "error"
+    assert str(out["reason"]) == "protocol: 检索响应解码失败(DecodingError)"
+    assert len(calls) == 1  # 响应类不重试
+
+
 # ── 停用域零感知 ──
 
 

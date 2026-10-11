@@ -17,6 +17,10 @@ _PROD_KW: dict[str, Any] = {
     "jwt_public_key_pem": "k",
     "internal_token": "k",
     "datasource_encrypt_key": "k" * 32,
+    # 094:websearch 组合残缺(供应商缺 key 等)在 prod 拒启——钉空隔离本地
+    # .env 的 KM_WEBSEARCH_*,防开发者本机配置把既有用例打红(评审循环登记)
+    "websearch_provider": "",
+    "websearch_api_key": "",
 }
 
 

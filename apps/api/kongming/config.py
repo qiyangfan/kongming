@@ -173,7 +173,7 @@ class Settings(BaseSettings):
 
     # 094 web-search-domain:联网检索域(供应商+API key 齐备才注册 web_search;
     # 均未配置=域零感知,合法缺省)。凭证只存控制面环境变量(ADR-002)
-    websearch_provider: str = ""  # tavily | bocha
+    websearch_provider: str = ""  # tavily | bocha | zhipu
     websearch_api_key: str = ""
     websearch_timeout_ms: int = Field(default=8000, ge=1, le=30000)
     toolgateway_websearch_quota: int = Field(default=20, ge=1, le=600)

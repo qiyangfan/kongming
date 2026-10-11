@@ -211,6 +211,44 @@ def _bocha_request(payload: dict[str, object]) -> dict[str, object]:
     return body
 
 
+# 智谱 search_query 上限 70 字符(官方 API schema 硬限;2026-10-11 核对)——
+# 域级上限 500 与供应商方言上限的差异在方言装配层消化,截断不改域契约
+_ZHIPU_QUERY_MAX_LEN = 70
+
+
+def _zhipu_request(payload: dict[str, object]) -> dict[str, object]:
+    query = payload.get("query")
+    count = payload.get("count")
+    # search_engine/search_intent 为官方必填字段;引擎属方言固定(search_std=标准引擎)
+    body: dict[str, object] = {
+        "search_query": query[:_ZHIPU_QUERY_MAX_LEN] if isinstance(query, str) else query,
+        "search_engine": "search_std",
+        "search_intent": False,
+    }
+    if isinstance(count, int) and not isinstance(count, bool):
+        body["count"] = count
+    return body
+
+
+def _normalize_zhipu(body: dict[str, object]) -> list[dict[str, object]]:
+    """zhipu 响应归一:search_result[].{title,link,content} → 检索卡。"""
+    raw = body.get("search_result")
+    if not isinstance(raw, list):
+        raise WebSearchError(f"{_PROTOCOL_PREFIX} 检索响应缺 search_result 列表")
+    cards: list[dict[str, object]] = []
+    for item in cast("list[object]", raw):
+        d = _as_dict(item)
+        if d is None:
+            continue
+        url = d.get("link")
+        if not isinstance(url, str) or not url:
+            continue
+        title = d.get("title") if isinstance(d.get("title"), str) else ""
+        snippet = d.get("content") if isinstance(d.get("content"), str) else ""
+        cards.append({"title": title, "url": url, "snippet": snippet})
+    return cards
+
+
 # 供应商适配注册表(新供应商=增一条映射,design D1):
 # 请求装配(统一参数→供应商方言)+ 响应归一(供应商报文→统一检索卡)
 _Adapter = tuple[
@@ -220,6 +258,7 @@ _Adapter = tuple[
 _ADAPTERS: dict[str, _Adapter] = {
     "tavily": (_tavily_request, _normalize_tavily),
     "bocha": (_bocha_request, _normalize_bocha),
+    "zhipu": (_zhipu_request, _normalize_zhipu),
 }
 
 

@@ -10,19 +10,31 @@
 ## 当前状态(2026-10-11)
 
 - **094 web 检索域(联网搜索)现状**:web_search 工具 = 部署级条件注册,
-  `KM_WEBSEARCH_PROVIDER`(tavily|bocha)+ `KM_WEBSEARCH_API_KEY` 齐备才注册;
+  `KM_WEBSEARCH_PROVIDER`(tavily|bocha|zhipu)+ `KM_WEBSEARCH_API_KEY` 齐备
+  才注册;zhipu=智谱独立检索 API(与 LLM 同平台,复用 bigmodel key 零额外
+  注册;search_query 方言硬限 70 字符在装配层截断,域契约 500 不动);
   均缺省=域零感知(合法形态);组合残缺(供应商缺 key、仅配 key 缺供应商、
-  供应商非法值):prod 拒启(fail_closed)、dev 启动告警降级。权限 `tool:websearch:search` 显式授予制(不进 DEVELOPER
-  推荐集)。供应商端点与出口白名单在 `toolgateway/models.py::WEBSEARCH_PROVIDERS`
+  供应商非法值):prod 拒启(fail_closed)、dev 启动告警降级。权限
+  `tool:websearch:search` 显式授予制(不进 DEVELOPER 推荐集)。
+  供应商端点与出口白名单在 `toolgateway/models.py::WEBSEARCH_PROVIDERS`
   代码单源派生(部署不可改端点);新供应商接入=该表加一条 + `websearch.py::
-  _ADAPTERS` 加一条映射。参数边界(500/1–10/缺省 5)同文件常量单源,注册表
-  schema 与策略器共引。观察=检索卡 title/url/snippet(追踪参数剥离、评分不透),
-  域配额与 knowledge 分桶独立(`KM_TOOLGATEWAY_WEBSEARCH_QUOTA`,缺 20/分)。
-  演示需真实检索供应商 key;无 key 时其余能力零影响。
-  **范围外待办(094 评审循环登记)**:`toolgateway/knowledge.py` 执行器 except 链
-  缺 `httpx.DecodingError` 收敛(继承 RequestError 非 TransportError,逃逸后审计
-  error_reason 丢 protocol:/unreachable: 前缀;081 已归档代码,修法照 094
-  websearch.py 同款单列 except)。
+  _ADAPTERS` 加一条映射,**接入前核对供应商参数硬限与响应字段名并在方言
+  装配层消化**(zhipu 70 截断即先例;域级 schema 与策略器共引 models 常量,
+  勿为单供应商改域契约)。参数边界(500/1–10/缺省 5)同文件常量单源。
+  观察=检索卡 title/url/snippet(追踪参数剥离、评分不透),域配额与 knowledge
+  分桶独立(`KM_TOOLGATEWAY_WEBSEARCH_QUOTA`,缺 20/分)。演示需真实检索
+  供应商 key,无 key 时其余能力零影响;zhipu web_search 按**次独立计费**
+  (不同于 chat 额度),演示前确认 key 已开通该工具。
+  (评审循环登记的两条范围外待办已清:knowledge.py DecodingError 收敛与
+  前缀收编落地;test_config_failclosed 已钉空 websearch 字段。)
+  **检索供应商调查结论(2026-10-11 契约核对)**:主流平台开放「独立检索 REST
+  API」的是少数——智谱(已收编)与阿里云 AI 搜索开放平台(OpenSearch:POST
+  `{host}/v3/openapi/workspaces/{ws}/web-search/{service_id}`,Bearer 为 `OS-`
+  独立 key 与百炼 `sk-` 不通用,请求 {query, top_k, content_type…},响应
+  `result.search_result[]{title,link,snippet,content}`,可适配待有 key/需求时
+  两条映射接入)。DeepSeek(官方文档零 search 端点)、Kimi(仅会话内「内置
+  联网搜索」工具)、豆包/火山方舟(WebSearch 仅为会话请求配置对象)均无独立
+  检索 API,不可收编——反证网关域+多供应商适配是正解,检索能力不绑模型选型。
 
 - **本机评测演示环境**:env-postgres 已装 tenant_sakila(28 对象)/tenant_olist
   (9 表 CSV)/sakila_ext 独立库 + sakila/olist 租户注册 + admin 绑定;知识已灌
@@ -78,7 +90,7 @@
 - **领域纯净契约**:lint-imports 现为 26 kept / 0 broken——领域用例/模型不得
   import kongming.db(含其 re-export 的 uuid7;纯函数单源在 kongming/uuid7.py,
   领域层直接从那里取)。
-- **门禁现值**:api 1217/agent 527/liannu 23/web 86;ruff/mypy/prettier 清;
+- **门禁现值**:api 1220/agent 527/liannu 23/web 86;ruff/mypy/prettier 清;
   pyright latest 双 app 0;CI 六 job 绿。
 - **环境提示**:演示数据在本机(kongming 库 tenant_sakila/tenant_olist +
   sakila_ext 库);admin 密码 KmSmoke#2026a;评测前清 query_history +
