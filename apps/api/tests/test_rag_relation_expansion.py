@@ -313,6 +313,11 @@ class _StubRepo:
     async def datasource_usable(self, datasource_key: str, tenant_id: str) -> bool:
         return True
 
+    async def has_knowledge(self, *, tenant_id: str, datasource_key: str) -> bool:
+        # 064 闸门前置探针:recall 主链路无条件调用,协议扩展桩须同步,
+        # 否则 AttributeError(本文件用例闸门缺省 off,返回值不改变行为)
+        return True
+
     async def recall_fulltext(
         self, *, tenant_id: str, datasource_key: str, question: str
     ) -> list[Any]:
