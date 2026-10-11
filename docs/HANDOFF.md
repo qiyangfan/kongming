@@ -581,26 +581,33 @@
 
 1. **本机是 podman 不是 docker**:`docker` 只是交互 shell 的 alias,
    非交互命令一律用 `podman`。
-2. **本地基础环境已统一到 `~/workspace/env`(2026-10-09 迁移,替代本仓自带
-   pg/redis)**:api **8000** / agent **8001** / web dev **5173** /
-   postgres **5432**(env-postgres,pg18+pgvector;角色 `kongming/kongming`,
-   库 `kongming` 开发库 + `kongming_test` 测试库)/ redis **6379**
-   (env-redis,免密,测试用 db15)。conftest 与 `config.py` 的缺省连接串
-   与统一栈完全同口径——本地跑测试**无需再注入任何 KM_* 环境变量**;
-   切勿 `set -a` source 根 `.env` 跑 pytest(2026-10-09 实证:KM_INTERNAL_TOKEN
-   真值会盖掉 conftest 测试缺省,内部端点全 403,126 例假败)。api/agent
-   容器冒烟仍让到 **18080/18081**(宿主 8000 属其他项目)。本仓
+2. **本地基础环境已统一到 `~/workspace/localenv`(2026-10-11 现态;owner 裁决
+   基础设施收敛单源、禁止另起容器——10-09 曾迁 `~/workspace/env`,该目录与
+   env-\* 容器已不存在)**:api **8000** / agent **8001** / web dev **5173** /
+   postgres **5432**(localenv-postgres,compose 镜像已由本仓换入
+   `pgvector/pgvector:pg18`——原 postgres:18-alpine 无 vector,同为 PG18
+   major 卷数据兼容;角色 `kongming/kongming` SUPERUSER+CREATEDB,与原
+   compose 超管形态对齐;库 `kongming` 开发库,`kongming_test` 由 conftest
+   fixture 自建;NOLOGIN 只读角色 `km_readonly` 已按 `infra/pg-init/
+   001-readonly-role.sql` 预建,kongming_test 侧授权由 baseline 迁移自建)/
+   redis **6379**(localenv-redis,**带密码**=localenv/.env 的 REDIS_PASSWORD,
+   勿入仓库)。**跑测试必须 export KM_REDIS_URL**(conftest 缺省无密码连接串
+   对 localenv-redis 必 NOAUTH 成片 ERROR;KM_DATABASE_URL 缺省即 localenv
+   形态无需注入);切勿 `set -a` source 根 `.env` 跑 pytest(2026-10-09 实证:
+   KM_INTERNAL_TOKEN 真值会盖掉 conftest 测试缺省,内部端点全 403,126 例假败)。
+   api/agent 容器冒烟仍让到 **18080/18081**(宿主 8000 属其他项目)。本仓
    `infra/docker-compose.yml` 的 postgres/redis 服务保留给容器部署形态,
-   本地开发勿再 `make up` 自起(会与 env 栈抢 5432)。历史注:redis 6380
-   免密/带密码口径随独立栈退役作废。
+   本地开发勿再 `make up` 自起(会与 localenv 抢 5432)。另:本机代理软件
+   在网络层截流回环 HTTP——127.0.0.1 任意死端口稳定回无特征 502(2026-10-11
+   实证),依赖「连死端口必 ConnectionRefused」的用例(external_knowledge 的
+   unreachable 断言)本机无法通过,属环境事实非代码缺陷,CI 无代理环境绿。
 3. **本地环境冷启动**(幂等,任何"连不上/端口不对"先跑这个):
    ```bash
-   cd ~/workspace/env && podman compose --profile pg --profile redis up -d
+   cd ~/workspace/localenv && podman compose up -d
    cd apps/api && uv run alembic upgrade head      # 开发库迁移(kongming_test 由 conftest 自建)
    ```
-   pg 数据持久化在 env 栈命名卷 `env_pg-data`;删卷/重置属破坏性操作,
-   须用户明确授权。pgvector/pgcrypto 扩展与只读角色 `km_readonly` 的
-   手工预建口径见 `~/workspace/env/README.md`「项目库登记」。
+   pg 数据持久化在 localenv 命名卷 `localenv_postgres-data`;删卷/重置属
+   破坏性操作,须用户明确授权。localenv 服务清单与连接信息见其 README。
 4. **两 apps 无 .env 文件**(2026-09-28 find 实证,旧版本文档作废):
    `apps/api/.env`、`apps/agent/.env` 均不存在;settings 的
    `env_file=".env"` 是 cwd 相对,读取不到即纯环境变量。根 `.env` 只供
