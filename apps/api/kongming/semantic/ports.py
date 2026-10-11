@@ -34,7 +34,7 @@ class SemanticRepo(Protocol):
     ) -> str: ...
 
     async def delete_relation(self, *, relation_id: str, tenant_id: str) -> str | None:
-        """删除命中返回该行的 datasource_key(088:提交后按其精确失效缓存),
+        """删除命中返回该行的 datasource_key(095:提交后按其精确失效缓存),
         不命中返回 None(同形 404,防探测)。"""
 
 
@@ -50,7 +50,7 @@ class KnowledgeTableLookup(Protocol):
 
 
 class RecallContextEvictor(Protocol):
-    """检索上下文缓存失效窄端口(088:关系写路径消费;实现=rag ContextCache,
+    """检索上下文缓存失效窄端口(095:关系写路径消费;实现=rag ContextCache,
     组合根注入——semantic 域只见 Protocol,不 import rag)。
 
     关系写(introspection upsert / 手工增删 / 数据源删除级联)提交后必须

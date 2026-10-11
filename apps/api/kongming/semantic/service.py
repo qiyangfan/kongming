@@ -38,7 +38,7 @@ class SemanticService:
         self._recall_ctx_evictor = recall_ctx_evictor
 
     async def _evict_recall_ctx(self, *, tenant_id: str, datasource_key: str) -> None:
-        """088:关系写提交后失效该租户+数据源的检索上下文缓存(正确性要求,
+        """095:关系写提交后失效该租户+数据源的检索上下文缓存(正确性要求,
         非优化)。实现(ContextCache)自身 fail-open,失效失败只告警。"""
         if self._recall_ctx_evictor is None:
             return
@@ -57,7 +57,7 @@ class SemanticService:
 
         写边界闸:source/target 均须为既有知识条目——引用条目外的表在召回
         relations_hint 中永不命中(静默死配置),创建期即拒。通过后落库
-        source=manual 并提交;提交后失效检索上下文缓存(088)。"""
+        source=manual 并提交;提交后失效检索上下文缓存(095)。"""
         if self._knowledge is not None:
             for st in (source_table, target_table):
                 if not await self._knowledge.knowledge_table_exists(
@@ -80,9 +80,9 @@ class SemanticService:
         return row_id
 
     async def delete_relation(self, *, relation_id: str, tenant_id: str) -> bool:
-        """手工关系删除(088 自 router 归位):不命中返回 False(同形 404 由
+        """手工关系删除(095 自 router 归位):不命中返回 False(同形 404 由
         调用方映射);命中则删除并提交,提交后按被删行数据源精确失效检索
-        上下文缓存(088)。"""
+        上下文缓存(095)。"""
         datasource_key = await self._repo.delete_relation(
             relation_id=relation_id, tenant_id=tenant_id
         )
@@ -96,7 +96,7 @@ class SemanticService:
         self, *, tenant_id: str, datasource_key: str, introspector: FkIntrospector
     ) -> int:
         """外键扫描幂等 upsert(按约束分组聚合多列 join_keys);返回关系条数。
-        提交后失效检索上下文缓存(088:同问句再召回即见新关系)。"""
+        提交后失效检索上下文缓存(095:同问句再召回即见新关系)。"""
         pairs = await introspector.fetch_fk_pairs(schemas=[])
         # 按 (source_table, target_table) 聚合多列外键
         grouped: dict[tuple[str, str], list[dict[str, str]]] = {}

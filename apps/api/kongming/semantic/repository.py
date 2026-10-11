@@ -90,7 +90,7 @@ class SqlSemanticRepo:
     async def relations_touching(
         self, *, tenant_id: str, datasource_key: str, tables: list[str]
     ) -> list[dict[str, Any]]:
-        """088 一跳扩展查询:任一端在表集合内即命中(与 relations_within 的
+        """095 一跳扩展查询:任一端在表集合内即命中(与 relations_within 的
         差别只在谓词:within=两端均在(注入收窄),touching=任一端在(扩展候选))。
         双过滤口径(tenant+datasource)与参数化形态同 relations_within;
         ORDER BY 保证输出序确定(扩展尾附加序可断言)。"""
@@ -144,7 +144,7 @@ class SqlSemanticRepo:
         return str(row_id)
 
     async def delete_relation(self, *, relation_id: str, tenant_id: str) -> str | None:
-        """删除命中返回该行的 datasource_key(088:提交后按其精确失效检索
+        """删除命中返回该行的 datasource_key(095:提交后按其精确失效检索
         缓存),不命中返回 None(同形,防探测)。"""
         ds = (
             await self._s.execute(

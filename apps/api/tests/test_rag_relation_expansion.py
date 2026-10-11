@@ -1,4 +1,4 @@
-"""088-relation-aware-recall 测试(宪法 Article III,先红后绿)。
+"""095-relation-aware-recall 测试(宪法 Article III,先红后绿)。
 
 覆盖:relations_touching 查询口径(1.1)/扩展纯函数一跳去重上限序(1.2)/
 relations_hint 收窄基准扩展(1.3)/端口缺失与查询异常降级不阻断(1.4)/

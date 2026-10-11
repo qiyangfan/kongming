@@ -107,7 +107,7 @@ resources/prompts 原语、Bot 版本化上架、个性化推荐、用户/TEAM �
 super-admin 管理、按 tenant+datasource 隔离;跨部门共享知识库时,指标的
 口径定义本身可能含敏感业务信息(如「VIP 客户复购率」的口径暴露客群规则),
 届时应按 data_scope 决定 metric_hints 注入范围。触发条件=team-workspace
-多团队共享数据源上线(2026-10-05 由 088 提案登记,本期不做)。
+多团队共享数据源上线(2026-10-05 由 095 提案登记,本期不做)。
 
 ## 已被治理文档覆盖,不再立 spec(D 层)
 

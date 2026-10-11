@@ -181,7 +181,7 @@ def build_history_sql(sql_texts: list[str]) -> str:
     return "\n".join(sql_texts[:HISTORY_SQL_LIMIT])
 
 
-# ---- 088 关系感知召回扩展(纯函数;一跳/去重/上限/尾附加) ----
+# ---- 095 关系感知召回扩展(纯函数;一跳/去重/上限/尾附加) ----
 
 
 @dataclass(frozen=True)
@@ -206,7 +206,7 @@ def expand_by_relations(
     *,
     max_expand: int,
 ) -> list[RelationExpansion]:
-    """按已声明关系一跳扩展(088;纯函数,无 IO)。
+    """按已声明关系一跳扩展(095;纯函数,无 IO)。
 
     任一端在召回集内的关系行,其对端不在召回集内则补入(方向对称);
     关系行不存在即零扩展(SHALL NOT 猜测)。已在召回集内的对端不补、

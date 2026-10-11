@@ -174,7 +174,7 @@ class _DefaultIntrospector:
 
 
 def _recall_ctx_evictor() -> "ContextCache":
-    """088 组合根:关系写路径的检索缓存失效实现=rag ContextCache(适配层
+    """095 组合根:关系写路径的检索缓存失效实现=rag ContextCache(适配层
     组基础设施,service 只见 RecallContextEvictor 端口)。"""
     from kongming.rag.cache import ContextCache
     from kongming.redis_client import get_redis
@@ -248,7 +248,7 @@ async def add_relation(
     svc = SemanticService(
         SqlSemanticRepo(session),
         _RagKnowledgeLookup(session),
-        recall_ctx_evictor=_recall_ctx_evictor(),  # 088:提交后失效检索缓存
+        recall_ctx_evictor=_recall_ctx_evictor(),  # 095:提交后失效检索缓存
     )
     try:
         row_id = await svc.add_relation(
@@ -272,7 +272,7 @@ async def delete_relation(
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
-    # 088:删除用例入服务层(commit + 按被删行数据源精确失效检索缓存)
+    # 095:删除用例入服务层(commit + 按被删行数据源精确失效检索缓存)
     ok = await SemanticService(
         SqlSemanticRepo(session), recall_ctx_evictor=_recall_ctx_evictor()
     ).delete_relation(relation_id=str(relation_id), tenant_id=tid)

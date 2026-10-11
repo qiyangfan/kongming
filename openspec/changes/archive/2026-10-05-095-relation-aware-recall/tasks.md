@@ -1,4 +1,4 @@
-# 088-relation-aware-recall 实施任务
+# 095-relation-aware-recall 实施任务
 
 ## 1. 测试先行(先红)
 
@@ -45,7 +45,7 @@
 
 - [x] 3.1 `make contracts` 跑一遍,确认 `contracts/openapi.json` 零漂移
       (试跑响应为既有 `dict[str, object]` 信封);若有漂移,提交产物(ADR-005)
-- [x] 3.2 全量评估跑一轮(`pytest evals -m full`),随 089 归因记录
+- [x] 3.2 全量评估跑一轮(`pytest evals -m full`),随 096 归因记录
       SELECT/JOIN 类计数与 Execution Match 变化,写入 `evals/README.md`
       (作为本变更的收益证据;无历史基线则记为「首轮基线」)
       **实测(2026-10-05)**:同指纹 f05c8028 开/关两轮——关=宽松 50/50、严格
@@ -65,4 +65,4 @@
        liannu 22、web、contracts-check EXIT 0。冒烟 sakila 租户:配
        customer→rental 关系 → recall-probe 透出扩展明细(customer 不在主召回
        、经关系一跳补入)→ 真实问答生成 `customer INNER JOIN rental`,
-       verdict=PASS 结果正确。评估栈进程与一次性账号 eval089 已清理)
+       verdict=PASS 结果正确。评估栈进程与一次性账号 eval096 已清理)

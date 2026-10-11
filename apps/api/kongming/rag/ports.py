@@ -62,7 +62,7 @@ class SuggestionCacheEvictor(Protocol):
 
 
 class RelationExpansionPort(Protocol):
-    """关系感知召回扩展窄端口(088;实现=semantic 仓储,组合根注入)。
+    """关系感知召回扩展窄端口(095;实现=semantic 仓储,组合根注入)。
 
     只读查询:该租户+数据源内「任一端在 tables 集合内」的已声明关系行
     ([{source_table, target_table, join_keys, source}]);查询失败由消费方
