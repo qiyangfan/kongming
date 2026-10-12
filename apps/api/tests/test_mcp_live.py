@@ -12,22 +12,32 @@ import asyncio
 import contextlib
 import socket
 from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
 
 from kongming.mcp.client import HttpMcpCaller
 
-try:  # dev 依赖(mcp<2)缺失 → 本文件全部 skip(环境事实探测,不假失败)
+if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
-except ImportError as _e:  # pragma: no cover - 取决于环境
-    FastMCP = None  # type: ignore[assignment,misc]
-    _FASTMCP_IMPORT_ERROR: object | None = _e
-else:
-    _FASTMCP_IMPORT_ERROR = None
+
+
+def _load_fastmcp() -> "type[FastMCP] | None":
+    """dev 依赖(mcp<2)缺失返回 None → 本文件全部 skip(环境事实探测,
+    不假失败;函数返回形态避免模块级 try/except 对大写常量的重定义)。"""
+    try:
+        from mcp.server.fastmcp import FastMCP
+
+        return FastMCP
+    except ImportError:  # pragma: no cover - 取决于环境
+        return None
+
+
+_HAS_FASTMCP = _load_fastmcp() is not None
 
 pytestmark = pytest.mark.skipif(
-    _FASTMCP_IMPORT_ERROR is not None,
+    not _HAS_FASTMCP,
     reason="dev 依赖 mcp<2 未安装(装后真跑)",
 )
 
@@ -44,19 +54,21 @@ def _free_port() -> int:
 
 async def _serve(port: int) -> None:
     """官方 SDK 的真实 MCP server(SSE transport):一个工具/资源/prompt。"""
-    server = FastMCP("kongming-live-verify", host="127.0.0.1", port=port)
+    FastMCPCls = _load_fastmcp()
+    assert FastMCPCls is not None  # pyright 收窄(pytestmark skipif 已保证)
+    server = FastMCPCls("kongming-live-verify", host="127.0.0.1", port=port)
 
     @server.tool()
-    async def echo_tool(text: str) -> str:
+    async def echo_tool(text: str) -> str:  # pyright: ignore[reportUnusedFunction]  # 装饰器注册面
         """回显入参(真实往返断言载体)。"""
         return f"echo:{text}"
 
     @server.resource(_RESOURCE_URI)
-    async def greeting() -> str:
+    async def greeting() -> str:  # pyright: ignore[reportUnusedFunction]  # 装饰器注册面
         return "hello-from-live-resource"
 
     @server.prompt()
-    async def greet_prompt(name: str) -> str:
+    async def greet_prompt(name: str) -> str:  # pyright: ignore[reportUnusedFunction]  # 装饰器注册面
         return f"请向 {name} 问候"
 
     import uvicorn
