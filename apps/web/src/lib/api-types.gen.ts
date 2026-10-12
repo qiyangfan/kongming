@@ -328,6 +328,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat/stt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transcribe Audio
+         * @description 语音转文字:音频 → 文本(即转即弃;前端填入输入框确认后发送)。
+         */
+        post: operations["transcribe_audio_chat_stt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/users": {
         parameters: {
             query?: never;
@@ -3513,6 +3533,14 @@ export interface components {
             tenant_id: string;
             /** Plan Id */
             plan_id?: string | null;
+        };
+        /** Body_transcribe_audio_chat_stt_post */
+        Body_transcribe_audio_chat_stt_post: {
+            /**
+             * File
+             * @description 音频文件(webm/opus/mp3/wav/m4a)
+             */
+            file: string;
         };
         /** Body_upload_attachment_chat_attachments_post */
         Body_upload_attachment_chat_attachments_post: {
@@ -8457,6 +8485,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExplainOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    transcribe_audio_chat_stt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_transcribe_audio_chat_stt_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

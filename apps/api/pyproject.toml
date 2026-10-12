@@ -24,6 +24,7 @@ dependencies = [
     "openpyxl>=3.1.5",
     "jsonschema>=4.23",             # 019 工具参数 JSON Schema 校验(L4)
     "liannu==0.1.4",                # 053 SQL 安全引擎(单遍解析;monorepo 共享包 packages/liannu)
+    "faster-whisper>=1.0",
 ]
 
 # 053:引擎为本仓共享包(packages/liannu,连弩),以 uv path 依赖引入;

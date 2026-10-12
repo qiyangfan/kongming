@@ -95,6 +95,16 @@
   对无状态 server 零影响;④评估栈两个假跌源已修:日配额耗尽(评估 api
   启动必带 `KM_CHAT_QUOTA_DAILY_CALLS=0`)与 hex id 题租户推断 403
   (sakila.yaml 显式 tenant)——历史基线跨轮对比以逐题失败名单为准。
+- **114 语音转写(/chat/stt)现态与启用配方**:本地 faster-whisper(api 面
+  运行,零凭证不触 ADR-002);**可选启用形态**——依赖随 main 安装,模型
+  在位即用,缺失时端点 503 明示(无开关,状态自明)。预下载(一次性,
+  ~480MB):`cd apps/api && uv run python -c "from faster_whisper import
+  WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"`
+  (HuggingFace 直连;失败配 `HF_ENDPOINT=https://hf-mirror.com`)。
+  模型规格经 `KM_STT_MODEL` 换(base/medium 同接口)。注意:faster-whisper
+  自带的 decode_audio 与 av>=15 不兼容(参数已移除),stt/engine.py 内置
+  av 解码替代,**勿改回**。前端:输入框麦克风按钮→录音→转写文本填入
+  输入框(用户确认后发送,Escape 取消)。
 - **094 web 检索域(联网搜索)现状**:web_search 工具 = 部署级条件注册,
   `KM_WEBSEARCH_PROVIDER`(tavily|bocha|zhipu|alibaba_ai_search)+
   `KM_WEBSEARCH_API_KEY` 齐备才注册;zhipu=智谱独立检索 API(与 LLM 同平台,复用 bigmodel key 零额外

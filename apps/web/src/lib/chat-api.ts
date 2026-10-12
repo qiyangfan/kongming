@@ -27,6 +27,14 @@ export async function uploadAttachment(file: File): Promise<AttachmentOut> {
   return api.postForm("/chat/attachments", fd);
 }
 
+/** 114 语音转写:录音 blob → 文本(即转即弃;503=未启用模型,文案面向用户) */
+export async function transcribeAudio(blob: Blob): Promise<string> {
+  const fd = new FormData();
+  fd.append("file", blob, "recording.webm");
+  const out = await api.postForm<{ text: string }>("/chat/stt", fd);
+  return out.text;
+}
+
 /** 会话列表(010 搜索):q 非空时服务端按标题/user 问句 ILIKE 匹配 */
 export function listSessions(q?: string): Promise<SessionItemOut[]> {
   const qs = q ? `?q=${encodeURIComponent(q)}` : "";

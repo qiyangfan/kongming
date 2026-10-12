@@ -188,6 +188,10 @@ class Settings(BaseSettings):
     chat_quota_daily_calls: int = Field(default=500, ge=0)
     chat_quota_monthly_calls: int = Field(default=10000, ge=0)
     bot_chat_rate_per_minute: int = Field(default=30, ge=0)
+    # 114 语音转写:faster-whisper 模型规格(small/base/medium…;int8/cpu)。
+    # 模型文件在位即启用,缺失时 /chat/stt 返 503 明示配方(可选启用形态,
+    # 无独立开关——状态自明);预下载配方见 docs/HANDOFF.md
+    stt_model: str = Field(default="small")
 
     # 问答结果行数上限(062):chat 面 SQL 执行行数统一配置(取代 inline 魔数,
     # 与导出路径 export_max_rows 同语义不同阀:结果表渲染上限远低于导出)

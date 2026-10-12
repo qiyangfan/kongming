@@ -19,6 +19,7 @@ import {
   Feather,
   Info,
   Loader2,
+  Mic,
   Paperclip,
   SendHorizontal,
   StopCircle,
@@ -53,7 +54,7 @@ import { api, humanizeErrorText, type ChatQueryOut, type SessionMessageOut } fro
 import { useAgentMode } from "@/lib/agent-mode-store";
 import { useAuth } from "@/lib/auth-store";
 import { hasPerm } from "@/lib/nav";
-import { getSuggestions, uploadAttachment } from "@/lib/chat-api";
+import { getSuggestions, transcribeAudio, uploadAttachment } from "@/lib/chat-api";
 import { generateReport } from "@/lib/report-api";
 import { useDatasource } from "@/lib/datasource-store";
 import {
@@ -473,6 +474,70 @@ export default function ChatPage() {
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // 114:语音输入(MediaRecorder → /chat/stt → 文本填入输入框,用户可修正后
+  // 发送;Escape 取消丢弃)。音频即转即弃,前端不留存。
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+
+  function cancelRecording(): void {
+    recorderRef.current?.stream.getTracks().forEach((t) => t.stop());
+    recorderRef.current = null;
+    chunksRef.current = [];
+    setRecording(false);
+  }
+
+  async function onMicClick(): Promise<void> {
+    if (recording) {
+      recorderRef.current?.stop(); // onstop 负责收尾+转写
+      return;
+    }
+    setAskError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      chunksRef.current = [];
+      rec.ondataavailable = (e) => {
+        if (e.data.size) chunksRef.current.push(e.data);
+      };
+      rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        recorderRef.current = null;
+        setRecording(false);
+        const blob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" });
+        if (blob.size < 1024) return; // 近乎无声的误触
+        setTranscribing(true);
+        transcribeAudio(blob)
+          .then((text) => {
+            if (!text) {
+              setAskError("没有听清,请再试一次。");
+              return;
+            }
+            setDraft((prev) => (prev ? `${prev} ${text}` : text));
+          })
+          .catch((err) =>
+            setAskError(err instanceof Error ? err.message : "语音识别未成,请稍后再试。"),
+          )
+          .finally(() => setTranscribing(false));
+      };
+      rec.start();
+      recorderRef.current = rec;
+      setRecording(true);
+    } catch {
+      setAskError("无法访问麦克风,请检查浏览器权限。");
+    }
+  }
+
+  useEffect(() => {
+    if (!recording) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") cancelRecording();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [recording]);
+
   async function onPickFile(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = e.target.files?.[0];
     e.target.value = ""; // 同文件可重选(009 R2-S2 教训)
@@ -689,6 +754,26 @@ export default function ChatPage() {
                 <Loader2 className="size-4 animate-spin" aria-hidden />
               ) : (
                 <Paperclip className="size-4" aria-hidden />
+              )}
+            </Button>
+            {/* 114 语音输入:录音中 Mic 变警示色+脉冲;转写中文本填入输入框,
+                用户可修正后发送;Escape 取消丢弃 */}
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="after:-inset-2"
+              onClick={() => void onMicClick()}
+              disabled={transcribing || uploading || streaming !== null}
+              aria-label={recording ? "停止录音" : "语音输入"}
+              title={recording ? "停止录音并转写(Escape 取消)" : "语音输入(说完点停止)"}
+            >
+              {transcribing ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+              ) : (
+                <Mic
+                  className={recording ? "size-4 animate-pulse text-destructive" : "size-4"}
+                  aria-hidden
+                />
               )}
             </Button>
             <div className="flex items-center gap-2">

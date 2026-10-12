@@ -1053,6 +1053,50 @@
         }
       }
     },
+    "/chat/stt": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Transcribe Audio",
+        "description": "语音转文字:音频 → 文本(即转即弃;前端填入输入框确认后发送)。",
+        "operationId": "transcribe_audio_chat_stt_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_transcribe_audio_chat_stt_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Transcribe Audio Chat Stt Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/system/users": {
       "get": {
         "tags": [
@@ -13534,6 +13578,21 @@
           "tenant_id"
         ],
         "title": "BindPlanIn"
+      },
+      "Body_transcribe_audio_chat_stt_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "音频文件(webm/opus/mp3/wav/m4a)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_transcribe_audio_chat_stt_post"
       },
       "Body_upload_attachment_chat_attachments_post": {
         "properties": {
