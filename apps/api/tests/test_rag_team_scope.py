@@ -23,7 +23,7 @@ from kongming.auth.seed import seed_all
 from kongming.config import get_settings
 from kongming.rag.agent_callback import AgentRagClient
 from kongming.rag.models import TableBlock
-from tests.conftest import API_ROOT, MakeUser
+from tests.conftest import MakeUser, migrated_tmp_db
 from tests.test_chat_query import _auth, _bind, _login
 from tests.test_toolcall import _mk_role_with_perms
 
@@ -248,87 +248,83 @@ def test_team_set_fingerprint_rules() -> None:
 # ============ 1.1 迁移 0048:升级/降级往返 + 存量行归属空 ============
 
 
-def _cfg() -> Config:
-    cfg = Config(str(API_ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(API_ROOT / "alembic"))
-    return cfg
-
-
-async def _run_alembic(session: AsyncSession, target: str) -> None:
-    """执行一条 alembic 命令(前 rollback 清场,防 ACCESS SHARE 死等——103 实证)。"""
+async def _run_alembic(session: AsyncSession, cfg: Config, target: str) -> None:
+    """执行一条 alembic 命令(前 rollback 清场,防 ACCESS SHARE 死等——103 实证)。
+    cfg 由 migrated_tmp_db 注入(一次性临时库,防 dropped 列占位累积)。"""
     await session.rollback()
     if target == "head":
-        await asyncio.to_thread(command.upgrade, _cfg(), "head")
+        await asyncio.to_thread(command.upgrade, cfg, "head")
     else:
-        await asyncio.to_thread(command.downgrade, _cfg(), target)
+        await asyncio.to_thread(command.downgrade, cfg, target)
 
 
-async def test_migration_0048_roundtrip_and_legacy_null(session: AsyncSession) -> None:
+async def test_migration_0048_roundtrip_and_legacy_null() -> None:
     """down 到 0047 → 存量形态插行 → 升 head:列存在且存量行归属全空(零回归);
     再降/升往返列随之出现消失。"""
-    await _run_alembic(session, "0047")
-    tid = str(
-        (
+    async with migrated_tmp_db() as (session, cfg):
+        await _run_alembic(session, cfg, "0047")
+        tid = str(
+            (
+                await session.execute(
+                    text(
+                        "INSERT INTO public.sys_tenant (id, tenant_key, tenant_name)"
+                        " VALUES (gen_random_uuid(), 'mig102', '迁移租户') RETURNING id"
+                    )
+                )
+            ).scalar_one()
+        )
+        await session.execute(
+            text(
+                "INSERT INTO rag.table_descriptions"
+                " (id, tenant_id, datasource_key, schema_name, table_name,"
+                "  table_comment, columns_comment, sample_queries, source_type)"
+                " VALUES (gen_random_uuid(), CAST(:t AS uuid), 'default', 's', 'legacy_t',"
+                "  'c', '{}', '[]', 'MANUAL_UPLOAD')"
+            ),
+            {"t": tid},
+        )
+        await session.commit()
+        await _run_alembic(session, cfg, "head")
+        col = (
             await session.execute(
                 text(
-                    "INSERT INTO public.sys_tenant (id, tenant_key, tenant_name)"
-                    " VALUES (gen_random_uuid(), 'mig102', '迁移租户') RETURNING id"
+                    "SELECT count(*) FROM information_schema.columns"
+                    " WHERE table_schema='rag' AND table_name='table_descriptions'"
+                    " AND column_name='team_id'"
                 )
             )
         ).scalar_one()
-    )
-    await session.execute(
-        text(
-            "INSERT INTO rag.table_descriptions"
-            " (id, tenant_id, datasource_key, schema_name, table_name,"
-            "  table_comment, columns_comment, sample_queries, source_type)"
-            " VALUES (gen_random_uuid(), CAST(:t AS uuid), 'default', 's', 'legacy_t',"
-            "  'c', '{}', '[]', 'MANUAL_UPLOAD')"
-        ),
-        {"t": tid},
-    )
-    await session.commit()
-    await _run_alembic(session, "head")
-    col = (
-        await session.execute(
-            text(
-                "SELECT count(*) FROM information_schema.columns"
-                " WHERE table_schema='rag' AND table_name='table_descriptions'"
-                " AND column_name='team_id'"
+        assert col == 1
+        # 存量行归属空断言(全 NULL=公共,零回归)
+        legacy = (
+            await session.execute(
+                text("SELECT team_id FROM rag.table_descriptions WHERE table_name='legacy_t'")
             )
-        )
-    ).scalar_one()
-    assert col == 1
-    # 存量行归属空断言(全 NULL=公共,零回归)
-    legacy = (
-        await session.execute(
-            text("SELECT team_id FROM rag.table_descriptions WHERE table_name='legacy_t'")
-        )
-    ).scalar_one()
-    assert legacy is None
-    # 降级:列消失;再回 head:契约复现
-    await _run_alembic(session, "0047")
-    col = (
-        await session.execute(
-            text(
-                "SELECT count(*) FROM information_schema.columns"
-                " WHERE table_schema='rag' AND table_name='table_descriptions'"
-                " AND column_name='team_id'"
+        ).scalar_one()
+        assert legacy is None
+        # 降级:列消失;再回 head:契约复现
+        await _run_alembic(session, cfg, "0047")
+        col = (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM information_schema.columns"
+                    " WHERE table_schema='rag' AND table_name='table_descriptions'"
+                    " AND column_name='team_id'"
+                )
             )
-        )
-    ).scalar_one()
-    assert col == 0
-    await _run_alembic(session, "head")
-    col = (
-        await session.execute(
-            text(
-                "SELECT count(*) FROM information_schema.columns"
-                " WHERE table_schema='rag' AND table_name='table_descriptions'"
-                " AND column_name='team_id'"
+        ).scalar_one()
+        assert col == 0
+        await _run_alembic(session, cfg, "head")
+        col = (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM information_schema.columns"
+                    " WHERE table_schema='rag' AND table_name='table_descriptions'"
+                    " AND column_name='team_id'"
+                )
             )
-        )
-    ).scalar_one()
-    assert col == 1
+        ).scalar_one()
+        assert col == 1
 
 
 # ============ 2.2/2.3 召回过滤 + 缓存团队指纹(全程禁 flush) ============
@@ -976,59 +972,60 @@ async def test_reconcile_deletes_stale_team_auto_entry_same_rule(
 # ============ 102 伴生:query_history 历史路样本可见性 ============
 
 
-async def test_migration_0052_roundtrip_and_legacy_public(session: AsyncSession) -> None:
+async def test_migration_0052_roundtrip_and_legacy_public() -> None:
     """down 到 0051 → 存量形态插行 → 升 head:visible_teams 列在且存量行为
     '{}' (=公共,来源不可追溯按既有公共语义);再降/升往返随列出现消失。"""
-    await _run_alembic(session, "0051")
-    tid = str(
-        (
+    async with migrated_tmp_db() as (session, cfg):
+        await _run_alembic(session, cfg, "0051")
+        tid = str(
+            (
+                await session.execute(
+                    text(
+                        "INSERT INTO public.sys_tenant (id, tenant_key, tenant_name)"
+                        " VALUES (gen_random_uuid(), 'mig102h', '迁移租户') RETURNING id"
+                    )
+                )
+            ).scalar_one()
+        )
+        await session.execute(
+            text(
+                "INSERT INTO rag.query_history"
+                " (id, tenant_id, datasource_key, question, sql_text, status, source_type)"
+                " VALUES (gen_random_uuid(), CAST(:t AS uuid), 'default', '旧问句',"
+                "  'SELECT 1', 'SUCCESS', 'EXECUTION')"
+            ),
+            {"t": tid},
+        )
+        await session.commit()
+        await _run_alembic(session, cfg, "head")
+        col = (
             await session.execute(
                 text(
-                    "INSERT INTO public.sys_tenant (id, tenant_key, tenant_name)"
-                    " VALUES (gen_random_uuid(), 'mig102h', '迁移租户') RETURNING id"
+                    "SELECT count(*) FROM information_schema.columns"
+                    " WHERE table_schema='rag' AND table_name='query_history'"
+                    " AND column_name='visible_teams'"
                 )
             )
         ).scalar_one()
-    )
-    await session.execute(
-        text(
-            "INSERT INTO rag.query_history"
-            " (id, tenant_id, datasource_key, question, sql_text, status, source_type)"
-            " VALUES (gen_random_uuid(), CAST(:t AS uuid), 'default', '旧问句',"
-            "  'SELECT 1', 'SUCCESS', 'EXECUTION')"
-        ),
-        {"t": tid},
-    )
-    await session.commit()
-    await _run_alembic(session, "head")
-    col = (
-        await session.execute(
-            text(
-                "SELECT count(*) FROM information_schema.columns"
-                " WHERE table_schema='rag' AND table_name='query_history'"
-                " AND column_name='visible_teams'"
+        assert col == 1
+        legacy = (
+            await session.execute(
+                text("SELECT visible_teams FROM rag.query_history WHERE question='旧问句'")
             )
-        )
-    ).scalar_one()
-    assert col == 1
-    legacy = (
-        await session.execute(
-            text("SELECT visible_teams FROM rag.query_history WHERE question='旧问句'")
-        )
-    ).scalar_one()
-    assert legacy is not None and len(legacy) == 0  # '{}'=公共
-    await _run_alembic(session, "0051")
-    col = (
-        await session.execute(
-            text(
-                "SELECT count(*) FROM information_schema.columns"
-                " WHERE table_schema='rag' AND table_name='query_history'"
-                " AND column_name='visible_teams'"
+        ).scalar_one()
+        assert legacy is not None and len(legacy) == 0  # '{}'=公共
+        await _run_alembic(session, cfg, "0051")
+        col = (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM information_schema.columns"
+                    " WHERE table_schema='rag' AND table_name='query_history'"
+                    " AND column_name='visible_teams'"
+                )
             )
-        )
-    ).scalar_one()
-    assert col == 0
-    await _run_alembic(session, "head")
+        ).scalar_one()
+        assert col == 0
+        await _run_alembic(session, cfg, "head")
 
 
 class _FixedTeams:

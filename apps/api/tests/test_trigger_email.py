@@ -22,7 +22,7 @@ from kongming.trigger.adapters import normalize_email
 from kongming.trigger.ports import MailAuthError, MailConnectError, MailFetch, MailRawMessage
 from kongming.trigger.repository import SqlTriggerRepo
 from kongming.trigger.service import TriggerService
-from tests.conftest import API_ROOT
+from tests.conftest import migrated_tmp_db
 from tests.test_trigger import _mk_workflow, _trigger_admin
 from tests.test_trigger_retry import _column_exists, _NoCipher, _runs_desc, _SeqRunner
 
@@ -294,74 +294,71 @@ async def test_migration_0050_legacy_zero_regression(session: AsyncSession) -> N
     assert run["summary"] == ""
 
 
-async def test_migration_0050_downgrade_roundtrip(session: AsyncSession) -> None:
+async def test_migration_0050_downgrade_roundtrip() -> None:
     """降级往返:down 后列/表消失(EMAIL 行随形态回退移除、存量 CRON 行保留),
     再 up head 契约复现。"""
-    from alembic.config import Config
+    async with migrated_tmp_db() as (session, cfg):
+        from alembic import command
 
-    from alembic import command
-
-    legacy = str(uuid_mod.uuid4())
-    email_id = str(uuid_mod.uuid4())
-    await session.execute(
-        text(
-            "INSERT INTO public.sys_trigger_definition"
-            " (id, tenant_id, tg_key, name, type, target_type, target_key, cron_expr,"
-            "  created_by) VALUES"
-            " (CAST(:i AS uuid), gen_random_uuid(), 'migrtdn50', '存量', 'CRON',"
-            "  'workflow', 'echo', '0 9 * * *', gen_random_uuid())"
-        ),
-        {"i": legacy},
-    )
-    await session.execute(
-        text(
-            "INSERT INTO public.sys_trigger_definition"
-            " (id, tenant_id, tg_key, name, type, target_type, target_key, created_by,"
-            "  imap_host) VALUES"
-            " (CAST(:i AS uuid), gen_random_uuid(), 'migemdn50', '邮件', 'EMAIL',"
-            "  'workflow', 'echo', gen_random_uuid(), 'imap.example.com')"
-        ),
-        {"i": email_id},
-    )
-    await session.commit()
-    await session.rollback()  # 迁移命令前清场(会话归零,释放锁面)
-    cfg = Config(str(API_ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(API_ROOT / "alembic"))
-    # 两段 alembic 命令之间只查 information_schema(不持业务表锁):
-    # 业务表查询会以 ACCESS SHARE 挂住事务,堵死后续 ALTER TABLE(0045 同教训)
-    await asyncio.to_thread(command.downgrade, cfg, "0049")
-    for col in ("imap_host", "imap_credential", "imap_poll_interval_sec"):
-        assert not await _column_exists(session, "sys_trigger_definition", col), col
-    assert not await _column_exists(session, "sys_trigger_run", "summary")
-    n = (
+        legacy = str(uuid_mod.uuid4())
+        email_id = str(uuid_mod.uuid4())
         await session.execute(
             text(
-                "SELECT count(*) FROM information_schema.tables"
-                " WHERE table_schema='public' AND table_name='sys_trigger_email_cursor'"
-            )
+                "INSERT INTO public.sys_trigger_definition"
+                " (id, tenant_id, tg_key, name, type, target_type, target_key, cron_expr,"
+                "  created_by) VALUES"
+                " (CAST(:i AS uuid), gen_random_uuid(), 'migrtdn50', '存量', 'CRON',"
+                "  'workflow', 'echo', '0 9 * * *', gen_random_uuid())"
+            ),
+            {"i": legacy},
         )
-    ).scalar_one()
-    assert int(n) == 0
-    # 必须回到 head(其后用例的 TRUNCATE 依赖全部表在位)
-    await asyncio.to_thread(command.upgrade, cfg, "head")
-    await session.rollback()  # 清掉 upgrade 前残留的会话事务,再开业务查询
-    assert await _column_exists(session, "sys_trigger_definition", "imap_host")
-    assert await _column_exists(session, "sys_trigger_run", "summary")
-    # EMAIL 行随形态回退移除,存量行保留(降级删除在再升级后仍成立)
-    remain = (
-        (
+        await session.execute(
+            text(
+                "INSERT INTO public.sys_trigger_definition"
+                " (id, tenant_id, tg_key, name, type, target_type, target_key, created_by,"
+                "  imap_host) VALUES"
+                " (CAST(:i AS uuid), gen_random_uuid(), 'migemdn50', '邮件', 'EMAIL',"
+                "  'workflow', 'echo', gen_random_uuid(), 'imap.example.com')"
+            ),
+            {"i": email_id},
+        )
+        await session.commit()
+        await session.rollback()  # 迁移命令前清场(会话归零,释放锁面)
+        # 两段 alembic 命令之间只查 information_schema(不持业务表锁):
+        # 业务表查询会以 ACCESS SHARE 挂住事务,堵死后续 ALTER TABLE(0045 同教训)
+        await asyncio.to_thread(command.downgrade, cfg, "0049")
+        for col in ("imap_host", "imap_credential", "imap_poll_interval_sec"):
+            assert not await _column_exists(session, "sys_trigger_definition", col), col
+        assert not await _column_exists(session, "sys_trigger_run", "summary")
+        n = (
             await session.execute(
                 text(
-                    "SELECT type FROM public.sys_trigger_definition"
-                    " WHERE tg_key IN ('migrtdn50','migemdn50')"
+                    "SELECT count(*) FROM information_schema.tables"
+                    " WHERE table_schema='public' AND table_name='sys_trigger_email_cursor'"
                 )
             )
+        ).scalar_one()
+        assert int(n) == 0
+        # 必须回到 head(其后用例的 TRUNCATE 依赖全部表在位)
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+        await session.rollback()  # 清掉 upgrade 前残留的会话事务,再开业务查询
+        assert await _column_exists(session, "sys_trigger_definition", "imap_host")
+        assert await _column_exists(session, "sys_trigger_run", "summary")
+        # EMAIL 行随形态回退移除,存量行保留(降级删除在再升级后仍成立)
+        remain = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT type FROM public.sys_trigger_definition"
+                        " WHERE tg_key IN ('migrtdn50','migemdn50')"
+                    )
+                )
+            )
+            .scalars()
+            .all()
         )
-        .scalars()
-        .all()
-    )
-    assert list(remain) == ["CRON"]
-    await session.rollback()
+        assert list(remain) == ["CRON"]
+        await session.rollback()
 
 
 # ── 2.2 摘要适配器(纯函数:白名单/截断/健壮) ──
@@ -922,3 +919,175 @@ async def test_email_trigger_interval_validation(
         "/system/triggers", headers=h, json={**_EMAIL_BODY, "tg_key": "emport", "imap_port": 70000}
     )
     assert r.status_code == 422
+
+
+# ==================== 评审循环回归(评审修复钉住) ====================
+
+
+async def test_poll_cursor_persisted_after_poll(session: AsyncSession) -> None:
+    """游标收尾提交(评审修复):poll_email 返回后游标必须已落库——独立新
+    会话可见。原实现末封游标推进在 _fire 提交之后、依赖调度器节流提交搭车,
+    节流失败被吞时 close() 回滚即丢游标,下轮确定性重复触发末封邮件。"""
+    tenant_id, tid = await _mk_email_trigger(session)
+    mail = _StubMail(messages=[MailRawMessage(uid=7, data=_mk_raw(subject="末封"))])
+    runner = _SeqRunner([("", True)])
+    svc = _email_svc(session, runner=runner, mail=mail, cipher=_REAL_CIPHER)
+    await svc.poll_email(trigger_id=tid)
+    assert len(runner.calls) == 1
+    from kongming.db import get_sessionmaker
+
+    async with get_sessionmaker()() as s2:
+        cur = await SqlTriggerRepo(s2).get_email_cursor(trigger_id=tid, folder="INBOX")
+    assert cur is not None and int(cur["last_uid"]) == 7
+    _ = tenant_id
+
+
+async def test_fetch_sync_abort_classified_connect_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """IMAP4.abort 归连接中断(评审修复):abort 继承 error,但语义是服务器
+    掐断/EOF——login 阶段不再误标 AUTH_FAILED、读取阶段不再误标协议失败。"""
+    import imaplib as _imaplib
+
+    from kongming.trigger.router import _ImaplibMailClient
+
+    monkeypatch.setattr(
+        "kongming.workflow.http_runner.assert_host_allowed_sync",
+        lambda host, port: None,  # type: ignore[arg-type,return-value]  # 测试桩,签名如实
+    )
+
+    class _AbortOnLoginConn:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            return
+
+        def login(self, user: str, credential: str) -> None:
+            raise _imaplib.IMAP4.abort("connection dropped during login")
+
+        def logout(self) -> None:
+            return
+
+    monkeypatch.setattr(_imaplib, "IMAP4_SSL", _AbortOnLoginConn)
+    client = _ImaplibMailClient()
+    with pytest.raises(MailConnectError, match="连接中断"):
+        client._fetch_sync(
+            host="imap.example.com",
+            port=993,
+            tls=True,
+            user="u",
+            credential="p",
+            folder="INBOX",
+            last_uid=0,
+            limit=10,
+        )
+
+
+async def test_update_run_terminal_rowcount_gates_rechain(session: AsyncSession) -> None:
+    """update_run_terminal 返回命中行数(评审修复):PENDING 行命中=1;已被
+    cancel_pending_retries 取消的行=0——service 据此跳过续链(结果补记为
+    独立行),不再给已停用触发器追加挂起记录。"""
+    tenant_id, tid = await _mk_email_trigger(session)
+    repo = SqlTriggerRepo(session)
+    rid = await repo.insert_run(
+        tenant_id=tenant_id,
+        trigger_id=tid,
+        status="PENDING",
+        error="",
+        duration_ms=0,
+        target_run_ref="",
+        attempt=2,
+        retry_of_run_id=None,
+        next_retry_at="2026-10-10T00:00:00+08:00",
+    )
+    assert (
+        await repo.update_run_terminal(
+            run_id=rid, status="SUCCESS", error="", duration_ms=5, target_run_ref="wf1"
+        )
+        == 1
+    )
+    await session.commit()
+    # 派发竞态路径:行被取消(PENDING 守卫不再命中)→ rowcount=0
+    rid2 = await repo.insert_run(
+        tenant_id=tenant_id,
+        trigger_id=tid,
+        status="PENDING",
+        error="",
+        duration_ms=0,
+        target_run_ref="",
+        attempt=2,
+        retry_of_run_id=None,
+        next_retry_at="2026-10-10T00:00:00+08:00",
+    )
+    await repo.cancel_pending_retries(trigger_id=tid, reason="触发器已停用或删除,挂起重试取消")
+    await session.commit()
+    assert (
+        await repo.update_run_terminal(
+            run_id=rid2, status="SUCCESS", error="", duration_ms=5, target_run_ref="wf1"
+        )
+        == 0
+    )
+
+
+async def test_fire_retry_cancelled_mid_flight_appends_final_row(session: AsyncSession) -> None:
+    """派发中取消的竞态收口(评审修复):fire_retry 读到 PENDING 后、执行完成
+    前行被 cancel_pending_retries 改判 FAILED(update_run_terminal 落 0)——
+    本次结果补记为独立终态行,不再给已停用触发器追加挂起 PENDING。"""
+    tenant_id, tid = await _mk_email_trigger(session)
+    base = SqlTriggerRepo(session)
+    pending_id = await base.insert_run(
+        tenant_id=tenant_id,
+        trigger_id=tid,
+        status="PENDING",
+        error="",
+        duration_ms=0,
+        target_run_ref="",
+        attempt=2,
+        retry_of_run_id="11111111-1111-1111-1111-111111111111",
+        next_retry_at="2026-10-10T00:00:00+08:00",
+        summary=json.dumps({"subject": "回放输入"}, ensure_ascii=False),
+    )
+    await session.commit()
+
+    inserted: list[dict[str, Any]] = []
+
+    class _CancelMidFlightRepo:
+        """get_run 恒见 PENDING(竞态前读),update_run_terminal 模拟取消后
+        no-op(0);insert_run 捕获,其余委托真仓储。"""
+
+        async def get_run(self, *, run_id: str) -> dict[str, Any] | None:
+            return await base.get_run(run_id=run_id)
+
+        async def update_run_terminal(self, **kw: Any) -> int:
+            # 模拟竞态:执行期间 cancel_pending_retries 已把行改判 FAILED
+            # (AND PENDING 守卫不再命中),返回 0
+            await base.cancel_pending_retries(
+                trigger_id=tid, reason="触发器已停用或删除,挂起重试取消"
+            )
+            return 0
+
+        async def insert_run(self, **kw: Any) -> str:
+            inserted.append(kw)
+            return "22222222-2222-2222-2222-222222222222"
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(base, name)
+
+    runner = _SeqRunner([("", True)])  # 目标实际执行成功
+    svc = TriggerService(
+        repo=cast("Any", _CancelMidFlightRepo()),
+        cipher=_NoCipher(),
+        runner=runner,
+        notifier=None,
+        mail=None,
+        input_guard=None,
+        retry_backoff_sec=0,
+    )
+    await svc.fire_retry(run_id=pending_id)
+    # 补记恰一条、终态 SUCCESS、非 PENDING(不续链),error 带补记说明
+    assert len(inserted) == 1
+    row = inserted[0]
+    assert row["status"] == "SUCCESS"
+    assert "链已取消" in str(row["error"])
+    assert row["attempt"] == 2
+    await session.commit()
+    _, runs = await base.page_runs(tenant_id=tenant_id, trigger_id=tid, page=1, size=10)
+    assert not any(r["status"] == "PENDING" for r in runs)

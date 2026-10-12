@@ -19,7 +19,7 @@ from kongming.auth.seed import seed_all
 from kongming.config import get_settings
 from kongming.mcp.client import _sse_events
 from kongming.mcp.models import merge_discovered, parse_qualified, qualified_name
-from tests.conftest import MakeUser
+from tests.conftest import MakeUser, migrated_tmp_db
 from tests.test_chat_query import _bind, _default_tenant_id, _login
 from tests.test_toolcall import (
     INTERNAL,
@@ -1608,47 +1608,48 @@ async def test_disabled_server_read_resource_disappears(
     assert n == 1
 
 
-async def test_migration_0049_roundtrip(session: AsyncSession) -> None:
+async def test_migration_0049_roundtrip() -> None:
     """0049 往返:降 0048 两列消失;存量行升级后零影响(缺省 '[]')。"""
-    from tests.test_store_migration import _run_alembic
+    async with migrated_tmp_db() as (session, cfg):
+        from tests.test_store_migration import _run_alembic
 
-    await _run_alembic(session, "0048")
-    col = (
-        await session.execute(
-            text(
-                "SELECT count(*) FROM information_schema.columns"
-                " WHERE table_name='sys_mcp_server'"
-                " AND column_name IN ('resources','prompts')"
-            )
-        )
-    ).scalar_one()
-    assert col == 0
-    tid = await _mk_tenant_once(session, "mcp_mig")
-    sid = (
-        await session.execute(
-            text(
-                "INSERT INTO public.sys_mcp_server"
-                " (id, tenant_id, server_key, name, endpoint)"
-                " VALUES (gen_random_uuid(), CAST(:t AS uuid), 'mig', '迁移', 'http://fake/mcp')"
-                " RETURNING id"
-            ),
-            {"t": tid},
-        )
-    ).scalar_one()
-    await session.commit()
-    await _run_alembic(session, "head")
-    row = (
-        (
+        await _run_alembic(session, cfg, "0048")
+        col = (
             await session.execute(
                 text(
-                    "SELECT server_key, resources, prompts"
-                    " FROM public.sys_mcp_server WHERE id=CAST(:i AS uuid)"
-                ),
-                {"i": str(sid)},
+                    "SELECT count(*) FROM information_schema.columns"
+                    " WHERE table_name='sys_mcp_server'"
+                    " AND column_name IN ('resources','prompts')"
+                )
             )
+        ).scalar_one()
+        assert col == 0
+        tid = await _mk_tenant_once(session, "mcp_mig")
+        sid = (
+            await session.execute(
+                text(
+                    "INSERT INTO public.sys_mcp_server"
+                    " (id, tenant_id, server_key, name, endpoint)"
+                    " VALUES (gen_random_uuid(), CAST(:t AS uuid), 'mig', '迁移', 'http://fake/mcp')"
+                    " RETURNING id"
+                ),
+                {"t": tid},
+            )
+        ).scalar_one()
+        await session.commit()
+        await _run_alembic(session, cfg, "head")
+        row = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT server_key, resources, prompts"
+                        " FROM public.sys_mcp_server WHERE id=CAST(:i AS uuid)"
+                    ),
+                    {"i": str(sid)},
+                )
+            )
+            .mappings()
+            .one()
         )
-        .mappings()
-        .one()
-    )
-    assert row["server_key"] == "mig"
-    assert row["resources"] == [] and row["prompts"] == []
+        assert row["server_key"] == "mig"
+        assert row["resources"] == [] and row["prompts"] == []

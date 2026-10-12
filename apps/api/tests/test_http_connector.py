@@ -27,105 +27,101 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from alembic import command
-from tests.conftest import API_ROOT
+from tests.conftest import migrated_tmp_db
 
 
-def _cfg() -> Config:
-    cfg = Config(str(API_ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(API_ROOT / "alembic"))
-    return cfg
-
-
-async def _run_alembic(session: AsyncSession, target: str) -> None:
+async def _run_alembic(session: AsyncSession, cfg: Config, target: str) -> None:
     """执行一条 alembic 命令(前 rollback 清场;连接持 ACCESS SHARE 会死等
-    ALTER 的 ACCESS EXCLUSIVE,104 期实证)。"""
+    ALTER 的 ACCESS EXCLUSIVE,104 期实证)。cfg 由 migrated_tmp_db 注入
+    (一次性临时库,防 dropped 列占位累积——2026-10 事故)。"""
     await session.rollback()
     if target == "head":
-        await asyncio.to_thread(command.upgrade, _cfg(), "head")
+        await asyncio.to_thread(command.upgrade, cfg, "head")
     else:
-        await asyncio.to_thread(command.downgrade, _cfg(), target)
+        await asyncio.to_thread(command.downgrade, cfg, target)
 
 
-async def test_migration_0051_roundtrip(session: AsyncSession) -> None:
+async def test_migration_0051_roundtrip() -> None:
     """升降级往返:down 到 0050 表消失,回 head 契约复现(全列 + CHECK)。"""
-    await _run_alembic(session, "0050")
-    has = (
-        await session.execute(
-            text(
-                "SELECT count(*) FROM information_schema.tables"
-                " WHERE table_schema='public' AND table_name='tool_http_connectors'"
-            )
-        )
-    ).scalar_one()
-    assert has == 0
-    await _run_alembic(session, "head")
-    cols = (
-        (
+    async with migrated_tmp_db() as (session, cfg):
+        await _run_alembic(session, cfg, "0050")
+        has = (
             await session.execute(
                 text(
-                    "SELECT column_name FROM information_schema.columns"
+                    "SELECT count(*) FROM information_schema.tables"
                     " WHERE table_schema='public' AND table_name='tool_http_connectors'"
-                    " ORDER BY column_name"
                 )
             )
-        )
-        .scalars()
-        .all()
-    )
-    assert set(cols) == {
-        "id",
-        "tenant_id",
-        "key",
-        "name",
-        "description",
-        "method",
-        "path_template",
-        "params",
-        "allowed_hosts",
-        "auth_type",
-        "auth_secret_enc",
-        "requires_confirmation",
-        "timeout_ms",
-        "enabled",
-        "created_at",
-        "updated_at",
-        "created_by",
-    }
-    # 状态列 CHECK 口径(VARCHAR+CHECK,禁魔数)
-    checks = (
-        (
-            await session.execute(
-                text(
-                    "SELECT conname FROM pg_constraint"
-                    " WHERE conrelid = 'public.tool_http_connectors'::regclass"
-                    " AND contype='c' ORDER BY conname"
+        ).scalar_one()
+        assert has == 0
+        await _run_alembic(session, cfg, "head")
+        cols = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns"
+                        " WHERE table_schema='public' AND table_name='tool_http_connectors'"
+                        " ORDER BY column_name"
+                    )
                 )
             )
+            .scalars()
+            .all()
         )
-        .scalars()
-        .all()
-    )
-    assert set(checks) >= {
-        "ck_tool_http_connectors_method",
-        "ck_tool_http_connectors_auth_type",
-        "ck_tool_http_connectors_enabled",
-        "ck_tool_http_connectors_timeout",
-    }
-    # 同租户 key 唯一
-    uniques = (
-        (
-            await session.execute(
-                text(
-                    "SELECT conname FROM pg_constraint"
-                    " WHERE conrelid = 'public.tool_http_connectors'::regclass"
-                    " AND contype='u'"
+        assert set(cols) == {
+            "id",
+            "tenant_id",
+            "key",
+            "name",
+            "description",
+            "method",
+            "path_template",
+            "params",
+            "allowed_hosts",
+            "auth_type",
+            "auth_secret_enc",
+            "requires_confirmation",
+            "timeout_ms",
+            "enabled",
+            "created_at",
+            "updated_at",
+            "created_by",
+        }
+        # 状态列 CHECK 口径(VARCHAR+CHECK,禁魔数)
+        checks = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT conname FROM pg_constraint"
+                        " WHERE conrelid = 'public.tool_http_connectors'::regclass"
+                        " AND contype='c' ORDER BY conname"
+                    )
                 )
             )
+            .scalars()
+            .all()
         )
-        .scalars()
-        .all()
-    )
-    assert "ux_tool_http_connectors_tenant_key" in set(uniques)
+        assert set(checks) >= {
+            "ck_tool_http_connectors_method",
+            "ck_tool_http_connectors_auth_type",
+            "ck_tool_http_connectors_enabled",
+            "ck_tool_http_connectors_timeout",
+        }
+        # 同租户 key 唯一
+        uniques = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT conname FROM pg_constraint"
+                        " WHERE conrelid = 'public.tool_http_connectors'::regclass"
+                        " AND contype='u'"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert "ux_tool_http_connectors_tenant_key" in set(uniques)
 
 
 # ── 注册校验纯函数段(安全规则先行) ──
@@ -143,6 +139,7 @@ from kongming.connector.models import (  # noqa: E402
     tool_name,
     validate_declaration,
 )
+from kongming.connector.service import ConnectorService  # noqa: E402
 from kongming.toolgateway.connector import HttpConnectorPolicy  # noqa: E402
 from kongming.toolgateway.models import (  # noqa: E402
     CONNECTOR_DOMAIN,
@@ -1826,3 +1823,62 @@ async def test_connector_registration_needs_manage_perm(
         "/system/connectors", headers=_auth(token), json=_connector_body(echo)
     )
     assert r.status_code == 403
+
+
+# ==================== 评审循环回归(112 批后评审修复钉住) ====================
+
+
+def test_registration_optional_path_placeholder_rejected() -> None:
+    """路径占位参数 MUST required(评审修复):可选参数缺参时 build_url 不替换,
+    字面 {name} 被 httpx 编码后打到错误路径——注册期一次性拒绝。"""
+    with pytest.raises(ConnectorValidationError, match="必填"):
+        validate_declaration(
+            _decl(
+                params=(
+                    ParamDecl(name="order_id", type="string", required=False, description="订单号"),
+                )
+            ),
+            has_secret=False,
+            timeout_max_ms=_TIMEOUT_CAP,
+        )
+
+
+async def test_executor_decoding_error_converged_protocol() -> None:
+    """DecodingError(继承 RequestError 而非 TransportError)单列收敛:损坏
+    gzip 响应不再以裸 httpx 异常逃逸,审计 error_reason 保 protocol 前缀
+    (094 评审 R1 同款;评审修复——connector.py 漏了 ticket/websearch 已补段)。"""
+
+    def _broken_gzip(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, headers={"content-encoding": "gzip"}, content=b"\x1f\x8bnot-really-gzip"
+        )
+
+    ex, _record = _executor(handler=_broken_gzip)
+    with pytest.raises(HttpConnectorError, match="protocol: 响应解码失败"):
+        await ex(url="t", payload={"order_id": "A1"}, timeout_s=2)
+
+
+async def test_service_test_call_saved_secret_key_mismatch_rejected() -> None:
+    """存量凭证只允许用于同一 key(先测后存语义,评审修复):指向他者 400 拒——
+    封死「表单改写目标主机 + use_saved_secret_for 指他人连接器」把同租户他人
+    明文凭证送出站外的通道。校验先于任何仓储触达。"""
+
+    class _NoRepo:
+        def __getattr__(self, name: str) -> Any:
+            raise AssertionError(f"凭证 key 校验前不应触达仓储: {name}")
+
+    svc = ConnectorService(
+        cast("Any", _NoRepo()),
+        cast("Any", None),
+        cast("Any", None),
+        timeout_max_ms=_TIMEOUT_CAP,
+    )
+    with pytest.raises(ConnectorValidationError, match="同一 key"):
+        await svc.test_call(
+            tenant_id="t1",
+            user_id="u1",
+            decl=_decl(key="orders_api"),
+            secret=None,
+            args={},
+            use_saved_secret_for="other_conn",
+        )

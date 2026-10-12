@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.trigger.repository import SqlTriggerRepo
 from kongming.trigger.retry import schedule_retry
+from tests.conftest import migrated_tmp_db
 from tests.test_trigger import _scheduler_with, _StubService
 
 _TZ = dt.timezone(dt.timedelta(hours=8))
@@ -698,53 +699,49 @@ async def test_migration_0045_check_constraints(session: AsyncSession) -> None:
     await session.rollback()
 
 
-async def test_migration_0045_downgrade_roundtrip(session: AsyncSession) -> None:
+async def test_migration_0045_downgrade_roundtrip() -> None:
     """降级往返:up 后 down 再 up,列/约束/缺省契约复现;回 head 不回版本号。"""
-    from alembic.config import Config
+    async with migrated_tmp_db() as (session, cfg):
+        from alembic import command
 
-    from alembic import command
-    from tests.conftest import API_ROOT
-
-    # 往返前置:留一行存量数据,验证再升级后缺省回填(真实「存量行」语义)
-    tid = str(uuid_mod.uuid4())
-    await session.execute(
-        text(
-            "INSERT INTO public.sys_trigger_definition"
-            " (id, tenant_id, tg_key, name, type, target_type, target_key, cron_expr,"
-            "  created_by) VALUES"
-            " (CAST(:i AS uuid), gen_random_uuid(), 'migrt45', '迁移', 'CRON',"
-            "  'workflow', 'echo', '0 9 * * *', gen_random_uuid())"
-        ),
-        {"i": tid},
-    )
-    await session.commit()
-    cfg = Config(str(API_ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(API_ROOT / "alembic"))
-    # env.py 内部 asyncio.run:事件循环内直调会冲突,经线程隔离(0034 先例)
-    await asyncio.to_thread(command.downgrade, cfg, "0044")
-    assert not await _column_exists(session, "sys_trigger_definition", "max_retries")
-    assert not await _column_exists(session, "sys_trigger_run", "retry_of_run_id")
-    assert not await _column_exists(session, "sys_trigger_run", "attempt")
-    assert not await _column_exists(session, "sys_trigger_run", "next_retry_at")
-    # 必须回到 head(而非钉死 0045 前序):停在旧版本会把其后迁移留在回滚态,
-    # 导致其后每个用例的 TRUNCATE 撞上不存在的表
-    await asyncio.to_thread(command.upgrade, cfg, "head")
-    # 契约复现 + 存量行缺省回填
-    assert await _column_exists(session, "sys_trigger_definition", "max_retries")
-    assert await _column_exists(session, "sys_trigger_run", "retry_of_run_id")
-    assert await _column_exists(session, "sys_trigger_run", "attempt")
-    assert await _column_exists(session, "sys_trigger_run", "next_retry_at")
-    row = (
-        (
-            await session.execute(
-                text(
-                    "SELECT max_retries FROM public.sys_trigger_definition"
-                    " WHERE id=CAST(:i AS uuid)"
-                ),
-                {"i": tid},
-            )
+        # 往返前置:留一行存量数据,验证再升级后缺省回填(真实「存量行」语义)
+        tid = str(uuid_mod.uuid4())
+        await session.execute(
+            text(
+                "INSERT INTO public.sys_trigger_definition"
+                " (id, tenant_id, tg_key, name, type, target_type, target_key, cron_expr,"
+                "  created_by) VALUES"
+                " (CAST(:i AS uuid), gen_random_uuid(), 'migrt45', '迁移', 'CRON',"
+                "  'workflow', 'echo', '0 9 * * *', gen_random_uuid())"
+            ),
+            {"i": tid},
         )
-        .mappings()
-        .one()
-    )
-    assert row["max_retries"] == 0
+        await session.commit()
+        # env.py 内部 asyncio.run:事件循环内直调会冲突,经线程隔离(0034 先例)
+        await asyncio.to_thread(command.downgrade, cfg, "0044")
+        assert not await _column_exists(session, "sys_trigger_definition", "max_retries")
+        assert not await _column_exists(session, "sys_trigger_run", "retry_of_run_id")
+        assert not await _column_exists(session, "sys_trigger_run", "attempt")
+        assert not await _column_exists(session, "sys_trigger_run", "next_retry_at")
+        # 必须回到 head(而非钉死 0045 前序):停在旧版本会把其后迁移留在回滚态,
+        # 导致其后每个用例的 TRUNCATE 撞上不存在的表
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+        # 契约复现 + 存量行缺省回填
+        assert await _column_exists(session, "sys_trigger_definition", "max_retries")
+        assert await _column_exists(session, "sys_trigger_run", "retry_of_run_id")
+        assert await _column_exists(session, "sys_trigger_run", "attempt")
+        assert await _column_exists(session, "sys_trigger_run", "next_retry_at")
+        row = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT max_retries FROM public.sys_trigger_definition"
+                        " WHERE id=CAST(:i AS uuid)"
+                    ),
+                    {"i": tid},
+                )
+            )
+            .mappings()
+            .one()
+        )
+        assert row["max_retries"] == 0

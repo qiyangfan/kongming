@@ -8,12 +8,11 @@ import asyncio
 import uuid as uuid_mod
 
 import pytest
-from alembic.config import Config
 from httpx import AsyncClient, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import MakeUser
+from tests.conftest import MakeUser, migrated_tmp_db
 from tests.test_billing import _insert_usage, _user_with_key
 from tests.test_bot import BOT_PAYLOAD
 from tests.test_chat_query import _bind, _default_tenant_id, _login
@@ -43,14 +42,6 @@ async def _ins_policy(
     await session.commit()
 
 
-def _alembic_cfg() -> Config:
-    from tests.conftest import API_ROOT
-
-    cfg = Config(str(API_ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(API_ROOT / "alembic"))
-    return cfg
-
-
 async def _db_version(session: AsyncSession) -> str:
     v = await session.execute(text("SELECT version_num FROM alembic_version"))
     return str(v.scalar_one())
@@ -59,73 +50,82 @@ async def _db_version(session: AsyncSession) -> str:
 # ── 1.1 迁移 0046 ──
 
 
-async def test_migration_0046_scope_check_and_guard(session: AsyncSession) -> None:
+async def test_migration_0046_scope_check_and_guard() -> None:
     """CHECK 扩展契约:USER/TEAM 行可落(scope_ref 非空)、域外/空引用拒;
     downgrade 存量守卫:存在 USER 行时拒降,版本不动。"""
-    tid = await _mk_tenant(session, "qt_mig1")
-    await _ins_policy(session, tenant_id=str(tid), scope="USER", scope_ref=str(uuid_mod.uuid4()))
-    await _ins_policy(session, tenant_id=str(tid), scope="TEAM", scope_ref=str(uuid_mod.uuid4()))
-    # 域外 scope 拒
-    with pytest.raises(Exception):  # noqa: B017,S101  # CHECK 违约即抛(DBAPIError)
-        await _ins_policy(session, tenant_id=str(tid), scope="GROUP", scope_ref=None)
-    await session.rollback()
-    # USER/TEAM 行 scope_ref 须非空(互斥 CHECK 与 BOT 同形态)
-    with pytest.raises(Exception):  # noqa: B017,S101
-        await _ins_policy(session, tenant_id=str(tid), scope="USER", scope_ref=None)
-    await session.rollback()
-    # 存量守卫:有 USER 行,降级被拒且版本停在 0046
-    # (head 高于 0046 时先降到 0046 再尝试继续降——守卫语义只针对 0046→0045 一步)
-    from alembic import command
-
-    cfg = _alembic_cfg()
-    await session.rollback()
-    await asyncio.to_thread(command.downgrade, cfg, "0046")
-    with pytest.raises(Exception):  # noqa: B017,S101  # 守卫 RuntimeError
-        await asyncio.to_thread(command.downgrade, cfg, "0045")
-    assert await _db_version(session) == "0046"
-    # 必须回到 head:停旧版会让其后用例 TRUNCATE 撞不存在的表
-    await session.rollback()
-    await asyncio.to_thread(command.upgrade, cfg, "head")
-
-
-async def test_migration_0046_downgrade_roundtrip(session: AsyncSession) -> None:
-    """降级往返:无 USER/TEAM 行时降级成功、存量 TENANT/BOT 行零影响、
-    降级后 USER 行被收窄 CHECK 拒;再升级契约复现。"""
-    from alembic import command
-
-    tid = await _mk_tenant(session, "qt_mig2")
-    # 存量形态:TENANT(NULL 引用)+ BOT 行
-    await _ins_policy(session, tenant_id=str(tid), scope="TENANT", scope_ref=None)
-    await _ins_policy(session, tenant_id=str(tid), scope="BOT", scope_ref=str(uuid_mod.uuid4()))
-    cfg = _alembic_cfg()
-    # 会话连接的 autobegin 事务会持 sys_quota_policy 的 ACCESS SHARE,
-    # 不先结束会让 alembic 的 ALTER(ACCESS EXCLUSIVE)死等——
-    # 每次 alembic 命令前一律 rollback 清场
-    await session.rollback()
-    await asyncio.to_thread(command.downgrade, cfg, "0045")
-    # 收窄后 USER 行拒(TENANT/BOT 存量行零影响)
-    with pytest.raises(Exception):  # noqa: B017,S101
+    async with migrated_tmp_db() as (session, cfg):
+        tid = await _mk_tenant(session, "qt_mig1")
         await _ins_policy(
             session, tenant_id=str(tid), scope="USER", scope_ref=str(uuid_mod.uuid4())
         )
-    await session.rollback()
-    n = int(
-        (
-            await session.execute(
-                text("SELECT count(*) FROM public.sys_quota_policy WHERE scope IN ('TENANT','BOT')")
-            )
-        ).scalar_one()
-    )
-    assert n == 2
-    # 回 head:契约复现,USER 行可再落(rollback 释放 count 查询的事务锁)
-    # head 与断言解耦(后续变更继续叠加迁移,不钉死具体版本号)
-    await session.rollback()
-    await asyncio.to_thread(command.upgrade, cfg, "head")
-    from alembic.script import ScriptDirectory
+        await _ins_policy(
+            session, tenant_id=str(tid), scope="TEAM", scope_ref=str(uuid_mod.uuid4())
+        )
+        # 域外 scope 拒
+        with pytest.raises(Exception):  # noqa: B017,S101  # CHECK 违约即抛(DBAPIError)
+            await _ins_policy(session, tenant_id=str(tid), scope="GROUP", scope_ref=None)
+        await session.rollback()
+        # USER/TEAM 行 scope_ref 须非空(互斥 CHECK 与 BOT 同形态)
+        with pytest.raises(Exception):  # noqa: B017,S101
+            await _ins_policy(session, tenant_id=str(tid), scope="USER", scope_ref=None)
+        await session.rollback()
+        # 存量守卫:有 USER 行,降级被拒且版本停在 0046
+        # (head 高于 0046 时先降到 0046 再尝试继续降——守卫语义只针对 0046→0045 一步)
+        from alembic import command
 
-    head = ScriptDirectory.from_config(cfg).get_current_head()
-    assert await _db_version(session) == head
-    await _ins_policy(session, tenant_id=str(tid), scope="USER", scope_ref=str(uuid_mod.uuid4()))
+        await session.rollback()
+        await asyncio.to_thread(command.downgrade, cfg, "0046")
+        with pytest.raises(Exception):  # noqa: B017,S101  # 守卫 RuntimeError
+            await asyncio.to_thread(command.downgrade, cfg, "0045")
+        assert await _db_version(session) == "0046"
+        # 必须回到 head:停旧版会让其后用例 TRUNCATE 撞不存在的表
+        await session.rollback()
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+
+
+async def test_migration_0046_downgrade_roundtrip() -> None:
+    """降级往返:无 USER/TEAM 行时降级成功、存量 TENANT/BOT 行零影响、
+    降级后 USER 行被收窄 CHECK 拒;再升级契约复现。"""
+    async with migrated_tmp_db() as (session, cfg):
+        from alembic import command
+
+        tid = await _mk_tenant(session, "qt_mig2")
+        # 存量形态:TENANT(NULL 引用)+ BOT 行
+        await _ins_policy(session, tenant_id=str(tid), scope="TENANT", scope_ref=None)
+        await _ins_policy(session, tenant_id=str(tid), scope="BOT", scope_ref=str(uuid_mod.uuid4()))
+        # 会话连接的 autobegin 事务会持 sys_quota_policy 的 ACCESS SHARE,
+        # 不先结束会让 alembic 的 ALTER(ACCESS EXCLUSIVE)死等——
+        # 每次 alembic 命令前一律 rollback 清场
+        await session.rollback()
+        await asyncio.to_thread(command.downgrade, cfg, "0045")
+        # 收窄后 USER 行拒(TENANT/BOT 存量行零影响)
+        with pytest.raises(Exception):  # noqa: B017,S101
+            await _ins_policy(
+                session, tenant_id=str(tid), scope="USER", scope_ref=str(uuid_mod.uuid4())
+            )
+        await session.rollback()
+        n = int(
+            (
+                await session.execute(
+                    text(
+                        "SELECT count(*) FROM public.sys_quota_policy"
+                        " WHERE scope IN ('TENANT','BOT')"
+                    )
+                )
+            ).scalar_one()
+        )
+        assert n == 2
+        # 回 head:契约复现,USER 行可再落(rollback 释放 count 查询的事务锁)
+        # head 与断言解耦(后续变更继续叠加迁移,不钉死具体版本号)
+        await session.rollback()
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+        from alembic.script import ScriptDirectory
+
+        head = ScriptDirectory.from_config(cfg).get_current_head()
+        assert await _db_version(session) == head
+        await _ins_policy(
+            session, tenant_id=str(tid), scope="USER", scope_ref=str(uuid_mod.uuid4())
+        )
 
 
 # ── 1.2 策略 CRUD scope 三分支 ──

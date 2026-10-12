@@ -7,8 +7,10 @@ env 必须在任何 kongming 导入前指向测试基础设施(get_settings/engi
 import asyncio
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 API_ROOT = Path(__file__).resolve().parent.parent
 
@@ -150,6 +152,50 @@ def db_conn() -> dict[str, object]:
 def _admin_url() -> str:
     """维护库(建测试库用):同主机同凭证,库名换 postgres。"""
     return _sync_dsn().rsplit("/", 1)[0] + "/postgres"
+
+
+@asynccontextmanager  # pyright: ignore[reportDeprecated]  # async 生成器误选 typeshed 弃用重载
+async def migrated_tmp_db() -> AsyncIterator[tuple[AsyncSession, Config]]:
+    """一次性迁移演练库(独立于共享 kongming_test;迁移 roundtrip 测试专用)。
+
+    迁移 downgrade 会 DROP COLUMN,而 PG 对已删列只做目录标记(attisdropped),
+    占位永久保留且对 information_schema 不可见,单表硬上限 1600——共享库上
+    反复 upgrade/downgrade 会累积占位直至加列被拒(2026-10 事故:
+    sys_trigger_definition 累积 1577 个占位后,0050 加列即炸、全量门禁 fixture
+    级失败)。本 helper 建带随机后缀的独立库承载演练,测试完 DROP,占位随库
+    清零,零累积。yield (演练库会话, 指向该库的 alembic Config)。
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    tmp_db = f"{TEST_DB}_mig{uuid4().hex[:8]}"
+    conn = await cast("Any", asyncpg).connect(_admin_url())
+    try:
+        await conn.execute(f'CREATE DATABASE "{tmp_db}"')
+    finally:
+        await conn.close()
+    # CREATE 之后全程收进 try/finally:upgrade 失败(恰是 roundtrip 要抓的
+    # 迁移写坏场景)同样必须 DROP,否则随机后缀库跨次永久累积(复审修复)
+    try:
+        # 保留 +asyncpg driver 段:env.py 以 async engine 跑迁移(同步 psycopg2 未装)
+        tmp_url = os.environ["KM_DATABASE_URL"].rsplit("/", 1)[0] + f"/{tmp_db}"
+        cfg = Config(str(API_ROOT / "alembic.ini"))
+        cfg.set_main_option("script_location", str(API_ROOT / "alembic"))
+        cfg.set_main_option("sqlalchemy.url", tmp_url)  # env.py 尊重程序化注入
+        # env.py 内部 asyncio.run:事件循环内直调会冲突,经线程隔离(0034 先例)
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+        engine = create_async_engine(tmp_url)
+        try:
+            maker = async_sessionmaker(engine, expire_on_commit=False)
+            async with maker() as s:
+                yield s, cfg
+        finally:
+            await engine.dispose()
+    finally:
+        conn = await cast("Any", asyncpg).connect(_admin_url())
+        try:
+            await conn.execute(f'DROP DATABASE "{tmp_db}" WITH (FORCE)')
+        finally:
+            await conn.close()
 
 
 @pytest.fixture(scope="session", autouse=True)

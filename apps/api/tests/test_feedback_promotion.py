@@ -7,7 +7,6 @@
 """
 
 import uuid
-from pathlib import Path
 from typing import Any, cast
 
 import httpx
@@ -16,14 +15,12 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import MakeUser
+from tests.conftest import MakeUser, migrated_tmp_db
 from tests.test_chat_query import _auth, _bind, _default_tenant_id, _login
 from tests.test_feedback_admin import _mk_feedback_msg
 from tests.test_rag_admin import _admin_token
 
 pytestmark = pytest.mark.usefixtures("fake_agent")
-
-API_ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture
@@ -635,45 +632,40 @@ async def test_migration_0034_schema_contract(session: AsyncSession) -> None:
     await session.rollback()
 
 
-async def test_migration_0034_downgrade_roundtrip(
-    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_migration_0034_downgrade_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
     """任务 2.4:downgrade 往返(up 后 down 再 up 契约复现)。"""
-    from alembic.config import Config
+    async with migrated_tmp_db() as (session, cfg):
+        from alembic import command
+        from kongming.auth.seed import seed_all
+        from kongming.config import get_settings
 
-    from alembic import command
-    from kongming.auth.seed import seed_all
-    from kongming.config import get_settings
+        await seed_all(session, get_settings())
+        import asyncio
 
-    await seed_all(session, get_settings())
-    import asyncio
-
-    cfg = Config(str(API_ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(API_ROOT / "alembic"))
-    # env.py 内部 asyncio.run:跑事件循环内直调会冲突,经线程隔离
-    await asyncio.to_thread(command.downgrade, cfg, "0033")
-    has_col = (
-        await session.execute(
-            text(
-                "SELECT count(*) FROM information_schema.columns"
-                " WHERE table_schema='rag' AND table_name='query_history'"
-                " AND column_name='source_type'"
+        # env.py 内部 asyncio.run:跑事件循环内直调会冲突,经线程隔离
+        await asyncio.to_thread(command.downgrade, cfg, "0033")
+        has_col = (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM information_schema.columns"
+                    " WHERE table_schema='rag' AND table_name='query_history'"
+                    " AND column_name='source_type'"
+                )
             )
-        )
-    ).scalar_one()
-    assert has_col == 0
-    import asyncio
+        ).scalar_one()
+        assert has_col == 0
+        import asyncio
 
-    # 必须回到 head(而非钉死 0034):停在旧版本会把其后的迁移留在回滚态,
-    # 导致其后每个用例的 TRUNCATE 撞上不存在的表
-    await asyncio.to_thread(command.upgrade, cfg, "head")
-    has_col2 = (
-        await session.execute(
-            text(
-                "SELECT count(*) FROM information_schema.columns"
-                " WHERE table_schema='rag' AND table_name='query_history'"
-                " AND column_name='source_type'"
+        # 必须回到 head(而非钉死 0034):停在旧版本会把其后的迁移留在回滚态,
+        # 导致其后每个用例的 TRUNCATE 撞上不存在的表
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+        has_col2 = (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM information_schema.columns"
+                    " WHERE table_schema='rag' AND table_name='query_history'"
+                    " AND column_name='source_type'"
+                )
             )
-        )
-    ).scalar_one()
-    assert has_col2 == 1
+        ).scalar_one()
+        assert has_col2 == 1

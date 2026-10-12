@@ -7,8 +7,18 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
-## 当前状态(2026-10-11)
+## 当前状态(2026-10-12)
 
+- **全仓评审循环收尾(2026-10-12)**:本会话两轮评审确认 22+3 项缺陷全部
+  修复,门禁全绿零挂账。高影响三件:**全仓 httpx 出站统一 `trust_env=False`**
+  (系统代理会架空 SSRF 钉扎/劫持内网回调,新增出站点必须带上);**stt 推理
+  创建+消费同线程**(faster-whisper generator 惰性,消费留事件循环=全进程
+  阻塞);**迁移 roundtrip 测试全部改 `migrated_tmp_db` 一次性临时库**(共享
+  库 dropped 列占位撞 1600 硬限事故,见环境事实 13)。其余:store 并发上架
+  原子化/回滚零工具闸、trigger 邮件游标收尾提交/派发取消竞态补记不续链/
+  IMAP 中断归类、工具网关三域真流式字节闸+DecodingError 收敛、test_call
+  凭证 key 一致闸、web 录音代际守卫/画布 nokey(含 portal)等——细节以
+  git log 与测试名(「评审修复/评审循环回归」注释)为准。
 - **099 HTTP 连接器域(租户级,首个租户级域)现态**:连接器=租户库表行
   (`tool_http_connectors`,迁移 0051),注入集**按请求按租户动态装配**
   (注册/编辑/启停即时生效,不要求重启);管理面 `/system/connectors/*`
@@ -778,10 +788,12 @@
    KM_INTERNAL_TOKEN 真值会盖掉 conftest 测试缺省,内部端点全 403,126 例假败)。
    api/agent 容器冒烟仍让到 **18080/18081**(宿主 8000 属其他项目)。本仓
    `infra/docker-compose.yml` 的 postgres/redis 服务保留给容器部署形态,
-   本地开发勿再 `make up` 自起(会与 localenv 抢 5432)。另:本机代理软件
-   在网络层截流回环 HTTP——127.0.0.1 任意死端口稳定回无特征 502(2026-10-11
-   实证),依赖「连死端口必 ConnectionRefused」的用例(external_knowledge 的
-   unreachable 断言)本机无法通过,属环境事实非代码缺陷,CI 无代理环境绿。
+   本地开发勿再 `make up` 自起(会与 localenv 抢 5432)。另:本机系统级
+   HTTP 代理常开(`scutil --proxy` HTTPEnable=1),httpx 缺省 `trust_env=True`
+   会经 getproxies 采到它——127.0.0.1 任意死端口曾稳定回无特征 502(代理
+   接管,2026-10-11 实证);**2026-10-12 起全仓 httpx 出站统一
+   `trust_env=False`**(代理环境会架空 SSRF 钉扎、劫持 api→agent 内网回调;
+   新增出站点必须带上),「死端口必 ConnectionRefused」断言已恢复本机可过。
    另:0047 迁移评审期修订为 uuid7 逐行回填(ADR-004 v7 口径;PG 无内置
    v7 生成,不用 gen_random_uuid 的 v4 形态)——本地开发库在修订前已应用
    旧版,存量在架 Bot 的 v1 行主键保持 v4,新环境与 kongming_test 从修订版
@@ -862,6 +874,21 @@
     (path 依赖 editable 生效,无 wheel 缓存坑);对拍基线回放走根
     `make check` 的 `liannu-check`。历史教训仍有效:**常驻 `uv run uvicorn`
     服务持有 uv 缓存锁时 `uv cache clean` 会超时**——升版本号路线可绕开。
+13. **测试库「dropped 列占位」上限(2026-10-12 事故)**:迁移 downgrade
+    在 PG 是假删列——只标 attisdropped,占位永久保留、information_schema
+    不可见、单表硬上限 **1600**。迁移 roundtrip 测试曾全跑在共享
+    kongming_test 上,`sys_trigger_definition` 累积 1577 个占位后 0050 的
+    `ADD COLUMN` 直接炸,全量门禁 fixture 级失败(表现=conftest 的 alembic
+    upgrade 报 TooManyColumnsError)。**现态:roundtrip 测试已全部改走
+    `tests/conftest.py` 的 `migrated_tmp_db()` 一次性临时库**(随机后缀库
+    →演练→DROP,占位随库清零);新增迁移 roundtrip 测试必须用它,禁止在
+    kongming_test 上跑 add/drop 循环。占位识别:`SELECT count(*) FROM
+    pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON
+    n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='<表>' AND
+    a.attisdropped`(超 800 即应重建);重建=DROP DATABASE kongming_test
+    WITH (FORCE) 后 CREATE(纯测试库,conftest 自动迁移),**重建后必须重跑
+    上文 zhparser 两件套**(扩展/检索配置按库安装,漏掉=4 个中文分词集成
+    测试转 skip;2026-10-12 重建后已补装)。
 
 ## 命令速查
 

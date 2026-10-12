@@ -15,7 +15,12 @@ if config.config_file_name is not None:
 
 from kongming.config import get_settings  # noqa: E402
 
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# URL 单源=KM_DATABASE_URL(settings);程序化注入(迁移演练临时库,如
+# tests.conftest.migrated_tmp_db)优先——ini 的占位 url 以 driver:// 开头,
+# 借此前缀区分「未注入」
+_injected_url = config.get_main_option("sqlalchemy.url")
+if not _injected_url or _injected_url.startswith("driver://"):
+    config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
 target_metadata = None  # baseline 为显式 SQL,不用 autogenerate
 
