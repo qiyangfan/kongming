@@ -8,7 +8,7 @@ import { Braces, TriangleAlert, Workflow } from "lucide-react";
 
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { dagToCanvas, moveCanvasPositions } from "@/lib/workflow-canvas";
+import { dagToCanvas, moveCanvasPositions, type DagToCanvasResult } from "@/lib/workflow-canvas";
 import { WorkflowCanvasPanel } from "./workflow-canvas-panel";
 
 export interface WorkflowDefinitionEditorHandle {
@@ -35,8 +35,10 @@ export const WorkflowDefinitionEditor = forwardRef<
   WorkflowDefinitionEditorHandle,
   WorkflowDefinitionEditorProps
 >(function WorkflowDefinitionEditor({ initialDefinition, wfKey, version, errorText }, ref) {
-  // 打开即判定可表达性:不支持 → 直接落 JSON 态并明示原因(spec 回落场景)
-  const initialTo = dagToCanvas(initialDefinition);
+  // 打开即判定可表达性:不支持 → 直接落 JSON 态并明示原因(spec 回落场景)。
+  // 惰性初始化(评审修复:dagToCanvas 是全量解析,原在组件体顶层每渲染
+  // 重跑——JSON 态每个键击都白算一次,结果只在挂载时消费)
+  const [initialTo] = useState<DagToCanvasResult>(() => dagToCanvas(initialDefinition));
   const [mode, setMode] = useState<EditorMode>(initialTo.ok ? "canvas" : "json");
   const [definition, setDefinition] = useState<unknown>(initialDefinition);
   const [jsonDraft, setJsonDraft] = useState(() => JSON.stringify(initialDefinition, null, 2));

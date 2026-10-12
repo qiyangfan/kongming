@@ -69,10 +69,16 @@ class FasterWhisperEngine:
         model = await self._ensure_model()
         try:
             decoded = await asyncio.to_thread(_decode_audio_16k, audio)
-            segments, _info = await asyncio.to_thread(
-                lambda: model.transcribe(decoded, language="zh", beam_size=5)
-            )
-            return "".join(seg.text for seg in segments)
+
+            def _run() -> str:
+                # 创建+消费同线程:faster-whisper 的 transcribe 返回 lazy
+                # generator,真正的 decoder 推理在逐段迭代时发生——消费若留在
+                # 事件循环线程会阻塞全进程(评审修复:原实现只把创建放进
+                # to_thread,seg 迭代仍在循环线程跑)
+                segments, _info = model.transcribe(decoded, language="zh", beam_size=5)
+                return "".join(seg.text for seg in segments)
+
+            return await asyncio.to_thread(_run)
         except EngineUnavailable:
             raise
         except Exception as e:  # noqa: BLE001  # 解码/推理错误由 service 收敛为 503

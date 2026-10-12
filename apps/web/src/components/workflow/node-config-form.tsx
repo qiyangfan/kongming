@@ -3,7 +3,7 @@
    拼装;缺必填/JSON 语法等本地提示仅作 UX,结构校验语义仍在服务端;服务端
    校验错误经 configKey 定位到具体字段。 */
 
-import { useState } from "react";
+import { useState, type KeyboardEvent, type ReactNode } from "react";
 import { Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,16 @@ import {
 import { NODE_TYPE_ICONS } from "./workflow-canvas-types";
 
 type FieldKind = "text" | "textarea" | "select" | "json" | "number";
+
+/** 下拉面板(体内容器):Backspace/Delete 不上冒——Radix SelectContent
+    portal 到 body,不在画布容器 .nokey 豁免区内,展开态按键曾误删画布
+    选中节点(评审修复);本表单两处下拉(字段/条件 on)共用此包装。 */
+function CfgSelectContent({ children }: { children: ReactNode }) {
+  const swallow = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Backspace" || e.key === "Delete") e.stopPropagation();
+  };
+  return <SelectContent onKeyDown={swallow}>{children}</SelectContent>;
+}
 
 interface FieldSpec {
   key: string;
@@ -220,14 +230,16 @@ export function NodeConfigForm({
               ? "与其他节点 id 重复"
               : null;
 
-  const fieldError = (key: string): string | null => {
-    if (serverError?.configKey === key) return serverError.message;
-    if (!(key in config)) return `${key} 为必填配置`;
+  const fieldError = (f: FieldSpec): string | null => {
+    if (serverError?.configKey === f.key) return serverError.message;
+    // 仅必填字段的缺省报「必填」(评审修复:原对任何缺失键一律报错,可选
+    // 字段挂着「(可选)」标签却恒显必填错误,自相矛盾)
+    if (f.required && !(f.key in config)) return `${f.key} 为必填配置`;
     return null;
   };
 
   const renderField = (f: FieldSpec) => {
-    const err = fieldError(f.key);
+    const err = fieldError(f);
     const id = `wf-cfg-${f.key}`;
     return (
       <FormRow
@@ -264,13 +276,13 @@ export function NodeConfigForm({
             <SelectTrigger id={id} className="w-full" aria-invalid={err !== null}>
               <SelectValue placeholder={f.required ? "必选" : "未设置"} />
             </SelectTrigger>
-            <SelectContent>
+            <CfgSelectContent>
               {(f.options ?? []).map((opt) => (
                 <SelectItem key={opt} value={opt}>
                   <span className="font-mono">{opt}</span>
                 </SelectItem>
               ))}
-            </SelectContent>
+            </CfgSelectContent>
           </Select>
         )}
         {f.kind === "json" && (
@@ -369,14 +381,14 @@ export function NodeConfigForm({
             <SelectTrigger id="wf-cfg-on" className="w-full">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <CfgSelectContent>
               <SelectItem value="true">
                 <span className="font-mono">true(条件成立)</span>
               </SelectItem>
               <SelectItem value="false">
                 <span className="font-mono">false(条件不成立)</span>
               </SelectItem>
-            </SelectContent>
+            </CfgSelectContent>
           </Select>
         </FormRow>
       )}

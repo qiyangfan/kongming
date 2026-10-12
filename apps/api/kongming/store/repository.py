@@ -67,46 +67,41 @@ class SqlStoreRepo:
         )
         return dict(row) if row else None
 
-    async def next_version_no(self, *, bot_id: str) -> int:
-        return int(
-            (
-                await self._s.execute(
-                    text(
-                        "SELECT COALESCE(MAX(version_no), 0) + 1"
-                        " FROM public.sys_bot_version WHERE bot_id=CAST(:i AS uuid)"
-                    ),
-                    {"i": bot_id},
-                )
-            ).scalar_one()
-        )
-
     async def create_version(
         self,
         *,
         bot_id: str,
         tenant_id: str,
-        version_no: int,
         snapshot: dict[str, object],
         user_id: str,
-    ) -> str:
+    ) -> tuple[str, int] | None:
+        """单句原子插入(MAX+1 与 INSERT 同语句,配唯一约束 DO NOTHING)。
+        返回 None=并发上架撞 version_no(评审修复:原「读 MAX+1→裸 INSERT」
+        两步在并发下撞唯一约束未映射 500);调用方重读重试即可,护栏审核
+        无需重跑。"""
         vid = str(uuid7())
-        await self._s.execute(
-            text(
-                "INSERT INTO public.sys_bot_version"
-                " (id, tenant_id, bot_id, version_no, snapshot, published_by)"
-                " VALUES (:i, CAST(:t AS uuid), CAST(:b AS uuid), :n,"
-                "         CAST(:s AS jsonb), CAST(:u AS uuid))"
-            ),
-            {
-                "i": vid,
-                "t": tenant_id,
-                "b": bot_id,
-                "n": version_no,
-                "s": json.dumps(snapshot, ensure_ascii=False),
-                "u": user_id,
-            },
-        )
-        return vid
+        row = (
+            await self._s.execute(
+                text(
+                    "INSERT INTO public.sys_bot_version"
+                    " (id, tenant_id, bot_id, version_no, snapshot, published_by)"
+                    " SELECT :i, CAST(:t AS uuid), CAST(:b AS uuid),"
+                    "        COALESCE(MAX(v.version_no), 0) + 1,"
+                    "        CAST(:s AS jsonb), CAST(:u AS uuid)"
+                    " FROM public.sys_bot_version v WHERE v.bot_id=CAST(:b AS uuid)"
+                    " ON CONFLICT (bot_id, version_no) DO NOTHING"
+                    " RETURNING id, version_no"
+                ),
+                {
+                    "i": vid,
+                    "t": tenant_id,
+                    "b": bot_id,
+                    "s": json.dumps(snapshot, ensure_ascii=False),
+                    "u": user_id,
+                },
+            )
+        ).one_or_none()
+        return (str(row[0]), int(row[1])) if row is not None else None
 
     async def point_current(
         self, *, bot_id: str, version_id: str, user_id: str, restore_shelf: bool = True

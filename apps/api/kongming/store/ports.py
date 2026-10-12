@@ -9,18 +9,16 @@ class StoreRepo(Protocol):
         """当前上架版本(id/version_no/snapshot/published_at);未上架 None。"""
         ...
 
-    async def next_version_no(self, *, bot_id: str) -> int: ...
-
     async def create_version(
         self,
         *,
         bot_id: str,
         tenant_id: str,
-        version_no: int,
         snapshot: dict[str, object],
         user_id: str,
-    ) -> str:
-        """创建不可变版本快照,返回版本 id(104:快照创建后审核通过才落库)。"""
+    ) -> tuple[str, int] | None:
+        """创建不可变版本快照(单句原子 MAX+1),返回 (版本 id, 版本号);
+        None=并发上架撞 version_no(调用方重读重试,104)。"""
         ...
 
     async def point_current(

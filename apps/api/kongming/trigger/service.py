@@ -548,6 +548,10 @@ class TriggerService:
             )
             if blocked:
                 await self._repo.commit()  # 拦截路径无 _fire 收尾,显式同事务提交
+        # 末封邮件的游标推进收尾提交(评审修复:_fire 的 commit 先于本封游标
+        # upsert,末封游标原依赖调度器节流提交搭车——节流提交失败被吞时
+        # close() 回滚即丢游标,下轮确定性重复触发末封邮件)
+        await self._repo.commit()
 
     async def list_due_retries(self, *, now_iso: str) -> list[dict[str, Any]]:
         """调度器调用:到期挂起重试(101 调度重排扫描面)。"""
@@ -706,13 +710,30 @@ class TriggerService:
             # 挂起重试在原行落定终态(独立行,历史中间失败全保留);
             # 链首沿用挂起行携带的关联(链内传递,免回查)
             chain_root = str(pending_run["retry_of_run_id"])
-            await self._repo.update_run_terminal(
+            landed = await self._repo.update_run_terminal(
                 run_id=str(pending_run["id"]),
                 status=status,
                 error=error,
                 duration_ms=duration,
                 target_run_ref=ref,
             )
+            if landed == 0:
+                # 派发期间行被停用/删除取消(cancel_pending_retries 竞态):
+                # 本次结果补记为独立行(通知已按真实 status 发出,结果不丢);
+                # 不续链——用户取消语义优先,评审修复(原实现 no-op 后仍插
+                # 新 PENDING 行,已停用触发器上多出挂起记录)
+                await self._repo.insert_run(
+                    tenant_id=str(row["tenant_id"]),
+                    trigger_id=str(row["id"]),
+                    status=status,
+                    error=f"链已取消,结果补记: {error}" if error else "链已取消,结果补记",
+                    duration_ms=duration,
+                    target_run_ref=ref,
+                    attempt=attempt,
+                    retry_of_run_id=chain_root,
+                )
+                await self._repo.commit()
+                return
         if retry_at is not None:
             # 链未终态:追加挂起重试行(独立 run 行,attempt 递增并关联首跑)
             await self._repo.insert_run(

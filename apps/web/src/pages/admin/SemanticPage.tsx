@@ -6,6 +6,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Layers, Loader2, Plus, RefreshCw, X } from "lucide-react";
 
+import type { components } from "@/lib/api-types.gen";
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -104,7 +106,8 @@ export default function SemanticPage() {
   const depts = useQuery({
     queryKey: ["depts", "tree"],
     queryFn: async () => {
-      type DeptNode = { id: string; dept_name: string; children?: DeptNode[] | null };
+      // 生成契约类型(宪法⑤:禁手写 API 类型;评审修复)
+      type DeptNode = components["schemas"]["DeptNodeOut"];
       const tree = await api.get<DeptNode[]>("/system/depts");
       const out: { id: string; name: string }[] = [];
       const walk = (nodes: DeptNode[], prefix: string) => {

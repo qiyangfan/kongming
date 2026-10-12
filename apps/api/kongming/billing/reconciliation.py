@@ -81,7 +81,7 @@ async def fetch_muniu_cost(
         return CostTrack(available=False, reason="muniu_admin_token 未配置")
     params: dict[str, str] = {"group_by": "key", "from": _window_since_rfc3339(window_days)}
     try:
-        async with httpx.AsyncClient(timeout=5.0, transport=transport) as client:
+        async with httpx.AsyncClient(timeout=5.0, transport=transport, trust_env=False) as client:
             resp = await client.get(
                 f"{base_url.rstrip('/')}/admin/v1/usage",
                 params=params,

@@ -15,6 +15,7 @@ updated_at——描述与工单系统内部元数据永不入观察)/重试分�
 不落代码映射,避免语义漂移双源)。
 """
 
+import json
 from typing import cast
 from urllib.parse import quote
 
@@ -47,6 +48,25 @@ _PROTOCOL_PREFIX = FAILURE_PROTOCOL_PREFIX
 
 class TicketError(Exception):
     """ticket 域执行失败的结构化收敛(分发兜底 ERROR + 审计)。"""
+
+
+class _ResponseTooLarge(Exception):
+    """响应超字节闸(内部信号;执行器收敛为 protocol 前缀域错误)。"""
+
+
+# 响应读取上限(字节闸,防巨头响应内存放大;099 connector 域同量级)
+_RESPONSE_CAP = 1024 * 1024
+
+
+async def _read_json_capped(resp: httpx.Response) -> object:
+    """stream 上下文内读 JSON 响应(字节闸内)——resp.json() 会全量预读
+    入内存,真流式须 aiter_bytes(099 connector 域同款修法)。"""
+    buf = bytearray()
+    async for chunk in resp.aiter_bytes(65536):
+        buf.extend(chunk)
+        if len(buf) > _RESPONSE_CAP:
+            raise _ResponseTooLarge from None
+    return json.loads(buf.decode("utf-8", errors="replace"))
 
 
 def _as_dict(value: object) -> dict[str, object] | None:
@@ -212,39 +232,43 @@ class TicketExecutor:
         )
         try:
             async with httpx.AsyncClient(
-                timeout=httpx.Timeout(timeout_s), transport=self._transport
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                timeout=httpx.Timeout(timeout_s),
+                transport=self._transport,
             ) as client:
-                resp = await client.request(
+                # stream 上下文+字节闸读取(评审修复:resp.json() 全量预读,
+                # 巨头响应先入内存;真流式见 _read_json_capped)
+                async with client.stream(
                     method,
                     path,
                     json=body,
                     params=params,
                     headers={"Authorization": f"Bearer {self._api_key}"},
-                )
-                if op == "get" and resp.status_code == 404:
-                    # 单查不存在:响应类失败,友好「不存在」文案(spec 场景——
-                    # 不编造、不静默吐空;凭证与端点细节不入文案)
-                    raise TicketError(f"{_PROTOCOL_PREFIX} 工单不存在")
-                resp.raise_for_status()
-                data = _as_dict(resp.json())
-                if data is None:
-                    raise TicketError(f"{_PROTOCOL_PREFIX} 工单响应报文畸形(JSON 对象缺失)")
-                if op == "search":
-                    # 检索形态:约定信封 {"tickets": [...], "total": n}
-                    raw = data.get("tickets")
-                    if not isinstance(raw, list):
-                        raise TicketError(f"{_PROTOCOL_PREFIX} 工单响应缺 tickets 列表")
-                    return {
-                        "tickets": [
-                            cast("dict[str, object]", item)
-                            for item in cast("list[object]", raw)
-                            if isinstance(item, dict)
-                        ]
-                    }
-                # 单查/创建:工单对象(allowlist 投影由策略器承担)
-                if "id" not in data:
-                    raise TicketError(f"{_PROTOCOL_PREFIX} 工单响应缺工单标识")
-                return data
+                ) as resp:
+                    if op == "get" and resp.status_code == 404:
+                        # 单查不存在:响应类失败,友好「不存在」文案(spec 场景——
+                        # 不编造、不静默吐空;凭证与端点细节不入文案)
+                        raise TicketError(f"{_PROTOCOL_PREFIX} 工单不存在")
+                    resp.raise_for_status()
+                    data = _as_dict(await _read_json_capped(resp))
+                    if data is None:
+                        raise TicketError(f"{_PROTOCOL_PREFIX} 工单响应报文畸形(JSON 对象缺失)")
+                    if op == "search":
+                        # 检索形态:约定信封 {"tickets": [...], "total": n}
+                        raw = data.get("tickets")
+                        if not isinstance(raw, list):
+                            raise TicketError(f"{_PROTOCOL_PREFIX} 工单响应缺 tickets 列表")
+                        return {
+                            "tickets": [
+                                cast("dict[str, object]", item)
+                                for item in cast("list[object]", raw)
+                                if isinstance(item, dict)
+                            ]
+                        }
+                    # 单查/创建:工单对象(allowlist 投影由策略器承担)
+                    if "id" not in data:
+                        raise TicketError(f"{_PROTOCOL_PREFIX} 工单响应缺工单标识")
+                    return data
         # 顺序铁律(089 审查 P1-1 同款):未送达族(含 ConnectTimeout)先于读超时
         except undelivered as e:
             raise TicketError(f"{_UNDELIVERED_PREFIX} 工单系统拒连({type(e).__name__})") from e
@@ -253,6 +277,8 @@ class TicketExecutor:
             raise TicketError(f"{_PROTOCOL_PREFIX} 工单读超时({type(e).__name__})") from e
         except httpx.HTTPStatusError as e:
             raise TicketError(f"{_PROTOCOL_PREFIX} 上游 HTTP {e.response.status_code}") from e
+        except _ResponseTooLarge as e:
+            raise TicketError(f"{_PROTOCOL_PREFIX} 响应超 {_RESPONSE_CAP // 1024}KB 上限") from e
         except (ValueError, TypeError) as e:
             raise TicketError(f"{_PROTOCOL_PREFIX} 响应报文畸形({type(e).__name__})") from e
         except httpx.DecodingError as e:

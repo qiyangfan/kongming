@@ -133,7 +133,7 @@ class _PinnedTransport(httpx.AsyncHTTPTransport):
     """连接期 DNS 钉扎:URL host 换成判定时的 IP,Host 头/SNI 保原域名。"""
 
     def __init__(self, pinned_ip: str) -> None:
-        super().__init__()
+        super().__init__(trust_env=False)  # 钉扎=直连该 IP,环境代理会架空 SSRF 判定
         self._pinned = pinned_ip
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
@@ -166,6 +166,7 @@ class HttpNodeRunner:
     ) -> dict[str, Any]:
         pinned = await assert_url_allowed(url)
         async with httpx.AsyncClient(
+            trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
             timeout=httpx.Timeout(_TIMEOUT),
             follow_redirects=False,
             transport=_PinnedTransport(pinned),

@@ -265,7 +265,13 @@ class ConnectorService:
         """按当前表单声明发起一次真实出站(web-admin「测试调用」):显式
         确认在 UI 层;落工具审计(与执行同表同语义,channel 区分)。
         use_saved_secret_for=已存连接器 key:表单材料留空时用存量凭证
-        (编辑态先测后存的空框语义)。"""
+        (编辑态先测后存的空框语义;HTTP 面由 router 以表单 key 传入)。
+        凭证面收窄(防御纵深):存量凭证只允许用于 key 相同的连接器自身
+        ——契约语义即「编辑中的这一个」;防止未来新调用方/内部直调借本
+        用例把任意同租户连接器的明文凭证装配到任意出站目标(router 既有
+        接线恒传表单 key,经 HTTP 本就不可达;此闸守住 service 层不变量)。"""
+        if use_saved_secret_for is not None and use_saved_secret_for != decl.key:
+            raise ConnectorValidationError("存量凭证只能用于同一 key 的连接器(先测后存)")
         # 存量凭证合并先于声明校验:has_secret 按「合并后是否持有材料」判定
         # (评审修复——先校验后合并时,编辑态空框+use_saved_secret 的先测后存
         # 路径会被材料闸误拒 400,功能死路)

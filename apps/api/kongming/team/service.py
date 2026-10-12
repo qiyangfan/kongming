@@ -88,6 +88,10 @@ class TeamService:
         await self._audit("team.update", team_id, {"name": name.strip()})
 
     async def delete(self, *, tenant_id: str, team_id: str) -> None:
+        # 租户校验前置(评审修复):原实现解绑/公共化(Redis 逐出不可回滚)
+        # 先行、404 判定最后——跨租户 team_id 会对它租户缓存发起逐出后才 404
+        if await self._repo.get_team(tenant_id=tenant_id, team_id=team_id) is None:
+            raise TeamNotFound(team_id)
         # 资源回个人(不丢资源),成员连带清
         await self._repo.clear_team_on_resources(team_id=team_id)
         # 102:知识条目公共化后置钩子——失败告警不阻塞删除(design D4:

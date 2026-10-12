@@ -8,6 +8,7 @@
 检索卡),不含治理逻辑——重试与脱敏由网关切面统一承担。
 """
 
+import json
 from collections.abc import Callable
 from typing import cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -79,6 +80,25 @@ def _strip_tracking(url: str) -> str:
 
 class WebSearchError(Exception):
     """websearch 域执行失败的结构化收敛(分发兜底 ERROR + 审计)。"""
+
+
+class _ResponseTooLarge(Exception):
+    """响应超字节闸(内部信号;执行器收敛为 protocol 前缀域错误)。"""
+
+
+# 响应读取上限(字节闸,防巨头响应内存放大;100 ticket 同款)
+_RESPONSE_CAP = 1024 * 1024
+
+
+async def _read_json_capped(resp: httpx.Response) -> object:
+    """stream 上下文内读 JSON 响应(字节闸内)——resp.json() 会全量预读
+    入内存,真流式须 aiter_bytes(100 ticket 同款修法)。"""
+    buf = bytearray()
+    async for chunk in resp.aiter_bytes(65536):
+        buf.extend(chunk)
+        if len(buf) > _RESPONSE_CAP:
+            raise _ResponseTooLarge from None
+    return json.loads(buf.decode("utf-8", errors="replace"))
 
 
 class WebSearchPolicy:
@@ -343,18 +363,23 @@ class WebSearchExecutor:
         )
         try:
             async with httpx.AsyncClient(
-                timeout=httpx.Timeout(timeout_s), transport=self._transport
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                timeout=httpx.Timeout(timeout_s),
+                transport=self._transport,
             ) as client:
-                resp = await client.post(
+                # stream 上下文+字节闸读取(评审修复:resp.json() 全量预读,
+                # 巨头响应先入内存;真流式见 _read_json_capped)
+                async with client.stream(
+                    "POST",
                     url,
                     json=self._request(payload),
                     headers={"Authorization": f"Bearer {self._api_key}"},
-                )
-                resp.raise_for_status()
-                body = _as_dict(resp.json())
-                if body is None:
-                    raise WebSearchError(f"{_PROTOCOL_PREFIX} 检索响应报文畸形(JSON 对象缺失)")
-                return {"results": self._normalize(body)}
+                ) as resp:
+                    resp.raise_for_status()
+                    body = _as_dict(await _read_json_capped(resp))
+                    if body is None:
+                        raise WebSearchError(f"{_PROTOCOL_PREFIX} 检索响应报文畸形(JSON 对象缺失)")
+                    return {"results": self._normalize(body)}
         # 顺序铁律(089 审查 P1-1 同款):未送达族(含 ConnectTimeout)先于读超时
         except undelivered as e:
             raise WebSearchError(f"{_UNDELIVERED_PREFIX} 联网检索拒连({type(e).__name__})") from e
@@ -363,6 +388,8 @@ class WebSearchExecutor:
             raise WebSearchError(f"{_PROTOCOL_PREFIX} 检索读超时({type(e).__name__})") from e
         except httpx.HTTPStatusError as e:
             raise WebSearchError(f"{_PROTOCOL_PREFIX} 上游 HTTP {e.response.status_code}") from e
+        except _ResponseTooLarge as e:
+            raise WebSearchError(f"{_PROTOCOL_PREFIX} 响应超 {_RESPONSE_CAP // 1024}KB 上限") from e
         except (ValueError, TypeError) as e:
             raise WebSearchError(f"{_PROTOCOL_PREFIX} 响应报文畸形({type(e).__name__})") from e
         except httpx.DecodingError as e:

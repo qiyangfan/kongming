@@ -370,17 +370,28 @@ class SqlTriggerRepo:
         error: str,
         duration_ms: int,
         target_run_ref: str,
-    ) -> None:
-        """挂起重试行原行落定终态(不覆盖先前失败行;AND PENDING 防双派发)。"""
-        await self._s.execute(
-            text(
-                "UPDATE public.sys_trigger_run"
-                " SET status=:st, error=:e, duration_ms=:d, target_run_ref=:ref,"
-                "     next_retry_at=NULL"
-                " WHERE id=CAST(:i AS uuid) AND status='PENDING'"
+    ) -> int:
+        """挂起重试行原行落定终态(不覆盖先前失败行;AND PENDING 防双派发)。
+        返回命中行数:0=行已被外部取消(停用/删除竞态),调用方不再续链。"""
+        res = cast(
+            "CursorResult[object]",
+            await self._s.execute(
+                text(
+                    "UPDATE public.sys_trigger_run"
+                    " SET status=:st, error=:e, duration_ms=:d, target_run_ref=:ref,"
+                    "     next_retry_at=NULL"
+                    " WHERE id=CAST(:i AS uuid) AND status='PENDING'"
+                ),
+                {
+                    "st": status,
+                    "e": error[:2000],
+                    "d": duration_ms,
+                    "ref": target_run_ref,
+                    "i": run_id,
+                },
             ),
-            {"st": status, "e": error[:2000], "d": duration_ms, "ref": target_run_ref, "i": run_id},
         )
+        return int(res.rowcount or 0)
 
     async def defer_retry(self, *, run_id: str, next_retry_at: Any) -> None:
         """挂起重试顺延(执行中永不并发:撞上在途执行推迟一个退避间隔)。"""

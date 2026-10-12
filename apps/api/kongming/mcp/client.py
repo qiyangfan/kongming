@@ -95,7 +95,9 @@ class HttpMcpCaller:
             if session_id is not None:
                 req_headers["Mcp-Session-Id"] = session_id
             async with httpx.AsyncClient(
-                timeout=httpx.Timeout(self._timeout), transport=self._transport
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                timeout=httpx.Timeout(self._timeout),
+                transport=self._transport,
             ) as client:
                 async with client.stream(
                     "POST", endpoint, json=payload, headers=req_headers
@@ -270,7 +272,9 @@ class HttpMcpCaller:
         payload = {"jsonrpc": "2.0", "method": "notifications/initialized"}
         try:
             async with httpx.AsyncClient(
-                timeout=httpx.Timeout(self._timeout), transport=self._transport
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                timeout=httpx.Timeout(self._timeout),
+                transport=self._transport,
             ) as client:
                 # 慢滴防护:httpx read 超时是单次 socket 读间隔,server 每次滴
                 # <timeout 一字节即永不触发——与 _rpc 同款全程预算(审查循环 F2),

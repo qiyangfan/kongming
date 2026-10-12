@@ -205,7 +205,10 @@ class AgentClient:
         path = "/query_react" if react_tools is not None else "/query"
         try:
             async with httpx.AsyncClient(
-                base_url=self._base, timeout=self._timeout, headers=self._headers
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                base_url=self._base,
+                timeout=self._timeout,
+                headers=self._headers,
             ) as client:
                 resp = await client.post(path, json=payload)
         except httpx.HTTPError as e:
@@ -255,7 +258,10 @@ class AgentClient:
         decoder = SseDecoder()
         try:
             async with httpx.AsyncClient(
-                base_url=self._base, timeout=self._timeout, headers=self._headers
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                base_url=self._base,
+                timeout=self._timeout,
+                headers=self._headers,
             ) as client:
                 async with client.stream("POST", path, json=payload) as resp:
                     if resp.status_code != 200:
@@ -275,6 +281,7 @@ class AgentClient:
         一律返回空清单(service 按生成失败收敛,不落缓存),不抛异常。"""
         try:
             async with httpx.AsyncClient(
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
                 base_url=self._base,
                 timeout=self._timeout,
                 headers=self._headers,
@@ -363,7 +370,10 @@ class AgentClient:
             payload["collect_usage"] = True
         try:
             async with httpx.AsyncClient(
-                base_url=self._base, timeout=self._timeout, headers=self._headers
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                base_url=self._base,
+                timeout=self._timeout,
+                headers=self._headers,
             ) as client:
                 resp = await client.post("/query_react", json=payload)
         except httpx.HTTPError as e:
@@ -380,7 +390,10 @@ class AgentClient:
         """021 注册表模型名(025;失败返回空——fail-closed 校验语义)。"""
         try:
             async with httpx.AsyncClient(
-                base_url=self._base, timeout=10.0, headers=self._headers
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                base_url=self._base,
+                timeout=10.0,
+                headers=self._headers,
             ) as client:
                 resp = await client.get("/internal/models")
         except httpx.HTTPError:
@@ -403,7 +416,10 @@ class AgentClient:
         任何失败收敛空列表(后台任务静默跳过)。"""
         try:
             async with httpx.AsyncClient(
-                base_url=self._base, timeout=30.0, headers=self._headers
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                base_url=self._base,
+                timeout=30.0,
+                headers=self._headers,
             ) as client:
                 resp = await client.post(
                     "/internal/extract-memory",
@@ -440,7 +456,10 @@ class AgentClient:
         应答/坏报文)一律返回 None,永不抛;调用方保持截断标题。"""
         try:
             async with httpx.AsyncClient(
-                base_url=self._base, timeout=30.0, headers=self._headers
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                base_url=self._base,
+                timeout=30.0,
+                headers=self._headers,
             ) as client:
                 resp = await client.post("/internal/rewrite-title", json={"question": question})
         except httpx.HTTPError as e:
@@ -465,6 +484,7 @@ class AgentClient:
         INTERRUPTED,可显式恢复),不裸抛。"""
         try:
             async with httpx.AsyncClient(
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
                 base_url=self._base,
                 timeout=self._task_timeout,
                 headers=self._headers,
@@ -488,6 +508,7 @@ class AgentClient:
         一律返回 None(调用方收敛 FAILED 终态),不裸抛。"""
         try:
             async with httpx.AsyncClient(
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
                 base_url=self._base,
                 timeout=self._report_timeout,
                 headers=self._headers,

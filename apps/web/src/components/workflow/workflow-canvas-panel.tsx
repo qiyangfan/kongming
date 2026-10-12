@@ -171,6 +171,8 @@ function CanvasInner({
   }, [initToken, setNodes, setEdges]);
 
   // 服务端校验错误 → 节点高亮定位(环参与节点/非法 on/缺配置;design 裁决 4)
+  // 依赖含 initToken(评审修复:JSON→画布重投影会重建节点丢 errorText,
+  // errorText 未变时 effect 不重跑,高亮丢失)
   useEffect(() => {
     if (errorText === "") {
       setNodes((ns) => (ns.some((n) => n.data.errorText !== undefined) ? stripErrors(ns) : ns));
@@ -189,7 +191,7 @@ function CanvasInner({
           : n;
       }),
     );
-  }, [errorText, setNodes, stripErrors]);
+  }, [errorText, initToken, setNodes, stripErrors]);
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<WfFlowNode>[]) => {
@@ -363,11 +365,12 @@ function CanvasInner({
         target: e.target === oldId ? newId : e.target,
       }));
       setNodes(nextNodes);
+      persistPositions(nextNodes); // 改名后坐标迁到新 id(按 id 存取,评审修复)
       setEdges(nextEdges);
       setSelectedId(newId);
       emitFrom(nextNodes, nextEdges);
     },
-    [nodes, edges, setNodes, setEdges, emitFrom],
+    [nodes, edges, setNodes, setEdges, persistPositions, emitFrom],
   );
 
   const deleteNode = useCallback(
@@ -391,8 +394,9 @@ function CanvasInner({
 
   return (
     <div className="flex flex-col md:h-[60vh] md:flex-row">
-      {/* 节点面板:拖拽到画布或点击居中放置 */}
-      <div className="flex shrink-0 gap-2 overflow-x-auto border-b p-2 md:w-36 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r">
+      {/* 节点面板:拖拽到画布或点击居中放置;nokey=RF 键盘删除豁免区
+          (面板内 Backspace/Delete 不再误删画布选中节点,评审修复) */}
+      <div className="nokey flex shrink-0 gap-2 overflow-x-auto border-b p-2 md:w-36 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r">
         <p className="hidden px-1 text-3xs font-medium text-muted-foreground md:block">节点类型</p>
         <p className="px-1 text-3xs text-muted-foreground md:hidden">拖到画布或点击放置:</p>
         {NODE_TYPES.map((t) => {
@@ -465,7 +469,9 @@ function CanvasInner({
       </div>
 
       {/* 节点配置侧栏 */}
-      <aside className="w-full shrink-0 border-t p-3 md:w-80 md:overflow-y-auto md:border-l md:border-t-0 md:p-3">
+      {/* 节点配置侧栏(nokey=RF 键盘删除豁免:Select 触发器是 button、
+          下拉面板是 div,聚焦时按 Backspace 曾静默删除画布选中节点) */}
+      <aside className="nokey w-full shrink-0 border-t p-3 md:w-80 md:overflow-y-auto md:border-l md:border-t-0 md:p-3">
         {selectedNode ? (
           <NodeConfigForm
             key={selectedNode.id}

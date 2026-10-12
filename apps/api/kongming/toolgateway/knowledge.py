@@ -105,7 +105,9 @@ class KnowledgeExecutor:
         )
         try:
             async with httpx.AsyncClient(
-                timeout=httpx.Timeout(timeout_s), transport=self._transport
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                timeout=httpx.Timeout(timeout_s),
+                transport=self._transport,
             ) as client:
                 resp = await client.post(url, json=payload)
                 resp.raise_for_status()

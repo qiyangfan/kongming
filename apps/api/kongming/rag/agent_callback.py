@@ -50,6 +50,7 @@ class AgentRagClient:
         """
         if self._client is None:
             self._client = httpx.AsyncClient(
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
                 base_url=self._base,
                 timeout=self._timeout,
                 headers={"X-Internal-Token": self._token},

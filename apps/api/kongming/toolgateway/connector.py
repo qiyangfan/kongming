@@ -33,6 +33,7 @@ from kongming.toolgateway.models import (
     RetryClass,
 )
 from kongming.workflow.http_runner import PinnedTransport, assert_url_allowed
+from kongming.workflow.ports import SsrFBlocked
 
 # 域失败文案前缀单源在 toolgateway.models(与 gateway._was_delivered 共引)
 _UNDELIVERED_PREFIX = FAILURE_UNDELIVERED_PREFIX
@@ -51,11 +52,15 @@ class HttpConnectorError(Exception):
     分类:unreachable:/protocol:/policy:)。"""
 
 
-def _as_text_response(resp: httpx.Response) -> tuple[str, bool]:
+async def _as_text_response(resp: httpx.Response) -> tuple[str, bool]:
     """响应体 → 文本形态(JSON 序列化为文本,其余原样;读字节闸内)。
-    返回 (文本, 是否截断)。"""
+    返回 (文本, 是否截断)。
+
+    须在 client.stream 上下文内消费(评审修复):原实现先 client.request()
+    再 iter_bytes——request 便捷方法默认全量预读响应,字节闸只剩切片意义,
+    巨头响应在返回前已入内存;aiter_bytes 于 stream 上下文才是真流式。"""
     buf = bytearray()
-    for chunk in resp.iter_bytes(65536):
+    async for chunk in resp.aiter_bytes(65536):
         buf.extend(chunk)
         if len(buf) > _RESPONSE_CAP:
             break
@@ -233,7 +238,11 @@ class HttpConnectorExecutor:
             # 029 拒绝段(design D3 执行期兜底;先于出站,DNS 解析任一地址
             # 落拒绝段即拒,白名单命中不构成豁免)
             pinned = await assert_url_allowed(final_url)
-        except Exception as e:  # SsrFBlocked 与解析族统一按策略类拒绝
+        except (SsrFBlocked, ValueError) as e:
+            # 结构化拒绝(SSRF 判定;解析族在其内部已转 SsrFBlocked)+ URL
+            # 求值 ValueError(urlparse.port 对越界端口如 :99999 抛出——
+            # 注册期模板校验不触端口段,执行期在此收口为 policy 归因);
+            # 其余编程性异常放行走分发兜底,不伪装成 policy(评审修复两轮)
             raise HttpConnectorError(f"{_POLICY_PREFIX} 目标地址被拒绝({e})") from e
         # 未完整取得响应族(拒连在 macOS anyio 后端以 ReadError 浮现,按语义归纳)
         undelivered = (
@@ -247,28 +256,31 @@ class HttpConnectorExecutor:
         try:
             transport = self._test_transport or PinnedTransport(pinned)
             async with httpx.AsyncClient(
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
                 timeout=httpx.Timeout(timeout_s),
                 transport=transport,
                 follow_redirects=False,  # 重定向是白名单绕过的经典通道,一律不跟随
             ) as client:
-                resp = await client.request(
+                # stream 上下文消费(真流式,字节闸才有内存意义——见
+                # _as_text_response 注记;重定向/状态判定只依赖响应头,兼容)
+                async with client.stream(
                     self._method,
                     final_url,
                     json=body,
                     headers=self._headers,
-                )
-                if 300 <= resp.status_code < 400:
-                    # 不静默跟随:按响应类失败收口(spec 场景「重定向不出白名单」)
-                    raise HttpConnectorError(
-                        f"{_PROTOCOL_PREFIX} 端点返回重定向 {resp.status_code}(不跟随)"
-                    )
-                resp.raise_for_status()
-                body_text, truncated = _as_text_response(resp)
-                return {
-                    "status_code": resp.status_code,
-                    "body": body_text,
-                    "truncated": truncated,
-                }
+                ) as resp:
+                    if 300 <= resp.status_code < 400:
+                        # 不静默跟随:按响应类失败收口(spec 场景「重定向不出白名单」)
+                        raise HttpConnectorError(
+                            f"{_PROTOCOL_PREFIX} 端点返回重定向 {resp.status_code}(不跟随)"
+                        )
+                    resp.raise_for_status()
+                    body_text, truncated = await _as_text_response(resp)
+                    return {
+                        "status_code": resp.status_code,
+                        "body": body_text,
+                        "truncated": truncated,
+                    }
         # 顺序铁律(089 审查 P1-1 同款):未送达族(含 ConnectTimeout)先于读超时
         except HttpConnectorError:
             raise  # 执行器自收敛(重定向)原样上浮,保前缀分类
@@ -283,6 +295,11 @@ class HttpConnectorExecutor:
             raise HttpConnectorError(
                 f"{_PROTOCOL_PREFIX} 端点 HTTP {e.response.status_code}"
             ) from e
+        except httpx.DecodingError as e:
+            # 解码失败继承 RequestError(非 TransportError),不单列会以裸 httpx
+            # 异常逃逸收敛链、审计 error_reason 丢结构化前缀(094 评审 R1 同款;
+            # 评审修复——新增 connector.py 漏了 ticket/websearch 已补的同段)
+            raise HttpConnectorError(f"{_PROTOCOL_PREFIX} 响应解码失败({type(e).__name__})") from e
         except httpx.TransportError as e:
             # 传输层未枚举残族(防 httpx 分层演进逃逸;089 同款兜底)
             raise HttpConnectorError(

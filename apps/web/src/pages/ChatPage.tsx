@@ -11,7 +11,7 @@
    中流刷新/停止后:末条为 USER 即触发有界恢复回查(控制面保证写终态行),
    应答自行出现;预算耗尽即停,不无限轮询。 */
 
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FileText,
@@ -306,6 +306,25 @@ export default function ChatPage() {
     }
   }, [messages.isError, messages.error, qc, navigate, current]);
 
+  // 114 录音态(声明在取消闸 effect 之前:该 effect 与卸载 effect 都要调
+  // cancelRecording);useCallback 稳定引用(评审修复——录音流原只在 Escape
+  // 一个出口关闭,路由跳转离开页面或录音中切会话/数据源都会让 getUserMedia
+  // 的 track 泄漏,麦克风占用不释放,且转写文本会写进切换后的新上下文输入框)
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const recGenRef = useRef(0); // 录音/转写代际:cancelRecording 自增作废在途回调
+
+  const cancelRecording = useCallback((): void => {
+    recGenRef.current += 1; // 在途转写/尾块回调随之失效(不落新上下文的草稿)
+    recorderRef.current?.stream.getTracks().forEach((t) => t.stop());
+    recorderRef.current = null;
+    chunksRef.current = [];
+    setRecording(false);
+    setTranscribing(false);
+  }, []);
+
   // 取消闸(017):上下文变化(切会话/新建/切租户/切数据源)即中止在途流并
   // 清残留呈现;卸载时同样中止(闭包捕获最新 refs)。
   // R2-B2 豁免:本流自建会话的 navigate 也会触发 sessionId 变化——该导航
@@ -319,17 +338,19 @@ export default function ChatPage() {
     abortRef.current?.abort();
     abortRef.current = null;
     streamCtxRef.current = null;
+    cancelRecording(); // 录音不跨上下文续命:切会话/租户/数据源即取消(防串写新输入框)
     setStreaming(null);
     setFinalized(null);
     setAskError(null);
     setStoppedNotice(false);
     setPendingConfirm(null); // 切换上下文丢弃待确认入口(瞬态语义)
-  }, [sessionId, current, datasource]);
+  }, [sessionId, current, datasource, cancelRecording]);
   useEffect(
     () => () => {
       abortRef.current?.abort();
+      cancelRecording(); // 路由离开页面:释放麦克风 track(评审修复,泄漏面)
     },
-    [],
+    [cancelRecording],
   );
 
   // 终态快照退位:消息历史 refetch 已含该轮(message_id 命中)即撤快照
@@ -476,17 +497,8 @@ export default function ChatPage() {
 
   // 114:语音输入(MediaRecorder → /chat/stt → 文本填入输入框,用户可修正后
   // 发送;Escape 取消丢弃)。音频即转即弃,前端不留存。
-  const [recording, setRecording] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-
-  function cancelRecording(): void {
-    recorderRef.current?.stream.getTracks().forEach((t) => t.stop());
-    recorderRef.current = null;
-    chunksRef.current = [];
-    setRecording(false);
-  }
+  // 录音/转写态已上移至取消闸 effect 之前(该 effect 与卸载 effect 共用
+  // cancelRecording;本区只保留交互逻辑)。
 
   async function onMicClick(): Promise<void> {
     if (recording) {
@@ -496,12 +508,20 @@ export default function ChatPage() {
     setAskError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // 代际守卫:每次开始录音自增;取消/上下文切换后旧代际的 dataavailable/
+      // onstop/转写回调全部失效——防止 track 停止时浏览器 flush 的尾块与
+      // 在途转写结果写进切换后的新上下文输入框(评审修复)
+      const gen = ++recGenRef.current;
       const rec = new MediaRecorder(stream);
       chunksRef.current = [];
       rec.ondataavailable = (e) => {
-        if (e.data.size) chunksRef.current.push(e.data);
+        if (recGenRef.current === gen && e.data.size) chunksRef.current.push(e.data);
       };
       rec.onstop = () => {
+        if (recGenRef.current !== gen) {
+          stream.getTracks().forEach((t) => t.stop()); // 已取消:只回收硬件,不再落笔
+          return;
+        }
         stream.getTracks().forEach((t) => t.stop());
         recorderRef.current = null;
         setRecording(false);
@@ -510,16 +530,20 @@ export default function ChatPage() {
         setTranscribing(true);
         transcribeAudio(blob)
           .then((text) => {
+            if (recGenRef.current !== gen) return; // 转写期间上下文已切换:丢弃
             if (!text) {
               setAskError("没有听清,请再试一次。");
               return;
             }
             setDraft((prev) => (prev ? `${prev} ${text}` : text));
           })
-          .catch((err) =>
-            setAskError(err instanceof Error ? err.message : "语音识别未成,请稍后再试。"),
-          )
-          .finally(() => setTranscribing(false));
+          .catch((err) => {
+            if (recGenRef.current !== gen) return;
+            setAskError(err instanceof Error ? err.message : "语音识别未成,请稍后再试。");
+          })
+          .finally(() => {
+            if (recGenRef.current === gen) setTranscribing(false);
+          });
       };
       rec.start();
       recorderRef.current = rec;
@@ -536,7 +560,7 @@ export default function ChatPage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [recording]);
+  }, [recording, cancelRecording]);
 
   async function onPickFile(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = e.target.files?.[0];

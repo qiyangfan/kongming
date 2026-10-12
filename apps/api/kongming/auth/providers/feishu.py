@@ -67,7 +67,7 @@ class FeishuProvider(OAuthProviderBase):
         }
         if code_verifier is not None:
             body["code_verifier"] = code_verifier
-        async with httpx.AsyncClient(timeout=10) as http:
+        async with httpx.AsyncClient(timeout=10, trust_env=False) as http:
             tok = resp_json(await http.post(self.token_url, json=body), self.display_name)
             if tok.get("error") or tok.get("code") != 0:
                 reason = tok.get("error_description") or tok.get("error", "code 交换异常")

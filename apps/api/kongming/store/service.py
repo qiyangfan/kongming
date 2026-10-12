@@ -155,15 +155,22 @@ class StoreService:
                 bot_id=bot_id, version_id=str(current["id"]), user_id=user_id
             )
             return {"idempotent": True, "version_no": int(current["version_no"])}
-        # 新版本:Bot 内 version_no 递增,创建→指针切换→封顶淘汰
-        version_no = await self._repo.next_version_no(bot_id=bot_id)
-        vid = await self._repo.create_version(
-            bot_id=bot_id,
-            tenant_id=tenant_id,
-            version_no=version_no,
-            snapshot=snapshot,
-            user_id=user_id,
-        )
+        # 新版本:Bot 内 version_no 递增(单句原子 MAX+1);并发上架撞号时
+        # 直接重试(重执即取新 MAX,评审修复:原「读 MAX+1→裸 INSERT」两步
+        # 撞唯一约束 500)
+        landed: tuple[str, int] | None = None
+        for _ in range(3):
+            landed = await self._repo.create_version(
+                bot_id=bot_id,
+                tenant_id=tenant_id,
+                snapshot=snapshot,
+                user_id=user_id,
+            )
+            if landed is not None:
+                break
+        if landed is None:
+            raise StoreValidationError("并发上架冲突,请稍后重试")
+        vid, version_no = landed
         await self._repo.point_current(bot_id=bot_id, version_id=vid, user_id=user_id)
         await self._repo.evict_overflow_versions(bot_id=bot_id, cap=self._version_cap)
         return {"idempotent": False, "version_no": version_no}
@@ -240,6 +247,14 @@ class StoreService:
         if not isinstance(raw_snap, dict):
             raise StoreValidationError("版本快照损坏,无法回滚")
         snapshot = cast("dict[str, object]", raw_snap)
+        # 零工具上架闸同款(评审修复):上架后工具授权/数据源被回收的旧版本,
+        # 回滚即把必败版本重新指上货架——与 publish 同源求交,空集拒回滚
+        if not await self._tool_lister.resolve_runnable(
+            creator_id=str(row["created_by"]),
+            tenant_id=tenant_id,
+            row={**row, "tools": snapshot.get("tools", [])},
+        ):
+            raise StoreValidationError("该版本的工具当前不可用,无法回滚,请先恢复工具配置")
         # 现行护栏重审:文本面同上架口径;系统提示词按输入面重审
         # (规则升级后旧内容违规即拦,回滚不构成绕过现行审核的通道)
         await self._audit_snapshot_texts(snapshot=snapshot, user_id=user_id, tenant_id=tenant_id)

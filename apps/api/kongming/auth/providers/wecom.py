@@ -78,7 +78,7 @@ class WecomProvider(OAuthProviderBase):
     async def fetch_profile(
         self, s: Settings, *, code: str, code_verifier: str | None
     ) -> NormalizedProfile:
-        async with httpx.AsyncClient(timeout=10) as http:
+        async with httpx.AsyncClient(timeout=10, trust_env=False) as http:
             tok = resp_json(
                 await http.get(
                     f"{_API}/cgi-bin/gettoken",

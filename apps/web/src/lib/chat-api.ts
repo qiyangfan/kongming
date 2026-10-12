@@ -29,8 +29,10 @@ export async function uploadAttachment(file: File): Promise<AttachmentOut> {
 
 /** 114 语音转写:录音 blob → 文本(即转即弃;503=未启用模型,文案面向用户) */
 export async function transcribeAudio(blob: Blob): Promise<string> {
+  // 文件名按 MIME 推导(Safari MediaRecorder 产出 audio/mp4,恒标 .webm 语义错)
+  const ext = blob.type.includes("mp4") ? "mp4" : blob.type.includes("ogg") ? "ogg" : "webm";
   const fd = new FormData();
-  fd.append("file", blob, "recording.webm");
+  fd.append("file", blob, `recording.${ext}`);
   const out = await api.postForm<{ text: string }>("/chat/stt", fd);
   return out.text;
 }

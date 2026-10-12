@@ -200,12 +200,16 @@ def _template_problem(
         return "路径模板缺主机"
     if parts.query or parts.fragment:
         return "路径模板不得携带 query/fragment(查询参数由参数声明按名映射)"
-    # 占位符与参数声明求交:每个占位必须有同名声明,且不得重复出现
-    declared = {p.name for p in params}
+    # 占位符与参数声明求交:每个占位必须有同名必填声明,且不得重复出现
+    # (评审修复:可选参数缺参会残留字面 {name} 占位,httpx 编码后打到
+    # 错误路径——路径占位参数 MUST required)
+    declared = {p.name: p for p in params}
     seen: set[str] = set()
     for raw in re.findall(r"\{([^{}]+)\}", template):
         if raw not in declared:
             return f"路径占位 {{{raw}}} 未在参数声明中定义"
+        if not declared[raw].required:
+            return f"路径占位 {{{raw}}} 对应参数必须声明为必填(缺参会残留字面占位)"
         if raw in seen:
             return f"路径占位 {{{raw}}} 重复出现"
         seen.add(raw)

@@ -78,7 +78,7 @@ class _HttpxNotifier:
     async def post(self, *, url: str, body: bytes, signature: str) -> None:
         import httpx
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(5)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5), trust_env=False) as client:
             resp = await client.post(
                 url,
                 content=body,
@@ -156,6 +156,11 @@ class _ImaplibMailClient:
         try:
             try:
                 conn.login(user, credential)
+            except imaplib.IMAP4.abort as e:
+                # 连接中断(abort)先于 error 判定:abort 继承 error,但语义是
+                # 服务器掐断/EOF 而非口令错——误标 AUTH_FAILED 会误导排障
+                # (评审修复)
+                raise MailConnectError(f"连接中断: {type(e).__name__}") from e
             except imaplib.IMAP4.error as e:
                 raise MailAuthError(f"认证失败: {e}") from e
             except OSError as e:
@@ -192,6 +197,10 @@ class _ImaplibMailClient:
         except (MailError, imaplib.IMAP4.error) as e:
             if isinstance(e, MailError):
                 raise
+            if isinstance(e, imaplib.IMAP4.abort):
+                # 选中/搜索/拉取阶段的连接中断:归 CONNECT_FAILED 而非协议失败
+                # (abort 继承 error,统一分支前先分流,评审修复)
+                raise MailConnectError(f"连接中断: {type(e).__name__}") from e
             # 选中/搜索/拉取阶段的协议态错误(IMAP4.error)统归协议失败
             raise MailProtocolError(f"协议失败: {e}") from e
         except OSError as e:
