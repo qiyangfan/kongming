@@ -21,7 +21,6 @@ from starlette.responses import Response as _Resp
 
 from kongming.attachment.router import chat_router as attachment_chat_router
 from kongming.attachment.router import internal_router as attachment_internal_router
-from kongming.stt.router import router as stt_router
 from kongming.audit.context import ClientIpMiddleware
 from kongming.audit.router import router as audit_router
 from kongming.auth.router import register_auth_error_handlers
@@ -58,6 +57,7 @@ from kongming.report.router import router as report_router
 from kongming.semantic.router import router as semantic_router
 from kongming.skillpack.router import router as skillpack_router
 from kongming.store.router import router as store_router
+from kongming.stt.router import router as stt_router
 from kongming.system.router import register_system_error_handlers
 from kongming.system.router import router as system_router
 from kongming.task.router import internal_router as task_internal_router
