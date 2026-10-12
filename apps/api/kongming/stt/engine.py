@@ -58,9 +58,7 @@ class FasterWhisperEngine:
                     WhisperModel, self._model_size, device="cpu", compute_type="int8"
                 )
             except ImportError as e:
-                raise EngineUnavailable(
-                    "faster-whisper 未安装(uv sync 后可用)"
-                ) from e
+                raise EngineUnavailable("faster-whisper 未安装(uv sync 后可用)") from e
             except Exception as e:  # noqa: BLE001  # 模型缺失/下载失败/加载错误统一明示
                 raise EngineUnavailable(
                     f"语音模型不可用({self._model_size}):{e}——预下载配方见 docs/HANDOFF.md"
