@@ -4,6 +4,7 @@ import logging
 from typing import cast
 
 from kongming.semantic.models import (
+    CallerScope,
     MetricDef,
     MetricHit,
     TableRelation,
@@ -13,6 +14,7 @@ from kongming.semantic.models import (
     project_metric_hits,
 )
 from kongming.semantic.ports import (
+    CallerDeptScopeResolver,
     FkIntrospector,
     KnowledgeTableLookup,
     RecallContextEvictor,
@@ -32,10 +34,12 @@ class SemanticService:
         repo: SemanticRepo,
         knowledge: KnowledgeTableLookup | None = None,
         recall_ctx_evictor: RecallContextEvictor | None = None,
+        caller_scope_resolver: CallerDeptScopeResolver | None = None,
     ) -> None:
         self._repo = repo
         self._knowledge = knowledge
         self._recall_ctx_evictor = recall_ctx_evictor
+        self._caller_scope = caller_scope_resolver
 
     async def _evict_recall_ctx(self, *, tenant_id: str, datasource_key: str) -> None:
         """095:关系写提交后失效该租户+数据源的检索上下文缓存(正确性要求,
@@ -117,12 +121,22 @@ class SemanticService:
         return n
 
     async def enrich(
-        self, *, tenant_id: str, datasource_key: str, question: str, tables: list[str]
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        question: str,
+        tables: list[str],
+        caller_user_id: str | None = None,
     ) -> tuple[str, str, list[MetricHit]]:
         """召回注入段组装(spec:仅召回集合内关系 + 命中指标 top-5)。
 
         076:命中列表不再丢弃——结构化投影(标识/名称/口径/修订时间)与派生
-        文字段同源返回;文字段 SHALL 由结构化命中派生(单一来源)。"""
+        文字段同源返回;文字段 SHALL 由结构化命中派生(单一来源)。
+        110:指标候选集先过调用者可见性再命中——None 身份/端口未注入=仅 ALL 档
+        (「未知调用者」,与 102 缺省纯公共同哲学,不设绕过面);ALL 档=全量
+        (过滤参数 None);其余按部门集合下推 SQL 单点。enrich 位于检索上下文
+        缓存之外(076 地形),本过滤零缓存键改动。"""
         relations: list[TableRelation] = []
         # 非空即查(023①:单表自引用 FK 也注入——ANY(:ts) 天然收窄,单表
         # 集合只命中自引用行,多表行为不变)
@@ -139,8 +153,25 @@ class SemanticService:
                 )
                 for r in rows
             ]
+        # 110:解析调用者有效范围。解析失败按「未知调用者」读面降级(仅 ALL 档),
+        # 与 CUSTOM 空集合同向——可见性过滤方向永远是收紧,不阻断召回主链路。
+        scope = CallerScope(universal=False)
+        if caller_user_id is not None and self._caller_scope is not None:
+            try:
+                scope = await self._caller_scope.resolve(
+                    user_id=caller_user_id, tenant_id=tenant_id
+                )
+            except Exception:  # noqa: BLE001  读面降级:判定故障不得放大为召回故障
+                log.warning(
+                    "指标可见性解析失败,按仅 ALL 档降级",
+                    exc_info=True,
+                    extra={"user": caller_user_id},
+                )
+                scope = CallerScope(universal=False)
         metric_rows = await self._repo.list_metrics(
-            tenant_id=tenant_id, datasource_key=datasource_key
+            tenant_id=tenant_id,
+            datasource_key=datasource_key,
+            visible_dept_ids=None if scope.universal else list(scope.dept_ids),
         )
         metrics = [
             MetricDef(

@@ -2,6 +2,8 @@
 
 from typing import Any, Protocol
 
+from kongming.semantic.models import CallerScope
+
 
 class FkIntrospector(Protocol):
     """外键扫描(基础设施适配:default=控制面会话/动态源=只读连接)。"""
@@ -26,7 +28,11 @@ class SemanticRepo(Protocol):
     ) -> list[dict[str, Any]]: ...
 
     async def list_metrics(
-        self, *, tenant_id: str, datasource_key: str
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        visible_dept_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]: ...
 
     async def add_relation(
@@ -47,6 +53,18 @@ class KnowledgeTableLookup(Protocol):
     async def knowledge_table_exists(
         self, *, tenant_id: str, datasource_key: str, schema_table: str
     ) -> bool: ...
+
+
+class CallerDeptScopeResolver(Protocol):
+    """调用者 data_scope 解析窄端口(110;实现=组合根注入适配器,
+    semantic 域只见 Protocol,不 import datascope)。
+
+    解析语义:启用角色最宽松档 ALL→universal=True;DEPT/DEPT_AND_BELOW/
+    CUSTOM→universal=False + 部门集合(递归/勾选并集按 datascope 既有口径);
+    SELF/用户不存在/无启用角色/CUSTOM 空集合→universal=False + 空集合
+    (读面降级=仅 ALL 档可见,不抛错)。"""
+
+    async def resolve(self, *, user_id: str, tenant_id: str) -> CallerScope: ...
 
 
 class RecallContextEvictor(Protocol):

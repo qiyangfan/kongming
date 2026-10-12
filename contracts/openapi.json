@@ -17961,6 +17961,24 @@
             "type": "boolean",
             "title": "Enabled",
             "default": true
+          },
+          "visible_scope": {
+            "type": "string",
+            "pattern": "^(ALL|DEPT)$",
+            "title": "Visible Scope",
+            "default": "ALL"
+          },
+          "dept_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dept Id"
           }
         },
         "type": "object",
@@ -17999,6 +18017,22 @@
           "updated_at": {
             "type": "string",
             "title": "Updated At"
+          },
+          "visible_scope": {
+            "type": "string",
+            "title": "Visible Scope",
+            "default": "ALL"
+          },
+          "dept_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dept Id"
           }
         },
         "type": "object",

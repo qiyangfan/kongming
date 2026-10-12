@@ -83,6 +83,18 @@
      (create 的 EXECUTED 行 args_digest 含 `"ticket_id"`;凭证值不得出现在
      日志/审计/失败文案——有专项 grep 断言钉着)。e2e 集成测试与演示共用同一
      mock 实现(`tests/test_ticket_domain.py` 测试内起停,不依赖手工启动)。
+- **110–113 批现态(2026-10-12,四变更全部落地归档)**:
+  ①110 指标可见性:metric_definitions 增 visible_scope(ALL/DEPT)+dept_id
+  (迁移 0053),注入面按调用者 data_scope 收窄,管理面保持全量;
+  ②112 全文路查询语义=「AND 优先、内容词兜底」(兜底轮 length≥2 词条
+  EXISTS,单字虚词被谓词排除;098「查询客户」场景自此真正兑现;111 无差别
+  形态曾被评估事故误判否决,勘误见 evals/README 基线表);③113 MCP 客户端
+  真实集成验证:官方 mcp SDK(**dev 依赖,钉 <2**)起本地真实 server 走
+  probe→发现→调用闭环,暴露并修复两处协议缺口——streamable-http 会话头
+  (`Mcp-Session-Id`)按 endpoint 透传 + 调用面懒握手(按 endpoint 加锁),
+  对无状态 server 零影响;④评估栈两个假跌源已修:日配额耗尽(评估 api
+  启动必带 `KM_CHAT_QUOTA_DAILY_CALLS=0`)与 hex id 题租户推断 403
+  (sakila.yaml 显式 tenant)——历史基线跨轮对比以逐题失败名单为准。
 - **094 web 检索域(联网搜索)现状**:web_search 工具 = 部署级条件注册,
   `KM_WEBSEARCH_PROVIDER`(tavily|bocha|zhipu|alibaba_ai_search)+
   `KM_WEBSEARCH_API_KEY` 齐备才注册;zhipu=智谱独立检索 API(与 LLM 同平台,复用 bigmodel key 零额外
@@ -127,18 +139,26 @@
   写读同源;ctx 缓存键含配置值(换配置天然隔离,无需清缓存);代码单点
   `kongming/config.py::FULLTEXT_TS_CONFIGS`(白名单放 config 层不落 rag 域包:
   auth 域经 auth.ports→config 的既有依赖链不得反向触达 kongming.rag,
-  import-linter 契约)。**启用配方(pg18 localenv;localenv-postgres 容器=
-  Debian 12 bookworm,PGDG 源已预配,pg_ts_config 现仅 simple 系)**:
-  1. 容器内装扩展包并重启装载:`podman exec localenv-postgres apt-get update
-     && podman exec localenv-postgres apt-get install -y postgresql-18-zhparser`,
-     然后 `podman restart localenv-postgres`(装包后须重启进程 .so 才装载;
-     PGDG 无包时的备选=源码编译:容器内装 `postgresql-server-dev-18` 与
-     SCWS(`libscws-dev`),`git clone https://github.com/amutu/zhparser`
-     后 `make && make install`);
-  2. 控制面库各建扩展(全文 SQL 只跑控制面库 rag 两表;扩展按库隔离,
-     漏建=该库启动自检拒):开发库 kongming 与测试库 kongming_test 各执行
-     `CREATE EXTENSION zhparser;`(kongming_test 若尚未由 conftest 自建,
-     先建库再执行);
+  import-linter 契约)。**启用配方(2026-10-12 localenv 实测跑通;PGDG **无**
+  zhparser 包——apt 路线不存在,走容器内源码编译)**:
+  1. 容器内源码编译(依赖=build-essential/git/automake/libtool/pkg-config/
+     binutils/bzip2/postgresql-server-dev-18,apt 可装):
+     ①SCWS:git 协议在本机网络被重置,**用 codeload tarball**——`wget -O
+     scws.tar.gz https://github.com/hightman/scws/archive/refs/tags/1.2.3.tar.gz`
+     (xunsearch.com 官网不可达,勿试);解包后仓库无 configure,须 autotools
+     引导:`touch README; aclocal; autoconf; autoheader; libtoolize; automake
+     --add-missing` → `./configure && make install && ldconfig`;
+     ②zhparser:`wget -O zhparser.tar.gz https://github.com/amutu/zhparser/
+     archive/refs/heads/master.tar.gz`,`PATH=/usr/lib/postgresql/18/bin:$PATH
+     make && make install`(dict.utf8.xdb 由 make install 落 tsearch_data,
+     缺则手补);
+     ③`podman restart localenv-postgres`(.so 重启才装载);
+  2. 控制面库各建**扩展+检索配置两件**(扩展只建 parser,配置不自带——
+     漏第二件=启动自检过但 to_tsvector 报 config 不存在):开发库 kongming
+     与测试库 kongming_test 各执行 `CREATE EXTENSION zhparser;` +
+     `CREATE TEXT SEARCH CONFIGURATION zhparser (PARSER = zhparser);` +
+     `ALTER TEXT SEARCH CONFIGURATION zhparser ADD MAPPING FOR n,v,a,i,e,l
+     WITH simple;`;
   3. `export KM_RAG_FULLTEXT_TS_CONFIG=zhparser` → 重启 api(启动自检过才起,
      自检=查 pg_ts_config,缺失即拒并指回本配方);
   4. **逐数据源重扫/重建重算存量 tsv**(fetch-metadata / reindex / 文档重新
@@ -146,18 +166,44 @@
   5. **复标全文路阈值**:`KM_RAG_GATE_FULLTEXT_TOP1/MEAN`(064;现恒裁剪
      形态,改值即生效、无 shadow/primary 切换步)——zhparser 改变 ts_rank
      量纲,先经 `/system/rag/recall-probe` 试跑采新量纲分布再定档。
+     **查询语义现态(112,2026-10-12)**:召回=「AND 优先、内容词兜底」——
+     问句切词条后先全词条 AND;零命中落**内容词兜底轮**(length≥2 词条
+     EXISTS,单字虚词词条被谓词排除)。098 验收场景「查询客户→『客户』
+     词条命中」自 112 起真正兑现(此前 AND-only 下结构性不成立)。
+     **111 勘误**:无差别 OR 兜底曾实施并「实证否决回退」——该否决经查为
+     **评估栈日配额耗尽事故误判**(非召回质量信号,逐题 429/403 在案,
+     见 evals/README 勘误行);无差别形态仍被 112 规范排除(噪声面无界),
+     内容词形态为 spec 认可的唯一兜底形态。历史「AND 语义压制」表述作废。
   回退:`KM_RAG_FULLTEXT_TS_CONFIG=simple` + 重启 + 重扫/重建(零 schema 依赖)。
 
-- **本机评测演示环境**:env-postgres 已装 tenant_sakila(28 对象)/tenant_olist
-  (9 表 CSV)/sakila_ext 独立库 + sakila/olist 租户注册 + admin 绑定;知识已灌
-  (sakila 21/olist 9)。**default 路径自动路由 tenant_{tenant_key} schema,租户
-  数据源无需注册**(reserved 保留字)。装载脚本 `infra/example-data/load.sh` 全
-  参数化(KM_PG_CONTAINER/KM_PG_USER/KM_PG_PASSWORD):上游 dump 依赖
-  DISABLE TRIGGER ALL 乱序装载,**数据段必须单事务+超管跑**(非超管必拒);
-  脚本含业务 schema→kongming 只读授权步(超管装载后表属主非 kongming,缺授权
-  api 侧权限拒)。
-- **评测基线现值**:宽松 50/53 (94%)/严格 34/53/表命中 47/53(基线表=
-  evals/README 单源;olist_016 为已知 LLM 采样波动题,宽松偶发落败)。编写坑:
+- **本机评测演示环境(2026-10-12 已重灌现态)**:`infra/example-data/load.sh`
+  对 localenv-postgres 实跑通过(幂等可重放)——tenant_sakila 28 对象/
+  tenant_olist 9 表/sakila_ext 独立库 28 对象,public 零泄漏;sakila/olist
+  租户已注册并绑 admin。三源知识已灌且全量向量化(sakila 22/olist 10/
+  sakila_dyn 21 条目;reindex 自动润色)。tenant_default.goods 负例域表
+  已建(051 语义)。动态源 sakila_dyn 挂 default 租户(sys_datasource 已注
+  册,凭证=api 同款 kongming 角色)。**default 路径自动路由
+  tenant_{tenant_key} schema,租户数据源无需注册**(reserved 保留字)。
+  评测口径:LLM key 仅 agent 面持有(ADR-002;api 经 /internal/embedding
+  回调),向量路生效前提=8001/18001 agent 进程在位 + muniu 桥(8787)在跑
+  (key 失效用 `./bin/muniu keys create --tenant default --name <名>` 重签并
+  更新 apps/agent/.env);评估栈配方(18000/18001+互联覆盖+一次性超管账号
+  +两轮间清 query_history 与 km:ragctx:*)见会话记忆 dev-machine-env-facts。
+  **评估环境坑(2026-10-12 实证)**:①`chat_quota_daily_calls` 缺省 500 按
+  租户日累计,一天多轮评估必在中后段撞 429 CHAT_QUOTA_EXCEEDED(分数假跌)
+  ——评估 api 启动必带 `KM_CHAT_QUOTA_DAILY_CALLS=0`(0=不限);②逐题
+  异常(429/403)会让「失败题」混入总分,**任何轮次判定前先 grep 逐题日志
+  的「异常」行**,总分下降≠质量劣化。
+  上游 dump 依赖 DISABLE TRIGGER ALL 乱序装载,**数据段必须单事务+超管跑**
+  (非超管必拒);脚本含业务 schema→kongming 只读授权步(缺授权 api 侧权限拒)。
+- **评测基线现值(2026-10-12,112 后)**:zhparser 档(现役档)**宽松
+  50/53 (94%)/严格 34/53/表命中 47/53——历史新高**(112 内容词兜底+
+  evals 基建修复后 B'' 轮;失败 3 题全确定性 FILTER 归因)。simple 缺省档
+  基线=48/32/44(重灌日)。**历史基线可比性警示**:2026-10-12 各轮均含
+  2 道 hex id 题恒 403(已修)且 A 轮后日配额递减污染(已加配额豁免)——
+  跨轮对比以失败名单逐题对拍为准,勿直接比分。基线表=evals/README 单源
+  (111 勘误注记在同表);
+  olist_016 为已知 LLM 采样波动题,宽松偶发落败。编写坑:
   **表命中判据=末段名子集比较,gold 的 expected_tables 必须裸表名**(schema 归
   gold_sql 承载);空结果 gold 已被 validators 拒(0 行=不可判定题,错误 SQL
   返回空集即伪通过);ORDER BY…LIMIT 须唯一列 tiebreaker(校验器括号感知,
@@ -878,10 +924,11 @@ UI(API 已备场景低频)/D-B7 进度条动态 style(原裁接受)。
   gen 的形态不一致;残余异常面≈0 仅编程错误):老流式挂收集器时同步迁移。
 - 辅助数据查询(tenants/myTeams)失败静默:核心已降级显式,其余触发=用户反馈。
 
-**产品登记(非债务;已落 docs/roadmap.md「产品待办登记」节)**:STT/OCR
-选型、真实支付通道、可视化画布、MCP resources/prompts、Bot 版本化上架、
-个性化推荐、用户/TEAM 维度配额、触发器失败重试、更多事件源、中文全文
-zhparser、知识库团队归属(出处 032①)。
+**产品登记(非债务;单源=docs/roadmap.md「产品待办登记」节,2026-10-12
+起含否定裁决登记——STT/OCR、个性化推荐、Slack、zhparser 切默认等六项已
+明确不做,勿再作为待办重提;可视化画布/MCP resources/prompts/Bot 版本化/
+配额/重试/邮件事件源/zhparser 配置化/知识库团队归属/指标可见性等已分批
+落地归档)**。
 
 **出处说明**:终态主清单见 archive/2026-08-25-backlog-settlement/proposal.md;
 「触顶部分结果的 web 渲染增强」「辅助数据查询失败静默」两条为 R1/R2 评审

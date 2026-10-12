@@ -33,6 +33,7 @@ import { DataView } from "@/components/data-view";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ErrorAlert } from "@/components/error-alert";
 import { useDatasource } from "@/lib/datasource-store";
+import { api } from "@/lib/api";
 import { ragApi } from "@/lib/rag-api";
 import {
   addRelation,
@@ -61,6 +62,9 @@ export default function SemanticPage() {
   const [mName, setMName] = useState("");
   const [mTpl, setMTpl] = useState("");
   const [mTerms, setMTerms] = useState("");
+  // 110:可见范围——DEPT 档仅归属部门集合内调用者注入
+  const [mScope, setMScope] = useState<"ALL" | "DEPT">("ALL");
+  const [mDeptId, setMDeptId] = useState("");
 
   // 040:候选表清单=当前数据源知识条目(引用条目外的表后端 400 拒;后端页大小
   // 上限 100,全页遍历取全,安全帽 5 页=500 表)
@@ -95,6 +99,24 @@ export default function SemanticPage() {
   const metrics = useQuery({
     queryKey: ["semantic", "metrics", ds],
     queryFn: () => listMetrics(ds),
+  });
+  // 110:DEPT 档归属部门候选(树接口拍平;仅 DEPT 档时拉取)
+  const depts = useQuery({
+    queryKey: ["depts", "tree"],
+    queryFn: async () => {
+      type DeptNode = { id: string; dept_name: string; children?: DeptNode[] | null };
+      const tree = await api.get<DeptNode[]>("/system/depts");
+      const out: { id: string; name: string }[] = [];
+      const walk = (nodes: DeptNode[], prefix: string) => {
+        for (const n of nodes) {
+          out.push({ id: n.id, name: `${prefix}${n.dept_name}` });
+          if (n.children?.length) walk(n.children, `${prefix}${n.dept_name} / `);
+        }
+      };
+      walk(tree, "");
+      return out;
+    },
+    enabled: tab === "metrics" && mScope === "DEPT",
   });
 
   const introspect = useMutation({
@@ -145,11 +167,15 @@ export default function SemanticPage() {
           .map((t) => t.trim())
           .filter(Boolean),
         enabled: true,
+        visible_scope: mScope,
+        dept_id: mScope === "DEPT" ? mDeptId : null,
       }),
     onSuccess: () => {
       setMName("");
       setMTpl("");
       setMTerms("");
+      setMScope("ALL");
+      setMDeptId("");
       setError(null);
       void qc.invalidateQueries({ queryKey: ["semantic", "metrics", ds] });
     },
@@ -164,6 +190,9 @@ export default function SemanticPage() {
         sql_template: input.m.sql_template,
         business_terms: input.m.business_terms,
         enabled: input.enabled,
+        // 110:启停带原值,不把 DEPT 档重置回 ALL
+        visible_scope: input.m.visible_scope,
+        dept_id: input.m.dept_id,
       }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["semantic", "metrics", ds] }),
     onError: (e) => setError(e instanceof Error ? e.message : "保存失败"),
@@ -567,6 +596,17 @@ export default function SemanticPage() {
                 ),
               },
               {
+                key: "visible_scope",
+                header: "可见范围",
+                cardPriority: 3,
+                cellClassName: "text-xs",
+                render: (m) => (
+                  <Badge variant="secondary">
+                    {m.visible_scope === "DEPT" ? "限部门" : "公共"}
+                  </Badge>
+                ),
+              },
+              {
                 key: "enabled",
                 header: "状态",
                 cardPriority: 2,
@@ -617,9 +657,49 @@ export default function SemanticPage() {
                 placeholder="复购,回头率"
               />
             </div>
+            <div className="space-y-1">
+              <Label className="text-xs">可见范围</Label>
+              <Select
+                value={mScope}
+                onValueChange={(v) => {
+                  setMScope(v as "ALL" | "DEPT");
+                  setMDeptId("");
+                }}
+              >
+                <SelectTrigger className="w-28" aria-label="可见范围">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">公共(全员)</SelectItem>
+                  <SelectItem value="DEPT">限部门</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {mScope === "DEPT" && (
+              <div className="space-y-1">
+                <Label className="text-xs">归属部门</Label>
+                <Select value={mDeptId} onValueChange={setMDeptId}>
+                  <SelectTrigger className="w-44" aria-label="归属部门">
+                    <SelectValue placeholder="选择部门" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(depts.data ?? []).map((d) => (
+                      <SelectItem key={d.id} value={d.id}>
+                        {d.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <Button
               size="sm"
-              disabled={!mName.trim() || !mTpl.trim() || saveMetric.isPending}
+              disabled={
+                !mName.trim() ||
+                !mTpl.trim() ||
+                (mScope === "DEPT" && !mDeptId) ||
+                saveMetric.isPending
+              }
               onClick={() => saveMetric.mutate()}
             >
               <Layers className="size-3.5" aria-hidden />

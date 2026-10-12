@@ -62,6 +62,11 @@ class HttpMcpCaller:
     ) -> None:
         self._timeout = timeout_sec
         self._transport = transport
+        # 113:streamable-http 会话头,按 endpoint 隔离(server 下发才存在;
+        # 无状态 server 无头零影响)。实例为每请求新建/组合根单例均安全:
+        # 同 endpoint 的会话复用正是规范语义,异 endpoint 天然隔离
+        self._sessions: dict[str, str] = {}
+        self._session_locks: dict[str, asyncio.Lock] = {}
 
     async def _rpc(
         self,
@@ -83,6 +88,12 @@ class HttpMcpCaller:
 
         async def _do_request() -> tuple[str, str]:
             """发请求+流式读,返回 (响应文本, content-type)。"""
+            # 113 会话透传(streamable-http 规范):initialize 的响应头携带
+            # mcp-session-id,后续请求 MUST 带上——按 endpoint 隔离存储,
+            # server 不下发头(无状态形态)则不带,零影响
+            session_id = self._sessions.get(endpoint)
+            if session_id is not None:
+                req_headers["Mcp-Session-Id"] = session_id
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(self._timeout), transport=self._transport
             ) as client:
@@ -91,6 +102,9 @@ class HttpMcpCaller:
                 ) as resp:
                     if resp.status_code >= 400:
                         raise McpCallError("remote", f"HTTP {resp.status_code}")
+                    new_session = resp.headers.get("mcp-session-id")
+                    if new_session:
+                        self._sessions[endpoint] = new_session
                     ctype = resp.headers.get("content-type", "")
                     # 流式读+传输硬闸(8MB):超即中断报结构化错误;
                     # 语义截断在内容提取后(_CONTENT_CAP,整洁截断文本)
@@ -163,6 +177,33 @@ class HttpMcpCaller:
             raise McpCallError("protocol", "缺 result 字段")
         return cast("dict[str, Any]", result)
 
+    async def _initialize_params(self) -> dict[str, Any]:
+        return {
+            "protocolVersion": _PROTOCOL_VERSION,
+            "capabilities": {},
+            "clientInfo": {"name": "kongming", "version": "1.0"},
+        }
+
+    async def _ensure_session(self, *, endpoint: str, headers: dict[str, str]) -> None:
+        """懒握手(113,真实 server 验证暴露):streamable-http 规范要求
+        initialize 后携 Mcp-Session-Id,而调用面(client 每请求新建)此前
+        对 stateful server 的后续请求恒缺会话头。按 endpoint 加锁防并发
+        双重 initialize;已有会话零开销。"""
+        if self._sessions.get(endpoint) is not None:
+            return
+        lock = self._session_locks.setdefault(endpoint, asyncio.Lock())
+        async with lock:
+            if self._sessions.get(endpoint) is not None:
+                return
+            await self._rpc(
+                endpoint=endpoint,
+                headers=headers,
+                method="initialize",
+                params=await self._initialize_params(),
+                rpc_id=1,
+            )
+            await self._notify_initialized(endpoint, headers)
+
     async def probe(self, *, endpoint: str, headers: dict[str, str]) -> ProbeResult:
         """initialize 握手 + 三原语并行探测(109,design D4):能力未声明
         即时短路(不发请求);方法不存在(-32601)= 不支持计数 0;超时/拒连/
@@ -172,11 +213,7 @@ class HttpMcpCaller:
             endpoint=endpoint,
             headers=headers,
             method="initialize",
-            params={
-                "protocolVersion": _PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "kongming", "version": "1.0"},
-            },
+            params=await self._initialize_params(),
             rpc_id=1,
         )
         await self._notify_initialized(endpoint, headers)
@@ -254,6 +291,7 @@ class HttpMcpCaller:
             log.debug("initialized 通告未被接受(无态形态继续)", exc_info=True)
 
     async def list_tools(self, *, endpoint: str, headers: dict[str, str]) -> list[DiscoveredTool]:
+        await self._ensure_session(endpoint=endpoint, headers=headers)
         result = await self._rpc(
             endpoint=endpoint,
             headers=headers,
@@ -294,6 +332,7 @@ class HttpMcpCaller:
         self, *, endpoint: str, headers: dict[str, str]
     ) -> list[DiscoveredResource]:
         """resources/list 发现(109):畸形条目跳过(宁缺毋滥),uri 必须非空。"""
+        await self._ensure_session(endpoint=endpoint, headers=headers)
         result = await self._rpc(
             endpoint=endpoint,
             headers=headers,
@@ -326,6 +365,7 @@ class HttpMcpCaller:
         self, *, endpoint: str, headers: dict[str, str]
     ) -> list[DiscoveredPrompt]:
         """prompts/list 发现(109):仅清单(name/description/arguments)。"""
+        await self._ensure_session(endpoint=endpoint, headers=headers)
         result = await self._rpc(
             endpoint=endpoint,
             headers=headers,
@@ -375,6 +415,7 @@ class HttpMcpCaller:
     ) -> dict[str, Any]:
         """resources/read(109):文本形态限定——blob(二进制)拒绝不进观察;
         语义截断同 tools/call(1MB 附标记,原始大小回传)。"""
+        await self._ensure_session(endpoint=endpoint, headers=headers)
         result = await self._rpc(
             endpoint=endpoint,
             headers=headers,
@@ -415,6 +456,7 @@ class HttpMcpCaller:
         arguments: dict[str, str],
     ) -> dict[str, Any]:
         """prompts/get 按名渲染(109):管理面只读预览的实时数据源,不落库。"""
+        await self._ensure_session(endpoint=endpoint, headers=headers)
         result = await self._rpc(
             endpoint=endpoint,
             headers=headers,
@@ -442,6 +484,7 @@ class HttpMcpCaller:
         tool_name: str,
         args: dict[str, Any],
     ) -> dict[str, Any]:
+        await self._ensure_session(endpoint=endpoint, headers=headers)
         result = await self._rpc(
             endpoint=endpoint,
             headers=headers,

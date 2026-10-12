@@ -22,6 +22,18 @@ class MetricDef:
     updated_at: object | None = None
 
 
+@dataclass(frozen=True)
+class CallerScope:
+    """调用者 data_scope 解析结果(110)。
+
+    universal=True=有效范围 ALL 档(全部指标可见);False 时仅 dept_ids 集合内
+    的 DEPT 档指标 + 全体 ALL 档指标可见(空集合=SELF/无身份/CUSTOM 空集读面
+    降级,只余 ALL 档)。"""
+
+    universal: bool
+    dept_ids: tuple[str, ...] = ()
+
+
 def format_relations_hint(relations: list[TableRelation]) -> str:
     """关系集 → JOIN path 文字段(纯函数;仅召回集合内的两两关系由调用方收窄)。"""
     lines: list[str] = []

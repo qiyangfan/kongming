@@ -731,6 +731,7 @@ async def rag_retrieve(
         import re as _re
 
         from kongming.semantic.repository import SqlSemanticRepo
+        from kongming.semantic.router import CallerDeptScopeAdapter
         from kongming.semantic.service import SemanticService
 
         tid_row = (
@@ -745,12 +746,15 @@ async def rag_retrieve(
             tables = _re.findall(r"^([\w]+\.[\w]+)\(", ctx.schema_hint, _re.M)
             tables = list(dict.fromkeys(tables))
             relations_hint, metric_hints, metric_hits_objs = await SemanticService(
-                SqlSemanticRepo(session)
+                SqlSemanticRepo(session),
+                # 110:指标注入面按调用者 data_scope 收窄(解析失败 service 内读面降级)
+                caller_scope_resolver=CallerDeptScopeAdapter(session),
             ).enrich(
                 tenant_id=str(tid_row),
                 datasource_key=req.datasource_key,
                 question=req.question,
                 tables=tables,
+                caller_user_id=None if req.user_id is None else str(req.user_id),
             )
     except Exception as _e:
         # R1-L3:undefined_table(0012 未迁移)升 error(运维可感知整体失效);

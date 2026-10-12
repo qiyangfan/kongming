@@ -21,19 +21,26 @@ log = logging.getLogger(__name__)
 _CTX_PREFIX = "km:ragctx:"
 _CTX_TTL_SEC = 600
 _SCAN_COUNT = 100
+# 112:查询语义版本段(全文路「AND 优先、内容词兜底」)——查询语义变更时
+# bump 本常量,变更前旧键空间在 TTL 窗口内自然弃用不串味(与 098 配置段
+# 同一「键版本化」思路;同部署内恒定,evict SCAN 模式不含该段跨语义全收)
+_QUERY_SEMANTICS = "and-cw"
 
 
 def _ctx_key(
     tenant_id: str, datasource_key: str, question: str, ts_config: str, team_fp: str = "public"
 ) -> str:
-    """键段序:租户/数据源/分词配置/团队集合指纹在 hash 前缀段(失效 SCAN 模式
-    `租户:数据源:*` 跨配置、跨可见集合全收——数据写失效本就应清全部变体),
-    问句材料(含 history/扩展开关等派生键材料)hash 在尾段。
-    102:团队集合指纹段(team_set_fingerprint,空集="public")——不同可见
-    集合的调用者 MUST NOT 互命中;团队关系变化→指纹变→自然隔离(TTL 吸收
-    旧条目),与 098 配置维度同一「键版本化」思路。"""
+    """键段序:租户/数据源/分词配置/查询语义/团队集合指纹在 hash 前缀段
+    (失效 SCAN 模式 `租户:数据源:*` 跨配置、跨语义、跨可见集合全收——
+    数据写失效本就应清全部变体),问句材料(含 history/扩展开关等派生键
+    材料)hash 在尾段。102:团队集合指纹段(team_set_fingerprint,空集=
+    "public")——不同可见集合的调用者 MUST NOT 互命中;团队关系变化→指纹
+    变→自然隔离(TTL 吸收旧条目),与 098 配置维度同一「键版本化」思路。"""
     digest = hashlib.sha256(question.encode("utf-8")).hexdigest()
-    return f"{_CTX_PREFIX}{tenant_id}:{datasource_key}:{ts_config}:{team_fp}:{digest}"
+    return (
+        f"{_CTX_PREFIX}{tenant_id}:{datasource_key}:{ts_config}"
+        f":{_QUERY_SEMANTICS}:{team_fp}:{digest}"
+    )
 
 
 class ContextCache:

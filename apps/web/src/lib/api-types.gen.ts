@@ -798,8 +798,8 @@ export interface paths {
          * @description 064:召回试跑(只读):三路命中及各自原生分、融合分、双条件判定结论。
          *
          *     零副作用:SHALL NOT 修改配置、SHALL NOT 落库、SHALL NOT 触发召回缓存
-         *     失效(不走 ctx 缓存)。影子形态含"若生效将丢弃"记录。两个高频场景:
-         *     上传表说明后验证可召回性;影子期标定阈值(不等真实流量)。
+         *     失效(不走 ctx 缓存)。两个高频场景:上传表说明后验证可召回性;闸门
+         *     阈值标定(不等真实流量)。102:召回在调用者可见集合内(公共∪所在团队)。
          *     097:响应模型纯定型(键集=service 现值锁定,判定逻辑零变更)。
          */
         get: operations["recall_probe_system_rag_recall_probe_get"];
@@ -5214,6 +5214,13 @@ export interface components {
              * @default true
              */
             enabled: boolean;
+            /**
+             * Visible Scope
+             * @default ALL
+             */
+            visible_scope: string;
+            /** Dept Id */
+            dept_id?: string | null;
         };
         /** MetricOut */
         MetricOut: {
@@ -5229,6 +5236,13 @@ export interface components {
             enabled: boolean;
             /** Updated At */
             updated_at: string;
+            /**
+             * Visible Scope
+             * @default ALL
+             */
+            visible_scope: string;
+            /** Dept Id */
+            dept_id?: string | null;
         };
         /** MissingColumnsOut */
         MissingColumnsOut: {

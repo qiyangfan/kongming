@@ -509,31 +509,45 @@ class RagRepository:
         ).scalar()
         return bool(row)
 
-    async def recall_fulltext(
+    @property
+    def _ft_and_pred(self) -> str:
+        """AND 轮谓词:全词条匹配。"""
+        return f" AND tsv @@ plainto_tsquery('{self._ts}', :q)"
+
+    @property
+    def _ft_or_pred(self) -> str:
+        """内容词兜底轮谓词(112):任一**内容词**词条命中——词条限
+        length >= 2,从谓词上排除 111 实证的单字虚词噪声源(『有』『部』
+        类高频词条挤占 RRF 位次);词条逐个过 plainto_tsquery(对任意
+        文本安全,内部转义),外部文本不进 to_tsquery 语法位。"""
+        return (
+            " AND EXISTS (SELECT 1 FROM"  # noqa: S608  # {self._ts} 白名单校验配置名(同 098 豁免)
+            f" unnest(tsvector_to_array(to_tsvector('{self._ts}', :q))) AS tok"
+            " WHERE length(tok) >= 2"
+            f"   AND tsv @@ plainto_tsquery('{self._ts}', tok))"
+        )
+
+    async def _fulltext_rows(
         self,
         *,
+        predicate: str,
         tenant_id: str,
         datasource_key: str,
         question: str,
-        visible_team_ids: Sequence[str] = (),
+        visible_team_ids: Sequence[str],
     ) -> list[RecallHit]:
-        """全文路:tsv @@ plainto_tsquery(配置分词,…),ts_rank 近似 BM25。
-
-        064:SELECT 回 ts_rank 得分(与 ORDER BY 同口径,消现状重复计算)。
-        分词配置与写入侧同源(self._ts 单点注入,098):配置变更后存量 tsv
-        未重扫前该路命中会静默错配——重扫配方见 docs/HANDOFF.md。
-        102:可见集合叠加(与向量路同款条目级过滤)。
-        """
+        """共享 SELECT 主体(排序/量纲/过滤单点;仅匹配谓词随轮次变化)。"""
         rows = (
             await self._s.execute(
                 text(
                     # S608 豁免:{self._ts} 为白名单校验后的配置名(098 design
-                    # D2/D5,标识符无法绑定参数),其余全部绑定参数
+                    # D2/D5,标识符无法绑定参数),谓词为类内常量形态(112),
+                    # 其余全部绑定参数
                     "SELECT schema_name, table_name,"  # noqa: S608
                     f" ts_rank(tsv, plainto_tsquery('{self._ts}', :q)) AS score"
                     " FROM rag.table_descriptions"
                     " WHERE tenant_id = :t AND datasource_key = :d"
-                    f" AND tsv @@ plainto_tsquery('{self._ts}', :q)"
+                    f"{predicate}"
                     " AND (team_id IS NULL OR team_id::text = ANY(CAST(:teams AS text[])))"
                     f" ORDER BY ts_rank(tsv, plainto_tsquery('{self._ts}', :q)) DESC"
                     " LIMIT :k"
@@ -556,6 +570,38 @@ class RagRepository:
             )
             for r in rows
         ]
+
+    async def recall_fulltext(
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        question: str,
+        visible_team_ids: Sequence[str] = (),
+    ) -> list[RecallHit]:
+        """全文路:tsv @@ plainto_tsquery(配置分词,…),ts_rank 近似 BM25。
+
+        112 查询语义「AND 优先、内容词兜底」:问句切词条后先全词条 AND
+        匹配;AND 零命中才落内容词兜底轮(length >= 2 词条,111 实证的
+        单字虚词噪声源被谓词排除)——正常路径往返数不变,兜底轮排序/得分
+        沿用同量纲 ts_rank,064 闸门判据不变。无差别形态 MUST NOT(spec
+        规范性排除,111 实证在案)。
+        064:SELECT 回 ts_rank 得分(与 ORDER BY 同口径,消现状重复计算)。
+        分词配置与写入侧同源(self._ts 单点注入,098):配置变更后存量 tsv
+        未重扫前该路命中会静默错配——重扫配方见 docs/HANDOFF.md。
+        102:可见集合叠加(与向量路同款条目级过滤)。
+        """
+        for predicate in (self._ft_and_pred, self._ft_or_pred):
+            hits = await self._fulltext_rows(
+                predicate=predicate,
+                tenant_id=tenant_id,
+                datasource_key=datasource_key,
+                question=question,
+                visible_team_ids=visible_team_ids,
+            )
+            if hits:
+                return hits
+        return []
 
     async def recall_history(
         self,

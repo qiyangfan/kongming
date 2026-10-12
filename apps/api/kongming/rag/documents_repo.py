@@ -186,20 +186,45 @@ class SqlDocumentRepo:
         )
         return [dict(r) for r in rows]
 
-    async def recall_children_fulltext(
-        self, *, tenant_id: str, datasource_key: str, question: str, top_k: int
+    @property
+    def _ft_and_pred(self) -> str:
+        """AND 轮谓词:全词条匹配。"""
+        return f"   AND tsv @@ plainto_tsquery('{self._ts}', :q)"
+
+    @property
+    def _ft_or_pred(self) -> str:
+        """内容词兜底轮谓词(112):任一**内容词**词条命中(词条限
+        length >= 2,排除 111 实证的单字虚词噪声源;与表说明路同构,
+        仅谓词行异;外部文本不进 to_tsquery 语法位)。"""
+        return (
+            "   AND EXISTS (SELECT 1 FROM"  # noqa: S608  # {self._ts} 白名单校验配置名(同 098 豁免)
+            f" unnest(tsvector_to_array(to_tsvector('{self._ts}', :q))) AS tok"
+            " WHERE length(tok) >= 2"
+            f"   AND tsv @@ plainto_tsquery('{self._ts}', tok))"
+        )
+
+    async def _children_fulltext_rows(
+        self,
+        *,
+        predicate: str,
+        tenant_id: str,
+        datasource_key: str,
+        question: str,
+        top_k: int,
     ) -> list[dict[str, Any]]:
+        """共享 SELECT 主体(R1-M3 相关度排序;仅匹配谓词随轮次变化)。"""
         rows = (
             (
                 await self._s.execute(
                     text(
                         # S608 豁免:{self._ts} 为白名单校验后的配置名(098 design
-                        # D2/D5,标识符无法绑定参数),其余全部绑定参数
+                        # D2/D5,标识符无法绑定参数),谓词为类内常量形态(112),
+                        # 其余全部绑定参数
                         "SELECT id, parent_id, source_ref FROM rag.document_chunks"  # noqa: S608
                         " WHERE tenant_id=:t AND datasource_key=:d AND chunk_level='CHILD'"
-                        f"   AND tsv @@ plainto_tsquery('{self._ts}', :q)"
-                        # R1-M3:相关度排序(009 同款,此前 LIMIT 取任意行);
-                        # 分词配置与写入侧同源(self._ts 单点注入,098)
+                        f"{predicate}"
+                        # R1-M3:相关度排序(009 同款);分词配置与写入侧同源(098);
+                        # 112 兜底轮沿用同量纲 ts_rank
                         f" ORDER BY ts_rank(tsv, plainto_tsquery('{self._ts}', :q)) DESC"
                         " LIMIT :k"
                     ),
@@ -210,6 +235,24 @@ class SqlDocumentRepo:
             .all()
         )
         return [dict(r) for r in rows]
+
+    async def recall_children_fulltext(
+        self, *, tenant_id: str, datasource_key: str, question: str, top_k: int
+    ) -> list[dict[str, Any]]:
+        """112 查询语义「AND 优先、内容词兜底」(与表说明路同根因同构):
+        全词条 AND 零命中才落内容词(length >= 2)兜底轮,排序/量纲不变;
+        无差别形态 MUST NOT(spec 规范性排除,111 实证在案)。"""
+        for predicate in (self._ft_and_pred, self._ft_or_pred):
+            rows = await self._children_fulltext_rows(
+                predicate=predicate,
+                tenant_id=tenant_id,
+                datasource_key=datasource_key,
+                question=question,
+                top_k=top_k,
+            )
+            if rows:
+                return rows
+        return []
 
     async def fetch_parents(self, *, tenant_id: str, parent_ids: list[str]) -> list[dict[str, Any]]:
         if not parent_ids:

@@ -170,16 +170,36 @@ class SqlSemanticRepo:
 
     # ── 指标 ──
 
-    async def list_metrics(self, *, tenant_id: str, datasource_key: str) -> list[dict[str, Any]]:
+    async def list_metrics(
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        visible_dept_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        # 110:可见性判定下推单点(与 102「SQL 同判」同纪律)——
+        # visible_dept_ids=None=不过滤(管理面全量视角/ALL 档调用者);
+        # 传序列(含空数组)=ALL 档 ∪「DEPT 档且 dept_id 命中集合」,空数组自然
+        # 退化为仅 ALL 档(SELF/无身份/CUSTOM 空集的读面降级形态)。
+        vis = ""
+        params: dict[str, Any] = {"t": tenant_id, "d": datasource_key}
+        if visible_dept_ids is not None:
+            vis = (
+                " AND (visible_scope='ALL'"
+                " OR (visible_scope='DEPT' AND dept_id = ANY(CAST(:depts AS uuid[]))))"
+            )
+            params["depts"] = visible_dept_ids
         rows = (
             (
                 await self._s.execute(
                     text(
-                        "SELECT id, metric_name, sql_template, business_terms, enabled, updated_at"
+                        "SELECT id, metric_name, sql_template, business_terms, enabled,"  # noqa: S608  # 常量模板,参数化绑定
+                        " updated_at, visible_scope, dept_id"
                         " FROM rag.metric_definitions"
-                        " WHERE tenant_id=:t AND datasource_key=:d ORDER BY metric_name"
+                        f" WHERE tenant_id=:t AND datasource_key=:d{vis}"  # noqa: S608  # 常量模板,参数化绑定
+                        " ORDER BY metric_name"
                     ),
-                    {"t": tenant_id, "d": datasource_key},
+                    params,
                 )
             )
             .mappings()
@@ -190,16 +210,18 @@ class SqlSemanticRepo:
     async def upsert_metric(
         self, *, tenant_id: str, datasource_key: str, metric: dict[str, Any]
     ) -> str:
+        visible_scope = str(metric.get("visible_scope") or "ALL")
+        dept_id = metric.get("dept_id")
         row_id = (
             await self._s.execute(
                 text(
                     "INSERT INTO rag.metric_definitions"
                     " (id, tenant_id, datasource_key, metric_name, sql_template,"
-                    "  business_terms, enabled)"
-                    " VALUES (:i, :t, :d, :n, :tpl, :terms, :en)"
+                    "  business_terms, enabled, visible_scope, dept_id)"
+                    " VALUES (:i, :t, :d, :n, :tpl, :terms, :en, :vs, :dp)"
                     " ON CONFLICT (tenant_id, datasource_key, metric_name)"
                     " DO UPDATE SET sql_template=:tpl, business_terms=:terms,"
-                    "   enabled=:en, updated_at=now()"
+                    "   enabled=:en, visible_scope=:vs, dept_id=:dp, updated_at=now()"
                     " RETURNING id"  # R1-M1:真实行 id
                 ),
                 {
@@ -210,6 +232,8 @@ class SqlSemanticRepo:
                     "tpl": metric["sql_template"],
                     "terms": metric.get("business_terms") or [],
                     "en": metric.get("enabled", True),
+                    "vs": visible_scope,
+                    "dp": dept_id,
                 },
             )
         ).scalar_one()

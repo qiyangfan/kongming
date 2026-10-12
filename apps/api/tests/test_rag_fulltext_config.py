@@ -3,9 +3,14 @@
 零回归红线:缺省 simple 下全部全文 SQL 形态与引入前逐字一致(现算对拍——
 捕获桩会话渲染 SQL 字符串,与 098 改动前字面量断言相等)。
 缓存纪律:键隔离断言不做中途清缓存(键含配置即天然隔离,清库会掩盖键缺陷)。
+112:查询语义「AND 优先、内容词兜底」——兜底轮词条限 length(tok) >= 2
+(111 实证否决无差别形态:单字虚词词条噪声;对拍重钉为轮次纪律形态,
+AND 命中=仅 1 条 SQL,桩恒空=AND+兜底两条,兜底与主轮仅谓词行异);
+「查询客户」xfail 摘除(『客户』内容词兜底应转真),兜底集成测试恢复。
 """
 
 import os
+import types
 from pathlib import Path
 from typing import Any, cast
 
@@ -130,11 +135,13 @@ async def test_startup_selfcheck_missing_config_rejected(session: AsyncSession) 
 
 
 def test_ctx_key_layout_contains_ts_config() -> None:
-    """键串直接断言:配置段在 hash 前缀段,异配置键串必异。"""
+    """键串直接断言:配置段在 hash 前缀段,异配置键串必异;112 后配置段后
+    必含查询语义段(AND-only 时代旧条目在 TTL 窗口内不串味)。"""
     k1 = _ctx_key("t1", "default", "键材料", "simple")
     k2 = _ctx_key("t1", "default", "键材料", "zhparser")
     assert k1.startswith("km:ragctx:t1:default:simple:")
     assert k2.startswith("km:ragctx:t1:default:zhparser:")
+    assert ":and-cw:" in k1 and ":and-cw:" in k2
     assert k1 != k2
 
 
@@ -212,6 +219,23 @@ _EXPECTED_RECALL_FULLTEXT_SQL = (
     " LIMIT :k"
 )
 
+# 112 内容词兜底轮:与主轮仅谓词行异(EXISTS 任一内容词命中;词条限
+# length >= 2 排除 111 实证的单字虚词噪声源;词条逐个过 plainto_tsquery,
+# 外部文本不进 to_tsquery 语法位),排序/量纲/过滤不变
+_EXPECTED_RECALL_FULLTEXT_OR_SQL = (
+    "SELECT schema_name, table_name,"
+    " ts_rank(tsv, plainto_tsquery('simple', :q)) AS score"
+    " FROM rag.table_descriptions"
+    " WHERE tenant_id = :t AND datasource_key = :d"
+    " AND EXISTS (SELECT 1 FROM"
+    " unnest(tsvector_to_array(to_tsvector('simple', :q))) AS tok"
+    " WHERE length(tok) >= 2"
+    "   AND tsv @@ plainto_tsquery('simple', tok))"
+    " AND (team_id IS NULL OR team_id::text = ANY(CAST(:teams AS text[])))"
+    " ORDER BY ts_rank(tsv, plainto_tsquery('simple', :q)) DESC"
+    " LIMIT :k"
+)
+
 _EXPECTED_DOC_FIND_SQL = (
     "SELECT id, content_hash FROM rag.documents"
     " WHERE tenant_id=:t AND datasource_key=:d AND doc_name=:n"
@@ -239,9 +263,25 @@ _EXPECTED_DOC_RECALL_SQL = (
     " LIMIT :k"
 )
 
+# 112 内容词兜底轮(文档路):同表说明路口径,仅谓词行异
+_EXPECTED_DOC_RECALL_OR_SQL = (
+    "SELECT id, parent_id, source_ref FROM rag.document_chunks"
+    " WHERE tenant_id=:t AND datasource_key=:d AND chunk_level='CHILD'"
+    "   AND EXISTS (SELECT 1 FROM"
+    " unnest(tsvector_to_array(to_tsvector('simple', :q))) AS tok"
+    " WHERE length(tok) >= 2"
+    "   AND tsv @@ plainto_tsquery('simple', tok))"
+    " ORDER BY ts_rank(tsv, plainto_tsquery('simple', :q)) DESC"
+    " LIMIT :k"
+)
+
 
 class _CaptureResult:
-    """桩 execute 结果:恒空集形态(mappings/all/one_or_none 全空)。"""
+    """桩 execute 结果:缺省恒空集形态(mappings/all/one_or_none 全空),
+    可注入预设行(供 _ScriptedSession 回放命中场景)。"""
+
+    def __init__(self, rows: list[object] | None = None) -> None:
+        self._rows: list[object] = rows or []
 
     def mappings(self) -> "_CaptureResult":
         return self
@@ -250,7 +290,7 @@ class _CaptureResult:
         return None
 
     def all(self) -> list[object]:
-        return []
+        return self._rows
 
 
 class _CaptureSession:
@@ -262,6 +302,19 @@ class _CaptureSession:
     async def execute(self, clause: object, params: object = None) -> _CaptureResult:
         self.sqls.append(str(clause))
         return _CaptureResult()
+
+
+class _ScriptedSession(_CaptureSession):
+    """回放桩会话:按预设序列弹出结果集(钉「AND 命中→不发第二条 SQL」
+    的轮次优先级纪律;空序列=恒空,与捕获桩同形态)。"""
+
+    def __init__(self, results: list[list[object]]) -> None:
+        super().__init__()
+        self._results = list(results)
+
+    async def execute(self, clause: object, params: object = None) -> _CaptureResult:
+        self.sqls.append(str(clause))
+        return _CaptureResult(self._results.pop(0) if self._results else [])
 
 
 _CHUNK: dict[str, object] = {
@@ -296,11 +349,25 @@ async def test_upsert_sql_identical_with_default_simple() -> None:
 
 
 async def test_recall_fulltext_sql_identical_with_default_simple() -> None:
+    """桩恒空=AND 零命中场景 → 渲染 AND+内容词兜底两条 SQL(112 轮次
+    纪律:兜底轮只在零命中后发生;两轮仅谓词行异,主体逐字同构)。"""
     cap = _CaptureSession()
     await RagRepository(cast("Any", cap)).recall_fulltext(
         tenant_id="t", datasource_key="d", question="q"
     )
-    assert cap.sqls == [_EXPECTED_RECALL_FULLTEXT_SQL]
+    assert cap.sqls == [_EXPECTED_RECALL_FULLTEXT_SQL, _EXPECTED_RECALL_FULLTEXT_OR_SQL]
+
+
+async def test_recall_fulltext_and_hit_skips_fallback_round() -> None:
+    """112 优先级纪律(spec 场景「AND 有命中时不放大混入」对拍):AND 轮
+    有命中 → 仅发 1 条 SQL,单内容词条目不经兜底轮混入。"""
+    hit = types.SimpleNamespace(schema_name="public", table_name="tbl", score=0.5)
+    cap = _ScriptedSession([[hit]])
+    hits = await RagRepository(cast("Any", cap)).recall_fulltext(
+        tenant_id="t", datasource_key="d", question="q"
+    )
+    assert len(cap.sqls) == 1 and cap.sqls[0] == _EXPECTED_RECALL_FULLTEXT_SQL
+    assert len(hits) == 1 and hits[0].table_name == "tbl" and hits[0].source == "fulltext"
 
 
 async def test_upsert_sql_switches_to_zhparser_single_point() -> None:
@@ -316,7 +383,10 @@ async def test_recall_fulltext_sql_switches_to_zhparser_single_point() -> None:
     await RagRepository(cast("Any", cap), ts_config="zhparser").recall_fulltext(
         tenant_id="t", datasource_key="d", question="q"
     )
-    assert cap.sqls == [_EXPECTED_RECALL_FULLTEXT_SQL.replace("'simple'", "'zhparser'")]
+    assert cap.sqls == [
+        _EXPECTED_RECALL_FULLTEXT_SQL.replace("'simple'", "'zhparser'"),
+        _EXPECTED_RECALL_FULLTEXT_OR_SQL.replace("'simple'", "'zhparser'"),
+    ]
 
 
 async def test_doc_fulltext_sql_identical_with_default_simple() -> None:
@@ -338,7 +408,18 @@ async def test_doc_fulltext_sql_identical_with_default_simple() -> None:
     await SqlDocumentRepo(cast("Any", cap2)).recall_children_fulltext(
         tenant_id="t", datasource_key="d", question="q", top_k=5
     )
-    assert cap2.sqls == [_EXPECTED_DOC_RECALL_SQL]
+    assert cap2.sqls == [_EXPECTED_DOC_RECALL_SQL, _EXPECTED_DOC_RECALL_OR_SQL]
+
+
+async def test_doc_fulltext_and_hit_skips_fallback_round() -> None:
+    """文档路同款轮次纪律:AND 命中 → 仅 1 条 SQL。"""
+    row = {"id": "c1", "parent_id": None, "source_ref": "文档.md §1"}
+    cap = _ScriptedSession([[row]])
+    rows = await SqlDocumentRepo(cast("Any", cap)).recall_children_fulltext(
+        tenant_id="t", datasource_key="d", question="q", top_k=5
+    )
+    assert len(cap.sqls) == 1 and cap.sqls[0] == _EXPECTED_DOC_RECALL_SQL
+    assert len(rows) == 1 and rows[0]["id"] == "c1"
 
 
 async def test_doc_fulltext_sql_switches_to_zhparser_single_point() -> None:
@@ -356,7 +437,10 @@ async def test_doc_fulltext_sql_switches_to_zhparser_single_point() -> None:
     await SqlDocumentRepo(cast("Any", cap2), ts_config="zhparser").recall_children_fulltext(
         tenant_id="t", datasource_key="d", question="q", top_k=5
     )
-    assert cap2.sqls == [_EXPECTED_DOC_RECALL_SQL.replace("'simple'", "'zhparser'")]
+    assert cap2.sqls == [
+        _EXPECTED_DOC_RECALL_SQL.replace("'simple'", "'zhparser'"),
+        _EXPECTED_DOC_RECALL_OR_SQL.replace("'simple'", "'zhparser'"),
+    ]
 
 
 def test_repo_constructor_rejects_illegal_config() -> None:
@@ -404,9 +488,10 @@ _SKIP_ZH = "本机 PG 无 zhparser 扩展(HANDOFF「zhparser 安装配方」装�
 
 @pytest.mark.skipif(not _HAS_ZHPARSER, reason=_SKIP_ZH)
 async def test_zhparser_tokenization_hits_table_description(session: AsyncSession) -> None:
-    """中文问句分词后命中表说明(写入/检索同配置 zhparser)。simple 形态下
-    「查询客户」整句成单 token 必不命中,分词后「客户」词元命中——全文路
-    中文第二支撑腿的核心断言。"""
+    """中文问句分词后命中表说明(写入/检索同配置 zhparser)。098 验收
+    场景「查询客户→『客户』词条命中」——AND 轮零命中(『查询』不在表
+    说明词条),经内容词兜底轮『客户』命中(112;111 曾兑现本断言、无差别
+    形态被否决,内容词过滤为 spec 点名的改善路径)。"""
     tid = await _mk_tenant(session, "zh_ft")
     repo = RagRepository(session, ts_config="zhparser")
     await repo.upsert_table(
@@ -452,6 +537,63 @@ async def test_zhparser_document_fulltext_same_config(session: AsyncSession) -> 
         tenant_id=tid, datasource_key="default", question="退货", top_k=5
     )
     assert hits  # simple 整句成 token 不命中,分词后「退货」词元命中
+
+
+@pytest.mark.skipif(not _HAS_ZHPARSER, reason=_SKIP_ZH)
+async def test_zhparser_contentword_fallback_hits_after_and_miss(
+    session: AsyncSession,
+) -> None:
+    """112 兜底真跑(spec 场景「虚词断裂问句经内容词兜底命中」):问句切
+    『有/部/影片』,表说明仅『影片』为内容词词条——AND 零命中落内容词
+    兜底轮。实现若丢失内容词过滤(回退无差别形态)本测试仍绿,由对拍桩
+    的谓词字面量与 evals 基线守卫。"""
+    tid = await _mk_tenant(session, "zh_cwfb")
+    repo = RagRepository(session, ts_config="zhparser")
+    await repo.upsert_table(
+        tenant_id=tid,
+        datasource_key="default",
+        schema_name="public",
+        table_name="film_info",
+        table_comment="影片信息表",
+        columns_comment={"id": "影片编号"},
+        sample_queries=[],
+        source_type="MANUAL_UPLOAD",
+        embedding=None,
+        alias="",
+    )
+    await repo.commit()
+    hits = await repo.recall_fulltext(
+        tenant_id=tid, datasource_key="default", question="有多少部影片"
+    )
+    assert any(h.table_name == "film_info" and h.source == "fulltext" for h in hits)
+
+
+@pytest.mark.skipif(not _HAS_ZHPARSER, reason=_SKIP_ZH)
+async def test_zhparser_doc_contentword_fallback(session: AsyncSession) -> None:
+    """文档路同款内容词兜底真跑:同根因同构,虚词断裂问句经『影片』命中。"""
+    tid = await _mk_tenant(session, "zh_docfb")
+    repo = SqlDocumentRepo(session, ts_config="zhparser")
+    await repo.replace_document(
+        tenant_id=tid,
+        datasource_key="default",
+        doc_name="影片规则.md",
+        content_hash="h1",
+        chunks=[
+            {
+                "seq": 1,
+                "level": "CHILD",
+                "parent_seq": None,
+                "source_ref": "影片规则.md §1",
+                "content": "影片规则:一部影片可被多名用户评分。",
+            }
+        ],
+        vectors=[],
+    )
+    await repo.commit()
+    hits = await repo.recall_children_fulltext(
+        tenant_id=tid, datasource_key="default", question="有多少部影片", top_k=5
+    )
+    assert hits
 
 
 async def test_simple_default_chinese_whole_sentence_misses(session: AsyncSession) -> None:

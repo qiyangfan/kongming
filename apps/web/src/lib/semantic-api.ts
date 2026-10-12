@@ -38,6 +38,8 @@ export function upsertMetric(input: {
   sql_template: string;
   business_terms: string[];
   enabled: boolean;
+  visible_scope?: string;
+  dept_id?: string | null;
 }): Promise<{ id: string }> {
   return api.post("/system/semantic/metrics", input);
 }

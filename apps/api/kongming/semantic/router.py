@@ -9,12 +9,13 @@ import uuid
 from typing import TYPE_CHECKING, Annotated, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.router import current_user, require_perm
 from kongming.db import get_session
+from kongming.semantic.models import CallerScope
 from kongming.semantic.repository import SqlSemanticRepo
 from kongming.semantic.service import RelationTableUnknown, SemanticService
 
@@ -112,6 +113,8 @@ class MetricOut(BaseModel):
     business_terms: list[str]
     enabled: bool
     updated_at: str
+    visible_scope: str = "ALL"
+    dept_id: str | None = None
 
 
 class MetricIn(BaseModel):
@@ -120,6 +123,49 @@ class MetricIn(BaseModel):
     sql_template: str = Field(min_length=1, max_length=4000)
     business_terms: list[str] = Field(default_factory=list, max_length=16)
     enabled: bool = True
+    # 110:可见范围档位——DEPT 档必须带归属部门(文案级拒);ALL 档 dept_id 不携带
+    visible_scope: str = Field(default="ALL", pattern=r"^(ALL|DEPT)$")
+    dept_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _dept_required_for_dept_scope(self) -> "MetricIn":
+        if self.visible_scope == "DEPT" and self.dept_id is None:
+            raise ValueError("DEPT 可见范围必须选择归属部门")
+        return self
+
+
+class CallerDeptScopeAdapter:
+    """110:CallerDeptScopeResolver 实现——组合 datascope 判定原语
+    (user_role_scopes→most_permissive→部门集合解析),semantic 域零 datascope
+    import(lint-imports 契约)。CUSTOM 空集合按读面降级为空集合(仅 ALL 档),
+    不复用执行面 fail-closed 语义(083 分层:注入方向=收紧,无越权面)。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def resolve(self, *, user_id: str, tenant_id: str) -> CallerScope:
+        from kongming.datascope.repository import SqlDataScopeRepo
+        from kongming.datascope.service import most_permissive
+
+        del tenant_id  # data_scope 判定原语为全租户身份体系,租户维度由授权闸保证
+        repo = SqlDataScopeRepo(self._s)
+        scopes = await repo.user_role_scopes(user_id)
+        if not scopes:
+            return CallerScope(universal=False)
+        eff = most_permissive(scopes)
+        if eff == "ALL":
+            return CallerScope(universal=True)
+        if eff == "SELF":
+            return CallerScope(universal=False)
+        ids: list[str] = []
+        if eff == "CUSTOM":
+            ids = await repo.custom_dept_ids(user_id)
+        else:
+            exists, dept = await repo.user_dept_id(user_id)
+            if not exists or dept is None:
+                return CallerScope(universal=False)
+            ids = await repo.dept_and_below(dept) if eff == "DEPT_AND_BELOW" else [dept]
+        return CallerScope(universal=False, dept_ids=tuple(dict.fromkeys(ids)))
 
 
 class _DefaultIntrospector:
@@ -298,6 +344,8 @@ async def list_metrics(
             business_terms=[str(t) for t in cast("list[object]", r["business_terms"] or [])],
             enabled=bool(r["enabled"]),
             updated_at=str(r["updated_at"]),
+            visible_scope=str(r.get("visible_scope") or "ALL"),
+            dept_id=None if r.get("dept_id") is None else str(r["dept_id"]),
         )
         for r in rows
     ]
@@ -313,6 +361,23 @@ async def upsert_metric(
 ) -> dict[str, str]:
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
     await _assert_datasource_usable(session, tenant_id=tid, datasource_key=req.datasource_key)
+    dept_id: str | None = None
+    if req.visible_scope == "DEPT" and req.dept_id is not None:
+        # 110:归属部门存在性+同租户校验(键级校验在模型,租户匹配在端点——
+        # 防跨租户 dept_id 借写)。部门停用不拒(086 同口径:启停是呈现标志)。
+        row = (
+            (
+                await session.execute(
+                    text("SELECT tenant_id FROM public.sys_dept WHERE id = :d"),
+                    {"d": str(req.dept_id)},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None or str(row["tenant_id"]) != tid:
+            raise HTTPException(status_code=400, detail="DEPT_INVALID") from None
+        dept_id = str(req.dept_id)
     row_id = await SqlSemanticRepo(session).upsert_metric(
         tenant_id=tid,
         datasource_key=req.datasource_key,
@@ -321,6 +386,8 @@ async def upsert_metric(
             "sql_template": req.sql_template,
             "business_terms": req.business_terms,
             "enabled": req.enabled,
+            "visible_scope": req.visible_scope,
+            "dept_id": dept_id,
         },
     )
     await session.commit()
