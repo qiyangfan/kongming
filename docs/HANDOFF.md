@@ -271,7 +271,9 @@
   retry_count=2 诚实 FAILED+列类喂回;还原后 PASS。
 - **pyright 门禁口径(推送前必查)**:CI 的 pyright=最新版(严格
   reportUnknown*/reportPrivateUsage 系),本地旧版可能解析到旧版本看不见——
-  推送前必须 `PYRIGHT_PYTHON_FORCE_VERSION=latest uv run pyright` 且双 app=0。
+  推送前必须 `PYRIGHT_PYTHON_FORCE_VERSION=latest uv run pyright` 且双 app=0;
+  **范围=全仓含 tests(2026-10-12 教训:CI 挂于只扫源码包漏掉新测试文件的
+  5 个错误,pyright 无参数跑的就是 pyproject 配置范围)**。
   高频触发:isinstance-dict 收窄须再 cast("dict[str, object]", …);跨模块复用
   一律公开名(或测试/冒烟脚本文件头 `# pyright: reportPrivateUsage=false` 等
   豁免,先例 test_collab_wiring/e2e_collab_smoke);dict 字面量传
