@@ -251,9 +251,11 @@
   纯函数,full 统计块+失败明细带判据,multiturn 同函数,12 单测进默认门禁;
   **判定序裁决点**:spec 字面序 EXEC 在 REJECT/ABSTAIN 前会把 BLOCKED/NO_DATA
   题(success 恒 false)全吞进 EXEC,实现取「verdict 终态先行」,README 口径
-  节已写明。**未完成项**:095 任务 2.7(SHOULD)web 探针结果展示扩展明细——
-  web 无任何 recall-probe 消费面(`RagPage.tsx` 零消费,064 起即 API-only),
-  补建=全新探针面板,待立项。
+  节已写明。**探针面板已兑现(097,2026-10-12 归档)**:知识库管理页内置只读
+  「召回试跑」面板——问句+数据源→三路命中(各路原生分)/闸门判定(verdict+
+  被裁命中数)/零知识旁路标注(gate_skipped=no_knowledge)/关系扩展明细
+  (补入表/经由关系/扩展后表集合);试跑端点补 response_model 走契约管线,
+  零副作用、权限复用 system:rag:manage。
 - **召回/评估批编写坑**:`kongming.feedback.models.extract_table_names` 返回
   末段名小写,与 `expected_tables` 比较前先 `.split(".")[-1].lower()` 折叠
   (否则 SELECT 层拆分误判);测「形态切换」类缓存语义禁止中途清缓存(kill
@@ -965,11 +967,11 @@ UI(API 已备场景低频)/D-B7 进度条动态 style(原裁接受)。
   gen 的形态不一致;残余异常面≈0 仅编程错误):老流式挂收集器时同步迁移。
 - 辅助数据查询(tenants/myTeams)失败静默:核心已降级显式,其余触发=用户反馈。
 
-**产品登记(非债务;单源=docs/roadmap.md「产品待办登记」节,2026-10-12
-起含否定裁决登记——STT/OCR、个性化推荐、Slack、zhparser 切默认等六项已
-明确不做,勿再作为待办重提;可视化画布/MCP resources/prompts/Bot 版本化/
-配额/重试/邮件事件源/zhparser 配置化/知识库团队归属/指标可见性等已分批
-落地归档)**。
+**产品登记(非债务;单源=docs/roadmap.md「产品待办登记」节,含否定裁决
+登记——Slack/zhparser 切默认/真实支付/OCR 引擎已明确不做,STT(114)/
+个性化推荐(039)/图片问数(030)已落地,勿再作为待办重提;可视化画布/
+MCP resources/prompts/Bot 版本化/配额/重试/邮件事件源/zhparser 配置化/
+知识库团队归属/指标可见性等已分批落地归档)**。
 
 **出处说明**:终态主清单见 archive/2026-08-25-backlog-settlement/proposal.md;
 「触顶部分结果的 web 渲染增强」「辅助数据查询失败静默」两条为 R1/R2 评审
