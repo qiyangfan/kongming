@@ -20,4 +20,4 @@
 ## 4. 收尾
 
 - [x] 4.1 spec delta 定稿(采纳形态+111 评估差异勘误);evals README 基线行与 111 行勘误;HANDOFF 分词节/基线段/评估配方(配额豁免)同步
-- [ ] 4.2 质量门禁复跑 + 变更归档(openspec archive)
+- [x] 4.2 质量门禁复跑 + 变更归档(openspec archive)

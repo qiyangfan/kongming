@@ -12,7 +12,14 @@ OBJECT_REPORT = "report"
 OBJECT_TASK = "task"
 OBJECT_COLLAB = "collab"
 OBJECT_ANSWER = "answer"
-OBJECT_TYPES: tuple[str, ...] = (OBJECT_REPORT, OBJECT_TASK, OBJECT_COLLAB, OBJECT_ANSWER)
+OBJECT_ROUNDTABLE = "roundtable"  # 115:圆桌运行(独立 rubric 维度族)
+OBJECT_TYPES: tuple[str, ...] = (
+    OBJECT_REPORT,
+    OBJECT_TASK,
+    OBJECT_COLLAB,
+    OBJECT_ANSWER,
+    OBJECT_ROUNDTABLE,
+)
 
 VERDICT_PASS = "PASS"  # noqa: S105  领域取值域常量非凭证
 VERDICT_BORDERLINE = "BORDERLINE"

@@ -8,7 +8,7 @@
 """
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -28,15 +28,16 @@ class FakeLlm:
 class FakeCollabApi:
     """协作账本假体(时序/载荷记录;同构 ApiClient 协议)。"""
 
-    def __init__(self, *, open_ok: bool = True) -> None:
+    def __init__(self, *, open_ok: bool = True, topology: dict[str, object] | None = None) -> None:
         self.open_ok = open_ok
+        self.topology = topology or {"max_workers": 3, "dispatch": "serial"}
         self.events: list[tuple[str, dict[str, object]]] = []
 
     async def collab_start(self, **kw: object) -> dict[str, object] | None:
         if not self.open_ok:
             return None
         self.events.append(("start", dict(kw)))
-        return {"run_id": "r1", "topology": {"max_workers": 3, "dispatch": "serial"}}
+        return {"run_id": "r1", "topology": dict(self.topology)}
 
     async def collab_worker_start(self, **kw: object) -> bool:
         self.events.append(("worker_start", dict(kw)))
@@ -44,6 +45,10 @@ class FakeCollabApi:
 
     async def collab_worker_result(self, **kw: object) -> bool:
         self.events.append(("worker_result", dict(kw)))
+        return True
+
+    async def collab_turn(self, **kw: object) -> bool:
+        self.events.append(("turn", dict(kw)))
         return True
 
     async def collab_finish(self, **kw: object) -> dict[str, object] | None:
@@ -396,3 +401,283 @@ async def test_task_gen_collab_failed_honest() -> None:
     assert "预算不足未派发" in reason
     assert isinstance(api.finished, dict)  # finish 未被调到时显式失败而非 TypeError
     assert str(api.finished["status"]) == "FAILED"
+
+
+# ── 圆桌分支(115)──
+
+
+def _roundtable_cfg(
+    participants: list[dict[str, object]] | None = None, max_rounds: int = 2
+) -> dict[str, object]:
+    """圆桌决策载荷假体(参与者=api 决策解析形态)。"""
+    return {
+        "kind": "roundtable",
+        "max_rounds": max_rounds,
+        "participants": participants
+        or [
+            {"role": "analyst", "bot_key": None, "bot": None},
+            {"role": "skeptic", "bot_key": None, "bot": None},
+        ],
+    }
+
+
+_ROUNDTABLE_TOPO = {
+    "kind": "roundtable",
+    "max_rounds": 2,
+    "participants": [{"role": "analyst"}, {"role": "skeptic"}],
+}
+
+
+@pytest.mark.asyncio
+async def test_roundtable_full_chain_ledger() -> None:
+    """圆桌全链:开账 → 参与者 worker 行 → 逐轮发言/判定上账 → 参与者聚合
+    回写 → 收口(共识 dissent=False);用量按参与者归集并回注总账。"""
+    api = FakeCollabApi(topology=dict(_ROUNDTABLE_TOPO))
+    # 覆写摘要带立场行(圆桌发言契约)
+    from kongming_agent.llm import _USAGE_COLLECTOR
+
+    async def react_speech(req: object) -> dict[str, object]:
+        r = dict(req) if isinstance(req, dict) else {}
+        collector = _USAGE_COLLECTOR.get()
+        if collector is not None:
+            collector.append({"total_tokens": 40})
+        who = "A" if r.get("trace_id") == "tr-w1" else "B"
+        return {
+            "verdict": "PASS",
+            "summary": f"{who}:结论成立,立场:支持",
+            "sql": "SELECT 1",
+        }
+
+    llm = FakeLlm(['{"consensus": true, "reason": "结论一致"}'])
+    runner = make_collab_runner(
+        api=api,  # type: ignore[arg-type]
+        llm=llm,
+        settings=_SETTINGS,
+        react_runner=react_speech,
+        task_id="t1",
+        tenant_key="default",
+        datasource_key="default",
+        user_id="u1",
+        trace_root="tr",
+        tools=[{"name": "sql_query"}],
+    )
+    out = await runner("s1", "评估异常成因", "任务目标:xxx", _roundtable_cfg())
+    kinds = [k for k, _ in api.events]
+    assert kinds == [
+        "start",
+        "worker_start",
+        "worker_start",
+        "turn",  # w1 speech
+        "turn",  # w2 speech
+        "turn",  # 主席判定(0 号位)
+        "worker_result",
+        "worker_result",
+        "finish",
+    ]
+    assert str(out["verdict"]) == "PASS"
+    assert out["consensus"] is True
+    assert out["dissent"] is False
+    verdict_turn = next(p for k, p in api.events if k == "turn" and p.get("worker_no") == 0)
+    assert verdict_turn["kind"] == "verdict"
+    assert cast("dict[str, object]", verdict_turn["content"])["consensus"] is True
+    # 参与者聚合:末位发言 PASS → DONE,用量按参与者归集
+    wr1 = next(p for k, p in api.events if k == "worker_result" and p.get("worker_no") == 1)
+    assert wr1["status"] == "DONE"
+    assert wr1["usage"] == {"llm_calls": 1, "total_tokens": 40}
+    fin = api.events[-1][1]
+    assert fin["verdict"] == "PASS"
+    assert fin["dissent"] is False
+    assert cast("dict[str, object]", out["usage"])["total_tokens"] == 80
+
+
+@pytest.mark.asyncio
+async def test_roundtable_zero_tool_fail_closed_quorum() -> None:
+    """零工具参与者 fail-closed 不派发;剔除后有效名册不足 → 不开桌
+    (无 worker 行无轮次),部分完成语义 + 保留意见披露。"""
+    api = FakeCollabApi(topology=dict(_ROUNDTABLE_TOPO))
+    react, reqs = _make_react_recorder()
+    runner = make_collab_runner(
+        api=api,  # type: ignore[arg-type]
+        llm=FakeLlm([]),
+        settings=_SETTINGS,
+        react_runner=react,
+        task_id="t1",
+        tenant_key="default",
+        datasource_key="default",
+        user_id="u1",
+        trace_root="tr",
+        tools=[{"name": "sql_query"}],
+    )
+    cfg = _roundtable_cfg(
+        participants=[
+            {
+                "role": "analyst",
+                "bot_key": "empty_bot",
+                "bot": {"bot_key": "empty_bot", "system_prompt": "x", "tools": []},
+            },
+            {"role": "skeptic", "bot_key": None, "bot": None},
+        ]
+    )
+    out = await runner("s1", "评估", "", cfg)
+    kinds = [k for k, _ in api.events]
+    assert kinds == ["start", "finish"]  # 无 worker 行、无轮次
+    assert str(out["verdict"]) == "ERROR"
+    assert out["pending_subgoals"] == ["评估"]
+    assert "参与者未派发" in str(out["reservation"]) and "fail-closed" in str(out["reservation"])
+    fin = api.events[-1][1]
+    assert fin["pending_count"] == 1
+    assert reqs == []
+
+
+@pytest.mark.asyncio
+async def test_roundtable_zero_tool_excluded_disclosed_quorum_ok() -> None:
+    """三声明一零工具:剔除后 2 人开桌,剔除事实如实披露于保留意见。"""
+    topo: dict[str, object] = {
+        "kind": "roundtable",
+        "max_rounds": 1,
+        "participants": [{"role": "analyst"}, {"role": "skeptic"}, {"role": "auditor"}],
+    }
+    api = FakeCollabApi(topology=topo)
+    react, reqs = _make_react_recorder()
+    runner = make_collab_runner(
+        api=api,  # type: ignore[arg-type]
+        llm=FakeLlm(['{"consensus": true, "reason": "一致"}']),
+        settings=_SETTINGS,
+        react_runner=react,
+        task_id="t1",
+        tenant_key="default",
+        datasource_key="default",
+        user_id="u1",
+        trace_root="tr",
+        tools=[{"name": "sql_query"}],
+    )
+    cfg = _roundtable_cfg(
+        participants=[
+            {"role": "analyst", "bot_key": None, "bot": None},
+            {
+                "role": "skeptic",
+                "bot_key": "mute_bot",
+                "bot": {"bot_key": "mute_bot", "system_prompt": "x", "tools": []},
+            },
+            {"role": "auditor", "bot_key": None, "bot": None},
+        ],
+        max_rounds=1,
+    )
+    out = await runner("s1", "评估", "", cfg)
+    assert str(out["verdict"]) == "PASS"
+    assert out["worker_count"] == 2
+    assert "mute_bot" in str(out["reservation"])
+    # Bot 名单为空集不放大为任务全量:该参与者被剔除而非放行
+    assert all(dict(r)["tools"] != [] for r in reqs)
+
+
+@pytest.mark.asyncio
+async def test_roundtable_multi_round_and_open_fail_closed() -> None:
+    """多轮:主席首轮不收敛 → 次轮再议;开账被拒 → 无任何轮次与 worker 行。"""
+    api = FakeCollabApi(topology=dict(_ROUNDTABLE_TOPO))
+    react, _ = _make_react_recorder()
+    llm = FakeLlm(
+        ['{"consensus": false, "reason": "仍有分歧"}', '{"consensus": true, "reason": "一致"}']
+    )
+    runner = make_collab_runner(
+        api=api,  # type: ignore[arg-type]
+        llm=llm,
+        settings=_SETTINGS,
+        react_runner=react,
+        task_id="t1",
+        tenant_key="default",
+        datasource_key="default",
+        user_id="u1",
+        trace_root="tr",
+        tools=[{"name": "sql_query"}],
+    )
+    out = await runner("s1", "评估", "", _roundtable_cfg(max_rounds=2))
+    assert out["consensus"] is True
+    assert out["rounds_used"] == 2
+    speech_turns = [p for k, p in api.events if k == "turn" and p.get("kind") == "speech"]
+    assert [t["round_no"] for t in speech_turns] == [1, 1, 2, 2]
+
+    closed = FakeCollabApi(open_ok=False)
+    runner2 = make_collab_runner(
+        api=closed,  # type: ignore[arg-type]
+        llm=FakeLlm([]),
+        settings=_SETTINGS,
+        react_runner=react,
+        task_id="t1",
+        tenant_key="default",
+        datasource_key="default",
+        user_id="u1",
+        trace_root="tr",
+        tools=[{"name": "sql_query"}],
+    )
+    out2 = await runner2("s1", "评估", "", _roundtable_cfg())
+    assert str(out2["verdict"]) == "ERROR"
+    assert [k for k, _ in closed.events] == []
+
+
+@pytest.mark.asyncio
+async def test_roundtable_abstain_participant_skipped_row() -> None:
+    """全程弃权参与者:worker 行 SKIPPED(诚实弃权非失败),发言账为零。"""
+    api = FakeCollabApi(topology=dict(_ROUNDTABLE_TOPO))
+    from kongming_agent.llm import _USAGE_COLLECTOR
+
+    async def react_mixed(req: object) -> dict[str, object]:
+        r = dict(req) if isinstance(req, dict) else {}
+        collector = _USAGE_COLLECTOR.get()
+        if collector is not None:
+            collector.append({"total_tokens": 10})
+        if r.get("trace_id") == "tr-w2":
+            return {"verdict": "PASS", "summary": "弃权", "sql": ""}
+        return {"verdict": "PASS", "summary": "结论成立,立场:支持", "sql": "SELECT 1"}
+
+    runner = make_collab_runner(
+        api=api,  # type: ignore[arg-type]
+        llm=FakeLlm(['{"consensus": true, "reason": "一致"}']),
+        settings=_SETTINGS,
+        react_runner=react_mixed,
+        task_id="t1",
+        tenant_key="default",
+        datasource_key="default",
+        user_id="u1",
+        trace_root="tr",
+        tools=[{"name": "sql_query"}],
+    )
+    out = await runner("s1", "评估", "", _roundtable_cfg(max_rounds=1))
+    assert str(out["verdict"]) == "PASS"
+    wr2 = next(p for k, p in api.events if k == "worker_result" and p.get("worker_no") == 2)
+    assert wr2["status"] == "SKIPPED"
+    assert cast("dict[str, object]", wr2["conclusion"])["abstained"] is True
+
+
+@pytest.mark.asyncio
+async def test_roundtable_unresolved_bot_binding_fail_closed() -> None:
+    """声明 bot_key 而运行时解析失败(Bot 已删/停用):按零工具同径剔除
+    (fail-closed,声明收窄不静默放宽为任务全量授权)。"""
+    api = FakeCollabApi(topology=dict(_ROUNDTABLE_TOPO))
+    react, reqs = _make_react_recorder()
+    runner = make_collab_runner(
+        api=api,  # type: ignore[arg-type]
+        llm=FakeLlm([]),
+        settings=_SETTINGS,
+        react_runner=react,
+        task_id="t1",
+        tenant_key="default",
+        datasource_key="default",
+        user_id="u1",
+        trace_root="tr",
+        tools=[{"name": "sql_query"}],
+    )
+    cfg = _roundtable_cfg(
+        participants=[
+            # 声明了 bot_key 但 api 决策载荷解析为 None(运行时失效)
+            {"role": "analyst", "bot_key": "dead_bot", "bot": None},
+            {"role": "skeptic", "bot_key": None, "bot": None},
+        ]
+    )
+    out = await runner("s1", "评估", "", cfg)
+    kinds = [k for k, _ in api.events]
+    assert kinds == ["start", "finish"]  # 有效名册仅 1 → 不开桌
+    assert str(out["verdict"]) == "ERROR"
+    assert "dead_bot" in str(out["reservation"])
+    assert "解析失败" in str(out["reservation"])
+    assert reqs == []  # 未派发任何参与者(不含任务全量工具的执行)

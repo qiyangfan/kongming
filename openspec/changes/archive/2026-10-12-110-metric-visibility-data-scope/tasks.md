@@ -21,4 +21,4 @@
 
 - [x] 3.1 `make check` 全量绿(coverage fail_under 不降)——api-check 1507 passed(+5 新测试,coverage 73.84%;唯一失败=本机代理截流已登记假败,HANDOFF 载明),web typecheck+lint 绿,契约再生幂等
 - [x] 3.2 实机冒烟(评估栈):DEPT 档指标「VIP复购率」归属数据部→ALL 用户 metric_hits 两枚全见、SELF 用户/CUSTOM 空集合用户/无身份均仅见 ALL 档「公共毛利」;DEPT 缺部门 422 文案拒、跨租户 dept_id 400 DEPT_INVALID;recall-probe 面不受影响
-- [ ] 3.3 文档现态:HANDOFF 指标域条目;docs/roadmap.md 远期条目改为已落地口径;`openspec archive` 归档并同步主规格
+- [x] 3.3 文档现态:HANDOFF 指标域条目;docs/roadmap.md 远期条目改为已落地口径;`openspec archive` 归档并同步主规格

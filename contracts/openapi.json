@@ -12840,6 +12840,40 @@
         }
       }
     },
+    "/internal/task/collab-turn": {
+      "post": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Collab Turn",
+        "operationId": "collab_turn_internal_task_collab_turn_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollabTurnIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/system/connectors": {
       "get": {
         "tags": [
@@ -14527,6 +14561,37 @@
         ],
         "title": "CollabFinishIn"
       },
+      "CollabParticipantIn": {
+        "properties": {
+          "role": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "bot_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Key"
+          }
+        },
+        "type": "object",
+        "title": "CollabParticipantIn",
+        "description": "圆桌参与者声明条目(115):role 取内置章程域,bot_key 可空绑定。"
+      },
       "CollabRunOut": {
         "properties": {
           "id": {
@@ -14589,6 +14654,13 @@
             },
             "type": "array",
             "title": "Workers"
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/CollabTurnOut"
+            },
+            "type": "array",
+            "title": "Turns"
           }
         },
         "type": "object",
@@ -14650,6 +14722,17 @@
       },
       "CollabTopologyIn": {
         "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
           "max_workers": {
             "anyOf": [
               {
@@ -14690,10 +14773,188 @@
               }
             ],
             "title": "Bot Key"
+          },
+          "max_rounds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 16.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Rounds"
+          },
+          "participants": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CollabParticipantIn"
+                },
+                "type": "array",
+                "maxItems": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Participants"
           }
         },
         "type": "object",
         "title": "CollabTopologyIn"
+      },
+      "CollabTurnIn": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "tenant_key": {
+            "type": "string",
+            "title": "Tenant Key"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "round_no": {
+            "type": "integer",
+            "maximum": 64.0,
+            "minimum": 1.0,
+            "title": "Round No"
+          },
+          "worker_no": {
+            "type": "integer",
+            "maximum": 64.0,
+            "minimum": 0.0,
+            "title": "Worker No"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "content": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Content"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Evidence"
+          },
+          "usage": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Usage"
+          },
+          "trace_id": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Trace Id",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "tenant_key",
+          "run_id",
+          "round_no",
+          "worker_no",
+          "kind"
+        ],
+        "title": "CollabTurnIn",
+        "description": "圆桌轮次上账载荷(115;追加只写,唯一键拒绝重复)。"
+      },
+      "CollabTurnOut": {
+        "properties": {
+          "round_no": {
+            "type": "integer",
+            "title": "Round No"
+          },
+          "worker_no": {
+            "type": "integer",
+            "title": "Worker No"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usage"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "round_no",
+          "worker_no",
+          "kind",
+          "content",
+          "evidence",
+          "usage",
+          "trace_id"
+        ],
+        "title": "CollabTurnOut",
+        "description": "圆桌轮次转写行(115;黑板观测面,追加只写)。"
       },
       "CollabWorkerOut": {
         "properties": {

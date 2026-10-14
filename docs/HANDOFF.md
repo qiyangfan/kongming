@@ -7,6 +7,55 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
+## 当前状态(2026-10-14)
+
+- **115 圆桌对等拓扑现态(2026-10-14 已落地归档,工件在
+  `openspec/changes/archive/2026-10-14-115-roundtable-swarm/`)**:collab 域第二形态
+  (`collab_topology.kind=roundtable`,
+  缺省 decomposition,存量行零漂移)——缺省名册 analyst/skeptic/auditor
+  (2..KM_COLLAB_MAX_WORKERS 人,声明期锁定),轮次 ≤KM_COLLAB_MAX_ROUNDS
+  (缺省 3,api 钳制+agent 兜底双口径)。黑板=追加式 turn 账
+  (`sys_agent_collab_turn`,0054;唯一键 run+round+worker_no,主席判定恒 0 号位,
+  无 UPDATE 路径);终止三通道=主席共识判定(每轮 ≤1 次,畸形按未共识+披露)/
+  轮次硬顶/执行预算池(=名册×轮次,发言查证同池)+全员弃权提前收口。
+  诚实收口:PASS 需全体实质发言带真实执行证据(纯文本对辩=ERROR,090 闸投影),
+  共识不洗白执行失败,未共识 dissent=true 分歧如实保留;参与者=受限 ReAct
+  (Bot 绑定或内置章程;工具=任务授权∩Bot 名单;**零工具与绑定解析失败一律
+  fail-closed 剔除并披露,不放宽为任务全量**——授权侧不沿用 091 的
+  「解析失败降级为无绑定」口径,那是人格侧口径)。「每轮完成」事件按
+  **实际派发最大序号**判定(有效名册经剔除压缩编号,拓扑名册长不可作依据)。
+  judge 增 RoundtableRubric v1(共识质量/分歧诚实/证据接地/收敛效率)+
+  roundtable 对象类型(0055)。**取数口径(115 决策)**:按运行终态取
+  (DONE=共识收口/PARTIAL=预算截断诚实收口),**不要求宿主任务 DONE**——
+  评审单元是 run(转写自含),任务后续步骤被预算饿死与对辩质量无关;
+  与 092「DONE 任务」口径有意分叉(task/collab 交付物=步骤产出,圆桌=
+  收口转写)。基线落库=条件触发:评估账号名下出现首个收口圆桌 run 时由
+  定时门禁自然落,不人工硬凑(圆桌诚实收口语义下 DONE 非必然,伪造共识
+  凑基线=作假)。
+  冒烟:`apps/api/scripts/e2e_roundtable_smoke.py`(api:8000+agent:8001+
+  smoke088/sakila;断言口径=圆桌运行终态+账本诚实,任务因步级 token 预算
+  PAUSED 属 090 语义非冒烟失败)。**成本口径**:3 参与者 ×2 轮 ≈80-100k
+  token,顶满 agent 编排 100k 累计硬顶(task_gen _MAX_TOTAL_TOKENS)——
+  冒烟/judge 载体用 2 人 ×1 轮(≈50-60k)留余量。契约/主 specs 已同步
+  (strict 单域 valid),openapi 重导出零漂移。
+- **judge 评估账号坑(2026-10-14 实证)**:judge 账号必须 (a) 绑定租户
+  (sys_user_tenant 缺行 → 取数全 403 TENANT_FORBIDDEN,被 gather
+  return_exceptions 吞成「类型空缺」——排查先看 api 日志的
+  「judge 对象取数失败」warning);(b) **对象归属该账号**——/tasks 列表
+  按归属用户过滤,别的账号跑的圆桌对 judge 不可见(SUPER_ADMIN 角色权限
+  ≠ 数据可见面,与 datascope 同哲学)。登录连败触发账号锁定(13 分钟),
+  建多账号勿重试同一账号。现役评估账号 eval116(自建,已绑 default 租户)。
+- **环境口径勘误(本机现态核对 2026-10-14)**:pg/redis 实为
+  `~/workspace/env` 栈(env-postgres/env-redis,**redis 免密**,与本文顶节
+  「localenv 带密码」口径不符——conftest 缺省即正确,跑测试无需注入
+  KM_REDIS_URL);kongming 角色本无 SUPERUSER,已按文档口径升齐
+  (`ALTER ROLE kongming SUPERUSER`,migrated_tmp_db 一次性演练库建 vector
+  扩展需要)。apps/api/.env 与 apps/agent/.env 当前**不存在**(顶节 2026-10-11
+  「均存在」口径失效)——本地起服务用根 .env 选择性注入:api 取
+  KM_INTERNAL_TOKEN/KM_DATASOURCE_ENCRYPT_KEY/KM_ADMIN_*;agent 取
+  KM_AGENT_LLM_*+KM_INTERNAL_TOKEN(改写为 KM_AGENT_INTERNAL_TOKEN 前缀),
+  **不得整份 source 根 .env**(KM_DB_PASSWORD 触发 agent fail-closed 拒启)。
+
 ## 当前状态(2026-10-12)
 
 - **全仓评审循环收尾(2026-10-12)**:本会话两轮评审确认 22+3 项缺陷全部
@@ -133,25 +182,18 @@
   (不同于 chat 额度),演示前确认 key 已开通该工具。
   (评审循环登记的两条范围外待办已清:knowledge.py DecodingError 收敛与
   前缀收编落地;test_config_failclosed 已钉空 websearch 字段。)
-  **检索供应商调查结论(2026-10-11 契约核对)**:主流平台开放「独立检索 REST
-  API」的是少数——智谱(已收编)与阿里云 AI 搜索开放平台(归 OpenSearch 品牌线但实为联网搜索 API,开通即用按次计费,勿与「自建索引托管引擎」老产品线混淆;已按两条映射接入 105-alibaba-ai-search-provider:POST
-  `{host}/v3/openapi/workspaces/{ws}/web-search/{service_id}`,Bearer 为 `OS-`
-  独立 key 与百炼 `sk-` 不通用,请求 {query, top_k, content_type…},响应
-  `result.search_result[]{title,link,snippet,content}`,e2e 待 key,配方见下)。DeepSeek(官方文档零 search 端点)、Kimi(仅会话内「内置
-  联网搜索」工具)、豆包/火山方舟(WebSearch 仅为会话请求配置对象)均无独立
-  检索 API,不可收编——反证网关域+多供应商适配是正解,检索能力不绑模型选型。
-  **alibaba_ai_search 待 key 验证配方(105)**:①控制台开通 AI 搜索开放平台
-  并建独立 `OS-` key(与百炼 `sk-` 不通用),同时记下实例公网域名——host
-  为账号级(形如 `xxx.platform-<region>.opensearch.aliyuncs.com`,控制台
-  API Keys 页查看),与 `toolgateway/models.py` 注册表占位不一致时先回填该条
-  endpoint/host 单源(白名单由同条派生,仅此一处);②环境变量
-  `KM_WEBSEARCH_PROVIDER=alibaba_ai_search` + `KM_WEBSEARCH_API_KEY` →
-  重启 api(组合残缺 prod 拒启/dev 告警降级);③冒烟:授予
-  `tool:websearch:search` 后问「杭州今日天气怎么样」,应返回检索卡
-  (报 unreachable 前缀=DNS/域名不符,回 ①);④硬限核对:top_k 官方无
-  硬限(域级 1–10 先行,缺省 5)、query 无长度硬限(域级 500,均无需截断)、
-  content_type 固定 snippet——首验核对实际返回条数与 top_k 一致性并回填
-  `test_websearch_domain.py` 夹具。
+  **检索供应商调查结论(2026-10-11 契约核对;2026-10-14 全五路实测收口)**:
+  主流平台开放「独立检索 REST API」的是少数——智谱已收编;zhipu/bocha/
+  tavily 均为固定公网端点+单 key。阿里云 AI 搜索开放平台(归 OpenSearch
+  品牌线):**2026-10-14 owner 提供实例域名与 `OS-` key,注册表已回填真实
+  host 并经网关实调验证(executed,5 检索卡;真链路=网关白名单+SSRF 段+审计
+  test_call 通道)**——host 为账号级实例域名,多账号部署需将 endpoint/host
+  升级为部署可配(当前单账号按固定端点同列);凭证形态 `OS-` 独立 key 与
+  百炼 `sk-` 不通用。DeepSeek(官方
+  文档零 search 端点)、Kimi(仅会话内「内置联网搜索」工具)、豆包/火山方舟
+  (WebSearch 仅为会话请求配置对象)均无独立检索 API,不可收编——反证网关
+  域+多供应商适配是正解,检索能力不绑模型选型。
+
 - **中文全文检索分词(098)现态与启用配方**:全文路分词配置部署级单值
   `KM_RAG_FULLTEXT_TS_CONFIG`(白名单 `simple|zhparser`,缺省 simple=零回归;
   白名单外值与目标库 pg_ts_config 缺失一律 fail-closed 拒启,dev/prod 同、
@@ -932,7 +974,14 @@ make contracts      # 导出 OpenAPI + 生成前端类型(改 api 后必跑)
 
 **明确关闭(结案)**:A-B10 confirm 硬熔断(write_burst 写闸实证兜底)/
 B2-B9 http 响应头闸(h11 16KB 默认兜底已实证+注释固化)/审计页 user 筛选
-UI(API 已备场景低频)/D-B7 进度条动态 style(原裁接受)。
+UI(API 已备场景低频)/D-B7 进度条动态 style(原裁接受)/003 联邦真实回调
+人工 e2e(2026-10-14 结案:收口提交明录真凭证 e2e 五家全过[github 登录即其中一路,owner 同日确认],归档件当年漏勾;
+后续仅 trust_env=False 加固与类型收敛,无流程行为变更——真实使用即持续验证面)/支付回调先查单后验签探测面
+(2026-10-14 结案:owner 确认真实支付不做,触发条件永久排除;mock 支付闭环
+保留为商业化演示形态,与产品登记「真实支付明确不做」同口径)/
+alibaba_ai_search 真实出站 e2e(2026-10-14 结案:owner 提供实例域名与 `OS-`
+key,注册表回填真实 host,网关实调 executed+5 检索卡,曾在案的「待 key」
+条件消除;key 已入根 .env 的 KM_WEBSEARCH_*,不入库)。
 
    **已裁决并落地(2026-10-01,change 086 `authz-status-single-gate`,已归档)**:
 - **禁用角色让行级可见范围反向放宽 → 角色状态升为授权读取的统一闸**:裁的是「**一切**按主体取授权面的
@@ -956,7 +1005,6 @@ UI(API 已备场景低频)/D-B7 进度条动态 style(原裁接受)。
 
    **条件触发登记(触发即评估,非开放债务)**:
 - 注入拆字/全角变体绕过:触发=出现真实绕过事件或规模化信号。
-- 支付回调先查单后验签探测面:触发=接真实公网支付通道。
 - MCP 远端错误文案反射面收紧:触发=生态滥用信号。
 - 多 worker 三项(池失效广播/归档 advisory lock/调度互斥):触发=实际多 worker 部署。
 - /mcp chunked 无 CL 形态的实测闸边界(body 已缓冲,属应用层输入约束

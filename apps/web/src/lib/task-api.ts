@@ -11,6 +11,7 @@ export type TaskMutateOut = components["schemas"]["TaskMutateOut"];
 export type CollabRunOut = components["schemas"]["CollabRunOut"];
 export type CollabRunsOut = components["schemas"]["CollabRunsOut"];
 export type CollabWorkerOut = components["schemas"]["CollabWorkerOut"];
+export type CollabTurnOut = components["schemas"]["CollabTurnOut"];
 
 /** 创建任务(异步;202 即返回 PLANNING,详情轮询状态) */
 export function createTask(body: {

@@ -83,7 +83,7 @@ artifacts(027)⇄ cloud-code-sandbox(029);agent-memory(026)← team-workspace(03
 | 问数智能体(王牌) | 一梯队 chat/nl2sql/nl2sql-agent + 三梯队 semantic-layer / query-streaming / cloud-code-sandbox | 088 报告生成——数据链路闭环到可交付报告 |
 | 问答智能体 | rag 三路召回 / knowledge / document-rag / agent-memory / knowledge-qa | 093 知识侧深化(三态意图路由 + 融合问答)——已落地归档 |
 | 通用智能体 | ReAct 内核 / agent-memory / multi-model-routing / prompt-guardrails / cloud-code-sandbox | 089 工具网关 + 090 任务内核(长任务)+ 094 web 检索域(联网搜索)——工具网关已接入检索/HTTP 连接器/工单等域 |
-| 多智能体 | workflow-orchestration(静态 DAG)/ custom-agent | 091 动态协作编排(宿主 = 090 任务内核)——选型指引:步骤可静态枚举→workflow;需运行时拆解/分歧裁决→collab(缺省深度 1,嵌套 opt-in) |
+| 多智能体 | workflow-orchestration(静态 DAG)/ custom-agent | 091 动态协作编排 + 115 圆桌对等拓扑(宿主 = 090 任务内核)——选型指引:步骤可静态枚举→workflow;运行时拆解/并行分治→collab 分工形态;立场对辩/交叉质疑(共识判定+分歧如实保留)→collab 圆桌形态(黑板轮次制,名册声明期锁定) |
 | 评测智能体 | eval / ai-eval(Execution Match、基线、few-shot 自学习)+ agent-observability / eval-agent | 092 评测智能体化(LLM-as-judge + 评测集自动构造)——已落地归档 |
 
 依赖拓扑:088 / 089 / 090 相互独立、可并行;091 以 090 为宿主殿后。

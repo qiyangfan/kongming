@@ -7,8 +7,9 @@ Bot 绑定校验)、无游离协作入口(未声明拓扑/非 RUNNING 步骤的 
 任务取消收敛在途协作账、预算部署级钳制、列表状态筛选、internal 畸形 UUID 404 同形。
 """
 
+import asyncio
 import json
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
@@ -43,9 +44,15 @@ def no_dispatch(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def test_normalize_collab_topology_defaults_and_clamp() -> None:
     from kongming.task import models as m
 
-    # 缺省回填 + 部署钳制
+    # 缺省回填 + 部署钳制(115 起恒带形态标记,缺省=分工)
     out = m.normalize_collab_topology(None, max_workers_cap=3)
-    assert out == {"max_workers": 3, "critic": False, "dispatch": "serial", "bot_key": None}
+    assert out == {
+        "kind": "decomposition",
+        "max_workers": 3,
+        "critic": False,
+        "dispatch": "serial",
+        "bot_key": None,
+    }
     # 超部署上限 → 钳到上限
     out = m.normalize_collab_topology({"max_workers": 99}, max_workers_cap=3)
     assert out["max_workers"] == 3
@@ -774,3 +781,492 @@ async def test_epoch_predicate_guards_cas_writes(
     ).scalar_one()
     assert row == "PAUSED"
     await session.commit()
+
+
+# ── 圆桌拓扑与轮次账本(115)──
+
+
+def test_normalize_roundtable_topology() -> None:
+    """圆桌拓扑归一:缺省名册回退、角色域外剔除、名册去重、人数/轮次钳制。"""
+    from kongming.task import models as m
+
+    # 未声明名册 → 缺省三角色;轮次缺省 3
+    out = m.normalize_collab_topology({"kind": "roundtable"}, max_workers_cap=3)
+    assert out["kind"] == "roundtable"
+    assert [p["role"] for p in cast("list[dict[str, object]]", out["participants"])] == [
+        "analyst",
+        "skeptic",
+        "auditor",
+    ]
+    assert out["max_rounds"] == 3
+    # 名册去重 + 角色域外剔除;不足下限回退缺省
+    out = m.normalize_collab_topology(
+        {
+            "kind": "roundtable",
+            "participants": [
+                {"role": "analyst"},
+                {"role": "analyst"},
+                {"role": "hacker"},
+                {"role": "skeptic", "bot_key": " b1 "},
+            ],
+        },
+        max_workers_cap=3,
+    )
+    parts = cast("list[dict[str, object]]", out["participants"])
+    assert [(p["role"], p["bot_key"]) for p in parts] == [("analyst", None), ("skeptic", "b1")]
+    # 人数钳到部署上限;轮次钳到上限
+    out = m.normalize_collab_topology(
+        {
+            "kind": "roundtable",
+            "max_rounds": 99,
+            "participants": [{"role": r} for r in ("analyst", "skeptic", "auditor", "analyst")],
+        },
+        max_workers_cap=3,
+        max_rounds_cap=5,
+    )
+    assert len(cast("list[object]", out["participants"])) == 3
+    assert out["max_rounds"] == 5
+    # 非法 kind 回退分工;分工形态恒带 kind
+    out = m.normalize_collab_topology({"kind": "chaos", "max_workers": 2}, max_workers_cap=3)
+    assert out["kind"] == "decomposition"
+    assert out["max_workers"] == 2
+    # 分工形态缺 kind 的旧载荷读作分工(存量兼容)
+    out = m.normalize_collab_topology({"max_workers": 2}, max_workers_cap=3)
+    assert out["kind"] == "decomposition"
+
+
+def test_roundtable_roster_reader() -> None:
+    """圆桌名册读取:分工形态恒空;kind 缺失(存量行)恒空。"""
+    from kongming.task import models as m
+
+    assert m.roundtable_roster({"max_workers": 2}) == []
+    assert m.roundtable_roster({"kind": "decomposition"}) == []
+    roster = m.roundtable_roster({"kind": "roundtable", "participants": [{"role": "analyst"}]})
+    assert len(roster) == 1
+
+
+@pytest.mark.asyncio
+async def test_roundtable_declare_and_turn_ledger(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: Any,
+    no_dispatch: list[str],  # noqa: ARG001
+) -> None:
+    """圆桌全链:拓扑声明(逐参与者 Bot 校验)→ 决策载荷带名册解析 →
+    开账 → worker 行 → 轮次上账(名册锁定/判定 0 号位/轮次上限/重复拒绝)
+    → 事件落流 → collab-runs 返回轮次转写 → 终态诚实映射。"""
+    uid, token = await _user_with_task_perms(client, session, make_user)
+    await _insert_bot(session, uid, "rt_bot", "你是圆桌财务专家")
+    await session.commit()
+    task_id = await _create_task(client, token)
+    step = await _plan_one_step(client, task_id, goal="评估指标异常成因")
+
+    # 声明圆桌拓扑:合法 Bot + 未注册 Bot 同拒(防幽灵工具/幽灵绑定)
+    r = await _set_topology(
+        client,
+        token,
+        task_id,
+        step["id"],
+        {
+            "kind": "roundtable",
+            "max_rounds": 2,
+            "participants": [
+                {"role": "analyst", "bot_key": "rt_bot"},
+                {"role": "skeptic", "bot_key": "ghost_bot"},
+            ],
+        },
+    )
+    assert r.status_code == 422
+    r = await _set_topology(
+        client,
+        token,
+        task_id,
+        step["id"],
+        {
+            "kind": "roundtable",
+            "max_rounds": 2,
+            "participants": [{"role": "analyst", "bot_key": "rt_bot"}, {"role": "skeptic"}],
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["kind"] == "roundtable"
+    assert body["max_rounds"] == 2
+    assert body["participants"][0]["bot_key"] == "rt_bot"
+
+    # 决策载荷:名册逐参与者 Bot 运行时解析
+    d = await client.post(
+        "/internal/task/step-start",
+        headers=INTERNAL,
+        json={"task_id": task_id, "tenant_key": "default", "step_id": step["id"]},
+    )
+    assert d.status_code == 200
+    collab = d.json()["collab"]
+    assert collab["kind"] == "roundtable"
+    parts = collab["participants"]
+    assert parts[0]["bot"]["bot_key"] == "rt_bot"
+    assert parts[0]["bot"]["system_prompt"] == "你是圆桌财务专家"
+    assert parts[1]["bot"] is None  # 未绑定如实降级,不虚报
+
+    # 开账 → 事件带形态与轮次
+    cs = await client.post(
+        "/internal/task/collab-start",
+        headers=INTERNAL,
+        json={"task_id": task_id, "tenant_key": "default", "step_id": step["id"], "depth": 1},
+    )
+    assert cs.status_code == 200
+    run_id = str(cs.json()["run_id"])
+
+    # 参与者 worker 行(名册内序号合法)
+    for no in (1, 2):
+        ws = await client.post(
+            "/internal/task/collab-worker-start",
+            headers=INTERNAL,
+            json={
+                "task_id": task_id,
+                "tenant_key": "default",
+                "run_id": run_id,
+                "worker_no": no,
+                "subgoal": f"参与者{no}",
+                "trace_id": f"tr-w{no}",
+            },
+        )
+        assert ws.status_code == 204
+
+    # 轮次上账:发言行(名册内)→ 判定行(0 号位)→ 名册末位触发每轮完成事件
+    t1 = await client.post(
+        "/internal/task/collab-turn",
+        headers=INTERNAL,
+        json={
+            "task_id": task_id,
+            "tenant_key": "default",
+            "run_id": run_id,
+            "round_no": 1,
+            "worker_no": 1,
+            "kind": "speech",
+            "content": {"stance": "支持", "summary": "结论A", "verdict": "PASS"},
+            "evidence": {"sql": "SELECT 1"},
+            "usage": {"llm_calls": 1, "total_tokens": 50},
+            "trace_id": "tr-w1",
+        },
+    )
+    assert t1.status_code == 204
+    # 名册外序号拒绝(运行期锁定)
+    t_ghost = await client.post(
+        "/internal/task/collab-turn",
+        headers=INTERNAL,
+        json={
+            "task_id": task_id,
+            "tenant_key": "default",
+            "run_id": run_id,
+            "round_no": 1,
+            "worker_no": 3,
+            "kind": "speech",
+        },
+    )
+    assert t_ghost.status_code == 409
+    # 重复回写拒绝(唯一键)
+    t_dup = await client.post(
+        "/internal/task/collab-turn",
+        headers=INTERNAL,
+        json={
+            "task_id": task_id,
+            "tenant_key": "default",
+            "run_id": run_id,
+            "round_no": 1,
+            "worker_no": 1,
+            "kind": "speech",
+        },
+    )
+    assert t_dup.status_code == 409
+    # 判定行必须 0 号位;非 0 号位判定拒绝
+    t_bad_verdict = await client.post(
+        "/internal/task/collab-turn",
+        headers=INTERNAL,
+        json={
+            "task_id": task_id,
+            "tenant_key": "default",
+            "run_id": run_id,
+            "round_no": 1,
+            "worker_no": 2,
+            "kind": "verdict",
+        },
+    )
+    assert t_bad_verdict.status_code == 409
+    t2 = await client.post(
+        "/internal/task/collab-turn",
+        headers=INTERNAL,
+        json={
+            "task_id": task_id,
+            "tenant_key": "default",
+            "run_id": run_id,
+            "round_no": 1,
+            "worker_no": 2,
+            "kind": "abstain",
+            "content": {"stance": "弃权"},
+        },
+    )
+    assert t2.status_code == 204
+    # 名册末位落账 → 每轮完成事件
+    detail = await client.get(f"/tasks/{task_id}", headers=_auth(token))
+    kinds = [str(e["kind"]) for e in detail.json()["events"]]
+    assert "collab_round_finished" in kinds
+    t_verdict = await client.post(
+        "/internal/task/collab-turn",
+        headers=INTERNAL,
+        json={
+            "task_id": task_id,
+            "tenant_key": "default",
+            "run_id": run_id,
+            "round_no": 1,
+            "worker_no": 0,
+            "kind": "verdict",
+            "content": {"consensus": True, "reason": "结论一致"},
+        },
+    )
+    assert t_verdict.status_code == 204
+    # 轮次超拓扑上限拒绝
+    t_over = await client.post(
+        "/internal/task/collab-turn",
+        headers=INTERNAL,
+        json={
+            "task_id": task_id,
+            "tenant_key": "default",
+            "run_id": run_id,
+            "round_no": 3,
+            "worker_no": 1,
+            "kind": "speech",
+        },
+    )
+    assert t_over.status_code == 409
+    detail = await client.get(f"/tasks/{task_id}", headers=_auth(token))
+    kinds = [str(e["kind"]) for e in detail.json()["events"]]
+    assert "collab_round_verdict" in kinds
+
+    # 参与者聚合回写 + 收口(共识 → PASS → DONE)
+    for no in (1, 2):
+        wr = await client.post(
+            "/internal/task/collab-worker-result",
+            headers=INTERNAL,
+            json={
+                "task_id": task_id,
+                "tenant_key": "default",
+                "run_id": run_id,
+                "worker_no": no,
+                "status": "DONE",
+                "conclusion": {"stance": "支持"},
+                "evidence": {},
+                "usage": {"llm_calls": 1, "total_tokens": 50},
+                "trace_id": f"tr-w{no}",
+            },
+        )
+        assert wr.status_code == 204
+    fin = await client.post(
+        "/internal/task/collab-finish",
+        headers=INTERNAL,
+        json={
+            "task_id": task_id,
+            "tenant_key": "default",
+            "run_id": run_id,
+            "verdict": "PASS",
+            "pending_count": 0,
+            "dissent": False,
+            "summary": "共识收口",
+        },
+    )
+    assert fin.status_code == 200
+    assert fin.json()["status"] == "DONE"
+
+    # 查询面:collab-runs 返回轮次转写(按序)
+    runs = await client.get(f"/tasks/{task_id}/collab-runs", headers=_auth(token))
+    assert runs.status_code == 200
+    run = runs.json()["items"][0]
+    assert run["topology"]["kind"] == "roundtable"
+    turns = run["turns"]
+    assert [(t["round_no"], t["worker_no"], t["kind"]) for t in turns] == [
+        (1, 1, "speech"),
+        (1, 2, "abstain"),
+        (1, 0, "verdict"),
+    ]
+    assert turns[0]["content"]["stance"] == "支持"
+    assert turns[0]["usage"]["total_tokens"] == 50
+
+    # 终态运行上的迟到轮次拒绝(在途谓词)
+    t_late = await client.post(
+        "/internal/task/collab-turn",
+        headers=INTERNAL,
+        json={
+            "task_id": task_id,
+            "tenant_key": "default",
+            "run_id": run_id,
+            "round_no": 2,
+            "worker_no": 1,
+            "kind": "speech",
+        },
+    )
+    assert t_late.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_collab_turn_rejects_non_roundtable(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: Any,
+    no_dispatch: list[str],  # noqa: ARG001
+) -> None:
+    """形态闸:分工拓扑的运行不受理轮次上账(无游离轮次通道)。"""
+    _uid, token = await _user_with_task_perms(client, session, make_user)
+    task_id = await _create_task(client, token)
+    step = await _plan_one_step(client, task_id)
+    rtop = await _set_topology(client, token, task_id, step["id"], {"max_workers": 2})
+    assert rtop.status_code == 200
+    d = await client.post(
+        "/internal/task/step-start",
+        headers=INTERNAL,
+        json={"task_id": task_id, "tenant_key": "default", "step_id": step["id"]},
+    )
+    assert d.status_code == 200
+    cs = await client.post(
+        "/internal/task/collab-start",
+        headers=INTERNAL,
+        json={"task_id": task_id, "tenant_key": "default", "step_id": step["id"], "depth": 1},
+    )
+    assert cs.status_code == 200
+    run_id = str(cs.json()["run_id"])
+    t = await client.post(
+        "/internal/task/collab-turn",
+        headers=INTERNAL,
+        json={
+            "task_id": task_id,
+            "tenant_key": "default",
+            "run_id": run_id,
+            "round_no": 1,
+            "worker_no": 1,
+            "kind": "speech",
+        },
+    )
+    assert t.status_code == 409
+
+
+async def test_migration_0054_turn_table_roundtrip() -> None:
+    """0054 往返:降级后轮次表消失、升级复现(表+唯一键);一次性临时库
+    (HANDOFF 环境事实 13:dropped 列占位上限,禁在共享库跑 add/drop 循环)。"""
+    from tests.conftest import migrated_tmp_db
+
+    async with migrated_tmp_db() as (session, cfg):
+        from alembic import command
+
+        async def _table_exists() -> bool:
+            await session.rollback()
+            n = await session.scalar(
+                text(
+                    "SELECT count(*) FROM information_schema.tables"
+                    " WHERE table_schema='public' AND table_name='sys_agent_collab_turn'"
+                )
+            )
+            return bool(n)
+
+        async def _uq_exists() -> bool:
+            await session.rollback()
+            n = await session.scalar(
+                text(
+                    "SELECT count(*) FROM pg_indexes"
+                    " WHERE schemaname='public'"
+                    "   AND indexname='uq_collab_turn_run_round_no'"
+                )
+            )
+            return bool(n)
+
+        assert await _table_exists() and await _uq_exists()
+        await session.rollback()
+        await asyncio.to_thread(command.downgrade, cfg, "0053")
+        assert not await _table_exists()
+        await session.rollback()
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+        assert await _table_exists() and await _uq_exists()
+        await session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_round_finished_event_by_dispatched_max(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: Any,
+    no_dispatch: list[str],  # noqa: ARG001
+) -> None:
+    """每轮完成事件按实际派发末位判定(P1-1):名册 3 人、零工具剔除后实派
+    2 人——2 号位落账即触发 round_finished(拓扑名册长不可作依据)。"""
+    _uid, token = await _user_with_task_perms(client, session, make_user)
+    task_id = await _create_task(client, token)
+    step = await _plan_one_step(client, task_id, goal="圆桌剔除场景")
+    rtop = await _set_topology(
+        client,
+        token,
+        task_id,
+        step["id"],
+        {
+            "kind": "roundtable",
+            "max_rounds": 1,
+            "participants": [{"role": "analyst"}, {"role": "skeptic"}, {"role": "auditor"}],
+        },
+    )
+    assert rtop.status_code == 200
+    d = await client.post(
+        "/internal/task/step-start",
+        headers=INTERNAL,
+        json={"task_id": task_id, "tenant_key": "default", "step_id": step["id"]},
+    )
+    assert d.status_code == 200
+    cs = await client.post(
+        "/internal/task/collab-start",
+        headers=INTERNAL,
+        json={"task_id": task_id, "tenant_key": "default", "step_id": step["id"], "depth": 1},
+    )
+    run_id = str(cs.json()["run_id"])
+    # 实际只派发 2 名(1 号为剔除后压缩编号)
+    for no in (1, 2):
+        ws = await client.post(
+            "/internal/task/collab-worker-start",
+            headers=INTERNAL,
+            json={
+                "task_id": task_id,
+                "tenant_key": "default",
+                "run_id": run_id,
+                "worker_no": no,
+                "subgoal": f"p{no}",
+                "trace_id": f"tr-w{no}",
+            },
+        )
+        assert ws.status_code == 204
+    t1 = await client.post(
+        "/internal/task/collab-turn",
+        headers=INTERNAL,
+        json={
+            "task_id": task_id,
+            "tenant_key": "default",
+            "run_id": run_id,
+            "round_no": 1,
+            "worker_no": 1,
+            "kind": "speech",
+        },
+    )
+    assert t1.status_code == 204
+    detail = await client.get(f"/tasks/{task_id}", headers=_auth(token))
+    kinds = [str(e["kind"]) for e in detail.json()["events"]]
+    assert "collab_round_finished" not in kinds  # 1 号非末位
+    t2 = await client.post(
+        "/internal/task/collab-turn",
+        headers=INTERNAL,
+        json={
+            "task_id": task_id,
+            "tenant_key": "default",
+            "run_id": run_id,
+            "round_no": 1,
+            "worker_no": 2,
+            "kind": "speech",
+        },
+    )
+    assert t2.status_code == 204
+    detail = await client.get(f"/tasks/{task_id}", headers=_auth(token))
+    kinds = [str(e["kind"]) for e in detail.json()["events"]]
+    assert "collab_round_finished" in kinds  # 实派末位落账即触发

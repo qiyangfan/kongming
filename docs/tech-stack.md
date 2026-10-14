@@ -47,6 +47,8 @@
 | `KM_AGENT_COLLAB_MAX_WORKERS` | agent | 3 | 编排派发上限(最后防线) |
 | `KM_AGENT_COLLAB_MAX_DEPTH` | agent | 1 | 嵌套深度上限(1=不嵌套,提额须显式配置) |
 | `KM_AGENT_COLLAB_MAX_REVISION_ROUNDS` | agent | 1 | critic 修订轮次上限(轮次尽如实附保留意见) |
+| `KM_COLLAB_MAX_ROUNDS` | api | 3 | 圆桌轮次上限(拓扑声明钳制;115) |
+| `KM_AGENT_COLLAB_MAX_ROUNDS` | agent | 3 | 圆桌轮次执行兜底(触顶诚实收口,不编造共识) |
 
 ## apps/web — React SPA
 

@@ -7,6 +7,7 @@ from kongming.evalj.models import (
     OBJECT_ANSWER,
     OBJECT_COLLAB,
     OBJECT_REPORT,
+    OBJECT_ROUNDTABLE,
     OBJECT_TASK,
     BaselineCompare,
     JudgeOutcome,
@@ -63,13 +64,13 @@ def test_baseline_improvement_never_redline() -> None:
     assert not c.red_line and c.current_rate > (c.previous_rate or 0)
 
 
-# ── rubric 纪律:四类齐备、版本随代码、指纹稳定 ──
+# ── rubric 纪律:五类齐备(115 起含圆桌)、版本随代码、指纹稳定 ──
 
 
 def test_rubrics_cover_four_object_types() -> None:
     from evals.judge.rubrics import _RUBRICS, judge_prompt_fingerprint, rubric_version
 
-    for ot in (OBJECT_REPORT, OBJECT_TASK, OBJECT_COLLAB, OBJECT_ANSWER):
+    for ot in (OBJECT_REPORT, OBJECT_TASK, OBJECT_COLLAB, OBJECT_ANSWER, OBJECT_ROUNDTABLE):
         assert ot in _RUBRICS
         assert rubric_version(ot)
         assert _RUBRICS[ot].dimensions

@@ -97,12 +97,12 @@ class _ShortTxnRunStore:
 @pytest.mark.smoke
 @pytest.mark.judge
 async def test_judge_gate_sampling() -> None:
-    """门禁 judge 抽检层:四类型分层抽样 → run 落库 → 基线对比红线判定。"""
+    """门禁 judge 抽检层:五类型分层抽样 → run 落库 → 基线对比红线判定。"""
     token = await _login()
     client = ObjectClient(API_BASE, token)
     per_type = await gather_objects(client, TENANT, PER_TYPE)
     if not any(per_type.values()):
-        pytest.skip("四类评审对象全部空缺(环境无产出),judge 层如实记录")
+        pytest.skip("评审对象全部空缺(环境无产出),judge 层如实记录")
     llm = JudgeLlm()  # 凭证缺失在此显式失败(spec 口径)
     store = _ShortTxnRunStore()  # LLM 调用不跨事务(短事务逐调用提交)
     failures: list[str] = []

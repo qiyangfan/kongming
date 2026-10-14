@@ -536,6 +536,42 @@ class ApiClient:
             return None
         return _json_of(resp) if resp.status_code == 200 else None
 
+    async def collab_turn(
+        self,
+        *,
+        task_id: str,
+        tenant_key: str,
+        run_id: str,
+        round_no: int,
+        worker_no: int,
+        kind: str,
+        content: dict[str, object],
+        evidence: dict[str, object],
+        usage: dict[str, object],
+        trace_id: str,
+    ) -> bool:
+        """圆桌轮次上账(115;追加只写);失败仅日志(账本尽力而为)。"""
+        try:
+            resp = await self._post_once(
+                "/internal/task/collab-turn",
+                {
+                    "task_id": task_id,
+                    "tenant_key": tenant_key,
+                    "run_id": run_id,
+                    "round_no": round_no,
+                    "worker_no": worker_no,
+                    "kind": kind,
+                    "content": content,
+                    "evidence": evidence,
+                    "usage": usage,
+                    "trace_id": trace_id[:64],
+                },
+            )
+            return resp.status_code == 204
+        except httpx.HTTPError as e:
+            log.warning("collab_turn 回调异常: %s", e)
+            return False
+
     async def report_progress(
         self, *, report_id: str, phase: str, tenant_key: str = "default"
     ) -> None:

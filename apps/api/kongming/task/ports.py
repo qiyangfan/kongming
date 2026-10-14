@@ -147,6 +147,21 @@ class TaskRepo(Protocol):
 
     async def finish_collab_run(self, *, run_id: str, status: str, verdict: str | None) -> bool: ...
 
+    async def max_collab_worker_no(self, *, run_id: str) -> int: ...
+
+    async def insert_collab_turn(
+        self,
+        *,
+        run_id: str,
+        round_no: int,
+        worker_no: int,
+        kind: str,
+        content: dict[str, object],
+        evidence: dict[str, object],
+        usage: dict[str, object],
+        trace_id: str,
+    ) -> bool: ...
+
     async def list_collab_runs(self, *, task_id: str) -> list[dict[str, Any]]: ...
 
 

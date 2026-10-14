@@ -80,18 +80,16 @@ WEBSEARCH_PROVIDERS: dict[str, SearchProvider] = {
         endpoint="https://open.bigmodel.cn/api/paas/v4/web_search", host="open.bigmodel.cn"
     ),
     # 阿里云 AI 搜索开放平台联网搜索(归 OpenSearch 品牌线,实为联网搜索 API
-    # 而非自建索引引擎;契约按官方帮助文档核对于 2026-10-11,105):POST
-    # {host}/v3/openapi/workspaces/{workspace_name}/web-search/{service_id},
-    # 内置服务 ops-web-search-001 + default 空间;鉴权 Bearer 独立 OS- key
-    # (与百炼 sk- 不通用)。host 为账号级实例域名(控制台 API Keys 页查看,
-    # 形如 xxx.platform-<region>.opensearch.aliyuncs.com),下为文档缺省形态
-    # 占位——e2e 接 key 时按控制台实际域名回填本条 endpoint/host 单源。
+    # 而非自建索引引擎):POST /v3/openapi/workspaces/{ws}/web-search/{service_id},
+    # Bearer 独立 OS- key(与百炼 sk- 不通用)。host 为账号级实例域名——
+    # 2026-10-14 owner 提供本账号实例域名并回填(原「占位待回填」口径作废);
+    # 多账号部署需将 endpoint/host 升级为部署可配,当前单账号按固定端点同列。
     "alibaba_ai_search": SearchProvider(
         endpoint=(
-            "https://platform-cn-shanghai.opensearch.aliyuncs.com"
+            "https://default-c7qq.platform-cn-shanghai.opensearch.aliyuncs.com"
             "/v3/openapi/workspaces/default/web-search/ops-web-search-001"
         ),
-        host="platform-cn-shanghai.opensearch.aliyuncs.com",
+        host="default-c7qq.platform-cn-shanghai.opensearch.aliyuncs.com",
     ),
 }
 

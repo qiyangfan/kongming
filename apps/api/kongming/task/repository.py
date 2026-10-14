@@ -718,6 +718,18 @@ class SqlTaskRepo:
         ).fetchall()
         return len(rows)
 
+    async def max_collab_worker_no(self, *, run_id: str) -> int:
+        """该运行实际派发的最大参与者序号(圆桌「每轮完成」判定基准:
+        参与者按剔除零工具后的有效名册压缩编号,拓扑名册长度不可作依据)。"""
+        row = await self._s.scalar(
+            text(
+                "SELECT max(worker_no) FROM public.sys_agent_collab_worker"
+                " WHERE run_id = CAST(:r AS uuid)"
+            ),
+            {"r": run_id},
+        )
+        return int(row) if row is not None else 0
+
     async def finish_collab_worker(
         self,
         *,
@@ -767,8 +779,50 @@ class SqlTaskRepo:
         ).scalar_one_or_none()
         return hit is not None
 
+    async def insert_collab_turn(
+        self,
+        *,
+        run_id: str,
+        round_no: int,
+        worker_no: int,
+        kind: str,
+        content: dict[str, object],
+        evidence: dict[str, object],
+        usage: dict[str, object],
+        trace_id: str,
+    ) -> bool:
+        """圆桌轮次上账(115;追加只写)。运行在途条件并入写入谓词(与 worker
+        行同范式:收敛不追认迟到轮次);(run, round, worker) 唯一键防重复回写
+        ——主席判定占 worker_no=0,一轮一判定。"""
+        hit = (
+            await self._s.execute(
+                text(
+                    "INSERT INTO public.sys_agent_collab_turn"
+                    " (id, run_id, round_no, worker_no, kind, content, evidence, usage, trace_id)"
+                    " SELECT :i, r.id, :rd, :n, :k, CAST(:c AS jsonb), CAST(:e AS jsonb),"
+                    "        CAST(:u AS jsonb), :tr"
+                    " FROM public.sys_agent_collab_run r"
+                    " WHERE r.id = CAST(:r AS uuid) AND r.status = 'RUNNING'"
+                    " FOR UPDATE OF r"
+                    " ON CONFLICT (run_id, round_no, worker_no) DO NOTHING RETURNING id"
+                ),
+                {
+                    "i": str(uuid7()),
+                    "r": run_id,
+                    "rd": round_no,
+                    "n": worker_no,
+                    "k": kind,
+                    "c": _dump(content),
+                    "e": _dump(evidence),
+                    "u": _dump(usage),
+                    "tr": trace_id,
+                },
+            )
+        ).scalar_one_or_none()
+        return hit is not None
+
     async def list_collab_runs(self, *, task_id: str) -> list[dict[str, Any]]:
-        """协作运行清单(任务维度,含 worker 行;查询面单源)。"""
+        """协作运行清单(任务维度,含 worker 行与圆桌轮次转写;查询面单源)。"""
         runs = (
             (
                 await self._s.execute(
@@ -801,12 +855,35 @@ class SqlTaskRepo:
             .mappings()
             .all()
         )
-        by_run: dict[str, list[dict[str, Any]]] = {}
+        turns = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT tn.run_id, tn.round_no, tn.worker_no, tn.kind, tn.content,"
+                        "       tn.evidence, tn.usage, tn.trace_id, tn.created_at"
+                        " FROM public.sys_agent_collab_turn tn"
+                        " JOIN public.sys_agent_collab_run r ON r.id = tn.run_id"
+                        " WHERE r.task_id = CAST(:t AS uuid)"
+                        # id 为 uuid7(时间有序):同事务 created_at 恒等,
+                        # 按写入序回放(判定行在名册发言之后)
+                        " ORDER BY tn.run_id, tn.round_no, tn.id"
+                    ),
+                    {"t": task_id},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        by_run_workers: dict[str, list[dict[str, Any]]] = {}
         for w in workers:
-            by_run.setdefault(str(w["run_id"]), []).append(dict(w))
+            by_run_workers.setdefault(str(w["run_id"]), []).append(dict(w))
+        by_run_turns: dict[str, list[dict[str, Any]]] = {}
+        for tn in turns:
+            by_run_turns.setdefault(str(tn["run_id"]), []).append(dict(tn))
         out: list[dict[str, Any]] = []
         for r in runs:
             row = dict(r)
-            row["workers"] = by_run.get(str(row["id"]), [])
+            row["workers"] = by_run_workers.get(str(row["id"]), [])
+            row["turns"] = by_run_turns.get(str(row["id"]), [])
             out.append(row)
         return out

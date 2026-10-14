@@ -335,13 +335,25 @@ class TaskService:
     async def _collab_decision(self, *, tenant_id: str, step: dict[str, Any]) -> dict[str, object]:
         """协作步骤的执行决策载荷(091):拓扑(以库内归一值为准,再按当前
         部署上限复钳)+ Bot 运行时解析(人格/工具子集;解析失败如实降级为
-        无绑定,不虚报人格注入)。"""
+        无绑定,不虚报人格注入)。圆桌形态(115)逐参与者解析各自 Bot。"""
         from kongming.config import get_settings
 
         topo = m.normalize_collab_topology(
             cast("dict[str, Any] | None", step.get("collab_topology")),
             max_workers_cap=get_settings().collab_max_workers,
+            max_rounds_cap=get_settings().collab_max_rounds,
         )
+        if str(topo.get("kind") or "") == m.COLLAB_KIND_ROUNDTABLE:
+            parts: list[dict[str, object]] = []
+            for p in cast("list[dict[str, object]]", topo.get("participants") or []):
+                p_bot: dict[str, object] | None = None
+                p_bot_key = p.get("bot_key")
+                if p_bot_key and self._bot_resolver is not None:
+                    p_bot = await self._bot_resolver.resolve(
+                        tenant_id=tenant_id, bot_key=str(p_bot_key)
+                    )
+                parts.append({**p, "bot": p_bot})
+            return {**topo, "participants": parts}
         bot: dict[str, object] | None = None
         bot_key = topo.get("bot_key")
         if bot_key and self._bot_resolver is not None:
@@ -368,20 +380,48 @@ class TaskService:
             raise TaskNotFound
         if str(step["status"]) != m.S_PENDING:
             raise TaskConflict("仅 PENDING 步骤可声明协作拓扑")
-        topo = m.normalize_collab_topology(raw_topology, max_workers_cap=max_workers_cap)
-        bot_key = topo.get("bot_key")
-        if bot_key:
-            if self._bot_resolver is None:
-                raise TaskConflict("协作 Bot 绑定未启用")
-            if await self._bot_resolver.resolve(tenant_id=tenant_id, bot_key=str(bot_key)) is None:
-                raise TopologyBotNotFound(str(bot_key))
+        from kongming.config import get_settings
+
+        topo = m.normalize_collab_topology(
+            raw_topology,
+            max_workers_cap=max_workers_cap,
+            max_rounds_cap=get_settings().collab_max_rounds,
+        )
+        if str(topo.get("kind") or "") == m.COLLAB_KIND_ROUNDTABLE and topo.get("bot_key"):
+            # 圆桌绑定收口在名册(逐参与者);顶层 bot_key 不生效,拒绝歧义声明
+            raise TaskConflict("圆桌形态不受理顶层 bot_key(用参与者名册绑定)")
+        if self._bot_resolver is not None:
+            if str(topo.get("kind") or "") == m.COLLAB_KIND_ROUNDTABLE:
+                for p in cast("list[dict[str, object]]", topo.get("participants") or []):
+                    p_bot_key = p.get("bot_key")
+                    if p_bot_key and (
+                        await self._bot_resolver.resolve(
+                            tenant_id=tenant_id, bot_key=str(p_bot_key)
+                        )
+                        is None
+                    ):
+                        raise TopologyBotNotFound(str(p_bot_key))
+            else:
+                bot_key = topo.get("bot_key")
+                if bot_key and (
+                    await self._bot_resolver.resolve(tenant_id=tenant_id, bot_key=str(bot_key))
+                    is None
+                ):
+                    raise TopologyBotNotFound(str(bot_key))
+        elif topo.get("bot_key") or any(
+            p.get("bot_key")
+            for p in cast("list[dict[str, object]]", topo.get("participants") or [])
+        ):
+            raise TaskConflict("协作 Bot 绑定未启用")
         if not await self._repo.update_step_topology(
             task_id=task_id, step_id=step_id, topology=topo
         ):
             raise TaskConflict("步骤状态已变更,不可声明协作拓扑")
         await self._repo.append_task_event(
             task_id=task_id,
-            event={"at": _now(), "kind": "collab_topology_set", "step": step_id, **topo},
+            # 拓扑键后展开但 kind 显式回写:拓扑自带的 kind(形态)不得覆盖
+            # 事件信封的 kind(事件类型;115 曾被展开覆盖为拓扑形态值)
+            event={"at": _now(), "step": step_id, **topo, "kind": "collab_topology_set"},
         )
         return topo
 
@@ -417,6 +457,7 @@ class TaskService:
         topo = m.normalize_collab_topology(
             cast("dict[str, Any] | None", step.get("collab_topology")),
             max_workers_cap=get_settings().collab_max_workers,
+            max_rounds_cap=get_settings().collab_max_rounds,
         )
         superseded = await self._repo.supersede_open_collab_runs(task_id=task_id, step_id=step_id)
         run_id = str(uuid7())
@@ -433,9 +474,12 @@ class TaskService:
             "kind": "collab_started",
             "step": step_id,
             "run": run_id,
+            "topology_kind": str(topo.get("kind") or m.COLLAB_KIND_DECOMPOSITION),
             "max_workers": topo.get("max_workers"),
             "critic": topo.get("critic"),
             "dispatch": topo.get("dispatch"),
+            "max_rounds": topo.get("max_rounds"),
+            "participants": len(cast("list[object]", topo.get("participants") or [])),
         }
         if superseded:
             event["superseded"] = superseded
@@ -462,7 +506,12 @@ class TaskService:
         if str(run["status"]) != m.R_RUNNING:
             raise TaskConflict("协作运行已终态,不可派发 worker")
         topo = cast("dict[str, Any]", run.get("topology") or {})
-        declared = int(topo.get("max_workers") or m.COLLAB_DEFAULT_WORKERS)
+        if str(topo.get("kind") or "") == m.COLLAB_KIND_ROUNDTABLE:
+            # 圆桌:参与者即 worker 行(名册锁定,无核实/修订重派余量需求,
+            # 上限式与分工形态同式防放大)
+            declared = len(m.roundtable_roster(topo))
+        else:
+            declared = int(topo.get("max_workers") or m.COLLAB_DEFAULT_WORKERS)
         if worker_no < 1 or worker_no > max(declared * 2 + 1, COLLAB_WORKER_NO_HARD_CAP):
             raise TaskConflict("worker 序号超上限")
         if not await self._repo.insert_collab_worker(
@@ -564,6 +613,82 @@ class TaskService:
             event["workers_skipped"] = converged
         await self._repo.append_task_event(task_id=task_id, event=event)
         return status
+
+    async def collab_record_turn(
+        self,
+        *,
+        task_id: str,
+        run_id: str,
+        tenant_id: str,
+        round_no: int,
+        worker_no: int,
+        kind: str,
+        content: dict[str, object],
+        evidence: dict[str, object],
+        usage: dict[str, object],
+        trace_id: str,
+    ) -> None:
+        """圆桌轮次上账(115 内部回调):拓扑形态闸(非圆桌运行不受理,无游离
+        轮次通道)+ 名册运行期锁定(非名册序号拒绝,主席判定恒 0 号)+ 轮次
+        上限闸。唯一键拒绝重复回写;在途谓词拒绝终态运行上的迟到轮次。
+        事件:主席判定行=判定事件;名册末位行=每轮完成事件(开桌/收口沿用
+        collab_started/collab_finished)。"""
+        run = await self._repo.get_collab_run_system(
+            run_id=run_id, task_id=task_id, tenant_id=tenant_id
+        )
+        if run is None:
+            raise TaskNotFound
+        if kind not in m.TURN_KINDS:
+            raise TaskConflict(f"轮次类型非法: {kind}")
+        topo = cast("dict[str, Any]", run.get("topology") or {})
+        if str(topo.get("kind") or "") != m.COLLAB_KIND_ROUNDTABLE:
+            raise TaskConflict("非圆桌运行不受理轮次上账")
+        # 实派名册(参与者行)为锁定基准:有效名册经零工具/绑定剔除后压缩
+        # 编号,拓扑名册长度不可作依据;幽灵序号(未派发行)一并拒绝
+        dispatched_max = await self._repo.max_collab_worker_no(run_id=run_id)
+        if kind == m.TURN_VERDICT:
+            if worker_no != m.CHAIR_WORKER_NO:
+                raise TaskConflict("主席判定仅可记 0 号位")
+        else:
+            if worker_no < 1 or worker_no > dispatched_max:
+                raise TaskConflict("参与者不在实派名册(名册运行期锁定)")
+        if round_no < 1 or round_no > int(topo.get("max_rounds") or 0):
+            raise TaskConflict("轮次超拓扑上限")
+        inserted = await self._repo.insert_collab_turn(
+            run_id=run_id,
+            round_no=round_no,
+            worker_no=worker_no,
+            kind=kind,
+            content=content,
+            evidence=evidence,
+            usage=usage,
+            trace_id=trace_id[:64],
+        )
+        if not inserted:
+            raise TaskConflict("轮次已记录或运行已不在途")
+        if kind == m.TURN_VERDICT:
+            await self._repo.append_task_event(
+                task_id=task_id,
+                event={
+                    "at": _now(),
+                    "kind": "collab_round_verdict",
+                    "run": run_id,
+                    "round": round_no,
+                    "consensus": bool(content.get("consensus")),
+                },
+            )
+        elif worker_no == await self._repo.max_collab_worker_no(run_id=run_id):
+            # 末位判定按实际派发的最大序号(有效名册经零工具剔除后压缩编号,
+            # 拓扑名册长度不可作依据——P1-1)
+            await self._repo.append_task_event(
+                task_id=task_id,
+                event={
+                    "at": _now(),
+                    "kind": "collab_round_finished",
+                    "run": run_id,
+                    "round": round_no,
+                },
+            )
 
     async def finish_step(
         self, *, task_id: str, tenant_id: str, result: m.StepResult, epoch: int | None = None

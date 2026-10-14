@@ -50,10 +50,10 @@ def test_provider_registry_single_source() -> None:
     assert zhipu.host == "open.bigmodel.cn"
     alibaba = WEBSEARCH_PROVIDERS["alibaba_ai_search"]
     assert alibaba.endpoint == (
-        "https://platform-cn-shanghai.opensearch.aliyuncs.com"
+        "https://default-c7qq.platform-cn-shanghai.opensearch.aliyuncs.com"
         "/v3/openapi/workspaces/default/web-search/ops-web-search-001"
     )
-    assert alibaba.host == "platform-cn-shanghai.opensearch.aliyuncs.com"
+    assert alibaba.host == "default-c7qq.platform-cn-shanghai.opensearch.aliyuncs.com"
     assert DOMAIN_TOOLS["web_search"] == "websearch"
     # 数据表与适配表同键(评审 D2:只加数据不加适配会在启动期 ValueError 拒启,
     # fail-closed 够响,但同键断言把漂移挡在测试层)
@@ -62,7 +62,7 @@ def test_provider_registry_single_source() -> None:
 
 def test_provider_manifest_derivation_covers_registry() -> None:
     """105:域清单端点与出口白名单由供应商单源派生(组合根 _build_gateway 同构
-    入参)——注册表任一供应商(含新增 alibaba)自动进清单,白名单=注册主机
+    入参)——注册表任一供应商自动进清单,白名单=注册主机
     精确匹配,无需逐供应商接线。"""
     for spec in WEBSEARCH_PROVIDERS.values():
         manifest, warnings = load_manifest(

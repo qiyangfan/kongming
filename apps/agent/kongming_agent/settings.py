@@ -74,6 +74,8 @@ class Settings(BaseSettings):
     collab_max_workers: int = 3
     collab_max_depth: int = 1
     collab_max_revision_rounds: int = 1
+    # 圆桌轮次上限(115;执行面最后防线,api 侧声明钳制为先)
+    collab_max_rounds: int = 3
 
     # 报告生成编排(088):报告级预算三约束(部署级可配,耗尽即停落 PARTIAL——
     # 「预算退出诚实」)与快照行数上限(与 api 刷新路径同量级)

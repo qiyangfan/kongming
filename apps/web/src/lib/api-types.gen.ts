@@ -3317,6 +3317,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/task/collab-turn": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Collab Turn */
+        post: operations["collab_turn_internal_task_collab_turn_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/connectors": {
         parameters: {
             query?: never;
@@ -3894,6 +3911,16 @@ export interface components {
              */
             summary: string;
         };
+        /**
+         * CollabParticipantIn
+         * @description 圆桌参与者声明条目(115):role 取内置章程域,bot_key 可空绑定。
+         */
+        CollabParticipantIn: {
+            /** Role */
+            role?: string | null;
+            /** Bot Key */
+            bot_key?: string | null;
+        };
         /** CollabRunOut */
         CollabRunOut: {
             /** Id */
@@ -3916,6 +3943,8 @@ export interface components {
             updated_at?: string | null;
             /** Workers */
             workers?: components["schemas"]["CollabWorkerOut"][];
+            /** Turns */
+            turns?: components["schemas"]["CollabTurnOut"][];
         };
         /** CollabRunsOut */
         CollabRunsOut: {
@@ -3938,6 +3967,8 @@ export interface components {
         };
         /** CollabTopologyIn */
         CollabTopologyIn: {
+            /** Kind */
+            kind?: string | null;
             /** Max Workers */
             max_workers?: number | null;
             /**
@@ -3949,6 +3980,73 @@ export interface components {
             dispatch?: string | null;
             /** Bot Key */
             bot_key?: string | null;
+            /** Max Rounds */
+            max_rounds?: number | null;
+            /** Participants */
+            participants?: components["schemas"]["CollabParticipantIn"][] | null;
+        };
+        /**
+         * CollabTurnIn
+         * @description 圆桌轮次上账载荷(115;追加只写,唯一键拒绝重复)。
+         */
+        CollabTurnIn: {
+            /** Task Id */
+            task_id: string;
+            /** Tenant Key */
+            tenant_key: string;
+            /** Run Id */
+            run_id: string;
+            /** Round No */
+            round_no: number;
+            /** Worker No */
+            worker_no: number;
+            /** Kind */
+            kind: string;
+            /** Content */
+            content?: {
+                [key: string]: unknown;
+            };
+            /** Evidence */
+            evidence?: {
+                [key: string]: unknown;
+            };
+            /** Usage */
+            usage?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Trace Id
+             * @default
+             */
+            trace_id: string;
+        };
+        /**
+         * CollabTurnOut
+         * @description 圆桌轮次转写行(115;黑板观测面,追加只写)。
+         */
+        CollabTurnOut: {
+            /** Round No */
+            round_no: number;
+            /** Worker No */
+            worker_no: number;
+            /** Kind */
+            kind: string;
+            /** Content */
+            content: {
+                [key: string]: unknown;
+            } | null;
+            /** Evidence */
+            evidence: {
+                [key: string]: unknown;
+            } | null;
+            /** Usage */
+            usage: {
+                [key: string]: unknown;
+            } | null;
+            /** Trace Id */
+            trace_id: string | null;
+            /** Created At */
+            created_at?: string | null;
         };
         /** CollabWorkerOut */
         CollabWorkerOut: {
@@ -15198,6 +15296,37 @@ export interface operations {
                         [key: string]: unknown;
                     };
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    collab_turn_internal_task_collab_turn_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollabTurnIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

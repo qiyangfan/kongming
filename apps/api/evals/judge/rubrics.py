@@ -17,6 +17,7 @@ from kongming.evalj.models import (
     OBJECT_ANSWER,
     OBJECT_COLLAB,
     OBJECT_REPORT,
+    OBJECT_ROUNDTABLE,
     OBJECT_TASK,
 )
 
@@ -73,6 +74,22 @@ CollabRubric = Rubric(
     },
     weights={"裁决合理性": 0.45, "分歧处理": 0.25, "汇总质量": 0.3},
 )
+RoundtableRubric = Rubric(
+    version="v1",
+    dimensions={
+        "共识质量": (
+            "1-5:1=共识与发言矛盾或附和式假共识;3=共识可接受但理由薄弱;5=共识建立在证据兼容上"
+        ),
+        "分歧诚实": (
+            "1-5:1=分歧被静默调和或编造共识;3=分歧保留但表述含糊;5=各方立场与证据完整呈现"
+        ),
+        "证据接地": ("1-5:1=发言无数据查证裸说理;3=部分发言有证据引用;5=关键论断均有查证支撑"),
+        "收敛效率": (
+            "1-5:1=轮次耗尽无实质推进;3=有收敛但冗余轮次多;5=以较少轮次达成收敛或有效保留"
+        ),
+    },
+    weights={"共识质量": 0.3, "分歧诚实": 0.25, "证据接地": 0.3, "收敛效率": 0.15},
+)
 AnswerRubric = Rubric(
     version="v1",
     dimensions={
@@ -89,6 +106,7 @@ _RUBRICS = {
     OBJECT_TASK: TaskRubric,
     OBJECT_COLLAB: CollabRubric,
     OBJECT_ANSWER: AnswerRubric,
+    OBJECT_ROUNDTABLE: RoundtableRubric,
 }
 
 

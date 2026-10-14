@@ -18,6 +18,7 @@ from kongming.evalj.models import (
     OBJECT_ANSWER,
     OBJECT_COLLAB,
     OBJECT_REPORT,
+    OBJECT_ROUNDTABLE,
     OBJECT_TASK,
     JudgeObject,
 )
@@ -189,6 +190,76 @@ async def fetch_collab_objects(client: ObjectClient, limit: int) -> list[JudgeOb
     return out
 
 
+# 圆桌对象资格 = 运行终态(收口诚实语义:DONE=共识收口,PARTIAL=预算/截断
+# 诚实收口)——评审单元是 run(转写自含问题+发言+判定),宿主任务的后续
+# 步骤是否被预算饿死与对辩质量无关,不以任务终态为门槛(115 决策;
+# 与 092「DONE 任务」口径分叉:task/collab 的交付物是步骤产出,圆桌是收口
+# 转写本身)。CANCELLED/RUNNING = 未完成旧账,不评。
+_ROUNDTABLE_ELIGIBLE = frozenset({"DONE", "PARTIAL"})
+
+
+async def fetch_roundtable_objects(client: ObjectClient, limit: int) -> list[JudgeObject]:
+    """圆桌评审对象(115):拓扑形态为 roundtable 且运行已诚实收口的协作
+    run。装配轮次转写(发言/弃权/判定按序)供 rubric 评共识质量/分歧诚实/
+    证据接地/收敛效率;字段严格按 CollabRunOut 契约(turns 为查询面扩展)。"""
+    data = await client._get("/tasks?page=1&size=50")
+    items = _dict_list(data.get("items"))
+    out: list[JudgeObject] = []
+    for item in items:
+        if len(out) >= limit:
+            break
+        tid = str(item.get("id") or "")
+        if not tid:
+            continue
+        detail = await client._get(f"/tasks/{tid}")
+        step_goal = {
+            str(s.get("id")): str(s.get("goal") or "") for s in _dict_list(detail.get("steps"))
+        }
+        runs = await client._get(f"/tasks/{tid}/collab-runs")
+        for run in _dict_list(runs.get("items")):
+            if len(out) >= limit:
+                break
+            topo = run.get("topology")
+            topo_d = topo if isinstance(topo, dict) else {}
+            if topo_d.get("kind") != "roundtable":
+                continue
+            if str(run.get("status") or "") not in _ROUNDTABLE_ELIGIBLE:
+                continue
+            goal = step_goal.get(str(run.get("step_id")), "")
+            turn_lines: list[str] = []
+            for t in _dict_list(run.get("turns")):
+                worker_no_raw = t.get("worker_no")
+                worker_no = int(worker_no_raw) if isinstance(worker_no_raw, (int, float)) else 0
+                who = "主席" if worker_no == 0 else f"#{worker_no}"
+                content = t.get("content")
+                cd = content if isinstance(content, dict) else {}
+                if str(t.get("kind")) == "verdict":
+                    turn_lines.append(
+                        f"- 第{t.get('round_no')}轮 {who}:判定"
+                        f" consensus={cd.get('consensus')}({cd.get('reason')})"
+                    )
+                    continue
+                stance = str(cd.get("stance") or "")
+                turn_lines.append(
+                    f"- 第{t.get('round_no')}轮 {who}[{stance}]:"
+                    f" {_json_short(cd.get('summary'), 240) or '弃权'}"
+                )
+            text = (
+                f"圆桌问题:{goal or tid}\n"
+                f"终态:{run.get('status', '')}(裁决:{run.get('verdict') or '—'})\n"
+                f"轮次转写:\n" + "\n".join(turn_lines)
+            )[:_TEXT_LIMIT]
+            out.append(
+                JudgeObject(
+                    object_type=OBJECT_ROUNDTABLE,
+                    object_id=str(run.get("id") or ""),
+                    object_ref=(goal or str(run.get("id") or ""))[:200],
+                    text=text,
+                )
+            )
+    return out
+
+
 async def fetch_answer_objects(
     tenant: str, limit: int, datasource_key: str = "sakila"
 ) -> list[JudgeObject]:
@@ -237,9 +308,10 @@ async def gather_objects(
         fetch_task_objects(client, per_type),
         fetch_collab_objects(client, per_type),
         fetch_answer_objects(tenant, per_type),
+        fetch_roundtable_objects(client, per_type),
         return_exceptions=True,
     )
-    names = (OBJECT_REPORT, OBJECT_TASK, OBJECT_COLLAB, OBJECT_ANSWER)
+    names = (OBJECT_REPORT, OBJECT_TASK, OBJECT_COLLAB, OBJECT_ANSWER, OBJECT_ROUNDTABLE)
     out: dict[str, list[JudgeObject]] = {}
     for name, res in zip(names, results, strict=True):
         if isinstance(res, BaseException):

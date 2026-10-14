@@ -117,26 +117,90 @@ def over_budget(used: dict[str, Any], config: dict[str, int]) -> str | None:
     return None
 
 
-# ── 协作拓扑(091;宿主=任务步骤)──
+# ── 协作拓扑(091;宿主=任务步骤;115 增圆桌形态)──
 
 COLLAB_DISPATCH_SERIAL = "serial"
 COLLAB_DISPATCH_PARALLEL = "parallel"
 COLLAB_DISPATCHES = frozenset({COLLAB_DISPATCH_SERIAL, COLLAB_DISPATCH_PARALLEL})
+# 拓扑形态(115):decomposition=091 分工编排(缺省,存量行缺 kind 即此);
+# roundtable=对等圆桌(黑板+轮次,显式 opt-in)
+COLLAB_KIND_DECOMPOSITION = "decomposition"
+COLLAB_KIND_ROUNDTABLE = "roundtable"
+COLLAB_KINDS = frozenset({COLLAB_KIND_DECOMPOSITION, COLLAB_KIND_ROUNDTABLE})
 # 缺省 worker 数(与 agent 面编排缺省一致;钳制上限来自部署配置)
 COLLAB_DEFAULT_WORKERS = 3
+# 圆桌轮次上限缺省(与 agent 面编排常量同值同源;部署 cap 钳制)
+COLLAB_DEFAULT_ROUNDS = 3
+# 圆桌参与者名册下限(二至部署上限;低于下限的声明回退缺省名册)
+COLLAB_MIN_PARTICIPANTS = 2
+# 内置角色章程取值域(圆桌参与者的声明角色;名册外角色声明逐条剔除)
+COLLAB_ROLES = frozenset({"analyst", "skeptic", "auditor"})
+# 缺省名册(声明未给出合法名册时的回退;与角色取值域同源)
+COLLAB_DEFAULT_ROSTER: tuple[dict[str, object], ...] = (
+    {"role": "analyst"},
+    {"role": "skeptic"},
+    {"role": "auditor"},
+)
 # 嵌套深度上限(与 agent 面编排常量同值同源语义;缺省不嵌套,协作只由任务步骤发起)
 DEFAULT_MAX_DEPTH = 1
 # bot_key 与 bot 域同口径(小写字母开头,小写字母/数字/下划线)
 COLLAB_BOT_KEY_MAX = 64
 
 
+def _norm_bot_key(raw: object) -> str | None:
+    """bot_key 归一(空串/空白 → None;与 091 单绑定口径一致)。"""
+    key = str(raw).strip() if raw else ""
+    return key or None
+
+
 def normalize_collab_topology(
-    raw: dict[str, Any] | None, *, max_workers_cap: int
+    raw: dict[str, Any] | None,
+    *,
+    max_workers_cap: int,
+    max_rounds_cap: int = COLLAB_DEFAULT_ROUNDS,
 ) -> dict[str, object]:
     """协作拓扑归一 + 部署级钳制(纯函数):非法值回退缺省;
-    max_workers 恒在 [1, max_workers_cap] 内(部署上限单点钳制)。
-    返回恒为合法载荷(库内只存归一结果)。"""
+    分工形态 max_workers 恒在 [1, max_workers_cap];圆桌形态参与者恒在
+    [2, max(2, max_workers_cap)]、max_rounds 恒在 [1, max_rounds_cap]
+    (部署上限单点钳制)。返回恒为合法载荷(库内只存归一结果)。"""
     cfg = raw if isinstance(raw, dict) else {}
+    kind = str(cfg.get("kind") or COLLAB_KIND_DECOMPOSITION)
+    if kind not in COLLAB_KINDS:
+        kind = COLLAB_KIND_DECOMPOSITION
+    if kind == COLLAB_KIND_ROUNDTABLE:
+        roster: list[dict[str, object]] = []
+        raw_parts = cfg.get("participants")
+        for item in cast("list[object]", raw_parts if isinstance(raw_parts, list) else []):
+            if not isinstance(item, dict):
+                continue
+            entry = cast("dict[str, object]", item)
+            role = str(entry.get("role") or "")
+            if role not in COLLAB_ROLES:
+                continue
+            roster.append({"role": role, "bot_key": _norm_bot_key(entry.get("bot_key"))})
+        # 名册去重(同角色重复声明裁到首条;角色即参与者的确定性标识)
+        seen: set[str] = set()
+        deduped: list[dict[str, object]] = []
+        for p in roster:
+            role = str(p["role"])
+            if role in seen:
+                continue
+            seen.add(role)
+            deduped.append(p)
+        roster = deduped
+        cap = max(COLLAB_MIN_PARTICIPANTS, max(1, max_workers_cap))
+        if len(roster) > cap:
+            roster = roster[:cap]
+        if len(roster) < COLLAB_MIN_PARTICIPANTS:
+            roster = [dict(p) for p in COLLAB_DEFAULT_ROSTER][:cap]
+        raw_rounds = cfg.get("max_rounds")
+        rounds = (
+            raw_rounds if isinstance(raw_rounds, int) and not isinstance(raw_rounds, bool) else 0
+        )
+        if rounds < 1:
+            rounds = COLLAB_DEFAULT_ROUNDS
+        rounds = min(max(1, rounds), max(1, max_rounds_cap))
+        return {"kind": kind, "max_rounds": rounds, "participants": roster}
     raw_workers = cfg.get("max_workers")
     workers = 0
     if isinstance(raw_workers, int) and not isinstance(raw_workers, bool):
@@ -148,15 +212,12 @@ def normalize_collab_topology(
     dispatch = str(cfg.get("dispatch") or COLLAB_DISPATCH_SERIAL)
     if dispatch not in COLLAB_DISPATCHES:
         dispatch = COLLAB_DISPATCH_SERIAL
-    raw_bot = cfg.get("bot_key")
-    bot_key = str(raw_bot).strip() if raw_bot else None
-    if bot_key == "":
-        bot_key = None
     return {
+        "kind": kind,
         "max_workers": workers,
         "critic": critic,
         "dispatch": dispatch,
-        "bot_key": bot_key,
+        "bot_key": _norm_bot_key(cfg.get("bot_key")),
     }
 
 
@@ -166,6 +227,16 @@ def has_collab_topology(step: dict[str, Any]) -> bool:
     if not isinstance(topo, dict):
         return False
     return bool(cast("dict[str, object]", topo))
+
+
+def roundtable_roster(topo: dict[str, Any]) -> list[dict[str, object]]:
+    """圆桌名册读取(缺 kind=分工形态 → 空名册;运行期名册锁定以此为准)。"""
+    if str(topo.get("kind") or "") != COLLAB_KIND_ROUNDTABLE:
+        return []
+    parts = topo.get("participants")
+    if not isinstance(parts, list):
+        return []
+    return [dict(p) for p in cast("list[dict[str, object]]", parts)]
 
 
 # ── 协作账本状态(091;与 0040 两表 CHECK 同源)──
@@ -184,6 +255,16 @@ W_SKIPPED = "SKIPPED"
 
 # 收敛裁决标记(supersede 写入 verdict 列并透出查询面,语义须单源)
 VERDICT_SUPERSEDED = "superseded"
+
+# ── 圆桌轮次账本(115;与 0054 turn 表 CHECK 同源)──
+
+TURN_SPEECH = "speech"
+TURN_VERIFICATION = "verification"
+TURN_ABSTAIN = "abstain"
+TURN_VERDICT = "verdict"
+TURN_KINDS = frozenset({TURN_SPEECH, TURN_VERIFICATION, TURN_ABSTAIN, TURN_VERDICT})
+# 主席判定行的参与者序号(主席非名册成员,不占 worker 行;0 号为判定保留位)
+CHAIR_WORKER_NO = 0
 
 
 def collab_run_status(verdict: str, pending_count: int) -> str:

@@ -22,7 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { COLLAB_STATUS_META, getTask, listCollabRuns, TASK_STATUS_META } from "@/lib/task-api";
-import type { CollabRunOut, CollabWorkerOut } from "@/lib/task-api";
+import type { CollabRunOut, CollabTurnOut, CollabWorkerOut } from "@/lib/task-api";
 import { useTenant } from "@/lib/tenant-store";
 
 // 轮询节奏(活动期;终态即停,间隔常量化避免散落字面量)
@@ -32,6 +32,14 @@ const COLLAB_RUNS_POLL_MS = 4000;
 // 暂停不杀在途编排循环,PAUSED 下仍可能有收尾中的运行
 const RUNS_ACTIVE_STATUSES = ["PLANNING", "RUNNING", "PAUSED"];
 // 裁决值中文映射(未知值原样透出;superseded=重跑前在途账被收敛的标记)
+/** 圆桌轮次行类型呈现(115):发言/查证/弃权/主席判定。 */
+const ROUND_TURN_KIND_LABELS: Record<string, string> = {
+  speech: "发言",
+  verification: "查证",
+  abstain: "弃权",
+  verdict: "判定",
+};
+
 const COLLAB_VERDICT_LABELS: Record<string, string> = {
   PASS: "通过",
   ERROR: "失败",
@@ -216,6 +224,7 @@ export default function TaskDetailPage() {
                 run={run}
                 // 详情轮询暂停期间事件可能滞后:无事件时不下发臆造的 0
                 pendingCount={typeof finEvent?.pending === "number" ? finEvent.pending : null}
+                dissent={typeof finEvent?.dissent === "boolean" ? finEvent.dissent : null}
               />
             );
           })}
@@ -258,7 +267,15 @@ function ButtonLink() {
 }
 
 /** 一次协作运行卡片:裁决态 + 分歧/部分完成披露 + worker 账本(DataView 双形态)。 */
-function CollabRunCard({ run, pendingCount }: { run: CollabRunOut; pendingCount: number | null }) {
+function CollabRunCard({
+  run,
+  pendingCount,
+  dissent,
+}: {
+  run: CollabRunOut;
+  pendingCount: number | null;
+  dissent: boolean | null;
+}) {
   const workerColumns: DataViewColumn<CollabWorkerOut>[] = [
     {
       key: "subgoal",
@@ -301,7 +318,9 @@ function CollabRunCard({ run, pendingCount }: { run: CollabRunOut; pendingCount:
   ];
   const topo = run.topology ?? {};
   const workers = run.workers ?? [];
+  const turns = run.turns ?? [];
   const hasVerification = workers.some((w) => w.conclusion?.verification);
+  const isRoundtable = topo.kind === "roundtable";
   return (
     <div className="space-y-2 rounded-lg border border-border p-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -311,10 +330,17 @@ function CollabRunCard({ run, pendingCount }: { run: CollabRunOut; pendingCount:
             裁决 {COLLAB_VERDICT_LABELS[run.verdict] ?? run.verdict}
           </span>
         )}
-        <span className="text-xs text-muted-foreground">
-          {String(topo.max_workers ?? "—")} worker·{String(topo.dispatch ?? "serial")}
-          {topo.critic ? "·critic" : ""}
-        </span>
+        {isRoundtable ? (
+          <span className="text-xs text-muted-foreground">
+            圆桌·{Array.isArray(topo.participants) ? topo.participants.length : "—"} 参与者·≤
+            {String(topo.max_rounds ?? "—")} 轮
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">
+            {String(topo.max_workers ?? "—")} worker·{String(topo.dispatch ?? "serial")}
+            {topo.critic ? "·critic" : ""}
+          </span>
+        )}
       </div>
       {/* 分歧/部分完成如实披露(不静默调和的呈现面);两态并存时各自成行,
           事件滞后时缺数不臆造 0 */}
@@ -331,6 +357,12 @@ function CollabRunCard({ run, pendingCount }: { run: CollabRunOut; pendingCount:
           存在 worker 结论分歧,已按核实结果或标注呈现。
         </p>
       )}
+      {isRoundtable && dissent === true && (
+        <p className="flex items-start gap-1.5 text-xs text-warning">
+          <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          圆桌未达成共识,分歧各方立场如实保留。
+        </p>
+      )}
       <DataView
         columns={workerColumns}
         rows={workers}
@@ -338,8 +370,86 @@ function CollabRunCard({ run, pendingCount }: { run: CollabRunOut; pendingCount:
         isEmpty={workers.length === 0}
         emptyText="无 worker 账本。"
       />
+      {isRoundtable && turns.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-muted-foreground">轮次转写(按序回放)</p>
+          <DataView
+            columns={buildTurnColumns()}
+            rows={turns}
+            rowKey={(t) => `${t.round_no}-${t.worker_no}`}
+            isEmpty={false}
+            emptyText=""
+          />
+        </div>
+      )}
     </div>
   );
+}
+
+/** 圆桌轮次转写列模型(115):参与者/类型/立场/摘要/证据,按轮按序回放;
+ * 参与者归属优先取行内 label/role(有效名册经剔除后压缩编号,拓扑下标
+ * 仅作无行内标签时的兜底),判定行恒 0 号位=主席。 */
+function buildTurnColumns(): DataViewColumn<CollabTurnOut>[] {
+  return [
+    { key: "round_no", header: "轮次", cardPriority: 1 },
+    {
+      key: "worker_no",
+      header: "参与者",
+      cardPriority: 2,
+      render: (t) => {
+        if (t.worker_no === 0) return <span className="font-medium text-foreground">主席</span>;
+        const label =
+          t.content && typeof t.content.label === "string" && t.content.label !== ""
+            ? t.content.label
+            : null;
+        const role =
+          t.content && typeof t.content.role === "string" && t.content.role !== ""
+            ? t.content.role
+            : null;
+        const text = label ?? role ?? `#${t.worker_no}`;
+        return (
+          <span className="font-medium text-foreground">
+            #{t.worker_no} {text}
+          </span>
+        );
+      },
+    },
+    {
+      key: "kind",
+      header: "类型",
+      cardPriority: 2,
+      render: (t) => ROUND_TURN_KIND_LABELS[t.kind] ?? t.kind,
+    },
+    {
+      key: "stance",
+      header: "立场/判定",
+      render: (t) => {
+        if (t.kind === "verdict") return t.content?.consensus === true ? "共识" : "未共识";
+        if (t.kind === "abstain") return "弃权";
+        const stance = t.content && typeof t.content.stance === "string" ? t.content.stance : "—";
+        return <span className="text-xs">{stance}</span>;
+      },
+    },
+    {
+      key: "summary",
+      header: "摘要",
+      render: (t) => {
+        const summary = t.content && typeof t.content.summary === "string" ? t.content.summary : "";
+        return <span className="line-clamp-2 text-xs text-muted-foreground">{summary || "—"}</span>;
+      },
+    },
+    {
+      key: "usage",
+      header: "token",
+      render: (t) =>
+        t.usage && typeof t.usage.total_tokens === "number" ? t.usage.total_tokens : "—",
+    },
+    {
+      key: "trace_id",
+      header: "trace",
+      render: (t) => <span className="font-mono text-xs">{t.trace_id || "—"}</span>,
+    },
+  ];
 }
 
 function OperationButton(props: { label: string; onClick: () => void; disabled?: boolean }) {

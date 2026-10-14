@@ -144,6 +144,19 @@ class CollabWorkerOut(BaseModel):
     updated_at: str | None = None
 
 
+class CollabTurnOut(BaseModel):
+    """圆桌轮次转写行(115;黑板观测面,追加只写)。"""
+
+    round_no: int
+    worker_no: int
+    kind: str
+    content: dict[str, object] | None
+    evidence: dict[str, object] | None
+    usage: dict[str, object] | None
+    trace_id: str | None
+    created_at: str | None = None
+
+
 class CollabRunOut(BaseModel):
     id: str
     step_id: str
@@ -154,17 +167,29 @@ class CollabRunOut(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
     workers: list[CollabWorkerOut] = Field(default_factory=list[CollabWorkerOut])
+    turns: list[CollabTurnOut] = Field(default_factory=list[CollabTurnOut])
 
 
 class CollabRunsOut(BaseModel):
     items: list[CollabRunOut]
 
 
+class CollabParticipantIn(BaseModel):
+    """圆桌参与者声明条目(115):role 取内置章程域,bot_key 可空绑定。"""
+
+    role: str | None = Field(default=None, max_length=32)
+    bot_key: str | None = Field(default=None, max_length=m.COLLAB_BOT_KEY_MAX)
+
+
 class CollabTopologyIn(BaseModel):
+    kind: str | None = None
     max_workers: int | None = Field(default=None, ge=1, le=16)
     critic: bool = False
     dispatch: str | None = None
     bot_key: str | None = Field(default=None, max_length=m.COLLAB_BOT_KEY_MAX)
+    # 圆桌(115):轮次上限与参与者名册(名册声明期确定,运行期锁定)
+    max_rounds: int | None = Field(default=None, ge=1, le=16)
+    participants: list[CollabParticipantIn] | None = Field(default=None, max_length=16)
 
 
 class TaskMutateOut(BaseModel):
@@ -427,6 +452,19 @@ async def list_collab_runs(
             )
             for w in cast("list[dict[str, Any]]", r.get("workers") or [])
         ]
+        turns = [
+            CollabTurnOut(
+                round_no=int(str(t.get("round_no") or 0)),
+                worker_no=int(str(t.get("worker_no") or 0)),
+                kind=str(t.get("kind") or ""),
+                content=cast("dict[str, object] | None", t.get("content")),
+                evidence=cast("dict[str, object] | None", t.get("evidence")),
+                usage=cast("dict[str, object] | None", t.get("usage")),
+                trace_id=cast("str | None", t.get("trace_id")),
+                created_at=_iso_or_none(t.get("created_at")),
+            )
+            for t in cast("list[dict[str, Any]]", r.get("turns") or [])
+        ]
         items.append(
             CollabRunOut(
                 id=str(r["id"]),
@@ -438,6 +476,7 @@ async def list_collab_runs(
                 created_at=_iso_or_none(r.get("created_at")),
                 updated_at=_iso_or_none(r.get("updated_at")),
                 workers=workers,
+                turns=turns,
             )
         )
     return CollabRunsOut(items=items)
@@ -752,6 +791,47 @@ async def collab_finish(
     except TaskConflict as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     return {"status": status}
+
+
+class CollabTurnIn(BaseModel):
+    """圆桌轮次上账载荷(115;追加只写,唯一键拒绝重复)。"""
+
+    task_id: str
+    tenant_key: str
+    run_id: str
+    round_no: int = Field(ge=1, le=64)
+    worker_no: int = Field(ge=0, le=64)
+    kind: str
+    content: dict[str, object] = Field(default_factory=dict)
+    evidence: dict[str, object] = Field(default_factory=dict)
+    usage: dict[str, object] = Field(default_factory=dict)
+    trace_id: str = Field(default="", max_length=64)
+
+
+@internal_router.post("/collab-turn", status_code=204)
+async def collab_turn(
+    body: CollabTurnIn, session: Annotated[AsyncSession, Depends(get_session)]
+) -> None:
+    _uuid_body_or_404(body.task_id, body.run_id)
+    tenant_id = await _tenant_key_to_id(session, body.tenant_key)
+    try:
+        await _get_service(session).collab_record_turn(
+            task_id=body.task_id,
+            run_id=body.run_id,
+            tenant_id=tenant_id,
+            round_no=body.round_no,
+            worker_no=body.worker_no,
+            kind=body.kind,
+            content=body.content,
+            evidence=body.evidence,
+            usage=body.usage,
+            trace_id=body.trace_id,
+        )
+        await session.commit()
+    except TaskNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    except TaskConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
 
 
 async def _tenant_key_to_id(session: AsyncSession, tenant_key: str) -> str:
