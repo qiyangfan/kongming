@@ -796,7 +796,6 @@ def test_normalize_roundtable_topology() -> None:
     assert [p["role"] for p in cast("list[dict[str, object]]", out["participants"])] == [
         "analyst",
         "skeptic",
-        "auditor",
     ]
     assert out["max_rounds"] == 3
     # 名册去重 + 角色域外剔除;不足下限回退缺省

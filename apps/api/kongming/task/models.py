@@ -135,11 +135,12 @@ COLLAB_DEFAULT_ROUNDS = 3
 COLLAB_MIN_PARTICIPANTS = 2
 # 内置角色章程取值域(圆桌参与者的声明角色;名册外角色声明逐条剔除)
 COLLAB_ROLES = frozenset({"analyst", "skeptic", "auditor"})
-# 缺省名册(声明未给出合法名册时的回退;与角色取值域同源)
+# 缺省名册(声明未给出合法名册时的回退):轻形态 2 人——2026-10-14 实测裁决:
+# 3 人×2 轮 ≈100k token 顶满任务编排硬顶,且专职审计者抬高单轮成本、
+# 压低轮内共识率;auditor 仍在取值域内可显式声明(重形态 opt-in)。
 COLLAB_DEFAULT_ROSTER: tuple[dict[str, object], ...] = (
     {"role": "analyst"},
     {"role": "skeptic"},
-    {"role": "auditor"},
 )
 # 嵌套深度上限(与 agent 面编排常量同值同源语义;缺省不嵌套,协作只由任务步骤发起)
 DEFAULT_MAX_DEPTH = 1
