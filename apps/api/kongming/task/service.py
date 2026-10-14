@@ -387,8 +387,9 @@ class TaskService:
             max_workers_cap=max_workers_cap,
             max_rounds_cap=get_settings().collab_max_rounds,
         )
-        if str(topo.get("kind") or "") == m.COLLAB_KIND_ROUNDTABLE and topo.get("bot_key"):
-            # 圆桌绑定收口在名册(逐参与者);顶层 bot_key 不生效,拒绝歧义声明
+        if str(topo.get("kind") or "") == m.COLLAB_KIND_ROUNDTABLE and raw_topology.get("bot_key"):
+            # 圆桌绑定收口在名册(逐参与者);顶层 bot_key 不生效,拒绝歧义声明。
+            # 判原始载荷:归一结果在圆桌分支已剥 bot_key,判归一值恒假(死闸)
             raise TaskConflict("圆桌形态不受理顶层 bot_key(用参与者名册绑定)")
         if self._bot_resolver is not None:
             if str(topo.get("kind") or "") == m.COLLAB_KIND_ROUNDTABLE:
@@ -507,13 +508,16 @@ class TaskService:
             raise TaskConflict("协作运行已终态,不可派发 worker")
         topo = cast("dict[str, Any]", run.get("topology") or {})
         if str(topo.get("kind") or "") == m.COLLAB_KIND_ROUNDTABLE:
-            # 圆桌:参与者即 worker 行(名册锁定,无核实/修订重派余量需求,
-            # 上限式与分工形态同式防放大)
+            # 圆桌:参与者即 worker 行,名册声明期锁定、无核实/修订重派余量——
+            # 上界=名册长度(2x+1 余量式只属分工形态;余量会让超名册行抬高
+            # 实派最大序号,名册锁定与「每轮完成」事件判定双双失真)
             declared = len(m.roundtable_roster(topo))
+            if worker_no < 1 or worker_no > declared:
+                raise TaskConflict("参与者不在圆桌名册(名册声明期锁定)")
         else:
             declared = int(topo.get("max_workers") or m.COLLAB_DEFAULT_WORKERS)
-        if worker_no < 1 or worker_no > max(declared * 2 + 1, COLLAB_WORKER_NO_HARD_CAP):
-            raise TaskConflict("worker 序号超上限")
+            if worker_no < 1 or worker_no > max(declared * 2 + 1, COLLAB_WORKER_NO_HARD_CAP):
+                raise TaskConflict("worker 序号超上限")
         if not await self._repo.insert_collab_worker(
             run_id=run_id,
             worker_no=worker_no,
@@ -644,14 +648,21 @@ class TaskService:
         if str(topo.get("kind") or "") != m.COLLAB_KIND_ROUNDTABLE:
             raise TaskConflict("非圆桌运行不受理轮次上账")
         # 实派名册(参与者行)为锁定基准:有效名册经零工具/绑定剔除后压缩
-        # 编号,拓扑名册长度不可作依据;幽灵序号(未派发行)一并拒绝
+        # 编号,拓扑名册长度不可作依据;序号须真实派发过(上界内的空洞序号
+        # 同样拒绝——名册锁定是存在性语义,不是上界语义)
         dispatched_max = await self._repo.max_collab_worker_no(run_id=run_id)
         if kind == m.TURN_VERDICT:
             if worker_no != m.CHAIR_WORKER_NO:
                 raise TaskConflict("主席判定仅可记 0 号位")
+            if dispatched_max < 1:
+                # 无任何参与者在桌,判定无对象(游离判定通道关闭;编排契约
+                # 保证判定恒在发言后,此处为账本侧同口径兜底)
+                raise TaskConflict("名册无人,不受理判定行")
         else:
             if worker_no < 1 or worker_no > dispatched_max:
                 raise TaskConflict("参与者不在实派名册(名册运行期锁定)")
+            if not await self._repo.collab_worker_exists(run_id=run_id, worker_no=worker_no):
+                raise TaskConflict("参与者序号未实派(名册空洞拒绝)")
         if round_no < 1 or round_no > int(topo.get("max_rounds") or 0):
             raise TaskConflict("轮次超拓扑上限")
         inserted = await self._repo.insert_collab_turn(
@@ -677,9 +688,10 @@ class TaskService:
                     "consensus": bool(content.get("consensus")),
                 },
             )
-        elif worker_no == await self._repo.max_collab_worker_no(run_id=run_id):
-            # 末位判定按实际派发的最大序号(有效名册经零工具剔除后压缩编号,
-            # 拓扑名册长度不可作依据——P1-1)
+        elif worker_no == dispatched_max:
+            # 末位判定按门禁时点的实派最大序号(有效名册经剔除压缩编号,
+            # 拓扑名册长度不可作依据——P1-1;复用门禁读数,避免二次查询
+            # 与并发派发下的判定漂移)
             await self._repo.append_task_event(
                 task_id=task_id,
                 event={

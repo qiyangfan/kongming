@@ -1,6 +1,7 @@
-"""judge 评审 rubric 声明(092,design D2):四类对象的维度/分档/权重/prompt
-模板 + VERSION 常量——随代码演进、随 git 可溯,任何维度/权重/模板变更
-MUST 递增 VERSION(跨版本分数不可比,models.compare_to_baseline 显式标注)。
+"""judge 评审 rubric 声明(092,design D2;115 增圆桌):五类对象的维度/
+分档/权重/prompt 模板 + VERSION 常量——随代码演进、随 git 可溯,任何维度/
+权重/模板变更 MUST 递增 VERSION(跨版本分数不可比,models.compare_to_baseline
+显式标注)。
 
 judge 输出固定 JSON 约定(design D3):
   {"verdict": "PASS|BORDERLINE|FAIL",
@@ -146,10 +147,17 @@ def build_judge_prompt(object_type: str, object_ref: str, text: str) -> tuple[st
 
 def judge_prompt_fingerprint() -> str:
     """judge prompt 资产指纹(与 agent prompt_fingerprint 同纪律:内容即身份)。
-    对四份 rubric(版本+维度+权重+纪律段)按固定序取 SHA-256 前 8 位。"""
+    对全部 rubric(版本+维度+权重+纪律段)按固定序取 SHA-256 前 8 位;
+    新增对象类型必须收编进指纹元组,否则指纹不随资产族变化(漂移检测失明)。"""
     blob = "\x1f".join(
         f"{ot}={_RUBRICS[ot].version}\x1e{_RUBRICS[ot].dimensions}"
         f"\x1e{_RUBRICS[ot].weights}\x1e{_JUDGE_DISCIPLINE}"
-        for ot in (OBJECT_REPORT, OBJECT_TASK, OBJECT_COLLAB, OBJECT_ANSWER)
+        for ot in (
+            OBJECT_REPORT,
+            OBJECT_TASK,
+            OBJECT_COLLAB,
+            OBJECT_ANSWER,
+            OBJECT_ROUNDTABLE,
+        )
     )
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:8]

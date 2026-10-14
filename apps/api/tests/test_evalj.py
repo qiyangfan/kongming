@@ -67,7 +67,7 @@ def test_baseline_improvement_never_redline() -> None:
 # ── rubric 纪律:五类齐备(115 起含圆桌)、版本随代码、指纹稳定 ──
 
 
-def test_rubrics_cover_four_object_types() -> None:
+def test_rubrics_cover_all_object_types() -> None:
     from evals.judge.rubrics import _RUBRICS, judge_prompt_fingerprint, rubric_version
 
     for ot in (OBJECT_REPORT, OBJECT_TASK, OBJECT_COLLAB, OBJECT_ANSWER, OBJECT_ROUNDTABLE):

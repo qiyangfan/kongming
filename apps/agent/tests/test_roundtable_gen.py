@@ -260,16 +260,27 @@ async def test_pure_text_deliberation_fails() -> None:
 
 
 async def test_chair_malformed_output_treated_as_no_consensus() -> None:
-    """主席判定畸形/异常:按未共识处理并披露,轮次硬顶兜底收口。"""
+    """主席判定畸形/异常:按未共识处理,畸形原因落判定行披露(披露面=轮次账;
+    reservation 只承载终止通道注记),轮次硬顶兜底收口。"""
+    log: list[tuple[int, int, str, dict[str, object], dict[str, object], dict[str, object]]] = []
+
+    async def rec(
+        r: int, w: int, k: str, c: dict[str, object], e: dict[str, object], u: dict[str, object]
+    ) -> None:
+        log.append((r, w, k, c, e, u))
+
     result = await run_roundtable(
         payload={"subgoal": "q"},
         llm=_FakeLlm(["这不是 JSON"]),
         roster=_roster(2),
         participant_runner=_runner_factory({i: [_speech()] for i in (1, 2)}),
+        turn_recorder=rec,
         max_rounds=2,
     )
     assert result["consensus"] is False
-    assert "畸形" in str(result["reservation"]) or "触顶" in str(result["reservation"])
+    verdict_reasons = [str(c.get("reason")) for _, _, k, c, _, _ in log if k == "verdict"]
+    assert verdict_reasons and all("畸形" in r for r in verdict_reasons)
+    assert "触顶" in str(result["reservation"])
 
 
 async def test_abstain_participant_excluded_from_cross() -> None:
@@ -291,13 +302,20 @@ async def test_abstain_participant_excluded_from_cross() -> None:
 
 
 async def test_stance_parsing_and_abstain_detection() -> None:
-    """立场解析(末行优先)与弃权精确/宽松形态。"""
+    """立场解析(末行优先/叙述句不算标注/句读截断)与弃权精确/宽松形态边界。"""
     assert parse_stance("分析..\n立场:反对") == "反对"
     assert parse_stance("立场:支持\n后记\n立场:中性") == "中性"
     assert parse_stance("没有立场行") == "未标注"
+    assert parse_stance("立场鲜明的反对这种口径") == "未标注"  # 无分隔符=叙述句
+    assert parse_stance("立场:支持。补充说明若干") == "支持"  # 首个句读截断
+    assert parse_stance("立场:支持. 补充说明") == "支持"  # ASCII 句点同截
     assert is_abstain("弃权")
     assert is_abstain(" 弃权(无新增论据) ")
     assert not is_abstain("我不弃权,立场:支持")
+    # 收紧后的负向边界(防宽松前缀回归):超长括注/换行附理由/前缀形态
+    assert not is_abstain("弃权(这是一个超过十二个字符的括注说明)")
+    assert not is_abstain("弃权\n理由:无新增论据")
+    assert not is_abstain("本轮弃权")
 
 
 async def test_participant_prompt_composition_and_snapshot_cap() -> None:

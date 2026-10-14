@@ -12,21 +12,24 @@
 - **115 圆桌对等拓扑现态(2026-10-14 已落地归档,工件在
   `openspec/changes/archive/2026-10-14-115-roundtable-swarm/`)**:collab 域第二形态
   (`collab_topology.kind=roundtable`,
-  缺省 decomposition,存量行零漂移)——缺省名册 analyst/skeptic/auditor
-  (2..KM_COLLAB_MAX_WORKERS 人,声明期锁定),轮次 ≤KM_COLLAB_MAX_ROUNDS
+  缺省 decomposition,存量行零漂移)——缺省名册 analyst+skeptic(2 人轻形态,
+  2026-10-14 实测收轻;auditor 可显式声明 opt-in,
+  2..KM_COLLAB_MAX_WORKERS 人,声明期锁定),轮次 ≤KM_COLLAB_MAX_ROUNDS
   (缺省 3,api 钳制+agent 兜底双口径)。黑板=追加式 turn 账
   (`sys_agent_collab_turn`,0054;唯一键 run+round+worker_no,主席判定恒 0 号位,
   无 UPDATE 路径);终止三通道=主席共识判定(每轮 ≤1 次,畸形按未共识+披露)/
   轮次硬顶/执行预算池(=名册×轮次,发言查证同池)+全员弃权提前收口。
   诚实收口:PASS 需全体实质发言带真实执行证据(纯文本对辩=ERROR,090 闸投影),
   共识不洗白执行失败,未共识 dissent=true 分歧如实保留;参与者=受限 ReAct
-  (Bot 绑定或内置章程;工具=任务授权∩Bot 名单;**零工具与绑定解析失败一律
+  (Bot 绑定或内置章程;工具=任务授权∩Bot 名单;**零工具、绑定解析失败、
+  超执行面部署上限(agent 侧 KM_AGENT_COLLAB_MAX_WORKERS 双钳)一律
   fail-closed 剔除并披露,不放宽为任务全量**——授权侧不沿用 091 的
   「解析失败降级为无绑定」口径,那是人格侧口径)。「每轮完成」事件按
   **实际派发最大序号**判定(有效名册经剔除压缩编号,拓扑名册长不可作依据)。
   judge 增 RoundtableRubric v1(共识质量/分歧诚实/证据接地/收敛效率)+
   roundtable 对象类型(0055)。**取数口径(115 决策)**:按运行终态取
-  (DONE=共识收口/PARTIAL=预算截断诚实收口),**不要求宿主任务 DONE**——
+  (DONE=共识收口/FAILED=未共识·无证据的诚实收口/PARTIAL=未开桌诚实失败,
+  零转写 run 经 turns 非空闸剔除不评),**不要求宿主任务 DONE**——
   评审单元是 run(转写自含),任务后续步骤被预算饿死与对辩质量无关;
   与 092「DONE 任务」口径有意分叉(task/collab 交付物=步骤产出,圆桌=
   收口转写)。基线落库=条件触发:评估账号名下出现首个收口圆桌 run 时由
@@ -36,7 +39,7 @@
   smoke088/sakila;断言口径=圆桌运行终态+账本诚实,任务因步级 token 预算
   PAUSED 属 090 语义非冒烟失败)。**成本口径**:3 参与者 ×2 轮 ≈80-100k
   token,顶满 agent 编排 100k 累计硬顶(task_gen _MAX_TOTAL_TOKENS)——
-  冒烟/judge 载体用 2 人 ×1 轮(≈50-60k)留余量。契约/主 specs 已同步
+  冒烟/judge 载体用 2 人 ×≤2 轮(≈40-60k)留余量。契约/主 specs 已同步
   (strict 单域 valid),openapi 重导出零漂移。
 - **judge 评估账号坑(2026-10-14 实证)**:judge 账号必须 (a) 绑定租户
   (sys_user_tenant 缺行 → 取数全 403 TENANT_FORBIDDEN,被 gather
@@ -55,6 +58,10 @@
   KM_INTERNAL_TOKEN/KM_DATASOURCE_ENCRYPT_KEY/KM_ADMIN_*;agent 取
   KM_AGENT_LLM_*+KM_INTERNAL_TOKEN(改写为 KM_AGENT_INTERNAL_TOKEN 前缀),
   **不得整份 source 根 .env**(KM_DB_PASSWORD 触发 agent fail-closed 拒启)。
+- **本机全量 pytest 已知假红(2026-10-14 实证)**:
+  `tests/test_workflow.py::test_ssrf_sync_host_allowed_check` 在本机失败
+  ——本机 DNS 通配解析 `nonexistent.invalid`,SSRF「解析失败」分支不触发
+  ——环境性存量非代码回归,换网络/修 hosts 前该用例在本机恒红,勿误归因。
 
 ## 当前状态(2026-10-12)
 

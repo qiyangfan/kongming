@@ -187,7 +187,7 @@ def make_collab_runner(
 
         async def _run_roundtable() -> dict[str, object]:
             """圆桌分支(115):名册装配(Bot 人格/内置章程、逐参与者工具求交、
-            零工具 fail-closed 剔除)→ 逐参与者 worker 行 → 圆桌编排核心
+            零工具/超执行面上限 fail-closed 剔除)→ 逐参与者 worker 行 → 圆桌编排核心
             (轮次/黑板/主席判定)→ 逐 turn 上账(尽力而为)→ 参与者聚合
             回写 → 运行收口。参与者名册运行期锁定,执行预算 = 名册 × 轮次。"""
 
@@ -212,12 +212,9 @@ def make_collab_runner(
                         )
                         if kind == "speech":
                             p["speeches"] = int(cast("int", p["speeches"])) + 1
-                            verdict = str(content.get("verdict") or "")
-                            if verdict == "PASS":
-                                p["pass_speeches"] = int(cast("int", p["pass_speeches"])) + 1
                             p["last"] = {
                                 "stance": content.get("stance"),
-                                "verdict": verdict,
+                                "verdict": content.get("verdict"),
                                 "summary": content.get("summary"),
                                 "sql": evidence.get("sql"),
                             }
@@ -313,6 +310,26 @@ def make_collab_runner(
                 ]
             effective: list[dict[str, object]] = []
             excluded: list[str] = []
+            # 执行面部署上限双钳(与轮次钳制同式,api 声明钳制为先;两进程
+            # COLLAB_MAX_WORKERS 漂移时执行面不被穿透):超限条目走既有
+            # fail-closed 剔除通道如实披露,不静默截断(剔除必披露口径)
+            roster_cap = max(2, settings.collab_max_workers)
+            if len(declared_parts) > roster_cap:
+                for idx, p in enumerate(declared_parts[roster_cap:], start=roster_cap + 1):
+                    bot_p = p.get("bot")
+                    bot_dict = (
+                        dict(cast("dict[str, object]", bot_p)) if isinstance(bot_p, dict) else {}
+                    )
+                    excluded.append(
+                        str(
+                            bot_dict.get("bot_key")
+                            or p.get("bot_key")
+                            or p.get("role")
+                            or f"#{idx}"
+                        )
+                        + "(超执行面部署上限)"
+                    )
+                declared_parts = declared_parts[:roster_cap]
             for idx, p in enumerate(declared_parts, start=1):
                 bot_p = p.get("bot")
                 bot_dict = dict(cast("dict[str, object]", bot_p)) if isinstance(bot_p, dict) else {}
@@ -345,7 +362,6 @@ def make_collab_runner(
                         "trace": f"{trace_root}-w{no}" if trace_root else f"roundtable-w{no}",
                         "usage": {"llm_calls": 0, "total_tokens": 0},
                         "speeches": 0,
-                        "pass_speeches": 0,
                         "last": None,
                     }
                 )
@@ -435,6 +451,11 @@ def make_collab_runner(
                 )
             reservation = str(result.get("reservation") or "")
             result["reservation"] = f"{reservation_prefix}{reservation}".strip()[:1000] or None
+            if result["reservation"]:
+                # 保留意见随摘要同行收口:PASS 路径的触顶/截断语境不许无痕。
+                # 可见性边界:运行账摘要(8k)可靠;步骤证据(2k)/事件(500)
+                # 面受截断长度限制,长结论下后缀可能不完整
+                result["summary"] = f"{result.get('summary')}\n#保留:{result['reservation']}"
             result["usage"] = dict(usage_totals)
             await api.collab_finish(
                 task_id=task_id,

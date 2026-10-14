@@ -112,9 +112,11 @@ class Settings(BaseSettings):
     task_budget_max_steps: int = Field(default=12, ge=1)
     task_budget_max_tokens: int = Field(default=200_000, gt=0)
     task_budget_max_seconds: int = Field(default=900, gt=0)
-    collab_max_workers: int = Field(default=3, ge=1)
+    # 上界与内部回调形参硬限单点对齐(collab-turn worker_no/round_no le=64、
+    # 拓扑 max_rounds le=16):部署放大天花板超形参限会被静默吞掉,此处收口
+    collab_max_workers: int = Field(default=3, ge=1, le=64)
     # 115:圆桌轮次上限(拓扑声明钳制;与 agent 面执行兜底同值同源)
-    collab_max_rounds: int = Field(default=3, ge=1)
+    collab_max_rounds: int = Field(default=3, ge=1, le=16)
 
     # 104 Bot 商店版本化:版本历史上限(部署级可配,缺省 10);封顶淘汰
     # 只淘汰最旧的「非当前」版本,当前上架版本恒受保护不淘汰

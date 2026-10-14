@@ -32,10 +32,11 @@ async def login(client: httpx.AsyncClient) -> dict[str, str]:
 
 
 def _h() -> dict[str, str]:
+    # 恒经 STATE 取当前登录态:长轮询重登后旧 dict 失效,禁止捕获复用
     return STATE["h"]
 
 
-async def get_task(client: httpx.AsyncClient, h: dict[str, str], task_id: str) -> dict:
+async def get_task(client: httpx.AsyncClient, task_id: str) -> dict:
     r = await client.get(f"/tasks/{task_id}", headers=_h())
     if r.status_code == 401:
         STATE["h"] = await login(client)
@@ -44,21 +45,30 @@ async def get_task(client: httpx.AsyncClient, h: dict[str, str], task_id: str) -
     return r.json()
 
 
+async def get_runs(client: httpx.AsyncClient, task_id: str) -> list[dict]:
+    """协作运行清单(401 重登同款;过期 token 上的裸 .json() 会 KeyError 假崩)。"""
+    r = await client.get(f"/tasks/{task_id}/collab-runs", headers=_h())
+    if r.status_code == 401:
+        STATE["h"] = await login(client)
+        r = await client.get(f"/tasks/{task_id}/collab-runs", headers=_h())
+    r.raise_for_status()
+    return r.json()["items"]
+
+
 async def wait_task(
     client: httpx.AsyncClient,
-    h: dict[str, str],
     task_id: str,
     statuses: tuple[str, ...],
     timeout: float,
 ) -> dict:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        d = await get_task(client, h, task_id)
+        d = await get_task(client, task_id)
         status = d["task"]["status"]
         if status in statuses:
             return d
         await asyncio.sleep(1.0)
-    live = await get_task(client, h, task_id)
+    live = await get_task(client, task_id)
     raise AssertionError(
         f"任务 {task_id} 未在 {timeout}s 内到达 {statuses}:"
         f" status={live['task']['status']}"
@@ -67,42 +77,54 @@ async def wait_task(
     )
 
 
-async def wait_roundtable_run(
-    client: httpx.AsyncClient, h: dict[str, str], task_id: str, timeout: float
-) -> dict:
+async def wait_roundtable_run(client: httpx.AsyncClient, task_id: str, timeout: float) -> dict:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        r = await client.get(f"/tasks/{task_id}/collab-runs", headers=_h())
-        if r.status_code == 401:
-            STATE["h"] = await login(client)
-            r = await client.get(f"/tasks/{task_id}/collab-runs", headers=_h())
-        r.raise_for_status()
-        items = [x for x in r.json()["items"] if x.get("topology", {}).get("kind") == "roundtable"]
+        items = [
+            x
+            for x in await get_runs(client, task_id)
+            if x.get("topology", {}).get("kind") == "roundtable"
+        ]
         if items:
             return items[0]
         await asyncio.sleep(1.0)
     raise AssertionError(f"任务 {task_id} 未在 {timeout}s 内产生圆桌运行")
 
 
-async def cleanup_task(client: httpx.AsyncClient, h: dict[str, str], task_id: str) -> None:
-    """兜底清理:断言失败/跳过路径不留烧真实 LLM 的在途任务。"""
+async def cleanup_task(client: httpx.AsyncClient, task_id: str) -> None:
+    """兜底清理:断言失败/跳过路径不留烧真实 LLM 的在途任务(cancel 失败
+    不静默——清理失效比冒烟失败更不可接受)。"""
     try:
-        d = await get_task(client, h, task_id)
+        d = await get_task(client, task_id)
         if d["task"]["status"] not in TERMINAL:
-            await client.post(f"/tasks/{task_id}/cancel", headers=h)
-    except httpx.HTTPError:
-        pass
+            rc = await client.post(f"/tasks/{task_id}/cancel", headers=_h())
+            if rc.status_code != 200:
+                raise AssertionError(f"清理 cancel 失败({rc.status_code}): {rc.text[:200]}")
+    except httpx.HTTPError as e:
+        raise AssertionError(f"清理读取任务失败: {e}") from e
 
 
 async def declare_roundtable_and_launch(
-    client: httpx.AsyncClient, h: dict[str, str], task_id: str, max_rounds: int
+    client: httpx.AsyncClient, task_id: str, max_rounds: int
 ) -> dict:
-    """等规划落账 → 暂停制造声明窗口 → 首个 PENDING 步声明圆桌拓扑 → 复跑。
+    """等规划落账(真实 LLM 规划可能标需确认:AWAITING_APPROVAL 批准放行)
+    → 暂停制造声明窗口 → 首个 PENDING 步声明圆桌拓扑 → 复跑。
     返回归一后的拓扑(断言名册/轮次钳制生效)。"""
-    d = await wait_task(client, h, task_id, ("RUNNING",), 120)
+    d = await wait_task(client, task_id, ("RUNNING", "AWAITING_APPROVAL"), 120)
+    if d["task"]["status"] == "AWAITING_APPROVAL":
+        # 遍历审批挂起步(首个 require_confirm 步未必在首位,批错步 404 假失败)
+        for s in d["steps"]:
+            if s["status"] == "AWAITING_APPROVAL":
+                ra = await client.post(
+                    f"/tasks/{task_id}/steps/{s['id']}/approve",
+                    headers=_h(),
+                    json={"approve": True},
+                )
+                assert ra.status_code == 200, ra.text
+        d = await wait_task(client, task_id, ("RUNNING",), 120)
     rp = await client.post(f"/tasks/{task_id}/pause", headers=_h())
     assert rp.status_code == 200, rp.text
-    d = await wait_task(client, h, task_id, ("PAUSED",), 30)
+    d = await wait_task(client, task_id, ("PAUSED",), 30)
     pending = [s for s in d["steps"] if s["status"] == "PENDING"]
     assert pending, f"无 PENDING 步骤可声明拓扑: {[s['status'] for s in d['steps']]}"
     rt = await client.put(
@@ -123,12 +145,11 @@ async def main() -> int:
     created: list[str] = []
     async with httpx.AsyncClient(base_url=BASE, timeout=30) as client:
         STATE["h"] = await login(client)
-        h = STATE["h"]
         try:
             # ── 场景一:圆桌全链(2 参与者 × ≤2 轮,真实对辩)──
             r = await client.post(
                 "/tasks",
-                headers=h,
+                headers=_h(),
                 json={
                     "goal": (
                         "圆桌冒烟:两位专家圆桌对辩——rental 表的月度租赁量"
@@ -142,27 +163,24 @@ async def main() -> int:
             created.append(task_id)
             print(f"[smoke] task={task_id}")
 
-            topo = await declare_roundtable_and_launch(client, h, task_id, max_rounds=2)
+            topo = await declare_roundtable_and_launch(client, task_id, max_rounds=2)
             print(f"[smoke] roundtable declared: {topo}")
 
-            run = await wait_roundtable_run(client, h, task_id, 300)
+            run = await wait_roundtable_run(client, task_id, 300)
             print(f"[smoke] roundtable run appeared: id={run['id']} status={run['status']}")
 
             # 等圆桌运行终态(运行口径);任务可能因步级 token 预算被 090 闸
             # PAUSED——平台诚实语义,不作为冒烟失败(与 091 冒烟同款处理)
             deadline = time.monotonic() + 900
             while time.monotonic() < deadline:
-                runs_now = (await client.get(f"/tasks/{task_id}/collab-runs", headers=_h())).json()[
-                    "items"
-                ]
+                runs_now = await get_runs(client, task_id)
                 run = next(x for x in runs_now if x["topology"].get("kind") == "roundtable")
                 if run["status"] != "RUNNING":
                     break
                 await asyncio.sleep(2.0)
-            final = await get_task(client, h, task_id)
+            final = await get_task(client, task_id)
             status = final["task"]["status"]
-            STATE["h"] = await login(client)  # 长等待后刷新
-            runs = (await client.get(f"/tasks/{task_id}/collab-runs", headers=_h())).json()["items"]
+            runs = await get_runs(client, task_id)
             run = next(x for x in runs if x["topology"].get("kind") == "roundtable")
             workers = run.get("workers") or []
             turns = run.get("turns") or []
@@ -180,10 +198,15 @@ async def main() -> int:
                 assert isinstance(w.get("usage"), dict), "参与者缺用量归集"
             speech_turns = [t for t in turns if t["kind"] == "speech"]
             verdict_turns = [t for t in turns if t["kind"] == "verdict"]
-            assert verdict_turns, "圆桌无主席判定轮次(治理协议未执行)"
+            abstain_turns = [t for t in turns if t["kind"] == "abstain"]
+            # 判定轮缺席的合法通道=首轮全员弃权提前收口(治理协议选择式参与)
+            assert verdict_turns or abstain_turns, (
+                f"圆桌无主席判定亦无弃权轮次(治理协议未执行): {[t['kind'] for t in turns]}"
+            )
             assert all(t["worker_no"] == 0 for t in verdict_turns), "判定行必须 0 号位"
             print(
                 f"[smoke] 轮次转写: speech={len(speech_turns)} verdict={len(verdict_turns)} "
+                f"abstain={len(abstain_turns)} "
                 f"判定={[t['content'].get('consensus') for t in verdict_turns]}"
             )
             events = [e["kind"] for e in final["events"]]
@@ -217,7 +240,7 @@ async def main() -> int:
             # ── 场景二:运行中取消 → 在途圆桌账收敛 ──
             r2 = await client.post(
                 "/tasks",
-                headers=h,
+                headers=_h(),
                 json={
                     "goal": "圆桌冒烟:取消场景,分析客户租赁行为的类别分布",
                     "datasource_key": "sakila",
@@ -226,27 +249,38 @@ async def main() -> int:
             assert r2.status_code == 202, r2.text
             task2 = r2.json()["task_id"]
             created.append(task2)
-            await declare_roundtable_and_launch(client, h, task2, max_rounds=2)
+            await declare_roundtable_and_launch(client, task2, max_rounds=2)
             try:
-                await wait_roundtable_run(client, h, task2, 60)
+                await wait_roundtable_run(client, task2, 60)
             except AssertionError:
                 print("[smoke] 场景二:圆桌未及开账(时序窗口),本场景未验证 → 失败退出")
                 return 1
-            live = await get_task(client, h, task2)
+            live = await get_task(client, task2)
             if live["task"]["status"] not in TERMINAL:
                 rc = await client.post(f"/tasks/{task2}/cancel", headers=_h())
                 assert rc.status_code == 200, rc.text
-                await wait_task(client, h, task2, ("CANCELLED",), 30)
-            runs2 = (await client.get(f"/tasks/{task2}/collab-runs", headers=_h())).json()["items"]
-            rt2 = [x for x in runs2 if x.get("topology", {}).get("kind") == "roundtable"]
+                await wait_task(client, task2, ("CANCELLED",), 30)
+            rt2 = [
+                x
+                for x in await get_runs(client, task2)
+                if x.get("topology", {}).get("kind") == "roundtable"
+            ]
             assert all(x["status"] != "RUNNING" for x in rt2), "取消后圆桌运行滞留 RUNNING"
             print(
                 f"[smoke] 场景二(取消收敛)通过: runs={[x['status'] for x in rt2]} "
                 f"turns={[len(x.get('turns') or []) for x in rt2]}"
             )
         finally:
+            # 逐任务隔离:单清理失败不连坐放弃后续清理(在途任务继续烧真实
+            # LLM 比冒烟失败更不可接受);收集后统一抛,不顶替主体验证根因
+            cleanup_errors: list[str] = []
             for tid in created:
-                await cleanup_task(client, h, tid)
+                try:
+                    await cleanup_task(client, tid)
+                except Exception as e:  # noqa: BLE001 —— 清理失败收集后统一上抛
+                    cleanup_errors.append(f"{tid}: {e}")
+            if cleanup_errors:
+                raise AssertionError("清理失败(在途任务可能残留): " + "; ".join(cleanup_errors))
     return 0
 
 

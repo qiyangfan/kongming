@@ -60,7 +60,9 @@ def _topo(*subgoals: str) -> str:
     return json.dumps([{"subgoal": s} for s in subgoals], ensure_ascii=False)
 
 
-_SETTINGS = Settings()
+# 显式钉死钳制上限:裸 Settings() 读真实环境,COLLAB_MAX_WORKERS/ROUNDS
+# 漂移会让依赖缺省上限的断言(名册 3/两轮收口)在别的环境假红
+_SETTINGS = Settings(collab_max_workers=3, collab_max_rounds=3)
 
 
 def _make_react_recorder(
@@ -613,6 +615,73 @@ async def test_roundtable_multi_round_and_open_fail_closed() -> None:
     out2 = await runner2("s1", "评估", "", _roundtable_cfg())
     assert str(out2["verdict"]) == "ERROR"
     assert [k for k, _ in closed.events] == []
+
+
+@pytest.mark.asyncio
+async def test_roundtable_reservation_surfaces_on_pass_summary() -> None:
+    """触顶未共识但执行证据全 PASS(PASS 收口):保留意见随摘要同行收口——
+    步骤证据/运行账摘要可查,截断语境不许无痕(诚实收口口径)。"""
+    api = FakeCollabApi(topology=dict(_ROUNDTABLE_TOPO))
+    react, _ = _make_react_recorder()
+    llm = FakeLlm(['{"consensus": false, "reason": "仍有分歧"}'])  # 恒不收敛 → 触顶
+    runner = make_collab_runner(
+        api=api,  # type: ignore[arg-type]
+        llm=llm,
+        settings=_SETTINGS,
+        react_runner=react,
+        task_id="t1",
+        tenant_key="default",
+        datasource_key="default",
+        user_id="u1",
+        trace_root="tr",
+        tools=[{"name": "sql_query"}],
+    )
+    out = await runner("s1", "评估", "", _roundtable_cfg(max_rounds=2))
+    assert str(out["verdict"]) == "PASS"
+    assert out["dissent"] is True
+    reservation = str(out.get("reservation") or "")
+    assert "触顶" in reservation
+    assert f"#保留:{reservation}" in str(out.get("summary"))
+
+
+@pytest.mark.asyncio
+async def test_roundtable_roster_execution_cap_disclosed() -> None:
+    """执行面部署上限双钳:名册超 settings.collab_max_workers 的条目按既有
+    fail-closed 通道剔除并披露(不静默截断);剔除后足 2 人照常开桌。"""
+    api = FakeCollabApi(topology=dict(_ROUNDTABLE_TOPO))
+    react, _ = _make_react_recorder()
+    llm = FakeLlm(['{"consensus": true, "reason": "一致"}'])
+    runner = make_collab_runner(
+        api=api,  # type: ignore[arg-type]
+        llm=llm,
+        settings=Settings(collab_max_workers=2, collab_max_rounds=3),
+        react_runner=react,
+        task_id="t1",
+        tenant_key="default",
+        datasource_key="default",
+        user_id="u1",
+        trace_root="tr",
+        tools=[{"name": "sql_query"}],
+    )
+    out = await runner(
+        "s1",
+        "评估",
+        "",
+        _roundtable_cfg(
+            participants=[
+                {"role": "analyst", "bot_key": None, "bot": None},
+                {"role": "skeptic", "bot_key": None, "bot": None},
+                {"role": "auditor", "bot_key": None, "bot": None},
+            ],
+            max_rounds=2,
+        ),
+    )
+    assert str(out["verdict"]) == "PASS"
+    assert out["worker_count"] == 2  # 开桌规模=执行面上限,名册不被穿透
+    reservation = str(out.get("reservation") or "")
+    assert "auditor" in reservation and "超执行面部署上限" in reservation
+    worker_nos = [p.get("worker_no") for k, p in api.events if k == "worker_start"]
+    assert worker_nos == [1, 2]
 
 
 @pytest.mark.asyncio

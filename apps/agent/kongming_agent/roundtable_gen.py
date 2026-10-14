@@ -86,15 +86,21 @@ TurnRecorder = Callable[
 
 
 def parse_stance(text: str) -> str:
-    """发言正文 → 立场标注(取最后一个「立场:」行;未标注如实返回)。"""
+    """发言正文 → 立场标注(取最后一个「立场:」行;未标注如实返回)。
+    标注行 = 前缀后紧跟分隔符(冒号/空白),叙述句(如「立场鲜明的反对」)
+    不算标注;值在首个句读处截断,不吞后续正文。"""
     stance = "未标注"
     for line in text.splitlines():
         s = line.strip()
-        if s.startswith(STANCE_PREFIX):
-            value = s[len(STANCE_PREFIX) :].lstrip(":： ").strip()
-            value = value.split(",", 1)[0].split("，", 1)[0].strip()
-            if value:
-                stance = value[:20]
+        if not s.startswith(STANCE_PREFIX):
+            continue
+        rest = s[len(STANCE_PREFIX) :]
+        if rest and rest[0] not in ":： \t":
+            continue
+        value = rest.lstrip(":： \t").strip()
+        value = re.split(r"[.,，。;；!！?？]", value, maxsplit=1)[0].strip()
+        if value:
+            stance = value[:20]
     return stance
 
 

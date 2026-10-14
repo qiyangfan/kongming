@@ -730,6 +730,18 @@ class SqlTaskRepo:
         )
         return int(row) if row is not None else 0
 
+    async def collab_worker_exists(self, *, run_id: str, worker_no: int) -> bool:
+        """参与者序号是否实派(名册运行期锁定的存在性闸:上界内的空洞序号
+        同样拒绝,轮次通道只对真实派发过的参与者开放)。"""
+        hit = await self._s.scalar(
+            text(
+                "SELECT 1 FROM public.sys_agent_collab_worker"
+                " WHERE run_id = CAST(:r AS uuid) AND worker_no = :n"
+            ),
+            {"r": run_id, "n": worker_no},
+        )
+        return hit is not None
+
     async def finish_collab_worker(
         self,
         *,
@@ -864,9 +876,9 @@ class SqlTaskRepo:
                         " FROM public.sys_agent_collab_turn tn"
                         " JOIN public.sys_agent_collab_run r ON r.id = tn.run_id"
                         " WHERE r.task_id = CAST(:t AS uuid)"
-                        # id 为 uuid7(时间有序):同事务 created_at 恒等,
-                        # 按写入序回放(判定行在名册发言之后)
-                        " ORDER BY tn.run_id, tn.round_no, tn.id"
+                        # created_at 微秒精度且轮次行逐回调独立事务提交,
+                        # 可分辨写入序(判定行在名册发言之后);id 兜底同序
+                        " ORDER BY tn.run_id, tn.round_no, tn.created_at, tn.id"
                     ),
                     {"t": task_id},
                 )

@@ -406,10 +406,12 @@ function buildTurnColumns(): DataViewColumn<CollabTurnOut>[] {
           t.content && typeof t.content.role === "string" && t.content.role !== ""
             ? t.content.role
             : null;
-        const text = label ?? role ?? `#${t.worker_no}`;
+        // 兜底 text 置空而非 #N:外层已带序号前缀,重复拼 #N 会渲染成「#1 #1」
+        const text = label ?? role ?? "";
         return (
           <span className="font-medium text-foreground">
-            #{t.worker_no} {text}
+            #{t.worker_no}
+            {text ? ` ${text}` : ""}
           </span>
         );
       },

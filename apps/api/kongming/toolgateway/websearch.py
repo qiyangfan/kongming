@@ -314,9 +314,6 @@ def _normalize_alibaba(body: dict[str, object]) -> list[dict[str, object]]:
 
 
 # 供应商适配注册表(新供应商=增一条映射,design D1):
-
-
-# 供应商适配注册表(新供应商=增一条映射,design D1):
 # 请求装配(统一参数→供应商方言)+ 响应归一(供应商报文→统一检索卡)
 _Adapter = tuple[
     Callable[[dict[str, object]], dict[str, object]],

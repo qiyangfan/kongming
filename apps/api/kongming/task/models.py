@@ -260,6 +260,8 @@ VERDICT_SUPERSEDED = "superseded"
 # ── 圆桌轮次账本(115;与 0054 turn 表 CHECK 同源)──
 
 TURN_SPEECH = "speech"
+# 预留值(design:一次建全已规划列,0054 CHECK 同域):当前编排的查证内嵌于
+# 发言轮,agent 面不产该 kind;留作独立查证轮的演进位,勿删除
 TURN_VERIFICATION = "verification"
 TURN_ABSTAIN = "abstain"
 TURN_VERDICT = "verdict"

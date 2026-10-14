@@ -790,7 +790,7 @@ def test_normalize_roundtable_topology() -> None:
     """圆桌拓扑归一:缺省名册回退、角色域外剔除、名册去重、人数/轮次钳制。"""
     from kongming.task import models as m
 
-    # 未声明名册 → 缺省三角色;轮次缺省 3
+    # 未声明名册 → 缺省轻形态 2 角色(实测裁决见 models.py 注记);轮次缺省 3
     out = m.normalize_collab_topology({"kind": "roundtable"}, max_workers_cap=3)
     assert out["kind"] == "roundtable"
     assert [p["role"] for p in cast("list[dict[str, object]]", out["participants"])] == [
@@ -1104,6 +1104,121 @@ async def test_roundtable_declare_and_turn_ledger(
         },
     )
     assert t_late.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_roundtable_gates_declaration_and_roster_lock(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: Any,
+    no_dispatch: list[str],  # noqa: ARG001
+) -> None:
+    """圆桌闸门补强:声明期顶层 bot_key 拒绝(409);派发上界=名册长度
+    (分工形态的 2x+1 余量不属圆桌);轮次通道存在性闸(上界内空洞序号
+    拒绝);零名册判定行拒绝。"""
+    uid, token = await _user_with_task_perms(client, session, make_user)
+    await _insert_bot(session, uid, "rt_bot2", "你是圆桌专家")
+    await session.commit()
+    task_id = await _create_task(client, token)
+    step = await _plan_one_step(client, task_id, goal="圆桌闸门用例")
+
+    # 圆桌 + 顶层 bot_key → 409(顶层单绑定语义属分工形态,声明防歧义)
+    r = await _set_topology(
+        client,
+        token,
+        task_id,
+        step["id"],
+        {"kind": "roundtable", "max_rounds": 2, "bot_key": "rt_bot2"},
+    )
+    assert r.status_code == 409, r.text
+
+    # 合法声明(3 人名册,覆盖空洞场景)
+    r = await _set_topology(
+        client,
+        token,
+        task_id,
+        step["id"],
+        {
+            "kind": "roundtable",
+            "max_rounds": 2,
+            "participants": [
+                {"role": "analyst"},
+                {"role": "skeptic"},
+                {"role": "auditor"},
+            ],
+        },
+    )
+    assert r.status_code == 200, r.text
+    # 步骤入跑(collab-start 只受理 RUNNING 步)
+    d = await client.post(
+        "/internal/task/step-start",
+        headers=INTERNAL,
+        json={"task_id": task_id, "tenant_key": "default", "step_id": step["id"]},
+    )
+    assert d.status_code == 200, d.text
+    cs = await client.post(
+        "/internal/task/collab-start",
+        headers=INTERNAL,
+        json={"task_id": task_id, "tenant_key": "default", "step_id": step["id"], "depth": 1},
+    )
+    assert cs.status_code == 200
+    run_id = str(cs.json()["run_id"])
+
+    def _turn(no: int, kind: str = "speech") -> dict[str, object]:
+        return {
+            "task_id": task_id,
+            "tenant_key": "default",
+            "run_id": run_id,
+            "round_no": 1,
+            "worker_no": no,
+            "kind": kind,
+        }
+
+    # 零名册判定拒绝(游离判定通道关闭)
+    t_bare = await client.post(
+        "/internal/task/collab-turn", headers=INTERNAL, json=_turn(0, "verdict")
+    )
+    assert t_bare.status_code == 409
+
+    # 派发上界=名册长度:3 人名册第 4 号拒绝
+    w4 = await client.post(
+        "/internal/task/collab-worker-start",
+        headers=INTERNAL,
+        json={
+            "task_id": task_id,
+            "tenant_key": "default",
+            "run_id": run_id,
+            "worker_no": 4,
+            "subgoal": "x",
+            "trace_id": "tr-w4",
+        },
+    )
+    assert w4.status_code == 409, w4.text
+
+    # 空洞派发(1、3 号在册,跳过 2)→ 2 号轮次被存在性闸拒绝
+    for no in (1, 3):
+        ws = await client.post(
+            "/internal/task/collab-worker-start",
+            headers=INTERNAL,
+            json={
+                "task_id": task_id,
+                "tenant_key": "default",
+                "run_id": run_id,
+                "worker_no": no,
+                "subgoal": f"参与者{no}",
+                "trace_id": f"tr-w{no}",
+            },
+        )
+        assert ws.status_code == 204
+    t_hole = await client.post("/internal/task/collab-turn", headers=INTERNAL, json=_turn(2))
+    assert t_hole.status_code == 409
+    # 在册序号照常受理;名册齐后判定行受理
+    t3 = await client.post("/internal/task/collab-turn", headers=INTERNAL, json=_turn(3))
+    assert t3.status_code == 204
+    t_verdict = await client.post(
+        "/internal/task/collab-turn", headers=INTERNAL, json=_turn(0, "verdict")
+    )
+    assert t_verdict.status_code == 204
 
 
 @pytest.mark.asyncio

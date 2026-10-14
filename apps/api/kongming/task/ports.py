@@ -149,6 +149,8 @@ class TaskRepo(Protocol):
 
     async def max_collab_worker_no(self, *, run_id: str) -> int: ...
 
+    async def collab_worker_exists(self, *, run_id: str, worker_no: int) -> bool: ...
+
     async def insert_collab_turn(
         self,
         *,

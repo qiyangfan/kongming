@@ -190,19 +190,23 @@ async def fetch_collab_objects(client: ObjectClient, limit: int) -> list[JudgeOb
     return out
 
 
-# 圆桌对象资格 = 运行终态(收口诚实语义:DONE=共识收口,PARTIAL=预算/截断
-# 诚实收口)——评审单元是 run(转写自含问题+发言+判定),宿主任务的后续
-# 步骤是否被预算饿死与对辩质量无关,不以任务终态为门槛(115 决策;
-# 与 092「DONE 任务」口径分叉:task/collab 的交付物是步骤产出,圆桌是收口
-# 转写本身)。CANCELLED/RUNNING = 未完成旧账,不评。
-_ROUNDTABLE_ELIGIBLE = frozenset({"DONE", "PARTIAL"})
+# 圆桌对象资格 = 运行终态且有轮次转写。DONE=共识收口;FAILED=未共识/无证据
+# 的诚实收口(恰是「分歧诚实/收敛效率」最有信息量的样本);PARTIAL=未开桌
+# 诚实失败(现态零转写,无对辩可评,经 turns 非空闸剔除)。评审单元是 run
+# (转写自含问题+发言+判定),宿主任务的后续步骤是否被预算饿死与对辩质量
+# 无关,不以任务终态为门槛(115 决策;与 092「DONE 任务」口径分叉:task/
+# collab 的交付物是步骤产出,圆桌是收口转写本身)。CANCELLED/RUNNING = 未
+# 完成旧账,不评。
+_ROUNDTABLE_ELIGIBLE = frozenset({"DONE", "FAILED", "PARTIAL"})
 
 
 async def fetch_roundtable_objects(client: ObjectClient, limit: int) -> list[JudgeObject]:
     """圆桌评审对象(115):拓扑形态为 roundtable 且运行已诚实收口的协作
     run。装配轮次转写(发言/弃权/判定按序)供 rubric 评共识质量/分歧诚实/
     证据接地/收敛效率;字段严格按 CollabRunOut 契约(turns 为查询面扩展)。"""
-    data = await client._get("/tasks?page=1&size=50")
+    # 取最新任务窗口(端点 size 上限 100):窗口外的圆桌 run 不在采样域,
+    # 语义=「近期收口抽检」而非全量清点
+    data = await client._get("/tasks?page=1&size=100")
     items = _dict_list(data.get("items"))
     out: list[JudgeObject] = []
     for item in items:
@@ -225,14 +229,27 @@ async def fetch_roundtable_objects(client: ObjectClient, limit: int) -> list[Jud
                 continue
             if str(run.get("status") or "") not in _ROUNDTABLE_ELIGIBLE:
                 continue
+            turns_all = _dict_list(run.get("turns"))
+            if not turns_all:
+                # 未开桌的诚实失败(零转写)无对辩可评,不进评审样本
+                continue
             goal = step_goal.get(str(run.get("step_id")), "")
             turn_lines: list[str] = []
-            for t in _dict_list(run.get("turns")):
+            for t in turns_all:
                 worker_no_raw = t.get("worker_no")
-                worker_no = int(worker_no_raw) if isinstance(worker_no_raw, (int, float)) else 0
-                who = "主席" if worker_no == 0 else f"#{worker_no}"
+                worker_no = int(worker_no_raw) if isinstance(worker_no_raw, (int, float)) else None
                 content = t.get("content")
                 cd = content if isinstance(content, dict) else {}
+                if worker_no == 0:
+                    who = "主席"
+                else:
+                    # 归属优先行内标签/角色(有效名册压缩编号,拓扑下标不可
+                    # 反推——P2-1 同口径);异形序号如实标 #?,不伪装主席
+                    label = str(cd.get("label") or "") or (
+                        f"#{worker_no}" if worker_no is not None else "#?"
+                    )
+                    role = str(cd.get("role") or "")
+                    who = f"{label}({role})" if role else label
                 if str(t.get("kind")) == "verdict":
                     turn_lines.append(
                         f"- 第{t.get('round_no')}轮 {who}:判定"
@@ -240,9 +257,15 @@ async def fetch_roundtable_objects(client: ObjectClient, limit: int) -> list[Jud
                     )
                     continue
                 stance = str(cd.get("stance") or "")
+                summary_raw = cd.get("summary")
+                # 字符串摘要直接截断(JSON 化会包引号转义换行,劣化评审输入)
+                summary_short = (
+                    summary_raw[:240]
+                    if isinstance(summary_raw, str)
+                    else _json_short(summary_raw, 240)
+                )
                 turn_lines.append(
-                    f"- 第{t.get('round_no')}轮 {who}[{stance}]:"
-                    f" {_json_short(cd.get('summary'), 240) or '弃权'}"
+                    f"- 第{t.get('round_no')}轮 {who}[{stance}]: {summary_short or '弃权'}"
                 )
             text = (
                 f"圆桌问题:{goal or tid}\n"
@@ -301,7 +324,7 @@ async def fetch_answer_objects(
 async def gather_objects(
     client: ObjectClient, tenant: str, per_type: int
 ) -> dict[str, list[JudgeObject]]:
-    """四类对象并发取数(类型间独立,单类型失败=空清单如实记录——
+    """五类对象并发取数(类型间独立,单类型失败=空清单如实记录——
     异常必须落日志,与「类型空缺」可区分)。"""
     results = await asyncio.gather(
         fetch_report_objects(client, per_type),
