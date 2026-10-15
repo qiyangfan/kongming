@@ -311,6 +311,11 @@ function CollabRunCard({
         w.usage && typeof w.usage.total_tokens === "number" ? w.usage.total_tokens : "—",
     },
     {
+      key: "bot_key",
+      header: "绑定",
+      render: (w) => (w.bot_key ? <span className="font-mono text-xs">{w.bot_key}</span> : "—"),
+    },
+    {
       key: "trace_id",
       header: "trace",
       render: (w) => <span className="font-mono text-xs">{w.trace_id ?? "—"}</span>,
@@ -321,6 +326,7 @@ function CollabRunCard({
   const turns = run.turns ?? [];
   const hasVerification = workers.some((w) => w.conclusion?.verification);
   const isRoundtable = topo.kind === "roundtable";
+  const rosterSize = Array.isArray(topo.workers) ? topo.workers.length : 0;
   return (
     <div className="space-y-2 rounded-lg border border-border p-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -337,7 +343,8 @@ function CollabRunCard({
           </span>
         ) : (
           <span className="text-xs text-muted-foreground">
-            {String(topo.max_workers ?? "—")} worker·{String(topo.dispatch ?? "serial")}
+            {String(topo.max_workers ?? "—")} worker
+            {rosterSize > 0 ? `·名册 ${rosterSize}` : ""}·{String(topo.dispatch ?? "serial")}
             {topo.critic ? "·critic" : ""}
           </span>
         )}

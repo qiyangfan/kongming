@@ -106,6 +106,59 @@ def make_collab_runner(
         persona = str(bot.get("system_prompt") or "")
         bot_key = str(bot.get("bot_key") or "") or None
         worker_tools = _worker_tools(tools, cfg)
+        # 分工名册装配(collab-worker-roster;cfg.workers = api 决策载荷的逐成员
+        # Bot 运行时解析结果):绑定解析失败/工具求交空集/超执行面部署上限一律
+        # fail-closed 剔除并披露(式样与圆桌名册装配同源,授权侧不放宽)
+        raw_workers = cfg.get("workers")
+        declared_workers: list[dict[str, object]] = (
+            [
+                dict(cast("dict[str, object]", w))
+                for w in cast("list[object]", raw_workers)
+                if isinstance(w, dict)
+            ]
+            if isinstance(raw_workers, list)
+            else []
+        )
+        roster_map: dict[str, dict[str, object]] = {}
+        roster_excluded: list[str] = []
+        if declared_workers:
+            roster_cap = max(1, settings.collab_max_workers)
+            if len(declared_workers) > roster_cap:
+                for idx, w in enumerate(declared_workers[roster_cap:], start=roster_cap + 1):
+                    bot_w = w.get("bot")
+                    bot_d = (
+                        dict(cast("dict[str, object]", bot_w)) if isinstance(bot_w, dict) else {}
+                    )
+                    roster_excluded.append(
+                        str(bot_d.get("bot_key") or w.get("bot_key") or w.get("name") or f"#{idx}")
+                        + "(超执行面部署上限)"
+                    )
+                declared_workers = declared_workers[:roster_cap]
+            for w in declared_workers:
+                bot_w = w.get("bot")
+                bot_d = dict(cast("dict[str, object]", bot_w)) if isinstance(bot_w, dict) else {}
+                declared_bot_key = str(w.get("bot_key") or "")
+                identity = str(w.get("name") or "") or declared_bot_key
+                if declared_bot_key and not bot_d:
+                    # 声明绑定但运行时解析失败:名册声明期锁定,收窄静默放宽即
+                    # fail-open——剔除并披露(授权侧口径,与圆桌同源)
+                    roster_excluded.append(f"{declared_bot_key}(绑定解析失败)")
+                    continue
+                w_tools = _worker_tools(tools, {"bot": bot_d}) if bot_d else list(tools)
+                if not w_tools:
+                    # 零工具成员不派发(与 bot 域「零工具不可运行」同口径,
+                    # 名单空集不放大为不限制)
+                    roster_excluded.append(identity)
+                    continue
+                roster_map[identity] = {
+                    "label": identity,
+                    "persona": str(bot_d.get("system_prompt") or ""),
+                    "tools": w_tools,
+                    "bot_key": str(bot_d.get("bot_key") or "") or None,
+                }
+        roster_reservation = (
+            f"名册成员未派发(fail-closed):{';'.join(roster_excluded)}; " if roster_excluded else ""
+        )
         # 部署级上限(编排常量与 Settings 双源取一,api 侧已钳过一轮)
         declared = int(str(topo.get("max_workers") or 0))
         workers_cap = min(declared or settings.collab_max_workers, settings.collab_max_workers)
@@ -113,9 +166,24 @@ def make_collab_runner(
         # worker 用量归集(回注步级预算账;api 预算闸据此可见协作真实消耗)
         usage_totals = {"llm_calls": 0, "total_tokens": 0}
 
-        async def _worker(subgoal: str, ctx: str) -> dict[str, object]:
+        async def _worker(subgoal: str, ctx: str, slot: str | None = None) -> dict[str, object]:
             """一次受限 ReAct worker:逐 worker 独立 trace(trace_root 父子关联
-            口径:-wN 后缀)+ 用量收集 + worker 账本回写(尽力而为)。"""
+            口径:-wN 后缀)+ 用量收集 + worker 账本回写(尽力而为)。
+            slot=名册成员标签(collab-worker-roster):人格/工具/账本 bot_key 按
+            成员路由,账本子目标带标签前缀;None=顶层单绑定/裸 worker/治理动作
+            (核实与 critic 重派),授权不提权结构不变。"""
+            if slot and slot in roster_map:
+                member = roster_map[slot]
+                w_persona = str(member["persona"])
+                w_bot_key = str(member["bot_key"] or "") or None
+                w_tools = list(cast("list[dict[str, object]]", member["tools"]))
+                label: str | None = str(member["label"])
+            else:
+                w_persona = persona
+                w_bot_key = bot_key
+                w_tools = worker_tools
+                label = None
+            ledger_subgoal = f"[{label}] {subgoal}" if label else subgoal
             counter["n"] += 1
             no = counter["n"]
             wid = f"{trace_root}-w{no}" if trace_root else f"collab-w{no}"
@@ -124,12 +192,14 @@ def make_collab_runner(
                 tenant_key=tenant_key,
                 run_id=run_id,
                 worker_no=no,
-                subgoal=subgoal,
-                bot_key=bot_key,
+                subgoal=ledger_subgoal,
+                bot_key=w_bot_key,
                 trace_id=wid,
             )
             # 上下文摘要为系统提示附加段(D2);人格经 bot_system_prompt 注入
-            sys_prompt = f"{persona}\n\n# 任务上下文摘要\n{ctx}" if persona or ctx else persona
+            sys_prompt = (
+                f"{w_persona}\n\n# 任务上下文摘要\n{ctx}" if w_persona or ctx else w_persona
+            )
             req_inner = {
                 "trace_id": wid,
                 "tenant_key": tenant_key,
@@ -137,7 +207,7 @@ def make_collab_runner(
                 "user_id": user_id,
                 "question": subgoal,
                 "history": [],
-                "tools": worker_tools,
+                "tools": w_tools,
                 "channel": "task",  # 审计归因任务编排(与 090 同口径)
                 "bot_system_prompt": sys_prompt,
             }
@@ -173,7 +243,7 @@ def make_collab_runner(
                 worker_no=no,
                 status="DONE" if w_verdict == "PASS" else "FAILED",
                 conclusion={
-                    "subgoal": subgoal[:2000],
+                    "subgoal": ledger_subgoal[:2000],
                     "verdict": w_verdict,
                     "summary": summary[:2000],
                 },
@@ -471,6 +541,31 @@ def make_collab_runner(
         if str(topo.get("kind") or "decomposition") == "roundtable":
             return await _run_roundtable()
 
+        if declared_workers and not roster_map:
+            # 名册声明存在但全员剔除:不开工(fail-closed),诚实收口披露
+            # (圆桌「有效参与者不足不开桌」同式)
+            reservation = f"{roster_reservation}有效名册成员不足,未派发任何 worker".strip()
+            result: dict[str, object] = {
+                "verdict": "ERROR",
+                "summary": "[]",
+                "conclusions": [],
+                "pending_subgoals": [step_goal],
+                "dissent": True,
+                "worker_count": 0,
+                "reservation": reservation,
+            }
+            await api.collab_finish(
+                task_id=task_id,
+                tenant_key=tenant_key,
+                run_id=run_id,
+                verdict="ERROR",
+                pending_count=1,
+                dissent=True,
+                summary=reservation[:8000],
+            )
+            result["usage"] = dict(usage_totals)
+            return result
+
         runner: WorkerRunner = _worker
         # 执行预算与 api 侧 worker 序号上限同式(declared*2+1):初派 ≤ declared,
         # 余量供分歧核实/critic 修订重派——预算池若取初派数,满额拆解(=declared
@@ -486,8 +581,14 @@ def make_collab_runner(
             max_revision_rounds=settings.collab_max_revision_rounds,
             dispatch=str(topo.get("dispatch") or "serial"),
             critic=bool(topo.get("critic")),
+            roster=list(roster_map.keys()) or None,
         )
         result["usage"] = dict(usage_totals)
+        inner_reservation = str(result.get("reservation") or "")
+        result["reservation"] = f"{roster_reservation}{inner_reservation}".strip()[:1000] or None
+        if result["reservation"]:
+            # 保留意见随摘要同行收口:剔除/未派发语境不许无痕(圆桌同式)
+            result["summary"] = f"{result.get('summary')}\n#保留:{result['reservation']}"
         await api.collab_finish(
             task_id=task_id,
             tenant_key=tenant_key,

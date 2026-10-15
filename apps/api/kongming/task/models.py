@@ -213,13 +213,38 @@ def normalize_collab_topology(
     dispatch = str(cfg.get("dispatch") or COLLAB_DISPATCH_SERIAL)
     if dispatch not in COLLAB_DISPATCHES:
         dispatch = COLLAB_DISPATCH_SERIAL
-    return {
+    out: dict[str, object] = {
         "kind": kind,
         "max_workers": workers,
         "critic": critic,
         "dispatch": dispatch,
         "bot_key": _norm_bot_key(cfg.get("bot_key")),
     }
+    # 分工 worker 名册(collab-worker-roster,可选):条目非法剔除、身份
+    # (name 缺省 bot_key)去重裁首条、部署上限截断;空名册视为未声明,
+    # 不落键——无名册载荷与存量行逐键一致(零漂移)。圆桌分支不读此字段。
+    worker_roster: list[dict[str, object]] = []
+    raw_roster = cfg.get("workers")
+    for item in cast("list[object]", raw_roster if isinstance(raw_roster, list) else []):
+        if not isinstance(item, dict):
+            continue
+        entry = cast("dict[str, object]", item)
+        w_bot_key = _norm_bot_key(entry.get("bot_key"))
+        if not w_bot_key:
+            continue
+        w_name = str(entry.get("name") or "").strip() or None
+        worker_roster.append({"name": w_name, "bot_key": w_bot_key})
+    if worker_roster:
+        w_seen: set[str] = set()
+        w_deduped: list[dict[str, object]] = []
+        for w in worker_roster:
+            identity = str(w["name"] or w["bot_key"])
+            if identity in w_seen:
+                continue
+            w_seen.add(identity)
+            w_deduped.append(w)
+        out["workers"] = w_deduped[: max(1, max_workers_cap)]
+    return out
 
 
 def has_collab_topology(step: dict[str, Any]) -> bool:
@@ -228,6 +253,15 @@ def has_collab_topology(step: dict[str, Any]) -> bool:
     if not isinstance(topo, dict):
         return False
     return bool(cast("dict[str, object]", topo))
+
+
+def decomposition_roster(topo: dict[str, Any]) -> list[dict[str, object]]:
+    """分工名册读取(collab-worker-roster):未声明名册/圆桌/存量缺 workers
+    → 恒空(无名册=匿名合成现行为);声明期锁定以此为准。"""
+    parts = topo.get("workers")
+    if not isinstance(parts, list):
+        return []
+    return [dict(p) for p in cast("list[dict[str, object]]", parts)]
 
 
 def roundtable_roster(topo: dict[str, Any]) -> list[dict[str, object]]:

@@ -750,3 +750,175 @@ async def test_roundtable_unresolved_bot_binding_fail_closed() -> None:
     assert "dead_bot" in str(out["reservation"])
     assert "解析失败" in str(out["reservation"])
     assert reqs == []  # 未派发任何参与者(不含任务全量工具的执行)
+
+
+# ── 分工名册接线(collab-worker-roster):装配/注入/账本 ──
+
+
+def _roster_cfg(workers: list[dict[str, object]]) -> dict[str, object]:
+    return {"max_workers": 2, "workers": workers}
+
+
+def _ok_bot(key: str, prompt: str, tool: str = "sql_query") -> dict[str, object]:
+    return {"bot_key": key, "system_prompt": prompt, "tools": [tool]}
+
+
+@pytest.mark.asyncio
+async def test_collab_runner_roster_per_worker_assembly() -> None:
+    """名册装配与逐成员注入:绑定解析失败/零工具 fail-closed 剔除并披露;
+    各成员按其 Bot 注入人格、工具逐成员求交;账本逐 worker 落 bot_key 与
+    成员标签前缀;治理语义(无 PASS 交叉)不受名册影响。"""
+    api = FakeCollabApi(topology={"max_workers": 2, "dispatch": "serial"})
+    react, reqs = _make_react_recorder(verdicts={"查用户": "ERROR"})
+    llm = FakeLlm(
+        [
+            json.dumps(
+                [
+                    {"subgoal": "查收入", "worker": "财务"},
+                    {"subgoal": "查用户", "worker": "运营"},
+                ],
+                ensure_ascii=False,
+            )
+        ]
+    )
+    runner = make_collab_runner(
+        api=api,  # type: ignore[arg-type]
+        llm=llm,
+        settings=_SETTINGS,
+        react_runner=react,
+        task_id="t1",
+        tenant_key="default",
+        datasource_key="default",
+        user_id="u1",
+        trace_root="tr",
+        tools=[{"name": "sql_query"}],
+    )
+    cfg = _roster_cfg(
+        [
+            {"name": "财务", "bot_key": "fin", "bot": _ok_bot("fin", "财务人格")},
+            {
+                "name": "运营",
+                "bot_key": "yunying",
+                # 双工具名单:与任务授权求交后仍留 sql_query(求交收窄可见)
+                "bot": {
+                    "bot_key": "yunying",
+                    "system_prompt": "运营人格",
+                    "tools": ["sql_query", "report"],
+                },
+            },
+            {"name": "ops", "bot_key": "ops", "bot": None},  # 解析失败 → 剔除
+            {  # 求交空集 → 剔除
+                "name": "空白",
+                "bot_key": "blank",
+                "bot": _ok_bot("blank", "x", tool="web_search"),
+            },
+        ]
+    )
+    out = await runner("s1", "经营指标分工", "", cfg)
+    # 逐成员注入:人格按各自 Bot,工具=任务授权∩成员 Bot 名单(report 被求交掉)
+    assert [str(r["question"]) for r in reqs] == ["查收入", "查用户"]
+    assert str(reqs[0]["bot_system_prompt"]).startswith("财务人格")
+    assert str(reqs[1]["bot_system_prompt"]).startswith("运营人格")
+    for r in reqs:
+        assert cast("list[object]", r["tools"]) == [{"name": "sql_query"}]
+    # 账本:逐 worker bot_key 与成员标签前缀;剔除披露进保留意见
+    starts = [payload for kind, payload in api.events if kind == "worker_start"]
+    assert [str(s.get("bot_key")) for s in starts] == ["fin", "yunying"]
+    assert str(starts[0]["subgoal"]).startswith("[财务]")
+    assert str(starts[1]["subgoal"]).startswith("[运营]")
+    assert "ops(绑定解析失败)" in str(out["reservation"])
+    # 第 4 条目超执行面部署上限(cap=3)→ 截断披露(先于零工具判定)
+    assert "blank(超执行面部署上限)" in str(out["reservation"])
+    assert str(out["verdict"]) == "ERROR"  # 运营 ERROR → 交叉裁决不通过(语义照旧)
+
+
+@pytest.mark.asyncio
+async def test_collab_runner_roster_all_excluded_no_start() -> None:
+    """全员剔除 → 不开工(ERROR 诚实收口),零 worker 执行、零派发行。"""
+    api = FakeCollabApi(topology={"max_workers": 2, "dispatch": "serial"})
+    react, reqs = _make_react_recorder()
+    runner = make_collab_runner(
+        api=api,  # type: ignore[arg-type]
+        llm=FakeLlm(["[]"]),
+        settings=_SETTINGS,
+        react_runner=react,
+        task_id="t1",
+        tenant_key="default",
+        datasource_key="default",
+        user_id="u1",
+        trace_root="tr",
+        tools=[{"name": "sql_query"}],
+    )
+    cfg = _roster_cfg(
+        [
+            {"name": "a", "bot_key": "ra", "bot": None},
+            {"name": "b", "bot_key": "rb", "bot": None},
+        ]
+    )
+    out = await runner("s1", "目标", "", cfg)
+    assert str(out["verdict"]) == "ERROR"
+    assert reqs == []
+    assert all(kind != "worker_start" for kind, _ in api.events)
+    assert "有效名册成员不足" in str(out["reservation"])
+    assert "ra(绑定解析失败)" in str(out["reservation"])
+    finish = [payload for kind, payload in api.events if kind == "finish"]
+    assert finish and str(finish[0].get("verdict")) == "ERROR"
+
+
+@pytest.mark.asyncio
+async def test_collab_runner_roster_execution_cap_double_clamp() -> None:
+    """执行面部署上限双钳:api 声明钳制为先,agent 面按自身 Settings 复钳,
+    超限成员剔除必披露(不静默截断)。"""
+    api = FakeCollabApi(topology={"max_workers": 3, "dispatch": "serial"})
+    react, reqs = _make_react_recorder()
+    runner = make_collab_runner(
+        api=api,  # type: ignore[arg-type]
+        llm=FakeLlm([json.dumps([{"subgoal": "s1", "worker": "a"}], ensure_ascii=False)]),
+        settings=Settings(collab_max_workers=2, collab_max_rounds=3),
+        react_runner=react,
+        task_id="t1",
+        tenant_key="default",
+        datasource_key="default",
+        user_id="u1",
+        trace_root="tr",
+        tools=[{"name": "sql_query"}],
+    )
+    cfg = _roster_cfg(
+        [
+            {"name": "a", "bot_key": "ra", "bot": _ok_bot("ra", "A 人格")},
+            {"name": "b", "bot_key": "rb", "bot": _ok_bot("rb", "B 人格")},
+            {"name": "c", "bot_key": "rc", "bot": _ok_bot("rc", "C 人格")},
+        ]
+    )
+    out = await runner("s1", "目标", "", cfg)
+    assert len(reqs) == 1  # 执行面 cap=2:仅 2 成员在册,单子目标单派发
+    assert "rc(超执行面部署上限)" in str(out["reservation"])
+
+
+@pytest.mark.asyncio
+async def test_collab_runner_roster_zero_tool_member_excluded() -> None:
+    """零工具成员(名单与任务授权求交为空集)fail-closed 剔除并披露,
+    不放大为不限制;其余成员照常派发。"""
+    api = FakeCollabApi(topology={"max_workers": 2, "dispatch": "serial"})
+    react, reqs = _make_react_recorder()
+    runner = make_collab_runner(
+        api=api,  # type: ignore[arg-type]
+        llm=FakeLlm([json.dumps([{"subgoal": "s1", "worker": "a"}], ensure_ascii=False)]),
+        settings=_SETTINGS,
+        react_runner=react,
+        task_id="t1",
+        tenant_key="default",
+        datasource_key="default",
+        user_id="u1",
+        trace_root="tr",
+        tools=[{"name": "sql_query"}],
+    )
+    cfg = _roster_cfg(
+        [
+            {"name": "a", "bot_key": "ra", "bot": _ok_bot("ra", "A 人格")},
+            {"name": "空集", "bot_key": "blank", "bot": _ok_bot("blank", "x", tool="web_search")},
+        ]
+    )
+    out = await runner("s1", "目标", "", cfg)
+    assert len(reqs) == 1
+    assert "空集" in str(out["reservation"])  # 剔除标签=身份(name 优先口径)

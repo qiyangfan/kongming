@@ -181,6 +181,14 @@ class CollabParticipantIn(BaseModel):
     bot_key: str | None = Field(default=None, max_length=m.COLLAB_BOT_KEY_MAX)
 
 
+class CollabWorkerIn(BaseModel):
+    """分工名册成员声明条目(collab-worker-roster):Bot 点名,可选别名
+    (身份 = name 缺省 bot_key;声明期锁定,运行期不可增减改绑)。"""
+
+    name: str | None = Field(default=None, max_length=m.COLLAB_BOT_KEY_MAX)
+    bot_key: str | None = Field(default=None, max_length=m.COLLAB_BOT_KEY_MAX)
+
+
 class CollabTopologyIn(BaseModel):
     kind: str | None = None
     max_workers: int | None = Field(default=None, ge=1, le=16)
@@ -190,6 +198,8 @@ class CollabTopologyIn(BaseModel):
     # 圆桌(115):轮次上限与参与者名册(名册声明期确定,运行期锁定)
     max_rounds: int | None = Field(default=None, ge=1, le=16)
     participants: list[CollabParticipantIn] | None = Field(default=None, max_length=16)
+    # 分工 worker 名册(collab-worker-roster):与顶层 bot_key 互斥(逐成员绑定)
+    workers: list[CollabWorkerIn] | None = Field(default=None, max_length=16)
 
 
 class TaskMutateOut(BaseModel):

@@ -3,6 +3,7 @@ HTTP 链路安全矩阵(测试先行,安全类)。"""
 # pyright: reportPrivateUsage=false
 
 import asyncio
+import socket
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -521,7 +522,7 @@ async def test_ssrf_domain_resolves_private(monkeypatch: pytest.MonkeyPatch) -> 
     await hr.assert_url_allowed("http://example.com/x")
 
 
-def test_ssrf_sync_host_allowed_check() -> None:
+def test_ssrf_sync_host_allowed_check(monkeypatch: pytest.MonkeyPatch) -> None:
     """同步主机级判定(assert_host_allowed_sync,108 IMAP 出站消费):字面
     与解析落拒绝段即拒(同一拒绝段单源),公网字面放行(不触网)。"""
     import kongming.workflow.http_runner as hr
@@ -537,8 +538,16 @@ def test_ssrf_sync_host_allowed_check() -> None:
     ):
         with pytest.raises(SsrFBlocked):
             hr.assert_host_allowed_sync(host, 993)
-    with pytest.raises(SsrFBlocked, match="解析失败"):
-        hr.assert_host_allowed_sync("nonexistent.invalid", 993)
+    # 解析失败场景经 monkeypatch 模拟(不触真实 DNS):本机解析器可能对
+    # NXDOMAIN 域名劫持返回公网 IP(DNS 重定向),真实解析在此环境不可依赖
+    with monkeypatch.context() as m:
+
+        def _fail_resolve(host: str, port: int, **_kw: object) -> list[tuple[object, ...]]:
+            raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+        m.setattr(hr.socket, "getaddrinfo", _fail_resolve)
+        with pytest.raises(SsrFBlocked, match="解析失败"):
+            hr.assert_host_allowed_sync("nonexistent.invalid", 993)
     hr.assert_host_allowed_sync("93.184.216.34", 993)
 
 

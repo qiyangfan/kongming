@@ -40,7 +40,7 @@ async def test_dissent_annotated_with_verification() -> None:
     """同题双 worker 结论不一致 → 派发核实 worker 后 LLM 仲裁不支持任一方
     → 分歧如实标注(不静默调和、不编造调和值)。"""
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         if "A 口径" in subgoal:
             return {"verdict": "PASS", "summary": "销售额 100"}
         if "B 口径" in subgoal:
@@ -60,7 +60,7 @@ async def test_dissent_annotated_with_verification() -> None:
 async def test_dissent_verification_adopts_one_side() -> None:
     """核实仲裁支持 A → 分歧收口(采纳 A,标注采纳依据),dissent 清除。"""
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         if "A 口径" in subgoal:
             return {"verdict": "PASS", "summary": "销售额 100"}
         if "B 口径" in subgoal:
@@ -78,7 +78,7 @@ async def test_dissent_verification_adopts_one_side() -> None:
 async def test_dissent_budget_exhausted_keeps_annotation() -> None:
     """预算不足(验证 worker 派不出)→ 分歧如实保留标注,不静默调和。"""
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         return {"verdict": "PASS", "summary": f"结论@{subgoal}"}
 
     llm = FakeLlm([_topo("查 A 口径", "查 B 口径")])
@@ -93,7 +93,7 @@ async def test_dissent_budget_exhausted_keeps_annotation() -> None:
 async def test_critic_pass_keeps_verdict() -> None:
     """critic 审查通过 → 结论保持 PASS,无保留意见。"""
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         return {"verdict": "PASS", "summary": "ok"}  # 同结论:不触发分歧,纯 critic 场景
 
     llm = FakeLlm([_topo("甲", "乙"), '{"pass": true, "issues": []}'])
@@ -111,7 +111,7 @@ async def test_critic_revision_redoes_flagged_worker() -> None:
 
     attempts: list[str] = []
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         attempts.append(subgoal)
         if "critic 反馈" in context:
             return {"verdict": "PASS", "summary": "扎实结论"}  # 修订重跑
@@ -137,7 +137,7 @@ async def test_critic_revision_redoes_flagged_worker() -> None:
 async def test_critic_rounds_exhausted_keeps_reservation() -> None:
     """critic 修订后仍未全通过 → 轮次尽如实附保留意见(不无限循环)。"""
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         if "critic 反馈" in context:
             return {"verdict": "ERROR", "summary": "重做仍失败"}
         return {"verdict": "PASS", "summary": "ok"}
@@ -166,7 +166,7 @@ async def test_critic_multi_round_continues_until_pass_or_exhausted() -> None:
 
     redo_attempts: list[int] = []
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         if "critic 反馈" in context:
             redo_attempts.append(1)
             if len(redo_attempts) == 1:
@@ -200,7 +200,7 @@ async def test_parallel_dispatch_preserves_results() -> None:
     """parallel 派发:全部 worker 执行、结果与子目标一一对应(输入冻结不串扰)。"""
     seen: list[str] = []
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         seen.append(subgoal)
         return {"verdict": "PASS", "summary": f"结论@{subgoal}"}
 
@@ -219,15 +219,15 @@ async def test_worker_error_recorded_not_raised() -> None:
     """单 worker 失败 → 结论记 ERROR(细节留日志,结论只带类型名),
     不中断他 worker、不裸抛;交叉裁决:非全 PASS → 整体 ERROR。"""
 
-    async def runner_fail(subgoal: str, context: str) -> dict[str, object]:
+    async def runner_fail(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         raise RuntimeError("down")
 
-    async def runner_ok(subgoal: str, context: str) -> dict[str, object]:
+    async def runner_ok(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         return {"verdict": "PASS", "summary": "ok"}
 
     calls: list[str] = []
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         calls.append(subgoal)
         return await (runner_fail if len(calls) == 1 else runner_ok)(subgoal, context)
 
@@ -246,7 +246,7 @@ async def test_worker_error_recorded_not_raised() -> None:
 async def test_topo_parse_failure_falls_back_single_worker() -> None:
     """拆解 LLM 输出畸形 → 回落单 worker 直执(不失败)。"""
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         return {"verdict": "PASS", "summary": "ok"}
 
     out = await run_collab(
@@ -262,7 +262,7 @@ async def test_worker_cap_respected_and_deploy_cap_tightens() -> None:
     """worker 数上限:拆解再多也只派发上限内数量;部署 cap 可再收紧。"""
     seen: list[str] = []
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         seen.append(subgoal)
         return {"verdict": "PASS", "summary": "ok"}
 
@@ -289,7 +289,7 @@ async def test_worker_cap_respected_and_deploy_cap_tightens() -> None:
 async def test_empty_topology_finishes() -> None:
     """拆解产出空清单 → 空结论收口(verdict ERROR,不挂起)。"""
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         raise AssertionError("不应派发")
 
     out = await run_collab(
@@ -305,7 +305,7 @@ async def test_empty_topology_finishes() -> None:
 async def test_depth_exceeded_refuses_nesting() -> None:
     """深度上限:超限构造即拒绝嵌套(失控防护;不产生任何派发)。"""
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         raise AssertionError("超深协作不应派发任何 worker")
 
     with pytest.raises(CollabDepthExceeded):
@@ -321,7 +321,7 @@ async def test_depth_exceeded_refuses_nesting() -> None:
 async def test_deploy_depth_cap_parameterized() -> None:
     """部署级深度上限参数化:cap=2 时 depth=2 放行、depth=3 仍拒。"""
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         return {"verdict": "PASS", "summary": "ok"}
 
     out = await run_collab(
@@ -346,7 +346,7 @@ async def test_deploy_depth_cap_parameterized() -> None:
 async def test_budget_exhausted_no_dispatch() -> None:
     """预算继承不足(worker_budget=0)→ 不拆解不派发,空收口并披露未完成。"""
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         raise AssertionError("预算尽不应派发")
 
     out = await run_collab(
@@ -365,7 +365,7 @@ async def test_budget_truncates_and_discloses_pending() -> None:
     """预算截断:只派发预算内数量,未派发子目标如实披露(不谎称完成)。"""
     seen: list[str] = []
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         seen.append(subgoal)
         return {"verdict": "PASS", "summary": "ok"}
 
@@ -382,13 +382,15 @@ async def test_budget_truncates_and_discloses_pending() -> None:
 
 @pytest.mark.asyncio
 async def test_worker_authorization_surface_structural() -> None:
-    """授权不提权结构断言(D5):worker 执行器签名仅 (subgoal, context),
+    """授权不提权结构断言(D5):worker 执行器签名仅 (subgoal, context, slot),
     编排器入口不持 api/token/credentials/tools 句柄(协作不引入新主体)。"""
     sig = inspect.signature(run_collab)
     for forbidden in ("api", "token", "credentials", "tools"):
         assert forbidden not in sig.parameters, f"run_collab 不得持有 {forbidden} 参数"
     params, _return = typing.get_args(WorkerRunner)
-    assert list(params) == [str, str]  # (subgoal, context) —— 无授权载荷
+    # (subgoal, context, slot) —— slot=名册成员标签(collab-worker-roster),
+    # 非授权载荷;签名禁入 api/token/credentials/tools 不变
+    assert list(params) == [str, str, str | None]
 
 
 @pytest.mark.asyncio
@@ -409,7 +411,7 @@ async def test_no_free_collab_entry_structural() -> None:
 async def test_aggregate_summary_always_valid_json() -> None:
     """聚合 summary 恒为合法 JSON(不再外层截断;长结论完整保留)。"""
 
-    async def runner(subgoal: str, context: str) -> dict[str, object]:
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
         return {"verdict": "PASS", "summary": "很长的结论" * 500, "sql": "SELECT 1"}
 
     out = await run_collab(
@@ -421,3 +423,153 @@ async def test_aggregate_summary_always_valid_json() -> None:
     assert len(parsed) == 3
     # 字段级 2000 上限保留(设计内);外层 JSON 完整合法、不被拦腰截断
     assert all(len(str(c["summary"])) == 2000 for c in parsed)
+
+
+# ── 分工名册(collab-worker-roster):分配制规划与纯名册派发 ──
+
+
+def _roster_topo(*entries: dict[str, object]) -> str:
+    return json.dumps(list(entries), ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_roster_assignment_dispatch_and_unmapped_disclosure() -> None:
+    """名册形态=分配制:分配在名册内 → 派发对应槽位(runner 收到成员标签);
+    名册外/缺分配 → 进未派发清单,不派发、不改派合成 worker。"""
+
+    calls: list[tuple[str, str | None]] = []
+
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
+        calls.append((subgoal, slot))
+        return {"verdict": "PASS", "summary": "统一结论"}  # 同摘要避免触发分歧核实歧路
+
+    llm = FakeLlm(
+        [
+            _roster_topo(
+                {"subgoal": "查收入口径", "worker": "财务"},
+                {"subgoal": "查留存口径", "worker": "运营"},
+                {"subgoal": "查成本口径", "worker": "幽灵"},
+                {"subgoal": "查毛利口径"},
+            )
+        ]
+    )
+    out = await run_collab(
+        payload={"subgoal": "查经营指标"},
+        llm=llm,
+        worker_runner=runner,
+        roster=["财务", "运营"],
+    )
+    assert ("查收入口径", "财务") in calls
+    assert ("查留存口径", "运营") in calls
+    # 名册外与缺分配 → 未派发披露,绝不改派(纯名册:无合成 worker 执行)
+    assert len(calls) == 2
+    pending = typing.cast("list[str]", out["pending_subgoals"])
+    assert any("查成本口径" in p and "幽灵" in p for p in pending)
+    assert any("查毛利口径" in p for p in pending)
+    # 名册拆解 prompt 携带成员清单(分配依据在 prompt 内)
+    assert any("财务" in user and "运营" in user for _sys, user in llm.calls)
+    conclusions = typing.cast("list[dict[str, object]]", out["conclusions"])
+    assert {str(c.get("worker")) for c in conclusions} == {"财务", "运营"}
+
+
+@pytest.mark.asyncio
+async def test_roster_parse_failure_honest_no_dispatch() -> None:
+    """名册形态拆解失败 → 不回落合成 worker(名册外执行者禁入),
+    空收口 + 父子目标进未派发清单 + 保留意见如实披露。"""
+
+    fired = False
+
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
+        nonlocal fired
+        fired = True
+        return {"verdict": "PASS", "summary": "x"}
+
+    llm = FakeLlm(["这不是 JSON"])
+    out = await run_collab(
+        payload={"subgoal": "查销售额"}, llm=llm, worker_runner=runner, roster=["财务"]
+    )
+    assert fired is False
+    assert out["verdict"] == "ERROR"
+    assert out["worker_count"] == 0
+    assert typing.cast("list[str]", out["pending_subgoals"]) == ["查销售额"]
+    assert "拆解失败" in str(out["reservation"])
+
+
+@pytest.mark.asyncio
+async def test_roster_budget_cap_and_multi_assignment() -> None:
+    """名册形态预算/上限照旧:初派总数受 max_workers 钳制(截断进未派发);
+    一成员可承接多子目标(多账本行,结论按成员可归集)。"""
+
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
+        return {"verdict": "PASS", "summary": "统一结论"}  # 同摘要避免触发分歧核实歧路
+
+    # 预算 1 → 只派 1 个,第 2 个截断披露(同成员不豁免上限)
+    llm = FakeLlm(
+        [_roster_topo({"subgoal": "s1", "worker": "a"}, {"subgoal": "s2", "worker": "a"})]
+    )
+    out = await run_collab(
+        payload={"subgoal": "父目标"}, llm=llm, worker_runner=runner, roster=["a"], worker_budget=1
+    )
+    conclusions = typing.cast("list[dict[str, object]]", out["conclusions"])
+    assert len(conclusions) == 1
+    assert str(conclusions[0]["worker"]) == "a"
+    assert len(typing.cast("list[object]", out["pending_subgoals"])) == 1
+
+    # 预算充足 → 同成员多子目标各自成行
+    llm2 = FakeLlm(
+        [_roster_topo({"subgoal": "s1", "worker": "a"}, {"subgoal": "s2", "worker": "a"})]
+    )
+    out2 = await run_collab(
+        payload={"subgoal": "父目标"}, llm=llm2, worker_runner=runner, roster=["a", "b"]
+    )
+    c2 = typing.cast("list[dict[str, object]]", out2["conclusions"])
+    assert [str(c["worker"]) for c in c2] == ["a", "a"]
+    assert out2["pending_subgoals"] == []
+
+
+@pytest.mark.asyncio
+async def test_roster_verification_redispatch_unbound() -> None:
+    """治理动作(分歧核实)不占名册:重派核实 worker 无槽位(slot=None),
+    结论条目无 worker 键(账本既有 verification 标记区分)。"""
+
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
+        if slot == "a":
+            return {"verdict": "PASS", "summary": "销售额 100"}
+        if slot == "b":
+            return {"verdict": "PASS", "summary": "销售额 200"}
+        return {"verdict": "PASS", "summary": "核实执行完成"}
+
+    llm = FakeLlm(
+        [
+            _roster_topo(
+                {"subgoal": "查 A 口径", "worker": "a"}, {"subgoal": "查 B 口径", "worker": "b"}
+            ),
+            '{"supports": "neither"}',
+        ]
+    )
+    out = await run_collab(
+        payload={"subgoal": "查销售额"}, llm=llm, worker_runner=runner, roster=["a", "b"]
+    )
+    conclusions = typing.cast("list[dict[str, object]]", out["conclusions"])
+    verify = [c for c in conclusions if c.get("verification")]
+    assert len(verify) == 1
+    assert verify[0].get("worker") is None
+    assert out["dissent"] is True
+
+
+@pytest.mark.asyncio
+async def test_anonymous_mode_ignores_hallucinated_worker_field() -> None:
+    """匿名形态零漂移:拆解输出混入 worker 字段(LLM 幻觉)不成为槽位,
+    结论条目不带 worker 键(无名册运行不出现幽灵成员标签,现行为不变)。"""
+
+    async def runner(subgoal: str, context: str, slot: str | None = None) -> dict[str, object]:
+        assert slot is None, "匿名形态不得携带名册槽位"
+        return {"verdict": "PASS", "summary": "统一结论"}
+
+    llm = FakeLlm(
+        [json.dumps([{"subgoal": "s1", "worker": "幽灵"}, {"subgoal": "s2"}], ensure_ascii=False)]
+    )
+    out = await run_collab(payload={"subgoal": "父目标"}, llm=llm, worker_runner=runner)
+    conclusions = typing.cast("list[dict[str, object]]", out["conclusions"])
+    assert len(conclusions) == 2
+    assert all("worker" not in c for c in conclusions)

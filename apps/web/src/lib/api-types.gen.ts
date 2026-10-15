@@ -3984,6 +3984,8 @@ export interface components {
             max_rounds?: number | null;
             /** Participants */
             participants?: components["schemas"]["CollabParticipantIn"][] | null;
+            /** Workers */
+            workers?: components["schemas"]["CollabWorkerIn"][] | null;
         };
         /**
          * CollabTurnIn
@@ -4047,6 +4049,17 @@ export interface components {
             trace_id: string | null;
             /** Created At */
             created_at?: string | null;
+        };
+        /**
+         * CollabWorkerIn
+         * @description 分工名册成员声明条目(collab-worker-roster):Bot 点名,可选别名
+         *     (身份 = name 缺省 bot_key;声明期锁定,运行期不可增减改绑)。
+         */
+        CollabWorkerIn: {
+            /** Name */
+            name?: string | null;
+            /** Bot Key */
+            bot_key?: string | null;
         };
         /** CollabWorkerOut */
         CollabWorkerOut: {

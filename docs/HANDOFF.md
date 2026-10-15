@@ -7,6 +7,31 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
+## 当前状态(2026-10-15)
+
+- **collab-worker-roster 分工名册现态(已落地归档,工件在
+  `openspec/changes/archive/2026-10-15-collab-worker-roster/`;delta 已同步
+  主 specs,strict 单域 valid,openapi 零漂移)**:分工形态(091)拓扑可选
+  `workers` 名册(条目 `{name?, bot_key}`,身份=name 缺省 bot_key)——
+  Bot 消费第四形态闭环(对话嵌入/OpenAI 兼容 API/分工 worker/圆桌参与者)。
+  口径:声明面 workers 与顶层 bot_key 互斥(409,判原始载荷)、条目 bot
+  存在性 422 INVALID_BOT(圆桌同款)、归一截断+响应回显、空/全非法名册=
+  未声明不落键(存量零漂移);派发面纯名册分配制(编排器把子目标分配给
+  成员清单,名册外/缺分配进未派发披露、拆解失败诚实空收口,均不回落
+  合成 worker);执行面逐成员人格注入+工具求交(∩任务授权),绑定解析
+  失败/零工具/超执行面双钳 fail-closed 剔除必披露,全员剔除不开工;核实/
+  critic 重派=治理动作无绑定不占名册(D4)。**无名册零漂移含幻觉字段**:
+  拆解输出混入的 worker 字段不成为槽位/结论标签(评审修复,回归测试钉住)。
+  分工名册运行期解析失败=决策降级 None+执行面剔除(091 人格侧口径,与
+  圆桌「声明即剔除」的分叉见 2026-10-14 节)。冒烟:
+  `apps/api/scripts/e2e_roster_smoke.py`(验收单元=run 收口,同 115 口径;
+  api:8000+agent:8001+smoke088/sakila)。
+- **SSRF 同步解析测试已修(2026-10-15)**:
+  `test_ssrf_sync_host_allowed_check` 解析失败分支改 monkeypatch
+  `getaddrinfo` 抛 gaierror(不触真实 DNS)——本机 DNS 通配劫持 `.invalid`
+  域名的环境假红已消除,本机/CI 恒绿;教训留存:涉及 NXDOMAIN 解析失败
+  分支的测试一律模拟解析,勿依赖真实 DNS。
+
 ## 当前状态(2026-10-14)
 
 - **115 圆桌对等拓扑现态(2026-10-14 已落地归档,工件在
@@ -58,10 +83,6 @@
   KM_INTERNAL_TOKEN/KM_DATASOURCE_ENCRYPT_KEY/KM_ADMIN_*;agent 取
   KM_AGENT_LLM_*+KM_INTERNAL_TOKEN(改写为 KM_AGENT_INTERNAL_TOKEN 前缀),
   **不得整份 source 根 .env**(KM_DB_PASSWORD 触发 agent fail-closed 拒启)。
-- **本机全量 pytest 已知假红(2026-10-14 实证)**:
-  `tests/test_workflow.py::test_ssrf_sync_host_allowed_check` 在本机失败
-  ——本机 DNS 通配解析 `nonexistent.invalid`,SSRF「解析失败」分支不触发
-  ——环境性存量非代码回归,换网络/修 hosts 前该用例在本机恒红,勿误归因。
 
 ## 当前状态(2026-10-12)
 
@@ -479,7 +500,7 @@
   (version 是服务端乐观锁实现细节,现无客户端消费场景;有真实消费方时随需求立项);
   审计读面 domain 列——**批准**(toolcall 审计行 089 起已落 domain,读面纯增可选字段
   投影,随下一批触及审计面的变更搭批落地 + make contracts);internal progress 租户过滤;
-  域启停多副本语义(持久化启停属 design 既有裁决的后续变更)。**环境(2026-10-10 已解)**:LLM 已切 dashscope 直连
+  域启停多副本语义(已随同批 0044 落地:写穿+启动装载,见顶节「多副本域启停」)。**环境(2026-10-10 已解)**:LLM 已切 dashscope 直连
   (owner 确认;根 .env KM_AGENT_LLM_BASE_URL=compatible-mode 端点,API_KEY=本地
   DASHSCOPE_API_KEY,muniu 网关不再依赖);本地起 agent 仍须
   `KM_AGENT_INTERNAL_TOKEN=$KM_INTERNAL_TOKEN`(compose 同款映射,pydantic 前缀
@@ -544,8 +565,8 @@
 - **登记待办(2026-10-10 已裁决,详见「当前状态(2026-10-10,091 接线完成待归档)」节)**:
   TaskItem 暴露 version(否决)、审计读面 domain 列(批准,搭批落地);任务列表状态筛选、
   预算部署级上限、internal 端点畸形 UUID 裸 500、报告 progress 轮询拉全量章节、列表页
-  GENERATING 不轮询——均已在 091 批次落地;域启停多副本语义(持久化启停属 design 既有
-  裁决的后续变更)。
+  GENERATING 不轮询——均已在 091 批次落地;域启停多副本语义亦随同批 0044 落地
+  (见顶节「多副本域启停」)。
 - **门禁终态**:api 1155(+10)/agent 488(+2)/liannu 22/web 86 全绿,双 app ruff/mypy/pyright/
   lint-imports 过(api pyright 曾报 16 项=pyright 版本漂移下既有测试鸭子型注入与类型收窄,
   按 test_task.py 同款 pragma+isinstance 收窄修复,非回归);契约再生成幂等(重新 export 前后
@@ -720,12 +741,9 @@
   15/15 通过零新增。四门禁绿(api 925/agent 287/web/contracts),
   375/1280 三档浏览器目验过。specs 已同步(multi-model-routing 增 protocol
   语义+「多协议出站适配」;web-nav 应用壳/响应式外壳两条款;新建
-  mobile-experience 域)。**遗留**:muniu 网关(8787)未运行时对话冒烟不可用
-  (起法=muniu 仓根 `env $(grep -v '^#' .env.local | grep '=' | xargs) ./bin/muniu`);
-  anthropic/responses 条目的流式问答 LLM 腿已于 2026-10-11 补验通过(见顶节
-  「流式协议覆盖现状」);根
-  `apps/web/vite.config.smoke.ts` 为临时冒烟件(硬编码本机绝对路径),
-  不入库,可删。
+  mobile-experience 域)。anthropic/responses 条目的流式问答 LLM 腿已于
+  2026-10-11 补验通过(现态单源=顶节「流式协议覆盖现状」;muniu 本地起法见
+  muniu 仓 README「快速开始」)。
 - **供应商预设目录 + ADR-007 定位修订(2026-09-26,文档级)**:用户裁决 muniu
   降级为可选端点(类 ollama,不强制经网关)→ ADR-007 状态行与文末「修订」节
   留痕,现网 muniu 形态部署不变;`docs/model-providers.md` 官方端点预设目录

@@ -66,6 +66,79 @@ def test_normalize_collab_topology_defaults_and_clamp() -> None:
     assert out["critic"] is False
 
 
+def test_normalize_collab_topology_worker_roster() -> None:
+    """分工 worker 名册归一(collab-worker-roster):条目归一/身份去重/钳制/
+    空名册不落键(存量载荷零漂移);圆桌分支不受 workers 字段影响。"""
+    from kongming.task import models as m
+
+    # 合法条目归一:name 缺省身份=bot_key;name 空白归一 None;bot_key 剥空白
+    out = m.normalize_collab_topology(
+        {
+            "max_workers": 2,
+            "workers": [
+                {"bot_key": " b1 "},
+                {"name": " 运营指标 ", "bot_key": "b2"},
+                {"name": "b1"},  # 缺 bot_key → 非法条目剔除
+                {"bot_key": "b1"},  # 身份与首条重复 → 裁到首条
+                {"name": "y", "bot_key": "b1"},  # 同 Bot 异名 = 不同成员,保留
+                "chaos",  # 非 dict → 剔除
+            ],
+        },
+        max_workers_cap=3,
+    )
+    assert cast("list[dict[str, object]]", out["workers"]) == [
+        {"name": None, "bot_key": "b1"},
+        {"name": "运营指标", "bot_key": "b2"},
+        {"name": "y", "bot_key": "b1"},
+    ]
+    # 部署上限钳制:名册 3 条 cap=2 → 截断至前 2 条
+    out = m.normalize_collab_topology(
+        {"workers": [{"bot_key": "b1"}, {"bot_key": "b2"}, {"bot_key": "b3"}]},
+        max_workers_cap=2,
+    )
+    assert [str(w["bot_key"]) for w in cast("list[dict[str, object]]", out["workers"])] == [
+        "b1",
+        "b2",
+    ]
+    # 空名册/全非法名册/畸形类型 → 视为未声明:不落 workers 键(存量形状不变)
+    undeclared: tuple[dict[str, object], ...] = (
+        {"workers": []},
+        {"workers": [{"name": "x"}]},
+        {"workers": "chaos"},
+        {},
+    )
+    for raw in undeclared:
+        out = m.normalize_collab_topology(raw, max_workers_cap=3)
+        assert "workers" not in out
+    # 无名册缺省载荷与 115 前存量形状逐键一致(零漂移)
+    out = m.normalize_collab_topology(None, max_workers_cap=3)
+    assert out == {
+        "kind": "decomposition",
+        "max_workers": 3,
+        "critic": False,
+        "dispatch": "serial",
+        "bot_key": None,
+    }
+    # 圆桌分支不读 workers 字段(声明不落键)
+    out = m.normalize_collab_topology(
+        {"kind": "roundtable", "workers": [{"bot_key": "b1"}]}, max_workers_cap=3
+    )
+    assert "workers" not in out
+
+
+def test_decomposition_roster_reader() -> None:
+    """分工名册读取:未声明/圆桌/存量缺 kind → 恒空;有名册 → 逐条透出。"""
+    from kongming.task import models as m
+
+    assert m.decomposition_roster({"kind": "decomposition", "max_workers": 2}) == []
+    assert m.decomposition_roster({"kind": "roundtable", "participants": []}) == []
+    assert m.decomposition_roster({"max_workers": 2}) == []
+    roster = m.decomposition_roster(
+        {"kind": "decomposition", "workers": [{"name": None, "bot_key": "b1"}]}
+    )
+    assert roster == [{"name": None, "bot_key": "b1"}]
+
+
 def test_clamp_budget_deployment_cap() -> None:
     from kongming.task import models as m
 
@@ -184,6 +257,142 @@ async def test_topology_declare_and_begin_step_collab_decision(
     kinds = [str(e["kind"]) for e in detail.json()["events"]]
     assert "collab_topology_set" in kinds
     assert "collab_started" not in kinds  # 尚未开账
+    _ = uid
+
+
+@pytest.mark.asyncio
+async def test_decomposition_roster_declaration_and_decision(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: Any,
+    no_dispatch: list[str],  # noqa: ARG001
+) -> None:
+    """分工名册闸门与决策解析(collab-worker-roster):逐条目 Bot 存在性校验、
+    名册与顶层单绑定互斥(判原始载荷)、决策载荷逐条目运行时解析(失败如实
+    降级 None)、无名册顶层绑定现行为不变、声明响应回显截断后名册。"""
+    uid, token = await _user_with_task_perms(client, session, make_user)
+    await _insert_bot(session, uid, "fin_analyst", "你是财务分析专家")
+    await _insert_bot(session, uid, "ops_metric", "你是运营指标专家")
+    await session.commit()
+
+    task_id = await _create_task(client, token)
+    step = await _plan_one_step(client, task_id, goal="名册分工用例")
+
+    # 名册 + 顶层 bot_key → 409(歧义声明,判原始载荷)
+    r = await _set_topology(
+        client,
+        token,
+        task_id,
+        step["id"],
+        {
+            "max_workers": 2,
+            "bot_key": "fin_analyst",
+            "workers": [{"bot_key": "fin_analyst"}],
+        },
+    )
+    assert r.status_code == 409, r.text
+    detail_409 = cast("str", r.json().get("detail") or "")
+    assert "bot_key" in detail_409
+
+    # 名册条目 Bot 不存在 → 422 INVALID_BOT 且点名条目(圆桌同款映射)
+    r = await _set_topology(
+        client,
+        token,
+        task_id,
+        step["id"],
+        {"max_workers": 2, "workers": [{"bot_key": "fin_analyst"}, {"bot_key": "ghost_bot"}]},
+    )
+    assert r.status_code == 422, r.text
+    detail_422 = cast("str", r.json().get("detail") or "")
+    assert "ghost_bot" in detail_422
+
+    # 合法名册声明:响应回显归一名册(条目非法剔除可见)
+    r = await _set_topology(
+        client,
+        token,
+        task_id,
+        step["id"],
+        {
+            "max_workers": 2,
+            "workers": [
+                {"name": " 财务 ", "bot_key": "fin_analyst"},
+                {"name": "ops", "bot_key": "ops_metric"},
+                {"name": "ops"},  # 缺 bot_key → 归一剔除
+            ],
+        },
+    )
+    assert r.status_code == 200, r.text
+    workers = cast("list[dict[str, object]]", r.json()["workers"])
+    assert [(str(w["name"]), str(w["bot_key"])) for w in workers] == [
+        ("财务", "fin_analyst"),
+        ("ops", "ops_metric"),
+    ]
+
+    # 决策载荷:逐条目 Bot 运行时解析(人格/工具子集随条目携带)
+    d = await client.post(
+        "/internal/task/step-start",
+        headers=INTERNAL,
+        json={"task_id": task_id, "tenant_key": "default", "step_id": step["id"]},
+    )
+    assert d.status_code == 200
+    dworkers = cast("list[dict[str, object]]", d.json()["collab"]["workers"])
+    assert [str(w.get("bot_key")) for w in dworkers] == ["fin_analyst", "ops_metric"]
+    fin_bot = cast("dict[str, object]", dworkers[0]["bot"])
+    assert str(fin_bot.get("system_prompt")) == "你是财务分析专家"
+    assert dworkers[1]["bot"] is not None
+
+    # 决策期解析失败(Bot 声明后被删)→ 该条目 bot 如实降级 None,不虚报
+    tid2 = await _create_task(client, token)
+    step2 = await _plan_one_step(client, tid2, goal="解析失败用例")
+    r2 = await _set_topology(
+        client,
+        token,
+        tid2,
+        step2["id"],
+        {"max_workers": 2, "workers": [{"bot_key": "fin_analyst"}, {"bot_key": "ops_metric"}]},
+    )
+    assert r2.status_code == 200, r2.text
+    await session.execute(
+        text("DELETE FROM public.sys_bot_definition WHERE bot_key = 'ops_metric'")
+    )
+    await session.commit()
+    d2 = await client.post(
+        "/internal/task/step-start",
+        headers=INTERNAL,
+        json={"task_id": tid2, "tenant_key": "default", "step_id": step2["id"]},
+    )
+    assert d2.status_code == 200
+    d2workers = cast("list[dict[str, object]]", d2.json()["collab"]["workers"])
+    assert d2workers[0]["bot"] is not None  # 存活条目照常解析
+    assert d2workers[1]["bot"] is None  # 已删条目如实降级 None(剔除在执行面收口)
+
+    # 删除后重声明:存在性校验拒绝(声明期口径,422 INVALID_BOT 圆桌同款)
+    tid3 = await _create_task(client, token)
+    step3 = await _plan_one_step(client, tid3, goal="删除后重声明用例")
+    r3 = await _set_topology(
+        client,
+        token,
+        tid3,
+        step3["id"],
+        {"max_workers": 2, "workers": [{"bot_key": "fin_analyst"}, {"bot_key": "ops_metric"}]},
+    )
+    assert r3.status_code == 422, r3.text
+
+    # 无名册 + 顶层 bot_key:现行为不变(受理,决策单绑定解析)
+    tid4 = await _create_task(client, token)
+    step4 = await _plan_one_step(client, tid4, goal="单绑定现行为")
+    r4 = await _set_topology(
+        client, token, tid4, step4["id"], {"max_workers": 1, "bot_key": "fin_analyst"}
+    )
+    assert r4.status_code == 200, r4.text
+    d4 = await client.post(
+        "/internal/task/step-start",
+        headers=INTERNAL,
+        json={"task_id": tid4, "tenant_key": "default", "step_id": step4["id"]},
+    )
+    assert d4.status_code == 200
+    assert str(d4.json()["collab"]["bot"].get("bot_key")) == "fin_analyst"
+    assert "workers" not in cast("dict[str, object]", d4.json()["collab"])
     _ = uid
 
 

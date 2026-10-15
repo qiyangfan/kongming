@@ -358,7 +358,22 @@ class TaskService:
         bot_key = topo.get("bot_key")
         if bot_key and self._bot_resolver is not None:
             bot = await self._bot_resolver.resolve(tenant_id=tenant_id, bot_key=str(bot_key))
-        return {**topo, "bot": bot}
+        out: dict[str, object] = {**topo, "bot": bot}
+        # 分工名册(collab-worker-roster)逐成员运行时解析:失败如实降级
+        # None 不虚报人格注入(剔除在执行面 fail-closed 收口,圆桌同口径)
+        roster = m.decomposition_roster(topo)
+        if roster:
+            workers: list[dict[str, object]] = []
+            for w in roster:
+                w_bot: dict[str, object] | None = None
+                w_key = w.get("bot_key")
+                if w_key and self._bot_resolver is not None:
+                    w_bot = await self._bot_resolver.resolve(
+                        tenant_id=tenant_id, bot_key=str(w_key)
+                    )
+                workers.append({**w, "bot": w_bot})
+            out["workers"] = workers
+        return out
 
     # ── 协作拓扑配置面与协作账本(091;查询挂 task:* 权限体系)──
 
@@ -391,6 +406,11 @@ class TaskService:
             # 圆桌绑定收口在名册(逐参与者);顶层 bot_key 不生效,拒绝歧义声明。
             # 判原始载荷:归一结果在圆桌分支已剥 bot_key,判归一值恒假(死闸)
             raise TaskConflict("圆桌形态不受理顶层 bot_key(用参与者名册绑定)")
+        roster = m.decomposition_roster(topo)
+        if roster and raw_topology.get("bot_key"):
+            # 分工名册(collab-worker-roster)绑定收口在名册(逐成员),
+            # 顶层单绑定与名册不共存,拒绝歧义声明(与圆桌闸同式判 raw)
+            raise TaskConflict("分工名册与顶层 bot_key 不共存(用名册逐成员绑定)")
         if self._bot_resolver is not None:
             if str(topo.get("kind") or "") == m.COLLAB_KIND_ROUNDTABLE:
                 for p in cast("list[dict[str, object]]", topo.get("participants") or []):
@@ -403,15 +423,28 @@ class TaskService:
                     ):
                         raise TopologyBotNotFound(str(p_bot_key))
             else:
+                for w in roster:
+                    w_bot_key = w.get("bot_key")
+                    if w_bot_key and (
+                        await self._bot_resolver.resolve(
+                            tenant_id=tenant_id, bot_key=str(w_bot_key)
+                        )
+                        is None
+                    ):
+                        raise TopologyBotNotFound(str(w_bot_key))
                 bot_key = topo.get("bot_key")
                 if bot_key and (
                     await self._bot_resolver.resolve(tenant_id=tenant_id, bot_key=str(bot_key))
                     is None
                 ):
                     raise TopologyBotNotFound(str(bot_key))
-        elif topo.get("bot_key") or any(
-            p.get("bot_key")
-            for p in cast("list[dict[str, object]]", topo.get("participants") or [])
+        elif (
+            topo.get("bot_key")
+            or any(
+                p.get("bot_key")
+                for p in cast("list[dict[str, object]]", topo.get("participants") or [])
+            )
+            or any(w.get("bot_key") for w in roster)
         ):
             raise TaskConflict("协作 Bot 绑定未启用")
         if not await self._repo.update_step_topology(

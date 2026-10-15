@@ -14801,6 +14801,21 @@
               }
             ],
             "title": "Participants"
+          },
+          "workers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CollabWorkerIn"
+                },
+                "type": "array",
+                "maxItems": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workers"
           }
         },
         "type": "object",
@@ -14955,6 +14970,37 @@
         ],
         "title": "CollabTurnOut",
         "description": "圆桌轮次转写行(115;黑板观测面,追加只写)。"
+      },
+      "CollabWorkerIn": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "bot_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Key"
+          }
+        },
+        "type": "object",
+        "title": "CollabWorkerIn",
+        "description": "分工名册成员声明条目(collab-worker-roster):Bot 点名,可选别名\n(身份 = name 缺省 bot_key;声明期锁定,运行期不可增减改绑)。"
       },
       "CollabWorkerOut": {
         "properties": {
