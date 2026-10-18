@@ -94,6 +94,35 @@ web 协作视图/端到端冒烟双场景)。**095–114 批亦已全部落地�
 面板/098 中文分词/099 HTTP 连接器/100 工单/106 召回闸恒生效/110 指标可见性/
 114 语音问数等;明细单源=HANDOFF 顶节与 openspec/changes/archive)。
 任务/协作部署级上限缺省值见 docs/tech-stack.md「任务/协作部署级上限」节。
+**2026-10-18**:ai-platform 对齐调研(docs/ai-platform-alignment.md)实证剩余
+差距后,净缺口立项(owner 裁决:求职学习项目以学习与展示价值为准,不做
+「等触发信号」式挂账,个人项目等不到信号)——
+①`add-graph-checkpoint`(图级检查点+图内挂起,HITL 第三形态)已立项开工;
+②向量规模化(Milvus)立项排序其后,开工先写 ADR(技术栈锁定流程)。
+media-generation(owner 2026-10-18 裁决不需要,见否定裁决表)原列②位,
+否决后净缺口收敛为两项。
+**2026-10-18(同日第二项)**:ruoyi-ai 对齐调研(docs/ruoyi-ai-alignment.md,
+开源万星级 Java AI 平台三路实证调研)结论=孔明治理面全面领先(凭证加密/Alembic/
+引用溯源/测试门禁/双进程边界,详见该文 §3),净缺口三项吸收:①`add-doc-rerank`
+(document-rag 检索精排层 rerank,问答智能体方向)当日立项、四工件过校验待 apply;
+②MCP 运行时熔断(mcp-interop 域 delta,连续失败自动冷却,排序 Milvus 之后开工)。
+③音视频生成(原列 media-generation 域扩展)随域否决一并落空(owner 同日裁决
+不需要 media-generation,登记于下方否定裁决表)。否决五项(短剧流水线/SSE 跨
+节点广播/MCP 市场导入/xlsx 单独立项/多厂商 OSS 抽象)登记于下方否定裁决表。
+**2026-10-18(同日第三项)**:全栈刷新调研(docs/stack-refresh-2026-10.md,
+registry 实查)裁决=ADR-011,立项两变更:①`adopt-mcp-sdk2`——MCP 规范
+2026-07-28 无状态修订(会话握手废除)使双向 689 行手写 JSON-RPC(028 出站
+519 行/入站 170 行)维护被规范废弃的概念,且手搓动机「零新依赖」已失效
+(mcp SDK 早是 dev 依赖),收编官方 SDK 2.x(dev→prod,<2→>=2.3,<3),
+mcp-interop 域 delta(跨修订协商+当前修订声明);②`stack-refresh-2026-10`
+(skip_specs 行为保持)——四批:后端 major(SQLAlchemy 2.1/openai 3.35/
+anthropic 1.15)+前端 major(Vite 8 Rolldown/vitest 5/eslint 10/
+react-router 8/echarts 6/react 19.3+React Compiler 1.0 替代手写 memo
+增量)+基础设施(compose pg17→pg18 对齐开发机、Python 3.14 可选档)+
+下限漂移清偿(langgraph 下限 0.2.60 vs 实锁 1.2.11 的反面教材)。
+暂缓/否决:TypeScript 7(typescript-eslint #10940 不兼容,等 7.1 世代)、
+PG19(RC 刚过)、Python 3.15(等补丁周期)、uuid7.py 换库(ORM 侧生成
+主键,PG18 原生 uuidv7() 仅 DB 侧 DEFAULT 场景,替换为负收益)。
 
 ### 089 工具网关:后续域接入清单(2026-10-09 登记,2026-10-13 更新现态)
 
@@ -132,6 +161,17 @@ resources/prompts(109)、Bot 版本化上架(104)、用户/TEAM 维度配额(103
 | OCR 引擎 | 否决 | 独立 OCR 已被 vision 路吸收(030 图片问数+注册表 qwen-vl 现成),再挂引擎=系统内两条平行「图→文」抽取路径;重依赖(PaddleOCR 系拖 paddlepaddle,Tesseract 中文弱)且与 114 本地可选模型模式同构,学习边际价值低(同 Slack 裁决逻辑)。扫描件 PDF 现态=pypdf 文本层;真实需求出现时载体=上传管线 vision 抽取(复用 qwen-vl),仍非 OCR 引擎(2026-10-13 owner 采纳) |
 | 真实支付通道 | 维持既有裁决 | 2026-10-11 用户裁决:支付通道 mock 即终态,不再重提 |
 | ticket 真实凭证 | 非工程决策(待外部条件) | 100 协议实现与治理面已落地且有测试覆盖;缺的是真实第三方账号——凭证到位即可接入,不存在工程欠债 |
+| 短剧流水线(剧本→分镜→配图→配音→合成) | 否决 | 方向外:ADR-010 五方向无内容创作归口,「数据为刃」禁横向摊薄;重依赖 FFmpeg/音频合成,学习边际价值低(ruoyi-ai 对齐调研 §5,2026-10-18) |
+| SSE 跨节点广播(Redis pub/sub) | 否决 | 单节点部署形态无场景;双进程 relay 已覆盖现有拓扑,为不存在的规模付复杂度(同上 §5) |
+| MCP 市场一键导入 | 否决 | 供应链高危面(ruoyi-ai 自身风险点:外部元数据一键导入即得 Stdio 执行权);人工注册+出站白名单已是更优形态(同上 §5) |
+| xlsx 知识文档解析单独立项 | 否决(搭车注记) | document-rag 域内小 delta(格式清单+1),单独立项价值不足;随该域下次变更搭车(同上 §5) |
+| 多厂商 OSS 抽象(S3 SDK/MinIO) | 否决 | 本地盘+既有落盘管线已覆盖,无对象存储对应场景;「规模化前置」反模式(同上 §5) |
+| media-generation(图像/音视频/音乐生成域) | 否决(owner 直接裁决,2026-10-18) | 多模态输出侧与「数据为刃」五方向无归口,对齐调研的立项排序被 owner 推翻;域变更(add-media-generation 四工件)已删,不作为待办挂账;前置条件=真实消费场景出现(报告配图等)再议 |
+
+**2026-10-18 追注**:原拟在此登记的 media-generation 与向量规模化(Milvus)
+不适用本表——二者已按 owner 裁决直接立项(见第四梯队 2026-10-18 段),
+「等触发信号」式挂账自即日起废弃。(同日再裁:media-generation 被 owner
+直接否决,回登本表;Milvus 维持立项。)
 
 **勘误(同日,owner 指正「无场景」理由不成立——求职项目无需求方,场景
 等不来)**:对原否定项重裁并勘测现状,两项发现**早已落地**(裁决时未查
