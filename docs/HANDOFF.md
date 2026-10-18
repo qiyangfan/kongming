@@ -7,7 +7,59 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
-## 当前状态(2026-10-18)
+## 当前状态(2026-10-19)
+
+- **全栈刷新现态(stack-refresh-2026-10,已落地)**:四批版本刷新行为保持。
+  后端=fastapi 0.144/pydantic 2.14/SA 2.1(`[asyncio]` extra 窗 `>=2.1,<3`,
+  弃用面 grep 零命中)/openai 3.35/anthropic 1.15/langgraph 1.2.16/pytest 9/
+  mypy 2.4/ruff 0.17;mypy 2.x 下 strict 全量绿。**下限对齐纪律生效**:双 app
+  pyproject 下限提到实锁 major 线+窗式约束(langgraph `>=1.2,<2`、openai
+  `>=3,<4` 等),新环境重解析不再回退旧 major。前端=Vite 8.3(Rolldown,
+  `rollupOptions`→`rolldownOptions`,manualChunks 函数形态尚可用已弃用、
+  066 分包边界由 echarts-boundary 静态护栏钉住)+vitest 5+eslint 10(新规则
+  preserve-caught-error 补一处 cause)+RR 8.4+echarts 6.1(**echarts-for-react
+  必须走 `echarts-for-react/esm/core`——Vite8 CJS 互操作统一后 lib/ 无
+  __esModule 默认导入不解包,extends 即炸**,echarts.ts 已修)+React Compiler
+  1.0(plugin-react `compiler: true`,依赖 oxc-transform-react;告警零条,
+  手写 memo 保留叠加)。基础设施=compose pgvector:pg18(开发机 localenv 已
+  pg18)+容器镜像 python3.14-bookworm-slim(requires-python 保持 >=3.13 兼容
+  声明;ctranslate2 4.8.3 cp314 轮子已验,api/agent 镜像构建+api 容器 healthz smoke 过)。
+  冒烟:echarts 亮暗两态真实问答图表走查过(muniu 网关需在位,agent mk-key
+  已换签为 walk310)。TypeScript 7 维持暂缓(typescript-eslint #10940)。
+
+- **文档检索精排现态(add-doc-rerank,已落地;工件在
+  `openspec/changes/archive/` 对应目录)**:document-rag 检索在 RRF 融合后
+  增可选精排级——候选池扩量(`KM_RERANK_POOL_TOPK` 缺省 20)→ rerank 打分 →
+  同父多子取最高分 → 截断 top-5 父块;失败(超时/限流/不可用)降级 RRF-only
+  不阻断,留痕 `sys_llm_usage`(task=doc_rerank,status 区分,token 记 0);
+  引用键与名次无关零改动。**部署级条件注册**:`KM_RERANK_PROVIDER`(siliconflow|
+  bailian)+`KM_RERANK_API_KEY`+`KM_RERANK_MODEL` 齐备才生效,未配=精排级
+  零存在感;组合残缺 prod 拒启/dev 告警降级,provider 非法值 dev/prod 同拒启。
+  **启用配方**:bailian 例 `KM_RERANK_PROVIDER=bailian`+`KM_RERANK_MODEL=
+  gte-rerank-v2`(key 复用百炼 sk-,与 LLM 同账号即可)+重启 api;siliconflow
+  例 `BAAI/bge-reranker-v2-m3`(bailian 的 gte 系必须走原生端点,
+  /compatible-mode 不提供 rerank)。**阈值建议**:缺省 0(不过滤)起步;要收
+  紧先经 recall-probe/日志观察 gte-rerank 分数分布(实测可答题 top1 ≈0.26,
+  无关文档 <0.08)再定档,阈值误配会诱发知识态频繁空命中(退化为纯数据答)。
+  冒烟:tests/test_doc_rerank.py(25 例,适配器经 MockTransport 零真实出站)。
+- **MCP 协议栈现态(adopt-mcp-sdk2,已落地)**:双向手写协议退役,收编
+  官方 SDK 2.x(`mcp>=2.3,<3`,dev→prod 依赖)。**修订声明值**:平台 /mcp
+  端点为无状态形态(2026-07-28 修订;现代客户端 `server/discover` 直连,
+  官方客户端 discover 响应 supported_versions=["2026-07-28"]);旧修订
+  客户端经 initialize 握手兼容(按客户端所报修订回签,如 2025-03-26 客户端
+  收 2025-03-26)——兼容矩阵=SDK KNOWN_PROTOCOL_VERSIONS 全集(2024-11-05
+  起五档)。出站=SDK streamable_http_client+ClientSession(modern
+  discover→旧修订 initialize 回退;SDK 异常含任务组包装,归一拆包在
+  mcp/client.py `_classify_group`)。HTTP 栈=`httpx2`(mcp 2.x 的依赖,
+  client.py 直接 import,api pyproject 已显式声明 `>=2,<3`——勿按纯传递
+  依赖对待)。**挂载形态**:/mcp=根级 Mount("")+
+  闸/鉴权 ASGI 中间件+SDK 无状态 app(Starlette 前缀挂载不匹配裸 /mcp,
+  307 面不可接受);session manager 禁止重复 run,每次 lifespan 经
+  McpInboundProxy.rebuild() 重建整链,宿主 lifespan MUST enter
+  session_manager.run()(挂载态 SDK 内建 lifespan 失效)。openapi 契约
+  面:/mcp 退出 OpenAPI(非 FastAPI 路由)。冒烟:tests/test_mcp.py
+  (出站组=真实 SDK server 载体)+tests/test_mcp_live.py(双形态真实
+  server:stateless/stateful 各三方法面)。
 
 - **图级检查点与图内挂起现态(add-graph-checkpoint,已落地归档,工件在
   `openspec/changes/archive/2026-10-18-add-graph-checkpoint/`;行为契约已同步

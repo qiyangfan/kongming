@@ -16,44 +16,56 @@ from kongming.config import get_settings
 from tests.conftest import MakeUser
 from tests.test_chat_query import _default_tenant_id
 from tests.test_llm_usage import INTERNAL, _records
-from tests.test_mcp import (
-    fake_agent,  # noqa: F401  # pyright: ignore[reportUnusedImport]  # pytest fixture(模块级引入方可发现)
-)
 
 # ── B1-B11:/mcp 入站 body 闸 ──
 
 
 async def test_mcp_body_gate_oversize_unauthenticated(
-    client: AsyncClient, session: AsyncSession
+    mcp_client: AsyncClient, session: AsyncSession
 ) -> None:
     """未认证客户端灌 >1MB body → 413 先于鉴权(body 未进业务)。"""
     big = b'{"method": "initialize", "id": 1, "params": "' + b"x" * (1024 * 1024 + 16)
-    r = await client.post("/mcp", content=big, headers={"Content-Type": "application/json"})
+    r = await mcp_client.post("/mcp", content=big, headers={"Content-Type": "application/json"})
     assert r.status_code == 413, r.text
 
 
 async def test_mcp_body_gate_normal_chain_unaffected(
-    client: AsyncClient,
+    mcp_client: AsyncClient,
     session: AsyncSession,
     make_user: MakeUser,
     fake_agent: dict[str, Any],  # noqa: F811  # pytest fixture(模块级引入+参数同名)
 ) -> None:
-    """小 body 正常链路零回归(畸形 JSON 归协议错误 -32700)。"""
+    """小 body 正常链路零回归(畸形 JSON 归 SDK 协议层 400 拒)。"""
     from tests.test_mcp import _bot_with_key
 
-    plain = await _bot_with_key(client, session, make_user, fake_agent)
-    r = await client.post(
+    plain = await _bot_with_key(mcp_client, session, make_user, fake_agent)
+    r = await mcp_client.post(
         "/mcp",
         headers={"X-Api-Key": plain},
-        json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        # 旧修订客户端形态(SDK 真校验 params)
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "legacy-client", "version": "0"},
+            },
+        },
     )
     assert r.status_code == 200
     assert r.json()["result"]["serverInfo"]["name"] == "kongming"
-    r2 = await client.post(
-        "/mcp", content=b"not-json", headers={"Content-Type": "application/json"}
+    r2 = await mcp_client.post(
+        "/mcp",
+        content=b"not-json",
+        # 闸序(adopt-mcp-sdk2):1MB 闸→鉴权→SDK 解析;畸形 JSON 的 -32700
+        # 归 SDK 协议面(带合法 key 验证该形态;无 key 401 由闸序用例另证)
+        headers={"Content-Type": "application/json", "X-Api-Key": plain},
     )
-    assert r2.status_code == 200
-    assert r2.json()["error"]["code"] == -32700
+    # 畸形 JSON=SDK 协议层 400 拒(adopt-mcp-sdk2:解析归 SDK,不再是手写的
+    # 200+JSON-RPC -32700 形态;闸零回归的判据=小 body 到达协议面)
+    assert r2.status_code == 400
 
 
 # ── R2-F1:bot OpenAI 端点失败形态 content 兜底 ──

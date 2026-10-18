@@ -5,6 +5,14 @@
 > (2026-10-18)+ 官方发布说明调研;裁决单源=ADR-011,实施载体=openspec 变更
 > `stack-refresh-2026-10`(行为保持)与 `adopt-mcp-sdk2`(协议收编)。
 >
+> **终态(2026-10-18 apply 完成后勾注)**:四批全部落地——后端常规+下限对齐
+> (批①)/SA 2.1+openai 3.35+anthropic 1.15(批②)/Vite8+vitest5+eslint10+RR8+
+> echarts6+React Compiler 1.0(批③;echarts-for-react 切 esm/ 导入修 Vite8
+> CJS 互操作)/pg18 compose 对齐+Python 3.14 容器镜像(批④,容器 healthz smoke
+> 过);TypeScript 7 维持暂缓。构建耗时对比:Vite8+Rolldown 全量 build 577ms
+> (Vite6 时代 ~10s 级);React Compiler 启用后 466ms、编译器告警清单=零条
+> (手写 memo 保留叠加),页面 chunk 因内联 memo 微涨(vendor 恒定)。
+>
 > **一句话结论:栈整体新鲜(多数依赖实锁在最新 minor),真正的大项是
 > ①MCP 规范 2026-07-28 无状态修订使双向手写协议栈过时→收编官方 SDK 2;
 > ②前端构建链跨两代(Vite 6→8 Rolldown + React Compiler 1.0 替代手写 memo);

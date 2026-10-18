@@ -7,6 +7,8 @@
 import hashlib
 import logging
 import re
+import time
+from collections.abc import Mapping
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
@@ -15,6 +17,7 @@ from kongming.rag.chunker import chunk_document
 from kongming.rag.documents_repo import SqlDocumentRepo
 from kongming.rag.models import rrf_fuse_ids
 from kongming.rag.ports import EmbeddingPort
+from kongming.rag.rerank import RerankError, RerankPort, record_rerank_usage
 
 log = logging.getLogger(__name__)
 
@@ -88,6 +91,92 @@ def derive_citation_key(*, parent_id: str, doc_name: str) -> str:
     return f"{prefix}-{hasher}"
 
 
+def _rrf_parent_ids(fused: list[str], id_to_parent: Mapping[str, str]) -> list[str]:
+    """RRF 名次→父块首现去重截断(未启用精排的既有路径;精排降级同源复用)。"""
+    parent_ids: list[str] = []
+    for cid in fused:
+        pid = id_to_parent.get(str(cid))
+        if pid and pid not in parent_ids:
+            parent_ids.append(pid)
+        if len(parent_ids) >= _PARENT_TOP_K:
+            break
+    return parent_ids
+
+
+def rank_parents_by_score(
+    pool_ids: list[str],
+    scores: list[float],
+    id_to_parent: Mapping[str, str],
+    *,
+    threshold: float,
+    top_k: int,
+) -> list[str]:
+    """精排分→父块序(纯函数;同父多子取最高分,阈值先滤候选,平分保 RRF
+    首现序——sorted 稳定性)。低于阈值的候选被过滤;过滤后空=空列表(调用方
+    按既有「文档未命中」收口)。"""
+    parent_scores: dict[str, float] = {}
+    for cid, sc in zip(pool_ids, scores, strict=True):
+        if sc < threshold:
+            continue
+        pid = id_to_parent.get(cid)
+        if pid is None:
+            continue
+        cur = parent_scores.get(pid)
+        parent_scores[pid] = sc if cur is None else max(cur, sc)
+    ranked = sorted(parent_scores.items(), key=lambda kv: kv[1], reverse=True)
+    return [pid for pid, _ in ranked[:top_k]]
+
+
+async def _rerank_parent_ids(
+    repo: SqlDocumentRepo,
+    reranker: RerankPort,
+    *,
+    tenant_id: str,
+    datasource_key: str,
+    question: str,
+    fused: list[str],
+    id_to_parent: Mapping[str, str],
+    fallback: list[str],
+) -> list[str]:
+    """精排级:融合后候选池扩量→子块正文打分→父块最高分截断 top-5。
+
+    任何精排失败(超时/限流/不可用)降级 RRF-only 不阻断(design D4:单次
+    调用粒度,不做熔断);成功/失败均留痕 sys_llm_usage(latency 只计出站
+    打分本身,不含子块正文取回)。候选池无正文可打(全缺)按 RRF-only。"""
+    pool = [str(cid) for cid in fused[: reranker.pool_topk]]
+    texts_by_id = await repo.fetch_child_texts(
+        tenant_id=tenant_id, datasource_key=datasource_key, child_ids=pool
+    )
+    pool = [cid for cid in pool if texts_by_id.get(cid, "").strip()]
+    if not pool:
+        return fallback
+    started = time.monotonic()
+    try:
+        scores = await reranker.score(query=question, documents=[texts_by_id[c] for c in pool])
+    except RerankError as e:
+        log.warning("精排失败降级 RRF-only(reason=%s)", e.reason)
+        await record_rerank_usage(
+            model=reranker.model,
+            tenant_id=tenant_id,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            status="ERROR",
+        )
+        return fallback
+    await record_rerank_usage(
+        model=reranker.model,
+        tenant_id=tenant_id,
+        latency_ms=int((time.monotonic() - started) * 1000),
+        status="SUCCESS",
+    )
+    return rank_parents_by_score(
+        pool,
+        scores,
+        id_to_parent,
+        threshold=reranker.score_threshold,
+        top_k=_PARENT_TOP_K,
+    )
+
+
 async def retrieve_docs(
     repo: SqlDocumentRepo,
     embedder: EmbeddingPort,
@@ -95,9 +184,14 @@ async def retrieve_docs(
     tenant_id: str,
     datasource_key: str,
     question: str,
+    reranker: RerankPort | None = None,
 ) -> list[dict[str, str]]:
-    """small-to-big 检索:子块向量+全文 RRF → 父块回填(top-5);
-    任何失败降级空列表(不阻断主链路)。"""
+    """small-to-big 检索:子块向量+全文 RRF → (可选精排)→ 父块回填(top-5);
+    任何失败降级空列表(不阻断主链路)。
+
+    reranker=None 时与既有行为逐字一致(RRF 名次直接截断,零回归);
+    注入精排级时候选池扩量(pool_topk)重排,引用键派生与名次无关(D5 零改动)。
+    """
     try:
         vector_hits: list[dict[str, Any]] = []
         try:
@@ -121,17 +215,23 @@ async def retrieve_docs(
                 [str(h["id"]) for h in vector_hits],
                 [str(h["id"]) for h in fulltext_hits],
             ],
-            top=_PARENT_TOP_K * 2,  # 子块级融合放宽,父块去重后截 top-5
+            top=reranker.pool_topk if reranker is not None else _PARENT_TOP_K * 2,
         )
         # 子块 id → parent_id(保序)
         id_to_parent = {str(h["id"]): str(h["parent_id"]) for h in [*vector_hits, *fulltext_hits]}
-        parent_ids: list[str] = []
-        for cid in fused:
-            pid = id_to_parent.get(str(cid))
-            if pid and pid not in parent_ids:
-                parent_ids.append(pid)
-            if len(parent_ids) >= _PARENT_TOP_K:
-                break
+        if reranker is not None and fused:
+            parent_ids = await _rerank_parent_ids(
+                repo,
+                reranker,
+                tenant_id=tenant_id,
+                datasource_key=datasource_key,
+                question=question,
+                fused=fused,
+                id_to_parent=id_to_parent,
+                fallback=_rrf_parent_ids(fused, id_to_parent),
+            )
+        else:
+            parent_ids = _rrf_parent_ids(fused, id_to_parent)
         parents = await repo.fetch_parents(tenant_id=tenant_id, parent_ids=parent_ids)
         by_id = {str(p["id"]): p for p in parents}
         out: list[dict[str, str]] = []

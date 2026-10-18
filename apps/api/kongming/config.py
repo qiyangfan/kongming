@@ -16,6 +16,19 @@ from kongming.toolgateway.models import WEBSEARCH_PROVIDERS, parse_ticket_endpoi
 FULLTEXT_TS_CONFIGS: tuple[str, ...] = ("simple", "zhparser")
 DEFAULT_FULLTEXT_TS_CONFIG = "simple"
 
+# add-doc-rerank:文档检索精排供应商注册表(部署级条件注册;代码单源=出口白名单)。
+# 与 FULLTEXT_TS_CONFIGS 同理由落 config 层不落 rag 域包(config 不得反向触达
+# kongming.rag 的既有依赖纪律);条目=(endpoint, exit_host)。新供应商=本表加一条
+# + kongming/rag/rerank.py 的 _ADAPTERS 加同名适配(Cohere 形态归一
+# results[i].index/relevance_score),两表共维、缺一启动即显式报错。
+RERANK_PROVIDERS: dict[str, tuple[str, str]] = {
+    "siliconflow": ("https://api.siliconflow.cn/v1/rerank", "api.siliconflow.cn"),
+    "bailian": (
+        "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank",
+        "dashscope.aliyuncs.com",
+    ),
+}
+
 
 def validated_fulltext_ts_config(value: str) -> str:
     """全文检索分词配置白名单校验闸(值域与缺省单源于此,全仓唯一)。
@@ -230,6 +243,18 @@ class Settings(BaseSettings):
     websearch_timeout_ms: int = Field(default=8000, ge=1, le=30000)
     toolgateway_websearch_quota: int = Field(default=20, ge=1, le=600)
 
+    # add-doc-rerank:文档检索精排(部署级条件注册:provider+key+model 齐备才
+    # 生效;均未配置=精排级零存在感,合法缺省)。供应商值域=RERANK_PROVIDERS。
+    # 组合残缺(配 provider 缺 key/model、只配 key)prod 拒启/dev 告警降级
+    # (同 websearch 口径);provider 非法值 dev/prod 同拒启(降级=换供应商,
+    # 无安全降级形态,不照抄 websearch 的告警降级)。凭证只存控制面环境变量。
+    rerank_provider: str = ""  # siliconflow | bailian
+    rerank_api_key: str = ""
+    rerank_model: str = ""
+    rerank_pool_topk: int = Field(default=20, ge=1, le=100)  # 融合后候选池扩量上限
+    rerank_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0)  # 0=不过滤
+    rerank_timeout_ms: int = Field(default=3000, ge=100, le=30000)
+
     # 100 internal-connector-domain:内部工单域(部署级条件注册:端点+服务凭证
     # 齐备才注册 ticket 三工具;均缺省=域零感知,合法缺省)。内部系统凭证属
     # 企业部署事实(服务账号),与 websearch 同谱系,只存控制面环境变量(ADR-002);
@@ -297,6 +322,40 @@ class Settings(BaseSettings):
             return f"KM_TICKET_BASE_URL 非法(须为可解析的 http(s) 地址),ticket 域不注册:{base}"
         return None
 
+    def rerank_misconfiguration(self) -> str | None:
+        """add-doc-rerank:精排组合配置校验(残缺返回描述,否则 None)。
+
+        prod 由 fail_closed_checks 拒启;dev 由 lifespan 告警降级(精排级不生效)。
+        均未配置=合法缺省(零存在感),不视为残缺。provider 非法值不在此列
+        ——走 require_rerank_provider 启动硬校验(dev/prod 同拒)。
+        """
+        provider = (self.rerank_provider or "").strip().lower()
+        key = (self.rerank_api_key or "").strip()
+        model = (self.rerank_model or "").strip()
+        if not provider:
+            # 只配 key/model 缺供应商同属残缺(websearch 评审循环 D3 同原则:
+            # 排障时「配了却没生效」不能无信号;三变量族的 model 单配也覆盖)
+            if key:
+                return "KM_RERANK_API_KEY 已配置但 KM_RERANK_PROVIDER 缺失,精排级不生效"
+            if model:
+                return "KM_RERANK_MODEL 已配置但 KM_RERANK_PROVIDER 缺失,精排级不生效"
+            return None
+        if not key:
+            return f"KM_RERANK_PROVIDER={provider} 已配置但 KM_RERANK_API_KEY 缺失,精排级不生效"
+        if not model:
+            return f"KM_RERANK_PROVIDER={provider} 已配置但 KM_RERANK_MODEL 缺失,精排级不生效"
+        return None
+
+    def require_rerank_provider(self) -> None:
+        """add-doc-rerank:provider 白名单校验,白名单外值 RuntimeError 拒启。
+
+        dev/prod 同(require_fulltext_ts_config 同款:非法值属配置错误而非
+        合法部署形态,降级只会静默失效无信号);get_settings 启动期调用。"""
+        provider = (self.rerank_provider or "").strip().lower()
+        if provider and provider not in RERANK_PROVIDERS:
+            valid = "、".join(sorted(RERANK_PROVIDERS))
+            raise RuntimeError(f"KM_RERANK_PROVIDER 非法值 {provider}(值域:{valid})")
+
     def require_fulltext_ts_config(self) -> str:
         """098:全文检索分词配置白名单校验,白名单外值 RuntimeError 拒启。
 
@@ -339,6 +398,11 @@ class Settings(BaseSettings):
         tk_misconfig = self.ticket_misconfiguration()
         if tk_misconfig:
             raise RuntimeError(f"prod fail-closed: {tk_misconfig}")
+        # add-doc-rerank:精排组合残缺同口径拒启(provider 非法值由
+        # require_rerank_provider 在 dev/prod 一律拒,此处只管残缺族)
+        rk_misconfig = self.rerank_misconfiguration()
+        if rk_misconfig:
+            raise RuntimeError(f"prod fail-closed: {rk_misconfig}")
 
 
 @lru_cache
@@ -346,4 +410,5 @@ def get_settings() -> Settings:
     s = Settings()
     s.fail_closed_checks()
     s.require_fulltext_ts_config()  # 098:非法分词配置一律拒启(dev/prod 同)
+    s.require_rerank_provider()  # add-doc-rerank:非法精排供应商一律拒启(dev/prod 同)
     return s

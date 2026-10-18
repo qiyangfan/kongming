@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -45,7 +46,7 @@ from kongming.internal.router import router as internal_router
 from kongming.llmusage.router import internal_router as llmusage_internal_router
 from kongming.llmusage.router import router as llmusage_router
 from kongming.logging_setup import setup_logging
-from kongming.mcp.inbound import router as mcp_inbound_router
+from kongming.mcp.inbound import McpInboundProxy
 from kongming.mcp.router import router as mcp_router
 from kongming.memory.router import router as memory_router
 from kongming.quality.router import router as quality_router
@@ -217,6 +218,14 @@ def _warn_ticket_misconfiguration() -> None:
         log.warning("ticket:%s", misconfig)
 
 
+def _warn_rerank_misconfiguration() -> None:
+    """add-doc-rerank:精排组合残缺的 dev 告警降级(prod 由 config.fail_closed_checks
+    拒启;lifespan 调用;测试直调——_warn_websearch_misconfiguration 同款)。"""
+    misconfig = get_settings().rerank_misconfiguration()
+    if misconfig:
+        log.warning("rerank:%s", misconfig)
+
+
 async def _knowledge_endpoint(session: AsyncSession) -> str | None:
     """081/082:个人知识库端点注册条件;多租户仅告警不拒绝(082 单租户闸降级)。
 
@@ -283,6 +292,7 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
                 log.info("启动扫描:%d 个滞留 GENERATING 的报告标记 FAILED", nr)
         _warn_websearch_misconfiguration()  # 094(prod 已拒启;dev 告警降级)
         _warn_ticket_misconfiguration()  # 100(同上口径)
+        _warn_rerank_misconfiguration()  # add-doc-rerank(同上口径)
         tool_registry.activate(
             tool_registry.build_registry(
                 await _knowledge_endpoint(session),
@@ -301,9 +311,16 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
     expire_task = asyncio.create_task(_payment_expire_loop())  # 035:支付单过期兜底
     attach_task = asyncio.create_task(_attachment_cleanup_loop())  # 036⑤:孤儿附件清理
     start_trigger_scheduler()  # 031:cron 调度薄壳(30s tick,单进程形态)
+    # adopt-mcp-sdk2:/mcp 入站 SDK 会话管理器生命周期(挂载态内建 lifespan
+    # 失效,宿主 MUST enter session_manager.run(),SDK 迁移指南明文;
+    # 每次 lifespan 重建入站链——manager 禁止重复 run)
+    mcp_sm_cm = _mcp_inbound_proxy.rebuild().run()
+    await mcp_sm_cm.__aenter__()
     try:
         yield
     finally:
+        with contextlib.suppress(BaseException):
+            await mcp_sm_cm.__aexit__(None, None, None)
         archive_task.cancel()
         billing_task.cancel()
         expire_task.cancel()
@@ -372,7 +389,10 @@ app.include_router(bot_router)
 app.include_router(bot_public_router)
 app.include_router(semantic_router)
 app.include_router(mcp_router)
-app.include_router(mcp_inbound_router)
+# adopt-mcp-sdk2:/mcp 入站=SDK 无状态 streamable-http app+闸/鉴权前置包装
+# (不再是 FastAPI 路由;代理间接层供 lifespan 期重建——session manager
+# 不允许重复 run,测试反复启停 lifespan 与生产单次同形)
+_mcp_inbound_proxy = McpInboundProxy()
 app.include_router(workflow_router)
 app.include_router(attachment_chat_router)
 app.include_router(attachment_internal_router)
@@ -394,6 +414,12 @@ register_datasource_error_handlers(app)
 @app.get("/healthz", tags=["ops"])
 async def healthz() -> dict[str, str]:
     return {"status": "ok", "app": get_settings().app_name}
+
+
+# adopt-mcp-sdk2:/mcp 入站挂载(根级 Mount(""):Starlette 前缀挂载不匹配
+# 裸 /mcp 会 307;根级须是最后一条路由兜住未匹配路径,非 /mcp 由闸层
+# 404 守卫保持既有 404 形态)
+app.mount("", _mcp_inbound_proxy)
 
 
 @app.middleware("http")

@@ -271,3 +271,26 @@ class SqlDocumentRepo:
             .all()
         )
         return [dict(r) for r in rows]
+
+    async def fetch_child_texts(
+        self, *, tenant_id: str, datasource_key: str, child_ids: list[str]
+    ) -> dict[str, str]:
+        """精排候选池子块正文批量取回(add-doc-rerank;启用精排时才调用,
+        未启用路径零成本)。返回 {child_id: content};已删块自然缺席。"""
+        if not child_ids:
+            return {}
+        rows = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, content FROM rag.document_chunks"
+                        " WHERE id = ANY(:ids) AND tenant_id=:t AND datasource_key=:d"
+                        "   AND chunk_level='CHILD'"
+                    ),
+                    {"ids": child_ids, "t": tenant_id, "d": datasource_key},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return {str(r["id"]): str(r["content"]) for r in rows}

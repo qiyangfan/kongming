@@ -44,8 +44,11 @@ async def test_endpoint_sees_middleware_trace_id() -> None:
     async def _probe(request: Any) -> JSONResponse:
         return JSONResponse({"tid": ensure_trace_id()})
 
-    # 临时挂探针路由(仅测试内;不改生产路由表)
-    _app.router.routes.append(Route("/__trace_probe", _probe))  # pyright: ignore[reportAttributeAccessIssue]
+    # 临时挂探针路由(仅测试内;不改生产路由表)。插在根级 Mount("")(adopt-
+    # mcp-sdk2 兜底挂载,位次最后)之前——append 会落 Mount 之后恒不可达
+    routes = _app.router.routes
+    mount_idx = next(i for i, r in enumerate(routes) if type(r).__name__ == "Mount")
+    routes.insert(mount_idx, Route("/__trace_probe", _probe))  # pyright: ignore[reportAttributeAccessIssue]
     try:
         transport = ASGITransport(app=_app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -54,4 +57,4 @@ async def test_endpoint_sees_middleware_trace_id() -> None:
             assert r.json()["tid"] == "contract-061-same"
             assert r.headers["x-trace-id"] == "contract-061-same"
     finally:
-        _app.router.routes.pop()  # pyright: ignore[reportAttributeAccessIssue]
+        routes.pop(mount_idx)  # pyright: ignore[reportAttributeAccessIssue]

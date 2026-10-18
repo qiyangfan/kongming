@@ -177,6 +177,35 @@ def get_bot_service(
     )
 
 
+def build_bot_service_with_session(session: AsyncSession) -> BotService:
+    """非 DI 组合工厂(adopt-mcp-sdk2:/mcp 入站 ASGI 中间件消费;与
+    get_bot_service 同源装配,防两处漂移)。agent 客户端经 _resolve_agent_client
+    (覆写感知,测试替身注入路径与 DI 同形)。"""
+    from kongming.bot.repository import SqlBotRepo
+
+    return BotService(
+        SqlBotRepo(session),
+        SqlPermRepo(session),
+        _AgentReactRunner(_resolve_agent_client()),
+        _BotGuardrailAdapter(),
+        SqlOperLogRepo(session),  # R1-L2:写操作审计
+        _McpDynamicToolLister(session),  # 028
+        _UsageSinkAdapter(),  # 035:bot 用量请求内落库(独立短会话,B1-B9)
+    )
+
+
+def _resolve_agent_client() -> AgentClient:
+    """DI 覆写感知的 agent 客户端解析(非 DI 消费点唯一入口):主 app 的
+    dependency_overrides 存在覆写时走覆写(测试替身),否则直调工厂。"""
+    from kongming.chat.router import get_agent_client
+    from kongming.main import app
+
+    override = app.dependency_overrides.get(get_agent_client)
+    if override is not None:
+        return cast("AgentClient", override())
+    return get_agent_client()
+
+
 class _UsageSinkAdapter:
     """035 UsageSink 适配(llmusage 仓储;组合根装配,保 bot.service 零框架)。
 

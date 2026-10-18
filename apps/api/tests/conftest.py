@@ -6,7 +6,7 @@ env 必须在任何 kongming 导入前指向测试基础设施(get_settings/engi
 
 import asyncio
 import os
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -37,6 +37,11 @@ for _k in (
     "KM_DINGTALK_CLIENT_SECRET",
     "KM_FEISHU_APP_ID",
     "KM_FEISHU_APP_SECRET",
+    # add-doc-rerank:精排同样钉空隔离本地 .env(检索面测试不得真实出站精排);
+    # 「配置后」场景由 test_doc_rerank 显式构造 Settings 覆盖
+    "KM_RERANK_PROVIDER",
+    "KM_RERANK_API_KEY",
+    "KM_RERANK_MODEL",
 ):
     os.environ.setdefault(_k, "")
 # 三家 redirect_uri 同样钉回默认值(本地 .env 可能指向隧道域名)
@@ -243,6 +248,30 @@ async def client() -> AsyncIterator[AsyncClient]:
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
+
+
+@pytest.fixture
+def fake_agent() -> Iterator[dict[str, Any]]:
+    """025 同款 agent 替身注入(adopt-mcp-sdk2 起入站中间件经覆写感知解析,
+    /mcp 入站与 web 面共用;原 test_mcp 模块私有件提升至此供挂账回归复用)。"""
+    from kongming.chat.router import get_agent_client
+    from kongming.main import app
+
+    holder: dict[str, Any] = {}
+    app.dependency_overrides[get_agent_client] = lambda: holder["agent"]
+    yield holder
+    app.dependency_overrides.pop(get_agent_client, None)
+
+
+@pytest.fixture
+async def mcp_client() -> AsyncIterator[AsyncClient]:
+    """带 lifespan 的客户端:SDK 入站 app 依赖会话管理器运行(ASGITransport
+    不触发 lifespan),/mcp 入站测试专用(其余测试用免 lifespan 的 client)。"""
+    from kongming.main import app
+
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            yield c
 
 
 MakeUser = Callable[..., Awaitable[str]]

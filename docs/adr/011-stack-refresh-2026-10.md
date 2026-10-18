@@ -96,3 +96,12 @@ ADR-002(agent 零凭证);add-graph-checkpoint 已按 /internal 回调适配器
 - 负面:四批升级的门禁成本(每批全量 make check);eslint 10 与
   Python 3.14 两处不确定性以回退条款内建;React Compiler 对存量组件的
   告警清单需登记消化(不阻断)。
+
+## 修订(2026-10-18 apply 终态)
+
+四批全部落地,无回退条款触发:eslint 10 与 typescript-eslint 8.71 无 peer
+冲突;Python 3.14 容器镜像构建+healthz smoke 过(ctranslate2 4.8.3 cp314
+轮子在位),requires-python 维持 >=3.13 兼容声明。React Compiler 告警清单
+=零条(手写 memo 保留叠加)。实施事实与冒烟口径见 docs/HANDOFF.md
+「全栈刷新现态」;echarts-for-react 必须走 esm/ 构建(Vite8 CJS 互操作,
+lib/ 默认导入不解包)。

@@ -104,7 +104,7 @@ media-generation(owner 2026-10-18 裁决不需要,见否定裁决表)原列②�
 **2026-10-18(同日第二项)**:ruoyi-ai 对齐调研(docs/ruoyi-ai-alignment.md,
 开源万星级 Java AI 平台三路实证调研)结论=孔明治理面全面领先(凭证加密/Alembic/
 引用溯源/测试门禁/双进程边界,详见该文 §3),净缺口三项吸收:①`add-doc-rerank`
-(document-rag 检索精排层 rerank,问答智能体方向)当日立项、四工件过校验待 apply;
+(document-rag 检索精排层 rerank,问答智能体方向)当日立项,**同日已落地归档**(工件在 openspec/changes/archive/);
 ②MCP 运行时熔断(mcp-interop 域 delta,连续失败自动冷却,排序 Milvus 之后开工)。
 ③音视频生成(原列 media-generation 域扩展)随域否决一并落空(owner 同日裁决
 不需要 media-generation,登记于下方否定裁决表)。否决五项(短剧流水线/SSE 跨
@@ -115,7 +115,8 @@ registry 实查)裁决=ADR-011,立项两变更:①`adopt-mcp-sdk2`——MCP 规�
 519 行/入站 170 行)维护被规范废弃的概念,且手搓动机「零新依赖」已失效
 (mcp SDK 早是 dev 依赖),收编官方 SDK 2.x(dev→prod,<2→>=2.3,<3),
 mcp-interop 域 delta(跨修订协商+当前修订声明);②`stack-refresh-2026-10`
-(skip_specs 行为保持)——四批:后端 major(SQLAlchemy 2.1/openai 3.35/
+(skip_specs 行为保持)。**同日 apply 终态:两变更均已落地归档**(SDK 双向收编
++四批刷新,实施事实见 HANDOFF「全栈刷新现态」与「MCP 协议栈现态」)。四批:后端 major(SQLAlchemy 2.1/openai 3.35/
 anthropic 1.15)+前端 major(Vite 8 Rolldown/vitest 5/eslint 10/
 react-router 8/echarts 6/react 19.3+React Compiler 1.0 替代手写 memo
 增量)+基础设施(compose pg17→pg18 对齐开发机、Python 3.14 可选档)+

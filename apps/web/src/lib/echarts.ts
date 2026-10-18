@@ -13,8 +13,11 @@ import {
 } from "echarts/components";
 import * as echarts from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import EChartsReactCore from "echarts-for-react/lib/core";
-import type { EChartsReactProps } from "echarts-for-react/lib/types";
+// Vite 8(Rolldown)CJS 互操作统一:lib/ 构建无 __esModule 标记,默认导入
+// 不再解包 exports.default(类拿到手是命名空间对象,extends 即炸)——改用
+// 官方 ESM 构建 esm/(导出语义同 lib/,形态等价)
+import EChartsReactCore from "echarts-for-react/esm/core";
+import type { EChartsReactProps } from "echarts-for-react/esm/types";
 
 echarts.use([
   BarChart,

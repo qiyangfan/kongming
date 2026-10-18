@@ -6,12 +6,12 @@ context: |
   Tool-Calling Agent 平台。
 
   技术栈(docs/tech-stack.md 锁定,偏离须 ADR):
-  - 后端 Python 3.13 双进程:apps/api(控制面,持凭证,FastAPI + SQLAlchemy 2 async
-    + Alembic baseline 制 + PyJWT/argon2 自建认证)+ apps/agent(Agent 面,零凭证,
-    LangGraph + openai 兼容客户端)
-  - 前端 React 19 纯 SPA:apps/web(Vite + Tailwind v4 + shadcn/ui,
-    类型由 OpenAPI 生成,禁手写 API 类型)
-  - PostgreSQL 17 + pgvector / Redis 8;不引入:Keycloak、Next.js、微服务、消息队列
+  - 后端 Python 3.13(容器镜像 3.14)双进程:apps/api(控制面,持凭证,FastAPI +
+    SQLAlchemy 2.1 async + Alembic baseline 制 + PyJWT/argon2 自建认证)+
+    apps/agent(Agent 面,零凭证,LangGraph + openai 兼容客户端)
+  - 前端 React 19 纯 SPA:apps/web(Vite 8/Rolldown + React Compiler + Tailwind v4 +
+    shadcn/ui,类型由 OpenAPI 生成,禁手写 API 类型)
+  - PostgreSQL 18 + pgvector / Redis 8;不引入:Keycloak、Next.js、微服务、消息队列
 
   分层纪律:域包内 router(适配)→ service(用例)→ models(领域)→ repository(基础设施);
   domain 不 import 任何框架,import-linter 守护(pyproject 已配)。

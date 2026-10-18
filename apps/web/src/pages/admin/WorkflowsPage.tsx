@@ -174,7 +174,9 @@ export default function WorkflowsPage() {
       try {
         inputs = JSON.parse(runInputs || "{}") as Record<string, unknown>;
       } catch (e) {
-        throw new Error(`inputs JSON 解析失败: ${e instanceof Error ? e.message : e}`);
+        throw new Error(`inputs JSON 解析失败: ${e instanceof Error ? e.message : e}`, {
+          cause: e,
+        });
       }
       return runWorkflow(running.wf_key, inputs);
     },

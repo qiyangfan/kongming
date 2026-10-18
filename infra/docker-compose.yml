@@ -2,7 +2,7 @@ name: kongming
 
 services:
   postgres:
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:pg18  # stack-refresh 批④:部署形态对齐开发机(localenv 已 pg18;PG19 不追)
     environment:
       POSTGRES_DB: kongming
       POSTGRES_USER: kongming

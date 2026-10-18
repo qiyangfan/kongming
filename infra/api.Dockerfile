@@ -1,6 +1,8 @@
 # 060:build context = 仓库根(packages/liannu 路径依赖落在 context 内)
 # 构建:podman build -f infra/api.Dockerfile -t kongming-api:test .
-FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS deps
+# stack-refresh 批④:3.13→3.14(ctranslate2 cp314 轮子已确认 4.8.3;
+# 任一依赖失配整批回退 3.13,design D6)
+FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim AS deps
 WORKDIR /app
 # 路径依赖源(与 apps/api/pyproject.toml 的 ../../packages/liannu 对齐)
 COPY packages/liannu/ packages/liannu/
@@ -8,7 +10,9 @@ COPY apps/api/pyproject.toml apps/api/uv.lock apps/api/
 # --no-editable:path 依赖拷入 site-packages,运行时镜像不再需要源码树
 RUN cd apps/api && uv sync --frozen --no-dev --no-install-project --no-editable
 
-FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+# stack-refresh 批④:3.13→3.14(ctranslate2 cp314 轮子已确认 4.8.3;
+# 任一依赖失配整批回退 3.13,design D6)
+FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 WORKDIR /app
 # 只取 .venv 与显式应用目录——不整目录 COPY apps/api,避开 var/ 与宿主机 .venv
 COPY --from=deps /app/apps/api/.venv /app/apps/api/.venv

@@ -768,6 +768,7 @@ async def rag_retrieve(
     try:
         from kongming.rag.documents_repo import SqlDocumentRepo
         from kongming.rag.documents_service import retrieve_docs
+        from kongming.rag.rerank import build_doc_reranker
 
         tid2 = (
             await session.execute(
@@ -782,6 +783,8 @@ async def rag_retrieve(
                 tenant_id=str(tid2),
                 datasource_key=req.datasource_key,
                 question=req.question,
+                # add-doc-rerank:未配置=None(零存在感零回归),精排失败内部降级
+                reranker=build_doc_reranker(),
             )
     except Exception:
         log.warning("文档检索组装失败(降级空)", exc_info=True)

@@ -4,7 +4,12 @@ import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    // React Compiler 1.0(adopt stack-refresh 3.4):构建期自动 memo;违例组件
+    // 编译器跳过并告警不阻断。手写 memo 保留叠加(裁决:不删,新代码逐步免写)
+    react({ compiler: true }),
+    tailwindcss(),
+  ],
   resolve: {
     alias: {
       // ESM 无 __dirname;官方模板姿势:import.meta.url(不依赖 vite 的内部 shim)
@@ -29,7 +34,9 @@ export default defineConfig({
     target: "es2022",
     // 事前实测:react-vendor ~290kB / markdown ~149kB 合法块超 500kB 默认线属预期,阈值随分包调宽
     chunkSizeWarningLimit: 1500,
-    rollupOptions: {
+    // Vite 8(Rolldown):rollupOptions 更名 rolldownOptions(迁移指南;manualChunks
+    // 函数形态尚可用已弃用,066 分包边界由 echarts-boundary.test.ts 静态护栏钉住)
+    rolldownOptions: {
       output: {
         // 按库名精确分包(066):粗粒度「node_modules → 单一 vendor 桶」会把 zrender
         // (约 250kB,echarts 渲染引擎)从已懒加载的 echarts 动态块提到首屏,禁——

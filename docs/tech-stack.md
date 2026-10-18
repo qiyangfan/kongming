@@ -6,9 +6,9 @@
 
 | 组件 | 选型 | 锁定版本 |
 |---|---|---|
-| Python | CPython | 3.13(uv 管理) |
-| Node | LTS | 22(pnpm 管理) |
-| 数据库 | PostgreSQL + pgvector | 17 / 0.8 |
+| Python | CPython | 3.13(本地/CI;容器镜像 3.14,stack-refresh 2026-10 批④) |
+| Node | LTS | 24 实跑(>=22.12 基线;vitest5/compiler 前置) |
+| 数据库 | PostgreSQL + pgvector | 18 / 0.8(stack-refresh 2026-10 批④) |
 | 缓存 | Redis | 8 |
 
 ## apps/api — 控制面(持凭证)
@@ -16,7 +16,7 @@
 | 维度 | 选型 |
 |---|---|
 | Web | FastAPI + Pydantic v2 |
-| ORM | SQLAlchemy 2.0 async + asyncpg |
+| ORM | SQLAlchemy 2.1 async + asyncpg(stack-refresh 2026-10 批②) |
 | 迁移 | Alembic(baseline 制,见 ADR-004) |
 | 认证 | 自建:argon2-cffi + PyJWT(RS256)+ authlib(GitHub OAuth),见 ADR-003;联邦登录走连接器架构(ADR-006) |
 | SQL 治理 | sqlglot(AST 防火墙 + 方言能力储备) |
@@ -56,7 +56,7 @@
 | 维度 | 选型 |
 |---|---|
 | 框架 | React 19 + TypeScript(strict) |
-| 构建 | Vite(纯 SPA,无 SSR——ADR-001) |
+| 构建 | Vite 8(Rolldown)+ React Compiler 1.0(stack-refresh 2026-10 批③;纯 SPA,无 SSR——ADR-001) |
 | 样式 | Tailwind CSS v4 |
 | 组件 | shadcn/ui(Radix 无头 + 代码自有;Radix 统一走 `radix-ui` 聚合包导入,006 起单轨) |
 | 动画 | tw-animate-css(shadcn Tailwind v4 标准配套,sheet/dropdown 等开合动画依赖) |
