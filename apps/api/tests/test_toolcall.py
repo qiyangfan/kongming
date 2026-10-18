@@ -661,6 +661,74 @@ async def test_confirm_idempotent_replay(
     assert n == 1  # 重复确认不产生重复写
 
 
+async def test_task_resolve_confirm_approve_idempotent_receipt(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """任务通道确认兑现(add-graph-checkpoint):批准=全量复校后执行;
+    重复兑换(步骤重放)幂等不重复执行,且反查回填首次执行结果(R1-S1
+    同口径——恢复重放缺结果会诱发模型再次发起同一动作)。"""
+    uid = await _user_with_tools(
+        session, make_user, "tc_task_c", ["tool:announcement:create", "chat:execute"]
+    )
+    confirm_id, _ = await _pending_confirm(client, session, uid)
+    payload = {
+        "tenant_key": "tc",
+        "user_id": uid,
+        "confirm_id": confirm_id,
+        "decision": "approve",
+    }
+    r = await client.post("/internal/tool/resolve-confirm", headers=INTERNAL, json=payload)
+    assert r.status_code == 200
+    assert r.json()["status"] == "executed"
+    n = (await session.execute(text("SELECT count(*) FROM public.sys_announcement"))).scalar_one()
+    assert n == 1
+    r2 = await client.post("/internal/tool/resolve-confirm", headers=INTERNAL, json=payload)
+    assert r2.status_code == 200
+    body2 = r2.json()
+    assert body2["status"] == "executed"
+    # 幂等反查:首次执行的公告 id 回填,任务侧重放不致当作未办再次发起
+    assert body2["result"] and body2["result"]["announcement_id"]
+    n = (await session.execute(text("SELECT count(*) FROM public.sys_announcement"))).scalar_one()
+    assert n == 1
+
+
+async def test_task_resolve_confirm_reject_and_foreign_forbidden(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """拒绝=CONFIRM_REJECTED 零执行;他人 confirm_id=REJECTED 同形拒绝
+    (归属拒绝落审计,不触碰原挂起行)。"""
+    uid = await _user_with_tools(
+        session, make_user, "tc_task_r", ["tool:announcement:create", "chat:execute"]
+    )
+    uid_b = await _user_with_tools(session, make_user, "tc_task_rb", ["chat:execute"])
+    confirm_id, _ = await _pending_confirm(client, session, uid)
+    r = await client.post(
+        "/internal/tool/resolve-confirm",
+        headers=INTERNAL,
+        json={
+            "tenant_key": "tc",
+            "user_id": uid_b,
+            "confirm_id": confirm_id,
+            "decision": "approve",
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["status"] == "rejected"
+    assert r.json()["reason"] == "CONFIRM_FORBIDDEN"
+    n = (await session.execute(text("SELECT count(*) FROM public.sys_announcement"))).scalar_one()
+    assert n == 0
+    # 原归属人仍可正常决策(挂起行未被他人尝试触碰)
+    r2 = await client.post(
+        "/internal/tool/resolve-confirm",
+        headers=INTERNAL,
+        json={"tenant_key": "tc", "user_id": uid, "confirm_id": confirm_id, "decision": "reject"},
+    )
+    assert r2.status_code == 200
+    assert r2.json()["status"] == "rejected"
+    n = (await session.execute(text("SELECT count(*) FROM public.sys_announcement"))).scalar_one()
+    assert n == 0
+
+
 async def test_confirm_perm_revoked_rejected(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:

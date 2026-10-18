@@ -14,6 +14,7 @@ from typing import Any, cast
 
 from kongming_agent import task_prompts as tp
 from kongming_agent.apiclient import ApiClient
+from kongming_agent.graph.checkpoints import thread_id_for_task
 from kongming_agent.llm import LlmError, reset_usage_collector, set_usage_collector
 from kongming_agent.settings import Settings
 
@@ -187,10 +188,42 @@ class TaskOrchestrator:
                 else:
                     final = await self._run_step(
                         str(step.get("goal") or ""),
-                        {"tools": tools, "datasource_key": datasource_key, "user_id": user_id},
+                        {
+                            "tools": tools,
+                            "datasource_key": datasource_key,
+                            "user_id": user_id,
+                            # 图级检查点上下文(add-graph-checkpoint):线程派生
+                            # 与内部回调归属;恢复提示=已决确认随 begin_step 下发
+                            "task_id": self._task_id,
+                            "step_id": step_id,
+                            "tenant_key": self._tenant_key,
+                            "trace_id": trace_root,
+                            "resume_confirm": (decision or {}).get("resume_confirm"),
+                        },
                     )
             finally:
                 reset_usage_collector(token)
+            # 图内挂起(add-graph-checkpoint):到达确认点图已挂(检查点在控制面),
+            # 上账(建/复用确认行+任务挂起)后如实返回,终态归属控制面审批流
+            suspended = (
+                cast("dict[str, object]", final.get("suspended"))
+                if isinstance(final.get("suspended"), dict)
+                else None
+            )
+            if suspended is not None:
+                rep = await self._api.task_step_suspended(
+                    task_id=self._task_id,
+                    tenant_key=self._tenant_key,
+                    step_id=step_id,
+                    epoch=self._epoch,
+                    confirm_id=str(suspended.get("confirm_id") or ""),
+                    tool_name=str(suspended.get("tool_name") or ""),
+                    summary=str(suspended.get("summary") or ""),
+                    thread_id=thread_id_for_task(self._task_id, step_id),
+                )
+                if rep is None:
+                    return await self._finish("FAILED", "图内挂起上账被拒(链路异常)")
+                return {"final_status": "AWAITING_APPROVAL"}
             # 每步上报本次增量(控制面负责累加;上报累计值会 O(n²) 膨胀账本)
             step_tokens = sum(int(cast("int", r.get("total_tokens") or 0)) for r in collector)
             if is_collab:
@@ -224,7 +257,10 @@ class TaskOrchestrator:
                 summary=str(final.get("summary") or final.get("final_answer") or ""),
                 evidence=evidence,
                 fail_reason=fail_reason,
-                checkpoint={"summary": str(final.get("summary") or "")[:2000]},
+                checkpoint={
+                    "summary": str(final.get("summary") or "")[:2000],
+                    "resume_origin": str(final.get("resume_origin") or "fresh"),
+                },
                 tokens_used=step_tokens,
             )
             if result is None:

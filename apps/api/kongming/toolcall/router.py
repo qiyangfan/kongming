@@ -728,6 +728,32 @@ async def tool_execute(
     return _to_out(outcome)
 
 
+class ToolResolveConfirmIn(BaseModel):
+    """任务通道确认兑现载荷(add-graph-checkpoint;决策权威=任务域确认行,
+    本端点只做兑换与全量复校)。"""
+
+    tenant_key: str
+    user_id: uuid.UUID
+    confirm_id: str = Field(min_length=1, max_length=64)
+    decision: Literal["approve", "reject"]
+
+
+@internal_router.post("/resolve-confirm", response_model=ToolExecuteOut)
+async def tool_resolve_confirm(
+    req: ToolResolveConfirmIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    svc: Annotated[ToolCallService, Depends(_get_service)],
+) -> ToolExecuteOut:
+    outcome = await svc.resolve_for_task(
+        user_id=str(req.user_id),
+        tenant_key=req.tenant_key,
+        confirm_id=req.confirm_id,
+        decision=req.decision,
+    )
+    await session.commit()
+    return _to_out(outcome)
+
+
 # ── 用户面:写工具人工确认 ──
 
 

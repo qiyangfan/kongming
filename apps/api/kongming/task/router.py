@@ -67,7 +67,13 @@ class _CollabBotResolver:
 
 
 def _get_service(session: AsyncSession) -> TaskService:
-    return TaskService(SqlTaskRepo(session), bot_resolver=_CollabBotResolver(session))
+    from kongming.task.graph_repo import SqlGraphRepo
+
+    return TaskService(
+        SqlTaskRepo(session),
+        bot_resolver=_CollabBotResolver(session),
+        graph_repo=SqlGraphRepo(session),
+    )
 
 
 async def _tenant_id(session: AsyncSession, user_id: str, tenant_key: str | None) -> str:
@@ -123,6 +129,18 @@ class StepOut(BaseModel):
     collab_topology: dict[str, object] | None = None
 
 
+class GraphConfirmOut(BaseModel):
+    """图内确认行(挂起卡片数据源;add-graph-checkpoint)。"""
+
+    confirm_id: str
+    step_id: str
+    tool_name: str
+    summary: str
+    status: str
+    expires_at: str
+    created_at: str
+
+
 class TaskDetailOut(BaseModel):
     task: TaskItem
     steps: list[StepOut]
@@ -130,6 +148,7 @@ class TaskDetailOut(BaseModel):
     budget_config: dict[str, object]
     budget_used: dict[str, object]
     trace_root: str | None = None
+    graph_confirms: list[GraphConfirmOut] = Field(default_factory=list[GraphConfirmOut])
 
 
 class CollabWorkerOut(BaseModel):
@@ -380,6 +399,47 @@ async def approve_step(
     detail = await svc.get_detail(task_id=task_id, tenant_id=tid, user_id=uid)
     # 批准与拒绝都要派发:批准=该步回队重跑;拒绝=跳过该步续跑其余步骤
     # (编排挂起即停,审批决策是循环唯一的再启动口)
+    await _bump_and_schedule(task_id)
+    return TaskMutateOut(task_id=task_id, status=str(detail["task"]["status"]))
+
+
+@router.post(
+    "/{task_id}/confirms/{confirm_id}",
+    response_model=TaskMutateOut,
+    dependencies=[Depends(require_perm("task:manage"))],
+)
+async def decide_graph_confirm(
+    task_id: str,
+    confirm_id: str,
+    body: ApproveIn,
+    user: Annotated[dict[str, object], Depends(current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> TaskMutateOut:
+    """图内确认处置(归属人-only):批准=动作恢复执行;拒绝=动作跳过观察喂回。
+    处置后步骤回队并重派编排(图从挂起点精确恢复,非整步重跑)。"""
+    uid = str(user["sub"])
+    _uuid_or_404(task_id)
+    tid = await _tenant_id(session, uid, x_tenant_id)
+    svc = _get_service(session)
+    try:
+        await svc.decide_graph_confirm(
+            task_id=task_id,
+            tenant_id=tid,
+            user_id=uid,
+            confirm_id=confirm_id,
+            approve=body.approve,
+        )
+        await session.commit()
+    except TaskNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    except TaskInvalidTransition as e:
+        await session.commit()
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except TaskConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    detail = await svc.get_detail(task_id=task_id, tenant_id=tid, user_id=uid)
+    # 批准/拒绝都要派发:图从挂起点恢复是循环唯一的再启动口(同 approve_step)
     await _bump_and_schedule(task_id)
     return TaskMutateOut(task_id=task_id, status=str(detail["task"]["status"]))
 
@@ -844,6 +904,203 @@ async def collab_turn(
         raise HTTPException(status_code=409, detail=str(e)) from e
 
 
+class StepSuspendedIn(BaseModel):
+    """图内挂起上账载荷(编排回调;add-graph-checkpoint)。"""
+
+    task_id: str
+    tenant_key: str
+    step_id: str
+    epoch: int | None = None
+    confirm_id: str = Field(min_length=1, max_length=64)
+    tool_name: str = Field(min_length=1, max_length=128)
+    summary: str = ""
+    thread_id: str = Field(min_length=1, max_length=200)
+
+
+@internal_router.post("/step-suspended")
+async def task_step_suspended(
+    body: StepSuspendedIn, session: Annotated[AsyncSession, Depends(get_session)]
+) -> dict[str, object]:
+    _uuid_body_or_404(body.task_id, body.step_id)
+    tenant_id = await _tenant_key_to_id(session, body.tenant_key)
+    try:
+        out = await _get_service(session).suspend_on_graph_confirm(
+            task_id=body.task_id,
+            tenant_id=tenant_id,
+            step_id=body.step_id,
+            epoch=body.epoch,
+            confirm_id=body.confirm_id,
+            tool_name=body.tool_name,
+            summary=body.summary,
+            thread_id=body.thread_id,
+        )
+        await session.commit()
+    except TaskNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    except TaskConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    return out
+
+
+class GraphCheckpointIn(BaseModel):
+    """检查点写入载荷(blob 对控制面不透明;agent 序列化/反序列化)。"""
+
+    tenant_key: str
+    thread_id: str = Field(min_length=1, max_length=200)
+    checkpoint_ns: str = ""
+    kind: str = Field(default="checkpoint", pattern="^(checkpoint|write)$")
+    checkpoint_id: str | None = Field(default=None, max_length=64)
+    task_id: str | None = None
+    step_id: str | None = None
+    payload_type: str = Field(default="", max_length=64)
+    payload_b64: str = Field(min_length=1)
+
+
+async def _thread_task_or_404(session: AsyncSession, tenant_id: str, thread_id: str) -> str:
+    """线程→任务归属校验:thread_id 确定性派生(compile D3),任务不存在/
+    跨租户一律 404 同形(存储不可越租户读写)。"""
+    from sqlalchemy import text as _text
+
+    task_id = thread_id.split(":", 2)[1] if thread_id.startswith("task:") else ""
+    _uuid_or_404(task_id)
+    row = (
+        await session.execute(
+            _text(
+                "SELECT id FROM public.sys_agent_task"
+                " WHERE id = CAST(:i AS uuid) AND tenant_id = CAST(:t AS uuid)"
+            ),
+            {"i": task_id, "t": tenant_id},
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    return task_id
+
+
+@internal_router.put("/graph-checkpoint")
+async def graph_checkpoint_put(
+    body: GraphCheckpointIn, session: Annotated[AsyncSession, Depends(get_session)]
+) -> dict[str, object]:
+    import base64
+
+    tenant_id = await _tenant_key_to_id(session, body.tenant_key)
+    task_id = await _thread_task_or_404(session, tenant_id, body.thread_id)
+    from kongming.task.graph_repo import SqlGraphRepo
+
+    try:
+        await SqlGraphRepo(session).put_checkpoint(
+            tenant_id=tenant_id,
+            thread_id=body.thread_id,
+            checkpoint_ns=body.checkpoint_ns,
+            kind=body.kind,
+            checkpoint_id=body.checkpoint_id,
+            task_id=task_id,
+            step_id=body.step_id or "",
+            payload_type=body.payload_type,
+            payload=base64.b64decode(body.payload_b64),
+        )
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise HTTPException(status_code=503, detail="CHECKPOINT_STORE_FAILED") from None
+    return {"ok": True}
+
+
+class GraphCheckpointDeleteIn(BaseModel):
+    tenant_key: str
+    thread_id: str = Field(min_length=1, max_length=200)
+
+
+@internal_router.get("/graph-checkpoint/latest")
+async def graph_checkpoint_latest(
+    tenant_key: str,
+    thread_id: str,
+    checkpoint_ns: str = "",
+    session: Annotated[AsyncSession, Depends(get_session)] = None,  # type: ignore[assignment]
+) -> dict[str, object]:
+    import base64
+
+    tenant_id = await _tenant_key_to_id(session, tenant_key)
+    await _thread_task_or_404(session, tenant_id, thread_id)
+    from kongming.task.graph_repo import SqlGraphRepo
+
+    row = await SqlGraphRepo(session).latest_checkpoint(
+        tenant_id=tenant_id, thread_id=thread_id, checkpoint_ns=checkpoint_ns
+    )
+    await session.commit()
+    if row is None:
+        raise HTTPException(status_code=404, detail="NOT_FOUND")
+    return {
+        "checkpoint_id": row["checkpoint_id"],
+        "payload_type": str(row["payload_type"] or ""),
+        "payload_b64": base64.b64encode(bytes(row["payload"])).decode("ascii"),
+    }
+
+
+@internal_router.get("/graph-checkpoint/writes")
+async def graph_checkpoint_writes(
+    tenant_key: str,
+    thread_id: str,
+    checkpoint_ns: str = "",
+    checkpoint_id: str = "",
+    session: Annotated[AsyncSession, Depends(get_session)] = None,  # type: ignore[assignment]
+) -> dict[str, object]:
+    import base64
+
+    tenant_id = await _tenant_key_to_id(session, tenant_key)
+    await _thread_task_or_404(session, tenant_id, thread_id)
+    from kongming.task.graph_repo import SqlGraphRepo
+
+    rows = await SqlGraphRepo(session).checkpoint_writes(
+        tenant_id=tenant_id,
+        thread_id=thread_id,
+        checkpoint_ns=checkpoint_ns,
+        checkpoint_id=checkpoint_id,
+    )
+    await session.commit()
+    return {
+        "writes": [
+            {
+                "write_task_id": str(r["source_task_id"] or ""),
+                "payload_type": str(r["payload_type"] or ""),
+                "payload_b64": base64.b64encode(bytes(r["payload"])).decode("ascii"),
+            }
+            for r in rows
+        ]
+    }
+
+
+@internal_router.post("/graph-checkpoint/delete")
+async def graph_checkpoint_delete_post(
+    body: GraphCheckpointDeleteIn, session: Annotated[AsyncSession, Depends(get_session)]
+) -> dict[str, object]:
+    """线程清理(POST 形态;与 agent 回调通道对称,终态钩子/降级清理用)。"""
+    tenant_id = await _tenant_key_to_id(session, body.tenant_key)
+    await _thread_task_or_404(session, tenant_id, body.thread_id)
+    from kongming.task.graph_repo import SqlGraphRepo
+
+    deleted = await SqlGraphRepo(session).delete_thread(
+        tenant_id=tenant_id, thread_id=body.thread_id
+    )
+    await session.commit()
+    return {"deleted": deleted}
+
+
+@internal_router.delete("/graph-checkpoint")
+async def graph_checkpoint_delete(
+    tenant_key: str,
+    thread_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)] = None,  # type: ignore[assignment]
+) -> dict[str, object]:
+    tenant_id = await _tenant_key_to_id(session, tenant_key)
+    await _thread_task_or_404(session, tenant_id, thread_id)
+    from kongming.task.graph_repo import SqlGraphRepo
+
+    deleted = await SqlGraphRepo(session).delete_thread(tenant_id=tenant_id, thread_id=thread_id)
+    await session.commit()
+    return {"deleted": deleted}
+
+
 async def _tenant_key_to_id(session: AsyncSession, tenant_key: str) -> str:
     """内部回调的租户解析(agent 传 key,库内为 id;不存在 404 同形)。"""
     from sqlalchemy import text
@@ -921,6 +1178,18 @@ def _detail_out(detail: dict[str, Any]) -> TaskDetailOut:
         budget_config=cast("dict[str, object]", task_row.get("budget_config") or {}),
         budget_used=cast("dict[str, object]", task_row.get("budget_used") or {}),
         trace_root=cast("str | None", task_row.get("trace_root")),
+        graph_confirms=[
+            GraphConfirmOut(
+                confirm_id=str(c["confirm_id"]),
+                step_id=str(c["step_id"]),
+                tool_name=str(c["tool_name"]),
+                summary=str(c["summary"]),
+                status=str(c["status"]),
+                expires_at=str(c["expires_at"]),
+                created_at=str(c["created_at"]),
+            )
+            for c in cast("list[dict[str, object]]", detail.get("graph_confirms") or [])
+        ],
     )
 
 

@@ -34,6 +34,9 @@ class ReactState(TypedDict, total=False):
     compute_values: NotRequired[list[float]]  # 057:本轮计算工具返回值(入白名单)
     numeric_whitelist: NotRequired[list[float]]  # 057:本轮数值白名单(compute 入参校验)
     todos: NotRequired[list[dict[str, str]]]  # 058:多步目标账本(仅 Agent 内部)
+    # 图内确认点(add-graph-checkpoint,仅任务通道):
+    confirm_inflight: NotRequired[dict[str, object] | None]  # 在途确认(挂图期间持久于快照)
+    confirm_decision: NotRequired[dict[str, object] | None]  # interrupt 返回的处置决策
     # finalize 终态键(与 8 节点图 AgentState 同名字段同构,_build_query_out 直读)
     execution: NotRequired[ExecutionResult]
     summary: NotRequired[str]

@@ -572,6 +572,178 @@ class ApiClient:
             log.warning("collab_turn 回调异常: %s", e)
             return False
 
+    async def graph_checkpoint_put(
+        self,
+        *,
+        tenant_key: str,
+        thread_id: str,
+        checkpoint_ns: str,
+        kind: str,
+        checkpoint_id: str | None,
+        task_id: str,
+        step_id: str,
+        payload_type: str,
+        payload: bytes,
+    ) -> bool:
+        """检查点/部分写入落控制面(add-graph-checkpoint)。失败返回 False
+        (适配器降级,不抛断执行主路径);不走重试——blob 重复行无害但
+        部分写入重复会造成恢复期重复观察,单次语义最诚实。"""
+        import base64 as _b64
+
+        try:
+            resp = await self._post_once(
+                "/internal/task/graph-checkpoint",
+                {
+                    "tenant_key": tenant_key,
+                    "thread_id": thread_id,
+                    "checkpoint_ns": checkpoint_ns,
+                    "kind": kind,
+                    "checkpoint_id": checkpoint_id,
+                    "task_id": task_id,
+                    "step_id": step_id,
+                    "payload_type": payload_type,
+                    "payload_b64": _b64.b64encode(payload).decode("ascii"),
+                },
+            )
+        except httpx.HTTPError as e:
+            log.warning("检查点写入回调异常: %s", e)
+            return False
+        return resp.status_code == 200
+
+    async def graph_checkpoint_latest(
+        self, *, tenant_key: str, thread_id: str, checkpoint_ns: str
+    ) -> dict[str, object] | None:
+        """取线程最新快照;404(缺席)与其他失败同形 None(回退整步重跑)。"""
+
+        try:
+            resp = await self._get_retryable(
+                "/internal/task/graph-checkpoint/latest",
+                params={
+                    "tenant_key": tenant_key,
+                    "thread_id": thread_id,
+                    "checkpoint_ns": checkpoint_ns,
+                },
+            )
+        except httpx.HTTPError as e:
+            log.warning("检查点读取回调异常: %s", e)
+            return None
+        if resp.status_code != 200:
+            return None
+        data = _json_of(resp)
+        if data is None:
+            return None
+        return {
+            "checkpoint_id": data.get("checkpoint_id"),
+            "payload_type": data.get("payload_type"),
+            "payload_b64": data.get("payload_b64"),
+        }
+
+    async def graph_checkpoint_writes(
+        self, *, tenant_key: str, thread_id: str, checkpoint_ns: str, checkpoint_id: str
+    ) -> list[dict[str, object]] | None:
+
+        try:
+            resp = await self._get_retryable(
+                "/internal/task/graph-checkpoint/writes",
+                params={
+                    "tenant_key": tenant_key,
+                    "thread_id": thread_id,
+                    "checkpoint_ns": checkpoint_ns,
+                    "checkpoint_id": checkpoint_id,
+                },
+            )
+        except httpx.HTTPError as e:
+            log.warning("检查点写入行读取回调异常: %s", e)
+            return None
+        if resp.status_code != 200:
+            return None
+        data = _json_of(resp)
+        if data is None:
+            return None
+        out: list[dict[str, object]] = []
+        for r in cast("list[object]", data.get("writes") or []):
+            if isinstance(r, dict):
+                row = cast("dict[str, object]", r)
+                out.append(
+                    {
+                        "write_task_id": row.get("write_task_id"),
+                        "payload_type": row.get("payload_type"),
+                        "payload_b64": row.get("payload_b64"),
+                    }
+                )
+        return out
+
+    async def graph_checkpoint_delete_thread(self, *, tenant_key: str, thread_id: str) -> bool:
+        try:
+            resp = await self._post_once(
+                "/internal/task/graph-checkpoint/delete",
+                {"tenant_key": tenant_key, "thread_id": thread_id},
+            )
+        except httpx.HTTPError as e:
+            log.warning("检查点清理回调异常: %s", e)
+            return False
+        return resp.status_code == 200
+
+    async def task_step_suspended(
+        self,
+        *,
+        task_id: str,
+        tenant_key: str,
+        step_id: str,
+        epoch: int | None,
+        confirm_id: str,
+        tool_name: str,
+        summary: str,
+        thread_id: str,
+    ) -> dict[str, object] | None:
+        """图内挂起上账(编排回调):建/复用确认行+任务/步骤 AWAITING_APPROVAL。
+        409(已挂起/状态冲突)按幂等返回 reused 口径,None 仅链路失败。"""
+        try:
+            resp = await self._post(
+                "/internal/task/step-suspended",
+                {
+                    "task_id": task_id,
+                    "tenant_key": tenant_key,
+                    "step_id": step_id,
+                    "epoch": epoch,
+                    "confirm_id": confirm_id,
+                    "tool_name": tool_name,
+                    "summary": summary,
+                    "thread_id": thread_id,
+                },
+            )
+        except httpx.HTTPError as e:
+            log.warning("挂起上账回调异常: %s", e)
+            return None
+        if resp.status_code == 409:
+            return {"status": "conflict"}
+        if resp.status_code != 200:
+            return None
+        data = _json_of(resp)
+        return data if isinstance(data, dict) else None
+
+    async def tool_resolve_confirm(
+        self, *, tenant_key: str, user_id: str | None, confirm_id: str, decision: str
+    ) -> dict[str, object] | None:
+        """任务通道确认兑现:决策 → 动作执行/拒绝观察(全量复校在控制面)。"""
+        try:
+            resp = await self._post_once(
+                "/internal/tool/resolve-confirm",
+                {
+                    "tenant_key": tenant_key,
+                    "user_id": user_id,
+                    "confirm_id": confirm_id,
+                    "decision": decision,
+                },
+            )
+        except httpx.HTTPError as e:
+            log.warning("确认兑现回调异常: %s", e)
+            return None
+        if resp.status_code != 200:
+            return {"status": "error", "reason": f"控制面拒绝(HTTP {resp.status_code})"}
+        data = _json_of(resp)
+        return data if isinstance(data, dict) else None
+
     async def report_progress(
         self, *, report_id: str, phase: str, tenant_key: str = "default"
     ) -> None:

@@ -1155,6 +1155,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/tool/resolve-confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Tool Resolve Confirm */
+        post: operations["tool_resolve_confirm_internal_tool_resolve_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chat/tool-confirm": {
         parameters: {
             query?: never;
@@ -3123,6 +3140,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{task_id}/confirms/{confirm_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide Graph Confirm
+         * @description 图内确认处置(归属人-only):批准=动作恢复执行;拒绝=动作跳过观察喂回。
+         *     处置后步骤回队并重派编排(图从挂起点精确恢复,非整步重跑)。
+         */
+        post: operations["decide_graph_confirm_tasks__task_id__confirms__confirm_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{task_id}/steps/{step_id}/collab-topology": {
         parameters: {
             query?: never;
@@ -3328,6 +3366,95 @@ export interface paths {
         put?: never;
         /** Collab Turn */
         post: operations["collab_turn_internal_task_collab_turn_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/task/step-suspended": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Task Step Suspended */
+        post: operations["task_step_suspended_internal_task_step_suspended_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/task/graph-checkpoint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Graph Checkpoint Put */
+        put: operations["graph_checkpoint_put_internal_task_graph_checkpoint_put"];
+        post?: never;
+        /** Graph Checkpoint Delete */
+        delete: operations["graph_checkpoint_delete_internal_task_graph_checkpoint_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/task/graph-checkpoint/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Graph Checkpoint Latest */
+        get: operations["graph_checkpoint_latest_internal_task_graph_checkpoint_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/task/graph-checkpoint/writes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Graph Checkpoint Writes */
+        get: operations["graph_checkpoint_writes_internal_task_graph_checkpoint_writes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/task/graph-checkpoint/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Graph Checkpoint Delete Post
+         * @description 线程清理(POST 形态;与 agent 回调通道对称,终态钩子/降级清理用)。
+         */
+        post: operations["graph_checkpoint_delete_post_internal_task_graph_checkpoint_delete_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4705,6 +4832,66 @@ export interface components {
             status: string;
             /** Phase */
             phase: string;
+        };
+        /** GraphCheckpointDeleteIn */
+        GraphCheckpointDeleteIn: {
+            /** Tenant Key */
+            tenant_key: string;
+            /** Thread Id */
+            thread_id: string;
+        };
+        /**
+         * GraphCheckpointIn
+         * @description 检查点写入载荷(blob 对控制面不透明;agent 序列化/反序列化)。
+         */
+        GraphCheckpointIn: {
+            /** Tenant Key */
+            tenant_key: string;
+            /** Thread Id */
+            thread_id: string;
+            /**
+             * Checkpoint Ns
+             * @default
+             */
+            checkpoint_ns: string;
+            /**
+             * Kind
+             * @default checkpoint
+             */
+            kind: string;
+            /** Checkpoint Id */
+            checkpoint_id?: string | null;
+            /** Task Id */
+            task_id?: string | null;
+            /** Step Id */
+            step_id?: string | null;
+            /**
+             * Payload Type
+             * @default
+             */
+            payload_type: string;
+            /** Payload B64 */
+            payload_b64: string;
+        };
+        /**
+         * GraphConfirmOut
+         * @description 图内确认行(挂起卡片数据源;add-graph-checkpoint)。
+         */
+        GraphConfirmOut: {
+            /** Confirm Id */
+            confirm_id: string;
+            /** Step Id */
+            step_id: string;
+            /** Tool Name */
+            tool_name: string;
+            /** Summary */
+            summary: string;
+            /** Status */
+            status: string;
+            /** Expires At */
+            expires_at: string;
+            /** Created At */
+            created_at: string;
         };
         /** GuardrailAuditItem */
         GuardrailAuditItem: {
@@ -6653,6 +6840,31 @@ export interface components {
             /** Epoch */
             epoch?: number | null;
         };
+        /**
+         * StepSuspendedIn
+         * @description 图内挂起上账载荷(编排回调;add-graph-checkpoint)。
+         */
+        StepSuspendedIn: {
+            /** Task Id */
+            task_id: string;
+            /** Tenant Key */
+            tenant_key: string;
+            /** Step Id */
+            step_id: string;
+            /** Epoch */
+            epoch?: number | null;
+            /** Confirm Id */
+            confirm_id: string;
+            /** Tool Name */
+            tool_name: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /** Thread Id */
+            thread_id: string;
+        };
         /** StoreBotDetailOut */
         StoreBotDetailOut: {
             /** Id */
@@ -6893,6 +7105,8 @@ export interface components {
             };
             /** Trace Root */
             trace_root?: string | null;
+            /** Graph Confirms */
+            graph_confirms?: components["schemas"]["GraphConfirmOut"][];
         };
         /** TaskItem */
         TaskItem: {
@@ -7302,6 +7516,27 @@ export interface components {
         ToolListOut: {
             /** Tools */
             tools: components["schemas"]["ToolItemOut"][];
+        };
+        /**
+         * ToolResolveConfirmIn
+         * @description 任务通道确认兑现载荷(add-graph-checkpoint;决策权威=任务域确认行,
+         *     本端点只做兑换与全量复校)。
+         */
+        ToolResolveConfirmIn: {
+            /** Tenant Key */
+            tenant_key: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Confirm Id */
+            confirm_id: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approve" | "reject";
         };
         /** TrendItemOut */
         TrendItemOut: {
@@ -10357,6 +10592,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ToolExecuteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolExecuteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tool_resolve_confirm_internal_tool_resolve_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolResolveConfirmIn"];
             };
         };
         responses: {
@@ -14946,6 +15214,44 @@ export interface operations {
             };
         };
     };
+    decide_graph_confirm_tasks__task_id__confirms__confirm_id__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                task_id: string;
+                confirm_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskMutateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     set_collab_topology_tasks__task_id__steps__step_id__collab_topology_put: {
         parameters: {
             query?: never;
@@ -15340,6 +15646,216 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    task_step_suspended_internal_task_step_suspended_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StepSuspendedIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    graph_checkpoint_put_internal_task_graph_checkpoint_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GraphCheckpointIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    graph_checkpoint_delete_internal_task_graph_checkpoint_delete: {
+        parameters: {
+            query: {
+                tenant_key: string;
+                thread_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    graph_checkpoint_latest_internal_task_graph_checkpoint_latest_get: {
+        parameters: {
+            query: {
+                tenant_key: string;
+                thread_id: string;
+                checkpoint_ns?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    graph_checkpoint_writes_internal_task_graph_checkpoint_writes_get: {
+        parameters: {
+            query: {
+                tenant_key: string;
+                thread_id: string;
+                checkpoint_ns?: string;
+                checkpoint_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    graph_checkpoint_delete_post_internal_task_graph_checkpoint_delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GraphCheckpointDeleteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
             };
             /** @description Validation Error */
             422: {

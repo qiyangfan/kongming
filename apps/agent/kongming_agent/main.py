@@ -11,11 +11,12 @@ POST /query/stream(同图流式 SSE,017)+ /internal/embedding(批量向量化)+
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import cast
+from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langgraph.errors import GraphRecursionError
+from langgraph.types import Command
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, Response
 
@@ -29,6 +30,11 @@ from kongming_agent.describer import (
 )
 from kongming_agent.graph.budget import PromptBudgetExceeded
 from kongming_agent.graph.build import get_graph
+from kongming_agent.graph.checkpoints import (
+    reset_checkpoint_context,
+    set_checkpoint_context,
+    thread_id_for_task,
+)
 from kongming_agent.graph.extract_prompt import EXTRACT_MEMORY_SYSTEM
 from kongming_agent.graph.react import get_react_graph, react_recursion_limit
 from kongming_agent.graph.react.state import ReactState
@@ -276,6 +282,18 @@ async def task_run(req: TaskRunIn) -> dict[str, object]:
             tools=tools,
             channel="task",  # 090:工具执行审计归因到任务编排(区别于交互问答)
         )
+        # add-graph-checkpoint:任务步骤受限循环带线程上下文与恢复提示
+        # (快照续跑/图内挂起/决策恢复;协作步骤不落此路)
+        task_id = str(extra.get("task_id") or "")
+        step_id = str(extra.get("step_id") or "")
+        hint = extra.get("resume_confirm")
+        if task_id and step_id:
+            return await _run_react_task(
+                req_inner,
+                task_id=task_id,
+                step_id=step_id,
+                resume_confirm=hint if isinstance(hint, dict) else None,  # pyright: ignore[reportUnknownArgumentType]
+            )
         return await _run_react(req_inner)
 
     # 091 组合根:协作步骤执行器(开账 fail-closed、worker=受限 ReAct、
@@ -640,6 +658,119 @@ def _initial_react_state(req: QueryReactIn) -> ReactState:
         "model_override": req.model,  # 025
         "channel": req.channel,  # 025
     }
+
+
+def _interrupt_confirm_id(tup: object) -> str:
+    """从检查点元组提取在途确认标识(恢复提示复合校验的安全闸):挂起写入行
+    __interrupt__ 携带 interrupt 载荷。读不出/解析失败=空串——宁可重挂等待
+    该确认自身的处置,不可把旧决策套到新在途确认上(未决动作被错兑=越权)。"""
+    try:
+        pending: Any = cast("Any", getattr(tup, "pending_writes", None)) or []
+        for w in pending:
+            if str(w[1]) != "__interrupt__":
+                continue
+            value: Any = w[2]
+            # 反序列化恢复的挂起值为 Interrupt 元组(兼容裸 dict/单对象形态)
+            for it in cast("list[Any]", value if isinstance(value, (list, tuple)) else [value]):
+                payload = getattr(it, "value", it)
+                d = cast("dict[str, Any]", payload) if isinstance(payload, dict) else None
+                if d is not None:
+                    cid = str(d.get("confirm_id") or "")
+                    if cid:
+                        return cid
+    except Exception:  # noqa: BLE001 —— 判读失败按无在途处理(保守侧)
+        log.warning("在途确认判读失败,恢复提示按失配处理", exc_info=True)
+    return ""
+
+
+async def _run_react_task(
+    req: QueryReactIn,
+    *,
+    task_id: str,
+    step_id: str,
+    resume_confirm: dict[str, object] | None,
+) -> dict[str, object]:
+    """任务通道受限循环(检查点形态,add-graph-checkpoint):线程确定性派生,
+    推进点快照落控制面;已决确认经 Command(resume) 从挂起点精确恢复;
+    线程既有快照(无确认挂起)时从中断处续跑(快照缺席回退整步重跑)。
+    恢复方式随终态携带(fresh/snapshot),编排如实入步骤账,不谎称首次执行。"""
+    graph = cast("Any", get_react_graph(checkpointed=True))
+    thread_id = thread_id_for_task(task_id, step_id)
+    set_checkpoint_context(
+        tenant_key=req.tenant_key,
+        task_id=task_id,
+        step_id=step_id,
+        trace_id=req.trace_id,
+    )
+    config = {
+        "recursion_limit": react_recursion_limit(),
+        "configurable": {"thread_id": thread_id},
+    }
+    origin = "fresh"
+    try:
+        has_thread = False
+        existing: object = None
+        if graph.checkpointer is not None:
+            existing = await graph.checkpointer.aget_tuple(config)
+            has_thread = existing is not None
+        # 恢复提示复合校验(安全红线):提示 confirm_id 必须与快照在途确认一致
+        # 才兑现——线程内先后挂起过多个确认时,旧决策不得套到新在途确认上
+        # (未决动作被他人决策兑现=越权执行)。失配/无法判读一律视为无决策,
+        # 走快照续跑:confirm_gate 原地重挂,同一确认行幂等复用,等待该确认
+        # 自身的处置
+        effective_resume: dict[str, object] | None = None
+        if resume_confirm is not None:
+            inflight_id = _interrupt_confirm_id(existing) if existing is not None else ""
+            if inflight_id and str(resume_confirm.get("confirm_id") or "") == inflight_id:
+                effective_resume = {
+                    "decision": str(resume_confirm.get("decision") or ""),
+                    "confirm_id": inflight_id,
+                }
+        try:
+            if effective_resume is not None:
+                origin = "snapshot"
+                final = await graph.ainvoke(Command(resume=effective_resume), config=config)
+            elif has_thread:
+                # 快照续跑(步骤内中断恢复);若快照停在确认点且无决策/决策失配,
+                # confirm_gate 会再次挂起(同一确认行幂等复用)
+                origin = "snapshot"
+                final = await graph.ainvoke(None, config=config)
+            else:
+                final = await graph.ainvoke(_initial_react_state(req), config=config)
+        except Exception:
+            if effective_resume is not None or has_thread:
+                # 恢复路径异常(线程态漂移/无挂起点可续):如实回退整步重跑,
+                # 不向账本谎称恢复成功
+                log.warning("检查点恢复失败,回退整步重跑: thread=%s", thread_id, exc_info=True)
+                origin = "fresh"
+                final = await graph.ainvoke(_initial_react_state(req), config=config)
+            else:
+                raise
+    except GraphRecursionError:
+        return {"error": "工具调用步数超限,请缩小问题范围后重试"}
+    except LlmError:
+        return {"llm_unavailable": True}
+    finally:
+        reset_checkpoint_context()
+    final_d = cast("dict[str, object]", final)
+    interrupts = final_d.get("__interrupt__")
+    if interrupts:
+        # 图内挂起(ainvoke 返回挂起态而非抛出):提取确认载荷交编排上账
+        payload: dict[str, object] = {}
+        first = cast("Any", interrupts[0]) if isinstance(interrupts, list) else None
+        value = getattr(first, "value", None)
+        if isinstance(value, dict):
+            payload = cast("dict[str, object]", value)
+        return {
+            "suspended": {
+                "confirm_id": str(payload.get("confirm_id") or ""),
+                "tool_name": str(payload.get("tool_name") or ""),
+                "summary": str(payload.get("summary") or ""),
+            }
+        }
+    out = dict(final_d)
+    out["resume_origin"] = origin
+    return out
 
 
 async def _run_react(req: QueryReactIn) -> dict[str, object]:

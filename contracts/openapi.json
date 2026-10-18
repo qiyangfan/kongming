@@ -4192,6 +4192,47 @@
         }
       }
     },
+    "/internal/tool/resolve-confirm": {
+      "post": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Tool Resolve Confirm",
+        "operationId": "tool_resolve_confirm_internal_tool_resolve_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolResolveConfirmIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolExecuteOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/tool-confirm": {
       "post": {
         "tags": [
@@ -12331,6 +12372,84 @@
         }
       }
     },
+    "/tasks/{task_id}/confirms/{confirm_id}": {
+      "post": {
+        "tags": [
+          "task"
+        ],
+        "summary": "Decide Graph Confirm",
+        "description": "图内确认处置(归属人-only):批准=动作恢复执行;拒绝=动作跳过观察喂回。\n处置后步骤回队并重派编排(图从挂起点精确恢复,非整步重跑)。",
+        "operationId": "decide_graph_confirm_tasks__task_id__confirms__confirm_id__post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "confirm_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Confirm Id"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskMutateOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/tasks/{task_id}/steps/{step_id}/collab-topology": {
       "put": {
         "tags": [
@@ -12860,6 +12979,323 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/task/step-suspended": {
+      "post": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Task Step Suspended",
+        "operationId": "task_step_suspended_internal_task_step_suspended_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StepSuspendedIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Task Step Suspended Internal Task Step Suspended Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/task/graph-checkpoint": {
+      "put": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Graph Checkpoint Put",
+        "operationId": "graph_checkpoint_put_internal_task_graph_checkpoint_put",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GraphCheckpointIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Graph Checkpoint Put Internal Task Graph Checkpoint Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Graph Checkpoint Delete",
+        "operationId": "graph_checkpoint_delete_internal_task_graph_checkpoint_delete",
+        "parameters": [
+          {
+            "name": "tenant_key",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tenant Key"
+            }
+          },
+          {
+            "name": "thread_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Graph Checkpoint Delete Internal Task Graph Checkpoint Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/task/graph-checkpoint/latest": {
+      "get": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Graph Checkpoint Latest",
+        "operationId": "graph_checkpoint_latest_internal_task_graph_checkpoint_latest_get",
+        "parameters": [
+          {
+            "name": "tenant_key",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tenant Key"
+            }
+          },
+          {
+            "name": "thread_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          },
+          {
+            "name": "checkpoint_ns",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Checkpoint Ns"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Graph Checkpoint Latest Internal Task Graph Checkpoint Latest Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/task/graph-checkpoint/writes": {
+      "get": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Graph Checkpoint Writes",
+        "operationId": "graph_checkpoint_writes_internal_task_graph_checkpoint_writes_get",
+        "parameters": [
+          {
+            "name": "tenant_key",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tenant Key"
+            }
+          },
+          {
+            "name": "thread_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          },
+          {
+            "name": "checkpoint_ns",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Checkpoint Ns"
+            }
+          },
+          {
+            "name": "checkpoint_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Checkpoint Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Graph Checkpoint Writes Internal Task Graph Checkpoint Writes Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/task/graph-checkpoint/delete": {
+      "post": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Graph Checkpoint Delete Post",
+        "description": "线程清理(POST 形态;与 agent 回调通道对称,终态钩子/降级清理用)。",
+        "operationId": "graph_checkpoint_delete_post_internal_task_graph_checkpoint_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GraphCheckpointDeleteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Graph Checkpoint Delete Post Internal Task Graph Checkpoint Delete Post"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -16704,6 +17140,148 @@
           "phase"
         ],
         "title": "GenerateOut"
+      },
+      "GraphCheckpointDeleteIn": {
+        "properties": {
+          "tenant_key": {
+            "type": "string",
+            "title": "Tenant Key"
+          },
+          "thread_id": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Thread Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tenant_key",
+          "thread_id"
+        ],
+        "title": "GraphCheckpointDeleteIn"
+      },
+      "GraphCheckpointIn": {
+        "properties": {
+          "tenant_key": {
+            "type": "string",
+            "title": "Tenant Key"
+          },
+          "thread_id": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Thread Id"
+          },
+          "checkpoint_ns": {
+            "type": "string",
+            "title": "Checkpoint Ns",
+            "default": ""
+          },
+          "kind": {
+            "type": "string",
+            "pattern": "^(checkpoint|write)$",
+            "title": "Kind",
+            "default": "checkpoint"
+          },
+          "checkpoint_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Id"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "step_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Id"
+          },
+          "payload_type": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Payload Type",
+            "default": ""
+          },
+          "payload_b64": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Payload B64"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tenant_key",
+          "thread_id",
+          "payload_b64"
+        ],
+        "title": "GraphCheckpointIn",
+        "description": "检查点写入载荷(blob 对控制面不透明;agent 序列化/反序列化)。"
+      },
+      "GraphConfirmOut": {
+        "properties": {
+          "confirm_id": {
+            "type": "string",
+            "title": "Confirm Id"
+          },
+          "step_id": {
+            "type": "string",
+            "title": "Step Id"
+          },
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "expires_at": {
+            "type": "string",
+            "title": "Expires At"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "confirm_id",
+          "step_id",
+          "tool_name",
+          "summary",
+          "status",
+          "expires_at",
+          "created_at"
+        ],
+        "title": "GraphConfirmOut",
+        "description": "图内确认行(挂起卡片数据源;add-graph-checkpoint)。"
       },
       "GuardrailAuditItem": {
         "properties": {
@@ -21746,6 +22324,67 @@
         ],
         "title": "StepStartIn"
       },
+      "StepSuspendedIn": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "tenant_key": {
+            "type": "string",
+            "title": "Tenant Key"
+          },
+          "step_id": {
+            "type": "string",
+            "title": "Step Id"
+          },
+          "epoch": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epoch"
+          },
+          "confirm_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Confirm Id"
+          },
+          "tool_name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Tool Name"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "default": ""
+          },
+          "thread_id": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Thread Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "tenant_key",
+          "step_id",
+          "confirm_id",
+          "tool_name",
+          "thread_id"
+        ],
+        "title": "StepSuspendedIn",
+        "description": "图内挂起上账载荷(编排回调;add-graph-checkpoint)。"
+      },
       "StoreBotDetailOut": {
         "properties": {
           "id": {
@@ -22172,6 +22811,13 @@
               }
             ],
             "title": "Trace Root"
+          },
+          "graph_confirms": {
+            "items": {
+              "$ref": "#/components/schemas/GraphConfirmOut"
+            },
+            "type": "array",
+            "title": "Graph Confirms"
           }
         },
         "type": "object",
@@ -23267,6 +23913,42 @@
           "tools"
         ],
         "title": "ToolListOut"
+      },
+      "ToolResolveConfirmIn": {
+        "properties": {
+          "tenant_key": {
+            "type": "string",
+            "title": "Tenant Key"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id"
+          },
+          "confirm_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Confirm Id"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "title": "Decision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tenant_key",
+          "user_id",
+          "confirm_id",
+          "decision"
+        ],
+        "title": "ToolResolveConfirmIn",
+        "description": "任务通道确认兑现载荷(add-graph-checkpoint;决策权威=任务域确认行,\n本端点只做兑换与全量复校)。"
       },
       "TrendItemOut": {
         "properties": {

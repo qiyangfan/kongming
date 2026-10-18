@@ -68,6 +68,17 @@ export function approveStep(id: string, stepId: string, approve: boolean): Promi
   return api.post<TaskMutateOut>(`/tasks/${id}/steps/${stepId}/approve`, { approve });
 }
 
+export type GraphConfirmOut = components["schemas"]["GraphConfirmOut"];
+
+/** 图内确认处置(add-graph-checkpoint):批准=动作恢复执行,拒绝=动作跳过。 */
+export function decideGraphConfirm(
+  id: string,
+  confirmId: string,
+  approve: boolean,
+): Promise<TaskMutateOut> {
+  return api.post<TaskMutateOut>(`/tasks/${id}/confirms/${confirmId}`, { approve });
+}
+
 /* 状态呈现单源(StatusBadge 消费;字面量 variant 与 Badge 联合类型结构兼容) */
 export const TASK_STATUS_META: Record<
   string,

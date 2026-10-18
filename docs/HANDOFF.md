@@ -7,7 +7,32 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
-## 当前状态(2026-10-15)
+## 当前状态(2026-10-18)
+
+- **图级检查点与图内挂起现态(add-graph-checkpoint,已落地归档,工件在
+  `openspec/changes/archive/2026-10-18-add-graph-checkpoint/`;行为契约已同步
+  `openspec/specs/graph-checkpoint/spec.md`)**:任务步骤受限循环获得超步粒度
+  恢复与图内 HITL 第三形态。要点:检查点 blob 对控制面不透明(agent
+  `graph/checkpoints.py` InternalCheckpointSaver 经 `/internal/task/graph-checkpoint*`
+  回调读写;控制面与图框架解耦,换运行时只换适配器);线程确定性派生
+  `task:{task_id}:step:{step_id}`(api 不感知图语义,恢复由 agent 自查快照);
+  图内挂起=react 图 `confirm_gate`(interrupt)节点,任务通道 confirm_required
+  时挂图,批准/拒绝经任务端点 `POST /tasks/{id}/confirms/{confirm_id}` →
+  重派 → begin_step 携 resume_confirm → `Command(resume)` 从挂起点精确恢复,
+  动作兑现走 `/internal/tool/resolve-confirm`(与 chat confirm() 镜像复校序,
+  刻意不复用不复写——安全面两侧复校序变更须同改);恢复方式(fresh/snapshot)
+  落步骤 checkpoint.resume_origin 如实呈现;任务终态钩子清理全部快照。
+  **安全闸(评审循环补齐,勿拆)**:`_run_react_task` 的恢复提示复合校验——
+  提示 confirm_id 必须与快照在途确认一致才 `Command(resume)`,失配/判读失败
+  一律按无决策处理走快照续跑原地重挂(同确认行幂等复用);同一线程先后挂起
+  多个确认时,旧决策不得套到新在途确认上。resolve-confirm 幂等路径反查回填
+  首次执行结果(与 confirm() R1-S1 同口径),缺结果会诱发模型重复发起同一动作。
+  协作编排(圆桌/分工)暂未接入检查点(后续独立立项,非外部触发条件);
+  交互问数通道行为逐字不变。冒烟:api tests/test_task_graph_checkpoint.py +
+  agent tests/test_graph_checkpoint.py + tests/test_task_gen_graph_suspend.py。
+  本地环境注记:localenv redis 带密码(`redis://:redis123@…`,见
+  ~/workspace/localenv/.env),api/tests/conftest.py 与 apps 双 .env 已对齐;
+  podman machine 需先 start 再起 localenv-postgres/redis。
 
 - **collab-worker-roster 分工名册现态(已落地归档,工件在
   `openspec/changes/archive/2026-10-15-collab-worker-roster/`;delta 已同步

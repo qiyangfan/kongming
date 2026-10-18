@@ -18,7 +18,9 @@ os.environ.setdefault(
     "KM_DATABASE_URL",
     "postgresql+asyncpg://kongming:kongming@localhost:5432/kongming_test",
 )
-os.environ.setdefault("KM_REDIS_URL", "redis://localhost:6379/15")
+# localenv 单源 redis 带密码(~/workspace/localenv/.env,2026-10-11 裁决);
+# 无密码 URL 会在 AUTH 握手处 AuthenticationError
+os.environ.setdefault("KM_REDIS_URL", "redis://:redis123@localhost:6379/15")
 os.environ.setdefault("KM_INTERNAL_TOKEN", "test-internal-token")
 # 联邦两家默认已配置;「过滤未配置」场景由各测试用 monkeypatch 摘除
 os.environ.setdefault("KM_GITHUB_CLIENT_ID", "test-gh-id")

@@ -44,6 +44,7 @@
 | `KM_TASK_BUDGET_MAX_TOKENS` | api | 200000 | 任务 token 预算上限 |
 | `KM_TASK_BUDGET_MAX_SECONDS` | api | 900 | 任务墙钟预算上限 |
 | `KM_COLLAB_MAX_WORKERS` | api | 3 | 协作拓扑 worker 数钳制上限 |
+| `KM_GRAPH_CONFIRM_TTL_MINUTES` | api | 30 | 图内确认过期分钟数(挂图审批超时=动作跳过,与任务审批门过期同语义) |
 | `KM_AGENT_COLLAB_MAX_WORKERS` | agent | 3 | 编排派发上限(最后防线) |
 | `KM_AGENT_COLLAB_MAX_DEPTH` | agent | 1 | 嵌套深度上限(1=不嵌套,提额须显式配置) |
 | `KM_AGENT_COLLAB_MAX_REVISION_ROUNDS` | agent | 1 | critic 修订轮次上限(轮次尽如实附保留意见) |

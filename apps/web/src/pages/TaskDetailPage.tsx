@@ -21,8 +21,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { COLLAB_STATUS_META, getTask, listCollabRuns, TASK_STATUS_META } from "@/lib/task-api";
-import type { CollabRunOut, CollabTurnOut, CollabWorkerOut } from "@/lib/task-api";
+import {
+  COLLAB_STATUS_META,
+  decideGraphConfirm,
+  getTask,
+  listCollabRuns,
+  TASK_STATUS_META,
+} from "@/lib/task-api";
+import type { CollabRunOut, CollabTurnOut, CollabWorkerOut, GraphConfirmOut } from "@/lib/task-api";
 import { useTenant } from "@/lib/tenant-store";
 
 // 轮询节奏(活动期;终态即停,间隔常量化避免散落字面量)
@@ -103,6 +109,18 @@ export default function TaskDetailPage() {
       invalidate();
     },
     onError: (e) => setActionError(e instanceof Error ? e.message : "审批未成"),
+  });
+
+  // 图内确认处置(add-graph-checkpoint):批准=动作恢复执行,拒绝=动作跳过;
+  // 恢复是编排循环唯一的再启动口,处置后控制面自动重派
+  const confirm = useMutation({
+    mutationFn: async (input: { confirmId: string; approve: boolean }) =>
+      decideGraphConfirm(taskId, input.confirmId, input.approve),
+    onSuccess: () => {
+      setActionError(null);
+      invalidate();
+    },
+    onError: (e) => setActionError(e instanceof Error ? e.message : "确认处置未成"),
   });
 
   if (detail.isLoading) {
@@ -202,9 +220,22 @@ export default function TaskDetailPage() {
               </div>
             )}
             {s.fail_reason && <p className="text-xs text-muted-foreground">{s.fail_reason}</p>}
+            {(d.graph_confirms ?? [])
+              .filter((c) => c.step_id === s.id)
+              .map((c) => (
+                <GraphConfirmCard
+                  key={c.confirm_id}
+                  confirm={c}
+                  disabled={confirm.isPending}
+                  onDecide={(ok) => confirm.mutate({ confirmId: c.confirm_id, approve: ok })}
+                />
+              ))}
             {s.checkpoint &&
               typeof s.checkpoint.summary === "string" &&
               s.checkpoint.summary !== "" && <MarkdownText text={s.checkpoint.summary} />}
+            {s.checkpoint && s.checkpoint.resume_origin === "snapshot" && (
+              <p className="text-xs text-muted-foreground">恢复方式:快照续跑(非首次执行)。</p>
+            )}
           </div>
         ))}
       </section>
@@ -459,6 +490,48 @@ function buildTurnColumns(): DataViewColumn<CollabTurnOut>[] {
       render: (t) => <span className="font-mono text-xs">{t.trace_id || "—"}</span>,
     },
   ];
+}
+
+/** 图内确认卡(add-graph-checkpoint):任务循环内高危动作挂图审批;
+ * 处置纪律与任务审批门同源(归属人-only/过期/幂等),呈现沿用确认卡形态。 */
+function GraphConfirmCard({
+  confirm,
+  disabled,
+  onDecide,
+}: {
+  confirm: GraphConfirmOut;
+  disabled?: boolean;
+  onDecide: (approve: boolean) => void;
+}) {
+  if (confirm.status !== "pending") {
+    const label =
+      confirm.status === "approved" ? "已批准" : confirm.status === "denied" ? "已拒绝" : "已过期";
+    return (
+      <p className="text-xs text-muted-foreground">
+        图内确认({confirm.tool_name}):{label}。
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-1 rounded-md border border-warning/40 bg-warning/10 p-2">
+      <p className="text-xs text-foreground">
+        待人工确认的动作:
+        <span className="font-medium">{confirm.tool_name}</span>
+        {confirm.summary ? ` — ${confirm.summary}` : ""}
+      </p>
+      <div className="flex gap-2">
+        <OperationButton label="批准执行" onClick={() => onDecide(true)} disabled={disabled} />
+        <ConfirmOperationButton
+          label="拒绝"
+          title="拒绝这个动作?"
+          description="该动作将不执行(作为拒绝观察喂回执行循环),任务按编排如实收口并说明未完成原因。"
+          confirmLabel="拒绝动作"
+          onClick={() => onDecide(false)}
+          disabled={disabled}
+        />
+      </div>
+    </div>
+  );
 }
 
 function OperationButton(props: { label: string; onClick: () => void; disabled?: boolean }) {

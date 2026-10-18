@@ -174,6 +174,66 @@ class CollabBotResolver(Protocol):
     async def resolve(self, *, tenant_id: str, bot_key: str) -> dict[str, object] | None: ...
 
 
+class GraphConfirmRepo(Protocol):
+    """图内确认与检查点存取端口(add-graph-checkpoint;组合根注入)。
+    检查点 blob 对用例层不透明(存取转发);确认行是任务域伴生账本。"""
+
+    async def put_checkpoint(
+        self,
+        *,
+        tenant_id: str,
+        thread_id: str,
+        checkpoint_ns: str,
+        kind: str,
+        checkpoint_id: str | None,
+        task_id: str,
+        step_id: str,
+        payload_type: str,
+        payload: bytes,
+    ) -> str: ...
+
+    async def latest_checkpoint(
+        self, *, tenant_id: str, thread_id: str, checkpoint_ns: str
+    ) -> dict[str, Any] | None: ...
+
+    async def checkpoint_writes(
+        self, *, tenant_id: str, thread_id: str, checkpoint_ns: str, checkpoint_id: str
+    ) -> list[dict[str, Any]]: ...
+
+    async def delete_thread(self, *, tenant_id: str, thread_id: str) -> int: ...
+
+    async def insert_graph_confirm(
+        self,
+        *,
+        tenant_id: str,
+        task_id: str,
+        step_id: str,
+        confirm_id: str,
+        tool_name: str,
+        summary: str,
+        thread_id: str,
+        ttl_minutes: int,
+    ) -> None: ...
+
+    async def get_graph_confirm(
+        self, *, tenant_id: str, confirm_id: str
+    ) -> dict[str, Any] | None: ...
+
+    async def latest_decided_confirm_for_step(
+        self, *, task_id: str, step_id: str
+    ) -> dict[str, Any] | None: ...
+
+    async def decide_graph_confirm(
+        self, *, tenant_id: str, confirm_id: str, to_status: str, decided_by: str
+    ) -> dict[str, Any] | None: ...
+
+    async def expire_stale_graph_confirms(self) -> list[dict[str, Any]]: ...
+
+    async def pending_confirms_for_task(self, *, task_id: str) -> list[dict[str, Any]]: ...
+
+    async def task_event(self, *, task_id: str, event: dict[str, object]) -> None: ...
+
+
 class TaskRunGateway(Protocol):
     """编排回调网关(agent 面 /internal/task-run);不可达返回 None。"""
 

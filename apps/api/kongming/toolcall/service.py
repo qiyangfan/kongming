@@ -17,6 +17,7 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import jsonschema
 import sqlglot
@@ -28,10 +29,12 @@ from kongming.toolcall.models import (
     ConfirmNotFound,
     ConnectorError,
     KnowledgeSourceError,
+    TenantNotFound,
     TicketError,
     ToolAuditEntry,
     ToolDef,
     ToolOutcome,
+    ToolStatus,
     WebSearchError,
     args_digest,
     derive_idempotency_key,
@@ -717,6 +720,108 @@ class ToolCallService:
         )
         await self._repo.commit()
         return ConfirmOutcome(status="executed", result=result)
+
+    async def resolve_for_task(
+        self, *, user_id: str, tenant_key: str, confirm_id: str, decision: str
+    ) -> ToolOutcome:
+        """任务通道确认兑现(add-graph-checkpoint):图从挂起点恢复后,编排经
+        内部回调把任务域确认决策兑换为「动作执行/拒绝」观察。
+
+        与 confirm() 镜像同一复校顺序(L1 解析+归属→L2 权限→L4 参数→域配额→
+        幂等键 dispatch),**刻意不复用不复写 chat 路径**(安全敏感面,零回归
+        优先;两侧复校序变更须同改);任务通道无会话,零回复副作用;
+        事务归内部端点提交(与 task 内部回调同口径)。"""
+        started = time.monotonic()
+        # L1:租户解析(与 execute_tool 同口径;解析失败按不存在处理,不落审计)
+        try:
+            tenant_id = await self._repo.resolve_tenant(tenant_key)
+        except TenantNotFound:
+            return ToolOutcome(status="ERROR", reason="TENANT_NOT_FOUND")
+        row = await self._repo.get_for_update(confirm_id)
+        if row is None:
+            return ToolOutcome(status="ERROR", reason="CONFIRM_NOT_FOUND")
+        if row.user_id != user_id or row.tenant_id != tenant_id:
+            # 归属拒绝落审计(尝试者记 REJECTED,不触碰原挂起行,防存在性泄漏)
+            await self._writer.record(
+                ToolAuditEntry(
+                    trace_id=f"task-confirm-{confirm_id[:24]}",
+                    user_id=user_id,
+                    tenant_id=row.tenant_id,
+                    tool_name=row.tool_name,
+                    status="REJECTED",
+                    error_reason="CONFIRM_FORBIDDEN",
+                )
+            )
+            return ToolOutcome(status="REJECTED", reason="CONFIRM_FORBIDDEN")
+        if row.status != "PENDING_CONFIRM":
+            # 已推进:幂等返回首次决策结果(不重复执行);EXECUTED 反查首次
+            # 执行结果回填(与 confirm() R1-S1 同口径)——恢复重放缺结果会
+            # 诱发模型把同一动作当未办再次发起(新确认行=绕过幂等的二次执行)
+            result: dict[str, object] | None = None
+            if row.status == "EXECUTED" and row.idempotency_key:
+                ann_id = await self._repo.find_announcement(
+                    tenant_id=row.tenant_id, idempotency_key=row.idempotency_key
+                )
+                if ann_id is not None:
+                    result = {"announcement_id": ann_id, "created": False}
+            return ToolOutcome(
+                status=cast("ToolStatus", _status_to_confirm_out(row.status).upper()),
+                reason="已处理(幂等)",
+                result=result,
+            )
+        if row.expires_at is not None and row.expires_at < datetime.now(UTC):
+            await self._repo.mark_status(row.id, "CONFIRM_EXPIRED", clear_reason=True)
+            return ToolOutcome(status="ERROR", reason="CONFIRM_EXPIRED: 确认已过期")
+
+        if decision != "approve":
+            await self._repo.mark_status(row.id, "CONFIRM_REJECTED", clear_reason=True)
+            return ToolOutcome(status="REJECTED", reason="用户拒绝该动作,已跳过")
+
+        # 确认复校(与 confirm() 同序:绑定/权限/参数;限流不适用人工动作)
+        await self._repo.assert_bound(user_id=user_id, tenant_id=row.tenant_id)
+        tool, _connector_hit = await self._resolve_tool(tenant_id=row.tenant_id, name=row.tool_name)
+        perms = await self._perms.list_codes(user_id)
+        if tool is None or tool.perm_code not in perms:
+            await self._repo.mark_status(row.id, "REJECTED", clear_reason=True)
+            return ToolOutcome(status="REJECTED", reason="TOOL_PERMISSION_DENIED: 权限已变更")
+        arg_err = validate_args(tool, row.args)
+        if arg_err is not None:
+            await self._repo.mark_status(row.id, "REJECTED", clear_reason=True)
+            return ToolOutcome(status="REJECTED", reason=arg_err)
+
+        confirm_domain = CONNECTOR_DOMAIN if _connector_hit else DOMAIN_TOOLS.get(row.tool_name)
+        confirm_quota = self._domain_quotas.get(confirm_domain or "")
+        if confirm_quota and not await self._limiter.allow(
+            f"toolgw:{row.tenant_id}:{user_id}:{confirm_domain}",
+            limit=confirm_quota,
+            window_sec=60,
+        ):
+            # 超限不落终态:确认保留,窗口重置后可再恢复(幂等收口按 PENDING 复核)
+            return ToolOutcome(status="ERROR", reason="RATE_LIMITED: 域配额超限,请稍后重试")
+
+        try:
+            result = await self._dispatch(
+                tool,
+                row.args,
+                trace_id=f"task-confirm-{row.id[:24]}",
+                tenant_key="",
+                tenant_id=row.tenant_id,
+                user_id=user_id,
+                datasource_key="default",
+                idem=row.idempotency_key,
+            )
+        except Exception as e:
+            log.warning("任务确认执行异常 confirm=%s: %s", confirm_id, e)
+            await self._repo.mark_status(row.id, "ERROR", clear_reason=True)
+            return ToolOutcome(status="ERROR", reason=str(e)[:200])
+        await self._repo.mark_status(
+            row.id, "EXECUTED", clear_reason=True, args_digest=args_digest(row.args)
+        )
+        return ToolOutcome(
+            status="EXECUTED",
+            result=result,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
 
     # ── 管理面 ──
     # 审计分页查询的行级可见性在 router 端点收口(非 ALL 强制本人,覆盖传值),

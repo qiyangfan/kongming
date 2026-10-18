@@ -112,6 +112,8 @@ class Settings(BaseSettings):
     task_budget_max_steps: int = Field(default=12, ge=1)
     task_budget_max_tokens: int = Field(default=200_000, gt=0)
     task_budget_max_seconds: int = Field(default=900, gt=0)
+    # 图内确认过期 TTL(add-graph-checkpoint;与任务审批门过期同语义,分钟制)
+    graph_confirm_ttl_minutes: int = Field(default=30, ge=1)
     # 上界与内部回调形参硬限单点对齐(collab-turn worker_no/round_no le=64、
     # 拓扑 max_rounds le=16):部署放大天花板超形参限会被静默吞掉,此处收口
     collab_max_workers: int = Field(default=3, ge=1, le=64)

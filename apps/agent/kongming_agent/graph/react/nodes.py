@@ -14,6 +14,8 @@ import json
 import logging
 from typing import cast
 
+from langgraph.types import interrupt
+
 from kongming_agent import deps, numeric
 from kongming_agent import todos as todo_mod
 from kongming_agent.apiclient import ToolExecuteOutcome
@@ -168,6 +170,26 @@ async def tool_dispatch(state: ReactState) -> dict[str, object]:
                 args=call.args,
                 channel=state.get("channel", "chat"),  # 025
             )
+            if outcome.status == "confirm_required" and state.get("channel") == "task":
+                # add-graph-checkpoint:任务通道高危动作挂图(HITL 第三形态)——
+                # 在途确认入状态,经 confirm_gate(interrupt)挂图上呈审批;
+                # 不喂观察不记账本(动作未执行),兑现观察由 tool_resolve 按决策回填
+                out["confirm_inflight"] = {
+                    "confirm_id": outcome.confirm_id or "",
+                    "tool_name": call.name,
+                    "call_id": call.call_id,
+                    "summary": f"调用工具 {call.name}",
+                }
+                emit_event(
+                    "tool_call",
+                    {
+                        "tool_name": call.name,
+                        "status": "confirm_required",
+                        "args_digest": _digest(call),
+                        "result_digest": "待人工确认,图挂起",
+                    },
+                )
+                break
             obs = _observe(outcome)
             # confirm_required 按 done 下发(spec:result_digest 含「待确认」),
             # rejected 仅防御层拒绝/执行错误语义
@@ -217,6 +239,65 @@ async def tool_dispatch(state: ReactState) -> dict[str, object]:
     out["compute_values"] = compute_values
     out["todos"] = todo_mod.todos_as_dicts(todo_items)
     return out
+
+
+# ── 图内确认点(任务通道;add-graph-checkpoint,HITL 第三形态)──
+def confirm_gate(state: ReactState) -> dict[str, object]:
+    """到达确认点即挂图:interrupt 抛出 → 检查点已落控制面,编排上报挂起。
+    重入(批准/拒绝后 Command(resume) 恢复)时本节点从头重放——前置**零
+    副作用**(只读在途确认),interrupt() 直接返回决策值,不重发工具调用。"""
+    inflight = state.get("confirm_inflight") or {}
+    if not inflight:
+        return {}  # 不可达(路由闸保证);防御空转
+    decision = interrupt(
+        {
+            "kind": "tool_confirm",
+            "confirm_id": str(inflight.get("confirm_id") or ""),
+            "tool_name": str(inflight.get("tool_name") or ""),
+            "summary": str(inflight.get("summary") or ""),
+        }
+    )
+    return {"confirm_decision": decision if isinstance(decision, dict) else {"raw": decision}}
+
+
+async def tool_resolve(state: ReactState) -> dict[str, object]:
+    """确认兑现:任务域决策 → 内部 resolve-confirm 回调(批准=全量复校后执行,
+    拒绝/过期=如实拒绝观察);观察以原 tool_call_id 喂回 LLM(恢复循环),
+    在途确认清账。控制面不可达=兑现失败如实入观察(不虚报已执行)。"""
+    inflight = state.get("confirm_inflight") or {}
+    decision = state.get("confirm_decision") or {}
+    outcome = await deps.get_api().tool_resolve_confirm(
+        tenant_key=str(state.get("tenant_key") or ""),
+        user_id=state.get("user_id"),
+        confirm_id=str(inflight.get("confirm_id") or ""),
+        decision="approve" if decision.get("decision") == "approved" else "reject",
+    )
+    if outcome is None:
+        obs: dict[str, object] = {"status": "error", "reason": "控制面不可达: 确认兑现失败"}
+    else:
+        status = str(outcome.get("status") or "error")
+        if status == "executed":
+            result = outcome.get("result")
+            obs = {
+                "status": "executed",
+                "result": result if isinstance(result, dict) else {},
+            }
+        else:
+            obs = {
+                "status": status,
+                "reason": str(outcome.get("reason") or "确认未兑现"),
+            }
+    return {
+        "messages": [
+            {
+                "role": "tool",
+                "tool_call_id": str(inflight.get("call_id") or ""),
+                "content": json.dumps(obs, ensure_ascii=False)[:_OBSERVE_TEXT_MAX],
+            }
+        ],
+        "confirm_inflight": None,
+        "confirm_decision": None,
+    }
 
 
 def _numeric_cells(execution: object) -> list[float]:

@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from kongming.task import models as m
-from kongming.task.ports import CollabBotResolver, TaskRepo
+from kongming.task.ports import CollabBotResolver, GraphConfirmRepo, TaskRepo
 from kongming.uuid7 import uuid7  # 纯函数单源直取(领域层不经基础设施 kongming.db)
 
 log = logging.getLogger(__name__)
@@ -40,9 +40,18 @@ def _now() -> str:
 
 
 class TaskService:
-    def __init__(self, repo: TaskRepo, *, bot_resolver: CollabBotResolver | None = None) -> None:
+    def __init__(
+        self,
+        repo: TaskRepo,
+        *,
+        bot_resolver: CollabBotResolver | None = None,
+        graph_repo: GraphConfirmRepo | None = None,
+    ) -> None:
         self._repo = repo
         self._bot_resolver = bot_resolver
+        # 图级检查点/图内确认账本(add-graph-checkpoint);缺席=能力不可用
+        # (纯函数单测场景),既有用例零回归
+        self._graph = graph_repo
 
     async def create(
         self,
@@ -75,7 +84,22 @@ class TaskService:
     async def get_detail(self, *, task_id: str, tenant_id: str, user_id: str) -> dict[str, Any]:
         task = await self._require(task_id=task_id, tenant_id=tenant_id, user_id=user_id)
         steps = await self._repo.get_steps(task_id=task_id)
-        return {"task": task, "steps": steps}
+        out: dict[str, Any] = {"task": task, "steps": steps, "graph_confirms": []}
+        if self._graph is not None:
+            # 图内确认行(挂起卡片数据源);uuid 归一为 str(异步驱动返回对象)
+            out["graph_confirms"] = [
+                {
+                    "confirm_id": str(r["confirm_id"]),
+                    "step_id": str(r["step_id"]),
+                    "tool_name": str(r["tool_name"] or ""),
+                    "summary": str(r["summary"] or ""),
+                    "status": str(r["status"]),
+                    "expires_at": str(r["expires_at"] or ""),
+                    "created_at": str(r["created_at"] or ""),
+                }
+                for r in await self._graph.pending_confirms_for_task(task_id=task_id)
+            ]
+        return out
 
     async def list_tasks(
         self, *, tenant_id: str, user_id: str, page: int, size: int, status: str | None = None
@@ -139,6 +163,7 @@ class TaskService:
         # 迟到的步骤回写此后被步骤 CAS 诚实拒绝);在途协作账一并收敛
         closed = await self._repo.cancel_open_steps(task_id=task_id)
         collab_cancelled = await self._repo.cancel_open_collab(task_id=task_id)
+        await self._purge_graph_threads(task_id=task_id, tenant_id=tenant_id)
         if closed or collab_cancelled:
             await self._repo.append_task_event(
                 task_id=task_id,
@@ -182,6 +207,145 @@ class TaskService:
             to=m.T_RUNNING,
             event_kind="step_approved" if approve else "step_rejected",
         )
+
+    # ── 图级检查点与图内挂起(add-graph-checkpoint)──
+
+    async def suspend_on_graph_confirm(
+        self,
+        *,
+        task_id: str,
+        tenant_id: str,
+        step_id: str,
+        epoch: int | None,
+        confirm_id: str,
+        tool_name: str,
+        summary: str,
+        thread_id: str,
+    ) -> dict[str, object]:
+        """图内挂起上账(编排回调):任务循环内高危动作到达确认点 → 建/复用
+        确认行,步骤 RUNNING→AWAITING_APPROVAL,任务 RUNNING→AWAITING_APPROVAL
+        (既有白名单边,状态机不扩)。幂等:同 confirm_id 已存在 → 同态返回
+        现状态(编排重入/重启再挂不重复上账);代际失配 → stale_epoch。"""
+        if self._graph is None:
+            raise TaskConflict("图内确认能力未启用")
+        existing = await self._graph.get_graph_confirm(tenant_id=tenant_id, confirm_id=confirm_id)
+        if existing is not None:
+            return {
+                "status": str(existing["status"]),
+                "confirm_id": confirm_id,
+                "reused": True,
+            }
+        task = await self._repo.get_task_system(task_id=task_id, tenant_id=tenant_id)
+        if task is None:
+            raise TaskNotFound
+        if epoch is not None and epoch != int(task.get("dispatch_epoch") or 0):
+            return {"decision": "stale_epoch"}
+        if str(task["status"]) != m.T_RUNNING:
+            raise TaskConflict(f"任务状态 {task['status']} 不可挂起")
+        from kongming.config import get_settings
+
+        await self._graph.insert_graph_confirm(
+            tenant_id=tenant_id,
+            task_id=task_id,
+            step_id=step_id,
+            confirm_id=confirm_id,
+            tool_name=tool_name,
+            summary=summary[:500],
+            thread_id=thread_id,
+            ttl_minutes=get_settings().graph_confirm_ttl_minutes,
+        )
+        ok_step = await self._repo.transition_step(
+            step_id=step_id,
+            task_id=task_id,
+            from_status=m.S_RUNNING,
+            to_status=m.S_AWAITING_APPROVAL,
+            expect_epoch=epoch,
+        )
+        if not ok_step:
+            raise TaskConflict("步骤状态已变更,挂起未落地")
+        moved = await self._repo.transition_task_system(
+            task_id=task_id,
+            tenant_id=tenant_id,
+            from_status=m.T_RUNNING,
+            to_status=m.T_AWAITING_APPROVAL,
+            event={
+                "at": _now(),
+                "kind": "graph_suspended",
+                "step": step_id,
+                "confirm": confirm_id,
+                "tool": tool_name,
+                "summary": summary[:300],
+            },
+            expect_epoch=epoch,
+        )
+        if not moved:
+            # 挂起瞬间任务被并发迁移(暂停/取消):回滚步骤态保持一致
+            # (确认行随事务回滚,不留游离挂起账)
+            await self._repo.transition_step(
+                step_id=step_id,
+                task_id=task_id,
+                from_status=m.S_AWAITING_APPROVAL,
+                to_status=m.S_RUNNING,
+            )
+            raise TaskConflict("任务状态已变更,挂起未落地")
+        return {"status": "pending", "confirm_id": confirm_id}
+
+    async def decide_graph_confirm(
+        self,
+        *,
+        task_id: str,
+        tenant_id: str,
+        user_id: str,
+        confirm_id: str,
+        approve: bool,
+    ) -> dict[str, object]:
+        """图内确认处置(归属人-only,审批门同源纪律):确认行 CAS 单向迁移;
+        步骤 AWAITING_APPROVAL→PENDING 回队(决策经 begin_step 恢复提示下发,
+        批准→动作执行,拒绝→动作跳过观察喂回);任务回 RUNNING 重派。
+        幂等:已决确认同态返回,不重复迁移不重复派发信号。"""
+        if self._graph is None:
+            raise TaskConflict("图内确认能力未启用")
+        task = await self._require(task_id=task_id, tenant_id=tenant_id, user_id=user_id)
+        if task["status"] not in (m.T_AWAITING_APPROVAL, m.T_RUNNING, m.T_PAUSED):
+            raise TaskConflict(f"任务状态 {task['status']} 不可处置确认")
+        row = await self._graph.get_graph_confirm(tenant_id=tenant_id, confirm_id=confirm_id)
+        # 存在性与任务归属同形 404(不暴露是哪种)
+        if row is None or str(row["task_id"]) != task_id:
+            raise TaskNotFound
+        if str(row["status"]) != "pending":
+            # 已决/过期:幂等收敛(与 approve_step 的 pending_confirm_step 同口径)
+            return {
+                "confirm_id": confirm_id,
+                "status": str(row["status"]),
+                "step_id": str(row["step_id"]),
+                "already_decided": True,
+            }
+        to_status = "approved" if approve else "denied"
+        hit = await self._graph.decide_graph_confirm(
+            tenant_id=tenant_id,
+            confirm_id=confirm_id,
+            to_status=to_status,
+            decided_by=user_id,
+        )
+        if hit is None:
+            raise TaskConflict("确认状态已变更")
+        step_id = str(hit["step_id"])
+        if not await self._repo.transition_step(
+            step_id=step_id,
+            task_id=task_id,
+            from_status=m.S_AWAITING_APPROVAL,
+            to_status=m.S_PENDING,
+        ):
+            raise TaskConflict("步骤状态已变更,决策未落地")
+        await self._move(
+            task_id=task_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            task=task,
+            to=m.T_RUNNING,
+            event_kind="graph_confirm_approved" if approve else "graph_confirm_rejected",
+        )
+        return {"confirm_id": confirm_id, "status": to_status, "step_id": step_id}
 
     # ── 编排回调(内部端点经 service 收口)──
 
@@ -330,7 +494,21 @@ class TaskService:
         if m.has_collab_topology(target):
             collab = await self._collab_decision(tenant_id=tenant_id, step=target)
             return {"decision": "execute", "collab": collab}
-        return {"decision": "execute"}
+        out: dict[str, object] = {"decision": "execute"}
+        # 图内挂起恢复提示(add-graph-checkpoint):步骤因确认挂起后批准/拒绝
+        # 回队重派,决策随 begin_step 下发;agent 以线程快照的在途确认复合校验
+        # (提示仅建议,快照不在途即忽略)——过期行不提示(过期=步骤跳过语义)
+        if self._graph is not None:
+            hint = await self._graph.latest_decided_confirm_for_step(
+                task_id=task_id, step_id=step_id
+            )
+            if hint is not None:
+                out["resume_confirm"] = {
+                    "confirm_id": str(hint["confirm_id"]),
+                    "decision": str(hint["status"]),
+                    "tool_name": str(hint["tool_name"] or ""),
+                }
+        return out
 
     async def _collab_decision(self, *, tenant_id: str, step: dict[str, Any]) -> dict[str, object]:
         """协作步骤的执行决策载荷(091):拓扑(以库内归一值为准,再按当前
@@ -855,13 +1033,26 @@ class TaskService:
             # 谓词未命中(状态漂移/并发 bump):不得向执行面谎报收口成功,
             # 任务终态归属在位执行者(重启清扫/在位派发兜底)
             raise TaskConflict("任务状态/派发代数已推进,终态收口未落地")
+        if status in m.TASK_TERMINAL:
+            await self._purge_graph_threads(task_id=task_id, tenant_id=tenant_id)
         return status
 
     async def mark_interrupted_stale(self) -> int:
         """启动清扫:RUNNING/PLANNING → INTERRUPTED(不谎称完成)
-        + 挂起超 TTL 的审批步骤 SKIPPED(spec 审批过期语义)。"""
+        + 挂起超 TTL 的审批步骤 SKIPPED(spec 审批过期语义)
+        + 图内确认过期(同语义:步骤跳过,确认行置 expired 留痕)。"""
         marked = await self._repo.mark_interrupted_stale()
         await self._repo.expire_stale_approvals()
+        if self._graph is not None:
+            for r in await self._graph.expire_stale_graph_confirms():
+                await self._graph.task_event(
+                    task_id=str(r["task_id"]),
+                    event={
+                        "at": _now(),
+                        "kind": "graph_confirm_expired",
+                        "confirm": str(r["confirm_id"]),
+                    },
+                )
         return marked
 
     # ── 内部 ──
@@ -888,6 +1079,17 @@ class TaskService:
                 "reason": f"任务已 {st},不再执行剩余步骤",
             }
         return {"decision": "skip", "reason": "步骤状态已变更"}
+
+    async def _purge_graph_threads(self, *, task_id: str, tenant_id: str) -> None:
+        """任务终态钩子:该任务全部图级快照清理(spec:快照随任务保留策略处置,
+        SHALL NOT 无界增长);恢复价值随终态消失,事件时间线已承载过程审计。"""
+        if self._graph is None:
+            return
+        for s in await self._repo.get_steps(task_id=task_id):
+            await self._graph.delete_thread(
+                tenant_id=tenant_id,
+                thread_id=f"task:{task_id}:step:{s['id']}",
+            )
 
     async def _require(self, *, task_id: str, tenant_id: str, user_id: str) -> dict[str, Any]:
         task = await self._repo.get_task(task_id=task_id, tenant_id=tenant_id, user_id=user_id)
