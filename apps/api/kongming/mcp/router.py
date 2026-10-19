@@ -19,7 +19,7 @@ from kongming.chat.repository import ChatRepository
 from kongming.config import get_settings
 from kongming.datasource.cipher import get_cipher
 from kongming.db import get_session
-from kongming.mcp.client import HttpMcpCaller
+from kongming.mcp.breaker import build_mcp_caller, get_mcp_breaker
 from kongming.mcp.models import McpServerExists, McpServerNotFound
 from kongming.mcp.repository import SqlMcpRepo
 from kongming.mcp.service import McpService, McpValidationError
@@ -70,8 +70,9 @@ def get_mcp_service(
     settings = get_settings()
     return McpService(
         SqlMcpRepo(session, get_cipher(settings.datasource_encrypt_key)),
-        HttpMcpCaller(timeout_sec=settings.mcp_outbound_timeout_sec),
+        build_mcp_caller(settings),
         _OperLogger(session, str(user["sub"])),
+        breaker=get_mcp_breaker(),
     )
 
 

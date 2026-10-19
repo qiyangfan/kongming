@@ -227,6 +227,12 @@ class Settings(BaseSettings):
     # mcp-interop(028):出站调用超时(秒;响应 1MB 闸在 client 常量)
     mcp_outbound_timeout_sec: int = Field(default=15, ge=1, le=120)
 
+    # add-mcp-breaker:出站运行时熔断(连续 timeout/conn 自动冷却,半开
+    # 探测恢复;管理面探测不受限,确定性错误不计数)。enabled=False 逐字旧行为
+    mcp_breaker_enabled: bool = True
+    mcp_breaker_threshold: int = Field(default=3, ge=1, le=100)
+    mcp_breaker_cooldown_sec: int = Field(default=60, ge=1, le=3600)
+
     # 081 external-knowledge:个人本地知识库(siku)检索端点。空=knowledge_search
     # 工具不注册(零回归);非空须过 localhost 白名单(registry.is_local_base_url)
     # 才生效(端点+localhost 白名单两道注册条件;多租户仅告警,082 降闸)

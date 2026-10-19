@@ -98,14 +98,16 @@ web 协作视图/端到端冒烟双场景)。**095–114 批亦已全部落地�
 差距后,净缺口立项(owner 裁决:求职学习项目以学习与展示价值为准,不做
 「等触发信号」式挂账,个人项目等不到信号)——
 ①`add-graph-checkpoint`(图级检查点+图内挂起,HITL 第三形态)已立项开工;
-②向量规模化(Milvus)立项排序其后,开工先写 ADR(技术栈锁定流程)。
-media-generation(owner 2026-10-18 裁决不需要,见否定裁决表)原列②位,
-否决后净缺口收敛为两项。
+②向量规模化(Milvus)原排序其后——**2026-10-19 ADR-012 收口:否决立项,
+pgvector 为终局选型**(量级余量 >10x,翻转条件登记于该 ADR;owner 同日
+定调裁决收口),净缺口收敛为熔断一项。
 **2026-10-18(同日第二项)**:ruoyi-ai 对齐调研(docs/ruoyi-ai-alignment.md,
 开源万星级 Java AI 平台三路实证调研)结论=孔明治理面全面领先(凭证加密/Alembic/
 引用溯源/测试门禁/双进程边界,详见该文 §3),净缺口三项吸收:①`add-doc-rerank`
 (document-rag 检索精排层 rerank,问答智能体方向)当日立项,**同日已落地归档**(工件在 openspec/changes/archive/);
-②MCP 运行时熔断(mcp-interop 域 delta,连续失败自动冷却,排序 Milvus 之后开工)。
+②MCP 运行时熔断(mcp-interop 域 delta,连续失败自动冷却)——2026-10-19
+Milvus 收口后排序阻塞解除,`add-mcp-breaker` 当日立项落地(工件在
+openspec/changes/archive/)。
 ③音视频生成(原列 media-generation 域扩展)随域否决一并落空(owner 同日裁决
 不需要 media-generation,登记于下方否定裁决表)。否决五项(短剧流水线/SSE 跨
 节点广播/MCP 市场导入/xlsx 单独立项/多厂商 OSS 抽象)登记于下方否定裁决表。
@@ -172,7 +174,9 @@ resources/prompts(109)、Bot 版本化上架(104)、用户/TEAM 维度配额(103
 **2026-10-18 追注**:原拟在此登记的 media-generation 与向量规模化(Milvus)
 不适用本表——二者已按 owner 裁决直接立项(见第四梯队 2026-10-18 段),
 「等触发信号」式挂账自即日起废弃。(同日再裁:media-generation 被 owner
-直接否决,回登本表;Milvus 维持立项。)
+直接否决,回登本表;**Milvus 于 2026-10-19 经 ADR-012 正式否决收口**
+——量级测算 pgvector 余量充分,独立向量库在该量级是纯运维负债,理由
+全文见该 ADR,同口径不再重提。)
 
 **勘误(同日,owner 指正「无场景」理由不成立——求职项目无需求方,场景
 等不来)**:对原否定项重裁并勘测现状,两项发现**早已落地**(裁决时未查

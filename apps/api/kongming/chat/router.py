@@ -452,14 +452,15 @@ def _build_connector_service_for(session: AsyncSession) -> "ConnectorService":
 def _build_mcp_service_for(session: AsyncSession) -> "McpService":
     """028 装配(chat 适配层;与 toolcall 组合根同构)。"""
     from kongming.datasource.cipher import get_cipher
-    from kongming.mcp.client import HttpMcpCaller
+    from kongming.mcp.breaker import build_mcp_caller, get_mcp_breaker
     from kongming.mcp.repository import SqlMcpRepo
     from kongming.mcp.service import McpService
 
     settings = get_settings()
     return McpService(
         SqlMcpRepo(session, get_cipher(settings.datasource_encrypt_key)),
-        HttpMcpCaller(timeout_sec=settings.mcp_outbound_timeout_sec),
+        build_mcp_caller(settings),
+        breaker=get_mcp_breaker(),
     )
 
 

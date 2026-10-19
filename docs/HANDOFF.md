@@ -60,6 +60,22 @@
   面:/mcp 退出 OpenAPI(非 FastAPI 路由)。冒烟:tests/test_mcp.py
   (出站组=真实 SDK server 载体)+tests/test_mcp_live.py(双形态真实
   server:stateless/stateful 各三方法面)。
+- **MCP 出站运行时熔断现态(add-mcp-breaker,已落地归档,工件在
+  `openspec/changes/archive/2026-10-19-add-mcp-breaker/`;行为契约已同步
+  mcp-interop spec「出站运行时熔断」Requirement)**:运行时出站(call/
+  read_resource)对连续 timeout/conn(缺省 3 次)自动冷却(缺省 60s),
+  期内快速失败不出站(新错误分类 `unavailable`,回灌文本含「未出站」),
+  冷却期满半开放行单个探测,成功复位失败回冷却;管理面探测(probe/
+  get_prompt)结构上不受限(装饰器不拦),确定性错误(protocol/remote/
+  unsupported)不计数,发现同步成功显式复位。落点=`kongming/mcp/
+  breaker.py`(McpBreaker 纯状态机+BreakerMcpCaller 端口装饰器+
+  build_mcp_caller 单点工厂),四个组合根(mcp/bot/chat/toolcall router)
+  统一经工厂装配,进程级单例(`get_mcp_breaker`,内存态重启即清);
+  计数维度=endpoint(端口契约零变更)。配置 KM_MCP_BREAKER_ENABLED/
+  THRESHOLD/COOLDOWN_SEC(缺省 true/3/60;false=逐字旧行为)。冒烟:
+  tests/test_mcp_breaker.py(18 例,fake clock+脚本 stub 不触单例;日志
+  断言经模块级 log 替身——本仓 pytest 日志基建 INFO 级不可测;半开探测
+  的取消收口经 cancel_probe 幂等回滚,防探测位挂死)。
 
 - **图级检查点与图内挂起现态(add-graph-checkpoint,已落地归档,工件在
   `openspec/changes/archive/2026-10-18-add-graph-checkpoint/`;行为契约已同步

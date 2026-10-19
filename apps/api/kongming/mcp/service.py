@@ -3,7 +3,7 @@
 109:三原语探测(test/sync)、资源快照存库、read_resource 白名单执行
 适配(白名单/文本 mime/截断/注入检测)、模板只读预览(实时拉取)。"""
 
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from kongming.mcp.models import (
     READ_RESOURCE_TOOL,
@@ -18,6 +18,9 @@ from kongming.mcp.models import (
     sanitize_external_text,
 )
 from kongming.mcp.ports import McpCaller, McpCallError, McpRepo
+
+if TYPE_CHECKING:
+    from kongming.mcp.breaker import McpBreaker
 
 
 class McpValidationError(Exception):
@@ -50,10 +53,12 @@ class McpService:
         repo: McpRepo,
         caller: McpCaller,
         oper: McpOperLogger | None = None,
+        breaker: "McpBreaker | None" = None,
     ) -> None:
         self._repo = repo
         self._caller = caller
         self._oper = oper
+        self._breaker = breaker
 
     async def _audit(self, action: str, target: str, detail: dict[str, object]) -> None:
         if self._oper is not None:
@@ -252,6 +257,10 @@ class McpService:
             prompts=prompts_out,
             error=error_note,
         )
+        if self._breaker is not None:
+            # add-mcp-breaker:同步成功=管理员确认可达,显式复位熔断
+            # (运行时立即可用,不等半开探测;管理面探测不受熔断约束)
+            self._breaker.reset(endpoint)
         return {
             "ok": True,
             "tools": len(entries),

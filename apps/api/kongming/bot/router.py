@@ -136,14 +136,15 @@ class _McpDynamicToolLister:
     def __init__(self, session: AsyncSession) -> None:
         from kongming.config import get_settings
         from kongming.datasource.cipher import get_cipher
-        from kongming.mcp.client import HttpMcpCaller
+        from kongming.mcp.breaker import build_mcp_caller, get_mcp_breaker
         from kongming.mcp.repository import SqlMcpRepo
         from kongming.mcp.service import McpService
 
         settings = get_settings()
         self._svc = McpService(
             SqlMcpRepo(session, get_cipher(settings.datasource_encrypt_key)),
-            HttpMcpCaller(timeout_sec=settings.mcp_outbound_timeout_sec),
+            build_mcp_caller(settings),
+            breaker=get_mcp_breaker(),
         )
 
     async def list_dynamic(self, *, tenant_id: str) -> list[dict[str, object]]:

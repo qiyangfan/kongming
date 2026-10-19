@@ -33,7 +33,7 @@ from kongming.connector.repository import SqlConnectorRepo
 from kongming.datasource.cipher import get_cipher
 from kongming.db import get_session
 from kongming.internal import service as internal_service
-from kongming.mcp.client import HttpMcpCaller
+from kongming.mcp.breaker import build_mcp_caller, get_mcp_breaker
 from kongming.mcp.repository import SqlMcpRepo
 from kongming.mcp.service import McpService
 from kongming.rag.router import get_rag_service
@@ -303,7 +303,8 @@ def _build_mcp_service(session: AsyncSession) -> McpService:
     settings = get_settings()
     return McpService(
         SqlMcpRepo(session, get_cipher(settings.datasource_encrypt_key)),
-        HttpMcpCaller(timeout_sec=settings.mcp_outbound_timeout_sec),
+        build_mcp_caller(settings),
+        breaker=get_mcp_breaker(),
     )
 
 
