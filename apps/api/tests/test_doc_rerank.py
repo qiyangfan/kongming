@@ -60,8 +60,6 @@ _PROD_KW: dict[str, Any] = {
     "billing_mock_secret": "prod-real-secret",
     "websearch_provider": "",
     "websearch_api_key": "",
-    "ticket_base_url": "",
-    "ticket_api_key": "",
 }
 
 

@@ -109,17 +109,6 @@ class SqlExecutor(Protocol):
     ) -> dict[str, object]: ...
 
 
-class KnowledgeSearchPort(Protocol):
-    """081:外部个人知识库检索(siku localhost /api/search)。
-
-    实现侧(组合根)负责 HTTP 出站、超时、连接层单次重试与错误分类;
-    领域只消费「命中列表」,失败经 KnowledgeSourceError 上浮分类
-    (分发兜底映射 ERROR + 审计,不裸崩)。
-    """
-
-    async def search(self, *, query: str, top_k: int) -> list[dict[str, object]]: ...
-
-
 class WebSearchPort(Protocol):
     """094:联网检索(websearch 域,检索供应商经网关出站)。
 
@@ -129,25 +118,6 @@ class WebSearchPort(Protocol):
     """
 
     async def search(self, *, query: str, count: int) -> list[dict[str, object]]: ...
-
-
-class TicketPort(Protocol):
-    """100:内部工单系统(ticket 域,按「最小工单 API 约定」经网关出站)。
-
-    实现侧(组合根)负责服务凭证装配、约定协议适配、超时与错误分类;
-    领域只消费标准化工单卡(allowlist 字段),失败经 TicketError 上浮分类
-    (分发兜底映射 ERROR + 审计,不裸崩)。
-    """
-
-    async def search(
-        self, *, query: str, status: str | None, limit: int
-    ) -> list[dict[str, object]]: ...
-
-    async def get(self, *, ticket_id: str) -> dict[str, object]: ...
-
-    async def create(
-        self, *, title: str, description: str, priority: str, assignee: str | None
-    ) -> dict[str, object]: ...
 
 
 class SandboxExecutor(Protocol):

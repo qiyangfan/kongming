@@ -7,6 +7,7 @@
 真实 PG + Redis:审计断言直查 sys_tool_audit;业务 schema 双租户隔离复用既有形态。
 """
 
+import json
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, cast
@@ -1016,3 +1017,78 @@ def test_validate_args_recursion_and_multistmt() -> None:
     assert out is None or "ARGS_INVALID" in out
     multi = validate_args(tool, {"sql": "SELECT 1; DROP TABLE x"})
     assert multi is not None and "单条" in multi
+
+
+# ============ 已退役工单工具零出站回归(remove-ticket-domain) ============
+
+
+@pytest.mark.parametrize("tool_name", ["ticket_search", "ticket_get", "ticket_create"])
+async def test_retired_ticket_tool_direct_call_rejected_zero_outbound(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser, tool_name: str
+) -> None:
+    """遗留工单工具名直接调用:未注册即拒(TOOL_NOT_REGISTERED)并落审计;
+    工具不在注册表=无执行器可派发,零出站(structural)。"""
+    uid = await _user_with_tools(session, make_user, f"tc_rt_{tool_name}", ["chat:execute"])
+    args: dict[str, object] = {"query": "报表"} if tool_name == "ticket_search" else {"id": "T-1"}
+    req = _req(tool_name, args, user_id=uid)
+    r = await client.post("/internal/tool/execute", headers=INTERNAL, json=req)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "rejected"
+    assert "TOOL_NOT_REGISTERED" in (body["reason"] or "")
+    audits = await _tool_audits(session, str(req["trace_id"]))
+    assert [a["status"] for a in audits] == ["REJECTED"]
+    assert audits[0]["tool_name"] == tool_name
+
+
+async def test_retired_ticket_create_pending_confirm_rejected_zero_outbound(
+    client: AsyncClient, session: AsyncSession, make_user: MakeUser
+) -> None:
+    """存量待确认 ticket_create 行(旧版本挂起):确认时工具解析为 None →
+    权限复校拒(TOOL_PERMISSION_DENIED),行推进 REJECTED,零出站。"""
+    from datetime import UTC, datetime, timedelta
+
+    uid = await _user_with_tools(session, make_user, "tc_rt_confirm", ["chat:execute"])
+    sid = await _mk_session(session, uid)
+    tid = (
+        await session.execute(
+            text("SELECT id FROM public.sys_tenant WHERE tenant_key='tc'"),
+        )
+    ).scalar_one()
+    confirm_id = str(uuid.uuid4())
+    await session.execute(
+        text(
+            "INSERT INTO public.sys_tool_audit"
+            " (id, trace_id, user_id, tenant_id, tool_name, args_digest, args_json,"
+            "  status, duration_ms, datasource_key, channel, expires_at)"
+            " VALUES (:id, :trace, :u, :t, 'ticket_create', :digest,"
+            "  CAST(:args AS jsonb), 'PENDING_CONFIRM', 0, 'default', 'chat', :exp)"
+        ),
+        {
+            "id": confirm_id,
+            "trace": f"tr-legacy-{uuid.uuid4().hex[:8]}",
+            "u": uid,
+            "t": str(tid),
+            "digest": "legacy",
+            "args": json.dumps(
+                {"title": "遗留工单", "description": "旧版本挂起", "priority": "high"}
+            ),
+            "exp": datetime.now(UTC) + timedelta(minutes=30),
+        },
+    )
+    await session.commit()
+    token = await _login(client, "tc_rt_confirm")
+    r = await client.post(
+        "/chat/tool-confirm",
+        headers=_auth(token),
+        json={"confirm_id": confirm_id, "decision": "confirm", "session_id": sid},
+    )
+    assert r.status_code == 200
+    assert r.json()["status"] == "rejected"
+    assert "TOOL_PERMISSION_DENIED" in (r.json()["reason"] or "")
+    row = (
+        await session.execute(
+            text("SELECT status FROM public.sys_tool_audit WHERE id=:i"), {"i": confirm_id}
+        )
+    ).scalar_one()
+    assert row == "REJECTED"

@@ -3,7 +3,7 @@
 
 import asyncio
 import json
-from typing import cast
+from typing import Any, cast
 
 import httpx
 import httpx2
@@ -768,3 +768,57 @@ async def test_anthropic_entry_failure_reported_as_error() -> None:
     await asyncio.sleep(0)
     assert reporter.records[0]["status"] == "ERROR"
     await llm.aclose()
+
+
+# ── embedding 维度契约(upgrade-rag-qwen3-halfvec-2560,design D1)──
+
+
+class _EmbItem:
+    def __init__(self, index: int, embedding: list[float]) -> None:
+        self.index = index
+        self.embedding = embedding
+
+
+class _EmbResp:
+    def __init__(self, items: list[_EmbItem]) -> None:
+        self.data = items
+        self.usage = None
+
+
+class _StubEmbeddings:
+    """记录 create 入参并按输入条数返回(维度可编排)。"""
+
+    def __init__(self, *, dim: int) -> None:
+        self.dim = dim
+        self.calls: list[dict[str, object]] = []
+
+    async def create(self, **kwargs: object) -> _EmbResp:
+        self.calls.append(kwargs)
+        n = len(cast("list[object]", kwargs["input"]))
+        return _EmbResp([_EmbItem(i, [0.1] * self.dim) for i in range(n)])
+
+
+class _StubEmbClient:
+    def __init__(self, embeddings: _StubEmbeddings) -> None:
+        self.embeddings = embeddings
+
+
+async def test_embed_passes_dimensions_and_validates_length() -> None:
+    """显式传 dimensions=2560;返回维度不符 → LlmError(不放过错维度向量)。"""
+    settings = _env_settings(
+        embedding_api_key="sk-emb", llm_retry_base_ms="1", llm_retry_max_wait_ms="1"
+    )
+    llm = LlmClient(settings)
+    assert llm._emb_client is not None  # type: ignore[reportPrivateUsage]
+    # 正确维度:dimensions 显式传入且向量原样返回
+    ok_stub = _StubEmbeddings(dim=2560)
+    llm._emb_client = cast("Any", _StubEmbClient(ok_stub))  # type: ignore[reportPrivateUsage]
+    out = await llm.embed(["问句一", "问句二"])
+    assert len(out) == 2 and all(len(v) == 2560 for v in out)
+    assert ok_stub.calls[0]["dimensions"] == 2560
+    assert ok_stub.calls[0]["model"] == "qwen3.7-text-embedding"
+    # 维度漂移(供应商忽略 dimensions):显式报错,不静默落库
+    bad_stub = _StubEmbeddings(dim=1536)
+    llm._emb_client = cast("Any", _StubEmbClient(bad_stub))  # type: ignore[reportPrivateUsage]
+    with pytest.raises(LlmError, match="维度不符"):
+        await llm.embed(["问句"])

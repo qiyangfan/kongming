@@ -28,9 +28,7 @@ from kongming.sqlfw.firewall import check as sql_check
 from kongming.toolcall.models import (
     ConfirmNotFound,
     ConnectorError,
-    KnowledgeSourceError,
     TenantNotFound,
-    TicketError,
     ToolAuditEntry,
     ToolDef,
     ToolOutcome,
@@ -45,14 +43,12 @@ from kongming.toolcall.ports import (
     ConnectorToolGate,
     DynamicToolResolver,
     IntentReviewer,
-    KnowledgeSearchPort,
     McpToolCaller,
     PermReader,
     RagRetriever,
     RateLimiter,
     SandboxExecutor,
     SqlExecutor,
-    TicketPort,
     ToolRepo,
     WebSearchPort,
 )
@@ -62,7 +58,6 @@ from kongming.toolgateway.models import (
     CONNECTOR_TOOL_PREFIX,
     DOMAIN_TOOLS,
     FAILURE_UNDELIVERED_PREFIX,
-    TICKET_LIMIT_DEFAULT,
     WEBSEARCH_COUNT_DEFAULT,
 )
 
@@ -194,12 +189,8 @@ class ToolCallService:
         sandbox: SandboxExecutor | None = None,  # 027:沙箱执行(未注入=未启用)
         resolver: DynamicToolResolver | None = None,  # 028:动态工具(MCP,未注入=纯静态)
         mcp_caller: McpToolCaller | None = None,  # 028:MCP 出站执行
-        knowledge: KnowledgeSearchPort | None = None,  # 081:个人知识库(未注入=工具未注册)
-        knowledge_quota: int | None = None,  # 089:域配额(第二维度;None=不限)
         websearch: WebSearchPort | None = None,  # 094:联网检索(未注入=工具未注册)
-        websearch_quota: int | None = None,  # 094:websearch 域配额(与 knowledge 分桶)
-        ticket: TicketPort | None = None,  # 100:内部工单(未注入=工具未注册)
-        ticket_quota: int | None = None,  # 100:ticket 域配额(独立分桶)
+        websearch_quota: int | None = None,  # 094:websearch 域配额(独立分桶)
         connector: ConnectorToolGate | None = None,  # 099:HTTP 连接器(未注入=不可用)
         connector_quota: int | None = None,  # 099:http 连接器域配额(独立分桶)
         *,
@@ -217,16 +208,12 @@ class ToolCallService:
         self._sandbox = sandbox
         self._resolver = resolver
         self._mcp = mcp_caller
-        self._knowledge = knowledge
         self._websearch = websearch
-        self._ticket = ticket
         self._connector = connector
         # 094:域配额按域分桶(单一配置值当全域值会让新域挤占既有域配额;
-        # knowledge 桶值不变=既有行为零回归;100 ticket / 099 http 桶同口径)
+        # 099 http 桶同口径)
         self._domain_quotas: dict[str, int | None] = {
-            "knowledge": knowledge_quota,
             "websearch": websearch_quota,
-            "ticket": ticket_quota,
             CONNECTOR_DOMAIN: connector_quota,
         }
         self._rate_limit = rate_limit_per_minute
@@ -429,32 +416,6 @@ class ToolCallService:
             if self._mcp is None:
                 raise LookupError("MCP 出站执行未接线(部署缺陷)")
             return await self._mcp.call(tenant_id=tenant_id, qualified=tool.name, args=args)
-        if tool.name == "knowledge_search":
-            # 081:注册表已过两道注册条件才可能到达此处;端口缺失=装配漂移,
-            # 收敛 KnowledgeSourceError(分发兜底 ERROR,不裸崩)
-            if self._knowledge is None:
-                raise KnowledgeSourceError("unreachable: 知识库检索未接线(部署缺陷)")
-            # 缺省 5 与注册表 schema description 标注一致;L4 已校验 ∈[1,10],
-            # 此处按非布尔 int 收窄(L4 之外的纵深一层)
-            top_k = args.get("top_k")
-            hits = await self._knowledge.search(
-                query=str(args["query"]),
-                top_k=top_k if isinstance(top_k, int) and not isinstance(top_k, bool) else 5,
-            )
-            # 观察整形:只透出文本与来源锚点(分数/内部 id 不进 LLM 上下文),
-            # 空结果如实表达(count=0),由 LLM 决定改走他路或据实回答
-            return {
-                "count": len(hits),
-                "hits": [
-                    {
-                        "source_name": hit.get("source_name"),
-                        "note_path": hit.get("note_path"),
-                        "anchor": hit.get("anchor"),
-                        "text": hit.get("text"),
-                    }
-                    for hit in hits
-                ],
-            }
         if tool.name == "web_search":
             # 094:注册表已过注册条件(供应商+key 齐备)才可能到达此处;
             # 端口缺失=装配漂移,收敛 WebSearchError(分发兜底 ERROR,不裸崩)
@@ -471,42 +432,6 @@ class ToolCallService:
             # 观察整形:检索卡已过策略器 allowlist(评分/追踪参数不入上下文),
             # 空结果如实表达(count=0),由 LLM 决定改写问句或据实回答
             return {"count": len(cards), "results": cards}
-        if tool.name in ("ticket_search", "ticket_get", "ticket_create"):
-            # 100:注册表已过注册条件(端点+凭证齐备)才可能到达此处;
-            # 端口缺失=装配漂移,收敛 TicketError(分发兜底 ERROR,不裸崩)
-            if self._ticket is None:
-                raise TicketError(f"{FAILURE_UNDELIVERED_PREFIX} 工单系统未接线(部署缺陷)")
-            if tool.name == "ticket_search":
-                status = args.get("status")
-                limit = args.get("limit")
-                cards = await self._ticket.search(
-                    query=str(args.get("query") or ""),
-                    status=status.strip() if isinstance(status, str) and status.strip() else None,
-                    limit=(
-                        limit
-                        if isinstance(limit, int) and not isinstance(limit, bool)
-                        else TICKET_LIMIT_DEFAULT
-                    ),
-                )
-                # 观察整形:工单卡已过策略器 allowlist(描述/内部元数据不入上下文),
-                # 空结果如实表达(count=0)
-                return {"count": len(cards), "tickets": cards}
-            if tool.name == "ticket_get":
-                card = await self._ticket.get(ticket_id=str(args["id"]))
-                return {"ticket": card}
-            # 创建:assignee 可省;创建结果回填入参(确认终态审计行参数摘要
-            # 携带目标工单标识,spec「创建结果回填」——回填发生在审计序列化前)
-            assignee = args.get("assignee")
-            card = await self._ticket.create(
-                title=str(args["title"]),
-                description=str(args["description"]),
-                priority=str(args["priority"]),
-                assignee=(
-                    assignee.strip() if isinstance(assignee, str) and assignee.strip() else None
-                ),
-            )
-            args["ticket_id"] = str(card.get("id"))
-            return {"ticket": card}
         if tool.name.startswith(CONNECTOR_TOOL_PREFIX):
             # 099:租户连接器经网关切面执行(出口校验→SSRF→出站→分类);
             # 端口缺失=装配漂移,收敛 ConnectorError(分发兜底 ERROR,不裸崩)
@@ -670,9 +595,9 @@ class ToolCallService:
             await self._repo.commit()
             return ConfirmOutcome(status="rejected", reason=arg_err)
 
-        # 099/100:确认型工具的域配额在真实出站点判定(执行=确认重放,PENDING
-        # 期不消费;评审修复——require_confirm 提前返回曾使 POST 连接器/
-        # ticket_create 整段绕过域配额)。超限不落终态:确认保留,窗口重置后
+        # 099:确认型工具的域配额在真实出站点判定(执行=确认重放,PENDING
+        # 期不消费;评审修复——require_confirm 提前返回曾使 POST 连接器
+        # 整段绕过域配额)。超限不落终态:确认保留,窗口重置后
         # 可再次确认(幂等收口仍按 PENDING 复核)。
         confirm_domain = CONNECTOR_DOMAIN if _connector_hit else DOMAIN_TOOLS.get(row.tool_name)
         confirm_quota = self._domain_quotas.get(confirm_domain or "")
@@ -708,9 +633,9 @@ class ToolCallService:
             )
             await self._repo.commit()
             return ConfirmOutcome(status="error", reason=str(e)[:200])
-        # 100:执行后重算参数摘要——域 handler 可把创建结果回填入参
-        # (ticket_create 回填 ticket_id),确认终态行摘要携带执行结果;
-        # 未回填的既有工具重算值与原摘要一致(确定性纯函数),零漂移
+        # 执行后重算参数摘要——域 handler 可把执行结果回填入参,
+        # 确认终态行摘要携带执行结果;未回填的既有工具重算值与原摘要一致
+        # (确定性纯函数),零漂移
         await self._repo.mark_status(
             row.id, "EXECUTED", clear_reason=True, args_digest=args_digest(row.args)
         )
@@ -840,7 +765,4 @@ def _status_to_confirm_out(status: str) -> str:
 def _announce_summary(tool_name: str, args: dict[str, object]) -> str:
     if tool_name == "create_system_announcement":
         return f"公告「{args.get('title', '')}」已发布。"
-    if tool_name == "ticket_create":
-        # 100:回执带目标工单标识(handler 已把创建结果回填入参)
-        return f"工单已创建(编号 {args.get('ticket_id', '')})。"
     return "执行完成。"

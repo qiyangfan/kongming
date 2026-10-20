@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-20
+goal: Remove the mock-only ticket dialect while preserving the generic HTTP
+  connector and shared tool governance

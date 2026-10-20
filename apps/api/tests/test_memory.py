@@ -274,11 +274,11 @@ async def test_implicit_form_dedup_and_sensitive(
 
 
 async def test_recall_dual_filter_and_hit_refresh(session: AsyncSession) -> None:
-    """召回双过滤+命中刷新(直调 repo,预置 1536 维向量):跨用户/跨租户不可见。"""
+    """召回双过滤+命中刷新(直调 repo,预置 2560 维向量):跨用户/跨租户不可见。"""
     from kongming.memory.repository import SqlMemoryRepo
 
     repo = SqlMemoryRepo(session)
-    vec = "[" + ",".join(["1.0"] + ["0.0"] * 1535) + "]"
+    vec = "[" + ",".join(["1.0"] + ["0.0"] * 2559) + "]"
     # 两租户两用户
     t1 = (
         await session.execute(
@@ -318,7 +318,7 @@ async def test_recall_dual_filter_and_hit_refresh(session: AsyncSession) -> None
                 "INSERT INTO public.user_memory"  # noqa: S608  # 多行拼接含 f-string(测试常量 vec)
                 " (id, user_id, tenant_id, content, confidence, source, dormant, embedding)"
                 f" VALUES (gen_random_uuid(), :u, :t, :c, 1.0, 'EXPLICIT', :d,"  # noqa: S608  # 测试常量 vec
-                f"  CAST('{vec}' AS vector))"
+                f"  CAST('{vec}' AS halfvec))"
             ),
             {"u": uid, "t": str(tid), "c": content, "d": dormant},
         )
@@ -329,7 +329,7 @@ async def test_recall_dual_filter_and_hit_refresh(session: AsyncSession) -> None
     await _ins(ua, t1, "A在T1的休眠记忆", dormant=True)
     await session.commit()
 
-    query_vec = [1.0] + [0.0] * 1535
+    query_vec = [1.0] + [0.0] * 2559
     rows = await repo.recall(user_id=str(ua), tenant_id=str(t1), vector=query_vec)
     await repo.commit()
     contents = [r["content"] for r in rows]
@@ -416,14 +416,14 @@ async def test_r1_m1_edit_preserves_vector_on_embedding_failure(
             )
         )
     ).scalar_one()
-    vec = "[" + ",".join(["1.0"] + ["0.0"] * 1535) + "]"
+    vec = "[" + ",".join(["1.0"] + ["0.0"] * 2559) + "]"
     mid = (
         await session.execute(
             text(  # noqa: S608  # 测试常量 vec
                 "INSERT INTO public.user_memory"  # noqa: S608  # 多行拼接含 f-string(测试常量 vec)
                 " (id, user_id, tenant_id, content, confidence, source, embedding)"
                 f" VALUES (gen_random_uuid(), :u, :t, '原内容', 1.0, 'EXPLICIT',"  # noqa: S608  # 测试常量 vec
-                f"  CAST('{vec}' AS vector)) RETURNING id"
+                f"  CAST('{vec}' AS halfvec)) RETURNING id"
             ),
             {"u": str(uid), "t": str(tid)},
         )

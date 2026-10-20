@@ -31,7 +31,7 @@ from kongming.toolgateway.websearch import (
     WebSearchExecutor,
     WebSearchPolicy,
 )
-from tests.test_external_knowledge import _http_response, _Stub
+from tests.tool_helpers import _http_response, _Stub
 
 # ── 纯函数段:供应商注册表与域映射 ──
 
@@ -585,17 +585,32 @@ async def test_gateway_domain_executor_routing_and_fallback() -> None:
     """按域执行器路由:声明专属执行器的域走专属;未声明的域回落通道级
     执行器(既有域零回归);执行器缺失的域拒绝(与「域从未存在」同形)。"""
     from kongming.toolgateway.gateway import ToolGateway
-    from kongming.toolgateway.knowledge import KnowledgePolicy
+    from kongming.toolgateway.models import RetryClass
+
+    class _DemoPolicy:
+        """demo 域测试策略器(框架回落路径的对照域;纯桩)。"""
+
+        def exit_host_allowed(self, host: str) -> bool:
+            return host in ("127.0.0.1", "localhost")
+
+        def validate_args(self, args: dict[str, object]) -> str | None:
+            return None
+
+        def redact(self, response: object) -> object:
+            return response
+
+        def classify(self, exc: Exception | None, *, delivered: bool) -> RetryClass:
+            return RetryClass.OK if exc is None else RetryClass.PROTOCOL
 
     manifest, _ = load_manifest(
         [
             {
-                "id": "knowledge",
+                "id": "demo",
                 "endpoint": "http://127.0.0.1:9901/api/search",
                 "whitelist_hosts": ["127.0.0.1"],
                 "timeout_ms": 1000,
                 "quota_per_minute": 60,
-                "redaction": "allowlist:knowledge",
+                "redaction": "allowlist:demo",
             },
             {
                 "id": "websearch",
@@ -622,7 +637,7 @@ async def test_gateway_domain_executor_routing_and_fallback() -> None:
     gw = ToolGateway(
         manifest=manifest,
         policies={
-            "knowledge": KnowledgePolicy(whitelist_hosts=("127.0.0.1",)),
+            "demo": _DemoPolicy(),
             "websearch": WebSearchPolicy(whitelist_hosts=("127.0.0.1",)),
         },
         executor=default_spy,
@@ -637,9 +652,9 @@ async def test_gateway_domain_executor_routing_and_fallback() -> None:
         user_id="u",
     )
     out_k = await gw.execute(
-        tool_name="knowledge_search",
+        tool_name="demo_tool",
         args={"query": "q"},
-        domain="knowledge",
+        domain="demo",
         trace_id="t",
         tenant_id="t",
         user_id="u",
@@ -649,7 +664,11 @@ async def test_gateway_domain_executor_routing_and_fallback() -> None:
     assert default_spy.urls == ["http://127.0.0.1:9901/api/search"]  # 回落生效
     # 执行器缺失的域拒绝(域在清单/有策略器但无执行器)
     gw_bare = ToolGateway(
-        manifest=manifest, policies={"knowledge": KnowledgePolicy(whitelist_hosts=("127.0.0.1",))}
+        manifest=manifest,
+        policies={
+            "demo": _DemoPolicy(),
+            "websearch": WebSearchPolicy(whitelist_hosts=("127.0.0.1",)),
+        },
     )
     out_none = await gw_bare.execute(
         tool_name="web_search",
@@ -668,24 +687,20 @@ async def test_gateway_domain_executor_routing_and_fallback() -> None:
 def test_build_registry_websearch_conditions() -> None:
     from kongming.toolcall.registry import REGISTRY, build_registry
 
-    base = build_registry(None)
+    base = build_registry()
     assert "web_search" not in base  # 缺省=静态基表,零回归
     assert set(base) == set(REGISTRY)
 
-    gated = build_registry(None, websearch_provider="tavily", websearch_api_key="tvly-k")
+    gated = build_registry(websearch_provider="tavily", websearch_api_key="tvly-k")
     assert "web_search" in gated
     assert gated["web_search"].perm_code == "tool:websearch:search"
     assert gated["web_search"].write is False
     assert gated["web_search"].require_confirm is False
 
     # 双条件缺一不注册;供应商值大小写归一
-    assert "web_search" not in build_registry(
-        None, websearch_provider="tavily", websearch_api_key=" "
-    )
-    assert "web_search" not in build_registry(
-        None, websearch_provider="bogus", websearch_api_key="k"
-    )
-    assert "web_search" in build_registry(None, websearch_provider="TAVILY", websearch_api_key="k")
+    assert "web_search" not in build_registry(websearch_provider="tavily", websearch_api_key=" ")
+    assert "web_search" not in build_registry(websearch_provider="bogus", websearch_api_key="k")
+    assert "web_search" in build_registry(websearch_provider="TAVILY", websearch_api_key="k")
 
 
 # ── 组合配置校验(prod 拒启 / dev 告警降级) ──
@@ -697,9 +712,6 @@ _PROD_KW: dict[str, Any] = {
     "internal_token": "k",
     "datasource_encrypt_key": "k" * 32,
     "billing_mock_enabled": False,
-    # 100:ticket 组合残缺 prod 拒启——钉空隔离本机 KM_TICKET_*(同上口径)
-    "ticket_base_url": "",
-    "ticket_api_key": "",
 }
 
 
@@ -779,40 +791,26 @@ def restore_registry() -> Any:
 
 
 @pytest.mark.asyncio
-async def test_websearch_quota_bucket_independent(
+async def test_websearch_domain_quota_limited(
     client: Any,
     session: Any,
     make_user: Any,
     monkeypatch: Any,
     restore_registry: Any,
 ) -> None:
-    """websearch 配额独立分桶:websearch 超限后 knowledge 域不受挤占;
-    观察形态 = count+检索卡。"""
+    """websearch 域配额第二维度:窗口内第二次调用即 RATE_LIMITED(域配额
+    文案),不触达执行器;观察形态 = count+检索卡。"""
     from kongming.config import get_settings
     from kongming.toolcall import router as router_mod
-    from tests.test_external_knowledge import (  # noqa: PLC0415
-        LOCAL_URL,
-        _FakeKnowledgePort,
-        _mk_tenant,
-        _req,
-        _user_with_tools,
-    )
+    from tests.tool_helpers import _mk_tenant, _req, _user_with_tools
 
     registry = restore_registry
-    registry.activate(
-        registry.build_registry(LOCAL_URL, websearch_provider="tavily", websearch_api_key="k")
-    )
+    registry.activate(registry.build_registry(websearch_provider="tavily", websearch_api_key="k"))
     monkeypatch.setattr(get_settings(), "toolgateway_websearch_quota", 1)
     ws_fake = _FakeWebSearchPort()
-    k_fake = _FakeKnowledgePort(
-        hits=[{"source_name": "n", "text": "t", "note_path": "p", "anchor": "a"}]
-    )
     monkeypatch.setattr(router_mod, "_build_websearch_client", lambda: ws_fake)
-    monkeypatch.setattr(router_mod, "_build_knowledge_client", lambda: k_fake)
     await _mk_tenant(session, "ek")
-    uid = await _user_with_tools(
-        session, make_user, "wsq", ["tool:websearch:search", "tool:knowledge:search"]
-    )
+    uid = await _user_with_tools(session, make_user, "wsq", ["tool:websearch:search"])
     headers = {"X-Internal-Token": "test-internal-token"}
     req = _req("web_search", {"query": "kongming 网关"}, user_id=uid, tenant_key="ek")
     r1 = await client.post("/internal/tool/execute", headers=headers, json=req)
@@ -825,10 +823,6 @@ async def test_websearch_quota_bucket_independent(
     r2 = await client.post("/internal/tool/execute", headers=headers, json=req)
     assert r2.json()["status"] == "rate_limited"
     assert "域配额" in str(r2.json().get("reason"))
-    # knowledge 域不受 websearch 配额挤占(分桶独立)
-    req_k = _req("knowledge_search", {"query": "口径"}, user_id=uid, tenant_key="ek")
-    r3 = await client.post("/internal/tool/execute", headers=headers, json=req_k)
-    assert r3.status_code == 200 and r3.json()["status"] == "executed", r3.text
 
 
 @pytest.mark.asyncio
@@ -839,14 +833,10 @@ async def test_websearch_unregistered_zero_aware(
     restore_registry: Any,
 ) -> None:
     """未配置供应商:工具不存在(与「域从未存在」不可区分),直调被拒落审计。"""
-    from tests.test_external_knowledge import (  # noqa: PLC0415
-        _mk_tenant,
-        _req,
-        _user_with_tools,
-    )
+    from tests.tool_helpers import _mk_tenant, _req, _user_with_tools
 
     registry = restore_registry
-    registry.activate(registry.build_registry(None))
+    registry.activate(registry.build_registry())
     assert registry.get_tool("web_search") is None
     await _mk_tenant(session, "ek")
     uid = await _user_with_tools(session, make_user, "wsz", ["tool:websearch:search"])
@@ -876,31 +866,23 @@ async def test_websearch_client_failure_mapping() -> None:
 
 
 def test_build_gateway_composition_shapes(monkeypatch: Any) -> None:
-    """组合根形态:全缺=无网关;websearch-only / knowledge-only 各自独立装配
-    (declared 只认装配,不随停用翻转——端口绑定与治理态解耦)。"""
+    """组合根形态:全缺=无网关;websearch-only 独立装配(declared 只认装配,
+    不随停用翻转——端口绑定与治理态解耦)。"""
     from kongming.config import get_settings
     from kongming.toolcall import router as router_mod
 
     s = get_settings()
-    monkeypatch.setattr(s, "siku_base_url", "")
     monkeypatch.setattr(s, "websearch_provider", "")
     monkeypatch.setattr(s, "websearch_api_key", "")
     router_mod._get_gateway.cache_clear()
     try:
         assert router_mod._build_gateway() is None  # 全缺=无网关(既有路径零回归)
-        # websearch-only(未配 siku)
+        # websearch-only
         monkeypatch.setattr(s, "websearch_provider", "tavily")
         monkeypatch.setattr(s, "websearch_api_key", "k")
         gw = router_mod._build_gateway()
         assert gw is not None
-        assert gw.declared("websearch") and not gw.declared("knowledge")
-        # knowledge-only(未配供应商)
-        monkeypatch.setattr(s, "websearch_provider", "")
-        monkeypatch.setattr(s, "websearch_api_key", "")
-        monkeypatch.setattr(s, "siku_base_url", "http://127.0.0.1:9901")
-        gw2 = router_mod._build_gateway()
-        assert gw2 is not None
-        assert gw2.declared("knowledge") and not gw2.declared("websearch")
+        assert gw.declared("websearch")
     finally:
         router_mod._get_gateway.cache_clear()
 
@@ -911,8 +893,7 @@ def test_build_gateway_composition_shapes(monkeypatch: Any) -> None:
 @pytest.fixture
 def _restore_main_logger() -> Any:  # pyright: ignore[reportUnusedFunction] —— fixture 经参数名引用
     """会话级 alembic upgrade 的 fileConfig(disable_existing_loggers)会把收集期
-    已创建的 kongming.main logger 置 disabled;本用例断言 main 告警,先复启再还原
-    (test_external_knowledge 同款)。"""
+    已创建的 kongming.main logger 置 disabled;本用例断言 main 告警,先复启再还原。"""
     lg = logging.getLogger("kongming.main")
     orig = lg.disabled
     lg.disabled = False
@@ -942,7 +923,6 @@ def test_lifespan_websearch_misconfig_warns_and_degrades(
     ), [r.getMessage() for r in caplog.records]
     # 降级=域不注册(lifespan 装配走同一判定)
     built = registry.build_registry(
-        None,
         websearch_provider=s.websearch_provider,
         websearch_api_key=s.websearch_api_key,
     )
@@ -965,17 +945,10 @@ async def test_websearch_empty_result_honest_observation(
 ) -> None:
     """空结果如实表达(spec SHALL):观察 = count=0 + 空表,不编造命中。"""
     from kongming.toolcall import router as router_mod
-    from tests.test_external_knowledge import (  # noqa: PLC0415
-        LOCAL_URL,
-        _mk_tenant,
-        _req,
-        _user_with_tools,
-    )
+    from tests.tool_helpers import _mk_tenant, _req, _user_with_tools
 
     registry = restore_registry
-    registry.activate(
-        registry.build_registry(LOCAL_URL, websearch_provider="tavily", websearch_api_key="k")
-    )
+    registry.activate(registry.build_registry(websearch_provider="tavily", websearch_api_key="k"))
     ws_fake = _FakeWebSearchPort(cards=[])
     monkeypatch.setattr(router_mod, "_build_websearch_client", lambda: ws_fake)
     await _mk_tenant(session, "ek")

@@ -152,6 +152,7 @@ class LlmClient:
         self._emb_model = settings.embedding_model
         self._emb_max_texts = settings.embedding_max_texts
         self._emb_batch_size = settings.embedding_batch_size
+        self._emb_dimensions = settings.embedding_dimensions
         self._emb_client: AsyncOpenAI | None = None
         if emb_key:
             self._emb_client = AsyncOpenAI(
@@ -843,7 +844,7 @@ class LlmClient:
                 t0 = time.monotonic()
                 try:
                     return await self._emb_client.embeddings.create(  # type: ignore[union-attr]
-                        model=self._emb_model, input=batch
+                        model=self._emb_model, input=batch, dimensions=self._emb_dimensions
                     )
                 except Exception:
                     self._report(
@@ -890,5 +891,21 @@ class LlmClient:
                 latency_ms=0,
                 protocol=PROTOCOL_OPENAI,
             )  # tenant 维度不适用(009 embedding 独立通道)
+            # 维度校验(design D1):模型默认维度不作契约,供应商少传/漂移
+            # dimensions 时显式报错,不把错维度向量放行给下游落库
+            for d in data:
+                if len(d.embedding) != self._emb_dimensions:
+                    self._report(
+                        task="EMBED",
+                        model=self._emb_model,
+                        trace_id=None,
+                        usage=None,
+                        status="ERROR",
+                        latency_ms=0,
+                        protocol=PROTOCOL_OPENAI,
+                    )
+                    raise LlmError(
+                        f"embeddings 维度不符(期望 {self._emb_dimensions},实际 {len(d.embedding)})"
+                    )
             out.extend(d.embedding for d in data)
         return out

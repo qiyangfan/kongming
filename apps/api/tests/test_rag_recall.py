@@ -14,7 +14,7 @@ from kongming.rag.agent_callback import AgentRagClient
 from tests.conftest import MakeUser
 
 INTERNAL = {"X-Internal-Token": "test-internal-token"}
-EMB_DIM = 1536
+EMB_DIM = 2560
 
 
 def _fake_vector(seed_text: str) -> list[float]:

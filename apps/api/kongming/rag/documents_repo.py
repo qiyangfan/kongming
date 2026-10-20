@@ -96,7 +96,7 @@ class SqlDocumentRepo:
                     " (id, document_id, tenant_id, datasource_key, chunk_level,"
                     "  parent_id, seq, source_ref, content, tsv, embedding)"
                     " VALUES (:i, :doc, :t, :d, :lv, :pid, :seq, :ref, :content,"
-                    f"  to_tsvector('{self._ts}', :content), CAST(:vec AS vector))"
+                    f"  to_tsvector('{self._ts}', :content), CAST(:vec AS halfvec))"
                 ),
                 {
                     "i": seq_to_id[int(str(c["seq"]))],
@@ -176,7 +176,7 @@ class SqlDocumentRepo:
                         "SELECT id, parent_id, source_ref FROM rag.document_chunks"
                         " WHERE tenant_id=:t AND datasource_key=:d AND chunk_level='CHILD'"
                         "   AND embedding IS NOT NULL"
-                        " ORDER BY embedding <=> CAST(:vec AS vector) LIMIT :k"
+                        " ORDER BY embedding <=> CAST(:vec AS halfvec) LIMIT :k"
                     ),
                     {"t": tenant_id, "d": datasource_key, "vec": vec_literal(vector), "k": top_k},
                 )

@@ -7,6 +7,38 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
+## 当前状态(2026-10-20)
+
+- **工具域退役与向量升级现态(2026-10-20,四变更落地)**:①ticket 工单域
+  与 Siku 知识库接入整体退役(remove-ticket-domain / remove-siku-integration):
+  `ticket_*`/`knowledge_search` 工具、`KM_TICKET_*`/`KM_SIKU_*` 配置、
+  `tool:ticket:*`/`tool:knowledge:search` 权限点(迁移 0057 精确删除两项
+  ticket 权限及绑定,历史审计保留)全部移除;遗留工具名直调与存量待确认
+  ticket_create 均 fail-closed 零出站(tests/test_toolcall.py 退役回归);
+  需要工单/外部知识访问改走租户级通用 HTTP 连接器(099)。②问答速率窗口
+  平滑(smooth-chat-rate-windows):固定窗口计数改单条 Lua 原子(递增+TTL+
+  限额,无 TTL 旧键自愈),问答速率闸(登录/公开嵌入)改近似滑动窗口
+  (前后窗口加权,窗口切换不再重置完整额度);工具配额仍固定窗口。
+  ③向量升级 halfvec(2560)(upgrade-rag-qwen3-halfvec-2560):四类向量列
+  (表说明/历史问句/文档子块/用户记忆)迁移 0058 切 halfvec(2560)+HNSW
+  halfvec_cosine_ops(旧向量清空、原文保留);agent embedding 切
+  qwen3.7-text-embedding 显式 dimensions=2560 并校验返回维度;emb 缓存
+  前缀 bump v2;SQL cast 全量 halfvec;重建命令
+  `apps/api/scripts/rebuild_embeddings.py`(可观测/按批提交/可重跑/
+  --dry-run/按表筛选)。**重建已完成**:dev 库四类存量 56 行(表说明 51+
+  文档子块 5)全部经 agent→百炼直连重建写回,库内实测 2560 维;冒烟经 agent
+  端点实证 qwen3.7-text-embedding+dimensions=2560 精确返回 2560 维。评估:
+  smoke 7/7、full 1/1(阈值过)、multiturn 11/12(1 例为历史基线已记录的
+  LLM 多轮生成质量问题,优于基线 10/12)。凭证口径:根 .env 的
+  KM_AGENT_LLM_API_KEY 即 DASHSCOPE_API_KEY 本身(直连百炼,不经 muniu);
+  qwen3.7-text-embedding 默认返回 1024 维,必须显式传 dimensions=2560
+  (agent 代码已落实,设计 D1 实证)。muniu 网关(独立仓,本地 8787)已重建到
+  HEAD 二进制并补 4 条 embedding 路由(qwen3.7-text-embedding/-flash 经网关
+  实测通;qwen3-vl-embedding/tongyi-embedding-vision-flash 仅百炼原生
+  multimodal 端点支持,muniu 数据面无该端点透传,待其侧代码变更);新模型
+  定价未配(计量记 token 成本 0,可经管理面运行时补)。四变更已 openspec
+  归档(archive/2026-10-20-*),主 spec 同步完毕。
+
 ## 当前状态(2026-10-19)
 
 - **全栈刷新现态(stack-refresh-2026-10,已落地)**:四批版本刷新行为保持。
@@ -225,44 +257,17 @@
      (失败分类前缀 unreachable/protocol/policy;无 LLM 用量行)。
 - **本机代理截流回环的测试假败坑(2026-10-11 实证)**:本机若开代理/增强模式,
   对**无监听**的 127.0.0.1 端口的连接会被代理截流并回 HTTP 502(而非拒连)——
-  `tests/test_external_knowledge.py::test_client_connection_refused_raises_unreachable`
-  「关端口=unreachable」前提随之假败(与代码无关;ticket mock 的 curl 需
-  `--noproxy '*'` 同源)。全量套件见此一例失败先查代理再查代码。
-- **100 内部系统连接器域(ticket,预置工单)现态**:第三工具域 = 部署级条件注册,
-  `KM_TICKET_BASE_URL` + `KM_TICKET_API_KEY` 齐备才注册 `ticket_search` /
-  `ticket_get` / `ticket_create` 三工具(端点解析与网关清单声明同源
-  `toolgateway/models.py::parse_ticket_endpoint`,出口白名单由端点主机派生,
-  部署不可单独改白名单);均缺省=域零感知(合法形态);组合残缺(端点缺凭证、
-  凭证缺端点、端点非法):prod 拒启(fail_closed)、dev 启动告警降级。权限
-  `tool:ticket:search`(search/get 读面)与 `tool:ticket:manage`(create 写面)
-  显式授予制(不进 DEVELOPER 推荐集,SUPER_ADMIN 种子自动覆盖);create 缺省
-  需确认(确认流独立于权限点)。域配额独立分桶(`KM_TOOLGATEWAY_TICKET_QUOTA`,
-  缺 20/分)。工单卡观察=allowlist 七键(id/title/status/priority/assignee/
-  created_at/updated_at;描述与工单系统内部元数据不进观察),状态/优先级枚举
-  **原样透传不翻译**(枚举语义在工具描述 prompt 层,design D5)。单查不存在=
-  protocol 类失败友好「工单不存在」;create 确认终态审计行参数摘要回填
-  `ticket_id`(spec「创建结果回填」)。对接面=**「最小工单 API 约定」**(三端点
-  六字段,单一事实源=`apps/api/scripts/mock_ticket_server.py` 文件头);真实
-  系统(Jira/ServiceNow)接入=按约定写门面或加适配层,不为对接差异散落第二套映射。
-  **演示配方(2026-10-11 实跑验证:①②④步 mock 启动/curl/审计面已走通;③真实
-  问答链路待确认——需本地 api+agent 栈与 LLM 凭证)**:
-  1. 起 mock(零依赖标准库单文件,内存态种子 4 条):
-     `cd apps/api && uv run python scripts/mock_ticket_server.py --port 8123
-     --token "$KM_TICKET_API_KEY"`(端口被占直接报错退出;重启即回种子);
-  2. 控制面注入 `KM_TICKET_BASE_URL=http://127.0.0.1:8123` +
-     `KM_TICKET_API_KEY=<与 mock --token 同值>` → 重启 api(dev 缺凭证只告警
-     降级不拒启);curl 三端点冒烟(带 `Authorization: Bearer $KM_TICKET_API_KEY`):
-     `GET /tickets?query=&status=open&limit=2`(注意 --noproxy '*',本机代理
-     截流回环)/`GET /tickets/T-1001`/`POST /tickets`(body title/description/
-     priority[/assignee],201 返回带服务端生成的 id);
-  3. 授予 `tool:ticket:search` 后问**「查一下最近的工单」**(应返回标准化工单卡
-     列表);授予 `tool:ticket:manage` 后问**「给张三建一个优先级高的工单」**
-     (应挂起确认,确认后才创建并回执工单编号;拒绝则工单系统无新单);
-  4. 审计核验:`SELECT tool_name, status, domain, args_digest FROM
-     public.sys_tool_audit WHERE domain='ticket' ORDER BY created_at DESC LIMIT 5;`
-     (create 的 EXECUTED 行 args_digest 含 `"ticket_id"`;凭证值不得出现在
-     日志/审计/失败文案——有专项 grep 断言钉着)。e2e 集成测试与演示共用同一
-     mock 实现(`tests/test_ticket_domain.py` 测试内起停,不依赖手工启动)。
+  「关端口=unreachable」前提的用例随之假败(与代码无关;出站类 curl 需
+  `--noproxy '*'` 同源)。全量套件见此类失败先查代理再查代码。
+- **ticket 工单域与 Siku 知识库接入已退役(remove-ticket-domain /
+  remove-siku-integration,2026-10-20 落地)**:`ticket_search`/`ticket_get`/
+  `ticket_create` 三工具与 `knowledge_search` 工具、`KM_TICKET_*`/`KM_SIKU_*`
+  配置、`tool:ticket:*`/`tool:knowledge:search` 权限点(迁移 0057 精确删除
+  两项 ticket 权限及绑定,历史 sys_tool_audit 保留)均已移除;遗留工具名
+  直接调用与存量待确认 ticket_create 均 fail-closed 拒绝且零出站
+  (tests/test_toolcall.py 退役回归)。需要工单/外部知识访问的部署改走租户级
+  通用 HTTP 连接器(099,显式配置端点/凭证/出口白名单并单独授权)。历史决策
+  与审计说明见 openspec/changes/archive 对应工件。
 - **110–113 批现态(2026-10-12,四变更全部落地归档)**:
   ①110 指标可见性:metric_definitions 增 visible_scope(ALL/DEPT)+dept_id
   (迁移 0053),注入面按调用者 data_scope 收窄,管理面保持全量;
@@ -297,8 +302,8 @@
   _ADAPTERS` 加一条映射,**接入前核对供应商参数硬限与响应字段名并在方言
   装配层消化**(zhipu 70 截断即先例;域级 schema 与策略器共引 models 常量,
   勿为单供应商改域契约)。参数边界(500/1–10/缺省 5)同文件常量单源。
-  观察=检索卡 title/url/snippet(追踪参数剥离、评分不透),域配额与 knowledge
-  分桶独立(`KM_TOOLGATEWAY_WEBSEARCH_QUOTA`,缺 20/分)。演示需真实检索
+  观察=检索卡 title/url/snippet(追踪参数剥离、评分不透),域配额按域独立
+  分桶(`KM_TOOLGATEWAY_WEBSEARCH_QUOTA`,缺 20/分)。演示需真实检索
   供应商 key,无 key 时其余能力零影响;zhipu web_search 按**次独立计费**
   (不同于 chat 额度),演示前确认 key 已开通该工具。
   (评审循环登记的两条范围外待办已清:knowledge.py DecodingError 收敛与
@@ -982,7 +987,7 @@
    env 到新 compose 调用可用 `podman inspect <c> --format '{{range
    .Config.Env}}...'`(值不回显,直接 export 给子进程)。
    LLM 冒烟出口=`DASHSCOPE_API_KEY` 环境变量(dashscope 兼容端点,
-   qwen-plus + text-embedding-v2)。
+   qwen-plus + qwen3.7-text-embedding)。
 6. 可能的后台进程:compose 容器(见 5)、web dev 多实例(5173/5174 属
    用户其他项目,**别 kill 错**——按 `ps -p <pid> -o command=` 确认
    kongming 再动手);日志 /tmp/km-*.log。

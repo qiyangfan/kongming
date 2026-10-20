@@ -41,9 +41,12 @@ class _Limiter:
             raise ConnectionError("redis down")
         return not self.fail
 
+    async def allow_sliding(self, key: str, *, limit: int, window_sec: int) -> bool:
+        return await self.allow(key, limit=limit, window_sec=window_sec)
+
 
 class _CountingLimiter:
-    """按 key 计数的固定窗口语义替身:同 key 第 limit+1 次起拒绝。"""
+    """按 key 计数的窗口语义替身:同 key 第 limit+1 次起拒绝。"""
 
     def __init__(self, *, limit: int = 1) -> None:
         self.limit = limit
@@ -55,6 +58,9 @@ class _CountingLimiter:
         n = self.seen.get(key, 0) + 1
         self.seen[key] = n
         return n <= self.limit
+
+    async def allow_sliding(self, key: str, *, limit: int, window_sec: int) -> bool:
+        return await self.allow(key, limit=limit, window_sec=window_sec)
 
 
 class _Counter:

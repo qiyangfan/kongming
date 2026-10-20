@@ -76,7 +76,7 @@ class SqlMemoryRepo:
                 " FROM public.user_memory"
                 " WHERE (user_id = :u OR team_id = ANY(:tids)) AND tenant_id = :t"
                 " AND dormant = false AND embedding IS NOT NULL"
-                " ORDER BY embedding <=> CAST(:vec AS vector) LIMIT :k"
+                " ORDER BY embedding <=> CAST(:vec AS halfvec) LIMIT :k"
             )
         else:
             # R1-J6:个人分支限 team_id IS NULL——离队成员不再召回自己
@@ -86,7 +86,7 @@ class SqlMemoryRepo:
                 " FROM public.user_memory"
                 " WHERE (user_id = :u AND team_id IS NULL) AND tenant_id = :t"
                 " AND dormant = false AND embedding IS NOT NULL"
-                " ORDER BY embedding <=> CAST(:vec AS vector) LIMIT :k"
+                " ORDER BY embedding <=> CAST(:vec AS halfvec) LIMIT :k"
             )
         rows = (await self._s.execute(text(sql), params)).mappings().all()
         if rows:
@@ -115,7 +115,7 @@ class SqlMemoryRepo:
                 " (id, user_id, tenant_id, content, category, confidence, source,"
                 "  embedding, team_id)"
                 " VALUES (:i, :u, :t, :c, :cat, :conf, :src,"
-                "         CAST(:vec AS vector), CAST(:tm AS uuid))"
+                "         CAST(:vec AS halfvec), CAST(:tm AS uuid))"
             ),
             {
                 "i": row_id,
@@ -178,7 +178,7 @@ class SqlMemoryRepo:
             await self._s.execute(
                 text(
                     "UPDATE public.user_memory SET content=:c, category=:cat,"
-                    " embedding=COALESCE(CAST(:vec AS vector), embedding),"  # R1-M1:失败保原值
+                    " embedding=COALESCE(CAST(:vec AS halfvec), embedding),"  # R1-M1:失败保原值
                     " dormant=false, updated_at=now()"
                     " WHERE id=:i AND user_id=:u AND tenant_id=:t"
                     " RETURNING id"

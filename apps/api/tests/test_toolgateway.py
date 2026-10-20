@@ -63,14 +63,9 @@ def test_domain_without_policy_not_registered() -> None:
 
 
 def test_domain_tools_mapping_single_source() -> None:
-    """工具名→域映射单源(审计域标签与配额闸共用;094 增 websearch 域,
-    100 增 ticket 域三工具)。"""
+    """工具名→域映射单源(审计域标签与配额闸共用;094 收录 websearch 域)。"""
     assert DOMAIN_TOOLS == {
-        "knowledge_search": "knowledge",
         "web_search": "websearch",
-        "ticket_search": "ticket",
-        "ticket_get": "ticket",
-        "ticket_create": "ticket",
     }
 
 
@@ -175,9 +170,9 @@ async def test_exit_whitelist_rejects_without_network() -> None:
 @pytest.mark.asyncio
 async def test_policy_whitelist_from_manifest_spec() -> None:
     """白名单单源:策略器白名单必须来自清单 spec(host.docker.internal 形态)。"""
-    from kongming.toolgateway.knowledge import KnowledgePolicy
+    from kongming.toolgateway.websearch import WebSearchPolicy
 
-    policy = KnowledgePolicy(whitelist_hosts=("localhost", "host.docker.internal", "::1"))
+    policy = WebSearchPolicy(whitelist_hosts=("api.tavily.com", "host.docker.internal"))
     assert policy.exit_host_allowed("host.docker.internal")
     assert not policy.exit_host_allowed("evil.example.com")
 
@@ -285,15 +280,17 @@ async def test_connect_timeout_real_executor_unreachable_retry_once() -> None:
     """真实执行器 + MockTransport 定点 ConnectTimeout(异常类型随事件循环环境
     漂移,不可用不可路由 IP 直连手法禁用——实测直跑 ConnectTimeout/pytest 下
     泛化 TimeoutException):连接类 → 重试恰好一次 → unreachable 文案零漂移。
-    断言用真实 KnowledgePolicy(failure_reason 在真策略器上)。"""
-    from kongming.toolgateway.knowledge import KnowledgeExecutor, KnowledgePolicy
+    断言用真实 WebSearchPolicy(failure_reason 在真策略器上)。"""
+    import httpx as _httpx
 
-    def _handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectTimeout("connect", request=request)
+    from kongming.toolgateway.websearch import WebSearchExecutor, WebSearchPolicy
+
+    def _handler(request: _httpx.Request) -> _httpx.Response:
+        raise _httpx.ConnectTimeout("connect", request=request)
 
     calls: list[int] = []
 
-    class _Counting(KnowledgeExecutor):
+    class _Counting(WebSearchExecutor):
         async def __call__(
             self, *, url: str, payload: dict[str, object], timeout_s: float
         ) -> object:
@@ -302,11 +299,11 @@ async def test_connect_timeout_real_executor_unreachable_retry_once() -> None:
 
     gw = ToolGateway(
         manifest=load_manifest(_raw_manifest())[0],
-        policies={"knowledge": KnowledgePolicy(whitelist_hosts=("127.0.0.1", "localhost"))},
-        executor=_Counting(transport=httpx.MockTransport(_handler)),
+        policies={"knowledge": WebSearchPolicy(whitelist_hosts=("127.0.0.1", "localhost"))},
+        executor=_Counting(adapter="tavily", api_key="k", transport=_httpx.MockTransport(_handler)),
     )
     out = await gw.execute(
-        tool_name="knowledge_search",
+        tool_name="web_search",
         args={"query": "x"},
         domain="knowledge",
         trace_id="t",
@@ -314,7 +311,7 @@ async def test_connect_timeout_real_executor_unreachable_retry_once() -> None:
         user_id="u",
     )
     assert out["status"] == "error"
-    assert str(out["reason"]) == "unreachable: 知识库拒连(ConnectTimeout)"
+    assert str(out["reason"]) == "unreachable: 联网检索拒连(ConnectTimeout)"
     assert len(calls) == 2  # 连接类恰好重试一次
 
 
@@ -322,15 +319,17 @@ async def test_connect_timeout_real_executor_unreachable_retry_once() -> None:
 async def test_decoding_error_real_executor_protocol_no_retry() -> None:
     """真实执行器 + MockTransport 坏 gzip:解码失败(DecodingError∈RequestError,
     非 TransportError/ValueError)按 protocol 前缀收口,不裸抛、不重试
-    (094 评审循环 R1 同款缺口的知识域回归)。"""
-    from kongming.toolgateway.knowledge import KnowledgeExecutor, KnowledgePolicy
+    (094 评审循环 R1 同款缺口的回归)。"""
+    import httpx as _httpx
 
-    def _handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, headers={"Content-Encoding": "gzip"}, content=b"not-gzip")
+    from kongming.toolgateway.websearch import WebSearchExecutor, WebSearchPolicy
+
+    def _handler(request: _httpx.Request) -> _httpx.Response:
+        return _httpx.Response(200, headers={"Content-Encoding": "gzip"}, content=b"not-gzip")
 
     calls: list[int] = []
 
-    class _Counting(KnowledgeExecutor):
+    class _Counting(WebSearchExecutor):
         async def __call__(
             self, *, url: str, payload: dict[str, object], timeout_s: float
         ) -> object:
@@ -339,11 +338,11 @@ async def test_decoding_error_real_executor_protocol_no_retry() -> None:
 
     gw = ToolGateway(
         manifest=load_manifest(_raw_manifest())[0],
-        policies={"knowledge": KnowledgePolicy(whitelist_hosts=("127.0.0.1", "localhost"))},
-        executor=_Counting(transport=httpx.MockTransport(_handler)),
+        policies={"knowledge": WebSearchPolicy(whitelist_hosts=("127.0.0.1", "localhost"))},
+        executor=_Counting(adapter="tavily", api_key="k", transport=_httpx.MockTransport(_handler)),
     )
     out = await gw.execute(
-        tool_name="knowledge_search",
+        tool_name="web_search",
         args={"query": "x"},
         domain="knowledge",
         trace_id="t",
@@ -351,7 +350,7 @@ async def test_decoding_error_real_executor_protocol_no_retry() -> None:
         user_id="u",
     )
     assert out["status"] == "error"
-    assert str(out["reason"]) == "protocol: 检索响应解码失败(DecodingError)"
+    assert str(out["reason"]) == "protocol: 响应解码失败(DecodingError)"
     assert len(calls) == 1  # 响应类不重试
 
 
@@ -406,27 +405,20 @@ async def test_domain_quota_gate_wired(
 ) -> None:
     """域配额第二维度接线:超限即 RATE_LIMITED(域配额文案),不触达执行器。"""
     from kongming.config import get_settings
-    from tests.test_external_knowledge import LOCAL_URL
+    from kongming.toolcall import router as router_mod
+    from tests.test_websearch_domain import _FakeWebSearchPort
+    from tests.tool_helpers import _mk_tenant, _req, _user_with_tools
 
     registry = restore_registry
-    registry.activate(registry.build_registry(LOCAL_URL))
-    monkeypatch.setattr(get_settings(), "toolgateway_knowledge_quota", 1)
-    from kongming.toolcall import router as router_mod
-    from tests.test_external_knowledge import (  # noqa: PLC0415
-        _FakeKnowledgePort,
-        _mk_tenant,
-        _req,
-        _user_with_tools,
-    )
+    registry.activate(registry.build_registry(websearch_provider="tavily", websearch_api_key="k"))
+    monkeypatch.setattr(get_settings(), "toolgateway_websearch_quota", 1)
 
-    fake = _FakeKnowledgePort(
-        hits=[{"source_name": "n", "text": "t", "note_path": "p", "anchor": "a"}]
-    )
-    monkeypatch.setattr(router_mod, "_build_knowledge_client", lambda: fake)
+    fake = _FakeWebSearchPort()
+    monkeypatch.setattr(router_mod, "_build_websearch_client", lambda: fake)
     await _mk_tenant(session, "ek")  # _user_with_tools 绑定 ek 租户(其模块 fixture 在此不生效)
-    uid = await _user_with_tools(session, make_user, "qwire", ["tool:knowledge:search"])
+    uid = await _user_with_tools(session, make_user, "qwire", ["tool:websearch:search"])
     headers = {"X-Internal-Token": "test-internal-token"}
-    req = _req("knowledge_search", {"query": "口径"}, user_id=uid, tenant_key="ek")
+    req = _req("web_search", {"query": "网关"}, user_id=uid, tenant_key="ek")
     r1 = await client.post("/internal/tool/execute", headers=headers, json=req)
     assert r1.status_code == 200 and r1.json()["status"] == "executed", r1.text
     r2 = await client.post("/internal/tool/execute", headers=headers, json=req)
@@ -438,17 +430,15 @@ async def test_domain_quota_gate_wired(
 @pytest.mark.asyncio
 async def test_disabled_domain_disappears_from_injection(restore_registry: Any) -> None:
     """停用集 → 注入集与分发解析同源消失(spec 域治理面;与「域从未存在」同形)。"""
-    from tests.test_external_knowledge import LOCAL_URL
-
     registry = restore_registry
-    registry.activate(registry.build_registry(LOCAL_URL))
-    registry.set_runtime_disabled(frozenset({"knowledge_search"}))
-    assert registry.get_tool("knowledge_search") is None  # 分发解析即拒
-    codes = {"tool:knowledge:search"}
-    assert all(s["name"] != "knowledge_search" for s in registry.filter_specs(codes))
+    registry.activate(registry.build_registry(websearch_provider="tavily", websearch_api_key="k"))
+    registry.set_runtime_disabled(frozenset({"web_search"}))
+    assert registry.get_tool("web_search") is None  # 分发解析即拒
+    codes = {"tool:websearch:search"}
+    assert all(s["name"] != "web_search" for s in registry.filter_specs(codes))
     registry.set_runtime_disabled(frozenset())
-    assert registry.get_tool("knowledge_search") is not None
-    assert [s["name"] for s in registry.filter_specs(codes)] == ["knowledge_search"]
+    assert registry.get_tool("web_search") is not None
+    assert [s["name"] for s in registry.filter_specs(codes)] == ["web_search"]
 
 
 @pytest.mark.asyncio
@@ -468,36 +458,31 @@ async def test_domain_governance_routes(
     from kongming.config import get_settings
     from kongming.toolcall import router as router_mod
     from kongming.toolgateway.gateway import ToolGateway
-    from kongming.toolgateway.knowledge import KnowledgePolicy
     from kongming.toolgateway.models import load_manifest
+    from kongming.toolgateway.websearch import WebSearchPolicy
     from tests.test_chat_query import _auth, _bind, _login
-    from tests.test_external_knowledge import (  # noqa: PLC0415
-        LOCAL_URL,
-        _FakeKnowledgePort,
-        _mk_tenant,
-        _req,
-        _user_with_tools,
-    )
     from tests.test_system_admin import _admin
+    from tests.test_websearch_domain import _FakeWebSearchPort
+    from tests.tool_helpers import _mk_tenant, _req, _user_with_tools
 
     registry = restore_registry
-    registry.activate(registry.build_registry(LOCAL_URL))
+    registry.activate(registry.build_registry(websearch_provider="tavily", websearch_api_key="k"))
     manifest, _w = load_manifest(
         [
             {
-                "id": "knowledge",
-                "endpoint": LOCAL_URL + "/api/search",
-                "whitelist_hosts": ["127.0.0.1", "localhost"],
+                "id": "websearch",
+                "endpoint": "https://api.tavily.com/search",
+                "whitelist_hosts": ["api.tavily.com"],
                 "timeout_ms": 5000,
                 "quota_per_minute": 60,
-                "redaction": "allowlist:knowledge",
+                "redaction": "allowlist:websearch",
             }
         ]
     )
     gw = ToolGateway(
         manifest=manifest,
         policies={
-            "knowledge": KnowledgePolicy(whitelist_hosts=manifest["knowledge"].whitelist_hosts)
+            "websearch": WebSearchPolicy(whitelist_hosts=manifest["websearch"].whitelist_hosts)
         },
     )
     monkeypatch.setattr(router_mod, "_get_gateway", lambda: gw)
@@ -518,20 +503,18 @@ async def test_domain_governance_routes(
     _, token_admin = await _admin(client, session, make_user)
     r200 = await client.get("/system/tools/domains", headers=_auth(token_admin))
     assert r200.status_code == 200
-    assert any(d["id"] == "knowledge" and d.get("disabled") is False for d in r200.json())
+    assert any(d["id"] == "websearch" and d.get("disabled") is False for d in r200.json())
     r404 = await client.post("/system/tools/domains/nope/disable", headers=_auth(token_admin))
     assert r404.status_code == 404
 
     # 停用 → internal execute 拒(与「工具从未注册」同形)+ 审计落 domain
-    fake = _FakeKnowledgePort(
-        hits=[{"source_name": "n", "text": "t", "note_path": "p", "anchor": "a"}]
-    )
-    monkeypatch.setattr(router_mod, "_build_knowledge_client", lambda: fake)
+    fake = _FakeWebSearchPort()
+    monkeypatch.setattr(router_mod, "_build_websearch_client", lambda: fake)
     await _mk_tenant(session, "ek")
-    uid = await _user_with_tools(session, make_user, "gwgov", ["tool:knowledge:search"])
+    uid = await _user_with_tools(session, make_user, "gwgov", ["tool:websearch:search"])
     headers = {"X-Internal-Token": "test-internal-token"}
-    req = _req("knowledge_search", {"query": "口径"}, user_id=uid, tenant_key="ek")
-    rd = await client.post("/system/tools/domains/knowledge/disable", headers=_auth(token_admin))
+    req = _req("web_search", {"query": "网关"}, user_id=uid, tenant_key="ek")
+    rd = await client.post("/system/tools/domains/websearch/disable", headers=_auth(token_admin))
     assert rd.status_code == 204
     rrej = await client.post("/internal/tool/execute", headers=headers, json=req)
     assert rrej.status_code == 200 and rrej.json()["status"] == "rejected", rrej.text
@@ -549,34 +532,34 @@ async def test_domain_governance_routes(
         .one()
     )
     assert audit["status"] == "REJECTED"
-    assert audit["domain"] == "knowledge"
+    assert audit["domain"] == "websearch"
 
     # 启用恢复:同请求 executed
-    ren = await client.post("/system/tools/domains/knowledge/enable", headers=_auth(token_admin))
+    ren = await client.post("/system/tools/domains/websearch/enable", headers=_auth(token_admin))
     assert ren.status_code == 204
     rok = await client.post("/internal/tool/execute", headers=headers, json=req)
     assert rok.status_code == 200 and rok.json()["status"] == "executed", rok.text
 
     # 0044 持久化:停用写穿入库;「重启」=清网关单例缓存后经启动装载恢复意图
-    await client.post("/system/tools/domains/knowledge/disable", headers=_auth(token_admin))
+    await client.post("/system/tools/domains/websearch/disable", headers=_auth(token_admin))
     states = (
         await session.execute(
             sql_text("SELECT domain_id, disabled FROM public.sys_tool_domain_state")
         )
     ).all()
-    assert ("knowledge", True) in [(r[0], bool(r[1])) for r in states]
+    assert ("websearch", True) in [(r[0], bool(r[1])) for r in states]
     gw.apply_disabled(frozenset())  # 模拟重启(进程内运行时态清零)
     await router_mod.load_persisted_domain_states()  # lifespan 同款装载
-    assert gw._disabled == {"knowledge"}  # 持久意图随装载恢复
+    assert gw._disabled == {"websearch"}  # 持久意图随装载恢复
     # 运行时注册表同步:停用域工具与「域从未存在」同形(注入集消失+分发解析即拒)
     from kongming.toolcall import registry
 
-    assert registry.get_tool("knowledge_search") is None
+    assert registry.get_tool("web_search") is None
     rrej2 = await client.post("/internal/tool/execute", headers=headers, json=req)
     assert rrej2.status_code == 200 and rrej2.json()["status"] == "rejected"
     assert rrej2.json()["reason"] == "TOOL_NOT_REGISTERED", rrej2.text
     # 清理:恢复启用态(写穿回库+本地生效),不污染同文件后续用例
-    await client.post("/system/tools/domains/knowledge/enable", headers=_auth(token_admin))
+    await client.post("/system/tools/domains/websearch/enable", headers=_auth(token_admin))
 
 
 def test_manifest_invalid_host_entries_dropped() -> None:

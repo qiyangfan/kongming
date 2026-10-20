@@ -4,9 +4,6 @@
 拒绝)→ 域限流(第二维度)→ 执行器单次出站(超时)→ 失败分类(连接类至多
 重试一次/响应类不重试)→ 响应脱敏 → 结构化观察。审计仍在既有六层 L5
 (sys_tool_audit,域标签复用 channel 列),本切面不落库。
-
-迁移判据:knowledge_search 经此切面的对外行为与 081 逐字段一致(观察形态/
-重试语义/失败分类文案);未命中域的工具走既有路径,零回归。
 """
 
 import logging
@@ -27,10 +24,6 @@ log = logging.getLogger(__name__)
 
 # 域执行器签名:单次出站(url/payload/timeout 由切面给定);返回已解析响应体
 Executor = Callable[..., Awaitable[object]]
-
-
-class KnowledgeSourceError(Exception):
-    """域执行失败的结构化收敛(081 同名异常迁移;分发兜底 ERROR + 审计)。"""
 
 
 class ToolGateway:

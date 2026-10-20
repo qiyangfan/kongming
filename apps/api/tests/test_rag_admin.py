@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 from tests.test_chat_query import _auth, _bind, _default_tenant_id, _login
 
 RAG = "/system/rag"
-EMB_DIM = 1536
+EMB_DIM = 2560
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -57,7 +57,7 @@ def _vec_literal(seed_text: str) -> str:
 
 
 def _fake_vector(seed_text: str) -> list[float]:
-    """确定性伪向量(同文本同向量——向量召回可预期;维度=列宽 1536)。"""
+    """确定性伪向量(同文本同向量——向量召回可预期;维度=列宽 2560)。"""
     digest = hashlib.sha256(seed_text.encode()).digest()
     vals = [
         ((digest[i % len(digest)] << 8 | digest[(i + 1) % len(digest)]) % 1000) / 1000.0
@@ -579,8 +579,8 @@ async def test_fetch_alias_overwrite_priority(
             await session.execute(
                 text(
                     "SELECT alias, tsv @@ plainto_tsquery('simple', 'AI商品表') AS tsv_hit,"
-                    " embedding <=> CAST(:vec AS vector) AS d_keep,"
-                    " embedding <=> CAST(:vec0 AS vector) AS d_drop"
+                    " embedding <=> CAST(:vec AS halfvec) AS d_keep,"
+                    " embedding <=> CAST(:vec0 AS halfvec) AS d_drop"
                     " FROM rag.table_descriptions WHERE table_name='goods'"
                 ),
                 {
@@ -888,8 +888,8 @@ async def test_upload_preserves_existing_alias(
             await session.execute(
                 text(
                     "SELECT alias, table_comment,"
-                    " embedding <=> CAST(:vk AS vector) AS d_keep,"
-                    " embedding <=> CAST(:vd AS vector) AS d_drop"
+                    " embedding <=> CAST(:vk AS halfvec) AS d_keep,"
+                    " embedding <=> CAST(:vd AS halfvec) AS d_drop"
                     " FROM rag.table_descriptions WHERE table_name='goods'"
                 ),
                 {

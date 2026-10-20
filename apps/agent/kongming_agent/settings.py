@@ -53,12 +53,15 @@ class Settings(BaseSettings):
     # embedding(009):独立于 LLM 主模型配置——上游 028 教训:主模型切非通义
     # 供应商时 embeddings API 不存在,RAG 会静默全量失败;缺省回退 llm_* 组,
     # dashscope 兼容端点常驻 embedding 能力。
+    # upgrade-rag-qwen3-halfvec-2560:Qwen3.7 文本向量,显式传 dimensions
+    # (模型默认维度不作契约,design D1);北京区域每批上限 20。
     embedding_base_url: str | None = None  # None=回退 llm_base_url
     embedding_api_key: str | None = None  # None=回退 llm_api_key
-    embedding_model: str = "text-embedding-v2"
+    embedding_model: str = "qwen3.7-text-embedding"
+    embedding_dimensions: int = 2560
     embedding_timeout_sec: float = 30.0
     embedding_max_texts: int = 64  # 单请求文本上限(防单请求打爆)
-    embedding_batch_size: int = 25  # 供应商单批上限(dashscope v2=25;内部分批)
+    embedding_batch_size: int = 20  # 供应商单批上限(百炼北京区域=20;内部分批)
 
     # 控制面回调地址 + 内部令牌(注意:这不是用户凭证,轮换由控制面发起)
     api_base_url: str = "http://localhost:8000"

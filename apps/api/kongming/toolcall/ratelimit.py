@@ -1,4 +1,15 @@
-"""固定窗口限流(019,六层防御 L5):Redis INCR + EXPIRE。
+"""限流(019,六层防御 L5):Redis 固定窗口 + 问答滑动窗口。
+
+固定窗口(工具总配额/工具域配额):单条 Lua 原子完成递增、TTL 管理与限额
+判定——INCR 与 EXPIRE 之间不再有进程崩溃留下无 TTL 永久计数键的竞态;
+检测到已存在但无 TTL 的旧键时补当前窗口 TTL(历史竞态残留的自愈),
+已有有效 TTL 不续期(窗口长度不因后续请求滑动)。
+
+滑动窗口(问答成本闸,062 平滑化):按 Redis 服务端时钟划分当前/前一窗口,
+加权估算(当前计数 + 前一计数 × 前一窗口剩余权重),估算加本次请求不超
+阈值才递增当前窗口计数,判定与递增同脚本原子完成。近似估算消除固定窗口
+切换时的完整额度重置,不限制窗口内并发突发(速率保护用途,精确计量仍由
+sys_llm_usage 承担)。
 
 Redis 不可用 fail-open 仅告警放行(与 007 吊销降级同口径:可用性优先,
 限流是配额保护层而非安全闸;安全闸=权限点/租户/防火墙,各自独立)。
@@ -10,22 +21,56 @@ from redis.asyncio import Redis
 
 log = logging.getLogger(__name__)
 
+# 固定窗口:INCR 后 TTL<0(刚创建或历史无 TTL 残留)→ 补窗口 TTL;不续期。
+_FIXED_WINDOW_LUA = """
+local current = redis.call('INCR', KEYS[1])
+if redis.call('TTL', KEYS[1]) < 0 then
+    redis.call('EXPIRE', KEYS[1], ARGV[2])
+end
+if current > tonumber(ARGV[1]) then
+    return 0
+end
+return 1
+"""
+
+# 滑动窗口:服务端时钟定窗;前一窗口按剩余权重计入估算;超估不递增。
+_SLIDING_WINDOW_LUA = """
+local window = tonumber(ARGV[2])
+local now = tonumber(redis.call('TIME')[1])
+local cur_idx = math.floor(now / window)
+local cur_key = KEYS[1] .. ':' .. cur_idx
+local prev_key = KEYS[1] .. ':' .. (cur_idx - 1)
+local cur = tonumber(redis.call('GET', cur_key) or '0')
+local prev = tonumber(redis.call('GET', prev_key) or '0')
+local weight = (window - (now - cur_idx * window)) / window
+if cur + prev * weight + 1 > tonumber(ARGV[1]) then
+    return 0
+end
+redis.call('INCR', cur_key)
+redis.call('EXPIRE', cur_key, window * 2)
+return 1
+"""
+
 
 class RedisRateLimiter:
     def __init__(self, redis: Redis) -> None:
         self._r = redis
+        self._fixed = redis.register_script(_FIXED_WINDOW_LUA)
+        self._sliding = redis.register_script(_SLIDING_WINDOW_LUA)
 
     async def allow(self, key: str, *, limit: int, window_sec: int) -> bool:
+        """固定窗口判定(工具配额;原子递增+TTL+限额,失败 fail-open)。"""
         try:
-            full_key = f"km:toolrl:{key}"
-            # 首次写入用 SET NX EX 原子带 TTL(审查循环 B8:裸 INCR+EXPIRE 两步间
-            # 进程崩溃会留下无 TTL 的永久计数键,该 (tenant,user) 被永久限流)
-            created = await self._r.set(full_key, 1, ex=window_sec, nx=True)
-            if created:
-                return 1 <= limit
-            count = await self._r.incr(full_key)  # INCR 不改动既有 TTL
-            return count <= limit
+            return bool(await self._fixed(keys=[f"km:toolrl:{key}"], args=[limit, window_sec]))
         except Exception:
             # 降级放行(fail-open):限流层失效不阻断业务,error 暴露
             log.error("限流 Redis 不可用,fail-open 放行 key=%s", key, exc_info=True)
+            return True
+
+    async def allow_sliding(self, key: str, *, limit: int, window_sec: int) -> bool:
+        """滑动窗口判定(问答速率闸;近似加权估算,失败 fail-open)。"""
+        try:
+            return bool(await self._sliding(keys=[f"km:chatrl:{key}"], args=[limit, window_sec]))
+        except Exception:
+            log.error("滑动窗口限流 Redis 不可用,fail-open 放行 key=%s", key, exc_info=True)
             return True

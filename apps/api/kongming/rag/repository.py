@@ -1,6 +1,6 @@
 """rag 仓储(009):rag 两表 SQL + 租户解析 + 全量内省编排(RagRepo 端口实现)。
 
-纪律:向量一律绑定参数 + CAST(:v AS vector) 强转(禁 f-string 拼接序列化向量);
+纪律:向量一律绑定参数 + CAST(:v AS halfvec) 强转(禁 f-string 拼接序列化向量);
 tsvector 应用层维护(to_tsvector 按部署配置 KM_RAG_FULLTEXT_TS_CONFIG 分词,
 098 白名单单源 kongming.config,与 embedding 文本内容对齐);
 召回查询强制 tenant + datasource 双过滤(rag spec「跨租户+跨数据源隔离」);
@@ -149,7 +149,7 @@ class RagRepository:
                 "  embedding, tsv, alias, team_id, created_at, updated_at)"
                 " VALUES (:id, :tenant, :ds, :schema, :table, :comment,"
                 "  CAST(:cols AS jsonb), CAST(:samples AS jsonb), :source,"
-                "  CAST(:vec AS vector),"
+                "  CAST(:vec AS halfvec),"
                 f"  to_tsvector('{self._ts}', :table_t || ' ' || :alias_t || ' ' ||"
                 "  :comment_t || ' ' || :cols_text),"
                 "  :alias, CAST(:team AS uuid), now(), now())"
@@ -467,12 +467,12 @@ class RagRepository:
             await self._s.execute(
                 text(
                     "SELECT schema_name, table_name,"
-                    " 1 - (embedding <=> CAST(:vec AS vector)) AS score"
+                    " 1 - (embedding <=> CAST(:vec AS halfvec)) AS score"
                     " FROM rag.table_descriptions"
                     " WHERE tenant_id = :t AND datasource_key = :d"
                     " AND embedding IS NOT NULL"
                     " AND (team_id IS NULL OR team_id::text = ANY(CAST(:teams AS text[])))"
-                    " ORDER BY embedding <=> CAST(:vec AS vector) LIMIT :k"
+                    " ORDER BY embedding <=> CAST(:vec AS halfvec) LIMIT :k"
                 ),
                 {
                     "t": tenant_id,
@@ -623,7 +623,7 @@ class RagRepository:
             await self._s.execute(
                 text(
                     "SELECT question, sql_text, source_type,"
-                    " 1 - (embedding <=> CAST(:vec AS vector)) AS score"
+                    " 1 - (embedding <=> CAST(:vec AS halfvec)) AS score"
                     " FROM rag.query_history"
                     " WHERE tenant_id = :t AND datasource_key = :d"
                     " AND status = 'SUCCESS' AND recall_enabled"
@@ -631,7 +631,7 @@ class RagRepository:
                     " AND embedding IS NOT NULL"
                     " AND (COALESCE(cardinality(visible_teams), 0) = 0"
                     "      OR visible_teams && CAST(:teams AS text[]))"
-                    " ORDER BY embedding <=> CAST(:vec AS vector) LIMIT :k"
+                    " ORDER BY embedding <=> CAST(:vec AS halfvec) LIMIT :k"
                 ),
                 {
                     "t": tenant_id,
@@ -716,7 +716,7 @@ class RagRepository:
                 "  source_type, recall_enabled, feedback_message_id, embedding,"
                 "  visible_teams, created_at)"
                 " VALUES (:id, :t, :d, :q, :sql, 'SUCCESS', 'FEEDBACK', TRUE,"
-                "         CAST(:mid AS uuid), CAST(:vec AS vector),"
+                "         CAST(:mid AS uuid), CAST(:vec AS halfvec),"
                 "         CAST(:teams AS text[]), now())"
                 " ON CONFLICT (tenant_id, feedback_message_id)"
                 "   WHERE source_type = 'FEEDBACK'"
@@ -776,7 +776,7 @@ class RagRepository:
                 " (id, tenant_id, datasource_key, question, sql_text, status,"
                 "  source_type, recall_enabled, embedding, visible_teams, created_at)"
                 " VALUES (:id, :t, :d, :q, :sql, 'SUCCESS', 'EXECUTION', TRUE,"
-                "         CAST(:vec AS vector), CAST(:teams AS text[]), now())"
+                "         CAST(:vec AS halfvec), CAST(:teams AS text[]), now())"
                 # 070:执行样本幂等目标=部分唯一索引(谓词须逐字匹配)
                 " ON CONFLICT (tenant_id, datasource_key, md5(question))"
                 "   WHERE source_type = 'EXECUTION' DO UPDATE SET"

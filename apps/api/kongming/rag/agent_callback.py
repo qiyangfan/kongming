@@ -19,7 +19,7 @@ from kongming.rag.ports import EmbeddingError
 
 log = logging.getLogger(__name__)
 
-_EMB_CACHE_PREFIX = "km:emb:v1:"  # v1=embedding 模型版本;换模型必须 bump+评估维度迁移
+_EMB_CACHE_PREFIX = "km:emb:v2:"  # v2=Qwen3.7 2560 维(换模型必须 bump+评估维度迁移)
 _EMB_TTL_SEC = 24 * 3600
 
 

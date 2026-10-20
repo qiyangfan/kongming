@@ -183,7 +183,7 @@ _EXPECTED_UPSERT_SQL = (
     "  embedding, tsv, alias, team_id, created_at, updated_at)"
     " VALUES (:id, :tenant, :ds, :schema, :table, :comment,"
     "  CAST(:cols AS jsonb), CAST(:samples AS jsonb), :source,"
-    "  CAST(:vec AS vector),"
+    "  CAST(:vec AS halfvec),"
     "  to_tsvector('simple', :table_t || ' ' || :alias_t || ' ' ||"
     "  :comment_t || ' ' || :cols_text),"
     "  :alias, CAST(:team AS uuid), now(), now())"
@@ -252,7 +252,7 @@ _EXPECTED_CHUNK_INSERT_SQL = (
     " (id, document_id, tenant_id, datasource_key, chunk_level,"
     "  parent_id, seq, source_ref, content, tsv, embedding)"
     " VALUES (:i, :doc, :t, :d, :lv, :pid, :seq, :ref, :content,"
-    "  to_tsvector('simple', :content), CAST(:vec AS vector))"
+    "  to_tsvector('simple', :content), CAST(:vec AS halfvec))"
 )
 
 _EXPECTED_DOC_RECALL_SQL = (

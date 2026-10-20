@@ -13,7 +13,6 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI, Request
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as _Req
@@ -204,18 +203,10 @@ async def _attachment_cleanup_loop() -> None:
 
 def _warn_websearch_misconfiguration() -> None:
     """094:websearch 组合残缺的 dev 告警降级(prod 由 config.fail_closed_checks
-    拒启;lifespan 调用;测试直调——082 _knowledge_endpoint 同款测试化形态)。"""
+    拒启;lifespan 调用;测试直调——_warn_rerank_misconfiguration 同款测试化形态)。"""
     misconfig = get_settings().websearch_misconfiguration()
     if misconfig:
         log.warning("websearch:%s", misconfig)
-
-
-def _warn_ticket_misconfiguration() -> None:
-    """100:ticket 组合残缺的 dev 告警降级(prod 由 config.fail_closed_checks
-    拒启;lifespan 调用;测试直调——_warn_websearch_misconfiguration 同款)。"""
-    misconfig = get_settings().ticket_misconfiguration()
-    if misconfig:
-        log.warning("ticket:%s", misconfig)
 
 
 def _warn_rerank_misconfiguration() -> None:
@@ -224,32 +215,6 @@ def _warn_rerank_misconfiguration() -> None:
     misconfig = get_settings().rerank_misconfiguration()
     if misconfig:
         log.warning("rerank:%s", misconfig)
-
-
-async def _knowledge_endpoint(session: AsyncSession) -> str | None:
-    """081/082:个人知识库端点注册条件;多租户仅告警不拒绝(082 单租户闸降级)。
-
-    1. 未配置 KM_SIKU_BASE_URL → None(零回归缺省);
-    2. 主机非 localhost 白名单 → None + 告警(fail-closed,防个人 vault 外露);
-    3. 多租户部署:告警后照常返回(注册发生)。个人知识源无租户语义,多租户下
-       所有租户共享同一检索面——081 曾据此拒注册,被 owner 环境事实证否
-       (开发库 3 租户时功能静默消失;多租户生产场景被 owner 明确排除),
-       降级为显性告警:功能可用性与残留风险都不隐藏(design D1)。
-    """
-    url = (get_settings().siku_base_url or "").strip()
-    if not url:
-        return None
-    if not tool_registry.is_local_base_url(url):
-        log.warning("KM_SIKU_BASE_URL 主机非 localhost 白名单,knowledge_search 工具不注册")
-        return None
-    count = (await session.execute(text("SELECT COUNT(*) FROM public.sys_tenant"))).scalar_one()
-    if count > 1:
-        log.warning(
-            "多租户部署(租户数=%d):knowledge_search 已注册,但个人知识源无租户隔离,"
-            "所有租户共享同一检索面(v1 定位个人单租户部署)",
-            count,
-        )
-    return url
 
 
 @asynccontextmanager
@@ -291,15 +256,11 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
             if nr:
                 log.info("启动扫描:%d 个滞留 GENERATING 的报告标记 FAILED", nr)
         _warn_websearch_misconfiguration()  # 094(prod 已拒启;dev 告警降级)
-        _warn_ticket_misconfiguration()  # 100(同上口径)
         _warn_rerank_misconfiguration()  # add-doc-rerank(同上口径)
         tool_registry.activate(
             tool_registry.build_registry(
-                await _knowledge_endpoint(session),
                 websearch_provider=get_settings().websearch_provider,
                 websearch_api_key=get_settings().websearch_api_key,
-                ticket_base_url=get_settings().ticket_base_url,
-                ticket_api_key=get_settings().ticket_api_key,
             )
         )
         # 0044:域启停持久状态装载(重启/多副本以库收敛;无网关静默跳过)

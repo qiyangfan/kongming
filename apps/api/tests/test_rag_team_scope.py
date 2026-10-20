@@ -28,7 +28,7 @@ from tests.test_chat_query import _auth, _bind, _login
 from tests.test_toolcall import _mk_role_with_perms
 
 INTERNAL = {"X-Internal-Token": "test-internal-token"}
-EMB_DIM = 1536
+EMB_DIM = 2560
 
 
 def _fake_vector(seed_text: str) -> list[float]:
@@ -1042,7 +1042,7 @@ class _FixedEmbedder:
     """embedding 端口桩(同文本同向量,保证召回向量可比)。"""
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        return [[0.1] * 1536 for _ in texts]
+        return [[0.1] * 2560 for _ in texts]
 
     async def describe(self, block: TableBlock, schema_name: str) -> tuple[bool, TableBlock]:
         raise AssertionError("回写路径不应触 describer")
@@ -1115,7 +1115,7 @@ async def test_history_sample_visibility_roundtrip(session: AsyncSession) -> Non
         hits = await repo.recall_history(
             tenant_id=tid,
             datasource_key="default",
-            vector=[0.1] * 1536,
+            vector=[0.1] * 2560,
             visible_team_ids=teams,
         )
         return {h.question for h in hits}

@@ -56,7 +56,13 @@
 
 ### Requirement: 统一出站通道
 
-所有域的外部调用 SHALL 收口于控制面统一出站通道:鉴权材料装配、超时控制、审计切面、失败分类由通道单点承担,域执行器只做协议适配(请求/响应的域方言翻译)。通道 SHALL 支持按域选择执行器(域执行器映射);未声明专属执行器的域 SHALL 回落既有通道级执行器——既有域的执行路径与行为 MUST 零回归。Agent 面 SHALL 恒经既有 `/internal/tool/execute` 回调触发域工具,MUST NOT 直连任何域端点,MUST NOT 持有或感知域凭证(ADR-002 不动,不新增内部端点)。通道超时 SHALL 按域清单配置(部署级可配);超时按分型归类:连接超时归入连接类失败按其重试语义处理(至多重试一次),读超时归入响应类失败(不重试)。
+所有域的外部调用 SHALL 收口于控制面统一出站通道：鉴权材料装配、超时控制、审计切面和失败分类由通道承担，域执行器只做协议适配。通道 SHALL 支持按域选择执行器；未声明专属执行器的域 SHALL 回落通道级执行器。Agent 面 SHALL 经既有 `/internal/tool/execute` 回调触发域工具，MUST NOT 直连域端点或持有域凭证。通道超时 SHALL 按域清单配置；连接超时按策略最多重试一次，读超时不重试。
+
+#### Scenario: 按域执行器路由
+
+- **GIVEN** 网关注册了 websearch 域并声明专属执行器
+- **WHEN** 执行该域工具
+- **THEN** 该域出站由其专属执行器承担(请求形态/鉴权头按域适配),未声明专属执行器的域仍走通道级执行器,既有域行为逐字段不变
 
 #### Scenario: 域凭证只在控制面
 
@@ -69,12 +75,6 @@
 - **GIVEN** 域清单配置超时 5s,端点 8s 未响应
 - **WHEN** 出站调用
 - **THEN** 通道按超时中断,失败分类按超时分型:连接超时归连接类(按策略器重试语义至多重试一次),读超时归响应类(不重试)
-
-#### Scenario: 按域执行器路由
-
-- **GIVEN** 网关注册了 knowledge 与 websearch 两域,各自声明专属执行器
-- **WHEN** 分别执行两域工具
-- **THEN** 各域出站由其专属执行器承担(请求形态/鉴权头按域适配),未声明专属执行器的域仍走通道级执行器,既有域行为逐字段不变
 
 ### Requirement: 域级审计与失败采集
 
@@ -91,22 +91,6 @@
 - **GIVEN** 某域端点服务未监听
 - **WHEN** LLM 调用该域工具
 - **THEN** 返回 unreachable 观察(含一次连接层重试),agent 据实说明域暂不可用,本轮问答不崩溃
-
-### Requirement: 迁移与零回归
-
-既有外部检索工具(knowledge_search)SHALL 收编为网关上的第一个域:其对外行为(注入/授权/观察形态/审计/重试语义)MUST 与迁移前逐字段一致,external-knowledge 主 spec 全部场景回归通过。既有内置工具(SQL 校验/执行/RAG 检索/公告/沙箱/动态 MCP)SHALL 行为零改动——网关分发仅新增域路由维度,未命中域的执行路径与引入前一致。
-
-#### Scenario: knowledge_search 零回归
-
-- **GIVEN** external-knowledge spec 的任一场景
-- **WHEN** 迁移后执行
-- **THEN** 行为与迁移前逐字段一致(观察形态/锚点/审计/失败分类)
-
-#### Scenario: 内置工具零回归
-
-- **GIVEN** 既有六个工具的任一调用
-- **WHEN** 网关引入后执行
-- **THEN** 执行路径与行为逐字段一致,评估基线不降
 
 ### Requirement: 域治理面
 
@@ -164,105 +148,35 @@
 
 ### Requirement: web 检索域配额与授权
 
-`websearch` 域限流配额 SHALL 独立配置(配额第二维度按域分桶),与其它域配额互不挤占。工具权限点 `tool:websearch:search` SHALL 显式授予制(不进 DEVELOPER 推荐集,SUPER_ADMIN 种子自动覆盖);域治理(清单摘要/启停)沿用既有 system:tool:manage 口径,websearch 域自动出现在治理清单。
+`websearch` 域限流配额 SHALL 独立配置，与其它已注册域的配额互不挤占。工具权限点 `tool:websearch:search` SHALL 显式授予制，不进入 DEVELOPER 推荐集，由 SUPER_ADMIN 种子自动覆盖；域治理沿用既有 `system:tool:manage` 口径，websearch 域自动出现在治理清单。
 
 #### Scenario: 配额独立分桶
 
-- **GIVEN** 同一用户同一分钟内调满 knowledge 域配额
-- **WHEN** 该用户调用 web_search
-- **THEN** websearch 域按自身配额独立判定,不因 knowledge 域配额用尽而限流
+- **GIVEN** 同一用户同一分钟内调满 websearch 域配额
+- **WHEN** 该用户调用另一个已注册域的工具
+- **THEN** 另一域按自身配额独立判定，不因 websearch 域配额用尽而限流
 
 #### Scenario: 显式授予制
 
-- **GIVEN** 默认角色用户未显式授予 tool:websearch:search
+- **GIVEN** 默认角色用户未显式授予 `tool:websearch:search`
 - **WHEN** 发起问答
-- **THEN** web_search 不在其授权注入集;显式授予后可见可用
+- **THEN** `web_search` 不在其授权注入集；显式授予后可见可用
 
-### Requirement: 内部系统连接器域注册与服务凭证
+### Requirement: 已退役工单工具请求拒绝
 
-系统 SHALL 提供 `ticket` 工具域(内部系统连接器首接:工单):域端点与服务
-凭证由部署配置单源派生,采用部署级条件注册——端点与凭证均配置才注册,
-条件未满足时与「域从未存在」不可区分;配置残缺(仅端点无凭证或反之,
-prod 环境)SHALL fail-closed 拒启并显式报缺项,dev 显式告警降级(与
-websearch 域同口径)。服务凭证 SHALL 只存控制面环境变量并仅在出站请求装配
-(ADR-002 不动),MUST NOT 落库、MUST NOT 入日志与审计明文。工单系统 SHALL
-按「最小工单 API 约定」对接(列表/单查/创建三端点形态,约定文档化),
-适配字段映射收在适配单点;MUST NOT 为对接差异在域外散落第二套映射。
+系统 SHALL 拒绝对已退役工单工具的直接调用与待确认操作；拒绝时 MUST NOT 发出外部请求。
 
-#### Scenario: 端点与凭证齐备注册
+#### Scenario: 直接调用已退役工具
 
-- **GIVEN** 部署配置工单系统端点与服务凭证
-- **WHEN** 控制面启动
-- **THEN** ticket 域注册,其工具经授权集注入,域出现在治理清单
+- **GIVEN** 请求仍携带 `ticket_search`、`ticket_get` 或 `ticket_create` 工具名
+- **WHEN** 控制面收到该调用
+- **THEN** 调用被拒绝并记录审计，且没有外部请求
 
-#### Scenario: 未配置零感知
+#### Scenario: 确认已退役的创建操作
 
-- **GIVEN** 部署未配置端点与凭证
-- **WHEN** 任意调用方发起问答或直调工单工具回调
-- **THEN** 工具不出现在注入集,直调被拒并落审计——与「域从未存在」不可区分
-
-#### Scenario: prod 配置残缺拒启
-
-- **GIVEN** prod 部署仅配置端点未配置凭证
-- **WHEN** 控制面启动
-- **THEN** fail-closed 拒启并显式报缺项,不静默不注册
-
-### Requirement: 预置工具语义与响应标准化
-
-ticket 域 SHALL 预置三个工具:`ticket_search`(关键词/状态/上限入参,返回
-标准化工单卡列表与命中计数)、`ticket_get`(id 入参,返回标准化详情卡,
-不存在按响应类失败如实表达)、`ticket_create`(标题/描述/优先级入参,
-**写工具,缺省需确认**,执行前走既有写工具确认流,确认前 MUST NOT 出站)。
-工单卡 SHALL 为 allowlist 字段(标识/标题/状态/优先级/负责人/时间戳),
-白名单外字段与内部系统元数据 MUST NOT 进工具观察;状态/优先级枚举值
-SHALL 原样透传(MUST NOT 平台侧翻译语义)。参数校验按预置声明执行;
-连接级失败重试至多一次,响应类错误不重试;空结果如实表达(计数 0)。
-
-#### Scenario: 检索返回标准化工单卡
-
-- **GIVEN** 工单系统有 3 条匹配工单,报文含白名单外内部字段
-- **WHEN** LLM 调用 ticket_search
-- **THEN** 观察只含 3 张标准化工单卡与命中计数,内部字段不出现在观察
-
-#### Scenario: 创建工单走确认流
-
-- **GIVEN** LLM 准备调用 ticket_create
-- **WHEN** 用户未确认
-- **THEN** 不出站、工单系统无新单;确认后才执行并如实返回结果
-
-#### Scenario: 单查不存在如实失败
-
-- **GIVEN** 工单 id 不存在
-- **WHEN** 调用 ticket_get
-- **THEN** 按响应类失败返回友好「不存在」观察,不编造、不静默吐空
-
-### Requirement: ticket 域授权、审计与配额
-
-`tool:ticket:search`(search/get)与 `tool:ticket:manage`(create)SHALL
-显式授予制(不进默认角色推荐集,SUPER_ADMIN 种子自动覆盖);未授权工具
-不出现在注入集、直调被拒并落审计。每次域工具执行 SHALL 落既有工具审计表
-(域标签=ticket,记录工具名/参数摘要/成败分类/耗时,同表同语义);create
-执行 SHALL 在审计参数摘要中记录目标工单标识(创建结果回填)。ticket 域
-限流配额 SHALL 独立分桶,与其它域互不挤占。既有域与内置工具行为
-MUST 零回归。
-
-#### Scenario: 未授权不可见
-
-- **GIVEN** 用户未获 ticket 工具权限点
-- **WHEN** 发起问答
-- **THEN** 工单工具不在注入集,直调被拒并落审计
-
-#### Scenario: 配额独立分桶
-
-- **GIVEN** 同一用户调满其它域配额
-- **WHEN** 该用户调用 ticket_search
-- **THEN** ticket 域按自身配额独立判定,不受其它域挤占
-
-#### Scenario: 既有域零回归
-
-- **GIVEN** websearch 域与内置工具任一既有场景
-- **WHEN** ticket 域引入后执行
-- **THEN** 行为与引入前逐字段一致
+- **GIVEN** 存在待确认的 `ticket_create` 操作
+- **WHEN** 用户提交确认
+- **THEN** 操作被拒绝并标记为 `REJECTED`，且没有外部请求
 
 ### Requirement: HTTP 连接器注册与凭证治理
 
@@ -395,12 +309,10 @@ api-key 头/basic)与鉴权材料。鉴权材料 SHALL 加密落库(与既有 we
 
 ### Requirement: 既有域零回归
 
-HTTP 连接器域接入 MUST NOT 改变既有域(websearch/knowledge)与内置工具的
-任何行为:注入、授权、执行路径、审计形态逐字段一致;未注册连接器的租户
-MUST 与「能力从未存在」不可区分。
+HTTP 连接器域接入 MUST NOT 改变既有域（websearch）与内置工具的行为：注入、授权、执行路径和审计形态逐字段一致。未注册连接器的租户 MUST 与“能力从未存在”不可区分。
 
 #### Scenario: 既有域行为一致
 
 - **GIVEN** 任意既有域工具的任一场景
 - **WHEN** HTTP 连接器域引入后执行
-- **THEN** 行为与引入前逐字段一致(含 websearch 全部场景回归)
+- **THEN** 行为与引入前逐字段一致

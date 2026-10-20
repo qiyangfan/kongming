@@ -39,26 +39,13 @@ fail-closed 拒绝(同形,防 key 探测)。该集合为知识上传 schema 字�
 
 ### Requirement: 文档上传与索引
 
-上传 Markdown 表说明(`## 表名` 二级标题切块),生成 embedding(1536 维)后
-幂等写入 rag.table_descriptions;重复上传覆盖更新(upsert);无权限或超限被拒。
-端点为 `POST /system/rag/documents/upload`(multipart),要求 system:rag:manage
-权限 + 租户上下文(与 chat 域同构的 X-Tenant-Id 白名单复校);datasource_key
-SHALL 通过存在+启用+归属当前租户校验;表单 schema_name SHALL 双闸校验——
-先过 PG 标识符语法校验(`^[a-z_][a-z0-9_]{0,62}$`,与 datasource 域
-default_schema 同一规则),再校验其属于该数据源的可扫描 schema 集合
-(与内省扫描同源同口径,见「可扫描 Schema 枚举」),越界即 400
-`SCHEMA_NOT_ALLOWED`,不落库——写边界 fail-fast,防拼错 schema 静默毒化召回;
-文档标题解析出的表名/schema SHALL 小写折叠(PG 未加引号标识符语义)。
-上传文件名(doc_name)SHALL 过 PII 检测(护栏 pii_* 规则集),命中敏感信息
-(身份证号/手机号等)即 400 拒绝——拒绝优于脱敏(脱敏后名可能撞
-uq_documents_tdq 唯一键);数字命名的正常文件(订单号等)按既有 bankcard
-19/20 前缀排除口径不误拒。
-知识条目以 (tenant_id, datasource_key, schema_name, table_name) 四元唯一
-(baseline 既定形态,与召回过滤维度对齐)。上传来源 SHALL 标记
-source_type=MANUAL_UPLOAD;embedding 输入文本 SHALL 为「表名 + 表说明 +
-字段说明原文」的确定性拼接。支持扩展名:.md/.markdown/.txt(文本链路)。
-上传解析 SHALL 在表块数上限(默认 500)内——超限拒绝,防大文档切块风暴;
-上传属管理写操作,SHALL 落 sys_oper_log 审计(与业务同事务)。
+上传 Markdown 表说明(`## 表名` 二级标题切块),生成 embedding(2560 维)后幂等写入 rag.table_descriptions;重复上传覆盖更新(upsert);无权限或超限被拒。embedding 应由同一部署模型生成且维度固定为 2560,并用于表说明和历史问句召回。端点为 `POST /system/rag/documents/upload`(multipart),要求 system:rag:manage 权限 + 租户上下文(与 chat 域同构的 X-Tenant-Id 白名单复校);datasource_key SHALL 通过存在+启用+归属当前租户校验;表单 schema_name SHALL 双闸校验——先过 PG 标识符语法校验(`^[a-z_][a-z0-9_]{0,62}$`,与 datasource 域 default_schema 同一规则),再校验其属于该数据源的可扫描 schema 集合(与内省扫描同源同口径,见「可扫描 Schema 枚举」),越界即 400 `SCHEMA_NOT_ALLOWED`,不落库——写边界 fail-fast,防拼错 schema 静默毒化召回;文档标题解析出的表名/schema SHALL 小写折叠(PG 未加引号标识符语义)。上传文件名(doc_name)SHALL 过 PII 检测(护栏 pii_* 规则集),命中敏感信息(身份证号/手机号等)即 400 拒绝——拒绝优于脱敏(脱敏后名可能撞 uq_documents_tdq 唯一键);数字命名的正常文件(订单号等)按既有 bankcard 19/20 前缀排除口径不误拒。知识条目以 (tenant_id, datasource_key, schema_name, table_name) 四元唯一(baseline 既定形态,与召回过滤维度对齐)。上传来源 SHALL 标记 source_type=MANUAL_UPLOAD;embedding 输入文本 SHALL 为「表名 + 表说明 + 字段说明原文」的确定性拼接。支持扩展名:.md/.markdown/.txt(文本链路)。上传解析 SHALL 在表块数上限(默认 500)内——超限拒绝,防大文档切块风暴;上传属管理写操作,SHALL 落 sys_oper_log 审计(与业务同事务)。
+
+#### Scenario: 上传表说明使用统一向量维度
+
+- GIVEN 用户上传有效表说明且 embedding 服务可用
+- WHEN 表说明被索引并随后参与召回
+- THEN 写入的表说明向量和查询向量均为 2560 维
 
 #### Scenario: 上传表说明 Markdown 成功索引
 
@@ -75,7 +62,7 @@ source_type=MANUAL_UPLOAD;embedding 输入文本 SHALL 为「表名 + 表说明 
 
 #### Scenario: 无权限用户上传被拒
 
-- GIVEN 用户角色无 system:rag:manage
+- GIVEN 用户角色无 system:rag:manage 权限
 - WHEN 上传
 - THEN 返回 403
 
@@ -105,8 +92,7 @@ source_type=MANUAL_UPLOAD;embedding 输入文本 SHALL 为「表名 + 表说明 
 
 #### Scenario: schema_name 不在可扫描集合被拒
 
-- GIVEN 上传表单 schema_name 语法合法但不在该数据源可扫描集合
-  (如 default 源填 `tenant_others`、拼错的 `tenant_sakila1`)
+- GIVEN 上传表单 schema_name 语法合法但不在该数据源可扫描集合(如 default 源填 `tenant_others`、拼错的 `tenant_sakila1`)
 - WHEN 上传
 - THEN 返回 400 SCHEMA_NOT_ALLOWED,不落库(写边界拦截,错误不上置到提问期)
 

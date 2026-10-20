@@ -5,7 +5,8 @@
 5+ 次 LLM 调用)。
 
 本模块(零框架,宪法 Article II):
-- **速率闸**(fail-open):Redis 固定窗口,_LIMITER 不可用放行——限流是
+- **速率闸**(fail-open):Redis 近似滑动窗口(跨窗口平滑,窗口切换不再
+  立即发放完整新额度),_LIMITER 不可用放行——限流是
   配额保护层而非安全闸(安全闸=权限点/租户/防火墙各自独立,与 019 同口径);
 - **配额闸**(fail-closed):日/月按次,已用量 = sys_llm_usage 行数按窗口
   count(不新增用量表,避免与 055 对账重复建账);读数异常拒绝并落审计
@@ -36,9 +37,15 @@ quota_warn_var: ContextVar[str] = ContextVar("kongming_chat_quota_warn", default
 
 
 class RateLimiterPort(Protocol):
-    """固定窗口限流端口(RedisRateLimiter 满足;鸭子类型便于测试注入)。"""
+    """限流端口(RedisRateLimiter 满足;鸭子类型便于测试注入)。
+
+    allow=固定窗口(工具配额);allow_sliding=近似滑动窗口(问答速率闸,
+    跨窗口平滑,消除窗口切换的完整额度重置)。
+    """
 
     async def allow(self, key: str, *, limit: int, window_sec: int) -> bool: ...
+
+    async def allow_sliding(self, key: str, *, limit: int, window_sec: int) -> bool: ...
 
 
 class UsageCounterPort(Protocol):
@@ -108,7 +115,7 @@ class ChatCostGate:
         """登录用户面双闸:速率(租户,用户)→ 配额(租户)。通过返回 warn(可空)。"""
         if self._rate > 0:
             try:
-                allowed = await self._limiter.allow(
+                allowed = await self._limiter.allow_sliding(
                     f"chat:{tenant_id}:{user_id}", limit=self._rate, window_sec=60
                 )
             except Exception:  # noqa: BLE001  # 限流存储异常=fail-open 放行(019 同口径)
@@ -205,7 +212,7 @@ class ChatCostGate:
             return
         key = f"chatbot:{bot_key}:{client_ip or 'noip'}"
         try:
-            allowed = await self._limiter.allow(key, limit=self._bot_rate, window_sec=60)
+            allowed = await self._limiter.allow_sliding(key, limit=self._bot_rate, window_sec=60)
         except Exception:  # noqa: BLE001  # 同上:fail-open
             log.error("bot 速率闸存储异常,fail-open 放行", exc_info=True)
             allowed = True

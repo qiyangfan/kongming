@@ -68,9 +68,6 @@ PERMISSIONS: list[tuple[str, str, int]] = [
     ("system:skill:manage", "Skill包管理", 30),
     # 069 chat-quality-observability:轮次质量观测(仅 SUPER_ADMIN)
     ("system:chat-quality:view", "问答质量查看", 31),
-    # 081 external-knowledge:个人知识库检索(显式授予制,不进 DEVELOPER 推荐集——
-    # 单租户个人部署由 SUPER_ADMIN 自动覆盖;多租户场景告警但不拒注册,082)
-    ("tool:knowledge:search", "工具-个人知识库检索", 32),
     # 088 report-generation:分析报告(生成/读取/导出;进 DEVELOPER 推荐集——
     # 取数走既有只读链路逐层复校,无权限放大)
     ("report:generate", "报告生成", 33),
@@ -82,15 +79,8 @@ PERMISSIONS: list[tuple[str, str, int]] = [
     ("task:read", "任务读取", 37),
     ("task:manage", "任务管理", 38),
     # 094 web-search-domain:联网检索(显式授予制,不进 DEVELOPER 推荐集——
-    # 查询内容外发第三方检索供应商 + API 成本,与 knowledge:search 同哲学;
-    # SUPER_ADMIN 由增量逻辑自动覆盖)
+    # 查询内容外发第三方检索供应商 + API 成本;SUPER_ADMIN 由增量逻辑自动覆盖)
     ("tool:websearch:search", "工具-联网搜索", 39),
-    # 100 internal-connector-domain:内部工单(读/写分权两点:search 收敛
-    # search/get 读面,manage 收敛 create 写面——读放宽写收紧是内部系统的
-    # 自然授权形态;均显式授予制,不进 DEVELOPER 推荐集;create 的确认流
-    # 独立于权限点,有权限仍需确认;SUPER_ADMIN 由增量逻辑自动覆盖)
-    ("tool:ticket:search", "工具-工单检索", 40),
-    ("tool:ticket:manage", "工具-工单管理", 41),
     # 099 http-connector-domain:连接器治理面(仅 SUPER_ADMIN)+ 工具调用
     # (显式授予制,不进 DEVELOPER 推荐集——租户自定义端点出站 + 凭证治理,
     # 与 websearch 同哲学;SUPER_ADMIN 由增量逻辑自动覆盖)

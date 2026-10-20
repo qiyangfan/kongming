@@ -79,6 +79,8 @@ async def fetch_muniu_cost(
     """
     if not token:
         return CostTrack(available=False, reason="muniu_admin_token 未配置")
+    if not base_url.strip():
+        return CostTrack(available=False, reason="muniu_admin_base_url 未配置")
     params: dict[str, str] = {"group_by": "key", "from": _window_since_rfc3339(window_days)}
     try:
         async with httpx.AsyncClient(timeout=5.0, transport=transport, trust_env=False) as client:

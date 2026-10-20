@@ -5,7 +5,7 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from kongming.toolgateway.models import WEBSEARCH_PROVIDERS, parse_ticket_endpoint
+from kongming.toolgateway.models import WEBSEARCH_PROVIDERS
 
 # 098:全文检索分词配置白名单(部署级单值;rag 表说明路与 document-rag 文档面
 # 同源)。单点在 config 层(域内只消费注入值):配置名是 SQL 标识符无法绑定
@@ -31,12 +31,12 @@ RERANK_PROVIDERS: dict[str, tuple[str, str]] = {
 
 
 def validated_fulltext_ts_config(value: str) -> str:
-    """全文检索分词配置白名单校验闸(值域与缺省单源于此,全仓唯一)。
+    """检查全文检索使用的分词配置是否受支持。
 
-    合法值原样返回;白名单外值抛 ValueError。config 启动期拒启与仓储/缓存
-    构造期防线(消费方直构未过 settings)共用同一判定,禁另起口径。"""
+    支持的配置原样返回；不支持的配置会抛出 ValueError。
+    应用启动、仓储和缓存初始化都会调用这里，确保校验规则一致。"""
     if value not in FULLTEXT_TS_CONFIGS:
-        valid = "、".join(FULLTEXT_TS_CONFIGS)
+        valid = ",".join(FULLTEXT_TS_CONFIGS)
         raise ValueError(f"全文检索分词配置非法值 {value}(值域:{valid})")
     return value
 
@@ -127,8 +127,8 @@ class Settings(BaseSettings):
     task_budget_max_seconds: int = Field(default=900, gt=0)
     # 图内确认过期 TTL(add-graph-checkpoint;与任务审批门过期同语义,分钟制)
     graph_confirm_ttl_minutes: int = Field(default=30, ge=1)
-    # 上界与内部回调形参硬限单点对齐(collab-turn worker_no/round_no le=64、
-    # 拓扑 max_rounds le=16):部署放大天花板超形参限会被静默吞掉,此处收口
+    # 协作人数最多 64，轮次最多 16，与内部接口的限制保持一致。
+    # 配置超过接口上限时，超出的协作事件可能会被接口忽略。
     collab_max_workers: int = Field(default=3, ge=1, le=64)
     # 115:圆桌轮次上限(拓扑声明钳制;与 agent 面执行兜底同值同源)
     collab_max_rounds: int = Field(default=3, ge=1, le=16)
@@ -140,15 +140,9 @@ class Settings(BaseSettings):
     # 内部元数据通道:租户 schema 内省表数上限(防 prompt 膨胀)
     meta_schema_max_tables: int = Field(default=50, ge=1)
 
-    # 064 召回相关度闸门:恒生效裁剪(2026-10-11 owner 裁决收编三态——
-    # 无生产流量,off/shadow/primary 的标定前提不存在;零误拒对拍已证即
-    # 直接切,不保留关闭/影子形态)。阈值按路独立(向量=余弦相似度 /
-    # 全文=ts_rank 量纲不同,不共用)。向量档已按评估集标定(2026-10-10
-    # 对拍:知识在位可答题 top1 最低 0.683,0.30 有 2.3× 余量、零误拒;
-    # 成对写入,防「mean=0 判据恒真」的半开脚枪);全文档量纲未标定,
-    # 保持 0(=该路不裁,非恒真放行——is_relevant 的 mean 恒真只在
-    # top1 档>0 时有语义,两档均为 0 即整路不裁)。启用前置已代码化:
-    # 零知识数据源闸门自动旁路(zero-knowledge ≠ low-relevance)。
+    # 相关度闸门始终生效；向量和全文的打分不同，门槛分别设置。
+    # 向量门槛已有评测依据；全文门槛尚未标定，暂设为 0（不裁全文结果）。
+    # 没有知识的数据源跳过闸门，避免把“无知识”误判成“低相关”。
     rag_gate_vector_top1: float = Field(default=0.30, ge=0.0)
     rag_gate_vector_mean: float = Field(default=0.28, ge=0.0)
     rag_gate_fulltext_top1: float = Field(default=0.0, ge=0.0)
@@ -161,19 +155,20 @@ class Settings(BaseSettings):
     rag_binary_upload_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024)
     # embedding 维度(009):缓存/回调向量的程序防线——换模型未 bump 缓存版本
     # 时,旧维度向量命中会被拦为 EmbeddingError(降级),不再 500(R2-R1)
-    rag_embedding_dim: int = Field(default=1536, ge=1)
+    # upgrade-rag-qwen3-halfvec-2560:Qwen3.7 显式 2560 维,四列 halfvec(2560)
+    rag_embedding_dim: int = Field(default=2560, ge=1)
 
-    # 098:全文检索分词配置(部署级单值;rag 表说明路与 document-rag 文档面
-    # 写读同源)。缺省 simple 零回归;白名单(simple/zhparser,值域单源见本
-    # 模块 FULLTEXT_TS_CONFIGS)外值一律拒启(dev/prod 同——降级=换词法,与
-    # 存量 tsv 错配,不存在安全降级形态;启用 zhparser 另需 PG 扩展,安装配方
-    # 见 docs/HANDOFF.md「zhparser 安装配方」)。切换后须重扫/重建重算存量 tsv
-    # 并复标全文路阈值(064 全文路 ts_rank 量纲随分词变化)。
+    # 098:全文检索按部署配置使用同一种分词规则，RAG 表说明和上传文档共用这套规则。
+    # 默认使用 simple，和现有行为一致。只接受 simple、zhparser（见 FULLTEXT_TS_CONFIGS）；
+    # 填其他值会让服务启动失败，开发和生产环境都一样，避免已有数据与分词规则对不上。
+    # 使用 zhparser 前需在 PostgreSQL 安装扩展，步骤见 docs/HANDOFF.md「zhparser 安装配方」。
+    # 切换分词规则后，要按新规则重新生成已有内容的全文检索数据，并重新校准检索阈值，
+    # 因为分词方式会影响检索相关性评分（064）。
     rag_fulltext_ts_config: str = DEFAULT_FULLTEXT_TS_CONFIG
 
-    # 095 关系感知召回扩展:缺省开启;整项 kill switch=置 false 即回到无扩展
-    # 形态(逐字一致,零回归);rag_expand_max 为单轮扩展表上限(0=不扩展)。
-    # 判据是二值的(关系行在不在),无需 064 式灰度标定,故只做开关+上限。
+    # 默认开启：根据已登记的表关系，为召回结果补充一跳关联表；设为 false 可关闭扩展。
+    # rag_expand_max 限制每次最多补充的关联表数量；设为 0 时不补充。
+    # 扩展只使用已登记的关系，不会猜测；是否补充由关系记录是否存在决定。
     rag_expand_enabled: bool = True
     rag_expand_max: int = Field(default=2, ge=0)
 
@@ -233,15 +228,6 @@ class Settings(BaseSettings):
     mcp_breaker_threshold: int = Field(default=3, ge=1, le=100)
     mcp_breaker_cooldown_sec: int = Field(default=60, ge=1, le=3600)
 
-    # 081 external-knowledge:个人本地知识库(siku)检索端点。空=knowledge_search
-    # 工具不注册(零回归);非空须过 localhost 白名单(registry.is_local_base_url)
-    # 才生效(端点+localhost 白名单两道注册条件;多租户仅告警,082 降闸)
-    siku_base_url: str = ""
-    siku_timeout_ms: int = Field(default=5000, ge=1, le=60000)
-    # 089 工具网关:knowledge 域限流第二维度(租户+用户固定窗口,叠加在
-    # 工具总配额之上;部署级可调)
-    toolgateway_knowledge_quota: int = Field(default=30, ge=1, le=600)
-
     # 094 web-search-domain:联网检索域(供应商+API key 齐备才注册 web_search;
     # 均未配置=域零感知,合法缺省)。凭证只存控制面环境变量(ADR-002)
     websearch_provider: str = ""  # tavily | bocha | zhipu | alibaba_ai_search
@@ -261,15 +247,6 @@ class Settings(BaseSettings):
     rerank_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0)  # 0=不过滤
     rerank_timeout_ms: int = Field(default=3000, ge=100, le=30000)
 
-    # 100 internal-connector-domain:内部工单域(部署级条件注册:端点+服务凭证
-    # 齐备才注册 ticket 三工具;均缺省=域零感知,合法缺省)。内部系统凭证属
-    # 企业部署事实(服务账号),与 websearch 同谱系,只存控制面环境变量(ADR-002);
-    # 对接面=「最小工单 API 约定」(单源:scripts/mock_ticket_server.py 文件头)
-    ticket_base_url: str = ""
-    ticket_api_key: str = ""
-    ticket_timeout_ms: int = Field(default=5000, ge=1, le=30000)
-    toolgateway_ticket_quota: int = Field(default=20, ge=1, le=600)
-
     # 099 http-connector-domain:租户级 HTTP 连接器(声明存库行,注入集按请求
     # 动态装配;凭证加密落库,复用 008 cipher 单点)。注册超时受部署级上限封顶
     # (spec「超时按注册声明,部署级上限封顶」);配额独立分桶(与既有域互不挤占)
@@ -280,9 +257,9 @@ class Settings(BaseSettings):
     # 引擎只对拍观测)。切换期行为契约零变更;引擎缺失/异常自动降级不阻断。
     sqlguard_mode: str = "shadow"
 
-    # 成本对账旁路(055):muniu 管理面只读访问,凭证环境变量注入,
-    # 不落库不入日志;token 空 = 对账端点报告「未配置」。
-    muniu_admin_base_url: str = "http://127.0.0.1:8787"
+    # 成本对账旁路(055):muniu 管理面只读访问,URL 与凭证均显式配置,
+    # 凭证环境变量注入,不落库不入日志;任一项空 = 对账端点报告「未配置」。
+    muniu_admin_base_url: str = ""
     muniu_admin_token: str = ""
     cost_reconcile_threshold: float = Field(default=0.2, ge=0.0, le=1.0)
 
@@ -301,31 +278,13 @@ class Settings(BaseSettings):
                 return "KM_WEBSEARCH_API_KEY 已配置但 KM_WEBSEARCH_PROVIDER 缺失,websearch 域不注册"
             return None
         if provider not in WEBSEARCH_PROVIDERS:
-            valid = "、".join(sorted(WEBSEARCH_PROVIDERS))
+            valid = ",".join(sorted(WEBSEARCH_PROVIDERS))
             return f"KM_WEBSEARCH_PROVIDER 非法值 {provider}(值域:{valid})"
         if not key:
             return (
                 f"KM_WEBSEARCH_PROVIDER={provider} 已配置但 KM_WEBSEARCH_API_KEY 缺失,"
                 "websearch 域不注册"
             )
-        return None
-
-    def ticket_misconfiguration(self) -> str | None:
-        """100:ticket 组合配置校验(残缺返回描述,否则 None)。
-
-        prod 由 fail_closed_checks 拒启;dev 由 lifespan 告警降级(域不注册)。
-        均未配置=合法缺省(零感知),不视为残缺。
-        """
-        base = (self.ticket_base_url or "").strip()
-        key = (self.ticket_api_key or "").strip()
-        if not base:
-            if key:
-                return "KM_TICKET_API_KEY 已配置但 KM_TICKET_BASE_URL 缺失,ticket 域不注册"
-            return None
-        if not key:
-            return "KM_TICKET_BASE_URL 已配置但 KM_TICKET_API_KEY 缺失,ticket 域不注册"
-        if parse_ticket_endpoint(base) is None:
-            return f"KM_TICKET_BASE_URL 非法(须为可解析的 http(s) 地址),ticket 域不注册:{base}"
         return None
 
     def rerank_misconfiguration(self) -> str | None:
@@ -359,7 +318,7 @@ class Settings(BaseSettings):
         合法部署形态,降级只会静默失效无信号);get_settings 启动期调用。"""
         provider = (self.rerank_provider or "").strip().lower()
         if provider and provider not in RERANK_PROVIDERS:
-            valid = "、".join(sorted(RERANK_PROVIDERS))
+            valid = ",".join(sorted(RERANK_PROVIDERS))
             raise RuntimeError(f"KM_RERANK_PROVIDER 非法值 {provider}(值域:{valid})")
 
     def require_fulltext_ts_config(self) -> str:
@@ -400,10 +359,6 @@ class Settings(BaseSettings):
         ws_misconfig = self.websearch_misconfiguration()
         if ws_misconfig:
             raise RuntimeError(f"prod fail-closed: {ws_misconfig}")
-        # 100:ticket 组合残缺(端点缺凭证/凭证缺端点/端点非法)同口径拒启
-        tk_misconfig = self.ticket_misconfiguration()
-        if tk_misconfig:
-            raise RuntimeError(f"prod fail-closed: {tk_misconfig}")
         # add-doc-rerank:精排组合残缺同口径拒启(provider 非法值由
         # require_rerank_provider 在 dev/prod 一律拒,此处只管残缺族)
         rk_misconfig = self.rerank_misconfiguration()

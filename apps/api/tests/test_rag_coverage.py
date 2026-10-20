@@ -216,7 +216,7 @@ def counting_agent(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
 
     async def fake_embed(self: AgentRagClient, texts: list[str]) -> list[list[float]]:
         state["embed"] += 1
-        return [[0.0] * 1536 for _ in texts]
+        return [[0.0] * 2560 for _ in texts]
 
     async def fake_describe(
         self: AgentRagClient, block: object, schema_name: str

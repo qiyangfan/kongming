@@ -119,15 +119,6 @@ class ConfirmNotFound(Exception):
     """待确认记录不存在/不属当前用户/已处理:404 同形,不暴露存在性。"""
 
 
-class KnowledgeSourceError(Exception):
-    """081:个人知识库检索失败(分类随 message 前缀上浮:unreachable/protocol)。
-
-    unreachable=连接层未送达(拒连/连接超时/accept 后无响应关连;实现侧已按
-    只读分层重试一次);protocol=响应类错误(非 2xx/报文畸形/读超时)。
-    分发兜底映射 ERROR + 审计,agent 据实降级为观察,不编造检索结果。
-    """
-
-
 class WebSearchError(Exception):
     """094:联网检索失败(分类随 message 前缀上浮:unreachable/protocol)。
 
@@ -135,16 +126,6 @@ class WebSearchError(Exception):
     报文畸形/读超时,不重试)。分发兜底映射 ERROR + 审计,agent 据实降级为
     观察,不编造检索结果。与 toolgateway.websearch 的执行器侧同名异常为
     领域单源双副本(审查 P1-1:service 不得传递性引入 httpx,089 裁决)。
-    """
-
-
-class TicketError(Exception):
-    """100:内部工单系统失败(分类随 message 前缀上浮:unreachable/protocol)。
-
-    unreachable=连接层未送达(重试至多一次);protocol=响应类错误(非 2xx/
-    报文畸形/读超时/单查不存在,不重试)。分发兜底映射 ERROR + 审计,agent
-    据实降级为观察,不编造工单结果。与 toolgateway.ticket 的执行器侧同名
-    异常为领域单源双副本(089 裁决同款:service 不得传递性引入 httpx)。
     """
 
 
