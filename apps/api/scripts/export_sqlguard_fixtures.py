@@ -1,14 +1,5 @@
-"""导出 SQL 安全引擎对拍基线(053 任务 2.1:期望集冻结,重复运行 diff 为空)。
-
-数据源 = 既有 sqlfw/datascope 测试资产 + evals gold;期望值由**当前内置实现**
-(firewall/rewrite)现算冻结——引擎判定与冻结值逐例比对,移植漂移即红。
-
-用法(apps/api 下):
-    uv run python scripts/export_sqlguard_fixtures.py [输出路径]
-默认输出 packages/liannu/tests/fixtures/kongming_baseline.json(仓内共享包)。
-
-确定性约定:用例按固定序排列,JSON sort_keys + 稳定缩进,同输入同字节。
-"""
+"""将 SQL 防火墙与数据范围测试资产导出为确定性基线 JSON,供不同校验引擎
+逐例对拍。用例顺序和 JSON 格式固定,以便比较文件差异。"""
 
 import json
 import logging
@@ -136,7 +127,7 @@ REWRITE_FILTERS: list[dict[str, Any]] = [
     {"filter_type": "DEPT_IN", "column": "dept_id", "values": ["d1", "d2"]},
 ]
 
-# ── 深嵌套受控行为钉样(引擎独有契约,无内置对拍形态;任务 4.2)──────────
+# ── 引擎独有的深嵌套用例 ──
 
 DEPTH_CASES: list[dict[str, Any]] = [
     # 子查询嵌套 40 层 > 默认上限 32:预扫描拦截,不进 sqlglot
@@ -146,8 +137,7 @@ DEPTH_CASES: list[dict[str, Any]] = [
         "max_depth": None,  # 默认上限
         "expect_reason_prefix": "DEPTH_EXCEEDED",
     },
-    # 括号外深嵌套(60 层函数嵌套,预扫描零深度):显式抬高上限穿过预扫描,
-    # 钉解析期 RecursionError 兜底收敛形态(实测 ≥48 层必炸)
+    # 函数嵌套绕过深度预扫描后,仍须将解析器递归异常转换为受控错误。
     {
         "id": "depth_expr_60_prescan_bypassed",
         "sql": "SELECT " + "abs(" * 60 + "1" + ")" * 60,
@@ -172,14 +162,14 @@ def _builtin_case(sql: str, allowed: list[str] | None, with_rewrite: bool) -> di
     v3 = firewall.check_reserved_tables(sql)
     expect["check_reserved_tables"] = _verdict_dict(v3.passed, v3.reason)
 
-    # 主表引用:内置 parse 成功才冻结(键缺省 = 解析门形态,回放方跳过)
+    # 只记录解析成功后的主表引用;解析失败时省略该字段。
     try:
         ref = rewrite.extract_main_table_ref(sql)
         expect["main_table_ref"] = {"ref": list(ref) if ref is not None else None}
     except Exception:
         logging.getLogger(__name__).debug("extract_main_table_ref 异常,跳过冻结: %r", sql[:80])
 
-    # 改写产物:内置成功才冻结该意图(PARSE_ERROR 等由 check 键钉住)
+    # 只记录成功的改写结果;其余解析结果由 check 字段描述。
     if with_rewrite:
         apply_out: list[dict[str, Any]] = []
         for flt_spec in REWRITE_FILTERS:
@@ -209,7 +199,7 @@ def _builtin_case(sql: str, allowed: list[str] | None, with_rewrite: bool) -> di
 
 
 def _eval_gold_sqls() -> list[tuple[str, str]]:
-    """evals gold SQL(文件名, gold_sql);仅钉 check/reserved(租户假设零依赖)。"""
+    """读取评测用 gold SQL,供 check 和 reserved 规则判断。"""
     import yaml
 
     evals_dir = Path(__file__).resolve().parent.parent / "evals"

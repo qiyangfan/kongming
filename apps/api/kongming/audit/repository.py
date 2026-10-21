@@ -1,8 +1,8 @@
-"""audit 查询仓储(015):sys_sql_audit/sys_oper_log 分页与详情(AuditRepo 端口实现)。
+"""audit 查询仓储:sys_sql_audit/sys_oper_log 分页与详情(AuditRepo 端口实现)。
 
-纪律:筛选参数全部 CAST(:x AS ...) 可空绑定(asyncpg None 类型推断坑,014 教训);
-倒序 id DESC 时序 tiebreak(与会话列表同一惯例);行级可见性由 vis_user_id
-显式注入(audit spec「不依赖通用机制对审计表的列推断」)。
+筛选参数全部 CAST(x AS ...) 可空绑定(asyncpg 对 None 的类型推断坑);
+倒序 id DESC 时序 tiebreak;行级可见性由 vis_user_id 显式注入,
+不依赖通用机制对审计表列做推断。
 """
 
 from typing import Any
@@ -52,7 +52,7 @@ class AuditRepository:
     )
 
     async def list_sql_by_trace(self, trace_id: str) -> list[dict[str, Any]]:
-        """038 观测域:trace 时间线 SQL 事件(时间升序稳定序)。"""
+        """观测域:trace 时间线 SQL 事件(时间升序稳定序)。"""
         rows = (
             (
                 await self._s.execute(

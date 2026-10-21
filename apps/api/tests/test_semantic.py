@@ -1,8 +1,4 @@
-"""semantic 域全栈集成测试(023 semantic-layer spec,测试先行)。
-
-覆盖:introspection 幂等/manual 守卫/无 FK 不猜;指标 CRUD 唯一约束;
-enrich 注入收窄与命中;级联删除;管理端点 403。
-"""
+"""覆盖表关系和指标管理、语义注入与级联删除。"""
 # pyright: reportPrivateUsage=false
 
 import uuid
@@ -80,7 +76,7 @@ async def _admin(client: AsyncClient, s: AsyncSession) -> str:
         ),
         {"u": str(admin_id), "t": str(tid)},
     )
-    # 040:关系存在性闸的候选源——为 sem 租户播三表知识条目(幂等;
+    # 关系存在性闸的候选源——为 sem 租户播三表知识条目(幂等;
     # 引用知识条目外的表在写边界被拒,故引用表须先有条目)
     for tb in ("orders", "customers", "orphan"):
         await s.execute(
@@ -242,7 +238,7 @@ async def test_enrich_narrowed_to_recalled(session: AsyncSession) -> None:
     assert "s.orders JOIN s.customers" in rel_hint
     assert "payments" not in rel_hint  # 收窄:召回集合外不进
     assert "复购率" in met_hint
-    # 076:结构化命中与文字段同源(标识/名称/口径/修订时间)
+    # 结构化命中与文字段同源(标识/名称/口径/修订时间)
     assert len(hits) == 1
     assert hits[0].metric_name == "复购率"
     assert hits[0].sql_template == "count(distinct c)/count(distinct m)"
@@ -307,13 +303,13 @@ async def test_semantic_forbidden(
     assert r.status_code == 403
 
 
-# ============ R1 评审修复直证 ============
+# ============ 语义定义行为 ============
 
 
 async def test_r1_h1_multi_column_fk_paired_correctly(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    """R1-H1:多列 FK 按序配对(不笛卡尔积)。"""
+    """多列 FK 按序配对(不笛卡尔积)。"""
     async with get_engine().begin() as conn:
         await conn.execute(
             text(
@@ -363,7 +359,7 @@ async def test_r1_h1_multi_column_fk_paired_correctly(
 async def test_r1_h2_introspect_rejects_non_default(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    """R1-H2:introspect 显式拒非 default 源(v1);伪造 key 同形 400。"""
+    """introspect 显式拒非 default 源(v1);伪造 key 同形 400。"""
     token = await _admin(client, session)
     r = await client.post(
         "/system/semantic/relations/introspect",
@@ -387,7 +383,7 @@ async def test_r1_h2_introspect_rejects_non_default(
 async def test_r1_m1_manual_takeover_flips_source(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    """R1-M1:手工 upsert 命中 introspection 行翻转 source=manual,重扫不还原。"""
+    """手工 upsert 命中 introspection 行翻转 source=manual,重扫不还原。"""
     token = await _admin(client, session)
     headers = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "sem"}
     await client.post(
@@ -432,7 +428,7 @@ async def test_r1_m1_manual_takeover_flips_source(
     assert row2.source == "manual"
 
 
-# ============ 040 手工关系存在性闸 ============
+# ============ 手工关系存在性闸 ============
 
 
 async def test_manual_relation_unknown_table_400(

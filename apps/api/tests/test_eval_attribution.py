@@ -1,10 +1,4 @@
-"""096-eval-failure-attribution 测试(宪法 Article III,先红后绿)。
-
-归因分类为纯函数(不依赖评估环境,进默认门禁):九类一级分类、优先级序
-固定先匹配先归类(1.1)、SELECT 层拆分(1.2)、负例守护自成类(1.3)、
-ABSTAIN/REJECT 不混类与 EXEC 双形态(1.4)、OTHER 桶显式纪律(1.5)、
-零外部调用(1.6)。
-"""
+"""验证评估失败的分类优先级、SQL 拆分、拒答类别和 OTHER 兜底。"""
 
 import pytest
 
@@ -112,7 +106,7 @@ def test_neg_guard_reject_case_not_rejected() -> None:
 
 
 def test_abstain_positive_case_no_data() -> None:
-    """正例题链路返回 NO_DATA(误弃答)→ ABSTAIN,不落 EXEC 也不落 REJECT。"""
+    """正例返回 NO_DATA 时归类为 ABSTAIN，而不是 EXEC 或 REJECT。"""
     a = classify_failure(
         **_case(  # type: ignore[arg-type]
             success=False,

@@ -1,6 +1,4 @@
-/* 联邦回调落地页(ADR-006):provider 回跳携带 code+state → 转 POST 后端
-   (OAuth token 永不经过浏览器,前端只经手 code)→ 存令牌 → 进首页。
-   state 一次性:StrictMode 双执行用 ref 去重,防二次消费 401。 */
+/* 联邦登录回调只将 code 和 state 发给后端；OAuth 令牌不经过浏览器，state 仅处理一次。 */
 
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";

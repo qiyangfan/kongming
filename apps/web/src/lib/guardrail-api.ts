@@ -1,4 +1,4 @@
-/* guardrail 域 API 封装(020 prompt 安全护栏)。类型契约由 ADR-005 管线生成。 */
+/* guardrail 域 API 封装( prompt 安全护栏)。类型契约由 ADR-005 管线生成。 */
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";

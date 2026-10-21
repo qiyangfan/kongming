@@ -1,6 +1,4 @@
-/* StatusSwitch(012):管理表格行内启停开关,用户页/数据源页共用。
-   受控 checked=服务器真值(react-query 缓存计算),请求飞行期禁用防抖动;
-   失败时缓存未变→开关自然回弹,错误行内 role=alert 暴露(008「失败静默」教训固化)。 */
+/* 请求期间禁用开关；失败时保留服务端状态并显示行内错误。 */
 
 import { Switch } from "@/components/ui/switch";
 

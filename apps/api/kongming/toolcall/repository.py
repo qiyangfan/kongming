@@ -1,10 +1,10 @@
-"""toolcall 仓储(019):sys_tool_audit / sys_announcement 的 SQL 落地。
+"""toolcall 仓储:sys_tool_audit / sys_announcement 的 SQL 落地。
 
 两类写路径:
 - 执行审计(record):独立短事务(get_sessionmaker),失败仅 error 日志不阻断
-  主流程——与 audit 域 SqlAuditWriter 同范式(审计失败绝不影响响应);
+ 主流程——与 audit 域 SqlAuditWriter 同范式(审计失败绝不影响响应);
 - 确认状态推进(mark_* / get_for_update):请求事务内,与公告写入/回执消息
-  同事务原子推进(用户动作=业务写,非横切审计)。
+ 同事务原子推进(用户动作=业务写,非横切审计)。
 """
 
 import json
@@ -36,7 +36,7 @@ class ToolAuditWriter:
         if len(trace_id) > _TRACE_ID_MAX:
             log.warning("trace_id 超长截断落库: %s", trace_id)
             trace_id = trace_id[:_TRACE_ID_MAX]
-        row_id = str(uuid7())  # ADR-004:UUID v7 主键(R1-M1)
+        row_id = str(uuid7())  # ADR-004:UUID v7 主键
         try:
             async with get_sessionmaker()() as s:
                 await s.execute(
@@ -119,7 +119,7 @@ class SqlToolCallRepo:
             raise TenantBindingForbidden(f"{user_id} 未绑定租户 {tenant_id}")
 
     async def count_write_calls(self, trace_id: str, write_tools: list[str]) -> int:
-        """同 trace 写工具已有调用数(全状态含挂起/拒绝;020 意图审核计数口径)。
+        """同 trace 写工具已有调用数(全状态含挂起/拒绝;意图审核计数口径)。
         写工具名集由调用方自注册表给出(仓储不反向依赖注册表语义)。"""
         if not write_tools:
             return 0
@@ -129,11 +129,11 @@ class SqlToolCallRepo:
                     text(
                         "SELECT count(*) FROM public.sys_tool_audit"
                         " WHERE trace_id = :t AND (tool_name = ANY(:names)"
-                        # R1-A1:MCP 写工具(动态注册,无 readOnlyHint 即写)
-                        # 不在静态名集——前缀口径并入,意图审核频控对动态
-                        # 写面不失效;mcp__ 前缀由 028 命名规则独占
-                        # 前缀判定走 left()(实测:LIKE 反斜杠转义在 Python
-                        # 字符串层被二级吞掉,ESCAPE 落空静默不命中)
+                        # MCP 写工具(动态注册,无 readOnlyHint 即写)
+                        # 不在静态名集——并入前缀口径,意图审核频控对动态
+                        # 写面不失效;mcp__ 前缀被命名规则独占。
+                        # 前缀判定用 left 而非 LIKE:反斜杠转义在 Python
+                        # 字符串层被二次吞掉,ESCAPE 落空静默不命中
                         " OR left(tool_name, 5) = 'mcp__')"
                     ),
                     {"t": trace_id, "names": write_tools},
@@ -177,15 +177,7 @@ class SqlToolCallRepo:
         clear_reason: bool = False,
         args_digest: str | None = None,
     ) -> None:
-        """状态推进;clear_reason=True 时清空挂起期 error_reason(R1-S3:
-        确认成功后 EXECUTED 行不残留「需用户确认」文案)。
-
-        审查循环 F3:确认终态推进时同步清空 args_json——重放已完成,原文
-        (可能含 MCP 动态工具的凭证参数)无保留必要,不留 DB/备份侧泄露面。
-
-        100:args_digest 非空时覆写参数摘要——域执行 handler 把创建结果
-        (目标工单标识)回填入参后,确认终态行摘要携带执行结果(spec
-        「创建结果回填」);None=不触碰(既有调用方零漂移)。"""
+        """更新工具审计状态。确认成功后清除错误原因和原始参数，避免留下确认提示或凭证；传入摘要时同步更新参数摘要。"""
         await self._s.execute(
             text(
                 "UPDATE public.sys_tool_audit SET status = :st,"
@@ -198,7 +190,7 @@ class SqlToolCallRepo:
         )
 
     async def find_announcement(self, *, tenant_id: str, idempotency_key: str) -> str | None:
-        """按幂等键反查公告(R1-S1:重复确认幂等回放返回首次执行结果)。"""
+        """按幂等键反查公告(重复确认幂等回放返回首次执行结果)。"""
         row = (
             await self._s.execute(
                 text(
@@ -237,7 +229,7 @@ class SqlToolCallRepo:
         ]
 
     async def list_by_trace(self, trace_id: str) -> list[dict[str, Any]]:
-        """038 观测域:trace 时间线 TOOL 事件(全部状态;时间升序稳定序)。"""
+        """观测域:trace 时间线 TOOL 事件(全部状态;时间升序稳定序)。"""
         rows = (
             (
                 await self._s.execute(
@@ -266,7 +258,7 @@ class SqlToolCallRepo:
     ) -> tuple[str, bool]:
         """幂等写入:(tenant_id, idempotency_key) 唯一约束兜底;
         已存在同键行返回 (既有 id, False)——重复执行返回首次结果(spec)。"""
-        row_id = str(uuid7())  # ADR-004:UUID v7 主键(R1-M1)
+        row_id = str(uuid7())  # ADR-004:UUID v7 主键
         inserted = (
             await self._s.execute(
                 text(
@@ -358,7 +350,7 @@ class SqlToolCallRepo:
 
 
 async def list_domain_states(session: AsyncSession) -> dict[str, bool]:
-    """域启停持久状态(0044):domain_id → disabled。未登记=启用(零回归)。"""
+    """域启停持久状态:domain_id → disabled。未登记=启用。"""
     rows = (
         await session.execute(text("SELECT domain_id, disabled FROM public.sys_tool_domain_state"))
     ).all()
@@ -380,9 +372,9 @@ async def upsert_domain_state(
 
 
 async def user_has_all_scope(session: AsyncSession, user_id: str) -> bool:
-    """行级可见性判定(与 014 feedback 同口径):角色集含 data_scope=ALL 即 True。
+    """行级可见性判定(与 feedback 同口径):角色集含 data_scope=ALL 即 True。
 
-    未启用角色的 data_scope 不兑现——与 datascope.user_role_scopes 同闸(086)。
+    未启用角色的 data_scope 不兑现——与 datascope.user_role_scopes 同闸。
     """
     val = (
         await session.execute(

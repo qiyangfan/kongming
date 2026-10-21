@@ -1,5 +1,5 @@
 # pyright: reportArgumentType=false, reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownParameterType=false, reportMissingParameterType=false, reportUnknownArgumentType=false, reportPrivateUsage=false
-"""图级检查点与图内挂起测试(add-graph-checkpoint,agent 面)。
+"""图级检查点与图内挂起测试(agent 面)。
 
 覆盖:控制面回调检查点适配器(往返/降级/写入行)、图内挂起端到端
 (confirm_required 挂图 → interrupt 挂起 → Command(resume) 决策兑现 →
@@ -383,7 +383,7 @@ async def test_interactive_channel_unaffected_by_confirm(monkeypatch: pytest.Mon
     )
     assert "__interrupt__" not in final
     assert final.get("summary") == "该操作待确认。"
-    assert not api.resolve_calls  # 零兑换(交互链路无图内确认)
+    assert not api.resolve_calls  # 图内没有待确认操作，无需兑换确认。
 
 
 @pytest.mark.asyncio

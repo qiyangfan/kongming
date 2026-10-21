@@ -1,5 +1,4 @@
-"""031 triggers-webhooks 测试:cron 解析/签名/适配器/管理面/调度/
-目标执行(测试先行,安全类)。"""
+"""覆盖触发器的 cron、签名、调度和目标执行。"""
 # pyright: reportPrivateUsage=false
 
 import asyncio
@@ -109,7 +108,7 @@ class _StubService:
         self.skipped: list[str] = []
         self.failed: list[str] = []
         self.marked: list[tuple[str, str | None]] = []
-        # 101:重试扫描面(缺省无挂起行;专项断言见 test_trigger_retry.py)
+        # 重试扫描面(缺省无挂起行;专项断言见 test_trigger_retry.py)
         self.retried: list[str] = []
         self.deferred: list[str] = []
 
@@ -125,7 +124,7 @@ class _StubService:
     async def defer_retry(self, *, run_id: str) -> None:
         self.deferred.append(run_id)
 
-    # 108:邮件轮询扫描面(缺省无到期邮件触发器;专项断言见 test_trigger_email.py)
+    # 邮件轮询扫描面(缺省无到期邮件触发器;专项断言见 test_trigger_email.py)
     async def list_due_emails(self, *, now_iso: str) -> list[dict[str, Any]]:
         return []
 
@@ -214,7 +213,7 @@ async def test_scheduler_in_progress_skips() -> None:
 
 
 async def test_scheduler_cron_recalc_failure_stops() -> None:
-    """R1-S1 回归:cron 重算失败 → 落 FAILED+next_fire 置 NULL(止损),
+    """回归:cron 重算失败 → 落 FAILED+next_fire 置 NULL(止损),
     不吞成「不推进」触发风暴。"""
     svc = _StubService(
         [
@@ -251,7 +250,7 @@ async def test_webhook_disabled_and_oversize(
     """S4 缺口:禁用 webhook 401;body 超限 413。"""
     uid_ds, token = await _trigger_admin(client, session, make_user, "tg_ds1")
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}
-    await _mk_workflow(session, creator_id=uid_ds)  # 040:目标存在性闸对齐
+    await _mk_workflow(session, creator_id=uid_ds)  # 目标存在性闸对齐
     r = await client.post(
         "/system/triggers",
         headers=h,
@@ -299,7 +298,7 @@ async def _mk_workflow(
     s: AsyncSession, tenant_key: str = "tg", creator_id: str | None = None
 ) -> None:
     """目标工作流(transform 单节点,零外部依赖)。
-    creator_id:032 归属可见性——个人资源仅创建者可见,触发器以创建者
+    creator_id:归属可见性——个人资源仅创建者可见,触发器以创建者
     身份执行,工作流的创建者须与触发器创建者一致(否则 404 同形)。"""
 
     tid = (
@@ -348,7 +347,7 @@ async def test_trigger_crud_and_cron_validation(
         json={**_CRON_BODY, "tg_key": "bad", "name": "坏", "cron_expr": "61 * * * *"},
     )
     assert r.status_code == 400
-    await _mk_workflow(session, creator_id=uid)  # 040:目标存在性闸对齐
+    await _mk_workflow(session, creator_id=uid)  # 目标存在性闸对齐
     # 合法创建,next_fire_at 预计算
     r2 = await client.post(
         "/system/triggers",
@@ -493,7 +492,7 @@ async def test_webhook_github_adapter_normalizes(
     assert r2.status_code == 202
 
 
-# ============ 040 目标存在性闸 ============
+# ============ 目标存在性闸 ============
 
 
 async def test_trigger_unknown_target_400(
@@ -597,7 +596,7 @@ async def test_trigger_orphan_still_manageable(
     assert r4.status_code == 200
 
 
-# ============ 040·11 cron 预览 ============
+# ============ cron 预览 ============
 
 
 async def test_cron_preview_three_fires(
@@ -634,7 +633,7 @@ async def test_cron_preview_invalid_400(
 async def test_trigger_team_workflow_target_allowed(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """040 回归(R1 实锤):团队 workflow(他人创建、自己在成员集)在前端
+    """团队成员可以触发其他成员创建的 workflow。
     候选可选,存在性闸必须同口径放行——checker 缺 team_ids 时创建必 400。"""
     uid, token = await _trigger_admin(client, session, make_user, "tg_040team")
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}

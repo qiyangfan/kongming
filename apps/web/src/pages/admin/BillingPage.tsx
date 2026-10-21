@@ -1,13 +1,4 @@
-/* 计费管理页(034,超管):套餐 CRUD + 租户配额策略 CRUD + 绑套餐 +
-   全部账单概览。
-   035:套餐 U/D(绑定中 409 行内可见)+策略删除确认(013 模式)+数值
-   受控校验(非法行内报错,禁静默归零)+BOT 级策略(scope/Bot 下拉,
-   数据源=billing 自供清单,解耦 user:manage/bot:manage)+账单分页
-   (支付状态列+作废)。
-   103:scope 扩展 USER/TEAM——范围下拉四项,scope_ref 选择器按 scope
-   切换数据源(助手/用户/团队清单,同 billing:manage 自供口径);
-   CALLS 维度仅租户级(非租户范围提交禁用+行内提示)。 */
-
+/* 管理套餐、租户配额策略和账单；金额按厘提交，表单展示校验错误。 */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus } from "lucide-react";
@@ -60,22 +51,16 @@ import { PageHeader } from "@/components/page-header";
 import { FormRow } from "@/components/form-row";
 import { formatNumber } from "@/lib/datetime";
 
-// 发票状态 → StatusBadge(管理端维持原「一律 secondary」密度;未知值回落 secondary 等价;
-// label 与 lib/billing-labels 的 INVOICE_STATUS_TEXT 对齐)
 const INVOICE_STATUS_META: StatusMeta = {
   PENDING: { label: "待支付", variant: "secondary" },
   PAID: { label: "已支付", variant: "secondary" },
   VOID: { label: "已作废", variant: "secondary" },
 };
 
-/**
- * 价格列(DB INTEGER)超 int32 的输入放行会在落库时 500,故统一取 INT32 上限;
- * 额度列(monthly_tokens、monthly_calls、limit_value)实为 BIGINT,
- * 此处一并收紧属前端一致性约束(保守无害)。
- */
+/** 限制金额字段，避免超出数据库 INTEGER 范围后落库失败。 */
 const INT32_MAX = 2_147_483_647;
 
-/** 数值受控校验(035 挂账⑦):非负整数才合法,非法不归零——返回 null 交行内报错 */
+/** 数值仅接受非负整数；非法输入返回 null，由表单显示错误。 */
 function parseNonNegInt(raw: string): number | null {
   if (!/^\d+$/.test(raw.trim())) return null;
   const n = Number(raw);
@@ -105,7 +90,7 @@ const EMPTY_PLAN_FORM = {
 export default function BillingPage() {
   const qc = useQueryClient();
   const [tenantId, setTenantIdRaw] = useState("");
-  // R1-T3:切租户连带重置策略表单(防他租户 scope_ref 残留脏态)
+  // 切租户连带重置策略表单(防他租户 scope_ref 残留脏态)
   const setTenantId = (v: string) => {
     setTenantIdRaw(v);
     setPolicyForm({
@@ -153,7 +138,7 @@ export default function BillingPage() {
     queryFn: () => listBillingBots(tenantId),
     enabled: tenantId !== "",
   });
-  // 103:USER/TEAM 级策略选择器数据源(挂 billing:manage 自供,同 Bot 清单)
+  // USER/TEAM 级策略选择器数据源(与 Bot 清单同由 billing 域提供)
   const users = useQuery({
     queryKey: ["admin", "billing", "users", tenantId],
     queryFn: () => listBillingUsers(tenantId),
@@ -190,8 +175,7 @@ export default function BillingPage() {
       if (values.some((n) => n === null)) {
         throw new Error(PLAN_NUM_ERROR);
       }
-      // 显式展开守卫后字段(Record 展开会丢字面量类型,契约收紧后 tsc 报错——
-      // 审查循环 F1 直证:手写 Record 曾让缺字段静默通过)
+      // Object.values 丢元组字面量类型,显式解构以保留生成请求类型对字段的检查
       const [monthly_tokens, monthly_calls, price_per_mtok, price_per_call] = values as [
         number,
         number,
@@ -296,7 +280,6 @@ export default function BillingPage() {
       setDeletePolicyId(null);
       invalidate();
     },
-    // 审查循环 F4:失败零反馈=用户以为没点上反复重试
     onError: (e) => setPolicyError(e instanceof Error ? e.message : "删除策略失败"),
   });
 
@@ -514,7 +497,7 @@ export default function BillingPage() {
                   cardPriority: 1,
                   cellClassName: "text-xs",
                   render: (p) => {
-                    // 103:USER/TEAM 级以清单数据源回显名称;候选未含(已删除)
+                    // USER/TEAM 级以清单数据源回显名称;候选未含(已删除)
                     // 不露 UUID,hover 可得原 id
                     if (p.scope === "BOT") {
                       const botKey = (bots.data ?? []).find((b) => b.id === p.scope_ref)?.bot_key;
@@ -625,7 +608,7 @@ export default function BillingPage() {
                       <SelectValue placeholder={`选择${SCOPE_TEXT[policyForm.scope] ?? ""}`} />
                     </SelectTrigger>
                     <SelectContent>
-                      {/* 103:数据源按 scope 切换(bots/users/teams 清单同口径自供) */}
+                      {/* 候选项按 scope 取对应清单(bots/users/teams) */}
                       {(policyForm.scope === "BOT"
                         ? (bots.data ?? []).map((b) => ({ id: b.id, label: b.bot_key }))
                         : policyForm.scope === "USER"
@@ -679,7 +662,7 @@ export default function BillingPage() {
                 disabled={
                   upsert.isPending ||
                   (policyForm.scope !== "TENANT" && policyForm.scope_ref === "") ||
-                  // 2.3:CALLS 维度仅租户级(资源/用户/团队级不立约)
+                  // CALLS 维度仅租户级可用(调用次数不按资源/用户/团队立约)
                   (policyForm.scope !== "TENANT" && policyForm.dimension === "CALLS")
                 }
               >
@@ -762,7 +745,7 @@ export default function BillingPage() {
           actions={[
             {
               label: "作废",
-              // 与原口径一致:仅 PENDING 账单可作废(非 PENDING 行不渲染该操作)
+              // 仅 PENDING 账单可作废(非 PENDING 行不渲染该操作)
               isVisible: (inv) => inv.status === "PENDING",
               onSelect: (inv) => {
                 setVoidTarget(inv.id);
@@ -862,7 +845,7 @@ export default function BillingPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 套餐删除确认(035 挂账⑦:013 模式——busy 期禁关) */}
+      {/* 套餐删除确认:请求进行中禁止关闭 */}
       <AlertDialog
         open={deletePlanTarget !== null}
         onOpenChange={(o) => {
@@ -897,7 +880,7 @@ export default function BillingPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 策略删除确认(035 挂账⑦) */}
+      {/* 策略删除确认 */}
       <AlertDialog
         open={deletePolicyId !== null}
         onOpenChange={(o) => {

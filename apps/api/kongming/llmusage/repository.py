@@ -1,4 +1,4 @@
-"""llmusage 仓储(021):sys_llm_usage 落库与聚合查询 SQL。
+"""llmusage 仓储:sys_llm_usage 落库与聚合查询 SQL。
 
 无 service 层:本域零业务规则(落库+聚合直读),用例过薄不设 service
 (宪法分层「组织」非每层必有;领域规则出现时再引入)。
@@ -61,11 +61,10 @@ class SqlLlmUsageRepo:
     async def insert_bot_usage_batch(
         self, records: list[dict[str, Any]], *, tenant_id: str, bot_id: str
     ) -> int:
-        """035:bot 链路请求内同步落库(tenant/bot 归属=api-key 绑定值,
-        不经反解);(trace_id,seq) 唯一索引兜底重试双写,冲突静默去重。
-        ON CONFLICT 谓词须与 0023 部分唯一索引逐字一致(PG index inference)。
-        返回真实插入行数(去重后)。自 commit(021 insert_batch 同款——
-        BotService.run 调用端点无 commit 义务,用量落库须自带事务边界)。"""
+        """同步保存 Bot 请求用量，tenant_id 和 bot_id 取自 API key 绑定。
+
+        trace_id 与 seq 唯一约束用于重试去重；方法自行提交事务。
+        """
         inserted = 0
         for r in records:
             res = await self._s.execute(
@@ -104,9 +103,9 @@ class SqlLlmUsageRepo:
         self, *, start: object = None, end: object = None, protocol: str | None = None
     ) -> list[dict[str, Any]]:
         """按租户+模型+任务聚合(时间范围可选;tenant 未反解归 unknown)。
-        038:补失败次数与延迟统计——延迟仅 SUCCESS 且 latency_ms 非空参与
+        补失败次数与延迟统计——延迟仅 SUCCESS 且 latency_ms 非空参与
         (失败耗时语义归时间线,聚合指标保持成功口径干净;无样本组 avg 为
-        None、max 为 None)。077:protocol 为过滤型筛选(不新增分组键)
+        None、max 为 None)。protocol 为过滤型筛选(不新增分组键)
         ——同名模型跨协议条目流量可拆分,不过滤时与现状逐字一致。"""
         conditions = ["1=1"]
         params: dict[str, object] = {}
@@ -149,9 +148,9 @@ class SqlLlmUsageRepo:
         return [dict(r) for r in rows]
 
     async def trend(self, *, days: int) -> list[dict[str, Any]]:
-        """038:按天趋势(最近 days 天,含今天;Asia/Shanghai 日历日分桶
-        逐天补零——月聚合时区教训先例,窗口边界与分桶必须同口径)。
-        R1-B2:JOIN 附窗口下界范围谓词(created_at 可裸走时间索引);
+        """按天趋势(最近 days 天,含今天;Asia/Shanghai 日历日分桶
+        逐天补零——月聚合时区先例,窗口边界与分桶必须同口径)。
+        JOIN 附窗口下界范围谓词(created_at 可裸走时间索引);
         范围条件 MUST 在 ON 内而非 WHERE——WHERE 会把无匹配的补零桶过滤掉。"""
         rows = (
             (
@@ -199,11 +198,11 @@ class SqlLlmUsageRepo:
         tenant_id: str | None = None,
         protocol: str | None = None,
     ) -> tuple[int, list[dict[str, Any]]]:
-        """038:明细分页(created_at 倒序;model/task/status/trace_id/tenant 筛选)。
-        077:protocol 过滤 + 行含 protocol 列(null 行原样返回不炸)。
+        """明细分页(created_at 倒序;model/task/status/trace_id/tenant 筛选)。
+        protocol 过滤 + 行含 protocol 列(null 行原样返回不炸)。
         返回 (total, rows);tenant 未反解归 unknown(展示口径);租户筛选经
         u.tenant_id 直滤——该租户全部行均返回,含 tenant_key 反解失败展示为
-        unknown 的行(展示 unknown ≠ 无 tenant_id,038③ 清偿口径)。"""
+        unknown 的行(展示 unknown ≠ 无 tenant_id)。"""
         conditions = ["1=1"]
         params: dict[str, object] = {"limit": limit, "offset": offset}
         if model:
@@ -259,7 +258,7 @@ class SqlLlmUsageRepo:
         return total, [dict(r) for r in rows]
 
     async def list_by_trace(self, *, trace_id: str) -> list[dict[str, Any]]:
-        """038:trace 时间线 LLM 事件(时间升序;稳定序 tiebreak=id)。"""
+        """trace 时间线 LLM 事件(时间升序;稳定序 tiebreak=id)。"""
         rows = (
             (
                 await self._s.execute(

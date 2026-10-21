@@ -1,12 +1,4 @@
-"""自动构造 CLI(092):
-  生成+自洽验证:uv run python -m evals.construct generate --tenant default \
-      --datasource sakila --per-category 2
-  人审后并入:  uv run python -m evals.construct merge --tenant default \
-      --ids <id1,id2> [--no-full-eval] [--reason "..."]
-
-生成=第一段闸(LLM 产出+自洽验证落目录);merge=第三段闸收口(人审圈定
-后一条命令:移动并入+全量重跑+基线登记)。
-"""
+"""评估题自动构造命令。generate 生成并校验候选题；人工审核后用 merge 并入评估集并重跑完整评估。"""
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportPrivateUsage=false, reportUnusedImport=false
 
 import argparse
@@ -132,7 +124,7 @@ async def _resolve_tenant_id(tenant_key: str) -> str:
 def _cmd_merge(args: argparse.Namespace) -> int:
     from evals.construct.merge import merge
 
-    # 候选文件固定单批形态:最新一批(设计 D5 单目录;多批人工滚动归档)
+    # 候选目录固定单批形态:只认最新一批;多批靠人工滚动归档
     tenant_dir = CANDIDATES_DIR / args.tenant
     batches = sorted(tenant_dir.glob("*.yaml"), key=lambda p: p.stat().st_mtime)
     if not batches:

@@ -1,8 +1,4 @@
-"""prompt 资产护栏单测(018):新规则关键标识在位,防后续手滑删规则/丢全角。
-
-标识清单与 design D2/D3/D4 逐字对拍;全角纪律只查「汉字,汉字」形态
-(SQL 函数参数如 ROUND(表达式, 2) 的半角逗号为语法豁免)。
-"""
+"""检查 SQL 生成提示中的关键规则和中文标点要求。"""
 
 import re
 
@@ -53,27 +49,22 @@ def test_sql_gen_id_not_name_substitute() -> None:
 
 
 def test_sql_gen_projection_id_discipline() -> None:
-    """046 投影 id 收敛:技术主键默认不进投影+业务编号列优先+DISTINCT 排序例外。"""
+    """投影 id 收敛:技术主键默认不进投影+业务编号列优先+DISTINCT 排序例外。"""
     assert "技术主键等代理键（主键 id 类列）默认不进投影" in prompts.SQL_GEN_SYSTEM
     assert "行标识需要编号时优先业务编号列" in prompts.SQL_GEN_SYSTEM
     assert "用户明确点名 ID/编号时才投影" in prompts.SQL_GEN_SYSTEM
     assert "DISTINCT 去重查询例外" in prompts.SQL_GEN_SYSTEM
     assert "排序键只能取已在投影中的列" in prompts.SQL_GEN_SYSTEM
     assert "❌ DISTINCT 去重查询追加投影外主键排序" in prompts.SQL_GEN_SYSTEM
-    # 旧措辞「ID 可附加」与收紧口径冲突,必须绝迹
+    # 与收紧口径冲突的历史措辞不得出现
     assert "ID 可附加，名称列必须在投影中" not in prompts.SQL_GEN_SYSTEM
-    # 既有钉句存活(018 结论零扰动:名称列必须进投影+tiebreaker 主句)
+    # 主句要求把名称列加入投影,并使用它作为平分时的排序条件。
     assert "名称列必须在投影中" in prompts.SQL_GEN_SYSTEM
     assert "排序键可能并列时必须追加主键等唯一列作第二排序键" in prompts.SQL_GEN_SYSTEM
 
 
-def test_prompts_exception_log_046_registered() -> None:
-    """046 增量已在 prompts.py 文件头例外清单登记(prompt 资产纪律)。"""
-    assert "046 projection-id-discipline" in (prompts.__doc__ or "")
-
-
 def test_sql_gen_column_level_sentinel() -> None:
-    """046 冒烟收编:规则 10 列级哨兵——问句口径所需列不存在且无法推导时如实说明,
+    """规则 10 列级哨兵:问句口径所需列不存在且无法推导时如实说明,
     不得以其他列近似顶替(表级哨兵语义补全至表/列两级)。"""
     assert "问句指定口径所需的列" in prompts.SQL_GEN_SYSTEM
     assert "不在该段中且无法由现有列合理推导" in prompts.SQL_GEN_SYSTEM
@@ -82,7 +73,7 @@ def test_sql_gen_column_level_sentinel() -> None:
     assert "缺支撑问句口径的关键列" in prompts.SQL_GEN_SYSTEM
     assert "不要硬凑近似答案" in prompts.SQL_GEN_SYSTEM
     assert "❌ 问句口径所需列不在表结构中时用其他列硬凑" in prompts.SQL_GEN_SYSTEM
-    # 043 既有钉句存活(哨兵出口与规则 7 例外表述不变)
+    # 哨兵出口与规则 7 的例外条件应保留在 prompt 中。
     assert "唯一例外于规则 7——只输出 NO_RELEVANT_TABLE" in prompts.SQL_GEN_SYSTEM
     assert "不要解释、不要编造表名或列名" in prompts.SQL_GEN_SYSTEM
 
@@ -109,16 +100,15 @@ def test_summarize_factuality_rules() -> None:
 
 
 def test_summarize_numeric_grounding_rules() -> None:
-    """057:白名单/派生量禁心算/trend 门槛已入 SUMMARIZE_SYSTEM,例外清单已登记。"""
+    """白名单/派生量禁心算/trend 门槛已入 SUMMARIZE_SYSTEM。"""
     assert "只写白名单数字" in prompts.SUMMARIZE_SYSTEM
     assert "派生量不得心算写入" in prompts.SUMMARIZE_SYSTEM
     assert "宁省略，不编造" in prompts.SUMMARIZE_SYSTEM
     assert "type=trend 仅在结果不少于 3 期" in prompts.SUMMARIZE_SYSTEM
-    assert "057 numeric-grounding" in (prompts.__doc__ or "")
 
 
 def test_summarize_alias_alignment_rules() -> None:
-    """037 称谓对齐规则在位,且与 018 事实性规则共存(互锁不互斥)。"""
+    """称谓对齐规则在位,且与事实性规则共存(互锁不互斥)。"""
     assert "称谓对齐规则：提及数据实体时必须使用业务称谓别名(alias)" in (prompts.SUMMARIZE_SYSTEM)
     assert "用户用语优先，其次所给别名" in prompts.SUMMARIZE_SYSTEM
     assert "禁止只写物理表名" in prompts.SUMMARIZE_SYSTEM
@@ -128,26 +118,19 @@ def test_summarize_alias_alignment_rules() -> None:
     )
     assert "别名缺失时回退表说明中的中文名称" in prompts.SUMMARIZE_SYSTEM
     assert "禁止编造别名" in prompts.SUMMARIZE_SYSTEM
-    # 双规则共存(018 事实性 + 037 称谓)
+    # 双规则共存(事实性 + 称谓)
     assert "不得外推到不可见数据" in prompts.SUMMARIZE_SYSTEM
-    # 例外清单登记(文件头):037 增量已登记
-    assert "SUMMARIZE_SYSTEM 称谓对齐规则(2026-08-24,037 entity-alias)" in (prompts.__doc__ or "")
 
 
 def test_sql_gen_table_scope_discipline() -> None:
-    """043 规则 10:表范围纪律——表/列仅来自可用表结构;哨兵是规则 7 唯一例外。"""
+    """规则 10:表范围纪律——表/列仅来自可用表结构;哨兵是规则 7 唯一例外。"""
     assert "表范围纪律" in prompts.SQL_GEN_SYSTEM
     assert "必须只来自「可用表结构」段" in prompts.SQL_GEN_SYSTEM
     assert "不得引入其中不存在的表" in prompts.SQL_GEN_SYSTEM
     assert "唯一例外于规则 7——只输出 NO_RELEVANT_TABLE" in prompts.SQL_GEN_SYSTEM
-    # 数词描述与 token 自相矛盾会干扰模型(R1 审查剔除:「六个词」实际为三个词)
+    # 数词描述与 token 实际数量不符会干扰模型。
     assert "六个词" not in prompts.SQL_GEN_SYSTEM
     assert "不要解释、不要编造表名或列名" in prompts.SQL_GEN_SYSTEM
-
-
-def test_prompts_exception_log_043_registered() -> None:
-    """043 增量已在 prompts.py 文件头例外清单登记(prompt 资产纪律)。"""
-    assert "043 generation-discipline" in (prompts.__doc__ or "")
 
 
 def test_fullwidth_discipline_no_stray_halfwidth_comma() -> None:
@@ -162,25 +145,25 @@ def test_fullwidth_discipline_no_stray_halfwidth_comma() -> None:
 
 
 def test_sql_gen_aggregate_followup_single_row() -> None:
-    """048 聚合追问:整体总量/总额/合计输出单一聚合行,不得逐行明细。"""
+    """聚合追问:整体总量/总额/合计输出单一聚合行,不得逐行明细。"""
     assert '追问整体总量/总额/合计（"总共/合计/一共"）时输出单一聚合行' in (prompts.SQL_GEN_SYSTEM)
     assert "不得逐行明细" in prompts.SQL_GEN_SYSTEM
 
 
 def test_sql_gen_correspondence_distinct() -> None:
-    """048 对应关系去重:一对多 JOIN 后投影组合重复必须 DISTINCT(018 靶点)。"""
+    """对应关系去重:一对多 JOIN 后投影组合重复必须 DISTINCT(靶点)。"""
     assert "「对应关系/名录/哪些」类明细经一对多 JOIN 后投影列组合重复" in (prompts.SQL_GEN_SYSTEM)
     assert "重复的对应行是噪声" in prompts.SQL_GEN_SYSTEM
     assert "❌ 「对应关系/名录」类查询经一对多 JOIN 后不去重" in prompts.SQL_GEN_SYSTEM
 
 
 def test_understand_aggregate_followup_explicit() -> None:
-    """048:understand 对聚合追问的补全必须显式单一汇总口径。"""
+    """understand 对聚合追问的补全必须显式单一汇总口径。"""
     assert "单一汇总口径" in prompts.UNDERSTAND_MULTI_SYSTEM
     assert "不得补全为逐行明细口径" in prompts.UNDERSTAND_MULTI_SYSTEM
     assert "完整复述该结果集的构造条件" in prompts.UNDERSTAND_MULTI_SYSTEM
     assert '也不得用其他集合（如"最近的订单"）替换' in prompts.UNDERSTAND_MULTI_SYSTEM
-    # 既有钉句存活(保真规则与输出约定零扰动)
+    # prompt 应保留原始数值规则和输出格式要求。
     assert "补全必须保留上一轮的全部限定条件（筛选/排序/数量限制/聚合口径）" in (
         prompts.UNDERSTAND_MULTI_SYSTEM
     )
@@ -189,13 +172,8 @@ def test_understand_aggregate_followup_explicit() -> None:
     )
 
 
-def test_prompts_exception_log_048_registered() -> None:
-    """048 增量已在 prompts.py 文件头例外清单登记(prompt 资产纪律)。"""
-    assert "048 followup-quality-guard" in (prompts.__doc__ or "")
-
-
 def test_doc_answer_citation_discipline() -> None:
-    """068 任务 3.3:doc_prompt 纪律段增量钉死(引用键标注/禁包装/禁自造)。"""
+    """检查文档回答提示中的引用键标注和引用边界。"""
     from kongming_agent.graph.doc_prompt import DOC_ANSWER_SYSTEM
 
     # 规则 2:句末标注【引用键】且与下发来源逐字一致
@@ -204,5 +182,5 @@ def test_doc_answer_citation_discipline() -> None:
     # 规则 4:禁包装形态、禁自造未下发键
     assert "来源：" in DOC_ANSWER_SYSTEM  # 禁令点名(全角冒号)
     assert "SHALL NOT" in DOC_ANSWER_SYSTEM
-    # 旧形态已移除(文档名 §段落标注法退役)
+    # 退役形态:文档名 §段落标注法不得出现
     assert "[文档名 §段落]" not in DOC_ANSWER_SYSTEM

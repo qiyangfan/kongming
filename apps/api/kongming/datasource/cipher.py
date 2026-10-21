@@ -1,12 +1,7 @@
-"""数据源凭证 AES-GCM 加解密(infrastructure 层;008 design D2)。
+"""数据源凭证使用 AES-GCM 加解密。密文为 Base64 编码的 12 字节 nonce 与密文、16 字节认证标签。
 
-密文格式 base64(iv[12B] ‖ ciphertext+tag[16B]),与上游 CredentialEncryptor
-逐字节同构(逻辑参考,非代码平移);GCM 自带完整性校验,篡改即解密失败。
-密钥:KM_DATASOURCE_ENCRYPT_KEY(base64 16/32 字节,AES-128/256-GCM);
-prod 缺配启动 fail-closed(config 已在)。dev 缺省降级为代码内固定 dev-only
-密钥(构造告警一次),仍走真 AES-GCM round-trip——优于上游 dev 明文直通;
-dev 密文可被本地重放属既定取舍(prod 强制真密钥,无安全风险面)。
-"""
+生产环境必须配置 `KM_DATASOURCE_ENCRYPT_KEY`（Base64 编码的 16 或 32 字节密钥）；
+开发环境缺省使用固定的开发密钥并记录告警。"""
 
 import base64
 import binascii

@@ -1,4 +1,4 @@
-"""bot 仓储(025):sys_bot_definition / sys_api_key SQL。"""
+"""bot 仓储:sys_bot_definition / sys_api_key SQL。"""
 
 import json
 from collections.abc import Collection
@@ -90,7 +90,7 @@ class SqlBotRepo:
         sql = "SELECT * FROM public.sys_bot_definition WHERE id=:i AND tenant_id=:t"
         params: dict[str, Any] = {"i": bot_id, "t": tenant_id}
         if not is_admin:
-            # 032:创建者 或 归属用户所在团队(与 list_bots 同口径)
+            # 创建者 或 归属用户所在团队(与 list_bots 同口径)
             sql += " AND (created_by=:u OR team_id = ANY(CAST(:tids AS uuid[])))"
             params["u"] = user_id
             params["tids"] = list(team_ids)
@@ -149,7 +149,7 @@ class SqlBotRepo:
         return hit is not None
 
     async def find_user_status(self, user_id: str) -> str | None:
-        """R1-L3:Bot 创建者账号态(ACTIVE 才可运行)。"""
+        """Bot 创建者账号态(ACTIVE 才可运行)。"""
         return (
             await self._s.execute(
                 text("SELECT status FROM public.sys_user WHERE id=:u"), {"u": user_id}
@@ -157,7 +157,7 @@ class SqlBotRepo:
         ).scalar_one_or_none()
 
     async def find_datasource(self, *, datasource_key: str) -> dict[str, Any] | None:
-        """R1-H2:Bot 创建/编辑的数据源归属校验(008 sys_datasource 只读)。"""
+        """Bot 创建/编辑的数据源归属校验(sys_datasource 只读)。"""
         row = (
             (
                 await self._s.execute(

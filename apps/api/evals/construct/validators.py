@@ -1,15 +1,4 @@
-"""gold_sql 规范校验器(092,design D6):把 eval 域 README 编写规范操作化
-为纯函数——自动构造候选与手工新题共用同一套判定(单一真理源)。
-
-覆盖规范条目(README「gold_sql 编写规范」):
-  1  tiebreaker(ORDER BY ... LIMIT 必须追加唯一列第二排序键)
-  5  外层 ORDER BY 才算保序(子查询含 ORDER BY 时 gold 外层必须保序——
-     本校验以「任何位置含 ORDER BY 则要求外层保序」的保守口径拦截)
-  7  显式 schema 限定(裸表名=直连不设 search_path 会落空)
-  3  结果集行数:1..1000(空结果=不可判定题同拒;执行期校验,非静态)
-  2  投影业务可读列(保守口径:仅拦「SELECT 裸单 ID 列」;形态判定的
-     天花板在此,生成 prompt 才是第一道)
-"""
+"""gold SQL 规范的纯函数校验器，供自动构造和手工新增用例共用。"""
 
 import re
 
@@ -69,11 +58,7 @@ def _has_outer_order_by(sql: str) -> bool:
 
 
 def _order_by_limit_segments(sql: str) -> list[str]:
-    """每个 ORDER BY 到其作用域内最近 LIMIT 的段(括号深度扫描,纯函数)。
-
-    括号深度回到 0 之前的「)」=本 ORDER BY 所属子查询结束(无 LIMIT,不构成
-    tiebreaker 义务);深度 0 处遇「LIMIT n」即截段(带数字约束,与旧正则
-    同精度——标识符前缀如 limits_col 不误截)。"""
+    """按括号作用域拆分每个 ORDER BY 与其最近的 LIMIT 之间的片段。"""
     lowered = sql.lower()
     segments: list[str] = []
     for m in re.finditer(r"order\s+by", lowered):
@@ -142,9 +127,7 @@ def check_projection_readable(sql: str) -> str | None:
 
 
 def check_row_cap(row_count: int) -> str | None:
-    """规范 3:gold 结果集 ≤1000 行(生成侧链路截断上限,超限双侧口径不一致);
-    空结果(0 行)同拒——空 gold 让任意「同样返回空集」的错误 SQL 在松/严
-    两侧双双伪通过,且题面常预设非空(「列出…」),属不可判定题。"""
+    """校验 gold 结果集行数不超过 1000，避免与生成端上限不一致。"""
     if row_count == 0:
         return "gold 结果集为空(0 行)——问题在数据集上不可判定,换题或改问法"
     if row_count > MAX_GOLD_ROWS:

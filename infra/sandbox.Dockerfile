@@ -1,4 +1,4 @@
-# 027 cloud-code-sandbox:数据分析沙箱镜像(最小栈,非 root,内置引导脚本)
+# 数据分析沙箱镜像，使用最小运行环境、非 root 用户并内置启动脚本。
 # 构建:podman build -f infra/sandbox.Dockerfile -t kongming-sandbox:dev infra/
 FROM docker.io/library/python:3.13-slim-bookworm
 

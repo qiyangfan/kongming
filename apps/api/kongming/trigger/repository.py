@@ -1,4 +1,4 @@
-"""trigger 存储(031):sys_trigger_definition/sys_trigger_run。"""
+"""trigger 存储:sys_trigger_definition/sys_trigger_run。"""
 
 import datetime as dt
 from typing import Any, cast
@@ -11,7 +11,7 @@ from kongming.uuid7 import uuid7
 
 
 def _ts(v: Any) -> dt.datetime | None:
-    """ISO 串/None → datetime(asyncpg 客户端类型预检,CAST 帮不上——014 教训)。"""
+    """ISO 串/None → datetime(asyncpg 需 Python 侧类型,SQL CAST 无法兜底)。"""
     if v is None or isinstance(v, dt.datetime):
         return v
     return dt.datetime.fromisoformat(str(v))
@@ -65,7 +65,7 @@ class SqlTriggerRepo:
         return rid
 
     async def update(self, **kw: Any) -> bool:
-        # 108:邮件配置列仅 EMAIL 行更新(service 只在 EMAIL 形态传入);
+        # 邮件配置列仅 EMAIL 行更新(service 只在 EMAIL 形态传入);
         # 凭证空框=保持现值(与 secret_cipher 同 COALESCE 口径)。
         # 两条完整字面量语句(非片段拼接):形态分支显式可读,且不触发 S608
         with_imap = "imap_host" in kw
@@ -222,7 +222,7 @@ class SqlTriggerRepo:
         return [dict(r) for r in rows]
 
     async def list_due_emails(self, *, now_iso: str) -> list[dict[str, Any]]:
-        """到期邮件触发器(108):轮询间隔即 next_fire_at 节流,独立于 cron
+        """到期邮件触发器:轮询间隔即 next_fire_at 节流,独立于 cron
         表达式;停用/删除即出扫描面(启用后从游标续传)。"""
         rows = (
             (
@@ -241,7 +241,7 @@ class SqlTriggerRepo:
         return [dict(r) for r in rows]
 
     async def get_email_cursor(self, *, trigger_id: str, folder: str) -> dict[str, Any] | None:
-        """UID 游标(108):每触发器×文件夹一行;无行=首次轮询(从 0 起步)。"""
+        """UID 游标:每触发器×文件夹一行;无行=首次轮询(从 0 起步)。"""
         row = (
             (
                 await self._s.execute(
@@ -260,7 +260,7 @@ class SqlTriggerRepo:
     async def upsert_email_cursor(
         self, *, trigger_id: str, folder: str, last_uid: int, uidvalidity: int
     ) -> None:
-        """游标推进(108):与触发记录同会话,由调用方 commit 同事务落定。"""
+        """游标推进:与触发记录同会话,由调用方 commit 同事务落定。"""
         await self._s.execute(
             text(
                 "INSERT INTO public.sys_trigger_email_cursor"
@@ -344,7 +344,7 @@ class SqlTriggerRepo:
         return dict(row) if row else None
 
     async def list_due_retries(self, *, now_iso: str) -> list[dict[str, Any]]:
-        """到期挂起重试(101):PENDING+next_retry_at 到期;部分索引覆盖。"""
+        """到期挂起重试:PENDING+next_retry_at 到期;部分索引覆盖。"""
         rows = (
             (
                 await self._s.execute(
@@ -404,7 +404,7 @@ class SqlTriggerRepo:
         )
 
     async def cancel_pending_retries(self, *, trigger_id: str, reason: str) -> None:
-        """停用/删除取消挂起重试(101):收敛为 FAILED 终态,历史可见。"""
+        """停用/删除取消挂起重试:收敛为 FAILED 终态,历史可见。"""
         await self._s.execute(
             text(
                 "UPDATE public.sys_trigger_run"

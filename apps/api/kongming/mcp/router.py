@@ -1,10 +1,4 @@
-"""mcp 路由(028,薄适配层):/system/mcp/* 管理端点 + /mcp 入站端点。
-
-管理端点挂 require_perm("system:mcp:manage"),租户视角(X-Tenant-Id
-白名单,与 chat 同构——复用 ChatRepository 租户解析,toolcall router
-已有跨域装配先例);跨租户/不存在 404 同形;领域错误映射 400/404/409。
-/mcp 入站不经 JWT——api-key 鉴权(025 体系),独立鉴权段。
-"""
+"""管理 MCP 服务的端点和 API key 认证的入站端点。"""
 
 import logging
 from typing import Annotated, Any, cast
@@ -32,7 +26,7 @@ MANAGE = "system:mcp:manage"
 
 
 class _OperLogger:
-    """McpOperLogger 端口绑定(actor 请求期横切;与业务同事务,007 惯例)。"""
+    """McpOperLogger 端口绑定(actor 请求期横切;与业务同事务,惯例)。"""
 
     def __init__(self, session: AsyncSession, actor_id: str) -> None:
         self._repo = SqlOperLogRepo(session)
@@ -91,7 +85,7 @@ class McpToolEntryOut(BaseModel):
 
 
 class McpResourceEntryOut(BaseModel):
-    """资源清单条目(109;快照面,白名单与详情展示同源)。"""
+    """资源清单条目(快照面,白名单与详情展示同源)。"""
 
     uri: str
     name: str = ""
@@ -100,7 +94,7 @@ class McpResourceEntryOut(BaseModel):
 
 
 class McpPromptArgOut(BaseModel):
-    """模板参数声明(109)。"""
+    """模板参数声明。"""
 
     name: str
     description: str = ""
@@ -108,7 +102,7 @@ class McpPromptArgOut(BaseModel):
 
 
 class McpPromptEntryOut(BaseModel):
-    """提示模板清单条目(109;仅声明,渲染预览实时拉取)。"""
+    """提示模板清单条目(仅声明,渲染预览实时拉取)。"""
 
     name: str
     description: str = ""
@@ -149,14 +143,14 @@ class McpSyncOut(BaseModel):
 
 
 class McpPromptPreviewIn(BaseModel):
-    """模板预览入参(109;按名 + 渲染 arguments)。"""
+    """模板预览入参(按名 + 渲染 arguments)。"""
 
     name: str = Field(min_length=1, max_length=128)
     arguments: dict[str, str] = {}
 
 
 class McpPromptPreviewOut(BaseModel):
-    """模板预览出参(109):净化后渲染文本 + 检测/截断标注。"""
+    """模板预览出参:净化后渲染文本 + 检测/截断标注。"""
 
     ok: bool
     text: str = ""
@@ -176,7 +170,7 @@ class McpServerIn(BaseModel):
 class McpServerUpdateIn(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     endpoint: str = Field(min_length=8, max_length=512)
-    # 值 None=保持现值;空串=删除该键(D2 编辑语义)
+    # 值 None=保持现值;空串=删除该键
     headers: dict[str, str | None] = {}
 
 
@@ -279,7 +273,7 @@ async def create_server(
             endpoint=body.endpoint,
             headers=body.headers,
         )
-        # 创建即同步(028 spec「保存即同步」);失败不炸创建(降级记错误)
+        # 创建即同步(spec「保存即同步」);失败不炸创建(降级记错误)
         await svc.sync(server_id=sid, tenant_id=tenant_id)
         await svc.commit()
     except McpValidationError as e:
@@ -430,7 +424,7 @@ async def preview_prompt(
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> McpPromptPreviewOut:
-    """模板只读内容预览(109):按名实时拉取渲染结果,注入检测+大小上限;
+    """模板只读内容预览:按名实时拉取渲染结果,注入检测+大小上限;
     禁止注入任何提示词、非运行时提示来源(spec「模板只读边界」)。"""
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     try:

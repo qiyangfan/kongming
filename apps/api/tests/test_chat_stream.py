@@ -1,4 +1,4 @@
-"""流式问答端点测试(017 query-streaming;chat spec「流式问答端点」)。
+"""流式问答端点测试(query-streaming;chat spec「流式问答端点」)。
 
 真实 PG/Redis;agent 面经 dependency_overrides 替身(scripted SSE 帧)。
 覆盖:事件中继/终态一致性(result 与同步逐字段一致)/REJECTED 走 result/
@@ -54,8 +54,8 @@ class StreamFakeAgent:
         self.frames = frames or []
         self.reply = reply or _pass_reply()
         self.boom = boom
-        self.crash = crash  # 非 AgentUnavailable 的意外异常(R1-S1)
-        # 全部帧发完后读尾异常(R3-R1:result 已落库,后置传输错误不得叠加 FAILED)
+        self.crash = crash  # 非 AgentUnavailable 的意外异常
+        # 全部帧发完后读尾异常(result 已落库,后置传输错误不得叠加 FAILED)
         self.crash_after_frames = crash_after_frames
         self.stream_calls: list[dict[str, object]] = []
         self.title_reply: str | None = None
@@ -81,7 +81,7 @@ class StreamFakeAgent:
 
 
 def _frames_for(reply: AgentReply) -> list[tuple[str, str]]:
-    """成功链路的 scripted 帧序列(stage 对+sql+summary+result)。"""
+    """构造成功响应的 scripted 帧序列，包含配对 stage、sql、summary 和 result。"""
     frames: list[tuple[str, str]] = []
     for node in ("understand", "retrieve", "generate"):
         for st in ("running", "done"):
@@ -220,7 +220,7 @@ async def test_stream_happy_path_full_relay(
     )
     msgs = [(str(r[0]), str(r[1])) for r in rows]
     assert msgs == [("USER", "SUCCESS"), ("ASSISTANT", "SUCCESS")]
-    # agent 收到完整回调参数(前段共用直证:history/tenant/trace)
+    # agent 应收到 history、tenant 和 trace 参数。
     assert first_agent.stream_calls[0]["question"] == "有多少商品"
 
 
@@ -286,7 +286,7 @@ async def test_stream_unexpected_crash_still_terminates(
     make_user: MakeUser,
     fake_agent: dict[str, StreamFakeAgent],
 ) -> None:
-    """R1-S1 直证:非 AgentUnavailable 的意外异常(如中途 RuntimeError)也收敛
+    """检查非 AgentUnavailable 的意外异常（如 RuntimeError）也会收敛
     error 终态+FAILED 落库——终止标记必达,前端不悬挂。"""
     _install(fake_agent, StreamFakeAgent(crash=True))
     _, token = await _user_with_chat_perm(client, session, make_user, "stream3b")
@@ -308,7 +308,7 @@ async def test_stream_missing_terminal_frame_converges_error(
     make_user: MakeUser,
     fake_agent: dict[str, StreamFakeAgent],
 ) -> None:
-    """R3:agent 流正常结束但缺终态帧(契约破坏)→ error 终态+FAILED 落库。"""
+    """Agent 流缺少终态帧时发送 error 终态并将消息标记为 FAILED。"""
     frames_in = [
         ("stage", json.dumps({"node": "understand", "status": "done", "retry_count": 0})),
     ]
@@ -326,7 +326,7 @@ async def test_stream_malformed_process_frame_skipped(
     make_user: MakeUser,
     fake_agent: dict[str, StreamFakeAgent],
 ) -> None:
-    """R1-S1 相邻面:过程帧 data 畸形 JSON → 跳帧不中断,流继续到终态。"""
+    """相邻面:过程帧 data 畸形 JSON → 跳帧不中断,流继续到终态。"""
     reply = _pass_reply()
     frames_in = [
         ("stage", "{not-json"),
@@ -347,7 +347,7 @@ async def test_stream_tail_error_after_result_no_double_write(
     make_user: MakeUser,
     fake_agent: dict[str, StreamFakeAgent],
 ) -> None:
-    """R3-R1 直证:result 终态已落库后流尾传输异常,按成功下发——
+    """检查 result 终态已落库后发生流尾传输异常时，仍按成功结果下发——
     不叠加第二条 FAILED 消息,不下发 error 帧。"""
     reply = _pass_reply()
     frames_in = [
@@ -375,7 +375,7 @@ async def test_stream_duplicate_result_frame_idempotent(
     make_user: MakeUser,
     fake_agent: dict[str, StreamFakeAgent],
 ) -> None:
-    """R4 直证:agent 违约发双 result 帧——首个为权威,幂等守卫不二次落库。"""
+    """Agent 重复发送 result 帧时只采用首帧，避免重复落库。"""
     reply = _pass_reply()
     frames_in = [
         ("result", json.dumps(reply.__dict__)),
@@ -520,7 +520,7 @@ async def test_relay_gen_heartbeat_on_idle(monkeypatch: pytest.MonkeyPatch) -> N
     """空闲超时发心跳注释行;帧到达即转发;None 收束。"""
     monkeypatch.setattr(chat_router, "STREAM_HEARTBEAT_SEC", 0.05)
     q: asyncio.Queue[tuple[str, object] | None] = asyncio.Queue()
-    # task 允许None 后接,cast 对齐标注(运行时不变)
+    # task 允许 None 后接,cast 对齐标注(运行时不变)
     handle = StreamHandle(queue=q, task=cast("asyncio.Task[None]", None))
     await q.put(("stage", {"node": "understand", "status": "running", "retry_count": 0}))
 
@@ -543,11 +543,11 @@ async def test_stream_trace_event_relayed(
     make_user: MakeUser,
     fake_agent: dict[str, StreamFakeAgent],
 ) -> None:
-    """trace 诊断帧(080 预算/063 预筛/064 闸门/068 净化共用通道)白名单透传,
+    """trace 诊断帧(预算/预筛/闸门/净化共用通道)白名单透传,
     不侵入 result 终态与用户响应契约(内部诊断信号,前端按未知事件忽略)。"""
     reply = _pass_reply()
     frames = _frames_for(reply)
-    # 在 summary 之后、result 之前插入 trace 帧
+    # 将 trace 帧插入 result 事件前。
     idx = next(i for i, (e, _) in enumerate(frames) if e == "result")
     frames.insert(
         idx,

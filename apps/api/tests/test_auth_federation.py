@@ -1,4 +1,4 @@
-"""联邦登录(auth spec「联邦登录(连接器形态)」):options/start/state/404 全链路。"""
+"""联邦登录测试覆盖 provider 选项、授权发起、state 校验和未知 provider。"""
 
 import asyncio
 from collections.abc import Callable
@@ -62,7 +62,7 @@ async def test_google_start_includes_pkce(client: AsyncClient) -> None:
 
 
 async def _start_and_callback(client: AsyncClient, provider: str, state: str | None = None):
-    """完整 start→callback 链路;可注入伪造 state。"""
+    """执行一次授权发起和回调，并允许测试注入伪造 state。"""
     if state is None:
         r = await client.get(f"/auth/{provider}/start")
         state = _query(r.json()["authorize_url"])["state"]

@@ -1,4 +1,4 @@
-"""system 域 SQLAlchemy 仓储实现(唯一 import sqlalchemy 的 system 文件,宪法 Article II)。
+"""system 持久化仓储,将 SQLAlchemy 查询映射到领域端口。
 
 显式 SQL(text)同 auth 域约定:表少且稳定,SQL 即文档;
 行 → 领域 dataclass 的映射集中在 _to_* 函数。
@@ -20,8 +20,8 @@ from kongming.system.models import (
     UserListItem,
 )
 
-# 关键字对用户名/昵称不区分大小写包含匹配(rbac delta 007「用户列表查询」);
-# ESCAPE '\' + like_pattern 转义使 %/_/\\ 按字面匹配(搜索语义不失真,R1-3)
+# 关键字对用户名/昵称不区分大小写包含匹配(rbac spec「用户列表查询」);
+# ESCAPE '\' + like_pattern 转义使 %/_/\\ 按字面匹配(搜索语义不失真)
 _USER_FILTER = (
     "u.deleted_at IS NULL"
     " AND (:kw = '' OR u.username ILIKE :p ESCAPE '\\'"
@@ -99,7 +99,7 @@ def _to_tenant(row: dict[str, Any]) -> TenantItem:
 class SqlSystemRepo:
     def __init__(self, s: AsyncSession) -> None:
         self._s = s
-        self._oper = SqlOperLogRepo(s)  # 审计与业务同会话=同事务(007 S2)
+        self._oper = SqlOperLogRepo(s)  # 审计与业务同会话=同事务(S2)
 
     # ---- 用户 ----
 
@@ -230,7 +230,7 @@ class SqlSystemRepo:
         )
 
     async def set_user_status(self, user_id: str, status: str) -> None:
-        """专用启停(012):只翻状态列,不触碰其余字段(与全量编辑区分)。"""
+        """专用启停:只翻状态列,不触碰其余字段(与全量编辑区分)。"""
         await self._s.execute(
             text(
                 "UPDATE public.sys_user SET status=:st, updated_at=now()"

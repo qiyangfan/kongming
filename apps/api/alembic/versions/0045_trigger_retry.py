@@ -1,17 +1,4 @@
-"""0045: 触发器失败重试策略(101-trigger-retry-policy)
-
-- sys_trigger_definition 加 max_retries INTEGER NOT NULL DEFAULT 0
-  (CHECK 0–5;0=不重试,存量行缺省零回归)。
-- sys_trigger_run 加 retry_of_run_id UUID NULL(重试行追溯首跑)、
-  attempt INTEGER NOT NULL DEFAULT 1(尝试序号冗余,历史查询免递归)、
-  next_retry_at TIMESTAMPTZ NULL(挂起重试的到期时刻)。
-- status CHECK 扩展 'PENDING':挂起重试为独立 run 行(调度重排形态),
-  派发执行后原行落定终态,不覆盖先前失败行。
-- 部分索引:调度 tick 扫描条件(挂起+到期)行数极小,部分索引即可。
-
-**downgrade**:删索引/列,恢复三态 CHECK(PENDING 行先收敛为 FAILED,
-不留悬挂调度态)。
-"""
+"""为触发器增加重试配置、尝试序号和到期时间，并以独立 PENDING run 保存待重试任务。降级前需先收敛待重试行。"""
 
 from sqlalchemy import text
 

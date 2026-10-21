@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { isNearBottom, NEAR_BOTTOM_PX } from "./scroll-follow";
 
-/* 近底跟随锚(078 任务 1.2):阈值单一常量;内容不足一屏恒贴底(新消息要跟)。
-   度量 = scrollTop/scrollHeight/clientHeight 三元组,不依赖 window。 */
+/* 近底跟随锚:阈值单一常量;内容不足一屏恒贴底(新消息要跟)。 度量 = scrollTop/scrollHeight/clientHeight 三元组,不依赖 window。 */
 describe("isNearBottom", () => {
   it("恰好贴底(distance=0)为近底", () => {
     expect(isNearBottom(500, 1000, 500)).toBe(true);
@@ -22,7 +21,7 @@ describe("isNearBottom", () => {
 
   it("用户上滚远离底部即非近底(长结果表查阅场景)", () => {
     expect(isNearBottom(0, 10000, 500)).toBe(false); // 内容顶部
-    expect(isNearBottom(9400, 10000, 500)).toBe(false); // distance=100
+    expect(isNearBottom(9400, 10000, 500)).toBe(false); // distance=
   });
 
   it("自定义阈值生效(阈值单一常量可注入,禁散落魔法数)", () => {

@@ -1,7 +1,7 @@
-"""bot 路由(025,custom-agent spec):管理端点(归属收口)+ 公开 web 嵌入 +
+"""bot 路由(custom-agent spec):管理端点(归属收口)+ 公开 web 嵌入 +
 OpenAI 兼容 API(api-key 鉴权)。
 
-组合根:ReactRunner 适配 chat AgentClient;BotGuardrail 适配 020 服务。
+组合根:ReactRunner 适配 chat AgentClient;BotGuardrail 适配 guardrail 服务。
 """
 
 import logging
@@ -78,7 +78,7 @@ class _AgentReactRunner:
             bot_system_prompt=bot_system_prompt,
             model=model,
             channel=channel,
-            collect_usage=True,  # 035:bot 链路请求内同步采集(R1-S2 按调用方挂载)
+            collect_usage=True,  # 仅 Bot 调用启用请求内用量采集。
         )
         return {
             "success": reply.success,
@@ -89,7 +89,7 @@ class _AgentReactRunner:
             "stats": reply.stats,
             "retry_count": reply.retry_count,
             "error": reply.error,
-            "usage_records": reply.usage_records,  # 035:同步采集透传
+            "usage_records": reply.usage_records,  # 同步采集透传
         }
 
 
@@ -131,7 +131,7 @@ class _BotGuardrailAdapter:
 
 
 class _McpDynamicToolLister:
-    """028 DynamicToolLister 绑定(mcp 域服务装配,与 toolcall 组合根同构)。"""
+    """DynamicToolLister 绑定(mcp 域服务装配,与 toolcall 组合根同构)。"""
 
     def __init__(self, session: AsyncSession) -> None:
         from kongming.config import get_settings
@@ -152,7 +152,7 @@ class _McpDynamicToolLister:
 
 
 def _build_bot_rate_gate() -> ChatCostGate:
-    """062:公开嵌入面速率闸(仅 (bot_key, ip) 分钟级;无用户/租户维度),
+    """公开嵌入面速率闸(仅 (bot_key, ip) 分钟级;无用户/租户维度),
     复用 chat 域零框架闸模块(单一 fail-open 口径,不复制限流逻辑)。"""
     settings = get_settings()
     return ChatCostGate(
@@ -172,16 +172,14 @@ def get_bot_service(
         SqlPermRepo(session),
         _AgentReactRunner(agent),
         _BotGuardrailAdapter(),
-        SqlOperLogRepo(session),  # R1-L2:写操作审计
-        _McpDynamicToolLister(session),  # 028
-        _UsageSinkAdapter(),  # 035:bot 用量请求内落库(独立短会话,B1-B9)
+        SqlOperLogRepo(session),  # 写操作审计
+        _McpDynamicToolLister(session),
+        _UsageSinkAdapter(),  # bot 用量请求内落库(独立短会话)
     )
 
 
 def build_bot_service_with_session(session: AsyncSession) -> BotService:
-    """非 DI 组合工厂(adopt-mcp-sdk2:/mcp 入站 ASGI 中间件消费;与
-    get_bot_service 同源装配,防两处漂移)。agent 客户端经 _resolve_agent_client
-    (覆写感知,测试替身注入路径与 DI 同形)。"""
+    """为 MCP 入站请求构建 Bot 服务，并复用标准依赖工厂的客户端解析。"""
     from kongming.bot.repository import SqlBotRepo
 
     return BotService(
@@ -189,9 +187,9 @@ def build_bot_service_with_session(session: AsyncSession) -> BotService:
         SqlPermRepo(session),
         _AgentReactRunner(_resolve_agent_client()),
         _BotGuardrailAdapter(),
-        SqlOperLogRepo(session),  # R1-L2:写操作审计
-        _McpDynamicToolLister(session),  # 028
-        _UsageSinkAdapter(),  # 035:bot 用量请求内落库(独立短会话,B1-B9)
+        SqlOperLogRepo(session),  # 写操作审计
+        _McpDynamicToolLister(session),
+        _UsageSinkAdapter(),  # bot 用量请求内落库(独立短会话)
     )
 
 
@@ -208,9 +206,9 @@ def _resolve_agent_client() -> AgentClient:
 
 
 class _UsageSinkAdapter:
-    """035 UsageSink 适配(llmusage 仓储;组合根装配,保 bot.service 零框架)。
+    """UsageSink 适配(llmusage 仓储;组合根装配,保 bot.service 零框架)。
 
-    独立短会话落库(B1-B9):sink 在 agent 分钟级长外呼之后才被调用,若复用
+    独立短会话落库:sink 在 agent 分钟级长外呼之后才被调用,若复用
     请求级会话,外呼期间白占连接池配额,且 sink 自 commit 会提前提交请求会话
     上的挂起写——与 _BotGuardrailAdapter 同款独立短会话范式。
     """
@@ -228,14 +226,14 @@ class _UsageSinkAdapter:
 
 
 async def _team_ids(session: AsyncSession, user_id: str) -> list[str]:
-    """032:用户所属团队 id 集(列表可见性双支用)。"""
+    """用户所属团队 id 集(列表与归属查询的可见性过滤用)。"""
     from kongming.team.repository import SqlTeamRepo
 
     return list((await SqlTeamRepo(session).role_map(user_id=user_id)).keys())
 
 
 async def _team_role(session: AsyncSession, user_id: str, team_id: str | None) -> str | None:
-    """032:单资源的团队角色(编辑/删除判定);无团队 None。"""
+    """单资源的团队角色(编辑/删除判定);无团队 None。"""
     if team_id is None:
         return None
     from kongming.team.repository import SqlTeamRepo
@@ -245,7 +243,7 @@ async def _team_role(session: AsyncSession, user_id: str, team_id: str | None) -
 
 async def _tenant_of(session: AsyncSession, user_id: str, tenant_key: str | None) -> str:
     """与 memory/semantic 同构(ACTIVE+default 优先+tiebreak)。
-    SQL 单一真理源=kongming.tenant.resolve_tenant(B1-B10 收口)。"""
+    SQL 单一真理源=kongming.tenant.resolve_tenant。"""
     from kongming.tenant import resolve_tenant
 
     resolved = await resolve_tenant(session, user_id=user_id, tenant_key=tenant_key)
@@ -277,8 +275,8 @@ class BotOut(BaseModel):
     model: str | None
     enabled: bool
     is_public: bool
-    published_at: str | None = None  # 033:上架态(None=未上架)
-    team_id: str | None = None  # 036⑥:归属回传(None=个人;契约纯增)
+    published_at: str | None = None  # 上架态(None=未上架)
+    team_id: str | None = None  # 归属回传(None=个人;契约)
     created_at: str
 
 
@@ -302,7 +300,7 @@ def _bot_out(r: dict[str, object]) -> BotOut:
         enabled=bool(r["enabled"]),
         is_public=bool(r["is_public"]),
         published_at=_iso_or_none(r.get("published_at")),
-        team_id=str(r["team_id"]) if r.get("team_id") else None,  # 036⑥
+        team_id=str(r["team_id"]) if r.get("team_id") else None,
         created_at=str(r["created_at"]),
     )
 
@@ -382,7 +380,7 @@ async def update_bot(
     )
     if row is None:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
-    # 032:编辑=创建者或 MEMBER+(VIEWER 可见不可编辑)
+    # 编辑=创建者或 MEMBER+(VIEWER 可见不可编辑)
     from kongming.team.models import can_edit as _can_edit
 
     if not _can_edit(
@@ -397,10 +395,9 @@ async def update_bot(
     ):
         raise HTTPException(status_code=403, detail="TEAM_ROLE_FORBIDDEN") from None
     fields = {k: v for k, v in req.model_dump().items() if v is not None}
-    # R1-J4:公开发布(is_public false→true)=创建者或 OWNER 全权——
+    # 公开发布(is_public false→true)=创建者或 OWNER 全权——
     # MEMBER 可编辑但不可把团队 Bot 暴露到免登录公网渠道
-    # 类型化 bool(|None):真值判断即语义——is True/is not True 字面量恒等
-    # 比较对 bool 是冗余噪音,且对"truthy 非 True 值"零容忍反成脆弱点
+    # (is_public 为 bool|None,真值判断即语义,无需 is True 恒等比较)
     if fields.get("is_public") and not row["is_public"]:
         from kongming.team.models import can_manage as _cm4
 
@@ -415,7 +412,7 @@ async def update_bot(
             ),
         ):
             raise HTTPException(status_code=403, detail="TEAM_ROLE_FORBIDDEN") from None
-    # R1-H2:编辑路径 datasource/model 复校
+    # 编辑路径 datasource/model 复校
     if "datasource_key" in fields and str(fields["datasource_key"]) != "default":
         try:
             await svc._assert_datasource(tid, str(fields["datasource_key"]))  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
@@ -427,7 +424,7 @@ async def update_bot(
             raise HTTPException(status_code=400, detail="模型未注册") from None
     # 编辑越权与审核:tools/system_prompt 变更时复校
     if "tools" in fields:
-        # 审查循环 F3:与 create 同口径——须含 MCP 动态工具集,否则含
+        # 与 create 同口径——须含 MCP 动态工具集,否则含
         # mcp__ 工具的 Bot 任何一次带 tools 的更新都被静态注册表误拒(工具集被冻结)
         mcp_names = await svc._mcp_names(tid)  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
         allowed = tools_for_perms(
@@ -441,8 +438,8 @@ async def update_bot(
             )
         except ToolSubsetViolation as e:
             raise HTTPException(status_code=400, detail=str(e)) from None
-    # J6:name 变更纳入重审(上架后改名绕过审核面收口——
-    # 上架内容的「名」与 greeting 同风险面)
+    # name 变更纳入重审:上架后改名绕过审核面——
+    # 上架内容的「名」与 greeting 同风险面
     if "name" in fields and row["published_at"] is not None:
         from kongming.guardrail.repository import (
             SqlGuardrailAuditWriter,
@@ -461,7 +458,7 @@ async def update_bot(
         )
         if filtered[0] != str(fields["name"]):
             raise HTTPException(status_code=400, detail="GUARDRAIL_REJECTED") from None
-    # L7:system_prompt 变更或开启公开(is_public=true)均重审
+    # system_prompt 变更或开启公开(is_public=true)均重审
     if "system_prompt" in fields or fields.get("is_public"):
         prompt_to_check = str(fields.get("system_prompt") or row["system_prompt"])
         try:
@@ -473,7 +470,7 @@ async def update_bot(
     ok = await repo.update_bot(bot_id=str(bot_id), fields=fields)
     if not ok:
         raise HTTPException(status_code=400, detail="EMPTY_UPDATE") from None
-    await SqlOperLogRepo(session).add(  # R1-L2
+    await SqlOperLogRepo(session).add(
         str(user["sub"]), "bot.update", str(row["bot_key"]), {"fields": sorted(fields)}
     )
     await session.commit()
@@ -487,7 +484,7 @@ async def delete_bot(
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
-    """R1-L5:Bot 删除(api-key 经 FK CASCADE;归属收口)。"""
+    """Bot 删除(api-key 经 FK CASCADE;归属收口)。"""
     from kongming.bot.repository import SqlBotRepo
 
     tid = await _tenant_of(session, str(user["sub"]), x_tenant_id)
@@ -502,7 +499,7 @@ async def delete_bot(
     )
     if row is None:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
-    # 032:删除=创建者或 OWNER(全权)
+    # 删除=创建者或 OWNER(全权)
     from kongming.team.models import can_manage as _can_manage
 
     if not _can_manage(
@@ -524,9 +521,7 @@ async def delete_bot(
     ).scalar_one_or_none()
     if hit is None:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
-    await SqlOperLogRepo(session).add(  # R1-L2
-        str(user["sub"]), "bot.delete", str(row["bot_key"]), {}
-    )
+    await SqlOperLogRepo(session).add(str(user["sub"]), "bot.delete", str(row["bot_key"]), {})
     await session.commit()
 
 
@@ -561,7 +556,7 @@ async def create_key(
     )
     if row is None:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
-    # R1-J3:key 管理=创建者或 OWNER(全权)
+    # key 管理=创建者或 OWNER(全权)
     from kongming.team.models import can_manage as _cm
 
     if not _cm(
@@ -578,7 +573,7 @@ async def create_key(
     plain, key_id = await svc.create_key(
         bot_id=str(bot_id), tenant_id=tid, user_id=str(user["sub"]), name=name
     )
-    await SqlOperLogRepo(session).add(  # R1-L2
+    await SqlOperLogRepo(session).add(
         str(user["sub"]), "bot.key_create", str(row["bot_key"]), {"name": name}
     )
     await session.commit()
@@ -664,8 +659,7 @@ async def revoke_key(
     )
     if bot is None:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
-    # R1-J3 同款闸:key 管理=创建者或 OWNER——审查循环 F2:曾只过 get_mine
-    # (团队任意角色成员含 VIEWER 命中),与 create/list 两端点自相矛盾
+    # 密钥管理只允许创建者或 OWNER，与创建和列表接口使用相同权限范围。
     from kongming.team.models import can_manage as _cm
 
     if not _cm(
@@ -680,9 +674,7 @@ async def revoke_key(
     ):
         raise HTTPException(status_code=403, detail="TEAM_ROLE_FORBIDDEN") from None
     await repo.revoke_key(key_id=str(key_id), bot_id=str(row))
-    await SqlOperLogRepo(session).add(  # R1-L2
-        str(user["sub"]), "bot.key_revoke", str(bot["bot_key"]), {}
-    )
+    await SqlOperLogRepo(session).add(str(user["sub"]), "bot.key_revoke", str(bot["bot_key"]), {})
     await session.commit()
 
 
@@ -702,7 +694,13 @@ class BotChatOut(BaseModel):
 @public_router.post(
     "/bot/{bot_key}/chat",
     response_model=BotChatOut,
-    responses={429: {"description": "速率超限(062;detail=CHAT_RATE_LIMITED,X-Quota-Warning 预警)"}},
+    responses={
+        429: {
+            "description": (
+                "请求超过速率限制(detail=CHAT_RATE_LIMITED);X-Quota-Warning 可能包含预警。"
+            )
+        }
+    },
 )
 async def bot_chat_public(
     bot_key: str,
@@ -710,9 +708,9 @@ async def bot_chat_public(
     svc: Annotated[BotService, Depends(get_bot_service)],
 ) -> BotChatOut:
     """web 嵌入公开端点(免登录):is_public+enabled 闸;护栏与工具防御全量。
-    062:(助手标识, 客户端 IP) 维度速率闸——该面无用户/租户维度可用,IP 取自
+    (助手标识, 客户端 IP) 维度速率闸——该面无用户/租户维度可用,IP 取自
     ClientIpMiddleware contextvar(经 --forwarded-allow-ips 约束,非客户端可
-    伪造),fail-open(Redis 不可用放行,与 019 工具限流同口径)。"""
+    伪造),fail-open(Redis 不可用放行,与 工具限流同口径)。"""
     try:
         await _build_bot_rate_gate().check_bot(bot_key=bot_key, client_ip=client_ip_var.get())
     except ChatRateLimited:
@@ -740,7 +738,7 @@ class OpenAiChatIn(BaseModel):
 
 @public_router.post(
     "/v1/chat/completions",
-    responses={429: {"description": "配额超限(034;响应头 X-Quota-Warning 预警)"}},
+    responses={429: {"description": "请求超过配额限制;X-Quota-Warning 可能包含预警。"}},
 )
 async def openai_chat(
     req: OpenAiChatIn,
@@ -748,7 +746,7 @@ async def openai_chat(
     x_api_key: Annotated[str | None, Header()] = None,
 ) -> object:
     """OpenAI 兼容端点:api-key 鉴权(scopes 限 bot);取最后一条 user 消息。
-    034:配额切面(超额 429;达预警线 X-Quota-Warning 响应头标记)。"""
+    配额切面(超额 429;达预警线 X-Quota-Warning 响应头标记)。"""
     if not x_api_key:
         raise HTTPException(status_code=401, detail="API_KEY_REQUIRED") from None
     try:
@@ -758,14 +756,14 @@ async def openai_chat(
     question = next((m.content for m in reversed(req.messages) if m.role == "user"), "")
     if not question.strip():
         raise HTTPException(status_code=400, detail="EMPTY_QUESTION") from None
-    # 034:配额切面(执行前 fail-closed;无策略无套餐=零判定零回归)
+    # 配额切面(执行前 fail-closed;无策略无套餐=零判定)
     from kongming.billing.repository import SqlBillingRepo
     from kongming.billing.service import BillingService
     from kongming.db import get_sessionmaker as _gsm
 
     quota_warn = ""
     async with _gsm()() as qs:
-        # R1-S1:审计注入(spec「429 并落审计」)+提交(独立会话须显式
+        # 审计注入(spec「429 并落审计」)+提交(独立会话须显式
         # commit,否则审计随会话关闭回滚)
         from kongming.auth.repository import SqlOperLogRepo
 
@@ -780,10 +778,10 @@ async def openai_chat(
             SqlBillingRepo(qs), _QuotaOper(qs)
         ).check_gateway_quota(
             tenant_id=str(key_info["tenant_id"]),
-            bot_id=str(key_info["bot_id"]),  # 035:BOT 级配额双路判定
+            bot_id=str(key_info["bot_id"]),  # BOT 级配额双路判定
         )
         if not allowed:
-            await qs.commit()  # R1-S1:拒前落审计
+            await qs.commit()  # 拒前落审计
     if not allowed:
         raise HTTPException(status_code=429, detail=f"QUOTA_EXCEEDED: {dimension}") from None
     try:
@@ -802,12 +800,12 @@ async def openai_chat(
     body = {
         "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
         "object": "chat.completion",
-        "created": int(time.time()),  # R1-M1:OpenAI SDK 必填
+        "created": int(time.time()),  # OpenAI SDK 必填
         "model": str(key_info["bot_key"]),
         "choices": [
             {
                 "index": 0,
-                # R2-F1:失败形态 summary 为空时 error 兜底(触顶/护栏拒绝/
+                # 失败形态 summary 为空时 error 兜底(触顶/护栏拒绝/
                 # 不可用)——集成方不再拿到静默空 content;error 已过输出护栏
                 "message": {
                     "role": "assistant",
@@ -816,9 +814,9 @@ async def openai_chat(
                 "finish_reason": "stop",
             }
         ],
-        "usage": None,  # 用量经 sys_llm_usage(021),v1 响应不回填
+        "usage": None,  # 用量经 sys_llm_usage,v1 响应不回填
     }
-    # 034:达预警线标记(不拒绝)
+    # 达预警线标记(不拒绝)
     if quota_warn:
         return _JSONResponse(body, headers={"X-Quota-Warning": quota_warn})
     return body

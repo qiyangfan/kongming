@@ -1,4 +1,4 @@
-"""task 端口(090;宪法 Article II:持久化经接口反转)。"""
+"""task 持久化端口,供用例层通过接口依赖存储实现。"""
 
 from typing import Any, Protocol
 
@@ -102,7 +102,7 @@ class TaskRepo(Protocol):
         self, *, task_id: str, step_id: str
     ) -> dict[str, Any] | None: ...
 
-    # ── 协作拓扑与协作账本(091)──
+    # ── 协作拓扑与协作账本──
 
     async def update_step_topology(
         self, *, task_id: str, step_id: str, topology: dict[str, object]
@@ -168,14 +168,14 @@ class TaskRepo(Protocol):
 
 
 class CollabBotResolver(Protocol):
-    """协作 Bot 运行时解析(091;组合根注入,task 用例零 bot 域依赖)。
+    """协作 Bot 运行时解析(组合根注入,task 用例零 bot 域依赖)。
     返回 None = 不存在/停用/创建者不可用(同形拒绝)。"""
 
     async def resolve(self, *, tenant_id: str, bot_key: str) -> dict[str, object] | None: ...
 
 
 class GraphConfirmRepo(Protocol):
-    """图内确认与检查点存取端口(add-graph-checkpoint;组合根注入)。
+    """图内确认与检查点存取端口(graph-checkpoint;组合根注入)。
     检查点 blob 对用例层不透明(存取转发);确认行是任务域伴生账本。"""
 
     async def put_checkpoint(

@@ -1,4 +1,4 @@
-"""document-rag 仓储(024):rag.documents / rag.document_chunks SQL。"""
+"""document-rag 仓储:rag.documents / rag.document_chunks SQL。"""
 
 from typing import Any
 
@@ -13,9 +13,9 @@ from kongming.rag.repository import vec_literal
 class SqlDocumentRepo:
     def __init__(self, s: AsyncSession, ts_config: str = DEFAULT_FULLTEXT_TS_CONFIG) -> None:
         self._s = s
-        # 098:全文分词配置(白名单校验 fail-fast,组合根注入部署值;缺省 simple
-        # 零回归)。文档写入(replace_document tsv)与检索(recall_children_fulltext)
-        # 共用同一注入值,与 rag 表说明路同配置单源——同库不分词两态
+        # 全文分词配置:白名单校验 fail-fast,组合根注入部署值(缺省 simple)。
+        # 文档写入(replace_document 的 tsv)与检索(recall_children_fulltext)
+        # 共用同一注入值——同库不允许两种分词形态并存
         self._ts = validated_fulltext_ts_config(ts_config)
 
     async def commit(self) -> None:
@@ -90,8 +90,8 @@ class SqlDocumentRepo:
             parent_seq = c["parent_seq"]
             await self._s.execute(
                 text(
-                    # S608 豁免:{self._ts} 为白名单校验后的配置名(098 design
-                    # D2/D5,标识符无法绑定参数),其余全部绑定参数
+                    # S608 豁免:{self._ts} 为白名单校验后的配置名
+                    # (标识符无法绑定参数),其余全部绑定参数
                     "INSERT INTO rag.document_chunks"  # noqa: S608
                     " (id, document_id, tenant_id, datasource_key, chunk_level,"
                     "  parent_id, seq, source_ref, content, tsv, embedding)"
@@ -193,11 +193,10 @@ class SqlDocumentRepo:
 
     @property
     def _ft_or_pred(self) -> str:
-        """内容词兜底轮谓词(112):任一**内容词**词条命中(词条限
-        length >= 2,排除 111 实证的单字虚词噪声源;与表说明路同构,
-        仅谓词行异;外部文本不进 to_tsquery 语法位)。"""
+        """内容词兜底轮谓词:任一词条命中(词条限 length >= 2,
+        滤掉单字虚词);外部文本不进 to_tsquery 语法位。"""
         return (
-            "   AND EXISTS (SELECT 1 FROM"  # noqa: S608  # {self._ts} 白名单校验配置名(同 098 豁免)
+            "   AND EXISTS (SELECT 1 FROM"  # noqa: S608  # {self._ts} 白名单校验配置名(同上豁免)
             f" unnest(tsvector_to_array(to_tsvector('{self._ts}', :q))) AS tok"
             " WHERE length(tok) >= 2"
             f"   AND tsv @@ plainto_tsquery('{self._ts}', tok))"
@@ -212,19 +211,19 @@ class SqlDocumentRepo:
         question: str,
         top_k: int,
     ) -> list[dict[str, Any]]:
-        """共享 SELECT 主体(R1-M3 相关度排序;仅匹配谓词随轮次变化)。"""
+        """共享 SELECT 主体(相关度排序;仅匹配谓词随轮次变化)。"""
         rows = (
             (
                 await self._s.execute(
                     text(
-                        # S608 豁免:{self._ts} 为白名单校验后的配置名(098 design
-                        # D2/D5,标识符无法绑定参数),谓词为类内常量形态(112),
+                        # S608 豁免:{self._ts} 为白名单校验后的配置名
+                        # (标识符无法绑定参数),谓词为类内常量形态,
                         # 其余全部绑定参数
                         "SELECT id, parent_id, source_ref FROM rag.document_chunks"  # noqa: S608
                         " WHERE tenant_id=:t AND datasource_key=:d AND chunk_level='CHILD'"
                         f"{predicate}"
-                        # R1-M3:相关度排序(009 同款);分词配置与写入侧同源(098);
-                        # 112 兜底轮沿用同量纲 ts_rank
+                        # 相关度排序;分词配置与写入侧同源,
+                        # 兜底轮沿用同量纲 ts_rank
                         f" ORDER BY ts_rank(tsv, plainto_tsquery('{self._ts}', :q)) DESC"
                         " LIMIT :k"
                     ),
@@ -239,9 +238,9 @@ class SqlDocumentRepo:
     async def recall_children_fulltext(
         self, *, tenant_id: str, datasource_key: str, question: str, top_k: int
     ) -> list[dict[str, Any]]:
-        """112 查询语义「AND 优先、内容词兜底」(与表说明路同根因同构):
-        全词条 AND 零命中才落内容词(length >= 2)兜底轮,排序/量纲不变;
-        无差别形态 MUST NOT(spec 规范性排除,111 实证在案)。"""
+        """查询语义「AND 优先、内容词兜底」：全词条 AND 零命中才落
+        内容词(length >= 2)兜底轮,排序/量纲不变;两轮无差别的形态
+        被 spec 规范性排除。"""
         for predicate in (self._ft_and_pred, self._ft_or_pred):
             rows = await self._children_fulltext_rows(
                 predicate=predicate,
@@ -275,7 +274,7 @@ class SqlDocumentRepo:
     async def fetch_child_texts(
         self, *, tenant_id: str, datasource_key: str, child_ids: list[str]
     ) -> dict[str, str]:
-        """精排候选池子块正文批量取回(add-doc-rerank;启用精排时才调用,
+        """精排候选池子块正文批量取回(启用精排时才调用,
         未启用路径零成本)。返回 {child_id: content};已删块自然缺席。"""
         if not child_ids:
             return {}

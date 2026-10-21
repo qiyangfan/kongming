@@ -1,6 +1,4 @@
-"""035 请求内同步采集测试(测试先行):bot 链路用量随响应回传→api 请求内
-落库(bot_id/tenant 归属/seq 幂等);落库失败不阻断应答;非 bot 渠道
-fire-and-forget 零回归。"""
+"""验证 Bot 用量随响应返回并在 API 请求中落库；记录失败不影响应答，其他渠道保持后台上报。"""
 # pyright: reportPrivateUsage=false
 
 from collections.abc import Iterator
@@ -72,7 +70,7 @@ async def test_bot_run_usage_synced_with_bot_id(
     make_user: MakeUser,
     fake_agent_usage: dict[str, FakeAgentUsage],
 ) -> None:
-    """spec「bot 链路请求内同步落库」:响应返回时用量已落库(bot_id/seq 正确)。"""
+    """验证响应返回时 Bot 用量已落库，且 bot_id 与 seq 正确。"""
     fake_agent_usage["agent"] = FakeAgentUsage()
     _, _, api_key = await _user_with_key(client, session, make_user, "sync_u1")
     r = await client.post(
@@ -81,7 +79,7 @@ async def test_bot_run_usage_synced_with_bot_id(
         json={"messages": [{"role": "user", "content": "hi"}]},
     )
     assert r.status_code == 200, r.text
-    # 035 R1-S2:bot 链路 runner 置 collect_usage=True(按调用方挂载直证)
+    # Bot 运行时启用用量采集。
     assert fake_agent_usage["agent"].calls[0].get("collect_usage") is True
     rows = (
         (

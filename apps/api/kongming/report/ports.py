@@ -1,8 +1,6 @@
-"""report 域端口(宪法 Article II:持久化/网关/执行经接口反转)。
+"""report 域端口,定义持久化、agent 网关和 SQL 执行接口。
 
-实现侧(adapter)在组合根装配:仓储=SqlReportRepo(repository),
-agent 网关=chat.agent_client.AgentClient 报告方法,SQL 执行=internal.service.execute
-(刷新数据全量防御与 rerun 同源),审计=auth SqlOperLogRepo,消息=chat 仓储。
+具体实现由组合根装配,用例层不依赖存储和外部服务。
 """
 
 from typing import Any, Protocol

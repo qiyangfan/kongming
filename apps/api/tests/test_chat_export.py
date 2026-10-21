@@ -1,10 +1,4 @@
-"""结果导出全栈测试(chat spec「结果导出 CSV/Excel」+ 010 delta,测试先行)。
-
-纯函数:to_csv/to_xlsx 形态断言(BOM/CRLF/RFC 4180 转义/表头加粗/自算列宽/
-类型分流/行数截断);端点:未认证 401、无权限 403、format 非法 422(传输层
-枚举收口)、响应头 Content-Disposition 时间戳文件名、文件体可读回、
-租户白名单复校 403。
-"""
+"""覆盖 CSV、XLSX 导出格式、权限、租户隔离和审计。"""
 # pyright: reportPrivateUsage=false
 
 import io
@@ -80,19 +74,16 @@ def test_xlsx_truncation() -> None:
     assert ws.max_row == 2  # 表头 + 1 数据行
 
 
-# ============ R1 评审修复回归 ============
-
-
 def test_xlsx_illegal_control_chars_stripped() -> None:
-    """PG text 允许 \\x01 等控制字符;openpyxl 遇之抛 IllegalCharacterError(裸 500
-    实证)——文本化时剥除,不再 500。"""
+    """PG text 允许 \\x01 等控制字符;openpyxl 遇之抛 IllegalCharacterError(裸 500)
+    ——文本化时剥除,不再 500。"""
     content, _ = to_xlsx(["x"], [["a\x01b\x0bc"]], max_rows=10)
     ws = cast("Any", load_workbook(io.BytesIO(content)).active)
     assert ws["A2"].value == "abc"
 
 
 def test_csv_formula_injection_neutralized() -> None:
-    """CSV 公式注入(R1):文本值以 =+-@ 等开头前置 ' 中和;数值类型不受影响。"""
+    """CSV 文本值以公式前缀开头时添加单引号；数值类型保持不变。"""
     content, _ = to_csv(
         ["a", "b", "c"],
         [["=HYPERLINK(x)", "@cmd", -30]],
@@ -115,7 +106,7 @@ def test_csv_lone_surrogate_no_500() -> None:
 
 
 def test_export_max_rows_lower_bound(monkeypatch: pytest.MonkeyPatch) -> None:
-    """export_max_rows 下界 ge=1:0 值会让导出恒空,配置错误启动期暴露(010 任务 1.3)。"""
+    """export_max_rows 下界 ge=1:0 值会让导出恒空,配置错误启动期暴露。"""
     from pydantic import ValidationError
 
     from kongming.config import Settings
@@ -217,7 +208,7 @@ async def test_export_tenant_forbidden_403(
 async def test_export_rows_over_transport_cap_422(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """rows 传输层上限(R1 评审:截断在 JSON 解析之后,挡不住请求体本身的内存
+    """rows 传输层上限(截断在 JSON 解析之后,挡不住请求体本身的内存
     放大)——超限在解析期即 422;service 层截断保留为双闸。"""
     _, token = await _user_with_chat_perm(client, session, make_user, "export-cap")
     r = await client.post(
@@ -228,7 +219,7 @@ async def test_export_rows_over_transport_cap_422(
     assert r.status_code == 422
 
 
-# ============ 导出审计(015,010 挂账⑦清零) ============
+# ============ 导出审计 ============
 
 
 async def test_export_audit_logged(
@@ -264,7 +255,7 @@ async def test_export_audit_logged(
 async def test_export_audit_failure_not_blocking(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """审计写失败不阻断导出(audit spec 铁律,与 004 SqlAuditWriter 同语义)。"""
+    """审计写失败不阻断导出(audit spec 铁律,与 SqlAuditWriter 同语义)。"""
     from kongming.auth.repository import SqlOperLogRepo
 
     async def _boom(self: object, *a: object, **kw: object) -> None:

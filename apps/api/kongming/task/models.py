@@ -1,4 +1,4 @@
-"""task 领域模型(090):状态机/步骤账本/预算(零框架,宪法 Article II)。
+"""task 领域模型:状态机、步骤账本和预算,不依赖 Web 框架或数据库。
 
 原则同源:步骤状态由工具执行证据驱动(语言模型自述不构成完成证据)、
 预算退出诚实、终态不复活。迁移白名单 fail-closed,非法迁移拒绝。
@@ -100,7 +100,7 @@ def normalize_budget(config: dict[str, Any] | None) -> dict[str, int]:
 
 
 def clamp_budget(normalized: dict[str, int], caps: dict[str, int]) -> dict[str, int]:
-    """预算部署级钳制(090 spec「任务级配置 + 部署级上限」):
+    """预算部署级钳制(spec「任务级配置 + 部署级上限」):
     归一后逐项取 min(任务配置, 部署上限)——部署可收紧也可放大天花板,
     但任务配置任何情况下不得超过部署上限。"""
     return {k: max(1, min(v, caps.get(k, v))) for k, v in normalized.items()}
@@ -117,12 +117,12 @@ def over_budget(used: dict[str, Any], config: dict[str, int]) -> str | None:
     return None
 
 
-# ── 协作拓扑(091;宿主=任务步骤;115 增圆桌形态)──
+# ── 协作拓扑(宿主=任务步骤;含分工与圆桌形态)──
 
 COLLAB_DISPATCH_SERIAL = "serial"
 COLLAB_DISPATCH_PARALLEL = "parallel"
 COLLAB_DISPATCHES = frozenset({COLLAB_DISPATCH_SERIAL, COLLAB_DISPATCH_PARALLEL})
-# 拓扑形态(115):decomposition=091 分工编排(缺省,存量行缺 kind 即此);
+# 拓扑形态:decomposition=分工编排(缺省,存量行缺 kind 即此);
 # roundtable=对等圆桌(黑板+轮次,显式 opt-in)
 COLLAB_KIND_DECOMPOSITION = "decomposition"
 COLLAB_KIND_ROUNDTABLE = "roundtable"
@@ -135,9 +135,8 @@ COLLAB_DEFAULT_ROUNDS = 3
 COLLAB_MIN_PARTICIPANTS = 2
 # 内置角色章程取值域(圆桌参与者的声明角色;名册外角色声明逐条剔除)
 COLLAB_ROLES = frozenset({"analyst", "skeptic", "auditor"})
-# 缺省名册(声明未给出合法名册时的回退):轻形态 2 人——2026-10-14 实测裁决:
-# 3 人×2 轮 ≈100k token 顶满任务编排硬顶,且专职审计者抬高单轮成本、
-# 压低轮内共识率;auditor 仍在取值域内可显式声明(重形态 opt-in)。
+# 默认使用分析者和质疑者两种角色，以控制任务编排的上下文开销。
+# 需要审计者时可在参与者名册中显式声明。
 COLLAB_DEFAULT_ROSTER: tuple[dict[str, object], ...] = (
     {"role": "analyst"},
     {"role": "skeptic"},
@@ -149,7 +148,7 @@ COLLAB_BOT_KEY_MAX = 64
 
 
 def _norm_bot_key(raw: object) -> str | None:
-    """bot_key 归一(空串/空白 → None;与 091 单绑定口径一致)。"""
+    """bot_key 归一(空串/空白 → None;与 bot 域绑定口径一致)。"""
     key = str(raw).strip() if raw else ""
     return key or None
 
@@ -220,7 +219,7 @@ def normalize_collab_topology(
         "dispatch": dispatch,
         "bot_key": _norm_bot_key(cfg.get("bot_key")),
     }
-    # 分工 worker 名册(collab-worker-roster,可选):条目非法剔除、身份
+    # 分工 worker 名册(可选):条目非法剔除、身份
     # (name 缺省 bot_key)去重裁首条、部署上限截断;空名册视为未声明,
     # 不落键——无名册载荷与存量行逐键一致(零漂移)。圆桌分支不读此字段。
     worker_roster: list[dict[str, object]] = []
@@ -256,7 +255,7 @@ def has_collab_topology(step: dict[str, Any]) -> bool:
 
 
 def decomposition_roster(topo: dict[str, Any]) -> list[dict[str, object]]:
-    """分工名册读取(collab-worker-roster):未声明名册/圆桌/存量缺 workers
+    """分工名册读取:未声明名册/圆桌/存量缺 workers
     → 恒空(无名册=匿名合成现行为);声明期锁定以此为准。"""
     parts = topo.get("workers")
     if not isinstance(parts, list):
@@ -274,7 +273,7 @@ def roundtable_roster(topo: dict[str, Any]) -> list[dict[str, object]]:
     return [dict(p) for p in cast("list[dict[str, object]]", parts)]
 
 
-# ── 协作账本状态(091;与 0040 两表 CHECK 同源)──
+# ── 协作账本状态(与 0040 两表 CHECK 同源)──
 
 R_RUNNING = "RUNNING"
 R_DONE = "DONE"
@@ -291,10 +290,10 @@ W_SKIPPED = "SKIPPED"
 # 收敛裁决标记(supersede 写入 verdict 列并透出查询面,语义须单源)
 VERDICT_SUPERSEDED = "superseded"
 
-# ── 圆桌轮次账本(115;与 0054 turn 表 CHECK 同源)──
+# ── 圆桌轮次账本(与 0054 turn 表 CHECK 同源)──
 
 TURN_SPEECH = "speech"
-# 预留值(design:一次建全已规划列,0054 CHECK 同域):当前编排的查证内嵌于
+# 预留值(ADR-004 一次建全已规划列,0054 CHECK 同域):当前编排的查证内嵌于
 # 发言轮,agent 面不产该 kind;留作独立查证轮的演进位,勿删除
 TURN_VERIFICATION = "verification"
 TURN_ABSTAIN = "abstain"

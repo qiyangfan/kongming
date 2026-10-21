@@ -1,10 +1,4 @@
-"""attachment 路由(030,薄适配层):
-- POST /chat/attachments(用户面,chat:execute):流式读+大小闸+magic
-  复核+落盘+元数据+审计;
-- GET /internal/attachment/{id}/content(内部面,中间件令牌已守):
-  绑定复校(user_id+tenant_key 传参比对)+一次性消费(置 CONSUMED
-  +删文件),重复/越权 404 同形。
-"""
+"""attachment 路由(薄适配层):用户附件上传与内部一次性读取。"""
 
 import contextlib
 import logging
@@ -67,8 +61,8 @@ async def upload_attachment(
     if mime is None:
         raise HTTPException(status_code=400, detail="ATTACHMENT_TYPE_INVALID")
     repo = SqlAttachmentRepo(session)
-    # R1-S1:租户解析与 chat 同构(读 X-Tenant-Id 头)——曾硬解析默认租户,
-    # 非默认租户下「上传→引用」必 404(归属校验按当前租户,附件却绑默认)
+    # 租户解析与 chat 同构(读 X-Tenant-Id 头):若回退默认租户,
+    # 非默认租户下「上传→引用」会 404(归属校验按当前租户,附件却绑默认)
     chat_repo = ChatRepository(session)
     if x_tenant_id is not None:
         bound = await chat_repo.find_bound_tenant(user_id=str(user["sub"]), tenant_key=x_tenant_id)
@@ -95,8 +89,8 @@ async def upload_attachment(
     try:
         await session.commit()
     except Exception:
-        # 审查循环 B10:行回滚但文件已落盘=行驱动孤儿清理永不覆盖的
-        # file-only 残余——补偿删文件后再抛
+        # 行回滚但文件已落盘,孤儿清理按行驱动覆盖不到这种 file-only
+        # 残余——补偿删文件后再抛
         with contextlib.suppress(Exception):
             await repo.delete_file(att_id, mime)
         raise

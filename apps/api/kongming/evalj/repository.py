@@ -1,9 +1,4 @@
-"""evalj 仓储(092):judge_run/judge_result 两表 SQL(基础设施层)。
-
-写入方=评估 harness(eval/judge runner,进程外工具):开 run → 逐对象落
-result → 收口汇总;读方=基线对比(同类型同 rubric 版本最近一次 COMPLETED run)。
-judge 是只读评审:本仓储对业务表零引用、零写副作用。
-"""
+"""Judge 运行记录与逐对象结果的仓储。评估工具写入；基线查询仅读取 Judge 表，不写入业务表。"""
 
 from typing import cast
 
@@ -18,7 +13,7 @@ class SqlJudgeRepo:
     """judge_run/judge_result 读写(asyncpg/SQLAlchemy 同款连接形态)。"""
 
     def __init__(self, conn: AsyncConnection | AsyncSession) -> None:
-        # 两者都实现 .execute(harness 侧经 get_sessionmaker()() 会话持有)
+        # 两者都实现 .execute(harness 侧经 get_sessionmaker 会话持有)
         self._conn = conn
 
     async def create_run(
@@ -92,7 +87,7 @@ class SqlJudgeRepo:
     async def latest_completed(
         self, *, object_type: str, exclude_run_id: str
     ) -> JudgeRunRecord | None:
-        """同类型最近一次 COMPLETED run(基线对照;排除本次)。"""
+        """查找同类对象最近一次已完成的评估运行，排除当前运行。"""
         row = (
             (
                 await self._conn.execute(

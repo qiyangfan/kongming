@@ -1,5 +1,4 @@
-/* 首登强制改密 / 自助改密页:改密成功即吊销全部 refresh 家族(后端),
-   本地清态回登录页重新登录。 */
+/* 首登强制改密 / 自助改密页:改密成功即吊销全部 refresh 家族(后端), 本地清态回登录页重新登录。 */
 
 import { useState } from "react";
 import { useNavigate } from "react-router";

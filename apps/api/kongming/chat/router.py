@@ -1,5 +1,5 @@
-"""chat 路由(薄适配层):POST /chat/query + 会话列表/消息历史/删除(006)
-+ 重命名/搜索/导出/执行计划(010)+ 流式问答(017)。
+"""chat 路由(薄适配层):POST /chat/query + 会话列表/消息历史/删除
++ 重命名/搜索/导出/执行计划+ 流式问答。
 
 首个受权限点保护的端点(chat:execute,rbac spec 权限点校验机制首发);
 租户上下文取 X-Tenant-Id 头(multitenant spec),缺省取用户默认租户。
@@ -73,7 +73,7 @@ from kongming.toolcall.repository import SqlToolCallRepo
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-STREAM_HEARTBEAT_SEC = 15.0  # SSE 心跳间隔(017;慢查询防中间层空闲断连)
+STREAM_HEARTBEAT_SEC = 15.0  # SSE 心跳间隔(慢查询防中间层空闲断连)
 
 log = logging.getLogger(__name__)
 
@@ -86,23 +86,23 @@ def get_rag_service(session: AsyncSession) -> RagService:
     from kongming.rag.agent_callback import get_agent_rag_client
     from kongming.redis_client import get_redis
 
-    client = get_agent_rag_client(get_redis())  # 013:进程内单例,连接池跨请求复用
+    client = get_agent_rag_client(get_redis())  # 进程内单例,连接池跨请求复用
     settings = get_settings()
     return RagService(
-        # 098:仓储与缓存注入部署分词配置(缺省 simple 零回归)
+        # 仓储与缓存使用部署配置的分词器，默认值为 simple。
         RagRepository(session, ts_config=settings.rag_fulltext_ts_config),
         embedder=client,
         describer=client,
         cache=ContextCache(get_redis(), ts_config=settings.rag_fulltext_ts_config),
-        # 047:知识写路径级联失效建议缓存(DELETE 同事务,rag commit 收口)
+        # 知识写路径级联失效建议缓存(DELETE 同事务,rag commit 收口)
         suggestion_evictor=SuggestionRepository(session),
-        # 064:召回闸门配置(off 缺省零回归)
+        # 召回闸门配置(off 缺省)
         gate_settings=settings,
     )
 
 
 class _InternalExplainRunner:
-    """组合根适配器(010):chat 域 ExplainRunner 端口 ← internal.service.explain。
+    """组合根适配器:chat 域 ExplainRunner 端口 ← internal.service.explain。
 
     chat service/models 受 import-linter 零框架契约,不可间接 import internal
     (携 sqlalchemy);内部异常在此翻译为 chat 域异常,不越域泄漏。
@@ -139,7 +139,7 @@ class _InternalExplainRunner:
 
 
 class _InternalExecuteRunner:
-    """026 rerun 端口:复用 internal.service.execute 全链路(六层防御)。"""
+    """将 Chat 的执行端口绑定到受控 SQL 执行服务，复用其权限与只读检查。"""
 
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
@@ -153,7 +153,7 @@ class _InternalExecuteRunner:
         sql_text: str,
         user_id: str,
     ) -> SqlRunOutcome:
-        # 062:行数上限配置化(与导出 export_max_rows 同语义不同阀;缺省 1000 行为不变)
+        # 行数上限配置化(与导出 export_max_rows 同语义不同阀;缺省 1000 行为不变)
         try:
             return await internal_service.execute(
                 self._s,
@@ -173,10 +173,10 @@ class _InternalExecuteRunner:
 
 
 class _ChatUsageCounter:
-    """062:租户窗口调用计数适配(独立短会话——闸判定不占用请求作用域会话)。
+    """租户窗口调用计数适配(独立短会话——闸判定不占用请求作用域会话)。
 
     口径:sys_llm_usage 行数按 created_at >= 窗口起点 count(含失败尝试行;
-    038「失败调用也采集」既有语义,072 重试后仍成立)。
+    「失败调用也采集」既有语义,重试后仍成立)。
     """
 
     async def count_calls(
@@ -200,7 +200,7 @@ class _ChatUsageCounter:
 
 
 def _build_cost_gate() -> ChatCostGate:
-    """062:成本双闸组合根(limiter=Redis 固定窗口;counter=上条适配;
+    """成本双闸组合根(limiter=Redis 固定窗口;counter=上条适配;
     oper=SqlOperLogRepo 独立短会话;参数取自 settings,0=不限)。"""
     settings = get_settings()
 
@@ -227,12 +227,8 @@ def get_chat_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     agent: Annotated[AgentClient, Depends(get_agent_client)],
 ) -> ChatService:
-    # history_writer=rag 回写端口(009;None 安全——注入失败不影响问答主链路)
-    # explainer=执行计划端口(010,组合根绑定 internal.service.explain)
-    # 013 构造反转:repo 在组合根装配,service 仅持 ChatRepo 端口(零框架契约)
-    # 015 导出审计:oper_logger 绑定 auth 域 SqlOperLogRepo(007 组合模式)
-    # 017 断线续存:stream_store_factory 开独立会话落库(title_tasks 同款模式)
-    # 019:tool_specs/pending_tools 绑定 toolcall 域(注册表过滤+待确认聚合,
+    # 断线续存:stream_store_factory 开独立会话落库(title_tasks 同款模式)
+    # tool_specs/pending_tools 绑定 toolcall 域(注册表过滤+待确认聚合,
     # 均独立短会话——同步/流式路径通用,不随请求作用域会话取消)
     return ChatService(
         ChatRepository(session),
@@ -244,18 +240,18 @@ def get_chat_service(
         _stream_store_factory(agent),
         _RegistryToolSpecProvider(),
         _PendingToolReader(),
-        _ChatGuardrail(),  # 020 输入/输出护栏
-        _MemoryAdapter(),  # 022 用户长期记忆
-        _InternalExecuteRunner(session),  # 026 再执行
-        attachment_checker=_AttachmentChecker(session),  # 030(关键字传参防错位)
-        implicit_memory_task=extract_memory_task,  # 022 隐式提取(组合根绑定)
-        column_comments=get_rag_service(session),  # 041 列标签(同一 RagService 的窄端口视角)
-        cost_gate=_build_cost_gate(),  # 062 成本双闸(速率+配额)
+        _ChatGuardrail(),  # 输入/输出护栏
+        _MemoryAdapter(),  # 用户长期记忆
+        _InternalExecuteRunner(session),  # 再执行
+        attachment_checker=_AttachmentChecker(session),  # (关键字传参防错位)
+        implicit_memory_task=extract_memory_task,  # 隐式提取(组合根绑定)
+        column_comments=get_rag_service(session),  # 列标签(同一 RagService 的窄端口视角)
+        cost_gate=_build_cost_gate(),  # 成本双闸(速率+配额)
     )
 
 
 class _TeamRolesAdapter:
-    """032 TeamRoles 绑定(team 域 role_map;独立短会话)。"""
+    """TeamRoles 绑定(team 域 role_map;独立短会话)。"""
 
     async def role_map(self, user_id: str) -> dict[str, str]:
         from kongming.team.repository import SqlTeamRepo
@@ -265,7 +261,7 @@ class _TeamRolesAdapter:
 
 
 class _MemoryAdapter:
-    """记忆端口绑定(022):独立短会话(同步/流式/后台任务通用);
+    """记忆端口绑定:独立短会话(同步/流式/后台任务通用);
     form_explicit 的敏感拒绝转 False(适配端口 bool 语义)。"""
 
     async def recall_hint(self, *, user_id: str, tenant_id: str, question: str) -> str:
@@ -366,7 +362,7 @@ class _MemoryAdapter:
 
 
 class _AttachmentChecker:
-    """030 AttachmentChecker 绑定(attachment 域仓储,请求会话)。"""
+    """AttachmentChecker 绑定(attachment 域仓储,请求会话)。"""
 
     def __init__(self, session: AsyncSession) -> None:
         self._repo = SqlAttachmentRepo(session)
@@ -375,7 +371,7 @@ class _AttachmentChecker:
         self, *, ids: list[str], user_id: str, tenant_id: str
     ) -> list[dict[str, object]] | None:
         out: list[dict[str, object]] = []
-        # R1-F3:去重保序——同 id 重复引用过检后第二次取件必 404
+        # 去重保序——同 id 重复引用过检后第二次取件必 404
         # (一次性消费),整轮 fail-closed 且文案误导
         for att_id in dict.fromkeys(ids):
             row = await self._repo.find_owned(att_id=att_id, tenant_id=tenant_id, user_id=user_id)
@@ -393,9 +389,9 @@ class _AttachmentChecker:
 
 
 class _RegistryToolSpecProvider:
-    """ReAct 注入工具的唯一真理源(019):权限点集查询 + toolcall 注册表过滤。
-    028:合并租户 MCP 动态工具(持 tool:mcp:use 才可见——与执行面 L2 同判据)。
-    099:合并租户 HTTP 连接器(持 tool:http:call 才可见;按请求动态装配,
+    """ReAct 注入工具的唯一真理源:权限点集查询 + toolcall 注册表过滤。
+    合并租户 MCP 动态工具(持 tool:mcp:use 才可见——与执行面 L2 同判据)。
+    合并租户 HTTP 连接器(持 tool:http:call 才可见;按请求动态装配,
     注册/启停即时生效;名称/描述过既有输入护栏,BLOCK 拒注入)。"""
 
     async def authorized_tools(self, user_id: str, tenant_id: str) -> list[dict[str, object]]:
@@ -433,7 +429,7 @@ class _RegistryToolSpecProvider:
 
 
 def _build_connector_service_for(session: AsyncSession) -> "ConnectorService":
-    """099 装配(chat 适配层;与 connector 组合根同构)。"""
+    """装配(chat 适配层;与 connector 组合根同构)。"""
     from kongming.connector.repository import SqlConnectorRepo
     from kongming.connector.router import ConnectorGuardrailAdapter, ConnectorTestCallAuditor
     from kongming.connector.service import ConnectorService
@@ -450,7 +446,7 @@ def _build_connector_service_for(session: AsyncSession) -> "ConnectorService":
 
 
 def _build_mcp_service_for(session: AsyncSession) -> "McpService":
-    """028 装配(chat 适配层;与 toolcall 组合根同构)。"""
+    """装配(chat 适配层;与 toolcall 组合根同构)。"""
     from kongming.datasource.cipher import get_cipher
     from kongming.mcp.breaker import build_mcp_caller, get_mcp_breaker
     from kongming.mcp.repository import SqlMcpRepo
@@ -465,7 +461,7 @@ def _build_mcp_service_for(session: AsyncSession) -> "McpService":
 
 
 class _PendingToolReader:
-    """待确认写工具聚合(019):独立短会话只读(PENDING_CONFIRM 行经独立事务提交)。"""
+    """待确认写工具聚合:独立短会话只读(PENDING_CONFIRM 行经独立事务提交)。"""
 
     async def list_pending(self, trace_id: str) -> list[dict[str, object]]:
         async with get_sessionmaker()() as s:
@@ -473,7 +469,7 @@ class _PendingToolReader:
 
 
 class _ChatGuardrail:
-    """prompt 护栏端口绑定(020):独立短会话读配置;审计经 writer 独立事务。"""
+    """prompt 护栏端口绑定:独立短会话读配置;审计经 writer 独立事务。"""
 
     async def check_input(
         self, *, trace_id: str, user_id: str, tenant_id: str, texts: list[str]
@@ -512,7 +508,7 @@ class _ChatGuardrail:
 
 
 def _stream_store_factory(agent: AgentClient) -> StreamStoreFactory:
-    """断线续存落库单元工厂(017 design §4):独立 sessionmaker 短会话——
+    """断线续存落库单元工厂(design §4):独立 sessionmaker 短会话——
     请求作用域会话随 SSE 响应取消而关闭,后台任务落库不得复用。"""
 
     @asynccontextmanager
@@ -536,9 +532,9 @@ class ChatQueryIn(BaseModel):
         default_factory=list, max_length=10
     )
     datasource_key: str = Field(default="default", pattern=r"^[a-z][a-z0-9_]{1,63}$")
-    # 019:Agent 内核选择(纯增,缺省 recipe 零回归);react=ReAct 工具调用内核
+    # Agent 内核选择(缺省 recipe,8 节点内核);react=ReAct 工具调用内核
     agent_mode: Literal["recipe", "react"] = "recipe"
-    # 030:图片附件引用(纯增,≤3;归属校验在 service)
+    # 图片附件引用(≤3;归属校验在 service)
     attachment_ids: list[uuid.UUID] = Field(default_factory=list[uuid.UUID], max_length=3)
 
 
@@ -549,7 +545,7 @@ class ChartOut(BaseModel):
 
 
 class ChartCandidateOut(BaseModel):
-    """图表候选(049 纯增):候选自带完整绑定,y 为值列(多度量多系列),
+    """图表候选:候选自带完整绑定,y 为值列(多度量多系列),
     series 为系列维(分组柱/时序多系列)。既有 chart 字段保留=首候选展平。"""
 
     type: str
@@ -559,7 +555,7 @@ class ChartCandidateOut(BaseModel):
 
 
 class ArtifactOut(BaseModel):
-    """类型化产物(026):type ∈ sql/chart/document。"""
+    """类型化产物:type ∈ sql/chart/document。"""
 
     type: str
     content: str
@@ -567,7 +563,7 @@ class ArtifactOut(BaseModel):
 
 
 class PendingToolCallOut(BaseModel):
-    """待确认写工具调用(019):确认卡片渲染要素。"""
+    """待确认写工具调用:确认卡片渲染要素。"""
 
     confirm_id: str
     tool_name: str
@@ -575,7 +571,7 @@ class PendingToolCallOut(BaseModel):
 
 
 class MetricHitOut(BaseModel):
-    """076(纯增):语义层口径命中(标识/名称/口径表达式/修订时间)。"""
+    """语义层口径命中(标识/名称/口径表达式/修订时间)。"""
 
     metric_id: str
     metric_name: str
@@ -584,7 +580,7 @@ class MetricHitOut(BaseModel):
 
 
 class SourceOut(BaseModel):
-    """结构化来源条目(068/093:引用键/来源标识/文档名快照)。
+    """结构化来源条目(引用键/来源标识/文档名快照)。
     语义:纯数据道恒为空;知识道与融合道由净化后正文单向投影,可非空。"""
 
     citation_key: str
@@ -603,32 +599,30 @@ class ChatQueryOut(BaseModel):
     rows: list[list[object]]
     sql: str
     chart: ChartOut
-    # 049(纯增):有序图表候选(空=查询失败/不适配;首候选即上方 chart)
+    # 有序图表候选(空=查询失败/不适配;首候选即上方 chart)
     chart_candidates: list[ChartCandidateOut] = []
     retry_count: int
     error: str | None
-    # 047(纯增):原始技术错误(FAILED 携带;前端折叠「技术详情」,缺省隐藏)
+    # 原始技术错误(FAILED 携带;前端折叠「技术详情」,缺省隐藏)
     error_detail: str | None = None
-    # 014 messageId 打通(纯增):assistant 落库消息 id(反馈提交引用)+执行数据源快照
+    # messageId 打通:assistant 落库消息 id(反馈提交引用)+执行数据源快照
     message_id: str | None = None
     datasource_key: str = "default"
-    # 019(纯增):待确认写工具调用(空列表=无)
+    # 待确认写工具调用(空列表=无)
     pending_tool_calls: list[PendingToolCallOut] = []
-    # 026(纯增):类型化产物(空数组零回归)
+    # 类型化产物(空数组)
     artifacts: list["ArtifactOut"] = []
-    # 030(纯增):附件引用摘要(空数组零回归)
+    # 附件引用摘要(空数组)
     attachments: list[dict[str, object]] = []
-    # 041(纯增):呈现层列标签,与 columns 等长对齐(空=未接线/历史存量,回退 columns)
+    # 呈现层列标签,与 columns 等长对齐(空=未接线/历史存量,回退 columns)
     column_labels: list[str] = []
-    # 076(纯增):语义层口径命中(空=无命中;链路输入透出,老 agent 零回归)
+    # 指标命中为空表示无命中；将命中列表传给 Agent。
     metric_hits: list[MetricHitOut] = []
-    # 068/093:结构化来源——纯数据道恒为空;知识道与融合道由净化后正文
-    # 单向投影,可非空(老 agent 零回归)
+    # 结构化来源——纯数据道恒为空;知识道与融合道由净化后正文
+    # 单向兼容投影允许为空，以兼容旧版 Agent。
     sources: Annotated[
         list[SourceOut],
-        Field(
-            description="结构化来源:纯数据道恒为空;知识道/融合道由净化后正文单向投影,可非空(068/093)"
-        ),
+        Field(description="纯数据问答不返回来源;知识问答和融合问答会从净化后的回答正文提取来源。"),
     ] = Field(default_factory=list[SourceOut])
 
 
@@ -703,11 +697,11 @@ def _out(o: ChatOutcome) -> ChatQueryOut:
     responses={
         429: {
             "description": (
-                "速率/配额超限(062;detail=CHAT_RATE_LIMITED / CHAT_QUOTA_EXCEEDED,"
-                "响应头 X-Quota-Warning 预警)"
+                "请求超过速率或配额限制(detail=CHAT_RATE_LIMITED 或 CHAT_QUOTA_EXCEEDED);"
+                "响应头 X-Quota-Warning 可能包含预警。"
             )
         },
-        503: {"description": "配额读数失败(062 fail-closed;detail=CHAT_QUOTA_UNAVAILABLE)"},
+        503: {"description": "配额数据不可用时拒绝请求(detail=CHAT_QUOTA_UNAVAILABLE)。"},
     },
 )
 async def chat_query(
@@ -749,13 +743,13 @@ async def chat_query(
     except InvalidDatasource:
         # 不存在/禁用/越属同形(防 key 探测);与 internal 面同一 detail 码
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
-    # 010 标题两阶段生成:首个 SUCCESS 轮后异步改写(守卫/条件写双闸在任务内);
+    # 标题两阶段生成:首个 SUCCESS 轮后异步改写(守卫/条件写双闸在任务内);
     # persist=false 临时对话无会话可改写;REJECTED/FAILED 轮不触发(违规/失败问句不作素材)
     if outcome.success and req.persist and outcome.session_id is not None:
         background.add_task(rewrite_session_title, outcome.session_id, svc.agent_for_tasks)
-        # 022 隐式记忆(首 SUCCESS 轮同款触发点;best-effort;
-        # R1-M2:显式短路轮排除——防同内容再落一条 IMPLICIT);
-        # 087:携带准备期人工版本快照,捕获失败(None)不挂任务
+        # 隐式记忆(首 SUCCESS 轮同款触发点;best-effort;
+        # 显式短路轮排除——防同内容再落一条 IMPLICIT);
+        # 携带准备期人工版本快照,捕获失败(None)不挂任务
         if outcome.tenant_id and not outcome.memory_shortcut and outcome.pref_revision is not None:
             background.add_task(
                 extract_memory_task,
@@ -766,14 +760,14 @@ async def chat_query(
                 agent=svc.agent_for_tasks,
                 pref_revision=outcome.pref_revision,
             )
-    # 062:达配额预警线回落 X-Quota-Warning(不拒绝;与 034 网关切面同口径)
+    # 达配额预警线回落 X-Quota-Warning(不拒绝;与 网关切面同口径)
     warn = quota_warn_var.get()
     if warn:
         response.headers["X-Quota-Warning"] = warn
     return _out(outcome)
 
 
-# ============ 对话冷启动建议问题(039 chat-suggestions) ============
+# ============ 对话冷启动建议问题(chat-suggestions) ============
 
 _SUGGEST_TABLE_CAP = 30  # 摘要表数封顶(meta 自身另有 max_tables,双闸取严)
 _SUGGEST_DIGEST_CHARS = 12_000  # 摘要字符封顶(防巨库撑爆生成 prompt)
@@ -799,7 +793,7 @@ def _render_schema_digest(tables: list[MetaTableOut], truncated: bool) -> str:
 
 
 class _SchemaOverviewSource:
-    """组合根适配器(039):chat 域 SchemaOverviewSource ← internal/meta 同源
+    """组合根适配器:chat 域 SchemaOverviewSource ← internal/meta 同源
     内省(保留表过滤/注释/单 schema/default 直通语义全部单一真理源)。
     数据源不可用/内省失败 → None(service 收敛空清单,降级不 5xx)。"""
 
@@ -814,7 +808,7 @@ class _SchemaOverviewSource:
                 MetaSchemaIn(tenant_key=tenant_key, datasource_key=datasource_key),
                 self._s,
             )
-        except Exception:  # noqa: BLE001  # 生成链路失败降级空清单,不 5xx
+        except Exception:  # noqa: BLE001  # 建议生成失败时返回空清单，不返回 5xx。
             log.warning("建议问题 schema 摘要内省失败 ds=%s", datasource_key, exc_info=True)
             return None
         return _render_schema_digest(out.tables, out.truncated)
@@ -874,7 +868,7 @@ async def chat_suggestions(
     return SuggestionsOut(items=items)
 
 
-# ============ 流式问答(017 query-streaming) ============
+# ============ 流式问答(query-streaming) ============
 
 
 class StreamStageOut(BaseModel):
@@ -882,7 +876,7 @@ class StreamStageOut(BaseModel):
 
     node: str
     status: Literal["running", "done"]
-    retry_count: int = 0  # selfheal=本次重试序号;其余节点=当前已重试次数
+    retry_count: int = 0  # selfheal 表示重试序号；其他节点表示已完成的重试数。
 
 
 class StreamSqlOut(BaseModel):
@@ -905,7 +899,7 @@ class StreamErrorOut(BaseModel):
 
 
 class StreamToolCallOut(BaseModel):
-    """tool_call 事件 data(019 tool-calling):工具调用进度。
+    """tool_call 事件 data(tool-calling):工具调用进度。
 
     status ∈ running/done/rejected(confirm_required 以 done 下发,result_digest
     含「待确认」);args_digest/result_digest 为截断摘要(审计同源口径)。
@@ -920,7 +914,7 @@ class StreamToolCallOut(BaseModel):
 class StreamTraceOut(BaseModel):
     """trace 事件 data:agent 侧诊断信号(内部运维口径,不渲染进用户答案)。
 
-    063 表预筛/064 召回闸门/068 引用净化/080 装配预算共用本通道;
+    表预筛/召回闸门/引用净化/装配预算共用本通道;
     fields 为自由映射(键集随能力演进,前向兼容);node=发起节点名。
     """
 
@@ -942,9 +936,9 @@ _STREAM_RESPONSES: dict[int | str, dict[str, Any]] = {
             | ChatQueryOut
         ),
         "description": (
-            "SSE 事件流:stage/sql/summary/tool_call/trace 过程事件逐帧下发;result=data 与同步"
-            " /chat/query 响应逐字段一致;error=传输层/意外失败终态;trace=agent 诊断信号"
-            "(预筛/闸门/净化/预算,不渲染进用户答案);注释行(: ping)为心跳"
+            "SSE 发送 stage、sql、summary、tool_call 和诊断事件;"
+            "result 与 /chat/query 返回相同数据。"
+            "错误通过 error 终态发送;以冒号开头的注释帧用于心跳。"
         ),
         "content": {
             "text/event-stream": {
@@ -995,11 +989,11 @@ async def _relay_gen(handle: StreamHandle) -> AsyncIterator[str]:
         **_STREAM_RESPONSES,
         429: {
             "description": (
-                "速率/配额超限(062;detail=CHAT_RATE_LIMITED / CHAT_QUOTA_EXCEEDED,"
-                "响应头 X-Quota-Warning 预警)"
+                "请求超过速率或配额限制(detail=CHAT_RATE_LIMITED 或 CHAT_QUOTA_EXCEEDED);"
+                "响应头 X-Quota-Warning 可能包含预警。"
             )
         },
-        503: {"description": "配额读数失败(062 fail-closed;detail=CHAT_QUOTA_UNAVAILABLE)"},
+        503: {"description": "配额数据不可用时拒绝请求(detail=CHAT_QUOTA_UNAVAILABLE)。"},
     },
 )
 async def chat_query_stream(
@@ -1039,7 +1033,7 @@ async def chat_query_stream(
     except InvalidDatasource:
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
     # 前段校验失败在流开始前以常规 JSON 错误响应(query-streaming spec「防线同构」)
-    # 062:达预警线的 X-Quota-Warning 随流响应头回落(不拒绝)
+    # 达预警线的 X-Quota-Warning 随流响应头回落(不拒绝)
     headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     warn = quota_warn_var.get()
     if warn:
@@ -1051,7 +1045,7 @@ async def chat_query_stream(
     )
 
 
-# ============ 会话列表/消息历史/删除(006,web-nav 支撑端点) ============
+# ============ 会话列表/消息历史/删除(web-nav 支撑端点) ============
 
 
 class SessionItemOut(BaseModel):
@@ -1072,24 +1066,22 @@ class MessageResultOut(BaseModel):
     insights: list[dict[str, str]] = Field(default_factory=list[dict[str, str]])
     stats: dict[str, object] = Field(default_factory=dict[str, object])
     chart: ChartInfoOut
-    # 049(纯增):有序图表候选(存量档缺失→空,前端回落单图 chart)
+    # 有序图表候选(存量档缺失→空,前端回落单图 chart)
     chart_candidates: list[ChartCandidateOut] = []
     error: str | None = None
-    # 047(纯增):原始技术错误(存量档缺失→None,前端不渲染折叠块)
+    # 原始技术错误(存量档缺失→None,前端不渲染折叠块)
     error_detail: str | None = None
-    # 026(纯增):类型化产物
+    # 类型化产物
     artifacts: list[ArtifactOut] = []
-    # 041(纯增):呈现层列标签(空=历史存量档,回退 columns)
+    # 呈现层列标签(空=历史存量档,回退 columns)
     column_labels: list[str] = Field(default_factory=list[str])
-    # 076(纯增):口径依据(空=无命中/存量档;由正文消息单向派生,回显不重算)
+    # 口径依据(空=无命中/存量档;由正文消息单向派生,回显不重算)
     metric_hits: list[MetricHitOut] = Field(default_factory=list[MetricHitOut])
-    # 068/093:结构化来源(空=纯数据道/存量档;知识道与融合道可非空;
+    # 结构化来源(空=纯数据道/存量档;知识道与融合道可非空;
     # 名称快照不回查文档表)
     sources: Annotated[
         list[SourceOut],
-        Field(
-            description="结构化来源:纯数据道恒为空;知识道/融合道由净化后正文单向投影,可非空(068/093)"
-        ),
+        Field(description="纯数据问答不返回来源;知识问答和融合问答会从净化后的回答正文提取来源。"),
     ] = Field(default_factory=list[SourceOut])
 
 
@@ -1101,14 +1093,14 @@ class SessionMessageOut(BaseModel):
     sql: str | None = None
     status: str
     error: str | None = None
-    # 047(纯增):原始技术错误(FAILED 回显;web 折叠「技术详情」)
+    # 原始技术错误(FAILED 回显;web 折叠「技术详情」)
     error_detail: str | None = None
     result: MessageResultOut | None = None
-    # 014 messageId 打通(纯增):assistant 消息反馈状态回显(user 消息恒 None)
+    # messageId 打通:assistant 消息反馈状态回显(user 消息恒 None)
     rating: str | None = None
     corrected_sql: str | None = None
     feedback_comment: str | None = None
-    # 030(纯增):附件引用摘要
+    # 附件引用摘要
     attachments: list[dict[str, object]] = []
 
 
@@ -1178,8 +1170,8 @@ def _msg_out(m: SessionMessage) -> SessionMessageOut:
 
 
 class RerunIn(BaseModel):
-    """SQL 卡再执行(026):message_id 引用 + 编辑后 SQL;归属与六层防御在
-    service/实现侧(与 010 EXPLAIN 同范式)。"""
+    """SQL 卡再执行:message_id 引用 + 编辑后 SQL;归属与六层防御在
+    service/实现侧(与 EXPLAIN 同范式)。"""
 
     message_id: uuid.UUID
     sql: str = Field(min_length=1, max_length=4000)
@@ -1244,9 +1236,7 @@ async def list_sessions(
 
 
 class RenameIn(BaseModel):
-    """重命名(010):去空白后非空与不超列上限(200)由领域层判定(013 补齐——
-    spec 立约以 strip 后值为准,带空白 201 字 strip 后 ≤200 不再 422 误拒);
-    max_length=2000 仅防离谱请求体(与 question 同宽),非业务上限。"""
+    """标题去除首尾空白后不能为空且最多 200 字;max_length=2000 仅限制过大的请求体。"""
 
     title: str = Field(min_length=1, max_length=2000)
 
@@ -1304,7 +1294,7 @@ async def session_messages(
     except TenantForbidden:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
     except SessionNotFound:
-        # 不存在/越权/跨租户同形 404,不泄露会话存在性(chat spec 006 delta)
+        # 不存在、越权和跨租户请求统一返回 404，避免泄露会话是否存在。
         raise HTTPException(status_code=404, detail="SESSION_NOT_FOUND") from None
     return [_msg_out(m) for m in msgs]
 
@@ -1330,13 +1320,13 @@ async def delete_session(
         raise HTTPException(status_code=404, detail="SESSION_NOT_FOUND") from None
 
 
-# ============ 结果导出(010,chat spec「结果导出 CSV/Excel」) ============
+# ============ 结果导出(chat spec「结果导出 CSV/Excel」) ============
 
 
 class ExportIn(BaseModel):
-    """所见即所导(010 design D3):前端传已展示的 columns+rows,不重跑 SQL。
+    """所见即所导:前端传已展示的 columns+rows,不重跑 SQL。
 
-    rows 传输层上限=R1 评审修复:截断发生在 JSON 解析之后,挡不住请求体本身
+    rows 传输层上限=修复:截断发生在 JSON 解析之后,挡不住请求体本身
     的内存放大;max_length 在解析期即拒(422),service 层截断保留为双闸。
     """
 
@@ -1375,11 +1365,11 @@ async def export_result(
     )
 
 
-# ============ 执行计划(010,chat spec「EXPLAIN 执行计划」) ============
+# ============ 执行计划(chat spec「EXPLAIN 执行计划」) ============
 
 
 class ExplainIn(BaseModel):
-    """message_id 引用形态(010 design D2):客户端不可提交裸 SQL。"""
+    """message_id 引用形态:客户端不可提交裸 SQL。"""
 
     message_id: uuid.UUID
 

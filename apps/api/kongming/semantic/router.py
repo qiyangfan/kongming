@@ -1,7 +1,7 @@
-"""semantic 路由(023,semantic-layer spec):关系/指标管理 + introspection 触发。
+"""semantic 路由(semantic-layer spec):关系/指标管理 + introspection 触发。
 
 全部端点 system:semantic:manage;tenant 头复校(chat 同构);datasource
-归属校验经 008 resolver(同形 400 防探测)。
+归属校验经 resolver(同形 400 防探测)。
 """
 
 import logging
@@ -27,13 +27,13 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/system/semantic", tags=["semantic"])
 
 _PG_NAME = r"^[a-zA-Z_][a-zA-Z0-9_]*$"  # PG 标识符(表名段)
-# 040:手工关系表引用须两段限定名(schema.table)——知识条目与内省关系恒两段,
+# 手工关系表引用须两段限定名(schema.table)——知识条目与内省关系恒两段,
 # 单段在存在性闸下必拒(静默死配置),语法层即拒语义更准(422 早失败于 400)
 _TABLE_REF = r"^[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*$"
 
 
 class _RagKnowledgeLookup:
-    """KnowledgeTableLookup 绑定(040):实现=rag 知识仓储存在性查询。"""
+    """KnowledgeTableLookup 绑定:实现=rag 知识仓储存在性查询。"""
 
     def __init__(self, session: AsyncSession) -> None:
         from kongming.rag.repository import RagRepository
@@ -50,7 +50,7 @@ class _RagKnowledgeLookup:
 
 async def _tenant_id(session: AsyncSession, user_id: str, tenant_key: str | None) -> str:
     """与 memory/chat 同构的租户解析(ACTIVE+default 优先+tiebreak)。
-    SQL 单一真理源=kongming.tenant.resolve_tenant(B1-B10 收口)。"""
+    SQL 单一真理源=kongming.tenant.resolve_tenant。"""
     from kongming.tenant import resolve_tenant
 
     resolved = await resolve_tenant(session, user_id=user_id, tenant_key=tenant_key)
@@ -62,7 +62,7 @@ async def _tenant_id(session: AsyncSession, user_id: str, tenant_key: str | None
 async def _assert_datasource_usable(
     session: AsyncSession, *, tenant_id: str, datasource_key: str
 ) -> None:
-    """R1-H2:非 default 源校验存在+启用+归属(008 同形 400 防探测);
+    """非 default 源校验存在+启用+归属(同形 400 防探测);
     default 恒可用(平台配置)。"""
     if datasource_key == "default":
         return
@@ -123,7 +123,7 @@ class MetricIn(BaseModel):
     sql_template: str = Field(min_length=1, max_length=4000)
     business_terms: list[str] = Field(default_factory=list, max_length=16)
     enabled: bool = True
-    # 110:可见范围档位——DEPT 档必须带归属部门(文案级拒);ALL 档 dept_id 不携带
+    # 可见范围档位——DEPT 档必须带归属部门(文案级拒);ALL 档 dept_id 不携带
     visible_scope: str = Field(default="ALL", pattern=r"^(ALL|DEPT)$")
     dept_id: uuid.UUID | None = None
 
@@ -135,10 +135,10 @@ class MetricIn(BaseModel):
 
 
 class CallerDeptScopeAdapter:
-    """110:CallerDeptScopeResolver 实现——组合 datascope 判定原语
+    """CallerDeptScopeResolver 实现——组合 datascope 判定原语
     (user_role_scopes→most_permissive→部门集合解析),semantic 域零 datascope
     import(lint-imports 契约)。CUSTOM 空集合按读面降级为空集合(仅 ALL 档),
-    不复用执行面 fail-closed 语义(083 分层:注入方向=收紧,无越权面)。"""
+    不复用执行面 fail-closed 语义(分层:注入方向=收紧,无越权面)。"""
 
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
@@ -171,8 +171,8 @@ class CallerDeptScopeAdapter:
 class _DefaultIntrospector:
     """default 源:控制面会话直查(目标 schema 集 tenant_<key>+public)。"""
 
-    # 023 v1 仅支持 default 源的 introspection;动态源 introspection 随
-    # 真实外部 PG 数据源接入评估(design 挂账)
+    # v1 仅支持 default 源的 introspection;动态源 introspection 随
+    # 真实外部 PG 数据源接入评估
     def __init__(self, session: AsyncSession, tenant_key: str) -> None:
         self._s = session
         self._schemas = [f"tenant_{tenant_key}", "public"]
@@ -196,7 +196,7 @@ class _DefaultIntrospector:
                         " JOIN information_schema.key_column_usage pk"
                         "   ON rc.unique_constraint_name=pk.constraint_name"
                         "  AND rc.unique_constraint_schema=pk.constraint_schema"
-                        # R1-H1:列序配对(多列 FK 不笛卡尔积):被引用侧序号=
+                        # 列序配对(多列 FK 不笛卡尔积):被引用侧序号=
                         # 引用侧的 position_in_unique_constraint
                         "  AND pk.ordinal_position = fk.position_in_unique_constraint"
                         " WHERE tc.constraint_type='FOREIGN KEY'"
@@ -220,8 +220,7 @@ class _DefaultIntrospector:
 
 
 def _recall_ctx_evictor() -> "ContextCache":
-    """095 组合根:关系写路径的检索缓存失效实现=rag ContextCache(适配层
-    组基础设施,service 只见 RecallContextEvictor 端口)。"""
+    """将关系写入后的检索缓存失效端口绑定到 RAG ContextCache。"""
     from kongming.rag.cache import ContextCache
     from kongming.redis_client import get_redis
 
@@ -237,11 +236,11 @@ async def introspect_relations(
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> IntrospectOut:
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
-    # R1-H2:v1 仅支持 default 源 introspection(动态源张冠李戴防护;
+    # v1 仅支持 default 源 introspection(动态源张冠李戴防护;
     # 动态源内省随真实外部 PG 源接入评估)——同形 400 防探测
     if req.datasource_key != "default":
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
-    # R1-L1:schema 集按解析出的租户反查(不直接用请求头,防无头时错配)
+    # schema 集按解析出的租户反查(不直接用请求头,防无头时错配)
     tkey = (
         await session.execute(
             text("SELECT tenant_key FROM public.sys_tenant WHERE id=:i"), {"i": tid}
@@ -294,7 +293,7 @@ async def add_relation(
     svc = SemanticService(
         SqlSemanticRepo(session),
         _RagKnowledgeLookup(session),
-        recall_ctx_evictor=_recall_ctx_evictor(),  # 095:提交后失效检索缓存
+        recall_ctx_evictor=_recall_ctx_evictor(),  # 提交后失效检索缓存
     )
     try:
         row_id = await svc.add_relation(
@@ -318,7 +317,7 @@ async def delete_relation(
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
-    # 095:删除用例入服务层(commit + 按被删行数据源精确失效检索缓存)
+    # 删除用例入服务层(commit + 按被删行数据源精确失效检索缓存)
     ok = await SemanticService(
         SqlSemanticRepo(session), recall_ctx_evictor=_recall_ctx_evictor()
     ).delete_relation(relation_id=str(relation_id), tenant_id=tid)
@@ -363,8 +362,8 @@ async def upsert_metric(
     await _assert_datasource_usable(session, tenant_id=tid, datasource_key=req.datasource_key)
     dept_id: str | None = None
     if req.visible_scope == "DEPT" and req.dept_id is not None:
-        # 110:归属部门存在性+同租户校验(键级校验在模型,租户匹配在端点——
-        # 防跨租户 dept_id 借写)。部门停用不拒(086 同口径:启停是呈现标志)。
+        # 归属部门存在性+同租户校验(键级校验在模型,租户匹配在端点——
+        # 防跨租户 dept_id 借写)。部门停用不拒(同口径:启停是呈现标志)。
         row = (
             (
                 await session.execute(

@@ -1,8 +1,8 @@
-"""store 用例编排(033;104 版本化):上架治理(归属+护栏+版本快照)+
-发现+互动+直跑。零框架(宪法 Article II);bot 行读取经组合根注入的
+"""store 用例编排(版本化):上架治理(归属+护栏+版本快照)+
+发现+互动+直跑。用例层不依赖 FastAPI 或 SQLAlchemy;bot 行读取经组合根注入的
 BotReader 端口。
 
-104 上架语义:上架=对当前定义(name/greeting/suggestions/system_prompt/
+上架语义:上架=对当前定义(name/greeting/suggestions/system_prompt/
 工具集)创建不可变版本快照,经护栏审核后成为「当前上架版本」(指针);
 商店展示与直跑一律消费快照(草稿/货架分离)。快照定型与一致性判定
 单源在 kongming.store.snapshot(纯函数)。
@@ -32,13 +32,13 @@ class GuardrailRejected(Exception):
 
 
 class BotReader(Protocol):
-    """Bot 行读取(实现侧 bot 域仓储;store 不 import bot 基础设施)。"""
+    """读取 Bot 定义的端口，由 Bot 域仓储实现。"""
 
     async def get_bot(self, *, bot_id: str, tenant_id: str) -> dict[str, Any] | None: ...
 
 
 class StoreGuardrail(Protocol):
-    """上架/回滚内容审核(实现侧 020 护栏)。
+    """上架/回滚内容审核(实现侧为护栏域)。
 
     filter_output:返回 (blocked, 处理后文本序列)——输出护栏拦截形态=
     安全文案替换(与原文不同即命中 BLOCK/masked,同拒);
@@ -55,10 +55,7 @@ class StoreGuardrail(Protocol):
 
 
 class StoreRunner(Protocol):
-    """商店直跑(实现侧 025 链路);返回 (success, summary, error)——
-    R1-S2:summary=应答正文(详情对话框直接展示,不误导「去看对话」)。
-    104:definition=当前上架版本快照定型(系统提示词/工具集),直跑消费
-    快照而非活定义;None=实现侧回退活定义(兼容形态)。"""
+    """执行商店中的 Bot 并返回成功状态、回答正文和错误信息。"""
 
     async def run(
         self,
@@ -74,7 +71,7 @@ class StoreRunner(Protocol):
 class ToolLister(Protocol):
     """求交后实际可用工具集解析(实现侧 bot 域,与运行闸同源单一真理源);
     上架准入闸消费(零工具 Bot 拒上架,货架不摆必败商品)。
-    104:在快照工具集上求交(row 由调用方以快照工具集覆写 tools)。"""
+    在快照工具集上求交(row 由调用方以快照工具集覆写 tools)。"""
 
     async def resolve_runnable(
         self, *, creator_id: str, tenant_id: str, row: dict[str, Any]
@@ -99,7 +96,7 @@ class StoreService:
         self._runner = runner
         self._version_cap = version_cap
 
-    # ── 治理(104 版本化上架) ──
+    # ── 治理(版本化上架) ──
 
     async def publish(
         self,
@@ -156,8 +153,8 @@ class StoreService:
             )
             return {"idempotent": True, "version_no": int(current["version_no"])}
         # 新版本:Bot 内 version_no 递增(单句原子 MAX+1);并发上架撞号时
-        # 直接重试(重执即取新 MAX,评审修复:原「读 MAX+1→裸 INSERT」两步
-        # 撞唯一约束 500)
+        # 直接重试(重执即取新 MAX,取代原先「读 MAX+1→裸 INSERT」两步
+        # 撞唯一约束 500 的写法)
         landed: tuple[str, int] | None = None
         for _ in range(3):
             landed = await self._repo.create_version(
@@ -205,7 +202,7 @@ class StoreService:
         await self._repo.unpublish(bot_id=bot_id)
         await self._repo.commit()
 
-    # ── 版本历史与回滚(104) ──
+    # ── 版本历史与回滚 ──
 
     async def list_versions(
         self, *, bot_id: str, tenant_id: str, can_manage: bool
@@ -247,7 +244,7 @@ class StoreService:
         if not isinstance(raw_snap, dict):
             raise StoreValidationError("版本快照损坏,无法回滚")
         snapshot = cast("dict[str, object]", raw_snap)
-        # 零工具上架闸同款(评审修复):上架后工具授权/数据源被回收的旧版本,
+        # 零工具上架闸同款:上架后工具授权/数据源被回收的旧版本,
         # 回滚即把必败版本重新指上货架——与 publish 同源求交,空集拒回滚
         if not await self._tool_lister.resolve_runnable(
             creator_id=str(row["created_by"]),
@@ -327,7 +324,7 @@ class StoreService:
         )
         await self._repo.commit()
 
-    # ── 直跑(104:消费当前上架版本快照) ──
+    # ── 直跑(消费当前上架版本快照) ──
 
     async def run(self, *, tenant_id: str, bot_key: str, question: str) -> dict[str, Any]:
         row = await self._repo.store_get(tenant_id=tenant_id, bot_key=bot_key)

@@ -1,15 +1,4 @@
-"""0014: custom-agent 域两表(025)
-
-Revision ID: 0014
-Revises: 0013
-Create Date: 2026-08-23
-
-sys_bot_definition:Bot 定义(agent-as-config);tenant+bot_key 唯一;
-tools JSONB 工具名数组(注册表名);model 可空=主模型。
-sys_api_key:Bot 渠道密钥;仅存 sha256 哈希(明文创建时返回一次);
-revoked_at 撤销语义;scopes JSONB(bot_keys 集合限权)。
-**downgrade**:删两表(新域零存量)。
-"""
+"""新增 Bot 定义表和 API key 表。API key 只存 SHA-256 哈希，明文仅在创建响应中返回。"""
 
 from alembic import op
 
@@ -37,7 +26,7 @@ CREATE TABLE public.sys_bot_definition (
     CONSTRAINT uq_bot_tenant_key UNIQUE (tenant_id, bot_key)
 );
 CREATE INDEX idx_bot_tenant ON public.sys_bot_definition (tenant_id);
--- R1-H3:bot_key 全局唯一(公开嵌入页按 key 定位,租户内唯一会碰撞 500/DoS)
+-- bot_key 全局唯一，公开嵌入页按 key 查找，避免不同租户出现同 key。
 CREATE UNIQUE INDEX uq_bot_key_global ON public.sys_bot_definition (bot_key);
 
 CREATE TABLE public.sys_api_key (

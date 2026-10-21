@@ -1,4 +1,4 @@
-"""深度门测试:预扫描词法正确性 + 受控拒绝契约(宪法 Article III 同款先红后绿)。"""
+"""深度门测试:预扫描词法正确性 + 受控拒绝契约。"""
 
 import pytest
 
@@ -51,8 +51,7 @@ def test_depth_within_limit_parses() -> None:
 def test_recursion_error_mapped_to_controlled_reject() -> None:
     """括号外深嵌套(预扫描放行)由解析期 RecursionError 兜底,收敛受控拒绝。
 
-    实测 abs( 嵌套 48 层必炸,60 层在默认上限(32)预扫描即拦不到
-    ——此处显式调高 max_depth 穿过预扫描,验证兜底路径。
+    显式提高 max_depth 以通过预扫描,验证解析期 RecursionError 会转为受控拒绝。
     """
     sql = "SELECT " + "abs(" * 60 + "1" + ")" * 60
     art = parse(sql, max_depth=200)

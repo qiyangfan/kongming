@@ -1,5 +1,5 @@
-"""034 developer-portal-billing 测试:配额判定纯函数/网关切面(超额 429/
-未超放行/预警/零回归)/套餐生效/月首出账/隔离(测试先行,安全类)。"""
+"""billing 测试:配额判定纯函数/网关切面(超额 429/未超放行/预警)/
+套餐生效/月首出账/租户隔离。"""
 # pyright: reportPrivateUsage=false
 
 from httpx import AsyncClient
@@ -32,7 +32,7 @@ def test_estimate_cost_int_fen() -> None:
     assert estimate_cost(tokens=0, calls=0, price_per_mtok=0, price_per_call=0) == 0
 
 
-# ── HTTP 链路 ──
+# ── HTTP 接口 ──
 
 
 async def _user_with_key(
@@ -76,7 +76,7 @@ async def _set_policy(
 
 
 async def _insert_usage(s: AsyncSession, tenant_id: str, tokens: int) -> None:
-    """直接落用量行(模拟 021 采集;当月)。"""
+    """直接落用量行(模拟 agent 上报;当月)。"""
     await s.execute(
         text(
             "INSERT INTO public.sys_llm_usage"
@@ -108,7 +108,7 @@ async def test_gateway_quota_exceeded_429(
 async def test_gateway_under_limit_pass_and_zero_regression(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """spec「未超放行」+「未配置零回归」:无策略请求照常。"""
+    """spec「未超放行」+「未配置」:无策略请求照常。"""
     _, _token, api_key = await _user_with_key(client, session, make_user, "bl_p1")
     # 零策略零套餐:照常(agent 可达性决定 200/5xx 但非 429)
     r = await client.post(
@@ -258,7 +258,7 @@ async def test_invoice_tenant_isolation(
 async def test_quota_reject_audit_written(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-S1 回归:429 后 sys_oper_log 有 billing.quota_reject 行。"""
+    """回归:429 后 sys_oper_log 有 billing.quota_reject 行。"""
     _, _token, api_key = await _user_with_key(client, session, make_user, "bl_a1")
     tenant_id = await _default_tenant_id(session)
     await _insert_usage(session, str(tenant_id), tokens=1000)
@@ -280,7 +280,7 @@ async def test_quota_reject_audit_written(
 async def test_month_boundary_shanghai_bucket(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-S2 回归:月聚合按 Asia/Shanghai 月桶(AT TIME ZONE),
+    """回归:月聚合按 Asia/Shanghai 月桶(AT TIME ZONE),
     UTC 上月末 16:xx(=CST 本月 0:xx)的用量计入 CST 当月。"""
     from kongming.billing.repository import SqlBillingRepo
     from kongming.billing.service import _current_month
@@ -291,7 +291,7 @@ async def test_month_boundary_shanghai_bucket(
     # UTC 本月 1 日 00:30(=CST 本月 1 日 08:30):UTC 会话时区会归入
     # CST 当月;仅当 SQL 按 Asia/Shanghai 分桶才计数(UTC 分桶归上月)
     month = _current_month()
-    # 直接构造 datetime(asyncpg 只收对象不收 ISO 串——031 教训)
+    # 直接构造 datetime(asyncpg 只收对象不收 ISO 串)
     import datetime as dt
 
     first_utc = dt.datetime.fromisoformat(f"{month}-01T00:00:00+00:00")
@@ -313,7 +313,7 @@ async def test_month_boundary_shanghai_bucket(
 async def test_invoice_cross_tenant_404(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-A7/spec「账单明细隔离」:他租户用户查账单 404 同形。"""
+    """spec「账单明细隔离」:他租户用户查账单 404 同形。"""
     from tests.test_toolcall import _mk_tenant
 
     _uid, _token, _api_key = await _user_with_key(client, session, make_user, "bl_x1")

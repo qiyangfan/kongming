@@ -1,10 +1,4 @@
-"""datasource 管理端点全栈测试(008,安全规则类测试先行)。
-
-真实 PG/Redis;数据直插 SQL(arrange 独立于被测实现)。
-安全面:凭证加密落库/DTO 无密文/key 唯一(含禁用)/保留字与 pattern 拒绝/
-default_schema 注入防护/key+租户归属不可改/非超管 403+审计/
-创建租户归属显式指定(隐式上下文不生效)/写操作审计/evictor 调用时机。
-"""
+"""覆盖数据源管理接口、凭证保护、租户归属和连接池失效规则。"""
 # pyright: reportPrivateUsage=false
 
 import uuid as uuidlib
@@ -24,7 +18,7 @@ from tests.conftest import MakeUser, db_conn
 from tests.test_chat_query import _auth, _bind, _default_tenant_id, _login
 from tests.test_system_admin import _admin
 
-# 本机测试库连接参数(环境派生,不硬编码端口——2026-10-09 端口被占 15 例假败教训)
+# 本机测试库连接参数(环境派生;硬编码端口会在本机端口不同时整批假败)
 _CONN = db_conn()
 
 DS = "/system/datasource"
@@ -154,7 +148,7 @@ async def test_create_encrypts_password_and_dto_clean(
 
     row = await _row(session, "extdb")
     assert row["password_enc"] != "secret-pw-1"  # 永不存明文
-    # 密文可被本进程密钥解出(round-trip 落库链路)
+    # 使用应用密钥解密已保存的密文。
     cipher = get_cipher(get_settings().datasource_encrypt_key)
     assert cipher.decrypt(str(row["password_enc"])) == "secret-pw-1"
     assert row["name"] == "外部库"
@@ -428,7 +422,7 @@ async def test_options_default_first_and_scoped(
 async def test_options_default_tenant_matches_chat_semantics(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-S1 回归:缺省租户解析与 chat 同构——default 优先,否则**最早授予**
+    """回归:缺省租户解析与 chat 同构——default 优先,否则**最早授予**
     (非最早创建);授予顺序 ≠ 创建顺序时,options 与 /chat/query 必须解析到同一租户,
     否则用户选中选项即被 chat 预检误拒。"""
     _, admin_token = await _admin(client, session, make_user)
@@ -481,7 +475,7 @@ async def test_options_default_tenant_matches_chat_semantics(
         app.dependency_overrides.pop(get_agent_client, None)
 
 
-# ============ 测试连接(任务组 3:无状态,不落库/不建池/不落审计) ============
+# ============ 测试连接(无状态,不落库/不建池/不落审计) ============
 
 
 async def test_test_connection_ok(

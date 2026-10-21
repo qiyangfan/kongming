@@ -1,7 +1,7 @@
-"""feedback 域端口(014,typing.Protocol 反转,宪法 Article II)。
+"""feedback 域端口,以 typing.Protocol 隔离用例层与存储实现。
 
 FeedbackRepo 镜像 FeedbackRepository 公开方法 + commit/rollback;
-service 仅持本端口,不触碰 session(与 013 chat 域同一反转范式)。
+service 仅持本端口,不触碰 session(与 chat 域同一反转范式)。
 """
 
 from typing import Protocol
@@ -10,12 +10,7 @@ from kongming.feedback.models import OverviewData
 
 
 class FeedbackRepo(Protocol):
-    """feedback 持久化端口(014)。
-
-    写路径方法(submit_feedback/handle_status)与 commit 失败抛
-    基础设施原异常——本域无容错段(提交/处置失败即 500/映射错误为既定
-    语义,与 chat 落库容错场景不同);rollback 不转译。
-    """
+    """反馈仓储端口。写入和提交错误保留实现层异常，由调用方处理。"""
 
     # ---- 提交面 ----
     async def find_bound_tenant(self, *, user_id: str, tenant_key: str) -> str | None:
@@ -54,7 +49,7 @@ class FeedbackRepo(Protocol):
     async def recent_user_question_before(
         self, *, session_id: str, message_created_at: object
     ) -> str | None:
-        """同会话内该消息之前最近一条 user 问句(纠错沉淀素材)。"""
+        """查找同一会话中创建时间早于目标消息的最近一条 user 问句。"""
         ...
 
     # ---- 管理面 ----
@@ -121,13 +116,13 @@ class FeedbackRepo(Protocol):
 
 
 class FeedbackSampleGate(Protocol):
-    """070 纠错样本启停窄端口(领域 service 不直接依赖 SQLAlchemy/Redis)。
+    """纠错样本启停窄端口(领域 service 不直接依赖 SQLAlchemy/Redis)。
 
     promote:ADOPTED 时把纠错 SQL 晋升为可召回样本(含 embedding;
     embedding 不可用 SHALL 抛 PromotionUnavailable——调用方收敛 503,
     与反馈处置同事务,无部分提交);disable:暂停召回(非 ADOPTED/重复
     提交的旧样本;行保留作来源审计,不删)。
-    102 伴生:caller_user_id=反馈发起者(样本可见集合归属主体;缺省=公共)。
+    caller_user_id=反馈发起者(样本可见集合归属主体;缺省=公共)。
     """
 
     async def promote(

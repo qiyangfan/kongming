@@ -1,4 +1,4 @@
-"""021 multi-model-routing 测试:注册表解析/任务路由/usage 采集上报。"""
+"""多模型路由测试:注册表解析/任务路由/usage 采集上报。"""
 
 import json
 
@@ -11,11 +11,10 @@ from kongming_agent.settings import Settings
 def _settings(**env: str) -> Settings:
     import os
 
-    # 环境隔离:白名单显式钉住(dashscope),不随本机 .env 的主模型 base_url
-    # 漂移(muniu 网关切换后 allowed_hosts 含 127.0.0.1,dashscope 条目会被
-    # 拒配致断言环境依赖性失败);调用方显式传入 model_allowed_hosts 时不覆盖。
+    # 显式配置模型主机白名单,避免本机 .env 改变路由测试结果;
+    # 调用方传入 model_allowed_hosts 时保留其设置。
     env.setdefault("model_allowed_hosts", "dashscope.aliyuncs.com")
-    # 同理钉协议缺省,不读本机 .env 的 KM_AGENT_LLM_PROTOCOL
+    # 显式设置协议,避免读取本机 .env。
     env.setdefault("llm_protocol", "openai")
     old = {k: os.environ.get(f"KM_AGENT_{k.upper()}") for k in env}
     for k, v in env.items():
@@ -131,7 +130,7 @@ class _Recorder:
 
 
 async def test_task_routing_and_usage_report() -> None:
-    """路由命中注册表模型;usage 上报含 task/model/tokens/tenant_key(R1-L2 字段钉)。"""
+    """路由选择注册表模型,用量上报包含 task、model、token 和租户字段。"""
     s = _settings(
         model_registry_json=REG,
         model_routes_json='{"SQL_GEN": "coder"}',
@@ -152,8 +151,7 @@ async def test_task_routing_and_usage_report() -> None:
     await asyncio.sleep(0)
     assert coder_comp.models == ["qwen-coder-plus"]  # SQL_GEN 路由命中
     assert main_comp.models == ["qwen-plus"]  # SUMMARIZE 回退主模型
-    # R1-L2:上报记录字段钉(漂移=api 422 静默丢量的防线)
-    # 038:补 status/latency_ms(采集补全)
+    # API 校验上报字段;记录同时包含请求状态和延迟。
     assert len(recorder.records) == 2
     for rec in recorder.records:
         assert set(rec) == {
@@ -166,7 +164,7 @@ async def test_task_routing_and_usage_report() -> None:
             "total_tokens",
             "status",
             "latency_ms",
-            "protocol",  # 077:出站协议归因
+            "protocol",  # 出站协议归因
         }
         assert rec["prompt_tokens"] == 11 and rec["total_tokens"] == 18
         assert rec["status"] == "SUCCESS"
@@ -178,7 +176,7 @@ async def test_task_routing_and_usage_report() -> None:
 
 
 async def test_usage_report_failure_never_blocks() -> None:
-    """上报异常(boom)主链路正常返回。"""
+    """用量上报异常时模型调用仍正常返回。"""
     s = _settings(llm_api_key="sk-main")
     recorder = _Recorder(boom=True)
     client = LlmClient(s, usage_reporter=recorder)
@@ -189,14 +187,14 @@ async def test_usage_report_failure_never_blocks() -> None:
 
 
 class _BoomCompletions:
-    """供应商失败替身:create 恒抛超时异常(038 失败采集路径)。"""
+    """供应商失败替身:create 恒抛超时异常(失败采集路径)。"""
 
     async def create(self, *, model: str, **kw: object):  # type: ignore[no-untyped-def]
         raise TimeoutError("Read timeout after 30s")
 
 
 async def test_failure_call_reported_as_error() -> None:
-    """038:失败调用也采集——status=ERROR、tokens=0、latency_ms 在场,
+    """失败调用也采集——status=ERROR、tokens=0、latency_ms 在场,
     异常仍按 LlmError 上抛(fail 语义不变)。"""
     import asyncio
 
@@ -204,7 +202,7 @@ async def test_failure_call_reported_as_error() -> None:
 
     from kongming_agent.llm import LlmError
 
-    # 072:读超时属瞬时故障——重试满预算(3 次),每尝试一条 usage(不再合并)
+    # 读超时属瞬时故障——重试满预算(3 次),每尝试一条 usage(不再合并)
     s = _settings(
         llm_api_key="sk-main",
         llm_retry_base_ms="1",
@@ -220,7 +218,7 @@ async def test_failure_call_reported_as_error() -> None:
     assert len(recorder.records) == 3
     assert all(r["status"] == "ERROR" for r in recorder.records)
     rec = recorder.records[0]
-    # R1-B4:失败路径字段集全键钉(与成功路径同构防线)
+    # 失败路径字段集全键钉(与成功路径同构防线)
     assert set(rec) == {
         "trace_id",
         "tenant_key",
@@ -231,7 +229,7 @@ async def test_failure_call_reported_as_error() -> None:
         "total_tokens",
         "status",
         "latency_ms",
-        "protocol",  # 077:出站协议归因
+        "protocol",  # 出站协议归因
     }
     assert rec["status"] == "ERROR"
     assert rec["prompt_tokens"] == 0 and rec["total_tokens"] == 0
@@ -240,7 +238,7 @@ async def test_failure_call_reported_as_error() -> None:
 
 
 class _EmptyChoicesCompletions:
-    """R1-B2:供应商 200 但空 choices(应答畸形)——应落 ERROR 并收敛 LlmError。"""
+    """供应商 200 但空 choices(应答畸形)——应落 ERROR 并收敛 LlmError。"""
 
     async def create(self, *, model: str, **kw: object):  # type: ignore[no-untyped-def]
         class _Resp:
@@ -251,7 +249,7 @@ class _EmptyChoicesCompletions:
 
 
 async def test_malformed_response_reported_as_error() -> None:
-    """R1-B2:空 choices 协议错不再裸 IndexError 500,归 ERROR 采集。"""
+    """空 choices 协议错不再裸 IndexError 500,归 ERROR 采集。"""
     import asyncio
 
     import pytest
@@ -272,8 +270,7 @@ async def test_malformed_response_reported_as_error() -> None:
 
 
 async def test_success_without_usage_still_reported() -> None:
-    """038:成功但供应商未回 usage(resp.usage=None)——同样落记录
-    (旧语义 usage None 即丢弃,038 起调用次数不丢)。"""
+    """成功但供应商未回 usage(resp.usage=None)——同样落记录,调用次数不丢。"""
 
     class _NoUsageCompletions:
         async def create(self, *, model: str, **kw: object):  # type: ignore[no-untyped-def]
@@ -304,11 +301,11 @@ async def test_success_without_usage_still_reported() -> None:
     assert recorder.records[0]["total_tokens"] == 0
 
 
-# ── 多协议出站(multi-protocol-llm):条目/主模型协议声明与 fail-closed 校验 ──
+# ── 多协议出站:条目/主模型协议声明与 fail-closed 校验 ──
 
 
 def test_protocol_defaults_openai() -> None:
-    """缺省零回归:条目未声明 protocol 与显式 openai 一致;主模型 env 缺省 openai。"""
+    """缺省:条目未声明 protocol 与显式 openai 一致;主模型 env 缺省 openai。"""
     s = _settings(model_registry_json=REG)
     out = s.parse_registry()
     assert all(e.protocol == "openai" for e in out.values())
@@ -352,7 +349,7 @@ def test_main_model_invalid_protocol_falls_back(caplog: pytest.LogCaptureFixture
     assert any("KM_AGENT_LLM_PROTOCOL" in r.getMessage() for r in caplog.records)
 
 
-# ── 075:计价字段死配置清除(未知键忽略,不拒配)──
+# ── 遗留计价键按未知键忽略(不拒配)──
 
 
 def test_legacy_price_keys_ignored_not_rejected() -> None:
@@ -372,7 +369,7 @@ def test_legacy_price_keys_ignored_not_rejected() -> None:
     out = s.parse_registry()
     assert "legacy" in out
     assert out["legacy"].model == "legacy"
-    # 075:ModelEntry 不再含计价字段
+    # ModelEntry 无计价字段
     assert not hasattr(out["legacy"], "price_input")
     assert not hasattr(out["legacy"], "price_output")
 

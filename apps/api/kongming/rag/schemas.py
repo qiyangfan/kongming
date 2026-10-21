@@ -1,14 +1,7 @@
-"""rag 域响应 schema(097):召回试跑端点定型。
+"""知识库响应模型,与 `service.recall_probe` 的字段保持一致并供 OpenAPI 生成前端类型。
 
-键名与 `service.recall_probe` 返回逐一对齐(纯定型,零行为变更:事实契约
-锁定,使前端经契约管线类型化消费——ADR-005 单源)。可选键按现状标注:
-- `gate_skipped` 为 None = 闸门正常参与;`"no_knowledge"` = 零知识旁路;
-- 路 verdict 为 None = 闸门未参与(零知识旁路/轻量装配),观测面如实透出,
-  不报裁剪结论误导排障。
-嵌套模型一律公开名(pyright reportPrivateUsage 禁跨模块消费下划线名)。
-via 各键由 rag.table_relations 列 NOT NULL 保证非空(jsonb join_keys 为
-`[{left_col, right_col}]` 数组形态)。
-"""
+`gate_skipped=None` 表示相关度判定已参与,`"no_knowledge"` 表示零知识旁路;
+旁路时各来源 verdict 保持 `None`。"""
 
 from pydantic import BaseModel
 
@@ -76,7 +69,7 @@ class ProbeSchemaTableOut(BaseModel):
 
 
 class ProbeExpansionOut(BaseModel):
-    """关系扩展明细(095):enabled=False 或零关系行时 tables 为空表。"""
+    """关系扩展明细:enabled=False 或零关系行时 tables 为空表。"""
 
     enabled: bool
     tables: list[ProbeExpansionTableOut]
@@ -84,7 +77,7 @@ class ProbeExpansionOut(BaseModel):
 
 
 class RecallProbeOut(BaseModel):
-    """064 召回试跑响应(只读验证面;键集=service.recall_probe 现值锁定)。"""
+    """召回试跑响应(只读验证面;键集=service.recall_probe 现值锁定)。"""
 
     question: str
     gate_skipped: str | None = None

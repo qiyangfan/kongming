@@ -1,6 +1,6 @@
-"""mcp 用例编排(028):配置 CRUD 校验 + 连通性测试 + 发现同步 +
-动态工具解析 + 出站执行。零框架(宪法 Article II);operlog 经端口。
-109:三原语探测(test/sync)、资源快照存库、read_resource 白名单执行
+"""mcp 用例编排:配置 CRUD 校验 + 连通性测试 + 发现同步 +
+动态工具解析 + 出站执行。用例层不依赖 FastAPI 或 SQLAlchemy;操作日志经端口写入。
+三原语探测(test/sync)、资源快照存库、read_resource 白名单执行
 适配(白名单/文本 mime/截断/注入检测)、模板只读预览(实时拉取)。"""
 
 from typing import TYPE_CHECKING, Any, Protocol, cast
@@ -24,11 +24,11 @@ if TYPE_CHECKING:
 
 
 class McpValidationError(Exception):
-    """领域层 400(fullmatch/endpoint 形态;008 同哲学)。"""
+    """领域校验错误(key/endpoint 形态),路由层映射 400。"""
 
 
 class McpOperLogger(Protocol):
-    """操作审计端口(015 operlog 适配,组合根注入 actor/ip 横切)。"""
+    """操作审计端口(operlog 适配,组合根注入 actor/ip 横切)。"""
 
     async def log(self, *, action: str, target: str, detail: dict[str, object]) -> None: ...
 
@@ -43,7 +43,7 @@ def _validate_endpoint(endpoint: str) -> None:
         raise McpValidationError("endpoint 须为 http(s) URL(≤512 字符)")
 
 
-# 109:模板预览文本上限(管理面低频只读动作,UI 形态量级;截断附标注)
+# 模板预览文本上限(管理面低频只读动作,UI 形态量级;截断附标注)
 _PREVIEW_CAP = 64 * 1024
 
 
@@ -139,9 +139,8 @@ class McpService:
     # ── 连通性测试与同步 ──
 
     async def test_connection(self, *, server_id: str, tenant_id: str) -> dict[str, Any]:
-        """握手 + 三原语探测(109)。不支持与原语类端点不可用一律计数 0 不算
-        失败(spec 109 验收句;评审修复——原实现把 resources/prompts 超时/
-        拒连判整体失败);tools 为核心原语,其失败保持整体失败(既有分类)。
+        """握手 + 三原语探测。不支持与原语类端点不可用一律计数 0 不算
+        失败(spec 验收句);tools 为核心原语,其失败保持整体失败(既有分类)。
         结构化错误注明原语名,不暴露堆栈/凭证。"""
         row = await self._repo.get(server_id=server_id, tenant_id=tenant_id)
         if row is None:
@@ -150,7 +149,7 @@ class McpService:
         try:
             probe = await self._caller.probe(endpoint=endpoint, headers=headers)
         except McpCallError as e:
-            # 握手失败:结构化错误(design D4 既有分类)
+            # 握手失败:结构化错误返回
             return {"ok": False, "kind": e.kind, "detail": e.detail}
         if "tools" in probe.failures:
             kind, detail = probe.failures["tools"]
@@ -168,9 +167,9 @@ class McpService:
         return out
 
     async def sync(self, *, server_id: str, tenant_id: str) -> dict[str, Any]:
-        """发现同步(109):三原语并行探测 → 快照原子替换(tools + resources
+        """发现同步:三原语并行探测 → 快照原子替换(tools + resources
         + prompts);单原语失败降级保留旧清单(同断连降级口径);
-        资源清单非空 → 前置注册 read_resource 合成工具(design D1/D2)。"""
+        资源清单非空 → 前置注册 read_resource 合成工具。"""
         row = await self._repo.get(server_id=server_id, tenant_id=tenant_id)
         if row is None:
             raise McpServerNotFound(server_id)
@@ -203,11 +202,10 @@ class McpService:
                 error=f"{kind}: {detail}"[:500],
             )
             return {"ok": False, "kind": kind, "detail": detail}
-        # R1-S2:注册时收敛敌意/畸形 JSON Schema——check_schema 不过
+        # 注册时收敛敌意/畸形 JSON Schema——check_schema 不过
         # 降级为 {"type":"object"}(L4 退化为仅结构校验),不合法 schema
-        # 进快照会让 validate_args 双路径裸 500(评审实证);
-        # 审查循环 F1:回溯型 pattern(check_schema 不查,实测 ReDoS 可
-        # 卡死 worker)同走降级
+        # 进快照会让 validate_args 双路径裸 500;
+        # check_schema 不检查正则回溯风险；这类 pattern 也必须降级，避免阻塞 worker。
         import jsonschema.validators as _jsv
 
         from kongming.mcp.models import has_redos_pattern
@@ -258,7 +256,7 @@ class McpService:
             error=error_note,
         )
         if self._breaker is not None:
-            # add-mcp-breaker:同步成功=管理员确认可达,显式复位熔断
+            # 同步成功=管理员确认可达,显式复位熔断
             # (运行时立即可用,不等半开探测;管理面探测不受熔断约束)
             self._breaker.reset(endpoint)
         return {
@@ -273,7 +271,7 @@ class McpService:
         self, row: dict[str, Any], *, require_enabled: bool = True
     ) -> tuple[str, dict[str, str]]:
         """get 行(掩码面)没有明文——出站前经专用出口取(明文不过查询面)。
-        管理面探测(test/sync)传 require_enabled=False(R1-S1 分流)。"""
+        管理面探测(test/sync)传 require_enabled=False(分流)。"""
         target = await self._repo.get_call_target(
             tenant_id=str(row["tenant_id"]),
             server_key=str(row["server_key"]),
@@ -292,7 +290,7 @@ class McpService:
         if row is None:
             return None
         for raw_entry in cast("list[object]", row.get("tools") or []):
-            # isinstance 守卫保留;收窄产物键型未知,cast 收窄后再取值(仅类型断言)
+            # 快照产物键型未知,先 isinstance 收窄再 cast(仅类型断言)
             entry = cast("dict[str, Any]", raw_entry) if isinstance(raw_entry, dict) else None
             if entry is not None and entry.get("qualified") == qualified:
                 return {**entry, "server_key": str(row["server_key"])}
@@ -321,7 +319,7 @@ class McpService:
         self, *, tenant_id: str, qualified: str, args: dict[str, Any]
     ) -> dict[str, Any]:
         """出站执行(六层防御后主链调用点):解析 → 取明文(瞬时)→ 调用。
-        read_resource 走资源白名单适配(109),其余工具原样出站。"""
+        read_resource 走资源白名单适配,其余工具原样出站。"""
         parsed = parse_qualified(qualified)
         if parsed is None:
             raise McpCallError("protocol", "工具名形态非法")
@@ -329,7 +327,7 @@ class McpService:
         entry = await self.resolve_tool(tenant_id=tenant_id, qualified=qualified)
         if entry is None:
             raise McpCallError("remote", "工具不可用(已禁用/删除/未注册)")
-        # R1-A5:server_key 取 resolve 结果——parse_qualified 按第一个 __
+        # server_key 取 resolve 结果——parse_qualified 按第一个 __
         # 切分,key 内含连续下划线(a__b 合法形态)会被错切
         server_key = str(entry["server_key"])
         target = await self._repo.get_call_target(tenant_id=tenant_id, server_key=server_key)
@@ -360,7 +358,7 @@ class McpService:
         headers: dict[str, str],
         args: dict[str, Any],
     ) -> dict[str, Any]:
-        """read_resource 执行适配(109,资源内容三层防线):uri 白名单校验
+        """read_resource 执行适配(资源内容三层防线):uri 白名单校验
         (不出站)→ 文本 mime 限定(声明二进制不出站)→ 出站读取 → 截断
         标注 → 注入检测(既有注入检测面,与工具观察既有防线同构)。"""
         uri = str(args.get("uri") or "")
@@ -371,11 +369,11 @@ class McpService:
         )
         hit = next((r for r in whitelist if str(r.get("uri") or "") == uri), None)
         if hit is None:
-            # 白名单外拒绝:结构化错误观察,不出站(design D2——白名单来自
-            # 最近一次成功探测的资源快照,server 未重同步前新增资源不可读)
+            # 白名单外拒绝:结构化错误观察,不出站;白名单来自
+            # 最近一次成功探测的资源快照,server 未重同步前新增资源不可读
             raise McpCallError("remote", "uri 不在资源白名单(仅限该 server 资源清单内 uri,未出站)")
         if not is_text_mime(str(hit.get("mime_type") or "")):
-            # 二进制 mime 拒绝(design Non-goal:观察是文本形态)
+            # 观察面仅文本形态,二进制资源不出站
             raise McpCallError("remote", "二进制资源不进观察(文本形态限定,未出站)")
         result = await self._caller.read_resource(endpoint=endpoint, headers=headers, uri=uri)
         cleaned, hits = sanitize_external_text(str(result.get("content") or ""))
@@ -395,7 +393,7 @@ class McpService:
         name: str,
         arguments: dict[str, str],
     ) -> dict[str, Any]:
-        """模板按名实时拉取只读预览(109,design D3:渲染带 arguments,快照
+        """模板按名实时拉取只读预览(渲染带 arguments,快照
         无法表达,管理面低频动作实时拉取不落库);预览文本过注入检测 +
         大小上限(截断标注)。只读:不注入任何提示词、非运行时提示来源。"""
         row = await self._repo.get(server_id=server_id, tenant_id=tenant_id)

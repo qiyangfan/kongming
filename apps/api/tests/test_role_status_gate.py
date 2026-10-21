@@ -1,10 +1,4 @@
-"""角色启用状态在所有授权读取点同一道闸(086)。
-
-背景:`sys_role.status` 原先只有 `datascope.user_role_scopes` 一处读它,权限点联查与
-四处 `data_scope='ALL'` 判定都不读——于是「禁用一个 ALL 角色」在不同链路上得到相反结果:
-数据范围侧消失(进而降级为不过滤),可见面侧照旧放宽。这些用例钉住「要么全程参与,
-要么完全不参与」这条口径,新增按角色联查的读取点时必须一并覆盖。
-"""
+"""验证所有授权查询都排除已停用角色，确保权限点和数据范围采用一致的角色集合。"""
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession

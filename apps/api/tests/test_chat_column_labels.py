@@ -1,9 +1,4 @@
-"""041 呈现层列标签测试:SQL 溯源解析 + 问答全栈落库(测试先行)。
-
-双轨制契约:columns 恒持物理名(eval/回写/审计零回归);column_labels 与
-columns 等长对齐——qualified 列按别名定表精确溯源,裸列唯一命中才用,
-跨表语义冲突/无有效中文注释/表达式列回退原列名;解析失败整列回退(fail-open)。
-"""
+"""覆盖结果列标签的 SQL 溯源和问答落库回显。"""
 # pyright: reportPrivateUsage=false
 
 import json
@@ -105,7 +100,7 @@ def test_length_alignment_and_empty_tables() -> None:
 
 def test_star_projection_falls_back_entirely() -> None:
     # 星号投影一对多(AST 投影数≠结果列数):按位对位会把后续投影的标签
-    # 贴到星号展开列上——SELECT *, amount 实证第 2 列错得「支付金额」。
+    # 贴到星号展开列上——SELECT *, amount 第 2 列错得「支付金额」。
     # 宁缺毋错:整体回退物理名(纯 SELECT * 同口径)。
     sql = "SELECT *, amount FROM payment"
     labels = resolve_column_labels(["customer_id", "amount", "amount"], _COMMENTS, sql)
@@ -161,7 +156,7 @@ async def test_labels_fallback_then_hit_with_persist(
     )
     await session.commit()
 
-    # 阶段一:无注释行→回退原列名(物理名零回归,等长对齐)
+    # 阶段一:无注释行→回退原列名(物理名,等长对齐)
     body = await _ask(client, token)
     assert body["columns"] == ["name", "qty"]
     assert body["column_labels"] == ["name", "qty"]
@@ -239,7 +234,7 @@ async def test_column_comments_tenant_schema_overrides_public(
     await session.commit()
     comments = await RagRepository(session).column_comments(tenant_id=tid, datasource_key="default")
     assert comments["goods"] == {"name": "varchar 租户名"}  # 租户 schema 胜出
-    # 清理:不残留本次插入的 goods 行(防污染其他用例)
+    # 清理 goods 测试数据，避免影响其他用例。
     await session.execute(
         text(
             "DELETE FROM rag.table_descriptions"

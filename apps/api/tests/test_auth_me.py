@@ -68,7 +68,7 @@ async def test_me_soft_deleted_user_rejected_live(
 async def test_me_perms_exclude_disabled_role(
     client: AsyncClient, make_user: MakeUser, session: AsyncSession
 ) -> None:
-    """未启用角色不授予功能权限——与数据范围侧同一道闸(086)。
+    """未启用角色不授予功能权限——与数据范围侧同一道闸。
 
     原实现只让 `status` 影响数据范围解析、不影响权限点联查,于是「禁用角色」这个
     治理动作的实际后果是:权限照旧、行级过滤整条消失 → 可见面反而放宽成全表。

@@ -1,18 +1,4 @@
-"""0047: bot-store 版本化上架(104-bot-store-versioning)
-
-上架语义从「状态开关」升级为「不可变版本快照」:
-- 新表 public.sys_bot_version:上架版本(bot 内 version_no 递增唯一,
-  快照 jsonb 白名单定型:name/greeting/suggestions/system_prompt/tools,
-  published_at=该版本上架时间);
-- sys_bot_definition 纯增指针列 current_version_id(FK→版本表,可空=
-  未上架/历史存量未上架):「当前上架版本」=指针,版本无独立状态机;
-- 存量回填(同事务):在架 Bot(published_at 非空)一律补 v1 快照
-  (=迁移时定义的白名单字段)并指向——商店行为零回归;未上架存量
-  不补(首次上架时创建 v1)。
-
-**downgrade**:删指针列+版本表(回退语义:指针列回退即消失,版本历史
-随表删除;降级属破坏性操作,与 0021 同款口径)。
-"""
+"""新增 Bot 不可变上架版本快照及当前版本指针，并为已上架 Bot 回填首个快照。降级会删除指针和版本历史。"""
 
 import json
 
@@ -26,8 +12,7 @@ down_revision = "0046"
 branch_labels = None
 depends_on = None
 
-# 快照白名单键集与 kongming.store.snapshot.build_snapshot 输出逐字一致
-# (读侧定型单源;改动须两处同步,tests/test_store_snapshot.py 钉键集)
+# 快照白名单键集必须与 kongming.store.snapshot.build_snapshot 保持一致。
 DDL = """
 CREATE TABLE public.sys_bot_version (
     id           UUID PRIMARY KEY,

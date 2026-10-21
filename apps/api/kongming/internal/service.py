@@ -1,18 +1,10 @@
-"""内部执行编排:租户解析 → 数据源解析 → 绑定复校 → 防火墙 → data_scope → 复检 → 只读执行 → 审计。
+"""Agent 内部 SQL 执行入口。
 
-sql-execution spec 落地:
-- fail-closed 三面:未知/禁用租户、用户-租户未绑定、数据源非法(008 动态化:
-  非 default 校验存在+启用+归属当前租户,同形 400 DATASOURCE_INVALID 防 key 探测,
-  审计落 BLOCKED+分类内部可溯;不静默回退默认路径);
-- 系统调用(user_id 缺省)豁免绑定复校与 data_scope,其余防御层不变;
-- 改写产物必过防火墙复检 + schema 边界校验(防御性,防改写引入非法语句/跨租户引用);
-- PASS/BLOCKED/ERROR 三态全落审计,trace_id 原样贯穿,sql_text 记实际执行形态;
-- 编排段基础设施异常(连接池超时等)同样收敛为 ERROR 落审计,不裸 500;
-- ERROR 的 reason 取驱动层整洁摘要(剥 SQLAlchemy asyncpg 包装类前缀),供 selfheal 喂回。
-
-010 注记:前段(1-6)提取为 _prepare,execute/explain 两入口共享——防线单一事实源,
-EXPLAIN 通道不复制安全逻辑(design D2)。
-"""
+先复核租户、数据源和绑定关系，再依次执行 SQL 防火墙、数据范围改写与复检，
+最后进入只读连接池并记录审计。未知租户、未绑定用户或无效数据源一律拒绝；
+系统调用只跳过用户绑定和数据范围检查；改写后的 SQL 仍需通过防火墙与
+schema 检查。结果均记录为 PASS、BLOCKED 或 ERROR；执行与 EXPLAIN 共用
+相同的前置检查。"""
 
 import json
 import logging
@@ -55,7 +47,7 @@ class InvalidDatasource(Exception):
 async def resolve_tenant(session: AsyncSession, tenant_key: str) -> str:
     """租户解析(fail-closed:不存在/禁用同形拒绝;此时无租户主体,不落审计)。
 
-    019 抽共用:internal 执行前段与 toolcall 六层防御 L1 同调(防线单一事实源)。
+    internal 执行前段与 toolcall 六层防御 L1 共用本实现,保证防线口径单一。
     """
     tenant = (
         (
@@ -75,7 +67,7 @@ async def resolve_tenant(session: AsyncSession, tenant_key: str) -> str:
 async def assert_user_bound(
     session: AsyncSession, *, user_id: str, tenant_id: str, tenant_key: str
 ) -> None:
-    """用户-租户绑定复校(019 抽共用;系统调用豁免语义由调用方决定,本函数恒校验)。"""
+    """用户-租户绑定复校;系统调用豁免语义由调用方决定,本函数恒校验。"""
     bound = (
         await session.execute(
             text("SELECT 1 FROM public.sys_user_tenant WHERE user_id = :u AND tenant_id = :t"),
@@ -99,11 +91,11 @@ def _error_summary(e: Exception) -> str:
 
 def _json_cell(v: object) -> object:
     """单元格 JSON 友好化:asyncpg 的 numeric→Decimal 在 JSON 里是字符串,
-    下游图表推断/stats 会判成非数值(005 冒烟实证);转 float 保数值语义。
+    下游图表推断/stats 会判成非数值;转 float 保数值语义。
 
-    取舍(钉住,R2 评审):>2⁵³ 的 numeric 转 float 有末位精度损失(展示路径
-    可接受,审计不存行数据);NaN/±Infinity 非有限值 JSON 无法表达(裸 NaN
-    字面量会让前端 JSON.parse 抛错),映射为 None。
+    取舍:>2⁵³ 的 numeric 转 float 有末位精度损失(展示路径可接受,审计不存
+    行数据);NaN/±Infinity 非有限值 JSON 无法表达(裸 NaN 字面量会让前端
+    JSON.parse 抛错),映射为 None。
     """
     if isinstance(v, Decimal):
         f = float(v)
@@ -123,7 +115,7 @@ class ExecResult:
 
 @dataclass(frozen=True)
 class ExplainResult:
-    """执行计划结果(010):PASS 时 plan=EXPLAIN (FORMAT JSON) 解析产物(顶层数组)。"""
+    """执行计划结果:PASS 时 plan=EXPLAIN (FORMAT JSON) 解析产物(顶层数组)。"""
 
     verdict: str  # PASS / BLOCKED / ERROR
     reason: str | None = None
@@ -189,7 +181,7 @@ async def _prepare(  # noqa: PLR0913 —— 请求字段平铺,编排前段
     """
     writer = SqlAuditWriter()
 
-    # 1. 租户解析(公共函数,019 抽共用;fail-closed 不落审计)
+    # 1. 租户解析(与 toolcall L1 共用;fail-closed 不落审计)
     tenant_id = await resolve_tenant(session, tenant_key)
 
     async def _fin(verdict: str, sql: str, reason: str) -> ExecResult:
@@ -206,7 +198,7 @@ async def _prepare(  # noqa: PLR0913 —— 请求字段平铺,编排前段
             reason=reason,
         )
 
-    # 2. 数据源解析(008 动态化):default 走平台配置连接串;非 default 校验
+    # 2. 数据源解析(动态化):default 走平台配置连接串;非 default 校验
     #    存在+启用+归属当前租户——任一不满足:审计 BLOCKED(分类内部可溯)+
     #    同形 InvalidDatasource(对外不区分原因,防 key 探测);不静默回退默认路径
     engine_dsn: URL | None = None
@@ -239,7 +231,7 @@ async def _prepare(  # noqa: PLR0913 —— 请求字段平铺,编排前段
         route_schema = row.default_schema
     engine = await get_or_create_engine(datasource_key, engine_dsn)
 
-    # 3. 用户-租户绑定复校(系统调用豁免;公共函数);基础设施异常收敛 ERROR 不裸 500
+    # 3. 复核用户与租户绑定；系统调用免检，校验异常统一记为 ERROR。
     if user_id is not None:
         try:
             await assert_user_bound(
@@ -250,7 +242,7 @@ async def _prepare(  # noqa: PLR0913 —— 请求字段平铺,编排前段
         except Exception as e:
             return await _fin("ERROR", sql_text, _error_summary(e))
 
-    # 4. 防火墙初检(原 SQL;单遍解析:初检/改写结构共享同一 Guarded,053)
+    # 4. 防火墙初检(原 SQL;单遍解析:初检/改写结构共享同一 Guarded)
     src = guard.parse_guarded(sql_text)
     first = src.check()
     if not first.passed:
@@ -276,13 +268,13 @@ async def _prepare(  # noqa: PLR0913 —— 请求字段平铺,编排前段
         except DataScopeUnsupported as e:
             return await _fin("BLOCKED", sql_text, f"DATA_SCOPE_UNSUPPORTED: {e.reason}")
         except Exception as e:
-            # 编排段基础设施异常(池超时/控制库抖动):ERROR 落审计,不裸 500
+            # 连接池超时或控制库异常均写入审计并返回 ERROR。
             return await _fin("ERROR", sql_text, _error_summary(e))
         if applied.warning:
             log.warning("data_scope 降级: %s (trace_id=%s)", applied.warning, trace_id)
 
     # 6. 改写产物复检:防火墙 + 保留表拒读 + schema 边界(纵深防御,datascope spec 清单 10)
-    #    改写产物为新文本,单遍复用同一 Guarded(053)
+    #    改写产物为新文本,单遍复用同一 Guarded
     out = guard.parse_guarded(applied.sql)
     second = out.check()
     if not second.passed:
@@ -382,9 +374,9 @@ async def explain(  # noqa: PLR0913 —— 与 execute 同构平铺
     user_id: str | None,
     question: str | None,
 ) -> ExplainResult:
-    """执行计划(010,chat spec「EXPLAIN 执行计划」):防线与 execute 全同(_prepare
+    """执行计划(chat spec「EXPLAIN 执行计划」):防线与 execute 全同(_prepare
     共享),复检通过后由服务端拼 `EXPLAIN (FORMAT JSON)` 前缀——EXPLAIN 文本永不进
-    防火墙 check()(无新攻击面),永不生成 ANALYZE(不真执行目标 SQL)。
+    防火墙 check(无新攻击面),永不生成 ANALYZE(不真执行目标 SQL)。
     """
     started = time.monotonic()
     prepared = await _prepare(

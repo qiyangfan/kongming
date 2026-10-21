@@ -1,4 +1,4 @@
-"""并入与基线重建(092,任务 3.3/3.4):人审通过后一条命令收口——
+"""将审核通过的候选题并入正式评估集并重建基线。
 候选移动并入正式评估集 + 全量评估重跑 + 基线行登记(原因=自动构造扩题)。
 
 人审是唯一并入路径(proposal Non-goal:不做无人审自动入集);本模块只提供
@@ -68,7 +68,7 @@ def to_eval_case(candidate: dict[str, object], tenant: str) -> dict[str, object]
     return {
         "id": str(candidate["id"]),
         # 显式租户章:候选 id 是内容哈希(无租户前缀),评估器按 id 前缀
-        # 推断租户会落到不存在的"租户"→ 403 死题(092 实测);并入时点
+        # 按候选 id 推断租户会得到无效租户并返回 403；并入时
         # 已知租户,必须显式携带
         "tenant": tenant,
         "question": str(candidate["question"]),
@@ -110,7 +110,7 @@ def append_cases(dataset_path: Path, cases: list[dict[str, object]]) -> int:
 
 
 def build_baseline_row(stats_line: str, reason: str) -> str:
-    """全量评估统计行 → README 基线表行(纯函数;断言过=任务 3.4)。"""
+    """全量评估统计行 → README 基线表行(纯函数;断言过=)。"""
     from datetime import datetime
 
     date = datetime.now().strftime("%Y-%m-%d")

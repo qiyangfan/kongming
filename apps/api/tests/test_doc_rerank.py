@@ -1,9 +1,7 @@
-"""add-doc-rerank 测试:配置组合校验/供应商适配/检索精排级接入。
+"""检索精排测试:配置组合校验/供应商适配/检索精排级接入。
 
-纪律:config 与管线用例先红后绿(实现前落位);适配器经 MockTransport 注入缝
-覆盖方言报文与错误归一,零真实出站;管线用例走真库(conftest TRUNCATE 用例级
-隔离),精排体为内存假体;「同父多子取最高分」由纯函数 rank_parents_by_score
-钉死(池序受控,不依赖 ts_rank 顺序)。
+适配器使用 MockTransport 验证请求和错误归一,不访问外部服务;
+检索管线使用真实数据库,精排器使用内存替身;父项得分取子项最高分。
 """
 # pyright: reportPrivateUsage=false
 
@@ -40,7 +38,7 @@ from kongming.rag.rerank import (
 
 
 def _settings(**kw: str | int | float) -> Settings:
-    """显式钉空 rerank 组(隔离本地 .env 的 KM_RERANK_*),按用例覆写。"""
+    """显式置空 rerank 配置(隔离本地 .env 的 KM_RERANK_*),按用例覆写。"""
     base: dict[str, Any] = {
         "environment": "dev",
         "rerank_provider": "",
@@ -134,7 +132,7 @@ async def _seed_doc(session: AsyncSession) -> str:
 
 
 def test_unconfigured_zero_footprint() -> None:
-    """未配置=零存在感:无残缺信号,组合根工厂返回 None(精排级从未存在)。"""
+    """未配置:无残缺信号,组合根工厂返回 None(与精排级从未存在不可区分)。"""
     s = _settings()
     assert s.rerank_misconfiguration() is None
     assert build_doc_reranker(s) is None
@@ -154,7 +152,7 @@ def test_key_without_provider_misconfigured() -> None:
 
 
 def test_model_without_provider_misconfigured() -> None:
-    """只配 model 缺供应商同属残缺族(三变量覆盖完备;评审循环补)。"""
+    """只配 model 缺供应商同属残缺族(覆盖三变量组合)。"""
     s = _settings(rerank_model="gte-rerank-v2")
     msg = s.rerank_misconfiguration()
     assert msg is not None and "KM_RERANK_PROVIDER" in msg
@@ -339,7 +337,7 @@ async def test_key_never_leaks_in_error_or_repr() -> None:
 
 
 def test_rank_parents_takes_child_max() -> None:
-    """P1 两子 0.3/0.9 → 父分 0.9 压 P2 0.5;末次覆写语义(0.3)会反序,钉死 max。"""
+    """父项得分取子项最高分: P1 为 0.9,排在 P2 的 0.5 之前。"""
     pool = ["c1", "c2", "c3"]
     scores = [0.3, 0.9, 0.5]
     id_to_parent = {"c1": "P1", "c2": "P1", "c3": "P2"}

@@ -31,14 +31,14 @@ import {
 import type { CollabRunOut, CollabTurnOut, CollabWorkerOut, GraphConfirmOut } from "@/lib/task-api";
 import { useTenant } from "@/lib/tenant-store";
 
-// 轮询节奏(活动期;终态即停,间隔常量化避免散落字面量)
+// 活动期轮询节奏;终态即停
 const TASK_ACTIVE_POLL_MS = 2000;
 const COLLAB_RUNS_POLL_MS = 4000;
 // 协作运行在途只可能发生在 PLANNING/RUNNING/PAUSED:审批挂起/中断期无执行者;
 // 暂停不杀在途编排循环,PAUSED 下仍可能有收尾中的运行
 const RUNS_ACTIVE_STATUSES = ["PLANNING", "RUNNING", "PAUSED"];
-// 裁决值中文映射(未知值原样透出;superseded=重跑前在途账被收敛的标记)
-/** 圆桌轮次行类型呈现(115):发言/查证/弃权/主席判定。 */
+// 裁决值中文映射(未知值原样透出)
+/** 圆桌轮次行类型呈现:发言/查证/弃权/主席判定。 */
 const ROUND_TURN_KIND_LABELS: Record<string, string> = {
   speech: "发言",
   verification: "查证",
@@ -240,7 +240,7 @@ export default function TaskDetailPage() {
         ))}
       </section>
 
-      {/* 协作视图(091):worker 账本 + 裁决;加载失败如实呈现,有账才渲染 */}
+      {/* 协作视图:worker 账本 + 裁决;加载失败如实呈现,有账才渲染 */}
       {runs.isError && <ErrorAlert text="协作账本加载失败,可刷新重试。" />}
       {runs.data && runs.data.items.length > 0 && (
         <section className="space-y-2" aria-label="协作">
@@ -424,9 +424,7 @@ function CollabRunCard({
   );
 }
 
-/** 圆桌轮次转写列模型(115):参与者/类型/立场/摘要/证据,按轮按序回放;
- * 参与者归属优先取行内 label/role(有效名册经剔除后压缩编号,拓扑下标
- * 仅作无行内标签时的兜底),判定行恒 0 号位=主席。 */
+/** 按轮次和发言顺序生成圆桌记录列；参与者优先使用行内标签。 */
 function buildTurnColumns(): DataViewColumn<CollabTurnOut>[] {
   return [
     { key: "round_no", header: "轮次", cardPriority: 1 },
@@ -492,7 +490,7 @@ function buildTurnColumns(): DataViewColumn<CollabTurnOut>[] {
   ];
 }
 
-/** 图内确认卡(add-graph-checkpoint):任务循环内高危动作挂图审批;
+/** 图内确认卡(graph-checkpoint):任务循环内高危动作挂图审批;
  * 处置纪律与任务审批门同源(归属人-only/过期/幂等),呈现沿用确认卡形态。 */
 function GraphConfirmCard({
   confirm,

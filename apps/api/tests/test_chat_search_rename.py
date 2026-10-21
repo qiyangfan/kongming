@@ -1,8 +1,4 @@
-"""会话搜索与重命名全栈测试(chat spec 010 delta「会话搜索」「会话重命名」,安全规则类)。
-
-真实 PG;搜索=标题 ILIKE OR user 问句 EXISTS(通配符 %/_/\\ 字面化,共享
-like_pattern);重命名=原子归属 UPDATE(先查后改竞态窗口不存在)。
-"""
+"""覆盖会话搜索、重命名和租户隔离。"""
 # pyright: reportPrivateUsage=false
 
 import uuid
@@ -59,7 +55,7 @@ async def test_search_by_question_content(
 async def test_search_wildcard_literal(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """%/_ 按字面匹配(007 R1-3 同款防线,共享 like_pattern)。"""
+    """%/_ 按字面匹配( 同款防线,共享 like_pattern)。"""
     uid, token = await _user_with_chat_perm(client, session, make_user, "srch-wild")
     tid = await _default_tenant_id(session)
     pct = await _mk_session(session, user_id=uid, tenant_id=tid, title="完成率100%达成")
@@ -162,7 +158,7 @@ async def test_rename_blank_title_400(
 async def test_rename_overlong_400(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """013:非法判定以 strip 后值为准(spec 立约「去首尾空白后非空且不超上限」)——
+    """非法判定以 strip 后值为准(spec 立约「去首尾空白后非空且不超上限」)——
     裸 201 字走领域层 400;超 2000 传输层 422 防离谱请求体。"""
     uid, token = await _user_with_chat_perm(client, session, make_user, "ren-long")
     tid = await _default_tenant_id(session)
@@ -178,7 +174,7 @@ async def test_rename_overlong_400(
 async def test_rename_strip_padded_201_succeeds(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """013 挂账⑰:带空白 201 字 strip 后 ≤200 此前被传输层 422 误拒,
+    """⑰:带空白 201 字 strip 后 ≤200 被传输层 422 误拒,
     现按 spec「去首尾空白后不超上限」成功并落 strip 后值。"""
     uid, token = await _user_with_chat_perm(client, session, make_user, "ren-pad")
     tid = await _default_tenant_id(session)

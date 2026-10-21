@@ -2,7 +2,7 @@ name: kongming
 
 services:
   postgres:
-    image: pgvector/pgvector:pg18  # stack-refresh 批④:部署形态对齐开发机(localenv 已 pg18;PG19 不追)
+    image: pgvector/pgvector:pg18  # 与本地开发环境使用相同的 PostgreSQL 主版本。
     environment:
       POSTGRES_DB: kongming
       POSTGRES_USER: kongming
@@ -37,7 +37,7 @@ services:
       KM_DATABASE_URL: postgresql+asyncpg://kongming:${KM_DB_PASSWORD}@postgres:5432/kongming
       KM_REDIS_URL: redis://redis:6379/0
       KM_INTERNAL_TOKEN: ${KM_INTERNAL_TOKEN:?KM_INTERNAL_TOKEN required}
-      # 071/073 评估实测:api 必须指向 agent 服务名,缺省 localhost 会在容器内指到自己
+      # 容器间通过服务名访问；localhost 会指向当前容器。
       KM_AGENT_BASE_URL: http://agent:8001
     ports:
       - "${KM_API_HOST_PORT:-8000}:8000"

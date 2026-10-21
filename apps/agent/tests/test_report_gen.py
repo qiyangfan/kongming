@@ -1,4 +1,4 @@
-"""报告生成编排测试(088,剧本化:mock LLM/mock ApiClient,零真实外呼)。
+"""报告生成编排测试(剧本化:mock LLM/mock ApiClient,零真实外呼)。
 
 覆盖:全管线 READY 形态、数据真实原则(失败章节如实标注、防御拒绝不绕道
 不修复)、预算耗尽 PARTIAL 诚实收口、畸形 plan 拒绝。

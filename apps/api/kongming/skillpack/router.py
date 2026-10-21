@@ -1,4 +1,4 @@
-"""skillpack 路由(056):管理 CRUD/启停(system:skill:manage;跨租户 404 同形)。"""
+"""skillpack 路由:管理 CRUD/启停(system:skill:manage;跨租户 404 同形)。"""
 
 from __future__ import annotations
 

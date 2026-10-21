@@ -1,4 +1,4 @@
-"""053:agent validate 切引擎(纯解析、无 IO,语义不变;宪法 III 先红后绿)。
+"""验证 agent validate 引擎的纯解析行为。
 
 引擎贡献单遍解析,validate 判定逻辑(MULTI_STATEMENT/只读根)本地派生;
 影子:内置权威,引擎只对拍;切主:引擎权威,异常请求级降级;深嵌套受控。

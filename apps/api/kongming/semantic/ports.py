@@ -1,4 +1,4 @@
-"""semantic 端口(022→023):service 依赖反转。零框架纪律:仅 Protocol。"""
+"""semantic 端口(→):service 依赖反转。零框架纪律:仅 Protocol。"""
 
 from typing import Any, Protocol
 
@@ -6,7 +6,7 @@ from kongming.semantic.models import CallerScope
 
 
 class FkIntrospector(Protocol):
-    """外键扫描(基础设施适配:default=控制面会话/动态源=只读连接)。"""
+    """外键扫描端口：默认数据源使用控制面会话，动态数据源使用只读连接。"""
 
     async def fetch_fk_pairs(
         self, *, schemas: list[str]
@@ -40,12 +40,12 @@ class SemanticRepo(Protocol):
     ) -> str: ...
 
     async def delete_relation(self, *, relation_id: str, tenant_id: str) -> str | None:
-        """删除命中返回该行的 datasource_key(095:提交后按其精确失效缓存),
+        """删除命中返回该行的 datasource_key(提交后按其精确失效缓存),
         不命中返回 None(同形 404,防探测)。"""
 
 
 class KnowledgeTableLookup(Protocol):
-    """知识条目表存在性(040:手工关系写边界闸;实现=rag 知识仓储查询)。
+    """知识条目表存在性(手工关系写边界闸;实现=rag 知识仓储查询)。
 
     schema_table 为「schema.table」形态;引用知识条目外的表在召回
     relations_hint 中永不命中(静默死配置),故创建期即拒。"""
@@ -56,7 +56,7 @@ class KnowledgeTableLookup(Protocol):
 
 
 class CallerDeptScopeResolver(Protocol):
-    """调用者 data_scope 解析窄端口(110;实现=组合根注入适配器,
+    """调用者 data_scope 解析窄端口(实现=组合根注入适配器,
     semantic 域只见 Protocol,不 import datascope)。
 
     解析语义:启用角色最宽松档 ALL→universal=True;DEPT/DEPT_AND_BELOW/
@@ -68,7 +68,7 @@ class CallerDeptScopeResolver(Protocol):
 
 
 class RecallContextEvictor(Protocol):
-    """检索上下文缓存失效窄端口(095:关系写路径消费;实现=rag ContextCache,
+    """检索上下文缓存失效窄端口(关系写路径消费;实现=rag ContextCache,
     组合根注入——semantic 域只见 Protocol,不 import rag)。
 
     关系写(introspection upsert / 手工增删 / 数据源删除级联)提交后必须

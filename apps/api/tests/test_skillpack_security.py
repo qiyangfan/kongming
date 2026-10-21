@@ -1,4 +1,4 @@
-"""056 skillpack 安全面测试(防火墙保留前缀 + 管理鉴权)。"""
+"""skillpack 安全面测试(防火墙保留前缀 + 管理鉴权)。"""
 
 from __future__ import annotations
 

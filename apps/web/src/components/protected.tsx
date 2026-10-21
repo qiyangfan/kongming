@@ -1,5 +1,4 @@
-/* 认证态守卫:loading → spinner;guest → /login;首登强制改密 → /change-password。
-   会话恢复单飞幂等(auth-store bootstrap)。 */
+/* 认证态守卫:loading → spinner;guest → /login;首登强制改密 → /change-password。 会话恢复单飞幂等(auth-store bootstrap)。 */
 
 import { useEffect, type ReactNode } from "react";
 import { Navigate } from "react-router";

@@ -1,4 +1,4 @@
-"""document-rag 编排(024):上传分块落库 + small-to-big 检索。
+"""document-rag 编排:上传分块落库 + small-to-big 检索。
 
 与 RagService 并列的独立函数集(嵌入/召回复用既有端口形态);双通道隔离:
 文档检索产物与 schema 通道(schema_hint/history_sql)互不混入。
@@ -23,11 +23,11 @@ log = logging.getLogger(__name__)
 
 _CHILD_TOP_K = 8
 _PARENT_TOP_K = 5
-_EMBED_BATCH = 64  # agent /internal/embedding 单批上限(R1-H1:超限 422 静默死)
+_EMBED_BATCH = 64  # agent /internal/embedding 单批上限(超限 422 静默死)
 
 
 class DocumentConflict(Exception):
-    """同名并发上传唯一约束冲突(R1-L2:映射 409)。"""
+    """同名并发上传唯一约束冲突(映射 409)。"""
 
 
 async def upload_document(
@@ -42,7 +42,7 @@ async def upload_document(
     """上传编排:分块→embedding(子块)→覆盖式落库。
 
     返回 (doc_id, 块数, skipped);content_hash 相同 → skipped=True(幂等)。
-    embedding 失败降级:子块无向量落库(仅全文路可召回,与 009 同哲学)。
+    embedding 失败降级:子块无向量落库(仅全文路可召回)。
     """
     digest = hashlib.sha256(text.encode()).hexdigest()
     existing = await repo.find_by_name(
@@ -54,7 +54,7 @@ async def upload_document(
     child_texts = [str(c["content"]) for c in chunks if c["level"] == "CHILD"]
     vectors: list[list[float] | None] = []
     if child_texts:
-        # R1-H1:按批循环(009 _embed_quietly 同款);单批失败仅该批降级
+        # 按批循环(_embed_quietly 同款);单批失败仅该批降级
         for start in range(0, len(child_texts), _EMBED_BATCH):
             batch = child_texts[start : start + _EMBED_BATCH]
             try:
@@ -80,7 +80,7 @@ async def upload_document(
 
 
 def derive_citation_key(*, parent_id: str, doc_name: str) -> str:
-    """068:稳定引用键(确定性派生;纯函数)。
+    """稳定引用键(确定性派生;纯函数)。
 
     形态=可读前缀(文档名去扩展名)+ `-` + 定长哈希后缀(父块主键 SHA-256
     前 4 位十六进制)。同一父块任何一次召回派生结果恒定(与命中名次/路数/
@@ -113,7 +113,7 @@ def rank_parents_by_score(
 ) -> list[str]:
     """精排分→父块序(纯函数;同父多子取最高分,阈值先滤候选,平分保 RRF
     首现序——sorted 稳定性)。低于阈值的候选被过滤;过滤后空=空列表(调用方
-    按既有「文档未命中」收口)。"""
+    按「文档未命中」收口)。"""
     parent_scores: dict[str, float] = {}
     for cid, sc in zip(pool_ids, scores, strict=True):
         if sc < threshold:
@@ -140,7 +140,7 @@ async def _rerank_parent_ids(
 ) -> list[str]:
     """精排级:融合后候选池扩量→子块正文打分→父块最高分截断 top-5。
 
-    任何精排失败(超时/限流/不可用)降级 RRF-only 不阻断(design D4:单次
+    任何精排失败(超时/限流/不可用)降级 RRF-only 不阻断(单次
     调用粒度,不做熔断);成功/失败均留痕 sys_llm_usage(latency 只计出站
     打分本身,不含子块正文取回)。候选池无正文可打(全缺)按 RRF-only。"""
     pool = [str(cid) for cid in fused[: reranker.pool_topk]]
@@ -186,12 +186,7 @@ async def retrieve_docs(
     question: str,
     reranker: RerankPort | None = None,
 ) -> list[dict[str, str]]:
-    """small-to-big 检索:子块向量+全文 RRF → (可选精排)→ 父块回填(top-5);
-    任何失败降级空列表(不阻断主链路)。
-
-    reranker=None 时与既有行为逐字一致(RRF 名次直接截断,零回归);
-    注入精排级时候选池扩量(pool_topk)重排,引用键派生与名次无关(D5 零改动)。
-    """
+    """检索子块并合并向量与全文结果，可选执行精排后回填父块；失败返回空列表。"""
     try:
         vector_hits: list[dict[str, Any]] = []
         try:
@@ -240,7 +235,7 @@ async def retrieve_docs(
                 continue
             p = by_id[pid]
             ref = str(p["source_ref"])
-            # 068:citation_key 由父块主键派生(改名/重切块不改变键)
+            # citation_key 由父块主键派生(改名/重切块不改变键)
             key = derive_citation_key(parent_id=pid, doc_name=ref.split(" §")[0])
             out.append(
                 {

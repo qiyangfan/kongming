@@ -1,8 +1,4 @@
-"""ApiClient HTTP 层收敛直测(013 挂账⑮):rag_retrieve 对「200 但非 JSON」
-网关形态按失败返回 None(回退实时内省),不裸抛 JSONDecodeError——
-nl2sql-agent spec 立约「召回服务失败时回退实时内省兜底」,docstring
-承诺「任何失败返回 None」,本用例锁该承诺兑现。
-"""
+"""检查 rag_retrieve 收到非 JSON 响应时返回 None 并回退实时内省。"""
 
 import httpx
 import pytest
@@ -44,9 +40,7 @@ async def test_rag_retrieve_valid_json_still_parsed(
 async def test_rag_retrieve_doc_hints_citation_key_passthrough(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """068 回归闸:api 下发的 doc_hints citation_key 必须透传进 RagContext——
-    交付时曾漏掉本解析点,键在 agent 面恒缺失(合法键集恒空 → 净化自跳过、
-    来源投影恒空);093 期修复,本用例锁死不再复发。"""
+    """将 API 返回的 citation_key 透传到 RagContext。"""
     client = ApiClient(Settings())
 
     async def fake_post(self: ApiClient, path: str, payload: dict[str, object]) -> httpx.Response:
@@ -77,8 +71,8 @@ async def test_rag_retrieve_doc_hints_citation_key_passthrough(
 async def test_rag_retrieve_user_id_payload_wiring(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """102 接线:user_id 携带时进回调负载;缺省(含 None/空串)不携带该键
-    ——负载与既有形态逐字节同形(可见集合缺省=纯公共,api 侧零回归)。"""
+    """接线:user_id 携带时进回调负载;缺省(含 None/空串)不携带该键
+    ——负载与既有形态逐字节同形(可见集合缺省=纯公共,api 侧)。"""
     client = ApiClient(Settings())
     captured: list[dict[str, object]] = []
 

@@ -1,15 +1,4 @@
-"""0003: 部门底座(rbac spec「部门管理」+ datascope DEPT 系支撑)
-
-Revision ID: 0003
-Revises: 0002
-Create Date: 2026-08-18
-
-baseline 合并 V6 时缓建 dept(「dept_id 弃」=缓建非否决),004 执行路由
-落地 data_scope 行级改写,补齐存储底座:
-- sys_dept        部门表(parent_id 自引用,NULL=根;递归 CTE 查子孙)
-- sys_user.dept_id 用户绑部门(NULL=未绑定,DEPT 系 scope 安全降级)
-约定同 baseline:UUID v7 主键 / VARCHAR+CHECK / timestamptz / 纯加法可回滚。
-"""
+"""新增部门表和用户部门关联字段，为部门数据范围提供存储。"""
 
 from sqlalchemy import text
 

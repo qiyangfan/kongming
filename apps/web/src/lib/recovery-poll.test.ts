@@ -9,8 +9,7 @@ import {
   needsTurnRecovery,
 } from "./recovery-poll";
 
-/* 有界恢复回查锚(078 任务 3.3):末条 USER 即服务端有轮次收尾(控制面保证
-   写终态行);回查有界——预算耗尽即停,不无限轮询。 */
+/* 有界恢复回查锚:末条 USER 即服务端有轮次收尾(控制面保证 写终态行);回查有界——预算耗尽即停,不无限轮询。 */
 
 function msg(role: "USER" | "ASSISTANT", id: string): SessionMessageOut {
   return {

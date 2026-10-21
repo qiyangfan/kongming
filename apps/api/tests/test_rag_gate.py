@@ -1,9 +1,7 @@
 # pyright: reportPrivateUsage=false
-"""064-rag-relevance-gate 测试:分数出口/融合分算式/双条件判据/恒裁剪形态。
+"""rag 相关性闸测试：分数出口/融合分算式/双条件判据/恒裁剪形态。
 
-宪法 Article III(先红后绿):「融合分不是相关度」的反例性质被固化为断言
-(锁死证据,防止后来者重新拿它当阈值)。106 收编三态后闸门恒裁剪,
-verdict 恒产出。
+融合分只用于候选排序,不能当作相关度阈值;闸门始终裁剪候选并返回 verdict。
 """
 
 from typing import Any, cast
@@ -28,11 +26,11 @@ class _Hit:
         self.score = score
 
 
-# ── 1. 分数出口(任务 1.1/1.2) ─────────────────────────────────────
+# ── 1. 分数出口 ─────────────────────────────────────
 
 
 def test_native_scores_exposed() -> None:
-    """任务 1.1:各路命中带原生分(余弦相似度值域 [0,1] 或检索得分≥0)。"""
+    """各路命中带原生分(余弦相似度值域 [0,1] 或检索得分≥0)。"""
     hits = [_Hit("a.b", 0.87), _Hit("c.d", 0.42)]
     assert all(0.0 <= h.score <= 1.0 for h in hits)
     verdict = is_relevant(hits, top1_threshold=0.8, min_count=1, mean_threshold=0.0, mean_window=1)
@@ -40,7 +38,7 @@ def test_native_scores_exposed() -> None:
 
 
 def test_rrf_fuse_formula_and_ordering() -> None:
-    """任务 1.2:融合分按已知算式可复算;单路首位 < 双路并列末位(反例性质)。"""
+    """融合分按已知算式可复算;单路首位 < 双路并列末位(反例性质)。"""
     # 单路第 1 名:1/61≈0.0164;双路并列第 1 名各 1/61(同表才叠加——不同表各拿一路首位)
     single_score = 1.0 / (60 + 1)
     # 反例性质固化:单路首位(仅一路首位) < 双路均列首位同一表的融合分场景
@@ -54,25 +52,25 @@ def test_rrf_fuse_formula_and_ordering() -> None:
     assert both_rank1[0].table_name == "x"
 
 
-# ── 2. 双条件判据(任务 1.3/1.4) ───────────────────────────────────
+# ── 2. 双条件判据 ───────────────────────────────────
 
 
 def test_dual_condition_mean_path() -> None:
-    """任务 1.3:最高分不达首档但前 N 均值达次级阈值且命中数满足 min_count 时放行。"""
+    """最高分不达首档但前 N 均值达次级阈值且命中数满足 min_count 时放行。"""
     hits = [_Hit("a.b", 0.6), _Hit("c.d", 0.6), _Hit("e.f", 0.6)]
     verdict = is_relevant(hits, top1_threshold=0.8, min_count=3, mean_threshold=0.55, mean_window=3)
     assert verdict.passed is True  # top1=0.6<0.8 但均值 0.6≥0.55
 
 
 def test_dual_condition_fail_path() -> None:
-    """任务 1.3:两条件均不满足时丢弃。"""
+    """两条件均不满足时丢弃。"""
     hits = [_Hit("a.b", 0.6), _Hit("c.d", 0.2)]
     verdict = is_relevant(hits, top1_threshold=0.8, min_count=3, mean_threshold=0.55, mean_window=3)
     assert verdict.passed is False  # top1 不达 + 命中数 2 < 3
 
 
 def test_zero_hit_path_not_voting() -> None:
-    """任务 1.4:零命中不参与判定,且不被判为「低相关」。"""
+    """零命中不参与判定,且不被判为「低相关」。"""
     verdict = is_relevant([], top1_threshold=0.8, min_count=1, mean_threshold=0.5, mean_window=3)
     assert verdict.passed is False
     assert verdict.reason == "no_hits"
@@ -85,7 +83,7 @@ def test_min_count_gate() -> None:
     assert verdict.passed is False
 
 
-# ── 3. 闸门消费(106 收编:恒裁剪,无 off/shadow 形态) ────────────────
+# ── 3. 闸门消费(恒裁剪,无 off/shadow 形态) ────────────────
 
 
 def test_gate_filters_by_route() -> None:
@@ -110,14 +108,13 @@ def test_gate_filters_by_route() -> None:
     assert result2.verdict is not None and result2.verdict.passed is False
 
 
-# ── 4. 试跑端点(任务 1.7:同源断言/403/零写入) ───────────────────
+# ── 4. 试跑端点(同源断言/403/零写入) ───────────────────
 
 
 async def test_recall_probe_same_source_as_main(
     client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """任务 1.7:试跑端点返回与主链路 retrieve 相同的三路命中与原生分
-    (同源断言);shadow 形态含"若生效将丢弃"结论。"""
+    """验证试跑端点与常规检索使用相同的三路命中及原生分数。"""
     from kongming.auth.seed import seed_all
     from kongming.config import get_settings
     from kongming.rag.agent_callback import AgentRagClient
@@ -142,7 +139,7 @@ async def test_recall_probe_same_source_as_main(
     for hit in body["vector"]["hits"]:
         assert isinstance(hit["score"], (int, float))
         assert hit["source"] == "vector"
-    # 106 收编:无 mode 字段;verdict 恒产出(有知识)或旁路标注(零知识)
+    # 无 mode 字段;verdict 恒产出(有知识)或旁路标注(零知识)
     assert "mode" not in body
     assert body["gate_skipped"] in (None, "no_knowledge")
 
@@ -150,9 +147,7 @@ async def test_recall_probe_same_source_as_main(
 async def test_recall_probe_mirrors_no_knowledge_bypass(
     client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """试跑面镜像主链路零知识旁路(2026-10-10 对拍裁决):没灌知识时
-    gate_skipped=no_knowledge、verdict 为 None——观测面不得报 mean_below
-    与主链路「整路旁路」相悖误导排障。"""
+    """验证无知识条目时试跑端点返回零知识旁路结果。"""
     from kongming.auth.seed import seed_all
     from kongming.config import get_settings
     from tests.test_rag_recall import _ensure_default_tenant
@@ -185,7 +180,7 @@ async def test_recall_probe_requires_perm(
     session: AsyncSession,
     make_user: MakeUser,
 ) -> None:
-    """任务 1.7:无 system:rag:manage 权限 → 403(不泄漏任何召回数据)。"""
+    """无 system:rag:manage 权限 → 403(不泄漏任何召回数据)。"""
     from kongming.auth.seed import seed_all
     from kongming.config import get_settings
     from tests.test_chat_query import _bind, _default_tenant_id, _login, _mk_role_with_perms
@@ -207,7 +202,7 @@ async def test_recall_probe_requires_perm(
 async def test_recall_probe_zero_writes(
     client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """任务 1.7:试跑前后配置/缓存/审计零写入。"""
+    """试跑前后配置/缓存/审计零写入。"""
     from kongming.auth.seed import seed_all
     from kongming.config import get_settings
     from kongming.rag.agent_callback import AgentRagClient
@@ -241,7 +236,7 @@ async def test_recall_probe_zero_writes(
     assert keys == []
 
 
-# ── 5. 047 继承路过闸(审查循环补漏:继承路不豁免 relevance) ─────────
+# ── 5. 继承路过闸(继承路不豁免 relevance) ─────────
 
 
 async def _register_datasource(s: AsyncSession, tenant_id: str, key: str) -> None:
@@ -274,7 +269,7 @@ async def _embed_stub(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_gate_primary_drops_junk_on_inherited_route(
     client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """继承路(047)同样过闸:上轮问句召回出 junk 时 primary 整路裁掉,
+    """继承路同样过闸:上轮问句召回出 junk 时 primary 整路裁掉,
     主路(本轮相关表)不受影响——「多轮依赖表」不是 relevance 豁免。"""
     from kongming.config import get_settings
     from tests.test_rag_recall import _ensure_default_tenant, _seed_knowledge
@@ -294,8 +289,8 @@ async def test_gate_primary_drops_junk_on_inherited_route(
         session, tid, ds=ds, table="gjunk", comment="无关表", embed_text="完全不一样的另一主题"
     )
     # 阈值 0.9:主路同种子命中=1.0 必过;继承路(测试替身 embedding 下
-    # 无关文本亦有 ~0.73 相似度)top1/均值均 < 0.9 必裁—— isolates 出
-    # 「整路不相关」的判定(106:恒生效,无需再开 mode)
+    # 无关文本亦有 ~0.73 相似度)top1/均值均 < 0.9 必裁——隔离出
+    # 「整路不相关」的判定(恒生效,无需再开 mode)
     monkeypatch.setenv("KM_RAG_GATE_VECTOR_TOP1", "0.9")
     monkeypatch.setenv("KM_RAG_GATE_VECTOR_MEAN", "0.9")
     get_settings.cache_clear()
@@ -343,10 +338,9 @@ def _gate_svc(repo: object) -> RagService:
 
 
 def test_apply_gate_skipped_when_no_knowledge() -> None:
-    """064 前置(2026-10-10 对拍裁决)在 _apply_gate 内部收口,服务层直调
-    验证:零知识数据源闸门自动旁路——「没灌知识」与「召回不相关」对闸门
-    同为零命中,语义不可区分;旁路时 trace 如实标注 skipped=no_knowledge,
-    不静默。"""
+    """零知识数据源闸门自动旁路(在 _apply_gate 内部收口,服务层直调验证):
+    「没灌知识」与「召回不相关」对闸门同为零命中,语义不可区分;
+    旁路时 trace 如实标注 skipped=no_knowledge,不静默。"""
     svc = _gate_svc(repo=None)
     hits = [cast("RecallHit", _Hit("t1", 0.9))]
     out = svc._apply_gate("main", hits, [], knowledge_present=False)

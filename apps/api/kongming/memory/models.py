@@ -1,7 +1,7 @@
-"""memory 领域模型(022):记忆实体 + 显式意图提取 + 敏感检测(零框架)。
+"""memory 领域模型:记忆实体 + 显式意图提取 + 敏感检测(零框架)。
 
 spec: agent-memory「记忆形成(显式+隐式)」——PII/凭证命中拒绝落库
-(复用 020 护栏规则集,不另立规则)。
+(复用 护栏规则集,不另立规则)。
 """
 
 import re
@@ -15,10 +15,8 @@ _CONTENT_MAX = 500  # 记忆内容截断
 # 显式意图词(句首锚定):「记住/请记住/帮我记住/记一下」+ 可选冒号
 _EXPLICIT_PATTERN = re.compile(r"^(?:请记住|记住|帮我记住|记一下)[:：,，]?\s*(.+)$", re.S)
 
-# 敏感检测=020 输入护栏全部规则(R1-H2:injection blocked 类一并纳入——
-# 记忆会跨会话注入 prompt,形成期是全链路唯一闸;召回注入不再过护栏)+
-# 记忆域特有的密码语境规则(「密码是 X」形态;不进护栏注册表——正常问答
-# 的密码字段提及不误伤)
+# 记忆会跨会话注入提示词，因此写入时执行完整敏感内容检测。
+# 密码语境由记忆域单独识别，避免误拦正常问答中的密码字段。
 _SENSITIVE_PATTERNS = [
     r.pattern for r in GUARDRAIL_REGISTRY if r.guardrail_type == "input" and r.pattern
 ] + [
@@ -50,5 +48,5 @@ def extract_explicit_intent(question: str) -> str | None:
 
 
 def contains_sensitive(text: str) -> bool:
-    """PII/凭证形态检测(复用 020 规则正则;IGNORECASE 与 020 R1-H1 同口径)。"""
+    """PII/凭证形态检测(正则复用护栏 input 规则集,IGNORECASE 同口径)。"""
     return any(re.search(p, text, re.IGNORECASE) for p in _SENSITIVE_PATTERNS)

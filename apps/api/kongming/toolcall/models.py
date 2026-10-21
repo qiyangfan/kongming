@@ -1,4 +1,4 @@
-"""toolcall 领域模型(019):工具元数据/执行结果/参数摘要与幂等键纯函数。
+"""toolcall 领域模型:工具元数据/执行结果/参数摘要与幂等键纯函数。
 
 零框架纪律:本模块不 import fastapi/sqlalchemy/redis(import-linter 守护)。
 spec: tool-calling「工具定义与注册表」「工具纵深防御」。
@@ -22,7 +22,7 @@ ToolStatus = Literal[
 ]
 
 # 参数摘要中值须脱敏的键名(小写比对)——凭证类字段永不进审计/日志;
-# 审查循环 F3:MCP 动态工具参数名不受控,白名单须覆盖常见凭证命名族
+# MCP 动态工具参数名不受控,白名单须覆盖常见凭证命名族
 _SENSITIVE_ARG_KEYS = frozenset(
     {
         "password",
@@ -85,7 +85,7 @@ class ToolOutcome:
 def args_digest(args: dict[str, object]) -> str:
     """审计用参数摘要(纯函数):敏感键值脱敏 + 定长截断。
 
-    sort_keys 键序无关(评审修复):确认终态会以 jsonb 读回的 args 重算摘要
+    sort_keys 键序无关:确认终态会以 jsonb 读回的 args 重算摘要
     (toolcall/service confirm 段),jsonb 不保序——不排序则 PENDING 与终态
     两处摘要系统性不一致,审计不可对照。"""
     masked = {k: ("***" if k.lower() in _SENSITIVE_ARG_KEYS else v) for k, v in args.items()}
@@ -120,25 +120,19 @@ class ConfirmNotFound(Exception):
 
 
 class WebSearchError(Exception):
-    """094:联网检索失败(分类随 message 前缀上浮:unreachable/protocol)。
+    """联网检索失败(分类随 message 前缀上浮:unreachable/protocol)。
 
     unreachable=连接层未送达(重试至多一次);protocol=响应类错误(非 2xx/
     报文畸形/读超时,不重试)。分发兜底映射 ERROR + 审计,agent 据实降级为
     观察,不编造检索结果。与 toolgateway.websearch 的执行器侧同名异常为
-    领域单源双副本(审查 P1-1:service 不得传递性引入 httpx,089 裁决)。
+    领域单源双副本(service 不得传递性引入 httpx)。
     """
 
 
 class ConnectorError(Exception):
-    """099:HTTP 连接器失败(分类随 message 前缀上浮:unreachable/protocol/
-    policy)。
-
-    unreachable=连接层未送达(重试至多一次);protocol=响应类错误(非 2xx/
-    报文畸形/读超时/重定向不跟随,不重试);policy=策略类拒绝(SSRF 拒绝段/
-    出口白名单/参数校验,不出站或零重试)。分发兜底映射 ERROR + 审计,agent
-    据实降级为观察,不编造调用结果。与 toolgateway.connector 的执行器侧同名
-    异常为领域单源双副本(089 裁决同款:service 不得传递性引入 httpx)。
-    """
+    """HTTP 连接器错误:unreachable=连接未送达(重试至多一次);
+    protocol=响应类错误(不重试);policy=策略拒绝(不发请求)。
+    未处理错误转换为 ERROR 并审计。"""
 
 
 @dataclass(frozen=True)
@@ -155,8 +149,8 @@ class ToolAuditEntry:
     error_reason: str | None = None
     duration_ms: int | None = None
     datasource_key: str | None = None
-    channel: str = "chat"  # 025:渠道标记(chat/web_embed/api)
-    domain: str | None = None  # 089:域标签(网关域工具非空;内置工具恒 None)
+    channel: str = "chat"  # 渠道标记(chat/web_embed/api)
+    domain: str | None = None  # 域标签(网关域工具非空;内置工具恒 None)
     idempotency_key: str | None = None
     expires_at: datetime | None = None
 

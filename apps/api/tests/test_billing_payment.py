@@ -1,9 +1,4 @@
-"""035 mock-payment-gateway 测试(测试先行,资金类):支付单创建/回调核销
-幂等/伪签/金额不符/失败非终态/取消/惰性过期/作废/mock 开关/隔离。
-
-核销路径唯一(design D1):mock-simulate 与 callback 两入口共用同一
-reconcile——两入口各自的行为断言都打到同一状态机。
-"""
+"""覆盖模拟支付创建、回调核销、取消和过期处理。"""
 # pyright: reportPrivateUsage=false
 
 from typing import Any, cast
@@ -472,7 +467,7 @@ async def test_mock_channel_closed() -> None:
         pass
 
 
-# ── R1-S1/A1:创建竞态与二次收款防线 ──
+# ── 创建竞态与二次收款防线 ──
 
 
 async def test_create_payment_race_returns_open_payment(
@@ -481,7 +476,7 @@ async def test_create_payment_race_returns_open_payment(
     make_user: MakeUser,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """R1-A1:并发双击——条件插入被部分唯一索引拦(模拟返回 None)时,
+    """并发双击——条件插入被部分唯一索引拦(模拟返回 None)时,
     仍有在途单则幂等返回现有单(不新建/不重复审计),不甩 500。"""
     from kongming.billing.repository import SqlBillingRepo
 
@@ -521,7 +516,7 @@ async def test_cond_insert_unique_violation_converges(
     client: AsyncClient,
     session: AsyncSession,
 ) -> None:
-    """R1-A1(repo 级直证):PENDING 账单已有 CREATED 单时,不取消直接
+    """检查 PENDING 账单已有 CREATED 支付单时，不会再次创建支付单。
     条件插入→唯一违例经 SAVEPOINT 收敛 None(会话不被污染可续用)。"""
     from kongming.auth.seed import seed_all
     from kongming.billing.repository import SqlBillingRepo
@@ -561,7 +556,7 @@ async def test_cond_insert_unique_violation_converges(
 async def test_reconcile_invoice_not_pending_alerts(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-S1:极端并发(单已核销窗口账单被置 PAID)——CAS 照常成功,
+    """极端并发(单已核销窗口账单被置 PAID)——CAS 照常成功,
     联动失败落 payment.invoice_not_pending 告警审计(不静默)。"""
     _, token, _ = await _user_with_key(client, session, make_user, "pay_r2")
     tid = await _default_tenant_id(session)

@@ -1,8 +1,4 @@
-"""数据源凭证 AES-GCM 加解密(008 design D2,安全规则类测试先行)。
-
-格式 base64(iv[12B] ‖ ciphertext+tag) 与上游 CredentialEncryptor 逐字节同构;
-dev 缺省降级=固定 dev-only 密钥走真 round-trip(优于上游明文直通)。
-"""
+"""检查数据源凭证的 AES-GCM 加解密和开发环境回退密钥。"""
 
 import base64
 import os
@@ -41,7 +37,7 @@ def test_dev_fallback_when_key_missing() -> None:
     """密钥缺省 → 固定 dev-only 密钥降级,仍走真 AES-GCM round-trip(构造告警)。"""
     cipher = AesGcmCipher(None)
     enc = cipher.encrypt("pw")
-    assert enc != "pw"  # 非明文直通(上游曾明文降级,本变更收紧)
+    assert enc != "pw"
     assert cipher.decrypt(enc) == "pw"
     # 同进程同缺省密钥可互解(dev 环境间可重放,既定取舍)
     assert AesGcmCipher("").decrypt(enc) == "pw"
@@ -79,11 +75,7 @@ def test_get_cipher_cached_by_key() -> None:
 
 
 def test_lifespan_rejects_invalid_encrypt_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """非法 KM_DATASOURCE_ENCRYPT_KEY 启动期即拒(R1-S3/R2-N3:lifespan 试构造接线)。
-
-    cipher 试构造在 lifespan 的 yield 之前,异常即拒启(不触碰 DB/不跑 seed,
-    teardown 的池清理也不会执行,无跨 loop 锁绑定面)。
-    """
+    """验证非法 KM_DATASOURCE_ENCRYPT_KEY 会在应用 lifespan 启动时拒绝。"""
     from fastapi.testclient import TestClient
 
     from kongming.config import get_settings

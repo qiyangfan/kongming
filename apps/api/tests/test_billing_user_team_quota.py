@@ -1,7 +1,4 @@
-"""103 配额 scope 扩展 USER/TEAM 测试(测试先行,安全类):
-迁移 0046(CHECK 扩展/降级守卫/往返)/策略 CRUD 三分支校验/清单端点
-单授可取/网关判定多路叠加(TENANT→BOT→USER→TEAM)/TEAM 聚合联表
-三场景(聚合/换队跟随/删除零命中)/CALLS 仅 TENANT。"""
+"""覆盖用户和团队配额的校验、查询与组合判定。"""
 # pyright: reportPrivateUsage=false
 
 import asyncio
@@ -115,8 +112,7 @@ async def test_migration_0046_downgrade_roundtrip() -> None:
             ).scalar_one()
         )
         assert n == 2
-        # 回 head:契约复现,USER 行可再落(rollback 释放 count 查询的事务锁)
-        # head 与断言解耦(后续变更继续叠加迁移,不钉死具体版本号)
+        # 回滚查询事务后升级到当前 head,确认 USER 范围可再次写入。
         await session.rollback()
         await asyncio.to_thread(command.upgrade, cfg, "head")
         from alembic.script import ScriptDirectory
@@ -614,7 +610,7 @@ async def test_team_deleted_policy_zero_hit(
 async def test_calls_non_tenant_scopes_rejected_400(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """spec「CALLS 维度仅 TENANT 级」:BOT 已有 035 用例;USER/TEAM 级
+    """spec「CALLS 维度仅 TENANT 级」:BOT 已有用例覆盖;USER/TEAM 级
     CALLS 策略创建期一律 400。"""
     uid, _token, _ = await _user_with_key(client, session, make_user, "qt_c1")
     tid = await _default_tenant_id(session)

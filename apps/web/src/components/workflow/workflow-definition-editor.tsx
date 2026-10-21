@@ -1,7 +1,4 @@
-/* 工作流定义双态编辑器(107 task 2.4/2.5):单一数据源=一份定义对象,
-   画布/JSON 是它的两个投影;JSON 中画布暂不表达的形态明示原因并阻断切换
-   (停留 JSON 态,绝不静默丢字段);JSON 文本编辑形态保留为高级入口。
-   保存经 imperative handle 取当前投影的定义对象,端点/校验零变化。 */
+/* 工作流定义可在画布和 JSON 间编辑；画布无法表达的定义会留在 JSON 态，避免切换时丢字段。 */
 
 import { forwardRef, useCallback, useImperativeHandle, useState } from "react";
 import { Braces, TriangleAlert, Workflow } from "lucide-react";
@@ -35,9 +32,7 @@ export const WorkflowDefinitionEditor = forwardRef<
   WorkflowDefinitionEditorHandle,
   WorkflowDefinitionEditorProps
 >(function WorkflowDefinitionEditor({ initialDefinition, wfKey, version, errorText }, ref) {
-  // 打开即判定可表达性:不支持 → 直接落 JSON 态并明示原因(spec 回落场景)。
-  // 惰性初始化(评审修复:dagToCanvas 是全量解析,原在组件体顶层每渲染
-  // 重跑——JSON 态每个键击都白算一次,结果只在挂载时消费)
+  // 打开时一次判定画布可表达性并定初始形态;dagToCanvas 不随 JSON 输入重跑
   const [initialTo] = useState<DagToCanvasResult>(() => dagToCanvas(initialDefinition));
   const [mode, setMode] = useState<EditorMode>(initialTo.ok ? "canvas" : "json");
   const [definition, setDefinition] = useState<unknown>(initialDefinition);

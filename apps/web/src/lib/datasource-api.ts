@@ -1,5 +1,4 @@
-/* 数据源域 API 封装(008):类型全生成(ADR-005,禁手写)。
-   管理端点(/system/datasource/*)全局视角;options 为登录即可的用户面接口。 */
+/* 数据源域 API 封装:类型全生成(ADR-005,禁手写)。 管理端点(/system/datasource/*)全局视角;options 为登录即可的用户面接口。 */
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";

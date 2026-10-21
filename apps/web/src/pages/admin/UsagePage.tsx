@@ -1,8 +1,4 @@
-/* 用量观测页(038 agent-observability):LLM 调用/失败/延迟的可观测面板——
-   汇总卡 + 按天趋势(双轴:调用/失败 vs tokens)+ 模型×任务对比表 +
-   明细分页(四类筛选)+ trace 时间线对话框(LLM/工具/SQL 三路事件流)。
-   图表色板从设计 token 派生(铁律 6);类型全生成(ADR-005);
-   无 system:llm-usage:view 者接口层 403(nav/PermRoute 同源守卫)。 */
+/* 展示 LLM 调用、失败率、延迟和 tokens 的汇总、趋势、模型对比、明细及 trace 时间线。 */
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -57,7 +53,7 @@ function fmtTokens(v: number): string {
 
 const KIND_ICON = { LLM: Sparkles, TOOL: Wrench, SQL: Database } as const;
 
-// 事件类型中文(时间线黑话直出克星);未收录值回退原值
+// 时间线事件类型的中文展示;未收录值回退原值
 const KIND_LABELS: Record<string, string> = {
   LLM: "模型调用",
   TOOL: "工具",
@@ -74,7 +70,7 @@ const TOOL_STATUS_LABEL: Record<string, string> = {
   CONFIRM_EXPIRED: "确认过期",
 };
 
-// R1-B8:SQL verdict 与 LLM status 的中文映射(与 TOOL 同面)
+// SQL verdict 与 LLM status 的中文映射(与 TOOL 状态表同一族)
 const VERDICT_LABEL: Record<string, string> = {
   PASS: "通过",
   BLOCKED: "拦截",
@@ -159,12 +155,11 @@ export default function UsagePage() {
   const [status, setStatus] = useState("");
   const [traceId, setTraceId] = useState("");
   const [tenantId, setTenantId] = useState("");
-  // 077:出站协议筛选(openai/anthropic/responses)
   const [protocol, setProtocol] = useState("");
   const [page, setPage] = useState(1);
   const [timelineTrace, setTimelineTrace] = useState<string | null>(null);
 
-  // R1-B6:防抖值驱动查询(输入即时回显,查询 300ms 收敛)
+  // 防抖值驱动查询(输入即时回显,查询 300ms 收敛)
   const modelQ = useDebounced(model);
   const taskQ = useDebounced(task);
   const traceIdQ = useDebounced(traceId);
@@ -201,8 +196,8 @@ export default function UsagePage() {
     enabled: timelineTrace !== null,
   });
 
-  // 筛选收窄致末页越界自愈(007/009/014 同款范式)。
-  // R2-B2:筛选 onChange 已同步 setPage(1)(防抖值到达时 page 已归 1,
+  // 筛选结果变少后重新计算页码，避免显示空页。
+  // 筛选 onChange 已同步 setPage(1)(防抖值到达时 page 已归 1,
   // 单请求无「旧页一次+页 1 一次」双发窗口),此处不再挂回页 effect。
   useEffect(() => {
     if (list.data && list.data.rows.length === 0 && list.data.total > 0 && page > 1) {
@@ -210,7 +205,7 @@ export default function UsagePage() {
     }
   }, [list.data, page]);
 
-  // 040·11:筛选候选自 summary 维度行派生(去重排序;summary 本页已在拉)
+  // 模型/任务筛选项取自已加载的汇总数据,避免额外请求。
   const modelOptions = useMemo(
     () => Array.from(new Set((summary.data?.items ?? []).map((i) => i.model))).sort(),
     [summary.data],
@@ -243,7 +238,7 @@ export default function UsagePage() {
 
   const totalPages = Math.max(1, Math.ceil((list.data?.total ?? 0) / PAGE_SIZE));
 
-  /** 汇总卡数值加载/错误态折叠(R1-B3:loading 显 …、错误显 —,不逐卡 role=alert) */
+  /** 汇总卡数值加载/错误态折叠(loading 显 …、错误显 —,不逐卡 role=alert) */
   const usageStat = (v: string) => (summary.isLoading ? "…" : summary.isError ? "—" : v);
 
   return (
@@ -253,7 +248,7 @@ export default function UsagePage() {
         description="模型调用的用量、成败与延迟——看穿每一次问卦背后的开销。"
       />
 
-      {/* 汇总卡(R1-B3:卡级错误不逐卡 role=alert,数值降 …/— 示错;区块级错误条由消费区承载) */}
+      {/* 汇总卡(卡级错误不逐卡 role=alert,数值降 …/— 示错;区块级错误条由消费区承载) */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="总调用" value={usageStat(String(totals.calls))} />
         <StatCard label="Tokens 总量" value={usageStat(fmtTokens(totals.tokens))} />
@@ -261,7 +256,6 @@ export default function UsagePage() {
         <StatCard label="平均延迟" value={usageStat(formatDuration(totals.latAvg))} />
       </div>
 
-      {/* 趋势 */}
       <div className="rounded-lg border bg-card p-4">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-sm font-medium">按天趋势</h3>
@@ -288,7 +282,6 @@ export default function UsagePage() {
         )}
       </div>
 
-      {/* 模型×任务对比 */}
       <div className="rounded-lg border bg-card">
         <div className="border-b px-4 py-3">
           <h3 className="text-sm font-medium">模型 × 任务</h3>
@@ -365,11 +358,8 @@ export default function UsagePage() {
         />
       </div>
 
-      {/* 明细分页 */}
       <div className="rounded-lg border bg-card">
         <div className="flex flex-wrap items-end gap-3 border-b px-4 py-3">
-          {/* 040·11:模型/任务筛选换 Select——候选自既有 summary 响应派生
-              (每行自带 model/task 维度,纯前端零契约),消灭手拼精确匹配串 */}
           <div className="space-y-1">
             <Label className="text-xs">模型</Label>
             <Select
@@ -457,7 +447,7 @@ export default function UsagePage() {
                 ))}
               </SelectContent>
             </Select>
-            {/* R1-F2:listTenants 挂 user:manage(页面守卫是 llm-usage:view,
+            {/* listTenants 挂 user:manage(页面守卫是 llm-usage:view,
                 权限错配时 403)——失败显式禁用+提示,不静默 */}
             {tenants.isError && (
               <p role="alert" className="text-xs text-destructive">
@@ -540,7 +530,7 @@ export default function UsagePage() {
               key: "protocol",
               header: "协议",
               cellClassName: "text-muted-foreground",
-              // 077:null(存量行/旧版上报)展示「-」,不回算不推断
+              // null(存量行/旧版上报)展示「-」,不回算不推断
               render: (r) => r.protocol ?? "—",
             },
             {
@@ -578,7 +568,6 @@ export default function UsagePage() {
           actions={[
             {
               label: "时间线",
-              // 与原条件渲染同口径:无 trace_id 的行不渲染该操作
               isVisible: (r) => Boolean(r.trace_id),
               onSelect: (r) => {
                 if (r.trace_id) setTimelineTrace(r.trace_id);
@@ -595,7 +584,6 @@ export default function UsagePage() {
         />
       </div>
 
-      {/* 时间线对话框 */}
       <Dialog
         open={timelineTrace !== null}
         onOpenChange={(open) => !open && setTimelineTrace(null)}

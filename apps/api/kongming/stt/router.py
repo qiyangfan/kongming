@@ -1,8 +1,8 @@
-"""stt 路由(114):POST /chat/stt——语音转文字进输入框。
+"""stt 路由:POST /chat/stt——语音转文字进输入框。
 
 权限复用 chat:execute(问数输入能力族,零新权限点);multipart 音频,
 15MB 上限;即转即弃(不落盘不建附件行),操作审计仅记 action+size
-(音频与转写正文不进日志)。引擎不可用 → 503 明示配方(design D2
+(音频与转写正文不进日志)。引擎不可用 → 503 明示配方(
 可选启用形态)。
 """
 
@@ -47,8 +47,8 @@ async def transcribe_audio(
 ) -> dict[str, Any]:
     """语音转文字:音频 → 文本(即转即弃;前端填入输入框确认后发送)。"""
     audio = await file.read()
-    # 操作审计仅记 action+体积(音频与转写正文不进日志,114 design D4);
-    # 审计与业务同会话=同事务(007 组合模式)
+    # 操作审计仅记 action+体积(音频与转写正文不进日志);
+    # 审计与业务同会话=同事务(组合模式)
     await SqlOperLogRepo(session).add(
         str(user["sub"]),
         "chat.stt.transcribe",

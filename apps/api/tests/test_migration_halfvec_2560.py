@@ -1,5 +1,5 @@
 # pyright: reportPrivateUsage=false
-"""0058 halfvec(2560) 迁移测试(upgrade-rag-qwen3-halfvec-2560 任务 2.1/2.2)。
+"""0058 halfvec(2560) 迁移测试。
 
 覆盖:四列升级为 halfvec(2560)+HNSW halfvec_cosine_ops 索引(含两条部分
 索引谓词原样保留)、旧向量清空而原文保留、downgrade 恢复 vector(1536)

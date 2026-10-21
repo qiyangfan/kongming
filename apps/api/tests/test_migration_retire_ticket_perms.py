@@ -1,11 +1,5 @@
 # pyright: reportPrivateUsage=false
-"""0057 权限退役迁移测试(remove-ticket-domain 任务 2.1,安全规则类测试先行)。
-
-覆盖:两项 ticket 权限与角色绑定被精确删除;无关权限/角色绑定与历史
-sys_tool_audit 保留;升级后启动种子不重建;downgrade 仅还原权限行、
-不还原绑定(设计明示的回滚约束)。
-迁移演练走 conftest.migrated_tmp_db 一次性临时库(dropped 列占位零累积)。
-"""
+"""覆盖权限退役迁移的升级和回滚行为。"""
 
 import asyncio
 import uuid

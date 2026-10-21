@@ -1,6 +1,4 @@
-/* 语义层页(023,semantic-layer spec「语义层管理与权限」):
-   表关系(introspection 只读/manual 可增删+触发扫描)与指标口径(增删/
-   启停)双 Tab;权限点 system:semantic:manage。 */
+/* 管理表关系和指标口径；表关系可查看扫描结果或手动维护。 */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -54,21 +52,20 @@ export default function SemanticPage() {
   const [tab, setTab] = useState<"relations" | "metrics">("relations");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // 关系表单(040:表/列改知识条目候选下拉;join 键改键对行,替代手输「左=右」CSV)
+  // 关系表单:表/列取知识条目候选,join 键为键对行
   const [srcTable, setSrcTable] = useState("");
   const [tgtTable, setTgtTable] = useState("");
   const [joinPairs, setJoinPairs] = useState<{ left: string; right: string }[]>([
     { left: "", right: "" },
   ]);
-  // 指标表单
   const [mName, setMName] = useState("");
   const [mTpl, setMTpl] = useState("");
   const [mTerms, setMTerms] = useState("");
-  // 110:可见范围——DEPT 档仅归属部门集合内调用者注入
+  // 可见范围:DEPT 档仅注入给归属部门内的调用者
   const [mScope, setMScope] = useState<"ALL" | "DEPT">("ALL");
   const [mDeptId, setMDeptId] = useState("");
 
-  // 040:候选表清单=当前数据源知识条目(引用条目外的表后端 400 拒;后端页大小
+  // 候选表清单=当前数据源知识条目(引用条目外的表后端 400 拒;后端页大小
   // 上限 100,全页遍历取全,安全帽 5 页=500 表)
   const knowledge = useQuery({
     queryKey: ["semantic", "knowledge", ds],
@@ -102,11 +99,10 @@ export default function SemanticPage() {
     queryKey: ["semantic", "metrics", ds],
     queryFn: () => listMetrics(ds),
   });
-  // 110:DEPT 档归属部门候选(树接口拍平;仅 DEPT 档时拉取)
+  // DEPT 档归属部门候选(树接口拍平;仅 DEPT 档时拉取)
   const depts = useQuery({
     queryKey: ["depts", "tree"],
     queryFn: async () => {
-      // 生成契约类型(宪法⑤:禁手写 API 类型;评审修复)
       type DeptNode = components["schemas"]["DeptNodeOut"];
       const tree = await api.get<DeptNode[]>("/system/depts");
       const out: { id: string; name: string }[] = [];
@@ -150,7 +146,7 @@ export default function SemanticPage() {
       void qc.invalidateQueries({ queryKey: ["semantic", "relations", ds] });
     },
     onError: (e) => {
-      // 040 写边界闸 detail 映射(黑话禁入用户文案)
+      // 服务端错误码转用户文案
       const reason =
         e.message === "RELATION_TABLE_UNKNOWN"
           ? "引用的表不在知识条目中,请先在知识库扫描/上传该表"
@@ -193,7 +189,7 @@ export default function SemanticPage() {
         sql_template: input.m.sql_template,
         business_terms: input.m.business_terms,
         enabled: input.enabled,
-        // 110:启停带原值,不把 DEPT 档重置回 ALL
+        // 启停带原值,不把 DEPT 档重置回 ALL
         visible_scope: input.m.visible_scope,
         dept_id: input.m.dept_id,
       }),
@@ -207,7 +203,7 @@ export default function SemanticPage() {
       setDelTarget(null);
       void qc.invalidateQueries({ queryKey: ["semantic", "relations", ds] });
     },
-    // 审查循环 F3:失败零反馈=用户无从得知未删成;对话框内回显
+    // 删除失败也在对话框内回显,避免零反馈
     onError: (e) =>
       setDelTarget({
         kind: "rel",
@@ -350,7 +346,7 @@ export default function SemanticPage() {
               {
                 label: "删除",
                 destructive: true,
-                // R1-L4:仅手工行渲染删除(introspection 行只读)
+                // 仅手工行渲染删除(introspection 行只读)
                 isVisible: (r) => r.source === "manual",
                 onSelect: (r) => {
                   setDelTarget({ kind: "rel", id: r.id, name: r.source_table });
@@ -365,7 +361,7 @@ export default function SemanticPage() {
               </p>
             )}
             <div className="flex flex-wrap items-end gap-3">
-              {/* 040:表引用改知识条目下拉(展示业务别名,候选与后端存在性闸同源) */}
+              {/* 表引用取知识条目下拉,展示业务别名(候选与后端校验同源) */}
               <div className="space-y-1">
                 <Label className="text-xs">左表(知识条目)</Label>
                 <Select
@@ -614,7 +610,6 @@ export default function SemanticPage() {
                 header: "状态",
                 cardPriority: 2,
                 render: (m) => (
-                  // R1-L4:启停切换(upsert 带原值,不重置其他字段)
                   <Switch
                     checked={m.enabled}
                     disabled={toggleMetric.isPending}
@@ -712,7 +707,7 @@ export default function SemanticPage() {
         </div>
       )}
 
-      {/* 审查循环 F3:删除受控确认(全站同款)+失败行内可见 */}
+      {/* 删除受控确认,失败行内回显 */}
       <AlertDialog
         open={delTarget !== null && delTarget.id !== ""}
         onOpenChange={(open) => {
@@ -752,7 +747,7 @@ export default function SemanticPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 失败回显兜留框(错误时 id 已清,靠 open 语义保持可见) */}
+      {/* 删除失败回显框:错误时 id 已清空,靠 open 条件保持可见 */}
       <AlertDialog
         open={delTarget !== null && delTarget.id === "" && !!delTarget.error}
         onOpenChange={(open) => {

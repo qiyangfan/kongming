@@ -1,4 +1,4 @@
-"""061:X-Trace-Id 与请求级 trace_id 单源——自动化断言,不靠人工冒烟。"""
+"""X-Trace-Id 与请求级 trace_id 单源——自动化断言,不靠人工冒烟。"""
 
 from typing import Any
 
@@ -44,8 +44,7 @@ async def test_endpoint_sees_middleware_trace_id() -> None:
     async def _probe(request: Any) -> JSONResponse:
         return JSONResponse({"tid": ensure_trace_id()})
 
-    # 临时挂探针路由(仅测试内;不改生产路由表)。插在根级 Mount("")(adopt-
-    # mcp-sdk2 兜底挂载,位次最后)之前——append 会落 Mount 之后恒不可达
+    # 测试探针必须插在根级 Mount 前；追加到列表末尾会被 Mount 遮住。
     routes = _app.router.routes
     mount_idx = next(i for i, r in enumerate(routes) if type(r).__name__ == "Mount")
     routes.insert(mount_idx, Route("/__trace_probe", _probe))  # pyright: ignore[reportAttributeAccessIssue]

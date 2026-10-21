@@ -1,9 +1,5 @@
-"""report 用例(088):生成编排接入/版本化/乐观锁/刷新/导出/软删。
-
-数据真实原则落点:一切取数走既有执行链路(生成期在 agent 面经工具回调;
-刷新期走 internal.service.execute 全量防御——与 artifacts rerun 同源),
-本服务不持有任何旁路执行路径。状态迁移 fail-closed(models.transition)。
-"""
+"""报告生成、版本管理、刷新、导出和删除用例。取数始终经受控 SQL 执行端点,
+状态迁移由领域模型校验。"""
 
 import logging
 from datetime import UTC, datetime

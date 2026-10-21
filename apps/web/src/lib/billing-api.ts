@@ -1,5 +1,4 @@
-/* billing 域 API 封装(034)。类型契约由 ADR-005 管线生成(禁手写)。
-   035:支付闭环(创建/查询/取消/mock 模拟)+套餐 U/D+租户清单自供+账单分页。 */
+/* billing 域 API 封装:支付流程、套餐增删改查、租户/用户/团队/Bot 清单、策略绑定与账单分页。类型契约由 ADR-005 管线生成(禁手写)。 */
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";
@@ -27,7 +26,7 @@ export function getInvoiceDetail(id: string): Promise<InvoiceDetail> {
   return api.get<InvoiceDetail>(`/portal/invoices/${id}`);
 }
 
-/* ── 门户支付(035) ── */
+/* ── 门户支付 ── */
 
 export function createPayment(invoiceId: string): Promise<PaymentItem> {
   return api.post(`/portal/invoices/${invoiceId}/payments`, undefined);
@@ -86,7 +85,7 @@ export function listBillingBots(tenantId: string): Promise<BotBrief[]> {
 export type UserBrief = components["schemas"]["UserBriefOut"];
 export type TeamBrief = components["schemas"]["TeamBriefOut"];
 
-/** 103:USER/TEAM 级策略选择器清单(挂 billing:manage 自供,与 Bot 清单同解耦原则) */
+/** USER/TEAM 级策略选择器的候选清单(与 Bot 清单同由 billing 域提供) */
 export function listBillingUsers(tenantId: string): Promise<UserBrief[]> {
   return api.get<UserBrief[]>(`/billing/users?tenant_id=${tenantId}`);
 }

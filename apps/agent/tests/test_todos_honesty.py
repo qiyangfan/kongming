@@ -1,4 +1,4 @@
-"""058 多步 Todo 诚实账本纯函数测试(先红后绿)。"""
+"""验证多步 Todo 状态与完成条件。"""
 
 from __future__ import annotations
 

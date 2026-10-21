@@ -8,8 +8,7 @@ import {
 } from "./cron-schedule";
 import type { Schedule } from "./cron-schedule";
 
-/* cron 解析白名单锚(066.3.2):档位生成的表达式恒可反解(等价写法互通);
-   白名单外形态一律 null 走高级直通(fail-open),后端语义是唯一事实源。 */
+/* 验证预设 cron 可反解；白名单外的表达式返回 null，由后端负责校验。 */
 
 describe("scheduleToCron + parseCronToSchedule 往返", () => {
   const cases: Schedule[] = [

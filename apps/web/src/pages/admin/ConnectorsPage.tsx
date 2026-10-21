@@ -1,9 +1,4 @@
-/* 连接器管理页(099 http-connector-domain,web-admin spec「连接器管理页」):
-   列表(名称/key/方法与路径/鉴权形态与尾号掩码/启停/更新时间,DataView 双形态)+
-   新建/编辑表单(声明全集;凭证空框语义:编辑不回填、留空=不修改、填入=替换,
-   任何位置不展示明文)+ 启停 StatusSwitch + 删除受控确认(明示注入集即时失效)+
-   测试调用(显式 AlertDialog 确认后真实出站一次,展示状态码/摘要/耗时/失败分类)。
-   表单校验错误在表单上方结构化展示(服务端 400 明文原因)。 */
+/* 管理 HTTP 连接器的声明、凭证掩码、启停和测试调用；凭证只写入，不回显。 */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -243,8 +238,8 @@ export default function ConnectorsPage() {
   const runTest = useMutation({
     mutationFn: async () => {
       if (!testSnap) return null;
-      // 声明参数按名装配示例入参(string/number 原文提交,boolean 转 true/false;
-      // 缺省空值不携带——与 LLM 调用的入参形态一致)
+      // 声明参数按名装配入参:number 转数值(失败保留原文),boolean 转 true/false;
+      // 空值不携带——与 LLM 调用的入参形态一致
       const args: Record<string, unknown> = {};
       for (const a of testSnap.argNames) {
         const v = (testArgs[a.name] ?? "").trim();
@@ -424,7 +419,6 @@ export default function ConnectorsPage() {
         ]}
       />
 
-      {/* 新建/编辑对话框 */}
       <Dialog
         open={form !== null}
         onOpenChange={(o) => {
@@ -717,7 +711,6 @@ export default function ConnectorsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 删除受控确认(明示即时失效,spec 场景) */}
       <AlertDialog
         open={deleting !== null}
         onOpenChange={(o) => {
@@ -752,7 +745,6 @@ export default function ConnectorsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 测试调用:显式确认 → 真实出站一次 → 状态码/摘要/耗时/失败分类 */}
       <AlertDialog
         open={testSnap !== null}
         onOpenChange={(o) => {

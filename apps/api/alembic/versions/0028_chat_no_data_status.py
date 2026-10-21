@@ -1,6 +1,6 @@
-"""044:chat_message.status 增第四态 NO_DATA(知识未覆盖如实说明)。
+"""chat_message.status 增第四态 NO_DATA(知识未覆盖如实说明)。
 
-如实说明型回答(043 生成短路)既非执行失败亦非请求被拒——以 FAILED
+如实说明型回答(生成短路)既非执行失败亦非请求被拒——以 FAILED
 持久化会伪装成失败形态(错误横幅/历史误导)。第四态经 drop+re-add
 内联 CHECK 演进(列宽 VARCHAR(16) 恰容纳,存量行零触碰)。
 

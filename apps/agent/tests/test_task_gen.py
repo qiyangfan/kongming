@@ -1,5 +1,5 @@
 # pyright: reportArgumentType=false, reportPrivateUsage=false
-"""任务编排测试(090 task-kernel,剧本化:mock LLM/mock ApiClient/mock step_runner)。
+"""任务编排测试(task-kernel,剧本化:mock LLM/mock ApiClient/mock step_runner)。
 
 覆盖:规划→逐步执行→DONE 主链、证据驱动(无证据 FAILED)、审批挂起、
 预算 PAUSED、plan 409 续跑。FakeApi 鸭子型注入(run_task 形参声明为具体
@@ -303,7 +303,7 @@ async def test_finish_rejection_reports_failed_honestly() -> None:
 
 
 def test_step_outcome_rejects_unearned_pass() -> None:
-    """PASS 不算数的两种形态(090 证据/预算退出口径):finalize 对纯文本直答
+    """PASS 不算数的两种形态(证据/预算退出口径):finalize 对纯文本直答
     合成空结果集 PASS → 无工具执行证据 FAILED;轮次触顶兜底(带 error 键,
     即便途中有过真实结果集)→ 最终结论未产出 FAILED。"""
     pure_text: dict[str, object] = {

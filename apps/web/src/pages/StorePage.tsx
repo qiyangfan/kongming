@@ -1,6 +1,4 @@
-/* Bot 商店页(033 bot-store spec):关键词搜索+排序切换+Bot 卡片
- (名称/greeting/评分星/使用量/收藏心)+详情对话框(suggestions 点击即问)
- +收藏/评分交互。主布局导航项(非管理子页)。 */
+/* Bot 商店支持搜索、排序、查看详情、收藏和评分。 */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -86,7 +84,7 @@ export default function StorePage() {
     setAskBusy(bot.id);
     try {
       const out = await runStoreBot(bot.bot_key, question);
-      // R1-S2:直接展示应答正文(无会话不产生「去看对话」语义)
+      // 直接展示应答正文(无会话不产生「去看对话」语义)
       setAnswer((m) => ({
         ...m,
         [bot.id]: out.success ? out.summary || "(助手未返回内容)" : out.error || "运行失败",
@@ -217,7 +215,7 @@ export default function StorePage() {
       {/* 详情对话框 */}
       <Dialog open={detailKey !== null} onOpenChange={(o) => !o && setDetailKey(null)}>
         <DialogContent className="max-w-lg">
-          {/* R1-B4:DialogHeader 恒渲染(加载/错误态也有 Title,读屏可识别对话框) */}
+          {/* DialogHeader 恒渲染(加载/错误态也有 Title,读屏可识别对话框) */}
           <DialogHeader>
             <DialogTitle>{detail.data?.name ?? "助手详情"}</DialogTitle>
             <DialogDescription className="font-mono text-xs">
@@ -238,7 +236,7 @@ export default function StorePage() {
                     <Badge variant="secondary">我评 {detail.data.my_rating} 星</Badge>
                   )}
                 </div>
-                {/* 104:当前上架版本号与上架时间(纯增字段;商店语义=消费该版本快照) */}
+                {/* 当前上架版本号与上架时间(纯增字段;商店语义=消费该版本快照) */}
                 {detail.data.version_no !== null && detail.data.version_no !== undefined && (
                   <p className="text-xs text-muted-foreground">
                     上架版本 v{detail.data.version_no}

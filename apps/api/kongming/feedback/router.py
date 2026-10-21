@@ -1,4 +1,4 @@
-"""feedback 路由(014,薄适配层):提交端点挂 /chat 前缀(spec 既定路径),
+"""feedback 路由(薄适配层):提交端点挂 /chat 前缀(spec 既定路径),
 管理端点挂 /feedback 前缀。
 
 权限点:提交=chat:feedback:submit;处置=system:feedback:handle;
@@ -31,9 +31,7 @@ from kongming.feedback.service import (
 chat_router = APIRouter(prefix="/chat", tags=["chat"])
 router = APIRouter(prefix="/feedback", tags=["feedback"])
 
-# 070:_FeedbackSampleGate 组合根实现依赖下列真名——运行时导入(3.13 在函数
-# 签名定义时求值注解+except 子句动态取名;3.14 PEP 649 惰性注解曾把该 latent
-# bug 在测试 venv 掩盖,pyright 亦因类型检查态可见而静默——故此处必须运行时可解析)
+# 以下类型在请求处理时用于注解和异常分支，需在运行时导入。
 from kongming.rag.ports import EmbeddingError, EmbeddingPort, MemberTeamsReader  # noqa: E402
 from kongming.rag.repository import RagRepository  # noqa: E402
 from kongming.rag.service import RagService  # noqa: E402
@@ -42,17 +40,17 @@ from kongming.rag.service import RagService  # noqa: E402
 def get_feedback_service(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> FeedbackService:
-    """组合根:rag 客户端只服务 070 样本闸门(embedding + ctx 失效);
-    组合形态与 chat/router.get_rag_service 同构,组合根上移随 009 挂账⑧。"""
+    """组合根:rag 客户端只服务样本闸门(embedding + ctx 失效);
+    组合形态与 chat/router.get_rag_service 同构。"""
     from kongming.config import get_settings
     from kongming.rag.agent_callback import get_agent_rag_client
     from kongming.rag.cache import ContextCache
     from kongming.redis_client import get_redis
 
     client = get_agent_rag_client(get_redis())
-    # 098:仓储与缓存注入部署分词配置(缺省 simple 零回归)
+    # 仓储与缓存注入部署分词配置(未配置时缺省 simple)
     ts = get_settings().rag_fulltext_ts_config
-    # 102 伴生:成员关系只读端口(与 rag 组合根同款适配,一实例两处消费)
+    # 伴生:成员关系只读端口(与 rag 组合根同款适配,一实例两处消费)
     membership = _TeamMembershipAdapter(session)
     rag = RagService(
         RagRepository(session, ts_config=ts),
@@ -70,7 +68,7 @@ def get_feedback_service(
 
 
 class _TeamMembershipAdapter:
-    """102 伴生组合根适配器(与 rag/router 同款):成员团队集合只读窄端口,
+    """伴生组合根适配器(与 rag/router 同款):成员团队集合只读窄端口,
     实现=team 域 SqlTeamRepo 组合适配(只读消费,team 域零改动)。"""
 
     def __init__(self, session: AsyncSession) -> None:
@@ -83,21 +81,14 @@ class _TeamMembershipAdapter:
 
 
 class _FeedbackSampleGate:
-    """070:纠错样本启停组合根实现(FeedbackSampleGate 窄端口)。
-
-    - promote/disable 与反馈处置共用同一请求会话(同事务原子性,组合根
-      保证);仓储方法不自行 commit,由 FeedbackService.commit 收口;
-    - embedding 经 rag 客户端(与 009 回写同一出口);EmbeddingError → 本域
-      SamplePromotionUnavailable(503),晋升/停用失败不产生部分提交;
-    - 缓存失效:晋升/停用提交后按 (租户, 数据源) 精确失效 ctx 缓存。
-    """
+    """反馈样本启停端口的组合根实现，通过反馈仓储和向量化服务完成审核晋升。"""
 
     def __init__(
         self,
         repo: RagRepository,
         embedder: EmbeddingPort,
         rag: RagService,
-        member_teams: MemberTeamsReader | None = None,  # 102 伴生:样本可见集合
+        member_teams: MemberTeamsReader | None = None,  # 伴生:样本可见集合
     ) -> None:
         self._repo = repo
         self._embedder = embedder
@@ -118,7 +109,7 @@ class _FeedbackSampleGate:
             vector = (await self._embedder.embed([question]))[0]
         except EmbeddingError as e:
             raise SamplePromotionUnavailable(str(e)) from e
-        # 102 伴生:样本可见集合=反馈发起者所在团队(缺省/无端口=公共)
+        # 伴生:样本可见集合=反馈发起者所在团队(缺省/无端口=公共)
         visible_teams: list[str] = []
         if caller_user_id and self._member_teams is not None:
             visible_teams = sorted(await self._member_teams.team_ids_of_user(caller_user_id))
@@ -136,7 +127,7 @@ class _FeedbackSampleGate:
         await self._repo.disable_feedback_samples(feedback_message_id=feedback_message_id)
 
     async def evict(self, *, tenant_id: str, datasource_key: str) -> None:
-        """070 任务 3.6:晋升/停用提交后 ctx 缓存按租户+数据源精确失效。"""
+        """晋升/停用提交后 ctx 缓存按租户+数据源精确失效。"""
         await self._rag.evict_ctx(tenant_id, datasource_key)
 
 
@@ -211,8 +202,7 @@ class HandleOut(BaseModel):
     responses={
         503: {
             "description": (
-                "070:ADOPTED 晋升不可用(embedding 失败等);处置整体回滚,"
-                "detail=SAMPLE_PROMOTION_UNAVAILABLE"
+                "样例晋升所需处理不可用时整体回滚(detail=SAMPLE_PROMOTION_UNAVAILABLE)。"
             )
         }
     },
@@ -233,8 +223,7 @@ async def handle_feedback(
     except InvalidHandleStatus:
         raise HTTPException(status_code=400, detail="HANDLE_STATUS_INVALID") from None
     except SamplePromotionUnavailable:
-        # 070:ADOPTED 晋升不可用(embedding 失败等)——503,处置整体回滚
-        # (反馈状态/审计/query_history 无部分提交,契约显式声明)
+        # 样例晋升所需处理失败时整体回滚,不提交反馈状态、审计或 query_history。
         raise HTTPException(status_code=503, detail="SAMPLE_PROMOTION_UNAVAILABLE") from None
     except FeedbackNotFound:
         raise HTTPException(status_code=404, detail="FEEDBACK_NOT_FOUND") from None
@@ -340,7 +329,7 @@ class FeedbackPageItemOut(BaseModel):
     session_id: str
     user_id: str
     user_nickname: str | None
-    # 050(纯增):昵称缺失时前端回退登录用户名,禁渲染 id 片段
+    # 昵称缺失时前端回退登录用户名,禁渲染 id 片段
     user_username: str | None = None
     tenant_id: str
     tenant_key: str

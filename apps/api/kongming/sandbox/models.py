@@ -1,4 +1,4 @@
-"""sandbox 领域模型(027,零框架,宪法 Article II)。
+"""sandbox 领域模型,不依赖 Web 框架或数据库。
 
 状态四终态与 sys_sandbox_run CHECK 同值域;SandboxOutcome 是运行器与
 用例层之间的解耦形态(宿主侧事实:duration/exit_code 由运行器测定,
@@ -12,13 +12,13 @@ SandboxStatus = Literal["SUCCESS", "ERROR", "TIMEOUT", "RESOURCE_LIMIT"]
 
 ALL_STATUSES: tuple[str, ...] = ("SUCCESS", "ERROR", "TIMEOUT", "RESOURCE_LIMIT")
 
-# 与镜像内 runner 的协议行前缀(design D2);宿主只认最后一行
+# 与镜像内 runner 的协议行前缀;宿主只认最后一行
 PROTOCOL_PREFIX = "__KM_RESULT__"
 
 
 @dataclass(frozen=True)
 class SandboxOutcome:
-    """一次沙箱执行的宿主侧事实。images 为 base64 png(≤500KB/张,027 v1 仅末图)。"""
+    """一次沙箱执行的宿主侧事实。images 为 base64 png(≤500KB/张,v1 仅末图)。"""
 
     status: SandboxStatus
     stdout: str = ""

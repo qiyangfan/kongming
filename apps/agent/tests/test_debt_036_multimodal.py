@@ -1,6 +1,4 @@
-"""036 清偿包 agent 侧测试(测试先行):③vision 描述注入包裹/
-④纯图片问题意图分流(双信号判定+doc_answer 空 hints 直答)/
-⑦每模型图片上限闸。"""
+"""覆盖图片描述隔离、图片问答分流和模型图片上限。"""
 
 from typing import cast
 
@@ -86,7 +84,7 @@ def test_is_sql_intent_matrix() -> None:
     assert is_sql_intent("列出前 10 名客户")
     assert not is_sql_intent("这张图里哪个分类最高")
     assert not is_sql_intent("这张报表讲了什么")
-    # 通用量词不是强信号(问图高频;真链路冒烟抓回)
+    # 通用量词不足以判断为问数，是否询问图片内容由其他测试覆盖。
     assert not is_sql_intent("这张图里哪个分类最高?数量是多少?")
 
 
@@ -101,7 +99,7 @@ def test_route_image_question_to_doc_answer() -> None:
 
 
 def test_route_data_question_with_image_stays_generate() -> None:
-    """spec「带图数据问题零回归」:SQL 意图命中→generate(不分流)。"""
+    """spec「带图数据问题」:SQL 意图命中→generate(不分流)。"""
     state: dict[str, object] = {
         "question": "sakila 里有多少位客户",
         "has_attachments": True,
@@ -111,7 +109,7 @@ def test_route_data_question_with_image_stays_generate() -> None:
 
 
 def test_route_no_attachment_zero_regression() -> None:
-    """零回归:无附件且无文档命中→generate(024 原语义不变)。"""
+    """无附件且无文档命中→generate(原语义不变)。"""
     state: dict[str, object] = {"question": "随便聊聊", "has_attachments": False, "doc_hints": []}
     assert route_after_retrieve(state) == "generate"  # type: ignore[arg-type]
 

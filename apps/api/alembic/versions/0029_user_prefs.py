@@ -1,4 +1,4 @@
-"""059 user_prefs 一次建全(ADR-004)。
+"""user_prefs 一次建全(ADR-004)。
 
 Revision ID: 0029_user_prefs
 Revises: 0028_chat_no_data_status
@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
         sa.UniqueConstraint("user_id", "tenant_id", name="uq_user_prefs_user_tenant"),
     )
-    # user_memory category 值域补 NOTE/LEGACY(059;CHECK 与既有对齐扩展)
+    # user_memory category 值域补 NOTE/LEGACY(CHECK 与既有对齐扩展)
     # asyncpg 不允许多语句一次 prepare,拆两条
     op.execute(
         "ALTER TABLE public.user_memory DROP CONSTRAINT IF EXISTS user_memory_category_check"

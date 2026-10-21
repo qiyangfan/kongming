@@ -8,11 +8,7 @@ import {
   type CanvasGraph,
 } from "./workflow-canvas";
 
-/* 107 canvasState ⇄ DAG 互转性质测试:
-   1) 合法定义往返无损(逐字段 deep-equal,含键缺省形态:无 depends_on 键、
-      显式空 depends_on、config 键序);
-   2) 不支持形态白名单检出(未知节点类型/未知字段/非法 on/悬挂依赖…),
-      显式回落 JSON 态,绝不静默丢字段。 */
+/* 检查画布和 DAG 定义的无损互转，以及不支持的定义会明确拒绝转换。 */
 
 /** 构造无坐标干扰的图:入参定义 → 画布 → 回定义 */
 function roundTrip(definition: unknown): unknown {

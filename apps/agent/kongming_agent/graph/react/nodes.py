@@ -1,14 +1,7 @@
-"""ReAct 内核节点(019):react_llm(LLM 决策)→ tool_dispatch(回调执行)→ 循环。
+"""ReAct 决策与工具分发节点。
 
-纪律:
-- 观察截断:喂 LLM 的 tool 消息 rows 只带前 MAX_OBSERVE_ROWS 行(全量留
-  last_execution 供终态)——防大结果集打爆 token;
-- 参数畸形(args=None)不回调,直接作为错误观察喂回 LLM 自纠;
-- confirm_required 观察带「停止调用」指令,引导 LLM 终止循环说明待确认;
-- tool_call 流式事件经 emit_event(running→done/rejected 成对);
-- 终态字段与 8 节点图同构(execution/summary/generated_sql/retry_count),
-  _build_query_out 零改动复用。
-"""
+工具结果只向模型展示前 `MAX_OBSERVE_ROWS` 行,完整结果留给终态;
+参数无效时不调用工具,需确认的操作提示模型停止。"""
 
 import json
 import logging
@@ -66,7 +59,7 @@ async def react_llm(state: ReactState) -> dict[str, object]:
                 ),
             }
         ]
-    # 能力-契约一致(079):纪律段按注入工具集派生——空=无工具纪律段,
+    # 能力-契约一致:纪律段按注入工具集派生——空=无工具纪律段,
     # 全套件=历史逐字,裁剪集=不教模型调用未注入的工具
     _tools = state.get("tools") or []
     system_prompt = build_react_system(
@@ -81,7 +74,7 @@ async def react_llm(state: ReactState) -> dict[str, object]:
         task="REACT",
         trace_id=state.get("trace_id"),
         tenant_key=state.get("tenant_key"),
-        model_override=state.get("model_override") or None,  # 025
+        model_override=state.get("model_override") or None,
     )
     if reply.tool_calls:
         assistant_msg: dict[str, object] = {
@@ -115,13 +108,13 @@ async def tool_dispatch(state: ReactState) -> dict[str, object]:
     messages = list(state.get("messages") or [])
     calls = state.get("pending_tool_calls") or []
     rounds = state.get("rounds", 0) + 1
-    # 重复熔断(019 UI 冒烟实证):同 trace 内同工具同参数已成功过的调用,
+    # 重复熔断(UI 冒烟):同 trace 内同工具同参数已成功过的调用,
     # 不回调控制面(零副作用零审计噪音),直接观察引导 LLM 基于已有信息作答
     executed_sigs: set[str] = set(state.get("executed_sigs") or [])
     compute_values: list[float] = list(state.get("compute_values") or [])
     todo_items = todo_mod.todos_from_dicts(state.get("todos") or [])
     out: dict[str, object] = {"rounds": rounds, "pending_tool_calls": []}
-    # 多子目标建单(058):问句可保守拆出 ≥2 目标时落账;单目标不建(零回归)
+    # 多子目标建单:问句可保守拆出 ≥2 目标时落账;单目标不建
     if not todo_items:
         goals = todo_mod.split_goals(state.get("question") or "")
         if goals:
@@ -153,7 +146,7 @@ async def tool_dispatch(state: ReactState) -> dict[str, object]:
             }
             outcome_status = "rejected"
         elif call.name in ("compute_delta", "compute_share"):
-            # 057:确定性派生量本地执行(纯函数+本轮白名单),不回调控制面
+            # 确定性派生量本地执行(纯函数+本轮白名单),不回调控制面
             # 白名单含本轮同批 execute_sql 刚落库的结果(out.last_execution)
             obs, outcome_status, add_vals = _run_local_compute(call, state, compute_values, out)
             compute_values.extend(add_vals)
@@ -168,10 +161,10 @@ async def tool_dispatch(state: ReactState) -> dict[str, object]:
                 user_id=state.get("user_id"),
                 tool_name=call.name,
                 args=call.args,
-                channel=state.get("channel", "chat"),  # 025
+                channel=state.get("channel", "chat"),
             )
             if outcome.status == "confirm_required" and state.get("channel") == "task":
-                # add-graph-checkpoint:任务通道高危动作挂图(HITL 第三形态)——
+                # 任务通道高危动作挂图(HITL 第三形态)——
                 # 在途确认入状态,经 confirm_gate(interrupt)挂图上呈审批;
                 # 不喂观察不记账本(动作未执行),兑现观察由 tool_resolve 按决策回填
                 out["confirm_inflight"] = {
@@ -200,7 +193,7 @@ async def tool_dispatch(state: ReactState) -> dict[str, object]:
                 # 重复熔断只收「真成功」的调用:execute_sql 工具通道 status 恒为
                 # executed,SQL 层 verdict(PASS/BLOCKED/ERROR)在 result 内——
                 # BLOCKED/ERROR 的调用若入集,LLM 重发同一条 SQL 会收到
-                # 「已成功执行过」的假观察,诱导编造数据(审查循环 S1)
+                # 「已成功执行过」的假观察,诱导编造数据
                 result = outcome.result or {}
                 really_ok = (
                     str(result.get("verdict") or "PASS") == "PASS"
@@ -211,10 +204,10 @@ async def tool_dispatch(state: ReactState) -> dict[str, object]:
                     executed_sigs.add(sig)
                 if call.name == "execute_sql":
                     _capture_execution(out, call, outcome)
-                    # 057:成功结果数值入本轮白名单(多查询时 ERROR 不得抹掉先前数字)
+                    # 成功结果数值入本轮白名单(多查询时 ERROR 不得抹掉先前数字)
                     if really_ok:
                         compute_values.extend(_numeric_cells(out.get("last_execution")))
-        # 058:工具结果回写账本(成功且非空才 DONE;失败/空/不适用如实标记)
+        # 工具结果回写账本(成功且非空才 DONE;失败/空/不适用如实标记)
         todo_items = _apply_todo_for_outcome(
             todo_items, call, obs, outcome_status, empty=_is_empty_tool_result(obs)
         )
@@ -241,11 +234,11 @@ async def tool_dispatch(state: ReactState) -> dict[str, object]:
     return out
 
 
-# ── 图内确认点(任务通道;add-graph-checkpoint,HITL 第三形态)──
+# ── 图内确认点(任务通道;HITL 第三形态)──
 def confirm_gate(state: ReactState) -> dict[str, object]:
     """到达确认点即挂图:interrupt 抛出 → 检查点已落控制面,编排上报挂起。
     重入(批准/拒绝后 Command(resume) 恢复)时本节点从头重放——前置**零
-    副作用**(只读在途确认),interrupt() 直接返回决策值,不重发工具调用。"""
+    副作用**(只读在途确认),interrupt 直接返回决策值,不重发工具调用。"""
     inflight = state.get("confirm_inflight") or {}
     if not inflight:
         return {}  # 不可达(路由闸保证);防御空转
@@ -337,7 +330,7 @@ def _apply_todo_for_outcome(
     *,
     empty: bool = False,
 ) -> list[todo_mod.TodoItem]:
-    """工具结果 → 账本回写(058):只有真成功且非空才 DONE。"""
+    """工具结果 → 账本回写:只有真成功且非空才 DONE。"""
     if not todo_items:
         return todo_items
     success = outcome_status == "done" and str(obs.get("status") or "") == "executed"
@@ -366,11 +359,7 @@ def _turn_whitelist(
     compute_values: list[float],
     batch_out: dict[str, object] | None = None,
 ) -> list[float]:
-    """本轮数值白名单:结果集数值 ∪ stats ∪ compute 返回 ∪ 结构性常量。
-
-    batch_out 非空时优先取本批 tool_dispatch 刚捕获的 execute_sql 结果
-    (LLM 同批下「查数+计算」是常态,不能只看上轮 state)。
-    """
+    """构造当前问答可用的数值白名单：查询结果、统计值、计算工具返回值和结构性常量。"""
     execution: ExecutionResult | None = None
     if batch_out is not None:
         batch_exec = batch_out.get("last_execution")
@@ -405,7 +394,7 @@ def _run_local_compute(
     compute_values: list[float],
     batch_out: dict[str, object] | None = None,
 ) -> tuple[dict[str, object], str, list[float]]:
-    """compute_delta/compute_share 本地确定性执行(057)。
+    """compute_delta/compute_share 本地确定性执行。
 
     入参必须 ∈ 本轮白名单(结果/stats/既有计算值),否则拒绝并给纠正指引。
     """
@@ -513,12 +502,12 @@ def _capture_execution(
 def finalize(state: ReactState) -> dict[str, object]:
     execution = state.get("last_execution")
     rounds = state.get("rounds", 0)
-    # 轮次上限触顶(R1-S6:dispatch 后直接收束):未产出最终答案且轮次已满
+    # 轮次上限触顶(dispatch 后直接收束):未产出最终答案且轮次已满
     # → 强制终止结构化错误(spec)。早前轮次已成功的执行结果随终态携带
     # (error 优先呈现,rows 作参考;不再调 LLM 摘要——触顶不该再花一次
-    # 模型调用),部分结果不丢弃(A-B6)。
+    # 模型调用),部分结果不丢弃。
     if state.get("final_answer") is None and rounds >= Settings().max_tool_rounds:
-        # 058:预算退出不得批量改 DONE;未完成清单随错误文案披露
+        # 预算退出不得批量改 DONE;未完成清单随错误文案披露
         todo_items = todo_mod.mark_pending_on_budget_exit(
             todo_mod.todos_from_dicts(state.get("todos") or [])
         )
@@ -541,7 +530,7 @@ def finalize(state: ReactState) -> dict[str, object]:
         # 无 SQL 执行的纯文本回答:成功终态,空结果集
         execution = ExecutionResult(verdict="PASS", columns=[], rows=[])
     stats = compute_stats(execution.columns, execution.rows)
-    # 057:finalize 同口径数值审计(与 summarize 共用纯函数;不重试 LLM)。
+    # finalize 同口径数值审计(与 summarize 共用纯函数;不重试 LLM)。
     # 仅对有结果集/列的数据收口审计——纯文本(无执行)无数可审,原文通过
     # (否则「共有 4 件」等非结果数字会被整句剥空)。
     compute_values = state.get("compute_values") or []
@@ -569,7 +558,7 @@ def finalize(state: ReactState) -> dict[str, object]:
         "retry_count": rounds,
         "compute_values": compute_values,
     }
-    # 058:收口与账本一致(禁全称完成,披露未完成);无账本/全 DONE 零回归
+    # 收口与账本一致(禁全称完成,披露未完成);无账本/全 DONE 时断言原文放行
     todo_items = todo_mod.mark_pending_on_budget_exit(
         todo_mod.todos_from_dicts(state.get("todos") or [])
     )

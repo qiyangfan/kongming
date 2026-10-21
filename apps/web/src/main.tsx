@@ -12,11 +12,7 @@ import OAuthCallback from "@/pages/OAuthCallback";
 import { NotFoundPage } from "@/pages/error-pages";
 import "./index.css";
 
-/* 路由懒加载(066 体积治理):非首屏路由一律 lazy()+路由级 Suspense。
-   例外保持静态导入的两类:
-   - /login(未认证落地首屏,AuthenticationShell 直达)
-   - /bot/:botKey(公开嵌入入口,外站 iframe 直达,任何 chunk 瀑布都是转化损失)
-   其余页面(含 OAuthCallback/ChangePassword)均非常驻首屏,懒加载收益大于白检窗口。 */
+/* 首屏外路由懒加载；登录页与公开 Bot 嵌入页保持静态导入。 */
 
 const MemoryPage = lazy(() => import("@/pages/MemoryPage"));
 const ReportsPage = lazy(() => import("@/pages/ReportsPage"));
@@ -58,12 +54,12 @@ function RouteSuspenseFallback() {
   );
 }
 
-/** 路由级 Suspense 包装(沿用既有 RouteSuspenseFallback 范式,禁新建骨架件)。 */
+/** 路由级 Suspense 统一包装,骨架固定复用 RouteSuspenseFallback。 */
 function el(node: ReactNode): ReactNode {
   return <Suspense fallback={<RouteSuspenseFallback />}>{node}</Suspense>;
 }
 
-/* 4xx 客户端错误(401 已由刷新链路处理)重试无意义:只对 5xx/网络错误重试两次 */
+/* 不重试 4xx；401 已由令牌刷新处理，网络错误和 5xx 最多重试两次。 */
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -328,8 +324,7 @@ const router = createBrowserRouter([
     ],
   },
   {
-    // 025 发布渠道:免登录公开对话页——必须在认证壳外(AppLayout 的
-    // Protected 会把匿名访客踢去 /login,嵌入渠道核心场景不可用——审查循环 S1)
+    // 免登录公开对话页;必须位于认证壳外,否则 AppLayout 会把匿名访客重定向到 /login。
     path: "/bot/:botKey",
     element: <BotPublicPage />,
   },

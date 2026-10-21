@@ -1,8 +1,4 @@
-"""数据库基础设施:async engine/session + FastAPI 依赖。
-
-ADR-004 约定主键 UUID v7;生成器实现见 kongming/uuid7.py(纯函数模块),
-此处 re-export 维持既有 `from kongming.db import uuid7` import 路径不变。
-"""
+"""提供异步数据库引擎、会话工厂和 FastAPI 会话依赖，并重新导出 UUID v7 生成器。"""
 
 from collections.abc import AsyncIterator
 from functools import lru_cache
@@ -23,7 +19,7 @@ __all__ = ["get_engine", "get_sessionmaker", "get_session", "uuid7"]
 @lru_cache
 def get_engine() -> AsyncEngine:
     s = get_settings()
-    # 074:pool_pre_ping 检出前存活校验(对端掐断连接不再变成间歇 500);
+    # pool_pre_ping 检出前存活校验(对端掐断连接不再变成间歇 500);
     # 容量与换代周期可配,缺省 5/5/关 与历史行为零差异
     return create_async_engine(
         s.database_url,

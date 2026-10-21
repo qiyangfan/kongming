@@ -1,11 +1,7 @@
-"""toolcall 路由(019,tool-calling spec):
+"""工具执行、写操作确认与工具审计查询路由。
 
-- 内部面:POST /internal/tool/execute(全局内部令牌 middleware 守门,ADR-002);
-- 用户面:POST /chat/tool-confirm(写工具人工确认;chat:execute + 归属校验);
-- 管理面:GET /system/tools(注册表清单只读)+ GET /system/tools/audit/page
-  (system:tool:manage,行级可见性非 ALL 强制本人——014/015 同口径)。
-
-组合根:端口绑定在此(internal 执行路由适配/RagService 同源工厂/chat 仓储适配)。
+内部执行端点由内部令牌保护(ADR-002);确认与管理端点各自执行权限与
+归属校验。端口适配在此装配。
 """
 
 import logging
@@ -81,7 +77,7 @@ chat_router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 class _InternalSqlExecutor:
-    """execute_sql 工具委托:既有执行路由全链路(防火墙+data_scope+只读池)零复制。"""
+    """将 SQL 工具绑定到受控执行服务，复用防火墙、数据范围和只读校验。"""
 
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
@@ -117,13 +113,7 @@ class _InternalSqlExecutor:
 
 
 class _RagServiceAdapter:
-    """rag_retrieve 工具委托:既有三路召回(RagService.recall)。
-
-    零命中回退(019 实施期评估实证):召回 schema/history 双空时回退实时内省
-    ——与老链路 retrieve 节点「RAG 优先、内省兜底」同语义;ReAct 内核无独立
-    内省工具,工具内回退使新租户/未扫描知识的数据源零质量回归(否则 LLM
-    只能盲目探测 information_schema,评估实证循环打满上限)。
-    """
+    """将 rag_retrieve 工具绑定到 RAG 三路召回服务。"""
 
     def __init__(self, session: AsyncSession) -> None:
         self._svc = get_rag_service(session)
@@ -132,7 +122,7 @@ class _RagServiceAdapter:
     async def _enrich(
         self, tenant_key: str, datasource_key: str, question: str, schema_hint: str
     ) -> dict[str, object]:
-        """023 语义段组装(与 rag retrieve 端点同构;降级空串)。"""
+        """语义段组装(与 rag retrieve 端点同构;降级空串)。"""
         import re as _re
 
         from sqlalchemy import text as _text
@@ -176,8 +166,7 @@ class _RagServiceAdapter:
                 "schema_hint": ctx.schema_hint,
                 "history_sql": ctx.history_sql,
             }
-            # R1-M2:ReAct 链路语义段(与 /internal/rag/retrieve 同源组装;
-            # 此前 ReAct 主路径对语义层零收益)
+            # ReAct 工具执行也传入语义提示，内容与 /internal/rag/retrieve 共用同一组装逻辑。
             out.update(await self._enrich(tenant_key, datasource_key, question, ctx.schema_hint))
             return out
         from kongming.internal.meta import MetaSchemaIn, meta_schema
@@ -187,7 +176,7 @@ class _RagServiceAdapter:
                 MetaSchemaIn(tenant_key=tenant_key, datasource_key=datasource_key), self._s
             )
         except Exception:
-            # 内省失败降级空提示(不误导、不硬编码——与老链路内省失败同口径)
+            # 实时内省失败时返回空提示。
             log.warning("rag_retrieve 回退内省失败 tenant=%s ds=%s", tenant_key, datasource_key)
             return {"schema_hint": "", "history_sql": ""}
         out2: dict[str, object] = {
@@ -243,7 +232,7 @@ class _ChatReplyStore:
 
 
 class _GuardrailIntentReviewer:
-    """020 意图审核端口绑定:guardrail 域服务(独立短会话读配置)。"""
+    """意图审核端口绑定:guardrail 域服务(独立短会话读配置)。"""
 
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
@@ -274,7 +263,7 @@ class _GuardrailIntentReviewer:
 
 
 def _build_sandbox() -> SandboxService | None:
-    """027 组合根(design D6):enabled 且宿主 podman 可用才接 runner;
+    """组合根:enabled 且宿主 podman 可用才接 runner;
     否则 None(handler 收敛 ERROR「沙箱未启用」+审计,fail-closed 不裸 500)。
     模块级 import 安全:sandbox 域零副作用(podman 调用在运行期子进程)。"""
     settings = get_settings()
@@ -295,7 +284,7 @@ def _build_sandbox() -> SandboxService | None:
 
 
 def _build_mcp_service(session: AsyncSession) -> McpService:
-    """028:mcp 域服务装配(动态解析与出站执行共用同一服务实例)。"""
+    """mcp 域服务装配(动态解析与出站执行共用同一服务实例)。"""
     settings = get_settings()
     return McpService(
         SqlMcpRepo(session, get_cipher(settings.datasource_encrypt_key)),
@@ -305,12 +294,12 @@ def _build_mcp_service(session: AsyncSession) -> McpService:
 
 
 def _build_gateway() -> ToolGateway | None:
-    """094:网关域清单装配(各域注册条件独立判定;条件不满足的域不进
+    """网关域清单装配(各域注册条件独立判定;条件不满足的域不进
     清单=零感知)。清单/策略器/执行器三件齐备才注册;策略器缺失的域不注册
-    (fail-closed)。全部域条件均不满足 → None(无网关,既有路径零回归)。"""
+    (fail-closed)。全部域条件均不满足 → None(无网关,既有路径)。"""
     settings = get_settings()
     entries: list[dict[str, object]] = []
-    # websearch 域(094):供应商在注册表内 + API key 齐备两道条件;
+    # websearch 域:供应商在注册表内 + API key 齐备两道条件;
     # 端点/白名单由供应商单源派生(部署不可单独改端点)
     provider = (settings.websearch_provider or "").strip().lower()
     api_key = (settings.websearch_api_key or "").strip()
@@ -349,12 +338,12 @@ def _build_gateway() -> ToolGateway | None:
 
 @lru_cache(maxsize=1)
 def _get_gateway() -> ToolGateway | None:
-    """089:网关进程单例(停用集合跨请求一致;清单随部署配置,重启复位)。"""
+    """网关进程单例(停用集合跨请求一致;清单随部署配置,重启复位)。"""
     return _build_gateway()
 
 
 class _GatewayWebSearchClient:
-    """094 WebSearchPort 绑定:出站经网关切面(出口校验→限流→出站→脱敏→
+    """WebSearchPort 绑定:出站经网关切面(出口校验→限流→出站→脱敏→
     重试分类),本适配层只做域方言整形(检索卡观察形态);失败收敛
     WebSearchError(分发兜底 ERROR+审计)。"""
 
@@ -379,13 +368,13 @@ class _GatewayWebSearchClient:
 
 
 def _build_websearch_client() -> _GatewayWebSearchClient | None:
-    """094:供应商+API key 任一缺失 → 域不在清单 → None(工具不注册)。"""
+    """供应商+API key 任一缺失 → 域不在清单 → None(工具不注册)。"""
     gw = _get_gateway()
     return _GatewayWebSearchClient(gw) if gw is not None and gw.declared("websearch") else None
 
 
 class _McpDynamicResolver:
-    """028 DynamicToolResolver 绑定:快照命中 → fail-closed ToolDef。"""
+    """DynamicToolResolver 绑定:快照命中 → fail-closed ToolDef。"""
 
     def __init__(self, svc: McpService) -> None:
         self._svc = svc
@@ -409,7 +398,7 @@ class _McpDynamicResolver:
 
 
 class _ConnectorToolGate:
-    """099 ConnectorToolGate 绑定:启用连接器行 → fail-closed ToolDef;
+    """ConnectorToolGate 绑定:启用连接器行 → fail-closed ToolDef;
     出站执行经网关切面单域装配(出口校验→SSRF→出站→分类)。凭证仅在
     get_call_target(唯一明文出口)瞬时装配,不落日志/审计/任何响应。"""
 
@@ -473,7 +462,7 @@ class _ConnectorToolGate:
 
 
 class _McpToolCaller:
-    """028 McpToolCaller 绑定(出站执行经 mcp 域服务)。"""
+    """McpToolCaller 绑定(出站执行经 mcp 域服务)。"""
 
     def __init__(self, svc: McpService) -> None:
         self._svc = svc
@@ -485,13 +474,13 @@ class _McpToolCaller:
 
 
 def _build_connector_gate(session: AsyncSession) -> _ConnectorToolGate:
-    """099 装配缝(测试可 monkeypatch,与 _build_websearch_client 同构)。"""
+    """装配缝(测试可 monkeypatch,与 _build_websearch_client 同构)。"""
     return _ConnectorToolGate(session)
 
 
 def _get_service(session: Annotated[AsyncSession, Depends(get_session)]) -> ToolCallService:
     settings = get_settings()
-    mcp_svc = _build_mcp_service(session)  # 028
+    mcp_svc = _build_mcp_service(session)
     return ToolCallService(
         repo=SqlToolCallRepo(session),
         writer=ToolAuditWriter(),
@@ -500,14 +489,14 @@ def _get_service(session: Annotated[AsyncSession, Depends(get_session)]) -> Tool
         sql_executor=_InternalSqlExecutor(session),
         rag_retriever=_RagServiceAdapter(session),
         reply_store=_ChatReplyStore(session),
-        intent=_GuardrailIntentReviewer(session),  # 020 意图审核
-        sandbox=_build_sandbox(),  # 027
-        resolver=_McpDynamicResolver(mcp_svc),  # 028
-        mcp_caller=_McpToolCaller(mcp_svc),  # 028
-        websearch=_build_websearch_client(),  # 094(未配置=None)
-        websearch_quota=settings.toolgateway_websearch_quota,  # 094 域配额(独立分桶)
-        connector=_build_connector_gate(session),  # 099(行零感知=resolve None)
-        connector_quota=settings.toolgateway_http_quota,  # 099 域配额(独立分桶)
+        intent=_GuardrailIntentReviewer(session),  # 意图审核
+        sandbox=_build_sandbox(),
+        resolver=_McpDynamicResolver(mcp_svc),
+        mcp_caller=_McpToolCaller(mcp_svc),
+        websearch=_build_websearch_client(),  # 未配置时返回 None。
+        websearch_quota=settings.toolgateway_websearch_quota,  # 域配额(独立分桶)
+        connector=_build_connector_gate(session),  # 未配置连接器时解析结果为 None。
+        connector_quota=settings.toolgateway_http_quota,  # 域配额(独立分桶)
         rate_limit_per_minute=settings.tool_rate_limit_per_minute,
         confirm_ttl_minutes=settings.tool_confirm_ttl_minutes,
     )
@@ -537,7 +526,7 @@ class ToolExecuteIn(BaseModel):
     tool_name: str = Field(min_length=1, max_length=64)
     args: dict[str, object] = {}
     idempotency_key: str | None = Field(default=None, max_length=128)
-    # 025:渠道标记(审计可溯;agent 透传)
+    # 渠道标记(审计可溯;agent 透传)
     channel: str = Field(default="chat", max_length=24)
 
 
@@ -595,7 +584,7 @@ async def tool_execute(
 
 
 class ToolResolveConfirmIn(BaseModel):
-    """任务通道确认兑现载荷(add-graph-checkpoint;决策权威=任务域确认行,
+    """任务通道确认兑现载荷(graph-checkpoint;决策权威=任务域确认行,
     本端点只做兑换与全量复校)。"""
 
     tenant_key: str
@@ -662,7 +651,7 @@ async def tool_confirm(
         # 不存在/不属本人/会话不属本人同形 404(不暴露存在性)
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     except TenantBindingForbidden:
-        # R1-M3:确认时 L1 复校——挂起后用户被解绑租户,拒绝执行
+        # 确认时 L1 复校——挂起后用户被解绑租户,拒绝执行
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
     return ToolConfirmOut(
         status=_CONFIRM_OUT_STATUS[outcome.status],  # type: ignore[arg-type]
@@ -680,8 +669,8 @@ class ToolItemOut(BaseModel):
     perm_code: str
     write: bool
     require_confirm: bool
-    enabled: bool = True  # 注册表即启用集(配置化启停随运营诉求评估,挂账)
-    server_key: str | None = None  # 028:MCP 工具溯源(内置为 None)
+    enabled: bool = True  # 注册表即启用集(配置化启停随运营诉求评估)
+    server_key: str | None = None  # MCP 工具溯源(内置为 None)
 
 
 class ToolListOut(BaseModel):
@@ -705,7 +694,7 @@ async def list_tools(
         )
         for d in REGISTRY.values()
     ]
-    # 028:合并租户 MCP 动态工具(溯源 server_key);租户未绑定 → 仅静态集
+    # 合并租户 MCP 动态工具(溯源 server_key);租户未绑定 → 仅静态集
     tenant_id = await _mcp_tenant_or_none(user, session, x_tenant_id)
     if tenant_id is not None:
         mcp_svc = _build_mcp_service(session)
@@ -735,8 +724,7 @@ class ToolAuditItem(BaseModel):
     error_reason: str | None
     duration_ms: int | None
     datasource_key: str | None
-    # 089 裁决批准(2026-10-10 随批落地):域标签读面投影(存量行/内置工具
-    # 为 NULL→None);纯增可选,老客户端零回归
+    # 域标签读面投影(存量行/内置工具为 NULL→None);可选字段,老客户端兼容
     domain: str | None = None
     idempotency_key: str | None
     expires_at: datetime | None
@@ -769,7 +757,7 @@ def _audit_item(r: dict[str, object]) -> ToolAuditItem:
     )
 
 
-# ── 089 域治理面:清单摘要(不含凭证与白名单明细)+ 运行时启停(重启随部署清单复位)──
+# ── 域治理面:清单摘要(不含凭证与白名单明细)+ 运行时启停(重启随部署清单复位)──
 
 
 def _summary_ids(gw: ToolGateway | None) -> set[str]:
@@ -823,7 +811,7 @@ async def disable_domain(
     _: Annotated[None, Depends(require_perm("system:tool:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    """停用域(0044 持久化:本进程立即生效 + 写穿;重启与多副本以库收敛)。"""
+    """停用工具域并持久化;本进程立即生效。"""
     gw = _get_gateway()
     if gw is None or domain_id not in _summary_ids(gw):
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
@@ -844,7 +832,7 @@ async def enable_domain(
     _: Annotated[None, Depends(require_perm("system:tool:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    """启用域(0044 持久化,写穿口径同 disable)。"""
+    """启用工具域并持久化;本进程立即生效。"""
     gw = _get_gateway()
     if gw is None or domain_id not in _summary_ids(gw):
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
@@ -873,7 +861,7 @@ async def tool_audit_page(
     end: Annotated[datetime | None, Query()] = None,
 ) -> ToolAuditPageOut:
     viewer_id = str(user["sub"])
-    # 行级可见性(spec,014/015 同口径):非 ALL 角色强制本人(覆盖传值)
+    # 行级可见性(spec, 同口径):非 ALL 角色强制本人(覆盖传值)
     all_scope = await user_has_all_scope(session, viewer_id)
     effective_user = (None if user_id is None else str(user_id)) if all_scope else viewer_id
     items, total = await SqlToolCallRepo(session).page_audit(

@@ -1,10 +1,7 @@
-"""datasource 领域模型与领域错误(008):纯 dataclass,零框架依赖(宪法 Article II)。
+"""数据源领域模型和校验规则,只依赖 dataclass。
 
-注册边界(datasource spec「数据源注册与凭证加密」):
-- datasource_key 传输/领域同一 pattern(小写字母起头小写蛇形,2..64 位);
-- 保留字 default 禁注册(内置默认路径标识,不登记为 sys_datasource 行);
-- default_schema 须为合法 PG 未加引号标识符(小写折叠语义),防 search_path 注入;
-- key 与租户归属创建后不可改(编辑须提交原值)。
+key 使用 2–64 位小写蛇形格式，保留 default；schema 必须是合法的未加引号
+PG 标识符。创建后不能修改 key 或租户归属。
 """
 
 import re
@@ -78,7 +75,7 @@ def validate_key(datasource_key: str) -> None:
     """注册/编辑边界:key pattern + 保留字双闸(spec「保留字与非法 key 拒绝」→ 400)。
 
     fullmatch 而非 match:Python `$` 匹配尾换行前位置,`"default\\n"` 可绕过
-    match 版 pattern 与保留字集合双闸(R1-S2 实证)。
+    match 版 pattern 与保留字集合双闸。
     """
     if not DATASOURCE_KEY_PATTERN.fullmatch(datasource_key):
         raise InvalidDatasourceKey("数据源键须为小写蛇形(小写字母起头,2..64 位)")

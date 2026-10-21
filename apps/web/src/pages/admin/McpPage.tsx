@@ -1,8 +1,4 @@
-/* MCP 服务管理页(028 mcp-interop spec「配置管理」;109 扩展原语清单):
-   列表(启用态/工具数/同步态)+ 新建/编辑对话框(server_key 创建后不可改;
-   headers 键值对编辑——值掩码语义:编辑态留空=保持现值,清空=删除该键)+
-   启停 StatusSwitch + 删除受控确认 + 连通性测试/同步(行内结果)+
-   原语清单(工具/资源/模板分区)与模板只读预览(AlertDialog,实时拉取)。 */
+/* 管理 MCP 服务和工具、资源、模板；编辑时密钥留空表示保留，清空键值表示删除。 */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -56,7 +52,7 @@ type FormState = {
   endpoint: string;
   headers: HeaderRow[];
   removedKeys: string[]; // 编辑态删除的头键(提交时空串=服务端删除该键)
-  existingKeys: string[]; // 编辑态已有键(键名锁定,改名=并存陷阱 R1-T1)
+  existingKeys: string[]; // 编辑态已有键；键名锁定，避免改名后产生重复配置。
 };
 
 const EMPTY_FORM: FormState = {
@@ -77,7 +73,7 @@ export default function McpPage() {
   const [deleteError, setDeleteError] = useState("");
   const [rowNote, setRowNote] = useState<Record<string, string>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  // 109:原语清单(工具/资源/模板)与模板只读预览
+  // 原语清单(工具/资源/模板)与模板只读预览
   const [primitives, setPrimitives] = useState<McpServerOut | null>(null);
   const [previewing, setPreviewing] = useState<McpPromptEntryOut | null>(null);
   const [previewArgs, setPreviewArgs] = useState<Record<string, string>>({});
@@ -112,7 +108,7 @@ export default function McpPage() {
       }
       // 编辑:值留空=保持现值(null);删除的行=空串(服务端删除该键)
       const headers: Record<string, string | null> = {};
-      for (const k of form.removedKeys) headers[k] = ""; // 先删(R1-T1)
+      for (const k of form.removedKeys) headers[k] = ""; // 先删
       for (const h of form.headers) {
         if (h.key.trim()) headers[h.key.trim()] = h.value === "" ? null : h.value;
       }
@@ -136,12 +132,10 @@ export default function McpPage() {
       await setMcpServerEnabled(row.id, enabled);
     },
     onSuccess: (_d, v) => {
-      // R1-A9:成功清行内错误
       setToggleError((m) => ({ ...m, [v.row.id]: "" }));
       invalidate();
     },
     onError: (e, v) =>
-      // 012/008 范式:失败行内 role=alert,不只回弹
       setToggleError((m) => ({
         ...m,
         [v.row.id]: e instanceof Error ? e.message : "操作失败",
@@ -195,7 +189,6 @@ export default function McpPage() {
       serverKey: row.server_key,
       name: row.name,
       endpoint: row.endpoint,
-      // 掩码语义:键名回显,值留空=保持(028 spec)
       headers: row.header_keys.map((k) => ({ key: k, value: "" })),
       removedKeys: [],
       existingKeys: [...row.header_keys],
@@ -351,7 +344,7 @@ export default function McpPage() {
       <Dialog
         open={form !== null}
         onOpenChange={(o) => {
-          if (save.isPending) return; // 提交中不可关(013 同范式)
+          if (save.isPending) return; // 提交中不可关
           if (!o) setForm(null);
         }}
       >
@@ -371,7 +364,7 @@ export default function McpPage() {
                 <Input
                   id="mcp-key"
                   value={form.serverKey}
-                  disabled={form.id !== null} // 创建后不可改(008 同范式)
+                  disabled={form.id !== null} // 创建后不可改
                   onChange={(e) => setForm({ ...form, serverKey: e.target.value })}
                   placeholder="小写字母开头,如 fs"
                   className="font-mono"
@@ -486,7 +479,7 @@ export default function McpPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 删除确认(受控:成功才关,009 教训) */}
+      {/* 删除确认(受控:成功才关) */}
       <AlertDialog
         open={deleting !== null}
         onOpenChange={(o) => {
@@ -521,7 +514,7 @@ export default function McpPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 原语清单(109):工具/资源/模板分区;清单来自最近一次同步快照 */}
+      {/* 原语清单:工具/资源/模板分区;清单来自最近一次同步快照 */}
       <Dialog
         open={primitives !== null}
         onOpenChange={(o) => {
@@ -642,7 +635,7 @@ export default function McpPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 模板只读预览(109):按名实时拉取渲染结果,服务端已过注入检测+大小上限;
+      {/* 模板只读预览:按名实时拉取渲染结果,服务端已过注入检测+大小上限;
           只读展示,不注入任何提示词、非运行时提示来源 */}
       <AlertDialog
         open={previewing !== null}

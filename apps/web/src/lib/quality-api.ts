@@ -1,5 +1,4 @@
-/* 轮次质量观测域 API 封装(069 chat-quality-observability)。类型契约由
-   ADR-005 管线生成(禁手写);两端点同挂 system:chat-quality:view。 */
+/* 轮次质量观测域 API 封装。类型契约由 ADR-005 管线生成(禁手写);两端点同挂 system:chat-quality:view。 */
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";

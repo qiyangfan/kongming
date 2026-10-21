@@ -5,10 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { CardTitle } from "@/components/ui/card";
 
-/* CardTitle 标题语义守卫(change 2026-10-02-card-title-heading-semantics):
-   react-dom/server 静态渲染断言行为——默认输出 h3、as 各取值生效、
-   视觉配方 className 逐字节不回归。零 jsdom 零新依赖(design D4);
-   文件保持 .test.ts(vitest 网只收 .ts),用 createElement 书写不依赖 TSX。 */
+/* 用服务端渲染检查 CardTitle 的默认标题标签、自定义标签和 className 透传。 */
 
 const VISUAL_CLASS = "text-lg font-semibold leading-none tracking-tight";
 
@@ -31,8 +28,7 @@ describe("CardTitle 标题语义", () => {
   });
 
   it("视觉配方打底不丢,调用方附加类正常合并", () => {
-    /* 配方类与非冲突附加类合并后逐字节保留;同组冲突类(如 text-xl 对 text-lg)
-       按 cn/tailwind-merge 既有语义由调用方胜出,属组件外通用约定,不在本守卫钉。 */
+    /* 配方类与非冲突附加类合并后逐字节保留;同组冲突类(如 text-xl 对 text-lg) 按 cn/tailwind-merge 既有语义由调用方胜出,属组件外通用约定,不在本守卫钉。 */
     const html = render(createElement(CardTitle, { as: "h2", className: "mb-2" }, "登录"));
     expect(html).toBe(`<h2 class="${VISUAL_CLASS} mb-2">登录</h2>`);
   });

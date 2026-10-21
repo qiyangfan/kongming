@@ -1,14 +1,12 @@
-"""0026: trace 时间线索引(038 R1)
+"""为 trace 时间线查询添加索引。
 
 Revision ID: 0026
 Revises: 0025
 Create Date: 2026-08-25
 
-timeline 端点按 trace_id 查三表——sys_llm_usage/sys_sql_audit 此前无
-trace_id 索引、sys_tool_audit 仅有 PENDING_CONFIRM 部分索引,每次查询
-全表扫描,随审计数据线性增长确定性退化。补 (trace_id, created_at)
-复合索引(等值+时间序排序双覆盖)。空表/低量表瞬时。
-**downgrade**:删三索引。
+trace 时间线查询按 trace_id 筛选并按 created_at 排序，因此为三张审计表添加
+(trace_id, created_at) 复合索引。
+**downgrade**:删除三项索引。
 """
 
 from alembic import op

@@ -1,6 +1,4 @@
-/* 登录页(铁律样板):基础组件全 shadcn/ui,色值全语义/品牌 token,
-   品牌渐变为表现层(第 7 条豁免)但色值仍从 token 派生。
-   联邦按钮数据驱动(/auth/options):未配置的 provider 不渲染(ADR-006)。 */
+/* 登录方式由 /auth/options 返回；未配置的身份提供商不会显示。 */
 
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
@@ -17,8 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { FormRow } from "@/components/form-row";
 
-/* 品牌 mark 数据驱动(ADR-006 品牌条款):simple-icons 覆盖 GitHub/Google/微信系;
-   钉钉/飞书 simple-icons 未收录,按例外条款内联官方 mark(单品牌缺失豁免)。 */
+/* 使用 simple-icons 中已有的品牌图标；缺少独立图标时使用官方标志。 */
 import { siGithub, siGoogle, siWechat, type SimpleIcon } from "simple-icons";
 
 function simpleMark(icon: SimpleIcon) {

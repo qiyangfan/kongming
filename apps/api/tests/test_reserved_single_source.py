@@ -1,7 +1,4 @@
-"""067 保留表清单单源化:对象恒等 + 三态拦截 + 防误伤 + 引擎窄清单降级。
-
-安全规则类(config.yaml rules)测试先行:先红后绿。
-"""
+"""覆盖保留表清单共享、引擎判定和降级行为。"""
 
 from types import SimpleNamespace
 

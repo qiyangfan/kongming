@@ -144,7 +144,7 @@ RESERVED_PASS = [
     "WITH g AS (SELECT 1) SELECT * FROM g",
     "WITH top5 AS (SELECT id FROM goods LIMIT 5) SELECT * FROM top5",
     "SELECT * FROM generate_series(1, 3)",
-    "SELECT * FROM tenant_default.query_history",  # 业务库同名表不误伤(009 D14)
+    "SELECT * FROM tenant_default.query_history",  # 业务库中的同名表不应被拦截
     "SELECT * FROM tenant_sakila.table_descriptions",
 ]
 
@@ -160,7 +160,7 @@ def test_reserved_tables_cases() -> None:
 
 
 def test_reserved_list_is_authoritative_members() -> None:
-    """067:清单成员收编 skill_/user_prefs(与 api 历史拦截行为对齐)。"""
+    """清单成员收编 skill_/user_prefs(与 api 历史拦截行为对齐)。"""
     from liannu import rules
 
     assert "skill_" in rules.RESERVED_TABLE_PREFIXES
@@ -170,7 +170,7 @@ def test_reserved_list_is_authoritative_members() -> None:
 
 
 def test_reserved_names_cover_platform_output_tables() -> None:
-    """092 纵深:平台产出表(judge_*/report 族)任何路径形态按名拒读——
+    """纵深:平台产出表(judge_*/report 族)任何路径形态按名拒读——
     动态源误指平台库时 scope 白名单(public)拦不住,名单是最后一道。"""
     assert "judge_" in RESERVED_TABLE_PREFIXES
     for name in ("report", "report_section", "report_version"):

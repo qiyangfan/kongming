@@ -1,14 +1,6 @@
-"""飞书插件(003):v2 端点 app 凭证直换 user token,无需预取 app_access_token
-(ADR-006「预取」为旧 v1 端点路径,演进注记见 ADR-006)。
+"""飞书 OAuth 接入。授权支持 PKCE；后端通过 v2 token 接口换取用户令牌，再读取用户资料。
 
-协议形态(官方文档核验 2026-08-17):
-- 授权 URL 标准形态(accounts.feishu.cn),官方支持 PKCE(S256)→ pkce=True
-- v2 token:POST /authen/v2/oauth/token,JSON 体 client_id/client_secret/code
-  (PKCE 时带 code_verifier)→ authlib 仅构造授权 URL,token/profile httpx 直写
-- user_info:GET /authen/v1/user_info,Bearer user_access_token → data 对象
-- external_id 用 union_id(跨应用稳定标识),不用 open_id;username 取 en_name 兜底 name
-- email 无验证语义:不入管线(email_verified 恒 False,永不走 email 关联)
-"""
+以 union_id 作为跨应用用户标识，用户名优先取 en_name；未验证的邮箱不参与账号关联。"""
 
 from typing import cast
 
@@ -62,7 +54,7 @@ class FeishuProvider(OAuthProviderBase):
             "client_id": s.feishu_app_id or "",
             "client_secret": s.feishu_app_secret or "",
             "code": code,
-            # 官方标注"可选",但授权阶段携带 redirect_uri 时换取必带(实测 20029→缺参报错,2026-08-17)
+            # 授权请求包含 redirect_uri 时,换取 token 也必须携带该参数。
             "redirect_uri": self.redirect_uri(s),
         }
         if code_verifier is not None:

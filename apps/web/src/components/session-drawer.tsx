@@ -1,7 +1,4 @@
-/* 会话抽屉(mobile-experience B2.3):窄屏会话列表唯一出口。
-   内容仅会话列表 + 新建对话——主导航不进抽屉(归 BottomNav 承载);
-   会话交互与宽屏侧栏同源(同一 SessionSidebar 单源,新建/切换/删除一致)。
-   触发入口由对话区页头放置(ChatPage md:hidden 页头)。 */
+/* 窄屏会话列表由此抽屉承载；主导航仍由 BottomNav 提供，入口位于对话页头。 */
 
 import { useState } from "react";
 import { Link } from "react-router";

@@ -1,9 +1,5 @@
-"""judge 评审对象取数(092,任务 2.4):报告/任务/协作经 api 查询端点、
-文本回答经问答链路(persist=false)——只读,评审对象零写副作用(spec)。
-
-对象清单形态(抽检层):按创建时间倒序取最新 N 个;存量不足取全量;
-类型空缺=空清单如实记录(门禁口径:不计失败)。
-"""
+"""Judge 评审对象读取器:五类对象按最新优先抽样;报告/任务/协作/圆桌走
+API 只读查询,文本回答以 persist=false 生成。"""
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false, reportMissingParameterType=false, reportPrivateUsage=false
 
 import asyncio
@@ -26,7 +22,7 @@ from kongming.evalj.models import (
 _TEXT_LIMIT = 6000  # 送 judge 的产出正文截断(评审摘要而非全文重放)
 _TIMEOUT = 60.0
 
-# 文本回答评审题面(知识/融合各一;093 落地后融合答天然入清单)
+# 文本回答评审题面: (问题, 类型) 对,类型=知识/融合
 ANSWER_QUESTIONS: tuple[tuple[str, str], ...] = (
     ("退货政策是什么?", "知识"),
     ("逾期费是怎么规定的?片库里租金最贵的影片租金是多少?", "融合"),
@@ -42,8 +38,8 @@ class ObjectClient:
         self._headers = {"Authorization": f"Bearer {token}"}
 
     async def _get(self, path: str) -> dict[str, object]:
-        """GET + JSON 收窄(非对象响应=端点契约破坏,显式失败——静默空对象
-        会让四类对象集体变空清单,门禁假绿)。"""
+        """GET 并收窄为 dict;非对象响应=端点契约破坏,显式失败——
+        静默空对象会让四类对象集体变空清单,门禁假绿。"""
         async with httpx.AsyncClient(base_url=self._base, timeout=_TIMEOUT) as c:
             r = await c.get(path, headers=self._headers)
             r.raise_for_status()
@@ -72,7 +68,7 @@ def _json_short(value: object, limit: int) -> str:
 
 
 async def fetch_report_objects(client: ObjectClient, limit: int) -> list[JudgeObject]:
-    """报告评审对象:最新报告的标题+章节正文(088 交付物;READY/PARTIAL 均评)。"""
+    """报告评审对象:最新报告的标题+章节正文(交付物;READY/PARTIAL 均评)。"""
     data = await client._get(f"/reports?page=1&size={max(limit, 1)}")
     items = _dict_list(data.get("items"))
     out: list[JudgeObject] = []
@@ -100,10 +96,12 @@ async def fetch_report_objects(client: ObjectClient, limit: int) -> list[JudgeOb
 
 
 async def fetch_task_objects(client: ObjectClient, limit: int) -> list[JudgeObject]:
-    """任务评审对象:最新 DONE 任务的 goal+证据化步骤账本(090 交付物)。
-    字段严格按 /tasks/{{id}} 契约(TaskDetailOut:goal/status 在 task 嵌套内,
-    步骤=goal/status/evidence;该契约无「最终结论」字段,不虚构——评审输入
-    必须真实,近空文本会让判定失真)。"""
+    """任务评审对象:最新 DONE 任务的 goal+步骤账本(交付物)。
+
+    字段按 /tasks/{id} 契约(TaskDetailOut:goal/status 在 task 嵌套内,
+    步骤=goal/status/evidence);契约无「最终结论」字段,不虚构——
+    近空文本会让评审判定失真。
+    """
     data = await client._get("/tasks?page=1&size=50&status=DONE")
     items = _dict_list(data.get("items"))
     out: list[JudgeObject] = []
@@ -144,10 +142,12 @@ async def fetch_task_objects(client: ObjectClient, limit: int) -> list[JudgeObje
 
 
 async def fetch_collab_objects(client: ObjectClient, limit: int) -> list[JudgeObject]:
-    """协作评审对象:最新 DONE 任务的协作 run(091 账本)。字段严格按
-    CollabRunOut 契约:run 级=topology/status/verdict/depth(无 goal/conclusion
-    顶层字段——目标经 step_id 映射步骤 goal);worker 级=subgoal/bot_key/
-    status/conclusion(dict,JSON 化喂入,不 str() 成 Python repr)。"""
+    """协作评审对象:最新 DONE 任务的协作 run(账本)。
+
+    字段按 CollabRunOut 契约:run 级=topology/status/verdict/depth
+    (无 goal/conclusion 顶层字段,目标经 step_id 映射步骤 goal);
+    worker 级=subgoal/bot_key/status/conclusion(dict,JSON 化喂入,不 str() 成 Python repr)。
+    """
     data = await client._get("/tasks?page=1&size=50&status=DONE")
     items = _dict_list(data.get("items"))
     out: list[JudgeObject] = []
@@ -191,19 +191,16 @@ async def fetch_collab_objects(client: ObjectClient, limit: int) -> list[JudgeOb
 
 
 # 圆桌对象资格 = 运行终态且有轮次转写。DONE=共识收口;FAILED=未共识/无证据
-# 的诚实收口(恰是「分歧诚实/收敛效率」最有信息量的样本);PARTIAL=未开桌
-# 诚实失败(现态零转写,无对辩可评,经 turns 非空闸剔除)。评审单元是 run
-# (转写自含问题+发言+判定),宿主任务的后续步骤是否被预算饿死与对辩质量
-# 无关,不以任务终态为门槛(115 决策;与 092「DONE 任务」口径分叉:task/
-# collab 的交付物是步骤产出,圆桌是收口转写本身)。CANCELLED/RUNNING = 未
-# 完成旧账,不评。
+# 的诚实收口(「分歧诚实/收敛效率」最有信息量的样本);PARTIAL 可能零转写,
+# 无对辩可评的由 turns 非空闸剔除。评审单元是 run(转写自含问题+发言+判定),
+# 不以宿主任务终态为门槛(交付物口径分叉:task/collab 评步骤产出,圆桌评
+# 收口转写本身)。CANCELLED/RUNNING 未完成,不评。
 _ROUNDTABLE_ELIGIBLE = frozenset({"DONE", "FAILED", "PARTIAL"})
 
 
 async def fetch_roundtable_objects(client: ObjectClient, limit: int) -> list[JudgeObject]:
-    """圆桌评审对象(115):拓扑形态为 roundtable 且运行已诚实收口的协作
-    run。装配轮次转写(发言/弃权/判定按序)供 rubric 评共识质量/分歧诚实/
-    证据接地/收敛效率;字段严格按 CollabRunOut 契约(turns 为查询面扩展)。"""
+    """圆桌评审对象:roundtable 拓扑且运行已诚实收口的协作 run,装配轮次
+    转写(发言/弃权/判定按序)供 rubric 评共识质量/分歧诚实/证据接地/收敛效率。"""
     # 取最新任务窗口(端点 size 上限 100):窗口外的圆桌 run 不在采样域,
     # 语义=「近期收口抽检」而非全量清点
     data = await client._get("/tasks?page=1&size=100")
@@ -243,8 +240,8 @@ async def fetch_roundtable_objects(client: ObjectClient, limit: int) -> list[Jud
                 if worker_no == 0:
                     who = "主席"
                 else:
-                    # 归属优先行内标签/角色(有效名册压缩编号,拓扑下标不可
-                    # 反推——P2-1 同口径);异形序号如实标 #?,不伪装主席
+                    # 归属优先行内标签/角色(worker_no 是名册压缩编号,拓扑下标
+                    # 反推不出身份);异形序号如实标 #?,不伪装主席
                     label = str(cd.get("label") or "") or (
                         f"#{worker_no}" if worker_no is not None else "#?"
                     )
@@ -286,10 +283,8 @@ async def fetch_roundtable_objects(client: ObjectClient, limit: int) -> list[Jud
 async def fetch_answer_objects(
     tenant: str, limit: int, datasource_key: str = "sakila"
 ) -> list[JudgeObject]:
-    """文本回答评审对象:经问答链路现跑题面(persist=false,零业务落库)——
-    与 eval 生成侧同路径;回答正文+来源即评审对象(093 知识/融合答)。
-    连接目标由 conftest 模块级 API_BASE 单源(评估器同进程同目标,无第二入口)。"""
-    from conftest import call_chat  # 评估器既有链路调用(persist=false)
+    """通过 persist=false 的 /chat/query 获取文本回答评审对象，不写入业务数据。"""
+    from conftest import call_chat  # 复用 persist=false 的问答调用。
 
     out: list[JudgeObject] = []
     for question, kind in ANSWER_QUESTIONS:

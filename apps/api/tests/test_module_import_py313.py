@@ -1,16 +1,6 @@
 # pyright: reportPrivateUsage=false
-"""070 防回归:feedback 组合根在注解求值语义下可导入(3.13 事故固化)。
-
-背景:容器(Python 3.13)import 时 kongming.feedback.router 在
-_FeedbackSampleGate.__init__ 签名注解处 NameError——RagRepository 等只在
-TYPE_CHECKING 块导入。测试 venv(3.14,PEP 649 惰性注解)把该 bug 完全掩盖,
-pyright 亦因类型态可见而静默。本测试以 3.13 语义静态固化:模块源码中
-TYPE_CHECKING 不得出现"运行时取用的名字"。
-
-判据(有牙齿,不是摆设):解析模块 AST;凡是在函数签名默认值/注解、except
-子句、装饰器、基类等"定义时即求值"位置出现的 Name,必须能在非
-TYPE_CHECKING 的 import 语句中解析到。
-"""
+"""回归测试：在 Python 3.13 的注解求值语义下检查反馈路由可导入，
+避免运行时签名引用只在 TYPE_CHECKING 中导入的名称。"""
 
 import ast
 import builtins

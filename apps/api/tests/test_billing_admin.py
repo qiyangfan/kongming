@@ -1,4 +1,4 @@
-"""035 套餐 U/D、租户清单自供、管理面账单分页测试(测试先行)。"""
+"""覆盖套餐管理、租户选择和账单分页。"""
 # pyright: reportPrivateUsage=false
 
 from httpx import AsyncClient
@@ -175,4 +175,4 @@ async def test_admin_invoices_pagination(
     ids1 = {i["id"] for i in body["items"]}
     ids2 = {i["id"] for i in r2.json()["items"]}
     assert not ids1 & ids2  # 翻页不重复
-    assert "payment_status" in body["items"][0]  # 035:支付状态列(无单 null)
+    assert "payment_status" in body["items"][0]  # 支付状态列(无单 null)

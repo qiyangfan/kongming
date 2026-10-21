@@ -1,15 +1,4 @@
-"""0019: triggers-webhooks 域两表(031)
-
-Revision ID: 0019
-Revises: 0018
-Create Date: 2026-08-24
-
-sys_trigger_definition:触发器;type/target_type VARCHAR+CHECK;
-webhook_path 随机 UUID 全局唯一(防枚举);secret_cipher AES-GCM;
-next_fire_at 预计算(调度扫描用)。
-sys_trigger_run:触发历史;status 三态 CHECK(SUCCESS/FAILED/SKIPPED)。
-**downgrade**:删两表(新域零存量)。
-"""
+"""新增触发器定义与运行记录表，包含随机 webhook 路径、加密密钥和预计算的下次触发时间。"""
 
 from alembic import op
 

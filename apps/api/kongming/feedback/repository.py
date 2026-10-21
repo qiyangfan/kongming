@@ -1,7 +1,7 @@
-"""feedback 仓储(014):chat_message 反馈列读写 + 统计/分页 SQL(FeedbackRepo 端口实现)。
+"""feedback 仓储:chat_message 反馈列读写 + 统计/分页 SQL(FeedbackRepo 端口实现)。
 
 纪律:归属判定收口(不存在与越权同形 None);审计复用 auth 域 SqlOperLogRepo
-(同会话=同事务,007 组合模式);统计口径 Asia/Shanghai 固定时区分桶(spec)。
+(同会话=同事务,组合模式);统计口径 Asia/Shanghai 固定时区分桶(spec)。
 """
 
 from sqlalchemy import text
@@ -15,12 +15,12 @@ from kongming.feedback.models import OverviewData
 class FeedbackRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
-        self._oper = SqlOperLogRepo(session)  # 审计与业务同会话=同事务(007 组合模式)
+        self._oper = SqlOperLogRepo(session)  # 审计与业务同会话=同事务(组合模式)
 
     # ============ 提交面 ============
 
     async def find_bound_tenant(self, *, user_id: str, tenant_key: str) -> str | None:
-        """显式租户白名单复校(单一真理源 kongming.tenant,B1-B10 收口)。"""
+        """显式租户白名单复校(委托单一实现 kongming.tenant)。"""
         return await tenant.bound_tenant_id(self._s, user_id=user_id, tenant_key=tenant_key)
 
     async def find_default_tenant(self, *, user_id: str) -> tuple[str, str] | None:
@@ -80,7 +80,7 @@ class FeedbackRepository:
         corrected_sql: str | None,
     ) -> None:
         """覆盖写反馈列;comment/corrected_sql 传 service 三态合并后的最终值。
-        重复提交=重新待处置(R1-O2):同步清空处置三列(handler/handle_time/
+        重复提交=重新待处置:同步清空处置三列(handler/handle_time/
         handle_note),防「新 PENDING + 陈旧处置者」组合。"""
         await self._s.execute(
             text(
@@ -97,7 +97,7 @@ class FeedbackRepository:
     async def recent_user_question_before(
         self, *, session_id: str, message_created_at: object
     ) -> str | None:
-        """同会话该消息之前最近一条 user 问句(created_at 严格早于,id DESC tiebreak)。"""
+        """查找同一会话中创建时间早于目标消息的最近一条 user 问句；时间相同时按 id 倒序。"""
         v = (
             await self._s.execute(
                 text(
@@ -116,7 +116,7 @@ class FeedbackRepository:
     async def user_has_scope_all(self, *, user_id: str) -> bool:
         """角色集含 data_scope=ALL 即 True(无角色 None→False,降级收紧)。
 
-        未启用角色的 data_scope 不兑现——与 datascope.user_role_scopes 同闸(086)。
+        未启用角色的 data_scope 不兑现——与 datascope.user_role_scopes 同闸。
         """
         v = (
             await self._s.execute(
@@ -134,7 +134,7 @@ class FeedbackRepository:
         self, *, message_id: str, vis_user_id: str | None, require_feedback: bool = False
     ) -> dict[str, object] | None:
         """处置/涉及表归属(vis 非 None 强制本人会话);返回消息全要素。
-        require_feedback=True(处置路径,R1-O1)限定已反馈的 assistant 消息,
+        require_feedback=True(处置路径)限定已反馈的 assistant 消息,
         防对任意消息处置产生「状态非 NONE 但 feedback_time 空」的幽灵行;
         涉及表定位维持宽松(零反馈消息的 SQL 也可定位)。"""
         row = (

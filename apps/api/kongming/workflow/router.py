@@ -1,9 +1,9 @@
-"""workflow 路由(029,薄适配层):/system/workflow/* 端点族。
+"""workflow 路由(薄适配层):/system/workflow/* 端点族。
 
 定义管理挂 system:workflow:manage;运行挂 workflow:execute(节点级防御
 以触发者身份逐层复校——无权限放大);租户解析与 chat 同构(跨域装配
 先例:toolcall/bot router)。组合根:sql=internal execute 适配(异常
-翻译与 026 ExecuteRunner 同范式);http=HttpNodeRunner;agent=019 回调
+翻译与 ExecuteRunner 同范式);http=HttpNodeRunner;agent=回调
 (工具集=触发者权限点过滤,channel="workflow")。
 """
 
@@ -44,7 +44,7 @@ EXECUTE = "workflow:execute"
 
 
 async def _member_roles(session: AsyncSession, user_id: str) -> dict[str, str]:
-    """032:用户团队角色映射(team_id→role,可见性判定用)。"""
+    """用户团队角色映射(team_id→role,可见性判定用)。"""
     from kongming.team.repository import SqlTeamRepo
 
     return await SqlTeamRepo(session).role_map(user_id=user_id)
@@ -54,7 +54,7 @@ async def _member_roles(session: AsyncSession, user_id: str) -> dict[str, str]:
 
 
 class InternalSqlRunner:
-    """SqlRunner 绑定:internal 执行全链路(六层防御,触发者身份)。"""
+    """绑定 internal SQL 执行服务，并沿用触发者身份校验。"""
 
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
@@ -80,7 +80,7 @@ class InternalSqlRunner:
                 limit=1000,
             )
         except (InvalidDatasource, TenantNotFound, TenantBindingForbidden) as e:
-            # 竞态/非法源收敛(与 026 ExecuteRunner 同范式)
+            # 竞态/非法源收敛(与 ExecuteRunner 同范式)
             return {"verdict": "BLOCKED", "reason": str(e), "columns": [], "rows": []}
         return {
             "verdict": r.verdict,
@@ -91,7 +91,7 @@ class InternalSqlRunner:
 
 
 class AgentWorkflowRunner:
-    """AgentRunner 绑定:019 ReAct 回调;工具=触发者权限点过滤集。"""
+    """AgentRunner 绑定:ReAct 回调;工具=触发者权限点过滤集。"""
 
     def __init__(self, session: AsyncSession, agent: AgentClient) -> None:
         self._s = session
@@ -119,7 +119,7 @@ class AgentWorkflowRunner:
                 tools=tools,
                 bot_system_prompt="",
                 model=None,
-                channel="workflow",  # 029 审计溯源
+                channel="workflow",  # 审计溯源
             )
         except Exception as e:  # noqa: BLE001  # 节点级收敛(fail-fast 由引擎定)
             return {"success": False, "error": str(e)[:200]}
@@ -188,7 +188,7 @@ class WorkflowRunIn(BaseModel):
 
 
 class WorkflowDefOut(BaseModel):
-    """029 工作流定义条目(审查循环 D-F2:契约化;definition 为自由 JSON)。"""
+    """工作流定义条目;definition 为自由 JSON。"""
 
     id: str
     wf_key: str
@@ -481,8 +481,7 @@ async def get_run(
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> WorkflowRunItemOut:
-    """run 详情(029⑤ 清偿):完整节点快照含 outputs(列表剥除防膨胀,
-    详情按需取);可见性与分页列表同口径。"""
+    """返回工作流运行详情；可见范围与分页列表一致。"""
     tenant_id, _ = await _tenant_or_403(user, session, x_tenant_id)
     try:
         r = await svc.get_run(

@@ -1,4 +1,4 @@
-"""审计查询全栈测试(audit spec 015 delta,安全规则类测试先行)。
+"""审计查询全栈测试。
 
 SQL 审计/操作日志分页筛选+倒序+详情完整 sql_text;行级可见性(非 ALL
 强制本人,传值被覆盖;详情 403 同形);无权限 403。真实 PG。
@@ -214,15 +214,13 @@ async def test_oper_page_no_perm_403(
     assert r.status_code == 403
 
 
-# ============ ip 链路(015,contextvars 横切) ============
+# ============ 请求 IP 与操作日志 ============
 
 
 async def test_oper_log_ip_recorded_from_request(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """015 ip 链路:经 HTTP 请求的管理操作,sys_oper_log.ip=client host
-    (httpx ASGITransport scope client=("127.0.0.1", port));调用点零改动
-    (contextvar 横切)。"""
+    """通过管理请求验证操作日志记录 contextvar 中的客户端 IP。"""
     from kongming.auth.seed import seed_all
     from kongming.config import get_settings
 
@@ -271,7 +269,7 @@ async def test_oper_log_ip_none_without_request_context(
     assert ip is None
 
 
-# ============ 敏感参数脱敏锁定(R1-S5,audit spec) ============
+# ============ 敏感参数脱敏锁定(audit spec) ============
 
 
 async def test_reset_password_detail_never_contains_password(

@@ -1,9 +1,4 @@
-"""内部元数据通道动态源测试(008 internal-meta delta,测试先行)。
-
-动态源限 default_schema 单 schema 内省;非法 key 同形 400(防探测);
-保留表排除与默认路径同一判定;内省走动态池连接(不越出目标库)。
-默认路径零回归由 test_internal_meta.py 既有用例兜底。
-"""
+"""覆盖动态数据源的单 schema 内省、归属校验和保留表过滤。"""
 
 from collections.abc import AsyncIterator
 from typing import Any

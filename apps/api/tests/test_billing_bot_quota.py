@@ -1,6 +1,4 @@
-"""035 Bot 维度配额测试(测试先行,安全类):BOT 级超限 429 归因/Bot 级与
-租户级独立/跨租户 scope_ref 404/同组合 upsert 唯一/零命中放行/CALLS
-维 BOT 级拒配。"""
+"""覆盖 Bot 配额隔离、组合判定和限额拒绝。"""
 # pyright: reportPrivateUsage=false
 
 from httpx import AsyncClient
@@ -127,7 +125,7 @@ async def test_bot_quota_zero_hit_pass(
 async def test_bot_deleted_policy_zero_hit_401(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """spec「Bot 被删除后其策略保留但零命中」(R1-A5):删除 Bot→api-key
+    """spec「Bot 被删除后其策略保留但零命中」:删除 Bot→api-key
     失效(JOIN 不上)→ 401 非 429,BOT 策略行残留不级联。"""
     _, token, _ = await _user_with_key(client, session, make_user, "bq_d1")
     bot_id, api_key = await _make_bot_and_key(client, token, tag="d1")

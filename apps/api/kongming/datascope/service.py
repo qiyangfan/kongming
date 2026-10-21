@@ -1,4 +1,4 @@
-"""data_scope 意图计算:纯逻辑,零框架依赖(宪法 Article II)。
+"""data_scope 意图计算:纯逻辑,不依赖 Web 框架或数据库。
 
 沿用上游「领域只产意图」分层:输入有效 scope 上下文 + 目标列存在性,
 输出 ScopeFilter;改写与探测分别在 rewrite/repository。
@@ -28,11 +28,7 @@ def most_permissive(scopes: Iterable[str]) -> str:
 
 
 def unsupported_reason(ctx: ScopeContext) -> str | None:
-    """无需列信息即可判定的 fail-closed 原因(CUSTOM 空集合 / 未知值);None=可继续。
-
-    单点判据:applier 在「主表不可定位→降级」之前先问它——CUSTOM 空集合若走到
-    降级分支就漂成了不过滤(fail-open,spec 明令禁止)。
-    """
+    """返回可直接判定的拒绝原因，例如 CUSTOM 部门集为空或范围值未知；返回 None 表示可以继续检查。"""
     scope = ctx.data_scope
     if scope not in PERMISSIVENESS:
         return f"未知 data_scope 值: {scope}"

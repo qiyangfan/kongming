@@ -1,18 +1,4 @@
-"""0023: mock 支付网关与配额 scope 扩展(035)
-
-Revision ID: 0023
-Revises: 0022
-Create Date: 2026-08-24
-
-sys_payment:支付单(状态机 CREATED→PAID/CANCELLED/EXPIRED;每账单
-仅一张在途单=部分唯一索引);
-sys_quota_policy:扩 scope(TENANT/BOT)/scope_ref(BOT=bot_id,CHECK
-互斥),唯一索引重建为表达式形态(COALESCE 消 NULL 不参与判等);
-sys_llm_usage:扩 bot_id/seq(bot 渠道请求内同步采集归属与幂等),
-存量行按 trace_id 分区 ROW_NUMBER 回填 seq 后建 (trace_id,seq)
-部分唯一索引。
-**downgrade**:逆向(索引形态还原 0022)。
-"""
+"""新增支付单并扩展配额范围；为 Bot 用量记录归属与幂等序号。降级会恢复配额索引形态。"""
 
 from alembic import op
 
@@ -86,7 +72,7 @@ DROP INDEX IF EXISTS ux_llm_usage_trace_seq;
 ALTER TABLE public.sys_llm_usage DROP COLUMN IF EXISTS bot_id;
 ALTER TABLE public.sys_llm_usage DROP COLUMN IF EXISTS seq;
 DROP INDEX IF EXISTS ux_sys_quota_policy_dim;
--- 审查循环 B3:BOT scope 行与 TENANT 行可同维度,先清 BOT 行再回建
+-- BOT 和 TENANT 范围可同时存在同维度策略，先删除 BOT 行再回建。
 -- 三列唯一索引,否则 down 在 23505 上失败(非幂等)
 DELETE FROM public.sys_quota_policy WHERE scope = 'BOT';
 CREATE UNIQUE INDEX ux_sys_quota_policy_dim

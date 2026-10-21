@@ -1,7 +1,4 @@
-/* 节点配置侧栏表单(107 task 2.2):六类型必填配置与既有定义契约一一对齐
-   (字段集 = models.py _REQUIRED_CONFIG ∪ 可选键,不加新语义),shadcn 标准件
-   拼装;缺必填/JSON 语法等本地提示仅作 UX,结构校验语义仍在服务端;服务端
-   校验错误经 configKey 定位到具体字段。 */
+/* 表单字段对应服务端定义；本地提示只辅助填写，最终校验由服务端执行，错误按 configKey 定位到字段。 */
 
 import { useState, type KeyboardEvent, type ReactNode } from "react";
 import { Trash2 } from "lucide-react";
@@ -27,9 +24,7 @@ import { NODE_TYPE_ICONS } from "./workflow-canvas-types";
 
 type FieldKind = "text" | "textarea" | "select" | "json" | "number";
 
-/** 下拉面板(体内容器):Backspace/Delete 不上冒——Radix SelectContent
-    portal 到 body,不在画布容器 .nokey 豁免区内,展开态按键曾误删画布
-    选中节点(评审修复);本表单两处下拉(字段/条件 on)共用此包装。 */
+/** 下拉展开时阻止 Backspace/Delete 传到画布，避免误删已选节点。 */
 function CfgSelectContent({ children }: { children: ReactNode }) {
   const swallow = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Backspace" || e.key === "Delete") e.stopPropagation();
@@ -232,8 +227,7 @@ export function NodeConfigForm({
 
   const fieldError = (f: FieldSpec): string | null => {
     if (serverError?.configKey === f.key) return serverError.message;
-    // 仅必填字段的缺省报「必填」(评审修复:原对任何缺失键一律报错,可选
-    // 字段挂着「(可选)」标签却恒显必填错误,自相矛盾)
+    // 只对必填字段报缺省错误;可选字段带「(可选)」标签,恒报必填会自相矛盾
     if (f.required && !(f.key in config)) return `${f.key} 为必填配置`;
     return null;
   };
@@ -359,7 +353,7 @@ export function NodeConfigForm({
             setIdDraft(e.target.value);
           }}
           onBlur={() => {
-            // 提交时机=失焦/回车(评审修复:逐键即时改名会更换 key={节点id} 的
+            // 提交时机=失焦/回车(逐键即时改名会更换 key={节点id} 的
             // 表单挂载,每键焦点丢失,多字符改名实际不可用);非法草稿回退现值
             if (idDraft !== nodeId && idError === null) onIdChange(idDraft);
             else setIdDraft(nodeId);

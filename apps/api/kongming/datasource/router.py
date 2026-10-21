@@ -1,11 +1,5 @@
-"""datasource 路由(薄适配层,008):/system/datasource/* 端点族。
-
-datasource 域独立 router(URL 前缀与 system 域同族不同包,design D7)。
-管理端点(page/create/update/enable/disable/delete/test)全挂
-require_perm("system:datasource:manage"),全局视角(X-Tenant-Id 无语义);
-options 为登录即可的用户面例外(消费 X-Tenant-Id,与 chat 租户白名单同构)。
-领域错误在此统一映射状态码(404 不存在 / 409 冲突 / 400 参数与领域规则)。
-"""
+"""数据源管理与选项查询路由。管理操作需要 `system:datasource:manage`,选项查询
+登录即可并按请求租户范围过滤;领域错误在路由层映射为对应 HTTP 状态码。"""
 
 import logging
 import uuid
@@ -86,8 +80,7 @@ class DatasourceCreateIn(BaseModel):
 
 
 class DatasourceUpdateIn(BaseModel):
-    """编辑全量表单语义;key/tenant_id 须提交原值(不可改,领域校验 400);
-    password 不传=不改(留空语义)。"""
+    """全量更新数据源配置;key 和 tenant_id 不可修改,密码为空或未提交时保持原值。"""
 
     datasource_key: str = Field(min_length=1, max_length=64)
     tenant_id: uuid.UUID
@@ -249,7 +242,7 @@ async def update_datasource(
         password=req.password,
         default_schema=req.default_schema,
         readonly=req.readonly,
-        # 039:连接信息变更级联失效建议缓存(组合根绑定请求会话,同事务)
+        # 连接信息变更级联失效建议缓存(组合根绑定请求会话,同事务)
         suggestion_evictor=_SuggestionEvictor(session),
     )
 
@@ -271,7 +264,7 @@ async def delete_datasource(
     svc: Service,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    # 009:删除同步失效 rag 检索缓存(缓存为 fail-open 基础设施,失效尽力而为)
+    # 删除后失效 RAG 缓存；失效失败只记录告警，不回滚删除。
     from kongming.rag.cache import ContextCache
     from kongming.redis_client import get_redis
 
@@ -279,15 +272,15 @@ async def delete_datasource(
         actor_id=str(user["sub"]),
         ds_id=str(ds_id),
         ctx_evictor=ContextCache(get_redis()).evict,
-        # 023:语义层级联(与删除同事务;组合根绑定请求会话)
+        # 语义层级联(与删除同事务;组合根绑定请求会话)
         semantic_cleaner=_SemanticCleanerAdapter().bind(session),
-        # 039:建议缓存级联失效(与删除同事务,不留孤儿行)
+        # 建议缓存级联失效(与删除同事务,不留孤儿行)
         suggestion_evictor=_SuggestionEvictor(session),
     )
 
 
 class _SemanticCleanerAdapter:
-    """023 组合根:级联清理走请求会话(与删除同事务)。"""
+    """组合根:级联清理走请求会话(与删除同事务)。"""
 
     def __init__(self) -> None:
         self._session: AsyncSession | None = None
@@ -304,7 +297,7 @@ class _SemanticCleanerAdapter:
         await SqlSemanticRepo(self._session).delete_by_datasource(
             tenant_id=tenant_id, datasource_key=datasource_key
         )
-        # 024:文档同域级联(chunks 经 FK CASCADE 随 documents 清)
+        # 文档同域级联(chunks 经 FK CASCADE 随 documents 清)
         from kongming.rag.documents_repo import SqlDocumentRepo
 
         await SqlDocumentRepo(
@@ -313,7 +306,7 @@ class _SemanticCleanerAdapter:
 
 
 class _SuggestionEvictor:
-    """039 组合根:建议缓存级联失效走请求会话(与变更/删除同事务)。"""
+    """组合根:建议缓存级联失效走请求会话(与变更/删除同事务)。"""
 
     def __init__(self, session: AsyncSession) -> None:
         self._s = session

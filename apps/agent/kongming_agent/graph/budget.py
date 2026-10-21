@@ -1,16 +1,5 @@
-"""生成提示词装配预算(080-prompt-assembly-budget):字符分档估算 + 分段优先级收敛。
-
-设计纪律(proposal What Changes 2/3/4):
-- **不可切段**:系统提示纪律段与本轮问句 SHALL NOT 被截(正确性与安全性不用
-  成本换);selfheal 喂回段与哨兵引导同理保留完整(自愈语义属正确性);
-- **证据段**(表结构/术语/示例/few-shot/语义/记忆)按优先级从尾部丢弃,且
-  **首位豁免**——schema/history 首位=最高相关命中,砍它等于自废召回;
-- **估算保守、零第三方分词器**(tech-stack 锁栈;精确计数对此用途是过度工程);
-- 收敛后仍超预算 → PromptBudgetExceeded(如实失败分支,可归因),
-  SHALL NOT 静默删不可切段。
-
-零框架、零 IO 纯函数模块(import-linter 契约覆盖);调用方=nodes.generate。
-"""
+"""按优先级压缩生成提示词。系统规则、用户问题、自愈反馈和哨兵提示不得截断;
+证据段从低优先级尾部移除,首位最高相关命中保留。压缩后仍超预算抛 PromptBudgetExceeded。"""
 
 import math
 from dataclasses import dataclass, field
@@ -76,7 +65,7 @@ def _drop_tail(text: str, keep_head: int) -> tuple[str, int]:
 def converge(segments: list[Segment], budget_tokens: int) -> BudgetResult:
     """按优先级收敛分段至预算内(纯函数)。
 
-    - 总估算 ≤ 预算:原样返回(调用方装配结果逐字不变——零回归锚);
+    - 总估算 ≤ 预算:原样返回(调用方装配结果逐字不变——锚);
     - 超限:按 priority 升序裁剪(行级段从尾部逐行丢、头部豁免;整段段直接丢),
       每轮重估,低于预算即停;
     - 全部可切段裁完仍超限:PromptBudgetExceeded(不可切段超预算)。

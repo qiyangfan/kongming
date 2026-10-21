@@ -1,8 +1,4 @@
-/* 工作流画布面板(107 task 2.1/2.2):左侧节点面板(六类拖拽或点击放置)、
-   中央 React Flow 画布(连线表达 depends_on、Shift 框选、滚轮/控件缩放)、
-   右侧节点配置侧栏。condition 出边强制 on 二选一(取消即不出线,无 on 值
-   条件后继在画布侧不可产生);布局坐标按 wf_key+version 存 localStorage,
-   不进定义契约。 */
+/* 工作流画布提供节点放置、依赖连线和配置侧栏。布局只存于本地；condition 出边需明确选择 on，取消时不创建连线。 */
 
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import {
@@ -170,9 +166,8 @@ function CanvasInner({
     );
   }, [initToken, setNodes, setEdges]);
 
-  // 服务端校验错误 → 节点高亮定位(环参与节点/非法 on/缺配置;design 裁决 4)
-  // 依赖含 initToken(评审修复:JSON→画布重投影会重建节点丢 errorText,
-  // errorText 未变时 effect 不重跑,高亮丢失)
+  // 重投影(initToken 变化)会重建节点并丢掉错误标注,故随 errorText 重新应用定位高亮。
+
   useEffect(() => {
     if (errorText === "") {
       setNodes((ns) => (ns.some((n) => n.data.errorText !== undefined) ? stripErrors(ns) : ns));
@@ -181,8 +176,8 @@ function CanvasInner({
     const { nodeIds } = locateValidationError(errorText);
     if (nodeIds.length === 0) return;
     const hit = new Set(nodeIds);
-    // 未命中节点一并清除旧 errorText(评审修复:两次不同错误的定位间,
-    // 残留高亮会误导排障;侧栏派生与画布高亮保持同一生命周期)
+    // 清除未命中节点的旧错误，避免画布高亮与侧栏状态不一致。
+
     setNodes((ns) =>
       ns.map((n) => {
         if (hit.has(n.id)) return { ...n, data: { ...n.data, errorText } };
@@ -244,7 +239,7 @@ function CanvasInner({
     (conn: Connection) => {
       if (!conn.source || !conn.target || conn.source === conn.target) return;
       if (edges.some((e) => e.source === conn.source && e.target === conn.target)) return;
-      // condition 出边必须显式指定 on 值:弹二选一,取消即不出线(spec MUST NOT)
+      // condition 出边必须明确指定 on 值；取消选择时不创建连线。
       if (isConditionSource(conn.source)) {
         setPending({
           source: conn.source,
@@ -307,8 +302,7 @@ function CanvasInner({
       ];
       setNodes(nextNodes);
       persistPositions(nextNodes);
-      // 结构变更即回写定义(单一数据源;评审修复:缺 emit 时新节点只存在于
-      // 画布投影,保存取 definition 会静默丢失该节点)
+      // 结构变更后立即回写定义，确保保存时包含新增节点。
       emitFrom(stripErrors(nextNodes), edges);
     },
     [nodes, edges, setNodes, persistPositions, emitFrom, stripErrors],
@@ -365,7 +359,7 @@ function CanvasInner({
         target: e.target === oldId ? newId : e.target,
       }));
       setNodes(nextNodes);
-      persistPositions(nextNodes); // 改名后坐标迁到新 id(按 id 存取,评审修复)
+      persistPositions(nextNodes); // 节点改名后按新 id 保存坐标。
       setEdges(nextEdges);
       setSelectedId(newId);
       emitFrom(nextNodes, nextEdges);
@@ -394,8 +388,7 @@ function CanvasInner({
 
   return (
     <div className="flex flex-col md:h-[60vh] md:flex-row">
-      {/* 节点面板:拖拽到画布或点击居中放置;nokey=RF 键盘删除豁免区
-          (面板内 Backspace/Delete 不再误删画布选中节点,评审修复) */}
+      {/* 节点面板支持拖拽或点击放置；nokey 阻止面板按键触发画布删除。 */}
       <div className="nokey flex shrink-0 gap-2 overflow-x-auto border-b p-2 md:w-36 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r">
         <p className="hidden px-1 text-3xs font-medium text-muted-foreground md:block">节点类型</p>
         <p className="px-1 text-3xs text-muted-foreground md:hidden">拖到画布或点击放置:</p>
@@ -421,7 +414,6 @@ function CanvasInner({
         })}
       </div>
 
-      {/* 画布区 */}
       <div
         ref={wrapperRef}
         className="relative h-72 md:h-auto md:flex-1"
@@ -468,9 +460,7 @@ function CanvasInner({
         )}
       </div>
 
-      {/* 节点配置侧栏 */}
-      {/* 节点配置侧栏(nokey=RF 键盘删除豁免:Select 触发器是 button、
-          下拉面板是 div,聚焦时按 Backspace 曾静默删除画布选中节点) */}
+      {/* nokey 排除侧栏控件的按键事件,避免 Backspace 删除画布选中节点。 */}
       <aside className="nokey w-full shrink-0 border-t p-3 md:w-80 md:overflow-y-auto md:border-l md:border-t-0 md:p-3">
         {selectedNode ? (
           <NodeConfigForm

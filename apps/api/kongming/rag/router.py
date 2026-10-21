@@ -1,9 +1,4 @@
-"""rag 路由(009):知识库管理端点(/system/rag,租户视角+system:rag:manage)
-与内部召回端点(/internal/rag/retrieve——api 全局内部令牌 middleware 守门)。
-
-上传链路:multipart(file+datasource_key+schema_name)→ 文本类直读/PDF·Word
-线程内解析 → Markdown `## 表名` 切块 → service 落库。
-"""
+"""知识库管理与内部召回路由。文件上传先解析为文本，再按 Markdown 表标题切块并交给 service 保存。"""
 
 import asyncio
 import logging
@@ -56,12 +51,12 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/system/rag", tags=["rag"])
 internal_router = APIRouter(prefix="/internal/rag", tags=["internal"])
 
-MAX_TABLE_BLOCKS = 500  # 单文档表块上限(防大文档切块风暴,design D7)
+MAX_TABLE_BLOCKS = 500  # 单文档表块上限(防大文档切块风暴)
 
 
 class _RelationExpansionAdapter:
-    """095 组合根适配器:rag 域只见 RelationExpansionPort,关系查询走
-    请求会话的 semantic 仓储(域间经端口反转,不直连;047 suggestion_evictor
+    """组合根适配器:rag 域只见 RelationExpansionPort,关系查询走
+    请求会话的 semantic 仓储(域间经端口反转,不直连;suggestion_evictor
     同款纪律)。tables 键序列转两段限定名字符串(关系行存储形态)。"""
 
     def __init__(self, session: AsyncSession) -> None:
@@ -80,8 +75,8 @@ class _RelationExpansionAdapter:
 
 
 class _TeamMembershipAdapter:
-    """102 组合根适配器:rag 域只见 MemberTeamsReader/MemberRoleReader 窄端口,
-    成员关系查询走 team 域既有仓储(只读消费,team 域零改动;design D3)。
+    """组合根适配器:rag 域只见 MemberTeamsReader/MemberRoleReader 窄端口,
+    成员关系查询走 team 域既有仓储(只读消费,team 域零改动)。
     team_ids_of_user 角色全收(可见性按「所在团队」判,VIEWER 亦在集合)。"""
 
     def __init__(self, session: AsyncSession) -> None:
@@ -99,27 +94,27 @@ class _TeamMembershipAdapter:
 
 
 def get_rag_service(session: AsyncSession) -> RagService:
-    """RagService 公共组合根(019 toolcall 复用同源;013 单例工厂同调)。"""
-    client = get_agent_rag_client(get_redis())  # 013:进程内单例,连接池跨请求复用
+    """RagService 公共组合根(toolcall 复用同源;单例工厂同调)。"""
+    client = get_agent_rag_client(get_redis())  # 进程内单例,连接池跨请求复用
     from kongming.chat.repository import SuggestionRepository
 
     settings = get_settings()
-    membership = _TeamMembershipAdapter(session)  # 102:双窄端口共用一适配器
+    membership = _TeamMembershipAdapter(session)  # 双窄端口共用一适配器
     return RagService(
-        # 098:仓储与缓存注入部署分词配置(缺省 simple 零回归)
+        # 仓储与缓存使用部署配置的分词器，默认值为 simple。
         RagRepository(session, ts_config=settings.rag_fulltext_ts_config),
         embedder=client,
         describer=client,
         cache=ContextCache(get_redis(), ts_config=settings.rag_fulltext_ts_config),
-        # 047:知识写路径级联失效建议缓存(DELETE 同事务,rag commit 收口)
+        # 知识写路径级联失效建议缓存(DELETE 同事务,rag commit 收口)
         suggestion_evictor=SuggestionRepository(session),
-        # 064:召回闸门配置(Settings 恒注入;None=测试轻量装配)
+        # 召回闸门配置(Settings 恒注入;None=测试轻量装配)
         gate_settings=settings,
-        # 095:关系感知召回扩展(缺省开启;kill switch=rag_expand_enabled)
+        # 关系感知召回扩展(缺省开启;kill switch=rag_expand_enabled)
         relation_expander=_RelationExpansionAdapter(session),
         expand_enabled=settings.rag_expand_enabled,
         expand_max=settings.rag_expand_max,
-        # 102:可见集合/写权限的成员关系端口(只读消费 team 域)
+        # 可见集合/写权限的成员关系端口(只读消费 team 域)
         member_teams=membership,
         member_roles=membership,
     )
@@ -130,7 +125,7 @@ def _get_service(session: Annotated[AsyncSession, Depends(get_session)]) -> RagS
 
 
 def _validate_schema_name(schema_name: str) -> None:
-    """schema_name 领域校验(标识符 pattern 与 datasource 域同一规则,评审 S3)。"""
+    """按 datasource 域的标识符规则校验 schema_name。"""
     if not PG_IDENTIFIER_PATTERN.fullmatch(schema_name):
         raise InvalidSchemaName("schema 须为合法 PG 标识符(小写字母/下划线起头)")
 
@@ -166,9 +161,9 @@ async def upload_document(
     user: Annotated[dict[str, object], Depends(current_user)],
     svc: Annotated[RagService, Depends(_get_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
-    team_id: Annotated[uuidlib.UUID | None, Form()] = None,  # 102:上传归属(缺省公共)
+    team_id: Annotated[uuidlib.UUID | None, Form()] = None,  # 上传归属(缺省公共)
 ) -> UploadOut:
-    # 校验序:租户白名单复校先于文件读取(未绑定租户者不消耗解析资源;复审 R5)
+    # 先复核租户绑定，再读取文件，避免未绑定租户消耗解析资源。
     try:
         resolved2 = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
         tenant_id, tenant_key = resolved2
@@ -209,7 +204,7 @@ async def upload_document(
             datasource_key=datasource_key,
             schema_name=schema_name,
             blocks=blocks,
-            team_id=None if team_id is None else str(team_id),  # 102
+            team_id=None if team_id is None else str(team_id),
         )
     except TenantForbiddenApi:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
@@ -218,14 +213,14 @@ async def upload_document(
     except SchemaNotAllowed:
         raise HTTPException(status_code=400, detail="SCHEMA_NOT_ALLOWED") from None
     except KnowledgeNotFound:
-        # 102:归属目标团队不存在/非成员——同形 404(不暴露团队存在性)
+        # 归属目标团队不存在/非成员——同形 404(不暴露团队存在性)
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     except TeamWriteForbidden:
         raise HTTPException(status_code=403, detail="TEAM_WRITE_FORBIDDEN") from None
     return UploadOut(tables=tables)
 
 
-# ============ 可扫描 schema 枚举(040:上传表单候选源,与内省/上传闸同源) ============
+# ============ 可扫描 schema 枚举(上传表单候选源,与内省/上传闸同源) ============
 
 
 class SchemasOut(BaseModel):
@@ -271,8 +266,8 @@ class KnowledgeItemOut(BaseModel):
     sample_queries: list[str]
     source_type: str
     updated_at: datetime
-    alias: str = ""  # 037:业务称谓别名
-    # 102(纯增可选):归属(空=租户公共;team_name 供列表归属列展示)
+    alias: str = ""  # 业务称谓别名
+    # 归属(空=租户公共;team_name 供列表归属列展示)
     team_id: str | None = None
     team_name: str | None = None
 
@@ -284,7 +279,7 @@ class KnowledgePageOut(BaseModel):
     size: int
 
 
-# 102:归属筛选取值(all/public/<team uuid>;pattern 双防——非枚举必须 UUID 形态)
+# 归属筛选取值(all/public/<team uuid>;pattern 双防——非枚举必须 UUID 形态)
 _TEAM_SCOPE_PATTERN = (
     r"^(all|public|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
 )
@@ -300,7 +295,7 @@ async def list_tables(
     svc: Annotated[RagService, Depends(_get_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
     datasource_key: str | None = None,
-    # 102:归属筛选(all=公共∪我所在团队缺省形态 / public=仅公共 / <team_id>=该团队)
+    # 归属筛选(all=公共∪我所在团队缺省形态 / public=仅公共 / <team_id>=该团队)
     team_scope: Annotated[str, Query(pattern=_TEAM_SCOPE_PATTERN)] = "all",
     page: Annotated[int, Field(ge=1)] = 1,
     size: Annotated[int, Field(ge=1, le=100)] = 20,
@@ -315,8 +310,8 @@ async def list_tables(
         datasource_key=datasource_key,
         limit=size,
         offset=(page - 1) * size,
-        caller_user_id=str(user["sub"]),  # 102:可见集合
-        team_scope=team_scope,  # 102:归属筛选
+        caller_user_id=str(user["sub"]),  # 可见集合
+        team_scope=team_scope,  # 归属筛选
     )
     return KnowledgePageOut(
         items=[_knowledge_item_out(e) for e in entries],
@@ -327,7 +322,7 @@ async def list_tables(
 
 
 def _knowledge_item_out(e: KnowledgeEntry) -> KnowledgeItemOut:
-    """条目 → 响应投影单点(列表/编辑/归属变更共用;102 归属字段纯增)。"""
+    """条目 → 响应投影单点(列表/编辑/归属变更共用)。"""
     return KnowledgeItemOut(
         id=e.id,
         datasource_key=e.datasource_key,
@@ -338,14 +333,14 @@ def _knowledge_item_out(e: KnowledgeEntry) -> KnowledgeItemOut:
         sample_queries=e.sample_queries,
         source_type=e.source_type,
         updated_at=e.updated_at,  # type: ignore[arg-type]
-        alias=e.alias,  # 037
-        team_id=e.team_id,  # 102
-        team_name=e.team_name,  # 102
+        alias=e.alias,
+        team_id=e.team_id,
+        team_name=e.team_name,
     )
 
 
 class EditTableIn(BaseModel):
-    """037:表说明人工精修请求(table_comment 与 alias 同面编辑)。"""
+    """表说明人工精修请求(table_comment 与 alias 同面编辑)。"""
 
     table_comment: str = Field(max_length=500)
     alias: str = Field(max_length=64)
@@ -353,7 +348,7 @@ class EditTableIn(BaseModel):
     @field_validator("table_comment", "alias")
     @classmethod
     def _strip_no_control(cls, v: str) -> str:
-        # 换行/回车破坏 schema_hint 行结构(R1-F1);strip 后空串=清除语义
+        # 换行/回车破坏 schema_hint 行结构;strip 后空串=清除语义
         if "\n" in v or "\r" in v:
             raise ValueError("不可包含换行")
         return v.strip()
@@ -361,8 +356,8 @@ class EditTableIn(BaseModel):
     @field_validator("alias")
     @classmethod
     def _alias_no_structure_chars(cls, v: str) -> str:
-        # 括号/竖线与 hint 行结构「表名(别名)(列…)」冲突,可借换行伪造表名
-        # 注入 023 提取正则(R1-F1 实证);此处拒收,models.clean_alias 为纵深
+        # 括号/竖线与 hint 行结构「表名(别名)(列…)」冲突,配合换行可
+        # 伪造表名注入提取正则;此处拒收,models.clean_alias 为纵深
         if any(c in v for c in "()（）|"):
             raise ValueError("别名不可包含括号或竖线")
         return v
@@ -394,7 +389,7 @@ async def edit_table(
             alias=body.alias,
         )
     except KnowledgeNotFound:
-        # 102:团队条目非成员写——与不存在同 detail(404 同形)
+        # 团队条目非成员写——与不存在同 detail(404 同形)
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     except TeamWriteForbidden:
         raise HTTPException(status_code=403, detail="TEAM_WRITE_FORBIDDEN") from None
@@ -404,7 +399,7 @@ async def edit_table(
 
 
 class OwnershipIn(BaseModel):
-    """102:归属变更请求(team_id 空=转公共;非空=转该团队专属)。"""
+    """归属变更请求(team_id 空=转公共;非空=转该团队专属)。"""
 
     team_id: uuidlib.UUID | None = None
 
@@ -421,7 +416,7 @@ async def set_table_ownership(
     svc: Annotated[RagService, Depends(_get_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> KnowledgeItemOut:
-    """归属变更(102):公共⇄团队原位转移(单一实例,内容不动)。
+    """归属变更:公共⇄团队原位转移(单一实例,内容不动)。
 
     非成员 404 同形(与不存在条目同 detail,不暴露存在性);VIEWER 403;
     变更落审计+精确失效检索缓存。web 侧走受控确认(AlertDialog 明示可见
@@ -468,7 +463,7 @@ async def delete_table(
             actor_id=str(user["sub"]), tenant_id=tenant_id, table_id=table_id
         )
     except KnowledgeNotFound:
-        # 102:团队条目非成员写——与不存在同形(不暴露存在性)
+        # 团队条目非成员写——与不存在同形(不暴露存在性)
         raise HTTPException(status_code=404, detail="KNOWLEDGE_NOT_FOUND") from None
     if deleted is None:
         raise HTTPException(status_code=404, detail="KNOWLEDGE_NOT_FOUND") from None
@@ -485,7 +480,7 @@ class FetchOut(BaseModel):
     found: int
     enriched: int
     skipped: int
-    removed: int  # 042:对账删除的扫描集外自动来源行数
+    removed: int  # 对账删除的扫描集外自动来源行数
 
 
 class ReindexOut(BaseModel):
@@ -551,7 +546,7 @@ async def reindex(
     return ReindexOut(deleted=result.deleted, rebuilt=result.rebuilt, enriched=result.enriched)
 
 
-# ============ 知识覆盖报告(052;只读确定性纯聚合) ============
+# ============ 知识覆盖报告(只读确定性纯聚合) ============
 
 
 class SchemaTableOut(BaseModel):
@@ -669,18 +664,18 @@ class RetrieveIn(BaseModel):
     tenant_key: str = Field(min_length=1, max_length=64)
     datasource_key: str = Field(default="default", pattern=r"^[a-z][a-z0-9_]{1,63}$")
     question: str = Field(min_length=1, max_length=2000)
-    # 047 多轮继承:最近历史问句(≤3 条,取末条走继承路;单轮缺省零回归)
+    # 多轮继承:最近历史问句(≤3 条,取末条走继承路;单轮缺省)
     history: list[Annotated[str, Field(max_length=2000)]] = Field(
         default_factory=list, max_length=3
     )
-    # 102 纯增可选:调用者身份(端用户 id)——可见集合=公共∪其所在团队;
-    # 缺省(未携带)=纯公共形态,既有回调负载零回归(agent 面无须改动即可
+    # 可选:调用者身份(端用户 id)——可见集合=公共∪其所在团队;
+    # 缺省(未携带)=纯公共形态,既有回调负载(agent 面无须改动即可
     # 继续工作;接线后团队条目方进入召回)
     user_id: uuidlib.UUID | None = None
 
 
 class MetricHitOut(BaseModel):
-    """076(纯增):语义层口径命中(标识/名称/口径表达式/修订时间)。"""
+    """语义层口径命中(标识/名称/口径表达式/修订时间)。"""
 
     metric_id: str
     metric_name: str
@@ -691,15 +686,15 @@ class MetricHitOut(BaseModel):
 class RetrieveOut(BaseModel):
     schema_hint: str
     history_sql: str
-    # 023 语义段(纯增;空串=无注入,agent 零回归)
+    # 语义段为空时，不向 Agent 注入内容。
     relations_hint: str = ""
     metric_hints: str = ""
-    # 076(纯增):结构化口径命中(与 metric_hints 同源;空=无命中)
+    # 结构化口径命中(与 metric_hints 同源;空=无命中)
     metric_hits: list[MetricHitOut] = []
-    # 024 文档段(纯增;空=无命中,双通道隔离)。
-    # 068:每项纯增 citation_key(稳定引用键;由父块主键派生)
+    # 文档段(空=无命中,双通道隔离)。
+    # 每项 citation_key(稳定引用键;由父块主键派生)
     doc_hints: list[dict[str, str]] = []
-    # 056 skill-pack 投影段(纯增;空=零包零回归)
+    # skill-pack 投影段(空=零包)
     skill_terms: str = ""
     skill_examples: str = ""
     skill_persona: str = ""
@@ -716,14 +711,14 @@ async def rag_retrieve(
             tenant_key=req.tenant_key,
             datasource_key=req.datasource_key,
             question=req.question,
-            history=req.history,  # 047 多轮继承
-            caller_user_id=None if req.user_id is None else str(req.user_id),  # 102
+            history=req.history,  # 多轮继承
+            caller_user_id=None if req.user_id is None else str(req.user_id),
         )
     except LookupError:
         raise HTTPException(status_code=404, detail="TENANT_NOT_FOUND") from None
     except DatasourceInvalid:
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
-    # 023:语义段组装(召回表集合收窄;失败降级空串不影响召回主链路)
+    # 语义提示用于收窄召回表集合；生成失败时传空提示继续召回。
     relations_hint = ""
     metric_hints = ""
     metric_hits_objs: list[MetricHit] = []
@@ -741,13 +736,13 @@ async def rag_retrieve(
             )
         ).scalar_one_or_none()
         if tid_row:
-            # 召回形态唯一:build_schema_hint=`schema.table(列…)`(009;R1-L2
-            # 删「表 x.y」死路径——该形态只存在于 agent 侧内省回退,不经此处)
+            # 召回形态唯一:build_schema_hint=`schema.table(列…)`;
+            # 「表 x.y」形态只存在于 agent 侧内省回退,不经此处
             tables = _re.findall(r"^([\w]+\.[\w]+)\(", ctx.schema_hint, _re.M)
             tables = list(dict.fromkeys(tables))
             relations_hint, metric_hints, metric_hits_objs = await SemanticService(
                 SqlSemanticRepo(session),
-                # 110:指标注入面按调用者 data_scope 收窄(解析失败 service 内读面降级)
+                # 指标注入面按调用者 data_scope 收窄(解析失败 service 内读面降级)
                 caller_scope_resolver=CallerDeptScopeAdapter(session),
             ).enrich(
                 tenant_id=str(tid_row),
@@ -757,13 +752,12 @@ async def rag_retrieve(
                 caller_user_id=None if req.user_id is None else str(req.user_id),
             )
     except Exception as _e:
-        # R1-L3:undefined_table(0012 未迁移)升 error(运维可感知整体失效);
-        # 其余异常仍降级空串不阻断召回主链路
+        # 缺少语义层表时按迁移未执行处理并报错；其他异常降级为空提示，继续召回。
         if "UndefinedTable" in type(_e).__name__ or "undefined_table" in str(_e):
             log.error("语义层表缺失(迁移未跑?),注入整体失效: %s", _e)
         else:
             log.warning("语义段组装失败(降级空串)", exc_info=True)
-    # 024:文档通道(降级空;与 schema 通道隔离)
+    # 文档通道(降级空;与 schema 通道隔离)
     doc_hints: list[dict[str, str]] = []
     try:
         from kongming.rag.documents_repo import SqlDocumentRepo
@@ -783,12 +777,12 @@ async def rag_retrieve(
                 tenant_id=str(tid2),
                 datasource_key=req.datasource_key,
                 question=req.question,
-                # add-doc-rerank:未配置=None(零存在感零回归),精排失败内部降级
+                # 未配置时为 None(无精排),精排失败在内部降级
                 reranker=build_doc_reranker(),
             )
     except Exception:
         log.warning("文档检索组装失败(降级空)", exc_info=True)
-    # 056:skill-pack 合并投影(零包=空段;失败降级不阻断)
+    # skill-pack 合并投影(零包=空段;失败降级不阻断)
     skill_terms = skill_examples = skill_persona = ""
     try:
         from kongming.skillpack.repository import SqlSkillPackRepo
@@ -825,7 +819,7 @@ async def rag_retrieve(
         history_sql=ctx.history_sql,
         relations_hint=relations_hint,
         metric_hints=metric_hints,
-        metric_hits=metric_hits_out,  # 076(纯增):结构化口径命中
+        metric_hits=metric_hits_out,  # 结构化口径命中
         doc_hints=doc_hints,
         skill_terms=skill_terms,
         skill_examples=skill_examples,
@@ -845,12 +839,12 @@ async def recall_probe(
     svc: Annotated[RagService, Depends(_get_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> RecallProbeOut:
-    """064:召回试跑(只读):三路命中及各自原生分、融合分、双条件判定结论。
+    """召回试跑(只读):三路命中及各自原生分、融合分、双条件判定结论。
 
     零副作用:SHALL NOT 修改配置、SHALL NOT 落库、SHALL NOT 触发召回缓存
     失效(不走 ctx 缓存)。两个高频场景:上传表说明后验证可召回性;闸门
-    阈值标定(不等真实流量)。102:召回在调用者可见集合内(公共∪所在团队)。
-    097:响应模型纯定型(键集=service 现值锁定,判定逻辑零变更)。
+    阈值标定(不等真实流量)。召回在调用者可见集合内(公共∪所在团队)。
+    响应模型纯定型(键集=service 现值锁定,判定逻辑零变更)。
     """
     try:
         _tenant_id, tenant_key = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
@@ -870,7 +864,7 @@ async def recall_probe(
         raise HTTPException(status_code=404, detail="TENANT_NOT_FOUND") from None
 
 
-# ============ 024 document-rag:文档管理端点 ============
+# ============ document-rag:文档管理端点 ============
 
 doc_router = APIRouter(prefix="/system/document", tags=["document"])
 
@@ -883,8 +877,8 @@ def _doc_name_sensitive(name: str) -> bool:
 
     for rule in REGISTRY:
         if rule.guardrail_type == "input" and rule.name.startswith(("pii_", "cred_", "inj_")):
-            # inj_ 一并拦(R1-B2:文件名经 source_ref 进召回文本→LLM 提示词,
-            # injection 短语文件名与 PII 同为入口防线)
+            # inj_ 一并拦:文件名经 source_ref 进召回文本→LLM 提示词,
+            # 注入短语与 PII 同为入口防线
             if rule.pattern and re.search(rule.pattern, name):
                 return True
     return False
@@ -893,7 +887,7 @@ def _doc_name_sensitive(name: str) -> bool:
 async def _doc_tenant(
     session: AsyncSession, svc: RagService, user_id: str, tenant_key: str | None
 ) -> str:
-    """R1-M4:统一 403 映射(与 009 端点同口径)。"""
+    """统一 403 映射(document 各端点共用)。"""
     try:
         resolved = await svc.resolve_tenant(user_id, tenant_key)
     except TenantForbiddenApi:
@@ -904,7 +898,7 @@ async def _doc_tenant(
 async def _assert_doc_datasource(
     session: AsyncSession, *, tenant_id: str, datasource_key: str
 ) -> None:
-    """R1-M1:数据源存在+启用+归属校验(伪造同形 400;spec「伪造 datasource_key
+    """数据源存在+启用+归属校验(伪造同形 400;spec「伪造 datasource_key
     同形拒绝」);default 恒可用。"""
     if datasource_key == "default":
         return
@@ -982,7 +976,7 @@ async def upload_doc(
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> DocUploadOut:
-    """文档上传(024):类型/大小沿用 009 分档;分块+embedding(子块)+覆盖落库。"""
+    """文档上传:类型/大小沿用 分档;分块+embedding(子块)+覆盖落库。"""
     from kongming.rag.documents_repo import SqlDocumentRepo
     from kongming.rag.documents_service import DocumentConflict, upload_document
 

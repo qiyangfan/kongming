@@ -1,7 +1,4 @@
-/* 数据源管理页(web-admin 008 delta + datasource spec「管理 UI」):
-   分页列表 + 搜索 + 创建/编辑对话框(key/default_schema/租户创建后不可改,编辑态禁改回显;
-   密码留空不改)+ 启停 + 删除确认(受控:成功才关)+ 测试连接(编辑态留空走库存密文)。
-   文案提示(004 裁定挂账):行级过滤依赖目标库 create_by 列,注册账号请使用只读账号。 */
+/* 管理数据源：支持分页、搜索、创建、编辑、启停、删除和连接测试。编辑密码留空时沿用已保存的凭证；行级过滤依赖目标库的 create_by 列，注册账号应使用只读账号。 */
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -91,7 +88,7 @@ export default function DatasourcesPage() {
     queryKey: ["admin", "datasources", page, search],
     queryFn: () => datasourceApi.page(page, PAGE_SIZE, search),
   });
-  // 租户下拉(创建时显式指定归属;复用 007 租户只读清单)
+  // 租户下拉(创建时显式指定归属;复用租户只读清单)
   const tenants = useQuery({ queryKey: ["admin", "tenants"], queryFn: systemApi.listTenants });
 
   // 越界自愈:删除末页条目/过滤后总页数收缩时,回退到最后有效页
@@ -161,7 +158,7 @@ export default function DatasourcesPage() {
       setToggleId(null);
       invalidate();
     },
-    onError: (e: Error) => setToggleError(e.message), // R1-web-1:启停失败不得静默(012 收敛为行内)
+    onError: (e: Error) => setToggleError(e.message), // 启停失败不得静默,收敛为行内提示
   });
 
   const remove = useMutation({
@@ -532,7 +529,7 @@ export default function DatasourcesPage() {
           )}
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            {/* 受控关闭:mutation 成功才关对话框,失败保持开启展示错误(007 教训) */}
+            {/* 受控关闭:mutation 成功才关对话框,失败保持开启展示错误 */}
             <Button
               variant="destructive"
               onClick={() => remove.mutate()}

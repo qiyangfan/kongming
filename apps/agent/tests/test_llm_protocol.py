@@ -1,5 +1,4 @@
-"""多协议翻译层测试(multi-protocol-llm):anthropic/responses 翻译纯函数
-表驱动 + 官方 SDK 客户端 MockTransport 集成钉子 + llm.py 三通道集成组。"""
+"""验证 Anthropic 和 Responses 协议转换、SDK 调用及 llm.py 三通道集成。"""
 
 import asyncio
 import json
@@ -60,7 +59,7 @@ class _Block:
 
 
 class TestAnthropicRequest:
-    """canonical → anthropic Messages 请求形态(翻译表:设计决策 4)。"""
+    """canonical → anthropic Messages 请求形态(翻译表驱动)。"""
 
     def test_assistant_without_content_rejected_locally(self) -> None:
         """空 content 且无 tool_calls 的 assistant 消息:本地即 LlmError,
@@ -370,7 +369,7 @@ class TestResponsesParse:
         assert reply.tool_calls[0].raw_args == "{oops"
 
 
-# ── anthropic 官方 SDK 客户端封装(MockTransport 集成钉子) ──
+# ── Anthropic SDK 客户端的 MockTransport 集成测试 ──
 
 _MSG_OK = {
     "id": "msg_1",
@@ -471,7 +470,7 @@ async def test_anthropic_client_malformed_json_maps_llm_error() -> None:
 
 
 def _env_settings(**env: str) -> Settings:
-    """与 test_model_routing 同款:env 显式钉住,防本地 .env 渗入。"""
+    """显式设置测试环境变量,避免本机 .env 影响结果。"""
     import os
 
     old = {k: os.environ.get(f"KM_AGENT_{k.upper()}") for k in env}
@@ -555,7 +554,7 @@ async def test_anthropic_entry_react_round_trip() -> None:
         model_routes_json='{"REACT": "glm-coding"}',
         model_allowed_hosts="test.local",
         llm_api_key="sk-main",
-        # 072:500/连接超时属瞬时故障,重试满预算;退避钉 1ms 防真等
+        # 重试间隔设为 1ms,避免测试等待真实退避时间。
         llm_retry_base_ms="1",
         llm_retry_max_wait_ms="1",
     )
@@ -706,7 +705,7 @@ async def test_responses_entry_chat_route_hit() -> None:
 
 
 async def test_anthropic_entry_failure_reported_as_error() -> None:
-    """失败语义(038 口径):anthropic 条目非 2xx → LlmError 且 _report 落
+    """失败语义(口径):anthropic 条目非 2xx → LlmError 且 _report 落
     status=ERROR、tokens=0、latency_ms 在场;超时同口径。"""
     scenario = {"mode": "server_error"}
 
@@ -731,7 +730,7 @@ async def test_anthropic_entry_failure_reported_as_error() -> None:
         model_routes_json='{"REACT": "glm-coding"}',
         model_allowed_hosts="test.local",
         llm_api_key="sk-main",
-        # 072:500/连接超时属瞬时故障,重试满预算;退避钉 1ms 防真等
+        # 重试间隔设为 1ms,避免测试等待真实退避时间。
         llm_retry_base_ms="1",
         llm_retry_max_wait_ms="1",
     )
@@ -751,7 +750,7 @@ async def test_anthropic_entry_failure_reported_as_error() -> None:
         await llm.chat("s", "u", task="REACT", trace_id="tr-fail")
     await asyncio.sleep(0)
     await asyncio.sleep(0)
-    # 072:瞬时故障(500)重试满预算,每尝试一条 ERROR 记录
+    # 瞬时故障(500)重试满预算,每尝试一条 ERROR 记录
     assert len(reporter.records) == 3
     assert all(r["status"] == "ERROR" for r in reporter.records)
     rec = reporter.records[0]
@@ -770,7 +769,7 @@ async def test_anthropic_entry_failure_reported_as_error() -> None:
     await llm.aclose()
 
 
-# ── embedding 维度契约(upgrade-rag-qwen3-halfvec-2560,design D1)──
+# ── embedding 维度契约(Qwen3 文本向量,2560 维)──
 
 
 class _EmbItem:

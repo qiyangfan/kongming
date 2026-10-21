@@ -1,7 +1,7 @@
-"""audit 用例层(015,零框架):审计查询编排(行级可见性强制覆盖)。
+"""audit 用例层(零框架):审计查询编排(行级可见性强制覆盖)。
 
 行级可见性(audit spec):角色集含 data_scope=ALL → 不限;否则强制本人
-(显式注入 vis_user_id,筛选传值被覆盖——与 014 feedback 同一口径)。
+(显式注入 vis_user_id,筛选传值被覆盖——与 feedback 同一口径)。
 """
 
 from kongming.audit.ports import AuditRepo
@@ -37,7 +37,7 @@ class AuditService:
         return await self._repo.sql_page(
             vis_user_id=vis,
             trace_id=trace_id,
-            user_id=(user_id if vis is None else None),  # userId 仅 ALL 生效(014 同款)
+            user_id=(user_id if vis is None else None),  # userId 仅 ALL 生效(同款)
             tenant_id=tenant_id,
             verdict=verdict,
             start_time=start_time,

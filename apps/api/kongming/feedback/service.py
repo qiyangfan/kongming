@@ -1,11 +1,4 @@
-"""feedback 用例层(014,零框架):提交/处置/涉及表/统计/分页编排。
-
-编排顺序(提交面):租户白名单复校 → 消息归属(403 同形)→ 仅 assistant →
-correctedSql 防火墙校验(整体拒)→ 行锁读现值 → 三态合并覆盖写 → 审计
-(同事务)→ commit。070 起提交路径不再沉淀 query_history(样本准入改由
-管理面 ADOPTED 处置时的 promote 同事务完成);现值曾 ADOPTED 的重复
-提交先停用旧样本(状态与样本准入原子)。
-"""
+"""处理反馈提交、审核处置、关联表分析和统计查询。"""
 
 import logging
 from dataclasses import dataclass, field
@@ -39,7 +32,7 @@ class InvalidCorrectedSql(Exception):
 
 
 class SamplePromotionUnavailable(Exception):
-    """070:晋升不可用(embedding 失败等)→ 503,反馈处置整体回滚(无部分提交)。"""
+    """样例晋升失败;反馈处置整体回滚并返回 503。"""
 
 
 class InvalidHandleStatus(Exception):
@@ -78,7 +71,7 @@ class FeedbackService:
     def __init__(
         self,
         repo: FeedbackRepo,
-        sample_gate: FeedbackSampleGate | None = None,  # 070:审核后晋升/停用(窄端口)
+        sample_gate: FeedbackSampleGate | None = None,  # 审核后晋升/停用(窄端口)
     ) -> None:
         self._repo = repo
         self._sample_gate = sample_gate
@@ -136,8 +129,7 @@ class FeedbackService:
             None if row["corrected_sql"] is None else str(row["corrected_sql"]), corrected_sql
         )
 
-        # 070:现值曾 ADOPTED(样本在召回中)→ 重复提交重置 PENDING 前停用旧
-        # 样本(同事务:状态与样本准入原子);未晋升过则无样本可停(no-op 跳过)
+        # 重新提交已晋升的反馈时，在同一事务中停用旧样本后再写入新状态。
         prior_status = None if row["feedback_status"] is None else str(row["feedback_status"])
         if prior_status == "ADOPTED" and self._sample_gate is not None:
             await self._sample_gate.disable(feedback_message_id=message_id)
@@ -148,21 +140,19 @@ class FeedbackService:
         await self._repo.log_oper(user_id, "feedback.submit", message_id, {"rating": rating})
         await self._repo.commit()
 
-        # 070 任务 3.6:停用旧样本后 ctx 缓存按租户+数据源精确失效
+        # 停用旧样本后 ctx 缓存按租户+数据源精确失效
         # (该问句的召回产物已变——存量缓存含被停用的纠错样本)
         if prior_status == "ADOPTED" and self._sample_gate is not None:
             await self._sample_gate.evict(
                 tenant_id=tenant_id, datasource_key=str(msg["datasource_key"])
             )
 
-        # 070:提交路径不再写 query_history(审核后晋升——样本准入经 ADOPTED),
-        # 沉淀语义已迁至 handle 的 promote
+        # 提交只记录反馈;样本在审核状态变为 ADOPTED 时晋升。
         return SubmitState(rating=rating, comment=merged_comment, corrected_sql=merged_sql)
 
     @staticmethod
     def _check_corrected_sql(sql_text: str, *, scope_schema: str) -> None:
-        """与问答主链路初检同一规则集:只读根+保留表+危险函数(均在 check 内)
-        +租户 schema 边界;不执行不改写。"""
+        """纠错 SQL 过与问答入口相同的防火墙规则(只读根/保留表/危险函数/schema),不执行。"""
         for verdict in (
             check(sql_text),
             check_reserved_tables(sql_text),
@@ -194,7 +184,7 @@ class FeedbackService:
         )
         if not ok:  # 竞态兜底
             raise FeedbackNotFound(message_id)
-        # 070:样本准入与处置状态、操作日志同事务(无部分提交);
+        # 样本准入与处置状态、操作日志同事务(无部分提交);
         # ADOPTED + 非空 correctedSql → 晋升(embedding 失败上抛 →
         # SamplePromotionUnavailable → 503 整体回滚);其余状态 → 停用
         if self._sample_gate is not None:
@@ -206,7 +196,7 @@ class FeedbackService:
         await self._repo.log_oper(actor_id, "feedback.handle", message_id, {"status": status})
         await self._repo.commit()
 
-        # 070 任务 3.6:晋升/停用提交后 ctx 缓存精确失效(复用既有机制)
+        # 晋升/停用提交后 ctx 缓存精确失效(复用既有机制)
         if self._sample_gate is not None:
             await self._sample_gate.evict(
                 tenant_id=str(msg["tenant_id"]), datasource_key=str(msg["datasource_key"])
@@ -214,11 +204,7 @@ class FeedbackService:
         return merged_note
 
     async def _promote(self, msg: dict[str, object], *, tenant_id: str, corrected_sql: str) -> None:
-        """070:晋升纠错 SQL 为可召回样本(问句=同会话该消息前最近 user 问句)。
-
-        无问句(构成异常:assistant 消息必随 user 问句产生)不晋升——处置本身
-        有效,仅样本缺失,告警留痕;embedding 不可用是晋升失败的硬语义
-        (狭窄端口上抛,本域转 SamplePromotionUnavailable → 503,不吞)。"""
+        """把纠正 SQL 晋升为样本;缺少关联问句时跳过,embedding 失败时抛晋升异常。"""
         if self._sample_gate is None:
             return
         question = await self._repo.recent_user_question_before(
@@ -234,12 +220,12 @@ class FeedbackService:
                 question=question,
                 sql_text=corrected_sql,
                 feedback_message_id=str(msg["id"]),
-                # 102 伴生:样本可见性归属反馈发起者(纠错 SQL 的来源主体)
+                # 伴生:样本可见性归属反馈发起者(纠错 SQL 的来源主体)
                 caller_user_id=str(msg["user_id"] or "") or None,
             )
         except SamplePromotionUnavailable:
             raise
-        except Exception as e:  # noqa: BLE001  # 晋升基础设施异常同口径 503(不回滚半提交由调用方事务保证)
+        except Exception as e:  # noqa: BLE001  # 晋升操作异常统一返回 503，事务由调用方管理。
             raise SamplePromotionUnavailable(str(e)) from e
 
     # ============ 涉及表定位(feedback-refine spec) ============

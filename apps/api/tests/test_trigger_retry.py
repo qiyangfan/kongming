@@ -1,5 +1,5 @@
-"""101 trigger-retry-policy 测试:重试判定纯函数(红→绿)/调度扫描派发/
-重试链集成(先败后成、耗尽)/停用删除取消/notify 终态化/迁移契约。"""
+"""trigger 重试策略测试:重试判定纯函数/调度扫描派发/重试链集成
+(先败后成、耗尽)/停用删除取消/notify 终态化/迁移契约。"""
 # pyright: reportPrivateUsage=false
 
 import asyncio
@@ -21,7 +21,7 @@ _TZ = dt.timezone(dt.timedelta(hours=8))
 _T0 = dt.datetime(2026, 10, 11, 9, 0, 0, tzinfo=_TZ)
 
 
-# ── 2.1 重试判定纯函数(边界逐类:成功/SKIPPED/0 次/耗尽/安排) ──
+# ── 重试判定纯函数(边界逐类:成功/SKIPPED/0 次/耗尽/安排) ──
 
 
 def test_retry_pure_success_terminal() -> None:
@@ -41,7 +41,7 @@ def test_retry_pure_skipped_never_retries() -> None:
 
 
 def test_retry_pure_zero_default_no_retry() -> None:
-    """缺省 max_retries=0:FAILED 也不安排(与引入前行为逐字一致,零回归)。"""
+    """未配置重试时，失败任务不会再次调度。"""
     assert (
         schedule_retry(status="FAILED", attempt=1, max_retries=0, now=_T0, backoff_sec=60) is None
     )
@@ -168,7 +168,7 @@ async def _runs_desc(
     return rows
 
 
-# ── 2.2/2.4 重试链集成:先败后成 + 耗尽 + 通知终态化 ──
+# ── 重试链集成:先败后成 + 耗尽 + 通知终态化 ──
 
 
 async def test_retry_chain_fail_then_success(session: AsyncSession) -> None:
@@ -210,7 +210,7 @@ async def test_retry_chain_fail_then_success(session: AsyncSession) -> None:
 
 
 async def test_retry_replays_original_inputs_and_channel(session: AsyncSession) -> None:
-    """重试回放(评审修复):webhook 失败重试以原 inputs 与 webhook 渠道执行
+    """重试回放:webhook 失败重试以原 inputs 与 webhook 渠道执行
     目标(design「webhook 失败重试同策略适用」),而非空 payload 的 cron 形态
     ——空载荷重试会以无意义执行掩盖真实失败。"""
     tenant_id, tid = await _mk_trigger(
@@ -264,8 +264,8 @@ async def test_retry_chain_exhausted_terminal_failed(session: AsyncSession) -> N
 
 
 async def test_retry_zero_default_single_row_notified(session: AsyncSession) -> None:
-    """spec「缺省不重试零回归」:max_retries=0 执行 FAILED = 单行终态+通知一次
-    (与引入前行为逐字一致,无挂起行)。"""
+    """spec「缺省不重试」:max_retries=0 执行 FAILED = 单行终态+通知一次
+    (无挂起行)。"""
     tenant_id, tid = await _mk_trigger(session, max_retries=0, notify_url="https://n.example/h")
     runner = _SeqRunner([("boom", False)])
     notifier = _RecNotifier()
@@ -296,7 +296,7 @@ async def test_retry_defer_keeps_pending(session: AsyncSession) -> None:
     assert pending2["next_retry_at"] is not None
 
 
-# ── 2.3 停用/删除取消挂起重试 ──
+# ── 停用/删除取消挂起重试 ──
 
 
 async def test_retry_disabled_cancels_pending(session: AsyncSession) -> None:
@@ -366,7 +366,7 @@ async def test_retry_fire_skips_when_trigger_disabled(session: AsyncSession) -> 
 
 
 class _RetryStubService(_StubService):
-    """在 031 桩上补 101 扫描面:list_due_retries 可注入到期挂起行。"""
+    """在桩服务上补扫描面:list_due_retries 可注入到期挂起行。"""
 
     def __init__(
         self, rows: list[dict[str, Any]], due_retries: list[dict[str, Any]] | None = None
@@ -440,7 +440,7 @@ async def test_scheduler_cron_skipped_during_retry_execution() -> None:
     assert svc.skipped == ["前次执行进行中"]
 
 
-# ── 1.1 迁移契约:缺省零回归 + CHECK + 部分索引 + 降级往返 ──
+# ── 迁移契约:缺省 + CHECK + 部分索引 + 降级往返 ──
 
 
 async def _column_exists(session: AsyncSession, table: str, column: str) -> bool:
@@ -456,7 +456,7 @@ async def _column_exists(session: AsyncSession, table: str, column: str) -> bool
     return int(n) == 1
 
 
-# ── 2.5 管理面端点扩展(HTTP):max_retries 读写 + 历史重试链字段 ──
+# ── 管理面端点扩展(HTTP):max_retries 读写 + 历史重试链字段 ──
 
 
 async def test_trigger_max_retries_crud_roundtrip(
@@ -475,7 +475,7 @@ async def test_trigger_max_retries_crud_roundtrip(
     await _bind(session, "sys_user_role", uid, rid)
     await _bind(session, "sys_user_tenant", uid, tid_tenant)
     await session.commit()
-    # 040 目标存在性闸:候选目标(创建者=触发器创建者,同口径)
+    # 目标存在性闸:候选目标(创建者=触发器创建者,同口径)
     from tests.test_trigger import _mk_workflow
 
     await _mk_workflow(session, creator_id=uid)
@@ -534,7 +534,7 @@ async def test_trigger_max_retries_crud_roundtrip(
     assert r2.status_code == 200, r2.text
     lst2 = await client.get("/system/triggers", headers=h)
     assert next(x for x in lst2.json() if x["tg_key"] == "rtcrud")["max_retries"] == 0
-    # 缺省创建(max_retries 省略)→ 0(零回归)
+    # 缺省创建(max_retries 省略)→ 0
     r3 = await client.post(
         "/system/triggers",
         headers=h,
@@ -584,7 +584,7 @@ async def test_trigger_max_retries_crud_roundtrip(
 
 
 async def test_migration_0045_defaults_zero_regression(session: AsyncSession) -> None:
-    """存量行缺省零回归:不带新列写入 → max_retries=0 / attempt=1 /
+    """存量行缺省:不带新列写入 → max_retries=0 / attempt=1 /
     retry_of_run_id 与 next_retry_at 为 NULL。"""
     tid = str(uuid_mod.uuid4())
     await session.execute(
@@ -723,8 +723,7 @@ async def test_migration_0045_downgrade_roundtrip() -> None:
         assert not await _column_exists(session, "sys_trigger_run", "retry_of_run_id")
         assert not await _column_exists(session, "sys_trigger_run", "attempt")
         assert not await _column_exists(session, "sys_trigger_run", "next_retry_at")
-        # 必须回到 head(而非钉死 0045 前序):停在旧版本会把其后迁移留在回滚态,
-        # 导致其后每个用例的 TRUNCATE 撞上不存在的表
+        # 回到当前 head,恢复后续测试需要的完整 schema。
         await asyncio.to_thread(command.upgrade, cfg, "head")
         # 契约复现 + 存量行缺省回填
         assert await _column_exists(session, "sys_trigger_definition", "max_retries")

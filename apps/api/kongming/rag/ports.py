@@ -1,4 +1,4 @@
-"""rag 域端口(009):领域依赖反转(宪法 Article II,typing.Protocol)。
+"""rag 域端口:以 typing.Protocol 隔离用例层与存储实现。
 
 service 零框架:持久化/内省/租户解析/数据源校验全部经端口;
 repo 实现见 repository.py(SQLAlchemy + 动态池内省编排)。
@@ -32,7 +32,7 @@ class EmbeddingPort(Protocol):
 class QueryHistoryWriter(Protocol):
     """成功 SQL 回写窄端口(chat 域消费;实现=RagService.writeback)。
 
-    102 伴生:caller_user_id 决定样本可见集合(公共∪其团队)——团队条目
+    伴生:caller_user_id 决定样本可见集合(公共∪其团队)——团队条目
     引出的 SQL 不经其成员授权进入他人 few-shot;缺省(None)=公共样本。"""
 
     async def writeback(
@@ -47,7 +47,7 @@ class QueryHistoryWriter(Protocol):
 
 
 class ColumnCommentReader(Protocol):
-    """列注释读取窄端口(041 呈现层列标签;chat 域消费;实现=RagService)。
+    """列注释读取窄端口(呈现层列标签;chat 域消费;实现=RagService)。
 
     返回 {表名: {列名: 注释原文(含 PG 类型前缀,剥离在呈现纯函数内)}}——
     单数据源注释集量级(数十表×数十列),整集返回免 SQL 解析与按表查询。"""
@@ -58,24 +58,13 @@ class ColumnCommentReader(Protocol):
 
 
 class SuggestionCacheEvictor(Protocol):
-    """建议问题缓存级联失效窄端口(047:知识写路径消费;实现=chat 域
-    SuggestionRepository,结构化匹配;datasource 域同名端口的实现亦兼容)。
-
-    DELETE 语句在知识写路径的业务事务内执行,由 rag commit 一并收口
-    (039 datasource 级联先例同范式)——表结构知识变更(收录收窄/对账
-    清偿/人工治理)若不失效建议缓存,存量建议会持续推荐已被治理排除的
-    问题。实现侧经 _store_error_boundary 装饰,协议成员以 def+Coroutine
-    形态声明(装饰器产物与 pyright 的协议匹配既定解法)。"""
+    """知识条目变化时清除相关建议缓存；删除操作与知识写事务一并提交。"""
 
     def delete_by_datasource(self, datasource_key: str) -> Coroutine[Any, Any, None]: ...
 
 
 class RelationExpansionPort(Protocol):
-    """关系感知召回扩展窄端口(095;实现=semantic 仓储,组合根注入)。
-
-    只读查询:该租户+数据源内「任一端在 tables 集合内」的已声明关系行
-    ([{source_table, target_table, join_keys, source}]);查询失败由消费方
-    降级为无扩展,不阻断召回主链路。"""
+    """按已声明的表关系扩展召回结果，由组合根注入实现。"""
 
     async def related_tables(
         self, *, tenant_id: str, datasource_key: str, tables: list[tuple[str, str]]
@@ -83,18 +72,18 @@ class RelationExpansionPort(Protocol):
 
 
 class MemberTeamsReader(Protocol):
-    """调用者团队集合只读窄端口(102 可见集合;实现=team 域 SqlTeamRepo
+    """调用者团队集合只读窄端口(可见集合;实现=team 域 SqlTeamRepo
     组合适配,组合根注入,team 域零改动)。
 
     返回该用户全部团队 id(角色不分——可见性按「所在团队」判,VIEWER 亦在
     集合内,与 team/models.visible 同判)。未注入/无身份=空集合=纯公共形态
-    (既有调用方零回归)。"""
+    (既有调用方)。"""
 
     async def team_ids_of_user(self, user_id: str) -> list[str]: ...
 
 
 class MemberRoleReader(Protocol):
-    """成员角色只读窄端口(102 写权限;实现=team 域 SqlTeamRepo 组合适配)。
+    """成员角色只读窄端口(写权限;实现=team 域 SqlTeamRepo 组合适配)。
 
     返回调用者在指定团队的角色(None=非成员),供 entry_write_access 三态
     判定(OWNER/MEMBER 可写、VIEWER 403、非成员 404 同形)。tenant_id 参与判定:
@@ -110,7 +99,7 @@ class TableDescriberPort(Protocol):
 
 
 class RagRepo(Protocol):
-    """rag 持久化与基础设施端口(实现组合审计仓储,同会话=同事务,007 惯例)。"""
+    """知识库持久化与数据源内省端口；审计写入与当前数据库会话共用事务。"""
 
     async def upsert_table(
         self,
@@ -124,17 +113,17 @@ class RagRepo(Protocol):
         sample_queries: list[str],
         source_type: str,
         embedding: list[float] | None,
-        alias: str = "",  # 037
-        team_id: str | None = None,  # 102:归属值(set_team_id=True 时生效)
-        set_team_id: bool = False,  # 102:False=保留既有归属(缺省零回归)
+        alias: str = "",
+        team_id: str | None = None,  # 归属值(set_team_id=True 时生效)
+        set_team_id: bool = False,  # False=保留既有归属(缺省)
     ) -> None: ...
 
     async def set_entry_team(self, *, tenant_id: str, table_id: str, team_id: str | None) -> bool:
-        """归属变更原位置 NULL⇄team_id(102;单一实例,内容不动)。"""
+        """归属变更原位置 NULL⇄team_id(单一实例,内容不动)。"""
         ...
 
     async def publicize_team_entries(self, *, team_id: str) -> list[tuple[str, str]]:
-        """团队删除钩子(102):名下条目归属置空,返回受影响 (tenant, ds) 范围。"""
+        """团队删除钩子:名下条目归属置空,返回受影响 (tenant, ds) 范围。"""
         ...
 
     async def list_tables(
@@ -144,8 +133,8 @@ class RagRepo(Protocol):
         datasource_key: str | None,
         limit: int,
         offset: int,
-        team_scope: str = "all",  # 102:all|public|<team_id>(可见集合内筛选)
-        visible_team_ids: Sequence[str] = (),  # 102:调用者团队集合
+        team_scope: str = "all",  # all|public|<team_id>(可见集合内筛选)
+        visible_team_ids: Sequence[str] = (),  # 调用者团队集合
     ) -> tuple[list[KnowledgeEntry], int]: ...
 
     async def find_table(self, *, tenant_id: str, table_id: str) -> KnowledgeEntry | None: ...
@@ -157,7 +146,7 @@ class RagRepo(Protocol):
     async def allowed_schemas(
         self, *, tenant_id: str, tenant_key: str, datasource_key: str
     ) -> list[str]:
-        """可扫描 schema 集合(040:上传存在性校验与枚举端点候选源,与内省同源)。"""
+        """可扫描 schema 集合(上传存在性校验与枚举端点候选源,与内省同源)。"""
         ...
 
     async def column_comments(
@@ -168,16 +157,13 @@ class RagRepo(Protocol):
         self, *, tenant_id: str, datasource_key: str
     ) -> dict[tuple[str, str], tuple[str, str, str | None]]:
         """(schema_name, table_name) → (source_type, alias, team_id)——二元键防
-        跨 schema 同名表互遮(042);team_id 供上传写闸判既有条目归属(102)。"""
+        跨 schema 同名表互遮;team_id 供上传写闸判既有条目归属。"""
         ...
 
     async def delete_stale_entries(
         self, *, tenant_id: str, datasource_key: str, keep: list[tuple[str, str]]
     ) -> tuple[int, int]:
-        """042 对账:删除扫描集外的自动来源登记行,返回 (removed, manual_orphans)。
-
-        keep=本次扫描集 [(schema_name, table_name)];扫描集外人工/反馈行
-        只计数不删(不可逆资产交人工裁决)。"""
+        """删除当前扫描结果之外的自动来源条目，返回删除数和保留的人工孤儿数。"""
         ...
 
     async def recall_vector(
@@ -186,11 +172,11 @@ class RagRepo(Protocol):
         tenant_id: str,
         datasource_key: str,
         vector: list[float],
-        visible_team_ids: Sequence[str] = (),  # 102:可见集合过滤
+        visible_team_ids: Sequence[str] = (),  # 可见集合过滤
     ) -> list[RecallHit]: ...
 
     async def has_knowledge(self, *, tenant_id: str, datasource_key: str) -> bool:
-        """该数据源是否已灌表知识(064 闸门前置:零知识≠低相关,见 gate 消费点)。"""
+        """该数据源是否已灌表知识(闸门前置:零知识≠低相关,见 gate 消费点)。"""
         ...
 
     async def recall_fulltext(
@@ -199,7 +185,7 @@ class RagRepo(Protocol):
         tenant_id: str,
         datasource_key: str,
         question: str,
-        visible_team_ids: Sequence[str] = (),  # 102:可见集合过滤
+        visible_team_ids: Sequence[str] = (),  # 可见集合过滤
     ) -> list[RecallHit]: ...
 
     async def recall_history(
@@ -208,7 +194,7 @@ class RagRepo(Protocol):
         tenant_id: str,
         datasource_key: str,
         vector: list[float],
-        visible_team_ids: Sequence[str] = (),  # 102 伴生:样本可见集合过滤
+        visible_team_ids: Sequence[str] = (),  # 伴生:样本可见集合过滤
     ) -> list[HistorySample]: ...
 
     async def fetch_entries(
@@ -217,7 +203,7 @@ class RagRepo(Protocol):
         tenant_id: str,
         datasource_key: str,
         keys: list[tuple[str, str]],
-        visible_team_ids: Sequence[str] = (),  # 102:可见集合过滤(扩展路兜底)
+        visible_team_ids: Sequence[str] = (),  # 可见集合过滤(扩展路兜底)
     ) -> list[KnowledgeEntry]: ...
 
     async def insert_history(
@@ -228,10 +214,10 @@ class RagRepo(Protocol):
         question: str,
         sql_text: str,
         embedding: list[float] | None,
-        visible_teams: Sequence[str] = (),  # 102 伴生:样本来源可见集合(空=公共)
+        visible_teams: Sequence[str] = (),  # 伴生:样本来源可见集合(空=公共)
     ) -> None: ...
 
-    # ---- 070 反馈样本晋升/停用(与反馈处置同事务;调用方负责 commit) ----
+    # 反馈样本晋升/停用(与反馈处置同事务;调用方负责 commit) ----
 
     async def promote_feedback_sample(
         self,
@@ -242,7 +228,7 @@ class RagRepo(Protocol):
         sql_text: str,
         feedback_message_id: str,
         embedding: list[float] | None,
-        visible_teams: Sequence[str] = (),  # 102 伴生:样本来源可见集合(空=公共)
+        visible_teams: Sequence[str] = (),  # 伴生:样本来源可见集合(空=公共)
     ) -> None: ...
 
     async def disable_feedback_samples(self, *, feedback_message_id: str) -> None: ...
@@ -271,7 +257,7 @@ class RagRepo(Protocol):
         self, *, tenant_id: str, tenant_key: str, datasource_key: str
     ) -> list[IntrospectedTable]: ...
 
-    # ---- 052 知识覆盖报告(只读聚合输入;零写入零 LLM) ----
+    # 知识覆盖报告(只读聚合输入;零写入零 LLM) ----
 
     async def list_all_entries(
         self,
@@ -282,7 +268,7 @@ class RagRepo(Protocol):
     ) -> list[KnowledgeEntry]:
         """该 (租户, 数据源) 登记条目(无分页;治理面整集盘点)。
 
-        102:可见集合=公共 ∪ 调用者团队(覆盖报告读面与列表同口径)。"""
+        可见集合=公共 ∪ 调用者团队(覆盖报告读面与列表同口径)。"""
         ...
 
     async def failure_signals(

@@ -1,5 +1,4 @@
-/* 导航配置单源(web-nav spec「应用壳结构」「RBAC 菜单守卫」):
-   菜单可见性过滤与路由级守卫同源消费,新增能力域入口=加一行配置,零改壳代码。 */
+/* 导航配置单源(web-nav spec「应用壳结构」「RBAC 菜单守卫」): 菜单可见性过滤与路由级守卫同源消费,新增能力域入口=加一行配置,零改壳代码。 */
 
 import type { LucideIcon } from "lucide-react";
 import { FileText, ListTodo, MessageSquare, Store, KeyRound, Settings2 } from "lucide-react";

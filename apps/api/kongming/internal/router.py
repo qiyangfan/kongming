@@ -1,9 +1,9 @@
 """内部受控通道(ADR-002):agent 进程回调的唯一入口。
 
 设计约束:
-- Agent 无凭证,SQL 执行 100% 收口于此;
+- Agent 无凭证,SQL 执行 % 收口于此;
 - 纵深防御:内部令牌(middleware)→ 租户解析/绑定复校 → SQL 防火墙 →
-  行级 data_scope → 防火墙复检 → 只读连接池(事务级 search_path);
+ 行级 data_scope → 防火墙复检 → 只读连接池(事务级 search_path);
 - 全量落 sys_sql_audit(trace_id 贯穿,成功/拦截/失败三类)。
 """
 
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/internal", tags=["internal"])
 class SqlExecuteRequest(BaseModel):
     trace_id: str = Field(min_length=1, max_length=64)  # 与 sys_sql_audit.trace_id 同宽
     tenant_key: str = Field(min_length=1, max_length=64)
-    # 查询面 pattern 与注册边界同一规则(008 D4 口径一致性收口)
+    # 与注册数据源时使用相同的键格式，避免查询阶段接受无效键。
     datasource_key: str = Field(default="default", pattern=r"^[a-z][a-z0-9_]{1,63}$")
     sql_text: str = Field(min_length=1)
     user_id: uuid.UUID | None = None

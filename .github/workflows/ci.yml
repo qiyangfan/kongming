@@ -16,7 +16,7 @@ jobs:
     defaults:
       run:
         working-directory: apps/api
-    # 认证安全测试需要真实 PG/Redis(测试先行;conftest 自建 kongming_test 库、用 db15)
+      # 认证安全测试使用真实 PostgreSQL 和 Redis;conftest 准备 kongming_test 库。
     services:
       postgres:
         image: pgvector/pgvector:pg17
@@ -48,7 +48,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run mypy kongming
-      # pyright 与本地 make api-check 同参(054:本地/CI 门禁等价)
+      # pyright 参数与本地 make api-check 一致。
       - run: uv run pyright
       - run: uv run lint-imports
       # baseline 迁移对 km_readonly 无条件 GRANT(0001),角色由 pg-init 创建;
@@ -74,7 +74,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run mypy kongming_agent
-      # pyright 与本地 make agent-check 同参(054:本地/CI 门禁等价)
+      # pyright 参数与本地 make agent-check 一致。
       - run: uv run pyright
       - run: uv run lint-imports
       - run: uv run pytest -q --cov
@@ -135,10 +135,10 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --frozen
-      # 单源:与本地 make check 同一目标(055 教训——两处手写曾单边漂移)
+      # 复用本地 make check，确保 CI 与本地执行相同的契约检查。
       - run: make -C ../.. contracts-check
 
-  # ── 门禁 6:镜像构建(060;不推送,防 Dockerfile/路径依赖断裂静默) ──
+  # ── 镜像构建（只构建，用于检查 Dockerfile 和路径依赖）──
   images:
     runs-on: ubuntu-latest
     steps:

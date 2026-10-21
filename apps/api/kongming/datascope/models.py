@@ -1,4 +1,4 @@
-"""datascope 领域模型:纯 dataclass,零框架依赖(宪法 Article II)。
+"""datascope 领域模型:纯 dataclass,不依赖 Web 框架或数据库。
 
 枚举值与 sys_role.data_scope CHECK 约束同源(字符串字面量)。
 ScopeFilter 是「过滤意图」:领域只产意图,AST 改写在 rewrite 模块。

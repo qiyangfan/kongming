@@ -1,4 +1,4 @@
-"""024 document-rag 测试:分块/上传幂等/检索隔离/知识分流两路。"""
+"""文档 RAG 测试:分块/上传幂等/检索隔离/知识分流两路。"""
 # pyright: reportPrivateUsage=false
 
 import pytest
@@ -125,7 +125,7 @@ async def test_doc_admin_forbidden(
 async def test_retrieve_doc_hints_isolated(client: AsyncClient, session: AsyncSession) -> None:
     """文档命中不进 schema_hint;doc_hints 带 source_ref(双通道隔离)。
 
-    R1-L8:断言无条件——ASCII 词构造确定性全文命中(simple 配置对中文整段
+    断言无条件——ASCII 词构造确定性全文命中(simple 配置对中文整段
     词命中不稳定;向量路在测试环境无 agent 降级)。"""
     token = await _admin(client, session)
     await client.post(
@@ -146,7 +146,7 @@ async def test_retrieve_doc_hints_isolated(client: AsyncClient, session: AsyncSe
         json={"tenant_key": "default", "question": "return policy"},
     )
     assert r.status_code == 200
-    body = r.json()  # pyright: ignore[reportPossiblyUnboundVariable]  # range(2) 恒迭代,r 必已绑定
+    body = r.json()  # pyright: ignore[reportPossiblyUnboundVariable]
     assert body["doc_hints"], "全文路应确定性命中 return/policy"
     assert body["doc_hints"][0]["source_ref"].startswith("policy.md §")
     assert "schema_hint" in body  # schema 通道独立(可为空)

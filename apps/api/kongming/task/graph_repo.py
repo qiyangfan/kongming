@@ -1,4 +1,4 @@
-"""图级检查点与图内挂起的存储层(add-graph-checkpoint)。
+"""图级检查点与图内挂起的存储层。
 
 职责边界:检查点 blob 对控制面**不透明**(agent 序列化、控制面只存不取,
 不理解图框架格式——控制面与图框架解耦,换运行时只换 agent 适配器);
@@ -68,7 +68,7 @@ class SqlGraphRepo:
     async def latest_checkpoint(
         self, *, tenant_id: str, thread_id: str, checkpoint_ns: str
     ) -> dict[str, Any] | None:
-        # id(uuid7)作时间有序 tiebreaker:now() 是事务戳,同请求连写可能同戳,
+        # id(uuid7)作时间有序 tiebreaker:now 是事务戳,同请求连写可能同戳,
         # 仅按 created_at 排序在快照行间取序不定
         row = (
             (

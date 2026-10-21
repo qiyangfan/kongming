@@ -1,17 +1,4 @@
-"""0009: prompt-guardrails 域两表(020)
-
-Revision ID: 0009
-Revises: 0008
-Create Date: 2026-08-23
-
-sys_guardrail_audit:护栏触发审计(输入/输出/工具意图三层;拦截/脱敏全量落,
-content_digest 为脱敏摘要——原值永不落审计);idx_guard_audit_trace 服务
-trace 贯穿排查。
-sys_guardrail_rule:规则配置覆盖表(仅存超管调整项;rule_name 与代码注册表
-对齐,未配置行=注册表缺省生效)——代码注册表即唯一规则定义处(与权限点
-同哲学),本表只做启用/动作/阈值覆盖。
-**downgrade**:删两表(新域零存量)。
-"""
+"""新增护栏触发审计表和规则覆盖表。原始触发内容不入审计，规则定义仍以代码注册表为准。"""
 
 from alembic import op
 

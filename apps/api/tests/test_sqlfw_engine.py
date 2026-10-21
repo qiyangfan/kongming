@@ -1,8 +1,8 @@
-"""053 SQL 安全引擎接入:影子对拍/降级 fallback/深嵌套受控/单遍复用。
+"""SQL 安全引擎接入测试:影子对拍/降级 fallback/深嵌套受控/单遍复用。
 
-宪法 Article III 测试先行:安全管线行为契约(影子不改判、降级不失败、
-深嵌套受控、单遍解析)以测试钉死。引擎以 duck-typing 假件注入
-(仅需 .passed/.reason 与 liannu.Verdict 同构)。
+验证影子模式判定、降级、深嵌套和单遍解析行为。
+引擎以 duck-typing 假件注入(仅需 .passed/.reason 与
+liannu.Verdict 同构)。
 """
 
 import logging
@@ -96,7 +96,7 @@ def _reset_guard() -> Generator[None]:  # pyright: ignore[reportUnusedFunction]
     guard.configure("builtin")
 
 
-# ============ 影子模式:内置权威,引擎只观测(任务 2.2/6.2)============
+# ============ 影子模式:内置权威,引擎只观测 ============
 
 
 def test_shadow_builtin_authoritative_on_mismatch() -> None:
@@ -134,7 +134,7 @@ def test_shadow_zero_mismatch_when_agree() -> None:
     assert guard.snapshot_stats()["fallback_total"] == 0
 
 
-# ============ 切主模式:引擎权威 + 请求级降级(任务 6.1)============
+# ============ 切主模式:引擎权威 + 请求级降级============
 
 
 def test_primary_engine_verdict_authoritative() -> None:
@@ -177,7 +177,7 @@ def test_primary_engine_parse_boom_falls_back(
     assert any("ENGINE_FALLBACK" in r.getMessage() for r in caplog.records)
 
 
-# ============ 深嵌套受控(任务 4.2,引擎模式)============
+# ============ 深嵌套受控(引擎模式)============
 
 
 def test_deep_nested_controlled_error_in_primary() -> None:
@@ -188,7 +188,7 @@ def test_deep_nested_controlled_error_in_primary() -> None:
     assert v.reason is not None and v.reason.startswith("DEPTH_EXCEEDED")
 
 
-# ============ 单遍解析复用(任务 4.1)============
+# ============ 单遍解析复用============
 
 
 def test_single_parse_shared_in_builtin(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -212,7 +212,7 @@ def test_single_parse_shared_in_builtin(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_engine_mode_matches_builtin_rewrite_byte_equal() -> None:
-    """主模式改写产物与内置路径逐字节一致(任务 5.1 对拍)。"""
+    """主模式改写产物与内置路径逐字节一致。"""
     from kongming.datascope import rewrite
     from kongming.datascope.models import FilterType, ScopeFilter
 
@@ -227,7 +227,7 @@ def test_engine_mode_matches_builtin_rewrite_byte_equal() -> None:
     assert engine_params == builtin_params
 
 
-# ============ 模式解析与启动自检(任务 3.1)============
+# ============ 模式解析与启动自检============
 
 
 def test_invalid_mode_falls_back_to_builtin(caplog: pytest.LogCaptureFixture) -> None:

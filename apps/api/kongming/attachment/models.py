@@ -1,4 +1,4 @@
-"""attachment 领域模型(030,零框架):类型白名单与 magic bytes 复核。
+"""attachment 领域模型(零框架):类型白名单与 magic bytes 复核。
 
 Content-Type 可伪造,magic 不可——白名单判定以文件头为准。
 """

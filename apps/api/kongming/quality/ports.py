@@ -1,6 +1,6 @@
-"""quality 域端口(069):仓储协议(router/service 依赖本端口,零 SQLAlchemy 泄漏)。
+"""quality 域端口:仓储协议(router/service 依赖本端口,零 SQLAlchemy 泄漏)。
 
-与 audit 域同款:Protocol 反转,domain 不 import 框架(宪法 Article II)。
+以 Protocol 隔离 domain 与框架及具体存储实现。
 """
 
 from collections.abc import Coroutine

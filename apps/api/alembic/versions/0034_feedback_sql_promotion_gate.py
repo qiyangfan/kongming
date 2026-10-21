@@ -1,21 +1,4 @@
-"""070-feedback-sql-promotion-gate:query_history 来源/反馈关联/召回启用态。
-
-纠错 SQL 此前提交即入 query_history(可召回),管理员驳回也无法撤回;本迁移
-把样本准入改为「审核后晋升」:
-- source_type:EXECUTION(执行成功样本)|FEEDBACK(审核晋升的纠错样本)|
-  LEGACY(来源无法证明的存量行——退出召回但保留);
-- feedback_message_id:FEEDBACK 样本的反馈消息关联(同问句异来源并存的
-  幂等键;重复提交停用旧样本);
-- recall_enabled:召回启用态(非 ADOPTED 的反馈样本、LEGACY 行=false)。
-- 原唯一索引 uq_query_history_tdq 收窄为仅约束执行成功样本(部分索引),
-  新增反馈 messageId 幂等索引——同问句可同时保留执行样本与纠错样本。
-- 存量治理:能从成功对话(问句+sql_text 精确匹配 SUCCESS assistant 消息)
-  证明的执行样本保留召回;能匹配当前反馈(chat_message.corrected_sql)
-  的按处置状态恢复(ADOPTED 启用,其余停用);均无法证明的标记 LEGACY 停用。
-
-Revision ID: 0034
-Revises: 0033
-"""
+"""为查询历史增加来源、反馈关联和召回状态，并将纠错 SQL 改为审核后晋升。无法确认来源的存量样本保留但退出召回。"""
 
 from sqlalchemy import text
 

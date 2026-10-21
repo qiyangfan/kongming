@@ -1,23 +1,11 @@
-"""问答成本控制(062-chat-cost-control):登录用户面双闸 + 公开嵌入面单闸。
+"""问答限流与用量配额。
 
-倒挂背景:成本控制此前只覆盖已有计费关系的 api-key 调用方(034 配额切面),
-而匿名访客经公开嵌入页、任意登录用户刷问答却是零成本控制(单次问答烧
-5+ 次 LLM 调用)。
+登录用户按 (租户, 用户) 维度限流,并按日/月统计调用次数;公开嵌入按
+(助手标识, 客户端 IP) 维度限流。速率用 Redis 滑动窗口,Redis 不可用放行;
+配额读数失败则拒绝;失败调用也计入配额。
 
-本模块(零框架,宪法 Article II):
-- **速率闸**(fail-open):Redis 近似滑动窗口(跨窗口平滑,窗口切换不再
-  立即发放完整新额度),_LIMITER 不可用放行——限流是
-  配额保护层而非安全闸(安全闸=权限点/租户/防火墙各自独立,与 019 同口径);
-- **配额闸**(fail-closed):日/月按次,已用量 = sys_llm_usage 行数按窗口
-  count(不新增用量表,避免与 055 对账重复建账);读数异常拒绝并落审计
-  ——放行即失控窗口;
-- **配额口径**:失败尝试计入(072「用量每尝试一条」+ 038「失败调用也采集」
-  既有语义)——按次配额统计的是「调用次数」而非「成功次数」,不因本变更
-  引入偏差(072 任务 3.1 的口径移交在此闭合)。
-
-公开嵌入面(无用户/租户维度可用):(助手标识, 客户端 IP) 维度速率闸,
-IP 取自 ClientIpMiddleware contextvar(经 --forwarded-allow-ips 约束,
-非客户端可伪造),fail-open。
+公开嵌入的 IP 从受信代理解析后的请求上下文读取。
+限流只保护配额,不替代权限、租户隔离或 SQL 防火墙。
 """
 
 import datetime as dt
@@ -27,11 +15,11 @@ from typing import Protocol
 
 from kongming.billing.models import check_quota
 
-_TZ = dt.timezone(dt.timedelta(hours=8))  # Asia/Shanghai(与 billing 031 同口径)
+_TZ = dt.timezone(dt.timedelta(hours=8))  # Asia/Shanghai(与 billing 同口径)
 
 log = logging.getLogger(__name__)
 
-# 062:达预警线值(请求域;与 audit 的 client_ip_var 同范式——横切回传响应头,
+# 达预警线值(请求域;与 audit 的 client_ip_var 同范式——横切回传响应头,
 # 免穿 service→outcome 多层 dataclass)。每请求独立 task,无跨请求泄漏。
 quota_warn_var: ContextVar[str] = ContextVar("kongming_chat_quota_warn", default="")
 
@@ -118,7 +106,7 @@ class ChatCostGate:
                 allowed = await self._limiter.allow_sliding(
                     f"chat:{tenant_id}:{user_id}", limit=self._rate, window_sec=60
                 )
-            except Exception:  # noqa: BLE001  # 限流存储异常=fail-open 放行(019 同口径)
+            except Exception:  # noqa: BLE001 # 限流存储异常=fail-open 放行(同口径)
                 log.error("速率闸存储异常,fail-open 放行", exc_info=True)
                 allowed = True
             if not allowed:

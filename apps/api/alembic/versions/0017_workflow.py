@@ -1,13 +1,12 @@
-"""0017: workflow-orchestration 域两表(029)
+"""工作流定义与执行记录表。
 
 Revision ID: 0017
 Revises: 0016
 Create Date: 2026-08-23
 
-sys_workflow_def:工作流定义,版本冻结(tenant+wf_key+version 唯一,
-旧版本无更新路径);definition JSONB={nodes:[{id,type,config,depends_on}]}。
-sys_workflow_run:执行历史;status VARCHAR+CHECK 四终态(ADR-004)。
-**downgrade**:删两表(新域零存量)。
+定义按租户、key 和版本唯一保存，执行记录独立保留。状态使用 VARCHAR 与
+CHECK 约束(ADR-004)。
+**downgrade**:删除两张表。
 """
 
 from alembic import op

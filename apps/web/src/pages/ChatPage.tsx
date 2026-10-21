@@ -1,15 +1,4 @@
-/* 对话页(web-nav spec「对话区渲染」+ 017 流式 + 039 冷启动建议问题):
-   历史回显 + 流式提问(阶段点亮/SQL 提前/summary 打字机;终态由 AssistantCard
-   接管)+ 新会话品牌空态(下方建议问句 chips,点击即问)。路由参数 sessionId
-   是会话选择的单源(刷新/直达天然成立)。
-   错误路径:流异常回填草稿并提示;会话被他端删除(404)时收敛回新建态。
-   取消语义(078):切会话/新建/切租户/数据源切换/卸载时中止在途流;流式期间
-   提供显式「停止接收」入口——前端中止读取,控制面仍跑完落库(既有契约:
-   主动取消不等同于后端中止),故文案只称"不再接收/后台完成",禁"已取消"。
-   滚动跟随(078):近底才自动贴底(阈值近底判定纯函数),用户上滚查看历史/
-   长结果表时不被拽回;出现「回到底部」浮标,点击即回底并恢复跟随。
-   中流刷新/停止后:末条为 USER 即触发有界恢复回查(控制面保证写终态行),
-   应答自行出现;预算耗尽即停,不无限轮询。 */
+/* 对话页展示历史消息、接收流式回答，并在新会话时提供建议问题。sessionId 决定当前会话；请求失败时保留输入草稿。 */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -86,7 +75,7 @@ function EmptyState({
           数据之事,直问即可。问库存、问销量、问趋势—— 运筹帷幄之事,交给军师。
         </p>
       </div>
-      {/* 039 冷启动建议:加载骨架/空清单或失败静默隐藏(不阻塞品牌空态) */}
+      {/* 冷启动建议:加载骨架/空清单或失败静默隐藏(不阻塞品牌空态) */}
       {loading && items.length === 0 && (
         <div className="flex max-w-lg flex-wrap justify-center gap-2" aria-hidden>
           <Skeleton className="h-8 w-44 rounded-full" />
@@ -113,10 +102,7 @@ function EmptyState({
   );
 }
 
-/** 终态快照(R1-B1):result 到达即由 ChatQueryOut 乐观构造本轮消息渲染,
- * 消息历史 refetch 含该轮(message_id 命中)后自然替换——消灭「先清空后补位」
- * 的空白间隙;persist=false 无历史可对照时保留至下一轮/切换上下文。 */
-/** 030 附件徽标(user 气泡两处共用:历史回显与即时快照) */
+/** 附件徽标(user 气泡两处共用:历史回显与即时快照) */
 function AttachmentBadge({ items }: { items: { [key: string]: unknown }[] }) {
   if (items.length === 0) return null;
   return (
@@ -129,7 +115,7 @@ function AttachmentBadge({ items }: { items: { [key: string]: unknown }[] }) {
 }
 
 function toSyntheticMessage(out: ChatQueryOut): SessionMessageOut {
-  // 044 四态:NO_DATA=知识未覆盖如实说明(中性,非失败)
+  // NO_DATA 为中性说明态(知识未覆盖),非失败
   const status = out.success
     ? "SUCCESS"
     : out.verdict === "BLOCKED"
@@ -139,7 +125,7 @@ function toSyntheticMessage(out: ChatQueryOut): SessionMessageOut {
         : "FAILED";
   return {
     // message_id 缺失(落库容错分支)置空串:FeedbackActions 的 !msg.id 守卫
-    // 与 EXPLAIN 入口({msg.sql && ...}同上)天然不渲染,避免非 UUID 直传 422(R3-B2)
+    // 与 EXPLAIN 入口({msg.sql && ...}同上)天然不渲染,避免非 UUID 直传 422
     id: out.message_id ?? "",
     role: "ASSISTANT",
     question: null,
@@ -147,35 +133,31 @@ function toSyntheticMessage(out: ChatQueryOut): SessionMessageOut {
     sql: out.sql || null,
     status,
     error: out.error,
-    error_detail: out.error_detail ?? null, // 047:技术详情折叠(快照与回显同源)
+    error_detail: out.error_detail ?? null, // 快照与历史回显同源
     result: {
       columns: out.columns,
       rows: out.rows,
       insights: out.insights,
       stats: out.stats,
       chart: out.chart,
-      // 049:候选快照同源(与 041 column_labels 同款先例)——漏带会使快照期
-      // 回落单图绑定、历史 refetch 后切换到候选绑定,产生一次视觉跳变
+      // 终态快照须带候选:漏带时快照期回落单图绑定,历史载入后又切到
+      // 候选绑定,产生一次视觉跳变
       chart_candidates: out.chart_candidates ?? [],
       error: out.error,
-      error_detail: out.error_detail ?? null, // 047 同源
-      // 026:终态快照携带产物卡(与历史回显 MessageResultOut.artifacts 同形),
-      // 缺档空数组 → assistant-card 回落既有形态,与读档重算兜底口径一致
+      error_detail: out.error_detail ?? null, // 同源
+      // 终态快照携带产物卡(与历史回显同形);缺档空数组回落既有形态
       artifacts: out.artifacts ?? [],
-      // 041:呈现层列标签快照同源(与 artifacts/attachments 同款先例)——
-      // 漏带会使快照期表头物理名、历史 refetch 后闪变业务名(评审实锤)
+      // 快照和历史消息使用相同列标签,避免表头在两种状态间切换名称
       column_labels: out.column_labels ?? [],
     },
     rating: null,
     corrected_sql: null,
     feedback_comment: null,
-    attachments: out.attachments ?? [], // 030:终态快照同源
+    attachments: out.attachments ?? [], // 终态快照同源
   };
 }
 
-/* 078 任务 2:历史消息项按数据字段 memo——比较器只比 msg 引用(react-query
-   结构共享保证未变消息引用稳定),回调身份/内联对象不参与比较;过程事件不再
-   广播到页面级 state,本组件不再随每个流事件重渲染。 */
+/* 只比较消息引用，避免每个流事件都重渲染历史消息。 */
 const MessageRow = memo(function MessageRow({ m }: { m: SessionMessageOut }) {
   if (m.role === "USER") {
     return (
@@ -196,7 +178,7 @@ function isStatus(err: unknown, status: number): boolean {
   return (err as Error & { status?: number }).status === status;
 }
 
-/** 在途流暂停态(078):发起时一次性创建,过程事件不再经它广播 */
+/** 在途流状态:发起时一次性创建,过程事件不经它广播 */
 interface StreamingTurnStart {
   question: string;
   body: unknown;
@@ -206,7 +188,7 @@ interface StreamingTurnStart {
 
 export default function ChatPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
-  // 088:会话内一键生成报告(入口 a:既有问答产物为素材;新会话无 sid=直接指令)
+  // 会话内一键生成报告(入口 a:既有问答产物为素材;新会话无 sid=直接指令)
   const canGenerateReport = hasPerm(
     useAuth((s) => s.user),
     "report:generate",
@@ -223,13 +205,14 @@ export default function ChatPage() {
   const navigate = useNavigate();
   const [draft, setDraft] = useState("");
   const [streaming, setStreaming] = useState<StreamingTurnStart | null>(null);
+  // 本轮终态快照:result 到达后先用快照渲染,消息历史载入该轮后替换,避免中间空白
   const [finalized, setFinalized] = useState<{ question: string; out: ChatQueryOut } | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
-  // 078 任务 3:主动停止接收后的口径提示(禁"已取消"类误导措辞)
+  // 主动停止接收后的口径提示(禁"已取消"类误导措辞)
   const [stoppedNotice, setStoppedNotice] = useState(false);
   const agentMode = useAgentMode((s) => s.mode);
   const setAgentMode = useAgentMode((s) => s.setMode);
-  // 019 待确认写工具(独立于 finalized 快照:快照退位由历史接管后确认卡
+  // 待确认写工具(独立于 finalized 快照:快照退位由历史接管后确认卡
   // 仍在,直到用户确认/拒绝或切换上下文——响应级瞬态,不落库不回显)
   const [pendingConfirm, setPendingConfirm] = useState<{
     pending: ChatQueryOut["pending_tool_calls"];
@@ -242,10 +225,8 @@ export default function ChatPage() {
     tenant: string | null;
     ds: string | null;
   } | null>(null);
-  // 本流自建会话的导航标记(R2-B2:取消闸豁免依据)
+  // 本流自建会话的导航标记(取消闸豁免依据)
   const selfNavigatedRef = useRef<string | null>(null);
-  // navigate/invalidate 回调里读最新值的稳定引用(sid 归一 null:useParams
-  // 无参数时为 undefined,与流发起上下文的 null 归一比对——不归一则守卫恒 false)
   async function submitGenerateReport(): Promise<void> {
     const instruction = reportInstruction.trim();
     if (reportBusy || !instruction) return;
@@ -269,13 +250,15 @@ export default function ChatPage() {
     }
   }
 
+  // navigate/invalidate 回调读最新值的稳定引用;sid 归一 null(useParams
+  // 无参数时为 undefined,与流发起上下文的 null 归一比对,否则守卫恒 false)
   const sessionIdRef = useRef<string | null>(sessionId ?? null);
   sessionIdRef.current = sessionId ?? null;
   const tenantRef = useRef(current);
   tenantRef.current = current;
   const dsRef = useRef(datasource);
   dsRef.current = datasource;
-  // 078 任务 1:滚动容器视口引用 + 近底跟随状态。视口经 ScrollArea Root 探
+  // 滚动容器视口引用 + 近底跟随状态。视口经 ScrollArea Root 探
   // data-slot 取得(不改双仓标准件 ui/scroll-area.tsx;Radix 隐藏原生滚动条,
   // 判定不能挂 window)
   const scrollRootRef = useRef<HTMLDivElement>(null);
@@ -291,7 +274,7 @@ export default function ChatPage() {
     enabled: sessionId !== undefined,
   });
 
-  // 039 冷启动建议:仅新建态干净分支启用;键含租户+数据源双维度,切换即换档
+  // 冷启动建议:仅新建态干净分支启用;键含租户+数据源双维度,切换即换档
   const suggestions = useQuery({
     queryKey: ["chat-suggestions", current, datasource],
     queryFn: () => getSuggestions(datasource),
@@ -306,10 +289,7 @@ export default function ChatPage() {
     }
   }, [messages.isError, messages.error, qc, navigate, current]);
 
-  // 114 录音态(声明在取消闸 effect 之前:该 effect 与卸载 effect 都要调
-  // cancelRecording);useCallback 稳定引用(评审修复——录音流原只在 Escape
-  // 一个出口关闭,路由跳转离开页面或录音中切会话/数据源都会让 getUserMedia
-  // 的 track 泄漏,麦克风占用不释放,且转写文本会写进切换后的新上下文输入框)
+  // 录音状态和取消回调要在两个清理 effect 前声明，供切换上下文和卸载时释放音轨并丢弃旧转写。
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -325,9 +305,9 @@ export default function ChatPage() {
     setTranscribing(false);
   }, []);
 
-  // 取消闸(017):上下文变化(切会话/新建/切租户/切数据源)即中止在途流并
+  // 取消闸:上下文变化(切会话/新建/切租户/切数据源)即中止在途流并
   // 清残留呈现;卸载时同样中止(闭包捕获最新 refs)。
-  // R2-B2 豁免:本流自建会话的 navigate 也会触发 sessionId 变化——该导航
+  // 豁免:本流自建会话的 navigate 也会触发 sessionId 变化——该导航
   // 是终态接管的一部分,不得清快照(否则接管间隙以骨架屏闪变复活)。
   useEffect(() => {
     if (selfNavigatedRef.current !== null && selfNavigatedRef.current === sessionId) {
@@ -348,7 +328,7 @@ export default function ChatPage() {
   useEffect(
     () => () => {
       abortRef.current?.abort();
-      cancelRecording(); // 路由离开页面:释放麦克风 track(评审修复,泄漏面)
+      cancelRecording(); // 路由离开页面:释放麦克风 track(泄漏面)
     },
     [cancelRecording],
   );
@@ -362,14 +342,14 @@ export default function ChatPage() {
     }
   }, [messages.data, finalized]);
 
-  // 078 任务 1:视口引用挂载后取一次(ScrollArea 常驻,分支切换不卸载)
+  // 视口引用挂载后取一次(ScrollArea 常驻,分支切换不卸载)
   useEffect(() => {
     const root = scrollRootRef.current;
     if (!root) return;
     viewportRef.current = root.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]');
   }, []);
 
-  // 078 任务 1:滚动监听只翻转布尔(状态更新限于变化帧,防每帧 setState)
+  // 滚动监听只翻转布尔(状态更新限于变化帧,防每帧 setState)
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
@@ -382,13 +362,13 @@ export default function ChatPage() {
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
-  // 078 任务 1:切换会话强制贴底(用户主动进入,从最新开始读)
+  // 切换会话强制贴底(用户主动进入,从最新开始读)
   useEffect(() => {
     forceBottomRef.current = true;
     setFollowBottom(true);
   }, [sessionId]);
 
-  // 078 任务 1:新旧消息/在途占位变化后——近底才跟随;非跟随即让用户留在
+  // 新旧消息/在途占位变化后——近底才跟随;非跟随即让用户留在
   // 原处(浮标提示可回底)。双 rAF:等 React 提交 + 布局完成再度量。
   useEffect(() => {
     const el = viewportRef.current;
@@ -408,7 +388,7 @@ export default function ChatPage() {
     };
   }, [messages.data, streaming, followBottom, sessionId]);
 
-  // 078 任务 3:有界恢复回查——末条 USER 且无 ASSISTANT(中流刷新/停止接收)
+  // 有界恢复回查——末条 USER 且无 ASSISTANT(中流刷新/停止接收)
   // 即服务端有轮次在收尾;budget 跨数据变更累计(防每次 refetch 重置变无限轮询),
   // 终态出现或超时即停;离开路由由 cleanup 兜底(无残留轮询)。
   const recoveryDeadlineRef = useRef(0);
@@ -449,15 +429,14 @@ export default function ChatPage() {
     setStreaming(null);
     setStoppedNotice(false);
     setAskError(null);
-    // 019:待确认调用独立留存(快照退位不带走确认入口);
-    // ?? [] 兜底:前后端版本错位(滚动部署)缺键时不炸(R1-D3)
+    // 待确认调用独立留存(快照退位不带走确认入口);
+    // ?? [] 兜底:前后端版本错位(滚动部署)缺键时不炸
     const pendingCalls = out.pending_tool_calls ?? [];
     if (pendingCalls.length > 0 && out.session_id) {
       setPendingConfirm({ pending: pendingCalls, sessionId: out.session_id });
     }
-    setFinalized({ question, out }); // 乐观渲染本轮,历史 refetch 后替换(R1-B1)
-    // 先导航(消空态闪回),再失效侧栏;新会话 URL 即状态(与原同步路径同构);
-    // 自建导航打标——取消闸据此豁免(R2-B2)
+    setFinalized({ question, out }); // 乐观渲染本轮,历史 refetch 后替换
+    // 先导航(消空态闪回),再失效侧栏;自建导航打标,取消闸据此豁免
     if (out.session_id && out.session_id !== sessionIdRef.current) {
       selfNavigatedRef.current = out.session_id;
       navigate(`/chat/${out.session_id}`, { replace: true });
@@ -480,7 +459,7 @@ export default function ChatPage() {
     setAskError(message);
     // 失败回填,但尊重用户等待期间的新输入
     setDraft((prev) => (prev.trim() ? prev : question));
-    // R1-F4:传输层失败时附件未被消费(agent 未取件),chips 恢复可重试;
+    // 传输层失败时附件未被消费(agent 未取件),chips 恢复可重试;
     // 尊重等待期间用户新贴的附件(去重合并)
     if (attSnapshot.length) {
       setAttachments((prev) => {
@@ -490,15 +469,13 @@ export default function ChatPage() {
     }
   }
 
-  // 030:附件状态(已上传附件 chips;发送后清空)
+  // 附件状态(已上传附件 chips;发送后清空)
   const [attachments, setAttachments] = useState<{ id: string; filename: string }[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // 114:语音输入(MediaRecorder → /chat/stt → 文本填入输入框,用户可修正后
+  // 语音输入(MediaRecorder → /chat/stt → 文本填入输入框,用户可修正后
   // 发送;Escape 取消丢弃)。音频即转即弃,前端不留存。
-  // 录音/转写态已上移至取消闸 effect 之前(该 effect 与卸载 effect 共用
-  // cancelRecording;本区只保留交互逻辑)。
 
   async function onMicClick(): Promise<void> {
     if (recording) {
@@ -510,7 +487,7 @@ export default function ChatPage() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       // 代际守卫:每次开始录音自增;取消/上下文切换后旧代际的 dataavailable/
       // onstop/转写回调全部失效——防止 track 停止时浏览器 flush 的尾块与
-      // 在途转写结果写进切换后的新上下文输入框(评审修复)
+      // 在途转写结果写进切换后的新上下文输入框
       const gen = ++recGenRef.current;
       const rec = new MediaRecorder(stream);
       chunksRef.current = [];
@@ -564,7 +541,7 @@ export default function ChatPage() {
 
   async function onPickFile(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = e.target.files?.[0];
-    e.target.value = ""; // 同文件可重选(009 R2-S2 教训)
+    e.target.value = ""; // 同文件可重选
     if (!file) return;
     if (attachments.length >= 3) {
       setAskError("一次最多引用 3 张图片。");
@@ -583,16 +560,13 @@ export default function ChatPage() {
   }
 
   async function submit(text?: string): Promise<void> {
-    // 039:建议 chips 直发(text 显式传入,保留草稿不被清空);缺省=输入框草稿
+    // 建议 chips 直发(text 显式传入,保留草稿不被清空);缺省=输入框草稿
     const fromDraft = text === undefined;
     const q = (text ?? draft).trim();
-    // R1-S2:与按钮/契约对齐(question min_length=1)——曾放行纯附件,
-    // Enter 可绕过按钮禁用直撞 422 且 chips 已清空
-    // 审查循环 B1:上传中禁发——此时提交 attIds 不含上传中附件,
-    // 问答无图且完成后 chips 孤立出现(与按钮禁用态对齐)
+    // question 至少包含一个非空字符；上传未完成时不提交,避免请求遗漏附件。
     if (!q || uploading || streaming !== null) return; // 防重复提交
     const attIds = attachments.map((a) => a.id);
-    const attSnapshot = attachments; // R1-F4:失败恢复用快照
+    const attSnapshot = attachments; // 失败恢复用快照
     setAttachments([]);
     if (fromDraft) setDraft("");
     setAskError(null);
@@ -601,17 +575,16 @@ export default function ChatPage() {
     const ac = new AbortController();
     abortRef.current = ac;
     streamCtxRef.current = { sid: sessionId ?? null, tenant: current, ds: datasource };
-    // 078:在途态一次性创建(占位只插一次);过程事件由 StreamingTurn 自持,
-    // 不再经页面级 state 逐事件广播
+    // 在途态一次性创建,占位只插一次;过程事件由 StreamingTurn 自持
     setStreaming({
       question: q,
       ac,
       attSnapshot,
       body: {
         question: q,
-        datasource_key: datasource, // 选中的数据源随查询发送(008)
-        agent_mode: agentMode, // 019:ReAct 内核开关(缺省 recipe 零回归)
-        ...(attIds.length ? { attachment_ids: attIds } : {}), // 030
+        datasource_key: datasource,
+        agent_mode: agentMode, // ReAct 内核开关,缺省 recipe
+        ...(attIds.length ? { attachment_ids: attIds } : {}),
         ...(sessionId ? { session_id: sessionId } : {}),
       },
     });
@@ -620,8 +593,7 @@ export default function ChatPage() {
     setFollowBottom(true);
   }
 
-  /** 078 任务 3:停止接收——中止前端读取;控制面仍跑完落库(既有契约),
-   *  文案只述"不再接收/后台完成",问句回框可重发 */
+  /** 停止接收会中止前端读取；服务端仍完成请求并保存结果。 */
   function stopStreaming(): void {
     const s = streaming;
     abortRef.current?.abort();
@@ -634,7 +606,7 @@ export default function ChatPage() {
     }
   }
 
-  // 078 任务 2.3:快照消息 useMemo 稳定引用(finalized 对象仅在轮次边界变)
+  // 快照消息 useMemo 稳定引用(finalized 对象仅在轮次边界变)
   const finalizedMsg = useMemo(
     () => (finalized ? toSyntheticMessage(finalized.out) : null),
     [finalized],
@@ -702,7 +674,7 @@ export default function ChatPage() {
                   onAllResolved={() => setPendingConfirm(null)}
                 />
               )}
-              {/* 078 任务 3:停止接收后的口径呈现——禁"已取消/已停止生成"类误导措辞 */}
+              {/* 停止接收后的口径呈现——禁"已取消/已停止生成"类误导措辞 */}
               {stoppedNotice && (
                 <div
                   className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm"
@@ -733,7 +705,7 @@ export default function ChatPage() {
         </div>
       </ScrollArea>
 
-      {/* 078 任务 1.4:回到底部浮标——非跟随时出现;到达底部(滚动监听翻转
+      {/* 回到底部浮标——非跟随时出现;到达底部(滚动监听翻转
           followBottom)或点击回底后消失 */}
       {!followBottom && (
         <div className="pointer-events-none absolute inset-x-0 bottom-28 z-10 flex justify-center">
@@ -759,7 +731,7 @@ export default function ChatPage() {
           底部安全区由导航层统一避让(bottom-nav pb-safe),此处不再叠加 */}
       <div className="mb-3 border-t border-border bg-background px-4 py-3 md:mb-0">
         <div className="mx-auto max-w-3xl">
-          {/* 019:Agent 内核开关(自主工具调用=ReAct;缺省 recipe 零回归);
+          {/* Agent 内核开关(自主工具调用=ReAct;缺省 recipe 零回归);
               UI 命名「运筹模式」与空态文案「运筹帷幄之事,交给军师」同源,实现术语不入用户文案 */}
           <div className="mb-2 flex items-center justify-between gap-2">
             {/* 附件钮置于工具行左位:输入行只留 [输入框|发送],水平间距以容器
@@ -780,7 +752,7 @@ export default function ChatPage() {
                 <Paperclip className="size-4" aria-hidden />
               )}
             </Button>
-            {/* 114 语音输入:录音中 Mic 变警示色+脉冲;转写中文本填入输入框,
+            {/* 语音输入:录音中 Mic 变警示色+脉冲;转写中文本填入输入框,
                 用户可修正后发送;Escape 取消丢弃 */}
             <Button
               variant="ghost"
@@ -835,7 +807,7 @@ export default function ChatPage() {
               </Tooltip>
             </div>
           </div>
-          {/* 088:一键生成报告对话框(入口 a/b 同源;发起后跳报告详情看进度) */}
+          {/* 一键生成报告对话框(入口 a/b 同源;发起后跳报告详情看进度) */}
           <Dialog open={reportOpen} onOpenChange={setReportOpen}>
             <DialogContent className="sm:max-w-lg">
               <DialogHeader>
@@ -931,7 +903,7 @@ export default function ChatPage() {
               className="max-h-40 min-h-10 resize-none"
               aria-label="提问"
             />
-            {/* 078 任务 3.1:流式期间发送位切换为显式「停止接收」——
+            {/* 流式期间发送位切换为显式「停止接收」——
                 中止读取并立即释放输入;服务端不中止(契约口径),文案对齐 */}
             {streaming ? (
               <Button

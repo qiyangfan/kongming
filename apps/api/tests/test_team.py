@@ -1,5 +1,4 @@
-"""032 team-workspace 测试:角色边界矩阵/可见性过滤/归属变更/团队记忆
-(测试先行,安全类)。"""
+"""覆盖团队角色、资源可见性、归属变更和团队记忆。"""
 # pyright: reportPrivateUsage=false
 
 from httpx import AsyncClient
@@ -137,7 +136,7 @@ async def test_team_isolation_cross_tenant(
 async def test_bot_visibility_by_team(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """spec 矩阵:团队 Bot VIEWER 可见/MEMBER 可编辑/非成员不可见;个人零回归。"""
+    """spec 矩阵:团队 Bot VIEWER 可见/MEMBER 可编辑/非成员不可见;个人 Bot 行为不变。"""
     from tests.test_bot import BOT_PAYLOAD
 
     users = await _mk_users(client, session, make_user)
@@ -260,7 +259,7 @@ async def test_workflow_visibility_by_team(
 async def test_attach_cross_tenant_rejected(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-S1 回归:attach 其他租户的资源 → 404 同形。"""
+    """尝试关联其他租户的资源时返回 404。"""
     users = await _mk_users(client, session, make_user)
     owner_uid, owner_token = users["tm_owner"]
     tid = await _mk_team(client, owner_token)
@@ -298,8 +297,7 @@ async def test_attach_cross_tenant_rejected(
 async def test_workflow_new_version_gate_and_inherit(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-S2 回归:非成员对他人团队工作流存新版本 → 403;MEMBER 存
-    新版本继承 team_id(不失守)。"""
+    """非成员不能保存他人团队工作流；成员保存新版本时保留 team_id。"""
     users = await _mk_users(client, session, make_user)
     owner_uid, owner_token = users["tm_owner"]
     member_uid, member_token = users["tm_member"]
@@ -377,7 +375,7 @@ async def test_workflow_new_version_gate_and_inherit(
 async def test_member_ops_cross_tenant_rejected(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-S3 回归:manage 持点者跨租户改/删成员 → 404。"""
+    """管理员跨租户修改或删除成员时返回 404。"""
     users = await _mk_users(client, session, make_user)
     owner_uid, owner_token = users["tm_owner"]
     member_uid, _ = users["tm_member"]
@@ -401,8 +399,7 @@ async def test_member_ops_cross_tenant_rejected(
 async def test_left_team_member_not_recalled(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-J6 回归:离队成员不再召回自己写的团队记忆(个人分支限
-    team_id IS NULL)。"""
+    """成员离队后，个人记忆查询不再返回其团队记忆。"""
     users = await _mk_users(client, session, make_user)
     _, owner_token = users["tm_owner"]
     member_uid, member_token = users["tm_member"]
@@ -431,7 +428,7 @@ async def test_left_team_member_not_recalled(
     )
     r2 = await client.delete(f"/system/teams/{tid}/members/{member_uid}", headers=_h(owner_token))
     assert r2.status_code == 200
-    # SQL 语义直证:个人分支(team_id IS NULL)不再命中该行
+    # 个人记忆查询不应再命中这条团队记忆。
     n = (
         await session.execute(
             text(
@@ -493,8 +490,7 @@ async def test_team_memory_write_and_recall(
         )
     ).scalar_one()
     assert str(tm) == tid
-    # 召回双路直证(service 级,向量无 embedding 时走降级——此处直接查
-    # recall SQL 语义:member 的团队记忆可见,outsider 不可见)
+    # 直接检查召回 SQL：团队成员可见团队记忆，其他用户不可见。
 
     rows = (
         await session.execute(
@@ -521,8 +517,7 @@ async def test_team_memory_write_and_recall(
 async def test_team_bot_key_revoke_requires_can_manage(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """审查循环 F2:revoke_key 曾缺 can_manage 闸——团队 VIEWER 可吊销团队
-    Bot 的 api-key(与 create/list 两端点自相矛盾);补闸后 VIEWER 403。"""
+    """团队 VIEWER 无权吊销团队 Bot 的 api-key,请求应返回 403。"""
     from tests.test_bot import BOT_PAYLOAD
 
     users = await _mk_users(client, session, make_user)

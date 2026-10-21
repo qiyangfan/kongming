@@ -1,4 +1,4 @@
-/* 写工具人工确认卡(019 tool-calling spec「写工具人工确认」):
+/* 写工具人工确认卡(tool-calling spec「写工具人工确认」):
    响应 pending_tool_calls 非空时渲染;确认/拒绝 → POST /chat/tool-confirm →
    回执消息落会话(invalidate messages 刷新可见);本地剔除已决项防重复点击。 */
 
@@ -11,8 +11,7 @@ import { api, type PendingToolCallOut, type ToolConfirmOut } from "@/lib/api";
 import { useDatasource } from "@/lib/datasource-store";
 import { useTenant } from "@/lib/tenant-store";
 
-/* 工具名 → 中文短语(与 apps/api toolcall/registry.py 内置注册表对齐;
-   MCP 动态工具等未收录名回退显示原名)。 */
+/* 工具名 → 中文短语(与 apps/api toolcall/registry.py 内置注册表对齐; MCP 动态工具等未收录名回退显示原名)。 */
 const TOOL_LABELS: Record<string, string> = {
   validate_sql: "校验 SQL",
   execute_sql: "执行 SQL 查询",
@@ -46,7 +45,7 @@ export function ToolConfirmCard({ pending, sessionId, onAllResolved }: ToolConfi
     onSuccess: (data, input) => {
       const next = new Set(resolved).add(input.confirm_id);
       setResolved(next);
-      // R1-D4:非 executed 结局给行内即时反馈(回执消息稍后经 refetch 呈现)
+      // 过期/条件变化等结局行内即时反馈;执行与拒绝的回执经 refetch 呈现
       if (data.status === "executed" || data.status === "confirm_rejected") {
         setError(null);
       } else if (data.status === "confirm_expired") {

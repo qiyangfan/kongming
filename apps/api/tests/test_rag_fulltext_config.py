@@ -1,13 +1,5 @@
-"""098 全文检索分词配置单源化:白名单/缺省 simple 零回归/启动自检/缓存隔离。
-
-零回归红线:缺省 simple 下全部全文 SQL 形态与引入前逐字一致(现算对拍——
-捕获桩会话渲染 SQL 字符串,与 098 改动前字面量断言相等)。
-缓存纪律:键隔离断言不做中途清缓存(键含配置即天然隔离,清库会掩盖键缺陷)。
-112:查询语义「AND 优先、内容词兜底」——兜底轮词条限 length(tok) >= 2
-(111 实证否决无差别形态:单字虚词词条噪声;对拍重钉为轮次纪律形态,
-AND 命中=仅 1 条 SQL,桩恒空=AND+兜底两条,兜底与主轮仅谓词行异);
-「查询客户」xfail 摘除(『客户』内容词兜底应转真),兜底集成测试恢复。
-"""
+"""验证全文检索配置白名单、缺省分词行为、启动自检和缓存键隔离;
+缺省配置下的 SQL 与现有查询保持一致。"""
 
 import os
 import types
@@ -66,7 +58,7 @@ def test_fulltext_ts_config_illegal_rejected(monkeypatch: pytest.MonkeyPatch) ->
 def test_fulltext_ts_config_env_driven_rejected_at_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """env 注入非法值 → get_settings 拒启(095 同款 cache_clear 试env 形态)。"""
+    """env 注入非法值 → get_settings 拒启(同款 cache_clear 试env 形态)。"""
     monkeypatch.setenv("KM_RAG_FULLTEXT_TS_CONFIG", "gogogo")
     get_settings.cache_clear()
     try:
@@ -135,7 +127,7 @@ async def test_startup_selfcheck_missing_config_rejected(session: AsyncSession) 
 
 
 def test_ctx_key_layout_contains_ts_config() -> None:
-    """键串直接断言:配置段在 hash 前缀段,异配置键串必异;112 后配置段后
+    """键串直接断言:配置段在 hash 前缀段,异配置键串必异;配置段之后
     必含查询语义段(AND-only 时代旧条目在 TTL 窗口内不串味)。"""
     k1 = _ctx_key("t1", "default", "键材料", "simple")
     k2 = _ctx_key("t1", "default", "键材料", "zhparser")
@@ -147,7 +139,7 @@ def test_ctx_key_layout_contains_ts_config() -> None:
 
 async def test_ctx_cache_isolated_by_ts_config_without_flush() -> None:
     """双配置各自命中、旧配置键对新配置不可见(全程零 flushdb——键含配置
-    即天然隔离,中途清缓存会掩盖键缺陷,095 缓存测试纪律)。"""
+    即天然隔离,中途清缓存会掩盖键缺陷,缓存测试纪律)。"""
     from kongming.redis_client import get_redis
 
     r = cast("Any", get_redis())
@@ -172,9 +164,8 @@ async def test_ctx_cache_isolated_by_ts_config_without_flush() -> None:
 
 
 # ============ 2.1/2.2 全文 SQL 参数化:缺省 simple 逐字对拍 + 白名单防线 ============
-# 期望字面量 = 098 缺省 simple 的逐字 SQL 形态 + 102 有意新增的归属维度
-# (team_id 列与可见集合子句;102 后重钉——非 098 配置渲染漂移,配置名仍是
-# 唯一自由度,断言语义不变)。
+# 期望字面量 = 缺省 simple 的逐字 SQL 形态 + 归属维度(team_id 列与可见集合
+# 子句);配置名是唯一自由度,断言语义不变。
 
 _EXPECTED_UPSERT_SQL = (
     "INSERT INTO rag.table_descriptions"
@@ -219,8 +210,8 @@ _EXPECTED_RECALL_FULLTEXT_SQL = (
     " LIMIT :k"
 )
 
-# 112 内容词兜底轮:与主轮仅谓词行异(EXISTS 任一内容词命中;词条限
-# length >= 2 排除 111 实证的单字虚词噪声源;词条逐个过 plainto_tsquery,
+# 内容词兜底轮:与主轮仅谓词行异(EXISTS 任一内容词命中;词条限
+# length >= 2 排除单字虚词噪声;词条逐个过 plainto_tsquery,
 # 外部文本不进 to_tsquery 语法位),排序/量纲/过滤不变
 _EXPECTED_RECALL_FULLTEXT_OR_SQL = (
     "SELECT schema_name, table_name,"
@@ -263,7 +254,7 @@ _EXPECTED_DOC_RECALL_SQL = (
     " LIMIT :k"
 )
 
-# 112 内容词兜底轮(文档路):同表说明路口径,仅谓词行异
+# 内容词兜底轮(文档路):同表说明路口径,仅谓词行异
 _EXPECTED_DOC_RECALL_OR_SQL = (
     "SELECT id, parent_id, source_ref FROM rag.document_chunks"
     " WHERE tenant_id=:t AND datasource_key=:d AND chunk_level='CHILD'"
@@ -305,8 +296,7 @@ class _CaptureSession:
 
 
 class _ScriptedSession(_CaptureSession):
-    """回放桩会话:按预设序列弹出结果集(钉「AND 命中→不发第二条 SQL」
-    的轮次优先级纪律;空序列=恒空,与捕获桩同形态)。"""
+    """回放桩会话:按预设顺序返回结果集;结果耗尽后返回空集。"""
 
     def __init__(self, results: list[list[object]]) -> None:
         super().__init__()
@@ -349,7 +339,7 @@ async def test_upsert_sql_identical_with_default_simple() -> None:
 
 
 async def test_recall_fulltext_sql_identical_with_default_simple() -> None:
-    """桩恒空=AND 零命中场景 → 渲染 AND+内容词兜底两条 SQL(112 轮次
+    """桩恒空=AND 零命中场景 → 渲染 AND+内容词兜底两条 SQL(轮次
     纪律:兜底轮只在零命中后发生;两轮仅谓词行异,主体逐字同构)。"""
     cap = _CaptureSession()
     await RagRepository(cast("Any", cap)).recall_fulltext(
@@ -359,7 +349,7 @@ async def test_recall_fulltext_sql_identical_with_default_simple() -> None:
 
 
 async def test_recall_fulltext_and_hit_skips_fallback_round() -> None:
-    """112 优先级纪律(spec 场景「AND 有命中时不放大混入」对拍):AND 轮
+    """优先级纪律(spec 场景「AND 有命中时不放大混入」对拍):AND 轮
     有命中 → 仅发 1 条 SQL,单内容词条目不经兜底轮混入。"""
     hit = types.SimpleNamespace(schema_name="public", table_name="tbl", score=0.5)
     cap = _ScriptedSession([[hit]])
@@ -454,7 +444,7 @@ def test_repo_constructor_rejects_illegal_config() -> None:
 
 
 def test_no_simple_literal_outside_single_source() -> None:
-    """全仓 'simple' 字面量清零断言(098 design R3):唯一例外=配置单源
+    """全仓 'simple' 字面量清零断言；唯一例外是配置单源。
     kongming/config.py;SQL/文档串/默认参数再现字面量即红。"""
     root = Path(__file__).resolve().parent.parent / "kongming"
     offenders = [
@@ -488,10 +478,11 @@ _SKIP_ZH = "本机 PG 无 zhparser 扩展(HANDOFF「zhparser 安装配方」装�
 
 @pytest.mark.skipif(not _HAS_ZHPARSER, reason=_SKIP_ZH)
 async def test_zhparser_tokenization_hits_table_description(session: AsyncSession) -> None:
-    """中文问句分词后命中表说明(写入/检索同配置 zhparser)。098 验收
-    场景「查询客户→『客户』词条命中」——AND 轮零命中(『查询』不在表
-    说明词条),经内容词兜底轮『客户』命中(112;111 曾兑现本断言、无差别
-    形态被否决,内容词过滤为 spec 点名的改善路径)。"""
+    """写入和检索均使用 zhparser;AND 轮无命中时,内容词兜底可命中表说明。
+
+    「查询客户」的 AND 轮因「查询」不在表说明中而无命中,内容词兜底应命中「客户」。
+    过滤内容词可避免无差别匹配。
+    """
     tid = await _mk_tenant(session, "zh_ft")
     repo = RagRepository(session, ts_config="zhparser")
     await repo.upsert_table(
@@ -543,7 +534,7 @@ async def test_zhparser_document_fulltext_same_config(session: AsyncSession) -> 
 async def test_zhparser_contentword_fallback_hits_after_and_miss(
     session: AsyncSession,
 ) -> None:
-    """112 兜底真跑(spec 场景「虚词断裂问句经内容词兜底命中」):问句切
+    """兜底真跑(spec 场景「虚词断裂问句经内容词兜底命中」):问句切
     『有/部/影片』,表说明仅『影片』为内容词词条——AND 零命中落内容词
     兜底轮。实现若丢失内容词过滤(回退无差别形态)本测试仍绿,由对拍桩
     的谓词字面量与 evals 基线守卫。"""
@@ -598,7 +589,7 @@ async def test_zhparser_doc_contentword_fallback(session: AsyncSession) -> None:
 
 async def test_simple_default_chinese_whole_sentence_misses(session: AsyncSession) -> None:
     """对照组(任意环境真跑):缺省 simple 下中文整句成单 token,表说明
-    中文注释不命中——098 问题陈述的原始形态与零回归基线。"""
+    中文注释不命中——问题陈述的原始形态与基线。"""
     tid = await _mk_tenant(session, "simple_ft")
     repo = RagRepository(session)  # 缺省 simple
     await repo.upsert_table(

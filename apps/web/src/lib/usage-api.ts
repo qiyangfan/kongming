@@ -1,6 +1,4 @@
-/* 用量观测域 API 封装(038 agent-observability)。类型契约由 ADR-005
-   管线生成(禁手写);汇总/趋势/明细/时间线四端点同挂
-   system:llm-usage:view。 */
+/* 用量观测域 API 封装。类型契约由 ADR-005 管线生成(禁手写);汇总/趋势/明细/时间线四端点同挂 system:llm-usage:view。 */
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";
@@ -39,8 +37,8 @@ export interface UsagePageParams {
   task?: string;
   status?: "SUCCESS" | "ERROR";
   trace_id?: string;
-  tenant_id?: string; // 038③:租户筛选(uuid 直滤)
-  protocol?: string; // 077:出站协议筛选(过滤型)
+  tenant_id?: string;
+  protocol?: string; // 出站协议(openai/anthropic 等)筛选
 }
 
 /** 明细分页(created_at 倒序;五类筛选) */

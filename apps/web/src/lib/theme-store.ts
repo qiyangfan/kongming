@@ -1,8 +1,4 @@
-/* 主题偏好单源(040 theme-switch spec「主题偏好解析与持久化」):
-   解析契约「localStorage 手动值 → prefers-color-scheme → 亮色」与 index.html
-   内联防 FOUC 脚本为同一契约(key 与优先级钉死,双侧注释互指,改动必须同步)。
-   store 持生效主题(渲染态);手动切换写入 localStorage 并优先于系统偏好;
-   系统偏好实时监听仅无手动值时跟随(design D4)。 */
+/* 主题优先级为 localStorage 手动值、系统偏好、亮色；index.html 的防闪烁脚本须保持同一顺序。 */
 
 import { create } from "zustand";
 
@@ -47,7 +43,7 @@ export const useTheme = create<ThemeState>((set, get) => ({
     try {
       localStorage.setItem(THEME_STORAGE_KEY, next);
     } catch {
-      /* 写失败(隐私模式):本次会话内仍生效,持久化降级 */
+      /* 隐私模式下存储失败时仅影响持久化，当前会话仍生效。 */
     }
     applyToDom(next);
     set({ theme: next });

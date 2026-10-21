@@ -1,4 +1,4 @@
-"""087 user_prefs 增内部人工版本(不改既有 JSON 列与历史迁移)。
+"""user_prefs 增内部人工版本(不改既有 JSON 列与历史迁移)。
 
 Revision ID: 0036_user_prefs_manual_revision
 Revises: 0035_sys_role_dept

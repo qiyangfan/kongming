@@ -1,4 +1,4 @@
-"""bot 领域模型(025):Bot 定义与校验纯函数(零框架)。"""
+"""bot 领域模型:Bot 定义与校验纯函数(零框架)。"""
 
 import re
 from collections.abc import Collection
@@ -34,7 +34,7 @@ class ToolSubsetViolation(Exception):
 
 def tools_for_perms(perm_codes: list[str], mcp_names: Collection[str] = ()) -> set[str]:
     """权限点集 → 可用工具名集(注册表反查)。
-    028:mcp_names=租户已注册 MCP 工具全名集(调用方供);持 tool:mcp:use
+    mcp_names=租户已注册 MCP 工具全名集(调用方供);持 tool:mcp:use
     才并入口径(与执行面 L2 同判据)。"""
     names = {d.name for d in effective().values() if d.perm_code in set(perm_codes)}
     if "tool:mcp:use" in set(perm_codes):
@@ -48,8 +48,8 @@ def validate_tool_subset(
     registered_names: Collection[str] | None = None,
 ) -> None:
     """工具子集 ⊆ 创建者权限工具集(spec「越权绑定拒绝」);
-    未注册名同拒(防幽灵工具)。028:registered=静态注册表 ∪ MCP 快照名集
-    (缺省纯静态,025 既有调用点兼容)。"""
+    未注册名同拒(防幽灵工具)。registered=静态注册表 ∪ MCP 快照名集
+    (缺省纯静态,既有调用点兼容)。"""
     registered = set(registered_names) if registered_names is not None else set(effective().keys())
     unknown = [t for t in bot_tools if t not in registered]
     if unknown:

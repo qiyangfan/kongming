@@ -1,6 +1,6 @@
-"""多步 Todo 诚实账本(058):状态机与收口断言纯函数。
+"""多步 Todo 诚实账本:状态机与收口断言纯函数。
 
-零框架依赖(宪法 Article II)。证据 = 工具成功结果引用;模型自述不算证据。
+不依赖 Web 框架或数据库。证据是工具成功结果的引用;模型自述不算证据。
 预算/失败不得标 DONE。
 """
 
@@ -49,7 +49,7 @@ def create_todos(goals: Sequence[str]) -> list[TodoItem]:
 def split_goals(question: str) -> list[str] | None:
     """保守拆多子目标:≥2 个问号切分,或「和/以及/另外」连接的并列问句。
 
-    拆不出 ≥2 条清晰目标时返回 None(单目标零回归,不建单)。
+    拆不出 ≥2 条清晰目标时返回 None(单目标,不建单)。
     """
     q = (question or "").strip()
     if not q:
@@ -145,7 +145,7 @@ def claims_all_done(text: str) -> bool:
 def assert_finalize_honest(todos: Sequence[TodoItem], text: str) -> tuple[str, str | None]:
     """收口诚实断言:存在非 DONE 时禁全称完成,并强制披露未完成清单。
 
-    返回 (修正后文本, 违规原因|None)。零账本/全 DONE 时原文返回(零回归)。
+    返回 (修正后文本, 违规原因|None)。零账本/全 DONE 时原文返回。
     """
     if not todos:
         return text, None

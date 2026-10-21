@@ -1,7 +1,4 @@
-/* 触发器管理页(031 triggers-webhooks spec):
-   列表(类型/目标/下次触发/启停)+ 新建/编辑对话框(cron 校验经服务端
-   400 行内反馈;webhook 创建后一次性展示 URL 与密钥;邮件形态配置 IMAP
-   连接与轮询,凭证空框=保持现值)+ 删除受控确认 + 执行历史分页。 */
+/* 管理触发器的创建、编辑、启停和执行历史。Webhook 密钥创建后只展示一次；编辑邮件触发器时凭证留空表示保留现值。 */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -98,7 +95,7 @@ type FormState = {
   notifyUrl: string;
   secret: string;
   maxRetries: string;
-  // 108:邮件形态(凭证仅写入不回显;编辑空框=保持现值)
+  // 邮件形态(凭证仅写入不回显;编辑空框=保持现值)
   imapHost: string;
   imapPort: string;
   imapTls: boolean;
@@ -130,7 +127,7 @@ const EMPTY_FORM: FormState = {
   imapPollInterval: "300",
 };
 
-// 108:邮件形态保存前校验(创建须填主机/账号/凭证;编辑凭证空框=保持现值)
+// 邮件形态保存前校验(创建须填主机/账号/凭证;编辑凭证空框=保持现值)
 function emailFormInvalid(form: FormState): boolean {
   const port = Number(form.imapPort);
   return (
@@ -143,7 +140,7 @@ function emailFormInvalid(form: FormState): boolean {
   );
 }
 
-// 101:重试上限解析与值域(0–5;空串=未填按 0;非整数/越界为非法)
+// 重试上限解析与值域(0–5;空串=未填按 0;非整数/越界为非法)
 function parseMaxRetries(raw: string): { value: number; invalid: boolean } {
   const t = raw.trim();
   if (t === "") return { value: 0, invalid: false };
@@ -164,11 +161,11 @@ export default function TriggersPage() {
   const [historyOf, setHistoryOf] = useState<TriggerItem | null>(null);
   const [historyPage, setHistoryPage] = useState(1);
   const [toggleError, setToggleError] = useState<Record<string, string>>({});
-  // 101:重试上限表单校验(0–5;非法禁保存)
+  // 重试上限表单校验(0–5;非法禁保存)
   const retries = parseMaxRetries(form?.maxRetries ?? "0");
 
   const triggers = useQuery({ queryKey: ["admin", "triggers"], queryFn: listTriggers });
-  // 040:目标候选(封闭集合,按类型联动;自由输入拼错会挂到运行期才暴露)。
+  // 目标候选(封闭集合,按类型联动;自由输入拼错会挂到运行期才暴露)。
   // 弹窗打开时才拉取,候选随 form.targetType 切换取用。
   const workflows = useQuery({
     queryKey: ["admin", "workflow"],
@@ -181,7 +178,7 @@ export default function TriggersPage() {
     enabled: form !== null,
   });
 
-  // 040·11:cron 预览(400ms 防抖;空表达式不查,弹窗关闭 form=null 停查)
+  // cron 预览使用 400ms 防抖；空表达式或弹窗关闭时不发请求。
   const cronExprD = useDebounced(form?.cronExpr ?? "", 400);
   const cronFires = useQuery({
     queryKey: ["admin", "cron-preview", cronExprD],
@@ -205,15 +202,15 @@ export default function TriggersPage() {
         target_type: form.targetType,
         target_key: form.targetKey.trim(),
         cron_expr: form.type === "CRON" ? form.cronExpr.trim() : null,
-        // R1-T9:|| 60 会吞掉合法的 0(ge=0 后端允许);空串才回退
+        // 空串才回退 60,0 是合法值,不可用 ||
         min_interval_sec: form.minInterval.trim() === "" ? 60 : Number(form.minInterval),
         adapter: form.adapter,
         notify_url: form.notifyUrl.trim(),
-        // 101:失败重试次数上限(0=不重试)
+        // 失败重试次数上限(0=不重试)
         max_retries: retries.value,
       };
       if (form.type === "EMAIL") {
-        // 108:邮件形态配置(凭证空框=后端保持现值;下限封顶在后端)
+        // 邮件形态配置(凭证空框=后端保持现值;下限封顶在后端)
         payload.imap_host = form.imapHost.trim();
         payload.imap_port = Number(form.imapPort);
         payload.imap_tls = form.imapTls;
@@ -239,12 +236,12 @@ export default function TriggersPage() {
       setForm(null);
       setFormError("");
       if (wasCreate && out && (out.webhook_path || out.secret)) {
-        setCreated(out); // 一次性展示(025 api-key 同哲学)
+        setCreated(out); // 密钥只在创建成功后展示一次。
       }
       invalidate();
     },
     onError: (e) => {
-      // 写边界闸 detail(TARGET_NOT_FOUND 等)已上收 lib/api 单源转译为中文
+      // TARGET_NOT_FOUND 等后端 detail 已在 lib/api 统一转译为中文
       setFormError(e instanceof Error ? e.message : "保存失败");
     },
   });
@@ -341,7 +338,7 @@ export default function TriggersPage() {
                 </>
               ) : row.type === "EMAIL" ? (
                 <>
-                  {/* 108:邮件形态展示 IMAP 连接要点(凭证永不回显) */}
+                  {/* 邮件形态展示 IMAP 连接要点(凭证永不回显) */}
                   <span className="block truncate" title={row.imap_host}>
                     {row.imap_host}/{row.imap_folder}
                   </span>
@@ -417,7 +414,6 @@ export default function TriggersPage() {
         ]}
       />
 
-      {/* 新建/编辑 */}
       <Dialog
         open={form !== null}
         onOpenChange={(o) => {
@@ -479,7 +475,7 @@ export default function TriggersPage() {
                   <Select
                     value={form.targetType}
                     onValueChange={(v) =>
-                      // 040:类型切换即清空目标——两类候选键不通用,防跨域残留
+                      // 类型切换即清空目标——两类候选键不通用,防跨域残留
                       setForm({ ...form, targetType: v as "workflow" | "bot", targetKey: "" })
                     }
                   >
@@ -493,7 +489,7 @@ export default function TriggersPage() {
                   </Select>
                 </FormRow>
                 <FormRow label={`目标${form.targetType === "workflow" ? "(工作流)" : "(助手)"}`}>
-                  {/* 040:自由输入改候选下拉(候选=对应域可见清单);
+                  {/* 自由输入改候选下拉(候选=对应域可见清单);
                       编辑回显时目标已删则注入禁用占位项,防「打开即保存」静默改值 */}
                   <Select
                     value={form.targetKey}
@@ -516,8 +512,8 @@ export default function TriggersPage() {
                               {b.name}({b.bot_key})
                             </SelectItem>
                           ))}
-                      {/* 候选加载中/失败时不判「已删除」——data 未到或缺失会把
-                          正常目标误标(R1 实锤:编辑回显闪现误读) */}
+                      {/* 候选加载中/失败时不判「已删除」:清单未到不等于目标已删,
+                          避免编辑回显被误读 */}
                       {form.targetKey !== "" &&
                         !(form.targetType === "workflow"
                           ? workflows.isPending || workflows.isError
@@ -563,9 +559,8 @@ export default function TriggersPage() {
                       两次触发之间的最小间隔秒数;间隔内的重复触发会跳过不执行。
                     </p>
                   </FormRow>
-                  {/* 040·11:接下来 3 次预览(防抖;非法表达式红色原因,与保存期同口径)。
-                      旧表达式结果不展示:防抖窗口内 data 落后于输入,仅当防抖值与
-                      当前输入一致才呈现(R1 实锤:防旧值被当现值误读) */}
+                  {/* 预览接下来三次触发时间;非法表达式显示错误原因,与保存校验一致。
+                      仅当防抖值与当前输入一致才显示,防抖窗口内的旧结果不展示 */}
                   {form.cronExpr.trim() !== "" && (
                     <p
                       role={cronFires.isError ? "alert" : undefined}
@@ -620,7 +615,7 @@ export default function TriggersPage() {
                       label={form.id === null ? "凭证(密码)" : "凭证(留空保持现值)"}
                       htmlFor="tg-imap-password"
                     >
-                      {/* 108:凭证任何接口不回显(webhook secret 同口径);
+                      {/* 凭证任何接口不回显(webhook secret 同口径);
                           编辑空框=保持现值 */}
                       <Input
                         id="tg-imap-password"
@@ -752,7 +747,6 @@ export default function TriggersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 创建后一次性展示(webhook URL + 密钥) */}
       <Dialog open={created !== null} onOpenChange={(o) => !o && setCreated(null)}>
         <DialogContent>
           <DialogHeader>
@@ -780,7 +774,6 @@ export default function TriggersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 历史 */}
       <Dialog open={historyOf !== null} onOpenChange={(o) => !o && setHistoryOf(null)}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
@@ -800,7 +793,7 @@ export default function TriggersPage() {
                     value={r.status}
                     fallbackVariant="destructive"
                   />
-                  {/* 101 重试链:attempt>1 标注尝试序号(首跑不标,免噪音) */}
+                  {/* 重试链:attempt>1 标注尝试序号(首跑不标,免噪音) */}
                   {r.attempt > 1 && (
                     <Badge variant="outline" className="ml-2">
                       第 {r.attempt} 次
@@ -845,7 +838,6 @@ export default function TriggersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 删除确认 */}
       <AlertDialog
         open={deleting !== null}
         onOpenChange={(o) => {

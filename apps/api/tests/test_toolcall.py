@@ -1,11 +1,4 @@
-"""toolcall 域全栈集成测试(019 tool-calling spec,安全规则类测试先行)。
-
-覆盖:六层纵深防御矩阵(内部令牌/绑定复校/权限点/JSON Schema/限流/审计)、
-内置工具 handler(validate_sql/execute_sql/rag_retrieve/create_system_announcement)、
-写工具确认流(挂起/确认执行/拒绝/过期/幂等/权限回收复校)、管理面(清单+审计
-分页+行级可见性)。
-真实 PG + Redis:审计断言直查 sys_tool_audit;业务 schema 双租户隔离复用既有形态。
-"""
+"""覆盖工具权限、参数校验、限流、审计、确认流程和租户隔离。"""
 
 import json
 import uuid
@@ -271,8 +264,7 @@ async def test_args_schema_invalid(
 async def test_sql_tool_semantic_precheck(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """工具层语义校验(spec「参数校验层拒绝 DROP」):SQL 工具 sql 首关键字非
-    SELECT/WITH → 参数校验层直接拒绝,不进入执行通路(防火墙之前)。"""
+    """验证 SQL 工具在 schema 校验前拒绝以非只读关键字开头的语句。"""
     uid = await _user_with_tools(session, make_user, "tc_ddl", ["tool:sql:execute"])
     req = _req("execute_sql", {"sql": "DROP TABLE goods"}, user_id=uid)
     r = await client.post("/internal/tool/execute", headers=INTERNAL, json=req)
@@ -366,7 +358,7 @@ async def test_validate_sql_handler(
 async def test_compute_handlers_pure_math(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """057:compute_delta/compute_share 控制面纯计算 handler(工作流等通道)。"""
+    """compute_delta/compute_share 控制面纯计算 handler(工作流等通道)。"""
     uid = await _user_with_tools(session, make_user, "tc_compute", ["tool:compute"])
     ok = await client.post(
         "/internal/tool/execute",
@@ -464,8 +456,7 @@ async def test_rag_retrieve_handler(
     )
     body = r.json()
     assert body["status"] == "executed"
-    # 知识库零命中(tenant_tc 无扫描)→ 回退实时内省,goods 表进提示
-    # (spec「内置工具集」回退语义:与老链路 retrieve 节点同形态)
+    # 知识库未命中时应回退实时内省，并将 goods 表加入结构提示。
     assert "goods" in body["result"]["schema_hint"]
     assert "history_sql" in body["result"]
 
@@ -665,8 +656,8 @@ async def test_confirm_idempotent_replay(
 async def test_task_resolve_confirm_approve_idempotent_receipt(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """任务通道确认兑现(add-graph-checkpoint):批准=全量复校后执行;
-    重复兑换(步骤重放)幂等不重复执行,且反查回填首次执行结果(R1-S1
+    """任务通道确认兑现(graph-checkpoint spec):批准=全量复校后执行;
+    重复兑换(步骤重放)幂等不重复执行,且反查回填首次执行结果(
     同口径——恢复重放缺结果会诱发模型再次发起同一动作)。"""
     uid = await _user_with_tools(
         session, make_user, "tc_task_c", ["tool:announcement:create", "chat:execute"]
@@ -778,7 +769,7 @@ async def test_tools_list_admin(
     tools = r.json()["tools"]
     names = {t["name"] for t in tools}
     assert {"validate_sql", "execute_sql", "rag_retrieve", "create_system_announcement"} <= names
-    assert {"compute_delta", "compute_share"} <= names  # 057
+    assert {"compute_delta", "compute_share"} <= names
     ann = next(t for t in tools if t["name"] == "create_system_announcement")
     assert ann["write"] is True and ann["require_confirm"] is True
     assert ann["perm_code"] == "tool:announcement:create"
@@ -822,8 +813,7 @@ async def test_audit_page_filters(
     assert r.status_code == 200
     body = r.json()
     assert body["total"] >= 2
-    # 089 裁决落地:域标签读面投影(内置工具恒 None;域工具非空)——存量行
-    # 与老客户端零回归(字段可选)
+    # 审计响应兼容存量行:内置工具的 domain 为空,域工具带 domain。
     validate_row = next((i for i in body["items"] if i["tool_name"] == "validate_sql"), None)
     assert validate_row is not None and validate_row["domain"] is None
     # 按工具名筛选
@@ -860,13 +850,13 @@ async def test_audit_page_row_visibility(
     assert all(str(it["user_id"]) == uid_x for it in items)
 
 
-# ============ R1 评审修复直证(M1-M3/S1-S3+并发) ============
+# ============ 参数校验、权限检查与并发调用 ============
 
 
 async def test_confirm_other_user_404_audited(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-M2:他人确认被拒落审计(REJECTED/CONFIRM_FORBIDDEN,尝试者维度新行,
+    """他人确认被拒落审计(REJECTED/CONFIRM_FORBIDDEN,尝试者维度新行,
     不触碰原挂起行)。"""
     uid_a = await _user_with_tools(
         session, make_user, "tc_fa", ["tool:announcement:create", "chat:execute"]
@@ -907,7 +897,7 @@ async def test_confirm_other_user_404_audited(
 async def test_confirm_after_unbind_tenant_403(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-M3:挂起后用户被解绑租户,确认时 L1 复校拒(403),公告不写。"""
+    """挂起后用户被解绑租户,确认时 L1 复校拒(403),公告不写。"""
     uid = await _user_with_tools(
         session, make_user, "tc_unbind", ["tool:announcement:create", "chat:execute"]
     )
@@ -930,7 +920,7 @@ async def test_confirm_after_unbind_tenant_403(
 async def test_confirm_idempotent_returns_first_result(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-S1:重复确认幂等回放返回首次执行结果(announcement_id 一致,created=false)。"""
+    """重复确认幂等回放返回首次执行结果(announcement_id 一致,created=false)。"""
     uid = await _user_with_tools(
         session, make_user, "tc_first", ["tool:announcement:create", "chat:execute"]
     )
@@ -952,7 +942,7 @@ async def test_confirm_idempotent_returns_first_result(
     assert body2["status"] == "executed"
     assert body2["result"]["announcement_id"] == first
     assert body2["result"]["created"] is False
-    # R1-S3:EXECUTED 行不残留挂起期文案
+    # EXECUTED 行不残留挂起期文案
     reason = (
         await session.execute(
             text("SELECT error_reason FROM public.sys_tool_audit WHERE id=:i"),
@@ -965,7 +955,7 @@ async def test_confirm_idempotent_returns_first_result(
 async def test_validate_args_comment_prefix_accepted(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-S2:注释前缀的合法 SELECT 不再被参数预检误拒(AST 根判定)。"""
+    """注释前缀的合法 SELECT 不再被参数预检误拒(AST 根判定)。"""
     uid = await _user_with_tools(session, make_user, "tc_comment", ["tool:sql:validate"])
     r = await client.post(
         "/internal/tool/execute",
@@ -999,12 +989,8 @@ async def test_confirm_concurrent_double_submit(
     assert n == 1
 
 
-# ============ 审查循环修复回归 ============
-
-
 def test_validate_args_recursion_and_multistmt() -> None:
-    """深嵌套括号曾致 RecursionError 逃逸(sqlglot 族外)→500 零审计;
-    多语句曾在参数校验层放行(仅查 stmts[0] 根)。"""
+    """深嵌套括号和多语句 SQL 在参数校验阶段都不得绕过拒绝处理。"""
     from kongming.toolcall.models import ToolDef
     from kongming.toolcall.registry import get_tool
     from kongming.toolcall.service import validate_args
@@ -1019,7 +1005,7 @@ def test_validate_args_recursion_and_multistmt() -> None:
     assert multi is not None and "单条" in multi
 
 
-# ============ 已退役工单工具零出站回归(remove-ticket-domain) ============
+# ============ 已退役工单工具零出站回归 ============
 
 
 @pytest.mark.parametrize("tool_name", ["ticket_search", "ticket_get", "ticket_create"])

@@ -1,13 +1,6 @@
-"""data_scope AST 改写:sqlglot 最外层 WHERE 注入(spec 立约:AST 非字符串拼接)。
+"""使用 sqlglot AST 将数据范围谓词加入最外层 WHERE，并以主表别名限定过滤列。
 
-设计(D1,004 实测修正):
-- 过滤谓词 AND 进最外层查询的 WHERE,列引用限定主表别名(JOIN 防歧义)——
-  过滤列属于 FROM 主表必然可见,与原查询投影解耦;
-  (首版「包外层子查询」被集成测试证伪:原查询不投影过滤列时外层不可见)
-- UNION / FROM 为子查询等取不到主表的形态,由 applier 上游安全降级,不到此;
-- 谓词值一律命名绑定参数(:km_ds_N),SQL 文本不含任何过滤值(防注入);
-- 命名参数经方言子类保留 :name 风格(postgres 方言默认渲 pyformat)。
-"""
+无法定位主表的查询由调用方拒绝；过滤值始终作为命名参数绑定，不拼入 SQL 文本。"""
 
 from collections.abc import Sequence
 from typing import cast
@@ -23,7 +16,7 @@ _PARAM_PREFIX = "km_ds_"
 
 
 class _NamedParamPG(Postgres):
-    """postgres 方言变体:占位符渲 :name(SQLAlchemy text() 参数风格)。"""
+    """postgres 方言变体:占位符渲 :name(SQLAlchemy text 参数风格)。"""
 
     # sqlglot 官方扩展点;存根把 Generator 声明为变量而非类型,关闭两码
     class Generator(Postgres.Generator):  # type: ignore[misc, valid-type]
@@ -32,7 +25,7 @@ class _NamedParamPG(Postgres):
 
 
 def extract_main_table_statement(statement: Expr | None) -> tuple[str, str | None] | None:
-    """语句级主表提取(吃共享解析产物,053 单遍复用;语义同 extract_main_table_ref)。"""
+    """语句级主表提取(吃共享解析产物,单遍复用;语义同 extract_main_table_ref)。"""
     if not isinstance(statement, exp.Select):
         return None
     from_ = statement.args.get("from_")
@@ -69,7 +62,7 @@ def apply_filter_statement(
     column: str | None,
     values: Sequence[object],
 ) -> tuple[str, dict[str, object]]:
-    """语句级改写(吃共享解析产物,053 单遍复用;语义同 apply_filter)。"""
+    """语句级改写(吃共享解析产物,单遍复用;语义同 apply_filter)。"""
     if filter_type in (FilterType.SKIP.value, FilterType.UNSUPPORTED.value):
         return sql, {}
     if not isinstance(statement, exp.Select):

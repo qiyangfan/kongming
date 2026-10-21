@@ -1,8 +1,6 @@
-# 动态数据源评估用例(016):显式 datasource_key 走 008 动态路径(区别于空
-# key=default 的租户 schema 路由);另含 1 题跨租户 key 预期拒绝(fail-closed)。
-# dev/预发形态:sakila_dyn 归属 default 租户,指向同实例独立库 sakila_ext
-# (外部业务库形态,default_schema=public,不复用 tenant_sakila 租户 schema)——
-# 动态题 tenant=default;gold_database 直连 sakila_ext,与生成侧动态路由同落点。
+# 验证显式 datasource_key 的动态数据源；空 key 使用 default 租户 schema。
+# sakila_dyn 归属 default 租户并连接独立库 sakila_ext，default_schema=public。
+# 金标查询直连 sakila_ext，与应用的动态数据源落到同一数据库。
 
 - id: sakila_ds_001
   question: 有多少部影片
@@ -12,7 +10,7 @@
   gold_sql: SELECT COUNT(*) FROM film
   expected_tables: [film]
   category: datasource_dynamic
-  smoke: true  # 动态路径进 smoke(约5题口径:fail-closed 与动态链路同受第一道闸守护)
+  smoke: true  # 动态路径进 smoke(约5题口径:fail-closed 与动态流程同受第一道闸守护)
 
 - id: sakila_ds_002
   question: 每个影片分类有多少部影片
@@ -32,9 +30,7 @@
   expected_tables: [payment, customer]
   category: datasource_dynamic
 
-# 跨租户数据源拒绝:sakila 租户上下文使用 sakila_dyn(属 default 租户),
-# 008 绑定校验 fail-closed 应拒绝(同形 400 DATASOURCE_INVALID,防 key 探测),
-# 无 gold_sql。
+# 跨租户请求应返回 400 DATASOURCE_INVALID，避免访问其他租户的数据源。
 - id: sakila_ds_deny_001
   question: 有多少部影片
   tenant: sakila

@@ -1,4 +1,4 @@
-"""team 存储(032):sys_team/sys_team_member;成员集单点查询
+"""team 存储:sys_team/sys_team_member;成员集单点查询
 (list_visible_ids:用户→(team_id→role) 映射,供列表过滤双支)。"""
 
 from typing import Any, cast
@@ -76,7 +76,7 @@ class SqlTeamRepo:
         return [dict(r) for r in rows]
 
     async def list_my_teams(self, *, tenant_id: str, user_id: str) -> list[dict[str, Any]]:
-        """我所在的团队(102:附带本人在各团队的角色,供「可写团队」前端筛选
+        """我所在的团队(附带本人在各团队的角色,供「可写团队」前端筛选
         ——OWNER/MEMBER 可写、VIEWER 只读;manage 面全量列表无此列)。"""
         rows = (
             (
@@ -161,7 +161,7 @@ class SqlTeamRepo:
     async def get_member_role_in_tenant(
         self, *, tenant_id: str, team_id: str, user_id: str
     ) -> str | None:
-        """租户限定版(102 供 rag 写闸消费):角色查询与团队归属租户绑定——
+        """租户限定版(供 rag 写闸消费):角色查询与团队归属租户绑定——
         跨租户活跃用户不得借他租户团队身份过写闸(spec「指向当前租户内
         真实团队」;跨租户引用一律按非成员 404 同形处理)。"""
         return (
@@ -177,7 +177,7 @@ class SqlTeamRepo:
         ).scalar_one_or_none()
 
     async def user_active_in_tenant(self, *, tenant_id: str, user_id: str) -> bool:
-        """成员候选存在性校验(审查循环 B7:sys_team_member 无 FK,不校验会
+        """成员候选存在性校验(sys_team_member 无 FK,不校验会
         落幽灵行且 list_members JOIN sys_user 不可见)。"""
         row = (
             await self._s.execute(
@@ -257,7 +257,7 @@ class SqlTeamRepo:
         team_id: str | None,
         tenant_id: str,
     ) -> bool:
-        """归属变更;R1-S1:UPDATE 带租户条件(跨租户资源零命中→404)。"""
+        """归属变更;UPDATE 带租户条件(跨租户资源零命中→404)。"""
         table = self._RESOURCE_TABLES[resource_type]
         res = cast(
             "CursorResult[object]",
@@ -273,7 +273,7 @@ class SqlTeamRepo:
 
     async def clear_team_on_resources(self, *, team_id: str) -> None:
         """团队删除时资源回个人(team_id 置 NULL,不丢资源);
-        R1-T5:团队记忆同回个人(与资源口径一致)。"""
+        团队记忆同回个人(与资源口径一致)。"""
         await self._s.execute(
             text(
                 f"UPDATE {self._MEMORY_TABLE} SET team_id=NULL"  # noqa: S608  # 常量

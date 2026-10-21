@@ -1,7 +1,5 @@
-# 060:build context = 仓库根(packages/liannu 路径依赖落在 context 内)
+# 从仓库根目录构建，确保 packages/liannu 路径依赖位于构建上下文中。
 # 构建:podman build -f infra/agent.Dockerfile -t kongming-agent:test .
-# stack-refresh 批④:3.13→3.14(ctranslate2 cp314 轮子已确认 4.8.3;
-# 任一依赖失配整批回退 3.13,design D6)
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim AS deps
 WORKDIR /app
 # 路径依赖源(与 apps/agent/pyproject.toml 的 ../../packages/liannu 对齐)
@@ -10,8 +8,6 @@ COPY apps/agent/pyproject.toml apps/agent/uv.lock apps/agent/
 # --no-editable:path 依赖拷入 site-packages,运行时镜像不再需要源码树
 RUN cd apps/agent && uv sync --frozen --no-dev --no-install-project --no-editable
 
-# stack-refresh 批④:3.13→3.14(ctranslate2 cp314 轮子已确认 4.8.3;
-# 任一依赖失配整批回退 3.13,design D6)
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 WORKDIR /app
 # 只取 .venv 与显式应用目录——不整目录 COPY apps/agent

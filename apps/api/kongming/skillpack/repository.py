@@ -1,4 +1,4 @@
-"""skillpack 仓储(056):skill_pack / skill_pack_binding SQL(租户双过滤)。
+"""skillpack 仓储:skill_pack / skill_pack_binding SQL(租户双过滤)。
 
 零框架纪律:本模块只依赖 sqlalchemy text/session。
 """

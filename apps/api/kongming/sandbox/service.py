@@ -1,9 +1,6 @@
-"""sandbox 用例编排(027):执行 + 审计落库 + LLM 投影组装。
+"""执行沙箱、写入审计记录并整理供 LLM 使用的结果。
 
-零框架(宪法 Article II):runner/writer 皆端口注入。返回值为 LLM 投影
-(工具结果 JSON 内容)——不含 images base64(design D2 修正案:agent
-观察截断 2000,base64 只烧预算);完整 SandboxOutcome 为域内事实,
-经端口实现的实现侧仍可取(本用例的消费面只要投影)。
+runner 和 writer 通过端口注入;传给 LLM 的投影不包含图片 base64。
 """
 
 from kongming.sandbox.ports import SandboxRunner, SandboxRunWriter

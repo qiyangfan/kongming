@@ -1,8 +1,4 @@
-"""bot 域全栈集成测试(025 custom-agent spec,权限继承/渠道安全测试先行)。
-
-覆盖:创建越权工具子集拒/运行时权限求交(回收即失效)/护栏审核拒发布/
-api-key 生命周期(明文一次/撤销 401/scopes)/公开页 404 同形/OpenAI 形态。
-"""
+"""覆盖 Bot 权限、工具渠道、密钥管理和公开访问。"""
 # pyright: reportPrivateUsage=false
 
 from collections.abc import Iterator
@@ -213,7 +209,7 @@ async def test_run_empty_tools_fails_fast(
     fake_agent: dict[str, FakeAgent],
 ) -> None:
     """零工具 Bot 运行闸:求交后工具集为空 → fail-fast 友好错误,
-    不发起 LLM 调用(伪调用假应答根治;治本闸②)。"""
+    不发起 LLM 调用。"""
     _, token = await _user(client, session, make_user, "bot_notools")
     fake_agent["agent"] = FakeAgent()
     r = await client.post(
@@ -233,7 +229,7 @@ async def test_run_empty_tools_fails_fast(
     assert body["summary"] == ""
     # 公开页响应契约(BotChatOut;fail-fast 与 LLM 失败分支形态一致)
     assert set(body) == {"success", "summary", "error"}
-    assert fake_agent["agent"].calls == []  # 零 LLM 调用(fail-fast 直证)
+    assert fake_agent["agent"].calls == []  # 工具为空时不会调用 LLM。
 
 
 async def test_bot_others_404(
@@ -252,7 +248,7 @@ async def test_bot_others_404(
     assert all(b["bot_key"] != "oa" for b in r3.json())
 
 
-# ============ R1 评审修复直证 ============
+# ============ Bot 权限和密钥行为 ============
 
 
 async def test_r1_h1_model_validation(
@@ -261,7 +257,7 @@ async def test_r1_h1_model_validation(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """R1-H1:model 非注册表名拒绝(fail-closed;agent 替身返回空注册表)。"""
+    """model 非注册表名拒绝(fail-closed;agent 替身返回空注册表)。"""
     _, token = await _user(client, session, make_user, "bot_model")
 
     class _ModelAgent(FakeAgent):
@@ -286,7 +282,7 @@ async def test_r1_h1_model_validation(
 async def test_r1_h3_bot_key_global_unique(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-H3:bot_key 全局唯一(跨租户同 key 冲突 409,公开页不碰撞)。"""
+    """bot_key 全局唯一(跨租户同 key 冲突 409,公开页不碰撞)。"""
     _, token_a = await _user(client, session, make_user, "bot_g1")
     _, token_b = await _user(client, session, make_user, "bot_g2")
     r1 = await client.post("/system/bots", headers=_auth(token_a), json=BOT_PAYLOAD)
@@ -302,7 +298,7 @@ async def test_r1_m2_confirm_tools_excluded(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """R1-M2:Bot 渠道剔除需确认写工具(公告权限授予创建者后仍不注入)。"""
+    """Bot 渠道剔除需确认写工具(公告权限授予创建者后仍不注入)。"""
     uid, token = await _user(client, session, make_user, "bot_m2")
     # 授公告权限
     from tests.test_toolcall import _mk_role_with_perms
@@ -336,7 +332,7 @@ async def test_r1_m1_openai_required_fields(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """R1-M1:OpenAI 响应含 created/model(SDK 必填)。"""
+    """OpenAI 响应含 created/model(SDK 必填)。"""
     _, token = await _user(client, session, make_user, "bot_sdk")
     fake_agent["agent"] = FakeAgent()
     r = await client.post(

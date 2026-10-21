@@ -1,7 +1,4 @@
-/* mock 收银台(035 payment-gateway spec「收银台」):支付单状态轮询
-   (非终态 2s)+模拟成功/失败(经服务端 mock-simulate,核销路径唯一——
-   前端不持密钥不直连改单)+取消;终态(PAID/CANCELLED/EXPIRED)结果态。
-   mock 通道语义:页面全程明示「模拟环境无真实资金」。 */
+/* 模拟支付页：由服务端模拟成功或失败，前端不持有密钥或直接修改支付单。 */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -26,7 +23,7 @@ export default function PayPage() {
     queryKey: ["portal", "payment", paymentId],
     queryFn: () => getPayment(paymentId),
     enabled: paymentId !== "",
-    // 非终态轮询(核销经回调异步生效);终态自停;R1-A3:错误态(404/跨租户)亦停
+    // 非终态继续轮询；支付单进入终态或请求返回错误后停止。
     refetchInterval: (q) => {
       if (q.state.status === "error") return false;
       return q.state.data && TERMINAL.has(q.state.data.status) ? false : 2000;

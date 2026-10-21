@@ -1,4 +1,4 @@
-"""056 skillpack 领域纯函数测试(测试先行)。"""
+"""覆盖技能包数据模型的纯函数校验。"""
 
 from __future__ import annotations
 

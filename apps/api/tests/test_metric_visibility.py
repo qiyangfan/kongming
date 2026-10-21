@@ -1,6 +1,6 @@
-"""110 指标定义可见性按 data_scope 过滤:SQL 同判/解析器/enrich 缺省/管理校验。
+"""指标定义可见性按 data_scope 过滤:SQL 同判/解析器/enrich 缺省/管理校验。
 
-判据(spec delta「110 修订」):调用者有效范围=启用角色最宽松档;ALL=全量;
+判据(semantic-layer spec「修订」):调用者有效范围=启用角色最宽松档;ALL=全量;
 DEPT/DEPT_AND_BELOW/CUSTOM=ALL 档 ∪ 部门集合内 DEPT 档;SELF/无身份=仅 ALL 档;
 CUSTOM 空集合读面降级(仅 ALL 档,不阻断)。管理面全量视角不过滤。
 """
@@ -200,7 +200,7 @@ async def test_resolver_scope_shapes(session: AsyncSession) -> None:
     )
 
 
-# ============ enrich 可见性缺省与注入(076 同源回归) ============
+# ============ enrich 可见性缺省与注入(同源回归) ============
 
 
 class _StubResolver:
@@ -212,7 +212,7 @@ class _StubResolver:
 
 
 async def test_enrich_visibility_paths(session: AsyncSession) -> None:
-    """None 身份=仅 ALL 档;universal=全量;部门集合过滤;076 派生不破。"""
+    """None 身份=仅 ALL 档;universal=全量;部门集合过滤;派生不破。"""
     repo = SqlSemanticRepo(session)
     tid = str(uuid.uuid4())
     dept_a = (await _seed_depts(session, tid))[0]
@@ -242,7 +242,7 @@ async def test_enrich_visibility_paths(session: AsyncSession) -> None:
     assert "受限口径" not in hint_none and "公共指标" in hint_none
     assert [h.metric_name for h in hits_none] == ["公共指标"]
 
-    # universal(ALL 角色)→ 全量;文字段仍由结构化命中派生(076 同源)
+    # universal(ALL 角色)→ 全量;文字段仍由结构化命中派生(同源)
     svc_all = SemanticService(
         repo, caller_scope_resolver=_StubResolver(CallerScope(universal=True))
     )

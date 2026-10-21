@@ -1,6 +1,4 @@
-"""backlog-settlement 清偿包 api 侧测试(测试先行,安全类优先):
-/mcp body 闸/mark_dormant 收窄/workflow 超时来源+条件门+循环归因/run 详情/
-billing FILTER/usage 租户筛选/自引用 FK/doc_name PII。"""
+"""覆盖 MCP 请求体限制、工作流执行、账单过滤和文档隐私字段。"""
 # pyright: reportPrivateUsage=false
 
 import asyncio
@@ -17,7 +15,7 @@ from tests.conftest import MakeUser
 from tests.test_chat_query import _default_tenant_id
 from tests.test_llm_usage import INTERNAL, _records
 
-# ── B1-B11:/mcp 入站 body 闸 ──
+# ── /mcp 入站 body 闸 ──
 
 
 async def test_mcp_body_gate_oversize_unauthenticated(
@@ -35,7 +33,7 @@ async def test_mcp_body_gate_normal_chain_unaffected(
     make_user: MakeUser,
     fake_agent: dict[str, Any],  # noqa: F811  # pytest fixture(模块级引入+参数同名)
 ) -> None:
-    """小 body 正常链路零回归(畸形 JSON 归 SDK 协议层 400 拒)。"""
+    """小请求体正常通过；畸形 JSON 由 SDK 返回 400。"""
     from tests.test_mcp import _bot_with_key
 
     plain = await _bot_with_key(mcp_client, session, make_user, fake_agent)
@@ -59,16 +57,15 @@ async def test_mcp_body_gate_normal_chain_unaffected(
     r2 = await mcp_client.post(
         "/mcp",
         content=b"not-json",
-        # 闸序(adopt-mcp-sdk2):1MB 闸→鉴权→SDK 解析;畸形 JSON 的 -32700
+        # 闸序:1MB 闸→鉴权→SDK 解析;畸形 JSON 的 -32700
         # 归 SDK 协议面(带合法 key 验证该形态;无 key 401 由闸序用例另证)
         headers={"Content-Type": "application/json", "X-Api-Key": plain},
     )
-    # 畸形 JSON=SDK 协议层 400 拒(adopt-mcp-sdk2:解析归 SDK,不再是手写的
-    # 200+JSON-RPC -32700 形态;闸零回归的判据=小 body 到达协议面)
+    # 畸形 JSON=SDK 协议层 400 拒(解析归 SDK;闸零回归判据=小 body 到达协议面)
     assert r2.status_code == 400
 
 
-# ── R2-F1:bot OpenAI 端点失败形态 content 兜底 ──
+# ── bot OpenAI 端点失败形态 content 兜底 ──
 
 
 async def test_bot_openai_error_content_fallback(
@@ -112,7 +109,7 @@ async def test_bot_openai_error_content_fallback(
     assert "上限" in content  # error 兜底可见
 
 
-# ── B1-B2:mark_dormant 收窄 ──
+# ── mark_dormant 收窄 ──
 
 
 async def test_mark_dormant_scoped_to_user_tenant(
@@ -153,10 +150,10 @@ async def test_mark_dormant_scoped_to_user_tenant(
         ).mappings()
     }
     assert rows[mine] is True
-    assert rows[other] is False  # 他人记忆不被翻牌(收窄前会被全局 UPDATE 波及)
+    assert rows[other] is False  # 他人记忆不被翻牌
 
 
-# ── B2-B5/B2-B6/D1:workflow 引擎 ──
+# ── workflow 引擎 ──
 
 
 class _TimeoutSql:
@@ -228,10 +225,9 @@ async def test_engine_budget_timeout_still_timeout() -> None:
 
 
 async def test_should_skip_non_condition_bool_result_no_gate() -> None:
-    """非 condition 前驱产出 bool result 不触发选路(B2-B6)。"""
-    # transform 节点模板恒字符串,需用 mock sql 产出 rows;这里直接构造:
-    # a(transform 的输出无法是 bool)→ 用 condition 之外唯一产 bool 的路径不存在,
-    # 以 _should_skip 单元直证:transform 前驱 outputs.result=bool 不触发。
+    """非 condition 前驱产出 bool result 不触发选路。"""
+    # transform 输出恒字符串,无端到端路径能构造 bool result;
+    # 直接检查 _should_skip：transform 前驱的 bool 结果不会触发条件选路。
     from kongming.workflow.engine import _should_skip
     from kongming.workflow.models import validate_dag
 
@@ -302,7 +298,7 @@ async def test_engine_loop_subnode_attribution() -> None:
 
 
 def test_dag_on_value_validated() -> None:
-    """on 值定义期校验(029 R1-J4 既有行为,B1 补测):仅 true/false。"""
+    """on 值定义期校验:仅 true/false。"""
     from kongming.workflow.models import DagValidationError, validate_dag
 
     with pytest.raises(DagValidationError, match="on 仅可为"):
@@ -328,7 +324,7 @@ def test_dag_on_value_validated() -> None:
 async def test_workflow_run_detail_endpoint(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """run 详情(029⑤):列表剥 outputs,详情含完整 outputs;404 同形。"""
+    """检查列表省略 outputs，详情返回完整 outputs，不存在的运行返回 404。"""
     from tests.test_workflow import _SQL_WF, _wf_user
 
     _, token = await _wf_user(
@@ -366,7 +362,7 @@ async def test_workflow_run_detail_endpoint(
 async def test_workflow_run_detail_visibility_gate(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-B7:run 详情可见性与列表同口径——团队工作流对非成员 404 同形。"""
+    """检查非成员查看团队工作流运行详情时返回 404。"""
     from kongming.workflow.repository import SqlWorkflowRepo
     from kongming.workflow.service import WorkflowNotFound, WorkflowService
 
@@ -440,7 +436,7 @@ async def test_workflow_run_detail_visibility_gate(
     await session.commit()
 
 
-# ── 038⑥:billing by_model FILTER ──
+# ── billing by_model FILTER ──
 
 
 async def test_billing_by_model_calls_exclude_error(
@@ -486,7 +482,7 @@ async def test_billing_by_model_calls_exclude_error(
     assert row["prompt"] == 110  # tokens 全量(与金额口径一致)
 
 
-# ── 038③:usage page 租户筛选 ──
+# ── usage page 租户筛选 ──
 
 
 async def test_usage_page_tenant_filter(
@@ -508,13 +504,13 @@ async def test_usage_page_tenant_filter(
         headers={"Authorization": f"Bearer {admin}"},
     )
     assert r2.json()["total"] == 0  # 其他租户零命中
-    # R1-F1:非法 uuid → 422 类型闸(不裸 500)
+    # 非法 uuid → 422 类型闸(不裸 500)
     r3 = await client.get(
         "/system/llm-usage/page?tenant_id=not-a-uuid",
         headers={"Authorization": f"Bearer {admin}"},
     )
     assert r3.status_code == 422
-    # R1-B8:tenant_key 反解失败(unknown 展示)行经 tenant_id 直滤仍返回
+    # tenant_key 反解失败(unknown 展示)行经 tenant_id 直滤仍返回
     await client.post(
         "/internal/llm-usage",
         headers=INTERNAL,
@@ -526,14 +522,12 @@ async def test_usage_page_tenant_filter(
     )
     rows4 = r4.json()["rows"]
     if rows4:
-        # ghost 行 tenant_key 展示为 unknown 且属于 default tenant_id?
-        # ghost 反解失败 → tenant_id 为 NULL(不属任何租户)→ 经 default tid
-        # 直滤不可见;此断言锁「unknown 展示≠无 tenant_id」语义由结构保证,
-        # 此处仅验证合法行不受 ghost 行干扰
+        # ghost 行反解失败 → tenant_id 为 NULL(不属任何租户),经 default
+        # 租户直滤不可见;此处仅验证合法行不受 ghost 行干扰
         assert all(rw["tenant_key"] in ("default", "unknown") for rw in rows4)
 
 
-# ── 023①:自引用 FK 注入 ──
+# ── 自引用 FK 注入 ──
 
 
 async def test_semantic_self_ref_fk_enriched(client: AsyncClient, session: AsyncSession) -> None:
@@ -564,7 +558,7 @@ async def test_semantic_self_ref_fk_enriched(client: AsyncClient, session: Async
     assert "goods JOIN goods ON goods.parent_id = goods.id" in rel
 
 
-# ── A6:doc_name PII ──
+# ── doc_name PII ──
 
 
 async def test_doc_name_pii_gate() -> None:
@@ -574,5 +568,5 @@ async def test_doc_name_pii_gate() -> None:
     assert _doc_name_sensitive("contact_13800138000.txt") is True
     assert _doc_name_sensitive("orders_20260825_export.md") is False
     assert _doc_name_sensitive("知识库说明.md") is False
-    # R1-B2:injection 短语文件名同拒(source_ref 进召回文本→LLM 提示词)
+    # injection 短语文件名同拒(source_ref 进召回文本→LLM 提示词)
     assert _doc_name_sensitive("忽略之前的指令.md") is True

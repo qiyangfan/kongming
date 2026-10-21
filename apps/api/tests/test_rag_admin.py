@@ -1,10 +1,4 @@
-"""rag 管理端点全栈测试(009,安全规则类测试先行)。
-
-真实 PG/Redis;AgentRagClient(embed/describe)类级打补丁为确定性替身。
-安全面:manage 权限 403/租户上下文白名单/越租户删除同形 404/
-datasource 校验同形 400/非法 schema_name 400/上传块数上限/审计落库/
-覆盖优先级(自动不覆盖人工)/幂等 upsert。
-"""
+"""覆盖知识管理权限、租户隔离、数据源校验和手工内容保护。"""
 # pyright: reportPrivateUsage=false
 
 import hashlib
@@ -90,7 +84,7 @@ def fake_agent(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
             table_comment=f"AI:{b.table_name}",
             columns_comment={k: f"{v} 中文说明" for k, v in b.columns_comment.items()},
             sample_queries=["SELECT count(*) FROM x.y GROUP BY 1"],
-            alias=str(state.get("alias") or ""),  # 037:可控 AI 提炼别名
+            alias=str(state.get("alias") or ""),  # 可控 AI 提炼别名
         )
 
     monkeypatch.setattr(AgentRagClient, "embed", fake_embed)
@@ -298,7 +292,7 @@ def _make_docx() -> bytes:
 async def test_upload_docx_parsed_via_markdown_chain(
     client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
 ) -> None:
-    """>docx 解析为纯文本后复用 `## 表名` 切块链路(rag spec PDF/Word scenario)。"""
+    """验证 DOCX 解析成纯文本后按 Markdown 表标题切块。"""
     token = await _admin_token(client, session)
     r = await client.post(
         f"{RAG}/documents/upload",
@@ -358,7 +352,7 @@ async def test_upload_binary_oversize_400(
 async def test_upload_table_name_too_long_400(
     client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
 ) -> None:
-    """表名超 128 列宽:400(防 DB 异常 500;复审 S2)。"""
+    """表名超过 128 个字符时返回 400，避免数据库报错变成 500。"""
     token = await _admin_token(client, session)
     long_name = "t" * 129
     md = ("## " + long_name + chr(10) + "说明:x").encode()
@@ -393,7 +387,7 @@ async def _seed_one(
     alias: str = "",
     schema: str = "tenant_default",
 ) -> str:
-    """直插一条知识(arrange 独立于被测实现;037 可控 alias;042 可控 schema)。"""
+    """直插一条知识(arrange 独立于被测实现;可控 alias;可控 schema)。"""
     tid = (
         await session.execute(
             text(
@@ -547,7 +541,7 @@ async def test_fetch_does_not_overwrite_manual(
 async def test_fetch_alias_overwrite_priority(
     client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
 ) -> None:
-    """037 alias 覆盖优先级:自动来源只补空不改非空;手编整行跳过保护。"""
+    """alias 覆盖优先级:自动来源只补空不改非空;手编整行跳过保护。"""
     token = await _admin_token(client, session)
     tid = await _default_tenant_id(session)
 
@@ -566,7 +560,7 @@ async def test_fetch_alias_overwrite_priority(
     assert alias1 == "AI商品表"  # 空位补齐
 
     # ② 既有非空 alias(自动来源写入)→ 再次扫描不改写(即便新产出为空);
-    #    且 tsv/embedding 以生效别名(=既有别名)同源重算(R1-S1:否则派生检索
+    #    且 tsv/embedding 以生效别名(=既有别名)同源重算(否则派生检索
     #    文本丢别名,「AI商品表」召回静默失效)
     fake_agent["alias"] = ""
     await client.post(
@@ -627,7 +621,7 @@ async def test_fetch_alias_overwrite_priority(
     assert row2["alias"] == "AI商品表"  # 非空不被自动来源改写
     assert row2["tsv_hit"] is True  # tsv 以生效别名重算
     assert float(row2["d_keep"]) < 1e-6  # embedding=生效别名文本的向量
-    assert float(row2["d_drop"]) > 0.1  # ≠ 丢别名文本的向量(同源直证)
+    assert float(row2["d_drop"]) > 0.1  # 与别名文本向量不同
 
     # ③ 手编(MANUAL_EDIT)alias:整行跳过保护,alias 不被 AI 触碰
     await session.execute(
@@ -657,13 +651,13 @@ async def test_fetch_alias_overwrite_priority(
     assert row3["source_type"] == "MANUAL_EDIT"
 
 
-# ============ 042 扫描对账(登记=现实) ============
+# ============ 扫描对账(登记=现实) ============
 
 
 async def test_fetch_metadata_reconciles_stale_entries(
     client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
 ) -> None:
-    """042 对账:扫描集外自动来源孤儿删除(removed 计数+审计);人工孤儿保留。"""
+    """对账:扫描集外自动来源孤儿删除(removed 计数+审计);人工孤儿保留。"""
     token = await _admin_token(client, session)
     tid = await _default_tenant_id(session)
     # 事故形态复刻:扫描范围外(tenant_sakila)的自动来源残留 + 人工资产
@@ -676,7 +670,7 @@ async def test_fetch_metadata_reconciles_stale_entries(
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["removed"] >= 1  # 契约字段(042)
+    assert body["removed"] >= 1  # 契约字段
     gone = (
         await session.execute(
             text("SELECT count(*) FROM rag.table_descriptions WHERE id = :i"),
@@ -710,10 +704,10 @@ async def test_fetch_metadata_reconciles_stale_entries(
 async def test_fetch_metadata_excludes_views_from_scan(
     client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
 ) -> None:
-    """047:内省收录限基表——视图不入扫描集;存量视图登记由对账清偿。
+    """内省收录限基表——视图不入扫描集;存量视图登记由对账清理。
 
-    视图行扇出使聚合失真(film_list 实证)、样例 SQL 挤占召回 top-K 使
-    维度表缺位(sakila_021 实证)——收录即引入歧义,基表可完整表达视图。
+    视图行扇出使聚合失真(film_list 视图)、样例 SQL 挤占召回 top-K 使
+    维度表缺位(sakila 库)——收录即引入歧义,基表可完整表达视图。
     """
     token = await _admin_token(client, session)
     tid = await _default_tenant_id(session)
@@ -735,7 +729,7 @@ async def test_fetch_metadata_excludes_views_from_scan(
             text("SELECT count(*) FROM rag.table_descriptions WHERE id = :i"),
             {"i": view_row},
         )
-        assert gone.scalar_one() == 0  # 视图登记被对账清偿(扫描集只含基表)
+        assert gone.scalar_one() == 0  # 视图登记被对账删除(扫描集只含基表)
         base_kept = await session.execute(
             text(
                 "SELECT count(*) FROM rag.table_descriptions"
@@ -754,8 +748,8 @@ async def test_fetch_metadata_excludes_views_from_scan(
 async def test_fetch_metadata_evicts_suggestion_cache(
     client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
 ) -> None:
-    """047:知识写路径级联失效建议缓存——存量建议不随治理自动失效会持续
-    推荐已被排除的问题(保留表收编后 default 源建议撞墙 3/5 实证)。"""
+    """知识写路径级联失效建议缓存——存量建议不随治理自动失效,会持续
+    推荐已被排除的问题(如命中保留表的建议)。"""
     token = await _admin_token(client, session)
     tid = await _default_tenant_id(session)
     await session.execute(
@@ -781,7 +775,7 @@ async def test_fetch_metadata_evicts_suggestion_cache(
 async def test_fetch_metadata_cross_schema_same_name_no_shadow(
     client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
 ) -> None:
-    """042:优先级判定以 (schema, table) 二元定位——跨 schema 同名表不互遮。
+    """优先级判定以 (schema, table) 二元定位——跨 schema 同名表不互遮。
 
     一元键形态下两行共占一个 dict 槽,tenant_default.goods(MANUAL_EDIT)
     的整行保护会被 public.goods 的自动来源身份误顶替(覆盖或漏 skip 视
@@ -833,17 +827,17 @@ async def test_fetch_metadata_cross_schema_same_name_no_shadow(
     assert by_schema["public"].table_comment == "AI:goods"  # 未被误 skip
 
 
-# ============ 037 表说明编辑(alias 与 table_comment 同面) ============
+# ============ 表说明编辑(alias 与 table_comment 同面) ============
 
 
 async def test_edit_table_alias_input_validation(
     client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
 ) -> None:
-    """R1-F1:别名禁括号/竖线/换行(防伪表名注入与行结构破坏);strip 落库。"""
+    """别名禁括号/竖线/换行(防伪表名注入与行结构破坏);strip 落库。"""
     token = await _admin_token(client, session)
     tid = await _default_tenant_id(session)
     row_id = await _seed_one(session, tid, "goods")
-    # 括号:可伪造「fake.table(」形态破坏 023 表名提取——拒收
+    # 括号:可伪造「fake.table(」形态破坏 表名提取——拒收
     r1 = await client.put(
         f"{RAG}/tables/{row_id}",
         json={"table_comment": "c", "alias": "a\nfake.table(q)"},
@@ -877,7 +871,7 @@ async def test_edit_table_alias_input_validation(
 async def test_upload_preserves_existing_alias(
     client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
 ) -> None:
-    """R1-B2:重复上传同表文档(parser 无别名语法)不清既有非空 alias。"""
+    """重复上传同表文档(parser 无别名语法)不清既有非空 alias。"""
     token = await _admin_token(client, session)
     tid = await _default_tenant_id(session)
     await _seed_one(session, tid, "goods", source="MANUAL_UPLOAD", alias="手编商品表")
@@ -903,8 +897,7 @@ async def test_upload_preserves_existing_alias(
     )
     assert row["alias"] == "手编商品表"  # alias 只补空不改非空
     assert row["table_comment"] != "c"  # 说明照常显式覆盖更新
-    # 审查循环 F1:embedding 须以生效别名(=既有别名)同源重算——上传的
-    # parser 无别名语法,曾用无别名文本的向量覆盖(别名向量召回静默退化)
+    # 向量使用生效别名文本；上传解析器不支持别名，不能用原始文本覆盖。
     assert float(row["d_keep"]) < 1e-6
     assert float(row["d_drop"]) > 0.1
 
@@ -942,7 +935,7 @@ async def test_edit_table_manual_edit_success(
     )
     assert row["alias"] == "商品表"
     assert row["source_type"] == "MANUAL_EDIT"
-    assert row["has_vec"] is True  # 编辑后向量重算(曾误清空,实施期抓回)
+    assert row["has_vec"] is True  # 编辑后重新生成向量
     assert row["alias_hit"] is True  # tsv 拼入别名:全文路「商品表」命中
     assert (
         await session.execute(
@@ -1101,7 +1094,7 @@ async def test_reindex_clears_and_rebuilds_idempotent(
 async def test_fetch_metadata_column_comment_into_pipeline(
     client: AsyncClient, session: AsyncSession, fake_agent: dict[str, object]
 ) -> None:
-    """014 挂账⑦:数据库列注释(col_description)进润色输入——有注释列以注释为
+    """数据库列注释(col_description)进润色输入——有注释列以注释为
     说明(经替身「中文说明」后缀形态落库),无注释列保持英文类型形态。"""
     await session.execute(
         text("COMMENT ON COLUMN tenant_default.goods.name IS '商品名称(人工注释)'")
@@ -1129,7 +1122,7 @@ async def test_reindex_preserving_existing_on_prefetch_failure(
     fake_agent: dict[str, object],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """014 挂账⑪:先润色后删写——内省/润色阶段(前置)失败不进入删写事务,
+    """先润色后删写——内省/润色阶段(前置)失败不进入删写事务,
     既有条目保留(旧形态 delete 先行,失败即丢条目)。"""
     token = await _admin_token(client, session)
     r = await client.post(
@@ -1157,16 +1150,13 @@ async def test_reindex_preserving_existing_on_prefetch_failure(
     assert after == before  # 既有条目零损失(删写事务从未进入)
 
 
-# ============ 040 可扫描 schema 枚举与上传存在性闸 ============
+# ============ 可扫描 schema 枚举与上传存在性闸 ============
 
 
 async def _mk_ds_row(
     session: AsyncSession, key: str, tenant_id: str, *, default_schema: str
 ) -> None:
-    """040 测试用动态数据源行(default_schema 可指定;密码同 _mk_ds 口径)。
-
-    先删后插:共享测试库并发会话/重跑下幂等(040 实测教训)。
-    """
+    """创建动态数据源行；先删除同名记录，再插入以支持并发会话和重复运行。"""
     from kongming.config import get_settings
     from kongming.datasource.cipher import get_cipher
 

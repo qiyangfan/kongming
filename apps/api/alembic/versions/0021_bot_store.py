@@ -1,10 +1,10 @@
-"""0021: bot-store 域(033)
+"""0021: bot-store 域
 
 Revision ID: 0021
 Revises: 0020
 Create Date: 2026-08-24
 
-sys_bot_definition 纯增上架四列(greeting/suggestions JSONB);
+sys_bot_definition 上架四列(greeting/suggestions JSONB);
 sys_bot_favorite/sys_bot_rating:互动两表,一人一 Bot 唯一约束。
 **downgrade**:删两表+回滚四列(新域零存量)。
 """

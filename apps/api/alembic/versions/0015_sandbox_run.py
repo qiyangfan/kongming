@@ -1,13 +1,12 @@
-"""0015: cloud-code-sandbox 执行审计表(027)
+"""沙箱执行审计表。
 
 Revision ID: 0015
 Revises: 0014
 Create Date: 2026-08-23
 
-sys_sandbox_run:沙箱执行审计(sys_tool_audit 的补充维度,经 trace_id 可
-JOIN);code_text 全文留存(≤8000,与 sys_sql_audit 留 sql_text 同哲学=
-排障需要);status VARCHAR+CHECK 四终态(ADR-004:禁魔数/禁 PG ENUM)。
-**downgrade**:删表(新域零存量)。
+记录执行代码和状态；代码最多保留 8000 字符，便于排障。status 使用
+VARCHAR 与 CHECK 约束(ADR-004)。
+**downgrade**:删除审计表。
 """
 
 from alembic import op

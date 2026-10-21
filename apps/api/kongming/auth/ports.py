@@ -1,7 +1,7 @@
-"""auth 域持久化/外存端口(typing.Protocol 反转,宪法 Article II)。
+"""auth 域持久化和外存端口,以 Protocol 隔离用例层与具体实现。
 
 service 只依赖这些接口;SQLAlchemy 实现在 repository.py、Redis 实现在 stores.py。
-UnitOfWork 聚合全部 repo 并承载 commit/rollback,service 不触碰 Session(零框架)。
+UnitOfWork 聚合 repo 并承载 commit/rollback,service 不直接操作 Session。
 """
 
 from __future__ import annotations

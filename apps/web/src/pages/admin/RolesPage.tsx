@@ -1,7 +1,4 @@
-/* 角色管理页(web-admin spec「角色管理页」):表格+创建/编辑
-   (roleKey 创建后不可改,dataScope/sqlScope 下拉;dataScope=CUSTOM 时同表单内
-   多选部门集合,非 CUSTOM 不显示也不发该字段)+权限绑定面板
-   (按命名空间分组复选,覆盖式保存)+内置角色删除禁用。 */
+/* 管理角色的数据范围、SQL 范围和权限绑定；内置角色不可删除。 */
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -285,7 +282,7 @@ export default function RolesPage() {
           {
             label: "删除",
             destructive: true,
-            // 内置角色不可删除:行级禁用承接可视反馈与拦截(原按钮 title 文案)
+            // 内置角色不可删除:行级禁用承担可视反馈与拦截
             isDisabled: (r) => r.builtin,
             disabledReason: "内置角色不可删除",
             onSelect: (r) => {
@@ -378,9 +375,9 @@ export default function RolesPage() {
                 {depts.isPending ? (
                   <p className="text-muted-foreground text-sm">部门加载中…</p>
                 ) : depts.isError ? (
-                  // 候选读不出来 ≠ 没有部门:空态会把人支去新建,而真实成因常是缺少读部门
-                  // 所需的权限(部门列表挂在 system:user:manage 下)。查询错误态按 web-nav
-                  // spec 走共享件 ErrorAlert,动作件并列在其外(该件只收 text 单参)
+                  // 候选读不出来 ≠ 没有部门:空态会把人支去新建,真实成因常是缺
+                  // 读部门权限(部门列表挂在 system:user:manage 下)。错误态按
+                  // web-nav spec 走共享件 ErrorAlert,重试钮在其外(该件只收 text 单参)
                   <div className="space-y-1">
                     <ErrorAlert
                       text={`部门列表加载失败:${(depts.error as Error).message}。已配置的部门集合保持不变(仍可保存);要增删部门请重试,或改用具备「用户与部门」权限的账号。`}

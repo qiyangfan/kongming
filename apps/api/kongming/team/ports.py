@@ -1,4 +1,4 @@
-"""team 端口(032):存储反转,用例层零框架依赖(宪法 Article II)。"""
+"""team 存储端口,供用例层通过接口依赖持久化能力。"""
 
 from typing import Any, Protocol
 

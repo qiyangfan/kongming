@@ -1,8 +1,6 @@
-"""LLM 成本对账(055):产品牌价轨与 muniu credit 成本轨的量级核对。
+"""只读比较模型牌价与 Muniu credit 成本的量级和偏差。
 
-只读旁路纪律:任何失败降级为报告内显式「不可用」标注(HTTP 200 结构化
-呈现),绝不抛出、绝不影响计费主链路,禁止以静默空值替代。两轨不做硬
-换算——牌价是产品定价,允许与成本解耦;比对对象是窗口内的量级与偏差率。
+任何失败在 HTTP 200 报告中标记为不可用,不影响计费;两种价格不作固定换算。
 """
 
 from __future__ import annotations
@@ -147,7 +145,7 @@ def build_report(
     cost: CostTrack,
     threshold: float,
 ) -> ReconciliationReport:
-    """纯函数组装报告与偏差判定(测试主战场)。"""
+    """组装报告并判定偏差(纯函数)。"""
     annotations: list[str] = ["牌价轨与成本轨不做硬换算;牌价为产品定价,允许与成本解耦"]
     if product_invoice_li and not cost.available:
         annotations.append("成本侧不可用,偏差未判定")

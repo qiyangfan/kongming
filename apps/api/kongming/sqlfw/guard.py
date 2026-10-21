@@ -1,16 +1,7 @@
-"""SQL 安全引擎接入层(053):模式解析、单遍解析产物、影子对拍、请求级降级。
+"""SQL 安全引擎适配层。`KM_SQLGUARD_MODE` 支持 builtin、shadow、primary;
+primary 引擎失败时回退内置校验并记录审计,shadow 只记录差异,不改变内置判定。
 
-模式(默认影子;env KM_SQLGUARD_MODE):
-- builtin:纯内置路径(sqlglot 现行实现),引擎不参与;
-- shadow:内置权威(行为与切换前逐字一致),引擎并行判定,不一致仅记录
-  (结构完整观测 + 计数),绝不影响 verdict;
-- primary:引擎权威;引擎加载失败/运行期异常时请求级降级内置,记
-  ENGINE_FALLBACK 审计事件与计数,服务不中断、请求不失败。
-
-单遍纪律:一次 parse_guarded 产出的 Guarded 对同一 SQL 只解析一次
-(内置路径共享语句列表;引擎路径共享 GuardArtifact),三闸判定与
-行级改写结构全部复用。
-"""
+每条 SQL 在一次 `parse_guarded` 调用中只解析一次,校验与行级改写复用解析结果。"""
 
 from __future__ import annotations
 
@@ -69,7 +60,7 @@ def effective_mode() -> str:
 def _reserved_lists_match(engine_rules: object) -> bool:
     """引擎清单成员集合与权威(liannu.rules)一致?
 
-    067:切主前必过。mismatch 归零不构成清单一致的证据(评估集不保证触达
+    切主前必过。mismatch 归零不构成清单一致的证据(评估集不保证触达
     skill_/user_prefs),必须显式比成员。窄于权威 → 视为引擎不可用。
     """
     from liannu import rules as authority
@@ -129,7 +120,7 @@ def _load_engine() -> Any:  # noqa: ANN401
 
 
 def startup_self_check() -> bool:
-    """启动自检(任务 3.1):版本 + 冒烟解析 + 保留清单成员校验(067);
+    """启动自检:版本 + 冒烟解析 + 保留清单成员校验;
     失败告警降级 builtin,不阻断启动。"""
     if _mode == MODE_BUILTIN:
         # builtin 模式引擎不参与:不触发引擎加载(缺失也不该有告警噪音)
@@ -145,7 +136,7 @@ def startup_self_check() -> bool:
         log.warning("SQLGUARD 引擎自检失败(%s),降级 builtin(不阻断)", detail)
         _downgrade(f"self-check failed: {detail}")
         return False
-    # 067:清单窄于权威 → 引擎不可用(mismatch 归零不是清单一致的证据)
+    # 清单窄于权威 → 引擎不可用(mismatch 归零不是清单一致的证据)
     if not _reserved_lists_match(engine):
         log.warning("SQLGUARD 引擎保留清单窄于权威,降级 builtin(067)")
         _downgrade("reserved lists narrower than authority")

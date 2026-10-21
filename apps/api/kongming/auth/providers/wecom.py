@@ -1,14 +1,6 @@
-"""企业微信插件(003):扫码即 OAuth——qrConnect 授权页自带二维码,无专用协议栈
-(ADR-006 关键设计 4)。
+"""企业微信扫码登录接入。授权页使用 `qrConnect`，后端按企业微信接口获取 access token 和 userid。
 
-协议形态(官方文档核验 2026-08-17):
-- 授权 URL 参数名为 appid(=corpid)/agentid,非标准 client_id → authorize_url 手工构造
-- 两步令牌(httpx 直写):cgi-bin/gettoken(corpid+corpsecret → 企业 access_token)
-  → cgi-bin/auth/getuserinfo(access_token+code → userid,小写字段)
-- 详档 cgi-bin/user/get 需应用通讯录查看权限;无权限时降级 display_name=userid,
-  登录链路不断(ADR-006 演进注记)
-- email 无验证语义:不入管线(email_verified 恒 False,永不走 email 关联)
-"""
+读取详细用户资料需要通讯录权限；无权限时以 userid 作为显示名。未验证的邮箱不参与账号关联。"""
 
 from urllib.parse import urlencode
 

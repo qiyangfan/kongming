@@ -1,14 +1,7 @@
-"""图级检查点适配器(add-graph-checkpoint):存储后端=控制面内部通道。
+"""LangGraph 检查点经 api 内部端点读写,agent 不直连数据库;控制面只存
+不透明数据,序列化由 agent 负责。
 
-信任边界(ADR-002)约束下的检查点形态:图框架原生 Postgres 检查点保存器
-不可用(agent 零凭证、禁 DB 驱动),本适配器实现检查点保存协议,读写 100%
-经 apiclient 回调 `/internal/task/graph-checkpoint*`;控制面只存不透明 blob
-(序列化/反序列化在 agent 侧),与图框架解耦。
-
-降级纪律:检查点写失败**不阻断执行主路径**(降级为无图级快照继续,步骤级
-检查点仍在);读失败/缺席返回 None(回退整步重跑)。降级事实经上下文标记,
-由编排层如实上报(不谎称可恢复)。
-"""
+写入失败继续执行但不保留图级快照;读取失败或无记录返回 `None`,由调用方重跑步骤。"""
 
 import base64
 import contextvars
@@ -50,7 +43,7 @@ def reset_checkpoint_context() -> None:
 
 
 def thread_id_for_task(task_id: str, step_id: str) -> str:
-    """线程确定性派生(D3):api 不感知图语义,恢复时 agent 自查快照决定
+    """线程确定性派生:api 不感知图语义,恢复时 agent 自查快照决定
     续跑或整步回退;派发-恢复双方向用同一派生,天然对齐。"""
     return f"task:{task_id}:step:{step_id}"
 

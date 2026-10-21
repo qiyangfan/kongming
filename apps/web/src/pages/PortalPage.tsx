@@ -1,6 +1,4 @@
-/* 开发者门户页(034 developer-portal-billing spec「开发者门户」):
-   当期三维用量看板(进度条+预警标记)+ 账单列表与明细对话框。
-   api-key 列表复用 Bots 页既有入口(导航指引),不重复建设。 */
+/* 展示开发者用量和账单；API 密钥管理入口复用 Bot 管理页。 */
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -25,16 +23,16 @@ import { li2yuan } from "@/lib/money";
 import { StatusBadge, type StatusMeta } from "@/components/status-badge";
 import { formatDate, formatNumber } from "@/lib/datetime";
 
-// 发票状态 → StatusBadge(未知值回落 outline,与原「非 PENDING 即 outline」等价;
-// label 与 lib/billing-labels 的 INVOICE_STATUS_TEXT 对齐)
+// 发票状态 → StatusBadge;未知值回落 outline,
+// label 与 lib/billing-labels 的 INVOICE_STATUS_TEXT 对齐
 const INVOICE_STATUS_META: StatusMeta = {
   PENDING: { label: "待支付", variant: "secondary" },
   PAID: { label: "已支付", variant: "outline" },
   VOID: { label: "已作废", variant: "outline" },
 };
 
-/** 明细 usage_json 形状(服务端固定结构;生成类型为 generic object,
- *  本地收窄——与服务端 usage_json 组装处逐字段对应) */
+/** 发票明细 usage_json 的固定结构;生成类型为宽泛 object,此处本地收窄,
+ * 字段与服务端组装处一一对应。 */
 interface UsageDetail {
   by_model?: { model: string; prompt: number; completion: number; calls: number }[];
   total_tokens?: number;
@@ -47,8 +45,8 @@ function usageOf(detail: InvoiceDetail): UsageDetail {
   return detail.usage_json as unknown as UsageDetail;
 }
 
-/** 行费用(整数厘):与服务端 estimate_cost 同式(整数运算,向下取整)。
- *  服务端金额按合计一次计算,各行求和与总额至多差尾数取整(厘级),总额以 amount 为准。 */
+/** 单行费用(整数厘),与服务端 estimate_cost 同式(整数运算、向下取整)。
+ * 服务端总额按合计一次计算,各行求和与总额至多差尾数取整(厘级),总额以 amount 为准。 */
 function rowCostLi(
   row: { prompt: number; completion: number; calls: number },
   u: UsageDetail,
@@ -59,8 +57,7 @@ function rowCostLi(
   );
 }
 
-/** 计费公式文案:单价代入算式,替代裸单价展示(用户可自行验算)。
- *  每个计费项独占一行——窄容器里自然折行断点不可控(可能断在单价/等号中间),主动断行钉在语义边界 */
+/** 将单价代入计费公式,并按计费项换行,避免窄屏在价格和运算符中间折行。 */
 function formulaLines(u: UsageDetail): string[] {
   const tokens = u.total_tokens ?? 0;
   const calls = u.total_calls ?? 0;
@@ -143,7 +140,7 @@ export default function PortalPage() {
   const [detailLoading, setDetailLoading] = useState(false);
 
   async function openDetail(id: string): Promise<void> {
-    // R1-A8:打开即清空(防闪现上一条)+加载态+错误收敛
+    // 先清空旧明细再请求,防闪现上一条内容。
     setDetailId(id);
     setDetail(null);
     setDetailError("");
@@ -157,7 +154,7 @@ export default function PortalPage() {
     }
   }
 
-  // 035:去支付——创建(或重发)支付单后进收银台;同账单重付旧单服务端作废旧单
+  // 创建支付单后进入收银台;同一账单重付时由服务端作废旧单。
   async function goPay(invoiceId: string): Promise<void> {
     setPayingId(invoiceId);
     setPayError("");
@@ -165,7 +162,7 @@ export default function PortalPage() {
       const payment = await createPayment(invoiceId);
       navigate(`/portal/pay/${payment.id}`);
     } catch (e) {
-      // R1-T4:409 错误码映射友好文案(原始码 INVOICE_PAID 不直抛用户)
+      // 原始错误码(INVOICE_PAID 等)映射为用户可读文案。
       const raw = e instanceof Error ? e.message : "";
       const msg = raw.startsWith("INVOICE_PAID")
         ? "该账单已支付,无需重复付款"
@@ -317,7 +314,6 @@ export default function PortalPage() {
         )}
       </section>
 
-      {/* 明细对话框 */}
       <Dialog open={detailId !== null} onOpenChange={(o) => !o && setDetailId(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>

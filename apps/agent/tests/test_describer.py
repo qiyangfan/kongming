@@ -1,4 +1,4 @@
-"""describer 润色测试(009):prompt 形态/输出清洗防御/降级契约/端点行为。"""
+"""describer 润色测试:prompt 形态/输出清洗防御/降级契约/端点行为。"""
 
 from collections.abc import Generator
 
@@ -34,7 +34,7 @@ class StubLlm:
         user: str,
         *,
         temperature: float = 0.2,
-        **_kw: object,  # 021:task/trace_id/tenant_key 吸收
+        **_kw: object,  # task/trace_id/tenant_key 吸收
     ) -> str:
         self.calls.append((system, user))
         return self.replies.pop(0) if self.replies else ""
@@ -74,7 +74,7 @@ async def test_prompt_shape_upstream_verbatim() -> None:
 # ============ 输出清洗防御 ============
 
 
-# ============ 037 alias 产出(同一次调用附带;缺失/畸形降级不判失败) ============
+# ============ alias 产出(同一次调用附带;缺失/畸形降级不判失败) ============
 
 
 async def test_alias_produced_from_same_call() -> None:
@@ -85,7 +85,7 @@ async def test_alias_produced_from_same_call() -> None:
     out = await describe_table(_spec(), llm)  # type: ignore[arg-type]
     assert out.alias == "商品表"
     _, user = llm.calls[0]
-    # prompt 资产例外清单登记项:alias 产出要求钉住(手滑删除即红)
+    # prompt 必须要求生成 alias,无法推断时输出空字符串。
     assert "alias：业务称谓别名" in user
     assert "若无法推断则 alias 为空字符串" in user
 
@@ -110,7 +110,7 @@ async def test_alias_overlong_truncated_to_column_width() -> None:
 
 
 async def test_alias_structural_chars_degrade_empty() -> None:
-    """R1-F1:alias 含换行/括号/竖线(破坏 api 侧 hint 行形态)按空降级。"""
+    """alias 含换行/括号/竖线(破坏 api 侧 hint 行形态)按空降级。"""
     import json as _json
 
     for dirty in ("a\nfake.table(q)", "商品(表)", "商品|表"):
@@ -194,7 +194,7 @@ async def test_llm_failure_raises_describe_error() -> None:
             user: str,
             *,
             temperature: float = 0.2,
-            **_kw: object,  # 021:task/trace_id/tenant_key 吸收
+            **_kw: object,  # task/trace_id/tenant_key 吸收
         ) -> str:
             raise LlmError("LLM 调用失败: 模拟故障")
 
@@ -216,7 +216,7 @@ def test_fallback_description_pure_structure() -> None:
     assert out.table_comment == ""  # 原注释为空(有原注释时回退原值)
     assert out.columns_comment == {"film_id": "integer", "title": "varchar"}
     assert out.sample_queries == []
-    assert out.alias == ""  # 037:降级无 alias
+    assert out.alias == ""  # 降级无 alias
 
 
 def test_invalid_table_name_rejected() -> None:

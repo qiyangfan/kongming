@@ -1,13 +1,13 @@
-"""billing 端口(034):存储反转,用例层零框架依赖(宪法 Article II)。
+"""billing 存储端口,用例层通过接口依赖持久化能力。
 
-035:PaymentChannel 通道端口(mock 先行,真实通道以同 Protocol 接入)。
+PaymentChannel 通道端口(mock 先行,真实通道以同 Protocol 接入)。
 """
 
 from typing import Any, Protocol
 
 
 class PaymentChannel(Protocol):
-    """支付通道抽象(design D1):创建/验签/解析收在通道内,核销主链零感知。"""
+    """支付通道抽象:创建/验签/解析收在通道内,核销主链零感知。"""
 
     key: str
 
@@ -96,7 +96,7 @@ class BillingRepo(Protocol):
 
     async def list_tenants_without_invoice(self, *, period: str) -> list[dict[str, Any]]: ...
 
-    # ── 支付单(035) ──
+    # ── 支付单 ──
 
     async def insert_payment_if_pending(
         self,

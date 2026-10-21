@@ -1,5 +1,5 @@
 # pyright: reportPrivateUsage=false
-"""全量向量重建命令测试(upgrade-rag-qwen3-halfvec-2560 任务 4.1)。
+"""全量向量重建命令测试。
 
 覆盖:dry-run 只报分批计划(零 embedding 调用、零写库);实跑按批 embed+
 写回(2560 维假向量),可重跑(二次执行覆盖同一行);document_chunks 只重建

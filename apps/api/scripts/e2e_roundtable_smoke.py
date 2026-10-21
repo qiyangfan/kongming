@@ -1,12 +1,8 @@
 # ruff: noqa: S101, S105, ASYNC109 —— 冒烟脚本:断言即验收、口令为本地冒烟账号、超时参数形参
 # pyright: reportUnknownParameterType=false, reportMissingTypeArgument=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
-"""115 圆桌端到端冒烟(4.3):建任务→步骤声明圆桌拓扑(2 参与者)
-→恢复→轮次对辩真实运行→轮次转写/参与者账本/事件可查→诚实收口。
+"""圆桌任务端到端冒烟脚本：创建并恢复双参与者任务，检查轮次记录、事件和最终状态。
 
-前置:api:8000 + agent:8001 已起,dev 库含冒烟账号 smoke088 / sakila 数据源。
-真实 LLM 驱动:结论与共识与否不预设,断言口径=链路贯通与账本诚实
-(状态机/事件/轮次转写/参与者行),非业务答案正确性;收敛通道二选一如实
-打印(共识判定 / 轮次触顶保留分歧),不假绿。
+需要已启动的 API、Agent 及开发用例数据；共识与答案内容不作断言。
 """
 
 import asyncio
@@ -46,7 +42,7 @@ async def get_task(client: httpx.AsyncClient, task_id: str) -> dict:
 
 
 async def get_runs(client: httpx.AsyncClient, task_id: str) -> list[dict]:
-    """协作运行清单(401 重登同款;过期 token 上的裸 .json() 会 KeyError 假崩)。"""
+    """协作运行清单(401 重登同款;过期 token 上的裸 .json 会 KeyError 假崩)。"""
     r = await client.get(f"/tasks/{task_id}/collab-runs", headers=_h())
     if r.status_code == 401:
         STATE["h"] = await login(client)
@@ -169,8 +165,8 @@ async def main() -> int:
             run = await wait_roundtable_run(client, task_id, 300)
             print(f"[smoke] roundtable run appeared: id={run['id']} status={run['status']}")
 
-            # 等圆桌运行终态(运行口径);任务可能因步级 token 预算被 090 闸
-            # PAUSED——平台诚实语义,不作为冒烟失败(与 091 冒烟同款处理)
+            # 等圆桌运行终态(运行账口径);任务可能因步级 token 预算在步边界
+            # 被暂停——平台诚实语义,不作为冒烟失败
             deadline = time.monotonic() + 900
             while time.monotonic() < deadline:
                 runs_now = await get_runs(client, task_id)
@@ -220,7 +216,7 @@ async def main() -> int:
             assert collab_step is not None, f"宿主步骤 {run['step_id']} 不在账本"
             if run["status"] == "DONE":
                 if collab_step["status"] != "DONE":
-                    # 运行账与任务步账是两本各自为真的账(090 预算在步间结账):
+                    # 运行账与任务步账是两本各自为真的账(预算在步间结账):
                     # 圆桌诚实收口后,任务累计 token 预算在步边界触发 → 步 FAILED
                     # 附因「预算耗尽」= 诚实边界,非漂移;其余步态即真缺陷
                     reason = str(collab_step.get("fail_reason") or "")

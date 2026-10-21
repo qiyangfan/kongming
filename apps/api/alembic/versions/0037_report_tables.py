@@ -1,16 +1,4 @@
-"""0037: 分析报告三表底座(088 report-generation)
-
-- report:报告主行(归属/状态机/当前版本指针/trace/用量摘要)——软删仅置
-  status=DELETED + deleted_at(ADR-004:软删仅 identity 域……本表为生成物
-  资产,删除语义=列表/详情/导出/再生成全拒,行保留供审计回溯,与规格
-  「删除 SHALL 为软删仅留痕」一致);
-- report_version:版本(不可变,一旦落库不被 UPDATE;编辑/刷新恒产生新版本);
-- report_section:章节树(parent_id 自关联,叶子持绑定快照与图表配置)。
-
-约定同 baseline:UUID 主键、状态列 VARCHAR+CHECK(禁 SMALLINT 魔数)、
-timestamptz、快照/元数据用 JSONB。版本不可变由服务层纪律 + 用例钉死
-(存储层不加触发器——参照 baseline 惯例,不变量在应用层收口)。
-"""
+"""新增报告、不可变版本和章节树表。删除报告只标记 DELETED 并保留行供审计；版本历史通过新增版本保存。"""
 
 from sqlalchemy import text
 

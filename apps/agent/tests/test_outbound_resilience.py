@@ -1,8 +1,8 @@
-"""072-agent-outbound-resilience 测试:错误分类 / 重试语义 / 退避 / 降级链 / 用量每尝试一条。
+"""-agent-outbound-resilience 测试:错误分类 / 重试语义 / 退避 / 降级链 / 用量每尝试一条。
 
 假时钟策略:on_retry 记录退避断言 + sleep 替身收 0——不真等。
 
-宪法 Article III:安全/成本规则先红后绿——本文件先于 llm.py 接线编写。
+验证重试、退避和降级不会重复或遗漏用量记录。
 """
 
 import asyncio
@@ -274,7 +274,7 @@ def _patch_main(client: LlmClient, comp: object) -> None:
 
 
 async def test_chat_retries_transient_then_succeeds() -> None:
-    """任务 1.1:瞬时故障(503)触发重试,最终成功;用量每尝试一条(1 ERROR + 1 SUCCESS)。"""
+    """瞬时故障(503)触发重试,最终成功;用量每尝试一条(1 ERROR + 1 SUCCESS)。"""
     s = _settings(llm_api_key="sk-main")
     recorder = _Recorder()
     client = LlmClient(s, usage_reporter=recorder)
@@ -290,7 +290,7 @@ async def test_chat_retries_transient_then_succeeds() -> None:
 
 
 async def test_chat_hard_cap_three_attempts() -> None:
-    """任务 1.7:恒定 503 下总尝试=3,usage 三条 ERROR,最终 LlmError 上抛。"""
+    """恒定 503 下总尝试=3,usage 三条 ERROR,最终 LlmError 上抛。"""
     s = _settings(llm_api_key="sk-main")
     recorder = _Recorder()
     client = LlmClient(s, usage_reporter=recorder)
@@ -305,7 +305,7 @@ async def test_chat_hard_cap_three_attempts() -> None:
 
 
 async def test_chat_non_transient_no_retry() -> None:
-    """任务 1.3:配置类/4xx 非瞬时故障只调一次。"""
+    """配置类/4xx 非瞬时故障只调一次。"""
 
     class _Bad:
         calls = 0
@@ -325,7 +325,7 @@ async def test_chat_non_transient_no_retry() -> None:
 
 
 async def test_task_target_degraded_to_main_model() -> None:
-    """任务 1.4:任务路由目标瞬时故障耗尽 → 降级主模型;用量记录实际模型(主模型)。"""
+    """任务路由目标瞬时故障耗尽 → 降级主模型;用量记录实际模型(主模型)。"""
     reg = json.dumps(
         [
             {
@@ -360,7 +360,7 @@ async def test_task_target_degraded_to_main_model() -> None:
 
 
 async def test_bot_override_never_degrades() -> None:
-    """任务 1.5:Bot model_override 目标瞬时故障耗尽 → 不降级,直接 LlmError。"""
+    """Bot model_override 目标瞬时故障耗尽 → 不降级,直接 LlmError。"""
     reg = json.dumps(
         [
             {
@@ -387,7 +387,7 @@ async def test_bot_override_never_degrades() -> None:
 
 
 async def test_fallback_entry_used_after_main_exhausted() -> None:
-    """任务 2.3:主模型也耗尽且配置了 fallback 条目 → 降级到该条目(1 次,不重试)。"""
+    """主模型也耗尽且配置了 fallback 条目 → 降级到该条目(1 次,不重试)。"""
     reg = json.dumps(
         [
             {
@@ -429,7 +429,7 @@ async def test_fallback_entry_used_after_main_exhausted() -> None:
 
 
 async def test_startup_rejects_unknown_fallback_entry() -> None:
-    """任务 2.3:fallback 条目不在注册表——启动期告警并视为未配置(不拒启)。"""
+    """fallback 条目不在注册表——启动期告警并视为未配置(不拒启)。"""
     s = _settings(llm_api_key="sk-main", llm_fallback_entry="ghost")
     s.fail_closed_checks()  # 仅告警,不抛
     client = LlmClient(s, usage_reporter=_Recorder())
@@ -441,7 +441,7 @@ async def test_startup_rejects_unknown_fallback_entry() -> None:
     assert main_comp.calls == 3
 
 
-# ── 5. 控制面回调分层(任务 1.8 / 2.5) ────────────────────────────
+# ── 控制面回调重试 ────────────────────────────
 
 
 class _CountingPost:

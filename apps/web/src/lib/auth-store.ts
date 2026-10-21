@@ -1,4 +1,4 @@
-/* 认证态(zustand):status 三态 + 当前用户;会话恢复单飞幂等。
+/* 认证态(zustand):status 三态 + 当前用户;bootstrap 并发调用只执行一次。
    fail-closed:任何一步失败都回落 guest,不留半截登录态。 */
 
 import { create } from "zustand";
@@ -34,7 +34,7 @@ export const useAuth = create<AuthState>((set) => {
     set({ status: "guest", user: null });
     useTenant.getState().clear();
     useDatasource.getState().clear();
-    useAgentMode.getState().clear(); // 019:跨账号不继承内核开关
+    useAgentMode.getState().clear(); // 跨账号不继承 Agent 模式开关
   });
 
   async function loadMe(): Promise<void> {
@@ -61,7 +61,7 @@ export const useAuth = create<AuthState>((set) => {
       // 每次都走 tryRefresh 轮换 refresh token——多标签页下另一标签持旧票再刷,
       // 即被后端复用检测吊销全家族(误伤)
       if (useAuth.getState().status === "authed") return Promise.resolve();
-      // StrictMode 双挂载/多守卫并发下幂等(单飞)
+      // StrictMode 双挂载/多守卫并发下幂等,只执行一次
       booting ??= (async () => {
         if (!getRefreshToken()) {
           set({ status: "guest", user: null });

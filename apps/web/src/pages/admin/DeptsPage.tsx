@@ -1,5 +1,4 @@
-/* 部门管理页(web-admin spec「部门管理页」):树形展示+创建/编辑
-   (父部门选择防自身/后代)+删除确认(端点前置校验兜底,失败展示错误)。 */
+/* 管理部门树；选择父部门时排除自身和后代，删除失败时显示服务端错误。 */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -93,7 +92,7 @@ function TreeRow({
       <span className="min-w-0 flex-1 truncate text-sm font-medium">{node.dept_name}</span>
       {node.status === "DISABLED" && <Badge variant="secondary">停用</Badge>}
       <span className="shrink-0 text-muted-foreground text-xs">#{node.sort}</span>
-      {/* 行操作(mobile-experience B5.4):宽屏行内按钮保留;窄屏收溢出菜单 */}
+      {/* 宽屏行内按钮,窄屏收溢出菜单 */}
       <div className="hidden items-center gap-1 md:flex">
         <Button variant="ghost" size="sm" onClick={() => onAddChild(node)}>
           加子级

@@ -6,7 +6,7 @@ export const DIM_TEXT: Record<string, string> = {
   COST: "成本(元)",
 };
 
-// 103:配额策略 scope 展示文案(下拉/列表徽标共用)
+// 配额策略 scope 展示文案(下拉/列表徽标共用)
 export const SCOPE_TEXT: Record<string, string> = {
   TENANT: "租户",
   BOT: "助手",

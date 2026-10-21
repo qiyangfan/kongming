@@ -1,12 +1,6 @@
-"""agent 面 validate 预检的引擎适配(053):单遍解析 + 模式化 + 请求级降级。
+"""Agent SQL 预检适配层:支持 builtin/shadow/primary 三种模式。
 
-引擎(liannu,进程内纯计算,零凭证零 IO——ADR-002 不受影响)贡献
-单遍解析;validate 判定逻辑(EMPTY_SQL/MULTI_STATEMENT/只读根)在本模块
-本地派生,语义与切换前逐字一致。纯解析无 IO 的节点契约不变。
-
-模式(env KM_AGENT_SQLGUARD_MODE,默认影子):
-- builtin:纯内置路径;shadow:内置权威,引擎解析只对拍(不一致仅记录);
-- primary:引擎解析权威,引擎异常时请求级降级内置,记 ENGINE_FALLBACK。
+primary 异常时回退内置校验并记录事件;预检不访问外部服务。
 """
 
 from __future__ import annotations
@@ -30,7 +24,7 @@ MODE_PRIMARY = "primary"
 _MODES = (MODE_BUILTIN, MODE_SHADOW, MODE_PRIMARY)
 DEFAULT_MODE = MODE_SHADOW
 
-# 067:只读根清单唯一定义在 liannu.rules(上方 import);公开 re-export 供恒等断言
+# 只读根清单唯一定义在 liannu.rules(上方 import);公开 re-export 供恒等断言
 _READONLY_ROOTS = READONLY_ROOTS
 
 _lock = threading.Lock()
@@ -79,7 +73,7 @@ def _load_engine() -> Any:
 
 
 def startup_self_check(mode: str = DEFAULT_MODE, engine: object | None = None) -> bool:
-    """启动自检(任务 3.1):失败告警降级 builtin,不阻断启动。"""
+    """启动自检:失败告警降级 builtin,不阻断启动。"""
     configure(mode, engine)
     if _mode == MODE_BUILTIN:
         log.info("SQLGUARD validate 以内置路径运行 mode=builtin")
@@ -110,7 +104,7 @@ def _fallback_count() -> None:
 
 
 def validate(sql: str) -> ValidationResult:
-    """validate 节点预检:模式化解析 + 本地判定(语义与切换前一致)。"""
+    """validate 节点预检:模式化解析 + 本地判定。"""
     if _mode == MODE_BUILTIN:
         return _builtin(sql)
     engine = _load_engine()
@@ -153,7 +147,7 @@ def validate(sql: str) -> ValidationResult:
 def _from_artifact(artifact: Any) -> ValidationResult:
     if getattr(artifact, "depth_exceeded", False):
         reason = getattr(artifact, "depth_reason", None) or "DEPTH_EXCEEDED"
-        # 深嵌套受控拒绝(053):语法形态类,非权限问题 → 可重试
+        # 深嵌套受控拒绝:语法形态类,非权限问题 → 可重试
         return ValidationResult(passed=False, reason=reason)
     parse_error = getattr(artifact, "parse_error", None)
     if parse_error is not None:

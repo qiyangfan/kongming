@@ -1,14 +1,7 @@
 # ruff: noqa: S101, S105, ASYNC109 —— 冒烟脚本:断言即验收、口令为本地冒烟账号、超时参数形参
 # pyright: reportUnknownParameterType=false, reportMissingTypeArgument=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
-"""collab-worker-roster 端到端冒烟(5.2):建 2 Bot → 建任务 → 步骤声明分工
-名册拓扑(2 成员点名)→恢复→分配制协作真实运行→账本逐 worker bot_key 与
-成员标签前缀可查→诚实收口。
-
-前置:api:8000 + agent:8001 已起,dev 库含冒烟账号 smoke088 / sakila 数据源。
-真实 LLM 驱动:结论内容不预设,断言口径=链路贯通与账本诚实(名册落账/
-逐 worker 绑定/事件),非业务答案正确性;终态 DONE/FAILED/PARTIAL 均为
-合法收口,如实打印不假绿。
-"""
+"""协作名册端到端冒烟脚本：创建 Bot 和任务，检查指定成员分工及逐 worker 账本。
+需要已启动的 API、Agent 和开发用例数据；只校验执行记录，不判断模型答案。"""
 
 import asyncio
 import sys
@@ -208,7 +201,7 @@ async def main() -> int:
                 assert isinstance(w.get("usage"), dict), "worker 缺用量归集"
 
             # 验收单元=run 收口(上方已断言);任务终态仅如实打印——后续普通步
-            # 被步级 token 预算闸暂停/失败属 090 语义,非冒烟失败(115 先例口径)
+            # 被步级 token 预算闸暂停/失败属预期行为,非冒烟失败
             final = await wait_task(client, task_id, TERMINAL + ("PAUSED",), 240)
             task_status = final["task"]["status"]
             events = [e["kind"] for e in final["events"]]

@@ -1,4 +1,4 @@
-/* toolcall 域 API 封装(019 工具管理与审计)。类型契约由 ADR-005 管线生成。 */
+/* toolcall 域 API 封装(工具管理与审计)。类型契约由 ADR-005 管线生成。 */
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";
@@ -20,7 +20,7 @@ export interface ToolAuditParams {
   end?: string;
 }
 
-/** 工具执行审计分页(019,行级可见性:非 ALL 角色服务端强制本人) */
+/** 工具执行审计分页(行级可见性:非 ALL 角色服务端强制本人) */
 export function toolAuditPage(params: ToolAuditParams): Promise<ToolAuditPageOut> {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {

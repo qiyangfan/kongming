@@ -62,7 +62,7 @@ class SchemaMeta:
 
 @dataclass(frozen=True)
 class MetricHit:
-    """语义层口径命中(076 纯增):标识/名称/口径表达式/修订时间。
+    """语义层口径命中:标识/名称/口径表达式/修订时间。
     与 metric_hints 文字段同源(api 侧派生),零凭证透传。"""
 
     metric_id: str = ""
@@ -73,17 +73,17 @@ class MetricHit:
 
 @dataclass(frozen=True)
 class RagContext:
-    """/internal/rag/retrieve 召回结果(009)。schema_hint 空=零命中(回退内省)。
-    023 纯增:relations_hint/metric_hints 语义段(空串=无注入)。
-    076 纯增:metric_hits 结构化口径命中(空=无命中)。"""
+    """/internal/rag/retrieve 召回结果。schema_hint 空=零命中(回退内省)。
+    relations_hint/metric_hints 语义段(空串=无注入)。
+    metric_hits 结构化口径命中(空=无命中)。"""
 
     schema_hint: str
     history_sql: str = ""
     relations_hint: str = ""
     metric_hints: str = ""
-    metric_hits: list[MetricHit] = field(default_factory=list[MetricHit])  # 076
-    doc_hints: list[dict[str, str]] = field(default_factory=list[dict[str, str]])  # 024 文档段
-    # 056 skill-pack 投影段(空串=零包零回归)
+    metric_hits: list[MetricHit] = field(default_factory=list[MetricHit])
+    doc_hints: list[dict[str, str]] = field(default_factory=list[dict[str, str]])  # 文档段
+    # skill-pack 投影段(空串=零包)
     skill_terms: str = ""
     skill_examples: str = ""
     skill_persona: str = ""
@@ -91,7 +91,7 @@ class RagContext:
 
 @dataclass(frozen=True)
 class ToolExecuteOutcome:
-    """/internal/tool/execute 的响应(019;HTTP 层异常已收敛为 status=error)。"""
+    """/internal/tool/execute 的响应(HTTP 层异常已收敛为 status=error)。"""
 
     status: str  # executed / rejected / error / rate_limited / confirm_required
     reason: str | None = None
@@ -137,7 +137,7 @@ class ApiClient:
             # 租户非法/绑定失败/数据源不支持等 HTTP 拒绝:重试无意义但语义非权限拦截,
             # 收敛 ERROR 让 selfheal 走有限重试后终止(计数即保护)
             return SqlExecuteOutcome(verdict="ERROR", reason=f"控制面拒绝(HTTP {resp.status_code})")
-        # httpx resp.json() 返回 Any,边界处一次收窄(运行时即 dict,cast 零行为变化)
+        # httpx resp.json 返回 Any,边界处一次收窄(运行时即 dict,cast 零行为变化)
         data = cast("dict[str, object]", resp.json())
         return SqlExecuteOutcome(
             verdict=cast("Verdict", data["verdict"]),
@@ -192,11 +192,11 @@ class ApiClient:
         history: list[str] | None = None,
         user_id: str | None = None,
     ) -> RagContext | None:
-        """三路召回(009):问句用 understand 产出的改写问句(语义完整);
-        047 多轮继承:history 末条走继承路补上轮依赖表;任何失败返回
+        """三路召回:问句用 understand 产出的改写问句(语义完整);
+        多轮继承:history 末条走继承路补上轮依赖表;任何失败返回
         None(retrieve 回退实时内省,不抛错)。
-        102:调用者身份随负载透传(可见集合=公共∪所在团队,控制面收敛);
-        缺省不携带=纯公共形态(既有调用零回归)。"""
+        调用者身份随负载透传(可见集合=公共∪所在团队,控制面收敛);
+        缺省不携带=纯公共形态(既有调用)。"""
         payload: dict[str, object] = {
             "tenant_key": tenant_key,
             "datasource_key": datasource_key,
@@ -218,7 +218,6 @@ class ApiClient:
             data = cast("dict[str, object]", resp.json())
         except ValueError:
             # 200 但非 JSON(网关回 HTML 错误页等):按失败回退内省,不裸抛
-            # (013 挂账⑮;docstring「任何失败返回 None」自此兑现)
             log.warning("rag_retrieve 响应非 JSON,回退实时内省")
             return None
         hits_raw = data.get("metric_hits")
@@ -252,10 +251,7 @@ class ApiClient:
                 {
                     "source_ref": str(cast("dict[str, object]", h).get("source_ref") or ""),
                     "content": str(cast("dict[str, object]", h).get("content") or ""),
-                    # 068:稳定引用键透传(api 侧由父块主键派生)。068 交付时漏掉
-                    # 本解析点,键在 agent 面恒缺失——合法键集恒空致净化自跳过、
-                    # 来源投影恒空(真实链路缺陷,093 期应改尽改);缺失=空串,
-                    # 注入段表头与合法键集按既有空值语义回退 source_ref
+                    # 引用键由父块主键派生;缺失时保持空值,来源说明回退 source_ref
                     "citation_key": str(cast("dict[str, object]", h).get("citation_key") or ""),
                 }
                 for h in cast("list[object]", data.get("doc_hints") or [])
@@ -264,13 +260,13 @@ class ApiClient:
         )
 
     async def report_usage(self, records: list[dict[str, object]]) -> None:
-        """LLM 用量上报(021):fire-and-forget;任何失败仅日志(统计口径非计费)。
-        072:不走 _post 重试包装——重复落库,任何失败都不重发。"""
+        """LLM 用量上报:fire-and-forget;任何失败仅日志(统计口径非计费)。
+        不走 _post 重试包装——重复落库,任何失败都不重发。"""
         try:
             resp = await self._post_once("/internal/llm-usage", {"records": records})
             if resp.status_code != 200:
                 log.warning("usage 上报非 200: HTTP %s(丢弃)", resp.status_code)
-        except Exception as e:  # noqa: BLE001  # 上报永不阻断主链路
+        except Exception as e:  # noqa: BLE001  # 用量上报失败只记录日志，不影响请求。
             log.warning("usage 上报失败(丢弃): %s", e)
 
     async def tool_execute(
@@ -282,12 +278,12 @@ class ApiClient:
         user_id: str | None,
         tool_name: str,
         args: dict[str, object],
-        channel: str = "chat",  # 025
+        channel: str = "chat",
     ) -> ToolExecuteOutcome:
-        """通用工具执行回调(019):agent 只传工具名/参数/上下文,零凭证(ADR-002)。
+        """通用工具执行回调:agent 只传工具名/参数/上下文,零凭证(ADR-002)。
 
         HTTP 层异常(超时/断连/5xx)收敛 status=error 喂回 LLM,不裸抛。
-        072:不走 _post 重试包装——工具副作用不假定幂等,任何失败都不重发。
+        不走 _post 重试包装——工具副作用不假定幂等,任何失败都不重发。
         """
         try:
             resp = await self._post_once(
@@ -324,7 +320,7 @@ class ApiClient:
     async def task_plan(
         self, *, task_id: str, tenant_key: str, steps: list[dict[str, object]]
     ) -> list[dict[str, object]] | None:
-        """计划回写(090):返回落库后的步骤清单(含 id);被拒返回 None。"""
+        """计划回写:返回落库后的步骤清单(含 id);被拒返回 None。"""
         try:
             resp = await self._post_once(
                 "/internal/task/plan",
@@ -420,12 +416,12 @@ class ApiClient:
             log.warning("task_finish 回调异常: %s", e)
             return False
 
-    # ── 协作账本回调(091;开账 fail-closed,worker 行/终态尽力而为)──
+    # ── 协作账本回调(开账 fail-closed,worker 行/终态尽力而为)──
 
     async def collab_start(
         self, *, task_id: str, tenant_key: str, step_id: str, depth: int = 1
     ) -> dict[str, object] | None:
-        """协作开账(091):返回 {run_id, topology}(拓扑以控制面库内声明为准);
+        """协作开账:返回 {run_id, topology}(拓扑以控制面库内声明为准);
         开账失败返回 None(调用方 fail-closed——无账不执行,防游离协作面)。"""
         try:
             resp = await self._post_once(
@@ -453,7 +449,7 @@ class ApiClient:
         bot_key: str | None,
         trace_id: str,
     ) -> bool:
-        """worker 派发落账(091);失败仅日志(账本尽力而为,执行照常)。"""
+        """worker 派发落账;失败仅日志(账本尽力而为,执行照常)。"""
         try:
             resp = await self._post_once(
                 "/internal/task/collab-worker-start",
@@ -485,7 +481,7 @@ class ApiClient:
         usage: dict[str, object],
         trace_id: str,
     ) -> bool:
-        """worker 终态回写(091,用量按 worker 归集);失败仅日志。"""
+        """worker 终态回写(用量按 worker 归集);失败仅日志。"""
         try:
             resp = await self._post_once(
                 "/internal/task/collab-worker-result",
@@ -517,7 +513,7 @@ class ApiClient:
         dissent: bool,
         summary: str,
     ) -> dict[str, object] | None:
-        """协作运行终态回写(091);失败仅日志(重跑/取消路径收敛账本)。"""
+        """协作运行终态回写;失败仅日志(重跑/取消路径收敛账本)。"""
         try:
             resp = await self._post_once(
                 "/internal/task/collab-finish",
@@ -550,7 +546,7 @@ class ApiClient:
         usage: dict[str, object],
         trace_id: str,
     ) -> bool:
-        """圆桌轮次上账(115;追加只写);失败仅日志(账本尽力而为)。"""
+        """圆桌轮次上账(追加只写);失败仅日志(账本尽力而为)。"""
         try:
             resp = await self._post_once(
                 "/internal/task/collab-turn",
@@ -585,7 +581,7 @@ class ApiClient:
         payload_type: str,
         payload: bytes,
     ) -> bool:
-        """检查点/部分写入落控制面(add-graph-checkpoint)。失败返回 False
+        """检查点/部分写入落控制面(graph-checkpoint spec)。失败返回 False
         (适配器降级,不抛断执行主路径);不走重试——blob 重复行无害但
         部分写入重复会造成恢复期重复观察,单次语义最诚实。"""
         import base64 as _b64
@@ -696,8 +692,7 @@ class ApiClient:
         summary: str,
         thread_id: str,
     ) -> dict[str, object] | None:
-        """图内挂起上账(编排回调):建/复用确认行+任务/步骤 AWAITING_APPROVAL。
-        409(已挂起/状态冲突)按幂等返回 reused 口径,None 仅链路失败。"""
+        """创建或复用确认记录，并将任务和步骤置为 AWAITING_APPROVAL；409 状态冲突按幂等结果处理。"""
         try:
             resp = await self._post(
                 "/internal/task/step-suspended",
@@ -747,8 +742,7 @@ class ApiClient:
     async def report_progress(
         self, *, report_id: str, phase: str, tenant_key: str = "default"
     ) -> None:
-        """报告生成进度回写(088):POST /internal/report/progress。
-        进度是尽力而为信号:任何失败仅日志,不阻断编排主链路,不重发。"""
+        """回写报告生成进度。失败只记录日志，不影响报告生成。"""
         try:
             resp = await self._post_once(
                 "/internal/report/progress",
@@ -756,14 +750,14 @@ class ApiClient:
             )
             if resp.status_code != 204 and resp.status_code != 200:
                 log.warning("report_progress 非 2xx: HTTP %s", resp.status_code)
-        except Exception as e:  # noqa: BLE001  # 进度回写永不阻断主链路
+        except Exception as e:  # noqa: BLE001  # 进度回写失败只记录日志，不影响报告生成。
             log.warning("report_progress 失败(忽略): %s", e)
 
     async def attachment_content(
         self, att_id: str, *, tenant_key: str, user_id: str
     ) -> tuple[str, bytes] | None:
-        """030:一次性取附件内容(内部端点绑定复校+消费语义);
-        404/异常 → None(由调用方 fail-closed 文案化)。072:同 _post 的
+        """一次性取附件内容(内部端点绑定复校+消费语义);
+        404/异常 → None(由调用方 fail-closed 文案化)。同 _post 的
         连接层分层重试口径(读超时=已送达,不重发)。"""
         try:
             resp = await self._get_retryable(
@@ -778,9 +772,9 @@ class ApiClient:
         return resp.headers.get("content-type", "image/png").split(";")[0], resp.content
 
     async def _post(self, path: str, payload: dict[str, object]) -> httpx.Response:
-        """控制面 POST(只读类回调入口;072 分层重试):仅**连接层未送达**失败
-        按回调预算快重试(design D2——读超时=已送达,执行副作用不可假定幂等,
-        不重发;5xx 语义上亦已送达)。report_usage/tool_execute 走 _post_once
+        """控制面 POST(只读类回调入口;分层重试):仅**连接层未送达**失败
+        按回调预算快重试——读超时=已送达,执行副作用不可假定幂等,
+        不重发;5xx 语义上亦已送达。report_usage/tool_execute 走 _post_once
         (任何失败都不重试)。"""
         return await call_with_retry(
             partial(self._post_once, path, payload),
@@ -797,7 +791,7 @@ class ApiClient:
             return await client.post(path, json=payload)
 
     async def _get_retryable(self, path: str, params: dict[str, str]) -> httpx.Response:
-        """控制面 GET(030 附件取用;同 _post 的连接层分层重试口径)。"""
+        """控制面 GET(附件取用;同 _post 的连接层分层重试口径)。"""
         return await call_with_retry(
             partial(self._get_once, path, params),
             max_attempts=CALLBACK_MAX_ATTEMPTS,

@@ -1,7 +1,7 @@
 """datasource 域 SQLAlchemy 仓储实现(唯一 import sqlalchemy 的 datasource 文件)。
 
 显式 SQL(text)同 system 域约定;行 → 领域 dataclass 的映射集中在 _to_* 函数。
-审计复用 auth 域 SqlOperLogRepo(同会话=同事务,007 组合模式)。
+审计复用 auth 域 SqlOperLogRepo(同会话=同事务,组合模式)。
 """
 
 from typing import Any
@@ -41,7 +41,7 @@ def _to_datasource(row: dict[str, Any]) -> Datasource:
 class SqlDatasourceRepo:
     def __init__(self, s: AsyncSession) -> None:
         self._s = s
-        self._oper = SqlOperLogRepo(s)  # 审计与业务同会话=同事务(007 组合模式)
+        self._oper = SqlOperLogRepo(s)  # 审计与业务同会话=同事务(组合模式)
 
     # ---- 管理面 ----
 
@@ -158,7 +158,7 @@ class SqlDatasourceRepo:
         default_schema: str,
         readonly: bool,
     ) -> None:
-        # password_enc None=不改(COALESCE 保持现值;007 S1 教训:专用语句语义钉住)
+        # password_enc None=不改(COALESCE 保持现值)
         await self._s.execute(
             text(
                 "UPDATE public.sys_datasource SET"
@@ -225,7 +225,7 @@ class SqlDatasourceRepo:
         row = await self.find_for_execute(datasource_key)
         return row is not None and row.status == "ACTIVE" and row.tenant_id == tenant_id
 
-    # ---- 选项接口租户复校(单一真理源 kongming.tenant,B1-B10 六处收口) ----
+    # ---- 选项接口租户复校(租户判定统一走 kongming.tenant) ----
 
     async def find_bound_tenant(self, user_id: str, tenant_key: str) -> str | None:
         return await tenant.bound_tenant_id(self._s, user_id=user_id, tenant_key=tenant_key)

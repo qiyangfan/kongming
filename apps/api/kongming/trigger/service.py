@@ -1,6 +1,6 @@
-"""trigger 用例编排(031):CRUD 校验 + 目标执行 + 出站通知 +
-执行历史。零框架(宪法 Article II);时区固定 Asia/Shanghai。
-108:邮件入站形态——UID 游标轮询 + 摘要白名单适配 + 输入护栏三层
+"""trigger 用例编排:CRUD 校验 + 目标执行 + 出站通知 +
+执行历史。用例层不依赖 FastAPI 或 SQLAlchemy;时区固定 Asia/Shanghai。
+邮件入站形态——UID 游标轮询 + 摘要白名单适配 + 输入护栏三层
 (轮询器是「形态」,重试是「策略」,正交共存)。"""
 
 import datetime as dt
@@ -33,10 +33,11 @@ from kongming.trigger.ports import (
 from kongming.trigger.retry import DEFAULT_BACKOFF_SEC, is_valid_max_retries, schedule_retry
 
 TG_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
-_TZ = dt.timezone(dt.timedelta(hours=8))  # Asia/Shanghai(design O5 挂账可配)
+_TZ = dt.timezone(dt.timedelta(hours=8))  # Asia/Shanghai(固定)
+
 _MAX_BODY = 1 * 1024 * 1024
 
-# 108:邮件轮询节流下限封顶(design:轮询风暴防线)与每轮处理数上限
+# 邮件轮询节流下限封顶(防轮询风暴)与每轮处理数上限
 # (剩余下轮续传,游标语义天然支持)
 MIN_POLL_INTERVAL_SEC = 30
 MAX_MESSAGES_PER_POLL = 20
@@ -51,11 +52,11 @@ class TriggerNotFound(Exception):
 
 
 class TriggerKeyTaken(Exception):
-    """同租户 tg_key 冲突(409 语义,R1-S2)。"""
+    """同租户 tg_key 冲突(409 语义)。"""
 
 
 class TargetNotFound(Exception):
-    """target_key 在当前租户对应目标域不存在(040 写边界闸,400 TARGET_NOT_FOUND)。"""
+    """target_key 在当前租户对应目标域不存在(写边界闸,400 TARGET_NOT_FOUND)。"""
 
 
 class WebhookRejected(Exception):
@@ -93,9 +94,9 @@ class TriggerService:
         self._notifier = notifier
         self._oper = oper
         self._target_checker = target_checker
-        # 101:部署级固定退避(重试次数上限在触发器行,间隔属部署)
+        # 部署级固定退避(重试次数上限在触发器行,间隔属部署)
         self._retry_backoff_sec = retry_backoff_sec
-        # 108:IMAP 客户端与输入护栏(组合根绑定;未注入=邮件形态不可轮询)
+        # IMAP 客户端与输入护栏(组合根绑定;未注入=邮件形态不可轮询)
         self._mail = mail
         self._input_guard = input_guard
 
@@ -139,7 +140,7 @@ class TriggerService:
             raise TriggerValidationError("target_type 须为 workflow/bot")
         if adapter not in ("custom", "github"):
             raise TriggerValidationError("adapter 须为 custom/github")
-        # 101:重试次数上限值域(0–5,0=不重试;与 DDL CHECK 同源判定)
+        # 重试次数上限值域(0–5,0=不重试;与 DDL CHECK 同源判定)
         if not is_valid_max_retries(max_retries):
             raise TriggerValidationError("max_retries 须为 0–5 的整数(0=不重试)")
         if type_ == "CRON":
@@ -156,7 +157,7 @@ class TriggerService:
             if not secret:
                 secret = "whsec_" + uuid_mod.uuid4().hex  # 缺省生成(一次性展示)
             plain_secret_out = secret
-        # 108:邮件形态保存期校验(与 cron 表达式同口径,拼错配置不进调度);
+        # 邮件形态保存期校验(与 cron 表达式同口径,拼错配置不进调度);
         # 凭证即刻加密,任何响应不回显(创建亦无一次性展示——口令是用户自填的)
         imap_credential_cipher = ""
         next_fire_iso: str | None = None
@@ -177,9 +178,9 @@ class TriggerService:
             try:
                 next_fire_iso = next_fire(cron_expr, _now()).isoformat()
             except CronError as e:
-                # R1-S1a:计算失败(永不触发/366 天外)同属保存期 400
+                # 计算失败(永不触发/366 天外)同属保存期 400
                 raise TriggerValidationError(str(e)) from e
-        # 040 写边界闸:目标不存在即 400,防拼错目标静默挂到运行期才暴露
+        # 写边界闸:目标不存在即 400,防拼错目标静默挂到运行期才暴露
         if self._target_checker is not None and not await self._target_checker.target_exists(
             target_type=target_type,
             target_key=target_key,
@@ -187,7 +188,7 @@ class TriggerService:
             creator_id=created_by,
         ):
             raise TargetNotFound(target_key)
-        # R1-S2:重名预检(唯一索引兜底之外的友好 409,与 datasource 同范式)
+        # 重名预检(唯一索引兜底之外的友好 409,与 datasource 同范式)
         if await self._repo.get(tenant_id=tenant_id, tg_key=tg_key) is not None:
             raise TriggerKeyTaken(tg_key)
         tid = await self._repo.create(
@@ -217,21 +218,21 @@ class TriggerService:
         await self._audit("trigger.create", tg_key, {"type": type_, "target": target_key})
         out: dict[str, Any] = {"id": tid, "webhook_path": webhook_path}
         if plain_secret_out:
-            out["secret"] = plain_secret_out  # 创建一次性展示(与 025 api-key 同哲学)
+            out["secret"] = plain_secret_out  # 创建一次性展示(与 api-key 同哲学)
         return out
 
     async def update(self, *, trigger_id: str, tenant_id: str, **kw: Any) -> None:
         row = await self._repo.get_by_id(trigger_id=trigger_id)
         if row is None or str(row["tenant_id"]) != tenant_id:
             raise TriggerNotFound(trigger_id)
-        # R1-T4:密钥轮换(仅显式非空才重加密;空=保持现值)
+        # 密钥轮换(仅显式非空才重加密;空=保持现值)
         new_secret = str(kw.pop("secret", "") or "")
         if new_secret:
             kw["secret_cipher"] = self._cipher.encrypt(new_secret)
-        # 101:重试次数上限值域(仅显式提交时校验)
+        # 重试次数上限值域(仅显式提交时校验)
         if "max_retries" in kw and not is_valid_max_retries(int(kw["max_retries"])):
             raise TriggerValidationError("max_retries 须为 0–5 的整数(0=不重试)")
-        # 108:邮件配置列仅 EMAIL 形态更新(空框=凭证保持现值;CRON/WEBHOOK
+        # 邮件配置列仅 EMAIL 形态更新(空框=凭证保持现值;CRON/WEBHOOK
         # 行剥除邮件字段,防误覆盖);配置变更即到期,下个 tick 按新配置轮询
         imap_password = str(kw.pop("imap_password", "") or "")
         if str(row["type"]) == "EMAIL":
@@ -272,7 +273,7 @@ class TriggerService:
                 kw["next_fire_at"] = next_fire(str(cron_expr), _now()).isoformat()
             except CronError as e:
                 raise TriggerValidationError(str(e)) from e
-        # 040:仅目标变更时重校验——目标已删的存量触发器仍可停用/改非目标字段
+        # 仅目标变更时重校验——目标已删的存量触发器仍可停用/改非目标字段
         new_tt = str(kw.get("target_type", row["target_type"]))
         new_tk = str(kw.get("target_key", row["target_key"]))
         if (
@@ -296,7 +297,7 @@ class TriggerService:
         ):
             raise TriggerNotFound(trigger_id)
         if not enabled:
-            # 101:停用语义=「不再主动执行」,挂起重试是未来时态的执行,一并取消
+            # 停用语义=「不再主动执行」,挂起重试是未来时态的执行,一并取消
             # (收敛 FAILED 终态可见;重新启用不补做,从下个周期开始)
             await self._repo.cancel_pending_retries(
                 trigger_id=trigger_id, reason="触发器已停用,挂起重试取消"
@@ -308,7 +309,7 @@ class TriggerService:
     async def delete(self, *, trigger_id: str, tenant_id: str) -> None:
         if not await self._repo.delete(trigger_id=trigger_id, tenant_id=tenant_id):
             raise TriggerNotFound(trigger_id)
-        # 101:定义删除即取消挂起重试(run 行随历史保留,不随定义消失)
+        # 定义删除即取消挂起重试(run 行随历史保留,不随定义消失)
         await self._repo.cancel_pending_retries(
             trigger_id=trigger_id, reason="触发器已删除,挂起重试取消"
         )
@@ -320,7 +321,7 @@ class TriggerService:
     async def page_runs(
         self, *, tenant_id: str, trigger_id: str, page: int, size: int
     ) -> tuple[int, list[dict[str, Any]]]:
-        # R1-S5:历史不随定义删除而不可读(查询列自带 tenant_id 隔离,
+        # 历史不随定义删除而不可读(查询列自带 tenant_id 隔离,
         # 空集即不存在;rowcount 语义下跨租户恒空,无存在性泄漏)
         return await self._repo.page_runs(
             tenant_id=tenant_id, trigger_id=trigger_id, page=page, size=size
@@ -336,7 +337,7 @@ class TriggerService:
         try:
             secret = self._cipher.decrypt(str(row["secret_cipher"]))
         except Exception as e:
-            # R1-T5:密文损坏/密钥轮换——同形拒(不 500 泄漏内部态)
+            # 密文损坏/密钥轮换——同形拒(不 500 泄漏内部态)
             raise WebhookRejected(f"secret 不可用: {type(e).__name__}") from e
         expect = hmac_mod.new(secret.encode(), body, hashlib.sha256).hexdigest()
         if not hmac_mod.compare_digest(expect, signature):
@@ -357,7 +358,7 @@ class TriggerService:
     ) -> None:
         """后台执行(路由已在请求期完成校验;此处深防御复验一次)。
 
-        summary_json=标准化 inputs JSON:重试回放载体(101,fire_retry 沿链首
+        summary_json=标准化 inputs JSON:重试回放载体(fire_retry 沿链首
         行还原),与 email 摘要同列同语义。"""
         if len(body) > _MAX_BODY:
             raise WebhookRejected("body 超 1MB")
@@ -392,7 +393,7 @@ class TriggerService:
     async def list_due(self, *, now_iso: str) -> list[dict[str, Any]]:
         return await self._repo.list_due_cron(now_iso=now_iso)
 
-    # ── 邮件入站(108) ──
+    # ── 邮件入站 ──
 
     async def list_due_emails(self, *, now_iso: str) -> list[dict[str, Any]]:
         """调度器调用:轮询间隔到期的邮件触发器(停用即出扫描面)。"""
@@ -410,14 +411,10 @@ class TriggerService:
         await self._repo.commit()
 
     async def poll_email(self, *, trigger_id: str) -> None:
-        """轮询一次邮件触发器(108,调度器调用)。
+        """按 UID 游标处理新邮件；UIDVALIDITY 变化时重扫。执行记录和游标同事务保存。
 
-        语义链:UID 游标续传(不重复不漏)→ UIDVALIDITY 变更游标作废重扫
-        (告警在案,宁重复不丢失)→ 每封新邮件经摘要白名单适配+输入护栏
-        → 目标执行 → run 落库与游标推进同事务(至少一次;崩溃双回滚,
-        下轮重触发,重复由 run 历史可见)。连接/认证/协议失败按错误分类
-        落 FAILED run,不执行目标、不推进游标;任何异常不逃逸(单触发器
-        失败不扩散)。目标执行失败走 101 重试链(形态与策略正交)。
+        连接或目标执行失败时记录失败状态且不推进游标，后续轮询可重试；
+        任何异常不逃逸(单触发器失败不扩散)。
         """
         row = await self._repo.get_by_id(trigger_id=trigger_id)
         if row is None or not row["enabled"] or str(row["type"]) != "EMAIL":
@@ -459,8 +456,8 @@ class TriggerService:
             fetch = await self._mail.fetch_since(last_uid=last_uid, **fetch_kwargs)
             reset = cur is not None and stored_uv is not None and stored_uv != fetch.uidvalidity
             if reset:
-                # UIDVALIDITY 变更:游标作废重置(design:全文件夹重扫会重复
-                # 触发——记录告警,人工裁决;宁重复不丢失的一致延续)
+                # UIDVALIDITY 变更:游标作废重置——全文件夹重扫会重复触发,
+                # 记录告警人工裁决;宁重复不丢失
                 log.warning(
                     "trigger %s 文件夹 %s UIDVALIDITY 变更 %s→%s,游标重置全量重扫",
                     trigger_id,
@@ -548,17 +545,17 @@ class TriggerService:
             )
             if blocked:
                 await self._repo.commit()  # 拦截路径无 _fire 收尾,显式同事务提交
-        # 末封邮件的游标推进收尾提交(评审修复:_fire 的 commit 先于本封游标
+        # 末封邮件的游标推进收尾提交(_fire 的 commit 先于本封游标
         # upsert,末封游标原依赖调度器节流提交搭车——节流提交失败被吞时
-        # close() 回滚即丢游标,下轮确定性重复触发末封邮件)
+        # close 回滚即丢游标,下轮确定性重复触发末封邮件)
         await self._repo.commit()
 
     async def list_due_retries(self, *, now_iso: str) -> list[dict[str, Any]]:
-        """调度器调用:到期挂起重试(101 调度重排扫描面)。"""
+        """调度器调用:到期挂起重试(调度重排扫描面)。"""
         return await self._repo.list_due_retries(now_iso=now_iso)
 
     async def fire_retry(self, *, run_id: str) -> None:
-        """调度器调用:派发到期的挂起重试(101)。
+        """调度器调用:派发到期的挂起重试。
 
         与 cron 同路:同身份(定义创建者)、同防御层(TargetRunner 组合根)、
         同目标解析口径;行已被取消/已派发时幂等返回。输入与渠道按触发器
@@ -575,9 +572,9 @@ class TriggerService:
             )
             await self._repo.commit()
             return
-        # 重试回放(101:design「webhook/email 失败重试同策略适用」):原输入
+        # 重试回放(webhook/email 失败重试同策略适用):原输入
         # 取自链首行 summary(fire_webhook 落标准化 inputs JSON;poll_email 落
-        # 护栏后摘要,108 隐私口径不变),渠道按触发器形态还原——空 payload
+        # 护栏后摘要,隐私口径不变),渠道按触发器形态还原——空 payload
         # 执行目标会以无意义执行掩盖真实失败;解析失败按空输入退回(不因脏
         # 摘要拒绝重试,与旧形态等价)。
         replay: dict[str, Any] = {}
@@ -616,7 +613,7 @@ class TriggerService:
         await self._repo.commit()
 
     async def record_failed(self, *, tenant_id: str, trigger_id: str, reason: str) -> None:
-        """R1-S1:调度器止损落 FAILED(cron 重算失败等)。"""
+        """调度器止损落 FAILED(cron 重算失败等)。"""
         await self._repo.insert_run(
             tenant_id=tenant_id,
             trigger_id=trigger_id,
@@ -647,15 +644,8 @@ class TriggerService:
         pending_run: dict[str, Any] | None = None,
         summary_json: str = "",
     ) -> None:
-        """目标执行+run 落库+重试链推进+出站通知。任何失败收敛 FAILED 落库。
-
-        101 重试链:普通触发落链首行(attempt=1);挂起重试派发在原 PENDING 行
-        落定终态(不覆盖先前失败行)。FAILED 且剩余次数>0 → 追加一行挂起重试
-        (链未终态,不通知);链终态(成功/耗尽/未配重试)→ 通知恰一次。
-        summary_json(108/101 回放载体):邮件=护栏后标准化摘要(原文不落库,
-        隐私最小化);webhook=标准化 inputs JSON。随链首行落库,fire_retry
-        沿链首还原重放输入。
-        """
+        """执行触发器目标、保存 run 并推进重试。只有成功、重试耗尽或未配置
+        重试时发送通知;挂起重试不通知。"""
         started = _now()
         attempt = int(pending_run["attempt"]) if pending_run is not None else 1
         status = "SUCCESS"
@@ -680,7 +670,7 @@ class TriggerService:
             status = "FAILED"
             error = f"{type(e).__name__}: {str(e)[:400]}"
         duration = int((_now() - started).total_seconds() * 1000)
-        # 101 重试判定(纯函数,单源):FAILED 且剩余次数>0 → 安排;否则链终态
+        # 重试判定(纯函数,单源):FAILED 且剩余次数>0 → 安排;否则链终态
         retry_at = schedule_retry(
             status=status,
             attempt=attempt,
@@ -690,7 +680,7 @@ class TriggerService:
         )
         if retry_at is None:
             # 链终态(成功/耗尽/未配重试):出站通知恰一次(max_retries=0 时
-            # 即既有行为——执行落定即通知,零回归)
+            # 即既有行为——执行落定即通知)
             notify_err = await self._notify(row, status=status, error=error, inputs=inputs)
             if notify_err:
                 error = (error + ";" if error else "") + f"通知失败: {notify_err}"
@@ -718,10 +708,7 @@ class TriggerService:
                 target_run_ref=ref,
             )
             if landed == 0:
-                # 派发期间行被停用/删除取消(cancel_pending_retries 竞态):
-                # 本次结果补记为独立行(通知已按真实 status 发出,结果不丢);
-                # 不续链——用户取消语义优先,评审修复(原实现 no-op 后仍插
-                # 新 PENDING 行,已停用触发器上多出挂起记录)
+                # 派发期间触发器若被停用或删除，仍补记执行结果行(通知状态如实)，但不再创建后续重试。
                 await self._repo.insert_run(
                     tenant_id=str(row["tenant_id"]),
                     trigger_id=str(row["id"]),
@@ -752,8 +739,8 @@ class TriggerService:
     async def _notify(
         self, row: dict[str, Any], *, status: str, error: str, inputs: dict[str, Any]
     ) -> str:
-        """出站通知(SSRF 判定复用 029;签名 X-Kongming-Signature;5s 超时);
-        返回错误文案(空=成功/未配置)。"""
+        """出站通知(SSRF 判定走 notifier.check_url;HMAC 签名经
+        X-Kongming-Signature 头发送;5s 超时);返回错误文案(空=成功/未配置)。"""
         url = str(row.get("notify_url") or "")
         if not url:
             return ""
@@ -779,7 +766,7 @@ class TriggerService:
             # 解密失败(密钥轮换后旧密文/密文损坏)必须收敛为通知错误文案:
             # 此处抛出会逃出 _fire 的 try(通知在执行段之外)→ insert_run 被
             # 跳过+next_fire 不推进 → 调度器每 30s 无限重触发且零 run 零审计
-            # (审查循环 F1,与入站侧 R1-T5 密钥轮换场景对称设防)
+            # (与入站侧 密钥轮换场景对称设防)
             try:
                 secret = self._cipher.decrypt(str(row["secret_cipher"]))
             except Exception as e:  # noqa: BLE001

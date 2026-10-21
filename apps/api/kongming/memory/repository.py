@@ -1,4 +1,4 @@
-"""memory 仓储(022):user_memory SQL(向量召回双过滤/惰性休眠/CRUD)。
+"""memory 仓储:user_memory SQL(向量召回双过滤/惰性休眠/CRUD)。
 
 隔离铁律(spec):所有读写强制 user_id+tenant_id 双过滤;归属校验与
 chat 404 同形(不存在/越权不区分)。
@@ -21,7 +21,7 @@ _DORMANT_CONFIDENCE = 0.3
 
 
 def _vec_literal(vector: list[float]) -> str:
-    """pgvector 文本字面量(repr 全精度,与 rag 域逐字同款;R1-L4)。"""
+    """pgvector 文本字面量(repr 全精度;与 rag 域实现保持一致)。"""
     return "[" + ",".join(repr(float(v)) for v in vector) + "]"
 
 
@@ -36,7 +36,7 @@ class SqlMemoryRepo:
         """惰性休眠标记(召回路径顺带):低置信或 90 天未命中 → dormant。
 
         强制 user_id+tenant_id 双过滤(与召回同隔离铁律)——仅作用本人
-        本租户,禁止跨用户跨租户批量翻牌。
+        本租户,禁止跨用户跨租户批量置位。
         """
         await self._s.execute(
             text(
@@ -55,10 +55,10 @@ class SqlMemoryRepo:
         user_id: str,
         tenant_id: str,
         vector: list[float],
-        team_ids: list[str] | None = None,  # 032:团队记忆双路
+        team_ids: list[str] | None = None,  # 团队记忆双路
     ) -> list[dict[str, Any]]:
         """向量召回 top-K(双过滤+非休眠+有向量);命中刷 last_hit_at(同事务)。
-        032:team_ids 非空时并集团队记忆(user_id 本人个人记忆 ∪ 成员团队
+        team_ids 非空时并集团队记忆(user_id 本人个人记忆 ∪ 成员团队
         团队记忆[team_id 非空],同向量距离混排 top-K)。"""
         if team_ids:
             params: dict[str, Any] = {
@@ -79,8 +79,7 @@ class SqlMemoryRepo:
                 " ORDER BY embedding <=> CAST(:vec AS halfvec) LIMIT :k"
             )
         else:
-            # R1-J6:个人分支限 team_id IS NULL——离队成员不再召回自己
-            # 曾写的团队记忆(spec「非成员不召回」)
+            # 个人查询只取 team_id 为空的记录，团队记忆需具备成员身份才能召回。
             sql = (
                 "SELECT id, content, category, confidence, source"
                 " FROM public.user_memory"
@@ -106,7 +105,7 @@ class SqlMemoryRepo:
         confidence: float,
         source: str,
         vector: list[float] | None,
-        team_id: str | None = None,  # 032:团队记忆(非空=归属团队)
+        team_id: str | None = None,  # 团队记忆(非空=归属团队)
     ) -> str:
         row_id = str(uuid7())
         await self._s.execute(
@@ -178,7 +177,7 @@ class SqlMemoryRepo:
             await self._s.execute(
                 text(
                     "UPDATE public.user_memory SET content=:c, category=:cat,"
-                    " embedding=COALESCE(CAST(:vec AS halfvec), embedding),"  # R1-M1:失败保原值
+                    " embedding=COALESCE(CAST(:vec AS halfvec), embedding),"  # 失败保原值
                     " dormant=false, updated_at=now()"
                     " WHERE id=:i AND user_id=:u AND tenant_id=:t"
                     " RETURNING id"
@@ -208,7 +207,7 @@ class SqlMemoryRepo:
         ).scalar_one_or_none()
         return hit is not None
 
-    # ── 059 user_prefs 闭合偏好槽位;087 增内部人工版本 manual_revision ──
+    # ── user_prefs 偏好槽位与人工版本 manual_revision ──
 
     async def get_prefs(self, *, user_id: str, tenant_id: str) -> dict[str, object]:
         prefs, _rev = await self.read_prefs_revision(user_id=user_id, tenant_id=tenant_id)
@@ -249,7 +248,7 @@ class SqlMemoryRepo:
     async def merge_prefs_manual(
         self, *, user_id: str, tenant_id: str, values: dict[str, object], deletes: list[str]
     ) -> tuple[dict[str, object], int]:
-        """人工短事务合并(087 D2):单语句 UPSERT 行锁内基于最新 prefs 合并并
+        """人工短事务合并:单语句 UPSERT 行锁内基于最新 prefs 合并并
         递增 manual_revision;调用方保证 values/deletes 已归一化且非全空。"""
         row = (
             await self._s.execute(
@@ -281,7 +280,7 @@ class SqlMemoryRepo:
     async def clear_prefs_manual(
         self, *, user_id: str, tenant_id: str
     ) -> tuple[dict[str, object], int]:
-        """清空(087):保留空行且已空仍递增版本——旧任务不得因重建行回到
+        """清空:保留空行且已空仍递增版本——旧任务不得因重建行回到
         版本 0 而复活偏好。"""
         row = (
             await self._s.execute(
@@ -305,7 +304,7 @@ class SqlMemoryRepo:
     async def fill_prefs_if_revision(
         self, *, user_id: str, tenant_id: str, values: dict[str, object], base_revision: int
     ) -> bool:
-        """自动补齐(087 D2):人工版本与快照一致才落;只补缺失槽位(已有值
+        """自动补齐:人工版本与快照一致才落;只补缺失槽位(已有值
         不覆盖、永不删除);不一致放弃(无返回行)。自动写入不递增版本。"""
         row = (
             await self._s.execute(

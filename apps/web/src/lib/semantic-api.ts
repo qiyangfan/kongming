@@ -1,4 +1,4 @@
-/* semantic 域 API 封装(023 语义层)。类型契约由 ADR-005 管线生成(禁手写)。 */
+/* semantic 域 API 封装( 语义层)。类型契约由 ADR-005 管线生成(禁手写)。 */
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";

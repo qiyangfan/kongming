@@ -1,9 +1,8 @@
 # pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false
 """工具域测试共享辅助(TCP 存根 + 租户/用户/权限装配)。
 
-放非 test_ 前缀模块(不被 pytest 收集);test_websearch_domain 与
-test_toolgateway 共用——原 test_external_knowledge 的通用件随 Siku 接入
-退役迁到此处,域专属件(knowledge 端口假件/检索剧本)随域删除。
+放非 test_ 前缀模块,避免被 pytest 收集;test_websearch_domain 与
+test_toolgateway 共用。
 """
 
 import socket

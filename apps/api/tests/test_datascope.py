@@ -1,9 +1,4 @@
-"""datascope 改写规则测试(spec「单元测试覆盖」十条清单,宪法 Article III 测试先行)。
-
-十条清单逐条对应 test_* 命名注释;另补多角色取最宽松、未绑定部门降级、
-UNION/FROM 子查询降级、值绑定类型感知等实现边界。
-DB 依赖用例走真实 PG(kongming_test),业务表建于专属 schema,模块级夹具收尾清理。
-"""
+"""覆盖部门数据范围规则、角色组合和缺失部门处理。"""
 
 import uuid
 from collections.abc import AsyncIterator
@@ -299,7 +294,7 @@ def test_extract_main_table_ref_carries_schema() -> None:
     assert rewrite.extract_main_table_ref("SELECT 1 UNION SELECT 2") is None
 
 
-# ============ DB 全链路:applier.apply(清单 2/3/4/5/6/7 + 降级告警) ============
+# ============ 数据范围应用器集成测试 ============
 
 
 async def _apply(session: AsyncSession, user_id: str, sql: str) -> models.AppliedSQL:
@@ -409,8 +404,8 @@ async def test_apply_unknown_subject_fail_closed(session: AsyncSession) -> None:
 async def test_apply_only_disabled_role_fail_closed(session: AsyncSession) -> None:  # 清单 14
     """用户只绑非 ACTIVE 角色 → 无任何可见面,拒绝执行。
 
-    此前此处正是 fail-open 的落点:数据范围侧按 status 收敛成空集,而功能权限侧不看
-    status(086 已把 `list_codes` 同闸),「禁用角色」这个治理动作反而让行过滤整条消失。
+    此处正是 fail-open 的落点:数据范围侧按 status 收敛成空集,而功能权限侧不看
+    status(已把 `list_codes` 同闸),「禁用角色」这个治理动作反而让行过滤整条消失。
     现在两侧同闸,且空 scopes 直接拒绝——治理动作的效果只能是收紧,不能是放宽。
     """
     uid = await _mk_user_with_dept(session, "ds-ruledout", None)
@@ -420,12 +415,10 @@ async def test_apply_only_disabled_role_fail_closed(session: AsyncSession) -> No
 
 
 async def test_dept_and_below_includes_disabled_dept(session: AsyncSession) -> None:  # 清单 15
-    """部门启停不参与行级可见性判定(086 裁决)。
+    """部门状态不参与数据范围计算。
 
-    原实现只有这条递归 CTE 过滤 `status='ACTIVE'`,而 DEPT(本人部门)与 CUSTOM
-    (角色配置集合)都按字面生效:同一个标志一半路径读、一半不读——停用中间节点会让
-    「本部门及以下」的负责人凭空看不见整棵子树,而把同一部门写进 CUSTOM 集合却照样可见。
-    口径统一为「都不读」:范围只由 data_scope + 所属部门 + 树结构决定。
+    DEPT、CUSTOM 和递归子部门查询统一按 data_scope、所属部门及部门树判定;
+    停用中间节点不能截断子树。
     """
     from kongming.datascope.repository import SqlDataScopeRepo
 

@@ -1,13 +1,4 @@
-"""0048: 知识条目团队归属(102-knowledge-team-scope)
-
-rag.table_descriptions 纯增 team_id(UUID NULL,REFERENCES public.sys_team
-ON DELETE SET NULL):NULL=租户公共(存量行全 NULL=零回归),非 NULL=团队专属。
-- ON DELETE SET NULL 的裁决:团队删除钩子(team 域 KnowledgePublicizer)
-  先行置空+审计;钩子失败不阻塞删除(design D4)——FK 级联 SET NULL 兜底
-  公共化,知识资产不因团队解散丢失(级联置空而非级联删除)。
-- 唯一键保持四元不变(单一实例,归属转移为原位变更,禁公共/团队双版本)。
-**downgrade**:删索引+删列(归属维度随列消失,条目内容不动)。
-"""
+"""为知识条目增加可选团队归属；删除团队时条目转为租户公共内容。降级只移除归属字段，不改条目内容。"""
 
 from alembic import op
 

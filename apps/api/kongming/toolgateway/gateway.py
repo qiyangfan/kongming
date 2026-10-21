@@ -1,6 +1,6 @@
-"""统一出站通道(089):域工具执行的薄切面。
+"""统一出站通道:域工具执行的薄切面。
 
-顺序固定(D1 策略器契约):停用/参数校验 → 出口校验(白名单,零网络请求
+顺序固定(策略器契约):停用/参数校验 → 出口校验(白名单,零网络请求
 拒绝)→ 域限流(第二维度)→ 执行器单次出站(超时)→ 失败分类(连接类至多
 重试一次/响应类不重试)→ 响应脱敏 → 结构化观察。审计仍在既有六层 L5
 (sys_tool_audit,域标签复用 channel 列),本切面不落库。
@@ -42,7 +42,7 @@ class ToolGateway:
         self._domains = manifest
         self._policies = policies
         self._executor = executor
-        # 094:按域专属执行器(缺省回落通道级 executor;既有域不声明=零回归)
+        # 按域专属执行器(缺省回落通道级 executor)
         self._domain_executors = dict(domain_executors) if domain_executors else {}
         self._disabled: set[str] = set()
         self.warnings: list[str] = [
@@ -59,7 +59,7 @@ class ToolGateway:
 
         端口绑定判「装配」不判「停用」:停用零感知由注册表闸(注入集消失)
         与执行期拒绝承担,端口绑定不随停用翻转——否则停用瞬间的在途回调会被
-        误标为「未接线(部署缺陷)」审计(审查 P2-1/P2-2)。"""
+        误标为「未接线(部署缺陷)」审计。"""
         return (
             domain in self._domains
             and domain in self._policies
@@ -71,7 +71,7 @@ class ToolGateway:
         return spec.quota_per_minute if spec else None
 
     def apply_disabled(self, domains: frozenset[str] | set[str]) -> None:
-        """0044:启动装载持久停用集(替换语义;运维意图以库为准)。"""
+        """启动装载持久停用集(替换语义;运维意图以库为准)。"""
         self._disabled = set(domains)
 
     def disable(self, domain: str) -> None:
@@ -162,8 +162,9 @@ class ToolGateway:
 def _was_delivered(exc: Exception) -> bool:
     """是否「请求已送达」:读超时/HTTP 状态错=已送达;连接族=未送达。
     判定供策略器分类;具体分类仍由域策略器声明(可覆盖)。
-    域收敛异常(081/094 同款前缀)按前缀语义归类,与策略器 classify
-    保持同向(delivered 是一致性兜底信号,重试判定只认前缀分类)。"""
+    域收敛异常按 FAILURE_UNDELIVERED/FAILURE_PROTOCOL 前缀语义归类,
+    与策略器 classify 保持同向(delivered 是一致性兜底信号,重试判定只认
+    前缀分类)。"""
     text = str(exc)
     if text.startswith(FAILURE_UNDELIVERED_PREFIX):
         return False

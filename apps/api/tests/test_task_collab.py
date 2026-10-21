@@ -1,11 +1,5 @@
 # pyright: reportPrivateUsage=false
-"""task 协作域测试(091 接线,安全规则类测试先行)。
-
-覆盖:拓扑归一/部署级钳制纯函数、步骤拓扑声明面(归属 404 同形/PENDING 闸/
-Bot 绑定校验)、无游离协作入口(未声明拓扑/非 RUNNING 步骤的 collab-start 一律拒)、
-协作账本全链(start→worker×n→finish,状态诚实映射)、重复回写 CAS 拒绝、
-任务取消收敛在途协作账、预算部署级钳制、列表状态筛选、internal 畸形 UUID 404 同形。
-"""
+"""覆盖任务协作拓扑、账本、状态映射和预算限制。"""
 
 import asyncio
 import json
@@ -44,7 +38,7 @@ def no_dispatch(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def test_normalize_collab_topology_defaults_and_clamp() -> None:
     from kongming.task import models as m
 
-    # 缺省回填 + 部署钳制(115 起恒带形态标记,缺省=分工)
+    # 缺省回填 + 部署钳制(起恒带形态标记,缺省=分工)
     out = m.normalize_collab_topology(None, max_workers_cap=3)
     assert out == {
         "kind": "decomposition",
@@ -67,7 +61,7 @@ def test_normalize_collab_topology_defaults_and_clamp() -> None:
 
 
 def test_normalize_collab_topology_worker_roster() -> None:
-    """分工 worker 名册归一(collab-worker-roster):条目归一/身份去重/钳制/
+    """分工 worker 名册归一:条目归一/身份去重/钳制/
     空名册不落键(存量载荷零漂移);圆桌分支不受 workers 字段影响。"""
     from kongming.task import models as m
 
@@ -110,7 +104,7 @@ def test_normalize_collab_topology_worker_roster() -> None:
     for raw in undeclared:
         out = m.normalize_collab_topology(raw, max_workers_cap=3)
         assert "workers" not in out
-    # 无名册缺省载荷与 115 前存量形状逐键一致(零漂移)
+    # 无名册缺省载荷与存量形状逐键一致(零漂移)
     out = m.normalize_collab_topology(None, max_workers_cap=3)
     assert out == {
         "kind": "decomposition",
@@ -267,7 +261,7 @@ async def test_decomposition_roster_declaration_and_decision(
     make_user: Any,
     no_dispatch: list[str],  # noqa: ARG001
 ) -> None:
-    """分工名册闸门与决策解析(collab-worker-roster):逐条目 Bot 存在性校验、
+    """分工名册闸门与决策解析:逐条目 Bot 存在性校验、
     名册与顶层单绑定互斥(判原始载荷)、决策载荷逐条目运行时解析(失败如实
     降级 None)、无名册顶层绑定现行为不变、声明响应回显截断后名册。"""
     uid, token = await _user_with_task_perms(client, session, make_user)
@@ -403,7 +397,7 @@ async def test_no_free_collab_entry(
     make_user: Any,
     no_dispatch: list[str],  # noqa: ARG001
 ) -> None:
-    """无游离协作入口(D5):未声明拓扑/非 RUNNING 步骤/超深嵌套一律拒绝。"""
+    """无游离协作入口:未声明拓扑/非 RUNNING 步骤/超深嵌套一律拒绝。"""
     _uid, token = await _user_with_task_perms(client, session, make_user)
     task_id = await _create_task(client, token)
     step = await _plan_one_step(client, task_id)
@@ -813,7 +807,7 @@ async def _make_other(client: AsyncClient, s: AsyncSession, make_user: Any) -> t
     return uid, token
 
 
-# ── 派发代际(0042 双执行者闸)──
+# ── 派发代际(双执行者闸)──
 
 
 @pytest.mark.asyncio
@@ -824,7 +818,7 @@ async def test_dispatch_epoch_gate(
     no_dispatch: list[str],  # noqa: ARG001
 ) -> None:
     """代际失配三闸:begin_step → abort 决策;step-result → stale_epoch(不写账);
-    finish → 409(旧循环不得收口);在位代数路径零回归(epoch=None 兼容)。"""
+    finish → 409(旧循环不得收口);在位代数路径(epoch=None 兼容)。"""
     _uid, token = await _user_with_task_perms(client, session, make_user)
     task_id = await _create_task(client, token)
     step = await _plan_one_step(client, task_id)
@@ -992,14 +986,14 @@ async def test_epoch_predicate_guards_cas_writes(
     await session.commit()
 
 
-# ── 圆桌拓扑与轮次账本(115)──
+# ── 圆桌拓扑与轮次账本──
 
 
 def test_normalize_roundtable_topology() -> None:
     """圆桌拓扑归一:缺省名册回退、角色域外剔除、名册去重、人数/轮次钳制。"""
     from kongming.task import models as m
 
-    # 未声明名册 → 缺省轻形态 2 角色(实测裁决见 models.py 注记);轮次缺省 3
+    # 未声明名册 → 缺省轻形态 2 角色(见 models.py 注记);轮次缺省 3
     out = m.normalize_collab_topology({"kind": "roundtable"}, max_workers_cap=3)
     assert out["kind"] == "roundtable"
     assert [p["role"] for p in cast("list[dict[str, object]]", out["participants"])] == [
@@ -1517,7 +1511,7 @@ async def test_round_finished_event_by_dispatched_max(
     make_user: Any,
     no_dispatch: list[str],  # noqa: ARG001
 ) -> None:
-    """每轮完成事件按实际派发末位判定(P1-1):名册 3 人、零工具剔除后实派
+    """每轮完成事件按实际派发末位判定:名册 3 人、零工具剔除后实派
     2 人——2 号位落账即触发 round_finished(拓扑名册长不可作依据)。"""
     _uid, token = await _user_with_task_perms(client, session, make_user)
     task_id = await _create_task(client, token)

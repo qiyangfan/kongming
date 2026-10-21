@@ -1,19 +1,7 @@
-"""MCP 出站运行时熔断(add-mcp-breaker)。
-
-三态状态机(CLOSED 正常 / OPEN 冷却 / HALF_OPEN 半开探测)+ McpCaller
-端口装饰器:运行时出站(tools/call 与 resources/read)对连续瞬时失败
-(timeout/conn——server 不可达信号)自动冷却,达阈值后冷却期内快速失败
-(不出站,`unavailable` 分类归一);冷却期满半开放行单个探测请求,成功
-复位、失败回冷却。管理面探测(probe/get_prompt)结构上不受限——装饰器
-不拦这两个方法,与 spec「管理面不受限」是类型面互锁而非约定;确定性
-结果(protocol/remote/unsupported)不计入——熔断是瞬时故障止损器,
-不掩盖确定性错误的真实报错。
-
-状态为进程内存态(不落库,重启即清零,与出站「每次即开即用连接」的
-无状态形态自洽);计数维度=endpoint(与 server 配置行一一对应,McpCaller
-端口签名只有 endpoint,按此维度端口契约零变更);记账方法全同步(无
-await),单事件循环内检查-置位天然原子,不引入锁。
-"""
+"""MCP 出站调用的进程内熔断器。
+连续超时/连接失败进冷却,冷却期不出站;期满放行一个半开探测,成功复位、失败重新冷却。
+协议错误/远端错误/不支持的操作不计入熔断;状态按 endpoint 计数,重启清零。
+管理面探测不受此熔断器限制。"""
 
 import logging
 import time
@@ -45,11 +33,7 @@ class _Entry:
 
 
 class McpBreaker:
-    """连续失败自动冷却的熔断器(纯领域逻辑,时钟注入可测)。
-
-    allow/record_success/record_failure/reset 均为同步方法;allow 返回
-    False 时调用方 MUST 快速失败且不出站(冷却拒),返回 True 且此前处于
-    冷却期满态时本次即半开探测请求。"""
+    """按 endpoint 统计连续瞬时失败并进入冷却；时钟可注入以便测试。"""
 
     def __init__(
         self,
@@ -81,7 +65,7 @@ class McpBreaker:
         if entry.blocked_until > self._clock():
             return False  # 冷却期内
         if entry.blocked_until > 0.0:
-            # 冷却期满:本次放行即半开探测(探测结果经 record_* 收口)
+            # 冷却结束后只放行一个半开探测，由 record_* 更新状态。
             entry.probing = True
         return True
 

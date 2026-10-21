@@ -1,4 +1,4 @@
-"""skillpack 域包(056):垂类内容包定义/启停/投影。"""
+"""skillpack 域包:垂类内容包定义/启停/投影。"""
 
 from kongming.skillpack.models import (
     SkillPackContent as SkillPackContent,

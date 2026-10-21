@@ -1,17 +1,8 @@
-"""http 节点执行器(029):SSRF 防护(design D3)——URL host 经
-getaddrinfo 解析,任一地址落入拒绝段即 SsrFBlocked(不发出请求);
-不跟随重定向(302 跳内网防);响应 1MB 截断;15s 超时。
+"""HTTP 工作流节点执行器:解析并固定目标 IP 后再连接,降低 DNS 重绑定风险;
+不跟随重定向,响应上限 1 MB,超时 15 秒。
 
-审查循环 F4(DNS rebinding TOCTOU):判定解析与 httpx 连接是两次独立
-DNS 解析,权威 DNS 可对两次返回不同答案(TTL=0)绕过判定——修=判定时
-钉扎解析到的 IP,经自定义 transport 直接连该 IP(Host 头保原域名、
-TLS SNI/证书校验经 sni_hostname 扩展指向原域名),连接期不再二次解析。
-
-拒绝段:私网 10/8、172.16/12、192.168/16;回环 127/8 与 ::1;
-链路本地 169.254/16(含云元数据 169.254.169.254)与 fe80::/10;
-未指定 0.0.0.0/:: 与保留段;IPv4 映射 IPv6 逃逸面经 ipaddress
-归一化(ipv4_mapped 取出再判)。
-"""
+拒绝私网、回环、link-local、未指定和保留地址(含云元数据地址);
+IPv4 映射 IPv6 地址先归一化再校验。"""
 
 import asyncio
 import ipaddress
@@ -26,8 +17,8 @@ from kongming.workflow.ports import SsrFBlocked
 _RESPONSE_CAP = 1 * 1024 * 1024  # 1MB 截断
 _BODY_CAP = 64 * 1024  # 进 outputs 的 body 截断
 # 响应头无显式闸:依赖 h11 默认 16KB 头块上限(DEFAULT_MAX_INCOMPLETE_EVENT_SIZE,
-# 超限抛协议异常 → 引擎通用 except 收敛 FAILED)——已实证兜底巨头攻击;该依赖
-# 以「HTTP/1.1 传输(未启用 HTTP/2)」为前提,若未来切换传输须补显式头闸(B2-B9 结案注记)
+# 超限抛协议异常 → 引擎通用 except 收敛 FAILED)——已兜底巨头攻击;该依赖
+# 以「HTTP/1.1 传输(未启用 HTTP/2)」为前提,若未来切换传输须补显式头闸
 _TIMEOUT = 15
 
 
@@ -36,12 +27,12 @@ async def _resolve(host: str, port: int) -> list[Any]:
     return await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
 
 
-_CGNAT = ipaddress.ip_network("100.64.0.0/10")  # R1-J7:共享段(云内网/Tailscale)
+_CGNAT = ipaddress.ip_network("100.64.0.0/10")  # 共享段(云内网/Tailscale)
 
 
 def _is_denied_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-        ip = ip.ipv4_mapped  # ::ffff:127.0.0.1 逃逸面归一
+        ip = ip.ipv4_mapped  # ::ffff:x.x.x.x 映射形态归一为 IPv4 再判(防 v6 包 v4 逃逸)
     return (
         ip.is_private
         or ip.is_loopback
@@ -49,7 +40,7 @@ def _is_denied_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         or ip.is_unspecified
         or ip.is_reserved
         or ip.is_multicast
-        or ip in _CGNAT  # is_private 不含 CGNAT 共享段(实证),显式补
+        or ip in _CGNAT  # is_private 不含 CGNAT 共享段,显式补
     )
 
 
@@ -98,15 +89,9 @@ async def assert_url_allowed(url: str) -> str:
 
 
 def assert_host_allowed_sync(host: str, port: int) -> None:
-    """主机级 SSRF 判定(非 HTTP 出站的同步形态;108 IMAP 消费)。与
-    assert_url_allowed 同一拒绝段单源(_is_denied_ip):字面 IP 直判,
-    域名解析后全量判定(任一地址落拒绝段即拒)。
-
-    同步 getaddrinfo 会阻塞,只供工作线程调用(调用方 _fetch_sync 已经
-    asyncio.to_thread 隔离),勿在事件循环线程直呼。无 HTTP 面的钉扎传输
-    可用(imaplib 无自定义连接工厂),解析-连接间存在理论 rebinding 窗口,
-    由连接超时收敛暴露面;主要攻击面(指向私网/元数据地址)在判定期关死。
-    """
+    """同步检查主机级 SSRF 拒绝规则:解析出的任一地址命中拒绝段即拒绝;
+    同步解析必须在线程中运行。IMAP 连接无法固定已解析 IP,连接阶段
+    仍有 DNS 重绑定风险。"""
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
@@ -149,7 +134,7 @@ class _PinnedTransport(httpx.AsyncHTTPTransport):
         return await super().handle_async_request(request)
 
 
-# 组合根跨域复用别名(099 连接器执行器出站钉扎;registry.LOCAL_HOSTS 同哲学)
+# 组合根跨域复用别名(连接器执行器出站钉扎;registry.LOCAL_HOSTS 同哲学)
 PinnedTransport = _PinnedTransport
 
 

@@ -1,9 +1,4 @@
-"""Agent 图拓扑测试:重试必经 selfheal(计数),权限类不重试,图必然终止。
-
-回归背景:曾存在 execute 失败 → 直达 generate 的边,retry_count 永不增长,
-图靠 recursion_limit 兜底——本测试锁死该缺陷不再复发。
-005 起权限类(BLOCKED)从 execute/validate 直接终态,不进 selfheal、不耗配额。
-"""
+"""覆盖图节点路由、重试计数和终止条件。"""
 
 # pyright: reportPrivateUsage=false
 # 测试惯例:路由函数为模块私有实现细节,测试直引锁死拓扑契约(仓库约定,不改名)
@@ -51,7 +46,7 @@ def test_validate_pass_goes_to_execute() -> None:
 
 
 def test_generate_sentinel_short_circuit_goes_fail() -> None:
-    """043:哨兵短路产物(end_reason=no_data)直达 fail 终态,不进 validate/execute。"""
+    """哨兵短路产物(end_reason=no_data)直达 fail 终态,不进 validate/execute。"""
     assert _after_generate({"end_reason": "no_data"}) == "fail"
 
 
@@ -73,16 +68,16 @@ def test_retry_only_via_selfheal_counting() -> None:
     assert _after_selfheal({"execution": FAILED, "retry_count": 0}) == "retry"
 
 
-# ---- 071:understand 复语直通条件边(与 043 generate→validate 同构)----
+# understand 复语直通条件边(与 generate→validate 同构)----
 
 
 def test_understand_passthrough_short_circuit_goes_fail() -> None:
-    """071:复语直通短路产物(end_reason=no_data)直达 fail 终态,不进 retrieve/generate。"""
+    """复语直通短路产物(end_reason=no_data)直达 fail 终态,不进 retrieve/generate。"""
     assert _after_understand({"end_reason": "no_data"}) == "fail"
 
 
 def test_understand_normal_goes_to_route_intent() -> None:
-    """数据查询路径节点序列:正常问句 understand→route_intent(093 检索前三态
+    """数据查询路径节点序列:正常问句 understand→route_intent(检索前三态
     路由)→retrieve;路由失败在节点内回退,拓扑不因路由增分支。"""
     assert _after_understand({}) == "route_intent"
 

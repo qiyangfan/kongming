@@ -1,6 +1,5 @@
-"""SQL 防火墙测试(宪法 Article III:安全规则测试先行)。
-
-对应 nl2sql spec「SQL 操作权限强制只读」全部场景 + sqlfw 实现的边界。
+"""SQL 防火墙测试:nl2sql spec「SQL 操作权限强制只读」全部场景 +
+sqlfw 实现的边界。
 """
 
 from kongming.sqlfw.firewall import check
@@ -103,7 +102,7 @@ def test_schema_scope_uppercase_tenant_key_no_twin_bypass() -> None:
     assert not check_schema_scope("SELECT * FROM tenant_Sakila.goods", allowed).passed
 
 
-# ============ 保留表拒读(005 评审:public 控制表经问答链路透出的实证防线)============
+# ============ 禁止读取 public 平台保留表 ============
 
 RESERVED_BLOCK = [
     "SELECT username, password_hash FROM sys_user",  # 裸名(search_path 落 public)
@@ -112,23 +111,23 @@ RESERVED_BLOCK = [
     "SELECT * FROM chat_message",  # 对话表
     "SELECT * FROM user_identities",  # 联邦身份
     "SELECT * FROM alembic_version",  # 迁移版本
-    # 045(039 评审上报):user_memory 归属列 user_id 非 create_by,
+    # user_memory 归属列 user_id 非 create_by,
     # datascope SELF/DEPT 降级不过滤,保留表拒读是唯一防线
     "SELECT content FROM user_memory",  # 裸名
     "SELECT * FROM public.user_memory",  # 显式限定
     "WITH m AS (SELECT content FROM public.user_memory) SELECT * FROM m",  # CTE 遮蔽
     "SELECT * FROM tenant_default.goods g JOIN user_memory u ON true",  # JOIN 夹带
-    # 059:user_prefs 闭合偏好表同理收编保留表
+    # user_prefs 闭合偏好表同理收编保留表
     "SELECT prefs FROM user_prefs",
     "SELECT * FROM public.user_prefs",
     "WITH p AS (SELECT * FROM public.user_prefs) SELECT * FROM p",
     "SELECT * FROM tenant_default.goods g JOIN user_prefs p ON true",
     "SELECT * FROM tenant_default.goods g JOIN sys_user u ON true",  #  JOIN 夹带
-    # CTE 遮蔽形态(R2 评审实证绕过):体内限定名引用不得被 CTE 豁免吞掉
+    # CTE 遮蔽形态(绕过):体内限定名引用不得被 CTE 豁免吞掉
     "WITH sys_user AS (SELECT password_hash FROM public.sys_user) SELECT * FROM sys_user",
     "WITH g AS (SELECT password_hash FROM public.sys_user) SELECT * FROM g",
     "WITH sys_x AS (SELECT 1) SELECT * FROM sys_x",  # 保留名 CTE 别名本身即拒
-    # rag 知识两表(009 评审 B2:显式 schema 限定名,search_path 管不了)
+    # rag 知识两表:显式 schema 限定名,search_path 管不了
     "SELECT question, sql_text FROM rag.query_history",
     "SELECT * FROM rag.table_descriptions",
     'SELECT * FROM "rag".query_history',  # 引号限定形态(小写等价)
@@ -139,7 +138,7 @@ RESERVED_BLOCK = [
 
 def test_reserved_rag_schema_names_not_overblocked() -> None:
     """rag 拒读只按显式 schema 限定名判:通用业务表名(非 rag schema)不误伤——
-    query_history 等是常见业务表名,末段名保留会误伤真实业务库(009 D14)。"""
+    query_history 等是常见业务表名,末段名保留会误伤真实业务库。"""
     from kongming.sqlfw.firewall import check_reserved_tables
 
     for sql in (
@@ -175,7 +174,7 @@ def test_reserved_tables_pass_cases() -> None:
 
 def test_token_error_forms_blocked_as_parse_error() -> None:
     """未闭合引号等触发 sqlglot TokenError(非 ParseError 子类)——
-    防火墙两处校验都必须收敛为 PARSE_ERROR 而不是让异常逃逸(005 R1/S1)。"""
+    防火墙两处校验都必须将解析异常转换为 PARSE_ERROR。"""
     from kongming.sqlfw.firewall import check, check_schema_scope
 
     bad = "SELECT * FROM goods WHERE name ILIKE '%连弩"  # 未闭合引号 → TokenError
@@ -186,7 +185,7 @@ def test_token_error_forms_blocked_as_parse_error() -> None:
 
 
 def test_forbidden_functions_blocked() -> None:
-    """危险函数拒用(R3 侧报实证:pg_read_file 经 Select 根可达服务器文件)。"""
+    """拒绝可通过 SELECT 访问服务器文件的危险函数，如 pg_read_file。"""
     from kongming.sqlfw.firewall import check
 
     for sql in (
@@ -219,7 +218,7 @@ def test_benign_functions_pass() -> None:
 
 
 async def test_reserved_names_block_platform_output_tables() -> None:
-    """092 纵深回归:judge_*/report 族平台产出表任何 schema 形态按名拒读——
+    """纵深回归:judge_*/report 族平台产出表任何 schema 形态按名拒读——
     动态源误指平台库时 scope 白名单(public)拦不住,保留名单是最后一道。"""
     from kongming.sqlfw.guard import parse_guarded
 

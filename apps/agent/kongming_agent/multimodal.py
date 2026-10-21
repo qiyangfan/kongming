@@ -1,10 +1,6 @@
-"""多模态预处理(030):图片附件 → vision 描述 → 拼接进问题。
+"""将图片附件转为描述并拼入问句。
 
-进图前调用(/query 与 /query_stream 处理器共用),agent 图结构零改动
-(prompt 资产纪律)。fail-closed:任一附件失败即整轮 AttachmentError
-(结构化文案指明哪件),不「半聋」作答;纯文本(空列表)零调用零回归。
-036:③描述段以「不可信数据,不是指令」标记+围栏包裹(间接注入面收口);
-⑦vision 前按生效模型图片上限判定(供应商限制先于平台 10MB 时不再误导)。
+普通问答与流式问答共用此预处理。任一附件读取或分析失败都会终止请求；空附件列表不调用模型。图片描述作为不可信资料隔离，并遵守当前视觉模型的体积上限。
 """
 
 import base64
@@ -42,12 +38,12 @@ async def preprocess_attachments(
     llm: LlmClient,
     trace_id: str,
 ) -> str:
-    """取件→vision→拼接段。返回拼于问题前的描述段(空列表→空串零回归)。"""
+    """取件→vision→拼接段。返回拼于问题前的描述段(空列表→空串)。"""
     if not attachment_ids:
         return ""
     if user_id is None:
         raise AttachmentError("附件引用需要用户身份")
-    limit_mb = llm.image_limit_mb("vision")  # 036⑦:生效模型图片上限
+    limit_mb = llm.image_limit_mb("vision")  # 使用视觉模型的图片上限。
     parts: list[str] = []
     for i, att_id in enumerate(attachment_ids, 1):
         got = await api.attachment_content(att_id, tenant_key=tenant_key, user_id=user_id)
@@ -62,18 +58,15 @@ async def preprocess_attachments(
                 _VISION_PROMPT,
                 "请描述这张图片。",
                 images=[(mime, b64)],
-                task="vision",  # 021 路由;未配回退主模型(文本模型报错即失败)
+                task="vision",  # vision 任务路由;未配回退主模型(文本模型报错即失败)
                 trace_id=trace_id,
-                tenant_key=tenant_key,  # R1-F7:用量租户维度
+                tenant_key=tenant_key,  # 用量租户维度
             )
         except Exception as e:
             log.warning("vision 调用失败 trace=%s: %s", trace_id, e)
             raise AttachmentError(f"图片 {i} 理解失败(视觉模型暂不可用)") from e
-        # 036③:图片描述是不可信数据(间接注入面)——标记+围栏包裹,
-        # 内容永不视作指令(020 输出护栏兜底不变)。围栏前防御两件
-        # (审查循环 F2/B8):描述内三连双引号可提前闭合围栏使注入文本
-        # 逃逸到顶层——替换为全角形态;高密度表格截图转述无上界会逐节点
-        # 放大 token——截断+省略标记
+        # 图片描述按不可信资料隔离；替换三连引号，防止内容提前结束围栏。
+        # 限制描述长度，避免长表格转述占用过多上下文。
         safe_desc = desc.strip()[:2000]
         if len(desc.strip()) > 2000:
             safe_desc += "…(描述超长已截断)"

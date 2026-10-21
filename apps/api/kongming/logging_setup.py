@@ -1,4 +1,4 @@
-"""运行日志配置(061):单一 API、单一输出流、级别可配、dev 文本 / prod JSON。
+"""运行日志配置:单一 API、单一输出流、级别可配、dev 文本 / prod JSON。
 
 两进程各持一份小配置(ADR-002 不跨进程 import)。INFO 及以上不再被
 root lastResort 丢弃。

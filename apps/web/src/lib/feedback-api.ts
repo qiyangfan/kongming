@@ -1,5 +1,4 @@
-/* feedback 域 API 封装(014 反馈闭环)。类型契约由 ADR-005 管线生成(禁手写,
-请求/响应同轨——R1-S4:请求体类型此前手写,违反先例已修)。 */
+/* 反馈 API 封装；请求与响应类型由 ADR-005 契约生成。 */
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";
@@ -13,7 +12,7 @@ export type OverviewOut = components["schemas"]["OverviewOut"];
 export type FeedbackPageOut = components["schemas"]["FeedbackPageOut"];
 export type FeedbackPageItemOut = components["schemas"]["FeedbackPageItemOut"];
 
-/** 反馈提交(014):rating 必传;comment/corrected_sql null=保持现值,空串=清空 */
+/** 反馈提交:rating 必传;comment/corrected_sql null=保持现值,空串=清空 */
 export function submitFeedback(messageId: string, payload: FeedbackIn): Promise<FeedbackOut> {
   return api.post<FeedbackOut>(`/chat/messages/${messageId}/feedback`, payload);
 }

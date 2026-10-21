@@ -1,7 +1,6 @@
-"""流式问答端点测试(017 query-streaming):事件序列/终态同构/错误收敛。
+"""流式问答端点测试:事件序列/终态同构/错误收敛。
 
-契约:nl2sql-agent spec「流式事件发射」「流式问答端点」+
-query-streaming spec「SSE 事件协议」。
+契约:nl2sql-agent spec「流式事件发射」「流式问答端点」+「SSE 事件协议」。
 """
 
 import json
@@ -25,7 +24,7 @@ TOKEN = {"X-Internal-Token": "test-internal-token"}
 
 class _Llm:
     def prompt_budget(self, task: str | None = None) -> int:
-        return 1_000_000  # 080:测试替身恒宽预算(收敛行为由纯函数测试覆盖)
+        return 1_000_000  # 测试替身恒宽预算(收敛行为由纯函数测试覆盖)
 
     def __init__(self, answers: list[str]) -> None:
         self.answers = list(answers)
@@ -36,7 +35,7 @@ class _Llm:
         user: str,
         *,
         temperature: float = 0.2,
-        **_kw: object,  # 021:task/trace_id/tenant_key 吸收
+        **_kw: object,  # task/trace_id/tenant_key 吸收
     ) -> str:
         if not self.answers:
             raise LlmError("no scripted answer")
@@ -109,12 +108,12 @@ async def test_stream_requires_token(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_stream_happy_path_event_sequence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """成功链路:stage 成对 → sql → summary → result 唯一终态;
-    result data 与同步 /query 响应逐字段一致(终态一致性直证)。"""
+    """成功响应按 stage、sql、summary、result 顺序发送;每节点 stage 成对,
+    result 仅一次。"""
     llm = _Llm(
         [
             "商品总库存",
-            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            '{"intent":"data","confidence":0.99}',  # route_intent
             "SELECT sum(qty) FROM goods",
             '{"summary":"共 30"}',
         ]
@@ -122,7 +121,7 @@ async def test_stream_happy_path_event_sequence(
     llm_sync = _Llm(
         [
             "商品总库存",
-            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            '{"intent":"data","confidence":0.99}',  # route_intent
             "SELECT sum(qty) FROM goods",
             '{"summary":"共 30"}',
         ]
@@ -138,7 +137,7 @@ async def test_stream_happy_path_event_sequence(
     frames = _parse_sse(stream_resp.text)
 
     events = [e for e, _ in frames]
-    # 各节点 running/done 成对,sql 在 validate done 之后、result 之前
+    # 每个节点的 running/done 成对；sql 事件位于 validate done 与 result 之间。
     assert events[0] == ("stage") and frames[0][1]["node"] == "understand"
     assert events[-1] == "result"
     assert events.count("result") == 1
@@ -150,7 +149,7 @@ async def test_stream_happy_path_event_sequence(
         if e == "stage" and d.get("node") == "validate" and d.get("status") == "done"
     )
     assert sql_idx == validate_done_idx + 1
-    # 每节点恰好 running/done 各一次(route_intent=093 检索前三态路由)
+    # 每节点恰好 running/done 各一次(route_intent=检索前三态路由)
     for node in (
         "understand",
         "route_intent",
@@ -200,7 +199,7 @@ async def test_stream_validate_rejected_no_sql_event(
     llm = _Llm(
         [
             "商品总库存",
-            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            '{"intent":"data","confidence":0.99}',  # route_intent
             "SELECT sum(qty FROM goods",  # 未闭合括号 → PARSE_ERROR
             "SELECT sum(qty) FROM goods",
             '{"summary":"共 30"}',
@@ -238,7 +237,7 @@ async def test_stream_permission_block_no_sql_no_selfheal(
     llm = _Llm(
         [
             "删掉商品",
-            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            '{"intent":"data","confidence":0.99}',  # route_intent
             "DELETE FROM goods",
         ]
     )
@@ -274,7 +273,7 @@ async def test_stream_empty_result_summary_still_emitted(
     llm = _Llm(
         [
             "商品总库存",
-            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            '{"intent":"data","confidence":0.99}',  # route_intent
             "SELECT sum(qty) FROM goods WHERE 1=0",
             '{"summary":""}',
         ]
@@ -292,14 +291,13 @@ async def test_stream_empty_result_summary_still_emitted(
 async def test_stream_fused_degenerate_still_emits_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """093 流式抑制判据=接手谓词单源:融合态但退化收口(执行 PASS 零行)
-    时,数据兜底稿必须照常以 summary 事件下发(query-streaming「无结果或
-    降级兜底文案 SHALL 同样以 summary 事件形态下发」,无 intent 豁免)——
-    不得因 intent=fused 一刀切吞稿。"""
+    """流式抑制判据=接手谓词单源:融合态但退化收口(执行 PASS 零行)时,
+    数据兜底稿必须照常以 summary 事件下发(spec:无结果或降级兜底文案 SHALL
+    同样以 summary 事件形态下发,无 intent 豁免)——不得因 intent=fused 吞稿。"""
     llm = _Llm(
         [
             "商品总库存",
-            '{"intent":"fused","confidence":0.99}',  # 093 route_intent
+            '{"intent":"fused","confidence":0.99}',  # route_intent
             "SELECT sum(qty) FROM goods WHERE 1=0",
             '{"summary":""}',
         ]
@@ -315,9 +313,9 @@ async def test_stream_fused_degenerate_still_emits_summary(
 
 class _BoomLlm:
     def prompt_budget(self, task: str | None = None) -> int:
-        return 1_000_000  # 080:测试替身恒宽预算(收敛行为由纯函数测试覆盖)
+        return 1_000_000  # 测试替身恒宽预算(收敛行为由纯函数测试覆盖)
 
-    """非 LlmError 的意外异常(评审 R3:图意外异常收敛 error 终态)。"""
+    # 非 LlmError 异常会作为 error 终态事件发送。
 
     async def chat(
         self,
@@ -325,7 +323,7 @@ class _BoomLlm:
         user: str,
         *,
         temperature: float = 0.2,
-        **_kw: object,  # 021:task/trace_id/tenant_key 吸收
+        **_kw: object,  # task/trace_id/tenant_key 吸收
     ) -> str:
         raise RuntimeError("unexpected boom")
 
@@ -333,7 +331,7 @@ class _BoomLlm:
 async def test_stream_unexpected_exception_error_terminal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """图执行意外异常(非 LlmError):收敛 error 终态事件,不裸 500(R3)。"""
+    """图执行意外异常时发送 error 终态事件，不返回裸 500。"""
     monkeypatch.setattr(deps, "get_llm", lambda: _BoomLlm())
     monkeypatch.setattr(deps, "get_api", lambda: _Api())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:

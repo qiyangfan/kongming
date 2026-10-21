@@ -168,7 +168,7 @@ async def test_auto_provision_username_always_carries_provider_suffix(
     fake_provider: Callable[[str, NormalizedProfile], None],
     session: AsyncSession,
 ) -> None:
-    """联邦建号一律 {base}-{provider}:无冲突也不占裸名(来源可溯,003 e2e 后拍板)。"""
+    """联邦建号一律 {base}-{provider}:无冲突也不占裸名(来源可溯,e2e 后拍板)。"""
     await seed_all(session, get_settings())
     fake_provider("github", _profile())
     r = await _callback(client, "github")

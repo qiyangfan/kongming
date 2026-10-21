@@ -1,4 +1,4 @@
-"""rag 内部召回端点测试(009):三路召回/双过滤隔离/缓存/降级/chat 回写闭环。"""
+"""知识库内部召回端点测试，覆盖三路召回、租户与数据源隔离、缓存、降级和历史回写。"""
 # pyright: reportPrivateUsage=false
 
 import hashlib
@@ -168,10 +168,10 @@ async def test_recall_vector_and_history(
 async def test_recall_history_inherits_prior_tables(
     client: AsyncClient, session: AsyncSession, fake_embed: None
 ) -> None:
-    """047 多轮继承:追问主路召回缺上轮依赖表,继承路(history 末条)补入。
+    """多轮继承:追问主路召回缺上轮依赖表,继承路(history 末条)补入。
 
-    复刻 mt_005 事故形态:追问「他们各自的邮箱」主路召回被填充表占满,
-    行为表 rental 只与上轮问句相似——无继承即缺表,模型越界引用清单外表。
+    事故形态:追问「他们各自的邮箱」主路召回被填充表占满,行为表
+    rental 只与上轮问句相似——无继承即缺表,模型越界引用清单外表。
     """
     from kongming.redis_client import get_redis
 
@@ -205,7 +205,7 @@ async def test_recall_history_inherits_prior_tables(
 async def test_recall_history_merge_caps_and_dedupes(
     client: AsyncClient, session: AsyncSession, fake_embed: None
 ) -> None:
-    """047:继承路只补主路未含的表,总量封顶 2×top-K=10。"""
+    """继承路只补主路未含的表,总量封顶 2×top-K=10。"""
     from kongming.redis_client import get_redis
 
     await cast("Any", get_redis()).flushdb()
@@ -237,7 +237,7 @@ async def test_recall_history_merge_caps_and_dedupes(
 async def test_recall_history_cache_key_splits_on_context(
     client: AsyncClient, session: AsyncSession, fake_embed: None
 ) -> None:
-    """047:同问句不同 history 缓存不互串(键并入历史指纹)。"""
+    """同问句不同 history 缓存不互串(键并入历史指纹)。"""
     from kongming.redis_client import get_redis
 
     await cast("Any", get_redis()).flushdb()
@@ -298,7 +298,7 @@ async def test_recall_fulltext_exact_table_promoted(
 async def test_recall_alias_hits_and_hint_carries_alias(
     client: AsyncClient, session: AsyncSession, fake_embed: None
 ) -> None:
-    """037:业务称谓经别名命中召回(向量路,embedding 文本拼入 alias);
+    """业务称谓经别名命中召回(向量路,embedding 文本拼入 alias);
     schema_hint 表说明段含「goods(商品表)」形态(rag delta 场景)。"""
     from kongming.redis_client import get_redis
 
@@ -394,7 +394,7 @@ async def test_recall_empty_returns_blank(
     client: AsyncClient, session: AsyncSession, fake_embed: None
 ) -> None:
     """空知识:返回空结果不报错(agent 侧回退内省);且空结果不写 ctx 缓存
-    (冒烟实证改进:降级空结果入缓存会让恢复后服务 TTL 窗口内持续返回空)。"""
+    (空结果入缓存会让恢复后服务 TTL 窗口内持续返回空)。"""
     from kongming.redis_client import get_redis
 
     await cast("Any", get_redis()).flushdb()
@@ -408,23 +408,23 @@ async def test_recall_empty_returns_blank(
     assert r.json() == {
         "schema_hint": "",
         "history_sql": "",
-        "relations_hint": "",  # 023 纯增语义段(空)
+        "relations_hint": "",  # 语义段(空)
         "metric_hints": "",
-        "metric_hits": [],  # 076 纯增结构化口径命中(空)
-        "doc_hints": [],  # 024 纯增文档段(空)
-        "skill_terms": "",  # 056 纯增 skill 段(空=零包零回归)
+        "metric_hits": [],  # 结构化口径命中(空)
+        "doc_hints": [],  # 文档段(空)
+        "skill_terms": "",  # skill 段(空=无技能包)
         "skill_examples": "",
         "skill_persona": "",
     }
     keys = [k async for k in cast("Any", get_redis()).scan_iter(match="km:ragctx:*")]
-    assert keys == []  # 空结果不写缓存(下次请求重试全链路)
+    assert keys == []  # 空结果不写缓存，后续请求会重新召回。
 
 
 async def test_recall_history_only_result_cached(
     client: AsyncClient, session: AsyncSession, fake_embed: None
 ) -> None:
     """纯历史命中(schema 空+history 有):有效形态写缓存且原样返回
-    (R2-S1 口径:api 认为纯 history 命中是有效结果)。"""
+    (口径:api 认为纯 history 命中是有效结果)。"""
     from kongming.redis_client import get_redis
 
     await cast("Any", get_redis()).flushdb()
@@ -446,7 +446,7 @@ async def test_recall_history_only_result_cached(
 async def test_emb_cache_dim_drift_treated_as_miss(
     client: AsyncClient, session: AsyncSession, fake_embed: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """emb 缓存维度漂移(换模型未 bump v1):坏维度缓存按未命中重取(R2-R1 防线)。"""
+    """emb 缓存维度漂移(换模型未 bump v1):坏维度缓存按未命中重取(防线)。"""
     from kongming.rag.agent_callback import _emb_key
     from kongming.redis_client import get_redis
 
@@ -589,7 +589,7 @@ async def _ensure_default_tenant(s: AsyncSession) -> str:
     return await _mk_tenant(s, "default")
 
 
-# ============ chat 回写闭环 ============
+# ============ Chat 问答后的历史回写 ============
 
 
 async def test_chat_success_writes_query_history(
@@ -661,7 +661,7 @@ async def test_writeback_failure_does_not_break_chat(
     make_user: MakeUser,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """回写内部异常:不阻断问答主链路(响应照常)。"""
+    """历史回写失败时仍返回问答响应。"""
     from kongming.chat.agent_client import AgentClient, AgentReply
     from kongming.rag.service import RagService
     from tests.test_chat_query import _auth, _user_with_chat_perm
@@ -682,7 +682,7 @@ async def test_writeback_failure_does_not_break_chat(
     _, token = await _user_with_chat_perm(client, session, make_user)
     r = await client.post("/chat/query", json={"question": "查一下"}, headers=_auth(token))
     assert r.status_code == 200
-    assert r.json()["success"] is True  # 主链路未受影响
+    assert r.json()["success"] is True
 
 
 def _areply(reply: object):

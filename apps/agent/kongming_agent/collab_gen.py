@@ -1,19 +1,8 @@
-"""多智能体协作编排(091):宿主=任务步骤;worker=一次受限 ReAct 调用。
+"""多智能体协作编排。
 
-D1:orchestrator 是循环不是图——规划(拆 worker 子目标)→ 派发(每次派发 =
-一次既有 ReAct 内核调用,上下文在派发时冻结)→ 聚合(交叉裁决/分歧验证/
-critic 审查)→ 回写结构化结果。worker 间无直连:worker 输入在派发时冻结,
-输出只进聚合,不回流为后续 worker 输入——「通信经 orchestrator」是结构保证。
-失控防护(D4,三重上限):深度超限拒绝嵌套(缺省不嵌套,部署配置可调)、
-worker 数上限(prompt 要求/解析/派发单一定义共用,部署 cap 参数化)、预算
-显式继承(可派发 worker 数由组合根从任务步骤预算换算传入,不足则少派/不派
-并披露未完成清单;分歧验证与 critic 修订重派同计入预算)。派发策略 serial/
-parallel 由拓扑声明(parallel=asyncio.gather,worker 输入仍在派发时冻结,
-结构保证不变)。聚合裁决:全 PASS 才 PASS;分歧重派验证或如实标注(不静默
-调和);critic 审查不通过触发有限轮修订,轮次尽后如实附保留意见。触顶/预算
-尽 → 部分完成语义(090 诚实收口),不新建终止语义。token 级记账在组合根以
-worker 用量摘要落实(本模块零 api 句柄,授权面零扩大)。
-"""
+每个 worker 以受限 ReAct 执行,输入在派发时固定,结果只交编排器汇总,
+不直接传给其他 worker;worker 数、嵌套深度、执行预算均有限制。
+预算耗尽或结论不一致时,如实返回未完成项与分歧,不伪造共识。"""
 
 import asyncio
 import json
@@ -125,7 +114,7 @@ def _json_object(raw: str) -> dict[str, object] | None:
 
 def _parse_topology(raw: str) -> list[dict[str, object]]:
     """规划输出 → worker 子目标清单(剥围栏+首尾括号;畸形拒绝;空清单合法)。
-    不在此截断:派发上限与预算截断在 run() 统一施加,未派发项如实披露。"""
+    不在此截断:派发上限与预算截断在 run 统一施加,未派发项如实披露。"""
     text = raw.strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[-1]
@@ -157,21 +146,7 @@ def _parse_topology(raw: str) -> list[dict[str, object]]:
 
 
 class CollabOrchestrator:
-    """一次步骤内的协作编排(每步实例化;依赖显式注入便于剧本化测试)。
-
-    worker_runner:测试与运行共用的 worker 执行器(见 WorkerRunner);
-    depth:当前嵌套深度(任务步骤直启=1),超 max_depth 构造即拒绝;
-    worker_budget:可派发 worker 执行总次数(初次派发+分歧验证+critic 修订
-    重派全计入;预算硬继承,组合根从任务步骤预算换算),None 表示不设预算
-    (仍受 worker 上限约束);
-    max_workers_cap/max_depth/max_revision_rounds:部署级上限(缺省=模块
-    常量;组合根自 Settings 注入,缺省值不漂移);
-    dispatch:"serial"(缺省)|"parallel"(asyncio.gather,输入冻结不变);
-    critic:是否启用 critic 审查与有限轮修订;
-    roster:分工名册成员标签清单(collab-worker-roster,可选)。给出即纯名册
-    分配制:子目标逐一分配给成员(允许一成员多子目标),映射失败进未派发
-    清单,拆解失败不回落合成 worker;None/空 = 匿名合成现行为。
-    """
+    """协作编排器:拆解、派发 worker、聚合与有限复核;依赖注入,预算受限。"""
 
     def __init__(
         self,
@@ -379,7 +354,7 @@ class CollabOrchestrator:
         if not self._budget_take(1):
             return True, "存在分歧且预算不足,未能派发核实(分歧如实保留)"
         # 重派验证 = 独立重跑一次 + LLM 仲裁采信哪方;核实条目只作裁决证据,
-        # 不参与交叉 verdict 计算(裁决链路失败不应拖垮原工作结论)
+        # 分歧裁决失败不影响原工作结论。
         verify = await self._execute_one(f"核实分歧:{subgoal}", context)
         try:
             verdict_raw = await self._llm.chat(
@@ -426,8 +401,7 @@ class CollabOrchestrator:
         verdict: str,
         reservation: str | None,
     ) -> tuple[str, list[dict[str, object]], str | None]:
-        """critic 审查 + 有限轮修订:不通过则重派被标记 worker(预算内),
-        轮次尽后如实附保留意见;审查链路异常不阻断收口(降级为如实标注)。"""
+        """critic 不通过时，在剩余预算内重派被标记的 worker；复核失败只作为保留意见返回。"""
         notes: list[str] = [reservation] if reservation else []
         rounds = max(1, self._max_revision_rounds)
         for round_no in range(rounds):

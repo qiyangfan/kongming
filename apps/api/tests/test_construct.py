@@ -1,4 +1,4 @@
-"""自动构造单测(092):规范校验器、并入口径、基线行构造——默认门禁可跑。"""
+"""自动构造单测:规范校验器、并入口径、基线行构造——默认门禁可跑。"""
 # pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false
 
 from pathlib import Path
@@ -26,7 +26,7 @@ from evals.construct.validators import (
 
 
 def test_tiebreaker_missing_rejected() -> None:
-    """任务 3.2 三类拦截之一:top-N 无第二排序键。"""
+    """三类拦截之一:top-N 无第二排序键。"""
     assert check_tiebreaker(
         "SELECT tenant_sakila.f.title FROM tenant_sakila.film f ORDER BY f.rental_rate DESC LIMIT 5"
     )
@@ -96,7 +96,7 @@ def test_inner_orderby_without_outer_ordering_rejected() -> None:
 
 
 def test_projection_bare_id_rejected() -> None:
-    """任务 3.2 三类拦截之二:裸投影 ID。"""
+    """三类拦截之二:裸投影 ID。"""
     assert check_projection_readable("SELECT film_id FROM tenant_sakila.film")
     assert check_projection_readable("SELECT order_no FROM tenant_olist.orders")
     # 名称列/多列投影放行
@@ -181,7 +181,7 @@ def test_load_candidates_rejects_non_list(tmp_path: Path) -> None:
         load_candidates(p)
 
 
-# ── 基线行构造(任务 3.4 断言)──
+# ── 基线行构造(评估统计行断言)──
 
 
 def test_build_baseline_row_parses_stats_line() -> None:

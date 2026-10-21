@@ -1,4 +1,4 @@
-"""toolgateway 领域模型(089):域清单装载 + 重试分类(零框架,宪法 Article II)。
+"""toolgateway 领域模型:域清单装载和重试分类,不依赖 Web 框架或数据库。
 
 域清单是数据:装载为可确定性重放的纯函数,畸形单域剔除并告警(fail-closed
 不裸崩,不影响其余域);重试分类=已送达与否的二值判定,由各域策略器声明。
@@ -19,19 +19,19 @@ class RetryClass(Enum):
     PROTOCOL = "protocol"
 
 
-# 域失败文案前缀单源(094 评审循环 D4:域执行器收敛文案与网关 _was_delivered
-# 的送达判定共引,防多处字面量漂移;knowledge 域已随 081 缺口修复一并收编)
+# 域失败文案前缀单源:域执行器收敛文案与网关 _was_delivered
+# 的送达判定共引,防多处字面量漂移
 FAILURE_UNDELIVERED_PREFIX = "unreachable:"
 FAILURE_PROTOCOL_PREFIX = "protocol:"
 
 
 # 工具名 → 域标识单源(审计域标签与域配额闸共用)。
-# 放 models(零依赖数据),避免 toolcall.service 传递性引入 httpx(审查 P2)。
+# 放 models(零依赖数据),避免 toolcall.service 传递性引入 httpx。
 DOMAIN_TOOLS: dict[str, str] = {
     "web_search": "websearch",
 }
 
-# 099 http-connector-domain:连接器域单源(域标签/配额桶/审计共用;连接器
+# 连接器域单源(域标签/配额桶/审计共用;连接器
 # 工具名为租户行派生的动态形态 http__<key>,与 MCP mcp__<server>__<tool>
 # 同构的下划线口径——LLM 函数名兼容字符集禁冒号)。
 CONNECTOR_DOMAIN = "http"
@@ -46,14 +46,14 @@ class SearchProvider:
     host: str
 
 
-# 094 websearch 域参数边界单源(注册表 schema 与域策略器/分发缺省共引;
-# 审查 P2-3:防三点人工对齐漂移)
+# websearch 域参数边界单源(注册表 schema 与域策略器/分发缺省共引,
+# 防三点人工对齐漂移)
 WEBSEARCH_QUERY_MAX_LEN = 500
 WEBSEARCH_COUNT_MIN = 1
 WEBSEARCH_COUNT_MAX = 10
 WEBSEARCH_COUNT_DEFAULT = 5
 
-# 094 websearch 域:首发供应商注册表(纯数据,config/registry 零 httpx 传递)。
+# websearch 域供应商注册表(纯数据,config/registry 零 httpx 传递)。
 # 端点由供应商单源派生,部署不可单独改端点(防白名单外端点的组合攻击面)。
 WEBSEARCH_PROVIDERS: dict[str, SearchProvider] = {
     "tavily": SearchProvider(endpoint="https://api.tavily.com/search", host="api.tavily.com"),
@@ -61,14 +61,13 @@ WEBSEARCH_PROVIDERS: dict[str, SearchProvider] = {
         endpoint="https://api.bochaai.com/v1/web-search", host="api.bochaai.com"
     ),
     # 智谱独立检索 API(与 LLM 同平台,复用已有 bigmodel key 零额外注册;
-    # 契约按官方 docs.bigmodel.cn「网络搜索」API 核对于 2026-10-11)
+    # 契约按官方 docs.bigmodel.cn「网络搜索」API 核对)
     "zhipu": SearchProvider(
         endpoint="https://open.bigmodel.cn/api/paas/v4/web_search", host="open.bigmodel.cn"
     ),
     # 阿里云 AI 搜索开放平台联网搜索(归 OpenSearch 品牌线,实为联网搜索 API
     # 而非自建索引引擎):POST /v3/openapi/workspaces/{ws}/web-search/{service_id},
-    # Bearer 独立 OS- key(与百炼 sk- 不通用)。host 为账号级实例域名——
-    # 2026-10-14 owner 提供本账号实例域名并回填(原「占位待回填」口径作废);
+    # Bearer 独立 OS- key(与百炼 sk- 不通用);host 为账号级实例域名,
     # 多账号部署需将 endpoint/host 升级为部署可配,当前单账号按固定端点同列。
     "alibaba_ai_search": SearchProvider(
         endpoint=(

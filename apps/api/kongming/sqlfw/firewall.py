@@ -1,22 +1,12 @@
-"""SQL 防火墙(sqlglot AST,纵深防御第 4 层)——053 起为薄适配层。
-
-原则:AST 白名单而非正则黑名单。Agent 产出的 SQL 必须经此校验,
-verdict 落审计表。方言当前 PG-only(datasource spec 为 PG-only)。
-
-053 单遍引擎接入:本模块保留**内置路径**的判定规则体(check_statements 等,
-与切换前实现一比一),公开函数委托 guard 门(模式化:builtin/shadow/primary,
-见 guard.py)。判定语义与 reason 字符串与引擎切换前逐字一致。
-
-067:保留表/只读根/危险函数清单唯一定义在 liannu.rules,本模块只 re-export
-(消费方 internal/meta、rag/repository 引用面零改动)。禁止在此再写字面值。
-"""
+"""以 sqlglot AST 校验 Agent 生成的 PostgreSQL 查询,判定结果写入审计。
+规则单点在 `liannu.rules`;执行模式与引擎降级由 `guard.py` 管理。"""
 
 from liannu import rules as _rules
 from sqlglot import Expr, exp
 
 from kongming.sqlfw.guard import parse_guarded
 
-# 067:清单唯一定义在 liannu.rules;此处显式 re-export(消费方引用面零改动)
+# 清单唯一定义在 liannu.rules;此处显式 re-export(消费方引用面零改动)
 RESERVED_TABLE_PREFIXES = _rules.RESERVED_TABLE_PREFIXES
 RESERVED_TABLE_NAMES = _rules.RESERVED_TABLE_NAMES
 RESERVED_SCHEMA_NAMES = _rules.RESERVED_SCHEMA_NAMES
@@ -33,7 +23,7 @@ class Verdict:
         return f"Verdict(passed={self.passed}, reason={self.reason!r})"
 
 
-# ── 内置路径规则体(与切换前实现一比一;吃共享解析产物,不再自行 parse)──
+# ── 内置路径规则体(吃共享解析产物,不再自行 parse)──
 
 
 def check_statements(statements: list[Expr | None]) -> Verdict:
@@ -64,7 +54,7 @@ def check_statements(statements: list[Expr | None]) -> Verdict:
                 return Verdict(False, f"BLOCKED_NODE: {forbidden.__name__}")
         # 危险函数拒用(服务器文件/系统操作/资源滥用)
         for func in st.find_all(exp.Func):
-            # Anonymous(sqlglot 未收录的函数)名在 .name;已收录类型用 sql_name()
+            # Anonymous(sqlglot 未收录的函数)名在 .name;已收录类型用 sql_name
             func_name = (
                 func.name.lower() if isinstance(func, exp.Anonymous) else func.sql_name().lower()
             )
@@ -79,11 +69,11 @@ def check_schema_scope_statements(
 ) -> Verdict:
     """schema 维度白名单:显式限定的表引用仅允许落在 allowed_schemas 内。
 
-    search_path 只约束未限定名的解析——`SELECT * FROM tenant_b.t` 可跨租户读
-    (评审实证),故在执行前对所有显式 schema 限定做一次收口:
-    - 未限定(db 为空)与 CTE 名引用:放行(search_path 已约束);
-    - 表函数(generate_series 等,无表名):放行;
-    - 三段式引用(catalog 非空):拒绝(PG 不支持跨库,出现即异常形态)。
+        search_path 只约束未限定名的解析——`SELECT * FROM tenant_b.t` 可跨租户读
+    因此，执行前会统一检查所有显式 schema 限定：
+        - 未限定(db 为空)与 CTE 名引用:放行(search_path 已约束);
+        - 表函数(generate_series 等,无表名):放行;
+        - 三段式引用(catalog 非空):拒绝(PG 不支持跨库,出现即异常形态)。
     """
     # PG 语义:仅未加引号的「引用侧」折叠小写;schema 名本身大小写精确,
     # 白名单不折叠(否则大写 tenant_key 会误放行其小写双胞胎 schema)
@@ -111,7 +101,7 @@ def check_reserved_tables_statements(statements: list[Expr | None]) -> Verdict:
     裸名经 search_path 落到 public 控制表,是最危险形态)。
     CTE 别名命中保留名同样拒(否则遮蔽形态绕过:WITH sys_user AS (SELECT FROM
     public.sys_user) SELECT FROM sys_user——PG 里 CTE 名只遮蔽裸名,体内限定名
-    引用会被 CTE 豁免误跳过,R2 评审实证);非保留 CTE 名引用与表函数放行。"""
+    引用会被 CTE 豁免误跳过);非保留 CTE 名引用与表函数放行。"""
     for st in statements:
         if st is None:
             continue

@@ -1,5 +1,5 @@
-"""mcp 配置仓储(028):sys_mcp_server CRUD + 快照;headers AES-GCM
-(008 cipher 复用),解密仅限出站调用路径(get_call_target)——
+"""mcp 配置仓储:sys_mcp_server CRUD + 快照;headers AES-GCM
+(cipher 复用),解密仅限出站调用路径(get_call_target)——
 查询面一律掩码,明文永不出现在列表/详情。"""
 
 import json
@@ -67,7 +67,7 @@ class SqlMcpRepo:
         tenant_id: str,
         name: str,
         endpoint: str,
-        headers: dict[str, str | None],  # 值 None=保持现值(D2 编辑语义)
+        headers: dict[str, str | None],  # 值 None=保持现值
     ) -> None:
         row = await self._get_row(server_id=server_id, tenant_id=tenant_id)
         if row is None:
@@ -98,7 +98,7 @@ class SqlMcpRepo:
         )
 
     async def set_enabled(self, *, server_id: str, tenant_id: str, enabled: bool) -> bool:
-        res = cast(  # DML 结果为 CursorResult(chat 仓储同款形态)
+        res = cast(  # DML 结果为 CursorResult,显式标注类型
             "CursorResult[object]",
             await self._s.execute(
                 text(
@@ -181,7 +181,7 @@ class SqlMcpRepo:
         prompts: list[dict[str, Any]],
         error: str,
     ) -> None:
-        """快照原子替换(109 起含资源/模板清单;失败降级由调用方传旧值)。"""
+        """快照原子替换(含资源/模板清单;失败降级由调用方传旧值)。"""
         await self._s.execute(
             text(
                 "UPDATE public.sys_mcp_server SET tools=CAST(:tools AS jsonb),"
@@ -202,7 +202,7 @@ class SqlMcpRepo:
     async def get_enabled_resources(
         self, *, tenant_id: str, server_key: str
     ) -> list[dict[str, Any]]:
-        """read_resource 执行期的 uri 白名单(109,design D2:来自探测快照)。
+        """read_resource 执行期的 uri 白名单(来自探测快照)。
         仅启用 server——禁用/删除竞态 → 空=全拒,与工具目录消失同形。"""
         if not SERVER_KEY_RE.fullmatch(server_key):
             return []
@@ -274,7 +274,7 @@ class SqlMcpRepo:
         """出站调用专用:endpoint + 解密 headers(唯一明文出口;
         调用方 MUST NOT 落日志/审计)。require_enabled=True=执行面(防禁用
         竞态);管理面探测(test/sync)传 False——禁用态只读探测无副作用,
-        且「禁用→改 endpoint→保存同步」主流程不能被 404 卡死(R1-S1)。"""
+        且「禁用→改 endpoint→保存同步」主流程不能被 404 卡死。"""
         if not SERVER_KEY_RE.fullmatch(server_key):
             return None
         # 两常量 SQL 分叉(不拼字符串,S608 零争议;enabled 列由分支字面量)

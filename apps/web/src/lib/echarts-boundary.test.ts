@@ -3,11 +3,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { describe, expect, it } from "vitest";
 
-/* 体积治理回归护栏(066.2.3):echarts/zrender 渲染引擎约 250 kB,只允许经
-   动态 import 的按需 chunk 进入依赖图。静态 import 若逃逸进首屏入口链,
-   构建无任何报错(它会静默进主包)——故以静态源码扫描钉死边界:
-   允许静态 import 的只有按需注册单源 lib/echarts.ts 与其唯一实现
-   chart-view-impl(仅由 chart-view.tsx 动态 import 引用)。 */
+/* 静态检查保证 ECharts 仅从动态导入的图表边界进入应用，避免它进入首屏主包。 */
 
 const SRC = fileURLToPath(new URL("../", import.meta.url));
 

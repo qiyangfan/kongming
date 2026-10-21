@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { isCitationKeyShape, keySuffix, splitCitationMarkers } from "./citation-utils";
 
-/* 068 引用键工具锚(纯函数;与 agent 侧 citations.py 同源跨进程各自落地): */
+/* 引用键纯函数工具;agent 侧有同逻辑实现(citations.py),两端行为需保持一致 */
 
 describe("isCitationKeyShape", () => {
   it("键形态:前缀-4位大写十六进制", () => {

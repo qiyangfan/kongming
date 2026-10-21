@@ -1,14 +1,5 @@
-"""内置工具注册表(019):代码声明式,随代码发布的契约数据(与权限点同哲学)。
-
-唯一真理源纪律:Agent 面不维护独立工具 schema——控制面在调用 ReAct 端点时
-按调用方授权集过滤本表注入(filter_specs);新增/变更工具只改本文件。
-零框架纪律:本模块不 import fastapi/sqlalchemy/redis。
-
-部署级可选内置工具(094 web-search-domain):REGISTRY 是静态基表(常驻工具,
-零回归缺省);build_registry(settings 条件) 产出有效表,启动时 activate。
-条件不满足的工具不进有效表——对调用方与 Agent 面「从未存在」(spec
-「部署级注册条件」)。
-"""
+"""内置工具的静态注册表。控制面按调用方权限过滤工具定义并提供给 Agent；
+新增或修改工具定义在此处维护。可选工具须满足部署配置才会进入有效注册表。"""
 
 from collections.abc import Collection
 
@@ -90,9 +81,8 @@ REGISTRY: dict[str, ToolDef] = {
         write=True,
         require_confirm=True,
     ),
-    # 027 cloud-code-sandbox:容器级隔离的 Python 执行面(非写工具——
-    # 沙箱无副作用出边界);用法说明自带(df 注入语义/pd/np/plt 可用),
-    # 不动 Agent 面 prompt 资产(prompt 资产纪律)
+    # 容器级隔离的 Python 执行面(非写工具——沙箱无副作用出边界);
+    # 用法说明自带(df 注入语义/pd/np/plt 可用),不改 Agent 面 prompt 资产
     "run_python_code": ToolDef(
         name="run_python_code",
         description=(
@@ -122,7 +112,7 @@ REGISTRY: dict[str, ToolDef] = {
         write=False,
         require_confirm=False,
     ),
-    # 057 numeric-grounding:确定性派生量(禁 LLM 心算);Agent 面本地执行并
+    # 确定性派生量(禁 LLM 心算);Agent 面本地执行并
     # 校验入参 ∈ 本轮数值白名单;控制面 handler 供工作流等通道复用同公式
     "compute_delta": ToolDef(
         name="compute_delta",
@@ -165,7 +155,7 @@ REGISTRY: dict[str, ToolDef] = {
 }
 
 
-# 094 web-search-domain:联网检索工具(部署级可选;注册条件两道:
+# 联网检索工具(部署级可选;注册条件两道:
 # 供应商在注册表内 + API key 已配置;查询内容外发第三方,显式授予制)
 _WEBSEARCH_TOOL = ToolDef(
     name="web_search",
@@ -198,7 +188,7 @@ _WEBSEARCH_TOOL = ToolDef(
     require_confirm=False,
 )
 
-# 089:运行时停用工具(网关域停用 → 注入集与分发解析同源消失,与「域从未存在」
+# 运行时停用工具(网关域停用 → 注入集与分发解析同源消失,与「域从未存在」
 # 同形;进程内生效,重启随部署清单复位)
 _RUNTIME_DISABLED: set[str] = set()
 
@@ -214,7 +204,7 @@ def build_registry(
     websearch_provider: str = "",
     websearch_api_key: str = "",
 ) -> dict[str, ToolDef]:
-    """094:有效注册表装配(确定性纯函数:同入参同结果)。
+    """有效注册表装配(确定性纯函数:同入参同结果)。
 
     websearch 供应商在注册表内且 API key 非空才追加 web_search;
     调用方(main.lifespan)负责配置残缺告警,本函数只做条件判定。
@@ -226,8 +216,8 @@ def build_registry(
     return registry
 
 
-# 有效表:缺省=静态基表(未 activate 的测试/导入路径零回归);activate 后
-# filter_specs/get_tool 及其余直接读表点经 effective() 消费
+# 有效表:缺省=静态基表(未 activate 的测试/导入路径);activate 后
+# filter_specs/get_tool 及其余直接读表点经 effective 消费
 _active_registry: dict[str, ToolDef] = REGISTRY
 
 
@@ -243,7 +233,7 @@ def effective() -> dict[str, ToolDef]:
 
 def filter_specs(perm_codes: Collection[str]) -> list[ToolSpec]:
     """按调用方权限点集过滤出可注入 Agent 面的工具 schema(空集→空列表,退化语义);
-    089:运行时停用工具不出现在注入集(与「域从未存在」同形)。"""
+    运行时停用工具不出现在注入集(与「域从未存在」同形)。"""
     return [
         d.spec()
         for d in _active_registry.values()

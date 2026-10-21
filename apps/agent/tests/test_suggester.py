@@ -1,6 +1,6 @@
-"""对话冷启动建议问题测试(039):产出清洗/降级契约/端点行为/prompt 全角。
+"""对话冷启动建议问题测试:产出清洗/降级契约/端点行为/prompt 全角。
 
-prompt 为 039 全新撰写(非上游资产);遵守全角标点纪律(本文件断言锚定)。
+prompt 为 全新撰写(非上游资产);遵守全角标点纪律(本文件断言锚定)。
 降级契约:任何失败 → SuggestError/generated=False,api 侧收敛空清单不落缓存。
 """
 
@@ -113,7 +113,7 @@ def test_success_returns_cleaned_and_uses_suggest_task() -> None:
     llm = StubLlm('```json\n{"questions": ["共有多少商品？", "销量 Top5 是哪些？"]}\n```')
     out = _run(suggest_questions(_DIGEST, cast("LlmClient", llm)))
     assert out == ["共有多少商品？", "销量 Top5 是哪些？"]
-    assert llm.task_seen == "SUGGEST"  # 021 任务路由(可定向小模型)
+    assert llm.task_seen == "SUGGEST"  # 任务路由(可定向小模型)
     assert "goods" in llm.calls[0][1]  # 摘要进入 prompt
 
 
@@ -138,12 +138,11 @@ def test_prompt_full_width_punctuation() -> None:
 
 
 def test_prompt_quality_rules_in_place() -> None:
-    """建议质量规则标识在位(039 实证缺陷防回退):跨表拼接与占位表述两条
-    曾分别导致 varchar=uuid 执行失败与占位符问句,断言防手滑删规则。"""
+    """检查建议提示禁止拼接无关表和生成占位问句。"""
     from kongming_agent import suggester
 
     template = suggester._USER_PROMPT_TEMPLATE
-    assert "互不相关" in template  # 禁不相关表拼接(跨表强join实证缺陷)
+    assert "互不相关" in template  # 禁不相关表拼接(跨表强join缺陷)
     assert "系统类表与业务表" in template
     assert "占位表述" in template  # 禁「指定值」类占位问句
 

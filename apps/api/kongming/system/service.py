@@ -1,7 +1,7 @@
-"""system 域用例(007):管理面 CRUD 编排与安全保护规则。
+"""system 域用例:管理面 CRUD 编排与安全保护规则。
 
-零框架依赖(宪法 Article II):持久化经 SystemRepo Protocol 反转。
-保护规则(rbac delta 007「内置数据保护」「角色删除前置校验」等)集中在
+不依赖 Web 框架或数据库;持久化通过 SystemRepo Protocol 注入。
+RBAC 规则(内置数据保护、角色删除前校验等)集中在
 对应用例入口,先校验后落库,单用例一事务。
 """
 
@@ -149,7 +149,7 @@ class SystemService:
         username = str(current["username"])
         if status == "DISABLED":
             self._assert_disable_allowed(current, actor_id)
-        # 超管账号保护(007 R1):不可删除,亦不可禁用/剥离 SUPER_ADMIN 绑定
+        # 超管账号不可删除、禁用或解除 SUPER_ADMIN 绑定。
         if username == self._admin_username:
             super_id = await self._repo.role_id_by_key("SUPER_ADMIN")
             if super_id is not None and super_id not in role_ids:
@@ -172,9 +172,9 @@ class SystemService:
         await self._repo.rebind_user_tenant(user_id, tenant_id)
         await self._repo.log_oper(actor_id, "user.update", username, {"user_id": user_id})
         await self._repo.commit()
-        # 密码被管理员变更 → 吊销全部 refresh 家族(与自助改密同语义,R1 严重 1:
+        # 管理员改密后吊销全部 refresh token，与用户自助改密保持一致。
         # 否则疑似泄漏场景下重置密码后攻击者旧 refresh token 仍可续换 access)
-        # 禁用同样踢下线(012):编辑路径与专用端点两路同收口,任一禁用路径生效
+        # 禁用同样踢下线:编辑路径与专用端点两路同收口,任一禁用路径生效
         if password or status == "DISABLED":
             await self._revoke_refresh(user_id)
 
@@ -182,8 +182,8 @@ class SystemService:
         current = await self._repo.get_user(user_id)
         if current is None:
             raise UserNotFound("用户不存在")
-        # 重置后首登改密标志复位(rbac spec「编辑与重置密码」;007 S1 修复:
-        # 专用语句同步置 NULL,update_user 的 COALESCE 路径不触碰该列)
+        # 重置后首登改密标志复位(rbac spec「编辑与重置密码」;专用语句
+        # 同步置 NULL,update_user 的 COALESCE 路径不触碰该列)
         await self._repo.reset_password(user_id, pwd.hash_password(new_password))
         await self._repo.log_oper(
             actor_id, "user.reset_password", str(current["username"]), {"user_id": user_id}
@@ -193,7 +193,7 @@ class SystemService:
         await self._revoke_refresh(user_id)
 
     async def enable_user(self, *, actor_id: str, user_id: str) -> None:
-        """专用启用(012):只翻状态;启用不涉及吊销。"""
+        """专用启用:只翻状态;启用不涉及吊销。"""
         current = await self._repo.get_user(user_id)
         if current is None:
             raise UserNotFound("用户不存在")
@@ -204,7 +204,7 @@ class SystemService:
         await self._repo.commit()
 
     async def disable_user(self, *, actor_id: str, user_id: str) -> None:
-        """专用禁用(012):保护与编辑路径同构;禁用即踢下线(吊销 refresh 家族)。"""
+        """专用禁用:保护与编辑路径同构;禁用即踢下线(吊销 refresh 家族)。"""
         current = await self._repo.get_user(user_id)
         if current is None:
             raise UserNotFound("用户不存在")
@@ -217,14 +217,14 @@ class SystemService:
         await self._revoke_refresh(user_id)
 
     def _assert_disable_allowed(self, current: Mapping[str, object], actor_id: str) -> None:
-        """禁用保护单点(012 F10):编辑路径与专用端点同调,防两份漂移。"""
+        """禁用保护单点:编辑路径与专用端点同调,防两份漂移。"""
         if str(current["id"]) == actor_id:
             raise SelfDisable("不可禁用自己的账号")
         if str(current["username"]) == self._admin_username:
             raise AdminAccountProtected("超管账号不可禁用")
 
     async def _revoke_refresh(self, user_id: str) -> None:
-        """吊销全部 refresh 家族(改密/重置/禁用三路同管线,012 收口单点)。"""
+        """吊销全部 refresh 家族(改密/重置/禁用三路同管线,收口单点)。"""
         await self._families.revoke_all_user_families(user_id, self._refresh_ttl_sec)
 
     async def delete_user(self, *, actor_id: str, user_id: str) -> None:
@@ -312,14 +312,8 @@ class SystemService:
         await self._repo.commit()
 
     async def _resolve_custom_depts(self, data_scope: str, dept_ids: list[str] | None) -> list[str]:
-        """CUSTOM ↔ 部门集合搭配校验,返回落库目标集合(整包替换语义)。
-
-        三条规则(spec datascope/rbac):
-        - CUSTOM 且集合为空(键缺失或显式空数组)→ 拒:否则落一个「每次查询必被拒」的角色;
-        - CUSTOM 且含不存在的部门 → UnknownDeptId(与用户绑部门同一族异常);
-        - 非 CUSTOM 却带非空集合 → 拒:静默忽略会留下「配了部门却不生效」的隐性状态。
-        非 CUSTOM 恒返回空集合 → rebind 即清空,库里不残留。
-        """
+        """校验数据范围与部门集合并返回替换值;CUSTOM 必须绑定现存部门,
+        其他范围不接受部门列表并清除已有绑定。"""
         ids = dept_ids or []
         if data_scope != "CUSTOM":
             if ids:

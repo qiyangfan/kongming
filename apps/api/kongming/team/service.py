@@ -1,6 +1,6 @@
-"""team 用例编排(032):CRUD+成员管理+归属变更。零框架(宪法 Article II)。
+"""team 用例编排:CRUD、成员管理和归属变更。用例层不依赖 Web 框架或数据库。
 
-102:团队删除挂知识公共化后置钩子(KnowledgePublicizer,组合根注入 rag 域
+团队删除挂知识公共化后置钩子(KnowledgePublicizer,组合根注入 rag 域
 适配)——名下知识条目归属置空+审计,知识资产不因团队解散丢失;钩子失败
 告警不阻塞删除(FK ON DELETE SET NULL 级联兜底公共化)。
 """
@@ -28,10 +28,10 @@ class TeamOperLogger(Protocol):
 
 
 class KnowledgePublicizer(Protocol):
-    """团队删除后置钩子(102):其名下知识条目公共化(team_id 置空)+审计。
+    """团队删除后置钩子:其名下知识条目公共化(team_id 置空)+审计。
 
     领域只见协议;实现=组合根注入的 rag 域适配(savepoint 包裹,失败只回滚
-    自身)。抛错由 TeamService 捕获告警,SHALL NOT 阻塞团队删除。"""
+    自身)。抛错由 TeamService 捕获告警,不阻塞团队删除。"""
 
     async def publicize(self, *, team_id: str) -> None: ...
 
@@ -41,7 +41,7 @@ class TeamService:
         self,
         repo: TeamRepo,
         oper: TeamOperLogger | None = None,
-        knowledge_publicizer: KnowledgePublicizer | None = None,  # 102
+        knowledge_publicizer: KnowledgePublicizer | None = None,
     ) -> None:
         self._repo = repo
         self._oper = oper
@@ -88,18 +88,18 @@ class TeamService:
         await self._audit("team.update", team_id, {"name": name.strip()})
 
     async def delete(self, *, tenant_id: str, team_id: str) -> None:
-        # 租户校验前置(评审修复):原实现解绑/公共化(Redis 逐出不可回滚)
-        # 先行、404 判定最后——跨租户 team_id 会对它租户缓存发起逐出后才 404
+        # 租户校验前置:解绑/公共化(Redis 逐出不可回滚)不可先行,
+        # 否则跨租户 team_id 会先对它租户缓存发起逐出后才 404
         if await self._repo.get_team(tenant_id=tenant_id, team_id=team_id) is None:
             raise TeamNotFound(team_id)
         # 资源回个人(不丢资源),成员连带清
         await self._repo.clear_team_on_resources(team_id=team_id)
-        # 102:知识条目公共化后置钩子——失败告警不阻塞删除(design D4:
-        # 条目残留按团队不存在=不可见;FK 级联 SET NULL 兜底公共化,不丢资产)
+        # 知识条目公共化后置钩子——失败告警不阻塞删除
+        # (条目残留按团队不存在=不可见;FK 级联 SET NULL 兜底公共化,不丢资产)
         if self._knowledge_publicizer is not None:
             try:
                 await self._knowledge_publicizer.publicize(team_id=team_id)
-            except Exception:  # noqa: BLE001  # 钩子失败 SHALL NOT 阻塞删除
+            except Exception:  # noqa: BLE001  # 钩子失败不阻塞删除
                 log.warning(
                     "知识条目公共化钩子失败(团队删除继续,级联兜底公共化): team=%s",
                     team_id,
@@ -114,7 +114,7 @@ class TeamService:
             raise TeamValidationError(f"role 须为 {'/'.join(ROLES)}")
         if await self._repo.get_team(tenant_id=tenant_id, team_id=team_id) is None:
             raise TeamNotFound(team_id)
-        # 审查循环 B7:无 FK 的成员表须校验候选真实存在且属当前租户,
+        # 无 FK 的成员表须校验候选真实存在且属当前租户,
         # 否则幽灵行落库且成员列表(JOIN sys_user)永不可见
         if not await self._repo.user_active_in_tenant(tenant_id=tenant_id, user_id=user_id):
             raise TeamValidationError("用户不存在或不属于当前租户")
@@ -126,7 +126,7 @@ class TeamService:
     ) -> None:
         if role not in ROLES:
             raise TeamValidationError(f"role 须为 {'/'.join(ROLES)}")
-        # R1-S3:团队租户校验(跨租户成员写 404 同形)
+        # 团队租户校验(跨租户成员写 404 同形)
         if await self._repo.get_team(tenant_id=tenant_id, team_id=team_id) is None:
             raise TeamNotFound(team_id)
         current = await self._repo.get_member_role(team_id=team_id, user_id=user_id)
@@ -170,8 +170,8 @@ class TeamService:
             raise TeamValidationError("resource_type 须为 bot/workflow")
         if await self._repo.get_team(tenant_id=tenant_id, team_id=team_id) is None:
             raise TeamNotFound(team_id)
-        # T1 化简:两个子句逻辑等价(创建者路径必须同时为 OWNER)——
-        # 语义=必须目标团队 OWNER(创建者本人无独立豁免,与 spec 字面一致)
+        # 创建者路径同样要求 OWNER——语义=必须目标团队 OWNER,
+        # 创建者本人无独立豁免
         if actor_role != "OWNER":
             raise TeamForbiddenError("仅目标团队 OWNER 可变更归属")
         if not await self._repo.attach_resource(

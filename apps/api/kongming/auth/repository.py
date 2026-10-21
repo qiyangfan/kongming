@@ -1,4 +1,4 @@
-"""auth 域 SQLAlchemy 仓储实现(唯一 import sqlalchemy 的 auth 文件,宪法 Article II)。
+"""auth 域持久化仓储,将 SQLAlchemy 查询映射到领域端口。
 
 显式 SQL(text)而非 ORM 映射:identity 域表少且稳定,SQL 即文档;
 行 → 领域 dataclass 的映射集中在各 _to_* 函数。
@@ -258,10 +258,9 @@ class SqlPermRepo:
             (
                 await self._s.execute(
                     text(
-                        # 未启用角色不授予任何权限(与 datascope 的「启用角色」闸同一口径):
-                        # 此前这里不看 r.status,而行级过滤按 status 收敛——把角色置为 DISABLED
-                        # 会让功能权限原样保留、数据范围解析为空却「降级为不过滤」,
-                        # 即治理动作反向放宽可见面(086 收口)
+                        # 禁用角色不授予任何权限,与 datascope 的「启用角色」闸同一口径:
+                        # 若不按 status 过滤,角色置为 DISABLED 后功能权限原样保留,
+                        # 而数据范围解析会变空并「降级为不过滤」,禁用反而放宽可见面
                         "SELECT DISTINCT p.perm_code FROM public.sys_permission p"
                         " JOIN public.sys_role_permission rp ON rp.permission_id=p.id"
                         " JOIN public.sys_user_role ur ON ur.role_id=rp.role_id"
@@ -331,7 +330,7 @@ class SqlOperLogRepo:
                 "a": action,
                 "t": target,
                 "d": json.dumps(detail, ensure_ascii=False),
-                # 015 ip 链路:请求上下文横切(contextvar),调用点零改动;
+                # 从 contextvar 读取请求 IP，避免端点逐个传递。
                 # 无请求上下文(后台任务/定时任务/测试直调)自然为 None
                 "ip": client_ip_var.get(),
             },

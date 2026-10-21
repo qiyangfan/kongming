@@ -1,4 +1,4 @@
-"""074 连接池弹性:配置缺省零变化 + pre_ping/容量/换代可配。"""
+"""连接池弹性:配置缺省零变化 + pre_ping/容量/换代可配。"""
 
 from typing import Any, cast
 

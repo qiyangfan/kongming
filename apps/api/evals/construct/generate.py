@@ -1,4 +1,4 @@
-"""候选生成与自洽验证(092,任务 3.1/3.2):从知识面生成候选题
+"""从知识面生成候选题并执行自洽验证。
 (question/gold_sql/expected_tables/category),逐条执行自洽验证
 (gold 直连执行 + 规范校验 + 语义去重),连同验证报告落候选集目录。
 """
@@ -26,7 +26,7 @@ CATEGORIES: tuple[str, ...] = (
     "join_2table",
     "join_3table",
 )
-# 语义去重阈值(design D6:余弦缺省 0.92,超阈值标记重复)
+# 语义去重阈值(余弦缺省 0.92,超阈值标记重复)
 DEDUP_COSINE_THRESHOLD = 0.92
 
 
@@ -263,7 +263,7 @@ async def self_check(
     *,
     schema_name: str,
 ) -> None:
-    """自洽验证(design D6):gold 直连执行 → 规范校验 → 语义去重,逐项落报告。
+    """自洽验证:gold 直连执行 → 规范校验 → 语义去重,逐项落报告。
     单条候选执行失败=该候选验证 FAIL(带原因),不中断整批。"""
     flags = await dedup_flags(llm, candidates)
     for cand, dup in zip(candidates, flags, strict=True):
@@ -291,7 +291,7 @@ async def self_check(
 
 
 def write_candidates(tenant: str, candidates: list[Candidate]) -> Path:
-    """候选+验证报告落目录(design D5):datasets/candidates/<tenant>/<批次>.yaml。"""
+    """候选+验证报告落目录:datasets/candidates/<tenant>/<批次>.yaml。"""
     target_dir = CANDIDATES_DIR / tenant
     target_dir.mkdir(parents=True, exist_ok=True)
     batch = f"{max((p.stat().st_mtime for p in target_dir.glob('*.yaml')), default=0.0):.0f}-auto"

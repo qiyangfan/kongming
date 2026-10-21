@@ -1,12 +1,4 @@
-"""datasource 域用例(008):注册/编辑/启停/删除/测试连接/选项编排。
-
-零框架依赖(宪法 Article II):持久化经 DatasourceRepo Protocol 反转,
-加解密经 CredentialCipher,池失效经 PoolEvictor(commit 后调用,上游
-afterCommit 同语义——防建池快照与库内状态错位产生僵尸池),
-直连测试经 ConnectionTester。保护规则集中在用例入口,先校验后落库,
-单用例一事务;管理面写操作 5 动作(create/update/delete/enable/disable)
-与业务同事务落 sys_oper_log(007 惯例)。
-"""
+"""数据源注册、编辑、启停、删除、连接测试和选项查询用例。持久化、加解密、连接池失效和连接测试都通过端口注入；写操作先校验再落库，并在同一事务记录操作日志。连接池仅在数据库提交后失效。"""
 
 import logging
 
@@ -36,7 +28,7 @@ from kongming.uuid7 import uuid7
 
 log = logging.getLogger(__name__)
 
-# 选项接口首位合成项(design D7):default=内置默认路径标识,非 sys_datasource 行
+# 选项接口首位合成项:default=内置默认路径标识,非 sys_datasource 行
 DEFAULT_OPTION = DatasourceOption(datasource_key="default", name="默认数据源")
 
 
@@ -138,7 +130,7 @@ class DatasourceService:
         if current.tenant_id != tenant_id:
             raise DatasourceTenantImmutable("数据源租户归属创建后不可修改")
         validate_default_schema(default_schema)
-        # 连接信息变更检测(design D5):host/port/database/username/password/
+        # 连接信息变更检测:host/port/database/username/password/
         # default_schema 任一变化 → commit 后定向 evict;仅改 name 等展示字段不动池
         conn_changed = (
             current.host != host
@@ -159,7 +151,7 @@ class DatasourceService:
             default_schema=default_schema,
             readonly=readonly,
         )
-        # 039:连接信息变更级联失效建议缓存(同事务;仅改 name 不失效)
+        # 连接信息变更级联失效建议缓存(同事务;仅改 name 不失效)
         if conn_changed and suggestion_evictor is not None:
             await suggestion_evictor.evict_by_datasource(datasource_key)
         await self._repo.log_oper(
@@ -200,12 +192,12 @@ class DatasourceService:
         if current is None:
             raise DatasourceNotFound("数据源不存在")
         await self._repo.delete(ds_id)
-        # 023:语义层级联清理(关系+指标,同事务;spec「数据源删除级联」)
+        # 语义层级联清理(关系+指标,同事务;spec「数据源删除级联」)
         if semantic_cleaner is not None:
             await semantic_cleaner.delete_by_datasource(
                 tenant_id=current.tenant_id, datasource_key=current.datasource_key
             )
-        # 039:建议缓存级联失效(同事务,不留孤儿行)
+        # 建议缓存级联失效(同事务,不留孤儿行)
         if suggestion_evictor is not None:
             await suggestion_evictor.evict_by_datasource(current.datasource_key)
         await self._repo.log_oper(
@@ -213,8 +205,8 @@ class DatasourceService:
         )
         await self._repo.commit()
         await self._evict_quietly(current.datasource_key)
-        # 009:数据源删除同步失效 rag 检索缓存(残留知识条目不再可召回;
-        # 知识条目本身保留——级联清理策略挂 multitenant 变更,design Open Questions)
+        # 数据源删除同步失效 rag 检索缓存(残留知识条目不再可召回;
+        # 知识条目本身保留,级联清理策略另行决策)
         if ctx_evictor is not None:
             try:
                 await ctx_evictor(current.tenant_id, current.datasource_key)
@@ -274,5 +266,5 @@ class DatasourceService:
         try:
             await self._evictor.evict(datasource_key)
         except Exception:
-            # 旧池残留窗口随目标库凭证轮换自然收敛;多 worker 跨进程失效见 design 挂账
+            # 旧池残留窗口随目标库凭证轮换自然收敛;多 worker 跨进程失效无统一方案
             log.warning("连接池定向失效失败 key=%s", datasource_key, exc_info=True)

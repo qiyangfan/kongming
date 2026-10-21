@@ -1,11 +1,4 @@
-"""对话冷启动建议问题(039 chat-suggestions,安全规则类测试先行)。
-
-安全面:租户隔离(缓存按租户分档/越租户 403)/数据源可用性同形收敛
-(伪造/禁用/越属一律空清单且不触发生成,防 key 探测)/生成失败不落缓存
-/产出防线校验/并发首访只生成一次;datasource 管理变更级联失效缓存
-(连接信息变更/删除失效,仅改 name 不失效)。
-suggestor 与 schema 摘要经依赖替身注入(不触真实 LLM/业务库内省)。
-"""
+"""覆盖建议问题的租户隔离、数据源校验、缓存和生成失败处理。"""
 # pyright: reportPrivateUsage=false
 
 import asyncio
@@ -325,7 +318,7 @@ async def test_concurrent_first_visit_generates_once(
         app.dependency_overrides.pop(get_suggestor, None)
 
 
-# ---- datasource 管理变更级联失效(039 缓存生命周期) ----
+# ---- datasource 管理变更级联失效(缓存生命周期) ----
 
 
 def _update_body(row: dict[str, object], tenant_id: str, **over: object) -> dict[str, Any]:
@@ -471,7 +464,7 @@ def test_agent_client_degrades_on_bad_reply(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr("kongming.chat.agent_client.httpx.AsyncClient", _factory)
     client = AgentClient(get_settings())
 
-    # 200 但 HTML(中间层注入形态):json() 抛 ValueError
+    # 200 但 HTML(中间层注入形态):json 抛 ValueError
     captured["resp"] = _Resp(ValueError("Expecting value"))
     assert client.suggest_questions.__name__ == "suggest_questions"
     import asyncio

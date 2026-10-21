@@ -1,7 +1,7 @@
-"""0055: judge 评审对象类型收编圆桌(115)
+"""0055: judge 评审对象类型收编圆桌
 
 - judge_run.object_type CHECK 增 'roundtable':圆桌运行成为独立评审对象
-  (RoundtableRubric v1;对象取数=拓扑形态为 roundtable 的协作运行)。
+ (RoundtableRubric v1;对象取数=拓扑形态为 roundtable 的协作运行)。
 """
 
 from sqlalchemy import text

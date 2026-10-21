@@ -2,9 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { locateValidationError } from "./workflow-error-locate";
 
-/* 服务端校验错误文案 → 画布节点定位(107)。
-   文案全集以 apps/api/kongming/workflow/models.py + service.py 为唯一事实源,
-   禁前端臆造;未收录形态一律空定位(文案原样展示,不猜)。 */
+/* 将服务端工作流配置错误映射到画布节点；未知错误只展示原文，不猜测节点。 */
 
 describe("locateValidationError 节点定位", () => {
   it("环 → 全部参与节点高亮", () => {

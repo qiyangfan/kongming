@@ -1,17 +1,17 @@
-"""audit 域端口(015,typing.Protocol 反转,宪法 Article II)。
+"""audit 域端口,以 typing.Protocol 隔离用例层与存储实现。
 
 AuditRepo 镜像 AuditRepository 公开方法 + commit/rollback;
-service 仅持本端口,不触碰 session(013 chat/014 feedback 同一反转范式)。
+service 仅持本端口,不触碰 session(chat/feedback 同一反转范式)。
 """
 
 from typing import Protocol
 
 
 class AuditRepo(Protocol):
-    """audit 查询持久化端口(015)。全部为只读查询 + 事务原语。"""
+    """audit 查询持久化端口。全部为只读查询 + 事务原语。"""
 
     async def user_has_scope_all(self, *, user_id: str) -> bool:
-        """角色集含 data_scope=ALL 即 True(行级可见性判定,014 同款口径)。"""
+        """角色集含 data_scope=ALL 即 True(行级可见性判定,同款口径)。"""
         ...
 
     async def sql_page(

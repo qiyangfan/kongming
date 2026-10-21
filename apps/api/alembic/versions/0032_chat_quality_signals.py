@@ -1,14 +1,4 @@
-"""069-chat-quality-observability:chat_message 轮次质量信号四列(诊断信号)。
-
-trace_id(三表关联唯一键)/ retry_count(selfheal 次数,现状丢弃)/
-resolved_question(多轮改写结果,仅实际发生时非空)/ prompt_version(agent
-prompt 资产指纹前 8 位,073 纯函数同源)。四字段为管理面诊断信号,SHALL NOT
-进用户响应与 SSE(query-streaming「逐字段同构」契约不破)。存量行 null/0
-零回算;created_at 聚合索引支撑质量汇总/趋势查询。
-
-Revision ID: 0032
-Revises: 0031
-"""
+"""为 assistant 问答轮次增加 trace、重试次数、解析后问题和提示词版本等诊断字段；这些字段不进入用户响应。"""
 
 from collections.abc import Sequence
 

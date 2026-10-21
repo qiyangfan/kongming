@@ -1,9 +1,5 @@
-"""隐式记忆后台任务(022):首个 SUCCESS 轮触发(与标题改写同触发点),
-agent /internal/extract-memory 提取候选 → memory service 落库(IMPLICIT)。
-
-与 010 title_tasks 同模式:独立会话(请求作用域会话随响应关闭);
-任何失败仅日志(后台任务 best-effort 语义,不阻断主链路)。
-"""
+"""首个成功问答轮结束后提取隐式记忆并写入 memory service。
+独立数据库会话;失败只记日志,不影响问答响应。"""
 
 import logging
 
@@ -20,11 +16,11 @@ async def extract_memory_task(
     question: str,
     answer: str,
     agent: AgentClient,
-    pref_revision: int | None = None,  # 087:问答准备期人工版本快照
+    pref_revision: int | None = None,  # 问答准备期人工版本快照
 ) -> None:
     """隐式记忆提取与落库;全部异常收敛(后台任务语义)。
 
-    087:pref_revision=None(准备期版本读取失败)→ 整轮跳过(不当作 0,
+    pref_revision=None(准备期版本读取失败)→ 整轮跳过(不当作 0,
     防未知版本覆盖人工修改)。"""
     from kongming.auth.repository import SqlOperLogRepo
     from kongming.memory.repository import SqlMemoryRepo

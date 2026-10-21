@@ -1,15 +1,8 @@
-"""文档检索精排(rerank)出站适配(add-doc-rerank)。
+"""文档精排的出站适配器。
 
-部署级条件注册:KM_RERANK_* 齐备才生效——build_doc_reranker 返回 None 即
-「精排级从未存在」(同 websearch 094 形态);供应商注册表(config.RERANK_PROVIDERS,
-代码单源)即出口白名单,装载期结构校验,白名单外条目剔除并告警(fail-closed
-不裸崩)。两段式适配器(请求装配/响应归一)镜像 websearch(094)范式,归一
-最小公共面=results[i].index/relevance_score。失败归一三类(timeout/ratelimit/
-unavailable)统一触发降级(design D4:粒度=单次检索调用,不做熔断)。
-出站留痕进既有 sys_llm_usage 面(task=doc_rerank,calls/latency 维度;rerank
-无 completion 概念,token 三列记 0,design D6)。凭证只进请求头,不进日志/
-审计/错误文本/repr。
-"""
+只有 `KM_RERANK_*` 配置齐全且供应商通过白名单校验时才启用；调用失败
+统一降级到原检索结果。用量写入 `sys_llm_usage`。凭证只用于请求头，
+不写入日志、审计记录或错误文本。"""
 
 import json
 import logging
@@ -27,7 +20,7 @@ from kongming.uuid7 import uuid7
 
 log = logging.getLogger(__name__)
 
-# 响应读取上限(字节闸,防巨头响应内存放大;websearch/ticket 同款)
+# 响应读取上限(字节闸,防超大响应内存放大)
 _RESPONSE_CAP = 1024 * 1024
 
 # 降级原因三类(可观测 reason 单源;usage status 恒 ERROR + 日志带 reason)
@@ -71,7 +64,7 @@ def _siliconflow_request(model: str, query: str, documents: list[str]) -> dict[s
 def _bailian_request(model: str, query: str, documents: list[str]) -> dict[str, object]:
     """百炼原生端点(gte-rerank 系必须走原生,/compatible-mode 仅 qwen3-rerank)。
 
-    parameters.return_documents=False:只要 index/score,不回传原文(省流)。"""
+    parameters.return_documents=False:只要 index/score,不回传原文。"""
     return {
         "model": model,
         "input": {"query": query, "documents": documents},
@@ -135,8 +128,8 @@ class _ResponseTooLarge(Exception):
 
 
 async def _read_json_capped(resp: httpx.Response) -> object:
-    """stream 上下文内读 JSON 响应(字节闸内;websearch 同款修法)——
-    resp.json() 会全量预读入内存。"""
+    """stream 上下文内读 JSON 响应(字节闸内)——
+    resp.json 会全量预读入内存。"""
     buf = bytearray()
     async for chunk in resp.aiter_bytes(65536):
         buf.extend(chunk)
@@ -149,8 +142,8 @@ class DocReranker:
     """精排执行器:单次供应商协议适配(POST + Bearer);零治理。
 
     失败在执行器内收敛为 RerankError(三类 reason);降级决策与用量留痕由
-    检索编排(documents_service)承担。transport 仅测试注入(与 websearch
-    同构的注入缝);凭证只在构造期注入,只进请求头。"""
+    检索编排(documents_service)承担。transport 仅测试注入;凭证只在
+    构造期注入,只进请求头。"""
 
     def __init__(
         self,
@@ -177,7 +170,7 @@ class DocReranker:
         self.pool_topk = pool_topk
         self.score_threshold = score_threshold
 
-    def __repr__(self) -> str:  # 凭证不进 repr(掩码纪律)
+    def __repr__(self) -> str:  # 凭证不进 repr
         return (
             f"DocReranker(provider={self._provider} model={self.model} "
             f"pool_topk={self.pool_topk} threshold={self.score_threshold})"
@@ -200,7 +193,7 @@ class DocReranker:
                 timeout=httpx.Timeout(self._timeout_s),
                 transport=self._transport,
             ) as client:
-                # stream 上下文+字节闸读取(resp.json() 全量预读,websearch 同款)
+                # stream 上下文+字节闸读取
                 async with client.stream(
                     "POST",
                     self._endpoint,
@@ -228,22 +221,18 @@ class DocReranker:
         except (ValueError, TypeError) as e:
             raise RerankError(REASON_UNAVAILABLE, f"响应报文畸形({type(e).__name__})") from e
         except httpx.DecodingError as e:
-            # 解码失败不单列会以裸 httpx 异常逃逸收敛链(websearch 评审 R1 同款)
+            # 解码失败不单列会以裸 httpx 异常逃逸收敛链
             raise RerankError(REASON_UNAVAILABLE, f"响应解码失败({type(e).__name__})") from e
         except httpx.TransportError as e:
-            # 传输层未枚举残族(防 httpx 分层演进逃逸;089 同款兜底)
+            # 传输层未枚举残族(防 httpx 分层演进后异常逃逸收敛链)
             raise RerankError(REASON_UNAVAILABLE, f"传输失败({type(e).__name__})") from e
         return [indexed.get(i, 0.0) for i in range(len(documents))]
 
 
 def build_doc_reranker(settings: Settings | None = None) -> DocReranker | None:
-    """组合根工厂:KM_RERANK_* → DocReranker;未配置/残缺/白名单外=None
-    (与「精排级从未存在」不可区分,spec 缺省即此形态)。
+    """按 KM_RERANK_* 配置创建精排器；配置不完整或 provider 不在白名单时返回 None。
 
-    残缺族(配 provider 缺 key/model 等)dev 由 lifespan 统一告警,此处静默
-    不生效;provider 非法值由 get_settings 启动校验拒启,运行期兜底不生效。
-    出口主机白名单=config.RERANK_PROVIDERS 代码单源,装载期结构校验
-    (须为可解析 https 且主机非空),不过=剔除并告警(fail-closed 不裸崩)。
+    非法 provider 在启动时拒绝；无效出口配置会被剔除并记录告警。
     """
     s = settings or get_settings()
     provider = (s.rerank_provider or "").strip().lower()
@@ -275,10 +264,10 @@ def build_doc_reranker(settings: Settings | None = None) -> DocReranker | None:
 async def record_rerank_usage(
     *, model: str, tenant_id: str | None, latency_ms: int, status: str
 ) -> None:
-    """rerank 出站留痕(sys_llm_usage 既有面;独立短事务,失败只告警不阻断)。
+    """rerank 出站留痕(sys_llm_usage;独立短事务,失败只告警不阻断)。
 
-    task 固定 doc_rerank;rerank 无 completion 概念,token 三列记 0(D6);
-    trace_id 取请求级单源(061);凭证不落任何列。"""
+    task 固定 doc_rerank;rerank 无 completion 概念,token 三列记 0;
+    trace_id 取请求级单源;凭证不落任何列。"""
     try:
         async with get_sessionmaker()() as s:
             await s.execute(
@@ -300,5 +289,5 @@ async def record_rerank_usage(
                 },
             )
             await s.commit()
-    except Exception:  # noqa: BLE001  # 留痕失败不阻断检索主链路(审计同款纪律)
+    except Exception:  # noqa: BLE001  # 用量记录失败只告警，不影响检索结果。
         log.warning("rerank 用量写入失败(不阻断)", exc_info=True)

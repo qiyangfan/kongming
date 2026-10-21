@@ -1,16 +1,4 @@
-"""baseline: 核心域一次性整合建全
-
-Revision ID: 0001
-Revises:
-Create Date: 2026-08-16
-
-整合前系统 50 个 Flyway 迁移的最终形态,消除全部补丁链(ADR-004):
-- sys_user        ← V1 + V6(dept_id 弃) + V18(external_id/source/email 一次建全)
-- table_descriptions ← V3 + V13(序列弃,UUID) + V16(source_type/tsv) + V20(datasource_key,约束直接建对)
-- chat_message    ← V19 + V23(反馈4列) + V25(状态机4列) + V43(artifacts)
-- sys_sql_audit   ← 含 datasource_key/trace_id
-约定:UUID v7 主键 / 状态 VARCHAR+CHECK / created_at+updated_at / 软删仅 identity 域。
-"""
+"""核心域 Alembic baseline。按最终结构创建 identity、chat、audit 和知识库表，主键使用 UUID v7，状态列使用 VARCHAR + CHECK。"""
 
 from sqlalchemy import text
 

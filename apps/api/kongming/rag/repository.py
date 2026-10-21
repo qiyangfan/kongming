@@ -1,10 +1,8 @@
-"""rag 仓储(009):rag 两表 SQL + 租户解析 + 全量内省编排(RagRepo 端口实现)。
+"""知识库仓储实现。
 
-纪律:向量一律绑定参数 + CAST(:v AS halfvec) 强转(禁 f-string 拼接序列化向量);
-tsvector 应用层维护(to_tsvector 按部署配置 KM_RAG_FULLTEXT_TS_CONFIG 分词,
-098 白名单单源 kongming.config,与 embedding 文本内容对齐);
-召回查询强制 tenant + datasource 双过滤(rag spec「跨租户+跨数据源隔离」);
-审计复用 auth 域 SqlOperLogRepo(同会话=同事务,007 组合模式)。
+向量查询使用绑定参数，全文分词配置由 `KM_RAG_FULLTEXT_TS_CONFIG` 指定；
+召回查询同时过滤租户和数据源。操作审计复用认证域仓储，并与当前数据库会话
+处于同一事务。
 """
 
 import json
@@ -45,9 +43,9 @@ def vec_literal(vector: list[float]) -> str:
 
 
 async def assert_fulltext_ts_config_available(session: AsyncSession, ts_config: str) -> str:
-    """098 启动自检:分词配置目标必须在 pg_ts_config 存在,缺失 fail-closed 拒启。
+    """启动自检:分词配置目标必须在 pg_ts_config 存在,缺失 fail-closed 拒启。
 
-    检索配置降级不安全(降级=换词法,与存量 tsv 直接错配,098 design D3),
+    检索配置降级不安全(降级=换词法,与存量 tsv 直接错配),
     故 prod/dev 同拒启,无降级形态;文案明示缺项与安装配方指引。白名单校验
     先行(先词法后存在性,错误归因不混淆)。lifespan 启动期调用;测试直调。
     """
@@ -77,11 +75,11 @@ def _is_reserved(table_name: str) -> bool:
 class RagRepository:
     def __init__(self, session: AsyncSession, ts_config: str = DEFAULT_FULLTEXT_TS_CONFIG) -> None:
         self._s = session
-        # 098:全文分词配置(白名单校验 fail-fast,组合根注入部署值;缺省 simple
-        # 零回归)。写(upsert tsv)与读(recall_fulltext)共用同一注入值——
+        # 全文分词配置(白名单校验 fail-fast,组合根注入部署值,缺省 simple)。
+        # 写(upsert tsv)与读(recall_fulltext)共用同一注入值——
         # 同库不分词两态,写读异配置 = 检索静默错配
         self._ts = validated_fulltext_ts_config(ts_config)
-        self._oper = SqlOperLogRepo(session)  # 审计与业务同会话=同事务(007 组合模式)
+        self._oper = SqlOperLogRepo(session)  # 审计与业务同会话=同事务(组合模式)
 
     # ============ 事务 ============
 
@@ -110,25 +108,15 @@ class RagRepository:
         sample_queries: list[str],
         source_type: str,
         embedding: list[float] | None,
-        alias: str = "",  # 037:业务称谓别名
-        team_id: str | None = None,  # 102:归属值(set_team_id=True 时生效)
-        set_team_id: bool = False,  # 102:False=保留既有归属(缺省零回归)
+        alias: str = "",  # 业务称谓别名
+        team_id: str | None = None,  # 归属值(set_team_id=True 时生效)
+        set_team_id: bool = False,  # False=保留既有归属(缺省)
     ) -> None:
-        """四元幂等 upsert;embedding 为 None 时自动来源清空向量(009 降级语义)。
-
-        037 alias 覆盖规则(knowledge spec「补齐不改写既有非空 alias」):
-        自动来源(INTROSPECTION/AI_GENERATED)与上传(MANUAL_UPLOAD——parser 无
-        别名语法,清空非显式意图)只补空 alias,不改写既有非空值;人工精修
-        (MANUAL_EDIT/FEEDBACK_REFINED)显式操作即显式覆盖。
-        **tsv 同规则同源**(R1-S1):alias 命中保留分支时,tsv 须以「生效别名」
-        (=既有别名)在 DO UPDATE 内重算,否则派生检索文本与 alias 列不同源,
-        别名召回静默失效;人工精修路径 embedding 传 None 时保留既有向量
-        (清向量会使该表退出向量召回)。
-        102 归属:set_team_id=False 时既有 team_id 原位保留(上传不带归属=
-        无归属意图,不静默公共化/改属;新建行落 NULL=公共);set_team_id=True
-        时写入 team_id 值——上传显式选择团队=显式归属;自动来源(fetch/reindex)
-        恒传 set_team_id=True + team_id=None(机器产物一律公共,design D5:
-        团队条目被扫描更新/重建后回公共)。冲突键四元不含归属(单一实例)。"""
+        """按租户、数据源、schema 和表名幂等写入。自动来源和文件上传只补空 alias；
+        人工精修可覆盖，tsv 使用最终生效的 alias。embedding 为 None 时，人工精修保留
+        原向量，自动来源清空原向量。上传未指定 team_id 时保留现有归属；自动扫描将
+        机器生成条目设为公共。
+        """
         vec = vec_literal(embedding) if embedding else None
         cols_text = " ".join(f"{k} {v}" for k, v in columns_comment.items())
         # 生效别名(单一定义):保留分支命中→既有别名;否则→传入别名。
@@ -142,7 +130,7 @@ class RagRepository:
             text(
                 # S608 豁免:effective_alias 为本文件内常量片段(非用户输入),
                 # 其余全部为绑定参数——无任何外部字符串拼接;{self._ts} 为
-                # 098 白名单校验后的配置名(标识符无法绑定参数,单源注入)
+                # 白名单校验后的配置名(标识符无法绑定参数,单源注入)
                 "INSERT INTO rag.table_descriptions"  # noqa: S608
                 " (id, tenant_id, datasource_key, schema_name, table_name,"
                 "  table_comment, columns_comment, sample_queries, source_type,"
@@ -186,7 +174,7 @@ class RagRepository:
                 # tsv 内容参数与列值参数分开命名(同值不同参):asyncpg 对同一参数
                 # 在 varchar 列与 tsvector 输入两处推断类型会报 AmbiguousParameter
                 "table_t": table_name,
-                "alias_t": alias or " ",  # 037:alias 进 tsv
+                "alias_t": alias or " ",  # alias 进 tsv
                 "comment_t": table_comment or " ",
             },
         )
@@ -195,8 +183,8 @@ class RagRepository:
         self, *, tenant_id: str, datasource_key: str
     ) -> dict[tuple[str, str], tuple[str, str, str | None]]:
         """(schema_name, table_name) → (source_type, alias, team_id)——优先级判定
-        与生效别名(R1-S1:embedding 文本须以生效别名参与,与 alias 列/tsv 同源),
-        一次读免二次往返;team_id 供上传写闸判既有条目归属(102)。042 二元键:
+        与生效别名(embedding 文本须以生效别名参与,与 alias 列/tsv 同源),
+        一次读免二次往返;team_id 供上传写闸判既有条目归属。二元键:
         default 源合法范围含两个 schema(tenant_<key> + public),一元键会让跨
         schema 同名表互遮。"""
         rows = (
@@ -222,7 +210,7 @@ class RagRepository:
     async def delete_stale_entries(
         self, *, tenant_id: str, datasource_key: str, keep: list[tuple[str, str]]
     ) -> tuple[int, int]:
-        """042 对账(登记=现实):删扫描集外自动来源行,人工/反馈行只计数不删
+        """对账(登记=现实):删扫描集外自动来源行,人工/反馈行只计数不删
         (不可逆资产交人工裁决,service 层告警)。keep 空集=该范围已无表,全删
         自动行;静态 SQL 双形态(keep 有/无),禁字符串拼 keep 集。"""
         sources = sorted(AUTOMATED_SOURCE_TYPES)
@@ -251,9 +239,8 @@ class RagRepository:
     async def column_comments(
         self, *, tenant_id: str, datasource_key: str
     ) -> dict[str, dict[str, str]]:
-        """表名 → 列注释(041 呈现层列标签)。注释原文含 PG 类型前缀
-        (fetch-metadata 形态,类型段同时是 LLM 生成输入),剥离在 chat
-        呈现纯函数内,此处不丢信息。"""
+        """表名 → 列注释(呈现层列标签)。注释原文含 PG 类型前缀
+        (类型段同时是 LLM 生成输入),剥离在 chat 呈现纯函数内,此处不丢信息。"""
         rows = (
             await self._s.execute(
                 text(
@@ -267,10 +254,10 @@ class RagRepository:
         ).all()
         # 同名表跨 schema(default 源合法并存 tenant_<key> 与 public)时
         # 字典后写覆盖:排序保证 public 先读、租户 schema 后写胜出——
-        # 标签取「本租户」注释,方向确定(R1 实锤:无序覆盖方向随计划漂移)
+        # 租户 schema 排在 public 后，使租户注释覆盖同名表的公共注释。
         return {str(r.table_name): dict(r.columns_comment or {}) for r in rows}
 
-    # 102:可见集合子句单源(scope 枚举→常量片段;teams 恒绑定参数,无拼接输入)
+    # 可见集合子句单源(scope 枚举→常量片段;teams 恒绑定参数,无拼接输入)
     _TEAM_CLAUSE = {
         "all": "(rd.team_id IS NULL OR rd.team_id::text = ANY(CAST(:teams AS text[])))",
         "public": "rd.team_id IS NULL",
@@ -291,7 +278,7 @@ class RagRepository:
         """管理面列表:updated_at 倒序(id tiebreak);不取向量/tsv 列。
 
         静态 SQL 两形态(datasource 筛选有/无),不做任何字符串拼接。
-        102:可见集合=公共 ∪ 调用者团队(teams 绑定参数);team_scope ∈
+        可见集合=公共 ∪ 调用者团队(teams 绑定参数);team_scope ∈
         {all, public, <team_id>} 为管理面归属筛选(未知值防御性收窄为
         team 子句=空集——宁窄勿宽;路由 pattern 已保证正常形态)。
         """
@@ -344,8 +331,8 @@ class RagRepository:
             sample_queries=list(row.sample_queries or []),  # type: ignore[attr-defined]
             source_type=str(row.source_type),  # type: ignore[attr-defined]
             updated_at=row.updated_at,  # type: ignore[attr-defined]
-            alias=str(row.alias or ""),  # type: ignore[attr-defined]  # 037
-            # 102:归属字段(无该投影的调用面 Row 无属性→getattr 缺省公共形态)
+            alias=str(row.alias or ""),  # type: ignore[attr-defined] #
+            # 归属字段(无该投影的调用面 Row 无属性→getattr 缺省公共形态)
             team_id=getattr(row, "team_id", None),
             team_name=getattr(row, "team_name", None),
         )
@@ -383,13 +370,13 @@ class RagRepository:
             sample_queries=list(row["sample_queries"] or []),
             source_type=str(row["source_type"]),
             updated_at=row["updated_at"],
-            alias=str(row.get("alias") or ""),  # 037
-            team_id=row["team_id"],  # 102
+            alias=str(row.get("alias") or ""),
+            team_id=row["team_id"],
             team_name=row["team_name"],
         )
 
     async def set_entry_team(self, *, tenant_id: str, table_id: str, team_id: str | None) -> bool:
-        """归属变更原位置 NULL⇄team_id(102;单一实例,内容与来源标记不动)。"""
+        """归属变更原位置 NULL⇄team_id(单一实例,内容与来源标记不动)。"""
         rows = (
             await self._s.execute(
                 text(
@@ -403,7 +390,7 @@ class RagRepository:
         return bool(rows)
 
     async def publicize_team_entries(self, *, team_id: str) -> list[tuple[str, str]]:
-        """团队删除钩子(102):名下条目归属置空(公共化,知识资产不丢失),
+        """团队删除钩子:名下条目归属置空(公共化,知识资产不丢失),
         返回受影响 (tenant_id, datasource_key) 去重范围(供调用方精确失效
         检索缓存)。团队行本身的删除由调用方随后执行;FK ON DELETE SET NULL
         为钩子失败时的级联兜底(同语义公共化,无审计)。"""
@@ -458,10 +445,10 @@ class RagRepository:
     ) -> list[RecallHit]:
         """向量路:pgvector 余弦距离 <=>(topK)。
 
-        064:SELECT 回原生分 `1-(embedding<=>v)`(余弦相似度,值域约 [0,1];
+        SELECT 回原生分 `1-(embedding<=>v)`(余弦相似度,值域约 [0,1];
         表达式仅算一次并同时用于排序与返回——ORDER BY 子查询消重复计算)。
-        102:可见集合叠加(tenant+ds 双过滤之上的条目级过滤)——公共条目 ∪
-        调用者团队条目;空集合=纯公共形态(存量行为逐字一致,存量行全 NULL)。
+        可见集合叠加(tenant+ds 双过滤之上的条目级过滤)——公共条目 ∪
+        调用者团队条目;空集合=纯公共形态(存量行全 NULL)。
         """
         rows = (
             await self._s.execute(
@@ -494,9 +481,9 @@ class RagRepository:
         ]
 
     async def has_knowledge(self, *, tenant_id: str, datasource_key: str) -> bool:
-        """064 闸门前置:零知识数据源闸门自动旁路——零命中源于「无知识」
-        而非「低相关」,此时裁剪召回会误杀内省回退路径的可答题(sakila_dyn
-        形态,2026-10-10 对拍实证 3/3 误拒)。EXISTS 单点查,零成本。"""
+        """闸门前置:零知识数据源闸门自动旁路——零命中源于「无知识」
+        而非「低相关」,此时裁剪召回会误杀内省回退路径的可答题。
+        EXISTS 单点查,零成本。"""
         row = (
             await self._s.execute(
                 text(
@@ -516,12 +503,12 @@ class RagRepository:
 
     @property
     def _ft_or_pred(self) -> str:
-        """内容词兜底轮谓词(112):任一**内容词**词条命中——词条限
-        length >= 2,从谓词上排除 111 实证的单字虚词噪声源(『有』『部』
+        """内容词兜底轮谓词:任一**内容词**词条命中——词条限
+        length >= 2,从谓词上排除单字虚词噪声源(『有』『部』
         类高频词条挤占 RRF 位次);词条逐个过 plainto_tsquery(对任意
         文本安全,内部转义),外部文本不进 to_tsquery 语法位。"""
         return (
-            " AND EXISTS (SELECT 1 FROM"  # noqa: S608  # {self._ts} 白名单校验配置名(同 098 豁免)
+            " AND EXISTS (SELECT 1 FROM"  # noqa: S608 # {self._ts} 为白名单校验后的配置名(标识符无法绑定参数)
             f" unnest(tsvector_to_array(to_tsvector('{self._ts}', :q))) AS tok"
             " WHERE length(tok) >= 2"
             f"   AND tsv @@ plainto_tsquery('{self._ts}', tok))"
@@ -540,9 +527,8 @@ class RagRepository:
         rows = (
             await self._s.execute(
                 text(
-                    # S608 豁免:{self._ts} 为白名单校验后的配置名(098 design
-                    # D2/D5,标识符无法绑定参数),谓词为类内常量形态(112),
-                    # 其余全部绑定参数
+                    # S608 豁免:{self._ts} 为白名单校验后的配置名(标识符
+                    # 无法绑定参数),谓词为类内常量形态,其余全部绑定参数
                     "SELECT schema_name, table_name,"  # noqa: S608
                     f" ts_rank(tsv, plainto_tsquery('{self._ts}', :q)) AS score"
                     " FROM rag.table_descriptions"
@@ -579,17 +565,8 @@ class RagRepository:
         question: str,
         visible_team_ids: Sequence[str] = (),
     ) -> list[RecallHit]:
-        """全文路:tsv @@ plainto_tsquery(配置分词,…),ts_rank 近似 BM25。
-
-        112 查询语义「AND 优先、内容词兜底」:问句切词条后先全词条 AND
-        匹配;AND 零命中才落内容词兜底轮(length >= 2 词条,111 实证的
-        单字虚词噪声源被谓词排除)——正常路径往返数不变,兜底轮排序/得分
-        沿用同量纲 ts_rank,064 闸门判据不变。无差别形态 MUST NOT(spec
-        规范性排除,111 实证在案)。
-        064:SELECT 回 ts_rank 得分(与 ORDER BY 同口径,消现状重复计算)。
-        分词配置与写入侧同源(self._ts 单点注入,098):配置变更后存量 tsv
-        未重扫前该路命中会静默错配——重扫配方见 docs/HANDOFF.md。
-        102:可见集合叠加(与向量路同款条目级过滤)。
+        """全文检索先按全部词项做 AND 匹配，零命中时再按长度至少为 2 的内容词检索。
+        返回与排序共用 ts_rank；写入和查询使用相同分词配置，并叠加团队可见性过滤。
         """
         for predicate in (self._ft_and_pred, self._ft_or_pred):
             hits = await self._fulltext_rows(
@@ -611,14 +588,9 @@ class RagRepository:
         vector: list[float],
         visible_team_ids: Sequence[str] = (),
     ) -> list[HistorySample]:
-        """历史路:问句向量相似的**可用样本** sql_text(独立强 few-shot 通道)。
-
-        070:候选=(EXECUTION | FEEDBACK)且 recall_enabled(LEGACY/未启用退出
-        召回);同问句候选经 service 去重(优先 ADOPTED 反馈样本)后取前 K。
-        多取 3 倍候选供去重(同问句多来源在 top-K 内仍可保住最优)。
-        102 伴生:样本可见集合过滤——公共样本(空集合)恒可见,团队样本
-        仅在调用者所在团队与样本来源集合有交集时进入 few-shot;无身份调用
-        (空集合)只见公共样本,与条目三路同判据。"""
+        """召回已启用的 EXECUTION 或 FEEDBACK SQL 样本；同问句优先保留 ADOPTED
+        反馈样本。团队样本只对可见团队成员开放，无身份调用仅能读取公共样本。
+        """
         rows = (
             await self._s.execute(
                 text(
@@ -662,7 +634,7 @@ class RagRepository:
     ) -> list[KnowledgeEntry]:
         """按 (schema, table) 集取条目内容(四维限定,防同名表跨 schema 串扰)。
 
-        102:同款可见集合过滤——兜底关系扩展(semantic 层不识归属)引入的
+        同款可见集合过滤——兜底关系扩展(semantic 层不识归属)引入的
         键,团队条目 MUST NOT 经扩展路进入注入。"""
         out: list[KnowledgeEntry] = []
         for schema, table in keys:
@@ -689,7 +661,7 @@ class RagRepository:
             out.extend(self._to_entry(r, tenant_id) for r in rows)
         return out
 
-    # ============ 070 反馈样本晋升/停用(与处置同事务,不自行 commit) ============
+    # ============ 反馈样本晋升/停用(与处置同事务,不自行 commit) ============
 
     async def promote_feedback_sample(
         self,
@@ -706,7 +678,7 @@ class RagRepository:
 
         幂等键=(tenant_id, feedback_message_id) 部分唯一索引:同一反馈的
         重复晋升覆盖(最新纠错);与执行样本(同问句 EXECUTION)并存不互覆盖
-        ——070「同问句异来源并存,召回按优先级择优」。102 伴生:visible_teams
+        ——「同问句异来源并存,召回按优先级择优」。伴生:visible_teams
         =反馈发起者可见集合(空=公共)。"""
         vec = vec_literal(embedding) if embedding else None
         await self._s.execute(
@@ -762,10 +734,10 @@ class RagRepository:
         embedding: list[float] | None,
         visible_teams: Sequence[str] = (),
     ) -> None:
-        """幂等回写(016 治理):同 (tenant, ds, question) 覆盖保留最新成功 SQL
+        """幂等回写(治理):同 (tenant, ds, question) 覆盖保留最新成功 SQL
         (0007 唯一索引支撑);embedding 失败传 None 时保留旧向量(旧向量语义
         仍有效,清空会使该行退出向量召回);同事务上限淘汰该维度最旧行。
-        102 伴生:visible_teams=回写时调用者可见集合(排序去重;空=公共),
+        伴生:visible_teams=回写时调用者可见集合(排序去重;空=公共),
         覆盖更新同步刷新(同题重写以最新一次来源为准)。
         """
         vec = vec_literal(embedding) if embedding else None
@@ -777,7 +749,7 @@ class RagRepository:
                 "  source_type, recall_enabled, embedding, visible_teams, created_at)"
                 " VALUES (:id, :t, :d, :q, :sql, 'SUCCESS', 'EXECUTION', TRUE,"
                 "         CAST(:vec AS halfvec), CAST(:teams AS text[]), now())"
-                # 070:执行样本幂等目标=部分唯一索引(谓词须逐字匹配)
+                # 执行样本幂等目标=部分唯一索引(谓词须逐字匹配)
                 " ON CONFLICT (tenant_id, datasource_key, md5(question))"
                 "   WHERE source_type = 'EXECUTION' DO UPDATE SET"
                 "  sql_text = EXCLUDED.sql_text,"
@@ -822,8 +794,8 @@ class RagRepository:
     async def tenant_id_by_key(self, tenant_key: str) -> str | None:
         """内部召回端点租户解析(与 meta 通道同语义:未知/禁用同形 404)。
 
-        统一转 str:is_usable 的归属比对在 str 域(asyncpg 返回 UUID 曾致
-        合法数据源被恒拒——冒烟实证,负向测试曾掩蔽)。
+        统一转 str:is_usable 的归属比对在 str 域(asyncpg 返回 UUID 对象
+        会使合法数据源被恒拒)。
         """
         v = (
             await self._s.execute(
@@ -839,13 +811,14 @@ class RagRepository:
         """存在+启用+归属(chat 预检同款 DatasourceChecker 语义)。"""
         return await SqlDatasourceRepo(self._s).is_usable(datasource_key, tenant_id)
 
-    # ============ 全量内省(fetch-metadata;与 meta 通道同口径,无截断) ============
+    # ============ 全量内省(与 meta 通道同口径,无截断) ============
 
     async def introspect_all(
         self, *, tenant_id: str, tenant_key: str, datasource_key: str
     ) -> list[IntrospectedTable]:
-        """default=本库 [tenant_<key>, public];动态源=resolver 校验+动态池限
-        [default_schema](业务库连接是基础设施职责,归仓储层)。"""
+        """default 数据源只读取租户 schema 与 public；动态数据源由 resolver 校验，
+        并通过受限连接池内省。
+        """
         if datasource_key == "default":
             return await _introspect_all_on(self._s, allowed_schemas_for(tenant_key, None))
         try:
@@ -873,7 +846,7 @@ class RagRepository:
     async def allowed_schemas(
         self, *, tenant_id: str, tenant_key: str, datasource_key: str
     ) -> list[str]:
-        """可扫描 schema 集合(040:枚举端点/上传存在性闸,与内省同源同口径)。
+        """可扫描 schema 集合(枚举端点/上传存在性闸,与内省同源同口径)。
 
         动态源经 resolver 校验;resolver 的 DatasourceInvalid(resolver 模块
         自有同名类,与 rag 领域错误非一类)在此翻译为 rag 领域错误出港,
@@ -892,7 +865,7 @@ class RagRepository:
     async def knowledge_table_exists(
         self, *, tenant_id: str, datasource_key: str, schema_table: str
     ) -> bool:
-        """知识条目表存在性(040:semantic 域手工关系闸经端口消费)。
+        """知识条目表存在性(semantic 域手工关系闸经端口消费)。
 
         schema_table 形态「schema.table」(rsplit 拆解——表名不含点,
         PG 未加引号标识符语义);形态不合法即不存在。"""
@@ -911,7 +884,7 @@ class RagRepository:
         ).scalar_one_or_none()
         return row is not None
 
-    # ============ 052 知识覆盖报告(只读聚合输入;零写入零 LLM) ============
+    # ============ 知识覆盖报告(只读聚合输入;零写入零 LLM) ============
 
     async def list_all_entries(
         self,
@@ -922,9 +895,8 @@ class RagRepository:
     ) -> list[KnowledgeEntry]:
         """该 (租户, 数据源) 管理读面登记条目(与 fetch_entries 同投影,无分页)。
 
-        102:可见集合单点收敛的第四处(覆盖报告读面)——仅公共条目与
-        调用者所在团队条目进入报告,与列表端点同口径(管理读面不成为
-        团队条目存在性的旁路)。"""
+        可见集合与列表端点同口径:仅公共条目与调用者所在团队条目进入报告
+        (管理读面不成为团队条目存在性的旁路)。"""
         rows = (
             await self._s.execute(
                 text(
@@ -1005,7 +977,7 @@ class RagRepository:
 
 
 def allowed_schemas_for(tenant_key: str, default_schema: str | None) -> list[str]:
-    """可扫描 schema 集合唯一计算点(040):default 源=路由约定
+    """可扫描 schema 集合唯一计算点:default 源=路由约定
     [tenant_<key>, public](物理 schema 随租户首查创建,枚举先行于建表合法);
     动态源=[default_schema]。内省/枚举端点/上传校验三方共用,禁另起口径。"""
     if default_schema is None:
@@ -1022,9 +994,9 @@ async def _introspect_all_on(
             text(
                 "SELECT table_schema, table_name FROM information_schema.tables"
                 " WHERE table_schema = ANY(CAST(:schemas AS text[]))"
-                # 047:收录限基表——视图是基表派生物,行扇出使聚合失真
-                # (film_list AVG 实证),样例 SQL 挤占召回 top-K 使维度表
-                # 缺位;基表可完整表达视图可表达的一切查询
+                # 收录限基表——视图是基表派生物,行扇出使聚合失真,
+                # 样例 SQL 挤占召回 top-K 使维度表缺位;
+                # 基表可完整表达视图可表达的一切查询
                 " AND table_type = 'BASE TABLE'"
                 " ORDER BY table_schema, table_name"
             ),
@@ -1063,8 +1035,8 @@ async def _introspect_all_on(
         )
     ).all()
     comments = {(r.table_schema, r.table_name): r.table_comment or "" for r in comment_rows}
-    # 列注释(014 挂账⑦清零):数据库既有 col_description 作为润色输入的既有注释
-    # 参考;有注释列以其为说明,无注释列保持英文类型形态(行为逐字不变)
+    # 列注释取数据库既有 col_description:有注释列以其为说明,
+    # 无注释列保持英文类型形态(类型即说明)
     col_comment_rows = (
         await conn.execute(
             text(

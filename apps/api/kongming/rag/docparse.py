@@ -1,9 +1,5 @@
-"""文档文件解析为纯文本(009):PDF/Word 扩展格式,解析后复用 Markdown 切块链路。
-
-选型(design D7):pypdf(纯 Python,BSD)+ python-docx(MIT,仅 .docx);
-旧 .doc 二进制格式不支持(Python 生态无维护良好的纯库,提案 Non-goal)。
-解析为同步 CPU 密集操作——调用方须在工作线程执行(asyncio.to_thread)。
-"""
+"""将 PDF 和 DOCX 解析为纯文本，供 Markdown 分块器处理；不支持旧版 DOC。
+解析是同步 CPU 操作，调用方应在线程中执行。"""
 
 import io
 import logging

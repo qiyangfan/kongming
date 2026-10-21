@@ -1,7 +1,4 @@
-/* 工作流管理页(029 workflow-orchestration spec):
-   定义列表(最新版本)+ 双态定义编辑器(107:可视化画布 ⇄ JSON,保存即结构
-   校验,服务端错误行内反馈并定位画布节点)+ 启停 StatusSwitch + 删除受控确认 +
-   运行对话框(inputs JSON)+ run 历史分页(节点状态逐行展开)。 */
+/* 管理工作流定义和运行记录；定义可用画布或 JSON 编辑，服务端校验错误会定位到对应节点。 */
 
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -59,8 +56,8 @@ const PAGE_SIZE = 10;
 /** 新建工作流的空定义(画布初始态;JSON 态展示为 {"nodes": []}) */
 const EMPTY_DEFINITION: unknown = { nodes: [] };
 
-// run/节点状态 → 徽章统一走 StatusBadge(未知值回落 destructive,保持原「非 SUCCESS 一律红」
-// 语义);SKIPPED 为节点级状态(条件门控/依赖跳过),run 终态不出现
+// run/节点状态 → 徽章统一走 StatusBadge(未知值回落 destructive,即非 SUCCESS 一律红);
+// SKIPPED 为节点级状态(条件门控/依赖跳过),run 终态不出现
 const RUN_STATUS_META: StatusMeta = {
   SUCCESS: { label: "成功", variant: "secondary" },
   FAILED: { label: "失败", variant: "destructive" },
@@ -83,9 +80,9 @@ const TRIGGER_SOURCE_LABELS: Record<string, string> = {
 export default function WorkflowsPage() {
   const qc = useQueryClient();
   const editorRef = useRef<WorkflowDefinitionEditorHandle | null>(null);
-  // 107:定义编辑交由双态编辑器(画布 ⇄ JSON);页面只持初始定义与布局键
+  // 定义编辑交由双态编辑器(画布 ⇄ JSON);页面只持初始定义与布局键
   const [editing, setEditing] = useState<{
-    origKey: string | null; // 审查循环 B3:编辑态锁 wf_key(改 key 保存=静默新建另一工作流)
+    origKey: string | null; // 编辑态锁定 wf_key，避免改名后保存为另一条工作流。
     wfKey: string;
     name: string;
     initialDef: unknown;
@@ -100,7 +97,7 @@ export default function WorkflowsPage() {
   const [runError, setRunError] = useState("");
   const [historyOf, setHistoryOf] = useState<WorkflowItem | null>(null);
   const [historyPage, setHistoryPage] = useState(1);
-  // D2:run 详情对话框(存 runId;详情数据只来自新端点)
+  // run 详情对话框(存 runId;详情数据来自独立端点)
   const [detailRunId, setDetailRunId] = useState<string | null>(null);
   const [toggleError, setToggleError] = useState<Record<string, string>>({});
 
@@ -273,7 +270,7 @@ export default function WorkflowsPage() {
         actions={[
           {
             label: "运行",
-            // 与原按钮 disabled={!row.enabled} 同口径,行级禁用承接拦截
+            // 停用的工作流不可运行;行级禁用保留可视反馈
             isDisabled: (row) => !row.enabled,
             disabledReason: "已停用的工作流不可运行",
             onSelect: (row) => {
@@ -314,7 +311,7 @@ export default function WorkflowsPage() {
         ]}
       />
 
-      {/* 新建/编辑(107 双态编辑器:画布 ⇄ JSON) */}
+      {/* 新建/编辑(双态编辑器:画布 ⇄ JSON) */}
       <Dialog
         open={editing !== null}
         onOpenChange={(o) => {
@@ -550,7 +547,7 @@ export default function WorkflowsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* run 详情(D2:独立端点,node_runs 含 outputs;列表行展示不动) */}
+      {/* run 详情:独立端点,node_runs 含 outputs */}
       <Dialog
         open={detailRunId !== null}
         onOpenChange={(o) => {
@@ -598,9 +595,9 @@ export default function WorkflowsPage() {
               <div className="space-y-2">
                 {(runDetail.data.node_runs ?? []).map((raw, i) => {
                   const nr = nodeRunsOf({ node_runs: [raw] })[0];
-                  // R1-B7:渲染前截断 64KB(引擎节点级截断兜底之外的第二道防线,
+                  // 渲染前截断 64KB(引擎节点级截断兜底之外的第二道防线,
                   // 防多 MB 文本整段进 DOM)
-                  // R2-B1:outputs 为 null(未产出)不渲染折叠区——
+                  // outputs 为 null(未产出)不渲染折叠区——
                   // stringify(null) 会得到无信息量的字面 "null"
                   const outputsRaw =
                     raw.outputs == null ? null : JSON.stringify(raw.outputs, null, 2);

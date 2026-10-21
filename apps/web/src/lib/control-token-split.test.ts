@@ -3,10 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-/* 控件令牌三分离回归护栏(084 立值 / 085 拆分):--border 只做分隔线、--input 只做控件边界、
-   --input-fill 只做控件底与开关轨道填充。085 立项的原因是 084 把 --input 当成只有描边一个用途,
-   而标准件里它还喂着 bg-input——描边一提亮,未勾选开关轨道就跟着变成实心灰条。
-   token 未注册或类名拼错时 Tailwind 静默不生成规则,构建与 lint 都不报错,故以源码扫描钉死。 */
+/* 锁定控件色值令牌的职责：描边变化不得改变控件填充或开关轨道。 */
 
 const SRC = fileURLToPath(new URL("../", import.meta.url));
 // 令牌值一律从去注释后的 CSS 取:注释里出现过 "--border:" 这样的字面写法,不排除会污染取值
@@ -70,7 +67,7 @@ describe("控件边界/填充/分隔线令牌三者分离(084/085)", () => {
       if (/bg-input(?!-fill)/.test(source)) offenders.push(file.slice(SRC.length));
     }
     expect(offenders).toEqual([]);
-    // 拆分靠改指而非删类:填充与描边两类消费点都必须仍然存在
+    // 拆分靠改指向而非删类:填充与描边两类消费点都必须仍存在
     expect(fillUses).toBeGreaterThan(0);
     expect(borderUses).toBeGreaterThan(0);
   });

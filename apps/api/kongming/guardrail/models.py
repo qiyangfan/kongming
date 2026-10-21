@@ -1,4 +1,4 @@
-"""guardrail 领域模型(020):护栏判定与脱敏纯函数(零框架,import-linter 守护)。
+"""guardrail 领域模型:护栏判定与脱敏纯函数(零框架,import-linter 守护)。
 
 spec: prompt-guardrails「输入护栏」「输出护栏」「工具调用前意图审核」
 「护栏 fail-closed」。判定全确定性(正则/关键词/特征片段),无 LLM 调用。
@@ -87,14 +87,9 @@ class RuleConfig:
 def evaluate_text(
     text: str, configs: list[RuleConfig], gtype: GuardrailType
 ) -> tuple[str, list[GuardrailHit]]:
-    """文本护栏判定(纯函数):masked 规则改文本,blocked 规则收集命中。
+    """按注册顺序应用文本护栏规则,返回处理后文本与命中列表。
 
-    返回 (最终文本, 命中集);调用方按命中集落审计,有 blocked 即拦截。
-    规则按注册表顺序应用(masked 先改后判后续规则,次序即注册表次序)。
-    R1-H1:统一 re.IGNORECASE(英文 injection 首字母大写为常态;中文规则无
-    大小写概念,不受影响)。
-    R1-M2:审计 digest 生成前对文本过全量 MASKERS——审计永不落 PII 原文
-    (含 blocked 命中时、多 PII 混合时前序 digest 带后序未处理值两形态)。
+    masked 规则改写文本;blocked 仅记录命中。审计摘要先掩码全部敏感内容。
     """
     hits: list[GuardrailHit] = []
     current = text

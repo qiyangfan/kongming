@@ -1,5 +1,4 @@
-"""030 multimodal-input api 侧测试:上传限制/归属隔离/一次性消费/
-chat 链路引用校验与摘要回显(测试先行,安全类)。"""
+"""附件测试覆盖上传限制、归属隔离、一次性消费、会话引用校验和摘要回显。"""
 # pyright: reportPrivateUsage=false
 
 import io
@@ -77,7 +76,7 @@ async def test_upload_limits_and_magic(
 async def test_non_default_tenant_upload_reference(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-S1 回归:非默认租户上传的附件按该租户归属(上传端点读
+    """回归:非默认租户上传的附件按该租户归属(上传端点读
     X-Tenant-Id);上传后引用过归属校验(不再 404)。"""
     uid, token = await _mk_user(client, session, make_user, "att_t1")
     # 绑定第二租户 sakila(种子既有)并以其上传

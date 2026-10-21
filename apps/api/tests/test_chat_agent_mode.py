@@ -1,4 +1,4 @@
-"""chat 019 集成测试:agent_mode 分支/ReAct 工具注入/pending_tool_calls 聚合。
+"""chat 集成测试:agent_mode 分支/ReAct 工具注入/pending_tool_calls 聚合。
 
 FakeAgent 替身记录 react_tools 透传;pending 聚合用真实 sys_tool_audit 行
 (PENDING_CONFIRM 经独立事务提交,聚合读取独立短会话——与生产同形态)。
@@ -39,7 +39,7 @@ class FakeAgent:
         self.stream_calls.append(kw)
         # 生产签名 StreamFrameHandler = Callable[[str, str], Coroutine[Any, Any, None]]
         on_frame = cast("Callable[[str, str], Coroutine[Any, Any, None]]", kw["on_frame"])
-        # 019 流式:tool_call 帧 + result 帧(终态与同步同构 JSON)
+        # 流式:tool_call 帧 + result 帧(终态与同步同构 JSON)
         import dataclasses
 
         await on_frame(
@@ -125,7 +125,7 @@ async def test_default_recipe_sends_no_tools(
     fake_agent["agent"] = FakeAgent()
     r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
     assert r.status_code == 200
-    assert fake_agent["agent"].calls[0]["react_tools"] is None  # 老链路零改动
+    assert fake_agent["agent"].calls[0]["react_tools"] is None
 
 
 async def test_react_injects_authorized_tools(
@@ -145,7 +145,7 @@ async def test_react_injects_authorized_tools(
     tools_any = fake_agent["agent"].calls[0]["react_tools"]
     tools = cast("list[dict[str, Any]]", tools_any)
     # isinstance 守卫保持在原始对象上(运行时语义不变)
-    assert isinstance(tools_any, list) and len(tools) == 5  # DEVELOPER 只读三件套+057 compute 两件
+    assert isinstance(tools_any, list) and len(tools) == 5  # DEVELOPER 只读三件套+compute 两件
     names = {t["name"] for t in tools}
     assert names == {
         "validate_sql",

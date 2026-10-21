@@ -1,8 +1,4 @@
-/* 服务端结构校验错误文案 → 画布节点定位(107 design 裁决 4):
-   定义端点的校验错误文案已含节点 id(环参与节点/非法 on 值/缺必填配置等),
-   画布侧解析同一载荷定位高亮——不新增服务端错误字段,契约零变更。
-   文案全集唯一事实源 = apps/api/kongming/workflow/models.py + service.py;
-   未收录形态一律空定位(原文展示,绝不猜测)。 */
+/* 按服务端校验错误文案定位画布节点；未识别的错误不猜测节点，只显示原文。 */
 
 export interface LocatedValidationError {
   /** 定位到的节点 id(可能含不存在的依赖目标;调用方与画布节点求交) */
@@ -19,8 +15,7 @@ interface LocatePattern {
   configKey?: (m: RegExpMatchArray) => string;
 }
 
-/* 顺序敏感:「节点 id …」前缀形态必须先于通用「节点 <id> …」形态,
-   否则字面 "id" 会被误捕为节点 id。 */
+/* 顺序敏感:「节点 id …」前缀形态必须先于通用「节点 <id> …」形态, 否则字面 "id" 会被误捕为节点 id。 */
 const PATTERNS: LocatePattern[] = [
   {
     re: /^定义存在环,参与节点: (.+)$/,

@@ -1,9 +1,4 @@
-"""反馈提交全栈测试(feedback spec 014,安全规则类测试先行)。
-
-真实 PG:归属 403 同形/仅 assistant/幂等覆盖三态(null 保持/显式覆盖/空串
-清空/feedback_time 最新)/correctedSql 防火墙整体拒/纠错沉淀 query_history
-(会话快照数据源)/审计同事务。
-"""
+"""覆盖反馈提交的权限、幂等更新、纠错 SQL 校验和审核后晋升。"""
 # pyright: reportPrivateUsage=false
 
 import uuid
@@ -90,7 +85,7 @@ async def _feedback_row(s: AsyncSession, mid: str) -> dict[str, Any]:
 
 
 async def _setup(s: AsyncSession, client: AsyncClient, make_user: MakeUser, name: str):
-    """有 chat:feedback:submit(DEVELOPER 推荐绑定,014 种子)的用户+会话+assistant 消息。"""
+    """有 chat:feedback:submit(DEVELOPER 推荐绑定,种子)的用户+会话+assistant 消息。"""
     uid, token = await _user_with_chat_perm(client, s, make_user, name)
     tid = await _default_tenant_id(s)
     sid = await _mk_session(s, user_id=uid, tenant_id=tid)
@@ -147,7 +142,7 @@ async def test_submit_down_with_comment_and_sql(
     assert r.json()["corrected_sql"] == "SELECT count(*) FROM tenant_default.goods"
     row = await _feedback_row(session, mid)
     assert row["feedback_comment"] == "数量不对"
-    # 070:提交路径不再写 query_history(审核后晋升——PENDING 态不可召回)
+    # 提交路径不写 query_history(审核 ADOPTED 后才晋升,PENDING 态不可召回)
     hist = (
         await session.execute(
             text("SELECT count(*) FROM rag.query_history WHERE sql_text LIKE '%goods%'")
@@ -213,7 +208,7 @@ async def test_submit_no_perm_403(
         f"/chat/messages/{mid}/feedback", json={"rating": "UP"}, headers=_auth(token2)
     )
     assert r.status_code == 403
-    assert uid != uid2  # 吊具健全性:确实是另一用户
+    assert uid != uid2  # 断言健全性:确实是另一用户
 
 
 # ============ 幂等覆盖三态 ============
@@ -263,7 +258,7 @@ async def test_submit_idempotent_merge_semantics(
         )
     ).scalar_one()
     assert t2 >= t1
-    # 070:提交路径不写 query_history(审核后晋升);三态合并语义不变,
+    # 提交路径不写 query_history(审核后晋升);三态合并语义不变,
     # 「样本停用后保留行」由处置路径测试覆盖
     n = (
         await session.execute(
@@ -276,7 +271,7 @@ async def test_submit_idempotent_merge_semantics(
 async def test_submit_same_sql_no_history_write(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """070:重复提交相同 correctedSql 同样零沉淀(提交路径不经召回);
+    """重复提交相同 correctedSql 同样零沉淀(提交路径不经召回);
     同反馈消息的样本准入=ADOPTED 时一次晋升(幂等键 message_id)。"""
     _, token, _, _, mid = await _setup(session, client, make_user, "fb-dup")
     payload = {"rating": "DOWN", "corrected_sql": "SELECT 2 FROM tenant_default.goods"}
@@ -339,7 +334,7 @@ async def test_submit_cross_tenant_schema_sql_rejected(
     assert row["rating"] is None
 
 
-# ============ messageId 打通(014) ============
+# ============ messageId 打通 ============
 
 
 async def test_query_response_contains_message_id(
@@ -348,7 +343,7 @@ async def test_query_response_contains_message_id(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """014 messageId 打通:实时响应 message_id 与库内 assistant 消息一致,
+    """messageId 打通:实时响应 message_id 与库内 assistant 消息一致,
     datasource_key=执行快照;persist=false 时 message_id 为 null(spec)。"""
     _install(fake_agent, FakeAgent(_pass_reply()))
     _, token = await _user_with_chat_perm(client, session, make_user, "fb-mid")
@@ -408,4 +403,4 @@ async def test_history_messages_echo_feedback_fields(
     assert user_item["feedback_comment"] is None
     assert asst_item["rating"] == "DOWN"
     assert asst_item["corrected_sql"] == "SELECT 9 FROM tenant_default.goods"
-    assert asst_item["feedback_comment"] == "历史留言"  # R1-S3:comment 回显(弹窗预填源)
+    assert asst_item["feedback_comment"] == "历史留言"  # comment 回显(弹窗预填源)

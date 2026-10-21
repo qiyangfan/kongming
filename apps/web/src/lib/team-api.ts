@@ -1,4 +1,4 @@
-/* team 域 API 封装(032)。审查循环 D-F2:消费生成契约(ADR-005,禁手写)。 */
+/* team 域 API 封装；请求和响应类型由 ADR-005 生成。 */
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";

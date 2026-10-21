@@ -1,4 +1,4 @@
-"""guardrail 端口(020):service 依赖反转。零框架纪律:仅 Protocol。"""
+"""guardrail 端口:service 依赖反转。零框架纪律:仅 Protocol。"""
 
 from typing import Any, Protocol
 

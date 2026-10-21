@@ -1,19 +1,5 @@
-"""全量向量重建(upgrade-rag-qwen3-halfvec-2560,design D4/D5)。
-
-迁移 0058 清空四类派生向量(表说明/历史问句/文档子块/用户记忆)后,本命令
-从保留的原文经 Agent embedding 回调(ADR-002:凭证仅在 agent 面)重建
-halfvec(2560) 向量:
-- 可观测:分批进度日志(表/批次数/行数);
-- 按批提交:每批独立事务,失败即止,此前批次已落库;
-- 可重跑:重复执行覆盖同一行向量(embedding 缓存命中未变文本,重跑廉价);
-- --dry-run:只报分批数量与目标行数,不调用 embedding、不写库;
-- --table:按表筛选(缺省四表全量)。
-
-用法:
-  uv run python scripts/rebuild_embeddings.py --dry-run
-  uv run python scripts/rebuild_embeddings.py --table query_history
-  uv run python scripts/rebuild_embeddings.py
-"""
+"""从保留的文本重建四类派生向量。每批单独提交，失败时停止但保留已写入的批次；
+支持 --dry-run 和 --table。"""
 
 import argparse
 import asyncio

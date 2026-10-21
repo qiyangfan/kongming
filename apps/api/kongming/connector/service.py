@@ -1,5 +1,5 @@
-"""connector 用例编排(099):注册校验→护栏闸→加密落库→掩码查询面→注入
-装配→测试调用。零框架纪律(宪法 Article II);SQL 全在 repository,凭证
+"""connector 用例编排:注册校验→护栏闸→加密落库→掩码查询面→注入
+装配→测试调用。用例层不依赖 FastAPI 或 SQLAlchemy;SQL 全在 repository,凭证
 加密/护栏/审计/出站经 ports 端口注入,组合根在 router。
 
 凭证口径(spec「凭证不回显」):任何接口响应只含鉴权形态与尾号掩码——
@@ -94,7 +94,7 @@ class ConnectorService:
             await self._oper.log(action=action, target=target, detail=detail)
 
     async def _assert_clean_texts(self, *, tenant_id: str, user_id: str, texts: list[str]) -> None:
-        """注册闸门(020 护栏,与 bot-store 上架同闸):名称/描述命中 BLOCK
+        """注册闸门(护栏,与 bot-store 上架同闸):名称/描述命中 BLOCK
         即拒注册(spec「注入检测面」;fail-closed 在护栏服务内)。"""
         blocked, _ = await self._guardrail.check(
             trace_id=f"connector-{uuid.uuid4().hex[:12]}",
@@ -113,7 +113,7 @@ class ConnectorService:
         """注册(fail-fast):声明校验 → 护栏闸 → 加密落库 → 掩码行返回
         (创建响应亦不回显材料,spec)。"""
         validate_declaration(decl, has_secret=bool(secret), timeout_max_ms=self._timeout_max)
-        # 注入检测面含参数描述(评审修复:它是经 params_to_schema 注入给 LLM
+        # 注入检测面含参数描述(它是经 params_to_schema 注入给 LLM
         # 的第三个自由文本字段,漏检即成注入面)
         await self._assert_clean_texts(
             tenant_id=tenant_id,
@@ -178,7 +178,7 @@ class ConnectorService:
         ):
             raise ConnectorNotFound(connector_id)
         await self._repo.commit()
-        # 审计 target=存量行 key(key 不可更新,请求体 key 与行无关;评审修复:
+        # 审计 target=存量行 key(key 不可更新,请求体 key 与行无关;
         # 按请求 key 记账会产生指向不存在 key 的审计行)
         await self._audit("connector.update", str(current["key"]), {"name": decl.name.strip()})
         return await self._must_masked(connector_id, tenant_id)
@@ -262,19 +262,16 @@ class ConnectorService:
         args: dict[str, object],
         use_saved_secret_for: str | None = None,
     ) -> dict[str, Any]:
-        """按当前表单声明发起一次真实出站(web-admin「测试调用」):显式
-        确认在 UI 层;落工具审计(与执行同表同语义,channel 区分)。
-        use_saved_secret_for=已存连接器 key:表单材料留空时用存量凭证
-        (编辑态先测后存的空框语义;HTTP 面由 router 以表单 key 传入)。
-        凭证面收窄(防御纵深):存量凭证只允许用于 key 相同的连接器自身
-        ——契约语义即「编辑中的这一个」;防止未来新调用方/内部直调借本
-        用例把任意同租户连接器的明文凭证装配到任意出站目标(router 既有
-        接线恒传表单 key,经 HTTP 本就不可达;此闸守住 service 层不变量)。"""
+        """按当前表单配置发起一次真实出站请求并写工具审计。
+
+        只有同一个连接器 key 可复用已保存凭证;表单凭证为空时才使用
+        该连接器的存量凭证。
+        """
         if use_saved_secret_for is not None and use_saved_secret_for != decl.key:
             raise ConnectorValidationError("存量凭证只能用于同一 key 的连接器(先测后存)")
-        # 存量凭证合并先于声明校验:has_secret 按「合并后是否持有材料」判定
-        # (评审修复——先校验后合并时,编辑态空框+use_saved_secret 的先测后存
-        # 路径会被材料闸误拒 400,功能死路)
+        # 存量凭证合并先于声明校验:has_secret 按「合并后是否持有材料」判定;
+        # 若先校验后合并,编辑态空框+use_saved_secret 的先测后存路径会被
+        # 材料闸误拒 400
         used_secret = secret
         row_fields = decl_secret_fields(decl, None)
         row_fields.pop("auth_secret_plain")

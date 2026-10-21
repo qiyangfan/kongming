@@ -1,4 +1,4 @@
-"""report 仓储(088):report / report_version / report_section SQL。
+"""report 仓储:report / report_version / report_section SQL。
 
 隔离铁律:一切读写强制 tenant_id+user_id 双过滤;归属收口与 chat 404 同形
 (不存在/越权/已删除不区分)。版本不可变:版本与章节一经插入永不 UPDATE
@@ -80,8 +80,7 @@ class SqlReportRepo:
         return dict(row) if row else None
 
     async def set_phase(self, *, report_id: str, phase: str, tenant_id: str) -> None:
-        """进度回写(091 裁决:锚定租户归属——report_id 归属不匹配即不更新,
-        与 collab-start 任务-租户归属闸同式;跨租户回写静默无效)。"""
+        """进度回写(仅当 report 归属该租户才生效,跨租户回写静默无效)。"""
         await self._s.execute(
             text(
                 "UPDATE public.report SET phase = :p, updated_at = now()"
@@ -159,8 +158,8 @@ class SqlReportRepo:
     async def claim_next_version(
         self, *, report_id: str, tenant_id: str, user_id: str, expected_version: int
     ) -> int | None:
-        """原子申领下一版本号(刷新路径):带期望版本的 CAS——读数后若被编辑
-        推进则申领失败返回 None(审查 P1-4:无 CAS 时旧内容可覆盖最新版本)。"""
+        """原子申领下一版本号(刷新路径):带期望版本的 CAS,被并发编辑
+        推进则申领失败返回 None(无 CAS 时旧内容可覆盖最新版本)。"""
         row = (
             await self._s.execute(
                 text(

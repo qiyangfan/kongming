@@ -1,5 +1,4 @@
-"""backlog-settlement agent 侧测试:收集器经图传播的端到端直证(A-B9)+
-LLM 注册表池缓存(021①)。"""
+"""检查用量记录经图传播，以及 LLM 注册表池的缓存行为。"""
 
 # pyright: reportPrivateUsage=false
 # 测试惯例:允许引用兄弟测试模块与被测模块的私有 helper(仓库测试约定,不改名)
@@ -23,7 +22,7 @@ from tests.test_react import FakeApi, _state, react_recursion_limit
 
 
 def _tool_completion(*, content: str | None, tool_name: str | None, call_id: str) -> object:
-    """构造带 usage 的真 SDK 形态应答(isinstance 解析路径直证)。"""
+    """构造包含 usage 字段的 OpenAI SDK 应答对象。"""
     from openai.types.chat import (
         ChatCompletion,
         ChatCompletionMessage,
@@ -75,7 +74,7 @@ class _ScriptClient:
 async def test_collect_usage_e2e_through_react_graph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A-B9:真 LlmClient(fake OpenAI,带 usage)+ReAct 图两轮——contextvar
+    """真 LlmClient(fake OpenAI,带 usage)+ReAct 图两轮:contextvar
     经 LangGraph 节点传播,collect_usage 收集 seq 递增,reporter 零调用。"""
     s = _settings(llm_api_key="sk-main")
     recorder = _Recorder()
@@ -123,8 +122,7 @@ async def test_collect_usage_e2e_through_react_graph(
 async def test_attachment_error_carries_usage_records(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """035⑧:附件预处理失败早返携带已收集记录(vision 第 1 件成功的用量
-    不随 AttachmentError 丢弃)。"""
+    """附件预处理失败时，提前返回仍保留已收集的图片分析用量。"""
     import kongming_agent.main as main_mod
     from kongming_agent.main import app
     from tests.test_react import TOKEN, _react_payload
@@ -154,8 +152,7 @@ async def test_attachment_error_carries_usage_records(
 async def test_stream_attachment_error_carries_usage_records(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """R1-F2:流式端点附件预处理在 gen 内(收集器挂载之后)——早返 result 帧
-    携带已收集记录(挂载缺位则恒空,本用例直证修复)。"""
+    """验证附件预处理提前返回时，流式结果仍包含已经收集的用量记录。"""
     import kongming_agent.main as main_mod
     from kongming_agent.main import app
     from tests.test_react import TOKEN, _react_payload
@@ -191,12 +188,12 @@ async def test_stream_attachment_error_carries_usage_records(
     )
     body = _json.loads(result_line)
     assert body["success"] is False and body["error"]
-    assert body["verdict"] == "ERROR"  # R2-B2:与同步端点早返 verdict 同构
+    assert body["verdict"] == "ERROR"  # 与同步端点早返 verdict 同构
     assert len(body["usage_records"]) == 1  # combine 段收集的记录随早返携带
     assert body["usage_records"][0]["task"] == "VISION"
 
 
-# ── 021①:LLM 注册表池缓存 ──
+# ── LLM 注册表池缓存 ──
 
 
 async def test_llm_pool_cached_by_fingerprint(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -217,7 +214,7 @@ async def test_llm_pool_cached_by_fingerprint(monkeypatch: pytest.MonkeyPatch) -
 async def test_llm_pool_rebuilt_on_fingerprint_change(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """指纹变更:重建新实例,旧实例客户端已 aclose(is_closed 直证)。"""
+    """指纹变化后重建客户端，并关闭旧实例持有的 HTTP 客户端。"""
     import kongming_agent.deps as d
 
     d.reset_llm_cache()

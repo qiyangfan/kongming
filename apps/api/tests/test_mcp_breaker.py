@@ -122,7 +122,7 @@ def test_record_success_quiet_on_healthy_path(monkeypatch: pytest.MonkeyPatch) -
     """健康路径(从未熔断)成功不打「恢复」打点,仅真恢复打点(日志零噪音)。
 
     经模块级 log 替身断言——本仓 pytest 日志基建 INFO 级不可测(setLevel
-    不解锁,tests/test_rag_team_scope.py 既有同款实证),替身是确定性形态。"""
+    不解锁,tests/test_rag_team_scope.py 既有同款),替身是确定性形态。"""
 
     class _LogStub:
         def __init__(self) -> None:
@@ -142,7 +142,7 @@ def test_record_success_quiet_on_healthy_path(monkeypatch: pytest.MonkeyPatch) -
     b.record_success(ep)  # 从未失败:无「恢复」可言
     assert stub.infos == []
     b.record_failure(ep)
-    b.record_success(ep)  # 曾失败过:真恢复打点
+    b.record_success(ep)  # 失败后的成功调用应记录恢复。
     assert len(stub.infos) == 1 and "熔断恢复" in stub.infos[0]
 
 

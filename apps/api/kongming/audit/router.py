@@ -1,4 +1,4 @@
-"""audit 路由(015,薄适配层):SQL 审计/操作日志查询(行级可见性在 service)
+"""audit 路由(薄适配层):SQL 审计/操作日志查询(行级可见性在 service)
 + 归档手动触发/重导入。
 
 权限点 system:audit:view(种子排序 9,仅 SUPER_ADMIN);详情 403 同形
@@ -37,7 +37,7 @@ class SqlAuditItemOut(BaseModel):
     trace_id: str
     user_id: str | None
     user_nickname: str | None
-    # 050(纯增):昵称缺失时前端回退登录用户名,禁渲染 id 片段
+    # 昵称缺失时前端回退登录用户名,禁渲染 id 片段
     user_username: str | None = None
     tenant_id: str
     tenant_key: str
@@ -128,7 +128,7 @@ class OperLogItemOut(BaseModel):
     id: str
     user_id: str | None
     user_nickname: str | None
-    # 050(纯增):昵称缺失时前端回退登录用户名,禁渲染 id 片段
+    # 昵称缺失时前端回退登录用户名,禁渲染 id 片段
     user_username: str | None = None
     action: str
     target: str | None
@@ -187,7 +187,7 @@ async def oper_page(
     )
 
 
-# ============ 归档(015:手动触发同函数;调度=lifespan 每日薄壳) ============
+# ============ 归档(手动触发同函数;调度=lifespan 每日薄壳) ============
 
 
 class ArchiveRunOut(BaseModel):

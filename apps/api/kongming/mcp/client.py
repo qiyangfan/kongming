@@ -1,12 +1,6 @@
-"""MCP 出站客户端(028;adopt-mcp-sdk2 收编官方 SDK 2.x)。
-
-协议载体=SDK `streamable_http_client` + `ClientSession`(跨修订协商/SSE 帧
-聚合/双响应形态/会话语义由 SDK 承载,替换手写 JSON-RPC 栈);本适配层保留
-平台语义:跨修订探测路径(现代 `server/discover` 无握手直连 → 旧修订
-initialize 回退)、错误归一(timeout/conn/protocol/remote/unsupported 五类)、
-结果语义截断(1MB 附标记)与凭证纪律(headers 明文只在客户端构造瞬时存在,
-异常路径不落 headers;不裸抛——任何异常归一 McpCallError)。
-"""
+"""MCP 出站客户端基于官方 SDK。现代服务端使用 `server/discover`，旧版本回退
+到 `initialize`；调用错误统一转换为五类 `McpCallError`，响应最多保留 1 MB。
+请求头中的凭证不会写入日志或异常文本。"""
 
 import asyncio
 import json
@@ -29,8 +23,8 @@ from kongming.mcp.models import (
 )
 from kongming.mcp.ports import McpCallError
 
-_CONTENT_CAP = 1 * 1024 * 1024  # 结果内容截断(design D4:截断附标记回灌)
-_METHOD_NOT_FOUND = -32601  # JSON-RPC 方法不存在(MCP 原语不支持形态,109)
+_CONTENT_CAP = 1 * 1024 * 1024  # 超出上限时截断结果并附加标记。
+_METHOD_NOT_FOUND = -32601  # JSON-RPC 方法不存在(MCP 原语不支持形态)
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +33,7 @@ _L = TypeVar("_L")
 
 
 def _classify_mcp_error(e: MCPError) -> McpCallError:
-    """SDK 协议错误 → 平台五类归一:方法不存在=unsupported(109,原语不支持
+    """SDK 协议错误 → 平台五类归一:方法不存在=unsupported(原语不支持
     形态);请求超时(-32001,SDK 逐请求读超时)=timeout;其余=remote。"""
     if e.error.code == _METHOD_NOT_FOUND:
         return McpCallError("unsupported", str(e.error.message)[:300])
@@ -51,7 +45,7 @@ def _classify_mcp_error(e: MCPError) -> McpCallError:
 class HttpMcpCaller:
     """McpCaller 实现(SDK 2.x 适配)。timeout_sec 来自组合根(Settings);
     单连接生命周期=每次调用即开即用(transport→session→时代探测→动作),
-    不引入常驻连接池(design D1;高频同步场景再评估)。"""
+    不引入常驻连接池(高频同步场景再评估)。"""
 
     def __init__(self, *, timeout_sec: int = 15) -> None:
         self._timeout = timeout_sec
@@ -66,7 +60,7 @@ class HttpMcpCaller:
         action: Callable[[ClientSession, types.ServerCapabilities], Awaitable[_T]],
     ) -> _T:
         """建立一次连接并在其上执行 action;全程预算 wait_for 包整个交换
-        (R1-A2:传输超时是单次操作间隔,慢滴响应须总预算守「Ns」字面语义)。"""
+        (传输超时是单次操作间隔,慢滴响应须总预算守「Ns」字面语义)。"""
 
         async def _inner() -> _T:
             async with httpx2.AsyncClient(
@@ -102,7 +96,7 @@ class HttpMcpCaller:
             raise McpCallError("conn", type(e).__name__) from e
         except RuntimeError as e:
             # SDK 修订协商失败(modern 无交集/服务器版本不可识)=协议不匹配
-            # 归一为同步错误分类(spec delta:SHALL NOT 裸抛协议异常)
+            # 将协商错误归类为协议错误，不向调用方暴露 SDK 异常。
             raise McpCallError("protocol", str(e)[:300]) from e
         except BaseExceptionGroup as eg:
             # anyio 任务组把叶子错误打包组(SDK 会话/传输层),拆包归一
@@ -172,7 +166,7 @@ class HttpMcpCaller:
     # ---- McpCaller 端口实现 ----
 
     async def probe(self, *, endpoint: str, headers: dict[str, str]) -> ProbeResult:
-        """时代探测 + 三原语并行探测(109 design D4):能力未声明即时短路
+        """时代探测 + 三原语并行探测:能力未声明即时短路
         (不发请求);方法不存在(-32601)=不支持计数 0;超时/拒连/协议错=
         结构化失败。tools 是核心原语(能力恒声明,宣告过即须能列):tools/list
         回 -32601 属协议不当行为,按失败处理(防 sync 以 ok=True 原子替换为
@@ -192,7 +186,7 @@ class HttpMcpCaller:
                     return await fetch()
                 except McpCallError as e:
                     if e.kind == "unsupported" and name != "tools":
-                        # -32601 方法不存在=可选原语不支持,计数 0(109 design D4)
+                        # 32601 方法不存在=可选原语不支持,计数 0
                         probe_unsupported.add(name)
                         return []
                     probe_failures[name] = (e.kind, e.detail)
@@ -227,7 +221,7 @@ class HttpMcpCaller:
     async def read_resource(
         self, *, endpoint: str, headers: dict[str, str], uri: str
     ) -> dict[str, Any]:
-        """resources/read(109):文本形态限定——blob(二进制)拒绝不进观察;
+        """resources/read:文本形态限定——blob(二进制)拒绝不进观察;
         语义截断同 tools/call(1MB 附标记,原始大小回传)。"""
 
         async def _read(session: ClientSession, caps: types.ServerCapabilities) -> dict[str, Any]:
@@ -255,7 +249,7 @@ class HttpMcpCaller:
         name: str,
         arguments: dict[str, str],
     ) -> dict[str, Any]:
-        """prompts/get 按名渲染(109):管理面只读预览的实时数据源,不落库。"""
+        """prompts/get 按名渲染:管理面只读预览的实时数据源,不落库。"""
 
         async def _get(session: ClientSession, caps: types.ServerCapabilities) -> dict[str, Any]:
             result = await session.get_prompt(name, arguments)
@@ -302,10 +296,7 @@ class HttpMcpCaller:
 
 
 async def _negotiate(session: ClientSession) -> types.ServerCapabilities:
-    """跨修订探测路径(spec delta):现代 server 声明 2026-07-28 →
-    `server/discover` 无会话握手直连;旧修订 server 无此方法(-32601)→
-    initialize 握手透明兼容;其余错误上抛由 _run 归一(修订不匹配 =
-    RuntimeError → protocol 分类)。"""
+    """优先使用 `server/discover`；旧版服务端返回 -32601 时回退到 initialize。"""
     try:
         result = await session.discover()
     except MCPError as e:

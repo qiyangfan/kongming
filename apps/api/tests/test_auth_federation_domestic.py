@@ -1,4 +1,4 @@
-"""国内三家联邦(003):normalize 字段映射回归网 + options/start 集成。
+"""国内三家联邦:normalize 字段映射回归网 + options/start 集成。
 
 协议形态按官方文档核验(2026-08-17):
 - 企微 qrConnect:getuserinfo 返回小写 userid;详档 user/get 需通讯录权限,缺失降级
@@ -43,7 +43,7 @@ def test_wecom_normalize_full_detail() -> None:
 
 
 def test_wecom_normalize_degrades_without_detail() -> None:
-    """无通讯录权限取不到详档:display_name 降级为 UserId,登录链路不断。"""
+    """无通讯录权限时使用 userid 作为显示名，登录仍可完成。"""
     userinfo = {"errcode": 0, "errmsg": "ok", "userid": "ZhangSan"}
     p = wecom.normalize(cast("dict[str, object]", userinfo), None)
     assert p.external_id == "ZhangSan"
@@ -120,7 +120,7 @@ def test_feishu_normalize_en_name_empty_falls_back_to_name() -> None:
     assert p.avatar_url is None
 
 
-# ---- options / start 集成(002 语义 + 三家形态) ----
+# options / start 集成(语义 + 三家形态) ----
 
 
 @pytest.fixture
@@ -185,7 +185,7 @@ async def test_feishu_start_url_form(client: AsyncClient, domestic_configured: N
 
 
 async def test_domestic_unconfigured_keeps_404(client: AsyncClient) -> None:
-    """002 语义回归:三家已注册但未配置 → start/callback 404,options 不出现。"""
+    """语义回归:三家已注册但未配置 → start/callback 404,options 不出现。"""
     for key in ("wecom", "dingtalk", "feishu"):
         assert (await client.get(f"/auth/{key}/start")).status_code == 404
         r = await client.post(f"/auth/{key}/callback", json={"code": "x", "state": "y"})
@@ -198,7 +198,7 @@ async def test_domestic_unconfigured_keeps_404(client: AsyncClient) -> None:
 async def test_enabled_switch_overrides_credentials(
     client: AsyncClient, domestic_configured: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """总开关(003 追加):KM_<P>_ENABLED=false 即时停用,凭证保留;其余家不受影响。
+    """总开关(追加):KM_<P>_ENABLED=false 即时停用,凭证保留;其余家不受影响。
     wecom 覆盖自定义 configured 路径,feishu 覆盖基类 getattr 路径。"""
     s = get_settings()
     monkeypatch.setattr(s, "wecom_enabled", False)

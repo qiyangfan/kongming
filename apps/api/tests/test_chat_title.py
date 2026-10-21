@@ -1,9 +1,4 @@
-"""会话标题 LLM 改写全栈测试(chat spec 010 delta「会话持久化」标题两阶段,测试先行)。
-
-链路:首个 SUCCESS 轮 → BackgroundTasks(响应后执行,独立会话)→ 首问截断值
-守卫(人工重命名/已改写跳过,省 LLM 调用)→ agent /internal/rewrite-title →
-update_title_if_current 条件回写(竞态双闸)。失败保持截断标题,主链路零感知。
-"""
+"""验证首个成功问答后的标题改写、人工标题保护和条件回写；失败时保留原截断标题，不影响问答响应。"""
 # pyright: reportPrivateUsage=false
 
 from collections.abc import Iterator
@@ -158,7 +153,7 @@ async def test_title_not_rewritten_on_blocked_round(
     assert agent.title_calls == []  # 未触发
 
 
-# ============ R2-S2:条件写竞态落败直证 ============
+# ============ 条件写竞态测试 ============
 
 
 async def test_update_title_if_current_rowcount(session: AsyncSession, make_user: MakeUser) -> None:
@@ -190,9 +185,7 @@ async def test_title_rewrite_loses_race_to_concurrent_rename(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """任务级竞态直证:守卫放行后、LLM 回调期间用户改名 → 条件写 0 行落败,
-    人工标题不被自动改写覆盖(chat spec「手动重命名后不被自动改写覆盖」闸 2)。
-    竞态构造:回调内按「当前标题=首问截断值」定位并改名(等价用户并发重命名)。"""
+    """检查 LLM 改写标题期间用户手动改名时，条件更新不会覆盖人工标题。"""
     from kongming.db import get_sessionmaker
 
     _, token = await _user_with_chat_perm(client, session, make_user, "title-race")

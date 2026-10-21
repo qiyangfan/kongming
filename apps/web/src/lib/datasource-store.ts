@@ -1,6 +1,4 @@
-/* 数据源上下文单源(008 design D7,与 tenant-store 同构):
-   localStorage km.datasource;选项来自 options 接口(按租户),
-   持久值失效(切租户/数据源被禁用或删除)回落首项(default 合成项恒在)。 */
+/* 按租户保存数据源选择；租户变化或所选数据源失效时回落到首个选项。 */
 
 import { create } from "zustand";
 

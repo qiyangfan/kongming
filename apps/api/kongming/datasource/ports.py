@@ -1,4 +1,4 @@
-"""datasource 域端口(typing.Protocol 反转,宪法 Article II)。
+"""datasource 域端口,以 typing.Protocol 隔离用例层与存储实现。
 
 service 只依赖本接口;SQLAlchemy/cryptography/asyncpg/executor 实现各自落在
 repository.py / cipher.py / tester.py / router 装配层。
@@ -89,7 +89,7 @@ class DatasourceRepo(Protocol):
 
     async def list_enabled_by_tenant(self, tenant_id: str) -> list[DatasourceOption]: ...
 
-    # ---- 操作审计(与业务同事务,007 组合模式) ----
+    # 操作审计(与业务同事务,组合模式) ----
 
     async def log_oper(
         self, actor_id: str, action: str, target: str | None, detail: dict[str, object]
@@ -123,25 +123,25 @@ class ConnectionTester(Protocol):
 
 
 class DatasourceChecker(Protocol):
-    """chat 入口 fail-fast 预检端口(008 design D8):存在+启用+归属。"""
+    """chat 入口 fail-fast 预检端口:存在+启用+归属。"""
 
     async def is_usable(self, datasource_key: str, tenant_id: str) -> bool: ...
 
 
 class SemanticCleaner(Protocol):
-    """023:数据源删除级联清理语义层(关系+指标;同事务,spec 立约)。"""
+    """数据源删除级联清理语义层(关系+指标;同事务,spec 立约)。"""
 
     async def delete_by_datasource(self, *, tenant_id: str, datasource_key: str) -> None: ...
 
 
 class RagCtxEvictor(Protocol):
-    """rag 检索缓存失效窄端口(009:数据源删除时同步失效该源检索缓存)。"""
+    """rag 检索缓存失效窄端口(数据源删除时同步失效该源检索缓存)。"""
 
     async def __call__(self, tenant_id: str, datasource_key: str) -> None: ...
 
 
 class SuggestionCacheEvictor(Protocol):
-    """建议问题缓存失效窄端口(039:数据源连接信息变更/删除时级联失效
+    """建议问题缓存失效窄端口(数据源连接信息变更/删除时级联失效
     该源全部租户的对话冷启动建议缓存;实现=chat 域仓储,管理事务内调用)。"""
 
     async def evict_by_datasource(self, datasource_key: str) -> None: ...

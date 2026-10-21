@@ -1,10 +1,4 @@
-"""反馈管理面全栈测试(feedback-refine/feedback-analytics spec 014,安全规则类测试先行)。
-
-处置状态机/note 三态/行级可见性(非 ALL 强制本人,传值被覆盖)/涉及表
-sqlglot 抽取(CTE 排除+hasKnowledge 匹配+解析失败兜底)/统计口径
-(Asia/Shanghai 分桶逐天补零,downRate 分母零)/明细分页筛选。
-真实 PG;超管=admin(admin123,SUPER_ADMIN 自动覆盖全部权限点)。
-"""
+"""覆盖反馈处置状态、可见性、关联表抽取和统计口径。"""
 # pyright: reportPrivateUsage=false
 
 import uuid
@@ -33,8 +27,7 @@ async def _mk_feedback_msg(
     with_time: bool = True,
     question: str | None = "问句",
 ) -> str:
-    """已反馈 assistant 消息(直写反馈列;管理面测试不依赖提交链路);
-    user 问句 created_at 显式早 1 秒(同事务 now() 相等会错过「之前」严格小于)。"""
+    """构造已提交反馈的 assistant 消息；管理端测试不依赖反馈提交路由。"""
 
     sid = await _mk_session(s, user_id=user_id, tenant_id=tenant_id)
     if question is not None:
@@ -203,7 +196,7 @@ async def test_handle_no_perm_403(
 async def test_handle_unanswered_message_404(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-O1:处置限定已反馈的 assistant 消息——user 消息/零反馈消息 404 同形,
+    """处置限定已反馈的 assistant 消息——user 消息/零反馈消息 404 同形,
     防「状态非 NONE 但 feedback_time 空」幽灵行。"""
     token = await _admin_token(client, session)
     tid = await _default_tenant_id(session)
@@ -247,7 +240,7 @@ async def test_handle_unanswered_message_404(
 async def test_resubmit_clears_handle_columns(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-O2:已处置(ADOPTED)消息被再次反馈→重置 PENDING 且处置三列清空
+    """已处置(ADOPTED)消息被再次反馈→重置 PENDING 且处置三列清空
     (防「新 PENDING + 陈旧处置者」组合)。"""
     token = await _admin_token(client, session)
     tid = await _default_tenant_id(session)
@@ -284,7 +277,7 @@ async def test_resubmit_clears_handle_columns(
 async def test_page_invalid_uuid_422(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-S1:非法 uuid 传输层 422(此前裸 str 直穿 CAST → PG 22P02 裸 500)。"""
+    """非法 uuid 传输层 422(裸 str 直穿 CAST → PG 22P02 裸 500)。"""
     token = await _admin_token(client, session)
     r = await client.get("/feedback/page", params={"user_id": "abc"}, headers=_auth(token))
     assert r.status_code == 422

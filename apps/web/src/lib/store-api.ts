@@ -1,4 +1,4 @@
-/* store 域 API 封装(033)。类型契约由 ADR-005 管线生成(禁手写)。 */
+/* store 域 API 封装。类型契约由 ADR-005 管线生成(禁手写)。 */
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";
@@ -50,7 +50,7 @@ export function unpublishBot(id: string): Promise<{ ok: boolean }> {
   return api.post(`/system/bots/${id}/unpublish`, {});
 }
 
-/* ============ 104 版本化上架 ============ */
+/* ============ 版本化上架 ============ */
 
 export type BotVersion = components["schemas"]["BotVersionOut"];
 export type BotSnapshot = components["schemas"]["BotSnapshotOut"];

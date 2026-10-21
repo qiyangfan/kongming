@@ -1,4 +1,4 @@
-"""connector 仓储(099):tool_http_connectors CRUD;凭证 AES-GCM(008 cipher
+"""connector 仓储:tool_http_connectors CRUD;凭证 AES-GCM(cipher
 复用,与 webhook secret 同一加密机制),解密仅限出站装配路径(get_call_target)
 与掩码尾号提取——查询/列表面一律掩码,明文永不出现在任何接口响应。"""
 

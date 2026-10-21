@@ -1,8 +1,7 @@
-"""chat 域端口(typing.Protocol 反转,宪法 Article II)。
+"""chat 域端口,以 typing.Protocol 隔离用例层与存储实现。
 
-ExplainRunner 由组合根(router 适配层)绑定 internal.service.explain——chat 域
-service/models 受 import-linter 零框架契约,不可间接 import internal.service
-(携 sqlalchemy 引擎层),007 uuid7 拆分同款教训;适配层组合与 009 rag⇄datasource 同构。
+ExplainRunner 等实现绑定在组合根(router 适配层):chat 域 service/models
+受 import-linter 零框架契约,不得 import internal.service(携 sqlalchemy 引擎层)。
 """
 
 from collections.abc import Callable, Coroutine
@@ -15,26 +14,12 @@ from kongming.rag.ports import QueryHistoryWriter
 
 
 class ChatStoreError(Exception):
-    """chat 持久化基础设施失败(013 构造反转):service 容错段据此捕获,
-    替代原 SQLAlchemyError 直捕——领域层由此零 sqlalchemy import。
-    由 ChatRepository 写路径方法与 commit 的转译边界抛出(读路径不转译)。"""
+    """会话或消息写入失败时使用的领域异常，供 service 层处理存储错误。"""
 
 
 class ChatRepo(Protocol):
-    """chat 持久化端口(013 构造反转):镜像 ChatRepository 公开方法 +
-    commit/rollback 事务原语;service 仅持本端口,不触碰 session。
-
-    写路径方法(create_session/touch_session/rename_session/
-    update_title_if_current/insert_message/delete_session)与 commit
-    失败抛 ChatStoreError(已转译);读路径方法失败抛基础设施原异常
-    (service 不容错,冒出转 500 为既定语义);rollback 不转译(容错段内
-    再失败逃逸为既定语义)。
-
-    写路径成员在实现侧经 _store_error_boundary 装饰(类型形态为
-    typing.Coroutine),故以 def + Coroutine 显式声明而非 async def
-    ——pyright 对 async def 成员推导 CoroutineType,与装饰器形态判
-    结构不兼容(mypy 两形态均接受,此声明两侧精确匹配)。
-    """
+    """会话与消息持久化端口。写入及提交错误转换为 ChatStoreError;
+    读取和回滚错误保留原异常。"""
 
     async def find_bound_tenant(self, *, user_id: str, tenant_key: str) -> str | None: ...
     async def find_default_tenant(self, *, user_id: str) -> tuple[str, str] | None: ...
@@ -73,11 +58,11 @@ class ChatRepo(Protocol):
         result_json: str | None = None,
         summary: str | None = None,
         status: str,
-        attachments: list[dict[str, object]] | None = None,  # 030
-        trace_id: str | None = None,  # 069:轮次质量信号(可选,纯增)
-        retry_count: int = 0,  # 069
-        resolved_question: str | None = None,  # 069
-        prompt_version: str | None = None,  # 069
+        attachments: list[dict[str, object]] | None = None,
+        trace_id: str | None = None,  # 轮次质量信号(可选)
+        retry_count: int = 0,
+        resolved_question: str | None = None,
+        prompt_version: str | None = None,
     ) -> Coroutine[Any, Any, str]: ...
     async def recent_user_questions(self, session_id: str, *, limit: int = 5) -> list[str]: ...
     def commit(self) -> Coroutine[Any, Any, None]: ...
@@ -85,8 +70,7 @@ class ChatRepo(Protocol):
 
 
 class OperLogger(Protocol):
-    """操作日志写入窄端口(015 导出审计;实现=auth 域 SqlOperLogRepo,
-    组合根绑定——chat 域不直接依赖 auth 基础设施,与 013 反转同范式)。"""
+    """操作日志写入端口，由组合根绑定认证域仓储。"""
 
     async def add(
         self, user_id: str | None, action: str, target: str | None, detail: dict[str, object]
@@ -95,10 +79,10 @@ class OperLogger(Protocol):
 
 @dataclass
 class StreamStore:
-    """流式终态落库单元(017 断线续存):独立数据库会话上的端口组装。
+    """流式终态落库单元(断线续存):独立数据库会话上的端口组装。
 
     前端断开后请求作用域会话随响应取消而关闭,assistant 落库/回写/标题任务
-    必须走本独立单元(design §4;010 title_tasks 同款模式)。
+    必须走本独立单元。
     """
 
     repo: ChatRepo
@@ -137,7 +121,7 @@ class ExplainRunner(Protocol):
 
 
 class ToolSpecProvider(Protocol):
-    """按用户授权集产出可注入 ReAct 内核的工具 schema(019;唯一真理源=toolcall 注册表)。
+    """按用户授权集产出可注入 ReAct 内核的工具 schema(唯一真理源=toolcall 注册表)。
 
     实现侧形态:权限点集查询 + 注册表过滤,独立短会话(同步/流式路径通用)。
     """
@@ -146,7 +130,7 @@ class ToolSpecProvider(Protocol):
 
 
 class PendingToolReader(Protocol):
-    """按 trace 聚合仍待确认的工具调用(019;chat 响应 pending_tool_calls 附加)。
+    """按 trace 聚合仍待确认的工具调用(chat 响应 pending_tool_calls 附加)。
 
     实现侧形态:独立短会话只读查询(PENDING_CONFIRM 行经独立事务提交,读已提交)。
     """
@@ -155,7 +139,7 @@ class PendingToolReader(Protocol):
 
 
 class AttachmentChecker(Protocol):
-    """图片附件归属校验(030;实现侧 attachment 域):全部 id 命中(当前用户+
+    """图片附件归属校验(实现侧 attachment 域):全部 id 命中(当前用户+
     租户+UPLOADED)返回摘要列表(filename/mime/size_bytes),任一无效返回 None
     (404 同形由 service 抛出)。"""
 
@@ -165,9 +149,7 @@ class AttachmentChecker(Protocol):
 
 
 class GuardrailPort(Protocol):
-    """prompt 安全护栏(020):chat 域消费面。输入判定返回 (blocked, 脱敏后文本序列
-    [question, *history]);输出过滤返回处理后文本序列(拦截=安全文案替换)。
-    实现侧 fail-closed;未注入(None)时链路行为与护栏引入前一致。"""
+    """输入判定接收问题和历史文本，返回是否拦截及脱敏文本；输出过滤返回处理后的回答文本。"""
 
     async def check_input(
         self, *, trace_id: str, user_id: str, tenant_id: str, texts: list[str]
@@ -179,11 +161,7 @@ class GuardrailPort(Protocol):
 
 
 class MemoryPort(Protocol):
-    """用户长期记忆(022/059):chat 域消费面。recall_hint 返回注入段(空串=无注入
-    零回归);preference_hint 返回偏好默认值段(可忽略/不约束数据范围);
-    explicit_intent 识别「记住…」;form_explicit/form_implicit 形成;current_revision
-    返回问答准备期的人工版本快照(087;None=读取失败,调用方跳过本轮自动写入)。
-    实现侧全部失败降级(仅日志),永不阻断问答主链路。"""
+    """提供长期记忆与偏好提示。空提示表示无内容；查询失败由实现记录并降级，不阻断问答。"""
 
     async def recall_hint(self, *, user_id: str, tenant_id: str, question: str) -> str: ...
 
@@ -206,7 +184,7 @@ class MemoryPort(Protocol):
 
 
 class SuggestionTenantSource(Protocol):
-    """建议问题租户复校窄端口(039;ChatRepository 结构化匹配,语义同
+    """建议问题租户复校窄端口(ChatRepository 结构化匹配,语义同
     ChatService._resolve_tenant 的两步解析)。"""
 
     async def find_bound_tenant(self, *, user_id: str, tenant_key: str) -> str | None: ...
@@ -214,15 +192,8 @@ class SuggestionTenantSource(Protocol):
 
 
 class SuggestionRepo(Protocol):
-    """建议缓存持久化端口(039):find 为读路径(失败不转译冒出);
-    lock/upsert/delete_by_datasource/commit 为写路径(ChatStoreError 转译)。
-
-    lock 为事务级咨询锁(hashtext(tenant:datasource)),commit/rollback 释放;
-    upsert 以 (tenant_id, datasource_key) 唯一约束幂等落库。
-
-    写路径成员(lock/upsert/delete_by_datasource/commit)在实现侧经
-    _store_error_boundary 装饰,形态说明同 ChatRepo(写路径成员注释)。
-    """
+    """建议缓存持久化端口。find 错误保留原异常;锁、写入、删除和提交错误
+    转换为 ChatStoreError。锁由事务结束释放,写入靠租户+数据源唯一键幂等。"""
 
     async def find(self, *, tenant_id: str, datasource_key: str) -> Suggestion | None: ...
     def lock(self, lock_key: str) -> Coroutine[Any, Any, None]: ...
@@ -233,7 +204,7 @@ class SuggestionRepo(Protocol):
 
 
 class SchemaOverviewSource(Protocol):
-    """schema 摘要来源窄端口(039;组合根绑定 internal/meta 同源内省)。
+    """schema 摘要来源窄端口(组合根绑定 internal/meta 同源内省)。
 
     返回供 LLM 生成建议问句的结构摘要文本(保留表过滤/注释/封顶语义由实现
     保证);数据源不可用/内省失败返回 None(service 据此收敛空清单)。"""
@@ -242,7 +213,7 @@ class SchemaOverviewSource(Protocol):
 
 
 class Suggestor(Protocol):
-    """建议问题生成端口(039;实现=AgentClient.suggest_questions,结构化匹配)。
+    """建议问题生成端口(实现=AgentClient.suggest_questions,结构化匹配)。
 
     降级契约:任何失败(不可达/超时/非 200/产出畸形)返回空清单,不抛异常
     ——service 据此按「生成失败」收敛且不落缓存。"""
@@ -251,7 +222,7 @@ class Suggestor(Protocol):
 
 
 class SqlRunOutcome(Protocol):
-    """执行结果(026 rerun;internal ExecResult 解耦形态);
+    """执行结果(rerun;internal ExecResult 解耦形态);
     只读 property 形态——frozen dataclass 结构化匹配(mypy 对可变属性
     要求可写,只读 Protocol 兼容只读实现)。"""
 
@@ -266,7 +237,7 @@ class SqlRunOutcome(Protocol):
 
 
 class ExecuteRunner(Protocol):
-    """SQL 再执行端口(026):完整六层防御由实现侧保证(internal.service.execute)。"""
+    """SQL 再执行端口:完整六层防御由实现侧保证(internal.service.execute)。"""
 
     async def run(
         self,

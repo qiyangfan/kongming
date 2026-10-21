@@ -1,5 +1,4 @@
-"""036 清偿包 api 侧测试(测试先行):孤儿附件清理/team_id 回传/
-收藏切换原子化。"""
+"""覆盖孤儿附件清理、资源归属字段回传和收藏并发写入。"""
 # pyright: reportPrivateUsage=false
 
 import asyncio
@@ -29,7 +28,7 @@ async def _mk_team_full(client: AsyncClient, session: AsyncSession, key: str) ->
     return str(r.json()["id"]), admin
 
 
-# ── ⑤孤儿附件清理 ──
+# ── 孤儿附件清理 ──
 
 
 async def test_orphan_attachment_cleanup(
@@ -85,7 +84,7 @@ async def test_orphan_attachment_cleanup(
     assert rows == []
 
 
-# ── ⑥team_id 回传 ──
+# ── team_id 回传 ──
 
 
 async def test_bot_list_out_has_team_id(
@@ -124,7 +123,7 @@ async def test_memory_list_out_has_team_id(
     """spec「归属字段回传」:记忆列表响应含 team_id。"""
     uid, token = await _user(client, session, make_user, "d36_m")
     team_id, admin = await _mk_team_full(client, session, key="d36m")
-    # 用户加为 MEMBER 才可写团队记忆(032 端点语义)
+    # 用户加为 MEMBER 才可写团队记忆(端点语义)
     rm = await client.post(
         f"/system/teams/{team_id}/members",
         headers={"Authorization": f"Bearer {admin}"},
@@ -151,13 +150,13 @@ async def test_memory_list_out_has_team_id(
     assert personal, "个人记忆 team_id 应为 null"
 
 
-# ── ⑥收藏切换原子化 ──
+# ── 收藏切换原子化 ──
 
 
 async def test_favorite_set_semantics_concurrent(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """审查循环 F6:收藏改 set 幂等语义(原 toggle 并发双击会互相抵消,
+    """收藏改 set 幂等语义(原 toggle 并发双击会互相抵消,
     HTTP POST 非幂等违 spec「重复操作幂等」)——并发双 POST 终态恒为已收藏。"""
     _, token = await _user(client, session, make_user, "d36_f")
     bot_id = await _mk_store_bot(client, token)

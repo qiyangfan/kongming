@@ -1,9 +1,9 @@
-"""trigger 路由(031,薄适配层):/system/triggers/* 管理端点 +
+"""trigger 路由(薄适配层):/system/triggers/* 管理端点 +
 /webhooks/{path} 入站端点 + 调度器/目标执行组合根。
 
-目标执行(TargetRunner):独立会话装配 029/025 组合根(015/017 短事务
-先例);创建者身份(权限放大面=节点级防御以创建者逐层复校,029 立约)。
-108:邮件入站——imaplib 标准库客户端绑定 + 输入护栏绑定(组合根);
+目标执行(TargetRunner):独立会话装配;以创建者身份执行
+(权限放大面——节点级防御以创建者逐层复校,立约)。
+邮件入站——imaplib 标准库客户端绑定 + 输入护栏绑定(组合根);
 凭证任何接口不回显(webhook secret 同口径)。
 """
 
@@ -54,7 +54,7 @@ MANAGE = "system:trigger:manage"
 
 
 def _bot_question(inputs: dict[str, Any]) -> str:
-    """bot 目标指令组装(纯函数,单测钉住)。邮件摘要形态=108 四字段白名单
+    """组装 bot 目标指令。邮件摘要仅包含四个白名单字段
     (from/subject/date/text_preview,已过输入护栏)进指令正文;webhook 沿用
     summary/event 提要;cron 无输入=固定职责指令。"""
     if "subject" in inputs or "text_preview" in inputs:
@@ -68,7 +68,7 @@ def _bot_question(inputs: dict[str, Any]) -> str:
 
 
 class _HttpxNotifier:
-    """Notifier 绑定(5s 超时;SSRF 判定复用 029 http_runner 拒绝段)。"""
+    """Notifier 绑定(5s 超时;SSRF 判定复用 http_runner 拒绝段)。"""
 
     async def check_url(self, url: str) -> None:
         from kongming.workflow.http_runner import assert_url_allowed
@@ -91,7 +91,7 @@ class _HttpxNotifier:
 
 
 class _ImaplibMailClient:
-    """MailClient 绑定(108):imaplib 标准库实现,零新依赖;阻塞 IO 经
+    """MailClient 绑定:imaplib 标准库实现,零新依赖;阻塞 IO 经
     线程池隔离事件循环。`UID SEARCH UID <n+1>:*` 游标语义 + STATUS 探测
     UIDVALIDITY;连接/认证/协议错误按端口三类抛出(服务层分类落 FAILED)。"""
 
@@ -159,7 +159,6 @@ class _ImaplibMailClient:
             except imaplib.IMAP4.abort as e:
                 # 连接中断(abort)先于 error 判定:abort 继承 error,但语义是
                 # 服务器掐断/EOF 而非口令错——误标 AUTH_FAILED 会误导排障
-                # (评审修复)
                 raise MailConnectError(f"连接中断: {type(e).__name__}") from e
             except imaplib.IMAP4.error as e:
                 raise MailAuthError(f"认证失败: {e}") from e
@@ -199,7 +198,7 @@ class _ImaplibMailClient:
                 raise
             if isinstance(e, imaplib.IMAP4.abort):
                 # 选中/搜索/拉取阶段的连接中断:归 CONNECT_FAILED 而非协议失败
-                # (abort 继承 error,统一分支前先分流,评审修复)
+                # (abort 继承 error,统一分支前先分流)
                 raise MailConnectError(f"连接中断: {type(e).__name__}") from e
             # 选中/搜索/拉取阶段的协议态错误(IMAP4.error)统归协议失败
             raise MailProtocolError(f"协议失败: {e}") from e
@@ -213,7 +212,7 @@ class _ImaplibMailClient:
 
 
 class _TriggerInputGuardrail:
-    """输入护栏端口绑定(108):邮件摘要=外部内容,进目标执行前过既有 020
+    """输入护栏端口绑定:邮件摘要=外部内容,进目标执行前过既有
     护栏;独立短会话读配置,审计经 writer 独立事务(与 chat 面同款装配)。"""
 
     async def check(
@@ -241,8 +240,8 @@ def _make_service(session: AsyncSession, actor_id: str | None = None) -> Trigger
             await SqlOperLogRepo(session).add(actor_id, action, target, detail)
 
     class _TargetCheckerImpl:
-        """040 目标存在性(与前端候选同源,与派发期同口径):
-        workflow=创建者视角可见集合(032 归属过滤:个人创建 + 所在团队,
+        """目标存在性(与前端候选同源,与派发期同口径):
+        workflow=创建者视角可见集合(归属过滤:个人创建 + 所在团队,
         与 workflow 列表端点同源同参);bot=租户级存在。"""
 
         async def target_exists(
@@ -252,9 +251,9 @@ def _make_service(session: AsyncSession, actor_id: str | None = None) -> Trigger
                 from kongming.team.repository import SqlTeamRepo
                 from kongming.workflow.repository import SqlWorkflowRepo
 
-                # 团队口径(R1 实锤回归):前端候选=list_workflows(team_ids=
-                # 角色映射键集),缺 team_ids 则他人创建的团队 workflow 在候选
-                # 可选、提交必拒——checker 与候选必须同源
+                # 团队候选范围与 list_workflows 保持一致(team_ids=角色映射
+                # 键集):缺 team_ids 则他人创建的团队 workflow 在候选可选、
+                # 提交必拒——checker 与候选必须同源
                 roles = await SqlTeamRepo(session).role_map(user_id=creator_id)
                 rows = await SqlWorkflowRepo(session).list_latest(
                     tenant_id=tenant_id,
@@ -276,16 +275,16 @@ def _make_service(session: AsyncSession, actor_id: str | None = None) -> Trigger
         notifier=_HttpxNotifier(),
         oper=_Oper(),
         target_checker=_TargetCheckerImpl(),
-        # 101:部署级固定退避(重试次数上限在触发器行,间隔属部署)
+        # 部署级固定退避(重试次数上限在触发器行,间隔属部署)
         retry_backoff_sec=settings.trigger_retry_backoff_sec,
-        # 108:邮件入站客户端与输入护栏(组合根绑定)
+        # 邮件入站客户端与输入护栏(组合根绑定)
         mail=_ImaplibMailClient(),
         input_guard=_TriggerInputGuardrail(),
     )
 
 
 class _TargetRunnerImpl:
-    """029/025 目标执行装配(独立会话;创建者身份)。"""
+    """目标执行装配(独立会话;创建者身份)。"""
 
     async def run_target(
         self,
@@ -300,7 +299,7 @@ class _TargetRunnerImpl:
     ) -> tuple[bool, str, str]:
         async with get_sessionmaker()() as s:
             try:
-                # R1-S3:创建者账号态闸(与 025 bot 分支对称,R1-L3)——禁用用户
+                # 创建者账号态闸(与 bot 分支对称)——禁用用户
                 # 的权限绑定仍在,不经此闸其 cron 工作流持续以其权限执行;
                 # 删除用户则绑定消失由六层 fail-closed(既定正确)
                 from sqlalchemy import text as _status_text
@@ -336,8 +335,8 @@ class _TargetRunnerImpl:
                             {"t": tenant_id},
                         )
                     ).scalar_one()
-                    # R1 实锤对齐:派发期可见性与 checker 同口径——创建者是触发器
-                    # 创建者,团队 workflow 成员(经 member_roles)可执行;缺此参
+                    # 派发期与 checker 使用相同的可见性规则:创建者及团队
+                    # workflow 成员(经 member_roles)可执行;缺此参
                     # 则团队目标 _assert_visible 恒 False,创建成功派发必败
                     from kongming.team.repository import SqlTeamRepo
 
@@ -356,12 +355,12 @@ class _TargetRunnerImpl:
                         inputs=inputs,
                         version=None,
                         member_roles=member_roles,
-                        # 审查循环 B3:cron/webhook 均系统触发,
+                        # cron/webhook 均系统触发,
                         # MANUAL 仅留给人工端点
                         trigger_source="API",
                         trace_id=uuid.uuid4().hex,
                     )
-                    # R1-S5:目标 run 关联回填(029 run_id 已随响应返回)
+                    # 目标 run 关联回填(run_id 已随响应返回)
                     return (
                         out["status"] == "SUCCESS",
                         str(out.get("run_id") or ""),
@@ -421,9 +420,9 @@ class TriggerIn(BaseModel):
     adapter: str = Field(default="custom", pattern="^(custom|github)$")
     notify_url: str = Field(default="", max_length=512)
     secret: str = Field(default="", max_length=256)
-    # 101:失败重试次数上限(0–5;0=不重试,缺省零回归)
+    # 失败重试次数上限(0–5;0=不重试,缺省)
     max_retries: int = Field(default=0, ge=0, le=5)
-    # 108:邮件形态配置(凭证明文只进不出,即刻加密落库)
+    # 邮件形态配置(凭证明文只进不出,即刻加密落库)
     imap_host: str = Field(default="", max_length=255)
     imap_port: int = Field(default=993, ge=1, le=65535)
     imap_tls: bool = True
@@ -441,11 +440,11 @@ class TriggerUpdateIn(BaseModel):
     min_interval_sec: int = Field(default=60, ge=0, le=86400)
     adapter: str = Field(default="custom", pattern="^(custom|github)$")
     notify_url: str = Field(default="", max_length=512)
-    # R1-T4:密钥轮换(空=保持现值;更新 webhook 密钥后旧签名即失效)
+    # 密钥轮换(空=保持现值;更新 webhook 密钥后旧签名即失效)
     secret: str = Field(default="", max_length=256)
-    # 101:失败重试次数上限(0–5;0=不重试,缺省零回归)
+    # 失败重试次数上限(0–5;0=不重试,缺省)
     max_retries: int = Field(default=0, ge=0, le=5)
-    # 108:邮件形态配置(凭证空框=保持现值,与 webhook secret 同口径)
+    # 邮件形态配置(凭证空框=保持现值,与 webhook secret 同口径)
     imap_host: str = Field(default="", max_length=255)
     imap_port: int = Field(default=993, ge=1, le=65535)
     imap_tls: bool = True
@@ -470,7 +469,7 @@ async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header:
 
 
 class TriggerOut(BaseModel):
-    """031 触发器条目(审查循环 D-F2:契约化)。"""
+    """触发器列表中的条目。"""
 
     id: str
     tg_key: str
@@ -487,9 +486,9 @@ class TriggerOut(BaseModel):
     has_secret: bool
     last_fired_at: str | None = None
     next_fire_at: str | None = None
-    # 101:失败重试次数上限(0=不重试)
+    # 失败重试次数上限(0=不重试)
     max_retries: int = 0
-    # 108:邮件形态配置(凭证仅掩码口径,永不回显明文)
+    # 邮件形态配置(凭证仅掩码口径,永不回显明文)
     imap_host: str = ""
     imap_port: int = 993
     imap_tls: bool = True
@@ -506,11 +505,11 @@ class TriggerRunOut(BaseModel):
     duration_ms: int
     target_run_ref: str | None = None
     created_at: str | None = None
-    # 101 重试链:尝试序号 + 首跑关联 + 挂起重试到期时刻
+    # 重试链:尝试序号 + 首跑关联 + 挂起重试到期时刻
     attempt: int = 1
     retry_of_run_id: str | None = None
     next_retry_at: str | None = None
-    # 108:邮件触发的标准化摘要 JSON(原文不落库,只留白名单摘要)
+    # 邮件触发的标准化摘要 JSON(原文不落库,只留白名单摘要)
     summary: str = ""
 
 
@@ -537,7 +536,7 @@ def _row_out(row: dict[str, Any]) -> dict[str, Any]:
         "last_fired_at": (row["last_fired_at"].isoformat() if row.get("last_fired_at") else None),
         "next_fire_at": (row["next_fire_at"].isoformat() if row.get("next_fire_at") else None),
         "max_retries": int(row.get("max_retries") or 0),
-        # 108:邮件配置回显(凭证仅掩码口径 has_imap_credential)
+        # 邮件配置回显(凭证仅掩码口径 has_imap_credential)
         "imap_host": str(row.get("imap_host") or ""),
         "imap_port": int(row.get("imap_port") or 993),
         "imap_tls": bool(row.get("imap_tls")),
@@ -552,7 +551,7 @@ def _row_out(row: dict[str, Any]) -> dict[str, Any]:
 
 
 class CronPreviewOut(BaseModel):
-    """040·11 cron 预览(与创建/调度同源的解析计算,前端防抖消费)。"""
+    """cron 预览(与创建/调度同源的解析计算,前端防抖消费)。"""
 
     next: list[str]
 
@@ -563,7 +562,7 @@ async def cron_preview(
     user: Annotated[dict[str, object], Depends(current_user)],
     _: Annotated[None, Depends(require_perm(MANAGE))],
 ) -> CronPreviewOut:
-    """接下来 3 次触发时刻(单次看不出日历跳跃类缺陷,036 教训);
+    """接下来 3 次触发时刻(单次看不出日历跳跃类缺陷);
     非法表达式 400 附原文案——与创建期校验同口径,禁第二套 cron 语义。"""
     try:
         fire = dt.datetime.now(dt.timezone(dt.timedelta(hours=8)))  # Asia/Shanghai(与服务层同钟)
@@ -759,7 +758,7 @@ async def page_trigger_runs(
                 "next_retry_at": (
                     r["next_retry_at"].isoformat() if r.get("next_retry_at") else None
                 ),
-                # 108:标准化摘要 JSON(邮件触发;原文不落库)
+                # 标准化摘要 JSON(邮件触发;原文不落库)
                 "summary": str(r.get("summary") or ""),
             }
             for r in rows
@@ -780,7 +779,7 @@ async def webhook_inbound(
 ) -> JSONResponse:
     import asyncio
 
-    # R1-T6:Content-Length 预检(超限不读 body 进内存)
+    # Content-Length 预检(超限不读 body 进内存)
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > 1 * 1024 * 1024:
         return JSONResponse(status_code=413, content={"detail": "PAYLOAD_TOO_LARGE"})
@@ -791,7 +790,7 @@ async def webhook_inbound(
         uuid.UUID(path)
     except ValueError:
         return JSONResponse(status_code=404, content={"detail": "NOT_FOUND"})
-    # R1-S6:GitHub 实际签名头 X-Hub-Signature-256: sha256=<hex>,
+    # GitHub 实际签名头 X-Hub-Signature-256: sha256=<hex>,
     # 与 X-Signature 二取一(前缀剥除后同规校验)
     effective_sig = x_signature or ""
     if not effective_sig and x_hub_signature_256:

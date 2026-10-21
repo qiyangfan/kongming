@@ -1,4 +1,4 @@
-"""memory 路由(022,agent-memory spec「记忆自管理」):本人记忆四端点。
+"""memory 路由(agent-memory spec「记忆自管理」):本人记忆四端点。
 
 登录即可(无新权限点);归属收口=user 必为本人 + X-Tenant-Id 白名单复校
 (与 chat 同构);越权 404 同形。
@@ -33,7 +33,7 @@ router = APIRouter(prefix="/memory", tags=["memory"])
 def _get_service(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> MemoryService:
-    # embedding 通道复用 009 单例(013);operlog 复用 auth 域(015 ip 链路自动覆盖)
+    # embedding 客户端复用单例；操作日志由 auth 域写入并自动附带请求 IP。
     from kongming.team.repository import SqlTeamRepo
 
     class _TeamRoles:
@@ -53,7 +53,7 @@ def _get_service(
 
 async def _tenant_id(session: AsyncSession, user_id: str, tenant_key: str | None) -> str:
     """X-Tenant-Id 白名单复校(与 chat._resolve_tenant 同构);缺省取默认。
-    SQL 单一真理源=kongming.tenant.resolve_tenant(B1-B10 收口)。"""
+    SQL 单一真理源=kongming.tenant.resolve_tenant。"""
     from kongming.tenant import resolve_tenant
 
     resolved = await resolve_tenant(session, user_id=user_id, tenant_key=tenant_key)
@@ -71,13 +71,13 @@ class MemoryItemOut(BaseModel):
     dormant: bool
     last_hit_at: str | None
     created_at: str
-    team_id: str | None = None  # 036⑥:归属回传(None=个人;契约纯增)
-    kind: str = "memory"  # 059:列表分组(kind=category;契约纯增)
-    legacy: bool = False  # 059:true=停写前 IMPLICIT 自由文本
+    team_id: str | None = None  # 归属回传(None=个人)
+    kind: str = "memory"  # 列表分组键=category
+    legacy: bool = False  # true=停写前 IMPLICIT 自由文本
 
 
 class PrefsIn(BaseModel):
-    # 059 闭合 schema:未知键 422(与 put_prefs.reject_unknown_keys 同语义)
+    # 闭合 schema:未知键 422(与 put_prefs.reject_unknown_keys 同语义)
     model_config = ConfigDict(extra="forbid")
 
     preferred_datasource: str | None = None
@@ -100,7 +100,7 @@ async def get_memory_prefs(
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> PrefsOut:
-    """059:读取本人闭合偏好槽位。"""
+    """读取本人闭合偏好槽位。"""
     from kongming.memory.prefs import SLOT_KEYS
 
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
@@ -116,7 +116,7 @@ async def put_memory_prefs(
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> PrefsOut:
-    """087:省略字段保留、显式 null 删除槽位、空补丁真无操作;未知键拒绝。"""
+    """省略字段保留、显式 null 删除槽位、空补丁真无操作;未知键拒绝。"""
     # model_fields_set 区分「显式传 null」与「省略」:仅显式提供的键进 raw
     raw = {k: v for k, v in body.model_dump().items() if k in body.model_fields_set}
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
@@ -134,7 +134,7 @@ async def delete_memory_prefs(
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> PrefsOut:
-    """087:清空本人本租户全部偏好(保留空行;笔记/团队记忆不受影响)。"""
+    """清空本人本租户全部偏好(保留空行;笔记/团队记忆不受影响)。"""
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
     prefs = await svc.clear_prefs(user_id=str(user["sub"]), tenant_id=tid)
     return PrefsOut(prefs=prefs)
@@ -157,7 +157,7 @@ def _item(r: dict[str, object]) -> MemoryItemOut:
         dormant=bool(r["dormant"]),
         last_hit_at=last_hit.isoformat() if isinstance(last_hit, datetime) else None,
         created_at=created.isoformat() if isinstance(created, datetime) else str(created),
-        team_id=str(r["team_id"]) if r.get("team_id") else None,  # 036⑥
+        team_id=str(r["team_id"]) if r.get("team_id") else None,
         kind=category,
         legacy=str(r.get("source") or "").upper() == "IMPLICIT",
     )
@@ -165,7 +165,7 @@ def _item(r: dict[str, object]) -> MemoryItemOut:
 
 class MemoryCreateIn(BaseModel):
     content: str = Field(min_length=1, max_length=500)
-    team_id: str | None = None  # 032:团队记忆(限 OWNER/MEMBER 成员)
+    team_id: str | None = None  # 团队记忆(限 OWNER/MEMBER 成员)
 
 
 @router.post("", status_code=201)
@@ -176,13 +176,13 @@ async def create_memory(
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
-    """显式写入(032):team_id 非空=团队记忆(OWNER/MEMBER 成员才允许);
+    """显式写入:team_id 非空=团队记忆(OWNER/MEMBER 成员才允许);
     空=个人记忆(与「请记住」同路径)。"""
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
     if body.team_id:
         from kongming.team.repository import SqlTeamRepo
 
-        # R1-J5:团队必须属于当前租户(跨租户写入 404 同形)
+        # 团队必须属于当前租户(跨租户写入 404 同形)
         team = await SqlTeamRepo(session).get_team(tenant_id=tid, team_id=body.team_id)
         if team is None:
             raise HTTPException(status_code=404, detail="NOT_FOUND") from None

@@ -1,9 +1,4 @@
-/* Markdown 渲染(026 conversation-artifacts document 卡;依赖立法 ADR-009):
-   react-markdown + remark 生态成熟件,不自写 tokenizer;不经
-   dangerouslySetInnerHTML、原始 HTML 一律按字面文本展示(spec
-   「Markdown 渲染不解析原始 HTML」——无 rehype-raw 时默认即此行为)。
-   单换行=自然段习惯由 remark-breaks 保真;GFM 表格/删除线由
-   remark-gfm 提供;样式映射保持既有 document 卡视觉(色彩全走 token)。 */
+/* 使用 react-markdown 渲染 Markdown，不解析原始 HTML（ADR-009）。 */
 
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
@@ -65,8 +60,8 @@ const COMPONENTS: Components = {
 };
 
 export function MarkdownText({ text }: { text: string }) {
-  // v10 渲染根是 Fragment(无包裹 div):块元素直接落在本层,
-  // space-y-2 与旧实现根容器语义一致
+  // react-markdown 渲染根是 Fragment(无包裹 div):块元素直接落在本层,
+  // space-y-2 由此作用于各块元素
   return (
     <div className="space-y-2">
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={COMPONENTS}>

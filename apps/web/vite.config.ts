@@ -5,24 +5,22 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [
-    // React Compiler 1.0(adopt stack-refresh 3.4):构建期自动 memo;违例组件
-    // 编译器跳过并告警不阻断。手写 memo 保留叠加(裁决:不删,新代码逐步免写)
+    // 启用 React Compiler，在构建时自动优化组件更新。
     react({ compiler: true }),
     tailwindcss(),
   ],
   resolve: {
     alias: {
-      // ESM 无 __dirname;官方模板姿势:import.meta.url(不依赖 vite 的内部 shim)
+      // ESM 没有 __dirname；从 import.meta.url 解析项目路径。
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
   server: {
     port: 5173,
-    // 放行隧道域名(企微可信域名 e2e 用):cloudflared 快速隧道 + ngrok 免费固定域名
+    // 端到端测试通过 cloudflared 或 ngrok 暴露本地可信域名。
     allowedHosts: [".trycloudflare.com", ".ngrok-free.app", ".ngrok-free.dev"],
     proxy: {
-      // 目标可经 VITE_API_PROXY_TARGET 覆盖(冒烟/联调指向非缺省 api 端口,
-      // 如容器栈 18080);缺省保持既有 8000 契约不变
+      // 可通过 VITE_API_PROXY_TARGET 指向其他 API 地址；默认使用本地 8000 端口。
       "/api": {
         target: process.env.VITE_API_PROXY_TARGET ?? "http://localhost:8000",
         rewrite: (p) => p.replace(/^\/api/, ""),
@@ -30,21 +28,17 @@ export default defineConfig({
     },
   },
   build: {
-    // 现代浏览器基线(Vite 默认 "modules"=esnext 过宽;es2022 对齐 tsconfig target)
+    // 与 tsconfig 的目标版本一致。
     target: "es2022",
-    // 事前实测:react-vendor ~290kB / markdown ~149kB 合法块超 500kB 默认线属预期,阈值随分包调宽
+    // 允许较大的按需加载块，避免把合法分包误报为构建问题。
     chunkSizeWarningLimit: 1500,
-    // Vite 8(Rolldown):rollupOptions 更名 rolldownOptions(迁移指南;manualChunks
-    // 函数形态尚可用已弃用,066 分包边界由 echarts-boundary.test.ts 静态护栏钉住)
+    // 使用 Rolldown 的分包配置，确保图表依赖保留在动态加载的块中。
     rolldownOptions: {
       output: {
-        // 按库名精确分包(066):粗粒度「node_modules → 单一 vendor 桶」会把 zrender
-        // (约 250kB,echarts 渲染引擎)从已懒加载的 echarts 动态块提到首屏,禁——
-        // echarts/zrender 不落入任何规则,留给 Rollup 自动共享块(仅动态可达)。
-        // 回归护栏:src/lib/echarts-boundary.test.ts 静态扫描钉死该边界。
+        // 按库名拆分依赖；不要将 ECharts 或 zrender 提到首屏块。
+        // src/lib/echarts-boundary.test.ts 检查图表引擎仍按需加载。
         manualChunks(id: string): string | undefined {
-          // pnpm 虚拟店布局:真实包名在最后一个 node_modules/ 之后
-          // (…/node_modules/.pnpm/pkg@ver/node_modules/pkg/…)——取末段
+          // pnpm 虚拟目录可能包含多段 node_modules，取最后一段之后的包名。
           const nm = id.lastIndexOf("node_modules");
           if (nm < 0) return undefined;
           const rest = id.slice(nm + "node_modules/".length);

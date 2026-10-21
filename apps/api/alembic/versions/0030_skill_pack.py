@@ -1,4 +1,4 @@
-"""056 skill_pack + skill_pack_binding 一次建全(ADR-004)。
+"""skill_pack + skill_pack_binding 一次建全(ADR-004)。
 
 Revision ID: 0030
 Revises: 0029

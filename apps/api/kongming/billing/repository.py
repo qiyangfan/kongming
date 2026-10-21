@@ -1,4 +1,4 @@
-"""billing 存储(034):策略/套餐/账单 + 用量聚合(sys_llm_usage
+"""billing 存储:策略/套餐/账单 + 用量聚合(sys_llm_usage
 服务端采集为唯一事实源,不经客户端)。"""
 
 import json
@@ -114,7 +114,7 @@ class SqlBillingRepo:
         )
         return [dict(r) for r in rows]
 
-    # ── 套餐 U/D(035 挂账④) ──
+    # ── 套餐查改删 ──
 
     async def get_plan(self, *, plan_id: str) -> dict[str, Any] | None:
         row = (
@@ -171,7 +171,7 @@ class SqlBillingRepo:
         )
         return res.rowcount > 0
 
-    # ── 配置面租户清单(035 挂账⑥) ──
+    # ── 配置面简列与归属校验 ──
 
     async def list_tenants_brief(self) -> list[dict[str, Any]]:
         rows = (
@@ -189,7 +189,7 @@ class SqlBillingRepo:
         return [dict(r) for r in rows]
 
     async def bot_exists_in_tenant(self, *, bot_id: str, tenant_id: str) -> bool:
-        """BOT 级策略 scope_ref 复校(035):Bot 属该租户才合法(跨租户 404)。"""
+        """BOT 级策略 scope_ref 复校:Bot 属该租户才合法(跨租户 404)。"""
         return (
             await self._s.execute(
                 text(
@@ -201,7 +201,7 @@ class SqlBillingRepo:
         ).scalar_one_or_none() is not None
 
     async def list_bots_brief(self, *, tenant_id: str) -> list[dict[str, Any]]:
-        """BOT 级策略配置面 Bot 下拉(035):本租户 Bot 简列(挂 MANAGE 自供,
+        """BOT 级策略配置面 Bot 下拉:本租户 Bot 简列(挂 MANAGE 自供,
         解耦 bot:manage——与 list_tenants_brief 同解耦原则)。"""
         rows = (
             (
@@ -219,7 +219,7 @@ class SqlBillingRepo:
         return [dict(r) for r in rows]
 
     async def user_exists_in_tenant(self, *, user_id: str, tenant_id: str) -> bool:
-        """USER 级策略 scope_ref 复校(103):用户存在(未软删)且绑定该租户
+        """USER 级策略 scope_ref 复校:用户存在(未软删)且绑定该租户
         才合法(跨租户/不存在 404)。"""
         return (
             await self._s.execute(
@@ -234,7 +234,7 @@ class SqlBillingRepo:
         ).scalar_one_or_none() is not None
 
     async def list_users_brief(self, *, tenant_id: str) -> list[dict[str, Any]]:
-        """USER 级策略配置面用户下拉(103):本租户用户简列(挂 MANAGE 自供,
+        """USER 级策略配置面用户下拉:本租户用户简列(挂 MANAGE 自供,
         解耦 user:manage——与 list_bots_brief 同解耦原则;软删不列)。"""
         rows = (
             (
@@ -254,7 +254,7 @@ class SqlBillingRepo:
         return [dict(r) for r in rows]
 
     async def team_exists_in_tenant(self, *, team_id: str, tenant_id: str) -> bool:
-        """TEAM 级策略 scope_ref 复校(103):团队属该租户才合法(跨租户 404)。"""
+        """TEAM 级策略 scope_ref 复校:团队属该租户才合法(跨租户 404)。"""
         return (
             await self._s.execute(
                 text(
@@ -266,7 +266,7 @@ class SqlBillingRepo:
         ).scalar_one_or_none() is not None
 
     async def list_teams_brief(self, *, tenant_id: str) -> list[dict[str, Any]]:
-        """TEAM 级策略配置面团队下拉(103):本租户团队简列(挂 MANAGE 自供,
+        """TEAM 级策略配置面团队下拉:本租户团队简列(挂 MANAGE 自供,
         解耦 team:manage——与 list_bots_brief 同解耦原则)。"""
         rows = (
             (
@@ -284,7 +284,7 @@ class SqlBillingRepo:
         return [dict(r) for r in rows]
 
     async def bot_scope_info(self, *, bot_id: str, tenant_id: str) -> dict[str, Any] | None:
-        """网关判定归属解析(103):Bot 的 created_by(USER 级命中)与
+        """网关判定归属解析:Bot 的 created_by(USER 级命中)与
         team_id(TEAM 级命中)一次点查;Bot 不在该租户返回 None(防御)。"""
         row = (
             (
@@ -324,7 +324,7 @@ class SqlBillingRepo:
             {"p": plan_id, "t": tenant_id},
         )
 
-    # ── 用量聚合(021 采集为唯一事实源) ──
+    # ── 用量聚合(采集为唯一事实源) ──
 
     async def month_token_usage(self, *, tenant_id: str, month: str) -> int:
         """当月 token 合计(prompt+completion;month=YYYY-MM)。"""
@@ -360,7 +360,7 @@ class SqlBillingRepo:
         )
 
     async def month_bot_token_usage(self, *, tenant_id: str, bot_id: str, month: str) -> int:
-        """当月单 Bot token 合计(035 BOT 级配额;bot_id 归属=同步采集口径)。"""
+        """当月单 Bot token 合计(BOT 级配额;bot_id 归属=同步采集口径)。"""
         return int(
             (
                 await self._s.execute(
@@ -378,7 +378,7 @@ class SqlBillingRepo:
         )
 
     async def month_user_token_usage(self, *, tenant_id: str, user_id: str, month: str) -> int:
-        """当月单用户 token 合计(103 USER 级配额):用量行经 Bot 归属联表
+        """当月单用户 token 合计(USER 级配额):用量行经 Bot 归属联表
         解析(usage.bot_id → bot.created_by);用户被软删后聚合归零
         (策略保留但零命中,不级联)。"""
         return int(
@@ -402,7 +402,7 @@ class SqlBillingRepo:
         )
 
     async def month_team_token_usage(self, *, tenant_id: str, team_id: str, month: str) -> int:
-        """当月单团队 token 合计(103 TEAM 级配额):用量行经资源归属联表
+        """当月单团队 token 合计(TEAM 级配额):用量行经资源归属联表
         解析(usage.bot_id → bot.team_id,零用量表 schema 变更);资源换队
         跟随现归属(联表即定义,当月治理窗口语义);团队被删除后聚合归零
         (策略保留但零命中,不级联)。"""
@@ -428,11 +428,10 @@ class SqlBillingRepo:
         )
 
     async def month_usage_by_model(self, *, tenant_id: str, month: str) -> list[dict[str, Any]]:
-        """按模型聚合(账单 usage_json 明细)。口径(038⑥ 清偿):calls=
-        成功调用次数(FILTER status='SUCCESS',ERROR 不计);tokens=实际
-        消耗全量(与月账单金额口径 month_token_usage 一致,畸形应答带回
-        usage 的 ERROR 行 tokens 也计)——两语义各自成立,usage_json 自洽
-        (by_model tokens 求和=月总 tokens)。"""
+        """按模型聚合(账单 usage_json 明细)。calls=成功调用次数
+        (FILTER status='SUCCESS',ERROR 不计);tokens=实际消耗全量,
+        与月账单口径 month_token_usage 一致(ERROR 行带回 usage 的
+        tokens 也计);by_model tokens 求和=月总 tokens。"""
         rows = (
             (
                 await self._s.execute(
@@ -527,7 +526,7 @@ class SqlBillingRepo:
         return dict(row) if row else None
 
     async def page_all_invoices(self, *, page: int, size: int) -> tuple[list[dict[str, Any]], int]:
-        """管理面账单分页(035 挂账⑧,弃 LIMIT 200):每行附最新支付单状态。"""
+        """管理面账单分页:每行附最新支付单状态。"""
         total = int(
             (await self._s.execute(text("SELECT count(*) FROM public.sys_invoice"))).scalar_one()
         )
@@ -574,7 +573,7 @@ class SqlBillingRepo:
         )
         return [dict(r) for r in rows]
 
-    # ── 支付单(035):状态机转换一律 CAS(WHERE status='CREATED'),
+    # ── 支付单:状态机转换一律 CAS(WHERE status='CREATED'),
     # 并发/重放安全由数据库行级原子性兜底 ──
 
     async def insert_payment_if_pending(
@@ -586,10 +585,10 @@ class SqlBillingRepo:
         amount: int,
         expires_at: Any,
     ) -> str | None:
-        """条件插入(R1-S1/A1):INSERT...SELECT 仅账单 PENDING 才落行(原子,
-        消 create 竞态——读后判 PENDING 到插入间被支付/作废的窗口由本句
-        兜底);SAVEPOINT 内捕部分唯一索引违例(并发双击同在途)→ None,
-        由服务层重读分流(双击幂等返回现有单/409)。"""
+        """条件插入:INSERT...SELECT 仅账单 PENDING 才落行,原子消除
+        读后判 PENDING 与插入间被支付/作废的竞态窗口;SAVEPOINT 内捕获
+        部分唯一索引违例(并发双击同在途)返回 None,由服务层重读分流
+        (双击幂等返回现有单/409)。"""
         from sqlalchemy.exc import IntegrityError
 
         rid = str(uuid7())
@@ -725,7 +724,7 @@ class SqlBillingRepo:
         return res.rowcount > 0
 
     async def expire_overdue_payments(self) -> list[dict[str, Any]]:
-        """每日薄壳批量兜底:全部过期在途单置 EXPIRED,返回行供逐条审计。"""
+        """批量兜底:过期在途单全部置 EXPIRED,返回行供逐条审计。"""
         rows = (
             (
                 await self._s.execute(

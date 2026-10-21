@@ -1,9 +1,4 @@
-"""query_history 回写治理测试(016,测试先行):同题幂等覆盖/保旧向量/上限淘汰。
-
-014 O4(反馈纠错原 SQL 重复沉淀)与 009③(无去重/上限挂账)的清偿——
-writeback SHALL 幂等:(tenant, datasource_key, question) 同键覆盖保留最新
-成功 SQL,embedding 失败保留旧向量;每租户+源维度总量上限淘汰最旧。
-"""
+"""覆盖 query_history 的幂等更新、旧向量保留和数量上限淘汰。"""
 # pyright: reportPrivateUsage=false
 
 from typing import cast
@@ -24,7 +19,7 @@ pytestmark = pytest.mark.usefixtures("fake_embed")
 
 
 def _reply(sql: str):
-    """成功 AgentReply(链路 SUCCESS → 触发回写)。"""
+    """构造会触发历史回写的成功 AgentReply。"""
     from kongming.chat.agent_client import AgentReply
 
     return AgentReply(
@@ -76,7 +71,7 @@ async def test_same_question_upsert_keeps_single_row(
     make_user: MakeUser,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """同题两次成功回写:一行、sql_text 为最新(014 O4 重复沉淀清零)。"""
+    """同题两次成功回写:一行、sql_text 为最新(O4 重复沉淀清零)。"""
     from tests.test_chat_query import _user_with_chat_perm
 
     _, token = await _user_with_chat_perm(client, session, make_user)
@@ -125,7 +120,7 @@ async def test_cap_evicts_oldest(
     make_user: MakeUser,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """总量上限:超限淘汰 created_at 最旧行(monkeypatch cap=3 直证)。"""
+    """超过总量上限时淘汰 created_at 最早的记录。"""
     import kongming.rag.repository as repo_mod
     from tests.test_chat_query import _user_with_chat_perm
 
@@ -179,10 +174,7 @@ async def test_overlong_question_writeback_survives(
     make_user: MakeUser,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """超长中文问句回写不炸(/goal R1):question 传输层上限 2000 字符,
-    UTF-8 可 6000 字节超 btree 行上限(~2704)——唯一索引用 md5(question)
-    表达式,超长问句回写正常且幂等(修前:索引炸→回写失败仅告警)。
-    """
+    """question 最多 2000 个字符；唯一索引对长问句使用 md5 表达式，确保回写幂等。"""
     from tests.test_chat_query import _user_with_chat_perm
 
     _, token = await _user_with_chat_perm(client, session, make_user)

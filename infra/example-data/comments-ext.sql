@@ -2,7 +2,7 @@
 -- 仅 schema 前缀不同(外部库原生落 public)。**只能对 sakila_ext 库执行**
 -- (load.sh 第 6 步),严禁混入 comments.sql 在 kongming 库执行——
 -- public 前缀会误伤 kongming 库自身业务表。
--- 经 /internal/meta/schema 进入 LLM schema 提示 + 041 呈现层列标签溯源。
+-- 通过 /internal/meta/schema 提供给模型查询提示，并用于页面列名显示。
 
 COMMENT ON TABLE public.actor IS '演员';
 COMMENT ON TABLE public.film IS '影片';

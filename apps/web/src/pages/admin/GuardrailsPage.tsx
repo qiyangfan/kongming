@@ -1,6 +1,4 @@
-/* 护栏页(020,prompt-guardrails spec「规则可配置」「护栏审计与查询」):
-   规则清单(启停/动作/阈值即时生效)+ 触发审计分页(类型/规则/动作/时间)。
-   权限点 system:guardrail:manage。 */
+/* 管理护栏规则和触发审计；需要 system:guardrail:manage 权限。 */
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -64,7 +62,7 @@ export default function GuardrailsPage() {
   });
 
   const toggle = useMutation({
-    // R1-M5:启停只传 enabled——不带 action/threshold(服务端 None=不触动,
+    // 启停只传 enabled——不带 action/threshold(服务端 None=不触动,
     // 避免把合并视图值固化成陈旧锚点/清掉既有动作覆盖)
     mutationFn: (input: { name: string; enabled: boolean }) =>
       updateGuardrailRule(input.name, { enabled: input.enabled }),
@@ -174,7 +172,6 @@ export default function GuardrailsPage() {
                   </SelectContent>
                 </Select>
               ) : (
-                // action 契约窄联合;未知值回落 default,与原 ?? "default" 等价
                 <StatusBadge meta={ACTION_META} value={r.action} fallbackVariant="default" />
               ),
           },

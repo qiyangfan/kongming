@@ -1,15 +1,4 @@
-"""0046: 配额策略 scope 扩展 USER/TEAM(103-quota-user-team-scope)
-
-sys_quota_policy 纯枚举面扩展:ck_sys_quota_policy_scope 由
-('TENANT','BOT') 放宽为 ('TENANT','BOT','USER','TEAM');
-ck_sys_quota_policy_scope_ref 互斥分支同步扩展(BOT/USER/TEAM 一律
-scope_ref NOT NULL,TENANT 强制 NULL)——零数据迁移,存量 TENANT/BOT
-行不受影响。USER 级=scope_ref 绑定租户内用户,TEAM 级=绑定租户内团队
-(用量聚合联表解析,零用量表 schema 变更,见 change design)。
-
-**downgrade**:带存量守卫——存在 USER/TEAM 行时拒绝降级(RuntimeError),
-须先人工清理新级策略行再回退;守卫通过后恢复 0023 形态双约束。
-"""
+"""配额策略新增 USER 和 TEAM 范围。降级时若仍有这两类策略会拒绝执行，需先清理策略行。"""
 
 from sqlalchemy import text
 

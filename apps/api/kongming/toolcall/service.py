@@ -1,15 +1,6 @@
-"""toolcall 用例编排(019):六层纵深防御 + handler 分发 + 写工具确认流。
+"""工具调用用例编排，按权限、租户归属、参数校验、审计、限流和人工确认执行防护。
 
-零框架纪律:不 import fastapi/sqlalchemy/redis;SQL 全在 repository,外部能力
-(执行路由/RAG 召回/回执落消息)经 ports 端口注入,组合根在 router。
-
-防线顺序(spec「工具纵深防御(六层)」):
-L1 内部令牌(router middleware 既有)+ 租户解析/绑定复校(repository);
-L2 工具权限点(注册表绑定,角色集不含即拒);
-L3 租户隔离(L1 复校 fail-closed 已覆盖);
-L4 参数 JSON Schema 校验 + 工具层语义预检(SQL 工具首关键字白名单);
-L5 审计全量落(独立短事务)+ 固定窗口限流;
-L6 写工具幂等键 + require_confirm 人工确认闸。
+SQL、RAG 与消息回写分别通过仓储和端口调用，端口由路由组合根装配。
 """
 
 import json
@@ -63,24 +54,21 @@ from kongming.toolgateway.models import (
 
 log = logging.getLogger(__name__)
 
-# 027:data_sql 注入载荷上限(JSON UTF-8 **字节**数,防内存放大——
-# 1000 行常规结果集约数十 KB,1MB 已宽;R1-A1:按字节量,与 runner
-# stdin 2MB 字节闸单位一致——曾按字符数,CJK 1 字符 3 字节会过闸后
-# 撞 runner 截断,报文误导为协议 bug)
+# 注入载荷按 UTF-8 字节计数，1 MB 上限低于 runner 的 2 MB stdin 限制。
 _DATA_INJECT_CAP = 1 * 1024 * 1024
 
 
 class SandboxUnavailableError(Exception):
-    """027:沙箱未启用(组合根未注入 runner 时的 handler 收敛;
+    """沙箱未启用(组合根未注入 runner 时的 handler 收敛;
     经分发兜底映射 ERROR+审计,不裸 500)。"""
 
 
 # SQL 类工具的 sql 参数语义预检(L4 的一部分):JSON Schema 管结构,sqlglot
 # 根节点判定管「必须是只读语句形态」——DROP 在到达防火墙前即被参数校验层
-# 拒绝(spec scenario 字面语义)。R1-S2:首关键字白名单改为 AST 根判定——
+# 拒绝(spec scenario 字面语义)。首关键字白名单改为 AST 根判定——
 # 注释形态(-- /* */ 前缀的合法 SELECT)不再误拒;语法畸形放行给下游
 # (防火墙/执行路由给出整洁错误,LLM 自纠)。
-# 027:run_python_code 的 data_sql(可选参数)同规——映射表驱动,参数名按工具取。
+# run_python_code 的 data_sql(可选参数)同规——映射表驱动,参数名按工具取。
 _READONLY_ROOTS = (exp.Select, exp.Union, exp.Subquery)
 
 _SQL_PARAM_BY_TOOL: dict[str, str] = {
@@ -91,7 +79,7 @@ _SQL_PARAM_BY_TOOL: dict[str, str] = {
 
 
 def _compute_delta(args: dict[str, object]) -> dict[str, object]:
-    """057:增幅百分比 (target-base)/|base|*100;零副作用纯计算。
+    """增幅百分比 (target-base)/|base|*100;零副作用纯计算。
 
     入参白名单校验在 Agent 面(唯一持有本轮结果/stats 白名单);本 handler
     供工作流等控制面通道复用同一公式,不做跨请求白名单臆测。
@@ -113,7 +101,7 @@ def _compute_delta(args: dict[str, object]) -> dict[str, object]:
 
 
 def _compute_share(args: dict[str, object]) -> dict[str, object]:
-    """057:占比 part/total;与 _compute_delta 同哲学。"""
+    """占比 part/total;与 _compute_delta 同哲学。"""
     part = args.get("part")
     total = args.get("total")
     if not isinstance(part, (int, float)) or isinstance(part, bool):
@@ -138,8 +126,8 @@ def validate_args(tool: ToolDef, args: dict[str, object]) -> str | None:
     except jsonschema.ValidationError as e:
         return f"ARGS_INVALID: {e.message[:120]}"
     except Exception as e:
-        # R1-S2:敌意/畸形 schema(外部 MCP 快照面)会抛非 ValidationError
-        # (SchemaError/_WrappedReferencingError 等,评审实证)——收敛
+        # 敌意/畸形 schema(外部 MCP 快照面)会抛非 ValidationError
+        # (SchemaError/_WrappedReferencingError 等)——收敛
         # ARGS_INVALID 结构化回灌,不裸 500;注册时 check_schema 降级是
         # 主闸,此处为纵深二层
         return f"ARGS_INVALID: schema 非法({type(e).__name__})"
@@ -150,13 +138,11 @@ def validate_args(tool: ToolDef, args: dict[str, object]) -> str | None:
             try:
                 stmts = [st for st in sqlglot.parse(sql, dialect="postgres") if st is not None]
             except (SqlglotError, RecursionError):
-                # 语法畸形:放行下游(防火墙 ParseError 语义接管);RecursionError
-                # 继承 RuntimeError 不在 SqlglotError 族——深嵌套括号曾逃逸
-                # 此层直裸 500 且绕过审计(审查循环 S1),同样按畸形放行
+                # RecursionError 不属于 SqlglotError；也按语法错误交给防火墙处理，避免绕过审计。
                 stmts = []
             if len(stmts) > 1:
                 # 多语句=非单条 SELECT(schema 明文语义;下游防火墙本会拦,
-                # 在参数校验层即拒——审查循环 B1 对齐 spec scenario 层位)
+                # 在参数校验层即拒)
                 return f"ARGS_INVALID: {sql_param} 必须为单条语句"
             if stmts and not isinstance(stmts[0], _READONLY_ROOTS):
                 return (
@@ -185,14 +171,14 @@ class ToolCallService:
         sql_executor: SqlExecutor,
         rag_retriever: RagRetriever,
         reply_store: ConfirmReplyStore,
-        intent: IntentReviewer | None = None,  # 020:工具意图审核(未注入=关闭)
-        sandbox: SandboxExecutor | None = None,  # 027:沙箱执行(未注入=未启用)
-        resolver: DynamicToolResolver | None = None,  # 028:动态工具(MCP,未注入=纯静态)
-        mcp_caller: McpToolCaller | None = None,  # 028:MCP 出站执行
-        websearch: WebSearchPort | None = None,  # 094:联网检索(未注入=工具未注册)
-        websearch_quota: int | None = None,  # 094:websearch 域配额(独立分桶)
-        connector: ConnectorToolGate | None = None,  # 099:HTTP 连接器(未注入=不可用)
-        connector_quota: int | None = None,  # 099:http 连接器域配额(独立分桶)
+        intent: IntentReviewer | None = None,  # 工具意图审核(未注入=关闭)
+        sandbox: SandboxExecutor | None = None,  # 沙箱执行(未注入=未启用)
+        resolver: DynamicToolResolver | None = None,  # 动态工具(MCP,未注入=纯静态)
+        mcp_caller: McpToolCaller | None = None,  # MCP 出站执行
+        websearch: WebSearchPort | None = None,  # 联网检索(未注入=工具未注册)
+        websearch_quota: int | None = None,  # websearch 域配额(独立分桶)
+        connector: ConnectorToolGate | None = None,  # HTTP 连接器(未注入=不可用)
+        connector_quota: int | None = None,  # http 连接器域配额(独立分桶)
         *,
         rate_limit_per_minute: int,
         confirm_ttl_minutes: int,
@@ -210,8 +196,8 @@ class ToolCallService:
         self._mcp = mcp_caller
         self._websearch = websearch
         self._connector = connector
-        # 094:域配额按域分桶(单一配置值当全域值会让新域挤占既有域配额;
-        # 099 http 桶同口径)
+        # 域配额按域分桶(单一配置值当全域值会让新域挤占既有域配额;
+        # http 桶同口径)
         self._domain_quotas: dict[str, int | None] = {
             "websearch": websearch_quota,
             CONNECTOR_DOMAIN: connector_quota,
@@ -231,7 +217,7 @@ class ToolCallService:
         tool_name: str,
         args: dict[str, object],
         idempotency_key: str | None,
-        channel: str = "chat",  # 025
+        channel: str = "chat",
     ) -> ToolOutcome:
         started = time.monotonic()
         # L1:租户解析 + 绑定复校(异常上抛,router 映射 404/403,不落审计——
@@ -265,7 +251,7 @@ class ToolCallService:
                     channel=channel,
                     idempotency_key=idem,
                     expires_at=expires_at,
-                    # 099:域标签在解析期随工具落定(静态域=映射表;连接器=http)
+                    # 域标签在解析期随工具落定(静态域=映射表;连接器=http)
                     domain=resolved_domain,
                 )
             )
@@ -284,8 +270,8 @@ class ToolCallService:
             )
 
         tool, connector_hit = await self._resolve_tool(tenant_id=tenant_id, name=tool_name)
-        # 域标签:静态域工具(含未注册)恒走映射(既有口径零回归);连接器
-        # 命中覆写为 http(099,审计域标签与配额桶共用)
+        # 域标签:静态域工具(含未注册)恒走映射(既有口径);连接器
+        # 命中覆写为 http(审计域标签与配额桶共用)
         resolved_domain = CONNECTOR_DOMAIN if connector_hit else DOMAIN_TOOLS.get(tool_name)
         if tool is None:
             return await _finish("REJECTED", reason="TOOL_NOT_REGISTERED")
@@ -294,8 +280,7 @@ class ToolCallService:
         if tool.perm_code not in await self._perms.list_codes(user_id):
             return await _finish("REJECTED", reason=f"TOOL_PERMISSION_DENIED: {tool.perm_code}")
 
-        # L4 之前:工具意图审核(020,spec「意图审核先于参数校验」)——
-        # 同 trace 写工具调用超阈值 fail-closed 拒绝,双审计落库
+        # 先审核写工具意图，再校验参数；超阈值时拒绝并写入两条审计记录。
         if tool.write and self._intent is not None:
             write_tools = [d.name for d in effective().values() if d.write]
             attempts = await self._repo.count_write_calls(trace_id, write_tools)
@@ -335,10 +320,9 @@ class ToolCallService:
                     args_json=args,  # 原文留存:确认后重放
                 )
 
-        # 089:域配额第二维度(网关域工具的固定窗口叠加;内置工具不受影响;
-        # 094 起按域分桶,各域配额互不挤占;099 连接器域标签在解析期落定)。
-        # 桶键=域标签(评审修复:按 tool_name 分桶会让多工具域的实际吞吐
-        # 放大 N 倍,与「域分桶」声明漂移)
+        # 域配额第二维度(网关域工具的固定窗口叠加;内置工具不受影响;
+        # 按域分桶,各域配额互不挤占;连接器域标签在解析期落定)。
+        # 桶键=域标签:按 tool_name 分桶会让多工具域的实际吞吐放大 N 倍
         quota = self._domain_quotas.get(resolved_domain or "")
         if quota and not await self._limiter.allow(
             f"toolgw:{tenant_id}:{user_id}:{resolved_domain}", limit=quota, window_sec=60
@@ -363,10 +347,10 @@ class ToolCallService:
         return await _finish("EXECUTED", result=result, idem=idem)
 
     async def _resolve_tool(self, *, tenant_id: str, name: str) -> tuple[ToolDef | None, bool]:
-        """静态注册表优先;连接器域按前缀解析(099,租户行);未命中查动态
-        解析(028 MCP 快照,未注入=纯静态)。
+        """静态注册表优先;连接器域按前缀解析(租户行);未命中查动态
+        解析(MCP 快照,未注入=纯静态)。
         返回 (工具定义, 是否连接器工具)——域标签不在解析期落定:静态域工具
-        (含未注册形态)恒走 DOMAIN_TOOLS 映射(零回归口径),仅连接器命中
+        (含未注册形态)恒走 DOMAIN_TOOLS 映射(既有口径),仅连接器命中
         覆写为 http。"""
         tool = get_tool(name)
         if tool is not None:
@@ -417,7 +401,7 @@ class ToolCallService:
                 raise LookupError("MCP 出站执行未接线(部署缺陷)")
             return await self._mcp.call(tenant_id=tenant_id, qualified=tool.name, args=args)
         if tool.name == "web_search":
-            # 094:注册表已过注册条件(供应商+key 齐备)才可能到达此处;
+            # 注册表已过注册条件(供应商+key 齐备)才可能到达此处;
             # 端口缺失=装配漂移,收敛 WebSearchError(分发兜底 ERROR,不裸崩)
             if self._websearch is None:
                 raise WebSearchError(f"{FAILURE_UNDELIVERED_PREFIX} 联网检索未接线(部署缺陷)")
@@ -433,7 +417,7 @@ class ToolCallService:
             # 空结果如实表达(count=0),由 LLM 决定改写问句或据实回答
             return {"count": len(cards), "results": cards}
         if tool.name.startswith(CONNECTOR_TOOL_PREFIX):
-            # 099:租户连接器经网关切面执行(出口校验→SSRF→出站→分类);
+            # 租户连接器经网关切面执行(出口校验→SSRF→出站→分类);
             # 端口缺失=装配漂移,收敛 ConnectorError(分发兜底 ERROR,不裸崩)
             if self._connector is None:
                 raise ConnectorError(f"{FAILURE_UNDELIVERED_PREFIX} 连接器未接线(部署缺陷)")
@@ -472,7 +456,7 @@ class ToolCallService:
         user_id: str,
         datasource_key: str,
     ) -> dict[str, object]:
-        """027:沙箱执行 handler。data_sql 六层防御取数注入(行级/防火墙
+        """沙箱执行 handler。data_sql 六层防御取数注入(行级/防火墙
         与 execute_sql 工具同构);1MB 注入闸防内存放大;未启用收敛
         SandboxUnavailableError(由分发兜底映射 ERROR)。"""
         if self._sandbox is None:
@@ -489,7 +473,7 @@ class ToolCallService:
                 question=None,
             )
             if sql_result.get("verdict") != "PASS":
-                # 取数未过检:沙箱不启动,原样返回( verdict/reason 供 LLM 自纠)
+                # 取数未过检:沙箱不启动,原样返回(verdict/reason 供 LLM 自纠)
                 return {
                     "status": "ERROR",
                     "error": f"data_sql 未过检: {sql_result.get('reason')}",
@@ -529,7 +513,7 @@ class ToolCallService:
         if row.user_id != user_id or not await self._reply.session_owned(
             session_id=session_id, user_id=user_id, tenant_id=row.tenant_id
         ):
-            # R1-M2:归属拒绝落审计(spec「他人确认被拒」立约)——为尝试者记
+            # 归属拒绝落审计(spec「他人确认被拒」立约)——为尝试者记
             # REJECTED 新行,不触碰原挂起行(防存在性泄漏)
             await self._writer.record(
                 ToolAuditEntry(
@@ -542,7 +526,7 @@ class ToolCallService:
                 )
             )
             raise ConfirmNotFound(confirm_id)
-        # 幂等:已推进过 → 返回首次决策结果(R1-S1:含首次执行结果反查)
+        # 幂等:已推进过 → 返回首次决策结果(含首次执行结果反查)
         if row.status != "PENDING_CONFIRM":
             result: dict[str, object] | None = None
             if row.status == "EXECUTED" and row.idempotency_key:
@@ -571,11 +555,11 @@ class ToolCallService:
             return ConfirmOutcome(status="confirm_rejected", reason="用户拒绝")
 
         # confirm 复校(spec「六层全量再过一遍」的人工确认适用子集):
-        # L1 用户-租户绑定复校(R1-M3:挂起后解绑租户则拒)+ L2 权限点复校 +
+        # L1 用户-租户绑定复校(挂起后解绑租户则拒)+ L2 权限点复校 +
         # L4 参数复校;L5 限流不适用(人工低频动作),L3 随 L1,L6 即本路径本身
         await self._repo.assert_bound(user_id=user_id, tenant_id=row.tenant_id)
-        # 028:确认重放同样走动态解析(MCP 写工具确认后不致误拒「权限已变更」);
-        # 099:连接器写工具确认后同源解析
+        # 确认重放同样走动态解析(MCP 写工具确认后不致误拒「权限已变更」);
+        # 连接器写工具确认后同源解析
         tool, _connector_hit = await self._resolve_tool(tenant_id=row.tenant_id, name=row.tool_name)
         perms = await self._perms.list_codes(user_id)
         if tool is None or tool.perm_code not in perms:
@@ -595,10 +579,10 @@ class ToolCallService:
             await self._repo.commit()
             return ConfirmOutcome(status="rejected", reason=arg_err)
 
-        # 099:确认型工具的域配额在真实出站点判定(执行=确认重放,PENDING
-        # 期不消费;评审修复——require_confirm 提前返回曾使 POST 连接器
-        # 整段绕过域配额)。超限不落终态:确认保留,窗口重置后
-        # 可再次确认(幂等收口仍按 PENDING 复核)。
+        # 确认型工具的域配额在真实出站点判定(执行=确认重放,PENDING
+        # 期不消费;提前判定会让 require_confirm 工具整段绕过域配额)。
+        # 超限不落终态:确认保留,窗口重置后可再次确认(幂等收口仍按
+        # PENDING 复核)。
         confirm_domain = CONNECTOR_DOMAIN if _connector_hit else DOMAIN_TOOLS.get(row.tool_name)
         confirm_quota = self._domain_quotas.get(confirm_domain or "")
         if confirm_quota and not await self._limiter.allow(
@@ -649,12 +633,12 @@ class ToolCallService:
     async def resolve_for_task(
         self, *, user_id: str, tenant_key: str, confirm_id: str, decision: str
     ) -> ToolOutcome:
-        """任务通道确认兑现(add-graph-checkpoint):图从挂起点恢复后,编排经
+        """任务通道确认兑现:图从挂起点恢复后,编排经
         内部回调把任务域确认决策兑换为「动作执行/拒绝」观察。
 
-        与 confirm() 镜像同一复校顺序(L1 解析+归属→L2 权限→L4 参数→域配额→
-        幂等键 dispatch),**刻意不复用不复写 chat 路径**(安全敏感面,零回归
-        优先;两侧复校序变更须同改);任务通道无会话,零回复副作用;
+        与 confirm 镜像同一复校顺序(L1 解析+归属→L2 权限→L4 参数→域配额→
+        幂等键 dispatch),**刻意不复用不复写 chat 路径**(安全敏感面,
+        零回归优先;两侧复校序变更须同改);任务通道无会话,零回复副作用;
         事务归内部端点提交(与 task 内部回调同口径)。"""
         started = time.monotonic()
         # L1:租户解析(与 execute_tool 同口径;解析失败按不存在处理,不落审计)
@@ -680,7 +664,7 @@ class ToolCallService:
             return ToolOutcome(status="REJECTED", reason="CONFIRM_FORBIDDEN")
         if row.status != "PENDING_CONFIRM":
             # 已推进:幂等返回首次决策结果(不重复执行);EXECUTED 反查首次
-            # 执行结果回填(与 confirm() R1-S1 同口径)——恢复重放缺结果会
+            # 执行结果回填(与 confirm 同口径)——恢复重放缺结果会
             # 诱发模型把同一动作当未办再次发起(新确认行=绕过幂等的二次执行)
             result: dict[str, object] | None = None
             if row.status == "EXECUTED" and row.idempotency_key:
@@ -702,7 +686,7 @@ class ToolCallService:
             await self._repo.mark_status(row.id, "CONFIRM_REJECTED", clear_reason=True)
             return ToolOutcome(status="REJECTED", reason="用户拒绝该动作,已跳过")
 
-        # 确认复校(与 confirm() 同序:绑定/权限/参数;限流不适用人工动作)
+        # 确认复校(与 confirm 同序:绑定/权限/参数;限流不适用人工动作)
         await self._repo.assert_bound(user_id=user_id, tenant_id=row.tenant_id)
         tool, _connector_hit = await self._resolve_tool(tenant_id=row.tenant_id, name=row.tool_name)
         perms = await self._perms.list_codes(user_id)
@@ -750,7 +734,7 @@ class ToolCallService:
 
     # ── 管理面 ──
     # 审计分页查询的行级可见性在 router 端点收口(非 ALL 强制本人,覆盖传值),
-    # 与 015 audit 域「service 收口」形态不同:本域查询面无独立 service 用例,
+    # 与 audit 域「service 收口」形态不同:本域查询面无独立 service 用例,
     # 端点直调 repo(单行可见性判定无复用方,不过度抽象)。
 
 

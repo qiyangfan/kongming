@@ -1,13 +1,4 @@
-"""judge/构造共用 LLM 客户端(092,design D1):harness 侧 openai 兼容直连,
-与 agent 面同协议(dashscope compatible-mode);不新增进程、不新增依赖
-(httpx 直连 /chat/completions 与 /embeddings——proposal Impact「无新第三方库」)。
-
-凭证(env,缺失=显式失败不静默):
-  KM_EVAL_LLM_API_KEY(缺省回退 KM_AGENT_LLM_API_KEY——CI secret 同名)
-  KM_EVAL_LLM_BASE_URL(缺省 dashscope compatible-mode)
-  KM_EVAL_LLM_MODEL(缺省回退 KM_AGENT_LLM_MODEL,再缺省 qwen-plus)
-  KM_EVAL_EMBEDDING_MODEL(缺省 text-embedding-v2;语义去重用)
-"""
+"""评估器共用的 OpenAI 兼容客户端，提供对话和向量化接口。"""
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 
 import json
@@ -83,7 +74,7 @@ class JudgeLlm:
         return str(message.get("content") or "").strip()
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        """批量向量化(内部分批;index 集合校验同 agent 面 R1-B2 口径)。"""
+        """批量向量化(内部分批;index 集合校验同 agent 面 embeddings 的校验口径)。"""
         if not texts:
             return []
         out: list[list[float]] = []

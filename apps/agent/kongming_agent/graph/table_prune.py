@@ -1,16 +1,4 @@
-"""表级预筛(063-schema-table-pruning):问题 + 资产(术语/示例/指标)驱动的
-表结构收敛(纯函数、零 IO、零新增外部调用)。
-
-动机:`meta_schema_max_tables=50` 是上限不是裁剪——50 表租户每次 generate
-都把全量 schema 注入提示词,token 成本随表数线性增长,且模型选表准确率随
-表数下降(注意力稀释)。预筛把"取多少"从上限逻辑改为相关性逻辑。
-
-判据(文本共现加权打分,确定性纯函数):
-- 表名命中权重高于列名/说明(表名是表级信号);
-- 问句命中权重高于资产命中(用户意图最直接;术语/示例/指标是弱信号);
-- **零命中返回空集**(而非 top-N 兜底)——无相关表即维持既有哨兵路径,
-  预筛 SHALL NOT 比全量注入更容易误判;开关关闭时退回全量(对拍回退)。
-"""
+"""按问题、术语、示例和指标的文本匹配分数筛选表结构，不增加外部调用。表名和问题命中的权重更高；没有命中时返回空集，关闭预筛时保留全部表。"""
 
 import re
 from dataclasses import dataclass, field
@@ -111,7 +99,7 @@ def score_table(
     if col_a:
         score += min(col_a, 2) * _W_COL * _W_ASSET
         sources.append("asset:column")
-    # 表说明:问句关键词落说明( topical 相关)
+    # 表说明:问句关键词落说明(主题相关)
     comment = (table.comment or "").lower()
     if comment:
         cmt_hits = sum(_count(comment, kw) for kw in kws if len(kw) >= 2)
@@ -128,7 +116,7 @@ def prune_tables(
     top_n: int = 12,
 ) -> list[PruneHit]:
     """表级预筛(纯函数):零命中返回空集;否则按分降序取前 top_n
-    (同分按原表序,确定性)。**首位=最高相关命中**(080 预算首位豁免同源)。"""
+    (同分按原表序,确定性)。**首位=最高相关命中**(预算首位豁免同源)。"""
     kws = question_keywords(question)
     hits: list[PruneHit] = []
     for t in tables:
@@ -149,7 +137,7 @@ def prune_schema(
     """SchemaMeta → 预筛后 SchemaMeta(仅保留命中表,**按命中分降序**)+
     命中记录。零命中:tables 为空(调用方走既有哨兵形态)。truncated 原样透传。
 
-    按分序(而非元数据原序)的三重一致性:trace 的 kept 列表即分序、080 预算
+    按分序(而非元数据原序)的三重一致性:trace 的 kept 列表即分序、预算
     的 schema 段 keep_head=1 首位豁免=最高相关命中(原序下首位是任意表,
     豁免保护错对象)、提示词首位=最相关表(注意力)。同分保持元数据原序
     (prune_tables 稳定排序),确定性不变。"""

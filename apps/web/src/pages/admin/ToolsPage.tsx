@@ -1,6 +1,4 @@
-/* 工具页(019,tool-calling spec「工具管理与审计查询」):已注册工具清单
-   (只读)+ 工具执行审计分页(筛选:工具名/状态/时间范围;时间本地化)。
-   权限点 system:tool:manage。 */
+/* 查看已注册工具和执行审计；需要 system:tool:manage 权限。 */
 
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -61,7 +59,7 @@ export default function ToolsPage() {
 
   const totalPages = Math.max(1, Math.ceil((audit.data?.total ?? 0) / PAGE_SIZE));
 
-  // 末页越界自愈(007/009 范式)
+  // 删除末页条目后重新计算页码，避免显示空页。
   useEffect(() => {
     const t = audit.data?.total;
     if (t !== undefined && t > 0 && page > 1 && audit.data?.items.length === 0) {

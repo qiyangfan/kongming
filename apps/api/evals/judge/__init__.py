@@ -1,3 +1,1 @@
-"""judge 评审编排(092 评测智能体化,evals 侧):rubric 声明/对象取数/
-run 编排/LLM 客户端。持久化走 kongming.evalj(D1:judge 不进业务链路)。
-"""
+"""Judge 评审编排:评分标准、对象读取、运行器与 LLM 客户端;结果由 kongming.evalj 保存。"""

@@ -1,14 +1,5 @@
-"""认证路由(ADR-003/006):登录页即前端路由,后端只出 JSON 与 JWT(薄适配层)。
-
-POST /auth/login                账密 → 令牌对(锁定/禁用/首登改密)
-POST /auth/refresh              refresh 轮换(旧票复用 → 吊销全家族)
-POST /auth/logout               吊销 refresh 所属家族(幂等 204)
-GET  /auth/me                   当前用户(真实角色/权限点/租户)
-POST /auth/password/change      自助改密(吊销全部家族,全端重登)
-GET  /auth/options              已配置联邦 provider 清单(前端按钮数据驱动)
-GET  /auth/{provider}/start     发起联邦(一次性 state;PKCE 按家声明)
-POST /auth/{provider}/callback  联邦回调(code+state → 令牌对;OAuth token 不出后端)
-"""
+"""认证与联邦登录路由(ADR-003、ADR-006)。
+后端负责校验凭证、交换 OAuth 令牌并签发 JWT;路由只返回 JSON。"""
 
 import logging
 from typing import Annotated

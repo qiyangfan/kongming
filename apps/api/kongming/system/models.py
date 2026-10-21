@@ -1,4 +1,4 @@
-"""system 领域模型与领域错误(007):纯 dataclass,零框架依赖(宪法 Article II)。
+"""system 领域模型与领域错误:纯 dataclass,不依赖 Web 框架或数据库。
 
 枚举字面量与 baseline CHECK 约束同源(字符串字面量,禁 ORM Enum/魔数)。
 """
@@ -12,7 +12,7 @@ SqlScope = Literal["SELECT_ONLY", "READ_DDL", "DML_DDL"]
 UserStatus = Literal["ACTIVE", "DISABLED"]
 DeptStatus = Literal["ACTIVE", "DISABLED"]
 
-# 内置角色(种子契约):禁删;role_key 全局创建后不可改(rbac delta 007)
+# 内置角色(种子契约):禁删;role_key 全局创建后不可改
 BUILTIN_ROLE_KEYS = ("SUPER_ADMIN", "DEVELOPER")
 
 

@@ -1,4 +1,4 @@
-"""030 multimodal-input agent 侧测试:预处理拼接/fail-closed/纯文本零回归。"""
+"""multimodal-input agent 侧测试:预处理拼接/fail-closed/纯文本。"""
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -37,7 +37,7 @@ class _FakeLlm:
         return "一张销售报表,含品类与销量两列"
 
     def image_limit_mb(self, task: str | None = None) -> float:
-        return 10.0  # 036⑦:替身镜像新接口(默认上限)
+        return 10.0  # 默认图片上限。
 
 
 async def test_combine_question() -> None:
@@ -48,7 +48,7 @@ async def test_combine_question() -> None:
 
 
 async def test_preprocess_empty_zero_call() -> None:
-    """纯文本零回归:空列表不取件不调用 vision。"""
+    """纯文本:空列表不取件不调用 vision。"""
     api = _FakeApi()
     llm = _FakeLlm()
     out = await preprocess_attachments(
@@ -76,13 +76,13 @@ async def test_preprocess_happy() -> None:
     )
     assert api.calls == ["id1", "id2"]
     assert len(llm.vision_calls) == 2
-    assert llm.vision_calls[0]["task"] == "vision"  # 021 路由键
-    assert "[图片 1 内容描述(" in out and "[图片 2 内容描述(" in out  # 036③包裹形态
+    assert llm.vision_calls[0]["task"] == "vision"  # 路由键
+    assert "[图片 1 内容描述(" in out and "[图片 2 内容描述(" in out  # 每张图片描述均被标记。
 
 
 async def test_preprocess_fence_escape_sanitized() -> None:
-    """审查循环 F2:描述含三连双引号不可提前闭合围栏(间接注入逃逸面);
-    超长描述截断(审查循环 B8)。"""
+    """描述含三连双引号不可提前闭合围栏(间接注入逃逸面);
+    超长描述截断。"""
 
     class _ScriptLlm(_FakeLlm):
         def __init__(self, replies: list[str]) -> None:
@@ -160,11 +160,11 @@ class _GraphLlm:
         return "描述文本"
 
     def image_limit_mb(self, task: str | None = None) -> float:
-        return 10.0  # 036⑦:替身镜像新接口
+        return 10.0  # 默认图片上限。
 
 
 async def test_query_endpoint_preprocess_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
-    """端点接线直证:附件取件失败 → success=False 结构化(不进图)。"""
+    """附件获取失败时返回结构化错误，且不进入图执行。"""
     monkeypatch.setattr(deps, "get_api", lambda: _FakeApi(available=False))
     monkeypatch.setattr(deps, "get_llm", lambda: _GraphLlm())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:

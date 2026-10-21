@@ -1,7 +1,6 @@
-"""llmusage 路由(021 multi-model-routing):用量上报(内部)+聚合查询(管理面)。
-038 agent-observability:聚合强化(失败/延迟)+按天趋势+明细分页+trace 时间线
-(时间线=router 组合根并行调 llmusage/toolcall/audit 三 repo 只读查询,
-chat 组合根先例;观测查询与采集通道隔离)。"""
+"""llmusage 路由:agent 用量上报(内部通道)+ 管理面聚合查询(摘要/趋势/
+明细分页/trace 时间线)。时间线由本路由并行调 llmusage/toolcall/audit
+三 repo 只读查询拼装;观测查询与采集通道隔离。"""
 
 import logging
 import uuid
@@ -34,10 +33,10 @@ class UsageRecordIn(BaseModel):
     prompt_tokens: int = Field(default=0, ge=0)
     completion_tokens: int = Field(default=0, ge=0)
     total_tokens: int = Field(default=0, ge=0)
-    # 038:缺省兼容旧 agent 上报(滚动升级窗口)
+    # 缺省兼容旧 agent 上报(滚动升级窗口)
     latency_ms: int | None = Field(default=None, ge=0)
     status: Literal["SUCCESS", "ERROR"] = "SUCCESS"
-    # 077:出站协议归因(openai|anthropic|responses;缺省 None=旧版 agent 上报)
+    # 出站协议归因(openai|anthropic|responses;缺省 None=旧版 agent 上报)
     protocol: str | None = Field(default=None, max_length=16)
 
 
@@ -100,7 +99,7 @@ async def usage_summary(
     session: Annotated[AsyncSession, Depends(get_session)],
     start: Annotated[datetime | None, Query()] = None,
     end: Annotated[datetime | None, Query()] = None,
-    # 077:协议过滤(过滤型,不新增分组键;空=不过滤,计数与现状逐字一致)
+    # 协议过滤(过滤型,不新增分组键;空=不过滤,计数与现状逐字一致)
     protocol: Annotated[str | None, Query(max_length=16)] = None,
 ) -> UsageSummaryOut:
     rows = await SqlLlmUsageRepo(session).summary(start=start, end=end, protocol=protocol)
@@ -167,7 +166,7 @@ class UsageRow(BaseModel):
     task: str
     status: str
     bot_id: str | None = None
-    # 077:出站协议(null=存量行/旧版上报,原样展示「-」,不回算不推断)
+    # 出站协议(null=存量行/旧版上报,原样展示「-」,不回算不推断)
     protocol: str | None = None
     prompt_tokens: int
     completion_tokens: int
@@ -191,9 +190,9 @@ async def usage_page(
     task: Annotated[str | None, Query(max_length=24)] = None,
     status: Literal["SUCCESS", "ERROR"] | None = None,
     trace_id: Annotated[str | None, Query(max_length=64)] = None,
-    # 038③:租户筛选(uuid 直滤);R1-F1:UUID 类型闸防非法值 500
+    # 租户筛选(uuid 直滤);UUID 类型闸防非法值 500
     tenant_id: Annotated[uuid.UUID | None, Query()] = None,
-    # 077:协议筛选(过滤型;空=不过滤)
+    # 协议筛选(过滤型;空=不过滤)
     protocol: Annotated[str | None, Query(max_length=16)] = None,
 ) -> UsagePageOut:
     total, rows = await SqlLlmUsageRepo(session).page(
@@ -278,7 +277,7 @@ async def usage_timeline(
         events.append(
             {
                 "kind": "SQL",
-                # R1-B5:name=数据源(比 verdict 重复信息更有价值;status 承载 verdict)
+                # name=数据源(比 verdict 重复信息更有价值;status 承载 verdict)
                 "name": str(r["datasource_key"]),
                 "status": str(r["verdict"]),
                 "tokens": None,
@@ -286,9 +285,8 @@ async def usage_timeline(
                 "ts": r["created_at"],
             }
         )
-    # R1-B4:同刻事件按 kind 次序(LLM<SQL<TOOL 字母序)保证输出完全确定
-    # (跨表 id 不可比,跨表因果序本不存在——design「(created_at,id)」指
-    # 组内 tiebreak,组间由本键补确定性)
+    # 同刻事件按 kind 次序(LLM<SQL<TOOL 字母序)保证输出确定——跨表 id
+    # 不可比,跨表因果序不存在,组间确定性只能由本键补足
     events.sort(key=lambda e: (e["ts"], e["kind"]))
     return UsageTimelineOut(
         trace_id=trace_id,

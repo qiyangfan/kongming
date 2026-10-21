@@ -1,8 +1,4 @@
-/** 引用键工具(068-doc-answer-citations):键形态判定与后缀提取(纯函数)。
-
-与 agent 侧 `graph/citations.py` 的 `is_citation_key_shape` 同源(跨进程
-各自落地的同规则小函数,注释互引防漂移):形态=`前缀-后缀` 且末段为
-4 位大写十六进制。 */
+/** 校验引用键并提取后缀；末段必须是 4 位大写十六进制，与 Agent 端使用相同规则。 */
 
 /** 键后缀:末段 `-` 之后的部分(无 `-` 返回空串) */
 export function keySuffix(token: string): string {

@@ -1,12 +1,4 @@
-"""对话冷启动建议问题生成(039,/internal/suggest-questions 核心逻辑)。
-
-prompt 为 039 全新撰写(非上游资产);遵守全角标点纪律。与 titler/describer
-同构:api 侧持 schema 元数据,agent 侧纯脑力(ADR-002)。
-降级契约:LLM 失败/输出非法/清洗后为空 → SuggestError,api 侧收敛空清单
-(不落缓存,下次访问自然重试),不阻断对话主链路。
-安全边界:输入仅为结构摘要(表/列/注释),输出仅为 UI 呈现文本,不构成
-任何执行放行依据。
-"""
+"""对话建议问题生成。输入只包含表结构摘要，输出仅用于界面展示；模型失败或结果无效时返回空清单且不写缓存。"""
 
 import json
 import logging
@@ -106,7 +98,7 @@ async def suggest_questions(digest: str, llm: LlmClient) -> list[str]:
             _USER_PROMPT_TEMPLATE.format(digest=d),
             temperature=0.3,
             max_tokens=400,
-            task="SUGGEST",  # 021:任务路由(缺省主模型;可用注册表定向小模型)
+            task="SUGGEST",  # 任务路由(缺省主模型;可用注册表定向小模型)
         )
     except LlmError as e:
         raise SuggestError(f"LLM 调用失败: {e}") from e

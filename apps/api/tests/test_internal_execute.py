@@ -1,8 +1,4 @@
-"""执行路由全栈集成测试(sql-execution spec,安全规则类测试先行)。
-
-真实 PG:租户 schema 双造数证路由隔离;审计断言直查 sys_sql_audit;
-内部令牌 middleware 回归;三态 verdict(PASS/BLOCKED/ERROR)全覆盖。
-"""
+"""覆盖内部 SQL 执行接口的权限、租户隔离和防护规则。"""
 # pyright: reportPrivateUsage=false
 
 import uuid
@@ -264,7 +260,7 @@ async def test_blocked_write_statement_audited(client: AsyncClient, session: Asy
 async def test_reserved_table_blocked_and_audited(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    """保留表拒读(005 评审实证):sys_user 经 search_path 落 public 可读的纵深缺口。
+    """保留表拒读:sys_user 经 search_path 落 public 可读的纵深缺口。
 
     系统调用(豁免 data_scope)也拦——保留表判定与用户身份无关。
     """
@@ -449,7 +445,7 @@ async def test_orchestration_infra_error_becomes_error_verdict(
     make_user: MakeUser,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """编排段基础设施异常(data_scope 探测挂掉)收敛为 ERROR + 审计,不裸 500。"""
+    """数据范围探测异常时，执行结果为 ERROR 并写审计，不返回 500。"""
     from kongming.internal import service as internal_service
 
     async def _boom(*args: object, **kwargs: object) -> None:
@@ -486,7 +482,7 @@ async def test_rewrite_recheck_blocks_tainted_sql(
     def _taint(statement: object, sql: str, **kw: object) -> tuple[str, dict[str, object]]:
         return ("DROP TABLE goods", {})
 
-    # 053:管线改写走 Guarded.apply_filter → apply_filter_statement(单遍复用接缝),
+    # 管线改写走 Guarded.apply_filter → apply_filter_statement(单遍复用接缝),
     # 污染点对齐新接缝;复检防线(步骤 6)本身不变。
     monkeypatch.setattr(rewrite, "apply_filter_statement", _taint)
     p = _payload("ita", "SELECT mark FROM goods", user_id=uid)

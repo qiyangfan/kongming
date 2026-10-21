@@ -2,7 +2,7 @@
 
 供 agent retrieve 节点消费(RAG 落地前的 schema 提示过渡来源);
 内省内容只进 LLM 提示文本,不构成任何执行放行依据。
-008:非 default 数据源经 DatasourceResolver 同构校验(存在+启用+归属,同形 400),
+非 default 数据源经 DatasourceResolver 同构校验(存在+启用+归属,同形 400),
 限其 default_schema 单 schema 内省,走动态池连接(不越出目标库)。
 """
 
@@ -27,14 +27,14 @@ log = logging.getLogger(__name__)
 
 
 def _is_reserved(table_name: str) -> bool:
-    """控制面保留表不进内省结果(005 评审:sys_user 等喂给 LLM = 凭证探测直通车)。"""
+    """控制面保留表不进内省结果(评审:sys_user 等喂给 LLM = 凭证探测直通车)。"""
     name = table_name.lower()
     return name.startswith(RESERVED_TABLE_PREFIXES) or name in RESERVED_TABLE_NAMES
 
 
 class MetaSchemaIn(BaseModel):
     tenant_key: str = Field(min_length=1, max_length=64)
-    # 查询面 pattern 与注册边界同一规则(008 D4 口径一致性收口)
+    # 与数据源注册边界同一 key 规则(datasource.DATASOURCE_KEY_PATTERN)
     datasource_key: str = Field(default="default", pattern=r"^[a-z][a-z0-9_]{1,63}$")
 
 
@@ -66,7 +66,7 @@ async def _introspect(conn: AsyncSession | AsyncConnection, schemas: list[str]) 
             text(
                 "SELECT table_schema, table_name FROM information_schema.tables"
                 " WHERE table_schema = ANY(CAST(:schemas AS text[]))"
-                # 047:与 knowledge 收录同口径,限基表——内省结果直连生成
+                # 与 knowledge 收录同口径,限基表——内省结果直连生成
                 # 上下文(ReAct 内省回退)与元数据呈现,视图行扇出与列缺失
                 # 形态对两条消费面同样有毒
                 " AND table_type = 'BASE TABLE'"
@@ -143,11 +143,11 @@ async def meta_schema(
     if req.datasource_key == "default":
         # 默认路径:仅租户 schema 内省(与执行路由 route_schema 同式)。SHALL NOT
         # 含 public——平台库 public 是控制面表(judge_run/report/sys_* 族),
-        # 入租户知识即跨域泄漏(生成侧可见即可查;092 供给环境时实测抓到)
+        # 如果把 public 表加入租户知识，模型生成的查询就可能访问控制面数据。
         return await _introspect(session, [f"tenant_{req.tenant_key}"])
 
     # 动态源:存在+启用+归属校验+解密(同形 400 防探测,与执行路由同构;
-    # 009 抽 resolver 公共,fetch-metadata 复用)
+    # 抽 resolver 公共,fetch-metadata 复用)
     try:
         row, plain = await resolve_for_read(
             session, tenant_id=str(tenant_id), datasource_key=req.datasource_key
@@ -165,6 +165,6 @@ async def meta_schema(
             database=row.database,
         ),
     )
-    # 限 default_schema 单 schema 内省(internal-meta spec 008 delta)
+    # 动态数据源只内省其 default_schema，不访问其他 schema。
     async with engine.connect() as conn:
         return await _introspect(conn, [row.default_schema])

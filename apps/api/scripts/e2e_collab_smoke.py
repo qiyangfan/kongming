@@ -1,12 +1,8 @@
 # ruff: noqa: S101, S105, ASYNC109 —— 冒烟脚本:断言即验收、口令为本地冒烟账号、超时参数形参
 # pyright: reportUnknownParameterType=false, reportMissingTypeArgument=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
-"""091 端到端冒烟(4.3):建任务→步骤声明协作拓扑(3 worker 并行+critic)
-→恢复→协作编排真实运行→聚合回写→协作账本/事件可查;取消场景收敛在途账。
-
-前置:api:8000 + agent:8001 已起,dev 库含冒烟账号 smoke088 / sakila 数据源。
-真实 LLM 驱动:结论内容不预设,断言口径=链路贯通与账本诚实(状态机/事件/
-worker 行),非业务答案正确性(分歧/预算截断场景由剧本化测试覆盖)。
-"""
+"""协作任务端到端冒烟脚本：创建并恢复包含并行 worker 与 critic 的任务，
+检查运行状态、事件和账本。需要已启动的 API、Agent 及开发用例数据；
+真实模型答案不作断言。"""
 
 import asyncio
 import sys

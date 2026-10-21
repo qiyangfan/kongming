@@ -1,6 +1,4 @@
-/* 查询结果表(088 自 assistant-card 抽出为公共件:报告详情页快照表为第二
-   消费方,宪法 Article 1 ≥2 处同类 UI 必抽公共;形态一字节未动)。
-   窄屏横滚豁免卡片化(设计决策 D6 动态列);overscroll-x-contain 手势隔离。 */
+/* 问答和报告详情共用的结果表；动态列在窄屏内横向滚动。 */
 
 export function ResultTable({
   columns,

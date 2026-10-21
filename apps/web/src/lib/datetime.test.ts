@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { formatDuration } from "./datetime";
 
-/* formatDuration 三档口径:<1s 毫秒 / <60s 秒(整秒去小数)/ ≥60s 分秒。
-   边界锚:59.95s 曾撞档显 "60s",钳回 59s 防与 "1m0s" 口径相撞(任务 066.3.2)。 */
+/* 验证毫秒、秒和分秒格式及各档之间的边界。 */
 describe("formatDuration", () => {
   it("毫秒档:<1000ms 舍入封顶 999", () => {
     expect(formatDuration(0)).toBe("0ms");

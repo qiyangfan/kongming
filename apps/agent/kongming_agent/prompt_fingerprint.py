@@ -1,12 +1,9 @@
-"""prompt 资产内容指纹(073-prompt-fingerprint;069 共用同一纯函数,先完成者为准)。
+"""prompt 资产内容指纹。
 
-对生效 prompt 模板常量全集取确定性密码学哈希(SHA-256 短十六进制):
-资产任一字变化即换指纹,资产不变则跨进程/跨次运行一致;不含任何人工
-维护的序号或随机分量(内容即身份,design D1)。
-
-纯 stdlib、无 IO、零第三方依赖;成本为几次字符串拼接 + 一次 SHA-256,
-无需缓存(design D5)。069 的 prompt_version 与本指纹同源(取前 8 位,
-对齐 VARCHAR(8)),禁止另写一份算法。
+对生效的 prompt 模板常量取 SHA-256 前 8 位:任一字符变化即换指纹,
+内容不变则跨进程一致,不含人工维护的序号或随机分量。纯 stdlib、无 IO,
+成本为几次字符串拼接和一次 SHA-256,无需缓存。QueryOut.prompt_version
+直接采用本指纹(对齐 VARCHAR(8)),禁止另写一份算法。
 """
 
 from __future__ import annotations
@@ -18,7 +15,7 @@ from typing import Final
 from kongming_agent.graph import doc_prompt, extract_prompt, prompts
 from kongming_agent.graph.react import prompts as react_prompts
 
-# 资产模块固定序(design D2:四文件全集;新增资产模块须同步本元组与单测)
+# 资产模块固定序(四文件全集;新增资产模块须同步本元组与单测)
 _ASSET_MODULES: Final[tuple[ModuleType, ...]] = (
     prompts,
     doc_prompt,
@@ -26,7 +23,7 @@ _ASSET_MODULES: Final[tuple[ModuleType, ...]] = (
     react_prompts,
 )
 
-# 短指纹长度(069 prompt_version VARCHAR(8) 同宽)
+# 短指纹长度(prompt_version VARCHAR(8) 同宽)
 _FINGERPRINT_LEN: Final = 8
 
 
@@ -47,7 +44,7 @@ def prompt_fingerprint() -> str:
 
 
 def format_cross_fingerprint_note(current: str, baseline: str) -> str | None:
-    """跨指纹比对标注(073 评估红线口径):不同 → 不可比说明(列两侧指纹);
+    """跨指纹比对标注(评估红线口径):不同 → 不可比说明(列两侧指纹);
     相同 → None(可比时不得误报)。SHALL NOT 静默套用劣化红线。"""
     if current == baseline:
         return None

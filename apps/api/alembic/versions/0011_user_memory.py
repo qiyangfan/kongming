@@ -1,4 +1,4 @@
-"""0011: agent-memory 域表(022)
+"""0011: agent-memory 域表
 
 Revision ID: 0011
 Revises: 0010

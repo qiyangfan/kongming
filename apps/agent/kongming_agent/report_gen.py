@@ -1,15 +1,5 @@
-"""报告生成编排(088,agent 面 D1:编排在 agent,事实在控制面)。
-
-管线:规划(章节树+逐叶 SQL,单次 LLM)→ 逐叶取数(100% 经既有
-/internal/tool/execute 回调,防御拒绝不绕道;语义修复至多一次且修正稿
-重过全量防御)→ 逐章撰写(快照外数值结构性不可得:prompt 只投喂快照,
-失败章节由编排确定性标注缺失,不经 LLM)→ 组装。
-
-预算三约束(LLM 调用数/token 总量/墙钟)在编排内判定,耗尽即停——
-未完成叶保持 PENDING 并如实标注,不谎称完成(「预算退出诚实」)。
-用量采集沿用既有通道(llm._report 自动上报 + 请求级收集器读回汇总),
-trace_id 全程贯穿(取数回调与 LLM 用量同一 trace,api 侧按报告归集)。
-"""
+"""Agent 侧报告生成编排:取数经控制面安全执行端点;规划、章节撰写与组装
+受 LLM 调用数、token 与耗时预算约束,耗尽时保留未完成章节并如实标记。"""
 
 import contextvars
 import json
@@ -25,8 +15,8 @@ from kongming_agent.settings import Settings
 
 log = logging.getLogger(__name__)
 
-# 规划规模护栏(防 runaway 计划烧穿预算):章数截断在此;叶数由单章
-# 叶上限 × 章数隐式约束,总量由撰写/修复调用次数上限兜底
+# 规划规模护栏:章数在此截断;叶数由单章上限 × 章数隐式约束,
+# 总量由撰写/修复调用次数上限兜底
 _MAX_CHAPTERS = 8
 _SCHEMA_DIGEST_MAX_CHARS = 8000
 _CHART_TYPES = frozenset({"line", "bar", "pie", "scatter"})
@@ -164,7 +154,7 @@ def _flatten_plan(plan: dict[str, Any]) -> tuple[str, list[tuple[dict[str, Any],
             raise ValueError("plan 章节条目畸形")
         chd = cast("dict[str, Any]", ch)
         ch_id = str(chd.get("id") or f"c{i}")
-        if ch_id in seen:  # id 冲突去 fail-closed
+        if ch_id in seen:  # id 重复直接失败(fail-closed)
             raise ValueError(f"章节 id 重复: {ch_id}")
         seen.add(ch_id)
         leaves: list[_Leaf] = []
@@ -241,8 +231,8 @@ class ReportOrchestrator:
         self._collector: list[dict[str, object]] = []
         self._partial = False
         self._stop_reason: str | None = None
-        # 规划成功后的半成品态(中途 LLM 死亡时已产出章节随载荷保留——
-        # spec「生成失败已产出章节保留供诊断」)
+        # 规划成功后的半成品态:中途失败时已产出章节随载荷保留
+        # (spec「生成失败已产出章节保留供诊断」)
         self._title = ""
         self._chapters: list[tuple[dict[str, Any], list[_Leaf]]] | None = None
         self._narratives: dict[str, str] = {}
@@ -413,7 +403,7 @@ class ReportOrchestrator:
         cap = self._settings.report_snapshot_rows
         kept = rows[:cap]
         lf.columns, lf.rows = columns, kept
-        # row_count=截断前总行数(工具通道如实返回;截断后行数不是总数,审查 P1-3)
+        # row_count=截断前总行数(工具通道如实返回;截断后行数不是总数)
         lf.row_count = len(rows)
         lf.truncated = len(rows) > len(kept)
         lf.status = "OK"
@@ -429,7 +419,7 @@ class ReportOrchestrator:
             f"## {lf.title}\n{rp.render_snapshot_text(lf.columns, lf.rows)}" for lf in ok_leaves
         )
         if not snapshot_text:
-            # 全缺数章节:不烧 LLM,确定性如实标注
+            # 全章缺数:直接确定性标注,不调用 LLM
             reasons = "、".join(
                 f"{lf.title}({lf.fail_reason or '数据缺失'})" for lf in leaves if lf.status != "OK"
             )
@@ -558,7 +548,7 @@ class ReportOrchestrator:
     async def _progress(self, report_id: str, phase: str) -> None:
         if not report_id:
             return
-        # 租户锚随载荷(091 裁决:进度回写按租户过滤,api 侧归属闸兜底)
+        # 进度回写携带租户键，API 会校验报告归属。
         tenant_key = str(self._payload.get("tenant_key") or "default")
         await self._api.report_progress(report_id=report_id, phase=phase, tenant_key=tenant_key)
 

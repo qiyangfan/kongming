@@ -1,4 +1,4 @@
-/* trigger 域 API 封装(031)。审查循环 D-F2:消费生成契约(ADR-005,禁手写)。 */
+/* trigger 域 API 封装；请求和响应类型由 ADR-005 生成。 */
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";
@@ -11,7 +11,7 @@ export function listTriggers(): Promise<TriggerItem[]> {
   return api.get<TriggerItem[]>("/system/triggers");
 }
 
-/** 040·11:cron 预览(接下来 3 次触发;非法表达式 400 附可读原因) */
+/** 预览 cron 接下来三次触发时间；非法表达式返回可读错误。 */
 export function cronPreview(expr: string): Promise<CronPreviewOut> {
   return api.get(`/system/triggers/cron-preview?expr=${encodeURIComponent(expr)}`);
 }

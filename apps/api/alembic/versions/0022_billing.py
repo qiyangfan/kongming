@@ -1,4 +1,4 @@
-"""0022: developer-portal-billing 域三表(034)
+"""0022: developer-portal-billing 域三表
 
 Revision ID: 0022
 Revises: 0021

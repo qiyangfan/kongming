@@ -1,5 +1,5 @@
 # pyright: reportPrivateUsage=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownMemberType=false
-"""协作接线测试(091 组合根 collab_wiring + task_gen 协作分支,剧本化)。
+"""协作接线测试(组合根 collab_wiring + task_gen 协作分支,剧本化)。
 
 覆盖:开账 fail-closed(开账被拒不执行,无游离协作面)、全链账本时序
 (start→worker×N→finish)、逐 worker trace 父子关联与用量归集、Bot 人格注入
@@ -60,8 +60,7 @@ def _topo(*subgoals: str) -> str:
     return json.dumps([{"subgoal": s} for s in subgoals], ensure_ascii=False)
 
 
-# 显式钉死钳制上限:裸 Settings() 读真实环境,COLLAB_MAX_WORKERS/ROUNDS
-# 漂移会让依赖缺省上限的断言(名册 3/两轮收口)在别的环境假红
+# 显式设置协作人数和轮数上限,避免依赖本机环境变量。
 _SETTINGS = Settings(collab_max_workers=3, collab_max_rounds=3)
 
 
@@ -234,7 +233,7 @@ async def test_collab_runner_bot_persona_and_tool_narrowing() -> None:
     assert r["tools"] == [{"name": "sql_query"}]  # 求交后仅剩 Bot 子集
     prompt = str(r["bot_system_prompt"])
     assert "你是财务分析专家" in prompt
-    assert "已有上下文:Q1 数据" in prompt  # 上下文摘要=系统提示附加段(D2)
+    assert "已有上下文:Q1 数据" in prompt  # 上下文摘要=系统提示附加段
     ws = api.events[1][1]
     assert ws["bot_key"] == "fin_analyst"
 
@@ -322,7 +321,7 @@ async def test_task_gen_collab_branch_end_to_end() -> None:
     assert len(collab_inputs) == 1
     sid, goal, digest, cfg = collab_inputs[0]
     assert (sid, goal) == ("b", "交叉验证")
-    assert "基础数据就绪" in digest  # 受控摘要含已完成结论(D2)
+    assert "基础数据就绪" in digest  # 受控摘要含已完成结论
     assert cfg["max_workers"] == 2
     # 步骤终态由聚合结论驱动:协作步 DONE,证据带协作语义披露
     collab_result = api.results[1]
@@ -405,7 +404,7 @@ async def test_task_gen_collab_failed_honest() -> None:
     assert str(api.finished["status"]) == "FAILED"
 
 
-# ── 圆桌分支(115)──
+# ── 圆桌分支──
 
 
 def _roundtable_cfg(
@@ -752,7 +751,7 @@ async def test_roundtable_unresolved_bot_binding_fail_closed() -> None:
     assert reqs == []  # 未派发任何参与者(不含任务全量工具的执行)
 
 
-# ── 分工名册接线(collab-worker-roster):装配/注入/账本 ──
+# ── 分工名册接线:装配/注入/账本 ──
 
 
 def _roster_cfg(workers: list[dict[str, object]]) -> dict[str, object]:

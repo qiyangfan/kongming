@@ -1,4 +1,4 @@
-"""bot 端口(025):service 依赖反转。零框架纪律:仅 Protocol。"""
+"""bot 端口:service 依赖反转。零框架纪律:仅 Protocol。"""
 
 from typing import Any, Protocol
 
@@ -40,7 +40,7 @@ class BotRepo(Protocol):
 
 
 class DynamicToolLister(Protocol):
-    """租户 MCP 动态工具目录(028;实现侧 mcp 域):返回快照展开条目
+    """租户 MCP 动态工具目录(实现侧 mcp 域):返回快照展开条目
     (qualified/description/schema/read_only/server_key),空集=纯静态。"""
 
     async def list_dynamic(self, *, tenant_id: str) -> list[dict[str, object]]: ...
@@ -68,12 +68,12 @@ class ReactRunner(Protocol):
     ) -> dict[str, object]: ...
 
     async def list_models(self) -> list[str]:
-        """021 注册表模型名(agent 回调;不可达返回空)。"""
+        """注册表模型名(agent 回调;不可达返回空)。"""
         ...
 
 
 class UsageSink(Protocol):
-    """035:bot 链路用量落库口(llmusage 仓储适配;失败仅日志不阻断)。"""
+    """Bot 请求用量持久化端口。记录失败只写日志，不影响应答。"""
 
     async def insert_bot_usage(
         self, records: list[dict[str, Any]], *, tenant_id: str, bot_id: str
@@ -81,7 +81,7 @@ class UsageSink(Protocol):
 
 
 class BotGuardrail(Protocol):
-    """护栏(020)消费面:输入判定 + 输出过滤。"""
+    """护栏消费面:输入判定 + 输出过滤。"""
 
     async def check_input(
         self, *, trace_id: str, user_id: str, tenant_id: str, texts: list[str]
@@ -93,7 +93,7 @@ class BotGuardrail(Protocol):
 
 
 class BotOperLogger(Protocol):
-    """操作日志(auth 域 SqlOperLogRepo 适配;025 写操作落审计)。"""
+    """操作日志(auth 域 SqlOperLogRepo 适配;写操作落审计)。"""
 
     async def add(
         self,

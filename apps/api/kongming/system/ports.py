@@ -1,7 +1,7 @@
-"""system 域持久化端口(typing.Protocol 反转,宪法 Article II)。
+"""system 域持久化端口,以 Protocol 隔离用例层与具体实现。
 
 service 只依赖本接口;SQLAlchemy 实现在 repository.py。
-事务由 repo 自身的 commit/rollback 收口,service 不触碰 Session(零框架)。
+事务由 repo 自身的 commit/rollback 负责,service 不直接操作 Session。
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ class SystemRepo(Protocol):
         ...
 
     async def set_user_status(self, user_id: str, status: str) -> None:
-        """专用启停(012):只翻状态列。"""
+        """专用启停:只翻状态列。"""
         ...
 
     async def soft_delete_user(self, user_id: str) -> bool: ...
@@ -151,7 +151,7 @@ class SystemRepo(Protocol):
 
     async def list_tenants(self) -> list[TenantItem]: ...
 
-    # ---- 操作审计(007 S2:管理面写操作与业务同事务留痕) ----
+    # ---- 操作审计(管理面写操作与业务同事务留痕) ----
 
     async def log_oper(
         self, actor_id: str, action: str, target: str | None, detail: dict[str, object]

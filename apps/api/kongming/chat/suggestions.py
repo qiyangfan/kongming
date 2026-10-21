@@ -1,14 +1,4 @@
-"""对话冷启动建议问题用例(039)。
-
-流程(与 spec chat-suggestions 逐条对映):
-租户复校 → 数据源可用性预检(default 直通,不可用同形空清单防 key 探测)
-→ 缓存命中即返 → 未命中:schema 摘要(不可得即空清单)→ advisory lock
-取锁复查(并发防击穿)→ 生成 → 防线校验(单行折叠/长度/条数/去重)→
-落库 → 返回。任一环失败一律收敛空清单且不落缓存(下次访问自然重试);
-缓存写失败不阻断本次返回(仅日志,自愈=下次重新生成)。
-
-建议问题仅为 UI 呈现文本,本用例不构成任何执行放行依据。
-"""
+"""对话冷启动建议问题用例：校验租户和数据源，读取或生成缓存，并验证输出格式。失败时返回空清单且不缓存；建议文本只用于界面展示。"""
 
 import logging
 from collections.abc import Sequence
@@ -47,7 +37,7 @@ def sanitize_questions(raw: Sequence[object]) -> list[str]:
 
 
 class SuggestionsService:
-    """建议问题获取用例(039)。端口全部组合根注入(013 反转同范式)。"""
+    """建议问题获取用例。端口依赖由组合根注入。"""
 
     def __init__(
         self,
@@ -83,8 +73,8 @@ class SuggestionsService:
     ) -> list[str]:
         tenant_id, resolved_key = await self._resolve_tenant(user_id, tenant_key)
 
-        # 可用性预检(008 D8 同款;default 内置直通):不存在/禁用/越属
-        # 同形空清单,不触发生成(spec「租户隔离与数据源可用性」)
+        # 可用性预检:数据源不存在/禁用/越属均返回同形空清单,不触发生成
+        # (default 内置源直通;spec「租户隔离与数据源可用性」)
         if datasource_key != "default" and not await self._ds_checker.is_usable(
             datasource_key, tenant_id
         ):
@@ -123,7 +113,7 @@ class SuggestionsService:
             )
             await self._suggestions.commit()
         except ChatStoreError:
-            # 缓存写失败不阻断本次返回(仅日志);并发双写由唯一约束兜底
+            # 缓存写入失败只记录日志，不影响响应；并发写入由唯一约束处理。
             log.warning("建议缓存落库失败 ds=%s", datasource_key, exc_info=True)
             await self._suggestions.rollback()
         return questions

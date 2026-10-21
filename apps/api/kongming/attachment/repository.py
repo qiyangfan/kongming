@@ -1,4 +1,4 @@
-"""attachment 存储(030):sys_attachment 元数据 + var/attachments 文件。
+"""attachment 存储:sys_attachment 元数据 + var/attachments 文件。
 
 一次性消费(consume_and_read):同事务置 CONSUMED → 删文件 → 提交;
 重复取用返回 None(404 语义由调用方映射)。文件路径全由 id 拼装
@@ -61,7 +61,7 @@ class SqlAttachmentRepo:
         await asyncio.to_thread(_write)
 
     async def delete_file(self, att_id: str, mime: str) -> None:
-        """删除已落盘文件(审查循环 B10:commit 失败行回滚后的补偿,
+        """删除已落盘文件(commit 失败行回滚后的补偿,
         防 file-only 孤儿——孤儿清理是行驱动,覆盖不了无行文件)。"""
         await asyncio.to_thread(_path(att_id, mime).unlink, True)
 
@@ -112,7 +112,7 @@ class SqlAttachmentRepo:
         try:
             data = await asyncio.to_thread(path.read_bytes)
         except FileNotFoundError:
-            return None  # 文件失踪(部署事故/提交失败残余:R1-T1——行回滚
+            return None  # 文件失踪(部署事故/提交失败残余:——行回滚
             # UPLOADED 但文件已删的低概率窗口):按不可消费收敛(404 语义)
         await self._s.execute(
             text(

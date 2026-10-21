@@ -1,5 +1,4 @@
-/** 时间与数字格式化单源(与 jinguan/web/src/lib/datetime.ts 同构,修改需双侧同步)。
- *  用户可见时间/数字一律走本文件:禁页面内 slice ISO 串、禁裸 toLocaleString()。 */
+/** 统一格式化用户界面显示的日期和数字；页面不应自行解析时间字符串。 */
 
 const pad = (n: number): string => String(n).padStart(2, "0");
 

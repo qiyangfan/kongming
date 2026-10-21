@@ -1,4 +1,4 @@
-"""多智能体协作编排测试(091,剧本化:mock LLM/worker)。
+"""多智能体协作编排测试(剧本化:mock LLM/worker)。
 
 覆盖:拆解→派发→聚合 DONE、分歧标注不静默调和、分歧核实采纳/预算不足保留、
 critic 审查通过/修订成功/轮次尽保留意见、worker 失败如实 ERROR、拆解失败回落、
@@ -382,20 +382,20 @@ async def test_budget_truncates_and_discloses_pending() -> None:
 
 @pytest.mark.asyncio
 async def test_worker_authorization_surface_structural() -> None:
-    """授权不提权结构断言(D5):worker 执行器签名仅 (subgoal, context, slot),
+    """授权不提权结构断言:worker 执行器签名仅 (subgoal, context, slot),
     编排器入口不持 api/token/credentials/tools 句柄(协作不引入新主体)。"""
     sig = inspect.signature(run_collab)
     for forbidden in ("api", "token", "credentials", "tools"):
         assert forbidden not in sig.parameters, f"run_collab 不得持有 {forbidden} 参数"
     params, _return = typing.get_args(WorkerRunner)
-    # (subgoal, context, slot) —— slot=名册成员标签(collab-worker-roster),
-    # 非授权载荷;签名禁入 api/token/credentials/tools 不变
+    # (subgoal, context, slot) —— slot=名册成员标签,非授权载荷;
+    # 签名禁入 api/token/credentials/tools 不变
     assert list(params) == [str, str, str | None]
 
 
 @pytest.mark.asyncio
 async def test_no_free_collab_entry_structural() -> None:
-    """无游离协作入口(1.1 结构断言):agent 面模块只经任务编排进入,
+    """无游离协作入口(结构断言):agent 面模块只经任务编排进入,
     run_collab 入口要求宿主载荷且不提供任何独立发起端点;
     协作发起=任务步骤 step-start 决策(接线组合根),模块自身无 server 面。"""
     # 模块不定义 FastAPI 路由/APIRouter(游离端点无从谈起)
@@ -425,7 +425,7 @@ async def test_aggregate_summary_always_valid_json() -> None:
     assert all(len(str(c["summary"])) == 2000 for c in parsed)
 
 
-# ── 分工名册(collab-worker-roster):分配制规划与纯名册派发 ──
+# ── 分工名册:分配制规划与纯名册派发 ──
 
 
 def _roster_topo(*entries: dict[str, object]) -> str:

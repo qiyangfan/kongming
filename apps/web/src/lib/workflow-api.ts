@@ -1,5 +1,4 @@
-/* workflow 域 API 封装(029)。审查循环 D-F2:list/detail/runs 已契约化,
-   消费生成类型(ADR-005);execute 响应嵌套深暂保留窄化助手。 */
+/* workflow 域 API 封装；请求和响应类型由 ADR-005 生成。 */
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";
@@ -64,8 +63,7 @@ export function pageWorkflowRuns(
   return api.get(`/system/workflow/${key}/runs?page=${page}&size=${size}`);
 }
 
-/** run 详情(D2 web 面):node_runs 含 outputs(列表行为省流量剥为 null,
-    详情走独立端点);权限 system:workflow:manage。 */
+/** 获取工作流运行详情,包含列表响应省略的 outputs。 */
 export function workflowRunDetail(wfKey: string, runId: string): Promise<WorkflowRunItem> {
   return api.get(`/system/workflow/${wfKey}/runs/${runId}`);
 }

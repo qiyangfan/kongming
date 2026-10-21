@@ -1,6 +1,6 @@
-"""stt 引擎(114):faster-whisper 懒加载单例——组合根装配的真实实现。
+"""stt 引擎:faster-whisper 懒加载单例——组合根装配的真实实现。
 
-加载策略(design D2):进程内首次请求时加载并缓存(asyncio.Lock 防并发
+加载策略:进程内首次请求时加载并缓存(asyncio.Lock 防并发
 双载;加载是阻塞调用走 to_thread),失败收敛 EngineUnavailable(端点 503
 明示配方)。模型文件缺失时 faster-whisper 会尝试从 HuggingFace 下载——
 离线环境即加载失败 503,预下载配方见 docs/HANDOFF.md。
@@ -71,10 +71,9 @@ class FasterWhisperEngine:
             decoded = await asyncio.to_thread(_decode_audio_16k, audio)
 
             def _run() -> str:
-                # 创建+消费同线程:faster-whisper 的 transcribe 返回 lazy
-                # generator,真正的 decoder 推理在逐段迭代时发生——消费若留在
-                # 事件循环线程会阻塞全进程(评审修复:原实现只把创建放进
-                # to_thread,seg 迭代仍在循环线程跑)
+                # 创建+消费须同线程:faster-whisper 的 transcribe 返回 lazy
+                # generator,真正推理在逐段迭代时发生——消费留在事件循环
+                # 线程会阻塞全进程
                 segments, _info = model.transcribe(decoded, language="zh", beam_size=5)
                 return "".join(seg.text for seg in segments)
 

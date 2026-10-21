@@ -1,4 +1,4 @@
-"""trigger 端口(031):存储与目标执行反转,用例/调度零框架依赖。"""
+"""trigger 端口:存储与目标执行反转,用例/调度零框架依赖。"""
 
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -76,7 +76,7 @@ class TriggerRepo(Protocol):
 
 
 class TargetRunner(Protocol):
-    """目标执行(031):实现侧装配 029/025 组合根(独立会话);
+    """目标执行:实现侧装配  组合根(独立会话);
     返回 (success, ref, error)。"""
 
     async def run_target(
@@ -93,9 +93,9 @@ class TargetRunner(Protocol):
 
 
 class TargetChecker(Protocol):
-    """目标存在性(040):创建/改指时写边界 fail-fast。
+    """目标存在性:创建/改指时写边界 fail-fast。
 
-    workflow=创建者视角可见集合(与前端候选同源,与派发期 032 可见性同口径);
+    workflow=创建者视角可见集合(与前端候选同源,与派发期 可见性同口径);
     bot=租户级存在(与派发期 get_by_key 同口径)。实现见 router 组合根。
     """
 
@@ -105,7 +105,7 @@ class TargetChecker(Protocol):
 
 
 class SecretCipher(Protocol):
-    """密钥加解密(008 cipher 反转)。"""
+    """密钥加解密(cipher 反转)。"""
 
     def encrypt(self, plain: str) -> str: ...
 
@@ -113,7 +113,7 @@ class SecretCipher(Protocol):
 
 
 class Notifier(Protocol):
-    """出站通知(031):实现侧 httpx+SSRF 判定(029 拒绝段复用);
+    """出站通知:实现侧 httpx+SSRF 判定(拒绝段复用);
     check_url 在 post 前由 service 调用。"""
 
     async def check_url(self, url: str) -> None: ...
@@ -121,7 +121,7 @@ class Notifier(Protocol):
     async def post(self, *, url: str, body: bytes, signature: str) -> None: ...
 
 
-# ── 邮件入站(108) ──
+# ── 邮件入站 ──
 
 
 class MailError(Exception):
@@ -157,7 +157,7 @@ class MailFetch:
 
 
 class MailClient(Protocol):
-    """IMAP 客户端(108):实现侧 imaplib 标准库(阻塞 IO 经线程隔离)。
+    """IMAP 客户端:实现侧 imaplib 标准库(阻塞 IO 经线程隔离)。
     语义:`UID SEARCH UID <last_uid+1>:*` 游标续传 + UIDVALIDITY 探测;
     连接/认证/协议错误按三类抛出,由服务层分类落 FAILED run。"""
 
@@ -176,9 +176,7 @@ class MailClient(Protocol):
 
 
 class InputGuardrail(Protocol):
-    """输入护栏(108:邮件摘要是外部内容,进目标执行=进 LLM 链路,过既有
-    020 护栏;实现侧组合根绑定 GuardrailService)。返回 (是否拦截,
-    处理后文本,与 texts 同序——masked 脱敏产物)。"""
+    """邮件摘要属于外部输入，交给目标执行前需经过文本护栏；被拦截时返回脱敏文本和拦截状态。"""
 
     async def check(
         self, *, tenant_id: str, user_id: str, texts: list[str]

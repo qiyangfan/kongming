@@ -1,10 +1,4 @@
-"""执行计划端点全栈测试(chat spec「EXPLAIN 执行计划」+ 010 delta,安全规则类测试先行)。
-
-真实 PG:EXPLAIN 真过「租户/数据源解析→绑定复校→防火墙初检→data_scope 改写→
-复检三件套→只读池」全管线(与 /internal/sql/execute 同源私有段);message_id
-引用形态——客户端不可提交裸 SQL,服务端构造 EXPLAIN (FORMAT JSON),永不 ANALYZE;
-归属 404/权限 403/无 SQL 400/动态源快照路由全覆盖;审计记 EXPLAIN 形态可回放。
-"""
+"""覆盖执行计划端点的权限、租户隔离、防护和审计。"""
 # pyright: reportPrivateUsage=false
 
 import uuid
@@ -30,7 +24,7 @@ from tests.test_chat_query import (
 )
 from tests.test_chat_sessions import _mk_session
 
-DS_SCHEMA = "ds_explain"  # 动态源快照证物 schema(同实例异 schema 形态,008 既定)
+DS_SCHEMA = "ds_explain"  # 动态源快照证物 schema(同实例异 schema 形态)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -97,7 +91,7 @@ async def _mk_msg(
 
 
 async def _mk_ds(s: AsyncSession, key: str, tenant_id: str, *, status: str = "ACTIVE") -> str:
-    """直插动态源行(密码经真 cipher 加密,与 008 测试同路径;同实例异 schema)。"""
+    """直插动态源行(密码经真 cipher 加密,与生产同路径;同实例异 schema)。"""
     conn = db_conn()  # 连接参数环境派生(不硬编码端口,见 conftest.db_conn)
     enc = get_cipher(get_settings().datasource_encrypt_key).encrypt(str(conn["password"]))
     did = (
@@ -221,7 +215,7 @@ async def test_explain_message_without_sql_400(
     mid_failed = await _mk_msg(session, sid, status="FAILED")  # 失败轮无 SQL
     r = await client.post("/chat/explain", json={"message_id": mid_failed}, headers=_auth(token))
     assert r.status_code == 400
-    # 审查循环 B5:锚定限定 ASSISTANT——USER 消息 id 同形 404(不泄露存在性)
+    # 锚定限定 ASSISTANT——USER 消息 id 同形 404(不泄露存在性)
     mid_user = await _mk_msg(session, sid, role="USER")
     r2 = await client.post("/chat/explain", json={"message_id": mid_user}, headers=_auth(token))
     assert r2.status_code == 404
@@ -311,7 +305,7 @@ async def test_explain_reserved_table_blocked(
     assert r.status_code == 200
     body = r.json()
     assert body["success"] is False
-    # 047 文案中性化(不责备用户),拦截语义不变
+    # 文案中性化(不责备用户),拦截语义不变
     assert "不允许查询" in body["error"]
 
 

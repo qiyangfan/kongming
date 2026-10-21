@@ -33,7 +33,7 @@ async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction
         await conn.execute(
             text(f'CREATE TABLE IF NOT EXISTS "{SCHEMA}".armor (id uuid PRIMARY KEY)')
         )
-        # 047:视图不入内省(收录收窄 BASE TABLE 的证物)
+        # 视图不入内省(收录收窄 BASE TABLE 的证物)
         await conn.execute(text(f'DROP VIEW IF EXISTS "{SCHEMA}".arms_view'))
         await conn.execute(
             # noqa 证明:SCHEMA 为测试模块常量,非外部输入
@@ -106,16 +106,15 @@ async def test_introspection_with_comments(client: AsyncClient, session: AsyncSe
     assert cols["qty"]["data_type"] == "integer"
     # 边界:其他租户 schema 不出现
     assert ("tenant_other", "secret") not in by_name
-    # 保留表不进提示(005 评审:sys_user.password_hash 透出通路)
+    # 控制面保留表不进入提示，避免泄露 sys_user.password_hash。
     assert ("public", "sys_user") not in by_name
     assert ("public", "chat_message") not in by_name
     assert ("public", "user_identities") not in by_name
-    # 092 跨域泄漏回归闸:非保留名的控制面表(report/judge_run 族)同样不得
-    # 入租户知识——default 路径内省 SHALL 只看租户 schema(public 整体不进;
-    # 修复前 public.report 会被内省进租户 schema 提示,实测抓到)
+    # 跨域泄漏回归闸:非保留名的控制面表(report/judge_run 族)同样不得
+    # 入租户知识——default 路径内省只看租户 schema,public 整体不进
     assert ("public", "report") not in by_name
     assert ("public", "judge_run") not in by_name
-    # 047:视图不入内省(便捷视图行扇出/列缺失对生成上下文有毒)
+    # 视图不入内省(便捷视图行扇出/列缺失对生成上下文有毒)
     assert (SCHEMA, "arms_view") not in by_name
 
 

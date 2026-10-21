@@ -1,7 +1,4 @@
-/* 审计页(015,audit spec「SQL 审计查询」「操作日志」):SQL 审计/操作日志
-   双区(toggle-group 切换)+筛选+分页,双表走 DataView 标准件(行详情收进
-   actions,经对话框查看完整 sql_text/detail)。只读页面(归档运维经 API/
-   调度,不在 UI)。权限点 system:audit:view。 */
+/* 审计页面提供 SQL 审计和操作日志查询；归档操作由 API 和定时任务处理。 */
 
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -47,7 +44,7 @@ export default function AuditPage() {
   const [tenantId, setTenantId] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  // 行详情对话框(DataView 契约不承载行间展开行,宽窄屏统一走对话框)
+  // 行详情使用对话框呈现，DataView 不承载行内展开内容。
   const [detail, setDetail] = useState<
     { kind: "sql"; item: SqlItem } | { kind: "oper"; item: OperItem } | null
   >(null);
@@ -87,7 +84,7 @@ export default function AuditPage() {
   const total = section === "sql" ? sqlList.data?.total : operList.data?.total;
   const totalPages = Math.max(1, Math.ceil((total ?? 0) / PAGE_SIZE));
 
-  // 切区重置分页;末页越界自愈(007/009 范式)
+  // 切换审计类型时重置分页;当前页被清空时退回一页,避免空页。
   useEffect(() => {
     setPage(1);
   }, [section]);
@@ -157,7 +154,7 @@ export default function AuditPage() {
                   ))}
                 </SelectContent>
               </Select>
-              {/* R1-F2:listTenants 挂 user:manage(页面守卫是 audit:view,
+              {/* listTenants 挂 user:manage(页面守卫是 audit:view,
                   权限错配时 403)——失败显式禁用+提示,不静默 */}
               {tenants.isError && (
                 <p role="alert" className="text-xs text-destructive">
@@ -249,7 +246,6 @@ export default function AuditPage() {
       {section === "sql" && sqlList.isError && <ErrorAlert />}
       {section === "oper" && operList.isError && <ErrorAlert />}
 
-      {/* 分页表(双区各自接 DataView;列序与原表格逐列保真) */}
       {section === "sql" ? (
         <DataView
           rows={sqlList.data?.items ?? []}
@@ -368,7 +364,6 @@ export default function AuditPage() {
 
       <Pagination page={page} pageCount={totalPages} total={total ?? 0} onPageChange={setPage} />
 
-      {/* 行详情对话框:SQL 正文/拦截原因/链路 ID 与操作日志原始 JSON */}
       <Dialog open={detail !== null} onOpenChange={(open) => !open && setDetail(null)}>
         <DialogContent aria-describedby={undefined} className="sm:max-w-2xl">
           <DialogHeader>
@@ -394,7 +389,7 @@ export default function AuditPage() {
           )}
           {detail?.kind === "oper" && (
             <div>
-              {/* 管理排查场景保留原始 JSON;标题说明数据形态 */}
+              {/* 管理排查场景需要原始 JSON */}
               <p className="mb-1 text-xs font-medium text-muted-foreground">原始数据(JSON)</p>
               <pre className="overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed">
                 {JSON.stringify(detail.item.detail ?? {}, null, 2)}

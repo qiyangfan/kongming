@@ -1,4 +1,4 @@
-"""079:ReAct 纪律段按注入工具集派生(全套件零漂移锚测试)。"""
+"""ReAct 纪律段按注入工具集派生(全套件零漂移锚测试)。"""
 
 from pathlib import Path
 
@@ -16,7 +16,7 @@ from kongming_agent.graph.react.prompts import (
 FULL = {T_RAG, T_VALIDATE, T_EXECUTE, T_WRITE}
 
 
-# 历史 REACT_DISCIPLINE 黄金夹具(079 引入前 git 版本;自比会掩盖漂移)
+# 固定 REACT_DISCIPLINE 提示词作为预期值，避免从被测函数生成断言内容。
 _LEGACY_DISCIPLINE = (Path(__file__).parent / "data_legacy_react_discipline.txt").read_text(
     encoding="utf-8"
 )

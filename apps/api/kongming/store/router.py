@@ -1,6 +1,6 @@
-"""store 路由(033,薄适配层):/store/* 发现/互动/直跑 + publish 治理。
+"""处理 /store/* 下的发现、互动、执行和发布端点。
 
-读取/互动挂 bot:run(商店消费面);上架治理复用 032 can_manage 判定
+读取/互动挂 bot:run(商店消费面);上架治理复用 can_manage 判定
 (创建者或归属团队 OWNER,fail-closed)。
 """
 
@@ -64,7 +64,7 @@ class _StoreGuardrail:
     async def check_input(
         self, *, trace_id: str, user_id: str, tenant_id: str, texts: list[str]
     ) -> tuple[bool, list[str]]:
-        """输入面判定(104 回滚重审系统提示词;与 bot 域同口径)。"""
+        """输入面判定(回滚重审系统提示词;与 bot 域同口径)。"""
         from kongming.db import get_sessionmaker
         from kongming.guardrail.repository import SqlGuardrailAuditWriter, SqlGuardrailRepo
         from kongming.guardrail.service import GuardrailService
@@ -101,19 +101,18 @@ class _StoreRunner:
                     question=question,
                     channel=channel,
                     tenant_id_hint=tenant_id,
-                    # 104:商店直跑消费当前上架版本快照(系统提示词/工具集)
+                    # 商店直跑消费当前上架版本快照(系统提示词/工具集)
                     definition_override=definition,
                 )
             except BotNotFound:
-                # R1-J1:创建者被禁用(025 状态闸)——收敛友好文案不裸 500
+                # 创建者被禁用(状态闸)——收敛友好文案不裸 500
                 return False, "", "助手暂不可用"
             summary = str(out.get("summary") or "")
             return bool(out.get("success")), summary, str(out.get("error") or "")
 
 
 class _StoreToolLister:
-    """上架闸工具集解析:经 bot 域服务求交(与运行闸 resolve_tools 同源;
-    与 _StoreRunner 同款组合根跨域装配,store 不 import bot 基础设施)。"""
+    """通过 Bot 域服务解析当前上架 Bot 可用工具，不直接依赖 Bot 仓储。"""
 
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
@@ -135,7 +134,7 @@ def _svc(session: AsyncSession) -> StoreService:
         tool_lister=_StoreToolLister(session),
         guardrail=_StoreGuardrail(),
         runner=_StoreRunner(),
-        version_cap=get_settings().bot_store_version_cap,  # 104:封顶上限部署级
+        version_cap=get_settings().bot_store_version_cap,  # 封顶上限部署级
     )
 
 
@@ -183,7 +182,7 @@ class StoreBotOut(BaseModel):
     avg_score: float = 0.0
     rating_count: int = 0
     fav_count: int = 0
-    favorited: bool = False  # J5:本人收藏态(心形填充依据)
+    favorited: bool = False  # 本人收藏态(心形填充依据)
     published_at: str | None = None
 
 
@@ -191,8 +190,8 @@ class StoreBotDetailOut(StoreBotOut):
     suggestions: list[str] = []
     tools: list[str] = []
     my_rating: int | None = None
-    version_no: int | None = None  # 104:当前上架版本号(纯增字段)
-    version_published_at: str | None = None  # 104:当前版本上架时间(纯增字段)
+    version_no: int | None = None  # 当前上架版本号
+    version_published_at: str | None = None  # 当前版本上架时间
 
 
 class BotSnapshotOut(BaseModel):
@@ -206,7 +205,7 @@ class BotSnapshotOut(BaseModel):
 
 
 class BotVersionOut(BaseModel):
-    """版本历史项(104):版本号/上架时间/当前标识/快照内容。"""
+    """版本历史项:版本号/上架时间/当前标识/快照内容。"""
 
     version_no: int
     published_at: str
@@ -277,7 +276,7 @@ async def publish_bot(
         raise HTTPException(status_code=400, detail=str(e)) from None
     except GuardrailRejected as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
-    # J7:上架审计(025 bot.* 先例);104:幂等复用记「内容无变化」,
+    # 上架审计(bot.* 先例);幂等复用记「内容无变化」,
     # 新版本记版本号(spec「内容无变化幂等复用…审计记录内容无变化」)
     from kongming.auth.repository import SqlOperLogRepo
 
@@ -345,7 +344,7 @@ def _version_out(r: dict[str, Any]) -> BotVersionOut:
     )
 
 
-# ── 版本历史与回滚(104;归属口径与上架治理同) ──
+# ── 版本历史与回滚(归属口径与上架治理同) ──
 
 
 @router.get(
@@ -477,7 +476,7 @@ async def add_favorite(
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
-    """收藏(幂等:set 语义,重复 POST 不反选——审查循环 F6 对齐 spec
+    """收藏(幂等:set 语义,重复 POST 不反选—— 对齐 spec
     「重复操作幂等」;取消走 DELETE 同路径)。"""
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     try:

@@ -1,11 +1,5 @@
 # pyright: reportPrivateUsage=false
-"""图级检查点与图内挂起测试(add-graph-checkpoint,安全规则类测试先行)。
-
-覆盖:检查点存储租户隔离(跨任务/跨租户 404 同形)、存取往返、图内挂起上账
-(幂等/代际失配)、确认处置(归属人-only/幂等/批准与拒绝的恢复提示)、
-过期扫描(步骤跳过+确认行置 expired)。驱动形态与 test_task.py 同款:
-内联编排(真实 HTTP 全链,派发记录器消除传输层死锁)。
-"""
+"""覆盖图级检查点、审批挂起和恢复及过期清理。"""
 
 from typing import Any
 

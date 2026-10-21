@@ -1,4 +1,4 @@
-"""测试连接(infrastructure 层,008 design D6):asyncpg 直连 SELECT 1 即关。
+"""测试连接:asyncpg 直连 SELECT 1 即关。
 
 失败 reason 收敛为驱动错误类别文案(超时/无法连接/认证失败/库不存在),
 永不回显密码与明文连接串;不落库、不建池、不落审计(无状态操作)。
@@ -73,6 +73,6 @@ class AsyncpgConnectionTester:
             if conn is not None:
                 try:
                     await conn.close()
-                except Exception:  # noqa: BLE001  # 断链上 close 可再抛,不得顶掉已构造的结果(R1-S4)
+                except Exception:  # noqa: BLE001 # 断链上 close 可再抛,不得顶掉已构造的结果
                     log.debug("测试连接 close 二次异常(已忽略)", exc_info=True)
         return TestConnectionResult(ok=True)

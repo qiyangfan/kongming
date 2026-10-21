@@ -1,10 +1,10 @@
-"""审计留存归档(015,audit spec):超窗记录导出 gzip JSONL + SHA-256 manifest
+"""审计留存归档(audit spec):超窗记录导出 gzip JSONL + SHA-256 manifest
 后库内删除;重导入按 id 幂等。
 
 逻辑全部在独立可测函数(调度器 lifespan 薄壳/管理端点仅转调):
 - 窗口目录名=导出日(同日重跑幂等:manifest 完整则跳过导出直接补删);
 - 导出与删除分步:manifest 写盘成功才删,删除失败保留文件(下轮重删);
-- 失败不阻断审计写入(调用方仅记录日志,宪法 Article III)。
+- 失败仅记 error 日志,不阻断审计写入。
 """
 
 import asyncio
@@ -26,9 +26,9 @@ log = logging.getLogger(__name__)
 
 _TABLES = ("sys_sql_audit", "sys_oper_log")  # 两审计表,导出文件基名=表名
 _FETCH_BATCH = 5000
-# 归档互斥(R1-S3):手动端点与每日调度共用入口,并发跑同窗口目录会
+# 归档互斥:手动端点与每日调度共用入口,并发跑同窗口目录会
 # gzip "wt" 截断交错致文件损坏且删除后不可恢复——进程内锁序列化
-# (单 worker 前提与 008 挂账②同款;多 worker 需 PG advisory lock,挂账)
+# (单 worker 前提;多 worker 需 PG advisory lock)
 _archive_lock = asyncio.Lock()
 
 
@@ -52,8 +52,10 @@ def _window_dir(archive_dir: str, now: datetime) -> Path:
 
 
 async def _export_table(session: AsyncSession, table: str, cutoff: datetime, path: Path) -> int:
-    """单表超窗行 → gzip JSONL(流式分批);返回行数(SHA-256 由调用方对
-    落盘文件统一计算——流式算未压缩文本会与文件字节不一致,实测坑)。"""
+    """分批导出单表超窗记录为 gzip JSONL 并返回行数。
+
+    SHA-256 必须基于压缩后的落盘文件计算。
+    """
     rows = 0
     with gzip.open(path, "wt", encoding="utf-8") as gz:
         offset = 0
@@ -88,7 +90,7 @@ async def run_archive(
 ) -> ArchiveResult:
     """超窗(早于 now-days)记录归档:导出两表 gzip JSONL + manifest(SHA-256)
     → 库内删除。同日重跑幂等(manifest 完整且窗口覆盖则跳过导出仅补删);
-    全程持进程锁(并发交错=文件损坏且删除后不可恢复,R1-S3)。"""
+    全程持进程锁(并发交错=文件损坏且删除后不可恢复)。"""
     async with _archive_lock:
         return await _run_archive_locked(session, days=days, archive_dir=archive_dir, now=now)
 
@@ -106,10 +108,10 @@ async def _run_archive_locked(
     exported = 0
 
     if manifest_path.exists():
-        # 重跑幂等:manifest 完整(两表文件均在且 SHA-256 校验过)**且其导出范围
-        # 覆盖本次删除范围**(manifest_cutoff >= 当前 cutoff——manifest 导出的是
-        # created_at < manifest_cutoff 的行,须为本次删除集的超集;R1-S2:days
-        # 调小后 cutoff 后移,旧 manifest 不覆盖新增段,不得跳过否则未导先删)
+        # 仅当 manifest 完整且 SHA-256 校验通过时才跳过导出。
+        # manifest_cutoff 必须覆盖当前清理范围；导出文件包含 created_at < manifest_cutoff 的行，
+        # 其中必须包含当前清理将删除的全部记录。
+        # 清理天数减少时旧 manifest 可能缺少新增区间，不能复用。
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             ok = (

@@ -1,6 +1,4 @@
-/* condition 出边 on 值强制二选一对话框(107 design 裁决 5):
-   拖线时弹出,MUST NOT 出现无 on 值条件后继连线——只有 true/false 两个
-   选项 + 取消,无「不选直接确认」路径。 */
+/* 创建条件分支连线时必须选择 true 或 false；不能保存缺少 on 值的连线。 */
 
 import { Loader2 } from "lucide-react";
 

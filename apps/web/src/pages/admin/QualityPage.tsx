@@ -1,9 +1,4 @@
-/* 轮次质量观测页(069 chat-quality-observability):线上真实质量第一天可观——
-   汇总卡 + 按天趋势(补零)+ 数据源切片 + prompt 版本切片 + 轮次明细分页。
-   NO_DATA 轮次首次拥有可见形态(此前无执行无审计行,任何观测面不可见);
-   trace_id 点击跳转用量时间线抽屉(与 UsagePage 同源复用);
-   图表色板从设计 token 派生(铁律 6);类型全生成(ADR-005);
-   无 system:chat-quality:view 者接口层 403(nav/PermRoute 同源守卫)。 */
+/* 展示问答轮次的汇总、趋势、切片和明细；NO_DATA 单独呈现，trace_id 可打开用量时间线。 */
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -46,8 +41,7 @@ import { cssVar } from "@/lib/utils";
 
 const PAGE_SIZE = 20;
 
-/* 轮次四态徽章(与 audit/usage 同范式:值 → 徽章统一走 StatusBadge;
-   044 NO_DATA=知识未覆盖中性形态,不用失败色) */
+/* 轮次四态徽章;NO_DATA 是知识未覆盖的中性形态,不用失败色 */
 const ROUND_STATUS_META: StatusMeta = {
   SUCCESS: { label: "成功", variant: "secondary" },
   NO_DATA: { label: "未覆盖", variant: "outline" },
@@ -149,7 +143,7 @@ function TimelineDialog({ traceId, onClose }: { traceId: string | null; onClose:
   );
 }
 
-/* 时间线事件状态徽章(LLM/TOOL/SQL 三路;值集开放,fallback 兜原值) */
+/* 时间线事件状态徽章;值集开放,未收录值回退原值 */
 const TIMELINE_STATUS_META: StatusMeta = {
   SUCCESS: { label: "成功", variant: "secondary" },
   EXECUTED: { label: "已执行", variant: "secondary" },
@@ -187,14 +181,14 @@ export default function QualityPage() {
       }),
   });
 
-  // 筛选收窄致末页越界自愈(007/009/014 同款范式;onChange 已同步 setPage(1))
+  // 当前页被清空时退回上一页,避免落在空页。
   useEffect(() => {
     if (list.data && list.data.items.length === 0 && list.data.total > 0 && page > 1) {
       setPage((p) => Math.max(1, p - 1));
     }
   }, [list.data, page]);
 
-  // 040·11:筛选候选自切片行派生(数据源维度;本页已在拉)
+  // 数据源筛选项从已加载的切片数据中生成。
   const dsOptions = useMemo(
     () => (summary.data?.by_datasource ?? []).map((r) => r.datasource_key).sort(),
     [summary.data],
@@ -217,7 +211,6 @@ export default function QualityPage() {
     {
       label: "知识库补全",
       onSelect: () => navigate("/admin/rag"),
-      // NO_DATA 轮次的知识补全闭环最小操作面(原 turn-status 行动作并入此处)
       isVisible: (row) => row.status === "NO_DATA",
     },
   ];
@@ -237,7 +230,6 @@ export default function QualityPage() {
         <StatCard label="自愈率" value={stat(ov ? pct(ov.selfheal_rate) : "0.0%")} />
       </div>
 
-      {/* 趋势 */}
       <div className="rounded-lg border bg-card p-4">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-sm font-medium">按天趋势</h3>

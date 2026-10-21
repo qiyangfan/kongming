@@ -38,25 +38,25 @@ class AgentReply:
     sql: str = ""
     retry_count: int = 0
     error: str | None = None
-    # 069:管理面诊断信号(纯增;仅落库,不进用户响应/SSE——逐字段同构契约不破)
+    # 管理面诊断信号:仅落库,不进用户响应/SSE(逐字段同构契约不破)
     resolved_question: str | None = None
     prompt_version: str | None = None
-    # 076:语义层口径命中(纯增;随 result_json 落库+回显,不进 SSE 用户事件)
+    # 语义层口径命中:随 result_json 落库+回显,不进 SSE 用户事件
     metric_hits: list[dict[str, str | None]] = field(default_factory=list[dict[str, str | None]])
-    # 068:文档道结构化来源(纯增;随 result_json 落库+回显;SQL 道恒空)
+    # 文档道结构化来源:随 result_json 落库+回显;SQL 道恒空
     sources: list[dict[str, str]] = field(default_factory=list[dict[str, str]])
-    # 035:bot 链路请求内同步采集(纯增;/query_react 响应携带,空=旧版 agent)
+    # Bot 请求内收集用量记录,随 /query_react 响应返回。
     usage_records: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
 
 
 def _obj_dict(value: object) -> dict[str, object] | None:
-    """dict 守卫 + 键型收窄(httpx resp.json() 的 Any 在 strict 下传播 Unknown,
-    边界处一次收窄;isinstance 守卫语义与裸 dict 检查一致)。"""
+    """dict 守卫 + 键型收窄(httpx resp.json 的 Any 在 strict 下传播
+    Unknown,边界处一次收窄)。"""
     return cast(dict[str, object], value) if isinstance(value, dict) else None
 
 
 def _metric_hits_of(raw: object) -> list[dict[str, str | None]]:
-    """076:QueryOut.metric_hits → AgentReply 载荷(守卫收窄;dict 且键全 str)。"""
+    """QueryOut.metric_hits → AgentReply 载荷(守卫收窄;dict 且键全 str)。"""
     if not isinstance(raw, list):
         return []
     out: list[dict[str, str | None]] = []
@@ -82,7 +82,7 @@ def _metric_hits_of(raw: object) -> list[dict[str, str | None]]:
 
 
 def _sources_of(raw: object) -> list[dict[str, str]]:
-    """068:QueryOut.sources → AgentReply 载荷(守卫收窄;缺 citation_key 跳过)。"""
+    """QueryOut.sources → AgentReply 载荷(守卫收窄;缺 citation_key 跳过)。"""
     if not isinstance(raw, list):
         return []
     out: list[dict[str, str]] = []
@@ -108,7 +108,7 @@ def parse_agent_reply(data: dict[str, object]) -> AgentReply:
     verdict = data.get("verdict")
     error = data.get("error")
     retry = data.get("retry_count")
-    # 069:诊断信号解析(旧版 agent 无该键 → None,零回归)
+    # 诊断信号解析(旧版 agent 无该键 → None)
     resolved_question = data.get("resolved_question")
     prompt_version = data.get("prompt_version")
     metric_hits_raw = data.get("metric_hits")
@@ -157,7 +157,7 @@ def parse_agent_reply(data: dict[str, object]) -> AgentReply:
         sql=str(data.get("sql") or ""),
         retry_count=retry if isinstance(retry, int) else 0,
         error=error if isinstance(error, str) else None,
-        # 069:诊断信号(旧版 agent 缺键 → None)
+        # 诊断信号(旧版 agent 缺键 → None)
         resolved_question=resolved_question if isinstance(resolved_question, str) else None,
         prompt_version=prompt_version if isinstance(prompt_version, str) else None,
         metric_hits=_metric_hits_of(metric_hits_raw),
@@ -171,9 +171,9 @@ class AgentClient:
         self._base = settings.agent_base_url.rstrip("/")
         self._timeout = settings.agent_timeout_sec
         self._headers = {"X-Internal-Token": settings.internal_token or ""}
-        # 088:报告生成是长任务(多轮 LLM+取数),独立超时预算(非单轮问答口径)
+        # 报告生成是长任务(多轮 LLM+取数),独立超时预算(非单轮问答口径)
         self._report_timeout = settings.agent_report_timeout_sec
-        # 090:任务编排是多步长任务,超时须覆盖任务墙钟预算上限(见 config)
+        # 任务编排是多步长任务,超时须覆盖任务墙钟预算上限(见 config)
         self._task_timeout = settings.agent_task_timeout_sec
 
     async def query(
@@ -187,10 +187,10 @@ class AgentClient:
         datasource_key: str,
         react_tools: list[dict[str, object]] | None = None,
         memory_hint: str = "",
-        attachment_ids: list[str] | None = None,  # 030
+        attachment_ids: list[str] | None = None,
     ) -> AgentReply:
-        """同步问答;react_tools 非 None 即走 ReAct 内核端点(019,tools 注入);
-        memory_hint=022 记忆段(空=零回归)。"""
+        """同步问答;react_tools 非 None 即走 ReAct 内核端点(tools 注入);
+        memory_hint=记忆段(空=不下发记忆段)。"""
         payload = self._payload(
             trace_id=trace_id,
             tenant_key=tenant_key,
@@ -237,11 +237,11 @@ class AgentClient:
         on_frame: StreamFrameHandler,
         react_tools: list[dict[str, object]] | None = None,
         memory_hint: str = "",
-        attachment_ids: list[str] | None = None,  # 030
+        attachment_ids: list[str] | None = None,
     ) -> None:
-        """流式问答(017):消费 agent SSE 流,逐帧 (event, data_json) 回调;
+        """流式问答:消费 agent SSE 流,逐帧 (event, data_json) 回调;
         错误语义与同步 query 同(不可达/非 200/传输失败一律 AgentUnavailable,
-        由调用方收敛 error 终态+FAILED 落库)。019:react_tools 非 None 走
+        由调用方收敛 error 终态+FAILED 落库)。react_tools 非 None 走
         /query_react/stream(tools 注入,事件含 tool_call)。"""
         payload = self._payload(
             trace_id=trace_id,
@@ -276,7 +276,7 @@ class AgentClient:
             raise AgentUnavailable(str(e)) from e
 
     async def suggest_questions(self, digest: str) -> list[str]:
-        """建议问题生成(039,Suggestor 端口实现):回调 agent
+        """建议问题生成(Suggestor 端口实现):回调 agent
         /internal/suggest-questions。降级契约:不可达/超时/非 200/报文畸形
         一律返回空清单(service 按生成失败收敛,不落缓存),不抛异常。"""
         try:
@@ -328,11 +328,11 @@ class AgentClient:
             "datasource_key": datasource_key,
         }
         if react_tools is not None:
-            payload["tools"] = react_tools  # ReAct 内核:api 按授权注入(019)
+            payload["tools"] = react_tools  # ReAct 内核:api 按授权注入
         if memory_hint:
-            payload["memory_hint"] = memory_hint  # 022
+            payload["memory_hint"] = memory_hint
         if attachment_ids:
-            payload["attachment_ids"] = attachment_ids  # 030
+            payload["attachment_ids"] = attachment_ids
         return payload
 
     async def query_react(
@@ -346,11 +346,11 @@ class AgentClient:
         datasource_key: str,
         tools: list[dict[str, object]],
         bot_system_prompt: str = "",
-        model: str | None = None,  # 025:Bot 模型覆盖
-        channel: str = "chat",  # 025:渠道标记
-        collect_usage: bool = False,  # 035:仅 bot 链路置真(响应携带用量明细)
+        model: str | None = None,  # Bot 模型覆盖
+        channel: str = "chat",  # 渠道标记
+        collect_usage: bool = False,  # 仅 Bot 调用启用用量收集。
     ) -> AgentReply:
-        """ReAct 显式调用(019/025:tools 注入 + Bot 系统提示);错误语义与 query 同。"""
+        """ReAct 显式调用(tools 注入 + Bot 系统提示);错误语义与 query 同。"""
         payload: dict[str, object] = {
             "trace_id": trace_id,
             "tenant_key": tenant_key,
@@ -387,7 +387,7 @@ class AgentClient:
             raise AgentUnavailable(f"bad reply: {e}") from e
 
     async def list_models(self) -> list[str]:
-        """021 注册表模型名(025;失败返回空——fail-closed 校验语义)。"""
+        """注册表模型名(失败返回空——fail-closed 校验语义)。"""
         try:
             async with httpx.AsyncClient(
                 trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
@@ -412,7 +412,7 @@ class AgentClient:
         return [str(m) for m in cast(list[object], models)]
 
     async def extract_memory(self, *, question: str, answer: str) -> list[dict[str, object]]:
-        """隐式偏好提取(059):agent /internal/extract-memory 回调槽位 patch;
+        """隐式偏好提取:agent /internal/extract-memory 回调槽位 patch;
         任何失败收敛空列表(后台任务静默跳过)。"""
         try:
             async with httpx.AsyncClient(
@@ -452,7 +452,7 @@ class AgentClient:
         return out
 
     async def rewrite_title(self, *, question: str) -> str | None:
-        """会话标题改写(010):后台任务兜底语义——任何失败(不可达/非 200/降级
+        """会话标题改写:后台任务兜底语义——任何失败(不可达/非 200/降级
         应答/坏报文)一律返回 None,永不抛;调用方保持截断标题。"""
         try:
             async with httpx.AsyncClient(
@@ -479,7 +479,7 @@ class AgentClient:
         return title or None
 
     async def run_task(self, payload: dict[str, object]) -> dict[str, object] | None:
-        """任务编排回调(090):POST /internal/task-run;长任务独立超时
+        """任务编排回调:POST /internal/task-run;长任务独立超时
         (覆盖任务墙钟预算);不可达/非 200/坏报文返回 None(调用方收敛
         INTERRUPTED,可显式恢复),不裸抛。"""
         try:
@@ -503,7 +503,7 @@ class AgentClient:
             return None
 
     async def generate_report(self, payload: dict[str, object]) -> dict[str, object] | None:
-        """报告生成编排回调(088):POST /internal/generate-report。
+        """报告生成编排回调:POST /internal/generate-report。
         长任务(agent 侧多轮 LLM+取数),超时取独立预算;不可达/非 200/坏报文
         一律返回 None(调用方收敛 FAILED 终态),不裸抛。"""
         try:

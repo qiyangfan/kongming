@@ -1,5 +1,4 @@
-/* 部门树展平(单源):DeptsPage 的父部门候选与 RolesPage 的自定义部门多选共用。
-   深度作缩进档位由调用方决定,本函数只给结构事实。 */
+/* 部门树展平(单源):DeptsPage 的父部门候选与 RolesPage 的自定义部门多选共用。 深度作缩进档位由调用方决定,本函数只给结构事实。 */
 
 import type { DeptNodeOut } from "@/lib/system-api";
 

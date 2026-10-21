@@ -1,10 +1,10 @@
-"""0027: 对话冷启动建议问题缓存(039)
+"""0027: 对话冷启动建议问题缓存
 
 public.chat_suggestion 新表——按租户+数据源维度缓存 LLM 生成的建议问句
 (空态 chips 一次生成永久复用)。
 UNIQUE(tenant_id, datasource_key) 即查询路径(命中/落库幂等/级联删除均走它);
 不设数据源外键:default 内置源无 sys_datasource 行,失效走 SuggestionCacheEvictor
-端口级联(与 023 语义层同款)。downgrade 删表。
+端口级联(与 语义层同款)。downgrade 删表。
 """
 
 from alembic import op

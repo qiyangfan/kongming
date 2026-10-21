@@ -1,15 +1,12 @@
-# default 数据源负例评估(051):问题实体与可用表(goods,名称/创建人等)
-# 领域错配,预期 generate 输出哨兵 NO_RELEVANT_TABLE 短路(043 管道)+
-# 051 实体核对判据(提示词)——守护表级哨兵判据的第一道回归闸。
-# 注意:同问句的真实成功执行会经 query_history 回写成为后续 few-shot
-# (硬凑自我繁殖环路),评估前须按 README「评估重复性口径」清理沉淀。
+# 验证问题实体与可用表不匹配时返回 NO_RELEVANT_TABLE。
+# 成功问答会写入 query_history 并进入后续 few-shot；运行前按 evals/README.md 清理相关记录。
 
 - id: default_no_data_001
   question: 每个门店库存中各影片分类的库存数量
   tenant: default
   expect_no_data: true
   category: no_data_entity_mismatch
-  smoke: true  # 哨兵判据进 smoke 第一道闸(051 实证失守案例原型)
+  smoke: true  # 在 smoke 评估中检查实体不匹配判定。
 
 - id: default_no_data_002
   question: 租赁次数最多的前5位客户是谁

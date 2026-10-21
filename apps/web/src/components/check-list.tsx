@@ -5,12 +5,7 @@ import { cn } from "@/lib/utils";
 /** 多选面板的候选项:label 主文案(可含层级缩进前缀),hint 为辅助标识(如权限点编码)。 */
 export type CheckOption = { id: string; label: string; hint?: string; title?: string };
 
-/**
- * 勾选项组(全站单源,宪法 Article 6):带边框滚动容器 + Checkbox 行 + 空态走 EmptyState。
- * 「角色权限绑定」与「角色自定义部门」两处同类面板的公共出处——禁逐页手搓 label+checkbox。
- * 行宽用 min-w-0 + truncate 收敛,窄屏(375)不横向溢出;行高 min-h-11 保触控热区 ≥44(B1.2);
- * 截断项一律带 title,长名称必须可回读(整行可点,故 title 挂在 label 上)。
- */
+/** 可复用的带边框勾选列表；内容超高时滚动，空数据使用 EmptyState。 */
 export function CheckList({
   options,
   selected,

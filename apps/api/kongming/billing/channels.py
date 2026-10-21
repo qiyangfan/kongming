@@ -1,10 +1,4 @@
-"""支付通道(035,零框架):MOCK 通道实现。
-
-与真实通道同构:签名/验签算法收在通道内,核销主链(BillingService.
-reconcile_payment)对通道零感知——未来接微信支付/支付宝=新增同
-Protocol 实现+注册,主链一行不动(design D1/D6)。
-mock 通道无网络 I/O:签名本地生成,演练路径与真实回调 100% 同形。
-"""
+"""本地模拟支付通道。签名和验签在通道内完成，不发起网络请求。"""
 
 import hashlib
 import hmac
@@ -31,7 +25,7 @@ class MockChannel:
     def verify(
         self, *, payment_id: str, trade_no: str, result: str, amount: int, sign: str
     ) -> bool:
-        """验签(compare_digest 防时序侧信道,031 同款)。"""
+        """验签(compare_digest 防时序侧信道,同款)。"""
         expected = self.sign_payload(
             payment_id=payment_id, trade_no=trade_no, result=result, amount=amount
         )

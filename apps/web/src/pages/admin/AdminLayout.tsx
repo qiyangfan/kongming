@@ -1,8 +1,4 @@
-/* 管理区布局(web-admin spec「管理面路由与页面守卫」):
-   宽屏(md+)左侧竖排子导航(入口数据驱动、权限过滤、当前子页高亮),不变;
-   窄屏移除横滚子导航(mobile-experience B2.2 层进式):/admin 渲染管理索引页
-   (AdminIndexPage,同源 ADMIN_NAV),子页顶部出现返回索引入口。
-   子页守卫由各路由的 PermRoute 承担(直达无权子页 → 403 页兜底)。 */
+/* 管理区在宽屏使用左侧导航；窄屏显示管理索引页并进入各管理页面。 */
 
 import { NavLink, Outlet, useLocation } from "react-router";
 import { ChevronLeft } from "lucide-react";
@@ -20,8 +16,7 @@ export default function AdminLayout() {
 
   return (
     <div className="flex h-full min-w-0 flex-col md:flex-row">
-      {/* 窄屏顶条:返回管理索引入口(B2.2 层进式);顶部安全区由壳层统一避让,
-          md+ 由侧栏承载不渲染 */}
+      {/* 窄屏顶栏提供返回管理索引的入口；宽屏导航由侧栏承载。 */}
       {!onIndex && (
         <div className="flex items-center gap-1 border-b border-border px-3 py-2 md:hidden">
           <NavLink

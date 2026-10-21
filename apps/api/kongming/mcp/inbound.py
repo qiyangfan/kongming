@@ -1,14 +1,8 @@
-"""MCP 入站端点(028;adopt-mcp-sdk2 收编官方 SDK 2.x 服务端)。
+"""Bot 的无状态 MCP 入站端点。
 
-POST /mcp —— Bot as MCP tools。协议载体=SDK 低层 Server(双时代循环:
-现代 `server/discover` 无会话直连声明 2026-07-28 修订;旧修订客户端经
-initialize 握手兼容),无状态形态(json 响应;会话握手废除为规范本体)。
-api-key 鉴权与 1MB 请求体闸以 ASGI 中间件前置于 SDK 路由(次序语义 spec
-逐字:闸 MUST 前置于鉴权、notifications 短路与 body 完整缓冲解析——413
-恒先于 401,声明超限不读 body,实测超限流式计数不完整缓冲)。key→Bot 绑定
-解析在中间件单点完成(结果经 scope state 传递
-给 tool 回调,零重复查库);tools/list 恰返回绑定 Bot(tools/call 校验
-工具名同形拒,创建者代理身份/护栏/配额/审计不豁免)。
+ASGI 中间件先做 1 MB 请求体闸(超限先回 413),再校验 api-key;鉴权后只公开
+该 key 绑定 Bot 的单个工具,调用时继续校验工具名、代理身份、护栏、配额与
+审计。客户端版本经 `server/discover` 或 `initialize` 协商。
 """
 
 from __future__ import annotations
@@ -28,7 +22,7 @@ from kongming.bot.service import ApiKeyInvalid, BotNotFound, BotService
 log = logging.getLogger(__name__)
 
 _BODY_MAX_BYTES = 1 * 1024 * 1024  # 与 trigger webhook 同值(免登录端点统一闸)
-_QUESTION_MAX_LEN = 2000  # R1-A3:与 web 端 BotChatIn max_length 同闸(创建者配额保护)
+_QUESTION_MAX_LEN = 2000  # 与 web 端 BotChatIn max_length 同闸(创建者配额保护)
 
 
 class _GateAuthMiddleware:
@@ -57,7 +51,7 @@ class _GateAuthMiddleware:
         if declared and declared.isdigit() and int(declared) > _BODY_MAX_BYTES:
             await _json(send, 413, {"detail": "PAYLOAD_TOO_LARGE"})
             return
-        # 实测体:流式计数,超限即 413(超大 body 不完整进内存);合法体缓存
+        # 流式计数实际请求体,超限即返回 413;合法请求体缓存
         # 回放给 SDK 路由(body 流只能消费一次)
         body = bytearray()
         while True:
@@ -104,7 +98,7 @@ class _GateAuthMiddleware:
 
 
 def _extract_key(authorization: str | None, x_api_key: str | None) -> str | None:
-    """X-Api-Key(025 同款)或 Authorization: Bearer(MCP 客户端惯例)。"""
+    """X-Api-Key(同款)或 Authorization: Bearer(MCP 客户端惯例)。"""
     if x_api_key:
         return x_api_key.strip()
     if authorization and authorization.lower().startswith("bearer "):
@@ -180,7 +174,7 @@ async def _on_call_tool(ctx: Any, params: types.CallToolRequestParams) -> types.
         out = await svc.run(
             bot_key=bot_key,
             question=question,
-            channel="mcp",  # 028 渠道溯源
+            channel="mcp",  # 渠道溯源
             tenant_id_hint=str(info["tenant_id"]),
         )
     except BotNotFound:
@@ -191,7 +185,7 @@ async def _on_call_tool(ctx: Any, params: types.CallToolRequestParams) -> types.
             content=[types.TextContent(type="text", text="执行失败,请稍后再试")],
             is_error=True,
         )
-    # R1-A7:失败轮(护栏拦截/助手不可用)透 error 文本+isError——否则客户端
+    # 失败轮(护栏拦截/助手不可用)透 error 文本+isError——否则客户端
     # 见「成功+空文本」无法排障;error 本是用户向友好文案
     if not out.get("success"):
         return types.CallToolResult(
@@ -206,7 +200,7 @@ async def _on_call_tool(ctx: Any, params: types.CallToolRequestParams) -> types.
 
 class McpInboundProxy:
     """挂载间接层:session manager 不允许重复 run(SDK 硬约束),而模块级
-    单例挂载只发生一次——每次 lifespan 由宿主调 rebuild() 重建整链入站 app,
+    单例挂载只发生一次——每次 lifespan 由宿主调 rebuild 重建整链入站 app,
     代理恒指向当前实例(测试反复启停 lifespan 与生产单次 lifespan 同形)。"""
 
     def __init__(self) -> None:
@@ -227,13 +221,9 @@ class McpInboundProxy:
 
 
 def build_mcp_inbound() -> tuple[ASGIApp, Any]:
-    """组合根:SDK 低层 Server → 无状态 streamable-http app → 闸/鉴权包装。
+    """构造无状态 MCP 应用与鉴权包装,返回 session_manager。
 
-    返回 (app, session_manager);宿主 lifespan MUST enter
-    `session_manager.run()`(挂载态 SDK 内建 lifespan 失效,迁移指南明文)。
-    streamable_http_path="/mcp":根级挂载,子路径=完整路径;端点恰为 POST /mcp。
-    声明修订=2026-07-28(无状态;现代客户端 server/discover 直连,旧修订
-    客户端 initialize 握手兼容由 SDK 双时代循环承载)。
+    宿主 lifespan 必须进入 session_manager.run;端点为 POST /mcp。
     """
     server = Server(
         "kongming",
@@ -246,7 +236,7 @@ def build_mcp_inbound() -> tuple[ASGIApp, Any]:
         json_response=True,
         stateless_http=True,
         max_request_body_size=_BODY_MAX_BYTES,  # SDK 内建第二道(次序语义由前置中间件保证)
-        # 平台端点鉴权=api-key(025 体系),Host 校验(DNS rebinding 防护)不启用
+        # 平台端点鉴权=api-key(体系),Host 校验(DNS rebinding 防护)不启用
         # ——与旧手写端点语义一致;防护缺位不构成新暴露面(凭证在头,浏览器
         # 跨站请求不带 key)。显式传 transport_security 同时关闭 SDK 对
         # localhost host 的自动白名单(生产域名 421 面)

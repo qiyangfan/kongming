@@ -1,4 +1,4 @@
-"""skillpack 用例(056):CRUD/启停/投影加载;metrics 冲突拒绝启用。"""
+"""skillpack 用例:CRUD/启停/投影加载;metrics 冲突拒绝启用。"""
 
 from __future__ import annotations
 

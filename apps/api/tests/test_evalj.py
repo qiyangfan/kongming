@@ -1,4 +1,4 @@
-"""evalj 域与 judge 编排单测(092):默认门禁可跑(不依赖评估环境)。"""
+"""evalj 域与 judge 编排单测:默认门禁可跑(不依赖评估环境)。"""
 # pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportPrivateUsage=false
 
 import pytest
@@ -64,7 +64,7 @@ def test_baseline_improvement_never_redline() -> None:
     assert not c.red_line and c.current_rate > (c.previous_rate or 0)
 
 
-# ── rubric 纪律:五类齐备(115 起含圆桌)、版本随代码、指纹稳定 ──
+# ── rubric 纪律:五类齐备(含圆桌)、版本随代码、指纹稳定 ──
 
 
 def test_rubrics_cover_all_object_types() -> None:
@@ -89,7 +89,7 @@ def test_rubric_weighted_score_ignores_undeclared() -> None:
     assert rubric_weighted_score({}, OBJECT_REPORT) is None
 
 
-# ── parse_verdict(结构化解析口径,design D3)──
+# ── parse_verdict(结构化解析口径)──
 
 
 def test_parse_verdict_accepts_wellformed() -> None:
@@ -230,7 +230,7 @@ def test_baseline_compare_is_pure_dataclass() -> None:
     assert c.current_rate == 1.0
 
 
-# ── 迁移结构断言(任务 1.1)+ 仓储回环(任务 1.2;测试库=alembic head)──
+# ── 迁移结构断言+仓储回环(测试库=alembic head)──
 
 
 async def test_judge_tables_structure() -> None:

@@ -1,4 +1,4 @@
-"""护栏规则注册表(020):代码声明式,随代码发布的契约数据(与权限点/工具
+"""护栏规则注册表:代码声明式,随代码发布的契约数据(与权限点/工具
 注册表同哲学);配置表(sys_guardrail_rule)只存覆盖项。
 
 零框架纪律:本模块不 import fastapi/sqlalchemy/redis。
@@ -40,7 +40,7 @@ REGISTRY: list[GuardrailRule] = [
         name="inj_prompt_leak",
         guardrail_type="input",
         action="blocked",
-        # R1-M3 窄化:套取动词+目标共现(「统计输出指令的执行次数」「你的指令集表
+        # 窄化:套取动词+目标共现(「统计输出指令的执行次数」「你的指令集表
         # 有哪些字段」「列出系统提示词表的字段」等正常业务问句不命中)
         pattern=(
             r"(输出|告诉|展示|打印|复述).{0,4}(你的|系统|以上|全部).{0,2}(提示词|指令)"
@@ -54,22 +54,22 @@ REGISTRY: list[GuardrailRule] = [
         name="pii_phone",
         guardrail_type="input",
         action="masked",
-        pattern=r"(?<!\d)1[3-9]\d{9}(?!\d)",  # R1-M4:边界断言(14 位串不误伤)
+        pattern=r"(?<!\d)1[3-9]\d{9}(?!\d)",  # 边界断言(14 位串不误伤)
         description="手机号脱敏",
     ),
     GuardrailRule(
         name="pii_idcard",
         guardrail_type="input",
         action="masked",
-        pattern=r"(?<!\d)\d{17}[\dXx](?!\d)",  # R1-M4:边界断言
+        pattern=r"(?<!\d)\d{17}[\dXx](?!\d)",  # 边界断言
         description="身份证号脱敏",
     ),
     GuardrailRule(
         name="pii_bankcard",
         guardrail_type="input",
         action="masked",
-        # R1-M4:边界断言 + 排除 19/20 开头(时间戳形态长编号静默误伤会改
-        # SQL 字面量→错误答案;残余误伤面登记挂账)
+        # 边界断言 + 排除 19/20 开头(时间戳形态长编号静默误伤会改
+        # SQL 字面量→错误答案;残余误伤面登记)
         pattern=r"(?<!\d)(?!19\d|20\d)\d{16,19}(?!\d)",
         description="银行卡号脱敏(边界+排除时间戳前缀)",
     ),
@@ -77,9 +77,7 @@ REGISTRY: list[GuardrailRule] = [
         name="pii_email",
         guardrail_type="input",
         action="masked",
-        # 109:local-part 有界量词({1,64},RFC 5321 上限)——无界 `+` 在
-        # 不含 @ 的大文本(资源内容等外部数据进检测面)上是 O(n²) 灾难性
-        # 回溯(实测 1MB 挂死);有界后 O(64·n) 线性,正常邮箱语义不变
+        # 限制 local-part 匹配长度,避免无界重复匹配在长文本上发生大量回溯。
         pattern=r"[\w.+-]{1,64}@[\w-]+\.[\w.]+",
         description="邮箱脱敏(保留域名)",
     ),

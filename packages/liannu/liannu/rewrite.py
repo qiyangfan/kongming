@@ -3,7 +3,7 @@
 设计契约(与内置实现逐字一致):
 - 过滤谓词 AND 进最外层查询的 WHERE,列引用限定主表别名(JOIN 防歧义);
 - UNION / FROM 为子查询等取不到主表的形态,由调用方上游安全降级;
-- 谓词值一律命名绑定参数(:km_ds_N),SQL 文本不含任何过滤值(防注入);
+- 谓词值一律命名绑定参数(km_ds_N),SQL 文本不含任何过滤值(防注入);
 - 命名参数经方言子类保留 :name 风格(postgres 方言默认渲 pyformat)。
 """
 
@@ -21,7 +21,7 @@ FILTER_USER_EQ = "USER_EQ"
 
 
 class _NamedParamPG(Postgres):
-    """postgres 方言变体:占位符渲 :name(SQLAlchemy text() 参数风格)。"""
+    """postgres 方言变体:占位符渲 :name(SQLAlchemy text 参数风格)。"""
 
     # sqlglot 官方扩展点;存根把 Generator 声明为变量而非类型,关闭两码
     class Generator(Postgres.Generator):  # type: ignore[misc, valid-type]

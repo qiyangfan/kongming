@@ -1,16 +1,7 @@
-"""auth 域 Redis 实现(唯一 import redis 的 auth 文件)。
+"""认证域的 Redis 存储实现。
 
-refresh 家族三态(D2):
-  auth:rt:{jti}      → fid      活跃票(EX=refresh TTL)
-  auth:rt:x:{jti}    → fid      已轮换墓碑(EX=原 TTL,复用检测依据)
-  auth:rfam:bad:{fid}→ 1        家族吊销标记(EX=refresh TTL)
-  auth:rfams:{uid}   → fid 集合  用户的家族索引(改密/全端登出)
-登录锁定:
-  auth:fail:{username} → 计数(INCR,首败设 EX)
-  auth:lock:{username} → 1      锁标记(EX=锁定时长)
-联邦 state:
-  auth:ostate:{state} → JSON{provider, code_verifier}(GETDEL 一次性消费)
-"""
+refresh 票据以活跃键、轮换墓碑和家族吊销标记管理；用户索引支持全端登出。
+登录锁定保存失败计数与锁标记，联邦 state 通过 GETDEL 一次性消费。"""
 
 import json
 
@@ -24,9 +15,9 @@ _FAIL = "auth:fail:"
 _LOCK = "auth:lock:"
 _OSTATE = "auth:ostate:"
 
-# 原子轮换:GETDEL 活跃票并立墓碑,单脚本闭环——若拆成"读活跃→删活跃→写墓碑"多轮
-# 往返,并发同票刷新会双双通过检查,产生两条有效链,静默破坏 ADR-003 的轮换失效保证。
-# 返回 {活跃 fid, 墓碑 fid}:消费成功={fid, nil};命中墓碑(复用)={nil, fid};两皆无=过期/伪造。
+# 单条 Lua 脚本原子消费活跃票并写入轮换墓碑。
+# 分开读取、删除和写入会使并发刷新都通过校验并生成有效票，
+# 因而无法保证旧 refresh 票据失效。
 _CONSUME_LUA = """
 local f = redis.call('GETDEL', KEYS[1])
 if f then

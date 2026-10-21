@@ -1,6 +1,6 @@
 """RFC 9562 UUID v7 生成器(纯函数模块,零框架依赖)。
 
-原住 db.py;007 起域 service 层需要生成主键又受 import-linter
+原住 db.py;起域 service 层需要生成主键又受 import-linter
 「service 不 import sqlalchemy(含间接)」约束,拆为独立纯模块,
 db.py re-export 维持既有 import 路径不变。
 """

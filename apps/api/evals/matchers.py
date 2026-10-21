@@ -1,25 +1,7 @@
-"""评估匹配器(016):Execution Match 严格/宽松双分纯函数。
+"""Execution Match 的严格与宽松比较纯函数。
 
-算法承上游 nl2sql-data-platform/nl2sql-agent/tests/eval(010 T301+T304 版)
-重写为 Kongming 形态——关键差异:双侧异源(gold=asyncpg 原生 DB 类型,
-gen=链路响应 JSON 归一化类型),比较前统一过 canon_cell(数值 round 1e-6、
-时间 isoformat、非有限数值映射 None 与 api _json_cell 口径对齐)。
-
-宽松(黄金指标)双路径:
-1. 列等价+投影行近似:gold 列集==gen 列集或 gold⊆gen(大小写不敏感)→
-   gen 按 gold 列名投影(兼容列序差异/SELECT *)→ 行集合近似等值
-   (gold_sql 含 ORDER BY 保序,否则 multiset);
-2. 数值子集:gold 数值 multiset ⊆ gen 数值 multiset——救「聚合别名差异/
-   投影列名不兼容但数值全对」(gold 数值型 id 列 gen 缺失时子集失败属
-   既定语义,靠编写规范「投影业务可读列」规避)。**天然无序**:保序仅
-   约束路径 1——列名不兼容场景(gold 按主键 tiebreak、gen 按名)行序
-   几乎必然不齐,路径 2 若也保序会整体失效;top-N 序错但值集对时宽松
-   放行,严格口径兜底。纯文本结果集(gold 无数值)只走路径 1(空集
-   子集恒真误判),路径 1 列名不兼容时回退严格集合等值兜底(上游 011
-   审查修复形态)。
-
-保序判定用子串识别(gold_sql 任意位置含 order by 即保序)——已知边界由
-编写规范第 5 条兜底(外层 ORDER BY 才算保序)。
+比较前统一规范化值;宽松评分先按 gold 列投影比较行集,列名不兼容时
+退回数值子集比较;只有 gold SQL 含 ORDER BY 时才要求保序。
 """
 
 import math

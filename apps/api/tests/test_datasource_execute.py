@@ -1,10 +1,4 @@
-"""动态数据源执行路由全栈测试(008 datasource spec「动态路由与查询」,安全规则类)。
-
-真实 PG:动态源=同实例异 schema(冒烟既定形态,design Risks 钉住);
-防御层与默认路径逐层实证一致(防火墙/保留表/危险函数/schema 边界/data_scope/
-事务级 search_path/连接级只读/行数截断);非法 key 同形 400 + 审计分类内部可溯;
-池生命周期:改密/启停/删除定向失效,仅改 name 不动池。
-"""
+"""覆盖动态数据源查询的防火墙、租户归属、连接池生命周期和行数限制。"""
 # pyright: reportPrivateUsage=false
 
 import uuid
@@ -62,7 +56,7 @@ async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction
         await conn.execute(text("CREATE TABLE IF NOT EXISTS public.pub_goods (mark varchar(8))"))
         await conn.execute(text("DELETE FROM public.pub_goods"))
         await conn.execute(text("INSERT INTO public.pub_goods (mark) VALUES ('PUB')"))
-        # 动态 schema 内的保留名表(内省排除判定证物,任务组 5 消费)
+        # 动态 schema 内的保留名表(内省排除判定证物)
         await conn.execute(text(f'CREATE TABLE IF NOT EXISTS "{SCHEMA}".sys_cfg (k varchar(8))'))
     yield
     async with get_engine().begin() as conn:
@@ -151,14 +145,13 @@ async def _audit_reasons(s: AsyncSession, trace_id: str) -> list[str]:
     return [f"{r.verdict}:{r.block_reason}" for r in rows]
 
 
-# ============ 4.1 动态路由:全链路与防御层一致 ============
+# ============ 动态数据源路由与防护 ============
 
 
 async def test_dynamic_datasource_pass_full_path(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    """非 default 全链路 PASS:动态池执行,search_path 首段=default_schema;
-    审计 datasource_key 记动态 key。"""
+    """验证动态数据源查询通过校验并使用 default_schema 设置 search_path。"""
     tid = await _mk_tenant(session, "dta")
     await _mk_ds(session, "dyn", tid)
     p = _payload("dta", "SELECT mark FROM goods", datasource_key="dyn")
@@ -303,7 +296,7 @@ async def test_dynamic_pool_readonly_and_truncation(
 async def test_query_face_key_pattern_rejected(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """查询面 datasource_key 传输层 pattern 收口(008 D4):畸形 key 422(chat+internal)。"""
+    """查询接口拒绝格式错误的数据源键，并返回 422。"""
     tid = await _mk_tenant(session, "dta")
     assert tid
     r = await client.post(
@@ -314,7 +307,7 @@ async def test_query_face_key_pattern_rejected(
     assert r.status_code == 422
 
 
-# ============ 4.4 池生命周期联动 ============
+# ============ 池生命周期联动 ============
 
 
 async def test_password_change_evicts_and_rebuilds(

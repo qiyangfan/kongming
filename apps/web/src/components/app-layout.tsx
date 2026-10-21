@@ -1,8 +1,4 @@
-/* 应用壳(web-nav spec「应用壳结构」+「响应式外壳」):
-   宽屏侧栏(品牌区/新对话/会话列表/导航区/用户区)常驻 + 内容区 Outlet;
-   窄屏不复刻侧栏——能力导航由 BottomNav 承载(mobile-experience B2.1),
-   会话列表经对话区页头的会话抽屉唤出(B2.3)。
-   认证分流由 Protected 承担,权限分流由子路由 PermRoute 承担。 */
+/* 应用壳在宽屏显示会话侧栏，窄屏改用 BottomNav 与会话抽屉。 */
 
 import { Link, Outlet } from "react-router";
 import { Feather, Plus } from "lucide-react";

@@ -1,4 +1,4 @@
-"""task 仓储(090):sys_agent_task / sys_agent_task_step SQL。
+"""task 仓储:sys_agent_task / sys_agent_task_step SQL。
 
 隔离铁律:一切读写强制 tenant_id+user_id 双过滤(他人任务 404 同形);
 状态迁移由乐观锁版本 + 白名单条件 UPDATE 兜底(并发操作竞态拒绝);
@@ -110,7 +110,7 @@ class SqlTaskRepo:
         expect_epoch: int | None = None,
     ) -> bool:
         """内部回调的状态迁移(编排驱动;白名单校验在 service 层)。
-        expect_epoch:派发代际写入谓词(0042)——执行侧写任务态必须带代数入
+        expect_epoch:派发代际写入谓词——执行侧写任务态必须带代数入
         WHERE,否则「读后判断→写」之间并发 bump 会放行旧执行者(读检查与
         CAS 写不在同一原子操作,仅读侧判失配存在 TOCTOU 窗口)。"""
         sets = ["status = :to", "version = version + 1", "updated_at = now()"]
@@ -306,7 +306,7 @@ class SqlTaskRepo:
         """步骤状态迁移(CAS,已终态不可改写);命中返回 True。
         clear_confirm:审批通过时一并清除确认标记(一次性闸门,防再挂死循环)。
         mark_started:起跑时刻落 started_at(墙钟预算的分步计量基准)。
-        expect_epoch:派发代际写入谓词(0042;经任务行子查询原子复核)——
+        expect_epoch:派发代际写入谓词(经任务行子查询原子复核)——
         执行侧写步骤态必须带代数,防「读后判断→写」窗口内 resume 回队后
         旧循环把回队步骤重新占走。"""
         sets = ["status = :to", "updated_at = now()"]
@@ -546,7 +546,7 @@ class SqlTaskRepo:
         )
         return dict(row) if row else None
 
-    # ── 协作拓扑与协作账本(091)──
+    # ── 协作拓扑与协作账本──
 
     async def update_step_topology(
         self, *, task_id: str, step_id: str, topology: dict[str, object]
@@ -803,7 +803,7 @@ class SqlTaskRepo:
         usage: dict[str, object],
         trace_id: str,
     ) -> bool:
-        """圆桌轮次上账(115;追加只写)。运行在途条件并入写入谓词(与 worker
+        """圆桌轮次上账(追加只写)。运行在途条件并入写入谓词(与 worker
         行同范式:收敛不追认迟到轮次);(run, round, worker) 唯一键防重复回写
         ——主席判定占 worker_no=0,一轮一判定。"""
         hit = (

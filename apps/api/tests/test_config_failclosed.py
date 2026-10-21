@@ -1,4 +1,4 @@
-"""config prod fail-closed 回归(审查循环 S1):mock 支付密钥闸。
+"""config prod fail-closed 回归:mock 支付密钥闸。
 
 prod + mock 开启 + 密钥缺省/占位 → 拒启(否则默认公开密钥可伪造 PAID 回调)。
 """
@@ -17,8 +17,7 @@ _PROD_KW: dict[str, Any] = {
     "jwt_public_key_pem": "k",
     "internal_token": "k",
     "datasource_encrypt_key": "k" * 32,
-    # 094:websearch 组合残缺(供应商缺 key 等)在 prod 拒启——钉空隔离本地
-    # .env 的 KM_WEBSEARCH_*,防开发者本机配置把既有用例打红(评审循环登记)
+    # 清空 websearch 配置,避免本机 .env 改变生产环境校验结果。
     "websearch_provider": "",
     "websearch_api_key": "",
 }

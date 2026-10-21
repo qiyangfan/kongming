@@ -1,5 +1,5 @@
-"""workflow 执行引擎(029,零框架):拓扑序逐节点执行;上下文不可变
-(节点产出深拷贝冻结,渲染全match路径亦深拷贝);条件选路(on 标记);
+"""workflow 执行引擎(零框架):拓扑序逐节点执行;上下文不可变
+(节点产出深拷贝冻结,模板渲染路径亦深拷贝);条件选路(on 标记);
 forEach 循环(迭代上限硬顶);全局超时(deadline 逐节点检查)+步数
 上限(循环迭代计入);fail-fast(节点 FAILED 即终,快照保留)。
 
@@ -33,7 +33,7 @@ class NodeFailed(Exception):
 
 class _StepLimit(BaseException):
     """控制流(非错误):BaseException 防被 except Exception 误捕
-    (R1-S1 收敛网不误伤步数/超时闸——与 CancelledError 同哲学)。"""
+    (收敛网不误伤步数/超时闸——与 CancelledError 同哲学)。"""
 
 
 class _DeadlineExceeded(BaseException):
@@ -79,7 +79,7 @@ class _Engine:
         self._deadline = deadline
         self._step_cap = step_cap
         self._steps = 0
-        # 循环子节点逐次记入顶层快照(与 run_dag 同一列表;B2-B4 归因粒度)
+        # 循环子节点逐次记入顶层快照(与 run_dag 同一列表,归因粒度到子节点)
         self._node_runs: list[NodeRun] = node_runs if node_runs is not None else []
 
     @property
@@ -199,9 +199,9 @@ class _Engine:
             for sub in _topo_order(body_nodes):
                 if sub.id in sub_context:
                     continue
-                # B2-B4:子节点逐次记入快照(迭代标记形态 <loop>.<i>.<sub>)
+                # 子节点逐次记入快照(迭代标记形态 <loop>.<i>.<sub>)
                 sub_id = f"{node.id}.{idx}.{sub.id}"
-                # R1-J2:子段选路与顶层同构(condition 门控+SKIPPED 传播)
+                # 子段选路与顶层同构(condition 门控+SKIPPED 传播)
                 if _should_skip(sub, sub_context, sub_by_id):
                     self._node_runs.append(NodeRun(node_id=sub_id, status="SKIPPED"))
                     sub_context[sub.id] = {"_status": "SKIPPED", "outputs": {}}
@@ -269,7 +269,7 @@ def _topo_order(nodes: list[NodeDef]) -> list[NodeDef]:
 def _should_skip(node: NodeDef, context: dict[str, Any], by_id: dict[str, NodeDef]) -> bool:
     """跳过判定:任一依赖 SKIPPED 传播;条件门仅当依赖是 condition 节点
     (按本节点 config.on[缺省 "true"] 与 dep.outputs.result 比对)——
-    其他类型节点产出 bool 型 result 键不触发选路(B2-B6 收紧)。"""
+    其他类型节点产出 bool 型 result 键不触发选路。"""
     for dep in node.depends_on:
         dep_state: dict[str, Any] = context.get(dep) or {}
         if dep_state.get("_status") == "SKIPPED":
@@ -330,7 +330,7 @@ async def run_dag(
             # 节点级预算(挂死节点可中断);task 显式持有以区分超时来源:
             # wait_for 到期 ⇒ task 被其取消(cancelled ⇒ 真·全局预算超时);
             # 节点内源 TimeoutError(socket/驱动语句超时)透传 ⇒ task 未被
-            # 取消——按节点失败归类,不得误标 TIMEOUT(B2-B5)
+            # 取消——按节点失败归类,不得误标 TIMEOUT
             task = asyncio.create_task(engine.execute_node(node, context))
             try:
                 outputs = await asyncio.wait_for(task, timeout=remaining)
@@ -370,8 +370,8 @@ async def run_dag(
                     )
                 )
                 break
-            except Exception as e:  # noqa: BLE001  # R1-S1:未知异常收敛
-                # R1-S1:httpx ConnectError/ReadTimeout、ValueError(非法
+            except Exception as e:  # noqa: BLE001 # 未知异常收敛
+                # httpx ConnectError/ReadTimeout、ValueError(非法
                 # 端口)、RecursionError 等未知异常不得逃逸为 500 零落库——
                 # 收敛节点 FAILED(run FAILED,已完成快照保留,spec 立约)
                 log.warning("节点未知异常收敛 FAILED node=%s", node.id, exc_info=True)

@@ -1,4 +1,4 @@
-"""026 conversation-artifacts 测试:derive 纯函数 + rerun 安全矩阵(测试先行)。"""
+"""conversation artifacts 测试:derive 纯函数 + rerun 安全矩阵。"""
 # pyright: reportPrivateUsage=false
 
 from collections.abc import AsyncIterator
@@ -176,7 +176,7 @@ async def test_rerun_write_blocked(
     body = r.json()
     assert body["success"] is False
     assert body["verdict"] == "BLOCKED"
-    # 审查循环 F5:拦截「不执行,不落新结果消息」——REJECTED assistant 消息
+    # 拦截「不执行,不落新结果消息」——REJECTED assistant 消息
     # 不得入库(其 sql_text 会再派生可执行的 sql 卡);消息数与重跑前一致
     n = (
         await session.execute(
@@ -237,9 +237,7 @@ async def test_rerun_other_user_404(
 
 
 async def test_rerun_output_guardrail_applied(session: AsyncSession, make_user: MakeUser) -> None:
-    """R1-F7/F5 直证:rerun 输出经 020 护栏(脱敏落到响应/落库/产物卡),
-    且护栏审计 trace_id 非空(执行与护栏同一 trace)。service 级直调,
-    runner/mock 护栏替代六层执行(过检面由 happy path 覆盖)。"""
+    """检查重新运行后的报告会应用输出脱敏，并用同一 trace 记录护栏审计。"""
     from kongming.chat.repository import ChatRepository
     from kongming.chat.service import ChatService
     from kongming.datasource.repository import SqlDatasourceRepo
@@ -295,10 +293,10 @@ async def test_rerun_output_guardrail_applied(session: AsyncSession, make_user: 
         user_id=uid, tenant_key="art", message_id=mid, sql="SELECT name FROM goods"
     )
     assert out.success is True
-    # 护栏被调且 trace 贯通(F5)
+    # 护栏被调且 trace 贯通
     assert len(calls) == 1
     assert str(calls[0]["trace_id"]) != ""
-    # 脱敏落到响应 sql 与产物卡(F7)
+    # 脱敏落到响应 sql 与产物卡
     assert out.sql == "SELECT name FROM ***"
     sql_card = next(a for a in out.artifacts if a["type"] == "sql")
     assert sql_card["content"] == "SELECT name FROM ***"

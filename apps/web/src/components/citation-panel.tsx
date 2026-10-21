@@ -1,13 +1,4 @@
-/* 文档道引用呈现(068-doc-answer-citations):正文角标 + 来源区。
-
-- 角标:【引用键】→ 可点击徽章(键尾四位);点击定位本消息来源条目并
-  短时高亮(同一条消息内命名空间隔离——同一文档多轮被引用不串);
-- 来源区:可展开列表(sources),每项=引用键 + 来源标识(§段落);
-- sources 缺失/为空 → 纯文本零渲染(历史消息与 SQL 道路径零回归);
-- 净化后仍留在正文的普通中括号文本(非键形态)不被渲染为角标。
-
-样式宪法:shadcn/ui + token;暗色一级公民(高亮取 primary/10 token,
-不新增 dark: 硬编码)。 */
+/* 将正文引用键渲染为可定位来源的徽章，并提供可折叠来源列表；无来源时隐藏来源区。 */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, FileText } from "lucide-react";
@@ -26,8 +17,8 @@ function keyTail(key: string): string {
   return keySuffix(key) || key;
 }
 
-/** 把正文中的【合法引用键】替换为角标节点(非键形态的中括号原样保留)。
- *  与 agent 侧 citations.sanitize_citations 的两级匹配同源(存活键即合法)。 */
+/** 把正文中的【合法引用键】替换为角标,非键形态的中括号原样保留。
+ * 匹配口径与 agent 侧 citations.sanitize_citations 同源:存活键(或其尾缀)即合法。 */
 export function renderWithCitations(
   text: string,
   sources: CitationSource[],
@@ -45,7 +36,7 @@ export function renderWithCitations(
     const token = m[1].trim();
     const isLegal =
       legal.has(token) || (isCitationKeyShape(token) && suffixes.has(keySuffix(token)));
-    if (!isLegal) continue; // 非键形态/编造键(已被 agent 净化剥括号)不渲染角标
+    if (!isLegal) continue; // 非键形态/编造键原样保留为文本,不渲染角标
     if (m.index > last) out.push(text.slice(last, m.index));
     const key = token;
     out.push(
@@ -111,7 +102,7 @@ export function CitationSourcesPanel({
   );
 }
 
-/** 角标点击 → 来源条目短时高亮(同消息命名空间隔离:activeKey 按消息实例) */
+/** 角标点击 → 对应来源条目短时高亮;高亮态由各消息实例自行持有。 */
 export function useCitationHighlight(): {
   activeKey: string | null;
   highlight: (key: string) => void;

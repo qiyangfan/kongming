@@ -1,6 +1,6 @@
-"""会话标题 LLM 改写(010,/internal/rewrite-title 核心逻辑)。
+"""会话标题改写请求的处理逻辑。
 
-prompt 为 010 全新撰写——上游无 LLM 标题资产(上游标题=首问截断 30 字符),
+prompt 为 全新撰写——上游无 LLM 标题资产(上游标题=首问截断 30 字符),
 本文件非 prompts.py 逐字移植资产,不适用全角标点纪律。
 降级契约:LLM 失败/输出非法 → TitleError,api 侧保持截断标题(不阻断问答)。
 """
@@ -60,8 +60,8 @@ async def rewrite_title(question: str, llm: LlmClient) -> str:
             _SYSTEM_PROMPT,
             _USER_PROMPT_TEMPLATE.format(question=q),
             temperature=0.3,
-            max_tokens=60,  # 标题 ≤20 字,封顶防长跑输出烧 token(design D1)
-            task="TITLER",  # 021:任务路由(缺省主模型)
+            max_tokens=60,  # 标题 ≤20 字,封顶防长跑输出烧 token
+            task="TITLER",  # 任务路由(缺省主模型)
         )
     except LlmError as e:
         raise TitleError(f"LLM 调用失败: {e}") from e

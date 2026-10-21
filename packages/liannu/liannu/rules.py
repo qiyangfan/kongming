@@ -1,4 +1,4 @@
-"""防火墙判定规则——保留表/只读根/危险函数清单的**唯一定义处**(067)。
+"""防火墙判定规则——保留表/只读根/危险函数清单的**唯一定义处**。
 
 原则:AST 白名单而非正则黑名单。函数签名吃「已解析的语句列表」
 (单遍解析产物),不再自行 parse——解析与深度门在 artifact 层。
@@ -14,7 +14,7 @@ from liannu.verdict import Verdict
 READONLY_ROOTS = (exp.Select, exp.Union, exp.Subquery)
 
 # 控制面保留表(前缀 + 精确名双形态;按未加引号即折叠小写的 PG 语义,一律小写比对)。
-# skill_(056)/user_prefs(059)已收编——与 api 历史实际拦截行为对齐,不放宽不收紧。
+# skill_/user_prefs 与 api 历史实际拦截行为对齐,不放宽不收紧。
 RESERVED_TABLE_PREFIXES = ("sys_", "chat_", "skill_", "judge_")
 RESERVED_TABLE_NAMES = frozenset(
     {
@@ -22,7 +22,7 @@ RESERVED_TABLE_NAMES = frozenset(
         "user_identities",
         "user_memory",
         "user_prefs",
-        # 092:平台级产出表不设租户语义,任何路径形态按名拒读(知识/执行双闸兜底)
+        # 平台级产出表不设租户语义,任何路径形态按名拒读(知识/执行双闸兜底)
         "report",
         "report_section",
         "report_version",
@@ -88,7 +88,7 @@ def check_firewall(statements: list[exp.Expression | None]) -> Verdict:
                 return Verdict(False, f"BLOCKED_NODE: {forbidden.__name__}")
         # 危险函数拒用(服务器文件/系统操作/资源滥用)
         for func in st.find_all(exp.Func):
-            # Anonymous(sqlglot 未收录的函数)名在 .name;已收录类型用 sql_name()
+            # Anonymous(sqlglot 未收录的函数)名在 .name;已收录类型用 sql_name
             func_name = (
                 func.name.lower() if isinstance(func, exp.Anonymous) else func.sql_name().lower()
             )

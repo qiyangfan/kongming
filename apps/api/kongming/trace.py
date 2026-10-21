@@ -1,4 +1,4 @@
-"""请求级 trace_id 单源(061):中间件写入,chat/审计/用量与响应头同一值。"""
+"""请求级 trace_id 单源:中间件写入,chat/审计/用量与响应头同一值。"""
 
 from __future__ import annotations
 

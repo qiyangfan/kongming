@@ -1,4 +1,4 @@
-"""team 路由(032,薄适配层):/system/teams/* 端点族。
+"""处理 /system/teams/* 管理端点。
 
 管理 CRUD 挂 system:team:manage;「我所在的团队」与成员列表登录即可
 (成员关系过滤);成员管理操作要求操作者是该团队 OWNER(或持
@@ -37,7 +37,7 @@ class _Oper:
 
 
 class _KnowledgePublicizeAdapter:
-    """102 组合根适配器:团队删除钩子——名下知识条目公共化(归属置空)+审计
+    """组合根适配器:团队删除钩子——名下知识条目公共化(归属置空)+审计
     +受影响范围检索缓存失效。savepoint 包裹:钩子内失败只回滚自身、会话可用,
     TeamService 捕获后告警并继续删除;FK ON DELETE SET NULL 为级联兜底。"""
 
@@ -60,7 +60,7 @@ class _KnowledgePublicizeAdapter:
                 {"scopes": [f"{t}:{d}" for t, d in scopes], "count": len(scopes)},
             )
         # 检索缓存失效(savepoint 外;Redis 侧操作,归属公共化即时生效——
-        # 回填旧值窗口由 TTL 有界吸收,与 rag 写路径 D6 同取舍)
+        # 回填旧值窗口由 TTL 有界吸收,与 rag 写路径同取舍)
         from kongming.config import get_settings
         from kongming.rag.cache import ContextCache
         from kongming.redis_client import get_redis
@@ -134,9 +134,7 @@ class AttachIn(BaseModel):
 
 
 class TeamOut(BaseModel):
-    """032 团队条目(审查循环 D-F2:契约化——曾裸 dict 使前端只能手写类型)。
-    102 纯增可选 role:「我所在的团队」形态附带本人角色(OWNER/MEMBER 可写、
-    VIEWER 只读,供知识库上传归属候选筛选);manage 面全量列表无此列=None。"""
+    """团队信息；个人团队列表包含当前用户角色，管理列表不返回该字段。"""
 
     id: str
     team_key: str
@@ -162,7 +160,7 @@ def _team_out(row: dict[str, Any]) -> dict[str, Any]:
         "team_key": row["team_key"],
         "name": row["name"],
         "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
-        "role": row.get("role"),  # 102:mine 形态附带;全量列表缺省 None
+        "role": row.get("role"),  # mine 形态附带;全量列表缺省 None
     }
 
 
@@ -216,7 +214,7 @@ async def get_team(
 ) -> dict[str, Any]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     svc = _svc(session)
-    # R1-J7:成员关系过滤(与 docstring 一致)——非成员且无 manage 404 同形
+    # 成员关系过滤——非成员且无 manage 404 同形
     from kongming.auth.repository import SqlPermRepo
 
     role = await SqlTeamRepo(session).get_member_role(team_id=team_id, user_id=str(user["sub"]))
@@ -269,7 +267,7 @@ async def delete_team(
 ) -> dict[str, bool]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     try:
-        # 102:挂知识公共化钩子(失败告警不阻塞删除;审计/缓存失效在钩子内)
+        # 挂知识公共化钩子(失败告警不阻塞删除;审计/缓存失效在钩子内)
         await _svc(session, str(user["sub"]), publicize_knowledge=True).delete(
             tenant_id=tenant_id, team_id=team_id
         )
@@ -365,7 +363,7 @@ async def attach_resource(
         "bot": "public.sys_bot_definition",
         "workflow": "public.sys_workflow_def",
     }[body.resource_type]
-    # R1-S1:资源行租户过滤(反查与 UPDATE 同租户收口;跨租户 404 同形)
+    # 资源行租户过滤(反查与 UPDATE 同租户收口;跨租户 404 同形)
     creator = (
         await session.execute(
             _text(

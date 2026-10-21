@@ -1,5 +1,4 @@
-/* 路由级权限守卫(web-nav spec「路由守卫分流」):
-   已认证但无权限点 → 403 页,不回退静默隐藏。 */
+/* 路由级权限守卫(web-nav spec「路由守卫分流」): 已认证但无权限点 → 403 页,不回退静默隐藏。 */
 
 import type { ReactNode } from "react";
 

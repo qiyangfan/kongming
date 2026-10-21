@@ -1,5 +1,4 @@
-/* 工作流画布自定义边(107):普通依赖边素线;条件出边带 on 值徽标
-   (true/false 分支边,MUST NOT 出现无 on 值条件后继连线)。 */
+/* 工作流画布自定义边:普通依赖边素线;条件出边带 on 值徽标 (true/false 分支边,MUST NOT 出现无 on 值条件后继连线)。 */
 
 import { memo } from "react";
 import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, type EdgeProps } from "@xyflow/react";

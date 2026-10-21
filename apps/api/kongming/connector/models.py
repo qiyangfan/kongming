@@ -1,13 +1,7 @@
-"""connector 领域模型(099 http-connector-domain):租户级 HTTP 连接器的
-注册声明/注册校验/掩码/装配纯函数(零框架,宪法 Article II)。
+"""租户级 HTTP 连接器的注册声明、校验与请求装配纯函数。注册只允许精确主机白名单,
+校验方法、鉴权材料、路径参数和超时上限;非 GET 默认需要确认。
 
-注册校验是安全资产(fail-fast,spec「注册校验」):路径模板占位与参数声明
-求交、白名单主机形态(精确主机,禁通配/路径/端口/scheme)、方法与鉴权白名单、
-材料相容(bearer/api_key/basic 须有材料,none 不得携带)、超时部署级封顶。
-写语义缺省规则(design D4):非 GET 缺省需确认,显式声明覆盖方法启发式。
-凭证任何接口不回显明文:查询/列表面只呈现「有无+尾号掩码」(与 webhook
-secret 同口径)。
-"""
+凭证接口只返回是否配置和尾号掩码,不回显明文。"""
 
 import ipaddress
 import re
@@ -51,7 +45,7 @@ API_KEY_HEADER = "X-API-Key"
 
 
 class ConnectorValidationError(Exception):
-    """领域层注册校验 400(008 McpValidationError 同哲学)。"""
+    """注册校验失败,路由层映射 400。"""
 
 
 class ConnectorNotFound(Exception):
@@ -64,7 +58,7 @@ class ConnectorExists(Exception):
 
 @dataclass(frozen=True)
 class ParamDecl:
-    """参数声明(design D5 有限字段集:名/类型/必填/描述;不收 JSON Schema)。"""
+    """参数声明:有限字段集(名/类型/必填/描述),不收 JSON Schema。"""
 
     name: str
     type: str  # string | number | boolean
@@ -102,7 +96,7 @@ def key_from_tool_name(name: str) -> str | None:
 
 
 def resolve_confirmation(method: str, declared: bool | None) -> bool:
-    """写语义缺省规则(design D4):非 GET 缺省需确认、GET 缺省豁免;
+    """写语义缺省规则:非 GET 缺省需确认、GET 缺省豁免;
     显式声明胜过方法启发式(POST 只读端点可标读,GET 写端点可标写)。"""
     if declared is not None:
         return declared
@@ -137,17 +131,15 @@ def _hosts_problem(allowed_hosts: tuple[str, ...]) -> str | None:
     return None
 
 
-# 注册期 SSRF 字面判定(099 spec「注册期 SSRF 判定拦截」):与执行期判定
-# (workflow.http_runner 的拒绝段)同一策略的零依赖副本——models 不 import
-# http_runner(其模块级 import httpx,污染领域纯度),两份判定同判由
-# tests/test_http_connector.py 的双源对拍测试钉住(guardrail 异常「单源
-# 双副本」同哲学)。
+# 注册期 SSRF 字面判定(spec「注册期 SSRF 判定拦截」):与执行期判定
+# (workflow.http_runner)保持相同的拒绝范围,避免导入其 httpx 依赖;
+# 两份判定同判由 tests/test_http_connector.py 对拍钉住。
 _CGNAT = ipaddress.ip_network("100.64.0.0/10")  # 共享段(云内网/Tailscale)
 
 
 def _is_denied_ip_literal(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-        ip = ip.ipv4_mapped  # ::ffff:127.0.0.1 逃逸面归一
+        ip = ip.ipv4_mapped  # IPv4 映射 IPv6(::ffff:127.0.0.1)归一为 IPv4 再判
     return (
         ip.is_private
         or ip.is_loopback
@@ -201,7 +193,7 @@ def _template_problem(
     if parts.query or parts.fragment:
         return "路径模板不得携带 query/fragment(查询参数由参数声明按名映射)"
     # 占位符与参数声明求交:每个占位必须有同名必填声明,且不得重复出现
-    # (评审修复:可选参数缺参会残留字面 {name} 占位,httpx 编码后打到
+    # (可选参数缺参会残留字面 {name} 占位,httpx 编码后打到
     # 错误路径——路径占位参数 MUST required)
     declared = {p.name: p for p in params}
     seen: set[str] = set()
@@ -224,8 +216,7 @@ def validate_declaration(decl: ConnectorDecl, *, has_secret: bool, timeout_max_m
     """注册校验(fail-fast 纯函数):畸形声明逐类拒绝,全部通过才落库。"""
     if not CONNECTOR_KEY_RE.fullmatch(decl.key):
         raise ConnectorValidationError("key 须为小写字母开头的字母/数字/下划线(2-64 位)")
-    # 合成工具名 http__<key> 受 toolcall 执行契约 64 位硬闸(内部回调 422、
-    # 审计列 VARCHAR(64))——注册期拦下,不产出必坏工具(评审修复)
+    # 工具名和审计列上限均为 64 字符；注册时拒绝超长键，避免生成无法执行的工具。
     if len(tool_name(decl.key)) > 64:
         raise ConnectorValidationError(
             f"key 过长:合成工具名前缀 {CONNECTOR_TOOL_PREFIX} + key 超出 64 位,"
@@ -331,5 +322,5 @@ def build_injection_spec(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def row_param_decls(row: dict[str, Any]) -> tuple[ParamDecl, ...]:
-    """行 → 参数声明元组(策略器/执行器装配共用;公开薄壳)。"""
+    """行 → 参数声明元组(策略器/执行器装配共用)。"""
     return _row_params(row)

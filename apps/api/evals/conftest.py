@@ -1,19 +1,6 @@
-"""评估器 fixtures(016):yaml 加载 + 真实链路调用 + gold 直连执行。
+"""评估器 fixtures：从 YAML 加载用例，经真实 /chat/query 生成结果，并直接执行 gold SQL。
 
-评估器以进程外工具形态运行(eval spec「评估运行形态」):
-- 生成侧:登录 → POST /chat/query(persist=false,不落业务数据),完整链路
-  (认证→租户→RAG 召回→生成→执行→洞察)与真实用户同路径;
-- gold 侧:asyncpg 直连目标库(显式 schema 限定,同控制面 DSN;
-  动态数据源题按 gold_database 直连其独立业务库);
-- 比对:matchers 严格/宽松双分(匹配器单测进默认门禁,本文件只做编排)。
-
-运行(需评估环境:双进程+示例数据集+LLM 凭证):
-  cd apps/api
-  KM_EVAL_ADMIN_PASSWORD=... uv run pytest evals -m smoke      # ~5 题
-  KM_EVAL_ADMIN_PASSWORD=... uv run pytest evals -m full       # 全量单轮
-  KM_EVAL_ADMIN_PASSWORD=... uv run pytest evals -m multiturn  # 多轮上下文
-
-无凭证环境(CI/新人)显式运行时整层 skip 并给出设置提示,不猜密码。
+需要已启动的 API、Agent、评估数据集和模型凭证；缺少凭证时整组评估明确跳过。
 """
 
 import os
@@ -30,7 +17,7 @@ EVAL_DIR = Path(__file__).parent
 API_BASE = os.getenv("KM_EVAL_API_BASE", "http://127.0.0.1:8000")
 ADMIN_USERNAME = os.getenv("KM_EVAL_ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("KM_EVAL_ADMIN_PASSWORD", "")
-# 019:评估内核选择(recipe 缺省 / react=ReAct 内核等价性验证)
+# 评估内核选择(recipe 缺省 / react=ReAct 内核等价性验证)
 AGENT_MODE = os.getenv("KM_EVAL_AGENT_MODE", "recipe")
 CHAT_TIMEOUT = 150.0  # agent_timeout_sec=120 覆盖全图 + 网络余量
 
@@ -43,10 +30,10 @@ if not ADMIN_PASSWORD:
 
 def _load_yaml_cases() -> list[dict[str, Any]]:
     """加载 evals/ 下全部 yaml;单轮(无 turns)与多轮(turns[])统一返回,
-    消费方按字段分流(016:文件即资产,不按文件名筛)。
+    消费方按字段分流(文件即资产,不按文件名筛)。
 
     畸形结构(顶层非 list、条目非 dict)显式 raise——静默跳过会缩 full 统计
-    分母,阈值口径悄悄失真(R1-B2)。空文件(合法空 list)放行。
+    分母,阈值口径悄悄失真。空文件(合法空 list)放行。
     """
     cases: list[dict[str, Any]] = []
     for yml in sorted(EVAL_DIR.glob("*.yaml")):
@@ -69,7 +56,7 @@ def _tenant_of(case: dict[str, Any]) -> str:  # pyright: ignore[reportUnusedFunc
     return str(case.get("tenant") or case["id"].split("_")[0])
 
 
-# ============ 登录与链路调用 ============
+# ============ 登录与评估 API 调用 ============
 
 _token_cache: str | None = None
 
@@ -107,13 +94,13 @@ async def call_chat(
         body["history"] = history
     if datasource_key:
         body["datasource_key"] = datasource_key
-    # 019:KM_EVAL_AGENT_MODE=react 时经 ReAct 内核跑同一评估集(基线对照);
-    # 缺省 recipe(8 节点链路,既有基线口径不变)
+    # AGENT_MODE=react 时使用 ReAct 图。
+    # 默认 recipe 模式使用固定的 8 节点图。
     if AGENT_MODE != "recipe":
         body["agent_mode"] = AGENT_MODE
     async with httpx.AsyncClient(base_url=API_BASE, timeout=CHAT_TIMEOUT) as c:
         r = await c.post("/chat/query", headers=headers, json=body)
-    if r.status_code == 401:  # token 过期:重登一次重发(上游同款教训)
+    if r.status_code == 401:  # token 过期:重登一次重发(上游同款)
         _token_cache = None
         token = await _login()
         headers["Authorization"] = f"Bearer {token}"
@@ -170,7 +157,7 @@ async def exec_sql(
 
 
 def gen_tables(sql: str) -> set[str]:
-    """生成 SQL 涉及表(sqlglot 抽表,CTE 排除——复用 014 feedback 实现)。"""
+    """生成 SQL 涉及表(sqlglot 抽表,CTE 排除——复用 feedback 实现)。"""
     from kongming.feedback.models import extract_table_names
 
     tables, _parse_error = extract_table_names(sql)

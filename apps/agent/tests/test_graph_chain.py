@@ -1,10 +1,4 @@
-"""图全链路测试:scripted LLM + scripted 控制面回调,四条主路径。
-
-- 首轮 PASS:understand→retrieve→generate→validate→execute→summarize 走通;
-- ERROR→selfheal→PASS:重试经 selfheal 计数,错误喂回 generate;
-- BLOCKED→fail:权限类不重试,LLM 调用次数不增;
-- 重试耗尽→fail:图必然终止(不依赖 recursion_limit)。
-"""
+"""Agent 图执行测试，使用脚本化模型和控制面回调覆盖成功、自愈、拦截和重试耗尽四种结果。"""
 
 from collections.abc import Callable
 from typing import Any, cast
@@ -27,7 +21,7 @@ _NO_DATA_ERROR = "当前数据源未找到回答该问题所需的数据,可切�
 
 class ScriptedLlm:
     def prompt_budget(self, task: str | None = None) -> int:
-        return 1_000_000  # 080:测试替身恒宽预算(收敛行为由纯函数测试覆盖)
+        return 1_000_000  # 测试替身恒宽预算(收敛行为由纯函数测试覆盖)
 
     """按调用序出答案:understand/generate(/selfheal 后再 generate)/summarize。"""
 
@@ -41,7 +35,7 @@ class ScriptedLlm:
         user: str,
         *,
         temperature: float = 0.2,
-        **_kw: object,  # 021:task/trace_id/tenant_key 吸收
+        **_kw: object,  # task/trace_id/tenant_key 吸收
     ) -> str:
         self.users.append(user)
         if not self.answers:
@@ -57,7 +51,7 @@ class ScriptedApi:
 
     async def rag_retrieve(self, **kw: object) -> RagContext | None:
         self.rag_calls += 1
-        return None  # 零命中回退内省(009 回归路径)
+        return None  # 零命中回退内省(回归路径)
 
     async def fetch_schema(self, **kw: object) -> SchemaMeta:
         return SchemaMeta(
@@ -84,7 +78,7 @@ Harness = Callable[[list[str], list[SqlExecuteOutcome]], tuple[ScriptedLlm, Scri
 
 
 async def _invoke(state: AgentState) -> dict[str, Any]:
-    """get_graph().ainvoke 成员型 strict 下部分未知(LangGraph 泛型),
+    """get_graph.ainvoke 成员型 strict 下部分未知(LangGraph 泛型),
     测试边界一次收窄为终态 state dict(自构造 state,键型已知)。"""
     graph = cast("Any", get_graph())
     return cast("dict[str, Any]", await graph.ainvoke(state))
@@ -120,7 +114,7 @@ async def test_first_round_pass(harness: Harness) -> None:
     llm, api = harness(
         [
             "商品总库存",
-            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            '{"intent":"data","confidence":0.99}',  # route_intent
             "SELECT sum(qty) FROM goods",
             '{"summary":"共 30"}',
         ],
@@ -139,7 +133,7 @@ async def test_error_selfheal_then_pass(harness: Harness) -> None:
     llm, api = harness(
         [
             "商品总库存",
-            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            '{"intent":"data","confidence":0.99}',  # route_intent
             "SELECT sum(qtyy) FROM goods",  # 首轮错列名
             '{"summary":"共 30"}',
         ],
@@ -162,7 +156,7 @@ async def test_blocked_never_retries(harness: Harness) -> None:
     llm, api = harness(
         [
             "删除商品",
-            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            '{"intent":"data","confidence":0.99}',  # route_intent
             "DELETE FROM goods",
         ],  # validate 本地即拦,execute 根本不会被调
         [],
@@ -175,11 +169,11 @@ async def test_blocked_never_retries(harness: Harness) -> None:
 
 
 async def test_sentinel_short_circuit_zero_execution(harness: Harness) -> None:
-    """043:知识未覆盖哨兵短路——零执行零重试,失败终态带用户友好文案。"""
+    """知识未覆盖哨兵短路——零执行零重试,失败终态带用户友好文案。"""
     llm, api = harness(
         [
             "员工总数",
-            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            '{"intent":"data","confidence":0.99}',  # route_intent
             "NO_RELEVANT_TABLE",
         ],
         [],
@@ -196,11 +190,11 @@ async def test_sentinel_short_circuit_zero_execution(harness: Harness) -> None:
 async def test_sentinel_after_does_not_exist_guides_then_terminates(
     harness: Harness,
 ) -> None:
-    """043:首轮编表执行报 does-not-exist → 喂回附清单引导 → 二轮哨兵短路不再连败。"""
+    """首轮编表执行报 does-not-exist → 喂回附清单引导 → 二轮哨兵短路不再连败。"""
     llm, api = harness(
         [
             "员工总数",
-            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            '{"intent":"data","confidence":0.99}',  # route_intent
             "SELECT count(*) FROM staff",
         ],  # 首轮凭先验编表
         [SqlExecuteOutcome(verdict="ERROR", reason='relation "public.staff" does not exist')],
@@ -217,7 +211,7 @@ async def test_sentinel_after_does_not_exist_guides_then_terminates(
 
 async def test_retry_exhaustion_terminates(harness: Harness) -> None:
     _, api = harness(
-        # 093 route_intent(脚本序=调用序:understand 先消费问句)
+        # route_intent(脚本序=调用序:understand 先消费问句)
         ["商品总库存", '{"intent":"data","confidence":0.99}']
         + ["SELECT sum(qtyy) FROM goods"] * (MAX_RETRY + 1),
         [SqlExecuteOutcome(verdict="ERROR", reason="column qtyy does not exist")] * (MAX_RETRY + 1),
@@ -229,11 +223,11 @@ async def test_retry_exhaustion_terminates(harness: Harness) -> None:
     assert "summary" not in final  # 失败路径不出洞察
 
 
-# ---- 071:对话复语直通(零模型/零检索/零执行,第四态收敛)----
+# 对话复语直通(零模型/零检索/零执行,第四态收敛)----
 
 
 async def test_dialogue_reply_passthrough_zero_calls(harness: Harness) -> None:
-    """071:复语「不用了」直通——不发起补全、不检索、不生成、不执行。"""
+    """复语「不用了」直通——不发起补全、不检索、不生成、不执行。"""
     llm, api = harness([], [])  # 脚本为空:任何 LLM/execute 调用即炸
     state = _initial()
     state["question"] = "不用了"
@@ -249,7 +243,7 @@ async def test_dialogue_reply_passthrough_zero_calls(harness: Harness) -> None:
 
 
 async def test_dialogue_reply_greeting_first_turn(harness: Harness) -> None:
-    """071:单轮无历史首句「你好」同样直通。"""
+    """单轮无历史首句「你好」同样直通。"""
     llm, api = harness([], [])
     state = _initial()
     state["question"] = "你好"
@@ -261,11 +255,11 @@ async def test_dialogue_reply_greeting_first_turn(harness: Harness) -> None:
 
 
 async def test_dialogue_reply_not_blocked_by_prefix_query(harness: Harness) -> None:
-    """071:复语起头的真实问法「取消订单的门店有哪些」照常走数据查询路径。"""
+    """复语起头的真实问法「取消订单的门店有哪些」照常走数据查询路径。"""
     llm, api = harness(
         [
             "取消订单的门店有哪些",
-            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            '{"intent":"data","confidence":0.99}',  # route_intent
             "SELECT store FROM orders WHERE status='cancelled'",
             '{"summary":"1 家"}',
         ],

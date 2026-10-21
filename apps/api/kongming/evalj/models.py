@@ -1,4 +1,4 @@
-"""evalj 领域模型与纯函数(092 评测智能体化):零框架依赖(宪法 Article II)。
+"""evalj 领域模型与纯函数:不依赖 Web 框架或数据库。
 
 judge 运行记录的领域侧:对象类型/verdict 取值域单源、run 汇总纯函数、
 跨基线对比纯函数(红线判定由 harness 门禁消费,本模块只出结构化事实)。
@@ -12,7 +12,7 @@ OBJECT_REPORT = "report"
 OBJECT_TASK = "task"
 OBJECT_COLLAB = "collab"
 OBJECT_ANSWER = "answer"
-OBJECT_ROUNDTABLE = "roundtable"  # 115:圆桌运行(独立 rubric 维度族)
+OBJECT_ROUNDTABLE = "roundtable"  # 圆桌运行(独立 rubric 维度族)
 OBJECT_TYPES: tuple[str, ...] = (
     OBJECT_REPORT,
     OBJECT_TASK,

@@ -1,5 +1,4 @@
-"""029 workflow-orchestration 测试:DAG 校验/引擎(mock runner)/SSRF 矩阵/
-HTTP 链路安全矩阵(测试先行,安全类)。"""
+"""工作流测试覆盖 DAG 校验、模拟节点执行、SSRF 地址拒绝矩阵和 HTTP 请求安全。"""
 # pyright: reportPrivateUsage=false
 
 import asyncio
@@ -182,7 +181,7 @@ def _run(nodes: list[dict[str, Any]], **kw: Any) -> Any:
 
 
 async def test_engine_happy_chain() -> None:
-    """sql → transform(引用)→ agent(引用):引用流转直证。"""
+    """检查 SQL、transform 和 Agent 节点之间的引用值传递。"""
     agent = _MockAgent()
     out = await _run(
         [
@@ -378,7 +377,7 @@ async def test_engine_ssrf_node_failed() -> None:
 
 
 async def test_engine_unknown_exception_converges() -> None:
-    """R1-S1:runner 未知异常(ConnectError 等)收敛节点 FAILED,
+    """runner 未知异常(ConnectError 等)收敛节点 FAILED,
     run FAILED 不逃逸 500。"""
     import httpx
 
@@ -395,7 +394,7 @@ async def test_engine_unknown_exception_converges() -> None:
 
 
 async def test_engine_loop_body_skip_routing() -> None:
-    """R1-J2:子段内 condition 选路生效(sql mock 调用序直证:
+    """子段内 condition 选路生效（检查 SQL mock 的调用顺序：
     item=2→big;item=1→small)。"""
     sql = _MockSql()
     out = await run_dag(
@@ -447,7 +446,7 @@ async def test_engine_loop_body_skip_routing() -> None:
 
 
 async def test_engine_loop_body_id_collision_fails() -> None:
-    """R1-J1:body 节点 id 撞外层 → 保存期校验拒绝(引擎深防御 NodeFailed)。"""
+    """body 节点 id 撞外层 → 保存期校验拒绝(引擎深防御 NodeFailed)。"""
     with pytest.raises(DagValidationError, match="撞保留名/外层节点"):
         validate_dag(
             {
@@ -486,7 +485,7 @@ async def test_engine_loop_body_id_collision_fails() -> None:
         "http://[::1]/x",
         "http://[::ffff:127.0.0.1]/x",  # IPv4 映射逃逸
         "http://[fe80::1]/x",
-        "http://100.64.1.1/x",  # R1-J7:CGNAT 共享段
+        "http://100.64.1.1/x",  # CGNAT 共享段
         "ftp://example.com/x",
         "http:///nohost",
     ],
@@ -523,7 +522,7 @@ async def test_ssrf_domain_resolves_private(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_ssrf_sync_host_allowed_check(monkeypatch: pytest.MonkeyPatch) -> None:
-    """同步主机级判定(assert_host_allowed_sync,108 IMAP 出站消费):字面
+    """同步主机级判定(assert_host_allowed_sync,IMAP 出站消费):字面
     与解析落拒绝段即拒(同一拒绝段单源),公网字面放行(不触网)。"""
     import kongming.workflow.http_runner as hr
 
@@ -551,7 +550,7 @@ def test_ssrf_sync_host_allowed_check(monkeypatch: pytest.MonkeyPatch) -> None:
     hr.assert_host_allowed_sync("93.184.216.34", 993)
 
 
-# ── HTTP 链路 ──
+# ── HTTP 节点 ──
 
 
 async def _wf_user(
@@ -668,7 +667,7 @@ async def test_workflow_run_and_history(
 async def test_workflow_disabled_blocks_explicit_old_version(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-S2:disable 后显式 version=旧 也 409(旧版本随新版本自动失活,
+    """disable 后显式 version=旧 也 409(旧版本随新版本自动失活,
     启用闸恒只作用最新版本)。"""
     _, token = await _wf_user(
         client,
@@ -743,7 +742,7 @@ async def test_workflow_perms_and_isolation(
 
 
 async def test_pinned_transport_rewrites_host(monkeypatch: pytest.MonkeyPatch) -> None:
-    """审查循环 F4:SSRF 判定后连接必须钉扎判定时的 IP(DNS rebinding
+    """SSRF 判定后连接必须钉扎判定时的 IP(DNS rebinding
     TOCTOU)——URL host 换 IP、Host 头/SNI 保原域名。"""
     import httpx
 

@@ -1,7 +1,7 @@
-"""guardrail 路由(020,prompt-guardrails spec):规则清单/覆盖更新/审计分页。
+"""guardrail 路由(prompt-guardrails spec):规则清单/覆盖更新/审计分页。
 
 全部端点挂 system:guardrail:manage(仅 SUPER_ADMIN 种子覆盖);
-行级可见性与 014/015/019 同口径(非 ALL 强制本人)。
+行级可见性:非 ALL scope 强制只看本人记录。
 """
 
 import logging
@@ -36,7 +36,7 @@ class GuardrailRuleOut(BaseModel):
     enabled: bool
     threshold: int | None
     overridden: bool  # 是否有库覆盖行
-    maskable: bool  # 有脱敏器(R1-L8:仅此类规则允许 action=masked)
+    maskable: bool  # 有脱敏器(仅此类规则允许 action=masked)
 
 
 class RuleListOut(BaseModel):
@@ -84,7 +84,7 @@ async def update_rule(
     rule = next((r for r in REGISTRY if r.name == rule_name), None)
     if rule is None:
         raise HTTPException(status_code=404, detail="RULE_NOT_FOUND") from None
-    # R1-L8:覆盖合法性——threshold 仅 tool_intent 类;action=masked 仅有脱敏器规则
+    # 覆盖合法性——threshold 仅 tool_intent 类;action=masked 仅有脱敏器规则
     if req.threshold is not None and rule.guardrail_type != "tool_intent":
         raise HTTPException(status_code=400, detail="THRESHOLD_NOT_APPLICABLE") from None
     if req.action == "masked" and rule.name not in MASKERS:

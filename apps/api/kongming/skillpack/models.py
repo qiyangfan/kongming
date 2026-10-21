@@ -1,6 +1,6 @@
-"""Skill Pack 领域纯函数(056):四段契约校验与合并投影封顶。
+"""Skill Pack 领域纯函数:四段契约校验与合并投影封顶。
 
-零框架依赖(宪法 Article II)。fewshot SQL 只作提示示例文本,永不执行。
+不依赖 Web 框架或数据库。fewshot SQL 只作提示示例文本,不会执行。
 """
 
 from __future__ import annotations
@@ -158,7 +158,7 @@ def merge_packs(packs: Sequence[SkillPackContent]) -> SkillPackContent:
 
 
 def project_terms(content: SkillPackContent) -> str:
-    """术语段;零条返回空串(零回归)。"""
+    """术语段;零条返回空串。"""
     lines: list[str] = []
     for g in content.glossary:
         alias = f"(又称 {', '.join(g.aliases)})" if g.aliases else ""
@@ -190,7 +190,7 @@ class SkillProjection:
 
 
 def build_projection(packs: Sequence[SkillPackContent]) -> SkillProjection:
-    """合并投影三段;全空=零注入(生成链路零回归)。"""
+    """合并三段投影文本；全为空时返回空串。"""
     merged = merge_packs(packs)
     return SkillProjection(
         skill_terms=project_terms(merged),

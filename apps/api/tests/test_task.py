@@ -1,10 +1,7 @@
 # pyright: reportPrivateUsage=false
-"""task 域测试(090 task-kernel,安全规则类测试先行)。
+"""覆盖任务状态机、权限、归属、审批和预算退出。
 
-覆盖:状态机白名单纯函数、证据驱动约束、HTTP 集成(权限面/归属 404 同形/
-全生命周期/审批挂起-批准/预算 PAUSED 诚实收口)。编排回调由测试内联驱动
-(真实 HTTP 全链;不用后台任务嵌套 ASGI 调同一 app——传输层死锁,2026-10-09
-实证,产品面不受影响:派发路径由记录器断言触发)。
+测试通过真实 HTTP 调用内部回调；派发时机由记录器断言，避免嵌套 ASGI 请求导致传输层死锁。
 """
 
 from typing import Any
@@ -204,8 +201,7 @@ async def _wait_status(
 
 @pytest.fixture
 def _no_dispatch(monkeypatch: pytest.MonkeyPatch) -> list[str]:  # pyright: ignore[reportUnusedFunction]
-    """派发记录器:创建/恢复/批准的 _schedule_run 改为记录(回调由测试内联
-    驱动);消除「后台任务嵌套 ASGI 调同一 app」的传输层死锁(2026-10-09 实证)。"""
+    """将派发替换为记录器，由测试显式调用回调，避免在同一 app 中嵌套请求。"""
     from kongming.task import router as task_router
 
     calls: list[str] = []
@@ -359,9 +355,6 @@ async def test_budget_pause_honest(
     assert [s["status"] for s in detail["steps"]].count("DONE") == 2
     assert any(e["kind"] == "budget_paused" for e in detail["events"])
     assert detail["task"]["status"] == "PAUSED"  # 不出现 DONE
-
-
-# ── 审查修复回归(P0 终态复活链 / 审批闸 / 预算三约束 / CAS)──
 
 
 async def _step_start(client: AsyncClient, tid: str, tk: str, sid: str) -> dict[str, object]:
@@ -732,9 +725,6 @@ async def test_read_perm_and_malformed_uuid(
     assert r2.status_code == 404
     r3 = await client.post("/tasks/not-a-uuid/cancel", headers=_auth(token2))
     assert r3.status_code == 404
-
-
-# ── 审查迭代修复回归(审批期暂停死锁/拒绝续跑派发/双派发/账本收敛)──
 
 
 @pytest.mark.asyncio

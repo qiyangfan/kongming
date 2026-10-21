@@ -1,16 +1,16 @@
-"""memory 端口(022):service 依赖反转。零框架纪律:仅 Protocol。"""
+"""memory 端口:service 依赖反转。零框架纪律:仅 Protocol。"""
 
 from typing import Any, Protocol
 
 
 class Embedder(Protocol):
-    """向量化(agent /internal/embedding 回调通道,009 单例复用)。"""
+    """向量化(agent /internal/embedding 回调通道,单例复用)。"""
 
     async def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
 class MemoryOperLogger(Protocol):
-    """操作日志(auth 域 SqlOperLogRepo 适配,015 ip 链路自动覆盖)。"""
+    """操作日志端口，由认证域仓储实现；客户端 IP 从请求上下文读取。"""
 
     async def add(
         self,

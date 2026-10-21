@@ -31,7 +31,7 @@ class FakeLlm:
         self.calls: list[tuple[str, str, float]] = []
 
     def prompt_budget(self, task: str | None = None) -> int:
-        return 1_000_000  # 080:测试替身恒宽预算(收敛行为由纯函数测试覆盖)
+        return 1_000_000  # 测试替身恒宽预算(收敛行为由纯函数测试覆盖)
 
     async def chat(
         self,
@@ -39,7 +39,7 @@ class FakeLlm:
         user: str,
         *,
         temperature: float = 0.2,
-        **_kw: object,  # 021:task/trace_id/tenant_key 吸收
+        **_kw: object,  # task/trace_id/tenant_key 吸收
     ) -> str:
         self.calls.append((system, user, temperature))
         if self.boom:
@@ -184,7 +184,7 @@ async def test_retrieve_formats_hint(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_retrieve_prefers_rag_context(monkeypatch: pytest.MonkeyPatch) -> None:
-    """召回命中:提示用召回结果,并透传历史 SQL;不回退内省(009 D4/D12)。"""
+    """召回命中时使用召回结果并透传历史 SQL，不回退到元数据内省。"""
     api = FakeApi(
         meta=_meta(),
         rag=RagContext(schema_hint="tenant_sakila.film(title)", history_sql="SELECT 1"),
@@ -204,7 +204,7 @@ async def test_retrieve_rag_empty_falls_back_introspection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """知识库零命中(schema_hint 空):回退实时内省;history_sql 独立保留
-    (R2-S1:「知识未抓取但已有成功历史」形态下 few-shot 不应被整体丢弃)。"""
+    (「知识未抓取但已有成功历史」形态下 few-shot 不应被整体丢弃)。"""
     api = FakeApi(meta=_meta(), rag=RagContext(schema_hint="", history_sql="SELECT 9"))
     _install(monkeypatch, FakeLlm(), api)
     out = await nodes.retrieve(_state())
@@ -215,7 +215,7 @@ async def test_retrieve_rag_empty_falls_back_introspection(
 async def test_retrieve_introspect_fail_keeps_semantic_hints(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """审查循环 F5:召回成功(schema 空)+内省失败分支不得丢语义段——
+    """召回成功(schema 空)+内省失败分支不得丢语义段——
     relations/metric 与内省成败无关,与兄弟分支同口径透传。"""
     from kongming_agent.apiclient import RagContext
 
@@ -239,7 +239,7 @@ async def test_retrieve_introspect_fail_keeps_semantic_hints(
 async def test_retrieve_history_only_still_feeds_generate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """纯历史命中形态(schema 空+history 有):内省兜底+few-shot 共存(R2-S1
+    """纯历史命中形态(schema 空+history 有):内省兜底+few-shot 共存(
     核心场景:知识从未抓取,问答成功回写后,相似问句应受益于历史 SQL)。"""
     api = FakeApi(meta=_meta(), rag=RagContext(schema_hint="", history_sql="SELECT 1"))
     _install(monkeypatch, FakeLlm(), api)
@@ -262,7 +262,7 @@ async def test_retrieve_rag_http_failure_falls_back(
 
 
 async def test_generate_history_sql_section_placement(monkeypatch: pytest.MonkeyPatch) -> None:
-    """历史成功 SQL 段(009):位于表结构之后;系统模板不动;无命中不出现。"""
+    """历史成功 SQL 段:位于表结构之后;系统模板不动;无命中不出现。"""
     fake = FakeLlm(["SELECT 1"])
     _install(monkeypatch, fake, FakeApi())
     await nodes.generate(_state(schema_hint="表 t(a)", history_sql="SELECT count(*) FROM t"))
@@ -271,7 +271,7 @@ async def test_generate_history_sql_section_placement(monkeypatch: pytest.Monkey
     assert user.index("可用表结构") < user.index("参考历史成功 SQL") < user.index("生成 SQL")
     assert "SELECT count(*) FROM t" in user
 
-    # 无历史命中:段不出现(005 形态回归)
+    # 无历史命中:段不出现(形态回归)
     fake2 = FakeLlm(["SELECT 2"])
     _install(monkeypatch, fake2, FakeApi())
     await nodes.generate(_state(schema_hint="表 t(a)"))
@@ -319,7 +319,7 @@ async def test_generate_appends_error_feedback(monkeypatch: pytest.MonkeyPatch) 
 
 
 async def test_generate_empty_hint_marker(monkeypatch: pytest.MonkeyPatch) -> None:
-    """043:空结构占位文案重写——如实声明+严禁臆测+哨兵出口;「尽力生成」教唆绝迹。"""
+    """空结构占位文案:如实声明+严禁臆测+哨兵出口,不出现「尽力生成」。"""
     fake = FakeLlm(["SELECT 1"])
     _install(monkeypatch, fake, FakeApi())
     await nodes.generate(_state(schema_hint=""))
@@ -330,7 +330,7 @@ async def test_generate_empty_hint_marker(monkeypatch: pytest.MonkeyPatch) -> No
     assert "尽力生成" not in user
 
 
-# ============ 043 生成纪律(哨兵短路/喂回引导) ============
+# ============ 生成纪律(哨兵短路/喂回引导) ============
 
 
 async def test_generate_sentinel_short_circuits(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -382,7 +382,7 @@ async def test_generate_selfheal_dne_error_appends_table_guidance(
 
 
 def test_selfheal_guidance_missing_from_clause() -> None:
-    """047:未定义别名(missing FROM-clause)→ 补 JOIN/改别名指令(017 事故形态)。"""
+    """未定义别名(missing FROM-clause)→ 补 JOIN/改别名指令(事故形态)。"""
     g = nodes._selfheal_guidance('missing FROM-clause entry for table "s"')
     assert "s" in g
     assert "JOIN" in g or "别名" in g
@@ -390,7 +390,7 @@ def test_selfheal_guidance_missing_from_clause() -> None:
 
 
 def test_selfheal_guidance_column_vs_relation() -> None:
-    """047:列不存在→列纪律(不引向表哨兵);表不存在→哨兵出口;其余→空。"""
+    """列不存在→列纪律(不引向表哨兵);表不存在→哨兵出口;其余→空。"""
     col = nodes._selfheal_guidance('column "email" does not exist')
     assert "列" in col
     assert "只输出 NO_RELEVANT_TABLE" not in col  # 表存在,出口是改列不是弃答
@@ -405,7 +405,7 @@ def test_selfheal_guidance_column_vs_relation() -> None:
 async def test_generate_selfheal_alias_error_gets_targeted_guidance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """047:sakila_017 事故端到端——别名错进 generate 喂回获得针对性指令。"""
+    """别名错(missing FROM-clause)进 generate 喂回获得针对性指令。"""
     fake = FakeLlm(["SELECT 1"])
     _install(monkeypatch, fake, FakeApi())
     await nodes.generate(
@@ -422,7 +422,7 @@ async def test_generate_selfheal_alias_error_gets_targeted_guidance(
 async def test_generate_selfheal_column_error_no_sentinel_exit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """047:列不存在喂回不携带表哨兵出口(否则模型弃答可答之题)。"""
+    """列不存在喂回不携带表哨兵出口(否则模型弃答可答之题)。"""
     fake = FakeLlm(["SELECT 1"])
     _install(monkeypatch, fake, FakeApi())
     await nodes.generate(_state(schema_hint="表 t(a)", error='column "email" does not exist'))
@@ -486,7 +486,7 @@ def test_validate_parse_error_retryable() -> None:
 def test_validate_token_error_retryable() -> None:
     """未闭合引号触发 sqlglot TokenError(非 ParseError 子类)——也必须进 selfheal。
 
-    回归:005 评审实证 TokenError 逃逸会穿出图变 500,语法错误零重试。
+    回归: TokenError 逃逸会穿出图变 500,语法错误零重试。
     """
     out = nodes.validate(_state(generated_sql="SELECT * FROM goods WHERE name ILIKE '%连弩"))
     v = out["validation"]
@@ -590,7 +590,7 @@ def test_compute_stats_numeric_and_bool() -> None:
 
 
 def test_compute_stats_excludes_identifier_and_period_columns() -> None:
-    """050:标识/期间列与整数稠密序列不具备度量资格,不产出统计键。"""
+    """标识/期间列与整数稠密序列不具备度量资格,不产出统计键。"""
     # store_id 名称信号+稠密序列;year 期间词;cnt 正常度量保留
     stats = nodes.compute_stats(
         ["store_id", "year", "cnt"],
@@ -665,7 +665,7 @@ async def test_summarize_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_summarize_strips_unwhitelisted_growth_rate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """057:心算派生量句剥离;合法白名单句保留;stats 不动。"""
+    """心算派生量句剥离;合法白名单句保留;stats 不动。"""
     answer = '{"summary":"由 80 变为 100。环比增长 25%。","insights":[]}'
     _install(monkeypatch, FakeLlm([answer]), FakeApi())
     exe = ExecutionResult(verdict="PASS", columns=["y", "v"], rows=[[2023, 80], [2024, 100]])
@@ -680,7 +680,7 @@ async def test_summarize_strips_unwhitelisted_growth_rate(
 async def test_summarize_allows_computed_growth_rate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """057:计算工具返回值入白名单后允许写增长率。"""
+    """计算工具返回值入白名单后允许写增长率。"""
     answer = '{"summary":"增长 25%。","insights":[]}'
     _install(monkeypatch, FakeLlm([answer]), FakeApi())
     exe = ExecutionResult(verdict="PASS", columns=["v"], rows=[[80], [100]])
@@ -691,7 +691,7 @@ async def test_summarize_allows_computed_growth_rate(
 
 
 async def test_summarize_context_grounded_with_stats(monkeypatch: pytest.MonkeyPatch) -> None:
-    """018:喂给 LLM 的上下文含总行数+本地统计+前5行(摘要数值接地)。"""
+    """喂给 LLM 的上下文含总行数+本地统计+前5行(摘要数值接地)。"""
     fake = FakeLlm(['{"summary":"x"}'])
     _install(monkeypatch, fake, FakeApi())
     exe = ExecutionResult(verdict="PASS", columns=["qty"], rows=[[3], [7], [10]])
@@ -705,10 +705,10 @@ async def test_summarize_context_grounded_with_stats(monkeypatch: pytest.MonkeyP
 async def test_summarize_context_includes_table_hint_with_alias(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """037:上下文含 schema_hint 表说明段(表名(别名) 列 -- 表说明)。
+    """上下文含 schema_hint 表说明段(表名(别名) 列 -- 表说明)。
 
-    只取召回形态表头行(R1-B1):示例行剔除省 token,内省回退形态
-    (「表 x.y：…」+「  - 」列行,无别名且全限定名与称谓规则相悖)不注入。
+    只取召回形态表头行:示例行剔除省 token,内省回退形态
+    (「表 x.y：…」+「 - 」列行,无别名且全限定名与称谓规则相悖)不注入。
     """
     fake = FakeLlm(['{"summary":"x"}'])
     _install(monkeypatch, fake, FakeApi())
@@ -725,16 +725,16 @@ async def test_summarize_context_includes_table_hint_with_alias(
     assert "goods(商品表)" in user  # 别名随表说明段注入
     assert "-- 订单主表" in user  # 无 alias 表:表说明中文可见(称谓回退依据)
     assert "示例:" not in user  # 示例行剔除省 token
-    assert "表 tenant_default.inventory" not in user  # 内省形态不注入(R1-B1)
+    assert "表 tenant_default.inventory" not in user  # 内省形态不注入
     assert "- id bigint" not in user
-    # 无 alias 表不产出「表名 -> 列清单」形态(正则解析垃圾,实施期抓回)
+    # 无 alias 表不产出「表名 -> 列清单」形态(该形态为正则误解析产物)
     assert "orders ->" not in user
 
 
 async def test_summarize_context_no_schema_hint_no_section(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """schema_hint 空:不注入表说明段(018 上下文形态零回归)。"""
+    """schema_hint 空:不注入表说明段(上下文形态)。"""
     fake = FakeLlm(['{"summary":"x"}'])
     _install(monkeypatch, fake, FakeApi())
     exe = ExecutionResult(verdict="PASS", columns=["qty"], rows=[[3]])

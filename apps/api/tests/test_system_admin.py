@@ -1,9 +1,4 @@
-"""system 管理端点全栈测试(007,安全规则类:保护规则先行验证)。
-
-真实 PG/Redis;数据直插 SQL(arrange 独立于被测实现)。
-安全面:无权限 403+审计、内置角色防删、role_key 不可改、超管/自删/自禁
-保护、角色/部门删除前置校验、禁用用户令牌即时失效、部门防成环。
-"""
+"""覆盖用户、角色和部门管理及账号状态保护。"""
 # pyright: reportPrivateUsage=false
 
 import uuid as uuidlib
@@ -107,7 +102,7 @@ async def test_no_perm_rejected_and_audited(
     ["GET", "POST"],
 )
 async def test_unauthenticated_401(client: AsyncClient, method: str) -> None:
-    """012(R2-F11):新启停端点与列表端点同走 UserClaims 认证闸,未认证一律 401。"""
+    """新启停端点与列表端点同走 UserClaims 认证闸,未认证一律 401。"""
     ghost = str(uuidlib.uuid4())
     paths = {
         "GET": "/system/users",
@@ -207,7 +202,7 @@ async def test_self_disable_rejected(
 async def test_disabled_user_token_rejected(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """禁用用户后既有令牌在下一次受权限点校验的请求即 401(rbac delta 007)。"""
+    """禁用用户后,其既有令牌在下一次受权限点校验的请求中返回 401。"""
     await seed_all(session, get_settings())
     uid = await make_user("victim")
     token = await _login(client, "victim")
@@ -399,7 +394,7 @@ async def test_user_crud_flow(
     assert item["username"] == "newbie"
     assert item["role_keys"] == ["DEVELOPER"]
     assert item["dept_name"] == "研发部"
-    # 编辑回显所需 id 字段(缺失曾致编辑对话框静默清空部门绑定)
+    # 编辑回显所需 id 字段(缺失会导致编辑对话框静默清空部门绑定)
     assert item["dept_id"] == dept
     assert item["tenant_id"] == tid
     # 关键字大小写不敏感(ILIKE)
@@ -893,13 +888,13 @@ async def test_tenant_list(client: AsyncClient, session: AsyncSession, make_user
     assert "default" in keys
 
 
-# ============ 评审修复锁定(007 R1:严重缺陷回归锚) ============
+# ============ 超级管理员保护与密码重置 ============
 
 
 async def test_reset_password_clears_changed_flag_after_self_change(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """S1:已自助改密(pca 有值)的用户被重置后,首登改密标志必须复位为 NULL。"""
+    """已自助改密(pca 有值)的用户被重置后,首登改密标志必须复位为 NULL。"""
     _, token = await _admin(client, session, make_user)
     uid = await make_user("changed-user")  # make_user 默认 pca=now(已改密)
     r = await client.post(
@@ -917,7 +912,7 @@ async def test_reset_password_clears_changed_flag_after_self_change(
 async def test_admin_disable_and_role_strip_rejected(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1:超管账号不可禁用、不可剥离 SUPER_ADMIN 绑定(锁定/接管向量)。"""
+    """超管账号不可禁用，也不能解除 SUPER_ADMIN 绑定。"""
     _, token = await _admin(client, session, make_user)
     settings = get_settings()
     admin_uid = str(
@@ -963,7 +958,7 @@ async def test_admin_disable_and_role_strip_rejected(
 async def test_role_key_format_rejected(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R4:role_key 空白/小写近形变体在传输层即拒(422)。"""
+    """role_key 不接受空白或小写形式，并在传输层返回 422。"""
     _, token = await _admin(client, session, make_user)
     for bad in [" super_admin", "Super_Admin", "lower_case", "1ABC", "A"]:
         r = await client.post(
@@ -977,7 +972,7 @@ async def test_role_key_format_rejected(
 async def test_write_operations_audited(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """S2:管理面写操作与业务同事务落操作审计(动作+目标可追溯)。"""
+    """管理面写操作与业务同事务落操作审计(动作+目标可追溯)。"""
     _, token = await _admin(client, session, make_user)
     tid = await _default_tenant_id(session)
     # 用户三写
@@ -1005,7 +1000,7 @@ async def test_write_operations_audited(
         headers=_auth(token),
     )
     assert r.status_code == 204
-    # 012 启停动作(R2-F4):专用端点动作进清单断言
+    # 启停动作:专用端点动作进清单断言
     r = await client.post(f"/system/users/{uid}/enable", headers=_auth(token))
     assert r.status_code == 204
     r = await client.post(f"/system/users/{uid}/disable", headers=_auth(token))
@@ -1063,13 +1058,13 @@ async def test_write_operations_audited(
     assert expected <= actions, f"缺失审计动作:{expected - actions}"
 
 
-# ============ R1 审查修复锁定(改密吊销/编辑改密/关键字转义/detail 语义) ============
+# ============ 密码修改、令牌吊销与查询语义 ============
 
 
 async def test_reset_password_revokes_refresh_families(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1 严重 1:管理面重置密码 = 强制踢下线,既有 refresh token 立即失效。"""
+    """管理员重置密码后，用户已有的 refresh token 立即失效。"""
     await seed_all(session, get_settings())
     uid = await make_user("victim2")
     _, token = await _admin(client, session, make_user, "boss2")
@@ -1093,7 +1088,7 @@ async def test_reset_password_revokes_refresh_families(
 async def test_update_user_password_changes_hash_and_revokes(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1 严重 1:编辑传密码 → 哈希变更 + 吊销家族;不传密码 → 均不动。"""
+    """编辑时传入密码会更新哈希并吊销令牌；未传密码时两者都不变。"""
     await seed_all(session, get_settings())
     uid = await make_user("victim3")
     old_hash = (
@@ -1133,7 +1128,7 @@ async def test_update_user_password_changes_hash_and_revokes(
 async def test_keyword_like_metachars_escaped(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """R1-3:关键字中的 %/_/\\ 按字面匹配,不做通配符。"""
+    """关键字中的 %/_/\\ 按字面匹配,不做通配符。"""
     await seed_all(session, get_settings())
     await make_user("sale50pct")  # 无特殊字符的对照行
     await make_user("sale50%")
@@ -1167,13 +1162,13 @@ async def test_error_detail_semantics(
     assert r.json()["detail"]
 
 
-# ============ 012 管理台状态启停范式(专用端点+禁用吊销) ============
+# ============ 管理台状态启停范式(专用端点+禁用吊销) ============
 
 
 async def test_disable_user_revokes_refresh(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """012:专用禁用端点 = 状态翻转 + 踢下线(旧 refresh 家族吊销)+ 审计。"""
+    """专用禁用端点 = 状态翻转 + 踢下线(旧 refresh 家族吊销)+ 审计。"""
     await seed_all(session, get_settings())
     uid = await make_user("victim4")
     victim_pair = await client.post(
@@ -1191,7 +1186,7 @@ async def test_disable_user_revokes_refresh(
     # 禁用即吊销:旧 refresh 不可续换(与改密踢下线对称)
     r = await client.post("/auth/refresh", json={"refresh_token": refresh})
     assert r.status_code == 401
-    # 判别步(R2-F3):401 也可能仅由禁用状态导致(refresh 有 is_active 闸);
+    # 判别步:401 也可能仅由禁用状态导致(refresh 有 is_active 闸);
     # 重新启用后旧 refresh 仍 401 才证明「家族吊销」独立成立,防 revoke 被静默删掉
     r = await client.post(f"/system/users/{uid}/enable", headers=_auth(token))
     assert r.status_code == 204
@@ -1207,7 +1202,7 @@ async def test_disable_user_revokes_refresh(
 async def test_enable_user_restores_login(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """012:启用端点恢复登录,不涉及吊销;审计 user.enable。"""
+    """启用端点恢复登录,不涉及吊销;审计 user.enable。"""
     await seed_all(session, get_settings())
     uid = await make_user("victim5")
     _, token = await _admin(client, session, make_user, "boss6")
@@ -1228,7 +1223,7 @@ async def test_enable_user_restores_login(
 async def test_update_user_status_disabled_also_revokes(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """012:编辑对话框路径 status→DISABLED 同样吊销(两路同收口直证)。"""
+    """将用户状态改为 DISABLED 后，已有令牌也会失效。"""
     await seed_all(session, get_settings())
     uid = await make_user("victim6")
     victim_pair = await client.post(
@@ -1250,7 +1245,7 @@ async def test_update_user_status_disabled_also_revokes(
     assert r.status_code == 204
     r = await client.post("/auth/refresh", json={"refresh_token": refresh})
     assert r.status_code == 401
-    # 判别步(R2-F3):重新启用后旧 refresh 仍 401 才锁住「编辑路径同吊销」
+    # 判别步:重新启用后旧 refresh 仍 401 才锁住「编辑路径同吊销」
     r = await client.put(
         f"/system/users/{uid}",
         json={
@@ -1269,7 +1264,7 @@ async def test_update_user_status_disabled_also_revokes(
 async def test_status_toggle_protections(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """012:专用端点保护与编辑路径同构——自禁 409/超管禁 409/不存在 404。"""
+    """专用端点保护与编辑路径同构——自禁 409/超管禁 409/不存在 404。"""
     await seed_all(session, get_settings())
     admin_uid, token = await _admin(client, session, make_user, "boss8")
     # 自禁

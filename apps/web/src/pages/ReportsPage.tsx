@@ -1,5 +1,4 @@
-/* 报告列表页(088 report-generation):DataView 双形态标准件 + 分页 +
-   StatusBadge;行操作「查看」进详情。骨架只用标准件(宪法 Article 4/9)。 */
+/* 报告列表使用 DataView 展示状态和分页；行操作打开报告详情。 */
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -24,7 +23,7 @@ export default function ReportsPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["reports", tenant, page],
     queryFn: () => listReports(page, PAGE_SIZE),
-    // 列表页存在生成中报告时轮询刷新(登记待办 B5);全终态即停,零空转
+    // 存在生成中报告时轮询刷新,全终态即停
     refetchInterval: (q) =>
       (q.state.data?.items ?? []).some((r) => r.status === "GENERATING") ? REPORTS_POLL_MS : false,
   });

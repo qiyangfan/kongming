@@ -1,10 +1,4 @@
-"""知识覆盖报告全栈测试(052,安全规则类测试先行)。
-
-纯函数(差集/归并/封顶)确定性单测 + 端点全栈(真实 PG/Redis;
-AgentRagClient 类级替身带调用计数——兼证零 LLM 调用)。
-安全面:manage 权限 403 / datasource 同形 400 / 租户隔离 /
-内省失败不产出半份报告 / 只读零副作用(两次调用逐字节一致)。
-"""
+"""覆盖知识覆盖报告的计算和只读接口行为。"""
 # pyright: reportPrivateUsage=false
 
 from collections.abc import AsyncIterator
@@ -153,7 +147,7 @@ def test_cluster_tiebreak_on_desc_input() -> None:
     首行(id 更大=最新插入)保持为簇代表——严格大于才覆盖,靠后旧行不得反转。"""
     same = datetime(2026, 9, 1, 12, 0, 0)
     signals = [
-        # 首行=最新插入(id 更大;同事务 now() 并列的真实形态)
+        # 首行=最新插入(id 更大;同事务 now 并列的真实形态)
         FailureSignal(
             question="每个门店的库存数量",
             status="NO_DATA",

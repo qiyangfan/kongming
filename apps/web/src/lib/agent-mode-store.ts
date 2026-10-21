@@ -1,5 +1,4 @@
-/* Agent 内核模式(019 tool-calling):recipe(8 节点预设配方,缺省)/ react
-   (ReAct 自主工具调用)。localStorage 单源,登出/会话终结随 tenant 同清。 */
+/* 按当前租户保存 Agent 模式；默认使用 recipe，也可选 ReAct。 */
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";

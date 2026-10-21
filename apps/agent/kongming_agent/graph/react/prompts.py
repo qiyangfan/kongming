@@ -1,12 +1,4 @@
-"""ReAct 内核 prompt(019)。
-
-**全新撰写资产**(非上游逐字移植——prompt 资产纪律只管 graph/prompts.py 的
-上游逐字面);全角中文标点纪律沿用,改动走评审。
-R1-L4:身份段/纪律段显式分段常量(REACT_SYSTEM 由常量组装;Bot 注入路径
-零 split 漂移——REACT_SYSTEM 演进只改对应段落常量)。
-079:纪律段按注入工具集派生(条款 + 工具名占位),默认全套件渲染结果与
-历史 REACT_DISCIPLINE 逐字相同;写能力陈述随 write 元数据变化,不再静态断言。
-"""
+"""ReAct 内核提示词由身份段和纪律段拼装，工具纪律随注入工具集生成。"""
 
 from collections.abc import Iterable, Sequence
 
@@ -61,10 +53,9 @@ def _clause_sql_style() -> str:
 
 
 def _clause_write(*, write_tools: Sequence[str]) -> str:
-    """规则 3:写能力陈述随注入写工具变化(079:删除全局静态断言)。
+    """规则 3:写能力陈述随注入写工具变化(删除全局静态断言)。
 
-    全套件(恰为历史默认 create_system_announcement)走历史逐字文本——
-    079-1.1 锚测试要求缺省场景零漂移;裁剪/扩展集才用自适应措辞。
+    默认工具集合使用固定提示词；工具集合变化时才生成对应说明。
     """
     if not write_tools:
         return (
@@ -72,7 +63,7 @@ def _clause_write(*, write_tools: Sequence[str]) -> str:
             "只提供现状查询并在答复中如实说明未执行写操作。"
         )
     if list(write_tools) == [T_WRITE]:
-        # 历史逐字(079-1.1 锚);勿改写此句
+        # 此句被锚测试钉住(test_react_discipline_tools 断言逐字匹配),勿改写
         return (
             "3. 写操作：除 create_system_announcement（系统公告）外没有任何写工具。"
             "用户要求增删改数据时，只提供现状查询并在答复中如实说明未执行写操作。"
@@ -221,7 +212,7 @@ REACT_SYSTEM = REACT_IDENTITY_DEFAULT + REACT_DISCIPLINE
 def build_react_system(
     bot_system_prompt: str, *, has_tools: bool, tool_names: Iterable[str] | None = None
 ) -> str:
-    """Bot 模式系统提示(025 + 079):Bot 身份段替换默认身份;纪律段按注入
+    """Bot 模式系统提示:Bot 身份段替换默认身份;纪律段按注入
     工具集派生——空集=无工具纪律段;默认全套件=历史 REACT_DISCIPLINE 逐字;
     裁剪集=按可用工具重排条款(不再教模型调用未注入的工具)。"""
     bot = bot_system_prompt.strip()
@@ -238,7 +229,7 @@ def build_react_system(
 
 def initial_user_prompt(question: str, history: list[str], memory_hint: str = "") -> str:
     """首轮 user 消息:多轮历史(旧→新)+ 当前问题(与 8 节点图 history 语义同构);
-    022:memory_hint 非空时追加「已知信息」段(控制面注入)。"""
+    memory_hint 非空时追加「已知信息」段(控制面注入)。"""
     memory_part = f"{memory_hint.strip()}\n\n" if memory_hint.strip() else ""
     if history:
         history_text = "\n".join(f"第{i + 1}轮:{q}" for i, q in enumerate(history))

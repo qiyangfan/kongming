@@ -1,5 +1,4 @@
-"""036 cron 日历跳跃重写测试(测试先行):a/b 形态/远未来毫秒级/
-月末闰年边界/双非*拒与原形态零回归。"""
+"""覆盖 cron 步进表达式、远期计算和日期边界。"""
 
 import datetime as dt
 import time
@@ -15,7 +14,7 @@ def _at(y: int, mo: int, d: int, h: int, mi: int) -> dt.datetime:
     return dt.datetime(y, mo, d, h, mi, tzinfo=_TZ)
 
 
-# ── a/b 形态(Vixie 兼容,036⑦) ──
+# ── a/b 形态（Vixie 兼容）──
 
 
 def test_parse_step_from_value() -> None:
@@ -25,7 +24,7 @@ def test_parse_step_from_value() -> None:
 
 
 def test_parse_step_forms_zero_regression() -> None:
-    """原形态零回归:*/n 与 a-b/n 不变。"""
+    """原形态:*/n 与 a-b/n 不变。"""
     assert parse_cron("*/15 * * * *")[0] == {0, 15, 30, 45}
     assert parse_cron("1-10/2 * * * *")[0] == {1, 3, 5, 7, 9}
 
@@ -35,7 +34,7 @@ def test_parse_step_out_of_bounds_rejected() -> None:
         parse_cron("60/10 * * * *")
 
 
-# ── 日历跳跃:远未来毫秒级(036⑥性能语义) ──
+# ── 日历字段跳跃，远期表达式仍可快速计算 ──
 
 
 def test_next_fire_far_future_instant() -> None:
@@ -77,12 +76,12 @@ def test_next_fire_daily_zero_regression() -> None:
 
 
 def test_next_fire_weekly_dow() -> None:
-    """每周一 09:00(dow 判定零回归;2026-08-24 是周一)。"""
+    """每周一 09:00(dow 判定;2026-08-24 是周一)。"""
     assert next_fire("0 9 * * 1", _at(2026, 8, 24, 8, 0)) == _at(2026, 8, 24, 9, 0)
     assert next_fire("0 9 * * 1", _at(2026, 8, 24, 9, 0)) == _at(2026, 8, 31, 9, 0)
 
 
 def test_next_fire_double_nonstar_still_rejected() -> None:
-    """日/周双非 * 拒(031 既定立约零回归)。"""
+    """日/周双非 * 拒(既定立约)。"""
     with pytest.raises(CronError):
         parse_cron("0 0 1 * 1")

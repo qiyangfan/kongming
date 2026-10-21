@@ -1,6 +1,4 @@
-/* 团队管理页(032 team-workspace spec):
-   我所在的团队列表 + 创建 + 成员管理对话框(加/删/改角色,末位 OWNER
-   保护 409 行内可见)+ 删除受控确认(资源回个人语义文案)。 */
+/* 团队管理页提供团队列表、创建、成员维护和删除确认；最后一位 OWNER 受服务端保护。 */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -67,7 +65,7 @@ export default function TeamsPage() {
     queryFn: () => getTeam(managing!.id),
     enabled: managing !== null,
   });
-  // 加成员候选(007 用户清单复用)
+  // 加成员候选(复用用户清单)
   const users = useQuery({
     queryKey: ["admin", "users", "team-candidates"],
     queryFn: () => systemApi.listUsers(1, 200, ""),
@@ -298,7 +296,7 @@ export default function TeamsPage() {
               ]}
               actions={[
                 {
-                  // 审查循环 B6:移除成员二次确认(首击选中,再击执行),武装态
+                  // 移除成员二次确认(首击选中,再击执行),武装态
                   // 经行级 label 可视;挂起期仍以 onSelect 守卫兜底
                   label: (m) => (memberConfirm === m.user_id ? "再次点击确认移除" : "移除"),
                   destructive: true,
@@ -334,7 +332,7 @@ export default function TeamsPage() {
                     {(users.data?.items ?? [])
                       .filter(
                         (u) =>
-                          // 036⑧:按 user_id 语义键排除(username 可改会漏排)
+                          // 按不可变的 user_id 排除已是成员的用户,避免用户名变更造成误判
                           !(detail.data?.members ?? []).some((m) => m.user_id === u.id),
                       )
                       .map((u) => (

@@ -1,4 +1,4 @@
-"""061:运行日志配置——INFO 不丢弃、级别可配。"""
+"""运行日志配置——INFO 不丢弃、级别可配。"""
 
 import logging
 from typing import Any

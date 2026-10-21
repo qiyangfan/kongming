@@ -1,8 +1,4 @@
-/* 底部标签栏(mobile-experience B2.1):窄屏能力导航唯一承载——
-   与宽屏侧栏同一 visibleNav() 单源(含 RBAC 权限过滤),当前能力高亮;
-   md+ 不渲染(宽屏侧栏常驻)。结构:外层吃底部安全区(pb-safe)、内层行
-   固定 h-16,总高恰为 4rem + 安全区,与壳层 pb-safe-nav 预留精确对齐
-   (安全区 padding 与行高不同元素,互不挤占触控内容区)。 */
+/* 窄屏能力导航与宽屏共享权限过滤后的入口；底部安全区由外层容器处理。 */
 
 import { NavLink } from "react-router";
 

@@ -1,4 +1,4 @@
-"""评估器 prompt 指纹接线(073):取指纹、打印、跨指纹可比性判定。
+"""评估器 prompt 指纹接线:取指纹、打印、跨指纹可比性判定。
 
 指纹算法单源在 agent `kongming_agent.prompt_fingerprint`(本模块不重写);
 这里只做取数(HTTP 内省端点)、上次基线存取与输出口径。指纹不可得时
@@ -78,7 +78,7 @@ def load_baseline_fingerprint() -> str | None:
 
 
 def save_baseline_fingerprint(fp: str | None) -> None:
-    """记录本次指纹为下次基线;指纹不可得时不清除既有基线(保留可比对象)。"""
+    """保存当前提示词指纹供下次基线比较；无法读取指纹时保留已有基线。"""
     if not fp:
         return
     _BASELINE_PATH.write_text(fp + "\n", encoding="utf-8")

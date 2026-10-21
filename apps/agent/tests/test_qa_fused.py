@@ -1,5 +1,5 @@
 # pyright: reportPrivateUsage=false
-"""093 三态意图路由 + 融合问答 agent 侧测试(nodes/build 直调)。
+"""三态意图路由 + 融合问答 agent 侧测试(nodes/build 直调)。
 
 - 路由解析纯函数:三态判定、畸形/越界回退;
 - route_intent 节点:LLM 三态、超时/失败/低置信回退(回退不写 intent 键);
@@ -78,7 +78,7 @@ async def test_route_intent_llm_three_states(monkeypatch: pytest.MonkeyPatch) ->
 async def test_route_intent_llm_error_falls_back_without_intent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """LLM 失败回退:不写 intent 键(route_after_retrieve 走 093 前词表分支),
+    """LLM 失败回退:不写 intent 键(route_after_retrieve 走 前词表分支),
     回退计数 +1(可观测)。"""
     before = snapshot_intent_route_stats()["intent_route_fallback_total"]
     monkeypatch.setattr(deps, "get_llm", lambda: _Llm([]))
@@ -88,7 +88,7 @@ async def test_route_intent_llm_error_falls_back_without_intent(
 
 
 async def test_route_intent_timeout_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
-    """超时(缺省 3s,测试经 env 调小)回退词表——D6 轻量调用不拖垮链路。"""
+    """意图判断超时后回退到词表规则，不能阻断问答。"""
     monkeypatch.setenv("KM_AGENT_INTENT_ROUTE_TIMEOUT_SEC", "0.05")
     monkeypatch.setattr(deps, "get_llm", lambda: _Llm([_ROUTE_OK], sleep_sec=0.5))
     out = await route_intent({"trace_id": "t", "tenant_key": "d", "question": "q"})
@@ -105,7 +105,7 @@ async def test_route_intent_low_confidence_falls_back(
 
 
 async def test_route_intent_config_defaults() -> None:
-    """1.2 配置缺省值:超时 3s / 置信阈值 0.7(design D2/D6)。"""
+    """检查意图路由的默认超时和置信度阈值。"""
     from kongming_agent.settings import Settings
 
     settings = Settings()
@@ -129,7 +129,7 @@ def _state(**kw: object) -> AgentState:
 
 
 def test_route_fused_goes_sql_channel_first() -> None:
-    """融合态先走 SQL 通道收口,fused_answer 后置(D4 数据为刃)。"""
+    """融合态先执行 SQL，再进入融合回答节点。"""
     assert route_after_retrieve(_state(intent="fused")) == "generate"
 
 
@@ -141,7 +141,7 @@ def test_route_knowledge_channel_confirm_by_retrieval() -> None:
 
 
 def test_route_data_attachment_rule_kept() -> None:
-    """036④ 零回归:LLM 判 data 不推翻附件直答规则(路由只看文本)。"""
+    """意图模型判为 data 时，含图片且无 SQL 意图的问题仍走图片问答。"""
     attached = _state(
         intent="data",
         has_attachments=True,
@@ -153,8 +153,7 @@ def test_route_data_attachment_rule_kept() -> None:
 
 
 def test_route_fallback_wordlist_verbatim() -> None:
-    """intent 缺席(LLM 失败/低置信)回退词表分支:与 093 前逐字一致
-    (含 047 多轮闸——多轮仅泛系系词命中不分流)。"""
+    """意图判断失败时沿用规则词表，多轮问句仍需满足强文档意图。"""
     knowledge = _state(
         question="退货政策是什么",
         doc_hints=[{"source_ref": "a.md", "content": "x"}],
@@ -179,7 +178,7 @@ def test_after_summarize_non_fused_ends() -> None:
 
 
 def test_after_summarize_fused_requires_success_and_docs() -> None:
-    """数据为刃(D4):SQL 非 PASS/空结果/文档未命中 → 纯数据态终态收口。"""
+    """SQL 未通过、结果为空或文档未命中时，保持为纯数据态终态。"""
     ok = ExecutionResult(verdict="PASS", columns=["rate"], rows=[[0.05]])
     full: AgentState = {
         "intent": "fused",
@@ -276,7 +275,7 @@ async def test_fused_answer_suffix_normalization(monkeypatch: pytest.MonkeyPatch
 async def test_fused_answer_sources_reprojected_after_audit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """057 审计剥句先于 sources 固化会造成「列表有条目而正文无标注」的幽灵
+    """审计剥句先于 sources 固化会造成「列表有条目而正文无标注」的幽灵
     不一致(chat spec SHALL NOT)——sources 必须按过审终稿的存活标记重投影;
     被引句整句被剥(回退纯数据答)时 sources 为空。"""
     # 「500 元」不在结果面(0.05)/stats/文档(7 天)任一白名单 → 引用句整句被剥

@@ -1,4 +1,4 @@
-"""auth 用例层:登录/令牌生命周期/当前用户/改密/联邦回调/种子(宪法 Article II 领域层)。
+"""auth 用例层:登录、令牌生命周期、当前用户、改密、联邦回调和种子。
 
 零框架依赖:不 import fastapi/sqlalchemy/redis;持久化经 ports 端口,配置经 Settings。
 """
@@ -175,7 +175,7 @@ class AuthService:
         """权限点校验 403 的操作审计(rbac spec「撤销权限立即生效」)。
 
         前提锚定:本方法只在 require_perm 依赖内调用——它先于端点执行,
-        此前 session 仅有只读查询,commit 不会意外提交业务写。若未来在
+         session 仅有只读查询,commit 不会意外提交业务写。若未来在
         权限校验前引入写型依赖(配额预扣等),须重新评估此处 commit 语义。
         """
         await self._uow.operlog.add(user_id, "perm_denied", perm_code, {"path": path})
@@ -287,7 +287,7 @@ class AuthService:
         return user
 
     async def _dedupe_username(self, base: str, provider_key: str) -> str:
-        """联邦建号用户名:一律 {base}-{provider} 起步(来源可溯,003 e2e 后拍板);
+        """联邦建号用户名:一律 {base}-{provider} 起步(来源可溯);
         后缀名仍冲突再追加 -N(bounded)。base 超长时先给后缀留位再截断,
         保证候选彼此恒不同且 ≤64(防截断后多候选同串误报失败)。"""
         short = base[: 64 - len(provider_key) - 3]  # 预留 -provider 与 -N 的位置

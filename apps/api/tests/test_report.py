@@ -1,9 +1,4 @@
-"""report 域全栈测试(088 report-generation,安全规则类测试先行)。
-
-覆盖:权限点授予/拒绝面、归属隔离(404 同形)、软删拒操作、版本化与
-乐观锁、刷新快照(全量防御/失败如实 MISSING 不绕道)、报告卡派生、
-导出审计、状态机与导出纯函数。
-"""
+"""覆盖报告权限、归属、版本、刷新、导出和状态转换。"""
 # pyright: reportPrivateUsage=false
 
 import asyncio
@@ -346,7 +341,7 @@ async def test_generate_requires_permission(
 async def test_generate_and_full_lifecycle(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """直接指令生成:202 → 后台编排 → READY;详情/列表/导出/审计全链路。"""
+    """验证生成报告后可查看详情、列表、导出和审计记录。"""
     from kongming.chat.agent_client import AgentClient
 
     monkeypatch.setattr(AgentClient, "generate_report", _stub_agent(_agent_payload()))
@@ -418,8 +413,7 @@ async def test_generate_foreign_session_404(
 async def test_report_card_derived_on_session(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """入口 a:完成后 report 卡挂回发起会话(artifacts 派生 report 类型);
-    会话素材摘要按真实链路取材(问在 USER 行、结论在 ASSISTANT 行)。"""
+    """验证报告完成后在发起会话中生成 report 类型的 artifact 卡片。"""
     from kongming.chat.agent_client import AgentClient
 
     captured: dict[str, object] = {}
@@ -787,8 +781,7 @@ async def test_progress_and_phase_writeback(
     p2 = await client.get(f"/reports/{rid}/progress", headers=_auth(token))
     assert p2.json()["phase"] == "FETCHING"
 
-    # 091 裁决:进度回写锚定租户归属——不携带/错租户的回写静默无效
-    # (该报告归属 default;tenant_key 指向别处时 UPDATE 不命中,phase 不变)
+    # 进度回写只能修改报告所属租户的数据。
     wrong = await client.post(
         "/internal/report/progress",
         json={"report_id": rid, "phase": "WRITING", "tenant_key": "olist"},

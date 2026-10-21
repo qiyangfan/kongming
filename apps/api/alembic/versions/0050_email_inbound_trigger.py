@@ -1,20 +1,4 @@
-"""0050: 邮件入站触发器(108-email-inbound-trigger)
-
-纯增三块(design D5:配置列在触发器行、游标独立小表):
-- sys_trigger_definition 加七列邮件配置:imap_host/imap_port/imap_tls/
-  imap_user/imap_credential/imap_folder/imap_poll_interval_sec——明文
-  配置列 + 加密凭证列(AES-GCM,与 webhook secret 同一加密机制);存量行
-  缺省空串零影响。
-- type CHECK 扩展 'EMAIL'(邮件触发器是触发器的一种形态)。
-- sys_trigger_run 加 summary TEXT:邮件触发 run 只留标准化摘要
-  ({from,subject,date,text_preview} JSON,白名单+截断),邮件原文与
-  完整正文 MUST NOT 落库(隐私最小化);存量行缺省空串。
-- sys_trigger_email_cursor:每触发器×文件夹一行已处理 UID 游标
-  (trigger_id+folder 唯一;last_uid/uidvalidity 支撑断线续传与
-  UIDVALIDITY 变更作废重置)。
-**downgrade**:删游标表/summary 列/七配置列,EMAIL 行随形态回退移除后
-恢复 CRON/WEBHOOK 双态 CHECK。
-"""
+"""增加邮件触发器配置和邮件 UID 游标。凭证加密保存，运行记录只保留截断后的摘要，不存邮件原文；降级会删除邮件触发器配置与游标。"""
 
 from sqlalchemy import text
 

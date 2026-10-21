@@ -1,12 +1,5 @@
-"""Kongming Agent 面入口(仅内网,内部令牌认证,ADR-002)。
-
-业务端点:POST /query(NL2SQL 问答图,同步一次性返回)+
-POST /query/stream(同图流式 SSE,017)+ /internal/embedding(批量向量化)+
-/internal/describe-table(表元数据润色,009)——后两者供控制面回调
-(api 持 DB、agent 持 LLM key 的分工)。
-019 新增:POST /query_react + /query_react/stream(ReAct 工具调用内核,
-工具 schema 由控制面按授权注入——agent 零工具真理源,零凭证回调执行)。
-"""
+"""Agent 内网服务入口(ADR-002):NL2SQL、ReAct、向量化、表元数据润色与
+报告生成端点;所有端点由内部令牌保护。"""
 
 import json
 import logging
@@ -51,11 +44,11 @@ log = logging.getLogger(__name__)
 _settings = Settings()
 _settings.fail_closed_checks()
 
-# 069:prompt 资产指纹(启动期一次计算,073 纯函数同源;任一字变化即换指纹,
+# prompt 资产指纹(启动期一次计算,纯函数同源;任一字变化即换指纹,
 # 跨重启稳定)——随每轮 QueryOut 携带,api 侧落 chat_message.prompt_version
 _PROMPT_VERSION = prompt_fingerprint()
 
-# 053:SQL 安全引擎启动自检(validate 预检解析底座;失败告警降级 builtin,不阻断)
+# SQL 安全引擎启动自检(validate 预检解析底座;失败告警降级 builtin,不阻断)
 from kongming_agent import sqlguard  # noqa: E402
 
 sqlguard.startup_self_check(_settings.sqlguard_mode)
@@ -89,7 +82,7 @@ async def healthz() -> dict[str, str]:
 
 
 class EmbeddingIn(BaseModel):
-    """批量向量化请求(009;api 回调,问句/知识文本 → 向量)。"""
+    """批量向量化请求(api 回调,问句/知识文本 → 向量)。"""
 
     texts: list[str] = Field(min_length=1)
 
@@ -118,7 +111,7 @@ class DescribeColumnIn(BaseModel):
 
 
 class DescribeTableIn(BaseModel):
-    """表结构润色请求(009;api 回调——内省产物,非业务行数据)。"""
+    """表结构润色请求(api 回调——内省产物,非业务行数据)。"""
 
     table_name: str
     schema_name: str
@@ -127,11 +120,11 @@ class DescribeTableIn(BaseModel):
 
 
 class DescribeTableOut(BaseModel):
-    enriched: bool  # False=本次失败(不可润色),api 侧自行降级纯结构
+    enriched: bool  # False 时 API 使用原始表结构。
     table_comment: str = ""
     columns_comment: dict[str, str] = {}
     sample_queries: list[str] = []
-    alias: str = ""  # 037:业务称谓别名(enriched=True 时有效)
+    alias: str = ""  # 业务称谓别名(enriched=True 时有效)
 
 
 @app.post("/internal/describe-table", response_model=DescribeTableOut, tags=["internal"])
@@ -152,18 +145,18 @@ async def describe_table_endpoint(req: DescribeTableIn) -> DescribeTableOut:
         table_comment=described.table_comment,
         columns_comment=described.columns_comment,
         sample_queries=described.sample_queries,
-        alias=described.alias,  # 037
+        alias=described.alias,
     )
 
 
 class TitleIn(BaseModel):
-    """会话标题改写请求(010;api 回调,首轮成功后异步触发)。"""
+    """会话标题改写请求(api 回调,首轮成功后异步触发)。"""
 
     question: str = Field(min_length=1, max_length=2000)
 
 
 class TitleOut(BaseModel):
-    rewritten: bool  # False=本次失败(降级),api 侧保持截断标题
+    rewritten: bool  # False 时 API 保留截断标题。
     title: str = ""
 
 
@@ -180,19 +173,19 @@ async def rewrite_title_endpoint(req: TitleIn) -> TitleOut:
 
 
 class SuggestQuestionsIn(BaseModel):
-    """建议问题生成请求(039;api 回调——结构摘要,非业务行数据)。"""
+    """建议问题生成请求(api 回调——结构摘要,非业务行数据)。"""
 
     digest: str = Field(min_length=1, max_length=20_000)
 
 
 class SuggestQuestionsOut(BaseModel):
     questions: list[str] = []
-    generated: bool  # False=本次失败(降级),api 侧收敛空清单不落缓存
+    generated: bool  # False 时 API 返回空清单且不缓存。
 
 
 @app.post("/internal/suggest-questions", response_model=SuggestQuestionsOut, tags=["internal"])
 async def suggest_questions_endpoint(req: SuggestQuestionsIn) -> SuggestQuestionsOut:
-    """LLM 建议问题生成(039);失败不抛 5xx(generated=False),api 侧降级。"""
+    """LLM 建议问题生成;失败不抛 5xx(generated=False),api 侧降级。"""
     from kongming_agent.suggester import SuggestError, suggest_questions
 
     try:
@@ -203,32 +196,32 @@ async def suggest_questions_endpoint(req: SuggestQuestionsIn) -> SuggestQuestion
 
 
 class ExtractMemoryIn(BaseModel):
-    """记忆提取请求(022;api 回调,成功问答轮后台任务)。"""
+    """记忆提取请求(api 回调,成功问答轮后台任务)。"""
 
     question: str = Field(min_length=1, max_length=2000)
     answer: str = Field(default="", max_length=2000)  # 摘要(截断后)
 
 
 class ExtractMemoryOut(BaseModel):
-    # 059:槽位 patch 形态 [{preferred_datasource:"…"}];metric_aliases 可为数组
+    # 槽位 patch 形态 [{preferred_datasource:"…"}];metric_aliases 可为数组
     memories: list[dict[str, object]] = []  # ≤3;空=无值得写入槽位
 
 
 @app.get("/internal/models", tags=["internal"])
 async def list_models() -> dict[str, list[str]]:
-    """021 注册表模型名(025 Bot model 校验用;agent 唯一真理源)。"""
+    """注册表模型名(Bot model 校验用;agent 唯一真理源)。"""
     return {"models": sorted(Settings().parse_registry().keys())}
 
 
 class PromptFingerprintOut(BaseModel):
-    """prompt 资产内容指纹(073;评估跨版本可比性判定)。"""
+    """prompt 资产内容指纹(评估跨版本可比性判定)。"""
 
     prompt_fingerprint: str
 
 
 @app.get("/internal/prompt-fingerprint", response_model=PromptFingerprintOut, tags=["internal"])
 async def prompt_fingerprint_endpoint() -> PromptFingerprintOut:
-    """073:prompt 资产全集内容指纹(控制面/评估器可取;069 共用同一纯函数)。
+    """prompt 资产全集内容指纹(控制面/评估器可取;共用同一纯函数)。
 
     受既有 X-Internal-Token 中间件守门(ADR-002 不变);纯函数直算,零状态。
     """
@@ -236,7 +229,7 @@ async def prompt_fingerprint_endpoint() -> PromptFingerprintOut:
 
 
 class GenerateReportIn(BaseModel):
-    """报告生成编排请求(088;api 报告域后台任务回调,字段=编排素材)。"""
+    """报告生成编排请求(api 报告域后台任务回调,字段=编排素材)。"""
 
     report_id: str
     trace_id: str = ""
@@ -249,7 +242,7 @@ class GenerateReportIn(BaseModel):
 
 
 class TaskRunIn(BaseModel):
-    """任务编排请求(090;api 任务域后台派发回调)。
+    """任务编排请求(api 任务域后台派发回调)。
     epoch=派发代际(0042 双执行者闸):编排全程携带,控制面失配即拦。"""
 
     task_id: str
@@ -265,7 +258,7 @@ class TaskRunIn(BaseModel):
 
 @app.post("/internal/task-run", tags=["internal"])
 async def task_run(req: TaskRunIn) -> dict[str, object]:
-    """任务编排(090/091):规划→逐步执行(单步有界 ReAct,证据驱动;
+    """任务编排:规划→逐步执行(单步有界 ReAct,证据驱动;
     声明协作拓扑的步骤走协作编排)→回写。agent 面零任务持久状态;
     审批/预算/暂停由控制面回调决策驱动。"""
 
@@ -280,9 +273,9 @@ async def task_run(req: TaskRunIn) -> dict[str, object]:
             question=question,
             history=[],
             tools=tools,
-            channel="task",  # 090:工具执行审计归因到任务编排(区别于交互问答)
+            channel="task",  # 工具执行审计归因到任务编排(区别于交互问答)
         )
-        # add-graph-checkpoint:任务步骤受限循环带线程上下文与恢复提示
+        # 任务步骤受限循环带线程上下文与恢复提示
         # (快照续跑/图内挂起/决策恢复;协作步骤不落此路)
         task_id = str(extra.get("task_id") or "")
         step_id = str(extra.get("step_id") or "")
@@ -296,7 +289,7 @@ async def task_run(req: TaskRunIn) -> dict[str, object]:
             )
         return await _run_react(req_inner)
 
-    # 091 组合根:协作步骤执行器(开账 fail-closed、worker=受限 ReAct、
+    # 组合根:协作步骤执行器(开账 fail-closed、worker=受限 ReAct、
     # 账本/用量/trace 归集;装配细节单源在 collab_wiring)。
     # 适配壳:collab_wiring 以 dict 载荷解耦 QueryReactIn(避免反向依赖本模块)
     async def _react_adapter(req: object) -> dict[str, object]:
@@ -330,7 +323,7 @@ async def task_run(req: TaskRunIn) -> dict[str, object]:
 
 @app.post("/internal/generate-report", tags=["internal"])
 async def generate_report(req: GenerateReportIn) -> dict[str, object]:
-    """报告生成编排(088):规划→逐叶取数(既有工具回调)→逐章撰写→组装。
+    """报告生成编排:规划→逐叶取数(既有工具回调)→逐章撰写→组装。
 
     长任务:多轮 LLM+多次取数,httpx 侧由 api 以独立长超时等待;编排内部
     预算三约束(LLM 调用/token/墙钟)耗尽即停,PARTIAL 诚实收口。响应即
@@ -345,7 +338,7 @@ async def generate_report(req: GenerateReportIn) -> dict[str, object]:
 
 @app.post("/internal/extract-memory", response_model=ExtractMemoryOut, tags=["internal"])
 async def extract_memory_endpoint(req: ExtractMemoryIn) -> ExtractMemoryOut:
-    """LLM 记忆提取(022 隐式路径;全新撰写 prompt,非上游逐字资产);
+    """LLM 记忆提取(隐式路径;全新撰写 prompt,非上游逐字资产);
     失败/畸形收敛空数组(api 侧静默跳过)。"""
     from kongming_agent.graph.nodes import parse_summary_json
 
@@ -355,7 +348,7 @@ async def extract_memory_endpoint(req: ExtractMemoryIn) -> ExtractMemoryOut:
             f"用户问题:{req.question}\n助手答复:{req.answer[:1000]}\n\n输出 JSON:",
             temperature=0.1,
             max_tokens=300,
-            task="EXTRACT",  # 021:任务路由(缺省主模型)
+            task="EXTRACT",  # 任务路由(缺省主模型)
         )
     except LlmError:
         return ExtractMemoryOut()
@@ -382,16 +375,16 @@ class QueryIn(BaseModel):
     user_id: str | None = None  # 缺省=系统调用(控制面豁免语义见 sql-execution spec)
     history: list[str] = []  # user 问句列表,旧→新
     datasource_key: str = "default"
-    # 022:召回的用户已知信息段(控制面注入;缺省/空=零回归)
+    # 控制面注入的用户记忆提示；为空时不注入。
     memory_hint: str = ""
-    # 030:图片附件引用(一次性消费;空=纯文本零回归)
+    # 图片附件引用(一次性消费;空=纯文本)
     attachment_ids: list[str] = []
 
 
 class QueryOut(BaseModel):
     success: bool
-    verdict: str | None = None  # PASS / BLOCKED / ERROR / NO_DATA(044 如实说明)
-    # None=未生成 SQL(LLM 故障——044 起 no_data 短路判别为 NO_DATA,不再落 None)
+    verdict: str | None = None  # PASS / BLOCKED / ERROR / NO_DATA(如实说明)
+    # None=未生成 SQL(LLM 故障——起 no_data 短路判别为 NO_DATA,不再落 None)
     summary: str = ""
     insights: list[dict[str, str]] = []
     stats: dict[str, object] = {}
@@ -400,15 +393,15 @@ class QueryOut(BaseModel):
     sql: str = ""
     retry_count: int = 0
     error: str | None = None
-    # 069:管理面诊断信号(api 侧落 chat_message;纯增,单轮无改写时 None)
+    # 管理面诊断信息由 API 落库；单轮问答未改写时为空。
     resolved_question: str | None = None
-    # 069:prompt 资产指纹(启动期计算;073 纯函数同源,前 8 位)
+    # prompt 资产指纹(启动期计算;纯函数同源,前 8 位)
     prompt_version: str | None = None
-    # 076:语义层口径命中(纯增;空=无命中;api 侧随 result_json 落库+回显)
+    # 语义层口径命中(空=无命中;api 侧随 result_json 落库+回显)
     metric_hits: list[dict[str, str | None]] = []
-    # 068:文档道结构化来源(纯增;空=SQL 道/无命中;落库+回显)
+    # 文档道结构化来源(空=SQL 道/无命中;落库+回显)
     sources: list[dict[str, str]] = []
-    # 035:bot 链路请求内同步采集(纯增;仅 /query_react 挂收集器时非空)
+    # 仅挂载用量收集器的 /query_react 请求会返回明细。
     usage_records: list[dict[str, object]] = []
 
 
@@ -417,7 +410,7 @@ async def query(req: QueryIn) -> QueryOut:
     from kongming_agent.multimodal import AttachmentError
 
     try:
-        req.question = await _combine_with_attachments(req)  # 030(空附件零改动)
+        req.question = await _combine_with_attachments(req)  # (空附件零改动)
     except AttachmentError as e:
         return QueryOut(success=False, verdict="ERROR", summary="", error=str(e))
     final = await _run_graph(req)
@@ -425,8 +418,8 @@ async def query(req: QueryIn) -> QueryOut:
 
 
 async def _combine_with_attachments(req: QueryIn) -> str:
-    """030:图片附件预处理(进图前,图结构零改动);fail-closed 任一件失败
-    即 AttachmentError;纯文本零调用零回归。"""
+    """图片附件预处理(进图前,图结构零改动);fail-closed 任一件失败
+    即 AttachmentError;纯文本零调用。"""
     from kongming_agent.multimodal import combine_question, preprocess_attachments
 
     prefix = await preprocess_attachments(
@@ -449,8 +442,8 @@ def _initial_state(req: QueryIn) -> AgentState:
         "history": req.history,
         "datasource_key": req.datasource_key,
         "retry_count": 0,
-        "memory_hint": req.memory_hint,  # 022
-        "has_attachments": bool(req.attachment_ids),  # 036④:直答分流信号
+        "memory_hint": req.memory_hint,
+        "has_attachments": bool(req.attachment_ids),  # 图片附件会影响问答分流。
     }
 
 
@@ -466,10 +459,10 @@ async def _run_graph(req: QueryIn) -> dict[str, object]:
             ),
         )
     except LlmError:
-        # LLM 故障(key 缺失/超时/协议异常):链路无法推进,友好返回不裸 500
+        # LLM 配置、网络或协议异常时返回可读错误，不抛出 500。
         return {"llm_unavailable": True}
     except PromptBudgetExceeded:
-        # 080:提示词装配超预算(不可切段本身超窗)——可归因失败,禁假托
+        # 提示词装配超预算(不可切段本身超窗)——可归因失败,禁假托
         # 「服务暂不可用」(真实原因是我方装配,运维按服务故障查不到东西)
         return {"prompt_budget_exceeded": True}
     return final
@@ -480,7 +473,7 @@ def _build_query_out(final: dict[str, object]) -> QueryOut:
     if final.get("llm_unavailable"):
         return QueryOut(success=False, error="LLM 服务暂不可用,请稍后重试")
     if final.get("prompt_budget_exceeded"):
-        # 080:如实归因——不可切段(纪律/问句/自愈喂回)本身已超模型窗口,
+        # 如实归因——不可切段(纪律/问句/自愈喂回)本身已超模型窗口,
         # 自动收敛救不回来的配置型失败
         return QueryOut(
             success=False,
@@ -494,7 +487,7 @@ def _build_query_out(final: dict[str, object]) -> QueryOut:
     validation = final.get("validation")
     verdict: str | None
     if final.get("end_reason") == "no_data":
-        # 044:知识未覆盖如实说明(短路,未执行)——判定最前:自愈轮短路时
+        # 知识未覆盖如实说明(短路,未执行)——判定最前:自愈轮短路时
         # state 残留上轮 execution(ERROR),不得遮蔽最终形态
         verdict = "NO_DATA"
     elif isinstance(execution, ExecutionResult):
@@ -509,23 +502,23 @@ def _build_query_out(final: dict[str, object]) -> QueryOut:
     sql = final.get("generated_sql", "")
     retry = final.get("retry_count", 0)
     error = final.get("error")
-    # 069:resolved_question 仅多轮改写实际发生且有 history 时非空
+    # resolved_question 仅多轮改写实际发生且有 history 时非空
     # (understand 直通路径 state 该键即原问句,单轮/直通不背诊断信号)
     resolved_q = final.get("resolved_question")
     resolved = resolved_q if isinstance(resolved_q, str) and resolved_q else None
     question_raw = final.get("question")
     if resolved is not None and isinstance(question_raw, str) and resolved == question_raw:
         resolved = None  # 未发生改写(恒等)——诊断信号只记实际改写
-    # 076:口径命中(链路输入,零凭证透传;存量/无命中=空)
+    # 语义层命中随请求状态透传，不包含凭证；无命中时为空。
     hits_raw = final.get("metric_hits")
     metric_hits = (
         cast("list[dict[str, str | None]]", hits_raw) if isinstance(hits_raw, list) else []
     )
-    # 068:文档道来源(净化后正文的存活标记投影;空=SQL 道/无命中)
+    # 文档道来源(净化后正文的存活标记投影;空=SQL 道/无命中)
     sources_raw = final.get("sources")
     sources = cast("list[dict[str, str]]", sources_raw) if isinstance(sources_raw, list) else []
     # error 非空 ⇒ 恒非成功终态(轮次触顶携带部分结果的形态:execution
-    # 可能 PASS 但 error 优先——A-B6;其余既有形态 error 与非 PASS 并存,零影响)
+    # 可能 PASS 但 error 优先;其余既有形态 error 与非 PASS 并存,零影响)
     has_error = isinstance(error, str) and bool(error)
     return QueryOut(
         success=(
@@ -549,19 +542,19 @@ def _build_query_out(final: dict[str, object]) -> QueryOut:
 
 
 def _sse_frame(event: str, data_json: str) -> str:
-    """标准 SSE 帧:event 行 + 单行 data + 空行分帧(017 事件契约)。"""
+    """标准 SSE 帧:event 行 + 单行 data + 空行分帧(事件契约)。"""
     return f"event: {event}\ndata: {data_json}\n\n"
 
 
 @app.post("/query/stream", tags=["agent"])
 async def query_stream(req: QueryIn) -> StreamingResponse:
-    """问答图流式端点(017):custom 通道=节点过程事件,updates 通道累积终态;
+    """问答图流式端点:custom 通道=节点过程事件,updates 通道累积终态;
     result 终态与同步 /query 同构(共用 _build_query_out);LLM 故障同同步
     口径走 result(success=false);意外异常收敛 error 终态不裸 500。"""
     from kongming_agent.multimodal import AttachmentError
 
     try:
-        req.question = await _combine_with_attachments(req)  # 030
+        req.question = await _combine_with_attachments(req)
     except AttachmentError as e:
         # 预处理失败:单 result 终态帧收敛(与 LLM 故障同口径,不裸 500)
         fail = _build_query_out({"error": str(e), "success": False})
@@ -622,7 +615,7 @@ async def query_stream(req: QueryIn) -> StreamingResponse:
     )
 
 
-# ── 019:ReAct 工具调用内核(与 8 节点图并存,终态同构) ──
+# ── ReAct 工具调用内核(与 8 节点图并存,终态同构) ──
 
 
 class QueryReactIn(QueryIn):
@@ -632,14 +625,13 @@ class QueryReactIn(QueryIn):
     """
 
     tools: list[dict[str, object]] = []
-    # 025:Bot 系统提示(身份/场景段;内核纪律后缀由 prompts 强制拼接)
+    # Bot 系统提示(身份/场景段;内核纪律后缀由 prompts 强制拼接)
     bot_system_prompt: str = ""
-    # 025:Bot 模型覆盖(021 注册表名;空=任务路由/主模型)
+    # Bot 模型覆盖(注册表名;空=任务路由/主模型)
     model: str = ""
-    # 025:渠道标记(审计平铺给 tool/execute)
+    # 渠道标记(审计平铺给 tool/execute)
     channel: str = "chat"
-    # 035:挂 request 级 usage 收集器(仅 bot 链路置真——chat 同步 react/
-    # workflow 缺省 False 走 fire-and-forget,R1-S2 防用量静默整丢)
+    # 仅 Bot 请求启用同步采集；普通 chat 和 workflow 保持异步上报。
     collect_usage: bool = False
 
 
@@ -653,10 +645,10 @@ def _initial_react_state(req: QueryReactIn) -> ReactState:
         "datasource_key": req.datasource_key,
         "tools": req.tools,
         "rounds": 0,
-        "memory_hint": req.memory_hint,  # 022
-        "bot_system_prompt": req.bot_system_prompt,  # 025
-        "model_override": req.model,  # 025
-        "channel": req.channel,  # 025
+        "memory_hint": req.memory_hint,
+        "bot_system_prompt": req.bot_system_prompt,
+        "model_override": req.model,
+        "channel": req.channel,
     }
 
 
@@ -690,7 +682,7 @@ async def _run_react_task(
     step_id: str,
     resume_confirm: dict[str, object] | None,
 ) -> dict[str, object]:
-    """任务通道受限循环(检查点形态,add-graph-checkpoint):线程确定性派生,
+    """任务通道受限循环(检查点形态):线程确定性派生,
     推进点快照落控制面;已决确认经 Command(resume) 从挂起点精确恢复;
     线程既有快照(无确认挂起)时从中断处续跑(快照缺席回退整步重跑)。
     恢复方式随终态携带(fresh/snapshot),编排如实入步骤账,不谎称首次执行。"""
@@ -795,21 +787,17 @@ async def _run_react(req: QueryReactIn) -> dict[str, object]:
 
 @app.post("/query_react", response_model=QueryOut, tags=["agent"])
 async def query_react(req: QueryReactIn) -> QueryOut:
-    """ReAct 内核同步端点;终态与 /query 逐字段同构(_build_query_out 单一定义)。
-    035:collect_usage=True(bot 链路)才挂 request 级收集器——响应携带明细
-    (bot 渠道唯一上报口,api 请求内落库);缺省 False(chat 同步 react/
-    workflow)不挂,fire-and-forget 旧路零回归(R1-S2)。"""
+    """执行 ReAct 问答并返回与 /query 同形的结果；启用用量采集时随响应返回明细。"""
     from kongming_agent.llm import reset_usage_collector, set_usage_collector
     from kongming_agent.multimodal import AttachmentError
 
     collector: list[dict[str, object]] = []
     token = set_usage_collector(collector) if req.collect_usage else None
     try:
-        req.question = await _combine_with_attachments(req)  # 030(与 /query 同前段)
+        req.question = await _combine_with_attachments(req)  # 与普通问答共用附件处理。
         final = await _run_react(req)
     except AttachmentError as e:
-        # 035⑧ 清偿:早返也携带已收集记录(多附件部分成功后失败场景,
-        # 第 1 张图 vision 用量已入收集器,不随早返丢弃)
+        # 部分图片处理成功后仍保留已收集的用量记录。
         out = QueryOut(success=False, verdict="ERROR", summary="", error=str(e))
         out.usage_records = collector
         return out
@@ -825,8 +813,8 @@ async def query_react(req: QueryReactIn) -> QueryOut:
 async def query_react_stream(req: QueryReactIn) -> StreamingResponse:
     """ReAct 流式端点:stage/tool_call/summary 过程事件 + result 终态(同构)。
 
-    035:collect_usage=True 时挂 request 级收集器(与同步 /query_react 同口径
-    ——审查循环 B7:曾静默忽略该字段,bot 渠道一旦流式化用量将静默回退
+    collect_usage=True 时挂 request 级收集器,与同步 /query_react 保持一致。
+    流式接口也必须启用收集器,否则 bot 用量不会写入 usage_records。
     fire-and-forget);result 终态帧携带 usage_records。"""
     from kongming_agent.llm import reset_usage_collector, set_usage_collector
     from kongming_agent.multimodal import AttachmentError
@@ -836,16 +824,16 @@ async def query_react_stream(req: QueryReactIn) -> StreamingResponse:
     async def gen() -> AsyncIterator[str]:
         # 收集器在生成器上下文内挂载/卸载:流式响应的迭代任务与端点 handler
         # 分属不同上下文,端点级 set 不传播到 gen(同步端点同款语义)。
-        # 附件预处理同在 gen 内执行(R1-F2):vision 用量发生在 combine 段,
+        # 附件预处理同在 gen 内执行:vision 用量发生在 combine 段,
         # 挂载若晚于 combine 则该段收集缺位、用量绕过「响应携带」契约。
         token2 = set_usage_collector(collector) if req.collect_usage else None
         try:
             try:
-                req.question = await _combine_with_attachments(req)  # 030
+                req.question = await _combine_with_attachments(req)
             except AttachmentError as e:
                 fail = _build_query_out({"error": str(e), "success": False})
-                fail.verdict = "ERROR"  # R2-B2:与同步端点早返同构(verdict 契约)
-                fail.usage_records = collector  # 035⑧:早返携带已收集记录
+                fail.verdict = "ERROR"  # 与同步端点早返同构(verdict 契约)
+                fail.usage_records = collector  # 保留早返前已收集的用量。
                 yield _sse_frame("result", fail.model_dump_json())
                 return
             state = _initial_react_state(req)
@@ -870,11 +858,11 @@ async def query_react_stream(req: QueryReactIn) -> StreamingResponse:
                                 final.update(cast("dict[str, object]", delta))
             except LlmError:
                 unavailable = _build_query_out({"llm_unavailable": True})
-                unavailable.usage_records = collector  # 038⑨:异常终态携带已收集记录
+                unavailable.usage_records = collector  # 异常终态也返回已收集的用量。
                 yield _sse_frame("result", unavailable.model_dump_json())
                 return
             except GraphRecursionError:
-                # 图步数兜底(R1-S4:与同步同口径的结构化错误,不走泛异常)
+                # 图步数兜底(与同步同口径的结构化错误,不走泛异常)
                 capped = _build_query_out({"error": "工具调用步数超限,请缩小问题范围后重试"})
                 capped.usage_records = collector  # 异常终态同携带
                 yield _sse_frame("result", capped.model_dump_json())
@@ -890,7 +878,7 @@ async def query_react_stream(req: QueryReactIn) -> StreamingResponse:
                 )
                 return
             out = _build_query_out(final)
-            out.usage_records = collector  # 035:bot 渠道流式化的同步入账口径
+            out.usage_records = collector  # bot 渠道流式化的同步入账口径
             yield _sse_frame("result", out.model_dump_json())
         finally:
             if token2 is not None:

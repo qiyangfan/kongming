@@ -1,10 +1,4 @@
-"""chat 持久化(基础设施层):chat_session/chat_message 读写。
-
-所有查询经 SQLAlchemy text() 绑定参数;会话归属判定在此收口
-(不存在与越权同形返回 None,不泄露信息,chat spec)。
-写路径方法与 commit 经 _store_error_boundary 转译 SQLAlchemyError →
-ChatStoreError(013 构造反转:service 领域层由此零 sqlalchemy import)。
-"""
+"""会话和消息持久化:归属检查在仓储层收口;写错误转 ChatStoreError,读错误保留原异常。"""
 
 import functools
 import json
@@ -50,8 +44,8 @@ class ChatRepository:
         self._s = session
 
     async def find_bound_tenant(self, *, user_id: str, tenant_key: str) -> str | None:
-        """显式租户白名单校验:命中(绑定 + ACTIVE)返回 tenant_id,否则 None。
-        单一真理源在 kongming.tenant(B1-B10 收口,五处同构 SQL 唯一定义)。"""
+        """显式租户白名单校验:命中(绑定 + ACTIVE)返回 tenant_id,否则 None;
+        单一真理源在 kongming.tenant(五处同构 SQL 唯一定义)。"""
         return await tenant.bound_tenant_id(self._s, user_id=user_id, tenant_key=tenant_key)
 
     async def find_default_tenant(self, *, user_id: str) -> tuple[str, str] | None:
@@ -90,8 +84,8 @@ class ChatRepository:
     async def find_explain_target(
         self, *, message_id: str, user_id: str, tenant_id: str
     ) -> dict[str, object] | None:
-        """执行计划定位(010):消息 JOIN 会话做归属收口(不存在/越权同形 None);
-        顺带取会话落库的 datasource_key(快照语义,非切换器实时值,010 design D2)。"""
+        """执行计划定位:消息 JOIN 会话做归属收口(不存在/越权同形 None);
+        顺带取会话落库的 datasource_key(快照语义,非切换器实时值)。"""
         row = (
             (
                 await self._s.execute(
@@ -100,7 +94,7 @@ class ChatRepository:
                         " FROM public.chat_message m"
                         " JOIN public.chat_session s ON s.id = m.session_id"
                         " WHERE m.id = :mid AND s.user_id = :u AND s.tenant_id = :t"
-                        " AND m.role = 'ASSISTANT'"  # 审查循环 B5:锚定 assistant 产出消息
+                        " AND m.role = 'ASSISTANT'"  # 锚定 assistant 产出消息
                     ),
                     {"mid": message_id, "u": user_id, "t": tenant_id},
                 )
@@ -122,9 +116,9 @@ class ChatRepository:
     ) -> list[dict[str, object]]:
         """本人本租户会话列表,updated_at 倒序(id DESC 作时序 tiebreak)。
 
-        keyword 非空时按「标题 OR user 问句(EXISTS)」ILIKE 包含匹配(010 会话搜索);
-        ESCAPE '\' + like_pattern 转义使 %/_/\\ 按字面(007 R1-3 同款防线);
-        :kw = '' 短路使空白词零行为变更(与 system/datasource 域同构)。
+        keyword 非空时按「标题 OR user 问句(EXISTS)」ILIKE 包含匹配(会话搜索);
+        ESCAPE '\' + like_pattern 转义使 %/_/\\ 按字面;
+        kw = '' 短路使空白词零行为变更(与 system/datasource 域同构)。
         """
         rows = (
             (
@@ -159,7 +153,7 @@ class ChatRepository:
     async def rename_session(
         self, *, session_id: str, user_id: str, tenant_id: str, title: str
     ) -> dict[str, object] | None:
-        """重命名(010):归属校验并入 UPDATE 的 WHERE(原子,无先查后改窗口),
+        """重命名:归属校验并入 UPDATE 的 WHERE(原子,无先查后改窗口),
         同时刷新 updated_at(与上游 renameSession 同构);未命中返回 None。"""
         row = (
             (
@@ -184,7 +178,7 @@ class ChatRepository:
         }
 
     async def get_session_title(self, session_id: str) -> str | None:
-        """标题单读(010 改写守卫用;会话被并发删除返回 None)。"""
+        """标题单读(改写守卫用;会话被并发删除返回 None)。"""
         v = (
             await self._s.execute(
                 text("SELECT title FROM public.chat_session WHERE id = :id"),
@@ -194,7 +188,7 @@ class ChatRepository:
         return None if v is None else str(v)
 
     async def first_user_question(self, session_id: str) -> str | None:
-        """首条 user 问句(010 标题改写素材与守卫基准);无消息返回 None。"""
+        """首条 user 问句(标题改写素材与守卫基准);无消息返回 None。"""
         v = (
             await self._s.execute(
                 text(
@@ -211,7 +205,7 @@ class ChatRepository:
     async def update_title_if_current(
         self, *, session_id: str, expected: str, new_title: str
     ) -> int:
-        """LLM 标题改写条件回写(010):仅当当前标题仍等于首问截断值时更新——
+        """LLM 标题改写条件回写:仅当当前标题仍等于首问截断值时更新——
         人工重命名(含与 LLM 回调的竞态)永不被自动改写覆盖;返回受影响行数。
         不刷新 updated_at:自动改写非用户活动,不应把老会话顶到列表前。"""
         res = cast(
@@ -230,11 +224,11 @@ class ChatRepository:
         self, *, session_id: str, limit: int | None = None
     ) -> list[dict[str, object]]:
         """会话全部消息,创建时间升序(id ASC tiebreak,与补全取数对偶);
-        014 增 rating/corrected_sql 反馈状态列(回显用);
-        026 增会话 datasource_key(JOIN 会话快照,artifacts 重算兜底用);
-        030 增 attachments(附件摘要回显)。
-        limit(088):有界读取(报告素材摘要等只需尾部的场景防大结果_json 放大);
-        取「最近 limit 条」仍按时间升序返回。None=全量(既有调用方零回归)。"""
+        增 rating/corrected_sql 反馈状态列(回显用);
+        增会话 datasource_key(JOIN 会话快照,artifacts 重算兜底用);
+        增 attachments(附件摘要回显)。
+        limit:有界读取(报告素材摘要等只需尾部的场景防大结果_json 放大);
+        取「最近 limit 条」仍按时间升序返回。None=全量(既有调用方)。"""
         bounded = " LIMIT :lim" if limit is not None else ""
         rows = (
             (
@@ -286,11 +280,11 @@ class ChatRepository:
         result_json: str | None = None,
         summary: str | None = None,
         status: str,
-        attachments: list[dict[str, object]] | None = None,  # 030
-        trace_id: str | None = None,  # 069:轮次质量信号(三表关联键)
-        retry_count: int = 0,  # 069
-        resolved_question: str | None = None,  # 069:仅多轮改写实际发生时非空
-        prompt_version: str | None = None,  # 069:agent prompt 资产指纹
+        attachments: list[dict[str, object]] | None = None,
+        trace_id: str | None = None,  # 轮次质量信号(三表关联键)
+        retry_count: int = 0,
+        resolved_question: str | None = None,  # 仅多轮改写实际发生时非空
+        prompt_version: str | None = None,  # agent prompt 资产指纹
     ) -> str:
         mid = str(uuid7())
         await self._s.execute(
@@ -343,7 +337,7 @@ class ChatRepository:
 
     @_store_error_boundary
     async def commit(self) -> None:
-        """事务提交(ChatRepo 端口,013 构造反转);失败转译 ChatStoreError。"""
+        """事务提交(ChatRepo 端口,构造反转);失败转译 ChatStoreError。"""
         await self._s.commit()
 
     async def rollback(self) -> None:
@@ -352,7 +346,7 @@ class ChatRepository:
 
 
 class SuggestionRepository:
-    """建议问题缓存读写(039):chat_suggestion 表。
+    """建议问题缓存读写:chat_suggestion 表。
 
     与 ChatRepository 共享同一请求会话(同事务语义):
     datasource 管理事务内的级联失效(Evictor 绑定)与建议 upsert/commit
@@ -387,7 +381,7 @@ class SuggestionRepository:
 
     @_store_error_boundary
     async def lock(self, lock_key: str) -> None:
-        """事务级咨询锁(039 并发防击穿):同 key 并发首访串行化,
+        """事务级咨询锁(并发防击穿):同 key 并发首访串行化,
         取锁后复查缓存命中即免重复生成;commit/rollback 自动释放。"""
         await self._s.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": lock_key}
@@ -414,7 +408,7 @@ class SuggestionRepository:
 
     @_store_error_boundary
     async def delete_by_datasource(self, datasource_key: str) -> None:
-        """按数据源全租户级联失效(039;datasource 管理事务内调用)。"""
+        """按数据源全租户级联失效(datasource 管理事务内调用)。"""
         await self._s.execute(
             text("DELETE FROM public.chat_suggestion WHERE datasource_key=:k"),
             {"k": datasource_key},

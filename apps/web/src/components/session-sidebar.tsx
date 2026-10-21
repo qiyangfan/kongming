@@ -1,7 +1,4 @@
-/* 会话侧栏(web-nav spec「会话侧栏交互」+ 010 chat spec 时间分组/搜索/重命名):
-   搜索框(300ms 防抖,服务端 ILIKE)/时间分组(今天/昨天/近 7 天/近 30 天/更早)/
-   行内操作菜单(重命名对话框 + 删除受控确认)/当前高亮/切换;
-   新建=导航 /chat,零后端请求(首问自动建会话)。 */
+/* 会话侧栏:搜索、时间分组、重命名与受控删除。 */
 
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -54,7 +51,7 @@ export function SessionSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { current } = useTenant();
   const [input, setInput] = useState("");
   const [q, setQ] = useState("");
-  // 300ms 防抖:输入停顿后再发搜索(键含 q 维度,换词即换档)
+  // 搜索输入 300ms 防抖
   useEffect(() => {
     const t = setTimeout(() => setQ(input.trim()), 300);
     return () => clearTimeout(t);
@@ -62,7 +59,7 @@ export function SessionSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { data: sessions, isLoading } = useQuery({
     queryKey: ["sessions", current, q],
     queryFn: () => listSessions(q || undefined),
-    // 换词瞬态保留上一档内容,不闪骨架屏(R1-S3)
+    // 换词瞬态保留上一档内容,不闪骨架屏
     placeholderData: (prev) => prev,
   });
   const { pathname } = useLocation();
@@ -124,12 +121,7 @@ export function SessionSidebar({ onNavigate }: { onNavigate?: () => void }) {
                       <span className="min-w-0 flex-1 truncate" title={s.title}>
                         {s.title}
                       </span>
-                      {/* 时间止步于行尾保留区之外:按钮独占 right-1+size-6=28px
-                          固定槽,时间 mr-7(28px)在 Link 内容盒内提前收束、右缘
-                          恒落槽外(Link 自身 pr-2 再让出 8px 呼吸)——按钮显现
-                          只盖空白,与时间无共槽可能;旧「同槽互换」范式下按钮
-                          transition-all 渐隐而时间瞬时回归,移开鼠标必有一瞬
-                          重叠,不可缝补 */}
+                      {/* 操作按钮单独占用 28px 槽位；时间右侧留出相同宽度，避免遮挡。 */}
                       <span className="mr-7 shrink-0 text-3xs text-muted-foreground">
                         {timeLabel(s.updated_at)}
                       </span>
@@ -146,8 +138,7 @@ export function SessionSidebar({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-/* 行内操作(010):重命名对话框 + 删除受控确认;菜单每项会话可达
-   (hover/focus-within 显现,移动端常显——006 可达性教训) */
+/* 提供会话重命名和删除；操作入口在悬停、键盘聚焦和窄屏时可见。 */
 function SessionActions({ session, isActive }: { session: SessionItemOut; isActive: boolean }) {
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -156,10 +147,7 @@ function SessionActions({ session, isActive }: { session: SessionItemOut; isActi
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          {/* 显隐用 visibility 而非 display:菜单打开期间鼠标点空白关闭时,
-              data-state 与 hover 同时失效,若 display:none 会把 anchor 几何
-              清零,Radix Popper 将播放退出动画的弹框重定位到视口左上角闪现;
-              visibility:hidden 保留盒几何,退出动画原位播完 */}
+          {/* 关闭动画期间保留触发器尺寸，防止 Radix Popper 重定位弹层。 */}
           <Button
             variant="ghost"
             size="icon-xs"
@@ -220,7 +208,7 @@ function RenameDialog({
     try {
       await renameSession(session.id, cleaned);
     } catch (err) {
-      // 失败保持对话框开启,错误行内可见(007 教训:不得随卸载不可见)
+      // 失败保持对话框开启,错误行内可见
       setError(err instanceof Error ? err.message : "重命名未成,请稍后再试。");
       setBusy(false);
       return;
@@ -290,7 +278,7 @@ function DeleteDialog({
       await api.delete(`/chat/sessions/${session.id}`);
     } catch (err) {
       if ((err as Error & { status?: number }).status !== 404) {
-        // 404=他端已删,视为已删照常收敛;其余失败保持对话框开启,提示可见
+        // 404=他端已删,视同删除成功;其余失败保持对话框开启提示
         setFailed(true);
         setBusy(false);
         return;
@@ -308,8 +296,8 @@ function DeleteDialog({
     <AlertDialog
       open={open}
       onOpenChange={(o) => {
-        // busy 期拦截一切关闭源(R1-S1):ESC/未来新增关闭路径统一收口——
-        // 「再想想」disabled 只堵按钮,闸在此才堵全(spec「取消操作不可用」)
+        // busy 期拦截一切关闭源(ESC 等按钮外路径);「再想想」disabled
+        // 只堵按钮,统一闸在此(spec「取消操作不可用」)
         if (!o && busy) return;
         onOpenChange(o);
         if (o) setFailed(false); // 重开清残留错误
@@ -328,8 +316,7 @@ function DeleteDialog({
           </p>
         )}
         <AlertDialogFooter>
-          {/* busy 期禁用取消(013,010 挂账⑤):删除请求已发出,
-              「再想想」可点会误导用户以为请求被撤回(spec「删除进行中取消不可用」) */}
+          {/* 删除请求发出后禁用取消，避免让用户误以为请求已撤回。 */}
           <AlertDialogCancel disabled={busy}>再想想</AlertDialogCancel>
           {/* 受控对话框:关闭时机由 remove 决定,Action 需阻默认关 */}
           <AlertDialogAction

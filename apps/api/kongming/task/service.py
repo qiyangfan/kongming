@@ -1,4 +1,4 @@
-"""task 用例(090):创建/迁移/审批/预算/事件(用例层;编排回调经内部端点)。
+"""task 用例:创建/迁移/审批/预算/事件(用例层;编排回调经内部端点)。
 
 原则:状态迁移全部经白名单 + CAS(乐观锁);非法迁移拒绝并留事件审计;
 审批归属=任务归属人;预算超限 PAUSED 诚实收口。
@@ -10,7 +10,7 @@ from typing import Any, cast
 
 from kongming.task import models as m
 from kongming.task.ports import CollabBotResolver, GraphConfirmRepo, TaskRepo
-from kongming.uuid7 import uuid7  # 纯函数单源直取(领域层不经基础设施 kongming.db)
+from kongming.uuid7 import uuid7  # 直接使用 UUIDv7 纯函数，避免依赖数据库模块。
 
 log = logging.getLogger(__name__)
 
@@ -49,8 +49,7 @@ class TaskService:
     ) -> None:
         self._repo = repo
         self._bot_resolver = bot_resolver
-        # 图级检查点/图内确认账本(add-graph-checkpoint);缺席=能力不可用
-        # (纯函数单测场景),既有用例零回归
+        # 图级检查点/图内确认账本;缺席=能力不可用(纯函数单测场景),既有用例不受影响
         self._graph = graph_repo
 
     async def create(
@@ -68,7 +67,7 @@ class TaskService:
     ) -> str:
         normalized = m.normalize_budget(budget)
         if budget_caps is not None:
-            # 部署级上限钳制(090 spec「任务级配置 + 部署级上限」)
+            # 部署级上限钳制(spec「任务级配置 + 部署级上限」)
             normalized = m.clamp_budget(normalized, budget_caps)
         return await self._repo.insert_task(
             task_id=task_id,
@@ -208,7 +207,7 @@ class TaskService:
             event_kind="step_approved" if approve else "step_rejected",
         )
 
-    # ── 图级检查点与图内挂起(add-graph-checkpoint)──
+    # ── 图级检查点与图内挂起 ──
 
     async def suspend_on_graph_confirm(
         self,
@@ -382,12 +381,7 @@ class TaskService:
     async def begin_step(
         self, *, task_id: str, tenant_id: str, step_id: str, epoch: int | None = None
     ) -> dict[str, object]:
-        """步骤启动(编排循环每步下发前):PENDING→RUNNING;需确认步骤→
-        AWAITING_APPROVAL 且任务挂起;预算超限 → 任务 PAUSED、decision=pause;
-        任务非 RUNNING(被暂停/取消/终态)→ pause/abort 决策,执行循环终止
-        (终态不复活:用户取消/暂停后,在途编排不得继续执行剩余步骤);
-        派发代际失配(epoch ≠ 任务行当前代数)→ abort 决策——旧循环立即退出,
-        消除「pause 不杀在途循环 + resume 立即派发」的双执行者窗口。"""
+        """决定步骤是否开始：需确认时挂起，预算超限时暂停；任务已停止或派发代际过期时终止旧循环。"""
         task = await self._repo.get_task_system(task_id=task_id, tenant_id=tenant_id)
         if task is None:
             raise TaskNotFound
@@ -433,7 +427,7 @@ class TaskService:
                 }
             return {"decision": "pause", "reason": reason}
         steps = await self._repo.get_steps(task_id=task_id)
-        # asyncpg 返回 UUID 对象:与 str 形参比较前归一(HANDOFF 教训)
+        # asyncpg 返回 UUID 对象:与 str 形参比较前归一(见 docs/HANDOFF.md)
         target = next((s for s in steps if str(s["id"]) == step_id), None)
         if target is None:
             raise TaskNotFound
@@ -495,7 +489,7 @@ class TaskService:
             collab = await self._collab_decision(tenant_id=tenant_id, step=target)
             return {"decision": "execute", "collab": collab}
         out: dict[str, object] = {"decision": "execute"}
-        # 图内挂起恢复提示(add-graph-checkpoint):步骤因确认挂起后批准/拒绝
+        # 图内挂起恢复提示:步骤因确认挂起后批准/拒绝
         # 回队重派,决策随 begin_step 下发;agent 以线程快照的在途确认复合校验
         # (提示仅建议,快照不在途即忽略)——过期行不提示(过期=步骤跳过语义)
         if self._graph is not None:
@@ -511,9 +505,9 @@ class TaskService:
         return out
 
     async def _collab_decision(self, *, tenant_id: str, step: dict[str, Any]) -> dict[str, object]:
-        """协作步骤的执行决策载荷(091):拓扑(以库内归一值为准,再按当前
+        """协作步骤的执行决策载荷:拓扑(以库内归一值为准,再按当前
         部署上限复钳)+ Bot 运行时解析(人格/工具子集;解析失败如实降级为
-        无绑定,不虚报人格注入)。圆桌形态(115)逐参与者解析各自 Bot。"""
+        无绑定,不虚报人格注入)。圆桌形态逐参与者解析各自 Bot。"""
         from kongming.config import get_settings
 
         topo = m.normalize_collab_topology(
@@ -537,7 +531,7 @@ class TaskService:
         if bot_key and self._bot_resolver is not None:
             bot = await self._bot_resolver.resolve(tenant_id=tenant_id, bot_key=str(bot_key))
         out: dict[str, object] = {**topo, "bot": bot}
-        # 分工名册(collab-worker-roster)逐成员运行时解析:失败如实降级
+        # 分工名册逐成员运行时解析:失败如实降级
         # None 不虚报人格注入(剔除在执行面 fail-closed 收口,圆桌同口径)
         roster = m.decomposition_roster(topo)
         if roster:
@@ -553,7 +547,7 @@ class TaskService:
             out["workers"] = workers
         return out
 
-    # ── 协作拓扑配置面与协作账本(091;查询挂 task:* 权限体系)──
+    # ── 协作拓扑配置面与协作账本(查询挂 task:* 权限体系)──
 
     async def set_step_topology(
         self,
@@ -586,7 +580,7 @@ class TaskService:
             raise TaskConflict("圆桌形态不受理顶层 bot_key(用参与者名册绑定)")
         roster = m.decomposition_roster(topo)
         if roster and raw_topology.get("bot_key"):
-            # 分工名册(collab-worker-roster)绑定收口在名册(逐成员),
+            # 分工名册绑定收口在名册(逐成员),
             # 顶层单绑定与名册不共存,拒绝歧义声明(与圆桌闸同式判 raw)
             raise TaskConflict("分工名册与顶层 bot_key 不共存(用名册逐成员绑定)")
         if self._bot_resolver is not None:
@@ -631,8 +625,7 @@ class TaskService:
             raise TaskConflict("步骤状态已变更,不可声明协作拓扑")
         await self._repo.append_task_event(
             task_id=task_id,
-            # 拓扑键后展开但 kind 显式回写:拓扑自带的 kind(形态)不得覆盖
-            # 事件信封的 kind(事件类型;115 曾被展开覆盖为拓扑形态值)
+            # 显式写回事件类型，避免拓扑对象中的 kind 覆盖信封字段。
             event={"at": _now(), "step": step_id, **topo, "kind": "collab_topology_set"},
         )
         return topo
@@ -843,7 +836,7 @@ class TaskService:
         usage: dict[str, object],
         trace_id: str,
     ) -> None:
-        """圆桌轮次上账(115 内部回调):拓扑形态闸(非圆桌运行不受理,无游离
+        """圆桌轮次上账(内部回调):拓扑形态闸(非圆桌运行不受理,无游离
         轮次通道)+ 名册运行期锁定(非名册序号拒绝,主席判定恒 0 号)+ 轮次
         上限闸。唯一键拒绝重复回写;在途谓词拒绝终态运行上的迟到轮次。
         事件:主席判定行=判定事件;名册末位行=每轮完成事件(开桌/收口沿用
@@ -901,7 +894,7 @@ class TaskService:
             )
         elif worker_no == dispatched_max:
             # 末位判定按门禁时点的实派最大序号(有效名册经剔除压缩编号,
-            # 拓扑名册长度不可作依据——P1-1;复用门禁读数,避免二次查询
+            # 拓扑名册长度不可作依据;复用门禁读数,避免二次查询
             # 与并发派发下的判定漂移)
             await self._repo.append_task_event(
                 task_id=task_id,
@@ -931,7 +924,7 @@ class TaskService:
         reject = m.validate_result_status(result.status, evidence)
         if reject:
             return f"reject:{reject}"
-        # 墙钟分步计量:起跑时刻 → 本次回写(spec 预算三约束的时长项)
+        # 记录步骤开始到结果回写的墙钟耗时，用于校验任务时限。
         elapsed_ms = 0
         step = await self._repo.get_step(task_id=task_id, step_id=result.step_id)
         if step is not None and step.get("started_at") is not None:

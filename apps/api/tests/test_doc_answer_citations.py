@@ -1,8 +1,8 @@
 # pyright: reportPrivateUsage=false
-"""068-doc-answer-citations api 全栈测试:来源契约/净化同源/SQL 道恒空/回显。
+"""-doc-answer-citations api 全栈测试:来源契约/净化同源/SQL 道恒空/回显。
 
 核心契约:响应与消息历史携带 sources(仅文档道);sources 是净化后正文存活
-标记的投影(不重不漏无幽灵);SQL 道恒空;老客户端零回归。
+标记的投影(不重不漏无幽灵);SQL 道恒空;老客户端。
 """
 
 from typing import cast
@@ -62,7 +62,7 @@ async def test_chat_query_sources_contract(
     make_user: MakeUser,
     fake_agent: dict[str, StreamFakeAgent],
 ) -> None:
-    """任务 2.3/1.7:响应纯增 sources;SQL 道恒空;文档道随 AgentReply 透出。"""
+    """响应来源随 AgentReply 返回；SQL 回答的来源列表为空。"""
     await seed_all(session, get_settings())
     _uid, token = await _user_with_chat_perm(client, session, make_user, "dc1")
     _install(fake_agent, StreamFakeAgent(reply=_DOC_REPLY))
@@ -82,14 +82,14 @@ async def test_sql_path_sources_empty(
     make_user: MakeUser,
     fake_agent: dict[str, StreamFakeAgent],
 ) -> None:
-    """任务 1.7:SQL 道产出的 sources 恒为空列表(不伪造引用)。"""
+    """SQL 道产出的 sources 恒为空列表(不伪造引用)。"""
     await seed_all(session, get_settings())
     _uid, token = await _user_with_chat_perm(client, session, make_user, "dc2")
     _install(fake_agent, StreamFakeAgent(reply=None))  # SQL 道(无 sources 字段)
     r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
     assert r.status_code == 200
     assert r.json()["sources"] == []
-    # 四态终态字段零回归(既有字段仍在)
+    # 四态终态字段(既有字段仍在)
     for f in ("success", "verdict", "summary", "columns", "rows", "sql"):
         assert f in r.json()
 
@@ -100,7 +100,7 @@ async def test_history_replay_and_legacy_empty(
     make_user: MakeUser,
     fake_agent: dict[str, StreamFakeAgent],
 ) -> None:
-    """任务 2.2/1.7:result_json 落库 sources;历史回显一致;老消息回空。"""
+    """消息来源写入 result_json 并在历史记录中回显，旧消息返回空列表。"""
     await seed_all(session, get_settings())
     _uid, token = await _user_with_chat_perm(client, session, make_user, "dc3")
     _install(fake_agent, StreamFakeAgent(reply=_DOC_REPLY))
@@ -137,7 +137,7 @@ async def test_sse_result_carries_sources(
     make_user: MakeUser,
     fake_agent: dict[str, StreamFakeAgent],
 ) -> None:
-    """任务 2.3:流式终态帧同构携带 sources(不新增事件类型)。"""
+    """流式终态帧同构携带 sources(不新增事件类型)。"""
     from tests.test_chat_stream import _frames_for, _parse_sse
 
     await seed_all(session, get_settings())

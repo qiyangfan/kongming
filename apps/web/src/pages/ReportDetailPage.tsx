@@ -1,6 +1,4 @@
-/* 报告详情页(088):章节树渲染(叙述 markdown + 快照表 + 图表复用 ChartView)、
-   版本切换(历史只读)、刷新数据/导出/删除(AlertDialog 确认)/编辑(乐观锁)。
-   GENERATING 态轮询进度端点,终态自动回落详情。 */
+/* 展示报告章节和历史版本，并提供刷新、导出、删除和编辑操作；生成时轮询进度。 */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Download, FileText, Pencil, RefreshCw, Trash2 } from "lucide-react";
@@ -330,7 +328,6 @@ function SectionBlock({ section: s, depth }: { section: SectionOut; depth: 0 | 1
   );
 }
 
-/** 图表复用既有 ChartView(无新渲染路径;spec「图表配置复用既有渲染」)。 */
 function SectionChart({ section: s }: { section: SectionOut }) {
   const chart = s.chart as { type?: string; x?: string; y?: string } | null;
   const ok = s.bindings.map(_binding).find((b) => b.status === "OK");

@@ -1,8 +1,4 @@
-"""063-schema-table-pruning 测试:打分/零命中/资产三类输入/开关回退/trace 下发。
-
-宪法 Article III:先红后绿——预筛契约(零命中不兜底、资产贡献、开关逐字回退)
-由本文件钉死。
-"""
+"""表级预筛测试:打分/零命中/资产三类输入/开关回退/trace 下发。"""
 
 from typing import cast
 
@@ -35,7 +31,7 @@ def _meta(*tables: MetaTable) -> SchemaMeta:
     return SchemaMeta(tables=list(tables), truncated=False)
 
 
-# ── 1. 打分函数(任务 1.1) ─────────────────────────────────────────
+# ── 1. 打分函数 ─────────────────────────────────────────
 
 
 def test_table_name_exact_match_scores_highest() -> None:
@@ -68,7 +64,7 @@ def test_column_and_comment_contribute() -> None:
     assert hits and hits[0].name == "goods"  # 「商品」命中表说明「商品表」
 
 
-# ── 2. 三类资产输入(任务 1.2) ─────────────────────────────────────
+# ── 2. 三类资产输入 ─────────────────────────────────────
 
 
 def test_glossary_alias_contributes() -> None:
@@ -105,7 +101,7 @@ def test_question_beats_assets() -> None:
     assert hits[0].name == "orders"
 
 
-# ── 3. 零命中哨兵形态与开关(任务 1.3/1.4) ─────────────────────────
+# ── 3. 零命中哨兵形态与开关 ───────────────────────────────
 
 
 def test_zero_hit_schema_hint_is_sentinel_shape() -> None:
@@ -120,7 +116,7 @@ def test_zero_hit_schema_hint_is_sentinel_shape() -> None:
 
 
 def test_switch_off_byte_identical(monkeypatch: pytest.MonkeyPatch) -> None:
-    """开关关闭:注入与全量逐字一致(零回归回退)。"""
+    """开关关闭:注入与全量逐字一致(回退)。"""
     from kongming_agent.graph.nodes import format_schema_hint
     from kongming_agent.settings import Settings
 
@@ -133,7 +129,7 @@ def test_switch_off_byte_identical(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_prune_schema_keeps_only_hits_in_score_order() -> None:
-    """预筛后 tables 仅含命中表,按命中分降序(与 trace kept/080 首位豁免/
+    """预筛后 tables 仅含命中表,按命中分降序(与 trace kept/首位豁免/
     提示词注意力一致;同分保持元数据原序——确定性)。"""
     meta, hits = prune_schema("商品和订单", _meta(GOODS, ORDERS, USERS), top_n=12)
     names = [t.name for t in meta.tables]
@@ -169,7 +165,7 @@ def test_question_keywords_cjk_and_latin() -> None:
 
 
 async def test_retrieve_fallback_emits_prune_trace(monkeypatch: pytest.MonkeyPatch) -> None:
-    """任务 2.3:入选依据与被裁表数随 trace 事件下发(可解释,非黑盒)。"""
+    """入选依据与被裁表数随 trace 事件下发(可解释,非黑盒)。"""
     from kongming_agent import deps
     from kongming_agent.graph import nodes as nodes_mod
     from kongming_agent.graph.nodes import retrieve
@@ -219,5 +215,5 @@ def test_prune_settings_defaults() -> None:
     from kongming_agent.settings import Settings
 
     s = Settings()
-    assert s.schema_prune is True  # 缺省开(提案口径)
+    assert s.schema_prune is True  # 缺省开
     assert s.schema_prune_top_n == 12  # 缺省 N

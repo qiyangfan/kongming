@@ -1,16 +1,4 @@
-"""0012: semantic-layer 域两表(023)
-
-Revision ID: 0012
-Revises: 0011
-Create Date: 2026-08-23
-
-rag.table_relations:表关系(JOIN path);四元唯一(tenant+ds+source+target);
-source 区分 introspection/manual——upsert 守卫在 ON CONFLICT WHERE(手工
-行不被内省覆盖)。
-rag.metric_definitions:指标口径;三元唯一(tenant+ds+metric_name);
-sql_template 仅作 prompt 文字注入,永不执行(无端点无代码路径)。
-**downgrade**:删两表(新域零存量)。
-"""
+"""新增表关系和指标定义表。内省更新不得覆盖人工关系；指标 SQL 模板仅供提示词使用，不会执行。"""
 
 from alembic import op
 

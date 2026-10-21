@@ -1,12 +1,12 @@
-"""0020: team-workspace 域两表 + 三处归属列(032)
+"""0020: team-workspace 域两表 + 三处归属列
 
 Revision ID: 0020
 Revises: 0019
 Create Date: 2026-08-24
 
 sys_team/sys_team_member:团队与成员(role VARCHAR+CHECK);
-sys_bot_definition/sys_workflow_def/user_memory 纯增 team_id
-(NULL=个人,存量零回归)。
+sys_bot_definition/sys_workflow_def/user_memory  team_id
+(NULL=个人,存量)。
 **downgrade**:删列+删两表(新域零存量)。
 """
 

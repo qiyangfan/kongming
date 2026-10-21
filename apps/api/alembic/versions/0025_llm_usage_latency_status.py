@@ -1,12 +1,12 @@
-"""0025: LLM 用量可观测(038)
+"""0025: LLM 用量可观测
 
 Revision ID: 0025
 Revises: 0024
 Create Date: 2026-08-25
 
-sys_llm_usage:加 latency_ms/status 两列——失败调用也采集(038 起),
+sys_llm_usage:加 latency_ms/status 两列——失败调用也采集(起),
 失败率与延迟成为可聚合指标。存量行 DEFAULT 'SUCCESS' 语义成立
-(021 起失败调用本就不落记录)。
+(起失败调用本就不落记录)。
 **downgrade**:删两列(新列无外键引用,瞬时)。
 """
 

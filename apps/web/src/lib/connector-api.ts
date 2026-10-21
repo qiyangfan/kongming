@@ -1,4 +1,4 @@
-/* 连接器域 API 封装(099 http-connector-domain)。类型契约由 ADR-005 管线生成(禁手写);
+/* 连接器域 API 封装。类型契约由 ADR-005 管线生成(禁手写);
    凭证任何接口不回显明文——列表/详情/创建/更新响应只含形态与尾号掩码。 */
 
 import type { components } from "./api-types.gen";

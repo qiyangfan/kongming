@@ -1,5 +1,4 @@
-/* 任务列表/详情页(090 task-kernel):DataView 双形态 + StatusBadge + 步骤账本
-   + 事件时间线;详情内暂停/恢复/取消/审批。骨架只用标准件(宪法 Article 4/9)。 */
+/* 展示任务列表和步骤状态，并提供暂停、恢复、取消与审批操作。 */
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -93,7 +92,7 @@ export default function TasksPage() {
   );
 }
 
-/** 状态筛选(090 spec 待实施项):全部 + 任务状态全集,单选即查。 */
+/** 提供“全部”和各任务状态筛选,选择后立即查询。 */
 function StatusFilter(props: { value: string; onChange: (v: string) => void }) {
   return (
     <Select value={props.value} onValueChange={props.onChange}>

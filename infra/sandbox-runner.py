@@ -1,16 +1,4 @@
-"""027 cloud-code-sandbox 沙箱内引导脚本(镜像内置,/runner.py)。
-
-协议(design D2):
-- stdin 收 JSON:{"code": str, "data": {"columns": [...], "rows": [[...]]} | null}
-- data 非空 → df 变量(pandas DataFrame)注入;无 data 则全局无 df 键
-  (引用即 NameError,错误原文回传由 LLM 自纠)
-- 末行(真实 stdout 最后一行)输出协议:__KM_RESULT__{json}
-  宿主只认最后一行(代码伪造的协议行必在真协议行之前,天然失效)
-- status 仅 SUCCESS/ERROR;TIMEOUT/RESOURCE_LIMIT 由宿主按杀信号/exit code 判定
-
-安全边界在容器层(无网络/只读根 fs/非 root/cgroup 限额),本脚本不做
-语言内沙箱(假安全感);stdout 有界收集防内存放大(cgroup 是最终闸)。
-"""
+"""沙箱运行脚本：读取 JSON 输入并输出 `__KM_RESULT__` 协议行，宿主解析 stdout 最后一行。资源隔离由容器提供。"""
 
 import base64
 import io
@@ -24,7 +12,7 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl")
 
 _STDOUT_CAP = 64 * 1024  # 64KB 截断
-_IMAGE_CAP = 500 * 1024  # base64 单图上限(design D2)
+_IMAGE_CAP = 500 * 1024  # base64 单图上限
 _TRACEBACK_TAIL = 2000
 
 _real_stdout = sys.stdout
@@ -113,7 +101,7 @@ def main() -> int:
     try:
         fignums = plt.get_fignums()
         if fignums:
-            fig = plt.figure(fignums[-1])  # 末图(design D2)
+            fig = plt.figure(fignums[-1])  # 末图
             buf = io.BytesIO()
             fig.savefig(buf, format="png", bbox_inches="tight")
             b64 = base64.b64encode(buf.getvalue()).decode("ascii")

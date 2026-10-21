@@ -1,9 +1,4 @@
-"""rag 域 agent 回调客户端(009):embedding / describe-table(ADR-002 方向:
-LLM key 仅 agent 面持有,api 经内部令牌回调获取智能服务)。
-
-HTTP 层错误一律收敛领域结果(embedding→EmbeddingError 降级;describe→
-enriched=False 降级),不裸抛——辅助路失败不阻断主链路(上游同款纪律)。
-"""
+"""API 经内部端点回调 Agent 做向量化和表说明生成;回调错误转领域失败,由调用方降级。"""
 
 import hashlib
 import json
@@ -26,7 +21,7 @@ _EMB_TTL_SEC = 24 * 3600
 class AgentRagClient:
     """EmbeddingPort/TableDescriberPort 实现:httpx 回调 + Redis emb 缓存(fail-open)。
 
-    AsyncClient 实例级 lazy 复用(013 挂账⑭):消每请求 TLS 握手——fetch-metadata
+    AsyncClient 实例级 lazy 复用:消每请求 TLS 握手——fetch-metadata
     500 表润色从 500 次建连降为共享一条 keep-alive 连接链。client 不 close,
     生命周期随实例(进程级单例见 get_agent_rag_client);httpx.AsyncClient
     设计为并发任务共享,无锁安全。
@@ -37,14 +32,14 @@ class AgentRagClient:
         self._base = settings.agent_base_url.rstrip("/")
         self._token = settings.internal_token or ""
         self._timeout = 60.0  # embedding/润色单请求超时(批量 64 条富余)
-        self._dim = settings.rag_embedding_dim  # 维度防线(R2-R1)
+        self._dim = settings.rag_embedding_dim  # 维度防线
         self._redis = redis
         self._client: httpx.AsyncClient | None = None
 
     def _get_client(self) -> httpx.AsyncClient:
         """lazy 创建并复用;首建竞态无害(最多多建一个被 GC,无状态正确性问题)。
 
-        进程单 loop 前提(R1-O1):连接池内连接绑定创建时事件循环——生产
+        进程单 loop 前提:连接池内连接绑定创建时事件循环——生产
         uvicorn 单 worker 单 loop 安全;测试若经本实例完成一次成功建连,
         后续用例换 loop 复用会 RuntimeError,须自行复位单例槽/_client。
         """
@@ -97,7 +92,7 @@ class AgentRagClient:
             data = resp.json()
         except ValueError as e:  # 200 但非 JSON(网关回 HTML 等)——同降级语义
             raise EmbeddingError(f"embedding 响应非 JSON: {e}") from e
-        # agent 契约:vectors 为 list[list[float]];非数值元素由下方 float() 原样报错
+        # agent 契约:vectors 为 list[list[float]];非数值元素由下方 float 原样报错
         vectors = cast("list[list[float]]", data.get("vectors") or [])
         if len(vectors) != len(texts):
             raise EmbeddingError("embedding 返回数量与请求不符")
@@ -143,7 +138,7 @@ class AgentRagClient:
                 for k, v in cast("dict[str, object]", data.get("columns_comment") or {}).items()
             },
             sample_queries=[str(s) for s in cast("list[object]", data.get("sample_queries") or [])],
-            # 037:透传即清洗(库内值与消费值一致,审查循环 B6)
+            # 透传即清洗(库内值与消费值一致)
             alias=clean_alias(str(data.get("alias") or "")),
         )
 
@@ -184,14 +179,7 @@ _singleton: AgentRagClient | None = None
 
 
 def get_agent_rag_client(redis: Redis | None = None) -> AgentRagClient:
-    """进程内共享单例(013 挂账⑭):组合根(chat/router、rag/router 的 Depends
-    工厂)经此取实例,AsyncClient 连接池跨请求复用,消每请求 TLS 握手。
-    redis 仅首建生效(get_redis 自身为单例工厂);单例无业务状态(仅配置+
-    连接池+redis 句柄)。测试面(R1-S3 如实注记):TestClient 测试经组合根
-    触达本工厂,但 embed/describe 类级补丁(test_rag_admin/test_rag_recall)
-    或测试环境连接失败兜底使 _client 恒空池,跨 loop 复用无害;成功建连的
-    新测试须先复位 _singleton(单 loop 前提见 _get_client)。
-    """
+    """返回进程内共享的 Agent RAG 客户端，复用 HTTPX 连接池和 Redis 客户端。"""
     global _singleton
     if _singleton is None:
         _singleton = AgentRagClient(redis)

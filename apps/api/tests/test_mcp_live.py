@@ -1,13 +1,5 @@
-"""113 真实 MCP server 集成验证:生产 HttpMcpCaller(SDK 2.x 客户端)与
-官方 SDK 实现的真实 server 全方法面闭环——109 的既有测试全走 mock,协议的
-真实握手、真实分帧、真实 server 头语义从未验证;adopt-mcp-sdk2 起客户端
-与 server 同为官方栈(双向一致性,「自我一致性」盲区消除)。
-
-双形态(adopt-mcp-sdk2 spec delta):stateless(2026-07-28 现代形态,
-server/discover 无会话直连)与 stateful(旧握手时代形态,initialize 兼容)。
-
-skip-safe:mcp 包缺失或服务拉起失败 → pytest.skip(环境事实探测,不假失败)。
-"""
+"""使用官方 MCP SDK 验证真实客户端与服务端的握手、分帧和响应语义,
+覆盖无状态与旧版握手模式。SDK 缺失或服务无法启动时跳过。"""
 
 import asyncio
 import contextlib
@@ -64,7 +56,7 @@ async def _serve(app: Any, port: int) -> None:
 
 @pytest.fixture()
 async def live_mcp(request: pytest.FixtureRequest) -> AsyncIterator[tuple[HttpMcpCaller, str]]:
-    """parametrize on request.param=(stateless,);uvicorn task 自持生命周期。"""
+    """parametrize on request.param=(stateless);uvicorn task 自持生命周期。"""
     stateless = request.param
     port = _free_port()
     base = f"http://127.0.0.1:{port}"

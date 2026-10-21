@@ -1,4 +1,4 @@
-"""system 路由(薄适配层,007):/system/* 管理端点族。
+"""处理 /system/* 管理端点。
 
 守卫复用 auth.router(current_user/require_perm);领域错误在此统一映射
 状态码(404 不存在 / 409 状态冲突 / 400 参数与领域规则不符)。
@@ -91,7 +91,7 @@ class UserCreateIn(BaseModel):
 
 
 class UserUpdateIn(BaseModel):
-    """编辑全量表单语义;password 不传=不改(username 创建后不可改,不接收)。"""
+    """全量更新用户资料;不提交密码时保持原值,username 创建后不可修改。"""
 
     nickname: str = Field(max_length=64)
     email: str | None = Field(default=None, max_length=128)
@@ -125,7 +125,7 @@ class UserPageOut(BaseModel):
 
 
 class RoleCreateIn(BaseModel):
-    # 大写蛇形约定(与内置角色同风格),拒绝空白/小写近形变体(R4)
+    # 使用与内置角色一致的大写蛇形格式，拒绝空白和小写变体。
     role_key: str = Field(min_length=2, max_length=100, pattern=r"^[A-Z][A-Z0-9_]+$")
     role_name: str = Field(min_length=1, max_length=100)
     data_scope: DataScope = "SELF"
@@ -136,7 +136,7 @@ class RoleCreateIn(BaseModel):
 
 
 class RoleUpdateIn(BaseModel):
-    """role_key 必须与原值一致(不可改,领域校验 400)。"""
+    """role_key 创建后不可修改。"""
 
     role_key: str = Field(min_length=2, max_length=100, pattern=r"^[A-Z][A-Z0-9_]+$")
     role_name: str = Field(min_length=1, max_length=100)
@@ -160,7 +160,7 @@ class RoleOut(BaseModel):
     sort: int
     builtin: bool
     perm_ids: list[str]
-    # data_scope=CUSTOM 的自定义部门集合(纯增字段,既有客户端可忽略;非 CUSTOM 恒空)
+    # data_scope=CUSTOM 的自定义部门集合(新增字段,既有客户端可忽略;非 CUSTOM 恒空)
     data_scope_dept_ids: list[str]
 
 

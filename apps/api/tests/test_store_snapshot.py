@@ -1,8 +1,4 @@
-"""104 bot-store 版本化:快照纯函数测试(测试先行,任务 2.1)。
-
-覆盖:定义→快照白名单定型/规范化、一致性判定(规范化后逐项相等)、
-快照键集断言(新增 Bot 定义字段时快照白名单同步的防线)。
-"""
+"""覆盖 Bot 版本快照的生成和校验。"""
 
 from typing import cast
 
@@ -53,7 +49,7 @@ def test_build_snapshot_normalization() -> None:
     assert suggestions[0] == "x" * 200  # 截断
     assert len(suggestions) == 5  # 封顶 5 条
     assert suggestions[4] == "e"
-    # 非 str 标量收编(与既有上架链路 str() 口径一致)
+    # 非字符串标量使用 str 转换。
     snap2 = build_snapshot(
         name="n",
         greeting="g",

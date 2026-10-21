@@ -1,20 +1,16 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* 铁律 3/5/6/7 的单源:品牌色(武侯祠三元:红墙·黛瓦·鎏金)全部定义于此。
-   色彩意图与命名见 docs/brand.md(文档定意、CSS 定值)。
-   组件只许引用 token 类(bg-primary/from-grad-from…),禁硬编码色值。 */
+/* 品牌色集中定义于此；组件应引用 token，色彩含义见 docs/brand.md。 */
 
 @custom-variant dark (&:is(.dark *));
 
-/* shadcn v4 基线:全局边框/轮廓/页面底色走 token(Tailwind v4 裸 border 落
-currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色且随文字变色) */
+/* Tailwind v4 的裸 border 使用 currentColor；全局边框、轮廓和页面底色统一映射到语义 token。 */
 @layer base {
   * {
     @apply border-border outline-ring/50;
 
-    /* 移动基线(mobile-experience B1.1):触控不闪斑;滚动容器到边缘不牵动
-       整页(嵌套滚动隔离,spec「触控与安全区基线」) */
+    /* 禁用移动端点击闪斑，并隔离嵌套滚动。 */
     -webkit-tap-highlight-color: transparent;
     overscroll-behavior: contain;
   }
@@ -24,9 +20,7 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
   }
 }
 
-/* 安全区工具类(mobile-experience B1.1):贴边区避让全面屏 Home 指示条/刘海。
-   BottomNav/对话输入区/全屏表单 Footer 消费 pb-safe;横屏 刘海侧用 pl/pr-safe。
-   壳层内容区预留导航避让高度的 pb-safe-nav 在 B2.1 BottomNav 接入时一并落地。 */
+/* 安全区工具类让贴边内容避开刘海和 Home 指示条。 */
 @utility pb-safe {
   padding-bottom: var(--kb-safe-bottom);
 }
@@ -39,15 +33,12 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
   padding-right: env(safe-area-inset-right, 0);
 }
 
-/* 顶部贴边区避让(刘海/状态栏):消费方为壳层内容列(app-layout 单点,页面
-   不自行感知)与不经过壳层的 portal 浮层(全屏 dialog 关闭钮/会话抽屉)。 */
+/* 为页面内容和 Portal 浮层预留顶部安全区。 */
 @utility pt-safe {
   padding-top: var(--kb-safe-top);
 }
 
-/* 壳层内容区底部避让(B2.1):BottomNav 总高 = 外层 pb-safe + 内层行 h-16
-   (bottom-nav.tsx 同源;安全区 padding 与行高不同元素,互不挤占内容区);
-   仅窄屏由 AppLayout 消费,md+ 不预留。 */
+/* 窄屏底部导航占用行高和安全区；桌面布局不预留空间。 */
 @utility pb-safe-nav {
   padding-bottom: calc(4rem + var(--kb-safe-bottom));
 }
@@ -55,8 +46,7 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
 :root {
   color-scheme: light;
 
-  /* 移动基线安全区(mobile-experience B1.1):全面屏 Home 指示条/刘海避让,
-     缺省 0px 非全面屏零影响 */
+  /* 非全面屏设备返回 0px，不影响现有布局。 */
   --kb-safe-bottom: env(safe-area-inset-bottom, 0px);
   --kb-safe-top: env(safe-area-inset-top, 0px);
 
@@ -81,13 +71,10 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
   --warning-foreground: #fff;
   --border: #dfe3de; /* 青灰线:分隔线/卡片描边,刻意低对比是设计意图 */
 
-  /* 控件边界独立取值,不得等于 --border:未勾选的复选框只有这一条线可辨,
-     必须达非文本控件 3:1(此值对宣纸白 3.35、对纯白卡 3.49)。消费方=input/textarea/
-     select/checkbox/toggle/button(outline) */
+  /* 未选控件主要依靠边界辨识，需满足非文本控件 3:1 对比度。 */
   --input: #808c86;
 
-  /* 控件底/开关轨道填充是第三个语义(宪法 Article 3):不得跟随 --input,否则描边一提亮,
-     未勾选开关轨道就变实心灰条被误读为开启态。值 = 拆分前 --input 的原值,填充观感逐字节不变 */
+  /* 轨道填充与控件描边分开设置，避免未选开关看起来像已开启。 */
   --input-fill: #dfe3de;
   --ring: #c9a063; /* 鎏金点睛:匾额之金,哑光不炫 */
 }
@@ -124,8 +111,7 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
     -apple-system, blinkmacsystemfont, "Segoe UI", roboto, "PingFang SC", "Microsoft YaHei",
     sans-serif;
 
-  /* 字号刻度补充:内建 xs/sm/base 档位间的中间档(等值收编自业务字面量,
-     业务代码字号只许引用此类,禁再写 text-[NNpx] 字面量) */
+  /* 补充 Tailwind 内建字号之间的刻度，业务代码统一使用这些 token。 */
   --text-3xs: 0.625rem; /* 10px:分组标题/时间戳等最小微字 */
   --text-2xs: 0.6875rem; /* 11px:slogan/工具名等辅助微字 */
   --text-md: 0.9375rem; /* 15px:对话正文/响应文本档(sm 与 base 之间) */
@@ -167,10 +153,7 @@ currentColor,须在此统一收敛,否则 outline 按钮/浮层边框呈墨色�
   --color-grad-mid: #1d3742; /* 深黛 */
   --color-grad-end: #0f1a22; /* 青墨 */
 
-  /* 流式时间轴动效(品牌表现层豁免,用色走 token):
-     运行中节点呼吸光环 + 运行中文字流光(bg-clip-text 扫过);
-     完成节点生命周期=降权保留,超限由窗口滚动+顶部 mask 渐隐收束(空间驱动,
-     刻意不做时间驱动消失:自愈/重试场景的轮次叙事不可丢,裁决见会话复盘) */
+  /* 时间轴突出运行中的节点，并保留已完成节点，便于查看重试过程。 */
   --animate-timeline-ping: timeline-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
   --animate-shimmer: shimmer 2.4s linear infinite;
 

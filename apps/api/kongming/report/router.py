@@ -1,4 +1,4 @@
-"""report 路由(088):公开端点(生成/进度/详情/列表/编辑/刷新/删除/导出/版本)
+"""report 路由:公开端点(生成/进度/详情/列表/编辑/刷新/删除/导出/版本)
 + 内部进度端点(agent 编排回写 phase)。
 
 权限点:report:generate(发起/编辑/刷新/删除)、report:read(查询面)、
@@ -69,7 +69,7 @@ def _get_service(session: AsyncSession) -> ReportService:
                     sql_text=sql_text,
                     user_id=user_id,
                     question=None,
-                    # 上限 +1:保留「超限」判定能力(执行端截断后恒等长会丢标注,审查 P1-2)
+                    # 上限 +1:保留「超限」判定能力(执行端截断后恒等长会丢标注)
                     limit=501,
                 )
                 await s.commit()
@@ -376,9 +376,8 @@ async def _session_digest(
         return None
     lines: list[str] = []
     last_question = ""
-    # 有界读取(088):素材只需最近 N 轮,防长会话大 result_json 全量拉取。
-    # 角色枚举为大写(库 CHECK 约束);问落 USER 行、SQL/结论落 ASSISTANT 行,
-    # 按轮次配对取材(真实链路 assistant 行不携带 question)
+    # 有界读取:素材只需最近 N 轮,防长会话大 result_json 全量拉取。
+    # role 必须大写以匹配 CHECK；按轮次配对 USER 问题与 ASSISTANT 的 SQL 和结论。
     for msg in await repo.list_messages(session_id=session_id, limit=limit * 2):
         role = str(msg.get("role") or "")
         if role == "USER":
@@ -400,7 +399,7 @@ async def _session_digest(
     return "\n".join(lines[: limit * 3])
 
 
-# 后台任务强引用集(防 GC:CPython 事件循环对 task 仅持弱引用,审查 P1-5)
+# 后台任务强引用集(防 GC:CPython 事件循环对 task 仅持弱引用)
 _GEN_TASKS: set[asyncio.Task[None]] = set()
 
 _REPORT_ROW_SQL = text(
@@ -688,8 +687,8 @@ async def export_report(
 class ProgressIn(BaseModel):
     report_id: str
     phase: str
-    # 091 裁决落地(2026-10-10):进度回写锚定租户归属——与 collab-start
-    # 同款闸;缺省 default 兼容旧 agent(租户语义在写侧过滤兜底)
+    # 进度回写锚定租户归属(与 collab-start 同款闸);缺省 default 兼容旧
+    # agent(租户语义在写侧过滤兜底)
     tenant_key: str = "default"
 
 

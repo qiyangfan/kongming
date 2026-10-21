@@ -1,4 +1,4 @@
-"""llmusage 端点测试(021 multi-model-routing + 038 agent-observability):
+"""llmusage 端点测试(multi-model-routing spec):
 落库/反解/聚合/守门;采集补全(latency/status)/趋势/明细/时间线。"""
 # pyright: reportPrivateUsage=false
 
@@ -132,7 +132,7 @@ async def test_summary_forbidden(
     assert r.status_code == 403
 
 
-# ========== 038 agent-observability ==========
+# ========== agent-observability ==========
 
 
 async def _seed_usage_rows(s: AsyncSession, rows: list[dict[str, Any]]) -> None:
@@ -151,7 +151,7 @@ async def _seed_usage_rows(s: AsyncSession, rows: list[dict[str, Any]]) -> None:
 
 
 async def test_report_persists_latency_status(client: AsyncClient, session: AsyncSession) -> None:
-    """038:上报含 latency_ms/status 落库(失败调用也上报,usage=0)。"""
+    """上报含 latency_ms/status 落库(失败调用也上报,usage=0)。"""
     await seed_all(session, get_settings())
     payload = {
         "records": [
@@ -180,7 +180,7 @@ async def test_report_persists_latency_status(client: AsyncClient, session: Asyn
 
 
 async def test_report_backcompat_defaults(client: AsyncClient, session: AsyncSession) -> None:
-    """038:旧 agent 上报(无新字段)缺省 SUCCESS/NULL latency,兼容窗口。"""
+    """旧 agent 上报(无新字段)缺省 SUCCESS/NULL latency,兼容窗口。"""
     await seed_all(session, get_settings())
     r = await client.post("/internal/llm-usage", headers=INTERNAL, json=_records())
     assert r.status_code == 200
@@ -194,7 +194,7 @@ async def test_report_backcompat_defaults(client: AsyncClient, session: AsyncSes
 
 
 async def test_summary_error_and_latency_stats(client: AsyncClient, session: AsyncSession) -> None:
-    """038:calls_error 计数;延迟统计仅 SUCCESS 参与(ERROR 的 30001 不入)。"""
+    """calls_error 计数;延迟统计仅 SUCCESS 参与(ERROR 的 30001 不入)。"""
     await seed_all(session, get_settings())
     await _seed_usage_rows(
         session,
@@ -245,7 +245,7 @@ async def test_summary_error_and_latency_stats(client: AsyncClient, session: Asy
 
 
 async def test_trend_pads_zero_days(client: AsyncClient, session: AsyncSession) -> None:
-    """038:趋势逐天补零(桶数=days;今天桶含刚落记录)。"""
+    """趋势逐天补零(桶数=days;今天桶含刚落记录)。"""
     await seed_all(session, get_settings())
     await _seed_usage_rows(
         session,
@@ -290,7 +290,7 @@ async def test_trend_days_bounds(client: AsyncClient, session: AsyncSession) -> 
 
 
 async def test_page_filters_and_total(client: AsyncClient, session: AsyncSession) -> None:
-    """038:明细分页——status/trace_id 筛选、倒序、total 一致。"""
+    """明细分页——status/trace_id 筛选、倒序、total 一致。"""
     await seed_all(session, get_settings())
     base = {"m": "qwen-plus", "task": "SUMMARIZE", "pt": 1, "ct": 1, "tt": 2}
     await _seed_usage_rows(
@@ -335,7 +335,7 @@ async def test_page_filters_and_total(client: AsyncClient, session: AsyncSession
 
 
 async def test_timeline_merges_three_tables(client: AsyncClient, session: AsyncSession) -> None:
-    """038:时间线按 trace 聚 LLM+TOOL+SQL 三路事件,时间升序。"""
+    """时间线按 trace 聚 LLM+TOOL+SQL 三路事件,时间升序。"""
     await seed_all(session, get_settings())
     tid = (
         await session.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'"))
@@ -402,7 +402,7 @@ async def test_timeline_merges_three_tables(client: AsyncClient, session: AsyncS
     assert tool_ev["latency_ms"] == 120
     sql_ev = next(e for e in body["events"] if e["kind"] == "SQL")
     assert sql_ev["status"] == "PASS"
-    assert sql_ev["name"] == "default"  # R1-B5:SQL 事件 name=数据源
+    assert sql_ev["name"] == "default"  # SQL 事件 name=数据源
 
 
 async def test_timeline_empty_200(client: AsyncClient, session: AsyncSession) -> None:
@@ -420,7 +420,7 @@ async def test_timeline_empty_200(client: AsyncClient, session: AsyncSession) ->
 async def test_new_endpoints_forbidden(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """038:trend/page/timeline 同挂 system:llm-usage:view。"""
+    """trend/page/timeline 同挂 system:llm-usage:view。"""
     await seed_all(session, get_settings())
     uid = await make_user("usage_plain2")
     tid = (
@@ -436,13 +436,13 @@ async def test_new_endpoints_forbidden(
     ).status_code == 403
 
 
-# ========== 038 R1 评审补测 ==========
+# ========== 聚合/分页/趋势边界口径 ==========
 
 
 async def test_summary_all_error_group_null_latency(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    """R1-B4:纯 ERROR 组延迟统计 NULL 传播(全组无 SUCCESS latency 样本)。"""
+    """纯 ERROR 组延迟统计 NULL 传播(全组无 SUCCESS latency 样本)。"""
     await seed_all(session, get_settings())
     await _seed_usage_rows(
         session,
@@ -481,7 +481,7 @@ async def test_summary_all_error_group_null_latency(
 
 
 async def test_bot_sink_persists_new_columns(client: AsyncClient, session: AsyncSession) -> None:
-    """R1-B4(design 承诺):bot 请求内同步通道(insert_bot_usage_batch)
+    """bot 请求内同步通道(insert_bot_usage_batch)
     落 latency_ms/status——收集器 ERROR 记录经 sink 可达落库。"""
     from kongming.llmusage.repository import SqlLlmUsageRepo
 
@@ -518,11 +518,11 @@ async def test_bot_sink_persists_new_columns(client: AsyncClient, session: Async
 
 
 async def test_trend_cross_month_bucketing(client: AsyncClient, session: AsyncSession) -> None:
-    """R1-B4(design 承诺):跨月窗口——上月日期行归上月桶,不溢进今天桶。"""
+    """跨月窗口:上月日期行归上月桶,不溢进今天桶。"""
     await seed_all(session, get_settings())
-    # 构造 35 天前±12h 的沪时日期(R2-F1:固定回退避开午夜边界;
-    # 恒在 45 天窗口内且必非今天——原「day=15 偏移」算式在每月
-    # 1-6/29-31 号会落到窗外或当天,CI 必挂)
+    # 构造 35 天前±12h 的沪时日期(固定回退避开午夜边界;
+    # 恒在 45 天窗口内且必非今天——按天号偏移的算式在每月
+    # 1-6/29-31 号会落到窗外或当天)
     now_sh = datetime.now(UTC) + timedelta(hours=8)
     last_month = now_sh - timedelta(days=35, hours=12)
     await _seed_usage_rows(
@@ -558,7 +558,7 @@ async def test_trend_cross_month_bucketing(client: AsyncClient, session: AsyncSe
 
 
 async def test_page_deep_offset_and_bounds(client: AsyncClient, session: AsyncSession) -> None:
-    """R1-B4:深翻页越界空页 total 不变;days 上下界合法。"""
+    """深翻页越界空页 total 不变;days 上下界合法。"""
     await seed_all(session, get_settings())
     await _seed_usage_rows(
         session,
@@ -591,7 +591,7 @@ async def test_page_deep_offset_and_bounds(client: AsyncClient, session: AsyncSe
 async def test_report_invalid_status_and_negative_latency_422(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    """R1-B4:status 非法值 422;latency_ms 负值 422。"""
+    """status 非法值 422;latency_ms 负值 422。"""
     await seed_all(session, get_settings())
     base = {
         "trace_id": "tr-x",
@@ -613,7 +613,7 @@ async def test_report_invalid_status_and_negative_latency_422(
     assert r2.status_code == 422
 
 
-# ============ 077 出站协议归因 ============
+# ============ 出站协议归因 ============
 
 
 def _records_protocol() -> dict[str, Any]:
@@ -673,7 +673,7 @@ async def test_report_protocol_persisted(client: AsyncClient, session: AsyncSess
 async def test_page_protocol_filter_and_column(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """任务 1.2:明细分页按 protocol 筛选只返回该协议行;同名 model 两条目
+    """明细分页按 protocol 筛选只返回该协议行;同名 model 两条目
     流量可拆分;返回行含 protocol 列(null 行不炸)。"""
     await seed_all(session, get_settings())
     await client.post("/internal/llm-usage", headers=INTERNAL, json=_records_protocol())
@@ -697,8 +697,8 @@ async def test_page_protocol_filter_and_column(
 async def test_summary_protocol_filter(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """任务 1.3:汇总按 protocol 过滤后 tokens/calls 计数只含该协议;
-    不过滤时与现状逐字一致(零回归);无权限 403。"""
+    """汇总按 protocol 过滤后 tokens/calls 计数只含该协议;
+    不过滤时与现状逐字一致;无权限 403。"""
     await seed_all(session, get_settings())
     await client.post("/internal/llm-usage", headers=INTERNAL, json=_records_protocol())
     token = await _admin_token(client, session)

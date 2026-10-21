@@ -1,4 +1,4 @@
-"""rag 纯函数测试(009):切块解析/RRF/优先级/提示构造(embedding 文本公式)。"""
+"""rag 纯函数测试:切块解析/RRF/优先级/提示构造(embedding 文本公式)。"""
 
 from typing import Any
 
@@ -142,12 +142,12 @@ def test_build_schema_hint_shape() -> None:
 
 
 def test_build_schema_hint_alias_shape() -> None:
-    """037:alias 进 schema_hint 表说明段「表名(别名)(列)」;空 alias 形态零回归。"""
+    """alias 进 schema_hint 表说明段「表名(别名)(列)」;空 alias 形态。"""
     with_alias = build_schema_hint([_entry(alias="影片信息表")])
     assert "tenant_sakila.film(影片信息表)(film_id(integer 影片ID), title) -- 影片表" in (
         with_alias
     )
-    # 空 alias:与引入前逐字一致(存量零回归)
+    # alias 为空时保留旧版输出格式。
     assert build_schema_hint([_entry()]) == (
         "tenant_sakila.film(film_id(integer 影片ID), title) -- 影片表\n"
         "  示例:SELECT count(*) FROM tenant_sakila.film"
@@ -173,14 +173,14 @@ def test_embedding_text_empty_parts() -> None:
 
 
 def test_embedding_text_includes_alias() -> None:
-    """037:alias 拼 embedding 输入文本(输入侧「商品表」命中 alias);无 alias 不变形。"""
+    """alias 拼 embedding 输入文本(输入侧「商品表」命中 alias);无 alias 不变形。"""
     text = build_embedding_text("goods", "商品信息", {}, alias="商品表")
     assert text == "goods 商品表 商品信息"
     assert build_embedding_text("goods", "商品信息", {}) == "goods 商品信息"
 
 
 def test_clean_alias_defense() -> None:
-    """R1-F1 纵深:结构性违禁字符(括号/换行/竖线)置空;空白折叠。"""
+    """纵深:结构性违禁字符(括号/换行/竖线)置空;空白折叠。"""
     from kongming.rag.models import clean_alias
 
     assert clean_alias("  商品 表 ") == "商品 表"  # 折叠空白
@@ -192,7 +192,7 @@ def test_clean_alias_defense() -> None:
 
 
 def test_build_schema_hint_dirty_alias_sanitized() -> None:
-    """R1-F1 纵深:脏别名不进 hint 行结构(整体按无别名处理)。"""
+    """纵深:脏别名不进 hint 行结构(整体按无别名处理)。"""
     hint = build_schema_hint([_entry(alias="bad\nfake.table(q)")])
     assert hint.startswith("tenant_sakila.film(film_id(integer 影片ID), title)")
 

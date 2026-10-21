@@ -1,4 +1,4 @@
-"""用户偏好闭合槽位(059):领域纯函数,零框架依赖。
+"""用户偏好闭合槽位:领域纯函数,零框架依赖。
 
 隐式提取只允许产出槽位 patch;禁止自由文本事实。注入为可关默认值段,
 不得作为 WHERE/数据范围约束。
@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
 
-# 闭合槽位 schema(v1;演进走变更,不开自由文本)
+# 闭合槽位 schema(v1;扩槽位走 openspec 变更,不开自由文本)
 SLOT_KEYS: tuple[str, ...] = (
     "preferred_datasource",
     "default_time_range",
@@ -45,7 +45,7 @@ _EXPLICIT_SLOT_HINTS: tuple[tuple[re.Pattern[str], str], ...] = (
 class PrefsPatch:
     """槽位补丁:只含合法槽位键;未知键在 normalize 阶段丢弃。
 
-    087:deletes=显式 null 删除指令(仅人工 PUT/显式聊天产生;隐式提取
+    deletes=显式 null 删除指令(仅人工 PUT/显式聊天产生;隐式提取
     永不删除,values 与 deletes 均空才是空补丁)。
     """
 
@@ -99,7 +99,7 @@ def normalize_patch(raw: Mapping[str, object]) -> PrefsPatch:
 
 
 def normalize_put_patch(raw: Mapping[str, object]) -> PrefsPatch:
-    """人工 PUT 归一化(087 D1):显式 null=删除指令;空串/空列表=丢弃
+    """人工 PUT 归一化：显式 null=删除指令；空串/空列表=丢弃
     (维持既有空补丁归一化,不表示清空);未知键由调用方先拒绝。
 
     合并语义(覆盖/删除/保留)由仓储单语句 UPSERT 在库内原子完成。"""
@@ -127,7 +127,7 @@ def reject_unknown_keys(raw: Mapping[str, object]) -> str | None:
 
 
 def build_preference_hint(prefs: Mapping[str, object]) -> str:
-    """注入段:零槽位返回空串(零回归);带固定前缀。"""
+    """注入段:零槽位返回空串;带固定前缀。"""
     lines: list[str] = []
     for key in SLOT_KEYS:
         if key not in prefs:

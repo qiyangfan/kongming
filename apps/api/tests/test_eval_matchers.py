@@ -1,9 +1,4 @@
-"""评估匹配器单测(016):严格/宽松双路径纯函数直测(默认门禁,不依赖评估环境)。
-
-ai-eval spec「CI smoke 守护」:匹配器判定逻辑由常规单测守护——异源类型
-(gold=asyncpg 原生类型 vs gen=链路 JSON 类型)归一化是 Kongming 相对上游的
-新增关键逻辑,重点覆盖。
-"""
+"""Execution Match 严格与宽松比较器的纯函数测试，覆盖数据库值与 JSON 结果的类型归一化。"""
 
 from datetime import datetime
 from decimal import Decimal
@@ -34,7 +29,7 @@ def test_canon_datetime_isoformat_aligns_json_side() -> None:
 
 
 def test_canon_uuid_to_str_aligns_json_side() -> None:
-    # gold 侧 asyncpg 返回 uuid.UUID;gen 侧经 JSON 已是字符串(R1-B4)
+    # gold 侧 asyncpg 返回 uuid.UUID;gen 侧经 JSON 已是字符串
     assert canon_cell(UUID("123e4567-e89b-12d3-a456-426614174000")) == (
         "123e4567-e89b-12d3-a456-426614174000"
     )
@@ -61,7 +56,7 @@ def test_strict_unequal_on_value_diff() -> None:
 
 
 def test_strict_none_and_str_mix_safe() -> None:
-    # None 与 str 混排:排序键不抛 TypeError(上游审查修复形态)
+    # None 与 str 混排:排序键不抛 TypeError(上游形态)
     assert result_set_equal([(None, "a"), ("b", None)], [("b", None), (None, "a")])
 
 

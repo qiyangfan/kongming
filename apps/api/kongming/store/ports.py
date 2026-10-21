@@ -1,5 +1,4 @@
-"""store 端口(033;104 版本化扩展):存储反转,用例层零框架依赖
-(宪法 Article II)。"""
+"""store 存储端口,供用例层通过接口依赖持久化能力。"""
 
 from typing import Any, Protocol
 
@@ -18,7 +17,7 @@ class StoreRepo(Protocol):
         user_id: str,
     ) -> tuple[str, int] | None:
         """创建不可变版本快照(单句原子 MAX+1),返回 (版本 id, 版本号);
-        None=并发上架撞 version_no(调用方重读重试,104)。"""
+        None=并发上架撞 version_no(调用方重读重试)。"""
         ...
 
     async def point_current(

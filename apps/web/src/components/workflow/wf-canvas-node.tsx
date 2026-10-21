@@ -1,5 +1,4 @@
-/* 工作流画布自定义节点(107):类型图标 + id + 配置完整度/校验错误定位。
-   样式全走 index.css 语义 token(RF 容器继承 html.dark 暗色变量)。 */
+/* 工作流画布自定义节点:类型图标 + id + 配置完整度/校验错误定位。 样式全走 index.css 语义 token(RF 容器继承 html.dark 暗色变量)。 */
 
 import { memo } from "react";
 import { CircleAlert } from "lucide-react";

@@ -1,4 +1,4 @@
-"""ReAct 内核测试(019 tool-calling):LLM 自主编排/终止/上限/畸形/确认观察/端点同构。
+"""ReAct 内核测试(tool-calling):LLM 自主编排/终止/上限/畸形/确认观察/端点同构。
 
 mock 形态与 test_nodes.py 同款:FakeLlm 脚本化 chat_with_tools 应答,
 FakeApi 记录 tool_execute 回调;deps 单例 monkeypatch。
@@ -48,7 +48,7 @@ class FakeLlm:
         tools: list[dict[str, object]],
         *,
         temperature: float = 0.1,
-        **_kw: object,  # 021:task/trace_id/tenant_key 吸收
+        **_kw: object,  # task/trace_id/tenant_key 吸收
     ) -> ToolChatReply:
         self.calls.append({"system": system, "messages": messages, "tools": tools})
         if not self.replies:
@@ -104,7 +104,7 @@ def _patch(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
 
 
 async def _ainvoke(state: ReactState) -> dict[str, Any]:
-    """get_react_graph().ainvoke 成员型 strict 下部分未知(LangGraph 泛型),
+    """get_react_graph.ainvoke 成员型 strict 下部分未知(LangGraph 泛型),
     测试边界一次收窄为终态 state dict(自构造 state,键型已知)。"""
     graph = cast("Any", get_react_graph())
     return cast(
@@ -165,7 +165,7 @@ async def test_react_full_loop(_patch) -> None:  # type: ignore[no-untyped-def]
         "user_id",
         "tool_name",
         "args",
-        "channel",  # 025
+        "channel",
     }
     # LLM 第二轮收到的 messages 含 tool 观察(行数据在观察内)
     tool_msgs = _tool_contents(llm.calls[1]["messages"])
@@ -212,7 +212,7 @@ async def test_react_round_limit_forces_stop(_patch) -> None:  # type: ignore[no
     assert "上限" in str(final.get("error") or "")
     assert final["retry_count"] == limit
     assert len(api.tool_calls) == limit  # 超限后不再执行
-    # A-B6:触顶不丢已产出部分结果——早前成功轮的 execution/rows 随终态携带
+    # 触顶不丢已产出部分结果:早前成功轮的 execution/rows 随终态携带
     exec_obj = final.get("execution")
     assert exec_obj is not None and exec_obj.verdict == "PASS"
     assert exec_obj.rows == [[1]]
@@ -334,7 +334,7 @@ async def test_query_react_requires_token() -> None:
 
 
 def _collector_spy(monkeypatch: pytest.MonkeyPatch) -> list[int]:
-    """set_usage_collector 调用计数(035 R1-S2:端点挂载闸直证)。"""
+    """检查请求级用量收集器已挂载到端点调用中。"""
     import kongming_agent.llm as llm_mod
 
     calls: list[int] = []
@@ -352,7 +352,7 @@ async def test_collect_usage_default_off(
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,  # type: ignore[valid-type]
 ) -> None:
-    """035 R1-S2:collect_usage 缺省 False → 端点不挂收集器(chat 同步
+    """collect_usage 缺省 False → 端点不挂收集器(chat 同步
     react/workflow 走 fire-and-forget 旧路,用量不整丢)。"""
     calls = _collector_spy(monkeypatch)
     async with client as c:
@@ -366,7 +366,7 @@ async def test_collect_usage_on_collects(
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,  # type: ignore[valid-type]
 ) -> None:
-    """035 R1-S2:collect_usage=True(bot 链路)→ 端点挂收集器,响应携带明细。"""
+    """启用 collect_usage 后，Bot 请求的用量明细随响应返回。"""
     calls = _collector_spy(monkeypatch)
     async with client as c:
         resp = await c.post("/query_react", json=_react_payload(collect_usage=True), headers=TOKEN)
@@ -379,8 +379,8 @@ async def test_query_react_happy_path(client: AsyncClient) -> None:  # type: ign
         resp = await c.post("/query_react", json=_react_payload(), headers=TOKEN)
     assert resp.status_code == 200
     body = resp.json()
-    # 与 /query 逐字段同构;035 纯增 usage_records(bot 链路同步采集明细,
-    # 本端点挂收集器——替身 LLM 无 usage 属性时为空列表)
+    # /query_react 与 /query 字段一致，Bot 用量明细随响应返回。
+    # 测试替身没有 usage 时返回空数组。
     assert set(body.keys()) == {
         "success",
         "verdict",
@@ -392,12 +392,12 @@ async def test_query_react_happy_path(client: AsyncClient) -> None:  # type: ign
         "sql",
         "retry_count",
         "error",
-        # 069:管理面诊断信号(纯增;随 QueryOut 回传 api 落 chat_message)
+        # 管理面诊断信号(随 QueryOut 回传 api 落 chat_message)
         "resolved_question",
         "prompt_version",
-        # 076:语义层口径命中(纯增;空=无命中)
+        # 语义层口径命中(空=无命中)
         "metric_hits",
-        # 068:文档道结构化来源(纯增;空=SQL 道/无命中)
+        # 文档道结构化来源(空=SQL 道/无命中)
         "sources",
         "usage_records",
     }
@@ -447,7 +447,7 @@ async def test_query_react_stream_events(client: AsyncClient) -> None:  # type: 
 
 
 async def test_react_duplicate_call_circuit_breaker(_patch) -> None:  # type: ignore[no-untyped-def]
-    """重复熔断(UI 冒烟实证):同工具同参数已成功过的调用不再回调控制面,
+    """重复熔断(UI 冒烟):同工具同参数已成功过的调用不再回调控制面,
     观察引导 LLM 基于已有信息作答。"""
     llm = FakeLlm(
         [
@@ -474,7 +474,7 @@ async def test_react_duplicate_call_circuit_breaker(_patch) -> None:  # type: ig
 
 
 async def test_react_blocked_sql_not_deduped(_patch) -> None:  # type: ignore[no-untyped-def]
-    """审查循环 S1:被 BLOCKED 的 execute_sql 不入熔断集——工具通道 status 恒为
+    """被 BLOCKED 的 execute_sql 不入熔断集——工具通道 status 恒为
     executed 而 SQL verdict 在 result 内,若入集,LLM 重发同条 SQL 会收到
     「已成功执行过」假观察并据此编造数据。"""
     blocked = ToolExecuteOutcome(
@@ -498,7 +498,7 @@ async def test_react_blocked_sql_not_deduped(_patch) -> None:  # type: ignore[no
 
 
 async def test_react_compute_delta_local_and_whitelist(_patch) -> None:  # type: ignore[no-untyped-def]
-    """057:compute_delta 本地执行;入参 ∈ 白名单则成功并回写 compute_values。"""
+    """compute_delta 本地执行;入参 ∈ 白名单则成功并回写 compute_values。"""
     llm = FakeLlm(
         [
             ToolChatReply(
@@ -531,7 +531,7 @@ async def test_react_compute_delta_local_and_whitelist(_patch) -> None:  # type:
 
 
 async def test_react_compute_rejects_out_of_whitelist(_patch) -> None:  # type: ignore[no-untyped-def]
-    """057:编造基数拒绝执行,不产生输出值,观察喂回纠正指引。"""
+    """编造基数拒绝执行,不产生输出值,观察喂回纠正指引。"""
     llm = FakeLlm(
         [
             ToolChatReply(
@@ -559,7 +559,7 @@ async def test_react_compute_rejects_out_of_whitelist(_patch) -> None:  # type: 
 
 
 async def test_react_finalize_strips_heart_calculated_rate(_patch) -> None:  # type: ignore[no-untyped-def]
-    """057:finalize 同口径——心算增长率句剥离,合法句保留。"""
+    """finalize 同口径——心算增长率句剥离,合法句保留。"""
     llm = FakeLlm(
         [
             ToolChatReply(tool_calls=[_call("execute_sql", {"sql": "SELECT v FROM t"})]),
@@ -582,7 +582,7 @@ async def test_react_finalize_strips_heart_calculated_rate(_patch) -> None:  # t
 
 
 async def test_react_finalize_all_stripped_falls_back_not_raw(_patch) -> None:  # type: ignore[no-untyped-def]
-    """057:审计剥空时不得回退未审原文(会放行非法数字),走 stats 兜底。"""
+    """审计剥空时不得回退未审原文(会放行非法数字),走 stats 兜底。"""
     llm = FakeLlm(
         [
             ToolChatReply(tool_calls=[_call("execute_sql", {"sql": "SELECT v FROM t"})]),
@@ -606,7 +606,7 @@ async def test_react_finalize_all_stripped_falls_back_not_raw(_patch) -> None:  
 
 
 async def test_react_todo_honesty_on_partial_failure(_patch) -> None:  # type: ignore[no-untyped-def]
-    """058:多子目标一失败——收口不得全称完成,须披露未完成。"""
+    """多子目标一失败——收口不得全称完成,须披露未完成。"""
     llm = FakeLlm(
         [
             ToolChatReply(
@@ -641,7 +641,7 @@ async def test_react_todo_honesty_on_partial_failure(_patch) -> None:  # type: i
 
 
 async def test_react_single_goal_no_todos_zero_regression(_patch) -> None:  # type: ignore[no-untyped-def]
-    """058:单目标简单问不建账本,收口原文。"""
+    """单目标简单问不建账本,收口原文。"""
     llm = FakeLlm([ToolChatReply(content="共有 4 件商品。")])
     api = FakeApi()
     _patch(llm, api)
@@ -654,7 +654,7 @@ async def test_react_single_goal_no_todos_zero_regression(_patch) -> None:  # ty
 
 
 def test_build_react_system_bot_injection() -> None:
-    """025:Bot 身份段替换默认身份,内核纪律后缀完整保留;空=逐字零回归。"""
+    """Bot 身份段替换默认身份,内核纪律后缀完整保留;空=逐字。"""
     from kongming_agent.graph.react.prompts import (
         REACT_SYSTEM,
         build_react_system,
@@ -670,7 +670,7 @@ def test_build_react_system_bot_injection() -> None:
 
 def test_build_react_system_no_tools_discipline() -> None:
     """能力-契约一致:注入工具集为空时纪律段替换为无工具模式——
-    禁伪调用/禁伪代码,数据类问题如实说明;工具教学不得残留(治本闸①)。"""
+    禁伪调用/禁伪代码,数据类问题如实说明;工具教学不得残留。"""
     from kongming_agent.graph.react.prompts import (
         REACT_DISCIPLINE,
         REACT_IDENTITY_DEFAULT,

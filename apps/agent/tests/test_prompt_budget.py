@@ -1,7 +1,4 @@
-"""080-prompt-assembly-budget 测试:估算/零回归锚/收敛方向纪律/不可切段/预算下发。
-
-宪法 Article III:先红后绿——预算纯函数与装配锚先于边界行为固化。
-"""
+"""提示词装配预算测试:估算/锚/收敛方向纪律/不可切段/预算下发。"""
 
 from typing import cast
 
@@ -27,7 +24,7 @@ def _baseline_budget(segment_tokens: int, question: str = "q") -> int:
     fixed = (
         estimate_tokens(SQL_GEN_SYSTEM)
         + estimate_tokens(f"问题:{question}")
-        + 24  # 装配标签/空段余量(实测口径)
+        + 24  # 装配标签和空段的预留开销
     )
     return fixed + segment_tokens
 
@@ -63,11 +60,11 @@ def test_estimate_tokens_cjk_and_ascii() -> None:
     assert estimate_tokens("你好SELECT") == 2 + 2  # 2 CJK + ceil(6/3.5)=2
 
 
-# ── 2. 零回归锚(任务 1.1) ─────────────────────────────────────────
+# ── 2. 锚 ─────────────────────────────────────────
 
 
 def test_under_budget_byte_identical() -> None:
-    """预算充足时,新装配与 080 前逻辑逐字一致(零回归锚)。"""
+    """预算充足时，提示词装配结果与原格式一致。"""
     kwargs = dict(
         question="每个租户的订单数",
         memory_hint="用户关注华北区",
@@ -108,7 +105,7 @@ def test_empty_segments_byte_identical() -> None:
     assert cut == {}
 
 
-# ── 3. 收敛方向纪律(任务 1.2/1.3) ─────────────────────────────────
+# ── 3. 收敛方向纪律 ───────────────────────────────────────
 
 
 def _big_schema(tables: int, cols: int) -> str:
@@ -119,7 +116,7 @@ def _big_schema(tables: int, cols: int) -> str:
 
 
 def test_history_sql_drops_from_oldest_end() -> None:
-    """任务 1.2:历史段只从最旧端丢(首位=最高相似保留),无中间掏空。"""
+    """历史段只从最旧端丢(首位=最高相似保留),无中间掏空。"""
     history = "\n".join(f"SELECT {i} FROM t{i}" for i in range(20))  # noqa: S608  测试夹具文本
     user, cut, _ = assemble_generate_user_prompt(
         question="q",
@@ -142,7 +139,7 @@ def test_history_sql_drops_from_oldest_end() -> None:
 
 
 def test_evidence_drops_from_tail_and_first_exempt() -> None:
-    """任务 1.3:证据段(表结构)自尾部裁剪,首位恒保留。"""
+    """证据段(表结构)自尾部裁剪,首位恒保留。"""
     schema = _big_schema(8, 30)  # 8 张宽表
     user, cut, _ = assemble_generate_user_prompt(
         question="q",
@@ -207,7 +204,7 @@ def test_skill_example_ban_prefix_kept() -> None:
         assert seg.startswith("fewshot SQL 仅文本,不执行")
 
 
-# ── 4. 不可切段(任务 1.4) ─────────────────────────────────────────
+# ── 4. 不可切段 ─────────────────────────────────────────
 
 
 def test_uncuttable_segments_never_truncated() -> None:
@@ -228,7 +225,7 @@ def test_uncuttable_segments_never_truncated() -> None:
 
 
 def test_selfheal_extra_preserved_after_convergence() -> None:
-    """任务 2.3:收敛后 selfheal 喂回段与哨兵引导仍完整。"""
+    """收敛后 selfheal 喂回段与哨兵引导仍完整。"""
     extra = '\n\n上次生成的 SQL 有误：relation "t" does not exist\n请修正。核对清单'
     user, cut, _ = assemble_generate_user_prompt(
         question="q",
@@ -258,7 +255,7 @@ def test_converge_primitives_directly() -> None:
     assert out.cut == {"a": 1}
 
 
-# ── 5. 注册表窗口与预算解析(任务 1.5) ─────────────────────────────
+# ── 5. 注册表窗口与预算解析 ─────────────────────────────
 
 
 def test_context_window_entry_and_default() -> None:
@@ -302,7 +299,7 @@ def test_context_window_entry_and_default() -> None:
     )
 
 
-# ── 6. 节点级 trace 下发(任务 1.6/2.5) ────────────────────────────
+# ── 节点级 trace 下发 ────────────────────────────
 
 
 async def test_generate_emits_trace_on_cut(monkeypatch: pytest.MonkeyPatch) -> None:

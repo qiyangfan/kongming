@@ -1,4 +1,4 @@
-"""guardrail 用例编排(020):三层护栏判定 + 配置合并 + fail-closed 收敛。
+"""guardrail 用例编排:三层护栏判定 + 配置合并 + fail-closed 收敛。
 
 零框架纪律:不 import fastapi/sqlalchemy/redis;SQL 全在 repository。
 fail-closed 铁律(spec):判定不确定(引擎异常/配置读失败)一律按拦截从严,
@@ -140,7 +140,7 @@ class GuardrailService:
             configs = await self._configs()
         except Exception:
             log.error("输出护栏配置异常,fail-closed 替换 trace_id=%s", trace_id, exc_info=True)
-            # R1-L6:fail-closed 故障落审计(spec「故障事件落审计」字面立约)
+            # fail-closed 故障落审计(spec「故障事件落审计」字面立约)
             await self._record_hits(
                 trace_id=trace_id,
                 user_id=user_id,
@@ -201,11 +201,7 @@ class GuardrailService:
         tool_write: bool,
         write_attempts: int,
     ) -> bool:
-        """工具意图审核(在参数校验之前):写工具 trace 内尝试数超阈值即拒。
-
-        write_attempts=本次之前的同 trace 写工具调用数(含挂起/执行/拒绝);
-        返回 True=放行。fail-closed:判定异常拒。
-        """
+        """在 JSON Schema 参数校验前检查当前 trace 的写工具调用数；超过上限即拒绝。"""
         if not tool_write:
             return True
         try:

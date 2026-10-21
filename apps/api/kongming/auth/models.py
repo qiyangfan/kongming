@@ -1,4 +1,4 @@
-"""auth 领域模型与领域错误:纯 dataclass,零框架依赖(宪法 Article II)。
+"""auth 领域模型与领域错误:纯 dataclass,不依赖 Web 框架或数据库。
 
 枚举值与 baseline CHECK 约束同源(字符串字面量,禁 ORM Enum/魔数)。
 """

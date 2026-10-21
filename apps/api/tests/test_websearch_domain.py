@@ -1,12 +1,5 @@
 # pyright: reportPrivateUsage=false
-"""094 web-search-domain 测试:供应商注册表/域策略器/执行器适配/注册条件/
-配额分桶/组合配置校验。
-
-安全规则类测试先行(宪法 Article III):白名单拒绝(零网络请求)、脱敏
-allowlist(评分与追踪参数不入观察)、注册双条件、凭证只在控制面请求头。
-执行器出站用真实 TCP 存根(与 081 同哲学:被测对象自建 AsyncClient,
-记录收到的请求头/报文,凭证装配可断言);失败分类定点触发(拒连=关闭端口)。
-"""
+"""覆盖 WebSearch 配置、权限、脱敏和出站请求限制。"""
 
 import json
 import logging
@@ -55,13 +48,13 @@ def test_provider_registry_single_source() -> None:
     )
     assert alibaba.host == "default-c7qq.platform-cn-shanghai.opensearch.aliyuncs.com"
     assert DOMAIN_TOOLS["web_search"] == "websearch"
-    # 数据表与适配表同键(评审 D2:只加数据不加适配会在启动期 ValueError 拒启,
-    # fail-closed 够响,但同键断言把漂移挡在测试层)
+    # 数据表与适配表同键:只加数据不加适配会在启动期 ValueError 拒启,
+    # fail-closed 够响,但同键断言把漂移挡在测试层
     assert set(WEBSEARCH_PROVIDERS) == set(_ADAPTERS)
 
 
 def test_provider_manifest_derivation_covers_registry() -> None:
-    """105:域清单端点与出口白名单由供应商单源派生(组合根 _build_gateway 同构
+    """域清单端点与出口白名单由供应商单源派生(组合根 _build_gateway 同构
     入参)——注册表任一供应商自动进清单,白名单=注册主机
     精确匹配,无需逐供应商接线。"""
     for spec in WEBSEARCH_PROVIDERS.values():
@@ -388,7 +381,7 @@ async def test_executor_zhipu_malformed_no_retry() -> None:
     assert stub.stub.connections == 1
 
 
-# 官方「联网搜索API参考」响应示例剪裁(105 契约桩夹具,2026-10-11 核对):
+# 官方「联网搜索API参考」响应示例剪裁(契约桩夹具):
 # result.search_result[].{title,link,snippet,content} + position/meta_info 附加字段
 _ALIBABA_SAMPLE_BODY = {
     "request_id": "5B9F5A24-8F1D-****-B7E2-3C6A1D9E4F02",
@@ -521,7 +514,7 @@ async def test_executor_undelivered_retries_once() -> None:
     finally:
         stub.close()
     assert out["status"] == "executed", out  # 重试恰好一次后交付
-    assert stub.stub.connections == 2  # 未送达重试至多一次的实证计数
+    assert stub.stub.connections == 2  # 未送达重试至多一次的计数
 
 
 @pytest.mark.asyncio
@@ -559,7 +552,7 @@ def _decoding_broken(_request: httpx.Request) -> httpx.Response:
 
 @pytest.mark.asyncio
 async def test_executor_decoding_error_protocol_no_retry() -> None:
-    """评审 R1 回归:解码失败(DecodingError∈RequestError,非 TransportError)
+    """解码失败属于 RequestError，应转换为可见的请求错误。
     须按 protocol 前缀收口,不裸抛 httpx 异常(否则审计丢结构化分类)、不重试。"""
 
     executor = WebSearchExecutor(
@@ -583,7 +576,7 @@ def test_executor_unknown_adapter_rejected() -> None:
 @pytest.mark.asyncio
 async def test_gateway_domain_executor_routing_and_fallback() -> None:
     """按域执行器路由:声明专属执行器的域走专属;未声明的域回落通道级
-    执行器(既有域零回归);执行器缺失的域拒绝(与「域从未存在」同形)。"""
+    执行器(既有域);执行器缺失的域拒绝(与「域从未存在」同形)。"""
     from kongming.toolgateway.gateway import ToolGateway
     from kongming.toolgateway.models import RetryClass
 
@@ -688,7 +681,7 @@ def test_build_registry_websearch_conditions() -> None:
     from kongming.toolcall.registry import REGISTRY, build_registry
 
     base = build_registry()
-    assert "web_search" not in base  # 缺省=静态基表,零回归
+    assert "web_search" not in base  # 缺省=静态基表
     assert set(base) == set(REGISTRY)
 
     gated = build_registry(websearch_provider="tavily", websearch_api_key="tvly-k")
@@ -730,7 +723,7 @@ def test_websearch_misconfiguration_matrix() -> None:
     bogus = Settings(websearch_provider="google", websearch_api_key="k")
     mis2 = bogus.websearch_misconfiguration()
     assert mis2 is not None and "非法值" in mis2
-    # 只配 key 缺供应商=残缺(评审 D3:排障「配了 key 却没生效」不能无信号)
+    # 只配 key 缺供应商=残缺(排障「配了 key 却没生效」不能无信号)
     keyonly = Settings(websearch_provider="", websearch_api_key="k")
     mis3 = keyonly.websearch_misconfiguration()
     assert mis3 is not None and "KM_WEBSEARCH_PROVIDER" in mis3
@@ -848,7 +841,7 @@ async def test_websearch_unregistered_zero_aware(
     assert "TOOL_NOT_REGISTERED" in str(r.json().get("reason"))
 
 
-# ── 审查补强:端口失败映射 + 组合根形态 ──
+# ── 端口失败映射 + 组合根形态 ──
 
 
 @pytest.mark.asyncio
@@ -876,7 +869,7 @@ def test_build_gateway_composition_shapes(monkeypatch: Any) -> None:
     monkeypatch.setattr(s, "websearch_api_key", "")
     router_mod._get_gateway.cache_clear()
     try:
-        assert router_mod._build_gateway() is None  # 全缺=无网关(既有路径零回归)
+        assert router_mod._build_gateway() is None  # 全缺=无网关(既有路径)
         # websearch-only
         monkeypatch.setattr(s, "websearch_provider", "tavily")
         monkeypatch.setattr(s, "websearch_api_key", "k")
@@ -887,7 +880,7 @@ def test_build_gateway_composition_shapes(monkeypatch: Any) -> None:
         router_mod._get_gateway.cache_clear()
 
 
-# ── 评审回灌:dev 告警降级接线 + 空结果如实表达 ──
+# ── dev 告警降级与空结果展示 ──
 
 
 @pytest.fixture

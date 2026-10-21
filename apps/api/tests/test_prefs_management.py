@@ -1,10 +1,4 @@
-"""087 偏好自管理与并发语义集成测试(测试先行)。
-
-覆盖:D1 语义表(PUT 省略保留/显式 null 删除/空补丁真无操作)、DELETE 清空
-(保留空行+版本推进+不动笔记)、D2 并发(不同字段并发合并保留、人工修改后
-旧提取放弃、清空后旧问答不复活、并发自动补丁串行补齐)、显式聊天槽位走
-人工语义、同步链路后台任务携带版本快照。
-"""
+"""偏好管理集成测试，覆盖省略、显式删除、并发合并、旧提取冲突和显式聊天槽位更新。"""
 
 # pyright: reportPrivateUsage=false
 
@@ -26,7 +20,7 @@ from tests.test_chat_query import _auth, _bind, _default_tenant_id, _login
 
 
 class ExtractAgent:
-    """成功问答 + 指定槽位候选的假 agent(隐式提取链路端到端)。"""
+    """模拟成功问答并返回指定槽位候选的 Agent。"""
 
     def __init__(self, candidates: list[dict[str, object]]) -> None:
         self.reply = AgentReply(success=True, verdict="PASS", summary="共 4 种商品")
@@ -89,7 +83,7 @@ def _svc():
     return _mk
 
 
-# ============ 1.1 D1:PUT 语义 ============
+# ============ PUT 语义 ============
 
 
 async def test_put_explicit_null_deletes_slot(
@@ -173,7 +167,7 @@ async def test_put_null_on_absent_slot_still_bumps_revision(
     assert row is not None and int(row[1]) == 1
 
 
-# ============ 1.1 D1:DELETE 清空 ============
+# ============ DELETE 清空 ============
 
 
 async def test_delete_clears_all_keeps_row_and_bumps(
@@ -234,7 +228,7 @@ async def test_clear_keeps_notes_and_team_memory(
     assert n == 1  # 笔记不受影响
 
 
-# ============ 1.2 D2:并发与复活防护 ============
+# ============ 并发与复活防护 ============
 
 
 async def test_concurrent_manual_merge_keeps_both_slots(
@@ -293,7 +287,7 @@ async def test_manual_edit_abandons_stale_extraction(
 async def test_clear_then_stale_extraction_not_resurrect(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """清空后,清空之前准备的旧问答任务不得复活偏好。"""
+    """清空偏好后，已启动的旧问答任务不得恢复这些偏好。"""
     uid, token = await _user(client, session, make_user, "pref_resur")
     tid = await _default_tenant_id(session)
     mk = _svc()
@@ -404,7 +398,7 @@ async def test_version_read_failure_skips_auto_write(
     assert await _row(session, uid) is None  # 不落库不建行
 
 
-# ============ 显式聊天与同步链路 ============
+# ============ 显式聊天与偏好更新 ============
 
 
 async def test_explicit_chat_slot_write_is_manual(

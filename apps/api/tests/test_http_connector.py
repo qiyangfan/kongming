@@ -1,20 +1,6 @@
 # pyright: reportPrivateUsage=false, reportUnusedFunction=false
-"""099 http-connector-domain 测试:租户级 HTTP 连接器(注册治理→注入→执行闭环)。
-
-照 100 ticket 域测试形态(安全规则类测试先行,宪法 Article III):
-- 迁移段:0051 升级/降级往返(表独立,down 即 DROP)。
-- 注册校验纯函数段:路径占位↔参数声明求交/白名单主机形态/方法白名单/key
-  形态/鉴权形态与材料相配/写语义缺省规则,畸形声明逐类拒绝。
-- 掩码段:凭证掩码形态纯函数(尾号掩码,不明文)。
-- 装配段:行→注入声明的纯函数(可重放)/参数声明→JSON Schema。
-- 策略器段:出口白名单精确命中(零网络请求)/参数校验/重试分类。
-- 执行器段:mock 出站(httpx MockTransport)覆盖 GET/POST 与四鉴权形态/
-  路径占位 URL 编码/查询与 body 映射/大响应截断/重定向不跟随/SSRF 拒绝段
-  (白名单命中不构成豁免)。
-- 集成段(真实 PG+Redis,conftest 基建):注册→注入→回调执行全链,凭证
-  全接口响应无明文断言、确认流(未确认零出站)、租户隔离 404 同形、
-  审计四形态(成功/拒绝/失败/超时)与无 LLM 用量行、域配额分桶。
-"""
+"""租户 HTTP 连接器测试，覆盖声明校验、凭证掩码、工具装配、请求策略与模拟出站；
+集成用例验证数据库、Redis、租户隔离、人工确认和审计行为。"""
 
 import asyncio
 import ipaddress
@@ -31,9 +17,9 @@ from tests.conftest import migrated_tmp_db
 
 
 async def _run_alembic(session: AsyncSession, cfg: Config, target: str) -> None:
-    """执行一条 alembic 命令(前 rollback 清场;连接持 ACCESS SHARE 会死等
-    ALTER 的 ACCESS EXCLUSIVE,104 期实证)。cfg 由 migrated_tmp_db 注入
-    (一次性临时库,防 dropped 列占位累积——2026-10 事故)。"""
+    """执行一条 alembic 命令(前 rollback 清场:连接持 ACCESS SHARE 会
+    死等 ALTER 的 ACCESS EXCLUSIVE 锁)。cfg 由 migrated_tmp_db 注入
+    (一次性临时库,防 dropped 列占位累积)。"""
     await session.rollback()
     if target == "head":
         await asyncio.to_thread(command.upgrade, cfg, "head")
@@ -193,7 +179,7 @@ def test_registration_key_malformed_rejected(key: str) -> None:
 
 
 def test_registration_key_tool_name_length_gate() -> None:
-    """合成工具名 http__<key> 受 toolcall 64 位执行契约(评审修复:59 位 key
+    """合成工具名 http__<key> 受 toolcall 64 位执行契约(59 位 key
     可注册却产出必坏工具)。边界:58 位=恰好 64 合名,59 位拒。"""
     validate_declaration(_decl(key="k" * 58), has_secret=False, timeout_max_ms=_TIMEOUT_CAP)
     with pytest.raises(ConnectorValidationError, match="64"):
@@ -215,7 +201,7 @@ def test_registration_key_tool_name_length_gate() -> None:
     ],
 )
 def test_registration_denied_ip_literal_rejected(host: str) -> None:
-    """注册期 SSRF 字面判定(099 spec「注册期 SSRF 判定拦截」;评审修复:
+    """注册期 SSRF 字面判定(spec「注册期 SSRF 判定拦截」:
     内网/元数据地址白名单不再以 ENABLED 态入库)。IPv6 字面由主机形态闸
     先行拒绝(白名单形态不收 IPv6),同为白名单主机类拒绝。"""
     with pytest.raises(ConnectorValidationError, match="白名单主机"):
@@ -227,8 +213,7 @@ def test_registration_denied_ip_literal_rejected(host: str) -> None:
 
 
 def test_registration_denied_list_matches_executor_judgement() -> None:
-    """注册期拒绝段副本与执行期判定(workflow.http_runner)对拍同判——
-    单源双副本由本测试钉住防漂移(guardrail 异常同哲学)。"""
+    """比较注册期和执行期对同一 IP 地址的拒绝判定。"""
     from kongming.connector.models import _is_denied_ip_literal
     from kongming.workflow.http_runner import _is_denied_ip
 
@@ -353,7 +338,7 @@ def test_registration_auth_material_rules(kwargs: dict[str, Any], has_secret: bo
 
 
 def test_registration_write_semantics_default_and_override() -> None:
-    """写语义缺省规则(design D4):非 GET 缺省需确认/GET 缺省豁免;显式声明
+    """写语义缺省规则:非 GET 缺省需确认/GET 缺省豁免;显式声明
     覆盖方法启发式(POST 可标读,GET 可标写)。"""
     assert resolve_confirmation("GET", None) is False
     assert resolve_confirmation("POST", None) is True
@@ -591,7 +576,7 @@ def _executor(
 
 
 def test_build_url_placeholder_encoding_and_query_mapping() -> None:
-    """路径占位 URL 编码后直插(design D6):空格/斜杠编码防路径穿越;
+    """路径占位 URL 编码后直插:空格/斜杠编码防路径穿越;
     GET 其余参数按名拼 query;缺省参数不出现在 URL。"""
     url = build_url(
         "GET",
@@ -616,8 +601,8 @@ def test_build_url_placeholder_encoding_and_query_mapping() -> None:
 
 
 def test_build_url_post_params_stay_out_of_query() -> None:
-    """POST 渠道二选一(评审修复):声明参数只进 JSON body,不重复拼 query
-    ——业务参数值不进 URL/网关访问日志;GET 行为零回归。"""
+    """POST 渠道二选一:声明参数只进 JSON body,不重复拼 query
+    ——业务参数值不进 URL/网关访问日志;GET 行为不变。"""
     url = build_url(
         "POST", "https://api.example.com/v1/orders", _PARAMS, {"order_id": "A1", "limit": 5}
     )
@@ -681,8 +666,8 @@ async def test_executor_auth_header_forms_outbound() -> None:
 
 
 async def test_executor_post_body_mapping() -> None:
-    """POST:占位参数进路径,其余进 JSON body 且不重复进 query(评审修复:
-    声明参数原实现 query/body 双通道重复)。"""
+    """POST:占位参数进路径,其余进 JSON body 且不重复进 query
+    (声明参数仅走 body 单通道)。"""
     ex, record = _executor(
         method="POST", template="https://api.example.com/v1/orders/{order_id}/items"
     )
@@ -746,7 +731,7 @@ async def test_executor_ssrf_denied_even_if_whitelisted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """SSRF 拒绝段执行期兜底(spec「SSRF 拒绝优先」):白名单命中的主机
-    解析到云元数据地址仍拒,白名单命中不构成豁免(design D3)。"""
+    解析到云元数据地址仍拒,白名单命中不构成豁免。"""
 
     async def _fake_resolve(host: str, port: int) -> list[Any]:
         return [(2, 1, 6, "", ("169.254.169.254", port))]
@@ -838,7 +823,7 @@ async def test_gateway_aspect_whitelist_out_rejected_zero_outbound() -> None:
     assert '"ok": true'.replace(" ", "") in str(result["body"]).replace(" ", "")
 
 
-# ── 集成段(真实 PG+Redis,conftest 基建):注册治理→注入→回调执行全链 ──
+# ── 集成段(真实 PG+Redis,conftest 公共夹具):注册治理→注入→回调执行全流程 ──
 
 import threading  # noqa: E402
 from collections.abc import AsyncIterator, Callable, Mapping  # noqa: E402
@@ -944,9 +929,10 @@ async def echo() -> AsyncIterator[_EchoServer]:
 def allow_local_ssrf(monkeypatch: pytest.MonkeyPatch) -> None:
     """集成段 SSRF 放行缝:mock 端点在 127.0.0.1(真实 SSRF 段必拒回环——
     该拒绝语义已由执行器单测层覆盖:拒绝段/字面回环两用例),集成全链聚焦
-    治理面语义;钉扎/拒绝逻辑不在此重复验证。按 029 契约返回「钉扎地址」:
-    mock 场景主机即字面 IP(127.0.0.1),直接作钉扎目标。注册期 SSRF 字面
-    判定(评审修复新增闸;拒绝语义由注册校验单测层覆盖)同缝放行。"""
+    治理面语义;钉扎/拒绝逻辑不在此重复验证。按 http_runner 的
+    assert_url_allowed 契约返回「钉扎地址」:mock 场景主机即字面 IP
+    (127.0.0.1),直接作钉扎目标。注册期 SSRF 字面
+    判定(新增闸;拒绝语义由注册校验单测层覆盖)同缝放行。"""
 
     async def _passthrough(url: str) -> str:
         return urlparse(url).hostname or ""
@@ -1271,7 +1257,7 @@ async def test_connector_registration_validation_http_and_guardrail_block(
     assert r5.status_code == 400, r5.text
     assert "护栏" in str(r5.json()["detail"])
 
-    # 参数描述注入形态 → 同闸拒绝(评审修复:参数描述经 params_to_schema
+    # 参数描述注入形态 → 同闸拒绝(参数描述经 params_to_schema
     # 注入给 LLM,是注册/注入两闸须覆盖的第三个自由文本字段)
     r6 = await api_client.post(
         "/system/connectors",
@@ -1578,7 +1564,7 @@ async def test_connector_write_semantics_explicit_override(
     echo: _EchoServer,
     allow_local_ssrf: None,
 ) -> None:
-    """写语义显式声明覆盖(design D4):GET 标写需确认;POST 标读豁免
+    """写语义显式声明覆盖:GET 标写需确认;POST 标读豁免
     (注册可显式覆盖方法启发式)。"""
     await _mk_tenant(session, "ek")
     uid = await _user_with_tools(
@@ -1673,8 +1659,8 @@ async def test_connector_test_call_use_saved_secret_empty_material(
     echo: _EchoServer,
     allow_local_ssrf: None,
 ) -> None:
-    """编辑态先测后存(评审修复):表单凭证空框+use_saved_secret 用存量凭证
-    出站——原实现校验先于存量凭证合并,该路径被材料闸必拒 400(功能死路)。"""
+    """编辑态先测后存:表单凭证空框+use_saved_secret 用存量凭证
+    出站——校验在存量凭证合并之后,合并后持有材料可过闸。"""
     await _mk_tenant(session, "ek")
     await _user_with_tools(session, make_user, "svadm", ["connector:manage"])
     token = await _login(api_client, "svadm")
@@ -1825,11 +1811,8 @@ async def test_connector_registration_needs_manage_perm(
     assert r.status_code == 403
 
 
-# ==================== 评审循环回归(112 批后评审修复钉住) ====================
-
-
 def test_registration_optional_path_placeholder_rejected() -> None:
-    """路径占位参数 MUST required(评审修复):可选参数缺参时 build_url 不替换,
+    """路径占位参数 MUST required:可选参数缺参时 build_url 不替换,
     字面 {name} 被 httpx 编码后打到错误路径——注册期一次性拒绝。"""
     with pytest.raises(ConnectorValidationError, match="必填"):
         validate_declaration(
@@ -1844,9 +1827,7 @@ def test_registration_optional_path_placeholder_rejected() -> None:
 
 
 async def test_executor_decoding_error_converged_protocol() -> None:
-    """DecodingError(继承 RequestError 而非 TransportError)单列收敛:损坏
-    gzip 响应不再以裸 httpx 异常逃逸,审计 error_reason 保 protocol 前缀
-    (094 评审 R1 同款;评审修复——connector.py 漏了 ticket/websearch 已补段)。"""
+    """损坏的 gzip 响应转换为带协议前缀的连接器错误。"""
 
     def _broken_gzip(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -1859,7 +1840,7 @@ async def test_executor_decoding_error_converged_protocol() -> None:
 
 
 async def test_service_test_call_saved_secret_key_mismatch_rejected() -> None:
-    """存量凭证只允许用于同一 key(先测后存语义,评审修复):指向他者 400 拒——
+    """存量凭证只允许用于同一 key(先测后存语义):指向他者 400 拒——
     封死「表单改写目标主机 + use_saved_secret_for 指他人连接器」把同租户他人
     明文凭证送出站外的通道。校验先于任何仓储触达。"""
 

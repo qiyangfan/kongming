@@ -1,8 +1,4 @@
-"""问答端点全栈测试(chat spec「问答查询端点」,安全规则类)。
-
-真实 PG/Redis;agent 面经 dependency_overrides 替身(scripted AgentReply)。
-安全面:未认证 401、无权限 403、撤销立即生效、租户白名单、会话归属同形 404。
-"""
+"""覆盖问答查询的租户隔离、权限和响应持久化。"""
 
 from collections.abc import Iterator
 
@@ -26,7 +22,7 @@ class FakeAgent:
         self.reply = reply or AgentReply(success=True, verdict="PASS")
         self.boom = boom
         self.calls: list[dict[str, object]] = []
-        # 010 标题改写:缺省 None=降级(保持截断标题);赋值字符串即模拟改写成功
+        # 标题改写:缺省 None=降级(保持截断标题);赋值字符串即模拟改写成功
         self.title_reply: str | None = None
         self.title_calls: list[str] = []
 
@@ -144,9 +140,6 @@ def _pass_reply() -> AgentReply:
     )
 
 
-# ============ 安全面(测试先行) ============
-
-
 async def test_unauthenticated_401(client: AsyncClient) -> None:
     r = await client.post("/chat/query", json={"question": "有多少商品"})
     assert r.status_code == 401
@@ -221,10 +214,10 @@ async def test_happy_path_auto_session_and_messages(
     assert body["success"] is True and body["verdict"] == "PASS"
     assert body["summary"] == "共 2 种商品"
     assert body["columns"] == ["name", "qty"] and body["rows"][0] == ["连弩", 30]
-    # 049:低基数分类+数值 → 首候选 bar;qty 裸列不可加(非 COUNT/SUM)pie 被闸
+    # 低基数分类+数值 → 首候选 bar;qty 裸列不可加(非 COUNT/SUM)pie 被闸
     assert body["chart"]["type"] == "bar"
     assert [c["type"] for c in body["chart_candidates"]] == ["bar"]
-    # 050:统计键经 humanize(rows→行数;qty_max→物理名回退形态「qty 最高」)
+    # 统计键经 humanize(rows→行数;qty_max→物理名回退形态「qty 最高」)
     assert body["stats"] == {"行数": 2, "qty 最高": 30}
     assert body["insights"] == [{"type": "max", "text": "连弩最多"}]
 
@@ -262,7 +255,7 @@ async def test_explicit_history_wins(
     )
     assert r.status_code == 200
     assert agent.calls[0]["history"] == ["问1", "问2"]  # 显式 history 原样透传
-    # trace_id 生成并贯穿传给 agent(与执行审计同源,nl2sql spec)
+    # 生成的 trace_id 同时传给 agent 和执行审计。
     assert isinstance(agent.calls[0]["trace_id"], str)
     assert len(str(agent.calls[0]["trace_id"])) == 32  # uuid4 hex
 
@@ -270,7 +263,7 @@ async def test_explicit_history_wins(
 async def test_super_admin_not_exempt_from_tenant_whitelist(
     client: AsyncClient, session: AsyncSession, fake_agent: dict[str, FakeAgent]
 ) -> None:
-    """SUPER_ADMIN 不豁免租户白名单(multitenant spec 明文,005 端点级钉死)。"""
+    """SUPER_ADMIN 仍受租户白名单约束。"""
     await seed_all(session, get_settings())
     _install(fake_agent, FakeAgent(_pass_reply()))
     token = await _login(client, "admin", "admin123")
@@ -312,7 +305,7 @@ async def test_backend_history_fill(
     _, token = await _user_with_chat_perm(client, session, make_user)
     agent = FakeAgent(_pass_reply())
     _install(fake_agent, agent)
-    # 先造 7 轮(第 7 轮发问时,此前 6 条 user 问句超 5 条补全上限)
+    # 先造 7 轮(第 7 轮发问时, 6 条 user 问句超 5 条补全上限)
     sid: str | None = None
     for i in range(7):
         payload: dict[str, object] = {"question": f"第{i}问"}
@@ -383,7 +376,7 @@ async def test_agent_unavailable_friendly_error(
     body = r.json()
     assert body["success"] is False
     assert "暂不可用" in body["error"] and "connect failed" not in body["error"]
-    # R2-B1:不可达分支的数据源快照字段与原同步形态一致(重构曾丢失落 default)
+    # 即使 agent 不可达,响应仍保留数据源快照。
     assert body["datasource_key"] == "default"
     status = (
         await session.execute(
@@ -448,7 +441,7 @@ async def test_no_data_maps_neutral_status(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """044:verdict=NO_DATA → 消息第四态;summary 承载中性文案,error 空无产物卡。"""
+    """verdict=NO_DATA → 消息第四态;summary 承载中性文案,error 空无产物卡。"""
     _, token = await _user_with_chat_perm(client, session, make_user)
     reply = AgentReply(
         success=False,
@@ -492,7 +485,7 @@ async def test_failed_friendly_error_with_detail(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """047:FAILED 文案用户语言,原始技术错误迁移 error_detail(响应+落档)。"""
+    """FAILED 文案用户语言,原始技术错误迁移 error_detail(响应+落档)。"""
     _, token = await _user_with_chat_perm(client, session, make_user)
     raw = 'missing FROM-clause entry for table "s"'
     reply = AgentReply(success=False, verdict="ERROR", error=raw, retry_count=2)
@@ -514,7 +507,7 @@ async def test_rejected_reserved_table_copy_neutral(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """047:保留表拦截文案中性化——不责备用户(模型越界是常见成因)。"""
+    """保留表拦截文案中性化——不责备用户(模型越界是常见成因)。"""
     from kongming.chat.service import blocked_friendly
 
     assert blocked_friendly("RESERVED_TABLE:user_memory") == (
@@ -526,7 +519,7 @@ async def test_rejected_reserved_table_copy_neutral(
 
 
 def test_chart_candidates_rules() -> None:
-    """049 图表候选:列角色画像→形状→有序候选(chat spec「图表可视化」)。"""
+    """图表候选:列角色画像→形状→有序候选(chat spec「图表可视化」)。"""
     import datetime as dt
 
     from kongming.chat.models import suggest_charts
@@ -588,7 +581,7 @@ def test_chart_candidates_rules() -> None:
 
 
 def test_chart_candidates_identifier_dims() -> None:
-    """049:标识列/期间列恒为维度(碎刻度根除),两维分组→分组柱状图。"""
+    """标识列/期间列恒为维度(碎刻度根除),两维分组→分组柱状图。"""
     from kongming.chat.models import suggest_charts
 
     sql = (
@@ -635,7 +628,7 @@ def test_chart_candidates_identifier_dims() -> None:
 
 
 def test_chart_candidates_multi_measure_scatter() -> None:
-    """049:双度量散点与多度量系列(y 列表);011 列序解耦语义保留。"""
+    """双度量散点与多度量系列(y 列表);列序解耦语义保留。"""
     from decimal import Decimal
 
     from kongming.chat.models import suggest_charts
@@ -663,7 +656,7 @@ def test_chart_candidates_multi_measure_scatter() -> None:
 
 
 def test_humanize_stats() -> None:
-    """050:统计键用户可读化(041 标签单源;歧义 fail-open;幂等)。"""
+    """统计键用户可读化(标签单源;歧义 fail-open;幂等)。"""
     from kongming.chat.models import humanize_stats
 
     stats: dict[str, object] = {
@@ -690,8 +683,8 @@ def test_humanize_stats() -> None:
 
 
 def test_chart_candidates_dim_priority() -> None:
-    """049:类目维在场时比较类图型(bar)优先于散点;散点仅服务双度量无维形态
-    (吸收 011 列序解耦——标识/名称列在任意位置都不进度量池)。"""
+    """类目维在场时比较类图型(bar)优先于散点;散点仅服务双度量无维形态
+    (列序解耦后的收紧:标识/名称列在任意位置都不进度量池)。"""
     from kongming.chat.models import suggest_charts
 
     # [名称, 片长, 租金] → bar 多度量系列(类目比较优先),散点不再截胡

@@ -1,6 +1,4 @@
-/* 日期筛选快捷档(近 7 天/近 30 天,含今天):一键填充开始/结束日期。
-   审计/护栏/工具等日期筛选区共用(≥2 处同类 UI 抽公共组件)。日期串按本地时区生成;
-   区间的日界语义(本地/UTC 零点)由消费页的换算(如 endExclusive)决定,本组件不解释。 */
+/* 提供近 7 天和近 30 天筛选；日期按本地时区生成，日界换算由调用页面处理。 */
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -18,7 +16,7 @@ const PRESETS = [
   { label: "近 30 天", days: 30 },
 ];
 
-/** 「快捷」筛选字段:与同区其他 Label+控件字段同构(items-end 对齐) */
+/** 「快捷」筛选字段,与同区其他 Label+控件字段同构 */
 export function DateRangeQuick({ onPick }: { onPick: (start: string, end: string) => void }) {
   return (
     <div className="space-y-1">

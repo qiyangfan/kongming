@@ -1,15 +1,10 @@
-"""LangGraph 编排骨架(继承前系统已验证的 8 节点设计)。
-
-节点链:understand → retrieve → generate → validate → execute → selfheal → summarize
-- execute:回调控制面 /internal/sql/execute(不是直连 DB)
-- selfheal:错误分类重试;权限类(verdict=BLOCKED/预检非只读)不重试
-"""
+"""LangGraph 问答状态与结果模型。"""
 
 from typing import NotRequired, TypedDict
 
 from pydantic import BaseModel
 
-# 093 三态意图路由取值域单源(常量放 state 纯数据模块:nodes/streams 共引,
+# 三态意图路由取值域单源(常量放 state 纯数据模块:nodes/streams 共引,
 # 避免 streams→nodes 反向依赖成环)
 INTENT_DATA = "data"
 INTENT_KNOWLEDGE = "knowledge"
@@ -44,7 +39,7 @@ class AgentState(TypedDict, total=False):
     history: list[str]  # 多轮上下文:user 问句列表,旧→新(指代消解用)
     resolved_question: NotRequired[str]  # understand 产物(指代消解后)
     schema_hint: NotRequired[str]  # retrieve 产物(拼好的 schema 提示文本)
-    history_sql: NotRequired[str]  # retrieve 产物(召回的历史成功 SQL 段,009)
+    history_sql: NotRequired[str]  # retrieve 产物(召回的历史成功 SQL 段)
     generated_sql: NotRequired[str]  # generate 产物
     validation: NotRequired[ValidationResult]  # validate 产物(本地预检)
     execution: NotRequired[ExecutionResult]  # execute 产物(回调)
@@ -53,21 +48,21 @@ class AgentState(TypedDict, total=False):
     summary: NotRequired[str]
     insights: NotRequired[list[dict[str, str]]]
     stats: NotRequired[dict[str, object]]
-    compute_values: NotRequired[list[float]]  # 057:本轮计算工具返回值(入白名单)
+    compute_values: NotRequired[list[float]]  # 本轮计算工具返回值(入白名单)
     end_reason: NotRequired[str]  # 终态分类(blocked 等)
-    memory_hint: NotRequired[str]  # 022:召回的用户已知信息段(控制面注入)
-    relations_hint: NotRequired[str]  # 023:召回集合内 JOIN path 段
-    metric_hints: NotRequired[str]  # 023:命中指标口径段
-    metric_hits: NotRequired[list[dict[str, str | None]]]  # 076:结构化口径命中(空=无命中)
-    # 068:文档道结构化来源(citation_key/source_ref/doc_name;空=SQL 道/无命中)
+    memory_hint: NotRequired[str]  # 召回的用户已知信息段(控制面注入)
+    relations_hint: NotRequired[str]  # 召回集合内 JOIN path 段
+    metric_hints: NotRequired[str]  # 命中指标口径段
+    metric_hits: NotRequired[list[dict[str, str | None]]]  # 结构化口径命中(空=无命中)
+    # 文档道结构化来源(citation_key/source_ref/doc_name;空=SQL 道/无命中)
     sources: NotRequired[list[dict[str, str]]]
-    skill_terms: NotRequired[str]  # 056:Skill Pack 术语段
-    skill_examples: NotRequired[str]  # 056:黄金示例段(禁令前缀)
-    skill_persona: NotRequired[str]  # 056:人设段
-    doc_hints: NotRequired[list[dict[str, str]]]  # 024:文档段(source_ref+content)
-    has_attachments: NotRequired[bool]  # 036④:本轮含图片附件(直答分流信号)
-    # 093:三态意图路由(route_intent 产物)。intent 缺席=LLM 失败/超时/低置信
-    # 已回退——分流判定走与 093 前逐字一致的词表分支(含 047 多轮闸,零回归)
+    skill_terms: NotRequired[str]  # Skill Pack 术语段
+    skill_examples: NotRequired[str]  # 黄金示例段(禁令前缀)
+    skill_persona: NotRequired[str]  # 人设段
+    doc_hints: NotRequired[list[dict[str, str]]]  # 文档段(source_ref+content)
+    has_attachments: NotRequired[bool]  # 当前请求是否含图片附件，用于问答分流。
+    # 三态意图路由(route_intent 产物)。intent 缺席=LLM 失败/超时/低置信
+    # 缺少 intent 时，分流会沿用规则词表并检查多轮上下文。
     intent: NotRequired[str]  # data / knowledge / fused(取值域见 VALID_INTENTS)
     intent_source: NotRequired[str]  # 判定来源 llm(诊断;只进 trace 不入响应)
     intent_confidence: NotRequired[float]  # LLM 置信(0~1)
@@ -75,7 +70,7 @@ class AgentState(TypedDict, total=False):
 
 
 def fused_takes_over(state: AgentState) -> bool:
-    """融合道接手判定(093,单源谓词):intent=fused 且 SQL 通道 PASS 且结果
+    """融合道接手判定(单源谓词):intent=fused 且 SQL 通道 PASS 且结果
     非空且文档命中,四条件合取——_after_summarize 条件边、流式 summary 抑制
     与 fused_answer 前置复核三处共用(判据漂移即「数据稿被吞」或「双稿拼接」,
     故收敛单点)。"""

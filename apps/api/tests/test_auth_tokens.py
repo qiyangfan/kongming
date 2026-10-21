@@ -32,10 +32,10 @@ async def test_refresh_reuse_revokes_whole_family(client: AsyncClient, make_user
     pair1 = await _login(client)
     r = await client.post("/auth/refresh", json={"refresh_token": pair1["refresh_token"]})
     pair2 = r.json()
-    # 攻击者持已轮换旧票 R1 再次刷新 → 401 且全家族吊销
+    # 已轮换的 refresh token 再次使用时，拒绝请求并吊销整个 token 家族。
     r = await client.post("/auth/refresh", json={"refresh_token": pair1["refresh_token"]})
     assert r.status_code == 401
-    # 合法链上的 R2 同样被拒(家族已吊销)
+    # 同一 token 家族中的其他 refresh token 也随之失效。
     r = await client.post("/auth/refresh", json={"refresh_token": pair2["refresh_token"]})
     assert r.status_code == 401
 

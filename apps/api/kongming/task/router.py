@@ -1,10 +1,7 @@
-"""task 路由(090/091):公开端点(创建/列表/详情/暂停/恢复/取消/审批
-+ 协作拓扑声明 + 协作运行查询)+ 内部编排回调(plan/step-start/step-result/
-collab-start/worker-start/worker-result/finish;X-Internal-Token 闸)。
+"""任务路由提供用户端任务操作和 Agent 内部回调。
 
-权限点:task:create / task:read / task:manage;归属收口=本人本租户,404 同形。
-执行派发=创建/真实恢复/审批决策时触发一次 agent 编排(拉取式,步间连续,
-挂起即停;同态幂等操作不二次派发)。
+用户端按本人和租户隔离；内部端点由 X-Internal-Token 保护。
+创建、有效恢复和审批决策会触发 Agent 执行。
 """
 
 import asyncio
@@ -39,7 +36,7 @@ internal_router = APIRouter(prefix="/internal/task", tags=["internal"])
 
 
 class _CollabBotResolver:
-    """协作 Bot 运行时解析适配(091;沿用 bot 域运行时口径:租户内存在
+    """协作 Bot 运行时解析适配(沿用 bot 域运行时口径:租户内存在
     + 启用 + 创建者用户 ACTIVE;人格与工具子集原样带出,工具交集在执行面收)。"""
 
     def __init__(self, session: AsyncSession) -> None:
@@ -130,7 +127,7 @@ class StepOut(BaseModel):
 
 
 class GraphConfirmOut(BaseModel):
-    """图内确认行(挂起卡片数据源;add-graph-checkpoint)。"""
+    """图内确认行(挂起卡片数据源;graph-checkpoint)。"""
 
     confirm_id: str
     step_id: str
@@ -164,7 +161,7 @@ class CollabWorkerOut(BaseModel):
 
 
 class CollabTurnOut(BaseModel):
-    """圆桌轮次转写行(115;黑板观测面,追加只写)。"""
+    """圆桌轮次转写行(黑板观测面,追加只写)。"""
 
     round_no: int
     worker_no: int
@@ -194,14 +191,14 @@ class CollabRunsOut(BaseModel):
 
 
 class CollabParticipantIn(BaseModel):
-    """圆桌参与者声明条目(115):role 取内置章程域,bot_key 可空绑定。"""
+    """圆桌参与者声明条目:role 取内置章程域,bot_key 可空绑定。"""
 
     role: str | None = Field(default=None, max_length=32)
     bot_key: str | None = Field(default=None, max_length=m.COLLAB_BOT_KEY_MAX)
 
 
 class CollabWorkerIn(BaseModel):
-    """分工名册成员声明条目(collab-worker-roster):Bot 点名,可选别名
+    """分工名册成员声明条目:Bot 点名,可选别名
     (身份 = name 缺省 bot_key;声明期锁定,运行期不可增减改绑)。"""
 
     name: str | None = Field(default=None, max_length=m.COLLAB_BOT_KEY_MAX)
@@ -214,7 +211,7 @@ class CollabTopologyIn(BaseModel):
     critic: bool = False
     dispatch: str | None = None
     bot_key: str | None = Field(default=None, max_length=m.COLLAB_BOT_KEY_MAX)
-    # 圆桌(115):轮次上限与参与者名册(名册声明期确定,运行期锁定)
+    # 圆桌:轮次上限与参与者名册(名册声明期确定,运行期锁定)
     max_rounds: int | None = Field(default=None, ge=1, le=16)
     participants: list[CollabParticipantIn] | None = Field(default=None, max_length=16)
     # 分工 worker 名册(collab-worker-roster):与顶层 bot_key 互斥(逐成员绑定)
@@ -260,7 +257,7 @@ async def create_task(
         session_id=body.session_id,
         trace_root=trace_root,
         budget=body.budget,
-        # 部署级上限钳制(090 spec「任务级配置 + 部署级上限」)
+        # 部署级上限钳制(spec「任务级配置 + 部署级上限」)
         budget_caps={
             "max_steps": s.task_budget_max_steps,
             "max_tokens": s.task_budget_max_tokens,
@@ -444,7 +441,7 @@ async def decide_graph_confirm(
     return TaskMutateOut(task_id=task_id, status=str(detail["task"]["status"]))
 
 
-# ── 协作(091):拓扑声明 + 运行查询(挂 task:* 权限体系)──
+# ── 协作:拓扑声明 + 运行查询(挂 task:* 权限体系)──
 
 
 @router.put(
@@ -688,8 +685,7 @@ async def task_step_result(
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     except TaskConflict as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
-    # 证据拒绝也是决策(非提交失败):200 携带决策原文,agent 按拒绝语义
-    # 收口(422 会被回调客户端归一为链路失败,拒绝原因丢失、分支不可达)
+    # 证据校验拒绝属于业务决策，使用 200 保留原始 decision；422 会被客户端归一为失败并丢失拒绝原因。
     return {"decision": decision}
 
 
@@ -730,7 +726,7 @@ async def task_finish(
         raise HTTPException(status_code=409, detail=str(e)) from e
 
 
-# ── 内部协作回调(091;agent 面编排回写;拓扑以库内声明为准)──
+# ── 内部协作回调(agent 面编排回写;拓扑以库内声明为准)──
 
 
 class CollabStartIn(BaseModel):
@@ -764,7 +760,7 @@ class CollabWorkerStartIn(BaseModel):
     run_id: str
     worker_no: int = Field(ge=1)
     subgoal: str = Field(min_length=1, max_length=2000)
-    # 与 0040 列宽同口径(bot_key VARCHAR(64));缺限长则畸形载荷裸 500
+    # 限长与库列 bot_key VARCHAR(64) 同口径;缺限长则畸形载荷裸 500
     bot_key: str | None = Field(default=None, max_length=m.COLLAB_BOT_KEY_MAX)
     trace_id: str = Field(default="", max_length=64)
 
@@ -864,7 +860,7 @@ async def collab_finish(
 
 
 class CollabTurnIn(BaseModel):
-    """圆桌轮次上账载荷(115;追加只写,唯一键拒绝重复)。"""
+    """圆桌轮次上账载荷(追加只写,唯一键拒绝重复)。"""
 
     task_id: str
     tenant_key: str
@@ -905,7 +901,7 @@ async def collab_turn(
 
 
 class StepSuspendedIn(BaseModel):
-    """图内挂起上账载荷(编排回调;add-graph-checkpoint)。"""
+    """图内挂起上账载荷(编排回调;graph-checkpoint)。"""
 
     task_id: str
     tenant_key: str
@@ -957,7 +953,7 @@ class GraphCheckpointIn(BaseModel):
 
 
 async def _thread_task_or_404(session: AsyncSession, tenant_id: str, thread_id: str) -> str:
-    """线程→任务归属校验:thread_id 确定性派生(compile D3),任务不存在/
+    """线程→任务归属校验:thread_id 确定性派生,任务不存在/
     跨租户一律 404 同形(存储不可越租户读写)。"""
     from sqlalchemy import text as _text
 
@@ -1128,8 +1124,8 @@ def _uuid_or_404(value: str) -> None:
 
 
 def _uuid_body_or_404(*values: str) -> None:
-    """内部回调请求体 UUID 形校验(091 补齐 B3:畸形串 404 同形,
-    不再穿透到 DBAPI 裸 500;agent 面按回调失败语义收敛)。"""
+    """内部回调请求体 UUID 形校验:畸形串 404 同形,
+    不穿透到 DBAPI 裸 500(agent 面按回调失败语义收敛)。"""
     for v in values:
         _uuid_or_404(v)
 
@@ -1226,7 +1222,7 @@ async def _mutate(
     return TaskMutateOut(task_id=task_id, status=status), moved
 
 
-# ── 执行派发(拉取式:创建/恢复触发一次;任务自持会话,连接卫生同 088)──
+# ── 执行派发(拉取式:创建/恢复触发一次;任务自持会话,连接卫生同)──
 
 _GEN_TASKS: set[asyncio.Task[None]] = set()
 
@@ -1240,7 +1236,7 @@ _TASK_ROW_SQL = (
 
 
 async def _bump_and_schedule(task_id: str) -> int | None:
-    """真实派发前置:派发代际原子自增,携新代数派发(0042 双执行者闸)。
+    """真实派发前置:派发代际原子自增,携新代数派发(防旧代数双执行)。
     代数失配会拦下旧循环的全部后续回调(begin abort/回写 stale/终态 409)。"""
 
     async with get_sessionmaker()() as session:
@@ -1253,11 +1249,8 @@ async def _bump_and_schedule(task_id: str) -> int | None:
 
 
 def _schedule_run(*, task_id: str, epoch: int | None = None) -> None:
-    """后台派发 agent 任务循环(强引用集防 GC);编排回调自持短会话,
-    agent 长任务期间不占池;终态收口全部走 service.finish 白名单
-    (编排迟到/用户已取消暂停时拒绝越权改写——终态不复活);
-    agent 未终态化=链路异常 → INTERRUPTED(可显式恢复),不静默滞留;
-    代际失配(STALE)或收口前代数已推进 → 放弃收口(在位派发负责)。"""
+    """将 Agent 任务放入后台循环并保留强引用;每个回调使用短数据库
+    会话,终态经 service.finish 收口。"""
 
     async def _run() -> None:
         agent = AgentClient(get_settings())
@@ -1275,9 +1268,8 @@ def _schedule_run(*, task_id: str, epoch: int | None = None) -> None:
                 m.T_CANCELLED,
                 m.T_INTERRUPTED,
             ):
-                # 链路异常(agent 不可达/坏报文/未知终态口径)≈ 进程中断:
-                # 收口 INTERRUPTED(可显式恢复),不谎称失败终态;白名单拒绝
-                # (如审批挂起中)则保持现态
+                # Agent 不可用/报文无效/终态未知 → 可恢复 INTERRUPTED;
+                # 审批等白名单状态保持不变。
                 await collector.finish_whitelisted(
                     m.T_INTERRUPTED, reason="任务编排链路异常(agent 未终态化),可显式恢复"
                 )

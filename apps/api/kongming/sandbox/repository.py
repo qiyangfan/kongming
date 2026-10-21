@@ -1,4 +1,4 @@
-"""sandbox 审计存储(027):独立短事务(与 019 AuditWriter 同款——
+"""sandbox 审计存储:独立短事务(与 AuditWriter 同款——
 get_sessionmaker 独立会话,不占请求事务,失败仅日志返回 None)。"""
 
 import logging
@@ -15,7 +15,7 @@ _TAIL = 2000
 
 
 class SqlSandboxRunRepo:
-    """sys_sandbox_run 写入(027)。零框架纪律:本文件属基础设施层。"""
+    """向 sys_sandbox_run 写入沙箱执行记录的仓储实现，不依赖 Web 框架。"""
 
     async def record(
         self,
@@ -59,6 +59,6 @@ class SqlSandboxRunRepo:
                 await s.commit()
             return row_id
         except Exception:
-            # 审计失败不阻断主链路(与 019 同款);仅日志
+            # 沙箱审计写入失败只记日志，不影响执行结果。
             log.warning("sys_sandbox_run 落库失败(不阻断)", exc_info=True)
             return None

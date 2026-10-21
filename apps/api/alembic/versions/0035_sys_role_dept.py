@@ -1,21 +1,4 @@
-"""0035: 角色自定义部门集合底座(datascope CUSTOM)
-
-Revision ID: 0035
-Revises: 0034
-Create Date: 2026-10-01
-
-CUSTOM(自定义部门集合)在 baseline 的 data_scope CHECK 里已占位(0001:75),
-但执行侧一直 fail-closed 拒绝——能力"已登记未实现"。本迁移补存储底座:
-- sys_role_dept:角色 ↔ 部门的关联表(复合主键 + 两侧 FK + dept_id 索引)。
-
-为什么用关联表而不是 sys_role.data_scope_dept_ids JSON 列:权威库里"部门集合"
-是关系不是文档——FK 完整性(删被引用的部门必须被拦下)、反查"哪些角色圈了
-这个部门"、集合语义天然去重都靠关系约束兑现;JSON 列三样都给不出,给不出
-就是把悬空授权语义写进生产库(与 ADR-004「状态列禁 SMALLINT 魔数」同源纪律:
-能用约束表达的不变量,不留给注释与应用层自觉)。
-约定同 baseline:UUID 主键片段沿用 sys_user_role/sys_role_permission 形态
-(关联表无独立 id)、无状态列故无需 CHECK、纯加法可回滚。
-"""
+"""新增角色与部门关联表，使用外键保证部门引用有效，关联行天然去重。"""
 
 from sqlalchemy import text
 

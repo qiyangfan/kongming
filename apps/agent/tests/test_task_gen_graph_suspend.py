@@ -1,8 +1,5 @@
 # pyright: reportArgumentType=false, reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownParameterType=false, reportMissingParameterType=false, reportUnknownArgumentType=false, reportPrivateUsage=false
-"""编排接线测试(add-graph-checkpoint):图内挂起上账、恢复提示透传、
-恢复方式如实入步骤账。Fake 形态与 test_task_gen.py 同款。"""
-
-# pyright: reportPrivateUsage=false
+"""图内挂起上账、恢复提示透传与恢复方式入账的编排测试。Fake 形态与 test_task_gen.py 同款。"""
 
 import json
 from typing import Any

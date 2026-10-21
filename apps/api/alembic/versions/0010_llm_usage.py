@@ -1,13 +1,12 @@
-"""0010: multi-model-routing 用量表(021)
+"""LLM 调用用量表。
 
 Revision ID: 0010
 Revises: 0009
 Create Date: 2026-08-23
 
-sys_llm_usage:LLM 逐次调用用量(agent 经 /internal/llm-usage 上报,
-fire-and-forget 统计口径非计费依据);tenant_id 由 api 按 tenant_key 反解,
-反解失败 NULL(聚合归 unknown);trace_id 可空(titler/describer 无 trace)。
-**downgrade**:删表(新域零存量)。
+Agent 通过 /internal/llm-usage 上报逐次用量，仅供统计，不作为计费依据。
+tenant_id 按 tenant_key 解析，失败时为空；trace_id 允许为空。
+**downgrade**:删除用量表。
 """
 
 from alembic import op

@@ -1,13 +1,4 @@
-"""0043: judge 运行记录两表(092 LLM-as-judge 评测智能体化)
-
-- judge_run:一次 judge run 的编排汇总(对象类型 × rubric 版本 × 提示词指纹 ×
-  通过率汇总 × 状态)——基线红线的对照单位(同类型同 rubric 版本相邻两次 run)。
-- judge_result:逐对象结构化结果(verdict/分项维度/依据摘录/原始输出)——
-  单对象独立收口,失败对象保留原始输出供排查。
-- (object_type, object_id) 二元组不设业务外键:四类评审对象异构(report/task/
-  collab/answer 分属不同业务表),外键会为每类各建列且跨域耦合;judge 是
-  只读评审,对象删除后 judge 记录保留(评审历史不受业务删除牵连)。
-"""
+"""新增 judge 运行和逐对象结果表。评审对象不设跨域外键，业务对象删除后仍保留评审记录。"""
 
 from sqlalchemy import text
 

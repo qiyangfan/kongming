@@ -1,4 +1,4 @@
-"""bot 用例编排(025):Bot CRUD + 运行时(权限求交)+ api-key + 审核。零框架。"""
+"""bot 用例编排:Bot CRUD + 运行时(权限求交)+ api-key + 审核。零框架。"""
 
 import hashlib
 import logging
@@ -51,8 +51,8 @@ class BotService:
         runner: ReactRunner,
         guardrail: BotGuardrail,
         oper_logger: BotOperLogger,
-        dynamic_tools: DynamicToolLister | None = None,  # 028:MCP 目录(未注入=纯静态)
-        usage_sink: UsageSink | None = None,  # 035:bot 用量落库(未注入=不落)
+        dynamic_tools: DynamicToolLister | None = None,  # MCP 目录(未注入=纯静态)
+        usage_sink: UsageSink | None = None,  # bot 用量落库(未注入=不落)
     ) -> None:
         self._repo = repo
         self._perms = perms
@@ -63,7 +63,7 @@ class BotService:
         self._usage_sink = usage_sink
 
     async def _sink_usage(self, reply: dict[str, object], *, tenant_id: str, bot_id: str) -> None:
-        """035:请求内同步落用量(计费基准);失败仅日志不阻断应答。"""
+        """请求内同步落用量(计费基准);失败仅日志不阻断应答。"""
         if self._usage_sink is None:
             return
         records_raw = reply.get("usage_records")
@@ -88,7 +88,7 @@ class BotService:
             )
 
     async def _mcp_names(self, tenant_id: str) -> list[str]:
-        """租户已注册 MCP 工具全名(未接线/空 → 纯静态口径,025 零回归)。"""
+        """租户已注册 MCP 工具全名(未接线/空 → 纯静态口径)。"""
         if self._dynamic_tools is None:
             return []
         return [
@@ -115,11 +115,11 @@ class BotService:
         mcp_names = await self._mcp_names(tenant_id)
         allowed = tools_for_perms(await self._perms.list_codes(user_id), mcp_names)
         validate_tool_subset(tools, allowed, registered_names=self._registered_names(mcp_names))
-        # R1-H2:datasource 归属校验(spec 字面立约;default 恒可用)
+        # datasource 归属校验(spec 字面立约;default 恒可用)
         ds_key = str(payload.get("datasource_key") or "default")
         if ds_key != "default":
             await self._assert_datasource(tenant_id, ds_key)
-        # R1-H1:model 注册表校验(非空时;实时查 agent 注册表,不可达 fail-closed 拒)
+        # model 注册表校验(非空时;实时查 agent 注册表,不可达 fail-closed 拒)
         model = payload.get("model")
         if model is not None:
             available = await self._runner.list_models()
@@ -145,7 +145,7 @@ class BotService:
         return row_id
 
     async def _assert_datasource(self, tenant_id: str, datasource_key: str) -> None:
-        """R1-H2:非 default 源存在+启用+归属(同形 InvalidBotKey 400 防探测)。"""
+        """非 default 源存在+启用+归属(同形 InvalidBotKey 400 防探测)。"""
         row = await self._repo.find_datasource(datasource_key=datasource_key)
         if row is None or row["status"] != "ACTIVE" or str(row["tenant_id"]) != tenant_id:
             raise InvalidBotKey(f"数据源不可用: {datasource_key}")
@@ -154,10 +154,10 @@ class BotService:
         self, *, creator_id: str, tenant_id: str, row: dict[str, object]
     ) -> list[dict[str, object]]:
         """实际可用工具集(单一真理源,运行闸/上架闸同源):
-        Bot 子集 ∩ 创建者当前权限 → 剔除需确认写工具(R1-M2)→ MCP 只读补入(028)。
+        Bot 子集 ∩ 创建者当前权限 → 剔除需确认写工具→ MCP 只读补入。
         返回空集 = 该 Bot 在当前状态下不存在任何可执行工具。"""
         # 权限求交(spec:Bot 子集 ∩ 创建者当前权限);
-        # filter_specs 吃权限点集(此前误传工具名集=恒空,R1 级自抓)
+        # filter_specs 接收权限点,传入工具名会导致过滤结果为空
         creator_perms = await self._perms.list_codes(creator_id)
         mcp_names = await self._mcp_names(tenant_id)
         allowed_names = tools_for_perms(creator_perms, mcp_names)
@@ -165,12 +165,12 @@ class BotService:
         raw_bot_tools = cast("list[object]", raw) if isinstance(raw, list) else []
         bot_tools = [str(t) for t in raw_bot_tools if str(t) in allowed_names]
         tools = [dict(s) for s in filter_specs(creator_perms) if s["name"] in set(bot_tools)]
-        # R1-M2:Bot 渠道无确认交互(公开页/OpenAI 无会话)——剔除需确认的写工具,
+        # Bot 渠道无确认交互(公开页/OpenAI 无会话)——剔除需确认的写工具,
         # 防确认死信+LLM 谎称卡片已弹出
         from kongming.toolcall.registry import REGISTRY as _TOOL_REG
 
         tools = [t for t in tools if not _TOOL_REG[str(t["name"])].require_confirm]
-        # 028:MCP 工具补入(filter_specs 只覆盖静态集);写工具同 R1-M2
+        # MCP 工具补入(filter_specs 只覆盖静态集);写工具同
         # 剔除(无 readOnlyHint=require_confirm,Bot 渠道确认死信)
         mcp_wanted = {t for t in bot_tools if t.startswith("mcp__")}
         if mcp_wanted and self._dynamic_tools is not None:
@@ -195,16 +195,16 @@ class BotService:
         *,
         bot_key: str,
         question: str,
-        channel: str,  # web_embed / api / mcp(028)/ store(104)
+        channel: str,  # web_embed / api / mcp/ store
         tenant_id_hint: str | None = None,  # api-key 渠道从 key 行带出
-        definition_override: dict[str, object] | None = None,  # 104:商店直跑消费快照
+        definition_override: dict[str, object] | None = None,  # 商店直跑消费快照
     ) -> dict[str, object]:
         """Bot 运行时:装载(启用/公开闸)→ 权限求交 → ReAct → 护栏 → 响应。
 
         返回 {success, summary, sql, columns, rows, stats, retry_count, error}。
-        104:definition_override(商店渠道传当前上架版本快照)覆写系统提示词
+        definition_override(商店渠道传当前上架版本快照)覆写系统提示词
         与工具集——货架消费快照而非活定义;公开页/api-key 等既有渠道不传,
-        消费活定义为既有契约(Non-goal 边界)。
+        消费活定义为既有契约。
         """
         tenant_id = tenant_id_hint
         if tenant_id is None:
@@ -218,7 +218,7 @@ class BotService:
         if channel == "web_embed" and not row["is_public"]:
             raise BotNotFound(bot_key)
         creator = str(row["created_by"])
-        # R1-L3:创建者禁用即不可运行(权限继承的账号态闸)
+        # 创建者禁用即不可运行(权限继承的账号态闸)
         creator_status = await self._repo.find_user_status(creator)
         if creator_status != "ACTIVE":
             raise BotNotFound(bot_key)  # 创建者不可用同形 404(防探测)
@@ -231,7 +231,7 @@ class BotService:
         if blocked:
             return {"success": False, "error": GUARDRAIL_REJECT_TEXT, "summary": ""}
         # 权限求交与工具裁剪(run/上架闸同源,见 resolve_tools);
-        # 104:商店渠道在快照定义上求交(零工具运行闸口径单源不变)
+        # 商店渠道在快照定义上求交(零工具运行闸口径单源不变)
         run_row: dict[str, object] = dict(row)
         if definition_override is not None:
             sp = definition_override.get("system_prompt")
@@ -265,12 +265,12 @@ class BotService:
                 user_id=creator,
                 datasource_key=str(row["datasource_key"]),
                 tools=tools,
-                bot_system_prompt=str(run_row["system_prompt"]),  # 104:商店渠道=快照
-                model=None if row["model"] is None else str(row["model"]),  # R1-H1
-                channel=channel,  # R1-M4
+                bot_system_prompt=str(run_row["system_prompt"]),  # 商店渠道=快照
+                model=None if row["model"] is None else str(row["model"]),
+                channel=channel,
             )
         except AgentUnavailable:
-            # R1-M3:agent 故障收敛友好错误(不裸 500)
+            # agent 故障收敛友好错误(不裸 500)
             return {
                 "success": False,
                 "error": "助手暂不可用,请稍后重试",
@@ -281,12 +281,10 @@ class BotService:
                 "stats": {},
                 "retry_count": 0,
             }
-        # 035:请求内同步落用量(计费基准=响应返回时本次用量已可判定;
-        # 失败仅日志不阻断应答)
         await self._sink_usage(reply, tenant_id=tenant_id, bot_id=str(row["id"]))
         summary = str(reply.get("summary") or "")
         error_text = str(reply.get("error") or "")
-        # R2-F1:error 一并过输出护栏(FAILED 错误原文可能含凭证形态,
+        # error 一并过输出护栏(FAILED 错误原文可能含凭证形态,
         # OpenAI 兼容端点 content 回退链会消费它——与 chat 域 _finalize_reply
         # 同纪律)
         filtered = await self._guardrail.filter_output(
@@ -324,7 +322,7 @@ class BotService:
     async def create_key(
         self, *, bot_id: str, tenant_id: str, user_id: str, name: str
     ) -> tuple[str, str]:
-        """创建 api-key:返回 (明文, key_id);明文仅本次可见。"""
+        """创建 API key 并返回明文和 key_id；明文只在创建响应中返回。"""
         plain = "km_" + secrets.token_urlsafe(32)
         key_hash = hashlib.sha256(plain.encode()).hexdigest()
         key_id = await self._repo.insert_api_key(
@@ -345,8 +343,8 @@ class BotService:
             raise ApiKeyInvalid
         await self._repo.touch_key_used(key_id=str(row["id"]))
         await self._repo.commit()
-        # R1-M5:key 绑定单 Bot,scopes 集合校验语义冗余(摘除;计费域重估)
-        # 035:纯增 bot_id(BOT 级配额判定与用量归属用;消费方既有键不变)
+        # key 绑定单 Bot,scopes 集合校验语义冗余,不再校验;
+        # bot_id 供 BOT 级配额判定与用量归属(消费方既有键不变)
         return {
             "bot_key": str(row["bot_key"]),
             "tenant_id": str(row["tenant_id"]),

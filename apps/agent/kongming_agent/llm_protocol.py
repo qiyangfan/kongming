@@ -1,17 +1,4 @@
-"""多协议出站翻译层(multi-protocol-llm,ADR-008)。
-
-职责双一(设计决策 2):①canonical OpenAI 形态(ReAct 内核消息史 / 工具声明 /
-工具调用)↔ anthropic Messages / openai Responses 形态的纯函数翻译;②anthropic
-官方 SDK 客户端封装(构造 / 双头鉴权 / 错误映射 → LlmError)。协议知识全部收敛
-本模块:llm.py 三通道按 protocol 分支选路,openai 路径零改动;ReAct 内核继续
-产出/消费 canonical 形态,内核与用量采集零改动。
-
-canonical 输入契约(与 openai 通道逐字同形):
-- messages:ChatCompletionMessageParam 形态 dict——system / user(content 为
-  str 或 vision content-parts 列表)/ assistant(content str + tool_calls)/
-  tool(tool_call_id + content JSON 观察文);
-- tools:openai function schema 列表 [{"type":"function","function":{…}}]。
-"""
+"""在 OpenAI、Anthropic 和 Responses 协议间转换请求与响应，统一为内部消息格式。"""
 
 import json
 import logging
@@ -51,7 +38,7 @@ def _attr(obj: object, name: str) -> object:
 
 
 def _usage_count(obj: object, name: str) -> int:
-    """usage 计数字段读取:缺失/None/畸形一律记 0(既有 038 采集语义)。"""
+    """usage 计数字段读取:缺失/None/畸形一律记 0(既有用量采集语义)。"""
     value = getattr(obj, name, None)
     try:
         return int(value) if value is not None else 0
@@ -70,15 +57,15 @@ class ProtocolUsage:
 
 class LlmError(Exception):
     """LLM 调用失败(key 缺失/网络/超时/协议异常)的统一出口。
-    自 llm.py 迁入:协议层错误映射(anthropic/responses)需在本层收敛该型,
-    llm.py 显式 re-export 保持既有导入面不变。"""
+    协议层错误映射(anthropic/responses)在本层收敛该型,llm.py 显式
+    re-export 保持既有导入面不变。"""
 
 
 @dataclass(frozen=True)
 class LlmToolCall:
     """LLM 产出的单次工具调用(canonical;args 解析失败时 args=None + raw_args 原文,
-    由 ReAct 节点收敛为「参数畸形」观察喂回自纠)。自 llm.py 迁入:三协议共用
-    的 canonical 型归属协议层,避免 llm.py ↔ llm_protocol 循环导入。"""
+    由 ReAct 节点收敛为「参数畸形」观察喂回自纠)。归属协议层,
+    避免 llm.py ↔ llm_protocol 循环导入。"""
 
     call_id: str
     name: str
@@ -111,15 +98,8 @@ def _json_object_or_none(raw: str) -> dict[str, object] | None:
 
 
 class AnthropicClient:
-    """anthropic 协议出站客户端(官方 AsyncAnthropic 封装;llm.py 池条目形态)。
-
-    URL 语义:base_url 即 Claude Code `ANTHROPIC_BASE_URL` 同构(SDK 请求
-    `{base}/v1/messages`,预设目录分支端点按此口径收录);双头鉴权:SDK 自发
-    `x-api-key` + `anthropic-version`,default_headers 补 `Authorization: Bearer`
-    (官方端点认 x-api-key,国内分支普遍认 Bearer,双发双兼容);SDK 重试用
-    官方默认(与 openai 通道同哲学,不新增重试语义);错误映射:APIError 族
-    (连接/超时/非 2xx/应答校验)与 200 裸解码失败统一收敛 LlmError。
-    """
+    """封装 Anthropic SDK 调用:请求鉴权与错误转换,APIError 及响应校验错误
+    统一转换为 LlmError。"""
 
     def __init__(
         self,
@@ -151,7 +131,7 @@ class AnthropicClient:
         kwargs = anthropic_request(messages=messages, tools=tools, max_tokens=max_tokens)
         kwargs["model"] = model
         try:
-            # SDK 重载对动态 kwargs 不收窄,cast 钉住返回型(边界处仅此一处)
+            # SDK 重载无法推断动态 kwargs 的返回类型,在调用边界显式 cast。
             raw = cast(
                 "object",
                 await self._sdk.messages.create(**cast("dict[str, Any]", kwargs)),
@@ -405,12 +385,12 @@ def _responses_input_items(messages: Sequence[Mapping[str, object]]) -> list[dic
                 p if p.get("type") == "input_image" else {"type": part_type, "text": p["text"]}
                 for p in parts
             ]
-            # type 显式补 message(role 消息省略 type 虽为官方缺省语义,但 muniu
-            # 入站仅认显式形态——2026-10-11 流式 e2e 实证)
+            # type 显式补 message(role 消息省略 type 虽为官方缺省语义,
+            # 但木牛入站只接受协议明确规定的形态)
             items.append({"type": "message", "role": role, "content": content_items})
         elif isinstance(content, str) and content:
             # 纯文本统一发 part 数组形态(与字符串快捷形态在 Responses 规范内等价,
-            # 对下游兼容面更宽:muniu 入站仅收数组形态——2026-10-11 流式 e2e 实证)
+            # 对下游保持兼容；木牛入站只接受数组形态。
             text_part_type = "output_text" if role == "assistant" else "input_text"
             items.append(
                 {
@@ -519,7 +499,7 @@ async def responses_create(
     )
     kwargs["model"] = model
     try:
-        # SDK 重载对动态 kwargs 不收窄,cast 钉住返回型(边界处仅此一处)
+        # SDK 重载无法推断动态 kwargs 的返回类型,在调用边界显式 cast。
         raw = cast(
             "object",
             await client.responses.create(**cast("dict[str, Any]", kwargs)),

@@ -1,4 +1,4 @@
-"""059 用户偏好闭合槽位纯函数测试(安全规则测试先行)。"""
+"""覆盖用户偏好闭合槽位和更新补丁处理。"""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ class TestNormalizePatch:
 
 
 class TestPutPatchNormalization:
-    """087 D1:人工 PUT 归一化(显式 null=删除;空串/空列表≠删除)。"""
+    """手动更新将显式 null 解释为删除，空串和空列表仍作为值保存。"""
 
     def test_explicit_null_is_delete(self) -> None:
         patch = p.normalize_put_patch({"language": None, "timezone": "UTC"})

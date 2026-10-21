@@ -1,15 +1,4 @@
-"""0013: document-rag 域两表(024)
-
-Revision ID: 0013
-Revises: 0012
-Create Date: 2026-08-23
-
-rag.documents:文档级(doc_name 同租户同数据源唯一;content_hash 幂等)。
-rag.document_chunks:父子块(chunk_level CHECK;子块 parent_id 指父块,
-document_id FK CASCADE;source_ref 定位;tsv 应用层维护[009 同款 simple
-配置];embedding 仅 CHILD,HNSW 部分索引不背父块死重)。
-**downgrade**:删两表(新域零存量)。
-"""
+"""新增文档与父子分块表。向量只存于子块，文档删除时级联清理分块。"""
 
 from alembic import op
 

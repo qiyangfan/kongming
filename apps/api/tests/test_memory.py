@@ -1,9 +1,4 @@
-"""memory 域全栈集成测试(022 agent-memory spec,双维隔离测试先行)。
-
-覆盖:召回双过滤(跨用户/跨租户不可见)+ dormant 排除 + 命中刷新;显式
-「记住」短路(落库+确认答复+不走 agent;PII 拒绝);自管理四端点(列表/
-编辑唤醒/删除/导出/越权 404);隐式落库(去重/敏感跳过)。
-"""
+"""覆盖记忆的用户与租户隔离、显式和隐式写入及自管理接口。"""
 # pyright: reportPrivateUsage=false
 
 from collections.abc import Iterator
@@ -78,7 +73,7 @@ async def _insert_memory(
     return str(mid)
 
 
-# ============ 显式记忆短路(chat 链路) ============
+# ============ 显式记忆请求 ============
 
 
 async def test_explicit_memory_short_circuit(
@@ -137,14 +132,13 @@ async def test_recall_hint_injected(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """召回注入:有向量记忆时 agent 请求体带 memory_hint(embedding 走 009 通道,
-    测试库无 agent——embedding 失败降级无注入;此处直证降级形态零回归)。"""
+    """检查记忆召回失败时不会向 Agent 注入记忆提示。"""
     uid, token = await _user(client, session, make_user, "mem_recall")
     await _insert_memory(session, user_id=uid, content="偏好月度口径")
     fake_agent["agent"] = FakeAgent()
     r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
     assert r.json()["success"] is True
-    # 测试环境无真 agent embedding:降级空 hint(或缺省)——零回归语义
+    # 测试环境无 agent embedding:降级为空 hint 或缺省
     hint = fake_agent["agent"].calls[0].get("memory_hint")
     assert hint in ("", None)
 
@@ -264,13 +258,13 @@ async def test_implicit_form_dedup_and_sensitive(
             {"content": "密码 abc123 手机 13812345678"},  # 敏感
         ],
     )
-    # 059:隐式只写槽位 patch,自由文本候选不再是落库单位
+    # 隐式只写槽位 patch,自由文本候选不落库
     assert saved == 0
     rows = await svc.list_mine(user_id=uid, tenant_id=tid)
-    assert rows == []  # 停止 IMPLICIT 自由文本落库
+    assert rows == []  # IMPLICIT 自由文本不落库
 
 
-# ============ R1-L1:召回核心路径直证(预置向量字面量) ============
+# ============ 召回核心路径测试(预置向量) ============
 
 
 async def test_recall_dual_filter_and_hit_refresh(session: AsyncSession) -> None:
@@ -350,7 +344,7 @@ async def test_recall_dual_filter_and_hit_refresh(session: AsyncSession) -> None
     assert no_hit is None
 
 
-# ============ R1 评审修复直证 ============
+# ============ 记忆管理行为 ============
 
 
 async def test_r1_h1_operlog_persisted_on_success(
@@ -359,7 +353,7 @@ async def test_r1_h1_operlog_persisted_on_success(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """R1-H1:显式形成成功路径的 memory.create 操作日志落库(同事务)。"""
+    """显式形成成功路径的 memory.create 操作日志落库(同事务)。"""
     _, token = await _user(client, session, make_user, "mem_oplog")
     fake_agent["agent"] = FakeAgent()
     r = await client.post(
@@ -380,7 +374,7 @@ async def test_r1_h2_injection_memory_rejected(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """R1-H2:injection 内容的显式记忆拒绝落库(跨会话注入通道封堵)。"""
+    """injection 内容的显式记忆拒绝落库(跨会话注入通道封堵)。"""
     _, token = await _user(client, session, make_user, "mem_inj")
     fake_agent["agent"] = FakeAgent()
     r = await client.post(
@@ -396,7 +390,7 @@ async def test_r1_h2_injection_memory_rejected(
 async def test_r1_m1_edit_preserves_vector_on_embedding_failure(
     session: AsyncSession,
 ) -> None:
-    """R1-M1:编辑时 embedding 失败保留原向量(COALESCE),记忆不退出召回。"""
+    """编辑时 embedding 失败保留原向量(COALESCE),记忆不退出召回。"""
     from kongming.memory.repository import SqlMemoryRepo
     from kongming.memory.service import MemoryService
 

@@ -1,7 +1,4 @@
-/* 反馈分析页(feedback-analytics spec 014「前端页面」):统计卡 + 趋势折线 +
-   筛选区 + 明细分页表(处置状态列) + 详情弹窗(对照/涉及表/处置区按权限显隐)。
-   页面只读(处置在弹窗内);图表色板从设计 token 派生(铁律 6);
-   无 system:feedback:view 者接口层 403(nav/PermRoute 同源守卫)。 */
+/* 反馈分析页提供统计、趋势、筛选和详情查看；图表颜色使用设计 token。 */
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -61,7 +58,7 @@ const STATUS_META: StatusMeta = {
   DISMISSED: { label: "已忽略", variant: "secondary" },
 };
 
-// 评分列(值 → 徽章统一走 StatusBadge;非 UP/DOWN 显示 —)
+// 评分列(徽章统一走 StatusBadge;空值显示 —)
 const RATING_META: StatusMeta = {
   UP: { label: "有用", variant: "secondary" },
   DOWN: { label: "不准确", variant: "default" },
@@ -169,7 +166,7 @@ export default function FeedbackPage() {
       }),
   });
 
-  // 删除/处置致末页越界自愈(007/009 同款范式)
+  // 删除或处置后重新计算页码，避免落在空页。
   useEffect(() => {
     if (list.data && list.data.items.length === 0 && list.data.total > 0 && page > 1) {
       setPage((p) => Math.max(1, p - 1));
@@ -179,7 +176,7 @@ export default function FeedbackPage() {
   const ov = overview.data;
   const totalPages = Math.max(1, Math.ceil((list.data?.total ?? 0) / PAGE_SIZE));
 
-  /** 统计卡数值加载/错误态折叠(R1-B3:loading 显 …、错误显 —) */
+  /** 统计卡数值加载/错误态折叠(loading 显 …、错误显 —) */
   const fbStat = (v: number | string | undefined) =>
     overview.isLoading ? "…" : overview.isError ? "—" : (v ?? 0);
 
@@ -190,7 +187,6 @@ export default function FeedbackPage() {
         description="用户反馈的统计与明细——处置反馈、沉淀纠错,让军师越答越准。"
       />
 
-      {/* 统计卡(feedback-analytics spec;R1-B3:卡级错误不逐卡 role=alert,数值降 …/— 示错) */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <StatCard label="反馈总数" value={fbStat(ov?.total)} />
         <StatCard label="有用(赞)" value={fbStat(ov?.up_count)} />
@@ -202,7 +198,6 @@ export default function FeedbackPage() {
         <StatCard label="带纠错" value={fbStat(ov?.corrected_count)} />
       </div>
 
-      {/* 趋势折线(token 色板) */}
       <div className="rounded-lg border border-border bg-card px-2 py-1">
         {overview.isError ? (
           <ErrorAlert />
@@ -211,7 +206,6 @@ export default function FeedbackPage() {
         )}
       </div>
 
-      {/* 筛选区 */}
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">评分</Label>
@@ -324,7 +318,6 @@ export default function FeedbackPage() {
         </label>
       </div>
 
-      {/* 明细分页表 */}
       {list.isError && <ErrorAlert />}
       <DataView
         rows={list.data?.items ?? []}
@@ -359,7 +352,7 @@ export default function FeedbackPage() {
             key: "rating",
             header: "评分",
             cardPriority: 4,
-            // rating 为窄联合:有值才出徽章,空值保持纯文本「—」(与原三元 else 分支等价)
+            // rating 为窄联合:有值才出徽章,空值纯文本「—」
             render: (item) =>
               item.rating ? <StatusBadge meta={RATING_META} value={item.rating} /> : "—",
           },
@@ -411,8 +404,7 @@ export default function FeedbackPage() {
   );
 }
 
-/* 详情弹窗(feedback-refine spec):对照区 + 涉及表区(「编辑知识」跳转)+
-   处置区(无 handle 权限隐藏) */
+/* 详情弹窗(feedback-refine spec):对照区 + 涉及表区(「编辑知识」跳转)+ 处置区(无 handle 权限隐藏) */
 function FeedbackDetailDialog({
   item,
   canHandle,
@@ -459,8 +451,7 @@ function FeedbackDetailDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {/* 040:包 form 对齐既有弹窗范式——备注框是 Textarea,Enter 为换行
-            不触发表单隐式提交,键盘提交如需要应另行加 Cmd/Ctrl+Enter(挂账) */}
+        {/* 字段包 form 对齐既有弹窗范式;备注为单行 Input,Enter 即隐式提交 */}
         <form
           onSubmit={(e) => {
             e.preventDefault();

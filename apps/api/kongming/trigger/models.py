@@ -1,11 +1,7 @@
-"""trigger 领域模型(031,零框架):cron 五字段解析与 next_fire 纯函数。
+"""解析五字段 cron 表达式并计算下次触发时间。
 
-支持形态:*、*/n、a-b、a-b/n、单值、逗号列表;036⑦ 补 Vixie `a/b`
-形态(从 a 起步进 b 至段上限);dom/dow 双非 * 直接拒(Vixie 并集
-语义易误解,简化立约);dow 0/7 皆周日;时区固定 Asia/Shanghai。
-036⑥:next_fire 改日历字段跳跃(月→日→时→分逐级推进),计算耗时
-与表达式跨度无关——原逐分钟迭代对远未来表达式(如每年一次)是
-52 万次迭代 0.3-0.5s 的请求路径阻塞。
+支持通配符、步长、范围、单值和逗号列表。星期日可写作 0 或 7;日和星期
+字段不能同时指定具体值。计算按日历字段推进,避免远期表达式逐分钟扫描。
 """
 
 import datetime as dt
@@ -48,8 +44,7 @@ def _parse_field(field: str, lo: int, hi: int) -> set[int]:
                 raise CronError(f"范围倒置: {part}")
         elif part.isdigit():
             start = int(part)
-            # 036⑦:Vixie `a/b`=从 a 起步进 b 至段上限(原单值形态
-            # 无步长时 start=end 不变)
+            # a/b 表示从 a 开始、每隔 b 取值；无步长时只取 a。
             end = hi if has_step else start
         else:
             raise CronError(f"片段非法: {part}")
@@ -75,7 +70,7 @@ def parse_cron(expr: str) -> list[set[int]]:
 
 
 def _dow(dt_: dt.datetime) -> int:
-    # Python weekday():周一=0..周日=6;cron:周日=0/7,周一=1
+    # Python weekday:周一=0..周日=6;cron:周日=0/7,周一=1
     return (dt_.weekday() + 1) % 7
 
 
@@ -88,8 +83,7 @@ def _ceil(s: set[int], cur: int) -> int | None:
 
 
 def next_fire(expr: str, after: dt.datetime) -> dt.datetime:
-    """下一次触发时刻(036⑥:日历字段跳跃,耗时与跨度无关;
-    日级上界 4 年防死循环;after 须带时区)。"""
+    """返回 after 之后的下一次触发时刻；after 必须带时区；4 年内无触发时刻抛 CronError。"""
     minute, hour, dom, month, dow = parse_cron(expr)
     if after.tzinfo is None:
         raise CronError("after 须带时区")

@@ -1,12 +1,4 @@
-"""0058: 向量列升级 halfvec(2560)(upgrade-rag-qwen3-halfvec-2560)
-
-四类派生向量(表说明/历史问句/文档子块/用户记忆)统一切半精度 2560 维:
-- 列类型 vector(1536) → halfvec(2560),HNSW 索引换 halfvec_cosine_ops;
-- 旧向量维度不匹配且可低成本重建,升级即清空(USING NULL),原文与业务
-  字段全部保留;降级恢复 vector(1536) 列与索引,同样不恢复旧向量
-  (设计 D3:两方向都不转换派生数据,恢复召回应重跑重建命令)。
-- halfvec HNSW 上限 4000 维(vector 上限 2000),2560 维只有 halfvec 可索引。
-"""
+"""将派生向量列升级为 2560 维 halfvec 并重建 HNSW 索引。旧向量会清空；降级也不会恢复旧向量，需重新运行向量重建。"""
 
 from alembic import op
 

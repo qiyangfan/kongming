@@ -1,6 +1,6 @@
-"""store 存储(033;104 版本化):商店发现/收藏/评分/使用量 + 上架版本快照。
+"""store 存储(版本化):商店发现/收藏/评分/使用量 + 上架版本快照。
 
-104 版本化语义:商店列表/详情/收藏/直跑一律消费「当前上架版本」快照
+版本化语义:商店列表/详情/收藏/直跑一律消费「当前上架版本」快照
 (sys_bot_version,经 current_version_id 指针 join);定义行只服务草稿态
 与既有渠道。快照读侧定型键集见 kongming.store.snapshot(单源)。
 """
@@ -31,7 +31,7 @@ _FAVORITED_SQL = (
     "        AND f2.user_id=CAST(NULLIF(:fu,'') AS uuid)) AS favorited"
 )
 
-# 快照消费 join(104):货架语义=有当前上架版本;未指向版本的在架行
+# 快照消费 join:货架语义=有当前上架版本;未指向版本的在架行
 # (迁移不变量外)不出现在商店——fail-safe 不裸奔草稿内容
 _SHELF_FROM_SQL = (
     " FROM public.sys_bot_definition b"
@@ -47,7 +47,7 @@ class SqlStoreRepo:
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
 
-    # ── 上架版本(104) ──
+    # ── 上架版本 ──
 
     async def current_version(self, *, bot_id: str) -> dict[str, Any] | None:
         row = (
@@ -76,9 +76,7 @@ class SqlStoreRepo:
         user_id: str,
     ) -> tuple[str, int] | None:
         """单句原子插入(MAX+1 与 INSERT 同语句,配唯一约束 DO NOTHING)。
-        返回 None=并发上架撞 version_no(评审修复:原「读 MAX+1→裸 INSERT」
-        两步在并发下撞唯一约束未映射 500);调用方重读重试即可,护栏审核
-        无需重跑。"""
+        返回 None=并发上架撞 version_no,调用方重读重试即可,护栏审核无需重跑。"""
         vid = str(uuid7())
         row = (
             await self._s.execute(
@@ -191,7 +189,7 @@ class SqlStoreRepo:
 
     async def unpublish(self, *, bot_id: str) -> None:
         """下架=撤货架标记(published_at/published_by);版本历史与指针保留
-        (104:下架态回滚仅恢复指针,历史不因下架丢失)。"""
+        (下架态回滚仅恢复指针,历史不因下架丢失)。"""
         await self._s.execute(
             text(
                 "UPDATE public.sys_bot_definition"
@@ -201,7 +199,7 @@ class SqlStoreRepo:
             {"i": bot_id},
         )
 
-    # ── 发现(消费当前上架版本快照,104) ──
+    # ── 发现(消费当前上架版本快照) ──
 
     async def store_list(
         self, *, tenant_id: str, keyword: str, sort: str, user_id: str = ""
@@ -221,8 +219,8 @@ class SqlStoreRepo:
             + _SHELF_WHERE_SQL
         )
         if keyword:
-            # J2:ILIKE 元字符转义(007 R1-3/014 防线;搜「_」不命中全表);
-            # 104:搜索对象=快照名/系统提示(货架内容),bot_key 为不可变标识
+            # ILIKE 元字符转义(搜「_」不命中全表);
+            # 搜索对象=快照名/系统提示(货架内容),bot_key 为不可变标识
             base += (
                 " AND (v.snapshot->>'name' ILIKE :kw ESCAPE '\\'"
                 " OR b.bot_key ILIKE :kw ESCAPE '\\'"
@@ -280,10 +278,10 @@ class SqlStoreRepo:
     async def set_favorite(
         self, *, tenant_id: str, user_id: str, bot_id: str, favorited: bool
     ) -> bool:
-        """幂等收藏/取消(spec「重复操作幂等」)——审查循环 F6:原 toggle
-        切换语义下网络重试/双击同一 POST 会把已收藏反选(HTTP POST 非幂等,
-        违约);改为显式 set:add=INSERT ON CONFLICT DO NOTHING,remove=DELETE,
-        两者天然幂等,无需 036⑥ 的 advisory lock 串行(无读-判-写交错)。"""
+        """幂等收藏/取消(spec「重复操作幂等」):显式 set 而非 toggle——
+        网络重试/双击同一 POST 会把已收藏反选(HTTP POST 非幂等);
+        add=INSERT ON CONFLICT DO NOTHING,remove=DELETE,
+        两者天然幂等,无读-判-写交错。"""
         if favorited:
             await self._s.execute(
                 text(

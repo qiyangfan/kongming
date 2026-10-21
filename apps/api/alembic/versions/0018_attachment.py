@@ -1,4 +1,4 @@
-"""0018: multimodal-input 附件表(030)
+"""0018: multimodal-input 附件表
 
 Revision ID: 0018
 Revises: 0017

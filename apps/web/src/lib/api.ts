@@ -1,11 +1,4 @@
-/* API 客户端。类型契约由 ADR-005 管线生成:
-   pnpm contracts:gen → api-types.gen.ts(禁手写接口类型)。
-
-   令牌策略(ADR-003):
-   - refresh token 存 localStorage(跨刷新会话恢复;XSS 暴露面见 002 design Risks)
-   - access token 仅存内存;启动凭 refresh 单飞换发
-   - 401 → 单飞刷新 → 重放原请求一次;刷新失败清态并通知会话终结
-*/
+/* 使用 ADR-005 生成类型；access token 仅存内存，refresh token 存 localStorage，启动时单飞刷新。 */
 
 import type { components } from "./api-types.gen";
 import { TENANT_STORAGE_KEY } from "./tenant-store";
@@ -18,12 +11,12 @@ export type SessionItemOut = components["schemas"]["SessionItemOut"];
 export type SessionMessageOut = components["schemas"]["SessionMessageOut"];
 export type ChatQueryOut = components["schemas"]["ChatQueryOut"];
 export type TenantRefOut = components["schemas"]["TenantRefOut"];
-/* 017 流式事件 data 形态(make contracts 生成;契约见 openapi responses oneOf) */
+/* 流式事件 data 形态(契约见 openapi responses oneOf) */
 export type StreamStageOut = components["schemas"]["StreamStageOut"];
 export type StreamSqlOut = components["schemas"]["StreamSqlOut"];
 export type StreamSummaryOut = components["schemas"]["StreamSummaryOut"];
 export type StreamErrorOut = components["schemas"]["StreamErrorOut"];
-/* 019 tool-calling:tool_call 事件 + 待确认调用 + 确认回执 */
+/* tool-calling:tool_call 事件 + 待确认调用 + 确认回执 */
 export type StreamToolCallOut = components["schemas"]["StreamToolCallOut"];
 export type PendingToolCallOut = components["schemas"]["PendingToolCallOut"];
 export type ToolConfirmOut = components["schemas"]["ToolConfirmOut"];
@@ -35,8 +28,7 @@ export type ToolAuditPageOut = components["schemas"]["ToolAuditPageOut"];
 const BASE = "/api";
 const REFRESH_KEY = "km.refresh";
 
-/* 当前租户标识(api 层直读持久化键,单点注入免遗漏;头对 chat 系端点有语义,
-   对多数管理端点无语义——例外:008 数据源 options 接口为用户面,同构消费该头) */
+/* 租户头单点注入(直读持久化键,免逐调用遗漏);对 chat 系端点与数据源 options 有语义,多数管理端点无语义 */
 function tenantHeader(): Record<string, string> {
   const t = localStorage.getItem(TENANT_STORAGE_KEY);
   return t ? { "X-Tenant-Id": t } : {};
@@ -95,8 +87,7 @@ export function tryRefresh(): Promise<boolean> {
 }
 
 async function doFetch(path: string, init?: RequestInit): Promise<Response> {
-  // multipart(FormData)不设 Content-Type——浏览器须自动生成 boundary,手设会致
-  // 服务端解析不出表单字段(009 冒烟实证);JSON 请求显式声明
+  // multipart 不设 Content-Type:boundary 须由浏览器生成,手设会致服务端解析不出表单字段;JSON 显式声明
   const isForm = init?.body instanceof FormData;
   try {
     return await fetch(`${BASE}${path}`, {
@@ -135,8 +126,7 @@ const HTTP_MESSAGES: Record<number, string> = {
   504: "服务响应超时,请稍后重试",
 };
 
-/** 后端业务错误码 → 用户文案(语义确定的才收录;未收录码原样保留)。
- *  码全集以 apps/api 各 router 的 `detail="XXX"` 为唯一事实源,禁前端臆造。 */
+/** 后端业务错误码 → 用户文案(语义确定的才收录,未收录码原样保留);码全集以 apps/api 各 router 的 detail 值为唯一事实源,禁前端臆造 */
 const ERROR_CODE_LABELS: Record<string, string> = {
   SCHEMA_NOT_ALLOWED: "当前工作空间没有该数据表的访问权限,请联系管理员在数据源中授权",
   TARGET_NOT_FOUND: "目标不存在(可能已删除),请重新选择",
@@ -158,7 +148,7 @@ const ERROR_CODE_LABELS: Record<string, string> = {
   ATTACHMENT_TOO_LARGE: "附件过大",
   ATTACHMENT_EMPTY: "附件内容为空",
   ATTACHMENT_TYPE_INVALID: "附件类型不支持",
-  // 062 问答成本控制:速率/配额/读数失败(429/503)
+  // 问答成本控制类(速率/配额)
   CHAT_RATE_LIMITED: "提问太频繁了,请稍后再试",
   CHAT_QUOTA_EXCEEDED: "已达到当前套餐的问答配额上限,请升级套餐或联系管理员",
 };
@@ -178,8 +168,7 @@ function detailForUser(status: number, detail: string | null): string {
   return HTTP_MESSAGES[status] ?? "请求失败,请稍后重试";
 }
 
-/** 已落地的错误文本 → 用户文案(SSE 事件/页面自有 fetch 等不经 toStatusError
- *  的通道复用):"HTTP 500" 形态与错误码形态转中文,其余原样返回(幂等)。 */
+/** 已落地错误文本 → 用户文案(SSE 事件等不经 toStatusError 的通道复用);"HTTP 500" 与错误码形态转中文,其余原样(幂等) */
 export function humanizeErrorText(s: string | null | undefined): string {
   if (s == null || s === "") return "请求失败,请稍后重试";
   const http = /^HTTP (\d{3})$/.exec(s);
@@ -223,8 +212,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await resp.json()) as T;
 }
 
-/** 文件下载类请求(010 导出):401 重放与错误 detail 与 request 同构;
-    成功返回原始 Response,由调用方取 blob(须先辨 JSON 错误形态,上游实证) */
+/** 文件下载类请求(导出):401 重放与错误转译同 request;返回原始 Response,调用方取 blob 前须先辨 JSON 错误形态 */
 async function postBlob(path: string, body: unknown): Promise<Response> {
   const init = { method: "POST", body: JSON.stringify(body) };
   let resp = await doFetch(path, init);
@@ -235,7 +223,7 @@ async function postBlob(path: string, body: unknown): Promise<Response> {
   return resp;
 }
 
-/** GET 文件下载类请求(088 报告 markdown 导出):错误语义与 postBlob 同构 */
+/** GET 文件下载类请求(报告导出):错误语义与 postBlob 同构 */
 async function getBlob(path: string): Promise<Response> {
   let resp = await doFetch(path);
   if (resp.status === 401 && (await tryRefresh())) {
@@ -249,7 +237,7 @@ export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "POST", body: JSON.stringify(body) }),
-  /** multipart 上传(009 知识库文档);浏览器自动设 boundary,勿手写 Content-Type */
+  /** multipart 上传(知识库文档);boundary 由浏览器生成,勿手写 Content-Type */
   postForm: <T>(path: string, form: FormData) => request<T>(path, { method: "POST", body: form }),
   put: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
@@ -260,7 +248,7 @@ export const api = {
   getBlob,
 };
 
-/* ============ 流式问答(017 query-streaming) ============ */
+/* ============ 流式问答(query-streaming) ============ */
 
 export interface StreamHandlers {
   onStage?: (d: StreamStageOut) => void;
@@ -271,8 +259,7 @@ export interface StreamHandlers {
   onError?: (d: StreamErrorOut) => void;
 }
 
-/** 解析一个 SSE 帧块(event:/data: 行;注释行忽略)并分发;畸形 data 静默跳帧。
- *  导出供 066 vitest 纯函数断言(分帧边界/跳帧)。 */
+/** 解析一个 SSE 帧块(event:/data: 行,注释行忽略)并分发;畸形 data 静默跳帧。导出供 vitest 断言分帧边界与跳帧 */
 export function dispatchSseBlock(block: string, handlers: StreamHandlers): boolean {
   let event = "";
   const dataLines: string[] = [];
@@ -312,12 +299,7 @@ export function dispatchSseBlock(block: string, handlers: StreamHandlers): boole
   }
 }
 
-/**
- * 流式问答(017):fetch + ReadableStream 手写 SSE 分帧(EventSource 不支持
- * POST/Bearer/X-Tenant-Id)。鉴权头/401 单飞重放与 request 同构;流开始前
- * 错误(4xx/5xx)抛 status Error(调用方按常规错误呈现);流正常结束但未收到
- * 终态事件也抛错(防气泡永等待);主动 abort(signal)静默返回不回调错误。
- */
+/** 发起流式问答请求并以 ReadableStream 解析 SSE;HTTP 错误抛给调用方 */
 export async function streamChatQuery(
   body: unknown,
   handlers: StreamHandlers,

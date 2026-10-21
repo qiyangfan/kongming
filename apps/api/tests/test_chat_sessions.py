@@ -1,9 +1,4 @@
-"""会话列表/消息历史/删除端点全栈测试(chat spec 006 delta,安全规则类)。
-
-真实 PG/Redis;会话数据直插 SQL(arrange 独立于被测实现),
-消息要素回显经 /chat/query 真实落库路径验证。
-安全面:未认证 401、无权限 403、越权/跨租户/不存在统一 404、级联删除。
-"""
+"""覆盖会话列表、消息历史、删除和权限隔离。"""
 # pyright: reportPrivateUsage=false
 
 import uuid
@@ -79,9 +74,6 @@ async def _mk_session(
     ).scalar_one()
     await s.commit()
     return str(sid)
-
-
-# ============ 安全面(测试先行):列表 ============
 
 
 async def test_sessions_unauthenticated_401(client: AsyncClient) -> None:
@@ -186,9 +178,6 @@ async def test_explicit_tenant_header_positive(
     assert r.status_code == 204
 
 
-# ============ 安全面(测试先行):消息历史 ============
-
-
 async def test_messages_of_other_user_404(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
@@ -259,9 +248,9 @@ async def test_messages_echo_order_and_shape(
     assert first["sql"] == "SELECT name, qty FROM goods"
     assert first["result"]["columns"] == ["name", "qty"]
     assert first["result"]["rows"][0] == ["连弩", 30]
-    # 049:qty 裸列不可加 pie 被闸 → 首候选 bar;候选随档读出
+    # qty 裸列不可加 pie 被闸 → 首候选 bar;候选随档读出
     assert first["result"]["chart"]["type"] == "bar"
-    assert first["result"]["chart"]["x"] == "name"  # x/y 完整(006 补存)
+    assert first["result"]["chart"]["x"] == "name"  # x/y 完整(补存)
     assert first["result"]["chart_candidates"] == [
         {"type": "bar", "x": "name", "y": ["qty"], "series": None}
     ]
@@ -273,7 +262,7 @@ async def test_messages_echo_order_and_shape(
 async def test_messages_legacy_result_json_recomputed(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """存量兼容:005 形态 result_json(裸 chartType,无 x/y/error)→
+    """存量兼容:形态 result_json(裸 chartType,无 x/y/error)→
     回显以 suggest_charts 确定性重算补全(落库输入=原始输入,重算=原始输出);
     旧档按当前规则重算:qty 裸列不可加 → 首候选 bar(不再是旧规则的 pie)。"""
     uid, token = await _user_with_chat_perm(client, session, make_user, "legacy")
@@ -314,7 +303,7 @@ async def test_messages_legacy_result_json_recomputed(
 async def test_messages_legacy_result_json_recomputed_scatter(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """049:双度量旧档回显重算得 scatter(与查询落库路径共享 suggest_charts)。"""
+    """双度量旧档回显重算得 scatter(与查询落库路径共享 suggest_charts)。"""
     uid, token = await _user_with_chat_perm(client, session, make_user, "legacysc")
     tid = await _default_tenant_id(session)
     sid = await _mk_session(session, user_id=uid, tenant_id=tid)
@@ -344,7 +333,7 @@ async def test_messages_agent_down_shape(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """agent 不可达轮:FAILED + error 文案可回显(006 统一落库路径)。"""
+    """agent 不可达轮:FAILED + error 文案可回显(统一落库路径)。"""
     _, token = await _user_with_chat_perm(client, session, make_user, "down")
     _install(fake_agent, FakeAgent(boom=True))
     r = await client.post("/chat/query", json={"question": "q"}, headers=_auth(token))
@@ -353,9 +342,6 @@ async def test_messages_agent_down_shape(
     failed = r.json()[1]
     assert failed["status"] == "FAILED"
     assert "暂不可用" in failed["error"]
-
-
-# ============ 安全面(测试先行):删除 ============
 
 
 async def test_delete_session_cascades_messages(

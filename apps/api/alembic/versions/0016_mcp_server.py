@@ -1,15 +1,4 @@
-"""0016: mcp-interop 域表(028)
-
-Revision ID: 0016
-Revises: 0015
-Create Date: 2026-08-23
-
-sys_mcp_server:外部 MCP server 配置;headers_cipher=AES-GCM 密文
-(008 cipher 同款 base64 iv‖ct+tag);tools JSONB=发现快照([{name,
-description, schema, read_only}]);server_key 租户内唯一(传输层
-pattern + 领域层 fullmatch 双闸,008 R1 尾换行教训)。
-**downgrade**:删表(新域零存量)。
-"""
+"""新增租户 MCP server 配置表。请求头凭证使用 AES-GCM 加密，工具发现结果按 server_key 保存。"""
 
 from alembic import op
 

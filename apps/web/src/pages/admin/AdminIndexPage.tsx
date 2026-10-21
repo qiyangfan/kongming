@@ -1,6 +1,4 @@
-/* 管理索引页(mobile-experience B2.2 层进式):窄屏直达 /admin 先呈现索引,
-   按权限列出全部子页入口(与 AdminLayout 侧栏同一 ADMIN_NAV 单源),点击进入
-   子页、子页顶部可返回;宽屏(md+)维持既有「重定向默认子页」现状不渲染。 */
+/* 窄屏访问 /admin 时按权限显示管理入口；宽屏继续打开默认管理页。 */
 
 import { NavLink, Navigate } from "react-router";
 

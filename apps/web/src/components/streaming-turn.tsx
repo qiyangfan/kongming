@@ -1,7 +1,4 @@
-/* 在途轮过程态自持(078 任务 2):流式过程事件(stage/sql/summary/tool_call)
-   只写入本组件本地 state,不再经 ChatPage 页面级 state 广播——每个流事件
-   不再触发整页(含全部历史卡片)重渲染;页面仅在轮次边界(发起/终态)重渲染。
-   守卫口径与既有实现一致:主动 abort/上下文切换后迟到事件由 alive 旗标丢弃。 */
+/* 流式事件只更新本组件状态，避免整页随每个事件重渲染；中止或切换上下文后忽略迟到事件。 */
 
 import { useEffect, useRef, useState } from "react";
 

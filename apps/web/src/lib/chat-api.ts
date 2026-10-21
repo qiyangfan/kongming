@@ -1,4 +1,4 @@
-/* chat 域 API 封装(010 会话体验深化)。类型契约由 ADR-005 管线生成(禁手写)。 */
+/* chat 域 API 封装。类型契约由 ADR-005 管线生成(禁手写)。 */
 
 import type { components } from "./api-types.gen";
 import { api, type ChatQueryOut, type SessionItemOut } from "./api";
@@ -8,26 +8,26 @@ export type ArtifactOut = components["schemas"]["ArtifactOut"];
 export type AttachmentOut = components["schemas"]["AttachmentOut"];
 export type SuggestionsOut = components["schemas"]["SuggestionsOut"];
 
-/** 对话冷启动建议问题(039):按当前数据源获取;空清单=静默隐藏(生成失败/不可用) */
+/** 对话冷启动建议问题:按当前数据源获取;空清单=静默隐藏(生成失败/不可用) */
 export function getSuggestions(datasourceKey: string): Promise<SuggestionsOut> {
   return api.get<SuggestionsOut>(
     `/chat/suggestions?datasource_key=${encodeURIComponent(datasourceKey)}`,
   );
 }
 
-/** SQL 产物再执行(026):message_id 归属校验 + 六层防御全量,结果落新消息 */
+/** SQL 产物再执行:服务端重新校验 message_id 归属与 SQL 合法性,结果落新消息 */
 export function rerunArtifact(messageId: string, sql: string): Promise<ChatQueryOut> {
   return api.post<ChatQueryOut>("/chat/artifacts/rerun", { message_id: messageId, sql });
 }
 
-/** 图片附件上传(030):multipart,返回 attachment_id 供问答引用 */
+/** 图片附件上传:multipart,返回 attachment_id 供问答引用 */
 export async function uploadAttachment(file: File): Promise<AttachmentOut> {
   const fd = new FormData();
   fd.append("file", file);
   return api.postForm("/chat/attachments", fd);
 }
 
-/** 114 语音转写:录音 blob → 文本(即转即弃;503=未启用模型,文案面向用户) */
+/** 语音转写:录音 blob → 文本(即转即弃;503=未启用模型,文案面向用户) */
 export async function transcribeAudio(blob: Blob): Promise<string> {
   // 文件名按 MIME 推导(Safari MediaRecorder 产出 audio/mp4,恒标 .webm 语义错)
   const ext = blob.type.includes("mp4") ? "mp4" : blob.type.includes("ogg") ? "ogg" : "webm";
@@ -37,18 +37,18 @@ export async function transcribeAudio(blob: Blob): Promise<string> {
   return out.text;
 }
 
-/** 会话列表(010 搜索):q 非空时服务端按标题/user 问句 ILIKE 匹配 */
+/** 会话列表(搜索):q 非空时服务端按标题/用户问句 ILIKE 匹配 */
 export function listSessions(q?: string): Promise<SessionItemOut[]> {
   const qs = q ? `?q=${encodeURIComponent(q)}` : "";
   return api.get<SessionItemOut[]>(`/chat/sessions${qs}`);
 }
 
-/** 重命名会话(010);成功返回更新后的列表项 */
+/** 重命名会话;成功返回更新后的列表项 */
 export function renameSession(id: string, title: string): Promise<SessionItemOut> {
   return api.patch<SessionItemOut>(`/chat/sessions/${id}`, { title });
 }
 
-/** 执行计划(010):message_id 引用形态,客户端不提交 SQL */
+/** 执行计划:message_id 引用形态,客户端不提交 SQL */
 export function explainPlan(messageId: string): Promise<ExplainOut> {
   return api.post<ExplainOut>("/chat/explain", { message_id: messageId });
 }
@@ -70,22 +70,21 @@ function downloadBlob(blob: Blob, filename: string): void {
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
-  // R1-O1(Safari 坑):锚点须入 DOM 且延迟回收——click 后同步 revoke 会取消下载
+  // (Safari 坑):锚点须入 DOM 且延迟回收——click 后同步 revoke 会取消下载
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-/** 结果导出(010):所见即所导(传展示中的 columns+rows,服务端不重跑 SQL);
-    文件名优先取 Content-Disposition(查询结果-<时间戳>),缺失回退本地生成 */
+/** 结果导出:传展示中的 columns+rows,服务端不重跑 SQL;文件名优先取 Content-Disposition,缺失回退本地生成 */
 export async function exportResult(
   format: "csv" | "xlsx",
   columns: string[],
   rows: unknown[][],
 ): Promise<void> {
   const resp = await api.postBlob("/chat/export", { format, columns, rows });
-  // JSON 形态即错误应答(上游实证:不分辨会下载垃圾文件)
+  // JSON 应答即错误(直接落 blob 会下载垃圾文件),先转错误再走下载
   if (resp.headers.get("content-type")?.includes("application/json")) {
     const body: unknown = await resp.json();
     const detail =

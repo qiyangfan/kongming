@@ -1,12 +1,6 @@
-"""钉钉插件(003):新版统一身份认证(OIDC 形态;旧版 app 签名机制不采用)。
+"""钉钉 OAuth 接入。授权 URL 使用 OAuth2 参数；token 和用户资料通过 JSON 接口获取。
 
-协议形态(官方文档核验 2026-08-17):
-- 授权 URL 为标准 OAuth2 参数 + prompt=consent;官方文档无 PKCE 形态 → pkce=False
-- token 端点为 JSON 请求体(非标准 form)→ authlib 仅构造授权 URL,
-  token/profile 由 fetch_profile 覆写 httpx 直写
-- external_id 用 unionId(跨应用稳定标识),不用 openId(防同企业多应用身份分裂)
-- email 无验证语义:不入管线(email_verified 恒 False,永不走 email 关联)
-"""
+以 unionId 作为跨应用用户标识；未验证的邮箱不参与账号关联。"""
 
 import httpx
 

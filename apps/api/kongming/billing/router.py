@@ -1,10 +1,5 @@
-"""billing 路由(034,薄适配层):/billing/* 超管配置 + /portal/* 自助门户。
-
-配置挂 system:billing:manage(全局视角,租户显式指定);门户登录即可
-(developer:portal,限自己租户)。
-035:支付闭环——门户支付端点(创建/查询/取消/mock-simulate)+统一回调
-(无登录态验签即鉴权,031 webhook 同构)+管理面作废/分页。
-"""
+"""账单配置与开发者门户路由。配置操作需要 system:billing:manage,门户用户仅
+访问所属租户;支付的创建、查询、取消与模拟支付统一由支付服务处理。"""
 
 import logging
 import uuid
@@ -55,7 +50,7 @@ class _Oper:
 
 
 def _channels() -> dict[str, PaymentChannel]:
-    """通道注册表(035 design D1):mock 经环境开关整体关闭(design 风险面)。"""
+    """通道注册表:mock 通道可经环境开关整体关闭。"""
     st = get_settings()
     if not st.billing_mock_enabled:
         return {}
@@ -64,7 +59,6 @@ def _channels() -> dict[str, PaymentChannel]:
 
 def _svc(session: AsyncSession, actor: str | None = None) -> BillingService:
     # 审计器恒创建:callback 等无登录态场景 actor=None 落库即匿名
-    # (与 034 网关切面 _QuotaOper 同款)
     st = get_settings()
     return BillingService(
         SqlBillingRepo(session),
@@ -99,7 +93,7 @@ async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header:
     return str(default[0])
 
 
-# ── 传输层响应模型(R1-S3:ADR-005 契约精确化,前端消费生成类型) ──
+# ── 传输层响应模型(前端消费生成类型) ──
 
 
 class PolicyOut(BaseModel):
@@ -133,7 +127,7 @@ class InvoiceOut(BaseModel):
 
 class InvoiceAdminOut(InvoiceOut):
     tenant_key: str
-    payment_status: str | None = None  # 035:最新支付单状态(无单 null)
+    payment_status: str | None = None  # 最新支付单状态(无单 null)
 
 
 class InvoiceAdminPageOut(BaseModel):
@@ -164,7 +158,7 @@ class PortalKeyOut(BaseModel):
     last_used_at: str | None = None
 
 
-# ── 支付(035) ──
+# ── 支付 ──
 
 
 class PaymentOut(BaseModel):
@@ -214,11 +208,11 @@ def _payment_out(row: dict[str, Any]) -> PaymentOut:
 
 
 class PolicyIn(BaseModel):
-    tenant_id: uuid.UUID  # T2:形态校验(非 UUID 422 不炸 500)
+    tenant_id: uuid.UUID  # 形态校验:非 UUID 由 pydantic 422,不炸 500
     dimension: str = Field(pattern="^(TOKENS|CALLS|COST)$")
     limit_value: int = Field(ge=0)
     warn_pct: int = Field(default=80, ge=1, le=100)
-    # 035/103:多级配额(scope_ref=BOT/USER/TEAM 时必填对应资源 id)
+    # 多级配额(scope_ref=BOT/USER/TEAM 时必填对应资源 id)
     scope: str = Field(default="TENANT", pattern="^(TENANT|BOT|USER|TEAM)$")
     scope_ref: uuid.UUID | None = None
 
@@ -229,7 +223,7 @@ async def upsert_policy(
     user: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, bool]:
-    # T2:租户存在复校(孤儿策略静默挂不可取)
+    # 复核租户存在,防孤儿策略静默挂空
     from sqlalchemy import text as _text2
 
     exists = (
@@ -293,7 +287,7 @@ async def delete_policy(
 ) -> dict[str, bool]:
     if not await SqlBillingRepo(session).delete_policy(policy_id=policy_id, tenant_id=tenant_id):
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
-    # R1-A4:删配额=解除防线,与 upsert 审计对称
+    # 删配额即解除防线,同样记审计
     user2 = _
     await SqlOperLogRepo(session).add(
         str(user2["sub"]), "billing.policy.delete", policy_id, {"tenant_id": tenant_id}
@@ -363,7 +357,7 @@ async def update_plan(
     user: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, bool]:
-    """035 挂账④:套餐更新(改价不回溯既有账单——明细为出账时快照)。"""
+    """更新套餐；已生成账单继续使用出账时保存的价格。"""
     svc = _svc(session, str(user["sub"]))
     try:
         await svc.update_plan(plan_id=plan_id, **body.model_dump())
@@ -381,7 +375,7 @@ async def delete_plan(
     user: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, bool]:
-    """035 挂账④:绑定中 409 PLAN_IN_USE;无绑定删除+审计。"""
+    """有租户仍在使用套餐时返回 409；删除成功后记录审计日志。"""
     svc = _svc(session, str(user["sub"]))
     try:
         await svc.delete_plan(plan_id=plan_id)
@@ -406,7 +400,7 @@ async def list_tenants_brief(
     _: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[TenantBriefOut]:
-    """035 挂账⑥:计费配置面自供租户清单(解耦 system:user:manage)。"""
+    """返回计费管理所需的租户清单。"""
     rows = await SqlBillingRepo(session).list_tenants_brief()
     return [
         TenantBriefOut(
@@ -432,7 +426,7 @@ async def list_bots_brief(
     session: Annotated[AsyncSession, Depends(get_session)],
     tenant_id: Annotated[str, Query(min_length=1)],
 ) -> list[BotBriefOut]:
-    """035:BOT 级策略配置面 Bot 下拉(挂 MANAGE 自供,解耦 bot:manage——
+    """BOT 级策略配置面 Bot 下拉(挂 MANAGE 自供,解耦 bot:manage——
     与租户清单同解耦原则)。"""
     rows = await SqlBillingRepo(session).list_bots_brief(tenant_id=tenant_id)
     return [
@@ -456,7 +450,7 @@ async def list_users_brief(
     session: Annotated[AsyncSession, Depends(get_session)],
     tenant_id: Annotated[str, Query(min_length=1)],
 ) -> list[UserBriefOut]:
-    """103:USER 级策略配置面用户下拉(挂 MANAGE 自供,解耦 user:manage——
+    """USER 级策略配置面用户下拉(挂 MANAGE 自供,解耦 user:manage——
     与 Bot 清单同解耦原则;软删用户不列)。"""
     rows = await SqlBillingRepo(session).list_users_brief(tenant_id=tenant_id)
     return [
@@ -481,7 +475,7 @@ async def list_teams_brief(
     session: Annotated[AsyncSession, Depends(get_session)],
     tenant_id: Annotated[str, Query(min_length=1)],
 ) -> list[TeamBriefOut]:
-    """103:TEAM 级策略配置面团队下拉(挂 MANAGE 自供,解耦 team:manage——
+    """TEAM 级策略配置面团队下拉(挂 MANAGE 自供,解耦 team:manage——
     与 Bot 清单同解耦原则)。"""
     rows = await SqlBillingRepo(session).list_teams_brief(tenant_id=tenant_id)
     return [
@@ -500,7 +494,7 @@ async def get_tenant_plan(
     _: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> PlanOut | None:
-    """R1-A9:管理面查租户当前绑定套餐(受控回显用;无绑定 null)。"""
+    """管理面查租户当前绑定套餐(受控回显用;无绑定 null)。"""
     row = await SqlBillingRepo(session).get_tenant_plan(tenant_id=tenant_id)
     if row is None:
         return None
@@ -526,8 +520,7 @@ async def bind_plan(
     user: Annotated[dict[str, object], Depends(current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, bool]:
-    # R1-A3:plan 存在性校验(悬空绑定静默回「无套餐」不限量是配置事故
-    # 无信号)+审计(计费语义变更);非 UUID 形态 400
+    # 先复核 plan 存在:悬空绑定会静默回「无套餐」不限量且无告警
     import uuid as _uuid
 
     try:
@@ -563,7 +556,7 @@ async def page_all_invoices(
     page: Annotated[int, Query(ge=1)] = 1,
     size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> InvoiceAdminPageOut:
-    """035 挂账⑧:管理面账单分页(弃 LIMIT 200);行附最新支付单状态。"""
+    """分页返回账单，并附带每张账单最新的支付状态。"""
     rows, total = await SqlBillingRepo(session).page_all_invoices(page=page, size=size)
     return InvoiceAdminPageOut(
         items=[
@@ -639,7 +632,7 @@ async def portal_keys(
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> list[PortalKeyOut]:
-    """R1-A6:门户 api-key 清单(spec「key 列表」兑现;025 仓储聚合,
+    """门户 api-key 清单(spec「key 列表」兑现;仓储聚合,
     本人 Bot 的 key,吊销态不回显)。"""
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     from sqlalchemy import text as _text
@@ -721,7 +714,7 @@ async def portal_invoice_detail(
     )
 
 
-# ── 门户支付(035) ──
+# ── 门户支付 ──
 
 
 @router.post(
@@ -796,7 +789,7 @@ async def mock_simulate(
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> ReconcileOut:
-    """mock 通道「支付动作」入口(035 design D1):服务端真实生成签名后
+    """mock 通道「支付动作」入口:服务端真实生成签名后
     走统一核销——收银台按钮唯一合法路径。"""
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     svc = _svc(session, str(user["sub"]))
@@ -810,7 +803,7 @@ async def mock_simulate(
     return ReconcileOut(idempotent=bool(out["idempotent"]), status=str(out["status"]))
 
 
-# ── 统一回调(035;无登录态,验签即鉴权,031 webhook 同构) ──
+# ── 统一回调(无登录态,验签即鉴权,webhook 同构) ──
 
 
 @router.post("/billing/payments/callback/{channel}", response_model=ReconcileOut)
@@ -836,13 +829,13 @@ async def payment_callback(
         PaymentChannelClosed,
         BillingValidationError,
     ) as e:
-        # 拒前落审计(034 R1-S1 同款:伪签/金额不符审计须持久,不随 4xx 回滚)
+        # 拒绝前先落审计:伪签/金额不符的审计须持久,不随 4xx 回滚
         await session.commit()
         raise _pay_http(e) from None
     return ReconcileOut(idempotent=bool(out["idempotent"]), status=str(out["status"]))
 
 
-# ── 管理面:账单作废(035) ──
+# ── 管理面:账单作废 ──
 
 
 @router.post("/billing/invoices/{invoice_id}/void", dependencies=[Depends(require_perm(MANAGE))])
@@ -860,7 +853,7 @@ async def void_invoice(
     return {"ok": True}
 
 
-# ── 成本对账(055,只读旁路):任何失败显式标注,不影响计费主链路 ──
+# ── 成本对账为只读检查；失败时标记不可用，不影响账单操作 ──
 
 
 @router.get(

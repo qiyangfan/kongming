@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { endExclusive } from "./date-utils";
 
-/* endExclusive off-by-one 锚:结束日当天记录须可见 — 直接取当日零点会把
-   结束日全天排除;须进到次日零点(后端 created_at < :end 排他语义)。 */
+/* endExclusive off-by-one 锚:结束日当天记录须可见 — 直接取当日零点会把 结束日全天排除;须进到次日零点(后端 created_at < :end 排他语义)。 */
 describe("endExclusive", () => {
   it("普通日期进到次日零点(UTC ISO)", () => {
     expect(endExclusive("2026-09-12")).toBe("2026-09-13T00:00:00.000Z");

@@ -1,8 +1,5 @@
-"""测试基建:真实 PG(kongming_test 独立库)+ Redis db15 上的全栈集成测试。
-
-安全规则类(config.yaml rules):登录/锁定/令牌轮换/联邦 state 一律经 HTTP 端到端验证。
-env 必须在任何 kongming 导入前指向测试基础设施(get_settings/engine/redis 均 lru_cache 一次固化)。
-"""
+"""集成测试用独立 PostgreSQL 库与 Redis db15;测试环境变量须在导入 kongming
+模块前设置(配置与连接客户端被缓存)。"""
 
 import asyncio
 import os
@@ -18,8 +15,7 @@ os.environ.setdefault(
     "KM_DATABASE_URL",
     "postgresql+asyncpg://kongming:kongming@localhost:5432/kongming_test",
 )
-# localenv 单源 redis 带密码(~/workspace/localenv/.env,2026-10-11 裁决);
-# 无密码 URL 会在 AUTH 握手处 AuthenticationError
+# 测试 Redis 启用了密码认证，连接 URL 需要包含密码。
 os.environ.setdefault("KM_REDIS_URL", "redis://:redis123@localhost:6379/15")
 os.environ.setdefault("KM_INTERNAL_TOKEN", "test-internal-token")
 # 联邦两家默认已配置;「过滤未配置」场景由各测试用 monkeypatch 摘除
@@ -37,18 +33,18 @@ for _k in (
     "KM_DINGTALK_CLIENT_SECRET",
     "KM_FEISHU_APP_ID",
     "KM_FEISHU_APP_SECRET",
-    # add-doc-rerank:精排同样钉空隔离本地 .env(检索面测试不得真实出站精排);
-    # 「配置后」场景由 test_doc_rerank 显式构造 Settings 覆盖
+    # 清空精排配置,避免读取本机 .env 后发起真实请求;
+    # 配置场景由 test_doc_rerank 显式构造 Settings。
     "KM_RERANK_PROVIDER",
     "KM_RERANK_API_KEY",
     "KM_RERANK_MODEL",
 ):
     os.environ.setdefault(_k, "")
-# 三家 redirect_uri 同样钉回默认值(本地 .env 可能指向隧道域名)
+# 固定三家 redirect_uri,避免本机 .env 指向其他域名。
 os.environ.setdefault("KM_WECOM_REDIRECT_URI", "http://localhost:5173/auth/wecom/callback")
 os.environ.setdefault("KM_DINGTALK_REDIRECT_URI", "http://localhost:5173/auth/dingtalk/callback")
 os.environ.setdefault("KM_FEISHU_REDIRECT_URI", "http://localhost:5173/auth/feishu/callback")
-# 联邦总开关钉为开(本地 .env 可能关停某家,如企微;防渗入测试面)
+# 启用联邦登录配置,避免本机 .env 改变测试条件。
 for _k in (
     "KM_GITHUB_ENABLED",
     "KM_GOOGLE_ENABLED",
@@ -141,9 +137,8 @@ def _sync_dsn() -> str:
 def db_conn() -> dict[str, object]:
     """从 KM_DATABASE_URL 派生本机测试库连接参数(host/port/user/password/db)。
 
-    动态数据源类用例以「同实例异库/异 schema」形态注册数据源,连接参数不得
-    硬编码——端口布局属环境事实(2026-10-09 实证:硬编码 5432 在本机被其他
-    项目占用后 15 个用例集体假败)。"""
+    动态数据源类用例以「同实例异库/异 schema」形态注册数据源,连接参数
+    不得硬编码——端口被其他项目占用会集体假败。"""
     from urllib.parse import unquote, urlparse
 
     p = urlparse(_sync_dsn())
@@ -163,15 +158,8 @@ def _admin_url() -> str:
 
 @asynccontextmanager  # pyright: ignore[reportDeprecated]  # async 生成器误选 typeshed 弃用重载
 async def migrated_tmp_db() -> AsyncIterator[tuple[AsyncSession, Config]]:
-    """一次性迁移演练库(独立于共享 kongming_test;迁移 roundtrip 测试专用)。
-
-    迁移 downgrade 会 DROP COLUMN,而 PG 对已删列只做目录标记(attisdropped),
-    占位永久保留且对 information_schema 不可见,单表硬上限 1600——共享库上
-    反复 upgrade/downgrade 会累积占位直至加列被拒(2026-10 事故:
-    sys_trigger_definition 累积 1577 个占位后,0050 加列即炸、全量门禁 fixture
-    级失败)。本 helper 建带随机后缀的独立库承载演练,测试完 DROP,占位随库
-    清零,零累积。yield (演练库会话, 指向该库的 alembic Config)。
-    """
+    """为迁移往返测试创建独立临时数据库(用后即删),避免已删除列的目录
+    占位在共享测试库累积;返回 (会话, Alembic 配置)。"""
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     tmp_db = f"{TEST_DB}_mig{uuid4().hex[:8]}"
@@ -181,14 +169,14 @@ async def migrated_tmp_db() -> AsyncIterator[tuple[AsyncSession, Config]]:
     finally:
         await conn.close()
     # CREATE 之后全程收进 try/finally:upgrade 失败(恰是 roundtrip 要抓的
-    # 迁移写坏场景)同样必须 DROP,否则随机后缀库跨次永久累积(复审修复)
+    # 形态)也要删除临时库,避免测试运行后残留。
     try:
         # 保留 +asyncpg driver 段:env.py 以 async engine 跑迁移(同步 psycopg2 未装)
         tmp_url = os.environ["KM_DATABASE_URL"].rsplit("/", 1)[0] + f"/{tmp_db}"
         cfg = Config(str(API_ROOT / "alembic.ini"))
         cfg.set_main_option("script_location", str(API_ROOT / "alembic"))
         cfg.set_main_option("sqlalchemy.url", tmp_url)  # env.py 尊重程序化注入
-        # env.py 内部 asyncio.run:事件循环内直调会冲突,经线程隔离(0034 先例)
+        # env.py 内部 asyncio.run:事件循环内直调会冲突,经线程隔离
         await asyncio.to_thread(command.upgrade, cfg, "head")
         engine = create_async_engine(tmp_url)
         try:
@@ -252,8 +240,7 @@ async def client() -> AsyncIterator[AsyncClient]:
 
 @pytest.fixture
 def fake_agent() -> Iterator[dict[str, Any]]:
-    """025 同款 agent 替身注入(adopt-mcp-sdk2 起入站中间件经覆写感知解析,
-    /mcp 入站与 web 面共用;原 test_mcp 模块私有件提升至此供挂账回归复用)。"""
+    """为 MCP 入站和 Web 请求提供可替换的 Agent 客户端。"""
     from kongming.chat.router import get_agent_client
     from kongming.main import app
 
@@ -322,11 +309,7 @@ def make_user(session: AsyncSession) -> MakeUser:
 def fake_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Callable[[str, "NormalizedProfile"], None]:
-    """联邦 HTTP 交换替身:把 name 为 key 的 provider 换成返回固定 profile 的假插件。
-
-    真插件的 code→token→profile 外呼不进测试;授权 URL 由假插件原样携带 state 返回,
-    走通 start→callback 全链路。NormalizedProfile 仅类型引用,运行时走惰性导入。
-    """
+    """将指定联邦 provider 替换为返回固定用户资料的测试实现。"""
     from kongming.auth import providers
 
     def _install(key: str, profile: "NormalizedProfile") -> None:

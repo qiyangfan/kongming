@@ -1,4 +1,4 @@
-"""workflow 存储(029):sys_workflow_def/sys_workflow_run;版本冻结=
+"""workflow 存储:sys_workflow_def/sys_workflow_run;版本冻结=
 只插不改(无 UPDATE definition 路径);JSONB 经 CAST 绑定。"""
 
 import json
@@ -38,11 +38,11 @@ class SqlWorkflowRepo:
         version: int,
         definition: dict[str, Any],
         created_by: str,
-        team_id: Any = None,  # 032:继承上一版归属(R1-S2b)
+        team_id: Any = None,  # 继承上一版归属
     ) -> str:
         """插入新版本;唯一索引冲突(并发同版本)转域异常 409 语义。"""
         rid = str(uuid7())
-        # R1-S2:版本冻结语义(design D1)——新版本产生即旧版本全失活;
+        # 版本冻结语义——新版本产生即旧版本全失活;
         # 同事务,启用闸恒只作用最新版本(显式旧版本触发亦被拦)
         await self._s.execute(
             text(
@@ -110,7 +110,7 @@ class SqlWorkflowRepo:
     async def list_latest(
         self, *, tenant_id: str, user_id: str = "", team_ids: list[str] | None = None
     ) -> list[dict[str, Any]]:
-        """032:归属过滤(user_id 非空时:创建者 或 归属用户所在团队;
+        """归属过滤(user_id 非空时:创建者 或 归属用户所在团队;
         空=全量[管理面调度等内部调用])。"""
         params: dict[str, Any] = {"t": tenant_id}
         if user_id:
@@ -151,7 +151,7 @@ class SqlWorkflowRepo:
 
     async def set_enabled(self, *, def_id: str, tenant_id: str, enabled: bool) -> bool:
         res = cast(
-            "CursorResult[object]",  # DML 结果为 CursorResult(chat 仓储同款)
+            "CursorResult[object]",  # DML 结果为 CursorResult,显式标注类型
             await self._s.execute(
                 text(
                     "UPDATE public.sys_workflow_def SET enabled=:e"
@@ -226,8 +226,7 @@ class SqlWorkflowRepo:
                 )
             ).scalar_one()
         )
-        # R1-提示3:列表剥 node_runs.outputs(快照可含 64KB body/千行,
-        # 全量回传会膨胀到数十 MB);status/error/duration 保留
+        # 列表响应不返回 node_runs.outputs；快照正文可能很大，保留状态、错误与耗时字段。
         rows = (
             (
                 await self._s.execute(
@@ -249,8 +248,7 @@ class SqlWorkflowRepo:
         return total, [dict(r) for r in rows]
 
     async def get_run(self, *, tenant_id: str, wf_key: str, run_id: str) -> dict[str, Any] | None:
-        """run 详情(029⑤ 清偿):完整快照含 outputs(列表剥除防膨胀,
-        详情按需取);不存在/跨租户 None 同形。"""
+        """返回工作流运行详情；不存在或属于其他租户时返回 None。"""
         row = (
             (
                 await self._s.execute(

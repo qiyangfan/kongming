@@ -1,8 +1,8 @@
 # pyright: reportPrivateUsage=false
-"""069-chat-quality-observability 全栈测试:信号落库/隔离/补零/NO_DATA 可见/权限。
+"""chat 质量观测全栈测试:信号落库/隔离/补零/NO_DATA 可见/权限。
 
-真实 PG/Redis(agent 替身 scripted)。安全面(租户隔离属安全相关,先红后绿):
-无 system:chat-quality:view → 403;非 ALL 按请求租户收敛(T1 只见 T1)。
+使用真实 PG/Redis 和 scripted agent 替身。无查看权限时返回 403;
+非 ALL 数据范围只返回请求租户的数据。
 """
 
 import pytest
@@ -44,7 +44,7 @@ def fake_agent():
 
 
 class _QualityAgent(FakeAgent):
-    """带 069 诊断信号的 agent 替身(resolved_question/prompt_version)。"""
+    """带诊断信号的 agent 替身(resolved_question/prompt_version)。"""
 
     def __init__(self, reply: AgentReply | None = None) -> None:
         base = reply or AgentReply(success=True, verdict="PASS")
@@ -82,7 +82,7 @@ async def _quality_admin(
     return uid, await _login(client, username)
 
 
-# ── 1. 信号落库(任务 1.1) ─────────────────────────────────────────
+# ── 1. 信号落库 ─────────────────────────────────────────
 
 
 async def test_quality_signals_persisted(
@@ -143,7 +143,7 @@ async def test_single_turn_no_rewrite_null(
     assert row["retry_count"] == 0
 
 
-# ── 2. 用户响应不进诊断信号(任务 1.2) ──────────────────────────────
+# ── 2. 用户响应不进诊断信号 ──────────────────────────────
 
 
 async def test_signals_not_in_user_response(
@@ -154,7 +154,7 @@ async def test_signals_not_in_user_response(
 ) -> None:
     """新增诊断信号不出现在同步响应(逐字段同构契约不被破坏)。
 
-    注:retry_count 是既有用户面字段(selfheal 次数,044 起),069 不改变
+    注:retry_count 是既有用户面字段(selfheal 重试次数),不改变
     存量契约——只验新增三项(trace_id/resolved_question/prompt_version)。"""
     _uid, token = await _user_with_chat_perm(client, session, make_user, "q3")
     _install(fake_agent, _QualityAgent(_pass_reply()))
@@ -165,7 +165,7 @@ async def test_signals_not_in_user_response(
         assert field not in body
 
 
-# ── 3. 汇总与明细分页(任务 1.3/1.4/1.5) ───────────────────────────
+# ── 3. 汇总与明细分页 ───────────────────────────
 
 
 async def test_summary_and_page_tenant_isolated(
@@ -174,7 +174,7 @@ async def test_summary_and_page_tenant_isolated(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """任务 1.3:T1 的查询方只见 T1 轮次(非按请求租户收敛,越权不可见)。"""
+    """T1 的查询方只见 T1 轮次(非按请求租户收敛,越权不可见)。"""
     _uid_t1, token_t1 = await _quality_admin(client, session, make_user, "qt1")
     _uid_t2, token_t2 = await _quality_admin(client, session, make_user, "qt2")
     # T1 用户先造一轮
@@ -207,7 +207,7 @@ async def test_trend_zero_filled(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """任务 1.4:按天趋势窗口内逐日补零(空天有桶,桶数=天数)。"""
+    """按天趋势窗口内逐日补零(空天有桶,桶数=天数)。"""
     _uid, token = await _quality_admin(client, session, make_user, "qt3")
     _install(fake_agent, _QualityAgent(_pass_reply()))
     r = await client.get("/system/chat-quality/summary?days=7", headers=_auth(token))
@@ -223,10 +223,10 @@ async def test_no_data_round_visible(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """任务 1.5:NO_DATA 轮次进入汇总与明细分页(此前任何观测面不可见)。"""
+    """NO_DATA 轮次进入汇总与明细分页(如实弃答同样计入观测面)。"""
     _uid, token = await _quality_admin(client, session, make_user, "qn")
     _uid_chat, chat_token = await _user_with_chat_perm(client, session, make_user, "qnchat")
-    # agent 替身:NO_DATA 终态(044 知识未覆盖)
+    # agent 替身:NO_DATA 终态(知识未覆盖)
     reply = AgentReply(success=False, verdict="NO_DATA", summary="")
     _install(fake_agent, FakeAgent(reply))
     r = await client.post("/chat/query", json={"question": "未覆盖问题"}, headers=_auth(chat_token))
@@ -240,7 +240,7 @@ async def test_no_data_round_visible(
     assert page.json()["items"][0]["status"] == "NO_DATA"
 
 
-# ── 4. 权限(任务 1.6) ─────────────────────────────────────────────
+# ── 4. 权限 ─────────────────────────────────────────────
 
 
 async def test_summary_requires_perm(

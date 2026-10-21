@@ -1,14 +1,8 @@
-"""data_scope 应用编排:上下文汇聚(角色/部门/集合/列探测)→ 意图 → 改写。
+"""数据范围应用：汇总角色、部门和列信息，计算过滤意图并改写 SQL。
 
-对应上游 DataScopeApplier 的职责落点(infrastructure 性质):
-- 用户不存在/无启用角色 → fail-closed 抛 DataScopeUnsupported(086:主体解析不出可见面时,
-  「不过滤」等价于把未知折算成最大权限,不再沿用上游的降级裁定);
-- ALL 提前退出(最常见路径,不做列探测);
-- DEPT 系先解有效部门集(DEPT 单部门 / DEPT_AND_BELOW 递归 CTE);
-- CUSTOM 先解角色自定义部门集合(启用角色并集,不递归)→ 与 DEPT 系同一 IN 改写;
-  集合为空则在任何降级分支之前 fail-closed 抛 DataScopeUnsupported(spec 铁律);
-- 绑定值按探测列类型绑 UUID/str(PG 无 uuid=text 算子)。
-"""
+- 用户缺失、无启用角色、CUSTOM 集合为空或范围值无效时拒绝执行。
+- ALL 不做列探测；DEPT_AND_BELOW 包含本部门及其子部门；CUSTOM 合并启用角色配置的部门，不递归。
+- 绑定参数类型与目标列一致，避免 PostgreSQL 的 UUID 与文本类型不匹配。"""
 
 import logging
 import uuid
@@ -44,7 +38,7 @@ async def apply(
 ) -> AppliedSQL:
     """按 user_id 的有效 data_scope 改写 sql;降级带 warning,fail-closed 抛异常。
 
-    guarded(053 单遍复用):调用方已对该 SQL 建立的单遍解析产物;缺省时
+    guarded(单遍复用):调用方已对该 SQL 建立的单遍解析产物;缺省时
     内部独立解析(行为不变)。
     """
     repo = SqlDataScopeRepo(session)
@@ -52,7 +46,7 @@ async def apply(
     user_exists, dept_id = await repo.user_dept_id(user_id)
     if not user_exists:
         # fail-closed:身份解析不出来就无法确定可见面。「降级为不过滤」等于
-        # 把一个查不到主体的 user_id 当超管使——086 收口(与 CUSTOM 空集合同一判据方向)
+        # 把一个查不到主体的 user_id 当超管使——收口(与 CUSTOM 空集合同一判据方向)
         log.warning("data_scope: 用户不存在或已删除,fail-closed 拒绝 (user_id=%s)", user_id)
         raise DataScopeUnsupported(
             "data_scope: 用户不存在或已删除,无法确定数据范围,fail-closed 拒绝"
@@ -60,9 +54,7 @@ async def apply(
 
     scopes = await repo.user_role_scopes(user_id)
     if not scopes:
-        # fail-closed:无启用角色=没有任何一行数据被授权可见。功能权限面已按角色
-        # status 同闸(086),正常链路走不到这里;留着降级分支就是留一条「治理动作
-        # 反向放宽可见面」的暗道(禁用角色曾使 scopes 变空而权限仍在)
+        # 功能权限和数据范围共用角色启用状态；无启用角色时仍拒绝访问，避免放宽数据可见范围。
         log.warning("data_scope: 用户无启用角色,fail-closed 拒绝 (user_id=%s)", user_id)
         raise DataScopeUnsupported("data_scope: 用户无启用角色,无法确定数据范围,fail-closed 拒绝")
 

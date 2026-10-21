@@ -1,13 +1,5 @@
-"""judge 抽检层(092):定时门禁在 Execution Match smoke 之外对非确定性
-产出抽样跑 judge(ai-eval delta「定时门禁 judge 抽检层」)。
-
-- 抽样:按对象类型分层,每类型每轮 ≥PER_TYPE 个(存量不足取全量),
-  取最新产出;时间窗=「全量最新」(design Open Questions 裁定形态)。
-- 通过率落 judge_run(库)+ 本行输出(artifacts 可见),与上次基线可比;
-  同 rubric 版本劣化 ≥5pp → 门禁失败(逐对象溯源信息随失败输出)。
-- 类型空缺(如当前环境无 DONE 任务/协作 run)→ 如实记录,不计失败。
-- judge 凭证缺失 → 显式失败(client 抛 JudgeLlmError),不静默跳过。
-"""
+"""Judge 定时抽检门禁测试：按对象类型抽样评审落库，通过率较基线
+下降超红线即失败；空对象类型如实记录，缺少凭证时显式报错。"""
 # pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportPrivateUsage=false
 
 import os

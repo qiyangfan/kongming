@@ -1,20 +1,7 @@
-"""HTTP 连接器域策略器 + 执行器(099:租户级域,089 框架第四域)。
+"""HTTP 连接器的出站策略与执行器。连接器配置按租户从数据库读取，凭证解密后只注入请求头。
 
-与既有部署级域(websearch/ticket)的两处结构差异(design D2):
-- 清单不是启动装载的部署配置,而是租户库表行——装配纯函数(行 → 域清单
-  声明)按请求动态重放,注册/启停即时生效;
-- 凭证来自库行加密列(解密在组合根,执行器构造期注入,只进请求头)。
-
-策略器(纯函数,安全资产):出口校验(注册声明的白名单精确命中——端口与
-scheme 由路径模板约束,白名单仅主机)/参数校验(按注册参数声明:未知拒/
-缺必填拒/类型不符拒)/响应整形(执行器已文本化截断;外部文本过既有注入
-检测面)/重试分类(089 两档语义 + policy 前缀同样不重试)。
-执行器:单次出站的通用 HTTP 适配——路径占位 URL 编码后直插(design D6)、
-查询参数与 POST JSON body 按名映射、鉴权头四形态装配(none/bearer/api-key
-头/basic)、响应文本化截断进观察、重定向不跟随、出站前经 029 SSRF 拒绝段
-(白名单命中不构成豁免,design D3)。不含治理逻辑——出口校验/重试由网关
-切面统一承担。
-"""
+策略校验精确主机白名单、参数和响应；执行器限制响应大小、不跟随重定向，
+并在请求前执行 SSRF 检查。重试与出站治理由网关统一处理。"""
 
 import base64
 import json
@@ -43,21 +30,21 @@ _POLICY_PREFIX = "policy:"
 
 # 观察体积上限(响应文本化后进观察的截断点;标注截断,spec「大响应截断」)
 _OBSERVATION_CAP = 16 * 1024
-# 响应读取上限(出站读取的字节闸,防巨头响应内存放大;029 http 节点同量级)
+# 响应读取上限(出站读取的字节闸,防巨头响应内存放大;http 节点同量级)
 _RESPONSE_CAP = 1024 * 1024
 
 
 class HttpConnectorError(Exception):
-    """连接器域执行失败的结构化收敛(分发兜底 ERROR + 审计;文案前缀承载
-    分类:unreachable:/protocol:/policy:)。"""
+    """连接器域执行失败的结构化收敛(分发兜底 ERROR + 审计;文案前缀
+    unreachable:/protocol:/policy: 承载分类,是 classify 的判定依据)。"""
 
 
 async def _as_text_response(resp: httpx.Response) -> tuple[str, bool]:
     """响应体 → 文本形态(JSON 序列化为文本,其余原样;读字节闸内)。
     返回 (文本, 是否截断)。
 
-    须在 client.stream 上下文内消费(评审修复):原实现先 client.request()
-    再 iter_bytes——request 便捷方法默认全量预读响应,字节闸只剩切片意义,
+    须在 client.stream 上下文内消费:先取响应头再流式读体——
+    request 便捷方法默认全量预读响应,字节闸只剩切片意义,
     巨头响应在返回前已入内存;aiter_bytes 于 stream 上下文才是真流式。"""
     buf = bytearray()
     async for chunk in resp.aiter_bytes(65536):
@@ -83,10 +70,9 @@ def build_url(
     method: str, template: str, params: tuple[ParamDecl, ...], payload: dict[str, object]
 ) -> str:
     """路径模板 → 出站 URL(纯函数):占位参数 URL 编码后直插;query 只承载
-    GET 的其余字符串型参数(非字符串标量转文本)。渠道按方法二选一(design
-    D6「查询参数与 POST JSON body 由参数声明按名映射」;评审修复——原实现
-    POST 声明参数同时进 query 与 body,业务参数值泄漏进 URL/网关日志)。
-    缺省参数不出现在 URL。"""
+    GET 的其余字符串型参数(非字符串标量转文本)。POST 声明参数不进 query,
+    防业务参数值泄漏进 URL/网关日志(spec「查询参数与 POST JSON body 由
+    参数声明按名映射」)。缺省参数不出现在 URL。"""
     param_types = {p.name: p.type for p in params}
     path_args: dict[str, str] = {}
     query_pairs: list[tuple[str, str]] = []
@@ -185,7 +171,7 @@ class HttpConnectorPolicy:
         return out
 
     def classify(self, exc: Exception | None, *, delivered: bool) -> RetryClass:
-        """按执行器收敛出的前缀判定(089 两档 + policy 语义):unreachable=
+        """按执行器收敛出的前缀判定(两档 + policy 语义):unreachable=
         连接层未送达(重试至多一次);protocol/policy=不重试。"""
         if exc is None:
             return RetryClass.OK
@@ -206,7 +192,7 @@ class HttpConnectorExecutor:
 
     失败在执行器内收敛为 HttpConnectorError(unreachable:/protocol:/policy:
     前缀),重试由网关切面按策略器分类承担——执行器自身不做第二次尝试。
-    出站前经 029 SSRF 拒绝段(design D3:白名单命中不构成豁免;存量行/
+    出站前经 SSRF 拒绝段(白名单命中不构成豁免;存量行/
     白名单拼错的执行期兜底),判定地址钉扎直连(防 DNS rebinding),重定向
     不跟随(白名单绕过的经典通道)。凭证只在构造期注入,只进请求头。
     """
@@ -225,8 +211,7 @@ class HttpConnectorExecutor:
         self._template = path_template
         self._params = params
         self._headers = build_auth_headers(auth_type, auth_secret)
-        # transport 仅测试注入(与 knowledge/websearch 域同构的注入缝;
-        # 生产 None——生产走 SSRF 钉扎 transport)
+        # transport 仅用于测试注入;生产请求由 SSRF 校验后的传输层执行。
         self._test_transport = transport
 
     async def __call__(self, *, url: str, payload: dict[str, object], timeout_s: float) -> object:
@@ -235,14 +220,14 @@ class HttpConnectorExecutor:
         final_url = build_url(self._method, self._template, self._params, payload)
         body = build_json_body(self._method, self._template, payload)
         try:
-            # 029 拒绝段(design D3 执行期兜底;先于出站,DNS 解析任一地址
-            # 落拒绝段即拒,白名单命中不构成豁免)
+            # 拒绝段(执行期兜底;先于出站,DNS 解析的任一地址落
+            # 拒绝段即拒,白名单命中不构成豁免)
             pinned = await assert_url_allowed(final_url)
         except (SsrFBlocked, ValueError) as e:
             # 结构化拒绝(SSRF 判定;解析族在其内部已转 SsrFBlocked)+ URL
             # 求值 ValueError(urlparse.port 对越界端口如 :99999 抛出——
             # 注册期模板校验不触端口段,执行期在此收口为 policy 归因);
-            # 其余编程性异常放行走分发兜底,不伪装成 policy(评审修复两轮)
+            # 其余编程性异常放行走分发兜底,不伪装成 policy
             raise HttpConnectorError(f"{_POLICY_PREFIX} 目标地址被拒绝({e})") from e
         # 未完整取得响应族(拒连在 macOS anyio 后端以 ReadError 浮现,按语义归纳)
         undelivered = (
@@ -281,7 +266,7 @@ class HttpConnectorExecutor:
                         "body": body_text,
                         "truncated": truncated,
                     }
-        # 顺序铁律(089 审查 P1-1 同款):未送达族(含 ConnectTimeout)先于读超时
+        # 顺序铁律:未送达族(含 ConnectTimeout)必须先于读超时捕获
         except HttpConnectorError:
             raise  # 执行器自收敛(重定向)原样上浮,保前缀分类
         except undelivered as e:
@@ -296,19 +281,18 @@ class HttpConnectorExecutor:
                 f"{_PROTOCOL_PREFIX} 端点 HTTP {e.response.status_code}"
             ) from e
         except httpx.DecodingError as e:
-            # 解码失败继承 RequestError(非 TransportError),不单列会以裸 httpx
-            # 异常逃逸收敛链、审计 error_reason 丢结构化前缀(094 评审 R1 同款;
-            # 评审修复——新增 connector.py 漏了 ticket/websearch 已补的同段)
+            # 解码失败继承 RequestError(非 TransportError),不被下方分支
+            # 覆盖;单列收口为协议前缀,供调用方与审计识别
             raise HttpConnectorError(f"{_PROTOCOL_PREFIX} 响应解码失败({type(e).__name__})") from e
         except httpx.TransportError as e:
-            # 传输层未枚举残族(防 httpx 分层演进逃逸;089 同款兜底)
+            # 传输层未枚举残族(防 httpx 分层演进逃逸;同款兜底)
             raise HttpConnectorError(
                 f"{_UNDELIVERED_PREFIX} 连接器端点拒连({type(e).__name__})"
             ) from e
 
 
 def connector_domain_spec(row: dict[str, object], *, quota_per_minute: int) -> DomainSpec:
-    """连接器行 → 域清单声明(纯函数,design D2「行→声明」;每请求重放,
+    """连接器行 → 域清单声明(纯函数,「行→声明」;每请求重放,
     可确定性测试)。endpoint=路径模板(占位形态;网关出口校验取其主机)。"""
     hosts_raw = row.get("allowed_hosts")
     hosts = (

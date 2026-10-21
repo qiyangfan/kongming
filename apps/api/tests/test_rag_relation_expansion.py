@@ -1,9 +1,9 @@
-"""095-relation-aware-recall 测试(宪法 Article III,先红后绿)。
+"""验证关系扩展召回、缓存失效和租户隔离。
 
-覆盖:relations_touching 查询口径(1.1)/扩展纯函数一跳去重上限序(1.2)/
-relations_hint 收窄基准扩展(1.3)/端口缺失与查询异常降级不阻断(1.4)/
-关系写路径提交后 ctx 缓存失效(1.5)/kill switch 关停零回归(1.6)/
-召回试跑透出扩展明细(1.7)/扩展的租户与数据源隔离(1.8)。
+覆盖:relations_touching 查询口径/扩展纯函数一跳去重上限序/
+relations_hint 收窄基准扩展/端口缺失与查询异常降级不阻断/
+关系写路径提交后 ctx 缓存失效/kill switch 关停/
+召回试跑透出扩展明细/扩展的租户与数据源隔离。
 """
 # pyright: reportPrivateUsage=false
 
@@ -112,7 +112,7 @@ async def _seed_expansion_scene(
         )
 
 
-# ============ 1.1 relations_touching 查询口径 ============
+# ============ relations_touching 查询口径 ============
 
 
 async def test_relations_touching_hits_either_end_and_double_filters(
@@ -157,7 +157,7 @@ async def test_relations_touching_hits_either_end_and_double_filters(
     assert cross_ds == []  # default 的关系不泄漏给其他数据源
 
 
-# ============ 1.2 扩展纯函数 ============
+# ============ 扩展纯函数 ============
 
 
 def _rel(source: str, target: str) -> dict[str, Any]:
@@ -220,7 +220,7 @@ def test_expand_by_relations_symmetric_direction() -> None:
     assert [e.key for e in out] == [("s", "orders")]  # 目标侧命中反向补源表
 
 
-# ============ 1.3 扩展表带 JOIN path 进 relations_hint ============
+# ============ 扩展表带 JOIN path 进 relations_hint ============
 
 
 async def test_expanded_table_enters_hint_tail_and_join_narrowing(
@@ -253,13 +253,13 @@ async def test_expanded_table_enters_hint_tail_and_join_narrowing(
     ) in body["relations_hint"]  # 收窄基准含扩展表
 
 
-# ============ 1.4 降级不阻断 ============
+# ============ 降级不阻断 ============
 
 
 async def test_expansion_query_failure_degrades_not_blocks(
     client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """关系查询抛异常:降级为无扩展,召回主链路不阻断、不以错误终态返回。"""
+    """关系查询失败时不扩展召回结果，也不改变问答终态。"""
     await _embed_stub(monkeypatch)
     tid = await _ensure_default_tenant(session)
     await _register_datasource(session, tid, EXP_DS)
@@ -314,8 +314,7 @@ class _StubRepo:
         return True
 
     async def has_knowledge(self, *, tenant_id: str, datasource_key: str) -> bool:
-        # 064 闸门前置探针:recall 主链路无条件调用,协议扩展桩须同步,
-        # 否则 AttributeError(本文件用例闸门缺省 off,返回值不改变行为)
+        # 召回过程会调用 has_knowledge，测试替身需实现此方法；闸门关闭时返回值不影响用例。
         return True
 
     async def recall_fulltext(
@@ -324,7 +323,7 @@ class _StubRepo:
         tenant_id: str,
         datasource_key: str,
         question: str,
-        visible_team_ids: list[str] | None = None,  # 102:协议扩展桩须同步
+        visible_team_ids: list[str] | None = None,  # 协议扩展桩须同步
     ) -> list[Any]:
         from kongming.rag.models import RecallHit
 
@@ -340,7 +339,7 @@ class _StubRepo:
         tenant_id: str,
         datasource_key: str,
         keys: list[tuple[str, str]],
-        visible_team_ids: list[str] | None = None,  # 102:协议扩展桩须同步
+        visible_team_ids: list[str] | None = None,  # 协议扩展桩须同步
     ) -> list[Any]:
         from kongming.rag.models import KnowledgeEntry
 
@@ -377,7 +376,7 @@ def _make_svc(expander: object | None, *, enabled: bool = True, max_expand: int 
 
 
 async def test_port_absent_recalls_without_expansion() -> None:
-    """端口未注入(老调用方/测试):零扩展、召回主链路照常。"""
+    """关系扩展端口未注入时只跳过扩展，正常返回召回结果。"""
     svc = _make_svc(None)
     ctx = await svc.recall(tenant_key="default", datasource_key="default", question=QUESTION)
     assert "tenant_default.orders" in ctx.schema_hint
@@ -392,7 +391,7 @@ async def test_disabled_switch_zero_relation_queries() -> None:
     assert "tenant_default.orders" in ctx.schema_hint
 
 
-# ============ 1.5 关系写路径提交后失效 ctx 缓存 ============
+# ============ 关系写路径提交后失效 ctx 缓存 ============
 
 
 async def test_relation_write_invalidates_ctx_cache(
@@ -455,7 +454,7 @@ async def test_relation_write_invalidates_ctx_cache(
     assert not await _ctx_keys()  # introspection upsert → 失效
 
 
-# ============ 1.6 kill switch 关停零回归 ============
+# ============ kill switch 关停 ============
 
 
 async def test_kill_switch_output_identical_to_pre_expansion(
@@ -483,7 +482,7 @@ async def test_kill_switch_output_identical_to_pre_expansion(
     try:
         # 不先 flushdb:开启形态写入的 ctx 缓存仍在——缓存键并入扩展形态后,
         # 关停形态不得命中它(否则 TTL 窗口内返回含扩展的旧输出,违背
-        # 「关停输出与开启前逐字一致」;评审 R1 缺陷钉)
+        # 「关闭关系扩展后输出与开启前完全一致」契约)。
         r_off = await client.post("/internal/rag/retrieve", json=payload, headers=INTERNAL)
         assert r_off.status_code == 200, r_off.text
         body = r_off.json()
@@ -500,7 +499,7 @@ async def test_kill_switch_output_identical_to_pre_expansion(
         get_settings.cache_clear()  # monkeypatch 撤销 env 后重建缺省设置
 
 
-# ============ 1.7 试跑端点透出扩展明细 ============
+# ============ 试跑端点透出扩展明细 ============
 
 
 async def test_recall_probe_exposes_expansion_detail(
@@ -568,7 +567,7 @@ async def test_recall_probe_expansion_requires_perm(
     assert r.status_code == 403
 
 
-# ============ 1.8 扩展的租户与数据源隔离 ============
+# ============ 扩展的租户与数据源隔离 ============
 
 
 async def test_expansion_tenant_isolation(

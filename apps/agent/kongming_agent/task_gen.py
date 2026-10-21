@@ -1,10 +1,6 @@
-"""任务编排(agent 面,090 task-kernel D1/D4):无界外层(步骤)+ 有界内层
-(单步 ReAct,轮次上限沿用既有配置)。
+"""任务编排：先规划步骤，再逐项执行并回写结果。
 
-编排循环:规划(LLM 产步骤清单)→ 控制面落账 → 逐步执行(每步一次有界
-ReAct;证据=工具执行结果,语言模型自述不构成完成证据)→ 步骤结果回写
-(控制面驱动审批/预算/暂停决策)。agent 面零任务持久状态——重启无残余,
-恢复天然干净(ADR-002 零改动:工具调用 100% 走既有回调)。
+每步的 ReAct 调用有轮次上限，任务状态由控制面保存；恢复时继续使用既有回调。
 """
 
 import json
@@ -26,7 +22,7 @@ _MAX_TOTAL_TOKENS = 100_000
 
 # 步骤执行器:单步有界 ReAct(问题→终态 dict);由组合根以既有内核装配
 StepRunner = Callable[[str, dict[str, object]], Awaitable[dict[str, object]]]
-# 协作执行器(091):声明协作拓扑的步骤改走协作编排(组合根装配 run_collab);
+# 协作执行器:声明协作拓扑的步骤改走协作编排(组合根装配 run_collab);
 # 签名 (step_id, step_goal, context_digest, collab_cfg) → 聚合结论 dict
 CollabRunner = Callable[[str, str, str, dict[str, object]], Awaitable[dict[str, object]]]
 
@@ -78,7 +74,7 @@ class TaskOrchestrator:
         self._run_step = step_runner
         self._run_collab = collab_runner
         self._task_id = str(payload.get("task_id") or "")
-        self._epoch = int(cast("int", payload.get("epoch") or 0))  # 派发代际(0042)
+        self._epoch = int(cast("int", payload.get("epoch") or 0))  # 派发代际(stale_epoch 判定依据)
         self._tenant_key = str(payload.get("tenant_key") or "default")
 
     async def run(self) -> dict[str, object]:
@@ -101,7 +97,7 @@ class TaskOrchestrator:
         datasource_key = str(self._payload.get("datasource_key") or "default")
         user_id = cast("str | None", self._payload.get("user_id"))
 
-        # 1) 规划(规划段 LLM 用量走 021 fire-and-forget 通道,不计入任务
+        # 1) 规划(规划段 LLM 用量走 fire-and-forget 通道,不计入任务
         # 预算账本——账本口径=步骤执行增量用量,预算闸按步骤边界判定)
         plan_raw = await self._llm.chat(
             tp.PLAN_SYSTEM_PROMPT,
@@ -177,7 +173,7 @@ class TaskOrchestrator:
             token = set_usage_collector(collector)
             try:
                 if isinstance(collab_cfg, dict) and run_collab_step is not None:
-                    # 091:声明协作拓扑的步骤走协作编排(聚合结论驱动步骤终态)
+                    # 声明协作拓扑的步骤走协作编排(聚合结论驱动步骤终态)
                     final = await run_collab_step(
                         step_id,
                         step_goal,
@@ -192,8 +188,8 @@ class TaskOrchestrator:
                             "tools": tools,
                             "datasource_key": datasource_key,
                             "user_id": user_id,
-                            # 图级检查点上下文(add-graph-checkpoint):线程派生
-                            # 与内部回调归属;恢复提示=已决确认随 begin_step 下发
+                            # 图级检查点上下文:线程派生与内部回调归属;
+                            # 恢复提示=已决确认随 begin_step 下发
                             "task_id": self._task_id,
                             "step_id": step_id,
                             "tenant_key": self._tenant_key,
@@ -203,7 +199,7 @@ class TaskOrchestrator:
                     )
             finally:
                 reset_usage_collector(token)
-            # 图内挂起(add-graph-checkpoint):到达确认点图已挂(检查点在控制面),
+            # 图内挂起:到达确认点图已挂(检查点在控制面),
             # 上账(建/复用确认行+任务挂起)后如实返回,终态归属控制面审批流
             suspended = (
                 cast("dict[str, object]", final.get("suspended"))
@@ -224,7 +220,7 @@ class TaskOrchestrator:
                 if rep is None:
                     return await self._finish("FAILED", "图内挂起上账被拒(链路异常)")
                 return {"final_status": "AWAITING_APPROVAL"}
-            # 每步上报本次增量(控制面负责累加;上报累计值会 O(n²) 膨胀账本)
+            # 每步只上报新增用量，由控制面负责累加。
             step_tokens = sum(int(cast("int", r.get("total_tokens") or 0)) for r in collector)
             if is_collab:
                 # worker 用量回注步级预算:worker 内层 collector 与步级外层互斥,
@@ -294,9 +290,7 @@ class TaskOrchestrator:
 
 
 def react_verdict(final: dict[str, object]) -> str:
-    """react 终态 verdict 单一定义提取:剧本化假体直接带 verdict 键;真实
-    _run_react 终态无 verdict,裁决在 execution(ExecutionResult)内——
-    090 剧本收口与真实组合根的形态差由此处统一收口(缺陷:真实链路曾恒判失败)。"""
+    """提取 ReAct 终态 verdict。测试替身可直接提供 verdict；真实调用从 execution 结果读取。"""
     v = final.get("verdict")
     if isinstance(v, str) and v:
         return v
@@ -307,7 +301,7 @@ def react_verdict(final: dict[str, object]) -> str:
 
 
 def react_execution_evidence(final: dict[str, object]) -> bool:
-    """工具执行证据判定(090 证据口径,单一定义):真实 react 终态的 execution
+    """工具执行证据判定(证据口径,单一定义):真实 react 终态的 execution
     载荷须带非空结果集(列或行)方构成完成证据——finalize 对纯文本直答会合成
     空结果集 PASS(graph/react/nodes 兜底),语言模型自述不算数。剧本化假体
     无 execution 键时不受此闸(verdict 即剧本结论)。"""
@@ -338,7 +332,7 @@ def _step_outcome(
     error = str(final.get("error") or "")
     if verdict == "PASS" and not error:
         if not react_execution_evidence(final):
-            # finalize 对纯文本直答合成空结果集 PASS:自述不构成完成证据(090)
+            # finalize 对纯文本直答合成空结果集 PASS:自述不构成完成证据
             return "FAILED", evidence, "步骤无工具执行证据(纯文本直答不构成完成)"
         return "DONE", evidence, None
     fail = error or summary or verdict or "步骤未产出工具执行证据"
@@ -348,9 +342,9 @@ def _step_outcome(
 def _collab_outcome(
     final: dict[str, object], trace_root: str
 ) -> tuple[str, dict[str, object], str | None]:
-    """协作聚合结论 → 步骤三态(091;步骤终态由聚合结论驱动):
+    """协作聚合结论 → 步骤三态(步骤终态由聚合结论驱动):
     verdict PASS → DONE(证据=trace+聚合结论+协作语义披露);其余 FAILED
-    (原因含未派发清单/保留意见/分歧态,诚实口径与 090 一致)。"""
+    (原因含未派发清单/保留意见/分歧态,诚实口径)。"""
     verdict = str(final.get("verdict") or "")
     summary = str(final.get("summary") or "")
     pending = cast("list[str]", final.get("pending_subgoals") or [])
@@ -375,7 +369,7 @@ def _collab_outcome(
 
 
 def _context_digest(goal: str, completed: list[tuple[str, str]]) -> str:
-    """受控上下文摘要(D2):任务目标 + 最近已完成结论(非全量历史,体积有界)。"""
+    """受控上下文摘要:任务目标 + 最近已完成结论(非全量历史,体积有界)。"""
     parts = [f"任务目标:{goal[:400]}"]
     for g, s in completed[-3:]:
         parts.append(f"已完成「{g[:120]}」:{s[:300]}")

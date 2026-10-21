@@ -1,9 +1,4 @@
-/* 数据源切换器(008 datasource spec「对话页数据源切换器」,与租户切换器同构):
-   选项接口驱动(首位合成 default 项);选中 key 随 /chat/query 发送;
-   切租户自动重置首项(options 按租户取,数据变更即 recalibrate);
-   切换=回新建态+失效会话域查询。
-   注意(挂账):会话列表不按数据源过滤,直达旧会话追问将按当前源执行——
-   会话-数据源绑定语义待 chat 域立约,本组件不作跨源隔离承诺。 */
+/* 切换数据源后回新建会话并清会话缓存;会话列表不按数据源筛选,旧会话以当前数据源打开 */
 
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -43,7 +38,7 @@ export function DatasourceSwitcher() {
   const items = options.data ?? [];
   const currentName = items.find((o) => o.datasource_key === current)?.name ?? "默认数据源";
 
-  // 拉取失败(无租户绑定 403/网络错误):显式错误态,不误标当前选择(R1-web-O4)
+  // 失败态显式呈现,不冒充当前选择
   if (options.isError) {
     return (
       <div className="flex h-8 items-center gap-2 px-2 text-xs text-muted-foreground">

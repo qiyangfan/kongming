@@ -1,14 +1,4 @@
-"""0002: user_identities 多身份表(ADR-006 连接器架构)
-
-Revision ID: 0002
-Revises: 0001
-Create Date: 2026-08-17
-
-- 新增 public.user_identities(user_id, provider, external_id):一用户可绑多路联邦;
-  provider CHECK 五家一次建全(ADR-004:已规划能力的列/约束一次建全;国内三家 003 接入)。
-- sys_user(auth_source, external_id) 数据平移后删列:身份绑定单一事实源收敛到
-  user_identities;「是否可账密登录」由 password_hash 是否为空承载。
-"""
+"""新增联邦身份表，并将用户的 provider 与 external_id 迁入该表。账密登录状态由 password_hash 是否为空表示。"""
 
 from sqlalchemy import text
 

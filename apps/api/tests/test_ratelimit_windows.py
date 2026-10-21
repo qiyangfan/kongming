@@ -20,7 +20,7 @@ from kongming.toolcall.ratelimit import RedisRateLimiter
 async def _server_now(r: Redis) -> float:
     """Redis 服务端 UNIX 秒(与脚本内 TIME 同源,边界推算用)。
 
-    redis-py 的 time() 存根类型不全,按 conftest 既有口径经 Any 收窄。"""
+    redis-py 的 time 存根类型不全,按 conftest 既有口径经 Any 收窄。"""
     t = await cast("Any", r).time()
     return float(t[0]) + float(t[1]) / 1e9
 

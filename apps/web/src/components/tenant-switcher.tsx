@@ -1,8 +1,4 @@
-/* 租户切换器(web-nav spec「租户切换」):
-   多租户下拉切换(切换=失效会话域查询+回新建态);单租户只读展示。
-   UI 文案呈「工作空间」而非「租户」:用户面产品化措辞(对标 Dify/Coze
-   workspace 惯例),且与紧邻的数据源切换器(「数据源」)拉开字面距离;
-   管理面超管页面仍用「租户」,与领域实体/契约对齐。 */
+/* 多租户模式允许切换工作空间，单租户只读展示。用户界面用“工作空间”，管理界面仍称“租户”。 */
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronsUpDown } from "lucide-react";

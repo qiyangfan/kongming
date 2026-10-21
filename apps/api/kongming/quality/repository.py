@@ -1,17 +1,5 @@
-"""quality 仓储(069):chat_message 质量信号聚合 SQL。
-
-口径:
-- 轮次 = role='ASSISTANT' 的 chat_message(USER 行是问句,非质量轮次);
-- 平均 token(072 任务 3.3 口径核对):同 trace_id 下「1 次 ERROR(tokens=0)
-  + 1 次 SUCCESS」并存时按行平均会被 0 值稀释——必须按 trace_id 分组
-  SUM(total_tokens) 得轮次总量再平均(尝试次数另计);
-- 趋势:Asia/Shanghai 日历日分桶逐天补零(窗口边界与分桶同口径,范围谓词
-  放 ON 内——WHERE 会把补零桶过滤掉,月聚合时区教训先例);
-- 数据源切片经 chat_session.datasource_key(消息行不背维度);
-- 点踩率:rating='DOWN' / 全部轮次(与 feedback 域 downRate 同口径——
-  "已评轮次才计入分母"的说法与两域实际实现都不符,rated 计数仅随行产出
-  备查,不参与任何比率)。
-"""
+"""问答质量信号聚合查询:轮次按 assistant 消息统计;token 按 trace_id 汇总
+再平均(失败调用并入);趋势按上海时区自然日分桶补零;点踩率以全部轮次为分母。"""
 
 from typing import Any
 
@@ -56,7 +44,7 @@ class SqlQualityRepo:
             .one()
         )
         out = dict(row)
-        # 平均 token:按 trace_id 分组的轮次 SUM 再平均(072 口径;trace_id
+        # 平均 token:按 trace_id 分组的轮次 SUM 再平均(口径;trace_id
         # 缺失的旧行不参与 token 均值——无关联用量可归)
         avg = (
             await self._s.execute(
@@ -240,7 +228,7 @@ class SqlQualityRepo:
         """data_scope=ALL 判定(audit 域同款查询:角色经 sys_user_role 关联,
         bool_or 覆盖多角色并集;多角色时任一 ALL 即全域可见)。
 
-        与 audit/feedback/toolcall 同一道启用闸(086):非启用角色的 ALL 不兑现——
+        与 audit/feedback/toolcall 同一道启用闸:非启用角色的 ALL 不兑现——
         本判定直接决定跨租户全量可见,漏闸等于留一条「禁用角色反而放宽观测面」的暗道。
         """
         row = (

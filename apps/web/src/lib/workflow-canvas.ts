@@ -1,8 +1,4 @@
-/* 工作流画布 ⇄ JSON DAG 定义互转纯函数(107)。
-   契约唯一事实源 = apps/api/kongming/workflow/models.py(NODE_TYPES /
-   _REQUIRED_CONFIG / config.on 值域 / 节点 id 规则);本模块只判定
-   「画布可表达性」并做无损投影,结构校验语义仍 100% 在服务端(不存在
-   第二套校验):本地检出的仅是画布无法承载的形态,fail-safe 回落 JSON 态。 */
+/* 在工作流定义与画布状态间无损转换；画布可表达性按后端模型判断，结构校验仍由服务端负责。 */
 
 export const WF_NODE_MIME = "application/x-km-wf-node";
 
@@ -28,9 +24,7 @@ export const REQUIRED_CONFIG_KEYS: Record<WfNodeType, readonly string[]> = {
   agent: ["instruction"],
 };
 
-/** 画布可表达的 config 键白名单 = 必填 ∪ 可选;白名单外字段检出即回落 JSON 态
- *  (fail-safe,MUST NOT 静默丢弃)。loop.body 是子节点数组,内部形态属服务端
- *  契约,画布不做深检(侧栏以 JSON 文本承载)。 */
+/** 画布支持的配置键；白名单外字段会拒绝转换，避免保存时丢字段。loop.body 由服务端校验。 */
 const CONFIG_KEY_WHITELIST: Record<WfNodeType, readonly string[]> = {
   sql: [...REQUIRED_CONFIG_KEYS.sql, "datasource_key"],
   http: [...REQUIRED_CONFIG_KEYS.http, "headers", "body"],
@@ -40,8 +34,7 @@ const CONFIG_KEY_WHITELIST: Record<WfNodeType, readonly string[]> = {
   agent: [...REQUIRED_CONFIG_KEYS.agent, "datasource_key"],
 };
 
-/** 节点 id 形态与保留名(与 models.py _NODE_ID_RE/_RESERVED_IDS 对齐;
-   新建节点生成 id 时消费,录入侧仍由服务端校验兜底) */
+/** 节点 id 形态与保留名(与 models.py _NODE_ID_RE/_RESERVED_IDS 对齐; 新建节点生成 id 时消费,录入侧仍由服务端校验兜底) */
 export const NODE_ID_RE = /^[A-Za-z0-9_]+$/;
 export const RESERVED_NODE_IDS: ReadonlySet<string> = new Set(["inputs", "_loop"]);
 
@@ -87,14 +80,7 @@ export function defaultPosition(index: number): CanvasPosition {
   return { x: (index % 4) * 240, y: Math.floor(index / 4) * 140 };
 }
 
-/**
- * JSON DAG 定义 → 画布态(纯函数)。
- * 白名单判定:顶层仅 nodes 键、节点键 ⊆ {id,type,config,depends_on}、类型合法、
- * config 键 ⊆ 类型白名单、on ∈ {"true","false"} 且必须有条件前驱(画布中 on
- * 只活在条件入边上,缺载体即不可表达)、依赖引用存在/无重复/不自指。
- * 任一不满足 → ok:false + 原因列表(调用方明示并阻断切换,回落 JSON 态)。
- * positions 为画布私有布局(按 wf_key+version 存 localStorage),缺省走网格。
- */
+/** 将工作流定义转为画布状态；拒绝画布无法无损表示的字段组合，并返回原因。 */
 export function dagToCanvas(
   definition: unknown,
   positions?: Record<string, CanvasPosition>,
@@ -209,12 +195,7 @@ export function dagToCanvas(
   return { ok: true, graph: { nodes, edges } };
 }
 
-/**
- * 画布态 → JSON DAG 定义(纯函数)。
- * 节点序 = 画布节点序;depends_on = 该节点入边序。条件入边是 config.on 的
- * 唯一载体:有条件入边 → 写入 on(同目标多条条件入边必须同值,冲突即拒绝);
- * 条件入边全没了 → 裁剪 on(画布删边即删 on,与画布语义一致,非静默丢字段)。
- */
+/** 将画布状态转为 DAG 定义。条件入边写入 config.on；同一节点的条件值冲突时拒绝转换，删除全部条件入边时也会删除 on。 */
 export function canvasToDag(
   graph: CanvasGraph,
 ): { ok: true; definition: unknown } | { ok: false; reasons: string[] } {
@@ -273,8 +254,7 @@ export function missingRequiredKeys(type: WfNodeType, config: Record<string, unk
   return REQUIRED_CONFIG_KEYS[type].filter((k) => !(k in config));
 }
 
-/* ── 布局坐标持久化(localStorage 按 wf_key+version;布局是个人偏好不是资产,
-      换端不迁移,design 裁决) ── */
+/* 布局坐标按工作流和版本保存在本地;它属于个人偏好,不会跨设备迁移。 */
 
 const POS_KEY_PREFIX = "km.wfcanvas.pos";
 

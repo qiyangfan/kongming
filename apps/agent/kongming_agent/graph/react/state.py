@@ -1,4 +1,4 @@
-"""ReAct 内核状态(019):与 8 节点图 AgentState 独立的并行状态面。
+"""ReAct 内核状态:与 8 节点图 AgentState 独立的并行状态面。
 
 messages 为 OpenAI 对话累积(user/assistant/tool),pending_tool_calls 为
 react_llm 产出待 tool_dispatch 消费的调用批;last_execution/last_sql 记
@@ -19,10 +19,10 @@ class ReactState(TypedDict, total=False):
     question: str  # 原始问句
     history: list[str]  # 多轮上下文:user 问句列表,旧→新
     tools: list[dict[str, object]]  # api 注入的授权工具 schema(唯一真理源=api)
-    memory_hint: NotRequired[str]  # 022:召回的用户已知信息段(控制面注入)
-    bot_system_prompt: NotRequired[str]  # 025:Bot 身份段(控制面注入)
-    model_override: NotRequired[str]  # 025:Bot 模型覆盖(注册表名)
-    channel: NotRequired[str]  # 025:渠道标记(工具审计平铺)
+    memory_hint: NotRequired[str]  # 召回的用户已知信息段(控制面注入)
+    bot_system_prompt: NotRequired[str]  # Bot 身份段(控制面注入)
+    model_override: NotRequired[str]  # Bot 模型覆盖(注册表名)
+    channel: NotRequired[str]  # 渠道标记(工具审计平铺)
     messages: list[dict[str, object]]  # OpenAI 对话累积
     pending_tool_calls: list[LlmToolCall]  # 待执行的 LLM 工具调用批
     rounds: int  # 已执行的工具轮次
@@ -31,9 +31,9 @@ class ReactState(TypedDict, total=False):
     executed_sigs: NotRequired[list[str]]  # 重复熔断:已成功调用的 工具|参数 签名集
     final_answer: NotRequired[str]  # LLM 最终文本答案
     error: NotRequired[str]  # 轮次上限触顶等终态错误
-    compute_values: NotRequired[list[float]]  # 057:本轮计算工具返回值(入白名单)
-    numeric_whitelist: NotRequired[list[float]]  # 057:本轮数值白名单(compute 入参校验)
-    todos: NotRequired[list[dict[str, str]]]  # 058:多步目标账本(仅 Agent 内部)
+    compute_values: NotRequired[list[float]]  # 本轮计算工具返回值(入白名单)
+    numeric_whitelist: NotRequired[list[float]]  # 本轮数值白名单(compute 入参校验)
+    todos: NotRequired[list[dict[str, str]]]  # 多步目标账本(仅 Agent 内部)
     # 图内确认点(add-graph-checkpoint,仅任务通道):
     confirm_inflight: NotRequired[dict[str, object] | None]  # 在途确认(挂图期间持久于快照)
     confirm_decision: NotRequired[dict[str, object] | None]  # interrupt 返回的处置决策

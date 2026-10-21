@@ -1,4 +1,4 @@
-"""108 email-inbound-trigger 测试:迁移契约/摘要适配器(白名单+截断+护栏)/
+"""email-inbound-trigger 测试:迁移契约/摘要适配器(白名单+截断+护栏)/
 IMAP 轮询器(内存桩,三场景:新邮件触发/续传不重复/失败落历史)/
 调度接线(四场景)/CRUD 凭证治理(加密落库/不回显/空框保持)。"""
 # pyright: reportPrivateUsage=false
@@ -186,7 +186,7 @@ async def _mk_email_trigger(
     return tid_t, tid
 
 
-# ── 1.1 迁移契约 ──
+# ── 迁移契约 ──
 
 
 async def test_migration_0050_schema_contract(session: AsyncSession) -> None:
@@ -325,7 +325,7 @@ async def test_migration_0050_downgrade_roundtrip() -> None:
         await session.commit()
         await session.rollback()  # 迁移命令前清场(会话归零,释放锁面)
         # 两段 alembic 命令之间只查 information_schema(不持业务表锁):
-        # 业务表查询会以 ACCESS SHARE 挂住事务,堵死后续 ALTER TABLE(0045 同教训)
+        # 查询业务表会取得 ACCESS SHARE 锁并阻塞后续 ALTER TABLE。
         await asyncio.to_thread(command.downgrade, cfg, "0049")
         for col in ("imap_host", "imap_credential", "imap_poll_interval_sec"):
             assert not await _column_exists(session, "sys_trigger_definition", col), col
@@ -361,7 +361,7 @@ async def test_migration_0050_downgrade_roundtrip() -> None:
         await session.rollback()
 
 
-# ── 2.2 摘要适配器(纯函数:白名单/截断/健壮) ──
+# ── 摘要适配器(纯函数:白名单/截断/健壮) ──
 
 
 def test_email_summary_whitelist_and_rfc2047() -> None:
@@ -385,7 +385,7 @@ def test_email_summary_truncates_long_content() -> None:
 
 
 def test_email_summary_html_only_no_rich_extraction() -> None:
-    """design Non-goal:HTML 富正文不提取——纯 html 邮件预览为空。"""
+    """HTML 富正文不做富提取——纯 html 邮件预览为空(设计明确的 Non-goal)。"""
     msg = EmailMessage()
     msg["Subject"] = "html only"
     msg["From"] = "a@b.c"
@@ -403,8 +403,7 @@ def test_email_summary_malformed_never_raises() -> None:
 
 
 def test_bot_question_builds_from_email_digest() -> None:
-    """bot 目标指令组装(评审修复):邮件摘要形态进指令正文——原实现只认
-    summary/event 键,邮件摘要被静默丢弃落「定时触发」;webhook 提要与
+    """bot 目标指令组装:邮件摘要形态进指令正文;webhook 提要与
     cron 固定指令各自保留。"""
     from kongming.trigger.router import _bot_question
 
@@ -417,7 +416,7 @@ def test_bot_question_builds_from_email_digest() -> None:
     assert _bot_question({}) == "定时触发,请执行你的职责"
 
 
-# ── 2.1 IMAP 轮询器(内存桩;三场景 + UIDVALIDITY + 护栏 + 101 正交) ──
+# ── IMAP 轮询器(内存桩;三场景 + UIDVALIDITY + 护栏 + 正交) ──
 
 
 async def test_poll_new_messages_trigger_target(session: AsyncSession) -> None:
@@ -451,7 +450,7 @@ async def test_poll_new_messages_trigger_target(session: AsyncSession) -> None:
 async def test_poll_failure_retry_replays_digest_and_email_channel(
     session: AsyncSession,
 ) -> None:
-    """重试回放(评审修复):目标首跑失败进 101 重试链,到期派发以 email
+    """重试回放:目标首跑失败进重试链,到期派发以 email
     渠道+原摘要回放(链首行 summary 为载体),而非空 payload 的 cron 形态。"""
     tenant_id, tid = await _mk_email_trigger(session, max_retries=1)
     mail = _StubMail(messages=[MailRawMessage(uid=1, data=_mk_raw(subject="日报"))])
@@ -636,7 +635,7 @@ async def test_poll_guardrail_masks_pii_in_summary(session: AsyncSession) -> Non
 
 
 async def test_poll_target_failure_enters_retry_chain(session: AsyncSession) -> None:
-    """101 正交组合:邮件触发的目标执行失败同样按 max_retries 走重试链
+    """正交组合:邮件触发的目标执行失败同样按 max_retries 走重试链
     (形态与策略分离)。"""
     tenant_id, tid = await _mk_email_trigger(session, max_retries=1)
     mail = _StubMail(messages=[MailRawMessage(uid=1, data=_mk_raw(subject="会失败的"))])
@@ -654,7 +653,7 @@ async def test_poll_target_failure_enters_retry_chain(session: AsyncSession) -> 
     )
 
 
-# ── 2.3 调度接线(stub 服务直测四场景) ──
+# ── 调度接线(stub 服务直测四场景) ──
 
 
 class _EmailStubService:
@@ -775,12 +774,12 @@ async def test_list_due_emails_enabled_gate(session: AsyncSession) -> None:
     # 停用 → 出扫描面
     await svc.set_enabled(trigger_id=tid, tenant_id=tenant_id, enabled=False)
     assert await svc.list_due_emails(now_iso=now) == []
-    # 启用 → 回归(游标续传由轮询器语义保证)
+    # 重新启用后,轮询器应继续扫描到期邮件。
     await svc.set_enabled(trigger_id=tid, tenant_id=tenant_id, enabled=True)
     assert [str(r["id"]) for r in await svc.list_due_emails(now_iso=now)] == [tid]
 
 
-# ── 1.2 管理面(HTTP):邮件形态 CRUD 与凭证治理 ──
+# ── 管理面(HTTP):邮件形态 CRUD 与凭证治理 ──
 
 
 _EMAIL_BODY = {
@@ -921,13 +920,10 @@ async def test_email_trigger_interval_validation(
     assert r.status_code == 422
 
 
-# ==================== 评审循环回归(评审修复钉住) ====================
-
-
 async def test_poll_cursor_persisted_after_poll(session: AsyncSession) -> None:
-    """游标收尾提交(评审修复):poll_email 返回后游标必须已落库——独立新
-    会话可见。原实现末封游标推进在 _fire 提交之后、依赖调度器节流提交搭车,
-    节流失败被吞时 close() 回滚即丢游标,下轮确定性重复触发末封邮件。"""
+    """游标收尾提交:poll_email 返回后游标必须已落库,独立新
+    会话可见——游标推进不得搭车后续提交,失败被吞即丢游标、
+    下轮确定性重复触发末封邮件。"""
     tenant_id, tid = await _mk_email_trigger(session)
     mail = _StubMail(messages=[MailRawMessage(uid=7, data=_mk_raw(subject="末封"))])
     runner = _SeqRunner([("", True)])
@@ -945,7 +941,7 @@ async def test_poll_cursor_persisted_after_poll(session: AsyncSession) -> None:
 async def test_fetch_sync_abort_classified_connect_failed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """IMAP4.abort 归连接中断(评审修复):abort 继承 error,但语义是服务器
+    """IMAP4.abort 归连接中断:abort 继承 error,但语义是服务器
     掐断/EOF——login 阶段不再误标 AUTH_FAILED、读取阶段不再误标协议失败。"""
     import imaplib as _imaplib
 
@@ -982,7 +978,7 @@ async def test_fetch_sync_abort_classified_connect_failed(
 
 
 async def test_update_run_terminal_rowcount_gates_rechain(session: AsyncSession) -> None:
-    """update_run_terminal 返回命中行数(评审修复):PENDING 行命中=1;已被
+    """update_run_terminal 返回命中行数:PENDING 行命中=1;已被
     cancel_pending_retries 取消的行=0——service 据此跳过续链(结果补记为
     独立行),不再给已停用触发器追加挂起记录。"""
     tenant_id, tid = await _mk_email_trigger(session)
@@ -1028,9 +1024,7 @@ async def test_update_run_terminal_rowcount_gates_rechain(session: AsyncSession)
 
 
 async def test_fire_retry_cancelled_mid_flight_appends_final_row(session: AsyncSession) -> None:
-    """派发中取消的竞态收口(评审修复):fire_retry 读到 PENDING 后、执行完成
-    前行被 cancel_pending_retries 改判 FAILED(update_run_terminal 落 0)——
-    本次结果补记为独立终态行,不再给已停用触发器追加挂起 PENDING。"""
+    """验证重试已派发后若被取消，执行完成时仍追加最终结果行。"""
     tenant_id, tid = await _mk_email_trigger(session)
     base = SqlTriggerRepo(session)
     pending_id = await base.insert_run(

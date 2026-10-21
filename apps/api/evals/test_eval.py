@@ -1,20 +1,5 @@
-"""NL2SQL 评估集测试(016):Execution Match 黄金指标(严格/宽松双分)。
-
-评分指标:
-  - Execution Match(黄金):gold_sql 直连执行 vs 链路响应结果集,宽松双路径
-    匹配(matchers);严格 multiset 并行记录(基线对照)
-  - Valid Execution:链路 success(生成 SQL 链路内真实执行)
-  - Recall(表命中):生成 SQL 涉及表覆盖 expected_tables(间接口径)
-  - Retry Rate:响应 retry_count
-
-分层(eval spec「评估运行形态」):
-  - smoke(-m smoke):约 5 题,评估环境显式触发,全过才绿
-  - full(-m full):全部单轮题(含动态数据源组),统计+阈值
-  - multiturn(-m multiturn):多轮上下文题(指代/省略/排序延续/过滤追加)
-
-073:运行首行携带 prompt 资产指纹;与上次基线跨指纹时显式标注不可比
-(SHALL NOT 静默套用劣化红线)。
-"""
+"""NL2SQL 评估集测试:统计 Execution Match、有效执行率、表召回率和重试率,
+覆盖 smoke、full、multiturn 三类用例。跨提示词指纹的运行不可直接比较。"""
 # pyright: reportPrivateUsage=false
 
 from collections.abc import Iterator
@@ -33,14 +18,14 @@ from prompt_fingerprint import (
     save_baseline_fingerprint,
 )
 
-FULL_PASS_FLOOR = 0.6  # 全量宽松及格线(上游 010+ 基线 76-78%,留采样波动余量)
+FULL_PASS_FLOOR = 0.6  # 全量宽松及格线(上游 + 基线 76-78%,留采样波动余量)
 
-# 会话级指纹(取一次,首行打印 + 四组分数同屏;073)
+# 会话级指纹(取一次,首行打印 + 四组分数同屏)
 _current_fingerprint: str | None = None
 
 
 class CaseFailure(AssertionError):
-    """单题失败(089):携带该题的归因产物,full 统计块据它计分类计数。
+    """单题失败:携带该题的归因产物,full 统计块据它计分类计数。
 
     AssertionError 子类:smoke 端每题独立断言的既有语义不变。"""
 
@@ -50,14 +35,13 @@ class CaseFailure(AssertionError):
 
 
 def _env_failure_attribution(reason: str) -> Attribution:
-    """评估环境/资产错误(gold 执行失败、链路不可达等)的归因形态:
-    不是链路质量失败,显式落 OTHER 桶(被全量统计捕获的异常题,spec)。"""
+    """归类评估环境错误，例如 gold SQL 执行失败或 API 不可达。"""
     return Attribution(category="OTHER", reason=f"评估环境/资产错误(非链路质量失败): {reason}")
 
 
 @pytest.fixture(scope="session", autouse=True)
 def _prompt_fingerprint_report() -> Iterator[None]:  # pyright: ignore[reportUnusedFunction]
-    """评估运行首行打印 prompt 指纹(073);会话结束时跨指纹标注 + 记基线。"""
+    """评估运行首行打印 prompt 指纹;会话结束时跨指纹标注 + 记基线。"""
     global _current_fingerprint
     _current_fingerprint = fetch_prompt_fingerprint()
     print(format_fingerprint_line(_current_fingerprint), flush=True)
@@ -69,13 +53,7 @@ def _prompt_fingerprint_report() -> Iterator[None]:  # pyright: ignore[reportUnu
 
 
 async def _eval_single(case: dict[str, Any]) -> tuple[bool, bool, bool]:
-    """单题评估:gold 直连执行 vs 链路生成 → (strict, loose, tables_recalled)。
-
-    expect_reject 用例:跨租户数据源预期被绑定校验拒绝(fail-closed,
-    同形 400 DATASOURCE_INVALID),断言链路失败即通过,不算 Execution Match。
-    089:失败 raise CaseFailure 携带归因产物(NEG_GUARD/结构判据),
-    full 统计块据它计一级分类计数与明细判据。
-    """
+    """单题评估：直接执行 gold SQL，与问答 API 返回结果比较，并计算表召回率。"""
     question = str(case["question"])
     tenant = _tenant_of(case)
     datasource_key = case.get("datasource_key")
@@ -85,7 +63,7 @@ async def _eval_single(case: dict[str, Any]) -> tuple[bool, bool, bool]:
             r = await call_chat(question, tenant, datasource_key=datasource_key)
         except httpx.HTTPError as e:
             # 传输层故障≠拒绝(httpx 对 4xx/5xx 响应不抛异常,真拒绝走下方
-            # 状态码判定);服务未起时把 deny 题当"拒绝"通过=假绿(/goal R1)
+            # 服务未启动时不能把请求失败当成“拒绝”通过。
             pytest.fail(f"[{case['id']}] 链路不可达(评估环境未起?): {e}")
         rejected = r.status_code >= 400 or not r.json().get("success", False)
         if not rejected:
@@ -109,7 +87,7 @@ async def _eval_single(case: dict[str, Any]) -> tuple[bool, bool, bool]:
         return False, True, True  # 拒绝用例不计 strict(防虚增),pass 由断言保证
 
     if case.get("expect_no_data"):
-        # 负例(051):问题实体与可用表领域错配,预期哨兵短路 NO_DATA——
+        # 负例:问题实体与可用表领域错配,预期哨兵短路 NO_DATA——
         # 业务终态(200+success=False+verdict=NO_DATA),非 expect_reject 的
         # HTTP 拒绝;SQL 为空=零执行硬断言
         r = await call_chat(question, tenant, datasource_key=datasource_key)
@@ -155,7 +133,7 @@ async def _eval_single(case: dict[str, Any]) -> tuple[bool, bool, bool]:
     except Exception as e:  # noqa: BLE001  # asyncpg 异常族统一收敛评估集错误
         pytest.fail(f"[{case['id']}] gold_sql 执行失败(评估集本身有误): {e}")
 
-    # 链路生成(persist=false;HTTP 故障=服务未起,直接 fail)
+    # 以 persist=false 调用问答 API；服务不可达时直接失败。
     r = await call_chat(question, tenant, datasource_key=datasource_key)
     r.raise_for_status()
     body = r.json()
@@ -173,7 +151,7 @@ async def _eval_single(case: dict[str, Any]) -> tuple[bool, bool, bool]:
     )
 
     if not loose:
-        # 089:确定性归因(纯函数;明细带分类名与判据原文,SHALL NOT 只给结论)
+        # 确定性归因(纯函数;明细带分类名与判据原文,不只给结论)
         att = classify_failure(
             question=question,
             gold_sql=gold_sql,
@@ -230,7 +208,7 @@ async def test_full_all(all_cases: list[dict[str, Any]]) -> None:
     """全量单轮评估:宽松/严格双分统计,动态数据源组单列;阈值判宽松。
 
     strict pass ⇒ loose 必 pass(行精确相等则数值子集成立),宽松失败的题
-    严格必失败,异常分支无需再细分(上游同款推理)。
+    严格必失败,异常分支无需再细分。
     """
     single = [c for c in all_cases if "turns" not in c]
     # 计数器与失败明细分开放:混装 dict 的推断类型带 Unknown/list,算术自增全报错
@@ -243,7 +221,7 @@ async def test_full_all(all_cases: list[dict[str, Any]]) -> None:
         "ds_total": 0,
     }
     details: list[str] = []
-    attributions: list[tuple[str, Attribution]] = []  # 089:失败归因(题目 id + 分类)
+    attributions: list[tuple[str, Attribution]] = []  # 失败归因(题目 id + 分类)
     for case in single:
         is_ds = case.get("datasource_key") or str(case.get("category", "")).startswith("datasource")
         try:
@@ -254,7 +232,7 @@ async def test_full_all(all_cases: list[dict[str, Any]]) -> None:
             if is_ds:
                 results["ds_pass"] += 1
         except CaseFailure as e:
-            # 089:链路质量失败——归因产物随异常携带(分类/判据原文已入明细)
+            # 失败时一并保存归因分类与判据原文。
             details.append(str(e))
             attributions.append((str(case["id"]), e.attribution))
         except pytest.fail.Exception as e:  # pytest.fail 抛 fail.Exception(即 Failed,
@@ -281,12 +259,11 @@ async def test_full_all(all_cases: list[dict[str, Any]]) -> None:
         f" | 动态数据源 {results['ds_pass']}/{results['ds_total']}"
         f" | prompt 指纹 {fp_display} ==="
     )
-    # 073:跨指纹比对显式标注不可比(四组分数后;SHALL NOT 静默套用劣化红线)
+    # 跨指纹时显式标注运行不可比,防止静默套用基线阈值
     cross_note = format_cross_fingerprint_note(_current_fingerprint, load_baseline_fingerprint())
     if cross_note:
         print(cross_note)
-    # 089:失败归因统计块(一级分类计数 + SELECT 层拆分 + OTHER 纪律),
-    # 在四组分数之后增列(spec「失败归因分类」)
+    # 失败归因统计块:一级分类计数与明细
     if attributions:
         print(summarize_attributions(attributions))
     for d in details:
@@ -335,7 +312,7 @@ async def test_multiturn(multiturn_case: dict[str, Any]) -> None:
             gold_cols, gold_rows, gen_cols, gen_rows, "order by" in gold_sql.lower()
         )
         if not loose:
-            # 089:失败轮次以同一纯函数归因(入参足够时;不做跨轮因果追责)
+            # 失败轮次以同一纯函数归因(入参足够时;不做跨轮因果追责)
             att = classify_failure(
                 question=question,
                 gold_sql=gold_sql,

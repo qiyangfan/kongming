@@ -1,8 +1,8 @@
-"""report 领域模型(088):状态机/章节树/绑定快照/导出装配(零框架)。
+"""report 领域模型:状态机/章节树/绑定快照/导出装配(零框架)。
 
 spec: report-generation——数据真实原则(数值断言只来自快照)、版本化
 快照语义(同版本恒同一份快照)、状态迁移 fail-closed(终态不复活)。
-本模块不 import fastapi/sqlalchemy(宪法 Article II,importlinter 契约)。
+本模块不依赖 fastapi 或 sqlalchemy;import-linter 会校验这条边界。
 """
 
 import json
@@ -213,7 +213,7 @@ def _depth(n: SectionNode, nodes: list[SectionNode]) -> int:
 
 
 def _depth_key(n: SectionNode, nodes: list[SectionNode]) -> tuple[object, ...]:
-    """树序输出键:按父链路径 + ord 排序(同层按 ord,子随父)。"""
+    """为章节排序生成父级路径和同级顺序键。"""
     chain: list[int] = []
     cur, seen = n, set[str | None]()
     while cur.parent_id is not None and cur.parent_id not in seen:

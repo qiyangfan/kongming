@@ -1,9 +1,4 @@
-"""单遍解析产物:一次 parse 承载全部判定与改写操作。
-
-parse 门序:深度预扫描(超限不进 sqlglot)→ sqlglot.parse 一次
-(SqlglotError→PARSE_ERROR;RecursionError→受控 DEPTH_EXCEEDED)。
-判定/改写方法全部复用本次产物,零重复解析。
-"""
+"""一次 SQL 解析产物承载全部校验与改写结果，调用方复用同一产物，避免重复解析。"""
 
 from typing import cast
 

@@ -1,7 +1,4 @@
-/* 触发器调度选择器:常用频率档位 + cron 表达式(高级)直通。
- * 受控组件,cron 表达式进出——外部表单只持有表达式字符串,不感知
- * 内部档位范式;生成/反解单源 lib/cron-schedule(白名单反解,识别
- * 不了的既有表达式自动落高级模式,不改写不丢真)。 */
+/* 提供常用频率和 cron 编辑；外部表单只保存 cron 字符串，无法识别的表达式保持原样进入高级模式。 */
 import { useEffect, useRef, useState } from "react";
 
 import { Input } from "@/components/ui/input";
@@ -41,8 +38,7 @@ type SchedulePickerProps = {
 export function SchedulePicker({ value, onChange }: SchedulePickerProps) {
   const [schedule, setSchedule] = useState<Schedule>({ kind: "daily", hour: 9, minute: 0 });
   const [expert, setExpert] = useState(false);
-  // 受控防回环:本组件吐出的表达式回灌 props 时不重反解;外部灌入
-  // (编辑回显/表单重置)才走白名单识别。
+  // 本组件 emit 的表达式回流时不重复解析;仅外部设值(编辑回显/表单重置)走白名单识别。
   const lastEmitted = useRef<string | null>(null);
 
   useEffect(() => {
@@ -59,7 +55,7 @@ export function SchedulePicker({ value, onChange }: SchedulePickerProps) {
 
   const emit = (next: Schedule) => {
     setSchedule(next);
-    setExpert(false); // 从高级模式点选任意档位即回到档位态
+    setExpert(false);
     const expr = scheduleToCron(next);
     lastEmitted.current = expr;
     onChange(expr);

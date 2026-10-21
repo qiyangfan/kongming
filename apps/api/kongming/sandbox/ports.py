@@ -1,4 +1,4 @@
-"""sandbox 端口(027):运行器与审计存储反转,用例层零框架依赖。"""
+"""sandbox 端口:运行器与审计存储反转,用例层零框架依赖。"""
 
 from typing import Protocol
 
@@ -6,7 +6,7 @@ from kongming.sandbox.models import SandboxOutcome
 
 
 class SandboxRunner(Protocol):
-    """代码执行运行器(027):实现侧保证容器级隔离与资源硬配额。
+    """代码执行运行器:实现侧保证容器级隔离与资源硬配额。
 
     data=None 为纯计算形态(沙箱内无 df 变量);非 None 形态
     {"columns": [...], "rows": [[...]]}(JSON 安全值,源自六层防御取数)。
@@ -18,8 +18,7 @@ class SandboxRunner(Protocol):
 
 
 class SandboxRunWriter(Protocol):
-    """执行审计(027):独立短事务落库(与 019 AuditWriter 同款),
-    失败仅日志不阻断主链路;返回行 id(失败 None)。"""
+    """沙箱运行审计写入端口。审计在独立短事务中保存；写入失败由调用方记录。"""
 
     async def record(
         self,

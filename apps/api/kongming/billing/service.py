@@ -1,10 +1,4 @@
-"""billing 用例编排(034):配额判定(网关切面)+ 出账(月首幂等)。
-零框架(宪法 Article II);时区固定 Asia/Shanghai(与 031 同口径)。
-
-035:支付闭环——reconcile_payment 为**唯一核销点**(mock-simulate 与
-callback 两入口汇聚,design D1);状态机转换一律经仓储 CAS,纯函数
-预判(models)只做文案与提前拒绝,不作并发依据。
-"""
+"""账单与配额用例,按 Asia/Shanghai 时区处理月度账单;支付核销统一经 reconcile_payment。"""
 
 import datetime as dt
 from typing import Any, Protocol
@@ -77,20 +71,14 @@ class BillingService:
     async def check_gateway_quota(
         self, *, tenant_id: str, bot_id: str | None = None
     ) -> tuple[bool, str, str]:
-        """返回 (allowed, reject_dimension, warn_header_value)。
-        无策略且无套餐=零判定(放行,零回归);任一超限=拒+审计。
-        035:BOT 级(scope_ref 命中当前 key 绑定 Bot)与租户级双路独立判定。
-        103:扩展多路叠加——确定性顺序 TENANT → BOT → USER → TEAM 各自独立
-        判定,任一超限即拒;拒绝维度文案取「先命中的超限路」并带 scope 前缀
-        (租户级保持无前缀,BOT:/USER:/TEAM:),保证同请求拒绝归因稳定可测。
-        USER 级命中=调用 Bot 归属(created_by)该用户;TEAM 级命中=调用 Bot
-        现归属(team_id)该团队(用量联表解析,资源换队跟随现归属;引用目标
-        删除后聚合归零=策略零命中,不级联)。"""
+        """依次独立检查 TENANT/BOT/USER/TEAM 四路配额,任一超限即拒绝并记审计;
+        返回(是否允许, 拒绝范围, 告警头)。无策略且无套餐时放行;
+        USER 按 Bot 创建者归属,TEAM 按 Bot 当前团队归属统计。"""
         all_p = await self._repo.list_policies(tenant_id=tenant_id)
         policies = {p["dimension"]: p for p in all_p if p.get("scope") == "TENANT"}
         plan = await self._repo.get_tenant_plan(tenant_id=tenant_id)
         month = _current_month()
-        # ── 命中收集(判定多路化:各路策略互斥命中,零交互) ──
+        # ── 命中收集:各路策略互斥命中 ──
         bot_pols: dict[str, dict[str, Any]] = {}
         user_pols: dict[str, dict[str, Any]] = {}
         team_pols: dict[str, dict[str, Any]] = {}
@@ -118,13 +106,13 @@ class BillingService:
                     for p in all_p
                     if p.get("scope") == "TEAM" and str(p.get("scope_ref")) == bot_team
                 }
-        # 无任何配置=零判定(spec「未配置零回归」)
+        # 无任何配置=零判定(spec「未配置」)
         if not policies and not bot_pols and not user_pols and not team_pols and plan is None:
             return True, "", ""
         warns: list[str] = []
         pm_price = int(plan["price_per_mtok"]) if plan else 0
 
-        # ── 路 1:租户级(034 原逻辑,scope=TENANT 行;文案无前缀) ──
+        # ── 路 1:租户级(scope=TENANT 行;文案无前缀) ──
         tokens = await self._repo.month_token_usage(tenant_id=tenant_id, month=month)
         calls = await self._repo.month_call_count(tenant_id=tenant_id, month=month)
         # 限额解析:策略优先,套餐兜底(0=不限)
@@ -140,7 +128,7 @@ class BillingService:
         )
         cost_limit = int(policies["COST"]["limit_value"]) if "COST" in policies else 0
 
-        # R1-A1:按维各用各策略 warn_pct(缺省 80;多策略取 max 会吞单策略线)
+        # 按维各用各策略 warn_pct(缺省 80;多策略取 max 会吞单策略线)
         def _wp(dim: str) -> int:
             return int(policies[dim]["warn_pct"]) if dim in policies else 80
 
@@ -173,14 +161,14 @@ class BillingService:
                     {"dimension": "COST", "used": cost, "limit": cost_limit},
                 )
                 return False, "COST", ""
-        # 预警头(任一维达线;R1-A1:COST 分支此前漏算)
+        # 预警头:任一维达线即记录
         if vt.warn and token_limit > 0:
             warns.append(f"TOKENS {tokens}/{token_limit}")
         if vc.warn and call_limit > 0:
             warns.append(f"CALLS {calls}/{call_limit}")
         if vcost is not None and vcost.warn and cost_limit > 0:
             warns.append(f"COST {vcost.used}/{cost_limit}")
-        # ── 路 2:BOT 级(035;TOKENS/COST 两维,无套餐兜底=0 不限) ──
+        # ── 路 2:BOT 级(TOKENS/COST 两维,无套餐兜底=0 不限) ──
         if bot_pols:
             bot_tokens = await self._repo.month_bot_token_usage(
                 tenant_id=tenant_id, bot_id=str(bot_id), month=month
@@ -234,7 +222,7 @@ class BillingService:
                     return False, "BOT:COST", ""
                 if vc2.warn:
                     warns.append(f"BOT:COST {bot_cost}/{int(bp['limit_value'])}")
-        # ── 路 3:USER 级(103;命中=调用 Bot 归属该用户;文案 USER: 前缀) ──
+        # ── 路 3:USER 级(命中=调用 Bot 归属该用户;文案 USER: 前缀) ──
         if user_pols:
             user_tokens = await self._repo.month_user_token_usage(
                 tenant_id=tenant_id, user_id=bot_owner or "", month=month
@@ -288,7 +276,7 @@ class BillingService:
                     return False, "USER:COST", ""
                 if vu2.warn:
                     warns.append(f"USER:COST {user_cost}/{int(up['limit_value'])}")
-        # ── 路 4:TEAM 级(103;命中=调用 Bot 现归属该团队;用量联表解析,
+        # ── 路 4:TEAM 级(命中=调用 Bot 现归属该团队;用量联表解析,
         # 资源换队跟随现归属;团队删除后聚合归零=零命中;文案 TEAM: 前缀) ──
         if team_pols:
             team_tokens = await self._repo.month_team_token_usage(
@@ -363,7 +351,7 @@ class BillingService:
             raise BillingValidationError("limit_value 须 ≥0(0=不限)")
         if not 1 <= warn_pct <= 100:
             raise BillingValidationError("warn_pct 须 1-100")
-        # 035/103:scope 校验(BOT=租户内 Bot;USER=租户内用户;TEAM=租户内
+        # scope 校验(BOT=租户内 Bot;USER=租户内用户;TEAM=租户内
         # 团队;CALLS 维无资源/用户/团队级归属口径,仅 TENANT 立约)
         if scope not in ("TENANT", "BOT", "USER", "TEAM"):
             raise BillingValidationError("scope 须为 TENANT/BOT/USER/TEAM")
@@ -483,7 +471,7 @@ class BillingService:
             "plan": plan,
         }
 
-    # ── 套餐 U/D(035 挂账④) ──
+    # ── 套餐更新/删除 ──
 
     async def update_plan(self, *, plan_id: str, **kw: Any) -> None:
         old = await self._repo.get_plan(plan_id=plan_id)
@@ -525,7 +513,7 @@ class BillingService:
         await self._repo.delete_plan(plan_id=plan_id)
         await self._audit("billing.plan.delete", str(old["plan_key"]), {"name": old["name"]})
 
-    # ── 支付闭环(035) ──
+    # ── 支付流程 ──
 
     def _channel(self, channel: str) -> PaymentChannel:
         ch = self._channels.get(channel)
@@ -535,9 +523,10 @@ class BillingService:
 
     async def create_payment(self, *, invoice_id: str, tenant_id: str) -> dict[str, Any]:
         """门户发起支付:每账单一在途单(旧单先惰性过期再清场)。
-        R1-S1/A1:条件插入原子兜底竞态——并发窗口(读后判 PENDING→插入前
-        被支付/作废/并发双击)返回 None,重读分流:非 PENDING=409;仍有
-        在途单=双击幂等返回现有单(不新建不重复审计)。"""
+
+        条件插入原子兜底并发竞态:插入失败时重读分流——账单已非 PENDING
+        =409;仍有在途单=双击幂等返回现有单(不新建不重复审计)。
+        """
         ch = self._channel("MOCK")
         inv = await self._repo.get_invoice(invoice_id=invoice_id, tenant_id=tenant_id)
         if inv is None:
@@ -618,9 +607,10 @@ class BillingService:
         amount: int,
         sign: str,
     ) -> dict[str, Any]:
-        """**唯一核销点**(design D1):两入口(mock-simulate/callback)汇聚。
+        """唯一核销点:mock-simulate 与 callback 两入口汇聚于此。
+
         验签→金额复核→惰性过期→CAS→invoice 同事务联动→审计;
-        重复回调/终态单据收敛幂等响应(通道重试是常态,报错诱发无限重试)。
+        重复回调/终态单据收敛为幂等响应(通道重试是常态,报错诱发无限重试)。
         """
         ch = self._channel(channel)
         pay = await self._repo.get_payment(payment_id=payment_id)
@@ -654,7 +644,7 @@ class BillingService:
             return {"idempotent": pay["status"] != "CREATED", "status": str(pay["status"])}
         ok = await self._repo.cas_pay(payment_id=payment_id, trade_no=trade_no)
         if not ok:
-            # R1-T2:幂等败者重读——并发双回调败者拿到的快照可能已陈旧
+            # 幂等败者重读——并发双回调败者拿到的快照可能已陈旧
             fresh = await self._repo.get_payment(payment_id=payment_id)
             return {
                 "idempotent": True,
@@ -662,7 +652,7 @@ class BillingService:
             }
         linked = await self._repo.mark_invoice_paid(invoice_id=str(pay["invoice_id"]))
         if not linked:
-            # R1-S1:单已 PAID 而账单非 PENDING(极端并发:作废/重复支付窗)——
+            # 单已 PAID 而账单非 PENDING(极端并发:作废/重复支付窗)——
             # 钱已收,静默当正常不可取,落异常审计给运维信号
             await self._audit(
                 "payment.invoice_not_pending",
@@ -683,8 +673,8 @@ class BillingService:
     async def mock_simulate(
         self, *, payment_id: str, tenant_id: str, result: str
     ) -> dict[str, Any]:
-        """mock 通道「支付动作」入口(收银台按钮):服务端真实生成签名后
-        走统一核销路径——前端不持密钥、不直连改单(design D1)。"""
+        """mock 通道「支付动作」入口(收银台按钮):服务端生成签名后走
+        统一核销路径——前端不持密钥、不可直连改单。"""
         ch = self._channel("MOCK")
         pay = await self.get_portal_payment(payment_id=payment_id, tenant_id=tenant_id)
         trade_no = ch.new_trade_no()
@@ -723,7 +713,7 @@ class BillingService:
         )
 
     async def expire_overdue_payments(self) -> int:
-        """lifespan 每日薄壳批量兜底(design D3)。"""
+        """lifespan 定时批量兜底:过期超时未支付的 CREATED 单。"""
         rows = await self._repo.expire_overdue_payments()
         for r in rows:
             await self._audit(

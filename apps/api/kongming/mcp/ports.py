@@ -1,4 +1,4 @@
-"""mcp 端口(028):出站调用与配置存储反转,用例层零框架依赖。"""
+"""mcp 端口:出站调用与配置存储反转,用例层零框架依赖。"""
 
 from typing import Any, Protocol
 
@@ -15,20 +15,20 @@ class McpCallError(Exception):
 
 
 class McpCaller(Protocol):
-    """MCP 出站调用(028;109 扩展三类原语探测与只读消费)。
+    """MCP 出站调用(扩展三类原语探测与只读消费)。
 
     headers 为调用瞬时解密明文(实现侧与调用方 MUST NOT 落日志/审计)。
     超时/大小闸在实现侧(默认 15s/1MB)。"""
 
     async def probe(self, *, endpoint: str, headers: dict[str, str]) -> ProbeResult:
-        """initialize 握手 + 三原语并行探测(109):能力未声明即时短路,
-        方法不存在=不支持计数 0,超时/拒连/协议错=结构化失败(design D4)。"""
+        """initialize 握手 + 三原语并行探测:能力未声明即时短路,
+        方法不存在=不支持计数 0,超时/拒连/协议错=结构化失败。"""
         ...
 
     async def read_resource(
         self, *, endpoint: str, headers: dict[str, str], uri: str
     ) -> dict[str, Any]:
-        """resources/read(109):文本形态限定(blob 拒绝),返回
+        """resources/read:文本形态限定(blob 拒绝),返回
         {content, truncated, original_size}。"""
         ...
 
@@ -40,7 +40,7 @@ class McpCaller(Protocol):
         name: str,
         arguments: dict[str, str],
     ) -> dict[str, Any]:
-        """prompts/get(109):模板按名渲染(管理面预览数据源),返回 {text}。"""
+        """prompts/get:模板按名渲染(管理面预览数据源),返回 {text}。"""
         ...
 
     async def call(
@@ -56,7 +56,7 @@ class McpCaller(Protocol):
 
 
 class McpRepo(Protocol):
-    """配置存储端口(端口反转:service 不 import 基础设施实现)。"""
+    """MCP 配置存储端口，具体存储由组合根注入。"""
 
     async def create(
         self,
@@ -100,7 +100,7 @@ class McpRepo(Protocol):
     async def get_enabled_resources(
         self, *, tenant_id: str, server_key: str
     ) -> list[dict[str, Any]]:
-        """read_resource 执行期的 uri 白名单(109,design D2:来自探测快照);
+        """read_resource 执行期的 uri 白名单(来自探测快照);
         仅启用 server(禁用/删除 → 空=全拒,与工具目录消失同形)。"""
         ...
 

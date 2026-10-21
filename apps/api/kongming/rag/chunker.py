@@ -1,7 +1,7 @@
-"""文档父子分块器(024,document-rag spec):纯函数,零依赖。
+"""文档父子分块器(document-rag spec):纯函数,零依赖。
 
 父块 ~800 字符按标题层级(Markdown 标题行聚合;无标题按段落/长度兜底);
-子块 ~200 字符滑窗(步进 150=overlap 50);source_ref 定位
+子块 ~200 字符滑窗(步进 =overlap 50);source_ref 定位
 `{文档名} §{父块序号}{父块标题前 20 字}`。
 """
 
@@ -27,7 +27,6 @@ MAX_PARENT_BLOCKS = 200
 
 def _split_parents(text: str) -> list[tuple[str, str]]:
     """按标题层级聚合父块;返回 [(标题前 20 字, 父块文本)]。"""
-    # 按标题行切段
     lines = text.split("\n")
     sections: list[tuple[str, list[str]]] = []
     cur_title = ""
@@ -55,7 +54,7 @@ def _split_parents(text: str) -> list[tuple[str, str]]:
             if cut <= 0 or cut < PARENT_SOFT_MAX // 2:
                 cut = PARENT_SOFT_MAX
             else:
-                cut += 1  # R1-L5:切割含句号(下块不以「。」开头)
+                cut += 1  # 切割含句号(下块不以「。」开头)
             parents.append((title, block[:cut].strip()))
             block = block[cut:].strip()
         if block:
@@ -69,7 +68,7 @@ def _split_children(parent_text: str) -> list[str]:
     i = 0
     while i < len(parent_text):
         tail = parent_text[i : i + CHILD_SIZE]
-        # R1-L5:尾块短于 overlap 步进余量时不再产块(原块滑窗天然含该尾段)
+        # 尾块短于 overlap 步进余量时不再产块(原块滑窗天然含该尾段)
         if out and len(tail) <= (CHILD_SIZE - CHILD_STEP):
             break
         out.append(tail)

@@ -1,15 +1,6 @@
-"""出站调用韧性(072-agent-outbound-resilience):瞬时故障分类 + 尝试循环 + 退避。
+"""Agent 出站错误的重试与退避:LLM 出站按瞬时故障判定重试。
 
-纯 asyncio、零第三方依赖(design D6:需求面=一个分类纯函数+一个带上限的
-尝试循环+一个退避函数+一个 Retry-After 截断,合计约 60 行,引库只加适配胶水)。
-
-两层分类口径(design D2 的关键区分):
-- `is_transient_error`:LLM 出站用——连接建立失败 / 读超时 / HTTP 408/429/5xx
-  及 SDK 协议层等价错误(openai APIConnectionError 族、anthropic APIError)。
-  领域语义错误(key 缺失、协议错、应答畸形)一律非瞬时——重发不会改变结果。
-- `is_connect_phase_error`:控制面回调用——**仅**连接层未送达失败
-  (httpx ConnectError/ConnectTimeout)。读超时不算:请求已送达且可能已执行
-  (SQL 防火墙当前是黑名单不是白名单,「只读」不是可证明命题),重发=重复执行。
+控制面回调只在连接阶段未送达时重试,避免重复执行已到达的请求。
 """
 
 import asyncio
@@ -78,15 +69,8 @@ def _type_names(exc: BaseException) -> set[str]:
 
 
 def is_transient_error(exc: BaseException) -> bool:
-    """LLM 出站瞬时故障判据(纯函数,四处出站点共用一个分类)。
-
-    判据(满足其一即瞬时):
-    1. HTTP 状态码 ∈ {408, 429, 500, 502, 503, 504}(openai APIStatusError /
-       anthropic APIError / httpx HTTPStatusError 鸭子读取);
-    2. 传输层错误:httpx.TransportError(连接建立/读/写/协议错)+ SDK 的
-       APIConnectionError/APITimeoutError 族(含 openai 读超时子类);
-    3. 内置 ConnectionError / TimeoutError(对端重置、asyncio 超时)。
-    """
+    """判断 LLM 出站错误是否可重试:HTTP 408/429/5xx、传输层错误、
+    连接超时为瞬时;配置缺失、协议错误、无效响应不可重试。"""
     import httpx
 
     root = _root_cause(exc)
@@ -102,7 +86,7 @@ def is_transient_error(exc: BaseException) -> bool:
 
 
 def is_connect_phase_error(exc: BaseException) -> bool:
-    """控制面回调判据(纯函数):仅连接层未送达失败可重试(design D2)。
+    """控制面回调判据(纯函数):仅连接层未送达失败可重试。
 
     httpx ConnectError(拒连/重置于建连期)、ConnectTimeout(建连超时);
     SDK APIConnectionError 但须排除 APITimeoutError(其读超时=已送达)。
@@ -134,8 +118,8 @@ def retry_wait_ms(
         if retry_after is not None:
             return min(max(retry_after, 0.0), max_wait_ms / 1000) * 1000
     ceiling = min(base_delay_ms * (2 ** (max(attempt, 1) - 1)), max_wait_ms)
-    # 退避抖动无需密码学强度:secrets 仅供静态检查口径(退避值本身不涉安全)
-    # ——此处用 secrets 的确定性随机源取 [0, ceiling) 均匀值
+    # 抖动无需密码学强度;random 系函数会被 S311 判为不安全随机,故用
+    # secrets.randbelow 取 [0, ceiling) 均匀值
     return secrets.randbelow(max(ceiling, 1)) if ceiling >= 1 else 0.0
 
 

@@ -1,8 +1,5 @@
-"""chat 入口数据源预检(008 datasource spec「查询入口 fail-fast 预检」,安全规则类)。
-
-伪造/禁用/跨租户 key → 同形 400 DATASOURCE_INVALID,不进 LLM 链路、不建会话;
-合法 key 全链路透传(agent 收到原样 key,会话落库 key);畸形 key 传输层 422。
-"""
+"""验证问答入口的数据源预检：非法、禁用和跨租户 key 使用相同错误响应，
+且不会创建会话或调用 Agent；合法 key 会传递并写入会话。"""
 # pyright: reportPrivateUsage=false
 
 from collections.abc import Iterator
@@ -77,7 +74,7 @@ async def test_forged_disabled_cross_tenant_same_shape(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """伪造/禁用/跨租户:同形 400,不建会话、不调 agent(fail-fast 在 LLM 链路之前)。"""
+    """验证伪造、禁用和跨租户数据源 key 返回相同 400，且不会创建会话或调用 Agent。"""
     agent = FakeAgent()
     _install(fake_agent, agent)
     uid, token = await _user_with_chat_perm(client, session, make_user)
@@ -97,8 +94,8 @@ async def test_forged_disabled_cross_tenant_same_shape(
         assert r.status_code == 400, key
         details.add(r.json()["detail"])
     assert details == {"DATASOURCE_INVALID"}
-    assert agent.calls == []  # 未进 LLM 链路
-    assert await _session_count(session) == 0  # 未建会话
+    assert agent.calls == []
+    assert await _session_count(session) == 0
 
 
 async def test_unavailable_keeps_datasource_key_snapshot(
@@ -107,8 +104,7 @@ async def test_unavailable_keeps_datasource_key_snapshot(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """R2-B1 回归锁定:agent 不可达 + 非 default 数据源时,响应 datasource_key
-    保持本次执行快照(流式重构曾将其丢失落 default)。"""
+    """Agent 不可达且使用非 default 数据源时，响应仍保留 datasource_key 快照。"""
     _install(fake_agent, FakeAgent(boom=True))
     _, token = await _user_with_chat_perm(client, session, make_user)
     tid = await _default_tenant_id(session)
@@ -156,7 +152,7 @@ async def test_valid_key_passes_through(
 async def test_malformed_key_422(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """畸形 key(大写/连字符)传输层 pattern 拒绝 422(查询面口径收口,008 D4)。"""
+    """畸形 key(大写/连字符)传输层 pattern 拒绝 422(查询面口径收口)。"""
     _, token = await _user_with_chat_perm(client, session, make_user)
     r = await client.post(
         "/chat/query",
@@ -172,7 +168,7 @@ async def test_default_key_unchanged(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """零回归:缺省/显式 default 不触发预检,行为不变。"""
+    """缺省/显式 default 不触发预检,行为不变。"""
     agent = FakeAgent()
     _install(fake_agent, agent)
     _, token = await _user_with_chat_perm(client, session, make_user)

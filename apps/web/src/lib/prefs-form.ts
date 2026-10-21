@@ -1,7 +1,4 @@
-/* 偏好表单纯逻辑(087):槽位草稿 ↔ PUT 补丁的确定性转换。
-   服务端语义(D1):省略=保留、显式 null=删除、空串/空列表≠删除;
-   本模块负责把「表单里清空了某槽位」翻译成显式 null(删除指令),
-   并只提交发生变化的键(最小补丁,审计只记受影响槽位)。 */
+/* 表单草稿 → 偏好补丁:只提交相对服务端变化的键;null 表示删除,空串/空列表是有效值。 */
 
 export type PrefsMap = Record<string, unknown>;
 
@@ -48,13 +45,7 @@ function serverList(prefs: PrefsMap, key: string): string[] {
   return Array.isArray(val) ? val.map((x) => String(x)) : [];
 }
 
-/**
- * 草稿 → PUT 补丁:只含变化键。
- * - 字符串槽位:填了新值 → 提交 trim 后值;清空且服务端原有值 → null(删除);
- *   清空且服务端本无值 → 省略(空补丁语义,非删除)。
- * - 列表槽位:增删改 → 提交整表;清到空且服务端原非空 → null(删除)。
- * - 服务端已有但表单外修改产生的差异不在本函数职责(保存后以响应重播草稿)。
- */
+/** 只提交相对服务端值发生变化的字段;清空已有值提交 null(删除),未变化字段省略。 */
 export function buildPrefsPatch(server: PrefsMap, draft: PrefsDraft): PrefsMap {
   const patch: PrefsMap = {};
   for (const slot of PREF_SLOTS) {
@@ -69,14 +60,13 @@ export function buildPrefsPatch(server: PrefsMap, draft: PrefsDraft): PrefsMap {
       const next = (typeof val === "string" ? val : "").trim();
       const prev = serverString(server, slot.key);
       if (next === prev) continue;
-      // 走到这里 next 与 prev 必不同:清空且原有值 → 删除(null);否则新值
       patch[slot.key] = next === "" ? null : next;
     }
   }
   return patch;
 }
 
-/** 补丁是否为空(无键)——空补丁提交前应拦下(服务端为真无操作) */
+/** 补丁是否无键;空补丁应拦下,不发无操作的请求。 */
 export function isEmptyPatch(patch: PrefsMap): boolean {
   return Object.keys(patch).length === 0;
 }

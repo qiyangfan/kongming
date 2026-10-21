@@ -1,10 +1,10 @@
-"""104 迁移契约测试:0047 升级/降级往返 + 存量在架 Bot v1 回填对拍。
+"""迁移契约测试:0047 升级/降级往返 + 存量在架 Bot v1 回填对拍。
 
-存量零回归铁律的对拍形态:在 0046(旧 schema)插入在架 Bot → 采集
+存量铁律的对拍形态:在 0046(旧 schema)插入在架 Bot → 采集
 商店可见字段基线 → 升级到 head → 断言 v1 快照=基线(逐字段)且新代码
 商店查询与基线一致;再验证 downgrade 往返后契约复现。
-注意:每条 alembic 命令前 session.rollback() 清场(连接持 ACCESS SHARE
-会死等 ALTER 的 ACCESS EXCLUSIVE,103 期实证)。"""
+注意:每条 alembic 命令前 session.rollback 清场(连接持 ACCESS SHARE
+会死等 ALTER 的 ACCESS EXCLUSIVE,期)。"""
 # pyright: reportPrivateUsage=false
 
 import asyncio
@@ -79,7 +79,7 @@ async def _mk_published_row(session: AsyncSession) -> dict[str, str]:
 
 
 async def test_migration_0047_backfill_and_store_parity() -> None:
-    """存量在架零回归:v1 快照=迁移前行字段;商店查询与迁移前基线逐字段一致。"""
+    """存量在架:v1 快照=迁移前行字段;商店查询与迁移前基线逐字段一致。"""
     async with migrated_tmp_db() as (session, cfg):
         from kongming.store.repository import SqlStoreRepo
 
@@ -189,7 +189,7 @@ async def test_migration_0047_downgrade_roundtrip() -> None:
             )
         ).scalar_one()
         assert has == 0 and col == 0
-        # 必须回到 head:停旧版会让其后用例 TRUNCATE 撞不存在的表(0034 先例)
+        # 必须回到 head:停在旧版本会让后续用例 TRUNCATE 撞不存在的表
         await _run_alembic(session, cfg, "head")
         has2 = (
             await session.execute(

@@ -1,14 +1,5 @@
-"""表元数据 LLM 润色(/internal/describe-table 核心逻辑,009)。
-
-prompt 资产纪律:SYSTEM/USER 模板为上游 table_describer.py 移植(全角标点!),
-改动前先比对上游原文,手抄易丢全角。例外(037 增量,不再与上游逐字一致):
-_USER_PROMPT_TEMPLATE 新增第 4 条 alias 产出要求(业务称谓别名,同一次调用
-附带,零增量成本;alias 缺失/畸形按空降级不判润色失败)。其余部分仍逐字保值。
-输入:表结构 JSON(表名/schema/列名/类型/注释——introspection 产物,非业务行数据)。
-输出:中文表说明 + 列说明(保留类型前缀)+ 2-3 条示例 SQL + 业务称谓别名(037)。
-安全边界(ADR-002):出域给 LLM 的只有表结构元数据,不查行业务行数据。
-降级契约:LLM 失败/超时/输出非法 → 抛异常,由 api 侧降级为纯结构内容(不阻断)。
-"""
+"""表元数据的 LLM 润色。输入只含表结构,不读业务行;输出表说明、列说明、
+示例 SQL 与业务别名。润色失败或输出无效时由 api 回退原始结构信息。"""
 
 import json
 import logging
@@ -27,8 +18,8 @@ _MAX_COMMENT_LEN = 200
 _MAX_COL_DESC_LEN = 200
 _MAX_SQL_LEN = 500
 _MAX_SAMPLES = 3
-_MAX_ALIAS_LEN = 64  # 037:alias 上限(对齐 VARCHAR(64))
-# 结构性字符(换行/括号/竖线)破坏 api 侧 schema_hint 行形态——按空降级(R1-F1)
+_MAX_ALIAS_LEN = 64  # alias 上限(对齐 VARCHAR(64))
+# 结构性字符(换行/括号/竖线)破坏 api 侧 schema_hint 行形态——按空降级
 _ALIAS_STRUCT_RE = re.compile(r"[\r\n()（）|]")
 # 列名标识符(与 api 侧 parser columnsToJson 同口径)
 _IDENT = re.compile(r"^[a-zA-Z_][\w]*$")
@@ -57,12 +48,12 @@ _USER_PROMPT_TEMPLATE = """表：{schema_name}.{table_name}
 
 
 class DescribedTable(BaseModel):
-    """LLM 润色结果(Pydantic 校验,输出契约)。037:新增 alias 业务称谓别名。"""
+    """LLM 润色结果(Pydantic 校验,输出契约)。新增 alias 业务称谓别名。"""
 
     table_comment: str = Field(default="")
     columns_comment: dict[str, str] = Field(default_factory=dict)
     sample_queries: list[str] = Field(default_factory=list)
-    alias: str = Field(default="")  # 037:业务称谓别名
+    alias: str = Field(default="")  # 业务称谓别名
 
     @field_validator("table_comment")
     @classmethod
@@ -72,8 +63,8 @@ class DescribedTable(BaseModel):
     @field_validator("alias")
     @classmethod
     def _cap_alias(cls, v: str) -> str:
-        # alias 缺失/畸形按空字符串降级(D2:不判润色失败);换行/括号等结构性
-        # 字符会破坏 api 侧 schema_hint 行形态(R1-F1)——同样按空降级
+        # alias 缺失/畸形按空字符串降级,不判润色失败;换行/括号等结构性
+        # 字符会破坏 api 侧 schema_hint 行形态,同样按空降级
         folded = " ".join((v or "").split())[:_MAX_ALIAS_LEN]
         return "" if _ALIAS_STRUCT_RE.search(folded) else folded
 
@@ -201,7 +192,7 @@ def fallback_description(spec: TableSpec) -> DescribedTable:
         table_comment=spec.table_comment or "",
         columns_comment={c.name: c.type for c in spec.columns},
         sample_queries=[],
-        alias="",  # 037:降级无 alias
+        alias="",  # 降级无 alias
     )
 
 

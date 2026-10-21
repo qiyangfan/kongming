@@ -741,7 +741,7 @@ export interface paths {
         get?: never;
         /**
          * Set Table Ownership
-         * @description 归属变更(102):公共⇄团队原位转移(单一实例,内容不动)。
+         * @description 归属变更:公共⇄团队原位转移(单一实例,内容不动)。
          *
          *     非成员 404 同形(与不存在条目同 detail,不暴露存在性);VIEWER 403;
          *     变更落审计+精确失效检索缓存。web 侧走受控确认(AlertDialog 明示可见
@@ -815,12 +815,12 @@ export interface paths {
         };
         /**
          * Recall Probe
-         * @description 064:召回试跑(只读):三路命中及各自原生分、融合分、双条件判定结论。
+         * @description 召回试跑(只读):三路命中及各自原生分、融合分、双条件判定结论。
          *
          *     零副作用:SHALL NOT 修改配置、SHALL NOT 落库、SHALL NOT 触发召回缓存
          *     失效(不走 ctx 缓存)。两个高频场景:上传表说明后验证可召回性;闸门
-         *     阈值标定(不等真实流量)。102:召回在调用者可见集合内(公共∪所在团队)。
-         *     097:响应模型纯定型(键集=service 现值锁定,判定逻辑零变更)。
+         *     阈值标定(不等真实流量)。召回在调用者可见集合内(公共∪所在团队)。
+         *     响应模型纯定型(键集=service 现值锁定,判定逻辑零变更)。
          */
         get: operations["recall_probe_system_rag_recall_probe_get"];
         put?: never;
@@ -876,7 +876,7 @@ export interface paths {
         put?: never;
         /**
          * Upload Doc
-         * @description 文档上传(024):类型/大小沿用 009 分档;分块+embedding(子块)+覆盖落库。
+         * @description 文档上传:类型/大小沿用 分档;分块+embedding(子块)+覆盖落库。
          */
         post: operations["upload_doc_system_document_upload_post"];
         delete?: never;
@@ -967,7 +967,7 @@ export interface paths {
         /**
          * Quality Page
          * @description 轮次明细分页(时间倒序):状态/数据源/时间范围筛选;NO_DATA 轮次首次
-         *     拥有可见形态(该形态无执行、无审计行,此前任何观测面不可见)。
+         *     拥有可见形态(该形态无执行、无审计行,任何观测面不可见)。
          */
         get: operations["quality_page_system_chat_quality_page_get"];
         put?: never;
@@ -1237,7 +1237,7 @@ export interface paths {
         put?: never;
         /**
          * Disable Domain
-         * @description 停用域(0044 持久化:本进程立即生效 + 写穿;重启与多副本以库收敛)。
+         * @description 停用工具域并持久化;本进程立即生效。
          */
         post: operations["disable_domain_system_tools_domains__domain_id__disable_post"];
         delete?: never;
@@ -1257,7 +1257,7 @@ export interface paths {
         put?: never;
         /**
          * Enable Domain
-         * @description 启用域(0044 持久化,写穿口径同 disable)。
+         * @description 启用工具域并持久化;本进程立即生效。
          */
         post: operations["enable_domain_system_tools_domains__domain_id__enable_post"];
         delete?: never;
@@ -1438,18 +1438,18 @@ export interface paths {
         };
         /**
          * Get Memory Prefs
-         * @description 059:读取本人闭合偏好槽位。
+         * @description 读取本人闭合偏好槽位。
          */
         get: operations["get_memory_prefs_memory_prefs_get"];
         /**
          * Put Memory Prefs
-         * @description 087:省略字段保留、显式 null 删除槽位、空补丁真无操作;未知键拒绝。
+         * @description 省略字段保留、显式 null 删除槽位、空补丁真无操作;未知键拒绝。
          */
         put: operations["put_memory_prefs_memory_prefs_put"];
         post?: never;
         /**
          * Delete Memory Prefs
-         * @description 087:清空本人本租户全部偏好(保留空行;笔记/团队记忆不受影响)。
+         * @description 清空本人本租户全部偏好(保留空行;笔记/团队记忆不受影响)。
          */
         delete: operations["delete_memory_prefs_memory_prefs_delete"];
         options?: never;
@@ -1469,7 +1469,7 @@ export interface paths {
         put?: never;
         /**
          * Create Memory
-         * @description 显式写入(032):team_id 非空=团队记忆(OWNER/MEMBER 成员才允许);
+         * @description 显式写入:team_id 非空=团队记忆(OWNER/MEMBER 成员才允许);
          *     空=个人记忆(与「请记住」同路径)。
          */
         post: operations["create_memory_memory_post"];
@@ -1614,7 +1614,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Bot
-         * @description R1-L5:Bot 删除(api-key 经 FK CASCADE;归属收口)。
+         * @description Bot 删除(api-key 经 FK CASCADE;归属收口)。
          */
         delete: operations["delete_bot_system_bots__bot_id__delete"];
         options?: never;
@@ -1669,9 +1669,9 @@ export interface paths {
         /**
          * Bot Chat Public
          * @description web 嵌入公开端点(免登录):is_public+enabled 闸;护栏与工具防御全量。
-         *     062:(助手标识, 客户端 IP) 维度速率闸——该面无用户/租户维度可用,IP 取自
+         *     (助手标识, 客户端 IP) 维度速率闸——该面无用户/租户维度可用,IP 取自
          *     ClientIpMiddleware contextvar(经 --forwarded-allow-ips 约束,非客户端可
-         *     伪造),fail-open(Redis 不可用放行,与 019 工具限流同口径)。
+         *     伪造),fail-open(Redis 不可用放行,与 工具限流同口径)。
          */
         post: operations["bot_chat_public_bot__bot_key__chat_post"];
         delete?: never;
@@ -1692,7 +1692,7 @@ export interface paths {
         /**
          * Openai Chat
          * @description OpenAI 兼容端点:api-key 鉴权(scopes 限 bot);取最后一条 user 消息。
-         *     034:配额切面(超额 429;达预警线 X-Quota-Warning 响应头标记)。
+         *     配额切面(超额 429;达预警线 X-Quota-Warning 响应头标记)。
          */
         post: operations["openai_chat_v1_chat_completions_post"];
         delete?: never;
@@ -1903,7 +1903,7 @@ export interface paths {
         put?: never;
         /**
          * Preview Prompt
-         * @description 模板只读内容预览(109):按名实时拉取渲染结果,注入检测+大小上限;
+         * @description 模板只读内容预览:按名实时拉取渲染结果,注入检测+大小上限;
          *     禁止注入任何提示词、非运行时提示来源(spec「模板只读边界」)。
          */
         post: operations["preview_prompt_system_mcp__server_id__prompts_preview_post"];
@@ -2026,8 +2026,7 @@ export interface paths {
         };
         /**
          * Get Run
-         * @description run 详情(029⑤ 清偿):完整节点快照含 outputs(列表剥除防膨胀,
-         *     详情按需取);可见性与分页列表同口径。
+         * @description 返回工作流运行详情；可见范围与分页列表一致。
          */
         get: operations["get_run_system_workflow__wf_key__runs__run_id__get"];
         put?: never;
@@ -2088,7 +2087,7 @@ export interface paths {
         };
         /**
          * Cron Preview
-         * @description 接下来 3 次触发时刻(单次看不出日历跳跃类缺陷,036 教训);
+         * @description 接下来 3 次触发时刻(单次看不出日历跳跃类缺陷);
          *     非法表达式 400 附原文案——与创建期校验同口径,禁第二套 cron 语义。
          */
         get: operations["cron_preview_system_triggers_cron_preview_get"];
@@ -2413,7 +2412,7 @@ export interface paths {
         put?: never;
         /**
          * Add Favorite
-         * @description 收藏(幂等:set 语义,重复 POST 不反选——审查循环 F6 对齐 spec
+         * @description 收藏(幂等:set 语义,重复 POST 不反选—— 对齐 spec
          *     「重复操作幂等」;取消走 DELETE 同路径)。
          */
         post: operations["add_favorite_store_bots__bot_key__favorite_post"];
@@ -2547,14 +2546,14 @@ export interface paths {
         post?: never;
         /**
          * Delete Plan
-         * @description 035 挂账④:绑定中 409 PLAN_IN_USE;无绑定删除+审计。
+         * @description 有租户仍在使用套餐时返回 409；删除成功后记录审计日志。
          */
         delete: operations["delete_plan_billing_plans__plan_id__delete"];
         options?: never;
         head?: never;
         /**
          * Update Plan
-         * @description 035 挂账④:套餐更新(改价不回溯既有账单——明细为出账时快照)。
+         * @description 更新套餐；已生成账单继续使用出账时保存的价格。
          */
         patch: operations["update_plan_billing_plans__plan_id__patch"];
         trace?: never;
@@ -2568,7 +2567,7 @@ export interface paths {
         };
         /**
          * List Tenants Brief
-         * @description 035 挂账⑥:计费配置面自供租户清单(解耦 system:user:manage)。
+         * @description 返回计费管理所需的租户清单。
          */
         get: operations["list_tenants_brief_billing_tenants_get"];
         put?: never;
@@ -2588,7 +2587,7 @@ export interface paths {
         };
         /**
          * List Bots Brief
-         * @description 035:BOT 级策略配置面 Bot 下拉(挂 MANAGE 自供,解耦 bot:manage——
+         * @description BOT 级策略配置面 Bot 下拉(挂 MANAGE 自供,解耦 bot:manage——
          *     与租户清单同解耦原则)。
          */
         get: operations["list_bots_brief_billing_bots_get"];
@@ -2609,7 +2608,7 @@ export interface paths {
         };
         /**
          * List Users Brief
-         * @description 103:USER 级策略配置面用户下拉(挂 MANAGE 自供,解耦 user:manage——
+         * @description USER 级策略配置面用户下拉(挂 MANAGE 自供,解耦 user:manage——
          *     与 Bot 清单同解耦原则;软删用户不列)。
          */
         get: operations["list_users_brief_billing_users_get"];
@@ -2630,7 +2629,7 @@ export interface paths {
         };
         /**
          * List Teams Brief
-         * @description 103:TEAM 级策略配置面团队下拉(挂 MANAGE 自供,解耦 team:manage——
+         * @description TEAM 级策略配置面团队下拉(挂 MANAGE 自供,解耦 team:manage——
          *     与 Bot 清单同解耦原则)。
          */
         get: operations["list_teams_brief_billing_teams_get"];
@@ -2651,7 +2650,7 @@ export interface paths {
         };
         /**
          * Get Tenant Plan
-         * @description R1-A9:管理面查租户当前绑定套餐(受控回显用;无绑定 null)。
+         * @description 管理面查租户当前绑定套餐(受控回显用;无绑定 null)。
          */
         get: operations["get_tenant_plan_billing_tenants__tenant_id__plan_get"];
         put?: never;
@@ -2688,7 +2687,7 @@ export interface paths {
         };
         /**
          * Page All Invoices
-         * @description 035 挂账⑧:管理面账单分页(弃 LIMIT 200);行附最新支付单状态。
+         * @description 分页返回账单，并附带每张账单最新的支付状态。
          */
         get: operations["page_all_invoices_billing_invoices_get"];
         put?: never;
@@ -2725,7 +2724,7 @@ export interface paths {
         };
         /**
          * Portal Keys
-         * @description R1-A6:门户 api-key 清单(spec「key 列表」兑现;025 仓储聚合,
+         * @description 门户 api-key 清单(spec「key 列表」兑现;仓储聚合,
          *     本人 Bot 的 key,吊销态不回显)。
          */
         get: operations["portal_keys_portal_keys_get"];
@@ -2833,7 +2832,7 @@ export interface paths {
         put?: never;
         /**
          * Mock Simulate
-         * @description mock 通道「支付动作」入口(035 design D1):服务端真实生成签名后
+         * @description mock 通道「支付动作」入口:服务端真实生成签名后
          *     走统一核销——收银台按钮唯一合法路径。
          */
         post: operations["mock_simulate_portal_payments__payment_id__mock_simulate_post"];
@@ -3614,7 +3613,7 @@ export interface components {
         };
         /**
          * ArtifactOut
-         * @description 类型化产物(026):type ∈ sql/chart/document。
+         * @description 类型化产物:type ∈ sql/chart/document。
          */
         ArtifactOut: {
             /** Type */
@@ -3812,7 +3811,7 @@ export interface components {
         };
         /**
          * BotVersionOut
-         * @description 版本历史项(104):版本号/上架时间/当前标识/快照内容。
+         * @description 版本历史项:版本号/上架时间/当前标识/快照内容。
          */
         BotVersionOut: {
             /** Version No */
@@ -3858,7 +3857,7 @@ export interface components {
         };
         /**
          * ChartCandidateOut
-         * @description 图表候选(049 纯增):候选自带完整绑定,y 为值列(多度量多系列),
+         * @description 图表候选:候选自带完整绑定,y 为值列(多度量多系列),
          *     series 为系列维(分组柱/时序多系列)。既有 chart 字段保留=首候选展平。
          */
         ChartCandidateOut: {
@@ -3991,7 +3990,7 @@ export interface components {
             metric_hits: components["schemas"]["MetricHitOut"][];
             /**
              * Sources
-             * @description 结构化来源:纯数据道恒为空;知识道/融合道由净化后正文单向投影,可非空(068/093)
+             * @description 纯数据问答不返回来源;知识问答和融合问答会从净化后的回答正文提取来源。
              */
             sources?: components["schemas"]["SourceOut"][];
         };
@@ -4023,7 +4022,7 @@ export interface components {
         };
         /**
          * CollabParticipantIn
-         * @description 圆桌参与者声明条目(115):role 取内置章程域,bot_key 可空绑定。
+         * @description 圆桌参与者声明条目:role 取内置章程域,bot_key 可空绑定。
          */
         CollabParticipantIn: {
             /** Role */
@@ -4099,7 +4098,7 @@ export interface components {
         };
         /**
          * CollabTurnIn
-         * @description 圆桌轮次上账载荷(115;追加只写,唯一键拒绝重复)。
+         * @description 圆桌轮次上账载荷(追加只写,唯一键拒绝重复)。
          */
         CollabTurnIn: {
             /** Task Id */
@@ -4134,7 +4133,7 @@ export interface components {
         };
         /**
          * CollabTurnOut
-         * @description 圆桌轮次转写行(115;黑板观测面,追加只写)。
+         * @description 圆桌轮次转写行(黑板观测面,追加只写)。
          */
         CollabTurnOut: {
             /** Round No */
@@ -4162,7 +4161,7 @@ export interface components {
         };
         /**
          * CollabWorkerIn
-         * @description 分工名册成员声明条目(collab-worker-roster):Bot 点名,可选别名
+         * @description 分工名册成员声明条目:Bot 点名,可选别名
          *     (身份 = name 缺省 bot_key;声明期锁定,运行期不可增减改绑)。
          */
         CollabWorkerIn: {
@@ -4395,7 +4394,7 @@ export interface components {
         };
         /**
          * CronPreviewOut
-         * @description 040·11 cron 预览(与创建/调度同源的解析计算,前端防抖消费)。
+         * @description cron 预览(与创建/调度同源的解析计算,前端防抖消费)。
          */
         CronPreviewOut: {
             /** Next */
@@ -4491,8 +4490,7 @@ export interface components {
         };
         /**
          * DatasourceUpdateIn
-         * @description 编辑全量表单语义;key/tenant_id 须提交原值(不可改,领域校验 400);
-         *     password 不传=不改(留空语义)。
+         * @description 全量更新数据源配置;key 和 tenant_id 不可修改,密码为空或未提交时保持原值。
          */
         DatasourceUpdateIn: {
             /** Datasource Key */
@@ -4636,7 +4634,7 @@ export interface components {
         };
         /**
          * EditTableIn
-         * @description 037:表说明人工精修请求(table_comment 与 alias 同面编辑)。
+         * @description 表说明人工精修请求(table_comment 与 alias 同面编辑)。
          */
         EditTableIn: {
             /** Table Comment */
@@ -4646,7 +4644,7 @@ export interface components {
         };
         /**
          * ExplainIn
-         * @description message_id 引用形态(010 design D2):客户端不可提交裸 SQL。
+         * @description message_id 引用形态:客户端不可提交裸 SQL。
          */
         ExplainIn: {
             /**
@@ -4666,9 +4664,9 @@ export interface components {
         };
         /**
          * ExportIn
-         * @description 所见即所导(010 design D3):前端传已展示的 columns+rows,不重跑 SQL。
+         * @description 所见即所导:前端传已展示的 columns+rows,不重跑 SQL。
          *
-         *     rows 传输层上限=R1 评审修复:截断发生在 JSON 解析之后,挡不住请求体本身
+         *     rows 传输层上限=修复:截断发生在 JSON 解析之后,挡不住请求体本身
          *     的内存放大;max_length 在解析期即拒(422),service 层截断保留为双闸。
          */
         ExportIn: {
@@ -4858,7 +4856,7 @@ export interface components {
         };
         /**
          * GraphConfirmOut
-         * @description 图内确认行(挂起卡片数据源;add-graph-checkpoint)。
+         * @description 图内确认行(挂起卡片数据源;graph-checkpoint)。
          */
         GraphConfirmOut: {
             /** Confirm Id */
@@ -5106,7 +5104,7 @@ export interface components {
         };
         /**
          * McpPromptArgOut
-         * @description 模板参数声明(109)。
+         * @description 模板参数声明。
          */
         McpPromptArgOut: {
             /** Name */
@@ -5124,7 +5122,7 @@ export interface components {
         };
         /**
          * McpPromptEntryOut
-         * @description 提示模板清单条目(109;仅声明,渲染预览实时拉取)。
+         * @description 提示模板清单条目(仅声明,渲染预览实时拉取)。
          */
         McpPromptEntryOut: {
             /** Name */
@@ -5142,7 +5140,7 @@ export interface components {
         };
         /**
          * McpPromptPreviewIn
-         * @description 模板预览入参(109;按名 + 渲染 arguments)。
+         * @description 模板预览入参(按名 + 渲染 arguments)。
          */
         McpPromptPreviewIn: {
             /** Name */
@@ -5157,7 +5155,7 @@ export interface components {
         };
         /**
          * McpPromptPreviewOut
-         * @description 模板预览出参(109):净化后渲染文本 + 检测/截断标注。
+         * @description 模板预览出参:净化后渲染文本 + 检测/截断标注。
          */
         McpPromptPreviewOut: {
             /** Ok */
@@ -5184,7 +5182,7 @@ export interface components {
         };
         /**
          * McpResourceEntryOut
-         * @description 资源清单条目(109;快照面,白名单与详情展示同源)。
+         * @description 资源清单条目(快照面,白名单与详情展示同源)。
          */
         McpResourceEntryOut: {
             /** Uri */
@@ -5447,7 +5445,7 @@ export interface components {
             metric_hits?: components["schemas"]["MetricHitOut"][];
             /**
              * Sources
-             * @description 结构化来源:纯数据道恒为空;知识道/融合道由净化后正文单向投影,可非空(068/093)
+             * @description 纯数据问答不返回来源;知识问答和融合问答会从净化后的回答正文提取来源。
              */
             sources?: components["schemas"]["SourceOut"][];
         };
@@ -5496,7 +5494,7 @@ export interface components {
         };
         /**
          * MetricHitOut
-         * @description 076(纯增):语义层口径命中(标识/名称/口径表达式/修订时间)。
+         * @description 语义层口径命中(标识/名称/口径表达式/修订时间)。
          */
         MetricHitOut: {
             /** Metric Id */
@@ -5650,7 +5648,7 @@ export interface components {
         };
         /**
          * OwnershipIn
-         * @description 102:归属变更请求(team_id 空=转公共;非空=转该团队专属)。
+         * @description 归属变更请求(team_id 空=转公共;非空=转该团队专属)。
          */
         OwnershipIn: {
             /** Team Id */
@@ -5779,7 +5777,7 @@ export interface components {
         };
         /**
          * PendingToolCallOut
-         * @description 待确认写工具调用(019):确认卡片渲染要素。
+         * @description 待确认写工具调用:确认卡片渲染要素。
          */
         PendingToolCallOut: {
             /** Confirm Id */
@@ -5981,7 +5979,7 @@ export interface components {
         };
         /**
          * ProbeExpansionOut
-         * @description 关系扩展明细(095):enabled=False 或零关系行时 tables 为空表。
+         * @description 关系扩展明细:enabled=False 或零关系行时 tables 为空表。
          */
         ProbeExpansionOut: {
             /** Enabled */
@@ -6243,7 +6241,7 @@ export interface components {
         };
         /**
          * RecallProbeOut
-         * @description 064 召回试跑响应(只读验证面;键集=service.recall_probe 现值锁定)。
+         * @description 召回试跑响应(只读验证面;键集=service.recall_probe 现值锁定)。
          */
         RecallProbeOut: {
             /** Question */
@@ -6337,9 +6335,7 @@ export interface components {
         };
         /**
          * RenameIn
-         * @description 重命名(010):去空白后非空与不超列上限(200)由领域层判定(013 补齐——
-         *     spec 立约以 strip 后值为准,带空白 201 字 strip 后 ≤200 不再 422 误拒);
-         *     max_length=2000 仅防离谱请求体(与 question 同宽),非业务上限。
+         * @description 标题去除首尾空白后不能为空且最多 200 字;max_length=2000 仅限制过大的请求体。
          */
         RenameIn: {
             /** Title */
@@ -6391,8 +6387,8 @@ export interface components {
         };
         /**
          * RerunIn
-         * @description SQL 卡再执行(026):message_id 引用 + 编辑后 SQL;归属与六层防御在
-         *     service/实现侧(与 010 EXPLAIN 同范式)。
+         * @description SQL 卡再执行:message_id 引用 + 编辑后 SQL;归属与六层防御在
+         *     service/实现侧(与 EXPLAIN 同范式)。
          */
         RerunIn: {
             /**
@@ -6522,7 +6518,7 @@ export interface components {
         };
         /**
          * RoleUpdateIn
-         * @description role_key 必须与原值一致(不可改,领域校验 400)。
+         * @description role_key 创建后不可修改。
          */
         RoleUpdateIn: {
             /** Role Key */
@@ -6644,7 +6640,7 @@ export interface components {
         };
         /**
          * SourceOut
-         * @description 结构化来源条目(068/093:引用键/来源标识/文档名快照)。
+         * @description 结构化来源条目(引用键/来源标识/文档名快照)。
          *     语义:纯数据道恒为空;知识道与融合道由净化后正文单向投影,可非空。
          */
         SourceOut: {
@@ -6825,7 +6821,7 @@ export interface components {
         };
         /**
          * StepSuspendedIn
-         * @description 图内挂起上账载荷(编排回调;add-graph-checkpoint)。
+         * @description 图内挂起上账载荷(编排回调;graph-checkpoint)。
          */
         StepSuspendedIn: {
             /** Task Id */
@@ -7015,7 +7011,7 @@ export interface components {
         };
         /**
          * StreamToolCallOut
-         * @description tool_call 事件 data(019 tool-calling):工具调用进度。
+         * @description tool_call 事件 data(tool-calling):工具调用进度。
          *
          *     status ∈ running/done/rejected(confirm_required 以 done 下发,result_digest
          *     含「待确认」);args_digest/result_digest 为截断摘要(审计同源口径)。
@@ -7043,7 +7039,7 @@ export interface components {
          * StreamTraceOut
          * @description trace 事件 data:agent 侧诊断信号(内部运维口径,不渲染进用户答案)。
          *
-         *     063 表预筛/064 召回闸门/068 引用净化/080 装配预算共用本通道;
+         *     表预筛/召回闸门/引用净化/装配预算共用本通道;
          *     fields 为自由映射(键集随能力演进,前向兼容);node=发起节点名。
          */
         StreamTraceOut: {
@@ -7168,9 +7164,7 @@ export interface components {
         };
         /**
          * TeamOut
-         * @description 032 团队条目(审查循环 D-F2:契约化——曾裸 dict 使前端只能手写类型)。
-         *     102 纯增可选 role:「我所在的团队」形态附带本人角色(OWNER/MEMBER 可写、
-         *     VIEWER 只读,供知识库上传归属候选筛选);manage 面全量列表无此列=None。
+         * @description 团队信息；个人团队列表包含当前用户角色，管理列表不返回该字段。
          */
         TeamOut: {
             /** Id */
@@ -7502,7 +7496,7 @@ export interface components {
         };
         /**
          * ToolResolveConfirmIn
-         * @description 任务通道确认兑现载荷(add-graph-checkpoint;决策权威=任务域确认行,
+         * @description 任务通道确认兑现载荷(graph-checkpoint;决策权威=任务域确认行,
          *     本端点只做兑换与全量复校)。
          */
         ToolResolveConfirmIn: {
@@ -7607,7 +7601,7 @@ export interface components {
         };
         /**
          * TriggerOut
-         * @description 031 触发器条目(审查循环 D-F2:契约化)。
+         * @description 触发器列表中的条目。
          */
         TriggerOut: {
             /** Id */
@@ -8002,7 +7996,7 @@ export interface components {
         };
         /**
          * UserUpdateIn
-         * @description 编辑全量表单语义;password 不传=不改(username 创建后不可改,不接收)。
+         * @description 全量更新用户资料;不提交密码时保持原值,username 创建后不可修改。
          */
         UserUpdateIn: {
             /** Nickname */
@@ -8056,7 +8050,7 @@ export interface components {
         };
         /**
          * WorkflowDefOut
-         * @description 029 工作流定义条目(审查循环 D-F2:契约化;definition 为自由 JSON)。
+         * @description 工作流定义条目;definition 为自由 JSON。
          */
         WorkflowDefOut: {
             /** Id */
@@ -8488,14 +8482,14 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description 速率/配额超限(062;detail=CHAT_RATE_LIMITED / CHAT_QUOTA_EXCEEDED,响应头 X-Quota-Warning 预警) */
+            /** @description 请求超过速率或配额限制(detail=CHAT_RATE_LIMITED 或 CHAT_QUOTA_EXCEEDED);响应头 X-Quota-Warning 可能包含预警。 */
             429: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description 配额读数失败(062 fail-closed;detail=CHAT_QUOTA_UNAVAILABLE) */
+            /** @description 配额数据不可用时拒绝请求(detail=CHAT_QUOTA_UNAVAILABLE)。 */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -8552,7 +8546,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description SSE 事件流:stage/sql/summary/tool_call/trace 过程事件逐帧下发;result=data 与同步 /chat/query 响应逐字段一致;error=传输层/意外失败终态;trace=agent 诊断信号(预筛/闸门/净化/预算,不渲染进用户答案);注释行(: ping)为心跳 */
+            /** @description SSE 发送 stage、sql、summary、tool_call 和诊断事件;result 与 /chat/query 返回相同数据。错误通过 error 终态发送;以冒号开头的注释帧用于心跳。 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8571,14 +8565,14 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description 速率/配额超限(062;detail=CHAT_RATE_LIMITED / CHAT_QUOTA_EXCEEDED,响应头 X-Quota-Warning 预警) */
+            /** @description 请求超过速率或配额限制(detail=CHAT_RATE_LIMITED 或 CHAT_QUOTA_EXCEEDED);响应头 X-Quota-Warning 可能包含预警。 */
             429: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description 配额读数失败(062 fail-closed;detail=CHAT_QUOTA_UNAVAILABLE) */
+            /** @description 配额数据不可用时拒绝请求(detail=CHAT_QUOTA_UNAVAILABLE)。 */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -10294,7 +10288,7 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description 070:ADOPTED 晋升不可用(embedding 失败等);处置整体回滚,detail=SAMPLE_PROMOTION_UNAVAILABLE */
+            /** @description 样例晋升所需处理不可用时整体回滚(detail=SAMPLE_PROMOTION_UNAVAILABLE)。 */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -11769,7 +11763,7 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description 速率超限(062;detail=CHAT_RATE_LIMITED,X-Quota-Warning 预警) */
+            /** @description 请求超过速率限制(detail=CHAT_RATE_LIMITED);X-Quota-Warning 可能包含预警。 */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -11811,7 +11805,7 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description 配额超限(034;响应头 X-Quota-Warning 预警) */
+            /** @description 请求超过配额限制;X-Quota-Warning 可能包含预警。 */
             429: {
                 headers: {
                     [name: string]: unknown;

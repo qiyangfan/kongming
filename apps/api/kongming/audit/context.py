@@ -1,9 +1,6 @@
-"""审计请求上下文(015 ip 链路):client host 经 contextvar 横切透传至
-审计写入——操作日志的 ip 列记录是横切关注点,逐端点手传必漏
-(调用点散布四域 15+ 处),contextvars 是正解(中间件写入,仓储读取,
-调用点零改动)。BackgroundTasks/定时任务无请求上下文自然为 None
-(语义正确:非用户请求无 ip);后台任务继承发起请求的上下文副本
-(Python 语义,操作由该请求发起,记其 ip 合理)。
+"""审计日志从 contextvar 读取请求客户端 IP，避免由每个端点单独传递。
+
+没有请求上下文的定时任务 IP 为空；由请求创建的后台任务沿用该请求的 IP。
 """
 
 from contextvars import ContextVar

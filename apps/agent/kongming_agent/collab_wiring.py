@@ -1,4 +1,4 @@
-"""协作组合根工厂(091 接线):把 run_collab 编排装配进任务步骤执行。
+"""协作组合根工厂(接线):把 run_collab 编排装配进任务步骤执行。
 
 职责:开账(fail-closed)→ worker=一次受限 ReAct(人格注入、工具求交、
 逐 worker trace 父子关联、用量收集)→ worker 账本/终态回写(尽力而为)→
@@ -45,8 +45,8 @@ def _worker_tools(
 
 
 class _UsageCountingLlm:
-    """主席判定 LLM 适配(细节-2):临时挂用量收集器,把主席份额归集进协作
-    账本——核心直连 llm.chat 的用量此前仅走 021 平台通道,运行账少计主席。"""
+    """主席判定 LLM 适配:临时挂用量收集器,把主席份额归集进协作账本——
+    核心直连 llm.chat 的用量仅走平台通道,运行账少计主席。"""
 
     def __init__(self, inner: Any, totals: dict[str, int]) -> None:
         self._inner = inner
@@ -169,7 +169,7 @@ def make_collab_runner(
         async def _worker(subgoal: str, ctx: str, slot: str | None = None) -> dict[str, object]:
             """一次受限 ReAct worker:逐 worker 独立 trace(trace_root 父子关联
             口径:-wN 后缀)+ 用量收集 + worker 账本回写(尽力而为)。
-            slot=名册成员标签(collab-worker-roster):人格/工具/账本 bot_key 按
+            slot=名册成员标签:人格/工具/账本 bot_key 按
             成员路由,账本子目标带标签前缀;None=顶层单绑定/裸 worker/治理动作
             (核实与 critic 重派),授权不提权结构不变。"""
             if slot and slot in roster_map:
@@ -196,7 +196,7 @@ def make_collab_runner(
                 bot_key=w_bot_key,
                 trace_id=wid,
             )
-            # 上下文摘要为系统提示附加段(D2);人格经 bot_system_prompt 注入
+            # 上下文摘要作为系统提示附加段;人格经 bot_system_prompt 注入
             sys_prompt = (
                 f"{w_persona}\n\n# 任务上下文摘要\n{ctx}" if w_persona or ctx else w_persona
             )
@@ -208,7 +208,7 @@ def make_collab_runner(
                 "question": subgoal,
                 "history": [],
                 "tools": w_tools,
-                "channel": "task",  # 审计归因任务编排(与 090 同口径)
+                "channel": "task",  # 将工具调用归因到任务编排。
                 "bot_system_prompt": sys_prompt,
             }
             collector: list[dict[str, object]] = []
@@ -228,7 +228,7 @@ def make_collab_runner(
             w_verdict = react_verdict(final)
             if w_verdict == "PASS" and (final.get("error") or not react_execution_evidence(final)):
                 # 终态带 error(轮次触顶兜底,最终结论未产出)或无执行证据:
-                # PASS 不算数(090 证据/预算退出口径,与步骤闸同源)
+                # PASS 不算数(证据/预算退出口径,与步骤闸同源)
                 w_verdict = "ERROR"
             elif w_verdict in ("", "UNKNOWN"):
                 # 触顶兜底等形态的 execution 无 verdict 键:裁决缺失=未通过,
@@ -256,7 +256,7 @@ def make_collab_runner(
             return {"verdict": w_verdict, "summary": summary, "sql": sql}
 
         async def _run_roundtable() -> dict[str, object]:
-            """圆桌分支(115):名册装配(Bot 人格/内置章程、逐参与者工具求交、
+            """圆桌分支:名册装配(Bot 人格/内置章程、逐参与者工具求交、
             零工具/超执行面上限 fail-closed 剔除)→ 逐参与者 worker 行 → 圆桌编排核心
             (轮次/黑板/主席判定)→ 逐 turn 上账(尽力而为)→ 参与者聚合
             回写 → 运行收口。参与者名册运行期锁定,执行预算 = 名册 × 轮次。"""
@@ -295,7 +295,7 @@ def make_collab_runner(
                         round_no=round_no,
                         worker_no=worker_no,
                         kind=kind,
-                        # 行内携带参与者标签/角色(P2-1):有效名册经剔除后压缩
+                        # 行内携带参与者标签/角色:有效名册经剔除后压缩
                         # 编号,web 不得按拓扑下标反推归属
                         content={
                             **content,
@@ -323,7 +323,7 @@ def make_collab_runner(
                     "question": step_goal,
                     "history": [],
                     "tools": p["tools"],
-                    "channel": "task",  # 审计归因任务编排(与 090 同口径)
+                    "channel": "task",  # 将工具调用归因到任务编排。
                     "bot_system_prompt": sys_prompt,
                 }
                 collector: list[dict[str, object]] = []
@@ -340,7 +340,7 @@ def make_collab_runner(
                 }
                 v = react_verdict(final)
                 if v == "PASS" and (final.get("error") or not react_execution_evidence(final)):
-                    # 终态带 error 或无执行证据:PASS 不算数(090 证据闸同源)
+                    # 终态带 error 或无执行证据:PASS 不算数(证据闸同源)
                     v = "ERROR"
                 elif v in ("", "UNKNOWN"):
                     v = "ERROR"

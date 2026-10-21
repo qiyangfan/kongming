@@ -1,4 +1,4 @@
-"""semantic 仓储(023):table_relations/metric_definitions SQL。"""
+"""semantic 仓储:table_relations/metric_definitions SQL。"""
 
 import json
 from typing import Any
@@ -66,8 +66,7 @@ class SqlSemanticRepo:
         self, *, tenant_id: str, datasource_key: str, tables: list[str]
     ) -> list[dict[str, Any]]:
         """仅取表集合内的两两关系(注入收窄,spec 立约)。
-        非空即查(023①):单表集合命中自引用 FK 行(goods→goods),
-        ANY(:ts) 天然收窄,多表行为不变。"""
+        单表集合也查:ANY(ts) 天然收窄,可命中自引用 FK 行(goods→goods)。"""
         if not tables:
             return []
         rows = (
@@ -90,10 +89,9 @@ class SqlSemanticRepo:
     async def relations_touching(
         self, *, tenant_id: str, datasource_key: str, tables: list[str]
     ) -> list[dict[str, Any]]:
-        """095 一跳扩展查询:任一端在表集合内即命中(与 relations_within 的
-        差别只在谓词:within=两端均在(注入收窄),touching=任一端在(扩展候选))。
-        双过滤口径(tenant+datasource)与参数化形态同 relations_within;
-        ORDER BY 保证输出序确定(扩展尾附加序可断言)。"""
+        """一跳扩展查询:任一端在表集合内即命中(与 relations_within 的
+        差别只在谓词:within=两端均在(注入收窄),touching=任一端在)。
+        ORDER BY 保证输出序确定。"""
         if not tables:
             return []
         rows = (
@@ -125,7 +123,7 @@ class SqlSemanticRepo:
                     "  join_keys, source)"
                     " VALUES (:i, :t, :d, :st, :tt, CAST(:jk AS jsonb), 'manual')"
                     " ON CONFLICT (tenant_id, datasource_key, source_table, target_table)"
-                    # R1-M1:手工接管——冲突翻转 source=manual(防下次扫描被还原);
+                    # 手工接管——冲突翻转 source=manual(防下次扫描被还原);
                     # RETURNING 真实行 id(此前返回新 uuid 指向不存在行)
                     " DO UPDATE SET join_keys = CAST(:jk AS jsonb), source='manual',"
                     "   updated_at = now()"
@@ -144,7 +142,7 @@ class SqlSemanticRepo:
         return str(row_id)
 
     async def delete_relation(self, *, relation_id: str, tenant_id: str) -> str | None:
-        """删除命中返回该行的 datasource_key(095:提交后按其精确失效检索
+        """删除命中返回该行的 datasource_key(提交后按其精确失效检索
         缓存),不命中返回 None(同形,防探测)。"""
         ds = (
             await self._s.execute(
@@ -177,9 +175,9 @@ class SqlSemanticRepo:
         datasource_key: str,
         visible_dept_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        # 110:可见性判定下推单点(与 102「SQL 同判」同纪律)——
+        # 可见性过滤在 SQL 内单点判定:
         # visible_dept_ids=None=不过滤(管理面全量视角/ALL 档调用者);
-        # 传序列(含空数组)=ALL 档 ∪「DEPT 档且 dept_id 命中集合」,空数组自然
+        # 传序列(含空数组)=ALL 档 ∪「DEPT 档且 dept_id 命中集合」,空数组
         # 退化为仅 ALL 档(SELF/无身份/CUSTOM 空集的读面降级形态)。
         vis = ""
         params: dict[str, Any] = {"t": tenant_id, "d": datasource_key}
@@ -222,7 +220,7 @@ class SqlSemanticRepo:
                     " ON CONFLICT (tenant_id, datasource_key, metric_name)"
                     " DO UPDATE SET sql_template=:tpl, business_terms=:terms,"
                     "   enabled=:en, visible_scope=:vs, dept_id=:dp, updated_at=now()"
-                    " RETURNING id"  # R1-M1:真实行 id
+                    " RETURNING id"  # 真实行 id
                 ),
                 {
                     "i": str(uuid7()),

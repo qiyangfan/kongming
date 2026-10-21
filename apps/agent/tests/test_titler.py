@@ -1,6 +1,6 @@
-"""会话标题改写测试(010):净化防御/降级契约/端点行为。
+"""会话标题改写测试:净化防御/降级契约/端点行为。
 
-prompt 为 010 全新撰写(上游无 LLM 标题资产,非逐字移植文件);
+prompt 为 全新撰写(上游无 LLM 标题资产,非逐字移植文件);
 降级契约:任何失败 → TitleError/rewritten=False,api 侧保持截断标题。
 """
 
@@ -67,7 +67,7 @@ def test_sanitize_empty() -> None:
     assert sanitize_title("「」") == ""
 
 
-# ============ rewrite_title 链路 ============
+# ============ rewrite_title 测试 ============
 
 
 async def test_rewrite_ok_and_prompt_shape() -> None:
@@ -77,7 +77,7 @@ async def test_rewrite_ok_and_prompt_shape() -> None:
     system, user = llm.calls[0]
     assert "标题" in system
     assert "各商品库存分别是多少?" in user
-    assert llm.max_tokens_seen == 60  # 轻量端点封顶(design D1,R2-S1)
+    assert llm.max_tokens_seen == 60  # 轻量端点封顶
 
 
 async def test_rewrite_llm_error_raises() -> None:

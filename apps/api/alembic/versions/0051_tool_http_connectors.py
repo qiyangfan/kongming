@@ -1,15 +1,4 @@
-"""0051: 租户级 HTTP 连接器(099-http-connector-domain)
-
-纯增一表(design D7 全列清单,ADR-004 口径):
-- tool_http_connectors:租户自助注册的 HTTP 端点工具声明行——UUID v7 主键
-  (应用侧生成器,列不带服务端缺省生成)、同租户 key 唯一、method/auth_type/
-  enabled 均为 VARCHAR+CHECK(禁 SMALLINT 魔数/PG ENUM)、params/allowed_hosts
-  JSONB、鉴权材料加密列 auth_secret_enc(TEXT NULLABLE,none 形态为 NULL;
-  加密复用 webhook secret 同一 AES-GCM 单点,任何接口不回显明文)、
-  requires_confirmation 写语义声明、timeout_ms 注册声明超时、timestamptz
-  审计时间戳、created_by 创建人。无软删(硬删,identity 域外)。
-**downgrade**:直接 DROP 表(纯增独立,无交叉依赖)。
-"""
+"""新增租户 HTTP 连接器表。鉴权材料加密存储，配置不使用软删除；降级会删除整张连接器表。"""
 
 from sqlalchemy import text
 

@@ -1,4 +1,4 @@
-"""SSE 帧解析纯函数(017 query-streaming)。
+"""SSE 帧解析纯函数(query-streaming)。
 
 控制面中继消费 agent 面 /query/stream 的 text/event-stream 字节流:
 逐行喂入解码器,空行为帧边界。契约见 query-streaming spec「SSE 事件协议」

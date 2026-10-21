@@ -1,4 +1,4 @@
-"""connector 路由(099,薄适配层):/system/connectors/* 管理端点。
+"""连接器管理端点：/system/connectors/*。
 
 挂 require_perm("connector:manage"),租户视角(X-Tenant-Id 白名单,与 mcp
 同构);跨租户/不存在 404 同形;领域错误映射 400/404/409。凭证任何接口不回
@@ -41,7 +41,7 @@ MANAGE = "connector:manage"
 
 
 class _OperLogger:
-    """操作审计端口绑定(actor 请求期横切;与业务同事务,007 惯例)。"""
+    """操作审计端口绑定(与业务共用同一 session 事务)。"""
 
     def __init__(self, session: AsyncSession, actor_id: str) -> None:
         self._repo = SqlOperLogRepo(session)
@@ -52,7 +52,7 @@ class _OperLogger:
 
 
 class ConnectorGuardrailAdapter:
-    """输入护栏端口绑定(020;独立短会话,与 bot 上架护栏同闸)。"""
+    """输入护栏端口绑定(独立短会话,与 bot 上架护栏同闸)。"""
 
     async def check(
         self, *, trace_id: str, user_id: str, tenant_id: str, texts: list[str]
@@ -206,7 +206,7 @@ class ConnectorIn(BaseModel):
     # 凭证仅写入形态:创建=必填性由鉴权形态校验;更新 None/空串=不修改,
     # 填入=替换(web-admin「凭证空框语义」);任何响应不回显
     auth_secret: str | None = Field(default=None, max_length=2048)
-    requires_confirmation: bool | None = None  # None=按方法缺省(design D4)
+    requires_confirmation: bool | None = None  # None=按方法缺省
     timeout_ms: int = Field(ge=1)
 
 
@@ -278,7 +278,6 @@ def _secret_of(body: ConnectorIn) -> str | None:
 
 
 def _row_out(row: dict[str, Any]) -> ConnectorOut:
-    """掩码行 → 契约模型(掩码投影 masked_out_row 与契约字段同源)。"""
     m = masked_out_row(row)
     return ConnectorOut(**m)
 

@@ -1,17 +1,4 @@
-/* 调度档位 <-> 五字段 cron 表达式的生成与白名单反解。
- *
- * cron 语义单源在后端(kongming/trigger/models.py),本文件不构成第二套
- * 校验语义,只做两件事:
- * 1. 生成:档位状态 -> cron 表达式,档位直出恒合法;
- * 2. 反解:cron 表达式 -> 档位状态,白名单制——仅识别本文件可生成的
- *    形态(按字段集合相等比对,等价写法互通);识别失败一律返回 null,
- *    由调用方落「cron 表达式(高级)」直通模式,宁缺毋错(fail-open):
- *    后端语义将来扩展时此处无需跟随。
- *
- * 档位的分钟/小时间隔只收 60/24 的因数:步进字段是「每小时/天内
- * 重复」的日历对齐语义,非因数(如每 7 分钟)心智与实际会偏差,该类
- * 长尾走高级模式全表达力承载。
- */
+/* 将预设调度档位转换为五字段 cron，并只将本模块生成的表达式反解为预设。完整 cron 合法性由后端校验。 */
 
 export type Schedule =
   | { kind: "interval"; unit: "minute" | "hour"; n: number }
@@ -139,7 +126,7 @@ function single(set: Set<number>): number | null {
   return set.size === 1 ? [...set][0] : null;
 }
 
-/** 字段段 -> 值集合;仅覆盖后端立约的形态,超纲返回 null(落高级模式)。 */
+/** 单个 cron 字段解析为值集合;仅支持与后端约定的形态,其余返回 null(落入高级模式)。 */
 function parseField(src: string, lo: number, hi: number): Set<number> | null {
   const out = new Set<number>();
   for (const part of src.split(",")) {

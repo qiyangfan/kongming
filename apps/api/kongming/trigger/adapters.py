@@ -1,10 +1,10 @@
-"""事件源适配器(031,零框架):平台事件格式 → 标准化目标输入。
+"""事件源适配器(零框架):平台事件格式 → 标准化目标输入。
 
 custom:整 payload 透传;github:X-GitHub-Event + push/pull_request/issues
 提要({event, repo, ref, summary})。
-108:邮件摘要适配器 normalize_email——RFC 822 字节 → 四字段白名单摘要
+邮件摘要适配器 normalize_email——RFC 822 字节 → 四字段白名单摘要
 ({from, subject, date, text_preview}),长度上限截断;邮件头可被构造出
-注入载荷,白名单+截断+输入护栏三层收敛(design 裁决 4),不透传原始头。
+注入载荷,白名单+截断+输入护栏三层收敛,不透传原始头。
 """
 
 from email import policy
@@ -13,7 +13,7 @@ from typing import Any, cast
 
 from kongming.trigger.models import CronError
 
-# 邮件摘要字段白名单(design 裁决 4:四字段定死)与长度上限(第二层防线)
+# 邮件摘要字段白名单(四字段定死)与长度上限(第二层防线)
 EMAIL_SUMMARY_FIELDS = ("from", "subject", "date", "text_preview")
 MAX_FROM_LEN = 256
 MAX_SUBJECT_LEN = 256
@@ -75,7 +75,7 @@ def validate_cron(expr: str) -> None:
         raise
 
 
-# ── 邮件摘要适配器(108) ──
+# ── 邮件摘要适配器 ──
 
 
 def _clean_header(value: object) -> str:
@@ -86,8 +86,8 @@ def _clean_header(value: object) -> str:
 
 
 def _text_preview(msg: Any) -> str:
-    """首段 text/plain(非附件)的正文预览;HTML 富正文不提取(design
-    Non-goal);畸形分段跳过,永不抛。"""
+    """首段 text/plain(非附件)的正文预览;HTML 富正文不提取;
+    畸形分段跳过,永不抛。"""
     for part in msg.walk():
         if part.get_content_type() != "text/plain":
             continue

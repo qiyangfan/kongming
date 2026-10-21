@@ -1,18 +1,4 @@
-"""0004: 用户名唯一约束软删感知(rbac spec「用户名唯一性(软删过滤)」)
-
-Revision ID: 0004
-Revises: 0003
-Create Date: 2026-08-19
-
-baseline 的 username UNIQUE 是全表硬约束,软删记录仍占名,
-「存在已软删的同名用户,创建同名新用户应成功」在 schema 层不可达。
-换成部分唯一索引(仅未软删行参与唯一)——软删+唯一的标准解法(ADR-004 演进)。
-纯约束形态变更,无数据迁移。
-**downgrade 前置条件**:还原全表 UNIQUE 前,须先清除「已软删且同名」的冗余行
-(合法数据形态会令 ADD CONSTRAINT 失败):
-  DELETE FROM sys_user a USING sys_user b
-    WHERE a.deleted_at IS NOT NULL AND b.deleted_at IS NULL AND a.username = b.username;
-"""
+"""将用户名唯一性改为仅约束未软删用户。降级前需处理与未删除用户同名的软删记录。"""
 
 from sqlalchemy import text
 

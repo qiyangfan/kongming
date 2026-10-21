@@ -1,4 +1,4 @@
-"""024 知识分流 agent 侧测试(nodes 直调)。"""
+"""知识分流 agent 侧测试(nodes 直调)。"""
 
 from typing import cast
 
@@ -19,7 +19,7 @@ def test_doc_answer_routing() -> None:
         "doc_hints": [{"source_ref": "退货政策.md §1", "content": "7 天内可退"}],
     }
     assert route_after_retrieve(state) == "doc_answer"
-    # schema 命中不再拦截分流(024 修订:意图+文档命中即分流)
+    # schema 命中不再拦截分流(修订:意图+文档命中即分流)
     state2: AgentState = {**state, "schema_hint": "tenant_x.film(...)"}  # type: ignore[assignment]
     assert route_after_retrieve(state2) == "doc_answer"
     state3: AgentState = {**state, "doc_hints": []}  # type: ignore[assignment]
@@ -27,7 +27,7 @@ def test_doc_answer_routing() -> None:
 
 
 def test_doc_answer_routing_multiturn_gate() -> None:
-    """047:多轮会话仅泛系系词「是什么」命中时不分流文档(数据追问防劫持)。"""
+    """多轮会话仅泛系系词「是什么」命中时不分流文档(数据追问防劫持)。"""
     from kongming_agent.graph.nodes import route_after_retrieve
 
     base: AgentState = {
@@ -37,7 +37,7 @@ def test_doc_answer_routing_multiturn_gate() -> None:
         "schema_hint": "tenant_sakila.film(...)",
         "doc_hints": [{"source_ref": "公告.md §1", "content": "x"}],
     }
-    # 多轮 + 仅系词命中 → generate(浏览器实测复现的劫持形态)
+    # 多轮中只有系词命中时，不应把数据问题误路由到文档回答。
     multi: AgentState = {**base, "history": ["查询租金最高的5部影片"]}  # type: ignore[assignment]
     assert route_after_retrieve(multi) == "generate"
     # 多轮 + 强文档词命中 → 照旧分流(历史在场不压倒显式文档意图)
@@ -47,7 +47,7 @@ def test_doc_answer_routing_multiturn_gate() -> None:
         "history": ["查询租金最高的5部影片"],  # type: ignore[assignment]
     }
     assert route_after_retrieve(strong) == "doc_answer"
-    # 单轮 + 仅系词命中 → 024 语义不变(分流)
+    # 单轮 + 仅系词命中 → 语义不变(分流)
     single: AgentState = {**base, "history": []}  # type: ignore[assignment]
     assert route_after_retrieve(single) == "doc_answer"
 
@@ -87,7 +87,7 @@ async def test_doc_answer_node_terminal() -> None:
 
 
 async def test_doc_answer_attachments_use_raw_question() -> None:
-    """审查循环 F3:混合路径(附件+文档命中)必须用原始拼接问题——
+    """混合路径(附件+文档命中)必须用原始拼接问题——
     resolved_question 经指代消解改写会压掉图片描述段关键数据。"""
     from kongming_agent import deps
     from kongming_agent.graph import nodes
@@ -126,7 +126,7 @@ async def test_doc_answer_attachments_use_raw_question() -> None:
 
 
 async def test_doc_answer_llm_error_propagates() -> None:
-    """审查循环 F4:LLM 故障不得以 PASS+「文档中未提及相关内容。」伪造终态
+    """LLM 故障不得以 PASS+「文档中未提及相关内容。」伪造终态
     ——吞掉后服务故障被表述为内容缺失;上抛经 _run_graph 统一收敛
     llm_unavailable(success=False)。"""
     import pytest as _pytest

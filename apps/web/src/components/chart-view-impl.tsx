@@ -9,13 +9,13 @@ import type { ChartDatum, ChartSpec, ChartTune, ChartType } from "@/components/c
 import { uniqueTypes } from "@/components/chart-shared";
 
 export interface ChartViewProps {
-  /** 有序图表候选(049):每个候选自带完整绑定,活动绑定=同类型首个候选 */
+  /** 有序图表候选:每个候选自带完整绑定,活动绑定=同类型首个候选 */
   candidates: ChartSpec[];
   data: ChartDatum;
   tune?: ChartTune;
-  /** 041 呈现层列标签(缺失/未命中回退物理列名)——多度量系列名用它,禁裸物理名直达用户 */
+  /** 呈现层列标签(缺失/未命中回退物理列名)——多度量系列名用它,禁裸物理名直达用户 */
   labels?: string[];
-  /** 当前图表类型(状态提升至 chart-view 壳:主题重挂不丢用户手动选择,040) */
+  /** 当前图表类型(状态提升至 chart-view 壳:主题重挂不丢用户手动选择) */
   activeType: ChartType;
   onActiveTypeChange: (t: ChartType) => void;
 }
@@ -27,8 +27,7 @@ const TYPE_META: Record<ChartType, { label: string; Icon: typeof ChartColumn }> 
   scatter: { label: "散点图", Icon: ChartScatter },
 };
 
-/* 从 CSS token 派生图表色板:朱砂打底、鎏金点睛、青灰过渡,惜色如金;
-   只用面向数据的 token,前景文字色不入系列(浅色底上近不可见) */
+/* 色板从面向数据的 token 派生;前景文字色不入系列(浅色底上近不可见) */
 function chartPalette(): string[] {
   return [
     cssVar("--primary"),
@@ -38,8 +37,7 @@ function chartPalette(): string[] {
   ];
 }
 
-/* 空值显式排除:JS Number(null)===0 / Number("")===0 会把空单元格误判为数值 0;
-   空白串同理(Number("  ")===0),一并拦下 */
+/* 空值/空白串显式排除:Number(null)、Number("")、Number(" ") 均为 0,会把空单元格误判成数值 */
 function isNumericCell(v: unknown): boolean {
   if (v === null || v === undefined || typeof v === "boolean") return false;
   if (typeof v === "string" && v.trim() === "") return false;
@@ -50,10 +48,7 @@ function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-/* temporal 轴标签本地化(011 挂账⑤/013):PG 日期序列化为 ISO 原文
-   (2005-07-05T00:00:00)不可读。全列匹配 ISO 日期形态才启用(任一不匹配
-   即整列原样,宁不错格式化——编号串不可能匹配完整形态);启用时呈现日期
-   部分,时间非全零附加 HH:mm。不引日期库(截断即可),轴与 tooltip 同源。 */
+/* 日期轴仅在整列均为 ISO 日期时格式化；混有其他值则整列原样显示，非零时间追加 HH:mm。 */
 const ISO_DATE_RE = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/;
 
 function formatTemporalLabels(labels: string[]): string[] {
@@ -91,10 +86,9 @@ export default function ChartViewImpl({
       axisLabel: { color: axisColor },
       axisLine: { lineStyle: { color: lineColor } },
     };
-    // 浮层 token 色:默认白底 tooltip 在暗色页面里刺眼(040 主题联动);
-    // 构造单源 lib/echarts.themedTooltip(与两统计页同源,禁第二份)
+    // 浮层配色走主题 token(暗色不现白底);themedTooltip 与统计页同源,勿另写
     const tooltipCommon = themedTooltip();
-    // 026 调参:标题非空才占位(顶部留白随有无标题切换,防空标题压图)
+    // 标题非空才占位,防空标题压图
     const titleOpt = tune?.title
       ? {
           title: {
@@ -150,8 +144,8 @@ export default function ChartViewImpl({
           tooltip: {
             trigger: "item",
             ...tooltipCommon,
-            // 列名+数值双行呈现(011 挂账⑨/013),与 bar/line 信息量对齐;
-            // y=null 空值点 echarts 不渲染,无 tooltip 触发,?? "—" 纯防御
+            // 列名和数值分两行,与 bar/line 图表信息量一致;
+            // y=null 空值点 echarts 不渲染无 tooltip,?? "—" 纯防御
             formatter: (p: unknown) => {
               const v = (p as { value: [number, number | null] }).value;
               return `${binding.x ?? "x"}: ${v[0]}<br/>${binding.y[0] ?? "y"}: ${v[1] ?? "—"}`;
@@ -174,7 +168,7 @@ export default function ChartViewImpl({
         };
       }
       // 退化:类目轴点图(一行非数值即整体退化,宁退化不丢点;
-      // y 沿用单系列的 Number() 既有语义,与 bar/line 同构)
+      // y 沿用单系列的 Number 既有语义,与 bar/line 同构)
       const values = data.rows.map((r) => {
         const v = r[yi];
         return typeof v === "number" ? v : Number(v);
@@ -190,17 +184,14 @@ export default function ChartViewImpl({
     }
 
     // bar/line:多系列=系列维绑定(分组柱/时序多系列)或多度量(y 列表);
-    // 分组/多度量空值映 null(稀疏组合不落零柱),单系列沿用 Number() 既有语义
+    // 分组/多度量空值映 null(稀疏组合不落零柱),单系列沿用 Number 既有语义
     const si = binding.series ? data.columns.indexOf(binding.series) : -1;
     // 分组系列:类目轴=x 唯一值全集(首次出现序),各系列按「系列值×类目」
-    // 对号取数、缺组合补 null——若逐行过滤,系列数据下标≠类目下标,会产生
-    // 柱体挤半轴与值归属错类目(049 实测缺陷,用户肉眼抓出)
+    // 对号取数、缺组合补 null——若逐行过滤,系列下标与类目下标错位,柱子会落错类别
     const hasSeries = si >= 0;
     const rawCats = [...new Set(data.rows.map((r) => String(r[xi] ?? "")))];
     const axisCats = formatTemporalLabels(rawCats);
-    // 类目轴标签分级(050 实测反馈):抽样显示是 echarts 防重叠默认,但柱状图
-    // 不给全类目名=读者只能靠 tooltip 认柱——少量全显横排、中量旋转全显、
-    // 大量(>24)才交回 echarts 自动抽稀
+    // 类目轴标签:少量横排,中量旋转,超过 24 项交给 ECharts 抽稀
     const catCount = hasSeries ? axisCats.length : xLabels.length;
     const catLabelOpt =
       catCount <= 12 ? { interval: 0 } : catCount <= 24 ? { interval: 0, rotate: 35 } : {};
@@ -221,7 +212,7 @@ export default function ChartViewImpl({
       }));
     } else if (useYIdxs.length > 1) {
       seriesList = useYIdxs.map((yi) => ({
-        // 041 双轨:系列名经列标签(缺失回退物理列名),不裸投物理名
+        // 双轨:系列名经列标签(缺失回退物理列名),不裸投物理名
         name: labels?.[yi] || data.columns[yi],
         data: data.rows.map((r) => {
           const v = r[yi];
@@ -283,7 +274,7 @@ export default function ChartViewImpl({
             },
       ),
     };
-    // tune 基元展开入依赖(标题/轴名一改即重算重绘,026 调参语义)
+    // tune 基元展开入依赖:标题/轴名一改即重算重绘
   }, [
     candidates,
     activeType,
@@ -308,7 +299,7 @@ export default function ChartViewImpl({
     });
     const d = new Date();
     const stamp = `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}-${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
-    // Safari 形态:锚点须入 DOM 再 click(010 教训);dataURL 非 blob 无需 revoke
+    // Safari 形态:锚点须入 DOM 再 click;dataURL 非 blob 无需 revoke
     const a = document.createElement("a");
     a.href = url;
     a.download = `图表-${stamp}.png`;
@@ -324,7 +315,6 @@ export default function ChartViewImpl({
           toggleTypes.length > 1 ? "justify-between" : "justify-end"
         }`}
       >
-        {/* 单候选隐藏切换器(spec 049):只渲染候选类型,顺序=候选序 */}
         {toggleTypes.length > 1 && (
           <ToggleGroup
             type="single"

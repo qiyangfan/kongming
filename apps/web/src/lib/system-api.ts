@@ -1,4 +1,4 @@
-/* system 管理面端点封装(007)。类型一律取生成契约(ADR-005,禁手写)。 */
+/* system 管理面端点封装。类型一律取生成契约(ADR-005,禁手写)。 */
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";

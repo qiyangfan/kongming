@@ -1,4 +1,4 @@
-/* Bot 公开嵌入页(025,custom-agent spec「发布渠道」):免登录单轮问答;
+/* Bot 公开嵌入页(custom-agent spec「发布渠道」):免登录单轮问答;
    Bot 未公开/不存在时后端 404,前端呈现统一不可用文案(不暴露存在性)。 */
 
 import { useState } from "react";
@@ -11,7 +11,6 @@ import { Textarea } from "@/components/ui/textarea";
 import type { components } from "@/lib/api-types.gen";
 import { humanizeErrorText } from "@/lib/api";
 
-// ADR-005:消费生成契约(审查循环 F1:手写接口使 tsc 对后端字段漂移零感知)
 type BotChatReply = components["schemas"]["BotChatOut"];
 
 export default function BotPublicPage() {

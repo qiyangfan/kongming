@@ -1,17 +1,4 @@
-"""0008: tool-calling 域两表(019)
-
-Revision ID: 0008
-Revises: 0007
-Create Date: 2026-08-22
-
-sys_tool_audit:工具执行审计(六层防御 L5)——成功/拒绝/失败/限流/待确认
-全量落;写工具确认的挂起态复用本表(status=PENDING_CONFIRM + expires_at +
-idempotency_key),confirm_id 即行 uuid(天然防枚举,归属校验先决),免新表。
-sys_announcement:系统公告(create_system_announcement 写工具落点),
-(tenant_id, idempotency_key) 唯一=幂等防重复发布的物理闸。
-手写迁移(与 0006/0007 同因:autogenerate 之外的手写 DDL 风格沿用 baseline)。
-**downgrade**:删两表(新能力域零存量,回滚即整体移除)。
-"""
+"""新增工具执行审计表和系统公告表，分别记录工具操作与公告发布幂等键。"""
 
 from alembic import op
 
@@ -45,7 +32,7 @@ CREATE TABLE public.sys_tool_audit (
 CREATE INDEX idx_tool_audit_tenant_time ON public.sys_tool_audit (tenant_id, created_at DESC);
 CREATE INDEX idx_tool_audit_tool_time ON public.sys_tool_audit (tool_name, created_at DESC);
 CREATE INDEX idx_tool_audit_user_time ON public.sys_tool_audit (user_id, created_at DESC);
--- R1-S5:pending 聚合按 trace_id+status 过滤,每轮 react 问答响应跑一次
+-- 按 trace_id 和 status 过滤待确认调用；每轮问答都会执行此查询。
 CREATE INDEX idx_tool_audit_trace ON public.sys_tool_audit (trace_id)
     WHERE status = 'PENDING_CONFIRM';
 CREATE INDEX idx_tool_audit_idem ON public.sys_tool_audit (idempotency_key)

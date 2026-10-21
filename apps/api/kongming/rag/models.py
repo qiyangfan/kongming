@@ -1,4 +1,4 @@
-"""rag 领域模型与纯函数(009):零框架依赖(宪法 Article II)。
+"""rag 领域模型与纯函数:不依赖 Web 框架或数据库。
 
 覆盖优先级(knowledge spec):INTROSPECTION < AI_GENERATED < MANUAL_UPLOAD <
 MANUAL_EDIT < FEEDBACK_REFINED——自动来源(扫描/润色)不覆盖更高优先级既有条目。
@@ -26,8 +26,7 @@ AUTOMATED_SOURCE_TYPES = frozenset({"INTROSPECTION", "AI_GENERATED"})
 RECALL_TOP_K = 5
 RRF_K = 60.0
 HISTORY_SQL_LIMIT = 3  # 历史成功 SQL 拼接条数上限(防 token 膨胀)
-# query_history 每 (tenant, datasource_key) 维度总量上限(016 治理):
-# 防膨胀闸门而非常态工作集(上游无上限实测沉淀 <百行/租户源),超出淘汰最旧
+# query_history 每 (tenant, datasource_key) 的总量上限(防膨胀闸门),超出淘汰最旧记录。
 QUERY_HISTORY_CAP = 500
 
 
@@ -40,13 +39,13 @@ class TableBlock:
     # default_factory 走参数化泛型别名(bare dict/list 推断出 Unknown 元素)
     columns_comment: dict[str, str] = field(default_factory=dict[str, str])
     sample_queries: list[str] = field(default_factory=list[str])
-    alias: str = ""  # 037:业务称谓别名
+    alias: str = ""  # 业务称谓别名
 
 
 @dataclass(frozen=True)
 class KnowledgeEntry:
-    """知识条目(管理面/召回视图;永不含向量原始值)。037:新增 alias 业务称谓。
-    102:team_id=团队归属(NULL=租户公共),team_name=展示用团队名(列表面)。"""
+    """知识条目(管理面/召回视图;永不含向量原始值)。新增 alias 业务称谓。
+    team_id=团队归属(NULL=租户公共),team_name=展示用团队名(列表面)。"""
 
     id: str
     tenant_id: str
@@ -58,16 +57,16 @@ class KnowledgeEntry:
     sample_queries: list[str]
     source_type: str
     updated_at: object
-    alias: str = ""  # 037:业务称谓别名
-    team_id: str | None = None  # 102:团队归属(NULL=公共)
-    team_name: str | None = None  # 102:归属团队名(管理面展示;召回面不取)
+    alias: str = ""  # 业务称谓别名
+    team_id: str | None = None  # 团队归属(NULL=公共)
+    team_name: str | None = None  # 归属团队名(管理面展示;召回面不取)
 
 
 @dataclass(frozen=True)
 class RecallHit:
     """单路召回命中(rank 从 1 起;RRF 输入形态)。
 
-    064:score=该路原生分(向量/历史路=余弦相似度 `1-(embedding<=>v)`,
+    score=该路原生分(向量/历史路=余弦相似度 `1-(embedding<=>v)`,
     全文路=ts_rank 检索得分)——RRF 融合分只用于排序与观测,相关度判据
     落在各路原生分上;source=来源路标识(vector/fulltext/history)。
     """
@@ -80,7 +79,7 @@ class RecallHit:
 
 @dataclass(frozen=True)
 class IntrospectedTable:
-    """全量内省产物(fetch-metadata 输入;与 meta 通道同口径:BASE TABLE+VIEW+注释)。"""
+    """全量内省产物(与 meta 通道同口径:BASE TABLE+VIEW+注释)。"""
 
     schema_name: str
     table_name: str
@@ -105,13 +104,13 @@ def can_automated_overwrite(existing: str, incoming: str) -> bool:
     return SOURCE_TYPE_PRIORITY[incoming] >= SOURCE_TYPE_PRIORITY[existing]
 
 
-# ---- 102 知识条目团队归属(可见集合/写权限判定/缓存指纹:领域纯函数单点) ----
+# 知识条目团队归属(可见集合/写权限判定/缓存指纹:领域纯函数单点) ----
 
 WRITABLE_TEAM_ROLES = frozenset({"OWNER", "MEMBER"})
 
 
 def entry_visible(*, team_id: str | None, caller_team_ids: Collection[str]) -> bool:
-    """知识条目可见集合判定(102):租户公共条目(归属空)恒可见;团队条目仅
+    """知识条目可见集合判定:租户公共条目(归属空)恒可见;团队条目仅
     调用者所在团队可见。孤儿归属(团队已删→成员行连带清空→不在任何调用者
     集合)与非成员同形不可见,不泄露存在性。召回过滤/缓存键/管理列表三处
     同一判定,禁另起口径(design Goals)。"""
@@ -121,10 +120,10 @@ def entry_visible(*, team_id: str | None, caller_team_ids: Collection[str]) -> b
 
 
 def entry_write_access(*, team_id: str | None, member_role: str | None) -> str:
-    """知识条目写权限三态判定(102):"allowed"=可写;"not_member"=非成员
+    """知识条目写权限三态判定:"allowed"=可写;"not_member"=非成员
     (404 同形,不暴露存在性);"viewer"=VIEWER 只读成员(403——条目在其
     可见集合内,存在性已知,角色不足如实拒绝)。公共条目=既有权限口径
-    (system:rag:manage 已闸),零额外判定(存量零回归)。"""
+    (system:rag:manage 已闸),零额外判定(存量)。"""
     if team_id is None:
         return "allowed"
     if member_role is None:
@@ -133,7 +132,7 @@ def entry_write_access(*, team_id: str | None, member_role: str | None) -> str:
 
 
 def team_set_fingerprint(team_ids: Collection[str]) -> str:
-    """调用者团队集合确定性指纹(102 缓存键维度):排序后拼接取 sha256 前
+    """调用者团队集合确定性指纹(缓存键维度):排序后拼接取 sha256 前
     16 hex;空集=固定串 "public"(纯公共形态,同形用户共享缓存空间)。
     同集合异序同指纹(排序),异集合异指纹——团队关系变化即指纹变,缓存
     天然隔离(TTL 吸收旧条目,无需主动清)。"""
@@ -143,9 +142,9 @@ def team_set_fingerprint(team_ids: Collection[str]) -> str:
     return hashlib.sha256("\x1f".join(ids).encode("utf-8")).hexdigest()[:16]
 
 
-# 037 alias 结构防御(R1-F1 纵深):括号/换行/竖线会破坏 schema_hint 行结构
+# alias 结构防御(纵深):括号/换行/竖线会破坏 schema_hint 行结构
 # 「schema.table(alias)(cols) -- comment」并可借换行伪造「fake.table(」形态
-# 注入 023 表名提取;含违禁字符的别名整体置空(截半句更误导)。
+# 注入 表名提取;含违禁字符的别名整体置空(截半句更误导)。
 _ALIAS_FORBIDDEN = re.compile(r"[\r\n()（）|]")
 
 
@@ -158,7 +157,7 @@ def clean_alias(alias: str) -> str:
 def build_embedding_text(
     table_name: str, table_comment: str, columns_comment: dict[str, str], *, alias: str = ""
 ) -> str:
-    """embedding 输入文本:表名+alias+表说明+字段说明(037 alias 增强输入侧匹配)。
+    """embedding 输入文本:表名+alias+表说明+字段说明(alias 增强输入侧匹配)。
 
     alias 经 clean_alias 纵深清洗(结构性违禁字符置空)。
     """
@@ -186,7 +185,7 @@ def rrf_fuse(
 
 
 def rrf_fuse_ids(ranked_lists: list[list[str]], *, k: float = RRF_K, top: int = 5) -> list[str]:
-    """通用 RRF(任意 id 键;024 文档子块融合)——与 rrf_fuse 同算法参数,
+    """通用 RRF(任意 id 键;文档子块融合)——与 rrf_fuse 同算法参数,
     同分按首现顺序稳定排序(不动既有函数)。"""
     scores: dict[str, float] = {}
     for hits in ranked_lists:
@@ -199,7 +198,7 @@ def rrf_fuse_ids(ranked_lists: list[list[str]], *, k: float = RRF_K, top: int = 
 def build_schema_hint(entries: list[KnowledgeEntry]) -> str:
     """召回条目 → generate 的 schema 提示文本(纯函数)。
 
-    形态(037 顺延):`表名(alias):列... -- 表说明`;空 alias 不显括号;
+    形态(顺延):`表名(alias):列... -- 表说明`;空 alias 不显括号;
     空说明只留列名;表内嵌示例 SQL 逐条追加。alias 经 clean_alias 纵深清洗。
     """
     lines: list[str] = []
@@ -207,7 +206,7 @@ def build_schema_hint(entries: list[KnowledgeEntry]) -> str:
         cols = ", ".join(
             f"{name}({desc})" if desc else name for name, desc in e.columns_comment.items()
         )
-        # 037:alias 优先显示在表名后括号内
+        # alias 优先显示在表名后括号内
         alias = clean_alias(e.alias)
         alias_part = f"({alias})" if alias else ""
         header = f"{e.schema_name}.{e.table_name}{alias_part}({cols})"
@@ -224,7 +223,7 @@ def build_history_sql(sql_texts: list[str]) -> str:
     return "\n".join(sql_texts[:HISTORY_SQL_LIMIT])
 
 
-# ---- 095 关系感知召回扩展(纯函数;一跳/去重/上限/尾附加) ----
+# 关系感知召回扩展(纯函数;一跳/去重/上限/尾附加) ----
 
 
 @dataclass(frozen=True)
@@ -249,12 +248,12 @@ def expand_by_relations(
     *,
     max_expand: int,
 ) -> list[RelationExpansion]:
-    """按已声明关系一跳扩展(095;纯函数,无 IO)。
+    """按已声明关系一跳扩展(纯函数,无 IO)。
 
     任一端在召回集内的关系行,其对端不在召回集内则补入(方向对称);
     关系行不存在即零扩展(SHALL NOT 猜测)。已在召回集内的对端不补、
     不占额度;多条关系指向同表只补一次;输出序=关系行输入序(尾附加序,
-    预算超限时按 080 既有尾部丢弃方向先裁扩展);受 max_expand 上限约束。
+    预算超限时按 既有尾部丢弃方向先裁扩展);受 max_expand 上限约束。
     """
     recalled_set = set(recalled)
     out: list[RelationExpansion] = []
@@ -298,7 +297,7 @@ class InvalidSchemaName(RagError):
 
 
 class SchemaNotAllowed(RagError):
-    """schema_name 语法合法但不在该数据源可扫描集合(040 写边界闸)。"""
+    """schema_name 语法合法但不在该数据源可扫描集合(写边界闸)。"""
 
 
 class EmptyDocument(RagError):
@@ -336,9 +335,9 @@ class TeamWriteForbidden(RagError):
     如实 403,与「非成员 404 同形」分立——不向不可见者泄露,不向可见者说谎)。"""
 
 
-# ============ 052 知识覆盖报告(确定性纯聚合;零 LLM 零写入) ============
+# ============ 知识覆盖报告(确定性纯聚合;零 LLM 零写入) ============
 
-# 清单封顶(契约固化:零覆盖/纯结构/示例缺口 ≤200,缺标签列按表 ≤100,
+# 清单封顶(契约固化:零覆盖/纯结构/示例缺口 ≤200,缺标签列按表 ≤,
 # 失败问题簇 ≤50);封顶只截条目,总数计数如实反映全量
 COVERAGE_LIST_CAP = 200
 COVERAGE_MISSING_COLS_CAP = 100
@@ -348,7 +347,7 @@ COVERAGE_FAILURE_ROW_LIMIT = 500  # 聚合读取行数上限(内存防线,归并
 
 
 class SchemaTablePair(NamedTuple):
-    """(schema, table) 二元键视图(042 同款防跨 schema 同名表互遮;
+    """(schema, table) 二元键视图(同款防跨 schema 同名表互遮;
     NamedTuple:与元组直接判等,测试与序列化两侧零适配)。"""
 
     schema_name: str
@@ -393,12 +392,12 @@ class MissingColumnsEntry:
 
 @dataclass(frozen=True)
 class HistorySample:
-    """query_history 历史路候选(070:来源透出;064:原生分透出)。"""
+    """query_history 历史路候选(来源透出;原生分透出)。"""
 
     question: str
     sql_text: str
     source_type: str  # EXECUTION | FEEDBACK
-    score: float = 0.0  # 064:历史路余弦相似度(1-(embedding<=>v))
+    score: float = 0.0  # 历史路余弦相似度(1-(embedding<=>v))
 
 
 @dataclass(frozen=True)

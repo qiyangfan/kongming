@@ -18,7 +18,7 @@ TOKEN = {"X-Internal-Token": "test-internal-token"}
 
 class _Llm:
     def prompt_budget(self, task: str | None = None) -> int:
-        return 1_000_000  # 080:测试替身恒宽预算(收敛行为由纯函数测试覆盖)
+        return 1_000_000  # 测试替身恒宽预算(收敛行为由纯函数测试覆盖)
 
     def __init__(self, answers: list[str]) -> None:
         self.answers = list(answers)
@@ -29,14 +29,14 @@ class _Llm:
         user: str,
         *,
         temperature: float = 0.2,
-        **_kw: object,  # 021:task/trace_id/tenant_key 吸收
+        **_kw: object,  # task/trace_id/tenant_key 吸收
     ) -> str:
         return self.answers.pop(0)
 
 
 class _Api:
     async def rag_retrieve(self, **kw: object) -> RagContext | None:
-        return None  # 知识库召回零命中路径(回退实时内省,005 形态回归)
+        return None  # 知识库召回零命中路径(回退实时内省,形态回归)
 
     async def fetch_schema(self, **kw: object) -> SchemaMeta:
         return SchemaMeta(
@@ -60,7 +60,7 @@ def client(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
     llm = _Llm(
         [
             "商品总库存",
-            '{"intent":"data","confidence":0.99}',  # 093 route_intent
+            '{"intent":"data","confidence":0.99}',  # route_intent
             "SELECT sum(qty) FROM goods",
             '{"summary":"共 30"}',
         ]

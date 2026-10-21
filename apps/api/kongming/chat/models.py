@@ -1,14 +1,8 @@
-"""chat 领域模型(零框架,宪法 Article II):图表候选推荐纯函数(049)。
+"""问答结果的图表候选推荐纯函数。按列角色和结果形状返回至多 3 个候选:
+时间维优先折线图,分类维与度量优先柱状图,可加且非负的数据可补饼图,
+双度量可用散点图。
 
-列角色画像(temporal/dimension/measure)→ 结果形状 → 有序图表候选(0~3 个,
-每类型至多一个;候选自带 x/y/series 绑定),参照 Tableau「Show Me」思路:
-- temporal 维(值形态日期/期间列名)→ line(时序;附低基数分类维则多系列);
-- 单分类维 + 度量 → bar 为主;pie 过「可加聚合 + 标签唯一 + 值非负」闸后为辅;
-- 两分类维 + 单度量 → 分组柱状图(bar + series=低基数维);
-- 双度量无维 → scatter;明细/不适配形状 → 零候选(表格即答案)。
-标识列(store_id 类)与期间列(year 类)恒为维度、丧失度量资格——散点 x 轴按
-值处理离散 id 产生的碎刻度从根因消除,而非对个例打补丁。
-"""
+标识列和期间列始终作为维度,不参与度量判断。"""
 
 import datetime as dt
 import re
@@ -31,7 +25,7 @@ _PERIOD_NAMES = {"year", "quarter", "month", "week", "day"}
 
 @dataclass(frozen=True)
 class Suggestion:
-    """对话冷启动建议问题缓存行(039):租户+数据源唯一,questions 为
+    """对话冷启动建议问题缓存行:租户+数据源唯一,questions 为
     3-5 条中文自然语言问句。"""
 
     tenant_id: str
@@ -41,7 +35,7 @@ class Suggestion:
 
 @dataclass(frozen=True)
 class ChartSuggestion:
-    """存量「默认单图」值对象(049 起由首候选展平):type ∈ line/bar/pie/scatter/none;
+    """存量「默认单图」值对象(由首候选展平而来):type ∈ line/bar/pie/scatter/none;
     x/y 为列名(none 时为空)。落库 chart 键与契约 chart 字段形态不变。"""
 
     type: str
@@ -51,7 +45,7 @@ class ChartSuggestion:
 
 @dataclass(frozen=True)
 class ChartCandidate:
-    """图表候选(049):type ∈ line/bar/pie/scatter;y 为值列(多度量多系列),
+    """图表候选:type ∈ line/bar/pie/scatter;y 为值列(多度量多系列),
     series 为系列维(分组柱/时序多系列),无则 None。"""
 
     type: str
@@ -82,7 +76,7 @@ _ROLE_MEASURE = "measure"
 
 def _is_dense_sequence(vals: list[object]) -> bool:
     """整数稠密序列(min∈{0,1}、连续、distinct≤16、max≤64)→ 维度信号
-    (无名形态的小值域枚举/序号兜底;阈值刻意收紧,design D1)。"""
+    (无名形态的小值域枚举/序号兜底;阈值刻意收紧)。"""
     ints = [v for v in vals if isinstance(v, int) and not isinstance(v, bool)]
     if not ints or len(ints) != len(vals):
         return False
@@ -94,7 +88,7 @@ def _is_dense_sequence(vals: list[object]) -> bool:
 
 
 def _profile_columns(columns: list[str], rows: list[list[object]]) -> list[str]:
-    """列角色画像(design D1,先中先停):temporal(值形态)→ 期间列/标识列
+    """列角色画像(先中先停):temporal(值形态)→ 期间列/标识列
     (名称信号)→ measure(其余非 bool 数值)→ dimension(分类)。
     整数稠密序列兜底仅当降维后仍剩至少一个度量才落地——防小值域计数列被
     降维后度量集归零,把本可配图的结果打成零候选。"""
@@ -142,14 +136,14 @@ def _additive_outputs(sql: str) -> set[str]:
             elif isinstance(inner, exp.Sum):
                 out.add((p.alias or "sum").lower())
         return out
-    except Exception:  # noqa: BLE001  # 任何解析异常按不可加处理(标签永不阻断同款)
+    except Exception:  # noqa: BLE001  # 解析异常按不可加处理,标签推导不阻断主流程
         return set()
 
 
 def suggest_charts(
     columns: list[str], rows: list[list[object]], sql: str = ""
 ) -> list[ChartCandidate]:
-    """结果形状 → 有序图表候选(design D3;纯函数,同步/流式/回显三路径同源,
+    """结果形状 → 有序图表候选(纯函数,同步/流式/回显三路径同源,
     回显缺档按同输入重算)。维基数=行集内 distinct 值数;零候选=不配图。"""
     if len(columns) < 2 or not rows:
         return []
@@ -211,7 +205,7 @@ def suggest_charts(
     return []  # 两维多度量/≥3 维等:任何单图必失真,表格即答案
 
 
-# ============ 050 结果统计键名用户化 ============
+# ============ 结果统计键名用户化 ============
 
 _STAT_KIND_CN = {"max": "最高", "min": "最低", "avg": "均值"}
 
@@ -220,7 +214,7 @@ def humanize_stats(
     stats: dict[str, object], columns: list[str], labels: list[str]
 ) -> dict[str, object]:
     """统计键 → 用户可读形态(纯函数,幂等):rows→「行数」;「{列}_max/_min/_avg」
-    在列名唯一命中结果列时→「{列标签} 最高/最低/均值」(041 列标签单源;标签
+    在列名唯一命中结果列时→「{列标签} 最高/最低/均值」(列标签单源;标签
     缺失回退物理列名);歧义/未命中保留原键 fail-open。已中文化键不匹配
     「列_后缀」形态,二次应用原样保留(存量档读档归一路径依赖此幂等性)。"""
     out: dict[str, object] = {}
@@ -247,11 +241,11 @@ def humanize_stats(
     return out
 
 
-# ============ 026 conversation-artifacts:产物派生纯函数 ============
+# ============ conversation-artifacts:产物派生纯函数 ============
 
 
 class Artifact(TypedDict):
-    """对话产物(026):type ∈ sql/chart/document/report;content 主内容;metadata 辅助。"""
+    """对话产物:type ∈ sql/chart/document/report;content 主内容;metadata 辅助。"""
 
     type: str
     content: str
@@ -264,10 +258,10 @@ def derive_artifacts(
     chart: ChartSuggestion,
     summary: str,
     datasource_key: str,
-    report: dict[str, object] | None = None,  # 088:报告轮次纯增(互斥派生)
+    report: dict[str, object] | None = None,  # 报告轮次(互斥派生)
 ) -> list[Artifact]:
     """从既有要素确定性派生产物(纯函数,零 LLM):报告轮次→report 卡
-    (088,互斥于问答三卡——报告轮次不叠加派生);否则 sql 非空→sql 卡;
+    (互斥于问答三卡——报告轮次不叠加派生);否则 sql 非空→sql 卡;
     chart.type≠none→chart 卡;summary 非空→document 卡。
     派生对同步/流式/回显三路径同源(回显缺档时按要素重算,与 chart 同款)。"""
     if report is not None:
@@ -310,7 +304,7 @@ def derive_artifacts(
     return out
 
 
-# ============ 041 呈现层列标签:物理名/显示名双轨制 ============
+# ============ 呈现层列标签:物理名/显示名双轨制 ============
 
 _CJK = re.compile(r"[\u4e00-\u9fff]")
 

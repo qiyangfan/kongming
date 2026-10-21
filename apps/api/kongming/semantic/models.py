@@ -1,4 +1,4 @@
-"""semantic 领域模型(023):表关系/指标/注入文本格式化(零框架)。"""
+"""semantic 领域模型:表关系/指标/注入文本格式化(零框架)。"""
 
 from dataclasses import dataclass, field
 
@@ -17,14 +17,14 @@ class MetricDef:
     sql_template: str
     business_terms: list[str] = field(default_factory=list[str])
     enabled: bool = True
-    # 076(纯增):口径依据透出(仓储 SQL 已 SELECT,此前被丢)
+    # 口径依据透出(仓储 SQL 已 SELECT,被丢)
     metric_id: str = ""
     updated_at: object | None = None
 
 
 @dataclass(frozen=True)
 class CallerScope:
-    """调用者 data_scope 解析结果(110)。
+    """调用者 data_scope 解析结果。
 
     universal=True=有效范围 ALL 档(全部指标可见);False 时仅 dept_ids 集合内
     的 DEPT 档指标 + 全体 ALL 档指标可见(空集合=SELF/无身份/CUSTOM 空集读面
@@ -69,7 +69,7 @@ def match_metrics(question: str, metrics: list[MetricDef], top_k: int = 5) -> li
 
 @dataclass(frozen=True)
 class MetricHit:
-    """语义层命中的结构化投影(076):标识/名称/口径表达式/修订时间。
+    """语义层命中的结构化投影:标识/名称/口径表达式/修订时间。
     提示词文字段由此列表派生(单一来源,杜绝两处口径漂移)。"""
 
     metric_id: str

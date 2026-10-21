@@ -1,4 +1,4 @@
-"""圆桌编排核心剧本化测试(115,安全与失控防护先行)。
+"""圆桌编排核心剧本化测试(安全与失控防护先行)。
 
 覆盖:治理协议(共识判定/轮次硬顶/预算池/全员弃权提前收口)、诚实收口
 (未共识分歧保留/假共识不洗白执行失败/纯文本对辩无证据不通过)、名册法定
@@ -138,8 +138,7 @@ async def test_budget_exhaustion_honest_close() -> None:
     assert result["consensus"] is False
     assert "预算" in str(result["reservation"])
     assert result["rounds_used"] == 2
-    # 截断收口的裁决语义钉死:截断轮前全体实质发言 PASS → 按证据口径 PASS
-    # (dissent/reservation 双披露,非谎称完成)
+    # 截断前全体有效发言为 PASS 时仍按证据判为 PASS,并保留分歧与保留意见。
     assert result["verdict"] == "PASS"
 
 
@@ -241,13 +240,13 @@ async def test_fake_consensus_not_whitewashed() -> None:
         ),
         max_rounds=3,
     )
-    assert result["consensus"] is True  # 主席确曾判共识(判定行如实落账)
+    assert result["consensus"] is True  # 主席判定已有共识。
     assert result["verdict"] == "ERROR"  # 但执行失败不被共识洗白
     assert "冲突" in str(result["reservation"])
 
 
 async def test_pure_text_deliberation_fails() -> None:
-    """全程无数据查证:纯文本对辩不构成完成证据(090 证据口径圆桌投影)。"""
+    """全程无数据查证:纯文本对辩不构成完成证据(证据口径圆桌投影)。"""
     result = await run_roundtable(
         payload={"subgoal": "q"},
         llm=_FakeLlm([_chair(True)]),

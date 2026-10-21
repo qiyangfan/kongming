@@ -1,4 +1,4 @@
-"""guardrail 仓储(020):sys_guardrail_audit / sys_guardrail_rule 的 SQL 落地。
+"""guardrail 仓储:sys_guardrail_audit / sys_guardrail_rule 的 SQL 落地。
 
 审计写入=独立短事务(失败仅 error 日志不阻断,与既有审计同范式);
 配置覆盖读写走请求会话。
@@ -93,7 +93,7 @@ class SqlGuardrailRepo:
                 " enabled = :e,"
                 " action = COALESCE(CAST(:a AS varchar), public.sys_guardrail_rule.action),"
                 " threshold = COALESCE(:t, public.sys_guardrail_rule.threshold),"
-                " updated_by = :u, updated_at = now()"  # R1-M5:None=不触动既有覆盖
+                " updated_by = :u, updated_at = now()"  # None=不触动既有覆盖
             ),
             {"n": rule_name, "e": enabled, "a": action, "t": threshold, "u": updated_by},
         )

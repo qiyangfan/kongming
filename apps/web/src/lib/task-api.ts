@@ -1,4 +1,4 @@
-/* task 域 API 封装(090 task-kernel)。类型契约由 ADR-005 管线生成(禁手写)。 */
+/* task 域 API 封装(task-kernel);类型契约由生成管线提供(ADR-005,禁手写)。 */
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";
@@ -32,7 +32,7 @@ export function getTask(id: string): Promise<TaskDetailOut> {
   return api.get<TaskDetailOut>(`/tasks/${id}`);
 }
 
-/* 协作观测面(091):任务维度协作运行清单(worker 账本+裁决) */
+/* 协作观测面:任务维度协作运行清单(worker 账本+裁决) */
 export function listCollabRuns(id: string): Promise<CollabRunsOut> {
   return api.get<CollabRunsOut>(`/tasks/${id}/collab-runs`);
 }
@@ -70,7 +70,7 @@ export function approveStep(id: string, stepId: string, approve: boolean): Promi
 
 export type GraphConfirmOut = components["schemas"]["GraphConfirmOut"];
 
-/** 图内确认处置(add-graph-checkpoint):批准=动作恢复执行,拒绝=动作跳过。 */
+/** 图内确认处置(graph-checkpoint):批准=动作恢复执行,拒绝=动作跳过。 */
 export function decideGraphConfirm(
   id: string,
   confirmId: string,
@@ -94,7 +94,7 @@ export const TASK_STATUS_META: Record<
   CANCELLED: { label: "已取消", variant: "outline" },
 };
 
-/* 协作账本状态呈现(091):运行态与 worker 态共用一族(PARTIAL 为运行独有) */
+/* 协作账本状态呈现:运行态与 worker 态共用一族(PARTIAL 为运行独有) */
 export const COLLAB_STATUS_META: Record<
   string,
   { label: string; variant: "secondary" | "success" | "warning" | "destructive" | "outline" }

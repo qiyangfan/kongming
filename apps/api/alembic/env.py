@@ -17,7 +17,7 @@ from kongming.config import get_settings  # noqa: E402
 
 # URL 单源=KM_DATABASE_URL(settings);程序化注入(迁移演练临时库,如
 # tests.conftest.migrated_tmp_db)优先——ini 的占位 url 以 driver:// 开头,
-# 借此前缀区分「未注入」
+# 借缀区分「未注入」
 _injected_url = config.get_main_option("sqlalchemy.url")
 if not _injected_url or _injected_url.startswith("driver://"):
     config.set_main_option("sqlalchemy.url", get_settings().database_url)

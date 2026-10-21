@@ -1,9 +1,4 @@
-"""102 知识条目团队归属:可见集合判定纯函数/三路召回过滤/缓存团队指纹/
-治理面归属治理(404 同形)/团队删除钩子公共化/fetch·reindex 归属语义。
-
-纪律:安全类测试先行(红→绿);缓存测试全程禁中途清缓存(键含团队集合
-指纹自然隔离,中途 flush 会掩盖键缺陷——095 缓存测试纪律)。
-"""
+"""覆盖知识条目的团队归属、可见性和成员离队后的处理。"""
 # pyright: reportPrivateUsage=false
 
 import asyncio
@@ -199,7 +194,7 @@ async def _upload(
     )
 
 
-# ============ 2.1 可见集合判定/写权限纯函数(四形态矩阵) ============
+# ============ 可见集合判定/写权限纯函数(四形态矩阵) ============
 
 
 def test_entry_visible_four_forms() -> None:
@@ -207,7 +202,7 @@ def test_entry_visible_four_forms() -> None:
     可见;孤儿(团队已删→不在任何调用者集合)不可见不泄露。"""
     from kongming.rag.models import entry_visible
 
-    # 公共(team 归属空):任何调用者可见(含无团队者)——存量零回归
+    # 公共(team 归属空):任何调用者可见(含无团队者)——存量行为
     assert entry_visible(team_id=None, caller_team_ids=frozenset()) is True
     assert entry_visible(team_id=None, caller_team_ids=frozenset({"t1"})) is True
     # 成员:条目团队 ∈ 调用者团队集合
@@ -245,11 +240,11 @@ def test_team_set_fingerprint_rules() -> None:
     assert len(a) == 16  # 短指纹(键段可读,碰撞面 2^64 足够)
 
 
-# ============ 1.1 迁移 0048:升级/降级往返 + 存量行归属空 ============
+# ============ 迁移 0048:升级/降级往返 + 存量行归属空 ============
 
 
 async def _run_alembic(session: AsyncSession, cfg: Config, target: str) -> None:
-    """执行一条 alembic 命令(前 rollback 清场,防 ACCESS SHARE 死等——103 实证)。
+    """执行一条 alembic 命令(前 rollback 清场,防 ACCESS SHARE 死等)。
     cfg 由 migrated_tmp_db 注入(一次性临时库,防 dropped 列占位累积)。"""
     await session.rollback()
     if target == "head":
@@ -259,7 +254,7 @@ async def _run_alembic(session: AsyncSession, cfg: Config, target: str) -> None:
 
 
 async def test_migration_0048_roundtrip_and_legacy_null() -> None:
-    """down 到 0047 → 存量形态插行 → 升 head:列存在且存量行归属全空(零回归);
+    """down 到 0047 → 存量形态插行 → 升 head:列存在且存量行归属全空;
     再降/升往返列随之出现消失。"""
     async with migrated_tmp_db() as (session, cfg):
         await _run_alembic(session, cfg, "0047")
@@ -295,7 +290,7 @@ async def test_migration_0048_roundtrip_and_legacy_null() -> None:
             )
         ).scalar_one()
         assert col == 1
-        # 存量行归属空断言(全 NULL=公共,零回归)
+        # 存量行归属空断言(全 NULL=公共)
         legacy = (
             await session.execute(
                 text("SELECT team_id FROM rag.table_descriptions WHERE table_name='legacy_t'")
@@ -327,7 +322,7 @@ async def test_migration_0048_roundtrip_and_legacy_null() -> None:
         assert col == 1
 
 
-# ============ 2.2/2.3 召回过滤 + 缓存团队指纹(全程禁 flush) ============
+# ============ 召回过滤 + 缓存团队指纹(全程禁 flush) ============
 
 
 async def _member_and_outsider(session: AsyncSession, make_user: MakeUser) -> tuple[str, str, str]:
@@ -462,7 +457,7 @@ async def test_membership_change_reflected_without_flush(
     assert len([k async for k in cast("Any", get_redis()).scan_iter(match="km:ragctx:*")]) == 2
 
 
-# ============ 3.1 治理面:上传归属/列表筛选/404 同形/VIEWER 403 ============
+# ============ 治理面:上传归属/列表筛选/404 同形/VIEWER 403 ============
 
 
 async def test_upload_with_team_and_list_scope_filters(
@@ -716,7 +711,7 @@ async def test_ownership_change_audit_and_cache_evict(
     assert row is None
 
 
-# ============ 3.2 团队删除钩子公共化 ============
+# ============ 团队删除钩子公共化 ============
 
 
 async def test_team_delete_publicizes_entries_with_audit_and_evict(
@@ -779,7 +774,7 @@ async def test_team_delete_hook_failure_not_blocking(
     ON DELETE SET NULL 级联兜底公共化(不泄露不丢资产)。
 
     告警经替换模块 logger 捕获(alembic fileConfig 会 disable 既有 logger,
-    caplog 在本套件不可靠——实证),断言确定性不受日志基建影响。"""
+    caplog 在本套件不可靠),断言确定性不受日志基建影响。"""
     import kongming.team.service as team_service
     from kongming.rag.repository import RagRepository
 
@@ -827,7 +822,7 @@ async def test_team_delete_hook_failure_not_blocking(
     assert row is None  # FK 级联兜底公共化(可见性按团队不存在=不可见→级联后公共)
 
 
-# ============ 3.3 fetch-metadata / reindex 归属语义(自动来源一律公共) ============
+# ============ fetch-metadata / reindex 归属语义(自动来源一律公共) ============
 
 
 async def test_fetch_metadata_resets_team_auto_entry_to_public(
@@ -969,7 +964,7 @@ async def test_reconcile_deletes_stale_team_auto_entry_same_rule(
         monkey.undo()
 
 
-# ============ 102 伴生:query_history 历史路样本可见性 ============
+# ============ query_history 历史路样本可见性 ============
 
 
 async def test_migration_0052_roundtrip_and_legacy_public() -> None:
@@ -1049,7 +1044,7 @@ class _FixedEmbedder:
 
 
 async def test_history_sample_visibility_roundtrip(session: AsyncSession) -> None:
-    """历史路旁路治理(102 伴生):成员回写的样本带其团队集合,非成员召回
+    """历史路旁路治理:成员回写的样本带其团队集合,非成员召回
     不可见、成员与公共可见;无身份回写=公共样本全员可见;幂等覆盖以最新
     一次来源刷新集合。"""
     import uuid as uuid_mod

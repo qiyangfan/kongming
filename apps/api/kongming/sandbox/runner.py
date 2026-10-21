@@ -1,15 +1,8 @@
-"""PodmanSandboxRunner(027):podman CLI 子进程执行(asyncio 参数数组,
-禁 shell);容器参数全常量拼装(用户输入零拼接,design D1)。
+"""通过 Podman CLI 在隔离容器中执行沙箱任务。
 
-隔离与配额(cgroup 内核级强制):
---network none / --read-only / tmpfs /tmp 16m(matplotlib 配置位)/
---memory / --cpus / --pids-limit 64 / --cap-drop ALL /
---security-opt no-new-privileges / 非 root(--user 1000,镜像内 sandbox)/
---rm 即起即销 / --stop-timeout 1。
-
-超时=wait_for 到点杀子进程(--rm 兜底清理);exit 137(cgroup OOM
-SIGKILL 典型形态)→ RESOURCE_LIMIT;协议行缺失(镜像损坏/直杀)→
-ERROR 带 stderr 尾。实现零抛出(端口契约)。
+命令以参数数组启动不经 shell;容器禁网、只读挂载、非 root 用户,并限制
+内存/CPU/进程数。超时终止子进程;退出码 137 归为资源超限;缺少协议结果行
+时按错误返回并附 stderr 尾部。
 """
 
 import asyncio
@@ -29,7 +22,7 @@ log = logging.getLogger(__name__)
 _STDIN_CAP = 2 * 1024 * 1024
 _STDERR_TAIL = 2000
 
-# R1-S1:宿主侧 stdout/stderr 各设总量闸——容器内 64KB 闸只拦 sys.stdout
+# 宿主侧 stdout/stderr 各设总量闸——容器内 64KB 闸只拦 sys.stdout
 # 替换位,os.write(1,…)/sys.__stdout__/刷 stderr 可绕过;communicate 全量
 # 读入 api 进程内存是无界放大面(30s × pipe 数百 MB/s → GB 级)。合法协议
 # 行上界 ≈ 500KB 图 + 64KB stdout + 开销,2MB 充裕
@@ -37,7 +30,7 @@ _OUTPUT_CAP = 2 * 1024 * 1024
 
 
 class _StreamOverflow(Exception):
-    """R1-S1:单侧输出超宿主总量闸(疑洪水攻击)。"""
+    """单侧输出超宿主总量闸(疑洪水攻击)。"""
 
 
 async def _read_bounded(stream: asyncio.StreamReader, cap: int) -> bytes:
@@ -59,10 +52,7 @@ def _parse_outcome(
     exit_code: int | None,
     duration_ms: int,
 ) -> SandboxOutcome:
-    """进程收尾分类(纯函数,单测直喂):137→RESOURCE_LIMIT(cgroup OOM
-    SIGKILL 典型形态);协议行缺失/畸形→ERROR(stderr 为主要事实源);
-    正常协议行→按 status 映射。只认最后一行(代码伪造的协议行必在真
-    协议行之前,天然失效)。"""
+    """根据子进程退出码和协议输出分类结果；137 表示资源超限，缺少结果行表示执行错误。"""
     if exit_code == 137:
         return SandboxOutcome(
             status="RESOURCE_LIMIT",
@@ -90,7 +80,7 @@ def _parse_outcome(
         if not isinstance(parsed, dict):
             raise ValueError("协议体非对象")
         body = cast("dict[str, Any]", parsed)
-        # A2:取值全收敛(伪造协议行 int 转换失败不得逃逸——端口零抛出契约)
+        # 协议字段取值全收敛:伪造协议行的 int 转换失败不得逃逸(端口零抛出契约)
         data_rows = int(body.get("data_rows") or 0)
         data_cols = int(body.get("data_cols") or 0)
         images_raw = body.get("images")
@@ -99,7 +89,7 @@ def _parse_outcome(
             if isinstance(images_raw, list)
             else []
         )
-        # T2:宿主复核(伪造/篡改面):v1 至多 1 张,单张 base64 ≤500KB
+        # 宿主复核(伪造/篡改面):v1 至多 1 张,单张 base64 ≤500KB
         images = [i for i in images[:1] if len(i) <= 500 * 1024]
         stdout_val = str(body.get("stdout") or "")
         error_val = body.get("error")
@@ -128,7 +118,7 @@ def _parse_outcome(
 
 
 class PodmanSandboxRunner:
-    """design D1/D3 实现。timeout_sec/mem_mb/cpus 来自 Settings(组合根)。"""
+    """timeout_sec/mem_mb/cpus 来自 Settings(组合根)。"""
 
     def __init__(
         self,
@@ -175,7 +165,7 @@ class PodmanSandboxRunner:
 
     @staticmethod
     async def _kill_container(name: str) -> None:
-        """按名杀容器(集成测试实证:杀 podman CLI 客户端不会终止容器——
+        """按名杀容器(集成测试:杀 podman CLI 客户端不会终止容器——
         conmon 托管下容器续跑至自然退出,--rm 才生效;TIMEOUT 语义要求
         立即终止,须 podman kill 容器本体)。"""
         with contextlib.suppress(Exception):
@@ -211,7 +201,7 @@ class PodmanSandboxRunner:
             )
 
         async def _exchange() -> tuple[bytes, bytes]:
-            # 写 stdin → 关闭 → 双侧有界读(R1-S1)。容器引导脚本先读尽
+            # 写 stdin → 关闭 → 双侧有界读。容器引导脚本先读尽
             # stdin 再执行,写侧不会与读侧死锁;子早夭则 drain 断管
             # 三管道已配 PIPE,None 不可达;显式收窄(S101 禁 assert)+
             # 局部变量锁定(mypy 属性收窄会被后续调用冲掉)
@@ -241,7 +231,7 @@ class PodmanSandboxRunner:
             await self._kill_container(name)  # 先杀容器本体(conmon 托管)
             with contextlib.suppress(ProcessLookupError):
                 proc.kill()
-            # T4:wait 裹超时保持防御对称(SIGKILL 秒回,裹 5s 防极端滞留)
+            # wait 裹超时保持防御对称(SIGKILL 秒回,裹 5s 防极端滞留)
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(proc.wait(), timeout=5)
             return SandboxOutcome(
@@ -250,7 +240,7 @@ class PodmanSandboxRunner:
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
         except _StreamOverflow:
-            # R1-S1:输出洪水——杀容器收敛 RESOURCE_LIMIT(资源滥用类)
+            # 输出洪水——杀容器收敛 RESOURCE_LIMIT(资源滥用类)
             await self._kill_container(name)
             with contextlib.suppress(ProcessLookupError):
                 proc.kill()
@@ -263,7 +253,7 @@ class PodmanSandboxRunner:
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
         except asyncio.CancelledError:
-            # R1-A3:停机/取消窗口也必须杀容器本体(conmon 托管不受 CLI 生死)
+            # 停机/取消窗口也必须杀容器本体(conmon 托管不受 CLI 生死)
             await self._kill_container(name)
             with contextlib.suppress(ProcessLookupError):
                 proc.kill()

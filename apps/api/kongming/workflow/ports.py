@@ -1,11 +1,10 @@
-"""workflow 端口(029):节点执行器与存储反转,引擎零框架依赖。"""
+"""workflow 端口:节点执行器与存储反转,引擎零框架依赖。"""
 
 from typing import Any, Protocol
 
 
 class SqlRunner(Protocol):
-    """sql 节点执行(029):实现侧=internal 执行全链路(六层防御,
-    触发者身份);返回 {verdict, reason, columns, rows}。"""
+    """通过 internal SQL 执行服务运行节点，并保留触发者身份校验。"""
 
     async def run_sql(
         self,
@@ -19,9 +18,10 @@ class SqlRunner(Protocol):
 
 
 class HttpRunner(Protocol):
-    """http 节点执行(029):实现侧保证 SSRF 判定(私网/回环/链路本地/
-    元数据/保留段拒绝,不发出请求)+不跟随重定向+1MB 截断+15s 超时;
-    返回 {status, body} 或抛 SsrFBlocked。"""
+    """执行 HTTP 节点并拒绝访问私网、回环、链路本地、云元数据和保留地址。
+
+    请求不跟随重定向，响应体最多 1 MB，超时 15 秒；拒绝时抛出 SsrFBlocked。
+    """
 
     async def run_http(
         self,
@@ -38,7 +38,7 @@ class SsrFBlocked(Exception):
 
 
 class AgentRunner(Protocol):
-    """agent 节点执行(029):实现侧=019 ReAct 回调(工具集=触发者
+    """agent 节点执行:实现侧=ReAct 回调(工具集=触发者
     权限点过滤,channel="workflow");返回 {success, summary, sql, columns, rows}。"""
 
     async def run_agent(
@@ -66,7 +66,7 @@ class WorkflowRepo(Protocol):
         version: int,
         definition: dict[str, Any],
         created_by: str,
-        team_id: Any = None,  # 032:继承上一版归属
+        team_id: Any = None,  # 继承上一版归属
     ) -> str: ...
 
     async def latest_def(self, *, tenant_id: str, wf_key: str) -> dict[str, Any] | None: ...

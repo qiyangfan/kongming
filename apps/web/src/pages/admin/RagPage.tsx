@@ -1,8 +1,4 @@
-/* 知识库管理页(web-admin 009 delta):列表(数据源筛选/分页)+ 上传(文件选择
-   +数据源/schema)+ 删除受控确认 + 扫描数据源 + 重建索引(受控确认,结果展示)。
-   102:列表归属列与筛选(公共/我所在的团队)、上传表单归属选择(默认公共,
-   可选我作为 OWNER/MEMBER 的团队)、归属变更受控确认(AlertDialog 明示可见
-   范围变化)。全部走 shadcn 组件;错误反馈 role=alert;进行中操作禁重复提交。 */
+/* 管理知识库条目：按数据源和归属筛选，支持上传、编辑说明、删除、扫描及重建索引。 */
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -71,7 +67,7 @@ const SOURCE_LABEL: Record<string, string> = {
 
 export default function RagPage() {
   const qc = useQueryClient();
-  // ?table=<名> 定位(014 feedback-refine「编辑知识」跳转):提示条+行高亮
+  // ?table=<名> 用于从反馈详情定位条目,并显示提示和行高亮。
   const [searchParams, setSearchParams] = useSearchParams();
   const locateTable = searchParams.get("table");
   const [page, setPage] = useState(1);
@@ -79,18 +75,17 @@ export default function RagPage() {
   const [actionDs, setActionDs] = useState("");
   const [uploadSchema, setUploadSchema] = useState("");
   const [uploadDs, setUploadDs] = useState("default");
-  // 102:上传归属(""=公共,否则团队 id)与列表归属筛选
+  // 上传归属(""=公共,否则团队 id)与列表归属筛选
   const [uploadTeamId, setUploadTeamId] = useState("");
   const [teamScope, setTeamScope] = useState<TeamScope>("all");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<KnowledgeItemOut | null>(null);
   const [reindexOpen, setReindexOpen] = useState(false);
-  // 037 表说明编辑(表说明与业务称谓别名同面)
   const [editTarget, setEditTarget] = useState<KnowledgeItemOut | null>(null);
   const [editComment, setEditComment] = useState("");
   const [editAlias, setEditAlias] = useState("");
-  // 102 归属变更受控确认(target=条目;destId=确认框内选择的目标归属)
+  // 归属变更确认框(target=条目;dest=框内选择的目标归属)
   const [ownershipTarget, setOwnershipTarget] = useState<KnowledgeItemOut | null>(null);
   const [ownershipDest, setOwnershipDest] = useState<string>("public");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -100,13 +95,13 @@ export default function RagPage() {
     queryFn: datasourceApi.options,
   });
 
-  // 102:我所在的团队(上传归属候选=OWNER/MEMBER 可写团队;筛选用全部所在团队)
+  // 我所在的团队(上传归属候选=OWNER/MEMBER 可写团队;筛选用全部所在团队)
   const myTeams = useQuery({ queryKey: ["teams", "mine"], queryFn: listMyTeams });
   const writableTeams = (myTeams.data ?? []).filter(
     (t) => t.role === "OWNER" || t.role === "MEMBER",
   );
 
-  // 040:可扫描 schema 集合(上传表单候选源,随上传数据源联动)
+  // 可扫描 schema 集合(上传表单候选源,随上传数据源联动)
   const schemas = useQuery({
     queryKey: ["rag", "schemas", uploadDs],
     queryFn: () => ragApi.allowedSchemas(uploadDs),
@@ -137,13 +132,12 @@ export default function RagPage() {
       invalidate();
     },
     onError: (e: Error) => {
-      // 写边界闸 detail(SCHEMA_NOT_ALLOWED 等)已上收 lib/api 单源转译为中文
+      // SCHEMA_NOT_ALLOWED 等边界错误已由 lib/api 统一转译为中文
       setError(`上传失败:${e.message}`);
       setNotice(null);
     },
   });
 
-  // 102:归属变更受控确认(公共⇄团队原位转移;确认后刷新,取消不动)
   const setOwnership = useMutation({
     mutationFn: (t: { id: string; teamId: string | null }) => ragApi.setOwnership(t.id, t.teamId),
     onSuccess: (out) => {
@@ -241,7 +235,7 @@ export default function RagPage() {
   const total = list.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  // 删除末页唯一条目后分页越界自愈(007 R2 同款:空页误导)
+  // 删除末页唯一条目后重新计算页码，避免显示空页。
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
@@ -353,7 +347,7 @@ export default function RagPage() {
           </div>
           <div className="space-y-1">
             <Label htmlFor="rag-upload-schema">schema</Label>
-            {/* 040:自由输入改封闭集合选择框(候选=可扫描 schema,与扫描/上传闸同源) */}
+            {/* schema 候选=可扫描集合,与扫描/上传校验同源 */}
             <Select
               value={uploadSchema}
               onValueChange={setUploadSchema}
@@ -380,7 +374,7 @@ export default function RagPage() {
               </p>
             )}
           </div>
-          {/* 102:上传归属(默认公共;可选我作为 OWNER/MEMBER 的团队——VIEWER 只读不可选) */}
+          {/* 上传归属(默认公共;可选我作为 OWNER/MEMBER 的团队——VIEWER 只读不可选) */}
           <div className="space-y-1">
             <Label htmlFor="rag-upload-team">归属</Label>
             <Select
@@ -419,7 +413,7 @@ export default function RagPage() {
                 </TooltipContent>
               </Tooltip>
             </Label>
-            {/* 隐藏 file input=不可见管道元素(样式铁律豁免);Button 触发 */}
+            {/* 隐藏 file input 仅作 Button 触发的管道,不作为可见交互件(样式铁律豁免) */}
             <input
               ref={fileRef}
               id="rag-upload-file"
@@ -428,8 +422,7 @@ export default function RagPage() {
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
-                // 读值后立即清 input:失败重选同一文件才触发 change
-                // (浏览器对同路径 value 不派发 onChange——R2-S2)
+                // 清空 input value,确保失败后再次选择同一文件仍会触发 change。
                 e.target.value = "";
                 if (f) upload.mutate(f);
               }}
@@ -448,8 +441,7 @@ export default function RagPage() {
         </p>
       </section>
 
-      {/* 097 召回试跑面板(只读验证面):上传→验证动线同页闭环;
-          数据源选项复用本页 options 查询(props 注入,不重复请求) */}
+      {/* 召回试跑面板只读验证知识表，不写入知识库；数据源选项复用本页查询。 */}
       <RecallProbePanel options={options ?? []} />
 
       <div className="flex flex-wrap items-center gap-2">
@@ -472,7 +464,6 @@ export default function RagPage() {
             ))}
           </SelectContent>
         </Select>
-        {/* 102:归属筛选(公共/我所在的团队) */}
         <Select
           value={teamScope}
           onValueChange={(v) => {
@@ -584,7 +575,7 @@ export default function RagPage() {
         ]}
         actions={[
           { label: "编辑", onSelect: openEdit },
-          // 102:归属变更入口(公共条目且无可写团队时无处可转,不显入口)
+          // 归属变更入口(公共条目且无可写团队时无处可转,不显入口)
           {
             label: "归属",
             onSelect: openOwnership,
@@ -616,7 +607,7 @@ export default function RagPage() {
         </Button>
       </div>
 
-      {/* 037 表说明编辑:表说明与业务称谓别名同面(MANUAL_EDIT,自动润色不覆盖) */}
+      {/* 表说明与业务称谓别名同面对话框编辑;保存后标记 MANUAL_EDIT,自动润色不覆盖 */}
       <Dialog
         open={editTarget !== null}
         onOpenChange={(open) => {
@@ -739,7 +730,7 @@ export default function RagPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 102 归属变更受控确认:明示变更后可见范围变化;取消则不动 */}
+      {/* 归属变更受控确认:明示变更后可见范围变化;取消则不动 */}
       <AlertDialog
         open={ownershipTarget !== null}
         onOpenChange={(open) => {
@@ -795,15 +786,13 @@ export default function RagPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 024 业务文档区:政策/流程类文档上传与维护(与表知识双通道隔离) */}
+      {/* 业务文档区:政策/流程类文档上传与维护(与表知识双通道隔离) */}
       <DocumentsSection datasource={actionDs || "default"} />
     </div>
   );
 }
 
-/* ---- 024 业务文档区 ---- */
-
-// ADR-005:消费生成契约(审查循环 F1)
+// ADR-005:消费生成契约
 type DocItem = components["schemas"]["DocumentItemOut"];
 
 function DocumentsSection({ datasource }: { datasource: string }) {
@@ -811,13 +800,13 @@ function DocumentsSection({ datasource }: { datasource: string }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [removing, setRemoving] = useState<DocItem | null>(null); // R1-L7
+  const [removing, setRemoving] = useState<DocItem | null>(null);
   const [delErr, setDelErr] = useState<string | null>(null);
   const docs = useQuery({
     queryKey: ["rag-docs", datasource],
     queryFn: () => api.get<DocItem[]>(`/system/document/documents?datasource_key=${datasource}`),
   });
-  // 审查循环 B4:裸 promise 改受控 mutation——删除在途可关框/双击重复发请求
+  // 受控 mutation 驱动删除:在途时禁用取消/确认,防关框后重复发请求或双击重复提交
   const delDoc = useMutation({
     mutationFn: (id: string) => api.delete(`/system/document/documents/${id}`),
     onSuccess: () => {
@@ -887,7 +876,7 @@ function DocumentsSection({ datasource }: { datasource: string }) {
           onChange={(e) => {
             const f = e.target.files?.[0];
             if (f) void doUpload(f);
-            e.target.value = ""; // 同文件重选触发(009 R2-S2 教训)
+            e.target.value = ""; // 同文件重选触发
           }}
         />
       </div>
@@ -927,7 +916,7 @@ function DocumentsSection({ datasource }: { datasource: string }) {
         )}
       </div>
 
-      {/* R1-L7:删除受控确认(与同页表知识同先例);失败对话框内可见 */}
+      {/* 删除受控确认(与同页表知识同先例);失败对话框内可见 */}
       <AlertDialog
         open={removing !== null}
         onOpenChange={(open) => {

@@ -1,10 +1,10 @@
-"""billing 领域模型(034,零框架):配额判定纯函数(全部网关判定
+"""billing 领域模型(零框架):配额判定纯函数(全部网关判定
 收于此单点)。
 
 三维:TOKENS(token 数)/CALLS(调用次数)/COST(成本,厘)。
 金额一律整数厘(禁浮点——浮点金额是累计误差源)。
 
-035:支付单状态机(纯函数)——CREATED → PAID/CANCELLED/EXPIRED
+支付单状态机(纯函数)——CREATED → PAID/CANCELLED/EXPIRED
 三终态;转换合法性判定收于此,服务层只负责 CAS 落库。
 """
 

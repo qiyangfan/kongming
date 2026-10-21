@@ -1,13 +1,4 @@
-"""0041: 步骤协作拓扑列(091 接线)
-
-- sys_agent_task_step.collab_topology:步骤声明协作拓扑(空对象=普通单 ReAct 步)。
-  声明后该步执行即协作(编排循环按 step-start 决策携带的拓扑装配协作编排器),
-  步骤终态由聚合结论驱动。归一/钳制在 api 侧写入前完成,库内只存合法载荷。
-
-拓扑参数(091 spec「协作拓扑」):worker 数量上限 / 是否启用 critic / 分配策略;
-bot_key 可空(worker 人格绑定)。部署级上限(配置 collab_max_workers)在
-normalize_collab_topology 钳制,库内值恒在部署上限内。
-"""
+"""为任务步骤增加协作拓扑声明，并在写入前按部署配置限制 worker 数量。"""
 
 from sqlalchemy import text
 

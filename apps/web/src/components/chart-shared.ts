@@ -1,14 +1,10 @@
-/* 图表共享契约(零 echarts 依赖,体积治理边界):
-   chart-view 壳(懒加载边界)静态导入本模块不含任何引擎代码;
-   实现层 chart-view-impl 亦从此复用。新增共享契约放这里,禁止让壳
-   直接 import chart-view-impl(会把 echarts 拖回首屏主包)。 */
+/* 图表共用契约放在此文件，零 echarts 依赖；懒加载壳 chart-view 禁止静态导入实现层 chart-view-impl，
+   否则 echarts 会进入首屏包（壳只经 lazy() 动态加载）；实现层与壳均从此复用。 */
 
 export const CHART_TYPES = ["bar", "line", "pie", "scatter"] as const;
 export type ChartType = (typeof CHART_TYPES)[number];
 
-/* 图表绑定(049 候选化):候选自带完整映射——y 为值列(多度量多系列),
-   series 为系列维(分组柱/时序多系列)。存量单图经 normalizeBinding 收为
-   y 数组形态,两代数据同构进渲染层。 */
+/* 每个图表候选包含值列和系列维度；旧版单图由 normalizeBinding 转成相同结构。 */
 export interface ChartSpec {
   type: string;
   x: string | null;
@@ -21,8 +17,7 @@ export interface ChartDatum {
   rows: unknown[][];
 }
 
-/* 026 调参(artifact chart 卡):标题/轴名本地即时重绘,不调 LLM;
-   缺省空串=不渲染对应元素,与既有调用方零行为差 */
+/* 图表标题和轴名只在本地重绘；空字符串表示不显示对应元素。 */
 export interface ChartTune {
   title: string;
   xName: string;
@@ -33,7 +28,7 @@ export function normalizeType(t: string): ChartType {
   return (CHART_TYPES as readonly string[]).includes(t) ? (t as ChartType) : "bar";
 }
 
-/* 存量单图(type/x/y 单值,049 前档)→ 绑定形态;type 为 none/空 → null(不配图) */
+/* 将旧版单图配置转换为绑定结构；类型为空或 none 时返回 null。 */
 export function normalizeBinding(chart: {
   type: string;
   x: string | null;

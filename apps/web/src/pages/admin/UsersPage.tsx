@@ -1,5 +1,4 @@
-/* 用户管理页(web-admin spec「用户管理页」):表格+分页+搜索+创建/编辑对话框
-   (用户名创建后不可改、角色多选、部门单选、状态启停)+重置密码+删除确认。 */
+/* 管理用户的角色、部门和启停状态，并支持重置密码和删除用户。 */
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -128,7 +127,7 @@ export default function UsersPage() {
       setToggleId(null);
       invalidate();
     },
-    onError: (e: Error) => setToggleErr(e.message), // 失败回弹+行内可见(012)
+    onError: (e: Error) => setToggleErr(e.message), // 失败时开关回弹,错误行内展示
   });
 
   const create = useMutation({

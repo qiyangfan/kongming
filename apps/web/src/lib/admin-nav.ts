@@ -1,6 +1,4 @@
-/* 管理区导航配置单源(mobile-experience B2.2:自 AdminLayout 抽出)——
-   AdminLayout 竖排子导航与窄屏管理索引页同一份数据、同一权限过滤;
-   每项 perm 与对应路由 PermRoute 同一权限点(双源同构)。 */
+/* 管理侧栏和窄屏索引共用导航项及权限过滤规则。 */
 
 import type { LucideIcon } from "lucide-react";
 import {

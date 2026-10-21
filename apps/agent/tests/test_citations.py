@@ -1,7 +1,4 @@
-"""068-doc-answer-citations agent 面测试:键派生/两级净化/降级/sources 投影。
-
-宪法 Article III(先红后绿):键派生恒定性与两级匹配契约由本文件钉死。
-"""
+"""验证引用键、两级内容净化、降级处理和 sources 投影。"""
 
 import pytest
 
@@ -13,7 +10,7 @@ from kongming_agent.graph.citations import (
 
 
 class TestShape:
-    """任务 1.4:键形态判定(非键形态不被剥离)。"""
+    """键形态判定(非键形态不被剥离)。"""
 
     @pytest.mark.parametrize("token", ["员工手册-A7F2", "a-B3F2", "手册-A7F2"])
     def test_key_shapes(self, token: str) -> None:
@@ -25,7 +22,7 @@ class TestShape:
 
 
 class TestSanitize:
-    """任务 1.2:两级匹配(全等保留/后缀命中保留/皆不命中降级)。"""
+    """两级匹配(全等保留/后缀命中保留/皆不命中降级)。"""
 
     LEGAL = ["员工手册-A7F2", "运维手册-9F2E"]
 
@@ -65,21 +62,21 @@ class TestSanitize:
     def test_mixed(self) -> None:
         src = "一【员工手册-A7F2】二【手册-A7F2】三【假键-0BAD】四"
         r = sanitize_citations(src, self.LEGAL)
-        # 二处后缀命中归一为权威键(068 修订:正文与 sources 双向无幽灵)
+        # 二处后缀命中归一为权威键(修订:正文与 sources 双向无幽灵)
         assert r.text == "一【员工手册-A7F2】二【员工手册-A7F2】三假键-0BAD四"
         assert r.stripped == 1
         # 全等与后缀命中同归一 → 去重为单一权威键(同一文档一项来源,不重复)
         assert r.surviving_keys == ("员工手册-A7F2",)
 
     def test_empty_legal_skips_all(self) -> None:
-        """任务 1.4:合法键为空整体跳过(零标记误伤)。"""
+        """合法键为空整体跳过(零标记误伤)。"""
         src = "任何【员工手册-A7F2】都原样"
         r = sanitize_citations(src, [])
         assert r.text == src
         assert r.stripped == 0
 
     def test_plain_brackets_kept(self) -> None:
-        """普通中括号文本(非键形态)不被降级(任务 1.4 第二条)。"""
+        """普通中括号文本(非键形态)不被降级( 第二条)。"""
         src = "价格【含税】与否【待确认】"
         r = sanitize_citations(src, self.LEGAL)
         assert r.text == src
@@ -91,7 +88,7 @@ class TestSanitize:
 
 
 class TestSurvivingProjection:
-    """任务 1.5:sources 投影与正文存活标记一一对应(不重不漏)。"""
+    """sources 投影与正文存活标记一一对应(不重不漏)。"""
 
     def test_projection_matches_surviving(self) -> None:
         src = "一【员工手册-A7F2】二【员工手册-A7F2】三【运维手册-9F2E】"

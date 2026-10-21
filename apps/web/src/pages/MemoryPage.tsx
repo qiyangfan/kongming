@@ -1,6 +1,4 @@
-/* 我的记忆页(022,agent-memory spec「记忆自管理」):本人当前租户记忆的
-   列表/编辑(唤醒)/删除/导出;隐式记忆(IMPLicIT)可确认(编辑即视为认可)。
-   087:增偏好区(查看/编辑/单项清除/全部清空),与笔记列表同页分区。 */
+/* 管理当前租户的记忆和用户偏好。 */
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -54,10 +52,9 @@ import {
 } from "@/lib/prefs-form";
 import type { components } from "@/lib/api-types.gen";
 
-// 036⑥:消费生成类型(ADR-005,禁手写;team_id 回传已在生成类型)
 type MemoryItem = components["schemas"]["MemoryItemOut"];
 
-// 值 → 徽章统一走 StatusBadge(宪法 Article 6)
+// 记忆来源状态统一使用 StatusBadge。
 const SOURCE_META: StatusMeta = {
   EXPLICIT: { label: "显式", variant: "default" },
   IMPLICIT: { label: "隐式", variant: "secondary" },
@@ -83,7 +80,7 @@ export default function MemoryPage() {
   const [editCategory, setEditCategory] = useState("general");
   const [removing, setRemoving] = useState<MemoryItem | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // 036⑥:归属徽标(team_id→团队名映射;032 已铺清单 query)
+  // 根据 team_id 显示团队名，复用已有团队清单查询。
   const myTeams = useQuery({ queryKey: ["admin", "teams"], queryFn: listMyTeams });
   const teamName = (id: string | null | undefined) =>
     id ? ((myTeams.data ?? []).find((t) => t.id === id)?.name ?? "团队") : null;
@@ -125,7 +122,6 @@ export default function MemoryPage() {
   }
 
   async function doExport() {
-    // 审查循环 B5:失败零提示+unhandled rejection
     try {
       const data = await api.get<object[]>("/memory/export");
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -133,7 +129,7 @@ export default function MemoryPage() {
       const a = document.createElement("a");
       a.href = url;
       a.download = `我的记忆-${formatDate(new Date())}.json`;
-      document.body.appendChild(a); // Safari 纪律(010):锚点入 DOM+延迟 revoke
+      document.body.appendChild(a); // Safari 纪律:锚点入 DOM+延迟 revoke
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -160,14 +156,14 @@ export default function MemoryPage() {
         </Button>
       </div>
 
-      {/* 032:团队记忆写入(个人记忆走对话「请记住」同路径) */}
+      {/* 团队记忆写入(个人记忆走对话「请记住」同路径) */}
       <TeamMemoryWrite />
 
-      {/* 087:偏好自管理(本人当前租户;查看/编辑/单项清除/全部清空) */}
+      {/* 偏好自管理(本人当前租户;查看/编辑/单项清除/全部清空) */}
       <PrefsSection />
 
       {list.isError && <ErrorAlert />}
-      {/* 外框仅在宽屏保留(md- 卡片形态裸露,与 DataView 样板口径一致) */}
+      {/* 外框仅宽屏保留,窄屏卡片形态与 DataView 口径一致 */}
       <div className="md:rounded-lg md:border md:border-border">
         <DataView
           rows={list.data?.items ?? []}
@@ -196,7 +192,7 @@ export default function MemoryPage() {
               key: "source",
               header: "来源",
               cardPriority: 2,
-              // source 契约为宽 string:未知值回落 secondary,与原 else 分支等价
+              // source 契约为宽 string:未知值回落 secondary
               render: (m) => (
                 <StatusBadge meta={SOURCE_META} value={m.source} fallbackVariant="secondary" />
               ),
@@ -240,7 +236,6 @@ export default function MemoryPage() {
         />
       </div>
 
-      {/* 编辑对话框 */}
       <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent>
           <DialogHeader>
@@ -292,7 +287,6 @@ export default function MemoryPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 删除确认 */}
       <AlertDialog open={removing !== null} onOpenChange={(open) => !open && setRemoving(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -317,7 +311,7 @@ export default function MemoryPage() {
   );
 }
 
-/* 032:团队记忆写入卡(team-api 创建端点;OWNER/MEMBER 校验在服务端) */
+/* 团队记忆写入卡(team-api 创建端点;OWNER/MEMBER 校验在服务端) */
 function TeamMemoryWrite() {
   const [content, setContent] = useState("");
   const [teamId, setTeamId] = useState("");
@@ -398,10 +392,7 @@ function TeamMemoryWrite() {
   );
 }
 
-/* 087:偏好自管理区(本人当前租户)。查询与表单按租户分区(query key 含
-   tenant,切租户即新语境);成功操作以服务端响应替换本页偏好(setQueryData
-   在 mutationFn 内执行——闭包在触发时固化租户,在途请求晚归时切了租户
-   也不会把旧语境响应写进新语境缓存),并重播表单草稿。 */
+/* 偏好数据按租户隔离；提交时固定租户，避免切换租户后迟到的响应污染新租户缓存。 */
 function PrefsSection() {
   const qc = useQueryClient();
   const { current: tenantKey } = useTenant();
@@ -416,7 +407,7 @@ function PrefsSection() {
   });
   const server: PrefsMap = prefs.data?.prefs ?? {};
 
-  // 草稿与数据同源重播:切租户/读取成功/写操作响应替换后都回到服务端确认值
+  // 草稿随服务端数据重置:切租户/读取成功/写回后回到服务端确认值
   useEffect(() => {
     setDraft(draftFromPrefs(prefs.data?.prefs ?? {}));
   }, [prefs.data]);
@@ -507,7 +498,7 @@ function PrefsSection() {
       </div>
 
       {prefs.isError ? (
-        // 读取失败显式可见,不用空配置掩盖(087 D3)
+        // 读取失败显式报错,避免误读为空配置
         <div className="space-y-1">
           <ErrorAlert
             text={`偏好加载失败:${(prefs.error as Error).message}。笔记与历史偏好不受影响;重试或稍后再来。`}
@@ -554,7 +545,6 @@ function PrefsSection() {
             </div>
           ))}
 
-          {/* metric_aliases 可编辑列表 */}
           <FormRow label="指标别名" htmlFor="pref-alias-0">
             <div className="space-y-2">
               {(draft.metric_aliases as string[]).map((alias, i) => (

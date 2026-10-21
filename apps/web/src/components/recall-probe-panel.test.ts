@@ -4,17 +4,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-/* mock 掉 rag-api 值导入:切断 api.ts → tenant-store(模块顶层 localStorage)
-   的加载链,node 环境零 jsdom 下的纯静态渲染守卫不触真实客户端 */
+/* mock 掉 rag-api 值导入:切断 api.ts → tenant-store(模块顶层 localStorage) 的加载链,node 环境零 jsdom 下的纯静态渲染守卫不触真实客户端 */
 vi.mock("@/lib/rag-api", () => ({ ragApi: { probe: () => undefined } }));
 
 import { ProbeResult, RecallProbePanel } from "@/components/recall-probe-panel";
 import type { RecallProbeOut } from "@/lib/rag-api";
 
-/* 097 召回试跑面板渲染守卫:react-dom/server 静态出串断言(零 jsdom,与
-   card-title-semantics 守卫同法)——覆盖 spec 三形态:完整命中/整路被裁/
-   零知识旁路/扩展三形态(有扩展/零扩展/未开启)与面板空态。
-   渲染如实纪律:旁路 SHALL NOT 呈现为「全部通过」,零命中 SHALL NOT 静默隐藏。 */
+/* 使用服务端渲染验证召回试跑的命中、裁剪、旁路、扩展结果和空态。 */
 
 const FULL: RecallProbeOut = {
   question: "查询库存数量",

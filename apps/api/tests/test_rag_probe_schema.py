@@ -1,13 +1,5 @@
 # pyright: reportPrivateUsage=false
-"""097 试跑端点响应模型序列化往返测试(任务 1.2)。
-
-样例以 service.recall_probe 实际返回形态构造(键集事实源=service 投影,
-与 test_rag_gate / test_rag_relation_expansion 的 HTTP 断言同形):
-- 完整形态(两路 verdict 齐备 + 关系扩展非空);
-- 零知识旁路形态(gate_skipped=no_knowledge,两路 verdict=None);
-- 扩展未开启形态(enabled=False,tables 空,fused_after 仅主召回)。
-断言模型可解析且 model_dump 后键集与样例无丢失(定型漂移即暴露)。
-"""
+"""验证召回试跑响应模型的字段保留，覆盖正常结果、零知识旁路和关系扩展关闭三种形态。"""
 
 from typing import cast
 
@@ -138,7 +130,7 @@ def _shape(value: object) -> object:
     ],
 )
 def test_probe_model_roundtrip(sample: dict[str, object], label: str) -> None:
-    """任务 1.2:service 实际返回形态 → 模型解析 → 序列化键集无丢失。"""
+    """service 实际返回形态 → 模型解析 → 序列化键集无丢失。"""
     model = RecallProbeOut.model_validate(sample)
     assert _shape(model.model_dump(mode="python")) == _shape(sample), label
 

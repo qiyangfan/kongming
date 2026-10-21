@@ -28,7 +28,7 @@ async def bound_tenant_id(session: AsyncSession, *, user_id: str, tenant_key: st
 async def default_tenant(session: AsyncSession, *, user_id: str) -> tuple[str, str] | None:
     """用户默认租户:default 优先,否则最早授予(multitenant spec);
     返回 (tenant_id, tenant_key);t.id tiebreak 保证同刻双授确定性收口
-    (与 datasource 域同名查询逐字同构,008 R2-N1)。"""
+    (与 datasource 域同名查询逐字同构)。"""
     row = (
         (
             await session.execute(

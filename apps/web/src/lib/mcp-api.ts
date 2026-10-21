@@ -1,4 +1,4 @@
-/* mcp 域 API 封装(028;109 扩展资源/模板原语)。类型契约由 ADR-005 管线生成(禁手写)。 */
+/* mcp 域 API 封装( 扩展资源/模板原语)。类型契约由 ADR-005 管线生成(禁手写)。 */
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";
@@ -46,7 +46,7 @@ export function syncMcpServer(id: string): Promise<McpSyncOut> {
   return api.post<McpSyncOut>(`/system/mcp/${id}/sync`, {});
 }
 
-/** 模板按名实时拉取只读预览(109;渲染结果,服务端已过注入检测+大小上限)。 */
+/** 模板按名实时拉取只读预览(渲染结果,服务端已过注入检测+大小上限)。 */
 export function previewMcpPrompt(
   id: string,
   body: { name: string; arguments: Record<string, string> },

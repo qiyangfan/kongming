@@ -1,10 +1,10 @@
-"""connector 端口(099):存储/加密/护栏/审计/出站反转,用例零框架依赖。"""
+"""connector 端口:存储/加密/护栏/审计/出站反转,用例零框架依赖。"""
 
 from typing import Any, Protocol
 
 
 class ConnectorRepo(Protocol):
-    """连接器存储(基础设施反转;行=数据库行 dict)。"""
+    """连接器持久化端口，读写数据库行。"""
 
     async def create(self, row: dict[str, Any]) -> str: ...
 
@@ -30,7 +30,7 @@ class ConnectorRepo(Protocol):
 
 
 class SecretCipher(Protocol):
-    """凭证加解密(008 cipher 反转;与 webhook secret 同一单点机制)。"""
+    """凭证加解密(cipher 反转;与 webhook secret 同一单点机制)。"""
 
     def encrypt(self, plain: str) -> str: ...
 
@@ -38,7 +38,7 @@ class SecretCipher(Protocol):
 
 
 class InputGuardrail(Protocol):
-    """输入护栏(020 注册闸门:名称/描述是 LLM 可见注入面,与 bot-store 上架
+    """输入护栏(注册闸门:名称/描述是 LLM 可见注入面,与 bot-store 上架
     护栏同闸;BLOCK 拒注册/拒注入)。返回 (是否拦截, 处理后文本)。"""
 
     async def check(
@@ -72,6 +72,6 @@ class ConnectorCaller(Protocol):
 
 
 class OperLogger(Protocol):
-    """操作审计端口(015 operlog 适配;CRUD/启停/删除留痕)。"""
+    """操作审计端口(operlog 适配;CRUD/启停/删除留痕)。"""
 
     async def log(self, *, action: str, target: str, detail: dict[str, object]) -> None: ...

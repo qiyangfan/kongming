@@ -1,8 +1,4 @@
-"""Redis 基础设施:进程级单例 + FastAPI 依赖。
-
-auth 域的 refresh 家族指纹/登录失败计数/oauth state 均落 Redis(ADR-003 既定),
-decode_responses=True 以 str 语义读写。
-"""
+"""提供进程级 Redis 客户端单例和 FastAPI 依赖，供登录失败计数、令牌状态及联邦 state 使用。"""
 
 from functools import lru_cache
 

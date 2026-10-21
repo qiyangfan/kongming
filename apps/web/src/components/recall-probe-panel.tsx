@@ -1,10 +1,4 @@
-/* 召回试跑面板(097):知识库管理页内只读验证面——上传表说明后验证可召回性
-   与召回闸门判定观察同页闭环。数据源选项复用页面既有 options 查询(props 注入,
-   不重复请求);试跑为显式触发(不自动打端点),进行中禁重复提交。
-   渲染如实:零命中/整路被裁/零知识旁路/扩展未开启与零扩展全部明示,不美化。
-   端点零副作用(不落库/不失效缓存),面板不提供任何写操作入口。
-   「生效阈值」不在试跑响应契约内(service 只透出判定归因与分值观测),
-   面板如实展示 verdict 观测值,不猜测阈值。 */
+/* 只读验证知识表是否可召回；手动触发，不写库或清缓存，命中与旁路结果均明确显示。 */
 
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
@@ -26,8 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { DatasourceOptionOut } from "@/lib/datasource-api";
 import { ragApi, type RecallProbeOut } from "@/lib/rag-api";
 
-/** 闸门判定归因 → 徽章(reason=passed 即过闸;其余为未过闸的归因;
-    top1_below 为判定函数预留档,现判定不产出,StatusBadge 原文兜底) */
+/** 闸门判定归因 → 徽章(reason=passed 即过闸;其余为未过闸的归因; top1_below 为判定函数预留档,现判定不产出,StatusBadge 原文兜底) */
 export const VERDICT_META: StatusMeta = {
   passed: { label: "过闸", variant: "success" },
   no_hits: { label: "零命中·不投票", variant: "secondary" },
@@ -63,8 +56,7 @@ export function fusedAfterText(tables: { schema_name: string; table_name: string
   return tables.map((t) => `${t.schema_name}.${t.table_name}`).join("、");
 }
 
-/** 连接键文案(契约形态=dict 投影索引签名,运行时键为 left_col/right_col;
-    空数组如实为「—」) */
+/** 连接键文案(契约形态=dict 投影索引签名,运行时键为 left_col/right_col; 空数组如实为「—」) */
 export function joinKeysText(joinKeys: Record<string, string>[]): string {
   if (joinKeys.length === 0) return "—";
   return joinKeys.map((j) => `${j.left_col} = ${j.right_col}`).join(", ");
@@ -129,8 +121,7 @@ function RouteSection({ title, route }: { title: string; route: RecallProbeOut["
   );
 }
 
-/** 关系扩展明细(定义列表:表少层级浅,列表组件过重——design 裁决):
-    未开启/开启零扩展/开启有扩展三形态如实 */
+/** 展示关系扩展的未开启、无结果和有结果三种状态。 */
 function ExpansionDetail({ expansion }: { expansion: RecallProbeOut["expansion"] }) {
   return (
     <section className="space-y-2">
@@ -175,8 +166,7 @@ function ExpansionDetail({ expansion }: { expansion: RecallProbeOut["expansion"]
   );
 }
 
-/** 试跑结果(有响应才渲染):旁路标注 → 三路命中 → 扩展明细。
-    导出供静态渲染守卫直接驱动三形态(零 jsdom,react-dom/server 出串断言) */
+/** 试跑结果(有响应才渲染):旁路标注 → 三路命中 → 扩展明细;导出供静态渲染测试直接驱动 */
 export function ProbeResult({ out }: { out: RecallProbeOut }) {
   return (
     <div className="space-y-4">
@@ -250,7 +240,6 @@ export function RecallProbePanel({ options }: { options: DatasourceOptionOut[] }
           {probe.isPending ? "试跑中…" : "试跑"}
         </Button>
       </div>
-      {/* 错误态收敛在面板内部(标准件 role=alert),不污染页面既有区块 */}
       {probe.isError && <ErrorAlert text={`试跑失败:${(probe.error as Error).message}`} />}
       {out ? (
         <ProbeResult out={out} />

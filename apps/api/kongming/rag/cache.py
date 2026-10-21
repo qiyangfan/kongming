@@ -1,6 +1,6 @@
-"""检索上下文缓存(009):Redis ctx 层(TTL 10min,fail-open)。
+"""检索上下文缓存:Redis ctx 层(TTL 10min,fail-open)。
 
-失效纪律(D6):知识写操作(上传/删除/fetch-metadata/reindex/datasource 删除)
+失效纪律:知识写操作(上传/删除/fetch-metadata/reindex/datasource 删除)
 在业务事务提交后精确失效(SCAN 收集+批量 DEL,仅目标 tenant+datasource 范围);
 回填旧值窗口由 TTL 有界吸收(上游同款取舍)。
 """
@@ -21,9 +21,9 @@ log = logging.getLogger(__name__)
 _CTX_PREFIX = "km:ragctx:"
 _CTX_TTL_SEC = 600
 _SCAN_COUNT = 100
-# 112:查询语义版本段(全文路「AND 优先、内容词兜底」)——查询语义变更时
-# bump 本常量,变更前旧键空间在 TTL 窗口内自然弃用不串味(与 098 配置段
-# 同一「键版本化」思路;同部署内恒定,evict SCAN 模式不含该段跨语义全收)
+# 查询语义版本段(全文路「AND 优先、内容词兜底」)——查询语义变更时
+# bump 本常量,旧键空间在 TTL 窗口内自然弃用不串味(与分词配置段同一
+# 「键版本化」思路;同部署内恒定,evict SCAN 模式不含该段,跨语义全收)
 _QUERY_SEMANTICS = "and-cw"
 
 
@@ -33,9 +33,9 @@ def _ctx_key(
     """键段序:租户/数据源/分词配置/查询语义/团队集合指纹在 hash 前缀段
     (失效 SCAN 模式 `租户:数据源:*` 跨配置、跨语义、跨可见集合全收——
     数据写失效本就应清全部变体),问句材料(含 history/扩展开关等派生键
-    材料)hash 在尾段。102:团队集合指纹段(team_set_fingerprint,空集=
+    材料)hash 在尾段。团队集合指纹段(team_set_fingerprint,空集=
     "public")——不同可见集合的调用者 MUST NOT 互命中;团队关系变化→指纹
-    变→自然隔离(TTL 吸收旧条目),与 098 配置维度同一「键版本化」思路。"""
+    变→自然隔离(TTL 吸收旧条目),与分词配置维度同一「键版本化」思路。"""
     digest = hashlib.sha256(question.encode("utf-8")).hexdigest()
     return (
         f"{_CTX_PREFIX}{tenant_id}:{datasource_key}:{ts_config}"
@@ -46,10 +46,10 @@ def _ctx_key(
 class ContextCache:
     """fail-open:Redis 不可用时读=未命中、写/失效=放弃(仅告警)。
 
-    098:键纳入分词配置维度(键版本化最简形态)——配置只在启动读、键含配置
+    键纳入分词配置维度(键版本化最简形态)——配置只在启动读、键含配置
     即天然隔离,不做切换期主动清缓存;否则换配置后 TTL 窗口内会命中异分词
     形态的旧输出(静默混用)。evict 模式不含配置段,跨配置全失效。
-    102:键纳入调用者团队集合指纹维度(同一思路)——可见集合因用户团队关系
+    键纳入调用者团队集合指纹维度(同一思路)——可见集合因用户团队关系
     而异,键含指纹即天然隔离;evict 模式同样不含指纹段,归属变更后跨集合全失效。
     """
 

@@ -1,9 +1,4 @@
-"""审计归档与重导入测试(audit spec 015 delta,逻辑先行直测)。
-
-run_archive/run_restore 为独立可测函数(session 注入,测试直调):
-导出 gzip JSONL+SHA-256 manifest → 库内删除+窗口内保留;同日重跑幂等;
-恢复按 id 幂等;manifest 篡改拒导入;归档失败不阻断审计写入。
-"""
+"""覆盖审计记录的归档、重导入及归档失败处理。"""
 
 import gzip
 import json
@@ -138,7 +133,7 @@ async def test_archive_failure_not_blocking_audit_write(
     session: AsyncSession, tmp_path: Path
 ) -> None:
     """归档失败(目录不可写)不阻断审计写入(audit spec 铁律):run_archive 抛错,
-    SqlAuditWriter 照常落库(调用方仅日志,语义直证)。"""
+    SqlAuditWriter 仍会写入审计记录，调用方只记录归档错误。"""
     from kongming.audit.models import SqlAuditEntry
     from kongming.audit.writer import SqlAuditWriter
 
@@ -168,13 +163,13 @@ async def test_archive_failure_not_blocking_audit_write(
     assert await _count(session, "sys_sql_audit", "WHERE trace_id='post-failure'") == 1
 
 
-# ============ R1 修复直证 ============
+# ============ 归档行为 ============
 
 
 async def test_archive_shrink_days_reexports_not_skip(
     session: AsyncSession, tmp_path: Path
 ) -> None:
-    """R1-S2:days 调小后旧 manifest(窗口更早)不覆盖新删除范围——
+    """days 调小后旧 manifest(窗口更早)不覆盖新删除范围——
     不得跳过导出,必须重新导出后再删(否则 90~180 天龄行未导先删)。"""
     await _mk_audit_row(session, days_ago=200)  # 两档窗口都超
     await _mk_audit_row(session, days_ago=120)  # 仅 90 天窗超,180 天窗内
@@ -186,7 +181,7 @@ async def test_archive_shrink_days_reexports_not_skip(
     assert await _count(session, "sys_sql_audit") == 2
     # 第二轮:同日同目录、manifest 完整,但 cutoff 更晚(90 天窗)——必须重新导出
     r2 = await run_archive(session, days=90, archive_dir=str(tmp_path), now=_NOW)
-    assert r2.skipped_export is False  # S2 核心:不跳过
+    assert r2.skipped_export is False  # 不得跳过导出
     assert r2.exported == 2  # 重导覆盖,两行全量
     assert r2.deleted == 2
     # 同 days 重跑(第三轮):manifest cutoff == 当前 cutoff,覆盖成立→跳过
@@ -196,7 +191,7 @@ async def test_archive_shrink_days_reexports_not_skip(
 
 
 async def test_archive_concurrent_serialized(session: AsyncSession, tmp_path: Path) -> None:
-    """R1-S3:并发两次 run_archive 进程内锁串行——无交错损坏,manifest 完整。"""
+    """并发两次 run_archive 进程内锁串行——无交错损坏,manifest 完整。"""
     import asyncio
 
     await _mk_audit_row(session, days_ago=200, trace_id="cc-a")

@@ -1,9 +1,4 @@
-"""guardrail 域全栈集成测试(020 prompt-guardrails spec,安全规则类测试先行)。
-
-覆盖:输入护栏(injection 拦截/PII 脱敏/干净放行)、输出护栏(泄漏替换/
-凭证脱敏)、工具意图审核(写工具 burst 拦截/阈值调整/双审计)、fail-closed
-(配置故障从严)、管理面(规则清单/启停生效/审计分页/403/行级可见性)。
-"""
+"""覆盖输入和输出护栏、工具意图审核及护栏管理接口。"""
 # pyright: reportPrivateUsage=false
 
 import uuid
@@ -70,7 +65,7 @@ async def _guard_audits(s: AsyncSession, *, gtype: str | None = None) -> list[di
     return [dict(r) for r in rows]
 
 
-# ============ 输入护栏(chat 链路) ============
+# ============ 聊天输入护栏 ============
 
 
 async def test_input_injection_blocked_no_agent_call(
@@ -253,7 +248,7 @@ async def test_intent_second_write_blocked_dual_audit(
     assert "GUARDRAIL" in (body2["reason"] or "")
     g = await _guard_audits(session, gtype="tool_intent")
     assert len(g) == 1 and g[0]["rule_name"] == "write_burst"
-    # sys_tool_audit 双行:PENDING_CONFIRM(首次)+ REJECTED(本次)
+    # 失败时保留 PENDING_CONFIRM，并新增 REJECTED 审计记录。
     rows = (
         (
             await session.execute(
@@ -385,11 +380,11 @@ def test_maskers() -> None:
     assert mask_apikey("key=sk-abcdef0123456789abcdef01") == "key=sk-****"
 
 
-# ============ R1 评审修复直证 ============
+# ============ 防护规则行为 ============
 
 
 def test_r1_h1_english_injection_case_insensitive() -> None:
-    """R1-H1:英文 injection 大小写混合/全大写均命中(re.IGNORECASE)。"""
+    """英文 injection 大小写混合/全大写均命中(re.IGNORECASE)。"""
     from kongming.guardrail.models import RuleConfig, evaluate_text
     from kongming.guardrail.rules import REGISTRY
 
@@ -407,7 +402,7 @@ def test_r1_h1_english_injection_case_insensitive() -> None:
 
 
 def test_r1_m2_audit_digest_never_contains_raw_pii() -> None:
-    """R1-M2:blocked 命中与多 PII 混合时,审计 digest 不含任何 PII 原文。"""
+    """blocked 命中与多 PII 混合时,审计 digest 不含任何 PII 原文。"""
     from kongming.guardrail.models import RuleConfig, evaluate_text
     from kongming.guardrail.rules import REGISTRY
 
@@ -422,7 +417,7 @@ def test_r1_m2_audit_digest_never_contains_raw_pii() -> None:
 
 
 def test_r1_m3_prompt_leak_narrowed() -> None:
-    """R1-M3:正常业务问句不命中;真实套取仍命中。"""
+    """正常业务问句不命中;真实套取仍命中。"""
     from kongming.guardrail.models import RuleConfig, evaluate_text
     from kongming.guardrail.rules import REGISTRY
 
@@ -443,7 +438,7 @@ def test_r1_m3_prompt_leak_narrowed() -> None:
 
 
 def test_r1_m4_pii_boundaries() -> None:
-    """R1-M4:边界断言——14 位串/时间戳编号不误伤;18 位带 X 仍按身份证脱敏。"""
+    """边界断言——14 位串/时间戳编号不误伤;18 位带 X 仍按身份证脱敏。"""
     from kongming.guardrail.models import mask_bankcard, mask_idcard, mask_phone
 
     assert mask_phone("13812345678901") == "13812345678901"
@@ -456,7 +451,7 @@ def test_r1_m4_pii_boundaries() -> None:
 async def test_r1_m5_toggle_preserves_action_override(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    """R1-M5:启停操作不清既有 action 覆盖(None=不触动)。"""
+    """启停操作不清既有 action 覆盖(None=不触动)。"""
     token = await _admin(client, session)
     await client.put(
         "/system/guardrails/rules/pii_phone",
@@ -501,7 +496,7 @@ async def test_r1_l9_sql_field_filtered(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    """R1-L9:sql 字段含系统提示词特征片段(注释藏私)时被输出护栏清空。"""
+    """sql 字段含系统提示词特征片段(注释藏私)时被输出护栏清空。"""
     _, token = await _user(client, session, make_user, "gd_sql")
     fake_agent["agent"] = FakeAgent(
         AgentReply(

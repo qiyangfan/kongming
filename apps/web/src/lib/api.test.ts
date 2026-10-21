@@ -1,8 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
-/* api.ts 纯函数网(066.3.2):SSE 分帧(CRLF 边界/畸形帧跳帧)与错误码转译查表。
-   api.ts 模块链含 tenant-store,import 期读 localStorage — node 环境无该对象,
-   先种最小桩再动态 import(不用 jsdom:租户桩只服务 import 期一次读取,断言不碰它)。 */
+/* 测试 SSE 分帧和错误码映射；导入 api.ts 前需为 Node 环境提供 localStorage 桩。 */
 
 type ApiModule = typeof import("./api");
 

@@ -1,4 +1,4 @@
-"""quality 路由(069,薄适配层):轮次质量汇总/明细分页(只读管理端点)。
+"""quality 路由(薄适配层):轮次质量汇总/明细分页(只读管理端点)。
 
 权限点 system:chat-quality:view(种子顺延;SUPER_ADMIN 覆盖自动生效);
 租户收敛在 service(data_scope=ALL 显式过滤,其余按请求租户强收敛)。
@@ -38,7 +38,7 @@ class QualityOverviewOut(BaseModel):
     failed_rate: float
     selfheal_rate: float
     down_rate: float
-    # 平均 token:按 trace_id 分组 SUM 的轮次均值(072 口径;0 值不稀释)
+    # 平均 token:按 trace_id 分组 SUM 的轮次均值(口径;0 值不稀释)
     avg_tokens: float
 
 
@@ -158,7 +158,7 @@ async def quality_page(
     size: Annotated[int, Field(ge=1, le=100)] = 20,
 ) -> QualityPageOut:
     """轮次明细分页(时间倒序):状态/数据源/时间范围筛选;NO_DATA 轮次首次
-    拥有可见形态(该形态无执行、无审计行,此前任何观测面不可见)。"""
+    拥有可见形态(该形态无执行、无审计行,任何观测面不可见)。"""
     total, rows = await svc.page(
         actor_id=str(user["sub"]),
         tenant_id=None if tenant_id is None else str(tenant_id),

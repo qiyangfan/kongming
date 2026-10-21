@@ -1,9 +1,4 @@
-/* 列表双形态标准件(mobile-experience B3.1,设计决策 D3):
-   页面以一份列定义声明全部栏位(键/表头/渲染函数/卡片优先级),md+ 渲染
-   ui/Table 表格(栏位与操作不因本契约减少),md- 渲染卡片列表(呈现卡片
-   优先级最高的栏位,行操作收进溢出菜单,破坏性操作标红——确认链路由页面
-   自身的 AlertDialog 承担,不在本组件内)。搜索/分页/筛选是页面级控件,
-   保持在组件外。空态/加载态复用 EmptyState 单源。 */
+/* 用同一列定义在宽屏显示表格、窄屏显示卡片；窄屏行操作收进菜单，破坏性操作由页面确认。 */
 
 import * as React from "react";
 import { MoreHorizontal } from "lucide-react";
@@ -31,7 +26,7 @@ export interface DataViewColumn<T> {
   header: React.ReactNode;
   /** 表格/卡片通用的单元格渲染;缺省按 String(row[key]) 显示 */
   render?: (row: T) => React.ReactNode;
-  /** 卡片形态优先级:数值越小越优先;=1 者作卡片标题。缺省=不进卡片(仅表格) */
+  /** 卡片形态优先级:数值越小越优先,最小者作卡片标题。缺省=不进卡片(仅表格) */
   cardPriority?: number;
   headClassName?: string;
   cellClassName?: string;

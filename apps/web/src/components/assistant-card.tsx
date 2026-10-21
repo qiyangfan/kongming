@@ -1,5 +1,4 @@
-/* assistant 结果卡片(web-nav spec「对话区渲染」+ 010 导出/执行计划 + 014 赞踩反馈):
-   摘要/表格/SQL 折叠/执行计划/洞察/统计/反馈操作行;SUCCESS/REJECTED/FAILED/NO_DATA 四态视觉区分(044)。 */
+/* 展示问答摘要、结果表、SQL、执行计划、反馈和类型化产物。 */
 
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -53,8 +52,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 
-/* 生成类型的 result 字段皆可选:本地归一化收窄。
-   labels=呈现层列标签(041 双轨):表头显示业务名,悬停 title 保留物理列名。 */
+/* 将可选结果字段收敛为展示状态；表头使用业务标签，悬停显示物理列名。 */
 function normalize(msg: SessionMessageOut): {
   columns: string[];
   rows: unknown[][];
@@ -72,7 +70,7 @@ function normalize(msg: SessionMessageOut): {
   sources: { citation_key: string; source_ref?: string; doc_name?: string }[];
 } {
   const r = msg.result;
-  // 049:候选优先(绑定随候选);存量档(仅单图)经 normalizeBinding 收为
+  // 候选优先(绑定随候选);存量档(仅单图)经 normalizeBinding 收为
   // 单元素绑定数组,两代档同构进渲染层;type=none → 空数组(不配图)
   const rawCands = r?.chart_candidates ?? [];
   const chartBindings: ChartSpec[] =
@@ -98,14 +96,14 @@ function normalize(msg: SessionMessageOut): {
     chartBindings,
     artifacts: r?.artifacts ?? [],
     columnLabels: r?.column_labels ?? [],
-    // 076:口径依据(纯增;空=无命中/存量档零回归)
+    // 口径依据(指标命中);空=无命中或存量消息
     metricHits: (r?.metric_hits ?? []).map((m) => ({
       metric_id: m.metric_id,
       metric_name: m.metric_name,
       sql_template: m.sql_template,
       updated_at: m.updated_at,
     })),
-    // 068:文档道来源(纯增;空=SQL 道/存量档零回归)
+    // 文档来源;空=SQL 路回答或存量消息
     sources: (r?.sources ?? []).map((x) => ({
       citation_key: x.citation_key,
       source_ref: x.source_ref,
@@ -115,7 +113,7 @@ function normalize(msg: SessionMessageOut): {
 }
 
 export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
-  // 093 融合消息:正文引用角标定位来源条目(与 DocumentCard 同机制;
+  // 融合消息:正文引用角标定位来源条目(与 DocumentCard 同机制;
   // hook 须在条件返回前调用)
   const { activeKey, highlight } = useCitationHighlight();
   if (msg.status === "REJECTED") {
@@ -132,7 +130,7 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
     );
   }
   if (msg.status === "NO_DATA") {
-    // 044:知识未覆盖如实说明——中性说明卡(非失败),文案在 summary;
+    // 知识未覆盖如实说明——中性说明卡(非失败),文案在 summary;
     // 反馈保留:数据源不对/答案没帮上忙恰是高价值信号
     return (
       <div className="space-y-3">
@@ -156,7 +154,7 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
             <p className="text-foreground">
               {msg.error ? humanizeErrorText(msg.error) : "查询执行失败,请调整问法后重试"}
             </p>
-            {/* 047:原始技术错误折叠披露(honest+可排障+不吓人;存量消息无此档) */}
+            {/* 原始技术错误默认折叠，方便排障且不干扰主要结果。 */}
             {msg.error_detail && (
               <Collapsible>
                 <CollapsibleTrigger className="mt-1 text-2xs text-muted-foreground underline-offset-2 hover:underline">
@@ -171,8 +169,7 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
             )}
           </div>
         </div>
-        {/* R2-F2:触顶等形态携带的部分结果不丢弃——错误优先呈现,
-            已产出结果集作参考附带(EXPLAIN 入口同步可达) */}
+        {/* 触顶错误仍展示已生成的部分结果，并保留 EXPLAIN 入口。 */}
         {partial.columns.length > 0 && (
           <>
             <ResultTable
@@ -188,9 +185,8 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
   }
 
   const result = normalize(msg);
-  // 026:artifacts 非空走类型化产物卡;缺档(026 前存量/persist=false 容错)
-  // 全段回落既有形态(spec「无 artifacts 的历史消息按既有形态渲染」)
-  // 088:报告轮次→report 卡独占(互斥于问答三卡,不叠加派生)
+  // 有产物时按类型渲染；旧消息和 persist=false 的结果沿用原展示方式。
+  // 报告轮次使用报告卡，不再叠加普通问答卡片。
   const reportArt = result.artifacts.find((a) => a.type === "report");
   if (reportArt) {
     return (
@@ -207,8 +203,7 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
       {docArt ? (
         <DocumentCard content={docArt.content} sources={result.sources} />
       ) : msg.summary && result.sources.length > 0 ? (
-        /* 093 融合消息并存渲染:正文引用角标 + 来源面板与 SQL 结果面并存
-           (纯数据道 sources 恒空,走下方纯文本分支零回归) */
+        /* 融合消息可同时显示正文引用、来源列表和 SQL 结果。 */
         <div className="space-y-2 px-1">
           <p className="text-md leading-relaxed text-foreground">
             {renderWithCitations(msg.summary, result.sources, highlight)}
@@ -269,11 +264,9 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
       )}
 
       {msg.sql && msg.id && <ExplainCollapsible messageId={msg.id} />}
-      {/* msg.id 守卫(017 乐观快照容错分支 id 可能为空串):
-          无落库 id 则无执行计划可查,渲染会 422 白点 */}
+      {/* 未落库的消息没有 message_id，因此隐藏执行计划查询入口。 */}
 
-      {/* 076:口径依据面板(语义层命中可见——治理投资的价值链最后一环);
-          无命中/存量档零渲染;指标名跳 /admin/semantic 定位定义 */}
+      {/* 口径依据面板:有语义层命中才渲染;指标名跳 /admin/semantic 定位定义 */}
       {result.metricHits.length > 0 && <MetricProvenancePanel hits={result.metricHits} />}
 
       {(result.insights?.length ?? 0) > 0 && (
@@ -302,11 +295,7 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
   );
 }
 
-/* 反馈操作行(014 feedback spec「前端交互」):赞=立即提交;踩=弹窗收集 comment
-   与 correctedSql;已反馈回显激活态(历史=服务端字段,实时=setQueriesData 本地
-   状态);无 chat:feedback:submit 权限或无 messageId 不渲染入口(spec)。
-   SUCCESS 与 NO_DATA(044:数据源不对/没帮上忙恰是高价值信号)挂载:
-   REJECTED=系统拦截、FAILED=执行失败,均非「错答」语义 */
+/* 反馈行：赞立即提交，踩可编辑说明和纠错 SQL；无权限或无消息 ID 时不显示。 */
 function FeedbackActions({ msg }: { msg: SessionMessageOut }) {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -327,8 +316,7 @@ function FeedbackActions({ msg }: { msg: SessionMessageOut }) {
     setError(null);
     try {
       const data = await submitFeedback(mid, payload);
-      // 实时消息本地状态(spec):前缀 setQueriesData 更新含该消息的全部 messages
-      // 缓存,激活态即时回显零重拉
+      // 实时消息经 setQueriesData 更新所有含该消息的缓存,激活态即时回显
       qc.setQueriesData({ queryKey: ["messages"] }, (old: unknown) =>
         Array.isArray(old)
           ? old.map((m) =>
@@ -388,7 +376,7 @@ function FeedbackActions({ msg }: { msg: SessionMessageOut }) {
         open={dialogOpen}
         busy={busy}
         onOpenChange={(o) => {
-          if (busy) return; // 提交中不可关(与删除对话框同范式)
+          if (busy) return; // 提交中不可关闭
           setDialogOpen(o);
         }}
         onSubmit={async (comment, correctedSql) => {
@@ -404,9 +392,7 @@ function FeedbackActions({ msg }: { msg: SessionMessageOut }) {
   );
 }
 
-/* 点踩弹窗(014):预填已提交 comment/correctedSql 或当前 SQL,可改可清空
-   (清空提交即撤销纠错/留言);未触碰的字段传 null=保持现值(R1-S3:
-   此前空串恒提交,重开弹窗直接提交会静默清空既有留言);提交中禁用防重复 */
+/* 点踩弹窗预填已有说明和纠错 SQL；未修改字段保持原值，清空字段则提交删除。 */
 function FeedbackDialog({
   msg,
   open,
@@ -490,8 +476,7 @@ function FeedbackDialog({
   );
 }
 
-/* 结果导出(010):所见即所导(传展示中的 columns+rows);失败行内提示不炸卡片。
-   041:表头列按呈现标签合成(labels 优先回退物理名),与表格所见一致。 */
+/* 导出当前展示的列和行；表头优先使用业务标签，失败时在卡片内提示。 */
 function ExportButtons({
   columns,
   rows,
@@ -545,8 +530,7 @@ function ExportButtons({
   );
 }
 
-/* 执行计划(010):展开时懒加载一次;计划树递归缩进为等宽文本(上游形态移植),
-   非预期形态降级 JSON 展示;message_id 引用,客户端不提交 SQL */
+/* 展开时按需加载执行计划；异常结构以 JSON 展示，客户端只传 message_id。 */
 function ExplainCollapsible({ messageId }: { messageId: string }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -594,7 +578,6 @@ function ExplainCollapsible({ messageId }: { messageId: string }) {
         ) : error ? (
           <p role="alert" className="mt-1.5 flex items-center gap-2 text-xs text-destructive">
             {error}
-            {/* R1-S1:失败态给出重试出口(此前 error 非 null 即永久锁死) */}
             <Button
               variant="ghost"
               size="xs"
@@ -616,8 +599,7 @@ function ExplainCollapsible({ messageId }: { messageId: string }) {
   );
 }
 
-/* EXPLAIN (FORMAT JSON) 顶层为 [{Plan: {...}}];逐层缩进渲染
-   Node Type / cost=Total Cost / rows=Plan Rows / on Relation Name */
+/* 格式化 PostgreSQL EXPLAIN 的计划树、节点类型、成本、行数和关联表。 */
 function renderPlan(plan: unknown): string {
   if (Array.isArray(plan) && plan.length > 0) {
     const first: unknown = plan[0];
@@ -635,7 +617,7 @@ function formatPlanNode(node: Record<string, unknown>, depth: number): string {
   const indent = "  ".repeat(depth);
   const parts = [String(node["Node Type"] ?? "节点")];
   const cost = Number(node["Total Cost"]);
-  if (Number.isFinite(cost)) parts.push(`cost=${cost.toFixed(2)}`); // R1-O4:非数值不渲染 NaN
+  if (Number.isFinite(cost)) parts.push(`cost=${cost.toFixed(2)}`); // 非数值不渲染 NaN
   const rows = node["Actual Rows"] ?? node["Plan Rows"];
   if (rows !== undefined) parts.push(`rows=${String(rows)}`);
   if (node["Relation Name"]) parts.push(`on ${String(node["Relation Name"])}`);
@@ -651,9 +633,7 @@ function formatPlanNode(node: Record<string, unknown>, depth: number): string {
   return lines.join("\n");
 }
 
-/* 076:口径依据折叠面板(指标名 + 口径表达式 + 修订时间)。取色全走 token
-   (Article 8);指标名为语义层管理页定位链接(system:semantic:manage 守卫,
-   无权限时 router 兜 403——不按权限隐藏,避免"看不见≠不存在"误导)。 */
+/* 展示指标名称、口径表达式和修订时间；管理链接由路由权限守卫处理。 */
 function MetricProvenancePanel({
   hits,
 }: {

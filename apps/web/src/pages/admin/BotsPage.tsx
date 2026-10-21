@@ -1,7 +1,4 @@
-/* Bot 管理页(025,custom-agent spec):列表/创建/编辑/启停/公开开关/
-   api-key 创建(明文一次展示);归属=本人或超管。
-   104 版本化上架:草稿与在架版本差异提示、重新上架入口、版本历史
-   视图(版本号/上架时间/当前标识/回滚 AlertDialog 确认)。 */
+/* 管理 Bot 的创建、编辑、启停、公开状态和版本发布。新建 API key 时明文仅展示一次。 */
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -54,17 +51,14 @@ import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types.gen";
 import { ErrorAlert } from "@/components/error-alert";
 
-// 036⑥:消费生成类型(ADR-005,禁手写;team_id 回传已在生成类型)
 type BotItem = components["schemas"]["BotOut"];
 
 export default function BotsPage() {
-  // 032:归属变更(团队下拉,attach 后经 attach 端点)
   const [attaching, setAttaching] = useState<string | null>(null); // bot_id
   const [attachTeam, setAttachTeam] = useState("");
   const [attachError, setAttachError] = useState("");
   const myTeams = useQuery({ queryKey: ["admin", "teams"], queryFn: listMyTeams });
-  // 审查循环 B2:上架须录入商店展示内容(曾恒传空 greeting/suggestions,
-  // 商店卡片与详情「建议问题」全部落空);下架保持直接操作(可逆)
+  // 上架前要求填写欢迎语与建议问题,避免商店卡片/详情展示落空;下架直接操作(可逆)
   const [pubTarget, setPubTarget] = useState<string | null>(null); // bot_id
   const [pubGreeting, setPubGreeting] = useState("");
   const [pubSuggestions, setPubSuggestions] = useState("");
@@ -83,13 +77,10 @@ export default function BotsPage() {
           ),
     onSuccess: () => {
       setPubTarget(null);
-      // R1-S1:键修正(列表键 ["bots"],曾 ["admin","bots"] 不刷新)
       void qc.invalidateQueries({ queryKey: ["bots"] });
       setError("");
     },
-    onError: (e) =>
-      // R1-S1:护栏拒绝行内可见(提案交付「护栏拒绝行内可见」)
-      setError(e instanceof Error ? e.message : "上架失败"),
+    onError: (e) => setError(e instanceof Error ? e.message : "上架失败"),
   });
   const attach = useMutation({
     mutationFn: () => attachResource(attachTeam, "bot", attaching!),
@@ -117,7 +108,7 @@ export default function BotsPage() {
     queryFn: () => api.get<BotItem[]>("/system/bots"),
   });
 
-  // 104 版本历史(对话框按需拉取)+ 在架 Bot 的当前版本快照(差异提示单源)
+  // 版本历史(对话框按需拉取)+ 在架 Bot 的当前版本快照(差异提示单源)
   const [verTarget, setVerTarget] = useState<string | null>(null); // bot_id
   const [rollbackNo, setRollbackNo] = useState<number | null>(null);
   const [rollbackError, setRollbackError] = useState("");
@@ -137,10 +128,10 @@ export default function BotsPage() {
     onError: (e) => setRollbackError(e instanceof Error ? e.message : "回滚失败"),
   });
 
-  // 040:工具多选候选源=注册表(封闭集合;CSV 手输拼错会被 resolve_tools 静默求交丢弃)
+  // 工具多选候选源=注册表(封闭集合;CSV 手输拼错会被 resolve_tools 静默求交丢弃)
   const registry = useQuery({ queryKey: ["toolcall", "registry"], queryFn: toolList });
 
-  // 104 差异提示:草稿定义(name/system_prompt/tools)与当前上架版本快照比对
+  // 差异提示:草稿定义(name/system_prompt/tools)与当前上架版本快照比对
   // (工具集按集合比较——上架快照保序,但草稿勾选顺序变化不构成实质差异)
   const publishedIds = (bots.data ?? []).filter((b) => b.published_at !== null).map((b) => b.id);
   const versionsQ = useQuery({
@@ -150,8 +141,8 @@ export default function BotsPage() {
       return Object.fromEntries(publishedIds.map((id, i) => [id, lists[i]]));
     },
     enabled: publishedIds.length > 0,
-    // 评审缓解:N 个在架 Bot = 进页 N 个并发请求(徽标用途),staleTime 内
-    // 复用不重复扇出;根治(批量端点)另行立项,回滚/上架后仍经 invalidate 刷新
+    // 每个在架 Bot 触发一次版本查询;staleTime 内复用,不重复扇出
+    // (批量端点可根治,另行立项;回滚/上架后经 invalidate 刷新)
     staleTime: 60_000,
   });
   const versionsMap = versionsQ.data ?? {};
@@ -257,7 +248,7 @@ export default function BotsPage() {
                     </span>
                   </Badge>
                 )}
-                {/* 104:草稿与在架版本不一致提示(治理补偿:分离是特性,提示防遗忘) */}
+                {/* 草稿与在架版本不一致提示(分离是特性,提示防遗忘) */}
                 {b.published_at !== null && draftDiffers(b) && (
                   <Badge variant="warning" className="shrink-0">
                     有未上架修改
@@ -333,7 +324,6 @@ export default function BotsPage() {
           {
             label: "创建密钥",
             onSelect: (b) => {
-              // 与原按钮 disabled={createKey.isPending} 同口径
               if (!createKey.isPending) createKey.mutate(b.id);
             },
           },
@@ -345,7 +335,7 @@ export default function BotsPage() {
             },
           },
           {
-            // 104:版本历史入口(在架/曾下架均可查;回滚入口在历史视图内)
+            // 已上架和已下架的版本都可查看;回滚在历史视图中操作。
             label: "版本历史",
             onSelect: (b) => {
               setRollbackError("");
@@ -353,7 +343,7 @@ export default function BotsPage() {
             },
           },
           {
-            // 104:草稿与在架版本不一致时的重新上架入口(预填当前版本商店内容)
+            // 草稿与在架版本不一致时的重新上架入口(预填当前版本商店内容)
             label: "重新上架",
             isVisible: (b) => b.published_at !== null && draftDiffers(b),
             onSelect: (b) => {
@@ -364,7 +354,6 @@ export default function BotsPage() {
             },
           },
           {
-            // 行级文案:已上架行展示「下架」,未上架行展示「上架」
             label: (b) => (b.published_at !== null ? "下架" : "上架"),
             onSelect: (b) => {
               if (publish.isPending) return;
@@ -380,7 +369,6 @@ export default function BotsPage() {
         ]}
       />
 
-      {/* 创建对话框 */}
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent>
           <DialogHeader>
@@ -437,7 +425,6 @@ export default function BotsPage() {
               label="可用工具"
               help="从清单勾选该助手可用的工具;不勾选时,助手仅对话,不执行任何操作。"
             >
-              {/* 040:CSV 手输改注册表勾选——封闭集合消灭拼错工具名被求交静默丢弃 */}
               <ScrollArea className="h-40 rounded-md border p-2">
                 <div className="space-y-1 pr-2">
                   {(registry.data?.tools ?? []).map((t) => (
@@ -503,7 +490,6 @@ export default function BotsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* api-key 一次展示 */}
       <Dialog open={keyShown !== null} onOpenChange={() => setKeyShown(null)}>
         <DialogContent>
           <DialogHeader>
@@ -535,7 +521,6 @@ export default function BotsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* 032:归属变更对话框(团队下拉) */}
       <Dialog
         open={attaching !== null}
         onOpenChange={(o) => {
@@ -579,8 +564,6 @@ export default function BotsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 审查循环 B2:上架录入商店展示内容;104:上架=创建版本快照
-          (内容无变化幂等复用,不产生重复版本) */}
       <Dialog
         open={pubTarget !== null}
         onOpenChange={(open) => {
@@ -634,7 +617,6 @@ export default function BotsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 104:版本历史视图(版本号/上架时间/当前标识/回滚入口) */}
       <Dialog
         open={verTarget !== null}
         onOpenChange={(open) => {
@@ -700,11 +682,10 @@ export default function BotsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 104:回滚确认(破坏性语义;受控关闭,失败保持开启展示错误) */}
       <AlertDialog
         open={rollbackNo !== null}
         onOpenChange={(open) => {
-          // 进行中不可关闭(评审修复:Esc 中途关框会让回滚失败信息无处渲染,
+          // 进行中不可关闭(Esc 中途关框会让回滚失败信息无处渲染,
           // 用户误以为已生效);未进行中才允许取消
           if (!open && !rollback.isPending) setRollbackNo(null);
         }}

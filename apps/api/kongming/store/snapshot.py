@@ -1,14 +1,9 @@
-"""Bot 上架版本快照定型(104):白名单字段 + 规范化 + 一致性判定。
-
-零框架纯函数(宪法 Article II):上架链路与回滚一致性判定共用本单源,
-快照 jsonb 的读侧定型依赖 SNAPSHOT_FIELDS 键集(测试 test_store_snapshot
-钉住键集,新增 Bot 定义字段时须显式裁决是否进快照)。
-"""
+"""定义 Bot 上架快照的字段白名单、规范化和一致性判定。新增 Bot 字段时需明确决定是否进入快照。"""
 
 from typing import cast
 
-# 快照字段白名单(设计裁决 D1:名称/问候语/建议问题/系统提示/工具集;
-# 数据源/模型等运行配置不在快照内——商店直跑仍按运行闸现行口径求交)
+# 快照字段白名单:数据源/模型等运行配置不在快照内——商店直跑仍按
+# 运行闸现行口径求交
 SNAPSHOT_FIELDS: tuple[str, ...] = (
     "name",
     "greeting",
@@ -43,11 +38,7 @@ def build_snapshot(
     system_prompt: object,
     tools: object,
 ) -> dict[str, object]:
-    """定义(白名单五字段)→ 规范化快照定型。
-
-    规范化口径与既有上架链路一致:greeting 为 str(超限由上架入口拒绝)、
-    建议问题逐条 str 截断 200 且至多 5 条、工具名数组保序收集。
-    """
+    """按五字段白名单构建并规范化上架快照。"""
     return {
         "name": _as_str(name),
         "greeting": _as_str(greeting),

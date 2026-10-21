@@ -1,13 +1,6 @@
-"""judge 评审 rubric 声明(092,design D2;115 增圆桌):五类对象的维度/
-分档/权重/prompt 模板 + VERSION 常量——随代码演进、随 git 可溯,任何维度/
-权重/模板变更 MUST 递增 VERSION(跨版本分数不可比,models.compare_to_baseline
-显式标注)。
+"""声明各类评审对象的评分维度、权重和提示词。
 
-judge 输出固定 JSON 约定(design D3):
-  {"verdict": "PASS|BORDERLINE|FAIL",
-   "dimensions": {"<维度名>": <1-分档上限 整数>, ...},
-   "quotes": ["引自产出原文的关键片段", ...]}
-解析失败保留原始输出重试一次,再失败该对象显式 ERROR(runner 职责)。
+维度、权重或提示词改变时必须递增 VERSION;Judge 输出为固定 JSON,解析失败最多重试一次。
 """
 # pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false
 

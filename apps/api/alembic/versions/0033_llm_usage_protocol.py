@@ -1,14 +1,4 @@
-"""077-llm-usage-protocol-attribution:sys_llm_usage 增 protocol 列(多协议观测闭环)。
-
-多协议出站已落地并归档(multi-protocol-llm,ADR-008:openai/anthropic/
-responses),但观测面仍停留单协议时代口径——protocol 取值域只在 agent 进程
-内存,不落库不可筛不可聚合。本迁移补最后一环:protocol VARCHAR(16) NULL,
-取值域对齐注册表单源(ADR-008 不新造枚举);存量行 null 不回算(model 名
-不可可靠映射协议,DashScope 代理同名模型是常态)。
-
-Revision ID: 0033
-Revises: 0032
-"""
+"""为 LLM 用量增加 protocol 字段。存量记录保持 NULL，因为模型名称无法可靠推断出站协议。"""
 
 from collections.abc import Sequence
 

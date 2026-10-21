@@ -1,4 +1,4 @@
-"""toolcall 端口(019):service 依赖反转,组合根在 router。
+"""toolcall 端口:service 依赖反转,组合根在 router。
 
 零框架纪律:本模块仅 typing.Protocol,不 import fastapi/sqlalchemy/redis。
 """
@@ -30,7 +30,7 @@ class ToolRepo(Protocol):
         clear_reason: bool = False,
         args_digest: str | None = None,
     ) -> None:
-        """状态推进;args_digest 非空时覆写参数摘要(100 创建结果回填,
+        """状态推进;args_digest 非空时覆写参数摘要(创建结果回填,
         None=不触碰;语义详见仓储实现)。"""
         ...
 
@@ -71,7 +71,7 @@ class AuditWriter(Protocol):
 
 
 class IntentReviewer(Protocol):
-    """工具意图审核(020):在参数 JSON Schema 校验之前;fail-closed 由实现保证。"""
+    """在 JSON Schema 参数校验前审核工具意图；实现必须拒绝无法安全判定的请求。"""
 
     async def allow(
         self,
@@ -91,11 +91,7 @@ class PermReader(Protocol):
 
 
 class SqlExecutor(Protocol):
-    """execute_sql 工具委托:既有执行路由全链路(internal.service.execute 适配)。
-
-    返回 dict 而非 internal 类型——domain 不依赖基础设施层类型(端口解耦)。
-    键:verdict/reason/columns/rows/row_count/duration_ms。
-    """
+    """execute_sql 委托到受控 SQL 执行服务，复用权限、数据范围和只读校验。"""
 
     async def run(
         self,
@@ -110,7 +106,7 @@ class SqlExecutor(Protocol):
 
 
 class WebSearchPort(Protocol):
-    """094:联网检索(websearch 域,检索供应商经网关出站)。
+    """联网检索(websearch 域,检索供应商经网关出站)。
 
     实现侧(组合根)负责凭证装配、供应商协议适配、超时与错误分类;
     领域只消费「检索卡列表」(title/url/snippet),失败经 WebSearchError
@@ -121,12 +117,8 @@ class WebSearchPort(Protocol):
 
 
 class SandboxExecutor(Protocol):
-    """run_python_code 工具委托(027):沙箱执行+审计(实现侧 sandbox 域)。
-    data=None 纯计算;非 None={"columns","rows"}(六层防御取数结果,
-    JSON 安全值)。返回 LLM 投影 dict(status/stdout/error/images_count/
-    duration_ms[/injected/image_note])——images base64 不进投影(design
-    D2 修正案:agent 观察截断 2000)。实现侧未启用由调用方判定(组合根
-    未注入=工具不可用),运行期故障收敛投影 status=ERROR。"""
+    """委托沙箱执行并写审计。data=None 表示纯计算;否则携带 columns 和 rows。
+    返回 LLM 可见结果,不含图片 Base64。"""
 
     async def execute(
         self,
@@ -148,7 +140,7 @@ class RagRetriever(Protocol):
 
 
 class DynamicToolResolver(Protocol):
-    """动态工具解析(028 MCP 桥接):静态注册表未命中时查租户启用
+    """动态工具解析(MCP 桥接):静态注册表未命中时查租户启用
     server 的快照;命中返回按 fail-closed 语义构造的 ToolDef
     (perm_code=tool:mcp:use,无 readOnlyHint=写工具+确认),未命中 None。"""
 
@@ -156,7 +148,7 @@ class DynamicToolResolver(Protocol):
 
 
 class McpToolCaller(Protocol):
-    """MCP 工具出站执行(028;实现侧 mcp 域):解析→取明文(瞬时)→
+    """MCP 工具出站执行(实现侧 mcp 域):解析→取明文(瞬时)→
     调用;超时/断连/协议错收敛 McpCallError(分发兜底映射 ERROR)。"""
 
     async def call(
@@ -165,11 +157,10 @@ class McpToolCaller(Protocol):
 
 
 class ConnectorToolGate(Protocol):
-    """连接器工具门(099 http-connector-domain;实现侧 connector 域 +
-    网关切面适配):resolve=按租户解析启用连接器为 fail-closed ToolDef
-    (perm_code=tool:http:call,写语义=requires_confirmation);
-    call=经网关切面执行(出口校验→SSRF→出站→分类),失败收敛
-    ConnectorError(分发兜底映射 ERROR + 审计)。"""
+    """连接器工具门(实现侧 connector 域 + 网关切面适配):resolve=按租户
+    解析启用连接器为 fail-closed ToolDef(perm_code=tool:http:call,
+    写语义=requires_confirmation);call=经网关切面执行(出口校验→SSRF→
+    出站→分类),失败收敛 ConnectorError(分发兜底映射 ERROR + 审计)。"""
 
     async def resolve(self, *, tenant_id: str, name: str) -> ToolDef | None: ...
 
@@ -179,7 +170,7 @@ class ConnectorToolGate(Protocol):
 
 
 class RateLimiter(Protocol):
-    """固定窗口限流(Redis);不可用 fail-open 仅告警(与 007 吊销降级同口径)。"""
+    """固定窗口限流(Redis);不可用 fail-open 仅告警。"""
 
     async def allow(self, key: str, *, limit: int, window_sec: int) -> bool: ...
 

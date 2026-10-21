@@ -1,11 +1,5 @@
 # pyright: reportPrivateUsage=false
-"""工具网关测试(089 tool-gateway,安全规则类测试先行)。
-
-覆盖:畸形清单单域剔除、缺策略器不注册、出口白名单拒绝(零网络请求)、
-脱敏先于观察、连接类重试至多一次/响应类不重试(连接超时/读超时分型,
-MockTransport 定点触发——异常类型随事件循环环境漂移,禁用不可路由 IP 直连
-手法)、停用域零感知、白名单单源、工具名→域映射单源。
-"""
+"""覆盖工具清单、出口白名单、脱敏、重试和停用。"""
 
 from typing import Any, cast
 
@@ -63,7 +57,7 @@ def test_domain_without_policy_not_registered() -> None:
 
 
 def test_domain_tools_mapping_single_source() -> None:
-    """工具名→域映射单源(审计域标签与配额闸共用;094 收录 websearch 域)。"""
+    """工具名→域映射单源(审计域标签与配额闸共用;收录 websearch 域)。"""
     assert DOMAIN_TOOLS == {
         "web_search": "websearch",
     }
@@ -277,10 +271,10 @@ async def test_connect_timeout_is_connection_class() -> None:
 
 @pytest.mark.asyncio
 async def test_connect_timeout_real_executor_unreachable_retry_once() -> None:
-    """真实执行器 + MockTransport 定点 ConnectTimeout(异常类型随事件循环环境
-    漂移,不可用不可路由 IP 直连手法禁用——实测直跑 ConnectTimeout/pytest 下
-    泛化 TimeoutException):连接类 → 重试恰好一次 → unreachable 文案零漂移。
-    断言用真实 WebSearchPolicy(failure_reason 在真策略器上)。"""
+    """用 MockTransport 固定 ConnectTimeout,避免异常类型受网络环境影响。
+
+    验证连接错误只重试一次,并由真实 WebSearchPolicy 生成 unreachable 文案。
+    """
     import httpx as _httpx
 
     from kongming.toolgateway.websearch import WebSearchExecutor, WebSearchPolicy
@@ -318,8 +312,7 @@ async def test_connect_timeout_real_executor_unreachable_retry_once() -> None:
 @pytest.mark.asyncio
 async def test_decoding_error_real_executor_protocol_no_retry() -> None:
     """真实执行器 + MockTransport 坏 gzip:解码失败(DecodingError∈RequestError,
-    非 TransportError/ValueError)按 protocol 前缀收口,不裸抛、不重试
-    (094 评审循环 R1 同款缺口的回归)。"""
+    非 TransportError/ValueError)按 protocol 前缀收口,不裸抛、不重试。"""
     import httpx as _httpx
 
     from kongming.toolgateway.websearch import WebSearchExecutor, WebSearchPolicy
@@ -359,7 +352,7 @@ async def test_decoding_error_real_executor_protocol_no_retry() -> None:
 
 @pytest.mark.asyncio
 async def test_disabled_domain_zero_awareness() -> None:
-    """停用域:handles() 即刻 False,直接执行被拒(policy 分类)。"""
+    """停用域:handles 即刻 False,直接执行被拒(policy 分类)。"""
     executor = _MockExecutor([{"results": []}])
     gw = _gateway(executor)
     assert gw.handles("knowledge")
@@ -379,7 +372,7 @@ async def test_disabled_domain_zero_awareness() -> None:
     assert gw.handles("knowledge")
 
 
-# ── 组合根接线回归(审查 P1-3/P1-4)──
+# ── 组合根接线回归 ──
 
 
 @pytest.fixture
@@ -449,7 +442,7 @@ async def test_domain_governance_routes(
     monkeypatch: Any,
     restore_registry: Any,
 ) -> None:
-    """域治理面路由级回归(spec 域治理面):无权限 403;未知域 404;
+    """验证域管理接口的权限、未知域、停用和恢复行为:
     停用 → internal execute 拒(TOOL_NOT_REGISTERED)且审计带 domain;
     启用恢复 executed。停用集为进程内存态(单进程部署形态),重启随部署清单复位。"""
     from sqlalchemy import text as sql_text
@@ -540,7 +533,7 @@ async def test_domain_governance_routes(
     rok = await client.post("/internal/tool/execute", headers=headers, json=req)
     assert rok.status_code == 200 and rok.json()["status"] == "executed", rok.text
 
-    # 0044 持久化:停用写穿入库;「重启」=清网关单例缓存后经启动装载恢复意图
+    # 停用持久化:写穿入库;「重启」=清网关单例缓存后经启动装载恢复意图
     await client.post("/system/tools/domains/websearch/disable", headers=_auth(token_admin))
     states = (
         await session.execute(

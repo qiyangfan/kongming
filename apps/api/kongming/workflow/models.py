@@ -1,4 +1,4 @@
-"""workflow 领域模型(029,零框架):DAG 结构校验/引用解析/模板替换/
+"""workflow 领域模型(零框架):DAG 结构校验/引用解析/模板替换/
 条件比较——全纯函数,引擎与路由共用唯一实现。
 
 定义形态:{nodes: [{id, type, config, depends_on}]};依赖即边
@@ -12,7 +12,7 @@ from typing import Any, cast
 
 NODE_TYPES = ("sql", "http", "condition", "loop", "transform", "agent")
 
-# 类型必填配置键(design D2)
+# 类型必填配置键
 _REQUIRED_CONFIG: dict[str, tuple[str, ...]] = {
     "sql": ("sql",),
     "http": ("url", "method"),
@@ -26,8 +26,8 @@ _CONDITION_OPS = ("==", "!=", ">=", "<=", ">", "<", "contains")
 
 _REF_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_.]+?)\s*\}\}")
 
-# R1-J5:节点 id 形态与引用语法字符集对齐(连字符/空格 id 会让引用
-# 静默解析为空串);保留名(loop 内建上下文)禁用作节点 id(R1-J1)
+# 节点 id 形态与引用语法字符集对齐(连字符/空格 id 会让引用
+# 静默解析为空串);保留名(loop 内建上下文)禁用作节点 id
 _NODE_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
 _RESERVED_IDS = frozenset({"inputs", "_loop"})
 
@@ -84,7 +84,7 @@ def validate_dag(
     存在/无环(Kahn,报环节点)/无孤立(多节点时)/loop 子段递归校验
     (外层 id 与保留名碰撞拒绝)。通过则返回节点表。"""
     nodes = _parse_nodes(definition)
-    if len(nodes) > 100:  # R1-提示3:体量上限(管理面资产防爆)
+    if len(nodes) > 100:  # 限制单个工作流的节点数，避免处理过大的定义。
         raise DagValidationError(f"节点数超上限 100(当前 {len(nodes)})")
     seen: set[str] = set()
     for n in nodes:
@@ -102,7 +102,7 @@ def validate_dag(
         for key in _REQUIRED_CONFIG[n.type]:
             if key not in n.config:
                 raise DagValidationError(f"节点 {n.id}({n.type})缺必填配置 {key}")
-        # R1-J4:config.on 值校验(typo 静默反转分支语义)
+        # config.on 值校验(typo 静默反转分支语义)
         on = n.config.get("on")
         if on is not None and on not in ("true", "false"):
             raise DagValidationError(f"节点 {n.id} 的 on 仅可为 true/false")
@@ -110,7 +110,7 @@ def validate_dag(
             raise DagValidationError(f"节点 {n.id} 存在重复依赖项")
         if n.id in n.depends_on:
             raise DagValidationError(f"节点 {n.id} 自依赖")
-        # R1-J1:loop 子段递归校验(保留名+外层全量 id 集,两遍制:
+        # loop 子段递归校验(保留名+外层全量 id 集,两遍制:
         # 先收集再校验——body 撞后声明的外层节点也拒)
         if n.type == "loop":
             body = n.config.get("body")

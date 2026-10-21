@@ -1,5 +1,4 @@
-"""033 bot-store 测试:上架治理(归属/护栏)/发现/互动/直跑计数
-(测试先行,安全类);104 版本化上架(快照/指针/幂等/回滚/封顶/直跑切快照)。"""
+"""覆盖 Bot 商店发现、收藏、版本化发布、回滚和运行。"""
 # pyright: reportPrivateUsage=false
 
 from collections.abc import Iterator
@@ -24,7 +23,7 @@ BOT2 = {**BOT_PAYLOAD, "bot_key": "store_bot", "name": "销售助手"}
 
 
 class _StoreFakeAgent:
-    """scripted 替身:记录 react 调用(104 直跑快照消费断言用)。"""
+    """scripted 替身:记录 react 调用(直跑快照消费断言用)。"""
 
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -183,7 +182,7 @@ async def test_favorite_and_rating(
         headers={"Authorization": f"Bearer {token}"},
         json={"greeting": "hi"},
     )
-    # 收藏幂等(审查循环 F6:set 语义——重复 POST 不反选,取消走 DELETE)
+    # 收藏幂等(set 语义——重复 POST 不反选,取消走 DELETE)
     r = await client.post(
         "/store/bots/store_bot/favorite", headers={"Authorization": f"Bearer {token}"}
     )
@@ -191,10 +190,10 @@ async def test_favorite_and_rating(
     favs = await client.get("/store/favorites", headers={"Authorization": f"Bearer {token}"})
     assert len(favs.json()) == 1
     # 收藏列表项同构 StoreBotOut:favorited 恒 TRUE(前端心形填充依据)、
-    # fav_count 全局计数(缺陷修复:曾缺字段致「我的收藏」页红心不亮)
+    # fav_count 全局计数
     assert favs.json()[0]["favorited"] is True
     assert favs.json()[0]["fav_count"] == 1
-    # 详情接口 favorited 同源真实(曾恒 false 的同根缺陷)
+    # 详情接口 favorited 同源真实
     d_fav = (
         await client.get("/store/bots/store_bot", headers={"Authorization": f"Bearer {token}"})
     ).json()
@@ -301,7 +300,7 @@ async def test_store_run_counts_usage(
             )
         ).scalar_one()
         assert n == 1
-    # 无 use_count 上报参数(契约面直证:塞入字段被忽略而非计数)
+    # 请求中的 use_count 字段会被忽略，不会增加计数。
     before = (
         await session.execute(
             text("SELECT use_count FROM public.sys_bot_definition WHERE id=CAST(:i AS uuid)"),
@@ -322,7 +321,7 @@ async def test_store_run_counts_usage(
     assert after == before
 
 
-# ── 104 版本化上架(快照/指针/幂等/回滚/封顶/直跑切快照) ──
+# ── 版本化上架(快照/指针/幂等/回滚/封顶/直跑切快照) ──
 
 
 async def _publish(client: AsyncClient, token: str, bot_id: str, greeting: str) -> Response:
@@ -337,10 +336,10 @@ async def test_publish_versioning_lifecycle(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """上架=版本快照:v1→v2 递增、草稿编辑不影响在架、内容一致幂等复用、
-    BLOCK 拒绝指针不动、详情纯增版本字段、幂等审计「内容无变化」。"""
+    BLOCK 拒绝指针不动、详情版本字段、幂等审计「内容无变化」。"""
     _, token = await _user(client, session, make_user, "st_vl")
     bot_id = await _mk_store_bot(client, token)
-    # v1 上架:详情带版本号与上架时间(纯增字段)
+    # v1 上架:详情带版本号与上架时间(字段)
     r1 = await _publish(client, token, bot_id, "v1 问候")
     assert r1.status_code == 200, r1.text
     d1 = (
@@ -527,7 +526,7 @@ async def test_store_run_consumes_snapshot_public_channel_live(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """直跑消费当前上架版本快照(草稿不外溢);公开页渠道消费活定义
-    (Non-goal 边界钉住:版本化不外溢既有渠道)。"""
+    (版本化不外溢既有渠道契约)。"""
     agent = _StoreFakeAgent()
     store_fake_agent["agent"] = agent
     # 商店直跑经组合根直调 get_agent_client(不经 FastAPI DI),补模块属性替身
@@ -567,7 +566,7 @@ async def test_store_run_consumes_snapshot_public_channel_live(
     rp = await client.post("/bot/store_bot/chat", json={"question": "你好"})
     assert rp.status_code == 200 and rp.json()["success"] is True
     call2 = agent.calls[1]
-    assert call2["bot_system_prompt"] == "草稿人设 v9"  # 活定义(边界钉住)
+    assert call2["bot_system_prompt"] == "草稿人设 v9"  # 活定义(非快照)
     assert {str(t["name"]) for t in cast("list[dict[str, object]]", call2["tools"])} == {
         "rag_retrieve"
     }

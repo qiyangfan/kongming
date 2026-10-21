@@ -1,4 +1,4 @@
-"""057 数值纪律:白名单构建、审计剥离、compute 工具纯函数。"""
+"""数值纪律:白名单构建、审计剥离、compute 工具纯函数。"""
 
 from __future__ import annotations
 

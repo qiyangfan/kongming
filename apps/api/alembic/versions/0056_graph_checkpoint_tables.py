@@ -1,11 +1,7 @@
-"""0056: 图级检查点与图内挂起(add-graph-checkpoint)
+"""创建执行图检查点和人工确认表。
 
-- sys_agent_graph_checkpoint:执行图推进快照(agent 经内部通道读写的不透明
-  blob;控制面只存不取,不理解图框架序列化格式——控制面与图框架解耦);
-  kind 区分快照行与中断挂起期的部分写入行。
-- sys_agent_graph_confirm:图内人工确认请求(任务循环内高危动作挂图审批);
-  状态机 pending→approved/denied/expired 单向 CAS,与任务审批门同源纪律
-  (归属人-only/过期/幂等)。
+控制面只保存检查点数据，不解析图框架格式。确认状态只能从 pending 转为
+approved、denied 或 expired。
 """
 
 from sqlalchemy import text

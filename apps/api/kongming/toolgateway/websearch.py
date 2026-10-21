@@ -1,8 +1,8 @@
-"""websearch 域策略器 + 执行器(094:联网检索,089 框架第二域)。
+"""websearch 域策略器 + 执行器(联网检索,框架第二域)。
 
 策略器(纯函数,安全资产):出口校验(供应商 API 主机白名单)/参数校验/
 响应脱敏(allowlist:检索卡只透 title/url/snippet,评分与追踪参数永不入
-观察)/重试分类(089 两档语义:连接层未送达可重试一次;读超时/非 2xx/
+观察)/重试分类(两档语义:连接层未送达可重试一次;读超时/非 2xx/
 报文畸形=已送达不重试)。
 执行器:单次出站的供应商协议适配(Bearer 鉴权头装配 + 响应归一为统一
 检索卡),不含治理逻辑——重试与脱敏由网关切面统一承担。
@@ -86,13 +86,13 @@ class _ResponseTooLarge(Exception):
     """响应超字节闸(内部信号;执行器收敛为 protocol 前缀域错误)。"""
 
 
-# 响应读取上限(字节闸,防巨头响应内存放大;100 ticket 同款)
+# 响应读取上限(字节闸,防巨头响应内存放大)
 _RESPONSE_CAP = 1024 * 1024
 
 
 async def _read_json_capped(resp: httpx.Response) -> object:
-    """stream 上下文内读 JSON 响应(字节闸内)——resp.json() 会全量预读
-    入内存,真流式须 aiter_bytes(100 ticket 同款修法)。"""
+    """stream 上下文内读 JSON 响应(字节闸内)——resp.json 会全量预读
+    入内存,超大响应须走本函数的字节闸路径。"""
     buf = bytearray()
     async for chunk in resp.aiter_bytes(65536):
         buf.extend(chunk)
@@ -147,7 +147,7 @@ class WebSearchPolicy:
         return {"results": cards}
 
     def classify(self, exc: Exception | None, *, delivered: bool) -> RetryClass:
-        """按执行器收敛出的前缀判定(089 两档语义):
+        """按执行器收敛出的前缀判定(两档语义):
         unreachable=连接层未送达(重试至多一次);protocol=已送达不重试。"""
         if exc is None:
             return RetryClass.OK
@@ -231,7 +231,7 @@ def _bocha_request(payload: dict[str, object]) -> dict[str, object]:
     return body
 
 
-# 智谱 search_query 上限 70 字符(官方 API schema 硬限;2026-10-11 核对)——
+# 智谱 search_query 上限 70 字符(官方 API schema 硬限)——
 # 域级上限 500 与供应商方言上限的差异在方言装配层消化,截断不改域契约
 _ZHIPU_QUERY_MAX_LEN = 70
 
@@ -270,15 +270,7 @@ def _normalize_zhipu(body: dict[str, object]) -> list[dict[str, object]]:
 
 
 def _alibaba_request(payload: dict[str, object]) -> dict[str, object]:
-    """alibaba 请求装配:query/count → {query, top_k, content_type}(105)。
-
-    方言固定 content_type=snippet(snippet/summary/mainText 三档中最廉价,
-    域检索卡语义只要摘要,summary/mainText 属增值解析面非本域语义);
-    top_k 官方文档无硬限(缺省 5),域级 1–10 边界由策略器先行约束;
-    query 官方文档无长度硬限(不同于 zhipu 70 截断),域级 500 上限先行约束。
-    鉴权为 Bearer 独立 OS- key(与百炼 sk- 不通用),头形态与出站通道既有
-    Bearer 装配一致——凭证由组合根注入执行器,不在此出现。
-    """
+    """装配 Alibaba 搜索请求(snippet 类型;top_k 1–10,query 最长 500 字)。"""
     query = payload.get("query")
     count = payload.get("count")
     body: dict[str, object] = {"query": query, "content_type": "snippet"}
@@ -313,7 +305,7 @@ def _normalize_alibaba(body: dict[str, object]) -> list[dict[str, object]]:
     return cards
 
 
-# 供应商适配注册表(新供应商=增一条映射,design D1):
+# 供应商适配注册表(新供应商=增一条映射):
 # 请求装配(统一参数→供应商方言)+ 响应归一(供应商报文→统一检索卡)
 _Adapter = tuple[
     Callable[[dict[str, object]], dict[str, object]],
@@ -367,7 +359,7 @@ class WebSearchExecutor:
                 timeout=httpx.Timeout(timeout_s),
                 transport=self._transport,
             ) as client:
-                # stream 上下文+字节闸读取(评审修复:resp.json() 全量预读,
+                # stream 上下文+字节闸读取(resp.json 全量预读,
                 # 巨头响应先入内存;真流式见 _read_json_capped)
                 async with client.stream(
                     "POST",
@@ -380,7 +372,7 @@ class WebSearchExecutor:
                     if body is None:
                         raise WebSearchError(f"{_PROTOCOL_PREFIX} 检索响应报文畸形(JSON 对象缺失)")
                     return {"results": self._normalize(body)}
-        # 顺序铁律(089 审查 P1-1 同款):未送达族(含 ConnectTimeout)先于读超时
+        # 顺序铁律:未送达族(含 ConnectTimeout)先于读超时
         except undelivered as e:
             raise WebSearchError(f"{_UNDELIVERED_PREFIX} 联网检索拒连({type(e).__name__})") from e
         except httpx.TimeoutException as e:
@@ -394,8 +386,8 @@ class WebSearchExecutor:
             raise WebSearchError(f"{_PROTOCOL_PREFIX} 响应报文畸形({type(e).__name__})") from e
         except httpx.DecodingError as e:
             # 解码失败继承 RequestError(非 TransportError),不单列会以裸 httpx
-            # 异常逃逸收敛链、审计 error_reason 丢结构化前缀(评审循环 R1)
+            # 异常逃逸收敛链、审计 error_reason 丢结构化前缀
             raise WebSearchError(f"{_PROTOCOL_PREFIX} 响应解码失败({type(e).__name__})") from e
         except httpx.TransportError as e:
-            # 传输层未枚举残族(防 httpx 分层演进逃逸;089 同款兜底)
+            # 传输层未枚举残族(防 httpx 分层演进逃逸;同款兜底)
             raise WebSearchError(f"{_UNDELIVERED_PREFIX} 联网检索拒连({type(e).__name__})") from e

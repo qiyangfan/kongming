@@ -1,7 +1,7 @@
 # pyright: reportPrivateUsage=false
-"""062-chat-cost-control 测试:速率闸/配额闸/公开嵌入限流/失败口径。
+"""-chat-cost-control 测试:速率闸/配额闸/公开嵌入限流/失败口径。
 
-单元层(零框架闸模块):假时钟 + 假端口,fail-open/fail-closed 全钉死;
+单元层使用假时钟和假端口验证 fail-open/fail-closed;
 集成层(HTTP 端到端):monkeypatch 组合根 _build_cost_gate 注入假端口,
 429/503 与 detail 码、X-Quota-Warning、agent 零调用(未烧 token)断言。
 """
@@ -125,7 +125,7 @@ async def test_rate_limit_blocks_with_429() -> None:
 
 
 async def test_rate_limit_fail_open_on_store_error() -> None:
-    """任务 1.4:限流存储异常放行(速率闸 fail-open;限流是保护层非安全闸)。"""
+    """限流存储异常放行(速率闸 fail-open;限流是保护层非安全闸)。"""
     limiter, counter = _Limiter(boom=True), _Counter()
     warn = await _gate(limiter, counter).check_login(tenant_id="t1", user_id="u1")
     assert warn == ""  # 放行,不抛
@@ -146,7 +146,7 @@ async def test_daily_quota_exceeded_429_with_audit() -> None:
     with pytest.raises(ChatQuotaExceeded):
         await _gate(limiter, counter, oper, daily=500).check_login(tenant_id="t1", user_id="u1")
     actions = [a for a, _, _ in oper.records]
-    assert "chat.quota_reject" in actions  # 拒绝落审计(034 同口径)
+    assert "chat.quota_reject" in actions  # 拒绝落审计(同口径)
 
 
 async def test_monthly_quota_exceeded() -> None:
@@ -165,7 +165,7 @@ async def test_quota_warn_header_under_limit() -> None:
 
 
 async def test_quota_read_failure_fails_closed_with_audit() -> None:
-    """任务 1.4:配额读数异常拒绝并落审计(配额闸 fail-closed)。"""
+    """配额读数异常拒绝并落审计(配额闸 fail-closed)。"""
     limiter, counter, oper = _Limiter(), _Counter(boom=True), _Oper()
     with pytest.raises(ChatQuotaUnavailable):
         await _gate(limiter, counter, oper).check_login(tenant_id="t1", user_id="u1")
@@ -182,7 +182,7 @@ async def test_quota_zero_disables_dimension() -> None:
 
 
 def test_day_window_asia_shanghai() -> None:
-    """窗口起点按 Asia/Shanghai 日历日/月(与 billing 031 同口径)。"""
+    """窗口起点按 Asia/Shanghai 日历日/月(与 billing 同口径)。"""
     day, month = day_window(dt.datetime(2026, 9, 27, 23, 30, tzinfo=dt.UTC))
     assert (day.year, day.month, day.day, day.hour) == (2026, 9, 28, 0)  # UTC+8 已跨日
     assert (month.year, month.month, month.day) == (2026, 9, 1)
@@ -192,7 +192,7 @@ def test_day_window_asia_shanghai() -> None:
 
 
 async def test_bot_gate_dimension_keys() -> None:
-    """任务 1.3:(助手标识, 客户端 IP) 维度;换 IP/换 bot 互不影响。"""
+    """(助手标识, 客户端 IP) 维度;换 IP/换 bot 互不影响。"""
     limiter, counter = _Limiter(), _Counter()
     gate = _gate(limiter, counter, rate=20)
     await gate.check_bot(bot_key="kb", client_ip="1.1.1.1")
@@ -210,8 +210,7 @@ async def test_bot_gate_dimension_keys() -> None:
 
 
 async def test_bot_gate_ip_never_from_request_header() -> None:
-    """IP 只经 ClientIpMiddleware contextvar 入参(禁读请求自带头):
-    伪造 X-Forwarded-For 不改变限流键——入参即全部来源,本测试钉死签名契约。"""
+    """限流键只使用 ClientIpMiddleware 注入的 IP,不读取请求自带的 X-Forwarded-For。"""
     limiter, counter = _Limiter(), _Counter()
     gate = _gate(limiter, counter, rate=20)
     await gate.check_bot(bot_key="kb", client_ip=None)  # 非 HTTP 上下文(None)
@@ -280,7 +279,7 @@ async def test_chat_query_rate_limited_skips_agent(
     fake_agent: dict[str, FakeAgent],
     gate_holder: dict[str, object],
 ) -> None:
-    """任务 1.1:分钟限额后 429 CHAT_RATE_LIMITED,且 agent 零调用(未烧 token)。"""
+    """分钟限额后 429 CHAT_RATE_LIMITED,且 agent 零调用(未烧 token)。"""
     _, token = await _user_with_chat_perm(client, session, make_user, "cost1")
     agent = FakeAgent(_pass_reply())
     _install(fake_agent, agent)
@@ -350,7 +349,7 @@ async def test_chat_stream_rate_limited_regular_json(
     fake_agent: dict[str, FakeAgent],
     gate_holder: dict[str, object],
 ) -> None:
-    """任务 1.2:流式端点同款闸;前段失败以常规 JSON 429(非 SSE,防线同构)。"""
+    """流式端点同款闸;前段失败以常规 JSON 429(非 SSE,防线同构)。"""
     _, token = await _user_with_chat_perm(client, session, make_user, "cost5")
     _install(fake_agent, FakeAgent(_pass_reply()))
     r1 = await client.post(

@@ -1,5 +1,4 @@
-/* 媒体查询 Hook(B2.2):管理索引页 /admin 宽屏重定向、窄屏渲染索引用。
-   matchMedia 订阅式,转屏即时响应。 */
+/* 订阅媒体查询变化，用于在窄屏显示管理索引、在宽屏重定向到默认管理页。 */
 
 import { useEffect, useState } from "react";
 

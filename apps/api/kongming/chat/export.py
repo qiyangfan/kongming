@@ -1,14 +1,7 @@
-"""结果导出序列化(010,chat spec「结果导出 CSV/Excel」):零框架纯函数。
+"""问答结果导出为 CSV 或 XLSX。
 
-形态与上游 ExportUseCase 同构:
-- CSV = UTF-8 BOM(Excel 直开不乱码)+ CRLF 行尾 + RFC 4180 转义
-  (含逗号/双引号/换行的字段双引号包裹,内部引号双写;None → 空串);
-- xlsx = 表头加粗 + 自算列宽(openpyxl 无 POI autoSizeColumn;东亚宽字符
-  按 2 计,width=clamp(内容最大宽+2, 8, 60),表头+前 100 行采样);
-- 行数截断由调用方给上限(防服务端内存失控,chat spec 默认 10000)。
-
-导出输入=请求方已查询到的 columns+rows(所见即所导,不重跑 SQL——数据隔离
-在查询时已由 data_scope 保证,上游同构决策)。
+CSV 使用 UTF-8 BOM、CRLF 行尾和 RFC 4180 转义；XLSX 按表头与前 100 行估算列宽。
+输入为调用方已查询并完成权限过滤的列和行，不会重新执行 SQL；行数上限由调用方提供。
 """
 
 from __future__ import annotations
@@ -29,7 +22,7 @@ _CSV_QUOTE_CHARS = (",", '"', "\n", "\r")
 _WIDTH_SAMPLE_ROWS = 100
 _WIDTH_MIN = 8
 _WIDTH_MAX = 60
-# CSV 公式注入中和(R1 评审):文本值以此类字符开头时,Excel 打开会按公式/DDE
+# CSV 公式注入中和:文本值以此类字符开头时,Excel 打开会按公式/DDE
 # 执行(内容源自业务库,可能他方写入)——前置单引号中和;数值类型不受影响
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
@@ -37,7 +30,7 @@ _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 def _cell_text(v: object) -> str:
     """CSV/列宽采样共用文本化:None→空串;bool 小写(JSON 语义,非 Python True)。
 
-    两道清洗(R1 评审实证):XML 非法控制字符剥除(openpyxl 遇之抛
+    两道清洗:XML 非法控制字符剥除(openpyxl 遇之抛
     IllegalCharacterError 裸 500);str 以公式字符开头前置 ' 中和(CSV 注入)。
     """
     if v is None:
@@ -52,7 +45,7 @@ def _cell_text(v: object) -> str:
 
 def _cell_native(v: object) -> object:
     """xlsx 单元格类型分流:bool/数值原生(可排序可求和),其余文本化;
-    文本同剥 XML 非法控制字符(R1:openpyxl 遇之抛 IllegalCharacterError 裸 500)。"""
+    文本同剥 XML 非法控制字符(openpyxl 遇之抛 IllegalCharacterError 裸 500)。"""
     if v is None or isinstance(v, (bool, int, float)):
         return v
     return ILLEGAL_CHARACTERS_RE.sub("", str(v))
@@ -77,7 +70,7 @@ def to_csv(columns: list[str], rows: list[list[object]], *, max_rows: int) -> tu
 
     lines = [_line([_cell_text(c) for c in columns])]
     lines.extend(_line([_cell_text(v) for v in r]) for r in rows[:max_rows])
-    # errors="replace":孤立代理(手搓 JSON 可过 json.loads)不至于编码炸 500(R1 实证)
+    # errors="replace":孤立代理(手搓 JSON 可过 json.loads)不至于编码炸 500
     return ("\ufeff" + "\r\n".join(lines) + "\r\n").encode("utf-8", errors="replace"), truncated
 
 
