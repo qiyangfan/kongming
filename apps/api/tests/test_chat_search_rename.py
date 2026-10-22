@@ -55,7 +55,7 @@ async def test_search_by_question_content(
 async def test_search_wildcard_literal(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """%/_ 按字面匹配( 同款防线,共享 like_pattern)。"""
+    """%/_ 按字面匹配(同款防线，共享 SQL 模糊模式工具)。"""
     uid, token = await _user_with_chat_perm(client, session, make_user, "srch-wild")
     tid = await _default_tenant_id(session)
     pct = await _mk_session(session, user_id=uid, tenant_id=tid, title="完成率100%达成")

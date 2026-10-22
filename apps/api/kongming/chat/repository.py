@@ -14,7 +14,7 @@ from kongming import tenant
 from kongming.chat.models import Suggestion
 from kongming.chat.ports import ChatStoreError
 from kongming.db import uuid7
-from kongming.like import like_pattern
+from kongming.sql_util import contains_like_pattern
 
 
 def _store_error_boundary[**P, R](
@@ -117,7 +117,7 @@ class ChatRepository:
         """本人本租户会话列表,updated_at 倒序(id DESC 作时序 tiebreak)。
 
         keyword 非空时按「标题 OR user 问句(EXISTS)」ILIKE 包含匹配(会话搜索);
-        ESCAPE '\' + like_pattern 转义使 %/_/\\ 按字面;
+        ESCAPE '\' + contains_like_pattern 转义使 %/_/\\ 按字面;
         kw = '' 短路使空白词零行为变更(与 system/datasource 域同构)。
         """
         rows = (
@@ -136,7 +136,7 @@ class ChatRepository:
                         "u": user_id,
                         "t": tenant_id,
                         "kw": keyword,
-                        "p": like_pattern(keyword),
+                        "p": contains_like_pattern(keyword),
                         "n": limit,
                     },
                 )

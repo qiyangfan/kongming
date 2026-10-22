@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.like import like_pattern
+from kongming.sql_util import contains_like_pattern
 from kongming.uuid7 import uuid7
 
 _SORT_SQL = {
@@ -226,7 +226,7 @@ class SqlStoreRepo:
                 " OR b.bot_key ILIKE :kw ESCAPE '\\'"
                 " OR v.snapshot->>'system_prompt' ILIKE :kw ESCAPE '\\')"
             )
-            params["kw"] = like_pattern(keyword)
+            params["kw"] = contains_like_pattern(keyword)
         # S608 说明:base 为两常量分支拼接,_SORT_SQL 为常量枚举,值全绑定
         rows = (
             (
