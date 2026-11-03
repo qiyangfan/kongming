@@ -7,6 +7,7 @@
 
 import time
 from collections.abc import Callable
+from typing import cast
 
 MAX_STAGE_EVENTS = 64  # 正常轮 ≤16 条目(8 节点×2);64 兜极端重试风暴
 
@@ -24,18 +25,19 @@ class StageTraceCollector:
         self._start = clock()
         self._truncated = False
 
-    def add_stage(self, data: dict[str, object]) -> None:
+    def add_stage(self, data: object) -> None:
         """消费一条 stage 帧(node/status/retry_count);畸形形态静默跳过。"""
         if not isinstance(data, dict):
             return
-        node = data.get("node")
-        status = data.get("status")
+        frame = cast("dict[str, object]", data)
+        node = frame.get("node")
+        status = frame.get("status")
         if not isinstance(node, str) or not node or status not in ("running", "done"):
             return
         if len(self._events) >= self._max:
             self._truncated = True
             return
-        retry = data.get("retry_count")
+        retry = frame.get("retry_count")
         self._events.append(
             {
                 "node": node,

@@ -312,16 +312,22 @@ class SqlQualityRepo:
             conds.append("s.tenant_id = ANY(CAST(:t_ids AS uuid[]))")
             params["t_ids"] = tenant_ids
         row = (
-            await self._s.execute(
-                text(
-                    "SELECT m.stage_trace FROM public.chat_message m"  # noqa: S608
-                    " JOIN public.chat_session s ON s.id = m.session_id"
-                    f" WHERE {' AND '.join(conds)}"  # noqa: S608
-                ),
-                params,
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT m.stage_trace FROM public.chat_message m"  # noqa: S608
+                        " JOIN public.chat_session s ON s.id = m.session_id"
+                        f" WHERE {' AND '.join(conds)}"  # noqa: S608
+                    ),
+                    params,
+                )
             )
-        ).scalar()
-        return {"stage_trace": row}
+            .mappings()
+            .one_or_none()
+        )
+        # 行不存在/租户不可见 → None(路由映射 404,与 score/context 同形防探测);
+        # 行在而轨迹为空 → trace 键为 null(同步轮如实为空,两者不得混同)
+        return {"stage_trace": row["stage_trace"]} if row is not None else None
 
     async def export_rows(
         self,

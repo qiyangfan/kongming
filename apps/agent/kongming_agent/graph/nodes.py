@@ -199,7 +199,9 @@ _DIALOGUE_REPLY_FAMILIES: dict[str, frozenset[str]] = {
     ),
     "greeting": frozenset({"你好", "您好", "hi", "hello", "hey"}),
 }
-DIALOGUE_REPLY_WORDS: frozenset[str] = frozenset().union(*_DIALOGUE_REPLY_FAMILIES.values())
+DIALOGUE_REPLY_WORDS: frozenset[str] = frozenset(
+    w for ws in _DIALOGUE_REPLY_FAMILIES.values() for w in ws
+)
 
 # 直通应答文案(族别静态表,零模型调用;招呼/致谢 SHALL NOT 以数据缺失话术作答)
 CHITCHAT_REPLIES: dict[str, str] = {
@@ -895,7 +897,7 @@ async def route_intent(state: AgentState) -> dict[str, object]:
             "fallback_type": FALLBACK_CHITCHAT,
         }
     # 澄清早退(spec「歧义问句澄清引导」):高置信歧义且上一轮非澄清轮
-    #(防循环硬门,确定性规则不依赖模型自觉);fail-open 路径在上方回退分支
+    # (防循环硬门,确定性规则不依赖模型自觉);fail-open 路径在上方回退分支
     if ambiguous and state.get("last_fallback") != FALLBACK_CLARIFY:
         emit_event(
             "trace",

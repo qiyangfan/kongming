@@ -30,9 +30,7 @@ class TestPassthroughReply:
         assert "未找到" not in str(out["error"])  # 数据缺失话术根除
         assert fake.calls == []
 
-    async def test_stop_word_gets_stop_reply(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_stop_word_gets_stop_reply(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(deps, "get_llm", lambda: FakeLlm())
         monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
         out = await nodes.understand(_state(question="不用了"))
@@ -66,9 +64,7 @@ class TestParseIntentRoute:
 
     def test_ambiguous_without_clarify_falls_open(self) -> None:
         """歧义判定无澄清问句 → 不可执行,收 false(fail-open)。"""
-        parsed = nodes.parse_intent_route(
-            '{"intent":"data","ambiguous":true,"confidence":0.9}'
-        )
+        parsed = nodes.parse_intent_route('{"intent":"data","ambiguous":true,"confidence":0.9}')
         assert parsed is not None and parsed[3] is False
 
     def test_chitchat_is_valid_intent(self) -> None:
@@ -86,9 +82,7 @@ class TestParseIntentRoute:
 
 
 class TestRouteIntentFallbacks:
-    async def test_semantic_chitchat_exits_early(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_semantic_chitchat_exits_early(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """词表漏网闲聊(「太感谢了」)被语义层接住:零检索零执行。"""
         fake = FakeLlm([_ROUTE_JSON % ("chitchat", "false", "")])
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
@@ -116,15 +110,11 @@ class TestRouteIntentFallbacks:
         fake = FakeLlm([_ROUTE_JSON % ("data", "true", "哪个范围?")])
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
         monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
-        out = await nodes.route_intent(
-            _state(question="上个月的", last_fallback=FALLBACK_CLARIFY)
-        )
+        out = await nodes.route_intent(_state(question="上个月的", last_fallback=FALLBACK_CLARIFY))
         assert out.get("end_reason") is None
         assert out.get("intent") == "data"  # 正常路由产物
 
-    async def test_chitchat_priority_over_ambiguous(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_chitchat_priority_over_ambiguous(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """同帧冲突:闲聊优先(无取数意图的输入无从澄清口径)。"""
         fake = FakeLlm([_ROUTE_JSON % ("chitchat", "true", "哪个范围?")])
         monkeypatch.setattr(deps, "get_llm", lambda: fake)

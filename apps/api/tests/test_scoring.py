@@ -142,7 +142,7 @@ def test_parse_decomposition_coverage_clamped():
 
 
 def test_assemble_data_evidence_truncation_marks():
-    rows = [[i, f"n{i}"] for i in range(80)]
+    rows: list[list[object]] = [[i, f"n{i}"] for i in range(80)]
     text = assemble_data_evidence(["id", "name"], rows, {"rows": 80})
     assert "仅展示前 50 行" in text
     assert "共 80 行" in text
@@ -164,7 +164,5 @@ def test_build_material_prefers_resolved_question():
         question="那 4 月呢", resolved_question="上海仓 4 月出库量", answer="答 1", evidence=""
     )
     assert "上海仓 4 月出库量" in m and "那 4 月呢" not in m
-    fallback = build_material(
-        question="原始问句", resolved_question=None, answer="答", evidence=""
-    )
+    fallback = build_material(question="原始问句", resolved_question=None, answer="答", evidence="")
     assert "原始问句" in fallback

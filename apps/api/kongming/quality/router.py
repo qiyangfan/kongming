@@ -244,7 +244,9 @@ async def quality_score_detail(
         score=int(cast("int", detail["score"])),
         grounding=int(cast("int", detail["grounding"])),
         coverage=int(cast("int", detail["coverage"])),
-        decomposition=decomposition if isinstance(decomposition, dict) else {},
+        decomposition=(
+            cast("dict[str, object]", decomposition) if isinstance(decomposition, dict) else {}
+        ),
         score_model=str(detail.get("score_model") or ""),
         scored_at=cast("dt.datetime", detail["scored_at"]),
     )

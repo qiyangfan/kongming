@@ -8,6 +8,7 @@
 """
 
 from dataclasses import dataclass
+from typing import cast
 
 # 主张重要度三档(权重)与支撑三级(分值);未知取值防御性归 normal/unsupported
 IMPORTANCE_WEIGHTS: dict[str, float] = {"critical": 1.0, "normal": 0.6, "minor": 0.3}
@@ -67,7 +68,7 @@ class TurnScore:
     coverage: int
 
 
-def parse_decomposition(raw: dict[str, object]) -> ScoreDecomposition | None:
+def parse_decomposition(raw: object) -> ScoreDecomposition | None:
     """评审输出 JSON → 分解(防御性解析,纯函数)。
 
     主张缺文本/非字符串丢弃;importance/support 未知取值归
@@ -75,12 +76,14 @@ def parse_decomposition(raw: dict[str, object]) -> ScoreDecomposition | None:
     非法 → None(该轮不评分,与「无主张分解不评分」守卫同义)。"""
     if not isinstance(raw, dict):
         return None
-    raw_claims = raw.get("claims")
+    body = cast("dict[str, object]", raw)
+    raw_claims = body.get("claims")
     claims: list[Claim] = []
     if isinstance(raw_claims, list):
-        for item in raw_claims[:MAX_CLAIMS]:
-            if not isinstance(item, dict):
+        for entry in cast("list[object]", raw_claims[:MAX_CLAIMS]):
+            if not isinstance(entry, dict):
                 continue
+            item = cast("dict[str, object]", entry)
             text = item.get("text")
             if not isinstance(text, str) or not text.strip():
                 continue
@@ -107,7 +110,7 @@ def parse_decomposition(raw: dict[str, object]) -> ScoreDecomposition | None:
             )
     if not claims:
         return None
-    points_total, points_covered = _coverage_of(raw)
+    points_total, points_covered = _coverage_of(cast("dict[str, object]", raw))
     return ScoreDecomposition(
         claims=tuple(claims), points_total=points_total, points_covered=points_covered
     )
@@ -120,11 +123,12 @@ def _coverage_of(raw: dict[str, object]) -> tuple[int, int]:
         return 0, 0
     total = 0
     covered = 0
-    for item in sq:
+    for item in cast("list[object]", sq):
         if not isinstance(item, dict):
             continue
+        entry = cast("dict[str, object]", item)
         total += 1
-        if item.get("answered") is True:
+        if entry.get("answered") is True:
             covered += 1
     covered = max(0, min(covered, total))
     return total, covered

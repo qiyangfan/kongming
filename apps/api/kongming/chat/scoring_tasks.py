@@ -7,6 +7,7 @@
 
 import json
 import logging
+from typing import cast
 
 from sqlalchemy import text
 
@@ -39,7 +40,7 @@ async def score_answer_task(*, message_id: str, agent: AgentClient) -> None:
         raw_decomposition = result.get("decomposition")
         if not isinstance(raw_decomposition, dict):
             return
-        d = parse_decomposition(raw_decomposition)
+        d = parse_decomposition(cast("dict[str, object]", raw_decomposition))
         if d is None:
             return
         ts = compute_score(d)
@@ -96,13 +97,20 @@ async def _assemble_material(message_id: str) -> tuple[str | None, str, str]:
             return None, "", ""
         if not isinstance(payload, dict):
             return None, "", ""
-        columns = payload.get("columns")
-        rows = payload.get("rows")
-        stats = payload.get("stats")
-        sources = payload.get("sources")
-        col_list = [str(c) for c in columns] if isinstance(columns, list) else []
-        row_list = [list(r) for r in rows] if isinstance(rows, list) else []
-        stat_map = dict(stats) if isinstance(stats, dict) else {}
+        body = cast("dict[str, object]", payload)
+        columns = body.get("columns")
+        rows = body.get("rows")
+        stats = body.get("stats")
+        sources = body.get("sources")
+        col_list = (
+            [str(c) for c in cast("list[object]", columns)] if isinstance(columns, list) else []
+        )
+        row_list = (
+            [list(cast("list[object]", r)) for r in cast("list[object]", rows)]
+            if isinstance(rows, list)
+            else []
+        )
+        stat_map = dict(cast("dict[str, object]", stats)) if isinstance(stats, dict) else {}
         tenant_id = str(row["tenant_id"] or "")
         tenant_key = str(row["tenant_key"] or "")
         trace_id = str(row["trace_id"] or "")
@@ -113,8 +121,8 @@ async def _assemble_material(message_id: str) -> tuple[str | None, str, str]:
             evidence = assemble_data_evidence(col_list, row_list, stat_map)
         elif isinstance(sources, list) and sources and tenant_id:
             typed_sources: list[dict[str, str]] = [
-                {k: str(v) for k, v in src.items() if isinstance(v, str)}
-                for src in sources
+                {k: str(v) for k, v in cast("dict[str, object]", src).items() if isinstance(v, str)}
+                for src in cast("list[object]", sources)
                 if isinstance(src, dict)
             ]
             refs = [src["source_ref"] for src in typed_sources if src.get("source_ref")]

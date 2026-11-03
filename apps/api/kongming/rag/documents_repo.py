@@ -271,9 +271,7 @@ class SqlDocumentRepo:
         )
         return [dict(r) for r in rows]
 
-    async def fetch_contents_by_refs(
-        self, *, tenant_id: str, refs: list[str]
-    ) -> dict[str, str]:
+    async def fetch_contents_by_refs(self, *, tenant_id: str, refs: list[str]) -> dict[str, str]:
         """按 source_ref 取父块正文(评分证据装配;tenant 收敛,缺 ref 跳过)。"""
         if not refs:
             return {}

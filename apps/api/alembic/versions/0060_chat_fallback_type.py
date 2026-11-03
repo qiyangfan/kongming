@@ -19,12 +19,8 @@ _CONSTRAINT = "chat_message_fallback_type_check"
 
 
 def upgrade() -> None:
-    op.execute(
-        "ALTER TABLE public.chat_message ADD COLUMN fallback_type VARCHAR(16)"
-    )
-    op.create_check_constraint(
-        _CONSTRAINT, _TABLE, "fallback_type IN ('CHITCHAT', 'CLARIFY')"
-    )
+    op.execute("ALTER TABLE public.chat_message ADD COLUMN fallback_type VARCHAR(16)")
+    op.create_check_constraint(_CONSTRAINT, _TABLE, "fallback_type IN ('CHITCHAT', 'CLARIFY')")
 
 
 def downgrade() -> None:

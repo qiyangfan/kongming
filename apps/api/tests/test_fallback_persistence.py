@@ -71,14 +71,14 @@ class TestConstraintAndRepo:
     async def test_invalid_value_rejected_by_check(
         self, session: AsyncSession, make_user: MakeUser
     ) -> None:
-        import sqlalchemy
+        from sqlalchemy.exc import IntegrityError
 
         from tests.test_chat_query import _default_tenant_id
 
         await seed_all(session, get_settings())
         uid = await make_user("fb-c2")
         tid = await _default_tenant_id(session)
-        with pytest.raises(sqlalchemy.exc.IntegrityError):
+        with pytest.raises(IntegrityError):
             await _mk_message(session, uid, tid, fallback_type="BOGUS")
         await session.rollback()
 

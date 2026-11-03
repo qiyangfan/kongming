@@ -143,7 +143,9 @@ class TestScoreAnswerTask:
         mid = await _mk_turn(session, uid, tid, result_json=_DATA_RESULT)
 
         class _Agent:
-            async def score_answer(self, *, material: str, trace_id: str, tenant_key: str) -> dict:
+            async def score_answer(
+                self, *, material: str, trace_id: str, tenant_key: str
+            ) -> dict[str, object]:
                 return {"decomposition": _DEC_FULL, "score_model": "judge-x"}
 
         await score_answer_task(message_id=mid, agent=_Agent())  # type: ignore[arg-type]

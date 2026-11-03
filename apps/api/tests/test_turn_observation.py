@@ -117,7 +117,9 @@ class TestSessionContext:
 class TestStageTraceDetail:
     async def test_streamed_turn_returns_trace(self, session: Any, scope: tuple[str, str]) -> None:
         uid, tid = scope
-        trace = [{"node": "understand", "status": "running", "retry": 0, "t": 0}]
+        trace: list[dict[str, object]] = [
+            {"node": "understand", "status": "running", "retry": 0, "t": 0}
+        ]
         mid = await _mk_turn(session, uid, tid, question="q", stage_trace=trace)
         detail = await SqlQualityRepo(session).stage_trace_detail(tenant_ids=[tid], message_id=mid)
         assert detail is not None
@@ -128,6 +130,17 @@ class TestStageTraceDetail:
         mid = await _mk_turn(session, uid, tid, question="q")
         detail = await SqlQualityRepo(session).stage_trace_detail(tenant_ids=[tid], message_id=mid)
         assert detail is not None and detail["stage_trace"] is None  # 同步轮如实为空
+
+    async def test_invisible_or_missing_yields_none(
+        self, session: Any, scope: tuple[str, str]
+    ) -> None:
+        uid, tid = scope
+        mid = await _mk_turn(session, uid, tid, question="q")
+        repo = SqlQualityRepo(session)
+        # 查询方绑定租户集不含锚点租户 → None(路由映射 404,与 score/context 同形防探测)
+        assert await repo.stage_trace_detail(tenant_ids=[str(uuid7())], message_id=mid) is None
+        # 锚点不存在 → None(与越权同形 404)
+        assert await repo.stage_trace_detail(tenant_ids=None, message_id=str(uuid7())) is None
 
 
 class TestExportRows:

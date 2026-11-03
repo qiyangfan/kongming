@@ -1,5 +1,8 @@
 """Agent 图执行测试，使用脚本化模型和控制面回调覆盖成功、自愈、拦截和重试耗尽四种结果。"""
 
+# pyright: reportPrivateUsage=false
+# NO_DATA 哨兵是 nodes 私有常量,图链测试刻意跨模块断言其逐字值
+
 from collections.abc import Callable
 from typing import Any, cast
 

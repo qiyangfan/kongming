@@ -409,6 +409,7 @@ export default function QualityPage() {
   const [stageTraceId, setStageTraceId] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState(false);
 
   const summary = useQuery({
     queryKey: ["quality", "summary", days],
@@ -472,6 +473,7 @@ export default function QualityPage() {
 
   async function doExport() {
     setExporting(true);
+    setExportError(false);
     try {
       const params = {
         ...(status ? { status: status as "SUCCESS" | "FAILED" | "REJECTED" | "NO_DATA" } : {}),
@@ -488,6 +490,8 @@ export default function QualityPage() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      setExportError(true);
     } finally {
       setExporting(false);
     }
@@ -649,6 +653,11 @@ export default function QualityPage() {
         {!list.isLoading && list.isError && (
           <div className="px-4 py-3">
             <ErrorAlert text="明细加载失败" />
+          </div>
+        )}
+        {exportError && (
+          <div className="px-4 py-3">
+            <ErrorAlert text="CSV 导出失败,请稍后重试" />
           </div>
         )}
         <DataView
