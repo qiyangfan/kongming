@@ -233,9 +233,7 @@ function ContextDialog({ messageId, onClose }: { messageId: string | null; onClo
                     {it.fallback_type && (
                       <StatusBadge value={it.fallback_type} meta={FALLBACK_META} />
                     )}
-                    {it.score != null && (
-                      <span className="font-mono text-xs">{it.score} 分</span>
-                    )}
+                    {it.score != null && <span className="font-mono text-xs">{it.score} 分</span>}
                   </span>
                 </div>
                 <p className="mt-1 line-clamp-2">{it.question ?? "—"}</p>
@@ -249,7 +247,13 @@ function ContextDialog({ messageId, onClose }: { messageId: string | null; onClo
 }
 
 /** 节点阶段轨迹抽屉(spec「节点阶段轨迹持久化」;null=同步轮如实为空) */
-function StageTraceDialog({ messageId, onClose }: { messageId: string | null; onClose: () => void }) {
+function StageTraceDialog({
+  messageId,
+  onClose,
+}: {
+  messageId: string | null;
+  onClose: () => void;
+}) {
   const trace = useQuery({
     queryKey: ["quality", "stage-trace", messageId],
     queryFn: () => qualityStageTrace(messageId!),
@@ -316,7 +320,13 @@ function StageTraceDialog({ messageId, onClose }: { messageId: string | null; on
 }
 
 /** 评分详情抽屉(维度分+主张分解;404=未评分或越权,同形提示) */
-function ScoreDetailDialog({ messageId, onClose }: { messageId: string | null; onClose: () => void }) {
+function ScoreDetailDialog({
+  messageId,
+  onClose,
+}: {
+  messageId: string | null;
+  onClose: () => void;
+}) {
   const detail = useQuery({
     queryKey: ["quality", "score", messageId],
     queryFn: () => qualityScoreDetail(messageId!),
@@ -423,9 +433,7 @@ export default function QualityPage() {
         size: PAGE_SIZE,
         ...(status ? { status: status as "SUCCESS" | "FAILED" | "REJECTED" | "NO_DATA" } : {}),
         ...(datasourceKey ? { datasource_key: datasourceKey } : {}),
-        ...(fallback
-          ? { fallback: fallback as "CHITCHAT" | "CLARIFY" | "none" }
-          : {}),
+        ...(fallback ? { fallback: fallback as "CHITCHAT" | "CLARIFY" | "none" } : {}),
       }),
   });
 
@@ -696,9 +704,7 @@ export default function QualityPage() {
               render: (r) => (
                 <span className="inline-flex items-center gap-1.5">
                   <StatusBadge value={r.status} meta={ROUND_STATUS_META} />
-                  {r.fallback_type && (
-                    <StatusBadge value={r.fallback_type} meta={FALLBACK_META} />
-                  )}
+                  {r.fallback_type && <StatusBadge value={r.fallback_type} meta={FALLBACK_META} />}
                   {r.retry_count > 0 && (
                     <span className="text-xs text-muted-foreground">重试 {r.retry_count}</span>
                   )}
