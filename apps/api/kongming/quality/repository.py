@@ -19,6 +19,7 @@ class SqlQualityRepo:
         tenant_ids: list[str] | None,
         start: object | None,
         end: object | None,
+        low_score_threshold: int,
     ) -> dict[str, Any]:
         where, params = _scope(tenant_ids, start, end)
         row = (
@@ -32,12 +33,17 @@ class SqlQualityRepo:
                         " count(*) FILTER (WHERE m.status = 'REJECTED') AS blocked,"
                         " count(*) FILTER (WHERE m.status = 'FAILED') AS failed,"
                         " count(*) FILTER (WHERE m.retry_count > 0) AS selfheal,"
-                        " count(*) FILTER (WHERE m.rating = 'DOWN') AS down"
+                        " count(*) FILTER (WHERE m.rating = 'DOWN') AS down,"
+                        " count(*) FILTER (WHERE m.fallback_type = 'CHITCHAT') AS chitchat,"
+                        " count(*) FILTER (WHERE m.fallback_type = 'CLARIFY') AS clarify,"
+                        " round(avg(sc.score)::numeric, 1) AS avg_score,"
+                        " count(*) FILTER (WHERE sc.score < :low) AS low_score_count"
                         f" FROM {_ROUNDS} m"  # noqa: S608
                         " JOIN public.chat_session s ON s.id = m.session_id"  # noqa: S608
+                        " LEFT JOIN public.chat_turn_score sc ON sc.message_id = m.id"  # noqa: S608
                         f" WHERE {where}"  # noqa: S608
                     ),
-                    params,
+                    {**params, "low": low_score_threshold},
                 )
             )
             .mappings()
@@ -162,6 +168,7 @@ class SqlQualityRepo:
         tenant_ids: list[str] | None,
         status: str | None,
         datasource_key: str | None,
+        fallback: str | None,
         start: object | None,
         end: object | None,
         page: int,
@@ -175,6 +182,11 @@ class SqlQualityRepo:
         if datasource_key:
             conds.append("s.datasource_key = :dk")
             params = {**params, "dk": datasource_key}
+        if fallback == "none":
+            conds.append("m.fallback_type IS NULL")
+        elif fallback in ("CHITCHAT", "CLARIFY"):
+            conds.append("m.fallback_type = :fb")
+            params = {**params, "fb": fallback}
         extra = f" AND {' AND '.join(conds)}" if conds else ""
         total = int(
             (
@@ -195,9 +207,12 @@ class SqlQualityRepo:
                     text(
                         "SELECT m.id, m.created_at, m.question, m.resolved_question,"  # noqa: S608
                         "       m.status, m.retry_count, m.rating, m.trace_id,"
-                        "       m.prompt_version, s.datasource_key AS datasource_key"
+                        "       m.prompt_version, m.fallback_type, m.session_id,"
+                        "       s.datasource_key AS datasource_key,"
+                        "       sc.score, sc.grounding, sc.coverage"
                         f" FROM {_ROUNDS} m"  # noqa: S608
                         " JOIN public.chat_session s ON s.id = m.session_id"  # noqa: S608
+                        " LEFT JOIN public.chat_turn_score sc ON sc.message_id = m.id"  # noqa: S608
                         f" WHERE {where}{extra}"  # noqa: S608
                         " ORDER BY m.created_at DESC LIMIT :lim OFFSET :off"  # noqa: S608
                     ),
@@ -208,6 +223,153 @@ class SqlQualityRepo:
             .all()
         )
         return total, [dict(r) for r in rows]
+
+    async def score_detail(
+        self, *, tenant_ids: list[str] | None, message_id: str
+    ) -> dict[str, Any] | None:
+        """评分详情(按消息取;租户不可见/未评分/非 assistant 轮 → None)。"""
+        conds = ["sc.message_id = :mid", "m.role = 'ASSISTANT'"]
+        params: dict[str, object] = {"mid": message_id}
+        if tenant_ids is not None:
+            conds.append("s.tenant_id = ANY(CAST(:t_ids AS uuid[]))")
+            params["t_ids"] = tenant_ids
+        row = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT sc.message_id, sc.score, sc.grounding, sc.coverage,"  # noqa: S608
+                        "       sc.decomposition, sc.score_model, sc.scored_at"
+                        " FROM public.chat_turn_score sc"
+                        " JOIN public.chat_message m ON m.id = sc.message_id"
+                        " JOIN public.chat_session s ON s.id = m.session_id"
+                        f" WHERE {' AND '.join(conds)}"  # noqa: S608
+                    ),
+                    params,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return dict(row) if row is not None else None
+
+    async def session_context(
+        self, *, tenant_ids: list[str] | None, message_id: str, limit: int
+    ) -> dict[str, Any] | None:
+        """同会话轮次串联(spec「同会话轮次串联」):锚点轮必含,窗口取锚点
+        及此前最近 limit 轮(升序返回);租户不可见/不存在 → None(404 同形
+        不区分存在性)。id(UUID v7)作时序 tiebreak。"""
+        anchor_conds = ["m.id = :mid", "m.role = 'ASSISTANT'"]
+        params: dict[str, object] = {"mid": message_id, "lim": limit}
+        if tenant_ids is not None:
+            anchor_conds.append("s.tenant_id = ANY(CAST(:t_ids AS uuid[]))")
+            params["t_ids"] = tenant_ids
+        anchor = (
+            await self._s.execute(
+                text(
+                    "SELECT m.session_id FROM public.chat_message m"  # noqa: S608
+                    " JOIN public.chat_session s ON s.id = m.session_id"
+                    f" WHERE {' AND '.join(anchor_conds)}"
+                ),
+                params,
+            )
+        ).scalar()
+        if anchor is None:
+            return None
+        rows = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT m.id, m.question, m.status, m.fallback_type,"
+                        "       sc.score, m.created_at"
+                        " FROM public.chat_message m"
+                        " JOIN public.chat_session s ON s.id = m.session_id"
+                        " LEFT JOIN public.chat_turn_score sc ON sc.message_id = m.id"
+                        " WHERE m.session_id = :sid AND m.role = 'ASSISTANT'"
+                        "   AND (m.created_at, m.id) <="
+                        "       (SELECT m2.created_at, m2.id FROM public.chat_message m2"
+                        "         WHERE m2.id = :mid)"
+                        " ORDER BY m.created_at DESC, m.id DESC LIMIT :lim"
+                    ),
+                    {**params, "sid": str(anchor)},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return {
+            "session_id": str(anchor),
+            "items": [dict(r) for r in reversed(rows)],  # 时间升序
+        }
+
+    async def stage_trace_detail(
+        self, *, tenant_ids: list[str] | None, message_id: str
+    ) -> dict[str, Any] | None:
+        """节点阶段轨迹(按消息取;租户不可见/非 assistant 轮 → None;
+        同步轮/无帧流轮为 null=如实为空)。"""
+        conds = ["m.id = :mid", "m.role = 'ASSISTANT'"]
+        params: dict[str, object] = {"mid": message_id}
+        if tenant_ids is not None:
+            conds.append("s.tenant_id = ANY(CAST(:t_ids AS uuid[]))")
+            params["t_ids"] = tenant_ids
+        row = (
+            await self._s.execute(
+                text(
+                    "SELECT m.stage_trace FROM public.chat_message m"  # noqa: S608
+                    " JOIN public.chat_session s ON s.id = m.session_id"
+                    f" WHERE {' AND '.join(conds)}"  # noqa: S608
+                ),
+                params,
+            )
+        ).scalar()
+        return {"stage_trace": row}
+
+    async def export_rows(
+        self,
+        *,
+        tenant_ids: list[str] | None,
+        status: str | None,
+        datasource_key: str | None,
+        fallback: str | None,
+        start: object | None,
+        end: object | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """导出行集(page 同筛选,无分页,行数上限在服务层收口)。"""
+        where, params = _scope(tenant_ids, start, end)
+        conds: list[str] = []
+        if status:
+            conds.append("m.status = :st")
+            params = {**params, "st": status}
+        if datasource_key:
+            conds.append("s.datasource_key = :dk")
+            params = {**params, "dk": datasource_key}
+        if fallback == "none":
+            conds.append("m.fallback_type IS NULL")
+        elif fallback in ("CHITCHAT", "CLARIFY"):
+            conds.append("m.fallback_type = :fb")
+            params = {**params, "fb": fallback}
+        extra = f" AND {' AND '.join(conds)}" if conds else ""
+        rows = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT m.created_at, m.question, m.resolved_question,"  # noqa: S608
+                        "       m.status, m.fallback_type, m.retry_count, m.rating,"
+                        "       sc.score, sc.grounding, sc.coverage, m.trace_id,"
+                        "       m.session_id, s.datasource_key, m.prompt_version"
+                        f" FROM {_ROUNDS} m"  # noqa: S608
+                        " JOIN public.chat_session s ON s.id = m.session_id"  # noqa: S608
+                        " LEFT JOIN public.chat_turn_score sc ON sc.message_id = m.id"  # noqa: S608
+                        f" WHERE {where}{extra}"  # noqa: S608
+                        " ORDER BY m.created_at DESC, m.id DESC LIMIT :lim"  # noqa: S608
+                    ),
+                    {**params, "lim": limit},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return [dict(r) for r in rows]
 
     async def list_bound_tenant_ids(self, *, user_id: str) -> list[str]:
         """查询方绑定租户全集(ACTIVE;非 ALL 权限方的收敛源——观测面越权

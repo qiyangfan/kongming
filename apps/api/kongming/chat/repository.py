@@ -285,6 +285,8 @@ class ChatRepository:
         retry_count: int = 0,
         resolved_question: str | None = None,  # 仅多轮改写实际发生时非空
         prompt_version: str | None = None,  # agent prompt 资产指纹
+        fallback_type: str | None = None,  # 兜底轮分类(闲聊/澄清;仅兜底轮非空)
+        stage_trace: list[dict[str, object]] | None = None,  # 节点轨迹(流式轮;同步轮 None)
     ) -> str:
         mid = str(uuid7())
         await self._s.execute(
@@ -292,9 +294,10 @@ class ChatRepository:
                 "INSERT INTO public.chat_message"
                 " (id, session_id, role, question, sql_text, result_json, summary,"
                 "  status, attachments, trace_id, retry_count, resolved_question,"
-                "  prompt_version)"
+                "  prompt_version, fallback_type, stage_trace)"
                 " VALUES (:id, :s, :role, :q, :sql, :rj, :sum, :st,"
-                "         CAST(:att AS jsonb), :tid, :rc, :rq, :pv)"
+                "         CAST(:att AS jsonb), :tid, :rc, :rq, :pv, :fb,"
+                "         CAST(:stg AS jsonb))"
             ),
             {
                 "id": mid,
@@ -310,9 +313,26 @@ class ChatRepository:
                 "rc": retry_count,
                 "rq": resolved_question,
                 "pv": prompt_version,
+                "fb": fallback_type,
+                "stg": json.dumps(stage_trace, ensure_ascii=False) if stage_trace else None,
             },
         )
         return mid
+
+    async def last_fallback_type(self, session_id: str) -> str | None:
+        """最近一条 assistant 消息的兜底分类(澄清防循环判据;无消息/无
+        分类 → None)。id(UUID v7)作 tiebreak,与 recent_user_questions 同款。"""
+        row = (
+            await self._s.execute(
+                text(
+                    "SELECT fallback_type FROM public.chat_message"
+                    " WHERE session_id = :s AND role = 'ASSISTANT'"
+                    " ORDER BY created_at DESC, id DESC LIMIT 1"
+                ),
+                {"s": session_id},
+            )
+        ).scalar()
+        return str(row) if row else None
 
     async def recent_user_questions(self, session_id: str, *, limit: int = 5) -> list[str]:
         """最近 N 条 user 问句,旧→新(chat spec「多轮上下文后端补全」)。

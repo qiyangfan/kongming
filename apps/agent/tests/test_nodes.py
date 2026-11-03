@@ -389,6 +389,20 @@ def test_selfheal_guidance_missing_from_clause() -> None:
     assert "NO_RELEVANT_TABLE" not in g  # 别名错可修,不是弃答出口
 
 
+def test_selfheal_guidance_distinct_order_by() -> None:
+    """DISTINCT 约束错→投影/排序修正指令(multiturn turn2 事故形态:
+    同因连败两轮,泛化喂回修不动——引导必须给出可执行的替代策略)。"""
+    g = nodes._selfheal_guidance(
+        "for SELECT DISTINCT, ORDER BY expressions must appear in select list"
+    )
+    assert "DISTINCT" in g
+    assert "投影" in g
+    assert "子查询" in g  # gold 同款策略:先取前 N 再关联
+    assert "LIMIT" in g  # 给出逐字正确形态模板(抽象指令修不动)
+    assert "不再使用 DISTINCT" in g  # 外层去 DISTINCT 是半途而废形态的针对点
+    assert "NO_RELEVANT_TABLE" not in g  # 可修,不是弃答出口
+
+
 def test_selfheal_guidance_column_vs_relation() -> None:
     """列不存在→列纪律(不引向表哨兵);表不存在→哨兵出口;其余→空。"""
     col = nodes._selfheal_guidance('column "email" does not exist')

@@ -220,6 +220,12 @@ class Settings(BaseSettings):
     mcp_breaker_threshold: int = Field(default=3, ge=1, le=100)
     mcp_breaker_cooldown_sec: int = Field(default=60, ge=1, le=3600)
 
+    # 答案异步评分(spec「答案异步评分」):SUCCESS 轮图外异步评审;
+    # enabled=False 触发点短路,逐字回到引入前行为
+    answer_scoring_enabled: bool = True
+    # 评审主张分解是长输出,独立超时预算(非标题 30s 口径)
+    answer_scoring_timeout_sec: float = Field(default=90.0, gt=0)
+
     # 联网检索域(供应商+API key 齐备才注册 web_search;
     # 均未配置=域零感知,合法缺省)。凭证只存控制面环境变量(ADR-002)
     websearch_provider: str = ""  # tavily | bocha | zhipu | alibaba_ai_search

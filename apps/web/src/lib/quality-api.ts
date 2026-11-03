@@ -6,6 +6,10 @@ import { api } from "./api";
 export type QualitySummaryOut = components["schemas"]["QualitySummaryOut"];
 export type QualityPageOut = components["schemas"]["QualityPageOut"];
 export type QualityRoundItemOut = components["schemas"]["QualityRoundItemOut"];
+export type QualityScoreDetailOut = components["schemas"]["QualityScoreDetailOut"];
+export type QualityContextOut = components["schemas"]["QualityContextOut"];
+export type QualityContextItemOut = components["schemas"]["QualityContextItemOut"];
+export type QualityStageTraceOut = components["schemas"]["QualityStageTraceOut"];
 export type QualityTrendPoint = QualitySummaryOut["trend"][number];
 export type QualitySliceRow = QualitySummaryOut["by_datasource"][number];
 export type QualityPromptSliceRow = QualitySummaryOut["by_prompt_version"][number];
@@ -20,6 +24,7 @@ export interface QualityPageParams {
   size?: number;
   status?: "SUCCESS" | "FAILED" | "REJECTED" | "NO_DATA";
   datasource_key?: string;
+  fallback?: "CHITCHAT" | "CLARIFY" | "none";
   start?: string;
   end?: string;
 }
@@ -33,4 +38,32 @@ export function qualityPage(params: QualityPageParams): Promise<QualityPageOut> 
   }
   const suffix = qs.size > 0 ? `?${qs}` : "";
   return api.get<QualityPageOut>(`/system/chat-quality/page${suffix}`);
+}
+
+/** 单轮评分详情(维度分+主张分解;404=未评分或越权,同形不区分) */
+export function qualityScoreDetail(messageId: string): Promise<QualityScoreDetailOut> {
+  return api.get<QualityScoreDetailOut>(`/system/chat-quality/score/${messageId}`);
+}
+
+/** 同会话轮次串联(锚点轮必含,时间升序;404=越权或不存在,同形不区分) */
+export function qualityContext(messageId: string): Promise<QualityContextOut> {
+  return api.get<QualityContextOut>(
+    `/system/chat-quality/context?message_id=${encodeURIComponent(messageId)}`,
+  );
+}
+
+/** 单轮节点阶段轨迹(null=同步轮/无帧流,如实为空;404=越权或不存在) */
+export function qualityStageTrace(messageId: string): Promise<QualityStageTraceOut> {
+  return api.get<QualityStageTraceOut>(`/system/chat-quality/stage-trace/${messageId}`);
+}
+
+/** 轮次质量导出(page 同筛选;CSV;403=无权限) */
+export function qualityExportUrl(params: QualityPageParams): string {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === "" || v === null) continue;
+    qs.set(k, String(v));
+  }
+  const suffix = qs.size > 0 ? `?${qs}` : "";
+  return `/system/chat-quality/export${suffix}`;
 }

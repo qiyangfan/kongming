@@ -271,6 +271,24 @@ class SqlDocumentRepo:
         )
         return [dict(r) for r in rows]
 
+    async def fetch_contents_by_refs(
+        self, *, tenant_id: str, refs: list[str]
+    ) -> dict[str, str]:
+        """按 source_ref 取父块正文(评分证据装配;tenant 收敛,缺 ref 跳过)。"""
+        if not refs:
+            return {}
+        rows = (
+            await self._s.execute(
+                text(
+                    "SELECT source_ref, content FROM rag.document_chunks"
+                    " WHERE source_ref = ANY(:refs) AND tenant_id=:t"
+                    " AND chunk_level='PARENT'"
+                ),
+                {"refs": refs, "t": tenant_id},
+            )
+        ).all()
+        return {str(r[0]): str(r[1] or "") for r in rows if r[0] is not None}
+
     async def fetch_child_texts(
         self, *, tenant_id: str, datasource_key: str, child_ids: list[str]
     ) -> dict[str, str]:

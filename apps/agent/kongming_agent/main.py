@@ -172,6 +172,42 @@ async def rewrite_title_endpoint(req: TitleIn) -> TitleOut:
     return TitleOut(rewritten=True, title=title)
 
 
+class ScoreAnswerIn(BaseModel):
+    """答案评审请求(api 评分后台任务回调,材料=问句+回答+证据装配)。"""
+
+    material: str = Field(min_length=1, max_length=24_000)
+    trace_id: str = Field(default="", max_length=64)  # 用量归因到本轮
+    tenant_key: str = Field(default="", max_length=64)  # 用量租户维度
+
+
+class ScoreAnswerOut(BaseModel):
+    decomposed: bool  # False 时 API 不落评分(降级)。
+    decomposition: dict[str, object] = {}
+    score_model: str = ""  # 实际生效的评审模型名(审计归因)
+
+
+@app.post("/internal/score-answer", response_model=ScoreAnswerOut, tags=["internal"])
+async def score_answer_endpoint(req: ScoreAnswerIn) -> ScoreAnswerOut:
+    """LLM 答案评审(只产出主张分解,分数由控制面重算);
+    失败不抛 5xx(decomposed=False),api 侧不落评分仅记日志。"""
+    from kongming_agent.scorer import ScoringError, score_answer
+
+    try:
+        decomposition = await score_answer(
+            req.material,
+            deps.get_llm(),
+            trace_id=req.trace_id or None,
+            tenant_key=req.tenant_key or None,
+        )
+    except ScoringError:
+        return ScoreAnswerOut(decomposed=False)
+    return ScoreAnswerOut(
+        decomposed=True,
+        decomposition=decomposition,
+        score_model=deps.get_llm().routed_model("ANSWER_SCORING"),
+    )
+
+
 class SuggestQuestionsIn(BaseModel):
     """建议问题生成请求(api 回调——结构摘要,非业务行数据)。"""
 
@@ -379,6 +415,8 @@ class QueryIn(BaseModel):
     memory_hint: str = ""
     # 图片附件引用(一次性消费;空=纯文本)
     attachment_ids: list[str] = []
+    # 上一轮兜底分类(澄清防循环判据;诊断字段,缺省不携带)
+    last_fallback: str | None = None
 
 
 class QueryOut(BaseModel):
@@ -401,6 +439,8 @@ class QueryOut(BaseModel):
     metric_hits: list[dict[str, str | None]] = []
     # 文档道结构化来源(空=SQL 道/无命中;落库+回显)
     sources: list[dict[str, str]] = []
+    # 兜底轮分类(CHITCHAT/CLARIFY;管理面诊断,api 落库不进用户响应)
+    fallback_type: str | None = None
     # 仅挂载用量收集器的 /query_react 请求会返回明细。
     usage_records: list[dict[str, object]] = []
 
@@ -434,7 +474,7 @@ async def _combine_with_attachments(req: QueryIn) -> str:
 
 
 def _initial_state(req: QueryIn) -> AgentState:
-    return {
+    state: AgentState = {
         "trace_id": req.trace_id,
         "tenant_key": req.tenant_key,
         "question": req.question,
@@ -445,6 +485,9 @@ def _initial_state(req: QueryIn) -> AgentState:
         "memory_hint": req.memory_hint,
         "has_attachments": bool(req.attachment_ids),  # 图片附件会影响问答分流。
     }
+    if req.last_fallback:
+        state["last_fallback"] = req.last_fallback  # 澄清防循环判据(缺省不带)
+    return state
 
 
 async def _run_graph(req: QueryIn) -> dict[str, object]:
@@ -520,6 +563,9 @@ def _build_query_out(final: dict[str, object]) -> QueryOut:
     # error 非空 ⇒ 恒非成功终态(轮次触顶携带部分结果的形态:execution
     # 可能 PASS 但 error 优先;其余既有形态 error 与非 PASS 并存,零影响)
     has_error = isinstance(error, str) and bool(error)
+    # 兜底轮分类(仅兜底早退轮非空;诊断字段,api 落库不进用户响应)
+    fallback_raw = final.get("fallback_type")
+    fallback = fallback_raw if isinstance(fallback_raw, str) and fallback_raw else None
     return QueryOut(
         success=(
             isinstance(execution, ExecutionResult) and execution.verdict == "PASS" and not has_error
@@ -529,6 +575,7 @@ def _build_query_out(final: dict[str, object]) -> QueryOut:
         prompt_version=_PROMPT_VERSION,
         metric_hits=metric_hits,
         sources=sources,
+        fallback_type=fallback,
         summary=summary if isinstance(summary, str) else "",
         # isinstance 守卫后 cast 收窄(守卫产物元素/键型仍 Unknown;cast 运行时恒等)
         insights=cast("list[dict[str, str]]", insights) if isinstance(insights, list) else [],

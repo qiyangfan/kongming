@@ -6,7 +6,8 @@ import { ChevronRight, Database, Wrench, X } from "lucide-react";
 import type { StreamStageOut, StreamToolCallOut } from "@/lib/api";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
-const STAGE_LABELS: Record<string, string> = {
+/* 节点中文标签单源(问答页时间轴与质量台轨迹块共用) */
+export const STAGE_LABELS: Record<string, string> = {
   understand: "理解问题",
   route_intent: "意图路由", // 三态意图路由(检索前)
   retrieve: "检索表结构",

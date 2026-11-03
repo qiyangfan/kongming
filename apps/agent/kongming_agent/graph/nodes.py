@@ -23,6 +23,9 @@ from kongming_agent.graph.prompts import (
     UNDERSTAND_SINGLE_SYSTEM,
 )
 from kongming_agent.graph.state import (
+    FALLBACK_CHITCHAT,
+    FALLBACK_CLARIFY,
+    INTENT_CHITCHAT,
     INTENT_DATA,
     INTENT_FUSED,
     INTENT_KNOWLEDGE,
@@ -157,45 +160,61 @@ _NO_DATA_ERROR = "当前数据源未找到回答该问题所需的数据,可切�
 # 全等匹配,SHALL NOT 包含/前缀/语义相似——"取消订单""确认切换"照常补全。
 _PUNCT_RE = re.compile(r"[\s,。，、！？!?,.;:；：…\-—_\"'“”‘’()（）\[\]【】/\\~·「」『』《》〈〉]+")
 
-# 闭合词表(规范化形态;随代码发布,不做管理台热配)。三类:
-# 否定/终止 · 应答/致谢 · 招呼。多词英文条目去空格后入表(never mind→nevermind)。
-DIALOGUE_REPLY_WORDS: frozenset[str] = frozenset(
-    {
-        # 否定/终止
-        "不用了",
-        "不需要",
-        "不必",
-        "算了",
-        "取消",
-        "终止",
-        "停",
-        "no",
-        "nope",
-        "cancel",
-        "nevermind",
-        # 应答/致谢
-        "好的",
-        "好",
-        "知道了",
-        "明白",
-        "收到",
-        "谢谢",
-        "多谢",
-        "thanks",
-        "thankyou",
-        "gotit",
-        "ok",
-        "okay",
-        "nothanks",  # 「NO, thanks」形态(spec 场景:句读大小写变体)
-        "nothankyou",
-        # 招呼
-        "你好",
-        "您好",
-        "hi",
-        "hello",
-        "hey",
-    }
-)
+# 闭合词表(规范化形态;随代码发布,不做管理台热配)。三族:
+# stop=否定/终止 · ack=应答/致谢 · greeting=招呼。多词英文条目去空格后入表
+# (never mind→nevermind)。族别决定直通应答文案(spec「对话复语不进取数补全」)。
+_DIALOGUE_REPLY_FAMILIES: dict[str, frozenset[str]] = {
+    "stop": frozenset(
+        {
+            "不用了",
+            "不需要",
+            "不必",
+            "算了",
+            "取消",
+            "终止",
+            "停",
+            "no",
+            "nope",
+            "cancel",
+            "nevermind",
+        }
+    ),
+    "ack": frozenset(
+        {
+            "好的",
+            "好",
+            "知道了",
+            "明白",
+            "收到",
+            "谢谢",
+            "多谢",
+            "thanks",
+            "thankyou",
+            "gotit",
+            "ok",
+            "okay",
+            "nothanks",  # 「NO, thanks」形态(spec 场景:句读大小写变体)
+            "nothankyou",
+        }
+    ),
+    "greeting": frozenset({"你好", "您好", "hi", "hello", "hey"}),
+}
+DIALOGUE_REPLY_WORDS: frozenset[str] = frozenset().union(*_DIALOGUE_REPLY_FAMILIES.values())
+
+# 直通应答文案(族别静态表,零模型调用;招呼/致谢 SHALL NOT 以数据缺失话术作答)
+CHITCHAT_REPLIES: dict[str, str] = {
+    "stop": "好的,已停止本轮查询。需要继续分析数据时随时告诉我。",
+    "ack": "不客气!如需继续分析数据,随时告诉我。",
+    "greeting": "你好!请描述你想分析的数据问题,例如「上月销售额是多少」。",
+}
+# 语义层兜底统一文案(意图路由帧判定的词表漏网闲聊;不区分族别,design D4)
+CHITCHAT_SEMANTIC_REPLY = "如需分析数据,请随时描述你想查的问题。"
+
+
+def reply_family(question: str) -> str:
+    """词表成员 → 族别(直通命中后取文案用;非成员回退 ack,不单独暴露)。"""
+    normalized = normalize_dialogue_reply(question)
+    return next((f for f, ws in _DIALOGUE_REPLY_FAMILIES.items() if normalized in ws), "ack")
 
 
 def normalize_dialogue_reply(text: str) -> str:
@@ -239,13 +258,15 @@ def _is_no_data_sentinel(raw: str) -> bool:
 async def understand(state: AgentState) -> dict[str, object]:
     # 入口 state 恒写入 question(main._initial_state);缺键属编程错误,保留下标
     question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
-    # 复语直通——零模型调用、零检索、零执行,按既有第四态收敛;
+    # 复语直通——零模型调用、零检索、零执行,以族别中性文案作答并标记
+    # CHITCHAT(招呼/致谢不是数据问题,SHALL NOT 以数据缺失话术作答);
     # 不设补全问句(迫使 retrieve/generate 不推进),判定只看当前问句与 history 无关
     if is_dialogue_reply(question):
         _note_dialogue_passthrough(state.get("trace_id"))
         return {
             "end_reason": "no_data",
-            "error": _NO_DATA_ERROR,
+            "error": CHITCHAT_REPLIES[reply_family(question)],
+            "fallback_type": FALLBACK_CHITCHAT,
             # 直通计数随 trace 下发(复用 QueryOut.stats 既有通道,零新采集)
             "stats": {"dialogue_reply_passthrough": 1},
         }
@@ -426,6 +447,23 @@ def _selfheal_guidance(error: str) -> str:
             f"SQL 引用了「{m.group(1)}」但 FROM/JOIN 中并没有定义这个别名——"
             "为其补充对应表的 JOIN,或改用 FROM/JOIN 中已有的别名；"
             "只引用『可用表结构』清单中存在的表。"
+        )
+    if "select distinct" in low and "order by" in low:
+        # PG 硬约束:DISTINCT 下 ORDER BY 键必须已投影。追问轮最易踩
+        # (沿用上轮排序语义 + 关联分类列触发去重)。实测两级演化:模型
+        # 先裸同错,采纳子查询后又把外层 DISTINCT 排序键留下——抽象
+        # 指令修不动,必须给逐字正确形态模板并明令外层去 DISTINCT。
+        return (
+            "SELECT DISTINCT 的 ORDER BY 表达式必须出现在投影内,二者不可共存——"
+            "正确做法:把「取前 N + 排序」整体放进子查询(排序键在该子查询投影内),"
+            "外层直接 JOIN 所需的分类/名称列并沿用子查询携带的排序键,"
+            "不再使用 DISTINCT。逐字形态示例:"
+            "SELECT f.title, c.name FROM (SELECT film_id, title, rental_rate"
+            " FROM 表 ORDER BY rental_rate DESC, film_id LIMIT 5) f"
+            " JOIN film_category fc ON fc.film_id = f.film_id"
+            " JOIN category c ON c.category_id = fc.category_id"
+            " ORDER BY f.rental_rate DESC, f.film_id；"
+            "若确需去重,只按已在投影中的列排序。"
         )
     if re.search(r'column "[^"]+" .*does not exist', low) or (
         low.startswith('column "') and "does not exist" in low
@@ -752,9 +790,13 @@ async def doc_answer(state: AgentState) -> dict[str, object]:
 # ── 三态意图路由(route_intent)+ 融合问答(fused_answer)──
 
 # 可观测计数(复语直通 snapshot_stats 同款形态;零新采集通道):
-# 路由回退(LLM 失败/超时/低置信)与融合兜底(生成失败回退纯数据答)
+# 路由回退(LLM 失败/超时/低置信)、语义闲聊命中与融合兜底(生成失败回退纯数据答)
 _intent_lock = threading.Lock()
-_intent_stats = {"intent_route_fallback_total": 0, "fused_answer_fallback_total": 0}
+_intent_stats = {
+    "intent_route_fallback_total": 0,
+    "fused_answer_fallback_total": 0,
+    "chitchat_semantic_total": 0,
+}
 
 
 def snapshot_intent_route_stats() -> dict[str, int]:
@@ -763,9 +805,11 @@ def snapshot_intent_route_stats() -> dict[str, int]:
         return dict(_intent_stats)
 
 
-def parse_intent_route(raw: str) -> tuple[str, float, str] | None:
-    """路由 LLM 输出解析(纯函数):JSON {intent, confidence, reason}。
-    intent 越域 / 置信缺失或不可解析 / 置信越界 [0,1] → None(调用方回退词表)。"""
+def parse_intent_route(raw: str) -> tuple[str, float, str, bool, str] | None:
+    """路由 LLM 输出解析(纯函数):JSON {intent, ambiguous, clarify_question,
+    confidence, reason}。intent 越域 / 置信缺失或不可解析 / 置信越界 [0,1]
+    → None(调用方回退词表);ambiguous 无澄清问句时收 false(fail-open,
+    不可执行的判定不放行)。"""
     parsed = parse_summary_json(raw)
     intent = str(parsed.get("intent", "")).strip().lower()
     if intent not in VALID_INTENTS:
@@ -776,26 +820,33 @@ def parse_intent_route(raw: str) -> tuple[str, float, str] | None:
         return None
     if not 0.0 <= confidence <= 1.0:
         return None
-    return intent, confidence, str(parsed.get("reason", "")).strip()
+    ambiguous = parsed.get("ambiguous") is True
+    clarify_raw = parsed.get("clarify_question")
+    clarify = clarify_raw.strip() if isinstance(clarify_raw, str) else ""
+    if ambiguous and not clarify:
+        ambiguous = False
+    return intent, confidence, str(parsed.get("reason", "")).strip(), ambiguous, clarify
 
 
 async def route_intent(state: AgentState) -> dict[str, object]:
     """检索前判定问句意图；失败或置信度不足时回退到规则词表。
 
     回退时不写 intent，沿用原有分流规则；意图误判只影响答法，不触发数据操作。
+    同一次调用收口两个兜底出口:闲聊(词表漏网的零取数意图输入)与澄清
+    (高置信歧义,上一轮已澄清则硬门防循环)——两者均早退,零检索零生成零执行。
     """
     question = state.get("resolved_question")
     if not question:
         question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
     settings = Settings()
-    parsed: tuple[str, float, str] | None = None
+    parsed: tuple[str, float, str, bool, str] | None = None
     try:
         raw = await asyncio.wait_for(
             deps.get_llm().chat(
                 INTENT_ROUTE_SYSTEM,
                 f"用户问题:{question}\n\n输出 JSON:",
                 temperature=0.1,
-                max_tokens=120,
+                max_tokens=200,
                 task="INTENT_ROUTE",  # 任务路由:小模型档(multi-model-routing,缺省主模型)
                 trace_id=state.get("trace_id"),
                 tenant_key=state.get("tenant_key"),
@@ -820,7 +871,49 @@ async def route_intent(state: AgentState) -> dict[str, object]:
             },
         )
         return {}
-    intent, confidence, reason = parsed
+    intent, confidence, reason, ambiguous, clarify = parsed
+    # 闲聊兜底(spec「闲聊语义兜底判定」):判定口径=完全无取数意图;
+    # 冲突时闲聊优先于澄清(无取数意图的输入无从澄清口径)
+    if intent == INTENT_CHITCHAT:
+        with _intent_lock:
+            _intent_stats["chitchat_semantic_total"] += 1
+        emit_event(
+            "trace",
+            {
+                "node": "route_intent",
+                "fields": {
+                    "kind": "intent_route",
+                    "source": "llm",
+                    "intent": INTENT_CHITCHAT,
+                    "confidence": confidence,
+                },
+            },
+        )
+        return {
+            "end_reason": "no_data",
+            "error": CHITCHAT_SEMANTIC_REPLY,
+            "fallback_type": FALLBACK_CHITCHAT,
+        }
+    # 澄清早退(spec「歧义问句澄清引导」):高置信歧义且上一轮非澄清轮
+    #(防循环硬门,确定性规则不依赖模型自觉);fail-open 路径在上方回退分支
+    if ambiguous and state.get("last_fallback") != FALLBACK_CLARIFY:
+        emit_event(
+            "trace",
+            {
+                "node": "route_intent",
+                "fields": {
+                    "kind": "intent_route",
+                    "source": "llm",
+                    "decision": "clarify",
+                    "confidence": confidence,
+                },
+            },
+        )
+        return {
+            "end_reason": "no_data",
+            "error": clarify,
+            "fallback_type": FALLBACK_CLARIFY,
+        }
     emit_event(
         "trace",
         {

@@ -13,6 +13,7 @@ from kongming_agent.apiclient import (
     SchemaMeta,
     SqlExecuteOutcome,
 )
+from kongming_agent.graph import nodes
 from kongming_agent.graph.build import MAX_RETRY, get_graph
 from kongming_agent.graph.state import AgentState
 
@@ -181,7 +182,7 @@ async def test_sentinel_short_circuit_zero_execution(harness: Harness) -> None:
     final = await _invoke(_initial())
     assert final["end_reason"] == "no_data"
     assert final["generated_sql"] == ""
-    assert final["error"] == _NO_DATA_ERROR
+    assert final["error"] == nodes._NO_DATA_ERROR  # 知识未覆盖哨兵:数据缺失话术保留(非闲聊轮)
     assert api.calls == 0  # 短路前零执行(sys_sql_audit 零新增记录)
     assert len(llm.users) == 3  # route_intent + understand + generate;无重试、无 summarize
     assert "summary" not in final  # 失败路径不出洞察
@@ -204,7 +205,7 @@ async def test_sentinel_after_does_not_exist_guides_then_terminates(
     assert final["end_reason"] == "no_data"
     assert api.calls == 1  # 二轮短路,零新增执行
     assert "所引用的表或列不在『可用表结构』清单中" in llm.users[3]  # 喂回引导在位
-    assert final["error"] == _NO_DATA_ERROR
+    assert final["error"] == nodes._NO_DATA_ERROR  # 知识未覆盖哨兵:数据缺失话术保留(非闲聊轮)
     assert final["retry_count"] == 1  # 仅首轮后的那一次 selfheal 计数
     assert "summary" not in final
 
@@ -234,7 +235,7 @@ async def test_dialogue_reply_passthrough_zero_calls(harness: Harness) -> None:
     state["history"] = ["有多少商品"]
     final = await _invoke(state)
     assert final["end_reason"] == "no_data"  # 既有第四态,不新增终态取值
-    assert final["error"] == _NO_DATA_ERROR
+    assert final["error"] == nodes.CHITCHAT_REPLIES["stop"]  # 族别中性文案(兜底分类修正)
     assert llm.users == []  # UNDERSTAND/SQL_GEN/SUMMARIZE 全未发起
     assert api.calls == 0  # 零执行(sys_sql_audit 零新增记录)
     assert api.rag_calls == 0  # 零检索回调

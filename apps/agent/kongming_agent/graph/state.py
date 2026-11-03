@@ -4,12 +4,19 @@ from typing import NotRequired, TypedDict
 
 from pydantic import BaseModel
 
-# 三态意图路由取值域单源(常量放 state 纯数据模块:nodes/streams 共引,
-# 避免 streams→nodes 反向依赖成环)
+# 意图路由取值域单源(常量放 state 纯数据模块:nodes/streams 共引,
+# 避免 streams→nodes 反向依赖成环)。chitchat 为兜底态:完全不携带取数
+# 意图的输入由语义判定收口(词表直通漏网的兜底层,spec「闲聊语义兜底判定」)
 INTENT_DATA = "data"
 INTENT_KNOWLEDGE = "knowledge"
 INTENT_FUSED = "fused"
-VALID_INTENTS: tuple[str, ...] = (INTENT_DATA, INTENT_KNOWLEDGE, INTENT_FUSED)
+INTENT_CHITCHAT = "chitchat"
+VALID_INTENTS: tuple[str, ...] = (INTENT_DATA, INTENT_KNOWLEDGE, INTENT_FUSED, INTENT_CHITCHAT)
+
+# 兜底轮分类(诊断字段,随 QueryOut 回传、api 落库;CHITCHAT=复语直通或
+# 语义判定闲聊,CLARIFY=歧义澄清早退)
+FALLBACK_CHITCHAT = "CHITCHAT"
+FALLBACK_CLARIFY = "CLARIFY"
 
 
 class ExecutionResult(BaseModel):
@@ -58,6 +65,9 @@ class AgentState(TypedDict, total=False):
     sources: NotRequired[list[dict[str, str]]]
     skill_terms: NotRequired[str]  # Skill Pack 术语段
     skill_examples: NotRequired[str]  # 黄金示例段(禁令前缀)
+    fallback_type: NotRequired[str]  # 兜底轮分类(闲聊/澄清;诊断字段)
+    # 上一轮兜底分类(控制面随载荷注入;CLARIFY 时本轮不再命中澄清,防循环)
+    last_fallback: NotRequired[str]
     skill_persona: NotRequired[str]  # 人设段
     doc_hints: NotRequired[list[dict[str, str]]]  # 文档段(source_ref+content)
     has_attachments: NotRequired[bool]  # 当前请求是否含图片附件，用于问答分流。

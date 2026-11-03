@@ -399,6 +399,8 @@ async def test_query_react_happy_path(client: AsyncClient) -> None:  # type: ign
         "metric_hits",
         # 文档道结构化来源(空=SQL 道/无命中)
         "sources",
+        # 兜底轮分类(诊断字段;非兜底轮 null)
+        "fallback_type",
         "usage_records",
     }
     assert body["success"] is True and body["verdict"] == "PASS"

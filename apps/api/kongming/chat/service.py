@@ -42,6 +42,7 @@ from kongming.chat.ports import (
     StreamStoreFactory,
     ToolSpecProvider,
 )
+from kongming.chat.stage_trace import StageTraceCollector
 from kongming.datasource.ports import DatasourceChecker
 from kongming.rag.ports import ColumnCommentReader, QueryHistoryWriter
 from kongming.trace import ensure_trace_id
@@ -220,6 +221,7 @@ class _PreparedQuery:
     trace_id: str
     user_id: str = ""  # 护栏审计主体
     attachments: list[dict[str, object]] | None = None  # 附件摘要(归属已验)
+    last_fallback: str = ""  # 上一轮兜底分类(澄清防循环判据;空=不携带)
 
 
 @dataclass
@@ -254,6 +256,9 @@ class ChatService:
         implicit_memory_task: (  # 隐式提取任务(组合根绑定;None=不触发)
             "Callable[..., Coroutine[Any, Any, None]] | None"
         ) = None,
+        scoring_task: (  # 答案异步评分任务(spec「答案异步评分」;None=不触发)
+            "Callable[..., Coroutine[Any, Any, None]] | None"
+        ) = None,
         column_comments: ColumnCommentReader | None = None,  # 列标签(可选注入)
         cost_gate: ChatCostGate | None = None,  # 成本双闸(可选注入)
     ) -> None:
@@ -271,6 +276,7 @@ class ChatService:
         self._runner = runner
         self._attachment_checker = attachment_checker
         self._implicit_memory_task = implicit_memory_task
+        self._scoring_task = scoring_task
         self._column_comments = column_comments
         self._cost_gate = cost_gate
 
@@ -342,6 +348,8 @@ class ChatService:
             if sid is not None
             else []
         )
+        # 上一轮兜底分类(澄清防循环判据;仅落库会话携带,诊断字段不入响应)
+        last_fallback = (await self._repo.last_fallback_type(sid) or "") if sid is not None else ""
 
         # 附件归属校验(当前用户+租户+未消费;任一无效 404 同形,
         # 不进 agent 回调);checker 未接线(部署缺陷)且引用非空=fail-closed
@@ -374,6 +382,7 @@ class ChatService:
             trace_id=trace_id,
             user_id=user_id,
             attachments=attachments,
+            last_fallback=last_fallback,
         )
 
     async def _react_tools(
@@ -540,6 +549,7 @@ class ChatService:
             user_id=user_id, tenant_id=p.tenant_id, question=question
         )
         try:
+            react_tools = await self._react_tools(user_id, agent_mode, p.tenant_id)
             reply = await self._agent.query(
                 trace_id=p.trace_id,
                 tenant_key=p.resolved_key,
@@ -547,9 +557,10 @@ class ChatService:
                 user_id=user_id,
                 history=eff_history,
                 datasource_key=datasource_key,
-                react_tools=await self._react_tools(user_id, agent_mode, p.tenant_id),
+                react_tools=react_tools,
                 memory_hint=memory_hint,
                 attachment_ids=[str(a["id"]) for a in p.attachments or []],
+                last_fallback=p.last_fallback,
             )
         except AgentUnavailable:
             log.warning("agent 不可达 trace_id=%s", p.trace_id)
@@ -570,6 +581,7 @@ class ChatService:
             history_writer=self._history_writer,
             trace_id=p.trace_id,
             attachments=p.attachments,
+            is_react=react_tools is not None,
             user_id=user_id,
         )
         # 同步路径经 outcome 携带版本快照给 router 的后台任务
@@ -681,6 +693,7 @@ class ChatService:
         靠它收束,缺失即前端永久等心跳。"""
         outcome: ChatOutcome | None = None
         error_text: str | None = None
+        stage_collector = StageTraceCollector()  # 节点轨迹(观测深化;采集零新增)
         try:
 
             async def on_frame(event: str, data_json: str) -> None:
@@ -705,6 +718,8 @@ class ChatService:
                         persist=persist,
                         datasource_key=datasource_key,
                         pref_revision=pref_revision,
+                        is_react=react_tools is not None,
+                        stage_trace=stage_collector.payload(),
                     )
                 elif event == "error":
                     # agent 意外异常帧:等价传输层失败,由 api 统一收敛(不透传)
@@ -721,6 +736,8 @@ class ChatService:
                     if isinstance(data, dict):
                         # isinstance 收窄产物键型未知,cast 对齐队列元素类型(运行时不变)
                         typed = cast("dict[str, object]", data)
+                        if event == "stage":
+                            stage_collector.add_stage(typed)  # 轨迹随行(与透传并行)
                         await queue.put((event, typed))
 
             await self._agent.query_stream(
@@ -734,6 +751,7 @@ class ChatService:
                 react_tools=react_tools,
                 memory_hint=memory_hint,
                 attachment_ids=attachment_ids,
+                last_fallback=p.last_fallback,
             )
         except AgentUnavailable:
             log.warning("agent 流式不可达 trace_id=%s", p.trace_id)
@@ -749,12 +767,16 @@ class ChatService:
                 await queue.put(("result", outcome))
             elif error_text is not None:
                 # 传输层/意外失败终态:FAILED 落库(独立会话)+ error 帧
-                await self._stream_finalize_unavailable(p, datasource_key=datasource_key)
+                await self._stream_finalize_unavailable(
+                    p, datasource_key=datasource_key, stage_trace=stage_collector.payload()
+                )
                 await queue.put(("error", {"error": error_text, "reason_code": None}))
             else:
                 # agent 流正常结束但无终态帧(契约破坏):与不可达同收敛
                 log.error("agent 流结束但缺终态帧 trace_id=%s", p.trace_id)
-                await self._stream_finalize_unavailable(p, datasource_key=datasource_key)
+                await self._stream_finalize_unavailable(
+                    p, datasource_key=datasource_key, stage_trace=stage_collector.payload()
+                )
                 await queue.put(("error", {"error": AGENT_UNAVAILABLE_TEXT, "reason_code": None}))
         finally:
             await queue.put(None)  # 终止标记(生成器据此收束;必达)
@@ -768,6 +790,8 @@ class ChatService:
         persist: bool,
         datasource_key: str,
         pref_revision: int | None = None,  # 准备期人工版本快照
+        is_react: bool = False,  # ReAct 链路轮不评分(spec 评分范围)
+        stage_trace: list[dict[str, object]] | None = None,  # 节点轨迹(流式轮)
     ) -> ChatOutcome:
         """流式终态落库(独立 StreamStore 会话;断线后照常执行)+标题任务触发。"""
         title_trigger: Callable[[str], Coroutine[Any, Any, None]] | None = None
@@ -785,6 +809,8 @@ class ChatService:
                     trace_id=p.trace_id,
                     attachments=p.attachments,
                     user_id=p.user_id,
+                    is_react=is_react,
+                    stage_trace=stage_trace,
                 )
                 title_trigger = store.trigger_title_rewrite
         else:  # 组合根未接线(部署缺陷):终态仍要回给前端,仅放弃断线持久化
@@ -801,6 +827,7 @@ class ChatService:
                 trace_id=p.trace_id,
                 user_id=p.user_id,
                 attachments=p.attachments,  # 兜底分支与主分支同源
+                stage_trace=stage_trace,
             )
         if (
             title_trigger is not None
@@ -836,7 +863,11 @@ class ChatService:
         return outcome
 
     async def _stream_finalize_unavailable(
-        self, p: _PreparedQuery, *, datasource_key: str = "default"
+        self,
+        p: _PreparedQuery,
+        *,
+        datasource_key: str = "default",
+        stage_trace: list[dict[str, object]] | None = None,  # 已收集轨迹如实落库
     ) -> None:
         """流式传输层失败的 FAILED 落库(独立会话);失败仅日志(不阻断 error 帧)。"""
         if self._stream_store_factory is None:
@@ -849,6 +880,7 @@ class ChatService:
                     repo=store.repo,
                     datasource_key=datasource_key,
                     attachments=p.attachments,
+                    stage_trace=stage_trace,
                 )
         except Exception:  # noqa: BLE001  # 断线续存落库兜底:不阻断终态帧下发
             log.warning("流式 FAILED 终态落库异常 session=%s", p.sid, exc_info=True)
@@ -882,6 +914,8 @@ class ChatService:
         trace_id: str = "",  # pending_tool_calls 聚合键(缺省空=不聚合)
         user_id: str = "",  # 输出护栏审计主体
         attachments: list[dict[str, object]] | None = None,
+        is_react: bool = False,  # ReAct 链路轮不评分(spec 评分范围)
+        stage_trace: list[dict[str, object]] | None = None,  # 节点轨迹(流式轮;同步轮 None)
     ) -> ChatOutcome:
         """终态落库与响应组装(同步/流式共用唯一实现):
         三态映射 → chart 建议 → error 文案 → result_json 落库(容错)→ 回写。
@@ -1011,12 +1045,28 @@ class ChatService:
                     retry_count=reply.retry_count,
                     resolved_question=reply.resolved_question,
                     prompt_version=reply.prompt_version,
+                    fallback_type=reply.fallback_type,
+                    stage_trace=stage_trace,
                 )
                 await self._persist_touch_quietly(repo, sid)
             except ChatStoreError:
                 mid = None  # 落库失败即无消息 id(与未落库语义一致)
                 log.warning("assistant 消息落库失败(会话可能已被删除) session=%s", sid)
                 await repo.rollback()
+
+        # 答案异步评分(spec「答案异步评分」):SUCCESS 且 persist 且非 react
+        # 链路的落库轮;任务内自守卫(role/status/证据装配/幂等/降级各短路,
+        # 任何失败仅日志),触发不阻塞响应
+        if (
+            self._scoring_task is not None
+            and status == "SUCCESS"
+            and persist
+            and mid is not None
+            and not is_react
+        ):
+            t = asyncio.create_task(self._scoring_task(message_id=mid, agent=self._agent))
+            _BACKGROUND_STREAM_TASKS.add(t)
+            t.add_done_callback(_BACKGROUND_STREAM_TASKS.discard)
 
         # 成功 SQL 回写 query_history:最终 SUCCESS 判定后;独立 try 不阻断;
         # persist=False 为测试通道不触发;空结果的成功查询同样回写(不依赖行数)。
@@ -1074,6 +1124,7 @@ class ChatService:
         repo: ChatRepo,
         datasource_key: str = "default",
         attachments: list[dict[str, object]] | None = None,  # 带附件轮与成功路径对称
+        stage_trace: list[dict[str, object]] | None = None,  # 失败前已收集轨迹如实落库
     ) -> ChatOutcome:
         """agent 不可达终态(同步/流式同构):FAILED 消息落库(容错)+友好错误。"""
         mid: str | None = None
@@ -1093,6 +1144,7 @@ class ChatService:
                     summary=AGENT_UNAVAILABLE_TEXT,
                     status="FAILED",
                     attachments=attachments,  # 与成功路径回显对称
+                    stage_trace=stage_trace,
                 )
                 await self._persist_touch_quietly(repo, sid)
             except ChatStoreError:

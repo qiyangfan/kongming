@@ -189,6 +189,15 @@ class LlmClient:
                 return self._image_limits[name]
         return self._default_image_limit_mb
 
+    def routed_model(self, task: str | None = None) -> str:
+        """该 task 实际生效的注册模型名(评分审计归因;未路由/条目不在池
+        回退主模型名,与 _resolve 的解析口径一致但不实际构建客户端)。"""
+        if task:
+            name = self._routes.get(task)
+            if name and name in self._pool:
+                return name
+        return self._model
+
     def context_window(self, task: str | None = None) -> int:
         """该 task 生效模型的上下文窗口——路由命中条目声明值优先,
         未声明回退全局缺省(窗口只用于装配预算,不出现在任何响应中)。"""

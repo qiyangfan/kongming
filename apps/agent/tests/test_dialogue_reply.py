@@ -177,7 +177,10 @@ class TestZeroSideEffects:
         monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
         out = await nodes.understand(_state(question="取消"))
         assert out["end_reason"] == "no_data"  # 既有第四态,不新增终态取值
-        assert out["error"] == nodes._NO_DATA_ERROR  # 收敛文案沿用既有第四态
+        # 兜底分类修正(spec「对话复语不进取数补全」):族别中性文案替代
+        # 数据缺失话术,并携带 CHITCHAT 诊断标记
+        assert out["error"] == nodes.CHITCHAT_REPLIES["stop"]
+        assert out["fallback_type"] == "CHITCHAT"
 
 
 # ============ 1.6 可观测计数 ============

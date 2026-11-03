@@ -23,6 +23,15 @@ def _after_understand(state: AgentState) -> str:
     return "route_intent"
 
 
+def _after_route(state: AgentState) -> str:
+    """闲聊/澄清早退产物(end_reason=no_data)直达失败终态——
+    零检索零生成零执行;正常问句照常进 retrieve(数据路径节点链与
+    重试语义不变)。"""
+    if state.get("end_reason"):
+        return "fail"
+    return "retrieve"
+
+
 def _after_generate(state: AgentState) -> str:
     """generate 输出哨兵短路产物(end_reason=no_data)直达失败终态——
     零执行零重试;正常产物照常进本地预检。"""
@@ -106,13 +115,18 @@ def get_graph():  # type: ignore[no-untyped-def]
 
     g.add_edge(START, "understand")
     # understand→retrieve 改条件边(复语直通直达 fail;与 generate→validate 同构)
-    # 正常问句先经 route_intent(检索前三态路由)再进 retrieve
+    # 正常问句先经 route_intent(检索前三态路由)再进 retrieve;
+    # route_intent 的闲聊/澄清早退经条件边直达终态(与直通同构)
     g.add_conditional_edges(
         "understand",
         _after_understand,
         {"route_intent": "route_intent", "fail": END},
     )
-    g.add_edge("route_intent", "retrieve")
+    g.add_conditional_edges(
+        "route_intent",
+        _after_route,
+        {"retrieve": "retrieve", "fail": END},
+    )
     # 知识分流(起判定单源=route_after_retrieve:LLM 三态结论优先,
     # 缺席回退词表;通道确认仍以检索结果为准)
     g.add_conditional_edges(

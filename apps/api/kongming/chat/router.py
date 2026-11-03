@@ -39,6 +39,7 @@ from kongming.chat.ports import (
     StreamStoreFactory,
 )
 from kongming.chat.repository import ChatRepository, SuggestionRepository
+from kongming.chat.scoring_tasks import score_answer_task
 from kongming.chat.service import (
     AttachmentNotFound,
     ChatOutcome,
@@ -245,6 +246,10 @@ def get_chat_service(
         _InternalExecuteRunner(session),  # 再执行
         attachment_checker=_AttachmentChecker(session),  # (关键字传参防错位)
         implicit_memory_task=extract_memory_task,  # 隐式提取(组合根绑定)
+        scoring_task=(
+            # 答案异步评分(组合根绑定;开关关闭=不注入,逐字回引入前行为)
+            score_answer_task if get_settings().answer_scoring_enabled else None
+        ),
         column_comments=get_rag_service(session),  # 列标签(同一 RagService 的窄端口视角)
         cost_gate=_build_cost_gate(),  # 成本双闸(速率+配额)
     )

@@ -36,6 +36,9 @@ class FakeAgent:
         self.title_calls.append(question)
         return self.title_reply
 
+    async def score_answer(self, *, material: str, trace_id: str, tenant_key: str) -> None:
+        return None  # 评审降级契约(评分链路细节由 test_scoring_task 承载)
+
 
 @pytest.fixture
 def fake_agent() -> Iterator[dict[str, FakeAgent]]:

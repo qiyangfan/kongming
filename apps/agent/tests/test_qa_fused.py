@@ -50,7 +50,7 @@ class _Llm:
 def test_parse_intent_route_accepts_three_states() -> None:
     for intent in ("data", "knowledge", "fused"):
         parsed = parse_intent_route(f'{{"intent":"{intent}","confidence":0.9,"reason":"r"}}')
-        assert parsed == (intent, 0.9, "r")
+        assert parsed == (intent, 0.9, "r", False, "")
 
 
 def test_parse_intent_route_rejects_malformed() -> None:

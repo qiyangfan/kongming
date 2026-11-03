@@ -966,10 +966,93 @@ export interface paths {
         };
         /**
          * Quality Page
-         * @description 轮次明细分页(时间倒序):状态/数据源/时间范围筛选;NO_DATA 轮次首次
-         *     拥有可见形态(该形态无执行、无审计行,任何观测面不可见)。
+         * @description 轮次明细分页(时间倒序):状态/数据源/兜底分类/时间范围筛选。
          */
         get: operations["quality_page_system_chat_quality_page_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/chat-quality/score/{message_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Quality Score Detail
+         * @description 评分详情:维度分与完整主张分解(主张/重要度/支撑分级/覆盖标记);
+         *     与汇总/明细同一权限点与租户收敛口径,不可见或未评分统一 404
+         *     (不区分存在性,防探测)。
+         */
+        get: operations["quality_score_detail_system_chat_quality_score__message_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/chat-quality/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Quality Context
+         * @description 同会话轮次串联:以明细行任一轮次为锚,返回锚点及此前最近 50 轮的
+         *     轻量列表(时间升序);越权锚点(不可见租户/不存在)统一 404 防探测。
+         */
+        get: operations["quality_context_system_chat_quality_context_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/chat-quality/stage-trace/{message_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Quality Stage Trace
+         * @description 单轮节点阶段轨迹;租户不可见统一 404(不区分存在性)。
+         */
+        get: operations["quality_stage_trace_system_chat_quality_stage_trace__message_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/chat-quality/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Quality Export
+         * @description 轮次质量导出(page 同筛选同收敛;CSV 转义纪律与问答结果导出同源;
+         *     行数上限截断并附截断标记行;导出落操作日志)。
+         */
+        get: operations["quality_export_system_chat_quality_export_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6119,6 +6202,34 @@ export interface components {
             /** Suggestions */
             suggestions?: string[];
         };
+        /**
+         * QualityContextItemOut
+         * @description 同会话轮次轻量行(诊断标记按已合并字段携带)。
+         */
+        QualityContextItemOut: {
+            /** Id */
+            id: string;
+            /** Question */
+            question?: string | null;
+            /** Status */
+            status: string;
+            /** Fallback Type */
+            fallback_type?: string | null;
+            /** Score */
+            score?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** QualityContextOut */
+        QualityContextOut: {
+            /** Session Id */
+            session_id: string;
+            /** Items */
+            items: components["schemas"]["QualityContextItemOut"][];
+        };
         /** QualityOverviewOut */
         QualityOverviewOut: {
             /** Total */
@@ -6133,6 +6244,16 @@ export interface components {
             failed: number;
             /** No Data Rate */
             no_data_rate: number;
+            /**
+             * Chitchat Count
+             * @default 0
+             */
+            chitchat_count: number;
+            /**
+             * Clarify Count
+             * @default 0
+             */
+            clarify_count: number;
             /** Blocked Rate */
             blocked_rate: number;
             /** Failed Rate */
@@ -6143,6 +6264,18 @@ export interface components {
             down_rate: number;
             /** Avg Tokens */
             avg_tokens: number;
+            /** Avg Score */
+            avg_score?: number | null;
+            /**
+             * Low Score Count
+             * @default 0
+             */
+            low_score_count: number;
+            /**
+             * Low Score Threshold
+             * @default 60
+             */
+            low_score_threshold: number;
         };
         /** QualityPageOut */
         QualityPageOut: {
@@ -6191,6 +6324,41 @@ export interface components {
             prompt_version?: string | null;
             /** Datasource Key */
             datasource_key: string;
+            /** Session Id */
+            session_id?: string | null;
+            /** Fallback Type */
+            fallback_type?: string | null;
+            /** Score */
+            score?: number | null;
+            /** Grounding */
+            grounding?: number | null;
+            /** Coverage */
+            coverage?: number | null;
+        };
+        /**
+         * QualityScoreDetailOut
+         * @description 单轮评分详情(spec「轮次质量观测」审计分解;404=未评分或越权)。
+         */
+        QualityScoreDetailOut: {
+            /** Message Id */
+            message_id: string;
+            /** Score */
+            score: number;
+            /** Grounding */
+            grounding: number;
+            /** Coverage */
+            coverage: number;
+            /** Decomposition */
+            decomposition: {
+                [key: string]: unknown;
+            };
+            /** Score Model */
+            score_model: string;
+            /**
+             * Scored At
+             * Format: date-time
+             */
+            scored_at: string;
         };
         /** QualitySliceRow */
         QualitySliceRow: {
@@ -6206,6 +6374,18 @@ export interface components {
             blocked: number;
             /** Failed */
             failed: number;
+        };
+        /**
+         * QualityStageTraceOut
+         * @description 节点阶段轨迹(有序数组;null=同步轮/无帧流,如实为空)。
+         */
+        QualityStageTraceOut: {
+            /** Message Id */
+            message_id: string;
+            /** Stage Trace */
+            stage_trace?: {
+                [key: string]: unknown;
+            }[] | null;
         };
         /** QualitySummaryOut */
         QualitySummaryOut: {
@@ -10224,6 +10404,7 @@ export interface operations {
                 tenant_id?: string | null;
                 status?: string | null;
                 datasource_key?: string | null;
+                fallback?: string | null;
                 start?: string | null;
                 end?: string | null;
                 page?: number;
@@ -10242,6 +10423,140 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QualityPageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    quality_score_detail_system_chat_quality_score__message_id__get: {
+        parameters: {
+            query?: {
+                tenant_id?: string | null;
+            };
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityScoreDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    quality_context_system_chat_quality_context_get: {
+        parameters: {
+            query: {
+                message_id: string;
+                tenant_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityContextOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    quality_stage_trace_system_chat_quality_stage_trace__message_id__get: {
+        parameters: {
+            query?: {
+                tenant_id?: string | null;
+            };
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityStageTraceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    quality_export_system_chat_quality_export_get: {
+        parameters: {
+            query?: {
+                tenant_id?: string | null;
+                status?: string | null;
+                datasource_key?: string | null;
+                fallback?: string | null;
+                start?: string | null;
+                end?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

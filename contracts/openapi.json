@@ -3253,7 +3253,7 @@
           "chat-quality"
         ],
         "summary": "Quality Page",
-        "description": "轮次明细分页(时间倒序):状态/数据源/时间范围筛选;NO_DATA 轮次首次\n拥有可见形态(该形态无执行、无审计行,任何观测面不可见)。",
+        "description": "轮次明细分页(时间倒序):状态/数据源/兜底分类/时间范围筛选。",
         "operationId": "quality_page_system_chat_quality_page_get",
         "parameters": [
           {
@@ -3305,6 +3305,23 @@
                 }
               ],
               "title": "Datasource Key"
+            }
+          },
+          {
+            "name": "fallback",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(CHITCHAT|CLARIFY|none)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Fallback"
             }
           },
           {
@@ -3373,6 +3390,323 @@
                 "schema": {
                   "$ref": "#/components/schemas/QualityPageOut"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/chat-quality/score/{message_id}": {
+      "get": {
+        "tags": [
+          "chat-quality"
+        ],
+        "summary": "Quality Score Detail",
+        "description": "评分详情:维度分与完整主张分解(主张/重要度/支撑分级/覆盖标记);\n与汇总/明细同一权限点与租户收敛口径,不可见或未评分统一 404\n(不区分存在性,防探测)。",
+        "operationId": "quality_score_detail_system_chat_quality_score__message_id__get",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Message Id"
+            }
+          },
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityScoreDetailOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/chat-quality/context": {
+      "get": {
+        "tags": [
+          "chat-quality"
+        ],
+        "summary": "Quality Context",
+        "description": "同会话轮次串联:以明细行任一轮次为锚,返回锚点及此前最近 50 轮的\n轻量列表(时间升序);越权锚点(不可见租户/不存在)统一 404 防探测。",
+        "operationId": "quality_context_system_chat_quality_context_get",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Message Id"
+            }
+          },
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityContextOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/chat-quality/stage-trace/{message_id}": {
+      "get": {
+        "tags": [
+          "chat-quality"
+        ],
+        "summary": "Quality Stage Trace",
+        "description": "单轮节点阶段轨迹;租户不可见统一 404(不区分存在性)。",
+        "operationId": "quality_stage_trace_system_chat_quality_stage_trace__message_id__get",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Message Id"
+            }
+          },
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityStageTraceOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/chat-quality/export": {
+      "get": {
+        "tags": [
+          "chat-quality"
+        ],
+        "summary": "Quality Export",
+        "description": "轮次质量导出(page 同筛选同收敛;CSV 转义纪律与问答结果导出同源;\n行数上限截断并附截断标记行;导出落操作日志)。",
+        "operationId": "quality_export_system_chat_quality_export_get",
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(SUCCESS|FAILED|REJECTED|NO_DATA)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "datasource_key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Datasource Key"
+            }
+          },
+          {
+            "name": "fallback",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(CHITCHAT|CLARIFY|none)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Fallback"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -20327,6 +20661,85 @@
         "type": "object",
         "title": "PublishIn"
       },
+      "QualityContextItemOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "fallback_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Type"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "created_at"
+        ],
+        "title": "QualityContextItemOut",
+        "description": "同会话轮次轻量行(诊断标记按已合并字段携带)。"
+      },
+      "QualityContextOut": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QualityContextItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "items"
+        ],
+        "title": "QualityContextOut"
+      },
       "QualityOverviewOut": {
         "properties": {
           "total": {
@@ -20353,6 +20766,16 @@
             "type": "number",
             "title": "No Data Rate"
           },
+          "chitchat_count": {
+            "type": "integer",
+            "title": "Chitchat Count",
+            "default": 0
+          },
+          "clarify_count": {
+            "type": "integer",
+            "title": "Clarify Count",
+            "default": 0
+          },
           "blocked_rate": {
             "type": "number",
             "title": "Blocked Rate"
@@ -20372,6 +20795,27 @@
           "avg_tokens": {
             "type": "number",
             "title": "Avg Tokens"
+          },
+          "avg_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Score"
+          },
+          "low_score_count": {
+            "type": "integer",
+            "title": "Low Score Count",
+            "default": 0
+          },
+          "low_score_threshold": {
+            "type": "integer",
+            "title": "Low Score Threshold",
+            "default": 60
           }
         },
         "type": "object",
@@ -20526,6 +20970,61 @@
           "datasource_key": {
             "type": "string",
             "title": "Datasource Key"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "fallback_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Type"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "grounding": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grounding"
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage"
           }
         },
         "type": "object",
@@ -20537,6 +21036,52 @@
           "datasource_key"
         ],
         "title": "QualityRoundItemOut"
+      },
+      "QualityScoreDetailOut": {
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "score": {
+            "type": "integer",
+            "title": "Score"
+          },
+          "grounding": {
+            "type": "integer",
+            "title": "Grounding"
+          },
+          "coverage": {
+            "type": "integer",
+            "title": "Coverage"
+          },
+          "decomposition": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Decomposition"
+          },
+          "score_model": {
+            "type": "string",
+            "title": "Score Model"
+          },
+          "scored_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Scored At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message_id",
+          "score",
+          "grounding",
+          "coverage",
+          "decomposition",
+          "score_model",
+          "scored_at"
+        ],
+        "title": "QualityScoreDetailOut",
+        "description": "单轮评分详情(spec「轮次质量观测」审计分解;404=未评分或越权)。"
       },
       "QualitySliceRow": {
         "properties": {
@@ -20575,6 +21120,35 @@
           "failed"
         ],
         "title": "QualitySliceRow"
+      },
+      "QualityStageTraceOut": {
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "stage_trace": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage Trace"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message_id"
+        ],
+        "title": "QualityStageTraceOut",
+        "description": "节点阶段轨迹(有序数组;null=同步轮/无帧流,如实为空)。"
       },
       "QualitySummaryOut": {
         "properties": {

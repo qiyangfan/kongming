@@ -41,6 +41,8 @@ class AgentReply:
     # 管理面诊断信号:仅落库,不进用户响应/SSE(逐字段同构契约不破)
     resolved_question: str | None = None
     prompt_version: str | None = None
+    # 兜底轮分类(CHITCHAT/CLARIFY;仅兜底轮非空;落库不进用户响应)
+    fallback_type: str | None = None
     # 语义层口径命中:随 result_json 落库+回显,不进 SSE 用户事件
     metric_hits: list[dict[str, str | None]] = field(default_factory=list[dict[str, str | None]])
     # 文档道结构化来源:随 result_json 落库+回显;SQL 道恒空
@@ -111,6 +113,7 @@ def parse_agent_reply(data: dict[str, object]) -> AgentReply:
     # 诊断信号解析(旧版 agent 无该键 → None)
     resolved_question = data.get("resolved_question")
     prompt_version = data.get("prompt_version")
+    fallback_raw = data.get("fallback_type")
     metric_hits_raw = data.get("metric_hits")
     sources_raw = data.get("sources")
     insights_raw = data.get("insights")
@@ -160,6 +163,7 @@ def parse_agent_reply(data: dict[str, object]) -> AgentReply:
         # 诊断信号(旧版 agent 缺键 → None)
         resolved_question=resolved_question if isinstance(resolved_question, str) else None,
         prompt_version=prompt_version if isinstance(prompt_version, str) else None,
+        fallback_type=fallback_raw if isinstance(fallback_raw, str) and fallback_raw else None,
         metric_hits=_metric_hits_of(metric_hits_raw),
         sources=_sources_of(sources_raw),
         usage_records=usage_records,
@@ -175,6 +179,8 @@ class AgentClient:
         self._report_timeout = settings.agent_report_timeout_sec
         # 任务编排是多步长任务,超时须覆盖任务墙钟预算上限(见 config)
         self._task_timeout = settings.agent_task_timeout_sec
+        # 评审主张分解是长输出(≤12 主张×摘录),独立超时预算(非标题 30s 口径)
+        self._scoring_timeout = settings.answer_scoring_timeout_sec
 
     async def query(
         self,
@@ -188,9 +194,11 @@ class AgentClient:
         react_tools: list[dict[str, object]] | None = None,
         memory_hint: str = "",
         attachment_ids: list[str] | None = None,
+        last_fallback: str = "",
     ) -> AgentReply:
         """同步问答;react_tools 非 None 即走 ReAct 内核端点(tools 注入);
-        memory_hint=记忆段(空=不下发记忆段)。"""
+        memory_hint=记忆段(空=不下发记忆段);last_fallback=上一轮兜底
+        分类(澄清防循环判据,空=不携带)。"""
         payload = self._payload(
             trace_id=trace_id,
             tenant_key=tenant_key,
@@ -201,6 +209,7 @@ class AgentClient:
             react_tools=react_tools,
             memory_hint=memory_hint,
             attachment_ids=attachment_ids,
+            last_fallback=last_fallback,
         )
         path = "/query_react" if react_tools is not None else "/query"
         try:
@@ -238,6 +247,7 @@ class AgentClient:
         react_tools: list[dict[str, object]] | None = None,
         memory_hint: str = "",
         attachment_ids: list[str] | None = None,
+        last_fallback: str = "",
     ) -> None:
         """流式问答:消费 agent SSE 流,逐帧 (event, data_json) 回调;
         错误语义与同步 query 同(不可达/非 200/传输失败一律 AgentUnavailable,
@@ -253,6 +263,7 @@ class AgentClient:
             react_tools=react_tools,
             memory_hint=memory_hint,
             attachment_ids=attachment_ids,
+            last_fallback=last_fallback,
         )
         path = "/query_react/stream" if react_tools is not None else "/query/stream"
         decoder = SseDecoder()
@@ -318,6 +329,7 @@ class AgentClient:
         react_tools: list[dict[str, object]] | None = None,
         memory_hint: str = "",
         attachment_ids: list[str] | None = None,
+        last_fallback: str = "",
     ) -> dict[str, object]:
         payload: dict[str, object] = {
             "trace_id": trace_id,
@@ -333,6 +345,8 @@ class AgentClient:
             payload["memory_hint"] = memory_hint
         if attachment_ids:
             payload["attachment_ids"] = attachment_ids
+        if last_fallback:
+            payload["last_fallback"] = last_fallback  # 澄清防循环判据(缺省不携带)
         return payload
 
     async def query_react(
@@ -477,6 +491,48 @@ class AgentClient:
             return None  # agent 侧降级(LLM 失败/输出非法)
         title = str(data.get("title") or "").strip()
         return title or None
+
+    async def score_answer(
+        self, *, material: str, trace_id: str = "", tenant_key: str = ""
+    ) -> dict[str, object] | None:
+        """答案评审回调:POST /internal/score-answer。降级契约同
+        rewrite_title——不可达/非 200/坏报文/decomposed=False 一律返回
+        None 永不抛(调用方不落评分);返回携带评审模型名(审计归因)。"""
+        try:
+            async with httpx.AsyncClient(
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                base_url=self._base,
+                timeout=self._scoring_timeout,
+                headers=self._headers,
+            ) as client:
+                resp = await client.post(
+                    "/internal/score-answer",
+                    json={
+                        "material": material,
+                        "trace_id": trace_id,
+                        "tenant_key": tenant_key,
+                    },
+                )
+        except httpx.HTTPError as e:
+            log.warning("答案评审回调异常: %s", e)
+            return None
+        if resp.status_code != 200:
+            log.warning("答案评审非 200: HTTP %s", resp.status_code)
+            return None
+        try:
+            data = _obj_dict(resp.json())
+        except (ValueError, TypeError, AttributeError) as e:
+            log.warning("答案评审响应解析失败: %s", e)
+            return None
+        if data is None or not data.get("decomposed"):
+            return None  # agent 侧降级(LLM 失败/输出不可解析)
+        decomposition = data.get("decomposition")
+        if not isinstance(decomposition, dict) or not decomposition:
+            return None
+        return {
+            "decomposition": decomposition,
+            "score_model": str(data.get("score_model") or ""),
+        }
 
     async def run_task(self, payload: dict[str, object]) -> dict[str, object] | None:
         """任务编排回调:POST /internal/task-run;长任务独立超时
