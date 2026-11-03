@@ -7,6 +7,63 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
+## 当前状态(2026-11-04)
+
+- **评分/兜底/观测三变更现态(已落地归档,工件在
+  `openspec/changes/archive/2026-11-03-*`)**:
+  ①答案异步评分:SUCCESS 问答轮图外异步评审——judge 只产出结构化主张
+  分解,分数由控制面按确定性公式重算;权重/封顶/净化规则单源
+  `apps/api/kongming/chat/scoring.py`,评审 prompt 侧
+  `apps/agent/kongming_agent/scorer.py` 的分级口径须与权重表同源演化,
+  两侧不得单边漂移。幂等=message_id UNIQUE+ON CONFLICT DO NOTHING;
+  开关 `KM_ANSWER_SCORING_ENABLED`(缺省 true)/`KM_ANSWER_SCORING_TIMEOUT_SEC`
+  (90s);表 chat_turn_score(0059);scorer.py 不进 prompt_fingerprint
+  资产集(主图指纹零影响)。不评分范围:非 SUCCESS、非落库轮、ReAct
+  链路、证据不可装配(无结果集且无有效来源引用)。
+  ②兜底分类:fallback_type 诊断列(0060,CHECK 枚举 CHITCHAT/CLARIFY)
+  复用 NO_DATA 中性通道——四态映射零新增;词表直通三族静态文案(招呼/
+  致谢不再答数据缺失);route_intent 一帧三用(四意图+ambiguous/clarify,
+  判闲聊口径=完全无取数意图,闲聊优先于澄清);防循环=api 读
+  `last_fallback_type` 注入载荷,上一轮 CLARIFY 则本轮不命中澄清;
+  no_data 率分子分母剔除兜底轮(原始计数如实保留)。
+  ③观测深化:stage_trace 诊断列(0061,流式轮消费端就地收集 running/
+  done 帧,cap 64 超限带截断标记;同步轮如实为 null;传输失败轮落已
+  收集部分)。质量台新端点 /system/chat-quality/score|context|stage-trace|
+  export——score/stage-trace 对不可见租户统一 404 防探测(stage_trace_detail
+  曾把「行不存在」与「轨迹 null」混同致 404 不可达,已修并由测试钉住);
+  串联 /context 锚点必含、上限 50;CSV 导出共享 `chat/export.py` 的
+  to_csv(BOM/RFC4180/公式注入中和),5000 行截断附标记行,导出落操作
+  日志(add 后必须 commit——`_Oper.log` 缺提交曾在本域翻车;chat 域
+  costgate 的同款问题仍挂账待裁决)。质量台前端:AI 平均分/AI 评分列
+  (未评分≠0 分,低于阈值红,点击开分解详情)/分类徽标与筛选/导出/
+  轨迹与串联抽屉。
+- **prompt 指纹与评估现值**:INTENT_ROUTE_SYSTEM 扩为四意图+ambiguous/
+  clarify 后指纹已重建,现值 **0b54ecda**——evals 基线对比须用同指纹
+  轮次。eval 三层实跑(2026-11-03 本地 live 栈):smoke 7/7(含 judge
+  抽检层)、full 1/1、multiturn 12/12。multiturn 一题曾同因连败:LLM
+  反复生成 `SELECT DISTINCT … ORDER BY 未投影列`(PG 硬约束),教训=
+  **selfheal 喂回抽象指令修不动模型,须给逐字正确形态模板并明令不要
+  什么**(`_selfheal_guidance` 的 DISTINCT 分支即该形态,测试锚定)。
+- **pyright strict 的 JSON 边界解析模式坑(本批实证)**:防御 isinstance
+  在形参已声明 dict 时会被 strict 判冗余;正确形态=形参标 `object`
+  保留守卫(守卫常是被测契约,如 StageTraceCollector 畸形帧跳过)再
+  `cast("dict[str, object]", …)` 收窄——**不要删守卫**。另:本批曾只跑
+  ruff+mypy 漏掉 pyright/format 两个 make check 组成项连红,收工门禁按
+  Makefile 全链跑,勿手搓单项(钉版与 `PYRIGHT_PYTHON_FORCE_VERSION=latest`
+  双口径都要过,latest 才是 CI 同款)。
+- **本地环境现值增量(2026-11-03/04)**:dev 库已迁移至 head 0061;
+  olist 数据源已在 dev 库注册(sys_datasource:datasource_key=olist→
+  tenant_olist,此前 olist 冒烟 NO_DATA 即缺此行);评估账号
+  **eval-owner/EvalOwner#2026a**(绑 sakila/olist/default 三租户,可删);
+  **admin 密码 KmSmoke#2026a 已实测失效**(连败触发 auth:lock:admin,
+  锁经 Redis 清键解除,密码未动)——勿再猜 admin 凭据,评估一律自建
+  账号。live 冒烟栈:api:8000/agent:8001/web:5173 + ~/workspace/env
+  (core+pg)。
+- **门禁现值(2026-11-04)**:api 1613/agent 589/web 134 全绿;pyright
+  钉版+latest 双口径双 app 0、lint-imports 27 kept;openspec 主 specs
+  52 passed 0 failed(>500 字符 WARNING 为存量噪声);openapi/前端类型
+  随三变更再生成,无漂移。
+
 ## 当前状态(2026-10-22)
 
 - **搜索索引评估边界**:chat、datasource、store、system 当前搜索均为
