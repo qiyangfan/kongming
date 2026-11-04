@@ -7,6 +7,38 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
+## 当前状态(2026-11-04,DeepSeek 对照三变更)
+
+- **A 看门狗/C 事件立项 task 目标/B worker 续读三变更已落地(工件在
+  `openspec/changes/archive/2026-11-04-add-*`,主 specs 已同步)**。
+  部署现值:dev 库
+  已迁 **0062**(sys_trigger_definition.task_template JSONB + CHECK 扩
+  task);重启 api/agent 即生效。看门狗缺省开(`KM_WATCHDOG_ENABLED`,
+  stale 300s/interval 60s/judge 超时 20s;单 api 进程巡检,独立短会话
+  整 tick commit)。
+- **机制口径现值**:①任务终态收口同态幂等——agent 侧 `/internal/task/finish`
+  先收口、api 编排循环按 final_status 复收口是常态链路,双重收口曾落
+  `invalid_transition`(FAILED→FAILED)噪音事件并抛 409,已修(同态收敛
+  不迁移不落事件;跨态仍白名单拒绝);②worker 续读端点 `/internal/task/context`
+  载荷钳制 8KB:先裁步骤明细,目标全文自身超限(创建口径 4000 字,CJK
+  ~12KB)按字节截断保指令头部,truncated 如实标注;③判读端点族
+  `/internal/judge-stagnation|judge-event`(agent 面,X-Internal-Token
+  中间件守门,WATCHDOG 任务路由,失败 judged=False 由 api 降级);④停滞
+  判读材料=末 8 条事件时间升序(晚在后);⑤触发器 task 目标:webhook/
+  email 经两级过滤闸(程序 filter→语义 judge→线程键去重,SKIPPED 不重试
+  不通知),CRON 免闸;线程去重载体=run.summary JSON(`thread_key`+
+  `task_id`);确认门复用 PAUSED(`confirm_auto=false` 缺省);web 表单编辑
+  保存保留非表单面模板字段(budget/topology/filter.equals),表单管理键
+  清空即删除。
+- **评估与账号**:worker 续读对照数据在 `apps/api/evals/README` 专项对照
+  记录(两臂均预算耗尽 FAILED,续读调用数无审计痕迹=观测缺口);评估
+  账号 **evalread/EvalRead#2026b**(SUPER_ADMIN,绑 sakila/default,可删);
+  dev 库遗留评估数据(触发器 2/任务 2/协作账本若干,tg_key 前缀
+  eval_readthrough_)可删。
+- **门禁现值(2026-11-04 三变更后)**:api 1639/agent 612/liannu 23/web
+  vitest 134 全绿;openapi/前端类型已再生成同步;未提交树上
+  contracts-check 机制性红(git diff 对 HEAD),提交产物后即绿。
+
 ## 当前状态(2026-11-04)
 
 - **评分/兜底/观测三变更现态(已落地归档,工件在
@@ -34,7 +66,7 @@
   串联 /context 锚点必含、上限 50;CSV 导出共享 `chat/export.py` 的
   to_csv(BOM/RFC4180/公式注入中和),5000 行截断附标记行,导出落操作
   日志(add 后必须 commit——`_Oper.log` 缺提交曾在本域翻车;chat 域
-  costgate 的同款问题仍挂账待裁决)。质量台前端:AI 平均分/AI 评分列
+  costgate 同款问题已同口径收口,两处各有回归测试钉住)。质量台前端:AI 平均分/AI 评分列
   (未评分≠0 分,低于阈值红,点击开分解详情)/分类徽标与筛选/导出/
   轨迹与串联抽屉。
 - **prompt 指纹与评估现值**:INTENT_ROUTE_SYSTEM 扩为四意图+ambiguous/
@@ -123,7 +155,7 @@
   pg18)+容器镜像 python3.14-bookworm-slim(requires-python 保持 >=3.13 兼容
   声明;ctranslate2 4.8.3 cp314 轮子已验,api/agent 镜像构建+api 容器 healthz smoke 过)。
   冒烟:echarts 亮暗两态真实问答图表走查过(muniu 网关需在位,agent mk-key
-  已换签为 walk310)。TypeScript 7 维持暂缓(typescript-eslint #10940)。
+  已换签为 walk310)。TypeScript 7 维持暂缓(typescript-eslint #10940;**重开条件=typescript-eslint 发布支持 TS7 的稳定版**,届时独立升级批验证)。
 
 - **文档检索精排现态(add-doc-rerank,已落地;工件在
   `openspec/changes/archive/` 对应目录)**:document-rag 检索在 RRF 融合后
