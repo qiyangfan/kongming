@@ -468,6 +468,47 @@ class SqlTaskRepo:
         ).scalar_one_or_none()
         return int(row) if row is not None else None
 
+    async def list_stale_inflight(self, *, stale_sec: int) -> list[dict[str, Any]]:
+        """看门狗候选:RUNNING/PLANNING 且心跳(updated_at)超阈的在途任务。
+
+        心跳即 updated_at:事件账本与状态迁移每次写都 bump 它(宽心跳,
+        偏向少误杀,语义精度由判读闸补偿)。附末事件 kind/verdict(判读
+        去重与二次超窗的判定依据)与最近 8 条事件尾(判读材料,时间升序
+        晚在后,与判读 prompt 口径一致);无归属过滤(系统巡检跨租户,
+        与会话只读系统口径一致)。"""
+        rows = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, tenant_id, goal, status, dispatch_epoch,"
+                        "       events->-1->>'kind' AS last_kind,"
+                        "       events->-1->>'verdict' AS last_verdict,"
+                        "       COALESCE("
+                        "         (SELECT jsonb_agg(e ORDER BY ord ASC)"
+                        "            FROM jsonb_array_elements(events)"
+                        "              WITH ORDINALITY AS t(e, ord)"
+                        "           WHERE ord > jsonb_array_length(events) - 8),"
+                        "         '[]'::jsonb) AS events_tail"
+                        " FROM public.sys_agent_task"
+                        " WHERE status IN ('RUNNING','PLANNING')"
+                        "   AND updated_at < now() - make_interval(secs => :stale)"
+                    ),
+                    {"stale": stale_sec},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            tail = item.get("events_tail")
+            if isinstance(tail, str):
+                tail = json.loads(tail)
+            item["events_tail"] = tail if isinstance(tail, list) else []
+            out.append(item)
+        return out
+
     async def lock_task(self, *, task_id: str) -> bool:
         """任务行锁(规划/插步等复合写的串行化闸;事务结束释放)。"""
         row = (

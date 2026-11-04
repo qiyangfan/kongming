@@ -181,6 +181,8 @@ class AgentClient:
         self._task_timeout = settings.agent_task_timeout_sec
         # 评审主张分解是长输出(≤12 主张×摘录),独立超时预算(非标题 30s 口径)
         self._scoring_timeout = settings.answer_scoring_timeout_sec
+        # 看门狗判读是单次轻量调用,独立短超时(不占问答/编排预算)
+        self._watchdog_timeout = settings.watchdog_judge_timeout_sec
 
     async def query(
         self,
@@ -533,6 +535,76 @@ class AgentClient:
             "decomposition": decomposition,
             "score_model": str(data.get("score_model") or ""),
         }
+
+    async def judge_stagnation(
+        self, *, goal: str, events: list[dict[str, object]], stale_sec: int
+    ) -> dict[str, object] | None:
+        """停滞判读回调:POST /internal/judge-stagnation。降级契约同
+        score_answer——不可达/非 200/坏报文/judged=False 一律返回 None
+        永不抛(调用方按判读不可用落标记事件走机械兜底)。"""
+        try:
+            async with httpx.AsyncClient(
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                base_url=self._base,
+                timeout=self._watchdog_timeout,
+                headers=self._headers,
+            ) as client:
+                resp = await client.post(
+                    "/internal/judge-stagnation",
+                    json={"goal": goal, "events": events, "stale_sec": stale_sec},
+                )
+        except httpx.HTTPError as e:
+            log.warning("停滞判读回调异常: %s", e)
+            return None
+        if resp.status_code != 200:
+            log.warning("停滞判读非 200: HTTP %s", resp.status_code)
+            return None
+        try:
+            data = _obj_dict(resp.json())
+        except (ValueError, TypeError, AttributeError) as e:
+            log.warning("停滞判读响应解析失败: %s", e)
+            return None
+        if data is None or not data.get("judged"):
+            return None  # agent 侧降级(LLM 失败/输出不可解析)
+        verdict = str(data.get("verdict") or "")
+        if verdict not in ("stagnant", "progressing"):
+            return None
+        return {"verdict": verdict, "reason": str(data.get("reason") or "")}
+
+    async def judge_event(
+        self, *, source: str, summary: str, goal_preview: str
+    ) -> dict[str, object] | None:
+        """事件立项判读回调:POST /internal/judge-event。降级契约同
+        judge_stagnation——不可达/非 200/坏报文/judged=False 一律返回
+        None 永不抛(调用方按判读不可用 SKIPPED,不默认立项)。"""
+        try:
+            async with httpx.AsyncClient(
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                base_url=self._base,
+                timeout=self._watchdog_timeout,
+                headers=self._headers,
+            ) as client:
+                resp = await client.post(
+                    "/internal/judge-event",
+                    json={"source": source, "summary": summary, "goal_preview": goal_preview},
+                )
+        except httpx.HTTPError as e:
+            log.warning("事件判读回调异常: %s", e)
+            return None
+        if resp.status_code != 200:
+            log.warning("事件判读非 200: HTTP %s", resp.status_code)
+            return None
+        try:
+            data = _obj_dict(resp.json())
+        except (ValueError, TypeError, AttributeError) as e:
+            log.warning("事件判读响应解析失败: %s", e)
+            return None
+        if data is None or not data.get("judged"):
+            return None  # agent 侧降级(LLM 失败/输出不可解析)
+        verdict = str(data.get("verdict") or "")
+        if verdict not in ("create", "skip"):
+            return None
+        return {"verdict": verdict, "reason": str(data.get("reason") or "")}
 
     async def run_task(self, payload: dict[str, object]) -> dict[str, object] | None:
         """任务编排回调:POST /internal/task-run;长任务独立超时

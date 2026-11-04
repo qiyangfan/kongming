@@ -199,6 +199,58 @@ async def _attachment_cleanup_loop() -> None:
         await asyncio.sleep(20 * 3600)
 
 
+async def _task_watchdog_loop() -> None:
+    """在途任务看门狗巡检循环:RUNNING/PLANNING 心跳超阈候选 → 单次停滞
+    判读(agent 判读端点,不可用即落标记)→ 停滞/二次超窗 epoch 夺权收口。
+    独立短会话,失败下轮重试;开关关闭时循环不创建(spec「运行中看门狗监督」)。"""
+    from kongming.chat.agent_client import AgentClient
+    from kongming.chat.router import get_agent_client
+    from kongming.db import get_sessionmaker as _gsm
+    from kongming.task.ports import StagnationVerdict
+    from kongming.task.repository import SqlTaskRepo as _TaskRepo
+    from kongming.task.service import TaskService as _TaskSvc
+
+    class _AgentJudge:
+        """停滞判读端口适配(组合根绑定;None=判读不可用,由 AgentClient
+        降级契约保证,巡检用例落标记后走机械兜底)。"""
+
+        def __init__(self, client: AgentClient) -> None:
+            self._client = client
+
+        async def judge(
+            self, *, goal: str, events_tail: list[dict[str, object]], stale_sec: int
+        ) -> StagnationVerdict | None:
+            out = await self._client.judge_stagnation(
+                goal=goal, events=events_tail, stale_sec=stale_sec
+            )
+            if out is None:
+                return None
+            return StagnationVerdict(verdict=str(out["verdict"]), reason=str(out["reason"]))
+
+    settings = get_settings()
+    while True:
+        await asyncio.sleep(settings.watchdog_interval_sec)
+        try:
+            async with _gsm()() as s:
+                summary = await _TaskSvc(_TaskRepo(s)).patrol_stagnation(
+                    stale_sec=settings.watchdog_stale_sec,
+                    judge=_AgentJudge(get_agent_client()),
+                )
+                await s.commit()
+            if summary["candidates"]:
+                log.info(
+                    "看门狗巡检: 候选=%d 判读=%d 夺权收口=%d",
+                    summary["candidates"],
+                    summary["judged"],
+                    summary["taken_over"],
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001  # 调度循环永不退出
+            log.warning("看门狗巡检异常(下轮重试)", exc_info=True)
+            continue
+
+
 def _warn_websearch_misconfiguration() -> None:
     """websearch 配置组合残缺时的 dev 告警降级（prod 由
     config.fail_closed_checks 拒启）。"""
@@ -266,6 +318,10 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
     billing_task = asyncio.create_task(_monthly_invoice_loop())
     expire_task = asyncio.create_task(_payment_expire_loop())
     attach_task = asyncio.create_task(_attachment_cleanup_loop())
+    # 看门狗开关关闭则不创建循环(停用即回到既有收口链行为)
+    watchdog_task = (
+        asyncio.create_task(_task_watchdog_loop()) if get_settings().watchdog_enabled else None
+    )
     start_trigger_scheduler()  # cron 调度循环(30s tick,单进程形态)
     # /mcp 入站走 SDK 会话管理器生命周期(挂载态内建 lifespan 失效,宿主
     # MUST enter session_manager.run,SDK 迁移指南明文);每次 lifespan
@@ -281,6 +337,8 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
         billing_task.cancel()
         expire_task.cancel()
         attach_task.cancel()
+        if watchdog_task is not None:
+            watchdog_task.cancel()
         # 收割防 pending 残留
         await asyncio.gather(
             archive_task,

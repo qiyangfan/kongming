@@ -1,5 +1,6 @@
 """task 持久化端口,供用例层通过接口依赖存储实现。"""
 
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from kongming.task.models import StepPlan
@@ -97,6 +98,8 @@ class TaskRepo(Protocol):
     async def mark_interrupted_stale(self) -> int: ...
 
     async def bump_dispatch_epoch(self, *, task_id: str) -> int | None: ...
+
+    async def list_stale_inflight(self, *, stale_sec: int) -> list[dict[str, Any]]: ...
 
     async def pending_confirm_step(
         self, *, task_id: str, step_id: str
@@ -238,3 +241,21 @@ class TaskRunGateway(Protocol):
     """编排回调网关(agent 面 /internal/task-run);不可达返回 None。"""
 
     async def run_task(self, payload: dict[str, object]) -> dict[str, object] | None: ...
+
+
+@dataclass(frozen=True)
+class StagnationVerdict:
+    """单次停滞判读结论(judge 端点产出;端口返回 None=判读不可用)。"""
+
+    verdict: str  # stagnant | progressing
+    reason: str
+
+
+class StagnationJudge(Protocol):
+    """停滞判读端口(实现侧=agent 判读端点回调;api 不直连 LLM)。
+
+    同一滞留段的判读去重由巡检用例的事件标记保证,端口实现无需幂等。"""
+
+    async def judge(
+        self, *, goal: str, events_tail: list[dict[str, object]], stale_sec: int
+    ) -> StagnationVerdict | None: ...

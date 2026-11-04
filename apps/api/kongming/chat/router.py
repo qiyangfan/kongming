@@ -213,6 +213,9 @@ def _build_cost_gate() -> ChatCostGate:
 
             async with get_sessionmaker()() as s:
                 await SqlOperLogRepo(s).add(None, action, target, detail)
+                # 独立短会话必须显式提交:close 即回滚,缺 commit=审计静默丢失
+                # (quality 域同款翻车的收口形态)
+                await s.commit()
 
     return ChatCostGate(
         limiter=RedisRateLimiter(get_redis()),

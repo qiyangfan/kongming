@@ -22,6 +22,7 @@ from kongming_agent.graph.state import ExecutionResult
 from kongming_agent.graph.streams import emit_event
 from kongming_agent.llm import LlmToolCall
 from kongming_agent.settings import Settings
+from kongming_agent.task_context import TASK_CONTEXT_TOOL_NAME
 
 log = logging.getLogger(__name__)
 
@@ -152,6 +153,23 @@ async def tool_dispatch(state: ReactState) -> dict[str, object]:
             compute_values.extend(add_vals)
             if outcome_status == "done" and sig:
                 executed_sigs.add(sig)
+        elif call.name == TASK_CONTEXT_TOOL_NAME:
+            # 内置只读续读(授权交集外加;零参绑定派发载荷 task_id,
+            # LLM 无法指定他任务):不走通用工具执行面,直读任务上下文
+            ctx = await deps.get_api().task_context(
+                task_id=str(state.get("task_id") or ""),
+                tenant_key=str(state.get("tenant_key") or "default"),
+            )
+            if ctx is None:
+                obs = {"status": "error", "reason": "任务上下文读取失败(端点不可达/超时)"}
+                outcome_status = "rejected"
+            else:
+                obs = {
+                    "status": "done",
+                    "reason": "",
+                    "content": json.dumps(ctx, ensure_ascii=False, default=str),
+                }
+                outcome_status = "done"
         else:
             # 入口 state 恒含 trace_id/tenant_key(_initial_react_state 写入)
             outcome = await deps.get_api().tool_execute(

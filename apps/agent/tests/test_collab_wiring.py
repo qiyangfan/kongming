@@ -14,6 +14,7 @@ import pytest
 
 from kongming_agent.collab_wiring import make_collab_runner
 from kongming_agent.settings import Settings
+from kongming_agent.task_context import TASK_CONTEXT_TOOL_SPEC
 from kongming_agent.task_gen import run_task
 
 
@@ -230,7 +231,8 @@ async def test_collab_runner_bot_persona_and_tool_narrowing() -> None:
     out = await runner("s1", "财务口径核对", "已有上下文:Q1 数据", cfg)
     assert str(out["verdict"]) == "PASS"
     r = reqs[0]
-    assert r["tools"] == [{"name": "sql_query"}]  # 求交后仅剩 Bot 子集
+    # 求交后仅剩 Bot 子集 + 内置续读(授权交集外加,恒在场)
+    assert r["tools"] == [{"name": "sql_query"}, TASK_CONTEXT_TOOL_SPEC]
     prompt = str(r["bot_system_prompt"])
     assert "你是财务分析专家" in prompt
     assert "已有上下文:Q1 数据" in prompt  # 上下文摘要=系统提示附加段
@@ -819,7 +821,10 @@ async def test_collab_runner_roster_per_worker_assembly() -> None:
     assert str(reqs[0]["bot_system_prompt"]).startswith("财务人格")
     assert str(reqs[1]["bot_system_prompt"]).startswith("运营人格")
     for r in reqs:
-        assert cast("list[object]", r["tools"]) == [{"name": "sql_query"}]
+        assert cast("list[object]", r["tools"]) == [
+            {"name": "sql_query"},
+            TASK_CONTEXT_TOOL_SPEC,
+        ]
     # 账本:逐 worker bot_key 与成员标签前缀;剔除披露进保留意见
     starts = [payload for kind, payload in api.events if kind == "worker_start"]
     assert [str(s.get("bot_key")) for s in starts] == ["fin", "yunying"]

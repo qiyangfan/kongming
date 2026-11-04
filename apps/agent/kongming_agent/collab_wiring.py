@@ -16,6 +16,7 @@ from kongming_agent.collab_gen import WorkerRunner, run_collab
 from kongming_agent.llm import reset_usage_collector, set_usage_collector
 from kongming_agent.roundtable_gen import ROLE_CHARTERS, run_roundtable
 from kongming_agent.settings import Settings
+from kongming_agent.task_context import TASK_CONTEXT_TOOL_SPEC
 from kongming_agent.task_gen import react_execution_evidence, react_verdict
 
 log = logging.getLogger(__name__)
@@ -207,9 +208,10 @@ def make_collab_runner(
                 "user_id": user_id,
                 "question": subgoal,
                 "history": [],
-                "tools": w_tools,
+                "tools": [*w_tools, TASK_CONTEXT_TOOL_SPEC],
                 "channel": "task",  # 将工具调用归因到任务编排。
                 "bot_system_prompt": sys_prompt,
+                "task_id": task_id,  # 续读绑定(worker task_context 取自身任务上下文)
             }
             collector: list[dict[str, object]] = []
             token = set_usage_collector(collector)
@@ -322,9 +324,13 @@ def make_collab_runner(
                     "user_id": user_id,
                     "question": step_goal,
                     "history": [],
-                    "tools": p["tools"],
+                    "tools": [
+                        *cast("list[dict[str, object]]", p["tools"]),
+                        TASK_CONTEXT_TOOL_SPEC,
+                    ],
                     "channel": "task",  # 将工具调用归因到任务编排。
                     "bot_system_prompt": sys_prompt,
+                    "task_id": task_id,  # 续读绑定(worker task_context 取自身任务上下文)
                 }
                 collector: list[dict[str, object]] = []
                 token = set_usage_collector(collector)

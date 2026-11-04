@@ -72,12 +72,16 @@ class TriggerRepo(Protocol):
         self, *, tenant_id: str, trigger_id: str, page: int, size: int
     ) -> tuple[int, list[dict[str, Any]]]: ...
 
+    async def latest_success_run_for_thread(
+        self, *, trigger_id: str, thread_key: str
+    ) -> dict[str, Any] | None: ...
+
     async def commit(self) -> None: ...
 
 
 class TargetRunner(Protocol):
     """目标执行:实现侧装配  组合根(独立会话);
-    返回 (success, ref, error)。"""
+    返回 (success, ref, error)。template 仅 task 目标消费(模板配置)。"""
 
     async def run_target(
         self,
@@ -89,7 +93,34 @@ class TargetRunner(Protocol):
         creator_id: str,
         inputs: dict[str, Any],
         channel: str,
+        template: dict[str, Any] | None = None,
     ) -> tuple[bool, str, str]: ...
+
+
+@dataclass(frozen=True)
+class EventGateVerdict:
+    """事件语义判读结论(单次;端口返回 None=判读不可用)。"""
+
+    verdict: str  # create | skip
+    reason: str
+
+
+class EventJudge(Protocol):
+    """事件立项语义判读端口(实现侧=agent 判读端点回调;api 不直连 LLM)。
+
+    仅 WEBHOOK/EMAIL 的 task 目标消费;CRON 不经判读(意图在创建期已定)。"""
+
+    async def judge(
+        self, *, source: str, summary: str, goal_preview: str
+    ) -> EventGateVerdict | None: ...
+
+
+class TaskGateway(Protocol):
+    """task 目标侧查/写端口(线程去重与事件归属;实现侧=组合根直调任务仓储)。"""
+
+    async def is_open(self, *, task_id: str) -> bool: ...
+
+    async def append_thread_event(self, *, task_id: str, event: dict[str, Any]) -> bool: ...
 
 
 class TargetChecker(Protocol):

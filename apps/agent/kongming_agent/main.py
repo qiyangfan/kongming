@@ -208,6 +208,68 @@ async def score_answer_endpoint(req: ScoreAnswerIn) -> ScoreAnswerOut:
     )
 
 
+class JudgeStagnationIn(BaseModel):
+    """任务停滞判读请求(api 看门狗巡检回调,单次判读)。"""
+
+    goal: str = Field(min_length=1, max_length=4_000)
+    events: list[dict[str, object]] = Field(default=[], max_length=8)
+    stale_sec: int = Field(ge=1)
+
+
+class JudgeStagnationOut(BaseModel):
+    judged: bool  # False=判读不可用,api 侧落标记事件走机械兜底。
+    verdict: str = ""  # stagnant | progressing
+    reason: str = ""
+
+
+@app.post("/internal/judge-stagnation", response_model=JudgeStagnationOut, tags=["internal"])
+async def judge_stagnation_endpoint(req: JudgeStagnationIn) -> JudgeStagnationOut:
+    """任务停滞判读(看门狗 judge 侧);失败不抛 5xx(judged=False),api 侧降级。"""
+    from kongming_agent.watchdog import JudgeError, judge_stagnation
+
+    try:
+        out = await judge_stagnation(
+            goal=req.goal,
+            events_tail=req.events,
+            stale_sec=req.stale_sec,
+            llm=deps.get_llm(),
+        )
+    except JudgeError:
+        return JudgeStagnationOut(judged=False)
+    return JudgeStagnationOut(judged=True, verdict=str(out["verdict"]), reason=str(out["reason"]))
+
+
+class JudgeEventIn(BaseModel):
+    """事件立项判读请求(api 触发器过滤闸回调,单次判读)。"""
+
+    source: str = Field(min_length=1, max_length=32)
+    summary: str = Field(min_length=1, max_length=2_000)
+    goal_preview: str = Field(default="", max_length=400)
+
+
+class JudgeEventOut(BaseModel):
+    judged: bool  # False=判读不可用,api 侧按不可用口径 SKIPPED。
+    verdict: str = ""  # create | skip
+    reason: str = ""
+
+
+@app.post("/internal/judge-event", response_model=JudgeEventOut, tags=["internal"])
+async def judge_event_endpoint(req: JudgeEventIn) -> JudgeEventOut:
+    """事件立项判读(触发器过滤闸语义层);失败不抛 5xx(judged=False),api 侧降级。"""
+    from kongming_agent.event_judge import JudgeError, judge_event
+
+    try:
+        out = await judge_event(
+            source=req.source,
+            summary=req.summary,
+            goal_preview=req.goal_preview,
+            llm=deps.get_llm(),
+        )
+    except JudgeError:
+        return JudgeEventOut(judged=False)
+    return JudgeEventOut(judged=True, verdict=str(out["verdict"]), reason=str(out["reason"]))
+
+
 class SuggestQuestionsIn(BaseModel):
     """建议问题生成请求(api 回调——结构摘要,非业务行数据)。"""
 
@@ -680,12 +742,15 @@ class QueryReactIn(QueryIn):
     channel: str = "chat"
     # 仅 Bot 请求启用同步采集；普通 chat 和 workflow 保持异步上报。
     collect_usage: bool = False
+    # 任务通道续读绑定(worker task_context 取自身任务上下文)
+    task_id: str = ""
 
 
 def _initial_react_state(req: QueryReactIn) -> ReactState:
     return {
         "trace_id": req.trace_id,
         "tenant_key": req.tenant_key,
+        "task_id": req.task_id,
         "question": req.question,
         "user_id": req.user_id,
         "history": req.history,

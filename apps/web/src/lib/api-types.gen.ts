@@ -3301,6 +3301,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/task/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Task Context
+         * @description worker 续读入口(spec「派发与上下文受控传递」):自身任务的目标全文
+         *     与各步骤状态/结论摘要。截断尾提示的按需读取端点;载荷整体钳制 8KB
+         *     (续读是按需补救,不是整份下传的旁路);跨租户 404 同形。
+         */
+        get: operations["task_context_internal_task_context_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/task/step-start": {
         parameters: {
             query?: never;
@@ -7714,7 +7736,10 @@ export interface components {
             type: string;
             /** Target Type */
             target_type: string;
-            /** Target Key */
+            /**
+             * Target Key
+             * @default
+             */
             target_key: string;
             /** Cron Expr */
             cron_expr?: string | null;
@@ -7743,6 +7768,10 @@ export interface components {
              * @default 0
              */
             max_retries: number;
+            /** Task Template */
+            task_template?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Imap Host
              * @default
@@ -7822,6 +7851,10 @@ export interface components {
              * @default 0
              */
             max_retries: number;
+            /** Task Template */
+            task_template?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Imap Host
              * @default
@@ -7900,7 +7933,10 @@ export interface components {
             name: string;
             /** Target Type */
             target_type: string;
-            /** Target Key */
+            /**
+             * Target Key
+             * @default
+             */
             target_key: string;
             /** Cron Expr */
             cron_expr?: string | null;
@@ -7929,6 +7965,10 @@ export interface components {
              * @default 0
              */
             max_retries: number;
+            /** Task Template */
+            task_template?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Imap Host
              * @default
@@ -15621,6 +15661,40 @@ export interface operations {
         };
     };
     task_steps_internal_task_steps_get: {
+        parameters: {
+            query: {
+                task_id: string;
+                tenant_key: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    task_context_internal_task_context_get: {
         parameters: {
             query: {
                 task_id: string;

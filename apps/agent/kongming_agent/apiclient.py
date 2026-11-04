@@ -7,6 +7,7 @@
   (retrieve 降级空提示,nl2sql-agent spec「Schema 智能选取」)。
 """
 
+import json
 import logging
 from dataclasses import dataclass, field
 from functools import partial
@@ -316,6 +317,23 @@ class ApiClient:
             result=cast("dict[str, object]", result_raw) if isinstance(result_raw, dict) else None,
             confirm_id=cast("str | None", data.get("confirm_id")),
         )
+
+    async def task_context(self, *, task_id: str, tenant_key: str) -> dict[str, object] | None:
+        """worker 续读回调:GET /internal/task/context。降级契约:不可达/
+        非 200/坏报文返回 None 永不抛(调用侧按错误观察喂回 LLM)。"""
+        try:
+            resp = await self._get_once(
+                "/internal/task/context", {"task_id": task_id, "tenant_key": tenant_key}
+            )
+        except Exception:  # noqa: BLE001  # 续读失败收敛错误观察,不裸抛
+            return None
+        if resp.status_code != 200:
+            return None
+        try:
+            data = json.loads(resp.text)
+        except ValueError:
+            return None
+        return cast("dict[str, object]", data) if isinstance(data, dict) else None
 
     async def task_plan(
         self, *, task_id: str, tenant_key: str, steps: list[dict[str, object]]

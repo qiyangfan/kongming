@@ -84,6 +84,7 @@ class _SeqRunner:
         creator_id: str,
         inputs: dict[str, Any],
         channel: str,
+        template: dict[str, Any] | None = None,
     ) -> tuple[bool, str, str]:
         self.calls.append(
             {

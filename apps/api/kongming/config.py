@@ -128,6 +128,14 @@ class Settings(BaseSettings):
     # 圆桌轮次上限(拓扑声明钳制;与 agent 面执行兜底同值同源)
     collab_max_rounds: int = Field(default=3, ge=1, le=16)
 
+    # 在途任务看门狗(task-kernel「运行中看门狗监督」):停滞阈值须显著小于
+    # 任务墙钟预算(900s),保证看门狗先于传输层超时收口;
+    # 判读后二次观察窗同用 stale_sec,最坏路径 stale*2+判读 < 900
+    watchdog_enabled: bool = True
+    watchdog_interval_sec: int = Field(default=60, ge=10)
+    watchdog_stale_sec: int = Field(default=300, ge=60)
+    watchdog_judge_timeout_sec: float = Field(default=20.0, gt=0)
+
     # Bot 商店版本历史上限(缺省 10);封顶淘汰只淘汰最旧的「非当前」版本,
     # 当前上架版本恒受保护
     bot_store_version_cap: int = Field(default=10, ge=1)

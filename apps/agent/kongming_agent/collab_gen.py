@@ -10,6 +10,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
+from kongming_agent.task_context import TASK_CONTEXT_HINT
+
 log = logging.getLogger(__name__)
 
 # worker 数上限(单一定义:prompt 要求、派发截断共用;解析不截断以披露未派发清单)
@@ -304,10 +306,11 @@ class CollabOrchestrator:
     async def _execute_one(
         self, w_subgoal: str, context: str, slot: object | None = None
     ) -> dict[str, object]:
+        ctx = context[:2000]
+        if len(context) > 2000:
+            ctx += f"\n{TASK_CONTEXT_HINT}"
         try:
-            final = await self._run_worker(
-                w_subgoal, context[:2000], str(slot) if slot is not None else None
-            )
+            final = await self._run_worker(w_subgoal, ctx, str(slot) if slot is not None else None)
         except Exception as e:  # noqa: BLE001 —— worker 失败如实记录,不中断他 worker
             log.warning("协作 worker 执行失败(子目标=%s): %s", w_subgoal, e)
             return {

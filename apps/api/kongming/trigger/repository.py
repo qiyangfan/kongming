@@ -1,6 +1,7 @@
 """trigger 存储:sys_trigger_definition/sys_trigger_run。"""
 
 import datetime as dt
+import json
 from typing import Any, cast
 
 from sqlalchemy import text
@@ -30,11 +31,11 @@ class SqlTriggerRepo:
                 "  cron_expr, min_interval_sec, webhook_path, secret_cipher, adapter,"
                 "  notify_url, created_by, next_fire_at, max_retries,"
                 "  imap_host, imap_port, imap_tls, imap_user, imap_credential,"
-                "  imap_folder, imap_poll_interval_sec)"
+                "  imap_folder, imap_poll_interval_sec, task_template)"
                 " VALUES (:id, CAST(:t AS uuid), :k, :n, :ty, :tt, :tk, :cron,"
                 "         :mis, CAST(:wp AS uuid), :sec, :ad, :nu,"
                 "         CAST(:cb AS uuid), CAST(:nf AS timestamptz), :mr,"
-                "         :ih, :ip, :itl, :iu, :ic, :ifo, :ipi)"
+                "         :ih, :ip, :itl, :iu, :ic, :ifo, :ipi, CAST(:tpl AS jsonb))"
             ),
             {
                 "id": rid,
@@ -60,6 +61,11 @@ class SqlTriggerRepo:
                 "ic": kw.get("imap_credential", ""),
                 "ifo": kw.get("imap_folder", "INBOX"),
                 "ipi": kw.get("imap_poll_interval_sec", 300),
+                "tpl": (
+                    json.dumps(kw["task_template"], ensure_ascii=False)
+                    if kw.get("task_template") is not None
+                    else None
+                ),
             },
         )
         return rid
@@ -89,9 +95,14 @@ class SqlTriggerRepo:
             " min_interval_sec=:mis, adapter=:ad, notify_url=:nu,"
             " secret_cipher=COALESCE(NULLIF(:sec, ''), secret_cipher),"
             " next_fire_at=CAST(:nf AS timestamptz),"
-            " max_retries=:mr, updated_at=now()"
+            " max_retries=:mr, task_template=CAST(:tpl AS jsonb), updated_at=now()"
         )
         where = " WHERE id=CAST(:i AS uuid) AND tenant_id=CAST(:t AS uuid)"
+        params["tpl"] = (
+            json.dumps(kw["task_template"], ensure_ascii=False)
+            if kw.get("task_template") is not None
+            else None
+        )
         if with_imap:
             sql = (
                 base_set + ", imap_host=:ih, imap_port=:ip, imap_tls=:itl, imap_user=:iu,"
@@ -329,6 +340,30 @@ class SqlTriggerRepo:
             },
         )
         return rid
+
+    async def latest_success_run_for_thread(
+        self, *, trigger_id: str, thread_key: str
+    ) -> dict[str, Any] | None:
+        """同线程键的最新成功 run(线程去重判定;summary 为 JSON 串,
+        非对象形态(旧行/空)经 CASE 守卫不参与匹配,不炸 cast)。"""
+        row = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, summary, target_run_ref, created_at"
+                        " FROM public.sys_trigger_run"
+                        " WHERE trigger_id=CAST(:t AS uuid) AND status='SUCCESS'"
+                        "   AND CASE WHEN summary LIKE '{%'"
+                        "       THEN summary::jsonb->>'thread_key' END = :tk"
+                        " ORDER BY created_at DESC LIMIT 1"
+                    ),
+                    {"t": trigger_id, "tk": thread_key},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row else None
 
     async def get_run(self, *, run_id: str) -> dict[str, Any] | None:
         row = (

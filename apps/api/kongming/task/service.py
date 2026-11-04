@@ -9,7 +9,12 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from kongming.task import models as m
-from kongming.task.ports import CollabBotResolver, GraphConfirmRepo, TaskRepo
+from kongming.task.ports import (
+    CollabBotResolver,
+    GraphConfirmRepo,
+    StagnationJudge,
+    TaskRepo,
+)
 from kongming.uuid7 import uuid7  # 直接使用 UUIDv7 纯函数，避免依赖数据库模块。
 
 log = logging.getLogger(__name__)
@@ -17,6 +22,10 @@ log = logging.getLogger(__name__)
 # 协作 worker 序号硬顶(失控兜底:worker 派发 + 分歧验证 + critic 修订重派
 # 全计入;agent 面预算先于此绑死,此处只防畸形客户端灌行)
 COLLAB_WORKER_NO_HARD_CAP = 12
+
+# 看门狗事件账本 kinds(巡检去重标记 + 夺权留痕;web 事件流按原始 kind 兜底展示)
+EVENT_WATCHDOG_JUDGED = "watchdog_judged"
+EVENT_WATCHDOG_TAKEN_OVER = "watchdog_taken_over"
 
 
 class TaskNotFound(Exception):
@@ -369,14 +378,85 @@ class TaskService:
             )
             if not ok:
                 raise TaskConflict("任务状态已变更(并发规划)")
-            return await self._repo.insert_steps(task_id=task_id, plans=steps, start_ord=0)
+            out = await self._repo.insert_steps(task_id=task_id, plans=steps, start_ord=0)
+            await self._apply_declared_topology(
+                task_id=task_id,
+                tenant_id=tenant_id,
+                owner_id=str(task.get("user_id") or ""),
+                events=cast("list[object]", task.get("events") or []),
+                steps=out,
+            )
+            return out
         if task["status"] == m.T_RUNNING and not await self._repo.get_steps(task_id=task_id):
             # 规划期中断 → resume → 重规划(计划未落账,不存在重复步骤)
             await self._repo.append_task_event(
                 task_id=task_id, event={"at": _now(), "kind": "replanned", "steps": len(steps)}
             )
-            return await self._repo.insert_steps(task_id=task_id, plans=steps, start_ord=0)
+            out = await self._repo.insert_steps(task_id=task_id, plans=steps, start_ord=0)
+            await self._apply_declared_topology(
+                task_id=task_id,
+                tenant_id=tenant_id,
+                owner_id=str(task.get("user_id") or ""),
+                events=cast("list[object]", task.get("events") or []),
+                steps=out,
+            )
+            return out
         raise TaskConflict("任务不处于规划态")
+
+    async def _apply_declared_topology(
+        self,
+        *,
+        task_id: str,
+        tenant_id: str,
+        owner_id: str,
+        events: list[object],
+        steps: list[dict[str, Any]],
+    ) -> None:
+        """消费触发器模板的拓扑声明标记(spec「task 立项目标」):计划生成后
+        对首个 PENDING 步骤经既有声明路径应用(校验同源);应用失败落
+        trigger_topology_failed 事件并以串行形态继续,不静默丢弃、不炸任务。"""
+        declared: dict[str, Any] | None = None
+        consumed = False
+        for e in events:
+            if not isinstance(e, dict):
+                continue
+            e_d = cast("dict[str, Any]", e)
+            kind = str(e_d.get("kind") or "")
+            if kind == "trigger_topology_declared":
+                declared = cast("dict[str, Any]", e_d.get("topology") or {})
+                consumed = False
+            elif kind in ("trigger_topology_applied", "trigger_topology_failed"):
+                consumed = True
+        if declared is None or consumed or not steps:
+            return
+        pending = next((s for s in steps if str(s.get("status")) == m.S_PENDING), None)
+        if pending is None:
+            return
+        from kongming.config import get_settings
+
+        try:
+            await self.set_step_topology(
+                task_id=task_id,
+                step_id=str(pending["id"]),
+                tenant_id=tenant_id,
+                user_id=owner_id,
+                raw_topology=declared,
+                max_workers_cap=get_settings().collab_max_workers,
+            )
+        except (TaskConflict, TaskNotFound, TopologyBotNotFound) as e:
+            await self._repo.append_task_event(
+                task_id=task_id,
+                event={
+                    "at": _now(),
+                    "kind": "trigger_topology_failed",
+                    "reason": f"{type(e).__name__}: {str(e)[:200]}",
+                },
+            )
+            return
+        await self._repo.append_task_event(
+            task_id=task_id,
+            event={"at": _now(), "kind": "trigger_topology_applied", "step": str(pending["id"])},
+        )
 
     async def begin_step(
         self, *, task_id: str, tenant_id: str, step_id: str, epoch: int | None = None
@@ -988,15 +1068,21 @@ class TaskService:
         fail_reason: str | None,
         epoch: int | None = None,
     ) -> str:
-        """编排终态回写(白名单内收口):DONE 前置「全部步骤终态」校验
-        (审批挂起/在途步骤未决时拒绝,防审批闸被 finish 旁路);
-        派发代际失配 → 409(旧循环不得收口任务终态,由在位派发负责)。"""
+        """编排终态回写(白名单内收口):同态请求幂等收敛(agent 侧已收口,
+        段三复收口不重复迁移);DONE 前置「全部步骤终态」校验(审批挂起/
+        在途步骤未决时拒绝,防审批闸被 finish 旁路);派发代际失配 →
+        409(旧循环不得收口任务终态,由在位派发负责)。"""
         task = await self._repo.get_task_system(task_id=task_id, tenant_id=tenant_id)
         if task is None:
             raise TaskNotFound
         if epoch is not None and epoch != int(task.get("dispatch_epoch") or 0):
             raise TaskConflict("派发代际失配,终态收口由在位派发负责")
         current = str(task["status"])
+        if current == status:
+            # 同态幂等收敛(agent 侧已终态化,api 编排循环按 final_status 复收口
+            # 是常态链路):不重复迁移、不留噪音事件,与 _transition_task_system
+            # 的同态口径一致;终态不可复活,跨态请求仍走白名单拒绝
+            return current
         try:
             m.transition(current, status)
         except m.InvalidTransition as e:
@@ -1047,6 +1133,86 @@ class TaskService:
                     },
                 )
         return marked
+
+    # ── 看门狗:在途任务停滞巡检(spec「运行中停滞检测与判读」「停滞任务夺权收口」) ──
+
+    async def patrol_stagnation(self, *, stale_sec: int, judge: StagnationJudge) -> dict[str, int]:
+        """巡检一轮:候选(心跳超阈在途任务)两段式决策。
+
+        末事件非判读标记 → 单次判读:「仍进展」落标记事件重置观察窗,
+        「停滞」即夺权收口,判读不可用落 unavailable 标记;末事件已是
+        判读标记 → 二次超窗机械收口(同一滞留段不再判读)。返回
+        候选/判读/收口计数。commit 所有权在巡检循环(整 tick 原子);
+        收口谓词未命中(并发迁移先到)即放弃,不抛不重试。"""
+        candidates = await self._repo.list_stale_inflight(stale_sec=stale_sec)
+        judged = taken = 0
+        for row in candidates:
+            if str(row.get("last_kind") or "") == EVENT_WATCHDOG_JUDGED:
+                # 判读后仍无任何活动且再超阈:机械收口(误判进展/判读不可用的兜底)
+                prev = str(row.get("last_verdict") or "")
+                prev_label = "判读不可用" if prev == "unavailable" else (prev or "不可用")
+                if await self._watchdog_takeover(
+                    row, f"看门狗:判读后仍停滞(二次超窗,前判读={prev_label})"
+                ):
+                    taken += 1
+                continue
+            verdict = await judge.judge(
+                goal=str(row["goal"]),
+                events_tail=cast("list[dict[str, object]]", row.get("events_tail") or []),
+                stale_sec=stale_sec,
+            )
+            if verdict is None:
+                await self._repo.append_task_event(
+                    task_id=str(row["id"]),
+                    event={
+                        "at": _now(),
+                        "kind": EVENT_WATCHDOG_JUDGED,
+                        "verdict": "unavailable",
+                        "reason": "判读不可用,二次超窗将机械收口",
+                    },
+                )
+                judged += 1
+                continue
+            if verdict.verdict == "progressing":
+                await self._repo.append_task_event(
+                    task_id=str(row["id"]),
+                    event={
+                        "at": _now(),
+                        "kind": EVENT_WATCHDOG_JUDGED,
+                        "verdict": "progressing",
+                        "reason": verdict.reason,
+                    },
+                )
+                judged += 1
+                continue
+            if await self._watchdog_takeover(row, f"看门狗:判读停滞 —— {verdict.reason}"):
+                taken += 1
+        return {"candidates": len(candidates), "judged": judged, "taken_over": taken}
+
+    async def _watchdog_takeover(self, row: dict[str, Any], reason: str) -> bool:
+        """夺权收口:派发代际自增(旧编排循环回调全失配)+ 条件迁移
+        INTERRUPTED(新代数入 CAS 谓词)。谓词未命中返回 False。"""
+        task_id = str(row["id"])
+        epoch = await self._repo.bump_dispatch_epoch(task_id=task_id)
+        if epoch is None:
+            return False
+        ok = await self._repo.transition_task_system(
+            task_id=task_id,
+            tenant_id=str(row["tenant_id"]),
+            from_status=str(row["status"]),
+            to_status=m.T_INTERRUPTED,
+            fail_reason=reason,
+            event={
+                "at": _now(),
+                "kind": EVENT_WATCHDOG_TAKEN_OVER,
+                "reason": reason,
+                "epoch": epoch,
+            },
+            expect_epoch=epoch,
+        )
+        if not ok:
+            log.info("看门狗收口谓词未命中(任务已被并发迁移): task_id=%s", task_id)
+        return ok
 
     # ── 内部 ──
 

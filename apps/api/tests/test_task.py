@@ -460,6 +460,60 @@ async def test_finish_done_requires_all_steps_terminal(
 
 
 @pytest.mark.asyncio
+async def test_finish_same_state_idempotent(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: Any,
+    _no_dispatch: list[str],
+) -> None:
+    """同态 finish 幂等收敛(agent 侧先收口,段三复收口是常态链路):
+    第二次 FAILED 收口 204、不重复迁移、不留 invalid_transition 噪音事件。"""
+    _, token = await _user_with_task_perms(client, session, make_user, "doneA")
+    task_id = await _create_task(client, token)
+    r = await client.post(
+        "/internal/task/plan",
+        headers=INTERNAL,
+        json={
+            "task_id": task_id,
+            "tenant_key": "default",
+            "steps": [
+                {"goal": "s1", "require_confirm": False},
+                {"goal": "s2", "require_confirm": False},
+            ],
+        },
+    )
+    ids = [s["id"] for s in r.json()["steps"]]
+    await _step_start(client, task_id, "default", ids[0])
+    await _step_result_done(client, task_id, "default", ids[0])
+    rf = await client.post(
+        "/internal/task/finish",
+        headers=INTERNAL,
+        json={
+            "task_id": task_id,
+            "tenant_key": "default",
+            "status": "FAILED",
+            "fail_reason": "部分步骤未完成",
+        },
+    )
+    assert rf.status_code == 204
+    rf2 = await client.post(
+        "/internal/task/finish",
+        headers=INTERNAL,
+        json={
+            "task_id": task_id,
+            "tenant_key": "default",
+            "status": "FAILED",
+            "fail_reason": "部分步骤未完成",
+        },
+    )
+    assert rf2.status_code == 204  # 同态收敛,不再 409
+    detail = (await client.get(f"/tasks/{task_id}", headers=_auth(token))).json()
+    kinds = [e["kind"] for e in detail["events"]]
+    assert kinds.count("finished") == 1
+    assert "invalid_transition" not in kinds
+
+
+@pytest.mark.asyncio
 async def test_resume_blocked_while_awaiting_approval(
     client: AsyncClient,
     session: AsyncSession,

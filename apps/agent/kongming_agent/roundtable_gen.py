@@ -10,6 +10,8 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
+from kongming_agent.task_context import TASK_CONTEXT_HINT
+
 log = logging.getLogger(__name__)
 
 # 圆桌轮次上限缺省(与 api 侧归一缺省同值同源;部署 cap 参数化)
@@ -110,10 +112,16 @@ def participant_system_prompt(
     parts = [persona.strip(), _ROUNDTABLE_DISCIPLINE]
     info = f"# 圆桌信息\n本轮为第 {round_no}/{max_rounds} 轮;主席每轮后判定共识,触顶即收口。"
     if context.strip():
-        info += f"\n# 任务上下文摘要\n{context[:800]}"
+        ctx = context[:800]
+        if len(context) > 800:
+            ctx += f"\n{TASK_CONTEXT_HINT}"
+        info += f"\n# 任务上下文摘要\n{ctx}"
     parts.append(info)
     if snapshot.strip():
-        parts.append(f"# 黑板转写(最近发言)\n{snapshot[:2000]}")
+        board = snapshot[:2000]
+        if len(snapshot) > 2000:
+            board += f"\n{TASK_CONTEXT_HINT}"
+        parts.append(f"# 黑板转写(最近发言)\n{board}")
     return "\n\n".join(p for p in parts if p.strip())
 
 

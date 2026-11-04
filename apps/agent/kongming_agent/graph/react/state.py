@@ -14,6 +14,7 @@ from kongming_agent.llm import LlmToolCall
 class ReactState(TypedDict, total=False):
     trace_id: str
     tenant_key: str
+    task_id: NotRequired[str]  # 任务通道续读绑定(worker task_context 取自身任务上下文)
     datasource_key: str
     user_id: NotRequired[str | None]
     question: str  # 原始问句

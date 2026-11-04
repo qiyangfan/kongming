@@ -114,6 +114,7 @@ class _RecRunner:
         tenant_id: str,
         tenant_key: str,
         creator_id: str,
+        template: dict[str, Any] | None = None,
         inputs: dict[str, Any],
         channel: str,
     ) -> tuple[bool, str, str]:

@@ -17,6 +17,7 @@ from typing import Annotated, Any, cast
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.repository import SqlOperLogRepo
@@ -27,6 +28,7 @@ from kongming.datasource.cipher import get_cipher
 from kongming.db import get_session, get_sessionmaker
 from kongming.trigger.models import CronError, next_fire
 from kongming.trigger.ports import (
+    EventGateVerdict,
     MailAuthError,
     MailConnectError,
     MailError,
@@ -242,11 +244,23 @@ def _make_service(session: AsyncSession, actor_id: str | None = None) -> Trigger
     class _TargetCheckerImpl:
         """目标存在性(与前端候选同源,与派发期同口径):
         workflow=创建者视角可见集合(归属过滤:个人创建 + 所在团队,
-        与 workflow 列表端点同源同参);bot=租户级存在。"""
+        与 workflow 列表端点同源同参);bot=租户级存在;
+        task=模板数据源存在(数据源为租户级资源,归属人可用口径)。"""
 
         async def target_exists(
             self, *, target_type: str, target_key: str, tenant_id: str, creator_id: str
         ) -> bool:
+            if target_type == "task":
+                n = (
+                    await session.execute(
+                        text(
+                            "SELECT count(*) FROM public.sys_datasource"
+                            " WHERE tenant_id=CAST(:t AS uuid) AND datasource_key=:k"
+                        ),
+                        {"t": tenant_id, "k": target_key},
+                    )
+                ).scalar_one()
+                return int(n) > 0
             if target_type == "workflow":
                 from kongming.team.repository import SqlTeamRepo
                 from kongming.workflow.repository import SqlWorkflowRepo
@@ -268,6 +282,39 @@ def _make_service(session: AsyncSession, actor_id: str | None = None) -> Trigger
                 is not None
             )
 
+    class _TaskGatewayImpl:
+        """task 目标侧查/写(线程去重判定与事件归属;同会话直调任务仓储)。"""
+
+        async def is_open(self, *, task_id: str) -> bool:
+            status = (
+                await session.execute(
+                    text("SELECT status FROM public.sys_agent_task WHERE id=CAST(:i AS uuid)"),
+                    {"i": task_id},
+                )
+            ).scalar()
+            return status in ("PLANNING", "RUNNING", "AWAITING_APPROVAL", "PAUSED")
+
+        async def append_thread_event(self, *, task_id: str, event: dict[str, Any]) -> bool:
+            from kongming.task.repository import SqlTaskRepo as _Repo
+
+            await _Repo(session).append_task_event(task_id=task_id, event=event)
+            return True
+
+    class _EventJudgeImpl:
+        """事件立项判读端口绑定(AgentClient 降级契约保证 None=判读不可用)。"""
+
+        async def judge(
+            self, *, source: str, summary: str, goal_preview: str
+        ) -> EventGateVerdict | None:
+            from kongming.chat.router import get_agent_client as _gac
+
+            out = await _gac().judge_event(
+                source=source, summary=summary, goal_preview=goal_preview
+            )
+            if out is None:
+                return None
+            return EventGateVerdict(verdict=str(out["verdict"]), reason=str(out["reason"]))
+
     return TriggerService(
         repo=SqlTriggerRepo(session),
         cipher=get_cipher(settings.datasource_encrypt_key),
@@ -280,6 +327,8 @@ def _make_service(session: AsyncSession, actor_id: str | None = None) -> Trigger
         # 邮件入站客户端与输入护栏(组合根绑定)
         mail=_ImaplibMailClient(),
         input_guard=_TriggerInputGuardrail(),
+        event_judge=_EventJudgeImpl(),
+        task_gateway=_TaskGatewayImpl(),
     )
 
 
@@ -296,6 +345,7 @@ class _TargetRunnerImpl:
         creator_id: str,
         inputs: dict[str, Any],
         channel: str,
+        template: dict[str, Any] | None = None,
     ) -> tuple[bool, str, str]:
         async with get_sessionmaker()() as s:
             try:
@@ -366,6 +416,71 @@ class _TargetRunnerImpl:
                         str(out.get("run_id") or ""),
                         str(out.get("error") or ""),
                     )
+                # task:模板立项(goal 渲染+护栏 → 创建 → 确认门/自动派发)
+                if target_type == "task":
+                    import datetime as _dt
+
+                    from kongming.config import get_settings as _gs
+                    from kongming.task.repository import SqlTaskRepo as _TaskRepo
+                    from kongming.task.router import schedule_task_run
+                    from kongming.task.service import TaskService as _TaskSvc
+                    from kongming.trace import ensure_trace_id as _trace
+                    from kongming.trigger.service import render_goal as _render
+                    from kongming.uuid7 import uuid7 as _uuid7
+
+                    tpl = template or {}
+                    goal = _render(str(tpl.get("goal_template") or ""), inputs)
+                    guard = _TriggerInputGuardrail()
+                    blocked, _kept = await guard.check(
+                        tenant_id=tenant_id, user_id=creator_id, texts=[goal]
+                    )
+                    if blocked:
+                        return False, "", "输入护栏拦截: 事件材料未通过文本护栏,未立项"
+                    settings = _gs()
+                    task_id = str(_uuid7())
+                    repo = _TaskRepo(s)
+                    task_svc = _TaskSvc(repo)
+                    await task_svc.create(
+                        task_id=task_id,
+                        tenant_id=tenant_id,
+                        user_id=creator_id,
+                        goal=goal,
+                        datasource_key=str(tpl.get("datasource_key") or ""),
+                        session_id=None,
+                        trace_root=_trace(),
+                        budget=cast("dict[str, Any] | None", tpl.get("budget")),
+                        budget_caps={
+                            "max_steps": settings.task_budget_max_steps,
+                            "max_tokens": settings.task_budget_max_tokens,
+                            "max_seconds": settings.task_budget_max_seconds,
+                        },
+                    )
+                    now_iso = _dt.datetime.now(_dt.UTC).isoformat()
+                    topo = tpl.get("topology")
+                    if isinstance(topo, dict) and topo:
+                        # 拓扑声明标记:计划生成后由 apply_plan 消费应用
+                        await repo.append_task_event(
+                            task_id=task_id,
+                            event={
+                                "at": now_iso,
+                                "kind": "trigger_topology_declared",
+                                "topology": topo,
+                            },
+                        )
+                    if not bool(tpl.get("confirm_auto", False)):
+                        # 确认门(缺省):落 PAUSED 等归属人恢复,不自动派发
+                        await repo.transition_task_system(
+                            task_id=task_id,
+                            tenant_id=tenant_id,
+                            from_status="PLANNING",
+                            to_status="PAUSED",
+                            fail_reason="触发立项待确认(归属人恢复后派发)",
+                            event={"at": now_iso, "kind": "trigger_awaiting_confirm"},
+                        )
+                    await s.commit()
+                    if bool(tpl.get("confirm_auto", False)):
+                        await schedule_task_run(task_id)
+                    return True, task_id, ""
                 # bot
                 from kongming.bot.router import get_bot_service as _bot_service_factory
                 from kongming.chat.router import get_agent_client as _gac
@@ -413,8 +528,9 @@ class TriggerIn(BaseModel):
     tg_key: str = Field(min_length=2, max_length=64)
     name: str = Field(min_length=1, max_length=128)
     type: str = Field(pattern="^(CRON|WEBHOOK|EMAIL)$")
-    target_type: str = Field(pattern="^(workflow|bot)$")
-    target_key: str = Field(min_length=1, max_length=64)
+    target_type: str = Field(pattern="^(workflow|bot|task)$")
+    # task 目标不受理 target_key(配置在任务模板);workflow/bot 须非空(service 校验)
+    target_key: str = Field(default="", max_length=64)
     cron_expr: str | None = Field(default=None, max_length=64)
     min_interval_sec: int = Field(default=60, ge=0, le=86400)
     adapter: str = Field(default="custom", pattern="^(custom|github)$")
@@ -422,6 +538,8 @@ class TriggerIn(BaseModel):
     secret: str = Field(default="", max_length=256)
     # 失败重试次数上限(0–5;0=不重试,缺省)
     max_retries: int = Field(default=0, ge=0, le=5)
+    # task 目标任务模板(goal/数据源/预算/拓扑/确认模式/过滤/线程字段)
+    task_template: dict[str, Any] | None = None
     # 邮件形态配置(凭证明文只进不出,即刻加密落库)
     imap_host: str = Field(default="", max_length=255)
     imap_port: int = Field(default=993, ge=1, le=65535)
@@ -434,8 +552,8 @@ class TriggerIn(BaseModel):
 
 class TriggerUpdateIn(BaseModel):
     name: str = Field(min_length=1, max_length=128)
-    target_type: str = Field(pattern="^(workflow|bot)$")
-    target_key: str = Field(min_length=1, max_length=64)
+    target_type: str = Field(pattern="^(workflow|bot|task)$")
+    target_key: str = Field(default="", max_length=64)
     cron_expr: str | None = Field(default=None, max_length=64)
     min_interval_sec: int = Field(default=60, ge=0, le=86400)
     adapter: str = Field(default="custom", pattern="^(custom|github)$")
@@ -444,6 +562,8 @@ class TriggerUpdateIn(BaseModel):
     secret: str = Field(default="", max_length=256)
     # 失败重试次数上限(0–5;0=不重试,缺省)
     max_retries: int = Field(default=0, ge=0, le=5)
+    # task 目标任务模板(形态或模板任一变更即保存期校验)
+    task_template: dict[str, Any] | None = None
     # 邮件形态配置(凭证空框=保持现值,与 webhook secret 同口径)
     imap_host: str = Field(default="", max_length=255)
     imap_port: int = Field(default=993, ge=1, le=65535)
@@ -488,6 +608,8 @@ class TriggerOut(BaseModel):
     next_fire_at: str | None = None
     # 失败重试次数上限(0=不重试)
     max_retries: int = 0
+    # task 目标任务模板回显(表单回显;非 task 目标为 null)
+    task_template: dict[str, Any] | None = None
     # 邮件形态配置(凭证仅掩码口径,永不回显明文)
     imap_host: str = ""
     imap_port: int = 993
@@ -536,6 +658,7 @@ def _row_out(row: dict[str, Any]) -> dict[str, Any]:
         "last_fired_at": (row["last_fired_at"].isoformat() if row.get("last_fired_at") else None),
         "next_fire_at": (row["next_fire_at"].isoformat() if row.get("next_fire_at") else None),
         "max_retries": int(row.get("max_retries") or 0),
+        "task_template": row.get("task_template"),
         # 邮件配置回显(凭证仅掩码口径 has_imap_credential)
         "imap_host": str(row.get("imap_host") or ""),
         "imap_port": int(row.get("imap_port") or 993),
@@ -599,6 +722,7 @@ async def create_trigger(
             secret=body.secret,
             created_by=str(user["sub"]),
             max_retries=body.max_retries,
+            task_template=body.task_template,
             imap_host=body.imap_host,
             imap_port=body.imap_port,
             imap_tls=body.imap_tls,
@@ -651,6 +775,7 @@ async def update_trigger(
             notify_url=body.notify_url,
             secret=body.secret,
             max_retries=body.max_retries,
+            task_template=body.task_template,
             imap_host=body.imap_host,
             imap_port=body.imap_port,
             imap_tls=body.imap_tls,

@@ -32,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { EmptyState } from "@/components/empty-state";
 import { StatusSwitch } from "@/components/status-switch";
 import { StatusBadge, type StatusMeta } from "@/components/status-badge";
@@ -52,6 +53,7 @@ import {
 import { cronPreview } from "@/lib/trigger-api";
 import { useDebounced } from "@/hooks/use-debounced";
 import { listWorkflows } from "@/lib/workflow-api";
+import { datasourceApi } from "@/lib/datasource-api";
 import { api } from "@/lib/api";
 import { formatDateTime, formatDuration } from "@/lib/datetime";
 
@@ -87,8 +89,17 @@ type FormState = {
   tgKey: string;
   name: string;
   type: TriggerType;
-  targetType: "workflow" | "bot";
+  targetType: "workflow" | "bot" | "task";
   targetKey: string;
+  // task 目标模板表单(预算/拓扑走 API 配置,不在表单面)
+  taskGoal: string;
+  taskDatasource: string;
+  taskConfirmAuto: boolean;
+  taskThreadField: string;
+  taskFilterActions: string;
+  // 编辑回显的原始模板载体:非表单面字段(预算/拓扑/filter.equals)经它
+  // 在保存时原样透传,防止表单保存静默丢弃 API 侧配置
+  taskRawTemplate: Record<string, unknown> | null;
   cronExpr: string;
   minInterval: string;
   adapter: "custom" | "github";
@@ -112,6 +123,12 @@ const EMPTY_FORM: FormState = {
   type: "CRON",
   targetType: "workflow",
   targetKey: "",
+  taskGoal: "",
+  taskDatasource: "",
+  taskConfirmAuto: false,
+  taskThreadField: "",
+  taskFilterActions: "",
+  taskRawTemplate: null,
   cronExpr: "0 9 * * *",
   minInterval: "60",
   adapter: "custom",
@@ -180,6 +197,11 @@ export default function TriggersPage() {
 
   // cron 预览使用 400ms 防抖；空表达式或弹窗关闭时不发请求。
   const cronExprD = useDebounced(form?.cronExpr ?? "", 400);
+  const datasourceOptions = useQuery({
+    queryKey: ["admin", "trigger-task-datasources"],
+    queryFn: datasourceApi.options,
+    enabled: form?.targetType === "task",
+  });
   const cronFires = useQuery({
     queryKey: ["admin", "cron-preview", cronExprD],
     queryFn: () => cronPreview(cronExprD),
@@ -196,11 +218,55 @@ export default function TriggersPage() {
   const save = useMutation({
     mutationFn: async () => {
       if (!form) return null;
+      if (
+        form.targetType === "task" &&
+        (form.taskGoal.trim() === "" || form.taskDatasource === "")
+      ) {
+        setFormError("数据任务须填写目标模板并选择数据源");
+        return null;
+      }
       const retries = parseMaxRetries(form.maxRetries);
+      // 编辑保存不丢非表单面字段(预算/拓扑/filter.equals):先取原始
+      // 过滤条件,再剔除表单管理键,其余字段原样透传;表单管理键按
+      // 「有值覆盖、清空删除」语义重建
+      const rawTpl = { ...(form.taskRawTemplate ?? {}) } as Record<string, unknown>;
+      const rawFilter = (rawTpl.filter ?? null) as Record<string, unknown> | null;
+      for (const k of [
+        "goal_template",
+        "datasource_key",
+        "confirm_auto",
+        "thread_field",
+        "filter",
+      ]) {
+        delete rawTpl[k];
+      }
+      const taskActions = form.taskFilterActions.trim();
+      const taskTemplate: Record<string, unknown> | null =
+        form.targetType === "task"
+          ? {
+              ...rawTpl,
+              goal_template: form.taskGoal.trim(),
+              datasource_key: form.taskDatasource,
+              confirm_auto: form.taskConfirmAuto,
+              ...(form.taskThreadField.trim() ? { thread_field: form.taskThreadField.trim() } : {}),
+              ...(taskActions
+                ? {
+                    filter: {
+                      ...(rawFilter ?? {}),
+                      actions: taskActions
+                        .split(",")
+                        .map((a) => a.trim())
+                        .filter(Boolean),
+                    },
+                  }
+                : {}),
+            }
+          : null;
       const payload: Record<string, unknown> = {
         name: form.name.trim(),
         target_type: form.targetType,
-        target_key: form.targetKey.trim(),
+        target_key: form.targetType === "task" ? "" : form.targetKey.trim(),
+        ...(form.targetType === "task" ? { task_template: taskTemplate } : {}),
         cron_expr: form.type === "CRON" ? form.cronExpr.trim() : null,
         // 空串才回退 60,0 是合法值,不可用 ||
         min_interval_sec: form.minInterval.trim() === "" ? 60 : Number(form.minInterval),
@@ -384,8 +450,18 @@ export default function TriggersPage() {
                 tgKey: row.tg_key,
                 name: row.name,
                 type: row.type as TriggerType,
-                targetType: row.target_type as "workflow" | "bot",
+                targetType: row.target_type as "workflow" | "bot" | "task",
                 targetKey: row.target_key,
+                taskGoal: String(row.task_template?.goal_template ?? ""),
+                taskDatasource: String(row.task_template?.datasource_key ?? ""),
+                taskConfirmAuto: row.task_template?.confirm_auto === true,
+                taskThreadField: String(row.task_template?.thread_field ?? ""),
+                taskRawTemplate: (row.task_template as Record<string, unknown> | null) ?? null,
+                taskFilterActions: (() => {
+                  // 自由 dict 字段在生成类型中为 {},显式收窄到已知形态
+                  const flt = row.task_template?.filter as { actions?: unknown } | undefined;
+                  return Array.isArray(flt?.actions) ? (flt.actions as string[]).join(",") : "";
+                })(),
                 cronExpr: row.cron_expr ?? "0 9 * * *",
                 minInterval: String(row.min_interval_sec),
                 adapter: row.adapter as "custom" | "github",
@@ -475,8 +551,18 @@ export default function TriggersPage() {
                   <Select
                     value={form.targetType}
                     onValueChange={(v) =>
-                      // 类型切换即清空目标——两类候选键不通用,防跨域残留
-                      setForm({ ...form, targetType: v as "workflow" | "bot", targetKey: "" })
+                      // 类型切换即清空目标——各形态配置不通用,防跨域残留
+                      setForm({
+                        ...form,
+                        targetType: v as "workflow" | "bot" | "task",
+                        targetKey: "",
+                        taskGoal: "",
+                        taskDatasource: "",
+                        taskConfirmAuto: false,
+                        taskThreadField: "",
+                        taskFilterActions: "",
+                        taskRawTemplate: null,
+                      })
                     }
                   >
                     <SelectTrigger aria-label="目标类型">
@@ -485,49 +571,115 @@ export default function TriggersPage() {
                     <SelectContent>
                       <SelectItem value="workflow">工作流</SelectItem>
                       <SelectItem value="bot">助手</SelectItem>
+                      <SelectItem value="task">数据任务</SelectItem>
                     </SelectContent>
                   </Select>
                 </FormRow>
-                <FormRow label={`目标${form.targetType === "workflow" ? "(工作流)" : "(助手)"}`}>
-                  {/* 自由输入改候选下拉(候选=对应域可见清单);
-                      编辑回显时目标已删则注入禁用占位项,防「打开即保存」静默改值 */}
-                  <Select
-                    value={form.targetKey}
-                    onValueChange={(v) => setForm({ ...form, targetKey: v })}
-                  >
-                    <SelectTrigger aria-label="目标">
-                      <SelectValue
-                        placeholder={form.targetType === "workflow" ? "选择工作流" : "选择助手"}
+                {form.targetType === "task" ? (
+                  <>
+                    <FormRow label="任务目标模板" htmlFor="tg-task-goal">
+                      <Textarea
+                        id="tg-task-goal"
+                        value={form.taskGoal}
+                        onChange={(e) => setForm({ ...form, taskGoal: e.target.value })}
+                        rows={4}
+                        placeholder="事件到达后创建任务的处置目标(事件材料将作为数据块附加在目标之后)"
                       />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {form.targetType === "workflow"
-                        ? (workflows.data ?? []).map((w) => (
-                            <SelectItem key={w.wf_key} value={w.wf_key}>
-                              {w.name}({w.wf_key})
-                            </SelectItem>
-                          ))
-                        : (bots.data ?? []).map((b) => (
-                            <SelectItem key={b.bot_key} value={b.bot_key}>
-                              {b.name}({b.bot_key})
+                    </FormRow>
+                    <FormRow label="数据源">
+                      <Select
+                        value={form.taskDatasource}
+                        onValueChange={(v) => setForm({ ...form, taskDatasource: v })}
+                      >
+                        <SelectTrigger aria-label="数据源">
+                          <SelectValue placeholder="选择数据源" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(datasourceOptions.data ?? []).map((d) => (
+                            <SelectItem key={d.datasource_key} value={d.datasource_key}>
+                              {d.name}({d.datasource_key})
                             </SelectItem>
                           ))}
-                      {/* 候选加载中/失败时不判「已删除」:清单未到不等于目标已删,
-                          避免编辑回显被误读 */}
-                      {form.targetKey !== "" &&
-                        !(form.targetType === "workflow"
-                          ? workflows.isPending || workflows.isError
-                          : bots.isPending || bots.isError) &&
-                        !(form.targetType === "workflow"
-                          ? (workflows.data ?? []).some((w) => w.wf_key === form.targetKey)
-                          : (bots.data ?? []).some((b) => b.bot_key === form.targetKey)) && (
-                          <SelectItem value={form.targetKey} disabled>
-                            (已删除){form.targetKey}
-                          </SelectItem>
-                        )}
-                    </SelectContent>
-                  </Select>
-                </FormRow>
+                        </SelectContent>
+                      </Select>
+                    </FormRow>
+                    <FormRow label="自动派发">
+                      <Switch
+                        checked={form.taskConfirmAuto}
+                        onCheckedChange={(v) => setForm({ ...form, taskConfirmAuto: v })}
+                        aria-label="自动派发"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        关闭(缺省)=事件立项后待你确认才执行;开启=立项即按正常编排派发(预算与审批照常)。
+                      </p>
+                    </FormRow>
+                    <FormRow label="线程键字段(可选)" htmlFor="tg-thread-field">
+                      <Input
+                        id="tg-thread-field"
+                        value={form.taskThreadField}
+                        onChange={(e) => setForm({ ...form, taskThreadField: e.target.value })}
+                        className="w-48 font-mono"
+                        placeholder="如 issue_no;GitHub 适配器自动推导"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        同线程存在未终态任务时,后续事件追加至既有任务而非重复立项。
+                      </p>
+                    </FormRow>
+                    <FormRow label="过滤动作(可选)" htmlFor="tg-filter-actions">
+                      <Input
+                        id="tg-filter-actions"
+                        value={form.taskFilterActions}
+                        onChange={(e) => setForm({ ...form, taskFilterActions: e.target.value })}
+                        className="w-64 font-mono"
+                        placeholder="opened, reopened(逗号分隔)"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        程序层先按事件动作筛除噪音,再交语义判读判断是否值得立项。
+                      </p>
+                    </FormRow>
+                  </>
+                ) : (
+                  <FormRow label={`目标${form.targetType === "workflow" ? "(工作流)" : "(助手)"}`}>
+                    {/* 自由输入改候选下拉(候选=对应域可见清单);
+                        编辑回显时目标已删则注入禁用占位项,防「打开即保存」静默改值 */}
+                    <Select
+                      value={form.targetKey}
+                      onValueChange={(v) => setForm({ ...form, targetKey: v })}
+                    >
+                      <SelectTrigger aria-label="目标">
+                        <SelectValue
+                          placeholder={form.targetType === "workflow" ? "选择工作流" : "选择助手"}
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {form.targetType === "workflow"
+                          ? (workflows.data ?? []).map((w) => (
+                              <SelectItem key={w.wf_key} value={w.wf_key}>
+                                {w.name}({w.wf_key})
+                              </SelectItem>
+                            ))
+                          : (bots.data ?? []).map((b) => (
+                              <SelectItem key={b.bot_key} value={b.bot_key}>
+                                {b.name}({b.bot_key})
+                              </SelectItem>
+                            ))}
+                        {/* 候选加载中/失败时不判「已删除」:清单未到不等于目标已删,
+                            避免编辑回显被误读 */}
+                        {form.targetKey !== "" &&
+                          !(form.targetType === "workflow"
+                            ? workflows.isPending || workflows.isError
+                            : bots.isPending || bots.isError) &&
+                          !(form.targetType === "workflow"
+                            ? (workflows.data ?? []).some((w) => w.wf_key === form.targetKey)
+                            : (bots.data ?? []).some((b) => b.bot_key === form.targetKey)) && (
+                            <SelectItem value={form.targetKey} disabled>
+                              (已删除){form.targetKey}
+                            </SelectItem>
+                          )}
+                      </SelectContent>
+                    </Select>
+                  </FormRow>
+                )}
               </div>
               {form.type === "CRON" && (
                 <div className="space-y-3">

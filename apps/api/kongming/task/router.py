@@ -612,6 +612,50 @@ async def task_steps(
     }
 
 
+@internal_router.get("/context")
+async def task_context(
+    task_id: str,
+    tenant_key: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, object]:
+    """worker 续读入口(spec「派发与上下文受控传递」):自身任务的目标全文
+    与各步骤状态/结论摘要。截断尾提示的按需读取端点;载荷整体钳制 8KB
+    (续读是按需补救,不是整份下传的旁路);跨租户 404 同形。"""
+    import json as _json
+
+    _uuid_body_or_404(task_id)
+    tenant_id = await _tenant_key_to_id(session, tenant_key)
+    task = await SqlTaskRepo(session).get_task_system(task_id=task_id, tenant_id=tenant_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    steps = await SqlTaskRepo(session).get_steps(task_id=task_id)
+    step_items = [
+        {
+            "ord": int(str(s["ord"])),
+            "goal": str(s["goal"]),
+            "status": str(s["status"]),
+            "evidence": s.get("evidence"),
+            "fail_reason": s.get("fail_reason"),
+        }
+        for s in steps
+    ]
+    payload: dict[str, object] = {"goal": str(task.get("goal") or ""), "steps": step_items}
+    encoded = _json.dumps(payload, ensure_ascii=False, default=str)
+    if len(encoded.encode()) > 8 * 1024:
+        # 超限先裁步骤明细保留目标全文;目标全文自身也可能超限(创建口径
+        # ≤4000 字,CJK 可至 ~12KB),按字节截断保留指令头部(6KB 留出
+        # JSON 结构余量,decode ignore 守住多字节字符边界),截断如实标注
+        payload["steps"] = []
+        payload["truncated"] = True
+        if len(_json.dumps(payload, ensure_ascii=False, default=str).encode()) > 8 * 1024:
+            keep = str(payload["goal"]).encode("utf-8")[: 6 * 1024].decode("utf-8", "ignore")
+            payload["goal"] = keep
+        encoded = _json.dumps(payload, ensure_ascii=False, default=str)
+    else:
+        payload["truncated"] = False
+    return payload
+
+
 class StepStartIn(BaseModel):
     task_id: str
     tenant_key: str
@@ -1246,6 +1290,12 @@ async def _bump_and_schedule(task_id: str) -> int | None:
         return None
     _schedule_run(task_id=task_id, epoch=epoch)
     return epoch
+
+
+async def schedule_task_run(task_id: str) -> int | None:
+    """公共派发入口(跨域组合根消费:触发器 task 目标自动派发):
+    派发代际自增 + 后台编排循环,与创建/恢复同链。"""
+    return await _bump_and_schedule(task_id)
 
 
 def _schedule_run(*, task_id: str, epoch: int | None = None) -> None:
