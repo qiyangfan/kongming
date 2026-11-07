@@ -253,6 +253,20 @@ class Settings(BaseSettings):
     rerank_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0)  # 0=不过滤
     rerank_timeout_ms: int = Field(default=3000, ge=100, le=30000)
 
+    # 文档实体抽取/检索扩展(部署级,缺省关=能力从未存在,合法缺省)。
+    # 组合残缺(enabled 但端点/key/model 任一缺)prod 拒启/dev 告警降级
+    # (同 rerank 口径)。凭证只存控制面环境变量。
+    doc_entity_enabled: bool = False
+    doc_entity_llm_base_url: str = ""  # openai 兼容 chat 端点(…/v1)
+    doc_entity_llm_api_key: str = ""
+    doc_entity_llm_model: str = ""
+    doc_entity_timeout_ms: int = Field(default=8000, ge=500, le=60000)
+    doc_entity_query_max: int = Field(default=8, ge=1, le=50)  # 实体路并入候选池配额
+    doc_entity_allow_private_llm: bool = False  # 私网/本机 LLM 端点显式豁免(本地 dev)
+
+    # 子块句界校准(独立部署开关,缺省关=切分与既有实现逐字一致)
+    doc_chunk_sentence_boundary: bool = False
+
     # 租户级 HTTP 连接器(声明存库行,注入集按请求
     # 动态装配;凭证加密落库,复用 cipher 单点)。注册超时受部署级上限封顶
     # (spec「超时按注册声明,部署级上限封顶」);配额独立分桶(与既有域互不挤占)
@@ -327,6 +341,26 @@ class Settings(BaseSettings):
             valid = ",".join(sorted(RERANK_PROVIDERS))
             raise RuntimeError(f"KM_RERANK_PROVIDER 非法值 {provider}(值域:{valid})")
 
+    def doc_entity_misconfiguration(self) -> str | None:
+        """实体抽取组合配置校验(enabled 且端点/key/model 任一缺=残缺)。
+
+        prod 由 fail_closed_checks 拒启;dev 由 lifespan 告警降级(实体级
+        不生效)。未开启=合法缺省(零存在感),不视为残缺。"""
+        if not self.doc_entity_enabled:
+            return None
+        missing = [
+            name
+            for name, val in (
+                ("KM_DOC_ENTITY_LLM_BASE_URL", self.doc_entity_llm_base_url),
+                ("KM_DOC_ENTITY_LLM_API_KEY", self.doc_entity_llm_api_key),
+                ("KM_DOC_ENTITY_LLM_MODEL", self.doc_entity_llm_model),
+            )
+            if not (val or "").strip()
+        ]
+        if missing:
+            return f"KM_DOC_ENTITY_ENABLED=true 但缺失 {','.join(missing)},实体级不生效"
+        return None
+
     def require_fulltext_ts_config(self) -> str:
         """全文检索分词配置白名单校验,白名单外值 RuntimeError 拒启。
 
@@ -370,6 +404,10 @@ class Settings(BaseSettings):
         rk_misconfig = self.rerank_misconfiguration()
         if rk_misconfig:
             raise RuntimeError(f"prod fail-closed: {rk_misconfig}")
+        # 文档实体抽取组合残缺同口径拒启(缺省关=零存在感,不校验)
+        de_misconfig = self.doc_entity_misconfiguration()
+        if de_misconfig:
+            raise RuntimeError(f"prod fail-closed: {de_misconfig}")
 
 
 @lru_cache

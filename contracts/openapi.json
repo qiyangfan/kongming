@@ -3019,6 +3019,149 @@
         }
       }
     },
+    "/system/document/documents/{doc_id}/enrich": {
+      "post": {
+        "tags": [
+          "document"
+        ],
+        "summary": "Enrich Doc",
+        "description": "既有文档实体覆盖式补抽(先清后抽;免重传文件)。\n\n部署未启用实体抽取时 400 DOC_ENTITY_DISABLED(与能力未开启不可区分\n的显式拒绝);抽取失败降级无实体(200 entities=0),不报错。",
+        "operationId": "enrich_doc_system_document_documents__doc_id__enrich_post",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Doc Id"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocEnrichOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/document/retrieval-probe": {
+      "get": {
+        "tags": [
+          "document"
+        ],
+        "summary": "Retrieval Probe",
+        "description": "文档检索试跑(只读零副作用):逐路命中/融合名次/父块回填,与主检索同源。",
+        "operationId": "retrieval_probe_system_document_retrieval_probe_get",
+        "parameters": [
+          {
+            "name": "question",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000,
+              "title": "Question"
+            }
+          },
+          {
+            "name": "datasource_key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{1,63}$",
+              "default": "default",
+              "title": "Datasource Key"
+            }
+          },
+          {
+            "name": "parent_top_k",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 20,
+              "minimum": 1,
+              "default": 5,
+              "title": "Parent Top K"
+            }
+          },
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalProbeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/system/document/documents/{doc_id}/chunks": {
       "get": {
         "tags": [
@@ -16770,6 +16913,24 @@
         ],
         "title": "DeptUpdateIn"
       },
+      "DocEnrichOut": {
+        "properties": {
+          "doc_id": {
+            "type": "string",
+            "title": "Doc Id"
+          },
+          "entities": {
+            "type": "integer",
+            "title": "Entities"
+          }
+        },
+        "type": "object",
+        "required": [
+          "doc_id",
+          "entities"
+        ],
+        "title": "DocEnrichOut"
+      },
       "DocUploadOut": {
         "properties": {
           "doc_id": {
@@ -21733,6 +21894,144 @@
           "new_password"
         ],
         "title": "ResetPasswordIn"
+      },
+      "RetrievalProbeFusedOut": {
+        "properties": {
+          "child_id": {
+            "type": "string",
+            "title": "Child Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "rank": {
+            "type": "integer",
+            "title": "Rank"
+          }
+        },
+        "type": "object",
+        "required": [
+          "child_id",
+          "parent_id",
+          "rank"
+        ],
+        "title": "RetrievalProbeFusedOut"
+      },
+      "RetrievalProbeHitOut": {
+        "properties": {
+          "child_id": {
+            "type": "string",
+            "title": "Child Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "child_id",
+          "parent_id",
+          "score"
+        ],
+        "title": "RetrievalProbeHitOut"
+      },
+      "RetrievalProbeOut": {
+        "properties": {
+          "paths": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/RetrievalProbeHitOut"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Paths"
+          },
+          "fused_children": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievalProbeFusedOut"
+            },
+            "type": "array",
+            "title": "Fused Children"
+          },
+          "parents": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievalProbeParentOut"
+            },
+            "type": "array",
+            "title": "Parents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paths",
+          "fused_children",
+          "parents"
+        ],
+        "title": "RetrievalProbeOut"
+      },
+      "RetrievalProbeParentOut": {
+        "properties": {
+          "parent_id": {
+            "type": "string",
+            "title": "Parent Id"
+          },
+          "seq": {
+            "type": "integer",
+            "title": "Seq"
+          },
+          "doc_name": {
+            "type": "string",
+            "title": "Doc Name"
+          },
+          "source_ref": {
+            "type": "string",
+            "title": "Source Ref"
+          },
+          "citation_key": {
+            "type": "string",
+            "title": "Citation Key"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "rank": {
+            "type": "integer",
+            "title": "Rank"
+          }
+        },
+        "type": "object",
+        "required": [
+          "parent_id",
+          "seq",
+          "doc_name",
+          "source_ref",
+          "citation_key",
+          "content",
+          "rank"
+        ],
+        "title": "RetrievalProbeParentOut"
       },
       "RetrieveIn": {
         "properties": {

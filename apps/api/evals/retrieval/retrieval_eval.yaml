@@ -1,0 +1,122 @@
+# 检索质量评测集(retrieval-eval spec):语料=corpus/ 下 md 文件(幂等上传),
+# gold=文档名+必含文本片段(运行时经 chunk_document 映射父块,不硬编码块 id)。
+# category 三类:single_hop / multi_hop_doc(同文档多跳)/ multi_hop_cross(跨文档多跳)。
+dataset:
+  tenant: default   # default/default=恒可用数据源形态(CI 空库亦可跑,零新增数据源登记)
+  datasource_key: default
+  corpus_dir: corpus
+  top_k: 5
+  min_questions: 12
+  min_multihop: 5
+questions:
+  # ── 单跳 ──
+  - id: retr_sakila_001
+    question: 所有影片的基础租期是多少天?
+    category: single_hop
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["基础租期为 7 天"]
+  - id: retr_sakila_002
+    question: 逾期归还的逾期费怎么计算?
+    category: single_hop
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["每日每部 0.5 元"]
+  - id: retr_sakila_003
+    question: 累计消费满多少可以成为金卡会员?
+    category: single_hop
+    gold:
+      - doc: 会员等级政策.md
+        snippets: ["满 500 元为金卡会员"]
+  - id: retr_sakila_004
+    question: 对逾期费有异议怎么处理?
+    category: single_hop
+    gold:
+      - doc: 逾期处理流程.md
+        snippets: ["发起申诉"]
+  - id: retr_sakila_005
+    question: 银卡会员租借有什么优惠?
+    category: single_hop
+    gold:
+      - doc: 会员权益说明.md
+        snippets: ["九折优惠"]
+  - id: retr_sakila_006
+    question: 逾期超过 30 天的影片怎么处理?
+    category: single_hop
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["按遗失赔偿处理"]
+  # ── 跨文档多跳 ──
+  - id: retr_sakila_007
+    question: 金卡会员一次租借最多能借多久?
+    category: multi_hop_cross
+    gold:
+      - doc: 会员权益说明.md
+        snippets: ["基础租期延长 3 天"]
+      - doc: 租赁规则.md
+        snippets: ["基础租期为 7 天"]
+  - id: retr_sakila_008
+    question: 铜卡会员消费满多少升级为银卡?升级后租借打几折?
+    category: multi_hop_cross
+    gold:
+      - doc: 会员等级政策.md
+        snippets: ["升级为银卡"]
+      - doc: 会员权益说明.md
+        snippets: ["九折优惠"]
+  - id: retr_sakila_009
+    question: 逾期费率是多少?欠到多少会被暂停借阅?
+    category: multi_hop_cross
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["每日每部 0.5 元"]
+      - doc: 逾期处理流程.md
+        snippets: ["累计超过 20 元"]
+  - id: retr_sakila_010
+    question: 金卡会员多久不租借会降级?降级当月免押金权益还有吗?
+    category: multi_hop_cross
+    gold:
+      - doc: 会员等级政策.md
+        snippets: ["连续 12 个月无租借记录"]
+      - doc: 会员权益说明.md
+        snippets: ["每次租借免押金"]
+  # ── 同文档多跳 ──
+  - id: retr_sakila_011
+    question: 会员等级怎么划分?等级怎么升降?
+    category: multi_hop_doc
+    gold:
+      - doc: 会员等级政策.md
+        snippets: ["满 500 元为金卡会员", "即时升级为金卡会员"]
+  - id: retr_sakila_012
+    question: 租借期限规则和逾期费用规则分别是什么?
+    category: multi_hop_doc
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["基础租期为 7 天", "每日每部 0.5 元"]
+  - id: retr_sakila_013
+    question: 欠费到多少会暂停借阅?有异议怎么申诉?
+    category: multi_hop_doc
+    gold:
+      - doc: 逾期处理流程.md
+        snippets: ["暂停借阅资格", "发起申诉"]
+  - id: retr_sakila_014
+    question: 租一部新片能攒多少积分?新片一次限借几部?
+    category: multi_hop_cross
+    gold:
+      - doc: 积分规则.md
+        snippets: ["每成功租借一部影片记 10 积分"]
+      - doc: 租赁规则.md
+        snippets: ["限借两部"]
+  - id: retr_sakila_015
+    question: 没有金卡租一部要交多少押金?押金能抵逾期费吗?
+    category: multi_hop_cross
+    gold:
+      - doc: 门店服务规则.md
+        snippets: ["押金不抵扣逾期费"]
+      - doc: 租赁规则.md
+        snippets: ["每日每部 0.5 元"]
+  - id: retr_sakila_016
+    question: 积分多久过期?
+    category: single_hop
+    gold:
+      - doc: 积分规则.md
+        snippets: ["有效期 24 个月"]

@@ -247,7 +247,9 @@ _EXPECTED_CHUNK_INSERT_SQL = (
 )
 
 _EXPECTED_DOC_RECALL_SQL = (
-    "SELECT id, parent_id, source_ref FROM rag.document_chunks"
+    "SELECT id, parent_id, source_ref,"
+    " ts_rank(tsv, plainto_tsquery('simple', :q)) AS score"
+    " FROM rag.document_chunks"
     " WHERE tenant_id=:t AND datasource_key=:d AND chunk_level='CHILD'"
     "   AND tsv @@ plainto_tsquery('simple', :q)"
     " ORDER BY ts_rank(tsv, plainto_tsquery('simple', :q)) DESC"
@@ -256,7 +258,9 @@ _EXPECTED_DOC_RECALL_SQL = (
 
 # 内容词兜底轮(文档路):同表说明路口径,仅谓词行异
 _EXPECTED_DOC_RECALL_OR_SQL = (
-    "SELECT id, parent_id, source_ref FROM rag.document_chunks"
+    "SELECT id, parent_id, source_ref,"
+    " ts_rank(tsv, plainto_tsquery('simple', :q)) AS score"
+    " FROM rag.document_chunks"
     " WHERE tenant_id=:t AND datasource_key=:d AND chunk_level='CHILD'"
     "   AND EXISTS (SELECT 1 FROM"
     " unnest(tsvector_to_array(to_tsvector('simple', :q))) AS tok"

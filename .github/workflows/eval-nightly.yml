@@ -8,7 +8,7 @@ on:
       layer:
         description: "评估层"
         type: choice
-        options: [smoke, full, multiturn]
+        options: [smoke, full, multiturn, retrieval]
         default: smoke
 
 concurrency:
@@ -109,7 +109,13 @@ jobs:
           LAYER: ${{ github.event.inputs.layer || 'smoke' }}
         working-directory: apps/api
         run: |
-          uv run pytest evals -m "$LAYER" -q --tb=short | tee /tmp/eval-out.txt
+          # retrieval 层语料目录独立(与 NL2SQL 统计互不混入),目标路径不同
+          if [ "$LAYER" = "retrieval" ]; then
+            TARGET=evals/retrieval
+          else
+            TARGET=evals
+          fi
+          uv run pytest "$TARGET" -m "$LAYER" -q --tb=short | tee /tmp/eval-out.txt
           # 抽出通过率行,写 baseline 产物
           mkdir -p /tmp/eval-now
           cp /tmp/eval-out.txt /tmp/eval-now/

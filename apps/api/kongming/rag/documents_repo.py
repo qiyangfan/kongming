@@ -173,7 +173,9 @@ class SqlDocumentRepo:
             (
                 await self._s.execute(
                     text(
-                        "SELECT id, parent_id, source_ref FROM rag.document_chunks"
+                        "SELECT id, parent_id, source_ref,"
+                        " embedding <=> CAST(:vec AS halfvec) AS score"
+                        " FROM rag.document_chunks"
                         " WHERE tenant_id=:t AND datasource_key=:d AND chunk_level='CHILD'"
                         "   AND embedding IS NOT NULL"
                         " ORDER BY embedding <=> CAST(:vec AS halfvec) LIMIT :k"
@@ -219,7 +221,10 @@ class SqlDocumentRepo:
                         # S608 豁免:{self._ts} 为白名单校验后的配置名
                         # (标识符无法绑定参数),谓词为类内常量形态,
                         # 其余全部绑定参数
-                        "SELECT id, parent_id, source_ref FROM rag.document_chunks"  # noqa: S608
+                        "SELECT id, parent_id, source_ref,"  # noqa: S608
+                        # 原生分随行返回(主检索不消费,试跑逐路展示)
+                        f" ts_rank(tsv, plainto_tsquery('{self._ts}', :q)) AS score"
+                        " FROM rag.document_chunks"
                         " WHERE tenant_id=:t AND datasource_key=:d AND chunk_level='CHILD'"
                         f"{predicate}"
                         # 相关度排序;分词配置与写入侧同源,
@@ -260,7 +265,7 @@ class SqlDocumentRepo:
             (
                 await self._s.execute(
                     text(
-                        "SELECT id, source_ref, content FROM rag.document_chunks"
+                        "SELECT id, seq, source_ref, content FROM rag.document_chunks"
                         " WHERE id = ANY(:ids) AND tenant_id=:t AND chunk_level='PARENT'"
                     ),
                     {"ids": parent_ids, "t": tenant_id},
@@ -270,6 +275,169 @@ class SqlDocumentRepo:
             .all()
         )
         return [dict(r) for r in rows]
+
+    # ── 文档实体伴表(事件-实体检索扩展;缺省关,未启用零行) ──
+
+    async def replace_entities(
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        document_id: str,
+        rows: list[tuple[str, str, str]],
+    ) -> int:
+        """文档实体覆盖式重建(先清后插;返回落库行数)。
+
+        rows=(chunk_id, name, name_normalized);调用方负责 commit。
+        实体名 tsv 与分块 tsv 同一部署分词配置(写读同源,单配置单源)。"""
+        await self._s.execute(
+            text("DELETE FROM rag.document_chunk_entities WHERE document_id=:d"),
+            {"d": document_id},
+        )
+        if not rows:
+            return 0
+        await self._s.execute(
+            text(
+                # S608 豁免:{self._ts} 为白名单校验后的配置名
+                "INSERT INTO rag.document_chunk_entities"  # noqa: S608
+                " (id, document_id, chunk_id, tenant_id, datasource_key,"
+                "  name, name_normalized, name_tsv)"
+                " VALUES (:i, :d, :c, :t, :k, :n, :nn,"
+                f"  to_tsvector('{self._ts}', CAST(:nn AS varchar)))"
+                " ON CONFLICT (chunk_id, name_normalized) DO NOTHING"
+            ),
+            [
+                {
+                    "i": str(uuid7()),
+                    "d": document_id,
+                    "c": chunk_id,
+                    "t": tenant_id,
+                    "k": datasource_key,
+                    "n": name,
+                    "nn": norm,
+                }
+                for chunk_id, name, norm in rows
+            ],
+        )
+        return len(rows)
+
+    async def fetch_doc_for_enrich(self, *, tenant_id: str, doc_id: str) -> dict[str, Any] | None:
+        """文档行 + 全部块(enrich 抽取输入;块按 seq 序)。租户收敛,他租户 404 同形。"""
+        doc = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, doc_name, datasource_key FROM rag.documents"
+                        " WHERE id=:i AND tenant_id=:t"
+                    ),
+                    {"i": doc_id, "t": tenant_id},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if doc is None:
+            return None
+        chunks = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, chunk_level, parent_id, seq, content"
+                        " FROM rag.document_chunks WHERE document_id=:d ORDER BY seq"
+                    ),
+                    {"d": doc_id},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return {"doc": dict(doc), "chunks": [dict(c) for c in chunks]}
+
+    async def match_entity_names(
+        self, *, tenant_id: str, datasource_key: str, question: str, limit: int
+    ) -> list[str]:
+        """词法兜底:问句词条(length≥2)任一命中实体规范化名(写读同分词配置)。
+
+        OR 语义(逐词条 plainto)——整句 plainto 的 AND 语义会被中文长段
+        压制(098 基线同款已知形态),实体名匹配按内容词兜底同款习语。"""
+        rows = (
+            (
+                await self._s.execute(
+                    text(
+                        # S608 豁免:{self._ts} 为白名单校验后的配置名
+                        "SELECT DISTINCT name_normalized FROM rag.document_chunk_entities"  # noqa: S608
+                        " WHERE tenant_id=:t AND datasource_key=:d"
+                        "   AND EXISTS (SELECT 1 FROM"
+                        f"   unnest(tsvector_to_array(to_tsvector('{self._ts}', :q))) AS tok"
+                        "    WHERE length(tok) >= 2"
+                        f"      AND name_tsv @@ plainto_tsquery('{self._ts}', tok))"
+                        " LIMIT :limit"
+                    ),
+                    {"t": tenant_id, "d": datasource_key, "q": question, "limit": limit},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return [str(r["name_normalized"]) for r in rows]
+
+    async def recall_children_by_entities(
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        names: list[str],
+        limit: int,
+        min_shared: int = 1,
+    ) -> list[dict[str, Any]]:
+        """实体 join:按共享实体数排序的子块行(租户+数据源双过滤)。
+
+        min_shared=入池门槛:仅共享 ≥min_shared 个查询实体的子块入池
+        (单一实体共现非桥接,防泛频实体挤占融合池);count(*) 在
+        (chunk_id, name_normalized) 唯一约束下恰=命中的去重查询实体数。
+        tiebreak 用 id 升序(uuid7 时间有序,确定性);行含 match_count 供
+        试跑逐路展示。"""
+        if not names:
+            return []
+        rows = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT c.id, c.parent_id, c.source_ref, count(*) AS match_count"
+                        " FROM rag.document_chunk_entities e"
+                        " JOIN rag.document_chunks c ON c.id = e.chunk_id"
+                        " WHERE e.tenant_id=:t AND e.datasource_key=:d"
+                        "   AND e.name_normalized = ANY(:names)"
+                        "   AND c.chunk_level='CHILD'"
+                        " GROUP BY c.id, c.parent_id, c.source_ref"
+                        " HAVING count(*) >= :min_shared"
+                        " ORDER BY match_count DESC, c.id ASC"
+                        " LIMIT :limit"
+                    ),
+                    {
+                        "t": tenant_id,
+                        "d": datasource_key,
+                        "names": names,
+                        "limit": limit,
+                        "min_shared": min_shared,
+                    },
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return [dict(r) for r in rows]
+
+    async def count_entities(self, *, document_id: str) -> int:
+        """文档实体行数(enrich 响应面)。"""
+        return int(
+            (
+                await self._s.execute(
+                    text("SELECT count(*) FROM rag.document_chunk_entities WHERE document_id=:d"),
+                    {"d": document_id},
+                )
+            ).scalar_one()
+        )
 
     async def fetch_contents_by_refs(self, *, tenant_id: str, refs: list[str]) -> dict[str, str]:
         """按 source_ref 取父块正文(评分证据装配;tenant 收敛,缺 ref 跳过)。"""

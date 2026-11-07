@@ -62,9 +62,24 @@ def _split_parents(text: str) -> list[tuple[str, str]]:
     return parents
 
 
-def _split_children(parent_text: str) -> list[str]:
-    """子块滑窗(定长步进,overlap 兜底语义连续性)。"""
+def _split_children(parent_text: str, *, sentence_boundary: bool = False) -> list[str]:
+    """子块滑窗(定长步进,overlap 兜底语义连续性)。
+
+    句界校准档:窗口右缘优先对齐句界(回退不越半窗,单句超长才句中截断),
+    步进=块长-固定 overlap(短块不足 overlap 时无重叠推进),尾段不丢。"""
     out: list[str] = []
+    if sentence_boundary:
+        i = 0
+        n = len(parent_text)
+        while i < n:
+            ideal_end = min(i + CHILD_SIZE, n)
+            end = _sentence_cut(parent_text, start=i, ideal_end=ideal_end)
+            out.append(parent_text[i:end])
+            if end >= n:
+                break
+            nxt = end - (CHILD_SIZE - CHILD_STEP)  # 固定 overlap=50
+            i = nxt if nxt > i else end
+        return out
     i = 0
     while i < len(parent_text):
         tail = parent_text[i : i + CHILD_SIZE]
@@ -76,11 +91,34 @@ def _split_children(parent_text: str) -> list[str]:
     return out
 
 
-def chunk_document(doc_name: str, text: str) -> list[dict[str, object]]:
+_SENTENCE_ENDS = ("。", "!", "?", ";", "\n")
+
+
+def _sentence_cut(text: str, *, start: int, ideal_end: int) -> int:
+    """窗口右缘回退至最近句界(含句界字符);无句界或越半窗则定长截断。
+
+    回退下限=起点+半窗(保子块长度下限,防碎片块)。纯函数。"""
+    ideal_end = min(ideal_end, len(text))
+    floor = start + CHILD_SIZE // 2
+    best = -1
+    for ch in _SENTENCE_ENDS:
+        pos = text.rfind(ch, floor, ideal_end)
+        if pos > best:
+            best = pos
+    if best < floor:
+        return ideal_end
+    return best + 1
+
+
+def chunk_document(
+    doc_name: str, text: str, *, sentence_boundary: bool = False
+) -> list[dict[str, object]]:
     """文档 → 父子块列表(扁平:PARENT 行与 CHILD 行按序,CHILD 带 parent 序号)。
 
     返回 [{level, seq, parent_seq(None 对 PARENT), content, source_ref}];
     parent_seq 为父块在返回列表中的 seq,供落库时映射 parent_id。
+    sentence_boundary=True 启用子块句界校准(部署级可选档,缺省关=既有
+    切分逐字一致)。
     """
     if not text.strip():
         raise EmptyDocument(doc_name)
@@ -101,7 +139,7 @@ def chunk_document(doc_name: str, text: str) -> list[dict[str, object]]:
             }
         )
         seq += 1
-        for child in _split_children(ptext):
+        for child in _split_children(ptext, sentence_boundary=sentence_boundary):
             out.append(
                 {
                     "level": "CHILD",

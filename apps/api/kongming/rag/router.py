@@ -762,6 +762,7 @@ async def rag_retrieve(
     try:
         from kongming.rag.documents_repo import SqlDocumentRepo
         from kongming.rag.documents_service import retrieve_docs
+        from kongming.rag.entity_extract import build_doc_entity_extractor
         from kongming.rag.rerank import build_doc_reranker
 
         tid2 = (
@@ -779,6 +780,8 @@ async def rag_retrieve(
                 question=req.question,
                 # 未配置时为 None(无精排),精排失败在内部降级
                 reranker=build_doc_reranker(),
+                entity_extractor=build_doc_entity_extractor(),
+                entity_quota=get_settings().doc_entity_query_max,
             )
     except Exception:
         log.warning("文档检索组装失败(降级空)", exc_info=True)
@@ -979,6 +982,7 @@ async def upload_doc(
     """文档上传:类型/大小沿用 分档;分块+embedding(子块)+覆盖落库。"""
     from kongming.rag.documents_repo import SqlDocumentRepo
     from kongming.rag.documents_service import DocumentConflict, upload_document
+    from kongming.rag.entity_extract import build_doc_entity_extractor
 
     svc = _get_service(session)
     tenant_id = await _doc_tenant(session, svc, str(user["sub"]), x_tenant_id)
@@ -1015,6 +1019,8 @@ async def upload_doc(
             datasource_key=datasource_key,
             doc_name=doc_name,
             text=text_content,
+            entity_extractor=build_doc_entity_extractor(),
+            sentence_boundary=settings.doc_chunk_sentence_boundary,
         )
     except DocEmpty:
         raise HTTPException(status_code=400, detail="文档内容为空") from None
@@ -1043,6 +1049,106 @@ async def delete_doc(
     if not ok:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     await session.commit()
+
+
+class DocEnrichOut(BaseModel):
+    doc_id: str
+    entities: int
+
+
+@doc_router.post("/documents/{doc_id}/enrich", response_model=DocEnrichOut)
+async def enrich_doc(
+    doc_id: str,
+    user: Annotated[dict[str, object], Depends(current_user)],
+    _: Annotated[None, Depends(require_perm("system:document:manage"))],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> DocEnrichOut:
+    """既有文档实体覆盖式补抽(先清后抽;免重传文件)。
+
+    部署未启用实体抽取时 400 DOC_ENTITY_DISABLED(与能力未开启不可区分
+    的显式拒绝);抽取失败降级无实体(200 entities=0),不报错。"""
+    from kongming.rag.documents_repo import SqlDocumentRepo
+    from kongming.rag.documents_service import DocNotFound, enrich_document
+    from kongming.rag.entity_extract import build_doc_entity_extractor
+
+    extractor = build_doc_entity_extractor()
+    if extractor is None:
+        raise HTTPException(status_code=400, detail="DOC_ENTITY_DISABLED") from None
+    svc = _get_service(session)
+    tid = await _doc_tenant(session, svc, str(user["sub"]), x_tenant_id)
+    try:
+        n = await enrich_document(
+            SqlDocumentRepo(session, ts_config=get_settings().rag_fulltext_ts_config),
+            extractor,
+            tenant_id=tid,
+            doc_id=doc_id,
+        )
+    except DocNotFound:
+        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
+    return DocEnrichOut(doc_id=doc_id, entities=n)
+
+
+class RetrievalProbeHitOut(BaseModel):
+    child_id: str
+    parent_id: str | None
+    score: float
+
+
+class RetrievalProbeFusedOut(BaseModel):
+    child_id: str
+    parent_id: str | None
+    rank: int
+
+
+class RetrievalProbeParentOut(BaseModel):
+    parent_id: str
+    seq: int
+    doc_name: str
+    source_ref: str
+    citation_key: str
+    content: str
+    rank: int
+
+
+class RetrievalProbeOut(BaseModel):
+    paths: dict[str, list[RetrievalProbeHitOut]]
+    fused_children: list[RetrievalProbeFusedOut]
+    parents: list[RetrievalProbeParentOut]
+
+
+@doc_router.get("/retrieval-probe", response_model=RetrievalProbeOut)
+async def retrieval_probe(
+    user: Annotated[dict[str, object], Depends(current_user)],
+    _: Annotated[None, Depends(require_perm("system:document:manage"))],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    question: Annotated[str, Query(min_length=1, max_length=2000)],
+    datasource_key: Annotated[str, Query(pattern=r"^[a-z][a-z0-9_]{1,63}$")] = "default",
+    parent_top_k: Annotated[int, Query(ge=1, le=20)] = 5,
+    x_tenant_id: Annotated[str | None, Header()] = None,
+) -> RetrievalProbeOut:
+    """文档检索试跑(只读零副作用):逐路命中/融合名次/父块回填,与主检索同源。"""
+    from kongming.rag.documents_repo import SqlDocumentRepo
+    from kongming.rag.documents_service import probe_docs
+    from kongming.rag.entity_extract import build_doc_entity_extractor
+    from kongming.rag.rerank import build_doc_reranker
+
+    svc = _get_service(session)
+    tid = await _doc_tenant(session, svc, str(user["sub"]), x_tenant_id)
+    await _assert_doc_datasource(session, tenant_id=tid, datasource_key=datasource_key)
+    settings = get_settings()
+    out = await probe_docs(
+        SqlDocumentRepo(session, ts_config=settings.rag_fulltext_ts_config),
+        get_agent_rag_client(get_redis()),
+        tenant_id=tid,
+        datasource_key=datasource_key,
+        question=question,
+        reranker=build_doc_reranker(),
+        parent_top_k=parent_top_k,
+        entity_extractor=build_doc_entity_extractor(),
+        entity_quota=settings.doc_entity_query_max,
+    )
+    return RetrievalProbeOut(**out)
 
 
 @doc_router.get("/documents/{doc_id}/chunks", response_model=list[DocumentChunkOut])

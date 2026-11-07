@@ -78,6 +78,7 @@ markers = [
     "full: 评估集全量单轮(手动/预发,含动态数据源组)",
     "multiturn: 多轮上下文评估(指代/省略/排序延续/过滤追加)",
     "judge: judge 抽检层(092,非确定性产出 LLM 评审;随 smoke 层进定时门禁)",
+    "retrieval: 文档检索质量评测(retrieval-eval;语料+multi-hop 评测集,评估环境显式触发)",
 ]
 
 # authlib 官方存根不完整:AsyncOAuth2Client 的 httpx 继承方法(get/aclose)

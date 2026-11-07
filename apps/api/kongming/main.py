@@ -267,6 +267,14 @@ def _warn_rerank_misconfiguration() -> None:
         log.warning("rerank:%s", misconfig)
 
 
+def _warn_doc_entity_misconfiguration() -> None:
+    """实体抽取配置组合残缺时的 dev 告警降级（prod 由
+    config.fail_closed_checks 拒启）。"""
+    misconfig = get_settings().doc_entity_misconfiguration()
+    if misconfig:
+        log.warning("doc_entity:%s", misconfig)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
     """启动即播种(幂等,rbac spec「种子数据」);DB 不可达则拒启(控制面 fail-closed)。
@@ -304,6 +312,7 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
                 log.info("启动扫描:%d 个滞留 GENERATING 的报告标记 FAILED", nr)
         _warn_websearch_misconfiguration()  # 开发环境告警；生产环境配置检查会拒绝启动。
         _warn_rerank_misconfiguration()  # 与 WebSearch 使用相同的环境规则。
+        _warn_doc_entity_misconfiguration()  # 与 WebSearch 使用相同的环境规则。
         tool_registry.activate(
             tool_registry.build_registry(
                 websearch_provider=get_settings().websearch_provider,

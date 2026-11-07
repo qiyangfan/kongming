@@ -902,6 +902,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/document/documents/{doc_id}/enrich": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enrich Doc
+         * @description 既有文档实体覆盖式补抽(先清后抽;免重传文件)。
+         *
+         *     部署未启用实体抽取时 400 DOC_ENTITY_DISABLED(与能力未开启不可区分
+         *     的显式拒绝);抽取失败降级无实体(200 entities=0),不报错。
+         */
+        post: operations["enrich_doc_system_document_documents__doc_id__enrich_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/document/retrieval-probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieval Probe
+         * @description 文档检索试跑(只读零副作用):逐路命中/融合名次/父块回填,与主检索同源。
+         */
+        get: operations["retrieval_probe_system_document_retrieval_probe_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/document/documents/{doc_id}/chunks": {
         parameters: {
             query?: never;
@@ -4684,6 +4727,13 @@ export interface components {
              */
             status: "ACTIVE" | "DISABLED";
         };
+        /** DocEnrichOut */
+        DocEnrichOut: {
+            /** Doc Id */
+            doc_id: string;
+            /** Entities */
+            entities: number;
+        };
         /** DocUploadOut */
         DocUploadOut: {
             /** Doc Id */
@@ -6605,6 +6655,52 @@ export interface components {
         ResetPasswordIn: {
             /** New Password */
             new_password: string;
+        };
+        /** RetrievalProbeFusedOut */
+        RetrievalProbeFusedOut: {
+            /** Child Id */
+            child_id: string;
+            /** Parent Id */
+            parent_id: string | null;
+            /** Rank */
+            rank: number;
+        };
+        /** RetrievalProbeHitOut */
+        RetrievalProbeHitOut: {
+            /** Child Id */
+            child_id: string;
+            /** Parent Id */
+            parent_id: string | null;
+            /** Score */
+            score: number;
+        };
+        /** RetrievalProbeOut */
+        RetrievalProbeOut: {
+            /** Paths */
+            paths: {
+                [key: string]: components["schemas"]["RetrievalProbeHitOut"][];
+            };
+            /** Fused Children */
+            fused_children: components["schemas"]["RetrievalProbeFusedOut"][];
+            /** Parents */
+            parents: components["schemas"]["RetrievalProbeParentOut"][];
+        };
+        /** RetrievalProbeParentOut */
+        RetrievalProbeParentOut: {
+            /** Parent Id */
+            parent_id: string;
+            /** Seq */
+            seq: number;
+            /** Doc Name */
+            doc_name: string;
+            /** Source Ref */
+            source_ref: string;
+            /** Citation Key */
+            citation_key: string;
+            /** Content */
+            content: string;
+            /** Rank */
+            rank: number;
         };
         /** RetrieveIn */
         RetrieveIn: {
@@ -10322,6 +10418,74 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enrich_doc_system_document_documents__doc_id__enrich_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path: {
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocEnrichOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retrieval_probe_system_document_retrieval_probe_get: {
+        parameters: {
+            query: {
+                question: string;
+                datasource_key?: string;
+                parent_top_k?: number;
+            };
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalProbeOut"];
+                };
             };
             /** @description Validation Error */
             422: {
