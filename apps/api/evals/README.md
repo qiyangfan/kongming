@@ -13,6 +13,7 @@ cd apps/api
 KM_EVAL_ADMIN_PASSWORD=Kongming#2026 uv run pytest evals -m smoke      # ~5 题
 KM_EVAL_ADMIN_PASSWORD=Kongming#2026 uv run pytest evals -m full       # 全量单轮(含动态组)
 KM_EVAL_ADMIN_PASSWORD=Kongming#2026 uv run pytest evals -m multiturn  # 多轮上下文
+KM_EVAL_ADMIN_PASSWORD=Kongming#2026 uv run pytest evals/retrieval -m retrieval  # 文档检索质量(语料幂等上传+multi-hop Recall@5)
 ```
 
 环境变量:`KM_EVAL_API_BASE`(缺省 127.0.0.1:8000)/`KM_EVAL_ADMIN_USERNAME`
@@ -84,6 +85,7 @@ podman exec kongming-redis-1 redis-cli --scan --pattern 'km:ragctx:*' | xargs -r
 | `sakila_multi_turn.yaml` / `olist_multi_turn.yaml` | 多轮 turns[](6+4 case) |
 | `datasource.yaml` | 动态数据源(sakila_dyn 显式 key ×3 + 跨租户拒绝 ×1) |
 | `default.yaml` | default 数据源负例(实体领域错配,expect_no_data ×2) |
+| `retrieval/retrieval_eval.yaml` | 文档检索质量(retrieval-eval;corpus/ 九文档语料幂等上传,16 题=single_hop 7+multi_hop_doc 3+multi_hop_cross 6,gold=文档名+必含片段) |
 
 用例字段:`id`(tenant 前缀推断租户)/`question`/`gold_sql`/
 `expected_tables`/`category`;可选 `tenant`/`datasource_key`(动态路径)/
@@ -219,6 +221,23 @@ full 层四组分数同屏携带指纹;与上次基线指纹**不同**时,分数
 `evals/.baseline_fingerprint`(本地上次运行记录,gitignore);每次运行结束
 把当次指纹写回该文件。与 065 红线的关系:红线判定**先读指纹**,跨指纹
 时不比数值(可比性由代码输出结构化事实,不靠人记得)。
+
+## 检索质量评测基线(retrieval-eval,2026-11-07 起)
+
+文档检索质量独立口径:语料九文档 18 父块挂 default 租户 default 数据源
+(恒可用形态,CI 空库亦可跑),逐题走 `/system/document/retrieval-probe`
+(与主检索同源),指标=父块级 macro Recall@5 + 全跳覆盖率。**红线只在
+同形态行之间比较**(劣化 ≥5pp 逐题溯源);「实体开」形态行与「实体关」
+行仅作对照分析,不作红线。坏档闸:macro <0.5 判检索链路异常(向量路
+死亡/语料失配)。
+
+| 日期 | 形态 | macro Recall@5 | 全跳覆盖率 | n | 备注 |
+|---|---|---|---|---|---|
+| 2026-11-07 | 实体关(基线,add-retrieval-quality-eval 首采;sakila 数据源形态) | 0.969 | 0.938 | 16 | 唯一漏跳=retr_sakila_012 漏「基础租期」父块(泛化问句词面不匹配) |
+| 2026-11-07 | 实体关(定版形态=default/default 恒可用,进 nightly) | 1.000 | 1.000 | 16 | 与上行差异全在 012 边界题采样翻转(泛化问句「基础租期」父块一漏一中);语料偏小、embedding 强,基线近天花板属已知形态,红线判定时 012 类边界题逐题溯源豁免 |
+| 2026-11-07 | 实体关(同日 A/B 复采,add-doc-event-entity-recall 对照基线) | 1.000 | 1.000 | 16 | 与定版行一致(A/B 同环境同条件) |
+| 2026-11-07 | **实体开**(entity=on,LLM 抽取同 agent 面) | 0.938 | 0.938 | 16 | 净 -6.2pp,首版实体路在此语料为负收益:泛频实体「逾期费」join 出 6 子块挤占融合池(retr_sakila_002 正确父块被挤出);012 边界题转命中。机制由 probe 逐路数据归因(vector 8/fulltext 0/entity 6)。调优方向=实体路入池门槛(共享实体数≥2)/实体路降权或仅两路候选不足时补缺——**对照行不作红线**,调优挂后续,不改闸门 |
+| 2026-11-07 | 实体开(入池门槛调优后,共享实体数≥2;tune-entity-recall-pool) | 1.000 | 1.000 | 16 | 与实体关持平,-6.2pp 回归消除:002 泛频单实体路整路短路(probe 实体路 0 候选,调优前同题为 6),010 桥接题实体路以共享实体数 2 精准入池(score=2)。门槛后扩展路仅在真桥接形态出力,单实体共现不再入池;部署仍缺省关(对照不劣化,开关语义不变) |
 
 ## 基线记录(016 起)
 

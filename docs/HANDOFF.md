@@ -7,6 +7,38 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
+## 当前状态(2026-11-07,SAG 对照弧线:检索评测+事件-实体扩展+实体路调优)
+
+- **三变更已落地**(工件在 `openspec/changes/archive/2026-11-07-*`,
+  主 specs 已同步):①`add-retrieval-quality-eval`——文档检索试跑端点
+  `GET /system/document/retrieval-probe`(逐路命中+融合名次,与主检索
+  同源,权限复用 `system:document:manage`)+ evals retrieval 层
+  (`apps/api/evals/retrieval/`:九文档语料+16 题评测集+Recall@k 纯函数,
+  语料挂 default/default 恒可用形态,nightly 已纳入);②
+  `add-doc-event-entity-recall`——实体伴表(迁移 **0063,dev 库已迁**),
+  抽取端口 `KM_DOC_ENTITY_*` 部署级**缺省关**,enrich 端点,检索实体
+  扩展路(RRF 第三路),chunker 句界校准独立开关**缺省关**;③
+  `tune-entity-recall-pool`——实体路入池门槛(共享实体数≥2,单实体
+  共现不入池、合并实体集不足门槛整路短路)。
+- **A/B 终值(调优已收口)**:off=1.000 / 首版 on=0.938(泛频实体
+  「逾期费」join 6 子块挤占融合池)/**门槛调优后 on=1.000 与关持平**——
+  002 泛频单实体整路短路(probe 实体路 0 候选),010 桥接题以共享实体数 2
+  精准入池;逐行见 `apps/api/evals/README.md` 检索质量基线节;**对照行
+  不作红线**,部署保持缺省关(开关语义不变)。
+- **本地 api 重启配方(坑)**:api 进程必须带 `KM_INTERNAL_TOKEN`(与
+  agent 的 `KM_AGENT_INTERNAL_TOKEN` 同值,可从 agent 进程 env 提取),
+  缺失则 `/internal/embedding` 403、文档向量路全死(仅剩全文路,中文
+  simple 分词近乎失忆,评测表现为 recall 崩至 0.077)。实体开形态另需
+  `KM_DOC_ENTITY_ENABLED=true`+`KM_DOC_ENTITY_LLM_*`(可复用 agent 进程
+  env 的 `KM_AGENT_LLM_*` 三件);公网 https 端点(如 dashscope)无需
+  豁免,仅私网/本机端点需 `KM_DOC_ENTITY_ALLOW_PRIVATE_LLM=true`。
+- **eval harness enrich 自发现语义**:retrieval 层逐题前对语料逐文档调
+  enrich——200=实体开形态(entity=on 进输出行),400 DOC_ENTITY_DISABLED=
+  实体关静默跳过;同一 harness 两形态通用,nightly 无需参数化。
+- **门禁现值(2026-11-07 弧线收口后)**:api/agent/web 全绿,新增
+  tests/test_retrieval_eval_metrics.py、test_doc_retrieval_probe.py、
+  test_doc_entity_recall.py;contracts 未提交树机制性红同前口径。
+
 ## 当前状态(2026-11-04,DeepSeek 对照三变更)
 
 - **A 看门狗/C 事件立项 task 目标/B worker 续读三变更已落地(工件在

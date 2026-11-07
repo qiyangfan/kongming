@@ -81,10 +81,10 @@ artifacts(027)⇄ cloud-code-sandbox(029);agent-memory(026)← team-workspace(03
 | 方向 | 地基(已落地) | 开工载体 |
 |---|---|---|
 | 问数智能体(王牌) | 一梯队 chat/nl2sql/nl2sql-agent + 三梯队 semantic-layer / query-streaming / cloud-code-sandbox | 088 报告生成——数据链路闭环到可交付报告 |
-| 问答智能体 | rag 三路召回 / knowledge / document-rag / agent-memory / knowledge-qa | 093 知识侧深化(三态意图路由 + 融合问答)——已落地归档 |
+| 问答智能体 | rag 三路召回 / knowledge / document-rag / agent-memory / knowledge-qa | 093 知识侧深化(三态意图路由 + 融合问答)——已落地归档;事件-实体检索扩展(SAG 对照借鉴)——已落地归档(首版实体路对照负收益已经入池门槛调优消除,对照持平见 evals/README 检索基线节) |
 | 通用智能体 | ReAct 内核 / agent-memory / multi-model-routing / prompt-guardrails / cloud-code-sandbox | 089 工具网关 + 090 任务内核(长任务)+ 094 web 检索域(联网搜索)——工具网关已接入检索/HTTP 连接器/工单等域 |
 | 多智能体 | workflow-orchestration(静态 DAG)/ custom-agent | 091 动态协作编排 + 115 圆桌对等拓扑(宿主 = 090 任务内核)——选型指引:步骤可静态枚举→workflow;运行时拆解/并行分治→collab 分工形态;立场对辩/交叉质疑(共识判定+分歧如实保留)→collab 圆桌形态(黑板轮次制,名册声明期锁定) |
-| 评测智能体 | eval / ai-eval(Execution Match、基线、few-shot 自学习)+ agent-observability / eval-agent | 092 评测智能体化(LLM-as-judge + 评测集自动构造)——已落地归档 |
+| 评测智能体 | eval / ai-eval(Execution Match、基线、few-shot 自学习)+ agent-observability / eval-agent | 092 评测智能体化(LLM-as-judge + 评测集自动构造)——已落地归档;检索质量评测 multi-hop Recall@k(SAG 对照借鉴)——已落地归档(retrieval 层进 nightly,基线见 evals/README) |
 
 依赖拓扑:088 / 089 / 090 相互独立、可并行;091 以 090 为宿主殿后。
 **落地状态(2026-10-13)**:088–091 全部归档;092/093/094 已落地归档(问答=
@@ -170,6 +170,7 @@ resources/prompts(109)、Bot 版本化上架(104)、用户/TEAM 维度配额(103
 | xlsx 知识文档解析单独立项 | 否决(搭车注记) | document-rag 域内小 delta(格式清单+1),单独立项价值不足;随该域下次变更搭车(同上 §5) |
 | 多厂商 OSS 抽象(S3 SDK/MinIO) | 否决 | 本地盘+既有落盘管线已覆盖,无对象存储对应场景;「规模化前置」反模式(同上 §5) |
 | media-generation(图像/音视频/音乐生成域) | 否决(owner 直接裁决,2026-10-18) | 多模态输出侧与「数据为刃」五方向无归口,对齐调研的立项排序被 owner 推翻;域变更(add-media-generation 四工件)已删,不作为待办挂账;前置条件=真实消费场景出现(报告配图等)再议 |
+| SAG 引擎整体引入(zleap-sag,SQL 检索增强) | 否决(2026-11-07,与借鉴路线拆分处置) | 同域已实现且 spec 化(rag/document-rag/knowledge-qa 三域,三路召回+RRF+rerank+召回闸契约),引擎自有存储所有权与租户/可见性/召回闸过滤契约冲突;每 chunk 一次 LLM 事件抽取=摄入成本翻倍级,买的是未实测的多跳收益;论文 2026-06、引擎 0.15.0 pre-1.0、benchmark 厂商自报,不达骨干依赖门槛。重开条件=社区独立复现+引擎过 1.0+过滤扩展点满足 Kongming 契约(三者同时);借鉴三件套不在本否决内,见第四梯队 2026-11-07 登记 |
 
 **2026-10-18 追注**:原拟在此登记的 media-generation 与向量规模化(Milvus)
 不适用本表——二者已按 owner 裁决直接立项(见第四梯队 2026-10-18 段),
@@ -192,6 +193,27 @@ resources/prompts(109)、Bot 版本化上架(104)、用户/TEAM 维度配额(103
 - **websearch 真实凭证**:撤出否定表——094 已接四家供应商(含智谱检索
   API 复用本地已有 bigmodel key,零额外注册),配 key 即真实生效,本就
   不该挂账。
+
+**2026-11-07**:SAG 对照调研评估(论文 arXiv:2606.15971「SQL-Retrieval
+Augmented Generation:事件-实体索引 + 查询时动态超边」,Zleap-AI 定位为
+取代 RAG/GraphRAG 的第三架构)裁决=**登记模式,拆三件处置**:
+①**引擎整体引入(zleap-sag)= 否决**,理由与重开条件登记于否定裁决表;
+②**借鉴路线不否决、转候选排期**(按学习增量/展示效果/成本比例/定位一致性
+四标准,守 2026-10-18「不等信号」口径,借鉴类候选同样不设「量出缺口才动」
+闸门;三件 2026-11-07 当日立项并全部落地归档):
+- 检索质量评测(评测智能体方向):multi-hop 评测集 + Recall@k,给 eval 域
+  补检索质量档——**已落地**(变更 add-retrieval-quality-eval;retrieval
+  层进 nightly,基线见 evals/README 检索质量基线节);
+- 事件-实体检索扩展(问答智能体方向):实体伴表 + 查询时实体 join 做多跳
+  扩展;pgvector 单库 SQL 形态,ADR-012 同哲学,零新增中间件——**已落地**
+  (变更 add-doc-event-entity-recall;部署级缺省关);同日 A/B 对照首版
+  实体路净负(泛频实体挤占融合池),经入池门槛(共享实体数≥2,仅真桥接
+  入池)调优收口为对照持平(变更 tune-entity-recall-pool);部署保持
+  缺省关;
+- chunking 句界校准(事件完整性原则的落地形态)——document-rag 域内搭车,
+  **已随上件落地**(部署开关缺省关,关闭=既有切分逐字一致);
+③SAG-Benchmark 复现(官方公开复现脚本)可作 Kongming 主线外独立学习
+实验,不占能力清单登记位。
 
 ## 已被治理文档覆盖,不再立 spec(D 层)
 
