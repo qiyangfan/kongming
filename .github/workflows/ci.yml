@@ -10,9 +10,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── 增量门控:按路径裁剪作业 ─────────────────────────────
+  # 文档/openspec-only 的推送不值得跑全量六门禁。判定失败一律放行
+  # (fail-open),宁可多跑不漏跑。liannu 被api/agent 以 path 依赖引入,
+  # 其变更会连带触发 api/agent/contracts/images。
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      agent: ${{ steps.filter.outputs.agent }}
+      liannu: ${{ steps.filter.outputs.liannu }}
+      web: ${{ steps.filter.outputs.web }}
+      contracts: ${{ steps.filter.outputs.contracts }}
+      images: ${{ steps.filter.outputs.images }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: filter
+        run: |
+          set -euo pipefail
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            BASE="origin/${GITHUB_BASE_REF}"
+          else
+            BASE="HEAD~1"
+          fi
+          if ! git rev-parse -q --verify "${BASE}^{commit}" >/dev/null 2>&1; then
+            echo "变更基线不可得,视为全量变更"
+            for k in api agent liannu web contracts images; do
+              echo "$k=true" >> "$GITHUB_OUTPUT"
+            done
+            exit 0
+          fi
+          FILES=$(git diff --name-only "${BASE}...HEAD")
+          echo "$FILES"
+          match() { echo "$FILES" | grep -Eq "$1" && echo true || echo false; }
+          {
+            echo "api=$(match '(^apps/api/|^packages/liannu/|^contracts/|^infra/|^Makefile$|^\.github/workflows/ci\.yml$)')"
+            echo "agent=$(match '(^apps/agent/|^packages/liannu/|^\.github/workflows/ci\.yml$)')"
+            echo "liannu=$(match '(^packages/liannu/|^\.github/workflows/ci\.yml$)')"
+            echo "web=$(match '(^apps/web/|^\.github/workflows/ci\.yml$)')"
+            echo "contracts=$(match '(^apps/api/|^packages/liannu/|^contracts/|^Makefile$|^\.github/workflows/ci\.yml$)')"
+            echo "images=$(match '(^apps/api/|^apps/agent/|^packages/liannu/|^infra/|^\.github/workflows/ci\.yml$)')"
+          } >> "$GITHUB_OUTPUT"
+
   # ── 门禁 1:控制面(Python) ──────────────────────────────
   api:
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: apps/api
@@ -60,7 +108,10 @@ jobs:
 
   # ── 门禁 2:Agent 面(Python,零凭证纪律) ────────────────
   agent:
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/agent
@@ -81,7 +132,10 @@ jobs:
 
   # ── 门禁 3:连弩引擎(packages/liannu 独立包) ────────────
   liannu:
+    needs: changes
+    if: needs.changes.outputs.liannu == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: packages/liannu
@@ -99,7 +153,10 @@ jobs:
 
   # ── 门禁 4:前端(TypeScript) ────────────────────────────
   web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/web
@@ -124,7 +181,10 @@ jobs:
   # ── 门禁 5:契约漂移(ADR-005) ──────────────────────────
   # 重新导出 OpenAPI 后 diff,防"改了代码忘了导出契约"
   contracts:
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/api
@@ -140,7 +200,10 @@ jobs:
 
   # ── 镜像构建（只构建，用于检查 Dockerfile 和路径依赖）──
   images:
+    needs: changes
+    if: needs.changes.outputs.images == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - name: Build api image
