@@ -142,8 +142,11 @@ jobs:
           # 保留评估产物供比较；评估器输出百分比后应用劣化阈值。
           PY
 
+      # baseline 仅 2KB 文本且同名上传自动替换旧版;账号存储配额计量器卡死
+      # 期间(2026-11 已知 bug)上传会被拒,不应拖红整个评估门禁。
       - name: Upload baseline artifact
         uses: actions/upload-artifact@v5
+        continue-on-error: true
         with:
           name: eval-baseline
           path: /tmp/eval-now/
