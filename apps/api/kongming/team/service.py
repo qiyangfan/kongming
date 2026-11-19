@@ -163,15 +163,12 @@ class TeamService:
         resource_id: str,
         actor_id: str,
         actor_role: str | None,
-        resource_creator_id: str,
     ) -> None:
-        """归属变更:团队 OWNER,或资源创建者本人(目标团队须其为 OWNER)。"""
+        """归属变更:仅目标团队 OWNER 可操作。"""
         if resource_type not in ("bot", "workflow"):
             raise TeamValidationError("resource_type 须为 bot/workflow")
         if await self._repo.get_team(tenant_id=tenant_id, team_id=team_id) is None:
             raise TeamNotFound(team_id)
-        # 创建者路径同样要求 OWNER——语义=必须目标团队 OWNER,
-        # 创建者本人无独立豁免
         if actor_role != "OWNER":
             raise TeamForbiddenError("仅目标团队 OWNER 可变更归属")
         if not await self._repo.attach_resource(

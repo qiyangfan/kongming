@@ -4,9 +4,8 @@ import type { components } from "./api-types.gen";
 import { api } from "./api";
 
 export type McpServerOut = components["schemas"]["McpServerOut"];
-export type McpTestOut = components["schemas"]["McpTestOut"];
-export type McpSyncOut = components["schemas"]["McpSyncOut"];
-export type McpResourceEntryOut = components["schemas"]["McpResourceEntryOut"];
+type McpTestOut = components["schemas"]["McpTestOut"];
+type McpSyncOut = components["schemas"]["McpSyncOut"];
 export type McpPromptEntryOut = components["schemas"]["McpPromptEntryOut"];
 export type McpPromptPreviewOut = components["schemas"]["McpPromptPreviewOut"];
 

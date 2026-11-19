@@ -10,7 +10,7 @@ export type PlanItem = components["schemas"]["PlanOut"];
 export type PolicyItem = components["schemas"]["PolicyOut"];
 export type PortalKeyItem = components["schemas"]["PortalKeyOut"];
 export type PaymentItem = components["schemas"]["PaymentOut"];
-export type ReconcileResult = components["schemas"]["ReconcileOut"];
+type ReconcileResult = components["schemas"]["ReconcileOut"];
 export type TenantBrief = components["schemas"]["TenantBriefOut"];
 export type InvoiceAdminPage = components["schemas"]["InvoiceAdminPageOut"];
 

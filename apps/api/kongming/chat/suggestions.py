@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Sequence
 
+from kongming.chat.domain_errors import TenantForbidden
 from kongming.chat.models import Suggestion
 from kongming.chat.ports import (
     ChatStoreError,
@@ -11,7 +12,6 @@ from kongming.chat.ports import (
     SuggestionTenantSource,
     Suggestor,
 )
-from kongming.chat.service import TenantForbidden
 from kongming.datasource.ports import DatasourceChecker
 
 log = logging.getLogger(__name__)

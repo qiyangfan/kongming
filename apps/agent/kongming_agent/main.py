@@ -21,6 +21,7 @@ from kongming_agent.describer import (
     TableSpec,
     describe_table,
 )
+from kongming_agent.diagnostics import diagnostics, flow_verdict
 from kongming_agent.graph.budget import PromptBudgetExceeded
 from kongming_agent.graph.build import get_graph
 from kongming_agent.graph.checkpoints import (
@@ -30,13 +31,16 @@ from kongming_agent.graph.checkpoints import (
 )
 from kongming_agent.graph.extract_prompt import EXTRACT_MEMORY_SYSTEM
 from kongming_agent.graph.react import get_react_graph, react_recursion_limit
+from kongming_agent.graph.react.result import suspended_or_final as _suspended_or_final
 from kongming_agent.graph.react.state import ReactState
-from kongming_agent.graph.state import AgentState, ExecutionResult, ValidationResult
+from kongming_agent.graph.state import AgentState, ExecutionResult
 from kongming_agent.llm import LlmError
 from kongming_agent.logging_setup import setup_logging
 from kongming_agent.prompt_fingerprint import prompt_fingerprint
 from kongming_agent.report_gen import run_report_generation
 from kongming_agent.settings import Settings
+from kongming_agent.streaming import consume_chunk as _consume_chunk
+from kongming_agent.streaming import sse_frame as _sse_frame
 from kongming_agent.task_gen import run_task as run_task_orchestration
 
 log = logging.getLogger(__name__)
@@ -589,55 +593,27 @@ def _build_query_out(final: dict[str, object]) -> QueryOut:
             ),
         )
     execution = final.get("execution")
-    validation = final.get("validation")
-    verdict: str | None
-    if final.get("end_reason") == "no_data":
-        # 知识未覆盖如实说明(短路,未执行)——判定最前:自愈轮短路时
-        # state 残留上轮 execution(ERROR),不得遮蔽最终形态
-        verdict = "NO_DATA"
-    elif isinstance(execution, ExecutionResult):
-        verdict = execution.verdict
-    elif isinstance(validation, ValidationResult) and validation.permission_block:
-        verdict = "BLOCKED"  # 本地预检拦下的写操作,未达执行路由
-    else:
-        verdict = None
+    verdict = flow_verdict(final)
     summary = final.get("summary", "")
     insights = final.get("insights", [])
     stats = final.get("stats", {})
     sql = final.get("generated_sql", "")
     retry = final.get("retry_count", 0)
     error = final.get("error")
-    # resolved_question 仅多轮改写实际发生且有 history 时非空
-    # (understand 直通路径 state 该键即原问句,单轮/直通不背诊断信号)
-    resolved_q = final.get("resolved_question")
-    resolved = resolved_q if isinstance(resolved_q, str) and resolved_q else None
-    question_raw = final.get("question")
-    if resolved is not None and isinstance(question_raw, str) and resolved == question_raw:
-        resolved = None  # 未发生改写(恒等)——诊断信号只记实际改写
-    # 语义层命中随请求状态透传，不包含凭证；无命中时为空。
-    hits_raw = final.get("metric_hits")
-    metric_hits = (
-        cast("list[dict[str, str | None]]", hits_raw) if isinstance(hits_raw, list) else []
-    )
-    # 文档道来源(净化后正文的存活标记投影;空=SQL 道/无命中)
-    sources_raw = final.get("sources")
-    sources = cast("list[dict[str, str]]", sources_raw) if isinstance(sources_raw, list) else []
+    diag = diagnostics(final)
     # error 非空 ⇒ 恒非成功终态(轮次触顶携带部分结果的形态:execution
     # 可能 PASS 但 error 优先;其余既有形态 error 与非 PASS 并存,零影响)
     has_error = isinstance(error, str) and bool(error)
-    # 兜底轮分类(仅兜底早退轮非空;诊断字段,api 落库不进用户响应)
-    fallback_raw = final.get("fallback_type")
-    fallback = fallback_raw if isinstance(fallback_raw, str) and fallback_raw else None
     return QueryOut(
         success=(
             isinstance(execution, ExecutionResult) and execution.verdict == "PASS" and not has_error
         ),
         verdict=verdict,
-        resolved_question=resolved,
+        resolved_question=diag.resolved,
         prompt_version=_PROMPT_VERSION,
-        metric_hits=metric_hits,
-        sources=sources,
-        fallback_type=fallback,
+        metric_hits=diag.metric_hits,
+        sources=diag.sources,
+        fallback_type=diag.fallback,
         summary=summary if isinstance(summary, str) else "",
         # isinstance 守卫后 cast 收窄(守卫产物元素/键型仍 Unknown;cast 运行时恒等)
         insights=cast("list[dict[str, str]]", insights) if isinstance(insights, list) else [],
@@ -650,9 +626,42 @@ def _build_query_out(final: dict[str, object]) -> QueryOut:
     )
 
 
-def _sse_frame(event: str, data_json: str) -> str:
-    """标准 SSE 帧:event 行 + 单行 data + 空行分帧(事件契约)。"""
-    return f"event: {event}\ndata: {data_json}\n\n"
+async def _single_result_frames(out: QueryOut) -> AsyncIterator[str]:
+    """单帧 result 终态(预处理失败等早退形态)。"""
+    yield _sse_frame("result", out.model_dump_json())
+
+
+async def _query_stream_frames(state: AgentState, trace_id: str | None) -> AsyncIterator[str]:
+    """问答图流式帧:custom 过程事件 + 终态 result;故障收敛为 result/error。"""
+    final: dict[str, object] = {}
+    try:
+        graph = get_graph()
+        # langgraph 成员签名自带库侧 Unknown,访问点豁免;chunk 守卫后收窄
+        async for mode, chunk in graph.astream(  # pyright: ignore[reportUnknownMemberType]
+            state, stream_mode=["updates", "custom"]
+        ):
+            frame = _consume_chunk(mode, chunk, final)
+            if frame is not None:
+                yield frame
+    except LlmError:
+        yield _sse_frame("result", _build_query_out({"llm_unavailable": True}).model_dump_json())
+        return
+    except PromptBudgetExceeded:
+        yield _sse_frame(
+            "result", _build_query_out({"prompt_budget_exceeded": True}).model_dump_json()
+        )
+        return
+    except Exception:
+        log.exception("流式问答图执行异常 trace_id=%s", trace_id)
+        yield _sse_frame(
+            "error",
+            json.dumps(
+                {"error": "问答服务内部错误,请稍后重试", "reason_code": None},
+                ensure_ascii=False,
+            ),
+        )
+        return
+    yield _sse_frame("result", _build_query_out(final).model_dump_json())
 
 
 @app.post("/query/stream", tags=["agent"])
@@ -667,58 +676,9 @@ async def query_stream(req: QueryIn) -> StreamingResponse:
     except AttachmentError as e:
         # 预处理失败:单 result 终态帧收敛(与 LLM 故障同口径,不裸 500)
         fail = _build_query_out({"error": str(e), "success": False})
-
-        async def _fail_gen() -> AsyncIterator[str]:
-            yield _sse_frame("result", fail.model_dump_json())
-
-        return StreamingResponse(_fail_gen(), media_type="text/event-stream")
-    state = _initial_state(req)
-
-    async def gen() -> AsyncIterator[str]:
-        final: dict[str, object] = {}
-        try:
-            graph = get_graph()
-            # langgraph 成员签名自带库侧 Unknown,访问点豁免;chunk 守卫后收窄
-            async for mode, chunk in graph.astream(  # pyright: ignore[reportUnknownMemberType]
-                state, stream_mode=["updates", "custom"]
-            ):
-                if mode == "custom":
-                    ev = cast("dict[str, object]", chunk) if isinstance(chunk, dict) else {}
-                    event = str(ev.get("event") or "")
-                    if event:
-                        yield _sse_frame(event, json.dumps(ev.get("data"), ensure_ascii=False))
-                elif isinstance(chunk, dict):
-                    typed = cast("dict[str, object]", chunk)
-                    for delta in typed.values():
-                        if isinstance(delta, dict):
-                            # updates 累积=终态 state
-                            final.update(cast("dict[str, object]", delta))
-        except LlmError:
-            yield _sse_frame(
-                "result",
-                _build_query_out({"llm_unavailable": True}).model_dump_json(),
-            )
-            return
-        except PromptBudgetExceeded:
-            yield _sse_frame(
-                "result",
-                _build_query_out({"prompt_budget_exceeded": True}).model_dump_json(),
-            )
-            return
-        except Exception:
-            log.exception("流式问答图执行异常 trace_id=%s", req.trace_id)
-            yield _sse_frame(
-                "error",
-                json.dumps(
-                    {"error": "问答服务内部错误,请稍后重试", "reason_code": None},
-                    ensure_ascii=False,
-                ),
-            )
-            return
-        yield _sse_frame("result", _build_query_out(final).model_dump_json())
-
+        return StreamingResponse(_single_result_frames(fail), media_type="text/event-stream")
     return StreamingResponse(
-        gen(),
+        _query_stream_frames(_initial_state(req), req.trace_id),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -787,6 +747,47 @@ def _interrupt_confirm_id(tup: object) -> str:
     return ""
 
 
+def _match_resume(
+    existing: object, resume_confirm: dict[str, object] | None
+) -> dict[str, object] | None:
+    """恢复提示复合校验(安全红线):confirm_id 须与快照在途确认一致才兑现。"""
+    if resume_confirm is None:
+        return None
+    inflight_id = _interrupt_confirm_id(existing) if existing is not None else ""
+    if inflight_id and str(resume_confirm.get("confirm_id") or "") == inflight_id:
+        return {
+            "decision": str(resume_confirm.get("decision") or ""),
+            "confirm_id": inflight_id,
+        }
+    return None
+
+
+async def _invoke_react(
+    graph: Any,
+    config: Any,
+    req: QueryReactIn,
+    has_thread: bool,
+    effective_resume: dict[str, object] | None,
+    thread_id: str,
+) -> tuple[Any, str]:
+    """按恢复形态调用图;恢复路径异常时如实回退整步重跑。"""
+    try:
+        if effective_resume is not None:
+            return await graph.ainvoke(Command(resume=effective_resume), config=config), "snapshot"
+        if has_thread:
+            # 快照续跑(步骤内中断恢复);若快照停在确认点且无决策/决策失配,
+            # confirm_gate 会再次挂起(同一确认行幂等复用)
+            return await graph.ainvoke(None, config=config), "snapshot"
+        return await graph.ainvoke(_initial_react_state(req), config=config), "fresh"
+    except Exception:
+        if effective_resume is None and not has_thread:
+            raise
+        # 恢复路径异常(线程态漂移/无挂起点可续):如实回退整步重跑,
+        # 不向账本谎称恢复成功
+        log.warning("检查点恢复失败,回退整步重跑: thread=%s", thread_id, exc_info=True)
+        return await graph.ainvoke(_initial_react_state(req), config=config), "fresh"
+
+
 async def _run_react_task(
     req: QueryReactIn,
     *,
@@ -810,71 +811,25 @@ async def _run_react_task(
         "recursion_limit": react_recursion_limit(),
         "configurable": {"thread_id": thread_id},
     }
-    origin = "fresh"
     try:
         has_thread = False
         existing: object = None
         if graph.checkpointer is not None:
             existing = await graph.checkpointer.aget_tuple(config)
             has_thread = existing is not None
-        # 恢复提示复合校验(安全红线):提示 confirm_id 必须与快照在途确认一致
-        # 才兑现——线程内先后挂起过多个确认时,旧决策不得套到新在途确认上
-        # (未决动作被他人决策兑现=越权执行)。失配/无法判读一律视为无决策,
-        # 走快照续跑:confirm_gate 原地重挂,同一确认行幂等复用,等待该确认
-        # 自身的处置
-        effective_resume: dict[str, object] | None = None
-        if resume_confirm is not None:
-            inflight_id = _interrupt_confirm_id(existing) if existing is not None else ""
-            if inflight_id and str(resume_confirm.get("confirm_id") or "") == inflight_id:
-                effective_resume = {
-                    "decision": str(resume_confirm.get("decision") or ""),
-                    "confirm_id": inflight_id,
-                }
-        try:
-            if effective_resume is not None:
-                origin = "snapshot"
-                final = await graph.ainvoke(Command(resume=effective_resume), config=config)
-            elif has_thread:
-                # 快照续跑(步骤内中断恢复);若快照停在确认点且无决策/决策失配,
-                # confirm_gate 会再次挂起(同一确认行幂等复用)
-                origin = "snapshot"
-                final = await graph.ainvoke(None, config=config)
-            else:
-                final = await graph.ainvoke(_initial_react_state(req), config=config)
-        except Exception:
-            if effective_resume is not None or has_thread:
-                # 恢复路径异常(线程态漂移/无挂起点可续):如实回退整步重跑,
-                # 不向账本谎称恢复成功
-                log.warning("检查点恢复失败,回退整步重跑: thread=%s", thread_id, exc_info=True)
-                origin = "fresh"
-                final = await graph.ainvoke(_initial_react_state(req), config=config)
-            else:
-                raise
+        # 失配/无法判读一律视为无决策,走快照续跑:confirm_gate 原地重挂,
+        # 同一确认行幂等复用,等待该确认自身的处置
+        effective_resume = _match_resume(existing, resume_confirm)
+        final, origin = await _invoke_react(
+            graph, config, req, has_thread, effective_resume, thread_id
+        )
     except GraphRecursionError:
         return {"error": "工具调用步数超限,请缩小问题范围后重试"}
     except LlmError:
         return {"llm_unavailable": True}
     finally:
         reset_checkpoint_context()
-    final_d = cast("dict[str, object]", final)
-    interrupts = final_d.get("__interrupt__")
-    if interrupts:
-        # 图内挂起(ainvoke 返回挂起态而非抛出):提取确认载荷交编排上账
-        payload: dict[str, object] = {}
-        first = cast("Any", interrupts[0]) if isinstance(interrupts, list) else None
-        value = getattr(first, "value", None)
-        if isinstance(value, dict):
-            payload = cast("dict[str, object]", value)
-        return {
-            "suspended": {
-                "confirm_id": str(payload.get("confirm_id") or ""),
-                "tool_name": str(payload.get("tool_name") or ""),
-                "summary": str(payload.get("summary") or ""),
-            }
-        }
-    out = dict(final_d)
-    out["resume_origin"] = origin
-    return out
+    return _suspended_or_final(final, origin)
 
 
 async def _run_react(req: QueryReactIn) -> dict[str, object]:
@@ -921,6 +876,73 @@ async def query_react(req: QueryReactIn) -> QueryOut:
     return out
 
 
+async def _react_graph_frames(
+    req: QueryReactIn, final: dict[str, object], collector: list[dict[str, object]]
+) -> AsyncIterator[str]:
+    """驱动 ReAct 图产出过程帧;异常按类给出终态帧后结束。"""
+    try:
+        graph = get_react_graph()
+        # langgraph 成员签名自带库侧 Unknown,访问点豁免;chunk 守卫后收窄
+        async for mode, chunk in graph.astream(  # pyright: ignore[reportUnknownMemberType]
+            _initial_react_state(req),
+            stream_mode=["updates", "custom"],
+            config={"recursion_limit": react_recursion_limit()},
+        ):
+            frame = _consume_chunk(mode, chunk, final)
+            if frame is not None:
+                yield frame
+    except LlmError:
+        unavailable = _build_query_out({"llm_unavailable": True})
+        unavailable.usage_records = collector  # 异常终态也返回已收集的用量。
+        yield _sse_frame("result", unavailable.model_dump_json())
+    except GraphRecursionError:
+        # 图步数兜底(与同步同口径的结构化错误,不走泛异常)
+        capped = _build_query_out({"error": "工具调用步数超限,请缩小问题范围后重试"})
+        capped.usage_records = collector  # 异常终态同携带
+        yield _sse_frame("result", capped.model_dump_json())
+    except Exception:
+        log.exception("ReAct 流式执行异常 trace_id=%s", req.trace_id)
+        yield _sse_frame(
+            "error",
+            json.dumps(
+                {"error": "问答服务内部错误,请稍后重试", "reason_code": None},
+                ensure_ascii=False,
+            ),
+        )
+
+
+async def _react_stream_frames(
+    req: QueryReactIn, collector: list[dict[str, object]]
+) -> AsyncIterator[str]:
+    """ReAct 流式帧:过程事件 + 终态 result;收集器在生成器上下文内挂载。"""
+    from kongming_agent.llm import reset_usage_collector, set_usage_collector
+    from kongming_agent.multimodal import AttachmentError
+
+    # 收集器在生成器上下文内挂载/卸载:流式响应的迭代任务与端点 handler
+    # 分属不同上下文,端点级 set 不传播到 gen(同步端点同款语义)。
+    # 附件预处理同在 gen 内执行:vision 用量发生在 combine 段,
+    # 挂载若晚于 combine 则该段收集缺位、用量绕过「响应携带」契约。
+    token = set_usage_collector(collector) if req.collect_usage else None
+    try:
+        try:
+            req.question = await _combine_with_attachments(req)
+        except AttachmentError as e:
+            fail = _build_query_out({"error": str(e), "success": False})
+            fail.verdict = "ERROR"  # 与同步端点早返同构(verdict 契约)
+            fail.usage_records = collector  # 保留早返前已收集的用量。
+            yield _sse_frame("result", fail.model_dump_json())
+            return
+        final: dict[str, object] = {}
+        async for frame in _react_graph_frames(req, final, collector):
+            yield frame
+        out = _build_query_out(final)
+        out.usage_records = collector  # bot 渠道流式化的同步入账口径
+        yield _sse_frame("result", out.model_dump_json())
+    finally:
+        if token is not None:
+            reset_usage_collector(token)
+
+
 @app.post("/query_react/stream", tags=["agent"])
 async def query_react_stream(req: QueryReactIn) -> StreamingResponse:
     """ReAct 流式端点:stage/tool_call/summary 过程事件 + result 终态(同构)。
@@ -928,76 +950,9 @@ async def query_react_stream(req: QueryReactIn) -> StreamingResponse:
     collect_usage=True 时挂 request 级收集器,与同步 /query_react 保持一致。
     流式接口也必须启用收集器,否则 bot 用量不会写入 usage_records。
     fire-and-forget);result 终态帧携带 usage_records。"""
-    from kongming_agent.llm import reset_usage_collector, set_usage_collector
-    from kongming_agent.multimodal import AttachmentError
-
     collector: list[dict[str, object]] = []
-
-    async def gen() -> AsyncIterator[str]:
-        # 收集器在生成器上下文内挂载/卸载:流式响应的迭代任务与端点 handler
-        # 分属不同上下文,端点级 set 不传播到 gen(同步端点同款语义)。
-        # 附件预处理同在 gen 内执行:vision 用量发生在 combine 段,
-        # 挂载若晚于 combine 则该段收集缺位、用量绕过「响应携带」契约。
-        token2 = set_usage_collector(collector) if req.collect_usage else None
-        try:
-            try:
-                req.question = await _combine_with_attachments(req)
-            except AttachmentError as e:
-                fail = _build_query_out({"error": str(e), "success": False})
-                fail.verdict = "ERROR"  # 与同步端点早返同构(verdict 契约)
-                fail.usage_records = collector  # 保留早返前已收集的用量。
-                yield _sse_frame("result", fail.model_dump_json())
-                return
-            state = _initial_react_state(req)
-            final: dict[str, object] = {}
-            try:
-                graph = get_react_graph()
-                # langgraph 成员签名自带库侧 Unknown,访问点豁免;chunk 守卫后收窄
-                async for mode, chunk in graph.astream(  # pyright: ignore[reportUnknownMemberType]
-                    state,
-                    stream_mode=["updates", "custom"],
-                    config={"recursion_limit": react_recursion_limit()},
-                ):
-                    if mode == "custom":
-                        ev = cast("dict[str, object]", chunk) if isinstance(chunk, dict) else {}
-                        event = str(ev.get("event") or "")
-                        if event:
-                            yield _sse_frame(event, json.dumps(ev.get("data"), ensure_ascii=False))
-                    elif isinstance(chunk, dict):
-                        typed = cast("dict[str, object]", chunk)
-                        for delta in typed.values():
-                            if isinstance(delta, dict):
-                                final.update(cast("dict[str, object]", delta))
-            except LlmError:
-                unavailable = _build_query_out({"llm_unavailable": True})
-                unavailable.usage_records = collector  # 异常终态也返回已收集的用量。
-                yield _sse_frame("result", unavailable.model_dump_json())
-                return
-            except GraphRecursionError:
-                # 图步数兜底(与同步同口径的结构化错误,不走泛异常)
-                capped = _build_query_out({"error": "工具调用步数超限,请缩小问题范围后重试"})
-                capped.usage_records = collector  # 异常终态同携带
-                yield _sse_frame("result", capped.model_dump_json())
-                return
-            except Exception:
-                log.exception("ReAct 流式执行异常 trace_id=%s", req.trace_id)
-                yield _sse_frame(
-                    "error",
-                    json.dumps(
-                        {"error": "问答服务内部错误,请稍后重试", "reason_code": None},
-                        ensure_ascii=False,
-                    ),
-                )
-                return
-            out = _build_query_out(final)
-            out.usage_records = collector  # bot 渠道流式化的同步入账口径
-            yield _sse_frame("result", out.model_dump_json())
-        finally:
-            if token2 is not None:
-                reset_usage_collector(token2)
-
     return StreamingResponse(
-        gen(),
+        _react_stream_frames(req, collector),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

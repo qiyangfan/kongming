@@ -12,7 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.seed import seed_all
-from kongming.chat.router import get_schema_overview, get_suggestor
+from kongming.chat.dependencies import get_schema_overview, get_suggestor
 from kongming.config import get_settings
 from kongming.datasource.cipher import get_cipher
 from kongming.main import app

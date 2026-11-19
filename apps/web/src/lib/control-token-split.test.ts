@@ -34,6 +34,18 @@ function tokenOf(block: string, name: string): string | null {
   return m ? m[1].trim() : null;
 }
 
+/** 统计源码中填充/描边类的消费点,并列出仍用裸 bg-input 的文件(相对 src/) */
+function scanInputClassUses(): { offenders: string[]; fillUses: number; borderUses: number } {
+  const result = { offenders: [] as string[], fillUses: 0, borderUses: 0 };
+  for (const file of walk(SRC)) {
+    const source = readFileSync(file, "utf8");
+    result.fillUses += (source.match(/bg-input-fill/g) ?? []).length;
+    result.borderUses += (source.match(/border-input/g) ?? []).length;
+    if (/bg-input(?!-fill)/.test(source)) result.offenders.push(file.slice(SRC.length));
+  }
+  return result;
+}
+
 describe("控件边界/填充/分隔线令牌三者分离(084/085)", () => {
   const blocks = {
     亮色: tokenBlock(/:root\s*\{([\s\S]*?)\n\}/),
@@ -57,17 +69,9 @@ describe("控件边界/填充/分隔线令牌三者分离(084/085)", () => {
   });
 
   it("标准件内不存在裸 bg-input(填充只许读 --input-fill)", () => {
-    const offenders: string[] = [];
-    let fillUses = 0;
-    let borderUses = 0;
-    for (const file of walk(SRC)) {
-      const source = readFileSync(file, "utf8");
-      fillUses += (source.match(/bg-input-fill/g) ?? []).length;
-      borderUses += (source.match(/border-input/g) ?? []).length;
-      if (/bg-input(?!-fill)/.test(source)) offenders.push(file.slice(SRC.length));
-    }
-    expect(offenders).toEqual([]);
     // 拆分靠改指向而非删类:填充与描边两类消费点都必须仍存在
+    const { offenders, fillUses, borderUses } = scanInputClassUses();
+    expect(offenders).toEqual([]);
     expect(fillUses).toBeGreaterThan(0);
     expect(borderUses).toBeGreaterThan(0);
   });

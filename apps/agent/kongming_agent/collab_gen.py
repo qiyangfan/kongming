@@ -114,6 +114,21 @@ def _json_object(raw: str) -> dict[str, object] | None:
     return cast("dict[str, object]", obj) if isinstance(obj, dict) else None
 
 
+def _parse_flagged(review: dict[str, object]) -> dict[str, str]:
+    """从 critic 审查结果提取可重做条目:子目标 → 反馈(截断 500 字)。"""
+    issues = cast("list[object]", review.get("issues") or [])
+    flagged: dict[str, str] = {}
+    for item in issues:
+        if not isinstance(item, dict):
+            continue
+        issue = cast("dict[str, object]", item)
+        subgoal = str(issue.get("subgoal") or "").strip()
+        feedback = str(issue.get("feedback") or "").strip()
+        if subgoal:
+            flagged[subgoal] = feedback[:500]
+    return flagged
+
+
 def _parse_topology(raw: str) -> list[dict[str, object]]:
     """规划输出 → worker 子目标清单(剥围栏+首尾括号;畸形拒绝;空清单合法)。
     不在此截断:派发上限与预算截断在 run 统一施加,未派发项如实披露。"""
@@ -195,61 +210,10 @@ class CollabOrchestrator:
                 "worker_count": 0,
                 "reservation": "预算继承不足,未派发任何 worker",
             }
-        try:
-            if self._roster:
-                topo_raw = await self._llm.chat(
-                    _ROSTER_TOPOLOGY_SYSTEM.format(max_workers=self._max_workers),
-                    _ROSTER_TOPOLOGY_USER.format(
-                        subgoal=subgoal,
-                        context=context,
-                        roster="\n".join(f"- {m}" for m in self._roster),
-                    ),
-                    temperature=0.2,
-                )
-            else:
-                topo_raw = await self._llm.chat(
-                    _TOPOLOGY_SYSTEM,
-                    _TOPOLOGY_USER.format(subgoal=subgoal, context=context),
-                    temperature=0.2,
-                )
-            workers_spec: list[dict[str, object]] = _parse_topology(topo_raw)
-        except Exception as e:  # noqa: BLE001 —— 拆解失败:名册形态诚实空收口,匿形态回落单 worker
-            if self._roster:
-                # 纯名册语义:不回落合成 worker(名册外执行者禁入),
-                # 父子目标如实进未派发清单(诚实收口,不静默降级)
-                log.warning("名册拆解失败,空收口披露: %s", e)
-                return {
-                    "verdict": "ERROR",
-                    "summary": "[]",
-                    "conclusions": [],
-                    "pending_subgoals": [subgoal],
-                    "dissent": False,
-                    "worker_count": 0,
-                    "reservation": f"名册拆解失败: {type(e).__name__}",
-                }
-            log.warning("协作拆解失败,回落单 worker: %s", e)
-            workers_spec = [{"subgoal": subgoal}]
-        pending: list[str] = []
-        if self._roster:
-            # 分配制映射:名册内 → 派发(带成员槽位);名册外/缺分配 → 未派发
-            # 披露(不静默丢弃、不改派合成 worker);截断披露通道与匿形态同式
-            roster_set = set(self._roster)
-            mapped: list[dict[str, object]] = []
-            for spec in workers_spec:
-                worker = str(spec.get("worker") or "")
-                text = str(spec.get("subgoal") or "")
-                if worker in roster_set:
-                    mapped.append(spec)
-                else:
-                    pending.append(f"{text}(分配对象 {worker or '缺失'} 不在名册)")
-            dispatched = mapped[: self._max_workers]
-            self._budget_left -= len(dispatched)
-            pending.extend(str(s.get("subgoal") or "") for s in mapped[self._max_workers :])
-        else:
-            dispatched = workers_spec[: self._max_workers]
-            self._budget_left -= len(dispatched)
-            # 预算/上限截掉的未派发子目标如实披露(不谎称完成)
-            pending = [str(s.get("subgoal") or "") for s in workers_spec[self._max_workers :]]
+        workers_spec, failure = await self._plan_workers(subgoal, context)
+        if failure is not None:
+            return failure
+        dispatched, pending = self._split_dispatched(cast("list[dict[str, object]]", workers_spec))
 
         conclusions = await self._dispatch(dispatched, context)
         reservation: str | None = None
@@ -273,6 +237,72 @@ class CollabOrchestrator:
             "worker_count": len(conclusions),
             "reservation": reservation,
         }
+
+    async def _plan_workers(
+        self, subgoal: str, context: str
+    ) -> tuple[list[dict[str, object]] | None, dict[str, object] | None]:
+        """拆解子目标;拆解失败时名册形态空收口披露,匿形态回落单 worker。"""
+        try:
+            if self._roster:
+                topo_raw = await self._llm.chat(
+                    _ROSTER_TOPOLOGY_SYSTEM.format(max_workers=self._max_workers),
+                    _ROSTER_TOPOLOGY_USER.format(
+                        subgoal=subgoal,
+                        context=context,
+                        roster="\n".join(f"- {m}" for m in self._roster),
+                    ),
+                    temperature=0.2,
+                )
+            else:
+                topo_raw = await self._llm.chat(
+                    _TOPOLOGY_SYSTEM,
+                    _TOPOLOGY_USER.format(subgoal=subgoal, context=context),
+                    temperature=0.2,
+                )
+            return _parse_topology(topo_raw), None
+        except Exception as e:  # noqa: BLE001 —— 拆解失败按名册/匿形态分别收口
+            if self._roster:
+                # 纯名册语义:不回落合成 worker(名册外执行者禁入),父子目标
+                # 如实进未派发清单(诚实收口,不静默降级)
+                log.warning("名册拆解失败,空收口披露: %s", e)
+                return None, {
+                    "verdict": "ERROR",
+                    "summary": "[]",
+                    "conclusions": [],
+                    "pending_subgoals": [subgoal],
+                    "dissent": False,
+                    "worker_count": 0,
+                    "reservation": f"名册拆解失败: {type(e).__name__}",
+                }
+            log.warning("协作拆解失败,回落单 worker: %s", e)
+            return [{"subgoal": subgoal}], None
+
+    def _split_dispatched(
+        self, specs: list[dict[str, object]]
+    ) -> tuple[list[dict[str, object]], list[str]]:
+        """按名册/上限切出派发清单,未派发子目标如实记入 pending。"""
+        pending: list[str] = []
+        if self._roster:
+            # 分配制映射:名册内 → 派发(带成员槽位);名册外/缺分配 → 未派发
+            # 披露(不静默丢弃、不改派合成 worker);截断披露通道与匿形态同式
+            roster_set = set(self._roster)
+            mapped: list[dict[str, object]] = []
+            for spec in specs:
+                worker = str(spec.get("worker") or "")
+                text = str(spec.get("subgoal") or "")
+                if worker in roster_set:
+                    mapped.append(spec)
+                else:
+                    pending.append(f"{text}(分配对象 {worker or '缺失'} 不在名册)")
+            dispatched = mapped[: self._max_workers]
+            self._budget_left -= len(dispatched)
+            pending.extend(str(s.get("subgoal") or "") for s in mapped[self._max_workers :])
+            return dispatched, pending
+        dispatched = specs[: self._max_workers]
+        self._budget_left -= len(dispatched)
+        # 预算/上限截掉的未派发子目标如实披露(不谎称完成)
+        pending = [str(s.get("subgoal") or "") for s in specs[self._max_workers :]]
+        return dispatched, pending
 
     async def _dispatch(
         self, specs: list[dict[str, object]], context: str
@@ -396,6 +426,45 @@ class CollabOrchestrator:
             return False, None
         return True, "分歧经核实仍无法采信任一方(如实标注,不调和)"
 
+    async def _review(
+        self, subgoal: str, conclusions: list[dict[str, object]]
+    ) -> tuple[dict[str, object] | None, str | None]:
+        """执行一次 critic 审查;异常或畸形输出转为保留意见文案。"""
+        try:
+            critic_raw = await self._llm.chat(
+                _CRITIC_SYSTEM,
+                _CRITIC_USER.format(
+                    subgoal=subgoal[:1000],
+                    conclusions=json.dumps(conclusions, ensure_ascii=False)[:4000],
+                ),
+                temperature=0.2,
+            )
+        except Exception as e:  # noqa: BLE001 —— 审查异常如实标注,不阻断
+            log.warning("critic 审查异常: %s", e)
+            return None, "critic 审查异常(结论未经审查)"
+        review = _json_object(critic_raw)
+        if review is None:
+            return None, "critic 审查输出畸形(结论未经有效审查)"
+        return review, None
+
+    async def _apply_revisions(
+        self, flagged: dict[str, str], context: str, conclusions: list[dict[str, object]]
+    ) -> bool:
+        """按 critic 条目重派 worker;返回 True 表示预算不足提前中止。"""
+        for g, fb in flagged.items():
+            if not self._budget_take(1):
+                return True
+            redo = await self._execute_one(
+                g, f"{context[:1000]}\n# critic 反馈(上一轮结论被退回)\n{fb}"
+            )
+            for i, c in enumerate(conclusions):
+                if str(c.get("subgoal") or "") == g:
+                    conclusions[i] = redo
+                    break
+            else:
+                conclusions.append(redo)
+        return False
+
     async def _critic_loop(
         self,
         subgoal: str,
@@ -408,54 +477,18 @@ class CollabOrchestrator:
         notes: list[str] = [reservation] if reservation else []
         rounds = max(1, self._max_revision_rounds)
         for round_no in range(rounds):
-            try:
-                critic_raw = await self._llm.chat(
-                    _CRITIC_SYSTEM,
-                    _CRITIC_USER.format(
-                        subgoal=subgoal[:1000],
-                        conclusions=json.dumps(conclusions, ensure_ascii=False)[:4000],
-                    ),
-                    temperature=0.2,
-                )
-                review = _json_object(critic_raw)
-            except Exception as e:  # noqa: BLE001 —— 审查异常如实标注,不阻断
-                log.warning("critic 审查异常: %s", e)
-                notes.append("critic 审查异常(结论未经审查)")
+            review, note = await self._review(subgoal, conclusions)
+            if note is not None:
+                notes.append(note)
                 break
-            if review is None:
-                notes.append("critic 审查输出畸形(结论未经有效审查)")
+            if review is not None and bool(review.get("pass")):
                 break
-            if bool(review.get("pass")):
-                break
-            issues = cast("list[object]", review.get("issues") or [])
-            flagged: dict[str, str] = {}
-            for item in issues:
-                if not isinstance(item, dict):
-                    continue
-                issue = cast("dict[str, object]", item)
-                g = str(issue.get("subgoal") or "").strip()
-                fb = str(issue.get("feedback") or "").strip()
-                if g:
-                    flagged[g] = fb[:500]
+            flagged = _parse_flagged(review or {})
             if not flagged:
                 # 审查不通过但无具体条目:无修订抓手,如实保留意见
                 notes.append("critic 不通过但未给出可重做条目")
                 break
-            budget_short = False
-            for g, fb in flagged.items():
-                if not self._budget_take(1):
-                    budget_short = True
-                    break
-                redo = await self._execute_one(
-                    g, f"{context[:1000]}\n# critic 反馈(上一轮结论被退回)\n{fb}"
-                )
-                for i, c in enumerate(conclusions):
-                    if str(c.get("subgoal") or "") == g:
-                        conclusions[i] = redo
-                        break
-                else:
-                    conclusions.append(redo)
-            if budget_short:
+            if await self._apply_revisions(flagged, context, conclusions):
                 # 部分重派已落账:先按当前结论重算归因,再如实保留预算缺口
                 verdict = self._verdict_of(conclusions)
                 notes.append("critic 修订预算不足,未重派项如实保留")

@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type AgentMode = "recipe" | "react";
+type AgentMode = "recipe" | "react";
 
 interface AgentModeState {
   mode: AgentMode;

@@ -317,7 +317,7 @@ async def test_runner_task_confirm_gate_integration(
     session: AsyncSession, make_user: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from kongming.auth.seed import seed_all
-    from kongming.trigger.router import _make_service
+    from kongming.trigger.dependencies import make_trigger_service as _make_service
     from kongming.uuid7 import uuid7
 
     await seed_all(session, get_settings())
@@ -363,7 +363,7 @@ async def test_runner_task_confirm_gate_integration(
     assert row is not None
 
     scheduled: list[str] = []
-    import kongming.task.router as _task_router
+    import kongming.task.dispatch as _task_dispatch
     from kongming.chat.agent_client import AgentClient as _AC
 
     async def _fake_schedule(task_id: str) -> int | None:
@@ -375,7 +375,7 @@ async def test_runner_task_confirm_gate_integration(
     ) -> dict[str, object] | None:
         return {"verdict": "create", "reason": "测试放行"}
 
-    monkeypatch.setattr(_task_router, "schedule_task_run", _fake_schedule)
+    monkeypatch.setattr(_task_dispatch, "schedule_task_run", _fake_schedule)
     monkeypatch.setattr(_AC, "judge_event", _fake_judge_event)
     svc = _make_service(session)
     await svc.fire_prepared(row=row, inputs=dict(_GITHUB_INPUTS))

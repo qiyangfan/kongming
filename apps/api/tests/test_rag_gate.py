@@ -331,7 +331,6 @@ def _gate_svc(repo: object) -> RagService:
     return RagService(
         repo=repo,  # type: ignore[arg-type]
         embedder=None,  # type: ignore[arg-type]
-        describer=None,  # type: ignore[arg-type]
         cache=None,  # type: ignore[arg-type]
         gate_settings=settings,
     )

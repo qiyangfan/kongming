@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 async def test_cost_gate_oper_log_persists(session: AsyncSession) -> None:
     from kongming.auth.seed import seed_all
-    from kongming.chat.router import _build_cost_gate
+    from kongming.chat.dependencies import _build_cost_gate
     from kongming.config import get_settings
 
     await seed_all(session, get_settings())

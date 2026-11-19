@@ -10,8 +10,8 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kongming.chat.dependencies import get_agent_client
 from kongming.chat.models import resolve_column_labels
-from kongming.chat.router import get_agent_client
 from kongming.main import app
 from tests.conftest import MakeUser
 from tests.test_chat_query import FakeAgent, _auth, _pass_reply, _user_with_chat_perm
@@ -232,7 +232,9 @@ async def test_column_comments_tenant_schema_overrides_public(
         {"t": tid},
     )
     await session.commit()
-    comments = await RagRepository(session).column_comments(tenant_id=tid, datasource_key="default")
+    comments = await RagRepository(session).entries.column_comments(
+        tenant_id=tid, datasource_key="default"
+    )
     assert comments["goods"] == {"name": "varchar 租户名"}  # 租户 schema 胜出
     # 清理 goods 测试数据，避免影响其他用例。
     await session.execute(

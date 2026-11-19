@@ -37,6 +37,73 @@ class ModelEntry:
     context_window: int | None = None
 
 
+def _parse_max_image(item: dict[str, object], name: str) -> float | None:
+    """图片上限:非正数/不可解析按未声明处理。"""
+    raw = cast("int | float | str | None", item.get("max_image_mb"))
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+        if value <= 0:
+            raise ValueError("非正数")
+    except (TypeError, ValueError):
+        log.warning("注册表条目 %s max_image_mb 畸形,剔除该字段", name)
+        return None
+    return value
+
+
+def _parse_context_window(item: dict[str, object], name: str) -> int | None:
+    """上下文窗口:畸形(非正数/不可解析)按未声明处理并告警,不拒配整条目。"""
+    raw = item.get("context_window")
+    if raw is None:
+        return None
+    try:
+        value = int(cast("int | float | str", raw))
+        if value <= 0:
+            raise ValueError("非正数")
+    except (TypeError, ValueError):
+        log.warning("注册表条目 %s context_window 畸形,按未声明处理", name)
+        return None
+    return value
+
+
+def _registry_entry(
+    item: dict[str, object], index: int, seen: set[str], allowed: set[str]
+) -> ModelEntry | None:
+    """校验并收敛单个注册表条目;不合格返回 None 并告警。"""
+    name = str(item.get("name") or "")
+    base_url = str(item.get("base_url") or "")
+    api_key = str(item.get("api_key") or "")
+    model = str(item.get("model") or name)
+    if not name or not base_url or not api_key:
+        log.warning("注册表条目 %d 缺 name/base_url/api_key,剔除", index)
+        return None
+    if name in seen:
+        log.warning("注册表条目重名 %s,剔除", name)
+        return None
+    host = urlparse(base_url).hostname or ""
+    if host not in allowed:
+        log.warning("注册表条目 %s 主机 %s 不在白名单,拒配", name, host)
+        return None
+    # 未知键静默忽略,不拒配;图片上限格式错误时忽略该字段
+    max_image_mb = _parse_max_image(item, name)
+    # 多协议(ADR-008):protocol 取值域外 = 与缺字段同级,单条目剔除告警
+    protocol = str(item.get("protocol") or DEFAULT_PROTOCOL)
+    if protocol not in VALID_PROTOCOLS:
+        log.warning("注册表条目 %s protocol 非法: %s,剔除该条目", name, protocol)
+        return None
+    return ModelEntry(
+        name=name,
+        base_url=base_url,
+        api_key=api_key,
+        model=model or name,
+        capabilities=[str(c) for c in cast("list[object]", item.get("capabilities") or [])],
+        max_image_mb=max_image_mb,
+        protocol=protocol,
+        context_window=_parse_context_window(item, name),
+    )
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="KM_AGENT_", extra="ignore")
 
@@ -139,59 +206,9 @@ class Settings(BaseSettings):
             if not isinstance(raw_item, dict):
                 log.warning("注册表条目 %d 非对象,剔除", i)
                 continue
-            item = cast("dict[str, object]", raw_item)
-            name = str(item.get("name") or "")
-            base_url = str(item.get("base_url") or "")
-            api_key = str(item.get("api_key") or "")
-            model = str(item.get("model") or name)
-            if not name or not base_url or not api_key:
-                log.warning("注册表条目 %d 缺 name/base_url/api_key,剔除", i)
-                continue
-            if name in out:
-                log.warning("注册表条目重名 %s,剔除", name)
-                continue
-            host = urlparse(base_url).hostname or ""
-            if host not in allowed:
-                log.warning("注册表条目 %s 主机 %s 不在白名单,拒配", name, host)
-                continue
-            # 未知键静默忽略,不拒配;图片上限格式错误时忽略该字段
-            max_image_mb: float | None = None
-            raw_mimb = cast("int | float | str | None", item.get("max_image_mb"))
-            if raw_mimb is not None:
-                try:
-                    max_image_mb = float(raw_mimb)
-                    if max_image_mb <= 0:
-                        raise ValueError("非正数")
-                except (TypeError, ValueError):
-                    log.warning("注册表条目 %s max_image_mb 畸形,剔除该字段", name)
-                    max_image_mb = None
-            # 多协议(ADR-008):protocol 取值域外 = 与缺字段同级,单条目剔除告警
-            protocol = str(item.get("protocol") or DEFAULT_PROTOCOL)
-            if protocol not in VALID_PROTOCOLS:
-                log.warning("注册表条目 %s protocol 非法: %s,剔除该条目", name, protocol)
-                continue
-            # 上下文窗口——畸形(非正数/不可解析)按未声明处理并告警,
-            # SHALL NOT 拒配整条目(窗口只用于预算收敛,不构成安全边界)
-            context_window: int | None = None
-            raw_cw = item.get("context_window")
-            if raw_cw is not None:
-                try:
-                    cw = int(cast("int | float | str", raw_cw))
-                    if cw <= 0:
-                        raise ValueError("非正数")
-                    context_window = cw
-                except (TypeError, ValueError):
-                    log.warning("注册表条目 %s context_window 畸形,按未声明处理", name)
-            out[name] = ModelEntry(
-                name=name,
-                base_url=base_url,
-                api_key=api_key,
-                model=model or name,
-                capabilities=[str(c) for c in cast("list[object]", item.get("capabilities") or [])],
-                max_image_mb=max_image_mb,
-                protocol=protocol,
-                context_window=context_window,
-            )
+            entry = _registry_entry(cast("dict[str, object]", raw_item), i, set(out), allowed)
+            if entry is not None:
+                out[entry.name] = entry
         return out
 
     def parse_routes(self) -> dict[str, str]:

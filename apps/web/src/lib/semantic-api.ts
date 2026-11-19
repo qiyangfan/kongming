@@ -5,7 +5,7 @@ import { api } from "./api";
 
 export type RelationItem = components["schemas"]["RelationOut"];
 export type MetricItem = components["schemas"]["MetricOut"];
-export type IntrospectOut = components["schemas"]["IntrospectOut"];
+type IntrospectOut = components["schemas"]["IntrospectOut"];
 
 export function listRelations(datasourceKey: string): Promise<RelationItem[]> {
   return api.get<RelationItem[]>(`/system/semantic/relations?datasource_key=${datasourceKey}`);

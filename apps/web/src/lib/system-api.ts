@@ -3,24 +3,23 @@
 import type { components } from "./api-types.gen";
 import { api } from "./api";
 
-export type UserPageOut = components["schemas"]["UserPageOut"];
+type UserPageOut = components["schemas"]["UserPageOut"];
 export type UserItemOut = components["schemas"]["UserItemOut"];
-export type UserCreateIn = components["schemas"]["UserCreateIn"];
-export type UserUpdateIn = components["schemas"]["UserUpdateIn"];
+type UserCreateIn = components["schemas"]["UserCreateIn"];
+type UserUpdateIn = components["schemas"]["UserUpdateIn"];
 export type RoleOut = components["schemas"]["RoleOut"];
-export type RoleCreateIn = components["schemas"]["RoleCreateIn"];
-export type RoleUpdateIn = components["schemas"]["RoleUpdateIn"];
+type RoleCreateIn = components["schemas"]["RoleCreateIn"];
+type RoleUpdateIn = components["schemas"]["RoleUpdateIn"];
 export type PermOut = components["schemas"]["PermOut"];
 export type DeptNodeOut = components["schemas"]["DeptNodeOut"];
-export type DeptCreateIn = components["schemas"]["DeptCreateIn"];
-export type DeptUpdateIn = components["schemas"]["DeptUpdateIn"];
+type DeptCreateIn = components["schemas"]["DeptCreateIn"];
+type DeptUpdateIn = components["schemas"]["DeptUpdateIn"];
 export type TenantOut = components["schemas"]["TenantOut"];
 
-export type UserStatusValue = components["schemas"]["UserCreateIn"]["status"];
 export type DataScopeValue = components["schemas"]["RoleCreateIn"]["data_scope"];
 export type SqlScopeValue = components["schemas"]["RoleCreateIn"]["sql_scope"];
 
-export type CreatedId = { id: string };
+type CreatedId = { id: string };
 
 export const systemApi = {
   listUsers: (page: number, size: number, keyword: string) =>

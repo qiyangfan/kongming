@@ -69,9 +69,9 @@ export default function BotPublicPage() {
         {rounds.map((r, i) => (
           <div key={i} className="space-y-2">
             <div className="flex justify-end">
-              <ChatBubble role="user">{r.q}</ChatBubble>
+              <ChatBubble variant="user">{r.q}</ChatBubble>
             </div>
-            <ChatBubble role="assistant">{r.a}</ChatBubble>
+            <ChatBubble variant="assistant">{r.a}</ChatBubble>
           </div>
         ))}
         {error && (

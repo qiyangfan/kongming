@@ -1,17 +1,17 @@
-"""知识库仓储实现。
+"""知识库仓储实现:条目读写、三路召回、样本回写与租户解析。
 
 向量查询使用绑定参数，全文分词配置由 `KM_RAG_FULLTEXT_TS_CONFIG` 指定；
 召回查询同时过滤租户和数据源。操作审计复用认证域仓储，并与当前数据库会话
-处于同一事务。
+处于同一事务。覆盖报告的只读查询见 coverage_repository;向量字面量、
+分词自检与全量内省见 catalog。
 """
 
 import json
 from collections.abc import Sequence
-from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.engine import URL
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.repository import SqlOperLogRepo
 from kongming.config import DEFAULT_FULLTEXT_TS_CONFIG, validated_fulltext_ts_config
@@ -19,13 +19,12 @@ from kongming.datasource.repository import SqlDatasourceRepo
 from kongming.datasource.resolver import DatasourceInvalid, resolve_for_read
 from kongming.db import uuid7
 from kongming.internal.executor import get_or_create_engine
+from kongming.rag.catalog import allowed_schemas_for, introspect_all_on, vec_literal
+from kongming.rag.coverage_repository import RagCoverageRepository
 from kongming.rag.models import (
     AUTOMATED_SOURCE_TYPES,
-    COVERAGE_FAILURE_ROW_LIMIT,
     QUERY_HISTORY_CAP,
     RECALL_TOP_K,
-    FailureSignal,
-    HistoryOverview,
     HistorySample,
     IntrospectedTable,
     KnowledgeEntry,
@@ -34,45 +33,30 @@ from kongming.rag.models import (
 from kongming.rag.models import (
     DatasourceInvalid as RagDatasourceInvalid,
 )
-from kongming.sqlfw.firewall import RESERVED_TABLE_NAMES, RESERVED_TABLE_PREFIXES
+from kongming.rag.ports import (
+    CoverageRepo,
+    RagEntryRepo,
+    RagRecallRepo,
+    RagSampleRepo,
+    RagTenantRepo,
+)
+from kongming.rag.row_mapping import to_entry
 
-
-def vec_literal(vector: list[float]) -> str:
-    """向量 → pgvector 字面量 '[v1,v2,…]'(绑定参数传输,驱动参数化)。"""
-    return "[" + ",".join(repr(float(x)) for x in vector) + "]"
-
-
-async def assert_fulltext_ts_config_available(session: AsyncSession, ts_config: str) -> str:
-    """启动自检:分词配置目标必须在 pg_ts_config 存在,缺失 fail-closed 拒启。
-
-    检索配置降级不安全(降级=换词法,与存量 tsv 直接错配),
-    故 prod/dev 同拒启,无降级形态;文案明示缺项与安装配方指引。白名单校验
-    先行(先词法后存在性,错误归因不混淆)。lifespan 启动期调用;测试直调。
-    """
-    cfg = validated_fulltext_ts_config(ts_config)
-    hit = (
-        await session.execute(
-            text("SELECT 1 FROM pg_ts_config WHERE cfgname = :c LIMIT 1"),
-            {"c": cfg},
-        )
-    ).scalar_one_or_none()
-    if hit is None:
-        raise RuntimeError(
-            f"全文检索分词配置 {cfg} 在 pg_ts_config 中不存在(分词器未安装,"
-            "如 zhparser 扩展缺失)——检索配置降级会与存量 tsv 错配,拒绝启动;"
-            "安装配方见 docs/HANDOFF.md「zhparser 安装配方(pg18 localenv)」,"
-            "或改配 KM_RAG_FULLTEXT_TS_CONFIG=simple 回退缺省"
-        )
-    return cfg
-
-
-def _is_reserved(table_name: str) -> bool:
-    """与 internal/meta._is_reserved 同口径(控制面保留表不入知识库/内省)。"""
-    name = table_name.lower()
-    return name.startswith(RESERVED_TABLE_PREFIXES) or name in RESERVED_TABLE_NAMES
+# 生效别名(单一定义):保留分支命中→既有别名;否则→传入别名。
+# alias 列、tsv、tsv 参数四处引用保持一致(EXCLUDED.alias=:alias 值)。
+_EFFECTIVE_ALIAS_SQL = (
+    "COALESCE(CASE WHEN :source IN ('INTROSPECTION', 'AI_GENERATED',"
+    " 'MANUAL_UPLOAD') AND COALESCE(rag.table_descriptions.alias, '') <> ''"
+    " THEN rag.table_descriptions.alias END, EXCLUDED.alias)"
+)
 
 
 class RagRepository:
+    """知识库主仓储:组合写入/事务、条目与召回、样本反馈、租户解析各窄类。
+
+    全部成员共用同一数据库会话与分词配置;本类提供共享状态与事务收口,
+    用例按需经属性访问对应子仓储(同一实例,事务语义与单类等价)。"""
+
     def __init__(self, session: AsyncSession, ts_config: str = DEFAULT_FULLTEXT_TS_CONFIG) -> None:
         self._s = session
         # 全文分词配置(白名单校验 fail-fast,组合根注入部署值,缺省 simple)。
@@ -80,8 +64,23 @@ class RagRepository:
         # 同库不分词两态,写读异配置 = 检索静默错配
         self._ts = validated_fulltext_ts_config(ts_config)
         self._oper = SqlOperLogRepo(session)  # 审计与业务同会话=同事务(组合模式)
+        self.entries: RagEntryRepo = RagEntryRepository(self)
+        self.recall: RagRecallRepo = RagRecallRepository(self)
+        self.samples: RagSampleRepo = RagSampleRepository(self)
+        self.tenant: RagTenantRepo = RagTenantRepository(self)
+        self.coverage: CoverageRepo = RagCoverageRepository(session)
 
-    # ============ 事务 ============
+    @property
+    def session(self) -> AsyncSession:
+        """共享会话(子仓储构造用,事务语义与主仓储一致)。"""
+        return self._s
+
+    @property
+    def ts_config(self) -> str:
+        """全文分词配置(子仓储读写共用,避免写读异配)。"""
+        return self._ts
+
+    # ============ 事务(组合根收口,供各用例共用) ============
 
     async def commit(self) -> None:
         await self._s.commit()
@@ -93,6 +92,14 @@ class RagRepository:
         self, user_id: str | None, action: str, target: str | None, detail: dict[str, object]
     ) -> None:
         await self._oper.add(user_id, action, target, detail)
+
+
+class RagEntryRepository:
+    """条目与租户绑定读写(写入幂等、列表、删除、归属变更)。"""
+
+    def __init__(self, core: RagRepository) -> None:
+        self._s = core.session
+        self._ts = core.ts_config
 
     # ============ 写入:upsert / 删除 ============
 
@@ -119,16 +126,9 @@ class RagRepository:
         """
         vec = vec_literal(embedding) if embedding else None
         cols_text = " ".join(f"{k} {v}" for k, v in columns_comment.items())
-        # 生效别名(单一定义):保留分支命中→既有别名;否则→传入别名。
-        # alias 列、tsv、tsv 参数四处引用保持一致(EXCLUDED.alias=:alias 值)。
-        effective_alias = (
-            "COALESCE(CASE WHEN :source IN ('INTROSPECTION', 'AI_GENERATED',"
-            " 'MANUAL_UPLOAD') AND COALESCE(rag.table_descriptions.alias, '') <> ''"
-            " THEN rag.table_descriptions.alias END, EXCLUDED.alias)"
-        )
         await self._s.execute(
             text(
-                # S608 豁免:effective_alias 为本文件内常量片段(非用户输入),
+                # S608 豁免:_EFFECTIVE_ALIAS_SQL 为本文件内常量片段(非用户输入),
                 # 其余全部为绑定参数——无任何外部字符串拼接;{self._ts} 为
                 # 白名单校验后的配置名(标识符无法绑定参数,单源注入)
                 "INSERT INTO rag.table_descriptions"  # noqa: S608
@@ -150,8 +150,8 @@ class RagRepository:
                 "   THEN EXCLUDED.embedding"
                 "   ELSE COALESCE(EXCLUDED.embedding, rag.table_descriptions.embedding) END,"
                 f"  tsv = to_tsvector('{self._ts}', :table_t || ' ' ||"
-                f"  {effective_alias} || ' ' || :comment_t || ' ' || :cols_text),"
-                "  alias = " + effective_alias + ","
+                f"  {_EFFECTIVE_ALIAS_SQL} || ' ' || :comment_t || ' ' || :cols_text),"
+                "  alias = " + _EFFECTIVE_ALIAS_SQL + ","
                 "  team_id = CASE WHEN :team_set THEN CAST(:team AS uuid)"
                 "   ELSE rag.table_descriptions.team_id END,"
                 "  updated_at = now()"
@@ -317,25 +317,7 @@ class RagRepository:
         rows = (
             await self._s.execute(text(list_sql), {**params, "lim": limit, "off": offset})
         ).all()
-        return [self._to_entry(r, tenant_id) for r in rows], int(total)
-
-    def _to_entry(self, row: object, tenant_id: str) -> KnowledgeEntry:
-        return KnowledgeEntry(
-            id=str(row.id),  # type: ignore[attr-defined]
-            tenant_id=tenant_id,
-            datasource_key=str(row.datasource_key),  # type: ignore[attr-defined]
-            schema_name=str(row.schema_name),  # type: ignore[attr-defined]
-            table_name=str(row.table_name),  # type: ignore[attr-defined]
-            table_comment=row.table_comment or "",  # type: ignore[attr-defined]
-            columns_comment=dict(row.columns_comment or {}),  # type: ignore[attr-defined]
-            sample_queries=list(row.sample_queries or []),  # type: ignore[attr-defined]
-            source_type=str(row.source_type),  # type: ignore[attr-defined]
-            updated_at=row.updated_at,  # type: ignore[attr-defined]
-            alias=str(row.alias or ""),  # type: ignore[attr-defined] #
-            # 归属字段(无该投影的调用面 Row 无属性→getattr 缺省公共形态)
-            team_id=getattr(row, "team_id", None),
-            team_name=getattr(row, "team_name", None),
-        )
+        return [to_entry(r, tenant_id) for r in rows], int(total)
 
     async def find_table(self, *, tenant_id: str, table_id: str) -> KnowledgeEntry | None:
         """单条取(租户归属限定;不命中=None→同形 404)。"""
@@ -432,6 +414,14 @@ class RagRepository:
             )
         ).all()
         return len(rows)
+
+
+class RagRecallRepository:
+    """三路召回与条目取数(全部 tenant+ds 双过滤,叠加可见集合)。"""
+
+    def __init__(self, core: RagRepository) -> None:
+        self._s = core.session
+        self._ts = core.ts_config
 
     # ============ 召回:三路(全部 tenant+ds 双过滤) ============
 
@@ -658,8 +648,16 @@ class RagRepository:
                     },
                 )
             ).all()
-            out.extend(self._to_entry(r, tenant_id) for r in rows)
+            out.extend(to_entry(r, tenant_id) for r in rows)
         return out
+
+
+class RagSampleRepository:
+    """few-shot 样本回写、反馈样本晋升/停用。"""
+
+    def __init__(self, core: RagRepository) -> None:
+        self._s = core.session
+        self._ts = core.ts_config
 
     # ============ 反馈样本晋升/停用(与处置同事务,不自行 commit) ============
 
@@ -781,6 +779,14 @@ class RagRepository:
             {"t": tenant_id, "d": datasource_key, "cap": cap},
         )
 
+
+class RagTenantRepository:
+    """租户解析、数据源可用性复校与全量内省/可扫描 schema。"""
+
+    def __init__(self, core: RagRepository) -> None:
+        self._s = core.session
+        self._ts = core.ts_config
+
     # ============ 租户解析(与 chat/options 白名单复校同构) ============
 
     async def resolve_bound_tenant(self, user_id: str, tenant_key: str) -> tuple[str, str] | None:
@@ -820,7 +826,7 @@ class RagRepository:
         并通过受限连接池内省。
         """
         if datasource_key == "default":
-            return await _introspect_all_on(self._s, allowed_schemas_for(tenant_key, None))
+            return await introspect_all_on(self._s, allowed_schemas_for(tenant_key, None))
         try:
             row, plain = await resolve_for_read(
                 self._s, tenant_id=tenant_id, datasource_key=datasource_key
@@ -839,7 +845,7 @@ class RagRepository:
             ),
         )
         async with engine.connect() as conn:
-            return await _introspect_all_on(
+            return await introspect_all_on(
                 conn, allowed_schemas_for(tenant_key, row.default_schema)
             )
 
@@ -883,188 +889,3 @@ class RagRepository:
             )
         ).scalar_one_or_none()
         return row is not None
-
-    # ============ 知识覆盖报告(只读聚合输入;零写入零 LLM) ============
-
-    async def list_all_entries(
-        self,
-        *,
-        tenant_id: str,
-        datasource_key: str,
-        visible_team_ids: Sequence[str] = (),
-    ) -> list[KnowledgeEntry]:
-        """该 (租户, 数据源) 管理读面登记条目(与 fetch_entries 同投影,无分页)。
-
-        可见集合与列表端点同口径:仅公共条目与调用者所在团队条目进入报告
-        (管理读面不成为团队条目存在性的旁路)。"""
-        rows = (
-            await self._s.execute(
-                text(
-                    "SELECT id, datasource_key, schema_name, table_name, table_comment,"
-                    " columns_comment, sample_queries, source_type, updated_at,"
-                    " COALESCE(alias, '') AS alias"
-                    " FROM rag.table_descriptions"
-                    " WHERE tenant_id = :t AND datasource_key = :d"
-                    " AND (team_id IS NULL OR team_id::text = ANY(CAST(:teams AS text[])))"
-                    " ORDER BY schema_name, table_name"
-                ),
-                {"t": tenant_id, "d": datasource_key, "teams": list(visible_team_ids)},
-            )
-        ).all()
-        return [self._to_entry(r, tenant_id) for r in rows]
-
-    async def failure_signals(
-        self, *, tenant_id: str, datasource_key: str, since: datetime
-    ) -> list[FailureSignal]:
-        """失败信号投影(chat_message 只读跨域,feedback 域同表先例)。
-
-        口径:status ∈ {FAILED, REJECTED, NO_DATA} ∪ rating=DOWN ∪
-        corrected_sql 非空;NO_DATA(如实弃答)作为知识未接住的弱信号计入,
-        状态分列呈现。窗口 since 之外不收;行数受应用层上限约束
-        (COVERAGE_FAILURE_ROW_LIMIT),归并在领域纯函数内。"""
-        rows = (
-            await self._s.execute(
-                text(
-                    "SELECT m.question, m.status, COALESCE(m.rating, '') AS rating,"
-                    " (m.corrected_sql IS NOT NULL) AS has_corrected, m.created_at"
-                    " FROM public.chat_message m"
-                    " JOIN public.chat_session s ON s.id = m.session_id"
-                    " WHERE s.tenant_id = :t AND s.datasource_key = :d"
-                    " AND m.role = 'ASSISTANT' AND m.question IS NOT NULL"
-                    " AND m.created_at >= CAST(:since AS timestamptz)"
-                    " AND (m.status IN ('FAILED', 'REJECTED', 'NO_DATA')"
-                    "      OR m.rating = 'DOWN' OR m.corrected_sql IS NOT NULL)"
-                    " ORDER BY m.created_at DESC, m.id DESC"
-                    " LIMIT :lim"
-                ),
-                {
-                    "t": tenant_id,
-                    "d": datasource_key,
-                    "since": since,
-                    "lim": COVERAGE_FAILURE_ROW_LIMIT,
-                },
-            )
-        ).all()
-        return [
-            FailureSignal(
-                question=str(r.question),
-                status=str(r.status),
-                rating=str(r.rating),
-                has_corrected_sql=bool(r.has_corrected),
-                created_at=r.created_at,
-            )
-            for r in rows
-        ]
-
-    async def history_overview(self, *, tenant_id: str, datasource_key: str) -> HistoryOverview:
-        """few-shot 通道概况:仅 SUCCESS(召回同口径);计数一次聚合完成。"""
-        row = (
-            await self._s.execute(
-                text(
-                    "SELECT COUNT(*) AS n, COUNT(DISTINCT question) AS q"
-                    " FROM rag.query_history"
-                    " WHERE tenant_id = :t AND datasource_key = :d"
-                    " AND status = 'SUCCESS'"
-                ),
-                {"t": tenant_id, "d": datasource_key},
-            )
-        ).one()
-        return HistoryOverview(
-            success_count=int(row.n),
-            distinct_questions=int(row.q),
-            cap=QUERY_HISTORY_CAP,
-        )
-
-
-def allowed_schemas_for(tenant_key: str, default_schema: str | None) -> list[str]:
-    """可扫描 schema 集合唯一计算点:default 源=路由约定
-    [tenant_<key>, public](物理 schema 随租户首查创建,枚举先行于建表合法);
-    动态源=[default_schema]。内省/枚举端点/上传校验三方共用,禁另起口径。"""
-    if default_schema is None:
-        return [f"tenant_{tenant_key}", "public"]
-    return [default_schema]
-
-
-async def _introspect_all_on(
-    conn: AsyncSession | AsyncConnection, schemas: list[str]
-) -> list[IntrospectedTable]:
-    """全量内省实现(信息模式查询与 internal/meta._introspect 同口径;无截断)。"""
-    table_rows = (
-        await conn.execute(
-            text(
-                "SELECT table_schema, table_name FROM information_schema.tables"
-                " WHERE table_schema = ANY(CAST(:schemas AS text[]))"
-                # 收录限基表——视图是基表派生物,行扇出使聚合失真,
-                # 样例 SQL 挤占召回 top-K 使维度表缺位;
-                # 基表可完整表达视图可表达的一切查询
-                " AND table_type = 'BASE TABLE'"
-                " ORDER BY table_schema, table_name"
-            ),
-            {"schemas": schemas},
-        )
-    ).all()
-    kept = [r for r in table_rows if not _is_reserved(r.table_name)]
-    if not kept:
-        return []
-    col_rows = (
-        await conn.execute(
-            text(
-                "SELECT c.table_schema, c.table_name, c.column_name, c.data_type"
-                " FROM information_schema.columns c"
-                " WHERE c.table_schema = ANY(CAST(:schemas AS text[]))"
-                " ORDER BY c.table_schema, c.table_name, c.ordinal_position"
-            ),
-            {"schemas": schemas},
-        )
-    ).all()
-    columns: dict[tuple[str, str], dict[str, str]] = {}
-    for r in col_rows:
-        columns.setdefault((r.table_schema, r.table_name), {})[r.column_name] = r.data_type
-    comment_rows = (
-        await conn.execute(
-            text(
-                "SELECT c.table_schema, c.table_name,"
-                " obj_description(cls.oid, 'pg_class') AS table_comment"
-                " FROM information_schema.tables c"
-                " JOIN pg_class cls ON cls.relname = c.table_name"
-                " JOIN pg_namespace n ON n.oid = cls.relnamespace"
-                "   AND n.nspname = c.table_schema"
-                " WHERE c.table_schema = ANY(CAST(:schemas AS text[]))"
-            ),
-            {"schemas": schemas},
-        )
-    ).all()
-    comments = {(r.table_schema, r.table_name): r.table_comment or "" for r in comment_rows}
-    # 列注释取数据库既有 col_description:有注释列以其为说明,
-    # 无注释列保持英文类型形态(类型即说明)
-    col_comment_rows = (
-        await conn.execute(
-            text(
-                "SELECT c.table_schema, c.table_name, c.column_name,"
-                " col_description(cls.oid, a.attnum) AS column_comment"
-                " FROM information_schema.columns c"
-                " JOIN pg_class cls ON cls.relname = c.table_name"
-                " JOIN pg_namespace n ON n.oid = cls.relnamespace"
-                "   AND n.nspname = c.table_schema"
-                " JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name"
-                " WHERE c.table_schema = ANY(CAST(:schemas AS text[]))"
-            ),
-            {"schemas": schemas},
-        )
-    ).all()
-    col_comments = {
-        (r.table_schema, r.table_name, r.column_name): r.column_comment or ""
-        for r in col_comment_rows
-    }
-    return [
-        IntrospectedTable(
-            schema_name=r.table_schema,
-            table_name=r.table_name,
-            table_comment=comments.get((r.table_schema, r.table_name), ""),
-            columns_comment={
-                name: col_comments.get((r.table_schema, r.table_name, name)) or dtype
-                for name, dtype in columns.get((r.table_schema, r.table_name), {}).items()
-            },
-        )
-        for r in kept
-    ]

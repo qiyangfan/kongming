@@ -6,7 +6,7 @@ fail-open、互斥优先级、可观测计数(spec「闲聊语义兜底判定」
 import pytest
 
 from kongming_agent import deps
-from kongming_agent.graph import build, nodes
+from kongming_agent.graph import build, dialogue, intent_nodes, nodes
 from kongming_agent.graph.state import FALLBACK_CHITCHAT, FALLBACK_CLARIFY
 from tests.test_nodes import FakeApi, FakeLlm, _state
 
@@ -38,8 +38,8 @@ class TestPassthroughReply:
         assert "已停止" in str(out["error"])
 
     async def test_family_mapping_is_total_over_vocabulary(self) -> None:
-        for word in nodes.DIALOGUE_REPLY_WORDS:
-            assert nodes.reply_family(word) in nodes.CHITCHAT_REPLIES
+        for word in dialogue.DIALOGUE_REPLY_WORDS:
+            assert dialogue.reply_family(word) in dialogue.CHITCHAT_REPLIES
 
 
 # ============ 意图路由帧扩展解析 ============
@@ -47,7 +47,7 @@ class TestPassthroughReply:
 
 class TestParseIntentRoute:
     def test_extended_fields_parsed(self) -> None:
-        parsed = nodes.parse_intent_route(
+        parsed = intent_nodes.parse_intent_route(
             '{"intent":"data","ambiguous":true,"clarify_question":"哪个时间范围?",'
             '"confidence":0.9,"reason":"r"}'
         )
@@ -58,24 +58,26 @@ class TestParseIntentRoute:
 
     def test_missing_fields_default_to_legacy_shape(self) -> None:
         """旧形态(无 ambiguous/clarify)照常解析——链路脚本兼容。"""
-        parsed = nodes.parse_intent_route('{"intent":"data","confidence":0.99}')
+        parsed = intent_nodes.parse_intent_route('{"intent":"data","confidence":0.99}')
         assert parsed is not None
         assert parsed[0] == "data" and parsed[3] is False and parsed[4] == ""
 
     def test_ambiguous_without_clarify_falls_open(self) -> None:
         """歧义判定无澄清问句 → 不可执行,收 false(fail-open)。"""
-        parsed = nodes.parse_intent_route('{"intent":"data","ambiguous":true,"confidence":0.9}')
+        parsed = intent_nodes.parse_intent_route(
+            '{"intent":"data","ambiguous":true,"confidence":0.9}'
+        )
         assert parsed is not None and parsed[3] is False
 
     def test_chitchat_is_valid_intent(self) -> None:
-        parsed = nodes.parse_intent_route(
+        parsed = intent_nodes.parse_intent_route(
             '{"intent":"chitchat","confidence":0.95,"ambiguous":false}'
         )
         assert parsed is not None and parsed[0] == "chitchat"
 
     def test_invalid_still_rejected(self) -> None:
-        assert nodes.parse_intent_route('{"intent":"bogus","confidence":0.9}') is None
-        assert nodes.parse_intent_route('{"intent":"data","confidence":2.0}') is None
+        assert intent_nodes.parse_intent_route('{"intent":"bogus","confidence":0.9}') is None
+        assert intent_nodes.parse_intent_route('{"intent":"data","confidence":2.0}') is None
 
 
 # ============ route_intent 双兜底出口 ============
@@ -87,12 +89,12 @@ class TestRouteIntentFallbacks:
         fake = FakeLlm([_ROUTE_JSON % ("chitchat", "false", "")])
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
         monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
-        before = nodes.snapshot_intent_route_stats()["chitchat_semantic_total"]
-        out = await nodes.route_intent(_state(question="太感谢了"))
+        before = intent_nodes.snapshot_intent_route_stats()["chitchat_semantic_total"]
+        out = await intent_nodes.route_intent(_state(question="太感谢了"))
         assert out["end_reason"] == "no_data"
         assert out["fallback_type"] == FALLBACK_CHITCHAT
-        assert out["error"] == nodes.CHITCHAT_SEMANTIC_REPLY
-        after = nodes.snapshot_intent_route_stats()["chitchat_semantic_total"]
+        assert out["error"] == dialogue.CHITCHAT_SEMANTIC_REPLY
+        after = intent_nodes.snapshot_intent_route_stats()["chitchat_semantic_total"]
         assert after == before + 1
         assert len(fake.calls) == 1  # 单次模型调用(搭意图路由帧)
 
@@ -100,7 +102,7 @@ class TestRouteIntentFallbacks:
         fake = FakeLlm([_ROUTE_JSON % ("data", "true", "想看哪个时间范围的销售数据?")])
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
         monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
-        out = await nodes.route_intent(_state(question="帮我看看销售情况"))
+        out = await intent_nodes.route_intent(_state(question="帮我看看销售情况"))
         assert out["end_reason"] == "no_data"
         assert out["fallback_type"] == FALLBACK_CLARIFY
         assert out["error"] == "想看哪个时间范围的销售数据?"
@@ -110,7 +112,9 @@ class TestRouteIntentFallbacks:
         fake = FakeLlm([_ROUTE_JSON % ("data", "true", "哪个范围?")])
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
         monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
-        out = await nodes.route_intent(_state(question="上个月的", last_fallback=FALLBACK_CLARIFY))
+        out = await intent_nodes.route_intent(
+            _state(question="上个月的", last_fallback=FALLBACK_CLARIFY)
+        )
         assert out.get("end_reason") is None
         assert out.get("intent") == "data"  # 正常路由产物
 
@@ -119,7 +123,7 @@ class TestRouteIntentFallbacks:
         fake = FakeLlm([_ROUTE_JSON % ("chitchat", "true", "哪个范围?")])
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
         monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
-        out = await nodes.route_intent(_state(question="你好呀"))
+        out = await intent_nodes.route_intent(_state(question="你好呀"))
         assert out["fallback_type"] == FALLBACK_CHITCHAT
 
     async def test_llm_failure_fails_open(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -127,10 +131,10 @@ class TestRouteIntentFallbacks:
         fake = FakeLlm(boom=True)
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
         monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
-        before = nodes.snapshot_intent_route_stats()["intent_route_fallback_total"]
-        out = await nodes.route_intent(_state(question="帮我看看销售情况"))
+        before = intent_nodes.snapshot_intent_route_stats()["intent_route_fallback_total"]
+        out = await intent_nodes.route_intent(_state(question="帮我看看销售情况"))
         assert out == {}
-        after = nodes.snapshot_intent_route_stats()["intent_route_fallback_total"]
+        after = intent_nodes.snapshot_intent_route_stats()["intent_route_fallback_total"]
         assert after == before + 1
 
     async def test_low_confidence_fails_open(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -139,7 +143,7 @@ class TestRouteIntentFallbacks:
         )
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
         monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
-        out = await nodes.route_intent(_state(question="帮我看看销售情况"))
+        out = await intent_nodes.route_intent(_state(question="帮我看看销售情况"))
         assert out == {}  # 低置信不命中澄清,照常链路
 
 

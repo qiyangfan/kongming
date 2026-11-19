@@ -1,6 +1,6 @@
 /* 按服务端校验错误文案定位画布节点；未识别的错误不猜测节点，只显示原文。 */
 
-export interface LocatedValidationError {
+interface LocatedValidationError {
   /** 定位到的节点 id(可能含不存在的依赖目标;调用方与画布节点求交) */
   nodeIds: string[];
   /** 命中的配置键(缺必填配置/非法 on),供侧栏表单字段级定位 */

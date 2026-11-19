@@ -11,7 +11,7 @@ from typing import Any, cast
 import pytest
 
 from kongming_agent.apiclient import SchemaMeta, ToolExecuteOutcome
-from kongming_agent.report_gen import _extract_json, run_report_generation
+from kongming_agent.report_gen import _extract_json, _flatten_plan, run_report_generation
 from kongming_agent.settings import Settings
 
 # ── fakes(与 test_react 同款剧本形态)──
@@ -237,6 +237,14 @@ async def test_malformed_plan_error_payload() -> None:
     assert out["success"] is False
     assert _sections(out) == []
     assert out["error"]
+
+
+def test_plan_leaf_shape_checked_beyond_cap() -> None:
+    """单章护栏只截数量:第 7 个及之后的畸形叶子仍须拒绝(不静默成功)。"""
+    leaves: list[object] = [{"id": f"l{i}", "sql": "select 1"} for i in range(6)]
+    plan = {"title": "t", "sections": [{"id": "c1", "children": [*leaves, "garbage"]}]}
+    with pytest.raises(ValueError, match="plan 叶子条目畸形"):
+        _flatten_plan(plan)
 
 
 def test_extract_json_fenced() -> None:

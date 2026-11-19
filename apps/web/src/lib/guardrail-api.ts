@@ -3,9 +3,8 @@
 import type { components } from "./api-types.gen";
 import { api } from "./api";
 
-export type RuleListOut = components["schemas"]["RuleListOut"];
-export type GuardrailRuleOut = components["schemas"]["GuardrailRuleOut"];
-export type GuardrailAuditPageOut = components["schemas"]["GuardrailAuditPageOut"];
+type RuleListOut = components["schemas"]["RuleListOut"];
+type GuardrailAuditPageOut = components["schemas"]["GuardrailAuditPageOut"];
 
 export function guardrailRules(): Promise<RuleListOut> {
   return api.get<RuleListOut>("/system/guardrails/rules");
@@ -18,7 +17,7 @@ export function updateGuardrailRule(
   return api.put<void>(`/system/guardrails/rules/${name}`, body);
 }
 
-export interface GuardrailAuditParams {
+interface GuardrailAuditParams {
   page?: number;
   size?: number;
   guardrail_type?: "input" | "output" | "tool_intent";

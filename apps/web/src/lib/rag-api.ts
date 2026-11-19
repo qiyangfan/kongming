@@ -4,11 +4,11 @@ import type { components } from "./api-types.gen";
 import { api } from "./api";
 
 export type KnowledgeItemOut = components["schemas"]["KnowledgeItemOut"];
-export type KnowledgePageOut = components["schemas"]["KnowledgePageOut"];
+type KnowledgePageOut = components["schemas"]["KnowledgePageOut"];
 export type UploadOut = components["schemas"]["UploadOut"];
 export type FetchOut = components["schemas"]["FetchOut"];
 export type ReindexOut = components["schemas"]["ReindexOut"];
-export type EditTableIn = components["schemas"]["EditTableIn"];
+type EditTableIn = components["schemas"]["EditTableIn"];
 export type SchemasOut = components["schemas"]["SchemasOut"];
 /* 召回试跑(只读验证面)响应 */
 export type RecallProbeOut = components["schemas"]["RecallProbeOut"];
@@ -16,20 +16,29 @@ export type RecallProbeOut = components["schemas"]["RecallProbeOut"];
 export type TeamScope = "all" | "public" | (string & {});
 
 export const ragApi = {
-  page: (page: number, size: number, datasourceKey: string, teamScope?: TeamScope) =>
+  page: (params: { page: number; size: number; datasourceKey: string; teamScope?: TeamScope }) =>
     api.get<KnowledgePageOut>(
-      `/system/rag/tables?page=${page}&size=${size}` +
-        (datasourceKey ? `&datasource_key=${encodeURIComponent(datasourceKey)}` : "") +
-        (teamScope && teamScope !== "all" ? `&team_scope=${encodeURIComponent(teamScope)}` : ""),
+      `/system/rag/tables?page=${params.page}&size=${params.size}` +
+        (params.datasourceKey
+          ? `&datasource_key=${encodeURIComponent(params.datasourceKey)}`
+          : "") +
+        (params.teamScope && params.teamScope !== "all"
+          ? `&team_scope=${encodeURIComponent(params.teamScope)}`
+          : ""),
     ),
   allowedSchemas: (datasourceKey: string) =>
     api.get<SchemasOut>(`/system/rag/schemas?datasource_key=${encodeURIComponent(datasourceKey)}`),
-  upload: (file: File, datasourceKey: string, schemaName: string, teamId?: string | null) => {
+  upload: (params: {
+    file: File;
+    datasourceKey: string;
+    schemaName: string;
+    teamId?: string | null;
+  }) => {
     const form = new FormData();
-    form.append("file", file);
-    form.append("datasource_key", datasourceKey);
-    form.append("schema_name", schemaName);
-    if (teamId) form.append("team_id", teamId);
+    form.append("file", params.file);
+    form.append("datasource_key", params.datasourceKey);
+    form.append("schema_name", params.schemaName);
+    if (params.teamId) form.append("team_id", params.teamId);
     return api.postForm<UploadOut>("/system/rag/documents/upload", form);
   },
   remove: (id: string) => api.delete<void>(`/system/rag/tables/${id}`),

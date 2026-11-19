@@ -75,34 +75,50 @@ def _parse_outcome(
             duration_ms=duration_ms,
             exit_code=exit_code,
         )
-    try:
-        parsed = json.loads(last_line[len(PROTOCOL_PREFIX) :])
-        if not isinstance(parsed, dict):
-            raise ValueError("协议体非对象")
-        body = cast("dict[str, Any]", parsed)
-        # 协议字段取值全收敛:伪造协议行的 int 转换失败不得逃逸(端口零抛出契约)
-        data_rows = int(body.get("data_rows") or 0)
-        data_cols = int(body.get("data_cols") or 0)
-        images_raw = body.get("images")
-        images = (
-            [str(i) for i in cast("list[object]", images_raw) if isinstance(i, str)]
-            if isinstance(images_raw, list)
-            else []
-        )
-        # 宿主复核(伪造/篡改面):v1 至多 1 张,单张 base64 ≤500KB
-        images = [i for i in images[:1] if len(i) <= 500 * 1024]
-        stdout_val = str(body.get("stdout") or "")
-        error_val = body.get("error")
-        note_val = body.get("image_note")
-        preview_val = body.get("result_preview")
-        status_val = str(body.get("status") or "")
-    except (json.JSONDecodeError, ValueError, TypeError):
+    body = _decode_protocol_body(last_line)
+    if body is None:
         return SandboxOutcome(
             status="ERROR",
             error="沙箱协议行畸形",
             duration_ms=duration_ms,
             exit_code=exit_code,
         )
+    try:
+        return _body_outcome(body, duration_ms=duration_ms, exit_code=exit_code)
+    except (TypeError, ValueError):
+        # 伪造协议行的字段转换失败不得逃逸(端口零抛出契约)
+        return SandboxOutcome(
+            status="ERROR",
+            error="沙箱协议行畸形",
+            duration_ms=duration_ms,
+            exit_code=exit_code,
+        )
+
+
+def _decode_protocol_body(last_line: str) -> dict[str, Any] | None:
+    """解析协议行对象体;非对象或 JSON 畸形返回 None(不抛出)。"""
+    try:
+        parsed = json.loads(last_line[len(PROTOCOL_PREFIX) :])
+        if not isinstance(parsed, dict):
+            raise ValueError("协议体非对象")
+        return cast("dict[str, Any]", parsed)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return None
+
+
+def _body_outcome(
+    body: dict[str, Any], *, duration_ms: int, exit_code: int | None
+) -> SandboxOutcome:
+    """协议体字段收敛为结局对象;字段取值异常上抛,由 _parse_outcome 归畸形。"""
+    # 协议字段取值全收敛:伪造协议行的 int 转换失败不得逃逸(端口零抛出契约)
+    data_rows = int(body.get("data_rows") or 0)
+    data_cols = int(body.get("data_cols") or 0)
+    images = _protocol_images(body.get("images"))
+    stdout_val = str(body.get("stdout") or "")
+    error_val = body.get("error")
+    note_val = body.get("image_note")
+    preview_val = body.get("result_preview")
+    status_val = str(body.get("status") or "")
     return SandboxOutcome(
         status="SUCCESS" if status_val == "SUCCESS" else "ERROR",
         stdout=stdout_val,
@@ -115,6 +131,16 @@ def _parse_outcome(
         duration_ms=duration_ms,
         exit_code=exit_code,
     )
+
+
+def _protocol_images(images_raw: object) -> list[str]:
+    """协议 images 字段收敛:仅取字符串项,宿主复核 v1 至多 1 张、单张 base64 ≤500KB。"""
+    images = (
+        [str(i) for i in cast("list[object]", images_raw) if isinstance(i, str)]
+        if isinstance(images_raw, list)
+        else []
+    )
+    return [i for i in images[:1] if len(i) <= 500 * 1024]
 
 
 class PodmanSandboxRunner:
@@ -178,6 +204,18 @@ class PodmanSandboxRunner:
             )
             await asyncio.wait_for(killer.wait(), timeout=5)
 
+    async def _terminate(
+        self, name: str, proc: asyncio.subprocess.Process, *, wait: bool = True
+    ) -> None:
+        """杀容器本体并回收子进程;取消路径不等待(取消即退出)。"""
+        await self._kill_container(name)
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        if wait:
+            # wait 裹超时保持防御对称(SIGKILL 秒回,裹 5s 防极端滞留)
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(proc.wait(), timeout=5)
+
     async def run(self, *, code: str, data: dict[str, object] | None) -> SandboxOutcome:
         started = time.monotonic()
         payload = json.dumps({"code": code, "data": data}, ensure_ascii=False, default=str).encode(
@@ -228,12 +266,7 @@ class PodmanSandboxRunner:
         try:
             stdout_b, stderr_b = await asyncio.wait_for(_exchange(), timeout=self._timeout)
         except TimeoutError:
-            await self._kill_container(name)  # 先杀容器本体(conmon 托管)
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
-            # wait 裹超时保持防御对称(SIGKILL 秒回,裹 5s 防极端滞留)
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(proc.wait(), timeout=5)
+            await self._terminate(name, proc)  # 先杀容器本体(conmon 托管)
             return SandboxOutcome(
                 status="TIMEOUT",
                 error=f"执行超 {self._timeout}s 上限已终止",
@@ -241,11 +274,7 @@ class PodmanSandboxRunner:
             )
         except _StreamOverflow:
             # 输出洪水——杀容器收敛 RESOURCE_LIMIT(资源滥用类)
-            await self._kill_container(name)
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(proc.wait(), timeout=5)
+            await self._terminate(name, proc)
             log.warning("沙箱输出超宿主上限,已终止 name=%s", name)
             return SandboxOutcome(
                 status="RESOURCE_LIMIT",
@@ -254,14 +283,10 @@ class PodmanSandboxRunner:
             )
         except asyncio.CancelledError:
             # 停机/取消窗口也必须杀容器本体(conmon 托管不受 CLI 生死)
-            await self._kill_container(name)
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
+            await self._terminate(name, proc, wait=False)
             raise
         except Exception as e:  # 管道断裂等通信故障
-            await self._kill_container(name)
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
+            await self._terminate(name, proc)
             log.error("沙箱通信故障", exc_info=True)
             return SandboxOutcome(
                 status="ERROR",

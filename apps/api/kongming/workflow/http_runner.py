@@ -44,6 +44,37 @@ def _is_denied_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
+def _parse_literal_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """字面 IP 判定;域名形态返回 None(须走 DNS)。"""
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        return None
+
+
+async def _pin_resolved_address(host: str, port: int) -> str:
+    """域名解析后全量判定(任一落入拒绝段即拒),返回首个通过地址作钉扎目标。"""
+    try:
+        infos = await _resolve(host, port)
+    except socket.gaierror as e:
+        raise SsrFBlocked(f"域名解析失败: {host}") from e
+    if not infos:
+        raise SsrFBlocked(f"域名无解析结果: {host}")
+    pinned: str | None = None
+    for info in infos:
+        addr = info[4][0]
+        resolved = _parse_literal_ip(addr)
+        if resolved is None:
+            raise SsrFBlocked(f"解析结果非法: {addr}")
+        if _is_denied_ip(resolved):
+            raise SsrFBlocked(f"{host} 解析到拒绝段地址: {addr}")
+        if pinned is None:
+            pinned = str(resolved)
+    if pinned is None:  # infos 非空且全部通过判定,防御分支
+        raise SsrFBlocked(f"{host} 无可用解析结果")
+    return pinned
+
+
 async def assert_url_allowed(url: str) -> str:
     """SSRF 判定(纯函数+DNS 解析):scheme/host/解析地址三层。
 
@@ -57,35 +88,14 @@ async def assert_url_allowed(url: str) -> str:
     if not host:
         raise SsrFBlocked("URL 缺 host")
     # 字面 IP 直判(不经 DNS)
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        ip = None
+    ip = _parse_literal_ip(host)
     if ip is not None:
         if _is_denied_ip(ip):
             raise SsrFBlocked(f"目标地址在拒绝段: {host}")
         return str(ip)
-    # 域名:解析后全量判定(任一落入拒绝段即拒),首个通过地址作钉扎目标
-    try:
-        infos = await _resolve(host, parsed.port or (443 if parsed.scheme == "https" else 80))
-    except socket.gaierror as e:
-        raise SsrFBlocked(f"域名解析失败: {host}") from e
-    if not infos:
-        raise SsrFBlocked(f"域名无解析结果: {host}")
-    pinned: str | None = None
-    for info in infos:
-        addr = info[4][0]
-        try:
-            resolved = ipaddress.ip_address(addr)
-        except ValueError:
-            raise SsrFBlocked(f"解析结果非法: {addr}") from None
-        if _is_denied_ip(resolved):
-            raise SsrFBlocked(f"{host} 解析到拒绝段地址: {addr}")
-        if pinned is None:
-            pinned = str(resolved)
-    if pinned is None:  # infos 非空且全部通过判定,防御分支
-        raise SsrFBlocked(f"{host} 无可用解析结果")
-    return pinned
+    return await _pin_resolved_address(
+        host, parsed.port or (443 if parsed.scheme == "https" else 80)
+    )
 
 
 def assert_host_allowed_sync(host: str, port: int) -> None:

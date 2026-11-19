@@ -15,25 +15,69 @@ import {
 import {
   EXPERT_KEY,
   FREQ_OPTIONS,
-  WEEKDAY_LABELS,
   parseCronToSchedule,
   scheduleFromKey,
   scheduleToCron,
   scheduleToKey,
   type Schedule,
 } from "@/lib/cron-schedule";
-
-const pad2 = (v: number) => String(v).padStart(2, "0");
-
-const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => i);
-const MINUTE_OPTIONS = Array.from({ length: 60 }, (_, i) => i);
-const MONTH_DAY_OPTIONS = Array.from({ length: 31 }, (_, i) => i + 1);
-const WEEKDAY_OPTIONS = [0, 1, 2, 3, 4, 5, 6];
+import { ScheduleParams } from "@/components/schedule-param-fields";
 
 type SchedulePickerProps = {
   value: string;
   onChange: (expr: string) => void;
 };
+
+/* 频率下拉：按间隔/按日历分组，末尾单列「cron 表达式」高级项。 */
+function FrequencySelect({
+  selectValue,
+  onPick,
+}: {
+  selectValue: string;
+  onPick: (key: string) => void;
+}) {
+  return (
+    <Select value={selectValue} onValueChange={onPick}>
+      <SelectTrigger id="tg-schedule" aria-label="调度频率" className="w-full">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {(["interval", "calendar"] as const).map((group) => (
+          <SelectGroup key={group}>
+            <SelectLabel>{group === "interval" ? "按间隔" : "按日历"}</SelectLabel>
+            {FREQ_OPTIONS.filter((o) => o.group === group).map((o) => (
+              <SelectItem key={o.key} value={o.key}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        ))}
+        <SelectGroup>
+          <SelectLabel>高级</SelectLabel>
+          <SelectItem value={EXPERT_KEY}>cron 表达式</SelectItem>
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  );
+}
+
+/* 高级模式：直接编辑五字段 cron 原文。 */
+function CronInput({ value, onChange }: { value: string; onChange: (expr: string) => void }) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="tg-cron">cron 表达式</Label>
+      <Input
+        id="tg-cron"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="font-mono"
+        autoComplete="off"
+        placeholder="分 时 日 月 周,如 0 9 * * 1-5"
+      />
+      <p className="text-xs text-muted-foreground">五字段:分 时 日 月 周;日与周仅其一可为 *。</p>
+    </div>
+  );
+}
 
 export function SchedulePicker({ value, onChange }: SchedulePickerProps) {
   const [schedule, setSchedule] = useState<Schedule>({ kind: "daily", hour: 9, minute: 0 });
@@ -70,220 +114,35 @@ export function SchedulePicker({ value, onChange }: SchedulePickerProps) {
     if (next) emit(next);
   };
 
-  // Radix BubbleSelect 缺陷防御:受控值在挂载后变化(编辑回显)且下拉从未
-  // 打开时,其隐藏原生 select 无 options,同步 change 事件回落为 "",直接
-  // 忽略,防 Number("")=0 静默打掉反解回显值。
-  const guardNum = (fn: (v: number) => void) => (v: string) => {
-    if (v === "") return;
-    fn(Number(v));
+  // 高级模式编辑时同步推进回流标记,避免自身输入被当作外部设值再解析
+  const changeCron = (expr: string) => {
+    lastEmitted.current = expr;
+    onChange(expr);
   };
-
-  const numSelect = (
-    label: string,
-    options: number[],
-    current: number,
-    onPick: (v: number) => void,
-    width: string,
-  ) => (
-    <Select value={String(current)} onValueChange={guardNum(onPick)}>
-      <SelectTrigger aria-label={label} className={width}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((v) => (
-          <SelectItem key={v} value={String(v)}>
-            {pad2(v)}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-
-  const renderParams = () => {
-    switch (schedule.kind) {
-      case "interval":
-        return null;
-      case "hourly":
-        return (
-          <>
-            <span>每小时第</span>
-            {numSelect(
-              "分钟",
-              MINUTE_OPTIONS,
-              schedule.minute,
-              (minute) => emit({ ...schedule, minute }),
-              "w-20",
-            )}
-            <span>分触发</span>
-          </>
-        );
-      case "daily":
-        return (
-          <>
-            <span>每天</span>
-            {numSelect(
-              "小时",
-              HOUR_OPTIONS,
-              schedule.hour,
-              (hour) => emit({ ...schedule, hour }),
-              "w-20",
-            )}
-            <span>时</span>
-            {numSelect(
-              "分钟",
-              MINUTE_OPTIONS,
-              schedule.minute,
-              (minute) => emit({ ...schedule, minute }),
-              "w-20",
-            )}
-            <span>分触发</span>
-          </>
-        );
-      case "weekly":
-        return (
-          <>
-            <span>每周</span>
-            <Select
-              value={String(schedule.weekday)}
-              onValueChange={guardNum((weekday) => emit({ ...schedule, weekday }))}
-            >
-              <SelectTrigger aria-label="星期" className="w-24">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {WEEKDAY_OPTIONS.map((v) => (
-                  <SelectItem key={v} value={String(v)}>
-                    {WEEKDAY_LABELS[v]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {numSelect(
-              "小时",
-              HOUR_OPTIONS,
-              schedule.hour,
-              (hour) => emit({ ...schedule, hour }),
-              "w-20",
-            )}
-            <span>时</span>
-            {numSelect(
-              "分钟",
-              MINUTE_OPTIONS,
-              schedule.minute,
-              (minute) => emit({ ...schedule, minute }),
-              "w-20",
-            )}
-            <span>分触发</span>
-          </>
-        );
-      case "workday":
-        return (
-          <>
-            <span>周一至周五</span>
-            {numSelect(
-              "小时",
-              HOUR_OPTIONS,
-              schedule.hour,
-              (hour) => emit({ ...schedule, hour }),
-              "w-20",
-            )}
-            <span>时</span>
-            {numSelect(
-              "分钟",
-              MINUTE_OPTIONS,
-              schedule.minute,
-              (minute) => emit({ ...schedule, minute }),
-              "w-20",
-            )}
-            <span>分触发</span>
-          </>
-        );
-      case "monthly":
-        return (
-          <>
-            <span>每月</span>
-            {numSelect(
-              "日期",
-              MONTH_DAY_OPTIONS,
-              schedule.monthDay,
-              (monthDay) => emit({ ...schedule, monthDay }),
-              "w-20",
-            )}
-            <span>日</span>
-            {numSelect(
-              "小时",
-              HOUR_OPTIONS,
-              schedule.hour,
-              (hour) => emit({ ...schedule, hour }),
-              "w-20",
-            )}
-            <span>时</span>
-            {numSelect(
-              "分钟",
-              MINUTE_OPTIONS,
-              schedule.minute,
-              (minute) => emit({ ...schedule, minute }),
-              "w-20",
-            )}
-            <span>分触发</span>
-          </>
-        );
-    }
-  };
-
-  const params = renderParams();
 
   return (
     <div className="space-y-3">
       <div className="space-y-1.5">
         <Label htmlFor="tg-schedule">调度频率</Label>
-        <Select value={expert ? EXPERT_KEY : scheduleToKey(schedule)} onValueChange={pick}>
-          <SelectTrigger id="tg-schedule" aria-label="调度频率" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(["interval", "calendar"] as const).map((group) => (
-              <SelectGroup key={group}>
-                <SelectLabel>{group === "interval" ? "按间隔" : "按日历"}</SelectLabel>
-                {FREQ_OPTIONS.filter((o) => o.group === group).map((o) => (
-                  <SelectItem key={o.key} value={o.key}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            ))}
-            <SelectGroup>
-              <SelectLabel>高级</SelectLabel>
-              <SelectItem value={EXPERT_KEY}>cron 表达式</SelectItem>
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+        <FrequencySelect
+          selectValue={expert ? EXPERT_KEY : scheduleToKey(schedule)}
+          onPick={pick}
+        />
       </div>
       {expert ? (
-        <div className="space-y-1.5">
-          <Label htmlFor="tg-cron">cron 表达式</Label>
-          <Input
-            id="tg-cron"
-            value={value}
-            onChange={(e) => {
-              lastEmitted.current = e.target.value;
-              onChange(e.target.value);
-            }}
-            className="font-mono"
-            autoComplete="off"
-            placeholder="分 时 日 月 周,如 0 9 * * 1-5"
-          />
-          <p className="text-xs text-muted-foreground">
-            五字段:分 时 日 月 周;日与周仅其一可为 *。
-          </p>
-        </div>
+        <CronInput value={value} onChange={changeCron} />
       ) : (
-        params !== null && (
-          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            {params}
-          </div>
-        )
+        <ParamsRow schedule={schedule} emit={emit} />
       )}
     </div>
+  );
+}
+
+/* 非高级模式的参数行；频率类型下无参数（如按间隔）时整行不渲染。 */
+function ParamsRow({ schedule, emit }: { schedule: Schedule; emit: (s: Schedule) => void }) {
+  const params = <ScheduleParams schedule={schedule} emit={emit} />;
+  if (params === null) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">{params}</div>
   );
 }

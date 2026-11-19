@@ -18,8 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kongming.auth.repository import SqlOperLogRepo, SqlPermRepo
 from kongming.auth.router import current_user, require_perm
 from kongming.chat.agent_client import AgentClient
+from kongming.chat.dependencies import get_agent_client
 from kongming.chat.repository import ChatRepository
-from kongming.chat.router import get_agent_client
 from kongming.db import get_session
 from kongming.internal import service as internal_service
 from kongming.internal.service import InvalidDatasource, TenantBindingForbidden, TenantNotFound

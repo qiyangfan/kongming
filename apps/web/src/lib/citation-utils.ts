@@ -15,6 +15,30 @@ export function isCitationKeyShape(token: string): boolean {
   return SUFFIX_RE.test(token.slice(idx + 1));
 }
 
+/** 追加一条标记片段:正文取完整标记【…】,键取括号内去空白后的内容 */
+function pushMarker(
+  out: { text: string; key: string | null; start: number; end: number }[],
+  m: RegExpExecArray,
+): void {
+  out.push({
+    text: m[0],
+    key: m[1].trim(),
+    start: m.index,
+    end: m.index + m[0].length,
+  });
+}
+
+/** 追加两个位置之间的正文片段(空区间不追加) */
+function pushPlainText(
+  out: { text: string; key: string | null; start: number; end: number }[],
+  text: string,
+  range: { start: number; end: number },
+): void {
+  if (range.start >= range.end) return;
+  const { start, end } = range;
+  out.push({ text: text.slice(start, end), key: null, start, end });
+}
+
 /** 把正文按【…】标记切段(纯函数;供角标渲染与 vitest 断言) */
 export function splitCitationMarkers(
   text: string,
@@ -24,19 +48,10 @@ export function splitCitationMarkers(
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    if (m.index > last) {
-      out.push({ text: text.slice(last, m.index), key: null, start: last, end: m.index });
-    }
-    out.push({
-      text: m[0],
-      key: m[1].trim(),
-      start: m.index,
-      end: m.index + m[0].length,
-    });
+    pushPlainText(out, text, { start: last, end: m.index });
+    pushMarker(out, m);
     last = m.index + m[0].length;
   }
-  if (last < text.length) {
-    out.push({ text: text.slice(last), key: null, start: last, end: text.length });
-  }
+  pushPlainText(out, text, { start: last, end: text.length });
   return out;
 }

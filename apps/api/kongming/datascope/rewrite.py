@@ -73,23 +73,35 @@ def apply_filter_statement(
         return sql, {}
     qualifier = from_.this.alias_or_name
 
+    params, placeholders = _bind_values(values)
+    predicate = _build_predicate(filter_type, column or "", qualifier, placeholders)
+
+    existing = parsed.args.get("where")
+    new_predicate = predicate
+    combined = exp.And(this=existing.this, expression=new_predicate) if existing else new_predicate
+    parsed.set("where", exp.Where(this=combined))
+    return parsed.sql(dialect=_NamedParamPG), params
+
+
+def _bind_values(values: Sequence[object]) -> tuple[dict[str, object], list[exp.Placeholder]]:
+    """过滤值 → 命名占位符序列与绑定参数字典(名为 _PARAM_PREFIX + 序号)。"""
     params: dict[str, object] = {}
     placeholders: list[exp.Placeholder] = []
     for i, value in enumerate(values):
         name = f"{_PARAM_PREFIX}{i}"
         placeholders.append(exp.Placeholder(this=name))
         params[name] = value
-    col = exp.column(column or "", table=qualifier or None)
-    predicate: Expr
-    if filter_type == FilterType.USER_EQ.value:
-        predicate = exp.EQ(this=col, expression=placeholders[0])
-    else:  # DEPT_IN
-        predicate = exp.In(this=col, expressions=placeholders)
+    return params, placeholders
 
-    existing = parsed.args.get("where")
-    combined = exp.And(this=existing.this, expression=predicate) if existing else predicate
-    parsed.set("where", exp.Where(this=combined))
-    return parsed.sql(dialect=_NamedParamPG), params
+
+def _build_predicate(
+    filter_type: str, column: str, qualifier: str, placeholders: list[exp.Placeholder]
+) -> Expr:
+    """按过滤意图构造谓词:USER_EQ 取首占位符等值,DEPT_IN 全部占位符 IN。"""
+    col = exp.column(column, table=qualifier or None)
+    if filter_type == FilterType.USER_EQ.value:
+        return exp.EQ(this=col, expression=placeholders[0])
+    return exp.In(this=col, expressions=placeholders)
 
 
 def apply_filter(sql: str, flt: ScopeFilter) -> tuple[str, dict[str, object]]:

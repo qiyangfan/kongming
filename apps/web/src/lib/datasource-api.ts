@@ -4,14 +4,14 @@ import type { components } from "./api-types.gen";
 import { api } from "./api";
 
 export type DatasourceItemOut = components["schemas"]["DatasourceItemOut"];
-export type DatasourcePageOut = components["schemas"]["DatasourcePageOut"];
+type DatasourcePageOut = components["schemas"]["DatasourcePageOut"];
 export type DatasourceOptionOut = components["schemas"]["DatasourceOptionOut"];
-export type DatasourceCreateIn = components["schemas"]["DatasourceCreateIn"];
-export type DatasourceUpdateIn = components["schemas"]["DatasourceUpdateIn"];
-export type TestConnectionIn = components["schemas"]["TestConnectionIn"];
+type DatasourceCreateIn = components["schemas"]["DatasourceCreateIn"];
+type DatasourceUpdateIn = components["schemas"]["DatasourceUpdateIn"];
+type TestConnectionIn = components["schemas"]["TestConnectionIn"];
 export type TestConnectionOut = components["schemas"]["TestConnectionOut"];
 
-export type CreatedId = { id: string };
+type CreatedId = { id: string };
 
 export const datasourceApi = {
   page: (page: number, size: number, keyword: string) =>

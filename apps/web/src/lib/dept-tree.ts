@@ -2,7 +2,7 @@
 
 import type { DeptNodeOut } from "@/lib/system-api";
 
-export type FlatDept = { id: string; label: string; depth: number };
+type FlatDept = { id: string; label: string; depth: number };
 
 export function flattenDeptTree(nodes: DeptNodeOut[] | undefined, depth = 0): FlatDept[] {
   return (nodes ?? []).flatMap((n) => [

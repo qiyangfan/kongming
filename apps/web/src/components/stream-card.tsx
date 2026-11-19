@@ -69,7 +69,7 @@ function mergeStages(list: StreamStageOut[]): StreamStageOut[] {
   return out;
 }
 
-export interface StreamCardProps {
+interface StreamCardProps {
   stages: StreamStageOut[];
   sql: string | null;
   summary: string;

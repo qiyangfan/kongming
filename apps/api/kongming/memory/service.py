@@ -27,6 +27,35 @@ class TeamRoles(Protocol):
     async def role_map(self, user_id: str) -> dict[str, str]: ...
 
 
+def _merge_embedded_slots(raw: dict[str, object], src: dict[str, object]) -> None:
+    """兼容抽取结果以 content 承载槽位 JSON 的形态:解析出的槽位并入 raw。"""
+    content = str(src.get("content") or "").strip()
+    if not content.startswith("{") or not content.endswith("}"):
+        return
+    import json as _json
+
+    try:
+        obj = _json.loads(content)
+    except Exception:
+        obj = {}
+    if isinstance(obj, dict):
+        _merge_slot_fields(raw, cast("dict[str, object]", obj))
+
+
+def _merge_slot_fields(raw: dict[str, object], src: dict[str, object]) -> None:
+    """把来源中的合法槽位并入 raw;含敏感内容的槽位整项丢弃(脏记忆不作数)。"""
+    for k, v in src.items():
+        if k not in prefs_mod.SLOT_KEYS or v in (None, ""):
+            continue
+        if isinstance(v, str) and contains_sensitive(v):
+            continue
+        if isinstance(v, list) and any(
+            contains_sensitive(str(x)) for x in cast("list[object]", v) if x is not None
+        ):
+            continue
+        raw[k] = v
+
+
 class MemoryService:
     def __init__(
         self,
@@ -146,30 +175,8 @@ class MemoryService:
         """
         raw: dict[str, object] = {}
         for c in candidates[:3]:
-            for k, v in c.items():
-                if k in prefs_mod.SLOT_KEYS and v not in (None, ""):
-                    if isinstance(v, str) and contains_sensitive(v):
-                        continue
-                    if isinstance(v, list) and any(
-                        contains_sensitive(str(x)) for x in cast("list[object]", v) if x is not None
-                    ):
-                        continue
-                    raw[k] = v
-            # 兼容抽取结果以 content 承载槽位 JSON 的形态
-            content = str(c.get("content") or "").strip()
-            if content.startswith("{") and content.endswith("}"):
-                import json as _json
-
-                try:
-                    obj = _json.loads(content)
-                except Exception:
-                    obj = {}
-                if isinstance(obj, dict):
-                    for k, v in cast("dict[str, object]", obj).items():
-                        if k in prefs_mod.SLOT_KEYS and v not in (None, ""):
-                            if isinstance(v, str) and contains_sensitive(v):
-                                continue
-                            raw[k] = v
+            _merge_slot_fields(raw, c)
+            _merge_embedded_slots(raw, c)
         ok = await self.apply_implicit_patch(
             user_id=user_id, tenant_id=tenant_id, raw=raw, base_revision=base_revision
         )

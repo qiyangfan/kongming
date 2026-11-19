@@ -18,9 +18,10 @@ from kongming.config import (
     validated_fulltext_ts_config,
 )
 from kongming.rag.cache import ContextCache, _ctx_key  # pyright: ignore[reportPrivateUsage]
+from kongming.rag.catalog import assert_fulltext_ts_config_available
 from kongming.rag.documents_repo import SqlDocumentRepo
 from kongming.rag.models import RagContext
-from kongming.rag.repository import RagRepository, assert_fulltext_ts_config_available
+from kongming.rag.repository import RagRepository
 
 # ============ 1.1 配置单点:白名单枚举/缺省/非法三形态 ============
 
@@ -322,7 +323,7 @@ _CHUNK: dict[str, object] = {
 
 async def _upsert_sample(repo: RagRepository) -> None:
     """桩会话 upsert(SQL 对拍与 zhparser 变体共用同一写入材料)。"""
-    await repo.upsert_table(
+    await repo.entries.upsert_table(
         tenant_id="t",
         datasource_key="d",
         schema_name="public",
@@ -346,7 +347,7 @@ async def test_recall_fulltext_sql_identical_with_default_simple() -> None:
     """桩恒空=AND 零命中场景 → 渲染 AND+内容词兜底两条 SQL(轮次
     纪律:兜底轮只在零命中后发生;两轮仅谓词行异,主体逐字同构)。"""
     cap = _CaptureSession()
-    await RagRepository(cast("Any", cap)).recall_fulltext(
+    await RagRepository(cast("Any", cap)).recall.recall_fulltext(
         tenant_id="t", datasource_key="d", question="q"
     )
     assert cap.sqls == [_EXPECTED_RECALL_FULLTEXT_SQL, _EXPECTED_RECALL_FULLTEXT_OR_SQL]
@@ -357,7 +358,7 @@ async def test_recall_fulltext_and_hit_skips_fallback_round() -> None:
     有命中 → 仅发 1 条 SQL,单内容词条目不经兜底轮混入。"""
     hit = types.SimpleNamespace(schema_name="public", table_name="tbl", score=0.5)
     cap = _ScriptedSession([[hit]])
-    hits = await RagRepository(cast("Any", cap)).recall_fulltext(
+    hits = await RagRepository(cast("Any", cap)).recall.recall_fulltext(
         tenant_id="t", datasource_key="d", question="q"
     )
     assert len(cap.sqls) == 1 and cap.sqls[0] == _EXPECTED_RECALL_FULLTEXT_SQL
@@ -374,7 +375,7 @@ async def test_upsert_sql_switches_to_zhparser_single_point() -> None:
 
 async def test_recall_fulltext_sql_switches_to_zhparser_single_point() -> None:
     cap = _CaptureSession()
-    await RagRepository(cast("Any", cap), ts_config="zhparser").recall_fulltext(
+    await RagRepository(cast("Any", cap), ts_config="zhparser").recall.recall_fulltext(
         tenant_id="t", datasource_key="d", question="q"
     )
     assert cap.sqls == [
@@ -489,7 +490,7 @@ async def test_zhparser_tokenization_hits_table_description(session: AsyncSessio
     """
     tid = await _mk_tenant(session, "zh_ft")
     repo = RagRepository(session, ts_config="zhparser")
-    await repo.upsert_table(
+    await repo.entries.upsert_table(
         tenant_id=tid,
         datasource_key="default",
         schema_name="public",
@@ -502,7 +503,9 @@ async def test_zhparser_tokenization_hits_table_description(session: AsyncSessio
         alias="",
     )
     await repo.commit()
-    hits = await repo.recall_fulltext(tenant_id=tid, datasource_key="default", question="查询客户")
+    hits = await repo.recall.recall_fulltext(
+        tenant_id=tid, datasource_key="default", question="查询客户"
+    )
     assert any(h.table_name == "customer_order" and h.source == "fulltext" for h in hits)
 
 
@@ -544,7 +547,7 @@ async def test_zhparser_contentword_fallback_hits_after_and_miss(
     的谓词字面量与 evals 基线守卫。"""
     tid = await _mk_tenant(session, "zh_cwfb")
     repo = RagRepository(session, ts_config="zhparser")
-    await repo.upsert_table(
+    await repo.entries.upsert_table(
         tenant_id=tid,
         datasource_key="default",
         schema_name="public",
@@ -557,7 +560,7 @@ async def test_zhparser_contentword_fallback_hits_after_and_miss(
         alias="",
     )
     await repo.commit()
-    hits = await repo.recall_fulltext(
+    hits = await repo.recall.recall_fulltext(
         tenant_id=tid, datasource_key="default", question="有多少部影片"
     )
     assert any(h.table_name == "film_info" and h.source == "fulltext" for h in hits)
@@ -596,7 +599,7 @@ async def test_simple_default_chinese_whole_sentence_misses(session: AsyncSessio
     中文注释不命中——问题陈述的原始形态与基线。"""
     tid = await _mk_tenant(session, "simple_ft")
     repo = RagRepository(session)  # 缺省 simple
-    await repo.upsert_table(
+    await repo.entries.upsert_table(
         tenant_id=tid,
         datasource_key="default",
         schema_name="public",
@@ -609,5 +612,7 @@ async def test_simple_default_chinese_whole_sentence_misses(session: AsyncSessio
         alias="",
     )
     await repo.commit()
-    hits = await repo.recall_fulltext(tenant_id=tid, datasource_key="default", question="查询客户")
+    hits = await repo.recall.recall_fulltext(
+        tenant_id=tid, datasource_key="default", question="查询客户"
+    )
     assert hits == []

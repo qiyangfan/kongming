@@ -9,7 +9,7 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.chat.router import get_agent_client
+from kongming.chat.dependencies import get_agent_client
 from kongming.config import get_settings
 from kongming.datasource.cipher import get_cipher
 from kongming.main import app

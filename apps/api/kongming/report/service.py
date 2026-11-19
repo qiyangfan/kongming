@@ -33,6 +33,44 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _apply_section_edits(
+    nodes: list[SectionNode], section_edits: list[dict[str, object]]
+) -> tuple[list[SectionNode], int]:
+    """按 section_id 覆盖叙述/标题,其余章节原样保留;返回 (章节树, 生效编辑数)。
+
+    越界章节或字段即 ValueError。"""
+    edits = {str(e.get("section_id")): e for e in section_edits if e.get("section_id")}
+    known = {n.section_id for n in nodes}
+    unknown = set(edits) - known
+    if unknown:
+        raise ValueError(f"编辑目标章节不存在: {sorted(unknown)}")
+    edited: list[SectionNode] = []
+    for n in nodes:
+        e = edits.get(n.section_id or "")
+        if e is None:
+            edited.append(n)
+            continue
+        unknown = set(e) - {"section_id", "title", "narrative_md"}
+        if unknown:
+            raise ValueError(f"编辑字段越界: {sorted(unknown)}")
+        edited.append(
+            SectionNode(
+                title=str(e.get("title") or n.title),
+                narrative_md=str(
+                    e.get("narrative_md") if e.get("narrative_md") is not None else n.narrative_md
+                ),
+                bindings=n.bindings,
+                chart=n.chart,
+                section_id=n.section_id,
+                parent_id=n.parent_id,
+                ord=n.ord,
+                data_status=n.data_status,
+                fail_reason=n.fail_reason,
+            )
+        )
+    return edited, len(edits)
+
+
 class ReportService:
     def __init__(
         self,
@@ -240,37 +278,7 @@ class ReportService:
         nodes = [
             section_from_row(r) for r in await self._repo.get_sections(version_id=str(vmeta["id"]))
         ]
-        edits = {str(e.get("section_id")): e for e in section_edits if e.get("section_id")}
-        known = {n.section_id for n in nodes}
-        unknown = set(edits) - known
-        if unknown:
-            raise ValueError(f"编辑目标章节不存在: {sorted(unknown)}")
-        edited: list[SectionNode] = []
-        for n in nodes:
-            e = edits.get(n.section_id or "")
-            if e is None:
-                edited.append(n)
-                continue
-            unknown = set(e) - {"section_id", "title", "narrative_md"}
-            if unknown:
-                raise ValueError(f"编辑字段越界: {sorted(unknown)}")
-            edited.append(
-                SectionNode(
-                    title=str(e.get("title") or n.title),
-                    narrative_md=str(
-                        e.get("narrative_md")
-                        if e.get("narrative_md") is not None
-                        else n.narrative_md
-                    ),
-                    bindings=n.bindings,
-                    chart=n.chart,
-                    section_id=n.section_id,
-                    parent_id=n.parent_id,
-                    ord=n.ord,
-                    data_status=n.data_status,
-                    fail_reason=n.fail_reason,
-                )
-            )
+        edited, edit_count = _apply_section_edits(nodes, section_edits)
         m.validate_tree(edited)
         new_version = await self._repo.cas_version(
             report_id=report_id,
@@ -288,7 +296,7 @@ class ReportService:
         await self._repo.insert_version_with_sections(
             report_id=report_id,
             version=new_version,
-            meta={"edit_base_version": base_version, "edited_sections": len(edits)},
+            meta={"edit_base_version": base_version, "edited_sections": edit_count},
             # 快照原样复制,数据时点继承基线(编辑未重取数,时点≠编辑时刻)
             data_time_point=dtp if isinstance(dtp, datetime) else _now(),
             created_by=user_id,
@@ -318,58 +326,12 @@ class ReportService:
             section_from_row(r) for r in await self._repo.get_sections(version_id=str(vmeta["id"]))
         ]
         # 以最新版本的叶子绑定重执行(全量防御,与 rerun 同源);失败章节如实 MISSING
-        refreshed: list[SectionNode] = []
-        for n in nodes:
-            if not n.bindings:
-                refreshed.append(n)
-                continue
-            new_bindings: list[Binding] = []
-            section_missing = False
-            section_reason: str | None = None
-            for b in n.bindings:
-                verdict, columns, rows, reason = await self._runner.run(
-                    trace_id=trace_id,
-                    tenant_key=tenant_key,
-                    datasource_key=str(report["datasource_key"]),
-                    sql_text=b.sql,
-                    user_id=user_id,
-                )
-                if verdict != "PASS":
-                    section_missing = True
-                    section_reason = reason or verdict
-                    new_bindings.append(
-                        Binding(
-                            sql=b.sql,
-                            status=m.DATA_MISSING,
-                            fail_reason=reason or verdict,
-                        )
-                    )
-                    continue
-                total = len(rows)  # 执行端 limit=cap+1:len>cap 即超限
-                kept = rows[:SNAPSHOT_ROW_LIMIT]
-                new_bindings.append(
-                    Binding(
-                        sql=b.sql,
-                        status=m.DATA_OK,
-                        columns=columns,
-                        rows=kept,
-                        row_count=total,
-                        truncated=total > SNAPSHOT_ROW_LIMIT,
-                    )
-                )
-            refreshed.append(
-                SectionNode(
-                    title=n.title,
-                    narrative_md=n.narrative_md,
-                    bindings=new_bindings,
-                    chart=n.chart,
-                    section_id=n.section_id,
-                    parent_id=n.parent_id,
-                    ord=n.ord,
-                    data_status=m.DATA_MISSING if section_missing else m.DATA_OK,
-                    fail_reason=section_reason,
-                )
+        refreshed = [
+            await self._refresh_section(
+                n, report=report, trace_id=trace_id, tenant_key=tenant_key, user_id=user_id
             )
+            for n in nodes
+        ]
         m.validate_tree(refreshed)
         new_version = await self._repo.claim_next_version(
             report_id=report_id,
@@ -393,6 +355,67 @@ class ReportService:
             status=m.STATUS_READY if m.all_sections_complete(refreshed) else m.STATUS_PARTIAL,
         )
         return new_version
+
+    async def _refresh_section(
+        self,
+        n: SectionNode,
+        *,
+        report: dict[str, Any],
+        trace_id: str,
+        tenant_key: str,
+        user_id: str,
+    ) -> SectionNode:
+        """重执行章节绑定;失败绑定如实记 MISSING,章节状态随绑定汇总。"""
+        if not n.bindings:
+            return n
+        new_bindings = [
+            await self._refresh_binding(
+                b, report=report, trace_id=trace_id, tenant_key=tenant_key, user_id=user_id
+            )
+            for b in n.bindings
+        ]
+        reasons = [b.fail_reason for b in new_bindings if b.status == m.DATA_MISSING]
+        return SectionNode(
+            title=n.title,
+            narrative_md=n.narrative_md,
+            bindings=new_bindings,
+            chart=n.chart,
+            section_id=n.section_id,
+            parent_id=n.parent_id,
+            ord=n.ord,
+            data_status=m.DATA_MISSING if reasons else m.DATA_OK,
+            fail_reason=reasons[-1] if reasons else None,  # 与逐条覆盖口径一致
+        )
+
+    async def _refresh_binding(
+        self,
+        b: Binding,
+        *,
+        report: dict[str, Any],
+        trace_id: str,
+        tenant_key: str,
+        user_id: str,
+    ) -> Binding:
+        """重执行单个绑定(截断上限与执行端 limit=cap+1 探针保持一致)。"""
+        verdict, columns, rows, reason = await self._runner.run(
+            trace_id=trace_id,
+            tenant_key=tenant_key,
+            datasource_key=str(report["datasource_key"]),
+            sql_text=b.sql,
+            user_id=user_id,
+        )
+        if verdict != "PASS":
+            return Binding(sql=b.sql, status=m.DATA_MISSING, fail_reason=reason or verdict)
+        total = len(rows)  # 执行端 limit=cap+1:len>cap 即超限
+        kept = rows[:SNAPSHOT_ROW_LIMIT]
+        return Binding(
+            sql=b.sql,
+            status=m.DATA_OK,
+            columns=columns,
+            rows=kept,
+            row_count=total,
+            truncated=total > SNAPSHOT_ROW_LIMIT,
+        )
 
     # ── 删除/导出 ──
 

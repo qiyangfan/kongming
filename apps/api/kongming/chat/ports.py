@@ -9,7 +9,7 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from kongming.chat.models import Suggestion
+from kongming.chat.models import MessageMeta, Suggestion
 from kongming.rag.ports import QueryHistoryWriter
 
 
@@ -59,12 +59,7 @@ class ChatRepo(Protocol):
         summary: str | None = None,
         status: str,
         attachments: list[dict[str, object]] | None = None,
-        trace_id: str | None = None,  # 轮次质量信号(可选)
-        retry_count: int = 0,
-        resolved_question: str | None = None,
-        prompt_version: str | None = None,
-        fallback_type: str | None = None,
-        stage_trace: list[dict[str, object]] | None = None,
+        meta: MessageMeta | None = None,
     ) -> Coroutine[Any, Any, str]: ...
     async def recent_user_questions(self, session_id: str, *, limit: int = 5) -> list[str]: ...
     async def last_fallback_type(self, session_id: str) -> str | None: ...

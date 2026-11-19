@@ -143,34 +143,38 @@ class DocEntityExtractor:
     def __repr__(self) -> str:  # 凭证不进 repr
         return f"DocEntityExtractor(model={self.model})"
 
+    async def _post_chat(self, system: str, user_content: str) -> str:
+        """单次流式 POST 并按字节闸读满响应正文(不解析)。"""
+        async with httpx.AsyncClient(
+            trust_env=False,  # 出站受控:不采环境代理(与精排级同源)
+            timeout=httpx.Timeout(self._timeout_s),
+            transport=self._transport,
+        ) as client:
+            async with client.stream(
+                "POST",
+                self._endpoint,
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user_content},
+                    ],
+                    "temperature": 0,
+                },
+                headers={"Authorization": f"Bearer {self._api_key}"},
+            ) as resp:
+                resp.raise_for_status()
+                buf = bytearray()
+                async for chunk in resp.aiter_bytes(65536):
+                    buf.extend(chunk)
+                    if len(buf) > _EXTRACT_RESPONSE_CAP:
+                        raise EntityExtractError(_REASON_UNAVAILABLE, "响应超字节闸")
+                return buf.decode("utf-8", errors="replace")
+
     async def _chat(self, system: str, user_content: str) -> str:
         """单次 chat 出站(字节闸内读响应+响应归一);错误归一为 EntityExtractError。"""
         try:
-            async with httpx.AsyncClient(
-                trust_env=False,  # 出站受控:不采环境代理(与精排级同源)
-                timeout=httpx.Timeout(self._timeout_s),
-                transport=self._transport,
-            ) as client:
-                async with client.stream(
-                    "POST",
-                    self._endpoint,
-                    json={
-                        "model": self.model,
-                        "messages": [
-                            {"role": "system", "content": system},
-                            {"role": "user", "content": user_content},
-                        ],
-                        "temperature": 0,
-                    },
-                    headers={"Authorization": f"Bearer {self._api_key}"},
-                ) as resp:
-                    resp.raise_for_status()
-                    buf = bytearray()
-                    async for chunk in resp.aiter_bytes(65536):
-                        buf.extend(chunk)
-                        if len(buf) > _EXTRACT_RESPONSE_CAP:
-                            raise EntityExtractError(_REASON_UNAVAILABLE, "响应超字节闸")
-                    raw = buf.decode("utf-8", errors="replace")
+            raw = await self._post_chat(system, user_content)
             payload = _json_dict(raw, "响应报文畸形(对象缺失)")
             choices = _obj_list(payload.get("choices"), "响应缺 choices")
             if not choices or not isinstance(choices[0], dict):

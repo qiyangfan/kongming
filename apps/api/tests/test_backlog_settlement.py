@@ -189,9 +189,7 @@ async def _run_wf(nodes: list[dict[str, Any]], sql: Any, **kw: Any) -> Any:
     return await run_dag(
         validate_dag({"nodes": nodes}),
         kw.get("inputs", {}),
-        sql=sql,
-        http=_MockHttp(),
-        agent=_MockAgent(),
+        runners=(sql, _MockHttp(), _MockAgent()),
         trace_id="t",
         tenant_key="wf",
         user_id="u",

@@ -6,6 +6,7 @@
 
 import datetime as dt
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import TypedDict
@@ -21,6 +22,18 @@ _DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}")
 # 标识列名信号:num 后缀刻意不入——中文库 order_num(订单数)类计数量是度量
 _ID_NAME = re.compile(r"(?:^|_)(?:id|no|code)$|^id_")
 _PERIOD_NAMES = {"year", "quarter", "month", "week", "day"}
+
+
+@dataclass(frozen=True)
+class MessageMeta:
+    """消息质量观测附属字段(可选;流式/同步/报表路径按需携带)。"""
+
+    trace_id: str | None = None  # 轮次质量信号(三表关联键)
+    retry_count: int = 0
+    resolved_question: str | None = None  # 仅多轮改写实际发生时非空
+    prompt_version: str | None = None  # agent prompt 资产指纹
+    fallback_type: str | None = None  # 兜底轮分类(闲聊/澄清;仅兜底轮非空)
+    stage_trace: list[dict[str, object]] | None = None  # 节点轨迹(流式轮;同步轮 None)
 
 
 @dataclass(frozen=True)
@@ -160,49 +173,87 @@ def suggest_charts(
     y_cols = tuple(columns[i] for i in measures[:_MAX_Y_COLUMNS])
 
     if temporal:
-        t = temporal[0]
-        if not dims:
-            return [ChartCandidate("line", x=columns[t], y=y_cols)]
-        if len(dims) == 1 and card(dims[0]) <= _PIE_MAX_CARDINALITY:
-            return [ChartCandidate("line", x=columns[t], y=y_cols, series=columns[dims[0]])]
-        return []  # T+多维/高基数维:粒度超单图表达,宁缺毋滥
+        return _temporal_candidates(columns, dims, temporal[0], card, y_cols)
 
     if len(dims) == 1:
-        di = dims[0]
-        if card(di) > _BAR_MAX_CARDINALITY:
-            return []
-        cands = [ChartCandidate("bar", x=columns[di], y=y_cols)]
-        first = columns[measures[0]]
-        labels = {str(r[di]) for r in rows if len(r) > di}
-        vals = [r[measures[0]] for r in rows if len(r) > measures[0]]
-        if (
-            card(di) <= _PIE_MAX_CARDINALITY
-            and len(labels) == len(rows)  # 标签唯一(GROUP BY 键语义)
-            and columns[di].lower() not in _PERIOD_NAMES  # 期间维(年份)非构成整体
-            and first.lower() in _additive_outputs(sql)  # 可加聚合才谈构成
-            and all(
-                isinstance(v, (int, float, Decimal)) and not isinstance(v, bool) and v >= 0
-                for v in vals
-            )
-        ):
-            cands.append(ChartCandidate("pie", x=columns[di], y=(first,)))
-        return cands
+        return _single_dim_candidates(columns, rows, dims[0], measures[0], sql, card, y_cols)
 
     if len(dims) == 2 and len(measures) == 1:
         low, high = sorted(dims, key=card)
         # 分组柱语义闸:x 标签须跨系列重复(真 GROUP BY 形状);小表明细行
         # 标签唯一(每行一个 x 值),分组柱退化成逐行摆柱,零候选
-        if (
-            card(low) <= _PIE_MAX_CARDINALITY
+        return (
+            [ChartCandidate("bar", x=columns[high], y=y_cols, series=columns[low])]
+            if card(low) <= _PIE_MAX_CARDINALITY
             and card(high) <= _BAR_MAX_CARDINALITY
             and card(high) < len(rows)
-        ):
-            return [ChartCandidate("bar", x=columns[high], y=y_cols, series=columns[low])]
-        return []
+            else []
+        )
 
-    if not dims and len(measures) >= 2:
-        return [ChartCandidate("scatter", x=columns[measures[0]], y=(columns[measures[1]],))]
-    return []  # 两维多度量/≥3 维等:任何单图必失真,表格即答案
+    # 无维两度量=散点;两维多度量/≥3 维等:任何单图必失真,表格即答案
+    return (
+        [ChartCandidate("scatter", x=columns[measures[0]], y=(columns[measures[1]],))]
+        if not dims and len(measures) >= 2
+        else []
+    )
+
+
+def _temporal_candidates(
+    columns: list[str],
+    dims: list[int],
+    t: int,
+    card: Callable[[int], int],
+    y_cols: tuple[str, ...],
+) -> list[ChartCandidate]:
+    """时间维在前:无分类维=单折线;恰一低基数维=多系列折线;其余零候选。"""
+    if not dims:
+        return [ChartCandidate("line", x=columns[t], y=y_cols)]
+    if len(dims) == 1 and card(dims[0]) <= _PIE_MAX_CARDINALITY:
+        return [ChartCandidate("line", x=columns[t], y=y_cols, series=columns[dims[0]])]
+    return []  # T+多维/高基数维:粒度超单图表达,宁缺毋滥
+
+
+def _single_dim_candidates(
+    columns: list[str],
+    rows: list[list[object]],
+    di: int,
+    measure: int,
+    sql: str,
+    card: Callable[[int], int],
+    y_cols: tuple[str, ...],
+) -> list[ChartCandidate]:
+    """单分类维:基数达标给柱图;构成语义齐备(低基数/标签唯一/非期间维/
+    可加非负)再补饼图。"""
+    if card(di) > _BAR_MAX_CARDINALITY:
+        return []
+    cands = [ChartCandidate("bar", x=columns[di], y=y_cols)]
+    if not _pie_eligible(columns, rows, di, measure, sql, card):
+        return cands
+    cands.append(ChartCandidate("pie", x=columns[di], y=(columns[measure],)))
+    return cands
+
+
+def _pie_eligible(
+    columns: list[str],
+    rows: list[list[object]],
+    di: int,
+    measure: int,
+    sql: str,
+    card: Callable[[int], int],
+) -> bool:
+    """饼图语义闸:构成整体才成立(标签唯一、非期间维、可加聚合且值非负)。"""
+    labels = {str(r[di]) for r in rows if len(r) > di}
+    vals = [r[measure] for r in rows if len(r) > measure]
+    return (
+        card(di) <= _PIE_MAX_CARDINALITY
+        and len(labels) == len(rows)  # 标签唯一(GROUP BY 键语义)
+        and columns[di].lower() not in _PERIOD_NAMES  # 期间维(年份)非构成整体
+        and columns[measure].lower() in _additive_outputs(sql)  # 可加聚合才谈构成
+        and all(
+            isinstance(v, (int, float, Decimal)) and not isinstance(v, bool) and v >= 0
+            for v in vals
+        )
+    )
 
 
 # ============ 结果统计键名用户化 ============

@@ -2,8 +2,8 @@
 
 import { create } from "zustand";
 
-export const DATASOURCE_STORAGE_KEY = "km.datasource";
-export const DEFAULT_DATASOURCE_KEY = "default";
+const DATASOURCE_STORAGE_KEY = "km.datasource";
+const DEFAULT_DATASOURCE_KEY = "default";
 
 interface DatasourceState {
   /** 当前数据源 key;default=内置默认路径(非 sys_datasource 行) */

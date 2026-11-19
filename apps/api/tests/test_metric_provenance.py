@@ -24,7 +24,7 @@ pytestmark = pytest.mark.usefixtures("fake_agent")
 
 @pytest.fixture
 def fake_agent():
-    from kongming.chat.router import get_agent_client
+    from kongming.chat.dependencies import get_agent_client
     from kongming.main import app
 
     holder: dict[str, StreamFakeAgent] = {}

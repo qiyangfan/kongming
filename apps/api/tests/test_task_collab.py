@@ -6,7 +6,7 @@ import json
 from typing import Any, cast
 
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,14 +21,14 @@ from tests.test_task import (  # noqa: F401 —— 助手跨文件复用
 @pytest.fixture
 def no_dispatch(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """派发记录器(与 test_task.py 同款):创建/恢复/批准的 _schedule_run 改为记录。"""
-    from kongming.task import router as task_router
+    from kongming.task import dispatch as task_dispatch
 
     calls: list[str] = []
 
     def _record(*, task_id: str, epoch: int | None = None) -> None:
         calls.append(task_id)
 
-    monkeypatch.setattr(task_router, "_schedule_run", _record)
+    monkeypatch.setattr(task_dispatch, "_schedule_run", _record)
     return calls
 
 
@@ -443,28 +443,18 @@ async def test_no_free_collab_entry(
     assert r2.status_code == 409
 
 
-@pytest.mark.asyncio
-async def test_collab_ledger_full_chain(
-    client: AsyncClient,
-    session: AsyncSession,
-    make_user: Any,
-    no_dispatch: list[str],  # noqa: ARG001
-) -> None:
-    """协作全链:开账 → worker 派发/回写 ×2 → 终态收口(DONE/PARTIAL/FAILED
-    诚实映射)→ 查询端点 worker 账本完整;重复回写 CAS 拒。"""
-    uid, token = await _user_with_task_perms(client, session, make_user)
-    await _insert_bot(session, uid)
-    await session.commit()
-    task_id = await _create_task(client, token)
-    step = await _plan_one_step(client, task_id)
+async def _open_bound_collab_run(
+    client: AsyncClient, task_id: str, step_id: str, token: str
+) -> str:
+    """声明单 Bot 拓扑并开账,返回 run_id(顺带校验决策载荷注入)。"""
     r = await _set_topology(
-        client, token, task_id, step["id"], {"max_workers": 3, "bot_key": "fin_analyst"}
+        client, token, task_id, step_id, {"max_workers": 3, "bot_key": "fin_analyst"}
     )
     assert r.status_code == 200
     d = await client.post(
         "/internal/task/step-start",
         headers=INTERNAL,
-        json={"task_id": task_id, "tenant_key": "default", "step_id": step["id"]},
+        json={"task_id": task_id, "tenant_key": "default", "step_id": step_id},
     )
     assert d.status_code == 200
     # Bot 绑定注入决策:人格与工具子集按 Bot 行带出
@@ -473,16 +463,19 @@ async def test_collab_ledger_full_chain(
         "system_prompt": "你是财务分析专家",
         "tools": [],
     }
-
     cs = await client.post(
         "/internal/task/collab-start",
         headers=INTERNAL,
-        json={"task_id": task_id, "tenant_key": "default", "step_id": step["id"], "depth": 1},
+        json={"task_id": task_id, "tenant_key": "default", "step_id": step_id, "depth": 1},
     )
     assert cs.status_code == 200, cs.text
-    run_id = cs.json()["run_id"]
+    run_id = str(cs.json()["run_id"])
     assert cs.json()["topology"]["bot_key"] == "fin_analyst"
+    return run_id
 
+
+async def _exercise_worker_ledger(client: AsyncClient, task_id: str, run_id: str) -> None:
+    """派发 1/2 号 worker 并回写终态,校验重复派发与迟到回写被拒。"""
     for no in (1, 2):
         ws = await client.post(
             "/internal/task/collab-worker-start",
@@ -544,6 +537,11 @@ async def test_collab_ledger_full_chain(
     )
     assert late.status_code == 409
 
+
+async def _check_exhausted_ledger(
+    client: AsyncClient, task_id: str, run_id: str, token: str
+) -> None:
+    """ERROR 裁决收口 → FAILED,校验查询端点账本与协作事件齐全。"""
     fin = await client.post(
         "/internal/task/collab-finish",
         headers=INTERNAL,
@@ -578,6 +576,26 @@ async def test_collab_ledger_full_chain(
     assert "collab_worker_started" in kinds
     assert "collab_worker_finished" in kinds
     assert "collab_finished" in kinds
+
+
+@pytest.mark.asyncio
+async def test_collab_ledger_full_chain(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: Any,
+    no_dispatch: list[str],  # noqa: ARG001
+) -> None:
+    """协作全链:开账 → worker 派发/回写 ×2 → 终态收口(DONE/PARTIAL/FAILED
+    诚实映射)→ 查询端点 worker 账本完整;重复回写 CAS 拒。"""
+    uid, token = await _user_with_task_perms(client, session, make_user)
+    await _insert_bot(session, uid)
+    await session.commit()
+    task_id = await _create_task(client, token)
+    step = await _plan_one_step(client, task_id)
+    run_id = await _open_bound_collab_run(client, task_id, step["id"], token)
+
+    await _exercise_worker_ledger(client, task_id, run_id)
+    await _check_exhausted_ledger(client, task_id, run_id, token)
 
     # PARTIAL:pending 非空诚实部分完成
     task2 = await _create_task(client, token)
@@ -930,7 +948,7 @@ async def test_epoch_predicate_guards_cas_writes(
 ) -> None:
     """执行侧 CAS 写入谓词(expect_epoch):失配代数的任务态/步骤态写入
     不命中(读检查与 CAS 写之间的并发 bump 窗口由此关死);在位代数照常命中。"""
-    from kongming.task.repository import SqlTaskRepo
+    from kongming.task.collab_repo import SqlCollabLedgerRepo as SqlTaskRepo
 
     _uid, token = await _user_with_task_perms(client, session, make_user)
     task_id = await _create_task(client, token)
@@ -1047,28 +1065,16 @@ def test_roundtable_roster_reader() -> None:
     assert len(roster) == 1
 
 
-@pytest.mark.asyncio
-async def test_roundtable_declare_and_turn_ledger(
-    client: AsyncClient,
-    session: AsyncSession,
-    make_user: Any,
-    no_dispatch: list[str],  # noqa: ARG001
+async def _assert_roundtable_declaration(
+    client: AsyncClient, token: str, task_id: str, step_id: str
 ) -> None:
-    """圆桌全链:拓扑声明(逐参与者 Bot 校验)→ 决策载荷带名册解析 →
-    开账 → worker 行 → 轮次上账(名册锁定/判定 0 号位/轮次上限/重复拒绝)
-    → 事件落流 → collab-runs 返回轮次转写 → 终态诚实映射。"""
-    uid, token = await _user_with_task_perms(client, session, make_user)
-    await _insert_bot(session, uid, "rt_bot", "你是圆桌财务专家")
-    await session.commit()
-    task_id = await _create_task(client, token)
-    step = await _plan_one_step(client, task_id, goal="评估指标异常成因")
-
+    """声明圆桌拓扑:未注册 Bot 与合法 Bot 同拒,合法声明回显归一名册。"""
     # 声明圆桌拓扑:合法 Bot + 未注册 Bot 同拒(防幽灵工具/幽灵绑定)
     r = await _set_topology(
         client,
         token,
         task_id,
-        step["id"],
+        step_id,
         {
             "kind": "roundtable",
             "max_rounds": 2,
@@ -1083,7 +1089,7 @@ async def test_roundtable_declare_and_turn_ledger(
         client,
         token,
         task_id,
-        step["id"],
+        step_id,
         {
             "kind": "roundtable",
             "max_rounds": 2,
@@ -1096,11 +1102,15 @@ async def test_roundtable_declare_and_turn_ledger(
     assert body["max_rounds"] == 2
     assert body["participants"][0]["bot_key"] == "rt_bot"
 
-    # 决策载荷:名册逐参与者 Bot 运行时解析
+
+async def _assert_roundtable_decision_payload(
+    client: AsyncClient, task_id: str, step_id: str
+) -> None:
+    """决策载荷:名册逐参与者 Bot 运行时解析。"""
     d = await client.post(
         "/internal/task/step-start",
         headers=INTERNAL,
-        json={"task_id": task_id, "tenant_key": "default", "step_id": step["id"]},
+        json={"task_id": task_id, "tenant_key": "default", "step_id": step_id},
     )
     assert d.status_code == 200
     collab = d.json()["collab"]
@@ -1110,142 +1120,78 @@ async def test_roundtable_declare_and_turn_ledger(
     assert parts[0]["bot"]["system_prompt"] == "你是圆桌财务专家"
     assert parts[1]["bot"] is None  # 未绑定如实降级,不虚报
 
-    # 开账 → 事件带形态与轮次
-    cs = await client.post(
-        "/internal/task/collab-start",
-        headers=INTERNAL,
-        json={"task_id": task_id, "tenant_key": "default", "step_id": step["id"], "depth": 1},
-    )
-    assert cs.status_code == 200
-    run_id = str(cs.json()["run_id"])
 
-    # 参与者 worker 行(名册内序号合法)
-    for no in (1, 2):
-        ws = await client.post(
-            "/internal/task/collab-worker-start",
-            headers=INTERNAL,
-            json={
-                "task_id": task_id,
-                "tenant_key": "default",
-                "run_id": run_id,
-                "worker_no": no,
-                "subgoal": f"参与者{no}",
-                "trace_id": f"tr-w{no}",
-            },
-        )
-        assert ws.status_code == 204
-
-    # 轮次上账:发言行(名册内)→ 判定行(0 号位)→ 名册末位触发每轮完成事件
-    t1 = await client.post(
+async def _post_turn(client: AsyncClient, task_id: str, run_id: str, **fields: object) -> Response:
+    """提交一条轮次转写(公共字段自动补齐)。"""
+    return await client.post(
         "/internal/task/collab-turn",
         headers=INTERNAL,
-        json={
-            "task_id": task_id,
-            "tenant_key": "default",
-            "run_id": run_id,
-            "round_no": 1,
-            "worker_no": 1,
-            "kind": "speech",
-            "content": {"stance": "支持", "summary": "结论A", "verdict": "PASS"},
-            "evidence": {"sql": "SELECT 1"},
-            "usage": {"llm_calls": 1, "total_tokens": 50},
-            "trace_id": "tr-w1",
-        },
+        json={"task_id": task_id, "tenant_key": "default", "run_id": run_id, **fields},
+    )
+
+
+async def _assert_roundtable_turns(
+    client: AsyncClient, task_id: str, run_id: str, token: str
+) -> None:
+    """轮次上账:发言行(名册内)→ 判定行(0 号位)→ 名册末位触发每轮完成事件。"""
+    t1 = await _post_turn(
+        client,
+        task_id,
+        run_id,
+        round_no=1,
+        worker_no=1,
+        kind="speech",
+        content={"stance": "支持", "summary": "结论A", "verdict": "PASS"},
+        evidence={"sql": "SELECT 1"},
+        usage={"llm_calls": 1, "total_tokens": 50},
+        trace_id="tr-w1",
     )
     assert t1.status_code == 204
     # 名册外序号拒绝(运行期锁定)
-    t_ghost = await client.post(
-        "/internal/task/collab-turn",
-        headers=INTERNAL,
-        json={
-            "task_id": task_id,
-            "tenant_key": "default",
-            "run_id": run_id,
-            "round_no": 1,
-            "worker_no": 3,
-            "kind": "speech",
-        },
-    )
+    t_ghost = await _post_turn(client, task_id, run_id, round_no=1, worker_no=3, kind="speech")
     assert t_ghost.status_code == 409
     # 重复回写拒绝(唯一键)
-    t_dup = await client.post(
-        "/internal/task/collab-turn",
-        headers=INTERNAL,
-        json={
-            "task_id": task_id,
-            "tenant_key": "default",
-            "run_id": run_id,
-            "round_no": 1,
-            "worker_no": 1,
-            "kind": "speech",
-        },
-    )
+    t_dup = await _post_turn(client, task_id, run_id, round_no=1, worker_no=1, kind="speech")
     assert t_dup.status_code == 409
     # 判定行必须 0 号位;非 0 号位判定拒绝
-    t_bad_verdict = await client.post(
-        "/internal/task/collab-turn",
-        headers=INTERNAL,
-        json={
-            "task_id": task_id,
-            "tenant_key": "default",
-            "run_id": run_id,
-            "round_no": 1,
-            "worker_no": 2,
-            "kind": "verdict",
-        },
+    t_bad_verdict = await _post_turn(
+        client, task_id, run_id, round_no=1, worker_no=2, kind="verdict"
     )
     assert t_bad_verdict.status_code == 409
-    t2 = await client.post(
-        "/internal/task/collab-turn",
-        headers=INTERNAL,
-        json={
-            "task_id": task_id,
-            "tenant_key": "default",
-            "run_id": run_id,
-            "round_no": 1,
-            "worker_no": 2,
-            "kind": "abstain",
-            "content": {"stance": "弃权"},
-        },
+    t2 = await _post_turn(
+        client,
+        task_id,
+        run_id,
+        round_no=1,
+        worker_no=2,
+        kind="abstain",
+        content={"stance": "弃权"},
     )
     assert t2.status_code == 204
     # 名册末位落账 → 每轮完成事件
     detail = await client.get(f"/tasks/{task_id}", headers=_auth(token))
     kinds = [str(e["kind"]) for e in detail.json()["events"]]
     assert "collab_round_finished" in kinds
-    t_verdict = await client.post(
-        "/internal/task/collab-turn",
-        headers=INTERNAL,
-        json={
-            "task_id": task_id,
-            "tenant_key": "default",
-            "run_id": run_id,
-            "round_no": 1,
-            "worker_no": 0,
-            "kind": "verdict",
-            "content": {"consensus": True, "reason": "结论一致"},
-        },
+    t_verdict = await _post_turn(
+        client,
+        task_id,
+        run_id,
+        round_no=1,
+        worker_no=0,
+        kind="verdict",
+        content={"consensus": True, "reason": "结论一致"},
     )
     assert t_verdict.status_code == 204
     # 轮次超拓扑上限拒绝
-    t_over = await client.post(
-        "/internal/task/collab-turn",
-        headers=INTERNAL,
-        json={
-            "task_id": task_id,
-            "tenant_key": "default",
-            "run_id": run_id,
-            "round_no": 3,
-            "worker_no": 1,
-            "kind": "speech",
-        },
-    )
+    t_over = await _post_turn(client, task_id, run_id, round_no=3, worker_no=1, kind="speech")
     assert t_over.status_code == 409
     detail = await client.get(f"/tasks/{task_id}", headers=_auth(token))
     kinds = [str(e["kind"]) for e in detail.json()["events"]]
     assert "collab_round_verdict" in kinds
 
-    # 参与者聚合回写 + 收口(共识 → PASS → DONE)
+
+async def _close_with_consensus(client: AsyncClient, task_id: str, run_id: str) -> None:
+    """参与者聚合回写 + 收口(共识 → PASS → DONE)。"""
     for no in (1, 2):
         wr = await client.post(
             "/internal/task/collab-worker-result",
@@ -1279,7 +1225,11 @@ async def test_roundtable_declare_and_turn_ledger(
     assert fin.status_code == 200
     assert fin.json()["status"] == "DONE"
 
-    # 查询面:collab-runs 返回轮次转写(按序)
+
+async def _assert_roundtable_transcript(
+    client: AsyncClient, task_id: str, run_id: str, token: str
+) -> None:
+    """查询面:collab-runs 返回轮次转写(按序)。"""
     runs = await client.get(f"/tasks/{task_id}/collab-runs", headers=_auth(token))
     assert runs.status_code == 200
     run = runs.json()["items"][0]
@@ -1293,6 +1243,53 @@ async def test_roundtable_declare_and_turn_ledger(
     assert turns[0]["content"]["stance"] == "支持"
     assert turns[0]["usage"]["total_tokens"] == 50
 
+
+@pytest.mark.asyncio
+async def test_roundtable_declare_and_turn_ledger(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: Any,
+    no_dispatch: list[str],  # noqa: ARG001
+) -> None:
+    """圆桌全链:拓扑声明(逐参与者 Bot 校验)→ 决策载荷带名册解析 →
+    开账 → worker 行 → 轮次上账(名册锁定/判定 0 号位/轮次上限/重复拒绝)
+    → 事件落流 → collab-runs 返回轮次转写 → 终态诚实映射。"""
+    uid, token = await _user_with_task_perms(client, session, make_user)
+    await _insert_bot(session, uid, "rt_bot", "你是圆桌财务专家")
+    await session.commit()
+    task_id = await _create_task(client, token)
+    step = await _plan_one_step(client, task_id, goal="评估指标异常成因")
+
+    await _assert_roundtable_declaration(client, token, task_id, step["id"])
+    await _assert_roundtable_decision_payload(client, task_id, step["id"])
+
+    cs = await client.post(
+        "/internal/task/collab-start",
+        headers=INTERNAL,
+        json={"task_id": task_id, "tenant_key": "default", "step_id": step["id"], "depth": 1},
+    )
+    assert cs.status_code == 200
+    run_id = str(cs.json()["run_id"])
+
+    # 参与者 worker 行(名册内序号合法)
+    for no in (1, 2):
+        ws = await client.post(
+            "/internal/task/collab-worker-start",
+            headers=INTERNAL,
+            json={
+                "task_id": task_id,
+                "tenant_key": "default",
+                "run_id": run_id,
+                "worker_no": no,
+                "subgoal": f"参与者{no}",
+                "trace_id": f"tr-w{no}",
+            },
+        )
+        assert ws.status_code == 204
+
+    await _assert_roundtable_turns(client, task_id, run_id, token)
+    await _close_with_consensus(client, task_id, run_id)
+    await _assert_roundtable_transcript(client, task_id, run_id, token)
     # 终态运行上的迟到轮次拒绝(在途谓词)
     t_late = await client.post(
         "/internal/task/collab-turn",

@@ -37,15 +37,8 @@ def _load_dataset() -> dict[str, Any]:
     return cast("dict[str, Any]", loaded)
 
 
-async def test_retrieval_quality_report() -> None:
-    ds = _load_dataset()
-    cfg = cast("dict[str, Any]", ds["dataset"])
-    questions = cast("list[dict[str, Any]]", ds["questions"])
-    tenant = str(cfg["tenant"])
-    dsk = str(cfg["datasource_key"])
-    top_k = int(cfg.get("top_k", 5))
-
-    # 评测集自检:题量/多跳下限 + 跳型覆盖(retrieval-eval spec)
+def _check_dataset(cfg: dict[str, Any], questions: list[dict[str, Any]]) -> None:
+    """评测集自检:题量/多跳下限 + 跳型覆盖(retrieval-eval spec)。"""
     categories = {str(q["category"]) for q in questions}
     if not _REQUIRED_CATEGORIES.issubset(categories):
         raise pytest.UsageError(f"评测集缺跳型: {_REQUIRED_CATEGORIES - categories}")
@@ -55,9 +48,11 @@ async def test_retrieval_quality_report() -> None:
     if len(multihop) < int(cfg.get("min_multihop", 5)):
         raise pytest.UsageError(f"多跳题数低于下限({cfg.get('min_multihop')})")
 
-    # gold 预映射:语料本地分块(与服务端同一纯函数),片段非法即拒绝启动
-    corpus_dir = RETR_DIR / str(cfg.get("corpus_dir", "corpus"))
-    texts = {p.name: p.read_text(encoding="utf-8") for p in sorted(corpus_dir.glob("*.md"))}
+
+def _map_gold(
+    questions: list[dict[str, Any]], texts: dict[str, str]
+) -> dict[str, set[tuple[str, int]]]:
+    """gold 预映射:语料本地分块(与服务端同一纯函数),片段非法即拒绝启动。"""
     gold_by_id: dict[str, set[tuple[str, int]]] = {}
     for q in questions:
         gold: set[tuple[str, int]] = set()
@@ -68,58 +63,98 @@ async def test_retrieval_quality_report() -> None:
             snippets = [str(s) for s in cast("list[Any]", g["snippets"])]
             gold |= gold_parent_keys(chunk_document(doc_name, texts[doc_name]), doc_name, snippets)
         gold_by_id[str(q["id"])] = gold
+    return gold_by_id
+
+
+async def _upload_corpus(
+    c: httpx.AsyncClient, texts: dict[str, str], headers: dict[str, str], dsk: str
+) -> list[str]:
+    """语料幂等上传(同内容 skipped;内容变更重切,块数随更新),返回 doc_id 列表。"""
+    doc_ids: list[str] = []
+    for name, content in texts.items():
+        r = await c.post(
+            "/system/document/upload",
+            headers=headers,
+            files={"file": (name, content.encode("utf-8"), "text/markdown")},
+            data={"datasource_key": dsk},
+        )
+        assert r.status_code == 200, f"{name}: 语料上传失败 {r.status_code} {r.text[:200]}"
+        doc_ids.append(str(r.json()["doc_id"]))
+    return doc_ids
+
+
+async def _enrich_corpus(c: httpx.AsyncClient, doc_ids: list[str], headers: dict[str, str]) -> bool:
+    """实体形态自发现:服务端启用实体抽取时对语料补抽(覆盖式);
+    400 DOC_ENTITY_DISABLED=实体关形态,静默跳过(开关态进输出行)。"""
+    entity_mode = False
+    for doc_id in doc_ids:
+        er = await c.post(f"/system/document/documents/{doc_id}/enrich", headers=headers)
+        if er.status_code == 200:
+            entity_mode = True
+        elif er.status_code != 400 or er.json().get("detail") != "DOC_ENTITY_DISABLED":
+            raise AssertionError(f"enrich 非预期失败 {er.status_code} {er.text[:150]}")
+    return entity_mode
+
+
+async def _probe_question(
+    c: httpx.AsyncClient,
+    q: dict[str, Any],
+    headers: dict[str, str],
+    dsk: str,
+    top_k: int,
+    gold_by_id: dict[str, set[tuple[str, int]]],
+) -> tuple[str, str, float, bool, list[str], str | None]:
+    """单题检索试跑评分;环境异常/非 200 记入该行错误列,不抛出。"""
+    qid = str(q["id"])
+    try:
+        r = await c.get(
+            "/system/document/retrieval-probe",
+            headers=headers,
+            params={
+                "datasource_key": dsk,
+                "question": str(q["question"]),
+                "parent_top_k": top_k,
+            },
+        )
+        if r.status_code != 200:
+            return (qid, str(q["category"]), 0.0, False, [], f"HTTP {r.status_code}")
+        ranked = [(str(p["doc_name"]), int(p["seq"])) for p in r.json()["parents"]]
+        gold = gold_by_id[qid]
+        rec = recall_at_k(gold, ranked, top_k)
+        fh = full_hop_coverage(gold, ranked, top_k)
+        missing = sorted(f"{d}#{s}" for d, s in gold.difference(ranked[:top_k]))
+        return (qid, str(q["category"]), rec, fh, missing, None)
+    except Exception as e:  # noqa: BLE001  # 单题环境异常不中断整层
+        return (qid, str(q["category"]), 0.0, False, [], repr(e)[:120])
+
+
+async def test_retrieval_quality_report() -> None:
+    ds = _load_dataset()
+    cfg = cast("dict[str, Any]", ds["dataset"])
+    questions = cast("list[dict[str, Any]]", ds["questions"])
+    tenant = str(cfg["tenant"])
+    dsk = str(cfg["datasource_key"])
+    top_k = int(cfg.get("top_k", 5))
+
+    _check_dataset(cfg, questions)
+
+    # gold 预映射:语料本地分块(与服务端同一纯函数)
+    corpus_dir = RETR_DIR / str(cfg.get("corpus_dir", "corpus"))
+    texts = {p.name: p.read_text(encoding="utf-8") for p in sorted(corpus_dir.glob("*.md"))}
+    gold_by_id = _map_gold(questions, texts)
 
     token = await _login()
     headers = {"Authorization": f"Bearer {token}"}
     if tenant != "default":
         headers["X-Tenant-Id"] = tenant
     async with httpx.AsyncClient(base_url=API_BASE, timeout=120.0) as c:
-        # 语料幂等上传(同内容 skipped;内容变更重切,块数随更新)
-        doc_ids: list[str] = []
-        for name, content in texts.items():
-            r = await c.post(
-                "/system/document/upload",
-                headers=headers,
-                files={"file": (name, content.encode("utf-8"), "text/markdown")},
-                data={"datasource_key": dsk},
-            )
-            assert r.status_code == 200, f"{name}: 语料上传失败 {r.status_code} {r.text[:200]}"
-            doc_ids.append(str(r.json()["doc_id"]))
-        # 实体形态自发现:服务端启用实体抽取时对语料补抽(覆盖式);
-        # 400 DOC_ENTITY_DISABLED=实体关形态,静默跳过(开关态进输出行)
-        entity_mode = False
-        for doc_id in doc_ids:
-            er = await c.post(f"/system/document/documents/{doc_id}/enrich", headers=headers)
-            if er.status_code == 200:
-                entity_mode = True
-            elif er.status_code != 400 or er.json().get("detail") != "DOC_ENTITY_DISABLED":
-                raise AssertionError(f"enrich 非预期失败 {er.status_code} {er.text[:150]}")
+        doc_ids = await _upload_corpus(c, texts, headers, dsk)
+        entity_mode = await _enrich_corpus(c, doc_ids, headers)
 
         # 逐题试跑评分(单题失败不中断:先记异常,末尾统一报告)
-        rows: list[tuple[str, str, float, bool, list[str], str | None]] = []
-        for q in questions:
-            qid = str(q["id"])
-            try:
-                r = await c.get(
-                    "/system/document/retrieval-probe",
-                    headers=headers,
-                    params={
-                        "datasource_key": dsk,
-                        "question": str(q["question"]),
-                        "parent_top_k": top_k,
-                    },
-                )
-                if r.status_code != 200:
-                    rows.append((qid, str(q["category"]), 0.0, False, [], f"HTTP {r.status_code}"))
-                    continue
-                ranked = [(str(p["doc_name"]), int(p["seq"])) for p in r.json()["parents"]]
-                gold = gold_by_id[qid]
-                rec = recall_at_k(gold, ranked, top_k)
-                fh = full_hop_coverage(gold, ranked, top_k)
-                missing = sorted(f"{d}#{s}" for d, s in gold.difference(ranked[:top_k]))
-                rows.append((qid, str(q["category"]), rec, fh, missing, None))
-            except Exception as e:  # noqa: BLE001  # 单题环境异常不中断整层
-                rows.append((qid, str(q["category"]), 0.0, False, [], repr(e)[:120]))
+        rows: list[tuple[str, str, float, bool, list[str], str | None]] = [
+            await _probe_question(c, q, headers, dsk, top_k, gold_by_id) for q in questions
+        ]
 
     macro_rec = macro([r[2] for r in rows])
     hop_rate = (sum(1 for r in rows if r[3]) / len(rows)) if rows else 0.0

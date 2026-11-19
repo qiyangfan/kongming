@@ -342,6 +342,84 @@ def _responses_tool(t: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _tool_output_item(msg: Mapping[str, object]) -> dict[str, object]:
+    """tool 消息 → function_call_output 项。"""
+    return {
+        "type": "function_call_output",
+        "call_id": str(msg.get("tool_call_id") or ""),
+        "output": str(msg.get("content") or ""),
+    }
+
+
+def _content_part(part: object) -> dict[str, object]:
+    """单个 canonical 内容部件 → Responses 部件(图片或文本)。"""
+    if not isinstance(part, dict):
+        return {"type": "input_text", "text": str(part)}
+    typed = cast("dict[str, object]", part)
+    if typed.get("type") == "image_url":
+        image_url = typed.get("image_url")
+        url = (
+            cast("dict[str, object]", image_url).get("url") if isinstance(image_url, dict) else None
+        )
+        return {"type": "input_image", "image_url": str(url or "")}
+    return {"type": "input_text", "text": str(typed.get("text") or "")}
+
+
+def _content_items(content: list[object], role: str) -> list[dict[str, object]]:
+    """列表内容 → 定型后的 Responses content 数组。"""
+    parts = [_content_part(part) for part in content]
+    # text 部件按 role 定型(assistant→output_text);不可用 **p 直接展开
+    # ——构造值自带 input_text 会盖掉定型。图片部件无 input/output 之分,原样保留
+    part_type = "output_text" if role == "assistant" else "input_text"
+    return [
+        p if p.get("type") == "input_image" else {"type": part_type, "text": p["text"]}
+        for p in parts
+    ]
+
+
+def _message_item(msg: Mapping[str, object], role: str) -> dict[str, object] | None:
+    """role 消息 → Responses message 项;无可用内容返回 None。"""
+    content = msg.get("content")
+    if isinstance(content, list):
+        # type 显式补 message(role 消息省略 type 虽为官方缺省语义,
+        # 但木牛入站只接受协议明确规定的形态)
+        content_items = _content_items(cast("list[object]", content), role)
+        return {"type": "message", "role": role, "content": content_items}
+    if isinstance(content, str) and content:
+        # 纯文本统一发 part 数组形态(与字符串快捷形态在 Responses 规范内等价),
+        # 对下游保持兼容;木牛入站只接受数组形态。
+        text_part_type = "output_text" if role == "assistant" else "input_text"
+        return {
+            "type": "message",
+            "role": role,
+            "content": [{"type": text_part_type, "text": content}],
+        }
+    return None
+
+
+def _function_call_items(msg: Mapping[str, object]) -> list[dict[str, object]]:
+    """assistant 工具调用轮 → function_call 项(原文 arguments 按序回放)。"""
+    raw = msg.get("tool_calls")
+    if not isinstance(raw, list):
+        return []
+    items: list[dict[str, object]] = []
+    for tc in cast("list[object]", raw):
+        if not isinstance(tc, dict):
+            continue
+        typed = cast("dict[str, object]", tc)
+        fn = typed.get("function")
+        fn_map = cast("dict[str, object]", fn if isinstance(fn, dict) else {})
+        items.append(
+            {
+                "type": "function_call",
+                "call_id": str(typed.get("id") or ""),
+                "name": str(fn_map.get("name") or ""),
+                "arguments": str(fn_map.get("arguments") or ""),
+            }
+        )
+    return items
+
+
 def _responses_input_items(messages: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
     """canonical 消息史 → Responses input 项序列:role 消息(text/output_text)、
     function_call(arguments 原文回放——Responses 以字符串承载,设计决策 4)、
@@ -352,69 +430,13 @@ def _responses_input_items(messages: Sequence[Mapping[str, object]]) -> list[dic
         if role == "system":
             continue  # instructions 在 responses_request 顶层统一提取
         if role == "tool":
-            items.append(
-                {
-                    "type": "function_call_output",
-                    "call_id": str(msg.get("tool_call_id") or ""),
-                    "output": str(msg.get("content") or ""),
-                }
-            )
+            items.append(_tool_output_item(msg))
             continue
-        content = msg.get("content")
-        if isinstance(content, list):
-            parts: list[dict[str, object]] = []
-            for part in cast("list[object]", content):
-                if not isinstance(part, dict):
-                    parts.append({"type": "input_text", "text": str(part)})
-                    continue
-                typed = cast("dict[str, object]", part)
-                if typed.get("type") == "image_url":
-                    image_url = typed.get("image_url")
-                    url = (
-                        cast("dict[str, object]", image_url).get("url")
-                        if isinstance(image_url, dict)
-                        else None
-                    )
-                    parts.append({"type": "input_image", "image_url": str(url or "")})
-                else:
-                    parts.append({"type": "input_text", "text": str(typed.get("text") or "")})
-            # text 部件按 role 定型(assistant→output_text);不可用 **p 直接展开
-            # ——构造值自带 input_text 会盖掉定型。图片部件无 input/output 之分,原样保留
-            part_type = "output_text" if role == "assistant" else "input_text"
-            content_items: list[dict[str, object]] = [
-                p if p.get("type") == "input_image" else {"type": part_type, "text": p["text"]}
-                for p in parts
-            ]
-            # type 显式补 message(role 消息省略 type 虽为官方缺省语义,
-            # 但木牛入站只接受协议明确规定的形态)
-            items.append({"type": "message", "role": role, "content": content_items})
-        elif isinstance(content, str) and content:
-            # 纯文本统一发 part 数组形态(与字符串快捷形态在 Responses 规范内等价,
-            # 对下游保持兼容；木牛入站只接受数组形态。
-            text_part_type = "output_text" if role == "assistant" else "input_text"
-            items.append(
-                {
-                    "type": "message",
-                    "role": role,
-                    "content": [{"type": text_part_type, "text": content}],
-                }
-            )
-        if role == "assistant" and isinstance(msg.get("tool_calls"), list):
-            # assistant 工具调用轮:function_call 项随文本之后按序展开(原文 arguments)
-            for tc in cast("list[object]", msg.get("tool_calls")):
-                if not isinstance(tc, dict):
-                    continue
-                typed = cast("dict[str, object]", tc)
-                fn = typed.get("function")
-                fn_map = cast("dict[str, object]", fn if isinstance(fn, dict) else {})
-                items.append(
-                    {
-                        "type": "function_call",
-                        "call_id": str(typed.get("id") or ""),
-                        "name": str(fn_map.get("name") or ""),
-                        "arguments": str(fn_map.get("arguments") or ""),
-                    }
-                )
+        item = _message_item(msg, role)
+        if item is not None:
+            items.append(item)
+        if role == "assistant":
+            items.extend(_function_call_items(msg))
     return items
 
 

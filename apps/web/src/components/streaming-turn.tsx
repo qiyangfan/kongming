@@ -10,7 +10,7 @@ import {
   type StreamToolCallOut,
 } from "@/lib/api";
 
-export interface StreamingTurnProps {
+interface StreamingTurnProps {
   /** 发起时冻结的请求体(单次生效,不随页面重渲染变更) */
   body: unknown;
   signal: AbortSignal;

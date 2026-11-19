@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.seed import seed_all
 from kongming.chat.agent_client import AgentReply
-from kongming.chat.router import get_agent_client
+from kongming.chat.dependencies import get_agent_client
 from kongming.config import get_settings
 from kongming.db import get_sessionmaker
 from kongming.main import app

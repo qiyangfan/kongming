@@ -77,54 +77,53 @@ def _parse_nodes(definition: dict[str, Any]) -> list[NodeDef]:
     return nodes
 
 
-def validate_dag(
-    definition: dict[str, Any], *, _reserved: frozenset[str] = _RESERVED_IDS
-) -> list[NodeDef]:
-    """DAG 结构校验(纯函数):id 唯一/形态合法/类型合法/必填配置/引用
-    存在/无环(Kahn,报环节点)/无孤立(多节点时)/loop 子段递归校验
-    (外层 id 与保留名碰撞拒绝)。通过则返回节点表。"""
-    nodes = _parse_nodes(definition)
-    if len(nodes) > 100:  # 限制单个工作流的节点数，避免处理过大的定义。
-        raise DagValidationError(f"节点数超上限 100(当前 {len(nodes)})")
-    seen: set[str] = set()
-    for n in nodes:
-        if n.id in seen:
-            raise DagValidationError(f"节点 id 重复: {n.id}")
-        if not _NODE_ID_RE.fullmatch(n.id):
-            raise DagValidationError(f"节点 id 形态非法(仅字母/数字/下划线): {n.id}")
-        if n.id in _reserved:
-            raise DagValidationError(f"节点 id 撞保留名/外层节点: {n.id}")
-        seen.add(n.id)
-        if n.type not in NODE_TYPES:
-            raise DagValidationError(
-                f"节点 {n.id} 类型非法: {n.type}(合法: {', '.join(NODE_TYPES)})"
-            )
-        for key in _REQUIRED_CONFIG[n.type]:
-            if key not in n.config:
-                raise DagValidationError(f"节点 {n.id}({n.type})缺必填配置 {key}")
-        # config.on 值校验(typo 静默反转分支语义)
-        on = n.config.get("on")
-        if on is not None and on not in ("true", "false"):
-            raise DagValidationError(f"节点 {n.id} 的 on 仅可为 true/false")
-        if len(set(n.depends_on)) != len(n.depends_on):
-            raise DagValidationError(f"节点 {n.id} 存在重复依赖项")
-        if n.id in n.depends_on:
-            raise DagValidationError(f"节点 {n.id} 自依赖")
-        # loop 子段递归校验(保留名+外层全量 id 集,两遍制:
-        # 先收集再校验——body 撞后声明的外层节点也拒)
-        if n.type == "loop":
-            body = n.config.get("body")
-            if isinstance(body, list) and body:
-                validate_dag(
-                    {"nodes": body},
-                    _reserved=frozenset(set(_reserved) | {x.id for x in nodes}),
-                )
+def _check_node(node: NodeDef, seen: set[str], reserved: frozenset[str]) -> None:
+    """单节点自身校验:id 唯一/形态/保留名/类型/必填配置/on 值/依赖形态。"""
+    if node.id in seen:
+        raise DagValidationError(f"节点 id 重复: {node.id}")
+    if not _NODE_ID_RE.fullmatch(node.id):
+        raise DagValidationError(f"节点 id 形态非法(仅字母/数字/下划线): {node.id}")
+    if node.id in reserved:
+        raise DagValidationError(f"节点 id 撞保留名/外层节点: {node.id}")
+    seen.add(node.id)
+    if node.type not in NODE_TYPES:
+        raise DagValidationError(
+            f"节点 {node.id} 类型非法: {node.type}(合法: {', '.join(NODE_TYPES)})"
+        )
+    for key in _REQUIRED_CONFIG[node.type]:
+        if key not in node.config:
+            raise DagValidationError(f"节点 {node.id}({node.type})缺必填配置 {key}")
+    # config.on 值校验(typo 静默反转分支语义)
+    on = node.config.get("on")
+    if on is not None and on not in ("true", "false"):
+        raise DagValidationError(f"节点 {node.id} 的 on 仅可为 true/false")
+    if len(set(node.depends_on)) != len(node.depends_on):
+        raise DagValidationError(f"节点 {node.id} 存在重复依赖项")
+    if node.id in node.depends_on:
+        raise DagValidationError(f"节点 {node.id} 自依赖")
+
+
+def _check_loop_body(node: NodeDef, nodes: list[NodeDef], reserved: frozenset[str]) -> None:
+    """loop 子段递归校验(保留名+外层全量 id 集,两遍制:
+    先收集再校验——body 撞后声明的外层节点也拒)。"""
+    if node.type != "loop":
+        return
+    body = node.config.get("body")
+    if isinstance(body, list) and body:
+        validate_dag({"nodes": body}, _reserved=frozenset(set(reserved) | {x.id for x in nodes}))
+
+
+def _check_refs_exist(nodes: list[NodeDef]) -> None:
+    """所有依赖必须指向表内节点。"""
     ids = {n.id for n in nodes}
     for n in nodes:
         for dep in n.depends_on:
             if dep not in ids:
                 raise DagValidationError(f"节点 {n.id} 依赖不存在的节点: {dep}")
-    # 无环:Kahn 拓扑(残留即环)
+
+
+def _check_acyclic(nodes: list[NodeDef]) -> None:
+    """无环校验:Kahn 拓扑(残留即环,报环节点)。"""
     indeg: dict[str, int] = {n.id: len(n.depends_on) for n in nodes}
     queue = [i for i, d in indeg.items() if d == 0]
     done = 0
@@ -139,12 +138,34 @@ def validate_dag(
     if done < len(nodes):
         cyclic = sorted(i for i, d in indeg.items() if d > 0)
         raise DagValidationError(f"定义存在环,参与节点: {', '.join(cyclic)}")
-    # 孤立节点(多节点时):无依赖且无后继
-    if len(nodes) > 1:
-        has_successor = {d for n in nodes for d in n.depends_on}
-        for n in nodes:
-            if not n.depends_on and n.id not in has_successor:
-                raise DagValidationError(f"孤立节点(无依赖且无后继): {n.id}")
+
+
+def _check_no_orphan(nodes: list[NodeDef]) -> None:
+    """孤立节点(多节点时):无依赖且无后继。"""
+    if len(nodes) <= 1:
+        return
+    has_successor = {d for n in nodes for d in n.depends_on}
+    for n in nodes:
+        if not n.depends_on and n.id not in has_successor:
+            raise DagValidationError(f"孤立节点(无依赖且无后继): {n.id}")
+
+
+def validate_dag(
+    definition: dict[str, Any], *, _reserved: frozenset[str] = _RESERVED_IDS
+) -> list[NodeDef]:
+    """DAG 结构校验(纯函数):id 唯一/形态合法/类型合法/必填配置/引用
+    存在/无环(Kahn,报环节点)/无孤立(多节点时)/loop 子段递归校验
+    (外层 id 与保留名碰撞拒绝)。通过则返回节点表。"""
+    nodes = _parse_nodes(definition)
+    if len(nodes) > 100:  # 限制单个工作流的节点数，避免处理过大的定义。
+        raise DagValidationError(f"节点数超上限 100(当前 {len(nodes)})")
+    seen: set[str] = set()
+    for n in nodes:
+        _check_node(n, seen, _reserved)
+        _check_loop_body(n, nodes, _reserved)
+    _check_refs_exist(nodes)
+    _check_acyclic(nodes)
+    _check_no_orphan(nodes)
     return nodes
 
 
@@ -186,33 +207,22 @@ def render_template(template: Any, context: dict[str, Any]) -> Any:
     return template
 
 
-def compare(op: str, left: Any, right: Any) -> bool:
-    """条件比较(无 eval):数值优先(双方可转数值),否则字符串兜底;
-    contains=子串(字符串化后)。"""
-    if op not in _CONDITION_OPS:
-        raise DagValidationError(f"非法比较符: {op}")
-    if op == "contains":
-        return str(right) in str(left)
-
-    def _num(v: Any) -> float | None:
-        if isinstance(v, bool):
-            return None
-        if isinstance(v, (int, float)):
-            return float(v)
-        if isinstance(v, str):
-            try:
-                return float(v)
-            except ValueError:
-                return None
+def _to_number(value: Any) -> float | None:
+    """可转数值则返回 float;bool 与不可解析值返回 None(走字符串兜底)。"""
+    if isinstance(value, bool):
         return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
 
-    ln, rn = _num(left), _num(right)
-    a: Any
-    b: Any
-    if ln is not None and rn is not None:
-        a, b = ln, rn
-    else:
-        a, b = str(left), str(right)
+
+def _compare_ordered(op: str, a: Any, b: Any) -> bool:
+    """==/!=/大小比较(>、>=、<、<=;其余按 <= 处理不可达)。"""
     if op == "==":
         return bool(a == b)
     if op == "!=":
@@ -224,3 +234,16 @@ def compare(op: str, left: Any, right: Any) -> bool:
     if op == "<":
         return bool(a < b)
     return bool(a <= b)
+
+
+def compare(op: str, left: Any, right: Any) -> bool:
+    """条件比较(无 eval):数值优先(双方可转数值),否则字符串兜底;
+    contains=子串(字符串化后)。"""
+    if op not in _CONDITION_OPS:
+        raise DagValidationError(f"非法比较符: {op}")
+    if op == "contains":
+        return str(right) in str(left)
+    ln, rn = _to_number(left), _to_number(right)
+    if ln is not None and rn is not None:
+        return _compare_ordered(op, ln, rn)
+    return _compare_ordered(op, str(left), str(right))

@@ -3,7 +3,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 
 /** 多选面板的候选项:label 主文案(可含层级缩进前缀),hint 为辅助标识(如权限点编码)。 */
-export type CheckOption = { id: string; label: string; hint?: string; title?: string };
+type CheckOption = { id: string; label: string; hint?: string; title?: string };
 
 /** 可复用的带边框勾选列表；内容超高时滚动，空数据使用 EmptyState。 */
 export function CheckList({

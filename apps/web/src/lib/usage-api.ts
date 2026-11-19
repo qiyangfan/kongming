@@ -3,12 +3,10 @@
 import type { components } from "./api-types.gen";
 import { api } from "./api";
 
-export type UsageSummaryOut = components["schemas"]["UsageSummaryOut"];
-export type UsageSummaryItem = components["schemas"]["UsageSummaryItem"];
-export type UsageTrendOut = components["schemas"]["UsageTrendOut"];
-export type UsagePageOut = components["schemas"]["UsagePageOut"];
-export type UsageRow = components["schemas"]["UsageRow"];
-export type UsageTimelineOut = components["schemas"]["UsageTimelineOut"];
+type UsageSummaryOut = components["schemas"]["UsageSummaryOut"];
+type UsageTrendOut = components["schemas"]["UsageTrendOut"];
+type UsagePageOut = components["schemas"]["UsagePageOut"];
+type UsageTimelineOut = components["schemas"]["UsageTimelineOut"];
 export type TimelineEvent = components["schemas"]["TimelineEvent"];
 
 /** 汇总(租户+模型+任务;时间范围可选) */
@@ -30,7 +28,7 @@ export function usageTrend(days: number): Promise<UsageTrendOut> {
   return api.get<UsageTrendOut>(`/system/llm-usage/trend?days=${days}`);
 }
 
-export interface UsagePageParams {
+interface UsagePageParams {
   page?: number;
   size?: number;
   model?: string;

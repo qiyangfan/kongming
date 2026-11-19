@@ -3,14 +3,13 @@
 import type { components } from "./api-types.gen";
 import { api } from "./api";
 
-export type GenerateOut = components["schemas"]["GenerateOut"];
+type GenerateOut = components["schemas"]["GenerateOut"];
 export type ReportItem = components["schemas"]["ReportItem"];
-export type ReportPageOut = components["schemas"]["ReportPageOut"];
+type ReportPageOut = components["schemas"]["ReportPageOut"];
 export type SectionOut = components["schemas"]["SectionOut"];
 export type ReportDetailOut = components["schemas"]["ReportDetailOut"];
-export type VersionMetaOut = components["schemas"]["VersionMetaOut"];
-export type ProgressOut = components["schemas"]["ProgressOut"];
-export type MutateOut = components["schemas"]["MutateOut"];
+type ProgressOut = components["schemas"]["ProgressOut"];
+type MutateOut = components["schemas"]["MutateOut"];
 /** 报告章节的 bindings 是自由 JSONB；仓储写入结构变化时需同步此类型。 */
 export type ReportBinding = {
   sql: string;
@@ -79,10 +78,8 @@ export async function deleteReport(id: string): Promise<void> {
   await api.delete(`/reports/${id}`);
 }
 
-/** markdown 导出(所见即所导:渲染快照原样落表;文件名取 Content-Disposition) */
-export async function exportReport(id: string, version?: number): Promise<void> {
-  const qs = version ? `?version=${version}` : "";
-  const resp = await api.getBlob(`/reports/${id}/export${qs}`);
+/** JSON 应答即错误(直接落 blob 会下载垃圾文件):取出 detail 抛出 */
+async function throwIfJsonError(resp: Response): Promise<void> {
   if (resp.headers.get("content-type")?.includes("application/json")) {
     const body: unknown = await resp.json();
     const detail =
@@ -91,10 +88,15 @@ export async function exportReport(id: string, version?: number): Promise<void> 
         : "导出失败";
     throw new Error(detail);
   }
-  const blob = await resp.blob();
-  const disposition = resp.headers.get("content-disposition");
-  const m = /filename="([^"]+)"/.exec(disposition ?? "");
-  const filename = m?.[1] ?? `report-${id}.md`;
+}
+
+/** 文件名优先取 Content-Disposition 的 filename,缺失回退 report-{id}.md */
+function reportFilename(disposition: string | null, id: string): string {
+  return /filename="([^"]+)"/.exec(disposition ?? "")?.[1] ?? `report-${id}.md`;
+}
+
+/** 以临时锚点触发浏览器下载并延迟回收对象 URL */
+function saveBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -103,6 +105,15 @@ export async function exportReport(id: string, version?: number): Promise<void> 
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/** markdown 导出(所见即所导:渲染快照原样落表;文件名取 Content-Disposition) */
+export async function exportReport(id: string, version?: number): Promise<void> {
+  const qs = version ? `?version=${version}` : "";
+  const resp = await api.getBlob(`/reports/${id}/export${qs}`);
+  await throwIfJsonError(resp);
+  const blob = await resp.blob();
+  saveBlob(blob, reportFilename(resp.headers.get("content-disposition"), id));
 }
 
 /* 状态呈现单源(StatusBadge 消费);variant 用字面量联合保持结构兼容,lib 层不反向依赖组件 */

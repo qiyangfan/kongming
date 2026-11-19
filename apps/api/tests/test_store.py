@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.seed import seed_all
 from kongming.chat.agent_client import AgentReply
-from kongming.chat.router import get_agent_client
+from kongming.chat.dependencies import get_agent_client
 from kongming.config import get_settings
 from kongming.main import app
 from tests.conftest import MakeUser
@@ -530,9 +530,9 @@ async def test_store_run_consumes_snapshot_public_channel_live(
     agent = _StoreFakeAgent()
     store_fake_agent["agent"] = agent
     # 商店直跑经组合根直调 get_agent_client(不经 FastAPI DI),补模块属性替身
-    import kongming.chat.router as chat_router
+    import kongming.chat.dependencies as chat_deps
 
-    monkeypatch.setattr(chat_router, "get_agent_client", lambda: agent)
+    monkeypatch.setattr(chat_deps, "get_agent_client", lambda: agent)
     _, token = await _user(client, session, make_user, "st_run")
     bot_id = await _mk_store_bot(client, token)
     assert (await _publish(client, token, bot_id, "上架问候")).status_code == 200

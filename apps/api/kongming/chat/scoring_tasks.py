@@ -10,6 +10,8 @@ import logging
 from typing import cast
 
 from sqlalchemy import text
+from sqlalchemy.engine import RowMapping
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.chat.agent_client import AgentClient
 from kongming.chat.scoring import (
@@ -67,73 +69,18 @@ async def _assemble_material(message_id: str) -> tuple[str | None, str, str]:
     不符(非 SUCCESS assistant 轮)、结果 JSON 解析失败、证据不可装配
     (无结果集且无有效来源引用)各归此口径。tenant_key=租户键(用量归因
     维度,api 侧按 key 反解;与问答链路同口径,SHALL NOT 传租户 UUID)。"""
-    from kongming.rag.documents_repo import SqlDocumentRepo
-
     async with get_sessionmaker()() as s:
-        row = (
-            (
-                await s.execute(
-                    text(
-                        "SELECT m.role, m.status, m.question, m.resolved_question,"
-                        "       m.result_json, m.summary, m.trace_id,"
-                        "       se.tenant_id AS tenant_id, te.tenant_key AS tenant_key"
-                        " FROM public.chat_message m"
-                        " JOIN public.chat_session se ON se.id = m.session_id"
-                        " LEFT JOIN public.sys_tenant te ON te.id = se.tenant_id"
-                        " WHERE m.id = :mid"
-                    ),
-                    {"mid": message_id},
-                )
-            )
-            .mappings()
-            .one_or_none()
-        )
+        row = await _fetch_message(s, message_id)
         if row is None or row["role"] != "ASSISTANT" or row["status"] != "SUCCESS":
             return None, "", ""
-        try:
-            payload = json.loads(str(row["result_json"] or "{}"))
-        except ValueError:
-            log.warning("评分证据装配失败(result_json 非法) message=%s", message_id)
+        body = _parse_result(row, message_id)
+        if body is None:
             return None, "", ""
-        if not isinstance(payload, dict):
-            return None, "", ""
-        body = cast("dict[str, object]", payload)
-        columns = body.get("columns")
-        rows = body.get("rows")
-        stats = body.get("stats")
-        sources = body.get("sources")
-        col_list = (
-            [str(c) for c in cast("list[object]", columns)] if isinstance(columns, list) else []
-        )
-        row_list = (
-            [list(cast("list[object]", r)) for r in cast("list[object]", rows)]
-            if isinstance(rows, list)
-            else []
-        )
-        stat_map = dict(cast("dict[str, object]", stats)) if isinstance(stats, dict) else {}
         tenant_id = str(row["tenant_id"] or "")
-        tenant_key = str(row["tenant_key"] or "")
-        trace_id = str(row["trace_id"] or "")
         answer = str(row["summary"] or "")
         if not answer.strip():
             return None, "", ""  # 无答案文本(如再执行轮)不评分
-        if col_list and row_list:
-            evidence = assemble_data_evidence(col_list, row_list, stat_map)
-        elif isinstance(sources, list) and sources and tenant_id:
-            typed_sources: list[dict[str, str]] = [
-                {k: str(v) for k, v in cast("dict[str, object]", src).items() if isinstance(v, str)}
-                for src in cast("list[object]", sources)
-                if isinstance(src, dict)
-            ]
-            refs = [src["source_ref"] for src in typed_sources if src.get("source_ref")]
-            contents = (
-                await SqlDocumentRepo(s).fetch_contents_by_refs(tenant_id=tenant_id, refs=refs)
-                if refs
-                else {}
-            )
-            evidence = assemble_doc_evidence(typed_sources, contents)
-        else:
-            return None, "", ""  # 证据不可装配(spec:该轮不评分)
+        evidence = await _assemble_evidence(s, body, tenant_id=tenant_id)
         if not evidence.strip():
             return None, "", ""
         material = build_material(
@@ -142,4 +89,69 @@ async def _assemble_material(message_id: str) -> tuple[str | None, str, str]:
             answer=answer,
             evidence=evidence,
         )
-    return material, trace_id, tenant_key
+    return material, str(row["trace_id"] or ""), str(row["tenant_key"] or "")
+
+
+async def _fetch_message(s: AsyncSession, message_id: str) -> RowMapping | None:
+    """守卫读:消息及其会话租户/trace 一行。"""
+    return (
+        (
+            await s.execute(
+                text(
+                    "SELECT m.role, m.status, m.question, m.resolved_question,"
+                    "       m.result_json, m.summary, m.trace_id,"
+                    "       se.tenant_id AS tenant_id, te.tenant_key AS tenant_key"
+                    " FROM public.chat_message m"
+                    " JOIN public.chat_session se ON se.id = m.session_id"
+                    " LEFT JOIN public.sys_tenant te ON te.id = se.tenant_id"
+                    " WHERE m.id = :mid"
+                ),
+                {"mid": message_id},
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+
+
+def _parse_result(row: RowMapping, message_id: str) -> dict[str, object] | None:
+    """result_json 解析为 dict;非法/非对象档返回 None(仅日志,不评分)。"""
+    try:
+        payload = json.loads(str(row["result_json"] or "{}"))
+    except ValueError:
+        log.warning("评分证据装配失败(result_json 非法) message=%s", message_id)
+        return None
+    return cast("dict[str, object]", payload) if isinstance(payload, dict) else None
+
+
+async def _assemble_evidence(s: AsyncSession, body: dict[str, object], *, tenant_id: str) -> str:
+    """按结果集优先、文档来源次之装配证据;两者皆不可用返回空串。"""
+    from kongming.rag.documents_repo import SqlDocumentRepo
+
+    columns = body.get("columns")
+    rows = body.get("rows")
+    stats = body.get("stats")
+    sources = body.get("sources")
+    col_list = [str(c) for c in cast("list[object]", columns)] if isinstance(columns, list) else []
+    row_list = (
+        [list(cast("list[object]", r)) for r in cast("list[object]", rows)]
+        if isinstance(rows, list)
+        else []
+    )
+    stat_map = dict(cast("dict[str, object]", stats)) if isinstance(stats, dict) else {}
+    if col_list and row_list:
+        return assemble_data_evidence(col_list, row_list, stat_map)
+    if isinstance(sources, list) and sources and tenant_id:
+        typed_sources: list[dict[str, str]] = [
+            {k: str(v) for k, v in cast("dict[str, object]", src).items() if isinstance(v, str)}
+            for src in cast("list[object]", sources)
+            if isinstance(src, dict)
+        ]
+        refs = [src["source_ref"] for src in typed_sources if src.get("source_ref")]
+        contents = (
+            await SqlDocumentRepo(s).fetch_contents_by_refs(tenant_id=tenant_id, refs=refs)
+            if refs
+            else {}
+        )
+        return assemble_doc_evidence(typed_sources, contents)
+    return ""  # 证据不可装配(spec:该轮不评分)

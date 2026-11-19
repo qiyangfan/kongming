@@ -1,36 +1,9 @@
 /* 管理知识库条目：按数据源和归属筛选，支持上传、编辑说明、删除、扫描及重建索引。 */
 
-import { useEffect, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { FormRow } from "@/components/form-row";
-import { formatDateTime } from "@/lib/datetime";
-import { PageHeader } from "@/components/page-header";
-import { EmptyState } from "@/components/empty-state";
-import { DataView } from "@/components/data-view";
 import {
   Select,
   SelectContent,
@@ -38,35 +11,113 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { datasourceApi } from "@/lib/datasource-api";
-import { api } from "@/lib/api";
-import { ragApi, type KnowledgeItemOut, type TeamScope } from "@/lib/rag-api";
-import { listMyTeams } from "@/lib/team-api";
+import { PageHeader } from "@/components/page-header";
+import type { KnowledgeItemOut, TeamScope } from "@/lib/rag-api";
+import type { TeamItem } from "@/lib/team-api";
 import { RecallProbePanel } from "@/components/recall-probe-panel";
-import type { components } from "@/lib/api-types.gen";
+import { RagUploadSection } from "./rag-page-upload";
+import { RagTable } from "./rag-page-table";
 import {
-  CircleHelp,
-  FileText,
-  Loader2 as LoaderIcon,
-  Trash2 as TrashIcon,
-  Upload,
-  Users as UsersIcon,
-} from "lucide-react";
+  RagDeleteDialog,
+  RagEditDialog,
+  RagOwnershipDialog,
+  RagReindexDialog,
+} from "./rag-page-dialogs";
+import { DocumentsSection } from "./rag-page-documents";
+import { useRagMutations, useRagQueries } from "./rag-page-queries";
 
 const PAGE_SIZE = 10;
 
-const SOURCE_LABEL: Record<string, string> = {
-  INTROSPECTION: "自动扫描",
-  AI_GENERATED: "AI 润色",
-  MANUAL_UPLOAD: "人工上传",
-  MANUAL_EDIT: "人工精修",
-  FEEDBACK_REFINED: "反馈精修",
-};
+function HeaderActions({
+  actionDs,
+  options,
+  fetchPending,
+  reindexPending,
+  onActionDsChange,
+  onScan,
+  onReindex,
+}: {
+  actionDs: string;
+  options: { datasource_key: string; name: string }[] | undefined;
+  fetchPending: boolean;
+  reindexPending: boolean;
+  onActionDsChange: (v: string) => void;
+  onScan: () => void;
+  onReindex: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <Select value={actionDs || "default"} onValueChange={onActionDsChange}>
+        <SelectTrigger className="w-40">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {(options ?? []).map((o) => (
+            <SelectItem key={o.datasource_key} value={o.datasource_key}>
+              {o.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="outline" onClick={onScan} disabled={fetchPending}>
+            {fetchPending ? "扫描中…" : "扫描数据源"}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-72">
+          读取该数据源的表结构,由 AI
+          生成每张表的业务说明并保存到知识库(耗时较长);人工精修的条目不会被覆盖。
+        </TooltipContent>
+      </Tooltip>
+      <Button variant="destructive" onClick={onReindex} disabled={reindexPending}>
+        重建索引
+      </Button>
+    </div>
+  );
+}
 
+// 页顶:定位提示、页头动作与操作结果提示(错误优先)
+function RagPageTop({
+  locateTable,
+  onClearLocate,
+  header,
+  error,
+  notice,
+}: {
+  locateTable: string | null;
+  onClearLocate: () => void;
+  header: ReactNode;
+  error: string | null;
+  notice: string | null;
+}) {
+  return (
+    <>
+      {locateTable && (
+        <div className="flex items-center justify-between rounded-lg border border-ring/40 bg-accent/40 px-3 py-2 text-sm">
+          <span>
+            已定位自反馈详情:表 <code className="font-mono">{locateTable}</code>
+          </span>
+          <Button variant="ghost" size="xs" aria-label="清除定位" onClick={onClearLocate}>
+            清除
+          </Button>
+        </div>
+      )}
+      <PageHeader title="知识库" actions={header} />
+
+      {(error || notice) && (
+        <p
+          role="alert"
+          className={error ? "text-sm text-destructive" : "text-sm text-muted-foreground"}
+        >
+          {error ?? notice}
+        </p>
+      )}
+    </>
+  );
+}
 export default function RagPage() {
-  const qc = useQueryClient();
   // ?table=<名> 用于从反馈详情定位条目,并显示提示和行高亮。
   const [searchParams, setSearchParams] = useSearchParams();
   const locateTable = searchParams.get("table");
@@ -90,149 +141,23 @@ export default function RagPage() {
   const [ownershipDest, setOwnershipDest] = useState<string>("public");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const { data: options } = useQuery({
-    queryKey: ["rag", "ds-options"],
-    queryFn: datasourceApi.options,
-  });
-
-  // 我所在的团队(上传归属候选=OWNER/MEMBER 可写团队;筛选用全部所在团队)
-  const myTeams = useQuery({ queryKey: ["teams", "mine"], queryFn: listMyTeams });
-  const writableTeams = (myTeams.data ?? []).filter(
-    (t) => t.role === "OWNER" || t.role === "MEMBER",
-  );
-
-  // 可扫描 schema 集合(上传表单候选源,随上传数据源联动)
-  const schemas = useQuery({
-    queryKey: ["rag", "schemas", uploadDs],
-    queryFn: () => ragApi.allowedSchemas(uploadDs),
-  });
+  const q = useRagQueries({ page, dsFilter, teamScope, uploadDs });
+  const m = useRagMutations({ setNotice, setError }, () => setReindexOpen(false));
 
   // 已选 schema 不在新数据源集合(换源/集合变化)时回落到首项
   useEffect(() => {
-    const list = schemas.data?.schemas;
+    const list = q.schemas.data?.schemas;
     if (list && list.length > 0 && !list.includes(uploadSchema)) {
       setUploadSchema(list[0]);
     }
-  }, [schemas.data, uploadSchema]);
-
-  const list = useQuery({
-    queryKey: ["rag", "tables", page, dsFilter, teamScope],
-    queryFn: () => ragApi.page(page, PAGE_SIZE, dsFilter, teamScope),
-  });
-
-  const invalidate = () => {
-    void qc.invalidateQueries({ queryKey: ["rag", "tables"] });
-  };
-
-  const upload = useMutation({
-    mutationFn: (file: File) => ragApi.upload(file, uploadDs, uploadSchema, uploadTeamId || null),
-    onSuccess: (out) => {
-      setNotice(`上传成功:${out.tables.join("、")}`);
-      setError(null);
-      invalidate();
-    },
-    onError: (e: Error) => {
-      // SCHEMA_NOT_ALLOWED 等边界错误已由 lib/api 统一转译为中文
-      setError(`上传失败:${e.message}`);
-      setNotice(null);
-    },
-  });
-
-  const setOwnership = useMutation({
-    mutationFn: (t: { id: string; teamId: string | null }) => ragApi.setOwnership(t.id, t.teamId),
-    onSuccess: (out) => {
-      setOwnershipTarget(null);
-      setNotice(
-        out.team_name
-          ? `已归属团队「${out.team_name}」:${out.table_name}`
-          : `已转为租户公共:${out.table_name}`,
-      );
-      setError(null);
-      invalidate();
-    },
-    onError: (e: Error) => {
-      setError(`归属变更失败:${e.message}`);
-      setNotice(null);
-    },
-  });
-
-  const openOwnership = (item: KnowledgeItemOut) => {
-    setOwnershipTarget(item);
-    // 预选与现状相对的目标(公共条目→首个可写团队;团队条目→公共)
-    setOwnershipDest(item.team_id ? "public" : (writableTeams[0]?.id ?? "public"));
-  };
-
-  const remove = useMutation({
-    mutationFn: (id: string) => ragApi.remove(id),
-    onSuccess: () => {
-      setDeleteTarget(null);
-      setNotice("已删除");
-      setError(null);
-      invalidate();
-    },
-    onError: (e: Error) => {
-      setError(`删除失败:${e.message}`);
-      setNotice(null);
-    },
-  });
-
-  const edit = useMutation({
-    mutationFn: (t: { id: string; comment: string; alias: string }) =>
-      ragApi.edit(t.id, { table_comment: t.comment, alias: t.alias }),
-    onSuccess: (out) => {
-      setEditTarget(null);
-      setNotice(`已保存:${out.table_name}${out.alias ? `(${out.alias})` : ""}`);
-      setError(null);
-      invalidate();
-    },
-    onError: (e: Error) => {
-      setError(`保存失败:${e.message}`);
-      setNotice(null);
-    },
-  });
-
-  const openEdit = (item: KnowledgeItemOut) => {
-    setEditComment(item.table_comment);
-    setEditAlias(item.alias);
-    setEditTarget(item);
-  };
-
-  const fetchMeta = useMutation({
-    mutationFn: () => ragApi.fetchMetadata(actionDs || "default"),
-    onSuccess: (out) => {
-      const parts = [`发现 ${out.found} 张表,已生成 ${out.enriched} 张的说明`];
-      if (out.skipped > 0) parts.push(`${out.skipped} 张人工精修未覆盖`);
-      if (out.removed > 0) parts.push(`清理 ${out.removed} 条失效条目`);
-      setNotice(`扫描完成:${parts.join(",")}`);
-      setError(null);
-      invalidate();
-    },
-    onError: (e: Error) => {
-      setError(`扫描数据源失败:${e.message}`);
-      setNotice(null);
-    },
-  });
-
-  const reindex = useMutation({
-    mutationFn: () => ragApi.reindex(actionDs || "default"),
-    onSuccess: (out) => {
-      setReindexOpen(false);
-      setNotice(`重建完成:清空 ${out.deleted} 条,重建 ${out.rebuilt} 表(润色 ${out.enriched})`);
-      setError(null);
-      invalidate();
-    },
-    onError: (e: Error) => {
-      setReindexOpen(false);
-      setError(`重建索引失败:${e.message}`);
-    },
-  });
+  }, [q.schemas.data, uploadSchema]);
 
   // 数据源动作下拉缺省对齐筛选
   useEffect(() => {
     if (!actionDs && dsFilter) setActionDs(dsFilter);
   }, [actionDs, dsFilter]);
 
-  const total = list.data?.total ?? 0;
+  const total = q.list.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   // 删除末页唯一条目后重新计算页码，避免显示空页。
@@ -240,551 +165,102 @@ export default function RagPage() {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
+  const changeScope = (setter: (v: TeamScope) => void) => (v: TeamScope) => {
+    setter(v);
+    setPage(1);
+  };
+  const items = q.list.data?.items ?? [];
+
   return (
     <div className="space-y-4">
-      {locateTable && (
-        <div className="flex items-center justify-between rounded-lg border border-ring/40 bg-accent/40 px-3 py-2 text-sm">
-          <span>
-            已定位自反馈详情:表 <code className="font-mono">{locateTable}</code>
-          </span>
-          <Button
-            variant="ghost"
-            size="xs"
-            aria-label="清除定位"
-            onClick={() => setSearchParams({}, { replace: true })}
-          >
-            清除
-          </Button>
-        </div>
-      )}
-      <PageHeader
-        title="知识库"
-        actions={
-          <div className="flex items-center gap-2">
-            <Select value={actionDs || "default"} onValueChange={setActionDs}>
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(options ?? []).map((o) => (
-                  <SelectItem key={o.datasource_key} value={o.datasource_key}>
-                    {o.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  onClick={() => fetchMeta.mutate()}
-                  disabled={fetchMeta.isPending}
-                >
-                  {fetchMeta.isPending ? "扫描中…" : "扫描数据源"}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-72">
-                读取该数据源的表结构,由 AI
-                生成每张表的业务说明并保存到知识库(耗时较长);人工精修的条目不会被覆盖。
-              </TooltipContent>
-            </Tooltip>
-            <Button
-              variant="destructive"
-              onClick={() => setReindexOpen(true)}
-              disabled={reindex.isPending}
-            >
-              重建索引
-            </Button>
-          </div>
+      <RagPageTop
+        locateTable={locateTable}
+        onClearLocate={() => setSearchParams({}, { replace: true })}
+        header={
+          <HeaderActions
+            actionDs={actionDs}
+            options={q.options.data}
+            fetchPending={m.fetchMeta.isPending}
+            reindexPending={m.reindex.isPending}
+            onActionDsChange={setActionDs}
+            onScan={() => m.fetchMeta.mutate(actionDs || "default")}
+            onReindex={() => setReindexOpen(true)}
+          />
+        }
+        error={error}
+        notice={notice}
+      />
+
+      <RagUploadSection
+        options={q.options.data}
+        uploadDs={uploadDs}
+        onUploadDsChange={setUploadDs}
+        uploadSchema={uploadSchema}
+        onUploadSchemaChange={setUploadSchema}
+        schemas={q.schemas}
+        uploadTeamId={uploadTeamId}
+        onUploadTeamIdChange={setUploadTeamId}
+        writableTeams={q.writableTeams}
+        fileRef={fileRef}
+        uploading={m.upload.isPending}
+        onUploadFile={(file) =>
+          m.upload.mutate({ file, ds: uploadDs, schema: uploadSchema, teamId: uploadTeamId })
         }
       />
 
-      {(error || notice) && (
-        <p
-          role="alert"
-          className={error ? "text-sm text-destructive" : "text-sm text-muted-foreground"}
-        >
-          {error ?? notice}
-        </p>
-      )}
-
-      <section className="rounded-lg border p-4 space-y-3">
-        <div className="flex items-center gap-1">
-          <h2 className="text-sm font-medium">表说明</h2>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-5 text-muted-foreground hover:text-foreground"
-                aria-label="什么是表说明"
-              >
-                <CircleHelp className="size-3.5" aria-hidden />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-72">
-              {
-                "教 AI 认识数据表——字段含义、业务别名、示例问题。可上传文档补充,或用「重建索引」自动扫描生成。"
-              }
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1">
-            <Label htmlFor="rag-upload-ds">数据源</Label>
-            <Select value={uploadDs} onValueChange={setUploadDs}>
-              <SelectTrigger id="rag-upload-ds" className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(options ?? []).map((o) => (
-                  <SelectItem key={o.datasource_key} value={o.datasource_key}>
-                    {o.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="rag-upload-schema">schema</Label>
-            {/* schema 候选=可扫描集合,与扫描/上传校验同源 */}
-            <Select
-              value={uploadSchema}
-              onValueChange={setUploadSchema}
-              disabled={schemas.isPending || schemas.isError}
-            >
-              <SelectTrigger id="rag-upload-schema" className="w-40">
-                <SelectValue
-                  placeholder={
-                    schemas.isError ? "候选加载失败" : schemas.isPending ? "加载中…" : "选择 schema"
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {(schemas.data?.schemas ?? []).map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {s}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {schemas.isError && (
-              <p className="text-xs text-destructive" role="alert">
-                schema 候选加载失败,请刷新重试
-              </p>
-            )}
-          </div>
-          {/* 上传归属(默认公共;可选我作为 OWNER/MEMBER 的团队——VIEWER 只读不可选) */}
-          <div className="space-y-1">
-            <Label htmlFor="rag-upload-team">归属</Label>
-            <Select
-              value={uploadTeamId || "public"}
-              onValueChange={(v) => setUploadTeamId(v === "public" ? "" : v)}
-            >
-              <SelectTrigger id="rag-upload-team" className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="public">租户公共</SelectItem>
-                {writableTeams.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>
-                    {t.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="rag-upload-file" className="flex items-center gap-1">
-              文件(Markdown/TXT/PDF/Word)
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-5 text-muted-foreground hover:text-foreground"
-                    aria-label="支持的文件格式与大小限制"
-                  >
-                    <CircleHelp className="size-3.5" aria-hidden />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-72">
-                  支持 Markdown / TXT / PDF / Word 文档,文本类不超过 1MB,PDF 和 Word 不超过 10MB。
-                </TooltipContent>
-              </Tooltip>
-            </Label>
-            {/* 隐藏 file input 仅作 Button 触发的管道,不作为可见交互件(样式铁律豁免) */}
-            <input
-              ref={fileRef}
-              id="rag-upload-file"
-              type="file"
-              accept=".md,.markdown,.txt,.pdf,.docx"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                // 清空 input value,确保失败后再次选择同一文件仍会触发 change。
-                e.target.value = "";
-                if (f) upload.mutate(f);
-              }}
-            />
-            <Button
-              variant="outline"
-              onClick={() => fileRef.current?.click()}
-              disabled={upload.isPending || schemas.isPending || !uploadSchema}
-            >
-              {upload.isPending ? "上传中…" : "选择文件并上传"}
-            </Button>
-          </div>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          上传后文档会按表格自动整理拆分;同一张表重复上传,新内容会覆盖旧内容。
-        </p>
-      </section>
-
       {/* 召回试跑面板只读验证知识表，不写入知识库；数据源选项复用本页查询。 */}
-      <RecallProbePanel options={options ?? []} />
+      <RecallProbePanel options={q.options.data ?? []} />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Select
-          value={dsFilter || "all"}
-          onValueChange={(v) => {
-            setDsFilter(v === "all" ? "" : v);
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-44">
-            <SelectValue placeholder="全部数据源" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部数据源</SelectItem>
-            {(options ?? []).map((o) => (
-              <SelectItem key={o.datasource_key} value={o.datasource_key}>
-                {o.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={teamScope}
-          onValueChange={(v) => {
-            setTeamScope(v as TeamScope);
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-40" aria-label="按归属筛选">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部归属</SelectItem>
-            <SelectItem value="public">租户公共</SelectItem>
-            {(myTeams.data ?? []).map((t) => (
-              <SelectItem key={t.id} value={t.id}>
-                {t.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <span className="text-sm text-muted-foreground">共 {total} 条</span>
-      </div>
-
-      <DataView
-        rows={list.data?.items ?? []}
-        rowKey={(item) => item.id}
-        isLoading={list.isPending}
-        isEmpty={!list.isPending && list.data?.items.length === 0}
-        emptyText="暂无知识条目——可在右上角对数据源执行「扫描数据源」"
-        columns={[
-          {
-            key: "datasource_key",
-            header: "数据源",
-            cellClassName: "font-mono text-xs",
-          },
-          {
-            key: "schema_name",
-            header: "schema",
-            cellClassName: "font-mono text-xs",
-          },
-          {
-            key: "table_name",
-            header: "表名",
-            cardPriority: 1,
-            cellClassName: "font-mono text-xs",
-            // ?table= 定位行高亮:DataView 无行级 className 口径,降为标题单元格高亮
-            render: (item) =>
-              item.table_name === locateTable ? (
-                <span className="bg-accent/50 px-1 font-mono text-xs">{item.table_name}</span>
-              ) : (
-                <span className="font-mono text-xs">{item.table_name}</span>
-              ),
-          },
-          {
-            key: "alias",
-            header: "业务称谓",
-            cardPriority: 4,
-            cellClassName: "text-xs",
-            render: (item) =>
-              item.alias ? (
-                <Badge variant="outline" className="max-w-40" title={item.alias}>
-                  <span className="truncate">{item.alias}</span>
-                </Badge>
-              ) : (
-                <span className="text-muted-foreground">—</span>
-              ),
-          },
-          {
-            key: "table_comment",
-            header: "说明",
-            cellClassName: "max-w-64 truncate",
-            render: (item) => (
-              <span className="block truncate" title={item.table_comment}>
-                {item.table_comment}
-              </span>
-            ),
-          },
-          {
-            key: "source_type",
-            header: "来源",
-            cardPriority: 2,
-            render: (item) => (
-              <Badge variant="secondary">
-                {SOURCE_LABEL[item.source_type] ?? item.source_type}
-              </Badge>
-            ),
-          },
-          {
-            key: "team_name",
-            header: "归属",
-            cardPriority: 5,
-            render: (item) =>
-              item.team_id ? (
-                <Badge variant="outline" className="max-w-36 gap-1" title={item.team_name ?? ""}>
-                  <UsersIcon className="size-3 shrink-0" aria-hidden />
-                  <span className="truncate">{item.team_name ?? item.team_id}</span>
-                </Badge>
-              ) : (
-                <span className="text-xs text-muted-foreground">公共</span>
-              ),
-          },
-          {
-            key: "updated_at",
-            header: "更新时间",
-            cardPriority: 3,
-            cellClassName: "text-xs text-muted-foreground",
-            render: (item) => formatDateTime(item.updated_at),
-          },
-        ]}
-        actions={[
-          { label: "编辑", onSelect: openEdit },
-          // 归属变更入口(公共条目且无可写团队时无处可转,不显入口)
-          {
-            label: "归属",
-            onSelect: openOwnership,
-            isVisible: (item) => Boolean(item.team_id) || writableTeams.length > 0,
-          },
-          { label: "删除", destructive: true, onSelect: setDeleteTarget },
-        ]}
+      <RagTable
+        items={items}
+        isLoading={q.list.isPending}
+        isEmpty={!q.list.isPending && items.length === 0}
+        options={q.options.data}
+        dsFilter={dsFilter}
+        onDsFilterChange={changeScope(setDsFilter)}
+        teamScope={teamScope}
+        onTeamScopeChange={changeScope(setTeamScope)}
+        myTeams={q.myTeams.data ?? []}
+        total={total}
+        page={page}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        locateTable={locateTable}
+        canChangeOwnership={q.writableTeams.length > 0}
+        onEdit={(item) => {
+          setEditComment(item.table_comment);
+          setEditAlias(item.alias);
+          setEditTarget(item);
+        }}
+        onOwnership={(item) => {
+          setOwnershipTarget(item);
+          // 预选与现状相对的目标(公共条目→首个可写团队;团队条目→公共)
+          setOwnershipDest(item.team_id ? "public" : (q.writableTeams[0]?.id ?? "public"));
+        }}
+        onDelete={setDeleteTarget}
       />
 
-      <div className="flex items-center justify-end gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={page <= 1}
-          onClick={() => setPage((p) => p - 1)}
-        >
-          上一页
-        </Button>
-        <span className="text-sm text-muted-foreground">
-          {page}/{totalPages}
-        </span>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={page >= totalPages}
-          onClick={() => setPage((p) => p + 1)}
-        >
-          下一页
-        </Button>
-      </div>
-
-      {/* 表说明与业务称谓别名同面对话框编辑;保存后标记 MANUAL_EDIT,自动润色不覆盖 */}
-      <Dialog
-        open={editTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setEditTarget(null);
+      <RagDialogs
+        m={m}
+        dialog={{
+          editTarget,
+          setEditTarget,
+          editComment,
+          setEditComment,
+          editAlias,
+          setEditAlias,
+          deleteTarget,
+          setDeleteTarget,
+          reindexOpen,
+          setReindexOpen,
+          actionDs,
+          ownershipTarget,
+          setOwnershipTarget,
+          ownershipDest,
+          setOwnershipDest,
         }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>编辑表说明</DialogTitle>
-            <DialogDescription>
-              表 {editTarget?.schema_name}.{editTarget?.table_name}
-              ——保存后标记为「人工精修」,自动扫描/润色不再覆盖。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <FormRow label="表说明" htmlFor="rag-edit-comment">
-              <Textarea
-                id="rag-edit-comment"
-                value={editComment}
-                maxLength={500}
-                rows={3}
-                onChange={(e) => setEditComment(e.target.value)}
-                placeholder="一句话中文表说明"
-              />
-            </FormRow>
-            <FormRow label="业务称谓别名" htmlFor="rag-edit-alias">
-              <Input
-                id="rag-edit-alias"
-                value={editAlias}
-                maxLength={64}
-                onChange={(e) => setEditAlias(e.target.value)}
-                placeholder="如「商品表」;留空表示无别名"
-              />
-              <p className="text-xs text-muted-foreground">
-                摘要与洞察将以此称谓提及该表(用户用语优先);留空时回退表说明中的中文名称。
-              </p>
-            </FormRow>
-          </div>
-          {edit.isError && (
-            <p className="text-sm text-destructive" role="alert">
-              {(edit.error as Error).message}
-            </p>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditTarget(null)}>
-              取消
-            </Button>
-            <Button
-              disabled={edit.isPending}
-              onClick={() =>
-                editTarget &&
-                edit.mutate({
-                  id: editTarget.id,
-                  comment: editComment,
-                  alias: editAlias,
-                })
-              }
-            >
-              {edit.isPending ? "保存中…" : "保存"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* open 只看 target:成功关闭由 onSuccess setDeleteTarget(null) 收口;
-          若并入 !remove.isSuccess,一次成功后 mutation 状态保持 true,
-          后续删除对话框永远打不开(须先 mutate 才重置——而不开框就到不了 mutate) */}
-      <AlertDialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除知识条目?</AlertDialogTitle>
-            <AlertDialogDescription>
-              将删除表 {deleteTarget?.schema_name}.{deleteTarget?.table_name} 的知识条目, 删除后 AI
-              问答不再引用;此操作不可恢复。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {remove.isError && (
-            <p className="text-sm text-destructive" role="alert">
-              {(remove.error as Error).message}
-            </p>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <Button
-              variant="destructive"
-              disabled={remove.isPending}
-              onClick={() => deleteTarget && remove.mutate(deleteTarget.id)}
-            >
-              {remove.isPending ? "删除中…" : "删除"}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={reindexOpen} onOpenChange={setReindexOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>重建索引?</AlertDialogTitle>
-            <AlertDialogDescription>
-              将清空数据源「{actionDs || "default"}」在该租户的全部表说明并重新扫描 (含 AI
-              润色)——人工上传/精修的条目也会被清掉,回到自动生成基线; 团队归属的条目将回到公共可见。
-              大库耗时较长,请耐心等待。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <Button
-              variant="destructive"
-              disabled={reindex.isPending}
-              onClick={() => reindex.mutate()}
-            >
-              {reindex.isPending ? "重建中…" : "确认重建"}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* 归属变更受控确认:明示变更后可见范围变化;取消则不动 */}
-      <AlertDialog
-        open={ownershipTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setOwnershipTarget(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>变更归属?</AlertDialogTitle>
-            <AlertDialogDescription>
-              表 {ownershipTarget?.schema_name}.{ownershipTarget?.table_name}
-              ——当前{ownershipTarget?.team_id ? "归属团队专属" : "为租户公共"}。
-              变更后可见范围随之变化:团队专属=仅该团队成员在问答中可见;租户公共=全租户可见。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <FormRow label="目标归属" htmlFor="rag-ownership-dest">
-            <Select value={ownershipDest} onValueChange={setOwnershipDest}>
-              <SelectTrigger id="rag-ownership-dest" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="public">租户公共(全租户可见)</SelectItem>
-                {writableTeams.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>
-                    {t.name}(仅团队成员可见)
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FormRow>
-          {setOwnership.isError && (
-            <p className="text-sm text-destructive" role="alert">
-              {(setOwnership.error as Error).message}
-            </p>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <Button
-              disabled={
-                setOwnership.isPending || ownershipDest === (ownershipTarget?.team_id ?? "public")
-              }
-              onClick={() =>
-                ownershipTarget &&
-                setOwnership.mutate({
-                  id: ownershipTarget.id,
-                  teamId: ownershipDest === "public" ? null : ownershipDest,
-                })
-              }
-            >
-              {setOwnership.isPending ? "变更中…" : "确认变更"}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        writableTeams={q.writableTeams}
+      />
 
       {/* 业务文档区:政策/流程类文档上传与维护(与表知识双通道隔离) */}
       <DocumentsSection datasource={actionDs || "default"} />
@@ -792,160 +268,73 @@ export default function RagPage() {
   );
 }
 
-// ADR-005:消费生成契约
-type DocItem = components["schemas"]["DocumentItemOut"];
+// 四个确认弹窗:成功回调里再关闭,避免先关框导致行级反馈丢失
+type DialogState = {
+  editTarget: KnowledgeItemOut | null;
+  setEditTarget: (v: KnowledgeItemOut | null) => void;
+  editComment: string;
+  setEditComment: (v: string) => void;
+  editAlias: string;
+  setEditAlias: (v: string) => void;
+  deleteTarget: KnowledgeItemOut | null;
+  setDeleteTarget: (v: KnowledgeItemOut | null) => void;
+  reindexOpen: boolean;
+  setReindexOpen: (v: boolean) => void;
+  actionDs: string;
+  ownershipTarget: KnowledgeItemOut | null;
+  setOwnershipTarget: (v: KnowledgeItemOut | null) => void;
+  ownershipDest: string;
+  setOwnershipDest: (v: string) => void;
+};
 
-function DocumentsSection({ datasource }: { datasource: string }) {
-  const qc2 = useQueryClient();
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [removing, setRemoving] = useState<DocItem | null>(null);
-  const [delErr, setDelErr] = useState<string | null>(null);
-  const docs = useQuery({
-    queryKey: ["rag-docs", datasource],
-    queryFn: () => api.get<DocItem[]>(`/system/document/documents?datasource_key=${datasource}`),
-  });
-  // 受控 mutation 驱动删除:在途时禁用取消/确认,防关框后重复发请求或双击重复提交
-  const delDoc = useMutation({
-    mutationFn: (id: string) => api.delete(`/system/document/documents/${id}`),
-    onSuccess: () => {
-      setRemoving(null);
-      setDelErr(null);
-      void qc2.invalidateQueries({ queryKey: ["rag-docs", datasource] });
-    },
-    onError: (e) => setDelErr(e instanceof Error ? e.message : "删除失败"),
-  });
-
-  async function doUpload(file: File) {
-    setBusy(true);
-    setErr(null);
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("datasource_key", datasource);
-      await api.postForm("/system/document/upload", form);
-      void qc2.invalidateQueries({ queryKey: ["rag-docs", datasource] });
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "上传失败");
-    } finally {
-      setBusy(false);
-    }
-  }
-
+function RagDialogs({
+  m,
+  dialog: d,
+  writableTeams,
+}: {
+  m: ReturnType<typeof useRagMutations>;
+  dialog: DialogState;
+  writableTeams: TeamItem[];
+}) {
   return (
-    <section className="rounded-lg border p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          <h2 className="text-sm font-medium">知识文档</h2>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-5 text-muted-foreground hover:text-foreground"
-                aria-label="什么是知识文档"
-              >
-                <CircleHelp className="size-3.5" aria-hidden />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-72">
-              存放政策、流程、规范等资料,支持 Markdown / TXT / PDF / Word。上传后用户问到相关内容,AI
-              直接按文档回答并标注出处,不查数据库。
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy}
-          onClick={() => fileRef.current?.click()}
-        >
-          {busy ? (
-            <LoaderIcon className="animate-spin" aria-hidden />
-          ) : (
-            <Upload className="size-3.5" aria-hidden />
-          )}
-          上传文档
-        </Button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".md,.txt,.pdf,.docx"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void doUpload(f);
-            e.target.value = ""; // 同文件重选触发
-          }}
-        />
-      </div>
-      {err && (
-        <p className="text-xs text-destructive" role="alert">
-          {err}
-        </p>
-      )}
-      <div className="divide-y">
-        {docs.isLoading ? (
-          <div className="py-4 text-center">
-            <LoaderIcon className="mx-auto size-4 animate-spin text-muted-foreground" aria-hidden />
-          </div>
-        ) : (docs.data?.length ?? 0) === 0 ? (
-          <EmptyState>
-            暂无文档——上传后,AI 遇到政策、流程类问题会直接按文档内容回答(标注出处)
-          </EmptyState>
-        ) : (
-          docs.data?.map((d: DocItem) => (
-            <div key={d.id} className="flex items-center gap-2 py-2 text-sm">
-              <FileText className="size-4 text-muted-foreground" aria-hidden />
-              <span className="flex-1 truncate">{d.doc_name}</span>
-              <span className="text-xs text-muted-foreground">{d.block_count} 块</span>
-              <Button
-                size="icon"
-                variant="ghost"
-                aria-label="删除文档"
-                onClick={() => {
-                  setRemoving(d);
-                  setDelErr(null);
-                }}
-              >
-                <TrashIcon className="size-3.5" aria-hidden />
-              </Button>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* 删除受控确认(与同页表知识同先例);失败对话框内可见 */}
-      <AlertDialog
-        open={removing !== null}
-        onOpenChange={(open) => {
-          if (!open && !delDoc.isPending) setRemoving(null);
+    <>
+      <RagEditDialog
+        target={d.editTarget}
+        comment={d.editComment}
+        alias={d.editAlias}
+        onCommentChange={d.setEditComment}
+        onAliasChange={d.setEditAlias}
+        onClose={() => d.setEditTarget(null)}
+        edit={{
+          ...m.edit,
+          mutate: (v) => m.edit.mutate(v, { onSuccess: () => d.setEditTarget(null) }),
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除文档「{removing?.doc_name}」?</AlertDialogTitle>
-            <AlertDialogDescription>
-              删除后其全部知识块移除,知识问答不再引用该文档。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {delErr && (
-            <p className="text-xs text-destructive" role="alert">
-              {delErr}
-            </p>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={delDoc.isPending}>再想想</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={delDoc.isPending}
-              onClick={() => removing && delDoc.mutate(removing.id)}
-            >
-              {delDoc.isPending ? "删除中…" : "删除"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </section>
+      />
+      <RagDeleteDialog
+        target={d.deleteTarget}
+        onClose={() => d.setDeleteTarget(null)}
+        remove={{
+          ...m.remove,
+          mutate: (id) => m.remove.mutate(id, { onSuccess: () => d.setDeleteTarget(null) }),
+        }}
+      />
+      <RagReindexDialog
+        open={d.reindexOpen}
+        onOpenChange={d.setReindexOpen}
+        actionDs={d.actionDs}
+        reindex={{ ...m.reindex, mutate: () => m.reindex.mutate(d.actionDs || "default") }}
+      />
+      <RagOwnershipDialog
+        target={d.ownershipTarget}
+        dest={d.ownershipDest}
+        onDestChange={d.setOwnershipDest}
+        writableTeams={writableTeams}
+        onClose={() => d.setOwnershipTarget(null)}
+        setOwnership={{
+          ...m.setOwnership,
+          mutate: (v) => m.setOwnership.mutate(v, { onSuccess: () => d.setOwnershipTarget(null) }),
+        }}
+      />
+    </>
   );
 }

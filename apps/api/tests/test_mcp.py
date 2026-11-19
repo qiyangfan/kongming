@@ -221,6 +221,65 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
+async def _on_list_tools(ctx: Any, params: Any) -> Any:
+    """工具清单:一个只读工具 + 一个写工具。"""
+    ro = mcp_types.ToolAnnotations(read_only_hint=True)
+    schema = {"type": "object", "properties": {"path": {"type": "string"}}}
+    return mcp_types.ListToolsResult(
+        tools=[
+            mcp_types.Tool(
+                name="read_thing",
+                description="读取一个东西",
+                input_schema=schema,
+                annotations=ro,
+            ),
+            mcp_types.Tool(name="write_thing", description="写一个东西", input_schema=schema),
+        ]
+    )
+
+
+async def _on_list_prompts(ctx: Any, params: Any) -> Any:
+    """提示模板清单:一个带参数的模板 + 一个无参模板。"""
+    return mcp_types.ListPromptsResult(
+        prompts=[
+            mcp_types.Prompt(
+                name="greet",
+                description="问候模板",
+                arguments=[
+                    mcp_types.PromptArgument(name="who", description="问候对象", required=True)
+                ],
+            ),
+            mcp_types.Prompt(name="summarize", description="摘要模板"),
+        ]
+    )
+
+
+async def _on_read_resource(ctx: Any, params: Any) -> Any:
+    """资源读取:.bin 后缀返回 blob,其余返回文本内容。"""
+    uri = str(params.uri)
+    if uri.endswith(".bin"):
+        return mcp_types.ReadResourceResult(
+            contents=[mcp_types.BlobResourceContents(uri=uri, mime_type="text/plain", blob="AAEC")]
+        )
+    return mcp_types.ReadResourceResult(
+        contents=[
+            mcp_types.TextResourceContents(uri=uri, mime_type="text/plain", text=f"资源内容: {uri}")
+        ]
+    )
+
+
+async def _on_get_prompt(ctx: Any, params: Any) -> Any:
+    """提示模板渲染:把 who 参数拼进问候文本。"""
+    who = str(cast("dict[str, Any]", params.arguments or {}).get("who") or "")
+    return mcp_types.GetPromptResult(
+        messages=[
+            mcp_types.PromptMessage(
+                role="user", content=mcp_types.TextContent(type="text", text=f"你好, {who}")
+            )
+        ]
+    )
+
+
 class _RealServer:
     """SDK 低层 Server 形态的真实 server(本进程 uvicorn,出站客户端测试载体)。
 
@@ -246,105 +305,48 @@ class _RealServer:
         from mcp.server.lowlevel import Server
         from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-        async def on_list_tools(ctx: Any, params: Any) -> Any:
-            ro = mcp_types.ToolAnnotations(read_only_hint=True)
-            schema = {"type": "object", "properties": {"path": {"type": "string"}}}
-            return mcp_types.ListToolsResult(
-                tools=[
-                    mcp_types.Tool(
-                        name="read_thing",
-                        description="读取一个东西",
-                        input_schema=schema,
-                        annotations=ro,
-                    ),
-                    mcp_types.Tool(
-                        name="write_thing", description="写一个东西", input_schema=schema
-                    ),
-                ]
-            )
-
-        async def on_call_tool(ctx: Any, params: Any) -> Any:
-            if self.call_delay:
-                await asyncio.sleep(self.call_delay)
-            text = (
-                "y" * (1100 * 1024)
-                if self.tool_output == "big"
-                else f"读到: {cast('dict[str, Any]', params.arguments or {}).get('path')}"
-            )
-            return mcp_types.CallToolResult(content=[mcp_types.TextContent(type="text", text=text)])
-
-        async def on_list_resources(ctx: Any, params: Any) -> Any:
-            if self.resources_mode == "slow":
-                await asyncio.sleep(30)
-            if self.resources_mode == "method_missing":
-                from mcp.shared.exceptions import MCPError
-
-                raise MCPError(code=-32601, message="Method not found: resources/list")
-            return mcp_types.ListResourcesResult(
-                resources=[
-                    mcp_types.Resource(
-                        uri="file:///docs/readme.md",
-                        name="README",
-                        description="说明文档",
-                        mime_type="text/markdown",
-                    )
-                ]
-            )
-
-        async def on_read_resource(ctx: Any, params: Any) -> Any:
-            uri = str(params.uri)
-            if uri.endswith(".bin"):
-                return mcp_types.ReadResourceResult(
-                    contents=[
-                        mcp_types.BlobResourceContents(uri=uri, mime_type="text/plain", blob="AAEC")
-                    ]
-                )
-            return mcp_types.ReadResourceResult(
-                contents=[
-                    mcp_types.TextResourceContents(
-                        uri=uri, mime_type="text/plain", text=f"资源内容: {uri}"
-                    )
-                ]
-            )
-
-        async def on_list_prompts(ctx: Any, params: Any) -> Any:
-            return mcp_types.ListPromptsResult(
-                prompts=[
-                    mcp_types.Prompt(
-                        name="greet",
-                        description="问候模板",
-                        arguments=[
-                            mcp_types.PromptArgument(
-                                name="who", description="问候对象", required=True
-                            )
-                        ],
-                    ),
-                    mcp_types.Prompt(name="summarize", description="摘要模板"),
-                ]
-            )
-
-        async def on_get_prompt(ctx: Any, params: Any) -> Any:
-            who = str(cast("dict[str, Any]", params.arguments or {}).get("who") or "")
-            return mcp_types.GetPromptResult(
-                messages=[
-                    mcp_types.PromptMessage(
-                        role="user", content=mcp_types.TextContent(type="text", text=f"你好, {who}")
-                    )
-                ]
-            )
-
         kwargs: dict[str, Any] = dict(
-            on_list_tools=on_list_tools,
-            on_call_tool=on_call_tool,
-            on_read_resource=on_read_resource,
-            on_get_prompt=on_get_prompt,
+            on_list_tools=_on_list_tools,
+            on_call_tool=self._on_call_tool,
+            on_read_resource=_on_read_resource,
+            on_get_prompt=_on_get_prompt,
         )
         if self.primitives == "all":
-            kwargs["on_list_resources"] = on_list_resources
-            kwargs["on_list_prompts"] = on_list_prompts
+            kwargs["on_list_resources"] = self._on_list_resources
+            kwargs["on_list_prompts"] = _on_list_prompts
         srv = Server("km-test-server", version="1.0", **kwargs)
         mgr = StreamableHTTPSessionManager(app=srv, json_response=True, stateless=True)
         return srv, mgr
+
+    async def _on_call_tool(self, ctx: Any, params: Any) -> Any:
+        """工具调用:按旋钮注入延迟,big 档返回超量文本触发语义截断。"""
+        if self.call_delay:
+            await asyncio.sleep(self.call_delay)
+        text = (
+            "y" * (1100 * 1024)
+            if self.tool_output == "big"
+            else f"读到: {cast('dict[str, Any]', params.arguments or {}).get('path')}"
+        )
+        return mcp_types.CallToolResult(content=[mcp_types.TextContent(type="text", text=text)])
+
+    async def _on_list_resources(self, ctx: Any, params: Any) -> Any:
+        """资源列表:slow 档挂 30s,method_missing 档抛 -32601。"""
+        if self.resources_mode == "slow":
+            await asyncio.sleep(30)
+        if self.resources_mode == "method_missing":
+            from mcp.shared.exceptions import MCPError
+
+            raise MCPError(code=-32601, message="Method not found: resources/list")
+        return mcp_types.ListResourcesResult(
+            resources=[
+                mcp_types.Resource(
+                    uri="file:///docs/readme.md",
+                    name="README",
+                    description="说明文档",
+                    mime_type="text/markdown",
+                )
+            ]
+        )
 
     async def start(self) -> str:
         _srv, self._mgr = await self._build()
@@ -769,17 +771,25 @@ def _override_toolcall() -> None:
     from kongming.mcp.repository import SqlMcpRepo
     from kongming.mcp.service import McpService
     from kongming.redis_client import get_redis
+    from kongming.toolcall.adapters import (
+        ChatReplyStore as _ChatReplyStore,
+    )
+    from kongming.toolcall.adapters import (
+        InternalSqlExecutor as _InternalSqlExecutor,
+    )
+    from kongming.toolcall.adapters import (
+        McpDynamicResolver as _McpDynamicResolver,
+    )
+    from kongming.toolcall.adapters import (
+        McpToolCaller as _McpToolCaller,
+    )
+    from kongming.toolcall.adapters import (
+        RagServiceAdapter as _RagServiceAdapter,
+    )
+    from kongming.toolcall.dependencies import get_tool_service as _get_service
     from kongming.toolcall.ratelimit import RedisRateLimiter
     from kongming.toolcall.repository import SqlToolCallRepo, ToolAuditWriter
-    from kongming.toolcall.router import (
-        _ChatReplyStore,
-        _get_service,
-        _InternalSqlExecutor,
-        _McpDynamicResolver,
-        _McpToolCaller,
-        _RagServiceAdapter,
-    )
-    from kongming.toolcall.service import ToolCallService
+    from kongming.toolcall.service import ToolCallService, ToolLimits, ToolPorts
 
     def _factory(s: AsyncSession = Depends(get_session)) -> ToolCallService:  # noqa: B008
         mcp_svc = McpService(
@@ -787,19 +797,18 @@ def _override_toolcall() -> None:
             _StubCaller(),
         )
         return ToolCallService(
-            repo=SqlToolCallRepo(s),
-            writer=ToolAuditWriter(),
-            perms=SqlPermRepo(s),
-            limiter=RedisRateLimiter(get_redis()),
-            sql_executor=_InternalSqlExecutor(s),
-            rag_retriever=_RagServiceAdapter(s),
-            reply_store=_ChatReplyStore(s),
-            intent=None,
-            sandbox=None,
-            resolver=_McpDynamicResolver(mcp_svc),
-            mcp_caller=_McpToolCaller(mcp_svc),
-            rate_limit_per_minute=600,
-            confirm_ttl_minutes=15,
+            ToolPorts(
+                repo=SqlToolCallRepo(s),
+                writer=ToolAuditWriter(),
+                perms=SqlPermRepo(s),
+                limiter=RedisRateLimiter(get_redis()),
+                sql=_InternalSqlExecutor(s),
+                rag=_RagServiceAdapter(s),
+                reply=_ChatReplyStore(s),
+                resolver=_McpDynamicResolver(mcp_svc),
+                mcp=_McpToolCaller(mcp_svc),
+            ),
+            limits=ToolLimits(rate_per_minute=600, confirm_ttl_minutes=15),
         )
 
     app.dependency_overrides[_get_service] = _factory
@@ -807,7 +816,7 @@ def _override_toolcall() -> None:
 
 def _clear_toolcall_override() -> None:
     from kongming.main import app
-    from kongming.toolcall.router import _get_service
+    from kongming.toolcall.dependencies import get_tool_service as _get_service
 
     app.dependency_overrides.pop(_get_service, None)
 

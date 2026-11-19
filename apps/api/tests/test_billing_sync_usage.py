@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.chat.agent_client import AgentReply
-from kongming.chat.router import get_agent_client
+from kongming.chat.dependencies import get_agent_client
 from kongming.main import app
 from tests.conftest import MakeUser
 from tests.test_billing import _user_with_key

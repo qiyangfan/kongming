@@ -398,7 +398,7 @@ async def test_domain_quota_gate_wired(
 ) -> None:
     """域配额第二维度接线:超限即 RATE_LIMITED(域配额文案),不触达执行器。"""
     from kongming.config import get_settings
-    from kongming.toolcall import router as router_mod
+    from kongming.toolcall import dependencies as router_mod
     from tests.test_websearch_domain import _FakeWebSearchPort
     from tests.tool_helpers import _mk_tenant, _req, _user_with_tools
 
@@ -445,18 +445,13 @@ async def test_domain_governance_routes(
     """验证域管理接口的权限、未知域、停用和恢复行为:
     停用 → internal execute 拒(TOOL_NOT_REGISTERED)且审计带 domain;
     启用恢复 executed。停用集为进程内存态(单进程部署形态),重启随部署清单复位。"""
-    from sqlalchemy import text as sql_text
-
     from kongming.auth.seed import seed_all
     from kongming.config import get_settings
-    from kongming.toolcall import router as router_mod
+    from kongming.toolcall import dependencies as router_mod
     from kongming.toolgateway.gateway import ToolGateway
     from kongming.toolgateway.models import load_manifest
     from kongming.toolgateway.websearch import WebSearchPolicy
-    from tests.test_chat_query import _auth, _bind, _login
-    from tests.test_system_admin import _admin
-    from tests.test_websearch_domain import _FakeWebSearchPort
-    from tests.tool_helpers import _mk_tenant, _req, _user_with_tools
+    from tests.test_chat_query import _auth
 
     registry = restore_registry
     registry.activate(registry.build_registry(websearch_provider="tavily", websearch_api_key="k"))
@@ -478,10 +473,33 @@ async def test_domain_governance_routes(
             "websearch": WebSearchPolicy(whitelist_hosts=manifest["websearch"].whitelist_hosts)
         },
     )
-    monkeypatch.setattr(router_mod, "_get_gateway", lambda: gw)
+    monkeypatch.setattr(router_mod, "get_gateway", lambda: gw)
+
+    from tests.test_system_admin import _admin
+
+    await seed_all(session, get_settings())
+    _, token_admin = await _admin(client, session, make_user)
+    await _assert_governance_requires_permission(client, session, make_user, token_admin)
+
+    await _assert_disable_rejects_and_enable_restores(
+        client, session, make_user, monkeypatch, token_admin
+    )
+    await _assert_disable_persists_and_restores_on_boot(
+        client, session, make_user, token_admin, gw, router_mod
+    )
+    # 清理:恢复启用态(写穿回库+本地生效),不污染同文件后续用例
+    await client.post("/system/tools/domains/websearch/enable", headers=_auth(token_admin))
+
+
+async def _assert_governance_requires_permission(
+    client: Any, session: Any, make_user: Any, token_admin: str
+) -> None:
+    """无 system:tool:manage 的普通用户读治理面 403;管理员读 200 且携带 websearch 域。"""
+    from sqlalchemy import text as sql_text
+
+    from tests.test_chat_query import _auth, _bind, _login
 
     # 无 system:tool:manage → 403(治理面读写全拒)
-    await seed_all(session, get_settings())
     plain = await make_user("gw_plain")
     tid = (
         await session.execute(
@@ -493,12 +511,24 @@ async def test_domain_governance_routes(
     r403 = await client.get("/system/tools/domains", headers=_auth(token_plain))
     assert r403.status_code == 403
 
-    _, token_admin = await _admin(client, session, make_user)
     r200 = await client.get("/system/tools/domains", headers=_auth(token_admin))
     assert r200.status_code == 200
     assert any(d["id"] == "websearch" and d.get("disabled") is False for d in r200.json())
     r404 = await client.post("/system/tools/domains/nope/disable", headers=_auth(token_admin))
     assert r404.status_code == 404
+
+
+async def _assert_disable_rejects_and_enable_restores(
+    client: Any, session: Any, make_user: Any, monkeypatch: Any, token_admin: str
+) -> None:
+    """停用 → internal execute 拒(与「工具从未注册」同形)+ 审计落 domain;
+    启用恢复 executed。"""
+    from sqlalchemy import text as sql_text
+
+    from kongming.toolcall import dependencies as router_mod
+    from tests.test_chat_query import _auth
+    from tests.test_websearch_domain import _FakeWebSearchPort
+    from tests.tool_helpers import _mk_tenant, _req, _user_with_tools
 
     # 停用 → internal execute 拒(与「工具从未注册」同形)+ 审计落 domain
     fake = _FakeWebSearchPort()
@@ -533,6 +563,21 @@ async def test_domain_governance_routes(
     rok = await client.post("/internal/tool/execute", headers=headers, json=req)
     assert rok.status_code == 200 and rok.json()["status"] == "executed", rok.text
 
+
+async def _assert_disable_persists_and_restores_on_boot(
+    client: Any, session: Any, make_user: Any, token_admin: str, gw: Any, router_mod: Any
+) -> None:
+    """停用写穿入库;模拟重启(清运行时态 + lifespan 同款装载)后意图与
+    注册表同步恢复,execute 仍拒。"""
+    from sqlalchemy import text as sql_text
+
+    from kongming.toolcall import registry
+    from tests.test_chat_query import _auth
+    from tests.tool_helpers import _req, _user_with_tools
+
+    headers = {"X-Internal-Token": "test-internal-token"}
+    uid = await _user_with_tools(session, make_user, "gwboot", ["tool:websearch:search"])
+    req = _req("web_search", {"query": "网关"}, user_id=uid, tenant_key="ek")
     # 停用持久化:写穿入库;「重启」=清网关单例缓存后经启动装载恢复意图
     await client.post("/system/tools/domains/websearch/disable", headers=_auth(token_admin))
     states = (
@@ -545,13 +590,11 @@ async def test_domain_governance_routes(
     await router_mod.load_persisted_domain_states()  # lifespan 同款装载
     assert gw._disabled == {"websearch"}  # 持久意图随装载恢复
     # 运行时注册表同步:停用域工具与「域从未存在」同形(注入集消失+分发解析即拒)
-    from kongming.toolcall import registry
-
     assert registry.get_tool("web_search") is None
     rrej2 = await client.post("/internal/tool/execute", headers=headers, json=req)
-    assert rrej2.status_code == 200 and rrej2.json()["status"] == "rejected"
+    assert rrej2.status_code == 200 and rrej2.json()["status"] == "rejected", rrej2.text
     assert rrej2.json()["reason"] == "TOOL_NOT_REGISTERED", rrej2.text
-    # 清理:恢复启用态(写穿回库+本地生效),不污染同文件后续用例
+
     await client.post("/system/tools/domains/websearch/enable", headers=_auth(token_admin))
 
 

@@ -42,6 +42,40 @@ class DocNotFound(Exception):
     """文档不存在或不在该租户(映射 404 同形)。"""
 
 
+async def _embed_child_chunks(
+    embedder: EmbeddingPort, child_texts: list[str]
+) -> list[list[float] | None]:
+    """按 _EMBED_BATCH 分批向量化子块正文;单批失败仅该批置空(降级纯全文路)。"""
+    vectors: list[list[float] | None] = []
+    # 按批循环(_embed_quietly 同款);单批失败仅该批降级
+    for start in range(0, len(child_texts), _EMBED_BATCH):
+        batch = child_texts[start : start + _EMBED_BATCH]
+        try:
+            got = await embedder.embed(batch)
+            vectors.extend(got)
+        except Exception:
+            log.warning("文档 embedding 批次失败(该批降级纯全文路)", exc_info=True)
+            vectors.extend([None] * len(batch))
+    return vectors
+
+
+async def _enrich_after_save(
+    repo: SqlDocumentRepo,
+    entity_extractor: EntityExtractorPort,
+    *,
+    tenant_id: str,
+    doc_id: str,
+) -> None:
+    """落库后走 enrich 同一路径补抽实体;任何失败降级无实体,不阻断上传。"""
+    # 实体行需要块 id,分块产物无 id
+    try:
+        await enrich_document(repo, entity_extractor, tenant_id=tenant_id, doc_id=doc_id)
+    except DocNotFound:  # 防御:同事务刚落库的文档不该缺行
+        log.warning("文档实体抽取跳过(文档行缺失)", exc_info=True)
+    except Exception:  # 文档已落库成功,抽取编排任何失败不阻断上传
+        log.warning("文档实体抽取失败(降级无实体,不阻断上传)", exc_info=True)
+
+
 async def upload_document(
     repo: SqlDocumentRepo,
     embedder: EmbeddingPort,
@@ -67,17 +101,7 @@ async def upload_document(
         return str(existing["id"]), 0, True
     chunks = chunk_document(doc_name, text, sentence_boundary=sentence_boundary)
     child_texts = [str(c["content"]) for c in chunks if c["level"] == "CHILD"]
-    vectors: list[list[float] | None] = []
-    if child_texts:
-        # 按批循环(_embed_quietly 同款);单批失败仅该批降级
-        for start in range(0, len(child_texts), _EMBED_BATCH):
-            batch = child_texts[start : start + _EMBED_BATCH]
-            try:
-                got = await embedder.embed(batch)
-                vectors.extend(got)
-            except Exception:
-                log.warning("文档 embedding 批次失败(该批降级纯全文路)", exc_info=True)
-                vectors.extend([None] * len(batch))
+    vectors = await _embed_child_chunks(embedder, child_texts) if child_texts else []
     try:
         doc_id = await repo.replace_document(
             tenant_id=tenant_id,
@@ -92,13 +116,7 @@ async def upload_document(
         await repo.rollback()  # 并发兜底
         raise DocumentConflict(doc_name) from None
     if entity_extractor is not None:
-        # 落库后走 enrich 同一路径(实体行需要块 id,分块产物无 id)
-        try:
-            await enrich_document(repo, entity_extractor, tenant_id=tenant_id, doc_id=doc_id)
-        except DocNotFound:  # 防御:同事务刚落库的文档不该缺行
-            log.warning("文档实体抽取跳过(文档行缺失)", exc_info=True)
-        except Exception:  # 文档已落库成功,抽取编排任何失败不阻断上传
-            log.warning("文档实体抽取失败(降级无实体,不阻断上传)", exc_info=True)
+        await _enrich_after_save(repo, entity_extractor, tenant_id=tenant_id, doc_id=doc_id)
     return doc_id, len(chunks), False
 
 
@@ -125,6 +143,23 @@ def _group_parent_children(
     return groups
 
 
+async def _collect_entity_rows(
+    extractor: EntityExtractorPort, parent_content: str, children: list[dict[str, Any]]
+) -> list[tuple[str, str, str]]:
+    """单个父块的子块抽取并转为 (子块 id, 实体名, 规范化名) 行;超长名跳过。"""
+    child_ids = [str(c["id"]) for c in children]
+    child_texts = [str(c["content"]) for c in children]
+    per_child = await extractor.extract(parent_content, child_texts)
+    rows: list[tuple[str, str, str]] = []
+    for cid, names in zip(child_ids, per_child, strict=True):
+        for name in names:
+            # 规范化收敛在服务层(抽取器已规范化,此处防御性兜底)
+            normalized = normalize_entity_name(name)
+            if normalized and len(name) <= _ENTITY_NAME_MAX and len(normalized) <= _ENTITY_NAME_MAX:
+                rows.append((cid, name, normalized))
+    return rows
+
+
 async def _extract_doc_entities(
     repo: SqlDocumentRepo,
     extractor: EntityExtractorPort,
@@ -141,19 +176,7 @@ async def _extract_doc_entities(
     rows: list[tuple[str, str, str]] = []
     try:
         for parent, children in _group_parent_children(chunks):
-            child_ids = [str(c["id"]) for c in children]
-            child_texts = [str(c["content"]) for c in children]
-            per_child = await extractor.extract(str(parent["content"]), child_texts)
-            for cid, names in zip(child_ids, per_child, strict=True):
-                for name in names:
-                    # 规范化收敛在服务层(抽取器已规范化,此处防御性兜底)
-                    normalized = normalize_entity_name(name)
-                    if (
-                        normalized
-                        and len(name) <= _ENTITY_NAME_MAX
-                        and len(normalized) <= _ENTITY_NAME_MAX
-                    ):
-                        rows.append((cid, name, normalized))
+            rows.extend(await _collect_entity_rows(extractor, str(parent["content"]), children))
     except EntityExtractError as e:
         log.warning("文档实体抽取失败(降级无实体,reason=%s)", e.reason)
         return 0
@@ -348,24 +371,18 @@ async def _entity_child_hits(
         return []
 
 
-async def _recall_stage(
+async def _recall_paths(
     repo: SqlDocumentRepo,
     embedder: EmbeddingPort,
     *,
     tenant_id: str,
     datasource_key: str,
     question: str,
-    reranker: RerankPort | None = None,
-    child_top_k: int = _CHILD_TOP_K,
-    entity_extractor: EntityExtractorPort | None = None,
-    entity_quota: int = 8,
-) -> dict[str, Any]:
-    """共享召回段:两路召回(+可选实体扩展路)→RRF 融合→(可选精排)父块序。
-
-    主检索(retrieve_docs)与试跑(probe_docs)同源:同配置同输入时父块序
-    一致。两路命中行携带原生分(score:向量路=余弦距离、全文路=ts_rank,
-    量纲互异,仅试跑逐路展示消费,主检索不读)。实体扩展路未注入时第三路
-    为空列表,RRF 融合结果与未引入该机制一致(逐字零回归)。"""
+    child_top_k: int,
+    entity_extractor: EntityExtractorPort | None,
+    entity_quota: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """两路召回(向量失败降级)+可选实体扩展路;返回 (向量路, 全文路, 实体路) 命中。"""
     vector_hits: list[dict[str, Any]] = []
     try:
         vector = (await embedder.embed([question]))[0]
@@ -393,6 +410,37 @@ async def _recall_stage(
             question=question,
             quota=entity_quota,
         )
+    return vector_hits, fulltext_hits, entity_hits
+
+
+async def _recall_stage(
+    repo: SqlDocumentRepo,
+    embedder: EmbeddingPort,
+    *,
+    tenant_id: str,
+    datasource_key: str,
+    question: str,
+    reranker: RerankPort | None = None,
+    child_top_k: int = _CHILD_TOP_K,
+    entity_extractor: EntityExtractorPort | None = None,
+    entity_quota: int = 8,
+) -> dict[str, Any]:
+    """共享召回段:两路召回(+可选实体扩展路)→RRF 融合→(可选精排)父块序。
+
+    主检索(retrieve_docs)与试跑(probe_docs)同源:同配置同输入时父块序
+    一致。两路命中行携带原生分(score:向量路=余弦距离、全文路=ts_rank,
+    量纲互异,仅试跑逐路展示消费,主检索不读)。实体扩展路未注入时第三路
+    为空列表,RRF 融合结果与未引入该机制一致(逐字零回归)。"""
+    vector_hits, fulltext_hits, entity_hits = await _recall_paths(
+        repo,
+        embedder,
+        tenant_id=tenant_id,
+        datasource_key=datasource_key,
+        question=question,
+        child_top_k=child_top_k,
+        entity_extractor=entity_extractor,
+        entity_quota=entity_quota,
+    )
     fused = rrf_fuse_ids(
         [
             [str(h["id"]) for h in vector_hits],
@@ -428,6 +476,53 @@ async def _recall_stage(
     }
 
 
+async def _stage_with_parents(
+    repo: SqlDocumentRepo,
+    embedder: EmbeddingPort,
+    *,
+    tenant_id: str,
+    datasource_key: str,
+    question: str,
+    reranker: RerankPort | None,
+    entity_extractor: EntityExtractorPort | None,
+    entity_quota: int,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """执行共享召回段并按父块序取回父块行;返回 (召回段结果, 父块行)。"""
+    stage = await _recall_stage(
+        repo,
+        embedder,
+        tenant_id=tenant_id,
+        datasource_key=datasource_key,
+        question=question,
+        reranker=reranker,
+        entity_extractor=entity_extractor,
+        entity_quota=entity_quota,
+    )
+    parents = await repo.fetch_parents(tenant_id=tenant_id, parent_ids=stage["parent_ids"])
+    return stage, parents
+
+
+def _retrieved_docs(parent_ids: list[str], parents: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """父块行按父块序投影为检索产物(引用键由父块主键派生);缺行的父块跳过。"""
+    by_id = {str(p["id"]): p for p in parents}
+    out: list[dict[str, str]] = []
+    for pid in parent_ids:
+        if pid not in by_id:
+            continue
+        p = by_id[pid]
+        ref = str(p["source_ref"])
+        # citation_key 由父块主键派生(改名/重切块不改变键)
+        key = derive_citation_key(parent_id=pid, doc_name=ref.split(" §")[0])
+        out.append(
+            {
+                "citation_key": key,
+                "source_ref": ref,
+                "content": str(p["content"]),
+            }
+        )
+    return out
+
+
 async def retrieve_docs(
     repo: SqlDocumentRepo,
     embedder: EmbeddingPort,
@@ -441,7 +536,7 @@ async def retrieve_docs(
 ) -> list[dict[str, str]]:
     """检索子块并合并向量与全文结果，可选执行精排后回填父块；失败返回空列表。"""
     try:
-        stage = await _recall_stage(
+        stage, parents = await _stage_with_parents(
             repo,
             embedder,
             tenant_id=tenant_id,
@@ -451,28 +546,68 @@ async def retrieve_docs(
             entity_extractor=entity_extractor,
             entity_quota=entity_quota,
         )
-        parent_ids = stage["parent_ids"]
-        parents = await repo.fetch_parents(tenant_id=tenant_id, parent_ids=parent_ids)
-        by_id = {str(p["id"]): p for p in parents}
-        out: list[dict[str, str]] = []
-        for pid in parent_ids:
-            if pid not in by_id:
-                continue
-            p = by_id[pid]
-            ref = str(p["source_ref"])
-            # citation_key 由父块主键派生(改名/重切块不改变键)
-            key = derive_citation_key(parent_id=pid, doc_name=ref.split(" §")[0])
-            out.append(
-                {
-                    "citation_key": key,
-                    "source_ref": ref,
-                    "content": str(p["content"]),
-                }
-            )
-        return out
+        return _retrieved_docs(stage["parent_ids"], parents)
     except Exception:
         log.warning("文档检索失败(降级空)", exc_info=True)
         return []
+
+
+def _probe_parent_rows(
+    parent_ids: list[str], parents: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """试跑父块回填(名次=父块序位);缺行的父块跳过。"""
+    by_id = {str(p["id"]): p for p in parents}
+    parent_rows: list[dict[str, Any]] = []
+    for rank, pid in enumerate(parent_ids, start=1):
+        p = by_id.get(pid)
+        if p is None:
+            continue
+        ref = str(p["source_ref"])
+        doc_name = ref.split(" §")[0]
+        parent_rows.append(
+            {
+                "parent_id": pid,
+                "seq": int(p["seq"]),
+                "doc_name": doc_name,
+                "source_ref": ref,
+                "citation_key": derive_citation_key(parent_id=pid, doc_name=doc_name),
+                "content": str(p["content"]),
+                "rank": rank,
+            }
+        )
+    return parent_rows
+
+
+def _probe_paths(
+    stage: dict[str, Any], entity_extractor: EntityExtractorPort | None
+) -> dict[str, list[dict[str, Any]]]:
+    """试跑逐路命中(原生分);实体路仅在注入抽取器时出现。"""
+
+    def _hits(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {
+                "child_id": str(h["id"]),
+                "parent_id": str(h["parent_id"]),
+                "score": float(h["score"]),
+            }
+            for h in rows
+        ]
+
+    paths: dict[str, list[dict[str, Any]]] = {
+        "vector": _hits(stage["vector_hits"]),
+        "fulltext": _hits(stage["fulltext_hits"]),
+    }
+    if entity_extractor is not None:
+        # 实体路原生分=共享实体数(match_count;量纲独立,仅逐路展示)
+        paths["entity"] = [
+            {
+                "child_id": str(h["id"]),
+                "parent_id": str(h["parent_id"]),
+                "score": float(h["match_count"]),
+            }
+            for h in stage["entity_hits"]
+        ]
+    return paths
 
 
 async def probe_docs(
@@ -505,57 +640,13 @@ async def probe_docs(
     )
     parent_ids = stage["parent_ids"][:parent_top_k]
     parents = await repo.fetch_parents(tenant_id=tenant_id, parent_ids=parent_ids)
-    by_id = {str(p["id"]): p for p in parents}
-    parent_rows: list[dict[str, Any]] = []
-    for rank, pid in enumerate(parent_ids, start=1):
-        p = by_id.get(pid)
-        if p is None:
-            continue
-        ref = str(p["source_ref"])
-        doc_name = ref.split(" §")[0]
-        parent_rows.append(
-            {
-                "parent_id": pid,
-                "seq": int(p["seq"]),
-                "doc_name": doc_name,
-                "source_ref": ref,
-                "citation_key": derive_citation_key(parent_id=pid, doc_name=doc_name),
-                "content": str(p["content"]),
-                "rank": rank,
-            }
-        )
     fused = stage["fused"]
     id_to_parent = stage["id_to_parent"]
-
-    def _hits(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return [
-            {
-                "child_id": str(h["id"]),
-                "parent_id": str(h["parent_id"]),
-                "score": float(h["score"]),
-            }
-            for h in rows
-        ]
-
-    paths: dict[str, list[dict[str, Any]]] = {
-        "vector": _hits(stage["vector_hits"]),
-        "fulltext": _hits(stage["fulltext_hits"]),
-    }
-    if entity_extractor is not None:
-        # 实体路原生分=共享实体数(match_count;量纲独立,仅逐路展示)
-        paths["entity"] = [
-            {
-                "child_id": str(h["id"]),
-                "parent_id": str(h["parent_id"]),
-                "score": float(h["match_count"]),
-            }
-            for h in stage["entity_hits"]
-        ]
     return {
-        "paths": paths,
+        "paths": _probe_paths(stage, entity_extractor),
         "fused_children": [
             {"child_id": str(cid), "parent_id": id_to_parent.get(str(cid)), "rank": rank}
             for rank, cid in enumerate(fused, start=1)
         ],
-        "parents": parent_rows,
+        "parents": _probe_parent_rows(parent_ids, parents),
     }

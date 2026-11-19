@@ -20,38 +20,46 @@ class CronError(Exception):
 
 
 def _parse_field(field: str, lo: int, hi: int) -> set[int]:
+    """逗号列表逐段解析并取并集(步长/范围/单值/通配)。"""
     out: set[int] = set()
-    for part in field.split(","):
-        part = part.strip()
+    for raw in field.split(","):
+        part = raw.strip()
         if not part:
             raise CronError(f"字段片段为空: {field}")
-        step = 1
-        has_step = "/" in part
-        if has_step:
-            base, step_s = part.split("/", 1)
-            if not step_s.isdigit() or int(step_s) < 1:
-                raise CronError(f"步长非法: {part}")
-            step = int(step_s)
-            part = base
-        if part == "*":
-            start, end = lo, hi
-        elif "-" in part:
-            a_s, b_s = part.split("-", 1)
-            if not (a_s.isdigit() and b_s.isdigit()):
-                raise CronError(f"范围非法: {part}")
-            start, end = int(a_s), int(b_s)
-            if start > end:
-                raise CronError(f"范围倒置: {part}")
-        elif part.isdigit():
-            start = int(part)
-            # a/b 表示从 a 开始、每隔 b 取值；无步长时只取 a。
-            end = hi if has_step else start
-        else:
-            raise CronError(f"片段非法: {part}")
+        part, step, has_step = _split_step(part)
+        start, end = _part_bounds(part, has_step, lo, hi)
         if start < lo or start > hi or end > hi:
             raise CronError(f"越界 [{lo},{hi}]: {part}")
         out.update(range(start, end + 1, step))
     return out
+
+
+def _split_step(part: str) -> tuple[str, int, bool]:
+    """拆出步长:返回 (去掉步长的片段, 步长, 是否带步长)。"""
+    if "/" not in part:
+        return part, 1, False
+    base, step_s = part.split("/", 1)
+    if not step_s.isdigit() or int(step_s) < 1:
+        raise CronError(f"步长非法: {part}")
+    return base, int(step_s), True
+
+
+def _part_bounds(part: str, has_step: bool, lo: int, hi: int) -> tuple[int, int]:
+    """单个片段的取值区间:通配=整段,范围=a..b,单值=只取 a(a/b 则到上界)。"""
+    if part == "*":
+        return lo, hi
+    if "-" in part:
+        a_s, b_s = part.split("-", 1)
+        if not (a_s.isdigit() and b_s.isdigit()):
+            raise CronError(f"范围非法: {part}")
+        start, end = int(a_s), int(b_s)
+        if start > end:
+            raise CronError(f"范围倒置: {part}")
+        return start, end
+    if part.isdigit():
+        # a/b 表示从 a 开始、每隔 b 取值；无步长时只取 a。
+        return int(part), hi if has_step else int(part)
+    raise CronError(f"片段非法: {part}")
 
 
 def parse_cron(expr: str) -> list[set[int]]:

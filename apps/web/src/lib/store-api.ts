@@ -53,7 +53,6 @@ export function unpublishBot(id: string): Promise<{ ok: boolean }> {
 /* ============ 版本化上架 ============ */
 
 export type BotVersion = components["schemas"]["BotVersionOut"];
-export type BotSnapshot = components["schemas"]["BotSnapshotOut"];
 
 export function listBotVersions(id: string): Promise<BotVersion[]> {
   return api.get<BotVersion[]>(`/system/bots/${id}/versions`);

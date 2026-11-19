@@ -20,10 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kongming.auth.seed import seed_all
 from kongming.chat import router as chat_router
 from kongming.chat.agent_client import AgentReply, AgentUnavailable
+from kongming.chat.dependencies import get_agent_client
 from kongming.chat.repository import ChatRepository
-from kongming.chat.router import get_agent_client
-from kongming.chat.service import ChatService, StreamHandle
+from kongming.chat.service import ChatService
 from kongming.chat.sse import SseDecoder
+from kongming.chat.stream_runner import StreamHandle
 from kongming.config import get_settings
 from kongming.datasource.repository import SqlDatasourceRepo
 from kongming.db import get_sessionmaker
@@ -475,17 +476,14 @@ async def test_disconnect_continues_to_terminal(
     uid, _token = await _user_with_chat_perm(client, session, make_user, "stream6")
     # 手工组装 service(不经 HTTP;stream_store_factory 与组合根同构)
     agent = fake_agent["agent"]
-    from kongming.chat.router import _stream_store_factory  # 组合根工厂复用
+    from kongming.chat.dependencies import _stream_store_factory  # 组合根工厂复用
 
     async with get_sessionmaker()() as s:
         svc = ChatService(
             ChatRepository(s),
             cast("Any", agent),
             SqlDatasourceRepo(s),
-            None,
-            None,
-            None,
-            _stream_store_factory(cast("Any", agent)),
+            stream_store_factory=_stream_store_factory(cast("Any", agent)),
         )
         handle = await svc.start_stream(
             user_id=uid,

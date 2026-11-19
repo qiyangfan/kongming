@@ -21,7 +21,7 @@ import type { DatasourceOptionOut } from "@/lib/datasource-api";
 import { ragApi, type RecallProbeOut } from "@/lib/rag-api";
 
 /** 闸门判定归因 → 徽章(reason=passed 即过闸;其余为未过闸的归因; top1_below 为判定函数预留档,现判定不产出,StatusBadge 原文兜底) */
-export const VERDICT_META: StatusMeta = {
+const VERDICT_META: StatusMeta = {
   passed: { label: "过闸", variant: "success" },
   no_hits: { label: "零命中·不投票", variant: "secondary" },
   min_count: { label: "未过闸·命中数不足", variant: "warning" },
@@ -30,34 +30,34 @@ export const VERDICT_META: StatusMeta = {
 };
 
 /** 零知识旁路标注(零命中源于「无知识」而非「低相关」,闸门自动旁路) */
-export const GATE_SKIP_META: StatusMeta = {
+const GATE_SKIP_META: StatusMeta = {
   no_knowledge: { label: "闸门未参与(无知识)", variant: "warning" },
 };
 
 /** 关系扩展开/关徽章(中性;零扩展与否由明细区如实展示) */
-export const EXPANSION_META: StatusMeta = {
+const EXPANSION_META: StatusMeta = {
   on: { label: "已开启", variant: "secondary" },
   off: { label: "未开启", variant: "outline" },
 };
 
 /** 判定观测行文案(响应内可得的实际分值,不含阈值——契约不含即不展示) */
-export function verdictObservation(
-  top1: number,
-  meanTopN: number,
-  count: number,
-  dropped: number,
-): string {
-  return `判定观测:top1 ${top1} · 均值 ${meanTopN} · 命中 ${count} 条 · 被裁 ${dropped} 条`;
+function verdictObservation(obs: {
+  top1: number;
+  meanTopN: number;
+  count: number;
+  dropped: number;
+}): string {
+  return `判定观测:top1 ${obs.top1} · 均值 ${obs.meanTopN} · 命中 ${obs.count} 条 · 被裁 ${obs.dropped} 条`;
 }
 
 /** 扩展后表集合文案(两段限定名串联;空集合如实为「(空)」) */
-export function fusedAfterText(tables: { schema_name: string; table_name: string }[]): string {
+function fusedAfterText(tables: { schema_name: string; table_name: string }[]): string {
   if (tables.length === 0) return "(空)";
   return tables.map((t) => `${t.schema_name}.${t.table_name}`).join("、");
 }
 
 /** 连接键文案(契约形态=dict 投影索引签名,运行时键为 left_col/right_col; 空数组如实为「—」) */
-export function joinKeysText(joinKeys: Record<string, string>[]): string {
+function joinKeysText(joinKeys: Record<string, string>[]): string {
   if (joinKeys.length === 0) return "—";
   return joinKeys.map((j) => `${j.left_col} = ${j.right_col}`).join(", ");
 }
@@ -98,12 +98,12 @@ function RouteSection({ title, route }: { title: string; route: RecallProbeOut["
               fallbackLabel="未知归因"
             />
             <span className="text-xs text-muted-foreground">
-              {verdictObservation(
-                route.verdict.top1,
-                route.verdict.mean_top_n,
-                route.verdict.count,
-                route.dropped,
-              )}
+              {verdictObservation({
+                top1: route.verdict.top1,
+                meanTopN: route.verdict.mean_top_n,
+                count: route.verdict.count,
+                dropped: route.dropped,
+              })}
             </span>
           </>
         ) : (

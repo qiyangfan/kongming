@@ -18,6 +18,7 @@ from kongming.datascope.models import (
     DataScopeUnsupported,
     FilterType,
     ScopeContext,
+    ScopeFilter,
 )
 from kongming.datascope.repository import SqlDataScopeRepo, probe_column_type
 
@@ -25,6 +26,67 @@ if TYPE_CHECKING:
     from kongming.sqlfw.guard import Guarded
 
 log = logging.getLogger(__name__)
+
+
+async def _resolve_dept_ids(
+    repo: SqlDataScopeRepo, scope: str, *, user_id: str, dept_id: str | None
+) -> list[str]:
+    """按范围类型解有效部门集(DEPT 系;SELF 无需部门)。"""
+    if scope == "CUSTOM":
+        return await repo.custom_dept_ids(user_id)
+    if scope == "DEPT" and dept_id is not None:
+        return [dept_id]
+    if scope == "DEPT_AND_BELOW" and dept_id is not None:
+        return await repo.dept_and_below(dept_id)
+    return []
+
+
+async def _probe_filter_type(
+    biz_conn: AsyncConnection,
+    scope: str,
+    *,
+    user_id: str,
+    tenant_schemas: list[str],
+    sql: str,
+    guarded: "Guarded | None",
+) -> str | None:
+    """探测过滤目标列类型(uuid 等);主表不可定位时记降级告警并返回 None。"""
+    # 列探测(DEPT 系与 CUSTOM 探 dept_id,SELF 探 create_by)
+    dept_family = scope in ("DEPT", "DEPT_AND_BELOW", "CUSTOM")
+    target_column = COL_DEPT_ID if dept_family else COL_CREATE_BY
+    ref = guarded.main_table_ref() if guarded is not None else rewrite.extract_main_table_ref(sql)
+    if ref is None:
+        log.warning(
+            "data_scope=%s: 无法提取主表名(UNION/子查询 FROM),降级为不过滤 (user_id=%s)",
+            scope,
+            user_id,
+        )
+        return None
+    table, explicit_schema = ref
+    # 显式 schema 限定的表只探该 schema(防跨 schema 同名表不同列集的误判)
+    probe_schemas = [explicit_schema] if explicit_schema else tenant_schemas
+    return await probe_column_type(
+        biz_conn, schemas=probe_schemas, table=table, column=target_column
+    )
+
+
+async def _load_scope(session: AsyncSession, user_id: str) -> tuple[str, str | None]:
+    """取用户有效范围(最宽松角色);主体或角色缺失即 fail-closed。"""
+    repo = SqlDataScopeRepo(session)
+    user_exists, dept_id = await repo.user_dept_id(user_id)
+    if not user_exists:
+        # fail-closed:身份解析不出来就无法确定可见面。「降级为不过滤」等于
+        # 把一个查不到主体的 user_id 当超管使——收口(与 CUSTOM 空集合同一判据方向)
+        log.warning("data_scope: 用户不存在或已删除,fail-closed 拒绝 (user_id=%s)", user_id)
+        raise DataScopeUnsupported(
+            "data_scope: 用户不存在或已删除,无法确定数据范围,fail-closed 拒绝"
+        )
+    scopes = await repo.user_role_scopes(user_id)
+    if not scopes:
+        # 功能权限和数据范围共用角色启用状态；无启用角色时仍拒绝访问，避免放宽数据可见范围。
+        log.warning("data_scope: 用户无启用角色,fail-closed 拒绝 (user_id=%s)", user_id)
+        raise DataScopeUnsupported("data_scope: 用户无启用角色,无法确定数据范围,fail-closed 拒绝")
+    return service.most_permissive(scopes), dept_id
 
 
 async def apply(
@@ -42,35 +104,11 @@ async def apply(
     内部独立解析(行为不变)。
     """
     repo = SqlDataScopeRepo(session)
-
-    user_exists, dept_id = await repo.user_dept_id(user_id)
-    if not user_exists:
-        # fail-closed:身份解析不出来就无法确定可见面。「降级为不过滤」等于
-        # 把一个查不到主体的 user_id 当超管使——收口(与 CUSTOM 空集合同一判据方向)
-        log.warning("data_scope: 用户不存在或已删除,fail-closed 拒绝 (user_id=%s)", user_id)
-        raise DataScopeUnsupported(
-            "data_scope: 用户不存在或已删除,无法确定数据范围,fail-closed 拒绝"
-        )
-
-    scopes = await repo.user_role_scopes(user_id)
-    if not scopes:
-        # 功能权限和数据范围共用角色启用状态；无启用角色时仍拒绝访问，避免放宽数据可见范围。
-        log.warning("data_scope: 用户无启用角色,fail-closed 拒绝 (user_id=%s)", user_id)
-        raise DataScopeUnsupported("data_scope: 用户无启用角色,无法确定数据范围,fail-closed 拒绝")
-
-    scope = service.most_permissive(scopes)
+    scope, dept_id = await _load_scope(session, user_id)
     if scope == "ALL":
         return AppliedSQL(sql=sql)
 
-    # DEPT 系解有效部门集(CUSTOM 解角色集合,SELF 无需部门)
-    dept_ids: list[str] = []
-    if scope == "CUSTOM":
-        dept_ids = await repo.custom_dept_ids(user_id)
-    elif scope == "DEPT" and dept_id is not None:
-        dept_ids = [dept_id]
-    elif scope == "DEPT_AND_BELOW" and dept_id is not None:
-        dept_ids = await repo.dept_and_below(dept_id)
-
+    dept_ids = await _resolve_dept_ids(repo, scope, user_id=user_id, dept_id=dept_id)
     ctx = ScopeContext(data_scope=scope, user_id=user_id, dept_ids=dept_ids)
     # fail-closed 判据先于列探测与「主表不可定位→降级」:CUSTOM 空集合禁漂成不过滤
     reason = service.unsupported_reason(ctx)
@@ -78,23 +116,19 @@ async def apply(
         raise DataScopeUnsupported(reason)
 
     # 列探测(DEPT 系与 CUSTOM 探 dept_id,SELF 探 create_by)
-    dept_family = scope in ("DEPT", "DEPT_AND_BELOW", "CUSTOM")
     data_type: str | None = None
-    if dept_family or scope == "SELF":
-        target_column = COL_DEPT_ID if dept_family else COL_CREATE_BY
-        ref = (
-            guarded.main_table_ref() if guarded is not None else rewrite.extract_main_table_ref(sql)
+    if scope in ("DEPT", "DEPT_AND_BELOW", "CUSTOM", "SELF"):
+        data_type = await _probe_filter_type(
+            biz_conn,
+            scope,
+            user_id=user_id,
+            tenant_schemas=tenant_schemas,
+            sql=sql,
+            guarded=guarded,
         )
-        if ref is None:
+        if data_type is None:
             warn = f"data_scope={scope}: 无法提取主表名(UNION/子查询 FROM),降级为不过滤"
-            log.warning("%s (user_id=%s)", warn, user_id)
             return AppliedSQL(sql=sql, warning=warn)
-        table, explicit_schema = ref
-        # 显式 schema 限定的表只探该 schema(防跨 schema 同名表不同列集的误判)
-        probe_schemas = [explicit_schema] if explicit_schema else tenant_schemas
-        data_type = await probe_column_type(
-            biz_conn, schemas=probe_schemas, table=table, column=target_column
-        )
 
     flt = service.resolve(ctx, column_exists=data_type is not None)
     if flt.type is FilterType.UNSUPPORTED:
@@ -106,6 +140,13 @@ async def apply(
             log.warning("%s (user_id=%s)", flt.skip_reason, user_id)
         return AppliedSQL(sql=sql, warning=flt.skip_reason)
 
+    return _apply_filter_sql(sql, flt, guarded=guarded, data_type=data_type)
+
+
+def _apply_filter_sql(
+    sql: str, flt: ScopeFilter, *, guarded: "Guarded | None", data_type: str | None
+) -> AppliedSQL:
+    """按过滤意图改写 SQL 并把绑定参数转成目标列类型(uuid 列绑 UUID 对象,其余绑原值)。"""
     if guarded is not None:
         new_sql, params = guarded.apply_filter(flt.type.value, flt.column, flt.values)
     else:

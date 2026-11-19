@@ -241,7 +241,7 @@ async def client() -> AsyncIterator[AsyncClient]:
 @pytest.fixture
 def fake_agent() -> Iterator[dict[str, Any]]:
     """为 MCP 入站和 Web 请求提供可替换的 Agent 客户端。"""
-    from kongming.chat.router import get_agent_client
+    from kongming.chat.dependencies import get_agent_client
     from kongming.main import app
 
     holder: dict[str, Any] = {}

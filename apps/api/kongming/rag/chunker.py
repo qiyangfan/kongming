@@ -25,13 +25,12 @@ class TooManyChunks(Exception):
 MAX_PARENT_BLOCKS = 200
 
 
-def _split_parents(text: str) -> list[tuple[str, str]]:
-    """按标题层级聚合父块;返回 [(标题前 20 字, 父块文本)]。"""
-    lines = text.split("\n")
+def _heading_sections(text: str) -> list[tuple[str, list[str]]]:
+    """按标题行切段;返回 [(标题前 20 字, 段内各行)]。"""
     sections: list[tuple[str, list[str]]] = []
     cur_title = ""
     cur: list[str] = []
-    for line in lines:
+    for line in text.split("\n"):
         if _HEADING.match(line):
             if cur:
                 sections.append((cur_title, cur))
@@ -41,24 +40,38 @@ def _split_parents(text: str) -> list[tuple[str, str]]:
             cur.append(line)
     if cur:
         sections.append((cur_title, cur))
+    return sections
+
+
+def _parent_cut(block: str) -> int:
+    """超软上限处的切点:优先句号,其次换行,都过短则定长切。"""
+    cut = block.rfind("。", 0, PARENT_SOFT_MAX)
+    if 0 < cut < PARENT_SOFT_MAX // 2:
+        cut = block.rfind("\n", 0, PARENT_SOFT_MAX)
+    if cut <= 0 or cut < PARENT_SOFT_MAX // 2:
+        return PARENT_SOFT_MAX
+    return cut + 1  # 切割含句号(下块不以「。」开头)
+
+
+def _split_long_block(title: str, block: str) -> list[tuple[str, str]]:
+    """单个超软上限的段按段落边界续切,返回若干 (标题, 父块)。"""
     parents: list[tuple[str, str]] = []
-    for title, sec_lines in sections:
+    while len(block) > PARENT_SOFT_MAX:
+        cut = _parent_cut(block)
+        parents.append((title, block[:cut].strip()))
+        block = block[cut:].strip()
+    if block:
+        parents.append((title, block))
+    return parents
+
+
+def _split_parents(text: str) -> list[tuple[str, str]]:
+    """按标题层级聚合父块;返回 [(标题前 20 字, 父块文本)]。"""
+    parents: list[tuple[str, str]] = []
+    for title, sec_lines in _heading_sections(text):
         block = "\n".join(sec_lines).strip()
-        if not block:
-            continue
-        # 超软上限按段落再切(句号/换行边界)
-        while len(block) > PARENT_SOFT_MAX:
-            cut = block.rfind("。", 0, PARENT_SOFT_MAX)
-            if 0 < cut < PARENT_SOFT_MAX // 2:
-                cut = block.rfind("\n", 0, PARENT_SOFT_MAX)
-            if cut <= 0 or cut < PARENT_SOFT_MAX // 2:
-                cut = PARENT_SOFT_MAX
-            else:
-                cut += 1  # 切割含句号(下块不以「。」开头)
-            parents.append((title, block[:cut].strip()))
-            block = block[cut:].strip()
         if block:
-            parents.append((title, block))
+            parents.extend(_split_long_block(title, block))
     return parents
 
 

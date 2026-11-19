@@ -11,7 +11,7 @@ export function toolList(): Promise<ToolListOut> {
   return api.get<ToolListOut>("/system/tools");
 }
 
-export interface ToolAuditParams {
+interface ToolAuditParams {
   page?: number;
   size?: number;
   tool_name?: string;

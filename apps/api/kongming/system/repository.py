@@ -2,6 +2,9 @@
 
 显式 SQL(text)同 auth 域约定:表少且稳定,SQL 即文档;
 行 → 领域 dataclass 的映射集中在 _to_* 函数。
+
+方法按能力簇拆入 mixin,SqlSystemRepo 只做组合;各 mixin 通过 _SystemRepoBase
+共享会话与审计写入器。
 """
 
 import json
@@ -96,12 +99,16 @@ def _to_tenant(row: dict[str, Any]) -> TenantItem:
     )
 
 
-class SqlSystemRepo:
+class _SystemRepoBase:
+    """会话与审计写入器持有者,各能力 mixin 经它共享同一事务。"""
+
     def __init__(self, s: AsyncSession) -> None:
         self._s = s
         self._oper = SqlOperLogRepo(s)  # 审计与业务同会话=同事务(S2)
 
-    # ---- 用户 ----
+
+class _UserRepoMixin(_SystemRepoBase):
+    """用户读写与角色/租户绑定。"""
 
     async def count_users(self, keyword: str) -> int:
         n = await self._s.scalar(
@@ -279,7 +286,9 @@ class SqlSystemRepo:
             {"u": user_id, "t": tenant_id},
         )
 
-    # ---- 存在性校验 ----
+
+class _RoleRepoMixin(_SystemRepoBase):
+    """角色读写与权限点/部门集合绑定。"""
 
     async def roles_exist(self, role_ids: list[str]) -> list[str]:
         if not role_ids:
@@ -289,38 +298,6 @@ class SqlSystemRepo:
             {"ids": role_ids},
         )
         return [str(r[0]) for r in rows]
-
-    async def perms_exist(self, perm_ids: list[str]) -> list[str]:
-        if not perm_ids:
-            return []
-        rows = await self._s.execute(
-            text("SELECT id FROM public.sys_permission WHERE id = ANY(:ids)"),
-            {"ids": perm_ids},
-        )
-        return [str(r[0]) for r in rows]
-
-    async def tenant_exists(self, tenant_id: str) -> bool:
-        n = await self._s.scalar(
-            text("SELECT count(*) FROM public.sys_tenant WHERE id=:i"), {"i": tenant_id}
-        )
-        return int(n or 0) > 0
-
-    async def dept_exists(self, dept_id: str) -> bool:
-        n = await self._s.scalar(
-            text("SELECT count(*) FROM public.sys_dept WHERE id=:i"), {"i": dept_id}
-        )
-        return int(n or 0) > 0
-
-    async def depts_exist(self, dept_ids: list[str]) -> list[str]:
-        if not dept_ids:
-            return []
-        rows = await self._s.execute(
-            text("SELECT id FROM public.sys_dept WHERE id = ANY(:ids)"),
-            {"ids": dept_ids},
-        )
-        return [str(r[0]) for r in rows]
-
-    # ---- 角色 ----
 
     async def list_roles(self) -> list[RoleListItem]:
         # 两个一对多聚合各走 LATERAL(单查询,避免双 JOIN 的笛卡儿积把集合乘重复);
@@ -469,7 +446,18 @@ class SqlSystemRepo:
                 {"r": role_id, "d": did},
             )
 
-    # ---- 权限点 ----
+
+class _PermRepoMixin(_SystemRepoBase):
+    """权限点只读清单与存在性校验。"""
+
+    async def perms_exist(self, perm_ids: list[str]) -> list[str]:
+        if not perm_ids:
+            return []
+        rows = await self._s.execute(
+            text("SELECT id FROM public.sys_permission WHERE id = ANY(:ids)"),
+            {"ids": perm_ids},
+        )
+        return [str(r[0]) for r in rows]
 
     async def list_perms(self) -> list[PermItem]:
         rows = (
@@ -482,7 +470,24 @@ class SqlSystemRepo:
         ).mappings()
         return [_to_perm(dict(r)) for r in rows]
 
-    # ---- 部门 ----
+
+class _DeptRepoMixin(_SystemRepoBase):
+    """部门读写与引用检查。"""
+
+    async def dept_exists(self, dept_id: str) -> bool:
+        n = await self._s.scalar(
+            text("SELECT count(*) FROM public.sys_dept WHERE id=:i"), {"i": dept_id}
+        )
+        return int(n or 0) > 0
+
+    async def depts_exist(self, dept_ids: list[str]) -> list[str]:
+        if not dept_ids:
+            return []
+        rows = await self._s.execute(
+            text("SELECT id FROM public.sys_dept WHERE id = ANY(:ids)"),
+            {"ids": dept_ids},
+        )
+        return [str(r[0]) for r in rows]
 
     async def list_depts(self) -> list[Dept]:
         rows = (
@@ -562,7 +567,20 @@ class SqlSystemRepo:
         )
         return int(n or 0) > 0
 
-    # ---- 租户 ----
+
+class _TenantAuditMixin(_SystemRepoBase):
+    """租户清单/存在性与操作审计留痕。"""
+
+    async def tenant_exists(self, tenant_id: str) -> bool:
+        n = await self._s.scalar(
+            text("SELECT count(*) FROM public.sys_tenant WHERE id=:i"), {"i": tenant_id}
+        )
+        return int(n or 0) > 0
+
+    async def log_oper(
+        self, actor_id: str, action: str, target: str | None, detail: dict[str, object]
+    ) -> None:
+        await self._oper.add(actor_id, action, target, detail)
 
     async def list_tenants(self) -> list[TenantItem]:
         rows = (
@@ -574,14 +592,15 @@ class SqlSystemRepo:
         ).mappings()
         return [_to_tenant(dict(r)) for r in rows]
 
-    # ---- 操作审计 ----
 
-    async def log_oper(
-        self, actor_id: str, action: str, target: str | None, detail: dict[str, object]
-    ) -> None:
-        await self._oper.add(actor_id, action, target, detail)
-
-    # ---- 事务 ----
+class SqlSystemRepo(
+    _UserRepoMixin,
+    _RoleRepoMixin,
+    _PermRepoMixin,
+    _DeptRepoMixin,
+    _TenantAuditMixin,
+):
+    """system 仓储组合:各能力簇 mixin 拼接,自身只保留事务控制。"""
 
     async def commit(self) -> None:
         await self._s.commit()

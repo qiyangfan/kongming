@@ -455,7 +455,7 @@ async def test_options_default_tenant_matches_chat_semantics(
     assert [o["datasource_key"] for o in r.json()] == ["default", "newds"]
     # 对照:chat 语义直连验证(选中 newds 经 /chat/query 预检应放行;
     # 补 chat:execute 角色过权限闸,agent 走替身保持确定性)
-    from kongming.chat.router import get_agent_client
+    from kongming.chat.dependencies import get_agent_client
     from tests.test_chat_query import FakeAgent
 
     rid = (

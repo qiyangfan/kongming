@@ -1,5 +1,6 @@
 """document-rag 仓储:rag.documents / rag.document_chunks SQL。"""
 
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import text
@@ -7,7 +8,64 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.config import DEFAULT_FULLTEXT_TS_CONFIG, validated_fulltext_ts_config
 from kongming.db import uuid7
-from kongming.rag.repository import vec_literal
+from kongming.rag.catalog import vec_literal
+
+_INSERT_DOCUMENT = (
+    "INSERT INTO rag.documents"
+    " (id, tenant_id, datasource_key, doc_name, content_hash, block_count)"
+    " VALUES (:i, :t, :d, :n, :h, :bc)"
+)
+
+
+def _chunk_insert_sql(ts_config: str) -> str:
+    """子块插入语句;{ts_config} 为白名单校验后的配置名(标识符无法绑定参数)。"""
+    # S608 豁免:{ts_config} 为白名单校验后的配置名,其余全部绑定参数
+    return (
+        "INSERT INTO rag.document_chunks"  # noqa: S608
+        " (id, document_id, tenant_id, datasource_key, chunk_level,"
+        "  parent_id, seq, source_ref, content, tsv, embedding)"
+        " VALUES (:i, :doc, :t, :d, :lv, :pid, :seq, :ref, :content,"
+        f"  to_tsvector('{ts_config}', :content), CAST(:vec AS halfvec))"
+    )
+
+
+@dataclass(frozen=True)
+class _DocWrite:
+    """一次覆盖式写入的全部入参(块级上下文由其派生)。"""
+
+    tenant_id: str
+    datasource_key: str
+    doc_name: str
+    content_hash: str
+    chunks: list[dict[str, object]]
+    vectors: list[list[float] | None]
+
+
+@dataclass(frozen=True)
+class _ChunkWrite:
+    """一次文档写入的块级公共上下文(插入参数与块 id 映射共用)。"""
+
+    doc: dict[str, object]
+    seq_to_id: dict[int, str]
+
+
+def _chunk_params(
+    chunk: dict[str, object], ctx: _ChunkWrite, vec: list[float] | None
+) -> dict[str, object]:
+    """单块插入语句的绑定参数;父块 id 由父块序号经映射取得,顶层块为空。"""
+    parent_seq = chunk["parent_seq"]
+    return {
+        "i": ctx.seq_to_id[int(str(chunk["seq"]))],
+        "doc": ctx.doc["i"],
+        "t": ctx.doc["t"],
+        "d": ctx.doc["d"],
+        "lv": chunk["level"],
+        "pid": ctx.seq_to_id.get(int(str(parent_seq))) if parent_seq is not None else None,
+        "seq": int(str(chunk["seq"])),
+        "ref": chunk["source_ref"],
+        "content": chunk["content"],
+        "vec": vec_literal(vec) if vec else None,
+    }
 
 
 class SqlDocumentRepo:
@@ -42,6 +100,18 @@ class SqlDocumentRepo:
         )
         return None if row is None else dict(row)
 
+    async def _delete_existing_document(
+        self, *, tenant_id: str, datasource_key: str, doc_name: str
+    ) -> None:
+        """同名文档存在则先删行(FK CASCADE 连带清旧块)。"""
+        existing = await self.find_by_name(
+            tenant_id=tenant_id, datasource_key=datasource_key, doc_name=doc_name
+        )
+        if existing is not None:
+            await self._s.execute(
+                text("DELETE FROM rag.documents WHERE id=:i"), {"i": str(existing["id"])}
+            )
+
     async def replace_document(
         self,
         *,
@@ -53,65 +123,48 @@ class SqlDocumentRepo:
         vectors: list[list[float] | None],
     ) -> str:
         """同名覆盖式更新(先删后插;FK CASCADE 清旧块);仅 CHILD 写向量/tsv。"""
-        existing = await self.find_by_name(
-            tenant_id=tenant_id, datasource_key=datasource_key, doc_name=doc_name
-        )
-        if existing is not None:
-            await self._s.execute(
-                text("DELETE FROM rag.documents WHERE id=:i"), {"i": str(existing["id"])}
+        return await self._replace_document(
+            _DocWrite(
+                tenant_id=tenant_id,
+                datasource_key=datasource_key,
+                doc_name=doc_name,
+                content_hash=content_hash,
+                chunks=chunks,
+                vectors=vectors,
             )
-        doc_id = str(uuid7())
-        await self._s.execute(
-            text(
-                "INSERT INTO rag.documents"
-                " (id, tenant_id, datasource_key, doc_name, content_hash, block_count)"
-                " VALUES (:i, :t, :d, :n, :h, :bc)"
-            ),
-            {
-                "i": doc_id,
-                "t": tenant_id,
-                "d": datasource_key,
-                "n": doc_name,
-                "h": content_hash,
-                "bc": len(chunks),
-            },
         )
+
+    async def _replace_document(self, write: _DocWrite) -> str:
+        """覆盖式写入的实际流程:删旧行→插文档行→插块,返回新文档 id。"""
+        await self._delete_existing_document(
+            tenant_id=write.tenant_id,
+            datasource_key=write.datasource_key,
+            doc_name=write.doc_name,
+        )
+        doc: dict[str, object] = {
+            "i": str(uuid7()),
+            "t": write.tenant_id,
+            "d": write.datasource_key,
+            "n": write.doc_name,
+            "h": write.content_hash,
+            "bc": len(write.chunks),
+        }
+        await self._s.execute(text(_INSERT_DOCUMENT), doc)
         seq_to_id: dict[int, str] = {}
-        for c in chunks:
-            cid = str(uuid7())
-            seq_to_id[int(str(c["seq"]))] = cid
+        for c in write.chunks:
+            seq_to_id[int(str(c["seq"]))] = str(uuid7())
+        await self._insert_chunks(_ChunkWrite(doc=doc, seq_to_id=seq_to_id), write)
+        return str(doc["i"])
+
+    async def _insert_chunks(self, ctx: _ChunkWrite, write: _DocWrite) -> None:
+        """按落库序逐块插入;子块依次取 vectors 中同序的向量。"""
         vi = 0  # vectors 与 CHILD 块同序
-        for c in chunks:
-            is_child = c["level"] == "CHILD"
+        for c in write.chunks:
             vec = None
-            if is_child:
-                vec = vectors[vi] if vi < len(vectors) else None
+            if c["level"] == "CHILD":
+                vec = write.vectors[vi] if vi < len(write.vectors) else None
                 vi += 1
-            parent_seq = c["parent_seq"]
-            await self._s.execute(
-                text(
-                    # S608 豁免:{self._ts} 为白名单校验后的配置名
-                    # (标识符无法绑定参数),其余全部绑定参数
-                    "INSERT INTO rag.document_chunks"  # noqa: S608
-                    " (id, document_id, tenant_id, datasource_key, chunk_level,"
-                    "  parent_id, seq, source_ref, content, tsv, embedding)"
-                    " VALUES (:i, :doc, :t, :d, :lv, :pid, :seq, :ref, :content,"
-                    f"  to_tsvector('{self._ts}', :content), CAST(:vec AS halfvec))"
-                ),
-                {
-                    "i": seq_to_id[int(str(c["seq"]))],
-                    "doc": doc_id,
-                    "t": tenant_id,
-                    "d": datasource_key,
-                    "lv": c["level"],
-                    "pid": seq_to_id.get(int(str(parent_seq))) if parent_seq is not None else None,
-                    "seq": int(str(c["seq"])),
-                    "ref": c["source_ref"],
-                    "content": c["content"],
-                    "vec": vec_literal(vec) if vec else None,
-                },
-            )
-        return doc_id
+            await self._s.execute(text(_chunk_insert_sql(self._ts)), _chunk_params(c, ctx, vec))
 
     async def list_documents(self, *, tenant_id: str, datasource_key: str) -> list[dict[str, Any]]:
         rows = (

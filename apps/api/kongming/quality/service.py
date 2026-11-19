@@ -46,54 +46,10 @@ class QualityService:
         by_ds = await self._repo.by_datasource(tenant_ids=vis, start=start, end=end)
         by_pv = await self._repo.by_prompt_version(tenant_ids=vis, start=start, end=end)
         total = int(overview.get("total", 0) or 0)
-
-        def _rate(n: object) -> float:
-            if not total:
-                return 0.0
-            # PG count(*) 产物恒 int;运行时收窄(overview 为 dict[str, Any] 边界)
-            return round(int(cast("int", n or 0)) / total, 4)
-
-        def _fallback_total(ov: dict[str, object]) -> int:
-            """兜底轮总数(闲聊+澄清;no_data 率剔除口径的分母缩减量)。"""
-            chitchat = int(cast("int", ov.get("chitchat") or 0))
-            clarify = int(cast("int", ov.get("clarify") or 0))
-            return chitchat + clarify
-
-        def _rate_adjusted(n: object, excluded: int) -> float:
-            """剔除兜底轮后的率(分子分母同步缩减;全兜底窗=0 除零收敛)。"""
-            denom = total - excluded
-            if denom <= 0:
-                return 0.0
-            return round(max(0, int(cast("int", n or 0)) - excluded) / denom, 4)
-
         return {
-            "overview": {
-                "total": total,
-                "success": int(overview.get("success", 0) or 0),
-                "no_data": int(overview.get("no_data", 0) or 0),
-                "blocked": int(overview.get("blocked", 0) or 0),
-                "failed": int(overview.get("failed", 0) or 0),
-                # 兜底轮分类计数(spec「兜底轮分类观测」;闲聊含直通与语义判定)
-                "chitchat_count": int(overview.get("chitchat", 0) or 0),
-                "clarify_count": int(overview.get("clarify", 0) or 0),
-                # 未覆盖率剔除兜底轮(分子分母均不含——兜底轮不是「没找到数据」),
-                # 原始 no_data 计数如实保留
-                "no_data_rate": _rate_adjusted(overview.get("no_data"), _fallback_total(overview)),
-                "blocked_rate": _rate(overview.get("blocked")),
-                "failed_rate": _rate(overview.get("failed")),
-                "selfheal_rate": _rate(overview.get("selfheal")),
-                "down_rate": _rate(overview.get("down")),
-                "avg_tokens": round(float(overview.get("avg_tokens", 0) or 0), 1),
-                # 答案评分观测(spec「轮次质量观测」):已评分轮均分与低分计数
-                # (未评分轮不进均值分母;avg 为 None=窗口内零评分)
-                "avg_score": (
-                    float(cast("float", overview.get("avg_score")))
-                    if overview.get("avg_score") is not None
-                    else None
-                ),
-                "low_score_count": int(cast("int", overview.get("low_score_count") or 0)),
-                "low_score_threshold": low_score_threshold,
-            },
+            "overview": _overview_payload(
+                overview, total=total, low_score_threshold=low_score_threshold
+            ),
             "trend": trend,
             "by_datasource": by_ds,
             "by_prompt_version": by_pv,
@@ -172,3 +128,60 @@ class QualityService:
         )
         truncated = len(rows) > _EXPORT_MAX_ROWS
         return rows[:_EXPORT_MAX_ROWS], truncated
+
+
+def _fallback_total(overview: dict[str, object]) -> int:
+    """兜底轮总数(闲聊+澄清;no_data 率剔除口径的分母缩减量)。"""
+    chitchat = int(cast("int", overview.get("chitchat") or 0))
+    clarify = int(cast("int", overview.get("clarify") or 0))
+    return chitchat + clarify
+
+
+def _rate(n: object, total: int) -> float:
+    """以窗口总轮数为分母的占比(总数为 0 时收敛 0)。"""
+    if not total:
+        return 0.0
+    # PG count(*) 产物恒 int;运行时收窄(overview 为 dict[str, Any] 边界)
+    return round(int(cast("int", n or 0)) / total, 4)
+
+
+def _rate_adjusted(n: object, excluded: int, total: int) -> float:
+    """剔除兜底轮后的率(分子分母同步缩减;全兜底窗=0 除零收敛)。"""
+    denom = total - excluded
+    if denom <= 0:
+        return 0.0
+    return round(max(0, int(cast("int", n or 0)) - excluded) / denom, 4)
+
+
+def _overview_payload(
+    overview: dict[str, object], *, total: int, low_score_threshold: int
+) -> dict[str, object]:
+    """概览计数与各比率(兜底轮剔除口径用于 no_data 率)。"""
+    excluded = _fallback_total(overview)
+    return {
+        "total": total,
+        "success": int(cast("int", overview.get("success") or 0)),
+        "no_data": int(cast("int", overview.get("no_data") or 0)),
+        "blocked": int(cast("int", overview.get("blocked") or 0)),
+        "failed": int(cast("int", overview.get("failed") or 0)),
+        # 兜底轮分类计数(spec「兜底轮分类观测」;闲聊含直通与语义判定)
+        "chitchat_count": int(cast("int", overview.get("chitchat") or 0)),
+        "clarify_count": int(cast("int", overview.get("clarify") or 0)),
+        # 未覆盖率剔除兜底轮(分子分母均不含——兜底轮不是「没找到数据」),
+        # 原始 no_data 计数如实保留
+        "no_data_rate": _rate_adjusted(overview.get("no_data"), excluded, total),
+        "blocked_rate": _rate(overview.get("blocked"), total),
+        "failed_rate": _rate(overview.get("failed"), total),
+        "selfheal_rate": _rate(overview.get("selfheal"), total),
+        "down_rate": _rate(overview.get("down"), total),
+        "avg_tokens": round(float(cast("float", overview.get("avg_tokens") or 0)), 1),
+        # 答案评分观测(spec「轮次质量观测」):已评分轮均分与低分计数
+        # (未评分轮不进均值分母;avg 为 None=窗口内零评分)
+        "avg_score": (
+            float(cast("float", overview.get("avg_score")))
+            if overview.get("avg_score") is not None
+            else None
+        ),
+        "low_score_count": int(cast("int", overview.get("low_score_count") or 0)),
+        "low_score_threshold": low_score_threshold,
+    }

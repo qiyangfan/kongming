@@ -452,14 +452,14 @@ async def test_coverage_report_happy_path(
 async def test_coverage_report_introspect_failure_no_partial(
     client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from kongming.rag.repository import RagRepository
+    from kongming.rag.repository import RagTenantRepository
 
     token = await _admin_token(client, session)
 
-    async def broken_introspect(self: RagRepository, **kw: object) -> list[object]:
+    async def broken_introspect(self: RagTenantRepository, **kw: object) -> list[object]:
         raise LookupError("default")
 
-    monkeypatch.setattr(RagRepository, "introspect_all", broken_introspect)
+    monkeypatch.setattr(RagTenantRepository, "introspect_all", broken_introspect)
     before = (
         await session.execute(text("SELECT COUNT(*) FROM rag.table_descriptions"))
     ).scalar_one()

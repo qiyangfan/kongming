@@ -1,5 +1,9 @@
 """billing 存储:策略/套餐/账单 + 用量聚合(sys_llm_usage
-服务端采集为唯一事实源,不经客户端)。"""
+服务端采集为唯一事实源,不经客户端)。
+
+方法按能力簇拆入 mixin,SqlBillingRepo 只做组合;各 mixin 通过 _BillingBase
+的 _s 会话访问数据库,彼此不互相调用。
+"""
 
 import json
 from typing import Any, cast
@@ -11,11 +15,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kongming.uuid7 import uuid7
 
 
-class SqlBillingRepo:
+class _BillingBase:
+    """会话持有者,各能力 mixin 经它共享同一会话。"""
+
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
 
-    # ── 策略 ──
+
+class _BillingPolicyMixin(_BillingBase):
+    """配额策略与套餐。"""
 
     async def upsert_policy(
         self,
@@ -79,8 +87,6 @@ class SqlBillingRepo:
         )
         return res.rowcount > 0
 
-    # ── 套餐 ──
-
     async def create_plan(self, **kw: Any) -> str:
         rid = str(uuid7())
         await self._s.execute(
@@ -113,8 +119,6 @@ class SqlBillingRepo:
             .all()
         )
         return [dict(r) for r in rows]
-
-    # ── 套餐查改删 ──
 
     async def get_plan(self, *, plan_id: str) -> dict[str, Any] | None:
         row = (
@@ -171,7 +175,32 @@ class SqlBillingRepo:
         )
         return res.rowcount > 0
 
-    # ── 配置面简列与归属校验 ──
+    async def get_tenant_plan(self, *, tenant_id: str) -> dict[str, Any] | None:
+        row = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT p.* FROM public.sys_tenant t"
+                        " JOIN public.sys_billing_plan p ON p.id=t.plan_id"
+                        " WHERE t.id=CAST(:t AS uuid)"
+                    ),
+                    {"t": tenant_id},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row else None
+
+    async def bind_plan(self, *, tenant_id: str, plan_id: str | None) -> None:
+        await self._s.execute(
+            text("UPDATE public.sys_tenant SET plan_id=CAST(:p AS uuid) WHERE id=CAST(:t AS uuid)"),
+            {"p": plan_id, "t": tenant_id},
+        )
+
+
+class _BillingCatalogMixin(_BillingBase):
+    """配置面简列与归属校验。"""
 
     async def list_tenants_brief(self) -> list[dict[str, Any]]:
         rows = (
@@ -301,30 +330,9 @@ class SqlBillingRepo:
         )
         return dict(row) if row else None
 
-    async def get_tenant_plan(self, *, tenant_id: str) -> dict[str, Any] | None:
-        row = (
-            (
-                await self._s.execute(
-                    text(
-                        "SELECT p.* FROM public.sys_tenant t"
-                        " JOIN public.sys_billing_plan p ON p.id=t.plan_id"
-                        " WHERE t.id=CAST(:t AS uuid)"
-                    ),
-                    {"t": tenant_id},
-                )
-            )
-            .mappings()
-            .first()
-        )
-        return dict(row) if row else None
 
-    async def bind_plan(self, *, tenant_id: str, plan_id: str | None) -> None:
-        await self._s.execute(
-            text("UPDATE public.sys_tenant SET plan_id=CAST(:p AS uuid) WHERE id=CAST(:t AS uuid)"),
-            {"p": plan_id, "t": tenant_id},
-        )
-
-    # ── 用量聚合(采集为唯一事实源) ──
+class _BillingUsageMixin(_BillingBase):
+    """用量聚合(采集为唯一事实源)。"""
 
     async def month_token_usage(self, *, tenant_id: str, month: str) -> int:
         """当月 token 合计(prompt+completion;month=YYYY-MM)。"""
@@ -453,7 +461,9 @@ class SqlBillingRepo:
         )
         return [dict(r) for r in rows]
 
-    # ── 账单 ──
+
+class _BillingInvoiceMixin(_BillingBase):
+    """账单与支付单(状态机转换一律 CAS,并发/重放安全由数据库行级原子性兜底)。"""
 
     async def insert_invoice(
         self, *, tenant_id: str, period: str, usage_json: dict[str, Any], amount: int
@@ -773,6 +783,15 @@ class SqlBillingRepo:
             .first()
         )
         return dict(row) if row else None
+
+
+class SqlBillingRepo(
+    _BillingPolicyMixin,
+    _BillingCatalogMixin,
+    _BillingUsageMixin,
+    _BillingInvoiceMixin,
+):
+    """billing 仓储组合:各能力簇 mixin 拼接,自身只保留事务提交。"""
 
     async def commit(self) -> None:
         await self._s.commit()

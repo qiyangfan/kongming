@@ -4,7 +4,7 @@ import type { components } from "./api-types.gen";
 import { api } from "./api";
 
 export type TeamItem = components["schemas"]["TeamOut"];
-export type TeamMemberItem = components["schemas"]["TeamMemberOut"];
+type TeamMemberItem = components["schemas"]["TeamMemberOut"];
 
 export function listMyTeams(): Promise<TeamItem[]> {
   return api.get<TeamItem[]>("/system/teams");
@@ -19,10 +19,6 @@ export function getTeam(id: string): Promise<{
 
 export function createTeam(body: { team_key: string; name: string }): Promise<{ id: string }> {
   return api.post("/system/teams", body);
-}
-
-export function renameTeam(id: string, name: string): Promise<{ ok: boolean }> {
-  return api.put(`/system/teams/${id}`, { name });
 }
 
 export function deleteTeam(id: string): Promise<{ ok: boolean }> {

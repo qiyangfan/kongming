@@ -64,39 +64,46 @@ def parse_markdown(content: str) -> list[TableBlock]:
     return list(seen.values())
 
 
-def _parse_block(body: str, table_name: str) -> TableBlock:
-    """单表块:按小节扫描提取 说明/字段/示例(上游 section 扫描逻辑同构)。"""
-    comment = ""
-    columns: dict[str, str] = {}
-    samples: list[str] = []
-    current: str | None = None
-    buf: list[str] = []
-    first_text: list[str] = []
+class _SectionScan:
+    """小节扫描累加器:按小节键收集正文,块结束时合并为三要素。"""
 
-    def flush(section: str | None, lines: list[str]) -> None:
-        nonlocal comment, columns, samples
+    def __init__(self) -> None:
+        self.comment = ""
+        self.columns: dict[str, str] = {}
+        self.samples: list[str] = []
+        self.first_text: list[str] = []
+
+    def flush(self, section: str | None, lines: list[str]) -> None:
+        """把一个小节的正文并入对应要素(空正文忽略)。"""
         text = "\n".join(lines).strip()
         if not text:
             return
         if section in _COLUMNS_KEYS:
-            columns = columns_to_json(text)
+            self.columns = columns_to_json(text)
         elif section in _SAMPLE_KEYS:
-            samples = [s.strip() for s in text.split(";") if s.strip()]
+            self.samples = [s.strip() for s in text.split(";") if s.strip()]
         elif section in _COMMENT_KEYS:
-            comment = _first_value(text)
-        elif section is None and not comment:
-            first_text.append(text)
+            self.comment = _first_value(text)
+        elif section is None and not self.comment:
+            self.first_text.append(text)
+
+
+def _parse_block(body: str, table_name: str) -> TableBlock:
+    """单表块:按小节扫描提取 说明/字段/示例(上游 section 扫描逻辑同构)。"""
+    scan = _SectionScan()
+    current: str | None = None
+    buf: list[str] = []
 
     for raw in body.splitlines():
         line = raw.rstrip()
         if line.strip().startswith("#"):  # 更深层标题(###)一律当小节终止
-            flush(current, buf)
+            scan.flush(current, buf)
             buf = []
             current = None
             continue
         key = _is_section_start(line)
         if key is not None:
-            flush(current, buf)
+            scan.flush(current, buf)
             buf = []
             current = key
             inline = _inline_value(line)
@@ -105,16 +112,17 @@ def _parse_block(body: str, table_name: str) -> TableBlock:
             continue
         if line.strip():
             buf.append(line)
-    flush(current, buf)
+    scan.flush(current, buf)
 
-    if not comment and first_text:
+    comment = scan.comment
+    if not comment and scan.first_text:
         # 无「说明:」小节时取第一段非空文本首行(上游 extractFirstLine 语义)
-        comment = _first_value(first_text[0])
+        comment = _first_value(scan.first_text[0])
     return TableBlock(
         table_name=table_name,
         table_comment=comment,
-        columns_comment=columns,
-        sample_queries=samples,
+        columns_comment=scan.columns,
+        sample_queries=scan.samples,
     )
 
 

@@ -16,7 +16,7 @@ import { useAgentMode } from "./agent-mode-store";
 import { useDatasource } from "./datasource-store";
 import { useTenant } from "./tenant-store";
 
-export type AuthStatus = "loading" | "guest" | "authed";
+type AuthStatus = "loading" | "guest" | "authed";
 
 interface AuthState {
   status: AuthStatus;

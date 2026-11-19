@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 
-class TriggerRepo(Protocol):
+class TriggerDefRepoPort(Protocol):
+    """触发器定义管理:增改查列、启停、删除与 webhook 路由定位。"""
+
     async def create(self, **kw: Any) -> str: ...
 
     async def update(self, **kw: Any) -> bool: ...
@@ -20,6 +22,10 @@ class TriggerRepo(Protocol):
     async def delete(self, *, trigger_id: str, tenant_id: str) -> bool: ...
 
     async def find_by_webhook_path(self, *, path: str) -> dict[str, Any] | None: ...
+
+
+class TriggerRunRepoPort(Protocol):
+    """运行记录与重试:cron 到期扫描、run 落定、挂起重试与分页。"""
 
     async def list_due_cron(self, *, now_iso: str) -> list[dict[str, Any]]: ...
 
@@ -46,6 +52,10 @@ class TriggerRepo(Protocol):
 
     async def list_due_retries(self, *, now_iso: str) -> list[dict[str, Any]]: ...
 
+
+class TriggerEmailRepoPort(Protocol):
+    """邮件入站:到期扫描与 UID 游标读写。"""
+
     async def list_due_emails(self, *, now_iso: str) -> list[dict[str, Any]]: ...
 
     async def get_email_cursor(self, *, trigger_id: str, folder: str) -> dict[str, Any] | None: ...
@@ -53,6 +63,10 @@ class TriggerRepo(Protocol):
     async def upsert_email_cursor(
         self, *, trigger_id: str, folder: str, last_uid: int, uidvalidity: int
     ) -> None: ...
+
+
+class TriggerRunResultRepoPort(Protocol):
+    """重试行落定、挂起顺延/取消与 run 分页查询。"""
 
     async def update_run_terminal(
         self,
@@ -75,6 +89,16 @@ class TriggerRepo(Protocol):
     async def latest_success_run_for_thread(
         self, *, trigger_id: str, thread_key: str
     ) -> dict[str, Any] | None: ...
+
+
+class TriggerRepo(
+    TriggerDefRepoPort,
+    TriggerRunRepoPort,
+    TriggerEmailRepoPort,
+    TriggerRunResultRepoPort,
+    Protocol,
+):
+    """trigger 完整端口:定义/运行/邮件/重试四簇的组合,外加事务提交。"""
 
     async def commit(self) -> None: ...
 

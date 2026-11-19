@@ -77,27 +77,8 @@ class InternalCheckpointSaver(BaseCheckpointSaver):  # type: ignore[type-arg]
         if latest is None:
             return None  # 缺席/失败同形:回退整步重跑(降级不谎称)
         try:
-            envelope = cast(
-                "dict[str, Any]",
-                self.serde.loads_typed(  # pyright: ignore[reportUnknownMemberType]
-                    (str(latest["payload_type"]), base64.b64decode(str(latest["payload_b64"])))
-                ),
-            )
-            checkpoint = cast("Checkpoint", envelope["checkpoint"])
-            metadata = cast("dict[str, Any]", envelope.get("metadata") or {})
-            cp_id = str(latest["checkpoint_id"] or checkpoint["id"])
-            writes: list[tuple[str, str, Any]] = []
-            rows = await deps.get_api().graph_checkpoint_writes(
-                tenant_key=ctx["tenant_key"],
-                thread_id=thread_id,
-                checkpoint_ns=ns,
-                checkpoint_id=cp_id,
-            )
-            for r in rows or []:
-                channel, value = self.serde.loads_typed(  # pyright: ignore[reportUnknownMemberType]
-                    (str(r["payload_type"]), base64.b64decode(str(r["payload_b64"])))
-                )
-                writes.append((str(r["write_task_id"] or ""), str(channel), value))
+            checkpoint, metadata, cp_id = self._decode_tuple(latest)
+            writes = await self._load_writes(ctx["tenant_key"], thread_id, ns, cp_id)
         except Exception as e:  # noqa: BLE001 —— blob 解析失败按降级(整步回退)
             self._mark_degraded("读取", e)
             return None
@@ -110,6 +91,36 @@ class InternalCheckpointSaver(BaseCheckpointSaver):  # type: ignore[type-arg]
             metadata=cast_metadata(metadata),
             pending_writes=writes or None,
         )  # pyright: ignore[reportUnknownArgumentType]
+
+    def _decode_tuple(self, latest: dict[str, Any]) -> tuple[Checkpoint, dict[str, Any], str]:
+        """解包 checkpoint 信封,返回 (检查点, 元数据, 检查点 id)。"""
+        envelope = cast(
+            "dict[str, Any]",
+            self.serde.loads_typed(  # pyright: ignore[reportUnknownMemberType]
+                (str(latest["payload_type"]), base64.b64decode(str(latest["payload_b64"])))
+            ),
+        )
+        checkpoint = cast("Checkpoint", envelope["checkpoint"])
+        metadata = cast("dict[str, Any]", envelope.get("metadata") or {})
+        return checkpoint, metadata, str(latest["checkpoint_id"] or checkpoint["id"])
+
+    async def _load_writes(
+        self, tenant_key: str, thread_id: str, ns: str, cp_id: str
+    ) -> list[tuple[str, str, Any]]:
+        """拉取检查点待写通道并解包(失败由调用方按降级处理)。"""
+        rows = await deps.get_api().graph_checkpoint_writes(
+            tenant_key=tenant_key,
+            thread_id=thread_id,
+            checkpoint_ns=ns,
+            checkpoint_id=cp_id,
+        )
+        writes: list[tuple[str, str, Any]] = []
+        for r in rows or []:
+            channel, value = self.serde.loads_typed(  # pyright: ignore[reportUnknownMemberType]
+                (str(r["payload_type"]), base64.b64decode(str(r["payload_b64"])))
+            )
+            writes.append((str(r["write_task_id"] or ""), str(channel), value))
+        return writes
 
     async def aput(
         self,

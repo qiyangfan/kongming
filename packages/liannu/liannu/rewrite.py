@@ -43,6 +43,19 @@ def main_table_ref(statement: exp.Expression | None) -> tuple[str, str | None] |
     return table.name, (table.db or None)
 
 
+def _bind_placeholders(
+    values: Sequence[object],
+) -> tuple[dict[str, object], list[exp.Placeholder]]:
+    """生成命名占位符与绑定参数(序号即参数名后缀)。"""
+    params: dict[str, object] = {}
+    placeholders: list[exp.Placeholder] = []
+    for i, value in enumerate(values):
+        name = f"{PARAM_PREFIX}{i}"
+        placeholders.append(exp.Placeholder(this=name))
+        params[name] = value
+    return params, placeholders
+
+
 def apply_scope_filter(
     statement: exp.Expression | None,
     original_sql: str,
@@ -66,12 +79,7 @@ def apply_scope_filter(
         return original_sql, {}
     qualifier = from_.this.alias_or_name
 
-    params: dict[str, object] = {}
-    placeholders: list[exp.Placeholder] = []
-    for i, value in enumerate(values):
-        name = f"{PARAM_PREFIX}{i}"
-        placeholders.append(exp.Placeholder(this=name))
-        params[name] = value
+    params, placeholders = _bind_placeholders(values)
     col = exp.column(column or "", table=qualifier or None)
     predicate: Expr
     if filter_type == FILTER_USER_EQ:

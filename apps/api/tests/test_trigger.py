@@ -86,6 +86,13 @@ def test_adapter_github_push() -> None:
     assert out["ref"] == "refs/heads/main" and "2 commits" in out["summary"]
 
 
+def test_adapter_github_pr_payload_absent() -> None:
+    """PR 事件但提载体缺失:ref/summary 均为空(不拼「PR # 」空壳)。"""
+    payload: dict[str, Any] = {"repository": {"full_name": "org/repo"}, "pull_request": None}
+    out = normalize("github", payload, "pull_request")
+    assert out["ref"] == "" and out["summary"] == ""
+
+
 def test_adapter_github_missing_event() -> None:
     with pytest.raises(AdapterError):
         normalize("github", {}, "")

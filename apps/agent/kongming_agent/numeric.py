@@ -287,6 +287,48 @@ def _looks_like_time_col(name: str) -> bool:
     return bool(_TIME_NAME.search(name))
 
 
+def _time_sort_key(r: Sequence[object], t_idx: int) -> tuple[int, float, str]:
+    """时间列排序键:数值期按数值序(避免 "10" < "9" 的字典序)。"""
+    v = r[t_idx] if t_idx < len(r) else None
+    if v is None:
+        return (2, 0.0, "")
+    if isinstance(v, bool):
+        return (1, 0.0, str(v))
+    if isinstance(v, (int, float)):
+        return (0, float(v), "")
+    s = str(v)
+    try:
+        return (0, float(s.replace(",", "")), "")
+    except ValueError:
+        return (1, 0.0, s)
+
+
+def _column_numbers(rows: Sequence[Sequence[object]], ci: int) -> list[float]:
+    """取某列的数值项(跳过缺列与非数值)。"""
+    nums: list[float] = []
+    for row in rows:
+        if ci >= len(row):
+            continue
+        v = row[ci]
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            nums.append(float(v))
+    return nums
+
+
+def _column_derived(col: str, nums: list[float]) -> dict[str, float]:
+    """单列派生量:末两行环比与末值占列和。"""
+    if len(nums) < 2:
+        return {}
+    prev, last = nums[-2], nums[-1]
+    out: dict[str, float] = {}
+    if prev != 0:
+        out[f"{col}_delta_pct"] = round((last - prev) / abs(prev) * 100.0, 4)
+    total = sum(nums)
+    if total != 0:
+        out[f"{col}_share_pct"] = round(last / total * 100.0, 4)
+    return out
+
+
 def precompute_derived_stats(
     columns: Sequence[str], rows: Sequence[Sequence[object]]
 ) -> dict[str, float]:
@@ -297,42 +339,12 @@ def precompute_derived_stats(
     if time_idx is None:
         return {}
     try:
-        t_idx = time_idx  # 已在上方 None 早退,收窄为 int
-
-        def _sort_key(r: Sequence[object]) -> tuple[int, float, str]:
-            # 数值期(如 month=9/10)须按数值序,不能 str 字典序("10"<"9")
-            v = r[t_idx] if t_idx < len(r) else None
-            if v is None:
-                return (2, 0.0, "")
-            if isinstance(v, bool):
-                return (1, 0.0, str(v))
-            if isinstance(v, (int, float)):
-                return (0, float(v), "")
-            s = str(v)
-            try:
-                return (0, float(s.replace(",", "")), "")
-            except ValueError:
-                return (1, 0.0, s)
-
-        ordered = sorted(rows, key=_sort_key)
+        ordered = sorted(rows, key=lambda r: _time_sort_key(r, time_idx))
     except TypeError:
         return {}
     out: dict[str, float] = {}
     for ci, col in enumerate(columns):
         if ci == time_idx:
             continue
-        nums: list[float] = []
-        for row in ordered:
-            if ci >= len(row):
-                continue
-            v = row[ci]
-            if isinstance(v, (int, float)) and not isinstance(v, bool):
-                nums.append(float(v))
-        if len(nums) >= 2:
-            prev, last = nums[-2], nums[-1]
-            if prev != 0:
-                out[f"{col}_delta_pct"] = round((last - prev) / abs(prev) * 100.0, 4)
-            total = sum(nums)
-            if total != 0:
-                out[f"{col}_share_pct"] = round(last / total * 100.0, 4)
+        out.update(_column_derived(col, _column_numbers(ordered, ci)))
     return out

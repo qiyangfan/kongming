@@ -105,6 +105,145 @@ async def react_llm(state: ReactState) -> dict[str, object]:
 
 
 # ── 节点2:工具执行(回调控制面,零凭证)──
+def _call_signature(call: LlmToolCall) -> str:
+    """生成重复熔断签名;参数畸形(None)不参与去重。"""
+    if call.args is None:
+        return ""
+    return call.name + "|" + json.dumps(call.args, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _malformed_observation(call: LlmToolCall) -> dict[str, object]:
+    """参数 JSON 畸形:不回调,直接喂回 LLM 自纠。"""
+    return {
+        "status": "error",
+        "reason": f"工具参数 JSON 畸形,请修正后重试: {call.raw_args[:200]}",
+    }
+
+
+def _duplicate_observation() -> dict[str, object]:
+    """同工具同参数已成功过:零副作用观察,引导模型改用已有信息。"""
+    return {
+        "status": "error",
+        "reason": "该调用(同工具同参数)已成功执行过,结果相同。"
+        "请基于已有信息直接作答或换一个思路,不要重复调用。",
+    }
+
+
+async def _task_context_observation(state: ReactState) -> tuple[dict[str, object], str]:
+    """内置只读续读:零参绑定派发载荷 task_id,LLM 无法指定他任务。"""
+    ctx = await deps.get_api().task_context(
+        task_id=str(state.get("task_id") or ""),
+        tenant_key=str(state.get("tenant_key") or "default"),
+    )
+    if ctx is None:
+        return {"status": "error", "reason": "任务上下文读取失败(端点不可达/超时)"}, "rejected"
+    return (
+        {
+            "status": "done",
+            "reason": "",
+            "content": json.dumps(ctx, ensure_ascii=False, default=str),
+        },
+        "done",
+    )
+
+
+def _capture_success(
+    call: LlmToolCall,
+    outcome: ToolExecuteOutcome,
+    sig: str,
+    executed_sigs: set[str],
+    compute_values: list[float],
+    out: dict[str, object],
+) -> None:
+    """登记真成功调用,并收集 execute_sql 结果与数值白名单。"""
+    result = outcome.result or {}
+    # execute_sql 的通道 status 恒为 executed,SQL 层 verdict 在 result 内:
+    # BLOCKED/ERROR 若入集会让模型收到「已成功执行过」的假观察
+    really_ok = (
+        str(result.get("verdict") or "PASS") == "PASS" if call.name == "execute_sql" else True
+    )
+    if really_ok and sig:
+        executed_sigs.add(sig)
+    if call.name == "execute_sql":
+        _capture_execution(out, call, outcome)
+        # 成功结果数值入本轮白名单(多查询时 ERROR 不得抹掉先前数字)
+        if really_ok:
+            compute_values.extend(_numeric_cells(out.get("last_execution")))
+
+
+async def _execute_observation(
+    call: LlmToolCall,
+    state: ReactState,
+    sig: str,
+    executed_sigs: set[str],
+    compute_values: list[float],
+    out: dict[str, object],
+) -> tuple[dict[str, object], str] | None:
+    """走通用工具执行面;任务通道高危动作入在途确认并返回 None(挂图)。"""
+    # 入口 state 恒含 trace_id/tenant_key(_initial_react_state 写入)
+    outcome = await deps.get_api().tool_execute(
+        trace_id=state["trace_id"],  # pyright: ignore[reportTypedDictNotRequiredAccess]
+        tenant_key=state["tenant_key"],  # pyright: ignore[reportTypedDictNotRequiredAccess]
+        datasource_key=state.get("datasource_key", "default"),
+        user_id=state.get("user_id"),
+        tool_name=call.name,
+        args=cast("dict[str, object]", call.args),
+        channel=state.get("channel", "chat"),
+    )
+    if outcome.status == "confirm_required" and state.get("channel") == "task":
+        # 任务通道高危动作挂图(HITL 第三形态):在途确认入状态,
+        # 不喂观察不记账本(动作未执行),兑现观察由 tool_resolve 回填
+        out["confirm_inflight"] = {
+            "confirm_id": outcome.confirm_id or "",
+            "tool_name": call.name,
+            "call_id": call.call_id,
+            "summary": f"调用工具 {call.name}",
+        }
+        emit_event(
+            "tool_call",
+            {
+                "tool_name": call.name,
+                "status": "confirm_required",
+                "args_digest": _digest(call),
+                "result_digest": "待人工确认,图挂起",
+            },
+        )
+        return None
+    obs = _observe(outcome)
+    # confirm_required 按 done 下发(spec:result_digest 含「待确认」),
+    # rejected 仅防御层拒绝/执行错误语义
+    status = "done" if outcome.status in ("executed", "confirm_required") else "rejected"
+    if outcome.status == "executed":
+        _capture_success(call, outcome, sig, executed_sigs, compute_values, out)
+    return obs, status
+
+
+async def _resolve_call(
+    call: LlmToolCall,
+    state: ReactState,
+    sig: str,
+    executed_sigs: set[str],
+    compute_values: list[float],
+    out: dict[str, object],
+) -> tuple[dict[str, object], str] | None:
+    """按调用形态分派(本地计算/续读/通用执行),返回观察与账本状态。"""
+    if call.args is None:
+        return _malformed_observation(call), "rejected"
+    if sig and sig in executed_sigs:
+        return _duplicate_observation(), "rejected"
+    if call.name in ("compute_delta", "compute_share"):
+        # 确定性派生量本地执行(纯函数+本轮白名单),不回调控制面
+        # 白名单含本轮同批 execute_sql 刚落库的结果(out.last_execution)
+        obs, status, add_vals = _run_local_compute(call, state, compute_values, out)
+        compute_values.extend(add_vals)
+        if status == "done" and sig:
+            executed_sigs.add(sig)
+        return obs, status
+    if call.name == TASK_CONTEXT_TOOL_NAME:
+        return await _task_context_observation(state)
+    return await _execute_observation(call, state, sig, executed_sigs, compute_values, out)
+
+
 async def tool_dispatch(state: ReactState) -> dict[str, object]:
     messages = list(state.get("messages") or [])
     calls = state.get("pending_tool_calls") or []
@@ -125,106 +264,12 @@ async def tool_dispatch(state: ReactState) -> dict[str, object]:
             "tool_call",
             {"tool_name": call.name, "status": "running", "args_digest": _digest(call)},
         )
-        sig = ""
-        if call.args is not None:
-            sig = (
-                call.name
-                + "|"
-                + json.dumps(call.args, ensure_ascii=False, sort_keys=True, default=str)
-            )
-        if call.args is None:
-            # 参数 JSON 畸形:不回调,直接观察喂回 LLM 自纠
-            obs: dict[str, object] = {
-                "status": "error",
-                "reason": f"工具参数 JSON 畸形,请修正后重试: {call.raw_args[:200]}",
-            }
-            outcome_status = "rejected"
-        elif sig and sig in executed_sigs:
-            obs = {
-                "status": "error",
-                "reason": "该调用(同工具同参数)已成功执行过,结果相同。"
-                "请基于已有信息直接作答或换一个思路,不要重复调用。",
-            }
-            outcome_status = "rejected"
-        elif call.name in ("compute_delta", "compute_share"):
-            # 确定性派生量本地执行(纯函数+本轮白名单),不回调控制面
-            # 白名单含本轮同批 execute_sql 刚落库的结果(out.last_execution)
-            obs, outcome_status, add_vals = _run_local_compute(call, state, compute_values, out)
-            compute_values.extend(add_vals)
-            if outcome_status == "done" and sig:
-                executed_sigs.add(sig)
-        elif call.name == TASK_CONTEXT_TOOL_NAME:
-            # 内置只读续读(授权交集外加;零参绑定派发载荷 task_id,
-            # LLM 无法指定他任务):不走通用工具执行面,直读任务上下文
-            ctx = await deps.get_api().task_context(
-                task_id=str(state.get("task_id") or ""),
-                tenant_key=str(state.get("tenant_key") or "default"),
-            )
-            if ctx is None:
-                obs = {"status": "error", "reason": "任务上下文读取失败(端点不可达/超时)"}
-                outcome_status = "rejected"
-            else:
-                obs = {
-                    "status": "done",
-                    "reason": "",
-                    "content": json.dumps(ctx, ensure_ascii=False, default=str),
-                }
-                outcome_status = "done"
-        else:
-            # 入口 state 恒含 trace_id/tenant_key(_initial_react_state 写入)
-            outcome = await deps.get_api().tool_execute(
-                trace_id=state["trace_id"],  # pyright: ignore[reportTypedDictNotRequiredAccess]
-                tenant_key=state["tenant_key"],  # pyright: ignore[reportTypedDictNotRequiredAccess]
-                datasource_key=state.get("datasource_key", "default"),
-                user_id=state.get("user_id"),
-                tool_name=call.name,
-                args=call.args,
-                channel=state.get("channel", "chat"),
-            )
-            if outcome.status == "confirm_required" and state.get("channel") == "task":
-                # 任务通道高危动作挂图(HITL 第三形态)——
-                # 在途确认入状态,经 confirm_gate(interrupt)挂图上呈审批;
-                # 不喂观察不记账本(动作未执行),兑现观察由 tool_resolve 按决策回填
-                out["confirm_inflight"] = {
-                    "confirm_id": outcome.confirm_id or "",
-                    "tool_name": call.name,
-                    "call_id": call.call_id,
-                    "summary": f"调用工具 {call.name}",
-                }
-                emit_event(
-                    "tool_call",
-                    {
-                        "tool_name": call.name,
-                        "status": "confirm_required",
-                        "args_digest": _digest(call),
-                        "result_digest": "待人工确认,图挂起",
-                    },
-                )
-                break
-            obs = _observe(outcome)
-            # confirm_required 按 done 下发(spec:result_digest 含「待确认」),
-            # rejected 仅防御层拒绝/执行错误语义
-            outcome_status = (
-                "done" if outcome.status in ("executed", "confirm_required") else "rejected"
-            )
-            if outcome.status == "executed":
-                # 重复熔断只收「真成功」的调用:execute_sql 工具通道 status 恒为
-                # executed,SQL 层 verdict(PASS/BLOCKED/ERROR)在 result 内——
-                # BLOCKED/ERROR 的调用若入集,LLM 重发同一条 SQL 会收到
-                # 「已成功执行过」的假观察,诱导编造数据
-                result = outcome.result or {}
-                really_ok = (
-                    str(result.get("verdict") or "PASS") == "PASS"
-                    if call.name == "execute_sql"
-                    else True
-                )
-                if really_ok and sig:
-                    executed_sigs.add(sig)
-                if call.name == "execute_sql":
-                    _capture_execution(out, call, outcome)
-                    # 成功结果数值入本轮白名单(多查询时 ERROR 不得抹掉先前数字)
-                    if really_ok:
-                        compute_values.extend(_numeric_cells(out.get("last_execution")))
+        resolved = await _resolve_call(
+            call, state, _call_signature(call), executed_sigs, compute_values, out
+        )
+        if resolved is None:
+            break
+        obs, outcome_status = resolved
         # 工具结果回写账本(成功且非空才 DONE;失败/空/不适用如实标记)
         todo_items = _apply_todo_for_outcome(
             todo_items, call, obs, outcome_status, empty=_is_empty_tool_result(obs)

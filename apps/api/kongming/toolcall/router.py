@@ -1,505 +1,52 @@
 """工具执行、写操作确认与工具审计查询路由。
 
 内部执行端点由内部令牌保护(ADR-002);确认与管理端点各自执行权限与
-归属校验。端口适配在此装配。
+归属校验。端口适配与工厂簇见 adapters/dependencies。
 """
 
-import logging
-import shutil
 import uuid
 from datetime import datetime
-from functools import lru_cache
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.repository import SqlPermRepo
 from kongming.auth.router import current_user, require_perm
 from kongming.chat.repository import ChatRepository
-from kongming.config import get_settings
-from kongming.connector.models import (
-    build_injection_spec,
-    key_from_tool_name,
-    params_to_schema,
-    row_param_decls,
-)
-from kongming.connector.repository import SqlConnectorRepo
-from kongming.datasource.cipher import get_cipher
 from kongming.db import get_session
-from kongming.internal import service as internal_service
-from kongming.mcp.breaker import build_mcp_caller, get_mcp_breaker
-from kongming.mcp.repository import SqlMcpRepo
-from kongming.mcp.service import McpService
-from kongming.rag.router import get_rag_service
-from kongming.redis_client import get_redis
-from kongming.sandbox.repository import SqlSandboxRunRepo
-from kongming.sandbox.runner import PodmanSandboxRunner
-from kongming.sandbox.service import SandboxService
-from kongming.toolcall import registry
+from kongming.toolcall import dependencies as _deps
+from kongming.toolcall.dependencies import (
+    build_mcp_service,
+    get_tool_service,
+    sync_runtime_disabled,
+)
 from kongming.toolcall.models import (
     ConfirmNotFound,
-    ConnectorError,
     TenantBindingForbidden,
     TenantNotFound,
-    ToolDef,
-    ToolOutcome,
 )
-from kongming.toolcall.ratelimit import RedisRateLimiter
 from kongming.toolcall.registry import REGISTRY
-from kongming.toolcall.repository import (
-    SqlToolCallRepo,
-    ToolAuditWriter,
-    user_has_all_scope,
+from kongming.toolcall.repository import SqlToolCallRepo, user_has_all_scope
+from kongming.toolcall.schemas import (
+    CONFIRM_OUT_STATUS,
+    ToolAuditPageOut,
+    ToolConfirmIn,
+    ToolConfirmOut,
+    ToolExecuteIn,
+    ToolExecuteOut,
+    ToolItemOut,
+    ToolListOut,
+    ToolResolveConfirmIn,
+    to_tool_audit_item,
+    to_tool_execute_out,
 )
 from kongming.toolcall.service import ConfirmOutcome, ToolCallService
-from kongming.toolgateway.gateway import Executor, ToolGateway
-from kongming.toolgateway.models import (
-    CONNECTOR_DOMAIN,
-    DOMAIN_TOOLS,
-    FAILURE_UNDELIVERED_PREFIX,
-    WEBSEARCH_PROVIDERS,
-    DomainPolicy,
-    load_manifest,
-)
-from kongming.toolgateway.websearch import WebSearchError, WebSearchExecutor, WebSearchPolicy
-
-log = logging.getLogger(__name__)
+from kongming.toolgateway.gateway import ToolGateway
 
 # 内部面(守门由 main 全局 middleware 承担)与管理面/用户面三个 router
 internal_router = APIRouter(prefix="/internal/tool", tags=["internal"])
 router = APIRouter(prefix="/system/tools", tags=["toolcall"])
 chat_router = APIRouter(prefix="/chat", tags=["chat"])
-
-
-# ── 端口适配(组合根) ──
-
-
-class _InternalSqlExecutor:
-    """将 SQL 工具绑定到受控执行服务，复用防火墙、数据范围和只读校验。"""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self._s = session
-
-    async def run(
-        self,
-        *,
-        trace_id: str,
-        tenant_key: str,
-        datasource_key: str,
-        sql_text: str,
-        user_id: str,
-        question: str | None,
-    ) -> dict[str, object]:
-        result = await internal_service.execute(
-            self._s,
-            trace_id=trace_id,
-            tenant_key=tenant_key,
-            datasource_key=datasource_key,
-            sql_text=sql_text,
-            user_id=user_id,
-            question=question,
-            limit=1000,
-        )
-        return {
-            "verdict": result.verdict,
-            "reason": result.reason,
-            "columns": result.columns,
-            "rows": result.rows,
-            "row_count": result.row_count,
-            "duration_ms": result.duration_ms,
-        }
-
-
-class _RagServiceAdapter:
-    """将 rag_retrieve 工具绑定到 RAG 三路召回服务。"""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self._svc = get_rag_service(session)
-        self._s = session
-
-    async def _enrich(
-        self, tenant_key: str, datasource_key: str, question: str, schema_hint: str
-    ) -> dict[str, object]:
-        """语义段组装(与 rag retrieve 端点同构;降级空串)。"""
-        import re as _re
-
-        from sqlalchemy import text as _text
-
-        from kongming.semantic.repository import SqlSemanticRepo
-        from kongming.semantic.service import SemanticService
-
-        try:
-            tid = (
-                await self._s.execute(
-                    _text(
-                        "SELECT id FROM public.sys_tenant WHERE tenant_key=:k AND status='ACTIVE'"
-                    ),
-                    {"k": tenant_key},
-                )
-            ).scalar_one_or_none()
-            if tid is None:
-                return {"relations_hint": "", "metric_hints": ""}
-            tables = _re.findall(r"^([\w]+\.[\w]+)\(", schema_hint, _re.M)
-            relations_hint, metric_hints, _mhits = await SemanticService(
-                SqlSemanticRepo(self._s)
-            ).enrich(
-                tenant_id=str(tid),
-                datasource_key=datasource_key,
-                question=question,
-                tables=tables,
-            )
-            return {"relations_hint": relations_hint, "metric_hints": metric_hints}
-        except Exception:
-            log.warning("ReAct 语义段组装失败(降级空串)", exc_info=True)
-            return {"relations_hint": "", "metric_hints": ""}
-
-    async def retrieve(
-        self, *, tenant_key: str, datasource_key: str, question: str
-    ) -> dict[str, object]:
-        ctx = await self._svc.recall(
-            tenant_key=tenant_key, datasource_key=datasource_key, question=question
-        )
-        if ctx.schema_hint.strip() or ctx.history_sql.strip():
-            out: dict[str, object] = {
-                "schema_hint": ctx.schema_hint,
-                "history_sql": ctx.history_sql,
-            }
-            # ReAct 工具执行也传入语义提示，内容与 /internal/rag/retrieve 共用同一组装逻辑。
-            out.update(await self._enrich(tenant_key, datasource_key, question, ctx.schema_hint))
-            return out
-        from kongming.internal.meta import MetaSchemaIn, meta_schema
-
-        try:
-            meta = await meta_schema(
-                MetaSchemaIn(tenant_key=tenant_key, datasource_key=datasource_key), self._s
-            )
-        except Exception:
-            # 实时内省失败时返回空提示。
-            log.warning("rag_retrieve 回退内省失败 tenant=%s ds=%s", tenant_key, datasource_key)
-            return {"schema_hint": "", "history_sql": ""}
-        out2: dict[str, object] = {
-            "schema_hint": _format_meta_hint(meta),
-            "history_sql": ctx.history_sql,
-        }
-        out2.update(
-            await self._enrich(tenant_key, datasource_key, question, out2["schema_hint"])  # type: ignore[arg-type]
-        )
-        return out2
-
-
-def _format_meta_hint(meta: object) -> str:
-    """实时内省结果 → schema 提示文本(与 8 节点图 retrieve 回退同形态)。"""
-    from kongming.internal.meta import MetaSchemaOut
-
-    if not isinstance(meta, MetaSchemaOut):
-        return ""
-    lines: list[str] = []
-    for t in meta.tables:
-        header = f"表 {t.schema_}.{t.name}"
-        if t.comment:
-            header += f":{t.comment}"
-        lines.append(header)
-        for c in t.columns:
-            col = f"  - {c.name} {c.data_type}"
-            if c.comment:
-                col += f"({c.comment})"
-            lines.append(col)
-    if meta.truncated:
-        lines.append(f"(表数量超上限,仅列前 {len(meta.tables)} 张)")
-    return "\n".join(lines)
-
-
-class _ChatReplyStore:
-    """确认回执落会话消息(chat 仓储适配;归属校验与 chat 404 同形)。"""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self._repo = ChatRepository(session)
-
-    async def session_owned(self, *, session_id: str, user_id: str, tenant_id: str) -> bool:
-        return (
-            await self._repo.find_session_owned(
-                session_id=session_id, user_id=user_id, tenant_id=tenant_id
-            )
-            is not None
-        )
-
-    async def append_reply(self, *, session_id: str, content: str) -> None:
-        await self._repo.insert_message(
-            session_id=session_id, role="ASSISTANT", summary=content, status="SUCCESS"
-        )
-
-
-class _GuardrailIntentReviewer:
-    """意图审核端口绑定:guardrail 域服务(独立短会话读配置)。"""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self._s = session
-
-    async def allow(
-        self,
-        *,
-        trace_id: str,
-        user_id: str,
-        tenant_id: str,
-        tool_write: bool,
-        write_attempts: int,
-    ) -> bool:
-        from kongming.guardrail.repository import (
-            SqlGuardrailAuditWriter,
-            SqlGuardrailRepo,
-        )
-        from kongming.guardrail.service import GuardrailService
-
-        svc = GuardrailService(SqlGuardrailRepo(self._s), SqlGuardrailAuditWriter())
-        return await svc.review_tool_intent(
-            trace_id=trace_id,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            tool_write=tool_write,
-            write_attempts=write_attempts,
-        )
-
-
-def _build_sandbox() -> SandboxService | None:
-    """组合根:enabled 且宿主 podman 可用才接 runner;
-    否则 None(handler 收敛 ERROR「沙箱未启用」+审计,fail-closed 不裸 500)。
-    模块级 import 安全:sandbox 域零副作用(podman 调用在运行期子进程)。"""
-    settings = get_settings()
-    if not settings.sandbox_enabled:
-        return None
-    if shutil.which("podman") is None:
-        log.warning("KM_SANDBOX_ENABLED=true 但宿主无 podman,沙箱按未启用降级")
-        return None
-    return SandboxService(
-        runner=PodmanSandboxRunner(
-            image=settings.sandbox_image,
-            timeout_sec=settings.sandbox_timeout_sec,
-            mem_mb=settings.sandbox_mem_mb,
-            cpus=settings.sandbox_cpus,
-        ),
-        writer=SqlSandboxRunRepo(),
-    )
-
-
-def _build_mcp_service(session: AsyncSession) -> McpService:
-    """mcp 域服务装配(动态解析与出站执行共用同一服务实例)。"""
-    settings = get_settings()
-    return McpService(
-        SqlMcpRepo(session, get_cipher(settings.datasource_encrypt_key)),
-        build_mcp_caller(settings),
-        breaker=get_mcp_breaker(),
-    )
-
-
-def _build_gateway() -> ToolGateway | None:
-    """网关域清单装配(各域注册条件独立判定;条件不满足的域不进
-    清单=零感知)。清单/策略器/执行器三件齐备才注册;策略器缺失的域不注册
-    (fail-closed)。全部域条件均不满足 → None(无网关,既有路径)。"""
-    settings = get_settings()
-    entries: list[dict[str, object]] = []
-    # websearch 域:供应商在注册表内 + API key 齐备两道条件;
-    # 端点/白名单由供应商单源派生(部署不可单独改端点)
-    provider = (settings.websearch_provider or "").strip().lower()
-    api_key = (settings.websearch_api_key or "").strip()
-    if provider in WEBSEARCH_PROVIDERS and api_key:
-        spec = WEBSEARCH_PROVIDERS[provider]
-        entries.append(
-            {
-                "id": "websearch",
-                "endpoint": spec.endpoint,
-                "whitelist_hosts": [spec.host],
-                "timeout_ms": settings.websearch_timeout_ms,
-                "quota_per_minute": settings.toolgateway_websearch_quota,
-                "redaction": "allowlist:websearch",
-            }
-        )
-    if not entries:
-        return None
-    manifest, warnings = load_manifest(entries)
-    for w in warnings:
-        log.warning("%s", w)
-    policies: dict[str, DomainPolicy] = {}
-    domain_executors: dict[str, Executor] = {}
-    executor: Executor | None = None
-    if "websearch" in manifest:
-        policies["websearch"] = WebSearchPolicy(
-            whitelist_hosts=manifest["websearch"].whitelist_hosts
-        )
-        domain_executors["websearch"] = WebSearchExecutor(adapter=provider, api_key=api_key)
-    return ToolGateway(
-        manifest=manifest,
-        policies=policies,
-        executor=executor,
-        domain_executors=domain_executors or None,
-    )
-
-
-@lru_cache(maxsize=1)
-def _get_gateway() -> ToolGateway | None:
-    """网关进程单例(停用集合跨请求一致;清单随部署配置,重启复位)。"""
-    return _build_gateway()
-
-
-class _GatewayWebSearchClient:
-    """WebSearchPort 绑定:出站经网关切面(出口校验→限流→出站→脱敏→
-    重试分类),本适配层只做域方言整形(检索卡观察形态);失败收敛
-    WebSearchError(分发兜底 ERROR+审计)。"""
-
-    def __init__(self, gateway: ToolGateway) -> None:
-        self._gw = gateway
-
-    async def search(self, *, query: str, count: int) -> list[dict[str, object]]:
-        out = await self._gw.execute(
-            tool_name="web_search",
-            args={"query": query, "count": count},
-            domain="websearch",
-            trace_id="-",  # trace 经工具分发层审计承载;适配层不重复落
-            tenant_id="-",
-            user_id="-",
-        )
-        if out["status"] != "executed":
-            raise WebSearchError(
-                str(out.get("reason") or f"{FAILURE_UNDELIVERED_PREFIX} 联网检索拒连")
-            )
-        result = cast("dict[str, object]", out.get("result") or {})
-        return cast("list[dict[str, object]]", result.get("results") or [])
-
-
-def _build_websearch_client() -> _GatewayWebSearchClient | None:
-    """供应商+API key 任一缺失 → 域不在清单 → None(工具不注册)。"""
-    gw = _get_gateway()
-    return _GatewayWebSearchClient(gw) if gw is not None and gw.declared("websearch") else None
-
-
-class _McpDynamicResolver:
-    """DynamicToolResolver 绑定:快照命中 → fail-closed ToolDef。"""
-
-    def __init__(self, svc: McpService) -> None:
-        self._svc = svc
-
-    async def resolve(self, *, tenant_id: str, name: str) -> ToolDef | None:
-        entry = await self._svc.resolve_tool(tenant_id=tenant_id, qualified=name)
-        if entry is None:
-            return None
-        read_only = bool(entry.get("read_only"))
-        schema = entry.get("schema")
-        return ToolDef(
-            name=name,
-            description=str(entry.get("description") or ""),
-            parameters=cast("dict[str, Any]", schema)
-            if isinstance(schema, dict)
-            else {"type": "object"},
-            perm_code="tool:mcp:use",
-            write=not read_only,  # fail-closed:未标注 readOnlyHint=写工具
-            require_confirm=not read_only,
-        )
-
-
-class _ConnectorToolGate:
-    """ConnectorToolGate 绑定:启用连接器行 → fail-closed ToolDef;
-    出站执行经网关切面单域装配(出口校验→SSRF→出站→分类)。凭证仅在
-    get_call_target(唯一明文出口)瞬时装配,不落日志/审计/任何响应。"""
-
-    def __init__(self, session: AsyncSession) -> None:
-        settings = get_settings()
-        self._repo = SqlConnectorRepo(session, get_cipher(settings.datasource_encrypt_key))
-        self._quota = settings.toolgateway_http_quota
-
-    def _tool_def(self, row: dict[str, Any], name: str) -> ToolDef:
-        spec = build_injection_spec(row)
-        confirm = bool(row.get("requires_confirmation"))
-        return ToolDef(
-            name=name,
-            description=str(spec["description"]),
-            parameters=params_to_schema(row_param_decls(row)),
-            perm_code="tool:http:call",
-            write=confirm,
-            require_confirm=confirm,
-        )
-
-    async def resolve(self, *, tenant_id: str, name: str) -> ToolDef | None:
-        key = key_from_tool_name(name)
-        if key is None:
-            return None
-        row = await self._repo.find_enabled_by_key(tenant_id=tenant_id, key=key)
-        return None if row is None else self._tool_def(row, name)
-
-    async def call(
-        self, *, tenant_id: str, name: str, args: dict[str, object]
-    ) -> dict[str, object]:
-        from kongming.toolgateway.connector import build_connector_stack
-
-        key = key_from_tool_name(name)
-        if key is None:
-            raise ConnectorError(f"{FAILURE_UNDELIVERED_PREFIX} 连接器工具名形态非法")
-        # 禁用/删除竞态:唯一明文出口返回 None → 「未注册」语义
-        row = await self._repo.get_call_target(tenant_id=tenant_id, key=key)
-        if row is None:
-            raise ConnectorError(f"{FAILURE_UNDELIVERED_PREFIX} 连接器不可用(已停用或删除)")
-        spec, policy, executor = build_connector_stack(
-            row,
-            auth_secret=row.get("auth_secret_plain"),
-            quota_per_minute=self._quota,
-        )
-        gw = ToolGateway(
-            manifest={CONNECTOR_DOMAIN: spec},
-            policies={CONNECTOR_DOMAIN: policy},
-            domain_executors={CONNECTOR_DOMAIN: executor},
-        )
-        out = await gw.execute(
-            tool_name=name,
-            args=args,
-            domain=CONNECTOR_DOMAIN,
-            trace_id="-",  # trace 经工具分发层审计承载;适配层不重复落
-            tenant_id=tenant_id,
-            user_id="-",
-        )
-        if out["status"] != "executed":
-            raise ConnectorError(str(out.get("reason") or "unreachable: 连接器调用失败"))
-        return cast("dict[str, object]", out.get("result") or {})
-
-
-class _McpToolCaller:
-    """McpToolCaller 绑定(出站执行经 mcp 域服务)。"""
-
-    def __init__(self, svc: McpService) -> None:
-        self._svc = svc
-
-    async def call(
-        self, *, tenant_id: str, qualified: str, args: dict[str, object]
-    ) -> dict[str, object]:
-        return await self._svc.call_tool(tenant_id=tenant_id, qualified=qualified, args=args)
-
-
-def _build_connector_gate(session: AsyncSession) -> _ConnectorToolGate:
-    """装配缝(测试可 monkeypatch,与 _build_websearch_client 同构)。"""
-    return _ConnectorToolGate(session)
-
-
-def _get_service(session: Annotated[AsyncSession, Depends(get_session)]) -> ToolCallService:
-    settings = get_settings()
-    mcp_svc = _build_mcp_service(session)
-    return ToolCallService(
-        repo=SqlToolCallRepo(session),
-        writer=ToolAuditWriter(),
-        perms=SqlPermRepo(session),
-        limiter=RedisRateLimiter(get_redis()),
-        sql_executor=_InternalSqlExecutor(session),
-        rag_retriever=_RagServiceAdapter(session),
-        reply_store=_ChatReplyStore(session),
-        intent=_GuardrailIntentReviewer(session),  # 意图审核
-        sandbox=_build_sandbox(),
-        resolver=_McpDynamicResolver(mcp_svc),
-        mcp_caller=_McpToolCaller(mcp_svc),
-        websearch=_build_websearch_client(),  # 未配置时返回 None。
-        websearch_quota=settings.toolgateway_websearch_quota,  # 域配额(独立分桶)
-        connector=_build_connector_gate(session),  # 未配置连接器时解析结果为 None。
-        connector_quota=settings.toolgateway_http_quota,  # 域配额(独立分桶)
-        rate_limit_per_minute=settings.tool_rate_limit_per_minute,
-        confirm_ttl_minutes=settings.tool_confirm_ttl_minutes,
-    )
 
 
 async def _mcp_tenant_or_none(
@@ -516,54 +63,10 @@ async def _mcp_tenant_or_none(
 # ── 内部面:通用工具执行回调 ──
 
 
-class ToolExecuteIn(BaseModel):
-    """Agent 面 → 控制面的工具执行回调(ADR-002:Agent 不持凭证,只传标识与文本)。"""
-
-    trace_id: str = Field(min_length=1, max_length=64)
-    tenant_key: str = Field(min_length=1, max_length=64)
-    datasource_key: str = Field(default="default", pattern=r"^[a-z][a-z0-9_]{1,63}$")
-    user_id: uuid.UUID  # 必填:工具权限点校验需要真实主体(无系统调用豁免,spec)
-    tool_name: str = Field(min_length=1, max_length=64)
-    args: dict[str, object] = {}
-    idempotency_key: str | None = Field(default=None, max_length=128)
-    # 渠道标记(审计可溯;agent 透传)
-    channel: str = Field(default="chat", max_length=24)
-
-
-class ToolExecuteOut(BaseModel):
-    """三态+确认挂起:executed(含结果)/ rejected(防御拒绝,含原因)/
-    error(执行异常)/ rate_limited(限流)/ confirm_required(写工具待确认)。"""
-
-    status: Literal["executed", "rejected", "error", "rate_limited", "confirm_required"]
-    reason: str | None = None
-    result: dict[str, object] | None = None
-    confirm_id: str | None = None
-    duration_ms: int = 0
-
-
-_OUT_STATUS: dict[str, str] = {
-    "EXECUTED": "executed",
-    "REJECTED": "rejected",
-    "ERROR": "error",
-    "RATE_LIMITED": "rate_limited",
-    "PENDING_CONFIRM": "confirm_required",
-}
-
-
-def _to_out(outcome: ToolOutcome) -> ToolExecuteOut:
-    return ToolExecuteOut(
-        status=_OUT_STATUS[outcome.status],  # type: ignore[arg-type]  # 五态全覆盖
-        reason=outcome.reason,
-        result=outcome.result,
-        confirm_id=outcome.confirm_id,
-        duration_ms=outcome.duration_ms,
-    )
-
-
 @internal_router.post("/execute", response_model=ToolExecuteOut)
 async def tool_execute(
     req: ToolExecuteIn,
-    svc: Annotated[ToolCallService, Depends(_get_service)],
+    svc: Annotated[ToolCallService, Depends(get_tool_service)],
 ) -> ToolExecuteOut:
     try:
         outcome = await svc.execute_tool(
@@ -580,24 +83,14 @@ async def tool_execute(
         raise HTTPException(status_code=404, detail="TENANT_NOT_FOUND") from None
     except TenantBindingForbidden:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
-    return _to_out(outcome)
-
-
-class ToolResolveConfirmIn(BaseModel):
-    """任务通道确认兑现载荷(graph-checkpoint;决策权威=任务域确认行,
-    本端点只做兑换与全量复校)。"""
-
-    tenant_key: str
-    user_id: uuid.UUID
-    confirm_id: str = Field(min_length=1, max_length=64)
-    decision: Literal["approve", "reject"]
+    return to_tool_execute_out(outcome)
 
 
 @internal_router.post("/resolve-confirm", response_model=ToolExecuteOut)
 async def tool_resolve_confirm(
     req: ToolResolveConfirmIn,
     session: Annotated[AsyncSession, Depends(get_session)],
-    svc: Annotated[ToolCallService, Depends(_get_service)],
+    svc: Annotated[ToolCallService, Depends(get_tool_service)],
 ) -> ToolExecuteOut:
     outcome = await svc.resolve_for_task(
         user_id=str(req.user_id),
@@ -606,38 +99,17 @@ async def tool_resolve_confirm(
         decision=req.decision,
     )
     await session.commit()
-    return _to_out(outcome)
+    return to_tool_execute_out(outcome)
 
 
 # ── 用户面:写工具人工确认 ──
-
-
-class ToolConfirmIn(BaseModel):
-    confirm_id: uuid.UUID
-    decision: Literal["confirm", "reject"]
-    session_id: uuid.UUID
-
-
-class ToolConfirmOut(BaseModel):
-    status: Literal["executed", "confirm_rejected", "confirm_expired", "rejected", "error"]
-    reason: str | None = None
-    result: dict[str, object] | None = None
-
-
-_CONFIRM_OUT_STATUS = {
-    "executed": "executed",
-    "confirm_rejected": "confirm_rejected",
-    "confirm_expired": "confirm_expired",
-    "rejected": "rejected",
-    "error": "error",
-}
 
 
 @chat_router.post("/tool-confirm", response_model=ToolConfirmOut)
 async def tool_confirm(
     req: ToolConfirmIn,
     user: Annotated[dict[str, object], Depends(current_user)],
-    svc: Annotated[ToolCallService, Depends(_get_service)],
+    svc: Annotated[ToolCallService, Depends(get_tool_service)],
     _: Annotated[None, Depends(require_perm("chat:execute"))],
 ) -> ToolConfirmOut:
     try:
@@ -654,27 +126,13 @@ async def tool_confirm(
         # 确认时 L1 复校——挂起后用户被解绑租户,拒绝执行
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
     return ToolConfirmOut(
-        status=_CONFIRM_OUT_STATUS[outcome.status],  # type: ignore[arg-type]
+        status=CONFIRM_OUT_STATUS[outcome.status],  # type: ignore[arg-type]
         reason=outcome.reason,
         result=outcome.result,
     )
 
 
 # ── 管理面:工具清单与审计查询 ──
-
-
-class ToolItemOut(BaseModel):
-    name: str
-    description: str
-    perm_code: str
-    write: bool
-    require_confirm: bool
-    enabled: bool = True  # 注册表即启用集(配置化启停随运营诉求评估)
-    server_key: str | None = None  # MCP 工具溯源(内置为 None)
-
-
-class ToolListOut(BaseModel):
-    tools: list[ToolItemOut]
 
 
 @router.get("", response_model=ToolListOut)
@@ -697,7 +155,7 @@ async def list_tools(
     # 合并租户 MCP 动态工具(溯源 server_key);租户未绑定 → 仅静态集
     tenant_id = await _mcp_tenant_or_none(user, session, x_tenant_id)
     if tenant_id is not None:
-        mcp_svc = _build_mcp_service(session)
+        mcp_svc = build_mcp_service(session)
         for e in await mcp_svc.list_dynamic_tools(tenant_id=tenant_id):
             read_only = bool(e.get("read_only"))
             items.append(
@@ -713,50 +171,6 @@ async def list_tools(
     return ToolListOut(tools=items)
 
 
-class ToolAuditItem(BaseModel):
-    id: str
-    trace_id: str
-    user_id: str
-    tenant_id: str
-    tool_name: str
-    args_digest: str | None
-    status: str
-    error_reason: str | None
-    duration_ms: int | None
-    datasource_key: str | None
-    # 域标签读面投影(存量行/内置工具为 NULL→None);可选字段,老客户端兼容
-    domain: str | None = None
-    idempotency_key: str | None
-    expires_at: datetime | None
-    created_at: datetime
-
-
-class ToolAuditPageOut(BaseModel):
-    items: list[ToolAuditItem]
-    total: int
-    page: int
-    size: int
-
-
-def _audit_item(r: dict[str, object]) -> ToolAuditItem:
-    return ToolAuditItem(
-        id=str(r["id"]),
-        trace_id=str(r["trace_id"]),
-        user_id=str(r["user_id"]),
-        tenant_id=str(r["tenant_id"]),
-        tool_name=str(r["tool_name"]),
-        args_digest=None if r["args_digest"] is None else str(r["args_digest"]),
-        status=str(r["status"]),
-        error_reason=None if r["error_reason"] is None else str(r["error_reason"]),
-        duration_ms=None if r["duration_ms"] is None else int(str(r["duration_ms"])),
-        datasource_key=None if r["datasource_key"] is None else str(r["datasource_key"]),
-        domain=None if r.get("domain") is None else str(r["domain"]),
-        idempotency_key=None if r["idempotency_key"] is None else str(r["idempotency_key"]),
-        expires_at=r["expires_at"],  # type: ignore[arg-type]  # datetime|None 直传
-        created_at=r["created_at"],  # type: ignore[arg-type]  # datetime 直传
-    )
-
-
 # ── 域治理面:清单摘要(不含凭证与白名单明细)+ 运行时启停(重启随部署清单复位)──
 
 
@@ -770,38 +184,8 @@ def _summary_ids(gw: ToolGateway | None) -> set[str]:
 )
 async def list_domains() -> list[dict[str, object]]:
     """治理面清单摘要(不含凭证与白名单明细;disabled 反映本进程运行时状态)。"""
-    gw = _get_gateway()
+    gw = _deps.get_gateway()
     return gw.summary() if gw else []
-
-
-def _sync_runtime_disabled() -> None:
-    """停用域 → 其工具从注入集与分发解析同源消失(spec 域治理面场景;
-    DOMAIN_TOOLS 反演域下工具集)。"""
-    gw = _get_gateway()
-    disabled_domains: set[str] = set()
-    if gw is not None:
-        disabled_domains = {str(d["id"]) for d in gw.summary() if bool(d.get("disabled"))}
-    registry.set_runtime_disabled(
-        frozenset(t for t, d in DOMAIN_TOOLS.items() if d in disabled_domains)
-    )
-
-
-async def load_persisted_domain_states() -> None:
-    """0044:启动装载持久停用集(lifespan 调用;测试可直调模拟重启)。
-    库为运维意图单源:装载=替换语义;无网关(清单空)静默跳过。
-    装载后同步运行时注册表(_sync_runtime_disabled,与 disable 端点同口径)——
-    否则重启后停用域的工具仍入注入集、分发仍可解析,持久化语义静默降级为
-    「执行期才被网关拒」。"""
-    gw = _get_gateway()
-    if gw is None:
-        return
-    from kongming.db import get_sessionmaker
-    from kongming.toolcall.repository import list_domain_states
-
-    async with get_sessionmaker()() as session:
-        states = await list_domain_states(session)
-    gw.apply_disabled(frozenset(d for d, dis in states.items() if dis))
-    _sync_runtime_disabled()
 
 
 @router.post("/domains/{domain_id}/disable", status_code=204)
@@ -812,11 +196,11 @@ async def disable_domain(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     """停用工具域并持久化;本进程立即生效。"""
-    gw = _get_gateway()
+    gw = _deps.get_gateway()
     if gw is None or domain_id not in _summary_ids(gw):
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     gw.disable(domain_id)
-    _sync_runtime_disabled()
+    sync_runtime_disabled()
     from kongming.toolcall.repository import upsert_domain_state
 
     await upsert_domain_state(
@@ -833,11 +217,11 @@ async def enable_domain(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     """启用工具域并持久化;本进程立即生效。"""
-    gw = _get_gateway()
+    gw = _deps.get_gateway()
     if gw is None or domain_id not in _summary_ids(gw):
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     gw.enable(domain_id)
-    _sync_runtime_disabled()
+    sync_runtime_disabled()
     from kongming.toolcall.repository import upsert_domain_state
 
     await upsert_domain_state(
@@ -875,5 +259,5 @@ async def tool_audit_page(
         end=end,
     )
     return ToolAuditPageOut(
-        items=[_audit_item(it) for it in items], total=total, page=page, size=size
+        items=[to_tool_audit_item(it) for it in items], total=total, page=page, size=size
     )

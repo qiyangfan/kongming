@@ -50,7 +50,7 @@ class _KnowledgePublicizeAdapter:
 
     async def publicize(self, *, team_id: str) -> None:
         async with self._s.begin_nested():
-            scopes = await self._repo.publicize_team_entries(team_id=team_id)
+            scopes = await self._repo.entries.publicize_team_entries(team_id=team_id)
             if not scopes:
                 return
             await self._repo.log_oper(
@@ -383,7 +383,6 @@ async def attach_resource(
             resource_id=body.resource_id,
             actor_id=str(user["sub"]),
             actor_role=role,
-            resource_creator_id=str(creator),
         )
         await session.commit()
     except TeamValidationError as e:

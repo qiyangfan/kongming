@@ -32,6 +32,7 @@ chat_router = APIRouter(prefix="/chat", tags=["chat"])
 router = APIRouter(prefix="/feedback", tags=["feedback"])
 
 # 以下类型在请求处理时用于注解和异常分支，需在运行时导入。
+from kongming.rag.adapters import TeamMembershipAdapter  # noqa: E402
 from kongming.rag.ports import EmbeddingError, EmbeddingPort, MemberTeamsReader  # noqa: E402
 from kongming.rag.repository import RagRepository  # noqa: E402
 from kongming.rag.service import RagService  # noqa: E402
@@ -41,7 +42,7 @@ def get_feedback_service(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> FeedbackService:
     """组合根:rag 客户端只服务样本闸门(embedding + ctx 失效);
-    组合形态与 chat/router.get_rag_service 同构。"""
+    组合形态与 chat/dependencies.get_rag_service 同构。"""
     from kongming.config import get_settings
     from kongming.rag.agent_callback import get_agent_rag_client
     from kongming.rag.cache import ContextCache
@@ -51,11 +52,10 @@ def get_feedback_service(
     # 仓储与缓存注入部署分词配置(未配置时缺省 simple)
     ts = get_settings().rag_fulltext_ts_config
     # 伴生:成员关系只读端口(与 rag 组合根同款适配,一实例两处消费)
-    membership = _TeamMembershipAdapter(session)
+    membership = TeamMembershipAdapter(session)
     rag = RagService(
         RagRepository(session, ts_config=ts),
         embedder=client,
-        describer=client,
         cache=ContextCache(get_redis(), ts_config=ts),
         member_teams=membership,
     )
@@ -65,19 +65,6 @@ def get_feedback_service(
             RagRepository(session, ts_config=ts), client, rag, member_teams=membership
         ),
     )
-
-
-class _TeamMembershipAdapter:
-    """伴生组合根适配器(与 rag/router 同款):成员团队集合只读窄端口,
-    实现=team 域 SqlTeamRepo 组合适配(只读消费,team 域零改动)。"""
-
-    def __init__(self, session: AsyncSession) -> None:
-        from kongming.team.repository import SqlTeamRepo
-
-        self._repo = SqlTeamRepo(session)
-
-    async def team_ids_of_user(self, user_id: str) -> list[str]:
-        return list(await self._repo.role_map(user_id=user_id))
 
 
 class _FeedbackSampleGate:
@@ -113,7 +100,7 @@ class _FeedbackSampleGate:
         visible_teams: list[str] = []
         if caller_user_id and self._member_teams is not None:
             visible_teams = sorted(await self._member_teams.team_ids_of_user(caller_user_id))
-        await self._repo.promote_feedback_sample(
+        await self._repo.samples.promote_feedback_sample(
             tenant_id=tenant_id,
             datasource_key=datasource_key,
             question=question,
@@ -124,7 +111,7 @@ class _FeedbackSampleGate:
         )
 
     async def disable(self, *, feedback_message_id: str) -> None:
-        await self._repo.disable_feedback_samples(feedback_message_id=feedback_message_id)
+        await self._repo.samples.disable_feedback_samples(feedback_message_id=feedback_message_id)
 
     async def evict(self, *, tenant_id: str, datasource_key: str) -> None:
         """晋升/停用提交后 ctx 缓存按租户+数据源精确失效。"""

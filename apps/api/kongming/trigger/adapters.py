@@ -30,39 +30,41 @@ def normalize(adapter: str, payload: dict[str, Any], event_header: str = "") -> 
     if adapter == "custom":
         return dict(payload)
     if adapter == "github":
-        event = event_header or str(payload.get("_event") or "")
-        repo = ""
-        ref = ""
-        summary = ""
-        repo_raw = payload.get("repository")
-        if isinstance(repo_raw, dict):
-            # isinstance 收窄产物键型未知,收窄键型后再取值(仅类型断言)
-            repo_d = cast("dict[str, object]", repo_raw)
-            repo = str(repo_d.get("full_name") or "")
-        if event == "push":
-            ref = str(payload.get("ref") or "")
-            commits = payload.get("commits")
-            n = len(cast("list[object]", commits)) if isinstance(commits, list) else 0
-            pusher = ""
-            if isinstance(payload.get("pusher"), dict):
-                pusher = str(cast("dict[str, object]", payload["pusher"]).get("name") or "")
-            summary = f"push {n} commits by {pusher}"
-        elif event == "pull_request":
-            pr = payload.get("pull_request")
-            if isinstance(pr, dict):
-                pr_d = cast("dict[str, object]", pr)
-                ref = str(pr_d.get("number") or "")
-                summary = f"PR #{ref} {pr_d.get('title', '')}"
-        elif event == "issues":
-            issue = payload.get("issue")
-            if isinstance(issue, dict):
-                issue_d = cast("dict[str, object]", issue)
-                ref = str(issue_d.get("number") or "")
-                summary = f"issue #{ref} {issue_d.get('title', '')}"
-        if not event:
-            raise AdapterError("缺 X-GitHub-Event 头")
-        return {"event": event, "repo": repo, "ref": ref, "summary": summary}
+        return _normalize_github(payload, event_header)
     raise AdapterError(f"未知适配器: {adapter}")
+
+
+def _as_dict(value: object) -> dict[str, object] | None:
+    """对象收窄;非对象返回 None(载荷形态容错)。"""
+    return cast("dict[str, object]", value) if isinstance(value, dict) else None
+
+
+def _github_ref_summary(event: str, payload: dict[str, Any]) -> tuple[str, str]:
+    """按事件类型取 (ref, summary);未知事件只留空提要。"""
+    if event == "push":
+        commits = payload.get("commits")
+        n = len(cast("list[object]", commits)) if isinstance(commits, list) else 0
+        pusher = (_as_dict(payload.get("pusher")) or {}).get("name") or ""
+        return str(payload.get("ref") or ""), f"push {n} commits by {pusher}"
+    inner_key = {"pull_request": "pull_request", "issues": "issue"}.get(event)
+    if inner_key is None:
+        return "", ""
+    inner = _as_dict(payload.get(inner_key))
+    if inner is None:
+        return "", ""  # 提载体缺失:无可摘要(不拼空壳前缀)
+    ref = str(inner.get("number") or "")
+    label = {"pull_request": "PR", "issues": "issue"}[event]
+    return ref, f"{label} #{ref} {inner.get('title', '')}"
+
+
+def _normalize_github(payload: dict[str, Any], event_header: str) -> dict[str, Any]:
+    """GitHub 提要:事件头优先,缺省取载荷 _event。"""
+    event = event_header or str(payload.get("_event") or "")
+    if not event:
+        raise AdapterError("缺 X-GitHub-Event 头")
+    repo = (_as_dict(payload.get("repository")) or {}).get("full_name") or ""
+    ref, summary = _github_ref_summary(event, payload)
+    return {"event": event, "repo": str(repo), "ref": ref, "summary": summary}
 
 
 def validate_cron(expr: str) -> None:

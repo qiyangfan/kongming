@@ -113,50 +113,78 @@ def endpoint_host(url: str) -> str:
     return _endpoint_host(url)
 
 
+def _positive_int(raw: object) -> bool:
+    """正整数取值(bool 是 int 子类:true 穿透校验会得到 1ms 超时/1 次配额——显式排除)。"""
+    return isinstance(raw, int) and not isinstance(raw, bool) and raw > 0
+
+
+def _clean_hosts(raw: object) -> tuple[str, ...]:
+    """白名单主机归一:非字符串/空/含路径或通配不构成精确主机,剔除。"""
+    if not isinstance(raw, list):
+        return ()
+    host_list = cast("list[object]", raw)
+    return tuple(
+        h
+        for h in (x.strip().lower() for x in host_list if isinstance(x, str))
+        if h and "/" not in h and "*" not in h
+    )
+
+
+def _entry_problems(
+    *,
+    did: str,
+    endpoint: str,
+    hosts: tuple[str, ...],
+    timeout: object,
+    quota: object,
+    taken: bool,
+) -> list[str]:
+    """单条域声明的合法性缺陷清单(空=可注册);taken=标识与已注册域冲突。"""
+    problems: list[str] = []
+    if not did:
+        problems.append("缺域标识")
+    if not endpoint:
+        problems.append("缺端点")
+    if not hosts:
+        problems.append("缺出口白名单")
+    if not _endpoint_host(endpoint):
+        problems.append("端点主机非法")
+    if not _positive_int(timeout):
+        problems.append("超时非法")
+    if not _positive_int(quota):
+        problems.append("配额非法")
+    if taken:
+        problems.append("标识冲突(后者剔除)")
+    return problems
+
+
 def load_manifest(raw: list[dict[str, object]]) -> tuple[dict[str, DomainSpec], list[str]]:
     """域清单装载(纯函数,同配置同结果):缺必填字段/白名单主机非法/标识
     冲突的域剔除并告警,其余正常注册;不抛异常(fail-closed 不裸崩)。"""
     domains: dict[str, DomainSpec] = {}
     warnings: list[str] = []
     for entry in cast("list[object]", raw):
-        entryd = cast("dict[str, object] | None", entry if isinstance(entry, dict) else None)
-        if entryd is None:
+        if not isinstance(entry, dict):
             warnings.append("toolgateway: 清单条目非对象,已剔除")
             continue
+        entryd = cast("dict[str, object]", entry)
         did = str(entryd.get("id") or "")
         endpoint = str(entryd.get("endpoint") or "")
-        hosts_raw = entryd.get("whitelist_hosts")
-        hosts: tuple[str, ...] = ()
-        if isinstance(hosts_raw, list):
-            host_list = cast("list[object]", hosts_raw)
-            # 白名单主机非法条目剔除(spec:非字符串/空/含路径或通配不构成精确主机)
-            hosts = tuple(
-                h
-                for h in (x.strip().lower() for x in host_list if isinstance(x, str))
-                if h and "/" not in h and "*" not in h
-            )
+        hosts = _clean_hosts(entryd.get("whitelist_hosts"))
         timeout = entryd.get("timeout_ms")
         quota = entryd.get("quota_per_minute")
-        redaction = entryd.get("redaction")
-        problems: list[str] = []
-        if not did:
-            problems.append("缺域标识")
-        if not endpoint:
-            problems.append("缺端点")
-        if not hosts:
-            problems.append("缺出口白名单")
-        if not _endpoint_host(endpoint):
-            problems.append("端点主机非法")
-        # bool 是 int 子类:true 穿透校验会得到 1ms 超时/1 次配额——显式排除
-        if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
-            problems.append("超时非法")
-        if not isinstance(quota, int) or isinstance(quota, bool) or quota <= 0:
-            problems.append("配额非法")
-        if did in domains:
-            problems.append("标识冲突(后者剔除)")
+        problems = _entry_problems(
+            did=did,
+            endpoint=endpoint,
+            hosts=hosts,
+            timeout=timeout,
+            quota=quota,
+            taken=did in domains,
+        )
         if problems:
             warnings.append(f"toolgateway: 域 {did or '(无名)'} 剔除——{'、'.join(problems)}")
             continue
+        redaction = entryd.get("redaction")
         domains[did] = DomainSpec(
             id=did,
             endpoint=endpoint,

@@ -2,6 +2,7 @@
 
 service 只依赖本接口;SQLAlchemy 实现在 repository.py。
 事务由 repo 自身的 commit/rollback 负责,service 不直接操作 Session。
+SystemRepo 按能力簇拆成多个协议再组合,用例仍只依赖 SystemRepo 这一个名字。
 """
 
 from __future__ import annotations
@@ -17,8 +18,8 @@ from kongming.system.models import (
 )
 
 
-class SystemRepo(Protocol):
-    # ---- 用户 ----
+class UserRepoPort(Protocol):
+    """用户管理:列表/读写/启停/软删,以及角色与租户绑定。"""
 
     async def count_users(self, keyword: str) -> int: ...
     async def list_users(self, keyword: str, limit: int, offset: int) -> list[UserListItem]: ...
@@ -68,20 +69,13 @@ class SystemRepo(Protocol):
         """覆盖式单租户绑定(管理面单选;联邦建号同构)。"""
         ...
 
-    # ---- 存在性校验(写路径领域校验的依赖) ----
+
+class RoleRepoPort(Protocol):
+    """角色管理:列表/读写删,以及权限点与部门集合绑定。"""
 
     async def roles_exist(self, role_ids: list[str]) -> list[str]:
         """返回实际存在的 id 子集(与入参比对即知缺失)。"""
         ...
-
-    async def perms_exist(self, perm_ids: list[str]) -> list[str]: ...
-    async def tenant_exists(self, tenant_id: str) -> bool: ...
-    async def dept_exists(self, dept_id: str) -> bool: ...
-    async def depts_exist(self, dept_ids: list[str]) -> list[str]:
-        """返回实际存在的 dept_id 子集(CUSTOM 集合的存在性校验,缺即 UnknownDeptId)。"""
-        ...
-
-    # ---- 角色 ----
 
     async def list_roles(self) -> list[RoleListItem]: ...
     async def get_role(self, role_id: str) -> dict[str, object] | None: ...
@@ -116,11 +110,21 @@ class SystemRepo(Protocol):
         """CUSTOM 部门集合整包替换(先删后插,与权限绑定覆盖式语义同构)。"""
         ...
 
-    # ---- 权限点 ----
 
+class PermRepoPort(Protocol):
+    """权限点:只读清单与存在性校验。"""
+
+    async def perms_exist(self, perm_ids: list[str]) -> list[str]: ...
     async def list_perms(self) -> list[PermItem]: ...
 
-    # ---- 部门 ----
+
+class DeptRepoPort(Protocol):
+    """部门管理:列表/读写删与引用检查。"""
+
+    async def dept_exists(self, dept_id: str) -> bool: ...
+    async def depts_exist(self, dept_ids: list[str]) -> list[str]:
+        """返回实际存在的 dept_id 子集(CUSTOM 集合的存在性校验,缺即 UnknownDeptId)。"""
+        ...
 
     async def list_depts(self) -> list[Dept]: ...
     async def get_dept(self, dept_id: str) -> Dept | None: ...
@@ -147,17 +151,26 @@ class SystemRepo(Protocol):
     async def dept_has_children(self, dept_id: str) -> bool: ...
     async def dept_has_active_users(self, dept_id: str) -> bool: ...
 
-    # ---- 租户(只读清单) ----
+
+class TenantAuditPort(Protocol):
+    """租户清单/存在性,以及管理面写操作的审计留痕(同事务)。"""
 
     async def list_tenants(self) -> list[TenantItem]: ...
-
-    # ---- 操作审计(管理面写操作与业务同事务留痕) ----
-
+    async def tenant_exists(self, tenant_id: str) -> bool: ...
     async def log_oper(
         self, actor_id: str, action: str, target: str | None, detail: dict[str, object]
     ) -> None: ...
 
-    # ---- 事务 ----
+
+class SystemRepo(
+    UserRepoPort,
+    RoleRepoPort,
+    PermRepoPort,
+    DeptRepoPort,
+    TenantAuditPort,
+    Protocol,
+):
+    """system 完整端口:上述能力簇的组合,外加事务控制。"""
 
     async def commit(self) -> None: ...
     async def rollback(self) -> None: ...

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.seed import seed_all
 from kongming.chat.agent_client import AgentReply, AgentUnavailable
-from kongming.chat.router import get_agent_client
+from kongming.chat.dependencies import get_agent_client
 from kongming.config import get_settings
 from kongming.main import app
 from tests.conftest import MakeUser
@@ -511,7 +511,7 @@ async def test_rejected_reserved_table_copy_neutral(
     fake_agent: dict[str, FakeAgent],
 ) -> None:
     """保留表拦截文案中性化——不责备用户(模型越界是常见成因)。"""
-    from kongming.chat.service import blocked_friendly
+    from kongming.chat.domain_errors import blocked_friendly
 
     assert blocked_friendly("RESERVED_TABLE:user_memory") == (
         "该问题涉及的数据不允许查询,请调整问法或咨询管理员"

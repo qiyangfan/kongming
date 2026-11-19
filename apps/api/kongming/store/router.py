@@ -87,8 +87,8 @@ class _StoreRunner:
         channel: str,
         definition: dict[str, Any] | None = None,
     ) -> tuple[bool, str, str]:
-        from kongming.bot.router import get_bot_service as _bot_factory
-        from kongming.chat.router import get_agent_client
+        from kongming.bot.dependencies import get_bot_service as _bot_factory
+        from kongming.chat.dependencies import get_agent_client
         from kongming.db import get_sessionmaker
 
         async with get_sessionmaker()() as s:
@@ -120,8 +120,8 @@ class _StoreToolLister:
     async def resolve_runnable(
         self, *, creator_id: str, tenant_id: str, row: dict[str, Any]
     ) -> list[dict[str, Any]]:
-        from kongming.bot.router import get_bot_service as _bot_factory
-        from kongming.chat.router import get_agent_client
+        from kongming.bot.dependencies import get_bot_service as _bot_factory
+        from kongming.chat.dependencies import get_agent_client
 
         svc = _bot_factory(self._s, get_agent_client())
         return await svc.resolve_tools(creator_id=creator_id, tenant_id=tenant_id, row=row)

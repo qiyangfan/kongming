@@ -1,6 +1,7 @@
 """billing 存储端口,用例层通过接口依赖持久化能力。
 
 PaymentChannel 通道端口(mock 先行,真实通道以同 Protocol 接入)。
+BillingRepo 按能力簇拆成四个协议再组合,用例仍只依赖 BillingRepo 这一个名字。
 """
 
 from typing import Any, Protocol
@@ -20,7 +21,9 @@ class PaymentChannel(Protocol):
     ) -> bool: ...
 
 
-class BillingRepo(Protocol):
+class BillingPolicyPort(Protocol):
+    """配额策略与套餐:策略 CRUD、套餐 CRUD 与租户绑套餐。"""
+
     async def upsert_policy(
         self,
         *,
@@ -52,6 +55,10 @@ class BillingRepo(Protocol):
 
     async def bind_plan(self, *, tenant_id: str, plan_id: str | None) -> None: ...
 
+
+class BillingCatalogPort(Protocol):
+    """配置面简表与归属校验:租户/Bot/用户/团队下拉,以及策略 scope_ref 复校。"""
+
     async def list_tenants_brief(self) -> list[dict[str, Any]]: ...
 
     async def bot_exists_in_tenant(self, *, bot_id: str, tenant_id: str) -> bool: ...
@@ -68,6 +75,10 @@ class BillingRepo(Protocol):
 
     async def bot_scope_info(self, *, bot_id: str, tenant_id: str) -> dict[str, Any] | None: ...
 
+
+class BillingUsagePort(Protocol):
+    """用量聚合:按月读取 token/调用数,供配额判定与账单明细。"""
+
     async def month_token_usage(self, *, tenant_id: str, month: str) -> int: ...
 
     async def month_call_count(self, *, tenant_id: str, month: str) -> int: ...
@@ -79,6 +90,10 @@ class BillingRepo(Protocol):
     async def month_team_token_usage(self, *, tenant_id: str, team_id: str, month: str) -> int: ...
 
     async def month_usage_by_model(self, *, tenant_id: str, month: str) -> list[dict[str, Any]]: ...
+
+
+class BillingInvoicePort(Protocol):
+    """账单与支付单:出账、账单查询,支付单状态机与核销。"""
 
     async def insert_invoice(
         self, *, tenant_id: str, period: str, usage_json: dict[str, Any], amount: int
@@ -95,8 +110,6 @@ class BillingRepo(Protocol):
     ) -> tuple[list[dict[str, Any]], int]: ...
 
     async def list_tenants_without_invoice(self, *, period: str) -> list[dict[str, Any]]: ...
-
-    # ── 支付单 ──
 
     async def insert_payment_if_pending(
         self,
@@ -129,5 +142,11 @@ class BillingRepo(Protocol):
     async def expire_payment_if_overdue(self, *, payment_id: str) -> bool: ...
 
     async def latest_payment_for_invoice(self, *, invoice_id: str) -> dict[str, Any] | None: ...
+
+
+class BillingRepo(
+    BillingPolicyPort, BillingCatalogPort, BillingUsagePort, BillingInvoicePort, Protocol
+):
+    """billing 完整端口:上述能力簇的组合,外加事务提交。"""
 
     async def commit(self) -> None: ...

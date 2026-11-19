@@ -141,6 +141,65 @@ def _schema_digest(meta: SchemaMeta | None) -> str:
     return "\n".join(lines)
 
 
+def _parse_chart(raw: object) -> dict[str, object] | None:
+    """图表声明 → 收敛后的 chart 字段;类型/坐标不完整视为无图。"""
+    if not isinstance(raw, dict):
+        return None
+    chartd = cast("dict[str, Any]", raw)
+    if str(chartd.get("type")) in _CHART_TYPES and chartd.get("x") and chartd.get("y"):
+        return {
+            "type": str(chartd.get("type")),
+            "x": str(chartd.get("x")),
+            "y": str(chartd.get("y")),
+        }
+    return None
+
+
+def _parse_leaf(lf: object, ch_id: str, j: int, seen: set[str]) -> _Leaf:
+    """叶子条目校验与收敛(id 唯一、SQL 必填);畸形直接失败。"""
+    if not isinstance(lf, dict):
+        raise ValueError("plan 叶子条目畸形")
+    lfd = cast("dict[str, Any]", lf)
+    leaf_id = str(lfd.get("id") or f"{ch_id}-{j}")
+    if leaf_id in seen:
+        raise ValueError(f"叶子 id 重复: {leaf_id}")
+    seen.add(leaf_id)
+    sql = str(lfd.get("sql") or "").strip()
+    if not sql:
+        raise ValueError(f"叶子缺 SQL: {leaf_id}")
+    return _Leaf(
+        leaf_id=leaf_id,
+        title=str(lfd.get("title") or f"小节 {j + 1}"),
+        sql=sql,
+        chapter_id=ch_id,
+        chart=_parse_chart(lfd.get("chart")),
+    )
+
+
+def _parse_chapter(ch: object, i: int, seen: set[str]) -> tuple[dict[str, Any], list[_Leaf]] | None:
+    """章节条目校验与收敛;无有效叶子返回 None。"""
+    if not isinstance(ch, dict):
+        raise ValueError("plan 章节条目畸形")
+    chd = cast("dict[str, Any]", ch)
+    ch_id = str(chd.get("id") or f"c{i}")
+    if ch_id in seen:  # id 重复直接失败(fail-closed)
+        raise ValueError(f"章节 id 重复: {ch_id}")
+    seen.add(ch_id)
+    leaves: list[_Leaf] = []
+    raw_children = chd.get("children")
+    if isinstance(raw_children, list):
+        for j, lf in enumerate(cast("list[object]", raw_children)):
+            # 形态校验先于数量护栏:超限之后的畸形条目仍须 fail-closed
+            if not isinstance(lf, dict):
+                raise ValueError("plan 叶子条目畸形")
+            if len(leaves) >= 6:  # 单章叶子护栏
+                break
+            leaves.append(_parse_leaf(cast("dict[str, object]", lf), ch_id, j, seen))
+    if not leaves:
+        return None
+    return {"id": ch_id, "title": str(chd.get("title") or f"第 {i + 1} 章")}, leaves
+
+
 def _flatten_plan(plan: dict[str, Any]) -> tuple[str, list[tuple[dict[str, Any], list[_Leaf]]]]:
     """plan 载荷 → (标题, [(章 dict, 叶列表)]);规模护栏与字段收敛在此收口。"""
     title = str(plan.get("title") or "").strip()
@@ -150,59 +209,9 @@ def _flatten_plan(plan: dict[str, Any]) -> tuple[str, list[tuple[dict[str, Any],
     chapters: list[tuple[dict[str, Any], list[_Leaf]]] = []
     seen: set[str] = set()
     for i, ch in enumerate(cast("list[object]", raw_sections[:_MAX_CHAPTERS])):
-        if not isinstance(ch, dict):
-            raise ValueError("plan 章节条目畸形")
-        chd = cast("dict[str, Any]", ch)
-        ch_id = str(chd.get("id") or f"c{i}")
-        if ch_id in seen:  # id 重复直接失败(fail-closed)
-            raise ValueError(f"章节 id 重复: {ch_id}")
-        seen.add(ch_id)
-        leaves: list[_Leaf] = []
-        raw_children = chd.get("children")
-        if isinstance(raw_children, list):
-            for j, lf in enumerate(cast("list[object]", raw_children)):
-                if not isinstance(lf, dict):
-                    raise ValueError("plan 叶子条目畸形")
-                lfd = cast("dict[str, Any]", lf)
-                if len(leaves) >= 6:  # 单章叶子护栏
-                    break
-                leaf_id = str(lfd.get("id") or f"{ch_id}-{j}")
-                if leaf_id in seen:
-                    raise ValueError(f"叶子 id 重复: {leaf_id}")
-                seen.add(leaf_id)
-                sql = str(lfd.get("sql") or "").strip()
-                if not sql:
-                    raise ValueError(f"叶子缺 SQL: {leaf_id}")
-                chart_raw = lfd.get("chart")
-                chart: dict[str, object] | None = None
-                if isinstance(chart_raw, dict):
-                    chartd = cast("dict[str, Any]", chart_raw)
-                    if (
-                        str(chartd.get("type")) in _CHART_TYPES
-                        and chartd.get("x")
-                        and chartd.get("y")
-                    ):
-                        chart = {
-                            "type": str(chartd.get("type")),
-                            "x": str(chartd.get("x")),
-                            "y": str(chartd.get("y")),
-                        }
-                leaves.append(
-                    _Leaf(
-                        leaf_id=leaf_id,
-                        title=str(lfd.get("title") or f"小节 {j + 1}"),
-                        sql=sql,
-                        chapter_id=ch_id,
-                        chart=chart,
-                    )
-                )
-        if leaves:
-            chapters.append(
-                (
-                    {"id": ch_id, "title": str(chd.get("title") or f"第 {i + 1} 章")},
-                    leaves,
-                )
-            )
+        chapter = _parse_chapter(ch, i, seen)
+        if chapter is not None:
+            chapters.append(chapter)
     if not chapters:
         raise ValueError("plan 无有效章节(章节必须含叶子)")
     return title, chapters
@@ -267,6 +276,36 @@ class ReportOrchestrator:
 
     # ── 管线 ──
 
+    async def _plan(
+        self,
+        schema: SchemaMeta | None,
+        instruction: str,
+        trace_id: str,
+        tenant_key: str,
+        datasource_key: str,
+    ) -> tuple[str, list[tuple[dict[str, Any], list[_Leaf]]]]:
+        """调模型产出章节规划;载荷显式标题优先于模型标题。"""
+        context = str(self._payload.get("context_digest") or "")
+        context_block = (
+            rp.CONTEXT_BLOCK_TEMPLATE.format(context_digest=context[:4000]) if context else ""
+        )
+        plan_raw = await self._llm.chat(
+            rp.PLAN_SYSTEM_PROMPT,
+            rp.PLAN_USER_TEMPLATE.format(
+                instruction=instruction,
+                datasource_key=datasource_key,
+                schema_digest=_schema_digest(schema),
+                context_block=context_block,
+            ),
+            temperature=0.2,
+            trace_id=trace_id,
+            tenant_key=tenant_key,
+        )
+        title, chapters = _flatten_plan(_extract_json(plan_raw))
+        if str(self._payload.get("title") or "").strip():
+            title = str(self._payload["title"])  # 发起方显式标题优先
+        return title, chapters
+
     async def _run_inner(self) -> dict[str, object]:
         report_id = str(self._payload.get("report_id") or "")
         trace_id = str(self._payload.get("trace_id") or "")
@@ -278,28 +317,11 @@ class ReportOrchestrator:
         # 1) 规划
         await self._progress(report_id, "PLANNING")
         schema = await self._api.fetch_schema(tenant_key=tenant_key, datasource_key=datasource_key)
-        digest = _schema_digest(schema)
-        context = str(self._payload.get("context_digest") or "")
-        context_block = (
-            rp.CONTEXT_BLOCK_TEMPLATE.format(context_digest=context[:4000]) if context else ""
-        )
         if not self._budget.spend_call():
             return self._error_payload("预算耗尽:规划未能启动")
-        plan_raw = await self._llm.chat(
-            rp.PLAN_SYSTEM_PROMPT,
-            rp.PLAN_USER_TEMPLATE.format(
-                instruction=instruction,
-                datasource_key=datasource_key,
-                schema_digest=digest,
-                context_block=context_block,
-            ),
-            temperature=0.2,
-            trace_id=trace_id,
-            tenant_key=tenant_key,
+        title, chapters = await self._plan(
+            schema, instruction, trace_id, tenant_key, datasource_key
         )
-        title, chapters = _flatten_plan(_extract_json(plan_raw))
-        if str(self._payload.get("title") or "").strip():
-            title = str(self._payload["title"])  # 发起方显式标题优先
         self._title, self._chapters = title, chapters  # 半成品态留存(中途失败保章节)
 
         # 2) 逐叶取数(防御拒绝不绕道;语义修复至多一次,修正稿重过全量防御)
@@ -315,7 +337,7 @@ class ReportOrchestrator:
                 tenant_key=tenant_key,
                 datasource_key=datasource_key,
                 user_id=user_id,
-                digest=digest,
+                digest=_schema_digest(schema),
             )
 
         # 3) 逐章撰写(失败/未完成叶不由 LLM 撰写——确定性如实标注)

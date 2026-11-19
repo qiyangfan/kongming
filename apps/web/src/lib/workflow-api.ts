@@ -7,7 +7,7 @@ export type WorkflowItem = components["schemas"]["WorkflowDefOut"];
 export type WorkflowRunItem = components["schemas"]["WorkflowRunItemOut"];
 
 /** node_runs 契约为自由 JSON(嵌套深),渲染层经本助手窄化(单点)。 */
-export interface WorkflowNodeRunView {
+interface WorkflowNodeRunView {
   node_id: string;
   status: string;
   error?: string;

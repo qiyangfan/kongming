@@ -153,6 +153,37 @@ def test_policy_classify_and_failure_reason() -> None:
 # ── 执行器:真实 TCP 存根(请求头/报文可断言) ──
 
 
+def _read_request(conn: socket.socket) -> tuple[str, str]:
+    """读到首个空行(头)并按 Content-Length 补齐体;返回 (头文本, 体文本)。"""
+    data = b""
+    while b"\r\n\r\n" not in data:
+        chunk = conn.recv(65536)
+        if not chunk:
+            break
+        data += chunk
+    head, _, rest = data.partition(b"\r\n\r\n")
+    headers = head.decode("utf-8", "replace")
+    length = 0
+    for line in headers.split("\r\n"):
+        if line.lower().startswith("content-length:"):
+            length = int(line.split(":", 1)[1].strip() or "0")
+    while len(rest) < length:
+        chunk = conn.recv(65536)
+        if not chunk:
+            break
+        rest += chunk
+    return headers, rest.decode("utf-8", "replace")
+
+
+def _scripted_response(
+    responds: list[bytes | None] | None, respond: bytes, nth: int
+) -> bytes | None:
+    """按连接序取响应剧本(越界回落最后一项);无剧本时用固定响应。"""
+    if responds is None:
+        return respond
+    return responds[min(nth - 1, len(responds) - 1)]
+
+
 class _RecordingStub:
     """TCP 存根包装:记录收到的请求行/头/体,按剧本响应。"""
 
@@ -167,43 +198,22 @@ class _RecordingStub:
         None=accept 后立即关连——连接层未送达的定点触发,无死端口竞态)。
         delay:响应前滞留秒数(读超时定点触发)。"""
         self.seen: list[dict[str, str]] = []
-        outer = self
 
-        def handler(conn: socket.socket, _nth: int) -> None:
-            data = b""
-            while b"\r\n\r\n" not in data:
-                chunk = conn.recv(65536)
-                if not chunk:
-                    break
-                data += chunk
-            head, _, rest = data.partition(b"\r\n\r\n")
-            headers = head.decode("utf-8", "replace")
-            length = 0
-            for line in headers.split("\r\n"):
-                if line.lower().startswith("content-length:"):
-                    length = int(line.split(":", 1)[1].strip() or "0")
-            while len(rest) < length:
-                chunk = conn.recv(65536)
-                if not chunk:
-                    break
-                rest += chunk
-            outer.seen.append(
+        def handler(conn: socket.socket, nth: int) -> None:
+            headers, body = _read_request(conn)
+            self.seen.append(
                 {
                     "request_line": headers.split("\r\n")[0],
                     "headers": headers,
-                    "body": rest.decode("utf-8", "replace"),
+                    "body": body,
                 }
             )
             if delay > 0:
                 time.sleep(delay)
-            if responds is not None:
-                idx = min(_nth - 1, len(responds) - 1)
-                scripted = responds[idx]
-                if scripted is None:
-                    return  # accept 后关连:客户端按连接层未送达归类
-                conn.sendall(scripted)
-            else:
-                conn.sendall(respond)
+            scripted = _scripted_response(responds, respond, nth)
+            if scripted is None:
+                return  # accept 后关连:客户端按连接层未送达归类
+            conn.sendall(scripted)
 
         self.stub = _Stub(handler)
 
@@ -794,7 +804,7 @@ async def test_websearch_domain_quota_limited(
     """websearch 域配额第二维度:窗口内第二次调用即 RATE_LIMITED(域配额
     文案),不触达执行器;观察形态 = count+检索卡。"""
     from kongming.config import get_settings
-    from kongming.toolcall import router as router_mod
+    from kongming.toolcall import dependencies as router_mod
     from tests.tool_helpers import _mk_tenant, _req, _user_with_tools
 
     registry = restore_registry
@@ -848,7 +858,7 @@ async def test_websearch_unregistered_zero_aware(
 async def test_websearch_client_failure_mapping() -> None:
     """端口适配层:网关非 executed(拒绝/错误/限流)一律收敛 WebSearchError
     (分发兜底 ERROR+审计,不裸崩)。"""
-    from kongming.toolcall.router import _GatewayWebSearchClient
+    from kongming.toolcall.adapters import GatewayWebSearchClient as _GatewayWebSearchClient
 
     class _RejectingGateway:
         async def execute(self, **kw: object) -> dict[str, object]:
@@ -862,22 +872,22 @@ def test_build_gateway_composition_shapes(monkeypatch: Any) -> None:
     """组合根形态:全缺=无网关;websearch-only 独立装配(declared 只认装配,
     不随停用翻转——端口绑定与治理态解耦)。"""
     from kongming.config import get_settings
-    from kongming.toolcall import router as router_mod
+    from kongming.toolcall import dependencies as router_mod
 
     s = get_settings()
     monkeypatch.setattr(s, "websearch_provider", "")
     monkeypatch.setattr(s, "websearch_api_key", "")
-    router_mod._get_gateway.cache_clear()
+    router_mod.get_gateway.cache_clear()
     try:
-        assert router_mod._build_gateway() is None  # 全缺=无网关(既有路径)
+        assert router_mod.build_gateway() is None  # 全缺=无网关(既有路径)
         # websearch-only
         monkeypatch.setattr(s, "websearch_provider", "tavily")
         monkeypatch.setattr(s, "websearch_api_key", "k")
-        gw = router_mod._build_gateway()
+        gw = router_mod.build_gateway()
         assert gw is not None
         assert gw.declared("websearch")
     finally:
-        router_mod._get_gateway.cache_clear()
+        router_mod.get_gateway.cache_clear()
 
 
 # ── dev 告警降级与空结果展示 ──
@@ -937,7 +947,7 @@ async def test_websearch_empty_result_honest_observation(
     restore_registry: Any,
 ) -> None:
     """空结果如实表达(spec SHALL):观察 = count=0 + 空表,不编造命中。"""
-    from kongming.toolcall import router as router_mod
+    from kongming.toolcall import dependencies as router_mod
     from tests.tool_helpers import _mk_tenant, _req, _user_with_tools
 
     registry = restore_registry

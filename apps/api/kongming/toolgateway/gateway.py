@@ -8,6 +8,7 @@
 
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 import httpx
@@ -24,6 +25,23 @@ log = logging.getLogger(__name__)
 
 # 域执行器签名:单次出站(url/payload/timeout 由切面给定);返回已解析响应体
 Executor = Callable[..., Awaitable[object]]
+
+
+@dataclass(frozen=True)
+class _DomainService:
+    """单个域的出站部件与运行时停用态。"""
+
+    spec: DomainSpec
+    policy: DomainPolicy
+    executor: Executor
+    disabled: bool
+
+    def rejection(self, args: dict[str, object]) -> str | None:
+        """出口白名单与参数校验;返回拒绝原因或 None。"""
+        host = urlsplit(self.spec.endpoint).hostname or ""
+        if not self.policy.exit_host_allowed(host):
+            return f"policy: 出口主机未命中白名单({self.spec.id})"
+        return self.policy.validate_args(args)
 
 
 class ToolGateway:
@@ -112,51 +130,103 @@ class ToolGateway:
     ) -> dict[str, object]:
         """域工具执行:返回既有分发形态的结构化观察
         (status ∈ executed/rejected/error + result/reason)。"""
+        domain_svc = self._lookup(domain)
+        # 未装配与已停用同形:拒绝并按策略分类落审计(由调用方 L5 承担)
+        if domain_svc is None or domain_svc.disabled:
+            return {"status": "rejected", "reason": f"policy: 域 {domain} 不可用"}
+        rejection = domain_svc.rejection(args)
+        if rejection is not None:
+            return {"status": "rejected", "reason": rejection}
+
+        return await _deliver(domain_svc, args, trace_id=trace_id)
+
+    def _lookup(self, domain: str) -> _DomainService | None:
+        """解析域的装配部件;缺清单/策略器/执行器或已停用返回 None。"""
         policy = self._policies.get(domain)
         spec = self._domains.get(domain)
         executor = self._domain_executors.get(domain) or self._executor
-        if domain in self._disabled or spec is None or policy is None or executor is None:
-            # 与「域从未存在」同形:拒绝并按策略分类落审计(由调用方 L5 承担)
-            return {"status": "rejected", "reason": f"policy: 域 {domain} 不可用"}
-        exit_check = policy.exit_host_allowed
-        host = urlsplit(spec.endpoint).hostname or ""
-        if not exit_check(host):
-            return {"status": "rejected", "reason": f"policy: 出口主机未命中白名单({domain})"}
-        validate = policy.validate_args
-        invalid = validate(args)
-        if invalid:
-            return {"status": "rejected", "reason": invalid}
+        if spec is None or policy is None or executor is None:
+            return None
+        return _DomainService(spec, policy, executor, disabled=domain in self._disabled)
 
-        url = spec.endpoint
-        timeout_s = spec.timeout_ms / 1000
-        for attempt in (1, 2):
-            delivered = False
-            exc: Exception | None = None
-            response: object = None
-            try:
-                response = await executor(url=url, payload=dict(args), timeout_s=timeout_s)
-                delivered = True
-            except Exception as e:  # noqa: BLE001 —— 分类收敛,不裸抛
-                exc = e
-                delivered = _was_delivered(e)
-            verdict = policy.classify(exc, delivered=delivered)
-            if verdict == RetryClass.OK:
-                redact = policy.redact
-                return {"status": "executed", "result": redact(response)}
-            # UNDELIVERED(连接层未送达):重试至多一次(切面单点承担);
-            # PROTOCOL(已送达)立即收口不重试——重试判定只认分类,不再进下一轮
-            if verdict != RetryClass.UNDELIVERED or attempt == 2:
-                # 域可声明 failure_reason(迁移零漂移文案);缺省走安全通用文案
-                fr = getattr(policy, "failure_reason", None)
-                reason = fr(verdict, exc) if fr else _safe_reason(domain, verdict, exc)
-                return {"status": "error", "reason": reason}
-            log.warning(
-                "toolgateway 域 %s 连接类失败,重试一次: trace=%s err=%s",
-                domain,
-                trace_id,
-                type(exc).__name__,
-            )
-        raise RuntimeError("unreachable")  # pragma: no cover —— 循环必经 return
+
+async def _deliver(
+    domain_svc: _DomainService, args: dict[str, object], *, trace_id: str
+) -> dict[str, object]:
+    """出站执行:未送达至多重试一次(切面单点承担),其余分类立即收口。"""
+    for attempt in (1, 2):
+        outcome = await _attempt(
+            domain_svc.executor,
+            domain_svc.policy,
+            args,
+            context=_AttemptContext(
+                url=domain_svc.spec.endpoint,
+                timeout_s=domain_svc.spec.timeout_ms / 1000,
+                domain=domain_svc.spec.id,
+                trace_id=trace_id,
+                final=attempt == 2,
+            ),
+        )
+        if outcome.result is not None:
+            return outcome.result
+        if outcome.exhausted:
+            break
+    raise RuntimeError("unreachable")  # pragma: no cover —— 循环必经 return
+
+
+@dataclass(frozen=True)
+class _AttemptContext:
+    """单次出站的固定参数与所处轮次。"""
+
+    url: str
+    timeout_s: float
+    domain: str
+    trace_id: str
+    final: bool  # 是否为最后一次尝试(未送达也不再重试)
+
+
+@dataclass(frozen=True)
+class _AttemptOutcome:
+    """单次出站结果:已收口的观察,或需继续重试的标记。"""
+
+    result: dict[str, object] | None
+    exhausted: bool
+
+
+async def _attempt(
+    executor: Executor,
+    policy: DomainPolicy,
+    args: dict[str, object],
+    *,
+    context: _AttemptContext,
+) -> _AttemptOutcome:
+    """单次出站并分类;OK 与各类失败收口返回观察,未送达且可重试返回空结果。"""
+    delivered = False
+    exc: Exception | None = None
+    response: object = None
+    try:
+        response = await executor(url=context.url, payload=dict(args), timeout_s=context.timeout_s)
+        delivered = True
+    except Exception as e:  # noqa: BLE001 —— 分类收敛,不裸抛
+        exc = e
+        delivered = _was_delivered(e)
+    verdict = policy.classify(exc, delivered=delivered)
+    if verdict == RetryClass.OK:
+        return _AttemptOutcome({"status": "executed", "result": policy.redact(response)}, True)
+    # UNDELIVERED(连接层未送达):重试至多一次(切面单点承担);
+    # PROTOCOL(已送达)立即收口不重试——重试判定只认分类,不再进下一轮
+    if verdict != RetryClass.UNDELIVERED or context.final:
+        # 域可声明 failure_reason(迁移零漂移文案);缺省走安全通用文案
+        fr = getattr(policy, "failure_reason", None)
+        reason = fr(verdict, exc) if fr else _safe_reason(context.domain, verdict, exc)
+        return _AttemptOutcome({"status": "error", "reason": reason}, True)
+    log.warning(
+        "toolgateway 域 %s 连接类失败,重试一次: trace=%s err=%s",
+        context.domain,
+        context.trace_id,
+        type(exc).__name__,
+    )
+    return _AttemptOutcome(None, False)
 
 
 def _was_delivered(exc: Exception) -> bool:
@@ -182,13 +252,8 @@ def _was_delivered(exc: Exception) -> bool:
         ),
     ):
         return False
-    if isinstance(exc, httpx.TimeoutException):
-        return True  # 读超时:已送达
-    if isinstance(exc, httpx.HTTPStatusError):
-        return True  # 已取得响应
-    if isinstance(exc, (ValueError, TypeError)):
-        return True  # 报文畸形:已取得响应
-    return False
+    # 读超时/已取得响应(含报文畸形)均视为已送达
+    return isinstance(exc, (httpx.TimeoutException, httpx.HTTPStatusError, ValueError, TypeError))
 
 
 def _safe_reason(domain: str, verdict: RetryClass, exc: Exception | None) -> str:

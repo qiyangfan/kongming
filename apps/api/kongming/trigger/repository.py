@@ -1,4 +1,8 @@
-"""trigger 存储:sys_trigger_definition/sys_trigger_run。"""
+"""trigger 存储:sys_trigger_definition/sys_trigger_run。
+
+方法按能力簇拆入 mixin,SqlTriggerRepo 只做组合;各 mixin 通过 _TriggerRepoBase
+共享会话。
+"""
 
 import datetime as dt
 import json
@@ -18,9 +22,15 @@ def _ts(v: Any) -> dt.datetime | None:
     return dt.datetime.fromisoformat(str(v))
 
 
-class SqlTriggerRepo:
+class _TriggerRepoBase:
+    """会话持有者,各能力 mixin 经它共享同一事务。"""
+
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
+
+
+class _TriggerDefMixin(_TriggerRepoBase):
+    """触发器定义管理。"""
 
     async def create(self, **kw: Any) -> str:
         rid = str(uuid7())
@@ -215,6 +225,10 @@ class SqlTriggerRepo:
         )
         return dict(row) if row else None
 
+
+class _TriggerRunMixin(_TriggerRepoBase):
+    """运行记录:cron 到期扫描、run 落库与查询。"""
+
     async def list_due_cron(self, *, now_iso: str) -> list[dict[str, Any]]:
         rows = (
             (
@@ -231,6 +245,118 @@ class SqlTriggerRepo:
             .all()
         )
         return [dict(r) for r in rows]
+
+    async def mark_fired(
+        self, *, trigger_id: str, last_fired_iso: str, next_fire_iso: str | None
+    ) -> None:
+        await self._s.execute(
+            text(
+                "UPDATE public.sys_trigger_definition"
+                " SET last_fired_at=CAST(:lf AS timestamptz),"
+                " next_fire_at=CAST(:nf AS timestamptz), updated_at=now()"
+                " WHERE id=CAST(:i AS uuid)"
+            ),
+            {"lf": _ts(last_fired_iso), "nf": _ts(next_fire_iso), "i": trigger_id},
+        )
+
+    async def insert_run(
+        self,
+        *,
+        tenant_id: str,
+        trigger_id: str,
+        status: str,
+        error: str,
+        duration_ms: int,
+        target_run_ref: str,
+        attempt: int = 1,
+        retry_of_run_id: str | None = None,
+        next_retry_at: Any | None = None,
+        summary: str = "",
+    ) -> str:
+        rid = str(uuid7())
+        await self._s.execute(
+            text(
+                "INSERT INTO public.sys_trigger_run"
+                " (id, tenant_id, trigger_id, status, error, duration_ms, target_run_ref,"
+                "  retry_of_run_id, attempt, next_retry_at, summary)"
+                " VALUES (:i, CAST(:t AS uuid), CAST(:g AS uuid), :st, :e, :d, :ref,"
+                "         CAST(:rof AS uuid), :at, CAST(:nra AS timestamptz), :sum)"
+            ),
+            {
+                "i": rid,
+                "t": tenant_id,
+                "g": trigger_id,
+                "st": status,
+                "e": error[:2000],
+                "d": duration_ms,
+                "ref": target_run_ref,
+                "rof": retry_of_run_id,
+                "at": attempt,
+                "nra": _ts(next_retry_at),
+                "sum": summary,
+            },
+        )
+        return rid
+
+    async def get_run(self, *, run_id: str) -> dict[str, Any] | None:
+        row = (
+            (
+                await self._s.execute(
+                    text("SELECT * FROM public.sys_trigger_run WHERE id=CAST(:i AS uuid)"),
+                    {"i": run_id},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row else None
+
+    async def list_due_retries(self, *, now_iso: str) -> list[dict[str, Any]]:
+        """到期挂起重试:PENDING+next_retry_at 到期;部分索引覆盖。"""
+        rows = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT * FROM public.sys_trigger_run"
+                        " WHERE status='PENDING' AND next_retry_at IS NOT NULL"
+                        " AND next_retry_at <= CAST(:now AS timestamptz)"
+                        " ORDER BY next_retry_at, id"
+                    ),
+                    {"now": _ts(now_iso)},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return [dict(r) for r in rows]
+
+    async def latest_success_run_for_thread(
+        self, *, trigger_id: str, thread_key: str
+    ) -> dict[str, Any] | None:
+        """同线程键的最新成功 run(线程去重判定;summary 为 JSON 串,
+        非对象形态(旧行/空)经 CASE 守卫不参与匹配,不炸 cast)。"""
+        row = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT id, summary, target_run_ref, created_at"
+                        " FROM public.sys_trigger_run"
+                        " WHERE trigger_id=CAST(:t AS uuid) AND status='SUCCESS'"
+                        "   AND CASE WHEN summary LIKE '{%'"
+                        "       THEN summary::jsonb->>'thread_key' END = :tk"
+                        " ORDER BY created_at DESC LIMIT 1"
+                    ),
+                    {"t": trigger_id, "tk": thread_key},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row else None
+
+
+class _TriggerEmailMixin(_TriggerRepoBase):
+    """邮件入站:到期扫描与 UID 游标。"""
 
     async def list_due_emails(self, *, now_iso: str) -> list[dict[str, Any]]:
         """到期邮件触发器:轮询间隔即 next_fire_at 节流,独立于 cron
@@ -289,113 +415,9 @@ class SqlTriggerRepo:
             },
         )
 
-    async def mark_fired(
-        self, *, trigger_id: str, last_fired_iso: str, next_fire_iso: str | None
-    ) -> None:
-        await self._s.execute(
-            text(
-                "UPDATE public.sys_trigger_definition"
-                " SET last_fired_at=CAST(:lf AS timestamptz),"
-                " next_fire_at=CAST(:nf AS timestamptz), updated_at=now()"
-                " WHERE id=CAST(:i AS uuid)"
-            ),
-            {"lf": _ts(last_fired_iso), "nf": _ts(next_fire_iso), "i": trigger_id},
-        )
 
-    async def insert_run(
-        self,
-        *,
-        tenant_id: str,
-        trigger_id: str,
-        status: str,
-        error: str,
-        duration_ms: int,
-        target_run_ref: str,
-        attempt: int = 1,
-        retry_of_run_id: str | None = None,
-        next_retry_at: Any | None = None,
-        summary: str = "",
-    ) -> str:
-        rid = str(uuid7())
-        await self._s.execute(
-            text(
-                "INSERT INTO public.sys_trigger_run"
-                " (id, tenant_id, trigger_id, status, error, duration_ms, target_run_ref,"
-                "  retry_of_run_id, attempt, next_retry_at, summary)"
-                " VALUES (:i, CAST(:t AS uuid), CAST(:g AS uuid), :st, :e, :d, :ref,"
-                "         CAST(:rof AS uuid), :at, CAST(:nra AS timestamptz), :sum)"
-            ),
-            {
-                "i": rid,
-                "t": tenant_id,
-                "g": trigger_id,
-                "st": status,
-                "e": error[:2000],
-                "d": duration_ms,
-                "ref": target_run_ref,
-                "rof": retry_of_run_id,
-                "at": attempt,
-                "nra": _ts(next_retry_at),
-                "sum": summary,
-            },
-        )
-        return rid
-
-    async def latest_success_run_for_thread(
-        self, *, trigger_id: str, thread_key: str
-    ) -> dict[str, Any] | None:
-        """同线程键的最新成功 run(线程去重判定;summary 为 JSON 串,
-        非对象形态(旧行/空)经 CASE 守卫不参与匹配,不炸 cast)。"""
-        row = (
-            (
-                await self._s.execute(
-                    text(
-                        "SELECT id, summary, target_run_ref, created_at"
-                        " FROM public.sys_trigger_run"
-                        " WHERE trigger_id=CAST(:t AS uuid) AND status='SUCCESS'"
-                        "   AND CASE WHEN summary LIKE '{%'"
-                        "       THEN summary::jsonb->>'thread_key' END = :tk"
-                        " ORDER BY created_at DESC LIMIT 1"
-                    ),
-                    {"t": trigger_id, "tk": thread_key},
-                )
-            )
-            .mappings()
-            .first()
-        )
-        return dict(row) if row else None
-
-    async def get_run(self, *, run_id: str) -> dict[str, Any] | None:
-        row = (
-            (
-                await self._s.execute(
-                    text("SELECT * FROM public.sys_trigger_run WHERE id=CAST(:i AS uuid)"),
-                    {"i": run_id},
-                )
-            )
-            .mappings()
-            .first()
-        )
-        return dict(row) if row else None
-
-    async def list_due_retries(self, *, now_iso: str) -> list[dict[str, Any]]:
-        """到期挂起重试:PENDING+next_retry_at 到期;部分索引覆盖。"""
-        rows = (
-            (
-                await self._s.execute(
-                    text(
-                        "SELECT * FROM public.sys_trigger_run"
-                        " WHERE status='PENDING' AND next_retry_at IS NOT NULL"
-                        " AND next_retry_at <= CAST(:now AS timestamptz)"
-                        " ORDER BY next_retry_at, id"
-                    ),
-                    {"now": _ts(now_iso)},
-                )
-            )
-            .mappings()
-            .all()
-        )
-        return [dict(r) for r in rows]
+class _TriggerRunResultMixin(_TriggerRepoBase):
+    """重试行落定与 run 分页。"""
 
     async def update_run_terminal(
         self,
@@ -478,6 +500,15 @@ class SqlTriggerRepo:
             .all()
         )
         return total, [dict(r) for r in rows]
+
+
+class SqlTriggerRepo(
+    _TriggerDefMixin,
+    _TriggerRunMixin,
+    _TriggerEmailMixin,
+    _TriggerRunResultMixin,
+):
+    """trigger 仓储组合:各能力簇 mixin 拼接,自身只保留事务提交。"""
 
     async def commit(self) -> None:
         await self._s.commit()

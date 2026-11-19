@@ -21,7 +21,7 @@ pytestmark = pytest.mark.usefixtures("fake_agent")
 @pytest.fixture
 def fake_agent(monkeypatch: pytest.MonkeyPatch):
     """构造返回可用向量服务的 Agent 替身，供纠错样本晋升测试使用。"""
-    from kongming.chat.router import get_agent_client
+    from kongming.chat.dependencies import get_agent_client
     from kongming.main import app
     from kongming.rag.agent_callback import AgentRagClient
     from tests.test_chat_stream import StreamFakeAgent
@@ -314,7 +314,7 @@ async def test_same_question_two_sources_coexist(
     # 执行样本(通道直插,同问句)
     async with session:
         repo = RagRepository(session)
-        await repo.insert_history(
+        await repo.samples.insert_history(
             tenant_id=tid,
             datasource_key="default",
             question="库存大于 5 的商品有几种",
@@ -322,7 +322,7 @@ async def test_same_question_two_sources_coexist(
             embedding=None,
         )
         # 反馈样本(通道晋升,同问句不同 SQL)
-        await repo.promote_feedback_sample(
+        await repo.samples.promote_feedback_sample(
             tenant_id=tid,
             datasource_key="default",
             question="库存大于 5 的商品有几种",
@@ -347,24 +347,16 @@ async def test_same_question_two_sources_coexist(
     assert [r["source_type"] for r in rows] == ["EXECUTION", "FEEDBACK"]
 
 
-async def test_recall_prefers_feedback_sample(
-    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """召回对同问句候选去重——优先 ADOPTED 反馈样本,无则执行样本。"""
-    from kongming.auth.seed import seed_all
-    from kongming.config import get_settings
+def _build_recall_repo(tid: str, question: str) -> object:
+    """召回替身:返回同问句的执行/反馈双样本,其余数据源为空。"""
     from kongming.rag.models import HistorySample
-    from kongming.rag.service import RagService
 
-    await seed_all(session, get_settings())
-    tid = await _tid(session)
-    question = "库存大于 5 的商品有几种"
     candidates = [
         HistorySample(question=question, sql_text="EXEC-SQL", source_type="EXECUTION"),
         HistorySample(question=question, sql_text="FEEDBACK-SQL", source_type="FEEDBACK"),
     ]
 
-    class _Repo:
+    class _Recall:
         async def recall_history(self, *_a: object, **_kw: object) -> list[HistorySample]:
             return candidates
 
@@ -377,14 +369,26 @@ async def test_recall_prefers_feedback_sample(
         async def recall_fulltext(self, *_a: object, **_kw: object) -> list[object]:
             return []
 
+        async def fetch_entries(self, *_a: object, **_kw: object) -> list[object]:
+            return []
+
+    class _Tenant:
         async def tenant_id_by_key(self, tenant_key: str) -> str:
             return tid
 
         async def datasource_usable(self, *_a: object, **_kw: object) -> bool:
             return True
 
-        async def fetch_entries(self, *_a: object, **_kw: object) -> list[object]:
-            return []
+    class _Repo:
+        def __init__(self) -> None:
+            self.recall = _Recall()
+            self.tenant = _Tenant()
+
+    return _Repo()
+
+
+def _build_recall_cache() -> object:
+    """缓存替身:读写均为空操作(不命中缓存)。"""
 
     class _Cache:
         async def get(self, *_a: object, **_kw: object) -> None:
@@ -393,11 +397,36 @@ async def test_recall_prefers_feedback_sample(
         async def set(self, *_a: object, **_kw: object) -> None:
             return None
 
+    return _Cache()
+
+
+def _build_recall_embedder() -> object:
+    """向量替身:固定维度假向量,不触发真实 embedding 调用。"""
+
     class _Embedder:
         async def embed(self, texts: list[str]) -> list[list[float]]:
             return [[0.1] * 4 for _ in texts]
 
-    svc = RagService(_Repo(), embedder=_Embedder(), describer=None, cache=_Cache())  # type: ignore[arg-type]
+    return _Embedder()
+
+
+async def test_recall_prefers_feedback_sample(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """召回对同问句候选去重——优先 ADOPTED 反馈样本,无则执行样本。"""
+    from kongming.auth.seed import seed_all
+    from kongming.config import get_settings
+    from kongming.rag.service import RagService
+
+    await seed_all(session, get_settings())
+    tid = await _tid(session)
+    question = "库存大于 5 的商品有几种"
+
+    svc = RagService(
+        cast("Any", _build_recall_repo(tid, question)),
+        embedder=cast("Any", _build_recall_embedder()),
+        cache=cast("Any", _build_recall_cache()),
+    )
     ctx = await cast("Any", svc).recall(
         tenant_key="default", datasource_key="default", question=question
     )
@@ -561,7 +590,7 @@ async def test_migration_0034_schema_contract(session: AsyncSession) -> None:
     from kongming.rag.repository import RagRepository
 
     repo = RagRepository(session)
-    await repo.insert_history(
+    await repo.samples.insert_history(
         tenant_id=tid,
         datasource_key="default",
         question="q-mig",
@@ -585,7 +614,7 @@ async def test_migration_0034_schema_contract(session: AsyncSession) -> None:
     assert row["recall_enabled"] is True
     assert row["feedback_message_id"] is None
     # 部分唯一索引:执行样本同问句幂等(ON CONFLICT 目标在位)
-    await repo.insert_history(
+    await repo.samples.insert_history(
         tenant_id=tid,
         datasource_key="default",
         question="q-mig",
@@ -605,7 +634,7 @@ async def test_migration_0034_schema_contract(session: AsyncSession) -> None:
         )
     )
     await session.commit()
-    hits = await repo.recall_history(tenant_id=tid, datasource_key="default", vector=[0.1])
+    hits = await repo.recall.recall_history(tenant_id=tid, datasource_key="default", vector=[0.1])
     assert all(h.question != "q-mig" for h in hits)
     # CHECK 约束在位(非法来源拒写)
     with pytest.raises(Exception):  # noqa: B017,S101  # CHECK 违约即抛(DBAPIError)

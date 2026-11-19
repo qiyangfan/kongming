@@ -3,7 +3,7 @@
   gold_sql: SELECT first_name, last_name, email, create_date FROM tenant_sakila.customer WHERE activebool = true ORDER BY
     create_date DESC, customer_id ASC LIMIT 100
   expected_tables:
-  - tenant_sakila.customer
+    - tenant_sakila.customer
   category: single_table
   validation:
     exec_ok: true
@@ -16,8 +16,8 @@
   gold_sql: SELECT c.country, COUNT(ci.city_id) AS city_count FROM tenant_sakila.country c JOIN tenant_sakila.city ci ON c.country_id
     = ci.country_id GROUP BY c.country_id, c.country ORDER BY city_count DESC, c.country ASC;
   expected_tables:
-  - tenant_sakila.country
-  - tenant_sakila.city
+    - tenant_sakila.country
+    - tenant_sakila.city
   category: aggregate
   validation:
     exec_ok: true
@@ -30,7 +30,7 @@
   gold_sql: SELECT first_name, last_name, email, create_date FROM tenant_sakila.customer WHERE activebool = true ORDER BY
     create_date DESC, customer_id ASC LIMIT 100
   expected_tables:
-  - tenant_sakila.customer
+    - tenant_sakila.customer
   category: filter
   validation:
     exec_ok: true
@@ -44,9 +44,9 @@
     FROM tenant_sakila.customer c JOIN tenant_sakila.store st ON c.store_id = st.store_id JOIN tenant_sakila.staff s ON st.manager_staff_id
     = s.staff_id WHERE c.activebool = true ORDER BY c.last_name, c.customer_id LIMIT 100
   expected_tables:
-  - tenant_sakila.customer
-  - tenant_sakila.store
-  - tenant_sakila.staff
+    - tenant_sakila.customer
+    - tenant_sakila.store
+    - tenant_sakila.staff
   category: join_2table
   validation:
     exec_ok: true
@@ -62,12 +62,12 @@
     JOIN tenant_sakila.inventory i ON r.inventory_id = i.inventory_id JOIN tenant_sakila.film f ON i.film_id = f.film_id ORDER
     BY p.payment_date DESC, p.payment_id ASC LIMIT 100
   expected_tables:
-  - tenant_sakila.payment_p2007_01
-  - tenant_sakila.customer
-  - tenant_sakila.staff
-  - tenant_sakila.rental
-  - tenant_sakila.inventory
-  - tenant_sakila.film
+    - tenant_sakila.payment_p2007_01
+    - tenant_sakila.customer
+    - tenant_sakila.staff
+    - tenant_sakila.rental
+    - tenant_sakila.inventory
+    - tenant_sakila.film
   category: join_3table
   validation:
     exec_ok: true

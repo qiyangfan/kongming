@@ -10,7 +10,7 @@
 import pytest
 
 from kongming_agent import deps
-from kongming_agent.graph import nodes
+from kongming_agent.graph import dialogue, nodes
 from tests.test_nodes import FakeApi, FakeLlm, _state
 
 # ============ 1.1 规范化纯函数 ============
@@ -20,29 +20,29 @@ class TestNormalize:
     """去首尾与内部空白、去中英文句读、拉丁字母小写。"""
 
     def test_strips_surrounding_and_inner_whitespace(self) -> None:
-        assert nodes.normalize_dialogue_reply("  不用了  ") == "不用了"
-        assert nodes.normalize_dialogue_reply("never  mind") == "nevermind"
+        assert dialogue.normalize_dialogue_reply("  不用了  ") == "不用了"
+        assert dialogue.normalize_dialogue_reply("never  mind") == "nevermind"
 
     def test_strips_chinese_and_ascii_punctuation(self) -> None:
-        assert nodes.normalize_dialogue_reply("不用了。") == "不用了"
-        assert nodes.normalize_dialogue_reply("好的,") == "好的"
-        assert nodes.normalize_dialogue_reply("谢谢!") == "谢谢"
-        assert nodes.normalize_dialogue_reply("hi~") == "hi"
+        assert dialogue.normalize_dialogue_reply("不用了。") == "不用了"
+        assert dialogue.normalize_dialogue_reply("好的,") == "好的"
+        assert dialogue.normalize_dialogue_reply("谢谢!") == "谢谢"
+        assert dialogue.normalize_dialogue_reply("hi~") == "hi"
 
     def test_lowers_latin_letters(self) -> None:
-        assert nodes.normalize_dialogue_reply("NO") == "no"
-        assert nodes.normalize_dialogue_reply("OK") == "ok"
-        assert nodes.normalize_dialogue_reply("Thanks") == "thanks"
+        assert dialogue.normalize_dialogue_reply("NO") == "no"
+        assert dialogue.normalize_dialogue_reply("OK") == "ok"
+        assert dialogue.normalize_dialogue_reply("Thanks") == "thanks"
 
     def test_spec_examples_normalize_to_vocabulary_shape(self) -> None:
         """「不用了。」「 NO, thanks 」「好的」均归一到词表形态(无空白/句读、拉丁小写)。"""
-        assert nodes.normalize_dialogue_reply("不用了。") == "不用了"
-        assert nodes.normalize_dialogue_reply(" NO, thanks ") == "nothanks"
-        assert nodes.normalize_dialogue_reply("好的") == "好的"
+        assert dialogue.normalize_dialogue_reply("不用了。") == "不用了"
+        assert dialogue.normalize_dialogue_reply(" NO, thanks ") == "nothanks"
+        assert dialogue.normalize_dialogue_reply("好的") == "好的"
 
     def test_empty_and_punct_only_normalize_to_empty(self) -> None:
-        assert nodes.normalize_dialogue_reply("") == ""
-        assert nodes.normalize_dialogue_reply("。。。") == ""
+        assert dialogue.normalize_dialogue_reply("") == ""
+        assert dialogue.normalize_dialogue_reply("。。。") == ""
 
 
 # ============ 1.2 全等语义 ============
@@ -91,7 +91,7 @@ class TestEqualitySemantics:
         ],
     )
     def test_closed_vocabulary_members_are_dialogue_reply(self, question: str) -> None:
-        assert nodes.is_dialogue_reply(question) is True
+        assert dialogue.is_dialogue_reply(question) is True
 
     @pytest.mark.parametrize(
         "question",
@@ -113,17 +113,17 @@ class TestEqualitySemantics:
     )
     def test_real_queries_are_not_dialogue_reply(self, question: str) -> None:
         """包含/前缀匹配会误拦这些真实问法——必须全等。"""
-        assert nodes.is_dialogue_reply(question) is False
+        assert dialogue.is_dialogue_reply(question) is False
 
     def test_no_prefix_matching(self) -> None:
         """「取消」是复语,「取消订单…」不是——前缀匹配即失败。"""
-        assert nodes.is_dialogue_reply("取消") is True
-        assert nodes.is_dialogue_reply("取消订单") is False
+        assert dialogue.is_dialogue_reply("取消") is True
+        assert dialogue.is_dialogue_reply("取消订单") is False
 
     def test_no_substring_matching(self) -> None:
         """「好的」是复语,「好的那看看上海仓」不是——包含匹配即失败。"""
-        assert nodes.is_dialogue_reply("好的") is True
-        assert nodes.is_dialogue_reply("好的那看看上海仓") is False
+        assert dialogue.is_dialogue_reply("好的") is True
+        assert dialogue.is_dialogue_reply("好的那看看上海仓") is False
 
 
 # ============ 1.5 单轮/多轮入口判定一致 ============
@@ -133,7 +133,7 @@ class TestSingleAndMultiTurnConsistency:
     """判定只看当前问句,与 history 无关;understand 节点两种入口行为一致。"""
 
     def test_pure_function_ignores_history(self) -> None:
-        assert nodes.is_dialogue_reply("不用了") is True
+        assert dialogue.is_dialogue_reply("不用了") is True
         # 纯函数不接 history——判定与入口形态无关
 
     async def test_understand_short_circuits_without_history(
@@ -179,7 +179,7 @@ class TestZeroSideEffects:
         assert out["end_reason"] == "no_data"  # 既有第四态,不新增终态取值
         # 兜底分类修正(spec「对话复语不进取数补全」):族别中性文案替代
         # 数据缺失话术,并携带 CHITCHAT 诊断标记
-        assert out["error"] == nodes.CHITCHAT_REPLIES["stop"]
+        assert out["error"] == dialogue.CHITCHAT_REPLIES["stop"]
         assert out["fallback_type"] == "CHITCHAT"
 
 
@@ -190,9 +190,9 @@ class TestObservableCounter:
     async def test_passthrough_increments_counter(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(deps, "get_llm", lambda: FakeLlm())
         monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
-        before = nodes.snapshot_passthrough_stats()["dialogue_reply_passthrough_total"]
+        before = dialogue.snapshot_passthrough_stats()["dialogue_reply_passthrough_total"]
         await nodes.understand(_state(question="好的"))
-        after = nodes.snapshot_passthrough_stats()["dialogue_reply_passthrough_total"]
+        after = dialogue.snapshot_passthrough_stats()["dialogue_reply_passthrough_total"]
         assert after == before + 1
 
     async def test_non_passthrough_does_not_increment(
@@ -201,9 +201,9 @@ class TestObservableCounter:
         fake = FakeLlm(["有多少商品"])
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
         monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
-        before = nodes.snapshot_passthrough_stats()["dialogue_reply_passthrough_total"]
+        before = dialogue.snapshot_passthrough_stats()["dialogue_reply_passthrough_total"]
         await nodes.understand(_state(question="有多少商品"))
-        after = nodes.snapshot_passthrough_stats()["dialogue_reply_passthrough_total"]
+        after = dialogue.snapshot_passthrough_stats()["dialogue_reply_passthrough_total"]
         assert after == before
         assert len(fake.calls) == 1  # 正常问句照常改写
 

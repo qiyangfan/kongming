@@ -16,7 +16,7 @@ from kongming_agent.apiclient import (
     SchemaMeta,
     SqlExecuteOutcome,
 )
-from kongming_agent.graph import nodes
+from kongming_agent.graph import dialogue, nodes
 from kongming_agent.graph.build import MAX_RETRY, get_graph
 from kongming_agent.graph.state import AgentState
 
@@ -238,7 +238,7 @@ async def test_dialogue_reply_passthrough_zero_calls(harness: Harness) -> None:
     state["history"] = ["有多少商品"]
     final = await _invoke(state)
     assert final["end_reason"] == "no_data"  # 既有第四态,不新增终态取值
-    assert final["error"] == nodes.CHITCHAT_REPLIES["stop"]  # 族别中性文案(兜底分类修正)
+    assert final["error"] == dialogue.CHITCHAT_REPLIES["stop"]  # 族别中性文案(兜底分类修正)
     assert llm.users == []  # UNDERSTAND/SQL_GEN/SUMMARIZE 全未发起
     assert api.calls == 0  # 零执行(sys_sql_audit 零新增记录)
     assert api.rag_calls == 0  # 零检索回调

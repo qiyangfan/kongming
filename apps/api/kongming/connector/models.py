@@ -174,27 +174,32 @@ def _denied_host_problem(allowed_hosts: tuple[str, ...], template: str) -> str |
     return None
 
 
-def _template_problem(
-    template: str, allowed_hosts: tuple[str, ...], params: tuple[ParamDecl, ...]
-) -> str | None:
+def _path_parts_problem(template: str) -> tuple[str | None, str]:
+    """模板粗形态检查(scheme/主机/query);返回 (问题文案, 小写主机)。"""
     if not template:
-        return "路径模板不能为空"
+        return "路径模板不能为空", ""
     if len(template) > PATH_TEMPLATE_MAX:
-        return f"路径模板超长(上限 {PATH_TEMPLATE_MAX})"
+        return f"路径模板超长(上限 {PATH_TEMPLATE_MAX})", ""
     try:
         parts = urlsplit(template)
     except ValueError:
-        return "路径模板不是合法 URL"
-    if parts.scheme not in ("http", "https"):
-        return "路径模板仅允许 http/https"
+        return "路径模板不是合法 URL", ""
     host = (parts.hostname or "").lower()
-    if not host:
-        return "路径模板缺主机"
-    if parts.query or parts.fragment:
-        return "路径模板不得携带 query/fragment(查询参数由参数声明按名映射)"
-    # 占位符与参数声明求交:每个占位必须有同名必填声明,且不得重复出现
-    # (可选参数缺参会残留字面 {name} 占位,httpx 编码后打到
-    # 错误路径——路径占位参数 MUST required)
+    if parts.scheme not in ("http", "https"):
+        problem: str | None = "路径模板仅允许 http/https"
+    elif not host:
+        problem = "路径模板缺主机"
+    elif parts.query or parts.fragment:
+        problem = "路径模板不得携带 query/fragment(查询参数由参数声明按名映射)"
+    else:
+        problem = None
+    return problem, host
+
+
+def _placeholders_problem(template: str, params: tuple[ParamDecl, ...]) -> str | None:
+    """占位符与参数声明求交:每个占位必须有同名必填声明,且不得重复出现
+    (可选参数缺参会残留字面 {name} 占位,httpx 编码后打到
+    错误路径——路径占位参数 MUST required)。"""
     declared = {p.name: p for p in params}
     seen: set[str] = set()
     for raw in re.findall(r"\{([^{}]+)\}", template):
@@ -205,6 +210,18 @@ def _template_problem(
         if raw in seen:
             return f"路径占位 {{{raw}}} 重复出现"
         seen.add(raw)
+    return None
+
+
+def _template_problem(
+    template: str, allowed_hosts: tuple[str, ...], params: tuple[ParamDecl, ...]
+) -> str | None:
+    parts_problem, host = _path_parts_problem(template)
+    if parts_problem:
+        return parts_problem
+    placeholders_problem = _placeholders_problem(template, params)
+    if placeholders_problem:
+        return placeholders_problem
     # 模板主机须命中白名单(「注入了却执行必拒」的注册期一致闸;执行期
     # 出口校验仍是独立防线,防存量行/带外改行)
     if host not in {h.lower() for h in allowed_hosts}:
@@ -212,49 +229,66 @@ def _template_problem(
     return None
 
 
-def validate_declaration(decl: ConnectorDecl, *, has_secret: bool, timeout_max_ms: int) -> None:
-    """注册校验(fail-fast 纯函数):畸形声明逐类拒绝,全部通过才落库。"""
-    if not CONNECTOR_KEY_RE.fullmatch(decl.key):
-        raise ConnectorValidationError("key 须为小写字母开头的字母/数字/下划线(2-64 位)")
-    # 工具名和审计列上限均为 64 字符；注册时拒绝超长键，避免生成无法执行的工具。
-    if len(tool_name(decl.key)) > 64:
-        raise ConnectorValidationError(
+def _key_problem(key: str) -> str | None:
+    """key 形态与合成工具名长度检查(工具名/审计列上限均 64 字符)。"""
+    if not CONNECTOR_KEY_RE.fullmatch(key):
+        return "key 须为小写字母开头的字母/数字/下划线(2-64 位)"
+    # 工具名和审计列上限均为 64 字符;注册时拒绝超长键,避免生成无法执行的工具。
+    if len(tool_name(key)) > 64:
+        return (
             f"key 过长:合成工具名前缀 {CONNECTOR_TOOL_PREFIX} + key 超出 64 位,"
             f"key 上限 {64 - len(CONNECTOR_TOOL_PREFIX)} 位"
         )
-    name = decl.name.strip()
+    return None
+
+
+def _text_problem(name: str, description: str) -> str | None:
+    """名称/描述的非空与长度检查。"""
     if not name:
-        raise ConnectorValidationError("名称不能为空")
+        return "名称不能为空"
     if len(name) > NAME_MAX:
-        raise ConnectorValidationError(f"名称超长(上限 {NAME_MAX})")
-    if len(decl.description.strip()) == 0:
-        raise ConnectorValidationError("描述不能为空(它是 LLM 判断何时调用该工具的依据)")
-    if len(decl.description) > DESCRIPTION_MAX:
-        raise ConnectorValidationError(f"描述超长(上限 {DESCRIPTION_MAX})")
-    if decl.method not in METHODS:
-        raise ConnectorValidationError(f"方法越白名单(仅允许 {'/'.join(METHODS)})")
-    hosts_problem = _hosts_problem(decl.allowed_hosts)
-    if hosts_problem:
-        raise ConnectorValidationError(hosts_problem)
-    ssrf_problem = _denied_host_problem(decl.allowed_hosts, decl.path_template)
-    if ssrf_problem:
-        raise ConnectorValidationError(ssrf_problem)
-    template_problem = _template_problem(decl.path_template, decl.allowed_hosts, decl.params)
-    if template_problem:
-        raise ConnectorValidationError(template_problem)
-    params_problem = _params_problem(decl.params)
-    if params_problem:
-        raise ConnectorValidationError(params_problem)
-    if decl.auth_type not in AUTH_TYPES:
-        raise ConnectorValidationError(f"鉴权形态越白名单(仅允许 {'/'.join(AUTH_TYPES)})")
-    if decl.auth_type in SECRET_AUTH_TYPES and not has_secret:
-        raise ConnectorValidationError(f"鉴权形态 {decl.auth_type} 必须提供凭证材料")
-    if decl.auth_type == "none" and has_secret:
-        raise ConnectorValidationError("鉴权形态 none 不允许携带凭证材料")
-    # 运行期守卫:exact-type 检查(bool 是 int 子类,须显式排除;bool 穿透
-    # 会得到 True≤上限 的恒真判定)
-    if type(decl.timeout_ms) is not int or not TIMEOUT_MIN_MS <= decl.timeout_ms <= timeout_max_ms:
-        raise ConnectorValidationError(f"超时须为 {TIMEOUT_MIN_MS}-{timeout_max_ms} 毫秒的整数")
+        return f"名称超长(上限 {NAME_MAX})"
+    if len(description.strip()) == 0:
+        return "描述不能为空(它是 LLM 判断何时调用该工具的依据)"
+    if len(description) > DESCRIPTION_MAX:
+        return f"描述超长(上限 {DESCRIPTION_MAX})"
+    return None
+
+
+def _auth_problem(auth_type: str, *, has_secret: bool) -> str | None:
+    """鉴权形态白名单与材料有无的一致性检查。"""
+    if auth_type not in AUTH_TYPES:
+        return f"鉴权形态越白名单(仅允许 {'/'.join(AUTH_TYPES)})"
+    if auth_type in SECRET_AUTH_TYPES and not has_secret:
+        return f"鉴权形态 {auth_type} 必须提供凭证材料"
+    if auth_type == "none" and has_secret:
+        return "鉴权形态 none 不允许携带凭证材料"
+    return None
+
+
+def _timeout_problem(timeout_ms: object, timeout_max_ms: int) -> str | None:
+    """超时须为范围内的整数;bool 是 int 子类须显式排除(bool 穿透会得到恒真判定)。"""
+    if type(timeout_ms) is not int or not TIMEOUT_MIN_MS <= timeout_ms <= timeout_max_ms:
+        return f"超时须为 {TIMEOUT_MIN_MS}-{timeout_max_ms} 毫秒的整数"
+    return None
+
+
+def validate_declaration(decl: ConnectorDecl, *, has_secret: bool, timeout_max_ms: int) -> None:
+    """注册校验(fail-fast 纯函数):畸形声明逐类拒绝,全部通过才落库。"""
+    problems = (
+        _key_problem(decl.key),
+        _text_problem(decl.name.strip(), decl.description),
+        None if decl.method in METHODS else f"方法越白名单(仅允许 {'/'.join(METHODS)})",
+        _hosts_problem(decl.allowed_hosts),
+        _denied_host_problem(decl.allowed_hosts, decl.path_template),
+        _template_problem(decl.path_template, decl.allowed_hosts, decl.params),
+        _params_problem(decl.params),
+        _auth_problem(decl.auth_type, has_secret=has_secret),
+        _timeout_problem(decl.timeout_ms, timeout_max_ms),
+    )
+    for problem in problems:
+        if problem:
+            raise ConnectorValidationError(problem)
 
 
 def mask_secret(secret: str | None) -> str:

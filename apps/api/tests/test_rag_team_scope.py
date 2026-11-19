@@ -776,7 +776,7 @@ async def test_team_delete_hook_failure_not_blocking(
     告警经替换模块 logger 捕获(alembic fileConfig 会 disable 既有 logger,
     caplog 在本套件不可靠),断言确定性不受日志基建影响。"""
     import kongming.team.service as team_service
-    from kongming.rag.repository import RagRepository
+    from kongming.rag.repository import RagEntryRepository
 
     warnings: list[str] = []
 
@@ -786,10 +786,10 @@ async def test_team_delete_hook_failure_not_blocking(
 
     monkeypatch.setattr(team_service, "log", _CaptureLog())
 
-    async def boom(self: RagRepository, *, team_id: str) -> list[tuple[str, str]]:
+    async def boom(self: RagEntryRepository, *, team_id: str) -> list[tuple[str, str]]:
         raise RuntimeError("公共化钩子故障")
 
-    monkeypatch.setattr(RagRepository, "publicize_team_entries", boom)
+    monkeypatch.setattr(RagEntryRepository, "publicize_team_entries", boom)
     mgr_uid, mgr_token = await _rag_mgr_token(client, session, make_user, "hookf_m")
     rid = await _mk_role_with_perms(session, "role_hookf_team", ["system:team:manage"])
     await _bind(session, "sys_user_role", mgr_uid, rid)
@@ -1072,7 +1072,6 @@ async def test_history_sample_visibility_roundtrip(session: AsyncSession) -> Non
     svc_member = RagService(
         repo,
         embedder=_FixedEmbedder(),
-        describer=_FixedEmbedder(),
         cache=null_cache,
         member_teams=_FixedTeams([team_y]),
     )
@@ -1084,9 +1083,7 @@ async def test_history_sample_visibility_roundtrip(session: AsyncSession) -> Non
         caller_user_id=member_uid,
     )
     # 无身份回写:公共样本
-    svc_anon = RagService(
-        repo, embedder=_FixedEmbedder(), describer=_FixedEmbedder(), cache=null_cache
-    )
+    svc_anon = RagService(repo, embedder=_FixedEmbedder(), cache=null_cache)
     await svc_anon.writeback(
         tenant_id=tid,
         datasource_key="default",
@@ -1107,7 +1104,7 @@ async def test_history_sample_visibility_roundtrip(session: AsyncSession) -> Non
     assert row_pub is not None and len(row_pub) == 0
 
     async def recall(teams: list[str]) -> set[str]:
-        hits = await repo.recall_history(
+        hits = await repo.recall.recall_history(
             tenant_id=tid,
             datasource_key="default",
             vector=[0.1] * 2560,

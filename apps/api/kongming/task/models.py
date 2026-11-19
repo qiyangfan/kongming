@@ -4,6 +4,7 @@
 预算退出诚实、终态不复活。迁移白名单 fail-closed,非法迁移拒绝。
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -153,6 +154,86 @@ def _norm_bot_key(raw: object) -> str | None:
     return key or None
 
 
+def _clamp_int(raw: object, default: int, cap: int) -> int:
+    """整数取值归一:非 int(bool 除外)或 <1 回退缺省,再钳到 [1, max(1, cap)]。"""
+    value = raw if isinstance(raw, int) and not isinstance(raw, bool) else 0
+    if value < 1:
+        value = default
+    return min(max(1, value), max(1, cap))
+
+
+def _dedup_first(
+    entries: list[dict[str, object]], identity: "Callable[[dict[str, object]], str]"
+) -> list[dict[str, object]]:
+    """按身份键去重,同键重复声明只保留首条(声明顺序即确定性标识)。"""
+    seen: set[str] = set()
+    out: list[dict[str, object]] = []
+    for entry in entries:
+        key = identity(entry)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(entry)
+    return out
+
+
+def _normalize_roundtable(
+    cfg: dict[str, Any], *, max_workers_cap: int, max_rounds_cap: int
+) -> dict[str, object]:
+    """圆桌形态归一:参与者按内置角色取值域过滤、角色去重裁首、
+    [2, max(2, max_workers_cap)] 钳制(不足下限回退缺省名册);轮次 [1, cap]。"""
+    roster: list[dict[str, object]] = []
+    raw_parts = cfg.get("participants")
+    for item in cast("list[object]", raw_parts if isinstance(raw_parts, list) else []):
+        if not isinstance(item, dict):
+            continue
+        entry = cast("dict[str, object]", item)
+        role = str(entry.get("role") or "")
+        if role not in COLLAB_ROLES:
+            continue
+        roster.append({"role": role, "bot_key": _norm_bot_key(entry.get("bot_key"))})
+    roster = _dedup_first(roster, lambda p: str(p["role"]))
+    cap = max(COLLAB_MIN_PARTICIPANTS, max(1, max_workers_cap))
+    roster = roster[:cap]
+    if len(roster) < COLLAB_MIN_PARTICIPANTS:
+        roster = [dict(p) for p in COLLAB_DEFAULT_ROSTER][:cap]
+    rounds = _clamp_int(cfg.get("max_rounds"), COLLAB_DEFAULT_ROUNDS, max_rounds_cap)
+    return {"kind": COLLAB_KIND_ROUNDTABLE, "max_rounds": rounds, "participants": roster}
+
+
+def _normalize_decomposition(
+    cfg: dict[str, Any], *, kind: str, max_workers_cap: int
+) -> dict[str, object]:
+    """分工形态归一:worker 数钳制、dispatch 白名单回退串行;名册条目
+    缺 bot_key 剔除、身份(name 缺省取 bot_key)去重、部署上限截断。
+    空名册视为未声明不落键——无名册载荷与存量行逐键一致(零漂移)。"""
+    dispatch = str(cfg.get("dispatch") or COLLAB_DISPATCH_SERIAL)
+    if dispatch not in COLLAB_DISPATCHES:
+        dispatch = COLLAB_DISPATCH_SERIAL
+    out: dict[str, object] = {
+        "kind": kind,
+        "max_workers": _clamp_int(cfg.get("max_workers"), COLLAB_DEFAULT_WORKERS, max_workers_cap),
+        "critic": bool(cfg.get("critic")),
+        "dispatch": dispatch,
+        "bot_key": _norm_bot_key(cfg.get("bot_key")),
+    }
+    roster: list[dict[str, object]] = []
+    raw_roster = cfg.get("workers")
+    for item in cast("list[object]", raw_roster if isinstance(raw_roster, list) else []):
+        if not isinstance(item, dict):
+            continue
+        entry = cast("dict[str, object]", item)
+        w_bot_key = _norm_bot_key(entry.get("bot_key"))
+        if not w_bot_key:
+            continue
+        w_name = str(entry.get("name") or "").strip() or None
+        roster.append({"name": w_name, "bot_key": w_bot_key})
+    if roster:
+        deduped = _dedup_first(roster, lambda w: str(w["name"] or w["bot_key"]))
+        out["workers"] = deduped[: max(1, max_workers_cap)]
+    return out
+
+
 def normalize_collab_topology(
     raw: dict[str, Any] | None,
     *,
@@ -168,82 +249,10 @@ def normalize_collab_topology(
     if kind not in COLLAB_KINDS:
         kind = COLLAB_KIND_DECOMPOSITION
     if kind == COLLAB_KIND_ROUNDTABLE:
-        roster: list[dict[str, object]] = []
-        raw_parts = cfg.get("participants")
-        for item in cast("list[object]", raw_parts if isinstance(raw_parts, list) else []):
-            if not isinstance(item, dict):
-                continue
-            entry = cast("dict[str, object]", item)
-            role = str(entry.get("role") or "")
-            if role not in COLLAB_ROLES:
-                continue
-            roster.append({"role": role, "bot_key": _norm_bot_key(entry.get("bot_key"))})
-        # 名册去重(同角色重复声明裁到首条;角色即参与者的确定性标识)
-        seen: set[str] = set()
-        deduped: list[dict[str, object]] = []
-        for p in roster:
-            role = str(p["role"])
-            if role in seen:
-                continue
-            seen.add(role)
-            deduped.append(p)
-        roster = deduped
-        cap = max(COLLAB_MIN_PARTICIPANTS, max(1, max_workers_cap))
-        if len(roster) > cap:
-            roster = roster[:cap]
-        if len(roster) < COLLAB_MIN_PARTICIPANTS:
-            roster = [dict(p) for p in COLLAB_DEFAULT_ROSTER][:cap]
-        raw_rounds = cfg.get("max_rounds")
-        rounds = (
-            raw_rounds if isinstance(raw_rounds, int) and not isinstance(raw_rounds, bool) else 0
+        return _normalize_roundtable(
+            cfg, max_workers_cap=max_workers_cap, max_rounds_cap=max_rounds_cap
         )
-        if rounds < 1:
-            rounds = COLLAB_DEFAULT_ROUNDS
-        rounds = min(max(1, rounds), max(1, max_rounds_cap))
-        return {"kind": kind, "max_rounds": rounds, "participants": roster}
-    raw_workers = cfg.get("max_workers")
-    workers = 0
-    if isinstance(raw_workers, int) and not isinstance(raw_workers, bool):
-        workers = raw_workers
-    if workers < 1:
-        workers = COLLAB_DEFAULT_WORKERS
-    workers = min(max(1, workers), max(1, max_workers_cap))
-    critic = bool(cfg.get("critic"))
-    dispatch = str(cfg.get("dispatch") or COLLAB_DISPATCH_SERIAL)
-    if dispatch not in COLLAB_DISPATCHES:
-        dispatch = COLLAB_DISPATCH_SERIAL
-    out: dict[str, object] = {
-        "kind": kind,
-        "max_workers": workers,
-        "critic": critic,
-        "dispatch": dispatch,
-        "bot_key": _norm_bot_key(cfg.get("bot_key")),
-    }
-    # 分工 worker 名册(可选):条目非法剔除、身份
-    # (name 缺省 bot_key)去重裁首条、部署上限截断;空名册视为未声明,
-    # 不落键——无名册载荷与存量行逐键一致(零漂移)。圆桌分支不读此字段。
-    worker_roster: list[dict[str, object]] = []
-    raw_roster = cfg.get("workers")
-    for item in cast("list[object]", raw_roster if isinstance(raw_roster, list) else []):
-        if not isinstance(item, dict):
-            continue
-        entry = cast("dict[str, object]", item)
-        w_bot_key = _norm_bot_key(entry.get("bot_key"))
-        if not w_bot_key:
-            continue
-        w_name = str(entry.get("name") or "").strip() or None
-        worker_roster.append({"name": w_name, "bot_key": w_bot_key})
-    if worker_roster:
-        w_seen: set[str] = set()
-        w_deduped: list[dict[str, object]] = []
-        for w in worker_roster:
-            identity = str(w["name"] or w["bot_key"])
-            if identity in w_seen:
-                continue
-            w_seen.add(identity)
-            w_deduped.append(w)
-        out["workers"] = w_deduped[: max(1, max_workers_cap)]
-    return out
+    return _normalize_decomposition(cfg, kind=kind, max_workers_cap=max_workers_cap)
 
 
 def has_collab_topology(step: dict[str, Any]) -> bool:

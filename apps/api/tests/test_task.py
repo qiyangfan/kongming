@@ -103,6 +103,51 @@ async def _user_with_task_perms(
     return uid, await _login(client, username)
 
 
+def _step_start_outcome(body: dict[str, Any]) -> str | None:
+    """step-start 决策 → 需提前返回的终态串;可继续(含 skip)返回 None。"""
+    decision = str(body.get("decision"))
+    if decision == "pause":
+        return "PAUSED"
+    if decision == "await_approval":
+        return "AWAITING_APPROVAL"
+    if decision == "abort":
+        # 控制面判定任务不可再执行(取消/终态):如实返回现态口径
+        return f"ABORT:{body.get('task_status')}"
+    return None
+
+
+async def _drive_step(client: AsyncClient, tid: str, tk: str, step_id: str) -> str | None:
+    """推进单步:start → 需要时提交 result;返回提前终止口径,继续执行返回 None。"""
+    h = INTERNAL
+    d = await client.post(
+        "/internal/task/step-start",
+        headers=h,
+        json={"task_id": tid, "tenant_key": tk, "step_id": step_id},
+    )
+    if d.status_code != 200:
+        raise RuntimeError(f"step-start {d.status_code}: {d.text[:200]}")
+    stop = _step_start_outcome(d.json())
+    if stop is not None:
+        return stop
+    if str(d.json().get("decision")) != "execute":
+        return None  # skip(DONE/已跳过步骤):推进下一步
+    rr = await client.post(
+        "/internal/task/step-result",
+        headers=h,
+        json={
+            "task_id": tid,
+            "tenant_key": tk,
+            "step_id": step_id,
+            "status": "DONE",
+            "evidence": {"trace_id": "tr", "summary": "ok"},
+            "summary": "ok",
+        },
+    )
+    if rr.status_code != 200:
+        raise RuntimeError(f"step-result {rr.status_code}: {rr.text[:200]}")
+    return None
+
+
 async def _drive_orchestration(
     client: AsyncClient, tid: str, tk: str, steps_script: list[dict[str, object]]
 ) -> str:
@@ -126,37 +171,9 @@ async def _drive_orchestration(
     else:
         steps = r.json()["steps"]
     for step in steps:
-        d = await client.post(
-            "/internal/task/step-start",
-            headers=h,
-            json={"task_id": tid, "tenant_key": tk, "step_id": step["id"]},
-        )
-        if d.status_code != 200:
-            raise RuntimeError(f"step-start {d.status_code}: {d.text[:200]}")
-        decision = str(d.json().get("decision"))
-        if decision == "pause":
-            return "PAUSED"
-        if decision == "await_approval":
-            return "AWAITING_APPROVAL"
-        if decision == "abort":
-            # 控制面判定任务不可再执行(取消/终态):如实返回现态口径
-            return f"ABORT:{d.json().get('task_status')}"
-        if decision != "execute":
-            continue  # skip(DONE/已跳过步骤):推进下一步
-        rr = await client.post(
-            "/internal/task/step-result",
-            headers=h,
-            json={
-                "task_id": tid,
-                "tenant_key": tk,
-                "step_id": step["id"],
-                "status": "DONE",
-                "evidence": {"trace_id": "tr", "summary": "ok"},
-                "summary": "ok",
-            },
-        )
-        if rr.status_code != 200:
-            raise RuntimeError(f"step-result {rr.status_code}: {rr.text[:200]}")
+        stop = await _drive_step(client, tid, tk, str(step["id"]))
+        if stop is not None:
+            return stop
     # 终态收口与真实编排器同径:全部 DONE 方可 DONE(spec),否则如实 FAILED
     rs = await client.get(
         "/internal/task/steps", headers=h, params={"task_id": tid, "tenant_key": tk}
@@ -202,14 +219,14 @@ async def _wait_status(
 @pytest.fixture
 def _no_dispatch(monkeypatch: pytest.MonkeyPatch) -> list[str]:  # pyright: ignore[reportUnusedFunction]
     """将派发替换为记录器，由测试显式调用回调，避免在同一 app 中嵌套请求。"""
-    from kongming.task import router as task_router
+    from kongming.task import dispatch as task_dispatch
 
     calls: list[str] = []
 
     def _record(*, task_id: str, epoch: int | None = None) -> None:
         calls.append(task_id)
 
-    monkeypatch.setattr(task_router, "_schedule_run", _record)
+    monkeypatch.setattr(task_dispatch, "_schedule_run", _record)
     return calls
 
 
@@ -353,7 +370,8 @@ async def test_budget_pause_honest(
     assert final == "PAUSED"
     detail = await _wait_status(client, token, task_id, ("PAUSED",))
     assert [s["status"] for s in detail["steps"]].count("DONE") == 2
-    assert any(e["kind"] == "budget_paused" for e in detail["events"])
+    paused_events = [e for e in detail["events"] if e["kind"] == "budget_paused"]
+    assert paused_events and paused_events[0]["reason"] == "步数预算耗尽"
     assert detail["task"]["status"] == "PAUSED"  # 不出现 DONE
 
 
@@ -622,7 +640,7 @@ async def test_approval_expiry_skips_and_resumes(
 ) -> None:
     """审批过期:超 TTL 的待审步骤不可再批准(404);启动清扫置 SKIPPED;
     resume 守卫因步骤已非 AWAITING 放行,续跑可 DONE。"""
-    from kongming.task.repository import SqlTaskRepo
+    from kongming.task.collab_repo import SqlCollabLedgerRepo as SqlTaskRepo
     from kongming.task.service import TaskService
 
     _, token = await _user_with_task_perms(client, session, make_user, "expA")

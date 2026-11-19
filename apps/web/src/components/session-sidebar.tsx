@@ -1,6 +1,6 @@
 /* 会话侧栏:搜索、时间分组、重命名与受控删除。 */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, MessageSquare, MoreVertical, Search } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
@@ -188,6 +188,7 @@ function RenameDialog({
   const [title, setTitle] = useState(session.title);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
   const qc = useQueryClient();
   const { current } = useTenant();
 
@@ -196,6 +197,7 @@ function RenameDialog({
     if (open) {
       setTitle(session.title);
       setError(null);
+      titleRef.current?.focus();
     }
   }, [open, session.title]);
 
@@ -231,7 +233,7 @@ function RenameDialog({
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             maxLength={200}
-            autoFocus
+            ref={titleRef}
             aria-label="会话标题"
           />
           {error && (

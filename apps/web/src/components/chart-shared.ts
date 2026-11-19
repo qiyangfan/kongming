@@ -38,6 +38,11 @@ export function normalizeBinding(chart: {
   return { type: chart.type, x: chart.x, y: chart.y ? [chart.y] : [], series: null };
 }
 
+/* 图表渲染闸:无数据列或无绑定候选时整卡不渲染(调参面板同闸,避免空图假设置) */
+export function hasChartToRender(columns: string[], bindings: ChartSpec[]): boolean {
+  return columns.length > 0 && bindings.length > 0;
+}
+
 /* 候选类型去重(每类型取首个候选,保持候选序)——切换器按类型渲染 */
 export function uniqueTypes(candidates: ChartSpec[]): ChartType[] {
   const seen = new Set<ChartType>();

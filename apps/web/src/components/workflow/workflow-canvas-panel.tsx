@@ -1,53 +1,39 @@
-/* 工作流画布提供节点放置、依赖连线和配置侧栏。布局只存于本地；condition 出边需明确选择 on，取消时不创建连线。 */
+/* 工作流画布提供节点放置、依赖连线和配置侧栏。布局只存于本地；condition 出边需明确选择 on，取消时不创建连线。
+   latest-ref 约定：初始化/持久化只跟随 initToken，回调经 ref 读取最新的定义、键、版本与节点列表。 */
 
-import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   Background,
   BackgroundVariant,
   Controls,
   ReactFlow,
   ReactFlowProvider,
-  applyEdgeChanges,
-  applyNodeChanges,
   useEdgesState,
   useNodesState,
-  useReactFlow,
-  type Connection,
-  type EdgeChange,
-  type NodeChange,
 } from "@xyflow/react";
 
 // RF 官方样式(仅随本懒加载分包进入;暗色经祖先 html.dark 的 .dark 选择器生效)
 import "@xyflow/react/dist/style.css";
 
-import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/empty-state";
-import {
-  canvasToDag,
-  dagToCanvas,
-  edgeId,
-  loadCanvasPositions,
-  NODE_ID_RE,
-  NODE_TYPE_LABELS,
-  NODE_TYPES,
-  nextNodeId,
-  RESERVED_NODE_IDS,
-  saveCanvasPositions,
-  WF_NODE_MIME,
-  type CanvasPosition,
-  type WfNodeType,
-} from "@/lib/workflow-canvas";
-import { locateValidationError } from "@/lib/workflow-error-locate";
 import { ConditionOnDialog, type PendingConditionEdge } from "./condition-on-dialog";
-import { NodeConfigForm } from "./node-config-form";
+import {
+  useCanvasDrop,
+  useCanvasEdges,
+  useCanvasNodes,
+  useCanvasEmit,
+  useCanvasSync,
+  useLatestRef,
+} from "./use-workflow-canvas";
 import { WfCanvasEdge } from "./wf-canvas-edge";
 import { WfCanvasNode } from "./wf-canvas-node";
-import { NODE_TYPE_ICONS, type WfEdge, type WfFlowNode } from "./workflow-canvas-types";
+import { CanvasSidePanel, handleDragOver, NodePalette } from "./wf-canvas-parts";
+import { locatedServerError } from "./wf-graph-helpers";
+import type { WfEdge, WfFlowNode } from "./workflow-canvas-types";
 
 const nodeTypes = { wf: WfCanvasNode };
 const edgeTypes = { wf: WfCanvasEdge };
 
-export interface WorkflowCanvasPanelProps {
+interface WorkflowCanvasPanelProps {
   /** 画布投影源(已过可表达性判定的定义对象) */
   definition: unknown;
   /** 外部重投影令牌:初始挂载或 JSON 态切回画布时自增,画布据此重建 */
@@ -69,359 +55,78 @@ function CanvasInner({
 }: WorkflowCanvasPanelProps) {
   const [nodes, setNodes] = useNodesState<WfFlowNode>([]);
   const [edges, setEdges] = useEdgesState<WfEdge>([]);
-  const { screenToFlowPosition } = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingConditionEdge | null>(null);
+  // 待确认连线的最新值：确认回调读取此引用，避免闭包滞后
+  const pendingRef = useLatestRef(pending);
   const [fallbackReasons, setFallbackReasons] = useState<string[]>([]);
 
   // latest-ref:初始化/持久化只应跟随 initToken,不随引用变化重建画布
-  const definitionRef = useRef(definition);
-  definitionRef.current = definition;
-  const wfKeyRef = useRef(wfKey);
-  wfKeyRef.current = wfKey;
-  const versionRef = useRef(version);
-  versionRef.current = version;
-  const nodesRef = useRef(nodes);
-  nodesRef.current = nodes;
-  const emitRef = useRef(onDefinitionChange);
-  emitRef.current = onDefinitionChange;
+  const definitionRef = useLatestRef(definition);
+  const wfKeyRef = useLatestRef(wfKey);
+  const versionRef = useLatestRef(version);
+  const nodesRef = useLatestRef(nodes);
+  const emitRef = useLatestRef(onDefinitionChange);
 
-  /** 画布态 → 定义并上报(单一数据源:编辑态只有一份定义对象) */
-  const emitFrom = useCallback((nextNodes: WfFlowNode[], nextEdges: WfEdge[]) => {
-    const back = canvasToDag({
-      nodes: nextNodes.map((n) => ({
-        id: n.id,
-        type: n.data.nodeType,
-        config: n.data.config,
-        position: n.position,
-        depsExplicit: n.data.depsExplicit,
-      })),
-      edges: nextEdges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        on: e.data?.on ?? null,
-      })),
-    });
-    if (back.ok) emitRef.current(back.definition);
-    // !ok 属防御分支(正常交互不会产出冲突图),保持上次定义不变
-  }, []);
-
-  /** 图结构变更即作废旧的服务端错误定位(新编辑使旧判定过期) */
-  const stripErrors = useCallback(
-    (ns: WfFlowNode[]): WfFlowNode[] =>
-      ns.some((n) => n.data.errorText !== undefined)
-        ? ns.map((n) => ({ ...n, data: { ...n.data, errorText: undefined } }))
-        : ns,
-    [],
-  );
-
-  const persistPositions = useCallback((ns: WfFlowNode[]) => {
-    const map: Record<string, CanvasPosition> = {};
-    for (const n of ns) map[n.id] = n.position;
-    saveCanvasPositions(wfKeyRef.current, versionRef.current, map);
-  }, []);
+  const { emitFrom, persistPositions } = useCanvasEmit({
+    wfKeyRef,
+    versionRef,
+    emitRef,
+  });
 
   /** 拖拽结束持久化全量布局(整表写,不丢未拖动节点的坐标) */
   const handleNodeDragStop = useCallback(() => {
     persistPositions(nodesRef.current);
-  }, [persistPositions]);
+  }, [persistPositions, nodesRef]);
 
-  // 外部重投影(初始挂载 / JSON 态切回):定义 → 画布态(坐标叠加 localStorage 布局)
-  useEffect(() => {
-    const to = dagToCanvas(
-      definitionRef.current,
-      loadCanvasPositions(wfKeyRef.current, versionRef.current),
-    );
-    setSelectedId(null);
-    if (!to.ok) {
-      // 防御:进入画布前编辑器已判定可表达;此处兜底展示原因
-      setFallbackReasons(to.reasons);
-      setNodes([]);
-      setEdges([]);
-      return;
-    }
-    setFallbackReasons([]);
-    setNodes(
-      to.graph.nodes.map((cnode) => ({
-        id: cnode.id,
-        type: "wf" as const,
-        position: cnode.position,
-        data: {
-          nodeType: cnode.type,
-          config: cnode.config,
-          depsExplicit: cnode.depsExplicit,
-        },
-      })),
-    );
-    setEdges(
-      to.graph.edges.map((ce) => ({
-        id: ce.id,
-        source: ce.source,
-        target: ce.target,
-        type: "wf" as const,
-        data: { on: ce.on },
-      })),
-    );
-  }, [initToken, setNodes, setEdges]);
+  // 外部重投影与错误高亮同步
+  useCanvasSync({
+    initToken,
+    errorText,
+    definitionRef,
+    wfKeyRef,
+    versionRef,
+    setNodes,
+    setEdges,
+    setSelectedId,
+    setFallbackReasons,
+  });
 
-  // 重投影(initToken 变化)会重建节点并丢掉错误标注,故随 errorText 重新应用定位高亮。
-
-  useEffect(() => {
-    if (errorText === "") {
-      setNodes((ns) => (ns.some((n) => n.data.errorText !== undefined) ? stripErrors(ns) : ns));
-      return;
-    }
-    const { nodeIds } = locateValidationError(errorText);
-    if (nodeIds.length === 0) return;
-    const hit = new Set(nodeIds);
-    // 清除未命中节点的旧错误，避免画布高亮与侧栏状态不一致。
-
-    setNodes((ns) =>
-      ns.map((n) => {
-        if (hit.has(n.id)) return { ...n, data: { ...n.data, errorText } };
-        return n.data.errorText !== undefined
-          ? { ...n, data: { ...n.data, errorText: undefined } }
-          : n;
-      }),
-    );
-  }, [errorText, initToken, setNodes, stripErrors]);
-
-  const handleNodesChange = useCallback(
-    (changes: NodeChange<WfFlowNode>[]) => {
-      const nextNodes = applyNodeChanges(changes, nodes);
-      setNodes(nextNodes);
-      if (!changes.some((c) => c.type === "remove")) return;
-      const alive = new Set(nextNodes.map((n) => n.id));
-      const nextEdges = edges.filter((e) => alive.has(e.source) && alive.has(e.target));
-      if (nextEdges.length !== edges.length) setEdges(nextEdges);
-      setSelectedId((s) => (s !== null && alive.has(s) ? s : null));
-      emitFrom(stripErrors(nextNodes), nextEdges);
-    },
-    [nodes, edges, setNodes, setEdges, emitFrom, stripErrors],
-  );
-
-  const handleEdgesChange = useCallback(
-    (changes: EdgeChange<WfEdge>[]) => {
-      const nextEdges = applyEdgeChanges(changes, edges);
-      setEdges(nextEdges);
-      if (changes.some((c) => c.type === "remove")) emitFrom(nodes, nextEdges);
-    },
-    [nodes, edges, setEdges, emitFrom],
-  );
-
-  const isConditionSource = useCallback(
-    (source: string) => nodes.find((n) => n.id === source)?.data.nodeType === "condition",
-    [nodes],
-  );
-
-  /** 目标节点现存的 on 值(同目标条件入边共用;无则 null) */
-  const existingOnOf = useCallback(
-    (target: string): "true" | "false" | null =>
-      edges.find((e) => e.target === target && isConditionSource(e.source))?.data?.on ?? null,
-    [edges, isConditionSource],
-  );
-
-  const addEdgeWith = useCallback(
-    (source: string, target: string, on: "true" | "false" | null) => {
-      const nextEdges: WfEdge[] = [
-        ...edges.filter((e) => !(e.source === source && e.target === target)),
-        { id: edgeId(source, target), source, target, type: "wf" as const, data: { on } },
-      ];
-      setEdges(nextEdges);
-      emitFrom(stripErrors(nodes), nextEdges);
-    },
-    [edges, nodes, setEdges, emitFrom, stripErrors],
-  );
-
-  const handleConnect = useCallback(
-    (conn: Connection) => {
-      if (!conn.source || !conn.target || conn.source === conn.target) return;
-      if (edges.some((e) => e.source === conn.source && e.target === conn.target)) return;
-      // condition 出边必须明确指定 on 值；取消选择时不创建连线。
-      if (isConditionSource(conn.source)) {
-        setPending({
-          source: conn.source,
-          target: conn.target,
-          existingOn: existingOnOf(conn.target),
-        });
-        return;
-      }
-      addEdgeWith(conn.source, conn.target, null);
-    },
-    [edges, isConditionSource, existingOnOf, addEdgeWith],
-  );
-
-  /** on 值确认:新边 + 同目标既有条件入边同步为同一 on(节点级单一语义) */
-  const confirmConditionOn = useCallback(
-    (on: "true" | "false") => {
-      if (!pending) return;
-      const { source, target } = pending;
-      const nextEdges: WfEdge[] = edges.map((e) =>
-        e.target === target && isConditionSource(e.source) ? { ...e, data: { ...e.data, on } } : e,
-      );
-      if (!nextEdges.some((e) => e.source === source && e.target === target))
-        nextEdges.push({
-          id: edgeId(source, target),
-          source,
-          target,
-          type: "wf" as const,
-          data: { on },
-        });
-      setEdges(nextEdges);
-      setPending(null);
-      emitFrom(stripErrors(nodes), nextEdges);
-    },
-    [pending, edges, nodes, isConditionSource, setEdges, emitFrom, stripErrors],
-  );
-
-  const setConditionOn = useCallback(
-    (targetId: string, on: "true" | "false") => {
-      const nextEdges: WfEdge[] = edges.map((e) =>
-        e.target === targetId && isConditionSource(e.source)
-          ? { ...e, data: { ...e.data, on } }
-          : e,
-      );
-      setEdges(nextEdges);
-      emitFrom(stripErrors(nodes), nextEdges);
-    },
-    [edges, nodes, isConditionSource, setEdges, emitFrom, stripErrors],
-  );
-
-  const addNode = useCallback(
-    (nodeType: WfNodeType, position: CanvasPosition) => {
-      const nextNodes: WfFlowNode[] = [
-        ...nodes,
-        {
-          id: nextNodeId(nodes, nodeType),
-          type: "wf" as const,
-          position,
-          data: { nodeType, config: {}, depsExplicit: false },
-        },
-      ];
-      setNodes(nextNodes);
-      persistPositions(nextNodes);
-      // 结构变更后立即回写定义，确保保存时包含新增节点。
-      emitFrom(stripErrors(nextNodes), edges);
-    },
-    [nodes, edges, setNodes, persistPositions, emitFrom, stripErrors],
-  );
-
-  const addNodeAtCenter = useCallback(
-    (nodeType: WfNodeType) => {
-      const rect = wrapperRef.current?.getBoundingClientRect();
-      const position = rect
-        ? screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 3 })
-        : { x: 120, y: 120 };
-      addNode(nodeType, position);
-    },
-    [screenToFlowPosition, addNode],
-  );
-
-  const handleDrop = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      const nodeType = event.dataTransfer.getData(WF_NODE_MIME);
-      if (!(NODE_TYPES as readonly string[]).includes(nodeType)) return;
-      addNode(nodeType as WfNodeType, screenToFlowPosition({ x: event.clientX, y: event.clientY }));
-    },
-    [screenToFlowPosition, addNode],
-  );
-
-  const updateConfig = useCallback(
-    (id: string, config: Record<string, unknown>) => {
-      const nextNodes = nodes.map((n) =>
-        n.id === id ? { ...n, data: { ...n.data, config, errorText: undefined } } : n,
-      );
-      setNodes(nextNodes);
-      emitFrom(nextNodes, edges);
-    },
-    [nodes, edges, setNodes, emitFrom],
-  );
-
-  const renameNode = useCallback(
-    (oldId: string, newId: string) => {
-      if (
-        oldId === newId ||
-        !NODE_ID_RE.test(newId) ||
-        RESERVED_NODE_IDS.has(newId) ||
-        nodes.some((n) => n.id === newId)
-      )
-        return;
-      const nextNodes = nodes.map((n) =>
-        n.id === oldId ? { ...n, id: newId, data: { ...n.data, errorText: undefined } } : n,
-      );
-      const nextEdges = edges.map((e) => ({
-        ...e,
-        id: edgeId(e.source === oldId ? newId : e.source, e.target === oldId ? newId : e.target),
-        source: e.source === oldId ? newId : e.source,
-        target: e.target === oldId ? newId : e.target,
-      }));
-      setNodes(nextNodes);
-      persistPositions(nextNodes); // 节点改名后按新 id 保存坐标。
-      setEdges(nextEdges);
-      setSelectedId(newId);
-      emitFrom(nextNodes, nextEdges);
-    },
-    [nodes, edges, setNodes, setEdges, persistPositions, emitFrom],
-  );
-
-  const deleteNode = useCallback(
-    (id: string) => {
-      const nextNodes = nodes.filter((n) => n.id !== id);
-      const nextEdges = edges.filter((e) => e.source !== id && e.target !== id);
-      setNodes(nextNodes);
-      setEdges(nextEdges);
-      setSelectedId((s) => (s === id ? null : s));
-      emitFrom(nextNodes, nextEdges);
-    },
-    [nodes, edges, setNodes, setEdges, emitFrom],
-  );
+  const { addNode, handleNodesChange, updateConfig, renameNode, deleteNode, addNodeAtCenter } =
+    useCanvasNodes({
+      nodes,
+      edges,
+      setNodes,
+      setEdges,
+      setSelectedId,
+      emitFrom,
+      persistPositions,
+      wrapperRef,
+    });
+  const { handleEdgesChange, existingOnOf, handleConnect, confirmConditionOn, setConditionOn } =
+    useCanvasEdges({
+      nodes,
+      edges,
+      setEdges,
+      setPending,
+      emitFrom,
+      pendingRef,
+    });
+  const handleDrop = useCanvasDrop({ addNode });
 
   const selectedNode = nodes.find((n) => n.id === selectedId) ?? null;
-  const located = errorText === "" ? null : locateValidationError(errorText);
-  const nodeServerError =
-    selectedNode && located?.nodeIds.includes(selectedNode.id)
-      ? { message: located.message, configKey: located.configKey }
-      : null;
+  const nodeServerError = locatedServerError(selectedNode, errorText);
 
   return (
     <div className="flex flex-col md:h-[60vh] md:flex-row">
-      {/* 节点面板支持拖拽或点击放置；nokey 阻止面板按键触发画布删除。 */}
-      <div className="nokey flex shrink-0 gap-2 overflow-x-auto border-b p-2 md:w-36 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r">
-        <p className="hidden px-1 text-3xs font-medium text-muted-foreground md:block">节点类型</p>
-        <p className="px-1 text-3xs text-muted-foreground md:hidden">拖到画布或点击放置:</p>
-        {NODE_TYPES.map((t) => {
-          const Icon = NODE_TYPE_ICONS[t];
-          return (
-            <Button
-              key={t}
-              type="button"
-              variant="outline"
-              draggable
-              className="shrink-0 justify-start gap-1.5 px-2 md:w-full"
-              onDragStart={(e) => {
-                e.dataTransfer.setData(WF_NODE_MIME, t);
-                e.dataTransfer.effectAllowed = "move";
-              }}
-              onClick={() => addNodeAtCenter(t)}
-            >
-              <Icon className="size-3.5 shrink-0 text-primary" aria-hidden />
-              <span className="text-xs">{NODE_TYPE_LABELS[t]}</span>
-            </Button>
-          );
-        })}
-      </div>
+      <NodePalette onPlace={addNodeAtCenter} />
 
       <div
         ref={wrapperRef}
         className="relative h-72 md:h-auto md:flex-1"
         onDrop={handleDrop}
-        onDragOver={(e) => {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "move";
-        }}
+        onDragOver={handleDragOver}
       >
         <ReactFlow<WfFlowNode, WfEdge>
           nodes={nodes}
@@ -460,30 +165,16 @@ function CanvasInner({
         )}
       </div>
 
-      {/* nokey 排除侧栏控件的按键事件,避免 Backspace 删除画布选中节点。 */}
-      <aside className="nokey w-full shrink-0 border-t p-3 md:w-80 md:overflow-y-auto md:border-l md:border-t-0 md:p-3">
-        {selectedNode ? (
-          <NodeConfigForm
-            key={selectedNode.id}
-            nodeId={selectedNode.id}
-            nodeType={selectedNode.data.nodeType}
-            config={selectedNode.data.config}
-            conditionOn={existingOnOf(selectedNode.id)}
-            serverError={nodeServerError}
-            takenIds={nodes.map((n) => n.id)}
-            onConfigChange={(config) => updateConfig(selectedNode.id, config)}
-            onIdChange={(newId) => renameNode(selectedNode.id, newId)}
-            onOnValueChange={(on) => setConditionOn(selectedNode.id, on)}
-            onDelete={() => deleteNode(selectedNode.id)}
-          />
-        ) : (
-          <EmptyState>
-            {nodes.length === 0
-              ? "从左侧拖入节点类型开始编排。"
-              : "点选节点编辑配置;从节点右缘拖线连接依赖。"}
-          </EmptyState>
-        )}
-      </aside>
+      <CanvasSidePanel
+        selectedNode={selectedNode}
+        nodeServerError={nodeServerError}
+        nodes={nodes}
+        existingOnOf={existingOnOf}
+        onConfigChange={updateConfig}
+        onRename={renameNode}
+        onConditionOn={setConditionOn}
+        onDelete={deleteNode}
+      />
 
       <ConditionOnDialog
         pending={pending}

@@ -269,21 +269,11 @@ class ConnectorService:
         """
         if use_saved_secret_for is not None and use_saved_secret_for != decl.key:
             raise ConnectorValidationError("存量凭证只能用于同一 key 的连接器(先测后存)")
-        # 存量凭证合并先于声明校验:has_secret 按「合并后是否持有材料」判定;
-        # 若先校验后合并,编辑态空框+use_saved_secret 的先测后存路径会被
-        # 材料闸误拒 400
-        used_secret = secret
-        row_fields = decl_secret_fields(decl, None)
-        row_fields.pop("auth_secret_plain")
-        if used_secret is None and use_saved_secret_for:
-            target = await self._repo.get_call_target(tenant_id=tenant_id, key=use_saved_secret_for)
-            if target is not None:
-                used_secret = target.get("auth_secret_plain")
-                row_fields["auth_type"] = str(target["auth_type"])
-        validate_declaration(decl, has_secret=bool(used_secret), timeout_max_ms=self._timeout_max)
+        used_secret, row = await self._test_row(
+            decl, secret, use_saved_secret_for=use_saved_secret_for, tenant_id=tenant_id
+        )
         if self._caller is None:
             raise ConnectorValidationError("出站通道未接线(部署缺陷)")
-        row: dict[str, Any] = {**row_fields, "tenant_id": tenant_id}
         started = time.monotonic()
         ok, status_code, body_summary, failure = await self._caller.call(
             row=row, secret=used_secret, args=args
@@ -306,6 +296,30 @@ class ConnectorService:
             "failure": failure,
             "duration_ms": duration_ms,
         }
+
+    async def _test_row(
+        self,
+        decl: ConnectorDecl,
+        secret: str | None,
+        *,
+        use_saved_secret_for: str | None,
+        tenant_id: str,
+    ) -> tuple[str | None, dict[str, Any]]:
+        """合并存量凭证、校验声明并组装测试调用行;返回 (实际使用凭证, 调用行)。"""
+        # 存量凭证合并先于声明校验:has_secret 按「合并后是否持有材料」判定;
+        # 若先校验后合并,编辑态空框+use_saved_secret 的先测后存路径会被
+        # 材料闸误拒 400
+        used_secret = secret
+        row_fields = decl_secret_fields(decl, None)
+        row_fields.pop("auth_secret_plain")
+        if used_secret is None and use_saved_secret_for:
+            target = await self._repo.get_call_target(tenant_id=tenant_id, key=use_saved_secret_for)
+            if target is not None:
+                used_secret = target.get("auth_secret_plain")
+                row_fields["auth_type"] = str(target["auth_type"])
+        validate_declaration(decl, has_secret=bool(used_secret), timeout_max_ms=self._timeout_max)
+        row: dict[str, Any] = {**row_fields, "tenant_id": tenant_id}
+        return used_secret, row
 
 
 def masked_out_row(row: dict[str, Any]) -> dict[str, Any]:

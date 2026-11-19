@@ -4,7 +4,7 @@ export type PrefsMap = Record<string, unknown>;
 
 export type PrefsDraft = Record<string, string | string[]>;
 
-export interface PrefSlotMeta {
+interface PrefSlotMeta {
   key: string;
   label: string;
   list: boolean;
@@ -45,23 +45,44 @@ function serverList(prefs: PrefsMap, key: string): string[] {
   return Array.isArray(val) ? val.map((x) => String(x)) : [];
 }
 
+/** 草稿中的列表值规整:去首尾空白并丢弃空项 */
+function draftList(val: string | string[] | undefined): string[] {
+  return Array.isArray(val) ? val.map((x) => String(x).trim()).filter(Boolean) : [];
+}
+
+/** 列表槽位的补丁值:未变化返回 undefined,清空返回 null */
+function listSlotPatch(
+  server: PrefsMap,
+  slot: PrefSlotMeta,
+  draft: PrefsDraft,
+): string[] | null | undefined {
+  const next = draftList(draft[slot.key]);
+  const prev = serverList(server, slot.key);
+  const changed = next.length !== prev.length || next.some((x, i) => x !== prev[i]);
+  if (!changed) return undefined;
+  return next.length > 0 ? next : null;
+}
+
+/** 单值槽位的补丁值:未变化返回 undefined,清空返回 null */
+function textSlotPatch(
+  server: PrefsMap,
+  slot: PrefSlotMeta,
+  draft: PrefsDraft,
+): string | null | undefined {
+  const val = draft[slot.key];
+  const next = (typeof val === "string" ? val : "").trim();
+  if (next === serverString(server, slot.key)) return undefined;
+  return next === "" ? null : next;
+}
+
 /** 只提交相对服务端值发生变化的字段;清空已有值提交 null(删除),未变化字段省略。 */
 export function buildPrefsPatch(server: PrefsMap, draft: PrefsDraft): PrefsMap {
   const patch: PrefsMap = {};
   for (const slot of PREF_SLOTS) {
-    const val = draft[slot.key];
-    if (slot.list) {
-      const next = Array.isArray(val) ? val.map((x) => String(x).trim()).filter(Boolean) : [];
-      const prev = serverList(server, slot.key);
-      const changed = next.length !== prev.length || next.some((x, i) => x !== prev[i]);
-      if (!changed) continue;
-      patch[slot.key] = next.length > 0 ? next : null;
-    } else {
-      const next = (typeof val === "string" ? val : "").trim();
-      const prev = serverString(server, slot.key);
-      if (next === prev) continue;
-      patch[slot.key] = next === "" ? null : next;
-    }
+    const value = slot.list
+      ? listSlotPatch(server, slot, draft)
+      : textSlotPatch(server, slot, draft);
+    if (value !== undefined) patch[slot.key] = value;
   }
   return patch;
 }

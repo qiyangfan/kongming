@@ -32,6 +32,51 @@ _T = TypeVar("_T")
 _L = TypeVar("_L")
 
 
+# 出站异常归一(除全程预算 TimeoutError 外)的静态分句:异常类的匹配按声明序
+# 优先,故分句顺序即优先级;分句须为静态表达式,动态逐类 try/except 会改变
+# 异常组的传递路径
+_normalized = (
+    McpCallError,
+    httpx2.InvalidURL,
+    MCPError,
+    httpx2.TimeoutException,
+    httpx2.HTTPError,
+    RuntimeError,
+    BaseExceptionGroup,
+    Exception,
+)
+_TRANSPORT_TIMEOUT = TimeoutError
+
+
+def _normalize_outbound(e: BaseException) -> McpCallError:
+    """底层异常按类归一为 McpCallError;顺序:本层错透传→URL→协议码→
+    传输族→协商→任务组→残族(平台不失败)。"""
+    err: McpCallError
+    if isinstance(e, McpCallError):
+        err = e  # 本适配层已归一(McpCallError 原样透传,不二次包装)
+    elif isinstance(e, httpx2.InvalidURL):
+        err = McpCallError("protocol", f"endpoint 非法: {e}")
+    elif isinstance(e, MCPError):
+        # 协议层错误按码归一(方法不存在/读超时/远端拒答)
+        err = _classify_mcp_error(e)
+    elif isinstance(e, httpx2.TimeoutException):
+        err = McpCallError("timeout", type(e).__name__)
+    elif isinstance(e, httpx2.HTTPError):
+        # 连接族/传输族未细分残族(HTTPError 基类;InvalidURL 已先行)
+        err = McpCallError("conn", type(e).__name__)
+    elif isinstance(e, RuntimeError):
+        # SDK 修订协商失败(modern 无交集/服务器版本不可识)=协议不匹配
+        err = McpCallError("protocol", str(e)[:300])
+    elif isinstance(e, BaseExceptionGroup):
+        # anyio 任务组把叶子错误打包组(SDK 会话/传输层),拆包归一
+        err = _classify_group(cast("BaseExceptionGroup", e))
+    else:
+        # 残族兜底:平台不失败,一律归 remote
+        log.debug("mcp 出站残族异常归一 remote", exc_info=True)
+        err = McpCallError("remote", type(e).__name__)
+    return err
+
+
 def _classify_mcp_error(e: MCPError) -> McpCallError:
     """SDK 协议错误 → 平台五类归一:方法不存在=unsupported(原语不支持
     形态);请求超时(-32001,SDK 逐请求读超时)=timeout;其余=remote。"""
@@ -63,47 +108,39 @@ class HttpMcpCaller:
         (传输超时是单次操作间隔,慢滴响应须总预算守「Ns」字面语义)。"""
 
         async def _inner() -> _T:
-            async with httpx2.AsyncClient(
-                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
-                headers=headers,
-                timeout=httpx2.Timeout(self._timeout, read=max(self._timeout, 30.0)),
-            ) as client:
-                async with streamable_http_client(url=endpoint, http_client=client) as (
-                    read_stream,
-                    write_stream,
-                ):
-                    async with ClientSession(
-                        read_stream, write_stream, read_timeout_seconds=float(self._timeout)
-                    ) as session:
-                        caps = await _negotiate(session)
-                        return await action(session, caps)
+            return await self._with_session(endpoint=endpoint, headers=headers, action=action)
 
         try:
             return await asyncio.wait_for(_inner(), timeout=self._timeout + 1)
-        except TimeoutError as e:
+        except _TRANSPORT_TIMEOUT as e:
             raise McpCallError("timeout", f"全程超 {self._timeout + 1}s") from e
-        except McpCallError:
-            raise
-        except httpx2.InvalidURL as e:
-            raise McpCallError("protocol", f"endpoint 非法: {e}") from e
-        except MCPError as e:
-            # 协议层错误按码归一(方法不存在/读超时/远端拒答)
-            raise _classify_mcp_error(e) from e
-        except httpx2.TimeoutException as e:
-            raise McpCallError("timeout", type(e).__name__) from e
-        except httpx2.HTTPError as e:
-            # 连接族/传输族未细分残族(HTTPError 基类;InvalidURL 已先行)
-            raise McpCallError("conn", type(e).__name__) from e
-        except RuntimeError as e:
-            # SDK 修订协商失败(modern 无交集/服务器版本不可识)=协议不匹配
-            # 将协商错误归类为协议错误，不向调用方暴露 SDK 异常。
-            raise McpCallError("protocol", str(e)[:300]) from e
-        except BaseExceptionGroup as eg:
-            # anyio 任务组把叶子错误打包组(SDK 会话/传输层),拆包归一
-            raise _classify_group(eg) from eg
-        except Exception as e:  # noqa: BLE001  # 平台不失败:残族归一 remote
-            log.debug("mcp 出站残族异常归一 remote", exc_info=True)
-            raise McpCallError("remote", type(e).__name__) from e
+        except _normalized as e:
+            raise _normalize_outbound(e) from e
+
+    async def _with_session(
+        self,
+        *,
+        endpoint: str,
+        headers: dict[str, str],
+        action: Callable[[ClientSession, types.ServerCapabilities], Awaitable[_T]],
+    ) -> _T:
+        """单次连接:传输→会话→能力协商→action。
+
+        传输超时是单次操作间隔,慢滴响应须由外层 wait_for 的总预算守「Ns」字面语义。"""
+        async with httpx2.AsyncClient(
+            trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+            headers=headers,
+            timeout=httpx2.Timeout(self._timeout, read=max(self._timeout, 30.0)),
+        ) as client:
+            async with streamable_http_client(url=endpoint, http_client=client) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(
+                    read_stream, write_stream, read_timeout_seconds=float(self._timeout)
+                ) as session:
+                    caps = await _negotiate(session)
+                    return await action(session, caps)
 
     # ---- 原语消费(转换 SDK 结果 → 域模型) ----
 

@@ -169,9 +169,11 @@ def _run(nodes: list[dict[str, Any]], **kw: Any) -> Any:
     return run_dag(
         validate_dag({"nodes": nodes}),
         kw.get("inputs", {}),
-        sql=kw.get("sql") or _MockSql(),
-        http=kw.get("http") or _MockHttp(),
-        agent=kw.get("agent") or _MockAgent(),
+        runners=(
+            kw.get("sql") or _MockSql(),
+            kw.get("http") or _MockHttp(),
+            kw.get("agent") or _MockAgent(),
+        ),
         trace_id="t",
         tenant_key="wf",
         user_id="u",
@@ -281,9 +283,7 @@ async def test_engine_loop_cap() -> None:
             }
         ),
         {"arr": [1, 2, 3, 4, 5]},
-        sql=_MockSql(),
-        http=_MockHttp(),
-        agent=_MockAgent(),
+        runners=(_MockSql(), _MockHttp(), _MockAgent()),
         trace_id="t",
         tenant_key="wf",
         user_id="u",
@@ -318,9 +318,7 @@ async def test_engine_loop_collects() -> None:
             }
         ),
         {"arr": ["a", "b"]},
-        sql=_MockSql(),
-        http=_MockHttp(),
-        agent=_MockAgent(),
+        runners=(_MockSql(), _MockHttp(), _MockAgent()),
         trace_id="t",
         tenant_key="wf",
         user_id="u",
@@ -434,9 +432,7 @@ async def test_engine_loop_body_skip_routing() -> None:
             }
         ),
         {"arr": [2, 1]},
-        sql=sql,
-        http=_MockHttp(),
-        agent=_MockAgent(),
+        runners=(sql, _MockHttp(), _MockAgent()),
         trace_id="t",
         tenant_key="wf",
         user_id="u",

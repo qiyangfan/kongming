@@ -3,13 +3,13 @@
 import type { components } from "./api-types.gen";
 import { api } from "./api";
 
-export type FeedbackIn = components["schemas"]["FeedbackIn"];
-export type HandleIn = components["schemas"]["HandleIn"];
+type FeedbackIn = components["schemas"]["FeedbackIn"];
+type HandleIn = components["schemas"]["HandleIn"];
 export type FeedbackOut = components["schemas"]["FeedbackOut"];
-export type HandleOut = components["schemas"]["HandleOut"];
-export type InvolvedTablesOut = components["schemas"]["InvolvedTablesOut"];
-export type OverviewOut = components["schemas"]["OverviewOut"];
-export type FeedbackPageOut = components["schemas"]["FeedbackPageOut"];
+type HandleOut = components["schemas"]["HandleOut"];
+type InvolvedTablesOut = components["schemas"]["InvolvedTablesOut"];
+type OverviewOut = components["schemas"]["OverviewOut"];
+type FeedbackPageOut = components["schemas"]["FeedbackPageOut"];
 export type FeedbackPageItemOut = components["schemas"]["FeedbackPageItemOut"];
 
 /** 反馈提交:rating 必传;comment/corrected_sql null=保持现值,空串=清空 */
@@ -41,7 +41,7 @@ export function feedbackOverview(params: {
   return api.get<OverviewOut>(`/feedback/overview${suffix}`);
 }
 
-export interface FeedbackPageParams {
+interface FeedbackPageParams {
   page?: number;
   size?: number;
   user_id?: string;

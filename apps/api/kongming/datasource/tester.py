@@ -39,9 +39,8 @@ def _classify(e: Exception) -> str:
     if isinstance(e, OSError):
         # 拒连/网络不可达等底层错误(ConnectionRefusedError 等,消息不含凭证)
         return "无法连接:主机或端口不可达"
-    if isinstance(e, asyncpg.PostgresError):
-        return f"连接失败:{type(e).__name__}"  # 驱动类别名(无敏感信息)
-    return "连接失败"
+    # 驱动类别名(无敏感信息),兜底不区分具体类型
+    return f"连接失败:{type(e).__name__}" if isinstance(e, asyncpg.PostgresError) else "连接失败"
 
 
 class AsyncpgConnectionTester:

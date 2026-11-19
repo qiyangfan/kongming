@@ -19,6 +19,7 @@ from starlette.requests import Request as _Req
 from starlette.responses import JSONResponse, Response
 from starlette.responses import Response as _Resp
 
+from kongming.app_registry import bind_app
 from kongming.attachment.router import chat_router as attachment_chat_router
 from kongming.attachment.router import internal_router as attachment_internal_router
 from kongming.audit.context import ClientIpMiddleware
@@ -68,9 +69,9 @@ from kongming.toolcall.router import chat_router as toolcall_chat_router
 from kongming.toolcall.router import internal_router as toolcall_internal_router
 from kongming.toolcall.router import router as toolcall_router
 from kongming.trace import get_trace_id, new_trace_id, set_trace_id
+from kongming.trigger.dependencies import start_scheduler as start_trigger_scheduler
+from kongming.trigger.dependencies import stop_scheduler as stop_trigger_scheduler
 from kongming.trigger.router import router as trigger_router
-from kongming.trigger.router import start_scheduler as start_trigger_scheduler
-from kongming.trigger.router import stop_scheduler as stop_trigger_scheduler
 from kongming.trigger.router import webhook_router as trigger_webhook_router
 from kongming.workflow.router import router as workflow_router
 
@@ -204,11 +205,11 @@ async def _task_watchdog_loop() -> None:
     判读(agent 判读端点,不可用即落标记)→ 停滞/二次超窗 epoch 夺权收口。
     独立短会话,失败下轮重试;开关关闭时循环不创建(spec「运行中看门狗监督」)。"""
     from kongming.chat.agent_client import AgentClient
-    from kongming.chat.router import get_agent_client
+    from kongming.chat.dependencies import get_agent_client
     from kongming.db import get_sessionmaker as _gsm
+    from kongming.task.collab_repo import SqlCollabLedgerRepo as _TaskRepo
     from kongming.task.ports import StagnationVerdict
-    from kongming.task.repository import SqlTaskRepo as _TaskRepo
-    from kongming.task.service import TaskService as _TaskSvc
+    from kongming.task.watchdog import TaskWatchdog as _TaskSvc
 
     class _AgentJudge:
         """停滞判读端口适配(组合根绑定;None=判读不可用,由 AgentClient
@@ -275,54 +276,73 @@ def _warn_doc_entity_misconfiguration() -> None:
         log.warning("doc_entity:%s", misconfig)
 
 
+def _self_check_and_configure_sqlguard() -> None:
+    """SQL 安全引擎启动自检(失败告警降级,不阻断)。"""
+    from kongming.sqlfw import guard
+
+    guard.configure(get_settings().sqlguard_mode)
+    guard.startup_self_check()
+
+
+async def _mark_stale_tasks_interrupted() -> None:
+    """重启扫描——存量 RUNNING/PLANNING 任务标记 INTERRUPTED(不谎称完成),
+    顺带清理挂起超 TTL 的审批步骤(必须经 service:repo 直调会漏掉审批清扫)。"""
+    from kongming.db import get_sessionmaker as _gsm
+    from kongming.task.collab_repo import SqlCollabLedgerRepo as SqlTaskRepo
+    from kongming.task.service import TaskService
+
+    async with _gsm()() as s:
+        n = await TaskService(SqlTaskRepo(s)).mark_interrupted_stale()
+        await s.commit()
+        if n:
+            log.info("启动扫描:%d 个存量任务标记 INTERRUPTED(含超时审批清理)", n)
+
+
+async def _mark_stale_reports_failed() -> None:
+    """进程中断滞留 GENERATING 的报告收敛 FAILED(不静默悬挂)。"""
+    from kongming.db import get_sessionmaker as _gsm
+    from kongming.report.repository import SqlReportRepo
+
+    async with _gsm()() as s:
+        nr = await SqlReportRepo(s).mark_interrupted_failed()
+        await s.commit()
+        if nr:
+            log.info("启动扫描:%d 个滞留 GENERATING 的报告标记 FAILED", nr)
+
+
+async def _startup(session: AsyncSession) -> None:
+    """lifespan 启动段:检索配置自检 + 播种 + 存量任务/报告收敛 + 工具与域启停装配。"""
+    from kongming.rag.catalog import assert_fulltext_ts_config_available
+
+    # 全文检索必须使用数据库中存在的分词配置；配置无效时阻止启动。
+    await assert_fulltext_ts_config_available(session, get_settings().rag_fulltext_ts_config)
+    await seed_all(session, get_settings())
+    await _mark_stale_tasks_interrupted()
+    await _mark_stale_reports_failed()
+    _warn_websearch_misconfiguration()  # 开发环境告警；生产环境配置检查会拒绝启动。
+    _warn_rerank_misconfiguration()  # 与 WebSearch 使用相同的环境规则。
+    _warn_doc_entity_misconfiguration()  # 与 WebSearch 使用相同的环境规则。
+    tool_registry.activate(
+        tool_registry.build_registry(
+            websearch_provider=get_settings().websearch_provider,
+            websearch_api_key=get_settings().websearch_api_key,
+        )
+    )
+    # 域启停持久状态装载(重启/多副本以库收敛;无网关静默跳过)
+    from kongming.toolcall.dependencies import load_persisted_domain_states
+
+    await load_persisted_domain_states()
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
     """启动即播种(幂等,rbac spec「种子数据」);DB 不可达则拒启(控制面 fail-closed)。
     启动时试构造凭证 cipher,非法密钥(坏 base64/非 16/32 字节)同样拒启,
     避免请求期才暴露为 500。teardown:清理只读执行池并取消后台任务。"""
     get_cipher(get_settings().datasource_encrypt_key)
-    from kongming.sqlfw import guard  # SQL 安全引擎启动自检(失败告警降级,不阻断)
-
-    guard.configure(get_settings().sqlguard_mode)
-    guard.startup_self_check()
+    _self_check_and_configure_sqlguard()
     async with get_sessionmaker()() as session:
-        # 全文检索必须使用数据库中存在的分词配置；配置无效时阻止启动。
-        from kongming.rag.repository import assert_fulltext_ts_config_available
-
-        await assert_fulltext_ts_config_available(session, get_settings().rag_fulltext_ts_config)
-        await seed_all(session, get_settings())
-        # 重启扫描——存量 RUNNING/PLANNING 任务标记 INTERRUPTED(不谎称完成),
-        # 顺带清理挂起超 TTL 的审批步骤(必须经 service:repo 直调会漏掉审批清扫)
-        from kongming.db import get_sessionmaker as _gsm
-        from kongming.task.repository import SqlTaskRepo as _TaskRepo
-        from kongming.task.service import TaskService as _TaskSvc
-
-        async with _gsm()() as _s:
-            n = await _TaskSvc(_TaskRepo(_s)).mark_interrupted_stale()
-            await _s.commit()
-            if n:
-                log.info("启动扫描:%d 个存量任务标记 INTERRUPTED(含超时审批清理)", n)
-        # 进程中断滞留 GENERATING 的报告收敛 FAILED(不静默悬挂)
-        from kongming.report.repository import SqlReportRepo as _ReportRepo
-
-        async with _gsm()() as _s:
-            nr = await _ReportRepo(_s).mark_interrupted_failed()
-            await _s.commit()
-            if nr:
-                log.info("启动扫描:%d 个滞留 GENERATING 的报告标记 FAILED", nr)
-        _warn_websearch_misconfiguration()  # 开发环境告警；生产环境配置检查会拒绝启动。
-        _warn_rerank_misconfiguration()  # 与 WebSearch 使用相同的环境规则。
-        _warn_doc_entity_misconfiguration()  # 与 WebSearch 使用相同的环境规则。
-        tool_registry.activate(
-            tool_registry.build_registry(
-                websearch_provider=get_settings().websearch_provider,
-                websearch_api_key=get_settings().websearch_api_key,
-            )
-        )
-        # 域启停持久状态装载(重启/多副本以库收敛;无网关静默跳过)
-        from kongming.toolcall.router import load_persisted_domain_states as _load_states
-
-        await _load_states()
+        await _startup(session)
     archive_task = asyncio.create_task(_daily_archive_loop())
     billing_task = asyncio.create_task(_monthly_invoice_loop())
     expire_task = asyncio.create_task(_payment_expire_loop())
@@ -368,6 +388,7 @@ app = FastAPI(
     description="控制面:持凭证、做安全决策(ADR-002)",
     lifespan=lifespan,
 )
+bind_app(app)  # 非 DI 装配点(如 MCP 入站中间件)经注册表读取依赖覆写
 # 请求 IP 通过 contextvars 传入操作日志，无需修改各调用点。
 app.add_middleware(ClientIpMiddleware)
 

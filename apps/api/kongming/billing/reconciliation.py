@@ -62,6 +62,10 @@ def _sum_rows(rows: list[dict[str, Any]]) -> CostTrack:
     )
 
 
+class _MuniuUnavailable(Exception):
+    """拉取失败的可见原因(只进入 CostTrack.reason,不对外抛出)。"""
+
+
 async def fetch_muniu_cost(
     base_url: str,
     token: str,
@@ -75,10 +79,23 @@ async def fetch_muniu_cost(
     异常只带异常类名,token 永不进入任何消息或日志。
     transport 仅供测试注入(生产缺省 None,自建真实客户端)。
     """
+    try:
+        return _sum_rows(await _fetch_muniu_points(base_url, token, window_days, transport))
+    except _MuniuUnavailable as exc:
+        return CostTrack(available=False, reason=str(exc))
+
+
+async def _fetch_muniu_points(
+    base_url: str,
+    token: str,
+    window_days: int,
+    transport: httpx.AsyncBaseTransport | None,
+) -> list[dict[str, Any]]:
+    """请求并解析 usage points;失败抛 _MuniuUnavailable。"""
     if not token:
-        return CostTrack(available=False, reason="muniu_admin_token 未配置")
+        raise _MuniuUnavailable("muniu_admin_token 未配置")
     if not base_url.strip():
-        return CostTrack(available=False, reason="muniu_admin_base_url 未配置")
+        raise _MuniuUnavailable("muniu_admin_base_url 未配置")
     params: dict[str, str] = {"group_by": "key", "from": _window_since_rfc3339(window_days)}
     try:
         async with httpx.AsyncClient(timeout=5.0, transport=transport, trust_env=False) as client:
@@ -88,25 +105,21 @@ async def fetch_muniu_cost(
                 headers={"Authorization": f"Bearer {token}"},
             )
     except httpx.HTTPError as exc:
-        return CostTrack(available=False, reason=f"muniu 不可达: {type(exc).__name__}")
+        raise _MuniuUnavailable(f"muniu 不可达: {type(exc).__name__}") from exc
     if resp.status_code != 200:
-        return CostTrack(available=False, reason=f"muniu HTTP {resp.status_code}")
+        raise _MuniuUnavailable(f"muniu HTTP {resp.status_code}")
     try:
         payload = cast("object", resp.json())
-    except ValueError:
-        return CostTrack(available=False, reason="muniu 响应非 JSON")
+    except ValueError as exc:
+        raise _MuniuUnavailable("muniu 响应非 JSON") from exc
     # muniu 真实契约:{"points":[UsagePoint...], "from","to","group_by"}(admin.go usage handler)
     envelope = cast("dict[str, object] | None", payload if isinstance(payload, dict) else None)
     if envelope is None:
-        return CostTrack(available=False, reason="muniu 响应形态异常(非对象)")
+        raise _MuniuUnavailable("muniu 响应形态异常(非对象)")
     points = cast("list[object] | None", envelope.get("points"))
     if not isinstance(points, list):
-        return CostTrack(available=False, reason="muniu 响应缺 points 数组")
-    typed: list[dict[str, Any]] = []
-    for raw in points:
-        if isinstance(raw, dict):
-            typed.append(cast("dict[str, Any]", raw))
-    return _sum_rows(typed)
+        raise _MuniuUnavailable("muniu 响应缺 points 数组")
+    return [cast("dict[str, Any]", raw) for raw in points if isinstance(raw, dict)]
 
 
 async def collect_local_usage(session: AsyncSession, *, window_days: int) -> tuple[int, int]:

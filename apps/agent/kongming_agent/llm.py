@@ -13,7 +13,9 @@ from typing import Any, Literal, cast
 from openai import AsyncOpenAI
 from openai.types import CreateEmbeddingResponse
 from openai.types.chat import (
+    ChatCompletion,
     ChatCompletionFunctionToolParam,
+    ChatCompletionMessage,
     ChatCompletionMessageFunctionToolCall,
     ChatCompletionMessageParam,
 )
@@ -71,6 +73,26 @@ class ToolChatReply:
 
     content: str | None = None
     tool_calls: list[LlmToolCall] = field(default_factory=list[LlmToolCall])
+
+
+def _parse_tool_calls(msg: Any) -> list[LlmToolCall]:
+    """OpenAI 应答 → LlmToolCall 列表;参数 JSON 畸形时 args=None 交 ReAct 自纠。"""
+    calls: list[LlmToolCall] = []
+    for tc in cast("list[Any]", msg.tool_calls or []):
+        # SDK 联合类型:function 工具调用与 custom 工具调用;本内核只产出
+        # function 形态(custom 无 function 属性,跳过——防御未知供应商形态)
+        if not isinstance(tc, ChatCompletionMessageFunctionToolCall):
+            continue
+        raw = tc.function.arguments or ""
+        try:
+            # json.loads 返回 Any,显式注解约束到 LlmToolCall.args 契约型
+            parsed: dict[str, object] | None = json.loads(raw) if raw.strip() else {}
+            if not isinstance(parsed, dict):
+                parsed = None  # 标量/数组畸形 → 喂回自纠
+        except json.JSONDecodeError:
+            parsed = None
+        calls.append(LlmToolCall(call_id=tc.id, name=tc.function.name, args=parsed, raw_args=raw))
+    return calls
 
 
 def _same_target(a: ResolvedTarget, b: ResolvedTarget) -> bool:
@@ -275,21 +297,17 @@ class LlmClient:
         主目标分得预算大头(总预算 − 下游目标各保留 1 次),下游不再重试。
         用量每尝试一条由 call_target 内部自报(实际模型名即该次尝试的模型)。"""
         chain = self._degrade_chain(task, model_override)
-        primary_client = chain[0][0]
-        if primary_client is None:
+        if chain[0][0] is None:
             raise LlmError("KM_AGENT_LLM_API_KEY 未配置")
-        # 下游目标客户端 None(未配 key 的池条目不可能出现;主模型 None = 全局无 key,
-        # 已被上面的 primary 检查覆盖)——防御性过滤
-        usable: list[Target] = [cast("Target", chain[0])] + [
-            cast("Target", t) for t in chain[1:] if t[0] is not None
-        ]
+        usable = self._usable_targets(chain)
         primary_attempts = max(1, self._max_attempts - (len(usable) - 1))
         last_exc: BaseException | None = None
-        for idx, (_client, model, protocol) in enumerate(usable):
+        for idx, target in enumerate(usable):
+            # 主目标分得预算大头,下游各保留 1 次重试
             attempts = primary_attempts if idx == 0 else 1
             try:
                 return await call_with_retry(
-                    partial(call_target, _client, model, protocol),
+                    partial(call_target, *target),
                     max_attempts=attempts,
                     base_delay_ms=self._retry_base_ms,
                     max_wait_ms=self._retry_max_wait_ms,
@@ -298,8 +316,8 @@ class LlmClient:
                 if idx + 1 < len(usable) and is_transient_error(e):
                     log.warning(
                         "LLM 出站目标 %s(%s) 瞬时故障耗尽(尝试 %d 次),降级下一目标: %s",
-                        model,
-                        protocol,
+                        target[1],
+                        target[2],
                         attempts,
                         e,
                     )
@@ -308,6 +326,12 @@ class LlmClient:
                 raise
         assert last_exc is not None  # noqa: S101  循环必已 return 或 raise(类型收窄)
         raise last_exc
+
+    def _usable_targets(self, chain: list[ResolvedTarget]) -> list[Target]:
+        """过滤掉客户端为 None 的降级目标(未配 key 的池条目;主模型无 key 已先行拦截)。"""
+        return [cast("Target", chain[0])] + [
+            cast("Target", t) for t in chain[1:] if t[0] is not None
+        ]
 
     async def _protocol_create(
         self,
@@ -660,6 +684,160 @@ class LlmClient:
         except Exception as e:
             raise LlmError(f"vision 调用失败: {e}") from e
 
+    async def _protocol_tool_reply(
+        self,
+        client: AsyncOpenAI | AnthropicClient,
+        protocol: str,
+        *,
+        system: str,
+        model: str,
+        messages: list[ChatCompletionMessageParam],
+        tools: list[dict[str, object]],
+        temperature: float,
+        task: str | None,
+        trace_id: str | None,
+        tenant_key: str | None,
+    ) -> ToolChatReply:
+        """非 OpenAI 协议的工具调用:消息史原样翻译出站,应答回既有结构。"""
+        protocol_messages: list[dict[str, object]] = [
+            {"role": "system", "content": system},
+            *[dict(m) for m in messages],
+        ]
+        t0 = time.monotonic()
+        try:
+            reply = await self._protocol_create(
+                client,
+                protocol,
+                model=model,
+                messages=protocol_messages,
+                tools=tools,
+                temperature=temperature,
+                max_tokens=None,
+            )
+        except Exception as e:
+            self._report(
+                task=task or "CHAT_TOOLS",
+                model=model,
+                trace_id=trace_id,
+                tenant_key=tenant_key,
+                usage=None,
+                status="ERROR",
+                latency_ms=int((time.monotonic() - t0) * 1000),
+                protocol=protocol,
+            )
+            raise LlmError(f"LLM 调用失败: {e}") from e
+        self._report(
+            task=task or "CHAT_TOOLS",
+            model=model,
+            trace_id=trace_id,
+            tenant_key=tenant_key,
+            usage=reply.usage,
+            latency_ms=int((time.monotonic() - t0) * 1000),
+            protocol=protocol,
+        )
+        return ToolChatReply(content=reply.content, tool_calls=reply.tool_calls)
+
+    async def _openai_tool_reply(
+        self,
+        client: AsyncOpenAI | AnthropicClient,
+        *,
+        system: str,
+        model: str,
+        messages: list[ChatCompletionMessageParam],
+        tools: list[dict[str, object]],
+        temperature: float,
+        task: str | None,
+        trace_id: str | None,
+        tenant_key: str | None,
+    ) -> ToolChatReply:
+        """OpenAI 协议的工具调用:tools 有无两分支,应答畸形归 ERROR 采集。"""
+        # protocol 分支已保证 openai 通道持 AsyncOpenAI(或测试替身);cast 仅收窄
+        oai = cast("AsyncOpenAI", client)
+        t0 = time.monotonic()
+        try:
+            resp = await self._openai_create(oai, model, system, messages, tools, temperature)
+        except Exception:
+            self._report_tool_call(
+                task, model, trace_id, tenant_key, None, "ERROR", t0, PROTOCOL_OPENAI
+            )
+            raise
+        msg = self._tool_reply_message(resp, task, model, trace_id, tenant_key, t0)
+        self._report_tool_call(
+            task, model, trace_id, tenant_key, resp.usage, "SUCCESS", t0, PROTOCOL_OPENAI
+        )
+        content = (msg.content or "").strip() or None
+        return ToolChatReply(content=content, tool_calls=_parse_tool_calls(msg))
+
+    async def _openai_create(
+        self,
+        oai: AsyncOpenAI,
+        model: str,
+        system: str,
+        messages: list[ChatCompletionMessageParam],
+        tools: list[dict[str, object]],
+        temperature: float,
+    ) -> ChatCompletion:
+        """发起一次 OpenAI 协议工具调用出站(tools 空时省略工具参数)。"""
+        full_messages: list[ChatCompletionMessageParam] = [
+            {"role": "system", "content": system},
+            *messages,
+        ]
+        # tools 有无两分支(openai 重载对 **kwargs 展开不过 mypy);dict 列表结构
+        # 与 ChatCompletionFunctionToolParam(TypedDict)对齐,cast 收窄给 mypy
+        if tools:
+            return await oai.chat.completions.create(
+                model=model,
+                messages=full_messages,
+                temperature=temperature,
+                tools=cast("list[ChatCompletionFunctionToolParam]", tools),
+                tool_choice="auto",
+            )
+        return await oai.chat.completions.create(
+            model=model, messages=full_messages, temperature=temperature
+        )
+
+    def _tool_reply_message(
+        self,
+        resp: ChatCompletion,
+        task: str | None,
+        model: str,
+        trace_id: str | None,
+        tenant_key: str | None,
+        t0: float,
+    ) -> ChatCompletionMessage:
+        """取应答首条消息;应答畸形时按 ERROR 上报并转为 LlmError。"""
+        try:
+            return resp.choices[0].message
+        except (IndexError, AttributeError, TypeError) as e:
+            # 应答畸形(空 choices 等)=供应商协议错,同样归 ERROR 采集
+            self._report_tool_call(
+                task, model, trace_id, tenant_key, resp.usage, "ERROR", t0, PROTOCOL_OPENAI
+            )
+            raise LlmError(f"LLM 应答畸形: {e}") from e
+
+    def _report_tool_call(
+        self,
+        task: str | None,
+        model: str,
+        trace_id: str | None,
+        tenant_key: str | None,
+        usage: object,
+        status: Literal["SUCCESS", "ERROR"],
+        t0: float,
+        protocol: str,
+    ) -> None:
+        """按已经过的时长上报一次工具调用(用量/状态/协议)。"""
+        self._report(
+            task=task or "CHAT_TOOLS",
+            model=model,
+            trace_id=trace_id,
+            tenant_key=tenant_key,
+            usage=usage,
+            status=status,
+            latency_ms=int((time.monotonic() - t0) * 1000),
+            protocol=protocol,
+        )
+
     async def chat_with_tools(
         self,
         system: str,
@@ -681,122 +859,29 @@ class LlmClient:
             protocol: str,
         ) -> ToolChatReply:
             if protocol != PROTOCOL_OPENAI:
-                # 多协议(ADR-008):消息史原样翻译出站,应答回 ProtocolReply → 既有返回结构
-                protocol_messages: list[dict[str, object]] = [
-                    {"role": "system", "content": system},
-                    *[dict(m) for m in messages],
-                ]
-                t0 = time.monotonic()
-                try:
-                    reply = await self._protocol_create(
-                        client,
-                        protocol,
-                        model=model,
-                        messages=protocol_messages,
-                        tools=tools,
-                        temperature=temperature,
-                        max_tokens=None,
-                    )
-                except Exception as e:
-                    self._report(
-                        task=task or "CHAT_TOOLS",
-                        model=model,
-                        trace_id=trace_id,
-                        tenant_key=tenant_key,
-                        usage=None,
-                        status="ERROR",
-                        latency_ms=int((time.monotonic() - t0) * 1000),
-                        protocol=protocol,
-                    )
-                    raise LlmError(f"LLM 调用失败: {e}") from e
-                self._report(
-                    task=task or "CHAT_TOOLS",
+                return await self._protocol_tool_reply(
+                    client,
+                    protocol,
+                    system=system,
                     model=model,
+                    messages=messages,
+                    tools=tools,
+                    temperature=temperature,
+                    task=task,
                     trace_id=trace_id,
                     tenant_key=tenant_key,
-                    usage=reply.usage,
-                    latency_ms=int((time.monotonic() - t0) * 1000),
-                    protocol=protocol,
                 )
-                return ToolChatReply(content=reply.content, tool_calls=reply.tool_calls)
-            # protocol 分支已保证 openai 通道持 AsyncOpenAI(或测试替身);cast 仅收窄
-            oai = cast("AsyncOpenAI", client)
-            full_messages: list[ChatCompletionMessageParam] = [
-                {"role": "system", "content": system},
-                *messages,
-            ]
-            t0 = time.monotonic()
-            try:
-                # tools 有无两分支(openai 重载对 **kwargs 展开不过 mypy;同 chat 的
-                # max_tokens 分支写法先例);dict 列表结构与 ChatCompletionFunctionToolParam
-                # (TypedDict)对齐,cast 收窄给 mypy
-                if tools:
-                    resp = await oai.chat.completions.create(
-                        model=model,
-                        messages=full_messages,
-                        temperature=temperature,
-                        tools=cast("list[ChatCompletionFunctionToolParam]", tools),
-                        tool_choice="auto",
-                    )
-                else:
-                    resp = await oai.chat.completions.create(
-                        model=model, messages=full_messages, temperature=temperature
-                    )
-            except Exception:
-                self._report(
-                    task=task or "CHAT_TOOLS",
-                    model=model,
-                    trace_id=trace_id,
-                    tenant_key=tenant_key,
-                    usage=None,
-                    status="ERROR",
-                    latency_ms=int((time.monotonic() - t0) * 1000),
-                    protocol=PROTOCOL_OPENAI,
-                )
-                raise
-            try:
-                msg = resp.choices[0].message
-            except (IndexError, AttributeError, TypeError) as e:
-                # 应答畸形(空 choices 等)=供应商协议错,同样归 ERROR 采集
-                self._report(
-                    task=task or "CHAT_TOOLS",
-                    model=model,
-                    trace_id=trace_id,
-                    tenant_key=tenant_key,
-                    usage=resp.usage,
-                    status="ERROR",
-                    latency_ms=int((time.monotonic() - t0) * 1000),
-                    protocol=PROTOCOL_OPENAI,
-                )
-                raise LlmError(f"LLM 应答畸形: {e}") from e
-            self._report(
-                task=task or "CHAT_TOOLS",
+            return await self._openai_tool_reply(
+                client,
+                system=system,
                 model=model,
+                messages=messages,
+                tools=tools,
+                temperature=temperature,
+                task=task,
                 trace_id=trace_id,
                 tenant_key=tenant_key,
-                usage=resp.usage,
-                latency_ms=int((time.monotonic() - t0) * 1000),
-                protocol=PROTOCOL_OPENAI,
             )
-            calls: list[LlmToolCall] = []
-            for tc in msg.tool_calls or []:
-                # SDK 联合类型:function 工具调用与 custom 工具调用;本内核只产出
-                # function 形态(custom 无 function 属性,跳过——防御未知供应商形态)
-                if not isinstance(tc, ChatCompletionMessageFunctionToolCall):
-                    continue
-                raw = tc.function.arguments or ""
-                try:
-                    # json.loads 返回 Any,显式注解约束到 LlmToolCall.args 契约型
-                    parsed: dict[str, object] | None = json.loads(raw) if raw.strip() else {}
-                    if not isinstance(parsed, dict):
-                        parsed = None  # 标量/数组畸形 → 喂回自纠
-                except json.JSONDecodeError:
-                    parsed = None
-                calls.append(
-                    LlmToolCall(call_id=tc.id, name=tc.function.name, args=parsed, raw_args=raw)
-                )
-            content = (msg.content or "").strip() or None
-            return ToolChatReply(content=content, tool_calls=calls)
 
         try:
             return cast(

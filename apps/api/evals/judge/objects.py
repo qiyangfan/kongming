@@ -198,6 +198,83 @@ async def fetch_collab_objects(client: ObjectClient, limit: int) -> list[JudgeOb
 _ROUNDTABLE_ELIGIBLE = frozenset({"DONE", "FAILED", "PARTIAL"})
 
 
+def _turn_who(turn: dict[str, object], content: dict[str, object]) -> str:
+    """发言者标签:主席固定「主席」,其余取行内标签/角色,缺失退化为编号。"""
+    raw = turn.get("worker_no")
+    worker_no = int(raw) if isinstance(raw, (int, float)) else None
+    if worker_no == 0:
+        return "主席"
+    # 归属优先行内标签/角色(worker_no 是名册压缩编号,拓扑下标
+    # 反推不出身份);异形序号如实标 #?,不伪装主席
+    label = str(content.get("label") or "") or (f"#{worker_no}" if worker_no is not None else "#?")
+    role = str(content.get("role") or "")
+    return f"{label}({role})" if role else label
+
+
+def _turn_line(turn: dict[str, object]) -> str:
+    """单条轮次转写行:判定行只写共识与理由,发言行写立场与摘要。"""
+    content = turn.get("content")
+    cd = content if isinstance(content, dict) else {}
+    who = _turn_who(turn, cd)
+    if str(turn.get("kind")) == "verdict":
+        return (
+            f"- 第{turn.get('round_no')}轮 {who}:判定"
+            f" consensus={cd.get('consensus')}({cd.get('reason')})"
+        )
+    stance = str(cd.get("stance") or "")
+    summary_raw = cd.get("summary")
+    # 字符串摘要直接截断(JSON 化会包引号转义换行,劣化评审输入)
+    summary_short = (
+        summary_raw[:240] if isinstance(summary_raw, str) else _json_short(summary_raw, 240)
+    )
+    return f"- 第{turn.get('round_no')}轮 {who}[{stance}]: {summary_short or '弃权'}"
+
+
+def _roundtable_run_object(run: dict[str, object], goal: str, tid: str) -> JudgeObject | None:
+    """把单个协作 run 装配为圆桌评审对象;非圆桌/未收口/零转写返回 None。"""
+    topo = run.get("topology")
+    topo_d = topo if isinstance(topo, dict) else {}
+    if topo_d.get("kind") != "roundtable":
+        return None
+    if str(run.get("status") or "") not in _ROUNDTABLE_ELIGIBLE:
+        return None
+    turns_all = _dict_list(run.get("turns"))
+    if not turns_all:
+        # 未开桌的诚实失败(零转写)无对辩可评,不进评审样本
+        return None
+    turn_lines = [_turn_line(t) for t in turns_all]
+    text = (
+        f"圆桌问题:{goal or tid}\n"
+        f"终态:{run.get('status', '')}(裁决:{run.get('verdict') or '—'})\n"
+        f"轮次转写:\n" + "\n".join(turn_lines)
+    )[:_TEXT_LIMIT]
+    return JudgeObject(
+        object_type=OBJECT_ROUNDTABLE,
+        object_id=str(run.get("id") or ""),
+        object_ref=(goal or str(run.get("id") or ""))[:200],
+        text=text,
+    )
+
+
+async def _roundtable_objects_of_task(
+    client: ObjectClient, tid: str, limit: int
+) -> list[JudgeObject]:
+    """取单任务的圆桌 run 转写对象;已达 limit 后不再追加。"""
+    detail = await client._get(f"/tasks/{tid}")
+    step_goal = {
+        str(s.get("id")): str(s.get("goal") or "") for s in _dict_list(detail.get("steps"))
+    }
+    runs = await client._get(f"/tasks/{tid}/collab-runs")
+    out: list[JudgeObject] = []
+    for run in _dict_list(runs.get("items")):
+        if len(out) >= limit:
+            break
+        obj = _roundtable_run_object(run, step_goal.get(str(run.get("step_id")), ""), tid)
+        if obj is not None:
+            out.append(obj)
+    return out
+
+
 async def fetch_roundtable_objects(client: ObjectClient, limit: int) -> list[JudgeObject]:
     """圆桌评审对象:roundtable 拓扑且运行已诚实收口的协作 run,装配轮次
     转写(发言/弃权/判定按序)供 rubric 评共识质量/分歧诚实/证据接地/收敛效率。"""
@@ -212,71 +289,7 @@ async def fetch_roundtable_objects(client: ObjectClient, limit: int) -> list[Jud
         tid = str(item.get("id") or "")
         if not tid:
             continue
-        detail = await client._get(f"/tasks/{tid}")
-        step_goal = {
-            str(s.get("id")): str(s.get("goal") or "") for s in _dict_list(detail.get("steps"))
-        }
-        runs = await client._get(f"/tasks/{tid}/collab-runs")
-        for run in _dict_list(runs.get("items")):
-            if len(out) >= limit:
-                break
-            topo = run.get("topology")
-            topo_d = topo if isinstance(topo, dict) else {}
-            if topo_d.get("kind") != "roundtable":
-                continue
-            if str(run.get("status") or "") not in _ROUNDTABLE_ELIGIBLE:
-                continue
-            turns_all = _dict_list(run.get("turns"))
-            if not turns_all:
-                # 未开桌的诚实失败(零转写)无对辩可评,不进评审样本
-                continue
-            goal = step_goal.get(str(run.get("step_id")), "")
-            turn_lines: list[str] = []
-            for t in turns_all:
-                worker_no_raw = t.get("worker_no")
-                worker_no = int(worker_no_raw) if isinstance(worker_no_raw, (int, float)) else None
-                content = t.get("content")
-                cd = content if isinstance(content, dict) else {}
-                if worker_no == 0:
-                    who = "主席"
-                else:
-                    # 归属优先行内标签/角色(worker_no 是名册压缩编号,拓扑下标
-                    # 反推不出身份);异形序号如实标 #?,不伪装主席
-                    label = str(cd.get("label") or "") or (
-                        f"#{worker_no}" if worker_no is not None else "#?"
-                    )
-                    role = str(cd.get("role") or "")
-                    who = f"{label}({role})" if role else label
-                if str(t.get("kind")) == "verdict":
-                    turn_lines.append(
-                        f"- 第{t.get('round_no')}轮 {who}:判定"
-                        f" consensus={cd.get('consensus')}({cd.get('reason')})"
-                    )
-                    continue
-                stance = str(cd.get("stance") or "")
-                summary_raw = cd.get("summary")
-                # 字符串摘要直接截断(JSON 化会包引号转义换行,劣化评审输入)
-                summary_short = (
-                    summary_raw[:240]
-                    if isinstance(summary_raw, str)
-                    else _json_short(summary_raw, 240)
-                )
-                turn_lines.append(
-                    f"- 第{t.get('round_no')}轮 {who}[{stance}]: {summary_short or '弃权'}"
-                )
-            text = (
-                f"圆桌问题:{goal or tid}\n"
-                f"终态:{run.get('status', '')}(裁决:{run.get('verdict') or '—'})\n"
-                f"轮次转写:\n" + "\n".join(turn_lines)
-            )[:_TEXT_LIMIT]
-            out.append(
-                JudgeObject(
-                    object_type=OBJECT_ROUNDTABLE,
-                    object_id=str(run.get("id") or ""),
-                    object_ref=(goal or str(run.get("id") or ""))[:200],
-                    text=text,
-                )
-            )
+        out.extend(await _roundtable_objects_of_task(client, tid, limit - len(out)))
     return out
 
 

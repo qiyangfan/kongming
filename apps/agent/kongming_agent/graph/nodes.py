@@ -3,19 +3,23 @@
 SQL 提示词见 prompts.py；自愈节点会把校验或执行错误传回 generate 供模型修正。
 """
 
-import asyncio
 import json
 import logging
 import re
-import threading
 from collections.abc import Sequence
 from typing import cast
 
 from kongming_agent import deps, numeric, sqlguard
 from kongming_agent.apiclient import MetricHit, SchemaMeta
 from kongming_agent.graph.budget import Segment, converge
-from kongming_agent.graph.citations import sanitize_citations, surviving_markers
-from kongming_agent.graph.doc_prompt import FUSED_ANSWER_SYSTEM, INTENT_ROUTE_SYSTEM
+from kongming_agent.graph.citations import sanitize_citations
+from kongming_agent.graph.dialogue import (
+    CHITCHAT_REPLIES,
+    is_dialogue_reply,
+    is_no_data_sentinel,
+    note_dialogue_passthrough,
+    reply_family,
+)
 from kongming_agent.graph.prompts import (
     SQL_GEN_SYSTEM,
     SUMMARIZE_SYSTEM,
@@ -24,16 +28,12 @@ from kongming_agent.graph.prompts import (
 )
 from kongming_agent.graph.state import (
     FALLBACK_CHITCHAT,
-    FALLBACK_CLARIFY,
-    INTENT_CHITCHAT,
     INTENT_DATA,
     INTENT_FUSED,
     INTENT_KNOWLEDGE,
-    VALID_INTENTS,
     AgentState,
     ExecutionResult,
     ValidationResult,
-    fused_takes_over,
 )
 from kongming_agent.graph.streams import emit_event
 from kongming_agent.graph.table_prune import prune_schema
@@ -49,6 +49,43 @@ _PRI_SKILL_TERMS = 4
 _PRI_SKILL_EXAMPLES = 5
 _PRI_HISTORY_SQL = 6
 _PRI_SCHEMA = 7
+
+
+def _seg(texts: dict[str, str], key: str, prefix: str, suffix: str = "") -> str:
+    """取段文本并按模板包裹;空段返回空串(不改变装配格式)。"""
+    value = texts.get(key) or ""
+    return f"{prefix}{value}{suffix}" if value else ""
+
+
+def _render_user(question: str, texts: dict[str, str]) -> str:
+    """按固定分段布局渲染 user 文本(空段不留痕迹)。"""
+    memory_part = _seg(texts, "memory", "", "\n\n")
+    semantic = "\n\n".join(
+        filter(
+            None,
+            (
+                _seg(texts, "relations", "表关系参考：\n"),
+                _seg(texts, "metric", "指标口径参考：\n"),
+            ),
+        )
+    )
+    skill = "\n\n".join(
+        filter(
+            None,
+            (
+                _seg(texts, "skill_terms", "业务术语参考：\n"),
+                _seg(texts, "skill_examples", "问法示例：\n"),
+            ),
+        )
+    )
+    semantic_part = f"\n\n{semantic}" if semantic else ""
+    skill_part = f"\n\n{skill}" if skill else ""
+    history_part = _seg(texts, "history_sql", "\n\n参考历史成功 SQL：\n")
+    return (
+        f"问题：{question}\n\n{memory_part}可用表结构：\n"
+        f"{texts.get('schema_hint') or ''}{semantic_part}{skill_part}{history_part}"
+        f"{texts.get('selfheal') or ''}\n\n生成 SQL："
+    )
 
 
 def assemble_generate_user_prompt(
@@ -89,23 +126,7 @@ def assemble_generate_user_prompt(
     ]
     result = converge(segments, budget_tokens)
     texts = {s.key: s.text for s in result.segments}
-    # 空段不改变装配格式；预算收敛后为空时也沿用相同分支。
-    memory_part = f"{texts['memory']}\n\n" if texts["memory"] else ""
-    _rel = f"表关系参考：\n{texts['relations']}" if texts["relations"] else ""
-    _met = f"指标口径参考：\n{texts['metric']}" if texts["metric"] else ""
-    _semantic = "\n\n".join(x for x in (_rel, _met) if x)
-    semantic_part = f"\n\n{_semantic}" if _semantic else ""
-    _st = f"业务术语参考：\n{texts['skill_terms']}" if texts["skill_terms"] else ""
-    _se = f"问法示例：\n{texts['skill_examples']}" if texts["skill_examples"] else ""
-    _skill = "\n\n".join(x for x in (_st, _se) if x)
-    skill_part = f"\n\n{_skill}" if _skill else ""
-    history_part = f"\n\n参考历史成功 SQL：\n{texts['history_sql']}" if texts["history_sql"] else ""
-    user = (
-        f"问题：{question}\n\n{memory_part}可用表结构：\n"
-        f"{texts['schema_hint']}{semantic_part}{skill_part}{history_part}"
-        f"{texts['selfheal']}\n\n生成 SQL："
-    )
-    return user, result.cut, result.estimated_tokens
+    return _render_user(question, texts), result.cut, result.estimated_tokens
 
 
 def legacy_generate_user_prompt(
@@ -121,20 +142,17 @@ def legacy_generate_user_prompt(
     extra: str,
 ) -> str:
     """按原有分段布局组装用户提示词;预算充足时与预算收敛版逐字一致(测试锚)。"""
-    memory_part = f"{memory_hint}\n\n" if memory_hint else ""
-    _rel = f"表关系参考：\n{relations_hint}" if relations_hint else ""
-    _met = f"指标口径参考：\n{metric_hints}" if metric_hints else ""
-    _semantic = "\n\n".join(x for x in (_rel, _met) if x)
-    semantic_part = f"\n\n{_semantic}" if _semantic else ""
-    _st = f"业务术语参考：\n{skill_terms}" if skill_terms else ""
-    _se = f"问法示例：\n{skill_examples}" if skill_examples else ""
-    _skill = "\n\n".join(x for x in (_st, _se) if x)
-    skill_part = f"\n\n{_skill}" if _skill else ""
-    history_part = f"\n\n参考历史成功 SQL：\n{history_sql}" if history_sql else ""
-    return (
-        f"问题：{question}\n\n{memory_part}可用表结构：\n"
-        f"{schema_hint}{semantic_part}{skill_part}{history_part}{extra}\n\n生成 SQL："
-    )
+    texts = {
+        "memory": memory_hint,
+        "schema_hint": schema_hint,
+        "relations": relations_hint,
+        "metric": metric_hints,
+        "skill_terms": skill_terms,
+        "skill_examples": skill_examples,
+        "history_sql": history_sql,
+        "selfheal": extra,
+    }
+    return _render_user(question, texts)
 
 
 log = logging.getLogger(__name__)
@@ -149,111 +167,9 @@ _EMPTY_HINT = (
     "只输出 NO_RELEVANT_TABLE——严禁臆测表名或列名。）"
 )
 
-# 知识未覆盖哨兵(生成侧如实说明的唯一出口);短路零执行零重试
-# 语义补全两级——无支撑本问题的表(表级)/所需关键信息项无列且无法推导(列级)
-_NO_DATA_SENTINEL = "NO_RELEVANT_TABLE"
+# 知识未覆盖哨兵语义补全两级——无支撑本问题的表(表级)/所需关键信息项无列且
+# 无法推导(列级);短路零执行零重试
 _NO_DATA_ERROR = "当前数据源未找到回答该问题所需的数据,可切换数据源或调整问法后重试"
-
-
-# ── 对话复语直通(闭合词表 + 全等判定,零依赖纯数据/纯函数)──
-# 规范化:去首尾与内部空白、去中英文句读、拉丁字母小写。
-# 全等匹配,SHALL NOT 包含/前缀/语义相似——"取消订单""确认切换"照常补全。
-_PUNCT_RE = re.compile(r"[\s,。，、！？!?,.;:；：…\-—_\"'“”‘’()（）\[\]【】/\\~·「」『』《》〈〉]+")
-
-# 闭合词表(规范化形态;随代码发布,不做管理台热配)。三族:
-# stop=否定/终止 · ack=应答/致谢 · greeting=招呼。多词英文条目去空格后入表
-# (never mind→nevermind)。族别决定直通应答文案(spec「对话复语不进取数补全」)。
-_DIALOGUE_REPLY_FAMILIES: dict[str, frozenset[str]] = {
-    "stop": frozenset(
-        {
-            "不用了",
-            "不需要",
-            "不必",
-            "算了",
-            "取消",
-            "终止",
-            "停",
-            "no",
-            "nope",
-            "cancel",
-            "nevermind",
-        }
-    ),
-    "ack": frozenset(
-        {
-            "好的",
-            "好",
-            "知道了",
-            "明白",
-            "收到",
-            "谢谢",
-            "多谢",
-            "thanks",
-            "thankyou",
-            "gotit",
-            "ok",
-            "okay",
-            "nothanks",  # 「NO, thanks」形态(spec 场景:句读大小写变体)
-            "nothankyou",
-        }
-    ),
-    "greeting": frozenset({"你好", "您好", "hi", "hello", "hey"}),
-}
-DIALOGUE_REPLY_WORDS: frozenset[str] = frozenset(
-    w for ws in _DIALOGUE_REPLY_FAMILIES.values() for w in ws
-)
-
-# 直通应答文案(族别静态表,零模型调用;招呼/致谢 SHALL NOT 以数据缺失话术作答)
-CHITCHAT_REPLIES: dict[str, str] = {
-    "stop": "好的,已停止本轮查询。需要继续分析数据时随时告诉我。",
-    "ack": "不客气!如需继续分析数据,随时告诉我。",
-    "greeting": "你好!请描述你想分析的数据问题,例如「上月销售额是多少」。",
-}
-# 语义层兜底统一文案(意图路由帧判定的词表漏网闲聊;不区分族别,design D4)
-CHITCHAT_SEMANTIC_REPLY = "如需分析数据,请随时描述你想查的问题。"
-
-
-def reply_family(question: str) -> str:
-    """词表成员 → 族别(直通命中后取文案用;非成员回退 ack,不单独暴露)。"""
-    normalized = normalize_dialogue_reply(question)
-    return next((f for f, ws in _DIALOGUE_REPLY_FAMILIES.items() if normalized in ws), "ack")
-
-
-def normalize_dialogue_reply(text: str) -> str:
-    """复语规范化(纯函数):去首尾与内部空白、去中英文句读、拉丁字母小写。"""
-    return _PUNCT_RE.sub("", text).lower()
-
-
-def is_dialogue_reply(question: str) -> bool:
-    """复语判定(纯函数):规范化后全等于闭合词表成员。"""
-    return normalize_dialogue_reply(question) in DIALOGUE_REPLY_WORDS
-
-
-# 复语直通可观测计数(sqlguard.snapshot_stats 同款形态;零新采集通道)
-_passthrough_lock = threading.Lock()
-_passthrough_stats = {"dialogue_reply_passthrough_total": 0}
-
-
-def snapshot_passthrough_stats() -> dict[str, int]:
-    """复语直通命中计数快照(可观测:词表宽严调整依据)。"""
-    with _passthrough_lock:
-        return dict(_passthrough_stats)
-
-
-def _note_dialogue_passthrough(trace_id: str | None) -> None:
-    """命中入账 + 随 trace 日志下发(复用既有日志关联通道,零新采集)。"""
-    with _passthrough_lock:
-        _passthrough_stats["dialogue_reply_passthrough_total"] += 1
-    log.info("071 复语直通命中 trace_id=%s", trace_id)
-
-
-def _is_no_data_sentinel(raw: str) -> bool:
-    """哨兵识别(纯函数):剥包裹标记后大小写折叠全等;子串出现不触发
-    (夹在解释句中的哨兵按普通输出走既有防御链,防火墙兜底)。"""
-    text = raw.strip().strip("`").strip()
-    if text.lower().startswith("sql\n"):
-        text = text[4:]
-    return text.strip("`").strip().lower() == _NO_DATA_SENTINEL.lower()
 
 
 # ── 节点1:问题理解(多轮指代消解/单轮改写)──
@@ -264,7 +180,7 @@ async def understand(state: AgentState) -> dict[str, object]:
     # CHITCHAT(招呼/致谢不是数据问题,SHALL NOT 以数据缺失话术作答);
     # 不设补全问句(迫使 retrieve/generate 不推进),判定只看当前问句与 history 无关
     if is_dialogue_reply(question):
-        _note_dialogue_passthrough(state.get("trace_id"))
+        note_dialogue_passthrough(state.get("trace_id"))
         return {
             "end_reason": "no_data",
             "error": CHITCHAT_REPLIES[reply_family(question)],
@@ -484,25 +400,31 @@ def _selfheal_guidance(error: str) -> str:
     return ""
 
 
+def _sql_hints(state: AgentState) -> dict[str, str]:
+    """收集生成提示的各参考段(空段保留空串,渲染期再决定痕迹)。"""
+    schema = state.get("schema_hint") or ""
+    return {
+        "schema": schema if schema.strip() else _EMPTY_HINT,
+        # 记忆提示放在表结构前；为空时不改变提示词。
+        "memory": (state.get("memory_hint") or "").strip(),
+        # 关系和指标提示放在表结构与历史 SQL 之间；为空时不改变提示词。
+        "relations": (state.get("relations_hint") or "").strip(),
+        "metric": (state.get("metric_hints") or "").strip(),
+        # 历史成功 SQL 段:召回命中时拼在表结构之后——人类验证过的 SQL 置信度
+        # 高于表说明内嵌示例(强 few-shot);系统模板资产零改动,只动 user 拼接。
+        "history": (state.get("history_sql") or "").strip(),
+        # skill-pack 两段(可空;零段零痕迹)
+        "skill_terms": (state.get("skill_terms") or "").strip(),
+        "skill_examples": (state.get("skill_examples") or "").strip(),
+    }
+
+
 async def generate(state: AgentState) -> dict[str, object]:
     # 下标:入口 state 恒写入 question(缺键属编程错误),保留下标求值序
     question = state.get("resolved_question")
     if not question:
         question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
-    schema_hint = state.get("schema_hint") or ""
-    if not schema_hint.strip():
-        schema_hint = _EMPTY_HINT
-    # 记忆提示放在表结构前；为空时不改变提示词。
-    memory_hint = (state.get("memory_hint") or "").strip()
-    # 关系和指标提示放在表结构与历史 SQL 之间；为空时不改变提示词。
-    relations_hint = (state.get("relations_hint") or "").strip()
-    metric_hints = (state.get("metric_hints") or "").strip()
-    # 历史成功 SQL 段:召回命中时拼在表结构之后——人类验证过的 SQL 置信度
-    # 高于表说明内嵌示例(强 few-shot);系统模板资产零改动,只动 user 拼接。
-    history_sql = (state.get("history_sql") or "").strip()
-    # skill-pack 两段(可空;零段零痕迹)
-    skill_terms = (state.get("skill_terms") or "").strip()
-    skill_examples = (state.get("skill_examples") or "").strip()
+    hints = _sql_hints(state)
     extra = ""
     error = state.get("error") or ""
     if error:
@@ -520,13 +442,13 @@ async def generate(state: AgentState) -> dict[str, object]:
     budget = llm.prompt_budget("SQL_GEN")
     user, cut, estimated = assemble_generate_user_prompt(
         question=question,
-        memory_hint=memory_hint,
-        schema_hint=schema_hint,
-        relations_hint=relations_hint,
-        metric_hints=metric_hints,
-        skill_terms=skill_terms,
-        skill_examples=skill_examples,
-        history_sql=history_sql,
+        memory_hint=hints["memory"],
+        schema_hint=hints["schema"],
+        relations_hint=hints["relations"],
+        metric_hints=hints["metric"],
+        skill_terms=hints["skill_terms"],
+        skill_examples=hints["skill_examples"],
+        history_sql=hints["history"],
         extra=extra,
         budget_tokens=budget,
     )
@@ -553,7 +475,7 @@ async def generate(state: AgentState) -> dict[str, object]:
     )
     # 哨兵=模型如实说明知识未覆盖——短路产物直达失败终态,
     # 不进 validate/execute、不进自愈(零执行零重试;路由见 build._after_generate)
-    if _is_no_data_sentinel(sql):
+    if is_no_data_sentinel(sql):
         return {"generated_sql": "", "error": _NO_DATA_ERROR, "end_reason": "no_data"}
     # 生成成功即清掉上轮错误(错误已消费)
     return {"generated_sql": clean_sql(sql), "error": ""}
@@ -685,23 +607,92 @@ def route_after_retrieve(state: AgentState) -> str:
     if not question:
         question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
     intent = state.get("intent")
+    route: str
     if intent == INTENT_FUSED:
-        return "generate"
-    if intent == INTENT_KNOWLEDGE:
-        return "doc_answer" if doc_hints else "generate"
-    if intent == INTENT_DATA and state.get("has_attachments") and not is_sql_intent(question):
+        route = "generate"
+    elif intent == INTENT_KNOWLEDGE:
+        route = "doc_answer" if doc_hints else "generate"
+    elif intent == INTENT_DATA and state.get("has_attachments") and not is_sql_intent(question):
         # 意图判定看不到图片内容;有附件且无 SQL 强意图时按图片问答处理。
-        return "doc_answer"
-    if intent is not None:  # 无附件的数据问题走 SQL 生成。
-        return "generate"
+        route = "doc_answer"
+    elif intent is not None:  # 无附件的数据问题走 SQL 生成。
+        route = "generate"
     # 意图判断不可用时，按原有规则词表分流。
-    if doc_hints and is_knowledge_intent(question):
-        if state.get("history") and not is_strong_doc_intent(question):
-            return "generate"
-        return "doc_answer"
-    if state.get("has_attachments") and not is_sql_intent(question):
-        return "doc_answer"
-    return "generate"
+    elif doc_hints and is_knowledge_intent(question):
+        route = (
+            "generate"
+            if state.get("history") and not is_strong_doc_intent(question)
+            else "doc_answer"
+        )
+    elif state.get("has_attachments") and not is_sql_intent(question):
+        route = "doc_answer"
+    else:
+        route = "generate"
+    return route
+
+
+def _doc_question(state: AgentState) -> str:
+    """文档/图片问答的问句选择(有附件时用原始问句)。"""
+    if state.get("has_attachments"):
+        return state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+    resolved = state.get("resolved_question")
+    return resolved or state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+
+
+def _doc_prompt(state: AgentState, doc_hints: list[dict[str, str]]) -> tuple[str, str]:
+    """装配文档/图片问答的 system 与 user 文本。"""
+    from kongming_agent.graph.doc_prompt import DOC_ANSWER_SYSTEM, IMAGE_ANSWER_SYSTEM
+
+    if doc_hints:
+        parts = [
+            f"来源 {h.get('citation_key') or h['source_ref']}:\n{h['content'][:1500]}"
+            for h in doc_hints[:5]
+        ]
+        user = f"问题:{_doc_question(state)}\n\n文档内容:\n" + "\n\n".join(parts) + "\n\n回答:"
+        return DOC_ANSWER_SYSTEM, user
+    # 纯图片直答必须用原始拼接问题(含附件描述段;入口 state 恒写入)
+    return (
+        IMAGE_ANSWER_SYSTEM,
+        f"问题:{state['question']}\n\n回答:",  # pyright: ignore[reportTypedDictNotRequiredAccess]
+    )
+
+
+def _sanitize_doc_sources(
+    summary: str, doc_hints: list[dict[str, str]]
+) -> tuple[str, list[dict[str, object]]]:
+    """确定性净化回答并投影 sources(合法键集取截断前的完整命中集)。"""
+    if not doc_hints:
+        return summary, []
+    legal_keys = [str(h.get("citation_key") or "") for h in doc_hints]
+    legal_keys = [k for k in legal_keys if k]
+    result = sanitize_citations(summary, legal_keys)
+    sources: list[dict[str, object]] = []
+    by_key = {str(h.get("citation_key") or ""): h for h in doc_hints}
+    for key in result.surviving_keys:
+        hit = by_key.get(key)
+        if hit is None:
+            continue
+        sources.append(
+            {
+                "citation_key": key,
+                "source_ref": str(hit.get("source_ref") or ""),
+                "doc_name": str(hit.get("source_ref") or "").split(" §")[0],
+            }
+        )
+    # 被剥离计数随 trace 下发(可观测;净化在输出护栏前完成)
+    if result.stripped:
+        emit_event(
+            "trace",
+            {
+                "node": "doc_answer",
+                "fields": {
+                    "kind": "citation_sanitize",
+                    "stripped": result.stripped,
+                    "surviving": list(result.surviving_keys),
+                },
+            },
+        )
+    return result.text, sources
 
 
 async def doc_answer(state: AgentState) -> dict[str, object]:
@@ -709,31 +700,8 @@ async def doc_answer(state: AgentState) -> dict[str, object]:
 
     图片问答使用原始问句，避免指代改写丢失图片描述。
     """
-    from kongming_agent.graph.doc_prompt import (
-        DOC_ANSWER_SYSTEM,
-        IMAGE_ANSWER_SYSTEM,
-    )
-
     doc_hints = state.get("doc_hints") or []
-    if doc_hints:
-        # 两处下标:入口 state 恒写入 question(缺键属编程错误),保留求值序
-        if state.get("has_attachments"):
-            question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
-        else:
-            resolved = state.get("resolved_question")
-            question = resolved or state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
-        # 注入段标注=引用键(与净化合法集同源;source_ref 仅作块头说明)
-        parts = [
-            f"来源 {h.get('citation_key') or h['source_ref']}:\n{h['content'][:1500]}"
-            for h in doc_hints[:5]
-        ]
-        system = DOC_ANSWER_SYSTEM
-        user = f"问题:{question}\n\n文档内容:\n" + "\n\n".join(parts) + "\n\n回答:"
-    else:
-        system = IMAGE_ANSWER_SYSTEM
-        # 纯图片直答必须用原始拼接问题(含附件描述段;入口 state 恒写入)
-        question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
-        user = f"问题:{question}\n\n回答:"
+    system, user = _doc_prompt(state, doc_hints)
     # LlmError 不在此吞掉:上抛经 _run_graph 统一收敛 llm_unavailable
     # (success=False)——吞掉后以 PASS+「文档中未提及相关内容。」出链,
     # 服务故障被表述为内容缺失,属伪造终态
@@ -746,309 +714,13 @@ async def doc_answer(state: AgentState) -> dict[str, object]:
         tenant_key=state.get("tenant_key"),
     )
     summary = answer or "文档中未提及相关内容。"
-    sources: list[dict[str, object]] = []
-    if doc_hints:
-        # 确定性净化(零模型;与 numeric 收口同位置)——合法键集取自
-        # 截断前的完整命中集(注入段 top-5/字符上限裁剪不得误杀真引用)
-        legal_keys = [str(h.get("citation_key") or "") for h in doc_hints]
-        legal_keys = [k for k in legal_keys if k]
-        result = sanitize_citations(summary, legal_keys)
-        summary = result.text
-        # sources 投影(api 侧落库;存活键 → 命中集元数据回填)
-        by_key = {str(h.get("citation_key") or ""): h for h in doc_hints}
-        for key in result.surviving_keys:
-            hit = by_key.get(key)
-            if hit is None:
-                continue
-            sources.append(
-                {
-                    "citation_key": key,
-                    "source_ref": str(hit.get("source_ref") or ""),
-                    "doc_name": str(hit.get("source_ref") or "").split(" §")[0],
-                }
-            )
-        # 被剥离计数随 trace 下发(可观测;净化在输出护栏前完成)
-        if result.stripped:
-            emit_event(
-                "trace",
-                {
-                    "node": "doc_answer",
-                    "fields": {
-                        "kind": "citation_sanitize",
-                        "stripped": result.stripped,
-                        "surviving": list(result.surviving_keys),
-                    },
-                },
-            )
+    summary, sources = _sanitize_doc_sources(summary, doc_hints)
     return {
         "execution": ExecutionResult(verdict="PASS", columns=[], rows=[]),
         "summary": summary,
         "insights": [],
         "stats": {},
         "sources": sources,  # 结构化来源(空=SQL 道/无命中)
-    }
-
-
-# ── 三态意图路由(route_intent)+ 融合问答(fused_answer)──
-
-# 可观测计数(复语直通 snapshot_stats 同款形态;零新采集通道):
-# 路由回退(LLM 失败/超时/低置信)、语义闲聊命中与融合兜底(生成失败回退纯数据答)
-_intent_lock = threading.Lock()
-_intent_stats = {
-    "intent_route_fallback_total": 0,
-    "fused_answer_fallback_total": 0,
-    "chitchat_semantic_total": 0,
-}
-
-
-def snapshot_intent_route_stats() -> dict[str, int]:
-    """回退/兜底计数快照(可观测:prompt 调优与阈值调整依据)。"""
-    with _intent_lock:
-        return dict(_intent_stats)
-
-
-def parse_intent_route(raw: str) -> tuple[str, float, str, bool, str] | None:
-    """路由 LLM 输出解析(纯函数):JSON {intent, ambiguous, clarify_question,
-    confidence, reason}。intent 越域 / 置信缺失或不可解析 / 置信越界 [0,1]
-    → None(调用方回退词表);ambiguous 无澄清问句时收 false(fail-open,
-    不可执行的判定不放行)。"""
-    parsed = parse_summary_json(raw)
-    intent = str(parsed.get("intent", "")).strip().lower()
-    if intent not in VALID_INTENTS:
-        return None
-    try:
-        confidence = float(cast("float", parsed.get("confidence")))
-    except (TypeError, ValueError):
-        return None
-    if not 0.0 <= confidence <= 1.0:
-        return None
-    ambiguous = parsed.get("ambiguous") is True
-    clarify_raw = parsed.get("clarify_question")
-    clarify = clarify_raw.strip() if isinstance(clarify_raw, str) else ""
-    if ambiguous and not clarify:
-        ambiguous = False
-    return intent, confidence, str(parsed.get("reason", "")).strip(), ambiguous, clarify
-
-
-async def route_intent(state: AgentState) -> dict[str, object]:
-    """检索前判定问句意图；失败或置信度不足时回退到规则词表。
-
-    回退时不写 intent，沿用原有分流规则；意图误判只影响答法，不触发数据操作。
-    同一次调用收口两个兜底出口:闲聊(词表漏网的零取数意图输入)与澄清
-    (高置信歧义,上一轮已澄清则硬门防循环)——两者均早退,零检索零生成零执行。
-    """
-    question = state.get("resolved_question")
-    if not question:
-        question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
-    settings = Settings()
-    parsed: tuple[str, float, str, bool, str] | None = None
-    try:
-        raw = await asyncio.wait_for(
-            deps.get_llm().chat(
-                INTENT_ROUTE_SYSTEM,
-                f"用户问题:{question}\n\n输出 JSON:",
-                temperature=0.1,
-                max_tokens=200,
-                task="INTENT_ROUTE",  # 任务路由:小模型档(multi-model-routing,缺省主模型)
-                trace_id=state.get("trace_id"),
-                tenant_key=state.get("tenant_key"),
-            ),
-            timeout=settings.intent_route_timeout_sec,
-        )
-        parsed = parse_intent_route(raw)
-    except (LlmError, TimeoutError):
-        parsed = None
-    if parsed is None or parsed[1] < settings.intent_route_min_confidence:
-        with _intent_lock:
-            _intent_stats["intent_route_fallback_total"] += 1
-        emit_event(
-            "trace",
-            {
-                "node": "route_intent",
-                "fields": {
-                    "kind": "intent_route",
-                    "source": "fallback",
-                    "reason": "llm_low_confidence" if parsed is not None else "llm_failed",
-                },
-            },
-        )
-        return {}
-    intent, confidence, reason, ambiguous, clarify = parsed
-    # 闲聊兜底(spec「闲聊语义兜底判定」):判定口径=完全无取数意图;
-    # 冲突时闲聊优先于澄清(无取数意图的输入无从澄清口径)
-    if intent == INTENT_CHITCHAT:
-        with _intent_lock:
-            _intent_stats["chitchat_semantic_total"] += 1
-        emit_event(
-            "trace",
-            {
-                "node": "route_intent",
-                "fields": {
-                    "kind": "intent_route",
-                    "source": "llm",
-                    "intent": INTENT_CHITCHAT,
-                    "confidence": confidence,
-                },
-            },
-        )
-        return {
-            "end_reason": "no_data",
-            "error": CHITCHAT_SEMANTIC_REPLY,
-            "fallback_type": FALLBACK_CHITCHAT,
-        }
-    # 澄清早退(spec「歧义问句澄清引导」):高置信歧义且上一轮非澄清轮
-    # (防循环硬门,确定性规则不依赖模型自觉);fail-open 路径在上方回退分支
-    if ambiguous and state.get("last_fallback") != FALLBACK_CLARIFY:
-        emit_event(
-            "trace",
-            {
-                "node": "route_intent",
-                "fields": {
-                    "kind": "intent_route",
-                    "source": "llm",
-                    "decision": "clarify",
-                    "confidence": confidence,
-                },
-            },
-        )
-        return {
-            "end_reason": "no_data",
-            "error": clarify,
-            "fallback_type": FALLBACK_CLARIFY,
-        }
-    emit_event(
-        "trace",
-        {
-            "node": "route_intent",
-            "fields": {
-                "kind": "intent_route",
-                "source": "llm",
-                "intent": intent,
-                "confidence": confidence,
-                "reason": reason,
-            },
-        },
-    )
-    return {
-        "intent": intent,
-        "intent_source": "llm",
-        "intent_confidence": confidence,
-        "intent_reason": reason,
-    }
-
-
-def _note_fused_fallback(trace_id: str | None, reason: str) -> None:
-    """融合兜底入账 + trace 下发(可观测;回退纯数据答是 spec 契约非故障)。"""
-    with _intent_lock:
-        _intent_stats["fused_answer_fallback_total"] += 1
-    emit_event(
-        "trace",
-        {"node": "fused_answer", "fields": {"kind": "fused_answer_fallback", "reason": reason}},
-    )
-    log.info("fused_answer 回退纯数据答 trace_id=%s reason=%s", trace_id, reason)
-
-
-async def fused_answer(state: AgentState) -> dict[str, object]:
-    """融合问答节点(summarize 后条件进入):SQL 通道 SUCCESS 且文档命中
-    且结果非空时联合作答——正文=数据结论(接地结果面,数值纪律同审计)
-    + 口径解释(【引用键】,净化与 sources 投影同机制,合法键=本节点下发
-    父块集);融合正文即洞察位正文(insights 清空,design Open Question 裁定)。
-    与 doc_answer 的 LlmError 上抛语义刻意不同:此处数据答已就绪,spec 明文
-    「生成失败回退纯数据答正文(结果面不丢)」——上抛反而丢掉完整结果面。"""
-    execution = state.get("execution")
-    doc_hints = state.get("doc_hints") or []
-    # 前置复核(_after_summarize 已拦,此处兜底防直调/拓扑改动漏网;判据
-    # 单源=state.fused_takes_over,与条件边/流式抑制三处共用)。execution
-    # 局部再收窄:谓词对类型检查不透明,后续 data_preview/审计直接解引用
-    if not fused_takes_over(state) or execution is None:
-        return {}
-    question = state.get("resolved_question")
-    if not question:
-        question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
-    stats = state.get("stats") or {}
-    data_preview = (
-        f"列:{execution.columns}\n总行数:{len(execution.rows)}\n"
-        f"本地统计:{stats}\n前5行:{execution.rows[:5]}"
-    )
-    # 注入段标注=引用键(与净化合法集同源;缺失回退 source_ref 作块头说明)
-    parts = [
-        f"来源 {h.get('citation_key') or h['source_ref']}:\n{h['content'][:1500]}"
-        for h in doc_hints[:5]
-    ]
-    user = (
-        f"问题:{question}\n\n数据结果:\n{data_preview}\n\n文档内容:\n"
-        + "\n\n".join(parts)
-        + "\n\n回答:"
-    )
-    try:
-        answer = await deps.get_llm().chat(
-            FUSED_ANSWER_SYSTEM,
-            user,
-            temperature=0.1,
-            task="FUSED_ANSWER",
-            trace_id=state.get("trace_id"),
-            tenant_key=state.get("tenant_key"),
-        )
-    except LlmError:
-        _note_fused_fallback(state.get("trace_id"), "llm_failed")
-        return {}
-    summary = answer.strip()
-    if not summary:
-        # 空稿同兜底:数据答已在,不伪造融合内容
-        _note_fused_fallback(state.get("trace_id"), "empty_answer")
-        return {}
-    # 确定性净化(零模型):合法键集=本节点下发父块集
-    legal_keys = [str(h.get("citation_key") or "") for h in doc_hints]
-    legal_keys = [k for k in legal_keys if k]
-    sanitized = sanitize_citations(summary, legal_keys)
-    summary = sanitized.text
-    by_key = {str(h.get("citation_key") or ""): h for h in doc_hints}
-    if sanitized.stripped:
-        emit_event(
-            "trace",
-            {
-                "node": "fused_answer",
-                "fields": {
-                    "kind": "citation_sanitize",
-                    "stripped": sanitized.stripped,
-                    "surviving": list(sanitized.surviving_keys),
-                },
-            },
-        )
-    # 数值纪律收口:融合正文同过确定性审计,白名单=结果面∪stats∪本轮
-    # 计算值∪下发文档内容数字(双依据语义:正文数字须可溯源到数据或文档,
-    # 两者皆非才剥——文档口径数字如「7 天」是合法证据,不得按数据口径误杀)
-    doc_numbers = [t.value for part in parts for t in numeric.extract_numbers(part)]
-    audited = numeric.audit_summarize_output(
-        summary,
-        [],
-        columns=execution.columns,
-        rows=execution.rows,
-        stats=stats,
-        compute_values=[*(state.get("compute_values") or []), *doc_numbers],
-        structural=[float(len(execution.rows)), float(numeric.PREVIEW_ROWS)],
-    )
-    final = audited.summary or fallback_summary(stats)
-    # sources 投影必须以「过审终稿」为准:审计会剥句(含被引句),若按
-    # 净化期存活键投影,会出现「列表有条目而正文无标注」的幽灵不一致
-    # (chat/knowledge-qa spec 明文 SHALL NOT)——终稿存活标记重投影,
-    # 全剥回退纯数据答时 sources 自然为空
-    sources: list[dict[str, object]] = []
-    for key in surviving_markers(final):
-        hit = by_key.get(key)
-        if hit is None:
-            continue
-        sources.append(
-            {
-                "citation_key": key,
-                "source_ref": str(hit.get("source_ref") or ""),
-                "doc_name": str(hit.get("source_ref") or "").split(" §")[0],
-            }
-        )
-    return {
-        "summary": final,
-        "insights": [],
-        "sources": sources,
     }
 
 

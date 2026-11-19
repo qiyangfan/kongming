@@ -14,7 +14,7 @@ export type ConnectorParamIn = {
   description: string;
 };
 
-export type ConnectorBody = {
+type ConnectorBody = {
   key: string;
   name: string;
   description: string;

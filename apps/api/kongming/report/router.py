@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kongming.auth.repository import SqlOperLogRepo
 from kongming.auth.router import current_user, require_perm
 from kongming.chat.agent_client import AgentClient
-from kongming.chat.models import ChartSuggestion
+from kongming.chat.models import ChartSuggestion, MessageMeta
 from kongming.chat.repository import ChatRepository
 from kongming.config import get_settings
 from kongming.db import get_session, get_sessionmaker, uuid7
@@ -116,7 +116,7 @@ def _get_service(session: AsyncSession) -> ReportService:
                     ),
                     summary=summary,
                     status="SUCCESS",
-                    trace_id=trace_id,
+                    meta=MessageMeta(trace_id=trace_id),
                 )
                 await s.commit()
 

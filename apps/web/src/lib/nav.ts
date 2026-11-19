@@ -5,7 +5,7 @@ import { FileText, ListTodo, MessageSquare, Store, KeyRound, Settings2 } from "l
 
 import type { MeOut } from "./api";
 
-export interface NavItem {
+interface NavItem {
   id: string;
   label: string;
   icon: LucideIcon;
@@ -14,7 +14,7 @@ export interface NavItem {
   perm: string;
 }
 
-export const NAV_ITEMS: NavItem[] = [
+const NAV_ITEMS: NavItem[] = [
   { id: "chat", label: "对话", icon: MessageSquare, to: "/chat", perm: "chat:execute" },
   { id: "reports", label: "报告", icon: FileText, to: "/reports", perm: "report:read" },
   { id: "tasks", label: "任务", icon: ListTodo, to: "/tasks", perm: "task:read" },

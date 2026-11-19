@@ -307,6 +307,10 @@ class _StubEmbedder:
 class _StubRepo:
     """recall 最小依赖替身:全文路单命中 orders,fetch 按键序返回条目。"""
 
+    def __init__(self) -> None:
+        self.tenant = _StubTenant(self)
+        self.recall = _StubRecall(self)
+
     async def tenant_id_by_key(self, tenant_key: str) -> str | None:
         return "tid-1"
 
@@ -359,6 +363,43 @@ class _StubRepo:
             for schema, table in keys
         ]
 
+    async def _recall_vector(self, *_a: object, **_kw: object) -> list[Any]:
+        return []
+
+    async def _recall_history(self, *_a: object, **_kw: object) -> list[Any]:
+        return []
+
+
+class _StubTenant:
+    def __init__(self, repo: _StubRepo) -> None:
+        self._repo = repo
+
+    async def tenant_id_by_key(self, tenant_key: str) -> str | None:
+        return await self._repo.tenant_id_by_key(tenant_key)
+
+    async def datasource_usable(self, datasource_key: str, tenant_id: str) -> bool:
+        return await self._repo.datasource_usable(datasource_key, tenant_id)
+
+
+class _StubRecall:
+    def __init__(self, repo: _StubRepo) -> None:
+        self._repo = repo
+
+    async def has_knowledge(self, **kw: object) -> bool:
+        return await self._repo.has_knowledge(**kw)  # type: ignore[arg-type]
+
+    async def recall_fulltext(self, **kw: object) -> list[Any]:
+        return await self._repo.recall_fulltext(**kw)  # type: ignore[arg-type]
+
+    async def recall_vector(self, **kw: object) -> list[Any]:
+        return await self._repo._recall_vector(**kw)
+
+    async def recall_history(self, **kw: object) -> list[Any]:
+        return await self._repo._recall_history(**kw)
+
+    async def fetch_entries(self, **kw: object) -> list[Any]:
+        return await self._repo.fetch_entries(**kw)  # type: ignore[arg-type]
+
 
 def _make_svc(expander: object | None, *, enabled: bool = True, max_expand: int = 2) -> Any:
     from kongming.rag.cache import ContextCache
@@ -367,7 +408,6 @@ def _make_svc(expander: object | None, *, enabled: bool = True, max_expand: int 
     return RagService(
         _StubRepo(),  # pyright: ignore[reportArgumentType]
         embedder=_StubEmbedder(),  # pyright: ignore[reportArgumentType]
-        describer=None,  # pyright: ignore[reportArgumentType]  # recall 不触润色
         cache=ContextCache(None),
         relation_expander=expander,  # pyright: ignore[reportArgumentType]
         expand_enabled=enabled,

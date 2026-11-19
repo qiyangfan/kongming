@@ -3,12 +3,10 @@
 import type { components } from "./api-types.gen";
 import { api } from "./api";
 
-export type SqlAuditPageOut = components["schemas"]["SqlAuditPageOut"];
-export type SqlAuditItemOut = components["schemas"]["SqlAuditItemOut"];
-export type OperLogPageOut = components["schemas"]["OperLogPageOut"];
-export type OperLogItemOut = components["schemas"]["OperLogItemOut"];
+type SqlAuditPageOut = components["schemas"]["SqlAuditPageOut"];
+type OperLogPageOut = components["schemas"]["OperLogPageOut"];
 
-export interface SqlAuditParams {
+interface SqlAuditParams {
   page?: number;
   size?: number;
   trace_id?: string;
@@ -29,7 +27,7 @@ export function sqlAuditPage(params: SqlAuditParams): Promise<SqlAuditPageOut> {
   return api.get<SqlAuditPageOut>(`/audit/sql/page${qs.size ? `?${qs}` : ""}`);
 }
 
-export interface OperLogParams {
+interface OperLogParams {
   page?: number;
   size?: number;
   action?: string;

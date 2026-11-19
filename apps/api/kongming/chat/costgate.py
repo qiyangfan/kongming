@@ -99,18 +99,45 @@ class ChatCostGate:
         self._monthly = quota_monthly_calls
         self._now = now
 
+    async def _check_rate(self, *, tenant_id: str, user_id: str) -> None:
+        """速率闸(租户,用户)近似滑动窗口;limit<=0 不限,存储异常 fail-open。"""
+        if self._rate <= 0:
+            return
+        try:
+            allowed = await self._limiter.allow_sliding(
+                f"chat:{tenant_id}:{user_id}", limit=self._rate, window_sec=60
+            )
+        except Exception:  # noqa: BLE001 # 限流存储异常=fail-open 放行(同口径)
+            log.error("速率闸存储异常,fail-open 放行", exc_info=True)
+            allowed = True
+        if not allowed:
+            raise ChatRateLimited("CHAT_RATE_LIMITED")
+
+    async def _check_quota_dim(
+        self, tenant_id: str, *, dimension: str, used: int, limit: int
+    ) -> None:
+        """单维配额判定:超限拒绝;达预警线仅记审计。limit<=0 不限。"""
+        if limit <= 0:
+            return
+        v = check_quota(used=used, limit=limit, warn_pct=80, dimension="CALLS")
+        if not v.allowed:
+            await self._reject(tenant_id, dimension, used, limit)
+        if v.warn:
+            await self._reject(tenant_id, dimension, used, limit, warn_only=True)
+
+    @staticmethod
+    def _warn_header(*, used_day: int, used_month: int, daily: int, monthly: int) -> str:
+        """预警头:任一维达线即带(维度: 已用/限额),逗号连接。"""
+        warns: list[str] = []
+        if daily > 0 and used_day * 100 >= daily * 80:
+            warns.append(f"CHAT_DAILY_CALLS:{used_day}/{daily}")
+        if monthly > 0 and used_month * 100 >= monthly * 80:
+            warns.append(f"CHAT_MONTHLY_CALLS:{used_month}/{monthly}")
+        return ",".join(warns)
+
     async def check_login(self, *, tenant_id: str, user_id: str) -> str:
         """登录用户面双闸:速率(租户,用户)→ 配额(租户)。通过返回 warn(可空)。"""
-        if self._rate > 0:
-            try:
-                allowed = await self._limiter.allow_sliding(
-                    f"chat:{tenant_id}:{user_id}", limit=self._rate, window_sec=60
-                )
-            except Exception:  # noqa: BLE001 # 限流存储异常=fail-open 放行(同口径)
-                log.error("速率闸存储异常,fail-open 放行", exc_info=True)
-                allowed = True
-            if not allowed:
-                raise ChatRateLimited("CHAT_RATE_LIMITED")
+        await self._check_rate(tenant_id=tenant_id, user_id=user_id)
         if self._counter is None:
             return ""  # 无配额维(bot 面):仅速率闸
         day_start, month_start = day_window(self._now or dt.datetime.now(_TZ))
@@ -121,47 +148,17 @@ class ChatCostGate:
         except Exception as e:  # noqa: BLE001  读数失败=fail-closed 拒绝(不裸 500)
             await self._audit("chat.quota_read_failed", tenant_id, {"error": str(e)[:200]})
             raise ChatQuotaUnavailable("CHAT_QUOTA_UNAVAILABLE") from e
-        if self._daily > 0:
-            v = check_quota(
-                used=used_day,
-                limit=self._daily,
-                warn_pct=80,
-                dimension="CALLS",
-            )
-            if not v.allowed:
-                await self._reject(tenant_id, "CHAT_DAILY_CALLS", used_day, self._daily)
-            if v.warn:
-                await self._reject(
-                    tenant_id,
-                    "CHAT_DAILY_CALLS",
-                    used_day,
-                    self._daily,
-                    warn_only=True,
-                )
-        if self._monthly > 0:
-            v = check_quota(
-                used=used_month,
-                limit=self._monthly,
-                warn_pct=80,
-                dimension="CALLS",
-            )
-            if not v.allowed:
-                await self._reject(tenant_id, "CHAT_MONTHLY_CALLS", used_month, self._monthly)
-            if v.warn:
-                await self._reject(
-                    tenant_id,
-                    "CHAT_MONTHLY_CALLS",
-                    used_month,
-                    self._monthly,
-                    warn_only=True,
-                )
-        # 预警头:任一维达线即带(维度: 已用/限额);contextvar 回传路由落响应头
-        warns: list[str] = []
-        if self._daily > 0 and used_day * 100 >= self._daily * 80:
-            warns.append(f"CHAT_DAILY_CALLS:{used_day}/{self._daily}")
-        if self._monthly > 0 and used_month * 100 >= self._monthly * 80:
-            warns.append(f"CHAT_MONTHLY_CALLS:{used_month}/{self._monthly}")
-        warn = ",".join(warns)
+        # 日维先于月维(拒绝/预警审计顺序不变)
+        await self._check_quota_dim(
+            tenant_id, dimension="CHAT_DAILY_CALLS", used=used_day, limit=self._daily
+        )
+        await self._check_quota_dim(
+            tenant_id, dimension="CHAT_MONTHLY_CALLS", used=used_month, limit=self._monthly
+        )
+        # 预警头经 contextvar 回传路由落响应头
+        warn = self._warn_header(
+            used_day=used_day, used_month=used_month, daily=self._daily, monthly=self._monthly
+        )
         quota_warn_var.set(warn)
         return warn
 

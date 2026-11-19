@@ -229,26 +229,21 @@ class WorkflowService:
         member_roles: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """执行编排:定义解析(版本/启用)→ 引擎 → run 落库(终态全落)。"""
-        if version is not None:
-            row = await self._repo.get_def(tenant_id=tenant_id, wf_key=wf_key, version=version)
-        else:
-            row = await self._repo.latest_def(tenant_id=tenant_id, wf_key=wf_key)
-        if row is None:
-            raise WorkflowNotFound(wf_key)
-        self._assert_visible(row, user_id=user_id, member_roles=member_roles)
-        if not row["enabled"]:
-            raise WorkflowDisabled(wf_key)
-        definition = row["definition"]
-        nodes = validate_dag(definition)  # 落库前已验,此处深防御重验
+        row = await self._resolve_definition(
+            tenant_id=tenant_id,
+            wf_key=wf_key,
+            version=version,
+            user_id=user_id,
+            member_roles=member_roles,
+        )
+        nodes = validate_dag(row["definition"])  # 落库前已验,此处深防御重验
         # 读取即提交释放连接(执行期 ≤120s 不占控制面连接槽;
         # 引擎 sql/agent 节点用同会话惰性重取连接,run 落库再入新事务)
         await self._repo.commit()
         outcome = await engine.run_dag(
             nodes,
             inputs,
-            sql=self._sql,
-            http=self._http,
-            agent=self._agent,
+            runners=(self._sql, self._http, self._agent),
             trace_id=trace_id,
             tenant_key=tenant_key,
             user_id=user_id,
@@ -283,6 +278,27 @@ class WorkflowService:
             "version": int(row["version"]),
             "run_id": run_id,  # trigger 关联回填
         }
+
+    async def _resolve_definition(
+        self,
+        *,
+        tenant_id: str,
+        wf_key: str,
+        version: int | None,
+        user_id: str,
+        member_roles: dict[str, str] | None,
+    ) -> dict[str, Any]:
+        """取目标版本定义并校验可见/启用(执行前统一前置)。"""
+        if version is not None:
+            row = await self._repo.get_def(tenant_id=tenant_id, wf_key=wf_key, version=version)
+        else:
+            row = await self._repo.latest_def(tenant_id=tenant_id, wf_key=wf_key)
+        if row is None:
+            raise WorkflowNotFound(wf_key)
+        self._assert_visible(row, user_id=user_id, member_roles=member_roles)
+        if not row["enabled"]:
+            raise WorkflowDisabled(wf_key)
+        return row
 
     async def page_runs(
         self,

@@ -1,6 +1,7 @@
 """数据源注册、编辑、启停、删除、连接测试和选项查询用例。持久化、加解密、连接池失效和连接测试都通过端口注入；写操作先校验再落库，并在同一事务记录操作日志。连接池仅在数据库提交后失效。"""
 
 import logging
+from dataclasses import dataclass
 
 from kongming.datasource.models import (
     CredentialUndecryptable,
@@ -34,6 +35,24 @@ DEFAULT_OPTION = DatasourceOption(datasource_key="default", name="默认数据�
 
 class OptionsTenantForbidden(Exception):
     """options 租户解析失败(未绑定/不存在/禁用——同形不区分,与 chat 同构)。"""
+
+
+@dataclass(frozen=True)
+class _UpdateRow:
+    """编辑落库所需全部字段(落库、建议缓存失效、操作日志与连接池失效共用)。"""
+
+    actor_id: str
+    ds_id: str
+    datasource_key: str
+    tenant_id: str
+    name: str
+    host: str
+    port: int
+    database: str
+    username: str
+    password: str | None
+    default_schema: str
+    readonly: bool
 
 
 class DatasourceService:
@@ -122,6 +141,68 @@ class DatasourceService:
         readonly: bool,
         suggestion_evictor: SuggestionCacheEvictor | None = None,
     ) -> None:
+        validate_default_schema(default_schema)
+        await self._write_update(
+            _UpdateRow(
+                actor_id=actor_id,
+                ds_id=ds_id,
+                datasource_key=datasource_key,
+                tenant_id=tenant_id,
+                name=name,
+                host=host,
+                port=port,
+                database=database,
+                username=username,
+                password=password,
+                default_schema=default_schema,
+                readonly=readonly,
+            ),
+            suggestion_evictor=suggestion_evictor,
+        )
+
+    async def _write_update(
+        self, fields: _UpdateRow, *, suggestion_evictor: SuggestionCacheEvictor | None
+    ) -> None:
+        """落库编辑字段并连带建议缓存失效、操作日志与提交;连接变化后再失效连接池。"""
+        current = await self._editable_row(
+            fields.ds_id, datasource_key=fields.datasource_key, tenant_id=fields.tenant_id
+        )
+        # 连接信息变更检测:host/port/database/username/password/
+        # default_schema 任一变化 → commit 后定向 evict;仅改 name 等展示字段不动池
+        conn_changed = (
+            current.host != fields.host
+            or current.port != fields.port
+            or current.database != fields.database
+            or current.username != fields.username
+            or current.default_schema != fields.default_schema
+            or bool(fields.password)
+        )
+        await self._repo.update(
+            fields.ds_id,
+            name=fields.name,
+            host=fields.host,
+            port=fields.port,
+            database=fields.database,
+            username=fields.username,
+            password_enc=self._cipher.encrypt(fields.password) if fields.password else None,
+            default_schema=fields.default_schema,
+            readonly=fields.readonly,
+        )
+        # 连接信息变更级联失效建议缓存(同事务;仅改 name 不失效)
+        if conn_changed and suggestion_evictor is not None:
+            await suggestion_evictor.evict_by_datasource(fields.datasource_key)
+        await self._repo.log_oper(
+            fields.actor_id,
+            "datasource.update",
+            fields.datasource_key,
+            {"datasource_id": fields.ds_id},
+        )
+        await self._repo.commit()
+        if conn_changed:
+            await self._evict_quietly(fields.datasource_key)
+
+    async def _editable_row(self, ds_id: str, *, datasource_key: str, tenant_id: str) -> Datasource:
+        """取待编辑行并校验存在、key 与租户归属未变;任一不符按对应领域异常拒绝。"""
         current = await self._repo.get(ds_id)
         if current is None:
             raise DatasourceNotFound("数据源不存在")
@@ -129,37 +210,7 @@ class DatasourceService:
             raise DatasourceKeyImmutable("datasource_key 创建后不可修改")
         if current.tenant_id != tenant_id:
             raise DatasourceTenantImmutable("数据源租户归属创建后不可修改")
-        validate_default_schema(default_schema)
-        # 连接信息变更检测:host/port/database/username/password/
-        # default_schema 任一变化 → commit 后定向 evict;仅改 name 等展示字段不动池
-        conn_changed = (
-            current.host != host
-            or current.port != port
-            or current.database != database
-            or current.username != username
-            or current.default_schema != default_schema
-            or bool(password)
-        )
-        await self._repo.update(
-            ds_id,
-            name=name,
-            host=host,
-            port=port,
-            database=database,
-            username=username,
-            password_enc=self._cipher.encrypt(password) if password else None,
-            default_schema=default_schema,
-            readonly=readonly,
-        )
-        # 连接信息变更级联失效建议缓存(同事务;仅改 name 不失效)
-        if conn_changed and suggestion_evictor is not None:
-            await suggestion_evictor.evict_by_datasource(datasource_key)
-        await self._repo.log_oper(
-            actor_id, "datasource.update", datasource_key, {"datasource_id": ds_id}
-        )
-        await self._repo.commit()
-        if conn_changed:
-            await self._evict_quietly(datasource_key)
+        return current
 
     # ---- 启停 ----
 

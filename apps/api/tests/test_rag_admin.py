@@ -1134,12 +1134,12 @@ async def test_reindex_preserving_existing_on_prefetch_failure(
     ).scalar_one()
     assert before >= 1
 
-    from kongming.rag.repository import RagRepository
+    from kongming.rag.repository import RagTenantRepository
 
-    async def _boom(self: RagRepository, **kw: object) -> list[object]:
+    async def _boom(self: RagTenantRepository, **kw: object) -> list[object]:
         raise LookupError("datasource gone")
 
-    monkeypatch.setattr(RagRepository, "introspect_all", _boom)
+    monkeypatch.setattr(RagTenantRepository, "introspect_all", _boom)
     r = await client.post(
         f"{RAG}/reindex", json={"datasource_key": "default"}, headers=_auth(token)
     )

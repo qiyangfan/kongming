@@ -6,7 +6,7 @@ from functools import lru_cache
 
 from langgraph.graph import END, START, StateGraph
 
-from kongming_agent.graph import nodes
+from kongming_agent.graph import intent_nodes, nodes
 from kongming_agent.graph.nodes import MAX_RETRY  # re-export(测试与调用方统一入口)
 from kongming_agent.graph.state import AgentState, fused_takes_over
 from kongming_agent.graph.streams import stage_wrapper
@@ -84,7 +84,7 @@ def get_graph():  # type: ignore[no-untyped-def]
     )
     # 三态意图路由(检索前轻量分类;失败/低置信回退词表)
     g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
-        "route_intent", stage_wrapper("route_intent", nodes.route_intent)
+        "route_intent", stage_wrapper("route_intent", intent_nodes.route_intent)
     )
     g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
         "retrieve", stage_wrapper("retrieve", nodes.retrieve)
@@ -110,7 +110,7 @@ def get_graph():  # type: ignore[no-untyped-def]
     )
     # 融合问答(summarize 后条件进入,见 _after_summarize)
     g.add_node(  # pyright: ignore[reportUnknownMemberType]  # langgraph 库侧签名含 Unknown
-        "fused_answer", stage_wrapper("fused_answer", nodes.fused_answer)
+        "fused_answer", stage_wrapper("fused_answer", intent_nodes.fused_answer)
     )
 
     g.add_edge(START, "understand")

@@ -15,14 +15,14 @@ from tests.test_task import INTERNAL, _create_task, _user_with_task_perms
 def _no_dispatch(monkeypatch: pytest.MonkeyPatch) -> list[str]:  # pyright: ignore[reportUnusedFunction]
     """派发记录器(与 test_task.py 同款):创建/恢复/批准的 _schedule_run 改为
     记录,编排回调由本文件内联驱动(消除后台任务嵌套 ASGI 传输层死锁)。"""
-    from kongming.task import router as task_router
+    from kongming.task import dispatch as task_dispatch
 
     calls: list[str] = []
 
     def _record(*, task_id: str, epoch: int | None = None) -> None:
         calls.append(task_id)
 
-    monkeypatch.setattr(task_router, "_schedule_run", _record)
+    monkeypatch.setattr(task_dispatch, "_schedule_run", _record)
     return calls
 
 
@@ -329,8 +329,8 @@ async def test_graph_confirm_expiry_skips_step(
         )
     )
     await session.commit()
+    from kongming.task.collab_repo import SqlCollabLedgerRepo as SqlTaskRepo
     from kongming.task.graph_repo import SqlGraphRepo
-    from kongming.task.repository import SqlTaskRepo
     from kongming.task.service import TaskService
 
     svc = TaskService(SqlTaskRepo(session), graph_repo=SqlGraphRepo(session))

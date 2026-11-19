@@ -26,7 +26,7 @@ from tests.test_chat_sessions import _mk_session
 @pytest.fixture
 def fake_agent() -> Iterator[dict[str, FakeAgent]]:
     """agent 面 dependency_overrides 替身(与 test_chat_query 同形态,模块私有不可跨用)。"""
-    from kongming.chat.router import get_agent_client
+    from kongming.chat.dependencies import get_agent_client
     from kongming.main import app
 
     holder: dict[str, FakeAgent] = {}

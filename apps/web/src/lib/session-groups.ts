@@ -1,6 +1,6 @@
 /* 按本地日期分组会话，组内保持服务端更新时间倒序。 */
 
-export interface SessionGroup<T> {
+interface SessionGroup<T> {
   label: string;
   items: T[];
 }
@@ -10,6 +10,15 @@ interface HasUpdatedAt {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/* 取(或按出现序新建)指定标签的分组 */
+function ensureGroup<T>(groups: SessionGroup<T>[], label: string): SessionGroup<T> {
+  const found = groups.find((x) => x.label === label);
+  if (found) return found;
+  const created: SessionGroup<T> = { label, items: [] };
+  groups.push(created);
+  return created;
+}
 
 export function groupSessionsByTime<T extends HasUpdatedAt>(
   items: T[],
@@ -28,12 +37,7 @@ export function groupSessionsByTime<T extends HasUpdatedAt>(
   for (const item of items) {
     const t = new Date(item.updated_at).getTime();
     const bucket = buckets.find((b) => t >= b.since) ?? buckets[buckets.length - 1];
-    let g = groups.find((x) => x.label === bucket.label);
-    if (!g) {
-      g = { label: bucket.label, items: [] };
-      groups.push(g);
-    }
-    g.items.push(item);
+    ensureGroup(groups, bucket.label).items.push(item);
   }
   return groups;
 }

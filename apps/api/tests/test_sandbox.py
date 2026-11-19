@@ -236,31 +236,35 @@ def _override_service(sandbox: object | None) -> None:  # noqa: ANN401
     from kongming.db import get_session
     from kongming.main import app
     from kongming.redis_client import get_redis
+    from kongming.toolcall.adapters import (
+        ChatReplyStore as _ChatReplyStore,
+    )
+    from kongming.toolcall.adapters import (
+        InternalSqlExecutor as _InternalSqlExecutor,
+    )
+    from kongming.toolcall.adapters import (
+        RagServiceAdapter as _RagServiceAdapter,
+    )
+    from kongming.toolcall.dependencies import get_tool_service as _get_service
     from kongming.toolcall.ratelimit import RedisRateLimiter
     from kongming.toolcall.repository import SqlToolCallRepo, ToolAuditWriter
-    from kongming.toolcall.router import (
-        _ChatReplyStore,
-        _get_service,
-        _InternalSqlExecutor,
-        _RagServiceAdapter,
-    )
-    from kongming.toolcall.service import ToolCallService
+    from kongming.toolcall.service import ToolCallService, ToolLimits, ToolPorts
 
     def _factory(
         s: AsyncSession = Depends(get_session),  # noqa: B008  # FastAPI 依赖注入惯例
     ) -> ToolCallService:
         return ToolCallService(
-            repo=SqlToolCallRepo(s),
-            writer=ToolAuditWriter(),
-            perms=SqlPermRepo(s),
-            limiter=RedisRateLimiter(get_redis()),
-            sql_executor=_InternalSqlExecutor(s),
-            rag_retriever=_RagServiceAdapter(s),
-            reply_store=_ChatReplyStore(s),
-            intent=None,
-            sandbox=cast("SandboxExecutor | None", sandbox),
-            rate_limit_per_minute=600,
-            confirm_ttl_minutes=15,
+            ToolPorts(
+                repo=SqlToolCallRepo(s),
+                writer=ToolAuditWriter(),
+                perms=SqlPermRepo(s),
+                limiter=RedisRateLimiter(get_redis()),
+                sql=_InternalSqlExecutor(s),
+                rag=_RagServiceAdapter(s),
+                reply=_ChatReplyStore(s),
+                sandbox=cast("SandboxExecutor | None", sandbox),
+            ),
+            limits=ToolLimits(rate_per_minute=600, confirm_ttl_minutes=15),
         )
 
     app.dependency_overrides[_get_service] = _factory
@@ -268,7 +272,7 @@ def _override_service(sandbox: object | None) -> None:  # noqa: ANN401
 
 def _clear_override() -> None:
     from kongming.main import app
-    from kongming.toolcall.router import _get_service
+    from kongming.toolcall.dependencies import get_tool_service as _get_service
 
     app.dependency_overrides.pop(_get_service, None)
 

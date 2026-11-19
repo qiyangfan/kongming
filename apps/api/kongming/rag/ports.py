@@ -98,8 +98,8 @@ class TableDescriberPort(Protocol):
     async def describe(self, block: TableBlock, schema_name: str) -> tuple[bool, TableBlock]: ...
 
 
-class RagRepo(Protocol):
-    """知识库持久化与数据源内省端口；审计写入与当前数据库会话共用事务。"""
+class RagEntryRepo(Protocol):
+    """知识库持久化端口的表条目读写、团队归属与数据源内省面(仅供类型组合,运行期按结构判定)。"""
 
     async def upsert_table(
         self,
@@ -143,12 +143,6 @@ class RagRepo(Protocol):
 
     async def delete_all_for_datasource(self, *, tenant_id: str, datasource_key: str) -> int: ...
 
-    async def allowed_schemas(
-        self, *, tenant_id: str, tenant_key: str, datasource_key: str
-    ) -> list[str]:
-        """可扫描 schema 集合(上传存在性校验与枚举端点候选源,与内省同源)。"""
-        ...
-
     async def column_comments(
         self, *, tenant_id: str, datasource_key: str
     ) -> dict[str, dict[str, str]]: ...
@@ -165,6 +159,10 @@ class RagRepo(Protocol):
     ) -> tuple[int, int]:
         """删除当前扫描结果之外的自动来源条目，返回删除数和保留的人工孤儿数。"""
         ...
+
+
+class RagRecallRepo(Protocol):
+    """知识库持久化端口的三路召回与知识存在闸面(仅供类型组合,运行期按结构判定)。"""
 
     async def recall_vector(
         self,
@@ -206,6 +204,10 @@ class RagRepo(Protocol):
         visible_team_ids: Sequence[str] = (),  # 可见集合过滤(扩展路兜底)
     ) -> list[KnowledgeEntry]: ...
 
+
+class RagSampleRepo(Protocol):
+    """知识库持久化端口的历史样本写入与反馈样本晋升/停用面(仅供类型组合,运行期按结构判定)。"""
+
     async def insert_history(
         self,
         *,
@@ -233,6 +235,10 @@ class RagRepo(Protocol):
 
     async def disable_feedback_samples(self, *, feedback_message_id: str) -> None: ...
 
+
+class RagCoreRepo(Protocol):
+    """知识库持久化端口的事务边界与审计写入面(仅供类型组合,运行期按结构判定)。"""
+
     async def log_oper(
         self, user_id: str | None, action: str, target: str | None, detail: dict[str, object]
     ) -> None: ...
@@ -242,6 +248,10 @@ class RagRepo(Protocol):
     async def rollback(self) -> None: ...
 
     # ---- 租户解析(与 chat/options 白名单复校同构) ----
+
+
+class RagTenantRepo(Protocol):
+    """知识库持久化端口的租户解析、数据源可用性与内省面(仅供类型组合,运行期按结构判定)。"""
 
     async def resolve_bound_tenant(
         self, user_id: str, tenant_key: str
@@ -253,11 +263,36 @@ class RagRepo(Protocol):
 
     async def datasource_usable(self, datasource_key: str, tenant_id: str) -> bool: ...
 
+    async def allowed_schemas(
+        self, *, tenant_id: str, tenant_key: str, datasource_key: str
+    ) -> list[str]:
+        """可扫描 schema 集合(上传存在性校验与枚举端点候选源,与内省同源)。"""
+        ...
+
     async def introspect_all(
         self, *, tenant_id: str, tenant_key: str, datasource_key: str
     ) -> list[IntrospectedTable]: ...
 
-    # 知识覆盖报告(只读聚合输入;零写入零 LLM) ----
+    async def knowledge_table_exists(
+        self, *, tenant_id: str, datasource_key: str, schema_table: str
+    ) -> bool: ...
+
+
+class RagRepo(RagCoreRepo, Protocol):
+    """知识库持久化的整体视图:事务收口 + 各能力子仓储(同一会话)。
+
+    服务按用例只依赖所用子仓储窄面;聚合视图供装配与跨用例测试注解使用。
+    """
+
+    entries: RagEntryRepo
+    recall: RagRecallRepo
+    samples: RagSampleRepo
+    tenant: RagTenantRepo
+    coverage: "CoverageRepo"
+
+
+class CoverageRepo(Protocol):
+    """知识覆盖报告的只读聚合输入端口(零写入零 LLM;实现见 coverage_repository)。"""
 
     async def list_all_entries(
         self,

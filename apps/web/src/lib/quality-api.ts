@@ -6,20 +6,18 @@ import { api } from "./api";
 export type QualitySummaryOut = components["schemas"]["QualitySummaryOut"];
 export type QualityPageOut = components["schemas"]["QualityPageOut"];
 export type QualityRoundItemOut = components["schemas"]["QualityRoundItemOut"];
-export type QualityScoreDetailOut = components["schemas"]["QualityScoreDetailOut"];
-export type QualityContextOut = components["schemas"]["QualityContextOut"];
+type QualityScoreDetailOut = components["schemas"]["QualityScoreDetailOut"];
+type QualityContextOut = components["schemas"]["QualityContextOut"];
 export type QualityContextItemOut = components["schemas"]["QualityContextItemOut"];
-export type QualityStageTraceOut = components["schemas"]["QualityStageTraceOut"];
+type QualityStageTraceOut = components["schemas"]["QualityStageTraceOut"];
 export type QualityTrendPoint = QualitySummaryOut["trend"][number];
-export type QualitySliceRow = QualitySummaryOut["by_datasource"][number];
-export type QualityPromptSliceRow = QualitySummaryOut["by_prompt_version"][number];
 
 /** 轮次质量总览(四态占比/率值 + 按天趋势补零 + 数据源/prompt 切片) */
 export function qualitySummary(days = 30): Promise<QualitySummaryOut> {
   return api.get<QualitySummaryOut>(`/system/chat-quality/summary?days=${days}`);
 }
 
-export interface QualityPageParams {
+interface QualityPageParams {
   page?: number;
   size?: number;
   status?: "SUCCESS" | "FAILED" | "REJECTED" | "NO_DATA";

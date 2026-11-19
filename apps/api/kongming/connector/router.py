@@ -111,26 +111,7 @@ def _build_caller() -> ConnectorCaller:
         async def call(
             self, *, row: dict[str, Any], secret: str | None, args: dict[str, object]
         ) -> tuple[bool, int | None, str, str | None]:
-            from kongming.toolgateway.connector import build_connector_stack
-            from kongming.toolgateway.gateway import ToolGateway
-
-            settings = get_settings()
-            spec, policy, executor = build_connector_stack(
-                row, auth_secret=secret, quota_per_minute=settings.toolgateway_http_quota
-            )
-            gw = ToolGateway(
-                manifest={"http": spec},
-                policies={"http": policy},
-                domain_executors={"http": executor},
-            )
-            out = await gw.execute(
-                tool_name=f"http__{row['key']}",
-                args=args,
-                domain="http",
-                trace_id=f"test-{uuid.uuid4().hex[:12]}",
-                tenant_id=str(row.get("tenant_id") or "-"),
-                user_id="-",
-            )
+            out = await _execute_once(row, secret=secret, args=args)
             if out["status"] == "executed":
                 result = cast("dict[str, object]", out.get("result") or {})
                 body = str(result.get("body") or "")
@@ -145,6 +126,32 @@ def _build_caller() -> ConnectorCaller:
             return False, None, "", reason
 
     return _Caller()
+
+
+async def _execute_once(
+    row: dict[str, Any], *, secret: str | None, args: dict[str, object]
+) -> dict[str, object]:
+    """按声明三件套装配调用栈并对网关切面真实出站一次,返回网关执行结果。"""
+    from kongming.toolgateway.connector import build_connector_stack
+    from kongming.toolgateway.gateway import ToolGateway
+
+    settings = get_settings()
+    spec, policy, executor = build_connector_stack(
+        row, auth_secret=secret, quota_per_minute=settings.toolgateway_http_quota
+    )
+    gw = ToolGateway(
+        manifest={"http": spec},
+        policies={"http": policy},
+        domain_executors={"http": executor},
+    )
+    return await gw.execute(
+        tool_name=f"http__{row['key']}",
+        args=args,
+        domain="http",
+        trace_id=f"test-{uuid.uuid4().hex[:12]}",
+        tenant_id=str(row.get("tenant_id") or "-"),
+        user_id="-",
+    )
 
 
 def _resolve_tenant(

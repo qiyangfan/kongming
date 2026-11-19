@@ -4,24 +4,13 @@ import type { components } from "./api-types.gen";
 import { api } from "./api";
 
 export type TaskItem = components["schemas"]["TaskItem"];
-export type TaskPageOut = components["schemas"]["TaskPageOut"];
+type TaskPageOut = components["schemas"]["TaskPageOut"];
 export type TaskDetailOut = components["schemas"]["TaskDetailOut"];
-export type StepOut = components["schemas"]["StepOut"];
-export type TaskMutateOut = components["schemas"]["TaskMutateOut"];
+type TaskMutateOut = components["schemas"]["TaskMutateOut"];
 export type CollabRunOut = components["schemas"]["CollabRunOut"];
-export type CollabRunsOut = components["schemas"]["CollabRunsOut"];
+type CollabRunsOut = components["schemas"]["CollabRunsOut"];
 export type CollabWorkerOut = components["schemas"]["CollabWorkerOut"];
 export type CollabTurnOut = components["schemas"]["CollabTurnOut"];
-
-/** 创建任务(异步;202 即返回 PLANNING,详情轮询状态) */
-export function createTask(body: {
-  goal: string;
-  datasource_key?: string;
-  session_id?: string | null;
-  budget?: Record<string, number> | null;
-}): Promise<components["schemas"]["TaskCreateOut"]> {
-  return api.post("/tasks", body);
-}
 
 export function listTasks(page: number, size = 20, status?: string): Promise<TaskPageOut> {
   const s = status ? `&status=${encodeURIComponent(status)}` : "";
@@ -35,20 +24,6 @@ export function getTask(id: string): Promise<TaskDetailOut> {
 /* 协作观测面:任务维度协作运行清单(worker 账本+裁决) */
 export function listCollabRuns(id: string): Promise<CollabRunsOut> {
   return api.get<CollabRunsOut>(`/tasks/${id}/collab-runs`);
-}
-
-/** 步骤声明协作拓扑(PENDING 步骤;归一+部署钳制在服务端) */
-export function setCollabTopology(
-  id: string,
-  stepId: string,
-  body: {
-    max_workers?: number | null;
-    critic?: boolean;
-    dispatch?: string | null;
-    bot_key?: string | null;
-  },
-): Promise<Record<string, unknown>> {
-  return api.put(`/tasks/${id}/steps/${stepId}/collab-topology`, body);
 }
 
 export function pauseTask(id: string, version?: number): Promise<TaskMutateOut> {

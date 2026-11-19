@@ -8,7 +8,7 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.chat.router import get_agent_client
+from kongming.chat.dependencies import get_agent_client
 from kongming.main import app
 from tests.conftest import MakeUser
 from tests.test_chat_query import (

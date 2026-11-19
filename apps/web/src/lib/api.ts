@@ -13,17 +13,13 @@ export type ChatQueryOut = components["schemas"]["ChatQueryOut"];
 export type TenantRefOut = components["schemas"]["TenantRefOut"];
 /* 流式事件 data 形态(契约见 openapi responses oneOf) */
 export type StreamStageOut = components["schemas"]["StreamStageOut"];
-export type StreamSqlOut = components["schemas"]["StreamSqlOut"];
-export type StreamSummaryOut = components["schemas"]["StreamSummaryOut"];
-export type StreamErrorOut = components["schemas"]["StreamErrorOut"];
+type StreamSqlOut = components["schemas"]["StreamSqlOut"];
+type StreamSummaryOut = components["schemas"]["StreamSummaryOut"];
+type StreamErrorOut = components["schemas"]["StreamErrorOut"];
 /* tool-calling:tool_call 事件 + 待确认调用 + 确认回执 */
 export type StreamToolCallOut = components["schemas"]["StreamToolCallOut"];
 export type PendingToolCallOut = components["schemas"]["PendingToolCallOut"];
 export type ToolConfirmOut = components["schemas"]["ToolConfirmOut"];
-export type ToolItemOut = components["schemas"]["ToolItemOut"];
-export type ToolListOut = components["schemas"]["ToolListOut"];
-export type ToolAuditItem = components["schemas"]["ToolAuditItem"];
-export type ToolAuditPageOut = components["schemas"]["ToolAuditPageOut"];
 
 const BASE = "/api";
 const REFRESH_KEY = "km.refresh";
@@ -59,28 +55,36 @@ export function clearTokens(): void {
   if (had) sessionClearedListeners.forEach((cb) => cb());
 }
 
+/* 提交刷新请求;2xx 时落盘新令牌返回 true,非 2xx 清空本地态 */
+async function postRefresh(rt: string): Promise<boolean> {
+  const resp = await fetch(`${BASE}/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: rt }),
+  });
+  if (!resp.ok) {
+    clearTokens();
+    return false;
+  }
+  const pair = (await resp.json()) as TokenPairOut;
+  setTokens(pair.access_token, pair.refresh_token);
+  return true;
+}
+
+/* 发起一次刷新请求并处理失败清理；网络异常时保留本地态,由下次请求再试 */
+async function requestTokenRefresh(): Promise<boolean> {
+  const rt = localStorage.getItem(REFRESH_KEY);
+  if (!rt) return false;
+  try {
+    return await postRefresh(rt);
+  } catch {
+    return false;
+  }
+}
+
 /* 单飞刷新:并发 401 只触发一次 /auth/refresh */
 export function tryRefresh(): Promise<boolean> {
-  refreshing ??= (async () => {
-    const rt = localStorage.getItem(REFRESH_KEY);
-    if (!rt) return false;
-    try {
-      const resp = await fetch(`${BASE}/auth/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: rt }),
-      });
-      if (!resp.ok) {
-        clearTokens();
-        return false;
-      }
-      const pair = (await resp.json()) as TokenPairOut;
-      setTokens(pair.access_token, pair.refresh_token);
-      return true;
-    } catch {
-      return false; // 网络异常:保留本地态,由下次请求再试
-    }
-  })().finally(() => {
+  refreshing ??= requestTokenRefresh().finally(() => {
     refreshing = null;
   });
   return refreshing;
@@ -250,7 +254,7 @@ export const api = {
 
 /* ============ 流式问答(query-streaming) ============ */
 
-export interface StreamHandlers {
+interface StreamHandlers {
   onStage?: (d: StreamStageOut) => void;
   onSql?: (d: StreamSqlOut) => void;
   onSummary?: (d: StreamSummaryOut) => void;
@@ -259,43 +263,105 @@ export interface StreamHandlers {
   onError?: (d: StreamErrorOut) => void;
 }
 
-/** 解析一个 SSE 帧块(event:/data: 行,注释行忽略)并分发;畸形 data 静默跳帧。导出供 vitest 断言分帧边界与跳帧 */
-export function dispatchSseBlock(block: string, handlers: StreamHandlers): boolean {
+/* 帧块内逐行抽取 event 与 data 行；出现心跳注释行即返回 null（整帧忽略）。 */
+function parseSseLines(block: string): { event: string; data: string } | null {
   let event = "";
   const dataLines: string[] = [];
   for (const line of block.split("\n")) {
-    if (line.startsWith(":")) return false; // 心跳注释行
+    if (line.startsWith(":")) return null; // 心跳注释行
     if (line.startsWith("event:")) event = line.slice(6).trim();
     else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
   }
-  if (!event || dataLines.length === 0) return false;
+  if (!event || dataLines.length === 0) return null;
+  return { event, data: dataLines.join("\n") };
+}
+
+/* 事件 → 回调与是否终态；未知事件不在表中（前向兼容，直接忽略）。 */
+const SSE_EVENT_HANDLERS: Record<
+  string,
+  { deliver: (h: StreamHandlers, d: unknown) => void; terminal: boolean }
+> = {
+  stage: { deliver: (h, d) => h.onStage?.(d as StreamStageOut), terminal: false },
+  sql: { deliver: (h, d) => h.onSql?.(d as StreamSqlOut), terminal: false },
+  summary: { deliver: (h, d) => h.onSummary?.(d as StreamSummaryOut), terminal: false },
+  tool_call: { deliver: (h, d) => h.onToolCall?.(d as StreamToolCallOut), terminal: false },
+  result: { deliver: (h, d) => h.onResult?.(d as ChatQueryOut), terminal: true },
+  error: { deliver: (h, d) => h.onError?.(d as StreamErrorOut), terminal: true },
+};
+
+/**
+ * 解析一个 SSE 帧块(event:/data: 行,注释行忽略)并分发;畸形 data 静默跳帧。
+ * @public 仅供 vitest 断言分帧边界与跳帧
+ */
+export function dispatchSseBlock(block: string, handlers: StreamHandlers): boolean {
+  const frame = parseSseLines(block);
+  if (!frame) return false;
   let data: unknown;
   try {
-    data = JSON.parse(dataLines.join("\n"));
+    data = JSON.parse(frame.data);
   } catch {
     return false; // 畸形帧跳过,流不断
   }
-  switch (event) {
-    case "stage":
-      handlers.onStage?.(data as StreamStageOut);
-      return false;
-    case "sql":
-      handlers.onSql?.(data as StreamSqlOut);
-      return false;
-    case "summary":
-      handlers.onSummary?.(data as StreamSummaryOut);
-      return false;
-    case "tool_call":
-      handlers.onToolCall?.(data as StreamToolCallOut);
-      return false;
-    case "result":
-      handlers.onResult?.(data as ChatQueryOut);
-      return true;
-    case "error":
-      handlers.onError?.(data as StreamErrorOut);
-      return true;
-    default:
-      return false; // 未知事件忽略(前向兼容)
+  const entry = SSE_EVENT_HANDLERS[frame.event];
+  if (!entry) return false;
+  entry.deliver(handlers, data);
+  return entry.terminal;
+}
+
+/* 按 SSE 帧边界切分缓冲区,返回剩余缓冲与是否出现过终态帧 */
+function drainSseBuffer(
+  buffer: string,
+  handlers: StreamHandlers,
+): { buffer: string; terminated: boolean } {
+  let terminated = false;
+  // SSE 帧边界:空行
+  for (let idx = buffer.indexOf("\n\n"); idx >= 0; idx = buffer.indexOf("\n\n")) {
+    const block = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 2);
+    if (dispatchSseBlock(block, handlers)) terminated = true;
+  }
+  return { buffer, terminated };
+}
+
+/* 读到流结束,逐块切帧分发;返回是否出现过终态帧 */
+async function readSseStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  handlers: StreamHandlers,
+): Promise<boolean> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let terminated = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    // SSE 规范行尾 CRLF/LF 皆合法:剥除 CR 消除跨 chunk 的 \r\n 分裂边界
+    buffer += decoder.decode(value, { stream: true }).replace(/\r/g, "");
+    ({ buffer, terminated } = drainSseBuffer(buffer, handlers));
+    if (terminated) break;
+  }
+  return terminated;
+}
+
+/* 带 401 单飞刷新重试的 POST 请求 */
+async function postWithRefresh(path: string, init: RequestInit): Promise<Response> {
+  const resp = await doFetch(path, init);
+  if (resp.status === 401 && (await tryRefresh())) return doFetch(path, init);
+  return resp;
+}
+
+/* 读流并分发帧;主动取消时静默返回(迟到事件由守卫丢弃),其余异常转人类文案 */
+async function drainSseStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  handlers: StreamHandlers,
+  signal: AbortSignal,
+): Promise<boolean> {
+  try {
+    return await readSseStream(reader, handlers);
+  } catch (err) {
+    if (signal.aborted) return false;
+    throw err instanceof Error ? err : new Error("连接中断");
+  } finally {
+    void reader.cancel().catch(() => undefined);
   }
 }
 
@@ -306,34 +372,11 @@ export async function streamChatQuery(
   signal: AbortSignal,
 ): Promise<void> {
   const init: RequestInit = { method: "POST", body: JSON.stringify(body), signal };
-  let resp = await doFetch("/chat/query/stream", init);
-  if (resp.status === 401 && (await tryRefresh())) {
-    resp = await doFetch("/chat/query/stream", init);
-  }
+  const resp = await postWithRefresh("/chat/query/stream", init);
   if (!resp.ok) throw await toStatusError(resp);
   const reader = resp.body?.getReader();
   if (!reader) throw new Error("流式响应不可用");
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let terminated = false;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      // SSE 规范行尾 CRLF/LF 皆合法:剥除 CR 消除跨 chunk 的 \r\n 分裂边界
-      buffer += decoder.decode(value, { stream: true }).replace(/\r/g, "");
-      // SSE 帧边界:空行
-      for (let idx = buffer.indexOf("\n\n"); idx >= 0; idx = buffer.indexOf("\n\n")) {
-        const block = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        if (dispatchSseBlock(block, handlers)) terminated = true;
-      }
-    }
-  } catch (err) {
-    if (signal.aborted) return; // 主动取消:静默终止(迟到事件由守卫丢弃)
-    throw err instanceof Error ? err : new Error("连接中断");
-  } finally {
-    void reader.cancel().catch(() => undefined);
-  }
-  if (!terminated) throw new Error("连接中断,答案未完整返回");
+  const terminated = await drainSseStream(reader, handlers, signal);
+  // 主动取消发生在 read 之间时 drainSseStream 正常返回,此处靠 abort 状态跳过未终态的报错
+  if (!terminated && !signal.aborted) throw new Error("连接中断,答案未完整返回");
 }

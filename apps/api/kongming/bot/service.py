@@ -30,6 +30,88 @@ GUARDRAIL_REJECT_TEXT = "内容未通过安全检查,请调整后重试"
 # 零工具 Bot 运行闸文案(fail-fast;消费者视角,不暴露内部求交细节)
 NO_TOOLS_TEXT = "该助手未配置可用工具,无法执行查询,请联系助手提供方配置后重试"
 
+# agent 故障时的运行时文案(不裸 500)
+AGENT_UNAVAILABLE_TEXT = "助手暂不可用,请稍后重试"
+
+
+def _failure(error: str) -> dict[str, object]:
+    """运行前失败的占位应答形态(零工具闸与 agent 不可用共用)。"""
+    return {
+        "success": False,
+        "error": error,
+        "summary": "",
+        "sql": "",
+        "columns": [],
+        "rows": [],
+        "stats": {},
+        "retry_count": 0,
+    }
+
+
+def _apply_definition_override(
+    row: dict[str, object], override: dict[str, object] | None
+) -> dict[str, object]:
+    """商店渠道用上架快照覆盖系统提示词与工具集;无快照原样返回行。"""
+    run_row: dict[str, object] = dict(row)
+    if override is None:
+        return run_row
+    sp = override.get("system_prompt")
+    if isinstance(sp, str) and sp:
+        run_row["system_prompt"] = sp
+    tools_override = override.get("tools")
+    if isinstance(tools_override, list):
+        run_row["tools"] = [str(t) for t in cast("list[object]", tools_override)]
+    return run_row
+
+
+def _run_response(reply: dict[str, object], filtered: list[str]) -> dict[str, object]:
+    """运行应答组装:字段原样取内核回复,summary/error 用输出护栏处理后的两段。"""
+    retry_count = reply.get("retry_count")
+    return {
+        "success": bool(reply.get("success")),
+        "summary": filtered[0],
+        "sql": str(reply.get("sql") or ""),
+        "columns": reply.get("columns") or [],
+        "rows": reply.get("rows") or [],
+        "stats": reply.get("stats") or {},
+        "retry_count": int(str(retry_count)) if retry_count is not None else 0,
+        "error": filtered[1] or None,
+    }
+
+
+def _static_tools(creator_perms: list[str], bot_tools: list[str]) -> list[dict[str, object]]:
+    """静态工具集:创建者权限工具 ∩ Bot 子集,并剔除需确认的写工具。
+
+    Bot 渠道无确认交互(公开页/OpenAI 无会话),保留需确认工具会落确认死信,
+    且 LLM 会谎称卡片已弹出。
+    """
+    from kongming.toolcall.registry import REGISTRY as _TOOL_REG
+
+    selected = [dict(s) for s in filter_specs(creator_perms) if s["name"] in set(bot_tools)]
+    return [t for t in selected if not _TOOL_REG[str(t["name"])].require_confirm]
+
+
+def _mcp_only_tools(
+    entries: list[dict[str, object]], mcp_wanted: set[str]
+) -> list[dict[str, object]]:
+    """动态 MCP 工具中只保留只读且落在 Bot 子集内的项,转成工具 schema 形态。"""
+    out: list[dict[str, object]] = []
+    for entry in entries:
+        q = str(entry.get("qualified") or "")
+        if q not in mcp_wanted or not bool(entry.get("read_only")):
+            continue
+        schema = entry.get("schema")
+        out.append(
+            {
+                "name": q,
+                "description": str(entry.get("description") or ""),
+                "parameters": schema if isinstance(schema, dict) else {"type": "object"},
+                "write": False,
+                "require_confirm": False,
+            }
+        )
+    return out
+
 
 class BotNotFound(Exception):
     """不存在/非本人/未公开(同形不区分)。"""
@@ -164,31 +246,64 @@ class BotService:
         raw = row.get("tools")
         raw_bot_tools = cast("list[object]", raw) if isinstance(raw, list) else []
         bot_tools = [str(t) for t in raw_bot_tools if str(t) in allowed_names]
-        tools = [dict(s) for s in filter_specs(creator_perms) if s["name"] in set(bot_tools)]
-        # Bot 渠道无确认交互(公开页/OpenAI 无会话)——剔除需确认的写工具,
-        # 防确认死信+LLM 谎称卡片已弹出
-        from kongming.toolcall.registry import REGISTRY as _TOOL_REG
-
-        tools = [t for t in tools if not _TOOL_REG[str(t["name"])].require_confirm]
+        tools = _static_tools(creator_perms, bot_tools)
         # MCP 工具补入(filter_specs 只覆盖静态集);写工具同
         # 剔除(无 readOnlyHint=require_confirm,Bot 渠道确认死信)
         mcp_wanted = {t for t in bot_tools if t.startswith("mcp__")}
         if mcp_wanted and self._dynamic_tools is not None:
-            for entry in await self._dynamic_tools.list_dynamic(tenant_id=tenant_id):
-                q = str(entry.get("qualified") or "")
-                if q not in mcp_wanted or not bool(entry.get("read_only")):
-                    continue
-                schema = entry.get("schema")
-                tools.append(
-                    {
-                        "name": q,
-                        "description": str(entry.get("description") or ""),
-                        "parameters": schema if isinstance(schema, dict) else {"type": "object"},
-                        "write": False,
-                        "require_confirm": False,
-                    }
-                )
+            entries = await self._dynamic_tools.list_dynamic(tenant_id=tenant_id)
+            tools.extend(_mcp_only_tools(entries, mcp_wanted))
         return tools
+
+    async def _load_row(
+        self, bot_key: str, *, channel: str, tenant_id_hint: str | None
+    ) -> dict[str, object]:
+        """装载 Bot 行并过启用/公开/创建者账号态闸(不过则同形 BotNotFound)。"""
+        if tenant_id_hint is None:
+            # web 嵌入:bot_key 全局定位(先查全表拿租户——bot_key 租户内唯一,
+            # 公开页不带租户头;经 key 定位租户是刻意的)
+            row = await self._repo.get_by_key_anytenant(bot_key)
+        else:
+            row = await self._repo.get_by_key(tenant_id=tenant_id_hint, bot_key=bot_key)
+        if row is None or not row["enabled"]:
+            raise BotNotFound(bot_key)
+        if channel == "web_embed" and not row["is_public"]:
+            raise BotNotFound(bot_key)
+        creator = str(row["created_by"])
+        # 创建者禁用即不可运行(权限继承的账号态闸)
+        creator_status = await self._repo.find_user_status(creator)
+        if creator_status != "ACTIVE":
+            raise BotNotFound(bot_key)  # 创建者不可用同形 404(防探测)
+        return cast("dict[str, object]", row)
+
+    async def _run_react(
+        self,
+        *,
+        row: dict[str, object],
+        run_row: dict[str, object],
+        tools: list[dict[str, object]],
+        trace_id: str,
+        creator: str,
+        question: str,
+        channel: str,
+    ) -> dict[str, object] | None:
+        """调 ReAct 内核;agent 不可用时返回 None 由调用方收敛为友好错误。"""
+        from kongming.chat.agent_client import AgentUnavailable
+
+        try:
+            return await self._runner.run_react(
+                trace_id=trace_id,
+                tenant_key=str(row["tenant_key"]),
+                question=question,
+                user_id=creator,
+                datasource_key=str(row["datasource_key"]),
+                tools=tools,
+                bot_system_prompt=str(run_row["system_prompt"]),  # 商店渠道=快照
+                model=None if row["model"] is None else str(row["model"]),
+                channel=channel,
+            )
+        except AgentUnavailable:
+            return None
 
     async def run(
         self,
@@ -206,105 +321,55 @@ class BotService:
         与工具集——货架消费快照而非活定义;公开页/api-key 等既有渠道不传,
         消费活定义为既有契约。
         """
-        tenant_id = tenant_id_hint
-        if tenant_id is None:
-            # web 嵌入:bot_key 全局定位(先查全表拿租户——bot_key 租户内唯一,
-            # 公开页不带租户头;经 key 定位租户是刻意的)
-            row = await self._repo.get_by_key_anytenant(bot_key)
-        else:
-            row = await self._repo.get_by_key(tenant_id=tenant_id, bot_key=bot_key)
-        if row is None or not row["enabled"]:
-            raise BotNotFound(bot_key)
-        if channel == "web_embed" and not row["is_public"]:
-            raise BotNotFound(bot_key)
+        row = await self._load_row(bot_key, channel=channel, tenant_id_hint=tenant_id_hint)
         creator = str(row["created_by"])
-        # 创建者禁用即不可运行(权限继承的账号态闸)
-        creator_status = await self._repo.find_user_status(creator)
-        if creator_status != "ACTIVE":
-            raise BotNotFound(bot_key)  # 创建者不可用同形 404(防探测)
         trace_id = uuid.uuid4().hex
-        tenant_id = str(row["tenant_id"])
         # 输入护栏(与 chat 同口径)
         blocked, processed = await self._guardrail.check_input(
-            trace_id=trace_id, user_id=creator, tenant_id=tenant_id, texts=[question]
+            trace_id=trace_id, user_id=creator, tenant_id=str(row["tenant_id"]), texts=[question]
         )
         if blocked:
             return {"success": False, "error": GUARDRAIL_REJECT_TEXT, "summary": ""}
-        # 权限求交与工具裁剪(run/上架闸同源,见 resolve_tools);
-        # 商店渠道在快照定义上求交(零工具运行闸口径单源不变)
-        run_row: dict[str, object] = dict(row)
-        if definition_override is not None:
-            sp = definition_override.get("system_prompt")
-            if isinstance(sp, str) and sp:
-                run_row["system_prompt"] = sp
-            tools_override = definition_override.get("tools")
-            if isinstance(tools_override, list):
-                run_row["tools"] = [str(t) for t in cast("list[object]", tools_override)]
-        tools = await self.resolve_tools(creator_id=creator, tenant_id=tenant_id, row=run_row)
+        run_row = _apply_definition_override(row, definition_override)
+        tools = await self.resolve_tools(
+            creator_id=creator, tenant_id=str(row["tenant_id"]), row=run_row
+        )
         if not tools:
             # 零工具运行闸:无工具进 ReAct 只会产出「文本伪调用」假应答
             # (内核纪律段教模型调工具而模型无工具可调)——必败运行不花
             # LLM 调用,同构失败形态直返(与 AgentUnavailable 分支同构)
-            return {
-                "success": False,
-                "error": NO_TOOLS_TEXT,
-                "summary": "",
-                "sql": "",
-                "columns": [],
-                "rows": [],
-                "stats": {},
-                "retry_count": 0,
-            }
-        from kongming.chat.agent_client import AgentUnavailable
-
-        try:
-            reply = await self._runner.run_react(
-                trace_id=trace_id,
-                tenant_key=str(row["tenant_key"]),
-                question=processed[0],
-                user_id=creator,
-                datasource_key=str(row["datasource_key"]),
-                tools=tools,
-                bot_system_prompt=str(run_row["system_prompt"]),  # 商店渠道=快照
-                model=None if row["model"] is None else str(row["model"]),
-                channel=channel,
-            )
-        except AgentUnavailable:
+            return _failure(NO_TOOLS_TEXT)
+        reply = await self._run_react(
+            row=row,
+            run_row=run_row,
+            tools=tools,
+            trace_id=trace_id,
+            creator=creator,
+            question=processed[0],
+            channel=channel,
+        )
+        if reply is None:
             # agent 故障收敛友好错误(不裸 500)
-            return {
-                "success": False,
-                "error": "助手暂不可用,请稍后重试",
-                "summary": "",
-                "sql": "",
-                "columns": [],
-                "rows": [],
-                "stats": {},
-                "retry_count": 0,
-            }
-        await self._sink_usage(reply, tenant_id=tenant_id, bot_id=str(row["id"]))
+            return _failure(AGENT_UNAVAILABLE_TEXT)
+        await self._sink_usage(reply, tenant_id=str(row["tenant_id"]), bot_id=str(row["id"]))
+        filtered = await self._filter_reply(
+            reply, trace_id=trace_id, creator=creator, tenant_id=str(row["tenant_id"])
+        )
+        return _run_response(reply, filtered)
+
+    async def _filter_reply(
+        self, reply: dict[str, object], *, trace_id: str, creator: str, tenant_id: str
+    ) -> list[str]:
+        """summary 与 error 一并过输出护栏:FAILED 错误原文可能含凭证形态,
+        OpenAI 兼容端点 content 回退链会消费它——与 chat 域 _finalize_reply 同纪律。"""
         summary = str(reply.get("summary") or "")
         error_text = str(reply.get("error") or "")
-        # error 一并过输出护栏(FAILED 错误原文可能含凭证形态,
-        # OpenAI 兼容端点 content 回退链会消费它——与 chat 域 _finalize_reply
-        # 同纪律)
-        filtered = await self._guardrail.filter_output(
+        return await self._guardrail.filter_output(
             trace_id=trace_id,
             user_id=creator,
             tenant_id=tenant_id,
             texts=[summary, error_text],
         )
-        return {
-            "success": bool(reply.get("success")),
-            "summary": filtered[0],
-            "sql": str(reply.get("sql") or ""),
-            "columns": reply.get("columns") or [],
-            "rows": reply.get("rows") or [],
-            "stats": reply.get("stats") or {},
-            "retry_count": (
-                int(str(reply.get("retry_count"))) if reply.get("retry_count") is not None else 0
-            ),
-            "error": filtered[1] or None,
-        }
 
     async def validate_prompt(self, *, user_id: str, tenant_id: str, prompt: str) -> None:
         """system_prompt 护栏审核(创建/编辑共用;命中抛 GuardrailRejected)。"""

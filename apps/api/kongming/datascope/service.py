@@ -43,36 +43,46 @@ def resolve(ctx: ScopeContext, column_exists: bool) -> ScopeFilter:
     column_exists=目标表是否含过滤列(DEPT 系与 CUSTOM 探 dept_id,SELF 探 create_by)。
     """
     scope = ctx.data_scope
-    if scope == "ALL":
-        return ScopeFilter(type=FilterType.SKIP)
     reason = unsupported_reason(ctx)
-    if reason is not None:
-        return ScopeFilter(type=FilterType.UNSUPPORTED, skip_reason=reason)
-    if scope == "CUSTOM":
-        if not column_exists:
-            return ScopeFilter(
+    result: ScopeFilter
+    if scope == "ALL":
+        result = ScopeFilter(type=FilterType.SKIP)
+    elif reason is not None:
+        result = ScopeFilter(type=FilterType.UNSUPPORTED, skip_reason=reason)
+    elif scope == "CUSTOM":
+        # 与 DEPT 系同源 IN 语义:等价于「部门 IN (角色显式集合)」,不递归子部门
+        result = (
+            ScopeFilter(type=FilterType.DEPT_IN, column=COL_DEPT_ID, values=ctx.dept_ids)
+            if column_exists
+            else ScopeFilter(
                 type=FilterType.SKIP,
                 skip_reason=f"目标表无 {COL_DEPT_ID} 列,data_scope=CUSTOM 降级为不过滤",
             )
-        # 与 DEPT 系同源 IN 语义:等价于「部门 IN (角色显式集合)」,不递归子部门
-        return ScopeFilter(type=FilterType.DEPT_IN, column=COL_DEPT_ID, values=ctx.dept_ids)
-    if scope in ("DEPT", "DEPT_AND_BELOW"):
+        )
+    elif scope in ("DEPT", "DEPT_AND_BELOW"):
         if not column_exists:
-            return ScopeFilter(
+            result = ScopeFilter(
                 type=FilterType.SKIP,
                 skip_reason=f"目标表无 {COL_DEPT_ID} 列,data_scope={scope} 降级为不过滤",
             )
-        if not ctx.dept_ids:
-            return ScopeFilter(
+        elif not ctx.dept_ids:
+            result = ScopeFilter(
                 type=FilterType.SKIP,
                 skip_reason=f"用户未绑定部门,data_scope={scope} 降级为不过滤",
             )
-        return ScopeFilter(type=FilterType.DEPT_IN, column=COL_DEPT_ID, values=ctx.dept_ids)
-    if scope == "SELF":
-        if not column_exists:
-            return ScopeFilter(
+        else:
+            result = ScopeFilter(type=FilterType.DEPT_IN, column=COL_DEPT_ID, values=ctx.dept_ids)
+    elif scope == "SELF":
+        result = (
+            ScopeFilter(type=FilterType.USER_EQ, column=COL_CREATE_BY, values=[ctx.user_id])
+            if column_exists
+            else ScopeFilter(
                 type=FilterType.SKIP,
                 skip_reason=f"目标表无 {COL_CREATE_BY} 列,data_scope=SELF 降级为不过滤",
             )
-        return ScopeFilter(type=FilterType.USER_EQ, column=COL_CREATE_BY, values=[ctx.user_id])
-    return ScopeFilter(type=FilterType.UNSUPPORTED, skip_reason=f"未知 data_scope 值: {scope}")
+        )
+    else:
+        result = ScopeFilter(
+            type=FilterType.UNSUPPORTED, skip_reason=f"未知 data_scope 值: {scope}"
+        )
+    return result

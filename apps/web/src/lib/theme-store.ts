@@ -2,9 +2,9 @@
 
 import { create } from "zustand";
 
-export const THEME_STORAGE_KEY = "km-theme";
+const THEME_STORAGE_KEY = "km-theme";
 
-export type Theme = "light" | "dark";
+type Theme = "light" | "dark";
 
 function readStored(): Theme | null {
   try {
@@ -20,7 +20,7 @@ function systemTheme(): Theme {
 }
 
 /** 契约解析(与 index.html 内联脚本同语义) */
-export function resolveTheme(): Theme {
+function resolveTheme(): Theme {
   return readStored() ?? systemTheme();
 }
 

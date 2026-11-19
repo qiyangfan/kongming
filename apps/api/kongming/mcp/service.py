@@ -47,6 +47,29 @@ def _validate_endpoint(endpoint: str) -> None:
 _PREVIEW_CAP = 64 * 1024
 
 
+def _sanitize_schemas(tools: list[Any]) -> list[str]:
+    """收敛敌意/畸形 JSON Schema,返回降级注记。
+
+    check_schema 不过降级为 {"type":"object"}(L4 退化为仅结构校验),不合法
+    schema 进快照会让 validate_args 双路径裸 500;check_schema 不检查正则回溯
+    风险,回溯型 pattern 也必须降级,避免阻塞 worker。"""
+    import jsonschema.validators as _jsv
+
+    from kongming.mcp.models import has_redos_pattern
+
+    notes: list[str] = []
+    for t in tools:
+        try:
+            if has_redos_pattern(t.schema):
+                raise ValueError("回溯型 pattern(ReDoS 面已降级)")
+            _jsv.validator_for(t.schema).check_schema(t.schema)
+        except Exception:  # noqa: BLE001  # 敌意面宽收敛,降级即安全
+            notes.append(f"schema 非法已降级: {t.name[:40]}")
+            t.schema.clear()
+            t.schema.update({"type": "object"})
+    return notes
+
+
 class McpService:
     def __init__(
         self,
@@ -174,69 +197,57 @@ class McpService:
         if row is None:
             raise McpServerNotFound(server_id)
         endpoint, headers = await self._call_target(row, require_enabled=False)
-        old_tools = list(row.get("tools") or [])
-        old_resources = list(row.get("resources") or [])
-        old_prompts = list(row.get("prompts") or [])
+        old = (
+            list(row.get("tools") or []),
+            list(row.get("resources") or []),
+            list(row.get("prompts") or []),
+        )
         try:
             probe = await self._caller.probe(endpoint=endpoint, headers=headers)
         except McpCallError as e:
-            err = f"{e.kind}: {e.detail}"[:500]
-            await self._repo.save_snapshot(
+            await self._save_kept(
                 server_id=server_id,
                 tenant_id=tenant_id,
-                tools=old_tools,
-                resources=old_resources,
-                prompts=old_prompts,
-                error=err,
+                kept=old,
+                error=f"{e.kind}: {e.detail}"[:500],
             )
             return {"ok": False, "kind": e.kind, "detail": e.detail}
         if "tools" in probe.failures:
             # 工具(核心原语)失败:整体降级,三快照全保留
             kind, detail = probe.failures["tools"]
-            await self._repo.save_snapshot(
+            await self._save_kept(
                 server_id=server_id,
                 tenant_id=tenant_id,
-                tools=old_tools,
-                resources=old_resources,
-                prompts=old_prompts,
+                kept=old,
                 error=f"{kind}: {detail}"[:500],
             )
             return {"ok": False, "kind": kind, "detail": detail}
-        # 注册时收敛敌意/畸形 JSON Schema——check_schema 不过
-        # 降级为 {"type":"object"}(L4 退化为仅结构校验),不合法 schema
-        # 进快照会让 validate_args 双路径裸 500;
-        # check_schema 不检查正则回溯风险；这类 pattern 也必须降级，避免阻塞 worker。
-        import jsonschema.validators as _jsv
+        return await self._save_discovered(
+            probe=probe,
+            row=row,
+            kept=old,
+            server_id=server_id,
+            tenant_id=tenant_id,
+            endpoint=endpoint,
+        )
 
-        from kongming.mcp.models import has_redos_pattern
-
+    async def _save_discovered(
+        self,
+        *,
+        probe: Any,
+        row: dict[str, Any],
+        kept: tuple[list[Any], list[Any], list[Any]],
+        server_id: str,
+        tenant_id: str,
+        endpoint: str,
+    ) -> dict[str, Any]:
+        """成功路径落快照:清洗/降级/合成工具/合并 → 原子替换 → 复位熔断。"""
+        old = kept
         discovered = list(probe.tools)
-        notes: list[str] = []
-        for t in discovered:
-            try:
-                if has_redos_pattern(t.schema):
-                    raise ValueError("回溯型 pattern(ReDoS 面已降级)")
-                _jsv.validator_for(t.schema).check_schema(t.schema)
-            except Exception:  # noqa: BLE001  # 敌意面宽收敛,降级即安全
-                notes.append(f"schema 非法已降级: {t.name[:40]}")
-                t.schema.clear()
-                t.schema.update({"type": "object"})
-        # 资源/模板清单:失败降级保留旧值(单原语失败不整体失败),
-        # 成功/不支持如实替换(同步语义=快照原子替换)
-        resources_out: list[dict[str, Any]]
-        if "resources" in probe.failures:
-            kind, detail = probe.failures["resources"]
-            resources_out = old_resources
-            notes.append(f"原语降级 resources: {kind}: {detail}")
-        else:
-            resources_out = resource_snapshot(probe.resources)
-        prompts_out: list[dict[str, Any]]
-        if "prompts" in probe.failures:
-            kind, detail = probe.failures["prompts"]
-            prompts_out = old_prompts
-            notes.append(f"原语降级 prompts: {kind}: {detail}")
-        else:
-            prompts_out = prompt_snapshot(probe.prompts)
+        notes = _sanitize_schemas(discovered)
+        resources_out, prompts_out = self._per_primitive_snapshots(
+            probe, kept=(old[1], old[2]), notes=notes
+        )
         # 资源白名单非空 → 前置注册 read_resource 合成工具(先于 server
         # 自有工具,同名冲突合成方胜——平台治理语义优先);白名单空/不支持
         # 不注册(目录零噪音,「只有工具的简单 server」零感知)
@@ -244,9 +255,7 @@ class McpService:
             discovered.insert(0, read_resource_tool())
         entries, merge_conflicts = merge_discovered(str(row["server_key"]), discovered)
         notes.extend(merge_conflicts)
-        error_note = ""
-        if notes:
-            error_note = f"注册告警: {', '.join(notes)}"[:500]
+        error_note = f"注册告警: {', '.join(notes)}"[:500] if notes else ""
         await self._repo.save_snapshot(
             server_id=server_id,
             tenant_id=tenant_id,
@@ -266,6 +275,49 @@ class McpService:
             "prompts": len(prompts_out),
             "conflicts": notes,
         }
+
+    async def _save_kept(
+        self,
+        *,
+        server_id: str,
+        tenant_id: str,
+        kept: tuple[list[Any], list[Any], list[Any]],
+        error: str,
+    ) -> None:
+        """降级落快照:三原语全保留旧清单,只记错误注记。"""
+        old_tools, old_resources, old_prompts = kept
+        await self._repo.save_snapshot(
+            server_id=server_id,
+            tenant_id=tenant_id,
+            tools=old_tools,
+            resources=old_resources,
+            prompts=old_prompts,
+            error=error,
+        )
+
+    def _per_primitive_snapshots(
+        self,
+        probe: Any,
+        *,
+        kept: tuple[list[Any], list[Any]],
+        notes: list[str],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """资源/模板清单:失败降级保留旧值(单原语失败不整体失败),
+        成功/不支持如实替换(同步语义=快照原子替换)。"""
+        old_resources, old_prompts = kept
+        if "resources" in probe.failures:
+            kind, detail = probe.failures["resources"]
+            notes.append(f"原语降级 resources: {kind}: {detail}")
+            resources_out = cast("list[dict[str, Any]]", old_resources)
+        else:
+            resources_out = resource_snapshot(probe.resources)
+        if "prompts" in probe.failures:
+            kind, detail = probe.failures["prompts"]
+            notes.append(f"原语降级 prompts: {kind}: {detail}")
+            prompts_out = cast("list[dict[str, Any]]", old_prompts)
+        else:
+            prompts_out = prompt_snapshot(probe.prompts)
+        return resources_out, prompts_out
 
     async def _call_target(
         self, row: dict[str, Any], *, require_enabled: bool = True

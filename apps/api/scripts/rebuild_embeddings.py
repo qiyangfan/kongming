@@ -15,8 +15,8 @@ from sqlalchemy import text  # noqa: E402
 
 from kongming.db import get_sessionmaker  # noqa: E402
 from kongming.rag.agent_callback import get_agent_rag_client  # noqa: E402
+from kongming.rag.catalog import vec_literal  # noqa: E402
 from kongming.rag.models import build_embedding_text  # noqa: E402
-from kongming.rag.repository import vec_literal  # noqa: E402
 from kongming.redis_client import get_redis  # noqa: E402
 
 log = logging.getLogger("rebuild_embeddings")

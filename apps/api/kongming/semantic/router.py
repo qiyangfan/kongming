@@ -43,7 +43,7 @@ class _RagKnowledgeLookup:
     async def knowledge_table_exists(
         self, *, tenant_id: str, datasource_key: str, schema_table: str
     ) -> bool:
-        return await self._repo.knowledge_table_exists(
+        return await self._repo.tenant.knowledge_table_exists(
             tenant_id=tenant_id, datasource_key=datasource_key, schema_table=schema_table
         )
 

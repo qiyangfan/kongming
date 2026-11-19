@@ -409,6 +409,58 @@ async def quality_stage_trace(
     )
 
 
+_EXPORT_COLUMNS = [
+    "时间",
+    "问题",
+    "改写问题",
+    "状态",
+    "兜底分类",
+    "重试",
+    "用户反馈",
+    "AI评分",
+    "依据分",
+    "覆盖分",
+    "trace_id",
+    "会话标识",
+    "数据源",
+    "prompt版本",
+]
+
+
+def _export_row(d: dict[str, object]) -> list[object]:
+    """单轮导出行按列顺序取值(缺失值统一转空串/零)。"""
+    return [
+        _opt_str(d.get("created_at")),
+        _opt_str(d.get("question")),
+        _opt_str(d.get("resolved_question")),
+        _opt_str(d.get("status")),
+        _opt_str(d.get("fallback_type")),
+        _opt_int(d.get("retry_count")),
+        _opt_str(d.get("rating")),
+        _opt_int(d.get("score")),
+        _opt_int(d.get("grounding")),
+        _opt_int(d.get("coverage")),
+        _opt_str(d.get("trace_id")),
+        _opt_str(d.get("session_id")),
+        _opt_str(d.get("datasource_key")),
+        _opt_str(d.get("prompt_version")),
+    ]
+
+
+def _export_rows_to_keyed(rows: list[dict[str, object]], *, truncated: bool) -> list[list[object]]:
+    """逐轮取值并追加截断标记行。"""
+    keyed: list[list[object]] = [_export_row(r) for r in rows]
+    if truncated:
+        keyed.append(
+            [
+                "……",
+                "已达导出行数上限,仅导出最近 5000 行(筛选命中更多)",
+                *([""] * (len(_EXPORT_COLUMNS) - 2)),
+            ]
+        )
+    return keyed
+
+
 @router.get(
     "/export",
     dependencies=[Depends(require_perm("system:chat-quality:view"))],
@@ -435,63 +487,8 @@ async def quality_export(
         start=start,
         end=end,
     )
-    columns = [
-        "时间",
-        "问题",
-        "改写问题",
-        "状态",
-        "兜底分类",
-        "重试",
-        "用户反馈",
-        "AI评分",
-        "依据分",
-        "覆盖分",
-        "trace_id",
-        "会话标识",
-        "数据源",
-        "prompt版本",
-    ]
-    keyed: list[list[object]] = []
-    for r in rows:
-        d = r
-        keyed.append(
-            [
-                _opt_str(d.get("created_at")),
-                _opt_str(d.get("question")),
-                _opt_str(d.get("resolved_question")),
-                _opt_str(d.get("status")),
-                _opt_str(d.get("fallback_type")),
-                _opt_int(d.get("retry_count")),
-                _opt_str(d.get("rating")),
-                _opt_int(d.get("score")),
-                _opt_int(d.get("grounding")),
-                _opt_int(d.get("coverage")),
-                _opt_str(d.get("trace_id")),
-                _opt_str(d.get("session_id")),
-                _opt_str(d.get("datasource_key")),
-                _opt_str(d.get("prompt_version")),
-            ]
-        )
-    if truncated:
-        keyed.append(
-            [
-                "……",
-                "已达导出行数上限,仅导出最近 5000 行(筛选命中更多)",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-            ]
-        )
-    csv_bytes, _ = to_csv(columns, keyed, max_rows=len(keyed))
+    keyed = _export_rows_to_keyed(rows, truncated=truncated)
+    csv_bytes, _ = to_csv(_EXPORT_COLUMNS, keyed, max_rows=len(keyed))
     await SqlOperLogRepo(session).add(
         None,
         "chat-quality.export",

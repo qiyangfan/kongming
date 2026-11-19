@@ -1287,7 +1287,7 @@ async def test_connector_injection_assembly_block_and_enablement(
 ) -> None:
     """注入集按请求动态装配:注册即生效/停用即消失/重启用恢复(spec 场景
     「启停即时生效」);带外改名的恶意行 BLOCK 拒注入(注册闸+注入闸双落点)。"""
-    from kongming.chat.router import _build_connector_service_for
+    from kongming.chat.adapters import _build_connector_service_for
 
     await _mk_tenant(session, "ek")
     await _user_with_tools(session, make_user, "injadm", ["connector:manage", "tool:http:call"])
@@ -1694,7 +1694,7 @@ async def test_connector_unauthorized_invisible(
 ) -> None:
     """未授权用户不可见(spec 场景「未授权用户不可见」):持 connector:manage
     注册后,无 tool:http:call 的用户注入集不含该工具,直调被拒并落审计。"""
-    from kongming.chat.router import _RegistryToolSpecProvider
+    from kongming.chat.adapters import RegistryToolSpecProvider
 
     await _mk_tenant(session, "ek")
     uid_admin = await _user_with_tools(
@@ -1707,7 +1707,7 @@ async def test_connector_unauthorized_invisible(
     assert r.status_code == 201
     tid = await _tenant_id(session)
 
-    provider = _RegistryToolSpecProvider()
+    provider = RegistryToolSpecProvider()
     # 授权用户:注入集含连接器
     specs_ok = await provider.authorized_tools(uid_admin, tid)
     assert any(s["name"] == "http__orders_api" for s in specs_ok)

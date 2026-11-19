@@ -709,6 +709,18 @@ async def test_task_resolve_confirm_reject_and_foreign_forbidden(
     assert r.json()["reason"] == "CONFIRM_FORBIDDEN"
     n = (await session.execute(text("SELECT count(*) FROM public.sys_announcement"))).scalar_one()
     assert n == 0
+    # 任务通道审计按 task-confirm 前缀归档(与 chat 通道 confirm- 区分)
+    trace = (
+        await session.execute(
+            text(
+                "SELECT trace_id FROM public.sys_tool_audit"
+                " WHERE user_id=:u AND error_reason='CONFIRM_FORBIDDEN'"
+                " ORDER BY created_at DESC LIMIT 1"
+            ),
+            {"u": uid_b},
+        )
+    ).scalar_one()
+    assert str(trace).startswith("task-confirm-")
     # 原归属人仍可正常决策(挂起行未被他人尝试触碰)
     r2 = await client.post(
         "/internal/tool/resolve-confirm",

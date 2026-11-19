@@ -3,7 +3,7 @@
 
 import type { DataScopeValue } from "@/lib/system-api";
 
-export const CUSTOM_SCOPE: DataScopeValue = "CUSTOM";
+const CUSTOM_SCOPE: DataScopeValue = "CUSTOM";
 
 /** 仅 CUSTOM 携带部门集合字段;非 CUSTOM 不发(服务端对「非 CUSTOM 带集合」显式拒绝)。 */
 export function deptIdsForScope(scope: DataScopeValue, deptIds: string[]): string[] | undefined {

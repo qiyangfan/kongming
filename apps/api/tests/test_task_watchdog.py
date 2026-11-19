@@ -13,8 +13,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.task.ports import StagnationVerdict
-from kongming.task.service import TaskService
+from kongming.task.ports import StagnationVerdict, TaskRepo
+from kongming.task.watchdog import TaskWatchdog
 
 
 class _FakeRepo:
@@ -77,7 +77,7 @@ def _row(**over: Any) -> dict[str, Any]:
 async def test_patrol_judges_candidate_without_marker() -> None:
     repo = _FakeRepo([_row()])
     judge = _FakeJudge(StagnationVerdict(verdict="progressing", reason="步骤在推进"))
-    svc = TaskService(repo)  # pyright: ignore[reportArgumentType]
+    svc = TaskWatchdog(cast("TaskRepo", repo))
 
     summary = await svc.patrol_stagnation(stale_sec=300, judge=judge)
 
@@ -95,7 +95,7 @@ async def test_patrol_judges_candidate_without_marker() -> None:
 async def test_patrol_takeover_on_stagnant_verdict() -> None:
     repo = _FakeRepo([_row()])
     judge = _FakeJudge(StagnationVerdict(verdict="stagnant", reason="反复同一查询无产出"))
-    svc = TaskService(repo)  # pyright: ignore[reportArgumentType]
+    svc = TaskWatchdog(cast("TaskRepo", repo))
 
     summary = await svc.patrol_stagnation(stale_sec=300, judge=judge)
 
@@ -113,7 +113,7 @@ async def test_patrol_takeover_on_stagnant_verdict() -> None:
 async def test_patrol_takeover_from_planning() -> None:
     repo = _FakeRepo([_row(status="PLANNING")])
     judge = _FakeJudge(StagnationVerdict(verdict="stagnant", reason="规划期即卡死"))
-    svc = TaskService(repo)  # pyright: ignore[reportArgumentType]
+    svc = TaskWatchdog(cast("TaskRepo", repo))
 
     summary = await svc.patrol_stagnation(stale_sec=300, judge=judge)
 
@@ -124,7 +124,7 @@ async def test_patrol_takeover_from_planning() -> None:
 async def test_patrol_judge_unavailable_marks_and_spares_task() -> None:
     repo = _FakeRepo([_row()])
     judge = _FakeJudge(None)
-    svc = TaskService(repo)  # pyright: ignore[reportArgumentType]
+    svc = TaskWatchdog(cast("TaskRepo", repo))
 
     summary = await svc.patrol_stagnation(stale_sec=300, judge=judge)
 
@@ -138,7 +138,7 @@ async def test_patrol_mechanical_takeover_after_marker() -> None:
     # 末事件已是判读标记且再超阈:不再判读,机械收口
     repo = _FakeRepo([_row(last_kind="watchdog_judged", last_verdict="progressing")])
     judge = _FakeJudge(StagnationVerdict(verdict="progressing", reason="不应被调用"))
-    svc = TaskService(repo)  # pyright: ignore[reportArgumentType]
+    svc = TaskWatchdog(cast("TaskRepo", repo))
 
     summary = await svc.patrol_stagnation(stale_sec=300, judge=judge)
 
@@ -152,7 +152,7 @@ async def test_patrol_mechanical_takeover_after_marker() -> None:
 async def test_patrol_mechanical_takeover_after_unavailable_marker() -> None:
     repo = _FakeRepo([_row(last_kind="watchdog_judged", last_verdict="unavailable")])
     judge = _FakeJudge(None)
-    svc = TaskService(repo)  # pyright: ignore[reportArgumentType]
+    svc = TaskWatchdog(cast("TaskRepo", repo))
 
     summary = await svc.patrol_stagnation(stale_sec=300, judge=judge)
 
@@ -165,7 +165,7 @@ async def test_patrol_cas_miss_abandons_takeover() -> None:
     repo = _FakeRepo([_row()])
     repo.transition_ok = False  # 并发迁移先到:谓词未命中
     judge = _FakeJudge(StagnationVerdict(verdict="stagnant", reason="停滞"))
-    svc = TaskService(repo)  # pyright: ignore[reportArgumentType]
+    svc = TaskWatchdog(cast("TaskRepo", repo))
 
     summary = await svc.patrol_stagnation(stale_sec=300, judge=judge)
 
@@ -175,7 +175,7 @@ async def test_patrol_cas_miss_abandons_takeover() -> None:
 async def test_patrol_empty_candidates_is_noop() -> None:
     repo = _FakeRepo([])
     judge = _FakeJudge(None)
-    svc = TaskService(repo)  # pyright: ignore[reportArgumentType]
+    svc = TaskWatchdog(cast("TaskRepo", repo))
 
     summary = await svc.patrol_stagnation(stale_sec=300, judge=judge)
 
@@ -191,7 +191,7 @@ async def test_list_stale_inflight_filters_by_heartbeat(
 ) -> None:
     from kongming.auth.seed import seed_all
     from kongming.config import get_settings
-    from kongming.task.repository import SqlTaskRepo
+    from kongming.task.system_repo import SqlTaskSystemRepo as SqlTaskRepo
     from kongming.uuid7 import uuid7
 
     await seed_all(session, get_settings())

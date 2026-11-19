@@ -6,6 +6,7 @@
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 from kongming_agent import task_prompts as tp
@@ -54,6 +55,32 @@ def _extract_steps(raw: str) -> list[dict[str, object]]:
     return out  # 空清单交由控制面语义处置(计划回写被拒/续跑无账 → FAILED,不假 DONE)
 
 
+@dataclass
+class _StepExecution:
+    """单步执行结果:终态载荷、本步用量与是否协作分支。"""
+
+    final: dict[str, object]
+    tokens: int
+    is_collab: bool
+
+
+@dataclass
+class _RunLog:
+    """任务循环账本:完成/未完成清单与累计用量。"""
+
+    not_done: list[str] = field(default_factory=list[str])
+    completed: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    tokens_total: int = 0
+
+
+def _collab_tokens(final: dict[str, object]) -> int:
+    """协作步骤的 worker 用量回注步级预算。"""
+    usage = final.get("usage")
+    if not isinstance(usage, dict):
+        return 0
+    return int(cast("int", cast("dict[str, object]", usage).get("total_tokens") or 0))
+
+
 class TaskOrchestrator:
     """一次任务执行的编排器(每请求实例化;依赖显式注入便于剧本化测试)。"""
 
@@ -90,15 +117,11 @@ class TaskOrchestrator:
             await self._finish("FAILED", f"规划输出畸形: {e}")
             return {"final_status": "FAILED", "error": str(e)}
 
-    async def _run_inner(self) -> dict[str, object]:
-        goal = str(self._payload.get("goal") or "")
-        trace_root = str(self._payload.get("trace_root") or "")
-        tools = cast("list[dict[str, object]]", self._payload.get("tools") or [])
-        datasource_key = str(self._payload.get("datasource_key") or "default")
-        user_id = cast("str | None", self._payload.get("user_id"))
-
-        # 1) 规划(规划段 LLM 用量走 fire-and-forget 通道,不计入任务
-        # 预算账本——账本口径=步骤执行增量用量,预算闸按步骤边界判定)
+    async def _prepare_steps(
+        self, goal: str, datasource_key: str, trace_root: str
+    ) -> tuple[list[dict[str, object]], dict[str, object] | None]:
+        """规划并落账步骤;返回 (步骤清单, 提前终态结果)。"""
+        # 规划段 LLM 用量走 fire-and-forget 通道,不计入任务预算账本
         plan_raw = await self._llm.chat(
             tp.PLAN_SYSTEM_PROMPT,
             tp.PLAN_USER_TEMPLATE.format(goal=goal, datasource_key=datasource_key),
@@ -109,170 +132,296 @@ class TaskOrchestrator:
         try:
             steps = _extract_steps(plan_raw)
         except ValueError as e:
-            return await self._finish("FAILED", f"规划输出畸形: {e}")
+            return [], await self._finish("FAILED", f"规划输出畸形: {e}")
         created = await self._api.task_plan(
             task_id=self._task_id, tenant_key=self._tenant_key, steps=steps
         )
         if created is None:
-            return await self._finish("FAILED", "计划回写被拒")
-        if created == []:
-            # 续跑(计划已在账):读既有步骤;读不到 = 规划期中断/回调失败,
-            # fail-closed 如实 FAILED(空清单跑 DONE 是假完成)
-            existing = await self._api.task_steps(
-                task_id=self._task_id, tenant_key=self._tenant_key
-            )
-            if not existing:
-                return await self._finish("FAILED", "续跑无已落账步骤(规划期中断),任务失败")
-            created = [
-                {
-                    "id": s["id"],
-                    "goal": s["goal"],
-                    "require_confirm": s["require_confirm"],
-                    # 账本状态随行:skip 决策区分「已 DONE 正常推进」与「真跳过」
-                    "status": s.get("status") or "",
-                }
-                for s in existing
-            ]
+            return [], await self._finish("FAILED", "计划回写被拒")
+        if created:
+            return created, None
+        # 续跑(计划已在账):读既有步骤;读不到 = 规划期中断/回调失败,
+        # fail-closed 如实 FAILED(空清单跑 DONE 是假完成)
+        existing = await self._api.task_steps(task_id=self._task_id, tenant_key=self._tenant_key)
+        if not existing:
+            return [], await self._finish("FAILED", "续跑无已落账步骤(规划期中断),任务失败")
+        return [
+            {
+                "id": s["id"],
+                "goal": s["goal"],
+                "require_confirm": s["require_confirm"],
+                # 账本状态随行:skip 决策区分「已 DONE 正常推进」与「真跳过」
+                "status": s.get("status") or "",
+            }
+            for s in existing
+        ], None
 
-        # 2) 逐步执行(拉取式:控制面每步下发决策)
-        tokens_total = 0
-        not_done: list[str] = []
-        completed: list[tuple[str, str]] = []  # (goal, summary) 受控上下文摘要源
-        for step in created:
-            step_id = str(step.get("id") or "")
-            step_goal = str(step.get("goal") or "")
-            decision = await self._api.task_step_start(
-                task_id=self._task_id,
-                tenant_key=self._tenant_key,
-                step_id=step_id,
-                epoch=self._epoch,
-            )
-            action = str((decision or {}).get("decision") or "skip")
-            if action == "pause":
-                return {"final_status": "PAUSED", "reason": str((decision or {}).get("reason"))}
-            if action == "await_approval":
-                return {"final_status": "AWAITING_APPROVAL"}
-            if action == "abort":
-                # 控制面判定任务不可再执行(用户取消/终态):如实返回现态,
-                # 不再回写终态(终态归属控制面)
-                return {
-                    "final_status": str((decision or {}).get("task_status") or "FAILED"),
-                    "reason": str((decision or {}).get("reason") or ""),
-                }
-            if action != "execute":
-                # skip:控制面判定不可执行。账本已 DONE 的跳过=正常推进;
-                # 其余(审批拒绝 SKIPPED/状态漂移)如实计入未完成
-                if str(step.get("status") or "") != "DONE":
-                    not_done.append(f"{step_goal[:80]}:控制面跳过")
-                continue
+    def _decision_exit(
+        self, action: str, decision: dict[str, object] | None
+    ) -> dict[str, object] | None:
+        """控制面决策的提前退出通道(pause/await_approval/abort)。"""
+        if action == "pause":
+            return {"final_status": "PAUSED", "reason": str((decision or {}).get("reason"))}
+        if action == "await_approval":
+            return {"final_status": "AWAITING_APPROVAL"}
+        if action == "abort":
+            # 控制面判定任务不可再执行(用户取消/终态):如实返回现态,
+            # 不再回写终态(终态归属控制面)
+            return {
+                "final_status": str((decision or {}).get("task_status") or "FAILED"),
+                "reason": str((decision or {}).get("reason") or ""),
+            }
+        return None
 
-            collector: list[dict[str, object]] = []
-            collab_cfg = (decision or {}).get("collab")
-            run_collab_step = self._run_collab
-            is_collab = False
-            token = set_usage_collector(collector)
-            try:
-                if isinstance(collab_cfg, dict) and run_collab_step is not None:
-                    # 声明协作拓扑的步骤走协作编排(聚合结论驱动步骤终态)
-                    final = await run_collab_step(
-                        step_id,
-                        step_goal,
-                        _context_digest(goal, completed),
-                        cast("dict[str, object]", collab_cfg),
-                    )
-                    is_collab = True
-                else:
-                    final = await self._run_step(
-                        str(step.get("goal") or ""),
-                        {
-                            "tools": tools,
-                            "datasource_key": datasource_key,
-                            "user_id": user_id,
-                            # 图级检查点上下文:线程派生与内部回调归属;
-                            # 恢复提示=已决确认随 begin_step 下发
-                            "task_id": self._task_id,
-                            "step_id": step_id,
-                            "tenant_key": self._tenant_key,
-                            "trace_id": trace_root,
-                            "resume_confirm": (decision or {}).get("resume_confirm"),
-                        },
-                    )
-            finally:
-                reset_usage_collector(token)
-            # 图内挂起:到达确认点图已挂(检查点在控制面),
-            # 上账(建/复用确认行+任务挂起)后如实返回,终态归属控制面审批流
-            suspended = (
-                cast("dict[str, object]", final.get("suspended"))
-                if isinstance(final.get("suspended"), dict)
-                else None
-            )
-            if suspended is not None:
-                rep = await self._api.task_step_suspended(
-                    task_id=self._task_id,
-                    tenant_key=self._tenant_key,
-                    step_id=step_id,
-                    epoch=self._epoch,
-                    confirm_id=str(suspended.get("confirm_id") or ""),
-                    tool_name=str(suspended.get("tool_name") or ""),
-                    summary=str(suspended.get("summary") or ""),
-                    thread_id=thread_id_for_task(self._task_id, step_id),
+    async def _begin_step(
+        self, step: dict[str, object]
+    ) -> tuple[str, str, dict[str, object] | None]:
+        """拉取控制面步骤决策,返回 (步骤 id, 目标文案, 决策)。"""
+        step_id = str(step.get("id") or "")
+        step_goal = str(step.get("goal") or "")
+        decision = await self._api.task_step_start(
+            task_id=self._task_id,
+            tenant_key=self._tenant_key,
+            step_id=step_id,
+            epoch=self._epoch,
+        )
+        return step_id, step_goal, decision
+
+    async def _run_one_step(
+        self,
+        step: dict[str, object],
+        step_id: str,
+        step_goal: str,
+        goal: str,
+        completed: list[tuple[str, str]],
+        tools: list[dict[str, object]],
+        datasource_key: str,
+        user_id: str | None,
+        trace_root: str,
+        decision: dict[str, object] | None,
+    ) -> tuple[dict[str, object] | None, _StepExecution | None]:
+        """执行单个步骤;返回 (提前终态结果, 步骤执行记录)。"""
+        is_collab = (
+            isinstance((decision or {}).get("collab"), dict) and self._run_collab is not None
+        )
+        # 每步只上报新增用量,由控制面负责累加。
+        final, step_tokens = await self._run_step_branch(
+            step,
+            step_id,
+            step_goal,
+            _context_digest(goal, completed),
+            is_collab,
+            self._step_context(tools, datasource_key, user_id, step_id, trace_root, decision),
+            (decision or {}).get("collab"),
+        )
+        # 图内挂起:到达确认点图已挂(检查点在控制面),
+        # 上账(建/复用确认行+任务挂起)后如实返回,终态归属控制面审批流
+        suspended = final.get("suspended")
+        if isinstance(suspended, dict):
+            return await self._suspend_step(step_id, cast("dict[str, object]", suspended)), None
+        return None, _StepExecution(final=final, tokens=step_tokens, is_collab=is_collab)
+
+    async def _run_step_branch(
+        self,
+        step: dict[str, object],
+        step_id: str,
+        step_goal: str,
+        digest: str,
+        is_collab: bool,
+        context: dict[str, object],
+        collab_cfg: object,
+    ) -> tuple[dict[str, object], int]:
+        """按是否声明协作拓扑择路执行单步,返回终态与本次新增用量。"""
+        collector: list[dict[str, object]] = []
+        token = set_usage_collector(collector)
+        try:
+            if is_collab:
+                # 声明协作拓扑的步骤走协作编排(聚合结论驱动步骤终态)
+                final = await cast("CollabRunner", self._run_collab)(
+                    step_id, step_goal, digest, cast("dict[str, object]", collab_cfg)
                 )
-                if rep is None:
-                    return await self._finish("FAILED", "图内挂起上账被拒(链路异常)")
-                return {"final_status": "AWAITING_APPROVAL"}
-            # 每步只上报新增用量，由控制面负责累加。
-            step_tokens = sum(int(cast("int", r.get("total_tokens") or 0)) for r in collector)
-            if is_collab:
-                # worker 用量回注步级预算:worker 内层 collector 与步级外层互斥,
-                # 不回注则协作步骤的真实大头消耗对 api 预算闸不可见
-                w_usage = final.get("usage")
-                if isinstance(w_usage, dict):
-                    step_tokens += int(
-                        cast(
-                            "int",
-                            cast("dict[str, object]", w_usage).get("total_tokens") or 0,
-                        )
-                    )
-            tokens_total += step_tokens
-            if is_collab:
-                status, evidence, fail_reason = _collab_outcome(final, trace_root)
             else:
-                status, evidence, fail_reason = _step_outcome(final, trace_root)
-            if tokens_total >= _MAX_TOTAL_TOKENS:
-                status, fail_reason = "FAILED", "任务累计 token 预算耗尽"
-            if status != "DONE":
-                not_done.append(f"{step_goal[:80]}:{fail_reason or status}")
-            else:
-                completed.append((step_goal, str(final.get("summary") or "")[:400]))
-            result = await self._api.task_step_result(
-                task_id=self._task_id,
-                tenant_key=self._tenant_key,
-                step_id=step_id,
-                epoch=self._epoch,
-                status=status,
-                summary=str(final.get("summary") or final.get("final_answer") or ""),
-                evidence=evidence,
-                fail_reason=fail_reason,
-                checkpoint={
-                    "summary": str(final.get("summary") or "")[:2000],
-                    "resume_origin": str(final.get("resume_origin") or "fresh"),
-                },
-                tokens_used=step_tokens,
-            )
-            if result is None:
-                return await self._finish("FAILED", "步骤结果回写被拒")
-            if str(result.get("decision") or "") == "stale_epoch":
-                # 派发代际失配:本循环已被新派发取代,静默退出(不收口不重试;
-                # 在途步已由新派发回队重跑,终态归属在位执行者)
-                return {"final_status": "STALE", "reason": "派发代际失配退出"}
-            if str(result.get("decision") or "").startswith("reject:"):
-                return await self._finish("FAILED", str(result.get("decision")))
+                final = await self._run_step(str(step.get("goal") or ""), context)
+        finally:
+            reset_usage_collector(token)
+        step_tokens = sum(int(cast("int", r.get("total_tokens") or 0)) for r in collector)
+        if is_collab:
+            step_tokens += _collab_tokens(final)
+        return final, step_tokens
 
-        # 3) 全部步骤 DONE 方可 DONE(spec:存在非 DONE 步骤 SHALL NOT 全称完成,
-        # 收口逐项如实说明未完成/失败原因)
-        if not_done:
-            return await self._finish("FAILED", "部分步骤未完成:" + ";".join(not_done)[:500])
+    def _step_context(
+        self,
+        tools: list[dict[str, object]],
+        datasource_key: str,
+        user_id: str | None,
+        step_id: str,
+        trace_root: str,
+        decision: dict[str, object] | None,
+    ) -> dict[str, object]:
+        """装配单步执行的图上下文(tools 与检查点/续跑归属字段)。"""
+        return {
+            "tools": tools,
+            "datasource_key": datasource_key,
+            "user_id": user_id,
+            # 图级检查点上下文:线程派生与内部回调归属;
+            # 恢复提示=已决确认随 begin_step 下发
+            "task_id": self._task_id,
+            "step_id": step_id,
+            "tenant_key": self._tenant_key,
+            "trace_id": trace_root,
+            "resume_confirm": (decision or {}).get("resume_confirm"),
+        }
+
+    async def _suspend_step(self, step_id: str, suspended: dict[str, object]) -> dict[str, object]:
+        """图内挂起上账;控制面拒绝(返回 None)时收敛为 FAILED 终态。"""
+        rep = await self._api.task_step_suspended(
+            task_id=self._task_id,
+            tenant_key=self._tenant_key,
+            step_id=step_id,
+            epoch=self._epoch,
+            confirm_id=str(suspended.get("confirm_id") or ""),
+            tool_name=str(suspended.get("tool_name") or ""),
+            summary=str(suspended.get("summary") or ""),
+            thread_id=thread_id_for_task(self._task_id, step_id),
+        )
+        if rep is None:
+            return await self._finish("FAILED", "图内挂起上账被拒(链路异常)")
+        return {"final_status": "AWAITING_APPROVAL"}
+
+    def _record_step(
+        self, step_goal: str, run: _StepExecution, log: _RunLog, trace_root: str
+    ) -> tuple[str, dict[str, object], str | None]:
+        """累计用量并归入完成/未完成账本;返回步骤终态三元组。"""
+        log.tokens_total += run.tokens
+        if run.is_collab:
+            status, evidence, fail_reason = _collab_outcome(run.final, trace_root)
+        else:
+            status, evidence, fail_reason = _step_outcome(run.final, trace_root)
+        if log.tokens_total >= _MAX_TOTAL_TOKENS:
+            status, fail_reason = "FAILED", "任务累计 token 预算耗尽"
+        if status != "DONE":
+            log.not_done.append(f"{step_goal[:80]}:{fail_reason or status}")
+        else:
+            log.completed.append((step_goal, str(run.final.get("summary") or "")[:400]))
+        return status, evidence, fail_reason
+
+    async def _submit_step(
+        self,
+        step_id: str,
+        run: _StepExecution,
+        status: str,
+        evidence: dict[str, object],
+        fail_reason: str | None,
+    ) -> dict[str, object] | None:
+        """回写步骤结果;返回提前终态结果(None = 继续)。"""
+        result = await self._api.task_step_result(
+            task_id=self._task_id,
+            tenant_key=self._tenant_key,
+            step_id=step_id,
+            epoch=self._epoch,
+            status=status,
+            summary=str(run.final.get("summary") or run.final.get("final_answer") or ""),
+            evidence=evidence,
+            fail_reason=fail_reason,
+            checkpoint={
+                "summary": str(run.final.get("summary") or "")[:2000],
+                "resume_origin": str(run.final.get("resume_origin") or "fresh"),
+            },
+            tokens_used=run.tokens,
+        )
+        if result is None:
+            return await self._finish("FAILED", "步骤结果回写被拒")
+        decision = str(result.get("decision") or "")
+        if decision == "stale_epoch":
+            # 派发代际失配:本循环已被新派发取代,静默退出(不收口不重试;
+            # 在途步已由新派发回队重跑,终态归属在位执行者)
+            return {"final_status": "STALE", "reason": "派发代际失配退出"}
+        if decision.startswith("reject:"):
+            return await self._finish("FAILED", decision)
+        return None
+
+    async def _process_step(
+        self,
+        step: dict[str, object],
+        log: _RunLog,
+        goal: str,
+        tools: list[dict[str, object]],
+        datasource_key: str,
+        user_id: str | None,
+        trace_root: str,
+    ) -> dict[str, object] | None:
+        """处理单个步骤的拉取式决策、执行与回写;返回提前终态结果。"""
+        step_id, step_goal, decision = await self._begin_step(step)
+        action = str((decision or {}).get("decision") or "skip")
+        early = self._decision_exit(action, decision)
+        if early is not None:
+            return early
+        if action != "execute":
+            # skip:控制面判定不可执行。账本已 DONE 的跳过=正常推进;
+            # 其余(审批拒绝 SKIPPED/状态漂移)如实计入未完成
+            if str(step.get("status") or "") != "DONE":
+                log.not_done.append(f"{step_goal[:80]}:控制面跳过")
+            return None
+        early, run = await self._run_one_step(
+            step,
+            step_id,
+            step_goal,
+            goal,
+            log.completed,
+            tools,
+            datasource_key,
+            user_id,
+            trace_root,
+            decision,
+        )
+        if early is not None or run is None:
+            return early
+        return await self._finish_step(step_id, step_goal, run, log, trace_root)
+
+    async def _finish_step(
+        self,
+        step_id: str,
+        step_goal: str,
+        run: _StepExecution,
+        log: _RunLog,
+        trace_root: str,
+    ) -> dict[str, object] | None:
+        """记录步骤产出并回写控制面(返回提前终态结果)。"""
+        status, evidence, fail_reason = self._record_step(step_goal, run, log, trace_root)
+        return await self._submit_step(step_id, run, status, evidence, fail_reason)
+
+    async def _execute_steps(
+        self,
+        steps: list[dict[str, object]],
+        goal: str,
+        tools: list[dict[str, object]],
+        datasource_key: str,
+        user_id: str | None,
+        trace_root: str,
+    ) -> dict[str, object]:
+        """逐步执行(拉取式:控制面每步下发决策),全部 DONE 方可 DONE。"""
+        log = _RunLog()
+        for step in steps:
+            early = await self._process_step(
+                step, log, goal, tools, datasource_key, user_id, trace_root
+            )
+            if early is not None:
+                return early
+        # spec:存在非 DONE 步骤 SHALL NOT 全称完成,收口逐项如实说明
+        if log.not_done:
+            return await self._finish("FAILED", "部分步骤未完成:" + ";".join(log.not_done)[:500])
         return await self._finish("DONE", None)
+
+    async def _run_inner(self) -> dict[str, object]:
+        goal = str(self._payload.get("goal") or "")
+        trace_root = str(self._payload.get("trace_root") or "")
+        tools = cast("list[dict[str, object]]", self._payload.get("tools") or [])
+        datasource_key = str(self._payload.get("datasource_key") or "default")
+        user_id = cast("str | None", self._payload.get("user_id"))
+        steps, early = await self._prepare_steps(goal, datasource_key, trace_root)
+        if early is not None:
+            return early
+        return await self._execute_steps(steps, goal, tools, datasource_key, user_id, trace_root)
 
     async def _finish(self, status: str, reason: str | None) -> dict[str, object]:
         ok = await self._api.task_finish(

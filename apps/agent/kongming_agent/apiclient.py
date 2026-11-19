@@ -105,12 +105,167 @@ def _json_of(resp: httpx.Response) -> dict[str, object] | None:
     return cast("dict[str, object]", data) if isinstance(data, dict) else None
 
 
-class ApiClient:
+class _ApiBase:
+    """控制面 HTTP 底座:出站地址/内部令牌与分层重试策略。"""
+
     def __init__(self, settings: Settings) -> None:
         self._base = settings.api_base_url.rstrip("/")
         self._timeout = settings.api_timeout_sec
         self._headers = {"X-Internal-Token": settings.internal_token or ""}
 
+    async def _post(self, path: str, payload: dict[str, object]) -> httpx.Response:
+        """控制面 POST(只读类回调入口;分层重试):仅**连接层未送达**失败
+        按回调预算快重试——读超时=已送达,执行副作用不可假定幂等,
+        不重发;5xx 语义上亦已送达。report_usage/tool_execute 走 _post_once
+        (任何失败都不重试)。"""
+        return await call_with_retry(
+            partial(self._post_once, path, payload),
+            max_attempts=CALLBACK_MAX_ATTEMPTS,
+            base_delay_ms=CALLBACK_RETRY_BASE_MS,
+            max_wait_ms=CALLBACK_RETRY_MAX_WAIT_MS,
+            is_transient=is_connect_phase_error,
+        )
+
+    async def _post_once(self, path: str, payload: dict[str, object]) -> httpx.Response:
+        async with httpx.AsyncClient(
+            base_url=self._base, timeout=self._timeout, headers=self._headers
+        ) as client:
+            return await client.post(path, json=payload)
+
+    async def _get_retryable(self, path: str, params: dict[str, str]) -> httpx.Response:
+        """控制面 GET(附件取用;同 _post 的连接层分层重试口径)。"""
+        return await call_with_retry(
+            partial(self._get_once, path, params),
+            max_attempts=CALLBACK_MAX_ATTEMPTS,
+            base_delay_ms=CALLBACK_RETRY_BASE_MS,
+            max_wait_ms=CALLBACK_RETRY_MAX_WAIT_MS,
+            is_transient=is_connect_phase_error,
+        )
+
+    async def _get_once(self, path: str, params: dict[str, str]) -> httpx.Response:
+        async with httpx.AsyncClient(
+            base_url=self._base, timeout=self._timeout, headers=self._headers
+        ) as client:
+            return await client.get(path, params=params)
+
+
+class _CheckpointApi(_ApiBase):
+    """图级检查点读写(控制面只存不透明数据)。"""
+
+    async def graph_checkpoint_put(
+        self,
+        *,
+        tenant_key: str,
+        thread_id: str,
+        checkpoint_ns: str,
+        kind: str,
+        checkpoint_id: str | None,
+        task_id: str,
+        step_id: str,
+        payload_type: str,
+        payload: bytes,
+    ) -> bool:
+        """检查点/部分写入落控制面(graph-checkpoint spec)。失败返回 False
+        (适配器降级,不抛断执行主路径);不走重试——blob 重复行无害但
+        部分写入重复会造成恢复期重复观察,单次语义最诚实。"""
+        import base64 as _b64
+
+        try:
+            resp = await self._post_once(
+                "/internal/task/graph-checkpoint",
+                {
+                    "tenant_key": tenant_key,
+                    "thread_id": thread_id,
+                    "checkpoint_ns": checkpoint_ns,
+                    "kind": kind,
+                    "checkpoint_id": checkpoint_id,
+                    "task_id": task_id,
+                    "step_id": step_id,
+                    "payload_type": payload_type,
+                    "payload_b64": _b64.b64encode(payload).decode("ascii"),
+                },
+            )
+        except httpx.HTTPError as e:
+            log.warning("检查点写入回调异常: %s", e)
+            return False
+        return resp.status_code == 200
+
+    async def graph_checkpoint_latest(
+        self, *, tenant_key: str, thread_id: str, checkpoint_ns: str
+    ) -> dict[str, object] | None:
+        """取线程最新快照;404(缺席)与其他失败同形 None(回退整步重跑)。"""
+
+        try:
+            resp = await self._get_retryable(
+                "/internal/task/graph-checkpoint/latest",
+                params={
+                    "tenant_key": tenant_key,
+                    "thread_id": thread_id,
+                    "checkpoint_ns": checkpoint_ns,
+                },
+            )
+        except httpx.HTTPError as e:
+            log.warning("检查点读取回调异常: %s", e)
+            return None
+        if resp.status_code != 200:
+            return None
+        data = _json_of(resp)
+        if data is None:
+            return None
+        return {
+            "checkpoint_id": data.get("checkpoint_id"),
+            "payload_type": data.get("payload_type"),
+            "payload_b64": data.get("payload_b64"),
+        }
+
+    async def graph_checkpoint_writes(
+        self, *, tenant_key: str, thread_id: str, checkpoint_ns: str, checkpoint_id: str
+    ) -> list[dict[str, object]] | None:
+
+        try:
+            resp = await self._get_retryable(
+                "/internal/task/graph-checkpoint/writes",
+                params={
+                    "tenant_key": tenant_key,
+                    "thread_id": thread_id,
+                    "checkpoint_ns": checkpoint_ns,
+                    "checkpoint_id": checkpoint_id,
+                },
+            )
+        except httpx.HTTPError as e:
+            log.warning("检查点写入行读取回调异常: %s", e)
+            return None
+        if resp.status_code != 200:
+            return None
+        data = _json_of(resp)
+        if data is None:
+            return None
+        out: list[dict[str, object]] = []
+        for r in cast("list[object]", data.get("writes") or []):
+            if isinstance(r, dict):
+                row = cast("dict[str, object]", r)
+                out.append(
+                    {
+                        "write_task_id": row.get("write_task_id"),
+                        "payload_type": row.get("payload_type"),
+                        "payload_b64": row.get("payload_b64"),
+                    }
+                )
+        return out
+
+    async def graph_checkpoint_delete_thread(self, *, tenant_key: str, thread_id: str) -> bool:
+        try:
+            resp = await self._post_once(
+                "/internal/task/graph-checkpoint/delete",
+                {"tenant_key": tenant_key, "thread_id": thread_id},
+            )
+        except httpx.HTTPError as e:
+            log.warning("检查点清理回调异常: %s", e)
+            return False
+        return resp.status_code == 200
+
+
+class ApiClient(_CheckpointApi):
     async def sql_execute(
         self,
         *,
@@ -586,118 +741,6 @@ class ApiClient:
             log.warning("collab_turn 回调异常: %s", e)
             return False
 
-    async def graph_checkpoint_put(
-        self,
-        *,
-        tenant_key: str,
-        thread_id: str,
-        checkpoint_ns: str,
-        kind: str,
-        checkpoint_id: str | None,
-        task_id: str,
-        step_id: str,
-        payload_type: str,
-        payload: bytes,
-    ) -> bool:
-        """检查点/部分写入落控制面(graph-checkpoint spec)。失败返回 False
-        (适配器降级,不抛断执行主路径);不走重试——blob 重复行无害但
-        部分写入重复会造成恢复期重复观察,单次语义最诚实。"""
-        import base64 as _b64
-
-        try:
-            resp = await self._post_once(
-                "/internal/task/graph-checkpoint",
-                {
-                    "tenant_key": tenant_key,
-                    "thread_id": thread_id,
-                    "checkpoint_ns": checkpoint_ns,
-                    "kind": kind,
-                    "checkpoint_id": checkpoint_id,
-                    "task_id": task_id,
-                    "step_id": step_id,
-                    "payload_type": payload_type,
-                    "payload_b64": _b64.b64encode(payload).decode("ascii"),
-                },
-            )
-        except httpx.HTTPError as e:
-            log.warning("检查点写入回调异常: %s", e)
-            return False
-        return resp.status_code == 200
-
-    async def graph_checkpoint_latest(
-        self, *, tenant_key: str, thread_id: str, checkpoint_ns: str
-    ) -> dict[str, object] | None:
-        """取线程最新快照;404(缺席)与其他失败同形 None(回退整步重跑)。"""
-
-        try:
-            resp = await self._get_retryable(
-                "/internal/task/graph-checkpoint/latest",
-                params={
-                    "tenant_key": tenant_key,
-                    "thread_id": thread_id,
-                    "checkpoint_ns": checkpoint_ns,
-                },
-            )
-        except httpx.HTTPError as e:
-            log.warning("检查点读取回调异常: %s", e)
-            return None
-        if resp.status_code != 200:
-            return None
-        data = _json_of(resp)
-        if data is None:
-            return None
-        return {
-            "checkpoint_id": data.get("checkpoint_id"),
-            "payload_type": data.get("payload_type"),
-            "payload_b64": data.get("payload_b64"),
-        }
-
-    async def graph_checkpoint_writes(
-        self, *, tenant_key: str, thread_id: str, checkpoint_ns: str, checkpoint_id: str
-    ) -> list[dict[str, object]] | None:
-
-        try:
-            resp = await self._get_retryable(
-                "/internal/task/graph-checkpoint/writes",
-                params={
-                    "tenant_key": tenant_key,
-                    "thread_id": thread_id,
-                    "checkpoint_ns": checkpoint_ns,
-                    "checkpoint_id": checkpoint_id,
-                },
-            )
-        except httpx.HTTPError as e:
-            log.warning("检查点写入行读取回调异常: %s", e)
-            return None
-        if resp.status_code != 200:
-            return None
-        data = _json_of(resp)
-        if data is None:
-            return None
-        out: list[dict[str, object]] = []
-        for r in cast("list[object]", data.get("writes") or []):
-            if isinstance(r, dict):
-                row = cast("dict[str, object]", r)
-                out.append(
-                    {
-                        "write_task_id": row.get("write_task_id"),
-                        "payload_type": row.get("payload_type"),
-                        "payload_b64": row.get("payload_b64"),
-                    }
-                )
-        return out
-
-    async def graph_checkpoint_delete_thread(self, *, tenant_key: str, thread_id: str) -> bool:
-        try:
-            resp = await self._post_once(
-                "/internal/task/graph-checkpoint/delete",
-                {"tenant_key": tenant_key, "thread_id": thread_id},
-            )
-        except httpx.HTTPError as e:
-            log.warning("检查点清理回调异常: %s", e)
-            return False
-        return resp.status_code == 200
-
     async def task_step_suspended(
         self,
         *,
@@ -788,38 +831,3 @@ class ApiClient:
         if resp.status_code != 200:
             return None
         return resp.headers.get("content-type", "image/png").split(";")[0], resp.content
-
-    async def _post(self, path: str, payload: dict[str, object]) -> httpx.Response:
-        """控制面 POST(只读类回调入口;分层重试):仅**连接层未送达**失败
-        按回调预算快重试——读超时=已送达,执行副作用不可假定幂等,
-        不重发;5xx 语义上亦已送达。report_usage/tool_execute 走 _post_once
-        (任何失败都不重试)。"""
-        return await call_with_retry(
-            partial(self._post_once, path, payload),
-            max_attempts=CALLBACK_MAX_ATTEMPTS,
-            base_delay_ms=CALLBACK_RETRY_BASE_MS,
-            max_wait_ms=CALLBACK_RETRY_MAX_WAIT_MS,
-            is_transient=is_connect_phase_error,
-        )
-
-    async def _post_once(self, path: str, payload: dict[str, object]) -> httpx.Response:
-        async with httpx.AsyncClient(
-            base_url=self._base, timeout=self._timeout, headers=self._headers
-        ) as client:
-            return await client.post(path, json=payload)
-
-    async def _get_retryable(self, path: str, params: dict[str, str]) -> httpx.Response:
-        """控制面 GET(附件取用;同 _post 的连接层分层重试口径)。"""
-        return await call_with_retry(
-            partial(self._get_once, path, params),
-            max_attempts=CALLBACK_MAX_ATTEMPTS,
-            base_delay_ms=CALLBACK_RETRY_BASE_MS,
-            max_wait_ms=CALLBACK_RETRY_MAX_WAIT_MS,
-            is_transient=is_connect_phase_error,
-        )
-
-    async def _get_once(self, path: str, params: dict[str, str]) -> httpx.Response:
-        async with httpx.AsyncClient(
-            base_url=self._base, timeout=self._timeout, headers=self._headers
-        ) as client:
-            return await client.get(path, params=params)

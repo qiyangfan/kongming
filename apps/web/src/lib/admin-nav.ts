@@ -22,7 +22,7 @@ import {
   Wrench,
 } from "lucide-react";
 
-export type AdminNavItem = {
+type AdminNavItem = {
   to: string;
   label: string;
   icon: LucideIcon;

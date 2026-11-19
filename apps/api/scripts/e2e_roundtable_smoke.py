@@ -137,146 +137,165 @@ async def declare_roundtable_and_launch(
     return topo
 
 
+async def _create_task(client: httpx.AsyncClient, goal: str, created: list[str]) -> str:
+    """建任务、登记待清理清单并返回 task_id。"""
+    r = await client.post(
+        "/tasks",
+        headers=_h(),
+        json={"goal": goal, "datasource_key": "sakila"},
+    )
+    assert r.status_code == 202, r.text
+    task_id = r.json()["task_id"]
+    created.append(task_id)
+    print(f"[smoke] task={task_id}")
+    return task_id
+
+
+async def _wait_roundtable_settled(client: httpx.AsyncClient, task_id: str, timeout: float) -> dict:
+    """等圆桌运行离开 RUNNING(运行账口径;任务可能因步级 token 预算在步边界
+    被暂停——平台诚实语义,不作为冒烟失败)。"""
+    deadline = time.monotonic() + timeout
+    run: dict = {}
+    while time.monotonic() < deadline:
+        runs_now = await get_runs(client, task_id)
+        run = next(x for x in runs_now if x["topology"].get("kind") == "roundtable")
+        if run["status"] != "RUNNING":
+            break
+        await asyncio.sleep(2.0)
+    return run
+
+
+def _check_roundtable_ledger(run: dict, final: dict) -> None:
+    """账本诚实断言(不预设共识结论):运行终态、参与者归集、轮次转写、
+    生命周期事件与宿主步骤口径。"""
+    # 账本诚实断言(不预设共识结论)
+    assert run["status"] in ("DONE", "FAILED", "PARTIAL", "CANCELLED"), run
+    assert run["status"] != "RUNNING", "任务终态后圆桌运行不得滞留 RUNNING"
+    workers = run.get("workers") or []
+    turns = run.get("turns") or []
+    assert workers, "圆桌运行无参与者账本"
+    for w in workers:
+        assert w["trace_id"], "参与者缺 trace 父子关联"
+        assert isinstance(w.get("usage"), dict), "参与者缺用量归集"
+    speech_turns = [t for t in turns if t["kind"] == "speech"]
+    verdict_turns = [t for t in turns if t["kind"] == "verdict"]
+    abstain_turns = [t for t in turns if t["kind"] == "abstain"]
+    # 判定轮缺席的合法通道=首轮全员弃权提前收口(治理协议选择式参与)
+    assert verdict_turns or abstain_turns, (
+        f"圆桌无主席判定亦无弃权轮次(治理协议未执行): {[t['kind'] for t in turns]}"
+    )
+    assert all(t["worker_no"] == 0 for t in verdict_turns), "判定行必须 0 号位"
+    print(
+        f"[smoke] 轮次转写: speech={len(speech_turns)} verdict={len(verdict_turns)} "
+        f"abstain={len(abstain_turns)} "
+        f"判定={[t['content'].get('consensus') for t in verdict_turns]}"
+    )
+    events = [e["kind"] for e in final["events"]]
+    for kind in ("collab_topology_set", "collab_started", "collab_finished"):
+        assert kind in events, f"缺协作事件 {kind}: {events}"
+    round_events = [e for e in events if e in ("collab_round_finished", "collab_round_verdict")]
+    print(f"[smoke] 生命周期事件: round_finished/verdict={len(round_events)}")
+    collab_step = next((s for s in final["steps"] if s["id"] == run["step_id"]), None)
+    assert collab_step is not None, f"宿主步骤 {run['step_id']} 不在账本"
+    if run["status"] == "DONE":
+        if collab_step["status"] != "DONE":
+            # 运行账与任务步账是两本各自为真的账(预算在步间结账):
+            # 圆桌诚实收口后,任务累计 token 预算在步边界触发 → 步 FAILED
+            # 附因「预算耗尽」= 诚实边界,非漂移;其余步态即真缺陷
+            reason = str(collab_step.get("fail_reason") or "")
+            assert collab_step["status"] == "FAILED" and "token 预算耗尽" in reason, (
+                f"run DONE 而步 {collab_step['status']} 且非预算边界附因: {reason[:120]}"
+            )
+            print("[smoke] 步态=FAILED 但属任务 token 预算边界诚实附因(运行账 DONE 为真)")
+    if run["status"] == "FAILED":
+        assert collab_step["status"] in ("FAILED", "DONE"), "运行 FAILED 但步骤状态漂移"
+
+
+async def _scenario_full_chain(client: httpx.AsyncClient, created: list[str]) -> None:
+    """场景一:圆桌全链(2 参与者 × ≤2 轮,真实对辩)。"""
+    task_id = await _create_task(
+        client,
+        "圆桌冒烟:两位专家圆桌对辩——rental 表的月度租赁量"
+        "是否存在明显季节性,给出数据依据并相互核查口径",
+        created,
+    )
+    topo = await declare_roundtable_and_launch(client, task_id, max_rounds=2)
+    print(f"[smoke] roundtable declared: {topo}")
+
+    run = await wait_roundtable_run(client, task_id, 300)
+    print(f"[smoke] roundtable run appeared: id={run['id']} status={run['status']}")
+
+    run = await _wait_roundtable_settled(client, task_id, 900)
+    final = await get_task(client, task_id)
+    status = final["task"]["status"]
+    runs = await get_runs(client, task_id)
+    run = next(x for x in runs if x["topology"].get("kind") == "roundtable")
+    workers = run.get("workers") or []
+    turns = run.get("turns") or []
+    print(
+        f"[smoke] run final: status={run['status']} verdict={run['verdict']} "
+        f"workers={[(w['worker_no'], w['status']) for w in workers]} "
+        f"turns={len(turns)}"
+    )
+    _check_roundtable_ledger(run, final)
+    dissent = next(
+        (e.get("dissent") for e in final["events"] if e["kind"] == "collab_finished"),
+        None,
+    )
+    channel = "共识判定" if dissent is False else "未共识保留分歧(触顶/弃权/预算)"
+    print(f"[smoke] 场景一(圆桌全链)通过: task={status} 收口通道={channel}")
+
+
+async def _scenario_cancel(client: httpx.AsyncClient, created: list[str]) -> bool:
+    """场景二:运行中取消 → 在途圆桌账收敛;未及开账返回 False。"""
+    task2 = await _create_task(client, "圆桌冒烟:取消场景,分析客户租赁行为的类别分布", created)
+    await declare_roundtable_and_launch(client, task2, max_rounds=2)
+    try:
+        await wait_roundtable_run(client, task2, 60)
+    except AssertionError:
+        print("[smoke] 场景二:圆桌未及开账(时序窗口),本场景未验证 → 失败退出")
+        return False
+    live = await get_task(client, task2)
+    if live["task"]["status"] not in TERMINAL:
+        rc = await client.post(f"/tasks/{task2}/cancel", headers=_h())
+        assert rc.status_code == 200, rc.text
+        await wait_task(client, task2, ("CANCELLED",), 30)
+    rt2 = [
+        x
+        for x in await get_runs(client, task2)
+        if x.get("topology", {}).get("kind") == "roundtable"
+    ]
+    assert all(x["status"] != "RUNNING" for x in rt2), "取消后圆桌运行滞留 RUNNING"
+    print(
+        f"[smoke] 场景二(取消收敛)通过: runs={[x['status'] for x in rt2]} "
+        f"turns={[len(x.get('turns') or []) for x in rt2]}"
+    )
+    return True
+
+
+async def _teardown(client: httpx.AsyncClient, created: list[str]) -> None:
+    """逐任务隔离清场:单清理失败不连坐放弃后续清理(在途任务继续烧真实
+    LLM 比冒烟失败更不可接受);收集后统一抛,不顶替主体验证根因。"""
+    cleanup_errors: list[str] = []
+    for tid in created:
+        try:
+            await cleanup_task(client, tid)
+        except Exception as e:  # noqa: BLE001 —— 清理失败收集后统一上抛
+            cleanup_errors.append(f"{tid}: {e}")
+    if cleanup_errors:
+        raise AssertionError("清理失败(在途任务可能残留): " + "; ".join(cleanup_errors))
+
+
 async def main() -> int:
     created: list[str] = []
     async with httpx.AsyncClient(base_url=BASE, timeout=30) as client:
         STATE["h"] = await login(client)
         try:
-            # ── 场景一:圆桌全链(2 参与者 × ≤2 轮,真实对辩)──
-            r = await client.post(
-                "/tasks",
-                headers=_h(),
-                json={
-                    "goal": (
-                        "圆桌冒烟:两位专家圆桌对辩——rental 表的月度租赁量"
-                        "是否存在明显季节性,给出数据依据并相互核查口径"
-                    ),
-                    "datasource_key": "sakila",
-                },
-            )
-            assert r.status_code == 202, r.text
-            task_id = r.json()["task_id"]
-            created.append(task_id)
-            print(f"[smoke] task={task_id}")
-
-            topo = await declare_roundtable_and_launch(client, task_id, max_rounds=2)
-            print(f"[smoke] roundtable declared: {topo}")
-
-            run = await wait_roundtable_run(client, task_id, 300)
-            print(f"[smoke] roundtable run appeared: id={run['id']} status={run['status']}")
-
-            # 等圆桌运行终态(运行账口径);任务可能因步级 token 预算在步边界
-            # 被暂停——平台诚实语义,不作为冒烟失败
-            deadline = time.monotonic() + 900
-            while time.monotonic() < deadline:
-                runs_now = await get_runs(client, task_id)
-                run = next(x for x in runs_now if x["topology"].get("kind") == "roundtable")
-                if run["status"] != "RUNNING":
-                    break
-                await asyncio.sleep(2.0)
-            final = await get_task(client, task_id)
-            status = final["task"]["status"]
-            runs = await get_runs(client, task_id)
-            run = next(x for x in runs if x["topology"].get("kind") == "roundtable")
-            workers = run.get("workers") or []
-            turns = run.get("turns") or []
-            print(
-                f"[smoke] run final: status={run['status']} verdict={run['verdict']} "
-                f"workers={[(w['worker_no'], w['status']) for w in workers]} "
-                f"turns={len(turns)}"
-            )
-            # 账本诚实断言(不预设共识结论)
-            assert run["status"] in ("DONE", "FAILED", "PARTIAL", "CANCELLED"), run
-            assert run["status"] != "RUNNING", "任务终态后圆桌运行不得滞留 RUNNING"
-            assert workers, "圆桌运行无参与者账本"
-            for w in workers:
-                assert w["trace_id"], "参与者缺 trace 父子关联"
-                assert isinstance(w.get("usage"), dict), "参与者缺用量归集"
-            speech_turns = [t for t in turns if t["kind"] == "speech"]
-            verdict_turns = [t for t in turns if t["kind"] == "verdict"]
-            abstain_turns = [t for t in turns if t["kind"] == "abstain"]
-            # 判定轮缺席的合法通道=首轮全员弃权提前收口(治理协议选择式参与)
-            assert verdict_turns or abstain_turns, (
-                f"圆桌无主席判定亦无弃权轮次(治理协议未执行): {[t['kind'] for t in turns]}"
-            )
-            assert all(t["worker_no"] == 0 for t in verdict_turns), "判定行必须 0 号位"
-            print(
-                f"[smoke] 轮次转写: speech={len(speech_turns)} verdict={len(verdict_turns)} "
-                f"abstain={len(abstain_turns)} "
-                f"判定={[t['content'].get('consensus') for t in verdict_turns]}"
-            )
-            events = [e["kind"] for e in final["events"]]
-            for kind in ("collab_topology_set", "collab_started", "collab_finished"):
-                assert kind in events, f"缺协作事件 {kind}: {events}"
-            round_events = [
-                e for e in events if e in ("collab_round_finished", "collab_round_verdict")
-            ]
-            print(f"[smoke] 生命周期事件: round_finished/verdict={len(round_events)}")
-            collab_step = next((s for s in final["steps"] if s["id"] == run["step_id"]), None)
-            assert collab_step is not None, f"宿主步骤 {run['step_id']} 不在账本"
-            if run["status"] == "DONE":
-                if collab_step["status"] != "DONE":
-                    # 运行账与任务步账是两本各自为真的账(预算在步间结账):
-                    # 圆桌诚实收口后,任务累计 token 预算在步边界触发 → 步 FAILED
-                    # 附因「预算耗尽」= 诚实边界,非漂移;其余步态即真缺陷
-                    reason = str(collab_step.get("fail_reason") or "")
-                    assert collab_step["status"] == "FAILED" and "token 预算耗尽" in reason, (
-                        f"run DONE 而步 {collab_step['status']} 且非预算边界附因: {reason[:120]}"
-                    )
-                    print("[smoke] 步态=FAILED 但属任务 token 预算边界诚实附因(运行账 DONE 为真)")
-            if run["status"] == "FAILED":
-                assert collab_step["status"] in ("FAILED", "DONE"), "运行 FAILED 但步骤状态漂移"
-            dissent = next(
-                (e.get("dissent") for e in final["events"] if e["kind"] == "collab_finished"),
-                None,
-            )
-            channel = "共识判定" if dissent is False else "未共识保留分歧(触顶/弃权/预算)"
-            print(f"[smoke] 场景一(圆桌全链)通过: task={status} 收口通道={channel}")
-
-            # ── 场景二:运行中取消 → 在途圆桌账收敛 ──
-            r2 = await client.post(
-                "/tasks",
-                headers=_h(),
-                json={
-                    "goal": "圆桌冒烟:取消场景,分析客户租赁行为的类别分布",
-                    "datasource_key": "sakila",
-                },
-            )
-            assert r2.status_code == 202, r2.text
-            task2 = r2.json()["task_id"]
-            created.append(task2)
-            await declare_roundtable_and_launch(client, task2, max_rounds=2)
-            try:
-                await wait_roundtable_run(client, task2, 60)
-            except AssertionError:
-                print("[smoke] 场景二:圆桌未及开账(时序窗口),本场景未验证 → 失败退出")
+            await _scenario_full_chain(client, created)
+            if not await _scenario_cancel(client, created):
                 return 1
-            live = await get_task(client, task2)
-            if live["task"]["status"] not in TERMINAL:
-                rc = await client.post(f"/tasks/{task2}/cancel", headers=_h())
-                assert rc.status_code == 200, rc.text
-                await wait_task(client, task2, ("CANCELLED",), 30)
-            rt2 = [
-                x
-                for x in await get_runs(client, task2)
-                if x.get("topology", {}).get("kind") == "roundtable"
-            ]
-            assert all(x["status"] != "RUNNING" for x in rt2), "取消后圆桌运行滞留 RUNNING"
-            print(
-                f"[smoke] 场景二(取消收敛)通过: runs={[x['status'] for x in rt2]} "
-                f"turns={[len(x.get('turns') or []) for x in rt2]}"
-            )
         finally:
-            # 逐任务隔离:单清理失败不连坐放弃后续清理(在途任务继续烧真实
-            # LLM 比冒烟失败更不可接受);收集后统一抛,不顶替主体验证根因
-            cleanup_errors: list[str] = []
-            for tid in created:
-                try:
-                    await cleanup_task(client, tid)
-                except Exception as e:  # noqa: BLE001 —— 清理失败收集后统一上抛
-                    cleanup_errors.append(f"{tid}: {e}")
-            if cleanup_errors:
-                raise AssertionError("清理失败(在途任务可能残留): " + "; ".join(cleanup_errors))
+            await _teardown(client, created)
     return 0
 
 

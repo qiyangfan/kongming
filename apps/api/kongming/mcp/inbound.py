@@ -45,31 +45,18 @@ class _GateAuthMiddleware:
             await _json(send, 404, {"detail": "Not Found"})
             return
         headers = Headers(scope=scope)
-        # 声明超限:不读 body 直接 413(闸前置于鉴权/解析;未认证客户端不可
-        # 借超大 body 消耗服务端内存)
-        declared = headers.get("content-length")
-        if declared and declared.isdigit() and int(declared) > _BODY_MAX_BYTES:
-            await _json(send, 413, {"detail": "PAYLOAD_TOO_LARGE"})
+        body = await _read_body(headers, receive, send)
+        if body is None:  # 已回 413,或客户端提前断开(无需响应)
             return
-        # 流式计数实际请求体,超限即返回 413;合法请求体缓存
-        # 回放给 SDK 路由(body 流只能消费一次)
-        body = bytearray()
-        while True:
-            message = await receive()
-            if message["type"] == "http.request":
-                body.extend(message.get("body", b""))
-                if len(body) > _BODY_MAX_BYTES:
-                    await _json(send, 413, {"detail": "PAYLOAD_TOO_LARGE"})
-                    return
-                if not message.get("more_body"):
-                    break
-            elif message["type"] == "http.disconnect":
-                return
         key = _extract_key(headers.get("authorization"), headers.get("x-api-key"))
         if not key:
             await _json(send, 401, {"detail": "API_KEY_REQUIRED"})
             return
-        from kongming.bot.router import build_bot_service_with_session
+        await self._authorize_and_forward(scope, body, send, key)
+
+    async def _authorize_and_forward(self, scope: Scope, body: bytes, send: Send, key: str) -> None:
+        """api-key 解析后把 key 信息挂 scope state,并以重放 body 调用 SDK 路由。"""
+        from kongming.bot.dependencies import build_bot_service_with_session
         from kongming.db import get_sessionmaker
 
         async with get_sessionmaker()() as session:
@@ -85,16 +72,44 @@ class _GateAuthMiddleware:
                 "tenant_id": str(key_info["tenant_id"]),
                 "svc": svc,
             }
-            sent_body = False
+            await self._app(scope, _replay(body), send)
 
-            async def replay() -> Message:
-                nonlocal sent_body
-                if not sent_body:
-                    sent_body = True
-                    return {"type": "http.request", "body": bytes(body), "more_body": False}
-                return {"type": "http.disconnect"}
 
-            await self._app(scope, replay, send)
+async def _read_body(headers: Headers, receive: Receive, send: Send) -> bytes | None:
+    """读入请求体并守住 1 MB 闸;超限或中断返回 None(响应已写出或无需响应)。"""
+    # 声明超限:不读 body 直接 413(闸前置于鉴权/解析;未认证客户端不可
+    # 借超大 body 消耗服务端内存)
+    declared = headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > _BODY_MAX_BYTES:
+        await _json(send, 413, {"detail": "PAYLOAD_TOO_LARGE"})
+        return None
+    # 流式计数实际请求体,超限即返回 413
+    body = bytearray()
+    while True:
+        message = await receive()
+        if message["type"] == "http.request":
+            body.extend(message.get("body", b""))
+            if len(body) > _BODY_MAX_BYTES:
+                await _json(send, 413, {"detail": "PAYLOAD_TOO_LARGE"})
+                return None
+            if not message.get("more_body"):
+                return bytes(body)
+        elif message["type"] == "http.disconnect":
+            return None
+
+
+def _replay(body: bytes) -> Receive:
+    """把已读入的请求体缓存回放给 SDK 路由(body 流只能消费一次),之后报断开。"""
+    sent_body = False
+
+    async def receive() -> Message:
+        nonlocal sent_body
+        if not sent_body:
+            sent_body = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        return {"type": "http.disconnect"}
+
+    return receive
 
 
 def _extract_key(authorization: str | None, x_api_key: str | None) -> str | None:

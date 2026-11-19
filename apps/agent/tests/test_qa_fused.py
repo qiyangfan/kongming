@@ -15,13 +15,13 @@ import pytest
 
 from kongming_agent import deps
 from kongming_agent.graph.build import _after_summarize
-from kongming_agent.graph.nodes import (
+from kongming_agent.graph.intent_nodes import (
     fused_answer,
     parse_intent_route,
-    route_after_retrieve,
     route_intent,
     snapshot_intent_route_stats,
 )
+from kongming_agent.graph.nodes import route_after_retrieve
 from kongming_agent.graph.state import AgentState, ExecutionResult
 
 _ROUTE_OK = '{"intent":"data","confidence":0.99,"reason":"问的是数量"}'

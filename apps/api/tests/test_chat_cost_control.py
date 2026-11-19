@@ -20,7 +20,7 @@ from kongming.chat.costgate import (
     ChatRateLimited,
     day_window,
 )
-from kongming.chat.router import get_agent_client
+from kongming.chat.dependencies import get_agent_client
 from kongming.main import app
 from tests.conftest import MakeUser
 
@@ -223,7 +223,7 @@ async def test_bot_gate_ip_never_from_request_header() -> None:
 @pytest.fixture
 def gate_holder() -> Iterator[dict[str, object]]:
     """在组合根 seam 注入可编排闸(limiter/counter/oper 假端口)。"""
-    import kongming.chat.router as chat_router
+    import kongming.chat.dependencies as chat_deps
 
     state: dict[str, object] = {
         "limiter": _CountingLimiter(limit=1),
@@ -241,10 +241,10 @@ def gate_holder() -> Iterator[dict[str, object]]:
             quota_monthly_calls=10_000,
         )
 
-    orig = chat_router._build_cost_gate
-    chat_router._build_cost_gate = _fake_build  # type: ignore[assignment]
+    orig = chat_deps._build_cost_gate
+    chat_deps._build_cost_gate = _fake_build  # type: ignore[assignment]
     yield state
-    chat_router._build_cost_gate = orig  # type: ignore[assignment]
+    chat_deps._build_cost_gate = orig  # type: ignore[assignment]
 
 
 def _auth(token: str) -> dict[str, str]:

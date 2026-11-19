@@ -174,97 +174,113 @@ class RoundtableOrchestrator:
         budget = len(roster) * rounds if execution_budget is None else max(0, execution_budget)
         self._budget_left = budget
 
+    def _not_opened(self, subgoal: str, reservation: str) -> dict[str, object]:
+        """未开桌的部分完成语义(名册不足/预算不足共用)。"""
+        return {
+            "verdict": "ERROR",
+            "summary": "[]",
+            "conclusions": [],
+            "pending_subgoals": [subgoal],
+            "dissent": True,
+            "worker_count": len(self._roster),
+            "reservation": reservation,
+            "rounds_used": 0,
+            "consensus": False,
+        }
+
+    async def _record_turn(
+        self, round_no: int, p: dict[str, object], final: dict[str, object]
+    ) -> None:
+        """落账一参与者发言(尽力而为)。"""
+        if self._recorder is None:
+            return
+        await self._recorder(
+            round_no,
+            int(cast("int", p.get("no") or 0)),
+            str(final.get("kind") or ""),
+            {
+                "stance": final.get("stance"),
+                "summary": final.get("summary"),
+                "verdict": final.get("verdict"),
+            },
+            {"sql": final.get("sql"), "trace_id": final.get("trace_id")},
+            cast("dict[str, object]", final.get("usage") or {}),
+        )
+
+    async def _run_round(
+        self, round_no: int, context: str, snapshot: str
+    ) -> tuple[list[dict[str, object]], bool, bool]:
+        """执行一轮参与者发言;返回 (转写行, 预算是否耗尽, 是否全员弃权)。"""
+        finals: list[dict[str, object]] = []
+        all_abstained = True
+        for p in self._roster:
+            if self._budget_left <= 0:
+                return finals, True, all_abstained
+            self._budget_left -= 1
+            sys_prompt = participant_system_prompt(
+                str(p.get("persona") or ""),
+                context,
+                snapshot,
+                round_no,
+                self._max_rounds,
+            )
+            final = await self._run_turn(p, round_no, sys_prompt)
+            finals.append(final)
+            await self._record_turn(round_no, p, final)
+            if str(final.get("kind") or "") != "abstain":
+                all_abstained = False
+        return finals, False, all_abstained
+
+    async def _chair_and_record(
+        self, round_no: int, subgoal: str, turns: list[dict[str, object]]
+    ) -> bool:
+        """主席判定一轮;返回是否达成共识。"""
+        verdict = await self._chair_round(subgoal, turns)
+        if verdict is None:
+            return False
+        turns.append(verdict)
+        if self._recorder is not None:
+            await self._recorder(
+                round_no,
+                0,
+                "verdict",
+                {
+                    "consensus": verdict.get("consensus"),
+                    "reason": verdict.get("reason"),
+                },
+                {},
+                {},
+            )
+        return bool(verdict.get("consensus"))
+
     async def run(self) -> dict[str, object]:
         """执行圆桌:逐轮(参与者发言 → 主席判定)→ 终止通道触发即诚实收口。"""
         subgoal = str(self._payload.get("subgoal") or "")
         context = str(self._payload.get("context_summary") or "")
         if len(self._roster) < 2:
             # 名册有效规模不足:不开桌(fail-closed),部分完成语义如实披露
-            return {
-                "verdict": "ERROR",
-                "summary": "[]",
-                "conclusions": [],
-                "pending_subgoals": [subgoal],
-                "dissent": True,
-                "worker_count": len(self._roster),
-                "reservation": "有效参与者不足(零工具 fail-closed 或名册缺额),未开桌",
-                "rounds_used": 0,
-                "consensus": False,
-            }
+            return self._not_opened(subgoal, "有效参与者不足(零工具 fail-closed 或名册缺额),未开桌")
         if self._budget_left <= 0:
-            return {
-                "verdict": "ERROR",
-                "summary": "[]",
-                "conclusions": [],
-                "pending_subgoals": [subgoal],
-                "dissent": True,
-                "worker_count": len(self._roster),
-                "reservation": "执行预算继承不足,未开桌",
-                "rounds_used": 0,
-                "consensus": False,
-            }
+            return self._not_opened(subgoal, "执行预算继承不足,未开桌")
         turns: list[dict[str, object]] = []
         notes: list[str] = []
         consensus = False
         rounds_used = 0
         for round_no in range(1, self._max_rounds + 1):
             rounds_used = round_no
-            snapshot = _snapshot(turns)
-            all_abstained = True
-            budget_short = False
-            for p in self._roster:
-                if self._budget_left <= 0:
-                    budget_short = True
-                    break
-                self._budget_left -= 1
-                sys_prompt = participant_system_prompt(
-                    str(p.get("persona") or ""),
-                    context,
-                    snapshot,
-                    round_no,
-                    self._max_rounds,
-                )
-                final = await self._run_turn(p, round_no, sys_prompt)
-                turns.append(final)
-                if self._recorder is not None:
-                    await self._recorder(
-                        round_no,
-                        int(cast("int", p.get("no") or 0)),
-                        str(final.get("kind") or ""),
-                        {
-                            "stance": final.get("stance"),
-                            "summary": final.get("summary"),
-                            "verdict": final.get("verdict"),
-                        },
-                        {"sql": final.get("sql"), "trace_id": final.get("trace_id")},
-                        cast("dict[str, object]", final.get("usage") or {}),
-                    )
-                if str(final.get("kind") or "") != "abstain":
-                    all_abstained = False
+            finals, budget_short, all_abstained = await self._run_round(
+                round_no, context, _snapshot(turns)
+            )
+            turns.extend(finals)
             if budget_short:
                 notes.append(f"执行预算耗尽,第 {round_no} 轮未完整(收口如实披露)")
                 break
             if all_abstained:
                 notes.append(f"第 {round_no} 轮全员弃权,提前收口(无可新增论据)")
                 break
-            verdict = await self._chair_round(subgoal, turns)
-            if verdict is not None:
-                turns.append(verdict)
-                if self._recorder is not None:
-                    await self._recorder(
-                        round_no,
-                        0,
-                        "verdict",
-                        {
-                            "consensus": verdict.get("consensus"),
-                            "reason": verdict.get("reason"),
-                        },
-                        {},
-                        {},
-                    )
-                if bool(verdict.get("consensus")):
-                    consensus = True
-                    break
+            consensus = await self._chair_and_record(round_no, subgoal, turns)
+            if consensus:
+                break
             if round_no == self._max_rounds:
                 notes.append(f"轮次上限 {self._max_rounds} 触顶,未共识收口")
 

@@ -96,133 +96,179 @@ async def ensure_bot(client: httpx.AsyncClient, key: str, name: str, prompt: str
     return str(r.json()["id"])
 
 
+async def _setup_roster_bots(client: httpx.AsyncClient, created_bots: list[str]) -> dict[str, str]:
+    """建财务/运营两个视角 Bot 并返回其 bot_key。"""
+    fin_key = f"roster_fin_{SUFFIX}"
+    ops_key = f"roster_ops_{SUFFIX}"
+    fin_id = await ensure_bot(
+        client,
+        fin_key,
+        "冒烟-财务视角",
+        "你是财务分析专家:从收入与金额口径分析问题,优先用只读 SQL 查证关键数字。",
+    )
+    created_bots.append(fin_id)
+    ops_id = await ensure_bot(
+        client,
+        ops_key,
+        "冒烟-运营视角",
+        "你是运营分析专家:从租赁与库存运营口径分析问题,优先用只读 SQL 查证关键数字。",
+    )
+    created_bots.append(ops_id)
+    return {"fin": fin_key, "ops": ops_key}
+
+
+async def _create_task(client: httpx.AsyncClient, created_tasks: list[str]) -> str:
+    """建任务并登记待清理清单,返回 task_id。"""
+    r = await client.post(
+        "/tasks",
+        headers=_h(),
+        json={
+            "goal": "名册冒烟:从财务与运营双视角协同分析 sakila 租赁业务的整体态势",
+            "datasource_key": "sakila",
+        },
+    )
+    assert r.status_code == 202, r.text
+    task_id = r.json()["task_id"]
+    created_tasks.append(task_id)
+    return task_id
+
+
+async def _declare_roster(
+    client: httpx.AsyncClient, task_id: str, fin_key: str, ops_key: str
+) -> dict:
+    """等规划落账 → 暂停制造声明窗口 → 首个 PENDING 步声明名册拓扑 → 复跑。
+
+    返回声明时的任务详情(供审批挂起态判断)。
+    """
+    d = await wait_task(client, task_id, ("RUNNING", "AWAITING_APPROVAL"), 120)
+    if d["task"]["status"] == "RUNNING":
+        rp = await client.post(f"/tasks/{task_id}/pause", headers=_h())
+        assert rp.status_code == 200, rp.text
+        d = await wait_task(client, task_id, ("PAUSED",), 30)
+    pending = [s for s in d["steps"] if s["status"] == "PENDING"]
+    assert pending, f"无 PENDING 步骤: {[s['status'] for s in d['steps']]}"
+    topo_req = {
+        "max_workers": 2,
+        "dispatch": "parallel",
+        "workers": [
+            {"name": "财务视角", "bot_key": fin_key},
+            {"name": "运营视角", "bot_key": ops_key},
+        ],
+    }
+    rt = await client.put(
+        f"/tasks/{task_id}/steps/{pending[0]['id']}/collab-topology",
+        headers=_h(),
+        json=topo_req,
+    )
+    assert rt.status_code == 200, rt.text
+    echoed = rt.json().get("workers") or []
+    assert len(echoed) == 2, f"声明响应名册回显异常: {rt.text}"
+    print(f"[smoke] 名册声明受理: {[(w['name'], w['bot_key']) for w in echoed]}")
+    return d
+
+
+async def _release_declared_task(client: httpx.AsyncClient, task_id: str, d: dict) -> None:
+    """声明后放行:审批挂起则逐条批准,否则恢复运行。"""
+    if d["task"]["status"] == "AWAITING_APPROVAL":
+        for s in d["steps"]:
+            if s["status"] == "AWAITING_APPROVAL":
+                ra = await client.post(
+                    f"/tasks/{task_id}/steps/{s['id']}/approve",
+                    headers=_h(),
+                    json={"approve": True},
+                )
+                assert ra.status_code == 200, ra.text
+    else:
+        rr = await client.post(f"/tasks/{task_id}/resume", headers=_h())
+        assert rr.status_code == 200, rr.text
+
+
+async def _wait_run_settled(client: httpx.AsyncClient, task_id: str, timeout: float) -> dict:
+    """等协作运行出现并到非 RUNNING 终态(诚实收口:任意终态均合法)。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        rruns = await client.get(f"/tasks/{task_id}/collab-runs", headers=_h())
+        rruns.raise_for_status()
+        items = rruns.json()["items"]
+        if items and items[0]["status"] != "RUNNING":
+            return items[0]
+        await asyncio.sleep(2.0)
+    raise AssertionError("协作运行未在时限内收口")
+
+
+def _check_roster_ledger(workers: list[dict], fin_key: str, ops_key: str) -> list[dict]:
+    """账本口径:点名成员执行的行必须带 bot_key 与成员标签前缀;返回绑定行。"""
+    assert workers, "协作运行无 worker 账本"
+    bound = [w for w in workers if w.get("bot_key")]
+    assert bound, f"无任何 worker 行携带 bot_key(名册未生效): {workers}"
+    for w in bound:
+        assert str(w["subgoal"]).startswith("["), f"名册成员行缺标签前缀: {w['subgoal']}"
+    used_keys = {str(w.get("bot_key")) for w in bound}
+    assert used_keys <= {fin_key, ops_key}, f"账本出现名册外 bot_key: {used_keys}"
+    for w in workers:
+        assert w["trace_id"], "worker 缺 trace 父子关联"
+        assert isinstance(w.get("usage"), dict), "worker 缺用量归集"
+    return bound
+
+
+async def _run_roster_scenario(
+    client: httpx.AsyncClient, keys: dict[str, str], created_tasks: list[str]
+) -> None:
+    """名册冒烟主流程:建任务 → 声明名册 → 等 run 收口 → 核对账本与事件。"""
+    fin_key = keys["fin"]
+    ops_key = keys["ops"]
+    task_id = await _create_task(client, created_tasks)
+    print(f"[smoke] task={task_id} bots={fin_key},{ops_key}")
+
+    d = await _declare_roster(client, task_id, fin_key, ops_key)
+    await _release_declared_task(client, task_id, d)
+
+    run = await _wait_run_settled(client, task_id, 420)
+    workers = run.get("workers") or []
+    print(
+        f"[smoke] run final: status={run['status']} verdict={run['verdict']} "
+        f"workers={[(w['worker_no'], w['status'], w.get('bot_key')) for w in workers]}"
+    )
+    bound = _check_roster_ledger(workers, fin_key, ops_key)
+
+    # 验收单元=run 收口(上方已断言);任务终态仅如实打印——后续普通步
+    # 被步级 token 预算闸暂停/失败属预期行为,非冒烟失败
+    final = await wait_task(client, task_id, TERMINAL + ("PAUSED",), 240)
+    task_status = final["task"]["status"]
+    events = [e["kind"] for e in final["events"]]
+    for kind in ("collab_topology_set", "collab_started", "collab_finished"):
+        assert kind in events, f"缺协作事件 {kind}"
+    print(f"[smoke] 名册冒烟通过: task={task_status} run={run['status']} 绑定行={len(bound)}")
+
+
+async def _teardown(
+    client: httpx.AsyncClient, created_tasks: list[str], created_bots: list[str]
+) -> None:
+    """清场:未终态任务取消,再删临时 Bot(HTTP 异常均吞掉)。"""
+    for tid in created_tasks:
+        try:
+            live = await get_task(client, tid)
+            if live["task"]["status"] not in TERMINAL:
+                await client.post(f"/tasks/{tid}/cancel", headers=_h())
+        except httpx.HTTPError:
+            pass
+    for bid in created_bots:
+        try:
+            await client.delete(f"/system/bots/{bid}", headers=_h())
+        except httpx.HTTPError:
+            pass
+
+
 async def main() -> int:
     created_tasks: list[str] = []
     created_bots: list[str] = []
     async with httpx.AsyncClient(base_url=BASE, timeout=30) as client:
         await login(client)
         try:
-            fin_id = await ensure_bot(
-                client,
-                f"roster_fin_{SUFFIX}",
-                "冒烟-财务视角",
-                "你是财务分析专家:从收入与金额口径分析问题,优先用只读 SQL 查证关键数字。",
-            )
-            created_bots.append(fin_id)
-            ops_id = await ensure_bot(
-                client,
-                f"roster_ops_{SUFFIX}",
-                "冒烟-运营视角",
-                "你是运营分析专家:从租赁与库存运营口径分析问题,优先用只读 SQL 查证关键数字。",
-            )
-            created_bots.append(ops_id)
-            fin_key = f"roster_fin_{SUFFIX}"
-            ops_key = f"roster_ops_{SUFFIX}"
-
-            r = await client.post(
-                "/tasks",
-                headers=_h(),
-                json={
-                    "goal": "名册冒烟:从财务与运营双视角协同分析 sakila 租赁业务的整体态势",
-                    "datasource_key": "sakila",
-                },
-            )
-            assert r.status_code == 202, r.text
-            task_id = r.json()["task_id"]
-            created_tasks.append(task_id)
-            print(f"[smoke] task={task_id} bots={fin_key},{ops_key}")
-
-            # 等规划落账 → 暂停制造声明窗口 → 首个 PENDING 步声明名册拓扑 → 复跑
-            d = await wait_task(client, task_id, ("RUNNING", "AWAITING_APPROVAL"), 120)
-            if d["task"]["status"] == "RUNNING":
-                rp = await client.post(f"/tasks/{task_id}/pause", headers=_h())
-                assert rp.status_code == 200, rp.text
-                d = await wait_task(client, task_id, ("PAUSED",), 30)
-            pending = [s for s in d["steps"] if s["status"] == "PENDING"]
-            assert pending, f"无 PENDING 步骤: {[s['status'] for s in d['steps']]}"
-            topo_req = {
-                "max_workers": 2,
-                "dispatch": "parallel",
-                "workers": [
-                    {"name": "财务视角", "bot_key": fin_key},
-                    {"name": "运营视角", "bot_key": ops_key},
-                ],
-            }
-            rt = await client.put(
-                f"/tasks/{task_id}/steps/{pending[0]['id']}/collab-topology",
-                headers=_h(),
-                json=topo_req,
-            )
-            assert rt.status_code == 200, rt.text
-            echoed = rt.json().get("workers") or []
-            assert len(echoed) == 2, f"声明响应名册回显异常: {rt.text}"
-            print(f"[smoke] 名册声明受理: {[(w['name'], w['bot_key']) for w in echoed]}")
-
-            if d["task"]["status"] == "AWAITING_APPROVAL":
-                for s in d["steps"]:
-                    if s["status"] == "AWAITING_APPROVAL":
-                        ra = await client.post(
-                            f"/tasks/{task_id}/steps/{s['id']}/approve",
-                            headers=_h(),
-                            json={"approve": True},
-                        )
-                        assert ra.status_code == 200, ra.text
-            else:
-                rr = await client.post(f"/tasks/{task_id}/resume", headers=_h())
-                assert rr.status_code == 200, rr.text
-
-            # 等协作运行出现并到非 RUNNING 终态(诚实收口:任意终态均合法)
-            deadline = time.monotonic() + 420
-            run: dict = {}
-            while time.monotonic() < deadline:
-                rruns = await client.get(f"/tasks/{task_id}/collab-runs", headers=_h())
-                rruns.raise_for_status()
-                items = rruns.json()["items"]
-                if items and items[0]["status"] != "RUNNING":
-                    run = items[0]
-                    break
-                await asyncio.sleep(2.0)
-            assert run, "协作运行未在时限内收口"
-            workers = run.get("workers") or []
-            print(
-                f"[smoke] run final: status={run['status']} verdict={run['verdict']} "
-                f"workers={[(w['worker_no'], w['status'], w.get('bot_key')) for w in workers]}"
-            )
-            assert workers, "协作运行无 worker 账本"
-            # 账本口径:点名成员执行的行必须带 bot_key 与成员标签前缀
-            bound = [w for w in workers if w.get("bot_key")]
-            assert bound, f"无任何 worker 行携带 bot_key(名册未生效): {workers}"
-            for w in bound:
-                assert str(w["subgoal"]).startswith("["), f"名册成员行缺标签前缀: {w['subgoal']}"
-            used_keys = {str(w.get("bot_key")) for w in bound}
-            assert used_keys <= {fin_key, ops_key}, f"账本出现名册外 bot_key: {used_keys}"
-            for w in workers:
-                assert w["trace_id"], "worker 缺 trace 父子关联"
-                assert isinstance(w.get("usage"), dict), "worker 缺用量归集"
-
-            # 验收单元=run 收口(上方已断言);任务终态仅如实打印——后续普通步
-            # 被步级 token 预算闸暂停/失败属预期行为,非冒烟失败
-            final = await wait_task(client, task_id, TERMINAL + ("PAUSED",), 240)
-            task_status = final["task"]["status"]
-            events = [e["kind"] for e in final["events"]]
-            for kind in ("collab_topology_set", "collab_started", "collab_finished"):
-                assert kind in events, f"缺协作事件 {kind}"
-            print(
-                f"[smoke] 名册冒烟通过: task={task_status} run={run['status']} 绑定行={len(bound)}"
-            )
+            keys = await _setup_roster_bots(client, created_bots)
+            await _run_roster_scenario(client, keys, created_tasks)
         finally:
-            for tid in created_tasks:
-                try:
-                    live = await get_task(client, tid)
-                    if live["task"]["status"] not in TERMINAL:
-                        await client.post(f"/tasks/{tid}/cancel", headers=_h())
-                except httpx.HTTPError:
-                    pass
-            for bid in created_bots:
-                try:
-                    await client.delete(f"/system/bots/{bid}", headers=_h())
-                except httpx.HTTPError:
-                    pass
+            await _teardown(client, created_tasks, created_bots)
     return 0
 
 

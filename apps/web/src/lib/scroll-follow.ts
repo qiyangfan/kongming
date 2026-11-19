@@ -4,12 +4,10 @@
 export const NEAR_BOTTOM_PX = 64;
 
 export function isNearBottom(
-  scrollTop: number,
-  scrollHeight: number,
-  clientHeight: number,
+  metrics: { scrollTop: number; scrollHeight: number; clientHeight: number },
   threshold: number = NEAR_BOTTOM_PX,
 ): boolean {
   // 内容不足一屏(无滚动余量)时恒视为贴底:新消息同样要跟
-  const distance = scrollHeight - clientHeight - scrollTop;
+  const distance = metrics.scrollHeight - metrics.clientHeight - metrics.scrollTop;
   return distance <= threshold;
 }

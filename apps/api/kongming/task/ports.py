@@ -6,7 +6,7 @@ from typing import Any, Protocol
 from kongming.task.models import StepPlan
 
 
-class TaskRepo(Protocol):
+class TaskReadRepo(Protocol):
     async def insert_task(
         self,
         *,
@@ -56,6 +56,10 @@ class TaskRepo(Protocol):
         expect_version: int | None = None,
     ) -> dict[str, Any] | None: ...
 
+
+class TaskWriteRepo(Protocol):
+    """步骤账本写入端口(CAS 迁移、插步、预算累加与事件追加)。"""
+
     async def insert_steps(
         self, *, task_id: str, plans: list[StepPlan], start_ord: int
     ) -> list[dict[str, Any]]: ...
@@ -78,6 +82,10 @@ class TaskRepo(Protocol):
     ) -> bool: ...
 
     async def first_executable_step(self, *, task_id: str) -> dict[str, Any] | None: ...
+
+
+class TaskRepo(TaskReadRepo, TaskWriteRepo, Protocol):
+    """任务主链仓储组合端口:读侧 + 写侧(各子服务按需只依赖所用子集)。"""
 
     async def get_step(self, *, task_id: str, step_id: str) -> dict[str, Any] | None: ...
 
@@ -105,7 +113,9 @@ class TaskRepo(Protocol):
         self, *, task_id: str, step_id: str
     ) -> dict[str, Any] | None: ...
 
-    # ── 协作拓扑与协作账本──
+
+class CollabLedgerRepo(Protocol):
+    """协作账本端口(协作拓扑声明、运行/worker/圆桌轮次;协作用例簇专用)。"""
 
     async def update_step_topology(
         self, *, task_id: str, step_id: str, topology: dict[str, object]
@@ -168,6 +178,10 @@ class TaskRepo(Protocol):
     ) -> bool: ...
 
     async def list_collab_runs(self, *, task_id: str) -> list[dict[str, Any]]: ...
+
+
+class TaskCollabRepo(TaskRepo, CollabLedgerRepo, Protocol):
+    """任务主链 + 协作账本的组合端口(拓扑配置面与协作用例共用同一会话)。"""
 
 
 class CollabBotResolver(Protocol):

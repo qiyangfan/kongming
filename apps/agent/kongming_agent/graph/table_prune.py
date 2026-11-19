@@ -62,6 +62,25 @@ def _count(haystack: str, needle: str) -> int:
     return haystack.count(needle)
 
 
+def _column_hits(table: MetaTable, q: str, a: str) -> tuple[int, int]:
+    """列名在问句/资产中的命中次数(短列名不计,防噪音)。"""
+    col_q = sum(
+        _count(q, col.name.lower())
+        for col in table.columns
+        if len(col.name) >= 3 and col.name.lower() in q
+    )
+    col_a = sum(_count(a, col.name.lower()) for col in table.columns if len(col.name) >= 3)
+    return col_q, col_a
+
+
+def _comment_hits(table: MetaTable, kws: set[str]) -> int:
+    """表说明中问句关键词的命中次数(单字关键词不计)。"""
+    comment = (table.comment or "").lower()
+    if not comment:
+        return 0
+    return sum(_count(comment, kw) for kw in kws if len(kw) >= 2)
+
+
 def score_table(
     question: str,
     table: MetaTable,
@@ -87,12 +106,7 @@ def score_table(
         score += min(a_hits, 1) * _W_NAME * _W_ASSET
         sources.append("asset:name")
     # 列名:问句/资产共现
-    col_q = sum(
-        _count(q, col.name.lower())
-        for col in table.columns
-        if len(col.name) >= 3 and col.name.lower() in q
-    )
-    col_a = sum(_count(a, col.name.lower()) for col in table.columns if len(col.name) >= 3)
+    col_q, col_a = _column_hits(table, q, a)
     if col_q:
         score += col_q * _W_COL * _W_QUESTION
         sources.append("question:column")
@@ -100,12 +114,10 @@ def score_table(
         score += min(col_a, 2) * _W_COL * _W_ASSET
         sources.append("asset:column")
     # 表说明:问句关键词落说明(主题相关)
-    comment = (table.comment or "").lower()
-    if comment:
-        cmt_hits = sum(_count(comment, kw) for kw in kws if len(kw) >= 2)
-        if cmt_hits:
-            score += cmt_hits * _W_COMMENT * _W_QUESTION
-            sources.append("question:comment")
+    cmt_hits = _comment_hits(table, kws)
+    if cmt_hits:
+        score += cmt_hits * _W_COMMENT * _W_QUESTION
+        sources.append("question:comment")
     return score, tuple(sources)
 
 

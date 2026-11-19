@@ -126,38 +126,131 @@ function single(set: Set<number>): number | null {
   return set.size === 1 ? [...set][0] : null;
 }
 
+const WEEKDAY_IDS = [1, 2, 3, 4, 5];
+
+function rangePart(
+  base: string,
+  bounds: { slash: number; lo: number; hi: number },
+): [number, number] | null {
+  const { slash, lo, hi } = bounds;
+  if (base === "*") return [lo, hi];
+  if (/^\d+$/.test(base)) {
+    const start = Number(base);
+    return [start, slash >= 0 ? hi : start];
+  }
+  if (/^\d+-\d+$/.test(base)) {
+    const [start, end] = base.split("-").map(Number);
+    return start > end ? null : [start, end];
+  }
+  return null;
+}
+
+/* 拆分 `a/b` 形式:无斜杠时步长取 1;步长非法返回 null。 */
+function splitStep(part: string): { base: string; slash: number; step: number } | null {
+  let base = part;
+  let step = 1;
+  const slash = part.indexOf("/");
+  if (slash >= 0) {
+    base = part.slice(0, slash);
+    const stepPart = part.slice(slash + 1);
+    if (!/^\d+$/.test(stepPart) || stepPart === "0") return null;
+    step = Number(stepPart);
+  }
+  return { base, slash, step };
+}
+
+/* 单个片段(如星号、单值、区间、步进形式)解析为 [起始, 结束, 步长]。 */
+function parsePart(part: string, lo: number, hi: number): [number, number, number] | null {
+  if (part === "") return null;
+  const split = splitStep(part);
+  if (!split) return null;
+  const { base, slash, step } = split;
+  const partBounds = rangePart(base, { slash, lo, hi });
+  if (!partBounds) return null;
+  const [start, end] = partBounds;
+  if (start < lo || start > hi || end > hi || start > end) return null;
+  return [start, end, step];
+}
+
 /** 单个 cron 字段解析为值集合;仅支持与后端约定的形态,其余返回 null(落入高级模式)。 */
 function parseField(src: string, lo: number, hi: number): Set<number> | null {
   const out = new Set<number>();
   for (const part of src.split(",")) {
-    if (part === "") return null;
-    let base = part;
-    let step = 1;
-    const slash = part.indexOf("/");
-    if (slash >= 0) {
-      base = part.slice(0, slash);
-      const stepPart = part.slice(slash + 1);
-      if (!/^\d+$/.test(stepPart) || stepPart === "0") return null;
-      step = Number(stepPart);
-    }
-    let start: number;
-    let end: number;
-    if (base === "*") {
-      start = lo;
-      end = hi;
-    } else if (/^\d+$/.test(base)) {
-      start = Number(base);
-      end = slash >= 0 ? hi : start;
-    } else if (/^\d+-\d+$/.test(base)) {
-      [start, end] = base.split("-").map(Number);
-      if (start > end) return null;
-    } else {
-      return null;
-    }
-    if (start < lo || start > hi || end > hi || start > end) return null;
+    const range = parsePart(part, lo, hi);
+    if (!range) return null;
+    const [start, end, step] = range;
     for (let v = start; v <= end; v += step) out.add(v);
   }
   return out;
+}
+
+/* 月/日/周三个字段是否都取满取值范围(全通配) */
+function isWildcardDayMonth(fields: {
+  dom: Set<number>;
+  month: Set<number>;
+  dow: Set<number>;
+}): boolean {
+  const { dom, month, dow } = fields;
+  return (
+    setEquals(dom, rangeSet(1, 31)) &&
+    setEquals(month, rangeSet(1, 12)) &&
+    setEquals(dow, rangeSet(0, 6))
+  );
+}
+
+/* 月/日/周组合是否可落到某个固定周期档;定不下返回 null。 */
+function namedKind(
+  dom: Set<number>,
+  month: Set<number>,
+  dow: Set<number>,
+): "weekly" | "workday" | "monthly" | null {
+  const domFull = setEquals(dom, rangeSet(1, 31));
+  const monFull = setEquals(month, rangeSet(1, 12));
+  const dowFull = setEquals(dow, rangeSet(0, 6));
+  if (domFull && monFull && dow.size === 1) return "weekly";
+  if (monFull && domFull && setEquals(dow, new Set(WEEKDAY_IDS))) return "workday";
+  if (monFull && dowFull && dom.size === 1) return "monthly";
+  return null;
+}
+
+/* 非全通配的月/日/周组合 → 每周/工作日/每月档;均不匹配返回 null。 */
+function namedSchedule(fields: {
+  minute: Set<number>;
+  hour: Set<number>;
+  dom: Set<number>;
+  month: Set<number>;
+  dow: Set<number>;
+}): Schedule | null {
+  const { minute, hour, dom, month, dow } = fields;
+  const kind = namedKind(dom, month, dow);
+  const m = single(minute);
+  const h = single(hour);
+  if (kind === null || m === null || h === null) return null;
+  if (kind === "weekly") return { kind, weekday: [...dow][0], hour: h, minute: m };
+  if (kind === "workday") return { kind, hour: h, minute: m };
+  return { kind: "monthly", monthDay: [...dom][0], hour: h, minute: m };
+}
+
+/* 小时轴全通配时的分钟档:整分钟步进优先,否则整点档。 */
+function minuteSchedule(minute: Set<number>): Schedule | null {
+  const n = matchStep(minute, "minute");
+  if (n !== null) return { kind: "interval", unit: "minute", n };
+  const m = single(minute);
+  return m === null ? null : { kind: "hourly", minute: m };
+}
+
+/* 全通配的月/日/周组合 → 按分钟/小时步进定档,否则退回每日/整点档。 */
+function wildcardSchedule(minute: Set<number>, hour: Set<number>): Schedule | null {
+  if (setEquals(hour, rangeSet(0, 23))) return minuteSchedule(minute);
+  const m = single(minute);
+  if (m === null) return null;
+  if (m === 0) {
+    const n = matchStep(hour, "hour");
+    if (n !== null) return { kind: "interval", unit: "hour", n };
+  }
+  const h = single(hour);
+  if (h === null) return null;
+  return { kind: "daily", hour: h, minute: m };
 }
 
 /** cron 表达式 -> 档位;不可识别返回 null。 */
@@ -178,38 +271,8 @@ export function parseCronToSchedule(expr: string): Schedule | null {
     dow.add(0);
     dow.delete(7);
   }
-  const domFull = setEquals(dom, rangeSet(1, 31));
-  const monFull = setEquals(month, rangeSet(1, 12));
-  const dowFull = setEquals(dow, rangeSet(0, 6));
-  if (!domFull || !monFull || !dowFull) {
-    const m = single(minute);
-    const h = single(hour);
-    if (m === null || h === null) return null;
-    if (monFull && domFull && dow.size === 1) {
-      return { kind: "weekly", weekday: [...dow][0], hour: h, minute: m };
-    }
-    if (monFull && domFull && setEquals(dow, new Set([1, 2, 3, 4, 5]))) {
-      return { kind: "workday", hour: h, minute: m };
-    }
-    if (monFull && dowFull && dom.size === 1) {
-      return { kind: "monthly", monthDay: [...dom][0], hour: h, minute: m };
-    }
-    return null;
-  }
-  const hFull = setEquals(hour, rangeSet(0, 23));
-  if (hFull) {
-    const n = matchStep(minute, "minute");
-    if (n !== null) return { kind: "interval", unit: "minute", n };
-    const m = single(minute);
-    return m === null ? null : { kind: "hourly", minute: m };
-  }
-  const m = single(minute);
-  if (m === null) return null;
-  if (m === 0) {
-    const n = matchStep(hour, "hour");
-    if (n !== null) return { kind: "interval", unit: "hour", n };
-  }
-  const h = single(hour);
-  if (h === null) return null;
-  return { kind: "daily", hour: h, minute: m };
+  return (
+    namedSchedule({ minute, hour, dom, month, dow }) ??
+    (isWildcardDayMonth({ dom, month, dow }) ? wildcardSchedule(minute, hour) : null)
+  );
 }

@@ -3,10 +3,10 @@
 import type { components } from "./api-types.gen";
 import { api, type ChatQueryOut, type SessionItemOut } from "./api";
 
-export type ExplainOut = components["schemas"]["ExplainOut"];
+type ExplainOut = components["schemas"]["ExplainOut"];
 export type ArtifactOut = components["schemas"]["ArtifactOut"];
-export type AttachmentOut = components["schemas"]["AttachmentOut"];
-export type SuggestionsOut = components["schemas"]["SuggestionsOut"];
+type AttachmentOut = components["schemas"]["AttachmentOut"];
+type SuggestionsOut = components["schemas"]["SuggestionsOut"];
 
 /** 对话冷启动建议问题:按当前数据源获取;空清单=静默隐藏(生成失败/不可用) */
 export function getSuggestions(datasourceKey: string): Promise<SuggestionsOut> {
@@ -77,6 +77,13 @@ function downloadBlob(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+/** 本地兜底文件名:查询结果-YYYYMMDD-HHmmss.{format} */
+function exportFallbackName(format: "csv" | "xlsx"): string {
+  const ts = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `查询结果-${ts.getFullYear()}${pad(ts.getMonth() + 1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}.${format}`;
+}
+
 /** 结果导出:传展示中的 columns+rows,服务端不重跑 SQL;文件名优先取 Content-Disposition,缺失回退本地生成 */
 export async function exportResult(
   format: "csv" | "xlsx",
@@ -94,9 +101,7 @@ export async function exportResult(
     throw new Error(detail);
   }
   const blob = await resp.blob();
-  const ts = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const fallback = `查询结果-${ts.getFullYear()}${pad(ts.getMonth() + 1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}.${format}`;
-  const filename = parseDispositionFilename(resp.headers.get("content-disposition")) ?? fallback;
+  const filename =
+    parseDispositionFilename(resp.headers.get("content-disposition")) ?? exportFallbackName(format);
   downloadBlob(blob, filename);
 }

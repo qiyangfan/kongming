@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming import tenant
-from kongming.chat.models import Suggestion
+from kongming.chat.models import MessageMeta, Suggestion
 from kongming.chat.ports import ChatStoreError
 from kongming.db import uuid7
 from kongming.sql_util import contains_like_pattern
@@ -37,6 +37,27 @@ def _store_error_boundary[**P, R](
             raise ChatStoreError(str(e)) from e
 
     return wrapper
+
+
+_INSERT_MESSAGE_SQL = (
+    "INSERT INTO public.chat_message"
+    " (id, session_id, role, question, sql_text, result_json, summary,"
+    "  status, attachments, trace_id, retry_count, resolved_question,"
+    "  prompt_version, fallback_type, stage_trace)"
+    " VALUES (:id, :s, :role, :q, :sql, :rj, :sum, :st,"
+    "         CAST(:att AS jsonb), :tid, :rc, :rq, :pv, :fb,"
+    "         CAST(:stg AS jsonb))"
+)
+
+
+def _jsonb(value: object) -> str:
+    """JSON 列参数编码(保留中文原文)。"""
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _jsonb_or_none(value: object | None) -> str | None:
+    """可选 JSON 列:空值写 NULL,便于 DISTINCT ON 等按 NULL 判无轨迹。"""
+    return _jsonb(value) if value is not None else None
 
 
 class ChatRepository:
@@ -281,24 +302,12 @@ class ChatRepository:
         summary: str | None = None,
         status: str,
         attachments: list[dict[str, object]] | None = None,
-        trace_id: str | None = None,  # 轮次质量信号(三表关联键)
-        retry_count: int = 0,
-        resolved_question: str | None = None,  # 仅多轮改写实际发生时非空
-        prompt_version: str | None = None,  # agent prompt 资产指纹
-        fallback_type: str | None = None,  # 兜底轮分类(闲聊/澄清;仅兜底轮非空)
-        stage_trace: list[dict[str, object]] | None = None,  # 节点轨迹(流式轮;同步轮 None)
+        meta: MessageMeta | None = None,
     ) -> str:
+        meta = meta or MessageMeta()
         mid = str(uuid7())
         await self._s.execute(
-            text(
-                "INSERT INTO public.chat_message"
-                " (id, session_id, role, question, sql_text, result_json, summary,"
-                "  status, attachments, trace_id, retry_count, resolved_question,"
-                "  prompt_version, fallback_type, stage_trace)"
-                " VALUES (:id, :s, :role, :q, :sql, :rj, :sum, :st,"
-                "         CAST(:att AS jsonb), :tid, :rc, :rq, :pv, :fb,"
-                "         CAST(:stg AS jsonb))"
-            ),
+            text(_INSERT_MESSAGE_SQL),
             {
                 "id": mid,
                 "s": session_id,
@@ -308,13 +317,13 @@ class ChatRepository:
                 "rj": result_json,
                 "sum": summary,
                 "st": status,
-                "att": json.dumps(attachments or [], ensure_ascii=False),
-                "tid": trace_id,
-                "rc": retry_count,
-                "rq": resolved_question,
-                "pv": prompt_version,
-                "fb": fallback_type,
-                "stg": json.dumps(stage_trace, ensure_ascii=False) if stage_trace else None,
+                "att": _jsonb(attachments or []),
+                "tid": meta.trace_id,
+                "rc": meta.retry_count,
+                "rq": meta.resolved_question,
+                "pv": meta.prompt_version,
+                "fb": meta.fallback_type,
+                "stg": _jsonb_or_none(meta.stage_trace),
             },
         )
         return mid
