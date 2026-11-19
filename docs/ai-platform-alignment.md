@@ -28,39 +28,39 @@ ai-platform 是 2026-10 立项的 Java 企业 Agent 平台(模块化单体 + DDD
 
 ## 3. 能力对照(ai-platform 31 项 → 孔明现状)
 
-| ai-platform 提案 | 孔明对应 spec | 状态 |
-| --- | --- | --- |
-| 0002 platform(认证/RBAC/租户/审计) | auth、rbac、multitenant、datascope、audit、web-admin | ✅ 已落地 |
-| 0003 model-catalog(模型目录/计量) | multi-model-routing、observability、docs/model-providers | ✅ |
-| 0004 knowledge-rag | rag、knowledge、document-rag、external-knowledge | ✅ |
-| 0005 tool-mcp-core | tool-calling、tool-gateway、mcp-interop | ✅ |
-| 0006 conversation-messaging | chat、chat-suggestions、conversation-artifacts、multimodal-input | ✅ |
-| 0007 agent-runtime(事件流/审批/恢复) | nl2sql-agent、query-streaming、**task-kernel**、runtime-resilience | ✅(不同实现,见 §4) |
-| 0008 prompt-governance | prompt-guardrails | ✅(版本化部分较薄) |
-| 0009 eval-honest | eval、ai-eval、eval-agent | ✅ |
-| 0010 sql-guard(五层纵深) | sql-execution、nl2sql | ✅(孔明为源头) |
-| 0011 data-agent | nl2sql、nl2sql-agent、report-generation、semantic-layer、knowledge-qa | ✅ |
-| 0012 multi-agent | multi-agent-orchestration(圆桌/名册/critic 重派) | ✅ 持续深化 |
-| 0013 workflow-orchestration | workflow-orchestration | ✅ |
-| 0014 media-generation | — | ❌ 缺(owner 2026-10-18 裁决不做,见 §6) |
-| 0015 skill-pack-market | skill-pack + bot-store | ✅ |
-| 0016 trigger-center | triggers-webhooks | ✅ |
-| 0017 governed-tool-gateway | tool-gateway | ✅ |
-| 0018 content-safety | prompt-guardrails | ✅~ |
-| 0019 llm-observability | observability(038) | ✅ |
-| 0020 model-egress-governance | multi-model-routing + ADR-008 multi-protocol-egress | ✅~ |
-| 0021 vector-scaleout(Milvus) | —(pgvector 单栈) | ❌ **缺**(登记候选) |
-| 0022 developer-portal | developer-portal-billing | ✅ |
-| 0023 interop-protocols | mcp-interop(平台 Bot 即 MCP Server 已生产验证) | ✅ |
-| 0024 control-plane(AgentScope Service) | 不适用(Java/AgentScope 专属形态) | ➖ 无关 |
-| 0025 feedback-loop | feedback ×3 | ✅ |
-| 0026 knowledge-qa-fusion | knowledge-qa | ✅ |
-| 0027 agent-memory | agent-memory | ✅ |
-| 0028 semantic-layer | semantic-layer | ✅ |
-| 0029 autonomous-task | task-kernel(自主任务宿主) | ✅ |
-| 0030 custom-agent-store | custom-agent、bot-store | ✅ |
-| 0031 team-workspace | team-workspace | ✅ |
-| 0032 code-sandbox | cloud-code-sandbox(实现在 `apps/api/kongming/sandbox/`,控制面持凭证) | ✅ |
+| ai-platform 提案                       | 孔明对应 spec                                                         | 状态                                   |
+| -------------------------------------- | --------------------------------------------------------------------- | -------------------------------------- |
+| 0002 platform(认证/RBAC/租户/审计)     | auth、rbac、multitenant、datascope、audit、web-admin                  | ✅ 已落地                              |
+| 0003 model-catalog(模型目录/计量)      | multi-model-routing、observability、docs/model-providers              | ✅                                     |
+| 0004 knowledge-rag                     | rag、knowledge、document-rag、external-knowledge                      | ✅                                     |
+| 0005 tool-mcp-core                     | tool-calling、tool-gateway、mcp-interop                               | ✅                                     |
+| 0006 conversation-messaging            | chat、chat-suggestions、conversation-artifacts、multimodal-input      | ✅                                     |
+| 0007 agent-runtime(事件流/审批/恢复)   | nl2sql-agent、query-streaming、**task-kernel**、runtime-resilience    | ✅(不同实现,见 §4)                     |
+| 0008 prompt-governance                 | prompt-guardrails                                                     | ✅(版本化部分较薄)                     |
+| 0009 eval-honest                       | eval、ai-eval、eval-agent                                             | ✅                                     |
+| 0010 sql-guard(五层纵深)               | sql-execution、nl2sql                                                 | ✅(孔明为源头)                         |
+| 0011 data-agent                        | nl2sql、nl2sql-agent、report-generation、semantic-layer、knowledge-qa | ✅                                     |
+| 0012 multi-agent                       | multi-agent-orchestration(圆桌/名册/critic 重派)                      | ✅ 持续深化                            |
+| 0013 workflow-orchestration            | workflow-orchestration                                                | ✅                                     |
+| 0014 media-generation                  | —                                                                     | ❌ 缺(owner 2026-10-18 裁决不做,见 §6) |
+| 0015 skill-pack-market                 | skill-pack + bot-store                                                | ✅                                     |
+| 0016 trigger-center                    | triggers-webhooks                                                     | ✅                                     |
+| 0017 governed-tool-gateway             | tool-gateway                                                          | ✅                                     |
+| 0018 content-safety                    | prompt-guardrails                                                     | ✅~                                    |
+| 0019 llm-observability                 | observability(038)                                                    | ✅                                     |
+| 0020 model-egress-governance           | multi-model-routing + ADR-008 multi-protocol-egress                   | ✅~                                    |
+| 0021 vector-scaleout(Milvus)           | —(pgvector 单栈)                                                      | ❌ **缺**(登记候选)                    |
+| 0022 developer-portal                  | developer-portal-billing                                              | ✅                                     |
+| 0023 interop-protocols                 | mcp-interop(平台 Bot 即 MCP Server 已生产验证)                        | ✅                                     |
+| 0024 control-plane(AgentScope Service) | 不适用(Java/AgentScope 专属形态)                                      | ➖ 无关                                |
+| 0025 feedback-loop                     | feedback ×3                                                           | ✅                                     |
+| 0026 knowledge-qa-fusion               | knowledge-qa                                                          | ✅                                     |
+| 0027 agent-memory                      | agent-memory                                                          | ✅                                     |
+| 0028 semantic-layer                    | semantic-layer                                                        | ✅                                     |
+| 0029 autonomous-task                   | task-kernel(自主任务宿主)                                             | ✅                                     |
+| 0030 custom-agent-store                | custom-agent、bot-store                                               | ✅                                     |
+| 0031 team-workspace                    | team-workspace                                                        | ✅                                     |
+| 0032 code-sandbox                      | cloud-code-sandbox(实现在 `apps/api/kongming/sandbox/`,控制面持凭证)  | ✅                                     |
 
 **净缺口:向量规模化(0021)一项 + JVM 交付形态本身。**
 media-generation(0014)owner 裁决不做(2026-10-18),不再挂账;
@@ -124,13 +124,13 @@ media-generation(0014)owner 裁决不做(2026-10-18),不再挂账;
 > Milvus 开工先写 ADR)。media-generation(owner 同日再裁)**不做**,登记
 > roadmap 否定裁决表。
 
-| 项 | 动作 | 触发条件 |
-| --- | --- | --- |
-| 图级 checkpoint + 图内 interrupt | 登记第四梯队;开工时立 spec | 自主任务出现步骤内长时执行,或问数图需要挂起审批 |
-| media-generation 域 | **否决**(owner 2026-10-18) | —(曾登记「有真实场景(报告配图?)」;裁决=不做,场景出现再议) |
-| 向量规模化(Milvus 切换) | 登记评估 | pgvector 规模/QPS 触顶 |
-| collab 域深化 | 按现有节奏(115/091 之后) | 无新条件 |
-| 运行时 | **不动** | 仅 §5 触发条件出现时重启 |
+| 项                               | 动作                       | 触发条件                                                  |
+| -------------------------------- | -------------------------- | --------------------------------------------------------- |
+| 图级 checkpoint + 图内 interrupt | 登记第四梯队;开工时立 spec | 自主任务出现步骤内长时执行,或问数图需要挂起审批           |
+| media-generation 域              | **否决**(owner 2026-10-18) | —(曾登记「有真实场景(报告配图?)」;裁决=不做,场景出现再议) |
+| 向量规模化(Milvus 切换)          | 登记评估                   | pgvector 规模/QPS 触顶                                    |
+| collab 域深化                    | 按现有节奏(115/091 之后)   | 无新条件                                                  |
+| 运行时                           | **不动**                   | 仅 §5 触发条件出现时重启                                  |
 
 ## 7. ai-platform 的处置建议
 

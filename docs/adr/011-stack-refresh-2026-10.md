@@ -20,26 +20,18 @@ PG18 原生 uuidv7()(评估后不采纳,见否决项)。技术栈锁定纪律要
 
 ### 1. 采纳的 major 升级(载体:`stack-refresh-2026-10`)
 
-| 项 | 升级 | 依据 |
-|---|---|---|
-| SQLAlchemy | 2.0 → 2.1 | typing 泛型 Table/性能;`[asyncio]` extra 继续,
-greenlet 显式;PG 驱动不变(asyncpg) |
-| openai SDK | 3.1 → 3.35 | 3.0 起 HTTPX2 默认(本项目已显式依赖 httpx,
-无感);responses API 客户端面持续演进 |
-| Vite + plugin-react | 6 → 8 / 4 → 6 | Rolldown 默认(10-30x 构建提速
-量级);React Compiler 的原生开关也要求 plugin-react 6 |
-| vitest | 3 → 5 | 性能线;node>=22.12 基线(4 为过渡,一步到位 5) |
-| eslint | 9 → 10 | flat config 已是现状;typescript-eslint 8.71 支持
-面内;peer 冲突则单项回退条款内建 |
-| react-router | 7 → 8 | v6/Remix v2 已 EOL、v7 仅安全维护;v8 官方定性
-「刻意无破坏」,SPA library 用法迁移面小 |
-| react | 19.2 → 19.3 | minor 线内 |
-| echarts | 5 → 6 | 新默认主题/原生暗色/动态主题切换;本项目 token
-派生主题覆盖主要视觉面,亮暗走查为验收 |
-| PostgreSQL(compose) | 17 → 18 | 开发机已运行 pg18(2026-10-11 localenv
-收敛),部署形态对齐;AIO 扫描提速顺带 |
-| Python 运行时 | 3.13 → 3.14 | ctranslate2 已发 3.14 轮子(CTranslate2
-#1926);可选档,任一依赖失配整批回退 |
+| 项                  | 升级          | 依据                                                                                 |
+| ------------------- | ------------- | ------------------------------------------------------------------------------------ |
+| SQLAlchemy          | 2.0 → 2.1     | typing 泛型 Table/性能;`[asyncio]` extra 继续,greenlet 显式;PG 驱动不变(asyncpg)     |
+| openai SDK          | 3.1 → 3.35    | 3.0 起 HTTPX2 默认(本项目已显式依赖 httpx,无感);responses API 客户端面持续演进       |
+| Vite + plugin-react | 6 → 8 / 4 → 6 | Rolldown 默认(10-30x 构建提速量级);React Compiler 的原生开关也要求 plugin-react 6    |
+| vitest              | 3 → 5         | 性能线;node>=22.12 基线(4 为过渡,一步到位 5)                                         |
+| eslint              | 9 → 10        | flat config 已是现状;typescript-eslint 8.71 支持面内;peer 冲突则单项回退条款内建     |
+| react-router        | 7 → 8         | v6/Remix v2 已 EOL、v7 仅安全维护;v8 官方定性「刻意无破坏」,SPA library 用法迁移面小 |
+| react               | 19.2 → 19.3   | minor 线内                                                                           |
+| echarts             | 5 → 6         | 新默认主题/原生暗色/动态主题切换;本项目 token 派生主题覆盖主要视觉面,亮暗走查为验收  |
+| PostgreSQL(compose) | 17 → 18       | 开发机已运行 pg18(2026-10-11 localenv 收敛),部署形态对齐;AIO 扫描提速顺带            |
+| Python 运行时       | 3.13 → 3.14   | ctranslate2 已发 3.14 轮子(CTranslate2 #1926);可选档,任一依赖失配整批回退            |
 
 ### 2. 采纳的手搓替代
 
@@ -55,22 +47,14 @@ greenlet 显式;PG 驱动不变(asyncpg) |
 
 ### 3. 否决/暂缓项
 
-| 项 | 裁决 | 理由 |
-|---|---|---|
-| TypeScript 7(tsgo) | 暂缓 | 10x 类型检查诱人,但 typescript-eslint
-不兼容(官方 tracking #10940,预期 7.1 世代跟上);lint 门禁是质量闸,
-不能并行双 TS 版本;既有「tsc 钉 5.x」纪律维持,生态就绪后另立变更 |
-| PostgreSQL 19 | 否决(本次) | RC1 刚过(2026-10-15 前后),非稳定
-成熟档;目标 18 |
-| Python 3.15 | 否决(本次) | 刚发布,等一个补丁周期 |
-| uuid7.py 换库/换 PG18 原生 | 否决 | 19 行纯函数、有测试、零依赖;
-PG18 uuidv7() 仅适用 DB 侧 DEFAULT 场景,本项目 ORM 侧生成主键(插入前
-即需 ID),替换为负收益 |
-| LangGraph 检查器换官方 PostgresSaver | 否决(既有裁决重申) | 违反
-ADR-002(agent 零凭证);add-graph-checkpoint 已按 /internal 回调适配器
-设计,不受本刷新影响 |
-| MCP SDK 高级特性(resumability/OAuth) | 否决(本次) | 无真实 server
-场景;收编只求协议栈等价替换 |
+| 项                                   | 裁决               | 理由                                                                                                                                                                    |
+| ------------------------------------ | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TypeScript 7(tsgo)                   | 暂缓               | 10x 类型检查诱人,但 typescript-eslint 不兼容(官方 tracking #10940,预期 7.1 世代跟上);lint 门禁是质量闸,不能并行双 TS 版本;既有「tsc 钉 5.x」纪律维持,生态就绪后另立变更 |
+| PostgreSQL 19                        | 否决(本次)         | RC1 刚过(2026-10-15 前后),非稳定成熟档;目标 18                                                                                                                          |
+| Python 3.15                          | 否决(本次)         | 刚发布,等一个补丁周期                                                                                                                                                   |
+| uuid7.py 换库/换 PG18 原生           | 否决               | 19 行纯函数、有测试、零依赖;PG18 uuidv7() 仅适用 DB 侧 DEFAULT 场景,本项目 ORM 侧生成主键(插入前即需 ID),替换为负收益                                                   |
+| LangGraph 检查器换官方 PostgresSaver | 否决(既有裁决重申) | 违反 ADR-002(agent 零凭证);add-graph-checkpoint 已按 /internal 回调适配器设计,不受本刷新影响                                                                            |
+| MCP SDK 高级特性(resumability/OAuth) | 否决(本次)         | 无真实 server 场景;收编只求协议栈等价替换                                                                                                                               |
 
 ### 4. 下限对齐原则(新增纪律)
 

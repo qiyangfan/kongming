@@ -13,6 +13,7 @@ __pycache__/
 # node
 node_modules/
 dist/
+coverage.xml
 *.tsbuildinfo
 
 # env & secrets
@@ -39,3 +40,7 @@ apps/api/var/
 apps/api/evals/.baseline_fingerprint
 .omc/
 .codegraph/
+
+# Playwright 报告与测试产物
+apps/web/playwright-report/
+apps/web/test-results/

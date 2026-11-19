@@ -48,8 +48,8 @@ services:
       timeout: 3s
       retries: 12
     depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
 
   agent:
     build:
@@ -73,7 +73,7 @@ services:
       timeout: 3s
       retries: 12
     depends_on:
-      api: { condition: service_healthy }
+      api: {condition: service_healthy}
 
 volumes:
   pg_data:

@@ -42,14 +42,14 @@ URL 语义:base_url 即 Claude Code 的 `ANTHROPIC_BASE_URL` 同构(SDK 请求 `
 
 ### 4. 翻译表(保真边界)
 
-| canonical | anthropic | responses |
-|---|---|---|
-| system 消息 | 顶层 `system`(不进消息史) | `instructions`(不进 input) |
-| `assistant.tool_calls` | `tool_use` 块(`input` = 解析后 args;畸形以 `{}` 回放,错误观察已在内核侧) | `function_call` 项(`arguments` 原文回放) |
-| `role:"tool"` | user 消息内 `tool_result` 块(连续多条合并一条 user) | `function_call_output` 项(output = 观察原文) |
-| 工具声明 | `{name, description, input_schema}` | 扁平 `{type:"function", name, description, parameters}` |
-| vision data-url | `image.source(base64)` | `input_image`(data-url 直传) |
-| usage | `input/output_tokens` → prompt/completion,total 求和 | `input/output/total_tokens` 同映射 |
+| canonical              | anthropic                                                                | responses                                               |
+| ---------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------- |
+| system 消息            | 顶层 `system`(不进消息史)                                                | `instructions`(不进 input)                              |
+| `assistant.tool_calls` | `tool_use` 块(`input` = 解析后 args;畸形以 `{}` 回放,错误观察已在内核侧) | `function_call` 项(`arguments` 原文回放)                |
+| `role:"tool"`          | user 消息内 `tool_result` 块(连续多条合并一条 user)                      | `function_call_output` 项(output = 观察原文)            |
+| 工具声明               | `{name, description, input_schema}`                                      | 扁平 `{type:"function", name, description, parameters}` |
+| vision data-url        | `image.source(base64)`                                                   | `input_image`(data-url 直传)                            |
+| usage                  | `input/output_tokens` → prompt/completion,total 求和                     | `input/output/total_tokens` 同映射                      |
 
 畸形 / 缺失 usage → 既有 ERROR / 0 采集语义(038);失败调用(非 2xx / 超时 / 应答畸形)统一收敛 LlmError 并落 ERROR 采集,不裸崩。
 

@@ -1,5 +1,8 @@
 name: ci
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -11,7 +14,7 @@ concurrency:
 
 jobs:
   # ── 增量门控:按路径裁剪作业 ─────────────────────────────
-  # 文档/openspec-only 的推送不值得跑全量六门禁。判定失败一律放行
+  # 文档/openspec-only 的推送不值得跑全量构建类作业。判定失败一律放行
   # (fail-open),宁可多跑不漏跑。liannu 被api/agent 以 path 依赖引入,
   # 其变更会连带触发 api/agent/contracts/images。
   changes:
@@ -25,8 +28,9 @@ jobs:
       contracts: ${{ steps.filter.outputs.contracts }}
       images: ${{ steps.filter.outputs.images }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: false
           fetch-depth: 0
       - id: filter
         run: |
@@ -55,6 +59,23 @@ jobs:
             echo "images=$(match '(^apps/api/|^apps/agent/|^packages/liannu/|^infra/|^\.github/workflows/ci\.yml$)')"
           } >> "$GITHUB_OUTPUT"
 
+  # ── 门禁 0:秘密扫描(默认规则 + 仓内已核实允许项) ────────
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          set -euo pipefail
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar -xz gitleaks
+          ./gitleaks detect --source . --config .gitleaks.toml --redact --no-banner
+
   # ── 门禁 1:控制面(Python) ──────────────────────────────
   api:
     needs: changes
@@ -64,7 +85,7 @@ jobs:
     defaults:
       run:
         working-directory: apps/api
-      # 认证安全测试使用真实 PostgreSQL 和 Redis;conftest 准备 kongming_test 库。
+    # 认证安全测试使用真实 PostgreSQL 和 Redis;conftest 准备 kongming_test 库。
     services:
       postgres:
         image: pgvector/pgvector:pg17
@@ -87,14 +108,18 @@ jobs:
           --health-interval 5s
           --health-retries 12
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --frozen
       - run: uv run ruff format --check .
       - run: uv run ruff check .
+      - run: uv run pylint --disable=all --enable=too-many-lines,too-many-public-methods,too-many-locals,too-many-return-statements,too-many-statements,too-many-ancestors,too-many-boolean-expressions,cyclic-import --jobs=0 kongming
       - run: uv run mypy kongming
       # pyright 参数与本地 make api-check 一致。
       - run: uv run pyright
@@ -104,7 +129,18 @@ jobs:
       - run: >
           psql "postgres://kongming:kongming@localhost:5432/kongming"
           -v ON_ERROR_STOP=1 -f ../../infra/pg-init/001-readonly-role.sql
-      - run: uv run pytest -q --cov
+      - run: uvx --from vulture==2.16 vulture kongming --min-confidence 100
+      - run: uv run pytest -q --cov --cov-report=xml
+      - if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: uvx diff-cover==11.0.4 coverage.xml --compare-branch="origin/${BASE_REF}" --fail-under=80
+      - if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: coverage-api
+          path: apps/api/coverage.xml
+          if-no-files-found: ignore
 
   # ── 门禁 2:Agent 面(Python,零凭证纪律) ────────────────
   agent:
@@ -116,19 +152,34 @@ jobs:
       run:
         working-directory: apps/agent
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --frozen
       - run: uv run ruff format --check .
       - run: uv run ruff check .
+      - run: uv run pylint --disable=all --enable=too-many-lines,too-many-public-methods,too-many-locals,too-many-return-statements,too-many-statements,too-many-ancestors,too-many-boolean-expressions,cyclic-import --jobs=0 kongming_agent
       - run: uv run mypy kongming_agent
       # pyright 参数与本地 make agent-check 一致。
       - run: uv run pyright
       - run: uv run lint-imports
-      - run: uv run pytest -q --cov
+      - run: uvx --from vulture==2.16 vulture kongming_agent --min-confidence 100 --ignore-names new_versions,task_path
+      - run: uv run pytest -q --cov --cov-report=xml
+      - if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: uvx diff-cover==11.0.4 coverage.xml --compare-branch="origin/${BASE_REF}" --fail-under=80
+      - if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: coverage-agent
+          path: apps/agent/coverage.xml
+          if-no-files-found: ignore
 
   # ── 门禁 3:连弩引擎(packages/liannu 独立包) ────────────
   liannu:
@@ -140,16 +191,31 @@ jobs:
       run:
         working-directory: packages/liannu
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --frozen
       - run: uv run ruff format --check .
       - run: uv run ruff check .
+      - run: uv run pylint --disable=all --enable=too-many-lines,too-many-public-methods,too-many-locals,too-many-return-statements,too-many-statements,too-many-ancestors,too-many-boolean-expressions,cyclic-import --jobs=0 liannu
       - run: uv run mypy liannu
-      - run: uv run pytest -q --cov
+      - run: uvx --from vulture==2.16 vulture liannu --min-confidence 100
+      - run: uv run pytest -q --cov --cov-report=xml
+      - if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: uvx diff-cover==11.0.4 coverage.xml --compare-branch="origin/${BASE_REF}" --fail-under=80
+      - if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: coverage-liannu
+          path: packages/liannu/coverage.xml
+          if-no-files-found: ignore
 
   # ── 门禁 4:前端(TypeScript) ────────────────────────────
   web:
@@ -161,11 +227,13 @@ jobs:
       run:
         working-directory: apps/web
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@9bbca1e9dc2902adb87e8780fe5c98796985a62d # v6.1.1
         with:
           version: 11
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "24"
           cache: pnpm
@@ -174,9 +242,19 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test:run
       - run: pnpm lint
+      - run: pnpm exec knip
       - run: pnpm lint:css
       - run: pnpm format:check
       - run: pnpm build
+      - run: pnpm size
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e
+      - if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          if-no-files-found: ignore
 
   # ── 门禁 5:契约漂移(ADR-005) ──────────────────────────
   # 重新导出 OpenAPI 后 diff,防"改了代码忘了导出契约"
@@ -189,12 +267,23 @@ jobs:
       run:
         working-directory: apps/api
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --frozen
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      # 存量 spec 的“需求文本过长”属历史告警,结构校验全量放行;活动 change 必须 strict 通过
+      - run: npx --yes @fission-ai/openspec@2.1.0 validate --all
+        working-directory: ${{ github.workspace }}/openspec
+      - run: for c in changes/*/; do npx --yes @fission-ai/openspec@2.1.0 validate "$(basename "$c")" --strict; done
+        working-directory: ${{ github.workspace }}/openspec
       # 复用本地 make check，确保 CI 与本地执行相同的契约检查。
       - run: make -C ../.. contracts-check
 
@@ -205,8 +294,103 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Build api image
         run: docker build -f infra/api.Dockerfile -t kongming-api:ci .
       - name: Build agent image
         run: docker build -f infra/agent.Dockerfile -t kongming-agent:ci .
+      - name: Trivy scan
+        env:
+          TRIVY_VERSION: 0.76.2
+        run: |
+          set -euo pipefail
+          curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" | tar -xz trivy
+          # 只做漏洞扫描;秘密由源码 gitleaks 门禁负责(镜像内第三方 SDK 文档串会误报)
+          ./trivy image --scanners vuln --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed kongming-api:ci
+          ./trivy image --scanners vuln --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed kongming-agent:ci
+          ./trivy image --scanners vuln --format cyclonedx --output sbom-api.json kongming-api:ci
+          ./trivy image --scanners vuln --format cyclonedx --output sbom-agent.json kongming-agent:ci
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: sbom
+          path: |
+            sbom-api.json
+            sbom-agent.json
+
+  # ── 门禁 6:重复代码(PMD CPD 同位) ──────────────────────
+  dup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      # jscpd 默认 50 tokens,门禁线=重复率 5%(超出即非零);只扫生产路径
+      - run: npx --yes jscpd@4.3.0 apps/api/kongming apps/agent/kongming_agent packages/liannu/liannu apps/web/src --threshold 5 --format python,typescript,tsx,css --ignore '**/*.gen.ts'
+
+  # ── 门禁 7:依赖漏洞(pip-audit 项目环境 + pnpm audit) ────
+  supply-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - uses: pnpm/action-setup@9bbca1e9dc2902adb87e8780fe5c98796985a62d # v6.1.1
+        with:
+          version: 11
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - run: cd apps/api && uv sync --frozen && uv run --with pip-audit==2.10.1 pip-audit --skip-editable --progress-spinner off
+      - run: cd apps/agent && uv sync --frozen && uv run --with pip-audit==2.10.1 pip-audit --skip-editable --progress-spinner off
+      - run: cd packages/liannu && uv sync --frozen && uv run --with pip-audit==2.10.1 pip-audit --skip-editable --progress-spinner off
+      - run: cd apps/web && pnpm install --frozen-lockfile && pnpm audit
+
+  # ── 门禁 8:配置与脚本(workflow/Dockerfile/shell/YAML/MD/TOML) ──
+  lint-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - name: actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+        run: |
+          set -euo pipefail
+          curl -sSfL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" | tar -xz actionlint
+          ./actionlint
+      - name: hadolint
+        env:
+          HADOLINT_VERSION: 2.15.1
+        run: |
+          set -euo pipefail
+          curl -sSfL -o hadolint "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-Linux-x86_64"
+          chmod +x hadolint
+          ./hadolint infra/api.Dockerfile infra/agent.Dockerfile
+      - run: shellcheck infra/example-data/load.sh
+      - run: uvx --from yamllint==1.38.0 yamllint -c .yamllint.yml .
+      - run: npx --yes markdownlint-cli2@0.24.1
+      - run: uvx codespell==2.4.3 README.md AGENTS.md docs
+      - run: npx --yes @taplo/cli@0.7.0 fmt --check apps/api/pyproject.toml apps/agent/pyproject.toml packages/liannu/pyproject.toml .gitleaks.toml
+      - run: uvx zizmor==1.32.0 .github/workflows

@@ -10,25 +10,24 @@
 12 个 spec 已改写入库(`openspec/specs/`):剥离旧实现绑定,对齐新 baseline
 (UUID 主键、data_scope/sql_scope/feedback_status 字符串枚举、审计 verdict 语义)。
 
-| 域 | 说明 |
-|---|---|
-| chat | 会话/消息持久化、多轮上下文、导出/EXPLAIN/图表 |
-| nl2sql | 问答主链路、强制只读、自愈重试、内部接口鉴权 |
-| nl2sql-agent | 多轮指代消解、生成质量规则、结构化洞察、schema 智能选取 |
-| rag | 三路混合召回、文档上传、知识管理、成功 SQL 回写 |
-| knowledge | 元数据 LLM 润色、reindex、覆盖优先级 |
-| feedback ×3 | 提交/纠错沉淀 → 处置状态机 → 统计分析 |
-| datasource | 动态数据源注册/路由(PG-only) |
-| audit | 审计落库/查询/留存归档 |
-| eval / ai-eval | Execution Match 匹配规则、基线管理、few-shot 自学习 |
+| 域             | 说明                                                    |
+| -------------- | ------------------------------------------------------- |
+| chat           | 会话/消息持久化、多轮上下文、导出/EXPLAIN/图表          |
+| nl2sql         | 问答主链路、强制只读、自愈重试、内部接口鉴权            |
+| nl2sql-agent   | 多轮指代消解、生成质量规则、结构化洞察、schema 智能选取 |
+| rag            | 三路混合召回、文档上传、知识管理、成功 SQL 回写         |
+| knowledge      | 元数据 LLM 润色、reindex、覆盖优先级                    |
+| feedback ×3    | 提交/纠错沉淀 → 处置状态机 → 统计分析                   |
+| datasource     | 动态数据源注册/路由(PG-only)                            |
+| audit          | 审计落库/查询/留存归档                                  |
+| eval / ai-eval | Execution Match 匹配规则、基线管理、few-shot 自学习     |
 
 ## 第二梯队(rbac/multitenant/datascope/auth 全部入库 ✅)
 
-| 域 | 说明 |
-|---|---|
-| rbac / multitenant / datascope | 已按新枚举(ALL/DEPT/SELF、SELECT_ONLY 等)改写入库,行为契约保留 |
-| auth | 已与认证闭环实现同步入库(003/006 落地后随行 sync:账密登录/refresh
-  轮换吊销/自助改密/联邦登录连接器/联邦账号关联) |
+| 域                             | 说明                                                                                                             |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| rbac / multitenant / datascope | 已按新枚举(ALL/DEPT/SELF、SELECT_ONLY 等)改写入库,行为契约保留                                                   |
+| auth                           | 已与认证闭环实现同步入库(003/006 落地后随行 sync:账密登录/refresh 轮换吊销/自助改密/联邦登录连接器/联邦账号关联) |
 
 ## 第三梯队(全部落地 ✅ 2026-08-25,019–038)
 
@@ -49,7 +48,7 @@ artifacts(027)⇄ cloud-code-sandbox(029);agent-memory(026)← team-workspace(03
 
 - **第一波(Agent 内核)**:019 tool-calling → 020 prompt-guardrails-security
   (安全向:injection 检测/PII 脱敏/输出审核/工具意图审核/sys_guardrail_audit,
-   与 018 质量向护栏不同域);
+  与 018 质量向护栏不同域);
 - **第二波(独立增强,互不依赖,可并行推进)**:multi-model-routing(纯 Python
   侧最友好)/ agent-memory / semantic-layer / document-rag(后两者依托既有 rag 链路);
 - **第三波(深化,依赖第一波内核)**:conversation-artifacts / custom-agent /
@@ -78,13 +77,13 @@ artifacts(027)⇄ cloud-code-sandbox(029);agent-memory(026)← team-workspace(03
 任务内核 091),不是并列的第五种 agent;运行时唯一 agent 实体 = custom-agent
 域的 Bot 注册行。架构口径以 ADR-010 为单源。
 
-| 方向 | 地基(已落地) | 开工载体 |
-|---|---|---|
-| 问数智能体(王牌) | 一梯队 chat/nl2sql/nl2sql-agent + 三梯队 semantic-layer / query-streaming / cloud-code-sandbox | 088 报告生成——数据链路闭环到可交付报告 |
-| 问答智能体 | rag 三路召回 / knowledge / document-rag / agent-memory / knowledge-qa | 093 知识侧深化(三态意图路由 + 融合问答)——已落地归档;事件-实体检索扩展(SAG 对照借鉴)——已落地归档(首版实体路对照负收益已经入池门槛调优消除,对照持平见 evals/README 检索基线节) |
-| 通用智能体 | ReAct 内核 / agent-memory / multi-model-routing / prompt-guardrails / cloud-code-sandbox | 089 工具网关 + 090 任务内核(长任务)+ 094 web 检索域(联网搜索)——工具网关已接入检索/HTTP 连接器/工单等域 |
-| 多智能体 | workflow-orchestration(静态 DAG)/ custom-agent | 091 动态协作编排 + 115 圆桌对等拓扑(宿主 = 090 任务内核)——选型指引:步骤可静态枚举→workflow;运行时拆解/并行分治→collab 分工形态;立场对辩/交叉质疑(共识判定+分歧如实保留)→collab 圆桌形态(黑板轮次制,名册声明期锁定) |
-| 评测智能体 | eval / ai-eval(Execution Match、基线、few-shot 自学习)+ agent-observability / eval-agent | 092 评测智能体化(LLM-as-judge + 评测集自动构造)——已落地归档;检索质量评测 multi-hop Recall@k(SAG 对照借鉴)——已落地归档(retrieval 层进 nightly,基线见 evals/README) |
+| 方向             | 地基(已落地)                                                                                   | 开工载体                                                                                                                                                                                                           |
+| ---------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 问数智能体(王牌) | 一梯队 chat/nl2sql/nl2sql-agent + 三梯队 semantic-layer / query-streaming / cloud-code-sandbox | 088 报告生成——数据链路闭环到可交付报告                                                                                                                                                                             |
+| 问答智能体       | rag 三路召回 / knowledge / document-rag / agent-memory / knowledge-qa                          | 093 知识侧深化(三态意图路由 + 融合问答)——已落地归档;事件-实体检索扩展(SAG 对照借鉴)——已落地归档(首版实体路对照负收益已经入池门槛调优消除,对照持平见 evals/README 检索基线节)                                       |
+| 通用智能体       | ReAct 内核 / agent-memory / multi-model-routing / prompt-guardrails / cloud-code-sandbox       | 089 工具网关 + 090 任务内核(长任务)+ 094 web 检索域(联网搜索)——工具网关已接入检索/HTTP 连接器/工单等域                                                                                                             |
+| 多智能体         | workflow-orchestration(静态 DAG)/ custom-agent                                                 | 091 动态协作编排 + 115 圆桌对等拓扑(宿主 = 090 任务内核)——选型指引:步骤可静态枚举→workflow;运行时拆解/并行分治→collab 分工形态;立场对辩/交叉质疑(共识判定+分歧如实保留)→collab 圆桌形态(黑板轮次制,名册声明期锁定) |
+| 评测智能体       | eval / ai-eval(Execution Match、基线、few-shot 自学习)+ agent-observability / eval-agent       | 092 评测智能体化(LLM-as-judge + 评测集自动构造)——已落地归档;检索质量评测 multi-hop Recall@k(SAG 对照借鉴)——已落地归档(retrieval 层进 nightly,基线见 evals/README)                                                  |
 
 依赖拓扑:088 / 089 / 090 相互独立、可并行;091 以 090 为宿主殿后。
 **落地状态(2026-10-13)**:088–091 全部归档;092/093/094 已落地归档(问答=
@@ -157,19 +156,19 @@ resources/prompts(109)、Bot 版本化上架(104)、用户/TEAM 维度配额(103
 以下各项经评估**明确不做**,登记理由防止反复重提;除非前置条件实质变化
 (如真实凭证到位、消费场景出现),不再作为待办挂账:
 
-| 项 | 裁决 | 理由 |
-|---|---|---|
-| Slack 事件源 | 否决 | 与 108 邮件触发器同构换协议,学习边际价值低;接入形态可复用 108 模式,凭证到位即可,无工程欠债 |
-| zhparser 切默认部署档 | 否决 | ①缺省 simple=任意 PG 零依赖可起;切 zhparser=所有部署必须装扩展否则启动自检拒启,部署门槛系统性抬高;②中文部署按 HANDOFF 配方显式启用即是正确形态,spec 已钉「缺省 simple 零回归」契约 |
-| OCR 引擎 | 否决 | 独立 OCR 已被 vision 路吸收(030 图片问数+注册表 qwen-vl 现成),再挂引擎=系统内两条平行「图→文」抽取路径;重依赖(PaddleOCR 系拖 paddlepaddle,Tesseract 中文弱)且与 114 本地可选模型模式同构,学习边际价值低(同 Slack 裁决逻辑)。扫描件 PDF 现态=pypdf 文本层;真实需求出现时载体=上传管线 vision 抽取(复用 qwen-vl),仍非 OCR 引擎(2026-10-13 owner 采纳) |
-| 真实支付通道 | 维持既有裁决 | 2026-10-11 用户裁决:支付通道 mock 即终态,不再重提 |
-| ticket 真实凭证 | 已退役(2026-10-20) | ticket 工单域随 remove-ticket-domain 整体移除(无真实消费对象的专用协议);需要工单访问的部署走租户级通用 HTTP 连接器显式配置,不再作为待办
-| 短剧流水线(剧本→分镜→配图→配音→合成) | 否决 | 方向外:ADR-010 五方向无内容创作归口,「数据为刃」禁横向摊薄;重依赖 FFmpeg/音频合成,学习边际价值低(ruoyi-ai 对齐调研 §5,2026-10-18) |
-| SSE 跨节点广播(Redis pub/sub) | 否决 | 单节点部署形态无场景;双进程 relay 已覆盖现有拓扑,为不存在的规模付复杂度(同上 §5) |
-| MCP 市场一键导入 | 否决 | 供应链高危面(ruoyi-ai 自身风险点:外部元数据一键导入即得 Stdio 执行权);人工注册+出站白名单已是更优形态(同上 §5) |
-| xlsx 知识文档解析单独立项 | 否决(搭车注记) | document-rag 域内小 delta(格式清单+1),单独立项价值不足;随该域下次变更搭车(同上 §5) |
-| 多厂商 OSS 抽象(S3 SDK/MinIO) | 否决 | 本地盘+既有落盘管线已覆盖,无对象存储对应场景;「规模化前置」反模式(同上 §5) |
-| media-generation(图像/音视频/音乐生成域) | 否决(owner 直接裁决,2026-10-18) | 多模态输出侧与「数据为刃」五方向无归口,对齐调研的立项排序被 owner 推翻;域变更(add-media-generation 四工件)已删,不作为待办挂账;前置条件=真实消费场景出现(报告配图等)再议 |
+| 项                                       | 裁决                                | 理由                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Slack 事件源                             | 否决                                | 与 108 邮件触发器同构换协议,学习边际价值低;接入形态可复用 108 模式,凭证到位即可,无工程欠债                                                                                                                                                                                                                                                                                                                    |
+| zhparser 切默认部署档                    | 否决                                | ①缺省 simple=任意 PG 零依赖可起;切 zhparser=所有部署必须装扩展否则启动自检拒启,部署门槛系统性抬高;②中文部署按 HANDOFF 配方显式启用即是正确形态,spec 已钉「缺省 simple 零回归」契约                                                                                                                                                                                                                            |
+| OCR 引擎                                 | 否决                                | 独立 OCR 已被 vision 路吸收(030 图片问数+注册表 qwen-vl 现成),再挂引擎=系统内两条平行「图→文」抽取路径;重依赖(PaddleOCR 系拖 paddlepaddle,Tesseract 中文弱)且与 114 本地可选模型模式同构,学习边际价值低(同 Slack 裁决逻辑)。扫描件 PDF 现态=pypdf 文本层;真实需求出现时载体=上传管线 vision 抽取(复用 qwen-vl),仍非 OCR 引擎(2026-10-13 owner 采纳)                                                           |
+| 真实支付通道                             | 维持既有裁决                        | 2026-10-11 用户裁决:支付通道 mock 即终态,不再重提                                                                                                                                                                                                                                                                                                                                                             |
+| ticket 真实凭证                          | 已退役(2026-10-20)                  | ticket 工单域随 remove-ticket-domain 整体移除(无真实消费对象的专用协议);需要工单访问的部署走租户级通用 HTTP 连接器显式配置,不再作为待办                                                                                                                                                                                                                                                                       |
+| 短剧流水线(剧本→分镜→配图→配音→合成)     | 否决                                | 方向外:ADR-010 五方向无内容创作归口,「数据为刃」禁横向摊薄;重依赖 FFmpeg/音频合成,学习边际价值低(ruoyi-ai 对齐调研 §5,2026-10-18)                                                                                                                                                                                                                                                                             |
+| SSE 跨节点广播(Redis pub/sub)            | 否决                                | 单节点部署形态无场景;双进程 relay 已覆盖现有拓扑,为不存在的规模付复杂度(同上 §5)                                                                                                                                                                                                                                                                                                                              |
+| MCP 市场一键导入                         | 否决                                | 供应链高危面(ruoyi-ai 自身风险点:外部元数据一键导入即得 Stdio 执行权);人工注册+出站白名单已是更优形态(同上 §5)                                                                                                                                                                                                                                                                                                |
+| xlsx 知识文档解析单独立项                | 否决(搭车注记)                      | document-rag 域内小 delta(格式清单+1),单独立项价值不足;随该域下次变更搭车(同上 §5)                                                                                                                                                                                                                                                                                                                            |
+| 多厂商 OSS 抽象(S3 SDK/MinIO)            | 否决                                | 本地盘+既有落盘管线已覆盖,无对象存储对应场景;「规模化前置」反模式(同上 §5)                                                                                                                                                                                                                                                                                                                                    |
+| media-generation(图像/音视频/音乐生成域) | 否决(owner 直接裁决,2026-10-18)     | 多模态输出侧与「数据为刃」五方向无归口,对齐调研的立项排序被 owner 推翻;域变更(add-media-generation 四工件)已删,不作为待办挂账;前置条件=真实消费场景出现(报告配图等)再议                                                                                                                                                                                                                                       |
 | SAG 引擎整体引入(zleap-sag,SQL 检索增强) | 否决(2026-11-07,与借鉴路线拆分处置) | 同域已实现且 spec 化(rag/document-rag/knowledge-qa 三域,三路召回+RRF+rerank+召回闸契约),引擎自有存储所有权与租户/可见性/召回闸过滤契约冲突;每 chunk 一次 LLM 事件抽取=摄入成本翻倍级,买的是未实测的多跳收益;论文 2026-06、引擎 0.15.0 pre-1.0、benchmark 厂商自报,不达骨干依赖门槛。重开条件=社区独立复现+引擎过 1.0+过滤扩展点满足 Kongming 契约(三者同时);借鉴三件套不在本否决内,见第四梯队 2026-11-07 登记 |
 
 **2026-10-18 追注**:原拟在此登记的 media-generation 与向量规模化(Milvus)
@@ -201,6 +200,7 @@ Augmented Generation:事件-实体索引 + 查询时动态超边」,Zleap-AI 定
 ②**借鉴路线不否决、转候选排期**(按学习增量/展示效果/成本比例/定位一致性
 四标准,守 2026-10-18「不等信号」口径,借鉴类候选同样不设「量出缺口才动」
 闸门;三件 2026-11-07 当日立项并全部落地归档):
+
 - 检索质量评测(评测智能体方向):multi-hop 评测集 + Recall@k,给 eval 域
   补检索质量档——**已落地**(变更 add-retrieval-quality-eval;retrieval
   层进 nightly,基线见 evals/README 检索质量基线节);
@@ -212,19 +212,20 @@ Augmented Generation:事件-实体索引 + 查询时动态超边」,Zleap-AI 定
   缺省关;
 - chunking 句界校准(事件完整性原则的落地形态)——document-rag 域内搭车,
   **已随上件落地**(部署开关缺省关,关闭=既有切分逐字一致);
-③SAG-Benchmark 复现(官方公开复现脚本)可作 Kongming 主线外独立学习
-实验,不占能力清单登记位。
+  ③SAG-Benchmark 复现(官方公开复现脚本)可作 Kongming 主线外独立学习
+  实验,不占能力清单登记位。
 
 ## 已被治理文档覆盖,不再立 spec(D 层)
 
-| 旧 spec | Kongming 对应 |
-|---|---|
-| contract-engineering | ADR-005 契约管线 + CI 漂移门禁 |
-| stability | 宪法 Article III + tech-stack 工程纪律 |
-| security-compliance | 宪法 Article IV(信任边界)+ ADR-002 |
-| system-nav / web-responsive | web 主布局域开工时随行立 spec |
+| 旧 spec                     | Kongming 对应                          |
+| --------------------------- | -------------------------------------- |
+| contract-engineering        | ADR-005 契约管线 + CI 漂移门禁         |
+| stability                   | 宪法 Article III + tech-stack 工程纪律 |
+| security-compliance         | 宪法 Article IV(信任边界)+ ADR-002     |
+| system-nav / web-responsive | web 主布局域开工时随行立 spec          |
 
 处置注记(2026-08-25 全量核对):
+
 - **observability**:已作为第三梯队落地(038 agent-observability——用量/失败/延迟
   采集与看板+trace 时间线;「宪法 Article III 覆盖」的旧处置作废)。
 - **rag-refine**:已被 037(单表知识编辑端点+alias)与 014(表名抽取/定位跳转)

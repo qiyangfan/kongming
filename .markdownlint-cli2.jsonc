@@ -1,0 +1,9 @@
+{
+  // 只守护人写文档;openspec 的 wiki 形态由 openspec validate --strict 负责
+  "globs": ["README.md", "AGENTS.md", "docs/**/*.md"],
+  "ignores": ["**/node_modules/**", "**/.venv/**"],
+  "config": {
+    // 中文段落不做强制折行
+    "MD013": false
+  }
+}

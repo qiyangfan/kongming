@@ -24,13 +24,13 @@
 
 技术要点:
 
-| 项 | 方案 |
-|---|---|
-| 密码哈希 | argon2id(argon2-cffi) |
-| 令牌 | PyJWT,RS256 签发;access 15min + refresh 7d(轮换,复用检测即吊销全家) |
-| 公钥 | api 暴露 `/auth/jwks`(为未来多验证方预留) |
+| 项          | 方案                                                                               |
+| ----------- | ---------------------------------------------------------------------------------- |
+| 密码哈希    | argon2id(argon2-cffi)                                                              |
+| 令牌        | PyJWT,RS256 签发;access 15min + refresh 7d(轮换,复用检测即吊销全家)                |
+| 公钥        | api 暴露 `/auth/jwks`(为未来多验证方预留)                                          |
 | GitHub 联邦 | 标准 OAuth2 Authorization Code 流,authlib,`syncMode=IMPORT` 语义自管(首次登录建号) |
-| 会话管理 | 无状态 JWT + Redis 存 refresh token 家族指纹(吊销用) |
+| 会话管理    | 无状态 JWT + Redis 存 refresh token 家族指纹(吊销用)                               |
 
 ## 明确接受的代价
 

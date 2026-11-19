@@ -4,7 +4,7 @@ version = "0.1.4"
 description = "Kongming SQL 安全引擎:单遍解析产出防火墙判定/schema 作用域/保留表/行级改写结构(PG 方言,纯计算零 IO)"
 requires-python = ">=3.13"
 dependencies = [
-    "sqlglot>=26.0", # 与消费方 kongming 同族版本;AST 语义即防火墙语义
+  "sqlglot>=26.0", # 与消费方 kongming 同族版本;AST 语义即防火墙语义
 ]
 
 [build-system]
@@ -16,10 +16,11 @@ packages = ["liannu"]
 
 [dependency-groups]
 dev = [
-    "mypy>=2.3.1",
-    "pytest>=8.3",
-    "pytest-cov>=7.0",
-    "ruff>=0.9",
+  "mypy>=2.3.1",
+  "pytest>=8.3",
+  "pytest-cov>=7.0",
+  "ruff>=0.9",
+  "pylint>=3.3",
 ]
 
 # 覆盖率门禁(JaCoCo 同位):branch 模式 + fail_under 一票否决,阈值只升不降
@@ -37,7 +38,10 @@ line-length = 100
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "S", "ASYNC"]
+# 复杂度/结构体积门禁取 ruff 默认阈值:C901 圈复杂度 10、PLR0912 分支 12、
+# PLR0915 语句 50;模块行数/公有方法数/局部变量/返回数/语句数/祖先数/布尔表达式数/
+# 循环 import 由 pylint 默认阈值守护(C0302/R0904/R0914/R0911/R0915/R0901/R0916/R0401)。
+select = ["E", "F", "I", "UP", "B", "S", "ASYNC", "C901", "PLR0912", "PLR0915"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"] # pytest 惯例

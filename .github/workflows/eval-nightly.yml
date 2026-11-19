@@ -2,6 +2,9 @@
 # 仅 workflow_dispatch 手动触发——个人项目不设 schedule,避免每日 LLM 费用
 name: eval-nightly
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:
@@ -19,7 +22,9 @@ jobs:
   eval:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Require LLM credentials
         env:
@@ -30,12 +35,12 @@ jobs:
             exit 1
           fi
 
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.13"
           enable-cache: true
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@a15d269cd4658e1107c09f1fabf4cbd7bd1f308a # v4.4.0
         with:
           version: 9
 
@@ -50,7 +55,7 @@ jobs:
           cp .env.example .env
           docker compose -f infra/docker-compose.yml up -d postgres redis
           # 等健康
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             docker compose -f infra/docker-compose.yml ps postgres | grep -q healthy && break
             sleep 2
           done
@@ -78,7 +83,7 @@ jobs:
         run: |
           cd apps/api && uv run uvicorn kongming.main:app --port 8000 &
           cd apps/agent && uv run uvicorn kongming_agent.main:app --port 8001 &
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             curl -sf http://127.0.0.1:8000/healthz && curl -sf http://127.0.0.1:8001/healthz && break
             sleep 2
           done
@@ -96,12 +101,12 @@ jobs:
             sh -c "redis-cli --scan --pattern 'km:ragctx:*' | xargs -r -n1 redis-cli DEL"
 
       - name: Restore previous baseline
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         continue-on-error: true
         with:
           name: eval-baseline
           path: /tmp/eval-prev
-        # 首次无基线:只记录不失败
+      # 首次无基线:只记录不失败
 
       - name: Run evaluation layer
         env:
@@ -145,7 +150,7 @@ jobs:
       # baseline 仅 2KB 文本且同名上传自动替换旧版;账号存储配额计量器卡死
       # 期间(2026-11 已知 bug)上传会被拒,不应拖红整个评估门禁。
       - name: Upload baseline artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         continue-on-error: true
         with:
           name: eval-baseline

@@ -4,33 +4,33 @@
 
 ## 运行时
 
-| 组件 | 选型 | 锁定版本 |
-|---|---|---|
-| Python | CPython | 3.13(本地/CI;容器镜像 3.14,stack-refresh 2026-10 批④) |
-| Node | LTS | 24 实跑(>=22.12 基线;vitest5/compiler 前置) |
-| 数据库 | PostgreSQL + pgvector | 18 / 0.8(stack-refresh 2026-10 批④) |
-| 缓存 | Redis | 8 |
+| 组件   | 选型                  | 锁定版本                                              |
+| ------ | --------------------- | ----------------------------------------------------- |
+| Python | CPython               | 3.13(本地/CI;容器镜像 3.14,stack-refresh 2026-10 批④) |
+| Node   | LTS                   | 24 实跑(>=22.12 基线;vitest5/compiler 前置)           |
+| 数据库 | PostgreSQL + pgvector | 18 / 0.8(stack-refresh 2026-10 批④)                   |
+| 缓存   | Redis                 | 8                                                     |
 
 ## apps/api — 控制面(持凭证)
 
-| 维度 | 选型 |
-|---|---|
-| Web | FastAPI + Pydantic v2 |
-| ORM | SQLAlchemy 2.1 async + asyncpg(stack-refresh 2026-10 批②) |
-| 迁移 | Alembic(baseline 制,见 ADR-004) |
-| 认证 | 自建:argon2-cffi + PyJWT(RS256)+ authlib(GitHub OAuth),见 ADR-003;联邦登录走连接器架构(ADR-006) |
-| SQL 治理 | sqlglot(AST 防火墙 + 方言能力储备) |
-| 限流 | 按需(nginx limit_req 起步,不预设库) |
-| 可观测 | structlog(JSON)+ prometheus-client + OpenTelemetry(按需启用) |
+| 维度     | 选型                                                                                            |
+| -------- | ----------------------------------------------------------------------------------------------- |
+| Web      | FastAPI + Pydantic v2                                                                           |
+| ORM      | SQLAlchemy 2.1 async + asyncpg(stack-refresh 2026-10 批②)                                       |
+| 迁移     | Alembic(baseline 制,见 ADR-004)                                                                 |
+| 认证     | 自建:argon2-cffi + PyJWT(RS256)+ authlib(GitHub OAuth),见 ADR-003;联邦登录走连接器架构(ADR-006) |
+| SQL 治理 | sqlglot(AST 防火墙 + 方言能力储备)                                                              |
+| 限流     | 按需(nginx limit_req 起步,不预设库)                                                             |
+| 可观测   | structlog(JSON)+ prometheus-client + OpenTelemetry(按需启用)                                    |
 
 ## apps/agent — Agent 面(零凭证)
 
-| 维度 | 选型 |
-|---|---|
-| 编排 | LangGraph |
-| LLM SDK | openai 兼容客户端(通义/DeepSeek 可切) |
-| 服务 | FastAPI(仅内网端口,内部令牌认证) |
-| 纪律 | 进程内禁止任何 DB 凭证(ADR-002),import-linter 守护 |
+| 维度    | 选型                                               |
+| ------- | -------------------------------------------------- |
+| 编排    | LangGraph                                          |
+| LLM SDK | openai 兼容客户端(通义/DeepSeek 可切)              |
+| 服务    | FastAPI(仅内网端口,内部令牌认证)                   |
+| 纪律    | 进程内禁止任何 DB 凭证(ADR-002),import-linter 守护 |
 
 ### 任务/协作部署级上限(090/091;缺省值文档化)
 
@@ -38,34 +38,34 @@
 被部署上限钳制(api 侧单点钳制),agent 侧编排常量+Settings 作为执行面
 最后防线(缺省与 api 同值同源,防配置漂移导致的防护空洞)。
 
-| 配置 | 侧 | 缺省 | 说明 |
-|---|---|---|---|
-| `KM_TASK_BUDGET_MAX_STEPS` | api | 12 | 任务步数上限(任务级 budget 配置不得超过) |
-| `KM_TASK_BUDGET_MAX_TOKENS` | api | 200000 | 任务 token 预算上限 |
-| `KM_TASK_BUDGET_MAX_SECONDS` | api | 900 | 任务墙钟预算上限 |
-| `KM_COLLAB_MAX_WORKERS` | api | 3 | 协作拓扑 worker 数钳制上限 |
-| `KM_GRAPH_CONFIRM_TTL_MINUTES` | api | 30 | 图内确认过期分钟数(挂图审批超时=动作跳过,与任务审批门过期同语义) |
-| `KM_AGENT_COLLAB_MAX_WORKERS` | agent | 3 | 编排派发上限(最后防线) |
-| `KM_AGENT_COLLAB_MAX_DEPTH` | agent | 1 | 嵌套深度上限(1=不嵌套,提额须显式配置) |
-| `KM_AGENT_COLLAB_MAX_REVISION_ROUNDS` | agent | 1 | critic 修订轮次上限(轮次尽如实附保留意见) |
-| `KM_COLLAB_MAX_ROUNDS` | api | 3 | 圆桌轮次上限(拓扑声明钳制;115) |
-| `KM_AGENT_COLLAB_MAX_ROUNDS` | agent | 3 | 圆桌轮次执行兜底(触顶诚实收口,不编造共识) |
+| 配置                                  | 侧    | 缺省   | 说明                                                             |
+| ------------------------------------- | ----- | ------ | ---------------------------------------------------------------- |
+| `KM_TASK_BUDGET_MAX_STEPS`            | api   | 12     | 任务步数上限(任务级 budget 配置不得超过)                         |
+| `KM_TASK_BUDGET_MAX_TOKENS`           | api   | 200000 | 任务 token 预算上限                                              |
+| `KM_TASK_BUDGET_MAX_SECONDS`          | api   | 900    | 任务墙钟预算上限                                                 |
+| `KM_COLLAB_MAX_WORKERS`               | api   | 3      | 协作拓扑 worker 数钳制上限                                       |
+| `KM_GRAPH_CONFIRM_TTL_MINUTES`        | api   | 30     | 图内确认过期分钟数(挂图审批超时=动作跳过,与任务审批门过期同语义) |
+| `KM_AGENT_COLLAB_MAX_WORKERS`         | agent | 3      | 编排派发上限(最后防线)                                           |
+| `KM_AGENT_COLLAB_MAX_DEPTH`           | agent | 1      | 嵌套深度上限(1=不嵌套,提额须显式配置)                            |
+| `KM_AGENT_COLLAB_MAX_REVISION_ROUNDS` | agent | 1      | critic 修订轮次上限(轮次尽如实附保留意见)                        |
+| `KM_COLLAB_MAX_ROUNDS`                | api   | 3      | 圆桌轮次上限(拓扑声明钳制;115)                                   |
+| `KM_AGENT_COLLAB_MAX_ROUNDS`          | agent | 3      | 圆桌轮次执行兜底(触顶诚实收口,不编造共识)                        |
 
 ## apps/web — React SPA
 
-| 维度 | 选型 |
-|---|---|
-| 框架 | React 19 + TypeScript(strict) |
-| 构建 | Vite 8(Rolldown)+ React Compiler 1.0(stack-refresh 2026-10 批③;纯 SPA,无 SSR——ADR-001) |
-| 样式 | Tailwind CSS v4 |
-| 组件 | shadcn/ui(Radix 无头 + 代码自有;Radix 统一走 `radix-ui` 聚合包导入,006 起单轨) |
-| 动画 | tw-animate-css(shadcn Tailwind v4 标准配套,sheet/dropdown 等开合动画依赖) |
-| 数据 | TanStack Query(服务端状态)+ Zustand(客户端状态) |
-| 路由 | React Router v7 |
-| 图表 | ECharts(echarts-for-react) |
+| 维度     | 选型                                                                                                            |
+| -------- | --------------------------------------------------------------------------------------------------------------- |
+| 框架     | React 19 + TypeScript(strict)                                                                                   |
+| 构建     | Vite 8(Rolldown)+ React Compiler 1.0(stack-refresh 2026-10 批③;纯 SPA,无 SSR——ADR-001)                          |
+| 样式     | Tailwind CSS v4                                                                                                 |
+| 组件     | shadcn/ui(Radix 无头 + 代码自有;Radix 统一走 `radix-ui` 聚合包导入,006 起单轨)                                  |
+| 动画     | tw-animate-css(shadcn Tailwind v4 标准配套,sheet/dropdown 等开合动画依赖)                                       |
+| 数据     | TanStack Query(服务端状态)+ Zustand(客户端状态)                                                                 |
+| 路由     | React Router v7                                                                                                 |
+| 图表     | ECharts(echarts-for-react)                                                                                      |
 | 内容渲染 | react-markdown + remark-gfm + remark-breaks(文档卡 Markdown;不解析原始 HTML,成熟库优先不自研 tokenizer,ADR-009) |
-| 品牌图标 | simple-icons(联邦 logo 等多品牌场景,ADR-006;单个图标可内联官方 SVG) |
-| 契约 | openapi-typescript 生成,禁手写 API 类型(ADR-005) |
+| 品牌图标 | simple-icons(联邦 logo 等多品牌场景,ADR-006;单个图标可内联官方 SVG)                                             |
+| 契约     | openapi-typescript 生成,禁手写 API 类型(ADR-005)                                                                |
 
 ## 前端样式铁律(继承旧项目 ADR-006/007 纪律,按新栈重写)
 

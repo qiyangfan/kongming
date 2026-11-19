@@ -18,7 +18,7 @@ display_name=UserId,登录链路不断(引导管理员开权限,见 .env.example
 ⑤ **联邦建号用户名一律 {base}-{provider}**(无冲突也带后缀,来源可溯;超长 base 先预留
 后缀位再截断,脱冲突 -N 链保留)——用户拍板;spec 仅立约"冲突时生成不重复用户名",
 属契约粒度以下实现变更。
-⑥ **联邦总开关 KM_<PROVIDER>_ENABLED**(默认 true):false 即停用该家(options 隐藏 +
+⑥ **联邦总开关 `KM_<PROVIDER>_ENABLED`**(默认 true):false 即停用该家(options 隐藏 +
 start/callback 404),凭证保留——为企微这类"凭证在、环境未就绪"的场景提供软关停。
 ⑦ 企微平台侧两门槛(非代码):可信域名需归属校验(校验文件放域名根目录;ngrok 免费
 域名因拦截页不兼容,cloudflared 快速隧道可过);gettoken 要求出口 IP 在应用
@@ -35,7 +35,8 @@ start/callback 404),凭证保留——为企微这类"凭证在、环境未就�
 > `/auth/{provider}/start|callback` + 前端按钮数据驱动(`/auth/options`)。**
 
 采纳 NextAuth/Auth0/Logto 共同收敛的 connector 形态:新增 provider = 一个小文件
-+ 一条 `KM_AUTH_PROVIDERS` 配置,路由与前端零改动。
+
+- 一条 `KM_AUTH_PROVIDERS` 配置,路由与前端零改动。
 
 ## 关键设计
 
@@ -55,9 +56,9 @@ start/callback 404),凭证保留——为企微这类"凭证在、环境未就�
 
 ## 已否决
 
-| 方案 | 否决理由 |
-|---|---|
-| 手写 adapter ×5 | 五处重复 code→token→profile;新增家全套复制;前端硬编码按钮 |
+| 方案                               | 否决理由                                                                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| 手写 adapter ×5                    | 五处重复 code→token→profile;新增家全套复制;前端硬编码按钮                                                                 |
 | 自托管 IdP(Logto/Zitadel/Keycloak) | 五个 OAuth 联邦恰是 IdP 最不需要出场的场景;溢价(SAML/企业 IdP 兼容)用不上,代价(重组件+登录页不可控)全付——ADR-003 账本重演 |
 
 ## 实施节奏

@@ -14,45 +14,45 @@
 
 ![问数结果:问题、柱状图、结果表](docs/screenshots/chat-answer-top.png)
 
-| 空态即入口:按租户与数据源生成建议问题 | 过程全透明:SQL 可编辑、可重新执行 |
-|---|---|
+| 空态即入口:按租户与数据源生成建议问题                  | 过程全透明:SQL 可编辑、可重新执行                      |
+| ------------------------------------------------------ | ------------------------------------------------------ |
 | ![对话空态与建议问题](docs/screenshots/chat-empty.png) | ![SQL 透明可编辑再执行](docs/screenshots/chat-sql.png) |
 
 ### 知识与护栏:让 Agent 答得准、行得正
 
-| 知识库:表业务术语 + 文档上传,双路增强 | 护栏:注入拦截 / PII 脱敏 / 输出防护 | 审计:每次执行留痕,判定与耗时可查 |
-|---|---|---|
+| 知识库:表业务术语 + 文档上传,双路增强     | 护栏:注入拦截 / PII 脱敏 / 输出防护                | 审计:每次执行留痕,判定与耗时可查              |
+| ----------------------------------------- | -------------------------------------------------- | --------------------------------------------- |
 | ![知识库](docs/screenshots/admin-rag.png) | ![护栏规则](docs/screenshots/admin-guardrails.png) | ![SQL 审计](docs/screenshots/admin-audit.png) |
 
 ### 运营与开放:用量可算、调度可靠
 
-| 模型用量:调用 / Token / 延迟按任务拆解 | 触发器:档位式定时调度或 webhook,预览未来执行 | 登录:本地账密 + GitHub / Google / 钉钉 / 飞书 |
-|---|---|---|
-| ![模型用量](docs/screenshots/admin-usage.png) | ![触发器调度档位](docs/screenshots/admin-trigger-dialog.png) | ![登录页](docs/screenshots/login.png) |
+| 模型用量:调用 / Token / 延迟按任务拆解        | 触发器:档位式定时调度或 webhook,预览未来执行                 | 登录:本地账密 + GitHub / Google / 钉钉 / 飞书 |
+| --------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------- |
+| ![模型用量](docs/screenshots/admin-usage.png) | ![触发器调度档位](docs/screenshots/admin-trigger-dialog.png) | ![登录页](docs/screenshots/login.png)         |
 
 ## 为什么是孔明:把 NL→SQL 当生产系统做
 
 开源的 text-to-SQL 生态大多以「能出数」为目标;孔明选择把多租户生产环境当成第一约束,押三件多数项目没有认真做的事:
 
-**1. SQL 安全纵深(五层,层层独立成立)**
+### 1. SQL 安全纵深(五层,层层独立成立)
 
 LLM 生成的 SQL 不可信,所以它进库前要连闯五关,每一层都不依赖上一层:
 
-| 层 | 机制 |
-|---|---|
-| AST 防火墙 | [sqlglot](https://github.com/tobymao/sqlglot) 解析为 AST 后做只读根白名单(SELECT/UNION/子查询)、嵌套写/DDL 拦截、危险函数拒用(pg_read_file/pg_sleep/dblink…)——AST 白名单,不是正则 |
-| schema 白名单 | 跨租户/跨 schema 引用直接 BLOCKED(`tenant_b.t` 不可见) |
-| 保留表拒读 | 控制面表(`sys_*`/`chat_*`/RAG 元数据)拒读,含 CTE 遮蔽绕过防护 |
-| 行级权限 | `data_scope` 以 **AST 改写**注入最外层 WHERE(明确立约:AST 非字符串拼接),参数化绑定 |
-| 连接级只读 | 执行连接 `default_transaction_read_only=on`,防火墙之上的最后一道闸 |
+| 层            | 机制                                                                                                                                                                              |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AST 防火墙    | [sqlglot](https://github.com/tobymao/sqlglot) 解析为 AST 后做只读根白名单(SELECT/UNION/子查询)、嵌套写/DDL 拦截、危险函数拒用(pg_read_file/pg_sleep/dblink…)——AST 白名单,不是正则 |
+| schema 白名单 | 跨租户/跨 schema 引用直接 BLOCKED(`tenant_b.t` 不可见)                                                                                                                            |
+| 保留表拒读    | 控制面表(`sys_*`/`chat_*`/RAG 元数据)拒读,含 CTE 遮蔽绕过防护                                                                                                                     |
+| 行级权限      | `data_scope` 以 **AST 改写**注入最外层 WHERE(明确立约:AST 非字符串拼接),参数化绑定                                                                                                |
+| 连接级只读    | 执行连接 `default_transaction_read_only=on`,防火墙之上的最后一道闸                                                                                                                |
 
 每次执行留审计(判定、耗时、租户、用户);agent 自愈重试遇权限/防火墙拦截直接终止不重试,省 LLM 配额。
 
-**2. 信任边界 = 进程边界**
+### 2. 信任边界 = 进程边界
 
 Agent 进程里**不存在任何数据库凭证**——import-linter 在 CI 里强制 agent 禁止 import 任何 DB 驱动(ADR-002)。Agent 只能经内部令牌回调控制面唯一执行入口;SQL 执行只发生在持凭证的控制面,且必过上述五层。
 
-**3. 诚实评估,不报喜数**
+### 3. 诚实评估,不报喜数
 
 内置 NL2SQL 评估集([apps/api/evals/](apps/api/evals/)):黄金指标 Execution Match(生成的 SQL 直连执行,与链路响应结果集做严格/宽松双分),评估器以真实用户路径跑完整链路,`persist=false` 不污染业务库。**2026-08-30 基线:单轮宽松 50/50、严格 35/50(2 题负例不计严格分)、多轮 12/12、动态数据源 4/4**——严格口径如实呈现,因为安全约束下的诚实基线比宽松高分更接近生产真相。
 
@@ -110,7 +110,7 @@ cd apps/web && pnpm install && pnpm dev   # http://localhost:5173
 ## 常用命令
 
 ```bash
-make check        # 全部质量门禁(ruff + mypy + pytest ×2 + tsc + eslint)
+make check        # 全量门禁:静态/测试/契约/死代码/重复/依赖/配置 lint
 make contracts    # 导出 OpenAPI → 生成前端类型(提交前必跑)
 make up / down    # compose 基础设施
 ```

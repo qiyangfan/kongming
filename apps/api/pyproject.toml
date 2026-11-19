@@ -4,29 +4,29 @@ version = "0.1.0"
 description = "Kongming 控制面:持凭证、做安全决策(FastAPI)"
 requires-python = ">=3.13"
 dependencies = [
-    "fastapi>=0.143",              # 下限与锁文件中的 FastAPI 主版本保持一致。
-    "uvicorn[standard]>=0.54",
-    "pydantic>=2.14",
-    "pydantic-settings>=2.7",
-    "sqlalchemy[asyncio]>=2.1,<3",  # asyncio extra 会安装 greenlet。
-    "asyncpg>=0.30",
-    "alembic>=1.20",
-    "argon2-cffi>=23.1",
-    "pyjwt[crypto]>=2.10",          # RS256;ADR-003:不用 python-jose
-    "authlib>=1.9",                 # GitHub OAuth
-    "sqlglot>=30.0",                # SQL 防火墙 AST
-    "redis>=8.1",
-    "cryptography>=50.0",           # 数据源密码 AES-GCM
-    "httpx>=0.28",                  # 回调 agent 面
-    "pypdf>=6.16.1",
-    "python-docx>=1.2.0",
-    "python-multipart>=0.0.32",
-    "openpyxl>=3.1.5",
-    "jsonschema>=4.23",             # 校验工具参数。
-    "liannu==0.1.4",                # 仓库共享的 SQL 安全引擎。
-    "faster-whisper>=1.0",
-    "mcp>=2.3,<3",                  # adopt-mcp-sdk2:MCP 官方 SDK 2.x(双向协议载体;dev→prod 迁移)
-    "httpx2>=2,<3",                 # mcp 2.x 的 HTTP 栈,kongming/mcp/client.py 直接 import(直接导入须直接声明)
+  "fastapi>=0.143",              # 下限与锁文件中的 FastAPI 主版本保持一致。
+  "uvicorn[standard]>=0.54",
+  "pydantic>=2.14",
+  "pydantic-settings>=2.7",
+  "sqlalchemy[asyncio]>=2.1,<3", # asyncio extra 会安装 greenlet。
+  "asyncpg>=0.30",
+  "alembic>=1.20",
+  "argon2-cffi>=23.1",
+  "pyjwt[crypto]>=2.10",         # RS256;ADR-003:不用 python-jose
+  "authlib>=1.9",                # GitHub OAuth
+  "sqlglot>=30.0",               # SQL 防火墙 AST
+  "redis>=8.1",
+  "cryptography>=50.0",          # 数据源密码 AES-GCM
+  "httpx>=0.28",                 # 回调 agent 面
+  "pypdf>=6.16.1",
+  "python-docx>=1.2.0",
+  "python-multipart>=0.0.32",
+  "openpyxl>=3.1.5",
+  "jsonschema>=4.23",            # 校验工具参数。
+  "liannu==0.1.4",               # 仓库共享的 SQL 安全引擎。
+  "faster-whisper>=1.0",
+  "mcp>=2.3,<3",                 # adopt-mcp-sdk2:MCP 官方 SDK 2.x(双向协议载体;dev→prod 迁移)
+  "httpx2>=2,<3",                # mcp 2.x 的 HTTP 栈,kongming/mcp/client.py 直接 import(直接导入须直接声明)
 ]
 
 # liannu 是仓库共享包；升级时同步 packages/liannu/pyproject.toml 中的版本。
@@ -35,17 +35,18 @@ liannu = { path = "../../packages/liannu" }
 
 [dependency-groups]
 dev = [
-    "pytest>=9.1",
-    "pytest-asyncio>=0.25",
-    "pytest-cov>=7.0",
-    "ruff>=0.16",
-    "mypy>=2.3",
-    "types-Authlib>=1.4",
-    "import-linter>=2.2",
-    "types-openpyxl>=3.1.5.20260807",
-    "types-jsonschema>=4.23",  # 工具参数校验类型声明。
-    "pyyaml>=6.0",  # 解析 evals/ 中的评估数据，不属于产品依赖。
-    "pyright>=1.1.411",
+  "pytest>=9.1",
+  "pytest-asyncio>=0.25",
+  "pytest-cov>=7.0",
+  "ruff>=0.16",
+  "mypy>=2.3",
+  "types-Authlib>=1.4",
+  "import-linter>=2.2",
+  "types-openpyxl>=3.1.5.20260807",
+  "types-jsonschema>=4.23",         # 工具参数校验类型声明。
+  "pyyaml>=6.0",                    # 解析 evals/ 中的评估数据，不属于产品依赖。
+  "pyright>=1.1.411",
+  "pylint>=3.3",
 ]
 
 [tool.ruff]
@@ -53,12 +54,15 @@ line-length = 100
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "S", "ASYNC"]
+# 复杂度/结构体积门禁取 ruff 默认阈值:C901 圈复杂度 10、PLR0912 分支 12、
+# PLR0915 语句 50;模块行数/公有方法数/局部变量/返回数/语句数/祖先数/布尔表达式数/
+# 循环 import 由 pylint 默认阈值守护(C0302/R0904/R0914/R0911/R0915/R0901/R0916/R0401)。
+select = ["E", "F", "I", "UP", "B", "S", "ASYNC", "C901", "PLR0912", "PLR0915"]
 
 [tool.ruff.lint.per-file-ignores]
-"alembic/versions/*" = ["E501"]  # DDL 行折叠伤可读性,版本文件放开行宽
-"tests/*" = ["S101", "S105", "S106", "S107"]  # pytest 惯例;测试密码为道具非密钥
-"evals/*" = ["S101", "S105", "S106", "S107"]  # 评估器同 pytest 惯例
+"alembic/versions/*" = ["E501"]              # DDL 行折叠伤可读性,版本文件放开行宽
+"tests/*" = ["S101", "S105", "S106", "S107"] # pytest 惯例;测试密码为道具非密钥
+"evals/*" = ["S101", "S105", "S106", "S107"] # 评估器同 pytest 惯例
 
 [tool.mypy]
 strict = true
@@ -74,11 +78,11 @@ testpaths = ["tests"]
 # tests/ 下的匹配器单测 import evals.matchers(匹配器逻辑进默认门禁守护)
 pythonpath = ["."]
 markers = [
-    "smoke: 评估集 smoke 子集(约5题,评估环境显式触发)",
-    "full: 评估集全量单轮(手动/预发,含动态数据源组)",
-    "multiturn: 多轮上下文评估(指代/省略/排序延续/过滤追加)",
-    "judge: judge 抽检层(092,非确定性产出 LLM 评审;随 smoke 层进定时门禁)",
-    "retrieval: 文档检索质量评测(retrieval-eval;语料+multi-hop 评测集,评估环境显式触发)",
+  "smoke: 评估集 smoke 子集(约5题,评估环境显式触发)",
+  "full: 评估集全量单轮(手动/预发,含动态数据源组)",
+  "multiturn: 多轮上下文评估(指代/省略/排序延续/过滤追加)",
+  "judge: judge 抽检层(092,非确定性产出 LLM 评审;随 smoke 层进定时门禁)",
+  "retrieval: 文档检索质量评测(retrieval-eval;语料+multi-hop 评测集,评估环境显式触发)",
 ]
 
 # authlib 官方存根不完整:AsyncOAuth2Client 的 httpx 继承方法(get/aclose)
@@ -113,26 +117,31 @@ forbidden_modules = ["fastapi"]
 name = "chat 领域模型/用例/端口/导出纯函数不依赖框架(宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [
-    "kongming.chat.models",
-    "kongming.chat.service",
-    "kongming.chat.ports",
-    "kongming.chat.export",
+  "kongming.chat.models",
+  "kongming.chat.service",
+  "kongming.chat.session_service",
+  "kongming.chat.ports",
+  "kongming.chat.export",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
 [[tool.importlinter.contracts]]
 name = "system 领域模型/用例不依赖框架(宪法 Article II 领域纯净)"
 type = "forbidden"
-source_modules = ["kongming.system.models", "kongming.system.service", "kongming.system.ports"]
+source_modules = [
+  "kongming.system.models",
+  "kongming.system.service",
+  "kongming.system.ports",
+]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
 [[tool.importlinter.contracts]]
 name = "datasource 领域模型/用例/端口不依赖框架(宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [
-    "kongming.datasource.models",
-    "kongming.datasource.service",
-    "kongming.datasource.ports",
+  "kongming.datasource.models",
+  "kongming.datasource.service",
+  "kongming.datasource.ports",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
@@ -140,16 +149,21 @@ forbidden_modules = ["fastapi", "sqlalchemy"]
 name = "rag 领域模型/用例/端口不依赖框架(宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [
-    "kongming.rag.models",
-    "kongming.rag.service",
-    "kongming.rag.ports",
+  "kongming.rag.models",
+  "kongming.rag.service",
+  "kongming.rag.admin_service",
+  "kongming.rag.ports",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
 [[tool.importlinter.contracts]]
 name = "audit 领域模型/用例/端口不依赖框架(宪法 Article II 领域纯净)"
 type = "forbidden"
-source_modules = ["kongming.audit.models", "kongming.audit.service", "kongming.audit.ports"]
+source_modules = [
+  "kongming.audit.models",
+  "kongming.audit.service",
+  "kongming.audit.ports",
+]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
 [[tool.importlinter.contracts]]
@@ -161,7 +175,13 @@ forbidden_modules = ["fastapi", "sqlalchemy"]
 [[tool.importlinter.contracts]]
 name = "task 领域模型/用例/端口不依赖框架(宪法 Article II 领域纯净,090)"
 type = "forbidden"
-source_modules = ["kongming.task.models", "kongming.task.service", "kongming.task.ports"]
+source_modules = [
+  "kongming.task.models",
+  "kongming.task.service",
+  "kongming.task.ports",
+  "kongming.task.collab",
+  "kongming.task.watchdog",
+]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
 [[tool.importlinter.contracts]]
@@ -174,9 +194,9 @@ forbidden_modules = ["fastapi", "sqlalchemy"]
 name = "report 领域模型/用例/端口不依赖框架(宪法 Article II 领域纯净,088)"
 type = "forbidden"
 source_modules = [
-    "kongming.report.models",
-    "kongming.report.service",
-    "kongming.report.ports",
+  "kongming.report.models",
+  "kongming.report.service",
+  "kongming.report.ports",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
@@ -190,9 +210,9 @@ forbidden_modules = ["fastapi", "sqlalchemy"]
 name = "feedback 领域模型/用例/端口不依赖框架(宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [
-    "kongming.feedback.models",
-    "kongming.feedback.service",
-    "kongming.feedback.ports",
+  "kongming.feedback.models",
+  "kongming.feedback.service",
+  "kongming.feedback.ports",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
@@ -200,10 +220,10 @@ forbidden_modules = ["fastapi", "sqlalchemy"]
 name = "toolcall 领域模型/用例/端口/注册表不依赖框架(019,宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [
-    "kongming.toolcall.models",
-    "kongming.toolcall.service",
-    "kongming.toolcall.ports",
-    "kongming.toolcall.registry",
+  "kongming.toolcall.models",
+  "kongming.toolcall.service",
+  "kongming.toolcall.ports",
+  "kongming.toolcall.registry",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
@@ -211,10 +231,10 @@ forbidden_modules = ["fastapi", "sqlalchemy"]
 name = "guardrail 领域模型/用例/端口/规则注册表不依赖框架(020,宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [
-    "kongming.guardrail.models",
-    "kongming.guardrail.service",
-    "kongming.guardrail.ports",
-    "kongming.guardrail.rules",
+  "kongming.guardrail.models",
+  "kongming.guardrail.service",
+  "kongming.guardrail.ports",
+  "kongming.guardrail.rules",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
@@ -222,9 +242,9 @@ forbidden_modules = ["fastapi", "sqlalchemy"]
 name = "memory 领域模型/用例/端口不依赖框架(022,宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [
-    "kongming.memory.models",
-    "kongming.memory.service",
-    "kongming.memory.ports",
+  "kongming.memory.models",
+  "kongming.memory.service",
+  "kongming.memory.ports",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
@@ -232,9 +252,9 @@ forbidden_modules = ["fastapi", "sqlalchemy"]
 name = "semantic 领域模型/用例/端口不依赖框架(023,宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [
-    "kongming.semantic.models",
-    "kongming.semantic.service",
-    "kongming.semantic.ports",
+  "kongming.semantic.models",
+  "kongming.semantic.service",
+  "kongming.semantic.ports",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
@@ -242,9 +262,9 @@ forbidden_modules = ["fastapi", "sqlalchemy"]
 name = "sandbox 领域模型/用例/端口不依赖框架(027,宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [
-    "kongming.sandbox.models",
-    "kongming.sandbox.service",
-    "kongming.sandbox.ports",
+  "kongming.sandbox.models",
+  "kongming.sandbox.service",
+  "kongming.sandbox.ports",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
@@ -252,10 +272,10 @@ forbidden_modules = ["fastapi", "sqlalchemy"]
 name = "billing 领域模型/用例不依赖框架(034,宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [
-    "kongming.billing.models",
-    "kongming.billing.service",
-    "kongming.billing.ports",
-    "kongming.billing.channels",
+  "kongming.billing.models",
+  "kongming.billing.service",
+  "kongming.billing.ports",
+  "kongming.billing.channels",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
@@ -269,9 +289,9 @@ forbidden_modules = ["fastapi", "sqlalchemy"]
 name = "team 领域模型/用例/端口不依赖框架(032,宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [
-    "kongming.team.models",
-    "kongming.team.service",
-    "kongming.team.ports",
+  "kongming.team.models",
+  "kongming.team.service",
+  "kongming.team.ports",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
@@ -279,10 +299,14 @@ forbidden_modules = ["fastapi", "sqlalchemy"]
 name = "trigger 领域模型/用例/端口/适配器不依赖框架(031,宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [
-    "kongming.trigger.models",
-    "kongming.trigger.service",
-    "kongming.trigger.ports",
-    "kongming.trigger.adapters",
+  "kongming.trigger.models",
+  "kongming.trigger.service",
+  "kongming.trigger.ports",
+  "kongming.trigger.adapters",
+  "kongming.trigger.errors",
+  "kongming.trigger.validation",
+  "kongming.trigger.task_target",
+  "kongming.trigger.firing",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy", "httpx"]
 
@@ -296,10 +320,10 @@ forbidden_modules = ["fastapi", "sqlalchemy"]
 name = "workflow 领域模型/用例/端口/引擎不依赖框架(029,宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [
-    "kongming.workflow.models",
-    "kongming.workflow.service",
-    "kongming.workflow.ports",
-    "kongming.workflow.engine",
+  "kongming.workflow.models",
+  "kongming.workflow.service",
+  "kongming.workflow.ports",
+  "kongming.workflow.engine",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy", "httpx"]
 
@@ -307,9 +331,9 @@ forbidden_modules = ["fastapi", "sqlalchemy", "httpx"]
 name = "mcp 领域模型/用例/端口不依赖框架(028,宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [
-    "kongming.mcp.models",
-    "kongming.mcp.service",
-    "kongming.mcp.ports",
+  "kongming.mcp.models",
+  "kongming.mcp.service",
+  "kongming.mcp.ports",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy", "httpx"]
 
@@ -317,9 +341,9 @@ forbidden_modules = ["fastapi", "sqlalchemy", "httpx"]
 name = "bot 领域模型/用例/端口不依赖框架(025,宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [
-    "kongming.bot.models",
-    "kongming.bot.service",
-    "kongming.bot.ports",
+  "kongming.bot.models",
+  "kongming.bot.service",
+  "kongming.bot.ports",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
@@ -327,9 +351,9 @@ forbidden_modules = ["fastapi", "sqlalchemy"]
 name = "connector 领域模型/用例/端口不依赖框架(099,宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = [
-    "kongming.connector.models",
-    "kongming.connector.service",
-    "kongming.connector.ports",
+  "kongming.connector.models",
+  "kongming.connector.service",
+  "kongming.connector.ports",
 ]
 forbidden_modules = ["fastapi", "sqlalchemy", "httpx"]
 

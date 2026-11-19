@@ -1,0 +1,12 @@
+# 秘密扫描基线(gitleaks 默认规则 + 仓库内已核实非凭证的允许项)。
+# 允许项只收紧到具体字面量/模式,不允许按路径整体豁免。
+[extend]
+useDefault = true
+
+[allowlist]
+description = "测试夹具与自指字段:掩码功能断言里的一次性字符串,非真实凭证"
+regexes = [
+  '''sk-abcdef0123456789abcdef01''',
+  '''bot_key=bot_key''',
+  '''question=body\.question''',
+]

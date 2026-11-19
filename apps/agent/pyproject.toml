@@ -4,16 +4,16 @@ version = "0.1.0"
 description = "Kongming Agent 面:零凭证、纯脑力(LangGraph)"
 requires-python = ">=3.13"
 dependencies = [
-    "fastapi>=0.143",              # stack-refresh-2026-10 批①:下限对齐实锁 major 线
-    "uvicorn[standard]>=0.54",
-    "pydantic>=2.14",
-    "pydantic-settings>=2.7",
-    "langgraph>=1.2,<2",            # D2:下限漂移反面教材,窗式约束防旧 major 回归
-    "openai>=3,<4",                  # D2 窗式约束;3.0 起 HTTPX2 默认(已显式依赖 httpx 无感)
-    "anthropic>=1.15",               # 多协议出站(ADR-008):anthropic Messages 官方 SDK(测试以 httpx2 注入)
-    "httpx>=0.28",                   # 回调控制面
-    "sqlglot>=30.0",                 # validate 节点本地 AST 预检(纯解析,无 IO)
-    "liannu==0.1.4",                 # SQL 安全引擎(validate 预检单遍解析;monorepo 共享包)
+  "fastapi>=0.143",          # stack-refresh-2026-10 批①:下限对齐实锁 major 线
+  "uvicorn[standard]>=0.54",
+  "pydantic>=2.14",
+  "pydantic-settings>=2.7",
+  "langgraph>=1.2,<2",       # D2:下限漂移反面教材,窗式约束防旧 major 回归
+  "openai>=3,<4",            # D2 窗式约束;3.0 起 HTTPX2 默认(已显式依赖 httpx 无感)
+  "anthropic>=1.15",         # 多协议出站(ADR-008):anthropic Messages 官方 SDK(测试以 httpx2 注入)
+  "httpx>=0.28",             # 回调控制面
+  "sqlglot>=30.0",           # validate 节点本地 AST 预检(纯解析,无 IO)
+  "liannu==0.1.4",           # SQL 安全引擎(validate 预检单遍解析;monorepo 共享包)
 ]
 
 # liannu 是仓库共享包；版本在 packages/liannu/pyproject.toml 管理，并同步此处依赖。
@@ -22,16 +22,17 @@ liannu = { path = "../../packages/liannu" }
 
 [dependency-groups]
 dev = [
-    "pytest>=9.1",
-    "pytest-asyncio>=0.25",
-    "pytest-cov>=7.0",
-    "ruff>=0.16",
-    "mypy>=2.3",
-    "import-linter>=2.2",
-    "pyright>=1.1.411",
-    # 协议集成测试 MockTransport 直接 import(anthropic 的 HTTP 栈,原为传递
-    # 依赖——显式声明防上游换栈时测试无征兆断)
-    "httpx2>=2.10",
+  "pytest>=9.1",
+  "pytest-asyncio>=0.25",
+  "pytest-cov>=7.0",
+  "ruff>=0.16",
+  "mypy>=2.3",
+  "import-linter>=2.2",
+  "pyright>=1.1.411",
+  "pylint>=3.3",
+  # 协议集成测试 MockTransport 直接 import(anthropic 的 HTTP 栈,原为传递
+  # 依赖——显式声明防上游换栈时测试无征兆断)
+  "httpx2>=2.10",
 ]
 
 # 覆盖率门禁(JaCoCo 同位):branch 模式 + fail_under 一票否决,阈值只升不降
@@ -48,14 +49,17 @@ line-length = 100
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "S", "ASYNC"]
+# 复杂度/结构体积门禁取 ruff 默认阈值:C901 圈复杂度 10、PLR0912 分支 12、
+# PLR0915 语句 50;模块行数/公有方法数/局部变量/返回数/语句数/祖先数/布尔表达式数/
+# 循环 import 由 pylint 默认阈值守护(C0302/R0904/R0914/R0911/R0915/R0901/R0916/R0401)。
+select = ["E", "F", "I", "UP", "B", "S", "ASYNC", "C901", "PLR0912", "PLR0915"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"]  # pytest 惯例
-"kongming_agent/graph/prompts.py" = ["E501"]  # prompt 逐字保值(折行即改给 LLM 的文本)
+"tests/*" = ["S101"]                                # pytest 惯例
+"kongming_agent/graph/prompts.py" = ["E501"]        # prompt 逐字保值(折行即改给 LLM 的文本)
 "kongming_agent/graph/react/prompts.py" = ["E501"]  # 提示词按原文发送，折行会改变输入
-"kongming_agent/graph/extract_prompt.py" = ["E501"]  # 提示词按原文发送，折行会改变输入
-"kongming_agent/graph/doc_prompt.py" = ["E501"]  # 提示词按原文发送，折行会改变输入
+"kongming_agent/graph/extract_prompt.py" = ["E501"] # 提示词按原文发送，折行会改变输入
+"kongming_agent/graph/doc_prompt.py" = ["E501"]     # 提示词按原文发送，折行会改变输入
 
 [tool.mypy]
 strict = true

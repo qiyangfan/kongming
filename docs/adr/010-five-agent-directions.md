@@ -16,13 +16,13 @@ cloud-code-sandbox、可观测(038)。产品终局是通用多领域智能体平
 
 ### 1. 五大方向是能力归口,不是五个系统
 
-| 方向 | 定位 | 地基(已落地) | 缺口(开工载体) |
-|---|---|---|---|
-| 问数智能体 | 首发王牌、差异化刃口 | 一梯队 chat/nl2sql/nl2sql-agent 主链路 + 三梯队 semantic-layer / query-streaming / cloud-code-sandbox | 报告交付物闭环(088) |
-| 问答智能体 | 知识问答 | rag 三路召回 / knowledge / document-rag / agent-memory / knowledge-qa | 知识侧深化(093-knowledge-qa 已落地归档) |
-| 通用智能体 | 横向底盘、终局形态 | ReAct 内核 + 三梯队通用能力 | 工具广度(089 工具网关 + 后续工具域)+ 长任务内核(090) |
-| 多智能体 | 复杂任务协作放大器 | workflow-orchestration(静态 DAG)/ custom-agent | 运行时动态协作(091,宿主 = 090) |
-| 评测智能体 | 全方向质量闸门 | eval / ai-eval(Execution Match、基线、few-shot 自学习)+ agent-observability / eval-agent | 评测智能体化:LLM-as-judge、自动构造评测集(092-eval-agent 已落地归档) |
+| 方向       | 定位                 | 地基(已落地)                                                                                          | 缺口(开工载体)                                                       |
+| ---------- | -------------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| 问数智能体 | 首发王牌、差异化刃口 | 一梯队 chat/nl2sql/nl2sql-agent 主链路 + 三梯队 semantic-layer / query-streaming / cloud-code-sandbox | 报告交付物闭环(088)                                                  |
+| 问答智能体 | 知识问答             | rag 三路召回 / knowledge / document-rag / agent-memory / knowledge-qa                                 | 知识侧深化(093-knowledge-qa 已落地归档)                              |
+| 通用智能体 | 横向底盘、终局形态   | ReAct 内核 + 三梯队通用能力                                                                           | 工具广度(089 工具网关 + 后续工具域)+ 长任务内核(090)                 |
+| 多智能体   | 复杂任务协作放大器   | workflow-orchestration(静态 DAG)/ custom-agent                                                        | 运行时动态协作(091,宿主 = 090)                                       |
+| 评测智能体 | 全方向质量闸门       | eval / ai-eval(Execution Match、基线、few-shot 自学习)+ agent-observability / eval-agent              | 评测智能体化:LLM-as-judge、自动构造评测集(092-eval-agent 已落地归档) |
 
 ### 2. 通用为骨、数据为刃
 

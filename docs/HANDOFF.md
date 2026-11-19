@@ -7,6 +7,44 @@
 > 维护纪律:每变更收尾只更新「当前状态」一行与必要的教训/终态条目;
 > 逐变更长段一律不进本文。
 
+## 当前状态(2026-11-19,质量门禁补全)
+
+- **`make check` 组成**:api/agent/liannu(ruff format+check、pylint 结构集、
+  mypy、pyright、import-linter、pytest --cov)+ web(typecheck、eslint、
+  stylelint、prettier、vitest、build、size、e2e)+ contracts-check +
+  dead-code(vulture+knip)+ dup-check(jscpd)+ deps-audit + lint-config
+  (actionlint/hadolint/shellcheck/yamllint/markdownlint/taplo/zizmor)。
+- **CI 独立作业**:secrets(gitleaks)、dup、supply-chain、lint-config;
+  api/agent/liannu 上传 coverage.xml 并在 PR 跑 diff-cover(新代码行 ≥80%);
+  images 作业内 trivy 扫 HIGH/CRITICAL(ignore-unfixed)并产出 CycloneDX SBOM;
+  codeql 按代码路径与每周定时触发(Python + TS/JS,PyPI 依赖由 pip-audit 覆盖)。
+- **门禁口径与豁免(均带实测依据)**:vulture 只取 100% 置信度;LangGraph
+  `aput/aput_writes` 的参数名由框架签名规定(`_task_path_kwarg` 按名探测),
+  以 `--ignore-names` 豁免。knip 忽略 `src/components/ui/**`(与 jinguan
+  逐字节一致的标准件)与生成文件;`dispatchSseBlock` 标 `@public`(测试经
+  动态 import 的命名空间访问)。jscpd 门禁用 `--threshold 5`(超阈值才非零;
+  再加 `--exitCode` 会把任何重复直接判失败);openspec
+  全量 `validate --all` + 活动 change `--strict`;存量 20 条「需求文本过长」
+  只告警,不阻断。
+- **依赖升级**:pypdf 7.1.1、certifi 2026.10.23、joserfc 1.8.0、
+  opentelemetry-api 1.45.2;web 定点升级 eslint 10.15/typescript-eslint
+  8.73 消 minimatch 漏洞,`@redocly/openapi-core>js-yaml` 经
+  pnpm-workspace overrides 固定到 4.3.2。
+- **镜像安全基线**:uv bookworm-slim 基础镜像发布时自带 7 个可修复 CRITICAL
+  (HIGH/CRITICAL 合计 30+),两个 Dockerfile 的运行时阶段在构建期
+  `apt-get upgrade` 到当前安全补丁;api/agent 镜像本地构建后同参数 trivy
+  漏洞扫描均为 0,HIGH/CRITICAL 无待修复项,CycloneDX SBOM 分别产出
+  171/154 个组件。镜像门禁只扫漏洞(`--scanners vuln`):秘密由源码
+  gitleaks 负责,镜像内第三方 SDK 文档串会误报 GCP 服务账号模式。
+  DL3005 的忽略仅针对这一条有实测依据的升级。
+- **本机测试坑**:环境 `NO_PROXY` 若含 `[::1],::1`,httpx2 解析代理白名单
+  会抛 `Invalid port: ':1]'`,agent 测试 23 个失败全部由此而来;跑 agent
+  门禁前设 `NO_PROXY=localhost,127.0.0.1`。api 的 4 个联邦测试失败同理是
+  本机出站受限,CI 有外网。
+- **本地前置**:uvx、npx、actionlint、hadolint、shellcheck、Playwright
+  chromium(`pnpm exec playwright install chromium`)、gitleaks;trivy 与
+  CodeQL 仅在 CI 执行。
+
 ## 当前状态(2026-11-07,SAG 对照弧线:检索评测+事件-实体扩展+实体路调优)
 
 - **三变更已落地**(工件在 `openspec/changes/archive/2026-11-07-*`,
@@ -181,7 +219,7 @@
   066 分包边界由 echarts-boundary 静态护栏钉住)+vitest 5+eslint 10(新规则
   preserve-caught-error 补一处 cause)+RR 8.4+echarts 6.1(**echarts-for-react
   必须走 `echarts-for-react/esm/core`——Vite8 CJS 互操作统一后 lib/ 无
-  __esModule 默认导入不解包,extends 即炸**,echarts.ts 已修)+React Compiler
+  \__esModule 默认导入不解包,extends 即炸**,echarts.ts 已修)+React Compiler
   1.0(plugin-react `compiler: true`,依赖 oxc-transform-react;告警零条,
   手写 memo 保留叠加)。基础设施=compose pgvector:pg18(开发机 localenv 已
   pg18)+容器镜像 python3.14-bookworm-slim(requires-python 保持 >=3.13 兼容
@@ -198,7 +236,7 @@
   bailian)+`KM_RERANK_API_KEY`+`KM_RERANK_MODEL` 齐备才生效,未配=精排级
   零存在感;组合残缺 prod 拒启/dev 告警降级,provider 非法值 dev/prod 同拒启。
   **启用配方**:bailian 例 `KM_RERANK_PROVIDER=bailian`+`KM_RERANK_MODEL=
-  gte-rerank-v2`(key 复用百炼 sk-,与 LLM 同账号即可)+重启 api;siliconflow
+gte-rerank-v2`(key 复用百炼 sk-,与 LLM 同账号即可)+重启 api;siliconflow
   例 `BAAI/bge-reranker-v2-m3`(bailian 的 gte 系必须走原生端点,
   /compatible-mode 不提供 rerank)。**阈值建议**:缺省 0(不过滤)起步;要收
   紧先经 recall-probe/日志观察 gte-rerank 分数分布(实测可答题 top1 ≈0.26,
@@ -230,8 +268,9 @@
   冷却期满半开放行单个探测,成功复位失败回冷却;管理面探测(probe/
   get_prompt)结构上不受限(装饰器不拦),确定性错误(protocol/remote/
   unsupported)不计数,发现同步成功显式复位。落点=`kongming/mcp/
-  breaker.py`(McpBreaker 纯状态机+BreakerMcpCaller 端口装饰器+
-  build_mcp_caller 单点工厂),四个组合根(mcp/bot/chat/toolcall router)
+breaker.py`(McpBreaker 纯状态机+BreakerMcpCaller 端口装饰器+
+  build_mcp_caller 单点工厂),四个组合根(mcp/router.py、bot/adapters.py、
+  chat/adapters.py、toolcall/dependencies.py)
   统一经工厂装配,进程级单例(`get_mcp_breaker`,内存态重启即清);
   计数维度=endpoint(端口契约零变更)。配置 KM_MCP_BREAKER_ENABLED/
   THRESHOLD/COOLDOWN_SEC(缺省 true/3/60;false=逐字旧行为)。冒烟:
@@ -335,8 +374,8 @@
   (`ALTER ROLE kongming SUPERUSER`,migrated_tmp_db 一次性演练库建 vector
   扩展需要)。apps/api/.env 与 apps/agent/.env 当前**不存在**(顶节 2026-10-11
   「均存在」口径失效)——本地起服务用根 .env 选择性注入:api 取
-  KM_INTERNAL_TOKEN/KM_DATASOURCE_ENCRYPT_KEY/KM_ADMIN_*;agent 取
-  KM_AGENT_LLM_*+KM_INTERNAL_TOKEN(改写为 KM_AGENT_INTERNAL_TOKEN 前缀),
+  KM_INTERNAL_TOKEN/KM_DATASOURCE_ENCRYPT_KEY/KM_ADMIN__;agent 取
+  KM_AGENT_LLM__+KM_INTERNAL_TOKEN(改写为 KM_AGENT_INTERNAL_TOKEN 前缀),
   **不得整份 source 根 .env**(KM_DB_PASSWORD 触发 agent fail-closed 拒启)。
 
 ## 当前状态(2026-10-12)
@@ -383,7 +422,7 @@
   4. 凭证掩码核验:列表/详情/创建/更新响应只有 `****尾号` 形态;
      `SELECT auth_secret_enc FROM public.tool_http_connectors` 为密文;
   5. 审计核验:`SELECT tool_name,status,domain,error_reason FROM
-     public.sys_tool_audit WHERE domain='http' ORDER BY created_at DESC LIMIT 8;`
+public.sys_tool_audit WHERE domain='http' ORDER BY created_at DESC LIMIT 8;`
      (失败分类前缀 unreachable/protocol/policy;无 LLM 用量行)。
 - **本机代理截流回环的测试假败坑(2026-10-11 实证)**:本机若开代理/增强模式,
   对**无监听**的 127.0.0.1 端口的连接会被代理截流并回 HTTP 502(而非拒连)——
@@ -414,7 +453,7 @@
   运行,零凭证不触 ADR-002);**可选启用形态**——依赖随 main 安装,模型
   在位即用,缺失时端点 503 明示(无开关,状态自明)。预下载(一次性,
   ~480MB):`cd apps/api && uv run python -c "from faster_whisper import
-  WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"`
+WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"`
   (HuggingFace 直连;失败配 `HF_ENDPOINT=https://hf-mirror.com`)。
   模型规格经 `KM_STT_MODEL` 换(base/medium 同接口)。注意:faster-whisper
   自带的 decode_audio 与 av>=15 不兼容(参数已移除),stt/engine.py 内置
@@ -429,7 +468,7 @@
   `tool:websearch:search` 显式授予制(不进 DEVELOPER 推荐集)。
   供应商端点与出口白名单在 `toolgateway/models.py::WEBSEARCH_PROVIDERS`
   代码单源派生(部署不可改端点);新供应商接入=该表加一条 + `websearch.py::
-  _ADAPTERS` 加一条映射,**接入前核对供应商参数硬限与响应字段名并在方言
+_ADAPTERS` 加一条映射,**接入前核对供应商参数硬限与响应字段名并在方言
   装配层消化**(zhipu 70 截断即先例;域级 schema 与策略器共引 models 常量,
   勿为单供应商改域契约)。参数边界(500/1–10/缺省 5)同文件常量单源。
   观察=检索卡 title/url/snippet(追踪参数剥离、评分不透),域配额按域独立
@@ -462,13 +501,13 @@
   1. 容器内源码编译(依赖=build-essential/git/automake/libtool/pkg-config/
      binutils/bzip2/postgresql-server-dev-18,apt 可装):
      ①SCWS:git 协议在本机网络被重置,**用 codeload tarball**——`wget -O
-     scws.tar.gz https://github.com/hightman/scws/archive/refs/tags/1.2.3.tar.gz`
+scws.tar.gz https://github.com/hightman/scws/archive/refs/tags/1.2.3.tar.gz`
      (xunsearch.com 官网不可达,勿试);解包后仓库无 configure,须 autotools
      引导:`touch README; aclocal; autoconf; autoheader; libtoolize; automake
-     --add-missing` → `./configure && make install && ldconfig`;
+--add-missing` → `./configure && make install && ldconfig`;
      ②zhparser:`wget -O zhparser.tar.gz https://github.com/amutu/zhparser/
-     archive/refs/heads/master.tar.gz`,`PATH=/usr/lib/postgresql/18/bin:$PATH
-     make && make install`(dict.utf8.xdb 由 make install 落 tsearch_data,
+archive/refs/heads/master.tar.gz`,`PATH=/usr/lib/postgresql/18/bin:$PATH
+make && make install`(dict.utf8.xdb 由 make install 落 tsearch_data,
      缺则手补);
      ③`podman restart localenv-postgres`(.so 重启才装载);
   2. 控制面库各建**扩展+检索配置两件**(扩展只建 parser,配置不自带——
@@ -476,7 +515,7 @@
      与测试库 kongming_test 各执行 `CREATE EXTENSION zhparser;` +
      `CREATE TEXT SEARCH CONFIGURATION zhparser (PARSER = zhparser);` +
      `ALTER TEXT SEARCH CONFIGURATION zhparser ADD MAPPING FOR n,v,a,i,e,l
-     WITH simple;`;
+WITH simple;`;
   3. `export KM_RAG_FULLTEXT_TS_CONFIG=zhparser` → 重启 api(启动自检过才起,
      自检=查 pg_ts_config,缺失即拒并指回本配方);
   4. **逐数据源重扫/重建重算存量 tsv**(fetch-metadata / reindex / 文档重新
@@ -492,7 +531,7 @@
      **评估栈日配额耗尽事故误判**(非召回质量信号,逐题 429/403 在案,
      见 evals/README 勘误行);无差别形态仍被 112 规范排除(噪声面无界),
      内容词形态为 spec 认可的唯一兜底形态。历史「AND 语义压制」表述作废。
-  回退:`KM_RAG_FULLTEXT_TS_CONFIG=simple` + 重启 + 重扫/重建(零 schema 依赖)。
+     回退:`KM_RAG_FULLTEXT_TS_CONFIG=simple` + 重启 + 重扫/重建(零 schema 依赖)。
 
 - **本机评测演示环境(2026-10-12 已重灌现态)**:`infra/example-data/load.sh`
   对 localenv-postgres 实跑通过(幂等可重放)——tenant_sakila 28 对象/
@@ -501,7 +540,7 @@
   sakila_dyn 21 条目;reindex 自动润色)。tenant_default.goods 负例域表
   已建(051 语义)。动态源 sakila_dyn 挂 default 租户(sys_datasource 已注
   册,凭证=api 同款 kongming 角色)。**default 路径自动路由
-  tenant_{tenant_key} schema,租户数据源无需注册**(reserved 保留字)。
+  tenant\_{tenant_key} schema,租户数据源无需注册**(reserved 保留字)。
   评测口径:LLM key 仅 agent 面持有(ADR-002;api 经 /internal/embedding
   回调),向量路生效前提=8001/18001 agent 进程在位 + muniu 桥(8787)在跑
   (key 失效用 `./bin/muniu keys create --tenant default --name <名>` 重签并
@@ -608,8 +647,6 @@
 - **环境提示**:演示数据在本机(kongming 库 tenant_sakila/tenant_olist +
   sakila_ext 库);admin 密码 KmSmoke#2026a;评测前清 query_history +
   km:ragctx:*(README 纪律)。
-
-
 
 ## 当前状态(2026-10-10,092 评测智能体化已归档 + judge/自动构造落地)
 
@@ -732,7 +769,7 @@
   (owner 确认;根 .env KM_AGENT_LLM_BASE_URL=compatible-mode 端点,API_KEY=本地
   DASHSCOPE_API_KEY,muniu 网关不再依赖);本地起 agent 仍须
   `KM_AGENT_INTERNAL_TOKEN=$KM_INTERNAL_TOKEN`(compose 同款映射,pydantic 前缀
-  KM_AGENT_ 读不到裸 KM_INTERNAL_TOKEN);本地全量 .env 不可直接喂 agent
+  KM_AGENT_读不到裸 KM_INTERNAL_TOKEN);本地全量 .env 不可直接喂 agent
   (KM_DB_PASSWORD 触发 fail-closed 拒启,是设计行为)。
 
 ## 当前状态(2026-10-02,CardTitle 落地归档 + spec strict 债清零)
@@ -826,7 +863,7 @@
   与「失败保持打开」注释矛盾→保持打开并对话框内显示错误。其后按 owner 指令开启独立评审迭代循环
   复扫全量未提交 diff,另修 2 处文档过时陈述(roadmap「当前提案队列未实施」段随落地移除;
   「下一棒」087 条目撤除重编号),代码零改动、全量门禁沿用本批全绿结论。**门禁**:`KM_REDIS_URL=…6380/15
-  make api-check` 全绿(1091 passed,cov 73.22%),agent 459/liannu 22/web 81+build 全绿;
+make api-check` 全绿(1091 passed,cov 73.22%),agent 459/liannu 22/web 81+build 全绿;
   契约已再生(纯增 DELETE),manual_revision 零泄漏(grep 实证)。**实机冒烟**(真 api 18000+真
   agent 18001+muniu LLM+Chrome headless playwright-core,宿主 18080/18081 已被上游 energy-ai
   占用须避让):查看→编辑(含别名)→保存回显→单项清除(它槽不误伤)→AlertDialog 全部清空→
@@ -891,7 +928,7 @@
 - **本机跑 api 门禁的端口坑(2026-10-01 复现;2026-10-09 已随环境统一栈退役)**:
   当年宿主 6379 被带密码的上游 redis 占用、6380 是本仓避让口的口径已作废——
   现本地环境单源 `~/workspace/env`(pg 5432 / redis 6379 免密),conftest 缺省
-  即正确,跑测试**无需任何 KM_* 注入**(详见「环境事实」2)。
+  即正确,跑测试**无需任何 KM\_* 注入**(详见「环境事实」2)。
 - **两条既有测试陷阱(已修,后来者勿再踩)**:① `tests/test_feedback_promotion.py` 的迁移往返用例
   `downgrade("0033")` 后只 `upgrade("0034")`——head 前移后它会把库永久留在 head 之下,其后每个用例的
   `TRUNCATE` 撞 `UndefinedTableError`(本次实测 518 个 error 的唯一成因),规则是**回 head 不回版本号**;
@@ -930,9 +967,9 @@
   qwen-plus 兼容端点),SQLGuard primary。真实问答全链路(生成→闸门→
   执行→答案卡)浏览器 10/10 走查过(playwright+系统 Chrome,路由经
   `VITE_API_PROXY_TARGET` 真代理);冒烟数据=`kongming_smoke` 库(26 表)
-  + smoke 账号(SUPER_ADMIN)+ smoke_ds/smoke_ds2 数据源(可随时清理,
-  自明命名)。**注意**:本机 admin 密码非缺省(容器 env 自管),冒烟一律
-  自建账号(`_mk` 范式见 tests),勿猜勿改现有凭据。
+  - smoke 账号(SUPER_ADMIN)+ smoke_ds/smoke_ds2 数据源(可随时清理,
+    自明命名)。**注意**:本机 admin 密码非缺省(容器 env 自管),冒烟一律
+    自建账号(`_mk` 范式见 tests),勿猜勿改现有凭据。
 
 ## 当前状态(2026-09-27)
 
@@ -1077,7 +1114,7 @@
    major 卷数据兼容;角色 `kongming/kongming` SUPERUSER+CREATEDB,与原
    compose 超管形态对齐;库 `kongming` 开发库,`kongming_test` 由 conftest
    fixture 自建;NOLOGIN 只读角色 `km_readonly` 已按 `infra/pg-init/
-   001-readonly-role.sql` 预建,kongming_test 侧授权由 baseline 迁移自建)/
+001-readonly-role.sql` 预建,kongming_test 侧授权由 baseline 迁移自建)/
    redis **6379**(localenv-redis,**带密码**=localenv/.env 的 REDIS_PASSWORD,
    勿入仓库)。**跑测试必须 export KM_REDIS_URL**(conftest 缺省无密码连接串
    对 localenv-redis 必 NOAUTH 成片 ERROR;KM_DATABASE_URL 缺省即 localenv
@@ -1096,12 +1133,15 @@
    旧版,存量在架 Bot 的 v1 行主键保持 v4,新环境与 kongming_test 从修订版
    跑全 v7;版本形态混合为已知现态,运行行为无差。
 3. **本地环境冷启动**(幂等,任何"连不上/端口不对"先跑这个):
+
    ```bash
    cd ~/workspace/localenv && podman compose up -d
    cd apps/api && uv run alembic upgrade head      # 开发库迁移(kongming_test 由 conftest 自建)
    ```
+
    pg 数据持久化在 localenv 命名卷 `localenv_postgres-data`;删卷/重置属
    破坏性操作,须用户明确授权。localenv 服务清单与连接信息见其 README。
+
 4. **两 apps 的 .env 现态**(2026-10-11 复核,替代 2026-09-28「不存在」
    旧口径):`apps/api/.env`、`apps/agent/.env` 均已存在;api 侧
    `KM_REDIS_URL` 为无密码连接串(对 localenv-redis 必 NOAUTH,跑测试仍按
@@ -1112,10 +1152,10 @@
    `kongming-api-1`(18080)/`kongming-agent-1`(18081),env 由
    override 文件注入(示例:`/tmp/smoke-primary.yml` 置
    `KM_SQLGUARD_MODE=primary` 等;`podman compose -f infra/docker-compose.yml
-   -f <override> up -d api agent`)。宿主机 gvproxy 转发 18080/18081。
+-f <override> up -d api agent`)。宿主机 gvproxy 转发 18080/18081。
    **本轮凭据一律来自容器 env(根 .env),勿读勿打印**;从现有容器提
    env 到新 compose 调用可用 `podman inspect <c> --format '{{range
-   .Config.Env}}...'`(值不回显,直接 export 给子进程)。
+.Config.Env}}...'`(值不回显,直接 export 给子进程)。
    LLM 冒烟出口=`DASHSCOPE_API_KEY` 环境变量(dashscope 兼容端点,
    qwen-plus + qwen3.7-text-embedding)。
 6. 可能的后台进程:compose 容器(见 5)、web dev 多实例(5173/5174 属
@@ -1137,13 +1177,13 @@
    4 行 + smoke-self 用户(SELF 域,密码 `Smoke#2026`)+ `sys_datasource`
    行 sakila_dyn(同实例**异库**动态源,指向独立库 `sakila_ext`——外部
    业务库形态,不复用 tenant_sakila 租户 schema;装载随 load.sh 第 6 步)
-   + 5 个联邦账号(漆阳帆-dingtalk 等)——均为回归活数据。冒烟库
-   `kongming_smoke`(26 表:smoke_goods/smoke_orders + 24 张 filler)
-   为 063/064/080 实测建的隔离库,可整库 drop。示例数据源文件
-   `.example-data/`(已 gitignore),装载管线 `infra/example-data/load.sh`
-   (幂等)。存量环境 sakila_dyn 仍指旧形态(同库 tenant_sakila)的,
-   手工一行迁到新落点:`UPDATE public.sys_datasource SET database='sakila_ext',
-   default_schema='public' WHERE datasource_key='sakila_dyn';`(密码不变)。
+   - 5 个联邦账号(漆阳帆-dingtalk 等)——均为回归活数据。冒烟库
+     `kongming_smoke`(26 表:smoke_goods/smoke_orders + 24 张 filler)
+     为 063/064/080 实测建的隔离库,可整库 drop。示例数据源文件
+     `.example-data/`(已 gitignore),装载管线 `infra/example-data/load.sh`
+     (幂等)。存量环境 sakila_dyn 仍指旧形态(同库 tenant_sakila)的,
+     手工一行迁到新落点:`UPDATE public.sys_datasource SET database='sakila_ext',
+default_schema='public' WHERE datasource_key='sakila_dyn';`(密码不变)。
 9. 企微联调:ngrok 免费域名与其可信域名校验不兼容;用 cloudflared 快速
    隧道或正式域名;应用可信 IP 白名单随家宽漂移重配。
 10. **仓库迁移后旧 venv 假健康**:apps/*/.venv 若建于旧绝对路径
@@ -1180,9 +1220,9 @@
     `tests/conftest.py` 的 `migrated_tmp_db()` 一次性临时库**(随机后缀库
     →演练→DROP,占位随库清零);新增迁移 roundtrip 测试必须用它,禁止在
     kongming_test 上跑 add/drop 循环。占位识别:`SELECT count(*) FROM
-    pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON
-    n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='<表>' AND
-    a.attisdropped`(超 800 即应重建);重建=DROP DATABASE kongming_test
+pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON
+n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='<表>' AND
+a.attisdropped`(超 800 即应重建);重建=DROP DATABASE kongming_test
     WITH (FORCE) 后 CREATE(纯测试库,conftest 自动迁移),**重建后必须重跑
     上文 zhparser 两件套**(扩展/检索配置按库安装,漏掉=4 个中文分词集成
     测试转 skip;2026-10-12 重建后已补装)。
@@ -1204,24 +1244,24 @@ make contracts      # 导出 OpenAPI + 生成前端类型(改 api 后必跑)
 
 ## 已定死的决策(不再议,引用即终)
 
-| 主题 | 结论 | 出处 |
-|---|---|---|
-| 技术栈 | Python 3.13 双进程(api 持凭证 / agent 零凭证)+ React 19 SPA;不引入 Keycloak/Next.js/微服务/消息队列/Litestar | ADR-001 |
-| 信任边界 | 进程边界构造级;agent 禁 DB 凭证(env/驱动双禁);合并进程=违宪 | ADR-002 + 宪法 Article IV |
-| 认证 | 自建(argon2id + PyJWT RS256 + authlib 联邦连接器);未来企业 SSO 走 IdP 下游回退 | ADR-003/006 |
-| Schema | baseline 制;UUID v7 / VARCHAR+CHECK / timestamptz;已规划能力列一次建全;新表/改表走新迁移 | ADR-004 |
-| 契约 | FastAPI OpenAPI 唯一事实源;前端类型生成禁手写;CI 漂移 diff | ADR-005 |
-| 分层 | 域包 router→service→models→repository;domain 零框架依赖 | 宪法 Article II |
-| 执行路由 | verdict 三态(PASS/BLOCKED/ERROR);绑定复校;data_scope=最外层 WHERE AST 注入;控制面保留表拒读+危险函数拒用;只读池连接级只读 | sql-execution + datascope spec |
-| 问答链路 | agent 8 节点图(老链路)+ ReAct 内核(019)双轨;verdict 对外四态(PASS/BLOCKED/ERROR/NO_DATA,044 如实说明);权限类不重试;重试上限=初始之外 2 次 | nl2sql + nl2sql-agent + chat spec |
-| RAG/知识库 | rag 两表(四元唯一键+HNSW+GIN);三路召回 RRF top5+query_history 独立 few-shot;召回零命中回退内省;成功 SQL 回写;覆盖优先级 INTROSPECTION<AI<UPLOAD<EDIT<FEEDBACK;别名(037)=生效值同源重算派生文本 | rag + knowledge spec |
-| 评估体系 | Execution Match 双分引擎;宽松=黄金指标且不惩罚序错;evals 进程外工具 testpaths 隔离;query_history 幂等治理 | eval + ai-eval spec |
-| prompt 质量 | 生成/理解/摘要三层规则(统计不加 LIMIT/tiebreaker/ROUND/投影完备+技术主键默认不进投影/列级哨兵两级如实说明/指代保真/事实性接地);prompt 文本迭代经验=点名自我合理化的反例比抽象纪律条遵从度高;gold 规范十条与生成侧互锁 | nl2sql-agent spec |
-| Bot/商业化 | Bot 定义+权限逐请求求交;OpenAI 兼容端点;BOT 维度配额+mock 支付闭环(核销单点 reconcile);团队归属可见性纯函数 | custom-agent + payment + team spec |
-| 多模型/观测 | 注册表 env JSON(条目级 protocol:openai/anthropic/responses)+任务路由+出口白名单;协议翻译层单点收敛(llm_protocol.py);用量采集 fire-and-forget+bot 收集器双通道;失败调用也采集(status/latency) | multi-model-routing + observability spec + ADR-008 |
-| LLM 网关 | muniu(127.0.0.1:8787,OpenAI 兼容)为可选端点,官方直连一等公民;供应商 key 仍可收敛 muniu 单点;回滚=.env 三处改回直连,零成本 | ADR-007(2026-09-26 修订) |
-| 前端 Markdown 渲染 | 文档卡收编 react-markdown+remark-gfm/breaks;不解析原始 HTML、无 dangerouslySetInnerHTML | ADR-009 |
-| 挂账治理 | 开放挂账=零;新发现项一律给终态(修/关闭/条件触发/产品登记),不留无排期「随域延后」 | backlog-settlement 终态块 |
+| 主题               | 结论                                                                                                                                                                                                                  | 出处                                               |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| 技术栈             | Python 3.13 双进程(api 持凭证 / agent 零凭证)+ React 19 SPA;不引入 Keycloak/Next.js/微服务/消息队列/Litestar                                                                                                          | ADR-001                                            |
+| 信任边界           | 进程边界构造级;agent 禁 DB 凭证(env/驱动双禁);合并进程=违宪                                                                                                                                                           | ADR-002 + 宪法 Article IV                          |
+| 认证               | 自建(argon2id + PyJWT RS256 + authlib 联邦连接器);未来企业 SSO 走 IdP 下游回退                                                                                                                                        | ADR-003/006                                        |
+| Schema             | baseline 制;UUID v7 / VARCHAR+CHECK / timestamptz;已规划能力列一次建全;新表/改表走新迁移                                                                                                                              | ADR-004                                            |
+| 契约               | FastAPI OpenAPI 唯一事实源;前端类型生成禁手写;CI 漂移 diff                                                                                                                                                            | ADR-005                                            |
+| 分层               | 域包 router→service→models→repository;domain 零框架依赖                                                                                                                                                               | 宪法 Article II                                    |
+| 执行路由           | verdict 三态(PASS/BLOCKED/ERROR);绑定复校;data_scope=最外层 WHERE AST 注入;控制面保留表拒读+危险函数拒用;只读池连接级只读                                                                                             | sql-execution + datascope spec                     |
+| 问答链路           | agent 8 节点图(老链路)+ ReAct 内核(019)双轨;verdict 对外四态(PASS/BLOCKED/ERROR/NO_DATA,044 如实说明);权限类不重试;重试上限=初始之外 2 次                                                                             | nl2sql + nl2sql-agent + chat spec                  |
+| RAG/知识库         | rag 两表(四元唯一键+HNSW+GIN);三路召回 RRF top5+query_history 独立 few-shot;召回零命中回退内省;成功 SQL 回写;覆盖优先级 INTROSPECTION<AI<UPLOAD<EDIT<FEEDBACK;别名(037)=生效值同源重算派生文本                        | rag + knowledge spec                               |
+| 评估体系           | Execution Match 双分引擎;宽松=黄金指标且不惩罚序错;evals 进程外工具 testpaths 隔离;query_history 幂等治理                                                                                                             | eval + ai-eval spec                                |
+| prompt 质量        | 生成/理解/摘要三层规则(统计不加 LIMIT/tiebreaker/ROUND/投影完备+技术主键默认不进投影/列级哨兵两级如实说明/指代保真/事实性接地);prompt 文本迭代经验=点名自我合理化的反例比抽象纪律条遵从度高;gold 规范十条与生成侧互锁 | nl2sql-agent spec                                  |
+| Bot/商业化         | Bot 定义+权限逐请求求交;OpenAI 兼容端点;BOT 维度配额+mock 支付闭环(核销单点 reconcile);团队归属可见性纯函数                                                                                                           | custom-agent + payment + team spec                 |
+| 多模型/观测        | 注册表 env JSON(条目级 protocol:openai/anthropic/responses)+任务路由+出口白名单;协议翻译层单点收敛(llm_protocol.py);用量采集 fire-and-forget+bot 收集器双通道;失败调用也采集(status/latency)                          | multi-model-routing + observability spec + ADR-008 |
+| LLM 网关           | muniu(127.0.0.1:8787,OpenAI 兼容)为可选端点,官方直连一等公民;供应商 key 仍可收敛 muniu 单点;回滚=.env 三处改回直连,零成本                                                                                             | ADR-007(2026-09-26 修订)                           |
+| 前端 Markdown 渲染 | 文档卡收编 react-markdown+remark-gfm/breaks;不解析原始 HTML、无 dangerouslySetInnerHTML                                                                                                                               | ADR-009                                            |
+| 挂账治理           | 开放挂账=零;新发现项一律给终态(修/关闭/条件触发/产品登记),不留无排期「随域延后」                                                                                                                                      | backlog-settlement 终态块                          |
 
 ## 挂账终态(开放挂账=零,2026-08-25 backlog-settlement 裁决;2026-10-01 曾登记的两条「待 owner 裁决」已由 086 裁决并落地,见本节末)
 
@@ -1236,7 +1276,8 @@ alibaba_ai_search 真实出站 e2e(2026-10-14 结案:owner 提供实例域名与
 key,注册表回填真实 host,网关实调 executed+5 检索卡,曾在案的「待 key」
 条件消除;key 已入根 .env 的 KM_WEBSEARCH_*,不入库)。
 
-   **已裁决并落地(2026-10-01,change 086 `authz-status-single-gate`,已归档)**:
+**已裁决并落地(2026-10-01,change 086 `authz-status-single-gate`,已归档)**:
+
 - **禁用角色让行级可见范围反向放宽 → 角色状态升为授权读取的统一闸**:裁的是「**一切**按主体取授权面的
   读取都必须 `sys_role.status='ACTIVE'`」,而不是只补 applier 那条「无启用角色」分支。理由:`datascope`
   主规格早就把范围解释成「用户**启用**角色的并集」,而功能权限点(`SqlPermRepo.list_codes`)、审计/反馈/
@@ -1256,7 +1297,8 @@ key,注册表回填真实 host,网关实调 executed+5 检索卡,曾在案的「
   用例 `test_dept_and_below_includes_disabled_dept` 反查。若日后确要「停用即停可见」,那是新的产品需求,
   得另立变更并同时改三档与前端语义,不能靠回归这条 CTE 偷偷实现。
 
-   **条件触发登记(触发即评估,非开放债务)**:
+  **条件触发登记(触发即评估,非开放债务)**:
+
 - 注入拆字/全角变体绕过:触发=出现真实绕过事件或规模化信号。
 - MCP 远端错误文案反射面收紧:触发=生态滥用信号。
 - 多 worker 三项(池失效广播/归档 advisory lock/调度互斥):触发=实际多 worker 部署。
@@ -1283,6 +1325,7 @@ MCP resources/prompts/Bot 版本化/配额/重试/邮件事件源/zhparser 配�
 ## 关键教训精选(代码里看不出来的操作知识)
 
 流程与门禁:
+
 - 会话级 alembic upgrade 的 `fileConfig`(disable_existing_loggers)会把
   **收集期已 import** 的模块 logger 置 disabled——新测试用 caplog 断言日志,
   夹具里先把目标 logger `disabled = False`(053 test_sqlfw_engine 实证)。
@@ -1339,6 +1382,7 @@ MCP resources/prompts/Bot 版本化/配额/重试/邮件事件源/zhparser 配�
   用户问题自身——断言前先把问题文本从正文剥掉再看。
 
 LLM/异步/协议:
+
 - 工具回调通道 status 恒 executed,**业务 verdict 在 result 内**(去重/
   熔断集按 verdict 收,否则诱导 LLM 编造)。
 - httpx 超时=单次操作间隔而非总时长(慢滴必须 wait_for 包总预算);
@@ -1354,6 +1398,7 @@ LLM/异步/协议:
   重建波及回环),勿误判限流勿长冷却,网络稳定后重跑。
 
 SQL/PG:
+
 - sqlglot 深嵌套抛 RecursionError **不在** SqlglotError 族(except 须扩面)。
 - LEFT JOIN 的范围过滤条件必须放 ON 内(放 WHERE 把补零桶滤掉)。
 - 超长中文文本列唯一索引用 md5 表达式索引;ON CONFLICT 要求表达式逐字
@@ -1363,14 +1408,16 @@ SQL/PG:
   (READ COMMITTED 下 wCTE 快照竞态消不掉)。
 
 安全:
+
 - SSRF DNS rebinding 防护=自定义 transport 钉扎判定 IP+Host 头保原域+
   `extensions["sni_hostname"]`(证书按原域校验)。
 - 免费文本进三引号围栏前必须替换围栏序列(提前闭合=注入逃逸)。
 - 别名/文件名类自由文本校验结构字符(换行可伪造表名注入);上传文件名
-  过护栏 pii_*/cred_*/inj_ 规则(拒绝优于脱敏:脱敏名撞唯一键)。
+  过护栏 pii__/cred__/inj_ 规则(拒绝优于脱敏:脱敏名撞唯一键)。
 - 敏感凭证字段 api_key 用 repr=False;PENDING_CONFIRM 凭证原文终态清零。
 
 前端/浏览器:
+
 - Playwright MCP:textarea 用原生 setter+input 事件(React 受控组件 fill
   偶发不触发);Radix 下拉/菜单 pointerdown 派发+evaluate DOM click;
   react-query 失效重渲染后快照 ref 过期,click 静默落空——改 evaluate
@@ -1404,13 +1451,13 @@ SQL/PG:
 
 > 增删任一侧门禁时双向核对本表,防止单边增删再现(054 立表动机:pyright 曾是本地专属门禁,CI 假绿)。
 
-| 门禁 | 本地命令 | CI job | CI 步骤 | 差异说明 |
-|---|---|---|---|---|
-| api 静态+测试 | `make api-check`(ruff format/check + mypy + **pyright** + lint-imports + pytest --cov) | `api` | 同左全序(pyright 于 2026-09-13 补齐) | 无 |
-| agent 静态+测试 | `make agent-check`(同上结构) | `agent` | 同左全序(pyright 同批补齐) | 无 |
-| liannu 引擎 | `make liannu-check`(ruff+mypy+pytest,含对拍基线回放) | `liannu` | 同左 | 无 |
-| web | `make web-check`(tsc+eslint+stylelint+prettier;**vitest 于 066 接入 CI `test:run`,60 例**) | `web` | 同左(066 补齐前端单测短板) | 无 |
-| 契约漂移 | `make contracts-check`(已并入 check;055 教训后补齐) | `contracts` | `make -C ../.. contracts-check`(单源) | 无 |
+| 门禁            | 本地命令                                                                                   | CI job      | CI 步骤                               | 差异说明 |
+| --------------- | ------------------------------------------------------------------------------------------ | ----------- | ------------------------------------- | -------- |
+| api 静态+测试   | `make api-check`(ruff format/check + mypy + **pyright** + lint-imports + pytest --cov)     | `api`       | 同左全序(pyright 于 2026-09-13 补齐)  | 无       |
+| agent 静态+测试 | `make agent-check`(同上结构)                                                               | `agent`     | 同左全序(pyright 同批补齐)            | 无       |
+| liannu 引擎     | `make liannu-check`(ruff+mypy+pytest,含对拍基线回放)                                       | `liannu`    | 同左                                  | 无       |
+| web             | `make web-check`(tsc+eslint+stylelint+prettier;**vitest 于 066 接入 CI `test:run`,60 例**) | `web`       | 同左(066 补齐前端单测短板)            | 无       |
+| 契约漂移        | `make contracts-check`(已并入 check;055 教训后补齐)                                        | `contracts` | `make -C ../.. contracts-check`(单源) | 无       |
 
 ## 邮件入站触发器演示配方(108;真实 IMAP 联调待邮箱账号,以下为可复现配方)
 
