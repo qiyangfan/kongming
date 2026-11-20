@@ -451,20 +451,20 @@ class ChatService:
             )
             if mem:
                 parts.append(mem)
-        except Exception:  # noqa: BLE001  # 记忆读取失败不影响问答
+        except Exception:  # 记忆读取失败不影响问答
             log.warning("记忆召回异常(降级无注入)", exc_info=True)
         try:
             pref = await self._ports.memory.preference_hint(user_id=user_id, tenant_id=tenant_id)
             if pref:
                 parts.append(pref)
-        except Exception:  # noqa: BLE001  # 偏好读取失败不影响问答
+        except Exception:  # 偏好读取失败不影响问答
             log.warning("偏好注入异常(降级无注入)", exc_info=True)
         revision: int | None = None
         try:
             revision = await self._ports.memory.current_revision(
                 user_id=user_id, tenant_id=tenant_id
             )
-        except Exception:  # noqa: BLE001  # 版本捕获失败只放弃自动写入
+        except Exception:  # 版本捕获失败只放弃自动写入
             log.warning("偏好人工版本捕获异常(本轮自动写入跳过)", exc_info=True)
         return "\n\n".join(parts), revision
 

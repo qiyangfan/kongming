@@ -194,7 +194,7 @@ class SqlSemanticRepo:
                         "SELECT id, metric_name, sql_template, business_terms, enabled,"  # noqa: S608  # 常量模板,参数化绑定
                         " updated_at, visible_scope, dept_id"
                         " FROM rag.metric_definitions"
-                        f" WHERE tenant_id=:t AND datasource_key=:d{vis}"  # noqa: S608  # 常量模板,参数化绑定
+                        f" WHERE tenant_id=:t AND datasource_key=:d{vis}"  # 常量模板,参数化绑定
                         " ORDER BY metric_name"
                     ),
                     params,

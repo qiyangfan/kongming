@@ -316,7 +316,7 @@ async def test_fused_answer_precondition_guard(monkeypatch: pytest.MonkeyPatch) 
         async def chat(self, *a: object, **kw: object) -> str:
             raise AssertionError("前置不满足时不得发起 LLM 调用")
 
-    monkeypatch.setattr(deps, "get_llm", lambda: _Boom())
+    monkeypatch.setattr(deps, "get_llm", _Boom)
     assert await fused_answer(_fused_state(execution=None)) == {}
     assert (
         await fused_answer(_fused_state(execution=ExecutionResult(verdict="ERROR", reason="x")))

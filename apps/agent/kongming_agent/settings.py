@@ -44,9 +44,10 @@ def _parse_max_image(item: dict[str, object], name: str) -> float | None:
         return None
     try:
         value = float(raw)
-        if value <= 0:
-            raise ValueError("非正数")
     except (TypeError, ValueError):
+        log.warning("注册表条目 %s max_image_mb 畸形,剔除该字段", name)
+        return None
+    if value <= 0:
         log.warning("注册表条目 %s max_image_mb 畸形,剔除该字段", name)
         return None
     return value
@@ -59,9 +60,10 @@ def _parse_context_window(item: dict[str, object], name: str) -> int | None:
         return None
     try:
         value = int(cast("int | float | str", raw))
-        if value <= 0:
-            raise ValueError("非正数")
     except (TypeError, ValueError):
+        log.warning("注册表条目 %s context_window 畸形,按未声明处理", name)
+        return None
+    if value <= 0:
         log.warning("注册表条目 %s context_window 畸形,按未声明处理", name)
         return None
     return value
@@ -193,8 +195,8 @@ class Settings(BaseSettings):
             return {}
         try:
             raw = json.loads(self.model_registry_json)
-        except json.JSONDecodeError as e:
-            log.error("MODEL_REGISTRY_JSON 解析失败,回退单模型: %s", e)
+        except json.JSONDecodeError:
+            log.exception("MODEL_REGISTRY_JSON 解析失败,回退单模型")
             return {}
         if not isinstance(raw, list):
             log.error("MODEL_REGISTRY_JSON 须为数组,回退单模型")
@@ -217,8 +219,8 @@ class Settings(BaseSettings):
             return {}
         try:
             raw = json.loads(self.model_routes_json)
-        except json.JSONDecodeError as e:
-            log.error("MODEL_ROUTES_JSON 解析失败,全走主模型: %s", e)
+        except json.JSONDecodeError:
+            log.exception("MODEL_ROUTES_JSON 解析失败,全走主模型")
             return {}
         if not isinstance(raw, dict):
             return {}

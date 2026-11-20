@@ -10,9 +10,9 @@ from typing import Any, cast
 # 保证 kongming/tests/evals 可导入(scripts/ 直跑形态)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from kongming.datascope import rewrite  # noqa: E402
-from kongming.datascope.models import FilterType, ScopeFilter  # noqa: E402
-from kongming.sqlfw import firewall  # noqa: E402
+from kongming.datascope import rewrite
+from kongming.datascope.models import FilterType, ScopeFilter
+from kongming.sqlfw import firewall
 
 DEFAULT_OUT = Path(__file__).resolve().parents[2] / (
     "packages/liannu/tests/fixtures/kongming_baseline.json"
@@ -166,7 +166,7 @@ def _builtin_case(sql: str, allowed: list[str] | None, with_rewrite: bool) -> di
     try:
         ref = rewrite.extract_main_table_ref(sql)
         expect["main_table_ref"] = {"ref": list(ref) if ref is not None else None}
-    except Exception:
+    except Exception:  # noqa: BLE001
         logging.getLogger(__name__).debug("extract_main_table_ref 异常,跳过冻结: %r", sql[:80])
 
     # 只记录成功的改写结果;其余解析结果由 check 字段描述。
@@ -180,7 +180,7 @@ def _builtin_case(sql: str, allowed: list[str] | None, with_rewrite: bool) -> di
             )
             try:
                 new_sql, params = rewrite.apply_filter(sql, flt)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logging.getLogger(__name__).debug(
                     "apply_filter 异常,跳过冻结: %r %s", sql[:80], flt_spec["filter_type"]
                 )

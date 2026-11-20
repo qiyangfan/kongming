@@ -80,9 +80,7 @@ def is_transient_error(exc: BaseException) -> bool:
     if isinstance(root, (httpx.TransportError, ConnectionError, TimeoutError)):
         return True
     names = _type_names(root)
-    if "APIConnectionError" in names or "APITimeoutError" in names:
-        return True
-    return False
+    return bool("APIConnectionError" in names or "APITimeoutError" in names)
 
 
 def is_connect_phase_error(exc: BaseException) -> bool:
@@ -98,9 +96,7 @@ def is_connect_phase_error(exc: BaseException) -> bool:
     if isinstance(root, (httpx.ConnectError, httpx.ConnectTimeout)):
         return True
     names = _type_names(root)
-    if "APIConnectionError" in names and "APITimeoutError" not in names:
-        return True
-    return False
+    return bool("APIConnectionError" in names and "APITimeoutError" not in names)
 
 
 def retry_wait_ms(
@@ -144,7 +140,7 @@ async def call_with_retry[T](
     for i in range(1, max_attempts + 1):
         try:
             return await attempt()
-        except Exception as exc:  # noqa: BLE001  分类后决定重发或上抛
+        except Exception as exc:
             if i >= max_attempts or not is_transient(exc):
                 raise
             wait_ms = retry_wait_ms(i, exc, base_delay_ms=base_delay_ms, max_wait_ms=max_wait_ms)

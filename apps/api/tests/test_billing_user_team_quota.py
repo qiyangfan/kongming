@@ -59,11 +59,11 @@ async def test_migration_0046_scope_check_and_guard() -> None:
             session, tenant_id=str(tid), scope="TEAM", scope_ref=str(uuid_mod.uuid4())
         )
         # 域外 scope 拒
-        with pytest.raises(Exception):  # noqa: B017,S101  # CHECK 违约即抛(DBAPIError)
+        with pytest.raises(Exception):  # noqa: B017  # CHECK 违约即抛(DBAPIError)
             await _ins_policy(session, tenant_id=str(tid), scope="GROUP", scope_ref=None)
         await session.rollback()
         # USER/TEAM 行 scope_ref 须非空(互斥 CHECK 与 BOT 同形态)
-        with pytest.raises(Exception):  # noqa: B017,S101
+        with pytest.raises(Exception):  # noqa: B017
             await _ins_policy(session, tenant_id=str(tid), scope="USER", scope_ref=None)
         await session.rollback()
         # 存量守卫:有 USER 行,降级被拒且版本停在 0046
@@ -72,7 +72,7 @@ async def test_migration_0046_scope_check_and_guard() -> None:
 
         await session.rollback()
         await asyncio.to_thread(command.downgrade, cfg, "0046")
-        with pytest.raises(Exception):  # noqa: B017,S101  # 守卫 RuntimeError
+        with pytest.raises(Exception):  # noqa: B017  # 守卫 RuntimeError
             await asyncio.to_thread(command.downgrade, cfg, "0045")
         assert await _db_version(session) == "0046"
         # 必须回到 head:停旧版会让其后用例 TRUNCATE 撞不存在的表
@@ -96,7 +96,7 @@ async def test_migration_0046_downgrade_roundtrip() -> None:
         await session.rollback()
         await asyncio.to_thread(command.downgrade, cfg, "0045")
         # 收窄后 USER 行拒(TENANT/BOT 存量行零影响)
-        with pytest.raises(Exception):  # noqa: B017,S101
+        with pytest.raises(Exception):  # noqa: B017
             await _ins_policy(
                 session, tenant_id=str(tid), scope="USER", scope_ref=str(uuid_mod.uuid4())
             )

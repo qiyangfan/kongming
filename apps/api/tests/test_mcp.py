@@ -305,12 +305,12 @@ class _RealServer:
         from mcp.server.lowlevel import Server
         from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-        kwargs: dict[str, Any] = dict(
-            on_list_tools=_on_list_tools,
-            on_call_tool=self._on_call_tool,
-            on_read_resource=_on_read_resource,
-            on_get_prompt=_on_get_prompt,
-        )
+        kwargs: dict[str, Any] = {
+            "on_list_tools": _on_list_tools,
+            "on_call_tool": self._on_call_tool,
+            "on_read_resource": _on_read_resource,
+            "on_get_prompt": _on_get_prompt,
+        }
         if self.primitives == "all":
             kwargs["on_list_resources"] = self._on_list_resources
             kwargs["on_list_prompts"] = _on_list_prompts
@@ -1278,25 +1278,27 @@ async def test_mcp_inbound_sdk_client_consistency(
     plain = await _bot_with_key(mcp_client, session, make_user, fake_agent)
     from kongming.main import app as km_app
 
-    async with httpx2.AsyncClient(
-        transport=httpx2.ASGITransport(app=km_app),
-        trust_env=False,
-        timeout=httpx2.Timeout(10, read=30),
-        headers={"X-Api-Key": plain},
-    ) as hc:
-        async with streamable_http_client(url="http://test/mcp", http_client=hc) as (
+    async with (
+        httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=km_app),
+            trust_env=False,
+            timeout=httpx2.Timeout(10, read=30),
+            headers={"X-Api-Key": plain},
+        ) as hc,
+        streamable_http_client(url="http://test/mcp", http_client=hc) as (
             read_stream,
             write_stream,
-        ):
-            async with ClientSession(read_stream, write_stream, read_timeout_seconds=10) as sess:
-                result = await sess.discover()
-                assert result.supported_versions == ["2026-07-28"]  # 平台声明当前修订
-                tools = await sess.list_tools()
-                assert [t.name for t in tools.tools] == ["bot__after_sale"]
-                out = await sess.call_tool("bot__after_sale", {"question": "你好"})
-                assert out.is_error is False
-                texts = [c.text for c in out.content if isinstance(c, mcp_types.TextContent)]
-                assert texts == ["Bot 应答"]
+        ),
+        ClientSession(read_stream, write_stream, read_timeout_seconds=10) as sess,
+    ):
+        result = await sess.discover()
+        assert result.supported_versions == ["2026-07-28"]  # 平台声明当前修订
+        tools = await sess.list_tools()
+        assert [t.name for t in tools.tools] == ["bot__after_sale"]
+        out = await sess.call_tool("bot__after_sale", {"question": "你好"})
+        assert out.is_error is False
+        texts = [c.text for c in out.content if isinstance(c, mcp_types.TextContent)]
+        assert texts == ["Bot 应答"]
     assert fake_agent["agent"].calls[0]["channel"] == "mcp"
 
 
@@ -1530,13 +1532,13 @@ class _StubProbeCaller:
             failures=failures,
         )
 
-    async def call(self, **kw: object) -> dict[str, Any]:  # noqa: ARG002
+    async def call(self, **kw: object) -> dict[str, Any]:
         return {}
 
-    async def read_resource(self, **kw: object) -> dict[str, Any]:  # noqa: ARG002
+    async def read_resource(self, **kw: object) -> dict[str, Any]:
         return {}
 
-    async def get_prompt(self, **kw: object) -> dict[str, Any]:  # noqa: ARG002
+    async def get_prompt(self, **kw: object) -> dict[str, Any]:
         return {}
 
 

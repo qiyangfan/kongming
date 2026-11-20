@@ -34,7 +34,7 @@ async def assert_fulltext_ts_config_available(session: AsyncSession, ts_config: 
         raise RuntimeError(
             f"全文检索分词配置 {cfg} 在 pg_ts_config 中不存在(分词器未安装,"
             "如 zhparser 扩展缺失)——检索配置降级会与存量 tsv 错配,拒绝启动;"
-            "安装配方见 docs/HANDOFF.md「zhparser 安装配方(pg18 localenv)」,"
+            "启用配方见 docs/HANDOFF.md「中文分词(zhparser)启用配方」,"
             "或改配 KM_RAG_FULLTEXT_TS_CONFIG=simple 回退缺省"
         )
     return cfg

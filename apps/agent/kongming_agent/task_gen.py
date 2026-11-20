@@ -40,7 +40,7 @@ def _extract_steps(raw: str) -> list[dict[str, object]]:
         raise ValueError("plan 输出无数组")
     obj = json.loads(text[start : end + 1])
     if not isinstance(obj, list):
-        raise ValueError("plan 输出非数组")
+        raise TypeError("plan 输出非数组")
     out: list[dict[str, object]] = []
     for item in cast("list[object]", obj[:_MAX_STEPS]):
         itemd = cast("dict[str, object] | None", item if isinstance(item, dict) else None)
@@ -131,7 +131,7 @@ class TaskOrchestrator:
         )
         try:
             steps = _extract_steps(plan_raw)
-        except ValueError as e:
+        except (ValueError, TypeError) as e:
             return [], await self._finish("FAILED", f"规划输出畸形: {e}")
         created = await self._api.task_plan(
             task_id=self._task_id, tenant_key=self._tenant_key, steps=steps

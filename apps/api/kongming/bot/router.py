@@ -127,7 +127,7 @@ async def _check_datasource_field(
     if "datasource_key" not in fields or str(fields["datasource_key"]) == "default":
         return
     try:
-        await svc._assert_datasource(tenant_id, str(fields["datasource_key"]))  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+        await svc.assert_datasource(tenant_id, str(fields["datasource_key"]))
     except InvalidBotKey as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 
@@ -136,7 +136,7 @@ async def _check_model_field(svc: BotService, fields: dict[str, object]) -> None
     """model 变更时复校 agent 注册表。"""
     if "model" not in fields:
         return
-    available = await svc._runner.list_models()  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+    available = await svc.registered_models()
     if str(fields["model"]) not in available:
         raise HTTPException(status_code=400, detail="模型未注册") from None
 
@@ -154,13 +154,13 @@ async def _check_tools_field(
         return
     # 与 create 同口径——须含 MCP 动态工具集,否则含
     # mcp__ 工具的 Bot 任何一次带 tools 的更新都被静态注册表误拒(工具集被冻结)
-    mcp_names = await svc._mcp_names(tenant_id)  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+    mcp_names = await svc.mcp_names(tenant_id)
     allowed = tools_for_perms(await SqlPermRepo(session).list_codes(user_id), mcp_names)
     try:
         validate_tool_subset(
             [str(t) for t in cast("list[object]", fields["tools"] or [])],
             allowed,
-            registered_names=svc._registered_names(mcp_names),  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+            registered_names=svc.registered_names(mcp_names),
         )
     except ToolSubsetViolation as e:
         raise HTTPException(status_code=400, detail=str(e)) from None

@@ -170,7 +170,7 @@ def _scheduler_with(svc: _StubService):
 
     sched = TriggerScheduler(service_factory=None)
     # 桩服务与 TriggerService 鸭子类型相容,cast 对齐工厂协议(运行时不变)
-    sched._factory = cast(  # noqa: SLF001  # 测试注入(与 lifespan 同点)
+    sched._factory = cast(  # 测试注入(与 lifespan 同点)
         "Callable[[], Awaitable[tuple[Any, Callable[[], Awaitable[None]]]]]",
         _factory,
     )
@@ -192,7 +192,7 @@ async def test_scheduler_min_interval_skips() -> None:
         ]
     )
     sched = _scheduler_with(svc)
-    await sched._tick()  # noqa: SLF001  # 直测 tick(测试专用入口)
+    await sched._tick()  # 直测 tick(测试专用入口)
     assert svc.fired == []
     assert svc.skipped == ["最小间隔保护"]
     assert svc.marked and svc.marked[0][1] is not None  # SKIPPED 也推进 next_fire
@@ -213,8 +213,8 @@ async def test_scheduler_in_progress_skips() -> None:
     )
     sched = _scheduler_with(svc)
     # 占位 Future 模拟在途执行,cast 对齐 Task 形态(运行时不变)
-    sched._running["t2"] = cast("asyncio.Task[None]", asyncio.get_running_loop().create_future())  # noqa: SLF001
-    await sched._tick()  # noqa: SLF001
+    sched._running["t2"] = cast("asyncio.Task[None]", asyncio.get_running_loop().create_future())
+    await sched._tick()
     assert svc.fired == []
     assert svc.skipped == ["前次执行进行中"]
 
@@ -243,7 +243,7 @@ async def test_scheduler_cron_recalc_failure_stops() -> None:
     orig = models_mod.next_fire
     models_mod.next_fire = _boom
     try:
-        await sched._fire_then_mark("t3")  # noqa: SLF001
+        await sched._fire_then_mark("t3")
     finally:
         models_mod.next_fire = orig
     assert svc.failed and "下次触发计算失败" in svc.failed[0]

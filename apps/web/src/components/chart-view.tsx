@@ -4,10 +4,10 @@ import { lazy, Suspense, useEffect, useState } from "react";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTheme } from "@/lib/theme-store";
-import type { ChartDatum, ChartSpec, ChartTune, ChartType } from "@/components/chart-shared";
-import { normalizeType } from "@/components/chart-shared";
+import type { ChartDatum, ChartSpec, ChartTune, ChartType } from "@/lib/chart-shared";
+import { normalizeType } from "@/lib/chart-shared";
 
-export type { ChartDatum, ChartTune } from "@/components/chart-shared";
+export type { ChartDatum, ChartTune } from "@/lib/chart-shared";
 
 const ChartViewImpl = lazy(() => import("./chart-view-impl"));
 
@@ -19,19 +19,21 @@ export function ChartView({
 }: {
   candidates: ChartSpec[];
   data: ChartDatum;
-  tune?: ChartTune;
+  tune?: ChartTune | undefined;
   /** 呈现层列标签(与 data.columns 等长;缺失回退物理列名)——多度量系列名/调参占位用 */
-  labels?: string[];
+  labels?: string[] | undefined;
 }) {
   const { theme } = useTheme();
+  // 首候选类型(零候选回落柱状;渲染前已拦截零候选)
+  const first = candidates[0];
   const [activeType, setActiveType] = useState<ChartType>(() =>
-    candidates.length > 0 ? normalizeType(candidates[0].type) : "bar",
+    first ? normalizeType(first.type) : "bar",
   );
   // 回落语义(spec):新结果进入/组件实例复用时重置回后端首候选。
   // 依赖取基元(首候选类型+绑定指纹)+react-query 缓存内稳定数组引用
   // (structural sharing),不能依赖外层内联组装的包装对象——否则父组件
   // 无关重渲染(如输入框逐键)会误重置
-  const firstType = candidates.length > 0 ? normalizeType(candidates[0].type) : "bar";
+  const firstType = first ? normalizeType(first.type) : "bar";
   const fingerprint = candidates
     .map((c) => `${c.type}:${c.x ?? ""}:${c.y.join(",")}:${c.series ?? ""}`)
     .join("|");

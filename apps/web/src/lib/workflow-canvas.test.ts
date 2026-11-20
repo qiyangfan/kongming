@@ -160,22 +160,19 @@ describe("合法定义往返无损", () => {
 
 describe("不支持形态白名单检出(明示回落 JSON 态)", () => {
   const unsupported: Record<string, unknown>[] = [
-    { 顶层多余键: 1, nodes: [] } as unknown as Record<string, unknown>,
-    { nodes: "not-array" } as unknown as Record<string, unknown>,
-    { nodes: [{ id: "x", type: "python", config: {} }] } as unknown as Record<string, unknown>,
+    { 顶层多余键: 1, nodes: [] },
+    { nodes: "not-array" },
+    { nodes: [{ id: "x", type: "python", config: {} }] },
     {
       nodes: [{ id: "x", type: "sql", config: { sql: "1", custom_extra: 1 }, depends_on: [] }],
-    } as unknown as Record<string, unknown>,
+    },
     {
       nodes: [{ id: "x", type: "sql", config: { sql: "1" }, label: "多余节点键" }],
-    } as unknown as Record<string, unknown>,
-    { nodes: [{ id: "x", type: "sql" }] } as unknown as Record<string, unknown>,
-    { nodes: [{ id: "x", type: "sql", config: "not-object" }] } as unknown as Record<
-      string,
-      unknown
-    >,
-    { nodes: [{ id: "", type: "sql", config: {} }] } as unknown as Record<string, unknown>,
-    { nodes: [{ id: " x ", type: "sql", config: {} }] } as unknown as Record<string, unknown>,
+    },
+    { nodes: [{ id: "x", type: "sql" }] },
+    { nodes: [{ id: "x", type: "sql", config: "not-object" }] },
+    { nodes: [{ id: "", type: "sql", config: {} }] },
+    { nodes: [{ id: " x ", type: "sql", config: {} }] },
     {
       nodes: [
         { id: "x", type: "sql", config: {} },
@@ -184,29 +181,29 @@ describe("不支持形态白名单检出(明示回落 JSON 态)", () => {
     },
     {
       nodes: [{ id: "x", type: "sql", config: { sql: "1" }, depends_on: ["ghost"] }],
-    } as unknown as Record<string, unknown>,
+    },
     {
       nodes: [{ id: "x", type: "sql", config: { sql: "1" }, depends_on: ["x"] }],
-    } as unknown as Record<string, unknown>,
+    },
     {
       nodes: [
         { id: "x", type: "sql", config: { sql: "1" }, depends_on: ["y", "y"] },
         { id: "y", type: "sql", config: { sql: "2" } },
       ],
-    } as unknown as Record<string, unknown>,
+    },
     {
       nodes: [{ id: "x", type: "sql", config: { sql: "1", on: "yes" } }],
-    } as unknown as Record<string, unknown>,
+    },
     {
       // on 值存在但无条件前驱:画布边上承载不了,静默丢弃 = 禁止
       nodes: [
         { id: "c", type: "sql", config: { sql: "1" } },
         { id: "x", type: "transform", config: { template: "t", on: "true" }, depends_on: ["c"] },
       ],
-    } as unknown as Record<string, unknown>,
+    },
     {
       nodes: [{ id: "x", type: "sql", config: { sql: 1 } }, 42],
-    } as unknown as Record<string, unknown>,
+    },
   ];
 
   for (const [i, definition] of unsupported.entries()) {
@@ -276,7 +273,9 @@ describe("画布 → 定义防御(UI 产出图)", () => {
     if (!back.ok) return;
     const nodes = (back.definition as { nodes: Record<string, unknown>[] }).nodes;
     expect(nodes[1]?.depends_on).toEqual(["a"]);
-    expect("depends_on" in nodes[0]!).toBe(false);
+    const first = nodes[0];
+    if (!first) throw new Error("缺少首个节点");
+    expect("depends_on" in first).toBe(false);
   });
 
   it("空依赖但显式键 → 保留空数组", () => {
@@ -301,7 +300,7 @@ describe("辅助纯函数", () => {
     const ids = [{ id: "sql" }, { id: "sql_2" }];
     expect(nextNodeId(ids, "sql")).toBe("sql_3");
     expect(nextNodeId([], "agent")).toBe("agent");
-    expect(nextNodeId(ids, "condition")).toMatch(/^[A-Za-z0-9_]+$/);
+    expect(nextNodeId(ids, "condition")).toMatch(/^\w+$/);
   });
 
   it("missingRequiredKeys 与服务端必填配置对齐(presence 语义)", () => {

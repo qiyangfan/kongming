@@ -200,7 +200,7 @@ function PrefSlotRow({
       <FormRow label={slot.label} htmlFor={`pref-${slot.key}`} className="flex-1">
         <Input
           id={`pref-${slot.key}`}
-          value={(draft[slot.key] as string) ?? ""}
+          value={draft[slot.key] ?? ""}
           onChange={(e) => setDraft((d) => ({ ...d, [slot.key]: e.target.value }))}
           disabled={pending}
           placeholder="未设置"
@@ -239,7 +239,7 @@ function PrefsBody({ apiState }: { apiState: PrefsApi }) {
     return (
       <div className="space-y-1">
         <ErrorAlert
-          text={`偏好加载失败:${(prefs.error as Error).message}。笔记与历史偏好不受影响;重试或稍后再来。`}
+          text={`偏好加载失败:${prefs.error.message}。笔记与历史偏好不受影响;重试或稍后再来。`}
         />
         <Button
           type="button"

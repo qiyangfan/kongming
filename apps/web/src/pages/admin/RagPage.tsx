@@ -117,6 +117,18 @@ function RagPageTop({
     </>
   );
 }
+/** 已选 schema 不在当前数据源集合(换源/集合变化)时回落到首项。 */
+function useUploadSchemaFallback(
+  schemas: string[] | undefined,
+  current: string,
+  setSchema: (v: string) => void,
+) {
+  useEffect(() => {
+    const first = schemas?.[0];
+    if (schemas && first !== undefined && !schemas.includes(current)) setSchema(first);
+  }, [schemas, current, setSchema]);
+}
+
 export default function RagPage() {
   // ?table=<名> 用于从反馈详情定位条目,并显示提示和行高亮。
   const [searchParams, setSearchParams] = useSearchParams();
@@ -144,13 +156,7 @@ export default function RagPage() {
   const q = useRagQueries({ page, dsFilter, teamScope, uploadDs });
   const m = useRagMutations({ setNotice, setError }, () => setReindexOpen(false));
 
-  // 已选 schema 不在新数据源集合(换源/集合变化)时回落到首项
-  useEffect(() => {
-    const list = q.schemas.data?.schemas;
-    if (list && list.length > 0 && !list.includes(uploadSchema)) {
-      setUploadSchema(list[0]);
-    }
-  }, [q.schemas.data, uploadSchema]);
+  useUploadSchemaFallback(q.schemas.data?.schemas, uploadSchema, setUploadSchema);
 
   // 数据源动作下拉缺省对齐筛选
   useEffect(() => {

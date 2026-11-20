@@ -2,6 +2,7 @@
 
 import type { StatusMeta } from "@/components/status-badge";
 import type { TriggerItem } from "@/lib/trigger-api";
+import { cellText } from "@/lib/utils";
 
 export const PAGE_SIZE = 10;
 
@@ -124,10 +125,10 @@ function filterActionsOf(row: TriggerItem): string {
 // 目标模板 → 表单里的任务字段(模板缺失时取空值)
 function taskTemplateFields(tpl: TriggerItem["task_template"]) {
   return {
-    taskGoal: String(tpl?.goal_template ?? ""),
-    taskDatasource: String(tpl?.datasource_key ?? ""),
+    taskGoal: cellText(tpl?.goal_template),
+    taskDatasource: cellText(tpl?.datasource_key),
     taskConfirmAuto: tpl?.confirm_auto === true,
-    taskThreadField: String(tpl?.thread_field ?? ""),
+    taskThreadField: cellText(tpl?.thread_field),
   };
 }
 

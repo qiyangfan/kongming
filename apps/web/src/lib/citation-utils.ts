@@ -22,7 +22,7 @@ function pushMarker(
 ): void {
   out.push({
     text: m[0],
-    key: m[1].trim(),
+    key: (m[1] ?? "").trim(),
     start: m.index,
     end: m.index + m[0].length,
   });

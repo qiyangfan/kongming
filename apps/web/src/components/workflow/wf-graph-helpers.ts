@@ -100,7 +100,7 @@ export function applyErrorHighlight(ns: WfFlowNode[], errorText: string): WfFlow
 export function locatedServerError(
   selected: WfFlowNode | null,
   errorText: string,
-): { message: string; configKey?: string } | null {
+): { message: string; configKey?: string | undefined } | null {
   if (!selected || errorText === "") return null;
   const located = locateValidationError(errorText);
   return located.nodeIds.includes(selected.id)

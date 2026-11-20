@@ -12,7 +12,7 @@ import { feedbackOverview } from "@/lib/feedback-api";
 type FeedbackTrendPoint = Awaited<ReturnType<typeof feedbackOverview>>["trend"][number];
 type OverviewData = Awaited<ReturnType<typeof feedbackOverview>>;
 
-type Stats = { isLoading: boolean; isError: boolean; data?: OverviewData };
+type Stats = { isLoading: boolean; isError: boolean; data?: OverviewData | undefined };
 
 /* 趋势折线(theme 经 key 作用于本组件:切主题整体重挂,option 重读 token 色板) */
 function FeedbackTrendChart({ trend }: { trend: FeedbackTrendPoint[] }) {
@@ -66,8 +66,11 @@ function FeedbackTrendChart({ trend }: { trend: FeedbackTrendPoint[] }) {
 
 /** 统计卡数值加载/错误态折叠(loading 显 …、错误显 —) */
 function statValue(src: Stats) {
-  return (v: number | string | undefined): number | string =>
-    src.isLoading ? "…" : src.isError ? "—" : (v ?? 0);
+  return (v: number | string | undefined): string => {
+    if (src.isLoading) return "…";
+    if (src.isError) return "—";
+    return String(v ?? 0);
+  };
 }
 
 export function FeedbackStats({ overview }: { overview: Stats }) {

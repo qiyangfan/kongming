@@ -72,7 +72,7 @@ def _normalize_outbound(e: BaseException) -> McpCallError:
         err = _classify_group(cast("BaseExceptionGroup", e))
     else:
         # 残族兜底:平台不失败,一律归 remote
-        log.debug("mcp 出站残族异常归一 remote", exc_info=True)
+        log.debug("mcp 出站残族异常归一 remote: %s", type(e).__name__)
         err = McpCallError("remote", type(e).__name__)
     return err
 
@@ -127,20 +127,22 @@ class HttpMcpCaller:
         """单次连接:传输→会话→能力协商→action。
 
         传输超时是单次操作间隔,慢滴响应须由外层 wait_for 的总预算守「Ns」字面语义。"""
-        async with httpx2.AsyncClient(
-            trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
-            headers=headers,
-            timeout=httpx2.Timeout(self._timeout, read=max(self._timeout, 30.0)),
-        ) as client:
-            async with streamable_http_client(url=endpoint, http_client=client) as (
+        async with (
+            httpx2.AsyncClient(
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                headers=headers,
+                timeout=httpx2.Timeout(self._timeout, read=max(self._timeout, 30.0)),
+            ) as client,
+            streamable_http_client(url=endpoint, http_client=client) as (
                 read_stream,
                 write_stream,
-            ):
-                async with ClientSession(
-                    read_stream, write_stream, read_timeout_seconds=float(self._timeout)
-                ) as session:
-                    caps = await _negotiate(session)
-                    return await action(session, caps)
+            ),
+            ClientSession(
+                read_stream, write_stream, read_timeout_seconds=float(self._timeout)
+            ) as session,
+        ):
+            caps = await _negotiate(session)
+            return await action(session, caps)
 
     # ---- 原语消费(转换 SDK 结果 → 域模型) ----
 
@@ -290,10 +292,11 @@ class HttpMcpCaller:
 
         async def _get(session: ClientSession, caps: types.ServerCapabilities) -> dict[str, Any]:
             result = await session.get_prompt(name, arguments)
-            texts: list[str] = []
-            for msg in result.messages:
-                if isinstance(msg.content, types.TextContent):
-                    texts.append(str(msg.content.text or ""))
+            texts = [
+                str(msg.content.text or "")
+                for msg in result.messages
+                if isinstance(msg.content, types.TextContent)
+            ]
             return {"text": "\n\n".join(texts)}
 
         return await self._run(endpoint=endpoint, headers=headers, action=_get)

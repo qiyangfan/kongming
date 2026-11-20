@@ -10,7 +10,7 @@ export function FieldLabel({
   help,
   children,
 }: {
-  htmlFor?: string;
+  htmlFor?: string | undefined;
   help: string;
   children: string;
 }) {

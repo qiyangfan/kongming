@@ -122,11 +122,13 @@ def test_prompt_full_width_punctuation() -> None:
 
     for prompt in (event_judge._SYSTEM_PROMPT, event_judge._USER_PROMPT_TEMPLATE):
         for i, ch in enumerate(prompt):
-            if ch in (",", ".") and 0 < i < len(prompt) - 1:
-                if _is_han(prompt[i - 1]) and _is_han(prompt[i + 1]):
-                    pytest.fail(
-                        f"prompt 出现汉字间半角标点 {ch!r}: {prompt[max(0, i - 6) : i + 6]}"
-                    )
+            if (
+                ch in (",", ".")
+                and 0 < i < len(prompt) - 1
+                and _is_han(prompt[i - 1])
+                and _is_han(prompt[i + 1])
+            ):
+                pytest.fail(f"prompt 出现汉字间半角标点 {ch!r}: {prompt[max(0, i - 6) : i + 6]}")
 
 
 # ============ 端点行为 ============

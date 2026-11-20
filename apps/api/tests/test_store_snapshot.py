@@ -8,13 +8,13 @@ from kongming.store.snapshot import (
     snapshots_equal,
 )
 
-_BASE = dict(
-    name="销售助手",
-    greeting="你好,我是销售助手",
-    suggestions=["本月 GMV", "退货率"],
-    system_prompt="你是销售分析助手",
-    tools=["execute_sql", "rag_retrieve"],
-)
+_BASE = {
+    "name": "销售助手",
+    "greeting": "你好,我是销售助手",
+    "suggestions": ["本月 GMV", "退货率"],
+    "system_prompt": "你是销售分析助手",
+    "tools": ["execute_sql", "rag_retrieve"],
+}
 
 
 def test_snapshot_key_set_is_pinned() -> None:

@@ -113,7 +113,7 @@ class ChatSessionService:
                     {"fmt": fmt, "rows": len(rows), "truncated": truncated},
                 )
                 await self._repo.commit()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.warning("导出审计落库失败(不阻断)", exc_info=True)
                 with contextlib.suppress(Exception):
                     await self._repo.rollback()

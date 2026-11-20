@@ -85,7 +85,7 @@ def _reserved_lists_match(engine_rules: object) -> bool:
                     return False
             elif tuple(b) != tuple(a or ()):
                 return False
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
     return True
 
@@ -101,7 +101,7 @@ def observations() -> list[dict[str, object]]:
         return list(_observations)
 
 
-def _load_engine() -> Any:  # noqa: ANN401
+def _load_engine() -> Any:
     """惰性加载 liannu;缺失只告警一次,不阻断(消费方降级内置)。"""
     global _engine_loaded
     if _engine is not None:
@@ -113,10 +113,11 @@ def _load_engine() -> Any:  # noqa: ANN401
         import liannu
 
         log.info("SQLGUARD 引擎已加载 version=%s", liannu.__version__)
-        return liannu
     except ImportError as e:
         log.warning("SQLGUARD 引擎不可用,管线以内置路径运行: %s", e)
         return None
+    else:
+        return liannu
 
 
 def startup_self_check() -> bool:
@@ -240,7 +241,7 @@ class Guarded:
                 return None
             try:
                 self._engine_artifact = engine.parse(self.sql)
-            except Exception as e:  # 引擎任何异常都不放行到管线外
+            except Exception as e:  # noqa: BLE001  # 引擎任何异常都不放行到管线外
                 self._engine_failed = True
                 _record_fallback(self.sql, "parse", e)
                 return None
@@ -276,7 +277,7 @@ class Guarded:
             return builtin_fn()
         try:
             engine_verdict: Verdict = engine_fn(engine)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             self._engine_failed = True
             _record_fallback(self.sql, check_name, e)
             return builtin_fn()
@@ -329,7 +330,7 @@ class Guarded:
                 try:
                     ref = art.main_table_ref()
                     return None if ref is None else (str(ref[0]), cast("str | None", ref[1]))
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     self._engine_failed = True
                     _record_fallback(self.sql, "main_table_ref", e)
         bp = self._builtin()
@@ -350,7 +351,7 @@ class Guarded:
                         filter_type=filter_type, column=column, values=values
                     )
                     return str(sql_out), cast("dict[str, object]", params_out)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     self._engine_failed = True
                     _record_fallback(self.sql, "apply_filter", e)
         bp = self._builtin()

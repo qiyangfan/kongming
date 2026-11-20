@@ -612,7 +612,7 @@ async def test_chat_success_writes_query_history(
         sql="SELECT count(*) FROM goods",
     )
 
-    def _fake_query(self: AgentClient, **kw: object) -> object:  # noqa: ARG001
+    def _fake_query(self: AgentClient, **kw: object) -> object:
         return _areply(reply)
 
     monkeypatch.setattr(AgentClient, "query", _fake_query)
@@ -645,7 +645,7 @@ async def test_chat_rejected_no_writeback(
 
     reply = AgentReply(success=False, verdict="BLOCKED", sql="DELETE FROM goods")
 
-    def _fake_query(self: AgentClient, **kw: object) -> object:  # noqa: ARG001
+    def _fake_query(self: AgentClient, **kw: object) -> object:
         return _areply(reply)
 
     monkeypatch.setattr(AgentClient, "query", _fake_query)
@@ -670,7 +670,7 @@ async def test_writeback_failure_does_not_break_chat(
         success=True, verdict="PASS", columns=["n"], rows=[[1]], sql="SELECT 1", summary="ok"
     )
 
-    def _fake_query(self: AgentClient, **kw: object) -> object:  # noqa: ARG001
+    def _fake_query(self: AgentClient, **kw: object) -> object:
         return _areply(reply)
 
     monkeypatch.setattr(AgentClient, "query", _fake_query)

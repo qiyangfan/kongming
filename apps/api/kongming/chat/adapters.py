@@ -421,7 +421,7 @@ class SchemaOverviewSource:
                 MetaSchemaIn(tenant_key=tenant_key, datasource_key=datasource_key),
                 self._s,
             )
-        except Exception:  # noqa: BLE001  # 建议生成失败时返回空清单，不返回 5xx。
+        except Exception:  # 建议生成失败时返回空清单，不返回 5xx。
             log.warning("建议问题 schema 摘要内省失败 ds=%s", datasource_key, exc_info=True)
             return None
         return _render_schema_digest(out.tables, out.truncated)

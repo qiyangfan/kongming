@@ -24,7 +24,8 @@ export function sqlAuditPage(params: SqlAuditParams): Promise<SqlAuditPageOut> {
     if (v === undefined || v === "" || v === null) continue;
     qs.set(k, String(v));
   }
-  return api.get<SqlAuditPageOut>(`/audit/sql/page${qs.size ? `?${qs}` : ""}`);
+  const suffix = qs.size > 0 ? `?${qs}` : "";
+  return api.get<SqlAuditPageOut>(`/audit/sql/page${suffix}`);
 }
 
 interface OperLogParams {
@@ -43,5 +44,6 @@ export function operLogPage(params: OperLogParams): Promise<OperLogPageOut> {
     if (v === undefined || v === "" || v === null) continue;
     qs.set(k, String(v));
   }
-  return api.get<OperLogPageOut>(`/audit/oper/page${qs.size ? `?${qs}` : ""}`);
+  const suffix = qs.size > 0 ? `?${qs}` : "";
+  return api.get<OperLogPageOut>(`/audit/oper/page${suffix}`);
 }

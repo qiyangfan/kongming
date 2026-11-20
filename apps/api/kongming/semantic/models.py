@@ -49,8 +49,7 @@ def format_relations_hint(relations: list[TableRelation]) -> str:
 def format_metric_hints(metrics: list[MetricDef]) -> str:
     """命中指标 → 口径文字段(纯函数);sql_template 仅为提示文字,永不执行。"""
     lines: list[str] = []
-    for m in metrics:
-        lines.append(f"{m.metric_name}: {m.sql_template}")
+    lines.extend(f"{m.metric_name}: {m.sql_template}" for m in metrics)
     return "\n".join(lines)
 
 

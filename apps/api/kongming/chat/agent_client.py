@@ -360,15 +360,17 @@ class AgentClient:
         path = "/query_react/stream" if req.react_tools is not None else "/query/stream"
         decoder = SseDecoder()
         try:
-            async with self._client() as client:
-                async with client.stream("POST", path, json=self._payload(req)) as resp:
-                    if resp.status_code != 200:
-                        log.warning("agent 流式回调非 200: HTTP %s", resp.status_code)
-                        raise AgentUnavailable(f"HTTP {resp.status_code}")
-                    async for line in resp.aiter_lines():
-                        frame = decoder.feed(line)
-                        if frame is not None:
-                            await on_frame(frame[0], frame[1])
+            async with (
+                self._client() as client,
+                client.stream("POST", path, json=self._payload(req)) as resp,
+            ):
+                if resp.status_code != 200:
+                    log.warning("agent 流式回调非 200: HTTP %s", resp.status_code)
+                    raise AgentUnavailable(f"HTTP {resp.status_code}")
+                async for line in resp.aiter_lines():
+                    frame = decoder.feed(line)
+                    if frame is not None:
+                        await on_frame(frame[0], frame[1])
         except httpx.HTTPError as e:
             log.warning("agent 流式回调异常: %s", e)
             raise AgentUnavailable(str(e)) from e

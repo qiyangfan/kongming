@@ -3,6 +3,8 @@
 SQL、RAG 与消息回写分别通过仓储和端口调用，端口由路由组合根装配。
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import time
@@ -126,7 +128,7 @@ def validate_args(tool: ToolDef, args: dict[str, object]) -> str | None:
         jsonschema.validate(args, tool.parameters)
     except jsonschema.ValidationError as e:
         return f"ARGS_INVALID: {e.message[:120]}"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # 敌意/畸形 schema(外部 MCP 快照面)会抛非 ValidationError
         # (SchemaError/_WrappedReferencingError 等)——收敛
         # ARGS_INVALID 结构化回灌,不裸 500;注册时 check_schema 降级是
@@ -412,7 +414,7 @@ class ToolCallService:
                 datasource_key=req.datasource_key,
                 idem=idem,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log.warning("工具执行异常 tool=%s trace=%s: %s", req.tool_name, req.trace_id, e)
             return await finish("ERROR", reason=str(e)[:200])
         return await finish("EXECUTED", result=result, idem=idem)
@@ -689,7 +691,7 @@ class ToolCallService:
             result = await self._dispatch_confirmed(
                 resolved.tool, row, user_id=user_id, prefix="confirm"
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log.warning("确认执行异常 confirm=%s: %s", confirm_id, e)
             await self._ports.repo.mark_status(row.id, "ERROR", clear_reason=True)
             await self._ports.reply.append_reply(
@@ -809,7 +811,7 @@ class ToolCallService:
             result = await self._dispatch_confirmed(
                 resolved.tool, row, user_id=user_id, prefix="task-confirm"
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log.warning("任务确认执行异常 confirm=%s: %s", confirm_id, e)
             await self._ports.repo.mark_status(row.id, "ERROR", clear_reason=True)
             return ToolOutcome(status="ERROR", reason=str(e)[:200])
@@ -826,10 +828,13 @@ class ToolCallService:
         """任务通道的终态分支:已决/过期/拒绝直接返回观察,需执行时返回 None。
         已决行反查首次执行结果回填——恢复重放缺结果会诱发模型把同一动作
         当未办再次发起(新确认行=绕过幂等的二次执行)。"""
-        if row.status == "PENDING_CONFIRM" and row.expires_at is not None:
-            if row.expires_at < datetime.now(UTC):
-                await self._ports.repo.mark_status(row.id, "CONFIRM_EXPIRED", clear_reason=True)
-                return ToolOutcome(status="ERROR", reason="CONFIRM_EXPIRED: 确认已过期")
+        if (
+            row.status == "PENDING_CONFIRM"
+            and row.expires_at is not None
+            and row.expires_at < datetime.now(UTC)
+        ):
+            await self._ports.repo.mark_status(row.id, "CONFIRM_EXPIRED", clear_reason=True)
+            return ToolOutcome(status="ERROR", reason="CONFIRM_EXPIRED: 确认已过期")
         if row.status == "PENDING_CONFIRM":
             if decision == "approve":
                 return None

@@ -136,8 +136,7 @@ def _md_escape(cell: object) -> str:
 def _md_table(columns: list[str], rows: list[list[object]]) -> list[str]:
     lines = ["| " + " | ".join(_md_escape(c) for c in columns) + " |"]
     lines.append("| " + " | ".join("---" for _ in columns) + " |")
-    for r in rows[:_MD_TABLE_CAP]:
-        lines.append("| " + " | ".join(_md_escape(v) for v in r) + " |")
+    lines.extend("| " + " | ".join(_md_escape(v) for v in r) + " |" for r in rows[:_MD_TABLE_CAP])
     return lines
 
 
@@ -279,11 +278,11 @@ def section_from_row(r: dict[str, Any]) -> SectionNode:
 def sections_from_payload(raw: object) -> list[SectionNode]:
     """agent 返回的章节载荷 → 领域树(非 dict 条目/缺标题拒绝)。"""
     if not isinstance(raw, list):
-        raise ValueError("章节载荷必须是数组")
+        raise TypeError("章节载荷必须是数组")
     out: list[SectionNode] = []
     for i, item in enumerate(cast("list[object]", raw)):
         if not isinstance(item, dict):
-            raise ValueError(f"章节条目畸形: index={i}")
+            raise TypeError(f"章节条目畸形: index={i}")
         d = cast("dict[str, object]", item)
         title = str(d.get("title") or "")
         if not title.strip():

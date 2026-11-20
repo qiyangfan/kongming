@@ -61,9 +61,9 @@ export function DatasourceSwitcher() {
     if (key === current) return;
     switchTo(key);
     // 先离场再失效(与租户切换同构):旧请求带新源选择会语义错位
-    navigate("/chat", { replace: true });
+    void navigate("/chat", { replace: true });
     void qc.invalidateQueries({ queryKey: ["sessions"] });
-    void qc.removeQueries({ queryKey: ["messages"] });
+    qc.removeQueries({ queryKey: ["messages"] });
   }
 
   return (

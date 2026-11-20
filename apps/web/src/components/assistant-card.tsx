@@ -9,9 +9,9 @@ import {
   ReportArtifactCard,
   SqlArtifactCard,
 } from "@/components/artifact-blocks";
-import type { ChartSpec } from "@/components/chart-shared";
+import type { ChartSpec } from "@/lib/chart-shared";
 import { ResultTable } from "@/components/result-table";
-import { hasChartToRender, normalizeBinding } from "@/components/chart-shared";
+import { hasChartToRender, normalizeBinding } from "@/lib/chart-shared";
 import {
   CitationSourcesPanel,
   renderWithCitations,
@@ -44,7 +44,7 @@ type NormalizedResult = {
     metric_id: string;
     metric_name: string;
     sql_template: string;
-    updated_at?: string | null;
+    updated_at?: string | null | undefined;
   }[];
   sources: { citation_key: string; source_ref?: string; doc_name?: string }[];
 };

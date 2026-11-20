@@ -16,12 +16,12 @@ __version__ = "0.1.4"
 __all__ = [
     "DEFAULT_MAX_DEPTH",
     "FORBIDDEN_FUNCS",
-    "GuardArtifact",
-    "GuardError",
     "READONLY_ROOTS",
     "RESERVED_SCHEMA_NAMES",
     "RESERVED_TABLE_NAMES",
     "RESERVED_TABLE_PREFIXES",
+    "GuardArtifact",
+    "GuardError",
     "Verdict",
     "__version__",
     "max_paren_depth",
@@ -50,6 +50,7 @@ def self_check() -> tuple[bool, str]:
         blocked = parse("DELETE FROM goods")
         if blocked.check_firewall().passed:
             return False, "冒烟 SQL 写拦截异常(应拒)"
-        return True, __version__
-    except Exception as e:  # 自检绝不向上抛——消费方以告警降级
+    except Exception as e:  # noqa: BLE001  # 自检绝不向上抛——消费方以告警降级
         return False, f"{type(e).__name__}: {e}"
+    else:
+        return True, __version__

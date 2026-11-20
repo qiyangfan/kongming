@@ -78,7 +78,7 @@ export function RunHistoryDialog({
   onClose,
 }: {
   workflow: WorkflowItem | null;
-  runs: { isError: boolean; data?: { items: WorkflowRunItem[]; total: number } };
+  runs: { isError: boolean; data?: { items: WorkflowRunItem[]; total: number } | undefined };
   page: number;
   pageSize: number;
   onPageChange: (page: number) => void;
@@ -100,13 +100,17 @@ export function RunHistoryDialog({
           <DialogDescription>按时间倒序的执行记录;点「详情」查看完整节点输出。</DialogDescription>
         </DialogHeader>
         <div className="max-h-96 space-y-2 overflow-y-auto">
-          {runs.isError ? (
-            <ErrorAlert />
-          ) : items.length === 0 ? (
-            <EmptyState>暂无运行记录。</EmptyState>
-          ) : (
-            items.map((r) => <RunHistoryEntry key={r.id} run={r} onDetail={() => onDetail(r.id)} />)
-          )}
+          {(() => {
+            if (runs.isError) return <ErrorAlert />;
+            if (items.length === 0) return <EmptyState>暂无运行记录。</EmptyState>;
+            return (
+              <>
+                {items.map((r) => (
+                  <RunHistoryEntry key={r.id} run={r} onDetail={() => onDetail(r.id)} />
+                ))}
+              </>
+            );
+          })()}
         </div>
         {total > pageSize && (
           <HistoryPager page={page} total={total} pageSize={pageSize} onPageChange={onPageChange} />
@@ -160,7 +164,7 @@ export function RunDetailDialog({
   onClose,
 }: {
   runId: string | null;
-  detail: { isLoading: boolean; isError: boolean; data?: WorkflowRunItem };
+  detail: { isLoading: boolean; isError: boolean; data?: WorkflowRunItem | undefined };
   onClose: () => void;
 }) {
   return (
@@ -180,16 +184,18 @@ export function RunDetailDialog({
             运行 ID:{runId}
           </DialogDescription>
         </DialogHeader>
-        {detail.isLoading ? (
-          <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" aria-hidden />
-            加载中…
-          </div>
-        ) : detail.isError ? (
-          <ErrorAlert />
-        ) : detail.data ? (
-          <RunDetailBody run={detail.data} />
-        ) : null}
+        {(() => {
+          if (detail.isLoading) {
+            return (
+              <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+                加载中…
+              </div>
+            );
+          }
+          if (detail.isError) return <ErrorAlert />;
+          return detail.data ? <RunDetailBody run={detail.data} /> : null;
+        })()}
       </DialogContent>
     </Dialog>
   );
@@ -211,6 +217,7 @@ function RunDetailBody({ run }: { run: WorkflowRunItem }) {
       <div className="space-y-2">
         {(run.node_runs ?? []).map((raw, i) => {
           const nr = nodeRunsOf({ node_runs: [raw] })[0];
+          if (!nr) return null;
           const outputs = formatOutputs(raw.outputs);
           return (
             <div key={nr.node_id || i} className="rounded-md border px-3 py-2">

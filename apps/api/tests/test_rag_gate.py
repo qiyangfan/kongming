@@ -45,7 +45,7 @@ def test_rrf_fuse_formula_and_ordering() -> None:
     both_rank1 = rrf_fuse(
         [[RecallHit(schema_name="s", table_name="x")], [RecallHit(schema_name="s", table_name="x")]]
     )
-    assert 2.0 / (60 + 1) > single_score  # 双路第 1 名同表 = 2/61 > 单路 1/61
+    assert single_score < 2.0 / (60 + 1)  # 双路第 1 名同表 = 2/61 > 单路 1/61
     # 单路首位 1/61 ≈0.0164 < 双路并列末位(两路均列第5的不同表不叠加;性质断言)
     single_top1_score = 1.0 / 61
     assert single_top1_score == pytest.approx(0.0164, abs=1e-4)

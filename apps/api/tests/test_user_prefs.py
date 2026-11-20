@@ -48,7 +48,7 @@ class TestPutPatchNormalization:
         assert "timezone" not in patch.deletes
 
     def test_null_on_any_slot_is_valid_instruction(self) -> None:
-        patch = p.normalize_put_patch({k: None for k in p.SLOT_KEYS})
+        patch = p.normalize_put_patch(dict.fromkeys(p.SLOT_KEYS))
         assert patch.deletes == frozenset(p.SLOT_KEYS)
         assert patch.values == {}
         assert not patch.is_empty()

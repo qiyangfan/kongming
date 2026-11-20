@@ -217,9 +217,9 @@ class FiringCore:
         self, row: dict[str, Any], *, inputs: dict[str, Any], channel: str, summary_json: str
     ) -> tuple[str, str, str, str]:
         """调用目标执行并归类结果;返回 (status, 目标 run 引用, 错误文案, summary)。"""
+        if self._runner is None:
+            return "FAILED", "", "RuntimeError: TargetRunner 未注入(部署缺陷)", summary_json
         try:
-            if self._runner is None:
-                raise RuntimeError("TargetRunner 未注入(部署缺陷)")
             ok, ref, err = await self._runner.run_target(
                 target_type=str(row["target_type"]),
                 target_key=str(row["target_key"]),
@@ -304,7 +304,7 @@ class FiringCore:
             return "通知器未接线(部署缺陷)"
         try:
             await self._notifier.check_url(url)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return f"SSRF 拒绝: {e}"
         body = json.dumps(
             {
@@ -409,8 +409,8 @@ def generated_secret() -> str:
 
 
 def parse_json_body(body: bytes) -> dict[str, Any]:
-    """请求体必须是 JSON 对象(其余抛 ValueError,入站侧同形拒)。"""
+    """请求体必须是 JSON 对象(类型不符抛 TypeError,入站侧同形拒)。"""
     parsed = json.loads(body.decode("utf-8", errors="replace"))
     if not isinstance(parsed, dict):
-        raise ValueError("payload 须为 JSON 对象")
+        raise TypeError("payload 须为 JSON 对象")
     return cast("dict[str, Any]", parsed)

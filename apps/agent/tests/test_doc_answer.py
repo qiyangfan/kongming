@@ -65,8 +65,8 @@ async def test_doc_answer_node_terminal() -> None:
         pass
 
     old_llm, old_api = deps.get_llm, deps.get_api
-    deps.get_llm = lambda: _Llm()  # type: ignore[assignment]
-    deps.get_api = lambda: _Api()  # type: ignore[assignment]
+    deps.get_llm = _Llm  # type: ignore[assignment]
+    deps.get_api = _Api  # type: ignore[assignment]
     try:
         out = await nodes.doc_answer(
             {
@@ -107,8 +107,8 @@ async def test_doc_answer_attachments_use_raw_question() -> None:
         '_"""\n图表数据:Sports 74 分\n_"""\n\n用户问题:\n这张图说明了什么'
     )
     old_llm, old_api = deps.get_llm, deps.get_api
-    deps.get_llm = lambda: _Llm()  # type: ignore[assignment]
-    deps.get_api = lambda: _Api()  # type: ignore[assignment]
+    deps.get_llm = _Llm  # type: ignore[assignment]
+    deps.get_api = _Api  # type: ignore[assignment]
     try:
         await nodes.doc_answer(
             {
@@ -143,8 +143,8 @@ async def test_doc_answer_llm_error_propagates() -> None:
         pass
 
     old_llm, old_api = deps.get_llm, deps.get_api
-    deps.get_llm = lambda: _BoomLlm()  # type: ignore[assignment]
-    deps.get_api = lambda: _Api()  # type: ignore[assignment]
+    deps.get_llm = _BoomLlm  # type: ignore[assignment]
+    deps.get_api = _Api  # type: ignore[assignment]
     try:
         with _pytest.raises(LlmError):
             await nodes.doc_answer(

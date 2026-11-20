@@ -76,6 +76,14 @@ def _as_dict(value: object) -> dict[str, object] | None:
     return cast("dict[str, object]", value) if isinstance(value, dict) else None
 
 
+def _require_body(value: object) -> dict[str, object]:
+    """响应体必须是 JSON 对象;畸形按协议失败上抛(不静默降级为空重排)。"""
+    body = _as_dict(value)
+    if body is None:
+        raise RerankError(REASON_UNAVAILABLE, "响应报文畸形(JSON 对象缺失)")
+    return body
+
+
 def _normalize_results(raw: object) -> dict[int, float]:
     """Cohere 形态 results[].{index, relevance_score} → {index: score}。
 
@@ -188,23 +196,22 @@ class DocReranker:
             httpx.CloseError,
         )
         try:
-            async with httpx.AsyncClient(
-                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
-                timeout=httpx.Timeout(self._timeout_s),
-                transport=self._transport,
-            ) as client:
+            async with (
+                httpx.AsyncClient(
+                    trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                    timeout=httpx.Timeout(self._timeout_s),
+                    transport=self._transport,
+                ) as client,
                 # stream 上下文+字节闸读取
-                async with client.stream(
+                client.stream(
                     "POST",
                     self._endpoint,
                     json=self._request(self.model, query, documents),
                     headers={"Authorization": f"Bearer {self._api_key}"},
-                ) as resp:
-                    resp.raise_for_status()
-                    body = _as_dict(await _read_json_capped(resp))
-                    if body is None:
-                        raise RerankError(REASON_UNAVAILABLE, "响应报文畸形(JSON 对象缺失)")
-                    indexed = self._normalize(body)
+                ) as resp,
+            ):
+                resp.raise_for_status()
+                indexed = self._normalize(_require_body(await _read_json_capped(resp)))
         except undelivered as e:
             raise RerankError(REASON_UNAVAILABLE, f"拒连({type(e).__name__})") from e
         except RerankError:
@@ -289,5 +296,5 @@ async def record_rerank_usage(
                 },
             )
             await s.commit()
-    except Exception:  # noqa: BLE001  # 用量记录失败只告警，不影响检索结果。
+    except Exception:  # 用量记录失败只告警，不影响检索结果。
         log.warning("rerank 用量写入失败(不阻断)", exc_info=True)

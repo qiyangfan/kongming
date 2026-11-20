@@ -23,7 +23,7 @@ export interface WfNodeData extends Record<string, unknown> {
   /** 原定义是否显式声明 depends_on;导出时据此保留空的 depends_on 字段 */
   depsExplicit: boolean;
   /** 服务端校验错误文案(定位命中时由画布面板写入;空=无错误) */
-  errorText?: string;
+  errorText?: string | undefined;
 }
 
 export type WfFlowNode = Node<WfNodeData, "wf">;

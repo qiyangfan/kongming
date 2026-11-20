@@ -22,7 +22,7 @@ from kongming_agent.prompt_fingerprint import (
     prompt_fingerprint,
 )
 
-TOKEN = {"X-Internal-Token": "test-internal-token"}  # noqa: S106  # 测试令牌,非凭证
+TOKEN = {"X-Internal-Token": "test-internal-token"}  # 测试令牌,非凭证
 
 # 四份资产文件(指纹覆盖全集,不漏文件)
 _ASSET_MODULE_PATHS = (

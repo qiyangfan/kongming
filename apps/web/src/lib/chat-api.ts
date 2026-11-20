@@ -30,7 +30,9 @@ export async function uploadAttachment(file: File): Promise<AttachmentOut> {
 /** 语音转写:录音 blob → 文本(即转即弃;503=未启用模型,文案面向用户) */
 export async function transcribeAudio(blob: Blob): Promise<string> {
   // 文件名按 MIME 推导(Safari MediaRecorder 产出 audio/mp4,恒标 .webm 语义错)
-  const ext = blob.type.includes("mp4") ? "mp4" : blob.type.includes("ogg") ? "ogg" : "webm";
+  let ext = "webm";
+  if (blob.type.includes("mp4")) ext = "mp4";
+  else if (blob.type.includes("ogg")) ext = "ogg";
   const fd = new FormData();
   fd.append("file", blob, `recording.${ext}`);
   const out = await api.postForm<{ text: string }>("/chat/stt", fd);
@@ -95,9 +97,7 @@ export async function exportResult(
   if (resp.headers.get("content-type")?.includes("application/json")) {
     const body: unknown = await resp.json();
     const detail =
-      body && typeof body === "object" && "detail" in body
-        ? String((body as { detail: unknown }).detail)
-        : "导出失败";
+      body && typeof body === "object" && "detail" in body ? String(body.detail) : "导出失败";
     throw new Error(detail);
   }
   const blob = await resp.blob();

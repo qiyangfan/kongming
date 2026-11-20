@@ -152,7 +152,7 @@ async def _finalize(ctx: "_ExecContext", verdict: str, sql_text: str, reason: st
     return ExecResult(verdict=verdict, reason=reason, duration_ms=elapsed)
 
 
-async def _prepare(  # noqa: PLR0913 —— 请求字段平铺,编排前段
+async def _prepare(
     session: AsyncSession,
     *,
     trace_id: str,
@@ -289,7 +289,7 @@ async def _resolve_target(
             )
         except TenantBindingForbidden:
             raise
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return await ctx.fin("ERROR", ctx.sql_text, _error_summary(e))
     return engine, route_schema
 
@@ -326,7 +326,7 @@ async def _apply_data_scope(
             )
     except DataScopeUnsupported as e:
         return await ctx.fin("BLOCKED", sql_text, f"DATA_SCOPE_UNSUPPORTED: {e.reason}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # 连接池超时或控制库异常均写入审计并返回 ERROR。
         return await ctx.fin("ERROR", sql_text, _error_summary(e))
     if applied.warning:
@@ -397,7 +397,7 @@ async def _record_pass(ctx: "_ExecContext", sql: str, row_count: int, elapsed: i
     )
 
 
-async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
+async def execute(
     session: AsyncSession,
     *,
     trace_id: str,
@@ -426,7 +426,7 @@ async def execute(  # noqa: PLR0913 —— 请求字段平铺,编排入口
     # 7. 只读池执行:事务内 SET LOCAL search_path + 行数截断
     try:
         columns, rows = await _fetch_capped(prepared, applied, limit)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return await _request_ctx(
             started=started,
             trace_id=trace_id,
@@ -466,18 +466,18 @@ async def _fetch_capped(
 ) -> tuple[list[str], list[list[object]]]:
     """只读池执行改写后的 SQL 并截断到 limit 行,返回 (列名, 行值)。"""
     quoted_schema = prepared.route_schema.replace('"', '""')
-    async with prepared.engine.connect() as conn:
-        async with conn.begin():
-            await conn.execute(
-                text(f'SET LOCAL search_path TO "{quoted_schema}", public')  # noqa: S608  # 标识符双引号转义,非值拼接
-            )
-            result = await conn.execute(text(applied.sql), applied.params)
-            columns = [str(c) for c in result.keys()]
-            rows = [[_json_cell(v) for v in r] for r in result.fetchmany(limit)]
+    async with prepared.engine.connect() as conn, conn.begin():
+        await conn.execute(
+            text(f'SET LOCAL search_path TO "{quoted_schema}", public')  # 标识符双引号转义,非值拼接
+        )
+        result = await conn.execute(text(applied.sql), applied.params)
+        # SQLAlchemy Result 不是 dict:显式取 keys()(SIM118 对 .keys() 迭代误报)
+        columns = [str(c) for c in list(result.keys())]
+        rows = [[_json_cell(v) for v in r] for r in result.fetchmany(limit)]
     return columns, rows
 
 
-async def explain(  # noqa: PLR0913 —— 与 execute 同构平铺
+async def explain(
     session: AsyncSession,
     *,
     trace_id: str,
@@ -519,7 +519,7 @@ async def explain(  # noqa: PLR0913 —— 与 execute 同构平铺
     explain_sql = f"EXPLAIN (FORMAT JSON) {prepared.applied.sql}"
     try:
         plan = _parse_plan(await _explain_raw(prepared))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         finalized = await ctx.fin("ERROR", explain_sql, _error_summary(e))
         return _explain_error(finalized)
 
@@ -541,13 +541,12 @@ async def _explain_raw(prepared: _Prepared) -> object:
     applied = prepared.applied
     quoted_schema = prepared.route_schema.replace('"', '""')
     explain_sql = f"EXPLAIN (FORMAT JSON) {applied.sql}"
-    async with prepared.engine.connect() as conn:
-        async with conn.begin():
-            await conn.execute(
-                text(f'SET LOCAL search_path TO "{quoted_schema}", public')  # noqa: S608  # 标识符双引号转义,非值拼接
-            )
-            result = await conn.execute(text(explain_sql), applied.params)
-            return result.scalar_one()
+    async with prepared.engine.connect() as conn, conn.begin():
+        await conn.execute(
+            text(f'SET LOCAL search_path TO "{quoted_schema}", public')  # 标识符双引号转义,非值拼接
+        )
+        result = await conn.execute(text(explain_sql), applied.params)
+        return result.scalar_one()
 
 
 def _parse_plan(raw: object) -> object:

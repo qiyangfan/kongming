@@ -193,7 +193,7 @@ def _normalize_roundtable(
             continue
         roster.append({"role": role, "bot_key": _norm_bot_key(entry.get("bot_key"))})
     roster = _dedup_first(roster, lambda p: str(p["role"]))
-    cap = max(COLLAB_MIN_PARTICIPANTS, max(1, max_workers_cap))
+    cap = max(COLLAB_MIN_PARTICIPANTS, 1, max_workers_cap)
     roster = roster[:cap]
     if len(roster) < COLLAB_MIN_PARTICIPANTS:
         roster = [dict(p) for p in COLLAB_DEFAULT_ROSTER][:cap]

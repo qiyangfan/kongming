@@ -59,8 +59,8 @@ async def _insert_memory(
 ) -> str:
     mid = (
         await s.execute(
-            text(  # noqa: S608  # 测试常量 vec
-                "INSERT INTO public.user_memory"  # noqa: S608  # 多行拼接含 f-string(测试常量 vec)
+            text(  # 测试常量 vec
+                "INSERT INTO public.user_memory"  # 多行拼接含 f-string(测试常量 vec)
                 " (id, user_id, tenant_id, content, confidence, source, dormant)"
                 " VALUES (gen_random_uuid(), :u,"
                 "  (SELECT id FROM public.sys_tenant WHERE tenant_key='default'),"
@@ -308,10 +308,10 @@ async def test_recall_dual_filter_and_hit_refresh(session: AsyncSession) -> None
 
     async def _ins(uid: str, tid: object, content: str, dormant: bool = False) -> None:
         await session.execute(
-            text(  # noqa: S608  # 测试常量 vec
+            text(  # 测试常量 vec
                 "INSERT INTO public.user_memory"  # noqa: S608  # 多行拼接含 f-string(测试常量 vec)
                 " (id, user_id, tenant_id, content, confidence, source, dormant, embedding)"
-                f" VALUES (gen_random_uuid(), :u, :t, :c, 1.0, 'EXPLICIT', :d,"  # noqa: S608  # 测试常量 vec
+                f" VALUES (gen_random_uuid(), :u, :t, :c, 1.0, 'EXPLICIT', :d,"  # 测试常量 vec
                 f"  CAST('{vec}' AS halfvec))"
             ),
             {"u": uid, "t": str(tid), "c": content, "d": dormant},
@@ -413,10 +413,10 @@ async def test_r1_m1_edit_preserves_vector_on_embedding_failure(
     vec = "[" + ",".join(["1.0"] + ["0.0"] * 2559) + "]"
     mid = (
         await session.execute(
-            text(  # noqa: S608  # 测试常量 vec
+            text(  # 测试常量 vec
                 "INSERT INTO public.user_memory"  # noqa: S608  # 多行拼接含 f-string(测试常量 vec)
                 " (id, user_id, tenant_id, content, confidence, source, embedding)"
-                f" VALUES (gen_random_uuid(), :u, :t, '原内容', 1.0, 'EXPLICIT',"  # noqa: S608  # 测试常量 vec
+                f" VALUES (gen_random_uuid(), :u, :t, '原内容', 1.0, 'EXPLICIT',"  # 测试常量 vec
                 f"  CAST('{vec}' AS halfvec)) RETURNING id"
             ),
             {"u": str(uid), "t": str(tid)},

@@ -223,7 +223,7 @@ _active_registry: dict[str, ToolDef] = REGISTRY
 
 def activate(registry: dict[str, ToolDef]) -> None:
     """启动装配入口(main.lifespan 调用一次;测试可 activate 后还原)。"""
-    global _active_registry  # noqa: PLW0603 —— 进程级单次装配,组合根模式
+    global _active_registry
     _active_registry = registry
 
 

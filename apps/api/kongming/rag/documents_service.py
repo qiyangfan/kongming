@@ -193,11 +193,12 @@ async def _extract_doc_entities(
             rows=rows,
         )
         await repo.commit()
-        return n
     except Exception:
         log.warning("文档实体落库失败(降级无实体)", exc_info=True)
         await repo.rollback()
         return 0
+    else:
+        return n
 
 
 async def enrich_document(

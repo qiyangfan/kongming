@@ -225,7 +225,7 @@ class FeedbackService:
             )
         except SamplePromotionUnavailable:
             raise
-        except Exception as e:  # noqa: BLE001  # 晋升操作异常统一返回 503，事务由调用方管理。
+        except Exception as e:  # 晋升操作异常统一返回 503，事务由调用方管理。
             raise SamplePromotionUnavailable(str(e)) from e
 
     # ============ 涉及表定位(feedback-refine spec) ============

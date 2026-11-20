@@ -92,8 +92,7 @@ def render_snapshot_text(
         return "(空结果)"
     lines = [" | ".join(columns)]
     lines.append(" | ".join("---" for _ in columns))
-    for r in rows[:max_rows]:
-        lines.append(" | ".join(str(v) for v in r))
+    lines.extend(" | ".join(str(v) for v in r) for r in rows[:max_rows])
     if len(rows) > max_rows:
         lines.append(f"(共 {len(rows)} 行,仅展示前 {max_rows} 行)")
     return "\n".join(lines)

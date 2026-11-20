@@ -36,7 +36,7 @@ def _merge_embedded_slots(raw: dict[str, object], src: dict[str, object]) -> Non
 
     try:
         obj = _json.loads(content)
-    except Exception:
+    except Exception:  # noqa: BLE001
         obj = {}
     if isinstance(obj, dict):
         _merge_slot_fields(raw, cast("dict[str, object]", obj))
@@ -318,10 +318,11 @@ class MemoryService:
         据此跳过本轮自动写入,不得把未知版本当作 0。"""
         try:
             _prefs, rev = await self._repo.read_prefs_revision(user_id=user_id, tenant_id=tenant_id)
-            return rev
         except Exception:
             log.warning("偏好人工版本读取失败(本轮自动写入将跳过)", exc_info=True)
             return None
+        else:
+            return rev
 
     async def preference_hint(self, *, user_id: str, tenant_id: str) -> str:
         """偏好注入段(可忽略/不约束数据范围);失败降级空串。"""

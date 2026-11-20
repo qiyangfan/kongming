@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 
 import { useAuth } from "@/lib/auth-store";
 import { hasPerm } from "@/lib/nav";
-import { ForbiddenPage } from "@/pages/error-pages";
+import { ForbiddenPage } from "@/components/error-pages";
 
 export function PermRoute({ perm, children }: { perm: string; children: ReactNode }) {
   const { user } = useAuth();

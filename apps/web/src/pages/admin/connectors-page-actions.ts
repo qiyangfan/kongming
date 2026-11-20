@@ -9,6 +9,7 @@ import {
   testConnector,
   updateConnector,
 } from "@/lib/connector-api";
+import { cellText } from "@/lib/utils";
 import { formToBody, rowToForm, type FormState, type TestSnapshot } from "./connectors-page-model";
 
 const errText = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
@@ -99,8 +100,8 @@ export function snapshotFromRow(row: Parameters<typeof rowToForm>[0]): TestSnaps
     title: row.name,
     body: { ...formToBody(rowToForm(row)), use_saved_secret: true },
     argNames: row.params.map((p) => ({
-      name: String(p.name ?? ""),
-      type: String(p.type ?? "string"),
+      name: cellText(p.name),
+      type: cellText(p.type) || "string",
       required: Boolean(p.required),
     })),
   };

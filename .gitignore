@@ -44,3 +44,4 @@ apps/api/evals/.baseline_fingerprint
 # Playwright 报告与测试产物
 apps/web/playwright-report/
 apps/web/test-results/
+apps/web/coverage/

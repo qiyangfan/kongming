@@ -100,19 +100,18 @@ async def list_packs(
 ) -> PackListOut:
     tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
     rows = await _service(session).list(tenant_id=tid)
-    items: list[PackOut] = []
-    for r in rows:
-        items.append(
-            PackOut(
-                id=str(r["id"]),
-                pack_key=str(r["pack_key"]),
-                name=str(r["name"]),
-                version=str(r["version"]),
-                # description 可空:str(None) 会回传字面量 "None"
-                description=str(r["description"] or ""),
-                status=str(r["status"]),
-            )
+    items = [
+        PackOut(
+            id=str(r["id"]),
+            pack_key=str(r["pack_key"]),
+            name=str(r["name"]),
+            version=str(r["version"]),
+            # description 可空:str(None) 会回传字面量 "None"
+            description=str(r["description"] or ""),
+            status=str(r["status"]),
         )
+        for r in rows
+    ]
     return PackListOut(items=items)
 
 

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ChevronRight, Database, Loader2 } from "lucide-react";
 
 import { explainPlan } from "@/lib/chat-api";
+import { cellText } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -52,23 +53,31 @@ export function ExplainCollapsible({ messageId }: { messageId: string }) {
         执行计划
       </CollapsibleTrigger>
       <CollapsibleContent>
-        {loading ? (
-          <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Loader2 className="size-3 animate-spin" aria-hidden />
-            计划生成中…
-          </p>
-        ) : error ? (
-          <p role="alert" className="mt-1.5 flex items-center gap-2 text-xs text-destructive">
-            {error}
-            <Button variant="ghost" size="xs" onClick={retry}>
-              重试
-            </Button>
-          </p>
-        ) : (
-          <pre className="mt-1.5 overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed text-foreground">
-            {text}
-          </pre>
-        )}
+        {(() => {
+          if (loading) {
+            return (
+              <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="size-3 animate-spin" aria-hidden />
+                计划生成中…
+              </p>
+            );
+          }
+          if (error) {
+            return (
+              <p role="alert" className="mt-1.5 flex items-center gap-2 text-xs text-destructive">
+                {error}
+                <Button variant="ghost" size="xs" onClick={retry}>
+                  重试
+                </Button>
+              </p>
+            );
+          }
+          return (
+            <pre className="mt-1.5 overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed text-foreground">
+              {text}
+            </pre>
+          );
+        })()}
       </CollapsibleContent>
     </Collapsible>
   );
@@ -89,12 +98,12 @@ function renderPlan(plan: unknown): string {
 }
 
 function planNodeLine(node: Record<string, unknown>, depth: number): string {
-  const parts = [String(node["Node Type"] ?? "节点")];
+  const parts = [cellText(node["Node Type"]) || "节点"];
   const cost = Number(node["Total Cost"]);
   if (Number.isFinite(cost)) parts.push(`cost=${cost.toFixed(2)}`); // 非数值不渲染 NaN
   const rows = node["Actual Rows"] ?? node["Plan Rows"];
-  if (rows !== undefined) parts.push(`rows=${String(rows)}`);
-  if (node["Relation Name"]) parts.push(`on ${String(node["Relation Name"])}`);
+  if (rows !== undefined) parts.push(`rows=${cellText(rows)}`);
+  if (node["Relation Name"]) parts.push(`on ${cellText(node["Relation Name"])}`);
   return "  ".repeat(depth) + parts.join("  ");
 }
 

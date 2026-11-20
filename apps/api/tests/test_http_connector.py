@@ -561,7 +561,7 @@ def _executor(
         return httpx.Response(200, json={"ok": True, "order_id": "A-1"})
 
     record["handler"] = handler or _default_handler
-    transport = httpx.MockTransport(lambda req: record["handler"](req))
+    transport = httpx.MockTransport(record["handler"])
     return (
         HttpConnectorExecutor(
             method=method,
@@ -858,10 +858,10 @@ class _EchoServer:
         echo = self
 
         class Handler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:  # noqa: N802  # http.server 命名约定
+            def do_GET(self) -> None:  # http.server 命名约定
                 self._handle("GET")
 
-            def do_POST(self) -> None:  # noqa: N802
+            def do_POST(self) -> None:
                 self._handle("POST")
 
             def _handle(self, method: str) -> None:
@@ -897,7 +897,7 @@ class _EchoServer:
                 self.end_headers()
                 self.wfile.write(data)
 
-            def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+            def log_message(self, format: str, *args: object) -> None:
                 del format, args  # 静默 mock 服务访问日志
 
         self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

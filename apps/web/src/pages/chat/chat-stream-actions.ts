@@ -19,7 +19,7 @@ interface FinalizeOkDeps {
     value: { pending: ChatQueryOut["pending_tool_calls"]; sessionId: string } | null,
   ) => void;
   setFinalized: (value: { question: string; out: ChatQueryOut } | null) => void;
-  selfNavigatedRef: React.MutableRefObject<string | null>;
+  selfNavigatedRef: React.RefObject<string | null>;
 }
 
 /** 生成成功终态接管函数：清在途态、留待确认入口、导航到会话并失效侧栏与消息缓存。 */
@@ -41,7 +41,7 @@ export function makeFinalizeOk(deps: FinalizeOkDeps) {
     // 先导航(消空态闪回),再失效侧栏;自建导航打标,取消闸据此豁免
     if (out.session_id && out.session_id !== sessionIdRef.current) {
       selfNavigatedRef.current = out.session_id;
-      navigate(`/chat/${out.session_id}`, { replace: true });
+      void navigate(`/chat/${out.session_id}`, { replace: true });
     }
     void qc.invalidateQueries({ queryKey: ["sessions", tenantRef.current] });
     if (out.session_id === sessionIdRef.current) {

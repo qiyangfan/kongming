@@ -99,11 +99,11 @@ def _decode_protocol_body(last_line: str) -> dict[str, Any] | None:
     """解析协议行对象体;非对象或 JSON 畸形返回 None(不抛出)。"""
     try:
         parsed = json.loads(last_line[len(PROTOCOL_PREFIX) :])
-        if not isinstance(parsed, dict):
-            raise ValueError("协议体非对象")
-        return cast("dict[str, Any]", parsed)
     except (json.JSONDecodeError, ValueError, TypeError):
         return None
+    if not isinstance(parsed, dict):
+        return None
+    return cast("dict[str, Any]", parsed)
 
 
 def _body_outcome(
@@ -231,7 +231,7 @@ class PodmanSandboxRunner:
             )
         except OSError as e:
             # podman 二进制失踪/权限不足等宿主故障:收敛 ERROR(端口零抛出契约)
-            log.error("沙箱进程启动失败", exc_info=True)
+            log.exception("沙箱进程启动失败")
             return SandboxOutcome(
                 status="ERROR",
                 error=f"沙箱启动失败: {e}",
@@ -287,7 +287,7 @@ class PodmanSandboxRunner:
             raise
         except Exception as e:  # 管道断裂等通信故障
             await self._terminate(name, proc)
-            log.error("沙箱通信故障", exc_info=True)
+            log.exception("沙箱通信故障")
             return SandboxOutcome(
                 status="ERROR",
                 error=f"沙箱通信故障: {e}",

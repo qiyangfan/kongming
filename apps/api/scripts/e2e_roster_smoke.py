@@ -4,6 +4,7 @@
 需要已启动的 API、Agent 和开发用例数据；只校验执行记录，不判断模型答案。"""
 
 import asyncio
+import contextlib
 import sys
 import time
 from collections.abc import Awaitable, Callable
@@ -253,10 +254,8 @@ async def _teardown(
         except httpx.HTTPError:
             pass
     for bid in created_bots:
-        try:
+        with contextlib.suppress(httpx.HTTPError):
             await client.delete(f"/system/bots/{bid}", headers=_h())
-        except httpx.HTTPError:
-            pass
 
 
 async def main() -> int:

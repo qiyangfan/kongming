@@ -394,7 +394,7 @@ async def test_scheduler_dispatches_due_retry() -> None:
         due_retries=[{"id": "r1", "trigger_id": "t9", "tenant_id": "ten"}],
     )
     sched = _scheduler_with(svc)  # type: ignore[arg-type]
-    await sched._tick()  # noqa: SLF001
+    await sched._tick()
     # 派发是异步任务:等在飞任务收尾再断言
     await asyncio.gather(*sched._running.values())
     assert svc.retried == ["r1"]
@@ -408,10 +408,10 @@ async def test_scheduler_defers_retry_when_busy() -> None:
         due_retries=[{"id": "r2", "trigger_id": "t8", "tenant_id": "ten"}],
     )
     sched = _scheduler_with(svc)  # type: ignore[arg-type]
-    sched._running["t8"] = cast(  # noqa: SLF001  # 模拟在途(占位 Future 对齐 Task 形态)
+    sched._running["t8"] = cast(  # 模拟在途(占位 Future 对齐 Task 形态)
         "asyncio.Task[None]", asyncio.get_running_loop().create_future()
     )
-    await sched._tick()  # noqa: SLF001
+    await sched._tick()
     assert svc.retried == []
     assert svc.deferred == ["r2"]
 
@@ -433,10 +433,8 @@ async def test_scheduler_cron_skipped_during_retry_execution() -> None:
     )
     sched = _scheduler_with(svc)  # type: ignore[arg-type]
     # 占位 Future 模拟重试执行在途(与既有 in-progress 测试同形态)
-    sched._running["t7"] = cast(  # noqa: SLF001
-        "asyncio.Task[None]", asyncio.get_running_loop().create_future()
-    )
-    await sched._tick()  # noqa: SLF001
+    sched._running["t7"] = cast("asyncio.Task[None]", asyncio.get_running_loop().create_future())
+    await sched._tick()
     assert svc.fired == []
     assert svc.skipped == ["前次执行进行中"]
 
@@ -669,7 +667,7 @@ async def test_migration_0045_check_constraints(session: AsyncSession) -> None:
         {"i": tid},
     )
     await session.commit()
-    with pytest.raises(Exception):  # noqa: B017,S101  # CHECK 违约即抛(DBAPIError)
+    with pytest.raises(Exception):  # noqa: B017  # CHECK 违约即抛(DBAPIError)
         await session.execute(
             text(
                 "UPDATE public.sys_trigger_definition SET max_retries=6 WHERE id=CAST(:i AS uuid)"
@@ -688,7 +686,7 @@ async def test_migration_0045_check_constraints(session: AsyncSession) -> None:
         {"i": tid},
     )
     await session.commit()
-    with pytest.raises(Exception):  # noqa: B017,S101
+    with pytest.raises(Exception):  # noqa: B017
         await session.execute(
             text(
                 "INSERT INTO public.sys_trigger_run"

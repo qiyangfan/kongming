@@ -78,10 +78,7 @@ function RagFilters(props: RagTableProps) {
           ))}
         </SelectContent>
       </Select>
-      <Select
-        value={props.teamScope}
-        onValueChange={(v) => props.onTeamScopeChange(v as TeamScope)}
-      >
+      <Select value={props.teamScope} onValueChange={(v) => props.onTeamScopeChange(v)}>
         <SelectTrigger className="w-40" aria-label="按归属筛选">
           <SelectValue />
         </SelectTrigger>

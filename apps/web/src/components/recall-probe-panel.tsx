@@ -240,7 +240,7 @@ export function RecallProbePanel({ options }: { options: DatasourceOptionOut[] }
           {probe.isPending ? "试跑中…" : "试跑"}
         </Button>
       </div>
-      {probe.isError && <ErrorAlert text={`试跑失败:${(probe.error as Error).message}`} />}
+      {probe.isError && <ErrorAlert text={`试跑失败:${probe.error.message}`} />}
       {out ? (
         <ProbeResult out={out} />
       ) : (

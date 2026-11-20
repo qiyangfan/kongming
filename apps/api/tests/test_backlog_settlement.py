@@ -31,7 +31,7 @@ async def test_mcp_body_gate_normal_chain_unaffected(
     mcp_client: AsyncClient,
     session: AsyncSession,
     make_user: MakeUser,
-    fake_agent: dict[str, Any],  # noqa: F811  # pytest fixture(模块级引入+参数同名)
+    fake_agent: dict[str, Any],  # pytest fixture(模块级引入+参数同名)
 ) -> None:
     """小请求体正常通过；畸形 JSON 由 SDK 返回 400。"""
     from tests.test_mcp import _bot_with_key
@@ -72,7 +72,7 @@ async def test_bot_openai_error_content_fallback(
     client: AsyncClient,
     session: AsyncSession,
     make_user: MakeUser,
-    fake_agent: dict[str, Any],  # noqa: F811  # pytest fixture(模块级引入+参数同名)
+    fake_agent: dict[str, Any],  # pytest fixture(模块级引入+参数同名)
 ) -> None:
     """失败形态(触顶/不可用)summary 为空 → content 回退 error,
     集成方不再拿到静默空回复;error 已过输出护栏。"""
@@ -269,7 +269,7 @@ async def test_engine_loop_subnode_attribution() -> None:
         async def run_sql(self, *, sql: str, **kw: Any) -> dict[str, Any]:
             self.n += 1
             if self.n == 2:
-                raise Exception("boom")  # 第 2 轮子节点失败
+                raise RuntimeError("boom")  # 第 2 轮子节点失败
             return {"verdict": "PASS", "columns": ["v"], "rows": [[1]]}
 
     out = await _run_wf(

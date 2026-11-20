@@ -8,6 +8,7 @@
 import asyncio
 import json
 import os
+from typing import ClassVar
 
 import httpx
 import pytest
@@ -83,12 +84,9 @@ def test_domain_errors_never_transient() -> None:
     assert is_transient_error(LlmError("KM_AGENT_LLM_API_KEY 未配置")) is False
     assert is_transient_error(LlmError("未知出站协议: x")) is False
     # 应答畸形:LlmError from IndexError —— cause 非传输层 → 非瞬时
-    try:
-        raise IndexError("empty choices")
-    except IndexError as e:
-        wrapped = LlmError(f"LLM 应答畸形: {e}")
-        wrapped.__cause__ = e
-        assert is_transient_error(wrapped) is False
+    wrapped = LlmError("LLM 应答畸形: empty choices")
+    wrapped.__cause__ = IndexError("empty choices")
+    assert is_transient_error(wrapped) is False
 
 
 def test_llmerror_unwraps_cause_for_status() -> None:
@@ -245,7 +243,7 @@ class _TransientCompletions:
             message = _Msg()
 
         class _Resp:
-            choices = [_Choice()]
+            choices: ClassVar[list[object]] = [_Choice()]
             usage = _Usage()
 
         return _Resp()

@@ -107,8 +107,8 @@ class ChatCostGate:
             allowed = await self._limiter.allow_sliding(
                 f"chat:{tenant_id}:{user_id}", limit=self._rate, window_sec=60
             )
-        except Exception:  # noqa: BLE001 # 限流存储异常=fail-open 放行(同口径)
-            log.error("速率闸存储异常,fail-open 放行", exc_info=True)
+        except Exception:  # 限流存储异常=fail-open 放行(同口径)
+            log.exception("速率闸存储异常,fail-open 放行")
             allowed = True
         if not allowed:
             raise ChatRateLimited("CHAT_RATE_LIMITED")
@@ -145,7 +145,7 @@ class ChatCostGate:
             used_day, used_month = await self._counter.count_calls(
                 tenant_id=tenant_id, day_start=day_start, month_start=month_start
             )
-        except Exception as e:  # noqa: BLE001  读数失败=fail-closed 拒绝(不裸 500)
+        except Exception as e:
             await self._audit("chat.quota_read_failed", tenant_id, {"error": str(e)[:200]})
             raise ChatQuotaUnavailable("CHAT_QUOTA_UNAVAILABLE") from e
         # 日维先于月维(拒绝/预警审计顺序不变)
@@ -168,7 +168,7 @@ class ChatCostGate:
             return
         try:
             await self._oper.log(action=action, target=tenant_id, detail=detail)
-        except Exception:  # noqa: BLE001  # 审计旁路不阻断/不翻转闸语义
+        except Exception:  # 审计旁路不阻断/不翻转闸语义
             log.warning("chat 成本闸审计写入失败(忽略) action=%s", action, exc_info=True)
 
     async def _reject(
@@ -198,8 +198,8 @@ class ChatCostGate:
         key = f"chatbot:{bot_key}:{client_ip or 'noip'}"
         try:
             allowed = await self._limiter.allow_sliding(key, limit=self._bot_rate, window_sec=60)
-        except Exception:  # noqa: BLE001  # 同上:fail-open
-            log.error("bot 速率闸存储异常,fail-open 放行", exc_info=True)
+        except Exception:  # 同上:fail-open
+            log.exception("bot 速率闸存储异常,fail-open 放行")
             allowed = True
         if not allowed:
             raise ChatRateLimited("CHAT_RATE_LIMITED")

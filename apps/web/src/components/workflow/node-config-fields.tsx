@@ -160,7 +160,7 @@ function CfgSelectContent({ children }: { children: ReactNode }) {
   return <SelectContent onKeyDown={swallow}>{children}</SelectContent>;
 }
 
-export const INT_RE = /^[1-9][0-9]*$/;
+export const INT_RE = /^[1-9]\d*$/;
 
 /* 空值/字符串原样返回，其余对象序列化为两空格缩进 JSON 文本。 */
 function configToString(v: unknown): string {
@@ -193,7 +193,7 @@ function fieldError(
 /* 供单个字段渲染的最小上下文：当前配置、草稿与提交回调。 */
 export type FieldContext = {
   config: Record<string, unknown>;
-  setField: (key: string, value: unknown | undefined) => void;
+  setField: (key: string, value: unknown) => void;
   jsonDrafts: Record<string, string>;
   setJsonDraft: (key: string, text: string, parsed: unknown) => void;
   numDraft: string;
@@ -286,6 +286,12 @@ function NumberConfigField({ f, err, ctx }: { f: FieldSpec; err: boolean; ctx: F
 }
 
 /* 按字段类型渲染单个字段，并附带服务端/必填错误提示。 */
+function renderField(f: FieldSpec, invalid: boolean, ctx: FieldContext) {
+  if (f.kind === "number") return <NumberConfigField f={f} err={invalid} ctx={ctx} />;
+  if (f.kind === "json") return <JsonConfigField f={f} err={invalid} ctx={ctx} />;
+  return <SimpleField f={f} err={invalid} ctx={ctx} />;
+}
+
 export function ConfigFieldRow({
   f,
   serverMessage,
@@ -297,14 +303,7 @@ export function ConfigFieldRow({
 }) {
   const err = fieldError(f, ctx.config, serverMessage);
   const invalid = err !== null;
-  const inner =
-    f.kind === "number" ? (
-      <NumberConfigField f={f} err={invalid} ctx={ctx} />
-    ) : f.kind === "json" ? (
-      <JsonConfigField f={f} err={invalid} ctx={ctx} />
-    ) : (
-      <SimpleField f={f} err={invalid} ctx={ctx} />
-    );
+  const inner = renderField(f, invalid, ctx);
   return (
     <FormRow
       label={`${f.label}${f.required ? "" : "(可选)"}`}
@@ -412,7 +411,7 @@ export function NodeIdField({
           else setIdDraft(nodeId);
         }}
         onKeyDown={(e) => {
-          if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+          if (e.key === "Enter") e.currentTarget.blur();
         }}
       />
       {idError && <p className="text-xs text-destructive">{idError}</p>}

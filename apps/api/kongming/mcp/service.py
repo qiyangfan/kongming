@@ -58,11 +58,15 @@ def _sanitize_schemas(tools: list[Any]) -> list[str]:
     from kongming.mcp.models import has_redos_pattern
 
     notes: list[str] = []
+
+    def _validate(t: Any) -> None:
+        if has_redos_pattern(t.schema):
+            raise ValueError("回溯型 pattern(ReDoS 面已降级)")
+        _jsv.validator_for(t.schema).check_schema(t.schema)
+
     for t in tools:
         try:
-            if has_redos_pattern(t.schema):
-                raise ValueError("回溯型 pattern(ReDoS 面已降级)")
-            _jsv.validator_for(t.schema).check_schema(t.schema)
+            _validate(t)
         except Exception:  # noqa: BLE001  # 敌意面宽收敛,降级即安全
             notes.append(f"schema 非法已降级: {t.name[:40]}")
             t.schema.clear()

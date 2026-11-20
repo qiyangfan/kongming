@@ -197,16 +197,15 @@ def _check_roundtable_ledger(run: dict, final: dict) -> None:
     print(f"[smoke] 生命周期事件: round_finished/verdict={len(round_events)}")
     collab_step = next((s for s in final["steps"] if s["id"] == run["step_id"]), None)
     assert collab_step is not None, f"宿主步骤 {run['step_id']} 不在账本"
-    if run["status"] == "DONE":
-        if collab_step["status"] != "DONE":
-            # 运行账与任务步账是两本各自为真的账(预算在步间结账):
-            # 圆桌诚实收口后,任务累计 token 预算在步边界触发 → 步 FAILED
-            # 附因「预算耗尽」= 诚实边界,非漂移;其余步态即真缺陷
-            reason = str(collab_step.get("fail_reason") or "")
-            assert collab_step["status"] == "FAILED" and "token 预算耗尽" in reason, (
-                f"run DONE 而步 {collab_step['status']} 且非预算边界附因: {reason[:120]}"
-            )
-            print("[smoke] 步态=FAILED 但属任务 token 预算边界诚实附因(运行账 DONE 为真)")
+    if run["status"] == "DONE" and collab_step["status"] != "DONE":
+        # 运行账与任务步账是两本各自为真的账(预算在步间结账):
+        # 圆桌诚实收口后,任务累计 token 预算在步边界触发 → 步 FAILED
+        # 附因「预算耗尽」= 诚实边界,非漂移;其余步态即真缺陷
+        reason = str(collab_step.get("fail_reason") or "")
+        assert collab_step["status"] == "FAILED" and "token 预算耗尽" in reason, (
+            f"run DONE 而步 {collab_step['status']} 且非预算边界附因: {reason[:120]}"
+        )
+        print("[smoke] 步态=FAILED 但属任务 token 预算边界诚实附因(运行账 DONE 为真)")
     if run["status"] == "FAILED":
         assert collab_step["status"] in ("FAILED", "DONE"), "运行 FAILED 但步骤状态漂移"
 
@@ -280,7 +279,7 @@ async def _teardown(client: httpx.AsyncClient, created: list[str]) -> None:
     for tid in created:
         try:
             await cleanup_task(client, tid)
-        except Exception as e:  # noqa: BLE001 —— 清理失败收集后统一上抛
+        except Exception as e:  # noqa: BLE001
             cleanup_errors.append(f"{tid}: {e}")
     if cleanup_errors:
         raise AssertionError("清理失败(在途任务可能残留): " + "; ".join(cleanup_errors))

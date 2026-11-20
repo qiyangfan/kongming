@@ -6,6 +6,7 @@ import { DataView, type DataViewColumn } from "@/components/data-view";
 import { StatusBadge } from "@/components/status-badge";
 import type { CollabRunOut, CollabTurnOut, CollabWorkerOut, TaskDetailOut } from "@/lib/task-api";
 import { COLLAB_STATUS_META } from "@/lib/task-api";
+import { cellText } from "@/lib/utils";
 
 // 裁决值中文映射(未知值原样透出)
 const COLLAB_VERDICT_LABELS: Record<string, string> = {
@@ -102,8 +103,9 @@ function turnStanceColumn(): DataViewColumn<CollabTurnOut> {
     key: "stance",
     header: "立场/判定",
     render: (t) => {
-      if (t.kind === "verdict") return t.content?.consensus === true ? "共识" : "未共识";
-      if (t.kind === "abstain") return "弃权";
+      if (t.kind === "verdict")
+        return <span>{t.content?.consensus === true ? "共识" : "未共识"}</span>;
+      if (t.kind === "abstain") return <span>弃权</span>;
       const stance = t.content && typeof t.content.stance === "string" ? t.content.stance : "—";
       return <span className="text-xs">{stance}</span>;
     },
@@ -152,14 +154,14 @@ function TopologyLine({ run }: { run: CollabRunOut }) {
     return (
       <span className="text-xs text-muted-foreground">
         圆桌·{Array.isArray(topo.participants) ? topo.participants.length : "—"} 参与者·≤
-        {String(topo.max_rounds ?? "—")} 轮
+        {cellText(topo.max_rounds) || "—"} 轮
       </span>
     );
   }
   return (
     <span className="text-xs text-muted-foreground">
-      {String(topo.max_workers ?? "—")} worker
-      {rosterSize > 0 ? `·名册 ${rosterSize}` : ""}·{String(topo.dispatch ?? "serial")}
+      {cellText(topo.max_workers) || "—"} worker
+      {rosterSize > 0 ? `·名册 ${rosterSize}` : ""}·{cellText(topo.dispatch) || "serial"}
       {topo.critic ? "·critic" : ""}
     </span>
   );
@@ -306,8 +308,8 @@ export function TaskEventsSection({ events }: { events: TaskDetailOut["events"] 
                 className="text-xs text-muted-foreground"
               >
                 {typeof e.at === "string" ? new Date(e.at).toLocaleString() : ""} —{" "}
-                {String(e.kind ?? "")}
-                {e.reason ? `(${String(e.reason)})` : ""}
+                {cellText(e.kind)}
+                {e.reason ? `(${cellText(e.reason)})` : ""}
               </li>
             ))
             .reverse()}

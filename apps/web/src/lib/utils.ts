@@ -9,3 +9,26 @@ export function cn(...inputs: ClassValue[]) {
 export function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
+
+/**
+ * 弱类型载荷转展示文本:对象/数组走 JSON,避免直接 String() 渲染成 [object Object]。
+ * null/undefined 统一为空串,调用方按需补占位符。
+ */
+export function cellText(value: unknown): string {
+  if (value === null) return "";
+  switch (typeof value) {
+    case "string":
+      return value;
+    case "number":
+    case "boolean":
+    case "bigint":
+      return String(value);
+    case "object":
+      return JSON.stringify(value);
+    case "undefined":
+    case "function":
+    case "symbol":
+      return "";
+  }
+  return "";
+}

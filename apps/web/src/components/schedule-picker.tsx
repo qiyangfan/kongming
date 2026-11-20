@@ -140,9 +140,11 @@ export function SchedulePicker({ value, onChange }: SchedulePickerProps) {
 
 /* 非高级模式的参数行；频率类型下无参数（如按间隔）时整行不渲染。 */
 function ParamsRow({ schedule, emit }: { schedule: Schedule; emit: (s: Schedule) => void }) {
-  const params = <ScheduleParams schedule={schedule} emit={emit} />;
-  if (params === null) return null;
+  // interval 没有可调参数(ScheduleParams 同判断),整行不渲染
+  if (schedule.kind === "interval") return null;
   return (
-    <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">{params}</div>
+    <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+      <ScheduleParams schedule={schedule} emit={emit} />
+    </div>
   );
 }

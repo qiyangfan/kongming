@@ -186,7 +186,7 @@ class RagService:
             rows = await self._relation_expander.related_tables(
                 tenant_id=tenant_id, datasource_key=datasource_key, tables=keys
             )
-        except Exception:  # noqa: BLE001  # 关系查询失败时跳过扩展，不影响召回。
+        except Exception:  # 关系查询失败时跳过扩展，不影响召回。
             log.warning("关系扩展查询失败(降级无扩展)", exc_info=True)
             return []
         return expand_by_relations(keys, rows, max_expand=self._expand_max)
@@ -622,7 +622,7 @@ class RagService:
                 visible_teams=await self._caller_team_ids(caller_user_id),
             )
             await self._repo.commit()
-        except Exception:  # noqa: BLE001  # 回写永不阻断主流程
+        except Exception:  # 回写永不阻断主流程
             log.warning("query_history 回写失败(不阻断主流程)", exc_info=True)
             await self._repo.rollback()
 

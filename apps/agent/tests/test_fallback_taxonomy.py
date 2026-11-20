@@ -22,7 +22,7 @@ class TestPassthroughReply:
     ) -> None:
         fake = FakeLlm(["不应被调用"])
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
-        monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
+        monkeypatch.setattr(deps, "get_api", FakeApi)
         out = await nodes.understand(_state(question="你好"))
         assert out["end_reason"] == "no_data"
         assert out["fallback_type"] == FALLBACK_CHITCHAT
@@ -31,8 +31,8 @@ class TestPassthroughReply:
         assert fake.calls == []
 
     async def test_stop_word_gets_stop_reply(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(deps, "get_llm", lambda: FakeLlm())
-        monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
+        monkeypatch.setattr(deps, "get_llm", FakeLlm)
+        monkeypatch.setattr(deps, "get_api", FakeApi)
         out = await nodes.understand(_state(question="不用了"))
         assert out["fallback_type"] == FALLBACK_CHITCHAT
         assert "已停止" in str(out["error"])
@@ -88,7 +88,7 @@ class TestRouteIntentFallbacks:
         """词表漏网闲聊(「太感谢了」)被语义层接住:零检索零执行。"""
         fake = FakeLlm([_ROUTE_JSON % ("chitchat", "false", "")])
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
-        monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
+        monkeypatch.setattr(deps, "get_api", FakeApi)
         before = intent_nodes.snapshot_intent_route_stats()["chitchat_semantic_total"]
         out = await intent_nodes.route_intent(_state(question="太感谢了"))
         assert out["end_reason"] == "no_data"
@@ -101,7 +101,7 @@ class TestRouteIntentFallbacks:
     async def test_ambiguous_question_clarifies(self, monkeypatch: pytest.MonkeyPatch) -> None:
         fake = FakeLlm([_ROUTE_JSON % ("data", "true", "想看哪个时间范围的销售数据?")])
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
-        monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
+        monkeypatch.setattr(deps, "get_api", FakeApi)
         out = await intent_nodes.route_intent(_state(question="帮我看看销售情况"))
         assert out["end_reason"] == "no_data"
         assert out["fallback_type"] == FALLBACK_CLARIFY
@@ -111,7 +111,7 @@ class TestRouteIntentFallbacks:
         """上一轮已澄清 → 本轮不再命中(照常链路,防循环硬门)。"""
         fake = FakeLlm([_ROUTE_JSON % ("data", "true", "哪个范围?")])
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
-        monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
+        monkeypatch.setattr(deps, "get_api", FakeApi)
         out = await intent_nodes.route_intent(
             _state(question="上个月的", last_fallback=FALLBACK_CLARIFY)
         )
@@ -122,7 +122,7 @@ class TestRouteIntentFallbacks:
         """同帧冲突:闲聊优先(无取数意图的输入无从澄清口径)。"""
         fake = FakeLlm([_ROUTE_JSON % ("chitchat", "true", "哪个范围?")])
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
-        monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
+        monkeypatch.setattr(deps, "get_api", FakeApi)
         out = await intent_nodes.route_intent(_state(question="你好呀"))
         assert out["fallback_type"] == FALLBACK_CHITCHAT
 
@@ -130,7 +130,7 @@ class TestRouteIntentFallbacks:
         """模型失败 → 不澄清不判闲聊,照常链路(fail-open 与现态一致)。"""
         fake = FakeLlm(boom=True)
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
-        monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
+        monkeypatch.setattr(deps, "get_api", FakeApi)
         before = intent_nodes.snapshot_intent_route_stats()["intent_route_fallback_total"]
         out = await intent_nodes.route_intent(_state(question="帮我看看销售情况"))
         assert out == {}
@@ -142,7 +142,7 @@ class TestRouteIntentFallbacks:
             ['{"intent":"data","ambiguous":true,"clarify_question":"?","confidence":0.3}']
         )
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
-        monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
+        monkeypatch.setattr(deps, "get_api", FakeApi)
         out = await intent_nodes.route_intent(_state(question="帮我看看销售情况"))
         assert out == {}  # 低置信不命中澄清,照常链路
 

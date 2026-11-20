@@ -31,7 +31,7 @@ interface UsageDetail {
 
 /** 从发票明细取用量结构。 */
 function usageOf(detail: InvoiceDetail): UsageDetail {
-  return detail.usage_json as unknown as UsageDetail;
+  return detail.usage_json;
 }
 
 /** 单行费用(整数厘),与服务端 estimate_cost 同式(整数运算、向下取整)。

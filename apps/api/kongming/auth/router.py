@@ -90,7 +90,7 @@ def require_perm(perm_code: str):  # type: ignore[no-untyped-def]
         if perm_code not in info.perm_codes:
             try:
                 await svc.log_perm_denied(str(user["sub"]), perm_code, request.url.path)
-            except Exception:  # noqa: BLE001  # 审计尽力而为,拒绝本身不受影响
+            except Exception:  # 审计尽力而为,拒绝本身不受影响
                 logger.warning("perm_denied 审计写入失败", exc_info=True)
             raise HTTPException(status_code=403, detail="forbidden")
 

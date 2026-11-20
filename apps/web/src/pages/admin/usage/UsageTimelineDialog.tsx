@@ -52,7 +52,11 @@ export function UsageTimelineDialog({
   onClose,
 }: {
   traceId: string | null;
-  timeline: { isLoading: boolean; isError: boolean; data?: { events: TimelineEvent[] } };
+  timeline: {
+    isLoading: boolean;
+    isError: boolean;
+    data?: { events: TimelineEvent[] } | undefined;
+  };
   onClose: () => void;
 }) {
   return (
@@ -70,19 +74,21 @@ export function UsageTimelineDialog({
             {traceId}
           </DialogDescription>
         </DialogHeader>
-        {timeline.isLoading ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">加载中…</div>
-        ) : timeline.isError ? (
-          <ErrorAlert text="时间线加载失败" />
-        ) : (timeline.data?.events ?? []).length === 0 ? (
-          <EmptyState>该链路暂无事件</EmptyState>
-        ) : (
-          <ol className="space-y-2 border-l pl-4">
-            {(timeline.data?.events ?? []).map((e, idx) => (
-              <TimelineItem key={idx} event={e} />
-            ))}
-          </ol>
-        )}
+        {(() => {
+          if (timeline.isLoading) {
+            return <div className="py-8 text-center text-sm text-muted-foreground">加载中…</div>;
+          }
+          if (timeline.isError) return <ErrorAlert text="时间线加载失败" />;
+          const events = timeline.data?.events ?? [];
+          if (events.length === 0) return <EmptyState>该链路暂无事件</EmptyState>;
+          return (
+            <ol className="space-y-2 border-l pl-4">
+              {events.map((e, idx) => (
+                <TimelineItem key={idx} event={e} />
+              ))}
+            </ol>
+          );
+        })()}
       </DialogContent>
     </Dialog>
   );

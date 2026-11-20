@@ -478,7 +478,7 @@ async def _mk_tenant(s: AsyncSession, key: str) -> str:
     return str(tid)
 
 
-_SKIP_ZH = "本机 PG 无 zhparser 扩展(HANDOFF「zhparser 安装配方」装好后真跑)"
+_SKIP_ZH = "本机 PG 无 zhparser 扩展(HANDOFF「中文分词(zhparser)启用配方」装好后真跑)"
 
 
 @pytest.mark.skipif(not _HAS_ZHPARSER, reason=_SKIP_ZH)

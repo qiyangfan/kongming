@@ -66,9 +66,9 @@ async def _mk_session(
         await s.execute(
             text(
                 "INSERT INTO public.chat_session (id, user_id, tenant_id, title, updated_at)"  # noqa: S608
-                f" VALUES (gen_random_uuid(), :u, :t, :title, {updated_at_expr})"  # noqa: S608
+                f" VALUES (gen_random_uuid(), :u, :t, :title, {updated_at_expr})"
                 " RETURNING id"
-            ),  # noqa: S608  # updated_at_expr 为测试内常量,非用户输入
+            ),  # updated_at_expr 为测试内常量,非用户输入
             {"u": user_id, "t": tenant_id, "title": title},
         )
     ).scalar_one()

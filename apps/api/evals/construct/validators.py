@@ -138,12 +138,11 @@ def check_row_cap(row_count: int) -> str | None:
 def validate_candidate(*, sql: str, schema: str, row_count: int | None) -> list[str]:
     """静态规范校验全集(执行行数可选,None=执行验证未跑)。返回失败原因列表。"""
     failures: list[str] = []
-    for check in (
+    checks = (
         check_tiebreaker(sql),
         check_schema_qualified(sql, schema),
         check_projection_readable(sql),
         check_row_cap(row_count) if row_count is not None else None,
-    ):
-        if check:
-            failures.append(check)
+    )
+    failures.extend(check for check in checks if check)
     return failures

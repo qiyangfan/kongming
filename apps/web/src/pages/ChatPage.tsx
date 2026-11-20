@@ -70,7 +70,7 @@ export default function ChatPage() {
 
   useForceBottomOnSessionChange(sessionId, stream, scroll);
 
-  const submit = () => void stream.submit(undefined, { draft, uploading, agentMode, attachments });
+  const submit = () => stream.submit(undefined, { draft, uploading, agentMode, attachments });
   const streaming = stream.streaming;
 
   return (
@@ -88,7 +88,7 @@ export default function ChatPage() {
           pendingConfirm={stream.pendingConfirm}
           stoppedNotice={stream.stoppedNotice}
           askError={askError}
-          onAsk={(q) => void stream.submit(q, { draft, uploading, agentMode, attachments })}
+          onAsk={(q) => stream.submit(q, { draft, uploading, agentMode, attachments })}
           onResult={(out: ChatQueryOut) => stream.finalizeOk(out, streaming?.question ?? "")}
           onError={(message: string) =>
             stream.finalizeError(message, streaming?.question ?? "", streaming?.attSnapshot)

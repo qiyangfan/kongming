@@ -46,7 +46,7 @@ export const WorkflowDefinitionEditor = forwardRef<
       try {
         return { ok: true, definition: JSON.parse(text) as unknown };
       } catch (e) {
-        return { ok: false, error: `JSON 解析失败: ${e instanceof Error ? e.message : e}` };
+        return { ok: false, error: `JSON 解析失败: ${e instanceof Error ? e.message : String(e)}` };
       }
     },
     [],

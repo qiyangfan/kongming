@@ -33,7 +33,7 @@ export function renderWithCitations(
   let m: RegExpExecArray | null;
   let i = 0;
   while ((m = re.exec(text)) !== null) {
-    const token = m[1].trim();
+    const token = (m[1] ?? "").trim();
     const isLegal =
       legal.has(token) || (isCitationKeyShape(token) && suffixes.has(keySuffix(token)));
     if (!isLegal) continue; // 非键形态/编造键原样保留为文本,不渲染角标

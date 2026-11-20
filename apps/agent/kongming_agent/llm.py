@@ -312,7 +312,7 @@ class LlmClient:
                     base_delay_ms=self._retry_base_ms,
                     max_wait_ms=self._retry_max_wait_ms,
                 )
-            except Exception as e:  # noqa: BLE001  分类后决定降级或上抛
+            except Exception as e:
                 if idx + 1 < len(usable) and is_transient_error(e):
                     log.warning(
                         "LLM 出站目标 %s(%s) 瞬时故障耗尽(尝试 %d 次),降级下一目标: %s",

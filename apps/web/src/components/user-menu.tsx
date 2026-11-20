@@ -48,7 +48,11 @@ export function UserMenu() {
           {theme === "dark" ? <Sun aria-hidden /> : <Moon aria-hidden />}
           {theme === "dark" ? "切换为亮色" : "切换为暗色"}
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => navigate("/memory")}>
+        <DropdownMenuItem
+          onSelect={() => {
+            void navigate("/memory");
+          }}
+        >
           <Brain aria-hidden />
           我的记忆
         </DropdownMenuItem>

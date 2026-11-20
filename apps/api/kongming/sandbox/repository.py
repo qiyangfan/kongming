@@ -57,8 +57,9 @@ class SqlSandboxRunRepo:
                     },
                 )
                 await s.commit()
-            return row_id
         except Exception:
             # 沙箱审计写入失败只记日志，不影响执行结果。
             log.warning("sys_sandbox_run 落库失败(不阻断)", exc_info=True)
             return None
+        else:
+            return row_id

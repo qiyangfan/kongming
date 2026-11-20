@@ -115,10 +115,10 @@ export function FeedbackFilters({
   onStatusChange: (v: string) => void;
   tenantId: string;
   onTenantChange: (v: string) => void;
-  tenantSource: { isSuccess: boolean; data?: TenantRow[] };
+  tenantSource: { isSuccess: boolean; data?: TenantRow[] | undefined };
   dsKey: string;
   onDsKeyChange: (v: string) => void;
-  dsSource: { isSuccess: boolean; data?: DsRow[] };
+  dsSource: { isSuccess: boolean; data?: DsRow[] | undefined };
   days: number;
   onDaysChange: (v: number) => void;
   onlyCorrected: boolean;

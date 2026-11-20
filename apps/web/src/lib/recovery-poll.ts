@@ -10,7 +10,7 @@ export const RECOVERY_POLL_BUDGET_MS = RECOVERY_POLL_INTERVAL_MS * RECOVERY_POLL
 /** 末条为 USER 且其后无 ASSISTANT → 需要对历史做回查(服务端有轮次在收尾)。 */
 export function needsTurnRecovery(msgs: SessionMessageOut[] | undefined): boolean {
   if (!msgs || msgs.length === 0) return false;
-  return msgs[msgs.length - 1].role === "USER";
+  return msgs[msgs.length - 1]?.role === "USER";
 }
 
 /** 回查预算是否已耗尽(deadline epoch ms;0 = 未在回查)。 */

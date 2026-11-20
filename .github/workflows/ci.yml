@@ -51,11 +51,11 @@ jobs:
           echo "$FILES"
           match() { echo "$FILES" | grep -Eq "$1" && echo true || echo false; }
           {
-            echo "api=$(match '(^apps/api/|^packages/liannu/|^contracts/|^infra/|^Makefile$|^\.github/workflows/ci\.yml$)')"
+            echo "api=$(match '(^apps/api/|^packages/liannu/|^contracts/|^infra/|^scripts/|^Makefile$|^\.env\.example$|^\.github/workflows/ci\.yml$)')"
             echo "agent=$(match '(^apps/agent/|^packages/liannu/|^\.github/workflows/ci\.yml$)')"
             echo "liannu=$(match '(^packages/liannu/|^\.github/workflows/ci\.yml$)')"
             echo "web=$(match '(^apps/web/|^\.github/workflows/ci\.yml$)')"
-            echo "contracts=$(match '(^apps/api/|^packages/liannu/|^contracts/|^Makefile$|^\.github/workflows/ci\.yml$)')"
+            echo "contracts=$(match '(^apps/api/|^packages/liannu/|^contracts/|^openspec/|^Makefile$|^\.github/workflows/ci\.yml$)')"
             echo "images=$(match '(^apps/api/|^apps/agent/|^packages/liannu/|^infra/|^\.github/workflows/ci\.yml$)')"
           } >> "$GITHUB_OUTPUT"
 
@@ -88,7 +88,9 @@ jobs:
     # 认证安全测试使用真实 PostgreSQL 和 Redis;conftest 准备 kongming_test 库。
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        # 与 infra/docker-compose.yml 及本地开发同主版本:迁移以显式 SQL 为主,
+        # 低版本 CI 库会漏掉高版本行为差异
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_DB: kongming
           POSTGRES_USER: kongming
@@ -117,20 +119,29 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --frozen
-      - run: uv run ruff format --check .
-      - run: uv run ruff check .
-      - run: uv run pylint --disable=all --enable=too-many-lines,too-many-public-methods,too-many-locals,too-many-return-statements,too-many-statements,too-many-ancestors,too-many-boolean-expressions,cyclic-import --jobs=0 kongming
-      - run: uv run mypy kongming
+      - run: uv lock --check
+      - run: uv run ruff format --check . ../../scripts
+      - run: uv run ruff check . ../../scripts
+      - run: uv run pylint --disable=all --enable=too-many-lines,too-many-public-methods,too-many-locals,too-many-return-statements,too-many-statements,too-many-ancestors,too-many-boolean-expressions,cyclic-import,E --disable=E1101 --jobs=0 kongming
+      - run: uv run mypy kongming ../../scripts
       # pyright 参数与本地 make api-check 一致。
       - run: uv run pyright
+      - run: uv run pyright ../../scripts
       - run: uv run lint-imports
+      # 单一迁移头:多 head 会让 upgrade head 行为不确定
+      - run: test "$(uv run alembic heads | wc -l | tr -d ' ')" -eq 1
+      # 依赖声明卫生:未声明/未使用的运行时依赖(dev 侧 tests/evals/scripts 不参与)
+      - run: uvx deptry==0.25.1 .
       # baseline 迁移对 km_readonly 无条件 GRANT(0001),角色由 pg-init 创建;
       # 本地 compose 挂载同款 init 脚本,CI 此处与其同构(单源,不复制 SQL)
       - run: >
           psql "postgres://kongming:kongming@localhost:5432/kongming"
           -v ON_ERROR_STOP=1 -f ../../infra/pg-init/001-readonly-role.sql
       - run: uvx --from vulture==2.16 vulture kongming --min-confidence 100
+      - run: uvx --from vulture==2.16 vulture ../../scripts --min-confidence 100
       - run: uv run pytest -q --cov --cov-report=xml
+      # 安全域分模块覆盖率地板(与本地 make security-cov 同源)
+      - run: make -C ../.. security-cov
       - if: github.event_name == 'pull_request'
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
@@ -161,13 +172,16 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --frozen
+      - run: uv lock --check
       - run: uv run ruff format --check .
       - run: uv run ruff check .
-      - run: uv run pylint --disable=all --enable=too-many-lines,too-many-public-methods,too-many-locals,too-many-return-statements,too-many-statements,too-many-ancestors,too-many-boolean-expressions,cyclic-import --jobs=0 kongming_agent
+      - run: uv run pylint --disable=all --enable=too-many-lines,too-many-public-methods,too-many-locals,too-many-return-statements,too-many-statements,too-many-ancestors,too-many-boolean-expressions,cyclic-import,E --disable=E1101 --jobs=0 kongming_agent
       - run: uv run mypy kongming_agent
       # pyright 参数与本地 make agent-check 一致。
       - run: uv run pyright
       - run: uv run lint-imports
+      # 依赖声明卫生:未声明/未使用的运行时依赖(dev 侧 tests/evals/scripts 不参与)
+      - run: uvx deptry==0.25.1 .
       - run: uvx --from vulture==2.16 vulture kongming_agent --min-confidence 100 --ignore-names new_versions,task_path
       - run: uv run pytest -q --cov --cov-report=xml
       - if: github.event_name == 'pull_request'
@@ -200,10 +214,12 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --frozen
+      - run: uv lock --check
       - run: uv run ruff format --check .
       - run: uv run ruff check .
-      - run: uv run pylint --disable=all --enable=too-many-lines,too-many-public-methods,too-many-locals,too-many-return-statements,too-many-statements,too-many-ancestors,too-many-boolean-expressions,cyclic-import --jobs=0 liannu
+      - run: uv run pylint --disable=all --enable=too-many-lines,too-many-public-methods,too-many-locals,too-many-return-statements,too-many-statements,too-many-ancestors,too-many-boolean-expressions,cyclic-import,E --disable=E1101 --jobs=0 liannu
       - run: uv run mypy liannu
+      - run: uvx deptry==0.25.1 .
       - run: uvx --from vulture==2.16 vulture liannu --min-confidence 100
       - run: uv run pytest -q --cov --cov-report=xml
       - if: github.event_name == 'pull_request'
@@ -232,7 +248,7 @@ jobs:
           persist-credentials: false
       - uses: pnpm/action-setup@9bbca1e9dc2902adb87e8780fe5c98796985a62d # v6.1.1
         with:
-          version: 11
+          version: 11.24.0  # 与 apps/web package.json 的 packageManager 保持一致
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "24"
@@ -240,8 +256,10 @@ jobs:
           cache-dependency-path: apps/web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm test:run
+      - run: pnpm test:cov
       - run: pnpm lint
+      # 循环依赖(tsc/knip 不报):跨模块环会让打包顺序与初始化时序不可预测
+      - run: pnpm dlx madge@8 --circular --extensions ts,tsx src
       - run: pnpm exec knip
       - run: pnpm lint:css
       - run: pnpm format:check
@@ -276,9 +294,16 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --frozen
+      - run: uv lock --check
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "24"
+      # contracts-check 会重生成前端契约类型并断言无差异,需要 web 依赖
+      - uses: pnpm/action-setup@9bbca1e9dc2902adb87e8780fe5c98796985a62d # v6.1.1
+        with:
+          version: 11.24.0  # 与 apps/web package.json 的 packageManager 保持一致
+      - run: pnpm install --frozen-lockfile
+        working-directory: ${{ github.workspace }}/apps/web
       # 存量 spec 的“需求文本过长”属历史告警,结构校验全量放行;活动 change 必须 strict 通过
       - run: npx --yes @fission-ai/openspec@2.1.0 validate --all
         working-directory: ${{ github.workspace }}/openspec
@@ -286,6 +311,17 @@ jobs:
         working-directory: ${{ github.workspace }}/openspec
       # 复用本地 make check，确保 CI 与本地执行相同的契约检查。
       - run: make -C ../.. contracts-check
+      # 破坏性变更检测:与 PR 基线比较 OpenAPI 语义差异
+      - if: github.event_name == 'pull_request'
+        working-directory: ${{ github.workspace }}
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          OASDIFF_VERSION: 1.39.0
+        run: |
+          set -euo pipefail
+          git show "origin/${BASE_REF}:contracts/openapi.json" > /tmp/base-openapi.json
+          curl -sSfL "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz" | tar -xz oasdiff
+          ./oasdiff breaking --fail-on ERR /tmp/base-openapi.json contracts/openapi.json
 
   # ── 镜像构建（只构建，用于检查 Dockerfile 和路径依赖）──
   images:
@@ -301,23 +337,34 @@ jobs:
         run: docker build -f infra/api.Dockerfile -t kongming-api:ci .
       - name: Build agent image
         run: docker build -f infra/agent.Dockerfile -t kongming-agent:ci .
+      - name: Build sandbox image
+        run: docker build -f infra/sandbox.Dockerfile -t kongming-sandbox:ci infra/
       - name: Trivy scan
         env:
           TRIVY_VERSION: 0.76.2
         run: |
           set -euo pipefail
           curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" | tar -xz trivy
+          # IaC 误配(Dockerfile/compose);sandbox 是一次性执行镜像,
+          # DS-0026(HEALTHCHECK)不适用,按 HIGH/CRITICAL 收口
+          for t in infra/api.Dockerfile infra/agent.Dockerfile infra/docker-compose.yml; do
+            ./trivy config --exit-code 1 "$t"
+          done
+          ./trivy config --exit-code 1 --severity HIGH,CRITICAL infra/sandbox.Dockerfile
           # 只做漏洞扫描;秘密由源码 gitleaks 门禁负责(镜像内第三方 SDK 文档串会误报)
           ./trivy image --scanners vuln --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed kongming-api:ci
           ./trivy image --scanners vuln --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed kongming-agent:ci
+          ./trivy image --scanners vuln --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed kongming-sandbox:ci
           ./trivy image --scanners vuln --format cyclonedx --output sbom-api.json kongming-api:ci
           ./trivy image --scanners vuln --format cyclonedx --output sbom-agent.json kongming-agent:ci
+          ./trivy image --scanners vuln --format cyclonedx --output sbom-sandbox.json kongming-sandbox:ci
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: sbom
           path: |
             sbom-api.json
             sbom-agent.json
+            sbom-sandbox.json
 
   # ── 门禁 6:重复代码(PMD CPD 同位) ──────────────────────
   dup:
@@ -347,7 +394,7 @@ jobs:
           enable-cache: true
       - uses: pnpm/action-setup@9bbca1e9dc2902adb87e8780fe5c98796985a62d # v6.1.1
         with:
-          version: 11
+          version: 11.24.0  # 与 apps/web package.json 的 packageManager 保持一致
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "24"
@@ -357,6 +404,11 @@ jobs:
       - run: cd apps/agent && uv sync --frozen && uv run --with pip-audit==2.10.1 pip-audit --skip-editable --progress-spinner off
       - run: cd packages/liannu && uv sync --frozen && uv run --with pip-audit==2.10.1 pip-audit --skip-editable --progress-spinner off
       - run: cd apps/web && pnpm install --frozen-lockfile && pnpm audit
+      # 许可证:运行时闭包与前端生产依赖只允许宽松许可(与本地 make license-check 同源)
+      - run: cd apps/api && uv run --with pip-licenses==5.5.1 python ../../scripts/license_check.py python .
+      - run: cd apps/agent && uv run --with pip-licenses==5.5.1 python ../../scripts/license_check.py python .
+      - run: cd packages/liannu && uv run --with pip-licenses==5.5.1 python ../../scripts/license_check.py python .
+      - run: cd apps/web && python3 ../../scripts/license_check.py node .
 
   # ── 门禁 8:配置与脚本(workflow/Dockerfile/shell/YAML/MD/TOML) ──
   lint-config:
@@ -387,10 +439,14 @@ jobs:
           set -euo pipefail
           curl -sSfL -o hadolint "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-Linux-x86_64"
           chmod +x hadolint
-          ./hadolint infra/api.Dockerfile infra/agent.Dockerfile
+          ./hadolint infra/api.Dockerfile infra/agent.Dockerfile infra/sandbox.Dockerfile
+      - run: python3 scripts/pin_check.py infra
       - run: shellcheck infra/example-data/load.sh
       - run: uvx --from yamllint==1.38.0 yamllint -c .yamllint.yml .
       - run: npx --yes markdownlint-cli2@0.24.1
+      - run: python3 scripts/link_check.py .
       - run: uvx codespell==2.4.3 README.md AGENTS.md docs
       - run: npx --yes @taplo/cli@0.7.0 fmt --check apps/api/pyproject.toml apps/agent/pyproject.toml packages/liannu/pyproject.toml .gitleaks.toml
       - run: uvx zizmor==1.32.0 .github/workflows
+      # 编排语义:变量插值/服务引用(CI 用 docker compose,本地 make 用 podman)
+      - run: KM_DB_PASSWORD=ci KM_INTERNAL_TOKEN=ci KM_AGENT_LLM_API_KEY=ci docker compose -f infra/docker-compose.yml config -q

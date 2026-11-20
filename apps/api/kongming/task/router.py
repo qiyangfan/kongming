@@ -752,7 +752,7 @@ async def graph_checkpoint_put(
             payload=base64.b64decode(body.payload_b64),
         )
         await session.commit()
-    except Exception:
+    except Exception:  # noqa: BLE001
         await session.rollback()
         raise HTTPException(status_code=503, detail="CHECKPOINT_STORE_FAILED") from None
     return {"ok": True}

@@ -47,7 +47,7 @@ function timeLabel(iso: string): string {
     : d.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 }
 
-export function SessionSidebar({ onNavigate }: { onNavigate?: () => void }) {
+export function SessionSidebar({ onNavigate }: { onNavigate?: (() => void) | undefined }) {
   const { current } = useTenant();
   const [input, setInput] = useState("");
   const [q, setQ] = useState("");
@@ -66,6 +66,7 @@ export function SessionSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const activeId = pathname.startsWith("/chat/") ? pathname.slice("/chat/".length) : null;
 
   const groups = sessions ? groupSessionsByTime(sessions) : [];
+  const emptyHint = q ? "没有匹配的会话。" : "尚无会话,问第一句即开卷。";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -83,56 +84,62 @@ export function SessionSidebar({ onNavigate }: { onNavigate?: () => void }) {
         />
       </div>
       <ScrollArea className="min-h-24 flex-1 rounded-md">
-        {isLoading ? (
-          <div className="space-y-2 p-1">
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-9 w-full" />
-          </div>
-        ) : !sessions?.length ? (
-          <p className="px-2 py-3 text-xs text-muted-foreground">
-            {q ? "没有匹配的会话。" : "尚无会话,问第一句即开卷。"}
-          </p>
-        ) : (
-          groups.map((g) => (
-            <div key={g.label} className="mb-1">
-              <p className="px-2 pt-1 pb-0.5 text-3xs font-medium text-muted-foreground">
-                {g.label}
-              </p>
-              <ul className="space-y-0.5 pr-2">
-                {g.items.map((s) => (
-                  <li key={s.id} className="group relative">
-                    <Link
-                      to={`/chat/${s.id}`}
-                      onClick={onNavigate}
-                      className={
-                        "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors " +
-                        (s.id === activeId
-                          ? "bg-accent text-accent-foreground"
-                          : "text-foreground hover:bg-accent/60")
-                      }
-                    >
-                      <MessageSquare
-                        className={
-                          "size-3.5 shrink-0 " +
-                          (s.id === activeId ? "text-primary" : "text-muted-foreground")
-                        }
-                        aria-hidden
-                      />
-                      <span className="min-w-0 flex-1 truncate" title={s.title}>
-                        {s.title}
-                      </span>
-                      {/* 操作按钮单独占用 28px 槽位；时间右侧留出相同宽度，避免遮挡。 */}
-                      <span className="mr-7 shrink-0 text-3xs text-muted-foreground">
-                        {timeLabel(s.updated_at)}
-                      </span>
-                    </Link>
-                    <SessionActions session={s} isActive={s.id === activeId} />
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))
-        )}
+        {(() => {
+          if (isLoading) {
+            return (
+              <div className="space-y-2 p-1">
+                <Skeleton className="h-9 w-full" />
+                <Skeleton className="h-9 w-full" />
+              </div>
+            );
+          }
+          if (!sessions?.length) {
+            return <p className="px-2 py-3 text-xs text-muted-foreground">{emptyHint}</p>;
+          }
+          return (
+            <>
+              {groups.map((g) => (
+                <div key={g.label} className="mb-1">
+                  <p className="px-2 pt-1 pb-0.5 text-3xs font-medium text-muted-foreground">
+                    {g.label}
+                  </p>
+                  <ul className="space-y-0.5 pr-2">
+                    {g.items.map((s) => (
+                      <li key={s.id} className="group relative">
+                        <Link
+                          to={`/chat/${s.id}`}
+                          onClick={onNavigate}
+                          className={
+                            "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors " +
+                            (s.id === activeId
+                              ? "bg-accent text-accent-foreground"
+                              : "text-foreground hover:bg-accent/60")
+                          }
+                        >
+                          <MessageSquare
+                            className={
+                              "size-3.5 shrink-0 " +
+                              (s.id === activeId ? "text-primary" : "text-muted-foreground")
+                            }
+                            aria-hidden
+                          />
+                          <span className="min-w-0 flex-1 truncate" title={s.title}>
+                            {s.title}
+                          </span>
+                          {/* 操作按钮单独占用 28px 槽位；时间右侧留出相同宽度，避免遮挡。 */}
+                          <span className="mr-7 shrink-0 text-3xs text-muted-foreground">
+                            {timeLabel(s.updated_at)}
+                          </span>
+                        </Link>
+                        <SessionActions session={s} isActive={s.id === activeId} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </>
+          );
+        })()}
       </ScrollArea>
     </div>
   );
@@ -201,7 +208,7 @@ function RenameDialog({
     }
   }, [open, session.title]);
 
-  async function submit(e: React.FormEvent): Promise<void> {
+  async function submit(e: React.SubmitEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
     const cleaned = title.trim();
     if (!cleaned || busy) return;
@@ -291,7 +298,7 @@ function DeleteDialog({
     // 已删会话的 messages 键不再 invalidate(重取只会 404);路由离开自然卸载
     await qc.invalidateQueries({ queryKey: ["sessions", current] });
     // 当前会话被删:视图回新建态(spec「删除会话需确认且即时收敛」)
-    if (isActive) navigate("/chat", { replace: true });
+    if (isActive) void navigate("/chat", { replace: true });
   }
 
   return (

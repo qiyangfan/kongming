@@ -125,7 +125,7 @@ async def test_doc_answer_empty_hints_direct(monkeypatch: pytest.MonkeyPatch) ->
             calls.append({"system": system, "user": user, **kw})
             return "分类A最高(据图)"
 
-    monkeypatch.setattr(deps, "get_llm", lambda: _Llm())
+    monkeypatch.setattr(deps, "get_llm", _Llm)
     state: dict[str, object] = {
         "question": "[图片 1 内容描述]\n分类A最高\n\n用户问题:\n这张图里哪个最高",
         "trace_id": "t",

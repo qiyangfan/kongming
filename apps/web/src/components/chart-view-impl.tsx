@@ -5,17 +5,17 @@ import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { EChart } from "@/lib/echarts";
 import { cssVar } from "@/lib/utils";
-import type { ChartDatum, ChartSpec, ChartTune, ChartType } from "@/components/chart-shared";
-import { uniqueTypes } from "@/components/chart-shared";
+import type { ChartDatum, ChartSpec, ChartTune, ChartType } from "@/lib/chart-shared";
+import { uniqueTypes } from "@/lib/chart-shared";
 import { buildChartOption } from "@/lib/chart-option";
 
 export interface ChartViewProps {
   /** 有序图表候选:每个候选自带完整绑定,活动绑定=同类型首个候选 */
   candidates: ChartSpec[];
   data: ChartDatum;
-  tune?: ChartTune;
+  tune?: ChartTune | undefined;
   /** 呈现层列标签(缺失/未命中回退物理列名)——多度量系列名用它,禁裸物理名直达用户 */
-  labels?: string[];
+  labels?: string[] | undefined;
   /** 当前图表类型(状态提升至 chart-view 壳:主题重挂不丢用户手动选择) */
   activeType: ChartType;
   onActiveTypeChange: (t: ChartType) => void;

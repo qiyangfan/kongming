@@ -45,9 +45,7 @@ def question_keywords(question: str) -> set[str]:
 def _identity_tokens(table: MetaTable) -> list[str]:
     """表身份 token(纯函数):表名(整体 + snake 分段,≥2 字符)+ 列名(≥3 字符)。"""
     tokens: list[str] = [table.name.lower()]
-    for part in re.split(r"[_\W]+", table.name.lower()):
-        if len(part) >= 2:
-            tokens.append(part)
+    tokens.extend(part for part in re.split(r"[_\W]+", table.name.lower()) if len(part) >= 2)
     for col in table.columns:
         low = col.name.lower()
         if len(low) >= 3:

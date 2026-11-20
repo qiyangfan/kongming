@@ -69,11 +69,17 @@ export function useUsagePageState() {
 
   // 模型/任务筛选项取自已加载的汇总数据,避免额外请求。
   const modelOptions = useMemo(
-    () => Array.from(new Set((summary.data?.items ?? []).map((i) => i.model))).sort(),
+    () =>
+      Array.from(new Set((summary.data?.items ?? []).map((i) => i.model))).sort((a, b) =>
+        a.localeCompare(b),
+      ),
     [summary.data],
   );
   const taskOptions = useMemo(
-    () => Array.from(new Set((summary.data?.items ?? []).map((i) => i.task))).sort(),
+    () =>
+      Array.from(new Set((summary.data?.items ?? []).map((i) => i.task))).sort((a, b) =>
+        a.localeCompare(b),
+      ),
     [summary.data],
   );
 

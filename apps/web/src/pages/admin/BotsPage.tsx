@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { DataView } from "@/components/data-view";
 import { ErrorAlert } from "@/components/error-alert";
 import { PageHeader } from "@/components/page-header";
-import type { components } from "@/lib/api-types.gen";
 
 import { AttachDialog } from "./bots/AttachDialog";
 import { botColumns } from "./bots/BotColumns";
@@ -15,8 +14,6 @@ import { KeyShownDialog } from "./bots/KeyShownDialog";
 import { PublishDialog } from "./bots/PublishDialog";
 import { useBotsPageState } from "./bots/use-bots-page-state";
 import { RollbackDialog, VersionHistoryDialog } from "./bots/VersionDialogs";
-
-export type BotItem = components["schemas"]["BotOut"];
 
 export default function BotsPage() {
   const s = useBotsPageState();
@@ -133,7 +130,7 @@ export default function BotsPage() {
         onGreetingChange={s.setPubGreeting}
         suggestions={s.pubSuggestions}
         onSuggestionsChange={s.setPubSuggestions}
-        error={s.publish.isError ? (s.publish.error as Error).message : ""}
+        error={s.publish.isError ? s.publish.error.message : ""}
         pending={s.publish.isPending}
         onSubmit={() => s.pubTarget && s.publish.mutate({ id: s.pubTarget, published: false })}
         onClose={() => s.setPubTarget(null)}

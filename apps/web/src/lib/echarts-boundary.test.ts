@@ -20,8 +20,18 @@ function walk(dir: string): string[] {
 /** 静态 import(形如 import … from "mod" 或 import "mod"),排除 import( … 动态形态 */
 function staticEngineImports(source: string): string[] {
   const hits: string[] = [];
-  const re = /(^|\n)\s*import\s+(?:[^"'()\n]*?\s+from\s+)?["'](echarts|zrender)[^"']*["']/g;
-  for (const m of source.matchAll(re)) hits.push(m[2]);
+  for (const m of source.matchAll(/(?:^|\n)[ \t]*import\b(?!\s*\()/g)) {
+    // 声明子句按分号或换行收口,避免跨语句误判;引号内即模块名
+    const rest = source.slice(m.index + m[0].length, m.index + m[0].length + 500);
+    const end = rest.indexOf(";");
+    // 无分号(ASI 风格)时取满窗口而非首行:多行 import 的模块名可能在后几行,
+    // 宁可多报(守卫失败方向安全)不可漏报
+    const clause = end >= 0 ? rest.slice(0, end) : rest;
+    for (const q of clause.matchAll(/["']([^"']+)["']/g)) {
+      const mod = q[1] ?? "";
+      if (/^(echarts|zrender)(\/|$)/.test(mod)) hits.push(mod);
+    }
+  }
   return hits;
 }
 

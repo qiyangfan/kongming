@@ -19,7 +19,7 @@ function ChangePasswordForm() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  async function submit(e: React.FormEvent) {
+  async function submit(e: React.SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     if (next !== confirm) {
       setError("两次输入的新密码不一致");
@@ -34,7 +34,7 @@ function ChangePasswordForm() {
       });
       // 后端已吊销全部会话(含当前),清态(联动 store 回落 guest)后重新登录
       clearTokens();
-      navigate("/login", { replace: true });
+      void navigate("/login", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? humanizeErrorText(err.message) : "改密失败");
     } finally {
@@ -52,7 +52,12 @@ function ChangePasswordForm() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={submit} className="space-y-4">
+          <form
+            onSubmit={(e) => {
+              void submit(e);
+            }}
+            className="space-y-4"
+          >
             <FormRow label="当前密码" htmlFor="current">
               <Input
                 id="current"

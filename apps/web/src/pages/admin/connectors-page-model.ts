@@ -1,6 +1,7 @@
 /* 连接器页的类型字典、表单状态与「表单 ↔ 请求体」的纯函数装配(可测逻辑)。 */
 
 import type { ConnectorOut, ConnectorParamIn } from "@/lib/connector-api";
+import { cellText } from "@/lib/utils";
 
 export const METHOD_LABELS: Record<string, string> = { GET: "GET(读)", POST: "POST(写)" };
 export const AUTH_LABELS: Record<string, string> = {
@@ -105,10 +106,10 @@ export function rowToForm(row: ConnectorOut): FormState {
     method: row.method === "POST" ? "POST" : "GET",
     pathTemplate: row.path_template,
     params: row.params.map((p) => ({
-      name: String(p.name ?? ""),
-      type: String(p.type ?? "string"),
+      name: cellText(p.name),
+      type: cellText(p.type) || "string",
       required: Boolean(p.required),
-      description: String(p.description ?? ""),
+      description: cellText(p.description),
     })),
     allowedHostsText: row.allowed_hosts.join("\n"),
     authType: row.auth_type,

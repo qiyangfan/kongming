@@ -60,8 +60,8 @@ async def _user(
 async def _guard_audits(s: AsyncSession, *, gtype: str | None = None) -> list[dict[str, object]]:
     q = "SELECT * FROM public.sys_guardrail_audit"
     if gtype:
-        q += f" WHERE guardrail_type = '{gtype}'"  # noqa: S608  # 测试常量
-    rows = (await s.execute(text(q))).mappings().all()  # noqa: S608  # 测试常量
+        q += f" WHERE guardrail_type = '{gtype}'"  # 测试常量
+    rows = (await s.execute(text(q))).mappings().all()  # 测试常量
     return [dict(r) for r in rows]
 
 

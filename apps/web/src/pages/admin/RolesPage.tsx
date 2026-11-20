@@ -116,7 +116,7 @@ export default function RolesPage() {
         }
       />
 
-      {roles.isError && <ErrorAlert text={`角色列表加载失败:${(roles.error as Error).message}`} />}
+      {roles.isError && <ErrorAlert text={`角色列表加载失败:${roles.error.message}`} />}
 
       <RoleTable
         rows={roles.data ?? []}

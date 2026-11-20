@@ -12,7 +12,7 @@ from typing import Any
 
 from kongming.trigger.definition import TriggerDefinitionService
 from kongming.trigger.email import TriggerEmailService
-from kongming.trigger.errors import (  # noqa: F401  # 对外再导出:路由/调度按 service 寻址
+from kongming.trigger.errors import (  # 对外再导出:路由/调度按 service 寻址
     TargetNotFound,
     TriggerKeyTaken,
     TriggerNotFound,
@@ -33,12 +33,12 @@ from kongming.trigger.ports import (
     TriggerRepo,
 )
 from kongming.trigger.retry import DEFAULT_BACKOFF_SEC
-from kongming.trigger.task_target import (  # noqa: F401  # 对外再导出:既有调用方按 service 寻址
+from kongming.trigger.task_target import (  # 对外再导出:既有调用方按 service 寻址
     filter_pass,
     render_goal,
     thread_key,
 )
-from kongming.trigger.validation import (  # noqa: F401  # 对外再导出:既有调用方按 service 寻址
+from kongming.trigger.validation import (  # 对外再导出:既有调用方按 service 寻址
     MAX_MESSAGES_PER_POLL,
     MIN_POLL_INTERVAL_SEC,
     TASK_TARGET,

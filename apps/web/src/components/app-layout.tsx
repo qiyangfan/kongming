@@ -30,7 +30,7 @@ function BrandMark() {
   );
 }
 
-function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
+function SidebarBody({ onNavigate }: { onNavigate?: (() => void) | undefined }) {
   const { user } = useAuth();
   const items = visibleNav(user);
 

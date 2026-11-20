@@ -78,7 +78,7 @@ class DatasourceService:
 
     # ---- 创建 ----
 
-    async def create(  # noqa: PLR0913 —— 注册字段平铺
+    async def create(
         self,
         *,
         actor_id: str,
@@ -124,7 +124,7 @@ class DatasourceService:
 
     # ---- 编辑(全量表单语义;key/租户归属不可改;密码留空=不改) ----
 
-    async def update(  # noqa: PLR0913 —— 编辑字段平铺
+    async def update(
         self,
         *,
         actor_id: str,
@@ -261,7 +261,7 @@ class DatasourceService:
         if ctx_evictor is not None:
             try:
                 await ctx_evictor(current.tenant_id, current.datasource_key)
-            except Exception:  # noqa: BLE001  # 缓存失效失败不阻断删除
+            except Exception:  # 缓存失效失败不阻断删除
                 log.warning("datasource 删除的 rag ctx 失效失败", exc_info=True)
 
     # ---- 测试连接(无状态:不落库/不建池/不落审计) ----

@@ -42,6 +42,6 @@ async def resolve_for_read(
     try:
         plain = cipher.decrypt(row.password_enc)
     except CredentialUndecryptable:
-        log.error("数据源凭证不可解 key=%s(密钥轮换/损坏)", datasource_key)
+        log.exception("数据源凭证不可解 key=%s(密钥轮换/损坏)", datasource_key)
         raise DatasourceInvalid(datasource_key) from None
     return row, plain

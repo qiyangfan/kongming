@@ -302,7 +302,7 @@ def test_embedding_endpoint_batch(monkeypatch: pytest.MonkeyPatch) -> None:
             captured["texts"] = texts
             return [[0.1, 0.2] for _ in texts]
 
-    monkeypatch.setattr(deps, "get_llm", lambda: FakeLlm2())
+    monkeypatch.setattr(deps, "get_llm", FakeLlm2)
     with TestClient(app) as c:
         resp = c.post(
             "/internal/embedding",
@@ -319,7 +319,7 @@ def test_embedding_endpoint_over_limit_rejected(monkeypatch: pytest.MonkeyPatch)
         async def embed(self, texts: list[str]) -> list[list[float]]:
             raise AssertionError("超限请求不应触达 LLM")
 
-    monkeypatch.setattr(deps, "get_llm", lambda: FakeLlm3())
+    monkeypatch.setattr(deps, "get_llm", FakeLlm3)
     with TestClient(app) as c:
         resp = c.post(
             "/internal/embedding",

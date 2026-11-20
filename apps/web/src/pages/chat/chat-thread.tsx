@@ -18,7 +18,7 @@ interface ChatThreadProps {
   sessionId: string | undefined;
   messagesLoading: boolean;
   messages: SessionMessageOut[] | undefined;
-  suggestions: { items?: string[]; loading: boolean };
+  suggestions: { items?: string[] | undefined; loading: boolean };
   streaming: StreamingTurnStart | null;
   finalized: { question: string; out: ChatQueryOut } | null;
   finalizedMsg: SessionMessageOut | null;

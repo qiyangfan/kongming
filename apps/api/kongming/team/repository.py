@@ -1,7 +1,7 @@
 """team 存储:sys_team/sys_team_member;成员集单点查询
 (list_visible_ids:用户→(team_id→role) 映射,供列表过滤双支)。"""
 
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from sqlalchemy import text
 from sqlalchemy.engine import CursorResult
@@ -243,7 +243,7 @@ class SqlTeamRepo:
 
     # ── 资源归属(三域共用:置 team_id 或回个人) ──
 
-    _RESOURCE_TABLES = {
+    _RESOURCE_TABLES: ClassVar[dict[str, str]] = {
         "bot": "public.sys_bot_definition",
         "workflow": "public.sys_workflow_def",
     }

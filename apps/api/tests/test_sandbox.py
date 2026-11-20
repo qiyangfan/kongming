@@ -38,10 +38,10 @@ SANDBOX_IMAGE = "kongming-sandbox:dev"
 async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     """沙箱测试租户业务 schema(data_sql 真执行活数据,与 test_toolcall 同形态)。"""
     async with get_engine().begin() as conn:
-        await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))  # noqa: S608  # 模块常量
+        await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))  # 模块常量
         await conn.execute(
             text(
-                f'CREATE TABLE IF NOT EXISTS "{SCHEMA}".goods ('  # noqa: S608  # 模块常量
+                f'CREATE TABLE IF NOT EXISTS "{SCHEMA}".goods ('  # 模块常量
                 " id uuid PRIMARY KEY, name varchar(64), create_by varchar(64))"
             )
         )
@@ -54,7 +54,7 @@ async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction
         )
     yield
     async with get_engine().begin() as conn:
-        await conn.execute(text(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE'))  # noqa: S608  # 模块常量
+        await conn.execute(text(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE'))  # 模块常量
 
 
 async def _sbx_user(s: AsyncSession, make_user: MakeUser, username: str, codes: list[str]) -> str:
@@ -224,7 +224,7 @@ class _RecordingSandbox:
         return proj
 
 
-def _override_service(sandbox: object | None) -> None:  # noqa: ANN401
+def _override_service(sandbox: object | None) -> None:
     """dependency_overrides 接收工厂;直接传类会被当作模型构造并返回 422。
 
     会话由请求级 get_session 子依赖提供并关闭,避免绕过连接池生命周期。

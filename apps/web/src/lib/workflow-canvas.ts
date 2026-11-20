@@ -35,7 +35,7 @@ const CONFIG_KEY_WHITELIST: Record<WfNodeType, readonly string[]> = {
 };
 
 /** 节点 id 形态与保留名(与 models.py _NODE_ID_RE/_RESERVED_IDS 对齐; 新建节点生成 id 时消费,录入侧仍由服务端校验兜底) */
-export const NODE_ID_RE = /^[A-Za-z0-9_]+$/;
+export const NODE_ID_RE = /^\w+$/;
 export const RESERVED_NODE_IDS: ReadonlySet<string> = new Set(["inputs", "_loop"]);
 
 export interface CanvasPosition {
@@ -81,6 +81,8 @@ function defaultPosition(index: number): CanvasPosition {
 }
 
 type Fail = { ok: false; reasons: string[] };
+type Ok<T> = { ok: true; value: T };
+type Outcome<T> = Ok<T> | Fail;
 type ParsedDef = { nodes: Record<string, unknown>[] } | Fail;
 
 /* 顶层只允许 nodes 字段，且必须是数组。 */
@@ -106,13 +108,17 @@ function checkNodeKeys(raw: Record<string, unknown>, i: number): string | null {
 }
 
 /* 节点 id 须为非空、无首尾空白且不重复的字符串。 */
-function checkNodeId(raw: Record<string, unknown>, i: number, seenIds: Set<string>): string | Fail {
+function checkNodeId(
+  raw: Record<string, unknown>,
+  i: number,
+  seenIds: Set<string>,
+): Outcome<string> {
   const id = raw.id;
   if (typeof id !== "string" || id.length === 0)
     return { ok: false, reasons: [`nodes[${i}] 缺字符串 id,画布无法表达`] };
   if (id.trim() !== id) return { ok: false, reasons: [`节点 id 含首尾空白,画布无法表达: ${id}`] };
   if (seenIds.has(id)) return { ok: false, reasons: [`节点 id 重复,画布无法表达: ${id}`] };
-  return id;
+  return { ok: true, value: id };
 }
 
 /* 节点类型须在画布支持的类型集内。 */
@@ -143,20 +149,19 @@ function checkNodeConfig(
 }
 
 /* 解析 depends_on：须为字符串数组、无重复、不自依赖。 */
-function parseDeps(raw: Record<string, unknown>, id: string): string[] | Fail {
-  if (!("depends_on" in raw)) return [];
+function parseDeps(raw: Record<string, unknown>, id: string): Outcome<string[]> {
+  if (!("depends_on" in raw)) return { ok: true, value: [] };
   const rawDeps = raw.depends_on;
   if (!Array.isArray(rawDeps))
     return { ok: false, reasons: [`节点 ${id} 的 depends_on 非数组,画布无法表达`] };
-  for (const d of rawDeps) {
-    if (typeof d !== "string")
-      return { ok: false, reasons: [`节点 ${id} 的依赖项非字符串,画布无法表达`] };
-  }
-  if (new Set(rawDeps).size !== rawDeps.length) {
+  const deps = rawDeps.filter((d): d is string => typeof d === "string");
+  if (deps.length !== rawDeps.length)
+    return { ok: false, reasons: [`节点 ${id} 的依赖项非字符串,画布无法表达`] };
+  if (new Set(deps).size !== deps.length) {
     return { ok: false, reasons: [`节点 ${id} 存在重复依赖项,画布无法表达`] };
   }
-  if (rawDeps.includes(id)) return { ok: false, reasons: [`节点 ${id} 自依赖,画布无法表达`] };
-  return rawDeps;
+  if (deps.includes(id)) return { ok: false, reasons: [`节点 ${id} 自依赖,画布无法表达`] };
+  return { ok: true, value: deps };
 }
 
 type DagParseState = {
@@ -165,24 +170,23 @@ type DagParseState = {
   depsById: Map<string, string[]>;
 };
 
-/* 区分解析结果:失败带 ok:false,成功声明只有 id/type/deps 字段 */
-function isFail(result: Record<string, unknown>): result is Fail {
-  return "ok" in result;
-}
-
 /* 解析节点类型,未知类型直接给出带原类型值的拒绝原因。 */
-function parseRequiredType(raw: Record<string, unknown>, id: string): WfNodeType | Fail {
+function parseRequiredType(raw: Record<string, unknown>, id: string): Outcome<WfNodeType> {
   const type = checkNodeType(raw);
   if (type === null) {
     return { ok: false, reasons: [`未知节点类型,画布无法表达: ${String(raw.type)}(节点 ${id})`] };
   }
-  return type;
+  return { ok: true, value: type };
 }
 
 /* 解析节点 id 并登记去重集；返回拒绝原因或字符串 id。 */
-function parseNodeId(raw: Record<string, unknown>, i: number, seenIds: Set<string>): string | Fail {
+function parseNodeId(
+  raw: Record<string, unknown>,
+  i: number,
+  seenIds: Set<string>,
+): Outcome<string> {
   const id = checkNodeId(raw, i, seenIds);
-  if (typeof id === "string") seenIds.add(id);
+  if (id.ok) seenIds.add(id.value);
   return id;
 }
 
@@ -197,14 +201,14 @@ function checkNodeShape(rawNodes: Record<string, unknown>[], i: number): string 
 function parseNodeDecl(
   raw: Record<string, unknown>,
   id: string,
-): { type: WfNodeType; deps: string[] } | Fail {
+): Outcome<{ type: WfNodeType; deps: string[] }> {
   const type = parseRequiredType(raw, id);
-  if (typeof type !== "string") return type;
-  const configError = checkNodeConfig(raw, id, type);
+  if (!type.ok) return type;
+  const configError = checkNodeConfig(raw, id, type.value);
   if (configError) return { ok: false, reasons: [configError] };
   const deps = parseDeps(raw, id);
-  if (!Array.isArray(deps)) return deps;
-  return { type, deps };
+  if (!deps.ok) return deps;
+  return { ok: true, value: { type: type.value, deps: deps.value } };
 }
 
 /* 解析第 i 个原始节点并返回其声明；任一检查失败即返回该拒绝原因。 */
@@ -212,13 +216,16 @@ function parseDagNode(
   rawNodes: Record<string, unknown>[],
   i: number,
   seenIds: Set<string>,
-): { id: string; type: WfNodeType; deps: string[] } | Fail {
+): Outcome<{ id: string; type: WfNodeType; deps: string[] }> {
+  const raw = rawNodes[i];
+  if (!raw) return { ok: false, reasons: [`nodes[${i}] 缺失,画布无法表达`] };
   const shapeError = checkNodeShape(rawNodes, i);
   if (shapeError) return { ok: false, reasons: [shapeError] };
-  const id = parseNodeId(rawNodes[i], i, seenIds);
-  if (typeof id !== "string") return id;
-  const decl = parseNodeDecl(rawNodes[i], id);
-  return isFail(decl) ? decl : { id, ...decl };
+  const id = parseNodeId(raw, i, seenIds);
+  if (!id.ok) return id;
+  const decl = parseNodeDecl(raw, id.value);
+  if (!decl.ok) return decl;
+  return { ok: true, value: { id: id.value, ...decl.value } };
 }
 
 /* 逐个解析原始节点，任一处失败即整体拒绝并给出原因。 */
@@ -230,14 +237,15 @@ function parseDagNodes(
   const seenIds = new Set<string>();
   for (let i = 0; i < rawNodes.length; i++) {
     const decl = parseDagNode(rawNodes, i, seenIds);
-    if (isFail(decl)) return decl;
-    const { id, type, deps } = decl;
+    if (!decl.ok) return decl;
+    const { id, type, deps } = decl.value;
+    // parseDagNode 已保证该下标存在且为对象
     state.nodes.push({
       id,
       type,
-      config: rawNodes[i].config as Record<string, unknown>,
+      config: rawNodes[i]!.config as Record<string, unknown>,
       position: positions?.[id] ?? defaultPosition(state.nodes.length),
-      depsExplicit: "depends_on" in rawNodes[i],
+      depsExplicit: "depends_on" in rawNodes[i]!,
     });
     state.typeOf.set(id, type);
     state.depsById.set(id, deps);
@@ -317,7 +325,9 @@ function resolveNodeConfig(n: CanvasNode, condIns: CanvasEdge[]): Record<string,
   }
   const values = new Set(condIns.map((e) => e.on));
   if (values.size > 1 || condIns.some((e) => e.on == null)) return null;
-  config.on = condIns[0]!.on; // 同目标条件入边同值(节点级单一 on 语义)
+  const edge = condIns[0];
+  if (!edge) return null;
+  config.on = edge.on; // 同目标条件入边同值(节点级单一 on 语义)
   return config;
 }
 

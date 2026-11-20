@@ -30,7 +30,9 @@ function parseRunInputs(raw: string): Record<string, unknown> {
   try {
     return JSON.parse(raw || "{}") as Record<string, unknown>;
   } catch (e) {
-    throw new Error(`inputs JSON 解析失败: ${e instanceof Error ? e.message : e}`, { cause: e });
+    throw new Error(`inputs JSON 解析失败: ${e instanceof Error ? e.message : String(e)}`, {
+      cause: e,
+    });
   }
 }
 

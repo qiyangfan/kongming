@@ -62,10 +62,11 @@ def to_csv(columns: list[str], rows: list[list[object]], *, max_rows: int) -> tu
 
     def _line(cells: list[str]) -> str:
         out: list[str] = []
-        for c in cells:
-            if any(ch in c for ch in _CSV_QUOTE_CHARS):
-                c = '"' + c.replace('"', '""') + '"'
-            out.append(c)
+        for cell in cells:
+            quoted = cell
+            if any(ch in cell for ch in _CSV_QUOTE_CHARS):
+                quoted = '"' + cell.replace('"', '""') + '"'
+            out.append(quoted)
         return ",".join(out)
 
     lines = [_line([_cell_text(c) for c in columns])]

@@ -207,7 +207,7 @@ async def _attempt(
     try:
         response = await executor(url=context.url, payload=dict(args), timeout_s=context.timeout_s)
         delivered = True
-    except Exception as e:  # noqa: BLE001 —— 分类收敛,不裸抛
+    except Exception as e:  # noqa: BLE001
         exc = e
         delivered = _was_delivered(e)
     verdict = policy.classify(exc, delivered=delivered)

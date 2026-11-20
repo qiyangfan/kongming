@@ -95,7 +95,7 @@ export default function Login() {
       .catch(() => setProviders([]));
   }, []);
 
-  async function submit(e: React.FormEvent) {
+  async function submit(e: React.SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     setPending(true);
     setError(null);
@@ -105,7 +105,7 @@ export default function Login() {
         password,
       });
       await acceptTokens(pair);
-      navigate("/", { replace: true });
+      void navigate("/", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? humanizeErrorText(err.message) : "登录失败");
     } finally {
@@ -135,7 +135,12 @@ export default function Login() {
           <CardDescription>问计于数据,如问计于孔明</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <form onSubmit={submit} className="space-y-4">
+          <form
+            onSubmit={(e) => {
+              void submit(e);
+            }}
+            className="space-y-4"
+          >
             <FormRow label="用户名" htmlFor="username">
               <Input
                 id="username"

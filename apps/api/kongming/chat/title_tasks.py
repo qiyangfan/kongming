@@ -44,5 +44,5 @@ async def rewrite_session_title(session_id: str, agent: AgentClient) -> None:
             await s.commit()
             if updated == 0:
                 log.info("标题改写竞态落败(用户已重命名) session=%s", session_id)
-    except Exception:  # noqa: BLE001  # 后台任务永不外抛(响应已发出)
+    except Exception:  # 后台任务永不外抛(响应已发出)
         log.warning("标题改写后台任务异常 session=%s", session_id, exc_info=True)

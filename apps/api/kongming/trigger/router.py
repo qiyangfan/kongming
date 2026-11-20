@@ -275,6 +275,13 @@ async def page_trigger_runs(
 # ── webhook 入站(公开端点,无 JWT) ──
 
 
+def _ensure_webhook_ready(row: dict[str, Any] | None, path: str) -> dict[str, Any]:
+    """不存在或未启用同形拒绝(401),避免探测面区分两种失败;通过则原样返回。"""
+    if row is None or not row["enabled"]:
+        raise WebhookRejected(path)
+    return row
+
+
 @webhook_router.post("/webhooks/{path}")
 async def webhook_inbound(
     path: str,
@@ -305,9 +312,7 @@ async def webhook_inbound(
         svc = make_trigger_service(s)
         try:
             # 校验同步完成(防探测同形);执行后台异步(202 即返)
-            row = await svc.find_webhook_row(path=path)
-            if row is None or not row["enabled"]:
-                raise WebhookRejected(path)
+            row = _ensure_webhook_ready(await svc.find_webhook_row(path=path), path)
             svc.verify_signature(row=row, body=body, signature=effective_sig)
             inputs = svc.normalize_inputs(row=row, body=body, event_header=x_github_event or "")
         except WebhookRejected:

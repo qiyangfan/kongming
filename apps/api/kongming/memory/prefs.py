@@ -148,9 +148,7 @@ def build_preference_hint(prefs: Mapping[str, object]) -> str:
 def is_free_text_fact(text: str) -> bool:
     """隐式提取产物若含自由文本事实形态则拒绝(只允许槽位 patch)。"""
     # 业务结论/事件句:含「下降/增长/%」等结论词且非槽位值
-    if re.search(r"(下降|增长|上涨|下跌|环比|同比)\s*[0-9]", text):
-        return True
-    return False
+    return bool(re.search(r"(下降|增长|上涨|下跌|环比|同比)\s*[0-9]", text))
 
 
 def extract_slot_patch_from_implicit(raw: Mapping[str, object]) -> PrefsPatch:

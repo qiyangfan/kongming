@@ -36,6 +36,9 @@ class TriggerIngressService(FiringCore):
         """适配器标准化(请求期;畸形同形拒)。"""
         try:
             payload = parse_json_body(body)
+        except (ValueError, TypeError) as e:  # JSON 解码错 / 顶层非对象(TypeError)
+            raise WebhookRejected(f"payload 解析失败: {e}") from e
+        try:
             return normalize(str(row["adapter"]), payload, event_header)
         except (AdapterError, ValueError) as e:
             raise WebhookRejected(f"payload 解析失败: {e}") from e

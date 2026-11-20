@@ -143,16 +143,18 @@ export function UsageSection({ usage, keys }: UsageSectionProps) {
   return (
     <section className="space-y-3 rounded-lg border border-border p-4">
       <h2 className="text-sm font-medium">当期用量({usage.data?.month ?? "…"})</h2>
-      {usage.isError ? (
-        <ErrorAlert />
-      ) : usage.isLoading ? (
-        <Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden />
-      ) : (
-        <>
-          <UsageBars usage={usage.data!} />
-          <ApiKeysBlock keys={keys} />
-        </>
-      )}
+      {(() => {
+        if (usage.isError) return <ErrorAlert />;
+        if (usage.isLoading) {
+          return <Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden />;
+        }
+        return (
+          <>
+            <UsageBars usage={usage.data!} />
+            <ApiKeysBlock keys={keys} />
+          </>
+        );
+      })()}
     </section>
   );
 }

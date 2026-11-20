@@ -126,7 +126,7 @@ class ApiKeyInvalid(Exception):
 
 
 class BotService:
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         repo: BotRepo,
         perms: PermReader,
@@ -169,7 +169,7 @@ class BotService:
                 exc_info=True,
             )
 
-    async def _mcp_names(self, tenant_id: str) -> list[str]:
+    async def mcp_names(self, tenant_id: str) -> list[str]:
         """租户已注册 MCP 工具全名(未接线/空 → 纯静态口径)。"""
         if self._dynamic_tools is None:
             return []
@@ -179,10 +179,14 @@ class BotService:
         ]
 
     @staticmethod
-    def _registered_names(mcp_names: list[str]) -> set[str]:
+    def registered_names(mcp_names: list[str]) -> set[str]:
         from kongming.toolcall.registry import REGISTRY
 
         return set(REGISTRY.keys()) | set(mcp_names)
+
+    async def registered_models(self) -> list[str]:
+        """agent 侧已注册模型名(更新校验用)。"""
+        return await self._runner.list_models()
 
     # ── CRUD ──
 
@@ -194,13 +198,13 @@ class BotService:
         tools = (
             [str(t) for t in cast("list[object]", raw_tools)] if isinstance(raw_tools, list) else []
         )
-        mcp_names = await self._mcp_names(tenant_id)
+        mcp_names = await self.mcp_names(tenant_id)
         allowed = tools_for_perms(await self._perms.list_codes(user_id), mcp_names)
-        validate_tool_subset(tools, allowed, registered_names=self._registered_names(mcp_names))
+        validate_tool_subset(tools, allowed, registered_names=self.registered_names(mcp_names))
         # datasource 归属校验(spec 字面立约;default 恒可用)
         ds_key = str(payload.get("datasource_key") or "default")
         if ds_key != "default":
-            await self._assert_datasource(tenant_id, ds_key)
+            await self.assert_datasource(tenant_id, ds_key)
         # model 注册表校验(非空时;实时查 agent 注册表,不可达 fail-closed 拒)
         model = payload.get("model")
         if model is not None:
@@ -226,7 +230,7 @@ class BotService:
         await self._repo.commit()
         return row_id
 
-    async def _assert_datasource(self, tenant_id: str, datasource_key: str) -> None:
+    async def assert_datasource(self, tenant_id: str, datasource_key: str) -> None:
         """非 default 源存在+启用+归属(同形 InvalidBotKey 400 防探测)。"""
         row = await self._repo.find_datasource(datasource_key=datasource_key)
         if row is None or row["status"] != "ACTIVE" or str(row["tenant_id"]) != tenant_id:
@@ -241,7 +245,7 @@ class BotService:
         # 权限求交(spec:Bot 子集 ∩ 创建者当前权限);
         # filter_specs 接收权限点,传入工具名会导致过滤结果为空
         creator_perms = await self._perms.list_codes(creator_id)
-        mcp_names = await self._mcp_names(tenant_id)
+        mcp_names = await self.mcp_names(tenant_id)
         allowed_names = tools_for_perms(creator_perms, mcp_names)
         raw = row.get("tools")
         raw_bot_tools = cast("list[object]", raw) if isinstance(raw, list) else []

@@ -142,7 +142,7 @@ def _parse_topology(raw: str) -> list[dict[str, object]]:
         raise ValueError("topology 输出无数组")
     obj = json.loads(text[start : end + 1])
     if not isinstance(obj, list):
-        raise ValueError("topology 输出非数组")
+        raise TypeError("topology 输出非数组")
 
     out: list[dict[str, object]] = []
     for item in cast("list[object]", obj):
@@ -169,7 +169,7 @@ class CollabOrchestrator:
         self,
         *,
         payload: dict[str, object],
-        llm: Any,  # noqa: ANN401 —— LlmClient 显式类型在调用方;剧本化测试注入假体
+        llm: Any,
         worker_runner: WorkerRunner,
         depth: int = 1,
         worker_budget: int | None = None,
@@ -260,7 +260,7 @@ class CollabOrchestrator:
                     temperature=0.2,
                 )
             return _parse_topology(topo_raw), None
-        except Exception as e:  # noqa: BLE001 —— 拆解失败按名册/匿形态分别收口
+        except Exception as e:  # noqa: BLE001
             if self._roster:
                 # 纯名册语义:不回落合成 worker(名册外执行者禁入),父子目标
                 # 如实进未派发清单(诚实收口,不静默降级)
@@ -322,16 +322,14 @@ class CollabOrchestrator:
 
             raws = await asyncio.gather(*(_one(s) for s in specs))
             return list(raws)
-        out: list[dict[str, object]] = []
-        for spec in specs:
-            out.append(
-                await self._execute_one(
-                    str(spec.get("subgoal") or ""),
-                    context,
-                    spec.get("worker") if self._roster else None,
-                )
+        return [
+            await self._execute_one(
+                str(spec.get("subgoal") or ""),
+                context,
+                spec.get("worker") if self._roster else None,
             )
-        return out
+            for spec in specs
+        ]
 
     async def _execute_one(
         self, w_subgoal: str, context: str, slot: object | None = None
@@ -341,7 +339,7 @@ class CollabOrchestrator:
             ctx += f"\n{TASK_CONTEXT_HINT}"
         try:
             final = await self._run_worker(w_subgoal, ctx, str(slot) if slot is not None else None)
-        except Exception as e:  # noqa: BLE001 —— worker 失败如实记录,不中断他 worker
+        except Exception as e:  # noqa: BLE001
             log.warning("协作 worker 执行失败(子目标=%s): %s", w_subgoal, e)
             return {
                 "subgoal": w_subgoal,
@@ -401,7 +399,7 @@ class CollabOrchestrator:
                 temperature=0.2,
             )
             arb = _json_object(verdict_raw) or {}
-        except Exception as e:  # noqa: BLE001 —— 裁决失败如实标注
+        except Exception as e:  # noqa: BLE001
             log.warning("分歧裁决 LLM 异常: %s", e)
             arb = {}
         conclusion_entry: dict[str, object] = {
@@ -439,7 +437,7 @@ class CollabOrchestrator:
                 ),
                 temperature=0.2,
             )
-        except Exception as e:  # noqa: BLE001 —— 审查异常如实标注,不阻断
+        except Exception as e:  # noqa: BLE001
             log.warning("critic 审查异常: %s", e)
             return None, "critic 审查异常(结论未经审查)"
         review = _json_object(critic_raw)
@@ -509,7 +507,7 @@ class CollabOrchestrator:
 async def run_collab(
     *,
     payload: dict[str, object],
-    llm: Any,  # noqa: ANN401
+    llm: Any,
     worker_runner: WorkerRunner,
     depth: int = 1,
     worker_budget: int | None = None,

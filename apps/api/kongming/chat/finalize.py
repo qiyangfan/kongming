@@ -130,7 +130,7 @@ async def _writeback_history(
             # 伴生:样本可见集合=执行主体可见范围(缺省=公共样本)
             caller_user_id=user_id or None,
         )
-    except Exception:  # noqa: BLE001  # 回写永不阻断主流程(writeback 内已兜底)
+    except Exception:  # 回写永不阻断主流程(writeback 内已兜底)
         log.warning("query_history 回写异常(不阻断)", exc_info=True)
 
 
@@ -465,7 +465,7 @@ class ReplyFinalizer:
             table_comments = await reader.column_comments(
                 tenant_id=tenant_id, datasource_key=datasource_key
             )
-        except Exception:  # noqa: BLE001  # 标签增强永不阻断主流程
+        except Exception:  # 标签增强永不阻断主流程
             log.warning("列注释查询异常(标签回退原始列名)", exc_info=True)
             return []
         return resolve_column_labels(columns, table_comments, sql)
@@ -544,11 +544,12 @@ class ReplyFinalizer:
                 ),
             )
             await touch_quietly(repo, sid)
-            return mid
         except ChatStoreError:
             log.warning("assistant 消息落库失败(会话可能已被删除) session=%s", sid)
             await repo.rollback()
             return None  # 落库失败即无消息 id(与未落库语义一致)
+        else:
+            return mid
 
     async def _pending_calls(self, trace_id: str) -> list[dict[str, object]]:
         """聚合本 trace 待确认写工具调用(前端确认卡);读取失败不阻断响应。"""
@@ -557,6 +558,6 @@ class ReplyFinalizer:
             return []
         try:
             return await reader.list_pending(trace_id)
-        except Exception:  # noqa: BLE001  # 附加信息聚合永不阻断主流程
+        except Exception:  # 附加信息聚合永不阻断主流程
             log.warning("pending_tool_calls 聚合异常 trace_id=%s", trace_id, exc_info=True)
             return []

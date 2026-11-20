@@ -1,10 +1,10 @@
 // 计费域枚举的中文展示文案(门户 PortalPage 与管理端 BillingPage 共用,单一真理源)。
 // 取值回退原样展示:后端新增枚举值时前端不白屏,以原文暴露异常源。
-export const DIM_TEXT: Record<string, string> = {
+export const DIM_TEXT = {
   TOKENS: "Token 用量",
   CALLS: "调用次数",
   COST: "成本(元)",
-};
+} as const;
 
 // 配额策略 scope 展示文案(下拉/列表徽标共用)
 export const SCOPE_TEXT: Record<string, string> = {

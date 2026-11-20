@@ -264,7 +264,7 @@ class _Engine:
                 )
             )
             raise
-        except Exception as e:  # noqa: BLE001  # 未知异常同记行后穿透(顶层统一收敛)
+        except Exception as e:  # 未知异常同记行后穿透(顶层统一收敛)
             self._node_runs.append(
                 NodeRun(
                     node_id=sub_id,
@@ -309,7 +309,7 @@ class _Engine:
         except NodeFailed as e:
             self._record_failed(node, str(e)[:500], node_started)
             return "FAILED", f"节点 {node.id} 失败: {str(e)[:300]}"
-        except Exception as e:  # noqa: BLE001 # 未知异常收敛
+        except Exception as e:  # 未知异常收敛
             # httpx ConnectError/ReadTimeout、ValueError(非法
             # 端口)、RecursionError 等未知异常不得逃逸为 500 零落库——
             # 收敛节点 FAILED(run FAILED,已完成快照保留,spec 立约)

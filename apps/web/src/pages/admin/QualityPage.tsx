@@ -78,7 +78,9 @@ export default function QualityPage() {
     onCopy,
     onContext: setContextMessageId,
     onStageTrace: setStageTraceId,
-    onRag: () => navigate("/admin/rag"),
+    onRag: () => {
+      void navigate("/admin/rag");
+    },
   });
 
   async function doExport() {

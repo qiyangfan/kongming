@@ -31,7 +31,7 @@ class SttService:
             text = await self._engine.transcribe(audio)
         except EngineUnavailable:
             raise
-        except Exception as e:  # noqa: BLE001  # 推理失败收敛为引擎不可用(503,配方指引)
+        except Exception as e:  # 推理失败收敛为引擎不可用(503,配方指引)
             log.warning("语音转写失败", exc_info=True)
             raise EngineUnavailable(f"转写失败: {e}") from e
         return " ".join(text.split())  # 单行折叠(与建议问题防线同款)

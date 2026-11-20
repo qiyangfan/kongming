@@ -36,7 +36,6 @@ async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction
         # 视图不入内省(收录收窄 BASE TABLE 的证物)
         await conn.execute(text(f'DROP VIEW IF EXISTS "{SCHEMA}".arms_view'))
         await conn.execute(
-            # noqa 证明:SCHEMA 为测试模块常量,非外部输入
             text(f'CREATE VIEW "{SCHEMA}".arms_view AS SELECT * FROM "{SCHEMA}".arms'),  # noqa: S608
         )
         # 另一个租户的 schema(边界证物:不应出现在 metatest 的内省结果)

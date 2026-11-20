@@ -27,6 +27,10 @@ dependencies = [
   "faster-whisper>=1.0",
   "mcp>=2.3,<3",                 # adopt-mcp-sdk2:MCP 官方 SDK 2.x(双向协议载体;dev→prod 迁移)
   "httpx2>=2,<3",                # mcp 2.x 的 HTTP 栈,kongming/mcp/client.py 直接 import(直接导入须直接声明)
+  "starlette>=1.8,<2",           # Response/JSONResponse 直接 import,原为 FastAPI 传递依赖
+  "mcp-types>=2.3,<3",           # mcp SDK 的协议类型子包,client/inbound 直接 import
+  "av>=19,<20",                  # STT 引擎直接 import,原为 faster-whisper 传递依赖
+  "numpy>=2.5,<3",               # STT 数组处理直接 import,同上
 ]
 
 # liannu 是仓库共享包；升级时同步 packages/liannu/pyproject.toml 中的版本。
@@ -49,6 +53,30 @@ dev = [
   "pylint>=3.3",
 ]
 
+[tool.deptry]
+# 产品依赖卫生只看运行时包;tests/evals/scripts 属 dev 侧(可用 dev 组依赖)
+known_first_party = ["kongming"]
+exclude = [
+  "tests",
+  "evals",
+  "scripts",
+  ".venv",
+  "__pycache__",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
+  ".git",
+  "dist",
+  "build",
+]
+# uvicorn 是进程入口、python-multipart 由 FastAPI 表单解析消费,代码内无 import
+per_rule_ignores = { DEP002 = ["uvicorn", "python-multipart"] }
+
+[tool.deptry.package_module_name_map]
+argon2-cffi = "argon2"
+pyjwt = "jwt"
+python-docx = "docx"
+
 [tool.ruff]
 line-length = 100
 target-version = "py313"
@@ -56,19 +84,72 @@ target-version = "py313"
 [tool.ruff.lint]
 # 复杂度/结构体积门禁取 ruff 默认阈值:C901 圈复杂度 10、PLR0912 分支 12、
 # PLR0915 语句 50;模块行数/公有方法数/局部变量/返回数/语句数/祖先数/布尔表达式数/
-# 循环 import 由 pylint 默认阈值守护(C0302/R0904/R0914/R0911/R0915/R0901/R0916/R0401)。
-select = ["E", "F", "I", "UP", "B", "S", "ASYNC", "C901", "PLR0912", "PLR0915"]
+# 循环 import 与错误类(E)由 pylint 守护(C0302/R0904/R0914/R0911/R0915/R0901/R0916/R0401/E;
+# E1101 不启用:装饰器/再导出场景误报,属性存在性由 mypy/pyright 保证)。
+select = [
+  "E",
+  "F",
+  "I",
+  "UP",
+  "B",
+  "S",
+  "ASYNC",
+  "C4",
+  "C901",
+  "PERF",
+  "PLR0912",
+  "PLR0915",
+  "PLW",
+  "RET",
+  "RUF012",
+  "RUF100",
+  "SIM",
+  "TRY",
+  # 盲捕获必须显式标注(边界降级路径逐个 noqa 并写明原因);时区/日志/print 同属缺陷高发面
+  "BLE",
+  "DTZ",
+  "G",
+  "LOG",
+  "T20",
+  # 内置 open/惯例别名与 __all__ 次序:低成本、直接指向一致性
+  # (私有成员跨界访问不设规则:Python 私有靠约定,pyright reportPrivateUsage 已在类型层把关)
+  "PTH",
+  "ICN",
+  "RUF022",
+]
+# TRY003 要求每个抛出点自带异常类与格式化消息,会把业务错误拆成上百个类;
+# PLW0603(global 语句)命中的全是模块级惰性单例/缓存,换容器藏起来不改变可测性。
+ignore = ["PLW0603", "TRY003"]
 
 [tool.ruff.lint.per-file-ignores]
-"alembic/versions/*" = ["E501"]              # DDL 行折叠伤可读性,版本文件放开行宽
-"tests/*" = ["S101", "S105", "S106", "S107"] # pytest 惯例;测试密码为道具非密钥
-"evals/*" = ["S101", "S105", "S106", "S107"] # 评估器同 pytest 惯例
+"alembic/versions/*" = ["E501"] # DDL 行折叠伤可读性,版本文件放开行宽
+# DTZ 豁免仅限测试:测试按被测函数的取值形态构造数据(naive datetime 的归一/格式化),
+# 加时区会改变被断言的字面量本身。生产代码不豁免。
+"tests/*" = [
+  "S101",
+  "S105",
+  "S106",
+  "S107",
+  "T201",
+  "DTZ",
+] # pytest 惯例;测试密码为道具非密钥
+"evals/*" = ["S101", "S105", "S106", "S107", "T201"] # 评估器同 pytest 惯例
+"scripts/*" = ["T201"] # 冒烟/导出脚本以 stdout 为输出通道
 
 [tool.mypy]
 strict = true
 python_version = "3.13"
 
 [tool.pytest.ini_options]
+# 严格模式:未登记 marker、未知 ini 配置项直接报错(拼错 marker 不再静默跳过)
+addopts = "--strict-markers --strict-config"
+# 警告即错误:新告警立刻可见。socket 关闭时机属 GC 噪声(ResourceWarning 与
+# pytest 的 unraisable 包装),不是代码缺陷,按类忽略;其余告警一律升级为错误
+filterwarnings = [
+  "error",
+  "ignore::ResourceWarning",
+  "ignore::pytest.PytestUnraisableExceptionWarning",
+]
 asyncio_mode = "auto"
 # 会话级事件循环:engine/redis 客户端 lru_cache 单例与 asyncpg 连接绑定同一 loop
 asyncio_default_test_loop_scope = "session"

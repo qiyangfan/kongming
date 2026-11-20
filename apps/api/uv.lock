@@ -1061,6 +1061,7 @@ dependencies = [
     { name = "argon2-cffi" },
     { name = "asyncpg" },
     { name = "authlib" },
+    { name = "av" },
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "faster-whisper" },
@@ -1069,6 +1070,8 @@ dependencies = [
     { name = "jsonschema" },
     { name = "liannu" },
     { name = "mcp" },
+    { name = "mcp-types" },
+    { name = "numpy" },
     { name = "openpyxl" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -1079,6 +1082,7 @@ dependencies = [
     { name = "redis" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "sqlglot" },
+    { name = "starlette" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -1104,6 +1108,7 @@ requires-dist = [
     { name = "argon2-cffi", specifier = ">=23.1" },
     { name = "asyncpg", specifier = ">=0.30" },
     { name = "authlib", specifier = ">=1.9" },
+    { name = "av", specifier = ">=19,<20" },
     { name = "cryptography", specifier = ">=50.0" },
     { name = "fastapi", specifier = ">=0.143" },
     { name = "faster-whisper", specifier = ">=1.0" },
@@ -1112,6 +1117,8 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.23" },
     { name = "liannu", directory = "../../packages/liannu" },
     { name = "mcp", specifier = ">=2.3,<3" },
+    { name = "mcp-types", specifier = ">=2.3,<3" },
+    { name = "numpy", specifier = ">=2.5,<3" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pydantic", specifier = ">=2.14" },
     { name = "pydantic-settings", specifier = ">=2.7" },
@@ -1122,6 +1129,7 @@ requires-dist = [
     { name = "redis", specifier = ">=8.1" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.1,<3" },
     { name = "sqlglot", specifier = ">=30.0" },
+    { name = "starlette", specifier = ">=1.8,<2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54" },
 ]
 

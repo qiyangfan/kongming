@@ -565,11 +565,12 @@ class BillingService:
             raise PaymentConflict(f"INVOICE_{inv['status']}")
         # 旧在途单:过期的惰性置 EXPIRED(审计),剩余置 CANCELLED(重付语义)
         old_open = await self._repo.latest_payment_for_invoice(invoice_id=invoice_id)
-        if old_open is not None and old_open["status"] == "CREATED":
-            if await self._repo.expire_payment_if_overdue(payment_id=str(old_open["id"])):
-                await self._audit(
-                    "payment.expired", str(old_open["id"]), {"invoice_id": invoice_id}
-                )
+        if (
+            old_open is not None
+            and old_open["status"] == "CREATED"
+            and await self._repo.expire_payment_if_overdue(payment_id=str(old_open["id"]))
+        ):
+            await self._audit("payment.expired", str(old_open["id"]), {"invoice_id": invoice_id})
         cancelled = await self._repo.cancel_open_payments(invoice_id=invoice_id)
         if cancelled:
             await self._audit(

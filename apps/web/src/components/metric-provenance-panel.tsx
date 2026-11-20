@@ -11,7 +11,7 @@ type MetricHit = {
   metric_id: string;
   metric_name: string;
   sql_template: string;
-  updated_at?: string | null;
+  updated_at?: string | null | undefined;
 };
 
 /* 展示指标名称、口径表达式和修订时间；管理链接由路由权限守卫处理。 */
@@ -35,7 +35,9 @@ export function MetricProvenancePanel({ hits }: { hits: MetricHit[] }) {
                 variant="link"
                 size="xs"
                 className="h-auto p-0 text-xs font-medium"
-                onClick={() => navigate("/admin/semantic")}
+                onClick={() => {
+                  void navigate("/admin/semantic");
+                }}
               >
                 {h.metric_name}
               </Button>

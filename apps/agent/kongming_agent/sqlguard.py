@@ -113,7 +113,7 @@ def validate(sql: str) -> ValidationResult:
     try:
         artifact = engine.parse(sql)
         engine_result = _from_artifact(artifact)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         with _lock:
             _stats["fallback_total"] += 1
         log.warning(

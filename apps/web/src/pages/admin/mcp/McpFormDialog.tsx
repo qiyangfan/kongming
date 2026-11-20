@@ -110,7 +110,7 @@ function HeaderRows({
       ...form,
       headers: form.headers.filter((_, j) => j !== i),
       removedKeys:
-        form.id !== null && removed.key.trim()
+        form.id !== null && removed?.key.trim()
           ? [...form.removedKeys, removed.key.trim()]
           : form.removedKeys,
     });

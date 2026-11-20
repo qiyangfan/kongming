@@ -528,12 +528,11 @@ class ApiClient(_CheckpointApi):
             return None
         data = _json_of(resp)
         items = (data or {}).get("steps")
-        out: list[dict[str, object]] = []
-        if isinstance(items, list):
-            for i in cast("list[object]", items):
-                if isinstance(i, dict):
-                    out.append(cast("dict[str, object]", i))
-        return out
+        if not isinstance(items, list):
+            return []
+        return [
+            cast("dict[str, object]", i) for i in cast("list[object]", items) if isinstance(i, dict)
+        ]
 
     async def task_step_start(
         self, *, task_id: str, tenant_key: str, step_id: str, epoch: int = 0
@@ -584,10 +583,11 @@ class ApiClient(_CheckpointApi):
                     "fail_reason": fail_reason,
                 },
             )
-            return resp.status_code == 204
         except httpx.HTTPError as e:
             log.warning("task_finish 回调异常: %s", e)
             return False
+        else:
+            return resp.status_code == 204
 
     # ── 协作账本回调(开账 fail-closed,worker 行/终态尽力而为)──
 
@@ -636,10 +636,11 @@ class ApiClient(_CheckpointApi):
                     "trace_id": trace_id[:64],
                 },
             )
-            return resp.status_code == 204
         except httpx.HTTPError as e:
             log.warning("collab_worker_start 回调异常: %s", e)
             return False
+        else:
+            return resp.status_code == 204
 
     async def collab_worker_result(
         self,
@@ -670,10 +671,11 @@ class ApiClient(_CheckpointApi):
                     "trace_id": trace_id[:64],
                 },
             )
-            return resp.status_code == 204
         except httpx.HTTPError as e:
             log.warning("collab_worker_result 回调异常: %s", e)
             return False
+        else:
+            return resp.status_code == 204
 
     async def collab_finish(
         self,
@@ -736,10 +738,11 @@ class ApiClient(_CheckpointApi):
                     "trace_id": trace_id[:64],
                 },
             )
-            return resp.status_code == 204
         except httpx.HTTPError as e:
             log.warning("collab_turn 回调异常: %s", e)
             return False
+        else:
+            return resp.status_code == 204
 
     async def task_step_suspended(
         self,

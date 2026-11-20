@@ -25,6 +25,7 @@ _SYSTEM_PROMPT = (
     "生成普通业务人员会问的中文示例问题。只输出 JSON，不要输出任何其他文字。"
 )
 
+# JSON 输出模板单行示例,拆行会改变给 LLM 的格式契约
 _USER_PROMPT_TEMPLATE = """数据库结构摘要：
 {digest}
 
@@ -38,7 +39,7 @@ _USER_PROMPT_TEMPLATE = """数据库结构摘要：
 6. 问句条件要具体，不得出现「某」「指定值」「某某」等占位表述
 
 严格输出如下 JSON（不要输出 markdown 代码块标记）：
-{{"questions": ["问题一", "问题二", "问题三"]}}"""  # noqa: E501  # JSON 输出模板单行示例,拆行会改变给 LLM 的格式契约
+{{"questions": ["问题一", "问题二", "问题三"]}}"""
 
 
 class SuggestError(Exception):

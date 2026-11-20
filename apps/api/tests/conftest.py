@@ -3,6 +3,7 @@
 
 import asyncio
 import os
+import socket
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -214,6 +215,38 @@ def _migrated_db() -> None:  # pyright: ignore[reportUnusedFunction]
 
 
 @pytest.fixture(autouse=True)
+def _loopback_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """测试不得发起外网连接:非回环 TCP 目标直接失败,外呼必须显式 mock。"""
+    real_connect = socket.socket.connect
+
+    def guarded(self: socket.socket, address: tuple[Any, ...] | str | bytes) -> None:
+        host: object = address[0] if isinstance(address, tuple) else address
+        # 本机回环与 unix socket(路径形态)放行,其余目标一律视为越界外呼
+        if (
+            isinstance(host, str)
+            and host not in {"127.0.0.1", "::1", "localhost"}
+            and not host.startswith("/")
+        ):
+            raise OSError(f"测试禁止外网连接: {host}")
+        return real_connect(self, address)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded)
+
+
+@pytest.fixture(autouse=True)
+async def _drain_tasks() -> AsyncIterator[None]:
+    """用例结束后取消仍在跑的后台任务:fire-and-forget 任务跨用例存活会与
+    下一条用例的 TRUNCATE/登录观测到中间态(顺序相关的 401/DBAPIError 假红)。"""
+    yield
+    current = asyncio.current_task()
+    pending = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
+@pytest.fixture(autouse=True)
 async def _clean(_migrated_db: None) -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     """用例级隔离:TRUNCATE 全部身份/审计表 + Redis 库清空(pytest 按名发现)。"""
     async with get_sessionmaker()() as s:
@@ -256,9 +289,11 @@ async def mcp_client() -> AsyncIterator[AsyncClient]:
     不触发 lifespan),/mcp 入站测试专用(其余测试用免 lifespan 的 client)。"""
     from kongming.main import app
 
-    async with app.router.lifespan_context(app):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            yield c
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c,
+    ):
+        yield c
 
 
 MakeUser = Callable[..., Awaitable[str]]

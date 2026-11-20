@@ -250,41 +250,40 @@ async def usage_timeline(
 ) -> UsageTimelineOut:
     """trace 时间线:LLM 调用+工具执行+SQL 执行三路事件按时间升序拼装;
     trace_id 不存在返回空事件流(与审计查询惯例一致)。"""
-    events: list[dict[str, Any]] = []
-    for r in await SqlLlmUsageRepo(session).list_by_trace(trace_id=trace_id):
-        events.append(
-            {
-                "kind": "LLM",
-                "name": f"{r['model']}/{r['task']}",
-                "status": str(r["status"]),
-                "tokens": int(r["total_tokens"]),
-                "latency_ms": (int(r["latency_ms"]) if r["latency_ms"] is not None else None),
-                "ts": r["created_at"],
-            }
-        )
-    for r in await SqlToolCallRepo(session).list_by_trace(trace_id):
-        events.append(
-            {
-                "kind": "TOOL",
-                "name": str(r["tool_name"]),
-                "status": str(r["status"]),
-                "tokens": None,
-                "latency_ms": (int(r["duration_ms"]) if r["duration_ms"] is not None else None),
-                "ts": r["created_at"],
-            }
-        )
-    for r in await AuditRepository(session).list_sql_by_trace(trace_id):
-        events.append(
-            {
-                "kind": "SQL",
-                # name=数据源(比 verdict 重复信息更有价值;status 承载 verdict)
-                "name": str(r["datasource_key"]),
-                "status": str(r["verdict"]),
-                "tokens": None,
-                "latency_ms": (int(r["duration_ms"]) if r["duration_ms"] is not None else None),
-                "ts": r["created_at"],
-            }
-        )
+    events: list[dict[str, Any]] = [
+        {
+            "kind": "LLM",
+            "name": f"{r['model']}/{r['task']}",
+            "status": str(r["status"]),
+            "tokens": int(r["total_tokens"]),
+            "latency_ms": (int(r["latency_ms"]) if r["latency_ms"] is not None else None),
+            "ts": r["created_at"],
+        }
+        for r in await SqlLlmUsageRepo(session).list_by_trace(trace_id=trace_id)
+    ]
+    events.extend(
+        {
+            "kind": "TOOL",
+            "name": str(r["tool_name"]),
+            "status": str(r["status"]),
+            "tokens": None,
+            "latency_ms": (int(r["duration_ms"]) if r["duration_ms"] is not None else None),
+            "ts": r["created_at"],
+        }
+        for r in await SqlToolCallRepo(session).list_by_trace(trace_id)
+    )
+    events.extend(
+        {
+            "kind": "SQL",
+            # name=数据源(比 verdict 重复信息更有价值;status 承载 verdict)
+            "name": str(r["datasource_key"]),
+            "status": str(r["verdict"]),
+            "tokens": None,
+            "latency_ms": (int(r["duration_ms"]) if r["duration_ms"] is not None else None),
+            "ts": r["created_at"],
+        }
+        for r in await AuditRepository(session).list_sql_by_trace(trace_id)
+    )
     # 同刻事件按 kind 次序(LLM<SQL<TOOL 字母序)保证输出确定——跨表 id
     # 不可比,跨表因果序不存在,组间确定性只能由本键补足
     events.sort(key=lambda e: (e["ts"], e["kind"]))

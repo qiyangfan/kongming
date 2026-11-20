@@ -24,7 +24,7 @@ SCHEMA = "tenant_tc"
 async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     """toolcall 测试租户业务 schema(execute_sql 真执行活数据)。"""
     async with get_engine().begin() as conn:
-        await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))  # noqa: S608  # 模块常量
+        await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))  # 模块常量
         await conn.execute(
             text(
                 f'CREATE TABLE IF NOT EXISTS "{SCHEMA}".goods ('

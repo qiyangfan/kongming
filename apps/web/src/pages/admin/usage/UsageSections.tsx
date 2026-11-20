@@ -26,7 +26,7 @@ type Totals = { calls: number; tokens: number; errorRate: number; latAvg: number
 type SummarySource = {
   isLoading: boolean;
   isError: boolean;
-  data?: Awaited<ReturnType<typeof usageSummary>>;
+  data?: Awaited<ReturnType<typeof usageSummary>> | undefined;
 };
 
 /* 按天趋势(theme 经 key 作用于本组件:切主题整体重挂,option 重读 token 色板) */
@@ -83,7 +83,11 @@ function UsageTrendChart({ points }: { points: UsageTrendPoint[] }) {
 
 export function UsageStats({ totals, summary }: { totals: Totals; summary: SummarySource }) {
   /** 汇总卡数值加载/错误态折叠(loading 显 …、错误显 —,不逐卡 role=alert) */
-  const usageStat = (v: string) => (summary.isLoading ? "…" : summary.isError ? "—" : v);
+  const usageStat = (v: string) => {
+    if (summary.isLoading) return "…";
+    if (summary.isError) return "—";
+    return v;
+  };
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <StatCard label="总调用" value={usageStat(String(totals.calls))} />
@@ -100,7 +104,7 @@ export function UsageTrendSection({
   days,
   onDaysChange,
 }: {
-  trend: { isLoading: boolean; isError: boolean; data?: { points: UsageTrendPoint[] } };
+  trend: { isLoading: boolean; isError: boolean; data?: { points: UsageTrendPoint[] } | undefined };
   days: number;
   onDaysChange: (days: number) => void;
 }) {
@@ -121,15 +125,17 @@ export function UsageTrendSection({
           </SelectContent>
         </Select>
       </div>
-      {trend.isLoading ? (
-        <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
-          加载中…
-        </div>
-      ) : trend.isError ? (
-        <ErrorAlert text="趋势加载失败" />
-      ) : (
-        <UsageTrendChart key={theme} points={trend.data?.points ?? []} />
-      )}
+      {(() => {
+        if (trend.isLoading) {
+          return (
+            <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
+              加载中…
+            </div>
+          );
+        }
+        if (trend.isError) return <ErrorAlert text="趋势加载失败" />;
+        return <UsageTrendChart key={theme} points={trend.data?.points ?? []} />;
+      })()}
     </div>
   );
 }

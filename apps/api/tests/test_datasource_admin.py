@@ -463,7 +463,7 @@ async def test_options_default_tenant_matches_chat_semantics(
     ).scalar_one()
     await _bind(session, "sys_user_role", uid, str(rid))
     # 零参工厂:类本身作 override 会被 FastAPI 解析 __init__ 签名(422 坑)
-    app.dependency_overrides[get_agent_client] = lambda: FakeAgent()
+    app.dependency_overrides[get_agent_client] = lambda: FakeAgent()  # noqa: PLW0108 —— 需零参可调用
     try:
         r = await client.post(
             "/chat/query",

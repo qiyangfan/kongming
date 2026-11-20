@@ -160,22 +160,21 @@ class HttpNodeRunner:
         body: str | None,
     ) -> dict[str, Any]:
         pinned = await assert_url_allowed(url)
-        async with httpx.AsyncClient(
-            trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
-            timeout=httpx.Timeout(_TIMEOUT),
-            follow_redirects=False,
-            transport=_PinnedTransport(pinned),
-        ) as client:
-            async with client.stream(method, url, headers=headers, content=body) as resp:
-                buf = bytearray()
-                async for chunk in resp.aiter_bytes(65536):
-                    buf.extend(chunk)
-                    if len(buf) > _RESPONSE_CAP:
-                        break
-                text = buf.decode("utf-8", errors="replace")
-                truncated = len(buf) > _RESPONSE_CAP
-                if truncated:
-                    text = text[:_BODY_CAP] + "\n…[响应超 1MB 已截断]"
-                else:
-                    text = text[:_BODY_CAP]
-                return {"status": resp.status_code, "body": text}
+        async with (
+            httpx.AsyncClient(
+                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                timeout=httpx.Timeout(_TIMEOUT),
+                follow_redirects=False,
+                transport=_PinnedTransport(pinned),
+            ) as client,
+            client.stream(method, url, headers=headers, content=body) as resp,
+        ):
+            buf = bytearray()
+            async for chunk in resp.aiter_bytes(65536):
+                buf.extend(chunk)
+                if len(buf) > _RESPONSE_CAP:
+                    break
+            text = buf.decode("utf-8", errors="replace")
+            truncated = len(buf) > _RESPONSE_CAP
+            text = text[:_BODY_CAP] + "\n…[响应超 1MB 已截断]" if truncated else text[:_BODY_CAP]
+            return {"status": resp.status_code, "body": text}

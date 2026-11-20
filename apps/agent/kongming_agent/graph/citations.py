@@ -28,9 +28,7 @@ def is_citation_key_shape(token: str) -> bool:
     if "-" not in token:
         return False
     head, _, tail = token.rpartition("-")
-    if not head or not _SUFFIX_RE.match(tail):
-        return False
-    return True
+    return not (not head or not _SUFFIX_RE.match(tail))
 
 
 def _suffix_of(key: str) -> str:

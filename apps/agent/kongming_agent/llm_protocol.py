@@ -450,9 +450,9 @@ def responses_request(
     """canonical 消息史 → Responses 请求 kwargs(responses.create 形态)。
     system 提取为 instructions;工具声明扁平化;max_tokens → max_output_tokens。"""
     system_parts: list[str] = []
-    for msg in messages:
-        if str(msg.get("role") or "") == "system":
-            system_parts.append(str(msg.get("content") or ""))
+    system_parts.extend(
+        str(msg.get("content") or "") for msg in messages if str(msg.get("role") or "") == "system"
+    )
     req: dict[str, object] = {
         "temperature": temperature,
         "instructions": "\n\n".join(system_parts),
@@ -476,9 +476,13 @@ def responses_parse(raw: object) -> ProtocolReply:
         itype = _attr_str(item, "type")
         if itype == "message":
             content_obj = _attr(item, "content")
-            for part in cast("list[object]", content_obj if isinstance(content_obj, list) else []):
-                if _attr_str(part, "type") == "output_text":
-                    texts.append(_attr_str(part, "text"))
+            texts.extend(
+                _attr_str(part, "text")
+                for part in cast(
+                    "list[object]", content_obj if isinstance(content_obj, list) else []
+                )
+                if _attr_str(part, "type") == "output_text"
+            )
         elif itype == "function_call":
             raw_args = _attr_str(item, "arguments")
             calls.append(

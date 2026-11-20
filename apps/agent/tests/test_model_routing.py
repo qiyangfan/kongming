@@ -1,6 +1,7 @@
 """多模型路由测试:注册表解析/任务路由/usage 采集上报。"""
 
 import json
+from typing import ClassVar
 
 import pytest
 
@@ -107,7 +108,7 @@ class _FakeCompletions:
             message = _Msg()
 
         class _Resp:
-            choices = [_Choice()]
+            choices: ClassVar[list[object]] = [_Choice()]
             usage = _Usage()
 
         return _Resp()
@@ -242,7 +243,7 @@ class _EmptyChoicesCompletions:
 
     async def create(self, *, model: str, **kw: object):  # type: ignore[no-untyped-def]
         class _Resp:
-            choices = []
+            choices: ClassVar[list[object]] = []
             usage = None
 
         return _Resp()
@@ -281,7 +282,7 @@ async def test_success_without_usage_still_reported() -> None:
                 message = _Msg()
 
             class _Resp:
-                choices = [_Choice()]
+                choices: ClassVar[list[object]] = [_Choice()]
                 usage = None
 
             return _Resp()

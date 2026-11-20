@@ -90,14 +90,12 @@ async def read_schema_knowledge(conn: _Conn, tenant_id: str, datasource_key: str
             cols = cast("dict[str, str]", json.loads(str(columns_comment or "{}")))
         except json.JSONDecodeError:
             cols = {}
-        for col, comment in cols.items():
-            lines.append(f"  - {col}({comment})")
+        lines.extend(f"  - {col}({comment})" for col, comment in cols.items())
         try:
             samples = cast("list[object]", json.loads(str(sample_queries or "[]")))
         except json.JSONDecodeError:
             samples = []
-        for sample in samples[:2]:
-            lines.append(f"  示例: {sample}")
+        lines.extend(f"  示例: {sample}" for sample in samples[:2])
     return "\n".join(lines)
 
 
@@ -111,9 +109,11 @@ async def _existing_questions() -> list[str]:
             continue
         if not isinstance(loaded, list):
             continue
-        for case in loaded:
-            if isinstance(case, dict) and case.get("question"):
-                questions.append(str(case["question"]))
+        questions.extend(
+            str(case["question"])
+            for case in loaded
+            if isinstance(case, dict) and case.get("question")
+        )
     return questions
 
 
@@ -274,7 +274,7 @@ async def self_check(
             row_count = len(rows)
             report["exec_ok"] = True
             report["row_count"] = row_count
-        except Exception as e:  # noqa: BLE001  asyncpg 异常族统一为校验失败
+        except Exception as e:  # noqa: BLE001
             report["exec_ok"] = False
             report["exec_error"] = str(e)[:300]
         style_failures = validate_candidate(

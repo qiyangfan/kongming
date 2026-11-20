@@ -63,7 +63,7 @@ export function rolePayload(
     data_scope: form.dataScope,
     sql_scope: form.sqlScope,
     sort: form.sort,
-    data_scope_dept_ids: deptIdsForScope(form.dataScope, form.deptIds),
+    data_scope_dept_ids: deptIdsForScope(form.dataScope, form.deptIds) ?? null,
   };
 }
 

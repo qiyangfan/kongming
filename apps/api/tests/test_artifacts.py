@@ -2,7 +2,7 @@
 # pyright: reportPrivateUsage=false
 
 from collections.abc import AsyncIterator
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 import pytest
 from httpx import AsyncClient
@@ -21,10 +21,10 @@ SCHEMA = "tenant_art"
 @pytest.fixture(scope="module", autouse=True)
 async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     async with get_engine().begin() as conn:
-        await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))  # noqa: S608
+        await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
         await conn.execute(
             text(
-                f'CREATE TABLE IF NOT EXISTS "{SCHEMA}".goods ('  # noqa: S608
+                f'CREATE TABLE IF NOT EXISTS "{SCHEMA}".goods ('
                 " id uuid PRIMARY KEY, name varchar(64), create_by varchar(64))"
             )
         )
@@ -37,7 +37,7 @@ async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction
         )
     yield
     async with get_engine().begin() as conn:
-        await conn.execute(text(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE'))  # noqa: S608
+        await conn.execute(text(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE'))
 
 
 # ── derive_artifacts 纯函数 ──
@@ -277,8 +277,8 @@ async def test_rerun_output_guardrail_applied(session: AsyncSession, make_user: 
             class _Outcome:
                 verdict = "PASS"
                 reason = None
-                columns = ["name"]
-                rows = [["连弩"]]
+                columns: ClassVar[list[str]] = ["name"]
+                rows: ClassVar[list[list[str]]] = [["连弩"]]
 
             return _Outcome()
 

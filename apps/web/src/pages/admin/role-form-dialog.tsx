@@ -99,31 +99,35 @@ function CustomDeptField({
 }: Pick<RoleFormDialogProps, "form" | "setForm" | "depts" | "deptOptions">) {
   return (
     <FormRow label="自定义部门" htmlFor="r-depts">
-      {depts.isPending ? (
-        <p className="text-muted-foreground text-sm">部门加载中…</p>
-      ) : depts.isError ? (
-        <div className="space-y-1">
-          <ErrorAlert
-            text={`部门列表加载失败:${(depts.error as Error).message}。已配置的部门集合保持不变(仍可保存);要增删部门请重试,或改用具备「用户与部门」权限的账号。`}
+      {(() => {
+        if (depts.isPending) return <p className="text-muted-foreground text-sm">部门加载中…</p>;
+        if (depts.isError) {
+          return (
+            <div className="space-y-1">
+              <ErrorAlert
+                text={`部门列表加载失败:${depts.error.message}。已配置的部门集合保持不变(仍可保存);要增删部门请重试,或改用具备「用户与部门」权限的账号。`}
+              />
+              <Button
+                type="button"
+                variant="link"
+                size="xs"
+                className="px-0"
+                onClick={() => void depts.refetch()}
+              >
+                重试
+              </Button>
+            </div>
+          );
+        }
+        return (
+          <CheckList
+            options={deptOptions}
+            selected={form.deptIds}
+            onChange={(ids) => setForm({ ...form, deptIds: ids })}
+            emptyText="暂无部门,请先到「部门」页新建"
           />
-          <Button
-            type="button"
-            variant="link"
-            size="xs"
-            className="px-0"
-            onClick={() => void depts.refetch()}
-          >
-            重试
-          </Button>
-        </div>
-      ) : (
-        <CheckList
-          options={deptOptions}
-          selected={form.deptIds}
-          onChange={(ids) => setForm({ ...form, deptIds: ids })}
-          emptyText="暂无部门,请先到「部门」页新建"
-        />
-      )}
+        );
+      })()}
       <p className="text-muted-foreground text-xs">
         只放行所选部门的数据,不含其下级部门(要含下级请选「本部门及以下」)。
       </p>

@@ -342,6 +342,14 @@ class WebSearchExecutor:
             raise ValueError(f"websearch 未知供应商适配器:{adapter}")
         self._request, self._normalize = _ADAPTERS[adapter]
 
+    async def _read_results(self, resp: httpx.Response) -> dict[str, object]:
+        """响应验收单点:状态码→字节闸读体→供应商归一为检索卡。"""
+        resp.raise_for_status()
+        body = _as_dict(await _read_json_capped(resp))
+        if body is None:
+            raise WebSearchError(f"{_PROTOCOL_PREFIX} 检索响应报文畸形(JSON 对象缺失)")
+        return {"results": self._normalize(body)}
+
     async def __call__(self, *, url: str, payload: dict[str, object], timeout_s: float) -> object:
         """url/payload/timeout 由网关切面给定(域清单口径);执行器只发一次。"""
         # 未完整取得响应族(拒连在 macOS anyio 后端以 ReadError 浮现,按语义归纳)
@@ -354,24 +362,22 @@ class WebSearchExecutor:
             httpx.CloseError,
         )
         try:
-            async with httpx.AsyncClient(
-                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
-                timeout=httpx.Timeout(timeout_s),
-                transport=self._transport,
-            ) as client:
+            async with (
+                httpx.AsyncClient(
+                    trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                    timeout=httpx.Timeout(timeout_s),
+                    transport=self._transport,
+                ) as client,
                 # stream 上下文+字节闸读取(resp.json 全量预读,
                 # 巨头响应先入内存;真流式见 _read_json_capped)
-                async with client.stream(
+                client.stream(
                     "POST",
                     url,
                     json=self._request(payload),
                     headers={"Authorization": f"Bearer {self._api_key}"},
-                ) as resp:
-                    resp.raise_for_status()
-                    body = _as_dict(await _read_json_capped(resp))
-                    if body is None:
-                        raise WebSearchError(f"{_PROTOCOL_PREFIX} 检索响应报文畸形(JSON 对象缺失)")
-                    return {"results": self._normalize(body)}
+                ) as resp,
+            ):
+                return await self._read_results(resp)
         # 顺序铁律:未送达族(含 ConnectTimeout)先于读超时
         except undelivered as e:
             raise WebSearchError(f"{_UNDELIVERED_PREFIX} 联网检索拒连({type(e).__name__})") from e

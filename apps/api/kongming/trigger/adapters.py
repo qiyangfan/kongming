@@ -11,10 +11,8 @@ from email import policy
 from email.parser import BytesParser
 from typing import Any, cast
 
-from kongming.trigger.models import CronError
-
 # 邮件摘要字段白名单(四字段定死)与长度上限(第二层防线)
-EMAIL_SUMMARY_FIELDS = ("from", "subject", "date", "text_preview")
+EMAIL_SUMMARY_FIELDS: tuple[str, ...] = ("from", "subject", "date", "text_preview")
 MAX_FROM_LEN = 256
 MAX_SUBJECT_LEN = 256
 MAX_DATE_LEN = 64
@@ -71,10 +69,7 @@ def validate_cron(expr: str) -> None:
     """保存期校验入口(CronError 透传)。"""
     from kongming.trigger.models import parse_cron
 
-    try:
-        parse_cron(expr)
-    except CronError:
-        raise
+    parse_cron(expr)
 
 
 # ── 邮件摘要适配器 ──
@@ -97,7 +92,7 @@ def _text_preview(msg: Any) -> str:
             continue
         try:
             text = part.get_content()
-        except Exception:  # noqa: BLE001, S112  # 坏分段(编码/charset)降级跳过——单封坏邮件不中断轮询
+        except Exception:  # noqa: S112, BLE001  # 坏分段(编码/charset)降级跳过——单封坏邮件不中断轮询
             continue
         if isinstance(text, str):
             return " ".join(text.split())  # 折叠空白(含软换行)
@@ -108,7 +103,7 @@ def normalize_email(raw: bytes) -> dict[str, str]:
     """邮件原始字节 → 四字段白名单摘要;畸形输入降级为空字段,永不抛
     (轮询面永不因单封坏邮件中断)。产出即摘要全量——调用方不再透传
     任何原始头/完整正文。"""
-    out = {f: "" for f in EMAIL_SUMMARY_FIELDS}
+    out = dict.fromkeys(EMAIL_SUMMARY_FIELDS, "")
     try:
         msg = BytesParser(policy=policy.default).parsebytes(raw)
         out["from"] = _clean_header(msg.get("From"))[:MAX_FROM_LEN]
@@ -116,5 +111,5 @@ def normalize_email(raw: bytes) -> dict[str, str]:
         out["date"] = _clean_header(msg.get("Date"))[:MAX_DATE_LEN]
         out["text_preview"] = _text_preview(cast("Any", msg))[:MAX_PREVIEW_LEN]
     except Exception:  # noqa: BLE001  # 解析总闸:任何畸形收敛空摘要
-        return {f: "" for f in EMAIL_SUMMARY_FIELDS}
+        return dict.fromkeys(EMAIL_SUMMARY_FIELDS, "")
     return out

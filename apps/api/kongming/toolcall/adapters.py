@@ -100,10 +100,11 @@ class RagServiceAdapter:
                 question=question,
                 tables=tables,
             )
-            return {"relations_hint": relations_hint, "metric_hints": metric_hints}
         except Exception:
             log.warning("ReAct 语义段组装失败(降级空串)", exc_info=True)
             return {"relations_hint": "", "metric_hints": ""}
+        else:
+            return {"relations_hint": relations_hint, "metric_hints": metric_hints}
 
     async def retrieve(
         self, *, tenant_key: str, datasource_key: str, question: str
@@ -125,7 +126,7 @@ class RagServiceAdapter:
             meta = await meta_schema(
                 MetaSchemaIn(tenant_key=tenant_key, datasource_key=datasource_key), self._s
             )
-        except Exception:
+        except Exception:  # noqa: BLE001
             # 实时内省失败时返回空提示。
             log.warning("rag_retrieve 回退内省失败 tenant=%s ds=%s", tenant_key, datasource_key)
             return {"schema_hint": "", "history_sql": ""}

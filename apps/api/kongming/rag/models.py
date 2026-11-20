@@ -213,8 +213,7 @@ def build_schema_hint(entries: list[KnowledgeEntry]) -> str:
         if e.table_comment:
             header += f" -- {e.table_comment}"
         lines.append(header)
-        for sql in e.sample_queries:
-            lines.append(f"  示例:{sql}")
+        lines.extend(f"  示例:{sql}" for sql in e.sample_queries)
     return "\n".join(lines)
 
 

@@ -163,7 +163,7 @@ class Settings(BaseSettings):
     # 全文检索按部署配置使用同一种分词规则,RAG 表说明和上传文档共用。
     # 只接受 simple、zhparser(见 FULLTEXT_TS_CONFIGS);填其他值 dev/prod 均
     # 启动失败,避免已有数据与分词规则对不上。zhparser 需在 PostgreSQL 安装
-    # 扩展,步骤见 docs/HANDOFF.md「zhparser 安装配方」。切换分词规则后须按
+    # 扩展,步骤见 docs/HANDOFF.md「中文分词(zhparser)启用配方」。切换分词规则后须按
     # 新规则重建已有内容的全文检索数据,并重新校准检索阈值(分词影响相关性评分)。
     rag_fulltext_ts_config: str = DEFAULT_FULLTEXT_TS_CONFIG
 

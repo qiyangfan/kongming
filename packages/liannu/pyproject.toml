@@ -32,6 +32,10 @@ branch = true
 show_missing = true
 fail_under = 70
 
+[tool.pytest.ini_options]
+# 严格模式:未登记 marker、未知 ini 配置项直接报错
+addopts = "--strict-markers --strict-config"
+
 # 子包自带 lint 配置(ruff 按最近 pyproject.toml 生效);规则与消费方 apps/api 同款
 [tool.ruff]
 line-length = 100
@@ -40,8 +44,40 @@ target-version = "py313"
 [tool.ruff.lint]
 # 复杂度/结构体积门禁取 ruff 默认阈值:C901 圈复杂度 10、PLR0912 分支 12、
 # PLR0915 语句 50;模块行数/公有方法数/局部变量/返回数/语句数/祖先数/布尔表达式数/
-# 循环 import 由 pylint 默认阈值守护(C0302/R0904/R0914/R0911/R0915/R0901/R0916/R0401)。
-select = ["E", "F", "I", "UP", "B", "S", "ASYNC", "C901", "PLR0912", "PLR0915"]
+# 循环 import 与错误类(E)由 pylint 守护(C0302/R0904/R0914/R0911/R0915/R0901/R0916/R0401/E;
+# E1101 不启用:装饰器/再导出场景误报,属性存在性由 mypy/pyright 保证)。
+select = [
+  "E",
+  "F",
+  "I",
+  "UP",
+  "B",
+  "S",
+  "ASYNC",
+  "C4",
+  "C901",
+  "PERF",
+  "PLR0912",
+  "PLR0915",
+  "PLW",
+  "RET",
+  "RUF012",
+  "RUF100",
+  "SIM",
+  "TRY",
+  # 盲捕获必须显式标注(边界降级路径逐个 noqa 并写明原因);时区/日志/print 同属缺陷高发面
+  "BLE",
+  "DTZ",
+  "G",
+  "LOG",
+  "T20",
+  # 内置 open/惯例别名与 __all__ 次序:低成本、直接指向一致性
+  # (私有成员跨界访问不设规则:Python 私有靠约定,pyright reportPrivateUsage 已在类型层把关)
+  "PTH",
+  "ICN",
+  "RUF022",
+]
+ignore = ["PLW0603", "TRY003"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"] # pytest 惯例
+"tests/*" = ["S101", "T201"] # pytest 惯例

@@ -216,15 +216,13 @@ def todos_as_dicts(todos: Sequence[TodoItem]) -> list[dict[str, str]]:
 
 def todos_from_dicts(raw: Sequence[Mapping[str, object]]) -> list[TodoItem]:
     """反序列化。"""
-    out: list[TodoItem] = []
-    for item in raw:
-        out.append(
-            TodoItem(
-                id=str(item.get("id") or ""),
-                goal=str(item.get("goal") or ""),
-                status=str(item.get("status") or "PENDING"),
-                evidence=str(item.get("evidence") or ""),
-                reason=str(item.get("reason") or ""),
-            )
+    return [
+        TodoItem(
+            id=str(item.get("id") or ""),
+            goal=str(item.get("goal") or ""),
+            status=str(item.get("status") or "PENDING"),
+            evidence=str(item.get("evidence") or ""),
+            reason=str(item.get("reason") or ""),
         )
-    return out
+        for item in raw
+    ]

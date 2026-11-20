@@ -27,9 +27,8 @@ describe("scheduleToCron + parseCronToSchedule 往返", () => {
       const expr = scheduleToCron(s);
       const back = parseCronToSchedule(expr);
       // 等价写法归一:每 1 小时(0 * * * *)反解为 hourly 档,语义相同
-      const equivalent = (
-        s.kind === "interval" && s.unit === "hour" && s.n === 1 ? { kind: "hourly", minute: 0 } : s
-      ) as Schedule;
+      const equivalent =
+        s.kind === "interval" && s.unit === "hour" && s.n === 1 ? { kind: "hourly", minute: 0 } : s;
       expect(back).toEqual(equivalent);
     });
   }

@@ -152,7 +152,7 @@ async def test_adopted_promotes_sample(
             await session.execute(
                 text(
                     "SELECT source_type, recall_enabled, feedback_message_id, question,"
-                    " sql_text FROM rag.query_history WHERE sql_text LIKE '%qty%'"  # noqa: S608
+                    " sql_text FROM rag.query_history WHERE sql_text LIKE '%qty%'"
                 )
             )
         )
@@ -289,7 +289,7 @@ async def test_resubmit_after_adopted_disables(
     disabled = (
         (
             await session.execute(
-                text("SELECT recall_enabled FROM rag.query_history WHERE sql_text LIKE '%42%'")  # noqa: S608
+                text("SELECT recall_enabled FROM rag.query_history WHERE sql_text LIKE '%42%'")
             )
         )
         .mappings()
@@ -637,7 +637,7 @@ async def test_migration_0034_schema_contract(session: AsyncSession) -> None:
     hits = await repo.recall.recall_history(tenant_id=tid, datasource_key="default", vector=[0.1])
     assert all(h.question != "q-mig" for h in hits)
     # CHECK 约束在位(非法来源拒写)
-    with pytest.raises(Exception):  # noqa: B017,S101  # CHECK 违约即抛(DBAPIError)
+    with pytest.raises(Exception):  # noqa: B017  # CHECK 违约即抛(DBAPIError)
         await session.execute(
             text(
                 "INSERT INTO rag.query_history"

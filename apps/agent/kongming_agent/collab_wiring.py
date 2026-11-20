@@ -259,7 +259,7 @@ class _Wiring:
     """一次任务装配期固定的依赖。"""
 
     api: ApiClient
-    llm: Any  # noqa: ANN401 —— LlmClient 显式类型在调用方;剧本化测试注入假体
+    llm: Any
     settings: Settings
     react_runner: ReactRunner
     task_id: str
@@ -476,7 +476,7 @@ class _Session:
                 usage=usage,
                 trace_id=f"{self.wiring.trace_root}-w{worker_no}" if worker_no >= 1 else "",
             )
-        except Exception as e:  # noqa: BLE001 —— 账本尽力而为,不阻断圆桌
+        except Exception as e:  # noqa: BLE001
             log.warning("圆桌轮次上账异常(尽力而为): %s", e)
 
     def _participant_result(
@@ -731,7 +731,7 @@ async def _run_step(
 def make_collab_runner(
     *,
     api: ApiClient,
-    llm: Any,  # noqa: ANN401 —— LlmClient 显式类型在调用方;剧本化测试注入假体
+    llm: Any,
     settings: Settings,
     react_runner: ReactRunner,
     task_id: str,

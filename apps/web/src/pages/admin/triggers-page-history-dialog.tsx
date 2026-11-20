@@ -60,13 +60,17 @@ export function TriggersHistoryDialog(props: TriggersHistoryDialogProps) {
           <DialogDescription>按时间倒序的触发执行记录。</DialogDescription>
         </DialogHeader>
         <div className="max-h-96 space-y-2 overflow-y-auto">
-          {isError ? (
-            <ErrorAlert />
-          ) : rows.length === 0 ? (
-            <EmptyState>暂无记录。</EmptyState>
-          ) : (
-            rows.map((r) => <RunItem key={r.id} run={r} />)
-          )}
+          {(() => {
+            if (isError) return <ErrorAlert />;
+            if (rows.length === 0) return <EmptyState>暂无记录。</EmptyState>;
+            return (
+              <>
+                {rows.map((r) => (
+                  <RunItem key={r.id} run={r} />
+                ))}
+              </>
+            );
+          })()}
         </div>
         {(total ?? 0) > PAGE_SIZE && (
           <div className="flex items-center justify-between pt-2">

@@ -249,7 +249,7 @@ class FeedbackRepository:
                 await self._s.execute(
                     text(
                         self._PAGE_SELECT
-                        + self._PAGE_WHERE  # noqa: S608  # 常量模板,参数化绑定
+                        + self._PAGE_WHERE  # 常量模板,参数化绑定
                         + " ORDER BY m.feedback_time DESC, m.id DESC LIMIT :lim OFFSET :off"
                     ),
                     params,

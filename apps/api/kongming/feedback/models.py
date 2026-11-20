@@ -52,7 +52,7 @@ def extract_table_names(*sql_texts: str) -> tuple[set[str], bool]:
             continue
         try:
             statements = list(sqlglot.parse(sql, read="postgres"))
-        except Exception:  # sqlglot 异常族(SqlglotError)兜底,解析失败不炸定位
+        except Exception:  # noqa: BLE001  # sqlglot 异常族(SqlglotError)兜底,解析失败不炸定位
             parse_error = True
             continue
         for stmt in statements:

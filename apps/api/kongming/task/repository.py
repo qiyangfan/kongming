@@ -173,7 +173,7 @@ class SqlTaskRepo:
                         "SELECT id, goal, status, version, budget_used, datasource_key,"  # noqa: S608 —— where 为常量片段
                         "       fail_reason, created_at, updated_at"
                         " FROM public.sys_agent_task"
-                        f"{where}"  # noqa: S608
+                        f"{where}"
                         " ORDER BY created_at DESC LIMIT :lim OFFSET :off"
                     ),
                     {**params, "lim": size, "off": (page - 1) * size},
@@ -224,7 +224,7 @@ class SqlTaskRepo:
         row = (
             (
                 await self._s.execute(
-                    text(  # noqa: S608 —— sets 为受控常量片段
+                    text(
                         "UPDATE public.sys_agent_task SET "  # noqa: S608 —— sets 为受控常量片段
                         + ", ".join(sets)
                         + " WHERE id = CAST(:i AS uuid) AND tenant_id = CAST(:t AS uuid)"
@@ -331,7 +331,7 @@ class SqlTaskRepo:
             params["cp"] = _dump(checkpoint)
         hit = (
             await self._s.execute(
-                text(  # noqa: S608 —— sets 为受控常量片段
+                text(
                     "UPDATE public.sys_agent_task_step SET "  # noqa: S608 —— sets 为受控常量片段
                     + ", ".join(sets)
                     + " WHERE id = CAST(:i AS uuid) AND task_id = CAST(:t AS uuid)"

@@ -8,6 +8,7 @@
 
 import json
 from collections.abc import Sequence
+from typing import ClassVar
 
 from sqlalchemy import text
 from sqlalchemy.engine import URL
@@ -230,10 +231,12 @@ class RagEntryRepository:
             params["tables"] = [t for _, t in keep]
         orphans = int(
             (
-                await self._s.execute(text(f"SELECT count(*) {base}"), params)  # noqa: S608  # base 为本文件常量片段+绑定参数
+                await self._s.execute(
+                    text(f"SELECT count(*) {base}"), params
+                )  # base 为本文件常量片段+绑定参数
             ).scalar_one()
         )
-        deleted = (await self._s.execute(text(f"DELETE {base} RETURNING 1"), params)).all()  # noqa: S608
+        deleted = (await self._s.execute(text(f"DELETE {base} RETURNING 1"), params)).all()
         return len(deleted), orphans
 
     async def column_comments(
@@ -258,7 +261,7 @@ class RagEntryRepository:
         return {str(r.table_name): dict(r.columns_comment or {}) for r in rows}
 
     # 可见集合子句单源(scope 枚举→常量片段;teams 恒绑定参数,无拼接输入)
-    _TEAM_CLAUSE = {
+    _TEAM_CLAUSE: ClassVar[dict[str, str]] = {
         "all": "(rd.team_id IS NULL OR rd.team_id::text = ANY(CAST(:teams AS text[])))",
         "public": "rd.team_id IS NULL",
         "team": "(rd.team_id::text = :scope_team"

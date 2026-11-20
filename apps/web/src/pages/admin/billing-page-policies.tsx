@@ -1,6 +1,6 @@
 /* 计费页配额策略区块:租户/套餐选择、策略清单与新增表单。 */
 
-import type { FormEvent } from "react";
+import type { SubmitEvent } from "react";
 import { Loader2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -30,7 +30,7 @@ import { formatNumber } from "@/lib/datetime";
 import type { PolicyForm } from "./billing-page-model";
 import type { QueryLike } from "./billing-page-sections";
 
-const preventDefault = (e: FormEvent) => e.preventDefault();
+const preventDefault = (e: SubmitEvent<HTMLFormElement>) => e.preventDefault();
 
 // 策略范围列:USER/TEAM 级以清单数据源回显名称;候选未含(已删除)
 // 不露 UUID,hover 可得原 id
@@ -293,7 +293,9 @@ export function PoliciesSection({
                 header: "维度",
                 cardPriority: 2,
                 render: (p) => (
-                  <Badge variant="secondary">{DIM_TEXT[p.dimension] ?? p.dimension}</Badge>
+                  <Badge variant="secondary">
+                    {DIM_TEXT[p.dimension as keyof typeof DIM_TEXT] ?? p.dimension}
+                  </Badge>
                 ),
               },
               {

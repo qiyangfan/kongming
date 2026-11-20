@@ -99,7 +99,7 @@ class TeamService:
         if self._knowledge_publicizer is not None:
             try:
                 await self._knowledge_publicizer.publicize(team_id=team_id)
-            except Exception:  # noqa: BLE001  # 钩子失败不阻塞删除
+            except Exception:  # 钩子失败不阻塞删除
                 log.warning(
                     "知识条目公共化钩子失败(团队删除继续,级联兜底公共化): team=%s",
                     team_id,

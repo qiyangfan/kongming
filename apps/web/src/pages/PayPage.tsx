@@ -24,6 +24,8 @@ export default function PayPage() {
     queryFn: () => getPayment(paymentId),
     enabled: paymentId !== "",
     // 非终态继续轮询；支付单进入终态或请求返回错误后停止。
+    // React Query 约定该回调返回 number | false,库类型决定无法收敛成单一类型
+    // eslint-disable-next-line sonarjs/function-return-type
     refetchInterval: (q) => {
       if (q.state.status === "error") return false;
       return q.state.data && TERMINAL.has(q.state.data.status) ? false : 2000;
@@ -64,22 +66,26 @@ export default function PayPage() {
         <Badge variant="outline">模拟环境 · 无真实资金</Badge>
       </div>
 
-      {payment.isLoading ? (
-        <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden />
-      ) : payment.isError || !pay ? (
-        <ErrorAlert text="支付单不存在或不可见。" />
-      ) : (
-        <section className="space-y-4 rounded-lg border border-border p-6 text-center">
-          <PayAmountHeader pay={pay} invoice={invoice.data} />
-          <PayStatusBlock pay={pay} busy={busy} simulate={simulate} cancel={cancel} />
+      {(() => {
+        if (payment.isLoading) {
+          return <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden />;
+        }
+        if (payment.isError || !pay) {
+          return <ErrorAlert text="支付单不存在或不可见。" />;
+        }
+        return (
+          <section className="space-y-4 rounded-lg border border-border p-6 text-center">
+            <PayAmountHeader pay={pay} invoice={invoice.data} />
+            <PayStatusBlock pay={pay} busy={busy} simulate={simulate} cancel={cancel} />
 
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
-        </section>
-      )}
+            {error && (
+              <p role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
+            )}
+          </section>
+        );
+      })()}
 
       <p className="text-center text-sm">
         <Link to="/portal" className={buttonVariants({ variant: "link" })}>

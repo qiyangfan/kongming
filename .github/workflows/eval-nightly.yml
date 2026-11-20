@@ -21,17 +21,23 @@ concurrency:
 jobs:
   eval:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
-      - name: Require LLM credentials
+      - name: Require eval credentials
         env:
           KM_AGENT_LLM_API_KEY: ${{ secrets.KM_AGENT_LLM_API_KEY }}
+          KM_EVAL_ADMIN_PASSWORD: ${{ secrets.KM_EVAL_ADMIN_PASSWORD }}
         run: |
           if [ -z "$KM_AGENT_LLM_API_KEY" ]; then
             echo "::error::缺少评估用 LLM 凭证 secret KM_AGENT_LLM_API_KEY(显式失败,不静默跳过)"
+            exit 1
+          fi
+          if [ -z "$KM_EVAL_ADMIN_PASSWORD" ]; then
+            echo "::error::缺少评估用超管密码 secret KM_EVAL_ADMIN_PASSWORD(显式失败,不用内置默认值)"
             exit 1
           fi
 
@@ -39,10 +45,6 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
-
-      - uses: pnpm/action-setup@a15d269cd4658e1107c09f1fabf4cbd7bd1f308a # v4.4.0
-        with:
-          version: 9
 
       - name: Start infrastructure
         env:
@@ -110,10 +112,13 @@ jobs:
 
       - name: Run evaluation layer
         env:
-          KM_EVAL_ADMIN_PASSWORD: ${{ secrets.KM_EVAL_ADMIN_PASSWORD || 'Kongming#2026' }}
+          KM_EVAL_ADMIN_PASSWORD: ${{ secrets.KM_EVAL_ADMIN_PASSWORD }}
           LAYER: ${{ github.event.inputs.layer || 'smoke' }}
         working-directory: apps/api
         run: |
+          # 管道到 tee 会吞掉 pytest 退出码(默认 shell 无 pipefail),
+          # 评估失败会静默变绿——显式开 pipefail
+          set -euo pipefail
           # retrieval 层语料目录独立(与 NL2SQL 统计互不混入),目标路径不同
           if [ "$LAYER" = "retrieval" ]; then
             TARGET=evals/retrieval
@@ -121,31 +126,19 @@ jobs:
             TARGET=evals
           fi
           uv run pytest "$TARGET" -m "$LAYER" -q --tb=short | tee /tmp/eval-out.txt
-          # 抽出通过率行,写 baseline 产物
+          # 结构化指标与层/指纹写入基线产物(summary.json 供下次对比)
           mkdir -p /tmp/eval-now
           cp /tmp/eval-out.txt /tmp/eval-now/
-          python - <<'PY'
-          import re, pathlib, json
-          out = pathlib.Path("/tmp/eval-out.txt").read_text()
-          # 宽松/严格若有结构化行则收录;否则留 raw
-          pathlib.Path("/tmp/eval-now/summary.json").write_text(json.dumps({"raw_tail": out[-2000:]}, ensure_ascii=False))
-          PY
+          python3 ../../scripts/eval_redline.py summarize \
+            /tmp/eval-out.txt "$LAYER" /tmp/eval-now/summary.json
 
       - name: Red-line compare (≥5pp drop fails)
+        env:
+          LAYER: ${{ github.event.inputs.layer || 'smoke' }}
+        working-directory: apps/api
         run: |
-          python - <<'PY'
-          import json, pathlib, re, sys
-          prev_dir = pathlib.Path("/tmp/eval-prev")
-          now_dir = pathlib.Path("/tmp/eval-now")
-          if not (prev_dir / "summary.json").exists():
-              print("无历史基线:只记录不失败(首次运行)")
-              sys.exit(0)
-          # 简易红线:对比 raw 中的百分比数字序列;若有结构化 summary 则用之
-          # 通过率数字仅供粗略比较；结构化评分由评估器输出后再使用。
-          print("基线存在:执行 ≥5pp 劣化红线(与上次 artifacts 可比)")
-          # 构造的劣化输入可触发 job 失败；真实分数比较依赖结构化 summary。
-          # 保留评估产物供比较；评估器输出百分比后应用劣化阈值。
-          PY
+          python3 ../../scripts/eval_redline.py compare \
+            /tmp/eval-prev /tmp/eval-out.txt "$LAYER"
 
       # baseline 仅 2KB 文本且同名上传自动替换旧版;账号存储配额计量器卡死
       # 期间(2026-11 已知 bug)上传会被拒,不应拖红整个评估门禁。

@@ -43,7 +43,8 @@ export function mergeToolCall(
 ): StreamToolCallOut[] {
   if (next.status === "running") return [...list, next];
   for (let i = list.length - 1; i >= 0; i--) {
-    if (list[i].tool_name === next.tool_name && list[i].status === "running") {
+    const cur = list[i];
+    if (cur && cur.tool_name === next.tool_name && cur.status === "running") {
       return [...list.slice(0, i), next, ...list.slice(i + 1)];
     }
   }
@@ -78,12 +79,9 @@ interface StreamCardProps {
 
 function AxisDot({ status, small = false }: { status: string; small?: boolean }) {
   const size = small ? "size-2" : "size-3";
-  const color =
-    status === "rejected"
-      ? "bg-destructive"
-      : status === "done" && small
-        ? "bg-primary/70"
-        : "bg-primary";
+  let color = "bg-primary";
+  if (status === "rejected") color = "bg-destructive";
+  else if (status === "done" && small) color = "bg-primary/70";
   return (
     <span className={`relative flex shrink-0 items-center justify-center ${size}`}>
       {status === "running" && (
@@ -140,8 +138,9 @@ export function StreamCard({ stages, sql, summary, toolCalls = [] }: StreamCardP
       return;
     }
     const box = el.getBoundingClientRect();
-    const first = runnings[0].getBoundingClientRect();
-    const last = runnings[runnings.length - 1].getBoundingClientRect();
+    const first = runnings[0]?.getBoundingClientRect();
+    const last = runnings[runnings.length - 1]?.getBoundingClientRect();
+    if (!first || !last) return;
     let delta = 0;
     if (last.bottom > box.bottom) delta = last.bottom - box.bottom;
     else if (first.top < box.top + MASK) delta = first.top - (box.top + MASK);

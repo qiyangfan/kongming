@@ -135,7 +135,7 @@ export function useUsersPageState() {
     setCreating,
     setEditing,
     tenantOptions: tenants.data ?? [],
-    roleOptions: roles.data ?? [],
+    roleOptions: roles.data,
     create,
     update,
   });
@@ -172,7 +172,7 @@ export function useUsersPageState() {
       setPage(1);
       setSearch(keyword.trim());
     },
-    usersErrorText: `用户列表加载失败:${(users.error as Error | null)?.message ?? ""}`,
+    usersErrorText: `用户列表加载失败:${users.error?.message ?? ""}`,
   };
 }
 
@@ -265,7 +265,7 @@ function useFormActions(src: {
   setCreating: (v: boolean) => void;
   setEditing: (u: UserItemOut | null) => void;
   tenantOptions: { id: string }[];
-  roleOptions: { id: string; role_key: string }[];
+  roleOptions: { id: string; role_key: string }[] | undefined;
   create: { mutate: () => void };
   update: { mutate: () => void };
 }) {
@@ -277,7 +277,9 @@ function useFormActions(src: {
     s.setCreating(true);
   };
   const openEdit = (u: UserItemOut) => {
-    const roleIds = s.roleOptions.filter((r) => u.role_keys.includes(r.role_key)).map((r) => r.id);
+    const roleIds = (s.roleOptions ?? [])
+      .filter((r) => u.role_keys.includes(r.role_key))
+      .map((r) => r.id);
     s.setForm({
       username: u.username,
       password: "",
@@ -298,7 +300,7 @@ function useFormActions(src: {
       form: s.form,
       creating: s.creating,
       editing: s.editing,
-      rolesLoaded: s.roleOptions !== null,
+      rolesLoaded: s.roleOptions !== undefined,
     });
     if (invalid) return s.setFormError(invalid);
     (s.creating ? s.create : s.update).mutate();
@@ -312,5 +314,5 @@ function useFormActions(src: {
 
 /** 删除 mutation 的错误文案;未失败时为 null。 */
 export function removeError(m: { isError: boolean; error: Error | null }): string | null {
-  return m.isError ? ((m.error as Error | null)?.message ?? "删除失败") : null;
+  return m.isError ? (m.error?.message ?? "删除失败") : null;
 }

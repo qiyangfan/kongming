@@ -47,8 +47,9 @@ export const LLM_STATUS_META: StatusMeta = {
 };
 
 export function kindStatusLabel(kind: string, status: string): string {
-  const table =
-    kind === "TOOL" ? TOOL_STATUS_LABEL : kind === "SQL" ? VERDICT_LABEL : LLM_STATUS_LABEL;
+  let table: Record<string, string> = LLM_STATUS_LABEL;
+  if (kind === "TOOL") table = TOOL_STATUS_LABEL;
+  else if (kind === "SQL") table = VERDICT_LABEL;
   return table[status] ?? status;
 }
 

@@ -25,7 +25,7 @@ import {
   type QualityTrendPoint,
 } from "@/lib/quality-api";
 import { formatDateTime } from "@/lib/datetime";
-import { cssVar } from "@/lib/utils";
+import { cellText, cssVar } from "@/lib/utils";
 import {
   FALLBACK_META,
   IMPORTANCE_META,
@@ -118,30 +118,40 @@ export function TimelineDialog({
             <span className="font-mono text-xs">{traceId}</span>
           </DialogDescription>
         </DialogHeader>
-        {timeline.isLoading ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">加载中…</p>
-        ) : timeline.isError ? (
-          <ErrorAlert text="时间线加载失败" />
-        ) : events.length === 0 ? (
-          <EmptyState icon={BookOpen}>
-            <p className="font-medium text-foreground">暂无时间线事件</p>
-            <p>该 trace_id 无 LLM/工具/SQL 事件记录。</p>
-          </EmptyState>
-        ) : (
-          <ol className="space-y-2">
-            {events.map((e, i) => (
-              <li key={`${e.ts}-${i}`} className="flex items-center justify-between gap-2 text-sm">
-                <span className="text-muted-foreground">
-                  {formatDateTime(e.ts, { seconds: true })}
-                </span>
-                <span className="truncate font-medium">
-                  {e.kind} · {e.name}
-                </span>
-                <StatusBadge value={e.status} meta={TIMELINE_STATUS_META} />
-              </li>
-            ))}
-          </ol>
-        )}
+        {(() => {
+          if (timeline.isLoading) {
+            return <p className="py-6 text-center text-sm text-muted-foreground">加载中…</p>;
+          }
+          if (timeline.isError) {
+            return <ErrorAlert text="时间线加载失败" />;
+          }
+          if (events.length === 0) {
+            return (
+              <EmptyState icon={BookOpen}>
+                <p className="font-medium text-foreground">暂无时间线事件</p>
+                <p>该 trace_id 无 LLM/工具/SQL 事件记录。</p>
+              </EmptyState>
+            );
+          }
+          return (
+            <ol className="space-y-2">
+              {events.map((e, i) => (
+                <li
+                  key={`${e.ts}-${i}`}
+                  className="flex items-center justify-between gap-2 text-sm"
+                >
+                  <span className="text-muted-foreground">
+                    {formatDateTime(e.ts, { seconds: true })}
+                  </span>
+                  <span className="truncate font-medium">
+                    {e.kind} · {e.name}
+                  </span>
+                  <StatusBadge value={e.status} meta={TIMELINE_STATUS_META} />
+                </li>
+              ))}
+            </ol>
+          );
+        })()}
       </DialogContent>
     </Dialog>
   );
@@ -182,36 +192,40 @@ export function ContextDialog({
             <span className="font-mono text-xs">{ctx.data?.session_id ?? ""}</span>
           </DialogDescription>
         </DialogHeader>
-        {ctx.isLoading ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">加载中…</p>
-        ) : ctx.isError ? (
-          <ErrorAlert text="会话轮次加载失败" />
-        ) : (
-          <ol className="space-y-2">
-            {items.map((it) => (
-              <li
-                key={it.id}
-                className={`rounded-lg border p-2.5 text-sm ${
-                  it.id === messageId ? "border-primary bg-primary/5" : ""
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs text-muted-foreground">
-                    {formatDateTime(it.created_at, { seconds: true })}
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <StatusBadge value={it.status} meta={ROUND_STATUS_META} />
-                    {it.fallback_type && (
-                      <StatusBadge value={it.fallback_type} meta={FALLBACK_META} />
-                    )}
-                    {it.score != null && <span className="font-mono text-xs">{it.score} 分</span>}
-                  </span>
-                </div>
-                <p className="mt-1 line-clamp-2">{it.question ?? "—"}</p>
-              </li>
-            ))}
-          </ol>
-        )}
+        {(() => {
+          if (ctx.isLoading) {
+            return <p className="py-6 text-center text-sm text-muted-foreground">加载中…</p>;
+          }
+          if (ctx.isError) {
+            return <ErrorAlert text="会话轮次加载失败" />;
+          }
+          return (
+            <ol className="space-y-2">
+              {items.map((it) => {
+                const activeClass = it.id === messageId ? "border-primary bg-primary/5" : "";
+                return (
+                  <li key={it.id} className={`rounded-lg border p-2.5 text-sm ${activeClass}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        {formatDateTime(it.created_at, { seconds: true })}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <StatusBadge value={it.status} meta={ROUND_STATUS_META} />
+                        {it.fallback_type && (
+                          <StatusBadge value={it.fallback_type} meta={FALLBACK_META} />
+                        )}
+                        {it.score != null && (
+                          <span className="font-mono text-xs">{it.score} 分</span>
+                        )}
+                      </span>
+                    </div>
+                    <p className="mt-1 line-clamp-2">{it.question ?? "—"}</p>
+                  </li>
+                );
+              })}
+            </ol>
+          );
+        })()}
       </DialogContent>
     </Dialog>
   );
@@ -240,51 +254,58 @@ export function StageTraceDialog({
           <DialogTitle>执行轨迹</DialogTitle>
           <DialogDescription>该轮各节点的执行序列与相对耗时(ms)。</DialogDescription>
         </DialogHeader>
-        {trace.isLoading ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">加载中…</p>
-        ) : trace.isError ? (
-          <ErrorAlert text="轨迹加载失败" />
-        ) : nodes.length === 0 ? (
-          <EmptyState icon={GitBranch}>
-            <p className="font-medium text-foreground">无轨迹</p>
-            <p>同步问答轮不产生节点阶段轨迹。</p>
-          </EmptyState>
-        ) : (
-          <>
-            {truncated && (
-              <p className="text-xs text-warning">条目超上限,仅保留最近记录(已截断)。</p>
-            )}
-            <ol className="space-y-1.5">
-              {nodes.map((e, i) => {
-                const node = String((e as Record<string, unknown>).node ?? "");
-                const status = String((e as Record<string, unknown>).status ?? "");
-                const t = Number((e as Record<string, unknown>).t ?? 0);
-                const retry = Number((e as Record<string, unknown>).retry ?? 0);
-                return (
-                  <li
-                    key={i}
-                    className="flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-sm"
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      <StatusBadge
-                        value={status}
-                        meta={{
-                          running: { label: "进行中", variant: "outline" },
-                          done: { label: "完成", variant: "secondary" },
-                        }}
-                      />
-                      <span className="font-medium">{STAGE_LABELS[node] ?? node}</span>
-                      {node === "selfheal" && retry > 0 && (
-                        <span className="text-xs text-muted-foreground">第 {retry} 轮</span>
-                      )}
-                    </span>
-                    <span className="font-mono text-xs text-muted-foreground">{t} ms</span>
-                  </li>
-                );
-              })}
-            </ol>
-          </>
-        )}
+        {(() => {
+          if (trace.isLoading) {
+            return <p className="py-6 text-center text-sm text-muted-foreground">加载中…</p>;
+          }
+          if (trace.isError) {
+            return <ErrorAlert text="轨迹加载失败" />;
+          }
+          if (nodes.length === 0) {
+            return (
+              <EmptyState icon={GitBranch}>
+                <p className="font-medium text-foreground">无轨迹</p>
+                <p>同步问答轮不产生节点阶段轨迹。</p>
+              </EmptyState>
+            );
+          }
+          return (
+            <>
+              {truncated && (
+                <p className="text-xs text-warning">条目超上限,仅保留最近记录(已截断)。</p>
+              )}
+              <ol className="space-y-1.5">
+                {nodes.map((e, i) => {
+                  const node = cellText((e as Record<string, unknown>).node);
+                  const status = cellText((e as Record<string, unknown>).status);
+                  const t = Number((e as Record<string, unknown>).t ?? 0);
+                  const retry = Number((e as Record<string, unknown>).retry ?? 0);
+                  return (
+                    <li
+                      key={i}
+                      className="flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-sm"
+                    >
+                      <span className="inline-flex items-center gap-1.5">
+                        <StatusBadge
+                          value={status}
+                          meta={{
+                            running: { label: "进行中", variant: "outline" },
+                            done: { label: "完成", variant: "secondary" },
+                          }}
+                        />
+                        <span className="font-medium">{STAGE_LABELS[node] ?? node}</span>
+                        {node === "selfheal" && retry > 0 && (
+                          <span className="text-xs text-muted-foreground">第 {retry} 轮</span>
+                        )}
+                      </span>
+                      <span className="font-mono text-xs text-muted-foreground">{t} ms</span>
+                    </li>
+                  );
+                })}
+              </ol>
+            </>
+          );
+        })()}
       </DialogContent>
     </Dialog>
   );
@@ -315,62 +336,67 @@ export function ScoreDetailDialog({
             分数由主张分解经确定性公式重算;每条扣分可定位到具体主张。
           </DialogDescription>
         </DialogHeader>
-        {detail.isLoading ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">加载中…</p>
-        ) : detail.isError ? (
-          <ErrorAlert text="评分详情加载失败(可能未评分或无权查看)" />
-        ) : detail.data ? (
-          <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="rounded-lg border bg-muted/40 p-3">
-                <p className="text-2xl font-semibold">{detail.data.score}</p>
-                <p className="text-xs text-muted-foreground">总分(0-100)</p>
-              </div>
-              <div className="rounded-lg border bg-muted/40 p-3">
-                <p className="text-2xl font-semibold">{detail.data.grounding}</p>
-                <p className="text-xs text-muted-foreground">依据分</p>
-              </div>
-              <div className="rounded-lg border bg-muted/40 p-3">
-                <p className="text-2xl font-semibold">{detail.data.coverage}</p>
-                <p className="text-xs text-muted-foreground">覆盖分</p>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              要点覆盖:{dec.points_covered ?? 0}/{dec.points_total ?? 0}
-              {detail.data.score_model && ` · 评审模型 ${detail.data.score_model}`}
-              {` · ${formatDateTime(detail.data.scored_at)}`}
-            </p>
-            <div className="space-y-2">
-              <h4 className="text-sm font-medium">事实主张({claims.length})</h4>
-              {claims.map((c, i) => (
-                <div key={i} className="rounded-lg border p-3 text-sm">
-                  <div className="mb-1.5 flex items-center gap-1.5">
-                    <StatusBadge value={c.importance ?? "normal"} meta={IMPORTANCE_META} />
-                    <StatusBadge value={c.support ?? "unsupported"} meta={SUPPORT_META} />
-                  </div>
-                  <p>{c.text}</p>
-                  {c.excerpt && (
-                    <p className="mt-1.5 border-l-2 pl-2 text-xs text-muted-foreground">
-                      证据摘录:{c.excerpt}
-                    </p>
-                  )}
+        {(() => {
+          if (detail.isLoading) {
+            return <p className="py-6 text-center text-sm text-muted-foreground">加载中…</p>;
+          }
+          if (detail.isError) {
+            return <ErrorAlert text="评分详情加载失败(可能未评分或无权查看)" />;
+          }
+          if (!detail.data) return null;
+          return (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="rounded-lg border bg-muted/40 p-3">
+                  <p className="text-2xl font-semibold">{detail.data.score}</p>
+                  <p className="text-xs text-muted-foreground">总分(0-100)</p>
                 </div>
-              ))}
-            </div>
-            {excluded.length > 0 && (
+                <div className="rounded-lg border bg-muted/40 p-3">
+                  <p className="text-2xl font-semibold">{detail.data.grounding}</p>
+                  <p className="text-xs text-muted-foreground">依据分</p>
+                </div>
+                <div className="rounded-lg border bg-muted/40 p-3">
+                  <p className="text-2xl font-semibold">{detail.data.coverage}</p>
+                  <p className="text-xs text-muted-foreground">覆盖分</p>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                要点覆盖:{dec.points_covered ?? 0}/{dec.points_total ?? 0}
+                {detail.data.score_model && ` · 评审模型 ${detail.data.score_model}`}
+                {` · ${formatDateTime(detail.data.scored_at)}`}
+              </p>
               <div className="space-y-2">
-                <h4 className="text-sm font-medium text-muted-foreground">
-                  净化剔除的非事实主张({excluded.length},不参与依据分)
-                </h4>
-                {excluded.map((c, i) => (
-                  <p key={i} className="text-xs text-muted-foreground">
-                    · {c.text}
-                  </p>
+                <h4 className="text-sm font-medium">事实主张({claims.length})</h4>
+                {claims.map((c, i) => (
+                  <div key={i} className="rounded-lg border p-3 text-sm">
+                    <div className="mb-1.5 flex items-center gap-1.5">
+                      <StatusBadge value={c.importance ?? "normal"} meta={IMPORTANCE_META} />
+                      <StatusBadge value={c.support ?? "unsupported"} meta={SUPPORT_META} />
+                    </div>
+                    <p>{c.text}</p>
+                    {c.excerpt && (
+                      <p className="mt-1.5 border-l-2 pl-2 text-xs text-muted-foreground">
+                        证据摘录:{c.excerpt}
+                      </p>
+                    )}
+                  </div>
                 ))}
               </div>
-            )}
-          </div>
-        ) : null}
+              {excluded.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-muted-foreground">
+                    净化剔除的非事实主张({excluded.length},不参与依据分)
+                  </h4>
+                  {excluded.map((c, i) => (
+                    <p key={i} className="text-xs text-muted-foreground">
+                      · {c.text}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </DialogContent>
     </Dialog>
   );

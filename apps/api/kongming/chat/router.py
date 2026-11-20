@@ -10,7 +10,7 @@ import json
 import uuid
 from collections.abc import AsyncIterator, Generator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 from urllib.parse import quote
 
@@ -412,7 +412,7 @@ async def export_result(
     except TenantForbidden:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
     # 「查询结果-<时间戳>.<ext>」(chat spec);RFC 5987 filename* 携带中文名
-    filename = quote(f"查询结果-{datetime.now():%Y%m%d-%H%M%S}.{ext}")
+    filename = quote(f"查询结果-{datetime.now(UTC):%Y%m%d-%H%M%S}.{ext}")
     return Response(
         content=content,
         media_type=media_type,

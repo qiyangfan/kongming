@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import contextlib
 import datetime as dt
 import logging
 import time
@@ -43,10 +44,8 @@ class TriggerScheduler:
     async def stop(self) -> None:
         if self._task:
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
         # 停机收割在飞 fire task(main.py archive_task 同款先例,
         # 防 run 落库半途)
         if self._running:
@@ -146,7 +145,7 @@ class TriggerScheduler:
                 except CronError:
                     # 重算失败(闰日跨 366 天窗等)——next_fire 置
                     # NULL 停调度止损(防每 tick 重触发风暴),落 FAILED run
-                    log.error("trigger 重算 next_fire 失败,调度停止 id=%s", trigger_id)
+                    log.exception("trigger 重算 next_fire 失败,调度停止 id=%s", trigger_id)
                     await svc.record_failed(
                         tenant_id=str(row["tenant_id"]),
                         trigger_id=trigger_id,

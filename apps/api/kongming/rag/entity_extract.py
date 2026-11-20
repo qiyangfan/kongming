@@ -103,6 +103,20 @@ def _obj_list(value: object, detail: str) -> list[object]:
     return cast("list[object]", value)
 
 
+def _parse_chat_content(raw: str) -> str:
+    """chat 响应取首条 message.content;结构与内容缺失均按畸形上抛。"""
+    payload = _json_dict(raw, "响应报文畸形(对象缺失)")
+    choices = _obj_list(payload.get("choices"), "响应缺 choices")
+    if not choices or not isinstance(choices[0], dict):
+        raise EntityExtractError(_REASON_UNAVAILABLE, "响应缺 choices")
+    message = cast("dict[str, object]", choices[0]).get("message")
+    message_dict = cast("dict[str, object]", message) if isinstance(message, dict) else None
+    content = message_dict.get("content") if message_dict is not None else None
+    if not isinstance(content, str):
+        raise EntityExtractError(_REASON_UNAVAILABLE, "响应缺 message.content")
+    return content
+
+
 def _parse_entities(raw: str, child_count: int) -> list[list[str]]:
     """父块批量抽取响应解析:返回与子块一一对应的实体名列表(已规范化去重)。
 
@@ -145,12 +159,13 @@ class DocEntityExtractor:
 
     async def _post_chat(self, system: str, user_content: str) -> str:
         """单次流式 POST 并按字节闸读满响应正文(不解析)。"""
-        async with httpx.AsyncClient(
-            trust_env=False,  # 出站受控:不采环境代理(与精排级同源)
-            timeout=httpx.Timeout(self._timeout_s),
-            transport=self._transport,
-        ) as client:
-            async with client.stream(
+        async with (
+            httpx.AsyncClient(
+                trust_env=False,  # 出站受控:不采环境代理(与精排级同源)
+                timeout=httpx.Timeout(self._timeout_s),
+                transport=self._transport,
+            ) as client,
+            client.stream(
                 "POST",
                 self._endpoint,
                 json={
@@ -162,29 +177,21 @@ class DocEntityExtractor:
                     "temperature": 0,
                 },
                 headers={"Authorization": f"Bearer {self._api_key}"},
-            ) as resp:
-                resp.raise_for_status()
-                buf = bytearray()
-                async for chunk in resp.aiter_bytes(65536):
-                    buf.extend(chunk)
-                    if len(buf) > _EXTRACT_RESPONSE_CAP:
-                        raise EntityExtractError(_REASON_UNAVAILABLE, "响应超字节闸")
-                return buf.decode("utf-8", errors="replace")
+            ) as resp,
+        ):
+            resp.raise_for_status()
+            buf = bytearray()
+            async for chunk in resp.aiter_bytes(65536):
+                buf.extend(chunk)
+                if len(buf) > _EXTRACT_RESPONSE_CAP:
+                    raise EntityExtractError(_REASON_UNAVAILABLE, "响应超字节闸")
+            return buf.decode("utf-8", errors="replace")
 
     async def _chat(self, system: str, user_content: str) -> str:
         """单次 chat 出站(字节闸内读响应+响应归一);错误归一为 EntityExtractError。"""
         try:
             raw = await self._post_chat(system, user_content)
-            payload = _json_dict(raw, "响应报文畸形(对象缺失)")
-            choices = _obj_list(payload.get("choices"), "响应缺 choices")
-            if not choices or not isinstance(choices[0], dict):
-                raise EntityExtractError(_REASON_UNAVAILABLE, "响应缺 choices")
-            message = cast("dict[str, object]", choices[0]).get("message")
-            message_dict = cast("dict[str, object]", message) if isinstance(message, dict) else None
-            content = message_dict.get("content") if message_dict is not None else None
-            if not isinstance(content, str):
-                raise EntityExtractError(_REASON_UNAVAILABLE, "响应缺 message.content")
-            return content
+            content = _parse_chat_content(raw)
         except _UNDELIVERED as e:
             raise EntityExtractError(_REASON_UNAVAILABLE, f"拒连({type(e).__name__})") from e
         except EntityExtractError:
@@ -197,6 +204,8 @@ class DocEntityExtractor:
             raise EntityExtractError(reason, f"上游 HTTP {code}") from e
         except httpx.TransportError as e:
             raise EntityExtractError(_REASON_UNAVAILABLE, f"传输失败({type(e).__name__})") from e
+        else:
+            return content
 
     async def _record_usage(self, latency_ms: int, status: str) -> None:
         """出站留痕(sys_llm_usage;独立短事务,失败只告警不阻断)。

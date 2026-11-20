@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import ChangePassword from "@/pages/ChangePassword";
 import Login from "@/pages/Login";
 import OAuthCallback from "@/pages/OAuthCallback";
-import { NotFoundPage } from "@/pages/error-pages";
+import { NotFoundPage } from "@/components/error-pages";
 import "./index.css";
 
 /* 首屏外路由懒加载；登录页与公开 Bot 嵌入页保持静态导入。 */

@@ -111,9 +111,9 @@ def append_cases(dataset_path: Path, cases: list[dict[str, object]]) -> int:
 
 def build_baseline_row(stats_line: str, reason: str) -> str:
     """全量评估统计行 → README 基线表行(纯函数;断言过=)。"""
-    from datetime import datetime
+    from datetime import UTC, datetime
 
-    date = datetime.now().strftime("%Y-%m-%d")
+    date = datetime.now(UTC).strftime("%Y-%m-%d")
     m = re.search(r"宽松\s*(\d+/\d+)\s*\((\d+%)\)", stats_line)
     loose = f"{m.group(1)} ({m.group(2)})" if m else "—"
     m = re.search(r"严格\s*(\d+/\d+)\s*\((\d+%)\)", stats_line)

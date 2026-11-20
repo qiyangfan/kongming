@@ -5,6 +5,7 @@
 test_toolgateway 共用。
 """
 
+import contextlib
 import socket
 import threading
 import uuid
@@ -58,10 +59,8 @@ class _Stub:
             except OSError:
                 pass
             finally:
-                try:
+                with contextlib.suppress(OSError):
                     conn.close()
-                except OSError:
-                    pass
 
     def close(self) -> None:
         self._stop.set()

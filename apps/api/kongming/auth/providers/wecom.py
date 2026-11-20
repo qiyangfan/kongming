@@ -38,7 +38,7 @@ class WecomProvider(OAuthProviderBase):
     display_name = "企业微信"
     pkce = False
     auth_url = "https://open.work.weixin.qq.com/wwopen/sso/qrConnect"
-    token_url = ""  # noqa: S105  # 非标准两步令牌,fetch_profile 整体覆写,不走 authlib token 流
+    token_url = ""  # 非标准两步令牌,fetch_profile 整体覆写,不走 authlib token 流
     scope = ""
 
     def client_id(self, s: Settings) -> str | None:

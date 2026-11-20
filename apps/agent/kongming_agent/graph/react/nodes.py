@@ -359,12 +359,12 @@ async def tool_resolve(state: ReactState) -> dict[str, object]:
 def _numeric_cells(execution: object) -> list[float]:
     if not isinstance(execution, ExecutionResult):
         return []
-    out: list[float] = []
-    for row in execution.rows:
-        for cell in row:
-            if isinstance(cell, (int, float)) and not isinstance(cell, bool):
-                out.append(float(cell))
-    return out
+    return [
+        float(cell)
+        for row in execution.rows
+        for cell in row
+        if isinstance(cell, (int, float)) and not isinstance(cell, bool)
+    ]
 
 
 def _todo_id_of(call: LlmToolCall) -> str | None:

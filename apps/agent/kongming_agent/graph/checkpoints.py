@@ -79,7 +79,7 @@ class InternalCheckpointSaver(BaseCheckpointSaver):  # type: ignore[type-arg]
         try:
             checkpoint, metadata, cp_id = self._decode_tuple(latest)
             writes = await self._load_writes(ctx["tenant_key"], thread_id, ns, cp_id)
-        except Exception as e:  # noqa: BLE001 —— blob 解析失败按降级(整步回退)
+        except Exception as e:  # noqa: BLE001
             self._mark_degraded("读取", e)
             return None
         tup_config: RunnableConfig = {

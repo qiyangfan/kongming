@@ -24,14 +24,14 @@ function walk(dir: string): string[] {
 
 /** 取 :root 或 .dark 的声明块正文(首个匹配=令牌块本身) */
 function tokenBlock(selector: RegExp): string {
-  const m = css.match(selector);
+  const m = selector.exec(css);
   if (!m) throw new Error(`index.css 未找到 ${selector} 令牌块`);
-  return m[1];
+  return m[1] ?? "";
 }
 
 function tokenOf(block: string, name: string): string | null {
-  const m = block.match(new RegExp(`--${name}:\\s*([^;]+);`));
-  return m ? m[1].trim() : null;
+  const m = new RegExp(`--${name}:\\s*([^;]+);`).exec(block);
+  return m?.[1]?.trim() ?? null;
 }
 
 /** 统计源码中填充/描边类的消费点,并列出仍用裸 bg-input 的文件(相对 src/) */

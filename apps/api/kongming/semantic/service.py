@@ -153,7 +153,7 @@ class SemanticService:
                 scope = await self._caller_scope.resolve(
                     user_id=caller_user_id, tenant_id=tenant_id
                 )
-            except Exception:  # noqa: BLE001  读面降级:判定故障不得放大为召回故障
+            except Exception:
                 log.warning(
                     "指标可见性解析失败,按仅 ALL 档降级",
                     exc_info=True,

@@ -84,7 +84,7 @@ async function throwIfJsonError(resp: Response): Promise<void> {
     const body: unknown = await resp.json();
     const detail =
       typeof body === "object" && body !== null && "detail" in body
-        ? String((body as { detail: unknown }).detail)
+        ? String(body.detail)
         : "导出失败";
     throw new Error(detail);
   }

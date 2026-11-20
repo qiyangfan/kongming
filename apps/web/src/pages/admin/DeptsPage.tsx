@@ -117,7 +117,7 @@ export default function DeptsPage() {
         }
       />
 
-      {depts.isError && <ErrorAlert text={`部门树加载失败:${(depts.error as Error).message}`} />}
+      {depts.isError && <ErrorAlert text={`部门树加载失败:${depts.error.message}`} />}
 
       <div className="rounded-md border">
         {depts.isPending && (

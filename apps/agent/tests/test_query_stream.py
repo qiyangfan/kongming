@@ -75,8 +75,8 @@ def _client(monkeypatch: pytest.MonkeyPatch, llm: _Llm, api: _Api | None = None)
 def _parse_sse(text: str) -> list[tuple[str, dict[str, object]]]:
     """SSE 响应体 → [(event, data)] 帧序列(与 api 侧解析同构的最小版)。"""
     frames: list[tuple[str, dict[str, object]]] = []
-    for block in text.split("\n\n"):
-        block = block.strip()
+    for raw_block in text.split("\n\n"):
+        block = raw_block.strip()
         if not block or block.startswith(":"):
             continue
         event = ""
@@ -332,8 +332,8 @@ async def test_stream_unexpected_exception_error_terminal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """图执行意外异常时发送 error 终态事件，不返回裸 500。"""
-    monkeypatch.setattr(deps, "get_llm", lambda: _BoomLlm())
-    monkeypatch.setattr(deps, "get_api", lambda: _Api())
+    monkeypatch.setattr(deps, "get_llm", _BoomLlm)
+    monkeypatch.setattr(deps, "get_api", _Api)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post("/query/stream", json=REQ, headers=TOKEN)
     assert resp.status_code == 200

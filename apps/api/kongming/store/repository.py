@@ -231,7 +231,7 @@ class SqlStoreRepo:
         rows = (
             (
                 await self._s.execute(
-                    text(base + " GROUP BY b.id, v.id" + f" ORDER BY {order}"),  # noqa: S608
+                    text(base + " GROUP BY b.id, v.id" + f" ORDER BY {order}"),
                     params,
                 )
             )

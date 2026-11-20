@@ -742,7 +742,7 @@ def _interrupt_confirm_id(tup: object) -> str:
                     cid = str(d.get("confirm_id") or "")
                     if cid:
                         return cid
-    except Exception:  # noqa: BLE001 —— 判读失败按无在途处理(保守侧)
+    except Exception:
         log.warning("在途确认判读失败,恢复提示按失配处理", exc_info=True)
     return ""
 

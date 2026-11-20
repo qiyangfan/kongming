@@ -85,13 +85,19 @@ def _frames_for(reply: AgentReply) -> list[tuple[str, str]]:
     """构造成功响应的 scripted 帧序列，包含配对 stage、sql、summary 和 result。"""
     frames: list[tuple[str, str]] = []
     for node in ("understand", "retrieve", "generate"):
-        for st in ("running", "done"):
-            frames.append(("stage", json.dumps({"node": node, "status": st, "retry_count": 0})))
-    for st in ("running", "done"):
-        frames.append(("stage", json.dumps({"node": "validate", "status": st, "retry_count": 0})))
+        frames.extend(
+            ("stage", json.dumps({"node": node, "status": st, "retry_count": 0}))
+            for st in ("running", "done")
+        )
+    frames.extend(
+        ("stage", json.dumps({"node": "validate", "status": st, "retry_count": 0}))
+        for st in ("running", "done")
+    )
     frames.append(("sql", json.dumps({"sql": reply.sql})))
-    for st in ("running", "done"):
-        frames.append(("stage", json.dumps({"node": "execute", "status": st, "retry_count": 0})))
+    frames.extend(
+        ("stage", json.dumps({"node": "execute", "status": st, "retry_count": 0}))
+        for st in ("running", "done")
+    )
     frames.append(("summary", json.dumps({"delta": reply.summary})))
     frames.append(("result", json.dumps(reply.__dict__)))
     return frames
@@ -128,8 +134,8 @@ async def _user_with_chat_perm(
 
 def _parse_sse(text: str) -> list[tuple[str, dict[str, object]]]:
     frames: list[tuple[str, dict[str, object]]] = []
-    for block in text.split("\n\n"):
-        block = block.strip()
+    for raw_block in text.split("\n\n"):
+        block = raw_block.strip()
         if not block or block.startswith(":"):
             continue
         event = ""
@@ -527,9 +533,7 @@ async def test_relay_gen_heartbeat_on_idle(monkeypatch: pytest.MonkeyPatch) -> N
         await q.put(None)
 
     terminator = asyncio.create_task(_late_terminate())
-    out: list[str] = []
-    async for chunk in chat_router._relay_gen(handle):
-        out.append(chunk)
+    out: list[str] = [chunk async for chunk in chat_router._relay_gen(handle)]
     await terminator
     assert out[0].startswith("event: stage\n")
     assert out.count(": ping\n\n") >= 2  # 空闲窗口跨过多个心跳间隔

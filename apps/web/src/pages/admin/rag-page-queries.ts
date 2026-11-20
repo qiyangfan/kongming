@@ -86,7 +86,8 @@ function noticeHandlers(n: RagNotices, onReindexDone: () => void) {
     },
     edit: {
       onSuccess: (out: KnowledgeItemOut) => {
-        n.setNotice(`已保存:${out.table_name}${out.alias ? `(${out.alias})` : ""}`);
+        const alias = out.alias ? `(${out.alias})` : "";
+        n.setNotice(`已保存:${out.table_name}${alias}`);
         n.setError(null);
       },
       onError: (e: Error) => {

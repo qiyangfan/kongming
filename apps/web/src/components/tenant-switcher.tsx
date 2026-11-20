@@ -35,9 +35,9 @@ export function TenantSwitcher() {
     if (key === current) return;
     switchTo(key);
     // 先离场再失效:旧会话消息请求若在失效后仍飞,会带新租户头撞 404 空转
-    navigate("/chat", { replace: true });
+    void navigate("/chat", { replace: true });
     void qc.invalidateQueries({ queryKey: ["sessions"] });
-    void qc.removeQueries({ queryKey: ["messages"] });
+    qc.removeQueries({ queryKey: ["messages"] });
   }
 
   return (

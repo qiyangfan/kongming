@@ -4,6 +4,7 @@
 并在请求前执行 SSRF 检查。重试与出站治理由网关统一处理。"""
 
 import base64
+import contextlib
 import json
 from typing import cast
 from urllib.parse import quote, urlencode, urlsplit
@@ -54,10 +55,9 @@ async def _as_text_response(resp: httpx.Response) -> tuple[str, bool]:
     text = buf.decode("utf-8", errors="replace")
     ctype = resp.headers.get("content-type", "")
     if "json" in ctype.lower():
-        try:
+        # 声明 JSON 但报文畸形:原样文本化(截断闸兜底)
+        with contextlib.suppress(ValueError, TypeError):
             text = json.dumps(json.loads(text), ensure_ascii=False)
-        except (ValueError, TypeError):
-            pass  # 声明 JSON 但报文畸形:原样文本化(截断闸兜底)
     truncated = len(buf) > _RESPONSE_CAP or len(text) > _OBSERVATION_CAP
     if len(text) > _OBSERVATION_CAP:
         text = text[:_OBSERVATION_CAP]
@@ -240,32 +240,23 @@ class HttpConnectorExecutor:
         )
         try:
             transport = self._test_transport or PinnedTransport(pinned)
-            async with httpx.AsyncClient(
-                trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
-                timeout=httpx.Timeout(timeout_s),
-                transport=transport,
-                follow_redirects=False,  # 重定向是白名单绕过的经典通道,一律不跟随
-            ) as client:
+            async with (
+                httpx.AsyncClient(
+                    trust_env=False,  # 出站受控:不采环境代理(SSRF 钉扎/内网回调语义)
+                    timeout=httpx.Timeout(timeout_s),
+                    transport=transport,
+                    follow_redirects=False,  # 重定向是白名单绕过的经典通道,一律不跟随
+                ) as client,
                 # stream 上下文消费(真流式,字节闸才有内存意义——见
                 # _as_text_response 注记;重定向/状态判定只依赖响应头,兼容)
-                async with client.stream(
+                client.stream(
                     self._method,
                     final_url,
                     json=body,
                     headers=self._headers,
-                ) as resp:
-                    if 300 <= resp.status_code < 400:
-                        # 不静默跟随:按响应类失败收口(spec 场景「重定向不出白名单」)
-                        raise HttpConnectorError(
-                            f"{_PROTOCOL_PREFIX} 端点返回重定向 {resp.status_code}(不跟随)"
-                        )
-                    resp.raise_for_status()
-                    body_text, truncated = await _as_text_response(resp)
-                    return {
-                        "status_code": resp.status_code,
-                        "body": body_text,
-                        "truncated": truncated,
-                    }
+                ) as resp,
+            ):
+                return await _read_connector_response(resp)
         # 顺序铁律:未送达族(含 ConnectTimeout)必须先于读超时捕获
         except HttpConnectorError:
             raise  # 执行器自收敛(重定向)原样上浮,保前缀分类
@@ -289,6 +280,20 @@ class HttpConnectorExecutor:
             raise HttpConnectorError(
                 f"{_UNDELIVERED_PREFIX} 连接器端点拒连({type(e).__name__})"
             ) from e
+
+
+async def _read_connector_response(resp: httpx.Response) -> dict[str, object]:
+    """状态类验收单点:重定向不跟随,非 2xx 抛 HTTPStatusError,正文走字节闸。"""
+    if 300 <= resp.status_code < 400:
+        # 不静默跟随:按响应类失败收口(spec 场景「重定向不出白名单」)
+        raise HttpConnectorError(f"{_PROTOCOL_PREFIX} 端点返回重定向 {resp.status_code}(不跟随)")
+    resp.raise_for_status()
+    body_text, truncated = await _as_text_response(resp)
+    return {
+        "status_code": resp.status_code,
+        "body": body_text,
+        "truncated": truncated,
+    }
 
 
 def connector_domain_spec(row: dict[str, object], *, quota_per_minute: int) -> DomainSpec:

@@ -42,7 +42,7 @@ class GuardrailService:
         try:
             overrides = await self._configs_store.list_overrides()
         except Exception:
-            log.error("护栏配置读取失败,fail-closed 按注册表缺省从严", exc_info=True)
+            log.exception("护栏配置读取失败,fail-closed 按注册表缺省从严")
             overrides = {}
         out: list[RuleConfig] = []
         for rule in REGISTRY:
@@ -102,7 +102,7 @@ class GuardrailService:
                     blocked = True
         except Exception:
             # fail-closed:引擎异常按拦截(spec)
-            log.error("输入护栏判定异常,fail-closed 拦截 trace_id=%s", trace_id, exc_info=True)
+            log.exception("输入护栏判定异常,fail-closed 拦截 trace_id=%s", trace_id)
             hit = GuardrailHit(
                 rule_name="__fail_closed__",
                 action="blocked",
@@ -139,7 +139,7 @@ class GuardrailService:
         try:
             configs = await self._configs()
         except Exception:
-            log.error("输出护栏配置异常,fail-closed 替换 trace_id=%s", trace_id, exc_info=True)
+            log.exception("输出护栏配置异常,fail-closed 替换 trace_id=%s", trace_id)
             # fail-closed 故障落审计(spec「故障事件落审计」字面立约)
             await self._record_hits(
                 trace_id=trace_id,
@@ -163,7 +163,7 @@ class GuardrailService:
             try:
                 new_text, hits = evaluate_text(text, configs, "output")
             except Exception:
-                log.error("输出护栏判定异常,fail-closed 替换 trace_id=%s", trace_id, exc_info=True)
+                log.exception("输出护栏判定异常,fail-closed 替换 trace_id=%s", trace_id)
                 await self._record_hits(
                     trace_id=trace_id,
                     user_id=user_id,
@@ -227,9 +227,8 @@ class GuardrailService:
                     ],
                 )
                 return False
-            return True
         except Exception:
-            log.error("意图审核异常,fail-closed 拒绝 trace_id=%s", trace_id, exc_info=True)
+            log.exception("意图审核异常,fail-closed 拒绝 trace_id=%s", trace_id)
             await self._record_hits(
                 trace_id=trace_id,
                 user_id=user_id,
@@ -244,3 +243,5 @@ class GuardrailService:
                 ],
             )
             return False
+        else:
+            return True

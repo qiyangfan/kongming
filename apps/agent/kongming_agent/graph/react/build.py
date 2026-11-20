@@ -37,7 +37,7 @@ def _after_dispatch(state: ReactState) -> str:
     return "react"
 
 
-def react_stage_wrapper(name: str, fn: Any) -> Any:  # noqa: ANN401 —— 刻意类型擦除(同 streams.stage_wrapper)
+def react_stage_wrapper(name: str, fn: Any) -> Any:
     """节点 wrapper:stage(running/done)对发 + finalize 发 summary。
 
     与 streams.stage_wrapper 分离的原因:ReactState 字段面不同(rounds 而非

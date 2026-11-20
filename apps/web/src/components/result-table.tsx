@@ -1,5 +1,14 @@
 /* 问答和报告详情共用的结果表；动态列在窄屏内横向滚动。 */
 
+import { cellText } from "@/lib/utils";
+
+/** 单元格展示文本与 title:空值显示破折号,其余按弱类型转文本。 */
+function displayCell(cell: unknown): { text: string; title: string | undefined } {
+  if (cell === null || cell === undefined) return { text: "—", title: undefined };
+  const text = cellText(cell);
+  return { text, title: text || undefined };
+}
+
 export function ResultTable({
   columns,
   rows,
@@ -38,17 +47,18 @@ export function ResultTable({
           ) : (
             rows.map((row, i) => (
               <tr key={i} className="border-t border-border">
-                {row.map((cell, j) => (
-                  <td
-                    key={j}
-                    className="max-w-80 truncate px-3 py-1.5 text-foreground"
-                    title={
-                      cell === null || cell === undefined ? undefined : String(cell) || undefined
-                    }
-                  >
-                    {cell === null || cell === undefined ? "—" : String(cell)}
-                  </td>
-                ))}
+                {row.map((cell, j) => {
+                  const c = displayCell(cell);
+                  return (
+                    <td
+                      key={j}
+                      className="max-w-80 truncate px-3 py-1.5 text-foreground"
+                      title={c.title}
+                    >
+                      {c.text}
+                    </td>
+                  );
+                })}
               </tr>
             ))
           )}

@@ -11,7 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.test_chat_query import _auth
-from tests.test_task import (  # noqa: F401 —— 助手跨文件复用
+from tests.test_task import (
     INTERNAL,
     _create_task,
     _user_with_task_perms,
@@ -202,7 +202,7 @@ async def test_topology_declare_and_begin_step_collab_decision(
     client: AsyncClient,
     session: AsyncSession,
     make_user: Any,
-    no_dispatch: list[str],  # noqa: ARG001
+    no_dispatch: list[str],
 ) -> None:
     """拓扑声明 → step-start 决策携带协作载荷(库内归一值为准);未声明步骤
     决策无协作载荷;配置与派发事件落任务事件流。"""
@@ -259,7 +259,7 @@ async def test_decomposition_roster_declaration_and_decision(
     client: AsyncClient,
     session: AsyncSession,
     make_user: Any,
-    no_dispatch: list[str],  # noqa: ARG001
+    no_dispatch: list[str],
 ) -> None:
     """分工名册闸门与决策解析:逐条目 Bot 存在性校验、
     名册与顶层单绑定互斥(判原始载荷)、决策载荷逐条目运行时解析(失败如实
@@ -395,7 +395,7 @@ async def test_no_free_collab_entry(
     client: AsyncClient,
     session: AsyncSession,
     make_user: Any,
-    no_dispatch: list[str],  # noqa: ARG001
+    no_dispatch: list[str],
 ) -> None:
     """无游离协作入口:未声明拓扑/非 RUNNING 步骤/超深嵌套一律拒绝。"""
     _uid, token = await _user_with_task_perms(client, session, make_user)
@@ -583,7 +583,7 @@ async def test_collab_ledger_full_chain(
     client: AsyncClient,
     session: AsyncSession,
     make_user: Any,
-    no_dispatch: list[str],  # noqa: ARG001
+    no_dispatch: list[str],
 ) -> None:
     """协作全链:开账 → worker 派发/回写 ×2 → 终态收口(DONE/PARTIAL/FAILED
     诚实映射)→ 查询端点 worker 账本完整;重复回写 CAS 拒。"""
@@ -633,7 +633,7 @@ async def test_collab_supersede_and_cancel_convergence(
     client: AsyncClient,
     session: AsyncSession,
     make_user: Any,
-    no_dispatch: list[str],  # noqa: ARG001
+    no_dispatch: list[str],
 ) -> None:
     """重跑前在途运行收敛(supersede)+ 任务取消收敛在途协作账。"""
     _uid, token = await _user_with_task_perms(client, session, make_user)
@@ -757,7 +757,7 @@ async def test_topology_guards_and_budget_clamp_and_filter(
     client: AsyncClient,
     session: AsyncSession,
     make_user: Any,
-    no_dispatch: list[str],  # noqa: ARG001
+    no_dispatch: list[str],
 ) -> None:
     """拓扑守卫(越权任务 404 同形/未知 Bot 422)+ 预算部署钳制 + 列表状态筛选
     + internal 畸形 UUID 404 同形。"""
@@ -833,7 +833,7 @@ async def test_dispatch_epoch_gate(
     client: AsyncClient,
     session: AsyncSession,
     make_user: Any,
-    no_dispatch: list[str],  # noqa: ARG001
+    no_dispatch: list[str],
 ) -> None:
     """代际失配三闸:begin_step → abort 决策;step-result → stale_epoch(不写账);
     finish → 409(旧循环不得收口);在位代数路径(epoch=None 兼容)。"""
@@ -944,7 +944,7 @@ async def test_epoch_predicate_guards_cas_writes(
     client: AsyncClient,
     session: AsyncSession,
     make_user: Any,
-    no_dispatch: list[str],  # noqa: ARG001
+    no_dispatch: list[str],
 ) -> None:
     """执行侧 CAS 写入谓词(expect_epoch):失配代数的任务态/步骤态写入
     不命中(读检查与 CAS 写之间的并发 bump 窗口由此关死);在位代数照常命中。"""
@@ -1249,7 +1249,7 @@ async def test_roundtable_declare_and_turn_ledger(
     client: AsyncClient,
     session: AsyncSession,
     make_user: Any,
-    no_dispatch: list[str],  # noqa: ARG001
+    no_dispatch: list[str],
 ) -> None:
     """圆桌全链:拓扑声明(逐参与者 Bot 校验)→ 决策载荷带名册解析 →
     开账 → worker 行 → 轮次上账(名册锁定/判定 0 号位/轮次上限/重复拒绝)
@@ -1311,7 +1311,7 @@ async def test_roundtable_gates_declaration_and_roster_lock(
     client: AsyncClient,
     session: AsyncSession,
     make_user: Any,
-    no_dispatch: list[str],  # noqa: ARG001
+    no_dispatch: list[str],
 ) -> None:
     """圆桌闸门补强:声明期顶层 bot_key 拒绝(409);派发上界=名册长度
     (分工形态的 2x+1 余量不属圆桌);轮次通道存在性闸(上界内空洞序号
@@ -1426,7 +1426,7 @@ async def test_collab_turn_rejects_non_roundtable(
     client: AsyncClient,
     session: AsyncSession,
     make_user: Any,
-    no_dispatch: list[str],  # noqa: ARG001
+    no_dispatch: list[str],
 ) -> None:
     """形态闸:分工拓扑的运行不受理轮次上账(无游离轮次通道)。"""
     _uid, token = await _user_with_task_perms(client, session, make_user)
@@ -1464,7 +1464,7 @@ async def test_collab_turn_rejects_non_roundtable(
 
 async def test_migration_0054_turn_table_roundtrip() -> None:
     """0054 往返:降级后轮次表消失、升级复现(表+唯一键);一次性临时库
-    (HANDOFF 环境事实 13:dropped 列占位上限,禁在共享库跑 add/drop 循环)。"""
+    (HANDOFF 环境事实:dropped 列占位上限,禁在共享库跑 add/drop 循环)。"""
     from tests.conftest import migrated_tmp_db
 
     async with migrated_tmp_db() as (session, cfg):
@@ -1506,7 +1506,7 @@ async def test_round_finished_event_by_dispatched_max(
     client: AsyncClient,
     session: AsyncSession,
     make_user: Any,
-    no_dispatch: list[str],  # noqa: ARG001
+    no_dispatch: list[str],
 ) -> None:
     """每轮完成事件按实际派发末位判定:名册 3 人、零工具剔除后实派
     2 人——2 号位落账即触发 round_finished(拓扑名册长不可作依据)。"""

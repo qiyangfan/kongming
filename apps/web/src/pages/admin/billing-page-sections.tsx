@@ -1,6 +1,6 @@
 /* 计费页三个区块:套餐列表与新建、租户配额策略、全部账单。 */
 
-import type { FormEvent } from "react";
+import type { SubmitEvent } from "react";
 import { Loader2, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import { INVOICE_STATUS_META, type PlanForm } from "./billing-page-model";
 
 export type QueryLike<T> = { data: T | undefined; isPending: boolean; isError: boolean };
 
-const preventDefault = (e: FormEvent) => e.preventDefault();
+const preventDefault = (e: SubmitEvent<HTMLFormElement>) => e.preventDefault();
 
 export function PlansSection({
   plans,

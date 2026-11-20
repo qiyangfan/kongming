@@ -149,10 +149,11 @@ class AgentRagClient:
             return [None] * len(keys)
         try:
             raw: list[str | None] = list(await self._redis.mget(keys))  # type: ignore[arg-type]
-            return raw
-        except Exception:  # noqa: BLE001  # Redis 故障不阻断 embedding(fail-open)
+        except Exception:  # Redis 故障不阻断 embedding(fail-open)
             log.warning("emb 缓存读失败,按未命中处理", exc_info=True)
             return [None] * len(keys)
+        else:
+            return raw
 
     async def _mset(self, keys: list[str], vectors: list[list[float]]) -> None:
         if self._redis is None or not keys:
@@ -162,7 +163,7 @@ class AgentRagClient:
             for key, vec in zip(keys, vectors, strict=True):
                 pipe.set(key, json.dumps(vec), ex=_EMB_TTL_SEC)
             await pipe.execute()
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.warning("emb 缓存写失败,跳过(不影响结果)", exc_info=True)
 
 

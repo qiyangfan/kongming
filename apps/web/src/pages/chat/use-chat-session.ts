@@ -55,7 +55,7 @@ export function useChatSession(params: ChatSessionParams & { scroll: ChatScrollA
   useEffect(() => {
     if (messages.isError && isStatus(messages.error, 404)) {
       void qc.invalidateQueries({ queryKey: ["sessions", current] });
-      navigate("/chat", { replace: true });
+      void navigate("/chat", { replace: true });
     }
   }, [messages.isError, messages.error, qc, navigate, current]);
 

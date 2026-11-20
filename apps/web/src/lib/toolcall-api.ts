@@ -27,5 +27,6 @@ export function toolAuditPage(params: ToolAuditParams): Promise<ToolAuditPageOut
     if (v === undefined || v === "" || v === null) continue;
     qs.set(k, String(v));
   }
-  return api.get<ToolAuditPageOut>(`/system/tools/audit/page${qs.size ? `?${qs}` : ""}`);
+  const suffix = qs.size > 0 ? `?${qs}` : "";
+  return api.get<ToolAuditPageOut>(`/system/tools/audit/page${suffix}`);
 }

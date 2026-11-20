@@ -123,7 +123,7 @@ function matchStep(set: Set<number>, unit: "minute" | "hour"): number | null {
 }
 
 function single(set: Set<number>): number | null {
-  return set.size === 1 ? [...set][0] : null;
+  return set.size === 1 ? (set.values().next().value ?? null) : null;
 }
 
 const WEEKDAY_IDS = [1, 2, 3, 4, 5];
@@ -139,7 +139,7 @@ function rangePart(
     return [start, slash >= 0 ? hi : start];
   }
   if (/^\d+-\d+$/.test(base)) {
-    const [start, end] = base.split("-").map(Number);
+    const [start, end] = base.split("-").map(Number) as [number, number];
     return start > end ? null : [start, end];
   }
   return null;
@@ -226,9 +226,11 @@ function namedSchedule(fields: {
   const m = single(minute);
   const h = single(hour);
   if (kind === null || m === null || h === null) return null;
-  if (kind === "weekly") return { kind, weekday: [...dow][0], hour: h, minute: m };
+  const weekday = single(dow);
+  const monthDay = single(dom);
+  if (kind === "weekly") return weekday === null ? null : { kind, weekday, hour: h, minute: m };
   if (kind === "workday") return { kind, hour: h, minute: m };
-  return { kind: "monthly", monthDay: [...dom][0], hour: h, minute: m };
+  return monthDay === null ? null : { kind: "monthly", monthDay, hour: h, minute: m };
 }
 
 /* 小时轴全通配时的分钟档:整分钟步进优先,否则整点档。 */
@@ -257,15 +259,22 @@ function wildcardSchedule(minute: Set<number>, hour: Set<number>): Schedule | nu
 export function parseCronToSchedule(expr: string): Schedule | null {
   const fields = expr.trim().split(/\s+/);
   if (fields.length !== 5) return null;
+  const [f0, f1, f2, f3, f4] = fields as [string, string, string, string, string];
   const parts = [
-    parseField(fields[0], 0, 59),
-    parseField(fields[1], 0, 23),
-    parseField(fields[2], 1, 31),
-    parseField(fields[3], 1, 12),
-    parseField(fields[4], 0, 7),
+    parseField(f0, 0, 59),
+    parseField(f1, 0, 23),
+    parseField(f2, 1, 31),
+    parseField(f3, 1, 12),
+    parseField(f4, 0, 7),
   ];
   if (parts.some((p) => p === null)) return null;
-  const [minute, hour, dom, month, dow] = parts as Set<number>[];
+  const [minute, hour, dom, month, dow] = parts as [
+    Set<number>,
+    Set<number>,
+    Set<number>,
+    Set<number>,
+    Set<number>,
+  ];
   // 周日 0/7 双写归一(与后端同口径),让 `0 9 * * 7` 也能反解为每周档
   if (dow.has(7)) {
     dow.add(0);

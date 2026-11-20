@@ -37,7 +37,7 @@ def _load_yaml_cases() -> list[dict[str, Any]]:
     """
     cases: list[dict[str, Any]] = []
     for yml in sorted(EVAL_DIR.glob("*.yaml")):
-        with open(yml, encoding="utf-8") as f:
+        with yml.open(encoding="utf-8") as f:
             # PyYAML 无 py.typed,safe_load 推断为 Unknown:先收口为 object 再走 isinstance 校验
             loaded = cast("object", yaml.safe_load(f) or [])
         if not isinstance(loaded, list):

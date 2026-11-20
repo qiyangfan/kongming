@@ -28,6 +28,11 @@ function statOf(q: QueryLike<QualitySummaryOut>, v: string): string {
   return v;
 }
 
+function avgScoreLabel(ov: Overview | undefined): string {
+  if (!ov) return "—";
+  return ov.avg_score != null ? ov.avg_score.toFixed(1) : "未评分";
+}
+
 function StatCards({ q, ov }: { q: QueryLike<QualitySummaryOut>; ov: Overview | undefined }) {
   const stat = (v: string) => statOf(q, v);
   return (
@@ -36,10 +41,7 @@ function StatCards({ q, ov }: { q: QueryLike<QualitySummaryOut>; ov: Overview | 
       <StatCard label="成功率" value={stat(ov ? pct(ov.success / (ov.total || 1)) : "0.0%")} />
       <StatCard label="未覆盖率" value={stat(ov ? pct(ov.no_data_rate) : "0.0%")} />
       <StatCard label="自愈率" value={stat(ov ? pct(ov.selfheal_rate) : "0.0%")} />
-      <StatCard
-        label="AI 平均分"
-        value={stat(ov ? (ov.avg_score != null ? ov.avg_score.toFixed(1) : "未评分") : "—")}
-      />
+      <StatCard label="AI 平均分" value={stat(avgScoreLabel(ov))} />
     </div>
   );
 }
@@ -125,15 +127,17 @@ export function QualitySummarySection({
             </Select>
           </div>
         </div>
-        {summary.isLoading ? (
-          <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
-            加载中…
-          </div>
-        ) : summary.isError ? (
-          <ErrorAlert text="汇总加载失败" />
-        ) : (
-          <QualityTrendChart key={theme} points={summary.data?.trend ?? []} />
-        )}
+        {(() => {
+          if (summary.isLoading) {
+            return (
+              <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
+                加载中…
+              </div>
+            );
+          }
+          if (summary.isError) return <ErrorAlert text="汇总加载失败" />;
+          return <QualityTrendChart key={theme} points={summary.data?.trend ?? []} />;
+        })()}
       </div>
 
       {/* 数据源 × prompt 版本切片(纯展示表:不传 actions) */}
@@ -162,7 +166,10 @@ export function QualitySummarySection({
 // 数据源筛选项从已加载的切片数据中生成。
 export function useDatasourceOptions(summary: QueryLike<QualitySummaryOut>): string[] {
   return useMemo(
-    () => (summary.data?.by_datasource ?? []).map((r) => r.datasource_key).sort(),
+    () =>
+      (summary.data?.by_datasource ?? [])
+        .map((r) => r.datasource_key)
+        .sort((a, b) => a.localeCompare(b)),
     [summary.data],
   );
 }

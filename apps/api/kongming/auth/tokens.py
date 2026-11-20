@@ -46,10 +46,8 @@ def _keypair() -> KeyPair:
 def issue(user_id: str, token_type: TokenType, extra: dict[str, object] | None = None) -> str:
     s = get_settings()
     priv, _ = _keypair()
-    if token_type == "access":  # noqa: S105 —— 字面量分支标记,非密钥
-        ttl = s.access_token_ttl_sec
-    else:
-        ttl = s.refresh_token_ttl_sec
+    is_access = token_type == "access"  # noqa: S105 —— 字面量分支标记,非密钥
+    ttl = s.access_token_ttl_sec if is_access else s.refresh_token_ttl_sec
     now = datetime.now(UTC)
     claims = {
         "iss": s.jwt_issuer,
@@ -64,7 +62,7 @@ def issue(user_id: str, token_type: TokenType, extra: dict[str, object] | None =
 
 def verify(
     token: str,
-    expected_type: TokenType = "access",  # noqa: S105 类型标记非密钥
+    expected_type: TokenType = "access",
 ) -> dict[str, object]:
     s = get_settings()
     _, pub = _keypair()

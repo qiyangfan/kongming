@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import contextlib
 import logging
 import re
 import uuid
@@ -130,10 +131,9 @@ class ImaplibMailClient:
         except OSError as e:
             raise MailConnectError(f"连接中断: {type(e).__name__}") from e
         finally:
-            try:
+            # 登出失败不影响已取结果,静默收尾
+            with contextlib.suppress(Exception):
                 conn.logout()
-            except Exception:  # noqa: BLE001, S110  # 登出失败不影响已取结果,静默收尾
-                pass
 
 
 @dataclass(frozen=True)
@@ -169,7 +169,7 @@ def _open_connection(opt: _FetchOpts) -> Any:
         if opt.tls:
             return imaplib.IMAP4_SSL(opt.host, opt.port, timeout=opt.timeout)
         return imaplib.IMAP4(opt.host, opt.port, timeout=opt.timeout)
-    except Exception as e:  # noqa: BLE001  # OSError/ssl/超时统归连接失败
+    except Exception as e:  # OSError/ssl/超时统归连接失败
         raise MailConnectError(f"连接失败: {type(e).__name__}") from e
 
 
@@ -294,7 +294,7 @@ class TargetRunnerImpl:
                     channel=channel,
                     template=template,
                 )
-            except Exception as e:  # noqa: BLE001  # 触发执行永不逃逸(run FAILED 落库)
+            except Exception as e:  # 触发执行永不逃逸(run FAILED 落库)
                 log.warning("trigger 目标执行异常", exc_info=True)
                 return False, "", f"{type(e).__name__}: {str(e)[:300]}"
 
@@ -387,7 +387,7 @@ async def _run_task(
     template: dict[str, Any] | None,
 ) -> tuple[bool, str, str]:
     """task 目标:模板立项(goal 渲染+护栏 → 创建 → 确认门/自动派发)。"""
-    import datetime as _dt
+    import datetime as dt
 
     from kongming.task.dispatch import schedule_task_run
 
@@ -401,7 +401,7 @@ async def _run_task(
     task_id, repo = await _create_task(
         s, tenant_id=tenant_id, creator_id=creator_id, goal=goal, template=tpl
     )
-    now_iso = _dt.datetime.now(_dt.UTC).isoformat()
+    now_iso = dt.datetime.now(dt.UTC).isoformat()
     await _declare_topology(repo, task_id, tpl.get("topology"), now_iso)
     auto = bool(tpl.get("confirm_auto", False))
     if not auto:

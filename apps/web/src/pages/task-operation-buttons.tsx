@@ -13,7 +13,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 
-export function OperationButton(props: { label: string; onClick: () => void; disabled?: boolean }) {
+export function OperationButton(props: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean | undefined;
+}) {
   return (
     <Button variant="outline" size="sm" onClick={props.onClick} disabled={props.disabled}>
       {props.label}
@@ -28,7 +32,7 @@ export function ConfirmOperationButton(props: {
   description: string;
   confirmLabel: string;
   onClick: () => void;
-  disabled?: boolean;
+  disabled?: boolean | undefined;
 }) {
   return (
     <AlertDialog>

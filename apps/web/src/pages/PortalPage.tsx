@@ -65,7 +65,7 @@ export default function PortalPage() {
     setPayError("");
     try {
       const payment = await createPayment(invoiceId);
-      navigate(`/portal/pay/${payment.id}`);
+      void navigate(`/portal/pay/${payment.id}`);
     } catch (e) {
       setPayError(payErrorMessage(e));
     } finally {

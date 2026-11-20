@@ -58,7 +58,7 @@ async def score_answer_task(*, message_id: str, agent: AgentClient) -> None:
             await s.commit()
             if not inserted:
                 log.info("评分幂等跳过 message=%s", message_id)
-    except Exception:  # noqa: BLE001  # 后台任务永不外抛
+    except Exception:  # 后台任务永不外抛
         log.warning("评分任务异常 message=%s", message_id, exc_info=True)
 
 

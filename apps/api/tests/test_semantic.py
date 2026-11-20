@@ -23,31 +23,28 @@ SCHEMA = "tenant_sem"
 async def _biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     """带 FK 的两表(orders→customers)+无 FK 表,供 introspection。"""
     async with get_engine().begin() as conn:
-        await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))  # noqa: S608  # 模块常量
+        await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))  # 模块常量
         await conn.execute(
             text(
-                f'CREATE TABLE IF NOT EXISTS "{SCHEMA}".customers ('  # noqa: S608
+                f'CREATE TABLE IF NOT EXISTS "{SCHEMA}".customers ('
                 " id uuid PRIMARY KEY, name varchar(64))"
             )
         )
         await conn.execute(
             text(
-                f'CREATE TABLE IF NOT EXISTS "{SCHEMA}".orders ('  # noqa: S608
+                f'CREATE TABLE IF NOT EXISTS "{SCHEMA}".orders ('
                 " id uuid PRIMARY KEY, customer_id uuid REFERENCES"
-                f' "{SCHEMA}".customers(id), amount numeric)'  # noqa: S608
+                f' "{SCHEMA}".customers(id), amount numeric)'
             )
         )
         await conn.execute(
-            text(
-                f'CREATE TABLE IF NOT EXISTS "{SCHEMA}".orphan ('  # noqa: S608
-                " id uuid PRIMARY KEY)"
-            )
+            text(f'CREATE TABLE IF NOT EXISTS "{SCHEMA}".orphan ( id uuid PRIMARY KEY)')
         )
         # 注:身份表(含租户)由 conftest._clean 用例级 TRUNCATE(知识条目经
         # tenant FK 级联同清)——租户/知识条目播种在 _admin 内逐用例完成。
     yield
     async with get_engine().begin() as conn:
-        await conn.execute(text(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE'))  # noqa: S608
+        await conn.execute(text(f'DROP SCHEMA IF EXISTS "{SCHEMA}" CASCADE'))
 
 
 async def _admin(client: AsyncClient, s: AsyncSession) -> str:
@@ -313,16 +310,16 @@ async def test_r1_h1_multi_column_fk_paired_correctly(
     async with get_engine().begin() as conn:
         await conn.execute(
             text(
-                f'CREATE TABLE IF NOT EXISTS "{SCHEMA}".parent_mc ('  # noqa: S608
+                f'CREATE TABLE IF NOT EXISTS "{SCHEMA}".parent_mc ('
                 " a int, b int, PRIMARY KEY (a, b))"
             )
         )
-        await conn.execute(text(f'DROP TABLE IF EXISTS "{SCHEMA}"."child_mc"'))  # noqa: S608
+        await conn.execute(text(f'DROP TABLE IF EXISTS "{SCHEMA}"."child_mc"'))
         await conn.execute(
             text(
-                f'CREATE TABLE "{SCHEMA}"."child_mc" ('  # noqa: S608
+                f'CREATE TABLE "{SCHEMA}"."child_mc" ('
                 " x int, y int,"
-                f' FOREIGN KEY (x, y) REFERENCES "{SCHEMA}".parent_mc(a, b))'  # noqa: S608
+                f' FOREIGN KEY (x, y) REFERENCES "{SCHEMA}".parent_mc(a, b))'
             )
         )
     token = await _admin(client, session)
@@ -352,8 +349,8 @@ async def test_r1_h1_multi_column_fk_paired_correctly(
     pairs = {(k["left_col"], k["right_col"]) for k in keys}
     assert pairs == {("x", "a"), ("y", "b")}
     async with get_engine().begin() as conn:
-        await conn.execute(text(f'DROP TABLE IF EXISTS "{SCHEMA}"."child_mc"'))  # noqa: S608
-        await conn.execute(text(f'DROP TABLE IF EXISTS "{SCHEMA}".parent_mc'))  # noqa: S608
+        await conn.execute(text(f'DROP TABLE IF EXISTS "{SCHEMA}"."child_mc"'))
+        await conn.execute(text(f'DROP TABLE IF EXISTS "{SCHEMA}".parent_mc'))
 
 
 async def test_r1_h2_introspect_rejects_non_default(

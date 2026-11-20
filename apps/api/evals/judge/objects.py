@@ -5,7 +5,7 @@ API 只读查询,文本回答以 persist=false 生成。"""
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import cast
 
 import httpx
@@ -18,6 +18,8 @@ from kongming.evalj.models import (
     OBJECT_TASK,
     JudgeObject,
 )
+
+log = logging.getLogger(__name__)
 
 _TEXT_LIMIT = 6000  # 送 judge 的产出正文截断(评审摘要而非全文重放)
 _TIMEOUT = 60.0
@@ -45,7 +47,7 @@ class ObjectClient:
             r.raise_for_status()
             body: object = r.json()
             if not isinstance(body, dict):
-                raise ValueError(f"端点 {path} 响应非 JSON 对象(契约漂移,拒绝静默降级)")
+                raise TypeError(f"端点 {path} 响应非 JSON 对象(契约漂移,拒绝静默降级)")
             return cast("dict[str, object]", body)
 
 
@@ -306,8 +308,8 @@ async def fetch_answer_objects(
         try:
             r = await call_chat(question, tenant, datasource_key=datasource_key)
             r.raise_for_status()
-        except Exception as e:  # noqa: BLE001  单对象取数失败不中断清单(独立收口在 runner)
-            logging.warning("answer 评审对象取数失败(%s): %s", kind, e)
+        except Exception as e:  # noqa: BLE001
+            log.warning("answer 评审对象取数失败(%s): %s", kind, e)
             continue
         body = r.json()
         sources = _dict_list(body.get("sources"))
@@ -321,7 +323,7 @@ async def fetch_answer_objects(
         out.append(
             JudgeObject(
                 object_type=OBJECT_ANSWER,
-                object_id=f"{kind}-{datetime.now().strftime('%Y%m%d%H%M%S')}-{len(out)}",
+                object_id=f"{kind}-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{len(out)}",
                 object_ref=f"[{kind}] {question}"[:200],
                 text=text,
             )
@@ -346,7 +348,7 @@ async def gather_objects(
     out: dict[str, list[JudgeObject]] = {}
     for name, res in zip(names, results, strict=True):
         if isinstance(res, BaseException):
-            logging.warning("judge 对象取数失败(%s): %s", name, res)
+            log.warning("judge 对象取数失败(%s): %s", name, res)
             out[name] = []
         else:
             out[name] = list(res)

@@ -320,7 +320,7 @@ class AgentStreamConsumer:
                     attachments=p.attachments,
                     stage_trace=stage_trace,
                 )
-        except Exception:  # noqa: BLE001  # 断线续存落库兜底:不阻断终态帧下发
+        except Exception:  # 断线续存落库兜底:不阻断终态帧下发
             log.warning("流式 FAILED 终态落库异常 session=%s", p.sid, exc_info=True)
 
 

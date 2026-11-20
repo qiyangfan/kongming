@@ -232,7 +232,7 @@ def test_team_set_fingerprint_rules() -> None:
     from kongming.rag.models import team_set_fingerprint
 
     assert team_set_fingerprint([]) == "public"
-    assert team_set_fingerprint([]) == team_set_fingerprint(tuple())
+    assert team_set_fingerprint([]) == team_set_fingerprint(())
     a = team_set_fingerprint(["t1", "t2"])
     assert a == team_set_fingerprint(["t2", "t1"])  # 排序确定性
     assert a != team_set_fingerprint(["t1"])

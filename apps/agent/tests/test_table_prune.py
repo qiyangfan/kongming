@@ -190,7 +190,7 @@ async def test_retrieve_fallback_emits_prune_trace(monkeypatch: pytest.MonkeyPat
         async def fetch_schema(self, **_kw: object) -> SchemaMeta:
             return SchemaMeta(tables=tables, truncated=False)
 
-    monkeypatch.setattr(deps, "get_api", lambda: _Api())
+    monkeypatch.setattr(deps, "get_api", _Api)
     state: dict[str, object] = {
         "question": "商品表里有什么",
         "resolved_question": "商品表里有什么",

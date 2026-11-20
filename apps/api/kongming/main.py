@@ -96,8 +96,8 @@ async def _daily_archive_loop() -> None:
                     archive_dir=settings.audit_archive_dir,
                 )
             log.info("每日审计归档完成: %s", result)
-        except Exception:  # noqa: BLE001  # 调度循环永不退出
-            log.error("每日审计归档失败(下轮重试)", exc_info=True)
+        except Exception:  # 调度循环永不退出
+            log.exception("每日审计归档失败(下轮重试)")
 
 
 async def _monthly_invoice_loop() -> None:
@@ -247,7 +247,7 @@ async def _task_watchdog_loop() -> None:
                 )
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001  # 调度循环永不退出
+        except Exception:  # 调度循环永不退出
             log.warning("看门狗巡检异常(下轮重试)", exc_info=True)
             continue
 

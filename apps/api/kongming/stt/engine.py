@@ -28,8 +28,7 @@ def _decode_audio_16k(data: bytes) -> Any:
     resampler = av.AudioResampler(format="s16", layout="mono", rate=16000)
     chunks: list[Any] = []
     for frame in container.decode(audio_stream):
-        for rf in resampler.resample(frame):
-            chunks.append(rf.to_ndarray().reshape(-1))
+        chunks.extend(rf.to_ndarray().reshape(-1) for rf in resampler.resample(frame))
     if not chunks:
         return np.zeros(0, dtype=np.float32)
     joined = np.concatenate(chunks)
@@ -59,7 +58,7 @@ class FasterWhisperEngine:
                 )
             except ImportError as e:
                 raise EngineUnavailable("faster-whisper 未安装(uv sync 后可用)") from e
-            except Exception as e:  # noqa: BLE001  # 模型缺失/下载失败/加载错误统一明示
+            except Exception as e:  # 模型缺失/下载失败/加载错误统一明示
                 raise EngineUnavailable(
                     f"语音模型不可用({self._model_size}):{e}——预下载配方见 docs/HANDOFF.md"
                 ) from e
@@ -80,5 +79,5 @@ class FasterWhisperEngine:
             return await asyncio.to_thread(_run)
         except EngineUnavailable:
             raise
-        except Exception as e:  # noqa: BLE001  # 解码/推理错误由 service 收敛为 503
+        except Exception as e:  # 解码/推理错误由 service 收敛为 503
             raise RuntimeError(f"转写推理失败: {e}") from e

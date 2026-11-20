@@ -91,7 +91,7 @@ type FiltersProps = {
   onStatusChange: (v: string) => void;
   tenantId: string;
   onTenantChange: (v: string) => void;
-  tenantsSource: { data?: { id: string; tenant_key: string }[]; isError: boolean };
+  tenantsSource: { data?: { id: string; tenant_key: string }[] | undefined; isError: boolean };
   protocol: string;
   onProtocolChange: (v: string) => void;
   traceId: string;

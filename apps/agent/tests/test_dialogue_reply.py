@@ -168,13 +168,13 @@ class TestZeroSideEffects:
     async def test_no_llm_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
         fake = FakeLlm(["不应该被消费"])
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
-        monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
+        monkeypatch.setattr(deps, "get_api", FakeApi)
         await nodes.understand(_state(question="谢谢"))
         assert fake.calls == []  # UNDERSTAND 任务未被发起
 
     async def test_sets_fourth_state_end_reason(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(deps, "get_llm", lambda: FakeLlm())
-        monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
+        monkeypatch.setattr(deps, "get_llm", FakeLlm)
+        monkeypatch.setattr(deps, "get_api", FakeApi)
         out = await nodes.understand(_state(question="取消"))
         assert out["end_reason"] == "no_data"  # 既有第四态,不新增终态取值
         # 兜底分类修正(spec「对话复语不进取数补全」):族别中性文案替代
@@ -188,8 +188,8 @@ class TestZeroSideEffects:
 
 class TestObservableCounter:
     async def test_passthrough_increments_counter(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(deps, "get_llm", lambda: FakeLlm())
-        monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
+        monkeypatch.setattr(deps, "get_llm", FakeLlm)
+        monkeypatch.setattr(deps, "get_api", FakeApi)
         before = dialogue.snapshot_passthrough_stats()["dialogue_reply_passthrough_total"]
         await nodes.understand(_state(question="好的"))
         after = dialogue.snapshot_passthrough_stats()["dialogue_reply_passthrough_total"]
@@ -200,7 +200,7 @@ class TestObservableCounter:
     ) -> None:
         fake = FakeLlm(["有多少商品"])
         monkeypatch.setattr(deps, "get_llm", lambda: fake)
-        monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
+        monkeypatch.setattr(deps, "get_api", FakeApi)
         before = dialogue.snapshot_passthrough_stats()["dialogue_reply_passthrough_total"]
         await nodes.understand(_state(question="有多少商品"))
         after = dialogue.snapshot_passthrough_stats()["dialogue_reply_passthrough_total"]
@@ -211,7 +211,7 @@ class TestObservableCounter:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """直通计数随 trace 下发:命中信号进 stats(复用 QueryOut.stats 既有通道)。"""
-        monkeypatch.setattr(deps, "get_llm", lambda: FakeLlm())
-        monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
+        monkeypatch.setattr(deps, "get_llm", FakeLlm)
+        monkeypatch.setattr(deps, "get_api", FakeApi)
         out = await nodes.understand(_state(question="hello", trace_id="tr-pt"))
         assert out["stats"] == {"dialogue_reply_passthrough": 1}

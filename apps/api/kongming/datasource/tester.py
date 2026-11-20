@@ -72,6 +72,6 @@ class AsyncpgConnectionTester:
             if conn is not None:
                 try:
                     await conn.close()
-                except Exception:  # noqa: BLE001 # 断链上 close 可再抛,不得顶掉已构造的结果
+                except Exception:  # 断链上 close 可再抛,不得顶掉已构造的结果
                     log.debug("测试连接 close 二次异常(已忽略)", exc_info=True)
         return TestConnectionResult(ok=True)

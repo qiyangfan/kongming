@@ -53,7 +53,7 @@ class RedisRateLimiter:
             return bool(await self._fixed(keys=[f"km:toolrl:{key}"], args=[limit, window_sec]))
         except Exception:
             # 降级放行(fail-open):限流层失效不阻断业务,error 暴露
-            log.error("限流 Redis 不可用,fail-open 放行 key=%s", key, exc_info=True)
+            log.exception("限流 Redis 不可用,fail-open 放行 key=%s", key)
             return True
 
     async def allow_sliding(self, key: str, *, limit: int, window_sec: int) -> bool:
@@ -61,5 +61,5 @@ class RedisRateLimiter:
         try:
             return bool(await self._sliding(keys=[f"km:chatrl:{key}"], args=[limit, window_sec]))
         except Exception:
-            log.error("滑动窗口限流 Redis 不可用,fail-open 放行 key=%s", key, exc_info=True)
+            log.exception("滑动窗口限流 Redis 不可用,fail-open 放行 key=%s", key)
             return True

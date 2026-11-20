@@ -92,6 +92,8 @@ function DetailFilters({
   );
 }
 
+const RATING_LABELS: Record<string, string> = { UP: "赞", DOWN: "踩" };
+
 function detailColumns(ctx: {
   lowScore: number;
   onScore: (id: string) => void;
@@ -136,8 +138,7 @@ function detailColumns(ctx: {
     {
       key: "rating",
       header: "反馈",
-      render: (r: QualityRoundItemOut) =>
-        r.rating === "UP" ? "赞" : r.rating === "DOWN" ? "踩" : "—",
+      render: (r: QualityRoundItemOut) => RATING_LABELS[r.rating ?? ""] ?? "—",
     },
     {
       key: "score",

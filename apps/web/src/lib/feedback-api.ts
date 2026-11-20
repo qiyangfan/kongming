@@ -59,7 +59,7 @@ export function feedbackPage(params: FeedbackPageParams): Promise<FeedbackPageOu
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === "" || v === null) continue;
-    qs.set(k, typeof v === "boolean" ? String(v) : String(v));
+    qs.set(k, String(v));
   }
   const suffix = qs.size > 0 ? `?${qs}` : "";
   return api.get<FeedbackPageOut>(`/feedback/page${suffix}`);

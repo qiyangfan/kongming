@@ -32,16 +32,17 @@ type FeedbackPayload = {
 /* 用反馈返回值替换目标消息的评分、纠错 SQL 与留言，其余条目原样保留。 */
 function patchMessages(old: unknown, mid: string, data: FeedbackOut): unknown {
   if (!Array.isArray(old)) return old;
-  return old.map((m) =>
-    m && typeof m === "object" && (m as { id?: string }).id === mid
-      ? {
-          ...m,
-          rating: data.rating,
-          corrected_sql: data.corrected_sql,
-          feedback_comment: data.comment,
-        }
-      : m,
-  );
+  return (old as unknown[]).map((m) => {
+    if (!m || typeof m !== "object") return m;
+    const item = m as Record<string, unknown>;
+    if (item.id !== mid) return m;
+    return {
+      ...item,
+      rating: data.rating,
+      corrected_sql: data.corrected_sql,
+      feedback_comment: data.comment,
+    };
+  });
 }
 
 function feedbackErrorMessage(err: unknown): string {
@@ -184,7 +185,7 @@ function FeedbackDialog({
 }) {
   const draft = useFeedbackDraft(msg, open);
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
+  function handleSubmit(e: React.SubmitEvent<HTMLFormElement>): void {
     e.preventDefault();
     // comment 未触碰传 null=保持现值;触碰后按显式值(空串=清空)
     void onSubmit(draft.commentTouched ? draft.comment : null, draft.sql);

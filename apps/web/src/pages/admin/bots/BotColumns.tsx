@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import type { DataViewColumn } from "@/components/data-view";
 import { Switch } from "@/components/ui/switch";
 import type { TeamItem } from "@/lib/team-api";
-import type { BotItem } from "../BotsPage";
+import type { BotItem } from "./bot-types";
 
 /** 构造助手表格列;draftDiffers 判定「有未上架修改」徽章。 */
 export function botColumns(ctx: {

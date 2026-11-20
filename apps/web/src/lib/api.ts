@@ -1,7 +1,7 @@
 /* 使用 ADR-005 生成类型；access token 仅存内存，refresh token 存 localStorage，启动时单飞刷新。 */
 
 import type { components } from "./api-types.gen";
-import { TENANT_STORAGE_KEY } from "./tenant-store";
+import { TENANT_STORAGE_KEY } from "./storage-keys";
 
 export type TokenPairOut = components["schemas"]["TokenPairOut"];
 export type MeOut = components["schemas"]["MeOut"];
@@ -183,13 +183,15 @@ export function humanizeErrorText(s: string | null | undefined): string {
   return s;
 }
 
-async function toStatusError(resp: Response): Promise<Error & { status?: number; raw?: string }> {
+async function toStatusError(
+  resp: Response,
+): Promise<Error & { status?: number; raw?: string | undefined }> {
   // 优先取 FastAPI {detail} 文案,原始 JSON 体不直接抛给用户;raw 留档供技术详情
   let detail: string | null = null;
   try {
     const body: unknown = await resp.json();
     if (body && typeof body === "object" && "detail" in body) {
-      const d = (body as { detail: unknown }).detail;
+      const d = body.detail;
       if (typeof d === "string") detail = d;
     }
   } catch {
@@ -197,7 +199,7 @@ async function toStatusError(resp: Response): Promise<Error & { status?: number;
   }
   const err = new Error(detailForUser(resp.status, detail)) as Error & {
     status?: number;
-    raw?: string;
+    raw?: string | undefined;
   };
   err.status = resp.status;
   err.raw = detail ?? undefined;

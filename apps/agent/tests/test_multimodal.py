@@ -166,7 +166,7 @@ class _GraphLlm:
 async def test_query_endpoint_preprocess_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
     """附件获取失败时返回结构化错误，且不进入图执行。"""
     monkeypatch.setattr(deps, "get_api", lambda: _FakeApi(available=False))
-    monkeypatch.setattr(deps, "get_llm", lambda: _GraphLlm())
+    monkeypatch.setattr(deps, "get_llm", _GraphLlm)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post(
             "/query",

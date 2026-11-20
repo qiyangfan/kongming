@@ -65,21 +65,21 @@ def test_estimate_tokens_cjk_and_ascii() -> None:
 
 def test_under_budget_byte_identical() -> None:
     """预算充足时，提示词装配结果与原格式一致。"""
-    kwargs = dict(
-        question="每个租户的订单数",
-        memory_hint="用户关注华北区",
-        schema_hint=(
+    kwargs = {
+        "question": "每个租户的订单数",
+        "memory_hint": "用户关注华北区",
+        "schema_hint": (
             "public.orders(user_id, amount, created_at) -- 订单表\npublic.users(id, name) -- 用户表"
         ),
-        relations_hint="orders.user_id → users.id",
-        metric_hints="订单数 = COUNT(orders.id)",
-        skill_terms="- 华北:region = 'NORTH'",
-        skill_examples=(
+        "relations_hint": "orders.user_id → users.id",
+        "metric_hints": "订单数 = COUNT(orders.id)",
+        "skill_terms": "- 华北:region = 'NORTH'",
+        "skill_examples": (
             "fewshot SQL 仅文本\n1. 问:订单数\n   答 SQL 形态:SELECT COUNT(*) FROM orders"
         ),
-        history_sql="SELECT COUNT(*) FROM orders WHERE created_at >= '2026-01-01'",
-        extra='\n\n上次生成的 SQL 有误:column "x" does not exist\n请修正。',
-    )
+        "history_sql": "SELECT COUNT(*) FROM orders WHERE created_at >= '2026-01-01'",
+        "extra": '\n\n上次生成的 SQL 有误:column "x" does not exist\n请修正。',
+    }
     legacy = legacy_generate_user_prompt(**kwargs)
     user, cut, _estimated = assemble_generate_user_prompt(**kwargs, budget_tokens=100_000)
     assert user == legacy
@@ -88,17 +88,17 @@ def test_under_budget_byte_identical() -> None:
 
 def test_empty_segments_byte_identical() -> None:
     """全空段(零命中形态)同样逐字一致。"""
-    kwargs = dict(
-        question="在吗",
-        memory_hint="",
-        schema_hint="（未能检索到与问题相关的表结构）",
-        relations_hint="",
-        metric_hints="",
-        skill_terms="",
-        skill_examples="",
-        history_sql="",
-        extra="",
-    )
+    kwargs = {
+        "question": "在吗",
+        "memory_hint": "",
+        "schema_hint": "（未能检索到与问题相关的表结构）",
+        "relations_hint": "",
+        "metric_hints": "",
+        "skill_terms": "",
+        "skill_examples": "",
+        "history_sql": "",
+        "extra": "",
+    }
     legacy = legacy_generate_user_prompt(**kwargs)
     user, cut, _estimated = assemble_generate_user_prompt(**kwargs, budget_tokens=100_000)
     assert user == legacy
@@ -109,9 +109,10 @@ def test_empty_segments_byte_identical() -> None:
 
 
 def _big_schema(tables: int, cols: int) -> str:
-    lines: list[str] = []
-    for t in range(tables):
-        lines.append(f"public.t{t}({', '.join(f'c{c} int' for c in range(cols))}) -- 表{t}")
+    lines: list[str] = [
+        f"public.t{t}({', '.join(f'c{c} int' for c in range(cols))}) -- 表{t}"
+        for t in range(tables)
+    ]
     return "\n".join(lines)
 
 
@@ -320,7 +321,7 @@ async def test_generate_emits_trace_on_cut(monkeypatch: pytest.MonkeyPatch) -> N
         async def chat(self, system: str, user: str, **_kw: object) -> str:
             return "SELECT 1"
 
-    monkeypatch.setattr(deps, "get_llm", lambda: _NarrowLlm())
+    monkeypatch.setattr(deps, "get_llm", _NarrowLlm)
     state: dict[str, object] = {
         "question": "q",
         "schema_hint": _big_schema(20, 3),  # 首位行短(豁免后仍有收敛空间)
@@ -355,7 +356,7 @@ async def test_generate_no_trace_when_under_budget(monkeypatch: pytest.MonkeyPat
         async def chat(self, system: str, user: str, **_kw: object) -> str:
             return "SELECT 1"
 
-    monkeypatch.setattr(deps, "get_llm", lambda: _WideLlm())
+    monkeypatch.setattr(deps, "get_llm", _WideLlm)
     state: dict[str, object] = {
         "question": "q",
         "schema_hint": "public.t(a)",

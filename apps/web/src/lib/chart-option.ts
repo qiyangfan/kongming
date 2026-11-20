@@ -2,7 +2,8 @@
    放在 lib 下以便纯函数单测；颜色经 token 派生，无 echarts 运行时依赖。 */
 
 import { themedTooltip } from "@/lib/echarts";
-import type { ChartDatum, ChartSpec, ChartTune, ChartType } from "@/components/chart-shared";
+import { cellText } from "@/lib/utils";
+import type { ChartDatum, ChartSpec, ChartTune, ChartType } from "@/lib/chart-shared";
 
 /* 空值/空白串显式排除:Number(null)、Number("")、Number(" ") 均为 0,会把空单元格误判成数值 */
 function isNumericCell(v: unknown): boolean {
@@ -19,7 +20,7 @@ function formatTemporalLabels(labels: string[]): string[] {
   return labels.map((l) => {
     const m = ISO_DATE_RE.exec(l);
     if (!m) return l;
-    return m[2] === "00" && m[3] === "00" ? m[1] : `${m[1]} ${m[2]}:${m[3]}`;
+    return m[2] === "00" && m[3] === "00" ? (m[1] ?? l) : `${m[1] ?? l} ${m[2]}:${m[3]}`;
   });
 }
 
@@ -65,7 +66,7 @@ type BuildCtx = {
 /* 饼图：恒单 y（候选生成保证；异常多 y 时取首个）。 */
 function pieOption(ctx: BuildCtx): Record<string, unknown> {
   const { data, useYIdxs, xLabels, palette, axisColor, titleOpt } = ctx;
-  const values = plainValues(data.rows, useYIdxs[0]);
+  const values = plainValues(data.rows, useYIdxs[0] ?? 0);
   return {
     ...titleOpt,
     tooltip: { trigger: "item", ...themedTooltip() },
@@ -88,7 +89,7 @@ function pieOption(ctx: BuildCtx): Record<string, unknown> {
 function numericScatterOption(ctx: BuildCtx): Record<string, unknown> {
   const { binding, data, xi, useYIdxs, palette, axisCommon, titleOpt, xNameOpt, yNameOpt, grid } =
     ctx;
-  const yi = useYIdxs[0];
+  const yi = useYIdxs[0] ?? 0;
   return {
     ...titleOpt,
     grid,
@@ -128,7 +129,7 @@ function categoryScatterOption(ctx: BuildCtx): Record<string, unknown> {
     series: [
       {
         type: "scatter",
-        data: plainValues(data.rows, useYIdxs[0]),
+        data: plainValues(data.rows, useYIdxs[0] ?? 0),
         itemStyle: { color: palette[0] },
       },
     ],
@@ -141,7 +142,7 @@ function scatterOption(ctx: BuildCtx): Record<string, unknown> {
   return xNumeric ? numericScatterOption(ctx) : categoryScatterOption(ctx);
 }
 
-type SeriesEntry = { name?: string; data: (number | null)[] };
+type SeriesEntry = { name?: string | undefined; data: (number | null)[] };
 
 /* 分组系列：类目轴=x 唯一值全集(首次出现序),各系列按「系列值×类目」
    对号取数、缺组合补 null——若逐行过滤,系列下标与类目下标错位,柱子会落错类别 */
@@ -149,9 +150,12 @@ function groupedSeries(ctx: BuildCtx & { si: number; rawCats: string[] }): Serie
   const { data, si, xi, useYIdxs, rawCats } = ctx;
   const lookup = new Map<string, number | null>();
   for (const r of data.rows) {
-    lookup.set(`${String(r[si] ?? "")}||${String(r[xi] ?? "")}`, sparseValues([r], useYIdxs[0])[0]);
+    lookup.set(
+      `${cellText(r[si])}||${cellText(r[xi])}`,
+      sparseValues([r], useYIdxs[0] ?? 0)[0] ?? null,
+    );
   }
-  const seriesVals = [...new Set(data.rows.map((r) => String(r[si] ?? "")))];
+  const seriesVals = [...new Set(data.rows.map((r) => cellText(r[si])))];
   return seriesVals.map((sv) => ({
     name: sv,
     data: rawCats.map((cat) => lookup.get(`${sv}||${cat}`) ?? null),
@@ -159,26 +163,28 @@ function groupedSeries(ctx: BuildCtx & { si: number; rawCats: string[] }): Serie
 }
 
 /* 多度量系列：系列名经列标签(缺失回退物理列名),不裸投物理名。 */
-function measureSeries(ctx: BuildCtx & { labels?: string[]; multiY: number[] }): SeriesEntry[] {
+function measureSeries(
+  ctx: BuildCtx & { labels?: string[] | undefined; multiY: number[] },
+): SeriesEntry[] {
   const { data, labels, multiY } = ctx;
   return multiY.map((yi) => ({
-    name: labels?.[yi] || data.columns[yi],
+    name: labels?.[yi] || data.columns[yi] || "",
     data: sparseValues(data.rows, yi),
   }));
 }
 
-function cartesianSeries(ctx: BuildCtx & { labels?: string[] }): {
+function cartesianSeries(ctx: BuildCtx & { labels?: string[] | undefined }): {
   seriesList: SeriesEntry[];
   hasSeries: boolean;
 } {
   const { binding, data, xi, useYIdxs } = ctx;
   const si = binding.series ? data.columns.indexOf(binding.series) : -1;
-  const rawCats = [...new Set(data.rows.map((r) => String(r[xi] ?? "")))];
+  const rawCats = [...new Set(data.rows.map((r) => cellText(r[xi])))];
   if (si >= 0) return { seriesList: groupedSeries({ ...ctx, si, rawCats }), hasSeries: true };
   if (useYIdxs.length > 1) {
     return { seriesList: measureSeries({ ...ctx, multiY: useYIdxs }), hasSeries: false };
   }
-  return { seriesList: [{ data: plainValues(data.rows, useYIdxs[0]) }], hasSeries: false };
+  return { seriesList: [{ data: plainValues(data.rows, useYIdxs[0] ?? 0) }], hasSeries: false };
 }
 
 /* 系列样式：折线平滑带线色，柱状圆角限宽；颜色按系列序循环取色板。 */
@@ -246,8 +252,8 @@ function cartesianOption(ctx: BuildCtx, activeType: ChartType): Record<string, u
 type BuildChartOptionArgs = {
   candidates: ChartSpec[];
   data: ChartDatum;
-  labels?: string[];
-  tune?: ChartTune;
+  labels?: string[] | undefined;
+  tune?: ChartTune | undefined;
   activeType: ChartType;
   palette: string[];
   axisColor: string;
@@ -302,9 +308,9 @@ function resolveAxes(
   return {
     xi,
     useYIdxs: yIdxs.length > 0 ? yIdxs : [1],
-    xLabels: formatTemporalLabels(data.rows.map((r) => String(r[xi] ?? ""))),
+    xLabels: formatTemporalLabels(data.rows.map((r) => cellText(r[xi]))),
     // 分组系列:类目轴=x 唯一值全集(首次出现序)
-    rawCats: [...new Set(data.rows.map((r) => String(r[xi] ?? "")))],
+    rawCats: [...new Set(data.rows.map((r) => cellText(r[xi])))],
   };
 }
 
@@ -321,11 +327,12 @@ export function buildChartOption({
 }: BuildChartOptionArgs): Record<string, unknown> {
   // 活动绑定:同类型取首个候选(切换类型即切换其完整 x/y/系列映射)
   const binding = candidates.find((c) => c.type === activeType) ?? candidates[0];
+  if (!binding) return {}; // 无候选时无 option 可建(调用方按空图处理)
   const axisCommon = {
     axisLabel: { color: axisColor },
     axisLine: { lineStyle: { color: lineColor } },
   };
-  const ctx: BuildCtx & { labels?: string[] } = {
+  const ctx: BuildCtx & { labels?: string[] | undefined } = {
     binding,
     data,
     labels,

@@ -44,6 +44,6 @@ describe("splitCitationMarkers", () => {
     expect(parts[0]).toMatchObject({ text: "外层【内", key: null });
     expect(parts[1]).toMatchObject({ key: "层" });
     // 成键者不含 【(互斥),后续文本按原样
-    expect(parts[parts.length - 1].key).toBe(null);
+    expect(parts[parts.length - 1]?.key).toBeNull();
   });
 });

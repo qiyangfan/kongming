@@ -53,7 +53,7 @@ class SqlGuardrailAuditWriter:
                 )
                 await s.commit()
         except Exception:
-            log.error("护栏审计写入失败 trace_id=%s", trace_id, exc_info=True)
+            log.exception("护栏审计写入失败 trace_id=%s", trace_id)
 
 
 class SqlGuardrailRepo:
@@ -134,7 +134,7 @@ class SqlGuardrailRepo:
         where = " AND ".join(conditions)
         total = (
             await self._s.execute(
-                text(  # noqa: S608  # 条件片段为常量
+                text(  # 条件片段为常量
                     f"SELECT count(*) FROM public.sys_guardrail_audit WHERE {where}"  # noqa: S608  # 条件片段为常量
                 ),
                 params,

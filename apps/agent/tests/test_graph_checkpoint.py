@@ -141,8 +141,7 @@ class FakeCheckpointApi:
         self.resolve_calls.append(kw)
         if not self.resolve_results:
             raise AssertionError("FakeCheckpointApi.resolve_results 已空")
-        r = self.resolve_results.pop(0)
-        return r
+        return self.resolve_results.pop(0)
 
 
 def _call(name: str, args: dict[str, object], call_id: str = "c1") -> LlmToolCall:

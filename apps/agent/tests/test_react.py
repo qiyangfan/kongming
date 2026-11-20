@@ -417,8 +417,8 @@ async def test_query_react_llm_unavailable(monkeypatch: pytest.MonkeyPatch) -> N
         async def chat_with_tools(self, *a: object, **kw: object) -> ToolChatReply:
             raise LlmError("LLM 调用失败: 模拟故障")
 
-    monkeypatch.setattr(deps, "get_llm", lambda: _BoomLlm())
-    monkeypatch.setattr(deps, "get_api", lambda: FakeApi())
+    monkeypatch.setattr(deps, "get_llm", _BoomLlm)
+    monkeypatch.setattr(deps, "get_api", FakeApi)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post("/query_react", json=_react_payload(), headers=TOKEN)
     body = resp.json()

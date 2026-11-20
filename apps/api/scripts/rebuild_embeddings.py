@@ -11,13 +11,13 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # scripts/ 直跑导入 kongming
 
-from sqlalchemy import text  # noqa: E402
+from sqlalchemy import text
 
-from kongming.db import get_sessionmaker  # noqa: E402
-from kongming.rag.agent_callback import get_agent_rag_client  # noqa: E402
-from kongming.rag.catalog import vec_literal  # noqa: E402
-from kongming.rag.models import build_embedding_text  # noqa: E402
-from kongming.redis_client import get_redis  # noqa: E402
+from kongming.db import get_sessionmaker
+from kongming.rag.agent_callback import get_agent_rag_client
+from kongming.rag.catalog import vec_literal
+from kongming.rag.models import build_embedding_text
+from kongming.redis_client import get_redis
 
 log = logging.getLogger("rebuild_embeddings")
 

@@ -100,7 +100,7 @@ async def test_fixed_window_fail_open_on_script_error() -> None:
 async def test_sliding_window_blocks_across_boundary_then_recovers() -> None:
     """窗口切换前耗尽 → 跨窗即时请求仍受限(固定窗口会放行,回归点);
     额度随旧请求老化恢复(前一窗口权重衰减)。窗口取 4s:拒绝区=新窗口
-    前 2s(权重>0.5),负载下 sleep 漂移容差大。"""
+    前 2s(权重>0.5),断言前按服务端时钟逼近边界,不依赖固定 sleep 精度。"""
     r = get_redis()
     limiter = RedisRateLimiter(r)
     window, limit = 4, 2
@@ -108,9 +108,13 @@ async def test_sliding_window_blocks_across_boundary_then_recovers() -> None:
     assert await limiter.allow_sliding("k", limit=limit, window_sec=window)
     assert await limiter.allow_sliding("k", limit=limit, window_sec=window)
     assert not await limiter.allow_sliding("k", limit=limit, window_sec=window)
-    # 睡到下一窗口刚起步(前一窗口权重≈1,估算≈limit → 仍拒)
-    now = await _server_now(r)
-    await asyncio.sleep(window - (now % window) + 0.1)
+    # 睡到下一窗口前 1s 内再断言:固定 sleep 在全量负载下可能滑过 2s 拒绝区,
+    # 逐步逼近边界让判定留在权重>0.5 的区间内(单次 Redis 往返远小于 1s 余量)
+    while True:
+        d = (await _server_now(r)) % window
+        if d < 1.0:
+            break
+        await asyncio.sleep(min(window - d + 0.05, 0.5))
     assert not await limiter.allow_sliding("k", limit=limit, window_sec=window)
     # 睡到窗口中点(权重≈0.5,估算≈1 → 放行):老化恢复
     await asyncio.sleep(window / 2)

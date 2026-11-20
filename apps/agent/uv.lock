@@ -792,6 +792,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "sqlglot" },
+    { name = "starlette" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -819,6 +820,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.14" },
     { name = "pydantic-settings", specifier = ">=2.7" },
     { name = "sqlglot", specifier = ">=30.0" },
+    { name = "starlette", specifier = ">=1.8,<2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54" },
 ]
 

@@ -136,7 +136,8 @@ class SqlLlmUsageRepo:
                         "         (WHERE u.status = 'SUCCESS' AND u.latency_ms IS NOT NULL)"
                         "         AS latency_ms_max"
                         " FROM public.sys_llm_usage u"
-                        f" LEFT JOIN public.sys_tenant t ON t.id = u.tenant_id WHERE {where}"  # noqa: S608  # 条件片段为常量
+                        " LEFT JOIN public.sys_tenant t ON t.id = u.tenant_id"
+                        f" WHERE {where}"  # 条件片段为常量
                         " GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
                     ),
                     params,

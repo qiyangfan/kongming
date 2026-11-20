@@ -380,7 +380,7 @@ async def test_custom_scope_with_depts_filters_by_in(
     async with get_engine().begin() as conn:
         await conn.execute(
             text(
-                f'CREATE TABLE IF NOT EXISTS "{SCHEMA_A}".dept_order ('  # noqa: S608  # 模块常量
+                f'CREATE TABLE IF NOT EXISTS "{SCHEMA_A}".dept_order ('  # 模块常量
                 " id uuid PRIMARY KEY, mark varchar(8), dept_id uuid)"
             )
         )

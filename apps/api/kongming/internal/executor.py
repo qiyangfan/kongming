@@ -58,5 +58,5 @@ async def dispose_read_engines() -> None:
     for engine in engines:
         try:
             await engine.dispose()
-        except Exception:  # noqa: BLE001  # 收尾期尽力而为,证据留日志
+        except Exception:  # 收尾期尽力而为,证据留日志
             log.warning("只读池收尾 dispose 失败(已忽略)", exc_info=True)

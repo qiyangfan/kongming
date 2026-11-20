@@ -25,7 +25,9 @@ describe("draftFromPrefs", () => {
 
   it("草稿覆盖全部七个槽位(与服务端闭合集合同序)", () => {
     const draft = draftFromPrefs({});
-    expect(Object.keys(draft).sort()).toEqual(PREF_SLOTS.map((s) => s.key).sort());
+    expect(Object.keys(draft).sort((a, b) => a.localeCompare(b))).toEqual(
+      PREF_SLOTS.map((s) => s.key).sort((a, b) => a.localeCompare(b)),
+    );
   });
 });
 

@@ -154,8 +154,8 @@ def columns_to_json(text: str) -> dict[str, str]:
     全部解析不出时兜底 {"_raw": 整段}(内容不丢)。
     """
     out: dict[str, str] = {}
-    for item in _COL_ITEM_SPLIT.split(text):
-        item = item.strip()
+    for raw_item in _COL_ITEM_SPLIT.split(text):
+        item = raw_item.strip()
         if not item:
             continue
         parts = item.split(None, 1)

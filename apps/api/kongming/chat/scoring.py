@@ -217,8 +217,7 @@ def assemble_data_evidence(
     (行数截断 + 总长截断,超限附标记)。"""
     lines: list[str] = [f"列: {', '.join(columns)}" if columns else ""]
     shown = rows[:max_rows]
-    for r in shown:
-        lines.append(" | ".join(_cell(v) for v in r))
+    lines.extend(" | ".join(_cell(v) for v in r) for r in shown)
     if len(rows) > max_rows:
         lines.append(f"(仅展示前 {max_rows} 行,共 {len(rows)} 行)")
     if stats:

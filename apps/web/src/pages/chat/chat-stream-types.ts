@@ -33,7 +33,7 @@ export interface ChatStreamApi {
   setStoppedNotice: React.Dispatch<React.SetStateAction<boolean>>;
   pendingConfirm: PendingConfirm | null;
   setPendingConfirm: React.Dispatch<React.SetStateAction<PendingConfirm | null>>;
-  forceBottomRef: React.MutableRefObject<boolean>;
+  forceBottomRef: React.RefObject<boolean>;
   finalizeOk: (out: ChatQueryOut, question: string) => void;
   finalizeError: (
     message: string,
@@ -44,10 +44,10 @@ export interface ChatStreamApi {
   stopStreaming: () => void;
   /** 取消闸：中止在途流并清空残留呈现（上下文切换/卸载时调用）。 */
   resetStream: () => void;
-  selfNavigatedRef: React.MutableRefObject<string | null>;
+  selfNavigatedRef: React.RefObject<string | null>;
   shutdown: () => void;
-  abortRef: React.MutableRefObject<AbortController | null>;
-  streamCtxRef: React.MutableRefObject<{
+  abortRef: React.RefObject<AbortController | null>;
+  streamCtxRef: React.RefObject<{
     sid: string | null;
     tenant: string | null;
     ds: string | null;

@@ -109,7 +109,7 @@ class AuditRepository:
                 await self._s.execute(
                     text(
                         self._SQL_COLS
-                        + self._SQL_WHERE  # noqa: S608  # 常量模板,参数化绑定
+                        + self._SQL_WHERE  # 常量模板,参数化绑定
                         + " ORDER BY a.created_at DESC, a.id DESC LIMIT :lim OFFSET :off"
                     ),
                     params,
@@ -124,7 +124,7 @@ class AuditRepository:
         row = (
             (
                 await self._s.execute(
-                    text(self._SQL_COLS + " WHERE a.id = CAST(:id AS uuid)"),  # noqa: S608  # 常量模板
+                    text(self._SQL_COLS + " WHERE a.id = CAST(:id AS uuid)"),  # 常量模板
                     {"id": audit_id},
                 )
             )

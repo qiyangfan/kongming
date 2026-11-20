@@ -15,9 +15,10 @@ import {
 } from "lucide-react";
 
 import { ChartView, type ChartDatum, type ChartTune } from "@/components/chart-view";
-import type { ChartSpec } from "@/components/chart-shared";
+import type { ChartSpec } from "@/lib/chart-shared";
 import { MarkdownText } from "@/components/markdown-text";
 import { rerunArtifact } from "@/lib/chat-api";
+import { cellText } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -198,7 +199,7 @@ export function ReportArtifactCard({
   content: string;
   metadata: Record<string, unknown>;
 }) {
-  const reportId = String(metadata.report_id ?? "");
+  const reportId = cellText(metadata.report_id);
   if (!reportId) return null;
   return (
     <Link
@@ -291,9 +292,9 @@ function CitedDocumentText({
         // 字符串段直接输出(该段放弃 Markdown 结构;引用句多为纯陈述,可接受)
         return (
           <p key={i} className="leading-relaxed">
-            {parts.map((p, j) =>
-              typeof p === "string" ? <span key={j}>{p}</span> : <span key={j}>{p}</span>,
-            )}
+            {parts.map((p, j) => (
+              <span key={j}>{p}</span>
+            ))}
           </p>
         );
       })}

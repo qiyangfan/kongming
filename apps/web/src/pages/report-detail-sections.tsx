@@ -1,16 +1,17 @@
 /* 报告详情的章节呈现:章节标题/叙述、数据绑定表、绑定图表。 */
 
 import { ChartView } from "@/components/chart-view";
-import type { ChartSpec } from "@/components/chart-shared";
+import type { ChartSpec } from "@/lib/chart-shared";
 import { MarkdownText } from "@/components/markdown-text";
 import { ResultTable } from "@/components/result-table";
 import type { ReportBinding, SectionOut } from "@/lib/report-api";
+import { cellText } from "@/lib/utils";
 
 /** 运行时弱类型的绑定收窄为强类型快照。 */
 function binding(b: { [key: string]: unknown }): ReportBinding {
   return {
-    sql: String(b.sql ?? ""),
-    status: String(b.status ?? "OK"),
+    sql: cellText(b.sql),
+    status: cellText(b.status) || "OK",
     columns: Array.isArray(b.columns) ? (b.columns as string[]) : [],
     rows: Array.isArray(b.rows) ? (b.rows as unknown[][]) : [],
     row_count: Number(b.row_count ?? 0),

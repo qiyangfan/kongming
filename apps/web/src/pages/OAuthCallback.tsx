@@ -30,7 +30,7 @@ export default function OAuthCallback() {
       try {
         const pair = await api.post<TokenPairOut>(`/auth/${provider}/callback`, { code, state });
         await acceptTokens(pair);
-        navigate("/", { replace: true });
+        void navigate("/", { replace: true });
       } catch (err) {
         setError(err instanceof Error ? humanizeErrorText(err.message) : "登录未完成,请稍后再试");
       }

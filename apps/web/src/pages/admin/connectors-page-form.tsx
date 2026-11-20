@@ -212,12 +212,7 @@ function PolicyFields({
       <FormRow label="写语义" htmlFor="conn-confirm">
         <Select
           value={form.confirmMode}
-          onValueChange={(v) =>
-            onChange({
-              ...form,
-              confirmMode: v === "yes" ? "yes" : v === "no" ? "no" : "auto",
-            })
-          }
+          onValueChange={(v) => onChange({ ...form, confirmMode: toConfirmMode(v) })}
         >
           <SelectTrigger id="conn-confirm" aria-label="写语义">
             <SelectValue />
@@ -253,6 +248,12 @@ type ConnectorFormDialogProps = {
   onSave: () => void;
   onTest: () => void;
 };
+
+function toConfirmMode(v: string): "yes" | "no" | "auto" {
+  if (v === "yes") return "yes";
+  if (v === "no") return "no";
+  return "auto";
+}
 
 export function ConnectorFormDialog(props: ConnectorFormDialogProps) {
   const { form, formError, savePending, testPending, onChange, onClose, onSave, onTest } = props;

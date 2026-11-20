@@ -118,7 +118,7 @@ def _extract_json(raw: str) -> dict[str, Any]:
         raise ValueError("plan 输出无 JSON 对象")
     obj = json.loads(text[start : end + 1])
     if not isinstance(obj, dict):
-        raise ValueError("plan 输出非对象")
+        raise TypeError("plan 输出非对象")
     return cast("dict[str, Any]", obj)
 
 
@@ -158,7 +158,7 @@ def _parse_chart(raw: object) -> dict[str, object] | None:
 def _parse_leaf(lf: object, ch_id: str, j: int, seen: set[str]) -> _Leaf:
     """叶子条目校验与收敛(id 唯一、SQL 必填);畸形直接失败。"""
     if not isinstance(lf, dict):
-        raise ValueError("plan 叶子条目畸形")
+        raise TypeError("plan 叶子条目畸形")
     lfd = cast("dict[str, Any]", lf)
     leaf_id = str(lfd.get("id") or f"{ch_id}-{j}")
     if leaf_id in seen:
@@ -179,7 +179,7 @@ def _parse_leaf(lf: object, ch_id: str, j: int, seen: set[str]) -> _Leaf:
 def _parse_chapter(ch: object, i: int, seen: set[str]) -> tuple[dict[str, Any], list[_Leaf]] | None:
     """章节条目校验与收敛;无有效叶子返回 None。"""
     if not isinstance(ch, dict):
-        raise ValueError("plan 章节条目畸形")
+        raise TypeError("plan 章节条目畸形")
     chd = cast("dict[str, Any]", ch)
     ch_id = str(chd.get("id") or f"c{i}")
     if ch_id in seen:  # id 重复直接失败(fail-closed)
@@ -191,7 +191,7 @@ def _parse_chapter(ch: object, i: int, seen: set[str]) -> tuple[dict[str, Any], 
         for j, lf in enumerate(cast("list[object]", raw_children)):
             # 形态校验先于数量护栏:超限之后的畸形条目仍须 fail-closed
             if not isinstance(lf, dict):
-                raise ValueError("plan 叶子条目畸形")
+                raise TypeError("plan 叶子条目畸形")
             if len(leaves) >= 6:  # 单章叶子护栏
                 break
             leaves.append(_parse_leaf(cast("dict[str, object]", lf), ch_id, j, seen))
@@ -301,7 +301,10 @@ class ReportOrchestrator:
             trace_id=trace_id,
             tenant_key=tenant_key,
         )
-        title, chapters = _flatten_plan(_extract_json(plan_raw))
+        try:
+            title, chapters = _flatten_plan(_extract_json(plan_raw))
+        except TypeError as e:  # 结构类型不符(TypeError)归一为畸形,避免外层吞掉内部类型错误
+            raise ValueError(f"plan 结构类型不符: {e}") from e
         if str(self._payload.get("title") or "").strip():
             title = str(self._payload["title"])  # 发起方显式标题优先
         return title, chapters

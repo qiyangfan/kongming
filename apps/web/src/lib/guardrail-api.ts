@@ -33,5 +33,6 @@ export function guardrailAuditPage(params: GuardrailAuditParams): Promise<Guardr
     if (v === undefined || v === "" || v === null) continue;
     qs.set(k, String(v));
   }
-  return api.get<GuardrailAuditPageOut>(`/system/guardrails/audit/page${qs.size ? `?${qs}` : ""}`);
+  const suffix = qs.size > 0 ? `?${qs}` : "";
+  return api.get<GuardrailAuditPageOut>(`/system/guardrails/audit/page${suffix}`);
 }

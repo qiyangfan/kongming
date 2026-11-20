@@ -75,7 +75,7 @@ class ToolAuditWriter:
                 await s.commit()
         except Exception:
             # 丢审计是严重事故:error 级暴露,但不阻断主流程(与 sql 审计同口径)
-            log.error("工具审计写入失败 trace_id=%s", trace_id, exc_info=True)
+            log.exception("工具审计写入失败 trace_id=%s", trace_id)
             return None
         return row_id
 

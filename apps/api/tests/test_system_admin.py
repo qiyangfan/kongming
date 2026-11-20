@@ -1036,7 +1036,7 @@ async def test_write_operations_audited(
     assert r.status_code == 204
     # 断言:全部动作都有审计行
     rows = await session.execute(
-        text(  # noqa: S608  # 测试常量
+        text(  # 测试常量
             "SELECT action FROM public.sys_oper_log"
             " WHERE action LIKE 'user.%' OR action LIKE 'role.%' OR action LIKE 'dept.%'"
         )
@@ -1155,7 +1155,7 @@ async def test_error_detail_semantics(
     ghost = str(uuidlib.uuid4())
     r = await client.delete(f"/system/users/{ghost}", headers=_auth(token))
     assert r.status_code == 404
-    assert r.json()["detail"]  # noqa: PT018  # 非空文案断言
+    assert r.json()["detail"]  # 非空文案断言
     rid = await _role_id(session, "SUPER_ADMIN")
     r = await client.delete(f"/system/roles/{rid}", headers=_auth(token))
     assert r.status_code == 409

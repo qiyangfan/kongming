@@ -122,7 +122,7 @@ export default function DatasourcesPage() {
       />
 
       {datasources.isError && (
-        <ErrorAlert text={`数据源列表加载失败:${(datasources.error as Error).message}`} />
+        <ErrorAlert text={`数据源列表加载失败:${datasources.error.message}`} />
       )}
 
       <DatasourcesTable

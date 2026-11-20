@@ -50,7 +50,7 @@ export function useReportDialog(
       setOpen(false);
       setInstruction("");
       setTitle("");
-      navigate(`/reports/${out.report_id}`);
+      void navigate(`/reports/${out.report_id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "发起生成未成,请稍后再试。");
     } finally {

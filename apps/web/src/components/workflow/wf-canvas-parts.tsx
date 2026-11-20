@@ -55,7 +55,7 @@ export function CanvasSidePanel({
   onDelete,
 }: {
   selectedNode: WfFlowNode | null;
-  nodeServerError: { message: string; configKey?: string } | null;
+  nodeServerError: { message: string; configKey?: string | undefined } | null;
   nodes: WfFlowNode[];
   existingOnOf: (target: string) => "true" | "false" | null;
   onConfigChange: (id: string, config: Record<string, unknown>) => void;

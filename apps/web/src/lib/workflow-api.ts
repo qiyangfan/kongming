@@ -2,6 +2,7 @@
 
 import type { components } from "./api-types.gen";
 import { api } from "./api";
+import { cellText } from "./utils";
 
 export type WorkflowItem = components["schemas"]["WorkflowDefOut"];
 export type WorkflowRunItem = components["schemas"]["WorkflowRunItemOut"];
@@ -10,14 +11,14 @@ export type WorkflowRunItem = components["schemas"]["WorkflowRunItemOut"];
 interface WorkflowNodeRunView {
   node_id: string;
   status: string;
-  error?: string;
-  duration_ms?: number;
+  error?: string | undefined;
+  duration_ms?: number | undefined;
 }
 
 export function nodeRunsOf(r: Pick<WorkflowRunItem, "node_runs">): WorkflowNodeRunView[] {
   return (r.node_runs ?? []).map((nr) => ({
-    node_id: String(nr.node_id ?? ""),
-    status: String(nr.status ?? ""),
+    node_id: cellText(nr.node_id),
+    status: cellText(nr.status),
     error: typeof nr.error === "string" ? nr.error : undefined,
     duration_ms: typeof nr.duration_ms === "number" ? nr.duration_ms : undefined,
   }));

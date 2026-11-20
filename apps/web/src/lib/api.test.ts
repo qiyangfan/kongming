@@ -12,8 +12,12 @@ beforeAll(async () => {
     configurable: true,
     value: {
       getItem: (k: string) => store.get(k) ?? null,
-      setItem: (k: string, v: string) => void store.set(k, String(v)),
-      removeItem: (k: string) => void store.delete(k),
+      setItem: (k: string, v: string) => {
+        store.set(k, String(v));
+      },
+      removeItem: (k: string) => {
+        store.delete(k);
+      },
       clear: () => store.clear(),
       key: (i: number) => [...store.keys()][i] ?? null,
       get length() {

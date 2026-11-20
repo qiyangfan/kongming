@@ -17,12 +17,11 @@ function GraphConfirmCard({
   onDecide,
 }: {
   confirm: GraphConfirmOut;
-  disabled?: boolean;
+  disabled?: boolean | undefined;
   onDecide: (approve: boolean) => void;
 }) {
   if (confirm.status !== "pending") {
-    const label =
-      confirm.status === "approved" ? "已批准" : confirm.status === "denied" ? "已拒绝" : "已过期";
+    const label = CONFIRM_LABELS[confirm.status] ?? "已过期";
     return (
       <p className="text-xs text-muted-foreground">
         图内确认({confirm.tool_name}):{label}。
@@ -101,6 +100,8 @@ interface TaskStepsSectionProps {
 }
 
 /** 步骤列表:每步的标题/状态、审批门、图内确认与断点。 */
+const CONFIRM_LABELS: Record<string, string> = { approved: "已批准", denied: "已拒绝" };
+
 export function TaskStepsSection(props: TaskStepsSectionProps) {
   return (
     <section className="space-y-2" aria-label="步骤">

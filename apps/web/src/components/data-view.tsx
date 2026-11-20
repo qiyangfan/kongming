@@ -19,7 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { cn } from "@/lib/utils";
+import { cellText, cn } from "@/lib/utils";
 
 export interface DataViewColumn<T> {
   key: string;
@@ -57,7 +57,7 @@ interface DataViewProps<T> {
   emptyText?: string;
 }
 
-export function DataView<T>({
+function DataViewTable<T>({
   columns,
   rows,
   rowKey,
@@ -80,7 +80,7 @@ export function DataView<T>({
     typeof a.label === "function" ? a.label(row) : a.label;
 
   const renderCell = (col: DataViewColumn<T>, row: T): React.ReactNode =>
-    col.render ? col.render(row) : String((row as Record<string, unknown>)[col.key] ?? "");
+    col.render ? col.render(row) : cellText((row as Record<string, unknown>)[col.key]);
 
   return (
     <>
@@ -199,3 +199,5 @@ export function DataView<T>({
     </>
   );
 }
+
+export { DataViewTable as DataView };

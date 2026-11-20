@@ -1,5 +1,7 @@
 """验证引用键、两级内容净化、降级处理和 sources 投影。"""
 
+from typing import ClassVar
+
 import pytest
 
 from kongming_agent.graph.citations import (
@@ -24,7 +26,7 @@ class TestShape:
 class TestSanitize:
     """两级匹配(全等保留/后缀命中保留/皆不命中降级)。"""
 
-    LEGAL = ["员工手册-A7F2", "运维手册-9F2E"]
+    LEGAL: ClassVar[list[str]] = ["员工手册-A7F2", "运维手册-9F2E"]
 
     def test_exact_match_kept(self) -> None:
         r = sanitize_citations("答案一句【员工手册-A7F2】。", self.LEGAL)

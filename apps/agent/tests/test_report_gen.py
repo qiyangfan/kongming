@@ -243,7 +243,7 @@ def test_plan_leaf_shape_checked_beyond_cap() -> None:
     """单章护栏只截数量:第 7 个及之后的畸形叶子仍须拒绝(不静默成功)。"""
     leaves: list[object] = [{"id": f"l{i}", "sql": "select 1"} for i in range(6)]
     plan = {"title": "t", "sections": [{"id": "c1", "children": [*leaves, "garbage"]}]}
-    with pytest.raises(ValueError, match="plan 叶子条目畸形"):
+    with pytest.raises(TypeError, match="plan 叶子条目畸形"):
         _flatten_plan(plan)
 
 

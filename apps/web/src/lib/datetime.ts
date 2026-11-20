@@ -2,7 +2,9 @@
 
 const pad = (n: number): string => String(n).padStart(2, "0");
 
-function toDate(v: string | Date | null | undefined): Date | null {
+type DateInput = string | Date | null | undefined;
+
+function toDate(v: DateInput): Date | null {
   if (v == null || v === "") return null;
   const d = v instanceof Date ? v : new Date(v);
   return Number.isNaN(d.getTime()) ? null : d;

@@ -225,7 +225,7 @@ async def test_migration_0050_schema_contract(session: AsyncSession) -> None:
     )
     await session.commit()
     # 轮询间隔正值域(0 拒写)
-    with pytest.raises(Exception):  # noqa: B017,S101  # CHECK 违约即抛(DBAPIError)
+    with pytest.raises(Exception):  # noqa: B017  # CHECK 违约即抛(DBAPIError)
         await session.execute(
             text(
                 "UPDATE public.sys_trigger_definition SET imap_poll_interval_sec=0"
@@ -701,7 +701,7 @@ def _email_scheduler_with(svc: _EmailStubService):
     # 桩服务与 TriggerService 鸭子类型相容,cast 对齐工厂协议(运行时不变)
     from collections.abc import Awaitable, Callable
 
-    sched._factory = cast(  # noqa: SLF001  # 测试注入(与 lifespan 同点)
+    sched._factory = cast(  # 测试注入(与 lifespan 同点)
         "Callable[[], Awaitable[tuple[Any, Callable[[], Awaitable[None]]]]]",
         _factory,
     )
@@ -715,7 +715,7 @@ async def test_scheduler_email_due_dispatch() -> None:
     """到期邮件触发器被派发轮询,节流按行内间隔推进。"""
     svc = _EmailStubService([dict(_ROW)])
     sched = _email_scheduler_with(svc)
-    await sched._tick()  # noqa: SLF001
+    await sched._tick()
     await asyncio.gather(*sched._running.values())  # 派发是异步任务:等收尾再断言
     assert svc.polled == ["e1"]
     assert svc.marked == [("e1", 300)]
@@ -728,10 +728,8 @@ async def test_scheduler_email_in_progress_skipped() -> None:
 
     svc = _EmailStubService([dict(_ROW)])
     sched = _email_scheduler_with(svc)
-    sched._running["e1"] = _cast(  # noqa: SLF001
-        "asyncio.Task[None]", _aio.get_running_loop().create_future()
-    )
-    await sched._tick()  # noqa: SLF001
+    sched._running["e1"] = _cast("asyncio.Task[None]", _aio.get_running_loop().create_future())
+    await sched._tick()
     assert svc.polled == []
     assert svc.skipped == ["前次轮询进行中"]
     assert svc.marked == [("e1", 300)]
@@ -745,7 +743,7 @@ async def test_scheduler_email_failure_isolated() -> None:
     ]
     svc = _EmailStubService(rows, poll_error=RuntimeError("unexpected mail stack blowup"))
     sched = _email_scheduler_with(svc)
-    await sched._tick()  # noqa: SLF001  # 不抛即隔离
+    await sched._tick()  # 不抛即隔离
     await asyncio.gather(*sched._running.values())  # 等在飞任务收尾再断言
     assert sorted(svc.polled) == ["e_bad", "e_ok"]  # 两者都被尝试
     assert sorted(t for t, _ in svc.marked) == ["e_bad", "e_ok"]  # 节流都推进

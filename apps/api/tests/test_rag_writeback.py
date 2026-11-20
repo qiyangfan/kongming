@@ -40,7 +40,7 @@ def _patch_agent(monkeypatch: pytest.MonkeyPatch, sql: str) -> None:
     fut: Future[object] = Future()
     fut.set_result(_reply(sql))
 
-    def _fake_query(self: AgentClient, **kw: object) -> Future[object]:  # noqa: ARG001
+    def _fake_query(self: AgentClient, **kw: object) -> Future[object]:
         return fut
 
     monkeypatch.setattr(AgentClient, "query", _fake_query)

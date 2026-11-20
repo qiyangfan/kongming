@@ -148,9 +148,10 @@ def _additive_outputs(sql: str) -> set[str]:
                 out.add((p.alias or "count").lower())
             elif isinstance(inner, exp.Sum):
                 out.add((p.alias or "sum").lower())
-        return out
     except Exception:  # noqa: BLE001  # 解析异常按不可加处理,标签推导不阻断主流程
         return set()
+    else:
+        return out
 
 
 def suggest_charts(

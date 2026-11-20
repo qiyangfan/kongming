@@ -20,7 +20,7 @@ interface NodeConfigFormProps {
   /** 目标节点的条件入边 on 值;null = 无条件入边(不显示该字段) */
   conditionOn: "true" | "false" | null;
   /** 服务端校验错误(已定位到本节点) */
-  serverError: { message: string; configKey?: string } | null;
+  serverError: { message: string; configKey?: string | undefined } | null;
   takenIds: readonly string[];
   onConfigChange: (config: Record<string, unknown>) => void;
   onIdChange: (id: string) => void;
@@ -56,7 +56,7 @@ export function NodeConfigForm({
     typeof config.max_iterations === "number" ? String(config.max_iterations) : "",
   );
 
-  const setField = (key: string, value: unknown | undefined) => {
+  const setField = (key: string, value: unknown) => {
     const next = { ...config };
     if (value === undefined) delete next[key];
     else next[key] = value;

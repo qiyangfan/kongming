@@ -157,7 +157,7 @@ class RoundtableOrchestrator:
         self,
         *,
         payload: dict[str, object],
-        llm: Any,  # noqa: ANN401 —— LlmClient 显式类型在调用方;剧本化测试注入假体
+        llm: Any,
         roster: list[dict[str, object]],
         participant_runner: ParticipantRunner,
         turn_recorder: TurnRecorder | None = None,
@@ -305,7 +305,7 @@ class RoundtableOrchestrator:
         no = int(cast("int", p.get("no") or 0))
         try:
             final = await self._run_participant(no, sys_prompt)
-        except Exception as e:  # noqa: BLE001 —— 参与者失败如实记录,不中断圆桌
+        except Exception as e:  # noqa: BLE001
             log.warning("圆桌参与者执行失败(no=%s): %s", no, e)
             final = {"verdict": "ERROR", "summary": f"参与者执行失败: {type(e).__name__}"}
         summary = str(final.get("summary") or "")[:2000]
@@ -341,7 +341,7 @@ class RoundtableOrchestrator:
                 _CHAIR_USER.format(subgoal=subgoal[:1000], transcript="\n".join(speeches)[-4000:]),
                 temperature=0.0,
             )
-        except Exception as e:  # noqa: BLE001 —— 判定异常如实披露,按未共识处理
+        except Exception as e:  # noqa: BLE001
             log.warning("圆桌主席判定异常: %s", e)
             return {
                 "round_no": turns[-1].get("round_no"),
@@ -456,7 +456,7 @@ def _json_object(raw: str) -> dict[str, object] | None:
 async def run_roundtable(
     *,
     payload: dict[str, object],
-    llm: Any,  # noqa: ANN401
+    llm: Any,
     roster: list[dict[str, object]],
     participant_runner: ParticipantRunner,
     turn_recorder: TurnRecorder | None = None,

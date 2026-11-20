@@ -72,7 +72,7 @@ class ContextCache:
                     tenant_id, datasource_key, question, self._ts, team_set_fingerprint(team_ids)
                 )
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.warning("ctx 缓存读失败,按未命中处理", exc_info=True)
             return None
         if raw is None:
@@ -111,7 +111,7 @@ class ContextCache:
                 ),
                 ex=_CTX_TTL_SEC,
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.warning("ctx 缓存写失败,跳过", exc_info=True)
 
     async def evict(self, tenant_id: str, datasource_key: str) -> None:
@@ -129,5 +129,5 @@ class ContextCache:
             keys = [key async for key in it(match=pattern, count=_SCAN_COUNT)]
             if keys:
                 await self._redis.delete(*keys)
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.warning("ctx 缓存失效失败(旧值残留至 TTL 过期)", exc_info=True)

@@ -37,6 +37,7 @@ export function groupSessionsByTime<T extends HasUpdatedAt>(
   for (const item of items) {
     const t = new Date(item.updated_at).getTime();
     const bucket = buckets.find((b) => t >= b.since) ?? buckets[buckets.length - 1];
+    if (!bucket) continue;
     ensureGroup(groups, bucket.label).items.push(item);
   }
   return groups;

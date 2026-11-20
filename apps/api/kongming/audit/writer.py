@@ -51,4 +51,4 @@ class SqlAuditWriter:
                 await s.commit()
         except Exception:
             # 丢审计是严重事故:error 级暴露,但不阻断主流程(spec 立约)
-            log.error("SQL 审计写入失败 trace_id=%s", trace_id, exc_info=True)
+            log.exception("SQL 审计写入失败 trace_id=%s", trace_id)

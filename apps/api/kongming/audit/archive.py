@@ -198,7 +198,7 @@ async def _delete_all(session: AsyncSession, cutoff: datetime) -> int:
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
-    with open(path, "rb") as f:
+    with path.open("rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
             digest.update(chunk)
     return digest.hexdigest()

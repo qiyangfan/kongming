@@ -6,7 +6,7 @@ import { listBotVersions, publishBot, rollbackBotVersion, unpublishBot } from "@
 import { toolList } from "@/lib/toolcall-api";
 import { attachResource, listMyTeams } from "@/lib/team-api";
 import { api } from "@/lib/api";
-import type { BotItem } from "../BotsPage";
+import type { BotItem } from "./bot-types";
 import { EMPTY_BOT_FORM, type BotForm } from "./CreateBotDialog";
 
 /** 把上架表单里的建议问题按换行/逗号切分,去空并至多保留 5 条。 */
@@ -179,7 +179,9 @@ function useVersionMap(publishedIds: string[]) {
     const cur = versionsOf(b.id).find((v) => v.current);
     if (!cur) return false;
     const s = cur.snapshot;
-    const toolsEq = [...b.tools].sort().join(",") === [...s.tools].sort().join(",");
+    const toolsEq =
+      [...b.tools].sort((a, b) => a.localeCompare(b)).join(",") ===
+      [...s.tools].sort((a, b) => a.localeCompare(b)).join(",");
     return b.name !== s.name || b.system_prompt !== s.system_prompt || !toolsEq;
   };
   return { versionsOf, draftDiffers };

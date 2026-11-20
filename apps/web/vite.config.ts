@@ -51,7 +51,9 @@ function packageName(id: string): string | undefined {
   const nm = id.lastIndexOf("node_modules");
   if (nm < 0) return undefined;
   const parts = id.slice(nm + "node_modules/".length).split(/[\\/]/);
-  return parts[0].startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0];
+  const [head, second] = parts;
+  if (!head) return undefined;
+  return head.startsWith("@") ? `${head}/${second ?? ""}` : head;
 }
 
 // 按库名归组依赖；ECharts/zrender 不归组，保持按需加载。

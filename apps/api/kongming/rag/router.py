@@ -555,7 +555,7 @@ async def _semantic_hints(
     except Exception as _e:
         # 缺少语义层表时按迁移未执行处理并报错；其他异常降级为空提示，继续召回。
         if "UndefinedTable" in type(_e).__name__ or "undefined_table" in str(_e):
-            log.error("语义层表缺失(迁移未跑?),注入整体失效: %s", _e)
+            log.exception("语义层表缺失(迁移未跑?),注入整体失效")
         else:
             log.warning("语义段组装失败(降级空串)", exc_info=True)
     return relations_hint, metric_hints, metric_hits
@@ -705,11 +705,15 @@ def _doc_name_sensitive(name: str) -> bool:
     from kongming.guardrail.rules import REGISTRY
 
     for rule in REGISTRY:
-        if rule.guardrail_type == "input" and rule.name.startswith(("pii_", "cred_", "inj_")):
+        if (
+            rule.guardrail_type == "input"
+            and rule.name.startswith(("pii_", "cred_", "inj_"))
             # inj_ 一并拦:文件名经 source_ref 进召回文本→LLM 提示词,
             # 注入短语与 PII 同为入口防线
-            if rule.pattern and re.search(rule.pattern, name):
-                return True
+            and rule.pattern
+            and re.search(rule.pattern, name)
+        ):
+            return True
     return False
 
 
@@ -842,7 +846,7 @@ async def upload_doc(
     doc_name, content = await _read_doc_upload(file)
     try:
         text_content = await asyncio.to_thread(parse_to_text, content, file.filename or "")
-    except Exception:
+    except Exception:  # noqa: BLE001
         raise HTTPException(status_code=400, detail="文档解析失败") from None
     doc_id, blocks, skipped = await _ingest_doc_upload(
         session,

@@ -6,6 +6,7 @@ import { Paperclip } from "lucide-react";
 import { AssistantCard } from "@/components/assistant-card";
 import { ChatBubble } from "@/components/chat-bubble";
 import type { ChatQueryOut, SessionMessageOut } from "@/lib/api";
+import { cellText } from "@/lib/utils";
 
 /** 附件徽标(user 气泡两处共用:历史回显与即时快照) */
 function AttachmentBadge({ items }: { items: { [key: string]: unknown }[] }) {
@@ -14,7 +15,7 @@ function AttachmentBadge({ items }: { items: { [key: string]: unknown }[] }) {
     <span className="flex items-center gap-1 text-xs text-muted-foreground">
       <Paperclip className="size-3" aria-hidden />
       {items.length} 张图片:
-      {items.map((a) => String(a.filename ?? "")).join(", ")}
+      {items.map((a) => cellText(a.filename)).join(", ")}
     </span>
   );
 }

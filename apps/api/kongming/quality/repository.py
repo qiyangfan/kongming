@@ -38,10 +38,10 @@ class SqlQualityRepo:
                         " count(*) FILTER (WHERE m.fallback_type = 'CLARIFY') AS clarify,"
                         " round(avg(sc.score)::numeric, 1) AS avg_score,"
                         " count(*) FILTER (WHERE sc.score < :low) AS low_score_count"
-                        f" FROM {_ROUNDS} m"  # noqa: S608
-                        " JOIN public.chat_session s ON s.id = m.session_id"  # noqa: S608
-                        " LEFT JOIN public.chat_turn_score sc ON sc.message_id = m.id"  # noqa: S608
-                        f" WHERE {where}"  # noqa: S608
+                        f" FROM {_ROUNDS} m"
+                        " JOIN public.chat_session s ON s.id = m.session_id"
+                        " LEFT JOIN public.chat_turn_score sc ON sc.message_id = m.id"
+                        f" WHERE {where}"
                     ),
                     {**params, "low": low_score_threshold},
                 )
@@ -56,13 +56,13 @@ class SqlQualityRepo:
             await self._s.execute(
                 text(
                     "SELECT avg(turn_tokens) AS avg_tokens FROM ("  # noqa: S608
-                    " SELECT sum(u.total_tokens) AS turn_tokens"  # noqa: S608
-                    " FROM public.chat_message m"  # noqa: S608
-                    " JOIN public.chat_session s ON s.id = m.session_id"  # noqa: S608
-                    " JOIN public.sys_llm_usage u ON u.trace_id = m.trace_id"  # noqa: S608
-                    " WHERE m.role = 'ASSISTANT' AND m.trace_id IS NOT NULL"  # noqa: S608
-                    f" AND {where}"  # noqa: S608
-                    " GROUP BY m.trace_id)"  # noqa: S608
+                    " SELECT sum(u.total_tokens) AS turn_tokens"
+                    " FROM public.chat_message m"
+                    " JOIN public.chat_session s ON s.id = m.session_id"
+                    " JOIN public.sys_llm_usage u ON u.trace_id = m.trace_id"
+                    " WHERE m.role = 'ASSISTANT' AND m.trace_id IS NOT NULL"
+                    f" AND {where}"
+                    " GROUP BY m.trace_id)"
                 ),
                 params,
             )
@@ -85,20 +85,20 @@ class SqlQualityRepo:
                         "    '1 day')::date AS d"
                         "  FROM bounds b"
                         ")"
-                        "SELECT to_char(ds.d, 'YYYY-MM-DD') AS date,"  # noqa: S608
+                        "SELECT to_char(ds.d, 'YYYY-MM-DD') AS date,"
                         "       count(m.id) AS rounds,"
                         "       count(m.id) FILTER (WHERE m.status = 'SUCCESS') AS success,"
                         "       count(m.id) FILTER (WHERE m.status = 'NO_DATA') AS no_data,"
                         "       count(m.id) FILTER (WHERE m.status = 'REJECTED') AS blocked,"
                         "       count(m.id) FILTER (WHERE m.status = 'FAILED') AS failed"
-                        " FROM day_series ds"  # noqa: S608
-                        " LEFT JOIN public.chat_message m"  # noqa: S608
+                        " FROM day_series ds"
+                        " LEFT JOIN public.chat_message m"
                         "   ON m.role = 'ASSISTANT'"
                         "   AND date_trunc('day', m.created_at AT TIME ZONE 'Asia/Shanghai')"
                         "       ::date = ds.d"
                         "  AND m.session_id IN ("
                         f"    SELECT id FROM public.chat_session WHERE {tenant_filter})"
-                        " GROUP BY ds.d ORDER BY ds.d"  # noqa: S608
+                        " GROUP BY ds.d ORDER BY ds.d"
                     ),
                     {**params, "days": days},
                 )
@@ -122,10 +122,10 @@ class SqlQualityRepo:
                         "       count(*) FILTER (WHERE m.status = 'NO_DATA') AS no_data,"
                         "       count(*) FILTER (WHERE m.status = 'REJECTED') AS blocked,"
                         "       count(*) FILTER (WHERE m.status = 'FAILED') AS failed"
-                        f" FROM {_ROUNDS} m"  # noqa: S608
-                        " JOIN public.chat_session s ON s.id = m.session_id"  # noqa: S608
-                        f" WHERE {where}"  # noqa: S608
-                        " GROUP BY s.datasource_key ORDER BY rounds DESC"  # noqa: S608
+                        f" FROM {_ROUNDS} m"
+                        " JOIN public.chat_session s ON s.id = m.session_id"
+                        f" WHERE {where}"
+                        " GROUP BY s.datasource_key ORDER BY rounds DESC"
                     ),
                     params,
                 )
@@ -149,10 +149,10 @@ class SqlQualityRepo:
                         "       count(*) FILTER (WHERE m.status = 'NO_DATA') AS no_data,"
                         "       count(*) FILTER (WHERE m.status = 'REJECTED') AS blocked,"
                         "       count(*) FILTER (WHERE m.status = 'FAILED') AS failed"
-                        f" FROM {_ROUNDS} m"  # noqa: S608
-                        " JOIN public.chat_session s ON s.id = m.session_id"  # noqa: S608
-                        f" WHERE {where}"  # noqa: S608
-                        " GROUP BY m.prompt_version ORDER BY rounds DESC"  # noqa: S608
+                        f" FROM {_ROUNDS} m"
+                        " JOIN public.chat_session s ON s.id = m.session_id"
+                        f" WHERE {where}"
+                        " GROUP BY m.prompt_version ORDER BY rounds DESC"
                     ),
                     params,
                 )
@@ -193,8 +193,8 @@ class SqlQualityRepo:
                 await self._s.execute(
                     text(
                         f"SELECT count(*) FROM {_ROUNDS} m"  # noqa: S608
-                        " JOIN public.chat_session s ON s.id = m.session_id"  # noqa: S608
-                        f" WHERE {where}{extra}"  # noqa: S608
+                        " JOIN public.chat_session s ON s.id = m.session_id"
+                        f" WHERE {where}{extra}"
                     ),
                     params,
                 )
@@ -210,11 +210,11 @@ class SqlQualityRepo:
                         "       m.prompt_version, m.fallback_type, m.session_id,"
                         "       s.datasource_key AS datasource_key,"
                         "       sc.score, sc.grounding, sc.coverage"
-                        f" FROM {_ROUNDS} m"  # noqa: S608
-                        " JOIN public.chat_session s ON s.id = m.session_id"  # noqa: S608
-                        " LEFT JOIN public.chat_turn_score sc ON sc.message_id = m.id"  # noqa: S608
-                        f" WHERE {where}{extra}"  # noqa: S608
-                        " ORDER BY m.created_at DESC LIMIT :lim OFFSET :off"  # noqa: S608
+                        f" FROM {_ROUNDS} m"
+                        " JOIN public.chat_session s ON s.id = m.session_id"
+                        " LEFT JOIN public.chat_turn_score sc ON sc.message_id = m.id"
+                        f" WHERE {where}{extra}"
+                        " ORDER BY m.created_at DESC LIMIT :lim OFFSET :off"
                     ),
                     {**params, "lim": size, "off": (page - 1) * size},
                 )
@@ -242,7 +242,7 @@ class SqlQualityRepo:
                         " FROM public.chat_turn_score sc"
                         " JOIN public.chat_message m ON m.id = sc.message_id"
                         " JOIN public.chat_session s ON s.id = m.session_id"
-                        f" WHERE {' AND '.join(conds)}"  # noqa: S608
+                        f" WHERE {' AND '.join(conds)}"
                     ),
                     params,
                 )
@@ -317,7 +317,7 @@ class SqlQualityRepo:
                     text(
                         "SELECT m.stage_trace FROM public.chat_message m"  # noqa: S608
                         " JOIN public.chat_session s ON s.id = m.session_id"
-                        f" WHERE {' AND '.join(conds)}"  # noqa: S608
+                        f" WHERE {' AND '.join(conds)}"
                     ),
                     params,
                 )
@@ -363,11 +363,11 @@ class SqlQualityRepo:
                         "       m.status, m.fallback_type, m.retry_count, m.rating,"
                         "       sc.score, sc.grounding, sc.coverage, m.trace_id,"
                         "       m.session_id, s.datasource_key, m.prompt_version"
-                        f" FROM {_ROUNDS} m"  # noqa: S608
-                        " JOIN public.chat_session s ON s.id = m.session_id"  # noqa: S608
-                        " LEFT JOIN public.chat_turn_score sc ON sc.message_id = m.id"  # noqa: S608
-                        f" WHERE {where}{extra}"  # noqa: S608
-                        " ORDER BY m.created_at DESC, m.id DESC LIMIT :lim"  # noqa: S608
+                        f" FROM {_ROUNDS} m"
+                        " JOIN public.chat_session s ON s.id = m.session_id"
+                        " LEFT JOIN public.chat_turn_score sc ON sc.message_id = m.id"
+                        f" WHERE {where}{extra}"
+                        " ORDER BY m.created_at DESC, m.id DESC LIMIT :lim"
                     ),
                     {**params, "lim": limit},
                 )
@@ -402,10 +402,10 @@ class SqlQualityRepo:
         row = (
             await self._s.execute(
                 text(
-                    "SELECT bool_or(r.data_scope = 'ALL')"  # noqa: S608
-                    " FROM public.sys_role r"  # noqa: S608
-                    " JOIN public.sys_user_role ur ON ur.role_id = r.id"  # noqa: S608
-                    " WHERE ur.user_id = :u AND r.status = 'ACTIVE'"  # noqa: S608
+                    "SELECT bool_or(r.data_scope = 'ALL')"
+                    " FROM public.sys_role r"
+                    " JOIN public.sys_user_role ur ON ur.role_id = r.id"
+                    " WHERE ur.user_id = :u AND r.status = 'ACTIVE'"
                 ),
                 {"u": user_id},
             )
