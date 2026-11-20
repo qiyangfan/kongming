@@ -126,8 +126,9 @@ web 前端统一遵循聚合目录 `../FRONTEND-CONSTITUTION.md`(Article 0–10)
   375(主)/768/1280 三档 + 亮暗两态(Article 9)。
   备注(设计 D7):聚合目录 `../FRONTEND-CONSTITUTION.md` 与
   `../scripts/sync-frontend-standard.sh` 均在原位,同步机制照下条执行;
-  本变更新增的共享组件(data-view/empty-state/error-alert/bottom-nav 等)
-  尚未收录进双仓标准件清单,是否双仓收编待 owner 裁定,先行修改源=本仓。
+  共享标准件清单以 sync 脚本 SHARED 为准(empty-state/error-alert 已收录);
+  data-view/bottom-nav 不收编进双仓清单——三仓列表与壳层已按各自习语分化
+  (DataView / MobileCard / DataList),统一收编需三仓共同重构,无对客收益。
 - ui/ 与共享组件是双仓标准件(与 jinguan 逐字节一致;theme-store 例外:同构不同 key):
   **先改本仓再同步** → 聚合目录 `bash ../scripts/sync-frontend-standard.sh`。
 - 收尾门禁:`pnpm typecheck && pnpm lint` + 宪法 Article 8 自检 grep + 亮暗两态走查改动页。

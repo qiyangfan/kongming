@@ -26,6 +26,8 @@
   关系扩展开、召回闸恒裁剪形态、文档实体扩展与句界校准缺省关(部署级开关)。
 - 前端标准件与宪法纪律见 `AGENTS.md` 与聚合目录 `../FRONTEND-CONSTITUTION.md`;
   `ui/` 与共享组件先改本仓再 `bash ../scripts/sync-frontend-standard.sh`。
+- 共享标准件收口(2026-11-20):FieldLabel 375 不换行(`whitespace-nowrap`+图标 `shrink-0`)、
+  status-badge 注释校正;与 jinguan 同步零差异,`data-view`/`bottom-nav` 不收编。
 
 ### 1.2 门禁构成与门禁实测值
 
@@ -310,6 +312,9 @@ SQL/PG:
 | 前端 Markdown 渲染 | react-markdown + remark-gfm/breaks;不解析原始 HTML                                                                   | ADR-009                             |
 | 挂账治理           | 开放挂账=零;新发现项一律给终态(修/关闭/条件触发/产品登记)                                                            | backlog-settlement 终态块           |
 
+补充终态(2026-11-20):前端列表/壳层标准件清单以 sync 脚本 SHARED 为准;
+`data-view`/`bottom-nav` 不收编(三仓列表与壳层已按各自习语分化)。
+
 挂账终态:开放挂账=零。条件触发登记(触发即评估,非开放债务):
 
 - 注入拆字/全角变体绕过:触发=出现真实绕过事件或规模化信号。
@@ -328,6 +333,10 @@ SQL/PG:
 
 每条只保留验收证据,过程见 git log 与归档工件。
 
+- **2026-11-20 跨仓标准件收口**:FieldLabel 375 不换行(`whitespace-nowrap` + 图标
+  `shrink-0`)与 status-badge 注释校正;`sync-frontend-standard.sh --apply` 后与
+  jinguan 零差异;本仓 web typecheck/lint/format/183 测试全绿,jinguan 侧 42 测试与
+  build 全绿。`data-view`/`bottom-nav` 裁定不收编(三仓列表与壳层已按各自习语分化)。
 - **2026-11-20 门禁补全**:`make check` 单条绿(数值见 1.2);补齐 CPD/死代码/
   依赖/镜像/配置 lint、前端覆盖率阈值与 E2E、回环网络守卫、后台任务清理、
   安全域覆盖率地板、迁移 DDL/往返、信任边界编排层、内链与评估红线脚本。
