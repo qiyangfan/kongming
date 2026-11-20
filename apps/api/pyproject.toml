@@ -456,6 +456,13 @@ forbidden_modules = [
   "kongming.*.documents_repo",
   "kongming.*.graph_repo",
   "kongming.*.collab_repo",
+  # 命名不是单段 service 的服务/组合根,通配无法表达,逐条列出。
+  "kongming.rag.admin_service",
+  "kongming.rag.documents_service",
+  "kongming.chat.session_service",
+  "kongming.audit.writer",
+  "kongming.bot.service_factory",
+  "kongming.chat.wiring",
 ]
 
 [[tool.importlinter.contracts]]
