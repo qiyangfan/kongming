@@ -26,6 +26,9 @@
   关系扩展开、召回闸恒裁剪形态、文档实体扩展与句界校准缺省关(部署级开关)。
 - 前端标准件与宪法纪律见 `AGENTS.md` 与聚合目录 `../FRONTEND-CONSTITUTION.md`;
   `ui/` 与共享组件先改本仓再 `bash ../scripts/sync-frontend-standard.sh`。
+- 质量门禁批次(2026-11-20):分层 import 契约 30 条(models/repository/跨域 router)、
+  pre-commit(gitleaks+ruff)、liannu pyright/import-linter;`make api-check` 与
+  `make liannu-check` 全绿;`2026-11-20-close-quality-gate-gaps` 已归档(--skip_specs)。
 - 共享标准件收口(2026-11-20):FieldLabel 375 不换行(`whitespace-nowrap`+图标 `shrink-0`)、
   status-badge 注释校正;与 jinguan 同步零差异,`data-view`/`bottom-nav` 不收编。
 
@@ -332,6 +335,11 @@ SQL/PG:
 ## 四、验收记录
 
 每条只保留验收证据,过程见 git log 与归档工件。
+
+- **2026-11-20 质量门禁批次**:分层 import 契约 30 kept/0 broken;`make api-check` exit 0
+  (ruff/pyright/mypy/pylint/deptry/pytest);`make liannu-check` exit 0(pyright 0 errors、
+  import-linter KEPT、覆盖率 90.37%);pre-commit v8.30.1 + ruff 0.17.1 validate 通过。
+  未验证:推送后 CI 实跑(按纪律不轮询)。
 
 - **2026-11-20 跨仓标准件收口**:FieldLabel 375 不换行(`whitespace-nowrap` + 图标
   `shrink-0`)与 status-badge 注释校正;`sync-frontend-standard.sh --apply` 后与
