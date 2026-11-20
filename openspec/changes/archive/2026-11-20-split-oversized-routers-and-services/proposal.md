@@ -62,9 +62,9 @@ api 面还有六个：
 → paths/operationId 不变）。无需新增或修改 capability spec，`.openspec.yaml`
 标记 `skip_specs: true`。
 
-涉及契约管线断言，引用 [ADR-005](../../../docs/adr/005-contract-pipeline.md)；
+涉及契约管线断言，引用 [ADR-005](../../../../docs/adr/005-contract-pipeline.md)；
 适配器迁移不触碰 api↔agent 信任边界，引用
-[ADR-002](../../../docs/adr/002-trust-boundary.md) 作为保持性约束；无数据库
+[ADR-002](../../../../docs/adr/002-trust-boundary.md) 作为保持性约束；无数据库
 schema 变更，ADR-004 不适用。
 
 ## Impact

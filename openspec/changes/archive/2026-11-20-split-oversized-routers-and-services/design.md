@@ -498,9 +498,9 @@ _caller_team_ids/_require_usable_datasource + repo/embedder/cache/member_teams
 
 ## References
 
-- [ADR-002：信任边界](../../../docs/adr/002-trust-boundary.md)（适配器迁移
+- [ADR-002：信任边界](../../../../docs/adr/002-trust-boundary.md)（适配器迁移
   不触碰 api↔agent 边界，保持性约束）
-- [ADR-005：契约管线](../../../docs/adr/005-contract-pipeline.md)（OpenAPI
+- [ADR-005：契约管线](../../../../docs/adr/005-contract-pipeline.md)（OpenAPI
   字节级零漂移断言与 contracts-check 门禁）
 - 宪法 Article II（领域纯净，import-linter 守护）、Article V（契约单源）
 - 归档先例 `openspec/changes/archive/2026-10-22-separate-escape-and-sql-utils/`

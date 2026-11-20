@@ -91,7 +91,7 @@ artifacts(027)⇄ cloud-code-sandbox(029);agent-memory(026)← team-workspace(03
 联网搜索;五方向全部有落地载体)。(091:拓扑配置面/协作账本/查询端点/
 web 协作视图/端到端冒烟双场景)。**095–114 批亦已全部落地归档**(097 探针
 面板/098 中文分词/099 HTTP 连接器/100 工单/106 召回闸恒生效/110 指标可见性/
-114 语音问数等;明细单源=HANDOFF 顶节与 openspec/changes/archive)。
+114 语音问数等;明细单源=openspec/changes/archive 工件与 git log)。
 任务/协作部署级上限缺省值见 docs/tech-stack.md「任务/协作部署级上限」节。
 **2026-10-18**:ai-platform 对齐调研(docs/ai-platform-alignment.md)实证剩余
 差距后,净缺口立项(owner 裁决:求职学习项目以学习与展示价值为准,不做
@@ -117,7 +117,7 @@ registry 实查)裁决=ADR-011,立项两变更:①`adopt-mcp-sdk2`——MCP 规�
 (mcp SDK 早是 dev 依赖),收编官方 SDK 2.x(dev→prod,<2→>=2.3,<3),
 mcp-interop 域 delta(跨修订协商+当前修订声明);②`stack-refresh-2026-10`
 (skip_specs 行为保持)。**同日 apply 终态:两变更均已落地归档**(SDK 双向收编
-+四批刷新,实施事实见 HANDOFF「全栈刷新现态」与「MCP 协议栈现态」)。四批:后端 major(SQLAlchemy 2.1/openai 3.35/
++四批刷新,实施事实见 ADR-011 与 archive/2026-10-18-stack-refresh-2026-10 归档工件)。四批:后端 major(SQLAlchemy 2.1/openai 3.35/
 anthropic 1.15)+前端 major(Vite 8 Rolldown/vitest 5/eslint 10/
 react-router 8/echarts 6/react 19.3+React Compiler 1.0 替代手写 memo
 增量)+基础设施(compose pg17→pg18 对齐开发机、Python 3.14 可选档)+

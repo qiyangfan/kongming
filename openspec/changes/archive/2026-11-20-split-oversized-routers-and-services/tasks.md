@@ -171,17 +171,28 @@
   判定首轮为环境干扰，非回归。依赖清洞后复跑仍为 1691/10/5、覆盖率
   76.61%（pypdf 7.1.1、certifi、joserfc、opentelemetry-api 升级；沙箱
   `_parse_outcome` 伪造字段逃逸与 team attach 死参数已修）。
-- [ ] 11.2 `make check` 全量（api/agent/liannu/web/contracts + 新增
+- [x] 11.2 `make check` 全量（api/agent/liannu/web/contracts + 新增
   dead-code/dup-check/deps-audit/lint-config）一次绿。
-  本地实测：agent 613、liannu 23、web 137+build+size(约 663/800kB)+e2e、
-  contracts 零 diff、新增门禁全绿；api 全量仍是 5 个环境失败（4 联邦出站
-  + 1 STT 模型），本机无法全绿，终判待有外网/模型的 CI。
-- [ ] 11.3 手工冒烟：本地起 api（env 栈），真实问答一轮——同步问答、流式
+  实测（2026-11-20）：单条 `make check` EXIT=0——api 1719 通过/10 跳过/覆盖率
+  76.84%、agent 613、liannu 23、web（typecheck/eslint/madge/stylelint/vitest 183/
+  build/size/e2e 2）、contracts 零 diff、dead-code/dup/deps/license/lint-config/
+  lock/compose/secret 全绿。此前「本机无法全绿」的根因是 `NO_PROXY` 含
+  `[::1],::1`（api-check 未像 agent-check 那样固定白名单），已在 Makefile 修正；
+  另修 tests/test_trust_boundary_compose.py 的 pyright 严格类型报错。
+- [x] 11.3 手工冒烟：本地起 api（env 栈），真实问答一轮——同步问答、流式
   问答（含心跳/断线续存）、SQL 卡再执行、结果导出、EXPLAIN、会话列表/重命名/
   删除，记录于 apply。
+  实测（2026-11-20，api 8000/agent 8001 起当前树、临时账号 smoke1120 用完即删）：
+  同步问答 `film` 计数 1000（verdict=PASS）；流式输出 stage/sql/summary/result/
+  trace 五类帧、终帧 success=true；流式中途断开（3s 杀连接）后后台续跑，30s 后
+  会话消息里 assistant 消息已落库（含 SQL 与摘要）——断线续存成立；EXPLAIN 返回
+  Aggregate/Seq Scan 计划；SQL 卡再执行改条件后返 195；CSV 导出带 BOM 与
+  Content-Disposition 文件名；会话列表/改名 200、删除 204，冒烟会话全部清空。
+  心跳帧未在快速请求窗口内出现（`STREAM_HEARTBEAT_SEC` 空闲才发），由
+  test_query_stream 单测覆盖。
 - [x] 11.4 HANDOFF 口径更新：组合根模块路径（「四个组合根 mcp/bot/chat/
   toolcall router」等指向旧路径的条目）同步为新模块；登记 5 个环境失败与
   本变更无关的口径。
-- [ ] 11.5 归档：`openspec validate split-oversized-routers-and-services
-  --strict` 通过后按流程归档（skip_specs 已标记）。本地 strict 已通过；
-  归档等外部 CI 全绿。
+- [x] 11.5 归档：`openspec validate split-oversized-routers-and-services
+  --strict` 通过后按流程归档（skip_specs 已标记）。本地 strict 已通过，
+  2026-11-20 归档为 `archive/2026-11-20-split-oversized-routers-and-services`。

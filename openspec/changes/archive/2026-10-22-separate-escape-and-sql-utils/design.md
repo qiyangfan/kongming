@@ -55,7 +55,7 @@
 
 在隔离事务的临时表上生成 200,000 条代表性文本，分别执行前缀 `ILIKE 'needle%'`、后缀 `ILIKE '%needle'`、包含 `ILIKE '%needle%'` 和短词 `ILIKE '%ab%'`，对比无索引、`text_pattern_ops` B-tree 与 `gin_trgm_ops` GIN 的 `EXPLAIN (ANALYZE, BUFFERS)`。事务最后回滚，未改动测试库对象。无索引时四种查询均为顺序扫描；B-tree 对大小写敏感的 `LIKE 'needle%'` 使用了 Bitmap Index Scan，但对现有 `ILIKE 'needle%'` 仍是顺序扫描，不能在保持语义的前提下替代当前索引候选。加 GIN 后，三个含足够 trigram 的 `ILIKE` 模式使用 Bitmap Index Scan，模式重检后分别返回 2,000、2,000、6,000 行；两字符 `%ab%` 仍走顺序扫描，返回 2,000 行。索引前后行数相同。
 
-该探针证明 `pg_trgm` 能为足够长的三种 `ILIKE` 模式提供候选路径，也验证短词会退化扫描且不丢结果。合成数据的命中行分散在全部堆页，GIN 执行计划仍读取全部 1,279 个本地堆页；一次临时表探针无法证明各业务表的实际读收益，也没有覆盖额外索引的存储和写入成本。因此本 change 不加生产索引迁移。若后续要建索引，须先用对应业务表的数据分布和完整仓储查询复核，并按 [ADR-004：Schema 基线纪律](../../../docs/adr/004-schema-baseline.md) 新增 Alembic 迁移。
+该探针证明 `pg_trgm` 能为足够长的三种 `ILIKE` 模式提供候选路径，也验证短词会退化扫描且不丢结果。合成数据的命中行分散在全部堆页，GIN 执行计划仍读取全部 1,279 个本地堆页；一次临时表探针无法证明各业务表的实际读收益，也没有覆盖额外索引的存储和写入成本。因此本 change 不加生产索引迁移。若后续要建索引，须先用对应业务表的数据分布和完整仓储查询复核，并按 [ADR-004：Schema 基线纪律](../../../../docs/adr/004-schema-baseline.md) 新增 Alembic 迁移。
 
 ## Risks / Trade-offs
 
@@ -68,4 +68,4 @@
 - [PostgreSQL 18：Index Types](https://www.postgresql.org/docs/18/indexes-types.html)（B-tree 对左锚定 `LIKE` 与 `ILIKE` 的条件）
 - [PostgreSQL 18：pg_trgm](https://www.postgresql.org/docs/18/pgtrgm.html)（trigram 索引支持 `LIKE`/`ILIKE` 且不要求左锚定）
 - [PostgreSQL 18：Operator Classes](https://www.postgresql.org/docs/18/indexes-opclass.html)（pattern-ops 对排序规则的适用条件）
-- [ADR-004：Schema 基线纪律](../../../docs/adr/004-schema-baseline.md)（若执行计划证明需要索引，新增索引须通过 Alembic 迁移）
+- [ADR-004：Schema 基线纪律](../../../../docs/adr/004-schema-baseline.md)（若执行计划证明需要索引，新增索引须通过 Alembic 迁移）

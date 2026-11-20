@@ -64,3 +64,15 @@ muniu 提供:多上游路由与 failover(首 token 边界语义)、per-key RPM/T
 - **选型参考**:`docs/model-providers.md` 官方端点预设目录——各家官方 OpenAI 兼容端点、各家 Anthropic 分支端点(消费路径说明)、muniu 与 ollama 等「自建网关/本地推理」类条目。选 muniu 的理由仍是原 ADR 的三项成本(密钥收敛/统一计量/failover);不选时这三项成本自担,零架构阻碍。
 - **现网不动**:当前部署仍是 muniu 形态,灰度与月末对账照旧;`.env` 三处改回直连即回官方形态,切换成本与原回滚路径一致。
 - **供应商侧配套**:官方端点清单与各家 Plan 订阅端点红线以 muniu 仓 `docs/provider-presets.md` 为交叉核对源(2026-09-26 版)。
+
+## 修订(2026-11-20):身份权威改归独立 IdP 虎符
+
+本 ADR「成本对账」小节以「锦官统一身份」为前提的两处长期演进表述(「kongming 租户身份
+与锦官用户身份未统一」「长期演进:锦官统一身份后……」),其身份权威改为平台级独立
+IdP 虎符(`longzhong/hufu`,标准 OIDC OP,见 ADR-006 追加节):
+
+- 孔明以可选 OIDC provider 接入,本地认证与本地会话签发保持默认;关闭 provider 即回落,
+  孔明可独立发布。互联只经标准 OIDC(发现文档/JWKS/授权码 + PKCE/`sub` 与 profile claims),
+  不共享库/DB、不依赖私有端点。
+- 身份权威不碰账本,资金锚仍在锦官 `users.id`(三仓影子映射)。
+- 成本对账从身份权威取数仍属后续演进,不改变本 ADR 任何计价与对账口径。
