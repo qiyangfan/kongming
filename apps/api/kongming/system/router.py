@@ -17,7 +17,7 @@ from redis.asyncio import Redis
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.router import current_user, require_perm
+from kongming.auth.deps import current_user, require_perm
 from kongming.auth.stores import RedisRefreshFamilyStore
 from kongming.config import get_settings
 from kongming.db import get_session

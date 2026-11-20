@@ -64,7 +64,7 @@ def test_gate_class_annotations_resolve_at_runtime() -> None:
 _COMPOSITION_ROOT_MODULES = [
     "kongming/chat/schemas.py",
     "kongming/chat/dependencies.py",
-    "kongming/chat/adapters.py",
+    "kongming/chat/wiring.py",
     "kongming/chat/session_service.py",
     "kongming/task/schemas.py",
     "kongming/task/dependencies.py",

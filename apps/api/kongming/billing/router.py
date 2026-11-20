@@ -6,8 +6,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kongming.auth.deps import current_user, require_perm
 from kongming.auth.repository import SqlOperLogRepo
-from kongming.auth.router import current_user, require_perm
 from kongming.billing.dependencies import get_billing_service
 from kongming.billing.reconciliation import (
     ReconciliationReport,

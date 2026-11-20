@@ -10,7 +10,7 @@ from typing import Annotated, Any, cast
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.router import current_user, require_perm
+from kongming.auth.deps import current_user, require_perm
 from kongming.config import get_settings
 from kongming.db import get_session, uuid7
 from kongming.task import models as m

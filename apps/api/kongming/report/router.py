@@ -18,8 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kongming.auth.deps import current_user, require_perm
 from kongming.auth.repository import SqlOperLogRepo
-from kongming.auth.router import current_user, require_perm
 from kongming.chat.agent_client import AgentClient
 from kongming.chat.models import ChartSuggestion, MessageMeta
 from kongming.chat.repository import ChatRepository

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-20
+goal: 补齐分层契约与 liannu 门禁——import-linter 层间方向、pre-commit、liannu pyright/import-linter/覆盖率
+skip_specs: true

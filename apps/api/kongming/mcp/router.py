@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kongming.auth.deps import current_user, require_perm
 from kongming.auth.repository import SqlOperLogRepo
-from kongming.auth.router import current_user, require_perm
 from kongming.chat.repository import ChatRepository
 from kongming.config import get_settings
 from kongming.datasource.cipher import get_cipher

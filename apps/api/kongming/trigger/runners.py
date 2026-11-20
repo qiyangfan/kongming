@@ -351,9 +351,9 @@ async def _workflow_deps(
 
     from kongming.chat.dependencies import get_agent_client
     from kongming.team.repository import SqlTeamRepo
+    from kongming.workflow.adapters import AgentWorkflowRunner, InternalSqlRunner
     from kongming.workflow.http_runner import HttpNodeRunner
     from kongming.workflow.repository import SqlWorkflowRepo
-    from kongming.workflow.router import AgentWorkflowRunner, InternalSqlRunner
     from kongming.workflow.service import WorkflowService
 
     # tenant_key 反解(触发器行只有 tenant_id)
@@ -487,7 +487,7 @@ async def _run_bot(
     s: Any, tenant_id: str, target_key: str, inputs: dict[str, Any], channel: str
 ) -> tuple[bool, str, str]:
     """bot 目标:以创建者可见的 bot 身份问答执行。"""
-    from kongming.bot.dependencies import get_bot_service as _bot_service_factory
+    from kongming.bot.service_factory import get_bot_service as _bot_service_factory
     from kongming.chat.dependencies import get_agent_client as _gac
 
     bot_svc = _bot_service_factory(s, _gac())

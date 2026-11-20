@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kongming.audit.archive import run_archive, run_restore
 from kongming.audit.repository import AuditRepository
 from kongming.audit.service import AuditNotFound, AuditService
-from kongming.auth.router import current_user, require_perm
+from kongming.auth.deps import current_user, require_perm
 from kongming.config import get_settings
 from kongming.db import get_session
 

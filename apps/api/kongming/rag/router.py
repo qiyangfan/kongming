@@ -11,7 +11,7 @@ from pydantic import Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.router import current_user, require_perm
+from kongming.auth.deps import current_user, require_perm
 from kongming.config import get_settings
 from kongming.datasource.models import PG_IDENTIFIER_PATTERN
 from kongming.db import get_session
@@ -531,8 +531,8 @@ async def _semantic_hints(
     try:
         import re as _re
 
+        from kongming.semantic.adapters import CallerDeptScopeAdapter
         from kongming.semantic.repository import SqlSemanticRepo
-        from kongming.semantic.router import CallerDeptScopeAdapter
         from kongming.semantic.service import SemanticService
 
         tid_row = await _tenant_id_by_key(session, req.tenant_key)

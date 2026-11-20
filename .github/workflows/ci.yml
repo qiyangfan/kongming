@@ -219,6 +219,8 @@ jobs:
       - run: uv run ruff check .
       - run: uv run pylint --disable=all --enable=too-many-lines,too-many-public-methods,too-many-locals,too-many-return-statements,too-many-statements,too-many-ancestors,too-many-boolean-expressions,cyclic-import,E --disable=E1101 --jobs=0 liannu
       - run: uv run mypy liannu
+      - run: uvx --from pyright==1.1.411 pyright -p .
+      - run: uvx --from import-linter lint-imports --config pyproject.toml
       - run: uvx deptry==0.25.1 .
       - run: uvx --from vulture==2.16 vulture liannu --min-confidence 100
       - run: uv run pytest -q --cov --cov-report=xml

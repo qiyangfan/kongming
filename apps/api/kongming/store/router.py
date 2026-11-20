@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.router import current_user, require_perm
+from kongming.auth.deps import current_user, require_perm
 from kongming.bot.repository import SqlBotRepo
 from kongming.chat.repository import ChatRepository
 from kongming.config import get_settings
@@ -87,12 +87,12 @@ class _StoreRunner:
         channel: str,
         definition: dict[str, Any] | None = None,
     ) -> tuple[bool, str, str]:
-        from kongming.bot.dependencies import get_bot_service as _bot_factory
+        from kongming.bot.service_factory import build_bot_service_for_agent as _bot_factory
         from kongming.chat.dependencies import get_agent_client
         from kongming.db import get_sessionmaker
 
         async with get_sessionmaker()() as s:
-            svc = _bot_factory(s, get_agent_client())
+            svc = _bot_factory(get_agent_client(), s)
             from kongming.bot.service import BotNotFound
 
             try:
@@ -120,10 +120,10 @@ class _StoreToolLister:
     async def resolve_runnable(
         self, *, creator_id: str, tenant_id: str, row: dict[str, Any]
     ) -> list[dict[str, Any]]:
-        from kongming.bot.dependencies import get_bot_service as _bot_factory
+        from kongming.bot.service_factory import build_bot_service_for_agent as _bot_factory
         from kongming.chat.dependencies import get_agent_client
 
-        svc = _bot_factory(self._s, get_agent_client())
+        svc = _bot_factory(get_agent_client(), self._s)
         return await svc.resolve_tools(creator_id=creator_id, tenant_id=tenant_id, row=row)
 
 

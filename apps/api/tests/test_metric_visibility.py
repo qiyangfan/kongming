@@ -176,7 +176,7 @@ async def _seed_scope_world(session: AsyncSession) -> dict[str, str]:
 
 async def test_resolver_scope_shapes(session: AsyncSession) -> None:
     """ALL→universal;DEPT/CUSTOM→集合;DEPT_AND_BELOW→递归;SELF/CUSTOM 空/无角色→空。"""
-    from kongming.semantic.router import CallerDeptScopeAdapter
+    from kongming.semantic.adapters import CallerDeptScopeAdapter
 
     w = await _seed_scope_world(session)
     ad = CallerDeptScopeAdapter(session)

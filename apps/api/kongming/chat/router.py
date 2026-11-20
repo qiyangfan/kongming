@@ -17,7 +17,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 
-from kongming.auth.router import current_user, require_perm
+from kongming.auth.deps import current_user, require_perm
 from kongming.chat.costgate import (
     ChatQuotaExceeded,
     ChatQuotaUnavailable,

@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.audit.repository import AuditRepository
-from kongming.auth.router import require_perm
+from kongming.auth.deps import require_perm
 from kongming.db import get_session
 from kongming.llmusage.repository import SqlLlmUsageRepo
 from kongming.toolcall.repository import SqlToolCallRepo

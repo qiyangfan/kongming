@@ -4,14 +4,11 @@
 import logging
 from typing import Annotated
 
-import jwt as pyjwt
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, Request
 from pydantic import BaseModel
-from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import JSONResponse, Response
 
-from kongming.auth import providers, tokens
+from kongming.auth.deps import Service, current_user
 from kongming.auth.models import (
     AccountDisabled,
     AccountLocked,
@@ -25,76 +22,10 @@ from kongming.auth.models import (
     TokenInvalid,
     TokenPair,
 )
-from kongming.auth.repository import SqlUnitOfWork
-from kongming.auth.service import AuthService
-from kongming.auth.stores import (
-    RedisLoginAttemptStore,
-    RedisOAuthStateStore,
-    RedisRefreshFamilyStore,
-)
-from kongming.config import get_settings
-from kongming.db import get_session
-from kongming.redis_client import get_redis
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 logger = logging.getLogger(__name__)
-
-
-# ---- 依赖装配(唯一知道"哪个端口绑哪个实现"的地方) ----
-
-
-async def get_auth_service(
-    session: Annotated[AsyncSession, Depends(get_session)],
-    redis: Annotated[Redis, Depends(get_redis)],
-) -> AuthService:
-    return AuthService(
-        SqlUnitOfWork(session),
-        attempts=RedisLoginAttemptStore(redis),
-        families=RedisRefreshFamilyStore(redis),
-        states=RedisOAuthStateStore(redis),
-        settings=get_settings(),
-        registry=providers.REGISTRY,
-    )
-
-
-Service = Annotated[AuthService, Depends(get_auth_service)]
-
-
-async def current_user(request: Request) -> dict[str, object]:
-    """Bearer access token → claims 依赖。缺失/无效一律 401(不泄露差异)。"""
-    auth = request.headers.get("Authorization", "")
-    if not auth.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    try:
-        claims = tokens.verify(auth.removeprefix("Bearer "))
-    except pyjwt.PyJWTError as e:
-        raise HTTPException(status_code=401, detail="unauthorized") from e
-    return claims
-
-
-def require_perm(perm_code: str):  # type: ignore[no-untyped-def]
-    """权限点校验依赖(rbac spec「权限点校验机制」):实时查库,绑定变更立即生效。
-
-    用法:`dependencies=[Depends(require_perm("chat:execute"))]`。
-    认证失败 401(先于本依赖,current_user 抛);有认证无权限 403 并落操作审计
-    (rbac spec「撤销权限立即生效」:审计记录该 403;审计写失败不阻断拒绝)。
-    """
-
-    async def _dep(
-        request: Request,
-        user: Annotated[dict[str, object], Depends(current_user)],
-        svc: Service,
-    ) -> None:
-        info = await svc.me(str(user["sub"]))
-        if perm_code not in info.perm_codes:
-            try:
-                await svc.log_perm_denied(str(user["sub"]), perm_code, request.url.path)
-            except Exception:  # 审计尽力而为,拒绝本身不受影响
-                logger.warning("perm_denied 审计写入失败", exc_info=True)
-            raise HTTPException(status_code=403, detail="forbidden")
-
-    return _dep
 
 
 # ---- 传输模型 ----

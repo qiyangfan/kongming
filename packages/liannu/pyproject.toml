@@ -81,3 +81,14 @@ ignore = ["PLW0603", "TRY003"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "T201"] # pytest 惯例
+
+# 独立包边界:liannu 是 SQL 安全引擎,不得反向依赖消费方 kongming。
+[tool.importlinter]
+root_packages = ["liannu"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "liannu 不依赖消费方 kongming"
+type = "forbidden"
+source_modules = ["liannu"]
+forbidden_modules = ["kongming"]

@@ -30,7 +30,7 @@ agent-check:
 
 # 连弩(053 SQL 安全引擎):独立 dev 环境全量门禁(对拍基线回放 + 覆盖率)
 liannu-check:
-	cd packages/liannu && uv run ruff format --check . && uv run ruff check . && uv run pylint --disable=all --enable=too-many-lines,too-many-public-methods,too-many-locals,too-many-return-statements,too-many-statements,too-many-ancestors,too-many-boolean-expressions,cyclic-import,E --disable=E1101 --jobs=0 liannu && uv run mypy liannu && uvx deptry==0.25.1 . && uv run pytest -q --cov
+	cd packages/liannu && uv run ruff format --check . && uv run ruff check . && uv run pylint --disable=all --enable=too-many-lines,too-many-public-methods,too-many-locals,too-many-return-statements,too-many-statements,too-many-ancestors,too-many-boolean-expressions,cyclic-import,E --disable=E1101 --jobs=0 liannu && uv run mypy liannu && uvx deptry==0.25.1 . && uv run pytest -q --cov && cd ../../apps/api && uv run lint-imports --config ../../packages/liannu/pyproject.toml && uv run pyright -p ../../packages/liannu
 
 web-check:
 	cd apps/web && pnpm typecheck && pnpm lint && pnpm dlx madge@8 --circular --extensions ts,tsx src && pnpm lint:css && pnpm format:check && pnpm test:cov && pnpm build && pnpm size && pnpm e2e

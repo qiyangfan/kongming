@@ -1,24 +1,15 @@
 """chat 组合根:FastAPI 依赖工厂,装配 ChatService/SuggestionsService 与成本闸。"""
 
+from __future__ import annotations
+
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.repository import SqlOperLogRepo
-from kongming.chat.adapters import (
-    AttachmentChecker,
-    ChatGuardrail,
-    ChatUsageCounter,
-    InternalExecuteRunner,
-    InternalExplainRunner,
-    MemoryAdapter,
-    PendingToolReader,
-    RegistryToolSpecProvider,
-    SchemaOverviewSource,
-)
 from kongming.chat.agent_client import AgentClient
 from kongming.chat.costgate import ChatCostGate
 from kongming.chat.memory_tasks import extract_memory_task
@@ -28,6 +19,11 @@ from kongming.chat.scoring_tasks import score_answer_task
 from kongming.chat.service import ChatService
 from kongming.chat.session_service import ChatSessionService
 from kongming.chat.suggestions import SuggestionsService
+
+if TYPE_CHECKING:  # 延迟导入:chat.wiring 装配他域仓储,顶层导入会把各域路由卷进 chat 依赖链
+    from kongming.chat.wiring import (
+        SchemaOverviewSource,
+    )
 from kongming.chat.title_tasks import rewrite_session_title
 from kongming.config import get_settings
 from kongming.datasource.repository import SqlDatasourceRepo
@@ -64,6 +60,8 @@ def get_rag_service(session: AsyncSession) -> RagService:
 def _build_cost_gate() -> ChatCostGate:
     """成本双闸组合根(limiter=Redis 固定窗口;counter=上条适配;
     oper=SqlOperLogRepo 独立短会话;参数取自 settings,0=不限)。"""
+    from kongming.chat.wiring import ChatUsageCounter
+
     settings = get_settings()
 
     class _Oper:
@@ -92,6 +90,16 @@ def get_chat_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     agent: Annotated[AgentClient, Depends(get_agent_client)],
 ) -> ChatService:
+    from kongming.chat.wiring import (
+        AttachmentChecker,
+        ChatGuardrail,
+        InternalExecuteRunner,
+        InternalExplainRunner,
+        MemoryAdapter,
+        PendingToolReader,
+        RegistryToolSpecProvider,
+    )
+
     # 断线续存:stream_store_factory 开独立会话落库(title_tasks 同款模式)
     # tool_specs/pending_tools 绑定 toolcall 域(注册表过滤+待确认聚合,
     # 均独立短会话——同步/流式路径通用,不随请求作用域会话取消)
@@ -131,6 +139,8 @@ def get_session_service(
 def get_schema_overview(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SchemaOverviewSource:
+    from kongming.chat.wiring import SchemaOverviewSource
+
     return SchemaOverviewSource(session)
 
 

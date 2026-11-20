@@ -14,8 +14,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kongming.auth.deps import current_user, require_perm
 from kongming.auth.repository import SqlOperLogRepo
-from kongming.auth.router import current_user, require_perm
 from kongming.chat.export import to_csv
 from kongming.chat.scoring import LOW_SCORE_THRESHOLD
 from kongming.db import get_session

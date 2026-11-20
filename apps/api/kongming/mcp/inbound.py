@@ -56,7 +56,7 @@ class _GateAuthMiddleware:
 
     async def _authorize_and_forward(self, scope: Scope, body: bytes, send: Send, key: str) -> None:
         """api-key 解析后把 key 信息挂 scope state,并以重放 body 调用 SDK 路由。"""
-        from kongming.bot.dependencies import build_bot_service_with_session
+        from kongming.bot.service_factory import build_bot_service_with_session
         from kongming.db import get_sessionmaker
 
         async with get_sessionmaker()() as session:

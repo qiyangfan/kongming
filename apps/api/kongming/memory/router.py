@@ -13,8 +13,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kongming.auth.deps import current_user
 from kongming.auth.repository import SqlOperLogRepo
-from kongming.auth.router import current_user
 from kongming.db import get_session
 from kongming.memory.repository import SqlMemoryRepo
 from kongming.memory.service import (

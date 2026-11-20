@@ -1,7 +1,8 @@
 """attachment 路由(薄适配层):用户附件上传与内部一次性读取。"""
 
-import contextlib
 import logging
+import uuid
+from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, UploadFile
@@ -9,22 +10,14 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.attachment.models import (
-    MAX_BYTES,
-    sniff_mime,
-)
-from kongming.attachment.repository import SqlAttachmentRepo
-from kongming.auth.repository import SqlOperLogRepo
-from kongming.auth.router import current_user, require_perm
-from kongming.chat.repository import ChatRepository
+from kongming.attachment import service
+from kongming.auth.deps import current_user, require_perm
 from kongming.db import get_session
 
 log = logging.getLogger(__name__)
 
 chat_router = APIRouter(prefix="/chat", tags=["attachment"])
 internal_router = APIRouter(prefix="/internal/attachment", tags=["internal"])
-
-_CHUNK = 256 * 1024
 
 
 class AttachmentOut(BaseModel):
@@ -46,55 +39,30 @@ async def upload_attachment(
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> AttachmentOut:
-    """流式读+超限即弃;magic 复核(Content-Type 可伪造);审计落库。"""
-    buf = bytearray()
-    while True:
-        chunk = await file.read(_CHUNK)
-        if not chunk:
-            break
-        buf.extend(chunk)
-        if len(buf) > MAX_BYTES:
-            raise HTTPException(status_code=400, detail="ATTACHMENT_TOO_LARGE")
-    if not buf:
-        raise HTTPException(status_code=400, detail="ATTACHMENT_EMPTY")
-    mime = sniff_mime(bytes(buf[:16]))
-    if mime is None:
-        raise HTTPException(status_code=400, detail="ATTACHMENT_TYPE_INVALID")
-    repo = SqlAttachmentRepo(session)
-    # 租户解析与 chat 同构(读 X-Tenant-Id 头):若回退默认租户,
-    # 非默认租户下「上传→引用」会 404(归属校验按当前租户,附件却绑默认)
-    chat_repo = ChatRepository(session)
-    if x_tenant_id is not None:
-        bound = await chat_repo.find_bound_tenant(user_id=str(user["sub"]), tenant_key=x_tenant_id)
-        tenant = (bound, x_tenant_id) if bound is not None else None
-    else:
-        tenant = await chat_repo.find_default_tenant(user_id=str(user["sub"]))
-    if tenant is None:
-        raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN")
-    filename = (file.filename or "image")[:256]
-    att_id = await repo.insert(
-        tenant_id=str(tenant[0]),
-        user_id=str(user["sub"]),
-        filename=filename,
-        mime=mime,
-        size_bytes=len(buf),
-    )
-    await repo.write_file(att_id, mime, bytes(buf))
-    await SqlOperLogRepo(session).add(
-        str(user["sub"]),
-        "attachment.upload",
-        att_id,
-        {"filename": filename, "mime": mime, "size": len(buf)},
-    )
+    """上传附件:类型/大小非法 400,无可用租户 403。"""
+    read: Callable[[int], Awaitable[bytes]] = file.read
     try:
-        await session.commit()
-    except Exception:
-        # 行回滚但文件已落盘,孤儿清理按行驱动覆盖不到这种 file-only
-        # 残余——补偿删文件后再抛
-        with contextlib.suppress(Exception):
-            await repo.delete_file(att_id, mime)
-        raise
-    return AttachmentOut(attachment_id=att_id, filename=filename, mime=mime, size_bytes=len(buf))
+        saved = await service.upload_attachment(
+            session,
+            read=read,
+            filename=file.filename,
+            user_id=str(user["sub"]),
+            tenant_key=x_tenant_id,
+        )
+    except service.AttachmentTooLarge:
+        raise HTTPException(status_code=400, detail="ATTACHMENT_TOO_LARGE") from None
+    except service.AttachmentEmpty:
+        raise HTTPException(status_code=400, detail="ATTACHMENT_EMPTY") from None
+    except service.AttachmentTypeInvalid:
+        raise HTTPException(status_code=400, detail="ATTACHMENT_TYPE_INVALID") from None
+    except service.TenantForbidden:
+        raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
+    return AttachmentOut(
+        attachment_id=saved.attachment_id,
+        filename=saved.filename,
+        mime=saved.mime,
+        size_bytes=saved.size_bytes,
+    )
 
 
 @internal_router.get("/{att_id}/content")
@@ -104,25 +72,16 @@ async def read_attachment_content(
     tenant_key: Annotated[str, Query(min_length=1, max_length=64)],
     user_id: Annotated[str, Query(min_length=1, max_length=64)],
 ) -> Response:
-    """一次性消费(绑定复校:tenant_key 解析 + user_id 比对);
-    命中即置 CONSUMED+删文件;任何未命中 404 同形(防探测)。"""
-    import uuid as _uuid
-
+    """内部一次性读取:任何未命中(含格式非法)一律 404 同形,防探测。"""
     try:
-        _uuid.UUID(att_id)
-        _uuid.UUID(user_id)
+        uuid.UUID(att_id)
+        uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
-    repo = SqlAttachmentRepo(session)
-    tid = await ChatRepository(session).find_bound_tenant(user_id=user_id, tenant_key=tenant_key)
-    if tid is None:
+    try:
+        mime, data = await service.read_attachment_content(
+            session, att_id=att_id, user_id=user_id, tenant_key=tenant_key
+        )
+    except service.AttachmentNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
-    row = await repo.find_owned(att_id=att_id, tenant_id=str(tid), user_id=user_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
-    got = await repo.consume_and_read(att_id=att_id, tenant_id=str(tid))
-    if got is None:
-        raise HTTPException(status_code=404, detail="NOT_FOUND") from None
-    meta, data = got
-    await session.commit()
-    return Response(content=data, media_type=str(meta["mime"]))
+    return Response(content=data, media_type=mime)

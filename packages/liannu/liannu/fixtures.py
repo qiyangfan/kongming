@@ -7,7 +7,7 @@ fixture 由消费方(基于其内置实现与既有测试资产/evals gold)导�
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from liannu.artifact import GuardArtifact, GuardError
 
@@ -36,8 +36,11 @@ class Mismatch:
 
 
 def load_fixtures(path: str | Path) -> dict[str, Any]:
-    data: Any = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or data.get("schema_version") != SCHEMA_VERSION:
+    raw: object = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise TypeError(f"fixture 顶层须为对象: {path}")
+    data = cast("dict[str, Any]", raw)
+    if data.get("schema_version") != SCHEMA_VERSION:
         raise ValueError(f"fixture schema_version 须为 {SCHEMA_VERSION}: {path}")
     return data
 

@@ -12,8 +12,8 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kongming.auth.deps import current_user, require_perm
 from kongming.auth.repository import SqlOperLogRepo
-from kongming.auth.router import current_user, require_perm
 from kongming.db import get_session
 from kongming.stt.engine import FasterWhisperEngine
 from kongming.stt.ports import EngineUnavailable

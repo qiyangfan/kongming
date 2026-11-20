@@ -12,9 +12,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.audit.context import client_ip_var
+from kongming.auth.deps import current_user, require_perm
 from kongming.auth.repository import SqlOperLogRepo, SqlPermRepo
-from kongming.auth.router import current_user, require_perm
-from kongming.bot.dependencies import build_bot_rate_gate, get_bot_service
+from kongming.bot.dependencies import build_bot_rate_gate
 from kongming.bot.models import (
     InvalidBotKey,
     ToolSubsetViolation,
@@ -37,6 +37,7 @@ from kongming.bot.service import (
     BotService,
     GuardrailRejected,
 )
+from kongming.bot.service_factory import get_bot_service
 from kongming.chat.costgate import ChatRateLimited
 from kongming.db import get_session
 from kongming.toolcall.repository import user_has_all_scope

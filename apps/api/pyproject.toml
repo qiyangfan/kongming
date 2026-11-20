@@ -438,6 +438,105 @@ source_modules = [
 ]
 forbidden_modules = ["fastapi", "sqlalchemy", "httpx"]
 
+# 分层方向(宪法 Article II 域包分层 router → service → models → repository)。
+# import-linter 的通配只能替换整段模块名(不能写 *.service_*),repository 层在本仓
+# 有 repository / *_repo / documents_repo / coverage_repository 多种命名,逐形态列出。
+# 只断言能直接表达的层间方向;router 就地装配同域仓储是本仓现行写法
+# (路由自持 get_x_service 依赖工厂),不设「router 禁 import repository」反向契约。
+
+[[tool.importlinter.contracts]]
+name = "models 层不得 import 服务/路由/仓储层"
+type = "forbidden"
+source_modules = ["kongming.*.models"]
+forbidden_modules = [
+  "kongming.*.service",
+  "kongming.*.router",
+  "kongming.*.repository",
+  "kongming.*.coverage_repository",
+  "kongming.*.documents_repo",
+  "kongming.*.graph_repo",
+  "kongming.*.collab_repo",
+]
+
+[[tool.importlinter.contracts]]
+name = "repository 层不得反向 import service/router 层"
+type = "forbidden"
+source_modules = [
+  "kongming.*.repository",
+  "kongming.*.coverage_repository",
+  "kongming.*.documents_repo",
+  "kongming.*.graph_repo",
+  "kongming.*.collab_repo",
+]
+forbidden_modules = [
+  "kongming.*.service",
+  "kongming.*.router",
+]
+
+[[tool.importlinter.contracts]]
+name = "路由不得 import 他域路由(跨域装配只经 dependencies 模块)"
+type = "forbidden"
+# 同域 router↔router 不可避免(单域多前缀),他域 router 是纪律问题:
+# 本轮已拆平 auth 守卫(auth.deps)与他域适配器对 router 的三处引用,
+# 新增跨域装配须落 dependencies/adapters 模块。
+source_modules = [
+  "kongming.attachment",
+  "kongming.audit",
+  "kongming.auth",
+  "kongming.billing",
+  "kongming.bot",
+  "kongming.chat",
+  "kongming.connector",
+  "kongming.datasource",
+  "kongming.feedback",
+  "kongming.guardrail",
+  "kongming.internal",
+  "kongming.llmusage",
+  "kongming.mcp",
+  "kongming.memory",
+  "kongming.quality",
+  "kongming.rag",
+  "kongming.report",
+  "kongming.semantic",
+  "kongming.skillpack",
+  "kongming.store",
+  "kongming.stt",
+  "kongming.system",
+  "kongming.task",
+  "kongming.team",
+  "kongming.toolcall",
+  "kongming.trigger",
+  "kongming.workflow",
+]
+forbidden_modules = [
+  "kongming.attachment.router",
+  "kongming.audit.router",
+  "kongming.auth.router",
+  "kongming.billing.router",
+  "kongming.bot.router",
+  "kongming.chat.router",
+  "kongming.connector.router",
+  "kongming.datasource.router",
+  "kongming.feedback.router",
+  "kongming.guardrail.router",
+  "kongming.llmusage.router",
+  "kongming.mcp.router",
+  "kongming.memory.router",
+  "kongming.quality.router",
+  "kongming.rag.router",
+  "kongming.report.router",
+  "kongming.semantic.router",
+  "kongming.skillpack.router",
+  "kongming.store.router",
+  "kongming.stt.router",
+  "kongming.system.router",
+  "kongming.task.router",
+  "kongming.team.router",
+  "kongming.toolcall.router",
+  "kongming.trigger.router",
+  "kongming.workflow.router",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

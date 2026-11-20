@@ -11,7 +11,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.router import current_user, require_perm
+from kongming.auth.deps import current_user, require_perm
 from kongming.chat.repository import ChatRepository
 from kongming.db import get_session
 from kongming.toolcall import dependencies as _deps

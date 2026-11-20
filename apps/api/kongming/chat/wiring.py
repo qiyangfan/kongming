@@ -305,8 +305,8 @@ class RegistryToolSpecProvider:
 
 def _build_connector_service_for(session: AsyncSession) -> "ConnectorService":
     """装配(chat 适配层;与 connector 组合根同构)。"""
+    from kongming.connector.adapters import ConnectorGuardrailAdapter, ConnectorTestCallAuditor
     from kongming.connector.repository import SqlConnectorRepo
-    from kongming.connector.router import ConnectorGuardrailAdapter, ConnectorTestCallAuditor
     from kongming.connector.service import ConnectorService
     from kongming.datasource.cipher import get_cipher as _cipher
 
