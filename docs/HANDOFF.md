@@ -13,7 +13,7 @@
 
 ## 下一步
 
-1. 推送后核对平台 CI(含 contracts-check、eval-nightly、镜像扫描);本会话不轮询。
+1. 已推送 `main` 到 origin;核对平台 CI(含 contracts-check、eval-nightly、镜像扫描),本会话不轮询。
 2. 首次 eval-nightly 真实运行:配置 `KM_AGENT_LLM_API_KEY`/`KM_EVAL_ADMIN_PASSWORD` 并建立基线。
 3. 反代部署确认 `KM_AUTH_COOKIE_SECURE`、可信代理头与登录限流口径。
 4. 观察多标签页并发登录的 state cookie 覆盖问题,必要时改多值/按 tab 存储。
@@ -31,4 +31,4 @@
 - 2026-11-21 `api-check`:1692 passed / 10 skipped / 77.04% 覆盖;ruff/pyright/mypy/pylint/import-linter/deptry 全绿。
 - 2026-11-21 `web-check`:typecheck/lint/knip/183 单测/build/e2e/size 全绿;contracts 生成幂等。
 - 2026-11-21 OpenSpec strict 53/53;归档 `2026-11-20-unified-identity-oidc`(spec 已由现行规格承接,归档 skip-specs)。
-- 未验证:CI 实跑、eval-nightly 真实运行、真实反代部署。
+- 2026-11-21 已推送 `main` 到 origin(`1b174d1`);未验证:CI 实跑、eval-nightly 真实运行、真实反代部署。
