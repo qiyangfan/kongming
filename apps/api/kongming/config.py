@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     wecom_enabled: bool = True
     dingtalk_enabled: bool = True
     feishu_enabled: bool = True
+    hufu_enabled: bool = True
 
     # GitHub OAuth 联邦
     github_client_id: str | None = None
@@ -80,6 +81,12 @@ class Settings(BaseSettings):
     google_client_id: str | None = None
     google_client_secret: str | None = None
     google_redirect_uri: str = "http://localhost:5173/auth/google/callback"
+
+    # 虎符(hufu)统一身份联邦:标准 OIDC 授权码 + PKCE;仅后端持有令牌
+    hufu_issuer: str | None = None
+    hufu_client_id: str | None = None
+    hufu_client_secret: str | None = None
+    hufu_redirect_uri: str = "http://localhost:5173/auth/hufu/callback"
 
     # 企业微信联邦:扫码即 OAuth(qrConnect),corpid 即 appid
     wecom_corpid: str | None = None

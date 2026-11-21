@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Literal
 
 UserStatus = Literal["ACTIVE", "DISABLED"]
-ProviderKey = Literal["GITHUB", "GOOGLE", "WECOM", "DINGTALK", "FEISHU"]
+ProviderKey = Literal["GITHUB", "GOOGLE", "WECOM", "DINGTALK", "FEISHU", "HUFU"]
 
 
 @dataclass(frozen=True)

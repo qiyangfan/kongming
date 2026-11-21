@@ -103,9 +103,17 @@ class RedisOAuthStateStore:
         self._r = r
 
     async def put(
-        self, state: str, *, provider: str, code_verifier: str | None, ttl_sec: int
+        self,
+        state: str,
+        *,
+        provider: str,
+        code_verifier: str | None,
+        ttl_sec: int,
+        nonce: str | None = None,
     ) -> None:
-        payload = json.dumps({"provider": provider, "code_verifier": code_verifier})
+        payload = json.dumps(
+            {"provider": provider, "code_verifier": code_verifier, "nonce": nonce or ""}
+        )
         await self._r.set(_OSTATE + state, payload, ex=ttl_sec)
 
     async def take(self, state: str) -> dict[str, str] | None:

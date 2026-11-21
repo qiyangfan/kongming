@@ -49,6 +49,10 @@ class OAuthProviderBase(ABC):
     key: str
     display_name: str
     pkce: bool
+    # OIDC provider:授权前预取发现文档,并在回调中校验 nonce
+    oidc: bool = False
+    # 是否允许按已验证 email 关联既有账号(虎符契约禁止,默认保持旧 provider 行为)
+    link_by_verified_email: bool = True
     auth_url: str
     token_url: str
     scope: str

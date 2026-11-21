@@ -95,7 +95,13 @@ class LoginAttemptStore(Protocol):
 
 class OAuthStateStore(Protocol):
     async def put(
-        self, state: str, *, provider: str, code_verifier: str | None, ttl_sec: int
+        self,
+        state: str,
+        *,
+        provider: str,
+        code_verifier: str | None,
+        ttl_sec: int,
+        nonce: str | None = None,
     ) -> None: ...
     async def take(self, state: str) -> dict[str, str] | None:
         """一次性取出并销毁(GETDEL);不存在/过期返回 None。"""
@@ -113,4 +119,22 @@ class OAuthProvider(Protocol):
     def authorize_url(self, s: Settings, *, state: str, code_challenge: str | None) -> str: ...
     async def fetch_profile(
         self, s: Settings, *, code: str, code_verifier: str | None
+    ) -> NormalizedProfile: ...
+
+
+class OIDCProvider(Protocol):
+    """标准 OIDC 扩展面:发现文档预热 + nonce 参与验签。
+
+    与 OAuthProvider 平行声明:多出的 nonce 参数不满足其窄面,service 在
+    provider.oidc 为真时 cast 到本协议使用。
+    """
+
+    async def prepare(self, s: Settings) -> None: ...
+
+    def authorize_url(
+        self, s: Settings, *, state: str, code_challenge: str | None, nonce: str | None
+    ) -> str: ...
+
+    async def fetch_profile(
+        self, s: Settings, *, code: str, code_verifier: str | None, nonce: str | None
     ) -> NormalizedProfile: ...

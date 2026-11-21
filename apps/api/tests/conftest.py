@@ -24,6 +24,9 @@ os.environ.setdefault("KM_GITHUB_CLIENT_ID", "test-gh-id")
 os.environ.setdefault("KM_GITHUB_CLIENT_SECRET", "test-gh-secret")
 os.environ.setdefault("KM_GOOGLE_CLIENT_ID", "test-gg-id")
 os.environ.setdefault("KM_GOOGLE_CLIENT_SECRET", "test-gg-secret")
+# 虎符默认未配置,接入场景由 test_auth_hufu 显式注入
+for _k in ("KM_HUFU_ISSUER", "KM_HUFU_CLIENT_ID", "KM_HUFU_CLIENT_SECRET"):
+    os.environ.setdefault(_k, "")
 # 国内三家默认"未配置"(空串经 env 优先级盖住本地 .env 的真实凭证,防渗入测试面);
 # 「配置后」场景由 domestic 测试 monkeypatch 设置
 for _k in (
@@ -52,6 +55,7 @@ for _k in (
     "KM_WECOM_ENABLED",
     "KM_DINGTALK_ENABLED",
     "KM_FEISHU_ENABLED",
+    "KM_HUFU_ENABLED",
 ):
     os.environ.setdefault(_k, "true")
 
@@ -348,9 +352,13 @@ def fake_provider(
     from kongming.auth import providers
 
     def _install(key: str, profile: "NormalizedProfile") -> None:
+        real = providers.REGISTRY.get(key)
+        link_email = getattr(real, "link_by_verified_email", True)
+
         class _Fake:
             pkce = False
             display_name = key.title()
+            link_by_verified_email = link_email
 
             def __init__(self) -> None:
                 self.key = key

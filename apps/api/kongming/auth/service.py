@@ -7,6 +7,7 @@ import base64
 import hashlib
 import secrets
 from datetime import UTC, datetime
+from typing import cast
 
 import jwt as pyjwt
 
@@ -31,6 +32,7 @@ from kongming.auth.ports import (
     LoginAttemptStore,
     OAuthProvider,
     OAuthStateStore,
+    OIDCProvider,
     RefreshFamilyStore,
     UnitOfWork,
 )
@@ -216,12 +218,21 @@ class AuthService:
             code_verifier = secrets.token_urlsafe(64)
             digest = hashlib.sha256(code_verifier.encode()).digest()
             code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+        oidc = bool(getattr(p, "oidc", False))
+        nonce = secrets.token_urlsafe(16) if oidc else None
         await self._states.put(
             state,
             provider=provider_key,
             code_verifier=code_verifier,
             ttl_sec=self._s.auth_state_ttl_sec,
+            nonce=nonce,
         )
+        if oidc:
+            op = cast("OIDCProvider", p)
+            await op.prepare(self._s)
+            return op.authorize_url(
+                self._s, state=state, code_challenge=code_challenge, nonce=nonce
+            )
         return p.authorize_url(self._s, state=state, code_challenge=code_challenge)
 
     async def oauth_callback(self, provider_key: str, code: str, state: str) -> TokenPair:
@@ -229,19 +240,31 @@ class AuthService:
         payload = await self._states.take(state)
         if payload is None or payload.get("provider") != provider_key:
             raise StateInvalid("state 无效或已过期")
-        profile = await p.fetch_profile(
-            self._s, code=code, code_verifier=payload.get("code_verifier")
-        )
-        user = await self._account_link(p.key, profile)
+        if getattr(p, "oidc", False):
+            profile = await cast("OIDCProvider", p).fetch_profile(
+                self._s,
+                code=code,
+                code_verifier=payload.get("code_verifier"),
+                nonce=payload.get("nonce") or None,
+            )
+        else:
+            profile = await p.fetch_profile(
+                self._s, code=code, code_verifier=payload.get("code_verifier")
+            )
+        user = await self._account_link(p, profile)
         if not user.active:
             raise AccountDisabled("账号已禁用")
         await self._uow.operlog.add(user.id, "auth.login", user.username, {"provider": p.key})
         await self._uow.commit()
         return await self._issue_pair(user)
 
-    async def _account_link(self, provider_key: str, profile: NormalizedProfile) -> User:
-        """按序关联(ADR-006):identity 命中 → verified email 关联 → 自动建号。"""
-        db_provider = provider_key.upper()
+    async def _account_link(self, provider: OAuthProvider, profile: NormalizedProfile) -> User:
+        """按序关联(ADR-006):identity 命中 → verified email 关联 → 自动建号。
+
+        `link_by_verified_email=False` 的 provider(虎符)跳过 email 关联,只按 sub 建档,
+        防止不同 IdP 间按 email 自动合并造成账号错绑。
+        """
+        db_provider = provider.key.upper()
         uid = await self._uow.identities.find_user_id(db_provider, profile.external_id)
         if uid is not None:
             user = await self._uow.users.get_by_id(uid)
@@ -249,7 +272,11 @@ class AuthService:
                 raise StateInvalid("身份绑定失效")
             return user
 
-        if profile.email and profile.email_verified:
+        if (
+            getattr(provider, "link_by_verified_email", True)
+            and profile.email
+            and profile.email_verified
+        ):
             existing = await self._uow.users.get_by_email(profile.email)
             if existing is not None:
                 await self._uow.identities.create(existing.id, db_provider, profile.external_id)
