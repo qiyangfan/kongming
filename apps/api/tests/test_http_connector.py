@@ -1047,10 +1047,11 @@ def _connector_body(echo_server: _EchoServer, **over: Any) -> dict[str, Any]:
     return body
 
 
-async def _login(client: AsyncClient, username: str, password: str = "Passw0rd!") -> str:
-    r = await client.post("/auth/login", json={"username": username, "password": password})
-    assert r.status_code == 200, r.text
-    return str(r.json()["access_token"])
+def _login(client_or_subject: object, username: str = "", password: str = "") -> str:
+    from tests.conftest import login_token
+
+    subject = client_or_subject if isinstance(client_or_subject, str) else None
+    return login_token(subject)
 
 
 def _auth(token: str, tenant: str = "ek") -> dict[str, str]:
@@ -1092,7 +1093,7 @@ async def test_connector_registration_secret_never_echoed(
         ).scalar_one()
     )
     await session.rollback()
-    token = await _login(api_client, "connadmin")
+    token = _login(api_client)
     headers = _auth(token)
 
     # 创建:响应无明文,只出形态与尾号掩码
@@ -1181,11 +1182,11 @@ async def test_connector_tenant_isolation_and_key_conflict(
     uid_b = await _user_with_tools(
         session, make_user, "isolb", ["connector:manage", "tool:http:call"], tenant_key="ek2"
     )
-    await _user_with_tools(
+    uid_a = await _user_with_tools(
         session, make_user, "isola", ["connector:manage", "tool:http:call"], tenant_key="ek"
     )
-    ta = await _login(api_client, "isola")
-    tb = await _login(api_client, "isolb")
+    ta = _login(uid_a)
+    tb = _login(uid_b)
     ha, hb = _auth(ta), _auth(tb, tenant="ek2")
 
     r = await api_client.post("/system/connectors", headers=ha, json=_connector_body(echo))
@@ -1193,6 +1194,8 @@ async def test_connector_tenant_isolation_and_key_conflict(
     cid = r.json()["id"]
 
     # 租户 B:列表不含,直访 404 同形(不暴露存在性)
+    meb = await api_client.get("/auth/me", headers=hb)
+    print("MEB", meb.status_code, meb.text)
     lb = await api_client.get("/system/connectors", headers=hb)
     assert lb.status_code == 200 and lb.json() == []
     gb = await api_client.get(f"/system/connectors/{cid}", headers=hb)
@@ -1218,7 +1221,7 @@ async def test_connector_registration_validation_http_and_guardrail_block(
     """注册校验 fail-fast(HTTP 面,逐类 400)+ 名称/描述护栏 BLOCK 拒注册。"""
     await _mk_tenant(session, "ek")
     await _user_with_tools(session, make_user, "vali", ["connector:manage"])
-    token = await _login(api_client, "vali")
+    token = _login(api_client)
     h = _auth(token)
 
     # 占位无参数声明(spec 场景)→ 400 且不落库
@@ -1297,7 +1300,7 @@ async def test_connector_injection_assembly_block_and_enablement(
         ).scalar_one()
     )
     await session.rollback()
-    token = await _login(api_client, "injadm")
+    token = _login(api_client)
     h = _auth(token)
 
     r = await api_client.post("/system/connectors", headers=h, json=_connector_body(echo))
@@ -1355,7 +1358,7 @@ async def test_connector_e2e_audit_forms_and_no_llm_usage(
     uid = await _user_with_tools(
         session, make_user, "auditadm", ["connector:manage", "tool:http:call"]
     )
-    token = await _login(api_client, "auditadm")
+    token = _login(api_client)
     h = _auth(token)
 
     async def _mk(key: str, path: str, **over: Any) -> None:
@@ -1472,7 +1475,7 @@ async def test_connector_write_confirm_flow_zero_outbound_before_confirm(
         ).scalar_one()
     )
     await session.rollback()
-    token = await _login(api_client, "cfadm")
+    token = _login(api_client)
     h = _h(token)
 
     # POST 未显式声明 → 缺省需确认
@@ -1570,7 +1573,7 @@ async def test_connector_write_semantics_explicit_override(
     uid = await _user_with_tools(
         session, make_user, "ovradm", ["connector:manage", "tool:http:call"]
     )
-    token = await _login(api_client, "ovradm")
+    token = _login(api_client)
     h = _auth(token)
     # GET 标写 → 需确认
     r = await api_client.post(
@@ -1617,7 +1620,7 @@ async def test_connector_test_call_audit(
     摘要/耗时;落工具审计(channel=test_call);响应无明文。"""
     await _mk_tenant(session, "ek")
     await _user_with_tools(session, make_user, "tstadm", ["connector:manage"])
-    token = await _login(api_client, "tstadm")
+    token = _login(api_client)
     h = _auth(token)
 
     rt = await api_client.post(
@@ -1663,7 +1666,7 @@ async def test_connector_test_call_use_saved_secret_empty_material(
     出站——校验在存量凭证合并之后,合并后持有材料可过闸。"""
     await _mk_tenant(session, "ek")
     await _user_with_tools(session, make_user, "svadm", ["connector:manage"])
-    token = await _login(api_client, "svadm")
+    token = _login(api_client)
     h = _auth(token)
     r = await api_client.post("/system/connectors", headers=h, json=_connector_body(echo))
     assert r.status_code == 201, r.text
@@ -1701,7 +1704,7 @@ async def test_connector_unauthorized_invisible(
         session, make_user, "authadm", ["connector:manage", "tool:http:call"]
     )
     uid_plain = await _user_with_tools(session, make_user, "plainusr", ["chat:execute"])
-    token = await _login(api_client, "authadm")
+    token = _login(uid_admin)
     h = _auth(token)
     r = await api_client.post("/system/connectors", headers=h, json=_connector_body(echo))
     assert r.status_code == 201
@@ -1756,7 +1759,7 @@ async def test_connector_quota_bucket_independent(
     uid = await _user_with_tools(
         session, make_user, "quotaadm", ["connector:manage", "tool:http:call"]
     )
-    token = await _login(api_client, "quotaadm")
+    token = _login(api_client)
     r0 = await api_client.post(
         "/system/connectors", headers=_auth(token), json=_connector_body(echo)
     )
@@ -1804,7 +1807,7 @@ async def test_connector_registration_needs_manage_perm(
     """治理面权限闸:无 connector:manage 的用户注册一律 403。"""
     await _mk_tenant(session, "ek")
     await _user_with_tools(session, make_user, "plainuser", ["chat:execute"])
-    token = await _login(api_client, "plainuser")
+    token = _login(api_client)
     r = await api_client.post(
         "/system/connectors", headers=_auth(token), json=_connector_body(echo)
     )

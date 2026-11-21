@@ -157,7 +157,7 @@ class _UserRepoMixin(_SystemRepoBase):
             (
                 await self._s.execute(
                     text(
-                        "SELECT id, username, email, nickname, status, dept_id, password_hash"
+                        "SELECT id, username, email, nickname, status, dept_id"
                         " FROM public.sys_user WHERE id=:i AND deleted_at IS NULL"
                     ),
                     {"i": user_id},
@@ -168,35 +168,25 @@ class _UserRepoMixin(_SystemRepoBase):
         )
         return dict(row) if row else None
 
-    async def username_taken(self, username: str) -> bool:
-        n = await self._s.scalar(
-            text("SELECT count(*) FROM public.sys_user WHERE username=:u AND deleted_at IS NULL"),
-            {"u": username},
-        )
-        return int(n or 0) > 0
-
     async def insert_user(
         self,
         *,
         user_id: str,
         username: str,
         email: str | None,
-        password_hash: str | None,
         nickname: str,
         status: str,
         dept_id: str | None,
     ) -> None:
         await self._s.execute(
             text(
-                "INSERT INTO public.sys_user"
-                " (id, username, email, password_hash, nickname, status, dept_id)"
-                " VALUES (:id, :u, :e, :ph, :n, :st, :d)"
+                "INSERT INTO public.sys_user (id, username, email, nickname, status, dept_id)"
+                " VALUES (:id, :u, :e, :n, :st, :d)"
             ),
             {
                 "id": user_id,
                 "u": username,
                 "e": email,
-                "ph": password_hash,
                 "n": nickname,
                 "st": status,
                 "d": dept_id,
@@ -211,34 +201,15 @@ class _UserRepoMixin(_SystemRepoBase):
         nickname: str,
         status: str,
         dept_id: str | None,
-        password_hash: str | None,
     ) -> None:
-        # 全量字段覆盖(表单全量语义);password_hash None=不改(COALESCE)
+        # 全量字段覆盖(表单全量语义)
         await self._s.execute(
             text(
                 "UPDATE public.sys_user SET"
-                " email=:e, nickname=:n, status=:st, dept_id=:d,"
-                " password_hash=coalesce(:ph, password_hash), updated_at=now()"
+                " email=:e, nickname=:n, status=:st, dept_id=:d, updated_at=now()"
                 " WHERE id=:i AND deleted_at IS NULL"
             ),
-            {
-                "e": email,
-                "n": nickname,
-                "st": status,
-                "d": dept_id,
-                "ph": password_hash,
-                "i": user_id,
-            },
-        )
-
-    async def reset_password(self, user_id: str, password_hash: str) -> None:
-        """重置密码:首登改密标志同步复位(rbac spec「编辑与重置密码」)。"""
-        await self._s.execute(
-            text(
-                "UPDATE public.sys_user SET password_hash=:ph, password_changed_at=NULL,"
-                " updated_at=now() WHERE id=:i AND deleted_at IS NULL"
-            ),
-            {"ph": password_hash, "i": user_id},
+            {"e": email, "n": nickname, "st": status, "d": dept_id, "i": user_id},
         )
 
     async def set_user_status(self, user_id: str, status: str) -> None:

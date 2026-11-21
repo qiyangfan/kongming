@@ -109,7 +109,7 @@ async def _user(
     ).scalar_one()
     await _bind(s, "sys_user_role", uid, str(rid))
     await _bind(s, "sys_user_tenant", uid, await _default_tenant_id(s))
-    return uid, await _login(client, username)
+    return uid, _login(uid)
 
 
 # ============ agent_mode 分支 ============
@@ -174,7 +174,7 @@ async def test_react_no_tool_perms_injects_empty(
     rid = await _mk_role_with_perms(session, "NO_TOOL", ["chat:execute"])
     await _bind(session, "sys_user_role", uid, rid)
     await _bind(session, "sys_user_tenant", uid, await _default_tenant_id(session))
-    token = await _login(client, "am_noperm")
+    token = _login(client)
     fake_agent["agent"] = FakeAgent()
     r = await client.post(
         "/chat/query",

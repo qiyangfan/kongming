@@ -1,4 +1,4 @@
-/* 使用 ADR-005 生成类型；access token 仅存内存，refresh token 存 localStorage，启动时单飞刷新。 */
+/* 使用 ADR-005 生成类型；access token 仅存内存，refresh 走 HttpOnly cookie，启动时单飞刷新。 */
 
 import type { components } from "./api-types.gen";
 import { TENANT_STORAGE_KEY } from "./storage-keys";
@@ -22,7 +22,6 @@ export type PendingToolCallOut = components["schemas"]["PendingToolCallOut"];
 export type ToolConfirmOut = components["schemas"]["ToolConfirmOut"];
 
 const BASE = "/api";
-const REFRESH_KEY = "km.refresh";
 
 /* 租户头单点注入(直读持久化键,免逐调用遗漏);对 chat 系端点与数据源 options 有语义,多数管理端点无语义 */
 function tenantHeader(): Record<string, string> {
@@ -39,44 +38,36 @@ export function onSessionCleared(cb: () => void): () => void {
   return () => sessionClearedListeners.delete(cb);
 }
 
-export function setTokens(access: string, refresh: string): void {
+export function setTokens(access: string): void {
   accessToken = access;
-  localStorage.setItem(REFRESH_KEY, refresh);
-}
-
-export function getRefreshToken(): string | null {
-  return localStorage.getItem(REFRESH_KEY);
 }
 
 export function clearTokens(): void {
-  const had = accessToken !== null || localStorage.getItem(REFRESH_KEY) !== null;
+  const had = accessToken !== null;
   accessToken = null;
-  localStorage.removeItem(REFRESH_KEY);
   if (had) sessionClearedListeners.forEach((cb) => cb());
 }
 
 /* 提交刷新请求;2xx 时落盘新令牌返回 true,非 2xx 清空本地态 */
-async function postRefresh(rt: string): Promise<boolean> {
+async function postRefresh(): Promise<boolean> {
   const resp = await fetch(`${BASE}/auth/refresh`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh_token: rt }),
   });
   if (!resp.ok) {
     clearTokens();
     return false;
   }
   const pair = (await resp.json()) as TokenPairOut;
-  setTokens(pair.access_token, pair.refresh_token);
+  setTokens(pair.access_token);
   return true;
 }
 
 /* 发起一次刷新请求并处理失败清理；网络异常时保留本地态,由下次请求再试 */
 async function requestTokenRefresh(): Promise<boolean> {
-  const rt = localStorage.getItem(REFRESH_KEY);
-  if (!rt) return false;
   try {
-    return await postRefresh(rt);
+    return await postRefresh();
   } catch {
     return false;
   }
@@ -96,6 +87,7 @@ async function doFetch(path: string, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(`${BASE}${path}`, {
       ...init,
+      credentials: "include",
       headers: {
         ...(isForm ? {} : { "Content-Type": "application/json" }),
         ...tenantHeader(),

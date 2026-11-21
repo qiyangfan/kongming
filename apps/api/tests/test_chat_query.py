@@ -56,10 +56,11 @@ def _install(holder: dict[str, FakeAgent], agent: FakeAgent) -> None:
     holder["agent"] = agent
 
 
-async def _login(client: AsyncClient, username: str, password: str = "Passw0rd!") -> str:
-    r = await client.post("/auth/login", json={"username": username, "password": password})
-    assert r.status_code == 200
-    return str(r.json()["access_token"])
+def _login(subject: object) -> str:
+    """本地签发 access 令牌:传 subject 用显式主体,传 client 用最近安排的主体。"""
+    from tests.conftest import login_token
+
+    return login_token(subject if isinstance(subject, str) else None)
 
 
 async def _mk_role_with_perms(s: AsyncSession, role_key: str, perm_codes: list[str]) -> str:
@@ -112,7 +113,7 @@ async def _default_tenant_id(s: AsyncSession) -> str:
 
 
 async def _user_with_chat_perm(
-    client: AsyncClient, s: AsyncSession, make_user: MakeUser, username: str = "qa"
+    s: AsyncSession, make_user: MakeUser, username: str = "qa"
 ) -> tuple[str, str]:
     """造一个有 chat:execute + default 租户的用户,返回 (user_id, token)。"""
     await seed_all(s, get_settings())
@@ -122,7 +123,7 @@ async def _user_with_chat_perm(
     ).scalar_one()
     await _bind(s, "sys_user_role", uid, str(rid))
     await _bind(s, "sys_user_tenant", uid, await _default_tenant_id(s))
-    return uid, await _login(client, username)
+    return uid, _login(uid)
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -154,7 +155,7 @@ async def test_no_perm_403(client: AsyncClient, session: AsyncSession, make_user
     rid = await _mk_role_with_perms(session, "NO_CHAT", [])  # 角色无任何权限点
     await _bind(session, "sys_user_role", uid, rid)
     await _bind(session, "sys_user_tenant", uid, await _default_tenant_id(session))
-    token = await _login(client, "noperm")
+    token = _login(uid)
     r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
     assert r.status_code == 403
     # 不新建会话、不落消息
@@ -166,7 +167,7 @@ async def test_no_perm_403(client: AsyncClient, session: AsyncSession, make_user
 async def test_perm_revoke_effective_immediately(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    _uid, token = await _user_with_chat_perm(client, session, make_user, "revoked")
+    _uid, token = await _user_with_chat_perm(session, make_user, "revoked")
     await session.execute(
         text(
             "DELETE FROM public.sys_role_permission rp"
@@ -183,7 +184,7 @@ async def test_perm_revoke_effective_immediately(
 async def test_tenant_not_bound_403(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    _, token = await _user_with_chat_perm(client, session, make_user, "tenantx")
+    _, token = await _user_with_chat_perm(session, make_user, "tenantx")
     await session.execute(
         text(
             "INSERT INTO public.sys_tenant (id, tenant_key, tenant_name)"
@@ -208,7 +209,7 @@ async def test_happy_path_auto_session_and_messages(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     _install(fake_agent, FakeAgent(_pass_reply()))
     question = "各商品库存分别是多少,帮我看看哪个最多"
     r = await client.post("/chat/query", json={"question": question}, headers=_auth(token))
@@ -248,7 +249,7 @@ async def test_explicit_history_wins(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     agent = FakeAgent(_pass_reply())
     _install(fake_agent, agent)
     r = await client.post(
@@ -264,12 +265,20 @@ async def test_explicit_history_wins(
 
 
 async def test_super_admin_not_exempt_from_tenant_whitelist(
-    client: AsyncClient, session: AsyncSession, fake_agent: dict[str, FakeAgent]
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, FakeAgent],
 ) -> None:
     """SUPER_ADMIN 仍受租户白名单约束。"""
     await seed_all(session, get_settings())
     _install(fake_agent, FakeAgent(_pass_reply()))
-    token = await _login(client, "admin", "admin123")
+    uid = await make_user("boss")
+    rid = (
+        await session.execute(text("SELECT id FROM public.sys_role WHERE role_key='SUPER_ADMIN'"))
+    ).scalar_one()
+    await _bind(session, "sys_user_role", uid, str(rid))
+    token = _login(uid)
     await session.execute(
         text(
             "INSERT INTO public.sys_tenant (id, tenant_key, tenant_name)"
@@ -292,7 +301,7 @@ async def test_rejected_copy_datascope_variant(
     fake_agent: dict[str, FakeAgent],
 ) -> None:
     """BLOCKED 文案分态:DATA_SCOPE_UNSUPPORTED 不说「非只读」。"""
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     reply = AgentReply(success=False, verdict="BLOCKED", error="DATA_SCOPE_UNSUPPORTED: 多主表")
     _install(fake_agent, FakeAgent(reply))
     r = await client.post("/chat/query", json={"question": "q"}, headers=_auth(token))
@@ -305,7 +314,7 @@ async def test_backend_history_fill(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     agent = FakeAgent(_pass_reply())
     _install(fake_agent, agent)
     # 先造 7 轮(第 7 轮发问时, 6 条 user 问句超 5 条补全上限)
@@ -327,7 +336,7 @@ async def test_persist_false_no_rows(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     _install(fake_agent, FakeAgent(_pass_reply()))
     r = await client.post(
         "/chat/query",
@@ -350,11 +359,11 @@ async def test_session_of_other_user_404(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    _, token_a = await _user_with_chat_perm(client, session, make_user, "usera")
+    _, token_a = await _user_with_chat_perm(session, make_user, "usera")
     _install(fake_agent, FakeAgent(_pass_reply()))
     r = await client.post("/chat/query", json={"question": "q"}, headers=_auth(token_a))
     sid_a = r.json()["session_id"]
-    _, token_b = await _user_with_chat_perm(client, session, make_user, "userb")
+    _, token_b = await _user_with_chat_perm(session, make_user, "userb")
     r = await client.post(
         "/chat/query",
         json={"question": "q", "session_id": sid_a},
@@ -372,7 +381,7 @@ async def test_agent_unavailable_friendly_error(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     _install(fake_agent, FakeAgent(boom=True))
     r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
     assert r.status_code == 200  # 不裸 500
@@ -396,7 +405,7 @@ async def test_blocked_maps_rejected(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     reply = AgentReply(
         success=False, verdict="BLOCKED", sql="DELETE FROM goods", error="BLOCKED_ROOT: Delete"
     )
@@ -420,7 +429,7 @@ async def test_error_maps_failed(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     reply = AgentReply(
         success=False, verdict="ERROR", error="column qtyy does not exist", retry_count=2
     )
@@ -445,7 +454,7 @@ async def test_no_data_maps_neutral_status(
     fake_agent: dict[str, FakeAgent],
 ) -> None:
     """verdict=NO_DATA → 消息第四态;summary 承载中性文案,error 空无产物卡。"""
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     reply = AgentReply(
         success=False,
         verdict="NO_DATA",
@@ -489,7 +498,7 @@ async def test_failed_friendly_error_with_detail(
     fake_agent: dict[str, FakeAgent],
 ) -> None:
     """FAILED 文案用户语言,原始技术错误迁移 error_detail(响应+落档)。"""
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     raw = 'missing FROM-clause entry for table "s"'
     reply = AgentReply(success=False, verdict="ERROR", error=raw, retry_count=2)
     _install(fake_agent, FakeAgent(reply))

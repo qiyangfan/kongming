@@ -26,7 +26,7 @@ async def _admin(
     ).scalar_one()
     await _bind(session, "sys_user_role", uid, str(rid))
     await _bind(session, "sys_user_tenant", uid, await _default_tenant_id(session))
-    return uid, await _login(client, username)
+    return uid, _login(uid)
 
 
 async def _mk_dept(s: AsyncSession, name: str, parent_id: str | None = None) -> str:
@@ -59,9 +59,7 @@ async def _role_id(s: AsyncSession, key: str) -> str:
     ("method", "path"),
     [
         ("GET", "/system/users"),
-        ("POST", "/system/users"),
         ("PUT", "/system/users/" + str(uuidlib.uuid4())),
-        ("POST", f"/system/users/{uuidlib.uuid4()}/reset-password"),
         ("DELETE", "/system/users/" + str(uuidlib.uuid4())),
         ("POST", f"/system/users/{uuidlib.uuid4()}/enable"),
         ("POST", f"/system/users/{uuidlib.uuid4()}/disable"),
@@ -88,7 +86,7 @@ async def test_no_perm_rejected_and_audited(
     """无任何角色的用户访问 system 端点族:一律 403 且落 perm_denied 审计。"""
     await seed_all(session, get_settings())
     await make_user("nobody")
-    token = await _login(client, "nobody")
+    token = _login(client)
     r = await client.request(method, path, headers=_auth(token), json={})
     assert r.status_code == 403, (method, path, r.text)
     n = await session.execute(
@@ -150,15 +148,7 @@ async def test_admin_account_delete_rejected(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     _, token = await _admin(client, session, make_user)
-    settings = get_settings()
-    admin_uid = str(
-        (
-            await session.execute(
-                text("SELECT id FROM public.sys_user WHERE username=:u"),
-                {"u": settings.admin_username},
-            )
-        ).scalar_one()
-    )
+    admin_uid = str(get_settings().admin_subject)
     r = await client.delete(f"/system/users/{admin_uid}", headers=_auth(token))
     assert r.status_code == 409
     kept = await session.execute(
@@ -205,7 +195,7 @@ async def test_disabled_user_token_rejected(
     """禁用用户后,其既有令牌在下一次受权限点校验的请求中返回 401。"""
     await seed_all(session, get_settings())
     uid = await make_user("victim")
-    token = await _login(client, "victim")
+    token = _login(client)
     await session.execute(
         text("UPDATE public.sys_user SET status='DISABLED' WHERE id=:i"), {"i": uid}
     )
@@ -346,17 +336,16 @@ async def test_dept_cycle_parent_rejected(
 async def test_user_crud_flow(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
+    """既有主体可编辑授权资料、停用与软删;列表聚合角色/部门。"""
     _, token = await _admin(client, session, make_user)
     tid = await _default_tenant_id(session)
     dept = await _mk_dept(session, "研发部")
     dev_role = await _role_id(session, "DEVELOPER")
+    uid = await make_user("newbie")
 
-    # 创建:argon2 落库 + 首登标志未改 + 角色/租户/部门绑定
-    r = await client.post(
-        "/system/users",
+    r = await client.put(
+        f"/system/users/{uid}",
         json={
-            "username": "newbie",
-            "password": "Initial#2026",
             "nickname": "新人",
             "email": "newbie@example.com",
             "status": "ACTIVE",
@@ -366,27 +355,8 @@ async def test_user_crud_flow(
         },
         headers=_auth(token),
     )
-    assert r.status_code == 201, r.text
-    uid = r.json()["id"]
-    row = (
-        await session.execute(
-            text(
-                "SELECT password_hash, password_changed_at, dept_id FROM public.sys_user"
-                " WHERE id=:i"
-            ),
-            {"i": uid},
-        )
-    ).one()
-    assert row.password_hash and row.password_hash.startswith("$argon2")
-    assert row.password_changed_at is None  # 首登强制改密
-    assert str(row.dept_id) == dept
-    roles = await session.execute(
-        text("SELECT role_id FROM public.sys_user_role WHERE user_id=:i"), {"i": uid}
-    )
-    assert [str(x[0]) for x in roles] == [dev_role]
-
-    # 列表:聚合行可见(角色键+部门名),关键字过滤
-    r = await client.get("/system/users", params={"keyword": "新人"}, headers=_auth(token))
+    assert r.status_code == 204, r.text
+    r = await client.get("/system/users", params={"keyword": "newbie"}, headers=_auth(token))
     assert r.status_code == 200
     page = r.json()
     assert page["total"] == 1
@@ -394,147 +364,17 @@ async def test_user_crud_flow(
     assert item["username"] == "newbie"
     assert item["role_keys"] == ["DEVELOPER"]
     assert item["dept_name"] == "研发部"
-    # 编辑回显所需 id 字段(缺失会导致编辑对话框静默清空部门绑定)
     assert item["dept_id"] == dept
     assert item["tenant_id"] == tid
-    # 关键字大小写不敏感(ILIKE)
-    r = await client.get("/system/users", params={"keyword": "NEWBIE"}, headers=_auth(token))
-    assert r.json()["total"] == 1
-    r = await client.get("/system/users", params={"keyword": "不存在"}, headers=_auth(token))
-    assert r.json()["total"] == 0
 
-    # 编辑:不传密码不改哈希;状态/部门/角色覆盖
-    r = await client.put(
-        f"/system/users/{uid}",
-        json={
-            "nickname": "新人改名",
-            "email": None,
-            "status": "ACTIVE",
-            "dept_id": None,
-            "tenant_id": tid,
-            "role_ids": [],
-        },
-        headers=_auth(token),
-    )
-    assert r.status_code == 204
-    after = (
-        await session.execute(
-            text("SELECT password_hash, nickname, dept_id, email FROM public.sys_user WHERE id=:i"),
-            {"i": uid},
-        )
-    ).one()
-    assert after.password_hash == row.password_hash
-    assert after.nickname == "新人改名"
-    assert after.dept_id is None and after.email is None
-    binds = await session.execute(
-        text("SELECT count(*) FROM public.sys_user_role WHERE user_id=:i"), {"i": uid}
-    )
-    assert int(binds.scalar_one()) == 0
-
-    # 重置密码:标志复位
-    r = await client.post(
-        f"/system/users/{uid}/reset-password",
-        json={"new_password": "Reset#2026x"},
-        headers=_auth(token),
-    )
-    assert r.status_code == 204
-    reset = (
-        await session.execute(
-            text("SELECT password_hash, password_changed_at FROM public.sys_user WHERE id=:i"),
-            {"i": uid},
-        )
-    ).one()
-    assert reset.password_hash != row.password_hash
-    assert reset.password_changed_at is None
-
-    # 删除:软删
     r = await client.delete(f"/system/users/{uid}", headers=_auth(token))
     assert r.status_code == 204
     soft = await session.execute(
         text("SELECT deleted_at FROM public.sys_user WHERE id=:i"), {"i": uid}
     )
     assert soft.scalar_one() is not None
-    # 软删后列表不可见
     r = await client.get("/system/users", params={"keyword": "newbie"}, headers=_auth(token))
     assert r.json()["total"] == 0
-
-
-async def test_username_uniqueness_with_soft_delete(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser
-) -> None:
-    """用户名唯一=过滤软删(软删记录不占名,rbac spec)。"""
-    _, token = await _admin(client, session, make_user)
-    tid = await _default_tenant_id(session)
-    # "role_ids": [] 使推断含 list[Unknown],显式 Any 值域
-    body: dict[str, Any] = {
-        "username": "dup",
-        "password": "Initial#2026",
-        "nickname": "重复",
-        "tenant_id": tid,
-        "role_ids": [],
-    }
-    r = await client.post("/system/users", json=body, headers=_auth(token))
-    assert r.status_code == 201
-    # 未软删同名 → 409
-    r = await client.post("/system/users", json=body, headers=_auth(token))
-    assert r.status_code == 409
-    # 软删后同名可建
-    await session.execute(text("UPDATE public.sys_user SET deleted_at=now() WHERE username='dup'"))
-    await session.commit()
-    r = await client.post("/system/users", json=body, headers=_auth(token))
-    assert r.status_code == 201
-
-
-async def test_create_user_unknown_refs_rejected(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser
-) -> None:
-    _, token = await _admin(client, session, make_user)
-    base: dict[str, Any] = {
-        "username": "badrefs",
-        "password": "Initial#2026",
-        "nickname": "坏引用",
-        "tenant_id": str(uuidlib.uuid4()),  # 未知租户
-        "role_ids": [],
-    }
-    r = await client.post("/system/users", json=base, headers=_auth(token))
-    assert r.status_code == 400
-    tid = await _default_tenant_id(session)
-    r = await client.post(
-        "/system/users",
-        json={**base, "tenant_id": tid, "role_ids": [str(uuidlib.uuid4())]},
-        headers=_auth(token),
-    )
-    assert r.status_code == 400
-    r = await client.post(
-        "/system/users",
-        json={**base, "tenant_id": tid, "dept_id": str(uuidlib.uuid4())},
-        headers=_auth(token),
-    )
-    assert r.status_code == 400
-    # 不存在用户编辑/重置/删除 → 404
-    ghost = str(uuidlib.uuid4())
-    r = await client.put(
-        f"/system/users/{ghost}",
-        json={
-            "nickname": "x",
-            "status": "ACTIVE",
-            "tenant_id": tid,
-            "role_ids": [],
-        },
-        headers=_auth(token),
-    )
-    assert r.status_code == 404
-    r = await client.post(
-        f"/system/users/{ghost}/reset-password",
-        json={"new_password": "Whatever#2026"},
-        headers=_auth(token),
-    )
-    assert r.status_code == 404
-    r = await client.delete(f"/system/users/{ghost}", headers=_auth(token))
-    assert r.status_code == 404
-
-
-# ============ 履约:角色与权限绑定 ============
 
 
 async def _role_by_key(client: AsyncClient, token: str, key: str) -> dict[str, Any]:
@@ -891,38 +731,12 @@ async def test_tenant_list(client: AsyncClient, session: AsyncSession, make_user
 # ============ 超级管理员保护与密码重置 ============
 
 
-async def test_reset_password_clears_changed_flag_after_self_change(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser
-) -> None:
-    """已自助改密(pca 有值)的用户被重置后,首登改密标志必须复位为 NULL。"""
-    _, token = await _admin(client, session, make_user)
-    uid = await make_user("changed-user")  # make_user 默认 pca=now(已改密)
-    r = await client.post(
-        f"/system/users/{uid}/reset-password",
-        json={"new_password": "Reset#2026x"},
-        headers=_auth(token),
-    )
-    assert r.status_code == 204
-    pca = await session.execute(
-        text("SELECT password_changed_at FROM public.sys_user WHERE id=:i"), {"i": uid}
-    )
-    assert pca.scalar_one() is None
-
-
 async def test_admin_disable_and_role_strip_rejected(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """超管账号不可禁用，也不能解除 SUPER_ADMIN 绑定。"""
     _, token = await _admin(client, session, make_user)
-    settings = get_settings()
-    admin_uid = str(
-        (
-            await session.execute(
-                text("SELECT id FROM public.sys_user WHERE username=:u"),
-                {"u": settings.admin_username},
-            )
-        ).scalar_one()
-    )
+    admin_uid = str(get_settings().admin_subject)
     tid = await _default_tenant_id(session)
     super_rid = await _role_id(session, "SUPER_ADMIN")
     base = {
@@ -975,28 +789,10 @@ async def test_write_operations_audited(
     """管理面写操作与业务同事务落操作审计(动作+目标可追溯)。"""
     _, token = await _admin(client, session, make_user)
     tid = await _default_tenant_id(session)
-    # 用户三写
-    r = await client.post(
-        "/system/users",
-        json={
-            "username": "audit-user",
-            "password": "Initial#2026",
-            "nickname": "审计",
-            "tenant_id": tid,
-            "role_ids": [],
-        },
-        headers=_auth(token),
-    )
-    uid = r.json()["id"]
+    uid = await make_user("audit-user")
     r = await client.put(
         f"/system/users/{uid}",
         json={"nickname": "审计改", "status": "ACTIVE", "tenant_id": tid, "role_ids": []},
-        headers=_auth(token),
-    )
-    assert r.status_code == 204
-    r = await client.post(
-        f"/system/users/{uid}/reset-password",
-        json={"new_password": "Reset#2026x"},
         headers=_auth(token),
     )
     assert r.status_code == 204
@@ -1043,9 +839,7 @@ async def test_write_operations_audited(
     )
     actions = {str(r[0]) for r in rows}
     expected = {
-        "user.create",
         "user.update",
-        "user.reset_password",
         "user.delete",
         "user.enable",
         "user.disable",
@@ -1059,70 +853,6 @@ async def test_write_operations_audited(
 
 
 # ============ 密码修改、令牌吊销与查询语义 ============
-
-
-async def test_reset_password_revokes_refresh_families(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser
-) -> None:
-    """管理员重置密码后，用户已有的 refresh token 立即失效。"""
-    await seed_all(session, get_settings())
-    uid = await make_user("victim2")
-    _, token = await _admin(client, session, make_user, "boss2")
-    # victim2 登录拿真 refresh token
-    victim_pair = await client.post(
-        "/auth/login", json={"username": "victim2", "password": "Passw0rd!"}
-    )
-    refresh = victim_pair.json()["refresh_token"]
-    # 管理员重置其密码
-    r = await client.post(
-        f"/system/users/{uid}/reset-password",
-        json={"new_password": "Reset#2026x"},
-        headers=_auth(token),
-    )
-    assert r.status_code == 204
-    # 旧 refresh token 不可再换新 access(家族已吊销)
-    r = await client.post("/auth/refresh", json={"refresh_token": refresh})
-    assert r.status_code == 401
-
-
-async def test_update_user_password_changes_hash_and_revokes(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser
-) -> None:
-    """编辑时传入密码会更新哈希并吊销令牌；未传密码时两者都不变。"""
-    await seed_all(session, get_settings())
-    uid = await make_user("victim3")
-    old_hash = (
-        await session.execute(
-            text("SELECT password_hash FROM public.sys_user WHERE id=:i"), {"i": uid}
-        )
-    ).scalar_one()
-    victim_pair = await client.post(
-        "/auth/login", json={"username": "victim3", "password": "Passw0rd!"}
-    )
-    refresh = victim_pair.json()["refresh_token"]
-    _, token = await _admin(client, session, make_user, "boss3")
-    tid = await _default_tenant_id(session)
-    # 编辑传密码:哈希变 + refresh 失效
-    r = await client.put(
-        f"/system/users/{uid}",
-        json={
-            "nickname": "改密",
-            "status": "ACTIVE",
-            "tenant_id": tid,
-            "role_ids": [],
-            "password": "Edited#2026x",
-        },
-        headers=_auth(token),
-    )
-    assert r.status_code == 204
-    new_hash = (
-        await session.execute(
-            text("SELECT password_hash FROM public.sys_user WHERE id=:i"), {"i": uid}
-        )
-    ).scalar_one()
-    assert new_hash != old_hash
-    r = await client.post("/auth/refresh", json={"refresh_token": refresh})
-    assert r.status_code == 401
 
 
 async def test_keyword_like_metachars_escaped(
@@ -1165,102 +895,6 @@ async def test_error_detail_semantics(
 # ============ 管理台状态启停范式(专用端点+禁用吊销) ============
 
 
-async def test_disable_user_revokes_refresh(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser
-) -> None:
-    """专用禁用端点 = 状态翻转 + 踢下线(旧 refresh 家族吊销)+ 审计。"""
-    await seed_all(session, get_settings())
-    uid = await make_user("victim4")
-    victim_pair = await client.post(
-        "/auth/login", json={"username": "victim4", "password": "Passw0rd!"}
-    )
-    refresh = victim_pair.json()["refresh_token"]
-    _, token = await _admin(client, session, make_user, "boss5")
-    r = await client.post(f"/system/users/{uid}/disable", headers=_auth(token))
-    assert r.status_code == 204
-    # 状态已翻转
-    status = (
-        await session.execute(text("SELECT status FROM public.sys_user WHERE id=:i"), {"i": uid})
-    ).scalar_one()
-    assert status == "DISABLED"
-    # 禁用即吊销:旧 refresh 不可续换(与改密踢下线对称)
-    r = await client.post("/auth/refresh", json={"refresh_token": refresh})
-    assert r.status_code == 401
-    # 判别步:401 也可能仅由禁用状态导致(refresh 有 is_active 闸);
-    # 重新启用后旧 refresh 仍 401 才证明「家族吊销」独立成立,防 revoke 被静默删掉
-    r = await client.post(f"/system/users/{uid}/enable", headers=_auth(token))
-    assert r.status_code == 204
-    r = await client.post("/auth/refresh", json={"refresh_token": refresh})
-    assert r.status_code == 401
-    # 审计动作落库
-    n = await session.execute(
-        text("SELECT count(*) FROM public.sys_oper_log WHERE action='user.disable'")
-    )
-    assert n.scalar_one() == 1
-
-
-async def test_enable_user_restores_login(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser
-) -> None:
-    """启用端点恢复登录,不涉及吊销;审计 user.enable。"""
-    await seed_all(session, get_settings())
-    uid = await make_user("victim5")
-    _, token = await _admin(client, session, make_user, "boss6")
-    r = await client.post(f"/system/users/{uid}/disable", headers=_auth(token))
-    assert r.status_code == 204
-    r = await client.post("/auth/login", json={"username": "victim5", "password": "Passw0rd!"})
-    assert r.status_code == 403  # 禁用后登录被拒
-    r = await client.post(f"/system/users/{uid}/enable", headers=_auth(token))
-    assert r.status_code == 204
-    r = await client.post("/auth/login", json={"username": "victim5", "password": "Passw0rd!"})
-    assert r.status_code == 200  # 启用后恢复(密码未动)
-    n = await session.execute(
-        text("SELECT count(*) FROM public.sys_oper_log WHERE action='user.enable'")
-    )
-    assert n.scalar_one() == 1
-
-
-async def test_update_user_status_disabled_also_revokes(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser
-) -> None:
-    """将用户状态改为 DISABLED 后，已有令牌也会失效。"""
-    await seed_all(session, get_settings())
-    uid = await make_user("victim6")
-    victim_pair = await client.post(
-        "/auth/login", json={"username": "victim6", "password": "Passw0rd!"}
-    )
-    refresh = victim_pair.json()["refresh_token"]
-    _, token = await _admin(client, session, make_user, "boss7")
-    tid = await _default_tenant_id(session)
-    r = await client.put(
-        f"/system/users/{uid}",
-        json={
-            "nickname": "禁用",
-            "status": "DISABLED",
-            "tenant_id": tid,
-            "role_ids": [],
-        },
-        headers=_auth(token),
-    )
-    assert r.status_code == 204
-    r = await client.post("/auth/refresh", json={"refresh_token": refresh})
-    assert r.status_code == 401
-    # 判别步:重新启用后旧 refresh 仍 401 才锁住「编辑路径同吊销」
-    r = await client.put(
-        f"/system/users/{uid}",
-        json={
-            "nickname": "解禁",
-            "status": "ACTIVE",
-            "tenant_id": tid,
-            "role_ids": [],
-        },
-        headers=_auth(token),
-    )
-    assert r.status_code == 204
-    r = await client.post("/auth/refresh", json={"refresh_token": refresh})
-    assert r.status_code == 401
-
-
 async def test_status_toggle_protections(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
@@ -1271,9 +905,7 @@ async def test_status_toggle_protections(
     r = await client.post(f"/system/users/{admin_uid}/disable", headers=_auth(token))
     assert r.status_code == 409
     # 超管账号(settings.admin_username)禁用
-    real_admin_id = (
-        await session.execute(text("SELECT id FROM public.sys_user WHERE username='admin'"))
-    ).scalar_one()
+    real_admin_id = get_settings().admin_subject
     r = await client.post(f"/system/users/{real_admin_id}/disable", headers=_auth(token))
     assert r.status_code == 409
     # 不存在

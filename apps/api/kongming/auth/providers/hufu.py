@@ -7,14 +7,14 @@
 import asyncio
 import time
 from typing import Any, cast
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 import jwt
 from jwt import PyJWK
 
 from kongming.auth.models import NormalizedProfile, ProviderExchangeFailed
-from kongming.auth.providers.base import OAuthClient, OAuthProviderBase
+from kongming.auth.providers.base import OAuthProviderBase
 from kongming.config import Settings
 
 _META_TTL_SEC = 300.0
@@ -26,9 +26,6 @@ class HufuProvider(OAuthProviderBase):
     display_name = "统一身份"
     pkce = True
     oidc = True
-    link_by_verified_email = False
-    auth_url = ""  # 由发现文档提供
-    token_url = ""  # 由发现文档提供
     scope = "openid profile email"
 
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
@@ -80,8 +77,18 @@ class HufuProvider(OAuthProviderBase):
         )
         return f"{cast('str', meta['authorization_endpoint'])}?{q}"
 
-    async def fetch_raw_profile(self, client: OAuthClient) -> NormalizedProfile:
-        raise NotImplementedError("虎符走 fetch_profile 覆写(id_token 验签)")
+    async def end_session_url(self, s: Settings) -> str | None:
+        """构造虎符 RP-Initiated Logout 地址;发现文档无端点时返回 None。"""
+        meta = await self._ensure_metadata(s)
+        endpoint = meta.get("end_session_endpoint")
+        if not isinstance(endpoint, str) or not endpoint:
+            return None
+        parsed = urlparse(endpoint)
+        q = dict(parse_qsl(parsed.query))
+        q["client_id"] = self.client_id(s) or ""
+        if s.hufu_post_logout_redirect_uri:
+            q["post_logout_redirect_uri"] = s.hufu_post_logout_redirect_uri
+        return urlunparse(parsed._replace(query=urlencode(q)))
 
     async def fetch_profile(
         self,
@@ -109,8 +116,11 @@ class HufuProvider(OAuthProviderBase):
                 return self._meta
             issuer = s.hufu_issuer.rstrip("/")
             url = f"{issuer}/.well-known/openid-configuration"
-            async with self._http() as http:
-                resp = await http.get(url, headers={"Accept": "application/json"})
+            try:
+                async with self._http() as http:
+                    resp = await http.get(url, headers={"Accept": "application/json"})
+            except httpx.HTTPError as e:
+                raise ProviderExchangeFailed("统一身份发现文档不可用") from e
             if resp.status_code != 200:
                 raise ProviderExchangeFailed(f"统一身份发现文档不可用({resp.status_code})")
             data = _json_object(resp)
@@ -196,8 +206,11 @@ class HufuProvider(OAuthProviderBase):
                 and time.monotonic() - self._jwks_at < _META_TTL_SEC
             ):
                 return self._jwks
-            async with self._http() as http:
-                resp = await http.get(cast("str", meta["jwks_uri"]))
+            try:
+                async with self._http() as http:
+                    resp = await http.get(cast("str", meta["jwks_uri"]))
+            except httpx.HTTPError as e:
+                raise ProviderExchangeFailed("统一身份 JWKS 不可用") from e
             if resp.status_code != 200:
                 raise ProviderExchangeFailed("统一身份 JWKS 不可用")
             jwks = _json_object(resp)

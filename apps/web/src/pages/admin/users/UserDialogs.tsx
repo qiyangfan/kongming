@@ -1,4 +1,4 @@
-/* 用户页的三个弹层:新建/编辑用户、重置密码、删除确认。 */
+/* 用户页弹层:编辑授权资料与删除确认。 */
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
@@ -85,14 +85,6 @@ export function UserFormDialog({
               />
             </FormRow>
           )}
-          <FormRow label={`密码${creating ? "" : "(留空不改)"}`} htmlFor="u-password">
-            <Input
-              id="u-password"
-              type="password"
-              value={form.password}
-              onChange={(e) => onFormChange({ ...form, password: e.target.value })}
-            />
-          </FormRow>
           <FormRow label="昵称" htmlFor="u-nickname">
             <Input
               id="u-nickname"
@@ -167,67 +159,6 @@ export function UserFormDialog({
             </Button>
             <Button type="submit" disabled={pending}>
               {pending ? "保存中…" : "保存"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-export function ResetPasswordDialog({
-  username,
-  password,
-  onPasswordChange,
-  error,
-  onErrorChange,
-  pending,
-  onSubmit,
-  onClose,
-}: {
-  username: string | null;
-  password: string;
-  onPasswordChange: (v: string) => void;
-  error: string;
-  onErrorChange: (v: string) => void;
-  pending: boolean;
-  onSubmit: () => void;
-  onClose: () => void;
-}) {
-  return (
-    <Dialog open={username !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent aria-describedby={undefined} className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>重置密码 — {username ?? ""}</DialogTitle>
-        </DialogHeader>
-        {error && (
-          <p className="text-destructive text-sm" role="alert">
-            {error}
-          </p>
-        )}
-        <form
-          className="grid gap-1.5"
-          onSubmit={(e) => {
-            e.preventDefault();
-            onErrorChange("");
-            if (password.length < 8) return onErrorChange("密码至少 8 位");
-            onSubmit();
-          }}
-        >
-          <FormRow label="新密码(重置后强制首登改密)" htmlFor="u-reset">
-            <Input
-              id="u-reset"
-              type="password"
-              value={password}
-              onChange={(e) => onPasswordChange(e.target.value)}
-            />
-          </FormRow>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
-              取消
-            </Button>
-            <Button type="submit" disabled={pending}>
-              {pending ? "重置中…" : "重置"}
             </Button>
           </DialogFooter>
         </form>

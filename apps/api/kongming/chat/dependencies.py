@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,12 +19,8 @@ from kongming.chat.scoring_tasks import score_answer_task
 from kongming.chat.service import ChatService
 from kongming.chat.session_service import ChatSessionService
 from kongming.chat.suggestions import SuggestionsService
-
-if TYPE_CHECKING:  # 延迟导入:chat.wiring 装配他域仓储,顶层导入会把各域路由卷进 chat 依赖链
-    from kongming.chat.wiring import (
-        SchemaOverviewSource,
-    )
 from kongming.chat.title_tasks import rewrite_session_title
+from kongming.chat.wiring import SchemaOverviewSource
 from kongming.config import get_settings
 from kongming.datasource.repository import SqlDatasourceRepo
 from kongming.db import get_session, get_sessionmaker
@@ -139,8 +135,6 @@ def get_session_service(
 def get_schema_overview(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SchemaOverviewSource:
-    from kongming.chat.wiring import SchemaOverviewSource
-
     return SchemaOverviewSource(session)
 
 

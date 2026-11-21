@@ -1,21 +1,19 @@
-"""启动幂等种子(rbac spec「种子数据」):角色/权限点/默认租户/超管。
+"""启动幂等种子(rbac spec「种子数据」):角色/权限点/默认租户/可选运维超管。
 
 纪律:只增不改——按唯一键查缺补插,从不 UPDATE/DELETE 既有行(不覆盖线上改动);
 重复启动幂等。权限点=随代码发布的契约数据,注册表即唯一定义处。
-"""
 
-from datetime import UTC, datetime
+不播种任何可登录账号:账户归虎符(ADR-0010);超管只能由 `KM_ADMIN_SUBJECT`
+绑定到虎符已存在的 sub,或由现有超管在管理面显式授权。
+"""
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth import password as pwd
 from kongming.auth.models import Role, Tenant, User
 from kongming.auth.repository import SqlUnitOfWork
 from kongming.auth.service import DEFAULT_ROLE_KEY, DEFAULT_TENANT_KEY
 from kongming.config import Settings
 from kongming.db import uuid7
-
-DEFAULT_ADMIN_PASSWORD = "admin123"  # noqa: S105  # 缺省不安全密码:播种后强制首登改密兜底
 
 # 权限点注册表:(perm_code, perm_name, sort);业务权限点随各自域变更增补本清单
 PERMISSIONS: list[tuple[str, str, int]] = [
@@ -144,25 +142,36 @@ async def seed_all(session: AsyncSession, settings: Settings) -> None:
         if role is not None:
             await uow.roles.bind_perm_codes(role.id, codes)
 
-    # 超管:存在即跳过(含密码;在线改密后重播不覆盖)
-    admin = await uow.users.get_by_username(settings.admin_username)
+    await _bind_admin(uow, settings)
+
+    await uow.commit()
+
+
+async def _bind_admin(uow: SqlUnitOfWork, settings: Settings) -> None:
+    """把 `KM_ADMIN_SUBJECT` 指定的虎符 sub 绑到 SUPER_ADMIN 与默认租户。
+
+    只认虎符已建过档的 sub(用户经虎符登录一次后 sys_user 才有该行);未配置时
+    不建任何账号。绑定只增:撤销超管须在管理面显式操作。
+    """
+    subject = (settings.admin_subject or "").strip()
+    if not subject:
+        return
+    admin = await uow.users.get_by_id(subject)
     if admin is None:
-        env_password = settings.admin_initial_password
+        # 只为配置的虎符 subject 预建授权资料(无密码、不可本地登录);
+        # 同时写 identity,确保该 subject 之后经虎符登录直接命中本行。
         admin = User(
-            id=str(uuid7()),
-            username=settings.admin_username,
+            id=subject,
+            username="admin",
             email=None,
-            password_hash=pwd.hash_password(env_password or DEFAULT_ADMIN_PASSWORD),
-            nickname="超管",
+            nickname="运维管理员",
             status="ACTIVE",
-            # env 密码视为已改密;缺省密码强制首登改密(spec 明文)
-            password_changed_at=datetime.now(UTC) if env_password else None,
         )
         await uow.users.create(admin)
+        await uow.identities.create(admin.id, "HUFU", subject)
+    admin_role = await uow.roles.get_by_key("SUPER_ADMIN")
     if admin_role is not None:
         await uow.roles.bind_user(admin.id, admin_role.id)
     tenant = await uow.tenants.get_by_key(DEFAULT_TENANT_KEY)
     if tenant is not None:
         await uow.tenants.bind_user(admin.id, tenant.id)
-
-    await uow.commit()

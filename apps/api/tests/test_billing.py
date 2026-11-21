@@ -48,7 +48,7 @@ async def _user_with_key(
     tid = await _default_tenant_id(s)
     await _bind(s, "sys_user_tenant", uid, tid)
     await s.commit()
-    token = await _login(client, name)
+    token = _login(client)
     r = await client.post(
         "/system/bots", headers={"Authorization": f"Bearer {token}"}, json=BOT_PAYLOAD
     )
@@ -339,7 +339,7 @@ async def test_invoice_cross_tenant_404(
     await _bind(session, "sys_user_role", uid_b, rid_b)
     await _bind(session, "sys_user_tenant", uid_b, tid_b)
     await session.commit()
-    token_b = await _login(client, "bl_x2")
+    token_b = _login(client)
     r = await client.get(
         f"/portal/invoices/{rid}",
         headers={"Authorization": f"Bearer {token_b}", "X-Tenant-Id": "other_t"},

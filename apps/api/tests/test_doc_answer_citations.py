@@ -64,7 +64,7 @@ async def test_chat_query_sources_contract(
 ) -> None:
     """响应来源随 AgentReply 返回；SQL 回答的来源列表为空。"""
     await seed_all(session, get_settings())
-    _uid, token = await _user_with_chat_perm(client, session, make_user, "dc1")
+    _uid, token = await _user_with_chat_perm(session, make_user, "dc1")
     _install(fake_agent, StreamFakeAgent(reply=_DOC_REPLY))
     r = await client.post("/chat/query", json={"question": "报销周期"}, headers=_auth(token))
     assert r.status_code == 200
@@ -84,7 +84,7 @@ async def test_sql_path_sources_empty(
 ) -> None:
     """SQL 道产出的 sources 恒为空列表(不伪造引用)。"""
     await seed_all(session, get_settings())
-    _uid, token = await _user_with_chat_perm(client, session, make_user, "dc2")
+    _uid, token = await _user_with_chat_perm(session, make_user, "dc2")
     _install(fake_agent, StreamFakeAgent(reply=None))  # SQL 道(无 sources 字段)
     r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
     assert r.status_code == 200
@@ -102,7 +102,7 @@ async def test_history_replay_and_legacy_empty(
 ) -> None:
     """消息来源写入 result_json 并在历史记录中回显，旧消息返回空列表。"""
     await seed_all(session, get_settings())
-    _uid, token = await _user_with_chat_perm(client, session, make_user, "dc3")
+    _uid, token = await _user_with_chat_perm(session, make_user, "dc3")
     _install(fake_agent, StreamFakeAgent(reply=_DOC_REPLY))
     r = await client.post("/chat/query", json={"question": "报销周期"}, headers=_auth(token))
     assert r.status_code == 200
@@ -141,7 +141,7 @@ async def test_sse_result_carries_sources(
     from tests.test_chat_stream import _frames_for, _parse_sse
 
     await seed_all(session, get_settings())
-    _uid, token = await _user_with_chat_perm(client, session, make_user, "dc4")
+    _uid, token = await _user_with_chat_perm(session, make_user, "dc4")
     frames = _frames_for(_DOC_REPLY)
     _install(fake_agent, StreamFakeAgent(frames, reply=_DOC_REPLY))
     r = await client.post("/chat/query/stream", json={"question": "报销周期"}, headers=_auth(token))

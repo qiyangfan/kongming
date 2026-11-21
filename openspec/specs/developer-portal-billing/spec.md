@@ -6,7 +6,7 @@
 
 ## Requirements
 
-### Requirement: 用量配额(fail-closed)
+### Requirement: 用量配额判定(fail-closed)
 
 系统 SHALL 支持租户级三维配额策略(dimension ∈ TOKENS/CALLS/COST,
 period=MONTHLY,limit_value,warn_pct 默认 80),由超管配置(system:
@@ -14,11 +14,7 @@ billing:manage)。OpenAI 兼容网关(POST /v1/chat/completions)执行前
 MUST 判定:当月 token 用量(sys_llm_usage 聚合)+ 当月调用数(api
 渠道审计计数)+ 成本估算(套餐单价×token),任一维度超限 MUST
 拒绝(429 QUOTA_EXCEEDED)并落审计,不执行请求;达到 warn_pct
-MUST 以响应头 X-Quota-Warning 标记预警(不拒绝)。**口径注记**:
-CALLS 维度=工具执行计数(api 渠道审计行数,纯问答型 Bot 无工具
-调用恒 0,既定语义);请求形态校验(空问题 400)先于配额判定(429)
-为既定顺序;**COST 维成本估算以绑定套餐单价为前提**——未绑套餐
-租户单价按 0,COST 策略零信号(配置面 MUST 给出提示,035 R1-A4)。
+MUST 以响应头 X-Quota-Warning 标记预警(不拒绝)。
 
 #### Scenario: 超额 fail-closed 拒绝
 
@@ -31,6 +27,20 @@ CALLS 维度=工具执行计数(api 渠道审计行数,纯问答型 Bot 无工�
 - GIVEN 用量达 80% 未达 100%
 - WHEN 新请求到达
 - THEN 放行执行,响应头 X-Quota-Warning 标记
+
+### Requirement: 配额口径与服务端采集
+
+**口径注记**:CALLS 维度=工具执行计数(api 渠道审计行数,纯问答型 Bot 无
+工具调用恒 0,既定语义);请求形态校验(空问题 400)先于配额判定(429)
+为既定顺序;**COST 维成本估算以绑定套餐单价为前提**——未绑套餐租户单价
+按 0,COST 策略零信号(配置面 MUST 给出提示,035 R1-A4)。用量计量 MUST
+以服务端 sys_llm_usage 采集为唯一事实源(客户端无上报通道)。
+
+#### Scenario: 未绑套餐时 COST 维零信号
+
+- GIVEN 租户未绑套餐且配置了 COST 维策略
+- WHEN 网关判定成本
+- THEN 单价按 0 计,COST 维不触发拒绝,配置面给出提示
 
 #### Scenario: 用量防绕过
 
@@ -107,35 +117,12 @@ developer:portal):api-key 列表(复用既有端点)+ 当期用量看板
 - WHEN 点击「去支付」
 - THEN 创建支付单并进入收银台,完成 mock 支付后账单置 PAID
 
-### Requirement: 多维度配额(scope:TENANT/BOT/USER/TEAM)
+### Requirement: 多维度配额 scope 与绑定校验
 
 配额策略 SHALL 支持 scope(TENANT[默认]/BOT/USER/TEAM):BOT 级策略以
 scope_ref 绑定**该租户内**一个 Bot,USER 级绑定该租户内一个用户,TEAM 级
-绑定该租户内一个团队(跨租户或不存在的 scope_ref MUST 拒绝)。BOT 级限定
-该 Bot 的当月 TOKENS/COST 用量(以用量表的 bot 归属为准);USER 级限定该
-用户当月 TOKENS/COST(以用量表的用户归属聚合);TEAM 级限定归属该团队的
-资源的当月 TOKENS/COST(用量行经资源归属解析 team——资源变更归属后跟随
-现归属,配额为当月治理窗口语义)。同一(租户,维度,周期,scope,scope_ref)
-组合 MUST 唯一(零 uuid 归一的表达式唯一约束,TENANT 行不因 NULL
-scope_ref 重复)。网关判定 MUST 多路叠加:租户级与命中的 BOT 级(api-key
-绑定 Bot)/USER 级(调用归属用户)/TEAM 级(归属团队命中策略)各自独立
-判定,任一超限即拒,拒绝维度文案 MUST 带 scope 前缀(如 BOT:TOKENS、
-USER:TOKENS、TEAM:COST)以归因审计。BOT/USER/TEAM 级均无套餐兜底
-(未配置=不限);CALLS 维度仅支持 TENANT 级(工具审计归因口径,资源/
-用户/团队级不立约)。引用目标(Bot/用户/团队)被删除后其策略保留但零命中,
-不立级联。
-
-#### Scenario: Bot 级超限拒绝
-
-- GIVEN Bot A 配置 BOT 级 TOKENS 上限且当月已达
-- WHEN 以 Bot A 的 api-key 调用网关
-- THEN 429 QUOTA_EXCEEDED: BOT:TOKENS + 审计,不执行
-
-#### Scenario: Bot 级与租户级独立
-
-- GIVEN Bot A BOT 级未超,但租户级 CALLS 已超限
-- WHEN 调用
-- THEN 按租户级 429 拒绝
+绑定该租户内一个团队(跨租户或不存在的 scope_ref MUST 拒绝)。引用目标
+(Bot/用户/团队)被删除后其策略保留但零命中,不立级联。
 
 #### Scenario: 跨租户 scope_ref 拒绝
 
@@ -143,17 +130,21 @@ USER:TOKENS、TEAM:COST)以归因审计。BOT/USER/TEAM 级均无套餐兜底
 - WHEN scope_ref 指向租户 B 的 Bot
 - THEN 404 拒绝,不落策略
 
-#### Scenario: 同 scope 组合唯一
+#### Scenario: 引用目标删除后零命中
 
-- GIVEN 租户 A 已有 BOT 级(bot X)TOKENS 策略
-- WHEN 再次创建同组合策略
-- THEN upsert 语义更新限额,不产生重复行
+- GIVEN USER 级策略引用的用户被删除
+- WHEN 网关判定
+- THEN 该策略不命中(零限流效果),策略行保留,不级联清理
 
-#### Scenario: USER 级超限拒绝
+### Requirement: 多维配额用量口径与唯一性
 
-- GIVEN 用户 U 配置 USER 级 TOKENS 上限且当月已达
-- WHEN 以 U 归属的 api-key 调用网关
-- THEN 429 QUOTA_EXCEEDED: USER:TOKENS + 审计,不执行
+BOT 级限定该 Bot 的当月 TOKENS/COST 用量(以用量表的 bot 归属为准);
+USER 级限定该用户当月 TOKENS/COST(以用量表的用户归属聚合);TEAM 级限定
+归属该团队的资源的当月 TOKENS/COST(用量行经资源归属解析 team——资源变更
+归属后跟随现归属,配额为当月治理窗口语义)。同一(租户,维度,周期,scope,
+scope_ref)组合 MUST 唯一(零 uuid 归一的表达式唯一约束,TENANT 行不因
+NULL scope_ref 重复)。BOT/USER/TEAM 级均无套餐兜底(未配置=不限);CALLS
+维度仅支持 TENANT 级(工具审计归因口径,资源/用户/团队级不立约)。
 
 #### Scenario: TEAM 级按资源归属聚合
 
@@ -167,17 +158,42 @@ USER:TOKENS、TEAM:COST)以归因审计。BOT/USER/TEAM 级均无套餐兜底
 - WHEN 当月 TEAM 级判定
 - THEN 用量 N 计入团队 R(现归属),不再计入团队 T
 
+#### Scenario: 同 scope 组合唯一
+
+- GIVEN 租户 A 已有 BOT 级(bot X)TOKENS 策略
+- WHEN 再次创建同组合策略
+- THEN upsert 语义更新限额,不产生重复行
+
+### Requirement: 网关多路配额叠加判定
+
+网关判定 MUST 多路叠加:租户级与命中的 BOT 级(api-key 绑定 Bot)/USER 级
+(调用归属用户)/TEAM 级(归属团队命中策略)各自独立判定,任一超限即拒,
+拒绝维度文案 MUST 带 scope 前缀(如 BOT:TOKENS、USER:TOKENS、TEAM:COST)
+以归因审计。
+
+#### Scenario: Bot 级超限拒绝
+
+- GIVEN Bot A 配置 BOT 级 TOKENS 上限且当月已达
+- WHEN 以 Bot A 的 api-key 调用网关
+- THEN 429 QUOTA_EXCEEDED: BOT:TOKENS + 审计,不执行
+
+#### Scenario: Bot 级与租户级独立
+
+- GIVEN Bot A BOT 级未超,但租户级 CALLS 已超限
+- WHEN 调用
+- THEN 按租户级 429 拒绝
+
+#### Scenario: USER 级超限拒绝
+
+- GIVEN 用户 U 配置 USER 级 TOKENS 上限且当月已达
+- WHEN 以 U 归属的 api-key 调用网关
+- THEN 429 QUOTA_EXCEEDED: USER:TOKENS + 审计,不执行
+
 #### Scenario: 多路叠加任一超限即拒
 
 - GIVEN 租户级未超、USER 级已超
 - WHEN 该用户调用网关
 - THEN 按 USER 级 429 拒绝(租户级未超不构成放行)
-
-#### Scenario: 引用目标删除后零命中
-
-- GIVEN USER 级策略引用的用户被删除
-- WHEN 网关判定
-- THEN 该策略不命中(零限流效果),策略行保留,不级联清理
 
 ### Requirement: 计费配置租户清单
 

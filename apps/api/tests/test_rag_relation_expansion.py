@@ -446,7 +446,7 @@ async def test_relation_write_invalidates_ctx_cache(
     from tests.test_chat_query import _auth, _login
 
     await seed_all(session, get_settings())
-    token = await _login(client, "admin", "admin123")
+    token = _login(client)
     tid = await _ensure_default_tenant(session)
     await _seed_expansion_scene(session, tid, ds="default")
     headers = _auth(token)
@@ -553,7 +553,7 @@ async def test_recall_probe_exposes_expansion_detail(
     from tests.test_chat_query import _auth, _login
 
     await seed_all(session, get_settings())
-    token = await _login(client, "admin", "admin123")
+    token = _login(client)
     tid = await _ensure_default_tenant(session)
     await _register_datasource(session, tid, EXP_DS)
     await _seed_expansion_scene(session, tid, ds=EXP_DS)
@@ -598,7 +598,7 @@ async def test_recall_probe_expansion_requires_perm(
     rid = await _mk_role_with_perms(session, "REL-NOPERM", ["chat:execute"])
     await _bind(session, "sys_user_role", uid, rid)
     await _bind(session, "sys_user_tenant", uid, await _default_tenant_id(session))
-    token = await _login(client, "rel_noperm")
+    token = _login(client)
     r = await client.get(
         "/system/rag/recall-probe",
         params={"question": "x", "datasource_key": "default"},

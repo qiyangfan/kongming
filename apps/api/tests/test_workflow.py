@@ -563,7 +563,7 @@ async def _wf_user(
     await _bind(s, "sys_user_role", uid, rid)
     await _bind(s, "sys_user_tenant", uid, tid)
     await s.commit()
-    return uid, await _login(client, name)
+    return uid, _login(uid)
 
 
 _SQL_WF = {
@@ -716,7 +716,7 @@ async def test_workflow_perms_and_isolation(
     ).scalar_one()
     await _bind(session, "sys_user_tenant", uid2, str(tid))
     await session.commit()
-    token2 = await _login(client, "wf_noexec")
+    token2 = _login(client)
     r = await client.post(
         "/system/workflow/guarded/run",
         headers={"Authorization": f"Bearer {token2}", "X-Tenant-Id": "wf"},
@@ -724,7 +724,7 @@ async def test_workflow_perms_and_isolation(
     )
     assert r.status_code == 403
     # 跨租户 404 同形
-    token3 = await _login(client, "wf_noexec")  # default 租户视角
+    token3 = _login(client)  # default 租户视角
     r2 = await client.get(
         "/system/workflow/guarded",
         headers={"Authorization": f"Bearer {token3}"},

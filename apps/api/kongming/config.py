@@ -63,55 +63,21 @@ class Settings(BaseSettings):
     # 内部服务令牌:api ↔ agent 通道(与用户 JWT 分离,ADR-002)
     internal_token: str | None = None
 
-    # 联邦总开关(默认开;置 false 临时停用该家,凭证保留——如企微待正式域名就位前关停)
-    github_enabled: bool = True
-    google_enabled: bool = True
-    wecom_enabled: bool = True
-    dingtalk_enabled: bool = True
-    feishu_enabled: bool = True
+    # 统一身份(虎符)联邦:唯一登录入口;置 false 只停新登录,已签发令牌按 TTL 继续有效
     hufu_enabled: bool = True
-
-    # GitHub OAuth 联邦
-    github_client_id: str | None = None
-    github_client_secret: str | None = None
-    # 须与 GitHub OAuth App 的 Authorization callback URL 精确一致(vite 默认端口 5173)
-    github_redirect_uri: str = "http://localhost:5173/auth/github/callback"
-
-    # Google OAuth 联邦(ADR-006 连接器首发第二家)
-    google_client_id: str | None = None
-    google_client_secret: str | None = None
-    google_redirect_uri: str = "http://localhost:5173/auth/google/callback"
-
-    # 虎符(hufu)统一身份联邦:标准 OIDC 授权码 + PKCE;仅后端持有令牌
     hufu_issuer: str | None = None
     hufu_client_id: str | None = None
     hufu_client_secret: str | None = None
     hufu_redirect_uri: str = "http://localhost:5173/auth/hufu/callback"
+    hufu_post_logout_redirect_uri: str = "http://localhost:5173/login"
+    auth_cookie_secure: bool = False
 
-    # 企业微信联邦:扫码即 OAuth(qrConnect),corpid 即 appid
-    wecom_corpid: str | None = None
-    wecom_secret: str | None = None
-    wecom_agentid: str | None = None
-    wecom_redirect_uri: str = "http://localhost:5173/auth/wecom/callback"
-
-    # 钉钉联邦:新版统一身份认证(token 为 JSON body,非标准 form)
-    dingtalk_client_id: str | None = None
-    dingtalk_client_secret: str | None = None
-    dingtalk_redirect_uri: str = "http://localhost:5173/auth/dingtalk/callback"
-
-    # 飞书联邦:v2 端点 app 凭证直换 user token(官方支持 PKCE)
-    feishu_app_id: str | None = None
-    feishu_app_secret: str | None = None
-    feishu_redirect_uri: str = "http://localhost:5173/auth/feishu/callback"
-
-    # 认证安全策略(ADR-003;锁定语义见 auth spec;ge=1 防 0 值导致 Redis EX 报错)
-    auth_login_max_fails: int = Field(default=5, ge=1)
-    auth_login_lock_min: int = Field(default=15, ge=1)  # 锁定时长(分钟)
     auth_state_ttl_sec: int = Field(default=600, ge=1)
+    # 登录发起每 IP 每分钟上限:匿名入口,防 state 存储与发现文档被刷
+    auth_login_rate_per_minute: int = Field(default=60, ge=1)
 
-    # 启动种子(rbac spec「种子数据」):超管账号;缺省密码时强制首登改密
-    admin_username: str = "admin"
-    admin_initial_password: str | None = None
+    # 运维超管:虎符 sub(首次登录建过档后生效);留空则不绑定任何超管
+    admin_subject: str | None = None
 
     # 动态数据源密码加密密钥
     datasource_encrypt_key: str | None = None

@@ -1,60 +1,21 @@
-"""OAuth2 插件基类(ADR-006 连接器内核):authlib 协议管道收敛于此。
+"""provider 插件基类:声明式端点与凭证读取。
 
-新增 provider = 一个声明式子类(端点/scope/PKCE/凭证读取/profile 归一化),
-路由与前端零改动。
+联邦只有虎符一家(标准 OIDC),授权码换来的 id_token 由各插件自行验签与归一化,
+协议差异止步于子类。
 """
 
 from abc import ABC, abstractmethod
-from typing import Protocol, cast
 
-import httpx
-from authlib.integrations.httpx_client import AsyncOAuth2Client
-
-from kongming.auth.models import NormalizedProfile, ProviderExchangeFailed
 from kongming.config import Settings
-
-
-class OAuthClient(Protocol):
-    """OAuth 客户端窄面(本域实际依赖)。
-
-    authlib 无 py.typed,pyright 解不出 AsyncOAuth2Client 的 httpx 继承方法;
-    以 Protocol 声明协议管道所需面,实现实例由 _client 构造处 cast 对齐。
-    """
-
-    def create_authorization_url(
-        self, url: str, *, state: str, **kwargs: str
-    ) -> tuple[str, str | None]: ...
-
-    async def fetch_token(self, url: str, *, code: str, **kwargs: str) -> object: ...
-
-    async def get(self, url: str, **kwargs: object) -> httpx.Response: ...
-
-    async def aclose(self) -> None: ...
-
-
-def resp_json(resp: httpx.Response, provider_name: str) -> dict[str, object]:
-    """provider HTTP 响应 → JSON 对象;非 JSON/非对象 → ProviderExchangeFailed(防 500)。"""
-    try:
-        data = resp.json()
-    except ValueError as e:
-        raise ProviderExchangeFailed(
-            f"{provider_name}登录失败(响应格式异常:{resp.status_code})"
-        ) from e
-    if not isinstance(data, dict):
-        raise ProviderExchangeFailed(f"{provider_name}登录失败(响应格式异常:{resp.status_code})")
-    return cast("dict[str, object]", data)
 
 
 class OAuthProviderBase(ABC):
     key: str
     display_name: str
-    pkce: bool
     # OIDC provider:授权前预取发现文档,并在回调中校验 nonce
     oidc: bool = False
-    # 是否允许按已验证 email 关联既有账号(虎符契约禁止,默认保持旧 provider 行为)
-    link_by_verified_email: bool = True
-    auth_url: str
-    token_url: str
+    # 是否允许按已验证 email 关联既有账号;虎符契约禁止(不同 IdP 间按 email 合并会错绑)
+    link_by_verified_email: bool = False
     scope: str
 
     @abstractmethod
@@ -66,44 +27,7 @@ class OAuthProviderBase(ABC):
     @abstractmethod
     def redirect_uri(self, s: Settings) -> str: ...
 
-    @abstractmethod
-    async def fetch_raw_profile(self, client: OAuthClient) -> NormalizedProfile:
-        """token 已就绪的 client → 拉取并归一化 profile(协议差异止步于此)。"""
-        ...
-
     def configured(self, s: Settings) -> bool:
-        # 联邦总开关(默认开):KM_<KEY>_ENABLED=false 即停用该家,无需摘除凭证
-        enabled = bool(getattr(s, f"{self.key}_enabled", True))
-        return enabled and bool(self.client_id(s) and self.client_secret(s))
-
-    def _client(self, s: Settings) -> OAuthClient:
-        # AsyncOAuth2Client 无 py.typed,结构面经 OAuthClient 窄协议对齐(见其 docstring)
-        return cast(
-            OAuthClient,
-            AsyncOAuth2Client(
-                client_id=self.client_id(s),
-                client_secret=self.client_secret(s),
-                redirect_uri=self.redirect_uri(s),
-            ),
+        return bool(s.hufu_enabled and s.hufu_issuer) and bool(
+            self.client_id(s) and self.client_secret(s)
         )
-
-    def authorize_url(self, s: Settings, *, state: str, code_challenge: str | None) -> str:
-        c = self._client(s)
-        extra: dict[str, str] = {}
-        if code_challenge is not None:
-            extra = {"code_challenge": code_challenge, "code_challenge_method": "S256"}
-        url, _ = c.create_authorization_url(self.auth_url, state=state, scope=self.scope, **extra)
-        return url
-
-    async def fetch_profile(
-        self, s: Settings, *, code: str, code_verifier: str | None
-    ) -> NormalizedProfile:
-        c = self._client(s)
-        try:
-            kwargs: dict[str, str] = {}
-            if code_verifier is not None:
-                kwargs["code_verifier"] = code_verifier
-            await c.fetch_token(self.token_url, code=code, **kwargs)
-            return await self.fetch_raw_profile(c)
-        finally:
-            await c.aclose()

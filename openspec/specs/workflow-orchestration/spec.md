@@ -47,19 +47,11 @@ condition/loop/transform/agent)、类型必填配置齐全;condition 后继
 
 系统 SHALL 提供拓扑序执行引擎:节点输出经 {{node_id.outputs.field}}
 引用语法流转,上下文 MUST 不可变(节点写入冻结历史);循环节点
-forEach MUST 有最大迭代上限(配置值且硬顶 100);全局执行 MUST
-有超时(默认 120s)与总步数上限(默认 200,循环迭代计入),超限
-强制终止,run 记录 status=TIMEOUT/STEP_LIMIT 与已完成节点快照;
-TIMEOUT MUST 仅归因全局预算到期——节点内部自行抛出的超时
-(socket/驱动语句超时等内源 TimeoutError)SHALL 按节点失败
-(FAILED)归类并携带「节点内部超时」明确文案,不得误标 TIMEOUT
-「超全局预算中断」;节点失败 MUST fail-fast(run FAILED,保留已
-完成快照)。条件跳过判定 SHALL 仅对 condition 类型依赖的前驱应用
-on 选路门(其他类型节点产出 bool 型 result 键不触发条件跳过)。
-循环体内子节点执行 SHALL 逐次记入 run 快照(node_id 以迭代标记
-限定,如 `<loop>.<i>.<sub>` 形态),失败子节点按其带迭代标记的
-自身 id 归因 FAILED(不只归因到 loop 节点);子节点 outputs 沿用
-节点级截断纪律(sql 行数/http 体积同款上限)。
+forEach MUST 有最大迭代上限(配置值且硬顶 100);全局执行预算、超时归因、
+循环子节点记录见「执行预算、超时归因与循环子节点快照」requirement;
+节点失败 MUST fail-fast(run FAILED,保留已完成快照)。条件跳过判定 SHALL
+仅对 condition 类型依赖的前驱应用 on 选路门(其他类型节点产出 bool 型
+result 键不触发条件跳过)。
 
 #### Scenario: 条件分支选路
 
@@ -78,6 +70,17 @@ on 选路门(其他类型节点产出 bool 型 result 键不触发条件跳过)�
 - GIVEN forEach 循环配置错误条件(数组无限或迭代不收敛)
 - WHEN 迭代达上限
 - THEN 循环节点 FAILED,run 终止,不无限循环
+
+### Requirement: 执行预算、超时归因与循环子节点快照
+
+全局执行 MUST 有超时(默认 120s)与总步数上限(默认 200,循环迭代计入),超限
+强制终止,run 记录 status=TIMEOUT/STEP_LIMIT 与已完成节点快照;TIMEOUT MUST 仅
+归因全局预算到期——节点内部自行抛出的超时(socket/驱动语句超时等内源
+TimeoutError)SHALL 按节点失败(FAILED)归类并携带「节点内部超时」明确文案,
+不得误标 TIMEOUT「超全局预算中断」。循环体内子节点执行 SHALL 逐次记入 run 快照
+(node_id 以迭代标记限定,如 `<loop>.<i>.<sub>` 形态),失败子节点按其带迭代标记的
+自身 id 归因 FAILED(不只归因到 loop 节点);子节点 outputs 沿用节点级截断纪律
+(sql 行数/http 体积同款上限)。
 
 #### Scenario: 循环子节点失败按迭代归因
 
@@ -197,10 +200,7 @@ SHALL 显式携带 on 值(true/false 两类分支边,MUST NOT 出现无 on 值�
 后继连线);节点配置经侧栏表单编辑,表单字段与该类型定义的必填配置对齐。
 画布状态与 JSON DAG 定义 SHALL 双向可转换,转换 SHALL 无损(画布可表达的
 定义 ⇄ JSON 互转后语义逐字段一致);JSON 中画布暂不表达的形态 SHALL 明示
-并阻断切换到画布(回落 JSON 编辑),MUST NOT 静默丢弃字段。保存 SHALL 走
-既有定义端点——结构校验(环/孤立/类型/必填配置/on 值)、版本化、租户隔离
-语义与 JSON 编辑完全同源,MUST NOT 出现第二套校验;校验错误 SHALL 在画布
-上定位呈现(环参与节点高亮、非法 on 值/缺配置定位到节点)。节点 id 生成
+并阻断切换到画布(回落 JSON 编辑),MUST NOT 静默丢弃字段。节点 id 生成
 SHALL 与手工定义同规(唯一非空),画布不产生服务端无法接受的定义形态。
 
 #### Scenario: 拖拽建图保存闭环
@@ -216,6 +216,12 @@ SHALL 与手工定义同规(唯一非空),画布不产生服务端无法接受�
 - WHEN 分别指定 on=true 与 on=false 并保存
 - THEN 定义中两个后继节点的 on 值分别为 "true"/"false"(与手工 JSON
   定义契约一致)
+
+### Requirement: 画布保存复用既有定义端点校验
+
+画布保存 SHALL 走既有定义端点——结构校验(环/孤立/类型/必填配置/on 值)、
+版本化、租户隔离语义与 JSON 编辑完全同源,MUST NOT 出现第二套校验;校验错误
+SHALL 在画布上定位呈现(环参与节点高亮、非法 on 值/缺配置定位到节点)。
 
 #### Scenario: 校验错误定位到节点
 

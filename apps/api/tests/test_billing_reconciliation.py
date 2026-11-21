@@ -183,8 +183,9 @@ async def test_endpoint_requires_manage_perm(client: AsyncClient, session: Async
     assert r.status_code in (401, 403)
     await seed_all(session, get_settings())
     await session.commit()
-    lr = await client.post("/auth/login", json={"username": "admin", "password": "admin123"})
-    token = lr.json()["access_token"]
+    from tests.conftest import login_token
+
+    token = login_token(get_settings().admin_subject)
     r2 = await client.get(
         "/system/billing/cost-reconciliation?window_days=30",
         headers={"Authorization": f"Bearer {token}"},

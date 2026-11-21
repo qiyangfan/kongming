@@ -100,7 +100,7 @@ async def _user_with_task_perms(
         )
     await _bind(s, "sys_user_role", uid, str(rid))
     await _bind(s, "sys_user_tenant", uid, await _default_tenant_id(s))
-    return uid, await _login(client, username)
+    return uid, _login(uid)
 
 
 def _step_start_outcome(body: dict[str, Any]) -> str | None:

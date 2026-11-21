@@ -54,7 +54,7 @@ async def _user(
     ).scalar_one()
     await _bind(s, "sys_user_role", uid, str(rid))
     await _bind(s, "sys_user_tenant", uid, await _default_tenant_id(s))
-    return uid, await _login(client, username)
+    return uid, _login(uid)
 
 
 async def _guard_audits(s: AsyncSession, *, gtype: str | None = None) -> list[dict[str, object]]:
@@ -297,7 +297,7 @@ async def test_intent_threshold_adjustable(
 
 async def _admin(client: AsyncClient, s: AsyncSession) -> str:
     await seed_all(s, get_settings())
-    return await _login(client, "admin", "admin123")
+    return _login(get_settings().admin_subject)
 
 
 async def test_rules_list_and_toggle(
@@ -338,13 +338,13 @@ async def test_rules_forbidden_and_audit_page(
         await session.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'"))
     ).scalar_one()
     await _bind(session, "sys_user_tenant", uid, str(tid))
-    token = await _login(client, "gd_plain")
+    token = _login(client)
     assert (await client.get("/system/guardrails/rules", headers=_auth(token))).status_code == 403
     assert (
         await client.get("/system/guardrails/audit/page", headers=_auth(token))
     ).status_code == 403
     # 超管审计分页
-    admin_token = await _login(client, "admin", "admin123")
+    admin_token = _login(get_settings().admin_subject)
     r = await client.get("/system/guardrails/audit/page?page=1&size=10", headers=_auth(admin_token))
     assert r.status_code == 200
     assert "items" in r.json() and "total" in r.json()

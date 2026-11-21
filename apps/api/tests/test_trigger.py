@@ -298,7 +298,7 @@ async def _trigger_admin(
     await _bind(s, "sys_user_role", uid, rid)
     await _bind(s, "sys_user_tenant", uid, tid)
     await s.commit()
-    return uid, await _login(client, name)
+    return uid, _login(uid)
 
 
 async def _mk_workflow(
@@ -382,7 +382,7 @@ async def test_trigger_perm_and_isolation(
 
     await _bind(session, "sys_user_tenant", uid2, await _default_tenant_id(session))
     await session.commit()
-    token2 = await _login(client, "tg_noperm")
+    token2 = _login(client)
     r = await client.get("/system/triggers", headers={"Authorization": f"Bearer {token2}"})
     assert r.status_code == 403
 

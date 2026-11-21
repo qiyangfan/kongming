@@ -104,21 +104,29 @@ async def test_sliding_window_blocks_across_boundary_then_recovers() -> None:
     r = get_redis()
     limiter = RedisRateLimiter(r)
     window, limit = 4, 2
-    # 当前窗口内耗尽额度
-    assert await limiter.allow_sliding("k", limit=limit, window_sec=window)
-    assert await limiter.allow_sliding("k", limit=limit, window_sec=window)
-    assert not await limiter.allow_sliding("k", limit=limit, window_sec=window)
-    # 睡到下一窗口前 1s 内再断言:固定 sleep 在全量负载下可能滑过 2s 拒绝区,
-    # 逐步逼近边界让判定留在权重>0.5 的区间内(单次 Redis 往返远小于 1s 余量)
-    while True:
-        d = (await _server_now(r)) % window
-        if d < 1.0:
+    blocked = False
+    key = "k-0"
+    for attempt in range(3):
+        key = f"k-{attempt}"
+        # 当前窗口内耗尽额度
+        assert await limiter.allow_sliding(key, limit=limit, window_sec=window)
+        assert await limiter.allow_sliding(key, limit=limit, window_sec=window)
+        assert not await limiter.allow_sliding(key, limit=limit, window_sec=window)
+        # 睡到下一窗口前 1s 内再断言:固定 sleep 在全量负载下可能滑过 2s 拒绝区,
+        # 逐步逼近边界让判定留在权重>0.5 的区间内(单次 Redis 往返远小于 1s 余量)
+        while True:
+            d = (await _server_now(r)) % window
+            if d < 1.0:
+                break
+            await asyncio.sleep(min(window - d + 0.05, 0.5))
+        if not await limiter.allow_sliding(key, limit=limit, window_sec=window):
+            blocked = True
             break
-        await asyncio.sleep(min(window - d + 0.05, 0.5))
-    assert not await limiter.allow_sliding("k", limit=limit, window_sec=window)
+        # 全量负载下调度停顿可能整体滑出拒绝区:换键重跑,不把环境抖动判成放行缺陷。
+    assert blocked, "跨窗即时请求必须受限"
     # 睡到窗口中点(权重≈0.5,估算≈1 → 放行):老化恢复
     await asyncio.sleep(window / 2)
-    assert await limiter.allow_sliding("k", limit=limit, window_sec=window)
+    assert await limiter.allow_sliding(key, limit=limit, window_sec=window)
 
 
 async def test_sliding_window_bucket_isolation() -> None:

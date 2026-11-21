@@ -85,9 +85,7 @@ async def test_transcribe_engine_unavailable_wrapped() -> None:
 # ============ 端点形态(mock 引擎依赖覆盖) ============
 
 
-async def _mk_user_with_chat_perm(
-    client: AsyncClient, s: AsyncSession, make_user: MakeUser, username: str
-) -> str:
+async def _mk_user_with_chat_perm(s: AsyncSession, make_user: MakeUser, username: str) -> str:
     """chat:execute + default 租户用户(test_chat_query 同款形态)。"""
     await seed_all(s, get_settings())
     uid = await make_user(username)
@@ -106,9 +104,9 @@ async def _mk_user_with_chat_perm(
         {"u": uid, "t": str(tid)},
     )
     await s.commit()
-    r = await client.post("/auth/login", json={"username": username, "password": "Passw0rd!"})
-    assert r.status_code == 200
-    return str(r.json()["access_token"])
+    from tests.conftest import login_token
+
+    return login_token(uid)
 
 
 async def test_endpoint_roundtrip_and_audit(
@@ -118,7 +116,7 @@ async def test_endpoint_roundtrip_and_audit(
     fake_stt: dict[str, SttService],
 ) -> None:
     """200 + 文本;审计 action 落行且转写正文不进 detail。"""
-    token = await _mk_user_with_chat_perm(client, session, make_user, "stt_user")
+    token = await _mk_user_with_chat_perm(session, make_user, "stt_user")
     _install(fake_stt, _svc(_FakeEngine("各上映年份的影片数量")))
     r = await client.post(
         "/chat/stt",
@@ -144,7 +142,7 @@ async def test_endpoint_unavailable_503(
     make_user: MakeUser,
     fake_stt: dict[str, SttService],
 ) -> None:
-    token = await _mk_user_with_chat_perm(client, session, make_user, "stt_una")
+    token = await _mk_user_with_chat_perm(session, make_user, "stt_una")
     _install(fake_stt, _svc(_FakeEngine(err=EngineUnavailable("模型缺失"))))
     r = await client.post(
         "/chat/stt",
@@ -161,7 +159,7 @@ async def test_endpoint_oversize_413(
     make_user: MakeUser,
     fake_stt: dict[str, SttService],
 ) -> None:
-    token = await _mk_user_with_chat_perm(client, session, make_user, "stt_big")
+    token = await _mk_user_with_chat_perm(session, make_user, "stt_big")
     _install(fake_stt, _svc(_FakeEngine("x")))
     r = await client.post(
         "/chat/stt",
@@ -196,8 +194,9 @@ async def test_endpoint_no_perm_403(
         {"u": uid, "t": str(tid)},
     )
     await session.commit()
-    r = await client.post("/auth/login", json={"username": "stt_noperm", "password": "Passw0rd!"})
-    token = str(r.json()["access_token"])
+    from tests.conftest import login_token
+
+    token = login_token(uid)
     r = await client.post(
         "/chat/stt",
         files={"file": ("a.webm", b"x", "audio/webm")},

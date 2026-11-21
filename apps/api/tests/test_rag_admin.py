@@ -94,7 +94,7 @@ def fake_agent(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
 
 async def _admin_token(client: AsyncClient, session: AsyncSession) -> str:
     await seed_all(session, get_settings())
-    return await _login(client, "admin", "admin123")  # SUPER_ADMIN 自动覆盖全部权限点
+    return _login(get_settings().admin_subject)  # SUPER_ADMIN 自动覆盖全部权限点
 
 
 async def _noperm_user(client: AsyncClient, session: AsyncSession, make_user: MakeUser) -> str:
@@ -106,7 +106,7 @@ async def _noperm_user(client: AsyncClient, session: AsyncSession, make_user: Ma
     ).scalar_one()
     await _bind(session, "sys_user_role", uid, str(rid))
     await _bind(session, "sys_user_tenant", uid, await _default_tenant_id(session))
-    return await _login(client, "ragless")
+    return _login(client)
 
 
 def _md(*tables: str) -> bytes:

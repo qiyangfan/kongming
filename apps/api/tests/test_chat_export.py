@@ -136,7 +136,7 @@ async def test_export_no_perm_403(
     rid = await _mk_role_with_perms(session, "EXPORT_NOCHAT", [])
     await _bind(session, "sys_user_role", uid, rid)
     await _bind(session, "sys_user_tenant", uid, await _default_tenant_id(session))
-    token = await _login(client, "export-noperm")
+    token = _login(client)
     r = await client.post(
         "/chat/export",
         json={"format": "csv", "columns": ["a"], "rows": []},
@@ -149,7 +149,7 @@ async def test_export_invalid_format_422(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """format 传输层枚举收口(Literal):非法值 422,不生成文件。"""
-    _, token = await _user_with_chat_perm(client, session, make_user, "export-fmt")
+    _, token = await _user_with_chat_perm(session, make_user, "export-fmt")
     r = await client.post(
         "/chat/export",
         json={"format": "pdf", "columns": ["a"], "rows": []},
@@ -161,7 +161,7 @@ async def test_export_invalid_format_422(
 async def test_export_csv_response_shape(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    _, token = await _user_with_chat_perm(client, session, make_user, "export-csv")
+    _, token = await _user_with_chat_perm(session, make_user, "export-csv")
     r = await client.post(
         "/chat/export",
         json={"format": "csv", "columns": ["name", "qty"], "rows": [["连弩", 30]]},
@@ -179,7 +179,7 @@ async def test_export_csv_response_shape(
 async def test_export_xlsx_response_shape(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    _, token = await _user_with_chat_perm(client, session, make_user, "export-xlsx")
+    _, token = await _user_with_chat_perm(session, make_user, "export-xlsx")
     r = await client.post(
         "/chat/export",
         json={"format": "xlsx", "columns": ["name"], "rows": [["连弩"]]},
@@ -196,7 +196,7 @@ async def test_export_tenant_forbidden_403(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """租户白名单复校(与问答端点同构):X-Tenant-Id 指向未绑定租户即 403。"""
-    _, token = await _user_with_chat_perm(client, session, make_user, "export-tenant")
+    _, token = await _user_with_chat_perm(session, make_user, "export-tenant")
     r = await client.post(
         "/chat/export",
         json={"format": "csv", "columns": ["a"], "rows": []},
@@ -210,7 +210,7 @@ async def test_export_rows_over_transport_cap_422(
 ) -> None:
     """rows 传输层上限(截断在 JSON 解析之后,挡不住请求体本身的内存
     放大)——超限在解析期即 422;service 层截断保留为双闸。"""
-    _, token = await _user_with_chat_perm(client, session, make_user, "export-cap")
+    _, token = await _user_with_chat_perm(session, make_user, "export-cap")
     r = await client.post(
         "/chat/export",
         json={"format": "csv", "columns": ["a"], "rows": [[i] for i in range(10001)]},
@@ -228,7 +228,7 @@ async def test_export_audit_logged(
     """导出落 sys_oper_log chat.export(fmt/rows/truncated,同事务;数据外发可见性)。"""
     from sqlalchemy import text
 
-    _, token = await _user_with_chat_perm(client, session, make_user, "export-audit")
+    _, token = await _user_with_chat_perm(session, make_user, "export-audit")
     r = await client.post(
         "/chat/export",
         json={"format": "csv", "columns": ["name"], "rows": [["连弩"], ["木牛"]]},
@@ -262,7 +262,7 @@ async def test_export_audit_failure_not_blocking(
         raise RuntimeError("oper_log down")
 
     monkeypatch.setattr(SqlOperLogRepo, "add", _boom)
-    _, token = await _user_with_chat_perm(client, session, make_user, "export-auditfail")
+    _, token = await _user_with_chat_perm(session, make_user, "export-auditfail")
     r = await client.post(
         "/chat/export",
         json={"format": "csv", "columns": ["name"], "rows": [["连弩"]]},

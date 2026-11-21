@@ -125,7 +125,7 @@ async def _user_token(
     rid = await _mk_role_with_perms(s, f"P-{username}", ["chat:execute", "chat:feedback:submit"])
     await _bind(s, "sys_user_role", uid, rid)
     await _bind(s, "sys_user_tenant", uid, await _default_tenant_id(s))
-    return uid, await _login(client, username)
+    return uid, _login(uid)
 
 
 # ── ADOPTED 晋升与幂等 ───────────────────────────────
@@ -272,7 +272,7 @@ async def test_resubmit_after_adopted_disables(
     r = await client.post(
         f"/chat/messages/{mid}/feedback",
         json={"rating": "UP", "corrected_sql": "SELECT 43 FROM dual"},
-        headers=_auth(await _login(client, "admin", "admin123")),
+        headers=_auth(_login(client)),
     )
     assert r.status_code == 200
     row = (
@@ -558,7 +558,7 @@ async def test_firewall_reject_keeps_state(
     r = await client.post(
         f"/chat/messages/{mid_bad}/feedback",
         json={"rating": "DOWN", "corrected_sql": "DELETE FROM goods"},
-        headers=_auth(await _login(client, "admin", "admin123")),
+        headers=_auth(_login(client)),
     )
     assert r.status_code == 400
     # 零新增、Baseline 不变
@@ -659,6 +659,9 @@ async def test_migration_0034_downgrade_roundtrip(monkeypatch: pytest.MonkeyPatc
         from kongming.config import get_settings
 
         await seed_all(session, get_settings())
+        # 0064 降级拒绝带 HUFU 绑定;这里先清理测试预建映射,不丢业务数据。
+        await session.execute(text("DELETE FROM public.user_identities WHERE provider='HUFU'"))
+        await session.commit()
         import asyncio
 
         # env.py 内部 asyncio.run:跑事件循环内直调会冲突,经线程隔离

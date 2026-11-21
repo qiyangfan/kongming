@@ -45,7 +45,6 @@ from kongming.system.models import (
     UnknownRoleId,
     UnknownTenantId,
     UserListItem,
-    UsernameTaken,
     UserNotFound,
 )
 from kongming.system.repository import SqlSystemRepo
@@ -67,7 +66,7 @@ def get_system_service(
     settings = get_settings()
     return SystemService(
         SqlSystemRepo(session),
-        settings.admin_username,
+        settings.admin_subject or "",
         families=RedisRefreshFamilyStore(redis),
         refresh_ttl_sec=settings.refresh_token_ttl_sec,
     )
@@ -79,19 +78,8 @@ UserClaims = Annotated[dict[str, object], Depends(current_user)]
 # ---- 传输模型 ----
 
 
-class UserCreateIn(BaseModel):
-    username: str = Field(min_length=2, max_length=64)
-    password: str = Field(min_length=8, max_length=128)
-    nickname: str = Field(max_length=64)
-    email: str | None = Field(default=None, max_length=128)
-    status: UserStatus = "ACTIVE"
-    dept_id: uuid.UUID | None = None
-    tenant_id: uuid.UUID
-    role_ids: list[uuid.UUID] = Field(default_factory=list[uuid.UUID])
-
-
 class UserUpdateIn(BaseModel):
-    """全量更新用户资料;不提交密码时保持原值,username 创建后不可修改。"""
+    """全量更新用户资料与授权;username 由虎符登录建档决定,创建后不可修改。"""
 
     nickname: str = Field(max_length=64)
     email: str | None = Field(default=None, max_length=128)
@@ -99,11 +87,6 @@ class UserUpdateIn(BaseModel):
     dept_id: uuid.UUID | None = None
     tenant_id: uuid.UUID
     role_ids: list[uuid.UUID] = Field(default_factory=list[uuid.UUID])
-    password: str | None = Field(default=None, min_length=8, max_length=128)
-
-
-class ResetPasswordIn(BaseModel):
-    new_password: str = Field(min_length=8, max_length=128)
 
 
 class UserItemOut(BaseModel):
@@ -274,26 +257,6 @@ async def list_users(
     return UserPageOut(total=total, items=[_map_user(u) for u in items])
 
 
-@router.post(
-    "/users",
-    status_code=201,
-    dependencies=[Depends(require_perm("system:user:manage"))],
-)
-async def create_user(req: UserCreateIn, user: UserClaims, svc: Service) -> dict[str, str]:
-    user_id = await svc.create_user(
-        actor_id=str(user["sub"]),
-        username=req.username,
-        password=req.password,
-        nickname=req.nickname,
-        email=req.email,
-        status=req.status,
-        dept_id=None if req.dept_id is None else str(req.dept_id),
-        tenant_id=str(req.tenant_id),
-        role_ids=[str(r) for r in req.role_ids],
-    )
-    return {"id": user_id}
-
-
 @router.put(
     "/users/{user_id}",
     status_code=204,
@@ -311,20 +274,6 @@ async def update_user(
         dept_id=None if req.dept_id is None else str(req.dept_id),
         tenant_id=str(req.tenant_id),
         role_ids=[str(r) for r in req.role_ids],
-        password=req.password,
-    )
-
-
-@router.post(
-    "/users/{user_id}/reset-password",
-    status_code=204,
-    dependencies=[Depends(require_perm("system:user:manage"))],
-)
-async def reset_password(
-    user_id: uuid.UUID, req: ResetPasswordIn, user: UserClaims, svc: Service
-) -> None:
-    await svc.reset_password(
-        actor_id=str(user["sub"]), user_id=str(user_id), new_password=req.new_password
     )
 
 
@@ -514,7 +463,6 @@ _STATUS_BY_TYPE: tuple[tuple[type[SystemError], int], ...] = (
     (UserNotFound, 404),
     (RoleNotFound, 404),
     (DeptNotFound, 404),
-    (UsernameTaken, 409),
     (RoleKeyTaken, 409),
     (BuiltinRoleProtected, 409),
     (AdminAccountProtected, 409),

@@ -1,6 +1,11 @@
-"""虎符(hufu) OIDC provider:发现文档/JWKS/nonce,以及禁止 email 自动关联。"""
+"""虎符(hufu) OIDC provider:发现文档/JWKS/nonce/state 一次性,以及禁止 email 关联。
+
+孔明登录入口只有虎符(ADR-0010):这里同时覆盖 provider 协议层与联邦回调链——
+主体键等于虎符 sub、禁用账号拒绝、其它 provider 路由不存在。
+"""
 
 import base64
+import time
 from collections.abc import Callable
 from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
@@ -50,6 +55,15 @@ def _configure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(s, "hufu_redirect_uri", "http://localhost:5173/auth/hufu/callback")
 
 
+def _metadata() -> dict[str, Any]:
+    return {
+        "issuer": ISSUER,
+        "authorization_endpoint": f"{ISSUER}/authorize",
+        "token_endpoint": f"{ISSUER}/token",
+        "jwks_uri": f"{ISSUER}/jwks",
+    }
+
+
 def _provider(monkeypatch: pytest.MonkeyPatch, claims: dict[str, Any]) -> HufuProvider:
     _configure(monkeypatch)
     key, jwk = _rsa_pair()
@@ -57,15 +71,7 @@ def _provider(monkeypatch: pytest.MonkeyPatch, claims: dict[str, Any]) -> HufuPr
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.url.path.endswith("/.well-known/openid-configuration"):
-            return httpx.Response(
-                200,
-                json={
-                    "issuer": ISSUER,
-                    "authorization_endpoint": f"{ISSUER}/authorize",
-                    "token_endpoint": f"{ISSUER}/token",
-                    "jwks_uri": f"{ISSUER}/jwks",
-                },
-            )
+            return httpx.Response(200, json=_metadata())
         if req.url.path == "/token":
             return httpx.Response(200, json={"id_token": id_token})
         if req.url.path == "/jwks":
@@ -76,8 +82,6 @@ def _provider(monkeypatch: pytest.MonkeyPatch, claims: dict[str, Any]) -> HufuPr
 
 
 def _claims(nonce: str = "n-1", aud: str = "kongming-hufu") -> dict[str, Any]:
-    import time
-
     now = int(time.time())
     return {
         "iss": ISSUER,
@@ -124,46 +128,125 @@ async def test_nonce_mismatch_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
         await provider.fetch_profile(get_settings(), code="c", code_verifier="v", nonce="n-1")
 
 
+async def test_missing_nonce_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = _provider(monkeypatch, _claims())
+    with pytest.raises(ProviderExchangeFailed):
+        await provider.fetch_profile(get_settings(), code="c", code_verifier="v", nonce=None)
+
+
 async def test_audience_mismatch_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = _provider(monkeypatch, _claims(aud="someone-else"))
     with pytest.raises(ProviderExchangeFailed):
         await provider.fetch_profile(get_settings(), code="c", code_verifier="v", nonce="n-1")
 
 
-async def test_options_lists_hufu_when_configured(
+async def test_options_lists_only_hufu_when_configured(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _configure(monkeypatch)
     r = await client.get("/auth/options")
-    keys = [p["provider"] for p in r.json()["providers"]]
-    assert "hufu" in keys
+    assert r.status_code == 200
+    assert [p["provider"] for p in r.json()["providers"]] == ["hufu"]
 
 
-async def _callback(client: AsyncClient, provider: str) -> httpx.Response:
+async def test_options_empty_when_hufu_unconfigured(client: AsyncClient) -> None:
+    r = await client.get("/auth/options")
+    assert r.status_code == 200
+    assert r.json()["providers"] == []
+
+
+@pytest.mark.parametrize("provider", ["github", "google", "feishu", "wecom", "dingtalk"])
+async def test_removed_providers_not_registered(client: AsyncClient, provider: str) -> None:
+    start = await client.get(f"/auth/{provider}/start")
+    assert start.status_code == 404
+    callback = await client.post(f"/auth/{provider}/callback", json={"code": "c0de", "state": "st"})
+    assert callback.status_code == 404
+
+
+async def test_local_login_and_password_change_removed(mcp_client: AsyncClient) -> None:
+    # 带 lifespan 的客户端:根路径挂载的 MCP 入站在未就绪时会把未知路径兜成 503
+    r = await mcp_client.post("/auth/login", json={"username": "admin", "password": "admin123"})
+    assert r.status_code in {404, 405}
+    r = await mcp_client.post(
+        "/auth/password/change", json={"old_password": "a", "new_password": "bbbbbbbb"}
+    )
+    assert r.status_code in {404, 405}
+
+
+async def _start(client: AsyncClient, provider: str = "hufu") -> str:
     r = await client.get(f"/auth/{provider}/start")
     authorize_url = cast("str", r.json()["authorize_url"])
-    state = parse_qs(urlparse(authorize_url).query)["state"][0]
+    return parse_qs(urlparse(authorize_url).query)["state"][0]
+
+
+async def _callback(client: AsyncClient, state: str, *, provider: str = "hufu") -> httpx.Response:
     return await client.post(f"/auth/{provider}/callback", json={"code": "c0de", "state": state})
 
 
-async def test_hufu_never_links_by_email(
+PROFILE = NormalizedProfile(
+    external_id="01a1f8e2-0000-7000-8000-000000000001",
+    username="alice",
+    display_name="Alice",
+    email="shared@example.com",
+    email_verified=True,
+    avatar_url=None,
+)
+
+
+async def test_federation_creates_user_keyed_by_subject(
     client: AsyncClient,
-    fake_provider: Callable[[str, NormalizedProfile], None],
+    fake_hufu: Callable[[NormalizedProfile], None],
+    session: AsyncSession,
+    bearer_headers: Callable[[str], dict[str, str]],
+) -> None:
+    await seed_all(session, get_settings())
+    fake_hufu(PROFILE)
+    state = await _start(client)
+    r = await _callback(client, state)
+    assert r.status_code == 200
+    me = await client.get("/auth/me", headers=bearer_headers(PROFILE.external_id))
+    assert me.status_code == 200
+    assert me.json()["user_id"] == PROFILE.external_id  # sys_user.id 即虎符 sub
+    assert me.json()["username"] == "alice-hufu"
+    assert me.json()["role_keys"] == ["DEVELOPER"]
+    bound = (
+        await session.execute(
+            text(
+                "SELECT user_id FROM public.user_identities"
+                " WHERE provider='HUFU' AND external_id=:e"
+            ),
+            {"e": PROFILE.external_id},
+        )
+    ).scalar_one()
+    assert str(bound) == PROFILE.external_id
+
+
+async def test_federation_is_idempotent_for_same_subject(
+    client: AsyncClient,
+    fake_hufu: Callable[[NormalizedProfile], None],
+    session: AsyncSession,
+) -> None:
+    await seed_all(session, get_settings())
+    fake_hufu(PROFILE)
+    assert (await _callback(client, await _start(client))).status_code == 200
+    assert (await _callback(client, await _start(client))).status_code == 200
+    assert (
+        await session.execute(
+            text("SELECT count(*) FROM public.sys_user WHERE id=:i"), {"i": PROFILE.external_id}
+        )
+    ).scalar_one() == 1
+
+
+async def test_federation_never_links_by_email(
+    client: AsyncClient,
+    fake_hufu: Callable[[NormalizedProfile], None],
     make_user: MakeUser,
     session: AsyncSession,
 ) -> None:
     await seed_all(session, get_settings())
-    existing = await make_user("localdev", "Passw0rd!", email="shared@example.com")
-    profile = NormalizedProfile(
-        external_id="hufu-sub-1",
-        username="alice",
-        display_name="Alice",
-        email="shared@example.com",
-        email_verified=True,
-        avatar_url=None,
-    )
-    fake_provider("hufu", profile)
-    r = await _callback(client, "hufu")
+    existing = await make_user("localdev", email="shared@example.com")
+    fake_hufu(PROFILE)
+    r = await _callback(client, await _start(client))
     assert r.status_code == 200
     me = await client.get(
         "/auth/me", headers={"Authorization": f"Bearer {r.json()['access_token']}"}
@@ -173,11 +256,53 @@ async def test_hufu_never_links_by_email(
         await session.execute(
             text(
                 "SELECT user_id FROM public.user_identities"
-                " WHERE provider='HUFU' AND external_id='hufu-sub-1'"
-            )
+                " WHERE provider='HUFU' AND external_id=:e"
+            ),
+            {"e": PROFILE.external_id},
         )
     ).scalar_one()
     assert str(bound) != existing
+
+
+async def test_federation_rejects_disabled_account(
+    client: AsyncClient,
+    fake_hufu: Callable[[NormalizedProfile], None],
+    make_user: MakeUser,
+    session: AsyncSession,
+) -> None:
+    await seed_all(session, get_settings())
+    uid = await make_user("disabled-user", status="DISABLED")
+    await session.execute(
+        text(
+            "INSERT INTO public.user_identities (id, user_id, provider, external_id)"
+            " VALUES (gen_random_uuid(), :u, 'HUFU', :e)"
+        ),
+        {"u": uid, "e": PROFILE.external_id},
+    )
+    await session.commit()
+    fake_hufu(PROFILE)
+    r = await _callback(client, await _start(client))
+    assert r.status_code == 403
+
+
+async def test_state_is_single_use(
+    client: AsyncClient, fake_hufu: Callable[[NormalizedProfile], None], session: AsyncSession
+) -> None:
+    await seed_all(session, get_settings())
+    fake_hufu(PROFILE)
+    state = await _start(client)
+    assert (await _callback(client, state)).status_code == 200
+    replay = await _callback(client, state)
+    assert replay.status_code == 401  # GETDEL 一次性消费
+
+
+async def test_forged_state_rejected(
+    client: AsyncClient, fake_hufu: Callable[[NormalizedProfile], None], session: AsyncSession
+) -> None:
+    await seed_all(session, get_settings())
+    fake_hufu(PROFILE)
+    r = await _callback(client, "forged-state")
+    assert r.status_code == 401
 
 
 async def test_jwks_refreshes_after_key_rotation(
@@ -195,15 +320,7 @@ async def test_jwks_refreshes_after_key_rotation(
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.url.path.endswith("/.well-known/openid-configuration"):
-            return httpx.Response(
-                200,
-                json={
-                    "issuer": ISSUER,
-                    "authorization_endpoint": f"{ISSUER}/authorize",
-                    "token_endpoint": f"{ISSUER}/token",
-                    "jwks_uri": f"{ISSUER}/jwks",
-                },
-            )
+            return httpx.Response(200, json=_metadata())
         if req.url.path == "/token":
             token = jwt.encode(
                 _claims(),
@@ -225,3 +342,145 @@ async def test_jwks_refreshes_after_key_rotation(
     second = await provider.fetch_profile(get_settings(), code="c", code_verifier="v", nonce="n-1")
     assert second.external_id == first.external_id
     assert cast("int", state["jwks_calls"]) == 2
+
+
+async def test_end_session_url_omits_empty_post_logout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure(monkeypatch)
+    s = get_settings()
+    monkeypatch.setattr(s, "hufu_post_logout_redirect_uri", "")
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.url.path.endswith("/.well-known/openid-configuration")
+        return httpx.Response(200, json={**_metadata(), "end_session_endpoint": f"{ISSUER}/logout"})
+
+    provider = HufuProvider(transport=httpx.MockTransport(handler))
+    url = await provider.end_session_url(s)
+
+    assert url is not None
+    query = parse_qs(urlparse(url).query)
+    assert "client_id" in query
+    assert "post_logout_redirect_uri" not in query
+
+    monkeypatch.setattr(s, "hufu_post_logout_redirect_uri", "http://localhost:5173/login")
+    url = await provider.end_session_url(s)
+    assert url is not None
+    assert parse_qs(urlparse(url).query)["post_logout_redirect_uri"] == [
+        "http://localhost:5173/login"
+    ]
+
+
+async def test_start_is_rate_limited(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_hufu: Callable[[NormalizedProfile], None],
+) -> None:
+    fake_hufu(PROFILE)
+    from kongming.auth import router as auth_router
+    from kongming.auth.login_limit import LoginRateLimiter
+
+    monkeypatch.setattr(auth_router, "_login_limiter", LoginRateLimiter())
+    monkeypatch.setattr(get_settings(), "auth_login_rate_per_minute", 1)
+
+    assert (await client.get("/auth/hufu/start")).status_code == 200
+    limited = await client.get("/auth/hufu/start")
+    assert limited.status_code == 429
+
+
+async def test_jwks_network_error_is_normalized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure(monkeypatch)
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path.endswith("/.well-known/openid-configuration"):
+            return httpx.Response(200, json=_metadata())
+        raise httpx.ConnectError("jwks down", request=req)
+
+    provider = HufuProvider(transport=httpx.MockTransport(handler))
+    with pytest.raises(ProviderExchangeFailed):
+        await provider._jwks_document(  # pyright: ignore[reportPrivateUsage]
+            {"jwks_uri": f"{ISSUER}/jwks"}, force=True
+        )
+
+
+async def test_callback_requires_state_cookie(
+    client: AsyncClient, fake_hufu: Callable[[NormalizedProfile], None]
+) -> None:
+    fake_hufu(PROFILE)
+    start = await client.get("/auth/hufu/start")
+    state = cast("dict[str, str]", start.json())["authorize_url"].split("state=")[1].split("&")[0]
+    client.cookies.clear()
+    r = await client.post("/auth/hufu/callback", json={"code": "c0de", "state": state})
+    assert r.status_code == 401
+
+
+async def test_callback_rejects_mismatched_state_cookie(
+    client: AsyncClient,
+    session: AsyncSession,
+    fake_hufu: Callable[[NormalizedProfile], None],
+) -> None:
+    await seed_all(session, get_settings())
+    fake_hufu(PROFILE)
+    state = await _start(client)
+    assert (await _callback(client, "forged-state")).status_code == 401
+    # 错误回调不消费服务端 state,原 state 仍可完成一次合法登录
+    assert (await _callback(client, state)).status_code == 200
+    assert "km_oidc_state" not in client.cookies  # 成功后即刻清除
+
+
+async def test_logout_sso_revokes_and_redirects(
+    client: AsyncClient,
+    session: AsyncSession,
+    fake_hufu: Callable[[NormalizedProfile], None],
+) -> None:
+    await seed_all(session, get_settings())
+    fake_hufu(PROFILE)
+    pair = (await _callback(client, await _start(client))).json()
+    r = await client.post("/auth/logout/sso", json={"refresh_token": pair["refresh_token"]})
+    assert r.status_code == 200
+    assert "end_session" in cast("dict[str, str]", r.json())["redirect_url"]
+    refreshed = await client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    assert refreshed.status_code == 401
+
+
+async def test_logout_sso_uses_refresh_cookie_and_clears_it(
+    client: AsyncClient,
+    session: AsyncSession,
+    fake_hufu: Callable[[NormalizedProfile], None],
+) -> None:
+    await seed_all(session, get_settings())
+    fake_hufu(PROFILE)
+    await _callback(client, await _start(client))
+    assert "km_refresh" in client.cookies
+
+    r = await client.post("/auth/logout/sso", json={})
+
+    assert r.status_code == 200
+    assert "km_refresh" not in client.cookies
+    assert (await client.post("/auth/refresh", json={})).status_code == 401
+
+
+async def test_logout_sso_survives_discovery_outage(
+    client: AsyncClient,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_hufu: Callable[[NormalizedProfile], None],
+) -> None:
+    await seed_all(session, get_settings())
+    fake_hufu(PROFILE)
+    pair = (await _callback(client, await _start(client))).json()
+    from kongming.auth import providers
+    from kongming.auth.models import ProviderExchangeFailed
+
+    async def _boom(settings: object) -> str:
+        raise ProviderExchangeFailed("发现文档不可达")
+
+    monkeypatch.setattr(providers.REGISTRY["hufu"], "end_session_url", _boom)
+    r = await client.post("/auth/logout/sso", json={"refresh_token": pair["refresh_token"]})
+
+    assert r.status_code == 200
+    assert r.json()["redirect_url"] is None  # 本地登出仍完成,交给前端回落
+    refreshed = await client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    assert refreshed.status_code == 401

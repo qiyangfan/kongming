@@ -89,7 +89,7 @@ async def test_sessions_no_perm_403(
     rid = await _mk_role_with_perms(session, "NO_CHAT2", [])
     await _bind(session, "sys_user_role", uid, rid)
     await _bind(session, "sys_user_tenant", uid, await _default_tenant_id(session))
-    token = await _login(client, "noperm")
+    token = _login(client)
     for path in ("/chat/sessions", f"/chat/sessions/{uuid.uuid4()}/messages"):
         r = await client.get(path, headers=_auth(token))
         assert r.status_code == 403
@@ -101,7 +101,7 @@ async def test_sessions_only_own_and_current_tenant_ordered(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """本人本租户过滤 + updated_at 倒序(他人/他租户会话不可见)。"""
-    uid, token = await _user_with_chat_perm(client, session, make_user, "owner")
+    uid, token = await _user_with_chat_perm(session, make_user, "owner")
     uid_b = await make_user("other")
     t2 = await _mk_tenant(session, "t2")
 
@@ -134,7 +134,7 @@ async def test_sessions_only_own_and_current_tenant_ordered(
 async def test_sessions_limit_bounds(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    uid, token = await _user_with_chat_perm(client, session, make_user, "limiter")
+    uid, token = await _user_with_chat_perm(session, make_user, "limiter")
     tid = await _default_tenant_id(session)
     for i in range(3):
         await _mk_session(session, user_id=uid, tenant_id=tid, title=f"s{i}")
@@ -151,7 +151,7 @@ async def test_explicit_tenant_header_positive(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """X-Tenant-Id 显式头正向通路(白名单命中→该租户数据域),三端点齐验。"""
-    uid, token = await _user_with_chat_perm(client, session, make_user, "thead")
+    uid, token = await _user_with_chat_perm(session, make_user, "thead")
     t2 = await _mk_tenant(session, "t2p")
     await _bind(session, "sys_user_tenant", uid, t2)
     headers = {**_auth(token), "X-Tenant-Id": "t2p"}
@@ -181,12 +181,12 @@ async def test_explicit_tenant_header_positive(
 async def test_messages_of_other_user_404(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    uid, _ = await _user_with_chat_perm(client, session, make_user, "msgowner")
+    uid, _ = await _user_with_chat_perm(session, make_user, "msgowner")
     uid_b = await make_user("msgother")
     await _bind(session, "sys_user_role", uid_b, (await _dev_role_id(session)))
     await _bind(session, "sys_user_tenant", uid_b, await _default_tenant_id(session))
     sid = await _mk_session(session, user_id=uid, tenant_id=await _default_tenant_id(session))
-    token_b = await _login(client, "msgother")
+    token_b = _login(client)
     r = await client.get(f"/chat/sessions/{sid}/messages", headers=_auth(token_b))
     assert r.status_code == 404  # 不存在与越权同形
 
@@ -200,7 +200,7 @@ async def _dev_role_id(s: AsyncSession) -> str:
 async def test_messages_cross_tenant_404(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    uid, token = await _user_with_chat_perm(client, session, make_user, "crosst")
+    uid, token = await _user_with_chat_perm(session, make_user, "crosst")
     t2 = await _mk_tenant(session, "t2c")
     await _bind(session, "sys_user_tenant", uid, t2)  # 同用户绑双租户,但会话挂在 t2
     sid = await _mk_session(session, user_id=uid, tenant_id=t2)
@@ -211,7 +211,7 @@ async def test_messages_cross_tenant_404(
 async def test_messages_not_found_404(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    _, token = await _user_with_chat_perm(client, session, make_user, "nf")
+    _, token = await _user_with_chat_perm(session, make_user, "nf")
     r = await client.get(f"/chat/sessions/{uuid.uuid4()}/messages", headers=_auth(token))
     assert r.status_code == 404
 
@@ -223,7 +223,7 @@ async def test_messages_echo_order_and_shape(
     fake_agent: dict[str, FakeAgent],
 ) -> None:
     """经 /chat/query 真实落库(PASS + BLOCKED 各一轮),回显保序且要素完整。"""
-    _, token = await _user_with_chat_perm(client, session, make_user, "echo")
+    _, token = await _user_with_chat_perm(session, make_user, "echo")
     _install(fake_agent, FakeAgent(_pass_reply()))
     r = await client.post("/chat/query", json={"question": "各商品库存"}, headers=_auth(token))
     assert r.status_code == 200
@@ -265,7 +265,7 @@ async def test_messages_legacy_result_json_recomputed(
     """存量兼容:形态 result_json(裸 chartType,无 x/y/error)→
     回显以 suggest_charts 确定性重算补全(落库输入=原始输入,重算=原始输出);
     旧档按当前规则重算:qty 裸列不可加 → 首候选 bar(不再是旧规则的 pie)。"""
-    uid, token = await _user_with_chat_perm(client, session, make_user, "legacy")
+    uid, token = await _user_with_chat_perm(session, make_user, "legacy")
     tid = await _default_tenant_id(session)
     sid = await _mk_session(session, user_id=uid, tenant_id=tid)
     legacy = (
@@ -304,7 +304,7 @@ async def test_messages_legacy_result_json_recomputed_scatter(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """双度量旧档回显重算得 scatter(与查询落库路径共享 suggest_charts)。"""
-    uid, token = await _user_with_chat_perm(client, session, make_user, "legacysc")
+    uid, token = await _user_with_chat_perm(session, make_user, "legacysc")
     tid = await _default_tenant_id(session)
     sid = await _mk_session(session, user_id=uid, tenant_id=tid)
     legacy = (
@@ -334,7 +334,7 @@ async def test_messages_agent_down_shape(
     fake_agent: dict[str, FakeAgent],
 ) -> None:
     """agent 不可达轮:FAILED + error 文案可回显(统一落库路径)。"""
-    _, token = await _user_with_chat_perm(client, session, make_user, "down")
+    _, token = await _user_with_chat_perm(session, make_user, "down")
     _install(fake_agent, FakeAgent(boom=True))
     r = await client.post("/chat/query", json={"question": "q"}, headers=_auth(token))
     sid = r.json()["session_id"]
@@ -350,7 +350,7 @@ async def test_delete_session_cascades_messages(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    _, token = await _user_with_chat_perm(client, session, make_user, "del")
+    _, token = await _user_with_chat_perm(session, make_user, "del")
     _install(fake_agent, FakeAgent(_pass_reply()))
     r = await client.post("/chat/query", json={"question": "q"}, headers=_auth(token))
     sid = r.json()["session_id"]
@@ -380,7 +380,7 @@ async def test_delete_session_cascades_messages(
 async def test_delete_twice_404(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    uid, token = await _user_with_chat_perm(client, session, make_user, "del2")
+    uid, token = await _user_with_chat_perm(session, make_user, "del2")
     sid = await _mk_session(session, user_id=uid, tenant_id=await _default_tenant_id(session))
     r = await client.delete(f"/chat/sessions/{sid}", headers=_auth(token))
     assert r.status_code == 204
@@ -391,12 +391,12 @@ async def test_delete_twice_404(
 async def test_delete_other_users_404(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    uid, _ = await _user_with_chat_perm(client, session, make_user, "delowner")
+    uid, _ = await _user_with_chat_perm(session, make_user, "delowner")
     sid = await _mk_session(session, user_id=uid, tenant_id=await _default_tenant_id(session))
     uid_b = await make_user("delother")
     await _bind(session, "sys_user_role", uid_b, (await _dev_role_id(session)))
     await _bind(session, "sys_user_tenant", uid_b, await _default_tenant_id(session))
-    token_b = await _login(client, "delother")
+    token_b = _login(client)
     r = await client.delete(f"/chat/sessions/{sid}", headers=_auth(token_b))
     assert r.status_code == 404
     # 会话未被误删

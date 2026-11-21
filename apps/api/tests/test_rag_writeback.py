@@ -74,7 +74,7 @@ async def test_same_question_upsert_keeps_single_row(
     """同题两次成功回写:一行、sql_text 为最新(O4 重复沉淀清零)。"""
     from tests.test_chat_query import _user_with_chat_perm
 
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     _patch_agent(monkeypatch, "SELECT count(*) FROM goods")
     await _ask(client, token, "有多少商品")
     _patch_agent(monkeypatch, "SELECT count(1) FROM goods")
@@ -97,7 +97,7 @@ async def test_embedding_failure_keeps_old_vector(
     from kongming.rag.ports import EmbeddingError
     from tests.test_chat_query import _user_with_chat_perm
 
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     _patch_agent(monkeypatch, "SELECT count(*) FROM goods")
     await _ask(client, token, "有多少商品")
 
@@ -142,7 +142,7 @@ async def test_cap_evicts_oldest(
 
     monkeypatch.setattr(repo_mod, "QUERY_HISTORY_CAP", 3)
     _patch_agent(monkeypatch, "SELECT count(*) FROM goods")
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     await _ask(client, token, "新问句")
 
     questions = {r["question"] for r in await _rows(session)}
@@ -160,7 +160,7 @@ async def test_different_questions_coexist(
     """不同问句互不覆盖(幂等键=问句原文,不误伤相似问句)。"""
     from tests.test_chat_query import _user_with_chat_perm
 
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     _patch_agent(monkeypatch, "SELECT count(*) FROM goods")
     await _ask(client, token, "有多少商品")
     await _ask(client, token, "商品有多少")
@@ -177,7 +177,7 @@ async def test_overlong_question_writeback_survives(
     """question 最多 2000 个字符；唯一索引对长问句使用 md5 表达式，确保回写幂等。"""
     from tests.test_chat_query import _user_with_chat_perm
 
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     _patch_agent(monkeypatch, "SELECT count(*) FROM goods")
     # 顶到传输层上限 2000 字(UTF-8 6000 字节,超 btree 2704 上限)
     long_q = ("请帮我统计库存明细" * 400)[:2000]

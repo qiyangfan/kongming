@@ -121,7 +121,7 @@ async def test_no_perm_rejected_and_audited(
     """无 system:datasource:manage 的用户访问管理端点:一律 403 且落 perm_denied 审计。"""
     await seed_all(session, get_settings())
     await make_user("ds-nobody")
-    token = await _login(client, "ds-nobody")
+    token = _login(client)
     r = await client.request(method, path, headers=_auth(token), json={})
     assert r.status_code == 403, (method, path, r.text)
     n = await session.execute(
@@ -406,7 +406,7 @@ async def test_options_default_first_and_scoped(
     # 普通用户(仅绑定 default 租户,无 manage 权限)也可拉取
     uid = await make_user("ds-viewer")
     await _bind(session, "sys_user_tenant", uid, tid)
-    token = await _login(client, "ds-viewer")
+    token = _login(client)
     r = await client.get(f"{DS}/options", headers=_auth(token))
     assert r.status_code == 200
     opts = r.json()
@@ -448,7 +448,7 @@ async def test_options_default_tenant_matches_chat_semantics(
     await _create(client, admin_token, old_tid, datasource_key="olds", name="旧租户源")
     await _create(client, admin_token, new_tid, datasource_key="newds", name="新租户源")
 
-    token = await _login(client, "ds-multi")
+    token = _login(client)
     # 不带 X-Tenant-Id:解析结果必须是「最早授予」的 ds-new(与 chat 同一租户)
     r = await client.get(f"{DS}/options", headers=_auth(token))
     assert r.status_code == 200

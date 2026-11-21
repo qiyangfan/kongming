@@ -12,11 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kongming.auth import providers
 from kongming.auth.repository import SqlUnitOfWork
 from kongming.auth.service import AuthService
-from kongming.auth.stores import (
-    RedisLoginAttemptStore,
-    RedisOAuthStateStore,
-    RedisRefreshFamilyStore,
-)
+from kongming.auth.stores import RedisOAuthStateStore, RedisRefreshFamilyStore
 from kongming.config import get_settings
 from kongming.db import get_session
 from kongming.redis_client import get_redis
@@ -29,7 +25,6 @@ async def get_auth_service(
     """装配 AuthService:唯一知道各端口绑定哪种实现的地方。"""
     return AuthService(
         SqlUnitOfWork(session),
-        attempts=RedisLoginAttemptStore(redis),
         families=RedisRefreshFamilyStore(redis),
         states=RedisOAuthStateStore(redis),
         settings=get_settings(),

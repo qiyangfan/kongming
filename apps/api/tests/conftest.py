@@ -19,45 +19,16 @@ os.environ.setdefault(
 # 测试 Redis 启用了密码认证，连接 URL 需要包含密码。
 os.environ.setdefault("KM_REDIS_URL", "redis://:redis123@localhost:6379/15")
 os.environ.setdefault("KM_INTERNAL_TOKEN", "test-internal-token")
-# 联邦两家默认已配置;「过滤未配置」场景由各测试用 monkeypatch 摘除
-os.environ.setdefault("KM_GITHUB_CLIENT_ID", "test-gh-id")
-os.environ.setdefault("KM_GITHUB_CLIENT_SECRET", "test-gh-secret")
-os.environ.setdefault("KM_GOOGLE_CLIENT_ID", "test-gg-id")
-os.environ.setdefault("KM_GOOGLE_CLIENT_SECRET", "test-gg-secret")
-# 虎符默认未配置,接入场景由 test_auth_hufu 显式注入
+# 测试用运维超管:种子把该虎符 sub 绑到 SUPER_ADMIN,不创建可登录账号。
+os.environ.setdefault("KM_ADMIN_SUBJECT", "00000000-0000-7000-8000-000000000001")
+# 虎符是唯一登录入口:默认未配置,接入场景由 test_auth_hufu 显式注入
 for _k in ("KM_HUFU_ISSUER", "KM_HUFU_CLIENT_ID", "KM_HUFU_CLIENT_SECRET"):
     os.environ.setdefault(_k, "")
-# 国内三家默认"未配置"(空串经 env 优先级盖住本地 .env 的真实凭证,防渗入测试面);
-# 「配置后」场景由 domestic 测试 monkeypatch 设置
-for _k in (
-    "KM_WECOM_CORPID",
-    "KM_WECOM_SECRET",
-    "KM_WECOM_AGENTID",
-    "KM_DINGTALK_CLIENT_ID",
-    "KM_DINGTALK_CLIENT_SECRET",
-    "KM_FEISHU_APP_ID",
-    "KM_FEISHU_APP_SECRET",
-    # 清空精排配置,避免读取本机 .env 后发起真实请求;
-    # 配置场景由 test_doc_rerank 显式构造 Settings。
-    "KM_RERANK_PROVIDER",
-    "KM_RERANK_API_KEY",
-    "KM_RERANK_MODEL",
-):
+os.environ.setdefault("KM_HUFU_ENABLED", "true")
+# 清空精排配置,避免读取本机 .env 后发起真实请求;
+# 配置场景由 test_doc_rerank 显式构造 Settings。
+for _k in ("KM_RERANK_PROVIDER", "KM_RERANK_API_KEY", "KM_RERANK_MODEL"):
     os.environ.setdefault(_k, "")
-# 固定三家 redirect_uri,避免本机 .env 指向其他域名。
-os.environ.setdefault("KM_WECOM_REDIRECT_URI", "http://localhost:5173/auth/wecom/callback")
-os.environ.setdefault("KM_DINGTALK_REDIRECT_URI", "http://localhost:5173/auth/dingtalk/callback")
-os.environ.setdefault("KM_FEISHU_REDIRECT_URI", "http://localhost:5173/auth/feishu/callback")
-# 启用联邦登录配置,避免本机 .env 改变测试条件。
-for _k in (
-    "KM_GITHUB_ENABLED",
-    "KM_GOOGLE_ENABLED",
-    "KM_WECOM_ENABLED",
-    "KM_DINGTALK_ENABLED",
-    "KM_FEISHU_ENABLED",
-    "KM_HUFU_ENABLED",
-):
-    os.environ.setdefault(_k, "true")
 
 import asyncpg  # noqa: E402
 import pytest  # noqa: E402
@@ -133,6 +104,20 @@ TRUNCATED = (
     "public.sys_agent_task",
     "public.tool_http_connectors",
 )
+
+
+last_subject: str | None = None
+
+
+def login_token(subject: str | None = None) -> str:
+    """测试凭据:显式 subject > make_user 最近主体 > KM_ADMIN_SUBJECT。"""
+    from kongming.auth import tokens
+    from kongming.config import get_settings
+
+    uid = subject or last_subject or get_settings().admin_subject
+    if not uid:
+        raise RuntimeError("测试未安排主体:先 make_user 或设置 KM_ADMIN_SUBJECT")
+    return tokens.issue(uid, "access")
 
 
 def _sync_dsn() -> str:
@@ -253,6 +238,8 @@ async def _drain_tasks() -> AsyncIterator[None]:
 @pytest.fixture(autouse=True)
 async def _clean(_migrated_db: None) -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     """用例级隔离:TRUNCATE 全部身份/审计表 + Redis 库清空(pytest 按名发现)。"""
+    global last_subject
+    last_subject = None
     async with get_sessionmaker()() as s:
         await s.execute(text(f"TRUNCATE {', '.join(TRUNCATED)} CASCADE"))
         await s.commit()
@@ -305,63 +292,63 @@ MakeUser = Callable[..., Awaitable[str]]
 
 @pytest.fixture
 def make_user(session: AsyncSession) -> MakeUser:
-    """直插 sys_user 的 arrange 助手(不依赖被测实现,保持测试独立)。"""
+    """直插 sys_user 的 arrange 助手(不依赖被测实现,保持测试独立)。
+
+    行 ID 由库生成(等价于虎符 sub);需要携带身份调用接口时用 bearer_headers。
+    """
 
     async def _make(
         username: str = "dev",
-        password: str | None = "Passw0rd!",
         *,
         status: str = "ACTIVE",
         email: str | None = None,
         nickname: str = "",
-        password_changed: bool = True,
     ) -> str:
-        from kongming.auth import password as pwd
-
-        ph = pwd.hash_password(password) if password is not None else None
         uid = (
             await session.execute(
                 text(
-                    "INSERT INTO public.sys_user"
-                    " (id, username, email, password_hash, nickname, status, password_changed_at)"
-                    " VALUES (gen_random_uuid(), :u, :e, :ph, :n, :st,"
-                    "         CASE WHEN :changed THEN now() ELSE NULL END)"
-                    " RETURNING id"
+                    "INSERT INTO public.sys_user (id, username, email, nickname, status)"
+                    " VALUES (gen_random_uuid(), :u, :e, :n, :st) RETURNING id"
                 ),
-                {
-                    "u": username,
-                    "e": email,
-                    "ph": ph,
-                    "n": nickname,
-                    "st": status,
-                    "changed": password_changed,
-                },
+                {"u": username, "e": email, "n": nickname, "st": status},
             )
         ).scalar_one()
         await session.commit()
+        global last_subject
+        last_subject = str(uid)
         return str(uid)
 
     return _make
 
 
 @pytest.fixture
-def fake_provider(
+def bearer_headers() -> Callable[[str], dict[str, str]]:
+    """本地签发 access 令牌(孔明已无账密登录;测试直接经签名模块造凭据)。"""
+
+    def _headers(subject: str) -> dict[str, str]:
+        from kongming.auth import tokens
+
+        return {"Authorization": f"Bearer {tokens.issue(subject, 'access')}"}
+
+    return _headers
+
+
+@pytest.fixture
+def fake_hufu(
     monkeypatch: pytest.MonkeyPatch,
-) -> Callable[[str, "NormalizedProfile"], None]:
-    """将指定联邦 provider 替换为返回固定用户资料的测试实现。"""
+) -> Callable[["NormalizedProfile"], None]:
+    """把虎符 provider 替换为返回固定资料的非 OIDC 桩。
+
+    只替换 profile 来源,state 一次性、账号关联与建号规则仍走真实实现。
+    """
     from kongming.auth import providers
 
-    def _install(key: str, profile: "NormalizedProfile") -> None:
-        real = providers.REGISTRY.get(key)
-        link_email = getattr(real, "link_by_verified_email", True)
-
+    def _install(profile: "NormalizedProfile") -> None:
         class _Fake:
+            key = "hufu"
+            display_name = "统一身份"
             pkce = False
-            display_name = key.title()
-            link_by_verified_email = link_email
-
-            def __init__(self) -> None:
-                self.key = key
+            oidc = False
 
             def configured(self, settings: object) -> bool:
                 return True
@@ -369,13 +356,16 @@ def fake_provider(
             def authorize_url(
                 self, settings: object, *, state: str, code_challenge: str | None = None
             ) -> str:
-                return f"https://fake.example/{key}/authorize?state={state}"
+                return f"https://idp.example/authorize?state={state}"
 
             async def fetch_profile(
                 self, settings: object, *, code: str, code_verifier: str | None = None
             ) -> "NormalizedProfile":
                 return profile
 
-        monkeypatch.setitem(providers.REGISTRY, key, _Fake())
+            async def end_session_url(self, settings: object) -> str:
+                return "https://idp.example/end_session?client_id=kongming"
+
+        monkeypatch.setitem(providers.REGISTRY, "hufu", _Fake())
 
     return _install

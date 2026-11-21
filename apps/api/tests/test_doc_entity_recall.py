@@ -81,7 +81,7 @@ async def _tid_default(session: AsyncSession) -> str:
 
 async def _admin_login(session: AsyncSession, client: AsyncClient) -> str:
     await seed_all(session, get_settings())
-    return await _login(client, "admin", "admin123")
+    return _login(get_settings().admin_subject)
 
 
 async def _upload_doc(

@@ -22,7 +22,7 @@ async def _admin_token(  # pyright: ignore[reportUnusedFunction]
     client: AsyncClient, s: AsyncSession
 ) -> str:
     await seed_all(s, get_settings())
-    return await _login(client, "admin", "admin123")
+    return _login(get_settings().admin_subject)
 
 
 def _records(tenant_key: str | None = "default") -> dict[str, Any]:
@@ -106,7 +106,7 @@ async def test_report_validation_422(client: AsyncClient) -> None:
 async def test_summary_aggregates(client: AsyncClient, session: AsyncSession) -> None:
     await seed_all(session, get_settings())
     await client.post("/internal/llm-usage", headers=INTERNAL, json=_records())
-    token = await _login(client, "admin", "admin123")
+    token = _login(client)
     r = await client.get("/system/llm-usage/summary", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
     items = r.json()["items"]
@@ -127,7 +127,7 @@ async def test_summary_forbidden(
         await session.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'"))
     ).scalar_one()
     await _bind(session, "sys_user_tenant", uid, str(tid))
-    token = await _login(client, "usage_plain")
+    token = _login(client)
     r = await client.get("/system/llm-usage/summary", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 403
 
@@ -234,7 +234,7 @@ async def test_summary_error_and_latency_stats(client: AsyncClient, session: Asy
             },
         ],
     )
-    token = await _login(client, "admin", "admin123")
+    token = _login(client)
     r = await client.get("/system/llm-usage/summary", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
     item = next(i for i in r.json()["items"] if i["task"] == "SQL_GEN")
@@ -263,7 +263,7 @@ async def test_trend_pads_zero_days(client: AsyncClient, session: AsyncSession) 
             },
         ],
     )
-    token = await _login(client, "admin", "admin123")
+    token = _login(client)
     r = await client.get(
         "/system/llm-usage/trend",
         params={"days": 7},
@@ -280,7 +280,7 @@ async def test_trend_pads_zero_days(client: AsyncClient, session: AsyncSession) 
 
 async def test_trend_days_bounds(client: AsyncClient, session: AsyncSession) -> None:
     await seed_all(session, get_settings())
-    token = await _login(client, "admin", "admin123")
+    token = _login(client)
     r = await client.get(
         "/system/llm-usage/trend",
         params={"days": 91},
@@ -307,7 +307,7 @@ async def test_page_filters_and_total(client: AsyncClient, session: AsyncSession
             },
         ],
     )
-    token = await _login(client, "admin", "admin123")
+    token = _login(client)
     hdr = {"Authorization": f"Bearer {token}"}
     r = await client.get(
         "/system/llm-usage/page",
@@ -381,7 +381,7 @@ async def test_timeline_merges_three_tables(client: AsyncClient, session: AsyncS
         {"tr": trace, "u": admin_id, "t": tid, "ca": datetime.now(UTC)},
     )
     await session.commit()
-    token = await _login(client, "admin", "admin123")
+    token = _login(client)
     r = await client.get(
         "/system/llm-usage/timeline",
         params={"trace_id": trace},
@@ -407,7 +407,7 @@ async def test_timeline_merges_three_tables(client: AsyncClient, session: AsyncS
 
 async def test_timeline_empty_200(client: AsyncClient, session: AsyncSession) -> None:
     await seed_all(session, get_settings())
-    token = await _login(client, "admin", "admin123")
+    token = _login(client)
     r = await client.get(
         "/system/llm-usage/timeline",
         params={"trace_id": "never-exists-038"},
@@ -427,7 +427,7 @@ async def test_new_endpoints_forbidden(
         await session.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'"))
     ).scalar_one()
     await _bind(session, "sys_user_tenant", uid, str(tid))
-    token = await _login(client, "usage_plain2")
+    token = _login(client)
     hdr = {"Authorization": f"Bearer {token}"}
     assert (await client.get("/system/llm-usage/trend", headers=hdr)).status_code == 403
     assert (await client.get("/system/llm-usage/page", headers=hdr)).status_code == 403
@@ -471,7 +471,7 @@ async def test_summary_all_error_group_null_latency(
             },
         ],
     )
-    token = await _login(client, "admin", "admin123")
+    token = _login(client)
     r = await client.get("/system/llm-usage/summary", headers={"Authorization": f"Bearer {token}"})
     item = next(i for i in r.json()["items"] if i["task"] == "TITLER")
     assert item["calls"] == 2
@@ -541,7 +541,7 @@ async def test_trend_cross_month_bucketing(client: AsyncClient, session: AsyncSe
             },  # 存回 UTC
         ],
     )
-    token = await _login(client, "admin", "admin123")
+    token = _login(client)
     r = await client.get(
         "/system/llm-usage/trend",
         params={"days": 45},
@@ -576,7 +576,7 @@ async def test_page_deep_offset_and_bounds(client: AsyncClient, session: AsyncSe
             },
         ],
     )
-    token = await _login(client, "admin", "admin123")
+    token = _login(client)
     hdr = {"Authorization": f"Bearer {token}"}
     r = await client.get("/system/llm-usage/page", params={"page": 999}, headers=hdr)
     body = r.json()
@@ -716,7 +716,7 @@ async def test_summary_protocol_filter(
     rid = await _mkdir_role(client, session, "USG-NOPERM-P", [])
     await _bind(session, "sys_user_role", uid, rid)
     await _bind(session, "sys_user_tenant", uid, await _default_tenant_id(session))
-    token2 = await _login(client, "usage_noperm_p")
+    token2 = _login(client)
     r403 = await client.get(
         "/system/llm-usage/summary?protocol=openai",
         headers={"Authorization": f"Bearer {token2}"},

@@ -131,7 +131,7 @@ async def test_rerun_happy_path(
         {"u": uid},
     )
     await session.commit()
-    token = await _login(client, "art_run")
+    token = _login(client)
     r = await client.post(
         "/chat/artifacts/rerun",
         headers={"Authorization": f"Bearer {token}", "X-Tenant-Id": "art"},
@@ -166,7 +166,7 @@ async def test_rerun_write_blocked(
     ).scalar_one()
     await _bind(session, "sys_user_role", uid, str(rid))
     _, mid = await _mk_session_with_sql(session, uid)
-    token = await _login(client, "art_w")
+    token = _login(client)
     r = await client.post(
         "/chat/artifacts/rerun",
         headers={"Authorization": f"Bearer {token}", "X-Tenant-Id": "art"},
@@ -200,7 +200,7 @@ async def test_rerun_reserved_table_blocked(
     ).scalar_one()
     await _bind(session, "sys_user_role", uid, str(rid))
     _, mid = await _mk_session_with_sql(session, uid)
-    token = await _login(client, "art_r")
+    token = _login(client)
     r = await client.post(
         "/chat/artifacts/rerun",
         headers={"Authorization": f"Bearer {token}", "X-Tenant-Id": "art"},
@@ -227,7 +227,7 @@ async def test_rerun_other_user_404(
     ).scalar_one()
     await _bind(session, "sys_user_tenant", uid_b, str(art_tid))
     await session.commit()
-    token_b = await _login(client, "art_b")
+    token_b = _login(client)
     r = await client.post(
         "/chat/artifacts/rerun",
         headers={"Authorization": f"Bearer {token_b}", "X-Tenant-Id": "art"},

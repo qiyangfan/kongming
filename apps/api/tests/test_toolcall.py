@@ -120,10 +120,11 @@ async def _user_with_tools(
     return uid
 
 
-async def _login(client: AsyncClient, username: str, password: str = "Passw0rd!") -> str:
-    r = await client.post("/auth/login", json={"username": username, "password": password})
-    assert r.status_code == 200
-    return str(r.json()["access_token"])
+def _login(client_or_subject: object, username: str = "", password: str = "") -> str:
+    from tests.conftest import login_token
+
+    subject = client_or_subject if isinstance(client_or_subject, str) else None
+    return login_token(subject)
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -523,7 +524,7 @@ async def test_confirm_executes_with_receipt(
     )
     sid = await _mk_session(session, uid)
     confirm_id, _ = await _pending_confirm(client, session, uid)
-    token = await _login(client, "tc_ok")
+    token = _login(client)
     r = await client.post(
         "/chat/tool-confirm",
         headers=_auth(token),
@@ -567,7 +568,7 @@ async def test_confirm_reject(
     )
     sid = await _mk_session(session, uid)
     confirm_id, _ = await _pending_confirm(client, session, uid)
-    token = await _login(client, "tc_no")
+    token = _login(client)
     r = await client.post(
         "/chat/tool-confirm",
         headers=_auth(token),
@@ -596,7 +597,7 @@ async def test_confirm_other_user_404(
     )
     sid_b = await _mk_session(session, uid_b)
     confirm_id, _ = await _pending_confirm(client, session, uid_a)
-    token_b = await _login(client, "tc_b")
+    token_b = _login(client)
     r = await client.post(
         "/chat/tool-confirm",
         headers=_auth(token_b),
@@ -620,7 +621,7 @@ async def test_confirm_expired(
         {"i": confirm_id},
     )
     await session.commit()
-    token = await _login(client, "tc_exp")
+    token = _login(client)
     r = await client.post(
         "/chat/tool-confirm",
         headers=_auth(token),
@@ -640,7 +641,7 @@ async def test_confirm_idempotent_replay(
     )
     sid = await _mk_session(session, uid)
     confirm_id, _ = await _pending_confirm(client, session, uid)
-    token = await _login(client, "tc_idem")
+    token = _login(client)
     for _ in range(2):
         r = await client.post(
             "/chat/tool-confirm",
@@ -752,7 +753,7 @@ async def test_confirm_perm_revoked_rejected(
         {"u": uid, "r": rid_ann},
     )
     await session.commit()
-    token = await _login(client, "tc_revoke")
+    token = _login(client)
     r = await client.post(
         "/chat/tool-confirm",
         headers=_auth(token),
@@ -769,7 +770,7 @@ async def test_confirm_perm_revoked_rejected(
 
 async def _admin_token(client: AsyncClient, s: AsyncSession) -> str:
     await seed_all(s, get_settings())
-    return await _login(client, "admin", "admin123")
+    return _login(get_settings().admin_subject)
 
 
 async def test_tools_list_admin(
@@ -796,7 +797,7 @@ async def test_tools_list_forbidden(
         await session.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'"))
     ).scalar_one()
     await _bind(session, "sys_user_tenant", uid, str(tid))
-    token = await _login(client, "plain_user")
+    token = _login(client)
     r = await client.get("/system/tools", headers=_auth(token))
     assert r.status_code == 403
     r2 = await client.get("/system/tools/audit/page", headers=_auth(token))
@@ -808,7 +809,10 @@ async def test_audit_page_filters(
 ) -> None:
     token = await _admin_token(client, session)
     admin_id = (
-        await session.execute(text("SELECT id FROM public.sys_user WHERE username='admin'"))
+        await session.execute(
+            text("SELECT id FROM public.sys_user WHERE id=:s"),
+            {"s": get_settings().admin_subject},
+        )
     ).scalar_one()
     # 造两条审计:一条 validate_sql EXECUTED,一条未注册 REJECTED
     await client.post(
@@ -854,9 +858,9 @@ async def test_audit_page_row_visibility(
     # 给 X 授带管理权限点的 SELF 角色
     rid = await _mk_role_with_perms(session, "role_tc_vx_mgr", ["system:tool:manage"])
     await _bind(session, "sys_user_role", uid_x, rid)
-    token_x = await _login(client, "tc_vx")
+    token_x = _login(uid_x)
     r = await client.get("/system/tools/audit/page?page=1&size=50", headers=_auth(token_x))
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     items = r.json()["items"]
     assert len(items) >= 1
     assert all(str(it["user_id"]) == uid_x for it in items)
@@ -878,7 +882,7 @@ async def test_confirm_other_user_404_audited(
     )
     sid_b = await _mk_session(session, uid_b)
     confirm_id, _trace_a = await _pending_confirm(client, session, uid_a)
-    token_b = await _login(client, "tc_fb")
+    token_b = _login(client)
     r = await client.post(
         "/chat/tool-confirm",
         headers=_auth(token_b),
@@ -918,7 +922,7 @@ async def test_confirm_after_unbind_tenant_403(
     # 解绑租户(chat_session 历史归属仍在——复校必须查 sys_user_tenant 当前绑定)
     await session.execute(text("DELETE FROM public.sys_user_tenant WHERE user_id=:u"), {"u": uid})
     await session.commit()
-    token = await _login(client, "tc_unbind")
+    token = _login(client)
     r = await client.post(
         "/chat/tool-confirm",
         headers=_auth(token),
@@ -938,7 +942,7 @@ async def test_confirm_idempotent_returns_first_result(
     )
     sid = await _mk_session(session, uid)
     confirm_id, _ = await _pending_confirm(client, session, uid)
-    token = await _login(client, "tc_first")
+    token = _login(client)
     r1 = await client.post(
         "/chat/tool-confirm",
         headers=_auth(token),
@@ -989,7 +993,7 @@ async def test_confirm_concurrent_double_submit(
     )
     sid = await _mk_session(session, uid)
     confirm_id, _ = await _pending_confirm(client, session, uid)
-    token = await _login(client, "tc_race")
+    token = _login(client)
     payload = {"confirm_id": confirm_id, "decision": "confirm", "session_id": sid}
     r1, r2 = await asyncio.gather(
         client.post("/chat/tool-confirm", headers=_auth(token), json=payload),
@@ -1075,7 +1079,7 @@ async def test_retired_ticket_create_pending_confirm_rejected_zero_outbound(
         },
     )
     await session.commit()
-    token = await _login(client, "tc_rt_confirm")
+    token = _login(client)
     r = await client.post(
         "/chat/tool-confirm",
         headers=_auth(token),

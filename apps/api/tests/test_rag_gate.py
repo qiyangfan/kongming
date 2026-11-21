@@ -126,7 +126,7 @@ async def test_recall_probe_same_source_as_main(
 
     monkeypatch.setattr(AgentRagClient, "embed", _embed)
     await seed_all(session, get_settings())
-    token = await _login(client, "admin", "admin123")  # SUPER_ADMIN(rag:manage 覆盖)
+    token = _login(client)  # SUPER_ADMIN(rag:manage 覆盖)
     r = await client.get(
         "/system/rag/recall-probe",
         params={"question": "商品表有哪些列", "datasource_key": "default"},
@@ -159,7 +159,7 @@ async def test_recall_probe_mirrors_no_knowledge_bypass(
     await _register_datasource(session, tid, ds)
     from tests.test_chat_query import _login
 
-    token = await _login(client, "admin", "admin123")  # SUPER_ADMIN(rag:manage 覆盖)
+    token = _login(client)  # SUPER_ADMIN(rag:manage 覆盖)
     r = await client.get(
         "/system/rag/recall-probe",
         params={"question": "商品表有哪些列", "datasource_key": ds},
@@ -190,7 +190,7 @@ async def test_recall_probe_requires_perm(
     rid = await _mk_role_with_perms(session, "PROBE-NOPERM", ["chat:execute"])
     await _bind(session, "sys_user_role", uid, rid)
     await _bind(session, "sys_user_tenant", uid, await _default_tenant_id(session))
-    token = await _login(client, "probe_noperm")
+    token = _login(client)
     r = await client.get(
         "/system/rag/recall-probe",
         params={"question": "x", "datasource_key": "default"},
@@ -214,7 +214,7 @@ async def test_recall_probe_zero_writes(
 
     monkeypatch.setattr(AgentRagClient, "embed", _embed)
     await seed_all(session, get_settings())
-    token = await _login(client, "admin", "admin123")
+    token = _login(client)
     before_ops = (
         await session.execute(text("SELECT count(*) FROM public.sys_oper_log"))
     ).scalar_one()

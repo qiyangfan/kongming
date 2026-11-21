@@ -141,7 +141,7 @@ async def test_labels_fallback_then_hit_with_persist(
     labels_agent: dict[str, Any],
 ) -> None:
     """无注释行→回退原列名;插入注释→业务标签;落库 result_json 同源携带。"""
-    _, token = await _user_with_chat_perm(client, session, make_user, "qa40")
+    _, token = await _user_with_chat_perm(session, make_user, "qa40")
     tid = await session.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'"))
     tenant_id = str(tid.scalar_one())
 
@@ -202,7 +202,7 @@ async def test_column_comments_tenant_schema_overrides_public(
     from kongming.rag.repository import RagRepository
 
     # 播种(_clean 每用例清身份表,default 租户由播种链重建)
-    await _user_with_chat_perm(client, session, make_user, "qa41x")
+    await _user_with_chat_perm(session, make_user, "qa41x")
     tid = str(
         (
             await session.execute(

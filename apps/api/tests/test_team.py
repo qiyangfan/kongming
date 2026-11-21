@@ -51,7 +51,7 @@ async def _mk_users(
         rid = await _mk_role_with_perms(s, f"role_{name}", codes)
         await _bind(s, "sys_user_role", uid, rid)
         await _bind(s, "sys_user_tenant", uid, tid)
-        out[name] = (uid, await _login(client, name))
+        out[name] = (uid, _login(client))
     await s.commit()
     return out
 

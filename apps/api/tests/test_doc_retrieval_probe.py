@@ -17,7 +17,7 @@ PROBE = "/system/document/retrieval-probe"
 
 async def _admin(client: AsyncClient, s: AsyncSession) -> str:
     await seed_all(s, get_settings())
-    return await _login(client, "admin", "admin123")
+    return _login(get_settings().admin_subject)
 
 
 async def _upload(client: AsyncClient, token: str) -> None:
@@ -39,7 +39,7 @@ async def test_probe_forbidden(
         await session.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'"))
     ).scalar_one()
     await _bind(session, "sys_user_tenant", uid, str(tid))
-    token = await _login(client, "probe_plain")
+    token = _login(client)
     r = await client.get(PROBE, headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 403
 

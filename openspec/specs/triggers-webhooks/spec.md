@@ -110,14 +110,7 @@ system:trigger:manage 权限):返回按 Asia/Shanghai 时区自当前时刻起�
 租户隔离,跨租户 404 同形);sys_trigger_run SHALL 记录每次触发
 (SUCCESS/FAILED/SKIPPED+耗时+错误+目标 run 关联);目标执行
 MUST 以定义创建者身份经既有防御层(无权限放大);失败重试策略见
-「失败重试策略」requirement(缺省不重试)。创建 SHALL 校验 target_key
-在当前租户对应目标域(workflow/bot)中真实存在,更新仅在 target_key 变更时
-重走同校验,不存在即 400 `TARGET_NOT_FOUND`——写边界 fail-fast,防拼错目标
-静默挂到运行期才暴露;校验与派发期目标解析同口径(同源,不出现第二套
-存在性判定)。task 目标无 target_key 引用,SHALL 以模板校验替代存在性校验:
-目标文本模板/数据源 key(须对创建者可见)/预算/可选协作拓扑在创建期
-fail-fast,非法即 400;校验口径与派发期立项参数同源。目标已被删除的存量触发器
-SHALL 仍可停用/删除/修改非目标字段(止损路径不被堵)。执行历史 SHALL 呈现
+「失败重试策略」requirement(缺省不重试)。执行历史 SHALL 呈现
 重试链:每行含尝试序号(attempt),重试行 SHALL 可追溯其首跑(重试来源关联)。
 
 #### Scenario: 管理与历史
@@ -126,29 +119,13 @@ SHALL 仍可停用/删除/修改非目标字段(止损路径不被堵)。执行�
 - WHEN 创建/启停/删除触发器并查询历史
 - THEN 落库并调度同步;历史分页含状态/耗时/错误
 
-#### Scenario: 目标不存在创建被拒
-
-- GIVEN 目标域中不存在 key 为 `wf_report` 的工作流
-- WHEN 创建 target_type=workflow、target_key=wf_report 的触发器
-- THEN 返回 400 TARGET_NOT_FOUND,不落库、不进调度
-
-#### Scenario: 更新改指不存在目标被拒
-
-- GIVEN 存量触发器原目标存在
-- WHEN 更新请求把 target_key 改为不存在的工作流 key
-- THEN 返回 400 TARGET_NOT_FOUND,原值不变
+目标已被删除的存量触发器 SHALL 仍可停用/删除/修改非目标字段(止损路径不被堵)。
 
 #### Scenario: 目标已删的存量触发器可止损
 
 - GIVEN 存量触发器目标 workflow 已被删除
 - WHEN 停用该触发器或修改非目标字段(名称/cron 等)
 - THEN 正常执行(止损不被堵;派发失败由执行历史可见)
-
-#### Scenario: 目标存在正常创建
-
-- GIVEN 目标域存在启用中的 bot `after_sale`
-- WHEN 创建 target_type=bot、target_key=after_sale 的触发器
-- THEN 落库并调度同步
 
 #### Scenario: 触发执行不绕过防御
 
@@ -162,11 +139,31 @@ SHALL 仍可停用/删除/修改非目标字段(止损路径不被堵)。执行�
 - WHEN 查询执行历史
 - THEN 可见 3 行(attempt=1/2/3),重试行可追溯到首跑,末行 SUCCESS
 
-#### Scenario: task 目标模板非法创建被拒
+### Requirement: 触发器创建期目标校验
 
-- GIVEN 触发器创建者对数据源 `ds_x` 无可见权限
-- WHEN 创建 target_type=task、模板引用 `ds_x` 的触发器
-- THEN 返回 400(模板校验失败),不落库、不进调度
+创建 SHALL 校验 target_key 在当前租户对应目标域(workflow/bot)中真实存在,更新
+仅在 target_key 变更时重走同校验,不存在即 400 `TARGET_NOT_FOUND`——写边界
+fail-fast,防拼错目标静默挂到运行期才暴露;校验与派发期目标解析同口径(同源,不
+出现第二套存在性判定)。target_type=task 无 target_key 引用,见「task 立项目标」
+requirement 的创建期模板校验。
+
+#### Scenario: 目标不存在创建被拒
+
+- GIVEN 目标域中不存在 key 为 `wf_report` 的工作流
+- WHEN 创建 target_type=workflow、target_key=wf_report 的触发器
+- THEN 返回 400 TARGET_NOT_FOUND,不落库、不进调度
+
+#### Scenario: 更新改指不存在目标被拒
+
+- GIVEN 存量触发器原目标存在
+- WHEN 更新请求把 target_key 改为不存在的工作流 key
+- THEN 返回 400 TARGET_NOT_FOUND,原值不变
+
+#### Scenario: 目标存在正常创建
+
+- GIVEN 目标域存在启用中的 bot `after_sale`
+- WHEN 创建 target_type=bot、target_key=after_sale 的触发器
+- THEN 落库并调度同步
 
 ### Requirement: 出站通知
 
@@ -245,16 +242,8 @@ SHALL 取消(不再派发)。出站通知 SHALL 只在重试链终态发送一�
 任何接口 MUST NOT 回显明文(创建/编辑响应与列表均掩码;编辑空框=保持
 现值)。目标(workflow/bot)校验、TARGET_NOT_FOUND 写边界、租户隔离
 (跨租户 404 同形)、执行历史、创建者身份执行与全量防御层复用既有触发器
-口径。轮询 SHALL 复用既有调度 tick;**每触发器按文件夹维护已处理 UID
-游标并持久化**:游标后的新邮件逐一触发,游标推进与触发记录同事务,
-重启/断线后 SHALL 续传(不重复处理已触发邮件,MUST NOT 跳过未处理邮件)。
-新邮件 SHALL 经适配器标准化为 `{from, subject, date, text_preview}`
-摘要(正文预览截断受上限约束)作为目标输入,标准化文本进目标执行前过
-既有输入护栏;邮件原文与完整正文 MUST NOT 落库(run 记录只含标准化
-摘要,隐私最小化)。轮询连接/认证/协议失败 SHALL 记 FAILED run(错误
-分类),MUST NOT 堆积并发、MUST NOT 影响其他触发器与调度器(重试策略
-由失败重试策略统一承接);触发器停用/删除后轮询停止且游标保留
-(重新启用从游标续传)。
+口径。轮询 SHALL 复用既有调度 tick;UID 游标、标准化摘要、失败处理与停用
+语义见「邮件轮询的游标续传与隐私最小化」requirement。
 
 #### Scenario: 新邮件触发目标执行
 
@@ -262,12 +251,6 @@ SHALL 取消(不再派发)。出站通知 SHALL 只在重试链终态发送一�
 - WHEN 轮询 tick 到期
 - THEN 新邮件经标准化摘要触发工作流执行,sys_trigger_run 落 SUCCESS
   且记录标准化摘要
-
-#### Scenario: UID 游标续传不重复
-
-- GIVEN 某文件夹 3 封邮件已触发(游标=UID 100)
-- WHEN 调度器重启后再轮询,文件夹新到第 4 封(UID 101)
-- THEN 仅第 4 封触发,前 3 封不重复(游标续传)
 
 #### Scenario: 凭证不回显
 
@@ -281,6 +264,25 @@ SHALL 取消(不再派发)。出站通知 SHALL 只在重试链终态发送一�
 - WHEN 轮询 tick 到期
 - THEN 该触发器落 FAILED run(含错误分类),不并发重试堆积,其他
   触发器与调度器不受影响
+
+### Requirement: 邮件轮询的游标续传与隐私最小化
+
+轮询 SHALL 复用既有调度 tick;**每触发器按文件夹维护已处理 UID
+游标并持久化**:游标后的新邮件逐一触发,游标推进与触发记录同事务,
+重启/断线后 SHALL 续传(不重复处理已触发邮件,MUST NOT 跳过未处理邮件)。
+新邮件 SHALL 经适配器标准化为 `{from, subject, date, text_preview}`
+摘要(正文预览截断受上限约束)作为目标输入,标准化文本进目标执行前过
+既有输入护栏;邮件原文与完整正文 MUST NOT 落库(run 记录只含标准化
+摘要,隐私最小化)。轮询连接/认证/协议失败 SHALL 记 FAILED run(错误
+分类),MUST NOT 堆积并发、MUST NOT 影响其他触发器与调度器(重试策略
+由失败重试策略统一承接);触发器停用/删除后轮询停止且游标保留
+(重新启用从游标续传)。
+
+#### Scenario: UID 游标续传不重复
+
+- GIVEN 某文件夹 3 封邮件已触发(游标=UID 100)
+- WHEN 调度器重启后再轮询,文件夹新到第 4 封(UID 101)
+- THEN 仅第 4 封触发,前 3 封不重复(游标续传)
 
 #### Scenario: 停用后游标保留
 
@@ -298,6 +300,16 @@ SHALL 取消(不再派发)。出站通知 SHALL 只在重试链终态发送一�
 触发 run 的 SUCCESS 语义为**立项成功**(任务后续生命周期归任务域账本,
 不构成触发成败)。可选协作拓扑 SHALL 在计划生成后经既有拓扑声明路径应用,
 应用失败 SHALL 落任务事件并以串行形态继续,SHALL NOT 静默丢弃声明。
+
+target_type=task 无 target_key 引用,SHALL 以模板校验替代存在性校验:目标文本
+模板/数据源 key(须对创建者可见)/预算/可选协作拓扑在创建期 fail-fast,非法即
+400;校验口径与派发期立项参数同源。
+
+#### Scenario: task 目标模板非法创建被拒
+
+- GIVEN 触发器创建者对数据源 `ds_x` 无可见权限
+- WHEN 创建 target_type=task、模板引用 `ds_x` 的触发器
+- THEN 返回 400(模板校验失败),不落库、不进调度
 
 #### Scenario: webhook 事件立项
 

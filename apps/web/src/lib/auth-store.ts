@@ -5,7 +5,6 @@ import { create } from "zustand";
 import {
   api,
   clearTokens,
-  getRefreshToken,
   onSessionCleared,
   setTokens,
   tryRefresh,
@@ -37,6 +36,14 @@ export const useAuth = create<AuthState>((set) => {
     useAgentMode.getState().clear(); // 跨账号不继承 Agent 模式开关
   });
 
+  function clearClientState(): void {
+    clearTokens();
+    set({ status: "guest", user: null });
+    useTenant.getState().clear();
+    useDatasource.getState().clear();
+    useAgentMode.getState().clear();
+  }
+
   async function loadMe(): Promise<void> {
     try {
       const me = await api.get<MeOut>("/auth/me");
@@ -44,11 +51,7 @@ export const useAuth = create<AuthState>((set) => {
       // 登录态就绪后校准租户:持久值失效(如被解绑)则回落首项
       useTenant.getState().calibrate(me.tenants);
     } catch {
-      clearTokens();
-      set({ status: "guest", user: null });
-      useTenant.getState().clear();
-      useDatasource.getState().clear();
-      useAgentMode.getState().clear();
+      clearClientState();
     }
   }
 
@@ -63,10 +66,6 @@ export const useAuth = create<AuthState>((set) => {
       if (useAuth.getState().status === "authed") return Promise.resolve();
       // StrictMode 双挂载/多守卫并发下幂等,只执行一次
       booting ??= (async () => {
-        if (!getRefreshToken()) {
-          set({ status: "guest", user: null });
-          return;
-        }
         if (await tryRefresh()) {
           await loadMe();
         } else {
@@ -79,22 +78,22 @@ export const useAuth = create<AuthState>((set) => {
     },
 
     acceptTokens: async (pair) => {
-      setTokens(pair.access_token, pair.refresh_token);
+      setTokens(pair.access_token);
       await loadMe();
     },
 
     logout: async () => {
-      const rt = getRefreshToken();
-      if (rt) {
-        await api.post("/auth/logout", { refresh_token: rt }).catch(() => {
-          /* 登出幂等,网络失败不阻断本地清态 */
-        });
+      let redirect: string | null = null;
+      try {
+        const out = await api.post<{ redirect_url: string | null }>("/auth/logout/sso", {});
+        redirect = out.redirect_url;
+      } catch {
+        /* 登出幂等,网络失败仍清本地态 */
       }
-      clearTokens();
-      set({ status: "guest", user: null });
-      useTenant.getState().clear();
-      useDatasource.getState().clear();
-      useAgentMode.getState().clear();
+      clearClientState();
+      if (import.meta.env.MODE !== "test" && redirect) {
+        window.location.href = redirect;
+      }
     },
   };
 });

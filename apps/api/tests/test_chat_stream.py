@@ -120,7 +120,7 @@ def _install(holder: dict[str, StreamFakeAgent], agent: StreamFakeAgent) -> None
 
 
 async def _user_with_chat_perm(
-    client: AsyncClient, s: AsyncSession, make_user: MakeUser, username: str = "qs"
+    s: AsyncSession, make_user: MakeUser, username: str = "qs"
 ) -> tuple[str, str]:
     await seed_all(s, get_settings())
     uid = await make_user(username)
@@ -129,7 +129,7 @@ async def _user_with_chat_perm(
     ).scalar_one()
     await _bind(s, "sys_user_role", uid, str(rid))
     await _bind(s, "sys_user_tenant", uid, await _default_tenant_id(s))
-    return uid, await _login(client, username)
+    return uid, _login(uid)
 
 
 def _parse_sse(text: str) -> list[tuple[str, dict[str, object]]]:
@@ -192,7 +192,7 @@ async def test_stream_happy_path_full_relay(
     reply = _pass_reply()
     first_agent = StreamFakeAgent(_frames_for(reply), reply=reply)
     _install(fake_agent, first_agent)
-    _uid, token = await _user_with_chat_perm(client, session, make_user, "stream1")
+    _uid, token = await _user_with_chat_perm(session, make_user, "stream1")
     r = await client.post(
         "/chat/query/stream", json={"question": "有多少商品"}, headers=_auth(token)
     )
@@ -246,7 +246,7 @@ async def test_stream_rejected_walks_result_not_error(
         ("result", json.dumps(rejected.__dict__)),
     ]
     _install(fake_agent, StreamFakeAgent(frames, reply=rejected))
-    _, token = await _user_with_chat_perm(client, session, make_user, "stream2")
+    _, token = await _user_with_chat_perm(session, make_user, "stream2")
     r = await client.post("/chat/query/stream", json={"question": "删掉商品"}, headers=_auth(token))
     frames_out = _parse_sse(r.text)
     events = [e for e, _ in frames_out]
@@ -270,7 +270,7 @@ async def test_stream_agent_unavailable_error_terminal(
 ) -> None:
     """传输层失败:error 终态事件+FAILED 消息落库(友好文案不暴露内部)。"""
     _install(fake_agent, StreamFakeAgent(boom=True))
-    _, token = await _user_with_chat_perm(client, session, make_user, "stream3")
+    _, token = await _user_with_chat_perm(session, make_user, "stream3")
     r = await client.post(
         "/chat/query/stream", json={"question": "有多少商品"}, headers=_auth(token)
     )
@@ -296,7 +296,7 @@ async def test_stream_unexpected_crash_still_terminates(
     """检查非 AgentUnavailable 的意外异常（如 RuntimeError）也会收敛
     error 终态+FAILED 落库——终止标记必达,前端不悬挂。"""
     _install(fake_agent, StreamFakeAgent(crash=True))
-    _, token = await _user_with_chat_perm(client, session, make_user, "stream3b")
+    _, token = await _user_with_chat_perm(session, make_user, "stream3b")
     r = await client.post("/chat/query/stream", json={"question": "q"}, headers=_auth(token))
     frames = _parse_sse(r.text)
     assert [e for e, _ in frames] == ["error"]
@@ -320,7 +320,7 @@ async def test_stream_missing_terminal_frame_converges_error(
         ("stage", json.dumps({"node": "understand", "status": "done", "retry_count": 0})),
     ]
     _install(fake_agent, StreamFakeAgent(frames_in))
-    _, token = await _user_with_chat_perm(client, session, make_user, "stream3c")
+    _, token = await _user_with_chat_perm(session, make_user, "stream3c")
     r = await client.post("/chat/query/stream", json={"question": "q"}, headers=_auth(token))
     frames = _parse_sse(r.text)
     events = [e for e, _ in frames]
@@ -341,7 +341,7 @@ async def test_stream_malformed_process_frame_skipped(
         ("result", json.dumps(reply.__dict__)),
     ]
     _install(fake_agent, StreamFakeAgent(frames_in, reply=reply))
-    _, token = await _user_with_chat_perm(client, session, make_user, "stream3d")
+    _, token = await _user_with_chat_perm(session, make_user, "stream3d")
     r = await client.post("/chat/query/stream", json={"question": "q"}, headers=_auth(token))
     frames = _parse_sse(r.text)
     events = [e for e, _ in frames]
@@ -361,7 +361,7 @@ async def test_stream_tail_error_after_result_no_double_write(
         ("result", json.dumps(reply.__dict__)),
     ]
     _install(fake_agent, StreamFakeAgent(frames_in, reply=reply, crash_after_frames=True))
-    _, token = await _user_with_chat_perm(client, session, make_user, "stream3e")
+    _, token = await _user_with_chat_perm(session, make_user, "stream3e")
     r = await client.post("/chat/query/stream", json={"question": "q"}, headers=_auth(token))
     frames = _parse_sse(r.text)
     events = [e for e, _ in frames]
@@ -389,7 +389,7 @@ async def test_stream_duplicate_result_frame_idempotent(
         ("result", json.dumps(reply.__dict__)),
     ]
     _install(fake_agent, StreamFakeAgent(frames_in, reply=reply))
-    _, token = await _user_with_chat_perm(client, session, make_user, "stream3f")
+    _, token = await _user_with_chat_perm(session, make_user, "stream3f")
     r = await client.post("/chat/query/stream", json={"question": "q"}, headers=_auth(token))
     frames = _parse_sse(r.text)
     assert [e for e, _ in frames].count("result") == 1
@@ -409,7 +409,7 @@ async def test_stream_persist_false_nothing_written(
 ) -> None:
     reply = _pass_reply()
     _install(fake_agent, StreamFakeAgent(_frames_for(reply), reply=reply))
-    _, token = await _user_with_chat_perm(client, session, make_user, "stream4")
+    _, token = await _user_with_chat_perm(session, make_user, "stream4")
     before = (await session.execute(text("SELECT count(*) FROM public.chat_session"))).scalar_one()
     r = await client.post(
         "/chat/query/stream",
@@ -432,7 +432,7 @@ async def test_stream_preflight_failures_regular_json(
     """前段校验失败在流开始前以常规 JSON 错误响应(404 会话/400 数据源)。"""
     reply = _pass_reply()
     _install(fake_agent, StreamFakeAgent(_frames_for(reply), reply=reply))
-    _, token = await _user_with_chat_perm(client, session, make_user, "stream5")
+    _, token = await _user_with_chat_perm(session, make_user, "stream5")
     r = await client.post(
         "/chat/query/stream",
         json={"question": "q", "session_id": "00000000-0000-0000-0000-000000000000"},
@@ -462,7 +462,7 @@ async def test_stream_no_perm_403(
     rid = await _mk_role_with_perms(session, "NO_CHAT2", [])
     await _bind(session, "sys_user_role", uid, rid)
     await _bind(session, "sys_user_tenant", uid, await _default_tenant_id(session))
-    token = await _login(client, "stream_noperm")
+    token = _login(client)
     r = await client.post("/chat/query/stream", json={"question": "q"}, headers=_auth(token))
     assert r.status_code == 403
 
@@ -479,7 +479,7 @@ async def test_disconnect_continues_to_terminal(
     """断线续存:前端断开(不消费 queue)后后台任务照常消费至终态并落库。"""
     reply = _pass_reply()
     _install(fake_agent, StreamFakeAgent(_frames_for(reply), reply=reply))
-    uid, _token = await _user_with_chat_perm(client, session, make_user, "stream6")
+    uid, _token = await _user_with_chat_perm(session, make_user, "stream6")
     # 手工组装 service(不经 HTTP;stream_store_factory 与组合根同构)
     agent = fake_agent["agent"]
     from kongming.chat.dependencies import _stream_store_factory  # 组合根工厂复用
@@ -564,7 +564,7 @@ async def test_stream_trace_event_relayed(
         ),
     )
     _install(fake_agent, StreamFakeAgent(frames, reply=reply))
-    _uid, token = await _user_with_chat_perm(client, session, make_user, "stream-tr")
+    _uid, token = await _user_with_chat_perm(session, make_user, "stream-tr")
     r = await client.post(
         "/chat/query/stream", json={"question": "有多少商品"}, headers=_auth(token)
     )

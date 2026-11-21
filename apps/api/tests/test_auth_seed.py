@@ -1,12 +1,16 @@
-"""启动种子(rbac spec「种子数据」):齐备/幂等/只增不改/缺省密码强制首登改密。"""
+"""启动种子(rbac spec「种子数据」):齐备/幂等/只增不改/超管按虎符 sub 绑定。
+
+种子不创建任何可登录账号(ADR-0010):超管身份只能来自 `KM_ADMIN_SUBJECT`
+指向的、虎符已建过档的 sys_user 行。
+"""
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth import password as pwd
-from kongming.auth.seed import DEFAULT_ADMIN_PASSWORD, seed_all
+from kongming.auth.seed import seed_all
 from kongming.config import get_settings
+from tests.conftest import MakeUser
 
 
 async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
@@ -70,37 +74,14 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
         (await session.execute(text("SELECT tenant_key FROM public.sys_tenant"))).scalars().all()
     )
     assert tenants == ["default"]
-    admin = (
-        await session.execute(
-            text(
-                "SELECT id, password_hash, password_changed_at FROM public.sys_user"
-                " WHERE username='admin'"
-            )
-        )
-    ).one()
-    assert pwd.verify_password(DEFAULT_ADMIN_PASSWORD, admin.password_hash)
-    assert admin.password_changed_at is None  # 缺省密码 → 强制首登改密
-    # 绑定:admin→SUPER_ADMIN、admin→default 租户、SUPER_ADMIN→全部权限点
+    # 只播种配置的虎符 sub 授权资料,不创建可登录账号
+    assert (await session.execute(text("SELECT count(*) FROM public.sys_user"))).scalar_one() == 1
     assert (
         await session.execute(
-            text(
-                "SELECT count(*) FROM public.sys_user_role ur"
-                " JOIN public.sys_role r ON r.id=ur.role_id"
-                " WHERE ur.user_id=:uid AND r.role_key='SUPER_ADMIN'"
-            ),
-            {"uid": admin.id},
+            text("SELECT id FROM public.sys_user WHERE id=:i"),
+            {"i": get_settings().admin_subject},
         )
-    ).scalar_one() == 1
-    assert (
-        await session.execute(
-            text(
-                "SELECT count(*) FROM public.sys_user_tenant ut"
-                " JOIN public.sys_tenant t ON t.id=ut.tenant_id"
-                " WHERE ut.user_id=:uid AND t.tenant_key='default'"
-            ),
-            {"uid": admin.id},
-        )
-    ).scalar_one() == 1
+    ).scalar_one() is not None
     assert (
         await session.execute(
             text(
@@ -144,7 +125,11 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
     ]
 
 
-async def test_seed_idempotent_on_repeat(session: AsyncSession) -> None:
+async def test_seed_idempotent_on_repeat(
+    session: AsyncSession, make_user: MakeUser, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    uid = await make_user("alice")
+    monkeypatch.setattr(get_settings(), "admin_subject", uid)
     await seed_all(session, get_settings())
     await seed_all(session, get_settings())
 
@@ -161,27 +146,60 @@ async def test_seed_idempotent_on_repeat(session: AsyncSession) -> None:
     assert await _count("public.sys_role_permission") == 55
 
 
-async def test_seed_with_env_password_not_forced_to_change(
-    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+async def test_seed_binds_admin_subject(
+    session: AsyncSession, make_user: MakeUser, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(get_settings(), "admin_initial_password", "S3cure!")
+    uid = await make_user("ops")
+    monkeypatch.setattr(get_settings(), "admin_subject", uid)
     await seed_all(session, get_settings())
-    row = (
+    assert (
         await session.execute(
             text(
-                "SELECT password_hash, password_changed_at FROM public.sys_user"
-                " WHERE username='admin'"
-            )
+                "SELECT count(*) FROM public.sys_user_role ur"
+                " JOIN public.sys_role r ON r.id=ur.role_id"
+                " WHERE ur.user_id=:uid AND r.role_key='SUPER_ADMIN'"
+            ),
+            {"uid": uid},
         )
-    ).one()
-    assert pwd.verify_password("S3cure!", row.password_hash)
-    assert row.password_changed_at is not None  # env 密码视为已改密
+    ).scalar_one() == 1
+    assert (
+        await session.execute(
+            text(
+                "SELECT count(*) FROM public.sys_user_tenant ut"
+                " JOIN public.sys_tenant t ON t.id=ut.tenant_id"
+                " WHERE ut.user_id=:uid AND t.tenant_key='default'"
+            ),
+            {"uid": uid},
+        )
+    ).scalar_one() == 1
+
+
+async def test_seed_precreates_configured_admin_subject(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    subject = "01a1f8e2-0000-7000-8000-00000000dead"
+    monkeypatch.setattr(get_settings(), "admin_subject", subject)
+    await seed_all(session, get_settings())
+    # 只预建该虎符 sub 的授权资料与身份映射,无本地密码
+    assert (await session.execute(text("SELECT count(*) FROM public.sys_user"))).scalar_one() == 1
+    assert (
+        await session.execute(
+            text(
+                "SELECT count(*) FROM public.user_identities"
+                " WHERE provider='HUFU' AND external_id=:s"
+            ),
+            {"s": subject},
+        )
+    ).scalar_one() == 1
+    assert (
+        await session.execute(text("SELECT count(*) FROM public.sys_user_role"))
+    ).scalar_one() == 1
 
 
 async def test_seed_never_overwrites_existing_rows(
-    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    session: AsyncSession, make_user: MakeUser, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # 预置被线上改过的角色名与 admin 自改密码
+    # 预置被线上改过的角色名
     await session.execute(
         text(
             "INSERT INTO public.sys_role (id, role_key, role_name, data_scope, sql_scope)"
@@ -189,7 +207,8 @@ async def test_seed_never_overwrites_existing_rows(
         )
     )
     await session.commit()
-    monkeypatch.setattr(get_settings(), "admin_initial_password", "S3cure!")
+    uid = await make_user("ops")
+    monkeypatch.setattr(get_settings(), "admin_subject", uid)
     await seed_all(session, get_settings())
     name = (
         await session.execute(
@@ -197,12 +216,17 @@ async def test_seed_never_overwrites_existing_rows(
         )
     ).scalar_one()
     assert name == "研发(线上改名)"  # 只增不改:不覆盖线上数据
-    # 再次播种(env 密码不同)不改 admin 已设密码
-    monkeypatch.setattr(get_settings(), "admin_initial_password", "An0ther!")
+    # 再次播种(超管配置改到别人)保留既有超管绑定,不摘除
+    other = await make_user("ops2")
+    monkeypatch.setattr(get_settings(), "admin_subject", other)
     await seed_all(session, get_settings())
-    ph = (
+    assert (
         await session.execute(
-            text("SELECT password_hash FROM public.sys_user WHERE username='admin'")
+            text(
+                "SELECT count(*) FROM public.sys_user_role ur"
+                " JOIN public.sys_role r ON r.id=ur.role_id"
+                " WHERE ur.user_id=:uid AND r.role_key='SUPER_ADMIN'"
+            ),
+            {"uid": uid},
         )
-    ).scalar_one()
-    assert pwd.verify_password("S3cure!", ph)
+    ).scalar_one() == 1

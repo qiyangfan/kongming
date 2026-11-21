@@ -157,7 +157,7 @@ async def test_explain_no_perm_403(
     await _bind(session, "sys_user_tenant", uid, await _default_tenant_id(session))
     from tests.test_chat_query import _login
 
-    token = await _login(client, "exp-noperm")
+    token = _login(client)
     r = await client.post(
         "/chat/explain", json={"message_id": str(uuid.uuid4())}, headers=_auth(token)
     )
@@ -167,7 +167,7 @@ async def test_explain_no_perm_403(
 async def test_explain_message_not_found_404(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    _, token = await _user_with_chat_perm(client, session, make_user, "exp-nf")
+    _, token = await _user_with_chat_perm(session, make_user, "exp-nf")
     r = await client.post(
         "/chat/explain", json={"message_id": str(uuid.uuid4())}, headers=_auth(token)
     )
@@ -177,11 +177,11 @@ async def test_explain_message_not_found_404(
 async def test_explain_other_users_message_404(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    uid, _ = await _user_with_chat_perm(client, session, make_user, "exp-owner")
+    uid, _ = await _user_with_chat_perm(session, make_user, "exp-owner")
     tid = await _default_tenant_id(session)
     sid = await _mk_session(session, user_id=uid, tenant_id=tid)
     mid = await _mk_msg(session, sid, sql="SELECT mark FROM explain_goods")
-    _, token_b = await _user_with_chat_perm(client, session, make_user, "exp-other")
+    _, token_b = await _user_with_chat_perm(session, make_user, "exp-other")
     r = await client.post("/chat/explain", json={"message_id": mid}, headers=_auth(token_b))
     assert r.status_code == 404  # 不存在与越权同形,不泄露消息存在性
 
@@ -189,7 +189,7 @@ async def test_explain_other_users_message_404(
 async def test_explain_cross_tenant_404(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    uid, token = await _user_with_chat_perm(client, session, make_user, "exp-xt")
+    uid, token = await _user_with_chat_perm(session, make_user, "exp-xt")
     t2 = (
         await session.execute(
             text(
@@ -209,7 +209,7 @@ async def test_explain_cross_tenant_404(
 async def test_explain_message_without_sql_400(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    uid, token = await _user_with_chat_perm(client, session, make_user, "exp-nosql")
+    uid, token = await _user_with_chat_perm(session, make_user, "exp-nosql")
     tid = await _default_tenant_id(session)
     sid = await _mk_session(session, user_id=uid, tenant_id=tid)
     mid_failed = await _mk_msg(session, sid, status="FAILED")  # 失败轮无 SQL
@@ -227,7 +227,7 @@ async def test_explain_message_without_sql_400(
 async def test_explain_happy_path_returns_plan_tree(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    uid, token = await _user_with_chat_perm(client, session, make_user, "exp-ok")
+    uid, token = await _user_with_chat_perm(session, make_user, "exp-ok")
     tid = await _default_tenant_id(session)
     sid = await _mk_session(session, user_id=uid, tenant_id=tid)
     mid = await _mk_msg(session, sid, sql="SELECT mark FROM explain_goods")
@@ -262,7 +262,7 @@ async def test_explain_reuses_data_scope_rewrite(
     await _bind(session, "sys_user_tenant", uid, await _default_tenant_id(session))
     from tests.test_chat_query import _login
 
-    token = await _login(client, "exp-self")
+    token = _login(client)
     tid = await _default_tenant_id(session)
     sid = await _mk_session(session, user_id=uid, tenant_id=tid)
     mid = await _mk_msg(session, sid, sql="SELECT mark FROM explain_goods")
@@ -278,7 +278,7 @@ async def test_explain_rejected_message_sql_still_blocked(
 ) -> None:
     """REJECTED 轮的落库 SQL(DELETE)再走管线仍被初检拦下:友好返回不 500,
     审计落 BLOCKED——EXPLAIN 通道不构成新的放行面。"""
-    uid, token = await _user_with_chat_perm(client, session, make_user, "exp-del")
+    uid, token = await _user_with_chat_perm(session, make_user, "exp-del")
     tid = await _default_tenant_id(session)
     sid = await _mk_session(session, user_id=uid, tenant_id=tid)
     mid = await _mk_msg(session, sid, sql="DELETE FROM explain_goods", status="REJECTED")
@@ -297,7 +297,7 @@ async def test_explain_reserved_table_blocked(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """诱导形态:落库 SQL 若指向保留表(手改库构造),复检保留表拒读仍拦。"""
-    uid, token = await _user_with_chat_perm(client, session, make_user, "exp-rsv")
+    uid, token = await _user_with_chat_perm(session, make_user, "exp-rsv")
     tid = await _default_tenant_id(session)
     sid = await _mk_session(session, user_id=uid, tenant_id=tid)
     mid = await _mk_msg(session, sid, sql="SELECT username FROM sys_user")
@@ -314,7 +314,7 @@ async def test_explain_dynamic_datasource_snapshot(
 ) -> None:
     """数据源快照:以会话落库的 datasource_key 路由(非当前切换器实时值),
     动态源失效后同形 400(与问答端点语义一致)。"""
-    uid, token = await _user_with_chat_perm(client, session, make_user, "exp-dyn")
+    uid, token = await _user_with_chat_perm(session, make_user, "exp-dyn")
     tid = await _default_tenant_id(session)
     await _mk_ds(session, "exp_dyn", tid)
     sid = (

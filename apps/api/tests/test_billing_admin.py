@@ -135,7 +135,7 @@ async def test_tenants_brief_with_billing_manage_only(
     await _bind(session, "sys_user_role", uid, str(rid))
     await _bind(session, "sys_user_tenant", uid, await _default_tenant_id(session))
     await session.commit()
-    token = await _login(client, "billing_only")
+    token = _login(client)
     r = await client.get("/billing/tenants", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200, r.text
     items = r.json()

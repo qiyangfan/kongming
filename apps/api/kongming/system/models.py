@@ -104,10 +104,6 @@ class DeptNotFound(SystemError):
 # 409:请求与资源状态冲突
 
 
-class UsernameTaken(SystemError):
-    """用户名已被未软删用户占用。"""
-
-
 class RoleKeyTaken(SystemError):
     """role_key 已存在。"""
 

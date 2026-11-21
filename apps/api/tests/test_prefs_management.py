@@ -46,7 +46,7 @@ async def _user(
     ).scalar_one()
     await _bind(s, "sys_user_role", uid, str(rid))
     await _bind(s, "sys_user_tenant", uid, await _default_tenant_id(s))
-    return uid, await _login(client, username)
+    return uid, _login(uid)
 
 
 async def _row(s: AsyncSession, uid: str) -> tuple[dict[str, object], int] | None:

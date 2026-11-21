@@ -48,7 +48,7 @@
 
 ### Requirement: ReAct 工具调用循环(Agent 面)
 
-Agent 面 SHALL 提供 ReAct 内核端点(内部令牌认证,ADR-002):LLM 根据用户意图自主决定调用哪个工具、接收工具结果、决定继续调工具还是产出最终答案。系统 MUST 保留既有 NL2SQL 链路 `/query` 与 `/query/stream`(8 节点图)的对外契约与行为不变,作为「预设工具配方」向后兼容。ReAct 端点终态响应 SHALL 与既有问答端点逐字段同构(success/verdict/summary/insights/stats/columns/rows/sql/retry_count/error,单一定义防漂移)。循环 SHALL 设轮次上限(可配置,缺省不超过 10),达到上限 SHALL 强制终止并返回结构化错误(携带已达上限提示),禁止无限循环;触顶终态 SHALL 携带已产出的部分结果——早前轮次若有成功 execute_sql,其结果集(columns/rows)与 SQL SHALL 随终态一并返回(error 与部分结果并存,消费方以 error 优先呈现、部分结果作参考),无已产出结果时仅返回错误。同一轮问答内的多次工具执行回调 SHALL 共用同一 trace_id。ReAct 请求 SHALL 纯增可选 bot_system_prompt(Bot 定义的系统提示,025):非空时替换内核默认系统提示的助手身份段(内核工具纪律后缀必须保留拼接),空时形态与注入前逐字一致。
+Agent 面 SHALL 提供 ReAct 内核端点(内部令牌认证,ADR-002):LLM 根据用户意图自主决定调用哪个工具、接收工具结果、决定继续调工具还是产出最终答案。系统 MUST 保留既有 NL2SQL 链路 `/query` 与 `/query/stream`(8 节点图)的对外契约与行为不变,作为「预设工具配方」向后兼容。ReAct 端点终态响应 SHALL 与既有问答端点逐字段同构(success/verdict/summary/insights/stats/columns/rows/sql/retry_count/error,单一定义防漂移)。同一轮问答内的多次工具执行回调 SHALL 共用同一 trace_id。
 
 #### Scenario: 数据查询场景 LLM 自主编排工具
 
@@ -74,6 +74,10 @@ Agent 面 SHALL 提供 ReAct 内核端点(内部令牌认证,ADR-002):LLM 根据
 - WHEN LLM 在某一轮不再产出 tool_calls 而是产出最终文本答案
 - THEN ReAct 循环终止,向控制面返回最终响应
 
+### Requirement: ReAct 轮次上限与部分结果保留
+
+ReAct 循环 SHALL 设轮次上限(可配置,缺省不超过 10),达到上限 SHALL 强制终止并返回结构化错误(携带已达上限提示),禁止无限循环。触顶终态 SHALL 携带已产出的部分结果——早前轮次若有成功 execute_sql,其结果集(columns/rows)与 SQL SHALL 随终态一并返回(error 与部分结果并存,消费方以 error 优先呈现、部分结果作参考),无已产出结果时仅返回错误。
+
 #### Scenario: 循环深度上限保护
 
 - GIVEN LLM 连续产出 tool_calls 未收敛
@@ -85,6 +89,10 @@ Agent 面 SHALL 提供 ReAct 内核端点(内部令牌认证,ADR-002):LLM 根据
 - GIVEN ReAct 循环第 2 轮 execute_sql 已成功返回结果集,后续轮次仍未收敛直至触顶
 - WHEN 轮次上限触发强制终止
 - THEN 终态 error 携带已达上限提示,且 columns/rows/sql 为该成功轮次的实际结果(不丢弃),消费方呈现错误与部分结果并存
+
+### Requirement: ReAct 请求注入 Bot 系统提示
+
+ReAct 请求 SHALL 纯增可选 bot_system_prompt(Bot 定义的系统提示,025):非空时替换内核默认系统提示的助手身份段(内核工具纪律后缀必须保留拼接),空时形态与注入前逐字一致。
 
 #### Scenario: Bot 系统提示注入(025)
 
@@ -126,10 +134,9 @@ Agent 面 SHALL 提供 ReAct 内核端点(内部令牌认证,ADR-002):LLM 根据
 
 1. **内部令牌与身份复校**:X-Internal-Token 校验 + 用户-租户绑定复校(与既有执行路由同构,fail-closed);工具执行请求 MUST 携带 user_id(无系统调用豁免——工具权限点校验需要真实主体)。
 2. **工具权限点**:每个工具绑定权限点(如 tool:sql:execute、tool:announcement:create),调用方角色集不含该权限点即拒,最小授权。
-3. **租户隔离**:跨租户执行 fail-closed 拒绝(沿用租户白名单复校)。
-4. **工具意图审核 + 参数 JSON Schema 校验**:意图审核(020 挂接:同 trace 写工具调用频次阈值,fail-closed)SHALL 先于参数校验;控制面按注册表 schema 校验 LLM 产出的 args,越界/畸形参数拒绝;该校验 SHALL 先于任何工具语义执行(写工具确认挂起点之后恢复执行时同一校验仍生效)。
-5. **审计 + 限流**:每次工具执行(含拒绝/失败/限流/待确认)落 sys_tool_audit;按租户+用户维度的固定窗口限流,超额拒绝并落审计。
-6. **写工具幂等 + 人工确认**:写操作工具 MUST 支持幂等键防重复执行;标记 require_confirm 的高风险写工具默认人工确认(见「写工具人工确认」requirement)。
+3. **租户隔离**:跨租户执行 fail-closed 拒绝(沿用租户白名单复校),见「工具防御层:租户隔离与权限校验」。
+4. **工具意图审核 + 参数 JSON Schema 校验**:意图审核先于参数校验,见「工具防御层:意图审核、参数校验与限流」。
+5. **审计 + 限流**:每次工具执行(含拒绝)落 sys_tool_audit,超额限流拒绝,见同上 requirement。
 
 #### Scenario: 工具权限点拒绝无权调用(接口层)
 
@@ -141,7 +148,27 @@ Agent 面 SHALL 提供 ReAct 内核端点(内部令牌认证,ADR-002):LLM 根据
 
 - GIVEN 用户对目标 tenant_key 不在白名单
 - WHEN tool_call 携带该 tenant_key 回调控制面
-- THEN 控制面 fail-closed 拒绝,不执行工具
+- THEN 控制面 fail-closed 拒绝,不执行工具,审计记录该次拒绝
+
+#### Scenario: 写工具幂等防重复执行
+
+- GIVEN 写工具(create_system_announcement)以相同幂等键被调用两次
+- WHEN 第二次调用到达控制面
+- THEN 控制面识别幂等键命中,不重复执行写动作,返回首次执行的结果
+
+### Requirement: 工具防御层:租户隔离与权限校验
+
+工具绑定权限点(如 tool:sql:execute、tool:announcement:create),调用方角色集不含该权限点即拒,最小授权;跨租户执行 SHALL fail-closed 拒绝(沿用租户白名单复校)。工具执行请求 MUST 携带 user_id(无系统调用豁免——工具权限点校验需要真实主体);X-Internal-Token 校验与用户-租户绑定复校与既有执行路由同构,fail-closed。
+
+#### Scenario: 未绑定权限点的工具调用被拒
+
+- GIVEN 调用方角色集不含某工具绑定权限点
+- WHEN tool_call 回调控制面执行
+- THEN 控制面在权限层即拒绝,不进入工具语义执行
+
+### Requirement: 工具防御层:意图审核、参数校验与限流
+
+意图审核 SHALL 先于参数 JSON Schema 校验:意图审核挂接 020(同 trace 写工具调用频次阈值,fail-closed),控制面按注册表 schema 校验 LLM 产出的 args,越界/畸形参数拒绝;该校验 SHALL 先于任何工具语义执行(写工具确认挂起点之后恢复执行时同一校验仍生效)。每次工具执行(含拒绝/失败/限流/待确认)SHALL 落 sys_tool_audit;SHALL 按租户+用户维度的固定窗口限流,超额拒绝并落审计。
 
 #### Scenario: 意图审核先于参数校验(020)
 
@@ -160,12 +187,6 @@ Agent 面 SHALL 提供 ReAct 内核端点(内部令牌认证,ADR-002):LLM 根据
 - GIVEN 某用户的 tool_call 频率超过限流配额
 - WHEN 超额请求到达控制面
 - THEN 超额请求被拒绝(限流语义),审计记录该次限流
-
-#### Scenario: 写工具幂等防重复执行
-
-- GIVEN 写工具(create_system_announcement)以相同幂等键被调用两次
-- WHEN 第二次调用到达控制面
-- THEN 控制面识别幂等键命中,不重复执行写动作,返回首次执行的结果
 
 ### Requirement: 内置工具集
 

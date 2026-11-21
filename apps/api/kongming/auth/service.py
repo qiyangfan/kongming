@@ -1,26 +1,22 @@
-"""auth 用例层:登录、令牌生命周期、当前用户、改密、联邦回调和种子。
+"""auth 用例层:虎符联邦回调、令牌生命周期、当前用户。
 
 零框架依赖:不 import fastapi/sqlalchemy/redis;持久化经 ports 端口,配置经 Settings。
+孔明不持有本地密码(ADR-0010),主体键即虎符 `sub`。
 """
 
 import base64
 import hashlib
 import secrets
-from datetime import UTC, datetime
 from typing import cast
 
 import jwt as pyjwt
 
-from kongming.auth import password as pwd
 from kongming.auth import tokens
 from kongming.auth.models import (
     AccountDisabled,
-    AccountLocked,
-    CurrentPasswordWrong,
-    LoginFailed,
     MeInfo,
-    NoLocalPassword,
     NormalizedProfile,
+    ProviderExchangeFailed,
     ProviderNotFound,
     StateInvalid,
     TenantRef,
@@ -29,7 +25,6 @@ from kongming.auth.models import (
     User,
 )
 from kongming.auth.ports import (
-    LoginAttemptStore,
     OAuthProvider,
     OAuthStateStore,
     OIDCProvider,
@@ -42,36 +37,24 @@ from kongming.db import uuid7
 DEFAULT_ROLE_KEY = "DEVELOPER"  # 联邦自动建号的默认角色(rbac spec)
 DEFAULT_TENANT_KEY = "default"
 
-# 防枚举:用户名不存在时对预置 dummy 哈希执行 argon2 verify,拉平与真实校验的时耗差
-_dummy_hash: str | None = None
-
-
-def _ensure_dummy_hash() -> str:
-    global _dummy_hash
-    if _dummy_hash is None:
-        _dummy_hash = pwd.hash_password(secrets.token_urlsafe(16))
-    return _dummy_hash
-
 
 class AuthService:
     def __init__(
         self,
         uow: UnitOfWork,
         *,
-        attempts: LoginAttemptStore,
         families: RefreshFamilyStore,
         states: OAuthStateStore,
         settings: Settings,
         registry: dict[str, OAuthProvider],
     ) -> None:
         self._uow = uow
-        self._attempts = attempts
         self._families = families
         self._states = states
         self._s = settings
         self._registry = registry
 
-    # ---- 令牌签发(登录与联邦回调共用) ----
+    # ---- 令牌签发(联邦回调与 refresh 共用) ----
 
     async def _issue_pair(self, user: User) -> TokenPair:
         fid = uuid7().hex
@@ -79,35 +62,7 @@ class AuthService:
         access = tokens.issue(user.id, "access")
         refresh = tokens.issue(user.id, "refresh", extra={"fid": fid, "jti": jti})
         await self._families.issue(user.id, fid, jti, self._s.refresh_token_ttl_sec)
-        # 纯联邦账号(无本地密码)不适用强制改密
-        must_change = user.password_hash is not None and user.password_changed_at is None
-        return TokenPair(access, refresh, must_change)
-
-    # ---- 账密登录 ----
-
-    async def login(self, username: str, password: str) -> TokenPair:
-        ttl = await self._attempts.locked_ttl(username)
-        if ttl > 0:
-            raise AccountLocked(ttl)
-
-        user = await self._uow.users.get_by_username(username)
-        candidate = user.password_hash if (user and user.password_hash) else _ensure_dummy_hash()
-        ok = pwd.verify_password(password, candidate)
-        if not ok or user is None or user.deleted:
-            # 失败计数对存在与不存在账号同键同策(防枚举);禁用账号的密码错误也走此路
-            lock_sec = self._s.auth_login_lock_min * 60
-            n = await self._attempts.incr_fails(username, lock_sec)
-            if n >= self._s.auth_login_max_fails:
-                await self._attempts.lock(username, lock_sec)
-                raise AccountLocked(lock_sec)
-            raise LoginFailed("用户名或密码错误")
-        if not user.active:
-            raise AccountDisabled("账号已禁用")
-
-        await self._attempts.clear_fails(username)
-        await self._uow.users.touch_last_login(user.id)
-        await self._uow.commit()
-        return await self._issue_pair(user)
+        return TokenPair(access, refresh)
 
     # ---- refresh 轮换 / 登出 ----
 
@@ -140,8 +95,27 @@ class AuthService:
         access = tokens.issue(user.id, "access")
         refresh = tokens.issue(user.id, "refresh", extra={"fid": fid, "jti": new_jti})
         await self._families.issue(user.id, fid, new_jti, self._s.refresh_token_ttl_sec)
-        must_change = user.password_hash is not None and user.password_changed_at is None
-        return TokenPair(access, refresh, must_change)
+        return TokenPair(access, refresh)
+
+    async def logout_sso(self, refresh_token: str) -> str | None:
+        """撤销本地 refresh 家族并返回虎符 end_session 地址;无可用端点时 None。"""
+        try:
+            _, fid, _ = self._decode_refresh(refresh_token)
+            await self._families.revoke_family(fid, self._s.refresh_token_ttl_sec)
+        except TokenInvalid:
+            pass
+        provider = self._registry.get("hufu")
+        if provider is None:
+            return None
+        end_session = getattr(provider, "end_session_url", None)
+        if end_session is None:
+            return None
+        try:
+            url: str | None = await end_session(self._s)
+        except ProviderExchangeFailed:
+            # 本地会话已撤销;发现文档故障不得把登出变成 500,前端回落本地登录页。
+            return None
+        return url
 
     async def logout(self, refresh_token: str) -> None:
         """幂等:无效令牌同样返回成功(不作存在性预言机)。"""
@@ -167,8 +141,6 @@ class AuthService:
             role_keys=role_keys,
             perm_codes=perm_codes,
             tenants=[TenantRef(t.tenant_key, t.tenant_name) for t in tenants],
-            must_change_password=user.password_hash is not None
-            and user.password_changed_at is None,
         )
 
     # ---- 权限拒绝审计 ----
@@ -183,21 +155,6 @@ class AuthService:
         await self._uow.operlog.add(user_id, "perm_denied", perm_code, {"path": path})
         await self._uow.commit()
 
-    # ---- 自助改密 ----
-
-    async def change_password(self, user_id: str, current: str, new: str) -> None:
-        user = await self._uow.users.get_by_id(user_id)
-        if user is None or not user.active:
-            raise TokenInvalid("账号不可用")
-        if user.password_hash is None:
-            raise NoLocalPassword("该账号无本地密码,无法自助改密")
-        if not pwd.verify_password(current, user.password_hash):
-            raise CurrentPasswordWrong("当前密码错误")
-        await self._uow.users.update_password(user.id, pwd.hash_password(new))
-        await self._uow.commit()
-        # 全端重新登录:吊销该用户全部 refresh 家族
-        await self._families.revoke_all_user_families(user.id, self._s.refresh_token_ttl_sec)
-
     # ---- 联邦登录(连接器形态) ----
 
     def _provider(self, key: str) -> OAuthProvider:
@@ -205,6 +162,10 @@ class AuthService:
         if p is None or not p.configured(self._s):
             raise ProviderNotFound("provider 不存在或未配置")
         return p
+
+    def has_provider(self, key: str) -> bool:
+        p = self._registry.get(key)
+        return p is not None and p.configured(self._s)
 
     def oauth_options(self) -> list[tuple[str, str]]:
         return [(p.key, p.display_name) for p in self._registry.values() if p.configured(self._s)]
@@ -218,8 +179,7 @@ class AuthService:
             code_verifier = secrets.token_urlsafe(64)
             digest = hashlib.sha256(code_verifier.encode()).digest()
             code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
-        oidc = bool(getattr(p, "oidc", False))
-        nonce = secrets.token_urlsafe(16) if oidc else None
+        nonce = secrets.token_urlsafe(16) if p.oidc else None
         await self._states.put(
             state,
             provider=provider_key,
@@ -227,7 +187,7 @@ class AuthService:
             ttl_sec=self._s.auth_state_ttl_sec,
             nonce=nonce,
         )
-        if oidc:
+        if p.oidc:
             op = cast("OIDCProvider", p)
             await op.prepare(self._s)
             return op.authorize_url(
@@ -240,7 +200,7 @@ class AuthService:
         payload = await self._states.take(state)
         if payload is None or payload.get("provider") != provider_key:
             raise StateInvalid("state 无效或已过期")
-        if getattr(p, "oidc", False):
+        if p.oidc:
             profile = await cast("OIDCProvider", p).fetch_profile(
                 self._s,
                 code=code,
@@ -259,10 +219,10 @@ class AuthService:
         return await self._issue_pair(user)
 
     async def _account_link(self, provider: OAuthProvider, profile: NormalizedProfile) -> User:
-        """按序关联(ADR-006):identity 命中 → verified email 关联 → 自动建号。
+        """按序关联(ADR-0010):identity 命中 → 以 `sub` 建档。
 
-        `link_by_verified_email=False` 的 provider(虎符)跳过 email 关联,只按 sub 建档,
-        防止不同 IdP 间按 email 自动合并造成账号错绑。
+        只按 (provider, sub) 绑定,不做 email 关联:跨 IdP 按 email 自动合并会把
+        两个真实身份错绑到同一个人。
         """
         db_provider = provider.key.upper()
         uid = await self._uow.identities.find_user_id(db_provider, profile.external_id)
@@ -271,17 +231,6 @@ class AuthService:
             if user is None:  # 身份绑定悬空(用户已被硬删)——防御分支
                 raise StateInvalid("身份绑定失效")
             return user
-
-        if (
-            getattr(provider, "link_by_verified_email", True)
-            and profile.email
-            and profile.email_verified
-        ):
-            existing = await self._uow.users.get_by_email(profile.email)
-            if existing is not None:
-                await self._uow.identities.create(existing.id, db_provider, profile.external_id)
-                return existing
-
         return await self._auto_provision(db_provider, profile)
 
     async def _auto_provision(self, db_provider: str, profile: NormalizedProfile) -> User:
@@ -291,15 +240,13 @@ class AuthService:
         if role is None or tenant is None:
             # 启动种子必先于流量就位(main lifespan);缺失即环境异常,拒绝建号
             raise RuntimeError("默认角色/租户缺失:种子未执行")
+        # sys_user.id 即虎符 sub:所有授权表都以该列外键关联,不再生成本地 ID
         user = User(
-            id=str(uuid7()),
+            id=profile.external_id,
             username=username,
             email=profile.email if profile.email_verified else None,
-            password_hash=None,
             nickname=profile.display_name[:64],
             status="ACTIVE",
-            # 纯联邦账号无本地密码,强制改密不适用(视为已改)
-            password_changed_at=datetime.now(UTC),
         )
         await self._uow.users.create(user)
         await self._uow.roles.bind_user(user.id, role.id)

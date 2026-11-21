@@ -146,7 +146,7 @@ async def test_final_carries_and_persists_metric_hits(
     from kongming.chat.agent_client import AgentReply
 
     await seed_all(session, get_settings())
-    _uid, token = await _user_with_chat_perm(client, session, make_user, "mp1")
+    _uid, token = await _user_with_chat_perm(session, make_user, "mp1")
     # Agent 应答中的 metric_hits 会透传到结果。
     reply = AgentReply(
         success=True,
@@ -199,7 +199,7 @@ async def test_old_message_no_metric_hits(
 ) -> None:
     """老消息(无该键)回显为空且不反查指标表重算。"""
     await seed_all(session, get_settings())
-    _uid, token = await _user_with_chat_perm(client, session, make_user, "mp2")
+    _uid, token = await _user_with_chat_perm(session, make_user, "mp2")
     _install(fake_agent, StreamFakeAgent(reply=None))  # 无 metric_hits 字段
     r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
     assert r.status_code == 200

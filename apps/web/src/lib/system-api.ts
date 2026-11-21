@@ -5,7 +5,6 @@ import { api } from "./api";
 
 type UserPageOut = components["schemas"]["UserPageOut"];
 export type UserItemOut = components["schemas"]["UserItemOut"];
-type UserCreateIn = components["schemas"]["UserCreateIn"];
 type UserUpdateIn = components["schemas"]["UserUpdateIn"];
 export type RoleOut = components["schemas"]["RoleOut"];
 type RoleCreateIn = components["schemas"]["RoleCreateIn"];
@@ -26,10 +25,7 @@ export const systemApi = {
     api.get<UserPageOut>(
       `/system/users?page=${page}&size=${size}&keyword=${encodeURIComponent(keyword)}`,
     ),
-  createUser: (body: UserCreateIn) => api.post<CreatedId>("/system/users", body),
   updateUser: (id: string, body: UserUpdateIn) => api.put<void>(`/system/users/${id}`, body),
-  resetPassword: (id: string, newPassword: string) =>
-    api.post<void>(`/system/users/${id}/reset-password`, { new_password: newPassword }),
   deleteUser: (id: string) => api.delete<void>(`/system/users/${id}`),
   enableUser: (id: string) => api.post<void>(`/system/users/${id}/enable`, {}),
   disableUser: (id: string) => api.post<void>(`/system/users/${id}/disable`, {}),

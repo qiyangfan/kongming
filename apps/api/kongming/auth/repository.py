@@ -15,7 +15,7 @@ from kongming.auth import ports
 from kongming.auth.models import Role, Tenant, User
 from kongming.db import uuid7
 
-_USER_COLS = "id, username, email, password_hash, nickname, status, password_changed_at, deleted_at"
+_USER_COLS = "id, username, email, nickname, status, deleted_at"
 
 
 def _to_user(row: dict[str, Any]) -> User:
@@ -23,10 +23,8 @@ def _to_user(row: dict[str, Any]) -> User:
         id=str(row["id"]),
         username=str(row["username"]),
         email=row["email"] if row["email"] is None else str(row["email"]),
-        password_hash=None if row["password_hash"] is None else str(row["password_hash"]),
         nickname=str(row["nickname"]),
         status=row["status"],  # Any → Literal;CHECK 约束保证字面量合法
-        password_changed_at=row["password_changed_at"],
         deleted=row["deleted_at"] is not None,
     )
 
@@ -80,47 +78,19 @@ class SqlUserRepo:
         )
         return _to_user(dict(row)) if row else None
 
-    async def get_by_email(self, email: str) -> User | None:
-        row = (
-            (
-                await self._s.execute(
-                    text(
-                        f"SELECT {_USER_COLS} FROM public.sys_user"  # noqa: S608
-                        " WHERE email=:e AND deleted_at IS NULL ORDER BY created_at LIMIT 1"
-                    ),
-                    {"e": email},
-                )
-            )
-            .mappings()
-            .one_or_none()
-        )
-        return _to_user(dict(row)) if row else None
-
     async def create(self, user: User) -> None:
         await self._s.execute(
             text(
-                "INSERT INTO public.sys_user"
-                " (id, username, email, password_hash, nickname, status, password_changed_at)"
-                " VALUES (:id, :u, :e, :ph, :n, :st, :pca)"
+                "INSERT INTO public.sys_user (id, username, email, nickname, status)"
+                " VALUES (:id, :u, :e, :n, :st)"
             ),
             {
                 "id": user.id,
                 "u": user.username,
                 "e": user.email,
-                "ph": user.password_hash,
                 "n": user.nickname,
                 "st": user.status,
-                "pca": user.password_changed_at,
             },
-        )
-
-    async def update_password(self, user_id: str, password_hash: str) -> None:
-        await self._s.execute(
-            text(
-                "UPDATE public.sys_user SET password_hash=:ph, password_changed_at=now(),"
-                " updated_at=now() WHERE id=:i"
-            ),
-            {"ph": password_hash, "i": user_id},
         )
 
     async def touch_last_login(self, user_id: str) -> None:

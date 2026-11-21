@@ -7,7 +7,6 @@ RBAC 规则(内置数据保护、角色删除前校验等)集中在
 
 from collections.abc import Mapping
 
-from kongming.auth import password as pwd
 from kongming.auth.ports import RefreshFamilyStore
 from kongming.system.models import (
     BUILTIN_ROLE_KEYS,
@@ -33,7 +32,6 @@ from kongming.system.models import (
     UnknownRoleId,
     UnknownTenantId,
     UserListItem,
-    UsernameTaken,
     UserNotFound,
 )
 from kongming.system.ports import SystemRepo
@@ -74,12 +72,13 @@ class SystemService:
     def __init__(
         self,
         repo: SystemRepo,
-        admin_username: str,
+        admin_subject: str,
         families: RefreshFamilyStore,
         refresh_ttl_sec: int,
     ) -> None:
         self._repo = repo
-        self._admin_username = admin_username
+        # 运维超管以虎符 sub 标识(ADR-0010);空串=未指定,下列保护全部跳过
+        self._admin_subject = admin_subject
         self._families = families
         self._refresh_ttl_sec = refresh_ttl_sec
 
@@ -93,43 +92,6 @@ class SystemService:
         items = await self._repo.list_users(kw, size, (page - 1) * size)
         return total, items
 
-    async def create_user(
-        self,
-        *,
-        actor_id: str,
-        username: str,
-        password: str,
-        nickname: str,
-        email: str | None,
-        status: str,
-        dept_id: str | None,
-        tenant_id: str,
-        role_ids: list[str],
-    ) -> str:
-        if await self._repo.username_taken(username):
-            raise UsernameTaken(f"用户名 {username} 已被占用")
-        await self._assert_roles(role_ids)
-        if not await self._repo.tenant_exists(tenant_id):
-            raise UnknownTenantId("租户不存在")
-        if dept_id is not None and not await self._repo.dept_exists(dept_id):
-            raise UnknownDeptId("部门不存在")
-        user_id = str(uuid7())
-        await self._repo.insert_user(
-            user_id=user_id,
-            username=username,
-            email=email,
-            # 首登改密标志=未改(password_changed_at 缺省 NULL,rbac spec「创建用户」)
-            password_hash=pwd.hash_password(password),
-            nickname=nickname,
-            status=status,
-            dept_id=dept_id,
-        )
-        await self._repo.rebind_user_roles(user_id, role_ids)
-        await self._repo.rebind_user_tenant(user_id, tenant_id)
-        await self._repo.log_oper(actor_id, "user.create", username, {"user_id": user_id})
-        await self._repo.commit()
-        return user_id
-
     async def update_user(
         self,
         *,
@@ -141,7 +103,6 @@ class SystemService:
         dept_id: str | None,
         tenant_id: str,
         role_ids: list[str],
-        password: str | None,
     ) -> None:
         current = await self._repo.get_user(user_id)
         if current is None:
@@ -150,7 +111,7 @@ class SystemService:
         if status == "DISABLED":
             self._assert_disable_allowed(current, actor_id)
         # 超管账号不可删除、禁用或解除 SUPER_ADMIN 绑定。
-        if username == self._admin_username:
+        if self._admin_subject and str(current["id"]) == self._admin_subject:
             super_id = await self._repo.role_id_by_key("SUPER_ADMIN")
             if super_id is not None and super_id not in role_ids:
                 raise AdminAccountProtected("超管账号不可剥离 SUPER_ADMIN 角色")
@@ -165,32 +126,14 @@ class SystemService:
             nickname=nickname,
             status=status,
             dept_id=dept_id,
-            # 编辑不传密码则不改(rbac spec);传了则重新哈希
-            password_hash=None if not password else pwd.hash_password(password),
         )
         await self._repo.rebind_user_roles(user_id, role_ids)
         await self._repo.rebind_user_tenant(user_id, tenant_id)
         await self._repo.log_oper(actor_id, "user.update", username, {"user_id": user_id})
         await self._repo.commit()
-        # 管理员改密后吊销全部 refresh token，与用户自助改密保持一致。
-        # 否则疑似泄漏场景下重置密码后攻击者旧 refresh token 仍可续换 access)
-        # 禁用同样踢下线:编辑路径与专用端点两路同收口,任一禁用路径生效
-        if password or status == "DISABLED":
+        # 禁用即踢下线:编辑路径与专用端点两路同收口,任一禁用路径生效
+        if status == "DISABLED":
             await self._revoke_refresh(user_id)
-
-    async def reset_password(self, *, actor_id: str, user_id: str, new_password: str) -> None:
-        current = await self._repo.get_user(user_id)
-        if current is None:
-            raise UserNotFound("用户不存在")
-        # 重置后首登改密标志复位(rbac spec「编辑与重置密码」;专用语句
-        # 同步置 NULL,update_user 的 COALESCE 路径不触碰该列)
-        await self._repo.reset_password(user_id, pwd.hash_password(new_password))
-        await self._repo.log_oper(
-            actor_id, "user.reset_password", str(current["username"]), {"user_id": user_id}
-        )
-        await self._repo.commit()
-        # 重置=强制踢下线:吊销全部 refresh 家族(自助改密同语义)
-        await self._revoke_refresh(user_id)
 
     async def enable_user(self, *, actor_id: str, user_id: str) -> None:
         """专用启用:只翻状态;启用不涉及吊销。"""
@@ -220,7 +163,7 @@ class SystemService:
         """禁用保护单点:编辑路径与专用端点同调,防两份漂移。"""
         if str(current["id"]) == actor_id:
             raise SelfDisable("不可禁用自己的账号")
-        if str(current["username"]) == self._admin_username:
+        if self._admin_subject and str(current["id"]) == self._admin_subject:
             raise AdminAccountProtected("超管账号不可禁用")
 
     async def _revoke_refresh(self, user_id: str) -> None:
@@ -231,7 +174,7 @@ class SystemService:
         current = await self._repo.get_user(user_id)
         if current is None:
             raise UserNotFound("用户不存在")
-        if str(current["username"]) == self._admin_username:
+        if self._admin_subject and str(current["id"]) == self._admin_subject:
             raise AdminAccountProtected("超管账号不可删除")
         if user_id == actor_id:
             raise SelfDeletion("不可删除自己的账号")

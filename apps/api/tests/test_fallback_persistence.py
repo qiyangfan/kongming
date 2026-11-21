@@ -120,7 +120,7 @@ class TestTurnPersistence:
         make_user: MakeUser,
     ) -> None:
         await seed_all(session, get_settings())
-        uid, token = await _user_with_chat_perm(client, session, make_user, "fb-u1")
+        uid, token = await _user_with_chat_perm(session, make_user, "fb-u1")
         fake_agent["agent"] = FakeAgent(
             AgentReply(
                 success=False,
@@ -159,7 +159,7 @@ class TestTurnPersistence:
         make_user: MakeUser,
     ) -> None:
         await seed_all(session, get_settings())
-        uid, token = await _user_with_chat_perm(client, session, make_user, "fb-u2")
+        uid, token = await _user_with_chat_perm(session, make_user, "fb-u2")
         fake_agent["agent"] = FakeAgent(
             AgentReply(
                 success=False,
@@ -194,7 +194,7 @@ class TestTurnPersistence:
     ) -> None:
         """会话内已有兜底轮 → 下一轮载荷携带 last_fallback(防循环判据)。"""
         await seed_all(session, get_settings())
-        uid, token = await _user_with_chat_perm(client, session, make_user, "fb-u3")
+        uid, token = await _user_with_chat_perm(session, make_user, "fb-u3")
         agent = FakeAgent(
             AgentReply(success=True, verdict="PASS", summary="共 3 行。", sql="SELECT 1")
         )

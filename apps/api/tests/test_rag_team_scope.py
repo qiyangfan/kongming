@@ -173,7 +173,7 @@ async def _rag_mgr_token(
     rid = await _mk_role_with_perms(session, f"role_{name}", ["system:rag:manage"])
     await _bind(session, "sys_user_role", uid, rid)
     await _bind(session, "sys_user_tenant", uid, await _ensure_default_tenant(session))
-    return uid, await _login(client, name)
+    return uid, _login(uid)
 
 
 def _md(*tables: str) -> bytes:

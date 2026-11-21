@@ -37,9 +37,9 @@ fail-closed 拒绝(同形,防 key 探测)。该集合为知识上传 schema 字�
 - WHEN 请求 schema 枚举
 - THEN 拒绝(同形,不区分具体原因,防 key 探测)
 
-### Requirement: 文档上传与索引
+### Requirement: 文档上传索引链路
 
-上传 Markdown 表说明(`## 表名` 二级标题切块),生成 embedding(2560 维)后幂等写入 rag.table_descriptions;重复上传覆盖更新(upsert);无权限或超限被拒。embedding 应由同一部署模型生成且维度固定为 2560,并用于表说明和历史问句召回。端点为 `POST /system/rag/documents/upload`(multipart),要求 system:rag:manage 权限 + 租户上下文(与 chat 域同构的 X-Tenant-Id 白名单复校);datasource_key SHALL 通过存在+启用+归属当前租户校验;表单 schema_name SHALL 双闸校验——先过 PG 标识符语法校验(`^[a-z_][a-z0-9_]{0,62}$`,与 datasource 域 default_schema 同一规则),再校验其属于该数据源的可扫描 schema 集合(与内省扫描同源同口径,见「可扫描 Schema 枚举」),越界即 400 `SCHEMA_NOT_ALLOWED`,不落库——写边界 fail-fast,防拼错 schema 静默毒化召回;文档标题解析出的表名/schema SHALL 小写折叠(PG 未加引号标识符语义)。上传文件名(doc_name)SHALL 过 PII 检测(护栏 pii_* 规则集),命中敏感信息(身份证号/手机号等)即 400 拒绝——拒绝优于脱敏(脱敏后名可能撞 uq_documents_tdq 唯一键);数字命名的正常文件(订单号等)按既有 bankcard 19/20 前缀排除口径不误拒。知识条目以 (tenant_id, datasource_key, schema_name, table_name) 四元唯一(baseline 既定形态,与召回过滤维度对齐)。上传来源 SHALL 标记 source_type=MANUAL_UPLOAD;embedding 输入文本 SHALL 为「表名 + 表说明 + 字段说明原文」的确定性拼接。支持扩展名:.md/.markdown/.txt(文本链路)。上传解析 SHALL 在表块数上限(默认 500)内——超限拒绝,防大文档切块风暴;上传属管理写操作,SHALL 落 sys_oper_log 审计(与业务同事务)。
+上传 Markdown 表说明(`## 表名` 二级标题切块),生成 embedding(2560 维)后幂等写入 rag.table_descriptions;重复上传覆盖更新(upsert);无权限或超限被拒。embedding 应由同一部署模型生成且维度固定为 2560,并用于表说明和历史问句召回。端点为 `POST /system/rag/documents/upload`(multipart),要求 system:rag:manage 权限 + 租户上下文(与 chat 域同构的 X-Tenant-Id 白名单复校)。上传来源 SHALL 标记 source_type=MANUAL_UPLOAD;embedding 输入文本 SHALL 为「表名 + 表说明 + 字段说明原文」的确定性拼接。支持扩展名:.md/.markdown/.txt(文本链路)。上传解析 SHALL 在表块数上限(默认 500)内——超限拒绝,防大文档切块风暴;上传属管理写操作,SHALL 落 sys_oper_log 审计(与业务同事务)。
 
 #### Scenario: 上传表说明使用统一向量维度
 
@@ -78,6 +78,10 @@ fail-closed 拒绝(同形,防 key 探测)。该集合为知识上传 schema 字�
 - WHEN 上传
 - THEN 返回 400(表块数超限),不写入知识库,不触发 embedding
 
+### Requirement: 上传数据源与 schema 写入校验
+
+datasource_key SHALL 通过存在+启用+归属当前租户校验(不满足即 fail-closed 同形拒绝,防 key 探测);表单 schema_name SHALL 双闸校验——先过 PG 标识符语法校验(`^[a-z_][a-z0-9_]{0,62}$`,与 datasource 域 default_schema 同一规则),再校验其属于该数据源的可扫描 schema 集合(与内省扫描同源同口径,见「可扫描 Schema 枚举」),越界即 400 `SCHEMA_NOT_ALLOWED`,不落库——写边界 fail-fast,防拼错 schema 静默毒化召回。文档标题解析出的表名/schema SHALL 小写折叠(PG 未加引号标识符语义)。知识条目以 (tenant_id, datasource_key, schema_name, table_name) 四元唯一(baseline 既定形态,与召回过滤维度对齐),重复上传按四元覆盖更新。
+
 #### Scenario: 上传对 datasource_key 校验 fail-closed
 
 - GIVEN 上传请求携带的 datasource_key 不存在/已禁用/不归属当前租户
@@ -108,6 +112,10 @@ fail-closed 拒绝(同形,防 key 探测)。该集合为知识上传 schema 字�
 - WHEN 解析
 - THEN 返回 400(提示分块格式要求),不写入知识库
 
+### Requirement: 上传文件名 PII 检测
+
+上传文件名(doc_name)SHALL 过 PII 检测(护栏 pii_* 规则集),命中敏感信息(身份证号/手机号等)即 400 拒绝——拒绝优于脱敏(脱敏后名可能撞 uq_documents_tdq 唯一键);数字命名的正常文件(订单号等)按既有 bankcard 19/20 前缀排除口径不误拒。
+
 #### Scenario: 文件名含 PII 被拒
 
 - GIVEN 上传文件名为「王五_11010119900101123X_简历.md」
@@ -126,53 +134,51 @@ retrieve 链路经控制面 `POST /internal/rag/retrieve`(内部令牌,Agent 面
 执行三路召回:①表说明向量召回(pgvector 余弦 topK,默认 5)②表说明全文检索
 (tsvector,plainto_tsquery + ts_rank,BM25 近似)③query_history 历史成功 SQL
 问句向量召回;①②两路用 RRF(Reciprocal Rank Fusion,k=60)融合排序后取
-topK;③为独立强 few-shot 通道,SHALL NOT 参与融合(人类验证过的成功 SQL
-置信度高,喂给 generate 的优先级高于表说明内嵌示例)。三路召回均 MUST 强制
-tenant + datasource_key 双过滤。**实体别名(alias) SHALL 参与召回与注入:
-embedding/tsv 文本拼入 alias(用户业务称谓命中 alias 提升召回;alias 命中
-覆盖保留时,tsv/embedding 以生效别名(=既有别名)同源重算,派生检索文本
-不得与 alias 列脱钩);schema_hint 表说明段拼装带 alias(表头行形态
-`表名(别名)(列…) -- 表说明`,generate 与 summarize 共享该段,不再单开
-别名段)**。**全文检索路的分词配置 SHALL 为部署级可配项,缺省 `simple`
-(与既有行为逐字一致,零回归);配置值 SHALL 为白名单枚举(至少含 `simple`
-与 `zhparser`),MUST NOT 透传白名单外的任意标识符。全文向量的写入与检索
-SHALL 使用同一配置(写读同配置,单一配置单源);配置目标在库不可用
-(如扩展未安装)时 SHALL fail-closed 拒启并明示缺项——MUST NOT 以降级到
-其他配置的方式静默启动(降级会与存量全文向量错配)。配置变更后,存量全文
-向量 SHALL 经既有重建链路重算生效(重扫/重建索引流程不变);检索上下文
-缓存 SHALL NOT 跨配置复用——配置变更生效后,变更前的缓存条目 MUST NOT
-参与命中。全文检索路的查询语义 SHALL 为「AND 优先、内容词兜底」:问句经
-配置分词切词条后先以全词条 AND 匹配;AND 零命中时 MUST 降级为**内容词
-兜底轮**——仅长度 ≥2 的词条(内容词)参与任一词条匹配(EXISTS),单字
-词条(『有』『部』类虚词/量词,已知高频噪声源)MUST NOT 参与
-兜底轮;**无差别任一词条兜底形态 MUST NOT 采用**(变更 111 曾实施该形态;
-其当时的评估差异经查证为评估栈日配额耗尽事故而非召回质量信号——勘误见
-evals/README——但无差别形态让全部单字词条进入召回匹配、噪声面无界,已被
-本变更的内容词形态取代并规范排除)。兜底轮排序与得分 SHALL 沿用同量纲
-ts_rank(召回闸门判据不变),AND 有命中时 MUST NOT 混入仅兜底轮可达的
-条目(兜底只发生在零命中轮)。检索上下文缓存键 SHALL 纳入查询语义版本段
-——查询语义变更生效后,变更前的缓存条目 MUST NOT 参与命中。**。
-embedding 服务不可用时 SHALL 降级为仅全文路(不阻断);检索
-上下文缓存(Redis)SHALL fail-open——缓存不可用按未命中处理。知识写操作
-(上传/删除/编辑表说明/fetch-metadata/reindex)后 SHALL 精确失效对应
-tenant+datasource 的检索缓存。
-
-**知识条目可见集合 SHALL 为「租户公共条目(team 归属为空)∪ 调用者所在
-团队的条目」:三路召回的条目过滤 MUST 叠加该可见集合,非成员团队的条目
-MUST NOT 进入召回、注入与任何提示段。检索上下文缓存键 SHALL 纳入调用者
-团队维度(团队集合的确定性指纹):不同可见集合的调用者 MUST NOT 命中彼此
-的缓存条目;用户团队关系变化后,新召回 MUST 反映新可见集合。生产召回
-链路(agent 检索回调)SHALL 透传调用者身份(可选 user_id,缺省不携带=
-纯公共形态,既有负载零回归)——团队条目在 chat 问答链的可达性按本可见
-集合判定。历史 few-shot 路(query_history)SHALL 同判据:样本行携带来源
-可见集合(回写/晋升时调用者的团队集合,空=公共;存量样本按公共处理),
-非成员 MUST NOT 经历史路接收团队口径 SQL。**
+topK;③为独立强 few-shot 通道,SHALL NOT 参与融合。三路召回均 MUST 强制
+tenant + datasource_key 双过滤。
 
 #### Scenario: 表说明向量召回
 - GIVEN 租户已有 customer/film/rental 表说明(已向量化)
 - WHEN Agent retrieve 节点收到问句「查询所有客户」
 - THEN 经控制面 /internal/rag/retrieve(内部令牌)做向量召回 topK(默认 5)
 - AND customer 表说明相似度最高
+
+### Requirement: 召回降级与缓存失效
+
+embedding 服务不可用时 SHALL 降级为仅全文路(不阻断);检索上下文缓存
+(Redis)SHALL fail-open——缓存不可用按未命中处理。知识写操作(上传/删除/
+编辑表说明/fetch-metadata/reindex)后 SHALL 精确失效对应 tenant+datasource
+的检索缓存。
+
+#### Scenario: 各路空命中降级
+
+- GIVEN 某租户知识库为空(新租户)
+- WHEN 召回
+- THEN 对应路返回空,RRF 融合退化为可用路,不报错
+- AND 表说明两路(向量+全文,全文按 AND 与内容词兜底两轮均零命中计)均
+零命中时 retrieve 节点回退实时内省兜底
+(见 nl2sql-agent 域「Schema 智能选取」),不降级为空提示
+
+#### Scenario: embedding 服务不可用降级全文路
+
+- GIVEN Agent 面 embedding 端点超时/失败
+- WHEN 召回
+- THEN 向量路与历史路返回空,全文检索路照常执行,不报错不阻断
+
+#### Scenario: 知识写操作后缓存精确失效
+
+- GIVEN 同一问句的检索上下文已缓存(命中返回)
+- WHEN 该租户该数据源发生知识写操作(上传/删除/fetch-metadata/reindex)
+- THEN 对应缓存被精确失效(仅目标 tenant+datasource 范围),下次召回重建;
+其余租户/数据源缓存不受影响
+
+### Requirement: 实体别名参与召回与注入
+
+实体别名(alias) SHALL 参与召回与注入:embedding/tsv 文本拼入 alias(用户
+业务称谓命中 alias 提升召回;alias 命中覆盖保留时,tsv/embedding 以生效
+别名(=既有别名)同源重算,派生检索文本不得与 alias 列脱钩);schema_hint
+表说明段拼装带 alias(表头行形态 `表名(别名)(列…) -- 表说明`,generate 与
+summarize 共享该段,不再单开别名段)。
 
 #### Scenario: 业务称谓经别名命中召回
 - GIVEN goods 表说明 alias=「商品表」(已向量化拼入)
@@ -185,6 +191,12 @@ MUST NOT 进入召回、注入与任何提示段。检索上下文缓存键 SHAL
 - THEN 全文检索路精确命中该关键词
 - AND RRF 融合后该表排名优于纯向量召回
 
+### Requirement: 历史成功 SQL 作为强 few-shot
+
+query_history 历史成功 SQL 问句向量召回为独立强 few-shot 通道,SHALL NOT
+参与 RRF 融合;其样本喂给 generate 节点的优先级 SHALL 高于表说明内嵌示例
+与 sample_queries(人类验证过的成功 SQL 置信度高)。
+
 #### Scenario: 历史成功 SQL 作为强 few-shot
 - GIVEN query_history 有「查询客户邮箱」的成功 SQL
 - WHEN 新提问「客户邮箱列表」(语义相似)
@@ -195,24 +207,16 @@ MUST NOT 进入召回、注入与任何提示段。检索上下文缓存键 SHAL
 - WHEN sakila 上下文召回
 - THEN 三路召回都强制按 tenant + datasource_key 双过滤,不返回他租户/他数据源内容
 
-#### Scenario: 各路空命中降级
-- GIVEN 某租户知识库为空(新租户)
-- WHEN 召回
-- THEN 对应路返回空,RRF 融合退化为可用路,不报错
-- AND 表说明两路(向量+全文,全文按 AND 与内容词兜底两轮均零命中计)均
-零命中时 retrieve 节点回退实时内省兜底
-(见 nl2sql-agent 域「Schema 智能选取」),不降级为空提示
+### Requirement: 全文分词配置可配与写读同配置
 
-#### Scenario: embedding 服务不可用降级全文路
-- GIVEN Agent 面 embedding 端点超时/失败
-- WHEN 召回
-- THEN 向量路与历史路返回空,全文检索路照常执行,不报错不阻断
-
-#### Scenario: 知识写操作后缓存精确失效
-- GIVEN 同一问句的检索上下文已缓存(命中返回)
-- WHEN 该租户该数据源发生知识写操作(上传/删除/fetch-metadata/reindex)
-- THEN 对应缓存被精确失效(仅目标 tenant+datasource 范围),下次召回重建;
-其余租户/数据源缓存不受影响
+全文检索路的分词配置 SHALL 为部署级可配项,缺省 `simple`(与既有行为逐字
+一致,零回归);配置值 SHALL 为白名单枚举(至少含 `simple` 与 `zhparser`),
+MUST NOT 透传白名单外的任意标识符。全文向量的写入与检索 SHALL 使用同一
+配置(写读同配置,单一配置单源);配置目标在库不可用(如扩展未安装)时
+SHALL fail-closed 拒启并明示缺项——MUST NOT 以降级到其他配置的方式静默
+启动(降级会与存量全文向量错配)。配置变更后,存量全文向量 SHALL 经既有
+重建链路重算生效(重扫/重建索引流程不变);检索上下文缓存 SHALL NOT 跨
+配置复用——配置变更生效后,变更前的缓存条目 MUST NOT 参与命中。
 
 #### Scenario: 缺省 simple 零回归
 
@@ -244,6 +248,20 @@ MUST NOT 进入召回、注入与任何提示段。检索上下文缓存键 SHAL
 - WHEN 该问句进入全文路且 AND 轮零命中
 - THEN 兜底轮不因单字词条产生任何命中(内容词过滤生效,变更 111 的噪声
 源被谓词排除)
+
+### Requirement: 全文检索查询语义 AND 优先与内容词兜底
+
+全文检索路的查询语义 SHALL 为「AND 优先、内容词兜底」:问句经配置分词切
+词条后先以全词条 AND 匹配;AND 零命中时 MUST 降级为**内容词兜底轮**——仅
+长度 ≥2 的词条(内容词)参与任一词条匹配(EXISTS),单字词条(『有』『部』
+类虚词/量词,已知高频噪声源)MUST NOT 参与兜底轮;**无差别任一词条兜底
+形态 MUST NOT 采用**(变更 111 曾实施该形态;其当时的评估差异经查证为
+评估栈日配额耗尽事故而非召回质量信号——勘误见 evals/README——但无差别
+形态让全部单字词条进入召回匹配、噪声面无界,已被本变更的内容词形态取代
+并规范排除)。兜底轮排序与得分 SHALL 沿用同量纲 ts_rank(召回闸门判据
+不变),AND 有命中时 MUST NOT 混入仅兜底轮可达的条目(兜底只发生在零命中
+轮)。检索上下文缓存键 SHALL 纳入查询语义版本段——查询语义变更生效后,
+变更前的缓存条目 MUST NOT 参与命中。
 
 #### Scenario: AND 有命中时不放大混入
 
@@ -282,12 +300,29 @@ MUST NOT 进入召回、注入与任何提示段。检索上下文缓存键 SHAL
 - WHEN 查询语义升级为「AND 优先、内容词兜底」后同问句召回
 - THEN 旧条目不参与命中(键含查询语义版本段,按新语义重建)
 
+### Requirement: 知识条目按团队可见集合过滤
+
+知识条目可见集合 SHALL 为「租户公共条目(team 归属为空)∪ 调用者所在
+团队的条目」:三路召回的条目过滤 MUST 叠加该可见集合,非成员团队的条目
+MUST NOT 进入召回、注入与任何提示段。检索上下文缓存键 SHALL 纳入调用者
+团队维度(团队集合的确定性指纹):不同可见集合的调用者 MUST NOT 命中彼此
+的缓存条目;用户团队关系变化后,新召回 MUST 反映新可见集合。生产召回
+链路(agent 检索回调)SHALL 透传调用者身份(可选 user_id,缺省不携带=
+纯公共形态,既有负载零回归)——团队条目在 chat 问答链的可达性按本可见
+集合判定。
+
 #### Scenario: 团队条目成员可召回
 
 - GIVEN 表知识 K 归属团队 T,用户 A 是 T 成员、用户 B 不是
 - WHEN A 与 B 分别经生产问答链(agent 检索回调携带调用者身份)以同问句召回
 - THEN A 的召回可命中 K,B 的召回不出现 K(公共条目不受影响)
 - AND 回调缺省不携带身份时(旧版 agent)按纯公共形态召回,零回归
+
+### Requirement: 历史路按来源可见集合过滤
+
+历史 few-shot 路(query_history)SHALL 与知识条目同判据:样本行携带来源
+可见集合(回写/晋升时调用者的团队集合,空=公共;存量样本按公共处理),
+非成员 MUST NOT 经历史路接收团队口径 SQL。
 
 #### Scenario: 历史样本不跨可见集合
 
@@ -316,27 +351,6 @@ manual 两类同权)的表,补入召回集。扩展 SHALL NOT 猜测关系——
 零扩展(与语义层「无 FK 库不猜测」同口径)。扩展 SHALL 缺省开启,并 SHALL 可经
 配置整项关停。
 
-扩展表 SHALL 去重(已在召回集内的表不重复补入)、SHALL 受可配上限于约(缺省 2)
-约束、SHALL 追加在 schema_hint 的**尾部**;扩展条目 SHALL 与主召回条目同形态
-(`schema.table(alias)(列…)`),SHALL NOT 新增段落类型或标记(Agent 侧解析与 080
-预算截断逻辑零改;预算超限时按既有尾部丢弃方向先裁扩展,主召回不受影响)。
-
-扩展生效后,召回响应内的 relations_hint 收窄基准 SHALL 同步扩展为
-「主召回 ∪ 扩展」集合——扩展表 SHALL 携带其 JOIN path 一并注入(不带路径的
-扩展表对生成无增益,只是稀释)。
-
-trace SHALL 记录本轮扩展的表与经由关系(SHALL NOT 静默);召回试跑端点 SHALL
-透出扩展明细(补入的表、经哪条关系补入、扩展后表集合),零副作用纪律
-(不改配置/不落库/不触发缓存失效)不变。
-
-关系查询失败或扩展端口未注入时,SHALL 降级为无扩展并继续召回主链路(与既有
-语义段降级同口径),SHALL NOT 阻断问答、SHALL NOT 以错误终态返回。
-
-**缓存失效(正确性要求)**:召回输出自此依赖关系数据,故关系写路径
-(introspection upsert、手工关系增删、数据源删除级联清理)SHALL 在提交后失效
-该租户+数据源的全部检索上下文缓存;未失效时,关系改动在缓存 TTL 窗口内
-不可见(用户感知为「配了却没变化」的静默失效)。
-
 #### Scenario: 关联表被扩展补入
 
 - GIVEN 召回集含 `sakila.customer`,且存在声明关系 `sakila.customer → sakila.rental`
@@ -349,6 +363,22 @@ trace SHALL 记录本轮扩展的表与经由关系(SHALL NOT 静默);召回试�
 - GIVEN 业务库无任何外键约束且无手工关系,introspection 未产生关系行
 - WHEN 任意召回
 - THEN 扩展集为空,输出与关停形态逐字一致(不猜测关系)
+
+#### Scenario: 整项关停零回归
+
+- GIVEN 扩展经配置关停
+- WHEN 与开启前同问句召回
+- THEN schema_hint / relations_hint / 响应信封逐字一致(零行为变更)
+
+### Requirement: 关系扩展的补入形态与预算
+
+扩展表 SHALL 去重(已在召回集内的表不重复补入)、SHALL 受可配上限于约(缺省 2)
+约束、SHALL 追加在 schema_hint 的**尾部**;扩展条目 SHALL 与主召回条目同形态
+(`schema.table(alias)(列…)`),SHALL NOT 新增段落类型或标记(Agent 侧解析与 080
+预算截断逻辑零改;预算超限时按既有尾部丢弃方向先裁扩展,主召回不受影响)。
+扩展生效后,召回响应内的 relations_hint 收窄基准 SHALL 同步扩展为
+「主召回 ∪ 扩展」集合——扩展表 SHALL 携带其 JOIN path 一并注入(不带路径的
+扩展表对生成无增益,只是稀释)。
 
 #### Scenario: 上限与去重
 
@@ -363,18 +393,13 @@ trace SHALL 记录本轮扩展的表与经由关系(SHALL NOT 静默);召回试�
 - THEN relations_hint 覆盖 `sakila.payment` 与召回表的 JOIN path(收窄基准含
   扩展表),而非仅主召回表两两
 
-#### Scenario: 整项关停零回归
+### Requirement: 关系扩展的可观测与降级
 
-- GIVEN 扩展经配置关停
-- WHEN 与开启前同问句召回
-- THEN schema_hint / relations_hint / 响应信封逐字一致(零行为变更)
-
-#### Scenario: 关系写后召回即时生效
-
-- GIVEN 已缓存某问句的检索上下文(含上一次无扩展的结果)
-- WHEN 管理员手工新增一条涉及该召回表的关系
-- THEN 该租户+数据源的检索上下文缓存被失效,下一轮同问句召回立即反映新关系
-  (不等待 TTL 过期)
+trace SHALL 记录本轮扩展的表与经由关系(SHALL NOT 静默);召回试跑端点 SHALL
+透出扩展明细(补入的表、经哪条关系补入、扩展后表集合),零副作用纪律
+(不改配置/不落库/不触发缓存失效)不变。关系查询失败或扩展端口未注入时,
+SHALL 降级为无扩展并继续召回主链路(与既有语义段降级同口径),SHALL NOT
+阻断问答、SHALL NOT 以错误终态返回。
 
 #### Scenario: 试跑透出扩展明细
 
@@ -387,6 +412,20 @@ trace SHALL 记录本轮扩展的表与经由关系(SHALL NOT 静默);召回试�
 - GIVEN 关系查询抛异常(如关系表尚未迁移)
 - WHEN 召回执行
 - THEN 按无扩展完成召回并告警,问答链路不中断、不以错误终态返回
+
+### Requirement: 关系写路径的召回缓存失效
+
+召回输出依赖关系数据,故关系写路径(introspection upsert、手工关系增删、
+数据源删除级联清理)SHALL 在提交后失效该租户+数据源的全部检索上下文缓存;
+未失效时,关系改动在缓存 TTL 窗口内不可见(用户感知为「配了却没变化」的
+静默失效)。
+
+#### Scenario: 关系写后召回即时生效
+
+- GIVEN 已缓存某问句的检索上下文(含上一次无扩展的结果)
+- WHEN 管理员手工新增一条涉及该召回表的关系
+- THEN 该租户+数据源的检索上下文缓存被失效,下一轮同问句召回立即反映新关系
+  (不等待 TTL 过期)
 
 ### Requirement: PDF/Word 文档解析(扩展上传格式)
 
@@ -413,21 +452,12 @@ trace SHALL 记录本轮扩展的表与经由关系(SHALL NOT 静默);召回试�
 ### Requirement: 知识库管理
 
 提供当前租户知识条目的列表查询与删除(硬删);列表与删除端点均 SHALL 要求
-system:rag:manage(与页面守卫、同域写操作权限口径一致):列表
+system:rag:manage(与页面守卫、同域写操作权限口径一致)。列表
 `GET /system/rag/tables`(分页 + 可选 datasource_key 筛选,按更新时间倒序,
 不返回向量与全文索引列);删除 `DELETE /system/rag/tables/{id}`,删除后触发
 检索缓存失效,后续召回不再命中,并落 sys_oper_log 审计(与业务同事务——
 与 fetch/reindex 同域同口径)。重建索引(reindex)能力归 knowledge 域立约
 (见 knowledge spec「reindex(按数据源重建)」requirement)。
-
-**知识条目 SHALL 支持团队归属治理:归属为空=租户公共(既有行为),或指向
-当前租户内真实团队。写操作(上传/编辑/归属变更/删除)对团队条目 SHALL
-额外校验操作者为该团队 OWNER/MEMBER,非成员按 404 同形拒绝(不暴露条目
-存在性);列表 SHALL 仅呈现公共条目与操作者所在团队条目。归属变更
-(公共 ⇄ 团队)SHALL 落操作审计并失效检索缓存;团队被删除时其条目 SHALL
-公共化(归属置空)并落审计——知识资产不因团队解散丢失。同表知识 SHALL
-保持单一实例(唯一键不含归属维度):归属转移为原位变更,MUST NOT 产生
-公共/团队双版本。**
 
 #### Scenario: 列出当前租户的表说明
 - GIVEN 用户已登录且持有 system:rag:manage
@@ -450,6 +480,17 @@ system:rag:manage(与页面守卫、同域写操作权限口径一致):列表
 - WHEN 触发重建索引
 - THEN 按知识域 reindex 立约执行:清空当前租户+数据源全部条目并重新扫描
    (含润色),重新生成向量更新(行为契约见 knowledge 域)
+
+### Requirement: 知识条目团队归属治理
+
+知识条目 SHALL 支持团队归属治理:归属为空=租户公共(既有行为),或指向
+当前租户内真实团队。写操作(上传/编辑/归属变更/删除)对团队条目 SHALL
+额外校验操作者为该团队 OWNER/MEMBER,非成员按 404 同形拒绝(不暴露条目
+存在性);列表 SHALL 仅呈现公共条目与操作者所在团队条目。归属变更
+(公共 ⇄ 团队)SHALL 落操作审计并失效检索缓存;团队被删除时其条目 SHALL
+公共化(归属置空)并落审计——知识资产不因团队解散丢失。同表知识 SHALL
+保持单一实例(唯一键不含归属维度):归属转移为原位变更,MUST NOT 产生
+公共/团队双版本。
 
 #### Scenario: 非成员写团队条目 404 同形
 
@@ -553,12 +594,12 @@ few-shot 召回位;embedding 计算失败时 SHALL 保留该行旧向量(旧向�
 - WHEN 历史 SQL 路召回
 - THEN 返回最近一次采纳的纠错 SQL,且同一问句至多一条
 
-### Requirement: 召回相关度闸门
+### Requirement: 问题驱动的召回相关度闸门
 
 RAG 召回 SHALL 支持问题驱动的相关度闸门,且闸门 SHALL 恒以裁剪形态生效
 (不过闸整路裁掉后重融合,无关闭/影子形态;零知识数据源自动旁路,见下)。
 判据 SHALL 落在各路原生相似度上(向量路=余弦相似度,全文路=检索得分),
-SHALL NOT 以 RRF 融合分充当相关度判据(融合值由命中路数与名次决定,与相似度无关)。闸门判据为双条件:`(过闸命中数 ≥ min_count ∧ 该路 top1 ≥ 该路阈值)` 或 `(过闸命中数 ≥ min_count ∧ 前 N 均值 ≥ 次级阈值)`。阈值 SHALL 按路独立可配(量纲不共用);命中数为 0 的路 SHALL NOT 参与判定(零命中不投票)。闸门 SHALL 覆盖进入提示词的全部召回路——含 047 多轮继承路(上轮问句独立召回路):「多轮依赖表」是继承机制的存在理由,SHALL NOT 构成 relevance 豁免,junk 依赖表与 junk 主路命中同样稀释提示词。全路零命中或全部不过闸时 SHALL 维持既有"知识不足"路径,不新增终态、不改响应信封。闸门触发、各路分数分布、被裁命中数与生效阈值 SHALL 可观测,SHALL NOT 静默降质。零知识数据源 SHALL 自动旁路闸门(零命中源于「无知识」而非「低相关」,裁剪会误杀内省回退可答题),旁路 SHALL 在 trace 如实标注。
+SHALL NOT 以 RRF 融合分充当相关度判据(融合值由命中路数与名次决定,与相似度无关)。闸门判据为双条件:`(过闸命中数 ≥ min_count ∧ 该路 top1 ≥ 该路阈值)` 或 `(过闸命中数 ≥ min_count ∧ 前 N 均值 ≥ 次级阈值)`。阈值 SHALL 按路独立可配(量纲不共用);命中数为 0 的路 SHALL NOT 参与判定(零命中不投票)。全路零命中或全部不过闸时 SHALL 维持既有"知识不足"路径,不新增终态、不改响应信封。
 
 #### Scenario: 单条差一点但多条印证时放行
 
@@ -583,6 +624,12 @@ SHALL NOT 以 RRF 融合分充当相关度判据(融合值由命中路数与名�
 - GIVEN 部署未配置任何闸门模式类环境变量(机制已收编,无此配置)
 - WHEN 知识在位的低相关问句召回
 - THEN 不过闸的路被整路裁掉后重融合,走既有「知识不足」路径(无开关可关)
+
+### Requirement: 零知识数据源闸门旁路
+
+闸门 SHALL 覆盖进入提示词的全部召回路——含 047 多轮继承路(上轮问句独立召回路):「多轮依赖表」是继承机制的存在理由,SHALL NOT 构成 relevance 豁免,junk 依赖表与 junk 主路命中同样稀释提示词。闸门触发、各路分数分布、被裁命中数与生效阈值 SHALL 可观测,SHALL NOT 静默降质。零知识数据源 SHALL 自动旁路闸门(零命中源于「无知识」而非「低相关」,裁剪会误杀内省回退可答题),旁路 SHALL 在 trace 如实标注。
+
+#### Scenario: 零知识数据源自动旁路
 
 #### Scenario: 零知识数据源自动旁路
 

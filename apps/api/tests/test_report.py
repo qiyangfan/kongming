@@ -77,7 +77,7 @@ async def _user_with_report_perms(
         )
     await _bind(s, "sys_user_role", uid, str(rid))
     await _bind(s, "sys_user_tenant", uid, await _default_tenant_id(s))
-    return uid, await _login(client, username)
+    return uid, _login(uid)
 
 
 _FULL_SECTIONS: list[dict[str, Any]] = [

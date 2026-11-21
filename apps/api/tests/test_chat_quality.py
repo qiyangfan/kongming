@@ -79,7 +79,7 @@ async def _quality_admin(
     rid = await _mk_role_with_perms(s, f"Q-{username}", ["system:chat-quality:view"])
     await _bind(s, "sys_user_role", uid, rid)
     await _bind(s, "sys_user_tenant", uid, await _default_tenant_id(s))
-    return uid, await _login(client, username)
+    return uid, _login(uid)
 
 
 # ── 1. 信号落库 ─────────────────────────────────────────
@@ -92,7 +92,7 @@ async def test_quality_signals_persisted(
     fake_agent: dict[str, FakeAgent],
 ) -> None:
     """多轮轮次终态落库 trace_id/retry_count/resolved_question/prompt_version。"""
-    _uid, token = await _user_with_chat_perm(client, session, make_user, "q1")
+    _uid, token = await _user_with_chat_perm(session, make_user, "q1")
     _install(fake_agent, _QualityAgent(_pass_reply()))
     r = await client.post("/chat/query", json={"question": "库存最多的商品"}, headers=_auth(token))
     assert r.status_code == 200
@@ -122,7 +122,7 @@ async def test_single_turn_no_rewrite_null(
     fake_agent: dict[str, FakeAgent],
 ) -> None:
     """单轮无改写:resolved_question=null(agent 直通时不背诊断信号)。"""
-    _uid, token = await _user_with_chat_perm(client, session, make_user, "q2")
+    _uid, token = await _user_with_chat_perm(session, make_user, "q2")
     agent = FakeAgent(_pass_reply())  # 无 resolved_question(直通形态)
     _install(fake_agent, agent)
     r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
@@ -156,7 +156,7 @@ async def test_signals_not_in_user_response(
 
     注:retry_count 是既有用户面字段(selfheal 重试次数),不改变
     存量契约——只验新增三项(trace_id/resolved_question/prompt_version)。"""
-    _uid, token = await _user_with_chat_perm(client, session, make_user, "q3")
+    _uid, token = await _user_with_chat_perm(session, make_user, "q3")
     _install(fake_agent, _QualityAgent(_pass_reply()))
     r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
     assert r.status_code == 200
@@ -178,7 +178,7 @@ async def test_summary_and_page_tenant_isolated(
     _uid_t1, token_t1 = await _quality_admin(client, session, make_user, "qt1")
     _uid_t2, token_t2 = await _quality_admin(client, session, make_user, "qt2")
     # T1 用户先造一轮
-    _, chat_token = await _user_with_chat_perm(client, session, make_user, "qt1chat")
+    _, chat_token = await _user_with_chat_perm(session, make_user, "qt1chat")
     _install(fake_agent, _QualityAgent(_pass_reply()))
     r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(chat_token))
     assert r.status_code == 200
@@ -225,7 +225,7 @@ async def test_no_data_round_visible(
 ) -> None:
     """NO_DATA 轮次进入汇总与明细分页(如实弃答同样计入观测面)。"""
     _uid, token = await _quality_admin(client, session, make_user, "qn")
-    _uid_chat, chat_token = await _user_with_chat_perm(client, session, make_user, "qnchat")
+    _uid_chat, chat_token = await _user_with_chat_perm(session, make_user, "qnchat")
     # agent 替身:NO_DATA 终态(知识未覆盖)
     reply = AgentReply(success=False, verdict="NO_DATA", summary="")
     _install(fake_agent, FakeAgent(reply))
@@ -255,7 +255,7 @@ async def test_summary_requires_perm(
     rid = await _mk_role_with_perms(session, "Q-NOPERM", [])
     await _bind(session, "sys_user_role", uid, rid)
     await _bind(session, "sys_user_tenant", uid, await _default_tenant_id(session))
-    token = await _login(client, "qnoperm")
+    token = _login(client)
     r = await client.get("/system/chat-quality/summary", headers=_auth(token))
     assert r.status_code == 403
     r2 = await client.get("/system/chat-quality/page", headers=_auth(token))

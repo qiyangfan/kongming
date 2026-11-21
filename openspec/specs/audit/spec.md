@@ -99,26 +99,78 @@ data_scope=ALL,与 feedback 域同一口径);单条详情含完整 sql_text
 - THEN 分页返回,筛选均可空,按 created_at 倒序
 - AND 数据范围非 ALL 强制只看本人
 
-### Requirement: 审计留存与归档
+### Requirement: 审计留存窗口与热数据在线查询
 
-审计类日志(SQL 审计、操作日志)留存不少于 6 个月:库内保留最近 180 天热数据供在线查询,超窗记录由定时归档任务导出为压缩归档文件(含 SHA-256 清单)后删除;归档纳入备份链;可重导入;归档失败不阻断审计写入。
-**Kongming 实现形态(015 细化)**:归档窗口默认 180 天(配置项
-`audit_archive_days`);归档目录配置项 `audit_archive_dir`(缺省
-var/audit-archive,落盘即随部署备份链——「纳入备份链」以目录声明,
-异地加密上传为部署运维面);归档文件形态 SHALL 为每表一个 gzip JSONL
-(一行一记录)+ manifest.json(含每文件 SHA-256/行数/窗口起止/
-导出时间);删除在导出校验(manifest 写盘成功)后执行,导出与删除
-分步,删除失败保留归档文件;同日重跑幂等(窗口目录=导出日,manifest
-完整且导出范围覆盖本次删除范围才跳过导出——days 调小后旧 manifest
-不覆盖新增段,必须重新导出,R1-S2);跨日重跑(前次删除失败的补删)可能
-向新目录重复导出同一批行,恢复按 id 幂等去重兜底(R1-S4:以导出日为
-窗口锚并显式声明跨日重复语义,恢复侧 ON CONFLICT 消重);重导入按
-id 幂等(ON CONFLICT DO NOTHING),
-manifest SHA-256 校验失败拒绝导入;调度=lifespan asyncio 每日定时
-(调度器为薄壳,归档逻辑全部在独立可测函数)+管理端点
-`POST /audit/archive/run`(system:audit:view,超管手动触发同函数,
-返回 {exported, deleted, files});重导入为管理端点
-`POST /audit/archive/restore`(同权限点,返回 {restored, skipped})。
+审计类日志(SQL 审计、操作日志)留存不少于 6 个月:库内保留最近 180 天热数据
+供在线查询,超窗记录由定时归档任务导出为压缩归档文件后删除。归档窗口默认
+180 天(配置项 `audit_archive_days`)。归档任务失败 SHALL NOT 阻断审计写入,
+失败以错误日志与指标暴露。
+
+#### Scenario: 过期数据自动归档
+- GIVEN 审计表中存在早于 180 天的记录
+- WHEN 归档任务按计划执行
+- THEN 过期记录导出为带 SHA-256 清单的压缩文件,随后库内删除,库内仅剩窗口内数据
+
+#### Scenario: 归档失败不阻断审计写入
+- GIVEN 归档任务失败(如对象存储不可达)
+- WHEN 用户执行新的查询
+- THEN 审计正常写入,任务失败以错误日志与指标暴露
+
+### Requirement: 归档文件形态与导出校验
+
+**Kongming 实现形态(015 细化)**:归档目录配置项 `audit_archive_dir`
+(缺省 var/audit-archive,落盘即随部署备份链——「纳入备份链」以目录声明,
+异地加密上传为部署运维面)。归档文件形态 SHALL 为每表一个 gzip JSONL
+(一行一记录)+ manifest.json(含每文件 SHA-256/行数/窗口起止/导出时间)。
+删除 SHALL 在导出校验(manifest 写盘成功)后执行:导出与删除分步,
+删除失败保留归档文件。归档文件产生后 SHALL 随当日备份加密上传异地,
+完整性校验覆盖归档清单。
+
+#### Scenario: 归档纳入备份链
+- GIVEN 归档任务产生新归档文件
+- WHEN 当日备份执行
+- THEN 归档文件随备份加密上传异地,完整性校验覆盖归档清单
+- AND Kongming 形态=归档目录落盘即随部署备份链(异地加密为部署运维面,design 声明)
+
+### Requirement: 归档重跑语义与重导入
+
+重导入 SHALL 按 id 幂等(ON CONFLICT DO NOTHING),manifest SHA-256 校验失败
+SHALL 拒绝导入。同日重跑幂等:窗口目录=导出日,manifest 完整且导出范围覆盖
+本次删除范围才跳过导出——days 调小后旧 manifest 不覆盖新增段,必须重新导出
+(R1-S2)。跨日重跑(前次删除失败的补删)可能向新目录重复导出同一批行,
+恢复按 id 幂等去重兜底(R1-S4:以导出日为窗口锚并显式声明跨日重复语义,
+恢复侧 ON CONFLICT 消重)。
+
+#### Scenario: 归档文件可重导入
+- GIVEN 一份归档文件及其清单
+- WHEN 执行重导入
+- THEN 记录恢复至可查询状态,SHA-256 校验通过
+- AND 重复导入按 id 幂等跳过,不产生重复行
+
+#### Scenario: 重导入校验失败拒绝
+- GIVEN 归档文件内容与其 manifest 的 SHA-256 不符
+- WHEN 执行重导入
+- THEN 拒绝导入,不产生半截或错误数据
+
+### Requirement: 归档与重导入的调度与管理端点
+
+归档调度 SHALL 为 lifespan asyncio 每日定时(调度器为薄壳,归档逻辑全部在
+独立可测函数);并 SHALL 提供管理端点 `POST /audit/archive/run`
+(system:audit:view,超管手动触发同函数,返回 {exported, deleted, files})。
+重导入 SHALL 为管理端点 `POST /audit/archive/restore`(同权限点,
+返回 {restored, skipped})。
+
+#### Scenario: 超管手动触发归档
+- GIVEN 超管持有 system:audit:view
+- WHEN 调用 POST /audit/archive/run
+- THEN 执行与定时任务同一归档函数,返回 {exported, deleted, files}
+
+#### Scenario: 手动重导入返回计数
+- GIVEN 一份已校验通过的归档文件
+- WHEN 调用 POST /audit/archive/restore
+- THEN 返回 {restored, skipped},跳过行按 id 已存在统计
+
+
 
 #### Scenario: 过期数据自动归档
 - GIVEN 审计表中存在早于 180 天的记录

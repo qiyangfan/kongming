@@ -37,7 +37,7 @@ async def _mk_user(
     await _bind(s, "sys_user_role", uid, str(rid))
     await _bind(s, "sys_user_tenant", uid, await _default_tenant_id(s))
     await s.commit()
-    return uid, await _login(client, name)
+    return uid, _login(uid)
 
 
 async def _upload(client: AsyncClient, token: str, data: bytes = _PNG, name: str = "a.png"):

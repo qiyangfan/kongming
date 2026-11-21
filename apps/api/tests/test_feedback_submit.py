@@ -86,7 +86,7 @@ async def _feedback_row(s: AsyncSession, mid: str) -> dict[str, Any]:
 
 async def _setup(s: AsyncSession, client: AsyncClient, make_user: MakeUser, name: str):
     """有 chat:feedback:submit(DEVELOPER 推荐绑定,种子)的用户+会话+assistant 消息。"""
-    uid, token = await _user_with_chat_perm(client, s, make_user, name)
+    uid, token = await _user_with_chat_perm(s, make_user, name)
     tid = await _default_tenant_id(s)
     sid = await _mk_session(s, user_id=uid, tenant_id=tid)
     await _mk_user_msg(s, sid, "有多少种商品")
@@ -159,7 +159,7 @@ async def test_submit_cross_user_403_same_shape(
 ) -> None:
     _, _token, _tid, _, mid = await _setup(session, client, make_user, "fb-owner")
     # 另一用户(绑同租户)对他人消息反馈 → 403 同形(不区分不存在与无权)
-    _, token_b = await _user_with_chat_perm(client, session, make_user, "fb-other")
+    _, token_b = await _user_with_chat_perm(session, make_user, "fb-other")
     r = await client.post(
         f"/chat/messages/{mid}/feedback", json={"rating": "UP"}, headers=_auth(token_b)
     )
@@ -178,7 +178,7 @@ async def test_submit_cross_user_403_same_shape(
 async def test_submit_user_message_400(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    uid, token = await _user_with_chat_perm(client, session, make_user, "fb-umsg")
+    uid, token = await _user_with_chat_perm(session, make_user, "fb-umsg")
     tid = await _default_tenant_id(session)
     sid = await _mk_session(session, user_id=uid, tenant_id=tid)
     await _mk_user_msg(session, sid, "用户问句")
@@ -203,7 +203,7 @@ async def test_submit_no_perm_403(
 
     uid2 = await make_user("fb-noperm")
     await _bind(session, "sys_user_tenant", uid2, await _default_tenant_id(session))
-    token2 = await _login(client, "fb-noperm")
+    token2 = _login(client)
     r = await client.post(
         f"/chat/messages/{mid}/feedback", json={"rating": "UP"}, headers=_auth(token2)
     )
@@ -346,7 +346,7 @@ async def test_query_response_contains_message_id(
     """messageId 打通:实时响应 message_id 与库内 assistant 消息一致,
     datasource_key=执行快照;persist=false 时 message_id 为 null(spec)。"""
     _install(fake_agent, FakeAgent(_pass_reply()))
-    _, token = await _user_with_chat_perm(client, session, make_user, "fb-mid")
+    _, token = await _user_with_chat_perm(session, make_user, "fb-mid")
     r = await client.post(
         "/chat/query",
         json={

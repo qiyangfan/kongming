@@ -529,7 +529,7 @@ async def test_recall_ctx_evicted_on_delete(
 
     # 管理面删除该条 → 缓存被失效
     await seed_all(session, get_settings())
-    token = await _login(client, "admin", "admin123")
+    token = _login(client)
     kid = (
         await session.execute(
             text("SELECT id FROM rag.table_descriptions WHERE table_name='staff'")
@@ -566,7 +566,7 @@ async def test_ctx_evict_scoped_to_tenant(
     from tests.test_chat_query import _auth, _login
 
     await seed_all(session, get_settings())
-    token = await _login(client, "admin", "admin123")
+    token = _login(client)
     kid = (
         await session.execute(text("SELECT id FROM rag.table_descriptions WHERE table_name='t_a'"))
     ).scalar_one()
@@ -616,7 +616,7 @@ async def test_chat_success_writes_query_history(
         return _areply(reply)
 
     monkeypatch.setattr(AgentClient, "query", _fake_query)
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     r = await client.post(
         "/chat/query",
         json={"question": "有多少商品"},
@@ -649,7 +649,7 @@ async def test_chat_rejected_no_writeback(
         return _areply(reply)
 
     monkeypatch.setattr(AgentClient, "query", _fake_query)
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     await client.post("/chat/query", json={"question": "删数据"}, headers=_auth(token))
     n = (await session.execute(text("SELECT count(*) FROM rag.query_history"))).scalar_one()
     assert n == 0
@@ -679,7 +679,7 @@ async def test_writeback_failure_does_not_break_chat(
         raise RuntimeError("回写故障")
 
     monkeypatch.setattr(RagService, "writeback", boom)
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     r = await client.post("/chat/query", json={"question": "查一下"}, headers=_auth(token))
     assert r.status_code == 200
     assert r.json()["success"] is True

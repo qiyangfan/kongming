@@ -616,7 +616,7 @@ async def _mcp_admin(client: AsyncClient, s: AsyncSession, make_user: MakeUser, 
     await _bind(s, "sys_user_role", uid, rid)
     await _bind(s, "sys_user_tenant", uid, tid_str)
     await s.commit()
-    return uid, await _login(client, name)
+    return uid, _login(uid)
 
 
 def _override_mcp_service(caller: Any | None = None) -> None:
@@ -706,7 +706,7 @@ async def test_admin_perm_403_and_cross_tenant_404(
     uid2 = await make_user("mcp_noperm")
     await _bind(session, "sys_user_tenant", uid2, await _default_tenant_id(session))
     await session.commit()
-    token2 = await _login(client, "mcp_noperm")
+    token2 = _login(client)
     r = await client.get("/system/mcp", headers={"Authorization": f"Bearer {token2}"})
     assert r.status_code == 403
     # 跨租户 404 同形:在 mcp 租户建行,另一租户用户操作
@@ -726,7 +726,7 @@ async def test_admin_perm_403_and_cross_tenant_404(
     await _bind(session, "sys_user_role", uid3, rid3)
     await _bind(session, "sys_user_tenant", uid3, await _default_tenant_id(session))
     await session.commit()
-    token3 = await _login(client, "mcp_other")
+    token3 = _login(client)
     r3 = await client.delete(
         f"/system/mcp/{sid}",
         headers={"Authorization": f"Bearer {token3}"},  # 缺省 default 租户
@@ -896,7 +896,7 @@ async def test_execute_unannotated_goes_confirm(
     await _register_fake_server(client, token)
     uid = await _tool_user(session, make_user, "mcp_u2", ["tool:mcp:use", "chat:execute"])
     sid = await _mk_session(session, uid, "mcp")
-    token_u = await _login(client, "mcp_u2")
+    token_u = _login(client)
     _override_toolcall()
     try:
         r = await client.post(

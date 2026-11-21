@@ -5,7 +5,6 @@ SQL 审计/操作日志分页筛选+倒序+详情完整 sql_text;行级可见性
 """
 # pyright: reportPrivateUsage=false
 
-import json
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -76,7 +75,7 @@ async def _self_audit_user(
     rid = await _mk_role_with_perms(s, f"AUD-{username}", ["system:audit:view"])
     await _bind(s, "sys_user_role", uid, rid)
     await _bind(s, "sys_user_tenant", uid, await _default_tenant_id(s))
-    return uid, await _login(client, username)
+    return uid, _login(uid)
 
 
 # ============ SQL 审计分页/详情 ============
@@ -175,7 +174,7 @@ async def test_sql_page_no_perm_403(
 ) -> None:
     from tests.test_chat_query import _user_with_chat_perm
 
-    _, token = await _user_with_chat_perm(client, session, make_user, "aud-np")
+    _, token = await _user_with_chat_perm(session, make_user, "aud-np")
     r = await client.get("/audit/sql/page", headers=_auth(token))
     assert r.status_code == 403
 
@@ -209,7 +208,7 @@ async def test_oper_page_no_perm_403(
 ) -> None:
     from tests.test_chat_query import _user_with_chat_perm
 
-    _, token = await _user_with_chat_perm(client, session, make_user, "audop-np")
+    _, token = await _user_with_chat_perm(session, make_user, "audop-np")
     r = await client.get("/audit/oper/page", headers=_auth(token))
     assert r.status_code == 403
 
@@ -220,29 +219,18 @@ async def test_oper_page_no_perm_403(
 async def test_oper_log_ip_recorded_from_request(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """通过管理请求验证操作日志记录 contextvar 中的客户端 IP。"""
-    from kongming.auth.seed import seed_all
-    from kongming.config import get_settings
-
-    await seed_all(session, get_settings())
+    """管理写请求的操作日志记录 contextvar 中的客户端 IP。"""
     token = await _admin_token(client, session)
-    tid = await _default_tenant_id(session)
     r = await client.post(
-        "/system/users",
-        json={
-            "username": "ip-probe",
-            "password": "Passw0rd!",
-            "nickname": "探针",
-            "tenant_id": tid,
-            "role_ids": [],
-        },
+        "/system/roles",
+        json={"role_key": "IP_PROBE", "role_name": "探针"},
         headers=_auth(token),
     )
     assert r.status_code in (200, 201, 204)
     ip = (
         await session.execute(
             text(
-                "SELECT ip FROM public.sys_oper_log WHERE action='user.create'"
+                "SELECT ip FROM public.sys_oper_log WHERE action='role.create'"
                 " ORDER BY created_at DESC LIMIT 1"
             )
         )
@@ -270,44 +258,3 @@ async def test_oper_log_ip_none_without_request_context(
 
 
 # ============ 敏感参数脱敏锁定(audit spec) ============
-
-
-async def test_reset_password_detail_never_contains_password(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser
-) -> None:
-    """脱敏锁定:重置密码的操作日志 detail 不含明文密码/密码字段
-    (现状=detail 仅 user_id;测试锁定防倒退,audit spec「敏感参数脱敏」)。"""
-    token = await _admin_token(client, session)
-    uid = (
-        await session.execute(
-            text(
-                "INSERT INTO public.sys_user (id, username, nickname, password_hash,"
-                " status)"
-                " VALUES (gen_random_uuid(), 'pw-probe', '探针', 'x', 'ACTIVE')"
-                " RETURNING id"
-            )
-        )
-    ).scalar_one()
-    await session.commit()
-    r = await client.post(
-        f"/system/users/{uid}/reset-password",
-        json={"new_password": "Sup3rSecret!"},
-        headers=_auth(token),
-    )
-    assert r.status_code in (200, 204)
-    row = (
-        (
-            await session.execute(
-                text(
-                    "SELECT detail FROM public.sys_oper_log"
-                    " WHERE action='user.reset_password' ORDER BY created_at DESC LIMIT 1"
-                )
-            )
-        )
-        .mappings()
-        .one()
-    )
-    detail = dict(row["detail"]) if isinstance(row["detail"], dict) else {}
-    detail_text = json.dumps(detail, ensure_ascii=False)
-    assert "Sup3rSecret!" not in detail_text  # 明文密码永不入 detail
-    assert all("password" not in k.lower() for k in detail)  # 无密码字段键

@@ -478,7 +478,7 @@ async def test_trigger_max_retries_crud_roundtrip(
     from tests.test_trigger import _mk_workflow
 
     await _mk_workflow(session, creator_id=uid)
-    token = await _login(client, "rt_admin")
+    token = _login(client)
     h = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tg"}
     # 越界 422(pydantic 值域闸;领域层 is_valid_max_retries 同源兜底)
     r_bad = await client.post(

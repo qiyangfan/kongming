@@ -14,17 +14,6 @@ JWT + X-Tenant-Id 租户白名单复校(与问答端点同构);归属校验 fail
 (消息 JOIN 会话,user_id + tenant_id 双匹配,未命中 403 同形——不区分
 「不存在」与「无权」,不泄露信息;与 chat 域 404 同形惯例不同,本域立约
 403);仅 assistant 消息可反馈(user 消息 400);重复反馈幂等覆盖。
-传输层约束:rating 仅 'UP'/'DOWN';comment ≤500;correctedSql ≤4000。
-提交落库:rating/feedback_comment/corrected_sql/feedback_time=now,
-并将 feedback_status 置 PENDING(状态机 NONE→PENDING,见 feedback-refine);
-重复提交=重新待处置(R1-O2):SHALL 同步清空处置三列(handler/handle_time/
-handle_note),防「新 PENDING + 陈旧处置者」组合;
-操作日志 `feedback.submit` 与业务同事务落 sys_oper_log(动作清单含
-messageId 与 rating,不记 comment/correctedSql 内容——内容可经明细分页查)。
-
-**070 修订(样本准入后移)**:提交路径 SHALL NOT 将 correctedSql 写入可召回的
-query_history——样本准入经 ADOPTED 处置(见 feedback-refine);校验失败
-SHALL 整体拒绝且不改变已晋升样本(既有原子契约不变)。
 
 #### Scenario: 提交反馈并记操作日志
 - GIVEN 用户持有权限点 chat:feedback:submit
@@ -59,6 +48,48 @@ SHALL 整体拒绝且不改变已晋升样本(既有原子契约不变)。
 - WHEN 提交
 - THEN 返回 403
 
+### Requirement: 反馈提交传输层约束
+
+传输层约束:rating SHALL 仅 'UP'/'DOWN';comment SHALL ≤500;correctedSql
+SHALL ≤4000。
+
+#### Scenario: 提交反馈并记操作日志
+- GIVEN 用户持有权限点 chat:feedback:submit
+- WHEN 提交 {rating: 'UP'|'DOWN', comment?(≤500), correctedSql?(≤4000)}
+- THEN 反馈落库(rating/feedback_comment/corrected_sql/feedback_time),
+  feedback_status 置 PENDING
+- AND 操作记 sys_oper_log(feedback.submit,同事务)
+
+### Requirement: 反馈落库与操作日志
+
+提交落库:rating/feedback_comment/corrected_sql/feedback_time=now,
+并将 feedback_status 置 PENDING(状态机 NONE→PENDING,见 feedback-refine);
+重复提交=重新待处置(R1-O2):SHALL 同步清空处置三列(handler/handle_time/
+handle_note),防「新 PENDING + 陈旧处置者」组合;
+操作日志 `feedback.submit` 与业务同事务落 sys_oper_log(动作清单含
+messageId 与 rating,不记 comment/correctedSql 内容——内容可经明细分页查)。
+
+#### Scenario: 提交反馈并记操作日志
+- GIVEN 用户持有权限点 chat:feedback:submit
+- WHEN 提交 {rating: 'UP'|'DOWN', comment?(≤500), correctedSql?(≤4000)}
+- THEN 反馈落库(rating/feedback_comment/corrected_sql/feedback_time),
+  feedback_status 置 PENDING
+- AND 操作记 sys_oper_log(feedback.submit,同事务)
+
+### Requirement: 纠错样本准入后移(070)
+
+**070 修订(样本准入后移)**:提交路径 SHALL NOT 将 correctedSql 写入可召回的
+query_history——样本准入经 ADOPTED 处置(见 feedback-refine);校验失败
+SHALL 整体拒绝且不改变已晋升样本(既有原子契约不变)。
+
+#### Scenario: 点踩并提交修正 SQL 沉淀
+- GIVEN correctedSql 非空
+- WHEN 提交
+- THEN correctedSql 必须通过 SQL 防火墙校验(SELECT 只读约束同问答主链路)
+- AND 校验失败整体拒绝(不落任何反馈列,不写 query_history)
+- AND 校验通过且与该消息现值不同时:取同会话内该消息之前最近一条 user 问句,
+  经 writeback 通道写入 rag.query_history(status=SUCCESS,
+  datasource_key=会话快照值)
 ### Requirement: 纠错 SQL 沉淀 few-shot
 
 correctedSql 非空时 SHALL 通过 SQL 防火墙校验(与问答主链路初检同一规则集:
@@ -67,12 +98,6 @@ correctedSql 非空时 SHALL 通过 SQL 防火墙校验(与问答主链路初检
 (400,不落任何反馈列,不写 query_history);校验通过且与现值不同时写入
 rag.query_history;沉淀记录被三路召回用作 history_sql few-shot;
 embedding/写入失败不阻断反馈提交。
-
-沉淀数据口径:question=同会话内该消息之前最近一条 user 问句(created_at
-倒序首条;无问句则不沉淀);sql_text=correctedSql;status=SUCCESS;
-datasource_key=消息所属会话落库 datasource_key(会话快照,与 EXPLAIN 同源;
-spec「缺省=租户标识」为上游无会话形态,Kongming 消息必属会话,快照恒存在);
-写通道复用 009 RagService.writeback(embedding 由该通道负责),召回链路零改动。
 
 #### Scenario: 点踩并提交修正 SQL 沉淀
 - GIVEN correctedSql 非空
@@ -97,6 +122,28 @@ spec「缺省=租户标识」为上游无会话形态,Kongming 消息必属会�
 - GIVEN embedding/query_history 写入失败
 - WHEN 反馈提交流程
 - THEN 不阻断反馈提交(告警日志),反馈列已落库即算成功
+
+#### Scenario: 沉淀记录被召回用作 few-shot
+- GIVEN 已沉淀纠错 SQL
+- WHEN 相似问题再提问
+- THEN 修正 SQL 被三路召回用作 history_sql(强参考),召回/生成链路零改动
+
+### Requirement: 纠错沉淀数据口径
+
+沉淀数据口径:question SHALL 取同会话内该消息之前最近一条 user 问句(created_at
+倒序首条;无问句则不沉淀);sql_text=correctedSql;status=SUCCESS;
+datasource_key=消息所属会话落库 datasource_key(会话快照,与 EXPLAIN 同源;
+spec「缺省=租户标识」为上游无会话形态,Kongming 消息必属会话,快照恒存在);
+写通道 SHALL 复用 009 RagService.writeback(embedding 由该通道负责),召回链路零改动。
+
+#### Scenario: 点踩并提交修正 SQL 沉淀
+- GIVEN correctedSql 非空
+- WHEN 提交
+- THEN correctedSql 必须通过 SQL 防火墙校验(SELECT 只读约束同问答主链路)
+- AND 校验失败整体拒绝(不落任何反馈列,不写 query_history)
+- AND 校验通过且与该消息现值不同时:取同会话内该消息之前最近一条 user 问句,
+  经 writeback 通道写入 rag.query_history(status=SUCCESS,
+  datasource_key=会话快照值)
 
 #### Scenario: 沉淀记录被召回用作 few-shot
 - GIVEN 已沉淀纠错 SQL

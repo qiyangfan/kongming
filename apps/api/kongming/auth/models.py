@@ -4,11 +4,10 @@
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Literal
 
 UserStatus = Literal["ACTIVE", "DISABLED"]
-ProviderKey = Literal["GITHUB", "GOOGLE", "WECOM", "DINGTALK", "FEISHU", "HUFU"]
+ProviderKey = Literal["HUFU"]
 
 
 @dataclass(frozen=True)
@@ -16,10 +15,8 @@ class User:
     id: str
     username: str
     email: str | None
-    password_hash: str | None  # None = 纯联邦账号(无本地密码)
     nickname: str
     status: UserStatus
-    password_changed_at: datetime | None
     deleted: bool = False
 
     @property
@@ -66,7 +63,6 @@ class NormalizedProfile:
 class TokenPair:
     access_token: str
     refresh_token: str
-    must_change_password: bool
     token_type: str = "Bearer"  # noqa: S105 —— 固定字面量,非密钥
 
 
@@ -78,7 +74,6 @@ class MeInfo:
     role_keys: list[str] = field(default_factory=list[str])
     perm_codes: list[str] = field(default_factory=list[str])
     tenants: list[TenantRef] = field(default_factory=list[TenantRef])
-    must_change_password: bool = False
 
 
 # ---- 领域错误(router 统一映射状态码;message 即用户可见文案) ----
@@ -88,20 +83,8 @@ class AuthError(Exception):
     """auth 域错误基类。"""
 
 
-class LoginFailed(AuthError):
-    """凭证错误(用户名不存在与密码错误同形,防枚举)。"""
-
-
 class AccountDisabled(AuthError):
-    """账号已禁用/软删(密码校验通过后才可暴露)。"""
-
-
-class AccountLocked(AuthError):
-    """连续失败触发锁定;retry_after_sec 供提示与 429 头。"""
-
-    def __init__(self, retry_after_sec: int) -> None:
-        super().__init__(f"账号已锁定,请 {max(1, (retry_after_sec + 59) // 60)} 分钟后重试")
-        self.retry_after_sec = retry_after_sec
+    """账号已禁用/软删。"""
 
 
 class TokenInvalid(AuthError):
@@ -118,11 +101,3 @@ class ProviderNotFound(AuthError):
 
 class ProviderExchangeFailed(AuthError):
     """联邦 code 交换/profile 拉取失败(provider 侧拒绝或异常)。"""
-
-
-class CurrentPasswordWrong(AuthError):
-    """自助改密:当前密码校验失败。"""
-
-
-class NoLocalPassword(AuthError):
-    """纯联邦账号无本地密码,不可自助改密。"""

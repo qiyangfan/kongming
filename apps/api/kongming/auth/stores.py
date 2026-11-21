@@ -1,7 +1,7 @@
 """认证域的 Redis 存储实现。
 
 refresh 票据以活跃键、轮换墓碑和家族吊销标记管理；用户索引支持全端登出。
-登录锁定保存失败计数与锁标记，联邦 state 通过 GETDEL 一次性消费。"""
+联邦 state 通过 GETDEL 一次性消费。"""
 
 import json
 
@@ -11,8 +11,6 @@ _RT = "auth:rt:"
 _RT_X = "auth:rt:x:"
 _RFAM_BAD = "auth:rfam:bad:"
 _RFAMS = "auth:rfams:"
-_FAIL = "auth:fail:"
-_LOCK = "auth:lock:"
 _OSTATE = "auth:ostate:"
 
 # 单条 Lua 脚本原子消费活跃票并写入轮换墓碑。
@@ -72,30 +70,6 @@ class RedisRefreshFamilyStore:
             # 索引集合保留(随 TTL 自然过期):若删除,smembers 与吊销之间新登录的家族
             # 会既逃过吊销又丢掉索引追踪,竞态后果更糟
             await p.execute()
-
-
-class RedisLoginAttemptStore:
-    def __init__(self, r: Redis) -> None:
-        self._r = r
-
-    async def incr_fails(self, username: str, window_sec: int) -> int:
-        key = _FAIL + username
-        async with self._r.pipeline(transaction=True) as p:
-            p.incr(key)
-            # 仅首次失败设窗口期(EXPIRE 的 NX 选项:已有 TTL 不刷新,防滑动窗口拉长)
-            p.expire(key, window_sec, nx=True)
-            n, _ = await p.execute()
-        return int(n)
-
-    async def clear_fails(self, username: str) -> None:
-        await self._r.delete(_FAIL + username)
-
-    async def lock(self, username: str, lock_sec: int) -> None:
-        await self._r.set(_LOCK + username, 1, ex=lock_sec)
-
-    async def locked_ttl(self, username: str) -> int:
-        ttl: int = await self._r.ttl(_LOCK + username)
-        return max(0, ttl)
 
 
 class RedisOAuthStateStore:

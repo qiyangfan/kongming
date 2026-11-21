@@ -285,7 +285,7 @@ async def _billing_only_token(
     await _bind(session, "sys_user_role", str(uid), rid)
     await _bind(session, "sys_user_tenant", str(uid), tid)
     await session.commit()
-    return await _login(client, "qt_bill")
+    return _login(client)
 
 
 async def test_billing_users_teams_brief_billing_manage_only(
@@ -500,7 +500,7 @@ async def test_user_policy_zero_hit_pass(
     await _bind(session, "sys_user_role", uid_b, str(rid))
     await _bind(session, "sys_user_tenant", uid_b, tid)
     await session.commit()
-    token_b = await _login(client, "qt_g6b")
+    token_b = _login(client)
     _bot_b, api_key_b = await _bot_with_key(client, token_b, "g6b")
     # A 的 USER 级策略;B 的 Bot(B 归属)调用 → 不命中 A 的策略
     assert uid_a != uid_b

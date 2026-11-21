@@ -280,7 +280,7 @@ async def test_chat_query_rate_limited_skips_agent(
     gate_holder: dict[str, object],
 ) -> None:
     """分钟限额后 429 CHAT_RATE_LIMITED,且 agent 零调用(未烧 token)。"""
-    _, token = await _user_with_chat_perm(client, session, make_user, "cost1")
+    _, token = await _user_with_chat_perm(session, make_user, "cost1")
     agent = FakeAgent(_pass_reply())
     _install(fake_agent, agent)
     r1 = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
@@ -300,7 +300,7 @@ async def test_chat_query_quota_exceeded_429(
 ) -> None:
     """配额超限:429 detail=CHAT_QUOTA_EXCEEDED:…,X-Quota-Warning 回落。"""
     gate_holder["counter"] = _Counter(day=500)  # 日配额打满
-    _, token = await _user_with_chat_perm(client, session, make_user, "cost2")
+    _, token = await _user_with_chat_perm(session, make_user, "cost2")
     _install(fake_agent, FakeAgent(_pass_reply()))
     r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
     assert r.status_code == 429
@@ -317,7 +317,7 @@ async def test_chat_query_quota_unavailable_503(
 ) -> None:
     """配额读数失败:503 CHAT_QUOTA_UNAVAILABLE(fail-closed),agent 零调用。"""
     gate_holder["counter"] = _Counter(boom=True)
-    _, token = await _user_with_chat_perm(client, session, make_user, "cost3")
+    _, token = await _user_with_chat_perm(session, make_user, "cost3")
     agent = FakeAgent(_pass_reply())
     _install(fake_agent, agent)
     r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
@@ -335,7 +335,7 @@ async def test_chat_query_warn_header_on_success(
 ) -> None:
     """达预警线不拒绝:200 + X-Quota-Warning(450/500)。"""
     gate_holder["counter"] = _Counter(day=450)
-    _, token = await _user_with_chat_perm(client, session, make_user, "cost4")
+    _, token = await _user_with_chat_perm(session, make_user, "cost4")
     _install(fake_agent, FakeAgent(_pass_reply()))
     r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
     assert r.status_code == 200
@@ -350,7 +350,7 @@ async def test_chat_stream_rate_limited_regular_json(
     gate_holder: dict[str, object],
 ) -> None:
     """流式端点同款闸;前段失败以常规 JSON 429(非 SSE,防线同构)。"""
-    _, token = await _user_with_chat_perm(client, session, make_user, "cost5")
+    _, token = await _user_with_chat_perm(session, make_user, "cost5")
     _install(fake_agent, FakeAgent(_pass_reply()))
     r1 = await client.post(
         "/chat/query/stream", json={"question": "有多少商品"}, headers=_auth(token)

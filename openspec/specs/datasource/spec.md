@@ -9,10 +9,7 @@
 ### Requirement: 数据源注册与凭证加密
 
 超管可注册 PostgreSQL 业务库(PG-only,方言能力储备见 ADR-001 附注),密码落库前必须加密;管理端点要求权限点 system:datasource:manage(仅 SUPER_ADMIN);返回 DTO 不含密码密文。
-数据源字段:datasource_key/name/host/port/database/username/password/default_schema/租户归属。name SHALL 用于选项与列表展示;default_schema SHALL 为动态路径 search_path 首段,且 SHALL 通过 PG 标识符合法性校验(未加引号小写折叠语义,`^[a-z_][a-z0-9_]{0,62}$`),防 search_path 注入。
-datasource_key 传输层 SHALL 匹配 `^[a-z][a-z0-9_]{1,63}$`;保留字 `default` SHALL NOT 被注册——default 为内置默认路径标识(走平台配置连接串),不登记为 sys_datasource 行。
-管理端点(page/create/update/enable/disable/delete/test)SHALL 为全局视角:X-Tenant-Id 对其无语义(与身份治理同一惯例);创建数据源时租户归属 SHALL 由超管显式指定,SHALL NOT 取自客户端隐式上下文;page/编辑/启停/删除不限当前租户。选项接口(options)为登录即可的用户面接口,不在管理端点之列。
-datasource_key 与租户归属创建后 SHALL NOT 可修改(009 起 008 已兑现的强制随本 delta 挪位至注册 requirement 立约)。
+数据源字段:datasource_key/name/host/port/database/username/password/default_schema/租户归属。name SHALL 用于选项与列表展示。
 
 #### Scenario: 注册数据源并加密密码
 - GIVEN 超管持有 system:datasource:manage
@@ -21,30 +18,25 @@ datasource_key 与租户归属创建后 SHALL NOT 可修改(009 起 008 已兑�
 - AND 密钥经环境变量注入(base64 16/32 字节),prod 必须配置
 - AND 返回 DTO 不含任何敏感字段
 
-#### Scenario: datasource_key 唯一性
-- GIVEN 已存在 datasource_key=sakila 的启用记录
-- WHEN 再次注册同 key
-- THEN 拒绝;key 在启用范围内全局唯一(含禁用记录校验)
-
 #### Scenario: 非超管访问管理端点被拒
 - GIVEN 非 SUPER_ADMIN 用户
 - WHEN 访问任一管理端点(page/create/update/enable/disable/delete/test;options 为登录即可的只读选项接口,不在此列)
 - THEN 返回 403
 
-#### Scenario: 创建时租户归属显式指定
-- GIVEN 超管创建数据源
-- WHEN 提交表单
-- THEN 租户归属取表单显式选择的租户(服务端校验该租户存在且启用),不取 X-Tenant-Id 等隐式上下文
-- AND 列表/编辑/启停/删除操作不受当前租户上下文限制(全局视角)
+### Requirement: datasource_key 形态、保留字与唯一性
+
+datasource_key 传输层 SHALL 匹配 `^[a-z][a-z0-9_]{1,63}$`;保留字 `default`
+SHALL NOT 被注册——default 为内置默认路径标识(走平台配置连接串),不登记为
+sys_datasource 行。datasource_key 与租户归属创建后 SHALL NOT 可修改。
+
+#### Scenario: datasource_key 唯一性
+- GIVEN 已存在 datasource_key=sakila 的启用记录
+- WHEN 再次注册同 key
+- THEN 拒绝;key 在启用范围内全局唯一(含禁用记录校验)
 
 #### Scenario: 保留字与非法 key 拒绝
 - GIVEN 注册或编辑请求
 - WHEN datasource_key 为 `default`、含大写/连字符/空白等不匹配 pattern 的形态
-- THEN 拒绝(400),不落库
-
-#### Scenario: default_schema 注入防护
-- GIVEN 注册或编辑请求
-- WHEN default_schema 含引号/分号/空白等非法标识符字符
 - THEN 拒绝(400),不落库
 
 #### Scenario: datasource_key 与租户归属不可修改
@@ -52,6 +44,29 @@ datasource_key 与租户归属创建后 SHALL NOT 可修改(009 起 008 已兑�
 - WHEN 尝试修改 datasource_key 或租户归属
 - THEN 拒绝(key 是知识/连接池/前端切换器的全局标识,改名会使旧 key 知识静默失效;租户归属是安全字段)
 - AND 换 key/换归属走新建+删除
+
+### Requirement: default_schema 标识符校验
+
+default_schema SHALL 为动态路径 search_path 首段,且 SHALL 通过 PG 标识符合法性
+校验(未加引号小写折叠语义,`^[a-z_][a-z0-9_]{0,62}$`),防 search_path 注入。
+
+#### Scenario: default_schema 注入防护
+- GIVEN 注册或编辑请求
+- WHEN default_schema 含引号/分号/空白等非法标识符字符
+- THEN 拒绝(400),不落库
+
+### Requirement: 管理端点全局视角与租户归属显式指定
+
+管理端点(page/create/update/enable/disable/delete/test)SHALL 为全局视角:
+X-Tenant-Id 对其无语义(与身份治理同一惯例);创建数据源时租户归属 SHALL 由
+超管显式指定,SHALL NOT 取自客户端隐式上下文;page/编辑/启停/删除不限当前租户。
+选项接口(options)为登录即可的用户面接口,不在管理端点之列。
+
+#### Scenario: 创建时租户归属显式指定
+- GIVEN 超管创建数据源
+- WHEN 提交表单
+- THEN 租户归属取表单显式选择的租户(服务端校验该租户存在且启用),不取 X-Tenant-Id 等隐式上下文
+- AND 列表/编辑/启停/删除操作不受当前租户上下文限制(全局视角)
 
 ### Requirement: 测试连接
 

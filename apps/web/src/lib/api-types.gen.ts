@@ -4,23 +4,6 @@
  */
 
 export interface paths {
-    "/auth/login": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Login */
-        post: operations["login_auth_login_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/auth/refresh": {
         parameters: {
             query?: never;
@@ -55,6 +38,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/logout/sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Logout Sso */
+        post: operations["logout_sso_auth_logout_sso_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/me": {
         parameters: {
             query?: never;
@@ -66,23 +66,6 @@ export interface paths {
         get: operations["me_auth_me_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/auth/password/change": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Change Password */
-        post: operations["change_password_auth_password_change_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -358,8 +341,7 @@ export interface paths {
         /** List Users */
         get: operations["list_users_system_users_get"];
         put?: never;
-        /** Create User */
-        post: operations["create_user_system_users_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -379,23 +361,6 @@ export interface paths {
         post?: never;
         /** Delete User */
         delete: operations["delete_user_system_users__user_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/system/users/{user_id}/reset-password": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reset Password */
-        post: operations["reset_password_system_users__user_id__reset_password_post"];
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2174,7 +2139,7 @@ export interface paths {
         put?: never;
         /**
          * Upload Attachment
-         * @description 流式读+超限即弃;magic 复核(Content-Type 可伪造);审计落库。
+         * @description 上传附件:类型/大小非法 400,无可用租户 403。
          */
         post: operations["upload_attachment_chat_attachments_post"];
         delete?: never;
@@ -2192,8 +2157,7 @@ export interface paths {
         };
         /**
          * Read Attachment Content
-         * @description 一次性消费(绑定复校:tenant_key 解析 + user_id 比对);
-         *     命中即置 CONSUMED+删文件;任何未命中 404 同形(防探测)。
+         * @description 内部一次性读取:任何未命中(含格式非法)一律 404 同形,防探测。
          */
         get: operations["read_attachment_content_internal_attachment__att_id__content_get"];
         put?: never;
@@ -3996,13 +3960,6 @@ export interface components {
             /** State */
             state: string;
         };
-        /** ChangePasswordRequest */
-        ChangePasswordRequest: {
-            /** Current Password */
-            current_password: string;
-            /** New Password */
-            new_password: string;
-        };
         /**
          * ChartCandidateOut
          * @description 图表候选:候选自带完整绑定,y 为值列(多度量多系列),
@@ -5245,17 +5202,10 @@ export interface components {
             /** Size */
             size: number;
         };
-        /** LoginRequest */
-        LoginRequest: {
-            /** Username */
-            username: string;
-            /** Password */
-            password: string;
-        };
         /** LogoutRequest */
         LogoutRequest: {
             /** Refresh Token */
-            refresh_token: string;
+            refresh_token?: string | null;
         };
         /**
          * McpPromptArgOut
@@ -5502,8 +5452,6 @@ export interface components {
             perm_codes: string[];
             /** Tenants */
             tenants: components["schemas"]["TenantRefOut"][];
-            /** Must Change Password */
-            must_change_password: boolean;
         };
         /** MemberIn */
         MemberIn: {
@@ -6544,7 +6492,7 @@ export interface components {
         /** RefreshRequest */
         RefreshRequest: {
             /** Refresh Token */
-            refresh_token: string;
+            refresh_token?: string | null;
         };
         /** ReindexOut */
         ReindexOut: {
@@ -6650,11 +6598,6 @@ export interface components {
             message_id: string;
             /** Sql */
             sql: string;
-        };
-        /** ResetPasswordIn */
-        ResetPasswordIn: {
-            /** New Password */
-            new_password: string;
         };
         /** RetrievalProbeFusedOut */
         RetrievalProbeFusedOut: {
@@ -7623,11 +7566,6 @@ export interface components {
              * @default Bearer
              */
             token_type: string;
-            /**
-             * Must Change Password
-             * @default false
-             */
-            must_change_password: boolean;
         };
         /** ToolAuditItem */
         ToolAuditItem: {
@@ -8251,32 +8189,6 @@ export interface components {
             /** Nickname */
             nickname: string;
         };
-        /** UserCreateIn */
-        UserCreateIn: {
-            /** Username */
-            username: string;
-            /** Password */
-            password: string;
-            /** Nickname */
-            nickname: string;
-            /** Email */
-            email?: string | null;
-            /**
-             * Status
-             * @default ACTIVE
-             * @enum {string}
-             */
-            status: "ACTIVE" | "DISABLED";
-            /** Dept Id */
-            dept_id?: string | null;
-            /**
-             * Tenant Id
-             * Format: uuid
-             */
-            tenant_id: string;
-            /** Role Ids */
-            role_ids?: string[];
-        };
         /** UserItemOut */
         UserItemOut: {
             /** Id */
@@ -8312,7 +8224,7 @@ export interface components {
         };
         /**
          * UserUpdateIn
-         * @description 全量更新用户资料;不提交密码时保持原值,username 创建后不可修改。
+         * @description 全量更新用户资料与授权;username 由虎符登录建档决定,创建后不可修改。
          */
         UserUpdateIn: {
             /** Nickname */
@@ -8333,8 +8245,6 @@ export interface components {
             tenant_id: string;
             /** Role Ids */
             role_ids?: string[];
-            /** Password */
-            password?: string | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -8465,45 +8375,14 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    login_auth_login_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LoginRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TokenPairOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     refresh_auth_refresh_post: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
-            cookie?: never;
+            cookie?: {
+                km_refresh?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -8536,7 +8415,9 @@ export interface operations {
             query?: never;
             header?: never;
             path?: never;
-            cookie?: never;
+            cookie?: {
+                km_refresh?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -8550,6 +8431,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    logout_sso_auth_logout_sso_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                km_refresh?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogoutRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string | null;
+                    };
+                };
             };
             /** @description Validation Error */
             422: {
@@ -8578,37 +8496,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MeOut"];
-                };
-            };
-        };
-    };
-    change_password_auth_password_change_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ChangePasswordRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -8671,7 +8558,9 @@ export interface operations {
             path: {
                 provider: string;
             };
-            cookie?: never;
+            cookie?: {
+                km_oidc_state?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -9205,41 +9094,6 @@ export interface operations {
             };
         };
     };
-    create_user_system_users_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UserCreateIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     update_user_system_users__user_id__put: {
         parameters: {
             query?: never;
@@ -9283,39 +9137,6 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    reset_password_system_users__user_id__reset_password_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                user_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ResetPasswordIn"];
-            };
-        };
         responses: {
             /** @description Successful Response */
             204: {

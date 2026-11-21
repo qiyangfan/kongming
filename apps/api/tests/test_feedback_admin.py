@@ -72,7 +72,7 @@ async def _view_user(
     rid = await _mk_role_with_perms(s, f"FBV-{username}", list(perms))
     await _bind(s, "sys_user_role", uid, rid)
     await _bind(s, "sys_user_tenant", uid, await _default_tenant_id(s))
-    return uid, await _login(client, username)
+    return uid, _login(uid)
 
 
 # ============ 处置(feedback-refine) ============
@@ -186,7 +186,7 @@ async def test_handle_no_perm_403(
     """DEVELOPER(chat:execute)无 system:feedback:* → 403。"""
     from tests.test_chat_query import _user_with_chat_perm
 
-    _, token = await _user_with_chat_perm(client, session, make_user, "fbh-np")
+    _, token = await _user_with_chat_perm(session, make_user, "fbh-np")
     r = await client.put(
         f"/feedback/{uuid.uuid4()}/status", json={"status": "ADOPTED"}, headers=_auth(token)
     )
@@ -347,7 +347,7 @@ async def test_involved_tables_no_perm_403(
 ) -> None:
     from tests.test_chat_query import _user_with_chat_perm
 
-    _, token = await _user_with_chat_perm(client, session, make_user, "fbt-np")
+    _, token = await _user_with_chat_perm(session, make_user, "fbt-np")
     r = await client.get(f"/feedback/{uuid.uuid4()}/involved-tables", headers=_auth(token))
     assert r.status_code == 403
 
@@ -405,7 +405,7 @@ async def test_overview_no_perm_403(
 ) -> None:
     from tests.test_chat_query import _user_with_chat_perm
 
-    _, token = await _user_with_chat_perm(client, session, make_user, "fbo-np")
+    _, token = await _user_with_chat_perm(session, make_user, "fbo-np")
     r = await client.get("/feedback/overview", headers=_auth(token))
     assert r.status_code == 403
 

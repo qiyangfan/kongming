@@ -27,17 +27,12 @@ class UserRepoPort(Protocol):
         """编辑/删除前的现状读取(含 username/status/dept_id 等)。"""
         ...
 
-    async def username_taken(self, username: str) -> bool:
-        """未软删用户占用判定(软删记录不占名,rbac spec)。"""
-        ...
-
     async def insert_user(
         self,
         *,
         user_id: str,
         username: str,
         email: str | None,
-        password_hash: str | None,
         nickname: str,
         status: str,
         dept_id: str | None,
@@ -50,13 +45,8 @@ class UserRepoPort(Protocol):
         nickname: str,
         status: str,
         dept_id: str | None,
-        password_hash: str | None,
     ) -> None:
-        """全量字段覆盖(表单全量语义);password_hash None=不改密码。"""
-        ...
-
-    async def reset_password(self, user_id: str, password_hash: str) -> None:
-        """重置密码并复位首登改密标志(password_changed_at=NULL)。"""
+        """全量字段覆盖(表单全量语义)。"""
         ...
 
     async def set_user_status(self, user_id: str, status: str) -> None:

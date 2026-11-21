@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/page-header";
 import { Pagination } from "@/components/pagination";
 
-import { DeleteUserDialog, ResetPasswordDialog, UserFormDialog } from "./users/UserDialogs";
+import { DeleteUserDialog, UserFormDialog } from "./users/UserDialogs";
 import { userColumns } from "./users/UserColumns";
 import {
   flattenDepts,
@@ -27,12 +27,7 @@ export default function UsersPage() {
     <div className="space-y-3">
       <PageHeader
         title="用户"
-        description="租户成员账号管理:搜索、新建,分配角色与部门,启用停用。"
-        actions={
-          <Button size="sm" onClick={s.openCreate}>
-            新建用户
-          </Button>
-        }
+        description="本地授权资料管理:分配角色与部门、启用停用;账号由虎符登录建档。"
       />
       <div className="flex items-center gap-2">
         <Input
@@ -65,7 +60,6 @@ export default function UsersPage() {
         })}
         actions={[
           { label: "编辑", onSelect: s.openEdit },
-          { label: "重置密码", onSelect: danger.openReset },
           { label: "删除", destructive: true, onSelect: danger.setDeleting },
         ]}
       />
@@ -74,7 +68,7 @@ export default function UsersPage() {
 
       <UserFormDialog
         open={s.formOpen}
-        creating={s.creating}
+        creating={false}
         form={s.form}
         onFormChange={s.setForm}
         formError={s.formError}
@@ -84,17 +78,6 @@ export default function UsersPage() {
         pending={s.formPending}
         onSubmit={s.submit}
         onClose={s.closeForm}
-      />
-
-      <ResetPasswordDialog
-        username={danger.resetUsername}
-        password={danger.resetPw}
-        onPasswordChange={danger.setResetPw}
-        error={danger.resetError}
-        onErrorChange={danger.setResetError}
-        pending={danger.reset.isPending}
-        onSubmit={danger.submitReset}
-        onClose={danger.closeReset}
       />
 
       <DeleteUserDialog

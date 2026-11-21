@@ -6,7 +6,6 @@ import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
 import { AppLayout } from "@/components/app-layout";
 import { PermRoute } from "@/components/perm-route";
 import { Skeleton } from "@/components/ui/skeleton";
-import ChangePassword from "@/pages/ChangePassword";
 import Login from "@/pages/Login";
 import OAuthCallback from "@/pages/OAuthCallback";
 import { NotFoundPage } from "@/components/error-pages";
@@ -75,7 +74,6 @@ const queryClient = new QueryClient({
 const router = createBrowserRouter([
   { path: "/login", element: <Login /> },
   { path: "/auth/:provider/callback", element: <OAuthCallback /> },
-  { path: "/change-password", element: <ChangePassword /> },
   {
     path: "/",
     element: el(<AppLayout />),

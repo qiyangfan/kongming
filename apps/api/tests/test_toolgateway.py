@@ -507,7 +507,7 @@ async def _assert_governance_requires_permission(
         )
     ).scalar_one()
     await _bind(session, "sys_user_tenant", plain, str(tid))
-    token_plain = await _login(client, "gw_plain")
+    token_plain = _login(client)
     r403 = await client.get("/system/tools/domains", headers=_auth(token_plain))
     assert r403.status_code == 403
 

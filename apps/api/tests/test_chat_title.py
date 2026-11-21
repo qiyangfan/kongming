@@ -48,7 +48,7 @@ async def test_title_rewritten_after_first_success(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    _, token = await _user_with_chat_perm(client, session, make_user, "title-ok")
+    _, token = await _user_with_chat_perm(session, make_user, "title-ok")
     agent = FakeAgent(_pass_reply())
     agent.title_reply = "商品库存总览"  # agent 侧已净化(引号/换行在 agent 去除)
     _install(fake_agent, agent)
@@ -67,7 +67,7 @@ async def test_title_rewrite_failure_keeps_truncated(
     make_user: MakeUser,
     fake_agent: dict[str, FakeAgent],
 ) -> None:
-    _, token = await _user_with_chat_perm(client, session, make_user, "title-deg")
+    _, token = await _user_with_chat_perm(session, make_user, "title-deg")
     _install(fake_agent, FakeAgent(_pass_reply()))  # title_reply=None=降级
     question = "这个问句会保留截断标题因为它超过了三十个字符的限制度试"
     r = await client.post("/chat/query", json={"question": question}, headers=_auth(token))
@@ -82,7 +82,7 @@ async def test_title_rewrite_skipped_after_manual_rename(
     fake_agent: dict[str, FakeAgent],
 ) -> None:
     """人工重命名保护:守卫(当前标题!=首问截断值)在 LLM 调用前短路。"""
-    _, token = await _user_with_chat_perm(client, session, make_user, "title-ren")
+    _, token = await _user_with_chat_perm(session, make_user, "title-ren")
     agent = FakeAgent(_pass_reply())
     agent.title_reply = "LLM 标题"
     _install(fake_agent, agent)
@@ -113,7 +113,7 @@ async def test_title_rewrite_fires_on_first_success_after_failure(
     fake_agent: dict[str, FakeAgent],
 ) -> None:
     """首轮失败(boom)不改写;次轮成功补偿触发(首个 SUCCESS 轮语义,自愈)。"""
-    _, token = await _user_with_chat_perm(client, session, make_user, "title-heal")
+    _, token = await _user_with_chat_perm(session, make_user, "title-heal")
     agent = FakeAgent(_pass_reply(), boom=True)  # 首轮 agent 不可达
     _install(fake_agent, agent)
     r = await client.post("/chat/query", json={"question": "首轮失败问"}, headers=_auth(token))
@@ -142,7 +142,7 @@ async def test_title_not_rewritten_on_blocked_round(
     """REJECTED 轮(权限拦截)不触发改写——违规问句不作标题素材。"""
     from kongming.chat.agent_client import AgentReply
 
-    _, token = await _user_with_chat_perm(client, session, make_user, "title-blk")
+    _, token = await _user_with_chat_perm(session, make_user, "title-blk")
     agent = FakeAgent(
         AgentReply(success=False, verdict="BLOCKED", sql="DELETE FROM goods", error="BLOCKED_ROOT")
     )
@@ -188,7 +188,7 @@ async def test_title_rewrite_loses_race_to_concurrent_rename(
     """检查 LLM 改写标题期间用户手动改名时，条件更新不会覆盖人工标题。"""
     from kongming.db import get_sessionmaker
 
-    _, token = await _user_with_chat_perm(client, session, make_user, "title-race")
+    _, token = await _user_with_chat_perm(session, make_user, "title-race")
 
     class RacingAgent(FakeAgent):
         async def rewrite_title(self, *, question: str) -> str | None:

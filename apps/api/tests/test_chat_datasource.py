@@ -77,7 +77,7 @@ async def test_forged_disabled_cross_tenant_same_shape(
     """验证伪造、禁用和跨租户数据源 key 返回相同 400，且不会创建会话或调用 Agent。"""
     agent = FakeAgent()
     _install(fake_agent, agent)
-    uid, token = await _user_with_chat_perm(client, session, make_user)
+    uid, token = await _user_with_chat_perm(session, make_user)
     assert uid
     tid = await _default_tenant_id(session)
     other_tid = await _mk_tenant(session, "chat-other")
@@ -106,7 +106,7 @@ async def test_unavailable_keeps_datasource_key_snapshot(
 ) -> None:
     """Agent 不可达且使用非 default 数据源时，响应仍保留 datasource_key 快照。"""
     _install(fake_agent, FakeAgent(boom=True))
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     tid = await _default_tenant_id(session)
     await _mk_ds(session, "chatdsdown", tid)
     r = await client.post(
@@ -129,7 +129,7 @@ async def test_valid_key_passes_through(
     """合法 key:预检放行,agent 收到原样 datasource_key,会话落库同一 key。"""
     agent = FakeAgent()
     _install(fake_agent, agent)
-    uid, token = await _user_with_chat_perm(client, session, make_user)
+    uid, token = await _user_with_chat_perm(session, make_user)
     tid = await _default_tenant_id(session)
     await _mk_ds(session, "chatdyn", tid)
 
@@ -153,7 +153,7 @@ async def test_malformed_key_422(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
     """畸形 key(大写/连字符)传输层 pattern 拒绝 422(查询面口径收口)。"""
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     r = await client.post(
         "/chat/query",
         json={"question": "q", "datasource_key": "BAD-KEY"},
@@ -171,7 +171,7 @@ async def test_default_key_unchanged(
     """缺省/显式 default 不触发预检,行为不变。"""
     agent = FakeAgent()
     _install(fake_agent, agent)
-    _, token = await _user_with_chat_perm(client, session, make_user)
+    _, token = await _user_with_chat_perm(session, make_user)
     r = await client.post("/chat/query", json={"question": "有多少商品"}, headers=_auth(token))
     assert r.status_code == 200
     assert agent.calls[0]["datasource_key"] == "default"

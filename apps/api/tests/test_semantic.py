@@ -89,7 +89,7 @@ async def _admin(client: AsyncClient, s: AsyncSession) -> str:
             {"t": str(tid), "sn": SCHEMA, "tb": tb},
         )
     await s.commit()
-    return await _login(client, "admin", "admin123")
+    return _login(get_settings().admin_subject)
 
 
 # ============ introspection ============
@@ -292,7 +292,7 @@ async def test_semantic_forbidden(
         await session.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'"))
     ).scalar_one()
     await _bind(session, "sys_user_tenant", uid, str(tid))
-    token = await _login(client, "sem_plain")
+    token = _login(client)
     r = await client.get(
         "/system/semantic/relations",
         headers={"Authorization": f"Bearer {token}"},

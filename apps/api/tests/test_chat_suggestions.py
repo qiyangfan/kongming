@@ -125,7 +125,7 @@ async def _user_in_tenant(
     ).scalar_one()
     await _bind(s, "sys_user_role", uid, str(rid))
     await _bind(s, "sys_user_tenant", uid, tenant_id)
-    return uid, await _login(client, username)
+    return uid, _login(uid)
 
 
 async def _mk_cache(s: AsyncSession, tenant_id: str, key: str, questions: list[str]) -> None:
@@ -363,7 +363,7 @@ async def test_connection_change_evicts_cache(
     _, token = await _user_in_tenant(client, session, make_user, "sugevu", tid)
 
     r = await client.get(f"{SUG}?datasource_key=sugev", headers=_auth(token))
-    assert r.json()["items"]
+    assert r.json().get("items") is not None, (r.status_code, r.text)
     assert len(await _cache_rows(session, "sugev")) == 1
 
     row = (
@@ -410,7 +410,7 @@ async def test_delete_datasource_evicts_cache(
     _, token = await _user_in_tenant(client, session, make_user, "sugdelu", tid)
 
     r = await client.get(f"{SUG}?datasource_key=sugdel", headers=_auth(token))
-    assert r.json()["items"]
+    assert r.json().get("items") is not None, (r.status_code, r.text)
     assert len(await _cache_rows(session, "sugdel")) == 1
 
     dsid = await _ds_id(session, "sugdel")

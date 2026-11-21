@@ -55,7 +55,7 @@ async def _user(
     await _bind(s, "sys_user_role", uid, str(rid))
     await _bind(s, "sys_user_tenant", uid, await _default_tenant_id(s))
     await s.commit()
-    return uid, await _login(client, name)
+    return uid, _login(uid)
 
 
 async def _mk_store_bot(client: AsyncClient, token: str) -> str:
