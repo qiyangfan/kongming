@@ -92,6 +92,11 @@ podman exec kongming-redis-1 redis-cli --scan --pattern 'km:ragctx:*' | xargs -r
   `wiki/reports/wiki-formal-2026-11-23.md`。结论 keep:wiki_first/parallel
   跨资料 90% 与 raw 持平(要求至少 +5pp)、引用支持 <95%;单资料 10/10 无
   回归。首轮两页原型的 keep 是覆盖率假象,已由本轮取代。
+- 文档多查询分解(agent 链路,2026-11-23):K8s 30 题真实链路
+  `route_intent→retrieve`,单跳组全跳 1.000;同文档多跳 0.667→0.833(5/6);
+  跨文档 0→1/6(仅报告);总体 Recall 0.833→0.883、全跳 0.733→0.800。
+  该判别为一次性实验室复跑,不是 CI 题集;实现与边界见
+  `openspec/changes/archive/2026-11-23-add-doc-query-decomposition/design.md`。
 - 运行前置:api/agent 在本机启动;BM25 对照 LLM/embedding 经 muniu(`:8787`)
   转发,Wiki 重跑直连 maas 镜像端点(`qwen-plus` 别名);评测登录用
   `KM_EVAL_ACCESS_TOKEN`(Keycloak 形态)。

@@ -14,6 +14,11 @@
   --table document_chunks` 重建(不重切块)。全文兜底轮零分命中(按全问句
   ts_rank ≈1e-20 的部分命中)不进入融合,词面只贡献 AND 轮正分证据。试跑的
   `parent_top_k` 已贯通到召回级(诊断参数;主检索仍固定 top-5)。
+- 文档多查询分解已落地并归档(`2026-11-23-add-doc-query-decomposition`):
+  意图路由同一 JSON 帧产出 2-3 条子查询(仅知识/融合),retrieve 原问优先、
+  并行补检、按引用键去重合并上限 8;doc_answer/fused_answer 文档注入上限 8
+  (单查询仍为召回 top-5);解析失败、子查询异常或零命中回落原问单次检索,
+  SQL/schema/指标链路不变。
 - 评测体系:retrieval-eval 15 文档 36 父块 / 28 题;BM25 正式对照 80 题;
   Wiki 问答对照 26 题。两份评测 change 与块索引/兜底两份 change 已归档,
   规格增量已应用(`openspec/specs/retrieval-eval`、`document-rag`)。
@@ -23,25 +28,23 @@
   真实租户语料到位后按同形态自建 dataset + corpus 目录即可评测。
 - 真实公开文档:k8s_eval 30 题挂 corpus_k8s(73 篇/1400 父块,CC BY 4.0,
   NOTICE 归属);题面与 gold 由模型按原文事实编写,程序校验(片段唯一、跨文档
-  零重复、多跳跨父块)+ AI 复核,未经人工领域评审;当前基线融合 0.833/全跳
-  0.733(向量 0.817/词面 0.150),跨文档多跳全跳 0;zhparser 复测 0.817
-  (词面路 0.700,仍不切换)。
+  零重复、多跳跨父块)+ AI 复核,未经人工领域评审;API 检索基线 0.833/全跳
+  0.733(向量 0.817/词面 0.150);agent 分解后 0.883/0.800(单跳 1.000、
+  同文档多跳 0.833、跨文档全跳 1/6);zhparser 复测 0.817(词面路 0.700,
+  仍不切换)。
 - 多模型注册表:人工条目按「模型×端点」编队,别名优先;任务路由
   TITLER/SUGGEST/DESCRIBE→qwen-flash;主模型与 embedding 走 maas 镜像域,
   dashscope 作回滚端点;compose 已透传注册表/路由/白名单三项。
-- 门禁:api-check 全绿(1748 passed,10 skipped,覆盖率 77.13%);
-  `openspec validate --all --strict` 54/54。
+- 门禁:api-check 全绿(1748 passed,10 skipped,覆盖率 77.13%);agent-check
+  全绿(620 passed,覆盖率 86.47%);`openspec validate --all --strict` 53/53。
 
 ## 下一步
 
-1. 按 `add-doc-query-decomposition` 提案实现文档多查询分解:意图路由同帧产出
-   2-3 条子查询,retrieve 原问优先、并行补检、引用键去重合并(上限 8);
-   跨文档多跳不承诺,验收口径见提案 design。
-2. 观察 CI(contracts-check、eval-nightly、镜像扫描)。
-3. 反代部署确认 `KM_AUTH_COOKIE_SECURE`、可信代理头与登录限流口径。
-4. eval-nightly 首次真实运行:配置 `KM_AGENT_LLM_API_KEY` 与
+1. CI 全 job 因 GitHub Actions 账单锁定未启动(2026-11-23 观测);解锁后观察
+   contracts-check、eval-nightly 与镜像扫描。
+2. 反代部署确认 `KM_AUTH_COOKIE_SECURE`、可信代理头与登录限流口径。
+3. eval-nightly 首次真实运行:配置 `KM_AGENT_LLM_API_KEY` 与
    `KM_EVAL_ACCESS_TOKEN`(旧 `KM_EVAL_ADMIN_PASSWORD` 仅兼容旧部署)并建基线。
-5. 观察多标签页并发登录的 state cookie 覆盖问题,必要时改多值/按 tab 存储。
 
 ## 开放决策项
 
@@ -59,17 +62,24 @@
   负例 max 0.630,候选 ≈0.67 双 100%);`KM_RAG_GATE_*` 属 schema 通道,
   阈值未写入,接入前须在目标通道复测。若未来收紧红线,
   先逐题评估 009/012 再动索引文本。
-- 真实文档基线(K8s 73 篇/30 题):兜底零分剔除后 0.833/全跳 0.733(修复
-  s_01/m_02/m_04,m_05 失去一跳跃为兜底零分无序命中);跨文档多跳 6 题
-  全跳 0,诊断显示多数 gold 父块不在任一路候选前 8(非融合丢失),现有
-  top-5 契约内无低风险修法,登记为已知边界。
+- K8s 跨文档多跳剩余缺口:分解后全跳 1/6,其余 5 题 gold 父块仍不在子查询
+  候选前 5;受查询改写与候选精度限制,不设通过线,登记为已知边界。
 - `0066` DOWNGRADE 只恢复 `admin` 账号,不回滚其余影子账号角色/租户绑定;回滚旧二进制需人工评估。
+- 多标签页并发登录:state cookie 为单值,`/auth/{provider}/start` 后发会覆盖
+  前一个 state,先发起的回调将被 `StateInvalid` 拒绝(代码路径已确认)。是否
+  支持并发 tab 需产品决策;后端最小修法是 state cookie 存短列表并在回调按
+  成员校验,或前端按 tab 存储 state。当前未改。
 - `/auth/refresh` 仍接受 body refresh_token 且响应回传明文;前端已走 cookie,是否收窄为只回 access 待拍板。
 - `sys_user.id` 依赖 Keycloak sub 为 UUID 的既有契约;非 UUID sub 需迁移。
 - 登录限流为进程内、每 worker 独立;严格全局阈值需共享后端。
 
 ## 验收记录
 
+- 2026-11-23 文档多查询分解(K8s 30 题真实链路,route_intent→retrieve):
+  单跳 18 题全跳 1.000;同文档多跳 0.667→0.833(5/6);跨文档 0→1/6(只报告);
+  总体 Recall 0.833→0.883、全跳 0.733→0.800。无子查询路径单次调用与
+  doc_hints 逐项一致由单测覆盖;15 文档 28 题与 lab 74 题为 API probe 口径,
+  本次未改 API 检索路径,既有结果复用。
 - 2026-11-23 块索引上下文 A/B:判别语料(正文剥离店名)旧代码 0.291 →
   重建后 1.000(+70.9pp);15 文档回归 0.964(-3.6pp,009/012 各丢「租赁规则」
   一跳,012 为登记豁免边界题),74 题回归 1.000。重建 552 块后父块正文逐字
