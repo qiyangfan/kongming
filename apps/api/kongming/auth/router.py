@@ -36,7 +36,39 @@ logger = logging.getLogger(__name__)
 REFRESH_COOKIE = "km_refresh"
 STATE_COOKIE = "km_oidc_state"
 
+# 并发 tab 上限:cookie 存点分隔 state 列表,超出丢最旧
+_STATE_COOKIE_MAX = 8
+
 _login_limiter = LoginRateLimiter()
+
+
+def _decode_states(raw: str | None) -> list[str]:
+    """state cookie → 列表(旧单值形态天然兼容;空段过滤)。
+
+    state 由 secrets.token_urlsafe 生成,字母表不含点,点分隔不歧义。"""
+    if not raw:
+        return []
+    return [state for state in raw.split(".") if state]
+
+
+def _encode_states(states: list[str]) -> str:
+    """state 列表 → cookie 值:去重保序,最多保留最近 _STATE_COOKIE_MAX 个。"""
+    unique = list(dict.fromkeys(state for state in states if state))
+    return ".".join(unique[-_STATE_COOKIE_MAX:])
+
+
+def _set_state_cookie(response: Response, value: str) -> None:
+    """写 state cookie(属性单源;start 与 callback 共用)。"""
+    s = get_settings()
+    response.set_cookie(
+        STATE_COOKIE,
+        value,
+        max_age=s.auth_state_ttl_sec,
+        httponly=True,
+        secure=s.auth_cookie_secure,
+        samesite="lax",
+        path="/auth",
+    )
 
 
 class RefreshRequest(BaseModel):
@@ -188,15 +220,8 @@ async def oauth_start(
     url = await svc.oauth_start(provider)
     state = parse_qs(urlparse(url).query).get("state", [""])[0]
     if state:
-        response.set_cookie(
-            STATE_COOKIE,
-            state,
-            max_age=s.auth_state_ttl_sec,
-            httponly=True,
-            secure=s.auth_cookie_secure,
-            samesite="lax",
-            path="/auth",
-        )
+        states = _decode_states(request.cookies.get(STATE_COOKIE))
+        _set_state_cookie(response, _encode_states([*states, state]))
     return StartOut(authorize_url=url)
 
 
@@ -210,10 +235,19 @@ async def oauth_callback(
 ) -> TokenPairOut:
     if not svc.has_provider(provider):
         raise ProviderNotFound("provider 不存在或未配置")
-    if not state_cookie or not secrets.compare_digest(state_cookie, req.state):
+    states = _decode_states(state_cookie)
+    # compare_digest 的 str 形态只接受 ASCII;按字节比较,任意回调参数都不会抛编解码异常
+    target = req.state.encode("utf-8", "surrogatepass")
+    if not any(secrets.compare_digest(candidate.encode(), target) for candidate in states):
         raise StateInvalid("state 未绑定当前浏览器")
     pair = await svc.oauth_callback(provider, req.code, req.state)
-    response.delete_cookie(STATE_COOKIE, path="/auth")
+    remaining = [
+        candidate for candidate in states if not secrets.compare_digest(candidate.encode(), target)
+    ]
+    if remaining:
+        _set_state_cookie(response, _encode_states(remaining))
+    else:
+        response.delete_cookie(STATE_COOKIE, path="/auth")
     _set_refresh_cookie(response, pair.refresh_token)
     return _pair_out(pair)
 

@@ -28,13 +28,15 @@ KM_EVAL_ADMIN_PASSWORD=Kongming#2026 uv run pytest evals/retrieval -m retrieval 
 目录+分层运行(eval spec「评估运行形态」);匹配器纯函数单测在
 `tests/test_eval_matchers.py` 进默认门禁。
 
-**双运行形态(065)**:
-- **显式触发**:本地/预发手动跑 smoke/full/multiturn,全过才视为该环境基线可信;
-- **定时门禁**:`eval-nightly` workflow 每日自动跑 smoke 层,通过率落 artifacts
-  并与上一次运行可比;劣化 ≥5pp 逐题溯源后判失败(首次无基线只记录)。
-  LLM 凭证走 repository secret(`KM_AGENT_LLM_API_KEY` 等),缺失时 job
-  **显式失败**,不静默跳过。job 内置清理 query_history 同题沉淀与 ragctx
-  缓存(011 教训)。
+**运行形态(065)**:
+- **本地/预发手动**:本地或预发手动跑 smoke/full/multiturn,全过才视为该环境
+  基线可信;
+- **CI 按需手动**:`eval-nightly` workflow 仅 `workflow_dispatch` 手动触发,
+  **不设 schedule**(个人项目避免每日真实 LLM 费用);手动运行时通过率落
+  artifacts 并与上一次运行可比,劣化 ≥5pp 逐题溯源后判失败(首次无基线
+  只记录)。LLM 凭证走 repository secret(`KM_AGENT_LLM_API_KEY` 等),缺失时
+  job **显式失败**,不静默跳过。job 内置清理 query_history 同题沉淀与
+  ragctx 缓存(011 教训)。
 - **judge 抽检层(092)**:smoke 层同时运行 `test_judge.py`(标记
   `smoke+judge`)——对非确定性产出(报告/任务结论/协作裁决/文本回答)按
   rubric 抽样评审(每类型 ≥3,存量不足全量,类型空缺如实记录不计失败);

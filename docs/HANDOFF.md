@@ -7,6 +7,9 @@
 - 统一身份:Keycloak 为唯一登录入口(`KM_KEYCLOAK_*`、`/auth/keycloak/callback`);
   授权仍全部本地(角色/租户/`data_scope`/本地 RS256 会话令牌,不消费 Keycloak claim);
   `/auth/login` 已移除,评测登录取现签 access JWT(`KM_EVAL_ACCESS_TOKEN`)。
+- 多标签页登录:`km_oidc_state` 为点分隔 state 列表(上限 8,旧单值兼容),
+  `/auth/{provider}/start` 追加、callback 命中后只移除已消费项;并发 tab 不再
+  互相覆盖,HttpOnly/SameSite/CSRF 绑定语义不变。
 - 文档检索:向量 + 全文(ts_rank,zhparser 可选)+ 可选实体扩展路 → RRF(k=60)
   → 可选精排 → 父块 top-5。精排与 zhparser 均已验收但**不启用**(证据见评测基线,
   配置与 runbook 就绪)。被索引文本=文档名+块正文(embedding 与 tsv 同源,
@@ -35,15 +38,15 @@
 - 多模型注册表:人工条目按「模型×端点」编队,别名优先;任务路由
   TITLER/SUGGEST/DESCRIBE→qwen-flash;主模型与 embedding 走 maas 镜像域,
   dashscope 作回滚端点;compose 已透传注册表/路由/白名单三项。
-- 门禁:api-check 全绿(1748 passed,10 skipped,覆盖率 77.13%);agent-check
+- 门禁:api-check 全绿(1751 passed,10 skipped,覆盖率 77.15%);agent-check
   全绿(620 passed,覆盖率 86.47%);`openspec validate --all --strict` 53/53。
 
 ## 下一步
 
 1. CI 全 job 因 GitHub Actions 账单锁定未启动(2026-11-23 观测);解锁后观察
-   contracts-check、eval-nightly 与镜像扫描。
+   contracts-check 与镜像扫描;eval-nightly 仅按需手动触发,不设每日 schedule。
 2. 反代部署确认 `KM_AUTH_COOKIE_SECURE`、可信代理头与登录限流口径。
-3. eval-nightly 首次真实运行:配置 `KM_AGENT_LLM_API_KEY` 与
+3. eval-nightly 按需手动运行:首次运行前配置 `KM_AGENT_LLM_API_KEY` 与
    `KM_EVAL_ACCESS_TOKEN`(旧 `KM_EVAL_ADMIN_PASSWORD` 仅兼容旧部署)并建基线。
 
 ## 开放决策项
@@ -65,16 +68,15 @@
 - K8s 跨文档多跳剩余缺口:分解后全跳 1/6,其余 5 题 gold 父块仍不在子查询
   候选前 5;受查询改写与候选精度限制,不设通过线,登记为已知边界。
 - `0066` DOWNGRADE 只恢复 `admin` 账号,不回滚其余影子账号角色/租户绑定;回滚旧二进制需人工评估。
-- 多标签页并发登录:state cookie 为单值,`/auth/{provider}/start` 后发会覆盖
-  前一个 state,先发起的回调将被 `StateInvalid` 拒绝(代码路径已确认)。是否
-  支持并发 tab 需产品决策;后端最小修法是 state cookie 存短列表并在回调按
-  成员校验,或前端按 tab 存储 state。当前未改。
 - `/auth/refresh` 仍接受 body refresh_token 且响应回传明文;前端已走 cookie,是否收窄为只回 access 待拍板。
 - `sys_user.id` 依赖 Keycloak sub 为 UUID 的既有契约;非 UUID sub 需迁移。
 - 登录限流为进程内、每 worker 独立;严格全局阈值需共享后端。
 
 ## 验收记录
 
+- 2026-11-23 多标签页登录 state cookie:改为点分隔有界列表(上限 8,旧单值
+  兼容);两个并发 tab 各自回调均 200,超上限丢最旧,非 ASCII state 返回 401。
+  api-check 1751 passed/10 skipped、覆盖率 77.15%,auth 覆盖率 86%(security-cov 全绿)。
 - 2026-11-23 文档多查询分解(K8s 30 题真实链路,route_intent→retrieve):
   单跳 18 题全跳 1.000;同文档多跳 0.667→0.833(5/6);跨文档 0→1/6(只报告);
   总体 Recall 0.833→0.883、全跳 0.733→0.800。无子查询路径单次调用与

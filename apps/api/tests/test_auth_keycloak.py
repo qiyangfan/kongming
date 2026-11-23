@@ -432,6 +432,58 @@ async def test_callback_rejects_mismatched_state_cookie(
     assert "km_oidc_state" not in client.cookies  # 成功后即刻清除
 
 
+async def test_callback_rejects_non_ascii_state_without_crash(
+    client: AsyncClient,
+    session: AsyncSession,
+    fake_keycloak: Callable[[NormalizedProfile], None],
+) -> None:
+    """非 ASCII state 一律 401;不得在恒定时间比较处抛出 TypeError。"""
+    await seed_all(session, get_settings())
+    fake_keycloak(PROFILE)
+    await _start(client)
+    assert (await _callback(client, "中文-state")).status_code == 401
+
+
+async def test_concurrent_tab_logins_keep_multiple_states(
+    client: AsyncClient,
+    session: AsyncSession,
+    fake_keycloak: Callable[[NormalizedProfile], None],
+) -> None:
+    """两个 tab 先后发起登录:state 共存,各自回调互不覆盖。"""
+    await seed_all(session, get_settings())
+    fake_keycloak(PROFILE)
+    first = await _start(client)
+    second = await _start(client)
+    raw = client.cookies.get("km_oidc_state")
+    assert raw is not None
+    assert set(raw.split(".")) == {first, second}
+    assert (await _callback(client, first)).status_code == 200
+    assert client.cookies.get("km_oidc_state") == second
+    assert (await _callback(client, second)).status_code == 200
+    assert "km_oidc_state" not in client.cookies
+
+
+async def test_state_cookie_caps_concurrent_states(
+    client: AsyncClient,
+    session: AsyncSession,
+    fake_keycloak: Callable[[NormalizedProfile], None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """并发 state 上限 8:超出丢最旧,最新 state 仍可完成登录。"""
+    from kongming.auth import router as auth_router
+    from kongming.auth.login_limit import LoginRateLimiter
+
+    monkeypatch.setattr(auth_router, "_login_limiter", LoginRateLimiter())
+    await seed_all(session, get_settings())
+    fake_keycloak(PROFILE)
+    states = [await _start(client) for _ in range(10)]
+    raw = client.cookies.get("km_oidc_state")
+    assert raw is not None
+    assert raw.split(".") == states[2:]
+    assert (await _callback(client, states[0])).status_code == 401
+    assert (await _callback(client, states[-1])).status_code == 200
+
+
 async def test_logout_sso_revokes_and_redirects(
     client: AsyncClient,
     session: AsyncSession,
