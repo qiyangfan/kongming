@@ -4,25 +4,36 @@
 
 ## 当前状态(2026-11-23)
 
-- `2026-11-23-switch-idp-to-keycloak` 已归档并推送:功能 `24a934a`,归档 `9ffa0af`。
-  provider key/env/回调改为 `keycloak`/`KM_KEYCLOAK_*`/`/auth/keycloak/callback`;
-  `user_identities` 迁移 0067 将 HUFU 绑定收敛为 KEYCLOAK。
-- 登录链路保持:授权码 + PKCE、state 浏览器绑定、state 单次、JWKS 验签;refresh 走
-  HttpOnly cookie;本地登出后跳 Keycloak `end_session`,旧 refresh 401。
-- 授权仍全部本地:角色、租户、`data_scope`(SQL AST 改写)与本地 RS256 会话令牌不变;
-  不消费 Keycloak 的角色/租户 claim。
-- 全量 `make check` EXIT=0(api/web/agent/liannu、contracts、security-cov、secret-scan);
-  归档后 `openspec validate --all --strict` 53/53。
+- 统一身份:Keycloak 为唯一登录入口(`KM_KEYCLOAK_*`、`/auth/keycloak/callback`);
+  授权仍全部本地(角色/租户/`data_scope`/本地 RS256 会话令牌,不消费 Keycloak claim);
+  `/auth/login` 已移除,评测登录取现签 access JWT(`KM_EVAL_ACCESS_TOKEN`)。
+- 文档检索:向量 + 全文(ts_rank,zhparser 可选)+ 可选实体扩展路 → RRF(k=60)
+  → 可选精排 → 父块 top-5。精排与 zhparser 均已验收但**不启用**(证据见评测基线,
+  配置与 runbook 就绪)。
+- 评测体系:retrieval-eval 15 文档 36 父块 / 28 题;BM25 正式对照 80 题;
+  Wiki 问答对照 26 题、七页主题页(覆盖题集全部 9 份文档)。两份评测 change
+  已归档,规格增量已应用(`openspec/specs/retrieval-eval`)。
+- 多模型注册表:人工条目按「模型×端点」编队,别名优先;任务路由
+  TITLER/SUGGEST/DESCRIBE→qwen-flash;主模型与 embedding 走 maas 镜像域,
+  dashscope 作回滚端点;compose 已透传注册表/路由/白名单三项。
+- 门禁:api-check 全绿(1732 passed,覆盖率 77.09%);`openspec validate --all
+  --strict` 53/53。
 
 ## 下一步
 
-1. 观察推送后的 CI(contracts-check、eval-nightly、镜像扫描);本会话不轮询。
+1. 观察 CI(contracts-check、eval-nightly、镜像扫描);本会话不轮询。
 2. 反代部署确认 `KM_AUTH_COOKIE_SECURE`、可信代理头与登录限流口径。
-3. 首次 eval-nightly 真实运行:配置 `KM_AGENT_LLM_API_KEY`/`KM_EVAL_ADMIN_PASSWORD` 并建基线。
+3. eval-nightly 首次真实运行:配置 `KM_AGENT_LLM_API_KEY` 与
+   `KM_EVAL_ACCESS_TOKEN`(旧 `KM_EVAL_ADMIN_PASSWORD` 仅兼容旧部署)并建基线。
 4. 观察多标签页并发登录的 state cookie 覆盖问题,必要时改多值/按 tab 存储。
 
 ## 开放决策项
 
+- 文档精排已验收未启用:链路/降级/延迟达标(p95≈1.3s),但本语料召回
+  1.000→0.982(唯一退化=012 登记豁免边界题),无非负收益;启用条件=语料扩容后
+  精排出现非负收益。
+- zhparser 已验证可建(配方见 `docs/zhparser-runbook.md`),但本语料 A/B 退化
+  (1.000→0.929)、zhparser+BM25 无差异,不切换;复评条件=真实语料出现词面缺口。
 - `0066` DOWNGRADE 只恢复 `admin` 账号,不回滚其余影子账号角色/租户绑定;回滚旧二进制需人工评估。
 - `/auth/refresh` 仍接受 body refresh_token 且响应回传明文;前端已走 cookie,是否收窄为只回 access 待拍板。
 - `sys_user.id` 依赖 Keycloak sub 为 UUID 的既有契约;非 UUID sub 需迁移。
@@ -30,9 +41,10 @@
 
 ## 验收记录
 
-- 2026-11-23 provider 切换:认证子集 47 passed;旧 `/auth/hufu/*` 404;迁移 0067 单头。
+- 2026-11-23 检索评测收口:BM25 80 题 keep(两路逐题无差异,P95 19ms);
+  wiki 两轮 keep(跨资料 90% 与 raw 持平、引用 <95%);精排 A/B 1.000→0.982、
+  zhparser A/B 1.000→0.929,均不启用。
 - 2026-11-23 Keycloak 真实联调:demo 登录后 `/auth/me` user_id=Keycloak sub、
   roles/tenant/perms 来自本地;登出 redirect 指向 Keycloak,旧 refresh 401。
-- 2026-11-23 全量 `make check` EXIT=0(api/web/agent/liannu、contracts、security-cov);
-  归档后 strict 53/53。
-- 2026-11-23 推送 `531e86f..9ffa0af`;本文档随单独提交入库。
+- 2026-11-23 全量 api-check 1732 passed、覆盖率 77.09%;归档后
+  `openspec validate --all --strict` 53/53。
