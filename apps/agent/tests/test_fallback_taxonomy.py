@@ -52,9 +52,10 @@ class TestParseIntentRoute:
             '"confidence":0.9,"reason":"r"}'
         )
         assert parsed is not None
-        intent, confidence, reason, ambiguous, clarify = parsed
+        intent, confidence, reason, ambiguous, clarify, subqueries = parsed
         assert (intent, confidence, reason) == ("data", 0.9, "r")
         assert ambiguous is True and clarify == "哪个时间范围?"
+        assert subqueries == ()
 
     def test_missing_fields_default_to_legacy_shape(self) -> None:
         """旧形态(无 ambiguous/clarify)照常解析——链路脚本兼容。"""

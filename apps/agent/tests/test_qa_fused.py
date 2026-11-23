@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import json
 from typing import cast
 
 import pytest
@@ -50,7 +51,32 @@ class _Llm:
 def test_parse_intent_route_accepts_three_states() -> None:
     for intent in ("data", "knowledge", "fused"):
         parsed = parse_intent_route(f'{{"intent":"{intent}","confidence":0.9,"reason":"r"}}')
-        assert parsed == (intent, 0.9, "r", False, "")
+        assert parsed == (intent, 0.9, "r", False, "", ())
+
+
+def test_parse_intent_route_subqueries_gated_and_trimmed() -> None:
+    """知识/融合保留子查询:去空白、去重、滤非字符串、上限 3;data 丢弃。"""
+    raw = json.dumps(
+        {
+            "intent": "knowledge",
+            "confidence": 0.9,
+            "subqueries": [" 退货条件 ", "退款流程", "退货条件", "", 3, "适用门店"],
+        }
+    )
+    parsed = parse_intent_route(raw)
+    assert parsed is not None
+    assert parsed[5] == ("退货条件", "退款流程", "适用门店")
+
+    fused = parse_intent_route(
+        '{"intent":"fused","confidence":0.9,"subqueries":["销售额","退货政策"]}'
+    )
+    assert fused is not None and fused[5] == ("销售额", "退货政策")
+
+    data = parse_intent_route('{"intent":"data","confidence":0.9,"subqueries":["销售额"]}')
+    assert data is not None and data[5] == ()
+    # 非数组形态按无子查询处理,不阻断意图解析
+    bad = parse_intent_route('{"intent":"knowledge","confidence":0.9,"subqueries":"退货条件"}')
+    assert bad is not None and bad[5] == ()
 
 
 def test_parse_intent_route_rejects_malformed() -> None:
@@ -73,6 +99,29 @@ async def test_route_intent_llm_three_states(monkeypatch: pytest.MonkeyPatch) ->
         assert out["intent"] == intent
         assert out["intent_source"] == "llm"
         assert isinstance(out["intent_confidence"], float)
+
+
+async def test_route_intent_passes_subqueries_only_for_doc_channels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """知识/融合态写 doc_subqueries;data 态即使模型给出子查询也不透传。"""
+    monkeypatch.setattr(
+        deps,
+        "get_llm",
+        lambda: _Llm(
+            ['{"intent":"knowledge","confidence":0.9,"subqueries":["退货条件","退款流程"]}']
+        ),
+    )
+    out = await route_intent({"trace_id": "t", "tenant_key": "d", "question": "退货要满足什么"})
+    assert out["doc_subqueries"] == ["退货条件", "退款流程"]
+
+    monkeypatch.setattr(
+        deps,
+        "get_llm",
+        lambda: _Llm(['{"intent":"data","confidence":0.9,"subqueries":["销售额"]}']),
+    )
+    out = await route_intent({"trace_id": "t", "tenant_key": "d", "question": "上个月销售额"})
+    assert "doc_subqueries" not in out
 
 
 async def test_route_intent_llm_error_falls_back_without_intent(

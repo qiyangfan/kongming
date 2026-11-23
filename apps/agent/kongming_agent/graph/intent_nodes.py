@@ -11,9 +11,12 @@ from kongming_agent.graph.dialogue import CHITCHAT_SEMANTIC_REPLY
 from kongming_agent.graph.doc_prompt import FUSED_ANSWER_SYSTEM, INTENT_ROUTE_SYSTEM
 from kongming_agent.graph.nodes import fallback_summary, parse_summary_json
 from kongming_agent.graph.state import (
+    DOC_HINT_LIMIT,
     FALLBACK_CHITCHAT,
     FALLBACK_CLARIFY,
     INTENT_CHITCHAT,
+    INTENT_FUSED,
+    INTENT_KNOWLEDGE,
     VALID_INTENTS,
     AgentState,
     ExecutionResult,
@@ -41,11 +44,12 @@ def snapshot_intent_route_stats() -> dict[str, int]:
         return dict(_intent_stats)
 
 
-def parse_intent_route(raw: str) -> tuple[str, float, str, bool, str] | None:
+def parse_intent_route(raw: str) -> tuple[str, float, str, bool, str, tuple[str, ...]] | None:
     """路由 LLM 输出解析(纯函数):JSON {intent, ambiguous, clarify_question,
-    confidence, reason}。intent 越域 / 置信缺失或不可解析 / 置信越界 [0,1]
-    → None(调用方回退词表);ambiguous 无澄清问句时收 false(fail-open,
-    不可执行的判定不放行)。"""
+    confidence, reason, subqueries}。intent 越域 / 置信缺失或不可解析 /
+    置信越界 [0,1] → None(调用方回退词表);ambiguous 无澄清问句时收
+    false(fail-open,不可执行的判定不放行)。subqueries 仅知识/融合态保留,
+    去空白、去重、滤非字符串后上限 3 条;其余意图与非数组形态收空。"""
     parsed = parse_summary_json(raw)
     intent = str(parsed.get("intent", "")).strip().lower()
     if intent not in VALID_INTENTS:
@@ -61,7 +65,26 @@ def parse_intent_route(raw: str) -> tuple[str, float, str, bool, str] | None:
     clarify = clarify_raw.strip() if isinstance(clarify_raw, str) else ""
     if ambiguous and not clarify:
         ambiguous = False
-    return intent, confidence, str(parsed.get("reason", "")).strip(), ambiguous, clarify
+    subqueries: list[str] = []
+    raw_subs = parsed.get("subqueries")
+    if intent in (INTENT_KNOWLEDGE, INTENT_FUSED) and isinstance(raw_subs, list):
+        for item in cast("list[object]", raw_subs):
+            if not isinstance(item, str):
+                continue
+            sub = item.strip()
+            if not sub or sub in subqueries:
+                continue
+            subqueries.append(sub)
+            if len(subqueries) >= 3:
+                break
+    return (
+        intent,
+        confidence,
+        str(parsed.get("reason", "")).strip(),
+        ambiguous,
+        clarify,
+        tuple(subqueries),
+    )
 
 
 async def route_intent(state: AgentState) -> dict[str, object]:
@@ -75,14 +98,14 @@ async def route_intent(state: AgentState) -> dict[str, object]:
     if not question:
         question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
     settings = Settings()
-    parsed: tuple[str, float, str, bool, str] | None = None
+    parsed: tuple[str, float, str, bool, str, tuple[str, ...]] | None = None
     try:
         raw = await asyncio.wait_for(
             deps.get_llm().chat(
                 INTENT_ROUTE_SYSTEM,
                 f"用户问题:{question}\n\n输出 JSON:",
                 temperature=0.1,
-                max_tokens=200,
+                max_tokens=400,
                 task="INTENT_ROUTE",  # 任务路由:小模型档(multi-model-routing,缺省主模型)
                 trace_id=state.get("trace_id"),
                 tenant_key=state.get("tenant_key"),
@@ -107,7 +130,7 @@ async def route_intent(state: AgentState) -> dict[str, object]:
             },
         )
         return {}
-    intent, confidence, reason, ambiguous, clarify = parsed
+    intent, confidence, reason, ambiguous, clarify, subqueries = parsed
     # 闲聊兜底(spec「闲聊语义兜底判定」):判定口径=完全无取数意图;
     # 冲突时闲聊优先于澄清(无取数意图的输入无从澄清口径)
     if intent == INTENT_CHITCHAT:
@@ -163,12 +186,15 @@ async def route_intent(state: AgentState) -> dict[str, object]:
             },
         },
     )
-    return {
+    out: dict[str, object] = {
         "intent": intent,
         "intent_source": "llm",
         "intent_confidence": confidence,
         "intent_reason": reason,
     }
+    if subqueries:
+        out["doc_subqueries"] = list(subqueries)
+    return out
 
 
 def _note_fused_fallback(trace_id: str | None, reason: str) -> None:
@@ -232,7 +258,7 @@ def _fused_doc_parts(doc_hints: list[dict[str, str]]) -> list[str]:
     """注入段:标注=引用键(与净化合法集同源;缺失回退 source_ref 作块头说明)。"""
     return [
         f"来源 {h.get('citation_key') or h['source_ref']}:\n{h['content'][:1500]}"
-        for h in doc_hints[:5]
+        for h in doc_hints[:DOC_HINT_LIMIT]
     ]
 
 

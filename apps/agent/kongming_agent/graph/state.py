@@ -13,6 +13,9 @@ INTENT_FUSED = "fused"
 INTENT_CHITCHAT = "chitchat"
 VALID_INTENTS: tuple[str, ...] = (INTENT_DATA, INTENT_KNOWLEDGE, INTENT_FUSED, INTENT_CHITCHAT)
 
+# 文档父块合并与提示注入上限:原问 top-5 + 最多 3 条子查询增量
+DOC_HINT_LIMIT = 8
+
 # 兜底轮分类(诊断字段,随 QueryOut 回传、api 落库;CHITCHAT=复语直通或
 # 语义判定闲聊,CLARIFY=歧义澄清早退)
 FALLBACK_CHITCHAT = "CHITCHAT"
@@ -70,6 +73,8 @@ class AgentState(TypedDict, total=False):
     last_fallback: NotRequired[str]
     skill_persona: NotRequired[str]  # 人设段
     doc_hints: NotRequired[list[dict[str, str]]]  # 文档段(source_ref+content)
+    # 意图帧产出的文档子查询(仅知识/融合态);retrieve 用于并行补检合并
+    doc_subqueries: NotRequired[list[str]]
     has_attachments: NotRequired[bool]  # 当前请求是否含图片附件，用于问答分流。
     # 三态意图路由(route_intent 产物)。intent 缺席=LLM 失败/超时/低置信
     # 缺少 intent 时，分流会沿用规则词表并检查多轮上下文。

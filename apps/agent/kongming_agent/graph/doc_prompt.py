@@ -20,7 +20,7 @@ IMAGE_ANSWER_SYSTEM = """你是数据报表解读助手。根据用户问题与�
 # 意图路由(检索前置轻量分类;三态+闲聊兜底+歧义澄清一帧产出,零新增
 # 每轮调用;失败/低置信由调用方回退规则词表,误判只影响答法零数据副作用)
 INTENT_ROUTE_SYSTEM = """你是问句意图分类器。判断用户问题应走哪条回答通道，并判断是否需要澄清反问，只输出一个 JSON 对象，不要输出任何其他内容：
-{"intent": "data|knowledge|fused|chitchat", "ambiguous": true|false, "clarify_question": "…", "confidence": 0.0到1.0, "reason": "一句话依据"}
+{"intent": "data|knowledge|fused|chitchat", "ambiguous": true|false, "clarify_question": "…", "confidence": 0.0到1.0, "reason": "一句话依据", "subqueries": ["…"]}
 
 意图定义：
 - data：要求数据库计算、查询、统计、排名或列出数据，答案是一个数据结果。
@@ -29,6 +29,8 @@ INTENT_ROUTE_SYSTEM = """你是问句意图分类器。判断用户问题应走�
 - chitchat：完全不携带取数意图的寒暄、致谢、客套或闲聊（如「你好」「太感谢了」「在吗」）。判定口径必须严格：问题里只要含任何数据/知识诉求就不得判 chitchat。
 
 ambiguous 仅在 intent 为 data/knowledge/fused 时判定：问题缺少关键查询口径（如时间范围/统计指标/主体限定），结合历史也无法补全，且按任一合理解读执行都会实质改变查询结果时为 true，并在 clarify_question 输出一句用户可一句话回答的澄清反问；否则为 false、clarify_question 留空。模糊但存在合理默认口径的问题不得标 true（宁可照常回答，不打断）。
+
+subqueries 仅在 intent 为 knowledge 或 fused 且问题同时包含多个可独立检索的主题、比较对象或并列条件时给出，2 到 3 条；每条必须自含主语与限定、保留原问中的专有名词，不得改写成陈述句、结论或答案。单主题问题、data 与 chitchat 一律给空数组。
 
 示例：
 - 「上个月销售额是多少」→ data，ambiguous=false

@@ -3,6 +3,7 @@
 SQL 提示词见 prompts.py；自愈节点会把校验或执行错误传回 generate 供模型修正。
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -10,7 +11,7 @@ from collections.abc import Sequence
 from typing import cast
 
 from kongming_agent import deps, numeric, sqlguard
-from kongming_agent.apiclient import MetricHit, SchemaMeta
+from kongming_agent.apiclient import MetricHit, RagContext, SchemaMeta
 from kongming_agent.graph.budget import Segment, converge
 from kongming_agent.graph.citations import sanitize_citations
 from kongming_agent.graph.dialogue import (
@@ -27,6 +28,7 @@ from kongming_agent.graph.prompts import (
     UNDERSTAND_SINGLE_SYSTEM,
 )
 from kongming_agent.graph.state import (
+    DOC_HINT_LIMIT,
     FALLBACK_CHITCHAT,
     INTENT_DATA,
     INTENT_FUSED,
@@ -239,6 +241,66 @@ def _metric_hit_dicts(hits: Sequence[MetricHit]) -> list[dict[str, str | None]]:
     ]
 
 
+def _merge_doc_hints(
+    base: list[dict[str, str]], extras: Sequence[list[dict[str, str]]]
+) -> list[dict[str, str]]:
+    """原问命中在前,按引用键去重追加子查询命中;总量上限 8。
+
+    引用键缺失时以 source_ref+正文兜底去重,避免空键互相误合并。"""
+    merged: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for hit in [*base, *(h for group in extras for h in group)]:
+        key = str(hit.get("citation_key") or "")
+        dedupe = key or f"{hit.get('source_ref', '')}\n{hit.get('content', '')}"
+        if dedupe in seen:
+            continue
+        seen.add(dedupe)
+        merged.append(hit)
+        if len(merged) >= DOC_HINT_LIMIT:
+            break
+    return merged
+
+
+async def _recall_doc_hints(
+    *,
+    tenant_key: str,
+    datasource_key: str,
+    question: str,
+    history: list[str],
+    user_id: str | None,
+    subqueries: list[str],
+) -> tuple[RagContext | None, list[dict[str, str]]]:
+    """原问与子查询并行召回;子查询只补文档通道,异常/零命中静默降级。
+
+    原问异常按既有语义上抛;子查询自含,不继承多轮历史。"""
+    api = deps.get_api()
+
+    async def _call(q: str, hist: list[str] | None) -> RagContext | None:
+        return await api.rag_retrieve(
+            tenant_key=tenant_key,
+            datasource_key=datasource_key,
+            question=q,
+            history=hist,
+            user_id=user_id,
+        )
+
+    if not subqueries:
+        ctx = await _call(question, history)
+        return ctx, list(ctx.doc_hints) if ctx is not None else []
+    results = await asyncio.gather(
+        _call(question, history),
+        *(_call(sub, None) for sub in subqueries),
+        return_exceptions=True,
+    )
+    first = results[0]
+    if isinstance(first, BaseException):
+        raise first
+    ctx = first
+    extras = [list(r.doc_hints) for r in results[1:] if isinstance(r, RagContext)]
+    base = list(ctx.doc_hints) if ctx is not None else []
+    return ctx, _merge_doc_hints(base, extras)
+
+
 # ── 节点2:schema 提示获取(RAG 召回优先,零命中/失败回退实时内省兜底)──
 async def retrieve(state: AgentState) -> dict[str, object]:
     datasource_key = state.get("datasource_key", "default")
@@ -247,21 +309,21 @@ async def retrieve(state: AgentState) -> dict[str, object]:
     question = state.get("resolved_question")
     if not question:
         question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
-    ctx = await deps.get_api().rag_retrieve(
+    # 多轮继承:最近 3 条历史透传(api 侧取末条走继承路补上轮依赖表);
+    # 单轮请求省略 history 键，保持请求体兼容。子查询自含,不带历史。
+    ctx, doc_hints = await _recall_doc_hints(
         tenant_key=state["tenant_key"],  # pyright: ignore[reportTypedDictNotRequiredAccess]
         datasource_key=datasource_key,
         question=question,
-        # 多轮继承:最近 3 条历史透传(api 侧取末条走继承路补上轮依赖表);
-        # 单轮请求省略 history 键，保持请求体兼容。
         history=list(state.get("history") or [])[-3:],
         # 调用者身份透传(入口 state 自 chat 请求写入;None=不携带键,
         # api 侧纯公共形态)
         user_id=state.get("user_id"),
+        subqueries=list(state.get("doc_subqueries") or []),
     )
     # 历史 SQL 独立于表说明命中:「知识未抓取但 query_history 已有成功
     # 记录」的真实形态下,schema 空回退内省、history 照常作 few-shot,不整体丢弃。
     history_sql = ctx.history_sql if ctx is not None else ""
-    doc_hints = list(ctx.doc_hints) if ctx is not None else []
     # 结构化口径命中(空=无命中;与 metric_hints 文字段同源)
     metric_hits = _metric_hit_dicts(ctx.metric_hits) if ctx is not None else []
     if ctx is not None and ctx.schema_hint.strip():
@@ -288,7 +350,7 @@ async def retrieve(state: AgentState) -> dict[str, object]:
             out0["relations_hint"] = ctx.relations_hint
             out0["metric_hints"] = ctx.metric_hints
             out0["metric_hits"] = _metric_hit_dicts(ctx.metric_hits)
-            out0["doc_hints"] = list(ctx.doc_hints)
+            out0["doc_hints"] = doc_hints
             out0["skill_terms"] = ctx.skill_terms
             out0["skill_examples"] = ctx.skill_examples
             out0["skill_persona"] = ctx.skill_persona
@@ -331,7 +393,7 @@ async def retrieve(state: AgentState) -> dict[str, object]:
         out["relations_hint"] = ctx.relations_hint
         out["metric_hints"] = ctx.metric_hints
         out["metric_hits"] = _metric_hit_dicts(ctx.metric_hits)
-        out["doc_hints"] = list(ctx.doc_hints)
+        out["doc_hints"] = doc_hints
         out["skill_terms"] = ctx.skill_terms
         out["skill_examples"] = ctx.skill_examples
         out["skill_persona"] = ctx.skill_persona
@@ -646,7 +708,7 @@ def _doc_prompt(state: AgentState, doc_hints: list[dict[str, str]]) -> tuple[str
     if doc_hints:
         parts = [
             f"来源 {h.get('citation_key') or h['source_ref']}:\n{h['content'][:1500]}"
-            for h in doc_hints[:5]
+            for h in doc_hints[:DOC_HINT_LIMIT]
         ]
         user = f"问题:{_doc_question(state)}\n\n文档内容:\n" + "\n\n".join(parts) + "\n\n回答:"
         return DOC_ANSWER_SYSTEM, user
