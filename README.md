@@ -120,4 +120,8 @@ make up / down    # compose 基础设施
 对话问答(RAG 三路召回 / 多轮指代消解)→ 反馈精修闭环 → 动态数据源 →
 云沙箱分析(NL2Insight)→ 工具调用 / MCP → Agent 市场。
 
-LLM 接入走自研网关 [muniu](../muniu/)(单二进制 Go 网关,计量计费与 failover 在网关层闭环)。
+LLM 接入可走自研网关 [muniu](https://github.com/qiyangfan/muniu)(单二进制 Go 网关,计量计费与 failover 在网关层闭环)。
+
+## License
+
+[Apache-2.0](LICENSE)。
