@@ -8,7 +8,6 @@ NL2SQL 核心链路的能力深化:多轮上下文全链路打通(前端→控�
 
 ### Requirement: 多轮上下文链路打通(命脉级)
 
-
 前端攒最近 5 轮 user 问句,控制面全链路透传 history 到 Agent 面,understand 节点用历史做指代消解与省略补全;不传 history 时向后兼容。指代消解 SHALL 保真:补全后的问句保留上轮全部限定条件(筛选/排序/数量限制/聚合口径),「这些/它们/上面提到的」SHALL 解析为对上轮结果集或上轮主体的追问,只补全语义 SHALL NOT 新增或篡改条件。**聚合追问 SHALL 显式汇总口径:追问上一轮整体的总量/总额/合计(「总共/合计/一共…多少」形态)时,补全后的问题 SHALL 明确为对上轮结果整体的单一聚合口径(如「这 10 个订单的支付总金额合计是多少」),SHALL NOT 改写为逐行明细口径**(048:改写问句的逐行/整体两读是 mt_006 聚合口径丢失的首因,聚合追问是多轮最高频真实问法)。
 
 #### Scenario: 前端攒历史问句传后端
@@ -123,7 +122,6 @@ SHALL 照常进入补全。词表 SHALL 随代码发布,SHALL NOT 做成运行�
 
 ### Requirement: 歧义问句澄清引导
 
-
 问答链路 SHALL 在检索与生成前识别**高置信歧义**问句并澄清反问:判定
 SHALL 与意图路由**共用同一次模型调用**(在既有意图路由输出上扩展歧义
 字段,SHALL NOT 新增每轮模型调用)。命中口径 SHALL 保守且全部满足:
@@ -170,7 +168,6 @@ SHALL NOT 澄清,照常进入既有链路(宁可猜错被点踩,SHALL NOT 让澄
 - THEN 指代消解结合澄清问句与回答补全为自包含问题,照常检索生成执行
 
 ### Requirement: 闲聊语义兜底判定
-
 
 意图路由模型调用 SHALL 同时输出闲聊判定(第四意图值),接住闭合词表
 漏网的、完全不携带取数意图的输入(寒暄/致谢/客套,如「太感谢了」
@@ -514,7 +511,6 @@ ctx 缓存键 SHALL 并入历史指纹(末条历史问句),同问句
 
 ### Requirement: selfheal 错误分类(省 LLM 配额)
 
-
 selfheal 按错误类型分类:权限/防火墙拦截类直接终止不重试;语法/执行错误才重试,节省 LLM 配额。**generate 组装喂回时 SHALL 按 PG 错误形态附加针对性修正指令**(047:泛化「请修正」使机械错同因连败,实证 missing FROM-clause 重试 2 轮同错):`missing FROM-clause entry for table "X"` → 指示补 X 的 JOIN 或改用已定义别名、不得引用『可用表结构』之外的表;`column "…" does not exist` → 指示只用清单内列并核对拼写、缺口径列不得近似顶替(046 列级哨兵的喂回镜像,SHALL NOT 引向表哨兵出口);`relation "…" does not exist` → 指示核对清单、确无数据只输出 NO_RELEVANT_TABLE(043 出口收窄到关系类);其余形态维持泛化喂回。
 
 #### Scenario: 权限拦截不重试
@@ -547,7 +543,6 @@ selfheal 按错误类型分类:权限/防火墙拦截类直接终止不重试;�
   SHALL NOT 误引表哨兵出口
 
 ### Requirement: 流式事件发射(自定义流通道)
-
 
 Agent 面问答图节点 SHALL 支持在流式调用下发射过程事件:每个节点进入时
 发射 stage(running)、完成时发射 stage(done);节点名 ∈ understand/
@@ -582,7 +577,6 @@ selfheal 的 stage 事件 SHALL 携带重试序号(retry_count=本次重试序�
 
 ### Requirement: 流式问答端点(Agent 面)
 
-
 Agent 面 SHALL 提供流式问答端点(内部令牌认证,ADR-002 信任边界):
 以自定义流通道转发节点事件,以 updates 通道累积终态;终态 result 事件
 data SHALL 与同步问答端点响应同构(单一定义防字段漂移);图执行意外
@@ -602,7 +596,6 @@ data SHALL 与同步问答端点响应同构(单一定义防字段漂移);图执
 - THEN 下发 error 终态事件(友好文案),不裸 500
 
 ### Requirement: ReAct 内核并存与终态等价
-
 
 Agent 面 SHALL 在既有 8 节点 NL2SQL 问答图之外并存 ReAct 工具调用内核(独立端点),两内核的终态响应单一定义、逐字段同构(success/verdict/summary/insights/stats/columns/rows/sql/retry_count/error)。既有问答图的节点逻辑、路由语义、prompt 资产与流式事件契约 SHALL NOT 因 ReAct 内核引入而变化;ReAct 链路的流式事件在既有事件清单上纯增 tool_call 类型,老消费方不受影响。两内核 SHALL 共享同一套 LLM 客户端纪律(无自写重试,ReAct 循环本身即重试/决策机制)与同一套控制面回调鉴权口径(X-Internal-Token)。
 
@@ -626,7 +619,6 @@ Agent 面 SHALL 在既有 8 节点 NL2SQL 问答图之外并存 ReAct 工具调�
 
 ### Requirement: LLM 调用的任务级路由挂接
 
-
 Agent 面 LLM 客户端 SHALL 在既有 chat/embeddings 接口上纯增任务类型参数(缺省=主模型,既有调用方零改动零回归);各图节点按语义传入任务类型(generate=SQL_GEN、understand=UNDERSTAND、summarize=SUMMARIZE、标题改写=TITLER、表润色=DESCRIBE、ReAct 决策=REACT)。路由判定 SHALL 在 LLM 客户端内单点完成(multi-model-routing spec),节点不感知模型选择细节。多轮上下文/指代消解/生成质量规则/结构化洞察等既有行为契约 SHALL NOT 因路由引入而变化(同一模型配置下行为逐字一致)。
 
 #### Scenario: 节点任务类型全标记
@@ -642,7 +634,6 @@ Agent 面 LLM 客户端 SHALL 在既有 chat/embeddings 接口上纯增任务类
 - THEN 全部调用走主模型,016 评估基线不降
 
 ### Requirement: 记忆段注入 generate 提示
-
 
 Agent 面问答请求 SHALL 纯增可选字段 memory_hint(召回的用户已知信息段,控制面注入);generate 节点在拼接用户提示时 SHALL 将非空 memory_hint 作为独立「关于这位用户的已知信息」段置于 schema 提示之前(系统提示模板资产不变);memory_hint 缺省或为空时提示形态与注入前逐字一致。ReAct 内核 SHALL 在首轮 user 消息拼接同一字段(同一拼接语义)。
 
@@ -660,7 +651,6 @@ Agent 面问答请求 SHALL 纯增可选字段 memory_hint(召回的用户已知
 
 ### Requirement: 召回响应语义段
 
-
 /internal/rag/retrieve 响应 SHALL 纯增可选字段 relations_hint(召回表集合内的 JOIN path 文字段)与 metric_hints(命中指标口径段);缺省/空时 Agent 面行为与引入前一致。两段由控制面组装(语义层域),召回服务失败时随整体回退实时内省(两段缺省为空)。
 
 #### Scenario: 响应携带语义段
@@ -670,7 +660,6 @@ Agent 面问答请求 SHALL 纯增可选字段 memory_hint(召回的用户已知
 - THEN 响应含 relations_hint 与 metric_hints 文字段
 
 ### Requirement: 生成提示拼接语义段
-
 
 generate 节点 SHALL 在用户提示中拼接 relations_hint/metric_hints 非空段(位于表结构提示之后、历史成功 SQL 之前;系统提示模板不变),并在拼接存在时遵循「JOIN 优先依据 relations_hint,口径优先依据 metric_hints」;两段皆空时提示形态与引入前逐字一致。ReAct 内核的 rag_retrieve 工具结果携带同名字段时,LLM 观察原样可见(内核零改动)。
 
@@ -828,7 +817,6 @@ generate 节点 SHALL 识别哨兵输出(去除包裹标记后大小写不敏感
 
 ### Requirement: QueryOut 响应终态判别
 
-
 `/query` 响应的 `verdict` SHALL 为四态:`PASS`(执行成功)/ `BLOCKED`
 (权限/策略拦截)/ `ERROR`(执行失败)/ `NO_DATA`(知识未覆盖如实说明,
 生成短路终态)。`NO_DATA` 态 `success=false`,SHALL NOT 记为执行失败
@@ -849,7 +837,6 @@ generate 节点 SHALL 识别哨兵输出(去除包裹标记后大小写不敏感
 - THEN 判别与字段形态与引入前逐字一致
 
 ### Requirement: 派生量接地与数值白名单
-
 
 结果智能分析输出的 summary 与 insights 文本中的数值 MUST 来自以下白名单
 之一:①本次查询结果集的数值单元格;②服务端确定性统计(stats)字段;
@@ -879,7 +866,6 @@ generate 节点 SHALL 识别哨兵输出(去除包裹标记后大小写不敏感
 
 ### Requirement: 确定性数值审计
 
-
 总结收口 SHALL 对 summary 与 insights 文本做确定性数值抽取与白名单比对
 (数值等价比较,百分数/千分位先归一化)。含非白名单数值的句子 SHALL 被
 剥离或降级为不含该数值的表述;审计 SHALL NOT 触发语言模型重试、SHALL NOT
@@ -901,7 +887,6 @@ generate 节点 SHALL 识别哨兵输出(去除包裹标记后大小写不敏感
 
 ### Requirement: 计算工具
 
-
 系统 SHALL 提供确定性计算工具(至少增幅与占比两类),入参为显式数值,
 输出确定性结果并纳入本轮数值白名单。入参 SHALL 校验属于本轮白名单
 (结果集/stats/既有工具值),不属于则拒绝并返回可纠正错误。计算工具
@@ -915,7 +900,6 @@ SHALL 为只读无副作用,不写任何业务数据。
 - AND 不产生输出值
 
 ### Requirement: 趋势与异常类洞察收紧
-
 
 insights 类型为 trend(趋势)时,SHALL 要求存在不少于 3 期可排序序列且
 结论数字在白名单;类型为 anomaly(异常)时,定量结论 SHALL 以白名单值与
@@ -1060,3 +1044,30 @@ SHALL NOT 伪装成服务故障。
 - GIVEN 评估集在预筛开启与关闭两种形态下的 Recall@K 与 Execution Match
 - WHEN 对比
 - THEN 预筛开启形态不劣于全量基线;若劣化超红线则记录并回退开关
+
+### Requirement: 文档多查询分解召回
+
+知识态与融合态的复合问题,意图路由 SHALL 在同一次模型调用中给出 1-3 条
+自含子查询;retrieve 节点 SHALL 先按原问句检索,再按子查询并行补检文档
+通道,按引用键去重合并父块,原问句结果优先,合并总量上限 8 条;单主题
+问题、解析失败或子查询检索失败时 SHALL 保持原问句单次检索行为。分解
+SHALL 仅影响文档通道,schema、指标、历史 SQL 与 SQL 链路不变。
+
+#### Scenario: 复合知识问题合并两路证据
+
+- GIVEN 问句同时涉及两个可独立检索的文档主题,路由判定 knowledge 并给出两条子查询
+- WHEN retrieve 执行
+- THEN 原问句与两条子查询各检索一次文档通道,父块按引用键去重合并,原问句命中在前
+- AND doc_answer 可引用合并后的父块
+
+#### Scenario: 单主题问题零变化
+
+- GIVEN 问句为单主题或路由未给出子查询
+- WHEN retrieve 执行
+- THEN 仅按原问句检索一次,doc_hints 与引入分解前一致
+
+#### Scenario: 子查询检索失败降级
+
+- GIVEN 子查询检索超时、异常或返回空
+- WHEN retrieve 执行
+- THEN 保留原问句命中,不新增失败终态
