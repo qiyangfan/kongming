@@ -1,0 +1,567 @@
+# 判别语料题集:正文剥离店名(店名仅存于文档名;块索引上下文判别器)(生成器产出,勿手改;重新生成:generate_scale_corpus.py --variant stripped)
+dataset:
+  tenant: default
+  datasource_key: default
+  corpus_dir: corpus_scale_v1
+  top_k: 5
+  min_questions: 60
+  min_multihop: 12
+questions:
+  - id: scale_s_01
+    question: 徐汇店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·徐汇店.md
+        snippets:
+          - 闭店前 30 分钟停止办理新租借
+  - id: scale_s_01b
+    question: 徐汇店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·徐汇店.md
+        snippets:
+          - 押金 30 元
+  - id: scale_s_02
+    question: 浦东店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·浦东店.md
+        snippets:
+          - 闭店前 20 分钟停止办理新租借
+  - id: scale_s_02b
+    question: 浦东店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·浦东店.md
+        snippets:
+          - 押金 40 元
+  - id: scale_s_03
+    question: 静安店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·静安店.md
+        snippets:
+          - 闭店前 45 分钟停止办理新租借
+  - id: scale_s_03b
+    question: 静安店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·静安店.md
+        snippets:
+          - 押金 20 元
+  - id: scale_s_04
+    question: 天河店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·天河店.md
+        snippets:
+          - 闭店前 30 分钟停止办理新租借
+  - id: scale_s_04b
+    question: 天河店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·天河店.md
+        snippets:
+          - 押金 30 元
+  - id: scale_s_05
+    question: 越秀店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·越秀店.md
+        snippets:
+          - 闭店前 20 分钟停止办理新租借
+  - id: scale_s_05b
+    question: 越秀店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·越秀店.md
+        snippets:
+          - 押金 40 元
+  - id: scale_s_06
+    question: 南山店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·南山店.md
+        snippets:
+          - 闭店前 45 分钟停止办理新租借
+  - id: scale_s_06b
+    question: 南山店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·南山店.md
+        snippets:
+          - 押金 20 元
+  - id: scale_s_07
+    question: 福田店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·福田店.md
+        snippets:
+          - 闭店前 30 分钟停止办理新租借
+  - id: scale_s_07b
+    question: 福田店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·福田店.md
+        snippets:
+          - 押金 30 元
+  - id: scale_s_08
+    question: 朝阳店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·朝阳店.md
+        snippets:
+          - 闭店前 20 分钟停止办理新租借
+  - id: scale_s_08b
+    question: 朝阳店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·朝阳店.md
+        snippets:
+          - 押金 40 元
+  - id: scale_s_09
+    question: 海淀店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·海淀店.md
+        snippets:
+          - 闭店前 45 分钟停止办理新租借
+  - id: scale_s_09b
+    question: 海淀店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·海淀店.md
+        snippets:
+          - 押金 20 元
+  - id: scale_s_10
+    question: 西城店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·西城店.md
+        snippets:
+          - 闭店前 30 分钟停止办理新租借
+  - id: scale_s_10b
+    question: 西城店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·西城店.md
+        snippets:
+          - 押金 30 元
+  - id: scale_s_11
+    question: 锦江店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·锦江店.md
+        snippets:
+          - 闭店前 20 分钟停止办理新租借
+  - id: scale_s_11b
+    question: 锦江店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·锦江店.md
+        snippets:
+          - 押金 40 元
+  - id: scale_s_12
+    question: 高新店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·高新店.md
+        snippets:
+          - 闭店前 45 分钟停止办理新租借
+  - id: scale_s_12b
+    question: 高新店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·高新店.md
+        snippets:
+          - 押金 20 元
+  - id: scale_s_13
+    question: 江汉店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·江汉店.md
+        snippets:
+          - 闭店前 30 分钟停止办理新租借
+  - id: scale_s_13b
+    question: 江汉店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·江汉店.md
+        snippets:
+          - 押金 30 元
+  - id: scale_s_14
+    question: 武昌店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·武昌店.md
+        snippets:
+          - 闭店前 20 分钟停止办理新租借
+  - id: scale_s_14b
+    question: 武昌店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·武昌店.md
+        snippets:
+          - 押金 40 元
+  - id: scale_s_15
+    question: 和平店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·和平店.md
+        snippets:
+          - 闭店前 45 分钟停止办理新租借
+  - id: scale_s_15b
+    question: 和平店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·和平店.md
+        snippets:
+          - 押金 20 元
+  - id: scale_s_16
+    question: 沈河店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·沈河店.md
+        snippets:
+          - 闭店前 30 分钟停止办理新租借
+  - id: scale_s_16b
+    question: 沈河店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·沈河店.md
+        snippets:
+          - 押金 30 元
+  - id: scale_s_17
+    question: 雁塔店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·雁塔店.md
+        snippets:
+          - 闭店前 20 分钟停止办理新租借
+  - id: scale_s_17b
+    question: 雁塔店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·雁塔店.md
+        snippets:
+          - 押金 40 元
+  - id: scale_s_18
+    question: 碑林店闭店前多久就不办新租借了?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·碑林店.md
+        snippets:
+          - 闭店前 45 分钟停止办理新租借
+  - id: scale_s_18b
+    question: 碑林店租一部影片要交多少保证金?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·碑林店.md
+        snippets:
+          - 押金 20 元
+  - id: scale_s_20
+    question: 以 LY-SH-XH 开头的会员卡是哪家门店发的?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·徐汇店.md
+        snippets:
+          - 卡号前缀为 LY-SH-XH
+  - id: scale_s_21
+    question: 以 LY-SH-PD 开头的会员卡是哪家门店发的?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·浦东店.md
+        snippets:
+          - 卡号前缀为 LY-SH-PD
+  - id: scale_s_22
+    question: 以 LY-SH-JA 开头的会员卡是哪家门店发的?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·静安店.md
+        snippets:
+          - 卡号前缀为 LY-SH-JA
+  - id: scale_s_23
+    question: 以 LY-GZ-TH 开头的会员卡是哪家门店发的?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·天河店.md
+        snippets:
+          - 卡号前缀为 LY-GZ-TH
+  - id: scale_s_24
+    question: 以 LY-GZ-YX 开头的会员卡是哪家门店发的?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·越秀店.md
+        snippets:
+          - 卡号前缀为 LY-GZ-YX
+  - id: scale_s_25
+    question: 以 LY-SZ-NS 开头的会员卡是哪家门店发的?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·南山店.md
+        snippets:
+          - 卡号前缀为 LY-SZ-NS
+  - id: scale_s_26
+    question: 以 LY-SZ-FT 开头的会员卡是哪家门店发的?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·福田店.md
+        snippets:
+          - 卡号前缀为 LY-SZ-FT
+  - id: scale_s_27
+    question: 以 LY-BJ-CY 开头的会员卡是哪家门店发的?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·朝阳店.md
+        snippets:
+          - 卡号前缀为 LY-BJ-CY
+  - id: scale_s_28
+    question: 以 LY-BJ-HD 开头的会员卡是哪家门店发的?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·海淀店.md
+        snippets:
+          - 卡号前缀为 LY-BJ-HD
+  - id: scale_s_29
+    question: 以 LY-BJ-XC 开头的会员卡是哪家门店发的?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·西城店.md
+        snippets:
+          - 卡号前缀为 LY-BJ-XC
+  - id: scale_s_30
+    question: 以 LY-CD-JJ 开头的会员卡是哪家门店发的?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·锦江店.md
+        snippets:
+          - 卡号前缀为 LY-CD-JJ
+  - id: scale_s_31
+    question: 以 LY-CD-GX 开头的会员卡是哪家门店发的?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·高新店.md
+        snippets:
+          - 卡号前缀为 LY-CD-GX
+  - id: scale_s_32
+    question: 徐汇店的逾期费一天一部收多少钱?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·徐汇店.md
+        snippets:
+          - 每日每部 0.5 元计收逾期费
+  - id: scale_s_33
+    question: 浦东店的逾期费一天一部收多少钱?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·浦东店.md
+        snippets:
+          - 每日每部 0.4 元计收逾期费
+  - id: scale_s_34
+    question: 静安店的逾期费一天一部收多少钱?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·静安店.md
+        snippets:
+          - 每日每部 0.6 元计收逾期费
+  - id: scale_s_35
+    question: 天河店的逾期费一天一部收多少钱?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·天河店.md
+        snippets:
+          - 每日每部 0.5 元计收逾期费
+  - id: scale_s_36
+    question: 越秀店的逾期费一天一部收多少钱?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·越秀店.md
+        snippets:
+          - 每日每部 0.4 元计收逾期费
+  - id: scale_s_37
+    question: 南山店的逾期费一天一部收多少钱?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·南山店.md
+        snippets:
+          - 每日每部 0.6 元计收逾期费
+  - id: scale_s_38
+    question: 福田店的逾期费一天一部收多少钱?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·福田店.md
+        snippets:
+          - 每日每部 0.5 元计收逾期费
+  - id: scale_s_39
+    question: 朝阳店的逾期费一天一部收多少钱?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·朝阳店.md
+        snippets:
+          - 每日每部 0.4 元计收逾期费
+  - id: scale_s_40
+    question: 海淀店的逾期费一天一部收多少钱?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·海淀店.md
+        snippets:
+          - 每日每部 0.6 元计收逾期费
+  - id: scale_s_41
+    question: 西城店的逾期费一天一部收多少钱?
+    category: single_hop
+    gold:
+      - doc: 门店运营手册·西城店.md
+        snippets:
+          - 每日每部 0.5 元计收逾期费
+  - id: scale_m_01
+    question: 徐汇店几点打烊?最晚提前多久停止办理租借,押金多少?
+    category: multi_hop_doc
+    gold:
+      - doc: 门店运营手册·徐汇店.md
+        snippets:
+          - 09:00 至 21:30
+          - 闭店前 30 分钟停止办理新租借
+          - 押金 30 元
+  - id: scale_m_02
+    question: 浦东店几点打烊?最晚提前多久停止办理租借,押金多少?
+    category: multi_hop_doc
+    gold:
+      - doc: 门店运营手册·浦东店.md
+        snippets:
+          - 09:30 至 22:00
+          - 闭店前 20 分钟停止办理新租借
+          - 押金 40 元
+  - id: scale_m_03
+    question: 静安店几点打烊?最晚提前多久停止办理租借,押金多少?
+    category: multi_hop_doc
+    gold:
+      - doc: 门店运营手册·静安店.md
+        snippets:
+          - 10:00 至 22:00
+          - 闭店前 45 分钟停止办理新租借
+          - 押金 20 元
+  - id: scale_m_04
+    question: 天河店几点打烊?最晚提前多久停止办理租借,押金多少?
+    category: multi_hop_doc
+    gold:
+      - doc: 门店运营手册·天河店.md
+        snippets:
+          - 09:00 至 22:00
+          - 闭店前 30 分钟停止办理新租借
+          - 押金 30 元
+  - id: scale_m_05
+    question: 越秀店几点打烊?最晚提前多久停止办理租借,押金多少?
+    category: multi_hop_doc
+    gold:
+      - doc: 门店运营手册·越秀店.md
+        snippets:
+          - 09:30 至 21:30
+          - 闭店前 20 分钟停止办理新租借
+          - 押金 40 元
+  - id: scale_m_06
+    question: 南山店几点打烊?最晚提前多久停止办理租借,押金多少?
+    category: multi_hop_doc
+    gold:
+      - doc: 门店运营手册·南山店.md
+        snippets:
+          - 10:00 至 22:00
+          - 闭店前 45 分钟停止办理新租借
+          - 押金 20 元
+  - id: scale_m_07
+    question: 福田店几点打烊?最晚提前多久停止办理租借,押金多少?
+    category: multi_hop_doc
+    gold:
+      - doc: 门店运营手册·福田店.md
+        snippets:
+          - 09:00 至 21:30
+          - 闭店前 30 分钟停止办理新租借
+          - 押金 30 元
+  - id: scale_m_08
+    question: 朝阳店几点打烊?最晚提前多久停止办理租借,押金多少?
+    category: multi_hop_doc
+    gold:
+      - doc: 门店运营手册·朝阳店.md
+        snippets:
+          - 09:30 至 22:00
+          - 闭店前 20 分钟停止办理新租借
+          - 押金 40 元
+  - id: scale_c_01
+    question: 徐汇店欠费超过多少会停借?暂停后还能续借吗?
+    category: multi_hop_cross
+    gold:
+      - doc: 门店运营手册·徐汇店.md
+        snippets:
+          - 逾期费累计超过 20 元时暂停借阅资格
+      - doc: 逾期处理流程.md
+        snippets:
+          - 暂停期间续借申请一律驳回
+  - id: scale_c_02
+    question: 浦东店欠费超过多少会停借?暂停后还能续借吗?
+    category: multi_hop_cross
+    gold:
+      - doc: 门店运营手册·浦东店.md
+        snippets:
+          - 逾期费累计超过 15 元时暂停借阅资格
+      - doc: 逾期处理流程.md
+        snippets:
+          - 暂停期间续借申请一律驳回
+  - id: scale_c_03
+    question: 静安店欠费超过多少会停借?暂停后还能续借吗?
+    category: multi_hop_cross
+    gold:
+      - doc: 门店运营手册·静安店.md
+        snippets:
+          - 逾期费累计超过 25 元时暂停借阅资格
+      - doc: 逾期处理流程.md
+        snippets:
+          - 暂停期间续借申请一律驳回
+  - id: scale_c_04
+    question: 天河店欠费超过多少会停借?暂停后还能续借吗?
+    category: multi_hop_cross
+    gold:
+      - doc: 门店运营手册·天河店.md
+        snippets:
+          - 逾期费累计超过 20 元时暂停借阅资格
+      - doc: 逾期处理流程.md
+        snippets:
+          - 暂停期间续借申请一律驳回
+  - id: scale_c_05
+    question: 越秀店欠费超过多少会停借?暂停后还能续借吗?
+    category: multi_hop_cross
+    gold:
+      - doc: 门店运营手册·越秀店.md
+        snippets:
+          - 逾期费累计超过 15 元时暂停借阅资格
+      - doc: 逾期处理流程.md
+        snippets:
+          - 暂停期间续借申请一律驳回
+  - id: scale_c_06
+    question: 南山店欠费超过多少会停借?暂停后还能续借吗?
+    category: multi_hop_cross
+    gold:
+      - doc: 门店运营手册·南山店.md
+        snippets:
+          - 逾期费累计超过 25 元时暂停借阅资格
+      - doc: 逾期处理流程.md
+        snippets:
+          - 暂停期间续借申请一律驳回
+  - id: scale_c_07
+    question: 福田店欠费超过多少会停借?暂停后还能续借吗?
+    category: multi_hop_cross
+    gold:
+      - doc: 门店运营手册·福田店.md
+        snippets:
+          - 逾期费累计超过 20 元时暂停借阅资格
+      - doc: 逾期处理流程.md
+        snippets:
+          - 暂停期间续借申请一律驳回
+  - id: scale_c_08
+    question: 朝阳店欠费超过多少会停借?暂停后还能续借吗?
+    category: multi_hop_cross
+    gold:
+      - doc: 门店运营手册·朝阳店.md
+        snippets:
+          - 逾期费累计超过 15 元时暂停借阅资格
+      - doc: 逾期处理流程.md
+        snippets:
+          - 暂停期间续借申请一律驳回

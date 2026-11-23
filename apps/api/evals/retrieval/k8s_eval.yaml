@@ -1,0 +1,248 @@
+# 真实文档评测集(K8s 中文 concepts 73 篇,CC BY 4.0,归属见 corpus_k8s/NOTICE.txt)。
+# 题面由模型按原文事实编写,引用片段唯一性与跨文档重复经程序校验并由 AI 逐题复核;
+# 未经人工领域评审,结论按此边界使用。不作 nightly 缺省题集。
+dataset:
+  tenant: default
+  datasource_key: default
+  corpus_dir: corpus_k8s
+  top_k: 5
+  min_questions: 30
+  min_multihop: 12
+questions:
+  # ── 单跳 18 ──
+  - id: k8s_s_01
+    question: Pod 中的多个容器共享哪些资源?
+    category: single_hop
+    gold:
+      - doc: Pod.md
+        snippets:
+          - 这些容器共享存储、网络、以及怎样运行这些容器的规约
+  - id: k8s_s_02
+    question: ConfigMap 适合存放机密数据吗?
+    category: single_hop
+    gold:
+      - doc: ConfigMap.md
+        snippets:
+          - ConfigMap 并不提供保密或者加密功能
+  - id: k8s_s_03
+    question: Secret 适合用来保存什么数据?
+    category: single_hop
+    gold:
+      - doc: Secret.md
+        snippets:
+          - Secret 是一种包含少量敏感信息例如密码、令牌或密钥的对象
+  - id: k8s_s_04
+    question: 持久卷支持哪些访问模式?
+    category: single_hop
+    gold:
+      - doc: 持久卷.md
+        snippets:
+          - 可以挂载为 ReadWriteOnce、ReadOnlyMany、ReadWriteMany 或 ReadWriteOncePod
+  - id: k8s_s_05
+    question: 节点资源不足时,Kubernetes 最先驱逐哪类 Pod?
+    category: single_hop
+    gold:
+      - doc: Pod QoS 类.md
+        snippets:
+          - Kubernetes 将首先驱逐在该 Node 上运行的 `BestEffort` Pod
+  - id: k8s_s_06
+    question: EndpointSlice 按什么把网络端点组织在一起?
+    category: single_hop
+    gold:
+      - doc: EndpointSlice.md
+        snippets:
+          - EndpointSlice 通过唯一的 IP 地址簇、协议、端口号和 Service 名称将网络端点组织在一起
+  - id: k8s_s_07
+    question: ReplicaSet 的存在目的是什么?
+    category: single_hop
+    gold:
+      - doc: ReplicaSet.md
+        snippets:
+          - ReplicaSet 的目的是维护一组在任何时候都处于运行状态的 Pod 副本的稳定集合
+  - id: k8s_s_08
+    question: StatefulSet 中的 Pod 标识包含哪些部分?
+    category: single_hop
+    gold:
+      - doc: StatefulSet.md
+        snippets:
+          - 该标识包括顺序标识、稳定的网络标识和稳定的存储
+  - id: k8s_s_09
+    question: DaemonSet 保证每个节点上运行什么?
+    category: single_hop
+    gold:
+      - doc: DaemonSet.md
+        snippets:
+          - 确保全部（或者某些）节点上运行一个 Pod 的副本
+  - id: k8s_s_10
+    question: Job 中每个失效的 Pod 会被计入哪个字段的限制?
+    category: single_hop
+    gold:
+      - doc: Job.md
+        snippets:
+          - 每个 Pod 失效都被计入 `.spec.backoffLimit` 限制
+  - id: k8s_s_11
+    question: 没有指定时区的 CronJob 按什么时区解释排期表?
+    category: single_hop
+    gold:
+      - doc: CronJob.md
+        snippets:
+          - 基于本地时区解释排期表（Schedule）
+  - id: k8s_s_12
+    question: Pod 处于 Pending 阶段时意味着什么?
+    category: single_hop
+    gold:
+      - doc: Pod 的生命周期.md
+        snippets:
+          - Pod 已被 Kubernetes 系统接受，但有一个或者多个容器尚未创建亦未运行
+  - id: k8s_s_13
+    question: 配置了启动探针后,它对存活与就绪探针有什么影响?
+    category: single_hop
+    gold:
+      - doc: 存活、就绪和启动探针.md
+        snippets:
+          - Kubernetes 将在启动探针成功之前不执行存活探针或就绪探针
+  - id: k8s_s_14
+    question: 多个 Init 容器之间的启动顺序有什么要求?
+    category: single_hop
+    gold:
+      - doc: Init 容器.md
+        snippets:
+          - 每个都必须在下一个启动之前成功完成
+  - id: k8s_s_15
+    question: 边车容器与主应用容器的关系是什么?
+    category: single_hop
+    gold:
+      - doc: 边车容器.md
+        snippets:
+          - 边车容器是与**主应用容器**在同一个 Pod 中运行的辅助容器
+  - id: k8s_s_16
+    question: 静态 Pod 由谁管理?
+    category: single_hop
+    gold:
+      - doc: 静态 Pod.md
+        snippets:
+          - kubelet 守护进程直接管理
+  - id: k8s_s_17
+    question: 水平 Pod 自动扩缩控制回路的默认同步间隔是多少?
+    category: single_hop
+    gold:
+      - doc: Pod 水平自动扩缩.md
+        snippets:
+          - 默认间隔为 15 秒
+  - id: k8s_s_18
+    question: kubeconfig 文件用来组织哪些信息?
+    category: single_hop
+    gold:
+      - doc: 使用 kubeconfig 文件组织集群访问.md
+        snippets:
+          - 使用 kubeconfig 文件来组织有关集群、用户、命名空间和身份认证机制的信息
+  # ── 同文档多跳 6 ──
+  - id: k8s_m_01
+    question: 节点资源压力时哪类 Pod 最先被驱逐?Guaranteed 类 Pod 的驱逐风险如何?
+    category: multi_hop_doc
+    gold:
+      - doc: Pod QoS 类.md
+        snippets:
+          - Kubernetes 将首先驱逐在该 Node 上运行的 `BestEffort` Pod
+          - "`Guaranteed` Pod 具有最严格的资源限制，并且最不可能面临驱逐"
+  - id: k8s_m_02
+    question: PersistentVolume 的访问模式与回收策略分别有哪些?
+    category: multi_hop_doc
+    gold:
+      - doc: 持久卷.md
+        snippets:
+          - 可以挂载为 ReadWriteOnce、ReadOnlyMany、ReadWriteMany 或 ReadWriteOncePod
+          - 目前，数据卷可以被 Retained（保留）、Recycled（回收）或 Deleted（删除）
+  - id: k8s_m_03
+    question: Deployment 的 `.spec.strategy.type` 支持哪些取值?滚动更新默认最多多出多少比例的 Pod?
+    category: multi_hop_doc
+    gold:
+      - doc: Deployments.md
+        snippets:
+          - "`.spec.strategy.type` 可以是 `Recreate` 或 `RollingUpdate`"
+          - 最大峰值 25%
+  - id: k8s_m_04
+    question: HPA 控制器的默认同步间隔是多少?稳定窗口用来做什么?
+    category: multi_hop_doc
+    gold:
+      - doc: Pod 水平自动扩缩.md
+        snippets:
+          - 默认间隔为 15 秒
+          - 自动扩缩算法使用此窗口来推断先前的期望状态并避免对工作负载规模进行不必要的更改
+  - id: k8s_m_05
+    question: Init 容器的按序运行规则,以及全部成功后主容器何时启动?
+    category: multi_hop_doc
+    gold:
+      - doc: Init 容器.md
+        snippets:
+          - 每个都必须在下一个启动之前成功完成
+          - 等到所有 Init 容器成功完成之后，主容器才会启动
+  - id: k8s_m_06
+    question: 启动探针成功之前会阻止哪些探针?就绪探针决定什么?
+    category: multi_hop_doc
+    gold:
+      - doc: 存活、就绪和启动探针.md
+        snippets:
+          - Kubernetes 将在启动探针成功之前不执行存活探针或就绪探针
+          - 就绪探针（Readiness Probe）决定容器何时准备好接受流量
+  # ── 跨文档多跳 6 ──
+  - id: k8s_c_01
+    question: Service 的 Pod 集合变化时由哪个对象承载端点?它引用哪些 Pod?
+    category: multi_hop_cross
+    gold:
+      - doc: 服务（Service）.md
+        snippets:
+          - 只要 Service 中的 Pod 集合发生变化，Kubernetes 就会为其更新 EndpointSlice
+      - doc: EndpointSlice.md
+        snippets:
+          - 这些 EndpointSlice 将包含对与 Service 选择算符匹配的所有 Pod 的引用
+  - id: k8s_c_02
+    question: Pod 内多个容器如何共享数据?容器自身的文件存储有什么问题?
+    category: multi_hop_cross
+    gold:
+      - doc: Pod.md
+        snippets:
+          - 这些容器共享存储、网络、以及怎样运行这些容器的规约
+      - doc: 卷.md
+        snippets:
+          - 容器中的文件在磁盘上是临时存放的
+  - id: k8s_c_03
+    question: HPA 扩缩 Deployment 时按什么选择 Pod?滚动更新默认最多多出多少比例?
+    category: multi_hop_cross
+    gold:
+      - doc: Pod 水平自动扩缩.md
+        snippets:
+          - 根据目标资源的 `.spec.selector` 标签选择 Pod
+      - doc: Deployments.md
+        snippets:
+          - 最大峰值 25%
+  - id: k8s_c_04
+    question: 动态卷制备的作用是什么?如何让卷绑定推迟到 Pod 调度时?
+    category: multi_hop_cross
+    gold:
+      - doc: 动态卷制备.md
+        snippets:
+          - 动态卷制备允许按需创建存储卷
+      - doc: 存储类（StorageClass）.md
+        snippets:
+          - 集群管理员可以通过指定 `WaitForFirstConsumer` 模式来解决此问题
+  - id: k8s_c_05
+    question: 限制自愿干扰的手段是什么?节点资源压力时的驱逐顺序如何?
+    category: multi_hop_cross
+    gold:
+      - doc: 干扰（Disruptions）.md
+        snippets:
+          - PDB 将限制在同一时间因自愿干扰导致的多副本应用中发生宕机的 Pod 数量
+      - doc: Pod QoS 类.md
+        snippets:
+          - 然后是 `Burstable` Pod，最后是 `Guaranteed` Pod
+  - id: k8s_c_06
+    question: 静态 Pod 与 DaemonSet 在节点上的管理方式有何不同?
+    category: multi_hop_cross
+    gold:
+      - doc: 静态 Pod.md
+        snippets:
+          - kubelet 守护进程直接管理
+      - doc: DaemonSet.md
+        snippets:
+          - 确保全部（或者某些）节点上运行一个 Pod 的副本

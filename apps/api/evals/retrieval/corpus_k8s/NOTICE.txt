@@ -1,0 +1,7 @@
+来源:Kubernetes website 仓库中文文档子树
+仓库:https://github.com/kubernetes/website
+提交:46728d2c27a129c956ad45f339616b523a6bc210
+范围:content/zh-cn/docs/concepts/{workloads,configuration,services-networking,storage}
+许可:CC BY 4.0(https://creativecommons.org/licenses/by/4.0/)
+修改:移除 front matter、HTML 注释(含英文原文)与 Hugo 短代码;按 front matter
+标题重命名文件;仅用于本仓库检索评测,非官方衍生,不代表原项目立场。

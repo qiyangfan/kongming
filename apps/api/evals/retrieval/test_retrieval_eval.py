@@ -4,9 +4,12 @@ gold=文档名+必含片段(运行时经 chunk_document 映射父块,不硬编�
 指标纯函数见 evals/retrieval_metrics.py(默认门禁单测守护)。运行:
 pytest evals/retrieval -m retrieval(评估环境显式触发;缺凭证由父 conftest 整层跳过)。
 基线口径:RETRIEVAL_EVAL 行进 README 基线表,红线=macro Recall@5 劣化 ≥5pp。
+`KM_EVAL_RETRIEVAL_DATASET` 可指定题集文件(真实语料按同形态指向自有 dataset);
+逐题输出附 `paths=` 逐路父块级 Recall@k,用于归因哪一路贡献/丢失。
 """
 # pyright: reportPrivateUsage=false
 
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -30,7 +33,8 @@ _REQUIRED_CATEGORIES = {"single_hop", "multi_hop_doc", "multi_hop_cross"}
 
 
 def _load_dataset() -> dict[str, Any]:
-    yml = RETR_DIR / "retrieval_eval.yaml"
+    name = os.environ.get("KM_EVAL_RETRIEVAL_DATASET", "retrieval_eval.yaml")
+    yml = RETR_DIR / name
     loaded = cast("object", yaml.safe_load(yml.read_text(encoding="utf-8")))
     if not isinstance(loaded, dict):
         raise pytest.UsageError(f"{yml.name}: 顶层必须是映射(dataset/questions)")
@@ -96,6 +100,30 @@ async def _enrich_corpus(c: httpx.AsyncClient, doc_ids: list[str], headers: dict
     return entity_mode
 
 
+async def _parent_keys(
+    c: httpx.AsyncClient, headers: dict[str, str], dsk: str
+) -> dict[str, tuple[str, int]]:
+    """父块 id → (文档名, 序号);逐路命中按父块级口径对齐 gold。"""
+    docs = cast(
+        "list[dict[str, Any]]",
+        (
+            await c.get(
+                "/system/document/documents", headers=headers, params={"datasource_key": dsk}
+            )
+        ).json(),
+    )
+    key_map: dict[str, tuple[str, int]] = {}
+    for doc in docs:
+        rows = cast(
+            "list[dict[str, Any]]",
+            (await c.get(f"/system/document/documents/{doc['id']}/chunks", headers=headers)).json(),
+        )
+        for row in rows:
+            if str(row.get("chunk_level")) == "PARENT":
+                key_map[str(row["id"])] = (str(doc["doc_name"]), int(row["seq"]))
+    return key_map
+
+
 async def _probe_question(
     c: httpx.AsyncClient,
     q: dict[str, Any],
@@ -103,8 +131,11 @@ async def _probe_question(
     dsk: str,
     top_k: int,
     gold_by_id: dict[str, set[tuple[str, int]]],
-) -> tuple[str, str, float, bool, list[str], str | None]:
-    """单题检索试跑评分;环境异常/非 200 记入该行错误列,不抛出。"""
+    parent_keys: dict[str, tuple[str, int]],
+) -> tuple[str, str, float, bool, list[str], str | None, dict[str, float]]:
+    """单题检索试跑评分;环境异常/非 200 记入该行错误列,不抛出。
+
+    末位为逐路父块级 Recall@k(路名→值;实体路未启用时无该键)。"""
     qid = str(q["id"])
     try:
         r = await c.get(
@@ -117,15 +148,25 @@ async def _probe_question(
             },
         )
         if r.status_code != 200:
-            return (qid, str(q["category"]), 0.0, False, [], f"HTTP {r.status_code}")
-        ranked = [(str(p["doc_name"]), int(p["seq"])) for p in r.json()["parents"]]
+            return (qid, str(q["category"]), 0.0, False, [], f"HTTP {r.status_code}", {})
+        body = cast("dict[str, Any]", r.json())
+        ranked = [(str(p["doc_name"]), int(p["seq"])) for p in body["parents"]]
         gold = gold_by_id[qid]
         rec = recall_at_k(gold, ranked, top_k)
         fh = full_hop_coverage(gold, ranked, top_k)
         missing = sorted(f"{d}#{s}" for d, s in gold.difference(ranked[:top_k]))
-        return (qid, str(q["category"]), rec, fh, missing, None)
+        route_rec: dict[str, float] = {}
+        paths = cast("dict[str, list[dict[str, Any]]]", body.get("paths") or {})
+        for name, hits in paths.items():
+            ordered: list[tuple[str, int]] = []
+            for hit in hits:
+                key = parent_keys.get(str(hit.get("parent_id") or ""))
+                if key is not None and key not in ordered:
+                    ordered.append(key)
+            route_rec[name] = recall_at_k(gold, ordered, top_k)
+        return (qid, str(q["category"]), rec, fh, missing, None, route_rec)
     except Exception as e:  # noqa: BLE001  # 单题环境异常不中断整层
-        return (qid, str(q["category"]), 0.0, False, [], repr(e)[:120])
+        return (qid, str(q["category"]), 0.0, False, [], repr(e)[:120], {})
 
 
 async def test_retrieval_quality_report() -> None:
@@ -150,21 +191,33 @@ async def test_retrieval_quality_report() -> None:
     async with httpx.AsyncClient(base_url=API_BASE, timeout=120.0) as c:
         doc_ids = await _upload_corpus(c, texts, headers, dsk)
         entity_mode = await _enrich_corpus(c, doc_ids, headers)
+        parent_keys = await _parent_keys(c, headers, dsk)
 
         # 逐题试跑评分(单题失败不中断:先记异常,末尾统一报告)
-        rows: list[tuple[str, str, float, bool, list[str], str | None]] = [
-            await _probe_question(c, q, headers, dsk, top_k, gold_by_id) for q in questions
+        rows = [
+            await _probe_question(c, q, headers, dsk, top_k, gold_by_id, parent_keys)
+            for q in questions
         ]
 
     macro_rec = macro([r[2] for r in rows])
     hop_rate = (sum(1 for r in rows if r[3]) / len(rows)) if rows else 0.0
-    for qid, cat, rec, fh, missing, err in rows:
+    for qid, cat, rec, fh, missing, err, route_rec in rows:
         mark = err or f"missing={missing}" if (missing or err) else "hit-all"
-        print(f"[retrieval] {qid} {cat} recall@{top_k}={rec:.2f} full_hop={int(fh)} {mark}")
+        routes = "/".join(f"{name}:{value:.2f}" for name, value in sorted(route_rec.items()))
+        print(
+            f"[retrieval] {qid} {cat} recall@{top_k}={rec:.2f} "
+            f"full_hop={int(fh)} {mark} paths={routes}"
+        )
+    route_names = sorted({name for r in rows for name in r[6]})
+    route_line = " ".join(
+        f"{name}={macro([r[6].get(name, 0.0) for r in rows]):.3f}" for name in route_names
+    )
     print(
         f"RETRIEVAL_EVAL macro_recall@{top_k}={macro_rec:.3f} "
         f"full_hop_rate={hop_rate:.3f} n={len(rows)} entity={'on' if entity_mode else 'off'}"
     )
+    if route_line:
+        print(f"RETRIEVAL_EVAL_ROUTES {route_line}")
     # 回归闸:macro Recall@k 下限(链路坏档如向量路死亡/语料失配必破;
     # 语料扩容后单题零命中属合法基线形态,闸门只拦系统性坏档)
     env_errs = [r[0] for r in rows if r[5] is not None]
