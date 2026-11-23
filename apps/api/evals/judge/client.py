@@ -1,6 +1,7 @@
 """评估器共用的 OpenAI 兼容客户端，提供对话和向量化接口。"""
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 
+import asyncio
 import json
 import os
 from typing import Any, cast
@@ -44,6 +45,13 @@ class JudgeLlm:
         )
 
     async def chat(self, system: str, user: str, *, max_tokens: int = 1200) -> str:
+        content, _ = await self.chat_with_usage(system, user, max_tokens=max_tokens)
+        return content
+
+    async def chat_with_usage(
+        self, system: str, user: str, *, max_tokens: int = 1200
+    ) -> tuple[str, dict[str, Any]]:
+        """对话并返回 (content, usage);服务端未给 usage 时为空映射(报告按未计入)。"""
         payload = {
             "model": self._model,
             "messages": [
@@ -54,13 +62,22 @@ class JudgeLlm:
             "max_tokens": max_tokens,
         }
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            try:
-                resp = await client.post(
-                    f"{self._base}/chat/completions", json=payload, headers=self._headers
-                )
-                resp.raise_for_status()
-            except httpx.HTTPError as e:
-                raise JudgeLlmError(f"judge LLM 调用失败: {e}") from e
+            last_exc: httpx.HTTPError | None = None
+            for attempt in range(2):  # 连接层抖动(网关/本机断连)重试一次;业务错误不重试
+                try:
+                    resp = await client.post(
+                        f"{self._base}/chat/completions", json=payload, headers=self._headers
+                    )
+                    resp.raise_for_status()
+                    break
+                except httpx.TransportError as e:
+                    last_exc = e
+                    if attempt == 0:
+                        await asyncio.sleep(0.5)
+                except httpx.HTTPError as e:
+                    raise JudgeLlmError(f"judge LLM 调用失败: {e}") from e
+            else:
+                raise JudgeLlmError(f"judge LLM 调用失败: {last_exc}") from last_exc
         # 应答体解析同样收口 JudgeLlmError(非 JSON/异形应答是「LLM 侧失败」
         # 而非程序缺陷;runner 只接 JudgeLlmError/JudgeParseError——裸异常
         # 逃逸会把单对象失败放大成整个 run 中断,破坏独立收口契约)
@@ -71,7 +88,9 @@ class JudgeLlm:
         message = cast("dict[str, object]", choices[0]).get("message")
         if not isinstance(message, dict):
             raise JudgeLlmError("judge LLM 应答畸形(message 缺失)")
-        return str(message.get("content") or "").strip()
+        content = str(message.get("content") or "").strip()
+        usage = body.get("usage")
+        return content, cast("dict[str, Any]", usage) if isinstance(usage, dict) else {}
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """批量向量化(内部分批;index 集合校验同 agent 面 embeddings 的校验口径)。"""

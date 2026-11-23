@@ -38,6 +38,22 @@ def validated_fulltext_ts_config(value: str) -> str:
     return value
 
 
+# 文档全文检索关键词排序白名单。ts_rank 为现有缺省;bm25 为评测实验排序,
+# 只在隔离评测环境的 API 进程启用(KM_RAG_FULLTEXT_RANKER=bm25),生产保持
+# ts_rank。BM25 依赖入库 tsv 的词频与段长统计,统计范围限定在所选租户与
+# 数据源(cross-tenant 对照见评测 change)。
+FULLTEXT_RANKERS: tuple[str, ...] = ("ts_rank", "bm25")
+DEFAULT_FULLTEXT_RANKER = "ts_rank"
+
+
+def validated_fulltext_ranker(value: str) -> str:
+    """检查关键词排序方式是否受支持;白名单外值抛 ValueError。"""
+    if value not in FULLTEXT_RANKERS:
+        valid = ",".join(FULLTEXT_RANKERS)
+        raise ValueError(f"全文检索排序方式非法值 {value}(值域:{valid})")
+    return value
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="KM_", extra="ignore")
 
@@ -139,6 +155,10 @@ class Settings(BaseSettings):
     # 扩展,步骤见 docs/HANDOFF.md「中文分词(zhparser)启用配方」。切换分词规则后须按
     # 新规则重建已有内容的全文检索数据,并重新校准检索阈值(分词影响相关性评分)。
     rag_fulltext_ts_config: str = DEFAULT_FULLTEXT_TS_CONFIG
+
+    # 文档全文检索关键词排序:ts_rank(缺省)|bm25(评测实验)。bm25 只在
+    # 隔离评测 API 进程启用,生产部署保持 ts_rank。
+    rag_fulltext_ranker: str = DEFAULT_FULLTEXT_RANKER
 
     # 按已登记表关系为召回结果补充一跳关联表,只用已登记关系,不猜测;
     # rag_expand_max=0 时不补充。
@@ -344,6 +364,13 @@ class Settings(BaseSettings):
         except ValueError as e:
             raise RuntimeError(str(e)) from None
 
+    def require_fulltext_ranker(self) -> str:
+        """关键词排序白名单校验,白名单外值 RuntimeError 拒启(dev/prod 同口径)。"""
+        try:
+            return validated_fulltext_ranker(self.rag_fulltext_ranker)
+        except ValueError as e:
+            raise RuntimeError(str(e)) from None
+
     def fail_closed_checks(self) -> None:
         """prod 环境缺敏感配置直接拒启(dev 宽松以便本地起步)。"""
         if self.environment != "prod":
@@ -388,5 +415,6 @@ def get_settings() -> Settings:
     s = Settings()
     s.fail_closed_checks()
     s.require_fulltext_ts_config()  # 分词配置无效时拒绝启动。
+    s.require_fulltext_ranker()  # 关键词排序配置无效时拒绝启动。
     s.require_rerank_provider()  # 重排供应商无效时拒绝启动。
     return s

@@ -1,0 +1,137 @@
+# Wiki 正式对照题集:独立编写(未参与页面生成与调试)。
+# category: single(单资料)/multi(跨资料或多段)/conflict(原文口径无法解决)/
+# no_answer(原文不足,应说明缺少依据)。expected 与 key_points 供盲评核对。
+dataset:
+  tenant: default
+  datasource_key: default
+questions:
+  - id: w_s01
+    category: single
+    question: 金卡会员的累计消费门槛是多少?银卡呢?
+    expected: 累计满 500 元为金卡;满 200 元不足 500 元为银卡。
+    key_points: ["500 元", "200 元"]
+  - id: w_s02
+    category: single
+    question: 银卡会员租借享什么优惠?
+    expected: 银卡会员租借享九折优惠。
+    key_points: ["九折"]
+  - id: w_s03
+    category: single
+    question: 补办会员卡的工本费是多少?
+    expected: 补办新卡收取工本费 10 元。
+    key_points: ["10 元"]
+  - id: w_s04
+    category: single
+    question: 单部影片的逾期费上限是什么?
+    expected: 单部影片逾期费上限为其租金的三倍。
+    key_points: ["租金的三倍"]
+  - id: w_s05
+    category: single
+    question: 积分的有效期和过期处理是什么?
+    expected: 积分有效期 24 个月,过期清零,兑换时不足整额部分不找零。
+    key_points: ["24 个月", "清零"]
+  - id: w_s06
+    category: single
+    question: 一次租借多少部以上按团体租借办理?
+    expected: 一次租借十部以上影片按团体租借办理。
+    key_points: ["十部以上"]
+  - id: w_s07
+    category: single
+    question: 家长指导级影片对租借人有什么要求?
+    expected: 仅向成年会员开放,租借时由柜台核验证件。
+    key_points: ["成年会员", "核验证件"]
+  - id: w_s08
+    category: single
+    question: 门店的营业时间和停止办理租借的时间?
+    expected: 每日 10:00 至 22:00 营业;闭店前 30 分钟停止办理新租借,归还不受时间限制。
+    key_points: ["10:00", "22:00", "30 分钟"]
+  - id: w_s09
+    category: single
+    question: 会员卡挂失后原卡何时失效?
+    expected: 挂失后原卡即时失效。
+    key_points: ["即时失效"]
+  - id: w_s10
+    category: single
+    question: 逾期超过多少天按遗失赔偿处理?
+    expected: 逾期超过 30 天按遗失赔偿处理,赔偿金额为影片定价。
+    key_points: ["30 天", "影片定价"]
+  - id: w_m01
+    category: multi
+    question: 逾期归还的租借,逾期费和积分分别怎么处理?
+    expected: 逾期归还按每日每部 0.5 元计收逾期费;逾期归还的租借减半计分。
+    key_points: ["每日每部 0.5 元", "减半计分"]
+  - id: w_m02
+    category: multi
+    question: 生日免逾期费与押金结清之间是什么关系?
+    expected: 生日当月可免除一次逾期费;押金不抵扣逾期费,逾期费须另行结清。
+    key_points: ["免除一次逾期费", "押金不抵扣逾期费"]
+  - id: w_m03
+    category: multi
+    question: 团体租借的逾期费和积分分别如何结算?
+    expected: 团体订单逾期费按整单统一结算、不拆分到单部;团体租借不参与积分累计。
+    key_points: ["整单统一结算", "不参与积分累计"]
+  - id: w_m04
+    category: multi
+    question: 补办会员卡当月的生日权益还能正常领取吗?
+    expected: 补办当月的生日权益不重复发放;生日当月租借可免除一次逾期费,各等级通用。
+    key_points: ["不重复发放", "免除一次逾期费"]
+  - id: w_m05
+    category: multi
+    question: 什么情况下暂停借阅,暂停期间能续借吗?
+    expected: 逾期费累计超过 20 元自动暂停借阅资格,缴清后次日恢复;暂停期间续借申请一律驳回。
+    key_points: ["超过 20 元", "续借申请一律驳回"]
+  - id: w_m06
+    category: multi
+    question: 影片被重新分类后,已租出影片的租期和计费会变吗?基础租期是多少?
+    expected: 分类变更不影响已租出影片的当次租期与计费;所有影片基础租期为 7 天。
+    key_points: ["不影响当次租期与计费", "7 天"]
+  - id: w_m07
+    category: multi
+    question: 团体租借与非金卡普通租借的押金标准一致吗?
+    expected: 一致,均为每部影片 30 元(团体按每部另行收取)。
+    key_points: ["每部 30 元"]
+  - id: w_m08
+    category: multi
+    question: 会员卡挂失前产生的费用由谁承担,押金能抵逾期费吗?
+    expected: 挂失前发生的租借与费用仍计入原卡账户,不由门店承担;押金不抵扣逾期费,须另行结清。
+    key_points: ["计入原卡账户", "押金不抵扣逾期费"]
+  - id: w_m09
+    category: multi
+    question: 对逾期费申诉的时限是多久,申诉期间借阅资格如何?
+    expected: 可在扣费后 7 天内发起申诉,客服核实后多收部分原路退回;申诉期间借阅资格不受影响。
+    key_points: ["7 天内", "资格不受影响"]
+  - id: w_m10
+    category: multi
+    question: 金卡会员降级后,当月已享受的免押金权益还有效吗?
+    expected: 连续 12 个月无租借记录的金卡降级为银卡;降级与升级都不影响已享受的当月权益。
+    key_points: ["连续 12 个月", "不影响已享受的当月权益"]
+  - id: w_c01
+    category: conflict
+    question: 金卡会员办理团体租借时,押金是免收还是按每部 30 元收取?
+    expected: 原文口径冲突无法确定:权益说明称金卡每次租借免押金,团体规范称押金按每部 30 元另行收取,未约定团体场景的优先顺序。
+    key_points: ["口径冲突", "缺少优先级"]
+  - id: w_c02
+    category: conflict
+    question: 生日免逾期费能否覆盖团体订单的整单逾期费?
+    expected: 原文口径冲突无法确定:生日豁免标注各等级通用,团体逾期费按整单统一结算,未说明豁免对团体场景是否适用。
+    key_points: ["口径冲突", "未说明适用范围"]
+  - id: w_c03
+    category: conflict
+    question: 影片逾期超 30 天且会员卡已挂失,赔偿和挂失前费用如何排序承担?
+    expected: 原文口径冲突无法确定:挂失前费用计入原卡账户、遗失赔偿按影片定价、押金另行结清三条规则并存,未约定适用顺序。
+    key_points: ["口径冲突", "缺少适用顺序"]
+  - id: w_n01
+    category: no_answer
+    question: 会员积分能否转让给其他会员?
+    expected: 原文未规定积分转让,应明确说明缺少依据。
+    key_points: ["缺少依据"]
+  - id: w_n02
+    category: no_answer
+    question: 门店是否提供影片邮寄归还服务?
+    expected: 原文未提及邮寄归还,应说明缺少依据。
+    key_points: ["缺少依据"]
+  - id: w_n03
+    category: no_answer
+    question: 团体租借能否开具发票?
+    expected: 原文未规定发票事项,应说明缺少依据。
+    key_points: ["缺少依据"]

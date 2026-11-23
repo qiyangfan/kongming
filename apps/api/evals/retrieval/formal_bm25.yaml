@@ -1,0 +1,656 @@
+# BM25 正式对照题集:独立编写,不用调试题。groups 分三类;
+# precise 组必带 subtype(number/term/brand/standard_no),覆盖门禁按
+# bm25_eval.yaml 的 min_subtype_counts 检查;brand 涵盖品牌型号与
+# 卡号/券码等标识编号,standard_no 为 GB 标准编号。
+dataset:
+  tenant: default
+  datasource_key: default
+  corpus_dir: corpus
+  top_k: 5
+  min_questions: 60
+  min_multihop: 20
+questions:
+  # ── 精确词:数字/金额/期限 15 ──
+  - id: f_prec_01
+    question: 所有影片的基础租期是多少天?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["所有影片基础租期为 7 天"]
+  - id: f_prec_02
+    question: 基础租期续借一次可以延长几天?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["续借延长 3 天"]
+  - id: f_prec_03
+    question: 新片首发多少天内每人限借两部?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["新片首发 30 天内每人限借两部"]
+  - id: f_prec_04
+    question: 逾期归还每日每部收取多少逾期费?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["逾期归还按每日每部 0.5 元计收逾期费"]
+  - id: f_prec_05
+    question: 单部影片的逾期费上限是多少?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["单部影片逾期费上限为其租金的三倍"]
+  - id: f_prec_06
+    question: 逾期超过多少天按遗失赔偿处理?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["逾期超过 30 天按遗失赔偿处理"]
+  - id: f_prec_07
+    question: 遗失赔偿的金额按什么确定?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["赔偿金额为影片定价"]
+  - id: f_prec_08
+    question: 累计消费满多少元成为金卡会员?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 会员等级政策.md
+        snippets: ["累计消费满 500 元为金卡会员"]
+  - id: f_prec_09
+    question: 银卡会员的累计消费区间是多少?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 会员等级政策.md
+        snippets: ["满 200 元不足 500 元为银卡会员"]
+  - id: f_prec_10
+    question: 铜卡会员累计消费满多少元即时升级为银卡?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 会员等级政策.md
+        snippets: ["铜卡会员累计消费满 200 元后即时升级为银卡会员"]
+  - id: f_prec_11
+    question: 金卡会员连续多少个月无租借记录会降级?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 会员等级政策.md
+        snippets: ["连续 12 个月无租借记录的金卡会员降级为银卡会员"]
+  - id: f_prec_12
+    question: 补办新卡的工本费是多少?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 会员卡挂失与补办.md
+        snippets: ["补办新卡收取工本费 10 元"]
+  - id: f_prec_13
+    question: 每成功租借一部影片记多少积分?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 积分规则.md
+        snippets: ["每成功租借一部影片记 10 积分"]
+  - id: f_prec_14
+    question: 100 积分可以抵扣多少租金?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 积分规则.md
+        snippets: ["100 积分可兑换一张免逾期费券,或抵扣 5 元租金"]
+  - id: f_prec_15
+    question: 积分的有效期是几个月?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 积分规则.md
+        snippets: ["积分有效期 24 个月"]
+  # ── 精确词:业务术语 5 ──
+  - id: f_prec_16
+    question: 金卡会员租借有哪些费用优惠?
+    category: single_hop
+    groups: [precise]
+    subtype: term
+    gold:
+      - doc: 会员权益说明.md
+        snippets: ["金卡会员每次租借免押金,基础租期延长 3 天"]
+  - id: f_prec_17
+    question: 团体租借是否参与积分累计?
+    category: single_hop
+    groups: [precise]
+    subtype: term
+    gold:
+      - doc: 团体租借规范.md
+        snippets: ["团体租借不参与积分累计"]
+  - id: f_prec_18
+    question: 家长指导级影片的租借有什么要求?
+    category: single_hop
+    groups: [precise]
+    subtype: term
+    gold:
+      - doc: 影片分类规范.md
+        snippets: ["家长指导级影片仅向成年会员开放,租借时由柜台核验证件"]
+  - id: f_prec_19
+    question: 团体租借能否部分归还?
+    category: single_hop
+    groups: [precise]
+    subtype: term
+    gold:
+      - doc: 团体租借规范.md
+        snippets: ["团体租借须一次性整单归还,不接受部分归还"]
+  - id: f_prec_20
+    question: 押金可以抵扣逾期费吗?
+    category: single_hop
+    groups: [precise]
+    subtype: term
+    gold:
+      - doc: 门店服务规则.md
+        snippets: ["押金不抵扣逾期费,逾期费须另行结清"]
+  # ── 精确词:品牌型号 5 / 标准编号 5(设备与设施规范)──
+  - id: f_prec_21
+    question: 门店自助借还机是什么型号?
+    category: single_hop
+    groups: [precise]
+    subtype: brand
+    gold:
+      - doc: 门店设备与设施规范.md
+        snippets: ["自助借还机为云杉 X7 型"]
+  - id: f_prec_22
+    question: 会员区放映体验使用什么型号的激光投影仪?
+    category: single_hop
+    groups: [precise]
+    subtype: brand
+    gold:
+      - doc: 门店设备与设施规范.md
+        snippets: ["玄鸟 A3 激光投影仪"]
+  - id: f_prec_23
+    question: 会员区放映体验配套的抗光幕布是什么型号?
+    category: single_hop
+    groups: [precise]
+    subtype: brand
+    gold:
+      - doc: 门店设备与设施规范.md
+        snippets: ["映雪 S2 抗光幕布"]
+  - id: f_prec_24
+    question: 儿童区配置的空气净化器是什么型号?
+    category: single_hop
+    groups: [precise]
+    subtype: brand
+    gold:
+      - doc: 门店设备与设施规范.md
+        snippets: ["清风 K3 空气净化器"]
+  - id: f_prec_25
+    question: 前台的食具消毒柜是什么型号?
+    category: single_hop
+    groups: [precise]
+    subtype: brand
+    gold:
+      - doc: 门店设备与设施规范.md
+        snippets: ["食具消毒柜为净风 D9 型"]
+  - id: f_prec_26
+    question: 门店公共用品卫生指标执行哪个标准编号?
+    category: single_hop
+    groups: [precise]
+    subtype: standard_no
+    gold:
+      - doc: 门店设备与设施规范.md
+        snippets: ["GB 37488-2019"]
+  - id: f_prec_27
+    question: 应急照明与疏散指示系统执行哪个标准?
+    category: single_hop
+    groups: [precise]
+    subtype: standard_no
+    gold:
+      - doc: 门店设备与设施规范.md
+        snippets: ["GB 51309-2018"]
+  - id: f_prec_28
+    question: 放映设备的电气安全执行什么标准编号?
+    category: single_hop
+    groups: [precise]
+    subtype: standard_no
+    gold:
+      - doc: 门店设备与设施规范.md
+        snippets: ["GB 4943.1-2022"]
+  - id: f_prec_29
+    question: 食具消毒柜执行哪个标准?
+    category: single_hop
+    groups: [precise]
+    subtype: standard_no
+    gold:
+      - doc: 门店设备与设施规范.md
+        snippets: ["GB 17988-2008"]
+  - id: f_prec_30
+    question: 营业场所边界噪声执行哪个标准编号?
+    category: single_hop
+    groups: [precise]
+    subtype: standard_no
+    gold:
+      - doc: 门店设备与设施规范.md
+        snippets: ["GB 22337-2008"]
+  # ── 同义改写 20 ──
+  - id: f_para_01
+    question: 影片借出后能续租吗,延长多久?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["续借延长 3 天"]
+  - id: f_para_02
+    question: 刚上映的片子每人最多同时借几部?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["新片首发 30 天内每人限借两部"]
+  - id: f_para_03
+    question: 晚还影片的费用按什么标准算?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["逾期归还按每日每部 0.5 元计收逾期费"]
+  - id: f_para_04
+    question: 一部片子的滞纳金封顶是多少?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["单部影片逾期费上限为其租金的三倍"]
+  - id: f_para_05
+    question: 片子弄丢了怎么赔?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["赔偿金额为影片定价"]
+  - id: f_para_06
+    question: 会员等级按什么划分?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 会员等级政策.md
+        snippets: ["会员等级按累计消费金额分为三档"]
+  - id: f_para_07
+    question: 等级什么时候更新,当次消费按新等级还是旧等级?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 会员等级政策.md
+        snippets: ["等级在每次租借结算后自动刷新,当次租借按刷新前等级计价"]
+  - id: f_para_08
+    question: 金卡用户很久不借片会怎样?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 会员等级政策.md
+        snippets: ["连续 12 个月无租借记录的金卡会员降级为银卡会员"]
+  - id: f_para_09
+    question: 银卡用户租片有什么折扣?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 会员权益说明.md
+        snippets: ["银卡会员租借享九折优惠"]
+  - id: f_para_10
+    question: 生日那个月借片有什么好处?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 会员权益说明.md
+        snippets: ["会员生日当月租借可免除一次逾期费,各等级通用"]
+  - id: f_para_11
+    question: 卡丢之前产生的费用由谁承担?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 会员卡挂失与补办.md
+        snippets: ["挂失之前发生的租借与费用仍计入原卡账户,不由门店承担"]
+  - id: f_para_12
+    question: 换新卡后原来的积分和等级还在吗?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 会员卡挂失与补办.md
+        snippets: ["原卡积分与会员等级在新卡激活后自动继承"]
+  - id: f_para_13
+    question: 一次借几部以上算团体单?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 团体租借规范.md
+        snippets: ["一次租借十部以上影片按团体租借办理"]
+  - id: f_para_14
+    question: 团体单可以先还一部分吗?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 团体租借规范.md
+        snippets: ["团体租借须一次性整单归还,不接受部分归还"]
+  - id: f_para_15
+    question: 影片分类标签由谁、多久更新一次?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 影片分类规范.md
+        snippets: ["每月初运营部按发行方提供的新片目录更新分类标签"]
+  - id: f_para_16
+    question: 影片被重新分类后,已经借出的片子租期和费用会变吗?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 影片分类规范.md
+        snippets: ["分类变更不影响已租出影片的当次租期与计费"]
+  - id: f_para_17
+    question: 什么情况下系统会停掉借阅资格?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 逾期处理流程.md
+        snippets: ["逾期费累计超过 20 元时系统自动暂停借阅资格"]
+  - id: f_para_18
+    question: 欠费缴清后什么时候恢复借阅?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 逾期处理流程.md
+        snippets: ["缴清全部逾期费后次日恢复借阅"]
+  - id: f_para_19
+    question: 对扣费有疑问怎么申诉,时限多久?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 逾期处理流程.md
+        snippets: ["对逾期费有异议的会员可在扣费后 7 天内发起申诉"]
+  - id: f_para_20
+    question: 押金什么时候退还?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 门店服务规则.md
+        snippets: ["归还验收无误后当场退还"]
+  # ── 多段证据 20(同文档 2 / 跨文档 18) ──
+  - id: f_mhop_01
+    question: 金卡会员借新片,免押金之外租期和限借规定如何?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 会员权益说明.md
+        snippets: ["金卡会员每次租借免押金,基础租期延长 3 天"]
+      - doc: 租赁规则.md
+        snippets: ["新片首发 30 天内每人限借两部"]
+  - id: f_mhop_02
+    question: 逾期归还在费用和积分上分别怎么处理?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["逾期归还按每日每部 0.5 元计收逾期费"]
+      - doc: 积分规则.md
+        snippets: ["逾期归还的租借减半计分"]
+  - id: f_mhop_03
+    question: 团体订单的逾期费用和积分分别如何结算?
+    category: multi_hop_doc
+    groups: [multihop]
+    gold:
+      - doc: 团体租借规范.md
+        snippets: ["团体订单的逾期费按整单统一结算,不拆分到单部影片"]
+      - doc: 团体租借规范.md
+        snippets: ["团体租借不参与积分累计"]
+  - id: f_mhop_04
+    question: 生日免逾期费与押金结清的关系是什么?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 会员权益说明.md
+        snippets: ["会员生日当月租借可免除一次逾期费,各等级通用"]
+      - doc: 门店服务规则.md
+        snippets: ["押金不抵扣逾期费,逾期费须另行结清"]
+  - id: f_mhop_05
+    question: 团体租借和非金卡普通租借的押金标准是否一致?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 团体租借规范.md
+        snippets: ["押金按每部影片 30 元另行收取"]
+      - doc: 门店服务规则.md
+        snippets: ["非金卡会员租借每部影片押金 30 元"]
+  - id: f_mhop_06
+    question: 卡挂失前产生的逾期费由谁结,押金能抵吗?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 会员卡挂失与补办.md
+        snippets: ["挂失之前发生的租借与费用仍计入原卡账户,不由门店承担"]
+      - doc: 门店服务规则.md
+        snippets: ["押金不抵扣逾期费,逾期费须另行结清"]
+  - id: f_mhop_07
+    question: 补办当月的生日免逾期费还能领吗?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 会员卡挂失与补办.md
+        snippets: ["补办当月的生日权益不重复发放"]
+      - doc: 会员权益说明.md
+        snippets: ["会员生日当月租借可免除一次逾期费,各等级通用"]
+  - id: f_mhop_08
+    question: 租家长指导级影片时,押金按什么标准收?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 影片分类规范.md
+        snippets: ["家长指导级影片仅向成年会员开放,租借时由柜台核验证件"]
+      - doc: 门店服务规则.md
+        snippets: ["非金卡会员租借每部影片押金 30 元"]
+  - id: f_mhop_09
+    question: 暂停借阅期间还能办理续借吗?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 逾期处理流程.md
+        snippets: ["暂停期间续借申请一律驳回"]
+      - doc: 租赁规则.md
+        snippets: ["可在到期前办理一次续借"]
+  - id: f_mhop_10
+    question: 申诉期间借阅资格如何,申诉针对的费用标准是什么?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 逾期处理流程.md
+        snippets: ["申诉期间借阅资格不受影响"]
+      - doc: 租赁规则.md
+        snippets: ["逾期归还按每日每部 0.5 元计收逾期费"]
+  - id: f_mhop_11
+    question: 影片重新分类后,已借出影片按什么租期和计费?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 影片分类规范.md
+        snippets: ["分类变更不影响已租出影片的当次租期与计费"]
+      - doc: 租赁规则.md
+        snippets: ["所有影片基础租期为 7 天"]
+  - id: f_mhop_12
+    question: 团体租借的积分和普通租借分别怎么算?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 团体租借规范.md
+        snippets: ["团体租借不参与积分累计"]
+      - doc: 积分规则.md
+        snippets: ["每成功租借一部影片记 10 积分"]
+  - id: f_mhop_13
+    question: 金卡会员办理团体租借,押金是否仍需缴纳?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 会员权益说明.md
+        snippets: ["金卡会员每次租借免押金,基础租期延长 3 天"]
+      - doc: 团体租借规范.md
+        snippets: ["押金按每部影片 30 元另行收取"]
+  - id: f_mhop_14
+    question: 金卡降级后,当月已享受的权益还有效吗?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 会员等级政策.md
+        snippets: ["降级与升级都不影响已享受的当月权益"]
+      - doc: 会员权益说明.md
+        snippets: ["金卡会员每次租借免押金,基础租期延长 3 天"]
+  - id: f_mhop_15
+    question: 铜卡升到银卡后,租借积分规则是什么?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 会员等级政策.md
+        snippets: ["铜卡会员累计消费满 200 元后即时升级为银卡会员"]
+      - doc: 积分规则.md
+        snippets: ["每成功租借一部影片记 10 积分"]
+  - id: f_mhop_16
+    question: 逾期超过 30 天的片子如何赔偿,押金能抵赔偿吗?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 租赁规则.md
+        snippets: ["逾期超过 30 天按遗失赔偿处理"]
+      - doc: 门店服务规则.md
+        snippets: ["押金不抵扣逾期费,逾期费须另行结清"]
+  - id: f_mhop_17
+    question: 闭店后还能还片吗,归还后的押金怎么退?
+    category: multi_hop_doc
+    groups: [multihop]
+    gold:
+      - doc: 门店服务规则.md
+        snippets: ["影片归还不受时间限制"]
+      - doc: 门店服务规则.md
+        snippets: ["归还验收无误后当场退还"]
+  - id: f_mhop_18
+    question: 团体单整单归还后押金如何退还?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 团体租借规范.md
+        snippets: ["团体租借须一次性整单归还"]
+      - doc: 门店服务规则.md
+        snippets: ["归还验收无误后当场退还"]
+  - id: f_mhop_19
+    question: 生日当月逾期归还,费用和积分分别怎么处理?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 会员权益说明.md
+        snippets: ["会员生日当月租借可免除一次逾期费"]
+      - doc: 积分规则.md
+        snippets: ["逾期归还的租借减半计分"]
+  - id: f_mhop_20
+    question: 金卡免押金,逾期费还能从押金里扣吗?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 会员权益说明.md
+        snippets: ["金卡会员每次租借免押金"]
+      - doc: 门店服务规则.md
+        snippets: ["押金不抵扣逾期费,逾期费须另行结清"]
+  # ── 扩展语料(2026-11-23):标识近似/改写型/长文档 ──
+  - id: f_prec_31
+    question: 押金 800 元的便携投影仪是什么型号?
+    category: single_hop
+    groups: [precise]
+    subtype: brand
+    gold:
+      - doc: 设备租借与损坏赔偿细则.md
+        snippets: ["后者押金 800 元"]
+  - id: f_prec_32
+    question: 使用 LY-2024-B 前缀的联名卡属于哪个渠道?
+    category: single_hop
+    groups: [precise]
+    subtype: brand
+    gold:
+      - doc: 联名卡与渠道规则.md
+        snippets: ["合作书店渠道前缀 LY-2024-B"]
+  - id: f_prec_33
+    question: 夏季活动第三批促销券码的编号是什么?
+    category: single_hop
+    groups: [precise]
+    subtype: brand
+    gold:
+      - doc: 门店促销与券码管理.md
+        snippets: ["QS-SUMMER-24-03"]
+  - id: f_prec_34
+    question: 长期寄存影片的仓储管理费每部每月多少钱?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 影片调拨与仓储规范.md
+        snippets: ["每部每月 8 元收取仓储管理费"]
+  - id: f_prec_35
+    question: 跨区调拨几个工作日内送达?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 影片调拨与仓储规范.md
+        snippets: ["跨区调拨 5 个工作日内送达"]
+  - id: f_prec_36
+    question: 设备主板损坏按什么比例赔偿?
+    category: single_hop
+    groups: [precise]
+    subtype: number
+    gold:
+      - doc: 设备租借与损坏赔偿细则.md
+        snippets: ["主板损坏按设备定价的 80% 赔偿"]
+  - id: f_para_21
+    question: 东西寄存久了没取会被怎么处理?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 影片调拨与仓储规范.md
+        snippets: ["按无人认领处理并公告 30 天"]
+  - id: f_para_22
+    question: 顾客闹到要投诉,多久必须给答复?
+    category: single_hop
+    groups: [paraphrase]
+    gold:
+      - doc: 投诉与回访流程.md
+        snippets: ["2 小时内首次响应"]
+  - id: f_mhop_21
+    question: 联名卡线上渠道的折扣和现场租借限制分别是什么?
+    category: multi_hop_doc
+    groups: [multihop]
+    gold:
+      - doc: 联名卡与渠道规则.md
+        snippets: ["85 折优惠", "不支持现场直接租借"]
+  - id: f_mhop_22
+    question: 租借设备丢失怎么赔偿?非金卡押金归还后怎么处理?
+    category: multi_hop_cross
+    groups: [multihop]
+    gold:
+      - doc: 设备租借与损坏赔偿细则.md
+        snippets: ["按同型号当期定价全额赔偿"]
+      - doc: 门店服务规则.md
+        snippets: ["归还验收无误后当场退还"]

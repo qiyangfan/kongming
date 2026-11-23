@@ -17,12 +17,17 @@ EVAL_DIR = Path(__file__).parent
 API_BASE = os.getenv("KM_EVAL_API_BASE", "http://127.0.0.1:8000")
 ADMIN_USERNAME = os.getenv("KM_EVAL_ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("KM_EVAL_ADMIN_PASSWORD", "")
+# Keycloak 形态:显式 access JWT(Keycloak 切换后 /auth/login 已移除)
+ACCESS_TOKEN = os.getenv("KM_EVAL_ACCESS_TOKEN", "")
 # 评估内核选择(recipe 缺省 / react=ReAct 内核等价性验证)
 AGENT_MODE = os.getenv("KM_EVAL_AGENT_MODE", "recipe")
 CHAT_TIMEOUT = 150.0  # agent_timeout_sec=120 覆盖全图 + 网络余量
 
-if not ADMIN_PASSWORD:
-    pytest.skip("缺 KM_EVAL_ADMIN_PASSWORD(评估环境登录凭证);设置后重跑", allow_module_level=True)
+if not ADMIN_PASSWORD and not ACCESS_TOKEN:
+    pytest.skip(
+        "缺 KM_EVAL_ACCESS_TOKEN / KM_EVAL_ADMIN_PASSWORD(评估环境登录凭证);设置后重跑",
+        allow_module_level=True,
+    )
 
 
 # ============ 评估集加载 ============
@@ -62,9 +67,12 @@ _token_cache: str | None = None
 
 
 async def _login() -> str:
-    """账密登录拿 access JWT(自建认证,ADR-003;非上游 Keycloak 形态)。"""
+    """取 access JWT:显式 KM_EVAL_ACCESS_TOKEN 优先(Keycloak 形态);否则账密登录(旧形态)。"""
     global _token_cache
     if _token_cache is not None:
+        return _token_cache
+    if ACCESS_TOKEN:
+        _token_cache = ACCESS_TOKEN
         return _token_cache
     async with httpx.AsyncClient(base_url=API_BASE, timeout=30.0) as c:
         r = await c.post(

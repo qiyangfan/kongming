@@ -120,3 +120,82 @@ questions:
     gold:
       - doc: 积分规则.md
         snippets: ["有效期 24 个月"]
+  # ── 扩展语料(2026-11-23):标识近似/改写型/长文档定位 ──
+  - id: retr_ext_001
+    question: 合作书店渠道的联名卡卡号前缀是什么?
+    category: single_hop
+    gold:
+      - doc: 联名卡与渠道规则.md
+        snippets: ["合作书店渠道前缀 LY-2024-B"]
+  - id: retr_ext_002
+    question: 线上渠道联名卡在门店租借享几折?
+    category: single_hop
+    gold:
+      - doc: 联名卡与渠道规则.md
+        snippets: ["85 折优惠"]
+  - id: retr_ext_003
+    question: 夏季活动第三批券码的编号是什么?
+    category: single_hop
+    gold:
+      - doc: 门店促销与券码管理.md
+        snippets: ["QS-SUMMER-24-03"]
+  - id: retr_ext_004
+    question: 东西寄存久了没取会被怎么处理?
+    category: single_hop
+    gold:
+      - doc: 影片调拨与仓储规范.md
+        snippets: ["按无人认领处理并公告 30 天"]
+  - id: retr_ext_005
+    question: 云杉 X7 Pro 的租赁押金是多少?
+    category: single_hop
+    gold:
+      - doc: 设备租借与损坏赔偿细则.md
+        snippets: ["押金 800 元"]
+  - id: retr_ext_006
+    question: 顾客投诉多久内必须首次响应?
+    category: single_hop
+    gold:
+      - doc: 投诉与回访流程.md
+        snippets: ["2 小时内首次响应"]
+  - id: retr_ext_007
+    question: 门店间调拨的审批要求和常规送达时限是什么?
+    category: multi_hop_doc
+    gold:
+      - doc: 影片调拨与仓储规范.md
+        snippets: ["区域经理审批", "3 个工作日内送达"]
+  - id: retr_ext_008
+    question: 联名卡注销有哪些限制?
+    category: multi_hop_doc
+    gold:
+      - doc: 联名卡与渠道规则.md
+        snippets: ["注销须结清全部欠费", "90 天内不得以同一手机号重新开卡"]
+  - id: retr_ext_009
+    question: 设备损坏的赔偿比例分别怎么算?
+    category: multi_hop_doc
+    gold:
+      - doc: 设备租借与损坏赔偿细则.md
+        snippets: ["镜头损坏按维修报价的 60% 赔偿", "主板损坏按设备定价的 80% 赔偿"]
+  - id: retr_ext_010
+    question: 生日月的逾期费豁免能与促销券码同时使用吗?
+    category: multi_hop_cross
+    gold:
+      - doc: 会员权益说明.md
+        snippets: ["会员生日当月租借可免除一次逾期费"]
+      - doc: 门店促销与券码管理.md
+        snippets: ["生日月逾期费豁免与券码可同时享受"]
+  - id: retr_ext_011
+    question: 租借设备丢失怎么赔偿?押金能抵扣逾期费吗?
+    category: multi_hop_cross
+    gold:
+      - doc: 设备租借与损坏赔偿细则.md
+        snippets: ["按同型号当期定价全额赔偿"]
+      - doc: 门店服务规则.md
+        snippets: ["押金不抵扣逾期费"]
+  - id: retr_ext_012
+    question: 长期寄存超期未取回怎么处理?和影片逾期遗失赔偿有什么区别?
+    category: multi_hop_cross
+    gold:
+      - doc: 影片调拨与仓储规范.md
+        snippets: ["按无人认领处理并公告 30 天"]
+      - doc: 租赁规则.md
+        snippets: ["逾期超过 30 天按遗失赔偿处理"]

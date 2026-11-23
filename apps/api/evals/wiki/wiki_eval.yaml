@@ -1,0 +1,26 @@
+# Wiki 问答对照运行条件(运行前固定;缺项时结论只能待判断)。
+# 主题页与题集均为仓库内置(合成业务语料,非生产文档);逐题费用与
+# 主题页维护时间上限须在运行前登记。
+debug: true
+answer_model: qwen-plus
+prompt_version: wiki-qa-v1
+embedding_channel: agent_internal
+answer_max_tokens: 800
+evidence_limit: 5
+citation_support_min: 0.95
+cross_doc_improve_pp: 0.05
+single_doc_regress_pp: 0.05
+per_question_cost_cap_cny: 0.2
+wiki_maintenance_minutes_cap: 120
+# 单价来源:muniu.yaml qwen-plus pricing(CNY/百万 token),报告随版本记录
+input_per_million_cny: 0.8
+output_per_million_cny: 2.0
+min_question_counts:
+  single: 10
+  multi: 10
+  conflict: 3
+  no_answer: 3
+# 计入「跨资料题改善」条件的题型(与题集 category 对应);其余题型按单资料题看回归
+cross_categories: [multi]
+# 计入「单资料题回归」条件的题型;conflict/no_answer 只计总正确率,不进任一桶
+single_categories: [single]

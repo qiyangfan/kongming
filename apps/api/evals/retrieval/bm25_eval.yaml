@@ -1,0 +1,18 @@
+# BM25 对照评测运行条件(运行前固定;缺项时报告只能给待验证)。
+# 仓库调试题集与 corpus/ 只作调试(debug=true,结论不作接入依据);
+# 正式对照须用获准业务语料与独立题集,并用任务记录的语料规模与并发量。
+debug: true
+dataset_file: retrieval_eval.yaml  # 正式对照用 formal_bm25.yaml(环境变量 KM_EVAL_BM25_DATASET 覆盖)
+top_k: 5
+latency_cap_ms_p95: 3000
+bootstrap_samples: 2000
+bootstrap_seed: 7
+min_group_counts:
+  precise: 20
+  paraphrase: 20
+  multihop: 20
+min_subtype_counts:
+  brand: 5
+  standard_no: 5
+  term: 5
+  number: 1

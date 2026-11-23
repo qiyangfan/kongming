@@ -16,8 +16,9 @@ KM_EVAL_ADMIN_PASSWORD=Kongming#2026 uv run pytest evals -m multiturn  # 多轮�
 KM_EVAL_ADMIN_PASSWORD=Kongming#2026 uv run pytest evals/retrieval -m retrieval  # 文档检索质量(语料幂等上传+multi-hop Recall@5)
 ```
 
-环境变量:`KM_EVAL_API_BASE`(缺省 127.0.0.1:8000)/`KM_EVAL_ADMIN_USERNAME`
-(缺省 admin)/`KM_EVAL_ADMIN_PASSWORD`(**必填**,缺失整层 skip)/
+环境变量:`KM_EVAL_API_BASE`(缺省 127.0.0.1:8000)/`KM_EVAL_ACCESS_TOKEN`
+(Keycloak 形态下显式 access JWT)或 `KM_EVAL_ADMIN_USERNAME`(缺省 admin)/
+`KM_EVAL_ADMIN_PASSWORD`(旧账密形态,二者至少一项,缺失整层 skip)/
 `KM_EVAL_PG_DSN`(缺省自控制面 DSN 派生,gold 直连执行)/
 `KM_EVAL_AGENT_BASE`(缺省 127.0.0.1:8001,取 prompt 指纹)/
 `KM_EVAL_INTERNAL_TOKEN` 或 `KM_INTERNAL_TOKEN`(指纹端点令牌;缺省从
@@ -75,6 +76,22 @@ podman exec kongming-postgres-1 psql -U kongming -d kongming \
   -c "DELETE FROM rag.query_history WHERE question LIKE '%影片%'"
 podman exec kongming-redis-1 redis-cli --scan --pattern 'km:ragctx:*' | xargs -r -n1 podman exec -i kongming-redis-1 redis-cli DEL
 ```
+
+## 正式对照记录(2026-11-23)
+
+- BM25 对照:题集 `retrieval/formal_bm25.yaml`(80 题;2026-11-23 补品牌型号/
+  标准编号及扩语料题),报告 `retrieval/reports/bm25-formal-2026-11-23.md`。
+  两组 Recall@5:overall 0.994、precise/paraphrase 1.000、multihop 0.977,
+  逐题无差异(唯一失配 f_mhop_03 两路同失),P95 19ms;结论 keep——精确词
+  无改善(阈值 5pp),维持 ts_rank,判据=真实/更大语料后按同一登记条件复测。
+- Wiki 问答对照:题集 `wiki/formal_wiki.yaml`(26 题);主题页补至七页覆盖
+  题集涉及的全部 9 份文档后按登记条件重跑(两轮结论一致),报告
+  `wiki/reports/wiki-formal-2026-11-23.md`。结论 keep:wiki_first/parallel
+  跨资料 90% 与 raw 持平(要求至少 +5pp)、引用支持 <95%;单资料 10/10 无
+  回归。首轮两页原型的 keep 是覆盖率假象,已由本轮取代。
+- 运行前置:api/agent 在本机启动;BM25 对照 LLM/embedding 经 muniu(`:8787`)
+  转发,Wiki 重跑直连 maas 镜像端点(`qwen-plus` 别名);评测登录用
+  `KM_EVAL_ACCESS_TOKEN`(Keycloak 形态)。
 
 ## 评估集分层
 
@@ -224,11 +241,14 @@ full 层四组分数同屏携带指纹;与上次基线指纹**不同**时,分数
 
 ## 检索质量评测基线(retrieval-eval,2026-11-07 起)
 
-文档检索质量独立口径:语料九文档 18 父块挂 default 租户 default 数据源
-(恒可用形态,CI 空库亦可跑),逐题走 `/system/document/retrieval-probe`
+文档检索质量独立口径:语料十五文档 36 父块挂 default 租户 default 数据源
+(恒可用形态,CI 空库亦可跑;2026-11-23 扩入 6 份文档:门店设备与设施规范、
+联名卡与渠道规则、门店促销与券码管理、影片调拨与仓储规范、设备租借与损坏
+赔偿细则、投诉与回访流程,承载标识近似与改写型题型),逐题走
+`/system/document/retrieval-probe`
 (与主检索同源),指标=父块级 macro Recall@5 + 全跳覆盖率。**红线只在
-同形态行之间比较**(劣化 ≥5pp 逐题溯源);「实体开」形态行与「实体关」
-行仅作对照分析,不作红线。坏档闸:macro <0.5 判检索链路异常(向量路
+同形态行之间比较**(劣化 ≥5pp 逐题溯源);「实体开」「精排开」形态行仅作
+对照分析,不作红线。坏档闸:macro <0.5 判检索链路异常(向量路
 死亡/语料失配)。
 
 | 日期 | 形态 | macro Recall@5 | 全跳覆盖率 | n | 备注 |
@@ -238,6 +258,12 @@ full 层四组分数同屏携带指纹;与上次基线指纹**不同**时,分数
 | 2026-11-07 | 实体关(同日 A/B 复采,add-doc-event-entity-recall 对照基线) | 1.000 | 1.000 | 16 | 与定版行一致(A/B 同环境同条件) |
 | 2026-11-07 | **实体开**(entity=on,LLM 抽取同 agent 面) | 0.938 | 0.938 | 16 | 净 -6.2pp,首版实体路在此语料为负收益:泛频实体「逾期费」join 出 6 子块挤占融合池(retr_sakila_002 正确父块被挤出);012 边界题转命中。机制由 probe 逐路数据归因(vector 8/fulltext 0/entity 6)。调优方向=实体路入池门槛(共享实体数≥2)/实体路降权或仅两路候选不足时补缺——**对照行不作红线**,调优挂后续,不改闸门 |
 | 2026-11-07 | 实体开(入池门槛调优后,共享实体数≥2;tune-entity-recall-pool) | 1.000 | 1.000 | 16 | 与实体关持平,-6.2pp 回归消除:002 泛频单实体路整路短路(probe 实体路 0 候选,调优前同题为 6),010 桥接题实体路以共享实体数 2 精准入池(score=2)。门槛后扩展路仅在真桥接形态出力,单实体共现不再入池;部署仍缺省关(对照不劣化,开关语义不变) |
+| 2026-11-23 | 实体关(十文档语料重取基线) | 1.000 | 1.000 | 16 | 补入《门店设备与设施规范》后重跑,与九文档定版行一致(16/16 全跳) |
+| 2026-11-23 | 精排开(bailian gte-rerank-v2;对照行,未启用) | 0.969 | 0.938 | 16 | 精排 16/16 成功,p50≈0.5s/p95≈1.3s;唯一退化=retr_sakila_012 边界题(登记豁免),无非负收益;结论=当前语料证据不支持启用,配置在 `.env` 注释段就绪 |
+| 2026-11-23 | 精排开(bailian qwen3-rerank;对照行,未启用) | 0.969 | 0.938 | 16 | 与 gte 行逐题一致(同退化 012),p50≈0.47s/p95≈1.35s |
+| 2026-11-23 | 实体关(扩语料基线,十五文档 36 父块) | 1.000 | 1.000 | 28 | 新增 12 题(近似标识/改写/长文档定位)后融合召回仍全跳,基线仍近天花板 |
+| 2026-11-23 | 精排开(bailian gte-rerank-v2;扩语料对照行,未启用) | 0.982 | 0.964 | 28 | 唯一退化仍是 012 边界题(登记豁免),无正收益;p50≈0.3s/p95≈0.8s;维持不启用 |
+| 2026-11-23 | 实体关(zhparser 分词,ts_rank;对照行,未启用) | 0.929 | 0.857 | 28 | 专用实例本地 A/B(simple 行 1.000):4 题丢跳,常用词泛化命中稀释融合池;zhparser+BM25 在 80 题上两路无差异;配方与复标步骤见 docs/zhparser-runbook.md |
 
 ## 基线记录(016 起)
 

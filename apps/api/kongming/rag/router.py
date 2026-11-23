@@ -565,7 +565,7 @@ async def _doc_hints(session: AsyncSession, req: RetrieveIn) -> list[dict[str, s
     """文档通道提示(降级空;与 schema 通道隔离)。"""
     doc_hints: list[dict[str, str]] = []
     try:
-        from kongming.rag.documents_repo import SqlDocumentRepo
+        from kongming.rag.documents_factory import build_document_repo
         from kongming.rag.documents_service import retrieve_docs
         from kongming.rag.entity_extract import build_doc_entity_extractor
         from kongming.rag.rerank import build_doc_reranker
@@ -573,7 +573,7 @@ async def _doc_hints(session: AsyncSession, req: RetrieveIn) -> list[dict[str, s
         tid2 = await _tenant_id_by_key(session, req.tenant_key)
         if tid2:
             doc_hints = await retrieve_docs(
-                SqlDocumentRepo(session, ts_config=get_settings().rag_fulltext_ts_config),
+                build_document_repo(session),
                 get_agent_rag_client(get_redis()),
                 tenant_id=tid2,
                 datasource_key=req.datasource_key,
@@ -922,7 +922,7 @@ async def retrieval_probe(
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> RetrievalProbeOut:
     """文档检索试跑(只读零副作用):逐路命中/融合名次/父块回填,与主检索同源。"""
-    from kongming.rag.documents_repo import SqlDocumentRepo
+    from kongming.rag.documents_factory import build_document_repo
     from kongming.rag.documents_service import probe_docs
     from kongming.rag.entity_extract import build_doc_entity_extractor
     from kongming.rag.rerank import build_doc_reranker
@@ -932,7 +932,7 @@ async def retrieval_probe(
     await _assert_doc_datasource(session, tenant_id=tid, datasource_key=datasource_key)
     settings = get_settings()
     out = await probe_docs(
-        SqlDocumentRepo(session, ts_config=settings.rag_fulltext_ts_config),
+        build_document_repo(session),
         get_agent_rag_client(get_redis()),
         tenant_id=tid,
         datasource_key=datasource_key,
