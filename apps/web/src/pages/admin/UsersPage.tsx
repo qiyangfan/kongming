@@ -27,7 +27,7 @@ export default function UsersPage() {
     <div className="space-y-3">
       <PageHeader
         title="用户"
-        description="本地授权资料管理:分配角色与部门、启用停用;账号由虎符登录建档。"
+        description="本地授权资料管理:分配角色与部门、启用停用;账号由Keycloak登录建档。"
       />
       <div className="flex items-center gap-2">
         <Input

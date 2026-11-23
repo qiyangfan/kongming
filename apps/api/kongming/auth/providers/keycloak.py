@@ -1,7 +1,7 @@
-"""虎符(hufu)统一身份 provider:标准 OIDC 授权码 + PKCE,后端独占令牌。
+"""Keycloak(keycloak)统一身份 provider:标准 OIDC 授权码 + PKCE,后端独占令牌。
 
 发现文档/JWKS 按需拉取并短时缓存;id_token 用 PyJWT 验 RS256 + iss/aud/exp/nonce,
-主体只取 `sub`。虎符下发的 email 一律未验证,且按契约禁止按 email 自动关联。
+主体只取 `sub`。Keycloak下发的 email 一律未验证,且按契约禁止按 email 自动关联。
 """
 
 import asyncio
@@ -21,8 +21,8 @@ _META_TTL_SEC = 300.0
 _CLOCK_LEEWAY_SEC = 60
 
 
-class HufuProvider(OAuthProviderBase):
-    key = "hufu"
+class KeycloakProvider(OAuthProviderBase):
+    key = "keycloak"
     display_name = "统一身份"
     pkce = True
     oidc = True
@@ -38,16 +38,21 @@ class HufuProvider(OAuthProviderBase):
         self._lock = asyncio.Lock()
 
     def client_id(self, s: Settings) -> str | None:
-        return s.hufu_client_id
+        return s.keycloak_client_id
 
     def client_secret(self, s: Settings) -> str | None:
-        return s.hufu_client_secret
+        return s.keycloak_client_secret
 
     def redirect_uri(self, s: Settings) -> str:
-        return s.hufu_redirect_uri
+        return s.keycloak_redirect_uri
 
     def configured(self, s: Settings) -> bool:
-        return bool(s.hufu_enabled and s.hufu_issuer and s.hufu_client_id and s.hufu_client_secret)
+        return bool(
+            s.keycloak_enabled
+            and s.keycloak_issuer
+            and s.keycloak_client_id
+            and s.keycloak_client_secret
+        )
 
     async def prepare(self, s: Settings) -> None:
         await self._ensure_metadata(s)
@@ -78,7 +83,7 @@ class HufuProvider(OAuthProviderBase):
         return f"{cast('str', meta['authorization_endpoint'])}?{q}"
 
     async def end_session_url(self, s: Settings) -> str | None:
-        """构造虎符 RP-Initiated Logout 地址;发现文档无端点时返回 None。"""
+        """构造Keycloak RP-Initiated Logout 地址;发现文档无端点时返回 None。"""
         meta = await self._ensure_metadata(s)
         endpoint = meta.get("end_session_endpoint")
         if not isinstance(endpoint, str) or not endpoint:
@@ -86,8 +91,8 @@ class HufuProvider(OAuthProviderBase):
         parsed = urlparse(endpoint)
         q = dict(parse_qsl(parsed.query))
         q["client_id"] = self.client_id(s) or ""
-        if s.hufu_post_logout_redirect_uri:
-            q["post_logout_redirect_uri"] = s.hufu_post_logout_redirect_uri
+        if s.keycloak_post_logout_redirect_uri:
+            q["post_logout_redirect_uri"] = s.keycloak_post_logout_redirect_uri
         return urlunparse(parsed._replace(query=urlencode(q)))
 
     async def fetch_profile(
@@ -107,14 +112,14 @@ class HufuProvider(OAuthProviderBase):
         return httpx.AsyncClient(timeout=10, transport=self._transport, trust_env=False)
 
     async def _ensure_metadata(self, s: Settings) -> dict[str, Any]:
-        if not s.hufu_issuer:
+        if not s.keycloak_issuer:
             raise ProviderExchangeFailed("统一身份登录未配置")
         if self._meta is not None and time.monotonic() - self._meta_at < _META_TTL_SEC:
             return self._meta
         async with self._lock:
             if self._meta is not None and time.monotonic() - self._meta_at < _META_TTL_SEC:
                 return self._meta
-            issuer = s.hufu_issuer.rstrip("/")
+            issuer = s.keycloak_issuer.rstrip("/")
             url = f"{issuer}/.well-known/openid-configuration"
             try:
                 async with self._http() as http:

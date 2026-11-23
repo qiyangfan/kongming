@@ -1,7 +1,7 @@
-"""虎符(hufu) OIDC provider:发现文档/JWKS/nonce/state 一次性,以及禁止 email 关联。
+"""Keycloak OIDC provider:发现文档/JWKS/nonce/state 一次性,以及禁止 email 关联。
 
-孔明登录入口只有虎符(ADR-0010):这里同时覆盖 provider 协议层与联邦回调链——
-主体键等于虎符 sub、禁用账号拒绝、其它 provider 路由不存在。
+孔明登录入口只有 Keycloak(ADR-0010):这里同时覆盖 provider 协议层与联邦回调链——
+主体键等于 Keycloak sub、禁用账号拒绝、其它 provider(含已退役 hufu)路由不存在。
 """
 
 import base64
@@ -19,7 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.models import NormalizedProfile, ProviderExchangeFailed
-from kongming.auth.providers.hufu import HufuProvider
+from kongming.auth.providers.keycloak import KeycloakProvider
 from kongming.auth.seed import seed_all
 from kongming.config import get_settings
 from tests.conftest import MakeUser
@@ -49,10 +49,10 @@ def _rsa_pair(kid: str = KID) -> tuple[Any, dict[str, Any]]:
 
 def _configure(monkeypatch: pytest.MonkeyPatch) -> None:
     s = get_settings()
-    monkeypatch.setattr(s, "hufu_issuer", ISSUER)
-    monkeypatch.setattr(s, "hufu_client_id", "kongming-hufu")
-    monkeypatch.setattr(s, "hufu_client_secret", "test-secret")
-    monkeypatch.setattr(s, "hufu_redirect_uri", "http://localhost:5173/auth/hufu/callback")
+    monkeypatch.setattr(s, "keycloak_issuer", ISSUER)
+    monkeypatch.setattr(s, "keycloak_client_id", "kongming-keycloak")
+    monkeypatch.setattr(s, "keycloak_client_secret", "test-secret")
+    monkeypatch.setattr(s, "keycloak_redirect_uri", "http://localhost:5173/auth/keycloak/callback")
 
 
 def _metadata() -> dict[str, Any]:
@@ -64,7 +64,7 @@ def _metadata() -> dict[str, Any]:
     }
 
 
-def _provider(monkeypatch: pytest.MonkeyPatch, claims: dict[str, Any]) -> HufuProvider:
+def _provider(monkeypatch: pytest.MonkeyPatch, claims: dict[str, Any]) -> KeycloakProvider:
     _configure(monkeypatch)
     key, jwk = _rsa_pair()
     id_token = jwt.encode(claims, key, algorithm="RS256", headers={"kid": KID})
@@ -78,10 +78,10 @@ def _provider(monkeypatch: pytest.MonkeyPatch, claims: dict[str, Any]) -> HufuPr
             return httpx.Response(200, json={"keys": [jwk]})
         return httpx.Response(404)
 
-    return HufuProvider(transport=httpx.MockTransport(handler))
+    return KeycloakProvider(transport=httpx.MockTransport(handler))
 
 
-def _claims(nonce: str = "n-1", aud: str = "kongming-hufu") -> dict[str, Any]:
+def _claims(nonce: str = "n-1", aud: str = "kongming-keycloak") -> dict[str, Any]:
     now = int(time.time())
     return {
         "iss": ISSUER,
@@ -140,22 +140,22 @@ async def test_audience_mismatch_rejected(monkeypatch: pytest.MonkeyPatch) -> No
         await provider.fetch_profile(get_settings(), code="c", code_verifier="v", nonce="n-1")
 
 
-async def test_options_lists_only_hufu_when_configured(
+async def test_options_lists_only_keycloak_when_configured(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _configure(monkeypatch)
     r = await client.get("/auth/options")
     assert r.status_code == 200
-    assert [p["provider"] for p in r.json()["providers"]] == ["hufu"]
+    assert [p["provider"] for p in r.json()["providers"]] == ["keycloak"]
 
 
-async def test_options_empty_when_hufu_unconfigured(client: AsyncClient) -> None:
+async def test_options_empty_when_keycloak_unconfigured(client: AsyncClient) -> None:
     r = await client.get("/auth/options")
     assert r.status_code == 200
     assert r.json()["providers"] == []
 
 
-@pytest.mark.parametrize("provider", ["github", "google", "feishu", "wecom", "dingtalk"])
+@pytest.mark.parametrize("provider", ["hufu", "github", "google", "feishu", "wecom", "dingtalk"])
 async def test_removed_providers_not_registered(client: AsyncClient, provider: str) -> None:
     start = await client.get(f"/auth/{provider}/start")
     assert start.status_code == 404
@@ -173,13 +173,15 @@ async def test_local_login_and_password_change_removed(mcp_client: AsyncClient) 
     assert r.status_code in {404, 405}
 
 
-async def _start(client: AsyncClient, provider: str = "hufu") -> str:
+async def _start(client: AsyncClient, provider: str = "keycloak") -> str:
     r = await client.get(f"/auth/{provider}/start")
     authorize_url = cast("str", r.json()["authorize_url"])
     return parse_qs(urlparse(authorize_url).query)["state"][0]
 
 
-async def _callback(client: AsyncClient, state: str, *, provider: str = "hufu") -> httpx.Response:
+async def _callback(
+    client: AsyncClient, state: str, *, provider: str = "keycloak"
+) -> httpx.Response:
     return await client.post(f"/auth/{provider}/callback", json={"code": "c0de", "state": state})
 
 
@@ -195,25 +197,25 @@ PROFILE = NormalizedProfile(
 
 async def test_federation_creates_user_keyed_by_subject(
     client: AsyncClient,
-    fake_hufu: Callable[[NormalizedProfile], None],
+    fake_keycloak: Callable[[NormalizedProfile], None],
     session: AsyncSession,
     bearer_headers: Callable[[str], dict[str, str]],
 ) -> None:
     await seed_all(session, get_settings())
-    fake_hufu(PROFILE)
+    fake_keycloak(PROFILE)
     state = await _start(client)
     r = await _callback(client, state)
     assert r.status_code == 200
     me = await client.get("/auth/me", headers=bearer_headers(PROFILE.external_id))
     assert me.status_code == 200
-    assert me.json()["user_id"] == PROFILE.external_id  # sys_user.id 即虎符 sub
-    assert me.json()["username"] == "alice-hufu"
+    assert me.json()["user_id"] == PROFILE.external_id  # sys_user.id 即Keycloak sub
+    assert me.json()["username"] == "alice-keycloak"
     assert me.json()["role_keys"] == ["DEVELOPER"]
     bound = (
         await session.execute(
             text(
                 "SELECT user_id FROM public.user_identities"
-                " WHERE provider='HUFU' AND external_id=:e"
+                " WHERE provider='KEYCLOAK' AND external_id=:e"
             ),
             {"e": PROFILE.external_id},
         )
@@ -223,11 +225,11 @@ async def test_federation_creates_user_keyed_by_subject(
 
 async def test_federation_is_idempotent_for_same_subject(
     client: AsyncClient,
-    fake_hufu: Callable[[NormalizedProfile], None],
+    fake_keycloak: Callable[[NormalizedProfile], None],
     session: AsyncSession,
 ) -> None:
     await seed_all(session, get_settings())
-    fake_hufu(PROFILE)
+    fake_keycloak(PROFILE)
     assert (await _callback(client, await _start(client))).status_code == 200
     assert (await _callback(client, await _start(client))).status_code == 200
     assert (
@@ -239,13 +241,13 @@ async def test_federation_is_idempotent_for_same_subject(
 
 async def test_federation_never_links_by_email(
     client: AsyncClient,
-    fake_hufu: Callable[[NormalizedProfile], None],
+    fake_keycloak: Callable[[NormalizedProfile], None],
     make_user: MakeUser,
     session: AsyncSession,
 ) -> None:
     await seed_all(session, get_settings())
     existing = await make_user("localdev", email="shared@example.com")
-    fake_hufu(PROFILE)
+    fake_keycloak(PROFILE)
     r = await _callback(client, await _start(client))
     assert r.status_code == 200
     me = await client.get(
@@ -256,7 +258,7 @@ async def test_federation_never_links_by_email(
         await session.execute(
             text(
                 "SELECT user_id FROM public.user_identities"
-                " WHERE provider='HUFU' AND external_id=:e"
+                " WHERE provider='KEYCLOAK' AND external_id=:e"
             ),
             {"e": PROFILE.external_id},
         )
@@ -266,7 +268,7 @@ async def test_federation_never_links_by_email(
 
 async def test_federation_rejects_disabled_account(
     client: AsyncClient,
-    fake_hufu: Callable[[NormalizedProfile], None],
+    fake_keycloak: Callable[[NormalizedProfile], None],
     make_user: MakeUser,
     session: AsyncSession,
 ) -> None:
@@ -275,21 +277,21 @@ async def test_federation_rejects_disabled_account(
     await session.execute(
         text(
             "INSERT INTO public.user_identities (id, user_id, provider, external_id)"
-            " VALUES (gen_random_uuid(), :u, 'HUFU', :e)"
+            " VALUES (gen_random_uuid(), :u, 'KEYCLOAK', :e)"
         ),
         {"u": uid, "e": PROFILE.external_id},
     )
     await session.commit()
-    fake_hufu(PROFILE)
+    fake_keycloak(PROFILE)
     r = await _callback(client, await _start(client))
     assert r.status_code == 403
 
 
 async def test_state_is_single_use(
-    client: AsyncClient, fake_hufu: Callable[[NormalizedProfile], None], session: AsyncSession
+    client: AsyncClient, fake_keycloak: Callable[[NormalizedProfile], None], session: AsyncSession
 ) -> None:
     await seed_all(session, get_settings())
-    fake_hufu(PROFILE)
+    fake_keycloak(PROFILE)
     state = await _start(client)
     assert (await _callback(client, state)).status_code == 200
     replay = await _callback(client, state)
@@ -297,10 +299,10 @@ async def test_state_is_single_use(
 
 
 async def test_forged_state_rejected(
-    client: AsyncClient, fake_hufu: Callable[[NormalizedProfile], None], session: AsyncSession
+    client: AsyncClient, fake_keycloak: Callable[[NormalizedProfile], None], session: AsyncSession
 ) -> None:
     await seed_all(session, get_settings())
-    fake_hufu(PROFILE)
+    fake_keycloak(PROFILE)
     r = await _callback(client, "forged-state")
     assert r.status_code == 401
 
@@ -334,7 +336,7 @@ async def test_jwks_refreshes_after_key_rotation(
             return httpx.Response(200, json={"keys": state["keys"]})
         return httpx.Response(404)
 
-    provider = HufuProvider(transport=httpx.MockTransport(handler))
+    provider = KeycloakProvider(transport=httpx.MockTransport(handler))
     first = await provider.fetch_profile(get_settings(), code="c", code_verifier="v", nonce="n-1")
     assert first.external_id == "01a1f8e2-0000-7000-8000-000000000001"
 
@@ -349,13 +351,13 @@ async def test_end_session_url_omits_empty_post_logout(
 ) -> None:
     _configure(monkeypatch)
     s = get_settings()
-    monkeypatch.setattr(s, "hufu_post_logout_redirect_uri", "")
+    monkeypatch.setattr(s, "keycloak_post_logout_redirect_uri", "")
 
     def handler(req: httpx.Request) -> httpx.Response:
         assert req.url.path.endswith("/.well-known/openid-configuration")
         return httpx.Response(200, json={**_metadata(), "end_session_endpoint": f"{ISSUER}/logout"})
 
-    provider = HufuProvider(transport=httpx.MockTransport(handler))
+    provider = KeycloakProvider(transport=httpx.MockTransport(handler))
     url = await provider.end_session_url(s)
 
     assert url is not None
@@ -363,7 +365,7 @@ async def test_end_session_url_omits_empty_post_logout(
     assert "client_id" in query
     assert "post_logout_redirect_uri" not in query
 
-    monkeypatch.setattr(s, "hufu_post_logout_redirect_uri", "http://localhost:5173/login")
+    monkeypatch.setattr(s, "keycloak_post_logout_redirect_uri", "http://localhost:5173/login")
     url = await provider.end_session_url(s)
     assert url is not None
     assert parse_qs(urlparse(url).query)["post_logout_redirect_uri"] == [
@@ -374,17 +376,17 @@ async def test_end_session_url_omits_empty_post_logout(
 async def test_start_is_rate_limited(
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
-    fake_hufu: Callable[[NormalizedProfile], None],
+    fake_keycloak: Callable[[NormalizedProfile], None],
 ) -> None:
-    fake_hufu(PROFILE)
+    fake_keycloak(PROFILE)
     from kongming.auth import router as auth_router
     from kongming.auth.login_limit import LoginRateLimiter
 
     monkeypatch.setattr(auth_router, "_login_limiter", LoginRateLimiter())
     monkeypatch.setattr(get_settings(), "auth_login_rate_per_minute", 1)
 
-    assert (await client.get("/auth/hufu/start")).status_code == 200
-    limited = await client.get("/auth/hufu/start")
+    assert (await client.get("/auth/keycloak/start")).status_code == 200
+    limited = await client.get("/auth/keycloak/start")
     assert limited.status_code == 429
 
 
@@ -398,7 +400,7 @@ async def test_jwks_network_error_is_normalized(
             return httpx.Response(200, json=_metadata())
         raise httpx.ConnectError("jwks down", request=req)
 
-    provider = HufuProvider(transport=httpx.MockTransport(handler))
+    provider = KeycloakProvider(transport=httpx.MockTransport(handler))
     with pytest.raises(ProviderExchangeFailed):
         await provider._jwks_document(  # pyright: ignore[reportPrivateUsage]
             {"jwks_uri": f"{ISSUER}/jwks"}, force=True
@@ -406,23 +408,23 @@ async def test_jwks_network_error_is_normalized(
 
 
 async def test_callback_requires_state_cookie(
-    client: AsyncClient, fake_hufu: Callable[[NormalizedProfile], None]
+    client: AsyncClient, fake_keycloak: Callable[[NormalizedProfile], None]
 ) -> None:
-    fake_hufu(PROFILE)
-    start = await client.get("/auth/hufu/start")
+    fake_keycloak(PROFILE)
+    start = await client.get("/auth/keycloak/start")
     state = cast("dict[str, str]", start.json())["authorize_url"].split("state=")[1].split("&")[0]
     client.cookies.clear()
-    r = await client.post("/auth/hufu/callback", json={"code": "c0de", "state": state})
+    r = await client.post("/auth/keycloak/callback", json={"code": "c0de", "state": state})
     assert r.status_code == 401
 
 
 async def test_callback_rejects_mismatched_state_cookie(
     client: AsyncClient,
     session: AsyncSession,
-    fake_hufu: Callable[[NormalizedProfile], None],
+    fake_keycloak: Callable[[NormalizedProfile], None],
 ) -> None:
     await seed_all(session, get_settings())
-    fake_hufu(PROFILE)
+    fake_keycloak(PROFILE)
     state = await _start(client)
     assert (await _callback(client, "forged-state")).status_code == 401
     # 错误回调不消费服务端 state,原 state 仍可完成一次合法登录
@@ -433,10 +435,10 @@ async def test_callback_rejects_mismatched_state_cookie(
 async def test_logout_sso_revokes_and_redirects(
     client: AsyncClient,
     session: AsyncSession,
-    fake_hufu: Callable[[NormalizedProfile], None],
+    fake_keycloak: Callable[[NormalizedProfile], None],
 ) -> None:
     await seed_all(session, get_settings())
-    fake_hufu(PROFILE)
+    fake_keycloak(PROFILE)
     pair = (await _callback(client, await _start(client))).json()
     r = await client.post("/auth/logout/sso", json={"refresh_token": pair["refresh_token"]})
     assert r.status_code == 200
@@ -448,10 +450,10 @@ async def test_logout_sso_revokes_and_redirects(
 async def test_logout_sso_uses_refresh_cookie_and_clears_it(
     client: AsyncClient,
     session: AsyncSession,
-    fake_hufu: Callable[[NormalizedProfile], None],
+    fake_keycloak: Callable[[NormalizedProfile], None],
 ) -> None:
     await seed_all(session, get_settings())
-    fake_hufu(PROFILE)
+    fake_keycloak(PROFILE)
     await _callback(client, await _start(client))
     assert "km_refresh" in client.cookies
 
@@ -466,10 +468,10 @@ async def test_logout_sso_survives_discovery_outage(
     client: AsyncClient,
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
-    fake_hufu: Callable[[NormalizedProfile], None],
+    fake_keycloak: Callable[[NormalizedProfile], None],
 ) -> None:
     await seed_all(session, get_settings())
-    fake_hufu(PROFILE)
+    fake_keycloak(PROFILE)
     pair = (await _callback(client, await _start(client))).json()
     from kongming.auth import providers
     from kongming.auth.models import ProviderExchangeFailed
@@ -477,7 +479,7 @@ async def test_logout_sso_survives_discovery_outage(
     async def _boom(settings: object) -> str:
         raise ProviderExchangeFailed("发现文档不可达")
 
-    monkeypatch.setattr(providers.REGISTRY["hufu"], "end_session_url", _boom)
+    monkeypatch.setattr(providers.REGISTRY["keycloak"], "end_session_url", _boom)
     r = await client.post("/auth/logout/sso", json={"refresh_token": pair["refresh_token"]})
 
     assert r.status_code == 200

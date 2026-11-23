@@ -1,0 +1,56 @@
+## MODIFIED Requirements
+
+### Requirement: 唯一登录入口
+
+孔明 SHALL 只提供 Keycloak OIDC 登录;未配置 Keycloak 时登录入口不出现,MUST NOT 提供任何
+本地账密、注册、改密或其它 OAuth provider。
+
+#### Scenario: 本地端点不存在
+
+- WHEN 调用 `/auth/login` 或 `/auth/password/change`
+- THEN 返回 404/405
+
+#### Scenario: 只显示已配置 provider
+
+- WHEN 登录页读取 `/auth/options`
+- THEN 仅返回已配置的 `keycloak`;`hufu` 不再出现
+
+### Requirement: subject 主体键
+
+首次 Keycloak 登录 SHALL 以 `id_token.sub` 作为 `sys_user.id` 建档;MUST NOT 生成新的本地
+用户 ID,也 MUST NOT 按 email/username 合并既有账号。
+
+#### Scenario: 首登建档
+
+- GIVEN 某 Keycloak sub 首次回调
+- WHEN id_token 验签通过
+- THEN 创建 `sys_user(id=sub)`、DEVELOPER 角色与 default 租户
+- AND `user_identities(provider=KEYCLOAK, external_id=sub)` 唯一
+
+#### Scenario: 重复登录幂等
+
+- WHEN 同一 sub 再次登录
+- THEN 复用同一 `sys_user` 行,不新增账号
+
+### Requirement: 本地令牌与 refresh
+
+登录成功后 SHALL 签发本地 RS256 access/refresh;refresh SHALL 轮换并在超窗重放时
+吊销全家族;refresh token SHALL NOT 落浏览器可读存储,只经 HttpOnly cookie 往返;
+登出 SHALL 吊销当前 refresh 家族,并在 Keycloak 可用时返回统一登出地址。
+
+#### Scenario: 旧 refresh 重放
+
+- GIVEN R1 已轮换出 R2
+- WHEN R1 超出宽限再次提交
+- THEN 家族吊销,刷新返回 401
+
+#### Scenario: 统一登出
+
+- WHEN 已登录用户退出
+- THEN 本地 refresh 家族吊销,cookie 清除,返回 Keycloak end_session 地址供前端跳转
+
+#### Scenario: 登出不因权威故障失败
+
+- GIVEN Keycloak 发现文档不可达
+- WHEN 用户退出
+- THEN 本地 refresh 家族仍吊销,响应 200,redirect_url 为空由前端回落登录页

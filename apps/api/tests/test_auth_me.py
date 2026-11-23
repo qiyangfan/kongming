@@ -25,7 +25,7 @@ async def test_me_returns_real_roles_perms_tenants(
     r = await client.get("/auth/me", headers=bearer_headers(uid))
     assert r.status_code == 200
     body = r.json()
-    assert body["user_id"] == uid  # 主体键即虎符 sub
+    assert body["user_id"] == uid  # 主体键即Keycloak sub
     assert "SUPER_ADMIN" in body["role_keys"]
     assert "system:user:manage" in body["perm_codes"]
     assert "system:role:manage" in body["perm_codes"]

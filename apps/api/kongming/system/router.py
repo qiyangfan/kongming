@@ -79,7 +79,7 @@ UserClaims = Annotated[dict[str, object], Depends(current_user)]
 
 
 class UserUpdateIn(BaseModel):
-    """全量更新用户资料与授权;username 由虎符登录建档决定,创建后不可修改。"""
+    """全量更新用户资料与授权;username 由Keycloak登录建档决定,创建后不可修改。"""
 
     nickname: str = Field(max_length=64)
     email: str | None = Field(default=None, max_length=128)

@@ -13,15 +13,15 @@
 
 ## apps/api — 控制面(持凭证)
 
-| 维度     | 选型                                                                                            |
-| -------- | ----------------------------------------------------------------------------------------------- |
-| Web      | FastAPI + Pydantic v2                                                                           |
-| ORM      | SQLAlchemy 2.1 async + asyncpg(stack-refresh 2026-10 批②)                                       |
-| 迁移     | Alembic(baseline 制,见 ADR-004)                                                                 |
-| 认证     | 自建:argon2-cffi + PyJWT(RS256)+ authlib(GitHub OAuth),见 ADR-003;联邦登录走连接器架构(ADR-006) |
-| SQL 治理 | sqlglot(AST 防火墙 + 方言能力储备)                                                              |
-| 限流     | 按需(nginx limit_req 起步,不预设库)                                                             |
-| 可观测   | structlog(JSON)+ prometheus-client + OpenTelemetry(按需启用)                                    |
+| 维度     | 选型                                                                                                                        |
+| -------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Web      | FastAPI + Pydantic v2                                                                                                       |
+| ORM      | SQLAlchemy 2.1 async + asyncpg(stack-refresh 2026-10 批②)                                                                   |
+| 迁移     | Alembic(baseline 制,见 ADR-004)                                                                                             |
+| 认证     | 本地会话:PyJWT(RS256)+ 连接器架构(ADR-006);唯一人类登录入口为平台 Keycloak(外部 OIDC provider,不自托管),见 ADR-003 演进注记 |
+| SQL 治理 | sqlglot(AST 防火墙 + 方言能力储备)                                                                                          |
+| 限流     | 按需(nginx limit_req 起步,不预设库)                                                                                         |
+| 可观测   | structlog(JSON)+ prometheus-client + OpenTelemetry(按需启用)                                                                |
 
 ## apps/agent — Agent 面(零凭证)
 

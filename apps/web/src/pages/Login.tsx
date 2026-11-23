@@ -1,4 +1,4 @@
-/* 登录页只展示统一身份(虎符)入口;未配置时提示联系运维。 */
+/* 登录页只展示统一身份(Keycloak)入口;未配置时提示联系运维。 */
 
 import { useEffect, useState } from "react";
 import { api, humanizeErrorText, type OptionsOut, type StartOut } from "../lib/api";

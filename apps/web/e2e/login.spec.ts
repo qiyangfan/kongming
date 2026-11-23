@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 
 test("登录页只提供统一身份入口且无严重可访问性违规", async ({ page }) => {
   await page.route("**/auth/options", (route) =>
-    route.fulfill({ json: { providers: [{ provider: "hufu", display_name: "统一身份" }] } }),
+    route.fulfill({ json: { providers: [{ provider: "keycloak", display_name: "统一身份" }] } }),
   );
   await page.goto("/login");
   await expect(page.getByRole("heading", { name: "孔明 Kongming" })).toBeVisible();

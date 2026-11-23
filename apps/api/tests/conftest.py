@@ -19,12 +19,12 @@ os.environ.setdefault(
 # 测试 Redis 启用了密码认证，连接 URL 需要包含密码。
 os.environ.setdefault("KM_REDIS_URL", "redis://:redis123@localhost:6379/15")
 os.environ.setdefault("KM_INTERNAL_TOKEN", "test-internal-token")
-# 测试用运维超管:种子把该虎符 sub 绑到 SUPER_ADMIN,不创建可登录账号。
+# 测试用运维超管:种子把该Keycloak sub 绑到 SUPER_ADMIN,不创建可登录账号。
 os.environ.setdefault("KM_ADMIN_SUBJECT", "00000000-0000-7000-8000-000000000001")
-# 虎符是唯一登录入口:默认未配置,接入场景由 test_auth_hufu 显式注入
-for _k in ("KM_HUFU_ISSUER", "KM_HUFU_CLIENT_ID", "KM_HUFU_CLIENT_SECRET"):
+# Keycloak是唯一登录入口:默认未配置,接入场景由 test_auth_keycloak 显式注入
+for _k in ("KM_KEYCLOAK_ISSUER", "KM_KEYCLOAK_CLIENT_ID", "KM_KEYCLOAK_CLIENT_SECRET"):
     os.environ.setdefault(_k, "")
-os.environ.setdefault("KM_HUFU_ENABLED", "true")
+os.environ.setdefault("KM_KEYCLOAK_ENABLED", "true")
 # 清空精排配置,避免读取本机 .env 后发起真实请求;
 # 配置场景由 test_doc_rerank 显式构造 Settings。
 for _k in ("KM_RERANK_PROVIDER", "KM_RERANK_API_KEY", "KM_RERANK_MODEL"):
@@ -294,7 +294,7 @@ MakeUser = Callable[..., Awaitable[str]]
 def make_user(session: AsyncSession) -> MakeUser:
     """直插 sys_user 的 arrange 助手(不依赖被测实现,保持测试独立)。
 
-    行 ID 由库生成(等价于虎符 sub);需要携带身份调用接口时用 bearer_headers。
+    行 ID 由库生成(等价于Keycloak sub);需要携带身份调用接口时用 bearer_headers。
     """
 
     async def _make(
@@ -334,10 +334,10 @@ def bearer_headers() -> Callable[[str], dict[str, str]]:
 
 
 @pytest.fixture
-def fake_hufu(
+def fake_keycloak(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Callable[["NormalizedProfile"], None]:
-    """把虎符 provider 替换为返回固定资料的非 OIDC 桩。
+    """把Keycloak provider 替换为返回固定资料的非 OIDC 桩。
 
     只替换 profile 来源,state 一次性、账号关联与建号规则仍走真实实现。
     """
@@ -345,7 +345,7 @@ def fake_hufu(
 
     def _install(profile: "NormalizedProfile") -> None:
         class _Fake:
-            key = "hufu"
+            key = "keycloak"
             display_name = "统一身份"
             pkce = False
             oidc = False
@@ -366,6 +366,6 @@ def fake_hufu(
             async def end_session_url(self, settings: object) -> str:
                 return "https://idp.example/end_session?client_id=kongming"
 
-        monkeypatch.setitem(providers.REGISTRY, "hufu", _Fake())
+        monkeypatch.setitem(providers.REGISTRY, "keycloak", _Fake())
 
     return _install

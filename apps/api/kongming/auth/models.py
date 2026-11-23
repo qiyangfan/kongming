@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 UserStatus = Literal["ACTIVE", "DISABLED"]
-ProviderKey = Literal["HUFU"]
+ProviderKey = Literal["KEYCLOAK"]
 
 
 @dataclass(frozen=True)

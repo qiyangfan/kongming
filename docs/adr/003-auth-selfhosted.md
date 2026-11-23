@@ -52,3 +52,5 @@ standalone 默认;虎符只作为**可选** provider 经 ADR-006 追加节接入
 (发现文档/JWKS/授权码与登出端点 + PKCE/`sub` 与 profile claims),不 import IdP 代码、
 不共享库/DB/签名密钥、不依赖私有端点。auth 模块因此必须保持独立包边界
 (`kongming/auth/`),不与业务域交织。
+
+> 2026-11-23 注:虎符已退役,由平台 Keycloak 承接;下文「虎符」仅为历史名称。

@@ -2,6 +2,7 @@
 
 日期: 2026-08-16
 状态: 已接受(002/003 变更的实施蓝图)
+> 演进注记(2026-11-23):虎符已退役,统一身份由平台 Keycloak 承接;provider 键与配置已改名为 `keycloak`,下文历史段落中的旧名不再使用。
 演进注记(2026-08-17,003 落地按官方文档核验):
 ① 飞书采用 authen **v2** 端点——app 凭证(client_id/client_secret,JSON 体)
 直换 user_access_token,**无需预取 app_access_token**(下文「实施节奏」的"预取"
@@ -62,7 +63,7 @@ start/callback 404),凭证保留——为企微这类"凭证在、环境未就�
 | 自托管 IdP(Logto/Zitadel/Keycloak) | 五个 OAuth 联邦恰是 IdP 最不需要出场的场景;溢价(SAML/企业 IdP 兼容)用不上,代价(重组件+登录页不可控)全付——ADR-003 账本重演 |
 
 注(2026-11-20):本表「自托管 IdP」否决的是以通用 IdP 替代孔明自建认证;
-虎符是平台级独立项目,以可选 OIDC provider 接入(见下文追加节),连接器形态不变。
+Keycloak是平台级独立项目,以可选 OIDC provider 接入(见下文追加节),连接器形态不变。
 
 ## 实施节奏
 
@@ -71,7 +72,7 @@ start/callback 404),凭证保留——为企微这类"凭证在、环境未就�
 
 ## 追加(2026-11-20):统一身份 IdP 作为可选 OIDC provider
 
-平台身份权威立项为独立项目虎符(`longzhong/hufu`,单二进制/自带存储,标准 OIDC OP)。
+平台身份权威立项为独立项目Keycloak(`longzhong/keycloak`,单二进制/自带存储,标准 OIDC OP)。
 孔明沿用本 ADR 的连接器形态把它接入,与 GitHub/Google 同级:
 
 - **可插拔**:启用/停用只经配置(issuer、client_id、client_secret),无代码分支;未配置即
@@ -83,14 +84,14 @@ start/callback 404),凭证保留——为企微这类"凭证在、环境未就�
   不消费任何产品角色/租户 claim(授权留本地)。
 - **令牌**:回调验 id_token(RS256、iss/aud/exp/nonce)后仍由本地签发会话令牌;孔明 API
   只认本地令牌,不直接采信 IdP access token;账号禁用由本地影子状态逐请求拦截。
-- **登出联动**:本地登出(先吊销本地 refresh 家族)后经 `end_session_endpoint` 结束虎符
+- **登出联动**:本地登出(先吊销本地 refresh 家族)后经 `end_session_endpoint` 结束Keycloak
   会话,避免下次登录被 SSO 直接带回;跳转不带 id_token 等任何令牌,不持久化 IdP id_token;
-  虎符不可达时不阻断本地登出,直接回落地登录页。
-- **发布与互联边界**:孔明未配置 IdP 时零依赖、可独立发布;虎符独立单二进制(自带存储)
+  Keycloak不可达时不阻断本地登出,直接回落地登录页。
+- **发布与互联边界**:孔明未配置 IdP 时零依赖、可独立发布;Keycloak独立单二进制(自带存储)
   发布,同一 issuer 可服务多个 RP;双方不 import 对方代码、不共享库/DB/签名密钥、不依赖私有端点。
 
 ## 与既有决策的关系
 
 ADR-003(自建认证)不变,本 ADR 是其联邦部分的架构化扩展;
-统一身份回退路径(2026-11-20 修订):独立 IdP 虎符以可选 provider 接入,本地会话
+统一身份回退路径(2026-11-20 修订):独立 IdP Keycloak以可选 provider 接入,本地会话
 仍由孔明签发,签发权不再平移(见上文追加节)。

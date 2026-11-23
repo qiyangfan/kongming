@@ -1,7 +1,7 @@
-"""启动种子(rbac spec「种子数据」):齐备/幂等/只增不改/超管按虎符 sub 绑定。
+"""启动种子(rbac spec「种子数据」):齐备/幂等/只增不改/超管按Keycloak sub 绑定。
 
 种子不创建任何可登录账号(ADR-0010):超管身份只能来自 `KM_ADMIN_SUBJECT`
-指向的、虎符已建过档的 sys_user 行。
+指向的、Keycloak已建过档的 sys_user 行。
 """
 
 import pytest
@@ -74,7 +74,7 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
         (await session.execute(text("SELECT tenant_key FROM public.sys_tenant"))).scalars().all()
     )
     assert tenants == ["default"]
-    # 只播种配置的虎符 sub 授权资料,不创建可登录账号
+    # 只播种配置的Keycloak sub 授权资料,不创建可登录账号
     assert (await session.execute(text("SELECT count(*) FROM public.sys_user"))).scalar_one() == 1
     assert (
         await session.execute(
@@ -180,13 +180,13 @@ async def test_seed_precreates_configured_admin_subject(
     subject = "01a1f8e2-0000-7000-8000-00000000dead"
     monkeypatch.setattr(get_settings(), "admin_subject", subject)
     await seed_all(session, get_settings())
-    # 只预建该虎符 sub 的授权资料与身份映射,无本地密码
+    # 只预建该Keycloak sub 的授权资料与身份映射,无本地密码
     assert (await session.execute(text("SELECT count(*) FROM public.sys_user"))).scalar_one() == 1
     assert (
         await session.execute(
             text(
                 "SELECT count(*) FROM public.user_identities"
-                " WHERE provider='HUFU' AND external_id=:s"
+                " WHERE provider='KEYCLOAK' AND external_id=:s"
             ),
             {"s": subject},
         )

@@ -77,7 +77,7 @@ class SystemService:
         refresh_ttl_sec: int,
     ) -> None:
         self._repo = repo
-        # 运维超管以虎符 sub 标识(ADR-0010);空串=未指定,下列保护全部跳过
+        # 运维超管以Keycloak sub 标识(ADR-0010);空串=未指定,下列保护全部跳过
         self._admin_subject = admin_subject
         self._families = families
         self._refresh_ttl_sec = refresh_ttl_sec

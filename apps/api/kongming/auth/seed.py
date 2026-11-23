@@ -3,8 +3,8 @@
 纪律:只增不改——按唯一键查缺补插,从不 UPDATE/DELETE 既有行(不覆盖线上改动);
 重复启动幂等。权限点=随代码发布的契约数据,注册表即唯一定义处。
 
-不播种任何可登录账号:账户归虎符(ADR-0010);超管只能由 `KM_ADMIN_SUBJECT`
-绑定到虎符已存在的 sub,或由现有超管在管理面显式授权。
+不播种任何可登录账号:账户归Keycloak(ADR-0010);超管只能由 `KM_ADMIN_SUBJECT`
+绑定到Keycloak已存在的 sub,或由现有超管在管理面显式授权。
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -148,9 +148,9 @@ async def seed_all(session: AsyncSession, settings: Settings) -> None:
 
 
 async def _bind_admin(uow: SqlUnitOfWork, settings: Settings) -> None:
-    """把 `KM_ADMIN_SUBJECT` 指定的虎符 sub 绑到 SUPER_ADMIN 与默认租户。
+    """把 `KM_ADMIN_SUBJECT` 指定的Keycloak sub 绑到 SUPER_ADMIN 与默认租户。
 
-    只认虎符已建过档的 sub(用户经虎符登录一次后 sys_user 才有该行);未配置时
+    只认Keycloak已建过档的 sub(用户经Keycloak登录一次后 sys_user 才有该行);未配置时
     不建任何账号。绑定只增:撤销超管须在管理面显式操作。
     """
     subject = (settings.admin_subject or "").strip()
@@ -158,8 +158,8 @@ async def _bind_admin(uow: SqlUnitOfWork, settings: Settings) -> None:
         return
     admin = await uow.users.get_by_id(subject)
     if admin is None:
-        # 只为配置的虎符 subject 预建授权资料(无密码、不可本地登录);
-        # 同时写 identity,确保该 subject 之后经虎符登录直接命中本行。
+        # 只为配置的Keycloak subject 预建授权资料(无密码、不可本地登录);
+        # 同时写 identity,确保该 subject 之后经Keycloak登录直接命中本行。
         admin = User(
             id=subject,
             username="admin",
@@ -168,7 +168,7 @@ async def _bind_admin(uow: SqlUnitOfWork, settings: Settings) -> None:
             status="ACTIVE",
         )
         await uow.users.create(admin)
-        await uow.identities.create(admin.id, "HUFU", subject)
+        await uow.identities.create(admin.id, "KEYCLOAK", subject)
     admin_role = await uow.roles.get_by_key("SUPER_ADMIN")
     if admin_role is not None:
         await uow.roles.bind_user(admin.id, admin_role.id)

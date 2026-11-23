@@ -659,8 +659,8 @@ async def test_migration_0034_downgrade_roundtrip(monkeypatch: pytest.MonkeyPatc
         from kongming.config import get_settings
 
         await seed_all(session, get_settings())
-        # 0064 降级拒绝带 HUFU 绑定;这里先清理测试预建映射,不丢业务数据。
-        await session.execute(text("DELETE FROM public.user_identities WHERE provider='HUFU'"))
+        # 0064 降级拒绝带 KEYCLOAK 绑定;这里先清理测试预建映射,不丢业务数据。
+        await session.execute(text("DELETE FROM public.user_identities WHERE provider='KEYCLOAK'"))
         await session.commit()
         import asyncio
 

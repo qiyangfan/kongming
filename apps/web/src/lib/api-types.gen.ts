@@ -8224,7 +8224,7 @@ export interface components {
         };
         /**
          * UserUpdateIn
-         * @description 全量更新用户资料与授权;username 由虎符登录建档决定,创建后不可修改。
+         * @description 全量更新用户资料与授权;username 由Keycloak登录建档决定,创建后不可修改。
          */
         UserUpdateIn: {
             /** Nickname */

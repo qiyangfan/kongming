@@ -1,7 +1,7 @@
 """令牌生命周期(auth spec「令牌签发与 refresh 轮换」):轮换/复用吊销/登出/类型混用。
 
 孔明已无本地登录入口(ADR-0010),凭据经联邦回调签发;此处用固定 profile 的
-虎符桩走完整回调链,保证被测的 refresh 语义面对的是真实签发的令牌对。
+Keycloak桩走完整回调链,保证被测的 refresh 语义面对的是真实签发的令牌对。
 """
 
 import asyncio
@@ -27,13 +27,13 @@ PROFILE = NormalizedProfile(
 
 
 async def _login(
-    client: AsyncClient, fake_hufu: Callable[[NormalizedProfile], None]
+    client: AsyncClient, fake_keycloak: Callable[[NormalizedProfile], None]
 ) -> dict[str, str]:
-    fake_hufu(PROFILE)
-    r = await client.get("/auth/hufu/start")
+    fake_keycloak(PROFILE)
+    r = await client.get("/auth/keycloak/start")
     start_body = cast("dict[str, str]", r.json())
     state = parse_qs(urlparse(start_body["authorize_url"]).query)["state"][0]
-    r = await client.post("/auth/hufu/callback", json={"code": "c0de", "state": state})
+    r = await client.post("/auth/keycloak/callback", json={"code": "c0de", "state": state})
     assert r.status_code == 200
     body: dict[str, str] = r.json()
     return body
@@ -42,10 +42,10 @@ async def _login(
 async def test_refresh_rotates_and_old_ticket_invalidated(
     client: AsyncClient,
     session: AsyncSession,
-    fake_hufu: Callable[[NormalizedProfile], None],
+    fake_keycloak: Callable[[NormalizedProfile], None],
 ) -> None:
     await seed_all(session, get_settings())  # 联邦建号依赖默认角色/租户
-    pair = await _login(client, fake_hufu)
+    pair = await _login(client, fake_keycloak)
     r = await client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]})
     assert r.status_code == 200
     pair2 = r.json()
@@ -58,10 +58,10 @@ async def test_refresh_rotates_and_old_ticket_invalidated(
 async def test_refresh_reuse_revokes_whole_family(
     client: AsyncClient,
     session: AsyncSession,
-    fake_hufu: Callable[[NormalizedProfile], None],
+    fake_keycloak: Callable[[NormalizedProfile], None],
 ) -> None:
     await seed_all(session, get_settings())  # 联邦建号依赖默认角色/租户
-    pair1 = await _login(client, fake_hufu)
+    pair1 = await _login(client, fake_keycloak)
     r = await client.post("/auth/refresh", json={"refresh_token": pair1["refresh_token"]})
     pair2 = r.json()
     # 已轮换的 refresh token 再次使用时，拒绝请求并吊销整个 token 家族。
@@ -75,10 +75,10 @@ async def test_refresh_reuse_revokes_whole_family(
 async def test_logout_revokes_family(
     client: AsyncClient,
     session: AsyncSession,
-    fake_hufu: Callable[[NormalizedProfile], None],
+    fake_keycloak: Callable[[NormalizedProfile], None],
 ) -> None:
     await seed_all(session, get_settings())  # 联邦建号依赖默认角色/租户
-    pair = await _login(client, fake_hufu)
+    pair = await _login(client, fake_keycloak)
     r = await client.post("/auth/logout", json={"refresh_token": pair["refresh_token"]})
     assert r.status_code == 204
     r = await client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]})
@@ -88,10 +88,10 @@ async def test_logout_revokes_family(
 async def test_refresh_rejects_access_token(
     client: AsyncClient,
     session: AsyncSession,
-    fake_hufu: Callable[[NormalizedProfile], None],
+    fake_keycloak: Callable[[NormalizedProfile], None],
 ) -> None:
     await seed_all(session, get_settings())  # 联邦建号依赖默认角色/租户
-    pair = await _login(client, fake_hufu)
+    pair = await _login(client, fake_keycloak)
     r = await client.post("/auth/refresh", json={"refresh_token": pair["access_token"]})
     assert r.status_code == 401
 
@@ -99,10 +99,10 @@ async def test_refresh_rejects_access_token(
 async def test_me_rejects_refresh_token(
     client: AsyncClient,
     session: AsyncSession,
-    fake_hufu: Callable[[NormalizedProfile], None],
+    fake_keycloak: Callable[[NormalizedProfile], None],
 ) -> None:
     await seed_all(session, get_settings())  # 联邦建号依赖默认角色/租户
-    pair = await _login(client, fake_hufu)
+    pair = await _login(client, fake_keycloak)
     r = await client.get("/auth/me", headers={"Authorization": f"Bearer {pair['refresh_token']}"})
     assert r.status_code == 401
 
@@ -110,11 +110,11 @@ async def test_me_rejects_refresh_token(
 async def test_concurrent_refresh_has_single_winner(
     client: AsyncClient,
     session: AsyncSession,
-    fake_hufu: Callable[[NormalizedProfile], None],
+    fake_keycloak: Callable[[NormalizedProfile], None],
 ) -> None:
     """并发同票刷新:原子轮换保证仅一个胜者;败者按复用检测吊销全家族(spec 契约语义)。"""
     await seed_all(session, get_settings())  # 联邦建号依赖默认角色/租户
-    pair = await _login(client, fake_hufu)
+    pair = await _login(client, fake_keycloak)
     r1, r2 = await asyncio.gather(
         client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]}),
         client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]}),

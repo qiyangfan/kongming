@@ -63,20 +63,20 @@ class Settings(BaseSettings):
     # 内部服务令牌:api ↔ agent 通道(与用户 JWT 分离,ADR-002)
     internal_token: str | None = None
 
-    # 统一身份(虎符)联邦:唯一登录入口;置 false 只停新登录,已签发令牌按 TTL 继续有效
-    hufu_enabled: bool = True
-    hufu_issuer: str | None = None
-    hufu_client_id: str | None = None
-    hufu_client_secret: str | None = None
-    hufu_redirect_uri: str = "http://localhost:5173/auth/hufu/callback"
-    hufu_post_logout_redirect_uri: str = "http://localhost:5173/login"
+    # 统一身份(Keycloak)联邦:唯一登录入口;置 false 只停新登录,已签发令牌按 TTL 继续有效
+    keycloak_enabled: bool = True
+    keycloak_issuer: str | None = None
+    keycloak_client_id: str | None = None
+    keycloak_client_secret: str | None = None
+    keycloak_redirect_uri: str = "http://localhost:5173/auth/keycloak/callback"
+    keycloak_post_logout_redirect_uri: str = "http://localhost:5173/login"
     auth_cookie_secure: bool = False
 
     auth_state_ttl_sec: int = Field(default=600, ge=1)
     # 登录发起每 IP 每分钟上限:匿名入口,防 state 存储与发现文档被刷
     auth_login_rate_per_minute: int = Field(default=60, ge=1)
 
-    # 运维超管:虎符 sub(首次登录建过档后生效);留空则不绑定任何超管
+    # 运维超管:Keycloak sub(首次登录建过档后生效);留空则不绑定任何超管
     admin_subject: str | None = None
 
     # 动态数据源密码加密密钥

@@ -1,7 +1,7 @@
-"""auth 用例层:虎符联邦回调、令牌生命周期、当前用户。
+"""auth 用例层:Keycloak联邦回调、令牌生命周期、当前用户。
 
 零框架依赖:不 import fastapi/sqlalchemy/redis;持久化经 ports 端口,配置经 Settings。
-孔明不持有本地密码(ADR-0010),主体键即虎符 `sub`。
+孔明不持有本地密码(ADR-0010),主体键即Keycloak `sub`。
 """
 
 import base64
@@ -98,13 +98,13 @@ class AuthService:
         return TokenPair(access, refresh)
 
     async def logout_sso(self, refresh_token: str) -> str | None:
-        """撤销本地 refresh 家族并返回虎符 end_session 地址;无可用端点时 None。"""
+        """撤销本地 refresh 家族并返回Keycloak end_session 地址;无可用端点时 None。"""
         try:
             _, fid, _ = self._decode_refresh(refresh_token)
             await self._families.revoke_family(fid, self._s.refresh_token_ttl_sec)
         except TokenInvalid:
             pass
-        provider = self._registry.get("hufu")
+        provider = self._registry.get("keycloak")
         if provider is None:
             return None
         end_session = getattr(provider, "end_session_url", None)
@@ -240,7 +240,7 @@ class AuthService:
         if role is None or tenant is None:
             # 启动种子必先于流量就位(main lifespan);缺失即环境异常,拒绝建号
             raise RuntimeError("默认角色/租户缺失:种子未执行")
-        # sys_user.id 即虎符 sub:所有授权表都以该列外键关联,不再生成本地 ID
+        # sys_user.id 即Keycloak sub:所有授权表都以该列外键关联,不再生成本地 ID
         user = User(
             id=profile.external_id,
             username=username,
