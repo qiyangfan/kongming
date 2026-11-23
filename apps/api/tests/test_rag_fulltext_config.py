@@ -244,7 +244,7 @@ _EXPECTED_CHUNK_INSERT_SQL = (
     " (id, document_id, tenant_id, datasource_key, chunk_level,"
     "  parent_id, seq, source_ref, content, tsv, embedding)"
     " VALUES (:i, :doc, :t, :d, :lv, :pid, :seq, :ref, :content,"
-    "  to_tsvector('simple', :content), CAST(:vec AS halfvec))"
+    "  to_tsvector('simple', :idx), CAST(:vec AS halfvec))"
 )
 
 _EXPECTED_DOC_RECALL_SQL = (

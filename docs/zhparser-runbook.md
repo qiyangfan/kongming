@@ -51,8 +51,16 @@ ALTER TEXT SEARCH CONFIGURATION zhparser ADD MAPPING FOR n,v,a,i,e,l,j WITH simp
 2. **存量重算 tsv**(切换前必须做,否则查询分词与存量 token 不一致):
 
    ```sql
-   UPDATE rag.document_chunks SET tsv = to_tsvector('zhparser', content);
+   UPDATE rag.document_chunks c
+      SET tsv = to_tsvector('zhparser', d.doc_name || E'\n' || c.content)
+     FROM rag.documents d
+    WHERE d.id = c.document_id;
    ```
+
+   表达式须与写入侧 `index_text`(文档名+块正文)一致,漏掉 `doc_name`
+   会让按文档名的词面召回失效。也可用维护脚本一并重算(会连带重算向量):
+   `KM_RAG_FULLTEXT_TS_CONFIG=zhparser uv run python scripts/rebuild_embeddings.py
+   --table document_chunks`。
 
    表说明表 `rag.table_descriptions.tsv` 由写入端拼接(表名/别名/注释/列说明)生成,
    重算须按 `kongming/rag/repository.py` 的同款表达式或重新内省,不建议手写 SQL。

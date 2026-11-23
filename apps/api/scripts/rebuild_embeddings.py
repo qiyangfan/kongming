@@ -1,5 +1,5 @@
-"""从保留的文本重建四类派生向量。每批单独提交，失败时停止但保留已写入的批次；
-支持 --dry-run 和 --table。"""
+"""从保留的文本重建派生向量;文档块同时按索引文本重算全文 tsv。每批单独提交,
+失败时停止但保留已写入的批次;支持 --dry-run 和 --table。"""
 
 import argparse
 import asyncio
@@ -13,15 +13,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # scripts/ 直�
 
 from sqlalchemy import text
 
+from kongming.config import get_settings
 from kongming.db import get_sessionmaker
 from kongming.rag.agent_callback import get_agent_rag_client
 from kongming.rag.catalog import vec_literal
+from kongming.rag.chunker import index_text
 from kongming.rag.models import build_embedding_text
 from kongming.redis_client import get_redis
 
 log = logging.getLogger("rebuild_embeddings")
 
-# 表 → (计数 SQL, 读取 SQL, 更新 SQL);读取按 id 键集分页(可重跑断点语义)
+# 表 → 计数/读取 SQL;通用分支另用 update 重建向量,
+# document_chunks 走 _apply_chunk_batch(向量+tsv 按层级分治)
 _TABLES: dict[str, dict[str, str]] = {
     "table_descriptions": {
         "count": "SELECT count(*) FROM rag.table_descriptions",
@@ -43,13 +46,11 @@ _TABLES: dict[str, dict[str, str]] = {
         "update": "UPDATE rag.query_history SET embedding = CAST(:vec AS halfvec) WHERE id = :id",
     },
     "document_chunks": {
-        "count": "SELECT count(*) FROM rag.document_chunks WHERE chunk_level = 'CHILD'",
+        "count": "SELECT count(*) FROM rag.document_chunks",
         "select": (
-            "SELECT id, content FROM rag.document_chunks WHERE chunk_level = 'CHILD'"
-            " AND id > :last ORDER BY id LIMIT :n"
-        ),
-        "update": (
-            "UPDATE rag.document_chunks SET embedding = CAST(:vec AS halfvec) WHERE id = :id"
+            "SELECT c.id, c.chunk_level, c.content, d.doc_name"
+            " FROM rag.document_chunks c JOIN rag.documents d ON d.id = c.document_id"
+            " WHERE c.id > :last ORDER BY c.id LIMIT :n"
         ),
     },
     "user_memory": {
@@ -63,14 +64,47 @@ _TABLES: dict[str, dict[str, str]] = {
 
 
 def _row_text(table: str, row: Any) -> str:
-    """行 → embedding 输入文本(与写入侧同源:表说明走 build_embedding_text)。"""
+    """行 → embedding 输入文本(与写入侧同源;文档块用文档名+正文索引文本)。"""
     if table == "table_descriptions":
         cols_raw = row.cols or "{}"
         columns = json.loads(cols_raw) if isinstance(cols_raw, str) else cols_raw
         return build_embedding_text(
             row.table_name, row.table_comment or "", columns, alias=row.alias or ""
         )
+    if table == "document_chunks":
+        return index_text(str(row.doc_name), str(row.content or ""))
     return str(row.content or "")
+
+
+def _chunk_update_sql(ts_config: str, *, with_vector: bool) -> str:
+    """块重建 UPDATE:tsv 恒重算,子块附带 embedding;配置名经白名单校验。"""
+    sets = f"tsv = to_tsvector('{ts_config}', :idx)"
+    if with_vector:
+        sets += ", embedding = CAST(:vec AS halfvec)"
+    # S608 豁免:{ts_config} 为白名单校验后的配置名,其余全部绑定参数
+    return f"UPDATE rag.document_chunks SET {sets} WHERE id = :id"  # noqa: S608
+
+
+async def _apply_chunk_batch(session: Any, embedder: Any, rows: Any, *, batch_no: int) -> None:
+    """块批:子块重算 embedding 与 tsv,父块仅重算 tsv(不重切块、不动 id)。"""
+    ts = get_settings().require_fulltext_ts_config()
+    child_rows = [r for r in rows if r.chunk_level == "CHILD"]
+    vectors: list[Any] = []
+    if child_rows:
+        vectors = await embedder.embed([_row_text("document_chunks", r) for r in child_rows])
+        if len(vectors) != len(child_rows):
+            raise RuntimeError(f"document_chunks 批 {batch_no}: embedding 返回数量不符")
+    vi = 0
+    for row in rows:
+        params: dict[str, Any] = {"id": row.id, "idx": _row_text("document_chunks", row)}
+        with_vector = row.chunk_level == "CHILD"
+        if with_vector:
+            vec = vectors[vi]
+            vi += 1
+            if not vec:
+                raise RuntimeError(f"document_chunks 批 {batch_no}: 行为空向量(id={row.id})")
+            params["vec"] = vec_literal(vec)
+        await session.execute(text(_chunk_update_sql(ts, with_vector=with_vector)), params)
 
 
 async def _count(session: Any, table: str) -> int:
@@ -85,7 +119,9 @@ async def _rebuild_table(
     batch_size: int,
     dry_run: bool,
 ) -> tuple[int, int]:
-    """重建单表;返回 (总行数, 批次数)。dry-run 只计数不调用不写库。"""
+    """重建单表;返回 (总行数, 批次数)。dry-run 只计数不调用不写库。
+
+    document_chunks 覆盖父块与子块:子块重算 embedding+tsv,父块只重算 tsv。"""
     spec = _TABLES[table]
     total = await _count(session, table)
     batches = (total + batch_size - 1) // batch_size
@@ -100,14 +136,17 @@ async def _rebuild_table(
         if not rows:
             break
         batch_no += 1
-        texts = [_row_text(table, r) for r in rows]
-        vectors = await embedder.embed(texts)
-        if len(vectors) != len(rows):
-            raise RuntimeError(f"{table} 批 {batch_no}: embedding 返回数量不符")
-        for row, vec in zip(rows, vectors, strict=True):
-            if not vec:
-                raise RuntimeError(f"{table} 批 {batch_no}: 行为空向量(id={row.id})")
-            await session.execute(text(spec["update"]), {"id": row.id, "vec": vec_literal(vec)})
+        if table == "document_chunks":
+            await _apply_chunk_batch(session, embedder, rows, batch_no=batch_no)
+        else:
+            texts = [_row_text(table, r) for r in rows]
+            vectors = await embedder.embed(texts)
+            if len(vectors) != len(rows):
+                raise RuntimeError(f"{table} 批 {batch_no}: embedding 返回数量不符")
+            for row, vec in zip(rows, vectors, strict=True):
+                if not vec:
+                    raise RuntimeError(f"{table} 批 {batch_no}: 行为空向量(id={row.id})")
+                await session.execute(text(spec["update"]), {"id": row.id, "vec": vec_literal(vec)})
         await session.commit()
         done += len(rows)
         last = str(rows[-1].id)
@@ -131,7 +170,9 @@ async def _run(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="全量向量重建(halfvec 2560)")
+    parser = argparse.ArgumentParser(
+        description="派生数据重建(向量 halfvec 2560;文档块同时重算 tsv)"
+    )
     parser.add_argument("--dry-run", action="store_true", help="只报分批计划,不调用不写库")
     parser.add_argument(
         "--table",

@@ -123,6 +123,11 @@ def _sentence_cut(text: str, *, start: int, ideal_end: int) -> int:
     return best + 1
 
 
+def index_text(doc_name: str, content: str) -> str:
+    """块的被索引文本=文档名 + 换行 + 块正文(embedding 与全文 tsv 共用)。"""
+    return f"{doc_name}\n{content}"
+
+
 def chunk_document(
     doc_name: str, text: str, *, sentence_boundary: bool = False
 ) -> list[dict[str, object]]:

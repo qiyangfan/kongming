@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kongming.config import DEFAULT_FULLTEXT_TS_CONFIG, validated_fulltext_ts_config
 from kongming.db import uuid7
 from kongming.rag.catalog import vec_literal
+from kongming.rag.chunker import index_text
 
 _INSERT_DOCUMENT = (
     "INSERT INTO rag.documents"
@@ -16,16 +17,21 @@ _INSERT_DOCUMENT = (
     " VALUES (:i, :t, :d, :n, :h, :bc)"
 )
 
+# 兜底轮得分下限:部分命中实测 ≈1e-20,全词命中 ≈0.1,阈值取两者之间数量级
+_FALLBACK_MIN_SCORE = 1e-9
+
 
 def _chunk_insert_sql(ts_config: str) -> str:
-    """子块插入语句;{ts_config} 为白名单校验后的配置名(标识符无法绑定参数)。"""
+    """块插入语句;{ts_config} 为白名单校验后的配置名(标识符无法绑定参数)。
+
+    tsv 用索引文本(文档名+块正文)构造,content 列存原文;向量仅子块携带。"""
     # S608 豁免:{ts_config} 为白名单校验后的配置名,其余全部绑定参数
     return (
         "INSERT INTO rag.document_chunks"  # noqa: S608
         " (id, document_id, tenant_id, datasource_key, chunk_level,"
         "  parent_id, seq, source_ref, content, tsv, embedding)"
         " VALUES (:i, :doc, :t, :d, :lv, :pid, :seq, :ref, :content,"
-        f"  to_tsvector('{ts_config}', :content), CAST(:vec AS halfvec))"
+        f"  to_tsvector('{ts_config}', :idx), CAST(:vec AS halfvec))"
     )
 
 
@@ -52,8 +58,11 @@ class _ChunkWrite:
 def _chunk_params(
     chunk: dict[str, object], ctx: _ChunkWrite, vec: list[float] | None
 ) -> dict[str, object]:
-    """单块插入语句的绑定参数;父块 id 由父块序号经映射取得,顶层块为空。"""
+    """单块插入语句的绑定参数;父块 id 由父块序号经映射取得,顶层块为空。
+
+    idx=索引文本(文档名+块正文),仅用于 tsv;content 绑定原文。"""
     parent_seq = chunk["parent_seq"]
+    content = str(chunk["content"])
     return {
         "i": ctx.seq_to_id[int(str(chunk["seq"]))],
         "doc": ctx.doc["i"],
@@ -63,7 +72,8 @@ def _chunk_params(
         "pid": ctx.seq_to_id.get(int(str(parent_seq))) if parent_seq is not None else None,
         "seq": int(str(chunk["seq"])),
         "ref": chunk["source_ref"],
-        "content": chunk["content"],
+        "content": content,
+        "idx": index_text(str(ctx.doc["n"]), content),
         "vec": vec_literal(vec) if vec else None,
     }
 
@@ -122,7 +132,7 @@ class SqlDocumentRepo:
         chunks: list[dict[str, object]],
         vectors: list[list[float] | None],
     ) -> str:
-        """同名覆盖式更新(先删后插;FK CASCADE 清旧块);仅 CHILD 写向量/tsv。"""
+        """同名覆盖式更新(先删后插;FK CASCADE 清旧块);tsv 全行写,向量仅 CHILD。"""
         return await self._replace_document(
             _DocWrite(
                 tenant_id=tenant_id,
@@ -296,20 +306,27 @@ class SqlDocumentRepo:
     async def recall_children_fulltext(
         self, *, tenant_id: str, datasource_key: str, question: str, top_k: int
     ) -> list[dict[str, Any]]:
-        """查询语义「AND 优先、内容词兜底」：全词条 AND 零命中才落
-        内容词(length >= 2)兜底轮,排序/量纲不变;两轮无差别的形态
-        被 spec 规范性排除。"""
-        for predicate in (self._ft_and_pred, self._ft_or_pred):
-            rows = await self._children_fulltext_rows(
-                predicate=predicate,
-                tenant_id=tenant_id,
-                datasource_key=datasource_key,
-                question=question,
-                top_k=top_k,
-            )
-            if rows:
-                return rows
-        return []
+        """查询语义「AND 优先、内容词兜底」:全词条 AND 零命中才落内容词
+        (length >= 2)兜底轮。兜底谓词只要求任一内容词命中,而计分沿用全问句
+        ts_rank——缺词命中恒为部分计量级(实测 ≈1e-20,全词命中 ≈0.1),
+        名次无意义,低于 _FALLBACK_MIN_SCORE 的兜底命中不进入融合。"""
+        and_rows = await self._children_fulltext_rows(
+            predicate=self._ft_and_pred,
+            tenant_id=tenant_id,
+            datasource_key=datasource_key,
+            question=question,
+            top_k=top_k,
+        )
+        if and_rows:
+            return and_rows
+        or_rows = await self._children_fulltext_rows(
+            predicate=self._ft_or_pred,
+            tenant_id=tenant_id,
+            datasource_key=datasource_key,
+            question=question,
+            top_k=top_k,
+        )
+        return [row for row in or_rows if float(row.get("score") or 0.0) >= _FALLBACK_MIN_SCORE]
 
     async def fetch_parents(self, *, tenant_id: str, parent_ids: list[str]) -> list[dict[str, Any]]:
         if not parent_ids:

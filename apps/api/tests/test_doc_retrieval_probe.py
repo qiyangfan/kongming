@@ -13,6 +13,11 @@ from tests.test_toolcall import _bind, _login
 DOC = b"return policy: within 7 days. refund process: apply first."
 QUESTION = "return policy"
 PROBE = "/system/document/retrieval-probe"
+# 每个标题段一个父块、一个子块;八段共享 policy 词,用于验证试跑父块上限
+MANY_PARENTS = "\n\n".join(
+    f"## Section {i}\nThe refund policy clause {i} is documented here with enough words."
+    for i in range(8)
+).encode()
 
 
 async def _admin(client: AsyncClient, s: AsyncSession) -> str:
@@ -20,11 +25,13 @@ async def _admin(client: AsyncClient, s: AsyncSession) -> str:
     return _login(get_settings().admin_subject)
 
 
-async def _upload(client: AsyncClient, token: str) -> None:
+async def _upload(
+    client: AsyncClient, token: str, *, name: str = "policy.md", content: bytes = DOC
+) -> None:
     r = await client.post(
         "/system/document/upload",
         headers={"Authorization": f"Bearer {token}"},
-        files={"file": ("policy.md", DOC, "text/markdown")},
+        files={"file": (name, content, "text/markdown")},
         data={"datasource_key": "default"},
     )
     assert r.status_code == 200
@@ -80,6 +87,20 @@ async def test_probe_paths_and_parents(client: AsyncClient, session: AsyncSessio
         assert p["doc_name"] == "policy.md"
         assert p["source_ref"].startswith("policy.md §")
         assert p["citation_key"].startswith("policy-")
+
+
+async def test_probe_parent_top_k_honored(client: AsyncClient, session: AsyncSession) -> None:
+    """父块上限参数贯通到召回级:请求 8 时不得被内部缺省 5 静默截断。"""
+    token = await _admin(client, session)
+    await _upload(client, token, name="many.md", content=MANY_PARENTS)
+    headers = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "default"}
+    common = {"datasource_key": "default", "question": "policy"}
+    default = await client.get(PROBE, headers=headers, params=common)
+    assert default.status_code == 200
+    assert len(default.json()["parents"]) == 5
+    widened = await client.get(PROBE, headers=headers, params={**common, "parent_top_k": 8})
+    assert widened.status_code == 200
+    assert len(widened.json()["parents"]) == 8
 
 
 async def test_probe_consistent_with_main_retrieval(

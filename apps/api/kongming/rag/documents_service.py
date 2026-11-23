@@ -9,11 +9,12 @@ import logging
 import re
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 
-from kongming.rag.chunker import chunk_document
+from kongming.rag.chunker import chunk_document, index_text
 from kongming.rag.documents_repo import SqlDocumentRepo
 from kongming.rag.entity_extract import (
     EntityExtractError,
@@ -26,8 +27,22 @@ from kongming.rag.rerank import RerankError, RerankPort, record_rerank_usage
 
 log = logging.getLogger(__name__)
 
+# 召回级参数按代码版本固化(质量口径与索引文本/嵌入模型绑定):改值须过
+# 检索评测矩阵并更新基线,不做运行时配置——线上行为必须与评测基线同源。
 _CHILD_TOP_K = 8
 _PARENT_TOP_K = 5
+
+
+@dataclass(frozen=True)
+class RecallLimits:
+    """召回级上限:主检索用缺省值,试跑可按请求覆盖父块上限。"""
+
+    child_top_k: int = _CHILD_TOP_K
+    parent_top_k: int = _PARENT_TOP_K
+    entity_quota: int = 8
+
+
+_DEFAULT_LIMITS = RecallLimits()
 _EMBED_BATCH = 64  # agent /internal/embedding 单批上限(超限 422 静默死)
 _ENTITY_LEXICAL_LIMIT = 20  # 词法兜底实体名上限(防高频词刷爆 join 键集)
 _ENTITY_NAME_MAX = 200  # 伴表 name/name_normalized 列宽;超限名跳过防整批落库失败
@@ -87,11 +102,12 @@ async def upload_document(
     entity_extractor: EntityExtractorPort | None = None,
     sentence_boundary: bool = False,
 ) -> tuple[str, int, bool]:
-    """上传编排:分块→embedding(子块)→覆盖式落库(→实体抽取,可选)。
+    """上传编排:分块→embedding(子块索引文本)→覆盖式落库(→实体抽取,可选)。
 
     返回 (doc_id, 块数, skipped);content_hash 相同 → skipped=True(幂等)。
-    embedding 失败降级:子块无向量落库(仅全文路可召回)。实体抽取为部署级
-    可选档:失败降级该文档无实体,不阻断上传。
+    embedding 输入为 index_text(文档名+块正文),与全文 tsv 同源;content 列
+    保持原文。embedding 失败降级:子块无向量落库(仅全文路可召回)。实体抽取
+    为部署级可选档:失败降级该文档无实体,不阻断上传。
     """
     digest = hashlib.sha256(text.encode()).hexdigest()
     existing = await repo.find_by_name(
@@ -100,7 +116,7 @@ async def upload_document(
     if existing is not None and existing["content_hash"] == digest:
         return str(existing["id"]), 0, True
     chunks = chunk_document(doc_name, text, sentence_boundary=sentence_boundary)
-    child_texts = [str(c["content"]) for c in chunks if c["level"] == "CHILD"]
+    child_texts = [index_text(doc_name, str(c["content"])) for c in chunks if c["level"] == "CHILD"]
     vectors = await _embed_child_chunks(embedder, child_texts) if child_texts else []
     try:
         doc_id = await repo.replace_document(
@@ -238,14 +254,18 @@ def derive_citation_key(*, parent_id: str, doc_name: str) -> str:
     return f"{prefix}-{hasher}"
 
 
-def _rrf_parent_ids(fused: list[str], id_to_parent: Mapping[str, str]) -> list[str]:
-    """RRF 名次→父块首现去重截断(未启用精排的既有路径;精排降级同源复用)。"""
+def _rrf_parent_ids(
+    fused: list[str], id_to_parent: Mapping[str, str], *, top_k: int = _PARENT_TOP_K
+) -> list[str]:
+    """RRF 名次→父块首现去重截断(未启用精排的既有路径;精排降级同源复用)。
+
+    top_k 由调用方给定:主检索固定 _PARENT_TOP_K,试跑按请求上限放宽。"""
     parent_ids: list[str] = []
     for cid in fused:
         pid = id_to_parent.get(str(cid))
         if pid and pid not in parent_ids:
             parent_ids.append(pid)
-        if len(parent_ids) >= _PARENT_TOP_K:
+        if len(parent_ids) >= top_k:
             break
     return parent_ids
 
@@ -284,8 +304,9 @@ async def _rerank_parent_ids(
     fused: list[str],
     id_to_parent: Mapping[str, str],
     fallback: list[str],
+    top_k: int = _PARENT_TOP_K,
 ) -> list[str]:
-    """精排级:融合后候选池扩量→子块正文打分→父块最高分截断 top-5。
+    """精排级:融合后候选池扩量→子块正文打分→父块最高分截断 top_k。
 
     任何精排失败(超时/限流/不可用)降级 RRF-only 不阻断(单次
     调用粒度,不做熔断);成功/失败均留痕 sys_llm_usage(latency 只计出站
@@ -320,7 +341,7 @@ async def _rerank_parent_ids(
         scores,
         id_to_parent,
         threshold=reranker.score_threshold,
-        top_k=_PARENT_TOP_K,
+        top_k=top_k,
     )
 
 
@@ -422,9 +443,8 @@ async def _recall_stage(
     datasource_key: str,
     question: str,
     reranker: RerankPort | None = None,
-    child_top_k: int = _CHILD_TOP_K,
+    limits: RecallLimits = _DEFAULT_LIMITS,
     entity_extractor: EntityExtractorPort | None = None,
-    entity_quota: int = 8,
 ) -> dict[str, Any]:
     """共享召回段:两路召回(+可选实体扩展路)→RRF 融合→(可选精排)父块序。
 
@@ -438,9 +458,9 @@ async def _recall_stage(
         tenant_id=tenant_id,
         datasource_key=datasource_key,
         question=question,
-        child_top_k=child_top_k,
+        child_top_k=limits.child_top_k,
         entity_extractor=entity_extractor,
-        entity_quota=entity_quota,
+        entity_quota=limits.entity_quota,
     )
     fused = rrf_fuse_ids(
         [
@@ -448,7 +468,7 @@ async def _recall_stage(
             [str(h["id"]) for h in fulltext_hits],
             [str(h["id"]) for h in entity_hits],
         ],
-        top=reranker.pool_topk if reranker is not None else _PARENT_TOP_K * 2,
+        top=reranker.pool_topk if reranker is not None else limits.parent_top_k * 2,
     )
     # 子块 id → parent_id(保序)
     id_to_parent = {
@@ -463,10 +483,11 @@ async def _recall_stage(
             question=question,
             fused=fused,
             id_to_parent=id_to_parent,
-            fallback=_rrf_parent_ids(fused, id_to_parent),
+            fallback=_rrf_parent_ids(fused, id_to_parent, top_k=limits.parent_top_k),
+            top_k=limits.parent_top_k,
         )
     else:
-        parent_ids = _rrf_parent_ids(fused, id_to_parent)
+        parent_ids = _rrf_parent_ids(fused, id_to_parent, top_k=limits.parent_top_k)
     return {
         "vector_hits": vector_hits,
         "fulltext_hits": fulltext_hits,
@@ -496,8 +517,8 @@ async def _stage_with_parents(
         datasource_key=datasource_key,
         question=question,
         reranker=reranker,
+        limits=RecallLimits(entity_quota=entity_quota),
         entity_extractor=entity_extractor,
-        entity_quota=entity_quota,
     )
     parents = await repo.fetch_parents(tenant_id=tenant_id, parent_ids=stage["parent_ids"])
     return stage, parents
@@ -636,8 +657,8 @@ async def probe_docs(
         datasource_key=datasource_key,
         question=question,
         reranker=reranker,
+        limits=RecallLimits(parent_top_k=parent_top_k, entity_quota=entity_quota),
         entity_extractor=entity_extractor,
-        entity_quota=entity_quota,
     )
     parent_ids = stage["parent_ids"][:parent_top_k]
     parents = await repo.fetch_parents(tenant_id=tenant_id, parent_ids=parent_ids)

@@ -2,8 +2,9 @@
 """全量向量重建命令测试。
 
 覆盖:dry-run 只报分批计划(零 embedding 调用、零写库);实跑按批 embed+
-写回(2560 维假向量),可重跑(二次执行覆盖同一行);document_chunks 只重建
-CHILD 行。真实 PG(kongming_test,迁移后 halfvec(2560) 列)。
+写回(2560 维假向量),可重跑(二次执行覆盖同一行);document_chunks 子块
+重算 embedding+tsv、父块只重算 tsv,索引文本=文档名+正文。真实 PG
+(kongming_test,迁移后 halfvec(2560) 列)。
 """
 
 import importlib.util
@@ -101,8 +102,8 @@ async def test_rebuild_writes_vectors_and_rerunnable(session: AsyncSession) -> N
     assert n_set2 == 3
 
 
-async def test_document_chunks_only_child(session: AsyncSession) -> None:
-    """document_chunks 只重建 CHILD 行(PARENT 不背向量)。"""
+async def test_document_chunks_rebuild_context_and_tsv(session: AsyncSession) -> None:
+    """document_chunks:子块重算 embedding+tsv、父块只重算 tsv;content 原文不动。"""
     mod = _load_module()
     tid = (
         await session.execute(
@@ -112,38 +113,53 @@ async def test_document_chunks_only_child(session: AsyncSession) -> None:
             )
         )
     ).scalar_one()
+    doc_name = "storex policy.md"
     doc = (
         await session.execute(
             text(
                 "INSERT INTO rag.documents (id, tenant_id, datasource_key, doc_name,"
-                " content_hash) VALUES (gen_random_uuid(), :t, 'default', 'p.md', 'h')"
+                " content_hash) VALUES (gen_random_uuid(), :t, 'default', :n, 'h')"
                 " RETURNING id"
             ),
-            {"t": str(tid)},
+            {"t": str(tid), "n": doc_name},
         )
     ).scalar_one()
-    for level in ("PARENT", "CHILD", "CHILD"):
+    chunks = ((1, "PARENT", "块一"), (2, "CHILD", "子块一"), (3, "CHILD", "子块二"))
+    for seq, level, content in chunks:
         await session.execute(
             text(
                 "INSERT INTO rag.document_chunks (id, document_id, tenant_id,"
                 " datasource_key, chunk_level, seq, content)"
-                " VALUES (gen_random_uuid(), :d, :t, 'default', :lv, 1, '块')"
+                " VALUES (gen_random_uuid(), :d, :t, 'default', :lv, :seq, :c)"
             ),
-            {"d": str(doc), "t": str(tid), "lv": level},
+            {"d": str(doc), "t": str(tid), "lv": level, "seq": seq, "c": content},
         )
     await session.commit()
     embedder = _FakeEmbedder()
+    total, batches = await mod._rebuild_table(
+        session, embedder, "document_chunks", batch_size=10, dry_run=True
+    )
+    assert (total, batches) == (3, 1)  # 计数覆盖父块与子块
+    assert embedder.calls == []  # dry-run 零调用零写库
+
     total, _ = await mod._rebuild_table(
         session, embedder, "document_chunks", batch_size=10, dry_run=False
     )
-    assert total == 2  # 仅 CHILD
-    assert sum(len(c) for c in embedder.calls) == 2
-    n_parent_null = (
+    assert total == 3
+    texts = [text for call in embedder.calls for text in call]
+    assert len(texts) == 2  # 仅子块进向量
+    assert all(t.startswith(f"{doc_name}\n") for t in texts)
+
+    rows = (
         await session.execute(
             text(
-                "SELECT count(*) FROM rag.document_chunks"
-                " WHERE chunk_level = 'PARENT' AND embedding IS NULL"
-            )
+                "SELECT chunk_level, content, embedding IS NOT NULL AS has_vec,"
+                " tsv @@ plainto_tsquery('simple', 'storex') AS hit"
+                " FROM rag.document_chunks WHERE document_id=:d ORDER BY seq"
+            ),
+            {"d": str(doc)},
         )
-    ).scalar_one()
-    assert n_parent_null == 1
+    ).all()
+    assert [r.has_vec for r in rows] == [False, True, True]  # 父块不背向量
+    assert all(r.hit for r in rows)  # 全文索引含文档名词项
+    assert all("storex" not in str(r.content) for r in rows)  # 原文无前缀
