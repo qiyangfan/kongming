@@ -33,17 +33,32 @@
   同一道内部令牌);被取消的轮落 `chat_message.status=CANCELLED`(迁移 `0068` 第五态;
   `0069` 给 `chat_message.trace_id` 建了索引)。刷新、切会话、断网仍只是脱离接收,
   后台照常跑完并落库。
+- 前端断开后的中继内存卫生:SSE 中继生成器异常退出(前端断开、取消、发送失败)时
+  就地丢弃消费任务后续入队的帧直到终止标记——后台照常落库,但不在内存里为无人接收的
+  帧堆队(结果集大时单轮可达数百 KB,并发遗弃轮次会叠加)。Agent 面帧队列保持无界:
+  其唯一消费者(控制面消费任务)断开时图执行即被取消,队列不会无限增长;设有界反而
+  在图执行快于读取时把驱动任务堵死。
+- 在途轮登记跨实例共享(share-turn-registry,已归档):取消请求落到任一实例都生效。
+  持有实例在 Redis 记一键(`chat:turn:{trace_id}`,值含归属用户/本实例地址/注销凭据,
+  TTL `KM_TURN_REGISTRY_TTL_SEC` 缺省 900s);收到取消的实例未命中本地在途登记时,
+  凭该键把取消经内部面 `POST /internal/chat/turn-cancel` 转给持有实例执行,结果原样
+  回传。登记不可用、持有实例不可达、登记指向本实例而本实例无该轮(陈旧登记)时,
+  一律按落库结果回答,不伪造终态。自报地址 `KM_API_SELF_BASE_URL` 缺省按主机名推导
+  ——多实例部署必须逐实例唯一可达,不能填共享服务名(会让自环防护误判);登记 TTL 须
+  大于 `KM_AGENT_TIMEOUT_SEC`(120s)× 最坏 5 阶段 + 收敛余量。Redis 故障时退化为
+  落库兜底,单实例语义不变。
 - 取消与收尾的先后:一轮的收尾(落库 + 终态帧)一旦开始就不被请求取消打断——硬取消落在
   收尾段时等它做完,取消结果按收尾定(已有业务行或 FAILED 行即 `COMPLETED`)。流式的
   FAILED 行带 trace_id,以失败收尾的轮再取消返回 `COMPLETED` 并带消息标识,不是 404。
   实现在 `apps/api/kongming/chat/stream_runner.py`(`_await_settle`/`_settle`)。
 - 真取消的已知限制:①`0068` 降级前须先处理 CANCELLED 行(删除或人工改写),否则四态
-  CHECK 拒绝降级;②在途轮登记在进程内存,单节点部署形态下才保证命中(多实例下取消
-  可能 404,前端提示「已结束」与事实不符);③通知 Agent 面等 3 秒、等本轮收敛 5 秒,
-  超时才硬取消本地任务——Agent 面挂起时取消请求约 8 秒返回(常量在
-  `apps/api/kongming/chat/inflight.py` 与 `agent_client.py`);④被中断的那次模型调用
-  不产生 `sys_llm_usage` 行;⑤质量观测面不计已取消轮次,按 trace 的用量时间线与按
-  消息标识的节点轨迹仍可查。
+  CHECK 拒绝降级;②通知 Agent 面等 3 秒、等本轮收敛 5 秒,超时才硬取消本地任务——
+  Agent 面挂起时取消请求约 8 秒返回(常量在 `apps/api/kongming/chat/inflight.py` 与
+  `agent_client.py`);③被中断的那次模型调用不产生 `sys_llm_usage` 行;④质量观测面
+  不计已取消轮次,按 trace 的用量时间线与按消息标识的节点轨迹仍可查;⑤跨实例取消的
+  残余窗口:持有实例硬崩后最长一个登记 TTL 内,取消会先转发、连不通后按落库兜底
+  (最坏多等一个转发超时 16s);Redis 故障时跨实例取消退化为落库兜底(单实例不受影响,
+  本地快路径不依赖 Redis)。
 - 模型调用可经 muniu 网关(2026-11-24 实测):agent 的 LLM/向量/模型注册表整体指向
   muniu(隔离实例、独立 SQLite、一次性 `mk-` key,不碰用户常驻实例)时问答/向量/路由/
   计量/密钥鉴权全通;取消时正在路上的模型请求被掐断——网关记 `client_cancel`、0 token,
@@ -54,7 +69,7 @@
   启动;内部令牌两侧要对上(`KM_INTERNAL_TOKEN` / `KM_AGENT_INTERNAL_TOKEN`),否则
   Agent 面对一切请求答 403。未配置签名密钥时每个 api 进程各自生成临时密钥,
   进程外签发的令牌在另一个进程里无效。
-- 门禁各项(2026-11-24):api-check 1781 passed/10 skipped、覆盖率 77.22%,agent-check
+- 门禁各项(2026-11-24):api-check 1797 passed/10 skipped、覆盖率 77.22%,agent-check
   626 passed,liannu-check 23 passed,web 192 tests + 2 e2e,
   `openspec validate --all --strict` 56/56,`make check` 全绿。
   `contracts-check` 比较的是工作区与已提交版本,改动未提交时必红——提交前以「重复生成
@@ -66,7 +81,9 @@
 1. CI 全 job 因 GitHub Actions 账单锁定未启动;解锁后观察 contracts-check 与镜像扫描;
    eval-nightly 仅手动触发。
 2. 反代部署确认:`KM_AUTH_COOKIE_SECURE`、可信代理头、登录限流口径;并确认反代把
-   `/api` 前缀剥离到后端根路由(认证 cookie 的路径覆盖依赖该口径)。
+   `/api` 前缀剥离到后端根路由(认证 cookie 的路径覆盖依赖该口径)。多实例部署时按
+   `KM_API_SELF_BASE_URL` 给每个实例配唯一可达地址,并确认实例间网络互通(内部面转发
+   依赖它)。
 3. eval-nightly 首次运行前配置 `KM_AGENT_LLM_API_KEY` 与 `KM_EVAL_ACCESS_TOKEN`。
 4. 实时语音通话(`add-voice-call`,提案已备、未开工):前置(真取消)已就绪,真实通话
    验证已做完(2026-11-24,约 0.02 元;要点=浏览器可 WebRTC 直连阿里实时模型、
@@ -105,6 +122,12 @@
   「生成 SQL 开始时取消」与「总结开始时取消」两组,被取消的那次调用在孔明用量表与
   muniu 用量记录里都没有行(muniu 记 `client_cancel`、0 token、15ms 收尾,对照组同类
   调用 2–3s)——取消一路传导到上游供应商,无额外 token。
+- 2026-11-24 在途轮登记跨实例共享(双实例手工冒烟):A(8020)起真实模型流、B(8022)
+  收到取消→经 Redis 登记定位并转发到 A 的内部面→A 跑既有编排并通知 Agent 面中止
+  (agent 日志「在途问答已中止 count=1」)→B 返回 CANCELLED 携消息标识,A 的流收到
+  CANCELLED 终态帧,历史恰一条已取消行;杀掉 A 后 B 取消其陈旧 trace→0.02s 返回
+  404(不自我转发成环、不悬挂);登记键随轮次释放。新增用例 16 个(单测 13 + 集成 3),
+  api-check 1797 passed/10 skipped。
 - 2026-11-24 认证 cookie 路径:state/refresh 覆盖 `/api` 前缀;回归测试旧实现红、
   新实现绿;认证测试 47 passed;浏览器三端 SSO 9/9(三种首登入口,其余两端免密);
   协议级 e2e ALL PASS;`make check` 全绿。同日下午修订正端点只认 cookie(删 body
