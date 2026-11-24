@@ -20,9 +20,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.models import NormalizedProfile, ProviderExchangeFailed
 from kongming.auth.providers.keycloak import KeycloakProvider
+from kongming.auth.router import REFRESH_COOKIE
 from kongming.auth.seed import seed_all
 from kongming.config import get_settings
 from tests.conftest import MakeUser
+
+
+def _cookie(token: str) -> dict[str, str]:
+    """刷新/登出只认 HttpOnly cookie;按浏览器形态发 Cookie 头(端点不认 body)。"""
+    return {"Cookie": f"{REFRESH_COOKIE}={token}"}
+
 
 ISSUER = "http://idp.test"
 KID = "k1"
@@ -529,10 +536,10 @@ async def test_logout_sso_revokes_and_redirects(
     await seed_all(session, get_settings())
     fake_keycloak(PROFILE)
     pair = (await _callback(client, await _start(client))).json()
-    r = await client.post("/auth/logout/sso", json={"refresh_token": pair["refresh_token"]})
+    r = await client.post("/auth/logout/sso", headers=_cookie(pair["refresh_token"]))
     assert r.status_code == 200
     assert "end_session" in cast("dict[str, str]", r.json())["redirect_url"]
-    refreshed = await client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    refreshed = await client.post("/auth/refresh", headers=_cookie(pair["refresh_token"]))
     assert refreshed.status_code == 401
 
 
@@ -569,9 +576,9 @@ async def test_logout_sso_survives_discovery_outage(
         raise ProviderExchangeFailed("发现文档不可达")
 
     monkeypatch.setattr(providers.REGISTRY["keycloak"], "end_session_url", _boom)
-    r = await client.post("/auth/logout/sso", json={"refresh_token": pair["refresh_token"]})
+    r = await client.post("/auth/logout/sso", headers=_cookie(pair["refresh_token"]))
 
     assert r.status_code == 200
     assert r.json()["redirect_url"] is None  # 本地登出仍完成,交给前端回落
-    refreshed = await client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    refreshed = await client.post("/auth/refresh", headers=_cookie(pair["refresh_token"]))
     assert refreshed.status_code == 401

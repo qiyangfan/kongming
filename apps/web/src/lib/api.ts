@@ -10,6 +10,7 @@ export type StartOut = components["schemas"]["StartOut"];
 export type SessionItemOut = components["schemas"]["SessionItemOut"];
 export type SessionMessageOut = components["schemas"]["SessionMessageOut"];
 export type ChatQueryOut = components["schemas"]["ChatQueryOut"];
+export type TurnCancelOut = components["schemas"]["TurnCancelOut"];
 export type TenantRefOut = components["schemas"]["TenantRefOut"];
 /* 流式事件 data 形态(契约见 openapi responses oneOf) */
 export type StreamStageOut = components["schemas"]["StreamStageOut"];
@@ -255,6 +256,8 @@ interface StreamHandlers {
   onToolCall?: (d: StreamToolCallOut) => void;
   onResult?: (d: ChatQueryOut) => void;
   onError?: (d: StreamErrorOut) => void;
+  /* 响应头到达时回调本轮标识(X-Trace-Id);之后的停止以它向控制面发起取消 */
+  onTraceId?: (traceId: string | null) => void;
 }
 
 /* 帧块内逐行抽取 event 与 data 行；出现心跳注释行即返回 null（整帧忽略）。 */
@@ -368,6 +371,8 @@ export async function streamChatQuery(
   const init: RequestInit = { method: "POST", body: JSON.stringify(body), signal };
   const resp = await postWithRefresh("/chat/query/stream", init);
   if (!resp.ok) throw await toStatusError(resp);
+  // 先于读流回调:响应头一到即下发本轮标识,停止入口据此决定能否发起取消
+  handlers.onTraceId?.(resp.headers.get("X-Trace-Id"));
   const reader = resp.body?.getReader();
   if (!reader) throw new Error("流式响应不可用");
   const terminated = await drainSseStream(reader, handlers, signal);

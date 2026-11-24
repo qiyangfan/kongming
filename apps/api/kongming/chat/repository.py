@@ -364,6 +364,28 @@ class ChatRepository:
         )
         return [str(q) for q in reversed(rows)]
 
+    async def assistant_message_by_trace(
+        self, *, trace_id: str, user_id: str
+    ) -> dict[str, object] | None:
+        """按 trace_id 取本人最近一条 assistant 消息(id/status/summary);
+        经会话归属收口(他人或不存在的 trace 同形 None)。"""
+        row = (
+            (
+                await self._s.execute(
+                    text(
+                        "SELECT m.id, m.status, m.summary FROM public.chat_message m"
+                        " JOIN public.chat_session s ON s.id = m.session_id"
+                        " WHERE m.trace_id = :tid AND m.role = 'ASSISTANT' AND s.user_id = :u"
+                        " ORDER BY m.created_at DESC, m.id DESC LIMIT 1"
+                    ),
+                    {"tid": trace_id, "u": user_id},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return None if row is None else dict(row)
+
     @_store_error_boundary
     async def commit(self) -> None:
         """事务提交(ChatRepo 端口,构造反转);失败转译 ChatStoreError。"""

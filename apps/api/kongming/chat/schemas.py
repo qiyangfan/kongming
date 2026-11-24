@@ -255,6 +255,14 @@ STREAM_RESPONSES: dict[int | str, dict[str, Any]] = {
             "result 与 /chat/query 返回相同数据。"
             "错误通过 error 终态发送;以冒号开头的注释帧用于心跳。"
         ),
+        "headers": {
+            "X-Trace-Id": {
+                "schema": {"type": "string"},
+                "description": (
+                    "本轮标识;取消端点 POST /chat/query/stream/{trace_id}/cancel 以它定位本轮。"
+                ),
+            }
+        },
         "content": {
             "text/event-stream": {
                 "schema": {
@@ -272,6 +280,14 @@ STREAM_RESPONSES: dict[int | str, dict[str, Any]] = {
         },
     }
 }
+
+
+class TurnCancelOut(BaseModel):
+    """取消端点响应:outcome=CANCELLED(本轮已取消)/ COMPLETED(取消到达前本轮已正常结束);
+    message_id=该轮落库的 assistant 消息 id(persist=false 或落库失败时为空)。"""
+
+    outcome: Literal["CANCELLED", "COMPLETED"]
+    message_id: str | None = None
 
 
 class SessionItemOut(BaseModel):

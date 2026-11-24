@@ -7,10 +7,13 @@ ExplainRunner 等实现绑定在组合根(router 适配层):chat 域 service/mod
 from collections.abc import Callable, Coroutine
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from kongming.chat.models import MessageMeta, Suggestion
 from kongming.rag.ports import QueryHistoryWriter
+
+if TYPE_CHECKING:
+    from kongming.chat.inflight import InflightTurn
 
 
 class ChatStoreError(Exception):
@@ -63,8 +66,19 @@ class ChatRepo(Protocol):
     ) -> Coroutine[Any, Any, str]: ...
     async def recent_user_questions(self, session_id: str, *, limit: int = 5) -> list[str]: ...
     async def last_fallback_type(self, session_id: str) -> str | None: ...
+    async def assistant_message_by_trace(
+        self, *, trace_id: str, user_id: str
+    ) -> dict[str, object] | None: ...
     def commit(self) -> Coroutine[Any, Any, None]: ...
     async def rollback(self) -> None: ...
+
+
+class TurnRegistry(Protocol):
+    """在途轮登记端口(进程内实现:取消请求与发起请求须经同一进程才命中)。"""
+
+    def register(self, turn: "InflightTurn") -> None: ...
+    def unregister(self, turn: "InflightTurn") -> None: ...
+    def find_all(self, *, user_id: str, trace_id: str) -> "list[InflightTurn]": ...
 
 
 class OperLogger(Protocol):

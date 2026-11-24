@@ -208,6 +208,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat/query/stream/{trace_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Query Stream
+         * @description 取消一轮在途流式问答;轮次标识取流式响应头 X-Trace-Id。
+         */
+        post: operations["cancel_query_stream_chat_query_stream__trace_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chat/artifacts/rerun": {
         parameters: {
             query?: never;
@@ -5202,11 +5222,6 @@ export interface components {
             /** Size */
             size: number;
         };
-        /** LogoutRequest */
-        LogoutRequest: {
-            /** Refresh Token */
-            refresh_token?: string | null;
-        };
         /**
          * McpPromptArgOut
          * @description 模板参数声明。
@@ -6488,11 +6503,6 @@ export interface components {
              * @default []
              */
             annotations: string[];
-        };
-        /** RefreshRequest */
-        RefreshRequest: {
-            /** Refresh Token */
-            refresh_token?: string | null;
         };
         /** ReindexOut */
         ReindexOut: {
@@ -8039,6 +8049,20 @@ export interface components {
              */
             imap_poll_interval_sec: number;
         };
+        /**
+         * TurnCancelOut
+         * @description 取消端点响应:outcome=CANCELLED(本轮已取消)/ COMPLETED(取消到达前本轮已正常结束);
+         *     message_id=该轮落库的 assistant 消息 id(persist=false 或落库失败时为空)。
+         */
+        TurnCancelOut: {
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "CANCELLED" | "COMPLETED";
+            /** Message Id */
+            message_id?: string | null;
+        };
         /** UploadOut */
         UploadOut: {
             /** Tables */
@@ -8384,11 +8408,7 @@ export interface operations {
                 km_refresh?: string | null;
             };
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RefreshRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -8419,11 +8439,7 @@ export interface operations {
                 km_refresh?: string | null;
             };
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LogoutRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             204: {
@@ -8452,11 +8468,7 @@ export interface operations {
                 km_refresh?: string | null;
             };
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LogoutRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -8754,6 +8766,8 @@ export interface operations {
             /** @description SSE 发送 stage、sql、summary、tool_call 和诊断事件;result 与 /chat/query 返回相同数据。错误通过 error 终态发送;以冒号开头的注释帧用于心跳。 */
             200: {
                 headers: {
+                    /** @description 本轮标识;取消端点 POST /chat/query/stream/{trace_id}/cancel 以它定位本轮。 */
+                    "X-Trace-Id"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -8783,6 +8797,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    cancel_query_stream_chat_query_stream__trace_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TurnCancelOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kongming.auth.repository import SqlOperLogRepo
 from kongming.chat.agent_client import AgentClient
 from kongming.chat.costgate import ChatCostGate
+from kongming.chat.inflight import InflightTurns
 from kongming.chat.memory_tasks import extract_memory_task
 from kongming.chat.ports import StreamStore, StreamStoreFactory
 from kongming.chat.repository import ChatRepository, SuggestionRepository
@@ -51,6 +52,10 @@ def get_rag_service(session: AsyncSession) -> RagService:
         # 召回闸门配置(off 缺省)
         gate_settings=settings,
     )
+
+
+# 在途轮登记是进程内单例:取消请求与发起请求落在同一进程才命中(单节点部署形态的前提)
+_TURNS = InflightTurns()
 
 
 def _build_cost_gate() -> ChatCostGate:
@@ -119,6 +124,7 @@ def get_chat_service(
         ),
         column_comments=get_rag_service(session),  # 列标签(同一 RagService 的窄端口视角)
         cost_gate=_build_cost_gate(),  # 成本双闸(速率+配额)
+        turns=_TURNS,  # 在途轮登记(取消端点与流式消费共用同一张表)
     )
 
 

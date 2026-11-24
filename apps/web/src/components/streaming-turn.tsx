@@ -18,9 +18,11 @@ interface StreamingTurnProps {
   onResult: (out: ChatQueryOut) => void;
   /** 终态回调:error 事件或传输层失败(已过滤主动 abort) */
   onError: (message: string) => void;
+  /** 响应头到达时上报本轮标识(X-Trace-Id) */
+  onTraceId: (traceId: string) => void;
 }
 
-export function StreamingTurn({ body, signal, onResult, onError }: StreamingTurnProps) {
+export function StreamingTurn({ body, signal, onResult, onError, onTraceId }: StreamingTurnProps) {
   const [stages, setStages] = useState<StreamStageOut[]>([]);
   const [sql, setSql] = useState<string | null>(null);
   const [summary, setSummary] = useState("");
@@ -30,42 +32,58 @@ export function StreamingTurn({ body, signal, onResult, onError }: StreamingTurn
   onResultRef.current = onResult;
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const onTraceIdRef = useRef(onTraceId);
+  onTraceIdRef.current = onTraceId;
+  // 存活标志提为 ref:开发模式严格模式会把挂载效应跑两遍(挂→卸→挂),
+  // 若用闭包变量,第二次挂载会再发一次请求——同一问句跑两轮模型、双倍 token;
+  // 提为 ref 后清理与二次挂载共享同一标志,请求仍只发一次(fired 门禁),
+  // 二次挂载把标志置活,唯一请求的回调继续生效。
+  const aliveRef = useRef(true);
+  const firedRef = useRef(false);
 
   useEffect(() => {
-    let alive = true;
-    void (async () => {
-      try {
-        await streamChatQuery(
-          body,
-          {
-            onStage: (d) => {
-              if (alive) setStages((prev) => [...prev, d]);
+    aliveRef.current = true;
+    if (!firedRef.current) {
+      firedRef.current = true;
+      void (async () => {
+        try {
+          await streamChatQuery(
+            body,
+            {
+              onStage: (d) => {
+                if (aliveRef.current) setStages((prev) => [...prev, d]);
+              },
+              onSql: (d) => {
+                if (aliveRef.current) setSql(d.sql);
+              },
+              onSummary: (d) => {
+                if (aliveRef.current) setSummary((prev) => prev + d.delta);
+              },
+              onToolCall: (d) => {
+                if (aliveRef.current) setToolCalls((prev) => mergeToolCall(prev, d));
+              },
+              onResult: (out) => {
+                if (aliveRef.current) onResultRef.current(out);
+              },
+              onError: (d) => {
+                if (aliveRef.current) onErrorRef.current(d.error);
+              },
+              onTraceId: (traceId) => {
+                if (aliveRef.current && traceId) onTraceIdRef.current(traceId);
+              },
             },
-            onSql: (d) => {
-              if (alive) setSql(d.sql);
-            },
-            onSummary: (d) => {
-              if (alive) setSummary((prev) => prev + d.delta);
-            },
-            onToolCall: (d) => {
-              if (alive) setToolCalls((prev) => mergeToolCall(prev, d));
-            },
-            onResult: (out) => {
-              if (alive) onResultRef.current(out);
-            },
-            onError: (d) => {
-              if (alive) onErrorRef.current(d.error);
-            },
-          },
-          signal,
-        );
-      } catch (err) {
-        if (signal.aborted) return; // 主动取消:静默(呈现由取消/停止入口清理)
-        if (alive) onErrorRef.current(err instanceof Error ? err.message : "问答服务异常");
-      }
-    })();
+            signal,
+          );
+        } catch (err) {
+          if (signal.aborted) return; // 主动取消:静默(呈现由取消/停止入口清理)
+          if (aliveRef.current) {
+            onErrorRef.current(err instanceof Error ? err.message : "问答服务异常");
+          }
+        }
+      })();
+    }
     return () => {
-      alive = false;
+      aliveRef.current = false;
     };
     // body/signal 发起时即冻结;回调经 ref 取最新——重渲染不重订(单次发起语义)
     // eslint-disable-next-line react-hooks/exhaustive-deps

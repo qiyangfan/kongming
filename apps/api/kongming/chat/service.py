@@ -30,6 +30,7 @@ from kongming.chat.domain_errors import (
     blocked_friendly,
 )
 from kongming.chat.finalize import FinalizePorts, ReplyFinalizer, persist_unavailable
+from kongming.chat.inflight import TurnCanceller, TurnSettlement
 from kongming.chat.ports import (
     AttachmentChecker,
     ChatRepo,
@@ -40,6 +41,7 @@ from kongming.chat.ports import (
     PendingToolReader,
     StreamStoreFactory,
     ToolSpecProvider,
+    TurnRegistry,
 )
 from kongming.chat.results import ChatOutcome, ExplainView
 from kongming.chat.stream_runner import (
@@ -117,6 +119,7 @@ class _ServiceOptions(TypedDict, total=False):
     scoring_task: Callable[..., Coroutine[Any, Any, None]] | None  # 答案异步评分任务
     column_comments: ColumnCommentReader | None  # 列标签
     cost_gate: ChatCostGate | None  # 成本双闸(速率+配额)
+    turns: TurnRegistry | None  # 在途轮登记(取消端点据此定位在途轮)
 
 
 @dataclass(frozen=True)
@@ -135,6 +138,7 @@ class _Ports:
     attachment_checker: AttachmentChecker | None
     scoring_task: "Callable[..., Coroutine[Any, Any, None]] | None"
     cost_gate: ChatCostGate | None
+    turns: TurnRegistry | None
 
     @classmethod
     def of(
@@ -158,6 +162,7 @@ class _Ports:
             attachment_checker=options.get("attachment_checker"),
             scoring_task=options.get("scoring_task"),
             cost_gate=options.get("cost_gate"),
+            turns=options.get("turns"),
         )
 
 
@@ -186,6 +191,7 @@ class _Engine:
                 finalizer=finalizer,
                 repo=ports.repo,
                 implicit_memory_task=options.get("implicit_memory_task"),
+                turns=ports.turns,
             ),
         )
 
@@ -729,6 +735,13 @@ class ChatService:
             pref_revision=pref_revision,  # 后台任务携带版本快照
             attachment_ids=[str(a["id"]) for a in p.attachments or []],
         )
+
+    async def cancel_turn(self, *, user_id: str, trace_id: str) -> TurnSettlement:
+        """取消一轮在途流式问答,或回答该轮已如何结束;
+        不在途且本人名下无落库结果时抛 TurnNotFound。"""
+        return await TurnCanceller(
+            agent=self._ports.agent, turns=self._ports.turns, repo=self._ports.repo
+        ).cancel(user_id=user_id, trace_id=trace_id)
 
     # ============ 执行计划(chat spec「EXPLAIN 执行计划」) ============
 

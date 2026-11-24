@@ -14,7 +14,16 @@ from datetime import UTC, datetime
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    Header,
+    HTTPException,
+    Path,
+    Query,
+    Response,
+)
 from fastapi.responses import StreamingResponse
 
 from kongming.auth.deps import current_user, require_perm
@@ -37,6 +46,7 @@ from kongming.chat.domain_errors import (
     MessageNotFound,
     SessionNotFound,
     TenantForbidden,
+    TurnNotFound,
 )
 from kongming.chat.memory_tasks import extract_memory_task
 from kongming.chat.results import ChatOutcome
@@ -52,6 +62,7 @@ from kongming.chat.schemas import (
     SessionItemOut,
     SessionMessageOut,
     SuggestionsOut,
+    TurnCancelOut,
     to_chat_query_out,
     to_session_message_out,
 )
@@ -245,6 +256,25 @@ async def chat_query_stream(
         media_type="text/event-stream",
         headers=headers,
     )
+
+
+@router.post(
+    "/query/stream/{trace_id}/cancel",
+    response_model=TurnCancelOut,
+    dependencies=[Depends(require_perm("chat:execute"))],
+)
+async def cancel_query_stream(
+    trace_id: Annotated[str, Path(min_length=1, max_length=64)],
+    user: Annotated[dict[str, object], Depends(current_user)],
+    svc: Annotated[ChatService, Depends(get_chat_service)],
+) -> TurnCancelOut:
+    """取消一轮在途流式问答;轮次标识取流式响应头 X-Trace-Id。"""
+    try:
+        settled = await svc.cancel_turn(user_id=str(user["sub"]), trace_id=trace_id)
+    except TurnNotFound:
+        # 他人轮次、不存在的轮次与已结束未落库的轮次统一 404(不泄露轮次是否存在)
+        raise HTTPException(status_code=404, detail="TURN_NOT_FOUND") from None
+    return TurnCancelOut(outcome=settled.outcome, message_id=settled.message_id)
 
 
 # ============ 会话列表/消息历史/删除(web-nav 支撑端点) ============

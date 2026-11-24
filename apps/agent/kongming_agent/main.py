@@ -34,6 +34,7 @@ from kongming_agent.graph.react import get_react_graph, react_recursion_limit
 from kongming_agent.graph.react.result import suspended_or_final as _suspended_or_final
 from kongming_agent.graph.react.state import ReactState
 from kongming_agent.graph.state import AgentState, ExecutionResult
+from kongming_agent.inflight import abort_inflight, in_owned_task
 from kongming_agent.llm import LlmError
 from kongming_agent.logging_setup import setup_logging
 from kongming_agent.prompt_fingerprint import prompt_fingerprint
@@ -678,10 +679,29 @@ async def query_stream(req: QueryIn) -> StreamingResponse:
         fail = _build_query_out({"error": str(e), "success": False})
         return StreamingResponse(_single_result_frames(fail), media_type="text/event-stream")
     return StreamingResponse(
-        _query_stream_frames(_initial_state(req), req.trace_id),
+        in_owned_task(_query_stream_frames(_initial_state(req), req.trace_id), req.trace_id),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+class AbortQueryIn(BaseModel):
+    """控制面请求中止一轮在途问答(nl2sql spec「在途问答中止(Agent 面)」)。"""
+
+    trace_id: str = Field(min_length=1, max_length=64)
+
+
+class AbortQueryOut(BaseModel):
+    aborted: bool  # False=该标识未知或已结束(未在执行)
+
+
+@app.post("/internal/abort-query", response_model=AbortQueryOut, tags=["internal"])
+async def abort_query(req: AbortQueryIn) -> AbortQueryOut:
+    """按 trace_id 中止该轮全部在途流式执行;幂等——未知或已结束返回未在执行。"""
+    count = abort_inflight(req.trace_id)
+    if count:
+        log.info("在途问答已中止 trace_id=%s count=%d", req.trace_id, count)
+    return AbortQueryOut(aborted=count > 0)
 
 
 # ── ReAct 工具调用内核(与 8 节点图并存,终态同构) ──
@@ -952,7 +972,7 @@ async def query_react_stream(req: QueryReactIn) -> StreamingResponse:
     fire-and-forget);result 终态帧携带 usage_records。"""
     collector: list[dict[str, object]] = []
     return StreamingResponse(
-        _react_stream_frames(req, collector),
+        in_owned_task(_react_stream_frames(req, collector), req.trace_id),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

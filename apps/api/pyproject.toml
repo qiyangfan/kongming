@@ -199,6 +199,7 @@ type = "forbidden"
 source_modules = [
   "kongming.chat.models",
   "kongming.chat.service",
+  "kongming.chat.inflight",
   "kongming.chat.session_service",
   "kongming.chat.ports",
   "kongming.chat.export",

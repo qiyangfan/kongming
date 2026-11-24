@@ -31,16 +31,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RefreshRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -90,16 +80,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LogoutRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -142,16 +122,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LogoutRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -584,6 +554,14 @@
         "responses": {
           "200": {
             "description": "SSE 发送 stage、sql、summary、tool_call 和诊断事件;result 与 /chat/query 返回相同数据。错误通过 error 终态发送;以冒号开头的注释帧用于心跳。",
+            "headers": {
+              "X-Trace-Id": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "本轮标识;取消端点 POST /chat/query/stream/{trace_id}/cancel 以它定位本轮。"
+              }
+            },
             "content": {
               "text/event-stream": {
                 "schema": {
@@ -647,6 +625,51 @@
           },
           "503": {
             "description": "配额数据不可用时拒绝请求(detail=CHAT_QUOTA_UNAVAILABLE)。"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/query/stream/{trace_id}/cancel": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Cancel Query Stream",
+        "description": "取消一轮在途流式问答;轮次标识取流式响应头 X-Trace-Id。",
+        "operationId": "cancel_query_stream_chat_query_stream__trace_id__cancel_post",
+        "parameters": [
+          {
+            "name": "trace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "title": "Trace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnCancelOut"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -18327,23 +18350,6 @@
         ],
         "title": "KnowledgePageOut"
       },
-      "LogoutRequest": {
-        "properties": {
-          "refresh_token": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Token"
-          }
-        },
-        "type": "object",
-        "title": "LogoutRequest"
-      },
       "McpPromptArgOut": {
         "properties": {
           "name": {
@@ -21514,23 +21520,6 @@
           "threshold"
         ],
         "title": "ReconciliationReport"
-      },
-      "RefreshRequest": {
-        "properties": {
-          "refresh_token": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Token"
-          }
-        },
-        "type": "object",
-        "title": "RefreshRequest"
       },
       "ReindexOut": {
         "properties": {
@@ -25275,6 +25264,35 @@
           "target_type"
         ],
         "title": "TriggerUpdateIn"
+      },
+      "TurnCancelOut": {
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "CANCELLED",
+              "COMPLETED"
+            ],
+            "title": "Outcome"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "outcome"
+        ],
+        "title": "TurnCancelOut",
+        "description": "取消端点响应:outcome=CANCELLED(本轮已取消)/ COMPLETED(取消到达前本轮已正常结束);\nmessage_id=该轮落库的 assistant 消息 id(persist=false 或落库失败时为空)。"
       },
       "UploadOut": {
         "properties": {

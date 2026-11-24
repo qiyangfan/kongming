@@ -20,6 +20,8 @@ log = logging.getLogger(__name__)
 # 流式帧回调:(event, data_json);协程返回由调用方 await
 StreamFrameHandler = Callable[[str, str], Coroutine[Any, Any, None]]
 
+ABORT_TIMEOUT_SEC = 3.0  # 中止请求的等待上限(等不到即由调用方硬取消本地任务)
+
 
 class AgentUnavailable(Exception):
     """Agent 面不可达/超时/异常响应(对用户只呈现友好文案)。"""
@@ -374,6 +376,24 @@ class AgentClient:
         except httpx.HTTPError as e:
             log.warning("agent 流式回调异常: %s", e)
             raise AgentUnavailable(str(e)) from e
+
+    async def abort_query(self, *, trace_id: str) -> bool:
+        """请求 Agent 面中止一轮在途流式执行:True=已中止,False=未在执行或未能送达
+        (只记日志,不抛——停不下来由调用方随后的硬取消兜底)。"""
+        try:
+            async with self._client(ABORT_TIMEOUT_SEC) as client:
+                resp = await client.post("/internal/abort-query", json={"trace_id": trace_id})
+        except httpx.HTTPError as e:
+            log.warning("中止请求回调异常: %s", e)
+            return False
+        if resp.status_code != 200:
+            log.warning("中止请求非 200: HTTP %s", resp.status_code)
+            return False
+        try:
+            data = _obj_dict(resp.json())
+        except (ValueError, TypeError, AttributeError):
+            return False
+        return data is not None and data.get("aborted") is True
 
     async def suggest_questions(self, digest: str) -> list[str]:
         """建议问题生成(Suggestor 端口实现):回调 agent

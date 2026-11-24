@@ -1,4 +1,4 @@
-/* 在途流：发起、终态接管与停止接收；流回调仅在发起上下文与当前一致时生效。 */
+/* 在途流：发起、终态接管与真取消(停止即向控制面发起取消)；流回调仅在发起上下文与当前一致时生效。 */
 
 import { useRef, useState } from "react";
 import type { RefObject } from "react";
@@ -6,29 +6,36 @@ import type { QueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 
 import type { ChatQueryOut } from "@/lib/api";
+import type { StopNotice } from "@/lib/turn-stop";
 
-import { buildStreamBody, makeFinalizeError, makeFinalizeOk } from "./chat-stream-actions";
+import {
+  buildStreamBody,
+  makeFinalizeError,
+  makeFinalizeOk,
+  makeOriginGuard,
+  makeStopTurn,
+} from "./chat-stream-actions";
 import type {
   ChatCtx,
   ChatStreamApi,
   PendingConfirm,
+  StreamCtx,
   StreamInputs,
   StreamingTurnStart,
 } from "./chat-stream-types";
 
 export type { PendingConfirm, StreamingTurnStart } from "./chat-stream-types";
 
-type StreamCtx = { sid: string | null; tenant: string | null; ds: string | null };
-
 /** 上下文切换/卸载时的流回收动作(不触发无关状态更新)。 */
 function makeContextResetters(env: {
   abortRef: RefObject<AbortController | null>;
   streamCtxRef: RefObject<StreamCtx | null>;
+  stopSeqRef: RefObject<number>;
   cancelRecording: () => void;
   setStreaming: (v: StreamingTurnStart | null) => void;
   setFinalized: (v: { question: string; out: ChatQueryOut } | null) => void;
   setAskError: (m: string | null) => void;
-  setStoppedNotice: (b: boolean) => void;
+  setStoppedNotice: (v: StopNotice | null) => void;
   setPendingConfirm: (v: PendingConfirm | null) => void;
 }) {
   /** 取消闸：中止在途流并清残留呈现，同时终止录音。 */
@@ -41,7 +48,8 @@ function makeContextResetters(env: {
     env.setStreaming(null);
     env.setFinalized(null);
     env.setAskError(null);
-    env.setStoppedNotice(false);
+    env.setStoppedNotice(null);
+    env.stopSeqRef.current += 1; // 迟到的取消应答不再落到新上下文
     env.setPendingConfirm(null); // 切换上下文丢弃待确认入口(瞬态语义)
   }
 
@@ -60,18 +68,18 @@ function useStreamState() {
   const [streaming, setStreaming] = useState<StreamingTurnStart | null>(null);
   // 本轮终态快照:result 到达后先用快照渲染,消息历史载入该轮后替换,避免中间空白
   const [finalized, setFinalized] = useState<{ question: string; out: ChatQueryOut } | null>(null);
-  // 主动停止接收后的口径提示(禁"已取消"类误导措辞)
-  const [stoppedNotice, setStoppedNotice] = useState(false);
+  // 主动停止后的提示:文案随取消结果如实变化(未确认前不声称已取消)
+  const [stoppedNotice, setStoppedNotice] = useState<StopNotice | null>(null);
   // 待确认写工具(独立于 finalized 快照:快照退位由历史接管后确认卡
   // 仍在,直到用户确认/拒绝或切换上下文——响应级瞬态,不落库不回显)
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // 本轮标识(X-Trace-Id):响应头到达后由流组件写入,停止时据此发起取消
+  const traceIdRef = useRef<string | null>(null);
+  // 最近一次停止的序号:取消应答只作用于发起它的那一次停止
+  const stopSeqRef = useRef(0);
   // 流发起时的上下文(守卫基准):迟到事件与当前不一致即丢弃(防串上下文)
-  const streamCtxRef = useRef<{
-    sid: string | null;
-    tenant: string | null;
-    ds: string | null;
-  } | null>(null);
+  const streamCtxRef = useRef<StreamCtx | null>(null);
   // 本流自建会话的导航标记(取消闸豁免依据)
   const selfNavigatedRef = useRef<string | null>(null);
   // 强制贴底标记:切会话/用户主动提问时消费(内容 effect 先于跟随判定)
@@ -86,6 +94,8 @@ function useStreamState() {
     pendingConfirm,
     setPendingConfirm,
     abortRef,
+    traceIdRef,
+    stopSeqRef,
     streamCtxRef,
     selfNavigatedRef,
     forceBottomRef,
@@ -116,21 +126,14 @@ export function useChatStream(
     pendingConfirm,
     setPendingConfirm,
     abortRef,
+    traceIdRef,
+    stopSeqRef,
     streamCtxRef,
     selfNavigatedRef,
     forceBottomRef,
   ] = useStreamState();
 
-  /** 守卫:流回调仅在「流的发起上下文 == 当前上下文」时生效(迟到即丢弃) */
-  function inOriginCtx(): boolean {
-    const origin = streamCtxRef.current;
-    return (
-      origin !== null &&
-      origin.sid === sessionIdRef.current &&
-      origin.tenant === tenantRef.current &&
-      origin.ds === dsRef.current
-    );
-  }
+  const inOriginCtx = makeOriginGuard(streamCtxRef, ctx);
 
   const finalizeOk = makeFinalizeOk({
     ctx,
@@ -167,8 +170,10 @@ export function useChatStream(
     // 草稿直发即清空；建议 chips 直发保留用户未发送的草稿
     if (fromDraft) setDraft("");
     setAskError(null);
-    setStoppedNotice(false);
+    setStoppedNotice(null);
     setFinalized(null); // 新一轮提问顶掉上一轮快照
+    stopSeqRef.current += 1; // 上一轮若仍有取消应答在途,不再落到本轮
+    traceIdRef.current = null;
     const ac = new AbortController();
     abortRef.current = ac;
     streamCtxRef.current = {
@@ -194,22 +199,22 @@ export function useChatStream(
     setFollowBottom(true);
   }
 
-  /** 停止接收会中止前端读取；服务端仍完成请求并保存结果。 */
+  const stopTurn = makeStopTurn({ traceIdRef, stopSeqRef, setStoppedNotice, setDraft });
+
+  /** 停止:中止读取并立即释放输入;取消请求与结果提示由 stopTurn 收口。 */
   function stopStreaming(): void {
     const s = streaming;
     abortRef.current?.abort();
     abortRef.current = null;
     streamCtxRef.current = null;
     setStreaming(null);
-    if (s) {
-      setDraft((prev) => (prev.trim() ? prev : s.question));
-      setStoppedNotice(true);
-    }
+    stopTurn(s);
   }
 
   const { resetStream, shutdown } = makeContextResetters({
     abortRef,
     streamCtxRef,
+    stopSeqRef,
     cancelRecording: ctx.cancelRecording,
     setStreaming,
     setFinalized,
@@ -235,6 +240,7 @@ export function useChatStream(
     resetStream,
     shutdown,
     abortRef,
+    traceIdRef,
     streamCtxRef,
     selfNavigatedRef,
   };

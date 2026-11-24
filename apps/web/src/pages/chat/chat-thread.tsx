@@ -9,6 +9,7 @@ import { ToolConfirmCard } from "@/components/tool-confirm-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ChatQueryOut, SessionMessageOut } from "@/lib/api";
 import { humanizeErrorText } from "@/lib/api";
+import { stopNoticeText, type StopNotice, type StopNoticeKind } from "@/lib/turn-stop";
 
 import { EmptyState } from "./empty-state";
 import { MessageRow, UserTurn } from "./message-row";
@@ -23,16 +24,19 @@ interface ChatThreadProps {
   finalized: { question: string; out: ChatQueryOut } | null;
   finalizedMsg: SessionMessageOut | null;
   pendingConfirm: PendingConfirm | null;
-  stoppedNotice: boolean;
+  stoppedNotice: StopNotice | null;
   askError: string | null;
   onAsk: (q: string) => void;
+  /** 本轮标识到达(X-Trace-Id):停止入口据此向控制面发起取消 */
+  onTraceId: (traceId: string) => void;
   onResult: (out: ChatQueryOut) => void;
   onError: (message: string) => void;
   onAllResolved: () => void;
 }
 
-/** 停止接收后的口径呈现——禁"已取消/已停止生成"类误导措辞。 */
-function StoppedNotice() {
+/** 停止后的提示:文案随取消结果如实变化(确认前不声称已取消)。 */
+function StoppedNotice({ kind }: { kind: StopNoticeKind }) {
+  const text = stopNoticeText(kind);
   return (
     <div
       className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm"
@@ -40,10 +44,8 @@ function StoppedNotice() {
     >
       <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
       <div>
-        <p className="text-foreground">已不再接收本轮输出。</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          该轮问答仍在后台完成,可稍后回看;问句已回到输入框,也可立即重发。
-        </p>
+        <p className="text-foreground">{text.title}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{text.detail}</p>
       </div>
     </div>
   );
@@ -87,10 +89,12 @@ function StreamingBlock({
   streaming,
   onResult,
   onError,
+  onTraceId,
 }: {
   streaming: StreamingTurnStart;
   onResult: ChatThreadProps["onResult"];
   onError: ChatThreadProps["onError"];
+  onTraceId: ChatThreadProps["onTraceId"];
 }) {
   return (
     <>
@@ -103,6 +107,7 @@ function StreamingBlock({
           signal={streaming.ac.signal}
           onResult={onResult}
           onError={onError}
+          onTraceId={onTraceId}
         />
       </div>
     </>
@@ -120,7 +125,9 @@ function ThreadBody(props: ChatThreadProps) {
       </div>
     );
   }
-  if (!sessionId && !streaming && !finalized && !askError) {
+  // 空态不含停止提示:新对话第一问停止时会话尚未建立(无 sessionId),漏此条件
+  // 会把取消结果提示整个吞掉——用户看不到「本轮已取消」的确认
+  if (!sessionId && !streaming && !finalized && !askError && !props.stoppedNotice) {
     return (
       <div className="h-[60vh]">
         <EmptyState
@@ -135,7 +142,12 @@ function ThreadBody(props: ChatThreadProps) {
     <>
       <ConversationBody {...props} />
       {streaming && (
-        <StreamingBlock streaming={streaming} onResult={props.onResult} onError={props.onError} />
+        <StreamingBlock
+          streaming={streaming}
+          onResult={props.onResult}
+          onError={props.onError}
+          onTraceId={props.onTraceId}
+        />
       )}
       {props.pendingConfirm && (
         <ToolConfirmCard
@@ -144,7 +156,7 @@ function ThreadBody(props: ChatThreadProps) {
           onAllResolved={props.onAllResolved}
         />
       )}
-      {props.stoppedNotice && <StoppedNotice />}
+      {props.stoppedNotice && <StoppedNotice kind={props.stoppedNotice.kind} />}
       {askError && <AskErrorNotice message={askError} />}
     </>
   );

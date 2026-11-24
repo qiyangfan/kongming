@@ -104,6 +104,13 @@ async def test_sliding_window_blocks_across_boundary_then_recovers() -> None:
     r = get_redis()
     limiter = RedisRateLimiter(r)
     window, limit = 4, 2
+    # 先等到窗口中段再耗尽额度:若恰落在窗口首秒,「跨窗」检查会退化成同一窗口,
+    # 随后的老化断言必然失败(随启动时刻随机变红)
+    while True:
+        d = (await _server_now(r)) % window
+        if 1.2 <= d <= 2.4:
+            break
+        await asyncio.sleep(0.1)
     blocked = False
     key = "k-0"
     for attempt in range(3):

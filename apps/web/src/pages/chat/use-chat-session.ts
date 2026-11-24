@@ -62,6 +62,16 @@ export function useChatSession(params: ChatSessionParams & { scroll: ChatScrollA
   useContextReset(params);
   useRouteShutdown(stream);
   useRecoveryPoll({ sessionId, messagesData: messages.data, refetch: messages.refetch });
+  // 停止收口后刷新一次列表:服务端该轮已落定终态(已取消/已结束),而在途态与
+  // 快照都不含该行——不回查则已取消卡片不出现(实测:列表末条仍是上一轮答句,
+  // 不满足 078 回查条件)。取消失效(仍在后台跑)时刷新后末条即问句,交由
+  // 078 回查继续跟到终态;会话列表一并刷新,新会话得以出现在侧栏。
+  useEffect(() => {
+    const notice = stream.stoppedNotice;
+    if (!notice || notice.kind === "pending") return;
+    void qc.invalidateQueries({ queryKey: ["messages", sessionId ?? "-", current, datasource] });
+    void qc.invalidateQueries({ queryKey: ["sessions", current] });
+  }, [stream.stoppedNotice, qc, sessionId, current, datasource]);
   useSnapshotRetire(stream, messages.data);
   // ScrollArea 视口仅在挂载后可用，内容变化后由该 hook 跟随贴底
   useFollowBottom({

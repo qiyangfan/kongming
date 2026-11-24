@@ -1,12 +1,18 @@
 """问答质量信号聚合查询:轮次按 assistant 消息统计;token 按 trace_id 汇总
-再平均(失败调用并入);趋势按上海时区自然日分桶补零;点踩率以全部轮次为分母。"""
+再平均(失败调用并入);趋势按上海时区自然日分桶补零;点踩率以全部轮次为分母。
+
+轮次范围单源在 _ROUNDS:已取消的轮没有可评价的答案,汇总、趋势、明细、同会话串联
+与导出一律不计(observability spec「已取消轮次的观测口径」);按消息标识取的
+节点轨迹不在此列,已取消轮仍可追溯。"""
 
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-_ROUNDS = "(SELECT m.* FROM public.chat_message m WHERE m.role = 'ASSISTANT')"
+_ROUNDS = (
+    "(SELECT m.* FROM public.chat_message m WHERE m.role = 'ASSISTANT' AND m.status <> 'CANCELLED')"
+)
 
 
 class SqlQualityRepo:
@@ -57,10 +63,10 @@ class SqlQualityRepo:
                 text(
                     "SELECT avg(turn_tokens) AS avg_tokens FROM ("  # noqa: S608
                     " SELECT sum(u.total_tokens) AS turn_tokens"
-                    " FROM public.chat_message m"
+                    f" FROM {_ROUNDS} m"
                     " JOIN public.chat_session s ON s.id = m.session_id"
                     " JOIN public.sys_llm_usage u ON u.trace_id = m.trace_id"
-                    " WHERE m.role = 'ASSISTANT' AND m.trace_id IS NOT NULL"
+                    " WHERE m.trace_id IS NOT NULL"
                     f" AND {where}"
                     " GROUP BY m.trace_id)"
                 ),
@@ -92,9 +98,8 @@ class SqlQualityRepo:
                         "       count(m.id) FILTER (WHERE m.status = 'REJECTED') AS blocked,"
                         "       count(m.id) FILTER (WHERE m.status = 'FAILED') AS failed"
                         " FROM day_series ds"
-                        " LEFT JOIN public.chat_message m"
-                        "   ON m.role = 'ASSISTANT'"
-                        "   AND date_trunc('day', m.created_at AT TIME ZONE 'Asia/Shanghai')"
+                        f" LEFT JOIN {_ROUNDS} m"
+                        "   ON date_trunc('day', m.created_at AT TIME ZONE 'Asia/Shanghai')"
                         "       ::date = ds.d"
                         "  AND m.session_id IN ("
                         f"    SELECT id FROM public.chat_session WHERE {tenant_filter})"
@@ -258,7 +263,7 @@ class SqlQualityRepo:
         """同会话轮次串联(spec「同会话轮次串联」):锚点轮必含,窗口取锚点
         及此前最近 limit 轮(升序返回);租户不可见/不存在 → None(404 同形
         不区分存在性)。id(UUID v7)作时序 tiebreak。"""
-        anchor_conds = ["m.id = :mid", "m.role = 'ASSISTANT'"]
+        anchor_conds = ["m.id = :mid"]
         params: dict[str, object] = {"mid": message_id, "lim": limit}
         if tenant_ids is not None:
             anchor_conds.append("s.tenant_id = ANY(CAST(:t_ids AS uuid[]))")
@@ -266,7 +271,7 @@ class SqlQualityRepo:
         anchor = (
             await self._s.execute(
                 text(
-                    "SELECT m.session_id FROM public.chat_message m"  # noqa: S608
+                    f"SELECT m.session_id FROM {_ROUNDS} m"  # noqa: S608
                     " JOIN public.chat_session s ON s.id = m.session_id"
                     f" WHERE {' AND '.join(anchor_conds)}"
                 ),
@@ -279,12 +284,12 @@ class SqlQualityRepo:
             (
                 await self._s.execute(
                     text(
-                        "SELECT m.id, m.question, m.status, m.fallback_type,"
+                        "SELECT m.id, m.question, m.status, m.fallback_type,"  # noqa: S608
                         "       sc.score, m.created_at"
-                        " FROM public.chat_message m"
+                        f" FROM {_ROUNDS} m"
                         " JOIN public.chat_session s ON s.id = m.session_id"
                         " LEFT JOIN public.chat_turn_score sc ON sc.message_id = m.id"
-                        " WHERE m.session_id = :sid AND m.role = 'ASSISTANT'"
+                        " WHERE m.session_id = :sid"
                         "   AND (m.created_at, m.id) <="
                         "       (SELECT m2.created_at, m2.id FROM public.chat_message m2"
                         "         WHERE m2.id = :mid)"
@@ -426,10 +431,11 @@ def _tenant_filter(
 def _scope(
     tenant_ids: list[str] | None, start: object | None, end: object | None
 ) -> tuple[str, dict[str, object]]:
-    """轮次范围谓词(租户收敛/时间窗);start 缺省=不限下界(补零桶不受损)。
+    """轮次的租户收敛与时间窗谓词(与 _ROUNDS 搭配使用);start 缺省=不限下界
+    (补零桶不受损)。
     tenant_ids=None 不限租户(ALL 权限方无显式过滤);空列表=无可见租户(收敛
     后无绑定,产出空集而非全量)。"""
-    conds = ["m.role = 'ASSISTANT'"]
+    conds: list[str] = []
     params: dict[str, object] = {}
     if tenant_ids is not None:
         conds.append("s.tenant_id = ANY(CAST(:t_ids AS uuid[]))")
@@ -440,4 +446,4 @@ def _scope(
     if end is not None:
         conds.append("m.created_at < :en")
         params["en"] = end
-    return " AND ".join(conds), params
+    return " AND ".join(conds) or "TRUE", params

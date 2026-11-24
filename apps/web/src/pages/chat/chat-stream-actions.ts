@@ -1,11 +1,28 @@
-/* 流的终态接管与停止:成功/失败收口;回调只在流发起上下文仍为当前上下文时生效。 */
+/* 流的终态接管与停止:成功/失败收口、停止时发起真取消;回调只在流发起上下文仍为当前上下文时生效。 */
 
 import type { QueryClient } from "@tanstack/react-query";
 import type { NavigateFunction } from "react-router";
 
-import type { ChatQueryOut } from "@/lib/api";
+import { api, type ChatQueryOut, type TurnCancelOut } from "@/lib/api";
+import { stopResultFromError, stopResultFromResponse, type StopNotice } from "@/lib/turn-stop";
 
-import type { ChatCtx, StreamInputs, StreamingTurnStart } from "./chat-stream-types";
+import type { ChatCtx, StreamCtx, StreamInputs, StreamingTurnStart } from "./chat-stream-types";
+
+/** 生成上下文守卫:流回调仅在「流的发起上下文 == 当前上下文」时生效(迟到即丢弃)。 */
+export function makeOriginGuard(
+  streamCtxRef: React.RefObject<StreamCtx | null>,
+  ctx: ChatCtx,
+): () => boolean {
+  return () => {
+    const origin = streamCtxRef.current;
+    return (
+      origin !== null &&
+      origin.sid === ctx.sessionIdRef.current &&
+      origin.tenant === ctx.tenantRef.current &&
+      origin.ds === ctx.dsRef.current
+    );
+  };
+}
 
 interface FinalizeOkDeps {
   ctx: ChatCtx;
@@ -13,7 +30,7 @@ interface FinalizeOkDeps {
   navigate: NavigateFunction;
   inOriginCtx: () => boolean;
   setStreaming: (value: StreamingTurnStart | null) => void;
-  setStoppedNotice: (value: boolean) => void;
+  setStoppedNotice: (value: StopNotice | null) => void;
   setAskError: (message: string | null) => void;
   setPendingConfirm: (
     value: { pending: ChatQueryOut["pending_tool_calls"]; sessionId: string } | null,
@@ -29,7 +46,7 @@ export function makeFinalizeOk(deps: FinalizeOkDeps) {
   return (out: ChatQueryOut, question: string): void => {
     if (!inOriginCtx()) return;
     deps.setStreaming(null);
-    deps.setStoppedNotice(false);
+    deps.setStoppedNotice(null);
     deps.setAskError(null);
     // 待确认调用独立留存(快照退位不带走确认入口);
     // ?? [] 兜底:前后端版本错位(滚动部署)缺键时不炸
@@ -81,6 +98,41 @@ export function makeFinalizeError(deps: FinalizeErrorDeps) {
       });
     }
   };
+}
+
+interface StopDeps {
+  traceIdRef: React.RefObject<string | null>;
+  stopSeqRef: React.RefObject<number>;
+  setStoppedNotice: (value: StopNotice | null) => void;
+  setDraft: React.Dispatch<React.SetStateAction<string>>;
+}
+
+/** 生成停止收口函数:回填问句;本轮标识已知即向控制面发起取消,提示随取消结果如实变化。 */
+export function makeStopTurn(deps: StopDeps) {
+  return (turn: { question: string } | null): void => {
+    if (!turn) return;
+    deps.setDraft((prev) => (prev.trim() ? prev : turn.question));
+    const traceId = deps.traceIdRef.current;
+    deps.traceIdRef.current = null;
+    if (traceId === null) {
+      // 响应头尚未返回:本轮标识未知,不发起取消,按断线续存如实说明
+      deps.setStoppedNotice({ kind: "not_started" });
+      return;
+    }
+    const seq = ++deps.stopSeqRef.current;
+    deps.setStoppedNotice({ kind: "pending" });
+    void api
+      .post<TurnCancelOut>(`/chat/query/stream/${encodeURIComponent(traceId)}/cancel`, undefined)
+      .then(
+        (out) => applyIfCurrent(seq, stopResultFromResponse(out)),
+        (err: unknown) => applyIfCurrent(seq, stopResultFromError(err)),
+      );
+  };
+
+  /** 取消应答只在发起它的那次停止仍有效时生效(期间已重新提问或切换上下文即丢弃)。 */
+  function applyIfCurrent(seq: number, notice: StopNotice): void {
+    if (deps.stopSeqRef.current === seq) deps.setStoppedNotice(notice);
+  }
 }
 
 /** 组装发往 agent 的问答请求体:附件与会话仅在存在时携带。 */

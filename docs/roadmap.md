@@ -125,6 +125,10 @@ react-router 8/echarts 6/react 19.3+React Compiler 1.0 替代手写 memo
 暂缓/否决:TypeScript 7(typescript-eslint #10940 不兼容,等 7.1 世代)、
 PG19(RC 刚过)、Python 3.15(等补丁周期)、uuid7.py 换库(ORM 侧生成
 主键,PG18 原生 uuidv7() 仅 DB 侧 DEFAULT 场景,替换为负收益)。
+**2026-11-24**:`add-chat-turn-cancel`(问答轮真取消)落地——对话页的「停止」从只脱离
+接收改为真取消(Agent 面显式中止端点 + 控制面在途轮登记与取消编排 + 消息第五态
+CANCELLED);实时语音通话(`add-voice-call`,提案已备、未开工)以本变更为前置
+(通话中的打断依赖真取消)。
 
 ### 089 工具网关:后续域接入清单(2026-10-09 登记,2026-10-13 更新现态)
 

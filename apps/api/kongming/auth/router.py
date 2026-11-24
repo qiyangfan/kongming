@@ -72,14 +72,6 @@ def _set_state_cookie(response: Response, value: str) -> None:
     )
 
 
-class RefreshRequest(BaseModel):
-    refresh_token: str | None = None
-
-
-class LogoutRequest(BaseModel):
-    refresh_token: str | None = None
-
-
 class CallbackRequest(BaseModel):
     code: str
     state: str
@@ -161,27 +153,26 @@ def _clear_refresh_cookie(response: Response) -> None:
 
 @router.post("/refresh", response_model=TokenPairOut)
 async def refresh(
-    req: RefreshRequest,
     response: Response,
     svc: Service,
     refresh_cookie: Annotated[str | None, Cookie(alias=REFRESH_COOKIE)] = None,
 ) -> TokenPairOut:
-    presented = req.refresh_token or refresh_cookie
-    if not presented:
+    # 刷新令牌只认 HttpOnly cookie(与锦官同构):不放 body——那会让令牌流经 JS 可达处,
+    # 且历史上正因「后端要求 body、前端只发 cookie」的空 body 之争,刷新页面即登出
+    if not refresh_cookie:
         raise TokenInvalid("refresh token 缺失")
-    pair = await svc.refresh(presented)
+    pair = await svc.refresh(refresh_cookie)
     _set_refresh_cookie(response, pair.refresh_token)
     return _pair_out(pair)
 
 
 @router.post("/logout", status_code=204)
 async def logout(
-    req: LogoutRequest,
     response: Response,
     svc: Service,
     refresh_cookie: Annotated[str | None, Cookie(alias=REFRESH_COOKIE)] = None,
 ) -> Response:
-    await svc.logout(req.refresh_token or refresh_cookie or "")
+    await svc.logout(refresh_cookie or "")
     _clear_refresh_cookie(response)
     response.status_code = 204
     return response
@@ -189,12 +180,11 @@ async def logout(
 
 @router.post("/logout/sso")
 async def logout_sso(
-    req: LogoutRequest,
     response: Response,
     svc: Service,
     refresh_cookie: Annotated[str | None, Cookie(alias=REFRESH_COOKIE)] = None,
 ) -> dict[str, str | None]:
-    target = await svc.logout_sso(req.refresh_token or refresh_cookie or "")
+    target = await svc.logout_sso(refresh_cookie or "")
     _clear_refresh_cookie(response)
     return {"redirect_url": target}
 

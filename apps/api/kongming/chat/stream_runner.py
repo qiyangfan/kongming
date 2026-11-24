@@ -3,6 +3,9 @@
 帧序契约:过程帧(stage/sql/summary/tool_call/trace)按 agent 到达顺序透传;
 每轮恰一个终态帧(result 或 error);终止标记 None 最后入队。任何退出路径都
 必须入队 None——中继生成器靠它收束,缺失即前端永久等心跳。
+
+被请求取消的轮由本任务收敛为已取消终态(query-streaming spec「取消的执行效果与终态」)。
+收尾(落库 + 终态帧)一旦开始就不被请求取消打断:一轮只落定一个终态。
 """
 
 import asyncio
@@ -13,8 +16,15 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from kongming.chat.agent_client import AgentClient, AgentReply, AgentUnavailable, parse_agent_reply
-from kongming.chat.finalize import AGENT_UNAVAILABLE_TEXT, ReplyFinalizer, persist_unavailable
-from kongming.chat.ports import ChatRepo, StreamStoreFactory
+from kongming.chat.finalize import (
+    AGENT_UNAVAILABLE_TEXT,
+    TURN_CANCELLED_TEXT,
+    ReplyFinalizer,
+    persist_cancelled,
+    persist_unavailable,
+)
+from kongming.chat.inflight import InflightTurn, TurnSettlement
+from kongming.chat.ports import ChatRepo, StreamStoreFactory, TurnRegistry
 from kongming.chat.results import ChatOutcome
 from kongming.chat.stage_trace import StageTraceCollector
 
@@ -68,7 +78,8 @@ async def noop() -> None:
 class AgentStreamConsumer:
     """后台消费 agent 流至终态:过程帧透传;result 帧先落库(独立 StreamStore
     会话)再富化入队;传输失败收敛 error 终态+FAILED 落库。
-    前端断线不影响本任务(断线续存);落库失败不阻断终态帧(与同步容错一致)。"""
+    前端断线不影响本任务(断线续存);落库失败不阻断终态帧(与同步容错一致)。
+    在途轮经登记端口登记,取消发起方据此找到并收敛本轮。"""
 
     def __init__(
         self,
@@ -78,12 +89,14 @@ class AgentStreamConsumer:
         finalizer: ReplyFinalizer,
         repo: ChatRepo,
         implicit_memory_task: "Callable[..., Coroutine[Any, Any, None]] | None" = None,
+        turns: TurnRegistry | None = None,
     ) -> None:
         self._agent = agent
         self._stream_store_factory = stream_store_factory
         self._finalizer = finalizer
         self._repo = repo
         self._implicit_memory_task = implicit_memory_task
+        self._turns = turns
 
     def begin(
         self,
@@ -137,26 +150,45 @@ class AgentStreamConsumer:
         attachment_ids: list[str] | None = None,
     ) -> None:
         """消费 agent 流并产出帧;异常收敛铁律:任何退出路径都入队终止标记(见模块说明)。"""
-        await self._run(
-            _StreamRun(
-                p=p,
-                user_id=user_id,
-                question=question,
-                orig_question=orig_question,
-                persist=persist,
-                datasource_key=datasource_key,
-                queue=queue,
-                react_tools=react_tools,
-                eff_history=eff_history,
-                memory_hint=memory_hint,
-                pref_revision=pref_revision,
-                attachment_ids=attachment_ids,
-            )
+        run = _StreamRun(
+            p=p,
+            user_id=user_id,
+            question=question,
+            orig_question=orig_question,
+            persist=persist,
+            datasource_key=datasource_key,
+            queue=queue,
+            react_tools=react_tools,
+            eff_history=eff_history,
+            memory_hint=memory_hint,
+            pref_revision=pref_revision,
+            attachment_ids=attachment_ids,
         )
+        turn: InflightTurn | None = None
+        if self._turns is not None:
+            # 登记以「用户 + trace_id」为键:入站 trace_id 可由调用方指定,他人同标识不得命中
+            turn = InflightTurn(
+                user_id=user_id,
+                trace_id=p.trace_id,
+                task=cast("asyncio.Task[None]", asyncio.current_task()),
+            )
+            self._turns.register(turn)
+        try:
+            await self._run(run, turn)
+        except asyncio.CancelledError:
+            if turn is None or not turn.cancel_requested:
+                raise  # 被外部取消且无人请求取消(进程关停等):原样上抛,不伪造终态
+            # 请求取消的硬取消落在流阶段:收敛为已取消(收敛段不被后续取消打断)
+            await _await_settle(asyncio.create_task(self._settle(run, turn)), turn)
+            raise
+        finally:
+            await run.queue.put(None)  # 终止标记(生成器据此收束;必达)
+            if turn is not None and self._turns is not None:
+                self._turns.unregister(turn)
 
-    async def _run(self, run: "_StreamRun") -> None:
-        """执行单轮消费:转发过程帧、收敛终态、flush 后必达终止标记。"""
-        terminal = _TerminalState()
+    async def _run(self, run: "_StreamRun", turn: InflightTurn | None) -> None:
+        """执行单轮消费:转发过程帧,随后收敛终态。"""
+        terminal = run.terminal
 
         async def on_frame(event: str, data_json: str) -> None:
             if event == "result":
@@ -200,16 +232,53 @@ class AgentStreamConsumer:
             # 响应格式错误或持久化异常也要写入 error 终态，避免前端一直等待。
             log.exception("流式消费任务异常 trace_id=%s", run.p.trace_id)
             terminal.error_text = AGENT_UNAVAILABLE_TEXT
-        try:
+        await _await_settle(asyncio.create_task(self._settle(run, turn)), turn)
+
+    async def _settle(self, run: "_StreamRun", turn: InflightTurn | None) -> None:
+        """终态收敛:被请求取消且没有业务终态时收敛为已取消(取消优先于失败收敛),
+        否则按既有规则(result 或 error);收敛结果随终态记下,取消发起方据此回答。"""
+        terminal = run.terminal
+        stage_trace = run.collector.payload() or []
+        if turn is not None and turn.cancel_requested and terminal.outcome is None:
+            await self._converge_cancelled(run, stage_trace=stage_trace)
+        else:
             await terminal.flush(
                 self,
                 run.p,
                 datasource_key=run.datasource_key,
                 queue=run.queue,
-                stage_trace=run.collector.payload() or [],
+                stage_trace=stage_trace,
             )
-        finally:
-            await run.queue.put(None)  # 终止标记(生成器据此收束;必达)
+        if turn is not None:
+            turn.settlement = terminal.settlement
+
+    async def _converge_cancelled(
+        self, run: "_StreamRun", *, stage_trace: list[dict[str, object]]
+    ) -> None:
+        """取消收敛:落已取消行(独立会话)并入队唯一的终态帧;不走正常终态管线,
+        不落半截 SQL 或半截摘要,不触发标题改写/成功回写/评分/隐式记忆。"""
+        p = run.p
+        outcome: ChatOutcome
+        if self._stream_store_factory is None:
+            log.error("stream_store_factory 未注入,已取消终态不落库")
+            outcome = ChatOutcome(
+                session_id=p.sid, success=False, verdict="CANCELLED", summary=TURN_CANCELLED_TEXT
+            )
+        else:
+            async with self._stream_store_factory() as store:
+                outcome = await persist_cancelled(
+                    store.repo,
+                    sid=p.sid,
+                    trace_id=p.trace_id,
+                    user_id=run.user_id,
+                    datasource_key=run.datasource_key,
+                    attachments=p.attachments,
+                    stage_trace=stage_trace,
+                )
+        run.terminal.settlement = TurnSettlement(
+            "CANCELLED" if outcome.verdict == "CANCELLED" else "COMPLETED", outcome.message_id
+        )
+        await run.queue.put(("result", outcome))
 
     async def finalize_stream(
         self,
@@ -306,41 +375,46 @@ class AgentStreamConsumer:
         *,
         datasource_key: str = "default",
         stage_trace: list[dict[str, object]] | None = None,  # 已收集轨迹如实落库
-    ) -> None:
-        """流式传输层失败的 FAILED 落库(独立会话);失败仅日志(不阻断 error 帧)。"""
+    ) -> ChatOutcome:
+        """流式传输层失败的 FAILED 落库(独立会话;失败行带本轮标识,取消收敛按它查重);
+        返回该终态。落库失败仅日志(不阻断 error 帧),此时无落库消息标识。"""
+        fallback = ChatOutcome(
+            session_id=p.sid,
+            success=False,
+            error=AGENT_UNAVAILABLE_TEXT,
+            datasource_key=datasource_key,
+        )
         if self._stream_store_factory is None:
             log.error("stream_store_factory 未注入,FAILED 终态不落库")
-            return
+            return fallback
         try:
             async with self._stream_store_factory() as store:
-                await persist_unavailable(
+                return await persist_unavailable(
                     store.repo,
                     sid=p.sid,
+                    trace_id=p.trace_id,
                     datasource_key=datasource_key,
                     attachments=p.attachments,
                     stage_trace=stage_trace,
                 )
         except Exception:  # 断线续存落库兜底:不阻断终态帧下发
             log.warning("流式 FAILED 终态落库异常 session=%s", p.sid, exc_info=True)
+            return fallback
 
 
-@dataclass(frozen=True)
-class _StreamRun:
-    """单轮流式消费的全部入参(帧回调闭包据此捕获,避免逐个闭包变量)。"""
-
-    p: PreparedQuery
-    user_id: str
-    question: str
-    orig_question: str
-    persist: bool
-    datasource_key: str
-    queue: "asyncio.Queue[tuple[str, object] | None]"
-    react_tools: list[dict[str, object]] | None
-    eff_history: list[str] | None
-    memory_hint: str
-    pref_revision: int | None
-    attachment_ids: list[str] | None
-    collector: StageTraceCollector = field(default_factory=StageTraceCollector)
+async def _await_settle(settle: "asyncio.Task[None]", turn: InflightTurn | None) -> None:
+    """等收尾任务结束。收尾(落库 + 终态帧)一旦开始就不被请求取消打断——终态只落定一次:
+    请求取消落在收尾段时继续等它做完,本轮终态以收尾结果为准;外部取消(无人请求取消)
+    则连带取消收尾并原样上抛,不伪造终态。"""
+    while not settle.done():
+        try:
+            await asyncio.shield(settle)
+        except asyncio.CancelledError:
+            if turn is None or not turn.cancel_requested:
+                settle.cancel()
+                await asyncio.gather(settle, return_exceptions=True)
+                raise
+    await settle  # 收尾已结束:正常返回,或原样抛出它的异常
 
 
 class _TerminalState:
@@ -349,6 +423,7 @@ class _TerminalState:
     def __init__(self) -> None:
         self.outcome: ChatOutcome | None = None
         self.error_text: str | None = None
+        self.settlement: TurnSettlement | None = None  # 本轮收敛结果(终态入队时记下)
 
     async def on_result(
         self,
@@ -395,10 +470,11 @@ class _TerminalState:
         queue: "asyncio.Queue[tuple[str, object] | None]",
         stage_trace: list[dict[str, object]],
     ) -> None:
-        """按终态入队唯一的终态帧(result 或 error);FAILED 先落库再入队。"""
+        """按终态入队唯一的终态帧(result 或 error);FAILED 先落库再入队;收敛结果随之记下。"""
         if self.outcome is not None:
             # 业务终态已落库(result 先finalize):即使读尾传输异常也按成功下发,
             # 不叠加 FAILED 消息(双落库收敛)
+            self.settlement = TurnSettlement("COMPLETED", self.outcome.message_id)
             await queue.put(("result", self.outcome))
             return
         if self.error_text is None:
@@ -406,10 +482,32 @@ class _TerminalState:
             log.error("agent 流结束但缺终态帧 trace_id=%s", p.trace_id)
             self.error_text = AGENT_UNAVAILABLE_TEXT
         # 传输层/意外失败终态:FAILED 落库(独立会话)+ error 帧
-        await agent_sink.persist_stream_failure(
+        failed = await agent_sink.persist_stream_failure(
             p, datasource_key=datasource_key, stage_trace=stage_trace
         )
+        self.settlement = TurnSettlement("COMPLETED", failed.message_id)
         await queue.put(("error", {"error": self.error_text, "reason_code": None}))
+
+
+@dataclass(frozen=True)
+class _StreamRun:
+    """单轮流式消费的全部入参(帧回调闭包据此捕获,避免逐个闭包变量)。"""
+
+    p: PreparedQuery
+    user_id: str
+    question: str
+    orig_question: str
+    persist: bool
+    datasource_key: str
+    queue: "asyncio.Queue[tuple[str, object] | None]"
+    react_tools: list[dict[str, object]] | None
+    eff_history: list[str] | None
+    memory_hint: str
+    pref_revision: int | None
+    attachment_ids: list[str] | None
+    collector: StageTraceCollector = field(default_factory=StageTraceCollector)
+    # 终态收集随行携带:硬取消从流的任意位置抛出后,收敛段仍能读到已收集的终态
+    terminal: _TerminalState = field(default_factory=_TerminalState)
 
 
 async def _forward_frame(

@@ -4,6 +4,7 @@
 是 SSE 契约的一部分,改动须保持逐字等价。
 """
 
+import dataclasses
 import json
 import logging
 from dataclasses import dataclass
@@ -27,6 +28,16 @@ from kongming.rag.ports import ColumnCommentReader, QueryHistoryWriter
 log = logging.getLogger(__name__)
 
 AGENT_UNAVAILABLE_TEXT = "问答服务暂不可用,请稍后重试"
+TURN_CANCELLED_TEXT = "本轮已取消"
+
+# 落库状态 → 响应结论词(与 map_status 互逆):取消收敛采用已落库行时还原为响应口径
+_SETTLED_VERDICTS = {
+    "SUCCESS": "PASS",
+    "REJECTED": "BLOCKED",
+    "NO_DATA": "NO_DATA",
+    "FAILED": "ERROR",
+    "CANCELLED": "CANCELLED",
+}
 
 
 def map_status(reply: AgentReply) -> str:
@@ -214,6 +225,7 @@ async def persist_unavailable(
     repo: ChatRepo,
     *,
     sid: str | None,
+    trace_id: str | None = None,  # 本轮标识(流式失败行携带;取消收敛按它查重)
     datasource_key: str = "default",
     attachments: list[dict[str, object]] | None = None,  # 带附件轮与成功路径对称
     stage_trace: list[dict[str, object]] | None = None,  # 失败前已收集轨迹如实落库
@@ -236,7 +248,7 @@ async def persist_unavailable(
                 summary=AGENT_UNAVAILABLE_TEXT,
                 status="FAILED",
                 attachments=attachments,  # 与成功路径回显对称
-                meta=MessageMeta(stage_trace=stage_trace),
+                meta=MessageMeta(trace_id=trace_id, stage_trace=stage_trace),
             )
             await touch_quietly(repo, sid)
         except ChatStoreError:
@@ -250,6 +262,70 @@ async def persist_unavailable(
         message_id=mid,
         datasource_key=datasource_key,  # 与同步分支口径一致
     )
+
+
+async def persist_cancelled(
+    repo: ChatRepo,
+    *,
+    sid: str | None,
+    trace_id: str,
+    user_id: str,
+    datasource_key: str = "default",
+    attachments: list[dict[str, object]] | None = None,
+    stage_trace: list[dict[str, object]] | None = None,
+) -> ChatOutcome:
+    """已取消终态落库(裸终态行)并返回其终态:summary 承载取消说明,不含 SQL、
+    结果集、图表与产物卡,携带取消前已收集的节点轨迹。同 trace 已有 assistant 行
+    (取消与完成几乎同时)即采用该行、不再写——同一轮至多一条 assistant 应答;
+    采用时结论词还原为响应口径(落库 REJECTED 即 BLOCKED)。查重读取失败时
+    不写行,按裸终态返回(漏写一条已取消消息,优于同轮落两条应答)。"""
+    cancelled = ChatOutcome(
+        session_id=sid,
+        success=False,
+        verdict="CANCELLED",
+        summary=TURN_CANCELLED_TEXT,
+        datasource_key=datasource_key,
+        attachments=[dict(a) for a in attachments or []],
+    )
+    if sid is None:
+        return cancelled
+    try:
+        existing = await repo.assistant_message_by_trace(trace_id=trace_id, user_id=user_id)
+    except Exception:
+        # 查重读取失败(连接中断一类)即不写行:该会话上的插入必再失败,
+        # 而绕过查重续写有同轮双行风险;裸终态由调用方照常下发
+        log.warning("已取消收敛查重失败,本轮不写消息 session=%s", sid, exc_info=True)
+        return cancelled
+    try:
+        if existing is not None:
+            status = str(existing["status"])
+            return ChatOutcome(
+                session_id=sid,
+                success=status == "SUCCESS",
+                # 未知状态按失败呈现:不把没把握的终态说成已取消
+                verdict=_SETTLED_VERDICTS.get(status, "ERROR"),
+                summary=str(existing["summary"] or ""),
+                message_id=str(existing["id"]),
+                datasource_key=datasource_key,
+                attachments=[dict(a) for a in attachments or []],
+            )
+        mid = await repo.insert_message(
+            session_id=sid,
+            role="ASSISTANT",
+            # artifacts 显式空数组:summary 列存了取消说明,
+            # 缺档会让回显重算出文档卡(与 FAILED 行同款处理)
+            result_json=json.dumps({"artifacts": []}, ensure_ascii=False),
+            summary=TURN_CANCELLED_TEXT,
+            status="CANCELLED",
+            attachments=attachments,
+            meta=MessageMeta(trace_id=trace_id, stage_trace=stage_trace),
+        )
+        await touch_quietly(repo, sid)
+    except ChatStoreError:
+        log.warning("已取消消息落库失败(会话可能已被删除) session=%s", sid)
+        await repo.rollback()
+        return cancelled
+    return dataclasses.replace(cancelled, message_id=mid)
 
 
 async def touch_quietly(repo: ChatRepo, session_id: str) -> None:

@@ -5,6 +5,10 @@
 非 ALL 数据范围只返回请求租户的数据。
 """
 
+import asyncio
+from datetime import UTC, datetime
+from typing import cast
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
@@ -27,6 +31,8 @@ from tests.test_chat_query import (
     _pass_reply,
     _user_with_chat_perm,
 )
+from tests.test_chat_turn_cancel import _HangAgent
+from tests.test_llm_usage import _seed_usage_rows
 
 pytestmark = pytest.mark.usefixtures("fake_agent")
 
@@ -260,3 +266,127 @@ async def test_summary_requires_perm(
     assert r.status_code == 403
     r2 = await client.get("/system/chat-quality/page", headers=_auth(token))
     assert r2.status_code == 403
+
+
+# ── 5. 已取消轮次的观测口径(observability spec) ─────────
+
+
+async def _cancelled_turn(
+    client: AsyncClient,
+    token: str,
+    holder: dict[str, FakeAgent],
+    session_id: str,
+    *,
+    trace_id: str,
+) -> str:
+    """流式问答一轮并取消,返回该轮已取消消息的 id。"""
+    agent = _HangAgent()
+    holder["agent"] = cast("FakeAgent", agent)
+    headers = {**_auth(token), "X-Trace-Id": trace_id}
+    stream = asyncio.create_task(
+        client.post(
+            "/chat/query/stream",
+            json={"question": f"被取消的轮 {trace_id}", "session_id": session_id},
+            headers=headers,
+        )
+    )
+    await asyncio.wait_for(agent.started.wait(), 5)
+    resp = await client.post(f"/chat/query/stream/{trace_id}/cancel", headers=_auth(token))
+    assert resp.status_code == 200 and resp.json()["outcome"] == "CANCELLED"
+    await asyncio.wait_for(stream, 5)
+    return str(resp.json()["message_id"])
+
+
+async def test_cancelled_rounds_excluded_from_quality_views(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, FakeAgent],
+) -> None:
+    """已取消轮次不进质量汇总、按天趋势、明细、同会话串联与导出;
+    历史里的已取消行、按 trace 的用量时间线与节点轨迹仍可追溯。"""
+    await seed_all(session, get_settings())
+    admin = await make_user("q-cancel-admin")
+    rid = await _mk_role_with_perms(
+        session, "Q-CANCEL", ["system:chat-quality:view", "system:llm-usage:view"]
+    )
+    await _bind(session, "sys_user_role", admin, rid)
+    await _bind(session, "sys_user_tenant", admin, await _default_tenant_id(session))
+    admin_hdr = _auth(_login(admin))
+    _uid, chat_token = await _user_with_chat_perm(session, make_user, "q-cancel-chat")
+    hdr = _auth(chat_token)
+
+    _install(fake_agent, FakeAgent(_pass_reply()))
+    first = (await client.post("/chat/query", json={"question": "成功的轮"}, headers=hdr)).json()
+    sid = first["session_id"]
+    cancelled_a = await _cancelled_turn(client, chat_token, fake_agent, sid, trace_id="q-cancel-a")
+    _install(fake_agent, FakeAgent(AgentReply(success=False, verdict="NO_DATA", summary="没有")))
+    third = (
+        await client.post(
+            "/chat/query", json={"question": "无数据的轮", "session_id": sid}, headers=hdr
+        )
+    ).json()
+    # 取消前已发生的模型调用(用量时间线须如实可见)
+    await _seed_usage_rows(
+        session,
+        [
+            {
+                "tr": "q-cancel-a",
+                "m": "qwen-plus",
+                "task": "SQL_GEN",
+                "pt": 10,
+                "ct": 5,
+                "tt": 15,
+                "lat": 800,
+                "st": "SUCCESS",
+                "ca": datetime.now(UTC),
+            }
+        ],
+    )
+    await _cancelled_turn(client, chat_token, fake_agent, sid, trace_id="q-cancel-b")
+
+    summary = (await client.get("/system/chat-quality/summary?days=7", headers=admin_hdr)).json()
+    overview = summary["overview"]
+    assert (
+        overview["total"],
+        overview["success"],
+        overview["no_data"],
+        overview["blocked"],
+        overview["failed"],
+    ) == (2, 1, 1, 0, 0)
+    assert sum(b["rounds"] for b in summary["trend"]) == 2
+    page = (await client.get("/system/chat-quality/page", headers=admin_hdr)).json()
+    assert page["total"] == 2
+    assert sorted(i["status"] for i in page["items"]) == ["NO_DATA", "SUCCESS"]
+    context = (
+        await client.get(
+            "/system/chat-quality/context",
+            params={"message_id": third["message_id"]},
+            headers=admin_hdr,
+        )
+    ).json()
+    assert [i["status"] for i in context["items"]] == ["SUCCESS", "NO_DATA"]
+    exported = await client.get("/system/chat-quality/export", headers=admin_hdr)
+    assert exported.status_code == 200 and "CANCELLED" not in exported.text
+
+    # 取消轮仍可追溯
+    trace = (
+        await client.get(f"/system/chat-quality/stage-trace/{cancelled_a}", headers=admin_hdr)
+    ).json()
+    assert trace["stage_trace"]  # 取消前已收集的部分,如实
+    timeline = (
+        await client.get(
+            "/system/llm-usage/timeline", params={"trace_id": "q-cancel-a"}, headers=admin_hdr
+        )
+    ).json()
+    assert [e["kind"] for e in timeline["events"]] == ["LLM"]
+    rows = (
+        await session.execute(
+            text(
+                "SELECT status FROM public.chat_message WHERE session_id = :s AND role='ASSISTANT'"
+                " ORDER BY created_at, id"
+            ),
+            {"s": sid},
+        )
+    ).all()
+    assert [str(r[0]) for r in rows] == ["SUCCESS", "CANCELLED", "NO_DATA", "CANCELLED"]

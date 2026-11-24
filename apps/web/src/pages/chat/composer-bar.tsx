@@ -268,15 +268,15 @@ export function ComposerBar(props: ComposerBarProps) {
           className="max-h-40 min-h-10 resize-none"
           aria-label="提问"
         />
-        {/* 流式期间发送位切换为显式「停止接收」——
-            中止读取并立即释放输入;服务端不中止(契约口径),文案对齐 */}
+        {/* 流式期间发送位切换为「取消本轮」——中止读取并立即释放输入,
+            同时向控制面发起取消;结果提示如实(已开始执行的操作不会被撤回) */}
         {streaming ? (
           <Button
             size="icon"
             variant="outline"
             onClick={props.onStop}
-            aria-label="停止接收本轮输出"
-            title="停止接收本轮输出(该轮仍在后台完成)"
+            aria-label="取消本轮问答"
+            title="取消本轮(已开始执行的操作不会被撤回)"
           >
             <StopCircle aria-hidden />
           </Button>

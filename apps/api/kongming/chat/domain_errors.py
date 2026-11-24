@@ -38,6 +38,10 @@ class MessageNotFound(Exception):
     """消息不存在或不属于当前用户+租户(执行计划;同形不区分,防探测)。"""
 
 
+class TurnNotFound(Exception):
+    """轮次不在途且本人名下无落库结果(不存在、他人轮次、已结束未落库同形 404)。"""
+
+
 class ExplainNoSql(Exception):
     """消息无落库 SQL(user 问句/纯失败轮)——无计划可分析。"""
 

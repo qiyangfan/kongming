@@ -94,6 +94,9 @@ export default function ChatPage() {
             stream.finalizeError(message, streaming?.question ?? "", streaming?.attSnapshot)
           }
           onAllResolved={() => stream.setPendingConfirm(null)}
+          onTraceId={(traceId) => {
+            stream.traceIdRef.current = traceId;
+          }}
         />
       </ScrollArea>
 

@@ -134,6 +134,19 @@ function NoDataCard({ msg }: { msg: SessionMessageOut }) {
   );
 }
 
+/* 已取消说明卡:用户主动放弃的一轮只留简洁说明,不提供反馈/纠错/再执行/导出/执行计划入口。 */
+function CancelledCard() {
+  return (
+    <div className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
+      <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <div>
+        <p className="text-foreground">本轮已取消</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">已开始执行的操作不会被撤回。</p>
+      </div>
+    </div>
+  );
+}
+
 /* 查询失败卡：折叠展示原始技术错误；触顶错误仍展示已生成的部分结果，并保留 EXPLAIN 入口。 */
 function FailedCard({ msg }: { msg: SessionMessageOut }) {
   const partial = normalize(msg);
@@ -331,7 +344,7 @@ function ResultCard({
   );
 }
 
-/* 状态分派：拦截/无数据/失败各自渲染专属卡片；其余按产物渲染结果或报告卡。 */
+/* 状态分派：拦截/无数据/失败/已取消各自渲染专属卡片；其余按产物渲染结果或报告卡。 */
 export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
   // 融合消息:正文引用角标定位来源条目(与 DocumentCard 同机制;
   // hook 须在条件返回前调用)
@@ -339,6 +352,7 @@ export function AssistantCard({ msg }: { msg: SessionMessageOut }) {
   if (msg.status === "REJECTED") return <RejectedCard msg={msg} />;
   if (msg.status === "NO_DATA") return <NoDataCard msg={msg} />;
   if (msg.status === "FAILED") return <FailedCard msg={msg} />;
+  if (msg.status === "CANCELLED") return <CancelledCard />;
 
   const result = normalize(msg);
   // 有产物时按类型渲染；旧消息和 persist=false 的结果沿用原展示方式。

@@ -1,6 +1,7 @@
 /* 在途流的数据类型：发起态、发起上下文、待确认卡与外部入参、对外 API 契约。 */
 
 import type { ChatQueryOut } from "@/lib/api";
+import type { StopNotice } from "@/lib/turn-stop";
 
 /** 在途流状态:发起时一次性创建,过程事件不经它广播 */
 export interface StreamingTurnStart {
@@ -17,6 +18,13 @@ export interface ChatCtx {
   cancelRecording: () => void;
 }
 
+/** 流发起时的上下文(守卫基准) */
+export interface StreamCtx {
+  sid: string | null;
+  tenant: string | null;
+  ds: string | null;
+}
+
 export interface PendingConfirm {
   pending: ChatQueryOut["pending_tool_calls"];
   sessionId: string;
@@ -29,8 +37,9 @@ export interface ChatStreamApi {
   setFinalized: React.Dispatch<
     React.SetStateAction<{ question: string; out: ChatQueryOut } | null>
   >;
-  stoppedNotice: boolean;
-  setStoppedNotice: React.Dispatch<React.SetStateAction<boolean>>;
+  /** 停止后的提示依据(取消结果);null=无提示 */
+  stoppedNotice: StopNotice | null;
+  setStoppedNotice: React.Dispatch<React.SetStateAction<StopNotice | null>>;
   pendingConfirm: PendingConfirm | null;
   setPendingConfirm: React.Dispatch<React.SetStateAction<PendingConfirm | null>>;
   forceBottomRef: React.RefObject<boolean>;
@@ -47,11 +56,9 @@ export interface ChatStreamApi {
   selfNavigatedRef: React.RefObject<string | null>;
   shutdown: () => void;
   abortRef: React.RefObject<AbortController | null>;
-  streamCtxRef: React.RefObject<{
-    sid: string | null;
-    tenant: string | null;
-    ds: string | null;
-  } | null>;
+  /** 本轮标识(X-Trace-Id),响应头到达后写入;停止时据此向控制面发起取消 */
+  traceIdRef: React.RefObject<string | null>;
+  streamCtxRef: React.RefObject<StreamCtx | null>;
 }
 
 export interface StreamInputs {

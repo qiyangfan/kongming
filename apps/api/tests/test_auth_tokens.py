@@ -13,6 +13,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.models import NormalizedProfile
+from kongming.auth.router import REFRESH_COOKIE
 from kongming.auth.seed import seed_all
 from kongming.config import get_settings
 
@@ -24,6 +25,11 @@ PROFILE = NormalizedProfile(
     email_verified=False,
     avatar_url=None,
 )
+
+
+def _cookie(token: str) -> dict[str, str]:
+    """刷新/登出只认 HttpOnly cookie;测试按浏览器形态发 Cookie 头(端点不认 body)。"""
+    return {"Cookie": f"{REFRESH_COOKIE}={token}"}
 
 
 async def _login(
@@ -46,12 +52,12 @@ async def test_refresh_rotates_and_old_ticket_invalidated(
 ) -> None:
     await seed_all(session, get_settings())  # 联邦建号依赖默认角色/租户
     pair = await _login(client, fake_keycloak)
-    r = await client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    r = await client.post("/auth/refresh", headers=_cookie(pair["refresh_token"]))
     assert r.status_code == 200
     pair2 = r.json()
     assert pair2["refresh_token"] != pair["refresh_token"]
     # 旧票即刻失效
-    r = await client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    r = await client.post("/auth/refresh", headers=_cookie(pair["refresh_token"]))
     assert r.status_code == 401
 
 
@@ -62,13 +68,13 @@ async def test_refresh_reuse_revokes_whole_family(
 ) -> None:
     await seed_all(session, get_settings())  # 联邦建号依赖默认角色/租户
     pair1 = await _login(client, fake_keycloak)
-    r = await client.post("/auth/refresh", json={"refresh_token": pair1["refresh_token"]})
+    r = await client.post("/auth/refresh", headers=_cookie(pair1["refresh_token"]))
     pair2 = r.json()
     # 已轮换的 refresh token 再次使用时，拒绝请求并吊销整个 token 家族。
-    r = await client.post("/auth/refresh", json={"refresh_token": pair1["refresh_token"]})
+    r = await client.post("/auth/refresh", headers=_cookie(pair1["refresh_token"]))
     assert r.status_code == 401
     # 同一 token 家族中的其他 refresh token 也随之失效。
-    r = await client.post("/auth/refresh", json={"refresh_token": pair2["refresh_token"]})
+    r = await client.post("/auth/refresh", headers=_cookie(pair2["refresh_token"]))
     assert r.status_code == 401
 
 
@@ -79,9 +85,9 @@ async def test_logout_revokes_family(
 ) -> None:
     await seed_all(session, get_settings())  # 联邦建号依赖默认角色/租户
     pair = await _login(client, fake_keycloak)
-    r = await client.post("/auth/logout", json={"refresh_token": pair["refresh_token"]})
+    r = await client.post("/auth/logout", headers=_cookie(pair["refresh_token"]))
     assert r.status_code == 204
-    r = await client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    r = await client.post("/auth/refresh", headers=_cookie(pair["refresh_token"]))
     assert r.status_code == 401
 
 
@@ -92,7 +98,7 @@ async def test_refresh_rejects_access_token(
 ) -> None:
     await seed_all(session, get_settings())  # 联邦建号依赖默认角色/租户
     pair = await _login(client, fake_keycloak)
-    r = await client.post("/auth/refresh", json={"refresh_token": pair["access_token"]})
+    r = await client.post("/auth/refresh", headers=_cookie(pair["access_token"]))
     assert r.status_code == 401
 
 
@@ -116,17 +122,37 @@ async def test_concurrent_refresh_has_single_winner(
     await seed_all(session, get_settings())  # 联邦建号依赖默认角色/租户
     pair = await _login(client, fake_keycloak)
     r1, r2 = await asyncio.gather(
-        client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]}),
-        client.post("/auth/refresh", json={"refresh_token": pair["refresh_token"]}),
+        client.post("/auth/refresh", headers=_cookie(pair["refresh_token"])),
+        client.post("/auth/refresh", headers=_cookie(pair["refresh_token"])),
     )
     codes = sorted([r1.status_code, r2.status_code])
     assert codes == [200, 401]  # 不允许双链并存(ADR-003 轮换失效保证)
     # 败者触发复用吊销:胜者的新票同家族,再刷亦 401
     winner = r1 if r1.status_code == 200 else r2
-    r = await client.post("/auth/refresh", json={"refresh_token": winner.json()["refresh_token"]})
+    r = await client.post("/auth/refresh", headers=_cookie(winner.json()["refresh_token"]))
     assert r.status_code == 401
 
 
 async def test_refresh_garbage_token(client: AsyncClient) -> None:
-    r = await client.post("/auth/refresh", json={"refresh_token": "not-a-jwt"})
+    r = await client.post("/auth/refresh", headers=_cookie("not-a-jwt"))
+    assert r.status_code == 401
+
+
+async def test_refresh_via_cookie_only(
+    client: AsyncClient,
+    session: AsyncSession,
+    fake_keycloak: Callable[[NormalizedProfile], None],
+) -> None:
+    """浏览器形态:SPA 启动刷新只带 HttpOnly cookie、不发 body——访问令牌仅存内存,
+    每次刷新页面都走这条;端点只认 cookie(空 body 曾被判 422,等于刷新页面即登出)。"""
+    await seed_all(session, get_settings())  # 联邦建号依赖默认角色/租户
+    pair = await _login(client, fake_keycloak)
+    r = await client.post("/auth/refresh", headers=_cookie(pair["refresh_token"]))
+    assert r.status_code == 200
+    assert r.json()["access_token"]
+
+
+async def test_refresh_rejects_body_without_cookie(client: AsyncClient) -> None:
+    """令牌只走 cookie:body 里塞刷新令牌不再被接受(防令牌在 JS 可达处流转)。"""
+    r = await client.post("/auth/refresh", json={"refresh_token": "whatever"})
     assert r.status_code == 401

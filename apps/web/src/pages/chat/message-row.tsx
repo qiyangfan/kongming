@@ -6,6 +6,7 @@ import { Paperclip } from "lucide-react";
 import { AssistantCard } from "@/components/assistant-card";
 import { ChatBubble } from "@/components/chat-bubble";
 import type { ChatQueryOut, SessionMessageOut } from "@/lib/api";
+import { snapshotStatus } from "@/lib/turn-stop";
 import { cellText } from "@/lib/utils";
 
 /** 附件徽标(user 气泡两处共用:历史回显与即时快照) */
@@ -18,14 +19,6 @@ function AttachmentBadge({ items }: { items: { [key: string]: unknown }[] }) {
       {items.map((a) => cellText(a.filename)).join(", ")}
     </span>
   );
-}
-
-/* 终态快照的状态码：失败按 verdict 区分安全护栏拦截与知识未覆盖。 */
-function snapshotStatus(out: ChatQueryOut): SessionMessageOut["status"] {
-  if (out.success) return "SUCCESS";
-  if (out.verdict === "BLOCKED") return "REJECTED";
-  if (out.verdict === "NO_DATA") return "NO_DATA";
-  return "FAILED";
 }
 
 export function toSyntheticMessage(out: ChatQueryOut): SessionMessageOut {
