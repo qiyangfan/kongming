@@ -67,7 +67,8 @@ def _set_state_cookie(response: Response, value: str) -> None:
         httponly=True,
         secure=s.auth_cookie_secure,
         samesite="lax",
-        path="/auth",
+        # 前端统一经 /api 前缀调用(dev 由 Vite 代理重写),cookie 须同时覆盖 /auth 与 /api/auth。
+        path="/",
     )
 
 
@@ -149,12 +150,13 @@ def _set_refresh_cookie(response: Response, refresh: str) -> None:
         httponly=True,
         secure=s.auth_cookie_secure,
         samesite="lax",
-        path="/auth",
+        # 同上:前端以 /api/auth/refresh 调用,路径必须覆盖 /api 前缀。
+        path="/",
     )
 
 
 def _clear_refresh_cookie(response: Response) -> None:
-    response.delete_cookie(REFRESH_COOKIE, path="/auth")
+    response.delete_cookie(REFRESH_COOKIE, path="/")
 
 
 @router.post("/refresh", response_model=TokenPairOut)
@@ -247,7 +249,7 @@ async def oauth_callback(
     if remaining:
         _set_state_cookie(response, _encode_states(remaining))
     else:
-        response.delete_cookie(STATE_COOKIE, path="/auth")
+        response.delete_cookie(STATE_COOKIE, path="/")
     _set_refresh_cookie(response, pair.refresh_token)
     return _pair_out(pair)
 

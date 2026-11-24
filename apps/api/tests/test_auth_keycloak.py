@@ -287,6 +287,43 @@ async def test_federation_rejects_disabled_account(
     assert r.status_code == 403
 
 
+def _cookie_path(set_cookie: list[str], name: str) -> str | None:
+    for raw in set_cookie:
+        parts = [part.strip() for part in raw.split(";")]
+        if parts[0].startswith(f"{name}="):
+            for attr in parts[1:]:
+                if attr.lower().startswith("path="):
+                    return attr.split("=", 1)[1]
+    return None
+
+
+def _path_covers(cookie_path: str, request_path: str) -> bool:
+    """RFC 6265 path-match:请求路径是否落在 cookie Path 内。"""
+    if request_path == cookie_path:
+        return True
+    if not request_path.startswith(cookie_path):
+        return False
+    return cookie_path.endswith("/") or request_path[len(cookie_path)] == "/"
+
+
+async def test_auth_cookies_cover_spa_api_prefix(
+    client: AsyncClient, fake_keycloak: Callable[[NormalizedProfile], None], session: AsyncSession
+) -> None:
+    """前端统一经 /api 前缀调用:state/refresh cookie 的 Path 须覆盖 /api/auth/*,
+    否则回调报 state 未绑定、启动刷新 401。"""
+    await seed_all(session, get_settings())
+    fake_keycloak(PROFILE)
+    start = await client.get("/auth/keycloak/start")
+    state_path = _cookie_path(start.headers.get_list("set-cookie"), "km_oidc_state")
+    assert state_path is not None and _path_covers(state_path, "/api/auth/keycloak/callback")
+    state = parse_qs(urlparse(cast("str", start.json()["authorize_url"])).query)["state"][0]
+
+    done = await _callback(client, state)
+    assert done.status_code == 200
+    refresh_path = _cookie_path(done.headers.get_list("set-cookie"), "km_refresh")
+    assert refresh_path is not None and _path_covers(refresh_path, "/api/auth/refresh")
+
+
 async def test_state_is_single_use(
     client: AsyncClient, fake_keycloak: Callable[[NormalizedProfile], None], session: AsyncSession
 ) -> None:
