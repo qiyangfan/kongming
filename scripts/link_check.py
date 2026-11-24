@@ -16,7 +16,8 @@ _LINK = re.compile(r"!?\[[^\]\n]*\]\(([^)\s]+)\)")
 # 路径形态判定:允许字母数字与 . _ - /,可带锚点;中文括注与散文不会命中
 _PATHLIKE = re.compile(r"^[A-Za-z0-9._/\-]+(?:#[^)]*)?$")
 _SKIP_SCHEMES = ("http://", "https://", "mailto:")
-_SKIP_DIRS = {".git", "node_modules", ".venv", "dist"}
+# corpus_k8s 是照抄的 Kubernetes 中文文档,相对链接指向上游站点而非仓内路径
+_SKIP_DIRS = {".git", "node_modules", ".venv", "dist", "corpus_k8s"}
 _FENCE = re.compile(r"^\s*(```|~~~)")
 
 
