@@ -331,6 +331,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/chat/turn-cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Turn Cancel
+         * @description 取消一轮在途问答(持有侧入口):与用户面取消端点同一编排、同一归属规则。
+         */
+        post: operations["turn_cancel_internal_chat_turn_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chat/stt": {
         parameters: {
             query?: never;
@@ -8050,6 +8070,16 @@ export interface components {
             imap_poll_interval_sec: number;
         };
         /**
+         * TurnCancelIn
+         * @description 跨实例取消转发入参:轮次标识 + 归属用户(转发方从已鉴权请求带入)。
+         */
+        TurnCancelIn: {
+            /** Trace Id */
+            trace_id: string;
+            /** User Id */
+            user_id: string;
+        };
+        /**
          * TurnCancelOut
          * @description 取消端点响应:outcome=CANCELLED(本轮已取消)/ COMPLETED(取消到达前本轮已正常结束);
          *     message_id=该轮落库的 assistant 消息 id(persist=false 或落库失败时为空)。
@@ -9058,6 +9088,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExplainOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    turn_cancel_internal_chat_turn_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TurnCancelIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TurnCancelOut"];
                 };
             };
             /** @description Validation Error */

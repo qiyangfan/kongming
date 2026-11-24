@@ -517,6 +517,71 @@ async def test_disconnect_continues_to_terminal(
     ]
 
 
+# ============ 前端断开后丢弃无人接收的帧 ============
+
+
+async def test_relay_discards_frames_after_client_gone(
+    session: AsyncSession, make_user: MakeUser
+) -> None:
+    """中继异常退出(前端断开/取消/发送失败)后就地丢弃后续帧:队列不为无人接收的
+    帧堆队,后台消费任务照常跑到终态并落库(断线续存不受影响)。"""
+    from kongming.chat.dependencies import _stream_store_factory
+    from tests.test_chat_query import _pass_reply
+    from tests.test_chat_turn_cancel import _HangAgent
+
+    uid, _token = await _user_with_chat_perm(session, make_user, "relay-drain")
+    agent = _HangAgent(tail=[("result", json.dumps(_pass_reply().__dict__))])
+    app.dependency_overrides[get_agent_client] = lambda: agent
+    try:
+        async with get_sessionmaker()() as s:
+            svc = ChatService(
+                ChatRepository(s),
+                cast("Any", agent),
+                SqlDatasourceRepo(s),
+                stream_store_factory=_stream_store_factory(cast("Any", agent)),
+            )
+            handle = await svc.start_stream(
+                user_id=uid,
+                tenant_key="default",
+                question="断开即弃帧",
+                session_id=None,
+                persist=True,
+                history=[],
+                datasource_key="default",
+            )
+            relay = chat_router._relay_gen(handle)
+
+            async def _pump() -> None:
+                async for _frame in relay:
+                    pass
+
+            pump = asyncio.create_task(_pump())
+            await asyncio.wait_for(agent.started.wait(), 5)
+            await asyncio.sleep(0.05)  # 让中继把已到达的帧交付出去
+            pump.cancel()  # 等同前端断开:响应任务被取消
+            # 先放行 agent 再等中继退出:中继的丢弃循环要等该轮终止标记才收尾
+            agent.release.set()
+            agent.finish.set()
+            with pytest.raises(asyncio.CancelledError):
+                await pump
+            await asyncio.wait_for(handle.task, 10)
+            assert handle.queue.empty()  # 中继退出前把后续帧丢弃干净
+    finally:
+        app.dependency_overrides.pop(get_agent_client, None)
+    msgs = await session.execute(
+        text(
+            "SELECT m.role, m.status, m.summary FROM public.chat_message m"
+            " JOIN public.chat_session s ON s.id = m.session_id"
+            " WHERE s.title LIKE '断开即弃帧%' ORDER BY m.created_at"
+        )
+    )
+    rows = [(str(r[0]), str(r[1]), r[2]) for r in msgs]
+    assert rows == [
+        ("USER", "SUCCESS", None),
+        ("ASSISTANT", "SUCCESS", _pass_reply().summary),
+    ]
+
+
 # ============ 心跳分支(直调生成器) ============
 
 

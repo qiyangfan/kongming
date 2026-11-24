@@ -2,7 +2,8 @@
 
 路由分两类(ADR-002):
 - 用户面 /auth/* /chat/* /admin/* —— 用户 JWT
-- 内部面 /internal/* —— 仅限 agent 进程调用,内部服务令牌认证
+- 内部面 /internal/* —— 内部服务令牌认证(agent 进程回调;chat 域的在途轮取消
+  转发由同类 api 实例调用,同属内部通道)
 """
 
 import asyncio
@@ -30,6 +31,7 @@ from kongming.auth.seed import seed_all
 from kongming.billing.router import router as billing_router
 from kongming.bot.router import public_router as bot_public_router
 from kongming.bot.router import router as bot_router
+from kongming.chat.internal_router import router as chat_internal_router
 from kongming.chat.router import router as chat_router
 from kongming.config import get_settings
 from kongming.connector.router import router as connector_router
@@ -409,6 +411,7 @@ app.include_router(auth_router)
 app.include_router(internal_router)
 app.include_router(internal_meta_router)
 app.include_router(chat_router)
+app.include_router(chat_internal_router)
 app.include_router(stt_router)
 app.include_router(system_router)
 app.include_router(datasource_router)

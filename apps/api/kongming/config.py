@@ -1,5 +1,6 @@
 """控制面配置。prod fail-closed:敏感项无默认值,缺失即拒启。"""
 
+import socket
 from functools import lru_cache
 
 from pydantic import Field
@@ -99,6 +100,14 @@ class Settings(BaseSettings):
     datasource_encrypt_key: str | None = None
 
     agent_base_url: str = "http://localhost:8001"
+    # 本实例对同类实例可达的自报地址(跨实例取消转发;share-turn-registry)。
+    # 多实例部署须逐实例唯一且可达:k8s 填 pod IP/名称,勿用共享服务名——
+    # 否则自环防护会把别实例的在途轮误判为陈旧登记。缺省按主机名推导
+    # (容器内监听端口固定 8000)。
+    api_self_base_url: str = Field(default_factory=lambda: f"http://{socket.gethostname()}:8000")
+    # 在途轮跨实例登记键 TTL:须大于「单轮 agent 流上限 + 收敛余量」
+    # (agent_timeout_sec 缺省 120s,最坏约 5 个顺序阶段);调大 agent 超时须同步调大
+    turn_registry_ttl_sec: int = Field(default=900, ge=60)
     agent_timeout_sec: float = 120.0  # 覆盖 understand+generate+≤2 次 selfheal+summarize
     # 报告生成=多轮 LLM+多次取数的长任务,独立超时预算(非单轮问答口径)
     agent_report_timeout_sec: float = Field(default=600.0, gt=0)

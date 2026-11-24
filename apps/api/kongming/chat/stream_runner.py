@@ -24,7 +24,7 @@ from kongming.chat.finalize import (
     persist_unavailable,
 )
 from kongming.chat.inflight import InflightTurn, TurnSettlement
-from kongming.chat.ports import ChatRepo, StreamStoreFactory, TurnRegistry
+from kongming.chat.ports import ChatRepo, StreamStoreFactory, TurnFederation, TurnRegistry
 from kongming.chat.results import ChatOutcome
 from kongming.chat.stage_trace import StageTraceCollector
 
@@ -90,6 +90,7 @@ class AgentStreamConsumer:
         repo: ChatRepo,
         implicit_memory_task: "Callable[..., Coroutine[Any, Any, None]] | None" = None,
         turns: TurnRegistry | None = None,
+        federation: TurnFederation | None = None,
     ) -> None:
         self._agent = agent
         self._stream_store_factory = stream_store_factory
@@ -97,6 +98,7 @@ class AgentStreamConsumer:
         self._repo = repo
         self._implicit_memory_task = implicit_memory_task
         self._turns = turns
+        self._federation = federation
 
     def begin(
         self,
@@ -173,6 +175,10 @@ class AgentStreamConsumer:
                 task=cast("asyncio.Task[None]", asyncio.current_task()),
             )
             self._turns.register(turn)
+        federation_token: str | None = None
+        if self._federation is not None:
+            # 跨实例登记紧随本地登记:本地表是主,共享登记只是给别实例的指针
+            federation_token = await self._federation.claim(trace_id=p.trace_id, user_id=user_id)
         try:
             await self._run(run, turn)
         except asyncio.CancelledError:
@@ -185,6 +191,8 @@ class AgentStreamConsumer:
             await run.queue.put(None)  # 终止标记(生成器据此收束;必达)
             if turn is not None and self._turns is not None:
                 self._turns.unregister(turn)
+            if self._federation is not None and federation_token is not None:
+                await self._federation.release(trace_id=p.trace_id, token=federation_token)
 
     async def _run(self, run: "_StreamRun", turn: InflightTurn | None) -> None:
         """执行单轮消费:转发过程帧,随后收敛终态。"""

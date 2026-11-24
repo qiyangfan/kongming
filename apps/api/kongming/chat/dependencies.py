@@ -21,6 +21,7 @@ from kongming.chat.service import ChatService
 from kongming.chat.session_service import ChatSessionService
 from kongming.chat.suggestions import SuggestionsService
 from kongming.chat.title_tasks import rewrite_session_title
+from kongming.chat.turn_federation import RedisTurnFederation
 from kongming.chat.wiring import SchemaOverviewSource
 from kongming.config import get_settings
 from kongming.datasource.repository import SqlDatasourceRepo
@@ -54,8 +55,12 @@ def get_rag_service(session: AsyncSession) -> RagService:
     )
 
 
-# 在途轮登记是进程内单例:取消请求与发起请求落在同一进程才命中(单节点部署形态的前提)
+# 在途轮登记是进程内单例:取消请求与发起请求落在同一进程即命中(快路径)
 _TURNS = InflightTurns()
+
+# 跨实例在途协作(share-turn-registry):把在途登记共享出去,取消落到别的实例时
+# 凭它转发给持有者。Redis 客户端惰性连接,进程内单例跨请求复用连接池。
+_FEDERATION = RedisTurnFederation(get_redis(), get_settings())
 
 
 def _build_cost_gate() -> ChatCostGate:
@@ -125,6 +130,7 @@ def get_chat_service(
         column_comments=get_rag_service(session),  # 列标签(同一 RagService 的窄端口视角)
         cost_gate=_build_cost_gate(),  # 成本双闸(速率+配额)
         turns=_TURNS,  # 在途轮登记(取消端点与流式消费共用同一张表)
+        federation=_FEDERATION,  # 跨实例在途协作(登记/转发/降级)
     )
 
 

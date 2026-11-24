@@ -198,19 +198,30 @@ def _sse_frame(event: str, data_json: str) -> str:
 async def _relay_gen(handle: StreamHandle) -> AsyncIterator[str]:
     """SSE 生成器:从后台任务队列转发帧;超时发心跳注释行;None 即收束。
     前端断开时本生成器被取消,后台任务(断线续存)继续不受影响。"""
-    while True:
-        try:
-            item = await asyncio.wait_for(handle.queue.get(), timeout=STREAM_HEARTBEAT_SEC)
-        except TimeoutError:
-            yield ": ping\n\n"
-            continue
-        if item is None:
-            return
-        event, payload = item
-        if event == "result" and isinstance(payload, ChatOutcome):
-            yield _sse_frame("result", to_chat_query_out(payload).model_dump_json())
-        else:
-            yield _sse_frame(event, json.dumps(payload, ensure_ascii=False, default=str))
+    delivered = False
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(handle.queue.get(), timeout=STREAM_HEARTBEAT_SEC)
+            except TimeoutError:
+                yield ": ping\n\n"
+                continue
+            if item is None:
+                delivered = True
+                return
+            event, payload = item
+            if event == "result" and isinstance(payload, ChatOutcome):
+                yield _sse_frame("result", to_chat_query_out(payload).model_dump_json())
+            else:
+                yield _sse_frame(event, json.dumps(payload, ensure_ascii=False, default=str))
+    finally:
+        if not delivered:
+            # 前端已收不到(断开、取消、发送失败):就地丢弃消费任务后续入队的帧直到
+            # 终止标记(消费任务任何退出路径都必达它)——落库照常,但不在内存里为
+            # 无人接收的帧堆队(结果集大时单轮可达数百 KB,并发遗弃轮次会叠加)
+            while True:
+                if await handle.queue.get() is None:
+                    break
 
 
 @router.post(

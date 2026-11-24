@@ -13,7 +13,7 @@ from kongming.chat.models import MessageMeta, Suggestion
 from kongming.rag.ports import QueryHistoryWriter
 
 if TYPE_CHECKING:
-    from kongming.chat.inflight import InflightTurn
+    from kongming.chat.inflight import InflightTurn, TurnSettlement
 
 
 class ChatStoreError(Exception):
@@ -79,6 +79,35 @@ class TurnRegistry(Protocol):
     def register(self, turn: "InflightTurn") -> None: ...
     def unregister(self, turn: "InflightTurn") -> None: ...
     def find_all(self, *, user_id: str, trace_id: str) -> "list[InflightTurn]": ...
+
+
+@dataclass(frozen=True)
+class TurnLocation:
+    """别实例持有的在途轮(跨实例登记的定位结果)。"""
+
+    user_id: str
+    base_url: str
+
+
+class TurnFederation(Protocol):
+    """在途轮的跨实例协作:本实例登记持有;取消落在别处时凭登记转发过去。
+
+    进程内登记表(TurnRegistry)只覆盖「取消与发起同进程」;本端口把在途登记
+    共享出去,使取消请求落到任一实例都能找到持有该轮的实例。"""
+
+    async def claim(self, *, trace_id: str, user_id: str) -> str | None:
+        """登记本实例持有该轮,返回注销凭据;登记不可用返回 None(退化为仅本实例可见)。"""
+
+    async def release(self, *, trace_id: str, token: str) -> None:
+        """按凭据注销;凭据不匹配(同名轮顶替)不删。"""
+
+    async def locate(self, *, trace_id: str) -> TurnLocation | None:
+        """按轮次标识取归属用户与持有实例地址;读取失败或不存在返回 None。"""
+
+    async def cancel_remote(self, *, trace_id: str, user_id: str) -> "TurnSettlement | None":
+        """取消请求经共享登记转给持有该轮的实例并等它收敛;返回 None=无处可转
+        (不在任何实例、陈旧登记、登记不可用或转发失败),由调用方走落库兜底。
+        该轮在别处但属于他人时抛 TurnNotFound(与不存在同形)。"""
 
 
 class OperLogger(Protocol):

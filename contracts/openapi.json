@@ -1123,6 +1123,48 @@
         }
       }
     },
+    "/internal/chat/turn-cancel": {
+      "post": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Turn Cancel",
+        "description": "取消一轮在途问答(持有侧入口):与用户面取消端点同一编排、同一归属规则。",
+        "operationId": "turn_cancel_internal_chat_turn_cancel_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TurnCancelIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnCancelOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/stt": {
       "post": {
         "tags": [
@@ -25264,6 +25306,29 @@
           "target_type"
         ],
         "title": "TriggerUpdateIn"
+      },
+      "TurnCancelIn": {
+        "properties": {
+          "trace_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Trace Id"
+          },
+          "user_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "User Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trace_id",
+          "user_id"
+        ],
+        "title": "TurnCancelIn",
+        "description": "跨实例取消转发入参:轮次标识 + 归属用户(转发方从已鉴权请求带入)。"
       },
       "TurnCancelOut": {
         "properties": {
