@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any, Literal, cast
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from kongming.chat.results import ChatOutcome, MessageResult, SessionMessage
 
@@ -25,6 +25,8 @@ class ChatQueryIn(BaseModel):
     agent_mode: Literal["recipe", "react"] = "recipe"
     # 图片附件引用(≤3;归属校验在 service)
     attachment_ids: list[uuid.UUID] = Field(default_factory=list[uuid.UUID], max_length=3)
+    # 语音轮关联字段:仅语音通话发起的一轮携带;须属当前用户在途通话且未使用
+    voice_turn_token: str | None = None
 
 
 class ChartOut(BaseModel):
@@ -189,13 +191,17 @@ class SuggestionsOut(BaseModel):
 class StreamStageOut(BaseModel):
     """stage 事件 data:节点粒度进度(status ∈ running/done)。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     node: str
     status: Literal["running", "done"]
-    retry_count: int = 0  # selfheal 表示重试序号；其他节点表示已完成的重试数。
+    retry_count: StrictInt = 0  # selfheal 表示重试序号；其他节点表示已完成的重试数。
 
 
 class StreamSqlOut(BaseModel):
     """sql 事件 data:validate 通过后提前下发,内容与终态落库 SQL 一致。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     sql: str
 
@@ -203,14 +209,22 @@ class StreamSqlOut(BaseModel):
 class StreamSummaryOut(BaseModel):
     """summary 事件 data:总结增量(当前为单条完整文案,逐事件追加=打字机语义)。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     delta: str
 
 
 class StreamErrorOut(BaseModel):
-    """error 终态事件 data:仅传输层/意外失败(业务三态走 result 事件)。"""
+    """error 终态事件 data:仅传输层/意外失败(业务三态走 result 事件)。
+
+    reason_code 必填且枚举两种流错误;公开信封据此构造,内部队列不可再发
+    reason_code=None 的裸错误。
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     error: str
-    reason_code: str | None = None
+    reason_code: Literal["AGENT_UNAVAILABLE", "STREAM_OUTPUT_FAILED"]
 
 
 class StreamToolCallOut(BaseModel):
@@ -219,6 +233,8 @@ class StreamToolCallOut(BaseModel):
     status ∈ running/done/rejected(confirm_required 以 done 下发,result_digest
     含「待确认」);args_digest/result_digest 为截断摘要(审计同源口径)。
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     tool_name: str
     status: Literal["running", "done", "rejected"]
@@ -237,23 +253,118 @@ class StreamTraceOut(BaseModel):
     fields: dict[str, Any]
 
 
-# model 键使 FastAPI 把全部事件模型注册进 components(ADR-005 类型生成可达),
-# content 键描述 SSE 事件流的真实形态(6 类事件 data 的 oneOf)
+# ---- 公开事件信封:{"type":"…","data":{…}},type 决定 data 的结构 ----
+# 外层一律 extra="forbid":公开流不发任何未声明字段(trace 诊断只走内部流)
+
+
+class StreamStageEvent(BaseModel):
+    """type=stage 信封。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["stage"]
+    data: StreamStageOut
+
+
+class StreamSqlEvent(BaseModel):
+    """type=sql 信封。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["sql"]
+    data: StreamSqlOut
+
+
+class StreamSummaryEvent(BaseModel):
+    """type=summary 信封。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["summary"]
+    data: StreamSummaryOut
+
+
+class StreamToolCallEvent(BaseModel):
+    """type=tool_call 信封。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["tool_call"]
+    data: StreamToolCallOut
+
+
+class StreamResultEvent(BaseModel):
+    """type=result 信封:data 与同步问答响应逐字段一致。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["result"]
+    data: ChatQueryOut
+
+
+class StreamErrorEvent(BaseModel):
+    """type=error 信封:仅传输/输出失败。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["error"]
+    data: StreamErrorOut
+
+
+ChatStreamEvent = Annotated[
+    StreamStageEvent
+    | StreamSqlEvent
+    | StreamSummaryEvent
+    | StreamToolCallEvent
+    | StreamResultEvent
+    | StreamErrorEvent,
+    Field(discriminator="type"),
+]
+
+# 过程事件的信封(result/error 由问答收尾产生,不经此校验器)
+PROCESS_STREAM_EVENTS = Annotated[
+    StreamStageEvent | StreamSqlEvent | StreamSummaryEvent | StreamToolCallEvent,
+    Field(discriminator="type"),
+]
+
+
+# 公开事件的信封组件名单(OpenAPI components 按 FastAPI 注册的类名落位)
+_STREAM_EVENT_COMPONENTS: tuple[tuple[str, str], ...] = (
+    ("stage", "StreamStageEvent"),
+    ("sql", "StreamSqlEvent"),
+    ("summary", "StreamSummaryEvent"),
+    ("tool_call", "StreamToolCallEvent"),
+    ("result", "StreamResultEvent"),
+    ("error", "StreamErrorEvent"),
+)
+
+_SSE_DATA_SCHEMA: dict[str, Any] = {
+    "oneOf": [{"$ref": f"#/components/schemas/{name}"} for _, name in _STREAM_EVENT_COMPONENTS],
+    "discriminator": {
+        "propertyName": "type",
+        "mapping": {t: f"#/components/schemas/{n}" for t, n in _STREAM_EVENT_COMPONENTS},
+    },
+}
+
+# model 键使 FastAPI 把六个信封模型注册进 components(ADR-005 类型生成可达);
+# 200 响应体是文本事件流,单条 data: 解码后的 JSON 结构由 x-sse-data-schema 声明
+# (OpenAPI 3.1 无逐条事件的媒体类型,itemSchema 为 3.2 特性);
+# FastAPI 对 model 键自动补的 application/json content 由导出脚本定点移除
 STREAM_RESPONSES: dict[int | str, dict[str, Any]] = {
     200: {
         "model": (
-            StreamStageOut
-            | StreamSqlOut
-            | StreamSummaryOut
-            | StreamToolCallOut
-            | StreamErrorOut
-            | StreamTraceOut
-            | ChatQueryOut
+            StreamStageEvent
+            | StreamSqlEvent
+            | StreamSummaryEvent
+            | StreamToolCallEvent
+            | StreamResultEvent
+            | StreamErrorEvent
         ),
         "description": (
-            "SSE 发送 stage、sql、summary、tool_call 和诊断事件;"
-            "result 与 /chat/query 返回相同数据。"
-            "错误通过 error 终态发送;以冒号开头的注释帧用于心跳。"
+            "SSE 只用默认消息(data: 行,无 event: 命名),每条业务帧的 data 为"
+            '{"type":"…","data":{…}},type 决定 data 的结构(见 x-sse-data-schema)。'
+            "result 与 /chat/query 返回相同数据;错误经 error 终态发送;"
+            "以冒号开头的注释帧用于心跳,消费方应忽略。"
         ),
         "headers": {
             "X-Trace-Id": {
@@ -266,16 +377,12 @@ STREAM_RESPONSES: dict[int | str, dict[str, Any]] = {
         "content": {
             "text/event-stream": {
                 "schema": {
-                    "oneOf": [
-                        {"$ref": "#/components/schemas/StreamStageOut"},
-                        {"$ref": "#/components/schemas/StreamSqlOut"},
-                        {"$ref": "#/components/schemas/StreamSummaryOut"},
-                        {"$ref": "#/components/schemas/StreamToolCallOut"},
-                        {"$ref": "#/components/schemas/StreamErrorOut"},
-                        {"$ref": "#/components/schemas/StreamTraceOut"},
-                        {"$ref": "#/components/schemas/ChatQueryOut"},
-                    ]
-                }
+                    "type": "string",
+                    "description": (
+                        "UTF-8 文本事件流;每条业务帧的 data 解码后符合 x-sse-data-schema。"
+                    ),
+                },
+                "x-sse-data-schema": _SSE_DATA_SCHEMA,
             }
         },
     }

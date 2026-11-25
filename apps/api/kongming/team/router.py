@@ -12,7 +12,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
+from kongming.auth.models import AuthenticatedUser
 from kongming.auth.repository import SqlOperLogRepo
 from kongming.chat.repository import ChatRepository
 from kongming.db import get_session
@@ -85,9 +86,9 @@ def _svc(
     )
 
 
-async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header: str | None) -> str:
+async def _tenant_or_403(user: AuthenticatedUser, session: AsyncSession, header: str | None) -> str:
     repo = ChatRepository(session)
-    uid = str(user["sub"])
+    uid = user.user_id
     if header is not None:
         tid = await repo.find_bound_tenant(user_id=uid, tenant_key=header)
         if tid is None:
@@ -100,16 +101,16 @@ async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header:
 
 
 async def _require_owner_or_manage(
-    user: dict[str, object], session: AsyncSession, team_id: str
+    user: AuthenticatedUser, session: AsyncSession, team_id: str
 ) -> None:
     """成员管理操作闸:目标团队 OWNER 或持 system:team:manage 的超管语义
     (权限实时查库,与 require_perm 同口径——claims 不载权限点)。"""
     from kongming.auth.repository import SqlPermRepo
 
-    perms = await SqlPermRepo(session).list_codes(str(user["sub"]))
+    perms = await SqlPermRepo(session).list_codes(user.user_id)
     if MANAGE in set(perms):
         return
-    role = await SqlTeamRepo(session).get_member_role(team_id=team_id, user_id=str(user["sub"]))
+    role = await SqlTeamRepo(session).get_member_role(team_id=team_id, user_id=user.user_id)
     if role != "OWNER":
         raise HTTPException(status_code=403, detail="TEAM_OWNER_REQUIRED")
 
@@ -167,17 +168,17 @@ def _team_out(row: dict[str, Any]) -> dict[str, Any]:
 @router.post("", status_code=201, dependencies=[Depends(require_perm(MANAGE))])
 async def create_team(
     body: TeamIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     try:
-        tid = await _svc(session, str(user["sub"])).create(
+        tid = await _svc(session, user.user_id).create(
             tenant_id=tenant_id,
             team_key=body.team_key,
             name=body.name,
-            created_by=str(user["sub"]),
+            created_by=user.user_id,
         )
         await session.commit()
     except TeamValidationError as e:
@@ -187,7 +188,7 @@ async def create_team(
 
 @router.get("", response_model=list[TeamOut])
 async def list_teams(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
     mine: bool = True,
@@ -196,10 +197,10 @@ async def list_teams(
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     from kongming.auth.repository import SqlPermRepo
 
-    perms = set(await SqlPermRepo(session).list_codes(str(user["sub"])))
+    perms = set(await SqlPermRepo(session).list_codes(user.user_id))
     svc = _svc(session)
     if mine or MANAGE not in perms:
-        rows = await svc.list_mine(tenant_id=tenant_id, user_id=str(user["sub"]))
+        rows = await svc.list_mine(tenant_id=tenant_id, user_id=user.user_id)
     else:
         rows = await svc.list_all(tenant_id=tenant_id)
     return [_team_out(r) for r in rows]
@@ -208,7 +209,7 @@ async def list_teams(
 @router.get("/{team_id}", response_model=TeamDetailOut)
 async def get_team(
     team_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
@@ -217,8 +218,8 @@ async def get_team(
     # 成员关系过滤——非成员且无 manage 404 同形
     from kongming.auth.repository import SqlPermRepo
 
-    role = await SqlTeamRepo(session).get_member_role(team_id=team_id, user_id=str(user["sub"]))
-    if role is None and MANAGE not in set(await SqlPermRepo(session).list_codes(str(user["sub"]))):
+    role = await SqlTeamRepo(session).get_member_role(team_id=team_id, user_id=user.user_id)
+    if role is None and MANAGE not in set(await SqlPermRepo(session).list_codes(user.user_id)):
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     try:
         out = await svc.get_with_members(tenant_id=tenant_id, team_id=team_id)
@@ -241,13 +242,13 @@ async def get_team(
 async def rename_team(
     team_id: str,
     body: TeamRenameIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     try:
-        await _svc(session, str(user["sub"])).rename(
+        await _svc(session, user.user_id).rename(
             tenant_id=tenant_id, team_id=team_id, name=body.name
         )
         await session.commit()
@@ -261,14 +262,14 @@ async def rename_team(
 @router.delete("/{team_id}", dependencies=[Depends(require_perm(MANAGE))])
 async def delete_team(
     team_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     try:
         # 挂知识公共化钩子(失败告警不阻塞删除;审计/缓存失效在钩子内)
-        await _svc(session, str(user["sub"]), publicize_knowledge=True).delete(
+        await _svc(session, user.user_id, publicize_knowledge=True).delete(
             tenant_id=tenant_id, team_id=team_id
         )
         await session.commit()
@@ -281,14 +282,14 @@ async def delete_team(
 async def add_member(
     team_id: str,
     body: MemberIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     await _require_owner_or_manage(user, session, team_id)
     try:
-        await _svc(session, str(user["sub"])).add_member(
+        await _svc(session, user.user_id).add_member(
             tenant_id=tenant_id, team_id=team_id, user_id=body.user_id, role=body.role
         )
         await session.commit()
@@ -304,14 +305,14 @@ async def change_member_role(
     team_id: str,
     member_id: str,
     body: MemberIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     await _require_owner_or_manage(user, session, team_id)
     try:
-        await _svc(session, str(user["sub"])).change_member_role(
+        await _svc(session, user.user_id).change_member_role(
             tenant_id=tenant_id, team_id=team_id, user_id=member_id, role=body.role
         )
         await session.commit()
@@ -328,14 +329,14 @@ async def change_member_role(
 async def remove_member(
     team_id: str,
     member_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     await _require_owner_or_manage(user, session, team_id)
     try:
-        await _svc(session, str(user["sub"])).remove_member(
+        await _svc(session, user.user_id).remove_member(
             tenant_id=tenant_id, team_id=team_id, user_id=member_id
         )
         await session.commit()
@@ -350,12 +351,12 @@ async def remove_member(
 async def attach_resource(
     team_id: str,
     body: AttachIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
-    role = await SqlTeamRepo(session).get_member_role(team_id=team_id, user_id=str(user["sub"]))
+    role = await SqlTeamRepo(session).get_member_role(team_id=team_id, user_id=user.user_id)
     # 资源创建者反查(bot/workflow 两表)
     from sqlalchemy import text as _text
 
@@ -376,12 +377,12 @@ async def attach_resource(
     if creator is None:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     try:
-        await _svc(session, str(user["sub"])).attach(
+        await _svc(session, user.user_id).attach(
             tenant_id=tenant_id,
             team_id=team_id,
             resource_type=body.resource_type,
             resource_id=body.resource_id,
-            actor_id=str(user["sub"]),
+            actor_id=user.user_id,
             actor_role=role,
         )
         await session.commit()

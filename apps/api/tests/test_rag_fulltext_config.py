@@ -134,7 +134,7 @@ def test_ctx_key_layout_contains_ts_config() -> None:
     k2 = _ctx_key("t1", "default", "键材料", "zhparser")
     assert k1.startswith("km:ragctx:t1:default:simple:")
     assert k2.startswith("km:ragctx:t1:default:zhparser:")
-    assert ":and-cw:" in k1 and ":and-cw:" in k2
+    assert ":and-cw2:" in k1 and ":and-cw2:" in k2
     assert k1 != k2
 
 

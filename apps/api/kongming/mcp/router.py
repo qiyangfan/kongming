@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
+from kongming.auth.models import AuthenticatedUser
 from kongming.auth.repository import SqlOperLogRepo
 from kongming.chat.repository import ChatRepository
 from kongming.config import get_settings
@@ -37,17 +38,17 @@ class _OperLogger:
 
 
 def _resolve_tenant(
-    user: dict[str, object], session: AsyncSession, header: str | None
+    user: AuthenticatedUser, session: AsyncSession, header: str | None
 ) -> tuple[Any, str | None]:
     """X-Tenant-Id 白名单解析(与 chat 同构);返回 (awaitable, 显式 key 或 None)。"""
     repo = ChatRepository(session)
-    uid = str(user["sub"])
+    uid = user.user_id
     if header is not None:
         return repo.find_bound_tenant(user_id=uid, tenant_key=header), header
     return repo.find_default_tenant(user_id=uid), None
 
 
-async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header: str | None) -> str:
+async def _tenant_or_403(user: AuthenticatedUser, session: AsyncSession, header: str | None) -> str:
     pending, explicit = _resolve_tenant(user, session, header)
     found = await pending
     if found is None:
@@ -59,13 +60,13 @@ async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header:
 
 def get_mcp_service(
     session: Annotated[AsyncSession, Depends(get_session)],
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
 ) -> McpService:
     settings = get_settings()
     return McpService(
         SqlMcpRepo(session, get_cipher(settings.datasource_encrypt_key)),
         build_mcp_caller(settings),
-        _OperLogger(session, str(user["sub"])),
+        _OperLogger(session, user.user_id),
         breaker=get_mcp_breaker(),
     )
 
@@ -242,7 +243,7 @@ def _row_out(row: dict[str, Any]) -> McpServerOut:
 
 @router.get("", response_model=list[McpServerOut], dependencies=[Depends(require_perm(MANAGE))])
 async def list_servers(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[McpService, Depends(get_mcp_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -259,7 +260,7 @@ async def list_servers(
 )
 async def create_server(
     body: McpServerIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[McpService, Depends(get_mcp_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -294,7 +295,7 @@ async def create_server(
 async def update_server(
     server_id: str,
     body: McpServerUpdateIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[McpService, Depends(get_mcp_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -323,7 +324,7 @@ async def update_server(
 @router.post("/{server_id}/enable", dependencies=[Depends(require_perm(MANAGE))])
 async def enable_server(
     server_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[McpService, Depends(get_mcp_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -340,7 +341,7 @@ async def enable_server(
 @router.post("/{server_id}/disable", dependencies=[Depends(require_perm(MANAGE))])
 async def disable_server(
     server_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[McpService, Depends(get_mcp_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -357,7 +358,7 @@ async def disable_server(
 @router.delete("/{server_id}", dependencies=[Depends(require_perm(MANAGE))])
 async def delete_server(
     server_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[McpService, Depends(get_mcp_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -378,7 +379,7 @@ async def delete_server(
 )
 async def test_server(
     server_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[McpService, Depends(get_mcp_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -397,7 +398,7 @@ async def test_server(
 )
 async def sync_server(
     server_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[McpService, Depends(get_mcp_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -419,7 +420,7 @@ async def sync_server(
 async def preview_prompt(
     server_id: str,
     body: McpPromptPreviewIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[McpService, Depends(get_mcp_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,

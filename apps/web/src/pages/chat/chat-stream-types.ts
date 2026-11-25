@@ -5,6 +5,7 @@ import type { StopNotice } from "@/lib/turn-stop";
 
 /** 在途流状态:发起时一次性创建,过程事件不经它广播 */
 export interface StreamingTurnStart {
+  id: number;
   question: string;
   body: unknown;
   attSnapshot: { id: string; filename: string }[];
@@ -50,7 +51,7 @@ export interface ChatStreamApi {
     attSnapshot?: { id: string; filename: string }[],
   ) => void;
   submit: (text: string | undefined, inputs: StreamInputs) => void;
-  stopStreaming: () => void;
+  stopStreaming: (options?: { restoreDraft?: boolean }) => void;
   /** 取消闸：中止在途流并清空残留呈现（上下文切换/卸载时调用）。 */
   resetStream: () => void;
   selfNavigatedRef: React.RefObject<string | null>;
@@ -67,4 +68,6 @@ export interface StreamInputs {
   attachments: { id: string; filename: string }[];
   uploading: boolean;
   agentMode: string;
+  /** 语音轮关联字段:仅通话发起的一轮携带(打字提问不传,行为逐字不变)。 */
+  voiceTurnToken?: string | null;
 }

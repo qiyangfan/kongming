@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -31,6 +31,10 @@ from kongming.rag.repository import RagRepository
 from kongming.rag.service import RagService
 from kongming.redis_client import get_redis
 from kongming.toolcall.ratelimit import RedisRateLimiter
+from kongming.voice.audit_sink import SessionOperLogSink
+from kongming.voice.binding import VoiceTurnRegistry
+from kongming.voice.repository import HttpxSignalingGateway, RedisAdmissionGate, RedisTicketStore
+from kongming.voice.service import VoiceService, VoiceSettingsView
 
 
 def get_agent_client() -> AgentClient:
@@ -130,7 +134,8 @@ def get_chat_service(
         column_comments=get_rag_service(session),  # 列标签(同一 RagService 的窄端口视角)
         cost_gate=_build_cost_gate(),  # 成本双闸(速率+配额)
         turns=_TURNS,  # 在途轮登记(取消端点与流式消费共用同一张表)
-        federation=_FEDERATION,  # 跨实例在途协作(登记/转发/降级)
+        federation=_FEDERATION,
+        voice_binding=_VOICE_REGISTRY,  # 语音轮关联字段(签发/绑定/终态回填)
     )
 
 
@@ -184,3 +189,68 @@ def _stream_store_factory(agent: AgentClient) -> StreamStoreFactory:
             )
 
     return _open
+
+
+# ============ 语音通话(voice 域) ============
+
+# 进程内单例:在途通话表在 service 实例上,须跨请求存续(与 _TURNS/_FEDERATION 同范式)
+_VOICE_GATE = RedisAdmissionGate(get_redis(), get_settings())
+_VOICE_GATEWAY = HttpxSignalingGateway(get_settings())
+_VOICE_TICKETS = RedisTicketStore(get_redis())
+_VOICE_OPERLOG = SessionOperLogSink()
+_VOICE_REGISTRY = VoiceTurnRegistry()
+_RUNTIME_HOOKS: dict[str, Callable[[str, str], Awaitable[None]] | None] = {"turn_canceler": None}
+
+
+def _build_voice_service() -> VoiceService:
+    s = get_settings()
+    return VoiceService(
+        _VOICE_GATE,
+        _VOICE_GATEWAY,
+        _VOICE_TICKETS,
+        operlog=_VOICE_OPERLOG,
+        settings=VoiceSettingsView(
+            voice_api_key=s.voice_api_key,
+            voice_realtime_base_url=s.voice_realtime_base_url,
+            voice_model=s.voice_model,
+            voice_max_call_seconds=s.voice_max_call_seconds,
+        ),
+    )
+
+
+# 服务实例必须单例:在途通话表(calls 字典)挂在实例上,建立/通道/挂断若各持
+# 各的实例,通道永远找不到在途通话(4404/404 级联,占位无人释放)
+_VOICE_SERVICE = _build_voice_service()
+
+
+def get_voice_service() -> VoiceService:
+    """语音服务进程内单例:准入/牵线/票据/审计的端口绑定单点。"""
+    return _VOICE_SERVICE
+
+
+VoiceServiceDep = Annotated[VoiceService, Depends(get_voice_service)]
+
+
+def get_turns_registry() -> InflightTurns:
+    """在途轮登记表单例(语音侧取消注入复用同一张表)。"""
+    return _TURNS
+
+
+def get_voice_registry() -> VoiceTurnRegistry:
+    """语音轮关联字段注册表单例。"""
+    return _VOICE_REGISTRY
+
+
+def get_tickets_store() -> RedisTicketStore:
+    """通道票据存储单例(WebSocket 适配层取用)。"""
+    return _VOICE_TICKETS
+
+
+def get_turn_canceler() -> Callable[[str, str], Awaitable[None]] | None:
+    """语音侧系统取消端口:组合根注入 ChatService.cancel_turn 的窄签名。"""
+    return _RUNTIME_HOOKS["turn_canceler"]
+
+
+def install_turn_canceler(fn: Callable[[str, str], Awaitable[None]]) -> None:
+    """启动时注入(依赖方向 voice→chat,经窄签名反转)。"""
+    _RUNTIME_HOOKS["turn_canceler"] = fn

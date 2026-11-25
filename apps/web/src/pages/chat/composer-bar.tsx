@@ -40,74 +40,50 @@ interface ComposerBarProps {
   onRemoveAttachment: (id: string) => void;
   onSubmit: () => void;
   onStop: () => void;
+  /** 语音通话入口(插槽:输入框为空且非流式时替代发送键;是否可用由页面按能力探测决定) */
+  voiceEntry?: React.ReactNode;
 }
 
-/** 输入区工具栏：附件、语音、报告入口与运筹模式开关。 */
+/** 输入区工具栏：附件、报告入口与运筹模式开关。 */
 function ComposerTools({
   canGenerateReport,
   streaming,
   uploading,
-  recording,
-  transcribing,
   agentMode,
   setAgentMode,
   fileRef,
   report,
-  onMicClick,
 }: Pick<
   ComposerBarProps,
   | "canGenerateReport"
   | "streaming"
   | "uploading"
-  | "recording"
-  | "transcribing"
   | "agentMode"
   | "setAgentMode"
   | "fileRef"
   | "report"
-  | "onMicClick"
 >) {
   return (
+    // 桌面习语:动作钮聚左成一组,模式开关(状态而非动作)独立居右;窄屏同样适配
     <div className="mb-2 flex items-center justify-between gap-2">
-      {/* 附件钮置于工具行左位:输入行只留 [输入框|发送],水平间距以容器
-          px-4 为单源;热区盒 24px(图标几何居中仅 4px),触控面经伪元素补至 40px */}
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        className="after:-inset-2"
-        onClick={() => fileRef.current?.click()}
-        disabled={uploading || streaming}
-        aria-label="添加图片附件"
-        title="添加图片(png/jpg/webp/gif,≤10MB)"
-      >
-        {/* 图标显式钉 size-4(icon-xs 默认 12px 经 :not 排除),与发送键同大 */}
-        {uploading ? (
-          <Loader2 className="size-4 animate-spin" aria-hidden />
-        ) : (
-          <Paperclip className="size-4" aria-hidden />
-        )}
-      </Button>
-      {/* 语音输入:录音中 Mic 变警示色+脉冲;转写中文本填入输入框,
-          用户可修正后发送;Escape 取消丢弃 */}
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        className="after:-inset-2"
-        onClick={() => void onMicClick()}
-        disabled={transcribing || uploading || streaming}
-        aria-label={recording ? "停止录音" : "语音输入"}
-        title={recording ? "停止录音并转写(Escape 取消)" : "语音输入(说完点停止)"}
-      >
-        {transcribing ? (
-          <Loader2 className="size-4 animate-spin" aria-hidden />
-        ) : (
-          <Mic
-            className={recording ? "size-4 animate-pulse text-destructive" : "size-4"}
-            aria-hidden
-          />
-        )}
-      </Button>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
+        {/* 附件钮:热区盒 24px(图标几何居中仅 4px),触控面经伪元素补至 40px */}
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="after:-inset-2"
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading || streaming}
+          aria-label="添加图片附件"
+          title="添加图片(png/jpg/webp/gif,≤10MB)"
+        >
+          {/* 图标显式钉 size-4(icon-xs 默认 12px 经 :not 排除),与发送键同大 */}
+          {uploading ? (
+            <Loader2 className="size-4 animate-spin" aria-hidden />
+          ) : (
+            <Paperclip className="size-4" aria-hidden />
+          )}
+        </Button>
         {canGenerateReport && (
           <Button
             variant="ghost"
@@ -121,6 +97,8 @@ function ComposerTools({
             <FileText className="size-4" aria-hidden />
           </Button>
         )}
+      </div>
+      <div className="flex items-center gap-2">
         <Switch
           id="agent-mode"
           checked={agentMode === "react"}
@@ -236,6 +214,41 @@ function AttachmentChips({
   );
 }
 
+/** 右端动作键:流式期取消、空草稿时语音通话入口、否则发送。 */
+function ComposerActionButton({
+  streaming,
+  draft,
+  uploading,
+  voiceEntry,
+  onSubmit,
+  onStop,
+}: Pick<
+  ComposerBarProps,
+  "streaming" | "draft" | "uploading" | "voiceEntry" | "onSubmit" | "onStop"
+>) {
+  if (streaming) {
+    return (
+      <Button
+        size="icon"
+        variant="outline"
+        onClick={onStop}
+        aria-label="取消本轮问答"
+        title="取消本轮(已开始执行的操作不会被撤回)"
+      >
+        <StopCircle aria-hidden />
+      </Button>
+    );
+  }
+  if (!draft.trim() && voiceEntry) {
+    return <>{voiceEntry}</>;
+  }
+  return (
+    <Button size="icon" onClick={onSubmit} disabled={!draft.trim() || uploading} aria-label="发送">
+      <SendHorizontal aria-hidden />
+    </Button>
+  );
+}
+
 /** 底部输入区：附件/chips、报告对话框与草稿发送。 */
 export function ComposerBar(props: ComposerBarProps) {
   const { streaming, uploading, draft, setDraft, attachments, fileRef } = props;
@@ -265,31 +278,35 @@ export function ComposerBar(props: ComposerBarProps) {
           }}
           placeholder="问计于数据,如问计于孔明…"
           rows={1}
-          className="max-h-40 min-h-10 resize-none"
+          className="max-h-40 min-h-10"
           aria-label="提问"
         />
-        {/* 流式期间发送位切换为「取消本轮」——中止读取并立即释放输入,
-            同时向控制面发起取消;结果提示如实(已开始执行的操作不会被撤回) */}
-        {streaming ? (
-          <Button
-            size="icon"
-            variant="outline"
-            onClick={props.onStop}
-            aria-label="取消本轮问答"
-            title="取消本轮(已开始执行的操作不会被撤回)"
-          >
-            <StopCircle aria-hidden />
-          </Button>
-        ) : (
-          <Button
-            size="icon"
-            onClick={props.onSubmit}
-            disabled={!draft.trim() || uploading}
-            aria-label="发送"
-          >
-            <SendHorizontal aria-hidden />
-          </Button>
-        )}
+        {/* 语音输入收进输入行右端(紧邻语音通话/发送键):录音中变警示色+脉冲,转写文本填入草稿 */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => void props.onMicClick()}
+          disabled={props.transcribing || uploading || streaming}
+          aria-label={props.recording ? "停止录音" : "语音输入"}
+          title={props.recording ? "停止录音并转写(Escape 取消)" : "语音输入(说完点停止)"}
+        >
+          {props.transcribing ? (
+            <Loader2 className="animate-spin" aria-hidden />
+          ) : (
+            <Mic
+              className={props.recording ? "animate-pulse text-destructive" : undefined}
+              aria-hidden
+            />
+          )}
+        </Button>
+        <ComposerActionButton
+          streaming={streaming}
+          draft={draft}
+          uploading={uploading}
+          voiceEntry={props.voiceEntry}
+          onSubmit={props.onSubmit}
+          onStop={props.onStop}
+        />
       </div>
     </>
   );

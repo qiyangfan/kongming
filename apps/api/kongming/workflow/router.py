@@ -15,7 +15,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
+from kongming.auth.models import AuthenticatedUser
 from kongming.auth.repository import SqlOperLogRepo
 from kongming.chat.agent_client import AgentClient
 from kongming.chat.dependencies import get_agent_client
@@ -63,23 +64,23 @@ class _WorkflowOperLogger:
 def get_workflow_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     agent: Annotated[AgentClient, Depends(get_agent_client)],
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
 ) -> WorkflowService:
     return WorkflowService(
         repo=SqlWorkflowRepo(session),
         sql=InternalSqlRunner(session),
         http=HttpNodeRunner(),
         agent=AgentWorkflowRunner(session, agent),
-        oper=_WorkflowOperLogger(session, str(user["sub"])),
+        oper=_WorkflowOperLogger(session, user.user_id),
     )
 
 
 async def _tenant_or_403(
-    user: dict[str, object], session: AsyncSession, header: str | None
+    user: AuthenticatedUser, session: AsyncSession, header: str | None
 ) -> tuple[str, str]:
     """与 chat 同构:显式 X-Tenant-Id 白名单/缺省默认租户;返回 (id, key)。"""
     repo = ChatRepository(session)
-    uid = str(user["sub"])
+    uid = user.user_id
     if header is not None:
         tid = await repo.find_bound_tenant(user_id=uid, tenant_key=header)
         if tid is None:
@@ -163,7 +164,7 @@ def _def_out(row: dict[str, Any]) -> dict[str, Any]:
 @router.post("", status_code=201, dependencies=[Depends(require_perm(MANAGE))])
 async def save_workflow(
     body: WorkflowSaveIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[WorkflowService, Depends(get_workflow_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -175,9 +176,9 @@ async def save_workflow(
             wf_key=body.wf_key,
             name=body.name,
             definition=body.definition,
-            created_by=str(user["sub"]),
-            user_id=str(user["sub"]),
-            member_roles=await _member_roles(session, str(user["sub"])),
+            created_by=user.user_id,
+            user_id=user.user_id,
+            member_roles=await _member_roles(session, user.user_id),
         )
         await svc.commit()
     except WorkflowValidationError as e:
@@ -191,17 +192,17 @@ async def save_workflow(
 
 @router.get("", response_model=list[WorkflowDefOut], dependencies=[Depends(require_perm(MANAGE))])
 async def list_workflows(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[WorkflowService, Depends(get_workflow_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> list[dict[str, Any]]:
     tenant_id, _ = await _tenant_or_403(user, session, x_tenant_id)
-    roles = await _member_roles(session, str(user["sub"]))
+    roles = await _member_roles(session, user.user_id)
     return [
         _def_out(r)
         for r in await svc.list_workflows(
-            tenant_id=tenant_id, user_id=str(user["sub"]), team_ids=list(roles.keys())
+            tenant_id=tenant_id, user_id=user.user_id, team_ids=list(roles.keys())
         )
     ]
 
@@ -211,7 +212,7 @@ async def list_workflows(
 )
 async def get_workflow(
     wf_key: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[WorkflowService, Depends(get_workflow_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -221,8 +222,8 @@ async def get_workflow(
         out = await svc.get_workflow(
             tenant_id=tenant_id,
             wf_key=wf_key,
-            user_id=str(user["sub"]),
-            member_roles=await _member_roles(session, str(user["sub"])),
+            user_id=user.user_id,
+            member_roles=await _member_roles(session, user.user_id),
         )
     except WorkflowNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
@@ -242,7 +243,7 @@ async def get_workflow(
 @router.post("/{wf_key}/enable", dependencies=[Depends(require_perm(MANAGE))])
 async def enable_workflow(
     wf_key: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[WorkflowService, Depends(get_workflow_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -253,8 +254,8 @@ async def enable_workflow(
             tenant_id=tenant_id,
             wf_key=wf_key,
             enabled=True,
-            user_id=str(user["sub"]),
-            member_roles=await _member_roles(session, str(user["sub"])),
+            user_id=user.user_id,
+            member_roles=await _member_roles(session, user.user_id),
         )
         await svc.commit()
     except WorkflowNotFound:
@@ -267,7 +268,7 @@ async def enable_workflow(
 @router.post("/{wf_key}/disable", dependencies=[Depends(require_perm(MANAGE))])
 async def disable_workflow(
     wf_key: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[WorkflowService, Depends(get_workflow_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -278,8 +279,8 @@ async def disable_workflow(
             tenant_id=tenant_id,
             wf_key=wf_key,
             enabled=False,
-            user_id=str(user["sub"]),
-            member_roles=await _member_roles(session, str(user["sub"])),
+            user_id=user.user_id,
+            member_roles=await _member_roles(session, user.user_id),
         )
         await svc.commit()
     except WorkflowNotFound:
@@ -292,7 +293,7 @@ async def disable_workflow(
 @router.delete("/{wf_key}", dependencies=[Depends(require_perm(MANAGE))])
 async def delete_workflow(
     wf_key: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[WorkflowService, Depends(get_workflow_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -302,8 +303,8 @@ async def delete_workflow(
         await svc.delete(
             tenant_id=tenant_id,
             wf_key=wf_key,
-            user_id=str(user["sub"]),
-            member_roles=await _member_roles(session, str(user["sub"])),
+            user_id=user.user_id,
+            member_roles=await _member_roles(session, user.user_id),
         )
         await svc.commit()
     except WorkflowNotFound:
@@ -317,7 +318,7 @@ async def delete_workflow(
 async def run_workflow(
     wf_key: str,
     body: WorkflowRunIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[WorkflowService, Depends(get_workflow_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -328,12 +329,12 @@ async def run_workflow(
             tenant_id=tenant_id,
             tenant_key=tenant_key,
             wf_key=wf_key,
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             inputs=body.inputs,
             version=body.version,
             trigger_source="MANUAL",  # v1 统一 JWT 通道;API 触发即外部系统持 JWT
             trace_id=uuid.uuid4().hex,
-            member_roles=await _member_roles(session, str(user["sub"])),
+            member_roles=await _member_roles(session, user.user_id),
         )
     except WorkflowNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
@@ -348,7 +349,7 @@ async def run_workflow(
 )
 async def page_runs(
     wf_key: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[WorkflowService, Depends(get_workflow_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -362,8 +363,8 @@ async def page_runs(
             wf_key=wf_key,
             page=page,
             size=size,
-            user_id=str(user["sub"]),
-            member_roles=await _member_roles(session, str(user["sub"])),
+            user_id=user.user_id,
+            member_roles=await _member_roles(session, user.user_id),
         )
     except WorkflowNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
@@ -394,7 +395,7 @@ async def page_runs(
 async def get_run(
     wf_key: str,
     run_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[WorkflowService, Depends(get_workflow_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -406,8 +407,8 @@ async def get_run(
             tenant_id=tenant_id,
             wf_key=wf_key,
             run_id=str(run_id),
-            user_id=str(user["sub"]),
-            member_roles=await _member_roles(session, str(user["sub"])),
+            user_id=user.user_id,
+            member_roles=await _member_roles(session, user.user_id),
         )
     except WorkflowNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None

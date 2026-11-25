@@ -2,6 +2,8 @@
 
 import type { components } from "./api-types.gen";
 import { TENANT_STORAGE_KEY } from "./storage-keys";
+import validateChatStreamEvent from "./chat-stream-validate.gen";
+import { channelUrl } from "./voice-call";
 
 export type TokenPairOut = components["schemas"]["TokenPairOut"];
 export type MeOut = components["schemas"]["MeOut"];
@@ -260,53 +262,76 @@ interface StreamHandlers {
   onTraceId?: (traceId: string | null) => void;
 }
 
-/* 帧块内逐行抽取 event 与 data 行；出现心跳注释行即返回 null（整帧忽略）。 */
-function parseSseLines(block: string): { event: string; data: string } | null {
-  let event = "";
+/* 六种公开事件的信封(契约单源生成;type 决定 data 的结构) */
+type ChatStreamEvent =
+  | components["schemas"]["StreamStageEvent"]
+  | components["schemas"]["StreamSqlEvent"]
+  | components["schemas"]["StreamSummaryEvent"]
+  | components["schemas"]["StreamToolCallEvent"]
+  | components["schemas"]["StreamResultEvent"]
+  | components["schemas"]["StreamErrorEvent"];
+
+/* 帧块内抽取 data 行(公开流只用默认消息,无 event: 命名);注释行整帧忽略。 */
+function parseSseData(block: string): string | null {
   const dataLines: string[] = [];
   for (const line of block.split("\n")) {
     if (line.startsWith(":")) return null; // 心跳注释行
-    if (line.startsWith("event:")) event = line.slice(6).trim();
-    else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+    if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
   }
-  if (!event || dataLines.length === 0) return null;
-  return { event, data: dataLines.join("\n") };
+  if (dataLines.length === 0) return null;
+  return dataLines.join("\n");
 }
 
-/* 事件 → 回调与是否终态；未知事件不在表中（前向兼容，直接忽略）。 */
-const SSE_EVENT_HANDLERS: Record<
-  string,
-  { deliver: (h: StreamHandlers, d: unknown) => void; terminal: boolean }
-> = {
-  stage: { deliver: (h, d) => h.onStage?.(d as StreamStageOut), terminal: false },
-  sql: { deliver: (h, d) => h.onSql?.(d as StreamSqlOut), terminal: false },
-  summary: { deliver: (h, d) => h.onSummary?.(d as StreamSummaryOut), terminal: false },
-  tool_call: { deliver: (h, d) => h.onToolCall?.(d as StreamToolCallOut), terminal: false },
-  result: { deliver: (h, d) => h.onResult?.(d as ChatQueryOut), terminal: true },
-  error: { deliver: (h, d) => h.onError?.(d as StreamErrorOut), terminal: true },
-};
+/* 事件 → 回调与是否终态;TS 穷尽检查:新增事件缺分支时类型检查失败。 */
+function deliverChatStreamEvent(event: ChatStreamEvent, handlers: StreamHandlers): boolean {
+  switch (event.type) {
+    case "stage":
+      handlers.onStage?.(event.data);
+      return false;
+    case "sql":
+      handlers.onSql?.(event.data);
+      return false;
+    case "summary":
+      handlers.onSummary?.(event.data);
+      return false;
+    case "tool_call":
+      handlers.onToolCall?.(event.data);
+      return false;
+    case "result":
+      handlers.onResult?.(event.data);
+      return true;
+    case "error":
+      handlers.onError?.(event.data);
+      return true;
+    default: {
+      // 穷尽检查:新增事件类型缺分支时 never 断言使编译失败
+      return event satisfies never;
+    }
+  }
+}
 
 /**
- * 解析一个 SSE 帧块(event:/data: 行,注释行忽略)并分发;畸形 data 静默跳帧。
- * @public 仅供 vitest 断言分帧边界与跳帧
+ * 解析一个 SSE 帧块(data: 行)并分发;畸形 JSON、未知类型或字段不合格的事件
+ * 经运行时校验一律跳帧,流不断。@public 仅供 vitest 断言分帧边界与跳帧
  */
 export function dispatchSseBlock(block: string, handlers: StreamHandlers): boolean {
-  const frame = parseSseLines(block);
-  if (!frame) return false;
-  let data: unknown;
+  const dataText = parseSseData(block);
+  if (dataText === null) return false;
+  let payload: unknown;
   try {
-    data = JSON.parse(frame.data);
+    payload = JSON.parse(dataText);
   } catch {
     return false; // 畸形帧跳过,流不断
   }
-  const entry = SSE_EVENT_HANDLERS[frame.event];
-  if (!entry) return false;
-  entry.deliver(handlers, data);
-  return entry.terminal;
+  // 运行时校验由契约单源生成的独立模块承担;通过者形状与生成类型一致
+  if (!validateChatStreamEvent(payload)) return false;
+  return deliverChatStreamEvent(payload as ChatStreamEvent, handlers);
 }
 
-/* 按 SSE 帧边界切分缓冲区,返回剩余缓冲与是否出现过终态帧 */
-function drainSseBuffer(
+/* 按 SSE 帧边界切分缓冲区,返回剩余缓冲与是否出现过终态帧;
+   首条合法结尾之后的同块消息不再分发(该请求的接收到此为止)。
+   @public 仅供 vitest 断言分块截断与结束语义 */
+export function drainSseBuffer(
   buffer: string,
   handlers: StreamHandlers,
 ): { buffer: string; terminated: boolean } {
@@ -315,13 +340,16 @@ function drainSseBuffer(
   for (let idx = buffer.indexOf("\n\n"); idx >= 0; idx = buffer.indexOf("\n\n")) {
     const block = buffer.slice(0, idx);
     buffer = buffer.slice(idx + 2);
-    if (dispatchSseBlock(block, handlers)) terminated = true;
+    if (dispatchSseBlock(block, handlers)) {
+      terminated = true;
+      break;
+    }
   }
   return { buffer, terminated };
 }
 
 /* 读到流结束,逐块切帧分发;返回是否出现过终态帧 */
-async function readSseStream(
+export async function readSseStream(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   handlers: StreamHandlers,
 ): Promise<boolean> {
@@ -378,4 +406,59 @@ export async function streamChatQuery(
   const terminated = await drainSseStream(reader, handlers, signal);
   // 主动取消发生在 read 之间时 drainSseStream 正常返回,此处靠 abort 状态跳过未终态的报错
   if (!terminated && !signal.aborted) throw new Error("连接中断,答案未完整返回");
+}
+
+/* ============ 语音通话(voice-call) ============ */
+
+type VoiceEstablishOut = components["schemas"]["VoiceEstablishOut"];
+
+/** 建交通话:body 为浏览器生成的实时连接请求(SDP offer 文本);503=未启用。 */
+export async function establishVoiceCall(
+  offer: string,
+  tenantId: string | null,
+  signal: AbortSignal,
+): Promise<VoiceEstablishOut> {
+  const resp = await postWithRefresh("/voice/calls", {
+    method: "POST",
+    body: offer,
+    headers: {
+      "Content-Type": "application/sdp",
+      ...(tenantId ? { "X-Tenant-Id": tenantId } : {}),
+    },
+    signal,
+  });
+  if (!resp.ok) throw await toStatusError(resp);
+  return (await resp.json()) as VoiceEstablishOut;
+}
+
+/** 挂断:通知后端结束通话(准入释放与审计在后端完成)。 */
+export async function hangUpVoiceCall(callId: string): Promise<void> {
+  await request<void>(`/voice/calls/${encodeURIComponent(callId)}`, { method: "DELETE" }).catch(
+    () => undefined,
+  );
+}
+
+type VoiceCapabilityOut = components["schemas"]["VoiceCapabilityOut"];
+
+/** 通话能力探测:部署未配置实时语音模型时返回未启用,页面据此不渲染通话入口。 */
+export async function getVoiceCapability(): Promise<VoiceCapabilityOut> {
+  return request<VoiceCapabilityOut>("/voice/calls/capability");
+}
+
+/** 打开文字事件通道(一次性票据;消息为模型事件与后端指令的搬运面)。 */
+export function openVoiceChannel(
+  ticket: string,
+  onMessage: (payload: unknown) => void,
+  onClosed: () => void,
+): WebSocket {
+  const ws = new WebSocket(channelUrl(window.location.origin, ticket));
+  ws.onmessage = (ev) => {
+    try {
+      onMessage(JSON.parse(ev.data as string));
+    } catch {
+      // 非法载荷丢弃,通道不断
+    }
+  };
+  ws.onclose = () => onClosed();
+  return ws;
 }

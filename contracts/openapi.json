@@ -553,7 +553,7 @@
         },
         "responses": {
           "200": {
-            "description": "SSE 发送 stage、sql、summary、tool_call 和诊断事件;result 与 /chat/query 返回相同数据。错误通过 error 终态发送;以冒号开头的注释帧用于心跳。",
+            "description": "SSE 只用默认消息(data: 行,无 event: 命名),每条业务帧的 data 为{\"type\":\"…\",\"data\":{…}},type 决定 data 的结构(见 x-sse-data-schema)。result 与 /chat/query 返回相同数据;错误经 error 终态发送;以冒号开头的注释帧用于心跳,消费方应忽略。",
             "headers": {
               "X-Trace-Id": {
                 "schema": {
@@ -565,57 +565,41 @@
             "content": {
               "text/event-stream": {
                 "schema": {
+                  "type": "string",
+                  "description": "UTF-8 文本事件流;每条业务帧的 data 解码后符合 x-sse-data-schema。"
+                },
+                "x-sse-data-schema": {
                   "oneOf": [
                     {
-                      "$ref": "#/components/schemas/StreamStageOut"
+                      "$ref": "#/components/schemas/StreamStageEvent"
                     },
                     {
-                      "$ref": "#/components/schemas/StreamSqlOut"
+                      "$ref": "#/components/schemas/StreamSqlEvent"
                     },
                     {
-                      "$ref": "#/components/schemas/StreamSummaryOut"
+                      "$ref": "#/components/schemas/StreamSummaryEvent"
                     },
                     {
-                      "$ref": "#/components/schemas/StreamToolCallOut"
+                      "$ref": "#/components/schemas/StreamToolCallEvent"
                     },
                     {
-                      "$ref": "#/components/schemas/StreamErrorOut"
+                      "$ref": "#/components/schemas/StreamResultEvent"
                     },
                     {
-                      "$ref": "#/components/schemas/StreamTraceOut"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ChatQueryOut"
-                    }
-                  ]
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/StreamStageOut"
-                    },
-                    {
-                      "$ref": "#/components/schemas/StreamSqlOut"
-                    },
-                    {
-                      "$ref": "#/components/schemas/StreamSummaryOut"
-                    },
-                    {
-                      "$ref": "#/components/schemas/StreamToolCallOut"
-                    },
-                    {
-                      "$ref": "#/components/schemas/StreamErrorOut"
-                    },
-                    {
-                      "$ref": "#/components/schemas/StreamTraceOut"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ChatQueryOut"
+                      "$ref": "#/components/schemas/StreamErrorEvent"
                     }
                   ],
-                  "title": "Response 200 Chat Query Stream Chat Query Stream Post"
+                  "discriminator": {
+                    "propertyName": "type",
+                    "mapping": {
+                      "stage": "#/components/schemas/StreamStageEvent",
+                      "sql": "#/components/schemas/StreamSqlEvent",
+                      "summary": "#/components/schemas/StreamSummaryEvent",
+                      "tool_call": "#/components/schemas/StreamToolCallEvent",
+                      "result": "#/components/schemas/StreamResultEvent",
+                      "error": "#/components/schemas/StreamErrorEvent"
+                    }
+                  }
                 }
               }
             }
@@ -14246,6 +14230,121 @@
         }
       }
     },
+    "/voice/calls": {
+      "post": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Establish Call",
+        "description": "建交通话:body 为浏览器生成的实时连接请求(SDP offer 文本),原样转发牵线。\n\n返回连接应答与一次性通道票据;模型服务密钥与内部接入地址不出现在任何\n下发给浏览器的内容中(ADR-013)。",
+        "operationId": "establish_call_voice_calls_post",
+        "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceEstablishOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/voice/calls/{call_id}": {
+      "delete": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Hang Up",
+        "description": "挂断:仅本人可挂;结束通话并关闭其文字事件通道(不让已释放的通话继续可用)。",
+        "operationId": "hang_up_voice_calls__call_id__delete",
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Call Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceHangUpOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/voice/calls/capability": {
+      "get": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Call Capability",
+        "description": "通话能力探测:页面加载时据此决定入口是否出现(未配置即无入口)。\n\n探测端点本身返回 200 加显式启用位——若它也 503,页面就无法区分\n「未启用」与「探测失败」,入口不出现便无从实现。",
+        "operationId": "call_capability_voice_calls_capability_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceCapabilityOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/healthz": {
       "get": {
         "tags": [
@@ -15231,6 +15330,17 @@
             "type": "array",
             "maxItems": 3,
             "title": "Attachment Ids"
+          },
+          "voice_turn_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice Turn Token"
           }
         },
         "type": "object",
@@ -23406,6 +23516,26 @@
         ],
         "title": "StoreRunOut"
       },
+      "StreamErrorEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "error",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/StreamErrorOut"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "data"
+        ],
+        "title": "StreamErrorEvent",
+        "description": "type=error 信封:仅传输/输出失败。"
+      },
       "StreamErrorOut": {
         "properties": {
           "error": {
@@ -23413,23 +23543,62 @@
             "title": "Error"
           },
           "reason_code": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "type": "string",
+            "enum": [
+              "AGENT_UNAVAILABLE",
+              "STREAM_OUTPUT_FAILED"
             ],
             "title": "Reason Code"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
-          "error"
+          "error",
+          "reason_code"
         ],
         "title": "StreamErrorOut",
-        "description": "error 终态事件 data:仅传输层/意外失败(业务三态走 result 事件)。"
+        "description": "error 终态事件 data:仅传输层/意外失败(业务三态走 result 事件)。\n\nreason_code 必填且枚举两种流错误;公开信封据此构造,内部队列不可再发\nreason_code=None 的裸错误。"
+      },
+      "StreamResultEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "result",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ChatQueryOut"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "data"
+        ],
+        "title": "StreamResultEvent",
+        "description": "type=result 信封:data 与同步问答响应逐字段一致。"
+      },
+      "StreamSqlEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "sql",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/StreamSqlOut"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "data"
+        ],
+        "title": "StreamSqlEvent",
+        "description": "type=sql 信封。"
       },
       "StreamSqlOut": {
         "properties": {
@@ -23438,12 +23607,33 @@
             "title": "Sql"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "sql"
         ],
         "title": "StreamSqlOut",
         "description": "sql 事件 data:validate 通过后提前下发,内容与终态落库 SQL 一致。"
+      },
+      "StreamStageEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "stage",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/StreamStageOut"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "data"
+        ],
+        "title": "StreamStageEvent",
+        "description": "type=stage 信封。"
       },
       "StreamStageOut": {
         "properties": {
@@ -23465,6 +23655,7 @@
             "default": 0
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "node",
@@ -23473,6 +23664,26 @@
         "title": "StreamStageOut",
         "description": "stage 事件 data:节点粒度进度(status ∈ running/done)。"
       },
+      "StreamSummaryEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "summary",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/StreamSummaryOut"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "data"
+        ],
+        "title": "StreamSummaryEvent",
+        "description": "type=summary 信封。"
+      },
       "StreamSummaryOut": {
         "properties": {
           "delta": {
@@ -23480,12 +23691,33 @@
             "title": "Delta"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "delta"
         ],
         "title": "StreamSummaryOut",
         "description": "summary 事件 data:总结增量(当前为单条完整文案,逐事件追加=打字机语义)。"
+      },
+      "StreamToolCallEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "tool_call",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/StreamToolCallOut"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "data"
+        ],
+        "title": "StreamToolCallEvent",
+        "description": "type=tool_call 信封。"
       },
       "StreamToolCallOut": {
         "properties": {
@@ -23513,6 +23745,7 @@
             "default": ""
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "tool_name",
@@ -23520,26 +23753,6 @@
         ],
         "title": "StreamToolCallOut",
         "description": "tool_call 事件 data(tool-calling):工具调用进度。\n\nstatus ∈ running/done/rejected(confirm_required 以 done 下发,result_digest\n含「待确认」);args_digest/result_digest 为截断摘要(审计同源口径)。"
-      },
-      "StreamTraceOut": {
-        "properties": {
-          "node": {
-            "type": "string",
-            "title": "Node"
-          },
-          "fields": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Fields"
-          }
-        },
-        "type": "object",
-        "required": [
-          "node",
-          "fields"
-        ],
-        "title": "StreamTraceOut",
-        "description": "trace 事件 data:agent 侧诊断信号(内部运维口径,不渲染进用户答案)。\n\n表预筛/召回闸门/引用净化/装配预算共用本通道;\nfields 为自由映射(键集随能力演进,前向兼容);node=发起节点名。"
       },
       "SuggestionsOut": {
         "properties": {
@@ -26042,6 +26255,58 @@
           "created_at"
         ],
         "title": "VersionMetaOut"
+      },
+      "VoiceCapabilityOut": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "VoiceCapabilityOut",
+        "description": "通话能力探测响应。"
+      },
+      "VoiceEstablishOut": {
+        "properties": {
+          "answer": {
+            "type": "string",
+            "title": "Answer"
+          },
+          "ticket": {
+            "type": "string",
+            "title": "Ticket"
+          },
+          "call_id": {
+            "type": "string",
+            "title": "Call Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "answer",
+          "ticket",
+          "call_id"
+        ],
+        "title": "VoiceEstablishOut",
+        "description": "建交通话响应:连接应答、一次性通道票据与通话标识。"
+      },
+      "VoiceHangUpOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "title": "VoiceHangUpOut",
+        "description": "挂断响应。"
       },
       "WorkflowDefOut": {
         "properties": {

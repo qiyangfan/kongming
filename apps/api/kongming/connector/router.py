@@ -14,7 +14,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
+from kongming.auth.models import AuthenticatedUser
 from kongming.chat.repository import ChatRepository
 from kongming.config import get_settings
 from kongming.connector.adapters import (
@@ -95,17 +96,17 @@ async def _execute_once(
 
 
 def _resolve_tenant(
-    user: dict[str, object], session: AsyncSession, header: str | None
+    user: AuthenticatedUser, session: AsyncSession, header: str | None
 ) -> tuple[Any, str | None]:
     """X-Tenant-Id 白名单解析(与 mcp/chat 同构)。"""
     repo = ChatRepository(session)
-    uid = str(user["sub"])
+    uid = user.user_id
     if header is not None:
         return repo.find_bound_tenant(user_id=uid, tenant_key=header), header
     return repo.find_default_tenant(user_id=uid), None
 
 
-async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header: str | None) -> str:
+async def _tenant_or_403(user: AuthenticatedUser, session: AsyncSession, header: str | None) -> str:
     pending, explicit = _resolve_tenant(user, session, header)
     found = await pending
     if found is None:
@@ -117,7 +118,7 @@ async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header:
 
 def get_connector_service(
     session: Annotated[AsyncSession, Depends(get_session)],
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
 ) -> ConnectorService:
     settings = get_settings()
     return ConnectorService(
@@ -127,7 +128,7 @@ def get_connector_service(
         timeout_max_ms=settings.connector_timeout_max_ms,
         caller=_build_caller(),
         auditor=ConnectorTestCallAuditor(),
-        oper=OperLogger(session, str(user["sub"])),
+        oper=OperLogger(session, user.user_id),
     )
 
 
@@ -234,7 +235,7 @@ def _row_out(row: dict[str, Any]) -> ConnectorOut:
 
 @router.get("", response_model=list[ConnectorOut], dependencies=[Depends(require_perm(MANAGE))])
 async def list_connectors(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ConnectorService, Depends(get_connector_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -251,7 +252,7 @@ async def list_connectors(
 )
 async def create_connector(
     body: ConnectorIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ConnectorService, Depends(get_connector_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -260,7 +261,7 @@ async def create_connector(
     try:
         row = await svc.create(
             tenant_id=tenant_id,
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             decl=_decl(body),
             secret=_secret_of(body),
         )
@@ -276,7 +277,7 @@ async def create_connector(
 )
 async def get_connector(
     connector_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ConnectorService, Depends(get_connector_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -295,7 +296,7 @@ async def get_connector(
 async def update_connector(
     connector_id: str,
     body: ConnectorIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ConnectorService, Depends(get_connector_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -305,7 +306,7 @@ async def update_connector(
         row = await svc.update(
             connector_id=connector_id,
             tenant_id=tenant_id,
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             decl=_decl(body),
             secret=_secret_of(body),
         )
@@ -319,14 +320,14 @@ async def update_connector(
 @router.delete("/{connector_id}", status_code=204, dependencies=[Depends(require_perm(MANAGE))])
 async def delete_connector(
     connector_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ConnectorService, Depends(get_connector_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     try:
-        await svc.delete(connector_id=connector_id, tenant_id=tenant_id, user_id=str(user["sub"]))
+        await svc.delete(connector_id=connector_id, tenant_id=tenant_id, user_id=user.user_id)
     except ConnectorNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
 
@@ -336,7 +337,7 @@ async def delete_connector(
 )
 async def enable_connector(
     connector_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ConnectorService, Depends(get_connector_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -346,7 +347,7 @@ async def enable_connector(
         await svc.set_enabled(
             connector_id=connector_id,
             tenant_id=tenant_id,
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             enabled=True,
         )
     except ConnectorNotFound:
@@ -358,7 +359,7 @@ async def enable_connector(
 )
 async def disable_connector(
     connector_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ConnectorService, Depends(get_connector_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -368,7 +369,7 @@ async def disable_connector(
         await svc.set_enabled(
             connector_id=connector_id,
             tenant_id=tenant_id,
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             enabled=False,
         )
     except ConnectorNotFound:
@@ -378,7 +379,7 @@ async def disable_connector(
 @router.post("/test-call", response_model=TestCallOut, dependencies=[Depends(require_perm(MANAGE))])
 async def test_call_connector(
     body: TestCallIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ConnectorService, Depends(get_connector_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -388,7 +389,7 @@ async def test_call_connector(
     try:
         out = await svc.test_call(
             tenant_id=tenant_id,
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             decl=_decl(body),
             secret=_secret_of(body),
             args=body.args,

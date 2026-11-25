@@ -12,7 +12,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
+from kongming.auth.models import AuthenticatedUser
 from kongming.bot.repository import SqlBotRepo
 from kongming.chat.repository import ChatRepository
 from kongming.config import get_settings
@@ -138,9 +139,9 @@ def _svc(session: AsyncSession) -> StoreService:
     )
 
 
-async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header: str | None) -> str:
+async def _tenant_or_403(user: AuthenticatedUser, session: AsyncSession, header: str | None) -> str:
     repo = ChatRepository(session)
-    uid = str(user["sub"])
+    uid = user.user_id
     if header is not None:
         tid = await repo.find_bound_tenant(user_id=uid, tenant_key=header)
         if tid is None:
@@ -153,20 +154,20 @@ async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header:
 
 
 async def _can_manage_bot(
-    user: dict[str, object], session: AsyncSession, row: dict[str, Any] | None
+    user: AuthenticatedUser, session: AsyncSession, row: dict[str, Any] | None
 ) -> bool:
     if row is None:
         return False
     team_id = None if row["team_id"] is None else str(row["team_id"])
     role = (
-        await SqlTeamRepo(session).get_member_role(team_id=team_id, user_id=str(user["sub"]))
+        await SqlTeamRepo(session).get_member_role(team_id=team_id, user_id=user.user_id)
         if team_id
         else None
     )
     return _can_manage(
         team_id=team_id,
         creator_id=str(row["created_by"]),
-        user_id=str(user["sub"]),
+        user_id=user.user_id,
         member_role=role,
     )
 
@@ -251,7 +252,7 @@ class PublishIn(BaseModel):
 async def publish_bot(
     bot_id: uuid.UUID,
     body: PublishIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
@@ -263,7 +264,7 @@ async def publish_bot(
         out = await svc.publish(
             bot_id=str(bot_id),
             tenant_id=tenant_id,
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             greeting=body.greeting,
             suggestions=body.suggestions[:5],
             can_manage=can,
@@ -281,7 +282,7 @@ async def publish_bot(
     from kongming.auth.repository import SqlOperLogRepo
 
     await SqlOperLogRepo(session).add(
-        str(user["sub"]),
+        user.user_id,
         "bot.publish",
         str(bot_id),
         {
@@ -300,7 +301,7 @@ async def publish_bot(
 )
 async def unpublish_bot(
     bot_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
@@ -316,7 +317,7 @@ async def unpublish_bot(
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     from kongming.auth.repository import SqlOperLogRepo
 
-    await SqlOperLogRepo(session).add(str(user["sub"]), "bot.unpublish", str(bot_id), {})
+    await SqlOperLogRepo(session).add(user.user_id, "bot.unpublish", str(bot_id), {})
     await session.commit()
     return {"ok": True}
 
@@ -354,7 +355,7 @@ def _version_out(r: dict[str, Any]) -> BotVersionOut:
 )
 async def list_bot_versions(
     bot_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> list[BotVersionOut]:
@@ -378,7 +379,7 @@ async def list_bot_versions(
 async def rollback_bot_version(
     bot_id: uuid.UUID,
     version_no: int,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, object]:
@@ -392,7 +393,7 @@ async def rollback_bot_version(
         out = await svc.rollback(
             bot_id=str(bot_id),
             tenant_id=tenant_id,
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             version_no=version_no,
             can_manage=can,
         )
@@ -407,7 +408,7 @@ async def rollback_bot_version(
     from kongming.auth.repository import SqlOperLogRepo
 
     await SqlOperLogRepo(session).add(
-        str(user["sub"]),
+        user.user_id,
         "bot.version_rollback",
         str(bot_id),
         {
@@ -426,7 +427,7 @@ async def rollback_bot_version(
     "/store/bots", response_model=list[StoreBotOut], dependencies=[Depends(require_perm(RUN))]
 )
 async def store_list(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
     q: Annotated[str, Query(max_length=64)] = "",
@@ -434,7 +435,7 @@ async def store_list(
 ) -> list[StoreBotOut]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     rows = await _svc(session).list_store(
-        tenant_id=tenant_id, keyword=q, sort=sort, user_id=str(user["sub"])
+        tenant_id=tenant_id, keyword=q, sort=sort, user_id=user.user_id
     )
     return [_store_out(r) for r in rows]
 
@@ -446,14 +447,14 @@ async def store_list(
 )
 async def store_detail(
     bot_key: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> StoreBotDetailOut:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     try:
         row = await _svc(session).get_detail(
-            tenant_id=tenant_id, bot_key=bot_key, user_id=str(user["sub"])
+            tenant_id=tenant_id, bot_key=bot_key, user_id=user.user_id
         )
     except StoreNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
@@ -472,7 +473,7 @@ async def store_detail(
 @router.post("/store/bots/{bot_key}/favorite", dependencies=[Depends(require_perm(RUN))])
 async def add_favorite(
     bot_key: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
@@ -481,7 +482,7 @@ async def add_favorite(
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     try:
         favorited = await _svc(session).set_favorite(
-            tenant_id=tenant_id, bot_key=bot_key, user_id=str(user["sub"]), favorited=True
+            tenant_id=tenant_id, bot_key=bot_key, user_id=user.user_id, favorited=True
         )
     except StoreNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
@@ -491,7 +492,7 @@ async def add_favorite(
 @router.delete("/store/bots/{bot_key}/favorite", dependencies=[Depends(require_perm(RUN))])
 async def remove_favorite(
     bot_key: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
@@ -499,7 +500,7 @@ async def remove_favorite(
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     try:
         favorited = await _svc(session).set_favorite(
-            tenant_id=tenant_id, bot_key=bot_key, user_id=str(user["sub"]), favorited=False
+            tenant_id=tenant_id, bot_key=bot_key, user_id=user.user_id, favorited=False
         )
     except StoreNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
@@ -510,14 +511,14 @@ async def remove_favorite(
     "/store/favorites", response_model=list[StoreBotOut], dependencies=[Depends(require_perm(RUN))]
 )
 async def my_favorites(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> list[StoreBotOut]:
     """与 /store/bots 同构的 StoreBotOut(含 favorited/fav_count,前端心形
     填充与收藏计数同源);列表本身即本人收藏,favorited 恒 TRUE。"""
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
-    rows = await _svc(session).my_favorites(tenant_id=tenant_id, user_id=str(user["sub"]))
+    rows = await _svc(session).my_favorites(tenant_id=tenant_id, user_id=user.user_id)
     return [_store_out(r) for r in rows]
 
 
@@ -529,7 +530,7 @@ class RatingIn(BaseModel):
 async def rate_bot(
     bot_key: str,
     body: RatingIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
@@ -539,7 +540,7 @@ async def rate_bot(
         await svc.rate(
             tenant_id=tenant_id,
             bot_key=bot_key,
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             score=body.score,
         )
     except StoreValidationError as e:
@@ -561,7 +562,7 @@ class StoreRunIn(BaseModel):
 async def store_run(
     bot_key: str,
     body: StoreRunIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> StoreRunOut:

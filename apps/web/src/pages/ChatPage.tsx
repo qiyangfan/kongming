@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, AudioLines } from "lucide-react";
 import { useParams } from "react-router";
 
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,8 @@ import { useChatStream } from "./chat/use-chat-stream";
 import { useRecording } from "./chat/use-recording";
 import { useReportDialog } from "./chat/use-report-dialog";
 import { ComposerSection, MobileHeader } from "./chat/chat-page-shell";
+import { useVoiceCallPage } from "./chat/use-voice-call-page";
+import { VoiceCallBar } from "./chat/voice-call-bar";
 
 export default function ChatPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -73,6 +75,14 @@ export default function ChatPage() {
   const submit = () => stream.submit(undefined, { draft, uploading, agentMode, attachments });
   const streaming = stream.streaming;
 
+  const voice = useVoiceCallPage({
+    tenantId: current ?? null,
+    submitTurn: (question, voiceTurnToken) =>
+      stream.submit(question, { draft, uploading, agentMode, attachments, voiceTurnToken }),
+    stopStreaming: (opts) => stream.stopStreaming(opts),
+    streaming: stream.streaming !== null,
+  });
+
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <MobileHeader />
@@ -110,7 +120,38 @@ export default function ChatPage() {
         />
       )}
 
+      {/* 语音通话(ADR-013):输入框为空时替代发送键;通话中展示声音驱动小球浮层 */}
+      {voice.phase !== "idle" && (
+        <VoiceCallBar
+          phase={voice.phase}
+          muted={voice.muted}
+          failure={voice.failure}
+          sampleAudioLevels={voice.sampleAudioLevels}
+          onHangUp={() => voice.hangUp()}
+        />
+      )}
       <ComposerSection
+        voiceEntry={
+          <span
+            className="inline-flex"
+            title={voice.voiceEnabled === false ? "语音通话未启用" : undefined}
+          >
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={
+                voice.voiceEnabled !== true || (voice.phase !== "idle" && voice.phase !== "failed")
+              }
+              aria-label="语音通话"
+              title="语音通话(与助手语音对话)"
+              onClick={() => {
+                if (voice.voiceEnabled) voice.start();
+              }}
+            >
+              <AudioLines aria-hidden />
+            </Button>
+          </span>
+        }
         sessionId={sessionId}
         canGenerateReport={canGenerateReport}
         streaming={streaming}

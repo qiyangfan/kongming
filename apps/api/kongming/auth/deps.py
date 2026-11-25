@@ -12,15 +12,15 @@ from fastapi import Depends, HTTPException, Request
 
 from kongming.auth import tokens
 from kongming.auth.dependencies import Service
-from kongming.auth.models import MeInfo
+from kongming.auth.models import AuthenticatedUser, RbacUser
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Service", "current_user", "require_perm"]
+__all__ = ["CurrentUser", "Service", "current_user", "require_perm"]
 
 
-async def current_user(request: Request) -> dict[str, object]:
-    """Bearer access token → claims 依赖。缺失/无效一律 401(不泄露差异)。"""
+async def current_user(request: Request) -> AuthenticatedUser:
+    """Bearer access token → 具名身份依赖。缺失/无效一律 401(不泄露差异)。"""
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="unauthorized")
@@ -28,7 +28,10 @@ async def current_user(request: Request) -> dict[str, object]:
         claims = tokens.verify(auth.removeprefix("Bearer "))
     except pyjwt.PyJWTError as e:
         raise HTTPException(status_code=401, detail="unauthorized") from e
-    return claims
+    return AuthenticatedUser(user_id=str(claims["sub"]))
+
+
+CurrentUser = Annotated[AuthenticatedUser, Depends(current_user)]
 
 
 def require_perm(perm_code: str):  # type: ignore[no-untyped-def]
@@ -41,13 +44,13 @@ def require_perm(perm_code: str):  # type: ignore[no-untyped-def]
 
     async def _dep(
         request: Request,
-        user: Annotated[dict[str, object], Depends(current_user)],
+        user: CurrentUser,
         svc: Service,
     ) -> None:
-        info: MeInfo = await svc.me(str(user["sub"]))
-        if perm_code not in info.perm_codes:
+        rbac: RbacUser = await svc.get_rbac_user(user.user_id)
+        if perm_code not in rbac.perm_codes:
             try:
-                await svc.log_perm_denied(str(user["sub"]), perm_code, request.url.path)
+                await svc.log_perm_denied(user.user_id, perm_code, request.url.path)
             except Exception:  # 审计尽力而为,拒绝本身不受影响
                 logger.warning("perm_denied 审计写入失败", exc_info=True)
             raise HTTPException(status_code=403, detail="forbidden")

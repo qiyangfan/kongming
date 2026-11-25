@@ -107,11 +107,13 @@ interface StopDeps {
   setDraft: React.Dispatch<React.SetStateAction<string>>;
 }
 
-/** 生成停止收口函数:回填问句;本轮标识已知即向控制面发起取消,提示随取消结果如实变化。 */
+/** 生成停止收口函数:手动停止时按需回填问句;本轮标识已知即向控制面发起取消,提示随取消结果如实变化。 */
 export function makeStopTurn(deps: StopDeps) {
-  return (turn: { question: string } | null): void => {
+  return (turn: { question: string } | null, options?: { restoreDraft?: boolean }): void => {
     if (!turn) return;
-    deps.setDraft((prev) => (prev.trim() ? prev : turn.question));
+    if (options?.restoreDraft !== false) {
+      deps.setDraft((prev) => (prev.trim() ? prev : turn.question));
+    }
     const traceId = deps.traceIdRef.current;
     deps.traceIdRef.current = null;
     if (traceId === null) {
@@ -147,6 +149,7 @@ export function buildStreamBody(req: {
     question: req.question,
     datasource_key: req.ds,
     agent_mode: req.inputs.agentMode, // ReAct 内核开关,缺省 recipe
+    ...(req.inputs.voiceTurnToken ? { voice_turn_token: req.inputs.voiceTurnToken } : {}),
     ...(req.attIds.length ? { attachment_ids: req.attIds } : {}),
     ...(req.sessionId ? { session_id: req.sessionId } : {}),
   };

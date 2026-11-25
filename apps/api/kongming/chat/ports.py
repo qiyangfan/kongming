@@ -7,6 +7,7 @@ ExplainRunner 等实现绑定在组合根(router 适配层):chat 域 service/mod
 from collections.abc import Callable, Coroutine
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from kongming.chat.models import MessageMeta, Suggestion
@@ -63,7 +64,9 @@ class ChatRepo(Protocol):
         status: str,
         attachments: list[dict[str, object]] | None = None,
         meta: MessageMeta | None = None,
+        created_at: datetime | None = None,
     ) -> Coroutine[Any, Any, str]: ...
+    async def message_created_at(self, *, message_id: str) -> datetime | None: ...
     async def recent_user_questions(self, session_id: str, *, limit: int = 5) -> list[str]: ...
     async def last_fallback_type(self, session_id: str) -> str | None: ...
     async def assistant_message_by_trace(
@@ -289,3 +292,11 @@ class ExecuteRunner(Protocol):
         sql_text: str,
         user_id: str,
     ) -> SqlRunOutcome: ...
+
+
+class VoiceTurnBinding(Protocol):
+    """语音轮关联字段端口(chat 域不认识 voice 域;实现由组合根注入)。"""
+
+    def validate(self, *, token: str, user_id: str) -> bool: ...
+    def bind(self, *, token: str, trace_id: str) -> bool: ...
+    def settle(self, *, trace_id: str, user_id: str, outcome: dict[str, object]) -> bool: ...

@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kongming.audit.archive import run_archive, run_restore
 from kongming.audit.repository import AuditRepository
 from kongming.audit.service import AuditNotFound, AuditService
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
 from kongming.config import get_settings
 from kongming.db import get_session
 
@@ -82,7 +82,7 @@ def _sql_item(r: dict[str, object]) -> SqlAuditItemOut:
     dependencies=[Depends(require_perm("system:audit:view"))],
 )
 async def sql_page(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[AuditService, Depends(get_audit_service)],
     page_num: Annotated[int, Query(ge=1, alias="page")] = 1,
     size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -94,7 +94,7 @@ async def sql_page(
     end_time: Annotated[datetime | None, Query()] = None,
 ) -> SqlAuditPageOut:
     total, rows = await svc.sql_page(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         trace_id=trace_id,
         user_id=None if user_id is None else str(user_id),
         tenant_id=None if tenant_id is None else str(tenant_id),
@@ -114,11 +114,11 @@ async def sql_page(
 )
 async def sql_detail(
     audit_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[AuditService, Depends(get_audit_service)],
 ) -> SqlAuditItemOut:
     try:
-        row = await svc.sql_detail(actor_id=str(user["sub"]), audit_id=str(audit_id))
+        row = await svc.sql_detail(actor_id=user.user_id, audit_id=str(audit_id))
     except AuditNotFound:
         raise HTTPException(status_code=403, detail="AUDIT_FORBIDDEN") from None
     return _sql_item(row)
@@ -148,7 +148,7 @@ class OperLogPageOut(BaseModel):
     dependencies=[Depends(require_perm("system:audit:view"))],
 )
 async def oper_page(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[AuditService, Depends(get_audit_service)],
     page_num: Annotated[int, Query(ge=1, alias="page")] = 1,
     size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -158,7 +158,7 @@ async def oper_page(
     end_time: Annotated[datetime | None, Query()] = None,
 ) -> OperLogPageOut:
     total, rows = await svc.oper_page(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         action=action,
         user_id=None if user_id is None else str(user_id),
         start_time=start_time,
@@ -213,7 +213,7 @@ class ArchiveRestoreOut(BaseModel):
     dependencies=[Depends(require_perm("system:audit:view"))],
 )
 async def archive_run(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ArchiveRunOut:
     """手动触发归档(超管;与 lifespan 每日调度同一函数,幂等可重跑)。"""
@@ -239,7 +239,7 @@ async def archive_run(
 )
 async def archive_restore(
     req: ArchiveRestoreIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ArchiveRestoreOut:
     """重导入归档窗口(manifest SHA-256 校验;id 幂等)。

@@ -92,7 +92,7 @@ export default function BotPublicPage() {
           }}
           placeholder="输入你的问题…"
           rows={1}
-          className="max-h-32 min-h-10 resize-none"
+          className="max-h-32 min-h-10"
           aria-label="提问"
         />
         <Button

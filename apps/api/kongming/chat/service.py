@@ -27,6 +27,7 @@ from kongming.chat.domain_errors import (
     MessageNotFound,
     SessionNotFound,
     TenantForbidden,
+    VoiceTurnInvalid,
     blocked_friendly,
 )
 from kongming.chat.finalize import FinalizePorts, ReplyFinalizer, persist_unavailable
@@ -43,14 +44,17 @@ from kongming.chat.ports import (
     ToolSpecProvider,
     TurnFederation,
     TurnRegistry,
+    VoiceTurnBinding,
 )
 from kongming.chat.results import ChatOutcome, ExplainView
 from kongming.chat.stream_runner import (
     AgentStreamConsumer,
+    OutboundFrame,
     PreparedQuery,
     StreamHandle,
     noop,
     spawn_background,
+    voice_turn_outcome,
 )
 from kongming.datasource.ports import DatasourceChecker
 from kongming.rag.ports import ColumnCommentReader, QueryHistoryWriter
@@ -122,6 +126,7 @@ class _ServiceOptions(TypedDict, total=False):
     cost_gate: ChatCostGate | None  # 成本双闸(速率+配额)
     turns: TurnRegistry | None  # 在途轮登记(取消端点据此定位在途轮)
     federation: TurnFederation | None  # 跨实例在途协作(取消落在别处时转发)
+    voice_binding: VoiceTurnBinding | None  # 语音轮关联字段(通话侧订阅终态/代为取消)
 
 
 @dataclass(frozen=True)
@@ -142,6 +147,7 @@ class _Ports:
     cost_gate: ChatCostGate | None
     turns: TurnRegistry | None
     federation: TurnFederation | None
+    voice_binding: "VoiceTurnBinding | None"
 
     @classmethod
     def of(
@@ -167,6 +173,7 @@ class _Ports:
             cost_gate=options.get("cost_gate"),
             turns=options.get("turns"),
             federation=options.get("federation"),
+            voice_binding=options.get("voice_binding"),
         )
 
 
@@ -197,6 +204,7 @@ class _Engine:
                 implicit_memory_task=options.get("implicit_memory_task"),
                 turns=ports.turns,
                 federation=ports.federation,
+                voice_binding=ports.voice_binding,
             ),
         )
 
@@ -288,8 +296,9 @@ class ChatService:
             turn.attachment_ids, user_id=turn.user_id, tenant_id=turn.tenant_id
         )
         trace_id = ensure_trace_id()  # 与响应头 X-Trace-Id / 用量落库同一值
+        user_message_id: str | None = None
         if turn.sid is not None:
-            await self._ports.repo.insert_message(
+            user_message_id = await self._ports.repo.insert_message(
                 session_id=turn.sid,
                 role="USER",
                 question=turn.question,
@@ -306,6 +315,7 @@ class ChatService:
             user_id=turn.user_id,
             attachments=attachments,
             last_fallback=last_fallback,
+            user_message_id=user_message_id,
         )
 
     async def _resolve_session(
@@ -628,10 +638,34 @@ class ChatService:
     @staticmethod
     def _immediate_handle(outcome: ChatOutcome) -> StreamHandle:
         """短路轮的句柄:result 直入队 + 终止标记,空任务占位(不起后台任务)。"""
-        queue: asyncio.Queue[tuple[str, object] | None] = asyncio.Queue()
-        queue.put_nowait(("result", outcome))
+        queue: asyncio.Queue[OutboundFrame | None] = asyncio.Queue()
+        queue.put_nowait(outcome)
         queue.put_nowait(None)
         return StreamHandle(queue=queue, task=spawn_background(noop()))
+
+    def _ensure_voice_turn(self, token: str | None, user_id: str) -> None:
+        """落库前的语音轮关联字段校验;无效即 400(不落消息、不回调 Agent 面)。"""
+        if token is not None and (
+            self._ports.voice_binding is None
+            or not self._ports.voice_binding.validate(token=token, user_id=user_id)
+        ):
+            raise VoiceTurnInvalid("语音轮关联字段无效")
+
+    def _bind_voice_turn(self, token: str | None, trace_id: str) -> None:
+        """trace 已知后的绑定;绑不进(顶替/失效)按无效字段回答。"""
+        if token is not None and (
+            self._ports.voice_binding is None
+            or not self._ports.voice_binding.bind(token=token, trace_id=trace_id)
+        ):
+            raise VoiceTurnInvalid("语音轮关联字段无效")
+
+    def _settle_voice_immediate(self, p: PreparedQuery, outcome: ChatOutcome) -> None:
+        """短路轮(记忆直答/护栏拦截)不经后台消费,语音轮终态在分支处回填。"""
+        if self._ports.voice_binding is None:
+            return
+        self._ports.voice_binding.settle(
+            trace_id=p.trace_id, user_id=p.user_id, outcome=voice_turn_outcome(outcome)
+        )
 
     async def start_stream(
         self,
@@ -645,9 +679,11 @@ class ChatService:
         datasource_key: str,
         agent_mode: str = "recipe",
         attachment_ids: list[str] | None = None,
+        voice_turn_token: str | None = None,
     ) -> StreamHandle:
         """启动流式问答:前段(含 USER 落库)完成后创建后台消费任务并返回句柄;
         前段异常(403/404/400)在 SSE 响应开始前抛出,由 router 常规映射。"""
+        self._ensure_voice_turn(voice_turn_token, user_id)
         p = await self._prepare_query(
             user_id=user_id,
             tenant_key=tenant_key,
@@ -658,39 +694,38 @@ class ChatService:
             datasource_key=datasource_key,
             attachment_ids=attachment_ids,
         )
+        self._bind_voice_turn(voice_turn_token, p.trace_id)
         # 显式记忆短路先于输入护栏(原始问句判定,与同步同序)
-        short = await self._memory_short_circuit(
-            p, question=question, persist=persist, datasource_key=datasource_key
-        )
-        if short is not None:
+        if (
+            short := await self._memory_short_circuit(
+                p, question=question, persist=persist, datasource_key=datasource_key
+            )
+        ) is not None:
+            self._settle_voice_immediate(p, short)
             return self._immediate_handle(short)
-        # 输入护栏(流式):拦截→result(REJECTED 形态)+ 终止标记。
-        orig_question = question  # 回写 query_history 须取原始问句
-        blocked, question, eff_history = await self._guard_input(
-            user_id=user_id,
-            tenant_id=p.tenant_id,
-            trace_id=p.trace_id,
-            question=question,
-            history=p.effective_history,
-        )
+        # 输入护栏挪进 _guarded_stream:start_stream 只做前段与入参打包
         return await self._guarded_stream(
             p,
             _AskRequest(
                 user_id=user_id,
                 question=question,
-                orig_question=orig_question,
+                orig_question=question,  # 回写 query_history 须取原始问句
                 persist=persist,
                 datasource_key=datasource_key,
                 agent_mode=agent_mode,
-                eff_history=eff_history,
+                eff_history=p.effective_history,  # 护栏结果在 _guarded_stream 内覆盖
             ),
-            blocked=blocked,
         )
 
-    async def _guarded_stream(
-        self, p: PreparedQuery, ask: "_AskRequest", *, blocked: bool
-    ) -> StreamHandle:
-        """护栏判定后的流式分支:拦截给即时句柄,放行起后台消费任务。"""
+    async def _guarded_stream(self, p: PreparedQuery, ask: "_AskRequest") -> StreamHandle:
+        """流式分支:先过输入护栏(拦截给即时句柄),放行起后台消费任务。"""
+        blocked, question, eff_history = await self._guard_input(
+            user_id=ask.user_id,
+            tenant_id=p.tenant_id,
+            trace_id=p.trace_id,
+            question=ask.question,
+            history=p.effective_history,
+        )
         if blocked:
             outcome = await self._guard_blocked_outcome(
                 p,
@@ -698,7 +733,9 @@ class ChatService:
                 persist=ask.persist,
                 datasource_key=ask.datasource_key,
             )
+            self._settle_voice_immediate(p, outcome)
             return self._immediate_handle(outcome)
+        ask = dataclasses.replace(ask, question=question, eff_history=eff_history)
         return await self._spawn_consumer(
             p,
             user_id=ask.user_id,

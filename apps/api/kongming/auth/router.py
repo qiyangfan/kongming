@@ -8,11 +8,11 @@ import secrets
 from typing import Annotated
 from urllib.parse import parse_qs, urlparse
 
-from fastapi import APIRouter, Cookie, Depends, FastAPI, Request, Response
+from fastapi import APIRouter, Cookie, FastAPI, Request, Response
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
-from kongming.auth.deps import Service, current_user
+from kongming.auth.deps import CurrentUser, Service
 from kongming.auth.login_limit import LoginRateLimiter
 from kongming.auth.models import (
     AccountDisabled,
@@ -190,8 +190,8 @@ async def logout_sso(
 
 
 @router.get("/me", response_model=MeOut)
-async def me(user: Annotated[dict[str, object], Depends(current_user)], svc: Service) -> MeOut:
-    return _me_out(await svc.me(str(user["sub"])))
+async def me(user: CurrentUser, svc: Service) -> MeOut:
+    return _me_out(await svc.me(user.user_id))
 
 
 @router.get("/options", response_model=OptionsOut)

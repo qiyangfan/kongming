@@ -84,6 +84,8 @@ function useStreamState() {
   const selfNavigatedRef = useRef<string | null>(null);
   // 强制贴底标记:切会话/用户主动提问时消费(内容 effect 先于跟随判定)
   const forceBottomRef = useRef(false);
+  // 每次发起递增的在途轮序号:供 ChatThread 作为 key,确保同帧顶掉旧轮时重建 StreamingTurn
+  const turnSeqRef = useRef(0);
   return [
     streaming,
     setStreaming,
@@ -99,6 +101,7 @@ function useStreamState() {
     streamCtxRef,
     selfNavigatedRef,
     forceBottomRef,
+    turnSeqRef,
   ] as const;
 }
 
@@ -131,6 +134,7 @@ export function useChatStream(
     streamCtxRef,
     selfNavigatedRef,
     forceBottomRef,
+    turnSeqRef,
   ] = useStreamState();
 
   const inOriginCtx = makeOriginGuard(streamCtxRef, ctx);
@@ -163,7 +167,9 @@ export function useChatStream(
     const fromDraft = text === undefined;
     const q = (text ?? draft).trim();
     // question 至少包含一个非空字符；上传未完成时不提交,避免请求遗漏附件。
-    if (!q || uploading || streaming !== null) return; // 防重复提交
+    if (!q || uploading) return;
+    // 语音新问顶掉旧轮(旧轮由 onTurnRequest 显式取消收口);打字轮仍防重复提交
+    if (streaming !== null && !inputs.voiceTurnToken) return;
     const attIds = attachments.map((a) => a.id);
     const attSnapshot = attachments; // 失败恢复用快照
     setAttachments([]);
@@ -183,6 +189,7 @@ export function useChatStream(
     };
     // 在途态一次性创建,占位只插一次;过程事件由 StreamingTurn 自持
     setStreaming({
+      id: ++turnSeqRef.current,
       question: q,
       ac,
       attSnapshot,
@@ -202,13 +209,13 @@ export function useChatStream(
   const stopTurn = makeStopTurn({ traceIdRef, stopSeqRef, setStoppedNotice, setDraft });
 
   /** 停止:中止读取并立即释放输入;取消请求与结果提示由 stopTurn 收口。 */
-  function stopStreaming(): void {
+  function stopStreaming(options?: { restoreDraft?: boolean }): void {
     const s = streaming;
     abortRef.current?.abort();
     abortRef.current = null;
     streamCtxRef.current = null;
     setStreaming(null);
-    stopTurn(s);
+    stopTurn(s, options);
   }
 
   const { resetStream, shutdown } = makeContextResetters({

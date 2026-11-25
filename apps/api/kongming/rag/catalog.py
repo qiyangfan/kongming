@@ -62,13 +62,21 @@ async def introspect_all_on(
     table_rows = (
         await conn.execute(
             text(
-                "SELECT table_schema, table_name FROM information_schema.tables"
-                " WHERE table_schema = ANY(CAST(:schemas AS text[]))"
+                "SELECT c.table_schema, c.table_name"
+                " FROM information_schema.tables c"
+                " JOIN pg_class cls ON cls.relname = c.table_name"
+                " JOIN pg_namespace n ON n.oid = cls.relnamespace"
+                "   AND n.nspname = c.table_schema"
+                " WHERE c.table_schema = ANY(CAST(:schemas AS text[]))"
                 # 收录限基表——视图是基表派生物,行扇出使聚合失真,
                 # 样例 SQL 挤占召回 top-K 使维度表缺位;
                 # 基表可完整表达视图可表达的一切查询
-                " AND table_type = 'BASE TABLE'"
-                " ORDER BY table_schema, table_name"
+                " AND c.table_type = 'BASE TABLE'"
+                # 继承/分区子表只是父表分片(可能为空),父表才是完整数据面
+                " AND NOT EXISTS ("
+                "   SELECT 1 FROM pg_inherits inh WHERE inh.inhrelid = cls.oid"
+                " )"
+                " ORDER BY c.table_schema, c.table_name"
             ),
             {"schemas": schemas},
         )

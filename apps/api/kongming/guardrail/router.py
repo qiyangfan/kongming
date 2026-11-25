@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
 from kongming.db import get_session
 from kongming.guardrail.models import MASKERS
 from kongming.guardrail.repository import SqlGuardrailRepo
@@ -77,7 +77,7 @@ class RuleUpdateIn(BaseModel):
 async def update_rule(
     rule_name: str,
     req: RuleUpdateIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:guardrail:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
@@ -94,7 +94,7 @@ async def update_rule(
         enabled=req.enabled,
         action=req.action,
         threshold=req.threshold,
-        updated_by=str(user["sub"]),
+        updated_by=user.user_id,
     )
 
 
@@ -136,7 +136,7 @@ def _item(r: dict[str, object]) -> GuardrailAuditItem:
 
 @router.get("/audit/page", response_model=GuardrailAuditPageOut)
 async def guardrail_audit_page(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:guardrail:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     page: Annotated[int, Query(ge=1)] = 1,
@@ -148,7 +148,7 @@ async def guardrail_audit_page(
     start: Annotated[datetime | None, Query()] = None,
     end: Annotated[datetime | None, Query()] = None,
 ) -> GuardrailAuditPageOut:
-    viewer_id = str(user["sub"])
+    viewer_id = user.user_id
     all_scope = await user_has_all_scope(session, viewer_id)
     effective_user = (None if user_id is None else str(user_id)) if all_scope else viewer_id
     items, total = await SqlGuardrailRepo(session).page_audit(

@@ -1,8 +1,9 @@
-"""流式问答的后台消费与中继:agent 流 → 帧队列(SSE 契约的唯一产出点)。
+"""流式问答的后台消费与中继:agent 流 → 公开事件队列(SSE 契约的唯一产出点)。
 
-帧序契约:过程帧(stage/sql/summary/tool_call/trace)按 agent 到达顺序透传;
-每轮恰一个终态帧(result 或 error);终止标记 None 最后入队。任何退出路径都
-必须入队 None——中继生成器靠它收束,缺失即前端永久等心跳。
+帧序契约:agent 过程帧(stage/sql/summary/tool_call)经形状校验后以信封事件
+{"type","data"} 入队;诊断 trace 不出公开流;每轮恰一个终态(result=ChatOutcome
+或失败标记);终止标记 None 最后入队。任何退出路径都必须入队 None——中继
+生成器靠它收束,缺失即前端永久等心跳。
 
 被请求取消的轮由本任务收敛为已取消终态(query-streaming spec「取消的执行效果与终态」)。
 收尾(落库 + 终态帧)一旦开始就不被请求取消打断:一轮只落定一个终态。
@@ -13,7 +14,9 @@ import json
 import logging
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, Literal, cast
+
+from pydantic import TypeAdapter, ValidationError
 
 from kongming.chat.agent_client import AgentClient, AgentReply, AgentUnavailable, parse_agent_reply
 from kongming.chat.finalize import (
@@ -24,16 +27,63 @@ from kongming.chat.finalize import (
     persist_unavailable,
 )
 from kongming.chat.inflight import InflightTurn, TurnSettlement
-from kongming.chat.ports import ChatRepo, StreamStoreFactory, TurnFederation, TurnRegistry
+from kongming.chat.ports import (
+    ChatRepo,
+    StreamStoreFactory,
+    TurnFederation,
+    TurnRegistry,
+    VoiceTurnBinding,
+)
 from kongming.chat.results import ChatOutcome
+from kongming.chat.schemas import (
+    StreamSqlEvent,
+    StreamStageEvent,
+    StreamSummaryEvent,
+    StreamToolCallEvent,
+)
 from kongming.chat.stage_trace import StageTraceCollector
 
 log = logging.getLogger(__name__)
 
-# 过程事件白名单(事件名/形状由 api 收口;trace=诊断信号通道,不进用户响应只作观测)
-_PASSTHROUGH_EVENTS = frozenset({"stage", "sql", "summary", "tool_call", "trace"})
+# 过程事件白名单(trace=诊断信号,只存在于 agent 内部流,不出公开面)
+_PROCESS_EVENTS = frozenset({"stage", "sql", "summary", "tool_call"})
 
-FrameQueue = asyncio.Queue[tuple[str, object] | None]
+_PROCESS_ADAPTER: TypeAdapter[
+    StreamStageEvent | StreamSqlEvent | StreamSummaryEvent | StreamToolCallEvent
+] = TypeAdapter(StreamStageEvent | StreamSqlEvent | StreamSummaryEvent | StreamToolCallEvent)
+
+
+@dataclass(frozen=True)
+class StreamFailure:
+    """传输/意外失败标记:发送端据此下发预制的 AGENT_UNAVAILABLE 错误结尾。"""
+
+    reason_code: Literal["AGENT_UNAVAILABLE"] = "AGENT_UNAVAILABLE"
+
+
+# 出站帧:已校验的过程事件、领域终态、失败标记;None=终止标记
+OutboundFrame = (
+    StreamStageEvent
+    | StreamSqlEvent
+    | StreamSummaryEvent
+    | StreamToolCallEvent
+    | ChatOutcome
+    | StreamFailure
+)
+
+type FrameQueue = asyncio.Queue[OutboundFrame | None]
+
+
+def voice_turn_outcome(o: ChatOutcome) -> dict[str, object]:
+    """语音轮终态回填给关联字段注册表的结果形状(voice 侧状态机消费 verdict/
+    summary/columns 等键;短路轮与后台消费轮共用,防两处形状漂移)。"""
+    return {
+        "verdict": o.verdict,
+        "success": o.success,
+        "summary": o.summary,
+        "sql": o.sql,
+        "columns": o.columns,
+        "rows": o.rows,
+    }
 
 
 @dataclass(frozen=True)
@@ -48,14 +98,15 @@ class PreparedQuery:
     user_id: str = ""  # 护栏审计主体
     attachments: list[dict[str, object]] | None = None  # 附件摘要(归属已验)
     last_fallback: str = ""  # 上一轮兜底分类(澄清防循环判据;空=不携带)
+    user_message_id: str | None = None  # 本轮用户消息 id(已取消行按它定位原轮时序)
 
 
 @dataclass
 class StreamHandle:
-    """流式中继句柄:queue=待发帧,event 为 result 时 payload=ChatOutcome;
+    """流式中继句柄:queue=已校验过程事件或终态元素(ChatOutcome/StreamFailure);
     task=后台消费任务(断线后照常跑完,调用方不 await)。"""
 
-    queue: asyncio.Queue[tuple[str, object] | None]
+    queue: "asyncio.Queue[OutboundFrame | None]"
     task: "asyncio.Task[None]"
 
 
@@ -76,8 +127,8 @@ async def noop() -> None:
 
 
 class AgentStreamConsumer:
-    """后台消费 agent 流至终态:过程帧透传;result 帧先落库(独立 StreamStore
-    会话)再富化入队;传输失败收敛 error 终态+FAILED 落库。
+    """后台消费 agent 流至终态:过程事件按公开模型校验后入队;result 帧先落库
+    (独立 StreamStore 会话)再富化入队;传输失败收敛失败标记+FAILED 落库。
     前端断线不影响本任务(断线续存);落库失败不阻断终态帧(与同步容错一致)。
     在途轮经登记端口登记,取消发起方据此找到并收敛本轮。"""
 
@@ -91,6 +142,7 @@ class AgentStreamConsumer:
         implicit_memory_task: "Callable[..., Coroutine[Any, Any, None]] | None" = None,
         turns: TurnRegistry | None = None,
         federation: TurnFederation | None = None,
+        voice_binding: "VoiceTurnBinding | None" = None,
     ) -> None:
         self._agent = agent
         self._stream_store_factory = stream_store_factory
@@ -99,6 +151,7 @@ class AgentStreamConsumer:
         self._implicit_memory_task = implicit_memory_task
         self._turns = turns
         self._federation = federation
+        self._voice_binding = voice_binding
 
     def begin(
         self,
@@ -116,7 +169,7 @@ class AgentStreamConsumer:
         attachment_ids: list[str] | None = None,
     ) -> StreamHandle:
         """起后台消费任务并返回句柄(任务持强引用,断线不取消)。"""
-        queue: asyncio.Queue[tuple[str, object] | None] = asyncio.Queue()
+        queue: asyncio.Queue[OutboundFrame | None] = asyncio.Queue()
         task = spawn_background(
             self.consume(
                 p,
@@ -144,7 +197,7 @@ class AgentStreamConsumer:
         orig_question: str = "",  # 回写原始问句(缺省=未脱敏同值)
         persist: bool,
         datasource_key: str,
-        queue: "asyncio.Queue[tuple[str, object] | None]",
+        queue: FrameQueue,
         react_tools: list[dict[str, object]] | None = None,
         eff_history: list[str] | None = None,  # 护栏脱敏后历史(缺省=prepare 原值)
         memory_hint: str = "",  # 记忆注入段
@@ -166,33 +219,47 @@ class AgentStreamConsumer:
             pref_revision=pref_revision,
             attachment_ids=attachment_ids,
         )
-        turn: InflightTurn | None = None
-        if self._turns is not None:
-            # 登记以「用户 + trace_id」为键:入站 trace_id 可由调用方指定,他人同标识不得命中
-            turn = InflightTurn(
-                user_id=user_id,
-                trace_id=p.trace_id,
-                task=cast("asyncio.Task[None]", asyncio.current_task()),
-            )
-            self._turns.register(turn)
-        federation_token: str | None = None
-        if self._federation is not None:
-            # 跨实例登记紧随本地登记:本地表是主,共享登记只是给别实例的指针
-            federation_token = await self._federation.claim(trace_id=p.trace_id, user_id=user_id)
+        await self._register(run)
         try:
-            await self._run(run, turn)
+            await self._run(run, run.registration.turn)
         except asyncio.CancelledError:
-            if turn is None or not turn.cancel_requested:
+            if run.registration.turn is None or not run.registration.turn.cancel_requested:
                 raise  # 被外部取消且无人请求取消(进程关停等):原样上抛,不伪造终态
             # 请求取消的硬取消落在流阶段:收敛为已取消(收敛段不被后续取消打断)
-            await _await_settle(asyncio.create_task(self._settle(run, turn)), turn)
+            await _await_settle(
+                asyncio.create_task(self._settle(run, run.registration.turn)),
+                run.registration.turn,
+            )
             raise
         finally:
             await run.queue.put(None)  # 终止标记(生成器据此收束;必达)
-            if turn is not None and self._turns is not None:
-                self._turns.unregister(turn)
-            if self._federation is not None and federation_token is not None:
-                await self._federation.release(trace_id=p.trace_id, token=federation_token)
+            if run.registration.turn is not None and self._turns is not None:
+                self._turns.unregister(run.registration.turn)
+            await self._release(run)
+
+    async def _release(self, run: "_StreamRun") -> None:
+        """跨实例登记的注销(凭据在登记产物上;无凭据即无外部状态要清)。"""
+        if self._federation is not None and run.registration.federation_token is not None:
+            await self._federation.release(
+                trace_id=run.p.trace_id, token=run.registration.federation_token
+            )
+
+    async def _register(self, run: "_StreamRun") -> None:
+        """本地 + 跨实例两级在途登记,产物记在 run.registration(句柄与注销凭据)。"""
+        if self._turns is not None:
+            # 登记以「用户 + trace_id」为键:入站 trace_id 可由调用方指定,他人同标识不得命中
+            run.registration.turn = InflightTurn(
+                user_id=run.user_id,
+                trace_id=run.p.trace_id,
+                task=cast("asyncio.Task[None]", asyncio.current_task()),
+            )
+            self._turns.register(run.registration.turn)
+        if self._federation is None:
+            return
+        # 跨实例登记紧随本地登记:本地表是主,共享登记只是给别实例的指针
+        run.registration.federation_token = await self._federation.claim(
+            trace_id=run.p.trace_id, user_id=run.user_id
+        )
 
     async def _run(self, run: "_StreamRun", turn: InflightTurn | None) -> None:
         """执行单轮消费:转发过程帧,随后收敛终态。"""
@@ -212,10 +279,15 @@ class AgentStreamConsumer:
                     stage_trace=run.collector.payload() or [],
                 )
             elif event == "error":
-                # agent 意外异常帧:等价传输层失败,由 api 统一收敛(不透传)
-                terminal.error_text = AGENT_UNAVAILABLE_TEXT
-            elif event in _PASSTHROUGH_EVENTS:
-                await _forward_frame(event, data_json, run.queue, run.collector)
+                # agent error 帧:data 为含字符串 error 的对象才算合法结尾;
+                # 由 api 统一收敛为友好文案(不透传 agent 原文)
+                if _agent_error_shape_ok(data_json):
+                    terminal.error_text = AGENT_UNAVAILABLE_TEXT
+                else:
+                    log.warning("agent error 帧形状不合格(跳帧) trace_id=%s", run.p.trace_id)
+            elif event in _PROCESS_EVENTS:
+                await _forward_process(event, data_json, run.queue, run.collector, run.p.trace_id)
+            # trace 与未知事件不出公开流(诊断信号限 agent 内部)
 
         try:
             await self._agent.query_stream(
@@ -244,10 +316,12 @@ class AgentStreamConsumer:
 
     async def _settle(self, run: "_StreamRun", turn: InflightTurn | None) -> None:
         """终态收敛:被请求取消且没有业务终态时收敛为已取消(取消优先于失败收敛),
-        否则按既有规则(result 或 error);收敛结果随终态记下,取消发起方据此回答。"""
+        否则按既有规则(result 或 error);收敛结果随终态记下,取消发起方据此回答。
+        语音轮的终态回填在本处统一发生(取消/失败/结果三类收敛都要回填)。"""
         terminal = run.terminal
         stage_trace = run.collector.payload() or []
-        if turn is not None and turn.cancel_requested and terminal.outcome is None:
+        cancelled = turn is not None and turn.cancel_requested
+        if cancelled and terminal.outcome is None:
             await self._converge_cancelled(run, stage_trace=stage_trace)
         else:
             await terminal.flush(
@@ -259,6 +333,17 @@ class AgentStreamConsumer:
             )
         if turn is not None:
             turn.settlement = terminal.settlement
+        if self._voice_binding is not None and terminal.settlement is not None:
+            o = terminal.outcome
+            if o is not None:
+                outcome: dict[str, object] = voice_turn_outcome(o)
+            elif cancelled:
+                outcome = {"verdict": "CANCELLED", "success": False}
+            else:
+                outcome = {"verdict": "FAILED", "success": False}
+            self._voice_binding.settle(
+                trace_id=run.p.trace_id, user_id=run.user_id, outcome=outcome
+            )
 
     async def _converge_cancelled(
         self, run: "_StreamRun", *, stage_trace: list[dict[str, object]]
@@ -282,11 +367,12 @@ class AgentStreamConsumer:
                     datasource_key=run.datasource_key,
                     attachments=p.attachments,
                     stage_trace=stage_trace,
+                    user_message_id=p.user_message_id,
                 )
         run.terminal.settlement = TurnSettlement(
             "CANCELLED" if outcome.verdict == "CANCELLED" else "COMPLETED", outcome.message_id
         )
-        await run.queue.put(("result", outcome))
+        await run.queue.put(outcome)
 
     async def finalize_stream(
         self,
@@ -446,18 +532,32 @@ class _TerminalState:
         is_react: bool,
         stage_trace: list[dict[str, object]],
     ) -> None:
-        """解析并落库首个 result 帧;重复帧/解析失败只记日志不改变终态。"""
+        """解析并落库首个合法 result 帧;重复帧/形状不合格只记日志不改变终态。
+
+        合法结尾形状:data 为 JSON 对象且 success 为布尔;不合格的 result 不算
+        结尾信号,若其后仍有合法 result 则照常收敛。
+        """
         if self.outcome is not None:
             # 终态幂等守卫:契约恰一个终态帧,首个即权威——
             # 违约多发的 result 不得二次落库/回写/触发标题任务
             log.warning("agent 流重复 result 帧(忽略) trace_id=%s", p.trace_id)
             return
         try:
-            reply = parse_agent_reply(json.loads(data_json))
-        except (ValueError, TypeError, AttributeError) as e:
-            log.warning("agent result 帧解析失败: %s", e)
+            data = json.loads(data_json)
+        except ValueError:
+            log.warning("agent result 帧非 JSON trace_id=%s", p.trace_id)
             self.error_text = AGENT_UNAVAILABLE_TEXT
             return
+        if not isinstance(data, dict):
+            log.warning("agent result 帧非对象(不作为结尾) trace_id=%s", p.trace_id)
+            self.error_text = AGENT_UNAVAILABLE_TEXT
+            return
+        typed = cast("dict[str, object]", data)
+        if not isinstance(typed.get("success"), bool):
+            log.warning("agent result 帧形状不合格(不作为结尾) trace_id=%s", p.trace_id)
+            self.error_text = AGENT_UNAVAILABLE_TEXT
+            return
+        reply = parse_agent_reply(typed)
         self.outcome = await agent_sink.finalize_stream(
             reply=reply,
             p=p,
@@ -475,26 +575,34 @@ class _TerminalState:
         p: PreparedQuery,
         *,
         datasource_key: str,
-        queue: "asyncio.Queue[tuple[str, object] | None]",
+        queue: FrameQueue,
         stage_trace: list[dict[str, object]],
     ) -> None:
-        """按终态入队唯一的终态帧(result 或 error);FAILED 先落库再入队;收敛结果随之记下。"""
+        """按终态入队唯一的终态(result=ChatOutcome 或失败标记);FAILED 先落库再入队。"""
         if self.outcome is not None:
             # 业务终态已落库(result 先finalize):即使读尾传输异常也按成功下发,
             # 不叠加 FAILED 消息(双落库收敛)
             self.settlement = TurnSettlement("COMPLETED", self.outcome.message_id)
-            await queue.put(("result", self.outcome))
+            await queue.put(self.outcome)
             return
         if self.error_text is None:
             # agent 流正常结束但无终态帧(契约破坏):与不可达同收敛
             log.error("agent 流结束但缺终态帧 trace_id=%s", p.trace_id)
             self.error_text = AGENT_UNAVAILABLE_TEXT
-        # 传输层/意外失败终态:FAILED 落库(独立会话)+ error 帧
+        # 传输层/意外失败终态:FAILED 落库(独立会话)+ 预制失败结尾(发送端定文案)
         failed = await agent_sink.persist_stream_failure(
             p, datasource_key=datasource_key, stage_trace=stage_trace
         )
         self.settlement = TurnSettlement("COMPLETED", failed.message_id)
-        await queue.put(("error", {"error": self.error_text, "reason_code": None}))
+        await queue.put(StreamFailure())
+
+
+@dataclass
+class _TurnRegistration:
+    """在途登记的产物:本地轮句柄与跨实例注销凭据(登记发生在 consume 内)。"""
+
+    turn: InflightTurn | None = None
+    federation_token: str | None = None
 
 
 @dataclass(frozen=True)
@@ -507,7 +615,7 @@ class _StreamRun:
     orig_question: str
     persist: bool
     datasource_key: str
-    queue: "asyncio.Queue[tuple[str, object] | None]"
+    queue: "asyncio.Queue[OutboundFrame | None]"
     react_tools: list[dict[str, object]] | None
     eff_history: list[str] | None
     memory_hint: str
@@ -516,24 +624,51 @@ class _StreamRun:
     collector: StageTraceCollector = field(default_factory=StageTraceCollector)
     # 终态收集随行携带:硬取消从流的任意位置抛出后,收敛段仍能读到已收集的终态
     terminal: _TerminalState = field(default_factory=_TerminalState)
+    # 在途登记产物(可变容器):frozen 的 run 不就地赋值,与 terminal 同范式
+    registration: _TurnRegistration = field(default_factory=_TurnRegistration)
 
 
-async def _forward_frame(
+async def _forward_process(
     event: str,
     data_json: str,
-    queue: "asyncio.Queue[tuple[str, object] | None]",
+    queue: "asyncio.Queue[OutboundFrame | None]",
     collector: StageTraceCollector,
+    trace_id: str,
 ) -> None:
-    """过程帧透传:单帧畸形跳过不中断;stage 帧同时采集节点轨迹。"""
+    """过程帧入队:组合信封后按公开模型校验;坏消息跳过并按类别记日志(不含原文)。
+
+    只有通过校验的 stage 进入节点轨迹;非法形状既不外发也不污染阶段记录。
+    """
     try:
         data = json.loads(data_json)
     except ValueError:
-        log.warning("agent 过程帧解析失败(跳帧): %s", data_json[:100])
+        log.warning("agent 过程帧非 JSON(跳帧) trace_id=%s", trace_id)
         return
     if not isinstance(data, dict):
+        log.warning("agent 过程帧非对象(跳帧) trace_id=%s kind=%s", trace_id, type(data).__name__)
         return
-    # isinstance 收窄产物键型未知,cast 对齐队列元素类型(运行时不变)
-    typed = cast("dict[str, object]", data)
+    try:
+        frame = _PROCESS_ADAPTER.validate_python({"type": event, "data": data})
+    except ValidationError as e:
+        # 只记事件名与失败类别;原始内容不进日志
+        log.warning(
+            "agent 过程帧形状不合格(跳帧) trace_id=%s event=%s errors=%s",
+            trace_id,
+            event,
+            e.error_count(),
+        )
+        return
     if event == "stage":
-        collector.add_stage(typed)  # 轨迹随行(与透传并行)
-    await queue.put((event, typed))
+        collector.add_stage(frame.data.model_dump())  # 轨迹只收有效 stage
+    await queue.put(frame)
+
+
+def _agent_error_shape_ok(data_json: str) -> bool:
+    """agent error 帧的合法结尾形状:JSON 对象且含字符串 error。"""
+    try:
+        data = json.loads(data_json)
+    except ValueError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    return isinstance(cast("dict[str, object]", data).get("error"), str)

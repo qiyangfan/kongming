@@ -10,6 +10,7 @@
 import asyncio
 import json
 from collections.abc import Callable, Coroutine, Iterator
+from dataclasses import replace as dataclasses_replace
 from typing import Any, cast
 
 import pytest
@@ -22,9 +23,10 @@ from kongming.chat import router as chat_router
 from kongming.chat.agent_client import AgentReply, AgentUnavailable
 from kongming.chat.dependencies import get_agent_client
 from kongming.chat.repository import ChatRepository
+from kongming.chat.schemas import StreamStageEvent, StreamStageOut
 from kongming.chat.service import ChatService
 from kongming.chat.sse import SseDecoder
-from kongming.chat.stream_runner import StreamHandle
+from kongming.chat.stream_runner import OutboundFrame, StreamHandle
 from kongming.config import get_settings
 from kongming.datasource.repository import SqlDatasourceRepo
 from kongming.db import get_sessionmaker
@@ -133,20 +135,19 @@ async def _user_with_chat_perm(
 
 
 def _parse_sse(text: str) -> list[tuple[str, dict[str, object]]]:
+    """解析公开流:默认消息(仅 data: 行),type 位于 JSON 内;返回 (type, data)。"""
     frames: list[tuple[str, dict[str, object]]] = []
     for raw_block in text.split("\n\n"):
         block = raw_block.strip()
         if not block or block.startswith(":"):
             continue
-        event = ""
-        data_lines: list[str] = []
-        for line in block.split("\n"):
-            if line.startswith("event:"):
-                event = line[len("event:") :].strip()
-            elif line.startswith("data:"):
-                data_lines.append(line[len("data:") :].strip())
-        if event:
-            frames.append((event, json.loads("\n".join(data_lines))))
+        data_lines = [
+            ln[len("data:") :].strip() for ln in block.split("\n") if ln.startswith("data:")
+        ]
+        if not data_lines:
+            continue
+        payload = json.loads("\n".join(data_lines))
+        frames.append((payload["type"], payload["data"]))
     return frames
 
 
@@ -588,10 +589,12 @@ async def test_relay_discards_frames_after_client_gone(
 async def test_relay_gen_heartbeat_on_idle(monkeypatch: pytest.MonkeyPatch) -> None:
     """空闲超时发心跳注释行;帧到达即转发;None 收束。"""
     monkeypatch.setattr(chat_router, "STREAM_HEARTBEAT_SEC", 0.05)
-    q: asyncio.Queue[tuple[str, object] | None] = asyncio.Queue()
+    q: asyncio.Queue[OutboundFrame | None] = asyncio.Queue()
     # task 允许 None 后接,cast 对齐标注(运行时不变)
     handle = StreamHandle(queue=q, task=cast("asyncio.Task[None]", None))
-    await q.put(("stage", {"node": "understand", "status": "running", "retry_count": 0}))
+    await q.put(
+        StreamStageEvent(type="stage", data=StreamStageOut(node="understand", status="running"))
+    )
 
     async def _late_terminate() -> None:
         await asyncio.sleep(0.12)  # 生成器消费首帧后经历两个心跳间隔的真空窗
@@ -600,18 +603,18 @@ async def test_relay_gen_heartbeat_on_idle(monkeypatch: pytest.MonkeyPatch) -> N
     terminator = asyncio.create_task(_late_terminate())
     out: list[str] = [chunk async for chunk in chat_router._relay_gen(handle)]
     await terminator
-    assert out[0].startswith("event: stage\n")
+    assert out[0].startswith("data: ")
     assert out.count(": ping\n\n") >= 2  # 空闲窗口跨过多个心跳间隔
 
 
-async def test_stream_trace_event_relayed(
+async def test_stream_trace_event_not_relayed(
     client: AsyncClient,
     session: AsyncSession,
     make_user: MakeUser,
     fake_agent: dict[str, StreamFakeAgent],
 ) -> None:
-    """trace 诊断帧(预算/预筛/闸门/净化共用通道)白名单透传,
-    不侵入 result 终态与用户响应契约(内部诊断信号,前端按未知事件忽略)。"""
+    """trace 诊断帧不出公开流(诊断信号限 agent 内部);
+    公开流照常下发合法过程事件与唯一 result,问答不受影响。"""
     reply = _pass_reply()
     frames = _frames_for(reply)
     # 将 trace 帧插入 result 事件前。
@@ -636,7 +639,260 @@ async def test_stream_trace_event_relayed(
     assert r.status_code == 200
     parsed = _parse_sse(r.text)
     events = [e for e, _ in parsed]
-    assert "trace" in events
+    assert "trace" not in events  # 诊断信号不出公开面
     assert events[-1] == "result" and events.count("result") == 1
-    trace_data = next(d for e, d in parsed if e == "trace")
-    assert trace_data["node"] == "generate"
+    assert "sql" in events and "summary" in events  # 其余过程帧照常
+
+
+# ============ 公开事件收紧(坏帧跳过 / 结尾选择 / 输出失败收尾) ============
+
+
+async def test_bad_process_frames_skipped_and_stage_trace_clean(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, StreamFakeAgent],
+) -> None:
+    """有效 stage、形状不合格的 stage、诊断 trace 依次到达:
+    公开流只发有效事件;节点轨迹只收有效 stage;问答照常保存。"""
+    reply = _pass_reply()
+    frames = [
+        ("stage", json.dumps({"node": "understand", "status": "running", "retry_count": 0})),
+        ("stage", json.dumps({"sql": "select 1"})),  # 形状错:stage 数据含 sql
+        (
+            "stage",
+            json.dumps({"node": "generate", "status": "running", "retry_count": "1"}),
+        ),  # 字符串计数
+        ("trace", json.dumps({"node": "generate", "fields": {}})),  # 诊断不出公开面
+        ("result", json.dumps(reply.__dict__)),
+    ]
+    _install(fake_agent, StreamFakeAgent(frames, reply=reply))
+    _uid, token = await _user_with_chat_perm(session, make_user, "stream-bad")
+    r = await client.post(
+        "/chat/query/stream", json={"question": "有多少商品"}, headers=_auth(token)
+    )
+    assert r.status_code == 200
+    parsed = _parse_sse(r.text)
+    events = [e for e, _ in parsed]
+    assert events == ["stage", "result"]
+    assert parsed[0][1]["node"] == "understand"
+    # 阶段记录只含有效 stage:落库应答的节点轨迹无坏帧痕迹
+    async with get_sessionmaker()() as s:
+        row = (
+            await s.execute(
+                text("SELECT stage_trace FROM public.chat_message WHERE role='ASSISTANT'")
+            )
+        ).scalar_one()
+        trace = cast("list[dict[str, object]] | None", row)
+        stages = [str(st["node"]) for st in (trace or [])]
+        assert "generate" not in stages  # 形状不合格的 stage 未进轨迹
+
+
+async def test_invalid_result_is_not_a_terminal(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, StreamFakeAgent],
+) -> None:
+    """result 帧缺布尔 success:不作为合法结尾,流结束按 AGENT_UNAVAILABLE 收敛;
+    persist=true 恰保存一条失败应答。"""
+    reply = _pass_reply()
+    bad = dict(reply.__dict__)
+    bad["success"] = "yes"  # 字符串:形状不合格
+    frames = [
+        ("stage", json.dumps({"node": "understand", "status": "running", "retry_count": 0})),
+        ("result", json.dumps(bad)),
+    ]
+    _install(fake_agent, StreamFakeAgent(frames, reply=reply))
+    _uid, token = await _user_with_chat_perm(session, make_user, "stream-inv")
+    r = await client.post(
+        "/chat/query/stream", json={"question": "有多少商品"}, headers=_auth(token)
+    )
+    assert r.status_code == 200
+    parsed = _parse_sse(r.text)
+    assert [e for e, _ in parsed] == ["stage", "error"]
+    err = parsed[-1][1]
+    assert err["reason_code"] == "AGENT_UNAVAILABLE"
+    assert "不可用" in str(err["error"])
+    async with get_sessionmaker()() as s:
+        status = (
+            await s.execute(text("SELECT status FROM public.chat_message WHERE role='ASSISTANT'"))
+        ).scalar_one()
+        assert status == "FAILED"  # 恰一条失败应答
+
+
+async def test_invalid_result_then_valid_result_converges_normally(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, StreamFakeAgent],
+) -> None:
+    """无效 result 之后合法 result 到达:后者作为唯一结尾,正常保存。"""
+    reply = _pass_reply()
+    bad = dict(reply.__dict__)
+    bad["success"] = None
+    frames = [
+        ("result", json.dumps(bad)),
+        ("result", json.dumps(reply.__dict__)),
+    ]
+    _install(fake_agent, StreamFakeAgent(frames, reply=reply))
+    _uid, token = await _user_with_chat_perm(session, make_user, "stream-inv2")
+    r = await client.post(
+        "/chat/query/stream", json={"question": "有多少商品"}, headers=_auth(token)
+    )
+    assert r.status_code == 200
+    parsed = _parse_sse(r.text)
+    events = [e for e, _ in parsed]
+    assert events == ["result"] and events.count("result") == 1
+    assert parsed[0][1]["success"] is True
+    async with get_sessionmaker()() as s:
+        rows = (
+            (await s.execute(text("SELECT status FROM public.chat_message WHERE role='ASSISTANT'")))
+            .scalars()
+            .all()
+        )
+        assert rows == ["SUCCESS"]  # 只保存一次,无失败行
+
+
+async def test_agent_error_frame_requires_valid_shape(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, StreamFakeAgent],
+) -> None:
+    """agent error:data 非对象不算合法结尾;流结束仍按 AGENT_UNAVAILABLE 收敛一次。"""
+    frames = [
+        ("stage", json.dumps({"node": "understand", "status": "running", "retry_count": 0})),
+        ("error", json.dumps(["not", "an", "object"])),
+    ]
+    _install(fake_agent, StreamFakeAgent(frames, reply=_pass_reply()))
+    _uid, token = await _user_with_chat_perm(session, make_user, "stream-err")
+    r = await client.post(
+        "/chat/query/stream", json={"question": "有多少商品"}, headers=_auth(token)
+    )
+    assert r.status_code == 200
+    parsed = _parse_sse(r.text)
+    assert [e for e, _ in parsed] == ["stage", "error"]
+    assert parsed[-1][1]["reason_code"] == "AGENT_UNAVAILABLE"
+
+
+async def test_duplicate_result_frame_delivers_first_only(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, StreamFakeAgent],
+) -> None:
+    """重复结尾:只处理首个 result,保存一次,终态照常。"""
+    reply = _pass_reply()
+    frames = [
+        ("result", json.dumps(reply.__dict__)),
+        ("result", json.dumps(reply.__dict__)),  # 违约重复
+    ]
+    _install(fake_agent, StreamFakeAgent(frames, reply=reply))
+    _uid, token = await _user_with_chat_perm(session, make_user, "stream-dup")
+    r = await client.post(
+        "/chat/query/stream", json={"question": "有多少商品"}, headers=_auth(token)
+    )
+    assert r.status_code == 200
+    parsed = _parse_sse(r.text)
+    events = [e for e, _ in parsed]
+    assert events.count("result") == 1
+    async with get_sessionmaker()() as s:
+        rows = (
+            (await s.execute(text("SELECT status FROM public.chat_message WHERE role='ASSISTANT'")))
+            .scalars()
+            .all()
+        )
+        assert rows == ["SUCCESS"]  # 只保存一次
+
+
+async def test_result_encode_failure_sends_output_failed(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, StreamFakeAgent],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """已保存的成功结果无法编码:发一条 STREAM_OUTPUT_FAILED 结尾;
+    已保存的应答不被改写,不新增失败记录。"""
+    reply = _pass_reply()
+    _install(fake_agent, StreamFakeAgent(_frames_for(reply), reply=reply))
+    _uid, token = await _user_with_chat_perm(session, make_user, "stream-enc")
+    monkeypatch.setattr(
+        chat_router,
+        "to_chat_query_out",
+        lambda _o: (_ for _ in ()).throw(ValueError("boom")),  # type: ignore[arg-type,return-value]
+    )
+    r = await client.post(
+        "/chat/query/stream", json={"question": "有多少商品"}, headers=_auth(token)
+    )
+    assert r.status_code == 200
+    parsed = _parse_sse(r.text)
+    events = [e for e, _ in parsed]
+    assert events[-1] == "error" and "result" not in events  # 结尾被替换为输出失败
+    assert parsed[-1][1]["reason_code"] == "STREAM_OUTPUT_FAILED"
+    async with get_sessionmaker()() as s:
+        rows = (
+            (await s.execute(text("SELECT status FROM public.chat_message WHERE role='ASSISTANT'")))
+            .scalars()
+            .all()
+        )
+        assert rows == ["SUCCESS"]  # 已保存状态未被发送错误改写
+
+
+async def test_queue_ended_without_terminal_sends_output_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """队列在没有任何结尾的情况下提前终止:发一条 STREAM_OUTPUT_FAILED 结尾。"""
+    q: asyncio.Queue[OutboundFrame | None] = asyncio.Queue()
+    handle = StreamHandle(queue=q, task=cast("asyncio.Task[None]", None))
+    await q.put(
+        StreamStageEvent(type="stage", data=StreamStageOut(node="understand", status="running"))
+    )
+    await q.put(None)  # 无终态元素直接终止(契约破坏的防御路径)
+    out: list[str] = [chunk async for chunk in chat_router._relay_gen(handle)]
+    parsed = _parse_sse("".join(out))
+    assert [e for e, _ in parsed] == ["stage", "error"]
+    assert parsed[-1][1]["reason_code"] == "STREAM_OUTPUT_FAILED"
+
+
+async def test_exported_definitions_accept_real_frames(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, StreamFakeAgent],
+) -> None:
+    """导出的接口说明与实际响应一致:公开帧按 type 落进声明的分支集合。"""
+    reply = _pass_reply()
+    _install(fake_agent, StreamFakeAgent(_frames_for(reply), reply=reply))
+    _uid, token = await _user_with_chat_perm(session, make_user, "sse-schema")
+    r = await client.post(
+        "/chat/query/stream", json={"question": "有多少商品"}, headers=_auth(token)
+    )
+    assert r.status_code == 200
+    parsed = _parse_sse(r.text)
+    assert {e for e, _ in parsed} <= {"stage", "sql", "summary", "result"}
+    assert parsed[-1][0] == "result"  # 恰以 result 收尾
+
+
+async def test_large_result_frame_roundtrip(
+    client: AsyncClient,
+    session: AsyncSession,
+    make_user: MakeUser,
+    fake_agent: dict[str, StreamFakeAgent],
+) -> None:
+    """大结果(数百行)经信封编码完整下发:唯一 result,行数与字段原样。"""
+    reply = _pass_reply()
+    reply = dataclasses_replace(reply, rows=[[f"r{i}", i] for i in range(300)], summary="共 300 行")
+    _install(fake_agent, StreamFakeAgent(_frames_for(reply), reply=reply))
+    _uid, token = await _user_with_chat_perm(session, make_user, "stream-big")
+    r = await client.post(
+        "/chat/query/stream", json={"question": "有多少商品"}, headers=_auth(token)
+    )
+    assert r.status_code == 200
+    parsed = _parse_sse(r.text)
+    last_data = parsed[-1][1]
+    rows = cast("list[list[object]]", last_data["rows"])
+    assert parsed[-1][0] == "result"
+    assert len(rows) == 300
+    assert rows[299] == ["r299", 299]

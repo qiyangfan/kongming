@@ -23,8 +23,9 @@ _CTX_TTL_SEC = 600
 _SCAN_COUNT = 100
 # 查询语义版本段(全文路「AND 优先、内容词兜底」)——查询语义变更时
 # bump 本常量,旧键空间在 TTL 窗口内自然弃用不串味(与分词配置段同一
-# 「键版本化」思路;同部署内恒定,evict SCAN 模式不含该段,跨语义全收)
-_QUERY_SEMANTICS = "and-cw"
+# 「键版本化」思路;同部署内恒定,evict SCAN 模式不含该段,跨语义全收)。
+# and-cw2:父子分片从内省剔除,旧 ctx 可能含子表提示,立即失效。
+_QUERY_SEMANTICS = "and-cw2"
 
 
 def _ctx_key(

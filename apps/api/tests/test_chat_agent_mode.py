@@ -250,8 +250,9 @@ async def test_react_stream_tool_call_frames(
         headers=_auth(token),
     )
     assert r.status_code == 200
-    events = [ln[7:] for ln in r.text.splitlines() if ln.startswith("event: ")]
-    assert events.count("tool_call") == 2  # running + done 透传
+    # 公开流只用默认消息,type 在 JSON 内
+    events = [json.loads(ln[5:])["type"] for ln in r.text.splitlines() if ln.startswith("data: ")]
+    assert events.count("tool_call") == 2  # running + done 下发
     assert events[-1] == "result"
     stream_kw = fake_agent["agent"].stream_calls[0]
     # cast 仅定型,收窄后的成员访问不再带 Unknown(运行时不变)

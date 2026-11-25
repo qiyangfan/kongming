@@ -6,12 +6,12 @@
 """
 
 import asyncio
-import json
+import logging
 import uuid
 from collections.abc import AsyncIterator, Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import quote
 
 from fastapi import (
@@ -25,8 +25,9 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import StreamingResponse
+from pydantic import TypeAdapter
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
 from kongming.chat.costgate import (
     ChatQuotaExceeded,
     ChatQuotaUnavailable,
@@ -47,13 +48,16 @@ from kongming.chat.domain_errors import (
     SessionNotFound,
     TenantForbidden,
     TurnNotFound,
+    VoiceTurnInvalid,
 )
+from kongming.chat.finalize import AGENT_UNAVAILABLE_TEXT
 from kongming.chat.memory_tasks import extract_memory_task
 from kongming.chat.results import ChatOutcome
 from kongming.chat.schemas import (
     STREAM_RESPONSES,
     ChatQueryIn,
     ChatQueryOut,
+    ChatStreamEvent,
     ExplainIn,
     ExplainOut,
     ExportIn,
@@ -61,6 +65,9 @@ from kongming.chat.schemas import (
     RerunIn,
     SessionItemOut,
     SessionMessageOut,
+    StreamErrorEvent,
+    StreamErrorOut,
+    StreamResultEvent,
     SuggestionsOut,
     TurnCancelOut,
     to_chat_query_out,
@@ -68,10 +75,12 @@ from kongming.chat.schemas import (
 )
 from kongming.chat.service import ChatService
 from kongming.chat.session_service import ChatSessionService
-from kongming.chat.stream_runner import StreamHandle
+from kongming.chat.stream_runner import OutboundFrame, StreamFailure, StreamHandle
 from kongming.chat.suggestions import SuggestionsService
 from kongming.chat.title_tasks import rewrite_session_title
 from kongming.config import get_settings
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -103,6 +112,8 @@ def _chat_query_errors() -> Generator[None]:
     except InvalidDatasource:
         # 不存在/禁用/越属同形(防 key 探测);与 internal 面同一 detail 码
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
+    except VoiceTurnInvalid:
+        raise HTTPException(status_code=400, detail="VOICE_TURN_INVALID") from None
 
 
 @router.post(
@@ -121,7 +132,7 @@ def _chat_query_errors() -> Generator[None]:
 )
 async def chat_query(
     req: ChatQueryIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ChatService, Depends(get_chat_service)],
     background: BackgroundTasks,
     response: Response,
@@ -129,7 +140,7 @@ async def chat_query(
 ) -> ChatQueryOut:
     with _chat_query_errors():
         outcome = await svc.query(
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             tenant_key=x_tenant_id,
             question=req.question,
             session_id=None if req.session_id is None else str(req.session_id),
@@ -149,7 +160,7 @@ async def chat_query(
         if outcome.tenant_id and not outcome.memory_shortcut and outcome.pref_revision is not None:
             background.add_task(
                 extract_memory_task,
-                user_id=str(user["sub"]),
+                user_id=user.user_id,
                 tenant_id=outcome.tenant_id,
                 question=req.question,
                 answer=outcome.summary,
@@ -172,14 +183,14 @@ async def chat_query(
     dependencies=[Depends(require_perm("chat:execute"))],
 )
 async def chat_suggestions(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[SuggestionsService, Depends(get_suggestions_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
     datasource_key: Annotated[str, Query(pattern=r"^[a-z][a-z0-9_]{1,63}$")] = "default",
 ) -> SuggestionsOut:
     try:
         items = await svc.list_suggestions(
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             tenant_key=x_tenant_id,
             datasource_key=datasource_key,
         )
@@ -190,15 +201,41 @@ async def chat_suggestions(
 
 # ============ 流式问答(query-streaming) ============
 
+_EVENT_ADAPTER: TypeAdapter[ChatStreamEvent] = TypeAdapter(ChatStreamEvent)
 
-def _sse_frame(event: str, data_json: str) -> str:
-    return f"event: {event}\ndata: {data_json}\n\n"
+
+def _sse_data(data_json: str) -> str:
+    """公开流只用默认 SSE 消息(type 在 JSON 内),命名 event: 行不再下发。"""
+    return f"data: {data_json}\n\n"
+
+
+def _prebuilt_error_data(reason_code: Literal["AGENT_UNAVAILABLE", "STREAM_OUTPUT_FAILED"]) -> str:
+    """预制错误结尾的 data 载荷(构造期编码,发送路径上不再有可失败的编码)。"""
+    out = StreamErrorOut(error=AGENT_UNAVAILABLE_TEXT, reason_code=reason_code)
+    return _EVENT_ADAPTER.dump_json(StreamErrorEvent(type="error", data=out)).decode()
+
+
+_AGENT_UNAVAILABLE_DATA = _prebuilt_error_data("AGENT_UNAVAILABLE")
+_STREAM_OUTPUT_FAILED_DATA = _prebuilt_error_data("STREAM_OUTPUT_FAILED")
+
+
+def _encode_outbound(item: OutboundFrame) -> str:
+    """出站元素 → 信封 data 载荷;转换或编码失败按输出失败收尾(调用方处理)。"""
+    if isinstance(item, ChatOutcome):
+        # 统一出口:正常/业务失败/无需 Agent/已取消的终态都与同步响应同构
+        return _EVENT_ADAPTER.dump_json(
+            StreamResultEvent(type="result", data=to_chat_query_out(item))
+        ).decode()
+    if isinstance(item, StreamFailure):
+        return _AGENT_UNAVAILABLE_DATA
+    return _EVENT_ADAPTER.dump_json(item).decode()
 
 
 async def _relay_gen(handle: StreamHandle) -> AsyncIterator[str]:
-    """SSE 生成器:从后台任务队列转发帧;超时发心跳注释行;None 即收束。
+    """SSE 生成器:从后台任务队列转发公开事件;超时发心跳注释行;None 即收束。
     前端断开时本生成器被取消,后台任务(断线续存)继续不受影响。"""
     delivered = False
+    saw_terminal = False
     try:
         while True:
             try:
@@ -208,12 +245,21 @@ async def _relay_gen(handle: StreamHandle) -> AsyncIterator[str]:
                 continue
             if item is None:
                 delivered = True
+                break
+            if isinstance(item, (ChatOutcome, StreamFailure)):
+                saw_terminal = True
+            try:
+                yield _sse_data(_encode_outbound(item))
+            except Exception:
+                # 结尾转换/编码失败:发预制的输出失败结尾并结束;不改动已保存状态,
+                # 不触发第二次落库(该错误只描述答案传输)
+                log.exception("公开结尾事件编码失败,按输出失败收尾")
+                saw_terminal = True
+                yield _sse_data(_STREAM_OUTPUT_FAILED_DATA)
                 return
-            event, payload = item
-            if event == "result" and isinstance(payload, ChatOutcome):
-                yield _sse_frame("result", to_chat_query_out(payload).model_dump_json())
-            else:
-                yield _sse_frame(event, json.dumps(payload, ensure_ascii=False, default=str))
+        if not saw_terminal:
+            # 队列提前结束且没有任何结尾:输出失败收尾(连接仍可写时恰发一条)
+            yield _sse_data(_STREAM_OUTPUT_FAILED_DATA)
     finally:
         if not delivered:
             # 前端已收不到(断开、取消、发送失败):就地丢弃消费任务后续入队的帧直到
@@ -241,13 +287,13 @@ async def _relay_gen(handle: StreamHandle) -> AsyncIterator[str]:
 )
 async def chat_query_stream(
     req: ChatQueryIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ChatService, Depends(get_chat_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> StreamingResponse:
     with _chat_query_errors():
         handle = await svc.start_stream(
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             tenant_key=x_tenant_id,
             question=req.question,
             session_id=None if req.session_id is None else str(req.session_id),
@@ -256,6 +302,7 @@ async def chat_query_stream(
             datasource_key=req.datasource_key,
             agent_mode=req.agent_mode,
             attachment_ids=[str(a) for a in req.attachment_ids],
+            voice_turn_token=req.voice_turn_token,
         )
     # 达预警线的 X-Quota-Warning 随流响应头回落(不拒绝)
     headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
@@ -276,12 +323,12 @@ async def chat_query_stream(
 )
 async def cancel_query_stream(
     trace_id: Annotated[str, Path(min_length=1, max_length=64)],
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ChatService, Depends(get_chat_service)],
 ) -> TurnCancelOut:
     """取消一轮在途流式问答;轮次标识取流式响应头 X-Trace-Id。"""
     try:
-        settled = await svc.cancel_turn(user_id=str(user["sub"]), trace_id=trace_id)
+        settled = await svc.cancel_turn(user_id=user.user_id, trace_id=trace_id)
     except TurnNotFound:
         # 他人轮次、不存在的轮次与已结束未落库的轮次统一 404(不泄露轮次是否存在)
         raise HTTPException(status_code=404, detail="TURN_NOT_FOUND") from None
@@ -298,13 +345,13 @@ async def cancel_query_stream(
 )
 async def rerun_artifact(
     req: RerunIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ChatService, Depends(get_chat_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> ChatQueryOut:
     try:
         outcome = await svc.rerun_artifact(
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             tenant_key=x_tenant_id,
             message_id=str(req.message_id),
             sql=req.sql,
@@ -324,7 +371,7 @@ async def rerun_artifact(
     dependencies=[Depends(require_perm("chat:execute"))],
 )
 async def list_sessions(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ChatSessionService, Depends(get_session_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
@@ -332,7 +379,7 @@ async def list_sessions(
 ) -> list[SessionItemOut]:
     try:
         rows = await svc.list_sessions(
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             tenant_key=x_tenant_id,
             limit=limit,
             keyword=q or "",
@@ -357,13 +404,13 @@ async def list_sessions(
 async def rename_session(
     session_id: uuid.UUID,
     req: RenameIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ChatSessionService, Depends(get_session_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> SessionItemOut:
     try:
         s = await svc.rename_session(
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             tenant_key=x_tenant_id,
             session_id=str(session_id),
             title=req.title,
@@ -389,13 +436,13 @@ async def rename_session(
 )
 async def session_messages(
     session_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ChatSessionService, Depends(get_session_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> list[SessionMessageOut]:
     try:
         msgs = await svc.session_messages(
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             tenant_key=x_tenant_id,
             session_id=str(session_id),
         )
@@ -414,13 +461,13 @@ async def session_messages(
 )
 async def delete_session(
     session_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ChatSessionService, Depends(get_session_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
     try:
         await svc.delete_session(
-            user_id=str(user["sub"]), tenant_key=x_tenant_id, session_id=str(session_id)
+            user_id=user.user_id, tenant_key=x_tenant_id, session_id=str(session_id)
         )
     except TenantForbidden:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
@@ -437,13 +484,13 @@ async def delete_session(
 )
 async def export_result(
     req: ExportIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ChatSessionService, Depends(get_session_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> Response:
     try:
         content, media_type, ext = await svc.export_result(
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             tenant_key=x_tenant_id,
             fmt=req.format,
             columns=req.columns,
@@ -471,13 +518,13 @@ async def export_result(
 )
 async def explain_message(
     req: ExplainIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ChatService, Depends(get_chat_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> ExplainOut:
     try:
         view = await svc.explain_message(
-            user_id=str(user["sub"]), tenant_key=x_tenant_id, message_id=str(req.message_id)
+            user_id=user.user_id, tenant_key=x_tenant_id, message_id=str(req.message_id)
         )
     except TenantForbidden:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None

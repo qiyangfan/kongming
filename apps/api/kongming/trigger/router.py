@@ -11,7 +11,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
+from kongming.auth.models import AuthenticatedUser
 from kongming.chat.repository import ChatRepository
 from kongming.db import get_session, get_sessionmaker
 from kongming.trigger.definition import TriggerDraft
@@ -41,9 +42,9 @@ webhook_router = APIRouter(tags=["webhook"])
 MANAGE = "system:trigger:manage"
 
 
-async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header: str | None) -> str:
+async def _tenant_or_403(user: AuthenticatedUser, session: AsyncSession, header: str | None) -> str:
     repo = ChatRepository(session)
-    uid = str(user["sub"])
+    uid = user.user_id
     if header is not None:
         tid = await repo.find_bound_tenant(user_id=uid, tenant_key=header)
         if tid is None:
@@ -61,7 +62,7 @@ async def _tenant_or_403(user: dict[str, object], session: AsyncSession, header:
 @router.get("/cron-preview", response_model=CronPreviewOut)
 async def cron_preview(
     expr: Annotated[str, Query(max_length=64)],
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm(MANAGE))],
 ) -> CronPreviewOut:
     """接下来 3 次触发时刻(单次看不出日历跳跃类缺陷);
@@ -80,12 +81,12 @@ async def cron_preview(
 @router.post("", status_code=201, dependencies=[Depends(require_perm(MANAGE))])
 async def create_trigger(
     body: TriggerIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
-    svc = make_trigger_service(session, str(user["sub"]))
+    svc = make_trigger_service(session, user.user_id)
     try:
         out = await svc.create(
             TriggerDraft(
@@ -100,7 +101,7 @@ async def create_trigger(
                 adapter=body.adapter,
                 notify_url=body.notify_url,
                 secret=body.secret,
-                created_by=str(user["sub"]),
+                created_by=user.user_id,
                 max_retries=body.max_retries,
                 task_template=body.task_template,
                 imap_host=body.imap_host,
@@ -124,7 +125,7 @@ async def create_trigger(
 
 @router.get("", response_model=list[TriggerOut], dependencies=[Depends(require_perm(MANAGE))])
 async def list_triggers(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> list[dict[str, Any]]:
@@ -137,12 +138,12 @@ async def list_triggers(
 async def update_trigger(
     trigger_id: str,
     body: TriggerUpdateIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
-    svc = make_trigger_service(session, str(user["sub"]))
+    svc = make_trigger_service(session, user.user_id)
     try:
         await svc.update(
             trigger_id=trigger_id,
@@ -178,12 +179,12 @@ async def update_trigger(
 @router.post("/{trigger_id}/enable", dependencies=[Depends(require_perm(MANAGE))])
 async def enable_trigger(
     trigger_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
-    svc = make_trigger_service(session, str(user["sub"]))
+    svc = make_trigger_service(session, user.user_id)
     try:
         await svc.set_enabled(trigger_id=trigger_id, tenant_id=tenant_id, enabled=True)
         await session.commit()
@@ -195,12 +196,12 @@ async def enable_trigger(
 @router.post("/{trigger_id}/disable", dependencies=[Depends(require_perm(MANAGE))])
 async def disable_trigger(
     trigger_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
-    svc = make_trigger_service(session, str(user["sub"]))
+    svc = make_trigger_service(session, user.user_id)
     try:
         await svc.set_enabled(trigger_id=trigger_id, tenant_id=tenant_id, enabled=False)
         await session.commit()
@@ -212,12 +213,12 @@ async def disable_trigger(
 @router.delete("/{trigger_id}", dependencies=[Depends(require_perm(MANAGE))])
 async def delete_trigger(
     trigger_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
-    svc = make_trigger_service(session, str(user["sub"]))
+    svc = make_trigger_service(session, user.user_id)
     try:
         await svc.delete(trigger_id=trigger_id, tenant_id=tenant_id)
         await session.commit()
@@ -233,7 +234,7 @@ async def delete_trigger(
 )
 async def page_trigger_runs(
     trigger_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
     page: Annotated[int, Query(ge=1)] = 1,

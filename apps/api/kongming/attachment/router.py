@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.attachment import service
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
 from kongming.db import get_session
 
 log = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class AttachmentOut(BaseModel):
 )
 async def upload_attachment(
     file: UploadFile,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> AttachmentOut:
@@ -46,7 +46,7 @@ async def upload_attachment(
             session,
             read=read,
             filename=file.filename,
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             tenant_key=x_tenant_id,
         )
     except service.AttachmentTooLarge:

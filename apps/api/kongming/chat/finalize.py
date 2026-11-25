@@ -273,12 +273,14 @@ async def persist_cancelled(
     datasource_key: str = "default",
     attachments: list[dict[str, object]] | None = None,
     stage_trace: list[dict[str, object]] | None = None,
+    user_message_id: str | None = None,
 ) -> ChatOutcome:
     """已取消终态落库(裸终态行)并返回其终态:summary 承载取消说明,不含 SQL、
     结果集、图表与产物卡,携带取消前已收集的节点轨迹。同 trace 已有 assistant 行
     (取消与完成几乎同时)即采用该行、不再写——同一轮至多一条 assistant 应答;
     采用时结论词还原为响应口径(落库 REJECTED 即 BLOCKED)。查重读取失败时
-    不写行,按裸终态返回(漏写一条已取消消息,优于同轮落两条应答)。"""
+    不写行,按裸终态返回(漏写一条已取消消息,优于同轮落两条应答)。
+    已取消行沿用原轮用户消息的落库时刻,避免历史按落库先后排到下一问之后。"""
     cancelled = ChatOutcome(
         session_id=sid,
         success=False,
@@ -309,6 +311,13 @@ async def persist_cancelled(
                 datasource_key=datasource_key,
                 attachments=[dict(a) for a in attachments or []],
             )
+        created_at = None
+        if user_message_id is not None:
+            try:
+                created_at = await repo.message_created_at(message_id=user_message_id)
+            except Exception:
+                # 时序读取失败按落库时刻写入:位置不准,但不阻断取消收敛
+                log.warning("已取消行原轮时序读取失败 session=%s", sid, exc_info=True)
         mid = await repo.insert_message(
             session_id=sid,
             role="ASSISTANT",
@@ -319,6 +328,7 @@ async def persist_cancelled(
             status="CANCELLED",
             attachments=attachments,
             meta=MessageMeta(trace_id=trace_id, stage_trace=stage_trace),
+            created_at=created_at,
         )
         await touch_quietly(repo, sid)
     except ChatStoreError:

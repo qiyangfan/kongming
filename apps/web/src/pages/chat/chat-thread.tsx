@@ -143,6 +143,7 @@ function ThreadBody(props: ChatThreadProps) {
       <ConversationBody {...props} />
       {streaming && (
         <StreamingBlock
+          key={streaming.id}
           streaming={streaming}
           onResult={props.onResult}
           onError={props.onError}

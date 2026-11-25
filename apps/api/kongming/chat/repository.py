@@ -3,6 +3,7 @@
 import functools
 import json
 from collections.abc import Callable, Coroutine
+from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import text
@@ -43,10 +44,10 @@ _INSERT_MESSAGE_SQL = (
     "INSERT INTO public.chat_message"
     " (id, session_id, role, question, sql_text, result_json, summary,"
     "  status, attachments, trace_id, retry_count, resolved_question,"
-    "  prompt_version, fallback_type, stage_trace)"
+    "  prompt_version, fallback_type, stage_trace, created_at)"
     " VALUES (:id, :s, :role, :q, :sql, :rj, :sum, :st,"
     "         CAST(:att AS jsonb), :tid, :rc, :rq, :pv, :fb,"
-    "         CAST(:stg AS jsonb))"
+    "         CAST(:stg AS jsonb), COALESCE(CAST(:cat AS timestamptz), now()))"
 )
 
 
@@ -303,6 +304,7 @@ class ChatRepository:
         status: str,
         attachments: list[dict[str, object]] | None = None,
         meta: MessageMeta | None = None,
+        created_at: datetime | None = None,
     ) -> str:
         meta = meta or MessageMeta()
         mid = str(uuid7())
@@ -324,9 +326,18 @@ class ChatRepository:
                 "pv": meta.prompt_version,
                 "fb": meta.fallback_type,
                 "stg": _jsonb_or_none(meta.stage_trace),
+                "cat": created_at,
             },
         )
         return mid
+
+    async def message_created_at(self, *, message_id: str) -> datetime | None:
+        """消息落库时刻(已取消行沿用原轮用户消息的时刻,保证历史按轮排序)。"""
+        row = await self._s.execute(
+            text("SELECT created_at FROM public.chat_message WHERE id = :id"),
+            {"id": message_id},
+        )
+        return cast("datetime | None", row.scalar_one_or_none())
 
     async def last_fallback_type(self, session_id: str) -> str | None:
         """最近一条 assistant 消息的兜底分类(澄清防循环判据;无消息/无

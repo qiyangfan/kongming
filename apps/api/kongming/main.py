@@ -31,6 +31,7 @@ from kongming.auth.seed import seed_all
 from kongming.billing.router import router as billing_router
 from kongming.bot.router import public_router as bot_public_router
 from kongming.bot.router import router as bot_router
+from kongming.chat.dependencies import install_turn_canceler
 from kongming.chat.internal_router import router as chat_internal_router
 from kongming.chat.router import router as chat_router
 from kongming.config import get_settings
@@ -75,6 +76,7 @@ from kongming.trigger.dependencies import start_scheduler as start_trigger_sched
 from kongming.trigger.dependencies import stop_scheduler as stop_trigger_scheduler
 from kongming.trigger.router import router as trigger_router
 from kongming.trigger.router import webhook_router as trigger_webhook_router
+from kongming.voice.router import router as voice_router
 from kongming.workflow.router import router as workflow_router
 
 log = logging.getLogger(__name__)
@@ -354,6 +356,21 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
         asyncio.create_task(_task_watchdog_loop()) if get_settings().watchdog_enabled else None
     )
     start_trigger_scheduler()  # cron 调度循环(30s tick,单进程形态)
+
+    # 语音侧系统取消端口注入(voice→chat 经窄签名反转;语义=用户显式取消)
+    async def _voice_cancel(user_id: str, trace_id: str) -> None:
+        from kongming.chat.dependencies import get_agent_client, get_turns_registry
+        from kongming.chat.inflight import TurnCanceller
+        from kongming.chat.repository import ChatRepository
+        from kongming.db import get_sessionmaker
+
+        async with get_sessionmaker()() as session:
+            canceller = TurnCanceller(
+                agent=get_agent_client(), turns=get_turns_registry(), repo=ChatRepository(session)
+            )
+            await canceller.cancel(user_id=user_id, trace_id=trace_id)
+
+    install_turn_canceler(_voice_cancel)
     # /mcp 入站走 SDK 会话管理器生命周期(挂载态内建 lifespan 失效,宿主
     # MUST enter session_manager.run,SDK 迁移指南明文);每次 lifespan
     # 重建入站链——manager 禁止重复 run
@@ -451,6 +468,8 @@ app.include_router(report_internal_router)
 app.include_router(task_router)
 app.include_router(task_internal_router)
 app.include_router(connector_router)
+# 语音通话(ADR-013);根级 Mount 兜底之前注册(新路由须在其前)
+app.include_router(voice_router)
 register_auth_error_handlers(app)
 register_system_error_handlers(app)
 register_datasource_error_handlers(app)

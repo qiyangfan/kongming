@@ -17,7 +17,7 @@ from redis.asyncio import Redis
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
 from kongming.auth.stores import RedisRefreshFamilyStore
 from kongming.config import get_settings
 from kongming.db import get_session
@@ -73,7 +73,6 @@ def get_system_service(
 
 
 Service = Annotated[SystemService, Depends(get_system_service)]
-UserClaims = Annotated[dict[str, object], Depends(current_user)]
 
 # ---- 传输模型 ----
 
@@ -263,10 +262,10 @@ async def list_users(
     dependencies=[Depends(require_perm("system:user:manage"))],
 )
 async def update_user(
-    user_id: uuid.UUID, req: UserUpdateIn, user: UserClaims, svc: Service
+    user_id: uuid.UUID, req: UserUpdateIn, user: CurrentUser, svc: Service
 ) -> None:
     await svc.update_user(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         user_id=str(user_id),
         nickname=req.nickname,
         email=req.email,
@@ -282,8 +281,8 @@ async def update_user(
     status_code=204,
     dependencies=[Depends(require_perm("system:user:manage"))],
 )
-async def delete_user(user_id: uuid.UUID, user: UserClaims, svc: Service) -> None:
-    await svc.delete_user(actor_id=str(user["sub"]), user_id=str(user_id))
+async def delete_user(user_id: uuid.UUID, user: CurrentUser, svc: Service) -> None:
+    await svc.delete_user(actor_id=user.user_id, user_id=str(user_id))
 
 
 @router.post(
@@ -291,8 +290,8 @@ async def delete_user(user_id: uuid.UUID, user: UserClaims, svc: Service) -> Non
     status_code=204,
     dependencies=[Depends(require_perm("system:user:manage"))],
 )
-async def enable_user(user_id: uuid.UUID, user: UserClaims, svc: Service) -> None:
-    await svc.enable_user(actor_id=str(user["sub"]), user_id=str(user_id))
+async def enable_user(user_id: uuid.UUID, user: CurrentUser, svc: Service) -> None:
+    await svc.enable_user(actor_id=user.user_id, user_id=str(user_id))
 
 
 @router.post(
@@ -300,8 +299,8 @@ async def enable_user(user_id: uuid.UUID, user: UserClaims, svc: Service) -> Non
     status_code=204,
     dependencies=[Depends(require_perm("system:user:manage"))],
 )
-async def disable_user(user_id: uuid.UUID, user: UserClaims, svc: Service) -> None:
-    await svc.disable_user(actor_id=str(user["sub"]), user_id=str(user_id))
+async def disable_user(user_id: uuid.UUID, user: CurrentUser, svc: Service) -> None:
+    await svc.disable_user(actor_id=user.user_id, user_id=str(user_id))
 
 
 # ---- 角色管理(权限点 system:role:manage) ----
@@ -321,9 +320,9 @@ async def list_roles(svc: Service) -> list[RoleOut]:
     status_code=201,
     dependencies=[Depends(require_perm("system:role:manage"))],
 )
-async def create_role(req: RoleCreateIn, user: UserClaims, svc: Service) -> dict[str, str]:
+async def create_role(req: RoleCreateIn, user: CurrentUser, svc: Service) -> dict[str, str]:
     role_id = await svc.create_role(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         role_key=req.role_key,
         role_name=req.role_name,
         data_scope=req.data_scope,
@@ -340,10 +339,10 @@ async def create_role(req: RoleCreateIn, user: UserClaims, svc: Service) -> dict
     dependencies=[Depends(require_perm("system:role:manage"))],
 )
 async def update_role(
-    role_id: uuid.UUID, req: RoleUpdateIn, user: UserClaims, svc: Service
+    role_id: uuid.UUID, req: RoleUpdateIn, user: CurrentUser, svc: Service
 ) -> None:
     await svc.update_role(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         role_id=str(role_id),
         role_key=req.role_key,
         role_name=req.role_name,
@@ -359,8 +358,8 @@ async def update_role(
     status_code=204,
     dependencies=[Depends(require_perm("system:role:manage"))],
 )
-async def delete_role(role_id: uuid.UUID, user: UserClaims, svc: Service) -> None:
-    await svc.delete_role(actor_id=str(user["sub"]), role_id=str(role_id))
+async def delete_role(role_id: uuid.UUID, user: CurrentUser, svc: Service) -> None:
+    await svc.delete_role(actor_id=user.user_id, role_id=str(role_id))
 
 
 @router.post(
@@ -369,12 +368,12 @@ async def delete_role(role_id: uuid.UUID, user: UserClaims, svc: Service) -> Non
     dependencies=[Depends(require_perm("system:role:manage"))],
 )
 async def bind_role_perms(
-    role_id: uuid.UUID, req: RolePermsIn, user: UserClaims, svc: Service
+    role_id: uuid.UUID, req: RolePermsIn, user: CurrentUser, svc: Service
 ) -> None:
     if req.perm_ids is None:
         raise HTTPException(status_code=400, detail="PERM_IDS_REQUIRED")
     await svc.bind_role_perms(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         role_id=str(role_id),
         perm_ids=[str(p) for p in req.perm_ids],
     )
@@ -406,9 +405,9 @@ async def dept_tree(svc: Service) -> list[DeptNodeOut]:
     status_code=201,
     dependencies=[Depends(require_perm("system:user:manage"))],
 )
-async def create_dept(req: DeptCreateIn, user: UserClaims, svc: Service) -> dict[str, str]:
+async def create_dept(req: DeptCreateIn, user: CurrentUser, svc: Service) -> dict[str, str]:
     dept_id = await svc.create_dept(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         parent_id=None if req.parent_id is None else str(req.parent_id),
         dept_name=req.dept_name,
         tenant_id=str(req.tenant_id),
@@ -423,10 +422,10 @@ async def create_dept(req: DeptCreateIn, user: UserClaims, svc: Service) -> dict
     dependencies=[Depends(require_perm("system:user:manage"))],
 )
 async def update_dept(
-    dept_id: uuid.UUID, req: DeptUpdateIn, user: UserClaims, svc: Service
+    dept_id: uuid.UUID, req: DeptUpdateIn, user: CurrentUser, svc: Service
 ) -> None:
     await svc.update_dept(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         dept_id=str(dept_id),
         parent_id=None if req.parent_id is None else str(req.parent_id),
         dept_name=req.dept_name,
@@ -441,8 +440,8 @@ async def update_dept(
     status_code=204,
     dependencies=[Depends(require_perm("system:user:manage"))],
 )
-async def delete_dept(dept_id: uuid.UUID, user: UserClaims, svc: Service) -> None:
-    await svc.delete_dept(actor_id=str(user["sub"]), dept_id=str(dept_id))
+async def delete_dept(dept_id: uuid.UUID, user: CurrentUser, svc: Service) -> None:
+    await svc.delete_dept(actor_id=user.user_id, dept_id=str(dept_id))
 
 
 # ---- 租户只读清单(权限点 system:user:manage) ----

@@ -21,7 +21,8 @@ class ClientIpMiddleware:
         self._app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http":
+        # websocket 同样记来源 IP(语音通话审计走 WebSocket,无来源 IP 是已知缺口)
+        if scope["type"] in ("http", "websocket"):
             client = scope.get("client")
             client_ip_var.set(client[0] if client else None)
         await self._app(scope, receive, send)

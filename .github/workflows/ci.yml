@@ -323,7 +323,8 @@ jobs:
           set -euo pipefail
           git show "origin/${BASE_REF}:contracts/openapi.json" > /tmp/base-openapi.json
           curl -sSfL "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz" | tar -xz oasdiff
-          ./oasdiff breaking --fail-on ERR /tmp/base-openapi.json contracts/openapi.json
+          # 已批准的破坏性差异登记在 contracts/oasdiff-ignore.txt(流事件格式切换)
+          ./oasdiff breaking --fail-on ERR --err-ignore contracts/oasdiff-ignore.txt /tmp/base-openapi.json contracts/openapi.json
 
   # ── 镜像构建（只构建，用于检查 Dockerfile 和路径依赖）──
   images:

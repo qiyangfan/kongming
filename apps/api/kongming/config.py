@@ -108,6 +108,14 @@ class Settings(BaseSettings):
     # 在途轮跨实例登记键 TTL:须大于「单轮 agent 流上限 + 收敛余量」
     # (agent_timeout_sec 缺省 120s,最坏约 5 个顺序阶段);调大 agent 超时须同步调大
     turn_registry_ttl_sec: int = Field(default=900, ge=60)
+
+    # 语音通话(013:声音直连、控制回后端):密钥/地址/模型缺省空=功能不启用,
+    # 入口不出现、通话端点 503;启用后并发与时长为部署级钳制(见 tech-stack 上限表)
+    voice_api_key: str | None = None
+    voice_realtime_base_url: str | None = None
+    voice_model: str | None = None
+    voice_max_concurrent: int = Field(default=2, ge=1)
+    voice_max_call_seconds: int = Field(default=600, ge=60)
     agent_timeout_sec: float = 120.0  # 覆盖 understand+generate+≤2 次 selfheal+summarize
     # 报告生成=多轮 LLM+多次取数的长任务,独立超时预算(非单轮问答口径)
     agent_report_timeout_sec: float = Field(default=600.0, gt=0)

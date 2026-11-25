@@ -76,7 +76,7 @@ export function SqlArtifactCard({ messageId, sql }: { messageId: string; sql: st
             rows={Math.min(Math.max(sql.split("\n").length, 3), 12)}
             maxLength={4000}
             aria-label="编辑 SQL"
-            className="font-mono text-xs leading-relaxed"
+            className="max-h-72 overflow-y-auto font-mono text-xs leading-relaxed"
           />
           <div className="flex items-center gap-2">
             {messageId && (

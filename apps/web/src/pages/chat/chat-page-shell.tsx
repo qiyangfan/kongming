@@ -35,6 +35,8 @@ interface ComposerSectionProps {
   onPickFile: (e: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
   onSubmit: () => void;
   onStop: () => void;
+  /** 语音通话入口(透传给输入区) */
+  voiceEntry?: React.ReactNode;
 }
 
 /**
@@ -65,6 +67,7 @@ export function ComposerSection(props: ComposerSectionProps) {
           onRemoveAttachment={(id) => setAttachments((prev) => prev.filter((x) => x.id !== id))}
           onSubmit={props.onSubmit}
           onStop={props.onStop}
+          voiceEntry={props.voiceEntry}
         />
       </div>
     </div>

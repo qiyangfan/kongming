@@ -11,7 +11,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
+from kongming.auth.models import AuthenticatedUser
 from kongming.chat.repository import ChatRepository
 from kongming.db import get_session
 from kongming.toolcall import dependencies as _deps
@@ -50,10 +51,10 @@ chat_router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 async def _mcp_tenant_or_none(
-    user: dict[str, object], session: AsyncSession, header: str | None
+    user: AuthenticatedUser, session: AsyncSession, header: str | None
 ) -> str | None:
     repo = ChatRepository(session)
-    uid = str(user["sub"])
+    uid = user.user_id
     if header is not None:
         return await repo.find_bound_tenant(user_id=uid, tenant_key=header)
     default = await repo.find_default_tenant(user_id=uid)
@@ -108,13 +109,13 @@ async def tool_resolve_confirm(
 @chat_router.post("/tool-confirm", response_model=ToolConfirmOut)
 async def tool_confirm(
     req: ToolConfirmIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[ToolCallService, Depends(get_tool_service)],
     _: Annotated[None, Depends(require_perm("chat:execute"))],
 ) -> ToolConfirmOut:
     try:
         outcome: ConfirmOutcome = await svc.confirm(
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             confirm_id=str(req.confirm_id),
             decision=req.decision,
             session_id=str(req.session_id),
@@ -138,7 +139,7 @@ async def tool_confirm(
 @router.get("", response_model=ToolListOut)
 async def list_tools(
     _: Annotated[None, Depends(require_perm("system:tool:manage"))],
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> ToolListOut:
@@ -191,7 +192,7 @@ async def list_domains() -> list[dict[str, object]]:
 @router.post("/domains/{domain_id}/disable", status_code=204)
 async def disable_domain(
     domain_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:tool:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
@@ -203,16 +204,14 @@ async def disable_domain(
     sync_runtime_disabled()
     from kongming.toolcall.repository import upsert_domain_state
 
-    await upsert_domain_state(
-        session, domain_id=domain_id, disabled=True, updated_by=str(user["sub"])
-    )
+    await upsert_domain_state(session, domain_id=domain_id, disabled=True, updated_by=user.user_id)
     await session.commit()
 
 
 @router.post("/domains/{domain_id}/enable", status_code=204)
 async def enable_domain(
     domain_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:tool:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
@@ -224,15 +223,13 @@ async def enable_domain(
     sync_runtime_disabled()
     from kongming.toolcall.repository import upsert_domain_state
 
-    await upsert_domain_state(
-        session, domain_id=domain_id, disabled=False, updated_by=str(user["sub"])
-    )
+    await upsert_domain_state(session, domain_id=domain_id, disabled=False, updated_by=user.user_id)
     await session.commit()
 
 
 @router.get("/audit/page", response_model=ToolAuditPageOut)
 async def tool_audit_page(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:tool:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     page: Annotated[int, Query(ge=1)] = 1,
@@ -244,7 +241,7 @@ async def tool_audit_page(
     start: Annotated[datetime | None, Query()] = None,
     end: Annotated[datetime | None, Query()] = None,
 ) -> ToolAuditPageOut:
-    viewer_id = str(user["sub"])
+    viewer_id = user.user_id
     # 行级可见性(spec, 同口径):非 ALL 角色强制本人(覆盖传值)
     all_scope = await user_has_all_scope(session, viewer_id)
     effective_user = (None if user_id is None else str(user_id)) if all_scope else viewer_id

@@ -88,6 +88,8 @@ export default defineConfig({
       "/api": {
         target: process.env.VITE_API_PROXY_TARGET ?? "http://localhost:8000",
         rewrite: (p) => p.replace(/^\/api/, ""),
+        // 语音通话的文字事件通道走 WebSocket(同 /api 前缀)
+        ws: true,
       },
     },
   },

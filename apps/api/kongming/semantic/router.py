@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
 from kongming.db import get_session
 from kongming.semantic.repository import SqlSemanticRepo
 from kongming.semantic.service import RelationTableUnknown, SemanticService
@@ -195,12 +195,12 @@ def _recall_ctx_evictor() -> "ContextCache":
 @router.post("/relations/introspect", response_model=IntrospectOut)
 async def introspect_relations(
     req: IntrospectIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:semantic:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> IntrospectOut:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     # v1 仅支持 default 源 introspection(动态源张冠李戴防护;
     # 动态源内省随真实外部 PG 源接入评估)——同形 400 防探测
     if req.datasource_key != "default":
@@ -222,13 +222,13 @@ async def introspect_relations(
 
 @router.get("/relations", response_model=list[RelationOut])
 async def list_relations(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:semantic:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     datasource_key: str = "default",
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> list[RelationOut]:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     rows = await SqlSemanticRepo(session).list_relations(
         tenant_id=tid, datasource_key=datasource_key
     )
@@ -248,12 +248,12 @@ async def list_relations(
 @router.post("/relations", status_code=201)
 async def add_relation(
     req: RelationIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:semantic:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     await _assert_datasource_usable(session, tenant_id=tid, datasource_key=req.datasource_key)
     svc = SemanticService(
         SqlSemanticRepo(session),
@@ -276,12 +276,12 @@ async def add_relation(
 @router.delete("/relations/{relation_id}", status_code=204)
 async def delete_relation(
     relation_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:semantic:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     # 删除用例入服务层(commit + 按被删行数据源精确失效检索缓存)
     ok = await SemanticService(
         SqlSemanticRepo(session), recall_ctx_evictor=_recall_ctx_evictor()
@@ -292,13 +292,13 @@ async def delete_relation(
 
 @router.get("/metrics", response_model=list[MetricOut])
 async def list_metrics(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:semantic:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     datasource_key: str = "default",
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> list[MetricOut]:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     rows = await SqlSemanticRepo(session).list_metrics(tenant_id=tid, datasource_key=datasource_key)
     return [
         MetricOut(
@@ -318,12 +318,12 @@ async def list_metrics(
 @router.post("/metrics", status_code=201)
 async def upsert_metric(
     req: MetricIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:semantic:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     await _assert_datasource_usable(session, tenant_id=tid, datasource_key=req.datasource_key)
     dept_id: str | None = None
     if req.visible_scope == "DEPT" and req.dept_id is not None:
@@ -361,12 +361,12 @@ async def upsert_metric(
 @router.delete("/metrics/{metric_id}", status_code=204)
 async def delete_metric(
     metric_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:semantic:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     ok = await SqlSemanticRepo(session).delete_metric(metric_id=str(metric_id), tenant_id=tid)
     if not ok:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None

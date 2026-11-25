@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
 from kongming.auth.repository import SqlOperLogRepo
 from kongming.chat.agent_client import AgentClient
 from kongming.chat.models import ChartSuggestion, MessageMeta
@@ -325,11 +325,11 @@ def _detail_out(detail: dict[str, Any]) -> ReportDetailOut:
 )
 async def generate_report(
     body: GenerateIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> GenerateOut:
-    uid = str(user["sub"])
+    uid = user.user_id
     tid = await _tenant_id(session, uid, x_tenant_id)
     trace_id = ensure_trace_id()
     context_digest = ""
@@ -463,16 +463,16 @@ def _schedule_generation(*, report_id: str, context_digest: str) -> None:
 
 @router.get("", response_model=ReportPageOut, dependencies=[Depends(require_perm("report:read"))])
 async def list_reports(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
     page: int = 1,
     size: int = 20,
 ) -> ReportPageOut:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     svc = _get_service(session)
     p, s = max(1, page), min(100, max(1, size))
-    items, total = await svc.list_reports(tenant_id=tid, user_id=str(user["sub"]), page=p, size=s)
+    items, total = await svc.list_reports(tenant_id=tid, user_id=user.user_id, page=p, size=s)
     return ReportPageOut(items=[_item(r) for r in items], total=total, page=p, size=s)
 
 
@@ -483,16 +483,16 @@ async def list_reports(
 )
 async def get_report(
     report_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
     version: int | None = None,
 ) -> ReportDetailOut:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     svc = _get_service(session)
     try:
         detail = await svc.get_detail(
-            report_id=report_id, tenant_id=tid, user_id=str(user["sub"]), version=version
+            report_id=report_id, tenant_id=tid, user_id=user.user_id, version=version
         )
     except ReportNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
@@ -506,15 +506,15 @@ async def get_report(
 )
 async def get_progress(
     report_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> ProgressOut:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     svc = _get_service(session)
     try:
         # 轻量读:只取报告行状态,不加载版本章节全文(轮询高频路径)
-        p = await svc.get_progress(report_id=report_id, tenant_id=tid, user_id=str(user["sub"]))
+        p = await svc.get_progress(report_id=report_id, tenant_id=tid, user_id=user.user_id)
     except ReportNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     return ProgressOut(report_id=report_id, status=p["status"], phase=p["phase"])
@@ -523,16 +523,14 @@ async def get_progress(
 @router.get("/{report_id}/versions", dependencies=[Depends(require_perm("report:read"))])
 async def list_versions(
     report_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> list[dict[str, object]]:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     svc = _get_service(session)
     try:
-        versions = await svc.list_versions(
-            report_id=report_id, tenant_id=tid, user_id=str(user["sub"])
-        )
+        versions = await svc.list_versions(report_id=report_id, tenant_id=tid, user_id=user.user_id)
     except ReportNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     return [
@@ -566,11 +564,11 @@ async def list_versions(
 async def edit_report(
     report_id: str,
     body: EditIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> MutateOut:
-    uid = str(user["sub"])
+    uid = user.user_id
     tid = await _tenant_id(session, uid, x_tenant_id)
     svc = _get_service(session)
     try:
@@ -602,11 +600,11 @@ async def edit_report(
 )
 async def refresh_report(
     report_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> MutateOut:
-    uid = str(user["sub"])
+    uid = user.user_id
     tid = await _tenant_id(session, uid, x_tenant_id)
     svc = _get_service(session)
     trace_id = ensure_trace_id()
@@ -636,14 +634,14 @@ async def refresh_report(
 )
 async def delete_report(
     report_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     svc = _get_service(session)
     try:
-        await svc.delete(report_id=report_id, tenant_id=tid, user_id=str(user["sub"]))
+        await svc.delete(report_id=report_id, tenant_id=tid, user_id=user.user_id)
         await session.commit()
     except ReportNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
@@ -658,16 +656,16 @@ async def delete_report(
 )
 async def export_report(
     report_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
     version: int | None = None,
 ) -> Response:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     svc = _get_service(session)
     try:
         md = await svc.export(
-            report_id=report_id, tenant_id=tid, user_id=str(user["sub"]), version=version
+            report_id=report_id, tenant_id=tid, user_id=user.user_id, version=version
         )
         await session.commit()  # 导出审计落库
     except ReportNotFound:

@@ -51,6 +51,20 @@
 | `KM_COLLAB_MAX_ROUNDS`                | api   | 3      | 圆桌轮次上限(拓扑声明钳制;115)                                   |
 | `KM_AGENT_COLLAB_MAX_ROUNDS`          | agent | 3      | 圆桌轮次执行兜底(触顶诚实收口,不编造共识)                        |
 
+### 语音通话部署级上限(013;缺省值文档化)
+
+通话是长驻 WebSocket 会话 + 外部语音模型按分钟计费,并发与时长在 api 侧单点
+钳制;准入对 Redis 故障 fail-closed(读不到即拒绝建立,与限流器 fail-open 相反,
+它是保护服务器的闸)。
+
+| 配置                         | 侧  | 缺省 | 说明                                                 |
+| ---------------------------- | --- | ---- | ---------------------------------------------------- |
+| `KM_VOICE_MAX_CONCURRENT`    | api | 2    | 部署级并发通话数上限(原子计数,带兜底过期)            |
+| `KM_VOICE_MAX_CALL_SECONDS`  | api | 600  | 单次通话时长上限(到点下发结束通知并关闭通道)         |
+| `KM_VOICE_MODEL`             | api | -    | 实时语音模型名(缺省空=功能不启用,入口不出现)         |
+| `KM_VOICE_REALTIME_BASE_URL` | api | -    | 语音模型接入地址(浏览器直连的交换端点,缺省空=不启用) |
+| `KM_VOICE_API_KEY`           | api | -    | 模型服务密钥(只存在于 api,不下发浏览器)              |
+
 ## apps/web — React SPA
 
 | 维度     | 选型                                                                                                            |

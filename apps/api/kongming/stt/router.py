@@ -12,7 +12,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
 from kongming.auth.repository import SqlOperLogRepo
 from kongming.db import get_session
 from kongming.stt.engine import FasterWhisperEngine
@@ -41,7 +41,7 @@ def get_stt_service() -> SttService:
 async def transcribe_audio(
     request: Request,
     file: Annotated[UploadFile, File(description="音频文件(webm/opus/mp3/wav/m4a)")],
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[SttService, Depends(get_stt_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
@@ -50,7 +50,7 @@ async def transcribe_audio(
     # 操作审计仅记 action+体积(音频与转写正文不进日志);
     # 审计与业务同会话=同事务(组合模式)
     await SqlOperLogRepo(session).add(
-        str(user["sub"]),
+        user.user_id,
         "chat.stt.transcribe",
         None,
         {"size": len(audio)},

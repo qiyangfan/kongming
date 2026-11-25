@@ -11,7 +11,7 @@ from pydantic import Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
 from kongming.config import get_settings
 from kongming.datasource.models import PG_IDENTIFIER_PATTERN
 from kongming.db import get_session
@@ -180,13 +180,13 @@ async def upload_document(
     file: Annotated[UploadFile, File()],
     datasource_key: Annotated[str, Form(pattern=r"^[a-z][a-z0-9_]{1,63}$")],
     schema_name: Annotated[str, Form()],
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[RagAdminService, Depends(get_rag_admin_service_dep)],
     x_tenant_id: Annotated[str | None, Header()] = None,
     team_id: Annotated[uuidlib.UUID | None, Form()] = None,  # 上传归属(缺省公共)
 ) -> UploadOut:
     # 先复核租户绑定，再读取文件，避免未绑定租户消耗解析资源。
-    tenant_id, tenant_key = await _resolve_admin_tenant(svc, str(user["sub"]), x_tenant_id)
+    tenant_id, tenant_key = await _resolve_admin_tenant(svc, user.user_id, x_tenant_id)
     _, limit = _upload_kind_and_limit(file.filename or "")
     content = await file.read(limit + 1)
     if len(content) > limit:
@@ -198,7 +198,7 @@ async def upload_document(
     blocks = await _parse_blocks_or_400(content, file.filename or "")
     tables = await _upload_blocks_or_map(
         svc,
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         tenant_id=tenant_id,
         tenant_key=tenant_key,
         datasource_key=datasource_key,
@@ -219,12 +219,12 @@ async def upload_document(
 )
 async def list_allowed_schemas(
     datasource_key: Annotated[str, Query(pattern=r"^[a-z][a-z0-9_]{1,63}$")],
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[RagAdminService, Depends(get_rag_admin_service_dep)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> SchemasOut:
     try:
-        tenant_id, tenant_key = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
+        tenant_id, tenant_key = await svc.resolve_tenant(user.user_id, x_tenant_id)
         schemas = await svc.allowed_schemas(
             tenant_id=tenant_id,
             tenant_key=tenant_key,
@@ -252,7 +252,7 @@ _TEAM_SCOPE_PATTERN = (
     dependencies=[Depends(require_perm("system:rag:manage"))],
 )
 async def list_tables(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[RagAdminService, Depends(get_rag_admin_service_dep)],
     x_tenant_id: Annotated[str | None, Header()] = None,
     datasource_key: str | None = None,
@@ -262,7 +262,7 @@ async def list_tables(
     size: Annotated[int, Field(ge=1, le=100)] = 20,
 ) -> KnowledgePageOut:
     try:
-        resolved2 = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
+        resolved2 = await svc.resolve_tenant(user.user_id, x_tenant_id)
         tenant_id = resolved2[0]
     except TenantForbiddenApi:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
@@ -271,7 +271,7 @@ async def list_tables(
         datasource_key=datasource_key,
         limit=size,
         offset=(page - 1) * size,
-        caller_user_id=str(user["sub"]),  # 可见集合
+        caller_user_id=user.user_id,  # 可见集合
         team_scope=team_scope,  # 归属筛选
     )
     return KnowledgePageOut(
@@ -290,18 +290,18 @@ async def list_tables(
 async def edit_table(
     table_id: str,
     body: EditTableIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[RagAdminService, Depends(get_rag_admin_service_dep)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> KnowledgeItemOut:
     try:
-        resolved2 = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
+        resolved2 = await svc.resolve_tenant(user.user_id, x_tenant_id)
         tenant_id = resolved2[0]
     except TenantForbiddenApi:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
     try:
         result = await svc.edit_table(
-            actor_id=str(user["sub"]),
+            actor_id=user.user_id,
             tenant_id=tenant_id,
             table_id=table_id,
             table_comment=body.table_comment,
@@ -325,7 +325,7 @@ async def edit_table(
 async def set_table_ownership(
     table_id: str,
     body: OwnershipIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[RagAdminService, Depends(get_rag_admin_service_dep)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> KnowledgeItemOut:
@@ -335,13 +335,13 @@ async def set_table_ownership(
     变更落审计+精确失效检索缓存。web 侧走受控确认(AlertDialog 明示可见
     范围变化)。"""
     try:
-        resolved2 = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
+        resolved2 = await svc.resolve_tenant(user.user_id, x_tenant_id)
         tenant_id = resolved2[0]
     except TenantForbiddenApi:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
     try:
         result = await svc.set_ownership(
-            actor_id=str(user["sub"]),
+            actor_id=user.user_id,
             tenant_id=tenant_id,
             table_id=table_id,
             team_id=None if body.team_id is None else str(body.team_id),
@@ -362,18 +362,18 @@ async def set_table_ownership(
 )
 async def delete_table(
     table_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[RagAdminService, Depends(get_rag_admin_service_dep)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
     try:
-        resolved2 = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
+        resolved2 = await svc.resolve_tenant(user.user_id, x_tenant_id)
         tenant_id = resolved2[0]
     except TenantForbiddenApi:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
     try:
         deleted = await svc.delete_table(
-            actor_id=str(user["sub"]), tenant_id=tenant_id, table_id=table_id
+            actor_id=user.user_id, tenant_id=tenant_id, table_id=table_id
         )
     except KnowledgeNotFound:
         # 团队条目非成员写——与不存在同形(不暴露存在性)
@@ -392,14 +392,14 @@ async def delete_table(
 )
 async def fetch_metadata(
     req: DatasourceActionIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[RagAdminService, Depends(get_rag_admin_service_dep)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> FetchOut:
     try:
-        tenant_id, tenant_key = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
+        tenant_id, tenant_key = await svc.resolve_tenant(user.user_id, x_tenant_id)
         result = await svc.fetch_metadata(
-            actor_id=str(user["sub"]),
+            actor_id=user.user_id,
             tenant_id=tenant_id,
             tenant_key=tenant_key,
             datasource_key=req.datasource_key,
@@ -423,14 +423,14 @@ async def fetch_metadata(
 )
 async def reindex(
     req: DatasourceActionIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[RagAdminService, Depends(get_rag_admin_service_dep)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> ReindexOut:
     try:
-        tenant_id, tenant_key = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
+        tenant_id, tenant_key = await svc.resolve_tenant(user.user_id, x_tenant_id)
         result = await svc.reindex(
-            actor_id=str(user["sub"]),
+            actor_id=user.user_id,
             tenant_id=tenant_id,
             tenant_key=tenant_key,
             datasource_key=req.datasource_key,
@@ -452,17 +452,17 @@ async def reindex(
 )
 async def coverage_report(
     datasource_key: Annotated[str, Query(pattern=r"^[a-z][a-z0-9_]{1,63}$")],
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[RagAdminService, Depends(get_rag_admin_service_dep)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> CoverageReportOut:
     try:
-        tenant_id, tenant_key = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
+        tenant_id, tenant_key = await svc.resolve_tenant(user.user_id, x_tenant_id)
         report = await svc.coverage_report(
             tenant_id=tenant_id,
             tenant_key=tenant_key,
             datasource_key=datasource_key,
-            caller_user_id=str(user["sub"]),
+            caller_user_id=user.user_id,
         )
     except TenantForbiddenApi:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
@@ -664,7 +664,7 @@ async def rag_retrieve(
 async def recall_probe(
     question: Annotated[str, Query(min_length=1, max_length=2000)],
     datasource_key: Annotated[str, Query(pattern=r"^[a-z][a-z0-9_]{1,63}$")],
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[RagService, Depends(get_rag_service_dep)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> RecallProbeOut:
@@ -676,13 +676,13 @@ async def recall_probe(
     响应模型纯定型(键集=service 现值锁定,判定逻辑零变更)。
     """
     try:
-        _tenant_id, tenant_key = await svc.resolve_tenant(str(user["sub"]), x_tenant_id)
+        _tenant_id, tenant_key = await svc.resolve_tenant(user.user_id, x_tenant_id)
         return RecallProbeOut.model_validate(
             await svc.recall_probe(
                 tenant_key=tenant_key,
                 datasource_key=datasource_key,
                 question=question,
-                caller_user_id=str(user["sub"]),
+                caller_user_id=user.user_id,
             )
         )
     except TenantForbiddenApi:
@@ -753,7 +753,7 @@ async def _assert_doc_datasource(
 
 @doc_router.get("/documents", response_model=list[DocumentItemOut])
 async def list_documents(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:document:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     datasource_key: str = "default",
@@ -762,7 +762,7 @@ async def list_documents(
     from kongming.rag.documents_repo import SqlDocumentRepo
 
     svc = get_rag_service_dep(session)
-    tid = await _doc_tenant(session, svc, str(user["sub"]), x_tenant_id)
+    tid = await _doc_tenant(session, svc, user.user_id, x_tenant_id)
     await _assert_doc_datasource(session, tenant_id=tid, datasource_key=datasource_key)
     rows = await SqlDocumentRepo(
         session, ts_config=get_settings().rag_fulltext_ts_config
@@ -834,14 +834,14 @@ async def _ingest_doc_upload(
 async def upload_doc(
     file: Annotated[UploadFile, File()],
     datasource_key: Annotated[str, Form(pattern=r"^[a-z][a-z0-9_]{1,63}$")],
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:document:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> DocUploadOut:
     """文档上传:类型/大小沿用 分档;分块+embedding(子块)+覆盖落库。"""
     svc = get_rag_service_dep(session)
-    tenant_id = await _doc_tenant(session, svc, str(user["sub"]), x_tenant_id)
+    tenant_id = await _doc_tenant(session, svc, user.user_id, x_tenant_id)
     await _assert_doc_datasource(session, tenant_id=tenant_id, datasource_key=datasource_key)
     doc_name, content = await _read_doc_upload(file)
     try:
@@ -861,7 +861,7 @@ async def upload_doc(
 @doc_router.delete("/documents/{doc_id}", status_code=204)
 async def delete_doc(
     doc_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:document:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -869,7 +869,7 @@ async def delete_doc(
     from kongming.rag.documents_repo import SqlDocumentRepo
 
     svc = get_rag_service_dep(session)
-    tid = await _doc_tenant(session, svc, str(user["sub"]), x_tenant_id)
+    tid = await _doc_tenant(session, svc, user.user_id, x_tenant_id)
     ok = await SqlDocumentRepo(
         session, ts_config=get_settings().rag_fulltext_ts_config
     ).delete_document(doc_id=doc_id, tenant_id=tid)
@@ -881,7 +881,7 @@ async def delete_doc(
 @doc_router.post("/documents/{doc_id}/enrich", response_model=DocEnrichOut)
 async def enrich_doc(
     doc_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:document:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -898,7 +898,7 @@ async def enrich_doc(
     if extractor is None:
         raise HTTPException(status_code=400, detail="DOC_ENTITY_DISABLED") from None
     svc = get_rag_service_dep(session)
-    tid = await _doc_tenant(session, svc, str(user["sub"]), x_tenant_id)
+    tid = await _doc_tenant(session, svc, user.user_id, x_tenant_id)
     try:
         n = await enrich_document(
             SqlDocumentRepo(session, ts_config=get_settings().rag_fulltext_ts_config),
@@ -913,7 +913,7 @@ async def enrich_doc(
 
 @doc_router.get("/retrieval-probe", response_model=RetrievalProbeOut)
 async def retrieval_probe(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:document:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     question: Annotated[str, Query(min_length=1, max_length=2000)],
@@ -928,7 +928,7 @@ async def retrieval_probe(
     from kongming.rag.rerank import build_doc_reranker
 
     svc = get_rag_service_dep(session)
-    tid = await _doc_tenant(session, svc, str(user["sub"]), x_tenant_id)
+    tid = await _doc_tenant(session, svc, user.user_id, x_tenant_id)
     await _assert_doc_datasource(session, tenant_id=tid, datasource_key=datasource_key)
     settings = get_settings()
     out = await probe_docs(
@@ -948,7 +948,7 @@ async def retrieval_probe(
 @doc_router.get("/documents/{doc_id}/chunks", response_model=list[DocumentChunkOut])
 async def list_doc_chunks(
     doc_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("system:document:manage"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -956,7 +956,7 @@ async def list_doc_chunks(
     from kongming.rag.documents_repo import SqlDocumentRepo
 
     svc = get_rag_service_dep(session)
-    tid = await _doc_tenant(session, svc, str(user["sub"]), x_tenant_id)
+    tid = await _doc_tenant(session, svc, user.user_id, x_tenant_id)
     rows = await SqlDocumentRepo(
         session, ts_config=get_settings().rag_fulltext_ts_config
     ).list_chunks(doc_id=doc_id, tenant_id=tid)

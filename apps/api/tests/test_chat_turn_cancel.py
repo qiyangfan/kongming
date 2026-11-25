@@ -6,6 +6,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Callable, Coroutine, Iterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
@@ -27,7 +28,12 @@ from kongming.chat.inflight import InflightTurns, TurnCanceller, TurnSettlement
 from kongming.chat.models import MessageMeta
 from kongming.chat.ports import StreamStore
 from kongming.chat.results import ChatOutcome
-from kongming.chat.stream_runner import AgentStreamConsumer, PreparedQuery, StreamHandle
+from kongming.chat.stream_runner import (
+    AgentStreamConsumer,
+    PreparedQuery,
+    StreamFailure,
+    StreamHandle,
+)
 from kongming.config import get_settings
 from kongming.main import app
 from kongming.uuid7 import uuid7
@@ -183,6 +189,7 @@ class _FakeRepo:
         status: str,
         attachments: list[dict[str, object]] | None = None,
         meta: MessageMeta | None = None,
+        created_at: datetime | None = None,
     ) -> str:
         mid = f"m{len(self.messages) + 1}"
         if role == "ASSISTANT":
@@ -197,9 +204,16 @@ class _FakeRepo:
                 "result_json": result_json,
                 "trace_id": meta.trace_id if meta is not None else None,
                 "stage_trace": meta.stage_trace if meta is not None else None,
+                "created_at": created_at,
             }
         )
         return mid
+
+    async def message_created_at(self, *, message_id: str) -> datetime | None:
+        for m in self.messages:
+            if m["id"] == message_id:
+                return cast("datetime | None", m.get("created_at"))
+        return None
 
     async def touch_session(self, session_id: str) -> None:
         return None
@@ -299,9 +313,9 @@ def _gated_store(repo: _FakeRepo, gate: asyncio.Event, closing: asyncio.Event) -
     return _open
 
 
-async def _drain(handle: StreamHandle) -> list[tuple[str, object] | None]:
-    """读空句柄队列直到终止标记。"""
-    out: list[tuple[str, object] | None] = []
+async def _drain(handle: StreamHandle) -> list[object]:
+    """读空句柄队列直到终止标记(公开流元素为事件对象或 ChatOutcome,不再用元组)。"""
+    out: list[object] = []
     while True:
         item = await asyncio.wait_for(handle.queue.get(), 5)
         out.append(item)
@@ -309,10 +323,10 @@ async def _drain(handle: StreamHandle) -> list[tuple[str, object] | None]:
             return out
 
 
-async def _terminal(handle: StreamHandle) -> tuple[str, object]:
-    """读空句柄队列直到终止标记,返回其中唯一的终态帧。"""
+async def _terminal(handle: StreamHandle) -> object:
+    """读空句柄队列直到终止标记,返回其中唯一的终态元素。"""
     frames = [f for f in await _drain(handle) if f is not None]
-    assert len(frames) == 1  # 恰一个终态帧
+    assert len(frames) == 1  # 恰一个终态元素
     return frames[0]
 
 
@@ -364,10 +378,9 @@ async def test_cancel_converges_to_cancelled_and_persists_stage_trace() -> None:
     ]
     assert json.loads(str(rows[0]["result_json"])) == {"artifacts": []}
     assert rows[0]["stage_trace"] is not None  # 取消前已收集的节点轨迹如实落库
-    event, payload = await _terminal(handle)
-    outcome = cast("ChatOutcome", payload)
-    assert event == "result"
-    assert outcome.verdict == "CANCELLED" and outcome.message_id == "m1"
+    terminal_item = await _terminal(handle)
+    assert isinstance(terminal_item, ChatOutcome)
+    assert terminal_item.verdict == "CANCELLED" and terminal_item.message_id == "m1"
     assert titles == []
 
 
@@ -388,8 +401,8 @@ async def test_cancel_without_persist_writes_nothing() -> None:
     )
     assert settled == TurnSettlement("CANCELLED", None)
     assert repo.messages == []
-    event, payload = await _terminal(handle)
-    assert event == "result" and cast("ChatOutcome", payload).verdict == "CANCELLED"
+    terminal_item = await _terminal(handle)
+    assert isinstance(terminal_item, ChatOutcome) and terminal_item.verdict == "CANCELLED"
 
 
 async def test_cancel_after_normal_result_returns_completed() -> None:
@@ -414,8 +427,8 @@ async def test_cancel_after_normal_result_returns_completed() -> None:
     assert settled == TurnSettlement("COMPLETED", "m1")
     assert agent.cancelled is False
     assert [r["status"] for r in _assistant_rows(repo)] == ["SUCCESS"]
-    event, payload = await _terminal(handle)
-    assert event == "result" and cast("ChatOutcome", payload).success is True
+    terminal_item = await _terminal(handle)
+    assert isinstance(terminal_item, ChatOutcome) and terminal_item.success is True
 
 
 async def test_cancel_racing_with_persisted_result_writes_no_second_row() -> None:
@@ -445,8 +458,8 @@ async def test_cancel_racing_with_persisted_result_writes_no_second_row() -> Non
     )
     assert settled == TurnSettlement("COMPLETED", "m1")
     assert [r["status"] for r in _assistant_rows(repo)] == ["SUCCESS"]
-    event, _payload = await _terminal(handle)
-    assert event == "result"
+    terminal_item = await _terminal(handle)
+    assert isinstance(terminal_item, ChatOutcome)
 
 
 @pytest.mark.parametrize(
@@ -482,6 +495,37 @@ async def test_persist_cancelled_adopts_existing_row_with_response_verdict(
     assert len(_assistant_rows(repo)) == 1
 
 
+async def test_persist_cancelled_keeps_original_turn_order() -> None:
+    """已取消行沿用原轮用户消息的落库时刻:下一问已先落库时,历史仍把取消说明排在原问之后。"""
+    repo = _FakeRepo()
+    user_time = datetime(2026, 11, 25, 15, 21, 48, tzinfo=UTC)
+    await repo.insert_message(
+        session_id="s1",
+        role="USER",
+        question="列出每位客户在各门店的累计租赁次数和总消费金额",
+        status="SUCCESS",
+        created_at=user_time,
+    )
+    await repo.insert_message(
+        session_id="s1",
+        role="USER",
+        question="参演电影最多的前三位演员是谁",
+        status="SUCCESS",
+        created_at=user_time.replace(second=58),
+    )
+    out = await persist_cancelled(
+        cast("Any", repo),
+        sid="s1",
+        trace_id=TID,
+        user_id="u1",
+        user_message_id="m1",
+    )
+    rows = [m for m in repo.messages if m["role"] == "ASSISTANT"]
+    assert len(rows) == 1 and rows[0]["status"] == "CANCELLED"
+    assert rows[0]["created_at"] == user_time  # 不是取消收敛时刻
+    assert out.message_id == rows[0]["id"]
+
+
 async def test_persist_cancelled_dedup_read_failure_returns_bare_cancelled() -> None:
     """查重读取失败(连接中断一类):收敛不炸,按裸已取消终态返回且不写行——
     读失败后的会话再插必败,强行续写只会把异常抛给取消发起方。"""
@@ -510,8 +554,8 @@ async def test_cancel_survives_dedup_read_failure_and_still_terminates() -> None
     )
     assert settled == TurnSettlement("CANCELLED", None)
     assert repo.messages == []
-    event, payload = await _terminal(handle)
-    assert event == "result" and cast("ChatOutcome", payload).verdict == "CANCELLED"
+    terminal_item = await _terminal(handle)
+    assert isinstance(terminal_item, ChatOutcome) and terminal_item.verdict == "CANCELLED"
 
 
 async def test_cancel_raised_inside_failed_wrap_up_reports_completed() -> None:
@@ -542,8 +586,8 @@ async def test_cancel_raised_inside_failed_wrap_up_reports_completed() -> None:
     )
     assert settled == TurnSettlement("COMPLETED", "m1")
     assert [(r["status"], r["trace_id"]) for r in _assistant_rows(repo)] == [("FAILED", TID)]
-    event, _payload = await _terminal(handle)
-    assert event == "error"
+    terminal_item = await _terminal(handle)
+    assert isinstance(terminal_item, StreamFailure)
 
 
 async def test_hard_cancel_inside_failed_wrap_up_keeps_single_failed_row(
@@ -578,8 +622,8 @@ async def test_hard_cancel_inside_failed_wrap_up_keeps_single_failed_row(
     settled = await asyncio.wait_for(cancel, 5)
     assert settled == TurnSettlement("COMPLETED", "m1")
     assert [(r["status"], r["trace_id"]) for r in _assistant_rows(repo)] == [("FAILED", TID)]
-    event, _payload = await _terminal(handle)
-    assert event == "error"
+    terminal_item = await _terminal(handle)
+    assert isinstance(terminal_item, StreamFailure)
 
 
 @pytest.mark.parametrize("abort", ["fail", "hang"])
@@ -605,8 +649,8 @@ async def test_cancel_hard_cancels_when_agent_notification_fails(
     assert settled == TurnSettlement("CANCELLED", "m1")
     assert agent.cancelled is True
     assert [r["status"] for r in _assistant_rows(repo)] == ["CANCELLED"]
-    event, payload = await _terminal(handle)
-    assert event == "result" and cast("ChatOutcome", payload).verdict == "CANCELLED"
+    terminal_item = await _terminal(handle)
+    assert isinstance(terminal_item, ChatOutcome) and terminal_item.verdict == "CANCELLED"
 
 
 async def test_external_cancel_without_request_is_reraised() -> None:

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
 from kongming.auth.repository import SqlOperLogRepo
 from kongming.db import get_session
 from kongming.skillpack.repository import SqlSkillPackRepo
@@ -94,11 +94,11 @@ class PackDetailOut(BaseModel):
 
 @router.get("", response_model=PackListOut, dependencies=[SKILL_MANAGE])
 async def list_packs(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> PackListOut:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     rows = await _service(session).list(tenant_id=tid)
     items = [
         PackOut(
@@ -118,14 +118,14 @@ async def list_packs(
 @router.post("", status_code=201, dependencies=[SKILL_MANAGE])
 async def create_pack(
     body: PackCreateIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     try:
         pid = await _service(session).create(
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             tenant_id=tid,
             pack_key=body.pack_key,
             name=body.name,
@@ -146,11 +146,11 @@ async def create_pack(
 @router.get("/{pack_id}", response_model=PackDetailOut, dependencies=[SKILL_MANAGE])
 async def get_pack(
     pack_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> PackDetailOut:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     try:
         row = await _service(session).get(pack_id=pack_id, tenant_id=tid)
     except SkillPackNotFound:
@@ -170,13 +170,13 @@ async def get_pack(
 @router.post("/{pack_id}/retire", status_code=204, dependencies=[SKILL_MANAGE])
 async def retire_pack(
     pack_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     try:
-        await _service(session).retire(user_id=str(user["sub"]), pack_id=pack_id, tenant_id=tid)
+        await _service(session).retire(user_id=user.user_id, pack_id=pack_id, tenant_id=tid)
     except SkillPackNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
 
@@ -185,14 +185,14 @@ async def retire_pack(
 async def bind_pack(
     pack_id: str,
     body: BindIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     try:
         await _service(session).set_enabled(
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             pack_id=pack_id,
             tenant_id=tid,
             datasource_key=body.datasource_key,

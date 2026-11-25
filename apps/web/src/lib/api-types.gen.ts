@@ -3686,6 +3686,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/voice/calls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Establish Call
+         * @description 建交通话:body 为浏览器生成的实时连接请求(SDP offer 文本),原样转发牵线。
+         *
+         *     返回连接应答与一次性通道票据;模型服务密钥与内部接入地址不出现在任何
+         *     下发给浏览器的内容中(ADR-013)。
+         */
+        post: operations["establish_call_voice_calls_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/voice/calls/{call_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Hang Up
+         * @description 挂断:仅本人可挂;结束通话并关闭其文字事件通道(不让已释放的通话继续可用)。
+         */
+        delete: operations["hang_up_voice_calls__call_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/voice/calls/capability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Call Capability
+         * @description 通话能力探测:页面加载时据此决定入口是否出现(未配置即无入口)。
+         *
+         *     探测端点本身返回 200 加显式启用位——若它也 503,页面就无法区分
+         *     「未启用」与「探测失败」,入口不出现便无从实现。
+         */
+        get: operations["call_capability_voice_calls_capability_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -4062,6 +4128,8 @@ export interface components {
             agent_mode: "recipe" | "react";
             /** Attachment Ids */
             attachment_ids?: string[];
+            /** Voice Turn Token */
+            voice_turn_token?: string | null;
         };
         /** ChatQueryOut */
         ChatQueryOut: {
@@ -7237,14 +7305,56 @@ export interface components {
             error: string;
         };
         /**
+         * StreamErrorEvent
+         * @description type=error 信封:仅传输/输出失败。
+         */
+        StreamErrorEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "error";
+            data: components["schemas"]["StreamErrorOut"];
+        };
+        /**
          * StreamErrorOut
          * @description error 终态事件 data:仅传输层/意外失败(业务三态走 result 事件)。
+         *
+         *     reason_code 必填且枚举两种流错误;公开信封据此构造,内部队列不可再发
+         *     reason_code=None 的裸错误。
          */
         StreamErrorOut: {
             /** Error */
             error: string;
-            /** Reason Code */
-            reason_code?: string | null;
+            /**
+             * Reason Code
+             * @enum {string}
+             */
+            reason_code: "AGENT_UNAVAILABLE" | "STREAM_OUTPUT_FAILED";
+        };
+        /**
+         * StreamResultEvent
+         * @description type=result 信封:data 与同步问答响应逐字段一致。
+         */
+        StreamResultEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "result";
+            data: components["schemas"]["ChatQueryOut"];
+        };
+        /**
+         * StreamSqlEvent
+         * @description type=sql 信封。
+         */
+        StreamSqlEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "sql";
+            data: components["schemas"]["StreamSqlOut"];
         };
         /**
          * StreamSqlOut
@@ -7253,6 +7363,18 @@ export interface components {
         StreamSqlOut: {
             /** Sql */
             sql: string;
+        };
+        /**
+         * StreamStageEvent
+         * @description type=stage 信封。
+         */
+        StreamStageEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "stage";
+            data: components["schemas"]["StreamStageOut"];
         };
         /**
          * StreamStageOut
@@ -7273,12 +7395,36 @@ export interface components {
             retry_count: number;
         };
         /**
+         * StreamSummaryEvent
+         * @description type=summary 信封。
+         */
+        StreamSummaryEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "summary";
+            data: components["schemas"]["StreamSummaryOut"];
+        };
+        /**
          * StreamSummaryOut
          * @description summary 事件 data:总结增量(当前为单条完整文案,逐事件追加=打字机语义)。
          */
         StreamSummaryOut: {
             /** Delta */
             delta: string;
+        };
+        /**
+         * StreamToolCallEvent
+         * @description type=tool_call 信封。
+         */
+        StreamToolCallEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "tool_call";
+            data: components["schemas"]["StreamToolCallOut"];
         };
         /**
          * StreamToolCallOut
@@ -7305,21 +7451,6 @@ export interface components {
              * @default
              */
             result_digest: string;
-        };
-        /**
-         * StreamTraceOut
-         * @description trace 事件 data:agent 侧诊断信号(内部运维口径,不渲染进用户答案)。
-         *
-         *     表预筛/召回闸门/引用净化/装配预算共用本通道;
-         *     fields 为自由映射(键集随能力演进,前向兼容);node=发起节点名。
-         */
-        StreamTraceOut: {
-            /** Node */
-            node: string;
-            /** Fields */
-            fields: {
-                [key: string]: unknown;
-            };
         };
         /**
          * SuggestionsOut
@@ -8329,6 +8460,34 @@ export interface components {
             created_at: string;
         };
         /**
+         * VoiceCapabilityOut
+         * @description 通话能力探测响应。
+         */
+        VoiceCapabilityOut: {
+            /** Enabled */
+            enabled: boolean;
+        };
+        /**
+         * VoiceEstablishOut
+         * @description 建交通话响应:连接应答、一次性通道票据与通话标识。
+         */
+        VoiceEstablishOut: {
+            /** Answer */
+            answer: string;
+            /** Ticket */
+            ticket: string;
+            /** Call Id */
+            call_id: string;
+        };
+        /**
+         * VoiceHangUpOut
+         * @description 挂断响应。
+         */
+        VoiceHangUpOut: {
+            /** Ok */
+            ok: boolean;
+        };
+        /**
          * WorkflowDefOut
          * @description 工作流定义条目;definition 为自由 JSON。
          */
@@ -8793,7 +8952,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description SSE 发送 stage、sql、summary、tool_call 和诊断事件;result 与 /chat/query 返回相同数据。错误通过 error 终态发送;以冒号开头的注释帧用于心跳。 */
+            /** @description SSE 只用默认消息(data: 行,无 event: 命名),每条业务帧的 data 为{"type":"…","data":{…}},type 决定 data 的结构(见 x-sse-data-schema)。result 与 /chat/query 返回相同数据;错误经 error 终态发送;以冒号开头的注释帧用于心跳,消费方应忽略。 */
             200: {
                 headers: {
                     /** @description 本轮标识;取消端点 POST /chat/query/stream/{trace_id}/cancel 以它定位本轮。 */
@@ -8801,8 +8960,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": components["schemas"]["StreamStageOut"] | components["schemas"]["StreamSqlOut"] | components["schemas"]["StreamSummaryOut"] | components["schemas"]["StreamToolCallOut"] | components["schemas"]["StreamErrorOut"] | components["schemas"]["StreamTraceOut"] | components["schemas"]["ChatQueryOut"];
-                    "application/json": components["schemas"]["StreamStageOut"] | components["schemas"]["StreamSqlOut"] | components["schemas"]["StreamSummaryOut"] | components["schemas"]["StreamToolCallOut"] | components["schemas"]["StreamErrorOut"] | components["schemas"]["StreamTraceOut"] | components["schemas"]["ChatQueryOut"];
+                    "text/event-stream": string;
                 };
             };
             /** @description Validation Error */
@@ -16555,6 +16713,88 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    establish_call_voice_calls_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-tenant-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceEstablishOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    hang_up_voice_calls__call_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                call_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceHangUpOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    call_capability_voice_calls_capability_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceCapabilityOut"];
                 };
             };
         };

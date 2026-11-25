@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
 from kongming.config import get_settings
 from kongming.datasource import service as ds_service
 from kongming.datasource.cipher import get_cipher
@@ -59,7 +59,6 @@ def get_datasource_service(
 
 
 Service = Annotated[DatasourceService, Depends(get_datasource_service)]
-UserClaims = Annotated[dict[str, object], Depends(current_user)]
 
 # ---- 传输模型 ----
 
@@ -140,12 +139,12 @@ class TestConnectionOut(BaseModel):
 
 @router.get("/options", response_model=list[DatasourceOptionOut])
 async def list_options(
-    user: UserClaims,
+    user: CurrentUser,
     svc: Service,
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> list[DatasourceOptionOut]:
     try:
-        opts = await svc.options(user_id=str(user["sub"]), tenant_key=x_tenant_id)
+        opts = await svc.options(user_id=user.user_id, tenant_key=x_tenant_id)
     except ds_service.OptionsTenantForbidden:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN") from None
     return [DatasourceOptionOut(datasource_key=o.datasource_key, name=o.name) for o in opts]
@@ -188,10 +187,10 @@ async def page_datasources(
 
 @router.post("", status_code=201, dependencies=[Depends(require_perm(MANAGE))])
 async def create_datasource(
-    req: DatasourceCreateIn, user: UserClaims, svc: Service
+    req: DatasourceCreateIn, user: CurrentUser, svc: Service
 ) -> dict[str, str]:
     ds_id = await svc.create(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         datasource_key=req.datasource_key,
         name=req.name,
         tenant_id=str(req.tenant_id),
@@ -225,12 +224,12 @@ async def test_connection(req: TestConnectionIn, svc: Service) -> TestConnection
 async def update_datasource(
     ds_id: uuid.UUID,
     req: DatasourceUpdateIn,
-    user: UserClaims,
+    user: CurrentUser,
     svc: Service,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     await svc.update(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         ds_id=str(ds_id),
         datasource_key=req.datasource_key,
         tenant_id=str(req.tenant_id),
@@ -248,19 +247,19 @@ async def update_datasource(
 
 
 @router.post("/{ds_id}/enable", status_code=204, dependencies=[Depends(require_perm(MANAGE))])
-async def enable_datasource(ds_id: uuid.UUID, user: UserClaims, svc: Service) -> None:
-    await svc.set_status(actor_id=str(user["sub"]), ds_id=str(ds_id), active=True)
+async def enable_datasource(ds_id: uuid.UUID, user: CurrentUser, svc: Service) -> None:
+    await svc.set_status(actor_id=user.user_id, ds_id=str(ds_id), active=True)
 
 
 @router.post("/{ds_id}/disable", status_code=204, dependencies=[Depends(require_perm(MANAGE))])
-async def disable_datasource(ds_id: uuid.UUID, user: UserClaims, svc: Service) -> None:
-    await svc.set_status(actor_id=str(user["sub"]), ds_id=str(ds_id), active=False)
+async def disable_datasource(ds_id: uuid.UUID, user: CurrentUser, svc: Service) -> None:
+    await svc.set_status(actor_id=user.user_id, ds_id=str(ds_id), active=False)
 
 
 @router.delete("/{ds_id}", status_code=204, dependencies=[Depends(require_perm(MANAGE))])
 async def delete_datasource(
     ds_id: uuid.UUID,
-    user: UserClaims,
+    user: CurrentUser,
     svc: Service,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
@@ -269,7 +268,7 @@ async def delete_datasource(
     from kongming.redis_client import get_redis
 
     await svc.delete(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         ds_id=str(ds_id),
         ctx_evictor=ContextCache(get_redis()).evict,
         # 语义层级联(与删除同事务;组合根绑定请求会话)

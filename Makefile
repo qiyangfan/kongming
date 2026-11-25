@@ -102,6 +102,9 @@ contracts-check:
 	git diff --exit-code contracts/openapi.json
 	# 前端类型由 spec 生成,漏跑契约只拦 spec 不拦产物:再生成一次并断言无差异
 	cd apps/web && pnpm exec openapi-typescript ../../contracts/openapi.json --output src/lib/api-types.gen.ts
+	# 流事件运行时校验模块同属生成产物:漏生成即拦
+	cd apps/web && node scripts/gen-sse-validator.mjs
+	git diff --exit-code apps/web/src/lib/chat-stream-validate.gen.js apps/web/src/lib/chat-stream-validate.gen.d.ts
 	git diff --exit-code apps/web/src/lib/api-types.gen.ts
 
 contracts:

@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
 from kongming.auth.repository import SqlOperLogRepo
 from kongming.chat.export import to_csv
 from kongming.chat.scoring import LOW_SCORE_THRESHOLD
@@ -123,7 +123,7 @@ class QualityPageOut(BaseModel):
     dependencies=[Depends(require_perm("system:chat-quality:view"))],
 )
 async def quality_summary(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[QualityService, Depends(get_quality_service)],
     tenant_id: Annotated[uuid.UUID | None, Query()] = None,
     days: Annotated[int, Query(ge=1, le=90)] = 30,
@@ -133,7 +133,7 @@ async def quality_summary(
     """轮次质量总览:四态占比/率值 + 按天趋势(≤90 天补零)+ 数据源切片 +
     prompt 版本切片;租户按权限收敛(observability 域口径,不做行级按用户拆分)。"""
     body = await svc.summary(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         tenant_id=None if tenant_id is None else str(tenant_id),
         start=start,
         end=end,
@@ -178,7 +178,7 @@ async def quality_summary(
     dependencies=[Depends(require_perm("system:chat-quality:view"))],
 )
 async def quality_page(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[QualityService, Depends(get_quality_service)],
     tenant_id: Annotated[uuid.UUID | None, Query()] = None,
     status: Annotated[str | None, Query(pattern=r"^(SUCCESS|FAILED|REJECTED|NO_DATA)$")] = None,
@@ -191,7 +191,7 @@ async def quality_page(
 ) -> QualityPageOut:
     """轮次明细分页(时间倒序):状态/数据源/兜底分类/时间范围筛选。"""
     total, rows = await svc.page(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         tenant_id=None if tenant_id is None else str(tenant_id),
         status=status,
         datasource_key=datasource_key,
@@ -224,7 +224,7 @@ class QualityScoreDetailOut(BaseModel):
 )
 async def quality_score_detail(
     message_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[QualityService, Depends(get_quality_service)],
     tenant_id: Annotated[uuid.UUID | None, Query()] = None,
 ) -> QualityScoreDetailOut:
@@ -232,7 +232,7 @@ async def quality_score_detail(
     与汇总/明细同一权限点与租户收敛口径,不可见或未评分统一 404
     (不区分存在性,防探测)。"""
     detail = await svc.score_detail(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         tenant_id=None if tenant_id is None else str(tenant_id),
         message_id=str(message_id),
     )
@@ -346,14 +346,14 @@ class QualityContextOut(BaseModel):
 )
 async def quality_context(
     message_id: Annotated[uuid.UUID, Query()],
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[QualityService, Depends(get_quality_service)],
     tenant_id: Annotated[uuid.UUID | None, Query()] = None,
 ) -> QualityContextOut:
     """同会话轮次串联:以明细行任一轮次为锚,返回锚点及此前最近 50 轮的
     轻量列表(时间升序);越权锚点(不可见租户/不存在)统一 404 防探测。"""
     ctx = await svc.session_context(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         tenant_id=None if tenant_id is None else str(tenant_id),
         message_id=str(message_id),
     )
@@ -390,13 +390,13 @@ class QualityStageTraceOut(BaseModel):
 )
 async def quality_stage_trace(
     message_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[QualityService, Depends(get_quality_service)],
     tenant_id: Annotated[uuid.UUID | None, Query()] = None,
 ) -> QualityStageTraceOut:
     """单轮节点阶段轨迹;租户不可见统一 404(不区分存在性)。"""
     detail = await svc.stage_trace(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         tenant_id=None if tenant_id is None else str(tenant_id),
         message_id=str(message_id),
     )
@@ -466,7 +466,7 @@ def _export_rows_to_keyed(rows: list[dict[str, object]], *, truncated: bool) -> 
     dependencies=[Depends(require_perm("system:chat-quality:view"))],
 )
 async def quality_export(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[QualityService, Depends(get_quality_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     tenant_id: Annotated[uuid.UUID | None, Query()] = None,
@@ -479,7 +479,7 @@ async def quality_export(
     """轮次质量导出(page 同筛选同收敛;CSV 转义纪律与问答结果导出同源;
     行数上限截断并附截断标记行;导出落操作日志)。"""
     rows, truncated = await svc.export_rows(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         tenant_id=None if tenant_id is None else str(tenant_id),
         status=status,
         datasource_key=datasource_key,

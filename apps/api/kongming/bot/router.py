@@ -12,7 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.audit.context import client_ip_var
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
 from kongming.auth.repository import SqlOperLogRepo, SqlPermRepo
 from kongming.bot.dependencies import build_bot_rate_gate
 from kongming.bot.models import (
@@ -220,20 +220,20 @@ async def _check_prompt_field(
 
 @router.get("", response_model=list[BotOut])
 async def list_bots(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("chat:execute"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> list[BotOut]:
     from kongming.bot.repository import SqlBotRepo
 
-    tid = await _tenant_of(session, str(user["sub"]), x_tenant_id)
-    all_scope = await user_has_all_scope(session, str(user["sub"]))
+    tid = await _tenant_of(session, user.user_id, x_tenant_id)
+    all_scope = await user_has_all_scope(session, user.user_id)
     rows = await SqlBotRepo(session).list_bots(
         tenant_id=tid,
-        user_id=str(user["sub"]),
+        user_id=user.user_id,
         is_admin=all_scope,
-        team_ids=await _team_ids(session, str(user["sub"])),
+        team_ids=await _team_ids(session, user.user_id),
     )
     return [to_bot_out(r) for r in rows]
 
@@ -241,15 +241,15 @@ async def list_bots(
 @router.post("", status_code=201)
 async def create_bot(
     req: BotIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("chat:execute"))],
     svc: Annotated[BotService, Depends(get_bot_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
-    tid = await _tenant_of(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_of(session, user.user_id, x_tenant_id)
     try:
-        bot_id = await svc.create(user_id=str(user["sub"]), tenant_id=tid, payload=req.model_dump())
+        bot_id = await svc.create(user_id=user.user_id, tenant_id=tid, payload=req.model_dump())
     except InvalidBotKey:
         raise HTTPException(status_code=400, detail="INVALID_BOT_KEY") from None
     except ToolSubsetViolation as e:
@@ -263,7 +263,7 @@ async def create_bot(
 async def update_bot(
     bot_id: uuid.UUID,
     req: BotUpdateIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("chat:execute"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     svc: Annotated[BotService, Depends(get_bot_service)],
@@ -271,7 +271,7 @@ async def update_bot(
 ) -> None:
     from kongming.bot.repository import SqlBotRepo
 
-    user_id = str(user["sub"])
+    user_id = user.user_id
     tid = await _tenant_of(session, user_id, x_tenant_id)
     all_scope = await user_has_all_scope(session, user_id)
     repo = SqlBotRepo(session)
@@ -305,7 +305,7 @@ async def update_bot(
     if not ok:
         raise HTTPException(status_code=400, detail="EMPTY_UPDATE") from None
     await SqlOperLogRepo(session).add(
-        str(user["sub"]), "bot.update", str(row["bot_key"]), {"fields": sorted(fields)}
+        user.user_id, "bot.update", str(row["bot_key"]), {"fields": sorted(fields)}
     )
     await session.commit()
 
@@ -313,13 +313,13 @@ async def update_bot(
 @router.delete("/{bot_id}", status_code=204)
 async def delete_bot(
     bot_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("chat:execute"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
     """Bot 删除(api-key 经 FK CASCADE;归属收口)。"""
-    user_id = str(user["sub"])
+    user_id = user.user_id
     tid = await _tenant_of(session, user_id, x_tenant_id)
     all_scope = await user_has_all_scope(session, user_id)
     row = await _fetch_owned_bot(
@@ -335,21 +335,21 @@ async def delete_bot(
     ).scalar_one_or_none()
     if hit is None:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
-    await SqlOperLogRepo(session).add(str(user["sub"]), "bot.delete", str(row["bot_key"]), {})
+    await SqlOperLogRepo(session).add(user.user_id, "bot.delete", str(row["bot_key"]), {})
     await session.commit()
 
 
 @router.post("/{bot_id}/keys", status_code=201)
 async def create_key(
     bot_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("chat:execute"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     svc: Annotated[BotService, Depends(get_bot_service)],
     name: str = "default",
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
-    user_id = str(user["sub"])
+    user_id = user.user_id
     tid = await _tenant_of(session, user_id, x_tenant_id)
     all_scope = await user_has_all_scope(session, user_id)
     row = await _fetch_owned_bot(
@@ -358,10 +358,10 @@ async def create_key(
     # key 管理=创建者或 OWNER(全权)
     await _assert_creator_or_owner(session, user_id, row)
     plain, key_id = await svc.create_key(
-        bot_id=str(bot_id), tenant_id=tid, user_id=str(user["sub"]), name=name
+        bot_id=str(bot_id), tenant_id=tid, user_id=user.user_id, name=name
     )
     await SqlOperLogRepo(session).add(
-        str(user["sub"]), "bot.key_create", str(row["bot_key"]), {"name": name}
+        user.user_id, "bot.key_create", str(row["bot_key"]), {"name": name}
     )
     await session.commit()
     return {"id": key_id, "api_key": plain}  # 明文仅此一次
@@ -370,14 +370,14 @@ async def create_key(
 @router.get("/{bot_id}/keys", response_model=list[ApiKeyOut])
 async def list_keys(
     bot_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("chat:execute"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> list[ApiKeyOut]:
     from kongming.bot.repository import SqlBotRepo
 
-    user_id = str(user["sub"])
+    user_id = user.user_id
     tid = await _tenant_of(session, user_id, x_tenant_id)
     all_scope = await user_has_all_scope(session, user_id)
     repo = SqlBotRepo(session)
@@ -401,14 +401,14 @@ async def list_keys(
 @router.delete("/keys/{key_id}", status_code=204)
 async def revoke_key(
     key_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     _: Annotated[None, Depends(require_perm("chat:execute"))],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
     from kongming.bot.repository import SqlBotRepo
 
-    user_id = str(user["sub"])
+    user_id = user.user_id
     tid = await _tenant_of(session, user_id, x_tenant_id)
     all_scope = await user_has_all_scope(session, user_id)
     repo = SqlBotRepo(session)
@@ -427,7 +427,7 @@ async def revoke_key(
     # 密钥管理只允许创建者或 OWNER，与创建和列表接口使用相同权限范围。
     await _assert_creator_or_owner(session, user_id, bot)
     await repo.revoke_key(key_id=str(key_id), bot_id=str(row))
-    await SqlOperLogRepo(session).add(str(user["sub"]), "bot.key_revoke", str(bot["bot_key"]), {})
+    await SqlOperLogRepo(session).add(user.user_id, "bot.key_revoke", str(bot["bot_key"]), {})
     await session.commit()
 
 

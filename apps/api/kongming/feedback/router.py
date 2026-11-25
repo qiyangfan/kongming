@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
 from kongming.db import get_session
 from kongming.feedback.repository import FeedbackRepository
 from kongming.feedback.service import (
@@ -143,13 +143,13 @@ class FeedbackOut(BaseModel):
 async def submit_feedback(
     req: FeedbackIn,
     message_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[FeedbackService, Depends(get_feedback_service)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> FeedbackOut:
     try:
         state = await svc.submit(
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             tenant_key=x_tenant_id,
             message_id=str(message_id),
             rating=req.rating,
@@ -197,12 +197,12 @@ class HandleOut(BaseModel):
 async def handle_feedback(
     req: HandleIn,
     message_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[FeedbackService, Depends(get_feedback_service)],
 ) -> HandleOut:
     try:
         merged_note = await svc.handle(
-            actor_id=str(user["sub"]),
+            actor_id=user.user_id,
             message_id=str(message_id),
             status=req.status,
             note=req.note,
@@ -240,11 +240,11 @@ class InvolvedTablesOut(BaseModel):
 )
 async def involved_tables(
     message_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[FeedbackService, Depends(get_feedback_service)],
 ) -> InvolvedTablesOut:
     try:
-        view = await svc.involved_tables(actor_id=str(user["sub"]), message_id=str(message_id))
+        view = await svc.involved_tables(actor_id=user.user_id, message_id=str(message_id))
     except FeedbackNotFound:
         raise HTTPException(status_code=404, detail="FEEDBACK_NOT_FOUND") from None
     return InvolvedTablesOut(
@@ -286,14 +286,14 @@ class OverviewOut(BaseModel):
     dependencies=[Depends(require_perm("system:feedback:view"))],
 )
 async def overview(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[FeedbackService, Depends(get_feedback_service)],
     days: Annotated[int, Query(ge=1, le=90)] = 30,
     tenant_id: Annotated[uuid.UUID | None, Query()] = None,
     datasource_key: Annotated[str | None, Query()] = None,
 ) -> OverviewOut:
     data = await svc.overview(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         days=days,
         tenant_id=None if tenant_id is None else str(tenant_id),
         datasource_key=datasource_key,
@@ -341,7 +341,7 @@ class FeedbackPageOut(BaseModel):
     dependencies=[Depends(require_perm("system:feedback:view"))],
 )
 async def page(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[FeedbackService, Depends(get_feedback_service)],
     page_num: Annotated[int, Query(ge=1, alias="page")] = 1,
     size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -357,7 +357,7 @@ async def page(
     end_time: Annotated[datetime | None, Query()] = None,
 ) -> FeedbackPageOut:
     total, rows = await svc.page(
-        actor_id=str(user["sub"]),
+        actor_id=user.user_id,
         user_id=None if user_id is None else str(user_id),
         rating=rating,
         tenant_id=None if tenant_id is None else str(tenant_id),

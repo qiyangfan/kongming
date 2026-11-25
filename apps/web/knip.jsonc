@@ -1,9 +1,11 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
   // 生成文件不参与导出使用分析
-  "ignore": ["src/lib/api-types.gen.ts"],
-  // components/ui 是与 jinguan 逐字节一致的 shadcn 标准件,保留完整导出面
+  "ignore": ["src/lib/api-types.gen.ts", "src/lib/chat-stream-validate.gen.js"],
+  // components/ui 是与 jinguan 逐字节一致的 shadcn 标准件,保留完整导出面;
+  // api.ts 的 SSE 分帧函数导出供测试在 localStorage 桩就绪后动态导入
   "ignoreIssues": {
     "src/components/ui/**": ["exports", "types", "nsExports", "nsTypes"],
+    "src/lib/api.ts": ["exports"],
   },
 }

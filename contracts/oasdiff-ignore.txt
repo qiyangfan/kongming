@@ -1,0 +1,4 @@
+// 流式问答事件格式为已批准的破坏性变更(standardize-chat-stream-events):
+// 200 响应只声明 text/event-stream,移除 FastAPI 对 model 键自动补的 application/json。
+// oasdiff --err-ignore 的匹配行:方法+路径 + 变化描述(singleline 文案的子集)。
+POST /chat/query/stream removed the media type `application/json` for the response with the status `200`

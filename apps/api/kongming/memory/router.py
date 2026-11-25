@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user
+from kongming.auth.deps import CurrentUser
 from kongming.auth.repository import SqlOperLogRepo
 from kongming.db import get_session
 from kongming.memory.repository import SqlMemoryRepo
@@ -95,7 +95,7 @@ class PrefsOut(BaseModel):
 
 @router.get("/prefs", response_model=PrefsOut)
 async def get_memory_prefs(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[MemoryService, Depends(_get_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -103,15 +103,15 @@ async def get_memory_prefs(
     """读取本人闭合偏好槽位。"""
     from kongming.memory.prefs import SLOT_KEYS
 
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
-    prefs = await svc.get_prefs(user_id=str(user["sub"]), tenant_id=tid)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
+    prefs = await svc.get_prefs(user_id=user.user_id, tenant_id=tid)
     return PrefsOut(prefs={k: prefs[k] for k in SLOT_KEYS if k in prefs})
 
 
 @router.put("/prefs", response_model=PrefsOut)
 async def put_memory_prefs(
     body: PrefsIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[MemoryService, Depends(_get_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
@@ -119,9 +119,9 @@ async def put_memory_prefs(
     """省略字段保留、显式 null 删除槽位、空补丁真无操作;未知键拒绝。"""
     # model_fields_set 区分「显式传 null」与「省略」:仅显式提供的键进 raw
     raw = {k: v for k, v in body.model_dump().items() if k in body.model_fields_set}
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     try:
-        prefs = await svc.put_prefs(user_id=str(user["sub"]), tenant_id=tid, raw=raw)
+        prefs = await svc.put_prefs(user_id=user.user_id, tenant_id=tid, raw=raw)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     return PrefsOut(prefs=prefs)
@@ -129,14 +129,14 @@ async def put_memory_prefs(
 
 @router.delete("/prefs", response_model=PrefsOut)
 async def delete_memory_prefs(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[MemoryService, Depends(_get_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> PrefsOut:
     """清空本人本租户全部偏好(保留空行;笔记/团队记忆不受影响)。"""
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
-    prefs = await svc.clear_prefs(user_id=str(user["sub"]), tenant_id=tid)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
+    prefs = await svc.clear_prefs(user_id=user.user_id, tenant_id=tid)
     return PrefsOut(prefs=prefs)
 
 
@@ -171,14 +171,14 @@ class MemoryCreateIn(BaseModel):
 @router.post("", status_code=201)
 async def create_memory(
     body: MemoryCreateIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[MemoryService, Depends(_get_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
     """显式写入:team_id 非空=团队记忆(OWNER/MEMBER 成员才允许);
     空=个人记忆(与「请记住」同路径)。"""
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     if body.team_id:
         from kongming.team.repository import SqlTeamRepo
 
@@ -187,13 +187,13 @@ async def create_memory(
         if team is None:
             raise HTTPException(status_code=404, detail="NOT_FOUND") from None
         role = await SqlTeamRepo(session).get_member_role(
-            team_id=body.team_id, user_id=str(user["sub"])
+            team_id=body.team_id, user_id=user.user_id
         )
         if role not in ("OWNER", "MEMBER"):
             raise HTTPException(status_code=403, detail="TEAM_ROLE_FORBIDDEN") from None
     try:
         await svc.form_explicit(
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             tenant_id=tid,
             content=body.content,
             team_id=body.team_id,
@@ -208,13 +208,13 @@ async def create_memory(
 
 @router.get("", response_model=MemoryListOut)
 async def list_memory(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[MemoryService, Depends(_get_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> MemoryListOut:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
-    rows = await svc.list_mine(user_id=str(user["sub"]), tenant_id=tid)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
+    rows = await svc.list_mine(user_id=user.user_id, tenant_id=tid)
     return MemoryListOut(items=[_item(r) for r in rows])
 
 
@@ -227,16 +227,16 @@ class MemoryUpdateIn(BaseModel):
 async def update_memory(
     memory_id: uuid.UUID,
     req: MemoryUpdateIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[MemoryService, Depends(_get_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     try:
         await svc.update_mine(
             memory_id=str(memory_id),
-            user_id=str(user["sub"]),
+            user_id=user.user_id,
             tenant_id=tid,
             content=req.content,
             category=req.category,
@@ -250,27 +250,27 @@ async def update_memory(
 @router.delete("/{memory_id}", status_code=204)
 async def delete_memory(
     memory_id: uuid.UUID,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[MemoryService, Depends(_get_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> None:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     try:
-        await svc.delete_mine(memory_id=str(memory_id), user_id=str(user["sub"]), tenant_id=tid)
+        await svc.delete_mine(memory_id=str(memory_id), user_id=user.user_id, tenant_id=tid)
     except MemoryNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
 
 
 @router.get("/export")
 async def export_memory(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     svc: Annotated[MemoryService, Depends(_get_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> list[dict[str, object]]:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
-    rows = await svc.list_mine(user_id=str(user["sub"]), tenant_id=tid)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
+    rows = await svc.list_mine(user_id=user.user_id, tenant_id=tid)
     return [
         {
             "content": r["content"],

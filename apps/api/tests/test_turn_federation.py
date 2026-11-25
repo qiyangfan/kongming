@@ -405,11 +405,10 @@ def _stream_store(agent: _HangAgent) -> Any:
 
 
 def _parse(text: str) -> list[tuple[str, dict[str, Any]]]:
+    """公开流只用默认消息,type 位于 JSON 内。"""
     out: list[tuple[str, dict[str, Any]]] = []
-    event = ""
     for line in text.splitlines():
-        if line.startswith("event: "):
-            event = line[len("event: ") :]
-        elif line.startswith("data: ") and event:
-            out.append((event, json.loads(line[len("data: ") :])))
+        if line.startswith("data: "):
+            payload = json.loads(line[len("data: ") :])
+            out.append((str(payload["type"]), payload["data"]))
     return out

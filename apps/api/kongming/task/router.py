@@ -10,7 +10,7 @@ from typing import Annotated, Any, cast
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kongming.auth.deps import current_user, require_perm
+from kongming.auth.deps import CurrentUser, require_perm
 from kongming.config import get_settings
 from kongming.db import get_session, uuid7
 from kongming.task import models as m
@@ -77,11 +77,11 @@ async def _tenant_id(session: AsyncSession, user_id: str, tenant_key: str | None
 )
 async def create_task(
     body: CreateIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> TaskCreateOut:
-    uid = str(user["sub"])
+    uid = user.user_id
     tid = await _tenant_id(session, uid, x_tenant_id)
     trace_root = ensure_trace_id()
     task_id = str(uuid7())
@@ -114,20 +114,20 @@ async def create_task(
     dependencies=[Depends(require_perm("task:read"))],
 )
 async def list_tasks(
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
     page: int = 1,
     size: int = 20,
     status: str | None = None,
 ) -> TaskPageOut:
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     if status is not None and status not in m.TASK_TRANSITIONS:
         raise HTTPException(status_code=422, detail="INVALID_STATUS") from None
     svc = get_task_service(session)
     p, s = max(1, page), min(100, max(1, size))
     items, total = await svc.list_tasks(
-        tenant_id=tid, user_id=str(user["sub"]), page=p, size=s, status=status
+        tenant_id=tid, user_id=user.user_id, page=p, size=s, status=status
     )
     return TaskPageOut(items=[to_task_item(r) for r in items], total=total, page=p, size=s)
 
@@ -139,15 +139,15 @@ async def list_tasks(
 )
 async def get_task(
     task_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> TaskDetailOut:
     _uuid_or_404(task_id)
-    tid = await _tenant_id(session, str(user["sub"]), x_tenant_id)
+    tid = await _tenant_id(session, user.user_id, x_tenant_id)
     svc = get_task_service(session)
     try:
-        detail = await svc.get_detail(task_id=task_id, tenant_id=tid, user_id=str(user["sub"]))
+        detail = await svc.get_detail(task_id=task_id, tenant_id=tid, user_id=user.user_id)
     except TaskNotFound:
         raise HTTPException(status_code=404, detail="NOT_FOUND") from None
     return to_task_detail_out(detail)
@@ -160,7 +160,7 @@ async def get_task(
 )
 async def pause_task(
     task_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
     version: int | None = None,
@@ -176,7 +176,7 @@ async def pause_task(
 )
 async def resume_task(
     task_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> TaskMutateOut:
@@ -193,7 +193,7 @@ async def resume_task(
 )
 async def cancel_task(
     task_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> TaskMutateOut:
@@ -210,11 +210,11 @@ async def approve_step(
     task_id: str,
     step_id: str,
     body: ApproveIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> TaskMutateOut:
-    uid = str(user["sub"])
+    uid = user.user_id
     _uuid_or_404(task_id)
     _uuid_or_404(step_id)
     tid = await _tenant_id(session, uid, x_tenant_id)
@@ -248,13 +248,13 @@ async def decide_graph_confirm(
     task_id: str,
     confirm_id: str,
     body: ApproveIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> TaskMutateOut:
     """图内确认处置(归属人-only):批准=动作恢复执行;拒绝=动作跳过观察喂回。
     处置后步骤回队并重派编排(图从挂起点精确恢复,非整步重跑)。"""
-    uid = str(user["sub"])
+    uid = user.user_id
     _uuid_or_404(task_id)
     tid = await _tenant_id(session, uid, x_tenant_id)
     svc = get_task_service(session)
@@ -292,13 +292,13 @@ async def set_collab_topology(
     task_id: str,
     step_id: str,
     body: CollabTopologyIn,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, object]:
     """步骤声明协作拓扑(PENDING 步骤;归一+部署级钳制后落库,声明后该步
     执行即协作)。Bot 绑定校验沿用 Bot 运行时口径(存在/启用/创建者 ACTIVE)。"""
-    uid = str(user["sub"])
+    uid = user.user_id
     _uuid_or_404(task_id)
     _uuid_or_404(step_id)
     tid = await _tenant_id(session, uid, x_tenant_id)
@@ -329,12 +329,12 @@ async def set_collab_topology(
 )
 async def list_collab_runs(
     task_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> CollabRunsOut:
     """协作运行清单(任务维度,含 worker 账本;协作观测面单源)。"""
-    uid = str(user["sub"])
+    uid = user.user_id
     _uuid_or_404(task_id)
     tid = await _tenant_id(session, uid, x_tenant_id)
     svc = get_task_service(session)
@@ -883,14 +883,14 @@ def _uuid_body_or_404(*values: str) -> None:
 
 async def _mutate(
     task_id: str,
-    user: Annotated[dict[str, object], Depends(current_user)],
+    user: CurrentUser,
     session: AsyncSession,
     x_tenant_id: str | None,
     version: int | None,
     *,
     op: str,
 ) -> tuple[TaskMutateOut, bool]:
-    uid = str(user["sub"])
+    uid = user.user_id
     _uuid_or_404(task_id)
     tid = await _tenant_id(session, uid, x_tenant_id)
     svc = get_task_service(session)

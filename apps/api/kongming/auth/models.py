@@ -67,6 +67,21 @@ class TokenPair:
 
 
 @dataclass(frozen=True)
+class AuthenticatedUser:
+    """已通过验签的访问令牌身份:仅含用户 ID,账号状态由相应数据库检查确认。"""
+
+    user_id: str
+
+
+@dataclass(frozen=True)
+class RbacUser:
+    """功能权限检查专用:账号有效性与启用角色授予的有效权限集合。"""
+
+    user_id: str
+    perm_codes: frozenset[str]
+
+
+@dataclass(frozen=True)
 class MeInfo:
     user_id: str
     username: str

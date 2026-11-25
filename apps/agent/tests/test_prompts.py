@@ -78,6 +78,17 @@ def test_sql_gen_column_level_sentinel() -> None:
     assert "不要解释、不要编造表名或列名" in prompts.SQL_GEN_SYSTEM
 
 
+def test_sql_gen_partition_and_event_metric_rules() -> None:
+    """分区/继承子表用父表;业务事件笔数与金额口径不混用。"""
+    assert "分区/继承子表纪律" in prompts.SQL_GEN_SYSTEM
+    assert "一律用父表" in prompts.SQL_GEN_SYSTEM
+    assert "子表可能为空，用子表会产生假零结果" in prompts.SQL_GEN_SYSTEM
+    assert "不得用金额明细的行数冒充事件笔数" in prompts.SQL_GEN_SYSTEM
+    assert "以事件明细的发生时间与归属维度驱动" in prompts.SQL_GEN_SYSTEM
+    assert "❌ 用子表/分片表代替父表" in prompts.SQL_GEN_SYSTEM
+    assert "❌ 问“业务事件笔数”却用金额明细的行数冒充" in prompts.SQL_GEN_SYSTEM
+
+
 def test_understand_fidelity_rules() -> None:
     assert "补全必须保留上一轮的全部限定条件（筛选/排序/数量限制/聚合口径）" in (
         prompts.UNDERSTAND_MULTI_SYSTEM

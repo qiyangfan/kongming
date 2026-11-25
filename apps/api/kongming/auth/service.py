@@ -18,6 +18,7 @@ from kongming.auth.models import (
     NormalizedProfile,
     ProviderExchangeFailed,
     ProviderNotFound,
+    RbacUser,
     StateInvalid,
     TenantRef,
     TokenInvalid,
@@ -141,6 +142,19 @@ class AuthService:
             role_keys=role_keys,
             perm_codes=perm_codes,
             tenants=[TenantRef(t.tenant_key, t.tenant_name) for t in tenants],
+        )
+
+    async def get_rbac_user(self, user_id: str) -> RbacUser:
+        """功能权限检查专用查询:账号有效性 + 启用角色授予的有效权限,只读两处。
+
+        与 me() 共用账号检查与 perms.list_codes()(停用角色不授予);角色名、
+        租户列表等资料面数据不在此读取——权限检查用不到它们。
+        """
+        user = await self._uow.users.get_by_id(user_id)
+        if user is None or not user.active:
+            raise TokenInvalid("账号不可用")
+        return RbacUser(
+            user_id=user.id, perm_codes=frozenset(await self._uow.perms.list_codes(user.id))
         )
 
     # ---- 权限拒绝审计 ----
