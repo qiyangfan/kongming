@@ -445,13 +445,13 @@ export async function getVoiceCapability(): Promise<VoiceCapabilityOut> {
   return request<VoiceCapabilityOut>("/voice/calls/capability");
 }
 
-/** 打开文字事件通道(一次性票据;消息为模型事件与后端指令的搬运面)。 */
+/** 打开文字事件通道(一次性票据走子协议,不进 URL;消息为模型事件与后端指令的搬运面)。 */
 export function openVoiceChannel(
   ticket: string,
   onMessage: (payload: unknown) => void,
   onClosed: () => void,
 ): WebSocket {
-  const ws = new WebSocket(channelUrl(window.location.origin, ticket));
+  const ws = new WebSocket(channelUrl(window.location.origin), [ticket]);
   ws.onmessage = (ev) => {
     try {
       onMessage(JSON.parse(ev.data as string));

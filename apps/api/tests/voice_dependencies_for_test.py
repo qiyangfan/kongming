@@ -6,7 +6,7 @@ from typing import Any
 
 from kongming.chat.dependencies import get_voice_service
 from kongming.voice.service import VoiceService, VoiceSettingsView
-from tests.test_voice_calls import FakeGate, FakeGateway, FakeTickets
+from tests.test_voice_calls import FakeGate, FakeGateway, FakeGuard, FakeTickets
 
 
 @contextmanager
@@ -18,11 +18,13 @@ def install_voice_service(
     tickets: Any = None,
     max_call_seconds: int = 600,
     operlog: Any = None,
+    guard: Any = None,
 ) -> Generator[VoiceService]:
     svc = VoiceService(
         FakeGate(),
         FakeGateway(answer),
         tickets if tickets is not None else FakeTickets(),
+        guard=guard if guard is not None else FakeGuard(),
         operlog=operlog,
         settings=VoiceSettingsView(
             voice_api_key="k" if enabled else None,

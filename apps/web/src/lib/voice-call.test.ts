@@ -189,22 +189,19 @@ describe("reduceCallPhase 通话状态归约", () => {
   });
 });
 
-describe("channelUrl 票据连接地址构造", () => {
+describe("channelUrl 通道地址构造", () => {
   it("https 页面 → wss 同源路径", () => {
-    expect(channelUrl("https://km.example", "tk-1")).toBe(
-      "wss://km.example/api/voice/calls/channel?ticket=tk-1",
-    );
+    expect(channelUrl("https://km.example")).toBe("wss://km.example/api/voice/calls/channel");
   });
 
   it("http 本地开发 → ws", () => {
-    expect(channelUrl("http://localhost:5173", "tk-2")).toBe(
-      "ws://localhost:5173/api/voice/calls/channel?ticket=tk-2",
-    );
+    expect(channelUrl("http://localhost:5173")).toBe("ws://localhost:5173/api/voice/calls/channel");
   });
 
-  it("票据进 URL 参数;地址里不含其他查询", () => {
-    const url = channelUrl("http://localhost:5173", "a b&c");
-    expect(url.endsWith(String(encodeURIComponent("a b&c")))).toBe(true);
+  it("票据不进 URL", () => {
+    const url = channelUrl("http://localhost:5173");
+    expect(url).not.toContain("ticket=");
+    expect(url).not.toContain("?");
   });
 });
 
@@ -234,6 +231,13 @@ describe("classifyEstablishFailure 通话冲突与占满", () => {
   it("后端 409 已有一通/并发已满各归其类(不再挤进一般失败)", () => {
     expect(classifyEstablishFailure({ status: 409, raw: "VOICE_CALL_EXISTS" })).toBe("exists");
     expect(classifyEstablishFailure({ status: 409, raw: "VOICE_BUSY" })).toBe("busy");
+  });
+
+  it("429 频控与日预算各归其类", () => {
+    expect(classifyEstablishFailure({ status: 429, raw: "VOICE_RATE_LIMITED" })).toBe(
+      "rate_limited",
+    );
+    expect(classifyEstablishFailure({ status: 429, raw: "VOICE_DAILY_LIMIT" })).toBe("daily_limit");
   });
 
   it("ICE 媒体连接失败归为网络受限(ice)", () => {

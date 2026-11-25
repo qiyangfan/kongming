@@ -31,6 +31,30 @@ class TicketStore(Protocol):
         ...
 
 
+class CallGuard(Protocol):
+    """建连频次与 24 小时预算闸;故障由实现 fail-open(准入仍 fail-closed)。"""
+
+    async def allow_establish(self, user_id: str) -> bool:
+        """单位时间建联次数是否放行(不占预算)。"""
+        ...
+
+    async def reserve_user_day(self, user_id: str) -> bool:
+        """占用该用户 24 小时预算;失败返回 False。"""
+        ...
+
+    async def reserve_deployment_day(self) -> bool:
+        """占用部署级 24 小时预算;失败返回 False。"""
+        ...
+
+    async def release_user_day(self, user_id: str) -> None:
+        """释放一次用户预算(建立失败回滚)。"""
+        ...
+
+    async def release_deployment_day(self) -> None:
+        """释放一次部署预算(建立失败回滚)。"""
+        ...
+
+
 class OperLogSink(Protocol):
     """操作审计出口(复用既有操作审计存储,不建新表)。"""
 

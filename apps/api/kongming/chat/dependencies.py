@@ -33,7 +33,12 @@ from kongming.redis_client import get_redis
 from kongming.toolcall.ratelimit import RedisRateLimiter
 from kongming.voice.audit_sink import SessionOperLogSink
 from kongming.voice.binding import VoiceTurnRegistry
-from kongming.voice.repository import HttpxSignalingGateway, RedisAdmissionGate, RedisTicketStore
+from kongming.voice.repository import (
+    HttpxSignalingGateway,
+    RedisAdmissionGate,
+    RedisCallGuard,
+    RedisTicketStore,
+)
 from kongming.voice.service import VoiceService, VoiceSettingsView
 
 
@@ -208,12 +213,21 @@ def _build_voice_service() -> VoiceService:
         _VOICE_GATE,
         _VOICE_GATEWAY,
         _VOICE_TICKETS,
+        guard=RedisCallGuard(
+            get_redis(),
+            rate_per_minute=s.voice_establish_rate_per_minute,
+            daily_per_user=s.voice_daily_calls_per_user,
+            daily_per_deployment=s.voice_daily_calls_per_deployment,
+        ),
         operlog=_VOICE_OPERLOG,
         settings=VoiceSettingsView(
             voice_api_key=s.voice_api_key,
             voice_realtime_base_url=s.voice_realtime_base_url,
             voice_model=s.voice_model,
             voice_max_call_seconds=s.voice_max_call_seconds,
+            voice_establish_rate_per_minute=s.voice_establish_rate_per_minute,
+            voice_daily_calls_per_user=s.voice_daily_calls_per_user,
+            voice_daily_calls_per_deployment=s.voice_daily_calls_per_deployment,
         ),
     )
 

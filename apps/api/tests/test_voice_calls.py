@@ -12,9 +12,12 @@ import pytest
 
 from kongming.voice.errors import (
     ConcurrencyFull,
+    DeploymentDailyLimitExceeded,
     OfferInvalid,
+    RateLimited,
     SignalingFailed,
     UserCallConflict,
+    UserDailyLimitExceeded,
     VoiceNotEnabled,
 )
 from kongming.voice.models import Ticket
@@ -29,6 +32,9 @@ def _settings(**over: Any) -> Any:
         "voice_model": "qwen3.8-omni-flash-realtime",
         "voice_max_concurrent": 2,
         "voice_max_call_seconds": 600,
+        "voice_establish_rate_per_minute": 6,
+        "voice_daily_calls_per_user": 20,
+        "voice_daily_calls_per_deployment": 100,
     }
     base.update(over)
     return cast("Any", type("S", (), base)())
@@ -106,16 +112,66 @@ class FakeTickets:
         return None
 
 
+class FakeGuard:
+    """替身建连闸:记录频次/预算的占用与释放;boom 模拟 Redis 故障。"""
+
+    def __init__(
+        self,
+        *,
+        rate_ok: bool = True,
+        user_ok: bool = True,
+        deploy_ok: bool = True,
+        boom: bool = False,
+    ) -> None:
+        self.rate_ok = rate_ok
+        self.user_ok = user_ok
+        self.deploy_ok = deploy_ok
+        self.boom = boom
+        self.rate_attempts = 0
+        self.user_reserves = 0
+        self.deploy_reserves = 0
+        self.user_releases = 0
+        self.deploy_releases = 0
+
+    async def allow_establish(self, user_id: str) -> bool:
+        if self.boom:
+            raise RuntimeError("redis down")
+        self.rate_attempts += 1
+        return self.rate_ok
+
+    async def reserve_user_day(self, user_id: str) -> bool:
+        if self.boom:
+            raise RuntimeError("redis down")
+        if self.user_ok:
+            self.user_reserves += 1
+        return self.user_ok
+
+    async def reserve_deployment_day(self) -> bool:
+        if self.boom:
+            raise RuntimeError("redis down")
+        if self.deploy_ok:
+            self.deploy_reserves += 1
+        return self.deploy_ok
+
+    async def release_user_day(self, user_id: str) -> None:
+        self.user_releases += 1
+
+    async def release_deployment_day(self) -> None:
+        self.deploy_releases += 1
+
+
 def _svc(
     gate: FakeGate,
     gateway: FakeGateway,
     tickets: FakeTickets,
     settings: Any | None = None,
+    guard: FakeGuard | None = None,
 ) -> VoiceService:
     return VoiceService(
         gate,
         gateway,
         tickets,
+        guard=guard or FakeGuard(),
         settings=settings or _settings(),
     )  # type: ignore[arg-type]
 
@@ -243,6 +299,90 @@ async def test_establish_success_returns_answer_and_ticket() -> None:
     assert ticket.user_id == UID
     assert tickets.issued[0].ttl_sec == 60
     assert gate.released_user == 0 and gate.released_slot == 0  # 成功不回滚
+
+
+# ---- 建连频次与 24 小时预算 ----
+
+
+async def test_rate_limit_denied_before_budget_and_gate() -> None:
+    """频次超限:最先拒绝,不占预算、不占准入、不发起上游交换。"""
+    gate = FakeGate()
+    gateway = FakeGateway()
+    guard = FakeGuard(rate_ok=False)
+    with pytest.raises(RateLimited):
+        await _svc(gate, gateway, FakeTickets(), guard=guard).establish(user_id=UID, offer=_OFFER)
+    assert guard.rate_attempts == 1
+    assert guard.user_reserves == 0 and guard.deploy_reserves == 0
+    assert gate.acquired_user == 0 and gateway.received == []
+
+
+async def test_user_budget_denied_before_gate() -> None:
+    """用户预算用尽:不占部署预算、不占准入、不发起上游交换。"""
+    gate = FakeGate()
+    gateway = FakeGateway()
+    guard = FakeGuard(user_ok=False)
+    with pytest.raises(UserDailyLimitExceeded):
+        await _svc(gate, gateway, FakeTickets(), guard=guard).establish(user_id=UID, offer=_OFFER)
+    assert guard.deploy_reserves == 0
+    assert gate.acquired_user == 0 and gateway.received == []
+
+
+async def test_deploy_budget_denied_releases_user_budget() -> None:
+    """部署预算用尽:回滚已占的用户预算,不占准入、不发起上游交换。"""
+    gate = FakeGate()
+    gateway = FakeGateway()
+    guard = FakeGuard(deploy_ok=False)
+    with pytest.raises(DeploymentDailyLimitExceeded):
+        await _svc(gate, gateway, FakeTickets(), guard=guard).establish(user_id=UID, offer=_OFFER)
+    assert guard.user_reserves == 1 and guard.user_releases == 1
+    assert guard.deploy_reserves == 0
+    assert gate.acquired_user == 0 and gateway.received == []
+
+
+async def test_establish_failure_releases_budgets() -> None:
+    """牵线失败:用户与部署预算都回滚,不留下幽灵额度。"""
+    guard = FakeGuard()
+    with pytest.raises(SignalingFailed):
+        await _svc(
+            FakeGate(),
+            FakeGateway(raise_error=SignalingFailed("boom")),
+            FakeTickets(),
+            guard=guard,
+        ).establish(user_id=UID, offer=_OFFER)
+    assert guard.user_reserves == 1 and guard.deploy_reserves == 1
+    assert guard.user_releases == 1 and guard.deploy_releases == 1
+
+
+async def test_success_keeps_budgets() -> None:
+    """成功建立:预算保留,释放次数为 0。"""
+    guard = FakeGuard()
+    await _svc(FakeGate(), FakeGateway(), FakeTickets(), guard=guard).establish(
+        user_id=UID, offer=_OFFER
+    )
+    assert guard.user_releases == 0 and guard.deploy_releases == 0
+
+
+async def test_user_budget_rejection_is_audited() -> None:
+    """日预算拒绝落 chat.voice.call_rejected 审计;频次拒绝不落。"""
+    sink = FakeOperLog()
+    svc = VoiceService(
+        FakeGate(),
+        FakeGateway(),
+        FakeTickets(),
+        guard=FakeGuard(user_ok=False),
+        operlog=sink,
+        settings=_settings(),
+    )
+    with pytest.raises(UserDailyLimitExceeded):
+        await svc.establish(user_id=UID, tenant_key="t-a", offer=_OFFER)
+    assert sink.rows == [
+        (
+            UID,
+            "chat.voice.call_rejected",
+            None,
+            {"tenant_key": "t-a", "reason": "user_daily", "limit": 20},
+        )
+    ]
 
 
 # ---- 票据 ----
@@ -431,6 +571,114 @@ def tokens_issue_other() -> str:
     return tokens.issue("00000000-0000-7000-8000-000000000001", "access")
 
 
+async def test_establish_rate_limited_is_429(client: Any, session: Any, make_user: Any) -> None:
+    """建联过频:429 专属码,且不建立通话。"""
+    from kongming.main import app
+    from tests.voice_dependencies_for_test import install_voice_service
+
+    token = await _user_with_chat_perm(session, make_user, "voice-rate")
+    with install_voice_service(app, enabled=True, guard=FakeGuard(rate_ok=False)) as svc:
+        r = await client.post(
+            "/voice/calls",
+            content=b"v=0\r\n",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/sdp"},
+        )
+        assert r.status_code == 429
+        assert r.json()["detail"] == "VOICE_RATE_LIMITED"
+        assert svc.calls == {}
+
+
+async def test_establish_user_budget_429(client: Any, session: Any, make_user: Any) -> None:
+    """用户 24 小时预算用尽:429 专属码。"""
+    from kongming.main import app
+    from tests.voice_dependencies_for_test import install_voice_service
+
+    token = await _user_with_chat_perm(session, make_user, "voice-user-budget")
+    with install_voice_service(app, enabled=True, guard=FakeGuard(user_ok=False)) as svc:
+        r = await client.post(
+            "/voice/calls",
+            content=b"v=0\r\n",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/sdp"},
+        )
+        assert r.status_code == 429
+        assert r.json()["detail"] == "VOICE_DAILY_LIMIT"
+        assert svc.calls == {}
+
+
+async def test_establish_deploy_budget_429_busy(client: Any, session: Any, make_user: Any) -> None:
+    """部署预算用尽:429 但语义是当前繁忙(复用 VOICE_BUSY 文案)。"""
+    from kongming.main import app
+    from tests.voice_dependencies_for_test import install_voice_service
+
+    token = await _user_with_chat_perm(session, make_user, "voice-deploy-budget")
+    with install_voice_service(app, enabled=True, guard=FakeGuard(deploy_ok=False)) as svc:
+        r = await client.post(
+            "/voice/calls",
+            content=b"v=0\r\n",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/sdp"},
+        )
+        assert r.status_code == 429
+        assert r.json()["detail"] == "VOICE_BUSY"
+        assert svc.calls == {}
+
+
+async def test_establish_invalid_tenant_is_403(client: Any, session: Any, make_user: Any) -> None:
+    """声明的租户未绑定:403;不发起上游交换。"""
+    from kongming.main import app
+    from tests.voice_dependencies_for_test import install_voice_service
+
+    token = await _user_with_chat_perm(session, make_user, "voice-tenant-bad")
+    with install_voice_service(app, enabled=True) as svc:
+        r = await client.post(
+            "/voice/calls",
+            content=b"v=0\r\n",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/sdp",
+                "X-Tenant-Id": "not-bound",
+            },
+        )
+        assert r.status_code == 403
+        assert r.json()["detail"] == "TENANT_FORBIDDEN"
+        assert svc.calls == {}
+
+
+async def test_establish_audits_validated_tenant(client: Any, session: Any, make_user: Any) -> None:
+    """审计记录校验后的租户;未声明时取默认租户。"""
+    from kongming.main import app
+    from tests.voice_dependencies_for_test import install_voice_service
+
+    token = await _user_with_chat_perm(session, make_user, "voice-tenant-ok")
+    sink = FakeOperLog()
+    with install_voice_service(app, enabled=True, operlog=sink) as svc:
+        r = await client.post(
+            "/voice/calls",
+            content=b"v=0\r\n",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/sdp",
+                "X-Tenant-Id": "default",
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert svc.calls[body["call_id"]].tenant_key == "default"
+        await client.delete(
+            f"/voice/calls/{body['call_id']}", headers={"Authorization": f"Bearer {token}"}
+        )
+    assert sink.rows[-1][3]["tenant_key"] == "default"
+
+    # 未声明租户:取默认租户(default 优先)
+    with install_voice_service(app, enabled=True) as svc2:
+        r2 = await client.post(
+            "/voice/calls",
+            content=b"v=0\r\n",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/sdp"},
+        )
+        assert r2.status_code == 200
+        assert svc2.calls[r2.json()["call_id"]].tenant_key == "default"
+
+
 # ============ WebSocket 通道鉴权(3.3):票据缺失/复用/通话不在途一律直接关闭 ============
 
 
@@ -528,6 +776,48 @@ def test_channel_ticket_single_use_second_connect_rejected(isolated_voice_redis:
         assert ei.value.code == 4401
 
 
+def test_channel_ticket_via_subprotocol(monkeypatch: pytest.MonkeyPatch) -> None:
+    """票据走子协议:handshake 回选该协议,URL 不含票据。"""
+    from starlette.testclient import TestClient
+
+    import kongming.chat.dependencies as deps
+    from kongming.main import app
+    from tests.voice_dependencies_for_test import install_voice_service
+
+    tickets = FakeTickets()
+    monkeypatch.setattr(deps, "_VOICE_TICKETS", tickets)
+    with install_voice_service(app, enabled=True, tickets=tickets) as svc:
+        token = _sync_establish(svc, user_id=UID)
+        with TestClient(app).websocket_connect("/voice/calls/channel", subprotocols=[token]) as ws:
+            assert ws.accepted_subprotocol == token
+            cfg = ws.receive_json()
+            assert cfg["type"] == "model.send"
+
+
+def test_channel_oversized_event_closes_1009(monkeypatch: pytest.MonkeyPatch) -> None:
+    """单帧超过 64KB:关闭 1009 并正常收口(通话从在途表移除)。"""
+    from starlette.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+
+    import kongming.chat.dependencies as deps
+    from kongming.main import app
+    from tests.voice_dependencies_for_test import install_voice_service
+
+    tickets = FakeTickets()
+    monkeypatch.setattr(deps, "_VOICE_TICKETS", tickets)
+    with install_voice_service(app, enabled=True, tickets=tickets) as svc:
+        token = _sync_establish(svc, user_id=UID)
+        with (
+            pytest.raises(WebSocketDisconnect) as ei,
+            TestClient(app).websocket_connect(f"/voice/calls/channel?ticket={token}") as ws,
+        ):
+            ws.receive_json()
+            ws.send_text("x" * (64 * 1024 + 1))
+            ws.receive_json()
+        assert ei.value.code == 1009
+        assert svc.calls == {}
+
+
 def test_client_ip_middleware_covers_websocket_scope() -> None:
     """来源 IP 中间件覆盖 WebSocket 范围:通话审计可取到 client host。"""
     from kongming.audit.context import ClientIpMiddleware, client_ip_var
@@ -572,7 +862,12 @@ def test_end_call_idempotent_single_release_and_audit() -> None:
     gate = FakeGate()
     sink = FakeOperLog()
     svc = VoiceService(
-        gate, FakeGateway(b"v=0\r\nok"), FakeTickets(), operlog=sink, settings=_settings()
+        gate,
+        FakeGateway(b"v=0\r\nok"),
+        FakeTickets(),
+        guard=FakeGuard(),
+        operlog=sink,
+        settings=_settings(),
     )
 
     async def _run() -> None:

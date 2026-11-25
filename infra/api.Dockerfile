@@ -38,4 +38,4 @@ WORKDIR /app/apps/api
 EXPOSE 8000
 # 反向代理部署时读取 X-Forwarded-For，使审计记录保留客户端地址；仅信任指定内网网段。
 # --forwarded-allow-ips 的网段列表必须作为一个逗号分隔参数传入。
-CMD ["uvicorn", "kongming.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"]
+CMD ["uvicorn", "kongming.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16", "--ws-max-size", "262144"]

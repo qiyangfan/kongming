@@ -151,9 +151,17 @@ export function reducePlayback(
   return { gate, signal: null };
 }
 
-/** 建立通话失败的原因:按来源给不同提示(麦克风被拒/无权限/未启用/已有通话/占满/网络受限/一般失败) */
+/** 建立通话失败的原因:按来源给不同提示(麦克风被拒/无权限/未启用/已有通话/占满/频控/预算/网络受限/一般失败) */
 export type FailureReason =
-  "mic" | "forbidden" | "not_enabled" | "exists" | "busy" | "ice" | "network";
+  | "mic"
+  | "forbidden"
+  | "not_enabled"
+  | "exists"
+  | "busy"
+  | "rate_limited"
+  | "daily_limit"
+  | "ice"
+  | "network";
 
 const MIC_ERROR_NAMES = new Set(["NotAllowedError", "NotFoundError", "NotReadableError"]);
 
@@ -161,6 +169,8 @@ const RAW_FAILURE_MAP: Record<string, FailureReason> = {
   VOICE_CALL_EXISTS: "exists",
   VOICE_BUSY: "busy",
   VOICE_NOT_ENABLED: "not_enabled",
+  VOICE_RATE_LIMITED: "rate_limited",
+  VOICE_DAILY_LIMIT: "daily_limit",
   VOICE_ICE_FAILED: "ice",
 };
 
@@ -206,10 +216,10 @@ export function reduceCallPhase(phase: CallPhase, event: CallEvent): CallPhase {
   );
 }
 
-/** 通道 WebSocket 地址:同源 /api 前缀(vite 代理对 api 前缀开启 ws 转发)。 */
-export function channelUrl(origin: string, ticket: string): string {
+/** 通道 WebSocket 地址:同源 /api 前缀(vite 代理对 api 前缀开启 ws 转发)。票据走子协议,不进 URL。 */
+export function channelUrl(origin: string): string {
   const wsOrigin = origin.replace(/^http/, "ws");
-  return `${wsOrigin}/api/voice/calls/channel?ticket=${encodeURIComponent(ticket)}`;
+  return `${wsOrigin}/api/voice/calls/channel`;
 }
 
 /** 固定应答录音清单(与模型同一音色 Serena;按序轮换) */

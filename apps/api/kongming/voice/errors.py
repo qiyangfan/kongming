@@ -21,6 +21,18 @@ class AdmissionUnavailable(VoiceError):
     """准入后端不可用:fail-closed 拒绝建立(503)。"""
 
 
+class RateLimited(VoiceError):
+    """单位时间建联次数超限(429)。"""
+
+
+class UserDailyLimitExceeded(VoiceError):
+    """用户 24 小时建联预算用尽(429)。"""
+
+
+class DeploymentDailyLimitExceeded(VoiceError):
+    """部署 24 小时建联预算用尽(429 当前繁忙)。"""
+
+
 class SignalingFailed(VoiceError):
     """牵线失败:上游拒绝/应答非法/网络错误(502;原文不透传)。"""
 

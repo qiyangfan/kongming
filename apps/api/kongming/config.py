@@ -116,6 +116,10 @@ class Settings(BaseSettings):
     voice_model: str | None = None
     voice_max_concurrent: int = Field(default=2, ge=1)
     voice_max_call_seconds: int = Field(default=600, ge=60)
+    # 建连频次与 24 小时成功建联预算(0=关闭;频次固定 60 秒窗口,预算滚动 24 小时)
+    voice_establish_rate_per_minute: int = Field(default=6, ge=0)
+    voice_daily_calls_per_user: int = Field(default=20, ge=0)
+    voice_daily_calls_per_deployment: int = Field(default=100, ge=0)
     agent_timeout_sec: float = 120.0  # 覆盖 understand+generate+≤2 次 selfheal+summarize
     # 报告生成=多轮 LLM+多次取数的长任务,独立超时预算(非单轮问答口径)
     agent_report_timeout_sec: float = Field(default=600.0, gt=0)

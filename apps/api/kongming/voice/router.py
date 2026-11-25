@@ -30,12 +30,19 @@ from kongming.chat.dependencies import (
     get_voice_registry,
     get_voice_service,
 )
+from kongming.db import get_sessionmaker
+from kongming.tenant import resolve_tenant
 from kongming.voice.errors import (
     AdmissionUnavailable,
     ConcurrencyFull,
+    DeploymentDailyLimitExceeded,
     OfferInvalid,
+    RateLimited,
     SignalingFailed,
     UserCallConflict,
+    UserDailyLimitExceeded,
+    VoiceError,
+    VoiceNotEnabled,
 )
 from kongming.voice.models import CallSession
 from kongming.voice.service import OFFER_MAX_BYTES, VoiceService
@@ -75,6 +82,19 @@ class VoiceHangUpOut(BaseModel):
 # 类型别名以大写开头(PEP 8;pyright 禁止小写/下划线变量进类型表达式)
 VoiceServiceDep = Annotated[VoiceService, Depends(get_voice_service)]
 
+# 领域错误到 HTTP 的单一映射:新增错误只改这里,不在路由堆 except 分支
+_VOICE_HTTP_ERRORS: dict[type[VoiceError], tuple[int, str]] = {
+    VoiceNotEnabled: (503, "VOICE_NOT_ENABLED"),
+    OfferInvalid: (400, "VOICE_OFFER_INVALID"),
+    RateLimited: (429, "VOICE_RATE_LIMITED"),
+    UserDailyLimitExceeded: (429, "VOICE_DAILY_LIMIT"),
+    DeploymentDailyLimitExceeded: (429, "VOICE_BUSY"),
+    UserCallConflict: (409, "VOICE_CALL_EXISTS"),
+    ConcurrencyFull: (409, "VOICE_BUSY"),
+    AdmissionUnavailable: (503, "VOICE_UNAVAILABLE"),
+    SignalingFailed: (502, "VOICE_SIGNALING_FAILED"),
+}
+
 
 @router.post(
     "/calls",
@@ -95,21 +115,23 @@ async def establish_call(
     if not svc.enabled():
         raise HTTPException(status_code=503, detail="VOICE_NOT_ENABLED")
     offer = await _read_offer_limited(request)
+    resolved = await _resolve_tenant(user.user_id, x_tenant_id)
+    if resolved is None:
+        raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN")
     try:
         answer, ticket = await svc.establish(
-            user_id=user.user_id, tenant_key=x_tenant_id or "", offer=offer
+            user_id=user.user_id, tenant_key=resolved[1], offer=offer
         )
-    except OfferInvalid:
-        raise HTTPException(status_code=400, detail="VOICE_OFFER_INVALID") from None
-    except UserCallConflict:
-        raise HTTPException(status_code=409, detail="VOICE_CALL_EXISTS") from None
-    except ConcurrencyFull:
-        raise HTTPException(status_code=409, detail="VOICE_BUSY") from None
-    except AdmissionUnavailable:
-        raise HTTPException(status_code=503, detail="VOICE_UNAVAILABLE") from None
-    except SignalingFailed:
-        raise HTTPException(status_code=502, detail="VOICE_SIGNALING_FAILED") from None
+    except VoiceError as e:
+        status, detail = _VOICE_HTTP_ERRORS.get(type(e), (500, "VOICE_INTERNAL"))
+        raise HTTPException(status_code=status, detail=detail) from None
     return VoiceEstablishOut(answer=answer.decode(), ticket=ticket.token, call_id=ticket.call_id)
+
+
+async def _resolve_tenant(user_id: str, tenant_key: str | None) -> tuple[str, str] | None:
+    """独立短会话解析租户:不把请求作用域会话带过慢上传与上游牵线。"""
+    async with get_sessionmaker()() as session:
+        return await resolve_tenant(session=session, user_id=user_id, tenant_key=tenant_key)
 
 
 async def _read_offer_limited(request: Request) -> bytes:
@@ -166,24 +188,41 @@ _CALL_TICK_SEC = 30.0
 # 在途通道表:挂断端点据此关闭仍开着的文字事件通道(单节点内存表,与通话表同前提)
 _CHANNELS: dict[str, WebSocket] = {}
 
+# 单帧上限:正常最大事件是 session.updated 回显(工具与指令,几 KB);64KB 留足余量
+_EVENT_MAX_BYTES = 64 * 1024
 
-# 类型别名以大写开头(PEP 8;pyright 禁止小写/下划线变量进类型表达式)
+
+def _ticket_from_subprotocol(websocket: "WebSocket") -> str:
+    """取 WebSocket 子协议里的票据(浏览器可用协议头传票据,避免落访问日志 URL)。"""
+    raw = websocket.headers.get("sec-websocket-protocol", "")
+    for part in raw.split(","):
+        value = part.strip()
+        if value:
+            return value
+    return ""
 
 
 @router.websocket("/calls/channel")
 async def call_channel(
     websocket: "WebSocket",
-    ticket: Annotated[str, Query(min_length=1)],
     svc: VoiceServiceDep,
+    ticket: Annotated[str | None, Query(min_length=1)] = None,
 ) -> None:
     """文字事件通道:浏览器把模型会话事件原样转给后端,后端指示转发的再发回。
 
-    凭一次性票据鉴权(token 即凭据);票据缺失/复用/通话不在途一律直接关闭,
-    不泄露通话是否存在。协议决策全部在后端状态机,浏览器只搬运。
+    凭一次性票据鉴权:优先取子协议,缺失时回退 query(兼容一版);票据复用/
+    通话不在途一律直接关闭,不泄露通话是否存在。协议决策全部在后端状态机。
     """
     registry = get_voice_registry()
-    await websocket.accept()
-    consumed = await get_tickets_store().consume(ticket)
+    header_ticket = _ticket_from_subprotocol(websocket)
+    if header_ticket:
+        # 回选客户端提供的子协议;协议值只承载一次性票据,不参与业务语义
+        await websocket.accept(subprotocol=header_ticket)
+        effective_ticket = header_ticket
+    else:
+        await websocket.accept()
+        effective_ticket = ticket or ""
+    consumed = await get_tickets_store().consume(effective_ticket) if effective_ticket else None
     if consumed is None:
         await websocket.close(code=4401)
         return
@@ -225,6 +264,10 @@ async def _pump_channel(
             if await _expire_if_due(machine, websocket, registry, svc):
                 return
             continue
+        if len(raw.encode("utf-8")) > _EVENT_MAX_BYTES:
+            # 超限帧不是合法模型事件:关闭 1009 并走正常收口
+            await websocket.close(code=1009)
+            return
         event = _parse_event(raw)
         if event is None:
             continue

@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 /* 测试 SSE 分帧和错误码映射；导入 api.ts 前需为 Node 环境提供 localStorage 桩。 */
 
@@ -307,5 +307,37 @@ describe("readSseStream 读取结束", () => {
       },
     } as unknown as ReadableStreamDefaultReader<Uint8Array>;
     expect(await apiModule.readSseStream(reader, {})).toBe(false);
+  });
+});
+
+describe("openVoiceChannel 子协议票据", () => {
+  it("URL 不含票据,票据由 WebSocket 子协议传递", () => {
+    const seen: Array<{ url: string; protocols?: string | string[] | undefined }> = [];
+
+    class FakeWS {
+      onmessage: ((ev: MessageEvent) => void) | null = null;
+      onclose: (() => void) | null = null;
+      constructor(
+        public url: string,
+        public protocols?: string | string[],
+      ) {
+        seen.push(this);
+      }
+    }
+
+    vi.stubGlobal("window", { location: { origin: "https://km.example" } });
+    vi.stubGlobal("WebSocket", FakeWS);
+    try {
+      apiModule.openVoiceChannel(
+        "tk-1",
+        () => {},
+        () => {},
+      );
+      expect(seen).toHaveLength(1);
+      expect(seen[0]!.url).toBe("wss://km.example/api/voice/calls/channel");
+      expect(seen[0]!.protocols).toEqual(["tk-1"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

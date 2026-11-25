@@ -22,6 +22,8 @@ const FAILURE_TEXT: Record<FailureReason, string> = {
   not_enabled: "通话功能未启用",
   exists: "已有一通通话在进行,请先挂断后再拨",
   busy: "当前通话人数已满,请稍后再试",
+  rate_limited: "操作太频繁,请稍后再试",
+  daily_limit: "近期通话次数已达上限,请稍后再试",
   ice: "当前网络不支持语音通话,请检查网络后重试",
   network: "通话不可用,请稍后重试",
 };
