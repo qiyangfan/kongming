@@ -2,95 +2,118 @@
 
 > 四块:当前状态 / 下一步 / 开放决策项 / 验收记录;变更细节归 git log 与 OpenSpec 归档。
 
-## 当前状态(2026-11-24)
+## 当前状态(2026-11-25)
 
 - 统一身份:Keycloak 为唯一登录入口(`KM_KEYCLOAK_*`、`/auth/keycloak/callback`);
   授权仍全部本地(角色/租户/`data_scope`/本地 RS256 会话令牌,不消费 Keycloak claim);
   `/auth/login` 已移除,评测登录取现签 access JWT(`KM_EVAL_ACCESS_TOKEN`)。
-  刷新/登出端点只认 HttpOnly cookie——body 通道已删(与锦官同构),前端也从不发 body。
-- 三端互通 SSO 已验收(muniu/kongming/jinguan):同一浏览器任一端登录,其余两端经
-  OIDC 免密进入,三端落到同一 Keycloak sub;协议级与浏览器 UI(Playwright)双口径通过。
-  kongming 的 state/refresh cookie 作用路径覆盖 SPA 的 `/api` 前缀,修复浏览器回调
-  「state 未绑定」与启动刷新 401,回归测试守护。
+  刷新/登出端点只认 HttpOnly cookie;访问令牌只存内存。三端 SSO 已验收
+  (muniu/kongming/jinguan):同一浏览器任一端登录,其余两端经 OIDC 免密进入,
+  三端落到同一 Keycloak sub。kongming 的 state/refresh cookie 作用路径覆盖 SPA 的
+  `/api` 前缀。多标签页 `km_oidc_state` 为点分隔 state 列表(上限 8),并发 tab 互不覆盖。
+- 认证依赖已收成具名身份:`CurrentUser` 只携带 `user_id`;`require_perm` 走
+  `AuthService.get_rbac_user()` 只读账号有效性与启用角色权限,不再为权限检查读取
+  角色名与租户列表。权限绑定变更下一次请求立即生效。
 - 本地联调口径:Keycloak `127.0.0.1:8080` realm `longzhong`;三端 issuer 必须统一写
   `127.0.0.1`(`localhost` 与 `127.0.0.1` cookie 按主机隔离,会破坏 SSO)。
-  kongming 配置在 `apps/api/.env`(pydantic 按工作目录加载,根 `.env` 仅 compose 用);
-  本机 DB/Redis 用统一环境栈 `~/workspace/env`(5432/6379)。
-- 多标签页登录:`km_oidc_state` 为点分隔 state 列表(上限 8,旧单值兼容),并发 tab
-  互不覆盖;HttpOnly/SameSite/CSRF 绑定语义不变。
+  api 配置在 `apps/api/.env`(pydantic 按工作目录加载);agent 没有自己的 `.env`,
+  配置在仓库根 `.env`,须从仓库根启动。本机 DB/Redis 用统一环境栈
+  `~/workspace/env`(5432/6379),不要用 `make up` 抢端口。
+- 真实测试环境配方(2026-11-25 验通):api 8000(另带语音三项配置与
+  `KM_AGENT_BASE_URL=http://127.0.0.1:8001`)、agent 8001(仓库根起,另设
+  `KM_AGENT_API_BASE_URL=http://127.0.0.1:8000`)、web 5173(`pnpm dev`);
+  Keycloak 先用 `podman start keycloak-spike-keycloak-1`;登录用户 demo 落到本地种子
+  账号 demo-keycloak(DEVELOPER+默认租户);测试数据源须切到「Sakila 影院」
+  (默认数据源无业务表,问业务必答「未找到数据」)。
+- 流式问答公开契约:`/chat/query/stream` 只用默认 SSE 消息(`data:` 行,不用
+  `event:`),每条业务帧是 `{"type":"…","data":{…}}`,六种 type 为
+  stage/sql/summary/tool_call/result/error;`result.data` 与同步 `/chat/query`
+  响应同构。`trace` 诊断只走 Agent 内部流,不出公开面;`error.reason_code` 只允许
+  `AGENT_UNAVAILABLE` / `STREAM_OUTPUT_FAILED`。前端用
+  `apps/web/src/lib/chat-stream-validate.gen.js`(由契约生成)做运行时校验,
+  坏帧/未知类型/字段不合格一律跳帧,不中断流。
+- 问答轮真取消:流式响应头 `X-Trace-Id` 是本轮标识,
+  `POST /chat/query/stream/{trace_id}/cancel` 返回 `CANCELLED`/`COMPLETED`;
+  Agent 面按 trace_id 中止(`POST /internal/abort-query`);被取消轮落
+  `chat_message.status=CANCELLED`,已取消行沿用原轮用户消息的落库时刻,历史顺序
+  不会插到下一问之后。刷新、切会话、断网只是脱离接收,后台照常跑完并落库。
+- 取消与收尾的先后:一轮收尾(落库 + 终态帧)一旦开始就不被请求取消打断;硬取消
+  落在收尾段时等它做完,取消结果按收尾定。流式 FAILED 行带 trace_id,以失败收尾
+  的轮再取消返回 `COMPLETED` 并带消息标识,不是 404。实现在
+  `apps/api/kongming/chat/stream_runner.py`。
+- 在途轮跨实例共享:持有实例在 Redis 记 `chat:turn:{trace_id}`,TTL
+  `KM_TURN_REGISTRY_TTL_SEC` 缺省 900s;取消落任一实例未命中本地登记时,凭该键经
+  内部面 `POST /internal/chat/turn-cancel` 转给持有实例。多实例部署必须给每个实例
+  配唯一可达的 `KM_API_SELF_BASE_URL`,且登记 TTL 大于 Agent 超时 × 最坏阶段数;
+  Redis 故障退化为落库兜底,单实例语义不变。
+- 真取消已知限制:通知 Agent 等 3 秒、等本轮收敛 5 秒;超时才硬取消本地任务,
+  Agent 面挂起时取消请求约 8 秒返回;被中断的模型调用不产生 `sys_llm_usage` 行;
+  质量观测面不计已取消轮次;跨实例持有实例硬崩后最长一个登记 TTL 内取消转落库兜底。
+- 语音通话(ADR-013,可选启用):`KM_VOICE_API_KEY`、`KM_VOICE_REALTIME_BASE_URL`、
+  `KM_VOICE_MODEL` 三项齐备才启用(缺任一项端点 503;页面凭
+  `GET /voice/calls/capability` 的启用位决定入口可用还是置灰)。接入地址现值
+  `https://cn-beijing.maas.qianwenaiapi.com/api/v1/webrtc/realtime`,模型
+  `qwen3.8-omni-flash-realtime`,音色 Serena。声音浏览器直连(标准 `oai-events`
+  DataChannel,发 offer 前等 ICE 收集完成,`pc.ontrack` 播放远端音频),控制回后端
+  (`/voice/calls/channel`,一次性票据)。语音模型只当耳嘴,每轮语音提问走与打字
+  相同的流式问答端点,请求带可选 `voice_turn_token`(一次性、绑定本人,终态回填
+  同时校验 trace_id 与 user_id)。
+- 语音会话固定两个工具:`ask_kongming` 与 `stop_current_query`。断句必须用
+  `semantic_vad`,静默下限 2000ms(官方默认 800);`session.updated` 回显的
+  turn_detection 与 voice 会写日志。保护分三层:①等待期/空闲期模型未拿结果就开口,
+  服务端在首个非工具输出项到达时 `response.cancel`;等待期取消会把原调用标记为失效,
+  结果回来改文字补交。②模型出声时用户开口,后端取消该回应,浏览器按回应 id 保持
+  静音,残余音频不再解除。③远端音频默认静音,只有结果回填的 `playback.allow`
+  放行下一次回应;固定应答/停止确认是本地预录,不走远端放行。
+- 语音停止与通话收口:停止工具取消在途轮、回工具结果但不触发回应、播本地
+  `zh-stopped.m4a`;不计轮数、不落停止句,旧轮留下已取消说明。挂断先由服务端落
+  `hung_up` 审计再关闭文字通道;通道先因网络断开时 DELETE 返回 404 属正常竞态,
+  前端忽略即可。达时长上限的审计原因必须记 `max_duration`,不能被通道断开覆盖。
+  通话审计只落 `chat.voice.call_end`(不进 `sys_llm_usage`),含轮数、打断次数、
+  模型报告的音频用量与结束原因。
+- 语音已知限制:真机冒烟待重走(真实麦克风/扬声器/模型,含受限网络禁 UDP);受限
+  网络不做中转;回声消除依赖浏览器;停止句不落库;被取消的回应不报用量;放行只
+  保证「有结果才允许说」,不逐字校验结果后的自由发挥。固定应答/停止录音在
+  `apps/web/public/voice/`(qwen3-tts-flash 合成,44.1kHz AAC),改音色须重录。
 - 文档检索:向量 + 全文(ts_rank,zhparser 可选)+ 可选实体扩展路 → RRF(k=60)
   → 可选精排 → 父块 top-5;精排与 zhparser 已验收未启用(条件见开放决策项)。
   被索引文本=文档名+块正文;全文兜底零分命中不进入融合;文档多查询分解已落地
-  (子查询 2-3、注入上限 8、失败回落原问)。
+  (子查询 2-3、注入上限 8、失败回落原问)。数据源内省按 `pg_inherits` 排除继承/
+  分区子表(父表保留),不依赖表名;新 PostgreSQL 租户首次内省即生效,存量知识须
+  重扫清理旧子表条目;非 PostgreSQL 数据源需在对应内省适配器实现同样的父子语义。
+- 成功 SQL 会写回 `rag.query_history` 作为 few-shot;错误但执行成功的样本会自我
+  强化。改口径/表义后须同时停用相冲突的历史样本并清理 RAG 上下文缓存,不能只改
+  提示。Sakila 按月租赁口径的坏样本已停用;`_QUERY_SEMANTICS` 已 bump 到
+  `and-cw2`,旧上下文缓存自然失效。
 - 评测:15 文档 28 题、BM25 80 题、Wiki 26 题、lab 74 题与判别变体、K8s 30 题
   (73 篇/1400 父块,AI 编写+程序校验+AI 复核,未经人工领域评审);K8s 基线融合
-  0.833/全跳 0.733,分解后 0.883/0.800。
+  0.833/全跳 0.733,分解后 0.883/0.800;跨文档多跳仍不承诺。
 - 多模型注册表:人工条目按「模型×端点」编队,别名优先;TITLER/SUGGEST/DESCRIBE→
-  qwen-flash;主模型与 embedding 走 maas 镜像域,dashscope 回滚。
-- 问答轮真取消(add-chat-turn-cancel,已归档):对话页「取消本轮」是真取消——流式响应头
-  `X-Trace-Id` 是本轮标识,`POST /chat/query/stream/{trace_id}/cancel` 返回
-  `CANCELLED`/`COMPLETED`;Agent 面按 trace_id 中止(`POST /internal/abort-query`,
-  同一道内部令牌);被取消的轮落 `chat_message.status=CANCELLED`(迁移 `0068` 第五态;
-  `0069` 给 `chat_message.trace_id` 建了索引)。刷新、切会话、断网仍只是脱离接收,
-  后台照常跑完并落库。
-- 前端断开后的中继内存卫生:SSE 中继生成器异常退出(前端断开、取消、发送失败)时
-  就地丢弃消费任务后续入队的帧直到终止标记——后台照常落库,但不在内存里为无人接收的
-  帧堆队(结果集大时单轮可达数百 KB,并发遗弃轮次会叠加)。Agent 面帧队列保持无界:
-  其唯一消费者(控制面消费任务)断开时图执行即被取消,队列不会无限增长;设有界反而
-  在图执行快于读取时把驱动任务堵死。
-- 在途轮登记跨实例共享(share-turn-registry,已归档):取消请求落到任一实例都生效。
-  持有实例在 Redis 记一键(`chat:turn:{trace_id}`,值含归属用户/本实例地址/注销凭据,
-  TTL `KM_TURN_REGISTRY_TTL_SEC` 缺省 900s);收到取消的实例未命中本地在途登记时,
-  凭该键把取消经内部面 `POST /internal/chat/turn-cancel` 转给持有实例执行,结果原样
-  回传。登记不可用、持有实例不可达、登记指向本实例而本实例无该轮(陈旧登记)时,
-  一律按落库结果回答,不伪造终态。自报地址 `KM_API_SELF_BASE_URL` 缺省按主机名推导
-  ——多实例部署必须逐实例唯一可达,不能填共享服务名(会让自环防护误判);登记 TTL 须
-  大于 `KM_AGENT_TIMEOUT_SEC`(120s)× 最坏 5 阶段 + 收敛余量。Redis 故障时退化为
-  落库兜底,单实例语义不变。
-- 取消与收尾的先后:一轮的收尾(落库 + 终态帧)一旦开始就不被请求取消打断——硬取消落在
-  收尾段时等它做完,取消结果按收尾定(已有业务行或 FAILED 行即 `COMPLETED`)。流式的
-  FAILED 行带 trace_id,以失败收尾的轮再取消返回 `COMPLETED` 并带消息标识,不是 404。
-  实现在 `apps/api/kongming/chat/stream_runner.py`(`_await_settle`/`_settle`)。
-- 真取消的已知限制:①`0068` 降级前须先处理 CANCELLED 行(删除或人工改写),否则四态
-  CHECK 拒绝降级;②通知 Agent 面等 3 秒、等本轮收敛 5 秒,超时才硬取消本地任务——
-  Agent 面挂起时取消请求约 8 秒返回(常量在 `apps/api/kongming/chat/inflight.py` 与
-  `agent_client.py`);③被中断的那次模型调用不产生 `sys_llm_usage` 行;④质量观测面
-  不计已取消轮次,按 trace 的用量时间线与按消息标识的节点轨迹仍可查;⑤跨实例取消的
-  残余窗口:持有实例硬崩后最长一个登记 TTL 内,取消会先转发、连不通后按落库兜底
-  (最坏多等一个转发超时 16s);Redis 故障时跨实例取消退化为落库兜底(单实例不受影响,
-  本地快路径不依赖 Redis)。
-- 模型调用可经 muniu 网关(2026-11-24 实测):agent 的 LLM/向量/模型注册表整体指向
-  muniu(隔离实例、独立 SQLite、一次性 `mk-` key,不碰用户常驻实例)时问答/向量/路由/
-  计量/密钥鉴权全通;取消时正在路上的模型请求被掐断——网关记 `client_cancel`、0 token,
-  无额外 token。起法:复制 muniu.yaml 删 `admin_oidc` 段(配置比二进制旧,缺
-  admin_subjects)、库指向临时文件;`DASHSCOPE_API_KEY` 取孔明根 `.env` 的
-  `KM_AGENT_LLM_API_KEY`(两域名同一把密钥);客户端用 `Authorization: Bearer mk-…`。
-- 本机手工起服务时 Agent 面没有自己的 `.env`:它的配置在仓库根 `.env`,须从仓库根
-  启动;内部令牌两侧要对上(`KM_INTERNAL_TOKEN` / `KM_AGENT_INTERNAL_TOKEN`),否则
-  Agent 面对一切请求答 403。未配置签名密钥时每个 api 进程各自生成临时密钥,
-  进程外签发的令牌在另一个进程里无效。
-- 门禁各项(2026-11-24):api-check 1797 passed/10 skipped、覆盖率 77.22%,agent-check
-  626 passed,liannu-check 23 passed,web 192 tests + 2 e2e,
-  `openspec validate --all --strict` 56/56,`make check` 全绿。
-  `contracts-check` 比较的是工作区与已提交版本,改动未提交时必红——提交前以「重复生成
-  `contracts/openapi.json` 无差异」为准。仓库根若残留 `.playwright-mcp/`(浏览器工具的
-  页面快照,已被 git 忽略)会让 `lint-config` 的 yamllint 报红,删掉即可。
+  qwen-flash;主模型与 embedding 走 maas 镜像域,dashscope 回滚。Agent 的 LLM/
+  向量/模型注册表可整体指向 muniu(隔离实例、独立 SQLite、一次性 `mk-` key,
+  不碰用户常驻实例);取消时正在路上的模型请求会被掐断,网关记 `client_cancel`、
+  0 token。启动 muniu 时复制 muniu.yaml 删 `admin_oidc` 段(配置比二进制旧),
+  库指向临时文件,`DASHSCOPE_API_KEY` 取孔明根 `.env` 的 `KM_AGENT_LLM_API_KEY`。
+- 门禁各项目前:api-check 1892 passed/10 skipped、覆盖率 77.80%;agent-check 627
+  passed;liannu-check 23 passed;web 236 tests + 2 e2e;
+  `openspec validate --all --strict` 55/55(归档 4 个变更后,在途仅
+  add-sql-semantic-guard 提案)。`make check` 全量绿,`contracts-check` 以已提交
+  契约为基线复跑零差异。仓库根若残留 `.playwright-mcp/`(浏览器工具快照,已 git
+  忽略)会让 `lint-config` 的 yamllint 报红,删掉即可。
 
 ## 下一步
 
-1. CI 全 job 因 GitHub Actions 账单锁定未启动;解锁后观察 contracts-check 与镜像扫描;
-   eval-nightly 仅手动触发。
-2. 反代部署确认:`KM_AUTH_COOKIE_SECURE`、可信代理头、登录限流口径;并确认反代把
-   `/api` 前缀剥离到后端根路由(认证 cookie 的路径覆盖依赖该口径)。多实例部署时按
-   `KM_API_SELF_BASE_URL` 给每个实例配唯一可达地址,并确认实例间网络互通(内部面转发
-   依赖它)。
+1. CI 全 job 因 GitHub Actions 账单锁定未启动;解锁后观察 contracts-check、镜像
+   扫描与 e2e;eval-nightly 仍只手动触发。
+2. 反代部署确认:`KM_AUTH_COOKIE_SECURE`、可信代理头、登录限流口径;反代须把
+   `/api` 前缀剥离到后端根路由。多实例按 `KM_API_SELF_BASE_URL` 逐实例配唯一可达
+   地址,并确认实例间内部面互通。
 3. eval-nightly 首次运行前配置 `KM_AGENT_LLM_API_KEY` 与 `KM_EVAL_ACCESS_TOKEN`。
-4. 实时语音通话(`add-voice-call`,提案已备、未开工):前置(真取消)已就绪,真实通话
-   验证已做完(2026-11-24,约 0.02 元;要点=浏览器可 WebRTC 直连阿里实时模型、
-   必须用 semantic_vad、命中工具调用的那轮模型不出声),待 owner 裁决是否开工。
-5. 两个待评审的外来提案(他人所写,未评审未开工):`refactor-current-user-auth`
-   (路由统一收 `CurrentUser`)、`standardize-chat-stream-events`(流式事件统一信封,
-   含 BREAKING 变更)。
+4. 语音真机冒烟:停止意图、空闲自答拦截、停顿容忍、插话即停、叠音、音色、
+   WebRTC 设备面与受限网络禁 UDP;异常先看 `chrome://webrtc-internals` 的 ICE 与
+   DataChannel 状态。`2026-11-25-add-voice-intent-guard` 的 4.3 为此保留未完成。
+5. `add-sql-semantic-guard` 仅立项、17 项任务全部未实现;实施前先过 tasks 1.4
+   (动态数据源 PK/FK 图采集)与 3.1(事件表被金额表引用仍判事件)两个前置门。
 
 ## 开放决策项
 
@@ -102,37 +125,22 @@
   「租赁规则」一跳,012 为登记豁免边界题);收紧红线前先逐题评估 009/012。
 - K8s 跨文档多跳全跳 1/6;剩余缺口受查询改写与候选精度限制,不设通过线。
 - refresh cookie 作用域为 API 同源全路径:同源信任边界内接受;若同源再挂其他应用,
-  复评限定方案(仅 `/api` 或双 cookie)。
-- `/auth/refresh` 响应仍回传明文 refresh_token,是否收窄为只回 access 待拍板。
-- `sys_user.id` 依赖 Keycloak sub 为 UUID;非 UUID sub 需迁移。
-- 登录限流为进程内、每 worker 独立;严格全局阈值需共享后端。
-- `0066` DOWNGRADE 只恢复 `admin` 账号,不回滚其余影子账号角色/租户绑定。
+  复评限定方案(仅 `/api` 或双 cookie)。`/auth/refresh` 响应仍回传明文
+  refresh_token,是否收窄为只回 access 待拍板。
+- `sys_user.id` 依赖 Keycloak sub 为 UUID;非 UUID sub 需迁移。登录限流为进程内、
+  每 worker 独立;严格全局阈值需共享后端。
+- 语音多实例:当前在途通话表、票据与轮关联表都是进程内单例,多实例部署前须外置
+  或做实例粘滞;语音模型密钥只在 api,不下发浏览器。
+- 数据源内省父子语义目前只覆盖 PostgreSQL;其他数据库适配器需补同语义,不能靠
+  表名过滤兜底。
 
 ## 验收记录
 
-- 2026-11-24 问答轮真取消:新增用例先红后绿(api `test_chat_turn_cancel.py` 26 例、
-  质量面已取消轮 1 例,agent `test_query_abort.py` 6 例,web `turn-stop` 9 例);
-  真实模型冒烟——查询中途取消 0.04s 返回 CANCELLED 且历史留已取消行;只断开连接不取消时
-  后台 3s 照常落库;Agent 面进程冻结时取消 8.04s 返回 CANCELLED(通知超时 3s + 等收敛 5s
-  后硬取消);三轮后历史恰三条 assistant 行;被取消 trace 的 `sys_llm_usage` 不再新增、
-  取消后立即重发同一问正常。界面走查(375/768/1280 × 亮暗)修掉三个前端问题(停止提示被
-  空态吞掉、已取消卡片不自行出现、严格模式双发请求);代码评审修掉两个缺陷(查重读取失败
-  逃出取消收敛;`chat_message` 缺 trace_id 索引,补迁移 `0069`)。
-- 2026-11-24 取消掐断上游请求(经 muniu 网关,真实模型):对照组跑完四步全记用量;
-  「生成 SQL 开始时取消」与「总结开始时取消」两组,被取消的那次调用在孔明用量表与
-  muniu 用量记录里都没有行(muniu 记 `client_cancel`、0 token、15ms 收尾,对照组同类
-  调用 2–3s)——取消一路传导到上游供应商,无额外 token。
-- 2026-11-24 在途轮登记跨实例共享(双实例手工冒烟):A(8020)起真实模型流、B(8022)
-  收到取消→经 Redis 登记定位并转发到 A 的内部面→A 跑既有编排并通知 Agent 面中止
-  (agent 日志「在途问答已中止 count=1」)→B 返回 CANCELLED 携消息标识,A 的流收到
-  CANCELLED 终态帧,历史恰一条已取消行;杀掉 A 后 B 取消其陈旧 trace→0.02s 返回
-  404(不自我转发成环、不悬挂);登记键随轮次释放。新增用例 16 个(单测 13 + 集成 3),
-  api-check 1797 passed/10 skipped。
-- 2026-11-24 认证 cookie 路径:state/refresh 覆盖 `/api` 前缀;回归测试旧实现红、
-  新实现绿;认证测试 47 passed;浏览器三端 SSO 9/9(三种首登入口,其余两端免密);
-  协议级 e2e ALL PASS;`make check` 全绿。同日下午修订正端点只认 cookie(删 body
-  通道),令牌测试增至 42 例。
-- 2026-11-23 多标签页登录 state cookie:并发 tab 各自回调 200,超上限丢最旧,
-  非 ASCII state 返回 401;api-check 1751 passed/10 skipped。
-- 2026-11-23 Keycloak 真实联调:demo 登录后 `/auth/me` user_id=Keycloak sub,
-  roles/tenant/perms 来自本地;登出 redirect 指向 Keycloak,旧 refresh 401。
+- 2026-11-25 门禁:api-check 1892 passed/10 skipped、覆盖率 77.80%;agent-check
+  627 passed;web-check 236 tests + 2 e2e(构建/体积限制通过);dead-code、dup-check、
+  lint-config、OpenSpec strict 均通过。`make contracts` 连续重复生成零差异,
+  `oasdiff breaking` 无 BREAKING。
+- 2026-11-25 语音单元与集成:状态机、准入/票据/牵线、语音轮关联、流式取消、
+  WebSocket 通道、播放闸门与前端 UI 用例通过;未做真实麦克风/扬声器真机验收。
+- 2026-11-24~25 认证、流式契约、问答取消、跨实例取消、Keycloak 三端 SSO 的
+  浏览器/协议级验收均已记录在对应 OpenSpec 归档与 git 历史。
