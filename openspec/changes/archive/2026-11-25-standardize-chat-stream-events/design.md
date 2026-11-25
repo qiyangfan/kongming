@@ -4,15 +4,15 @@
 
 | 位置 | 从代码确认的行为 |
 | --- | --- |
-| Agent 产生事件 | 普通问答和 ReAct 使用同一个 `emit_event(name, dict)`。两条内部流都用 SSE 发送事件名和数据，内部 `result` 使用 `QueryOut`。见 [发射函数](../../../apps/agent/kongming_agent/graph/streams.py#L26)和 [Agent 响应](../../../apps/agent/kongming_agent/main.py#L489)。 |
-| API 接收 Agent 流 | 按事件名白名单筛选。过程消息只检查数据能否解析为字典，随后进入队列，阶段消息还会写入阶段记录。当前 `trace` 也会转发，内容可包含表预筛结果、评分或引用净化信息。见 [中继](../../../apps/api/kongming/chat/stream_runner.py#L189)和 [诊断事件](../../../apps/agent/kongming_agent/graph/nodes.py#L373)。 |
-| API 对外发送 | `result` 先将领域结果转成 `ChatQueryOut`，再由响应模型编码。其余事件用 `json.dumps(default=str)`，遇到不支持的值时可能直接转成文本。接口说明用 `oneOf` 列出裸数据结构，200 响应还额外声明了实际不会返回的 `application/json`。见 [发送函数](../../../apps/api/kongming/chat/router.py#L194)、[模型与响应说明](../../../apps/api/kongming/chat/schemas.py#L189)和 [生成的接口说明](../../../contracts/openapi.json)。 |
-| 网页接收 | 按 SSE 的 `event:` 名查表，用 TypeScript 的 `as` 直接信任解析后的数据。现有测试把空对象视为合法结尾。读流逻辑标记结尾后还会继续分发同一网络分块中的消息。见 [分发函数](../../../apps/web/src/lib/api.ts#L276)和 [现有测试](../../../apps/web/src/lib/api.test.ts#L45)。 |
+| Agent 产生事件 | 普通问答和 ReAct 使用同一个 `emit_event(name, dict)`。两条内部流都用 SSE 发送事件名和数据，内部 `result` 使用 `QueryOut`。见 [发射函数](../../../../apps/agent/kongming_agent/graph/streams.py#L26)和 [Agent 响应](../../../../apps/agent/kongming_agent/main.py#L489)。 |
+| API 接收 Agent 流 | 按事件名白名单筛选。过程消息只检查数据能否解析为字典，随后进入队列，阶段消息还会写入阶段记录。当前 `trace` 也会转发，内容可包含表预筛结果、评分或引用净化信息。见 [中继](../../../../apps/api/kongming/chat/stream_runner.py#L189)和 [诊断事件](../../../../apps/agent/kongming_agent/graph/nodes.py#L373)。 |
+| API 对外发送 | `result` 先将领域结果转成 `ChatQueryOut`，再由响应模型编码。其余事件用 `json.dumps(default=str)`，遇到不支持的值时可能直接转成文本。接口说明用 `oneOf` 列出裸数据结构，200 响应还额外声明了实际不会返回的 `application/json`。见 [发送函数](../../../../apps/api/kongming/chat/router.py#L194)、[模型与响应说明](../../../../apps/api/kongming/chat/schemas.py#L189)和 [生成的接口说明](../../../../contracts/openapi.json)。 |
+| 网页接收 | 按 SSE 的 `event:` 名查表，用 TypeScript 的 `as` 直接信任解析后的数据。现有测试把空对象视为合法结尾。读流逻辑标记结尾后还会继续分发同一网络分块中的消息。见 [分发函数](../../../../apps/web/src/lib/api.ts#L276)和 [现有测试](../../../../apps/web/src/lib/api.test.ts#L45)。 |
 
 ## Goals / Non-Goals
 
 - API 的公开事件模型同时供校验、编码和契约生成使用。每种事件保留自身的业务数据结构。
-- Agent 内部 `QueryOut` 与 API 公开 `ChatQueryOut` 分属两个边界。前者包含问答引擎的内部字段，后者带有 API 补充的会话、保存结果和展示信息。两进程继续遵守 [ADR-002](../../../docs/adr/002-trust-boundary.md)。
+- Agent 内部 `QueryOut` 与 API 公开 `ChatQueryOut` 分属两个边界。前者包含问答引擎的内部字段，后者带有 API 补充的会话、保存结果和展示信息。两进程继续遵守 [ADR-002](../../../../docs/adr/002-trust-boundary.md)。
 - HTTP 发送失败与问答保存各自处理。发送端只处理输出，轮次结果仍由现有问答流程决定。
 
 ## Decisions
@@ -51,7 +51,7 @@ WHATWG 把文本分帧规则和应用消息内容分开。`event:` 可用于命�
 ### 3. 生成网页类型和接收时的校验函数
 
 - OpenAPI 继续使用仓库当前的 3.1.0。200 响应仅声明 `text/event-stream`，响应体表示为文本。用媒体类型的 `x-sse-data-schema` 引用 `components.schemas.ChatStreamEvent`，明确它描述的是单条 `data:` 解码后的 JSON。通过路由的响应模型注册组件并由 Pydantic 生成带 `oneOf` 和 `discriminator` 的规则。`result.data` 引用现有 `ChatQueryOut`。OpenAPI 3.2 定义了 `itemSchema`，本次改动的范围是单个接口，继续用 3.1 的扩展字段。见 [OpenAPI 3.1 媒体类型](https://spec.openapis.org/oas/v3.1.0.html#media-type-object)和 [OpenAPI 3.2 SSE](https://spec.openapis.org/oas/v3.2.0.html#special-considerations-for-server-sent-events)。
-- 沿用 `openapi-typescript` 生成事件类型。基于同一个 `x-sse-data-schema` 引用，用 Ajv 8 在构建阶段生成仅用于聊天流的校验模块。Ajv 已出现在网页锁文件中，实施时声明为相同版本线的直接开发依赖。只将生成的校验模块提供给浏览器。校验使用每个分支必填的 `type` 常量和 JSON Schema `oneOf`，关闭隐式转换与默认值填充。将校验产物纳入 `contracts:gen` 和 `contracts-check`，保持与 [ADR-005](../../../docs/adr/005-contract-pipeline.md) 的单一来源一致。见 [类型生成说明](https://openapi-ts.dev/advanced#use-oneof-by-itself)和 [Ajv 独立校验模块](https://ajv.js.org/standalone.html)。
+- 沿用 `openapi-typescript` 生成事件类型。基于同一个 `x-sse-data-schema` 引用，用 Ajv 8 在构建阶段生成仅用于聊天流的校验模块。Ajv 已出现在网页锁文件中，实施时声明为相同版本线的直接开发依赖。只将生成的校验模块提供给浏览器。校验使用每个分支必填的 `type` 常量和 JSON Schema `oneOf`，关闭隐式转换与默认值填充。将校验产物纳入 `contracts:gen` 和 `contracts-check`，保持与 [ADR-005](../../../../docs/adr/005-contract-pipeline.md) 的单一来源一致。见 [类型生成说明](https://openapi-ts.dev/advanced#use-oneof-by-itself)和 [Ajv 独立校验模块](https://ajv.js.org/standalone.html)。
 - 网页按 SSE 规则先恢复完整数据消息，再 `JSON.parse` 并调用生成的校验函数。检查通过后用 `switch (event.type)` 分发，保留现有组件回调。使用 TypeScript 的穷尽检查让新增事件在缺少处理分支时无法通过类型检查。对跨网络分块的 UTF-8、LF、CRLF、CR、注释和多行 `data:` 写分帧测试。第一条合法结尾触发回调并停止该请求的读取和分发，即使同一块字节还包含后续消息。见 [TypeScript 类型收窄](https://www.typescriptlang.org/docs/handbook/2/narrowing.html)和 [WHATWG SSE](https://html.spec.whatwg.org/multipage/server-sent-events.html#interpreting-an-event-stream)。
 
 ### 4. 用锁定版本验证技术路径

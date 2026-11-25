@@ -18,16 +18,16 @@
 
 ### Modified Capabilities
 
-无。`auth` 和 `rbac` 已规定令牌使用、本地授权和权限撤销行为。这里调整的是后端传递身份和读取权限的方式，验收仍以现有规格为准。 [认证规格](../../specs/auth/spec.md) · [权限规格](../../specs/rbac/spec.md)
+无。`auth` 和 `rbac` 已规定令牌使用、本地授权和权限撤销行为。这里调整的是后端传递身份和读取权限的方式，验收仍以现有规格为准。 [认证规格](../../../specs/auth/spec.md) · [权限规格](../../../specs/rbac/spec.md)
 
 ## Impact
 
 - 改动集中在 API 的认证模块及引用该依赖的路由。目前检索到 25 个路由文件，实施时以当时的调用点为准。
-- 客户端继续使用原有访问令牌和接口。验收时对比改动前后的 OpenAPI 和生成的前端类型。 [ADR-003 令牌签发](../../../docs/adr/003-auth-selfhosted.md) · [ADR-005 接口生成](../../../docs/adr/005-contract-pipeline.md)
-- 数据库使用现有用户和授权表。API 继续负责认证和授权，Agent 继续通过现有内部接口调用 API。 [ADR-002 信任边界](../../../docs/adr/002-trust-boundary.md)
+- 客户端继续使用原有访问令牌和接口。验收时对比改动前后的 OpenAPI 和生成的前端类型。 [ADR-003 令牌签发](../../../../docs/adr/003-auth-selfhosted.md) · [ADR-005 接口生成](../../../../docs/adr/005-contract-pipeline.md)
+- 数据库使用现有用户和授权表。API 继续负责认证和授权，Agent 继续通过现有内部接口调用 API。 [ADR-002 信任边界](../../../../docs/adr/002-trust-boundary.md)
 
 ## Non-goals
 
-- 登录、刷新、登出、签名密钥、令牌字段和 Keycloak 接入沿用现有行为。 [ADR-003](../../../docs/adr/003-auth-selfhosted.md) · [ADR-006](../../../docs/adr/006-federation-connectors.md)
+- 登录、刷新、登出、签名密钥、令牌字段和 Keycloak 接入沿用现有行为。 [ADR-003](../../../../docs/adr/003-auth-selfhosted.md) · [ADR-006](../../../../docs/adr/006-federation-connectors.md)
 - 租户绑定、资源归属及 SQL 数据范围由各自现有检查负责。角色管理和用户资料仍使用现有接口。
 - 把账号禁用检查扩展到当前仅验证访问令牌的入口，或让已开始的流式请求重新检查权限，属于另外的行为决策。

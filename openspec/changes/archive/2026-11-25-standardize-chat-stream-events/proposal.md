@@ -25,8 +25,8 @@
 
 ## Impact
 
-- `apps/api/kongming/chat` 负责解析 Agent 消息、组织公开事件和编码 SSE。Agent 与 API 的进程和凭证边界见 [ADR-002](../../../docs/adr/002-trust-boundary.md)。
-- `apps/web/src/lib/api.ts` 负责验证收到的消息并分发，现有聊天组件继续接收各类事件的数据。契约生成从现有 OpenAPI 入口扩展一项定向校验产物，见 [ADR-005](../../../docs/adr/005-contract-pipeline.md)。
+- `apps/api/kongming/chat` 负责解析 Agent 消息、组织公开事件和编码 SSE。Agent 与 API 的进程和凭证边界见 [ADR-002](../../../../docs/adr/002-trust-boundary.md)。
+- `apps/web/src/lib/api.ts` 负责验证收到的消息并分发，现有聊天组件继续接收各类事件的数据。契约生成从现有 OpenAPI 入口扩展一项定向校验产物，见 [ADR-005](../../../../docs/adr/005-contract-pipeline.md)。
 - 外部直接读取 `/chat/query/stream` 的客户端须按 `type` 分发。项目按学习环境安排一次切换，前后端及生成产物一起交付。
 
 ## Non-goals

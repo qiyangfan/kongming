@@ -246,19 +246,20 @@ ReAct 请求 SHALL 纯增可选 bot_system_prompt(Bot 定义的系统提示,025)
 
 ### Requirement: 工具调用流式契约
 
-ReAct 流式端点的 SSE 流 SHALL 新增 tool_call 事件(字段:tool_name、args 摘要、status ∈ {running, done, rejected}、result 摘要),与既有 stage/sql/summary/result/error 事件并列。事件扩展 MUST 向后兼容——老前端忽略未知事件类型。一次工具调用 SHALL 至少发射 running 与终态(done/rejected)各一帧;result 摘要有截断上限。
+ReAct 问答的公开流 SHALL 按 `query-streaming` 规格发送 `type=tool_call` 的过程事件。其 `data` SHALL 包含工具名 `tool_name` 和 `status`，状态取值为 `running`、`done` 或 `rejected`。`args_digest` 和 `result_digest` 为可选的截断摘要。一次工具调用 SHALL 报告开始与完成或被拒绝。工具完成或被拒绝后，问答流 SHALL 继续至问答自己的结尾事件。
 
 #### Scenario: tool_call 事件下发
 
-- GIVEN ReAct 循环进入一次工具调用
-- WHEN 工具开始执行、执行完成、或被防御层拒绝
-- THEN SSE 流依次下发对应 status 的 tool_call 事件
+- GIVEN ReAct 开始一次工具调用
+- WHEN 工具开始执行，随后执行完成或被防御层拒绝
+- THEN API 发送 `tool_call` 事件，先报告 `running`，再报告 `done` 或 `rejected`
+- AND 网页继续接收本轮问答，直到收到合法的 `result` 或 `error`
 
 #### Scenario: 老前端向后兼容
 
-- GIVEN 一个未升级的前端客户端
-- WHEN 收到未知事件类型 tool_call
-- THEN 客户端忽略该事件,不崩溃,不影响对 result/error 终态事件的处理
+- GIVEN 网页与 API 使用相同的事件格式，网页认识的事件类型少于 API
+- WHEN 网页收到无法识别的事件类型，随后收到合法的 `result` 或 `error`
+- THEN 网页跳过未知事件，照常处理问答结尾
 
 ### Requirement: 工具管理与审计查询
 

@@ -287,7 +287,9 @@ X-Tenant-Id 租户白名单校验(缺省取用户默认租户,未绑定拒绝,SU
 不豁免)。请求 SHALL 携带 question;SHOULD 携带 session_id(缺省自动新建会话,
 标题规则见「会话持久化」requirement 的两阶段生成)、persist(缺省 true)、
 history(显式多轮上下文)、datasource_key(缺省 default)。系统 SHALL 为每次问答
-生成 trace_id 并贯穿 Agent 面与执行审计。
+生成 trace_id 并贯穿 Agent 面与执行审计。请求 SHALL 纯增可选的语音轮关联
+字段(voice_turn_token):仅语音通话发起的一轮携带,须属于当前用户的在途
+通话且未被使用;打字提问不携带,行为逐字不变。
 
 #### Scenario: 有权限用户提问成功
 - GIVEN 已登录用户角色含 chat:execute,租户 default 已绑定
@@ -311,6 +313,21 @@ history(显式多轮上下文)、datasource_key(缺省 default)。系统 SHALL �
 - GIVEN 请求 X-Tenant-Id 指向用户未绑定的租户
 - WHEN 提交问题
 - THEN 返回 403,不回调 Agent 面
+
+#### Scenario: 语音轮携带关联字段
+- GIVEN 通话侧已为用户 A 的一通在途通话签发了关联字段
+- WHEN 用户 A 以该字段提交流式问答
+- THEN 该轮与通话侧绑定,通话侧可订阅其终态并代为取消;其余行为与打字提问一致
+
+#### Scenario: 关联字段非法
+- GIVEN 关联字段不存在、已被使用,或不属于当前用户
+- WHEN 提交问题
+- THEN 返回 400,不落消息、不回调 Agent 面
+
+#### Scenario: 打字提问零回归
+- GIVEN 请求不携带关联字段
+- WHEN 提交问题
+- THEN 请求校验、编排与响应与引入前逐字一致
 
 ### Requirement: 问答响应契约与状态映射
 
@@ -538,25 +555,21 @@ session_id):同一鉴权与租户约束;删除会话并级联删除其全部消�
 
 ### Requirement: 流式问答端点
 
-系统 SHALL 提供用户面流式问答端点 `POST /chat/query/stream`:鉴权与
-前段防线(权限点 `chat:execute` + X-Tenant-Id 租户白名单 + 数据源入口
-预检 + 会话处理 + history 补全 + USER 消息落库)SHALL 与同步问答端点
-共用同一编排;响应形态为 SSE(text/event-stream,Cache-Control no-cache),
-事件契约见 query-streaming spec。Agent 面流 SHALL 由控制面中继:阶段/
-sql/summary 事件透传,result/error 终态由控制面在落库后构造下发
-(result 事件在 assistant 消息落库之后发出,message_id 即落库消息 id)。
+系统 SHALL 提供 `POST /chat/query/stream`。认证、`chat:execute` 权限、`X-Tenant-Id` 租户白名单、数据源预检、会话、历史补全和用户消息保存 SHALL 与同步问答共用一套流程。响应 SHALL 为 SSE，带 `Cache-Control: no-cache`。API SHALL 按 `query-streaming` 规格检查和转发 Agent 过程事件。API SHALL 完成本轮的结果保存处理后发送 `result`，`result.data.message_id` 为已保存应答的标识，结果未保存时为 `null`。异常流 SHALL 按 `query-streaming` 规格处理。
 
 #### Scenario: 流式问答全链
-- GIVEN 已登录用户角色含 chat:execute 且租户已绑定
-- WHEN 以流式端点提交问题
-- THEN 响应为 SSE 流:阶段事件逐个到达,校验通过后 sql 事件先于终态
-- AND result 事件 data 与同步端点响应同构(含 message_id)
-- AND user 与 assistant 消息照常落库
+
+- GIVEN 已登录用户角色含 `chat:execute` 且租户已绑定
+- WHEN 用户提交流式问答
+- THEN 阶段事件逐个到达，通过校验的 `sql` 事件先于结尾
+- AND `result.data` 与同步端点响应同构，`message_id` 引用该轮保存的应答
+- AND 用户消息和应答正常保存
 
 #### Scenario: 流开始前校验失败
+
 - GIVEN 会话不存在或数据源非法或租户未绑定
-- WHEN 以流式端点提交问题
-- THEN 返回常规 JSON 错误响应(404/400/403,与同步端点同码同 detail)
+- WHEN 用户提交流式问答
+- THEN 返回常规 JSON 错误响应，与同步端点的响应状态码及 `detail` 一致
 
 ### Requirement: 流式中继的断线续存与失败收敛
 
