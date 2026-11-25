@@ -411,6 +411,7 @@ async def test_recall_empty_returns_blank(
         "relations_hint": "",  # 语义段(空)
         "metric_hints": "",
         "metric_hits": [],  # 结构化口径命中(空)
+        "schema_graph": None,  # 结构化图(空表集合无图)
         "doc_hints": [],  # 文档段(空)
         "skill_terms": "",  # skill 段(空=无技能包)
         "skill_examples": "",

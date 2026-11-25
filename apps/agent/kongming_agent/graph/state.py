@@ -49,6 +49,7 @@ class AgentState(TypedDict, total=False):
     history: list[str]  # 多轮上下文:user 问句列表,旧→新(指代消解用)
     resolved_question: NotRequired[str]  # understand 产物(指代消解后)
     schema_hint: NotRequired[str]  # retrieve 产物(拼好的 schema 提示文本)
+    schema_graph: NotRequired[dict[str, object]]  # retrieve 产物(结构化图;缺失=旧路径)
     history_sql: NotRequired[str]  # retrieve 产物(召回的历史成功 SQL 段)
     generated_sql: NotRequired[str]  # generate 产物
     validation: NotRequired[ValidationResult]  # validate 产物(本地预检)

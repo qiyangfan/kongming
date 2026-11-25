@@ -268,6 +268,45 @@ class MetricHitOut(BaseModel):
     updated_at: str | None = None
 
 
+class SchemaGraphColumnOut(BaseModel):
+    """结构化图列(名称/类型/注释;不含任何连接信息)。"""
+
+    name: str
+    data_type: str
+    comment: str = ""
+
+
+class SchemaGraphTableOut(BaseModel):
+    """结构化图表、列、主键与可确定角色。"""
+
+    schema_name: str
+    table_name: str
+    comment: str = ""
+    columns: list[SchemaGraphColumnOut] = []
+    primary_key: list[str] = []
+    role: str = "unknown"
+    source: str = "introspection"
+
+
+class SchemaGraphForeignKeyOut(BaseModel):
+    """结构化图外键边(多列按序配对)。"""
+
+    source_schema: str
+    source_table: str
+    source_columns: list[str] = []
+    target_schema: str
+    target_table: str
+    target_columns: list[str] = []
+
+
+class SchemaGraphOut(BaseModel):
+    """召回响应携带的结构化 Schema 图;complete=False 时调用方不得做硬范围拒绝。"""
+
+    tables: list[SchemaGraphTableOut] = []
+    foreign_keys: list[SchemaGraphForeignKeyOut] = []
+    complete: bool = True
+
+
 class RetrieveOut(BaseModel):
     schema_hint: str
     history_sql: str
@@ -276,6 +315,8 @@ class RetrieveOut(BaseModel):
     metric_hints: str = ""
     # 结构化口径命中(与 metric_hints 同源;空=无命中)
     metric_hits: list[MetricHitOut] = []
+    # 结构化 Schema 图(纯增;缺失/旧 Agent 不消费时保持既有路径)
+    schema_graph: SchemaGraphOut | None = None
     # 文档段(空=无命中,双通道隔离)。
     # 每项 citation_key(稳定引用键;由父块主键派生)
     doc_hints: list[dict[str, str]] = []

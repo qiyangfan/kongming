@@ -15,10 +15,12 @@ from redis.asyncio import Redis
 
 from kongming.config import DEFAULT_FULLTEXT_TS_CONFIG, validated_fulltext_ts_config
 from kongming.rag.models import RagContext, team_set_fingerprint
+from kongming.rag.schema_graph import SchemaGraph
 
 log = logging.getLogger(__name__)
 
 _CTX_PREFIX = "km:ragctx:"
+_GRAPH_PREFIX = "km:raggraph:"
 _CTX_TTL_SEC = 600
 _SCAN_COUNT = 100
 # 查询语义版本段(全文路「AND 优先、内容词兜底」)——查询语义变更时
@@ -42,6 +44,11 @@ def _ctx_key(
         f"{_CTX_PREFIX}{tenant_id}:{datasource_key}:{ts_config}"
         f":{_QUERY_SEMANTICS}:{team_fp}:{digest}"
     )
+
+
+def _graph_key(tenant_id: str, datasource_key: str, ts_config: str) -> str:
+    """图缓存键(租户+数据源);语义版本段随 ctx 一起隔离。"""
+    return f"{_GRAPH_PREFIX}{tenant_id}:{datasource_key}:{ts_config}:{_QUERY_SEMANTICS}"
 
 
 class ContextCache:
@@ -115,11 +122,47 @@ class ContextCache:
         except Exception:
             log.warning("ctx 缓存写失败,跳过", exc_info=True)
 
-    async def evict(self, tenant_id: str, datasource_key: str) -> None:
-        """精确失效该 tenant+datasource 的全部 ctx 缓存(SCAN,禁 KEYS)。"""
+    async def get_schema_graph(self, tenant_id: str, datasource_key: str) -> SchemaGraph | None:
+        """结构化 schema 图缓存(整库图,与具体问句无关);fail-open。"""
+        if self._redis is None:
+            return None
+        try:
+            raw = await self._redis.get(_graph_key(tenant_id, datasource_key, self._ts))
+        except Exception:
+            log.warning("schema 图缓存读失败,按未命中处理", exc_info=True)
+            return None
+        if raw is None:
+            return None
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        return SchemaGraph.from_dict(cast("dict[str, object]", data))
+
+    async def set_schema_graph(
+        self, tenant_id: str, datasource_key: str, graph: SchemaGraph
+    ) -> None:
         if self._redis is None:
             return
-        pattern = f"{_CTX_PREFIX}{tenant_id}:{datasource_key}:*"
+        try:
+            await self._redis.set(
+                _graph_key(tenant_id, datasource_key, self._ts),
+                json.dumps(graph.to_dict(), ensure_ascii=False),
+                ex=_CTX_TTL_SEC,
+            )
+        except Exception:
+            log.warning("schema 图缓存写失败,跳过", exc_info=True)
+
+    async def evict(self, tenant_id: str, datasource_key: str) -> None:
+        """精确失效该 tenant+datasource 的全部 ctx 与 schema 图缓存(SCAN,禁 KEYS)。"""
+        if self._redis is None:
+            return
+        patterns = [
+            f"{_CTX_PREFIX}{tenant_id}:{datasource_key}:*",
+            f"{_GRAPH_PREFIX}{tenant_id}:{datasource_key}:*",
+        ]
         try:
             # redis-py scan_iter 签名 kwargs 未注解(strict 判部分未知):成员
             # 访问行豁免,经 cast 收窄为「返回文本键迭代器」的可调用后使用
@@ -127,8 +170,9 @@ class ContextCache:
                 "Callable[..., AsyncIterator[str]]",
                 self._redis.scan_iter,  # pyright: ignore[reportUnknownMemberType]  # redis-py 未注解
             )
-            keys = [key async for key in it(match=pattern, count=_SCAN_COUNT)]
-            if keys:
-                await self._redis.delete(*keys)
+            for pattern in patterns:
+                keys = [key async for key in it(match=pattern, count=_SCAN_COUNT)]
+                if keys:
+                    await self._redis.delete(*keys)
         except Exception:
             log.warning("ctx 缓存失效失败(旧值残留至 TTL 过期)", exc_info=True)

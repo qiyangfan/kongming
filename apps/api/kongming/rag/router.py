@@ -38,6 +38,7 @@ from kongming.rag.models import (
     UnsupportedFileType,
 )
 from kongming.rag.parser import parse_markdown
+from kongming.rag.schema_graph_response import build_graph_hints, merge_hint_lines
 from kongming.rag.schemas import (
     CoverageReportOut,
     DatasourceActionIn,
@@ -628,10 +629,19 @@ async def rag_retrieve(
         raise HTTPException(status_code=404, detail="TENANT_NOT_FOUND") from None
     except DatasourceInvalid:
         raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
+    schema_hint, graph_relations, graph_out = await build_graph_hints(
+        session,
+        tenant_id=await _tenant_id_by_key(session, req.tenant_key),
+        tenant_key=req.tenant_key,
+        datasource_key=req.datasource_key,
+        question=req.question,
+        schema_hint=ctx.schema_hint,
+    )
     # 语义提示用于收窄召回表集合；生成失败时传空提示继续召回。
     relations_hint, metric_hints, metric_hits_objs = await _semantic_hints(
-        session, req, ctx.schema_hint
+        session, req, schema_hint
     )
+    relations_hint = merge_hint_lines(relations_hint, graph_relations)
     doc_hints = await _doc_hints(session, req)
     skill_terms, skill_examples, skill_persona = await _skill_hints(session, req)
     metric_hits_out = [
@@ -644,11 +654,12 @@ async def rag_retrieve(
         for h in metric_hits_objs
     ]
     return RetrieveOut(
-        schema_hint=ctx.schema_hint,
+        schema_hint=schema_hint,
         history_sql=ctx.history_sql,
         relations_hint=relations_hint,
         metric_hints=metric_hints,
         metric_hits=metric_hits_out,  # 结构化口径命中
+        schema_graph=graph_out,
         doc_hints=doc_hints,
         skill_terms=skill_terms,
         skill_examples=skill_examples,

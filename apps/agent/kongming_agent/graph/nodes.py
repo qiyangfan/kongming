@@ -10,7 +10,7 @@ import re
 from collections.abc import Sequence
 from typing import cast
 
-from kongming_agent import deps, numeric, sqlguard
+from kongming_agent import deps, numeric, sqlguard, sqlsemantic
 from kongming_agent.apiclient import MetricHit, RagContext, SchemaMeta
 from kongming_agent.graph.budget import Segment, converge
 from kongming_agent.graph.citations import sanitize_citations
@@ -40,6 +40,7 @@ from kongming_agent.graph.state import (
 from kongming_agent.graph.streams import emit_event
 from kongming_agent.graph.table_prune import prune_schema
 from kongming_agent.llm import LlmError
+from kongming_agent.schemagraph import format_prompt_hint, state_graph
 from kongming_agent.settings import Settings
 
 # 装配预算分段优先级(0=不可切;小者先裁)。schema/history 殿后(无表结构
@@ -50,6 +51,7 @@ _PRI_MEMORY = 3
 _PRI_SKILL_TERMS = 4
 _PRI_SKILL_EXAMPLES = 5
 _PRI_HISTORY_SQL = 6
+_PRI_GRAPH = 6
 _PRI_SCHEMA = 7
 
 
@@ -62,6 +64,7 @@ def _seg(texts: dict[str, str], key: str, prefix: str, suffix: str = "") -> str:
 def _render_user(question: str, texts: dict[str, str]) -> str:
     """按固定分段布局渲染 user 文本(空段不留痕迹)。"""
     memory_part = _seg(texts, "memory", "", "\n\n")
+    graph_part = _seg(texts, "graph", "\n\n结构事实：\n")
     semantic = "\n\n".join(
         filter(
             None,
@@ -85,7 +88,7 @@ def _render_user(question: str, texts: dict[str, str]) -> str:
     history_part = _seg(texts, "history_sql", "\n\n参考历史成功 SQL：\n")
     return (
         f"问题：{question}\n\n{memory_part}可用表结构：\n"
-        f"{texts.get('schema_hint') or ''}{semantic_part}{skill_part}{history_part}"
+        f"{texts.get('schema_hint') or ''}{graph_part}{semantic_part}{skill_part}{history_part}"
         f"{texts.get('selfheal') or ''}\n\n生成 SQL："
     )
 
@@ -102,6 +105,7 @@ def assemble_generate_user_prompt(
     history_sql: str,
     extra: str,
     budget_tokens: int,
+    graph_hint: str = "",
 ) -> tuple[str, dict[str, int], int]:
     """generate 的 user 提示八段装配 + 预算收敛(纯函数,可单测)。
 
@@ -115,6 +119,7 @@ def assemble_generate_user_prompt(
         Segment("question", f"问题：{question}"),
         Segment("memory", memory_hint, priority=_PRI_MEMORY),
         Segment("schema_hint", schema_hint, priority=_PRI_SCHEMA, lines=True, keep_head=1),
+        Segment("graph", graph_hint, priority=_PRI_GRAPH, lines=True),
         Segment("relations", relations_hint, priority=_PRI_RELATIONS),
         Segment("metric", metric_hints, priority=_PRI_METRIC),
         Segment("skill_terms", skill_terms, priority=_PRI_SKILL_TERMS, lines=True),
@@ -142,11 +147,13 @@ def legacy_generate_user_prompt(
     skill_examples: str,
     history_sql: str,
     extra: str,
+    graph_hint: str = "",
 ) -> str:
     """按原有分段布局组装用户提示词;预算充足时与预算收敛版逐字一致(测试锚)。"""
     texts = {
         "memory": memory_hint,
         "schema_hint": schema_hint,
+        "graph": graph_hint,
         "relations": relations_hint,
         "metric": metric_hints,
         "skill_terms": skill_terms,
@@ -327,7 +334,7 @@ async def retrieve(state: AgentState) -> dict[str, object]:
     # 结构化口径命中(空=无命中;与 metric_hints 文字段同源)
     metric_hits = _metric_hit_dicts(ctx.metric_hits) if ctx is not None else []
     if ctx is not None and ctx.schema_hint.strip():
-        return {
+        hit_out: dict[str, object] = {
             "schema_hint": ctx.schema_hint,
             "history_sql": history_sql,
             "relations_hint": ctx.relations_hint,
@@ -338,6 +345,9 @@ async def retrieve(state: AgentState) -> dict[str, object]:
             "skill_examples": ctx.skill_examples,
             "skill_persona": ctx.skill_persona,
         }
+        if ctx.schema_graph is not None:
+            hit_out["schema_graph"] = ctx.schema_graph.to_dict()
+        return hit_out
     # 召回服务不可用时，回退到实时表结构查询。
     meta = await deps.get_api().fetch_schema(
         tenant_key=state["tenant_key"],  # pyright: ignore[reportTypedDictNotRequiredAccess]
@@ -354,6 +364,8 @@ async def retrieve(state: AgentState) -> dict[str, object]:
             out0["skill_terms"] = ctx.skill_terms
             out0["skill_examples"] = ctx.skill_examples
             out0["skill_persona"] = ctx.skill_persona
+            if ctx.schema_graph is not None:
+                out0["schema_graph"] = ctx.schema_graph.to_dict()
         return out0
     # 表级预筛(问题+术语/示例/指标共现加权打分,top-N)。零命中=空表
     # 集 → 既有哨兵形态(不新增终态);关闭开关(对拍/应急)= 全量注入逐字回退。
@@ -465,8 +477,11 @@ def _selfheal_guidance(error: str) -> str:
 def _sql_hints(state: AgentState) -> dict[str, str]:
     """收集生成提示的各参考段(空段保留空串,渲染期再决定痕迹)。"""
     schema = state.get("schema_hint") or ""
+    graph = state_graph(state.get("schema_graph"))
     return {
         "schema": schema if schema.strip() else _EMPTY_HINT,
+        # 结构化事实段:角色/主键/外键;无图时为空,提示词逐字回退
+        "graph": format_prompt_hint(graph) if graph is not None else "",
         # 记忆提示放在表结构前；为空时不改变提示词。
         "memory": (state.get("memory_hint") or "").strip(),
         # 关系和指标提示放在表结构与历史 SQL 之间；为空时不改变提示词。
@@ -513,6 +528,7 @@ async def generate(state: AgentState) -> dict[str, object]:
         history_sql=hints["history"],
         extra=extra,
         budget_tokens=budget,
+        graph_hint=hints["graph"],
     )
     if cut:
         emit_event(
@@ -551,6 +567,23 @@ def validate(state: AgentState) -> dict[str, object]:
         result = ValidationResult(passed=False, reason="EMPTY_SQL")
     else:
         result = sqlguard.validate(sql)
+        graph = state_graph(state.get("schema_graph"))
+        if result.passed and graph is not None and Settings().sql_semantic_guard:
+            question = state.get("resolved_question") or state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+            verdict = sqlsemantic.validate_semantics(sql, graph, question)
+            emit_event(
+                "trace",
+                {
+                    "node": "guard",
+                    "fields": {
+                        "kind": "semantic_guard",
+                        "verdict": "pass" if verdict.passed else "reject",
+                        "categories": verdict.categories,
+                    },
+                },
+            )
+            if not verdict.passed:
+                result = ValidationResult(passed=False, reason=verdict.render_reason())
     out: dict[str, object] = {"validation": result}
     if not result.passed and result.permission_block:
         out["end_reason"] = "blocked"

@@ -6780,6 +6780,7 @@ export interface components {
              * @default []
              */
             metric_hits: components["schemas"]["MetricHitOut"][];
+            schema_graph?: components["schemas"]["SchemaGraphOut"] | null;
             /**
              * Doc Hints
              * @default []
@@ -6892,6 +6893,101 @@ export interface components {
             action?: ("blocked" | "masked") | null;
             /** Threshold */
             threshold?: number | null;
+        };
+        /**
+         * SchemaGraphColumnOut
+         * @description 结构化图列(名称/类型/注释;不含任何连接信息)。
+         */
+        SchemaGraphColumnOut: {
+            /** Name */
+            name: string;
+            /** Data Type */
+            data_type: string;
+            /**
+             * Comment
+             * @default
+             */
+            comment: string;
+        };
+        /**
+         * SchemaGraphForeignKeyOut
+         * @description 结构化图外键边(多列按序配对)。
+         */
+        SchemaGraphForeignKeyOut: {
+            /** Source Schema */
+            source_schema: string;
+            /** Source Table */
+            source_table: string;
+            /**
+             * Source Columns
+             * @default []
+             */
+            source_columns: string[];
+            /** Target Schema */
+            target_schema: string;
+            /** Target Table */
+            target_table: string;
+            /**
+             * Target Columns
+             * @default []
+             */
+            target_columns: string[];
+        };
+        /**
+         * SchemaGraphOut
+         * @description 召回响应携带的结构化 Schema 图;complete=False 时调用方不得做硬范围拒绝。
+         */
+        SchemaGraphOut: {
+            /**
+             * Tables
+             * @default []
+             */
+            tables: components["schemas"]["SchemaGraphTableOut"][];
+            /**
+             * Foreign Keys
+             * @default []
+             */
+            foreign_keys: components["schemas"]["SchemaGraphForeignKeyOut"][];
+            /**
+             * Complete
+             * @default true
+             */
+            complete: boolean;
+        };
+        /**
+         * SchemaGraphTableOut
+         * @description 结构化图表、列、主键与可确定角色。
+         */
+        SchemaGraphTableOut: {
+            /** Schema Name */
+            schema_name: string;
+            /** Table Name */
+            table_name: string;
+            /**
+             * Comment
+             * @default
+             */
+            comment: string;
+            /**
+             * Columns
+             * @default []
+             */
+            columns: components["schemas"]["SchemaGraphColumnOut"][];
+            /**
+             * Primary Key
+             * @default []
+             */
+            primary_key: string[];
+            /**
+             * Role
+             * @default unknown
+             */
+            role: string;
+            /**
+             * Source
+             * @default introspection
+             */
+            source: string;
         };
         /** SchemaTableOut */
         SchemaTableOut: {

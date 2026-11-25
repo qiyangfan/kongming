@@ -182,6 +182,10 @@ class Settings(BaseSettings):
     rag_expand_enabled: bool = True
     rag_expand_max: int = Field(default=2, ge=0)
 
+    # 结构化 schema 图与图驱动桥接表:图不可用/不完整时保持既有召回与 Agent 行为。
+    rag_schema_graph_enabled: bool = True
+    rag_schema_graph_bridge_max: int = Field(default=6, ge=0)
+
     # 结果导出行数上限:截断保护防服务端内存失控(chat spec 默认 10000)
     export_max_rows: int = Field(default=10000, ge=1)
 

@@ -22,6 +22,7 @@ from kongming_agent.retry import (
     call_with_retry,
     is_connect_phase_error,
 )
+from kongming_agent.schemagraph import SchemaGraph
 from kongming_agent.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -84,6 +85,8 @@ class RagContext:
     metric_hints: str = ""
     metric_hits: list[MetricHit] = field(default_factory=list[MetricHit])
     doc_hints: list[dict[str, str]] = field(default_factory=list[dict[str, str]])  # 文档段
+    # 结构化 schema 图(旧控制面缺失=None;Agent 必须回退既有文本路径)
+    schema_graph: SchemaGraph | None = None
     # skill-pack 投影段(空串=零包)
     skill_terms: str = ""
     skill_examples: str = ""
@@ -100,9 +103,40 @@ class ToolExecuteOutcome:
     confirm_id: str | None = None
 
 
+def _parse_metric_hits(raw: object) -> list[MetricHit]:
+    """解析 metric_hits;非列表/非对象项静默跳过(旧响应兼容)。"""
+    hits: list[MetricHit] = []
+    if not isinstance(raw, list):
+        return hits
+    for h in cast("list[object]", raw):
+        if not isinstance(h, dict):
+            continue
+        hm = cast("dict[str, object]", h)
+        hits.append(
+            MetricHit(
+                metric_id=str(hm.get("metric_id") or ""),
+                metric_name=str(hm.get("metric_name") or ""),
+                sql_template=str(hm.get("sql_template") or ""),
+                updated_at=(str(hm["updated_at"]) if hm.get("updated_at") is not None else None),
+            )
+        )
+    return hits
+
+
 def _json_of(resp: httpx.Response) -> dict[str, object] | None:
     data = resp.json()
     return cast("dict[str, object]", data) if isinstance(data, dict) else None
+
+
+def _schema_graph_of(raw: object) -> SchemaGraph | None:
+    """解析召回响应中的图;畸形按缺失处理(旧 schema_hint 路径回退)。"""
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return SchemaGraph.from_dict(cast("dict[str, object]", raw))
+    except (TypeError, ValueError):
+        log.warning("rag_retrieve schema_graph 解析失败,按无图回退")
+        return None
 
 
 class _ApiBase:
@@ -376,30 +410,15 @@ class ApiClient(_CheckpointApi):
             # 200 但非 JSON(网关回 HTML 错误页等):按失败回退内省,不裸抛
             log.warning("rag_retrieve 响应非 JSON,回退实时内省")
             return None
-        hits_raw = data.get("metric_hits")
-        hits: list[MetricHit] = []
-        if isinstance(hits_raw, list):
-            for h in cast("list[object]", hits_raw):
-                if not isinstance(h, dict):
-                    continue
-                hm = cast("dict[str, object]", h)
-                hits.append(
-                    MetricHit(
-                        metric_id=str(hm.get("metric_id") or ""),
-                        metric_name=str(hm.get("metric_name") or ""),
-                        sql_template=str(hm.get("sql_template") or ""),
-                        updated_at=(
-                            str(hm["updated_at"]) if hm.get("updated_at") is not None else None
-                        ),
-                    )
-                )
-        data_get = data.get
+        hits = _parse_metric_hits(data.get("metric_hits"))
+        graph = _schema_graph_of(data.get("schema_graph"))
         return RagContext(
-            schema_hint=str(data_get("schema_hint") or ""),
-            history_sql=str(data_get("history_sql") or ""),
-            relations_hint=str(data_get("relations_hint") or ""),
-            metric_hints=str(data_get("metric_hints") or ""),
+            schema_hint=str(data.get("schema_hint") or ""),
+            history_sql=str(data.get("history_sql") or ""),
+            relations_hint=str(data.get("relations_hint") or ""),
+            metric_hints=str(data.get("metric_hints") or ""),
             metric_hits=hits,
+            schema_graph=graph,
             skill_terms=str(data.get("skill_terms") or ""),
             skill_examples=str(data.get("skill_examples") or ""),
             skill_persona=str(data.get("skill_persona") or ""),

@@ -11,10 +11,17 @@ from typing import TYPE_CHECKING, Annotated, cast
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import text
+from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.deps import CurrentUser, require_perm
+from kongming.datasource.resolver import DatasourceInvalid, resolve_for_read
 from kongming.db import get_session
+from kongming.internal.executor import get_or_create_engine
+from kongming.semantic.introspection import (
+    ConnectionFkIntrospector,
+    fetch_fk_pairs,
+)
 from kongming.semantic.repository import SqlSemanticRepo
 from kongming.semantic.service import RelationTableUnknown, SemanticService
 
@@ -136,52 +143,13 @@ class MetricIn(BaseModel):
 class _DefaultIntrospector:
     """default 源:控制面会话直查(目标 schema 集 tenant_<key>+public)。"""
 
-    # v1 仅支持 default 源的 introspection;动态源 introspection 随
-    # 真实外部 PG 数据源接入评估
     def __init__(self, session: AsyncSession, tenant_key: str) -> None:
         self._s = session
         self._schemas = [f"tenant_{tenant_key}", "public"]
 
     async def fetch_fk_pairs(self, *, schemas: list[str]) -> list[dict[str, object]]:
-        rows = (
-            (
-                await self._s.execute(
-                    text(
-                        "SELECT fk.table_schema, fk.table_name, fk.column_name,"
-                        "       pk.table_schema AS f_schema, pk.table_name AS f_table,"
-                        "       pk.column_name AS f_col, fk.constraint_name,"
-                        "       fk.ordinal_position"
-                        " FROM information_schema.table_constraints tc"
-                        " JOIN information_schema.key_column_usage fk"
-                        "   ON tc.constraint_name=fk.constraint_name"
-                        "  AND tc.table_schema=fk.table_schema"
-                        " JOIN information_schema.referential_constraints rc"
-                        "   ON tc.constraint_name=rc.constraint_name"
-                        "  AND tc.constraint_schema=rc.constraint_schema"
-                        " JOIN information_schema.key_column_usage pk"
-                        "   ON rc.unique_constraint_name=pk.constraint_name"
-                        "  AND rc.unique_constraint_schema=pk.constraint_schema"
-                        # 列序配对(多列 FK 不笛卡尔积):被引用侧序号=
-                        # 引用侧的 position_in_unique_constraint
-                        "  AND pk.ordinal_position = fk.position_in_unique_constraint"
-                        " WHERE tc.constraint_type='FOREIGN KEY'"
-                        "   AND fk.table_schema = ANY(:ss)"
-                    ),
-                    {"ss": self._schemas},
-                )
-            )
-            .mappings()
-            .all()
-        )
-        return [
-            {
-                "source_table": f"{r['table_schema']}.{r['table_name']}",
-                "target_table": f"{r['f_schema']}.{r['f_table']}",
-                "left_col": str(r["column_name"]),
-                "right_col": str(r["f_col"]),
-            }
-            for r in rows
-        ]
+        del schemas
+        return await fetch_fk_pairs(self._s, schemas=self._schemas)
 
 
 def _recall_ctx_evictor() -> "ContextCache":
@@ -201,22 +169,45 @@ async def introspect_relations(
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> IntrospectOut:
     tid = await _tenant_id(session, user.user_id, x_tenant_id)
-    # v1 仅支持 default 源 introspection(动态源张冠李戴防护;
-    # 动态源内省随真实外部 PG 源接入评估)——同形 400 防探测
-    if req.datasource_key != "default":
-        raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
-    # schema 集按解析出的租户反查(不直接用请求头,防无头时错配)
-    tkey = (
-        await session.execute(
-            text("SELECT tenant_key FROM public.sys_tenant WHERE id=:i"), {"i": tid}
-        )
-    ).scalar_one()
+    await _assert_datasource_usable(session, tenant_id=tid, datasource_key=req.datasource_key)
     svc = SemanticService(SqlSemanticRepo(session), recall_ctx_evictor=_recall_ctx_evictor())
-    n = await svc.introspect(
-        tenant_id=tid,
-        datasource_key=req.datasource_key,
-        introspector=_DefaultIntrospector(session, str(tkey)),
+    if req.datasource_key == "default":
+        # schema 集按解析出的租户反查(不直接用请求头,防无头时错配)
+        tkey = (
+            await session.execute(
+                text("SELECT tenant_key FROM public.sys_tenant WHERE id=:i"), {"i": tid}
+            )
+        ).scalar_one()
+        n = await svc.introspect(
+            tenant_id=tid,
+            datasource_key=req.datasource_key,
+            introspector=_DefaultIntrospector(session, str(tkey)),
+        )
+        return IntrospectOut(relations=n)
+
+    try:
+        row, plain = await resolve_for_read(
+            session, tenant_id=tid, datasource_key=req.datasource_key
+        )
+    except DatasourceInvalid:
+        raise HTTPException(status_code=400, detail="DATASOURCE_INVALID") from None
+    engine = await get_or_create_engine(
+        req.datasource_key,
+        URL.create(
+            "postgresql+asyncpg",
+            username=row.username,
+            password=plain,
+            host=row.host,
+            port=row.port,
+            database=row.database,
+        ),
     )
+    async with engine.connect() as conn:
+        n = await svc.introspect(
+            tenant_id=tid,
+            datasource_key=req.datasource_key,
+            introspector=ConnectionFkIntrospector(conn, schemas=[row.default_schema]),
+        )
     return IntrospectOut(relations=n)
 
 

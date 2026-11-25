@@ -135,7 +135,7 @@ class SemanticCleaner(Protocol):
 
 
 class RagCtxEvictor(Protocol):
-    """rag 检索缓存失效窄端口(数据源删除时同步失效该源检索缓存)。"""
+    """rag 检索缓存失效窄端口(数据源删除或连接信息变更时同步失效该源检索缓存)。"""
 
     async def __call__(self, tenant_id: str, datasource_key: str) -> None: ...
 

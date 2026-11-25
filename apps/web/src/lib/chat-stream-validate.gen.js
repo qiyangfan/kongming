@@ -2982,6 +2982,7 @@ const schema31 = {
           title: "Metric Hits",
           default: [],
         },
+        schema_graph: { anyOf: [{ $ref: "#/$defs/SchemaGraphOut" }, { type: "null" }] },
         doc_hints: {
           items: { additionalProperties: { type: "string" }, type: "object" },
           type: "array",
@@ -3122,6 +3123,86 @@ const schema31 = {
       type: "object",
       required: ["enabled"],
       title: "RuleUpdateIn",
+    },
+    SchemaGraphColumnOut: {
+      properties: {
+        name: { type: "string", title: "Name" },
+        data_type: { type: "string", title: "Data Type" },
+        comment: { type: "string", title: "Comment", default: "" },
+      },
+      type: "object",
+      required: ["name", "data_type"],
+      title: "SchemaGraphColumnOut",
+      description: "结构化图列(名称/类型/注释;不含任何连接信息)。",
+    },
+    SchemaGraphForeignKeyOut: {
+      properties: {
+        source_schema: { type: "string", title: "Source Schema" },
+        source_table: { type: "string", title: "Source Table" },
+        source_columns: {
+          items: { type: "string" },
+          type: "array",
+          title: "Source Columns",
+          default: [],
+        },
+        target_schema: { type: "string", title: "Target Schema" },
+        target_table: { type: "string", title: "Target Table" },
+        target_columns: {
+          items: { type: "string" },
+          type: "array",
+          title: "Target Columns",
+          default: [],
+        },
+      },
+      type: "object",
+      required: ["source_schema", "source_table", "target_schema", "target_table"],
+      title: "SchemaGraphForeignKeyOut",
+      description: "结构化图外键边(多列按序配对)。",
+    },
+    SchemaGraphOut: {
+      properties: {
+        tables: {
+          items: { $ref: "#/$defs/SchemaGraphTableOut" },
+          type: "array",
+          title: "Tables",
+          default: [],
+        },
+        foreign_keys: {
+          items: { $ref: "#/$defs/SchemaGraphForeignKeyOut" },
+          type: "array",
+          title: "Foreign Keys",
+          default: [],
+        },
+        complete: { type: "boolean", title: "Complete", default: true },
+      },
+      type: "object",
+      title: "SchemaGraphOut",
+      description: "召回响应携带的结构化 Schema 图;complete=False 时调用方不得做硬范围拒绝。",
+    },
+    SchemaGraphTableOut: {
+      properties: {
+        schema_name: { type: "string", title: "Schema Name" },
+        table_name: { type: "string", title: "Table Name" },
+        comment: { type: "string", title: "Comment", default: "" },
+        columns: {
+          items: { $ref: "#/$defs/SchemaGraphColumnOut" },
+          type: "array",
+          title: "Columns",
+          default: [],
+        },
+        primary_key: {
+          items: { type: "string" },
+          type: "array",
+          title: "Primary Key",
+          default: [],
+        },
+        role: { type: "string", title: "Role", default: "unknown" },
+        source: { type: "string", title: "Source", default: "introspection" },
+      },
+      type: "object",
+      required: ["schema_name", "table_name"],
+      title: "SchemaGraphTableOut",
+      description: "结构化图表、列、主键与可确定角色。",
     },
     SchemaTableOut: {
       properties: {

@@ -161,6 +161,9 @@ class Settings(BaseSettings):
     # 引擎只对拍观测)。validate 预检纯解析无 IO,引擎缺失/异常自动降级不阻断。
     sqlguard_mode: str = "shadow"
 
+    # 确定性 SQL 语义护栏:图缺失/不完整时自动跳过;关闭即回到仅 sqlguard。
+    sql_semantic_guard: bool = True
+
     # 注册表可覆盖主模型的图片体积上限。
     llm_max_image_mb: float = 10.0
 

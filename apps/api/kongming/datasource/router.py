@@ -228,6 +228,9 @@ async def update_datasource(
     svc: Service,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
+    from kongming.rag.cache import ContextCache
+    from kongming.redis_client import get_redis
+
     await svc.update(
         actor_id=user.user_id,
         ds_id=str(ds_id),
@@ -243,6 +246,8 @@ async def update_datasource(
         readonly=req.readonly,
         # 连接信息变更级联失效建议缓存(组合根绑定请求会话,同事务)
         suggestion_evictor=_SuggestionEvictor(session),
+        # 连接变化后旧 schema_hint/结构化图立即失效(提交后,尽力而为)
+        ctx_evictor=ContextCache(get_redis()).evict,
     )
 
 

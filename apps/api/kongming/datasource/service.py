@@ -140,6 +140,7 @@ class DatasourceService:
         default_schema: str,
         readonly: bool,
         suggestion_evictor: SuggestionCacheEvictor | None = None,
+        ctx_evictor: RagCtxEvictor | None = None,
     ) -> None:
         validate_default_schema(default_schema)
         await self._write_update(
@@ -158,12 +159,18 @@ class DatasourceService:
                 readonly=readonly,
             ),
             suggestion_evictor=suggestion_evictor,
+            ctx_evictor=ctx_evictor,
         )
 
     async def _write_update(
-        self, fields: _UpdateRow, *, suggestion_evictor: SuggestionCacheEvictor | None
+        self,
+        fields: _UpdateRow,
+        *,
+        suggestion_evictor: SuggestionCacheEvictor | None,
+        ctx_evictor: RagCtxEvictor | None,
     ) -> None:
-        """落库编辑字段并连带建议缓存失效、操作日志与提交;连接变化后再失效连接池。"""
+        """落库编辑字段并连带建议/检索缓存失效、操作日志与提交;
+        连接变化后再失效连接池。"""
         current = await self._editable_row(
             fields.ds_id, datasource_key=fields.datasource_key, tenant_id=fields.tenant_id
         )
@@ -200,6 +207,17 @@ class DatasourceService:
         await self._repo.commit()
         if conn_changed:
             await self._evict_quietly(fields.datasource_key)
+            if ctx_evictor is not None:
+                try:
+                    # 连接变化后旧 schema_hint/图不可继续使用;失效失败按
+                    # 缓存策略降级,不阻断已提交的数据源编辑。
+                    await ctx_evictor(fields.tenant_id, fields.datasource_key)
+                except Exception:
+                    log.warning(
+                        "datasource 更新后的 rag 缓存失效失败 key=%s",
+                        fields.datasource_key,
+                        exc_info=True,
+                    )
 
     async def _editable_row(self, ds_id: str, *, datasource_key: str, tenant_id: str) -> Datasource:
         """取待编辑行并校验存在、key 与租户归属未变;任一不符按对应领域异常拒绝。"""

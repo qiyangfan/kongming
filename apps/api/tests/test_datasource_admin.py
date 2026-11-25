@@ -3,7 +3,7 @@
 
 import uuid as uuidlib
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
@@ -14,6 +14,7 @@ from kongming.auth.seed import seed_all
 from kongming.config import get_settings
 from kongming.datasource.cipher import get_cipher
 from kongming.main import app
+from kongming.redis_client import get_redis
 from tests.conftest import MakeUser, db_conn
 from tests.test_chat_query import _auth, _bind, _default_tenant_id, _login
 from tests.test_system_admin import _admin
@@ -268,6 +269,11 @@ async def test_update_password_blank_keeps_ciphertext(
     tid = await _default_tenant_id(session)
     created = await _create(client, token, tid)
     before = (await _row(session, "extdb"))["password_enc"]
+    redis = cast("Any", get_redis())
+    ctx_key = f"km:ragctx:{tid}:extdb:simple:and-cw2:public:keep"
+    graph_key = f"km:raggraph:{tid}:extdb:simple:and-cw2"
+    await redis.set(ctx_key, "x")
+    await redis.set(graph_key, "x")
 
     # 密码留空(不传)=不改;仅改 name 不触发 evict
     r = await client.put(
@@ -277,6 +283,8 @@ async def test_update_password_blank_keeps_ciphertext(
     assert (await _row(session, "extdb"))["password_enc"] == before
     assert (await _row(session, "extdb"))["name"] == "改名"
     assert fake_evictor.evicted == []
+    assert await redis.exists(ctx_key) == 1
+    assert await redis.exists(graph_key) == 1
 
 
 async def test_update_conn_change_evicts(
@@ -285,6 +293,11 @@ async def test_update_conn_change_evicts(
     _, token = await _admin(client, session, make_user)
     tid = await _default_tenant_id(session)
     created = await _create(client, token, tid)
+    redis = cast("Any", get_redis())
+    ctx_key = f"km:ragctx:{tid}:extdb:simple:and-cw2:public:stale"
+    graph_key = f"km:raggraph:{tid}:extdb:simple:and-cw2"
+    await redis.set(ctx_key, "x")
+    await redis.set(graph_key, "x")
 
     # 改密码 → 密文变更 + evict;改 host → evict(每次变更一次定向失效)
     r = await client.put(
@@ -294,6 +307,8 @@ async def test_update_conn_change_evicts(
     cipher = get_cipher(get_settings().datasource_encrypt_key)
     assert cipher.decrypt(str((await _row(session, "extdb"))["password_enc"])) == "new-secret-pw"
     assert fake_evictor.evicted == ["extdb"]
+    assert await redis.exists(ctx_key) == 0
+    assert await redis.exists(graph_key) == 0
 
     r = await client.put(
         f"{DS}/{created['id']}", json=_body(tid, host="192.168.1.1"), headers=_auth(token)

@@ -193,3 +193,32 @@
     = s.staff_id WHERE c.activebool = true ORDER BY c.last_name, c.customer_id LIMIT 100
   expected_tables: [customer, store, staff]
   category: join_2table
+
+- id: sakila_semantic_001
+  question: 按月统计每个门店的租赁笔数和总支付金额，按月份、门店排序
+  # 语义护栏实验室用例：事件时间按月、事件归属走 rental→staff→store、
+  # 笔数按 rental 主键去重（payment 一对多不得放大计数）。
+  gold_sql: SELECT date_trunc('month', r.rental_date) AS month, st.store_id, COUNT(DISTINCT r.rental_id) AS rental_count, SUM(p.amount) AS amount FROM tenant_sakila.rental r JOIN tenant_sakila.staff st ON r.staff_id = st.staff_id LEFT JOIN tenant_sakila.payment p ON p.rental_id = r.rental_id GROUP BY 1, 2 ORDER BY 1, 2
+  expected_tables: [rental, staff, payment]
+  category: aggregate
+
+- id: sakila_semantic_002
+  question: 每个门店的租赁笔数，按门店编号排序
+  # 事件计数与门店归属：事件表自身 staff 外键路径。
+  gold_sql: SELECT st.store_id, COUNT(*) AS rentals FROM tenant_sakila.rental r JOIN tenant_sakila.staff st ON r.staff_id = st.staff_id GROUP BY st.store_id ORDER BY st.store_id
+  expected_tables: [rental, staff]
+  category: aggregate
+
+- id: sakila_semantic_003
+  question: 按月统计租赁笔数，按月份排序
+  # 事件时间口径：只使用事件表 rental 的发生时间。
+  gold_sql: SELECT date_trunc('month', r.rental_date) AS month, COUNT(*) AS rentals FROM tenant_sakila.rental r GROUP BY 1 ORDER BY 1
+  expected_tables: [rental]
+  category: aggregate
+
+- id: sakila_semantic_004
+  question: 每个门店的租赁笔数和支付笔数，按门店编号排序
+  # 一对多计数：rental 与 payment 关联后，两侧都按各自主键去重。
+  gold_sql: SELECT st.store_id, COUNT(DISTINCT r.rental_id) AS rentals, COUNT(DISTINCT p.payment_id) AS payments FROM tenant_sakila.rental r JOIN tenant_sakila.staff st ON r.staff_id = st.staff_id JOIN tenant_sakila.payment p ON p.rental_id = r.rental_id GROUP BY st.store_id ORDER BY st.store_id
+  expected_tables: [rental, staff, payment]
+  category: aggregate
