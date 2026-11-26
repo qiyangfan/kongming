@@ -100,5 +100,9 @@
       通话中从 DevTools 关闭文字通道、保持 PeerConnection,确认模型仍可应答,
       记录收口边界的实际表现
       **阻塞**:需真实麦克风/扬声器与真实模型账号;本轮无浏览器/设备验收条件。
+      **2026-11-26 自动化子集**:①频次 429 `VOICE_RATE_LIMITED`、②用户预算 429
+      `VOICE_DAILY_LIMIT`、③未绑租户 403 `TENANT_FORBIDDEN`、④真实票据 WS 的
+      访问日志不含 ticket,均 PASS(临时 API + 本地 SDP stub,不重启评测栈);
+      ⑤真实通话全链路与⑥通道断开观察仍待真机。
 - [x] 7.3 spec 增量 sync 进主 specs;`openspec validate --all --strict` 绿;
       ADR 已更新;归档记录写清未完成项(如有)
