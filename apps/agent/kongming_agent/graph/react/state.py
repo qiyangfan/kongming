@@ -11,6 +11,14 @@ from kongming_agent.graph.state import ExecutionResult
 from kongming_agent.llm import LlmToolCall
 
 
+class ResultScope(TypedDict):
+    """一次 execute_sql 结果的作用域快照(finalize 按序合并为 r0/r1… 槽位)。"""
+
+    columns: list[str]
+    rows: list[list[object]]
+    stats: dict[str, object]
+
+
 class ReactState(TypedDict, total=False):
     trace_id: str
     tenant_key: str
@@ -29,10 +37,12 @@ class ReactState(TypedDict, total=False):
     rounds: int  # 已执行的工具轮次
     last_sql: NotRequired[str]  # 最后一次 execute_sql 调用的 SQL
     last_execution: NotRequired[ExecutionResult]  # 最后一次 execute_sql 执行结果
+    result_scopes: NotRequired[list[ResultScope]]  # 每次成功执行的结果快照(槽位前缀 r0/r1…)
     executed_sigs: NotRequired[list[str]]  # 重复熔断:已成功调用的 工具|参数 签名集
     final_answer: NotRequired[str]  # LLM 最终文本答案
     error: NotRequired[str]  # 轮次上限触顶等终态错误
-    compute_values: NotRequired[list[float]]  # 本轮计算工具返回值(入白名单)
+    compute_values: NotRequired[list[float]]  # 本轮计算工具返回值(可信数值源)
+    compute_slots: NotRequired[dict[str, float]]  # 计算工具具名结果(calc.* 槽位)
     numeric_whitelist: NotRequired[list[float]]  # 本轮数值白名单(compute 入参校验)
     todos: NotRequired[list[dict[str, str]]]  # 多步目标账本(仅 Agent 内部)
     # 图内确认点(add-graph-checkpoint,仅任务通道):

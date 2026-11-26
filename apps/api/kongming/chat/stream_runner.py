@@ -98,6 +98,7 @@ class PreparedQuery:
     user_id: str = ""  # 护栏审计主体
     attachments: list[dict[str, object]] | None = None  # 附件摘要(归属已验)
     last_fallback: str = ""  # 上一轮兜底分类(澄清防循环判据;空=不携带)
+    last_clarification: str = ""  # 上一轮澄清问句(补全用户补充回答用)
     user_message_id: str | None = None  # 本轮用户消息 id(已取消行按它定位原轮时序)
 
 
@@ -304,6 +305,7 @@ class AgentStreamConsumer:
                 memory_hint=run.memory_hint,
                 attachment_ids=run.attachment_ids,
                 last_fallback=run.p.last_fallback,
+                last_clarification=run.p.last_clarification,
             )
         except AgentUnavailable:
             log.warning("agent 流式不可达 trace_id=%s", run.p.trace_id)

@@ -305,6 +305,9 @@ class SchemaGraphOut(BaseModel):
     tables: list[SchemaGraphTableOut] = []
     foreign_keys: list[SchemaGraphForeignKeyOut] = []
     complete: bool = True
+    # 全图已知表键("schema.table",子图下发时携带):调用方据此区分
+    # 「未召回的已知表」与「库中不存在的表」,只对后者做范围硬拒
+    known_tables: list[str] = []
 
 
 class RetrieveOut(BaseModel):

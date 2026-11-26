@@ -1,6 +1,6 @@
 /* 按类型渲染 SQL、图表、报告和文档产物；SQL 重跑结果追加为新消息，不覆盖原卡。 */
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import {
@@ -10,6 +10,7 @@ import {
   Database,
   FileText,
   Loader2,
+  Pencil,
   Play,
   SlidersHorizontal,
 } from "lucide-react";
@@ -17,7 +18,9 @@ import {
 import { ChartView, type ChartDatum, type ChartTune } from "@/components/chart-view";
 import type { ChartSpec } from "@/lib/chart-shared";
 import { MarkdownText } from "@/components/markdown-text";
+import { useCopyFeedback } from "@/hooks/use-copy-feedback";
 import { rerunArtifact } from "@/lib/chat-api";
+import { fencedSql } from "@/lib/sql-markdown";
 import { cellText } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -31,12 +34,35 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
-/* SQL 重跑前由服务端复检；成功结果作为新消息追加。无 messageId 时隐藏入口，避免发送无效请求。 */
+/* 默认只读高亮展示;编辑为次级入口。重跑结果作为新消息追加,不覆盖原卡。 */
 export function SqlArtifactCard({ messageId, sql }: { messageId: string; sql: string }) {
   const qc = useQueryClient();
   const [draft, setDraft] = useState(sql);
+  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { copied, markCopied } = useCopyFeedback();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editButtonRef = useRef<HTMLButtonElement>(null);
+  const focusEditOnExit = useRef(false);
+
+  useEffect(() => {
+    if (editing) textareaRef.current?.focus();
+  }, [editing]);
+
+  useEffect(() => {
+    if (!editing && focusEditOnExit.current) {
+      focusEditOnExit.current = false;
+      editButtonRef.current?.focus();
+    }
+  }, [editing]);
+
+  function leaveEditing(): void {
+    focusEditOnExit.current = true;
+    setDraft(sql);
+    setError(null);
+    setEditing(false);
+  }
 
   async function run(): Promise<void> {
     if (busy || !messageId) return;
@@ -51,6 +77,7 @@ export function SqlArtifactCard({ messageId, sql }: { messageId: string; sql: st
       await rerunArtifact(messageId, sqlText);
       // 新消息由 refetch 入列(会话尾部);按 ["messages"] 前缀失效覆盖各会话查询
       void qc.invalidateQueries({ queryKey: ["messages"] });
+      leaveEditing();
     } catch (err) {
       setError(err instanceof Error ? err.message : "再执行未成,请稍后再试。");
     } finally {
@@ -58,52 +85,101 @@ export function SqlArtifactCard({ messageId, sql }: { messageId: string; sql: st
     }
   }
 
+  async function copy(): Promise<void> {
+    setError(null);
+    try {
+      await navigator.clipboard.writeText(sql);
+      markCopied();
+    } catch {
+      setError("复制未成,请手动选择文本。");
+    }
+  }
+
   return (
-    <Collapsible>
+    <Collapsible
+      onOpenChange={(open) => {
+        // 收起即回到只读态,下次展开不以编辑态出现
+        if (!open && editing) leaveEditing();
+      }}
+    >
       <CollapsibleTrigger className="group flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
         <ChevronRight
           className="size-3.5 transition-transform group-data-[state=open]:rotate-90"
           aria-hidden
         />
         <Database className="size-3.5" aria-hidden />
-        SQL(可编辑再执行)
+        SQL
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-1.5 space-y-2">
-          <Textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            rows={Math.min(Math.max(sql.split("\n").length, 3), 12)}
-            maxLength={4000}
-            aria-label="编辑 SQL"
-            className="max-h-72 overflow-y-auto font-mono text-xs leading-relaxed"
-          />
-          <div className="flex items-center gap-2">
-            {messageId && (
-              <Button variant="outline" size="xs" onClick={() => void run()} disabled={busy}>
-                {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Play aria-hidden />}
-                重新执行
-              </Button>
-            )}
-            {draft !== sql && (
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => {
-                  setDraft(sql);
-                  setError(null);
-                }}
-                disabled={busy}
-              >
-                还原
-              </Button>
-            )}
-            {error && (
-              <p role="alert" className="text-xs text-destructive">
-                {error}
-              </p>
-            )}
-          </div>
+          {editing ? (
+            <>
+              <Textarea
+                ref={textareaRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                rows={Math.min(Math.max(sql.split("\n").length, 3), 12)}
+                maxLength={4000}
+                aria-label="编辑 SQL"
+                className="max-h-72 overflow-y-auto font-mono text-xs leading-relaxed"
+              />
+              <div className="flex items-center gap-2">
+                {messageId && (
+                  <Button variant="outline" size="xs" onClick={() => void run()} disabled={busy}>
+                    {busy ? <Loader2 className="animate-spin" aria-hidden /> : <Play aria-hidden />}
+                    重新执行
+                  </Button>
+                )}
+                <Button variant="ghost" size="xs" onClick={leaveEditing} disabled={busy}>
+                  还原
+                </Button>
+                {error && (
+                  <p role="alert" className="text-xs text-destructive">
+                    {error}
+                  </p>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <MarkdownText text={fencedSql(sql)} />
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => void copy()}
+                  aria-label={copied ? "已复制 SQL" : "复制 SQL"}
+                  className="text-muted-foreground"
+                >
+                  {copied ? <Check className="text-primary" aria-hidden /> : <Copy aria-hidden />}
+                  {copied ? "已复制" : "复制"}
+                </Button>
+                <span className="sr-only" role="status" aria-live="polite">
+                  {copied ? "SQL 已复制" : ""}
+                </span>
+                {messageId && (
+                  <Button
+                    ref={editButtonRef}
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => {
+                      setError(null);
+                      setEditing(true);
+                    }}
+                    className="text-muted-foreground"
+                  >
+                    <Pencil aria-hidden />
+                    编辑
+                  </Button>
+                )}
+                {error && (
+                  <p role="alert" className="text-xs text-destructive">
+                    {error}
+                  </p>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </CollapsibleContent>
     </Collapsible>
@@ -221,16 +297,15 @@ export function DocumentCard({
   content: string;
   sources?: CitationSource[];
 }) {
-  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { copied, markCopied } = useCopyFeedback();
   const { activeKey, highlight } = useCitationHighlight();
 
   async function copy(): Promise<void> {
     setError(null);
     try {
       await navigator.clipboard.writeText(content);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      markCopied();
     } catch {
       setError("复制未成,请手动选择文本。");
     }
@@ -252,12 +327,15 @@ export function DocumentCard({
           variant="ghost"
           size="xs"
           onClick={() => void copy()}
-          aria-label="复制答案"
+          aria-label={copied ? "答案已复制" : "复制答案"}
           className="text-muted-foreground"
         >
           {copied ? <Check className="text-primary" aria-hidden /> : <Copy aria-hidden />}
           {copied ? "已复制" : "复制"}
         </Button>
+        <span className="sr-only" role="status" aria-live="polite">
+          {copied ? "答案已复制" : ""}
+        </span>
         {error && (
           <p role="alert" className="text-xs text-destructive">
             {error}

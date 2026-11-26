@@ -5,6 +5,8 @@ import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
+import { rehypeSqlHighlight } from "@/lib/rehype-sql-highlight";
+
 const COMPONENTS: Components = {
   h1: ({ children }) => <h1 className="text-base font-semibold">{children}</h1>,
   h2: ({ children }) => <h2 className="text-md font-semibold">{children}</h2>,
@@ -64,7 +66,11 @@ export function MarkdownText({ text }: { text: string }) {
   // space-y-2 由此作用于各块元素
   return (
     <div className="space-y-2">
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={COMPONENTS}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkBreaks]}
+        rehypePlugins={[rehypeSqlHighlight]}
+        components={COMPONENTS}
+      >
         {text}
       </ReactMarkdown>
     </div>

@@ -228,3 +228,4 @@ class TestTurnPersistence:
         )
         second = agent.calls[1]
         assert second.get("last_fallback") == "CLARIFY"
+        assert second.get("last_clarification") == "共 3 行。"

@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import FastAPI, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request as _Req
 from starlette.responses import JSONResponse, Response
 from starlette.responses import Response as _Resp
@@ -408,6 +409,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 bind_app(app)  # 非 DI 装配点(如 MCP 入站中间件)经注册表读取依赖覆写
+# 大 JSON(尤其内部 schema 图)走传输压缩;SSE 由中间件按 text/event-stream 排除。
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 # 请求 IP 通过 contextvars 传入操作日志，无需修改各调用点。
 app.add_middleware(ClientIpMiddleware)
 

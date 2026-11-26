@@ -147,7 +147,7 @@ async def test_react_full_loop(_patch) -> None:  # type: ignore[no-untyped-def]
     _patch(llm, api)
     final = await _ainvoke(_state())
     # 终态同构:execution/summary/generated_sql/retry_count
-    assert final["summary"] == "共有 1000 部电影。"
+    assert final["summary"] == "共 1000 部。"
     assert final["execution"].verdict == "PASS"
     assert final["execution"].rows == [[1000]]
     assert final["generated_sql"] == "SELECT count(*) FROM film"
@@ -404,7 +404,7 @@ async def test_query_react_happy_path(client: AsyncClient) -> None:  # type: ign
         "usage_records",
     }
     assert body["success"] is True and body["verdict"] == "PASS"
-    assert body["summary"] == "结果是 1。"
+    assert body["summary"] == "结果为 1。"
     assert body["columns"] == ["?column?"] and body["rows"] == [[1]]
     assert body["sql"] == "SELECT 1"
     assert body["retry_count"] == 1
@@ -445,7 +445,7 @@ async def test_query_react_stream_events(client: AsyncClient) -> None:  # type: 
     # result 终态字段同构
     result_data = [ln[6:] for ln in text.splitlines() if ln.startswith("data: ")][-1]
     final = json.loads(result_data)
-    assert final["success"] is True and final["summary"] == "结果是 1。"
+    assert final["success"] is True and final["summary"] == "结果为 1。"
 
 
 async def test_react_duplicate_call_circuit_breaker(_patch) -> None:  # type: ignore[no-untyped-def]
@@ -472,7 +472,7 @@ async def test_react_duplicate_call_circuit_breaker(_patch) -> None:  # type: ig
     # 第三轮 LLM 收到的 messages 含熔断观察
     tool_msgs = _tool_contents(llm.calls[2]["messages"])
     assert "已成功执行过" in tool_msgs[-1]
-    assert final["summary"] == "已有结果,答案是 1。"
+    assert final["summary"] == "结果为 1 部。"
 
 
 async def test_react_blocked_sql_not_deduped(_patch) -> None:  # type: ignore[no-untyped-def]
@@ -499,6 +499,129 @@ async def test_react_blocked_sql_not_deduped(_patch) -> None:  # type: ignore[no
     assert final["last_execution"].verdict == "BLOCKED"
 
 
+async def test_react_multi_execution_slots_are_scoped(_patch) -> None:  # type: ignore[no-untyped-def]
+    """多次执行的结果各占槽位作用域:最终答案可分别引用,不串成最后一次的值。"""
+    llm = FakeLlm(
+        [
+            ToolChatReply(tool_calls=[_call("execute_sql", {"sql": "SELECT 100 AS v"})]),
+            ToolChatReply(tool_calls=[_call("execute_sql", {"sql": "SELECT 200 AS v"}, "c2")]),
+            ToolChatReply(content="首次 {{r0.cell.0.0}}，末次最高 {{r1.argmax.v.value}}。"),
+        ]
+    )
+    api = FakeApi(
+        [
+            ToolExecuteOutcome(
+                status="executed",
+                result={"verdict": "PASS", "columns": ["v"], "rows": [[100]], "row_count": 1},
+            ),
+            ToolExecuteOutcome(
+                status="executed",
+                result={
+                    "verdict": "PASS",
+                    "columns": ["v"],
+                    "rows": [[200], [300]],
+                    "row_count": 2,
+                },
+            ),
+        ]
+    )
+    _patch(llm, api)
+    final = await _ainvoke(_state())
+    assert final["summary"] == "首次 100，末次最高 300。"
+
+
+async def test_react_multi_execution_scalar_keeps_both_results(_patch) -> None:  # type: ignore[no-untyped-def]
+    """多次执行时最后一次虽为标量,也不得覆盖掉前一次结果可引用的综合答案。"""
+    llm = FakeLlm(
+        [
+            ToolChatReply(tool_calls=[_call("execute_sql", {"sql": "SELECT 100 AS v"})]),
+            ToolChatReply(tool_calls=[_call("execute_sql", {"sql": "SELECT 200 AS v"}, "c2")]),
+            ToolChatReply(content="首次 {{r0.cell.0.0}}，末次 {{r1.cell.0.0}}。"),
+        ]
+    )
+    api = FakeApi(
+        [
+            ToolExecuteOutcome(
+                status="executed",
+                result={"verdict": "PASS", "columns": ["v"], "rows": [[100]], "row_count": 1},
+            ),
+            ToolExecuteOutcome(
+                status="executed",
+                result={"verdict": "PASS", "columns": ["v"], "rows": [[200]], "row_count": 1},
+            ),
+        ]
+    )
+    _patch(llm, api)
+    final = await _ainvoke(_state())
+    assert final["summary"] == "首次 100，末次 200。"
+
+
+async def test_react_unscoped_slot_not_rendered_from_last_result(_patch) -> None:  # type: ignore[no-untyped-def]
+    """无作用域的旧键不得在多次执行后静默取最后一次结果的值。"""
+    llm = FakeLlm(
+        [
+            ToolChatReply(tool_calls=[_call("execute_sql", {"sql": "SELECT 100 AS v"})]),
+            ToolChatReply(tool_calls=[_call("execute_sql", {"sql": "SELECT 200 AS v"}, "c2")]),
+            ToolChatReply(content="首次 {{cell.0.0}}。"),
+        ]
+    )
+    api = FakeApi(
+        [
+            ToolExecuteOutcome(
+                status="executed",
+                result={"verdict": "PASS", "columns": ["v"], "rows": [[100]], "row_count": 1},
+            ),
+            ToolExecuteOutcome(
+                status="executed",
+                result={
+                    "verdict": "PASS",
+                    "columns": ["v"],
+                    "rows": [[200], [300]],
+                    "row_count": 2,
+                },
+            ),
+        ]
+    )
+    _patch(llm, api)
+    final = await _ainvoke(_state())
+    assert final["summary"] == "共 2 行；v 最高为 300，最低为 200。"
+
+
+async def test_react_last_error_does_not_bypass_prior_scope_contract(_patch) -> None:  # type: ignore[no-untyped-def]
+    """最后一次执行失败时,早先成功结果的槽位仍须渲染,不能原样泄漏。"""
+    llm = FakeLlm(
+        [
+            ToolChatReply(tool_calls=[_call("execute_sql", {"sql": "SELECT 100 AS v"})]),
+            ToolChatReply(tool_calls=[_call("execute_sql", {"sql": "SELECT bad"}, "c2")]),
+            ToolChatReply(content="首次 {{r0.cell.0.0}}。"),
+        ]
+    )
+    api = FakeApi(
+        [
+            ToolExecuteOutcome(
+                status="executed",
+                result={"verdict": "PASS", "columns": ["v"], "rows": [[100]], "row_count": 1},
+            ),
+            ToolExecuteOutcome(
+                status="executed",
+                result={"verdict": "ERROR", "reason": "boom", "columns": [], "rows": []},
+            ),
+        ]
+    )
+    _patch(llm, api)
+    final = await _ainvoke(_state())
+    assert final["summary"] == "首次 100。"
+    assert "{{" not in final["summary"]
+
+
+def test_compute_slots_are_scoped_on_repeat() -> None:
+    """同名派生量多次计算不得互相覆盖;第二次用 call_id 区分。"""
+    first = nodes._compute_slots_of({"result": {"delta_pct": 25.0}}, existing={}, call_id="c1")
+    assert first == {"delta_pct": 25.0}
+    second = nodes._compute_slots_of({"result": {"delta_pct": -10.0}}, existing=first, call_id="c2")
+    assert second == {"delta_pct.c2": -10.0}
+
+
 async def test_react_compute_delta_local_and_whitelist(_patch) -> None:  # type: ignore[no-untyped-def]
     """compute_delta 本地执行;入参 ∈ 白名单则成功并回写 compute_values。"""
     llm = FakeLlm(
@@ -509,7 +632,7 @@ async def test_react_compute_delta_local_and_whitelist(_patch) -> None:  # type:
                     _call("compute_delta", {"base": 80, "target": 100}, "c2"),
                 ]
             ),
-            ToolChatReply(content="增长 25%。"),
+            ToolChatReply(content="增长 {{calc.delta_pct}}。"),
         ]
     )
     api = FakeApi(
@@ -561,7 +684,7 @@ async def test_react_compute_rejects_out_of_whitelist(_patch) -> None:  # type: 
 
 
 async def test_react_finalize_strips_heart_calculated_rate(_patch) -> None:  # type: ignore[no-untyped-def]
-    """finalize 同口径——心算增长率句剥离,合法句保留。"""
+    """字面数字违约:整段弃用,输出确定性轮廓(不剥句、不罗列 max/min/avg)。"""
     llm = FakeLlm(
         [
             ToolChatReply(tool_calls=[_call("execute_sql", {"sql": "SELECT v FROM t"})]),
@@ -579,12 +702,12 @@ async def test_react_finalize_strips_heart_calculated_rate(_patch) -> None:  # t
     _patch(llm, api)
     final = await _ainvoke(_state())
     summary = str(final["summary"])
-    assert "25%" not in summary
-    assert "80" in summary or "100" in summary
+    assert "25" not in summary and "增长" not in summary
+    assert "最高" in summary and "未生成解读" not in summary
 
 
 async def test_react_finalize_all_stripped_falls_back_not_raw(_patch) -> None:  # type: ignore[no-untyped-def]
-    """审计剥空时不得回退未审原文(会放行非法数字),走 stats 兜底。"""
+    """违约时不得回退未校验原文(会放行字面数字),走确定性兜底。"""
     llm = FakeLlm(
         [
             ToolChatReply(tool_calls=[_call("execute_sql", {"sql": "SELECT v FROM t"})]),

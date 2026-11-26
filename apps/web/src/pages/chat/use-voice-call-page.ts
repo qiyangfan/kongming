@@ -1,9 +1,9 @@
-/* 页面级通话接线:能力探测决定入口、固定应答播放、新问顶掉旧轮、以听写原话+关联字段交接既有问答。
+/* 页面级通话接线:能力探测决定入口、停止确认播放、新问顶掉旧轮、以听写原话+关联字段交接既有问答。
    ChatPage 只消费状态与入口回调,媒体面细节在 use-voice-call。 */
 
 import { useEffect, useRef, useState } from "react";
 import { getVoiceCapability } from "@/lib/api";
-import { FIXED_REPLIES, STOP_REPLY } from "@/lib/voice-call";
+import { STOP_REPLY } from "@/lib/voice-call";
 import { useVoiceCall } from "./use-voice-call";
 
 interface UseVoiceCallPageOptions {
@@ -20,7 +20,6 @@ export function useVoiceCallPage(options: UseVoiceCallPageOptions) {
   const optionsRef = useRef(options);
   optionsRef.current = options;
   const localAudioRef = useRef<HTMLAudioElement | null>(null);
-  const fixedReplyIdxRef = useRef(0);
   const [muted] = useState(false);
   // 部署未配置实时语音模型时入口置灰;null=探测未完成,暂置灰防闪动
   const [voiceEnabled, setVoiceEnabled] = useState<boolean | null>(null);
@@ -53,9 +52,7 @@ export function useVoiceCallPage(options: UseVoiceCallPageOptions) {
     onTurnRequest: (turn) => {
       const current = optionsRef.current;
       if (current.streaming) current.stopStreaming({ restoreDraft: false });
-      // 固定应答立即播放(调工具那轮模型不出声,实测);措辞轮换
-      playLocalReply(FIXED_REPLIES[fixedReplyIdxRef.current % FIXED_REPLIES.length]);
-      fixedReplyIdxRef.current += 1;
+      // 静默进入查询:不播开场白,避免每轮固定寒暄;查询进度由通话浮层状态呈现
       current.submitTurn(turn.question, turn.token);
     },
     onSpeechStarted: () => {
@@ -67,8 +64,8 @@ export function useVoiceCallPage(options: UseVoiceCallPageOptions) {
       stopLocalReply();
     },
     onTurnStopped: () => {
-      const current = optionsRef.current;
-      if (current.streaming) current.stopStreaming({ restoreDraft: false });
+      // 后端停止工具已取消在途问答并下发 turn.stopped;这里只播确认,
+      // 不再调 stopStreaming,避免第二次取消和打断通话
       playLocalReply(STOP_REPLY);
     },
     onEnded: () => {

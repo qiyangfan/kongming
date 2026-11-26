@@ -12,6 +12,7 @@ from typing import Any, cast
 
 import sqlglot
 from liannu.rules import READONLY_ROOTS
+from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
 from kongming_agent.graph.state import ValidationResult
@@ -180,3 +181,43 @@ def _from_statements(statements: Sequence[object]) -> ValidationResult:
             reason=f"BLOCKED_ROOT: {type(first).__name__}",
         )
     return ValidationResult(passed=True)
+
+
+_AGGREGATE_KINDS: tuple[tuple[type[exp.AggFunc], str], ...] = (
+    (exp.Count, "count"),
+    (exp.Sum, "sum"),
+    (exp.Avg, "avg"),
+    (exp.Max, "max"),
+    (exp.Min, "min"),
+)
+
+
+def scalar_aggregate_kind(sql: str) -> str | None:
+    """单列标量查询的顶层聚合类型;供确定性作答措辞使用,不读列名。
+
+    只认投影里唯一的 COUNT/SUM/AVG/MAX/MIN;含算术或 CASE 的表达式返回 None,
+    由调用方用中性措辞。解析失败同样返回 None,不阻断作答。
+    """
+    if not sql.strip():
+        return None
+    try:
+        tree = sqlglot.parse_one(sql, dialect="postgres")
+    except SqlglotError:
+        return None
+    if not isinstance(tree, exp.Select) or len(tree.expressions) != 1:
+        return None
+    projection = tree.expressions[0]
+    # FILTER (WHERE x > 0) 的谓词属于聚合参数,不是投影外算术;只拒绝
+    # 聚合函数之外的二元表达式/ CASE。
+    if projection.find(exp.Case) is not None or any(
+        binary.find_ancestor(exp.AggFunc) is None and binary.find_ancestor(exp.Filter) is None
+        for binary in projection.find_all(exp.Binary)
+    ):
+        return None
+    kinds: set[str] = set()
+    for node in [projection, *projection.find_all(exp.AggFunc)]:
+        for agg_cls, kind in _AGGREGATE_KINDS:
+            if isinstance(node, agg_cls):
+                kinds.add(kind)
+                break
+    return next(iter(kinds)) if len(kinds) == 1 else None

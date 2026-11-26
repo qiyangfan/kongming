@@ -6953,6 +6953,11 @@ export interface components {
              * @default true
              */
             complete: boolean;
+            /**
+             * Known Tables
+             * @default []
+             */
+            known_tables: string[];
         };
         /**
          * SchemaGraphTableOut

@@ -115,7 +115,7 @@ async def test_stream_happy_path_event_sequence(
             "商品总库存",
             '{"intent":"data","confidence":0.99}',  # route_intent
             "SELECT sum(qty) FROM goods",
-            '{"summary":"共 30"}',
+            '{"summary":""}',
         ]
     )
     llm_sync = _Llm(
@@ -123,7 +123,7 @@ async def test_stream_happy_path_event_sequence(
             "商品总库存",
             '{"intent":"data","confidence":0.99}',  # route_intent
             "SELECT sum(qty) FROM goods",
-            '{"summary":"共 30"}',
+            '{"summary":""}',
         ]
     )
     async with _client(monkeypatch, llm) as c:
@@ -165,7 +165,8 @@ async def test_stream_happy_path_event_sequence(
     sql_frame = frames[sql_idx][1]
     assert sql_frame["sql"] == "SELECT sum(qty) FROM goods"
     summary_frame = frames[events.index("summary")][1]
-    assert summary_frame["delta"] == "共 30"
+    # 单行单列 SUM:措辞取自执行 SQL 的聚合结构,不按列名猜
+    assert summary_frame["delta"] == "合计为 30。"
     # 终态一致性:result data 与同步响应逐字段一致
     result_data = frames[-1][1]
     assert result_data == sync_resp.json()
@@ -173,7 +174,7 @@ async def test_stream_happy_path_event_sequence(
 
 async def test_stream_stage_running_before_done(monkeypatch: pytest.MonkeyPatch) -> None:
     """stage 事件序:每个节点的 running 先于 done(帧序即节点边界)。"""
-    llm = _Llm(["商品总库存", "SELECT sum(qty) FROM goods", '{"summary":"共 30"}'])
+    llm = _Llm(["商品总库存", "SELECT sum(qty) FROM goods", '{"summary":""}'])
     async with _client(monkeypatch, llm) as c:
         resp = await c.post("/query/stream", json=REQ, headers=TOKEN)
     frames = _parse_sse(resp.text)
@@ -202,7 +203,7 @@ async def test_stream_validate_rejected_no_sql_event(
             '{"intent":"data","confidence":0.99}',  # route_intent
             "SELECT sum(qty FROM goods",  # 未闭合括号 → PARSE_ERROR
             "SELECT sum(qty) FROM goods",
-            '{"summary":"共 30"}',
+            '{"summary":""}',
         ]
     )
     async with _client(monkeypatch, llm) as c:

@@ -10,6 +10,7 @@ from kongming.rag.schema_graph import (
     BridgePath,
     SchemaGraph,
     TableKey,
+    drop_schema_hint_tables,
     format_join,
     format_table_hint,
     schema_hint_tables,
@@ -29,6 +30,7 @@ log = logging.getLogger(__name__)
 
 def graph_out(graph: SchemaGraph) -> SchemaGraphOut:
     """领域图 → 响应模型(只含结构,不带凭据)。"""
+    known_tables = graph.known_tables or tuple(t.key for t in graph.tables)
     return SchemaGraphOut(
         tables=[
             SchemaGraphTableOut(
@@ -57,6 +59,7 @@ def graph_out(graph: SchemaGraph) -> SchemaGraphOut:
             for fk in graph.foreign_keys
         ],
         complete=graph.complete,
+        known_tables=[f"{schema}.{table}" for schema, table in known_tables],
     )
 
 
@@ -106,6 +109,34 @@ def _append_bridges(schema_hint: str, extra_hint: list[str], bridges: list[Bridg
     return schema_hint.rstrip() + "\n" + "\n".join(extra_hint)
 
 
+def _align_hint_with_graph(
+    schema_hint: str, recalled: list[tuple[TableKey, str]], graph: SchemaGraph
+) -> tuple[str, list[tuple[TableKey, str]]]:
+    """图完整时剔除提示词中的图外表(知识条目残留),让下发子图与提示词一致。
+
+    残留表既会诱导生成,又会让子图被判定为不完整,导致语义硬规则整体跳过。
+    """
+    if not graph.complete:
+        return schema_hint, recalled
+    # 图只覆盖允许的 schema:先按 schema 范围圈定管辖面,再判表级残留;
+    # 范围外 schema 的表(如知识里别的 schema)图无从判断,保留
+    known_schemas = {t.schema_name for t in graph.tables}
+    known = {t.key for t in graph.tables}
+    stale = [key for key, _ in recalled if key[0] in known_schemas and key not in known]
+    if not stale:
+        return schema_hint, recalled
+    log.info(
+        "schema_hint 剔除图外表(已删除或继承子表): %s",
+        sorted(f"{schema}.{table}" for schema, table in stale),
+    )
+    return (
+        drop_schema_hint_tables(schema_hint, set(stale)),
+        # 管辖外 schema 无法由图判断:召回项必须与提示词一起保留,
+        # 否则模型按提示词用了该表,语义护栏却按「不在已知表」硬拒
+        [(key, note) for key, note in recalled if key in known or key[0] not in known_schemas],
+    )
+
+
 async def build_graph_hints(
     session: AsyncSession,
     *,
@@ -129,9 +160,9 @@ async def build_graph_hints(
     if graph is None:
         return schema_hint, "", None
     recalled = schema_hint_tables(schema_hint)
+    schema_hint, recalled = _align_hint_with_graph(schema_hint, recalled, graph)
     if not recalled:
         return schema_hint, "", None
-    notes = {key: note for key, note in recalled if note}
     keys = [key for key, _ in recalled]
     bridges = (
         select_bridge_tables(
@@ -145,4 +176,6 @@ async def build_graph_hints(
     )
     extra_hint, extra_relations = _apply_bridges(graph, bridges, keys)
     hint = _append_bridges(schema_hint, extra_hint, bridges)
-    return hint, "\n".join(dict.fromkeys(extra_relations)), graph_out(graph.project(keys, notes))
+    # 语义预检需要完整外键图:子图会漏掉桥接/对端表,INNER JOIN 丢行无法证明。
+    # schema_hint 仍只含召回与桥接表;agent 提示词按 hint 过滤图,不膨胀。
+    return hint, "\n".join(dict.fromkeys(extra_relations)), graph_out(graph)

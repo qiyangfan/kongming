@@ -1,18 +1,15 @@
-"""数值纪律:白名单构建、审计剥离、compute 工具纯函数。"""
+"""数值纪律:可信数值源构建与 compute 工具纯函数。"""
 
 from __future__ import annotations
 
 import pytest
 
 from kongming_agent.numeric import (
-    audit_summarize_output,
-    audit_text,
     build_whitelist,
     compute_delta,
     compute_result_values,
     compute_share,
     extract_numbers,
-    filter_insights,
     normalize_number,
     precompute_derived_stats,
     value_in_whitelist,
@@ -52,104 +49,6 @@ class TestWhitelist:
         assert value_in_whitelist(25, is_percent=True, whitelist=[0.25])
         assert value_in_whitelist(25, is_percent=True, whitelist=[25.0])
         assert not value_in_whitelist(30, is_percent=True, whitelist=[0.25, 25.0])
-
-
-class TestAuditText:
-    def test_strips_non_whitelist_sentence_keeps_others(self) -> None:
-        text = "结果由 80 变为 100。环比增长 15%。共 2 行。"
-        out, n = audit_text(text, [80.0, 100.0, 2.0])
-        assert "15%" not in out
-        assert "由 80 变为 100" in out
-        assert "共 2 行" in out
-        assert n == 1
-
-    def test_zero_violation_verbatim(self) -> None:
-        text = "共 10 行,平均 3.5。"
-        out, n = audit_text(text, [10.0, 3.5])
-        assert out == text
-        assert n == 0
-
-    def test_empty_text(self) -> None:
-        assert audit_text("", [1.0]) == ("", 0)
-
-    def test_calendar_year_marker_not_data_number(self) -> None:
-        # 2024 本身不在白名单,但「2024年」是时间标记,不得整句剥离
-        out, n = audit_text("2024年销售额为 100。", [100.0])
-        assert "100" in out
-        assert n == 0
-
-    def test_scientific_notation_normalized(self) -> None:
-        out, n = audit_text("总和 1.5e3。", [1500.0])
-        assert n == 0
-        assert "1.5e3" in out
-
-
-class TestFilterInsights:
-    def test_trend_requires_three_rows(self) -> None:
-        out = filter_insights([{"type": "trend", "text": "逐月上升"}], n_rows=2, whitelist=[])
-        assert out == []
-
-    def test_trend_ok_with_three_and_whitelist(self) -> None:
-        out = filter_insights(
-            [{"type": "trend", "text": "由 80 升至 100"}], n_rows=3, whitelist=[80.0, 100.0]
-        )
-        assert len(out) == 1
-
-    def test_anomaly_quantitative_needs_whitelist(self) -> None:
-        out = filter_insights(
-            [{"type": "anomaly", "text": "偏离均值 40%"}], n_rows=5, whitelist=[3.5]
-        )
-        assert out == []
-
-    def test_max_stripped_when_number_illegal(self) -> None:
-        out = filter_insights([{"type": "max", "text": "最多 100"}], n_rows=5, whitelist=[50.0])
-        assert out == []
-
-
-class TestAuditSummarize:
-    def test_growth_rate_not_in_whitelist_stripped(self) -> None:
-        result = audit_summarize_output(
-            "由 80 变为 100。环比增长 25%。",
-            [{"type": "trend", "text": "增长 15%"}],
-            columns=["y", "v"],
-            rows=[[2023, 80], [2024, 100]],
-            stats={"rows": 2, "v_max": 100},
-        )
-        assert "25%" not in result.summary
-        assert "80" in result.summary or "100" in result.summary
-        assert result.insights == []  # 两期 trend 不产出
-
-    def test_tool_result_allows_growth_phrase(self) -> None:
-        result = audit_summarize_output(
-            "增长 25%。",
-            [],
-            rows=[[80], [100]],
-            stats={"rows": 2},
-            compute_values=[25.0],
-        )
-        assert result.summary == "增长 25%。"
-
-    def test_structural_constants_not_stripped(self) -> None:
-        result = audit_summarize_output(
-            "共 10 行,平均 3.5,预览前 5 行。",
-            [],
-            rows=[[1], [2], [3]],
-            stats={"rows": 10, "avg": 3.5},
-        )
-        assert result.stripped_sentences == 0
-        assert "10" in result.summary and "5" in result.summary
-
-    def test_zero_violation_zero_regression(self) -> None:
-        summary = "共 2 行,由 80 变为 100。"
-        insights = [{"type": "max", "text": "最大 100"}]
-        result = audit_summarize_output(
-            summary,
-            insights,
-            rows=[[80], [100]],
-            stats={"rows": 2},
-        )
-        assert result.summary == summary
-        assert result.insights == insights
 
 
 class TestComputeTools:

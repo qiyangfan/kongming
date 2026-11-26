@@ -20,6 +20,7 @@ from kongming_agent.apiclient import (
 from kongming_agent.graph import nodes
 from kongming_agent.graph.state import AgentState, ExecutionResult, ValidationResult
 from kongming_agent.llm import LlmError
+from kongming_agent.schemagraph import GraphColumn, GraphTable, SchemaGraph
 
 
 class FakeLlm:
@@ -146,6 +147,23 @@ async def test_understand_single_turn_branch(monkeypatch: pytest.MonkeyPatch) ->
     out = await nodes.understand(_state(question="有多少商品"))
     assert out["resolved_question"] == "商品总数"
     assert "提取查询意图" in fake.calls[0][0]
+
+
+async def test_understand_includes_previous_clarification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeLlm(["按租赁月份统计每个门店的租赁笔数和总支付金额"])
+    _install(monkeypatch, fake, FakeApi())
+    await nodes.understand(
+        _state(
+            question="按租赁月份",
+            history=["按门店每个月的租赁笔数和总支付金额"],
+            last_clarification="请确认时间口径：按租借时间还是支付时间统计？",
+        )
+    )
+    user = fake.calls[0][1]
+    assert "上一轮澄清问句：请确认时间口径" in user
+    assert "当前问题：按租赁月份" in user
 
 
 async def test_understand_empty_output_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -635,13 +653,6 @@ def test_parse_summary_json(raw: str, summary: str, n_insights: int) -> None:
     assert len(cast("list[object]", parsed.get("insights", []))) == n_insights
 
 
-def test_fallback_summary() -> None:
-    assert nodes.fallback_summary({"rows": 2, "qty_max": 9, "qty_min": 1, "qty_avg": 5}) == (
-        "共 2 行，qty 最大值 9，最小值 1，平均 5。"
-    )
-    assert nodes.fallback_summary({"rows": 4}) == "共 4 行结果。"
-
-
 async def test_summarize_no_rows_short_circuit() -> None:
     out = await nodes.summarize(_state(execution=ExecutionResult(verdict="PASS", rows=[])))
     assert out["summary"] == "查询无结果。"
@@ -652,7 +663,8 @@ async def test_summarize_llm_failure_degrades(monkeypatch: pytest.MonkeyPatch) -
     exe = ExecutionResult(verdict="PASS", columns=["qty"], rows=[[3], [7]])
     out = await nodes.summarize(_state(execution=exe))
     assert out["insights"] == []
-    assert "qty" in str(out["summary"])  # stats 兜底
+    summary = str(out["summary"])
+    assert "qty" in summary and "最高" in summary and "未生成解读" not in summary
     # stats 值型为 object,按生产代码实型(dict)收窄
     assert cast("dict[str, object]", out["stats"])["qty_max"] == 7
 
@@ -663,43 +675,125 @@ async def test_summarize_non_json_degrades_to_fallback(
     _install(monkeypatch, FakeLlm(["就是三行数据"]), FakeApi())
     exe = ExecutionResult(verdict="PASS", columns=["qty"], rows=[[1], [2], [3]])
     out = await nodes.summarize(_state(execution=exe))
-    assert "共 3 行" in str(out["summary"])  # 非 JSON 降级不报错
+    assert "共 3 行" in str(out["summary"])  # 非 JSON 空稿走确定性兜底,不报错
 
 
 async def test_summarize_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    answer = '{"summary":"库存共 30 件","insights":[{"type":"max","text":"连弩最多"}]}'
+    answer = (
+        '{"summary":"库存共 {{cell.0.1}} 件",'
+        '"insights":[{"type":"max","text":"{{cell.0.0}} 最多"}]}'
+    )
     _install(monkeypatch, FakeLlm([answer]), FakeApi())
     exe = ExecutionResult(verdict="PASS", columns=["name", "qty"], rows=[["连弩", 30]])
     out = await nodes.summarize(_state(execution=exe))
     assert out["summary"] == "库存共 30 件"
-    assert out["insights"] == [{"type": "max", "text": "连弩最多"}]
+    assert out["insights"] == [{"type": "max", "text": "连弩 最多"}]
     assert cast("dict[str, object]", out["stats"])["qty_max"] == 30
+
+
+async def test_summarize_insight_violation_is_traced(monkeypatch: pytest.MonkeyPatch) -> None:
+    """summary 合规但单条 insight 违约被丢弃时,trace 仍记录违约类型与层级。"""
+    from kongming_agent.graph import slots as slots_mod
+
+    events: list[dict[str, object]] = []
+
+    def _capture(kind: str, payload: dict[str, object]) -> None:
+        events.append(payload)
+
+    monkeypatch.setattr(slots_mod, "emit_event", _capture)
+    answer = '{"summary":"共 {{rows}} 行","insights":[{"type":"max","text":"最大 30"}]}'
+    _install(monkeypatch, FakeLlm([answer]), FakeApi())
+    exe = ExecutionResult(verdict="PASS", columns=["qty"], rows=[[30], [20]])
+    out = await nodes.summarize(_state(execution=exe))
+    assert out["summary"] == "共 2 行"
+    assert out["insights"] == []
+    fields = [
+        cast("dict[str, object]", e.get("fields"))
+        for e in events
+        if cast("dict[str, object]", e.get("fields")).get("kind") == "answer_contract"
+    ]
+    assert any(f.get("tier") == "slot_render" for f in fields)
+    assert any(
+        f.get("tier") == "insight_dropped" and f.get("violation") == "literal_digit" for f in fields
+    )
 
 
 async def test_summarize_strips_unwhitelisted_growth_rate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """心算派生量句剥离;合法白名单句保留;stats 不动。"""
+    """字面数字(含心算派生量)违约:整段弃用,输出确定性轮廓,stats 不动。"""
     answer = '{"summary":"由 80 变为 100。环比增长 25%。","insights":[]}'
     _install(monkeypatch, FakeLlm([answer]), FakeApi())
-    exe = ExecutionResult(verdict="PASS", columns=["y", "v"], rows=[[2023, 80], [2024, 100]])
+    exe = ExecutionResult(
+        verdict="PASS", columns=["month", "v"], rows=[["一月", 80], ["二月", 100]]
+    )
     out = await nodes.summarize(_state(execution=exe))
     summary = str(out["summary"])
-    assert "25%" not in summary
-    assert "80" in summary or "100" in summary
+    assert "25" not in summary and "增长" not in summary
+    assert "最高" in summary and "未生成解读" not in summary
     stats = cast("dict[str, object]", out["stats"])
     assert stats["rows"] == 2
+
+
+async def test_summarize_falls_back_when_focus_dimension_omitted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """问句关注城市时,合法但只报金额极值的总结也必须让位给含城市的轮廓。"""
+    graph = SchemaGraph(
+        tables=(
+            GraphTable(
+                "public",
+                "customer",
+                columns=(
+                    GraphColumn("first_name", "varchar", "名"),
+                    GraphColumn("last_name", "varchar", "姓"),
+                ),
+            ),
+            GraphTable(
+                "public",
+                "city",
+                columns=(GraphColumn("city", "varchar", "城市名称"),),
+            ),
+        ),
+        foreign_keys=(),
+    )
+    answer = (
+        '{"summary":"共 {{rows}} 行；总支付金额最高为 '
+        '{{stats.total_payment_amount_max}}，最低为 {{stats.total_payment_amount_min}}。",'
+        '"insights":[]}'
+    )
+    _install(monkeypatch, FakeLlm([answer]), FakeApi())
+    exe = ExecutionResult(
+        verdict="PASS",
+        columns=["first_name", "last_name", "city", "total_payment_amount"],
+        rows=[
+            ["KARL", "SEAL", "Cape Coral", 221.55],
+            ["RHONDA", "KENNEDY", "Apeldoorn", 194.61],
+        ],
+    )
+    out = await nodes.summarize(
+        _state(
+            question="这 5 位分别来自哪个城市？",
+            resolved_question="这 5 位分别来自哪个城市？",
+            schema_graph=graph.to_dict(),
+            execution=exe,
+        )
+    )
+    summary = str(out["summary"])
+    assert "city 包括 Cape Coral" in summary and "Apeldoorn" in summary
+    assert "其中 Cape Coral" in summary
+    assert "first_name" not in summary
 
 
 async def test_summarize_allows_computed_growth_rate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """计算工具返回值入白名单后允许写增长率。"""
-    answer = '{"summary":"增长 25%。","insights":[]}'
+    """计算工具结果经 calc 槽位引用后允许写增长率。"""
+    answer = '{"summary":"增长 {{calc.delta_pct}}。","insights":[]}'
     _install(monkeypatch, FakeLlm([answer]), FakeApi())
     exe = ExecutionResult(verdict="PASS", columns=["v"], rows=[[80], [100]])
     state = _state(execution=exe)
-    state["compute_values"] = [25.0]
+    state["compute_slots"] = {"delta_pct": 25.0}
     out = await nodes.summarize(state)
     assert out["summary"] == "增长 25%。"
 
@@ -716,6 +810,26 @@ async def test_summarize_context_grounded_with_stats(monkeypatch: pytest.MonkeyP
     assert "前5行" in user
 
 
+async def test_summarize_context_keeps_original_wording(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """内部改写只供理解;上下文显式保留用户原话作为回答措辞依据。"""
+    fake = FakeLlm(['{"summary":"x"}'])
+    _install(monkeypatch, fake, FakeApi())
+    exe = ExecutionResult(verdict="PASS", columns=["qty"], rows=[[3], [7]])
+    await nodes.summarize(
+        _state(
+            question="按租赁月份统计门店每月的笔数和金额",
+            resolved_question="按租赁记录的租借发生时间戳统计门店每月笔数和金额",
+            execution=exe,
+        )
+    )
+    user = fake.calls[0][1]
+    assert "用户原始问题：按租赁月份统计门店每月的笔数和金额" in user
+    assert "本轮完整意图（内部改写，仅供理解，回答措辞以用户原始问题为准）" in user
+    assert "按租赁记录的租借发生时间戳" in user
+
+
 async def test_summarize_context_includes_table_hint_with_alias(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -726,7 +840,7 @@ async def test_summarize_context_includes_table_hint_with_alias(
     """
     fake = FakeLlm(['{"summary":"x"}'])
     _install(monkeypatch, fake, FakeApi())
-    exe = ExecutionResult(verdict="PASS", columns=["qty"], rows=[[3]])
+    exe = ExecutionResult(verdict="PASS", columns=["qty"], rows=[[3], [7]])
     schema_hint = (
         "tenant_default.goods(商品表)(id integer, name varchar) -- 商品信息\n"
         "  示例:SELECT count(*) FROM tenant_default.goods\n"
@@ -751,7 +865,7 @@ async def test_summarize_context_no_schema_hint_no_section(
     """schema_hint 空:不注入表说明段(上下文形态)。"""
     fake = FakeLlm(['{"summary":"x"}'])
     _install(monkeypatch, fake, FakeApi())
-    exe = ExecutionResult(verdict="PASS", columns=["qty"], rows=[[3]])
+    exe = ExecutionResult(verdict="PASS", columns=["qty"], rows=[[3], [7]])
     await nodes.summarize(_state(execution=exe))
     user = fake.calls[0][1]
     assert "所涉表" not in user

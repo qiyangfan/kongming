@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Database, Wrench, X } from "lucide-react";
 
 import type { StreamStageOut, StreamToolCallOut } from "@/lib/api";
+import { MarkdownText } from "@/components/markdown-text";
+import { fencedSql } from "@/lib/sql-markdown";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 /* 节点中文标签单源(问答页时间轴与质量台轨迹块共用) */
@@ -233,9 +235,9 @@ export function StreamCard({ stages, sql, summary, toolCalls = [] }: StreamCardP
             查看 SQL
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <pre className="mt-1.5 overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed text-foreground">
-              {sql}
-            </pre>
+            <div className="mt-1.5">
+              <MarkdownText text={fencedSql(sql)} />
+            </div>
           </CollapsibleContent>
         </Collapsible>
       )}

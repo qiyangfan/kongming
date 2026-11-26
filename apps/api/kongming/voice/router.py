@@ -242,8 +242,8 @@ async def call_channel(
         for command in machine.on_channel_open():
             await _dispatch(machine, websocket, registry, command)
         await _pump_channel(machine, websocket, registry, svc)
-    except WebSocketDisconnect:
-        pass
+    except WebSocketDisconnect as e:
+        log.info("语音通道断开 call_id=%s code=%s", consumed.call_id, e.code)
     finally:
         _CHANNELS.pop(consumed.call_id, None)
         await _close_out(svc, machine, consumed.call_id)

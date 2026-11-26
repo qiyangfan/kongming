@@ -1010,6 +1010,8 @@ def test_channel_stop_tool_only_confirms_without_turn_request(
             assert backfill["payload"]["item"]["type"] == "function_call_output"
             stopped = ws.receive_json()
             assert stopped["type"] == "turn.stopped"
+            # 停止只收口在途问答,通话本身仍在途(通道关闭时才清理)
+            assert svc.calls
         assert svc.calls == {}
 
 

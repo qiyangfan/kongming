@@ -5,16 +5,18 @@ import logging
 import threading
 from typing import cast
 
-from kongming_agent import deps, numeric
+from kongming_agent import deps
+from kongming_agent.graph import slots
 from kongming_agent.graph.citations import sanitize_citations, surviving_markers
 from kongming_agent.graph.dialogue import CHITCHAT_SEMANTIC_REPLY
 from kongming_agent.graph.doc_prompt import FUSED_ANSWER_SYSTEM, INTENT_ROUTE_SYSTEM
-from kongming_agent.graph.nodes import fallback_summary, parse_summary_json
+from kongming_agent.graph.nodes import parse_summary_json
 from kongming_agent.graph.state import (
     DOC_HINT_LIMIT,
     FALLBACK_CHITCHAT,
     FALLBACK_CLARIFY,
     INTENT_CHITCHAT,
+    INTENT_DATA,
     INTENT_FUSED,
     INTENT_KNOWLEDGE,
     VALID_INTENTS,
@@ -42,6 +44,55 @@ def snapshot_intent_route_stats() -> dict[str, int]:
     """回退/兜底计数快照(可观测:prompt 调优与阈值调整依据)。"""
     with _intent_lock:
         return dict(_intent_stats)
+
+
+# data 意图的「指标已明确」信号:命中即按全量默认口径作答,歧义判定不可信
+_CLARIFY_METRIC_SIGNALS = (
+    "多少",
+    "几个",
+    "几笔",
+    "几次",
+    "几部",
+    "几名",
+    "几家",
+    "几条",
+    "数量",
+    "总数",
+    "个数",
+    "笔数",
+    "次数",
+    "条数",
+    "部数",
+    "人数",
+    "平均",
+    "合计",
+    "总计",
+    "总和",
+    "最大",
+    "最小",
+    "排名",
+    "统计",
+    "汇总",
+    "占比",
+    "比例",
+    "金额",
+    "总额",
+)
+# 开放表述(看情况/分析趋势)保留澄清:此时缺的是口径而非指标词
+_CLARIFY_OPEN_SIGNALS = ("情况", "看看", "看一下", "分析", "怎么样", "如何", "表现", "趋势")
+
+
+def clarify_suppressed(question: str, intent: str) -> bool:
+    """data 意图且问句已含明确统计指标时,抑制模型判定的歧义澄清早退。
+
+    总数/数量/平均这类聚合在全量口径上是合理默认,反问只会打断作答;
+    仅当问句是开放表述(看看/情况/分析)时保留澄清。
+    """
+    if intent != INTENT_DATA:
+        return False
+    if any(token in question for token in _CLARIFY_OPEN_SIGNALS):
+        return False
+    return any(token in question for token in _CLARIFY_METRIC_SIGNALS)
 
 
 def parse_intent_route(raw: str) -> tuple[str, float, str, bool, str, tuple[str, ...]] | None:
@@ -154,8 +205,22 @@ async def route_intent(state: AgentState) -> dict[str, object]:
             "fallback_type": FALLBACK_CHITCHAT,
         }
     # 澄清早退(spec「歧义问句澄清引导」):高置信歧义且上一轮非澄清轮
-    # (防循环硬门,确定性规则不依赖模型自觉);fail-open 路径在上方回退分支
-    if ambiguous and state.get("last_fallback") != FALLBACK_CLARIFY:
+    # (防循环硬门,确定性规则不依赖模型自觉);fail-open 路径在上方回退分支。
+    # 指标词明确的 data 问句(总数/数量/平均等)按全量默认口径作答,不早退。
+    if ambiguous and clarify_suppressed(question, intent):
+        emit_event(
+            "trace",
+            {
+                "node": "route_intent",
+                "fields": {
+                    "kind": "intent_route",
+                    "source": "llm",
+                    "decision": "clarify_suppressed",
+                    "confidence": confidence,
+                },
+            },
+        )
+    elif ambiguous and state.get("last_fallback") != FALLBACK_CLARIFY:
         emit_event(
             "trace",
             {
@@ -227,7 +292,15 @@ async def fused_answer(state: AgentState) -> dict[str, object]:
         question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
     stats = state.get("stats") or {}
     parts = _fused_doc_parts(doc_hints)
-    user = _fused_user(question, execution, stats, parts)
+    registry = slots.build_registry(
+        question=question,
+        columns=execution.columns,
+        rows=execution.rows,
+        stats=stats,
+        compute_slots=state.get("compute_slots") or {},
+        aliases=slots.parse_schema_aliases(state.get("schema_hint") or ""),
+    )
+    user = _fused_user(question, execution, stats, parts) + "\n\n" + registry.prompt_block()
     try:
         answer = await deps.get_llm().chat(
             FUSED_ANSWER_SYSTEM,
@@ -246,11 +319,21 @@ async def fused_answer(state: AgentState) -> dict[str, object]:
         _note_fused_fallback(state.get("trace_id"), "empty_answer")
         return {}
     summary, by_key = _sanitize_fused(summary, doc_hints)
-    final = _audit_fused(summary, execution, stats, parts, state.get("compute_values") or [])
+    # 槽位契约(与数据态同一实现):数据数字经槽位渲染;引用文档的数字须为
+    # 下发原文的逐字片段。违约整段弃用,保留 summarize 的纯数据答
+    checked = slots.apply_contract(summary, registry, doc_parts=parts)
+    slots.emit_contract_event(
+        node="fused_answer",
+        result=checked,
+        tier="fused_render" if checked.violation is None else "fused_fallback",
+    )
+    if checked.violation is not None:
+        _note_fused_fallback(state.get("trace_id"), checked.violation)
+        return {}
     return {
-        "summary": final,
+        "summary": checked.text,
         "insights": [],
-        "sources": _project_fused_sources(final, by_key),
+        "sources": _project_fused_sources(checked.text, by_key),
     }
 
 
@@ -298,27 +381,6 @@ def _sanitize_fused(
             },
         )
     return sanitized.text, by_key
-
-
-def _audit_fused(
-    summary: str,
-    execution: ExecutionResult,
-    stats: dict[str, object],
-    parts: list[str],
-    compute_values: list[float],
-) -> str:
-    """数值纪律收口:白名单=结果面∪stats∪本轮计算值∪下发文档内容数字。"""
-    doc_numbers = [t.value for part in parts for t in numeric.extract_numbers(part)]
-    audited = numeric.audit_summarize_output(
-        summary,
-        [],
-        columns=execution.columns,
-        rows=execution.rows,
-        stats=stats,
-        compute_values=[*compute_values, *doc_numbers],
-        structural=[float(len(execution.rows)), float(numeric.PREVIEW_ROWS)],
-    )
-    return audited.summary or fallback_summary(stats)
 
 
 def _project_fused_sources(

@@ -15,8 +15,6 @@ _TOL = 1e-6
 # 结构性常量:结果行数、预览行数(系统给出的计数,入白名单防误伤)
 PREVIEW_ROWS = 5
 
-# 句子边界(中英文句号/问号/感叹号/分号/换行)
-_SENT_SPLIT = re.compile(r"(?<=[。！？!?；;\n])")
 
 # 数字 token:可选符号/千分位/小数/科学计数/百分号
 # 指数段必须进捕获组,否则 normalize 会把 1.5e3 读成 1.5
@@ -40,16 +38,6 @@ class NumberToken:
     is_percent: bool
     start: int
     end: int
-
-
-@dataclass
-class AuditResult:
-    """审计产物:剥离后的文本与统计(便于日志,不影响 columns/rows/stats)。"""
-
-    summary: str
-    insights: list[dict[str, str]]
-    stripped_sentences: int = 0
-    stripped_insights: int = 0
 
 
 def normalize_number(raw: str) -> float | None:
@@ -130,93 +118,6 @@ def build_whitelist(
     for v in structural or []:
         _feed(v)
     return out
-
-
-def _split_sentences(text: str) -> list[str]:
-    parts = _SENT_SPLIT.split(text)
-    return [p for p in parts if p.strip()]
-
-
-def audit_text(text: str, whitelist: Sequence[float]) -> tuple[str, int]:
-    """剥离含非白名单数值的句子;零违规时逐字返回原文。返回 (文本, 剥离句数)。"""
-    if not text:
-        return text, 0
-    sentences = _split_sentences(text)
-    kept: list[str] = []
-    stripped = 0
-    for sent in sentences:
-        tokens = extract_numbers(sent)
-        if all(
-            value_in_whitelist(t.value, is_percent=t.is_percent, whitelist=whitelist)
-            for t in tokens
-        ):
-            kept.append(sent)
-        else:
-            stripped += 1
-    if stripped == 0:
-        return text, 0
-    return "".join(kept).strip(), stripped
-
-
-def filter_insights(
-    insights: Sequence[Mapping[str, str]],
-    *,
-    n_rows: int,
-    whitelist: Sequence[float],
-) -> list[dict[str, str]]:
-    """trend/anomaly 收紧 + 同口径数值审计剥离。"""
-    out: list[dict[str, str]] = []
-    for item in insights:
-        itype = str(item.get("type") or "").strip().lower()
-        text = str(item.get("text") or "").strip()
-        if not text:
-            continue
-        if itype == "trend" and n_rows < 3:
-            continue
-        if itype == "anomaly":
-            tokens = extract_numbers(text)
-            if tokens and not all(
-                value_in_whitelist(t.value, is_percent=t.is_percent, whitelist=whitelist)
-                for t in tokens
-            ):
-                continue
-        cleaned, _ = audit_text(text, whitelist)
-        if cleaned:
-            out.append({"type": itype, "text": cleaned})
-    return out
-
-
-def audit_summarize_output(
-    summary: str,
-    insights: Sequence[Mapping[str, str]],
-    *,
-    columns: Sequence[str] | None = None,
-    rows: Sequence[Sequence[object]] | None = None,
-    stats: Mapping[str, object] | None = None,
-    compute_values: Iterable[float] | None = None,
-    structural: Iterable[float] | None = None,
-) -> AuditResult:
-    """summarize/finalize 同口径收口。零违规时 summary/insights 与入参等价。"""
-    n_rows = len(rows) if rows is not None else 0
-    rows_val = stats.get("rows") if stats else None
-    if isinstance(rows_val, (int, float)) and not isinstance(rows_val, bool):
-        n_rows = max(n_rows, int(rows_val))
-    struct = list(structural) if structural is not None else [float(n_rows), float(PREVIEW_ROWS)]
-    wl = build_whitelist(
-        columns=columns,
-        rows=rows,
-        stats=stats,
-        compute_values=compute_values,
-        structural=struct,
-    )
-    new_summary, n_stripped = audit_text(summary, wl)
-    new_insights = filter_insights(insights, n_rows=n_rows, whitelist=wl)
-    return AuditResult(
-        summary=new_summary,
-        insights=new_insights,
-        stripped_sentences=n_stripped,
-        stripped_insights=max(0, len(insights) - len(new_insights)),
-    )
 
 
 def _assert_whitelisted(name: str, value: float, whitelist: Sequence[float]) -> str | None:

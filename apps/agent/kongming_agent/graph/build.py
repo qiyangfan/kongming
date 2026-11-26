@@ -41,6 +41,8 @@ def _after_generate(state: AgentState) -> str:
 
 
 def _after_validate(state: AgentState) -> str:
+    if state.get("end_reason"):
+        return "fail"
     validation = state.get("validation")
     if validation is None or validation.passed:
         return "execute"

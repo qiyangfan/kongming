@@ -8,10 +8,12 @@ import json
 import logging
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import cast
 
 from kongming_agent import deps, numeric, sqlguard, sqlsemantic
 from kongming_agent.apiclient import MetricHit, RagContext, SchemaMeta
+from kongming_agent.graph import slots
 from kongming_agent.graph.budget import Segment, converge
 from kongming_agent.graph.citations import sanitize_citations
 from kongming_agent.graph.dialogue import (
@@ -27,9 +29,12 @@ from kongming_agent.graph.prompts import (
     UNDERSTAND_MULTI_SYSTEM,
     UNDERSTAND_SINGLE_SYSTEM,
 )
+from kongming_agent.graph.selfheal import selfheal_guidance as _selfheal_guidance
+from kongming_agent.graph.semantic_guard import clarification_graph, semantic_guard
 from kongming_agent.graph.state import (
     DOC_HINT_LIMIT,
     FALLBACK_CHITCHAT,
+    FALLBACK_CLARIFY,
     INTENT_DATA,
     INTENT_FUSED,
     INTENT_KNOWLEDGE,
@@ -38,9 +43,15 @@ from kongming_agent.graph.state import (
     ValidationResult,
 )
 from kongming_agent.graph.streams import emit_event
+from kongming_agent.graph.summary_context import scalar_summary, summarize_context
 from kongming_agent.graph.table_prune import prune_schema
 from kongming_agent.llm import LlmError
-from kongming_agent.schemagraph import format_prompt_hint, state_graph
+from kongming_agent.schemagraph import (
+    column_comments,
+    format_prompt_hint,
+    graph_for_prompt,
+    state_graph,
+)
 from kongming_agent.settings import Settings
 
 # 装配预算分段优先级(0=不可切;小者先裁)。schema/history 殿后(无表结构
@@ -198,10 +209,15 @@ async def understand(state: AgentState) -> dict[str, object]:
             "stats": {"dialogue_reply_passthrough": 1},
         }
     history = state.get("history", [])[-MAX_HISTORY:]
+    last_clarification = (state.get("last_clarification") or "").strip()
     if history:
         system = UNDERSTAND_MULTI_SYSTEM
         history_text = "\n".join(f"第{i + 1}轮：{q}" for i, q in enumerate(history))
-        prompt = f"历史问题：\n{history_text}\n\n当前问题：{question}\n\n补全后的完整问题："
+        clarify_text = f"\n上一轮澄清问句：{last_clarification}" if last_clarification else ""
+        prompt = (
+            f"历史问题：\n{history_text}{clarify_text}\n\n"
+            f"当前问题：{question}\n\n补全后的完整问题："
+        )
     else:
         system = UNDERSTAND_SINGLE_SYSTEM
         prompt = f"用户问题：{question}\n请输出改写后的清晰问题（一行）。"
@@ -423,65 +439,14 @@ def clean_sql(raw: str) -> str:
 # ── 节点3:SQL 生成 ──
 
 
-def _selfheal_guidance(error: str) -> str:
-    """自愈喂回分类:按 PG 错误形态生成针对性修正指令。
-
-    旧行为对一切 does-not-exist 附表哨兵出口——列不存在会被引向弃答
-    (表存在,出口是改列);泛化「请修正」使机械错同因连败(
-    missing FROM-clause 重试 2 轮同错)。纯函数,优先级自上而下:别名→
-    列→关系;哨兵出口仅关系类(表/列以外的 does-not-exist 如函数/类型,
-    维持泛化喂回,不误引弃答出口)。
-    """
-    low = error.lower()
-    m = re.search(r'missing from-clause entry for table "([^"]+)"', low)
-    if m:
-        return (
-            f"SQL 引用了「{m.group(1)}」但 FROM/JOIN 中并没有定义这个别名——"
-            "为其补充对应表的 JOIN,或改用 FROM/JOIN 中已有的别名；"
-            "只引用『可用表结构』清单中存在的表。"
-        )
-    if "select distinct" in low and "order by" in low:
-        # PG 硬约束:DISTINCT 下 ORDER BY 键必须已投影。追问轮最易踩
-        # (沿用上轮排序语义 + 关联分类列触发去重)。实测两级演化:模型
-        # 先裸同错,采纳子查询后又把外层 DISTINCT 排序键留下——抽象
-        # 指令修不动,必须给逐字正确形态模板并明令外层去 DISTINCT。
-        return (
-            "SELECT DISTINCT 的 ORDER BY 表达式必须出现在投影内,二者不可共存——"
-            "正确做法:把「取前 N + 排序」整体放进子查询(排序键在该子查询投影内),"
-            "外层直接 JOIN 所需的分类/名称列并沿用子查询携带的排序键,"
-            "不再使用 DISTINCT。逐字形态示例:"
-            "SELECT f.title, c.name FROM (SELECT film_id, title, rental_rate"
-            " FROM 表 ORDER BY rental_rate DESC, film_id LIMIT 5) f"
-            " JOIN film_category fc ON fc.film_id = f.film_id"
-            " JOIN category c ON c.category_id = fc.category_id"
-            " ORDER BY f.rental_rate DESC, f.film_id；"
-            "若确需去重,只按已在投影中的列排序。"
-        )
-    if re.search(r'column "[^"]+" .*does not exist', low) or (
-        low.startswith('column "') and "does not exist" in low
-    ):
-        return (
-            "引用的列不在所引用表的『可用表结构』清单中——只使用清单内的列名"
-            "并核对拼写；若该表确无支撑问句口径的列，不得用其他列近似顶替。"
-        )
-    if re.search(r'relation "[^"]+" .*does not exist', low) or (
-        low.startswith('relation "') and "does not exist" in low
-    ):
-        return (
-            "所引用的表或列不在『可用表结构』清单中——核对清单；"
-            "若清单确无所需数据，只输出 NO_RELEVANT_TABLE。"
-        )
-    return ""
-
-
 def _sql_hints(state: AgentState) -> dict[str, str]:
     """收集生成提示的各参考段(空段保留空串,渲染期再决定痕迹)。"""
     schema = state.get("schema_hint") or ""
     graph = state_graph(state.get("schema_graph"))
     return {
         "schema": schema if schema.strip() else _EMPTY_HINT,
-        # 结构化事实段:角色/主键/外键;无图时为空,提示词逐字回退
-        "graph": format_prompt_hint(graph) if graph is not None else "",
+        # 结构化事实段:角色/主键/外键;只注入召回与桥接表,完整图留给语义预检
+        "graph": (format_prompt_hint(graph_for_prompt(graph, schema)) if graph is not None else ""),
         # 记忆提示放在表结构前；为空时不改变提示词。
         "memory": (state.get("memory_hint") or "").strip(),
         # 关系和指标提示放在表结构与历史 SQL 之间；为空时不改变提示词。
@@ -501,6 +466,27 @@ async def generate(state: AgentState) -> dict[str, object]:
     question = state.get("resolved_question")
     if not question:
         question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+    # 意图路由看不到 schema;事件时间与金额时间都可用且问句只说了「按月」
+    # 时,生成前先反问一次。上一轮已是澄清轮则不再追问(防循环),由历史补全。
+    graph_for_clarify = state_graph(state.get("schema_graph"))
+    if (
+        graph_for_clarify is not None
+        and not state.get("error")
+        and state.get("retry_count", 0) == 0
+        and state.get("last_fallback") != FALLBACK_CLARIFY
+    ):
+        clarify_graph = clarification_graph(graph_for_clarify, state.get("schema_hint") or "")
+        clarify = sqlsemantic.time_basis_clarification(question, clarify_graph)
+        if clarify:
+            emit_event(
+                "trace",
+                {"node": "generate", "fields": {"kind": "clarify", "reason": "time_basis"}},
+            )
+            return {
+                "end_reason": "no_data",
+                "error": clarify,
+                "fallback_type": FALLBACK_CLARIFY,
+            }
     hints = _sql_hints(state)
     extra = ""
     error = state.get("error") or ""
@@ -569,21 +555,9 @@ def validate(state: AgentState) -> dict[str, object]:
         result = sqlguard.validate(sql)
         graph = state_graph(state.get("schema_graph"))
         if result.passed and graph is not None and Settings().sql_semantic_guard:
-            question = state.get("resolved_question") or state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
-            verdict = sqlsemantic.validate_semantics(sql, graph, question)
-            emit_event(
-                "trace",
-                {
-                    "node": "guard",
-                    "fields": {
-                        "kind": "semantic_guard",
-                        "verdict": "pass" if verdict.passed else "reject",
-                        "categories": verdict.categories,
-                    },
-                },
-            )
-            if not verdict.passed:
-                result = ValidationResult(passed=False, reason=verdict.render_reason())
+            early = semantic_guard(state, sql, graph)
+            if early is not None:
+                return early
     out: dict[str, object] = {"validation": result}
     if not result.passed and result.permission_block:
         out["end_reason"] = "blocked"
@@ -658,8 +632,9 @@ KNOWLEDGE_INTENT_WORDS = (
 DOC_STRONG_INTENT_WORDS = tuple(w for w in KNOWLEDGE_INTENT_WORDS if w != "是什么")
 
 # SQL 强意图词表用于识别明显的数据库查询请求，只收**几乎只在
-# 问库出现**的强信号;通用量词(多少/数量/平均/最高/哪个)不收
-# 图片问题也可能包含“数量”等通用词，不能据此否决文档问答分流。
+# 问库出现**的通用强信号;通用量词(多少/数量/平均/最高/哪个)不收。
+# 库名/表名/字段名不得作为意图信号:租户数据不可预设,意图由模型判定,
+# 词表只保留与数据源无关的 SQL 语义词。
 SQL_INTENT_WORDS = (
     "数据",
     "数据库",
@@ -673,9 +648,6 @@ SQL_INTENT_WORDS = (
     "排名",
     "SQL",
     "sql",
-    "sakila",
-    "olist",
-    "default",
 )
 
 
@@ -841,6 +813,12 @@ def _is_stat_worthy(col: str, values: list[int | float]) -> bool:
     return True
 
 
+def _schema_column_labels(state: AgentState) -> dict[str, str]:
+    """取本轮结构化图的列注释,供总结选择问句关注的可读列。"""
+    graph = state_graph(state.get("schema_graph"))
+    return column_comments(graph) if graph is not None else {}
+
+
 def compute_stats(columns: list[str], rows: list[list[object]]) -> dict[str, object]:
     """本地确定性统计:行数 + 具备度量资格的数值列 max/min/avg(显式排除 bool;
     标识/期间列经 _is_stat_worthy 排除)。
@@ -867,21 +845,6 @@ def compute_stats(columns: list[str], rows: list[list[object]]) -> dict[str, obj
     return stats
 
 
-# summarize 上下文的表说明段抽取——generate 与 summarize 共享召回
-# schema_hint 的表说明段(rag spec「不再单开别名段」):只取召回形态表头行
-# `schema.table(别名)(列…) -- 表说明`,剔除「示例:」行省 token;内省回退
-# 形态(「表 x.y：…」表头+「  - 」列行,无别名且全限定名与称谓规则相悖)
-# 整体不注入。头行同时含 alias 与表说明中文——别名缺失时 LLM 可依
-# 「回退表说明中的中文名称」规则取中文名。不做任何「表名(…)」正则解析:
-# 该形态无法区分 alias 与列清单,无 alias 表会被解析出「别名=列清单」垃圾。
-_HINT_HEADER_RE = re.compile(r"^[A-Za-z_]\w*\.[A-Za-z_]\w*\(")
-
-
-def _table_hint_lines(schema_hint: str) -> str:
-    """取 schema_hint 的召回形态表头行(含业务称谓别名与表说明)。"""
-    return "\n".join(ln for ln in schema_hint.splitlines() if _HINT_HEADER_RE.match(ln))
-
-
 def parse_summary_json(raw: str) -> dict[str, object]:
     """解析 LLM 返回的 JSON(容错:剥 markdown 标记、取首尾花括号子串);失败返回空 dict。"""
     text = raw.strip().strip("`")
@@ -903,20 +866,6 @@ def parse_summary_json(raw: str) -> dict[str, object]:
     return cast("dict[str, object]", parsed) if isinstance(parsed, dict) else {}
 
 
-def fallback_summary(stats: dict[str, object]) -> str:
-    """LLM 失败时用 stats 拼一句话总结。"""
-    rows = stats.get("rows", 0)
-    for k, v in stats.items():
-        if k.endswith("_max") and isinstance(v, (int, float)):
-            col = k[:-4]
-            return (
-                f"共 {rows} 行，{col} 最大值 {v}，"
-                f"最小值 {stats.get(f'{col}_min', '?')}，"
-                f"平均 {stats.get(f'{col}_avg', '?')}。"
-            )
-    return f"共 {rows} 行结果。"
-
-
 def _normalize_insights(raw: object) -> list[dict[str, str]]:
     """LLM 产出的 insights 结构防御:只收 {type: str, text: str} 项。"""
     if not isinstance(raw, list):
@@ -930,7 +879,44 @@ def _normalize_insights(raw: object) -> list[dict[str, str]]:
     return out
 
 
-# ── 节点7:结构化洞察(stats 本地确定性 + LLM insights,多级降级)──
+async def _summarize_llm(state: AgentState, context: str) -> tuple[str, list[dict[str, str]]]:
+    """调用总结模型并解析 JSON;失败降级为空稿(由契约兜底接管)。"""
+    try:
+        raw = await deps.get_llm().chat(
+            SUMMARIZE_SYSTEM,
+            context,
+            task="SUMMARIZE",
+            trace_id=state.get("trace_id"),
+            tenant_key=state.get("tenant_key"),
+        )
+    except LlmError:
+        log.warning("summarize LLM 调用失败,降级确定性兜底", exc_info=True)
+        return "", []
+    parsed = parse_summary_json(raw)
+    return str(parsed.get("summary", "")).strip(), _normalize_insights(parsed.get("insights", []))
+
+
+@dataclass(frozen=True)
+class _SummaryFocus:
+    labels: dict[str, str]
+    question: str
+    index: int | None
+
+
+def _summary_focus(
+    state: AgentState, question: str, columns: list[str], rows: list[list[object]]
+) -> _SummaryFocus:
+    """汇总总结焦点所需的列注释、合并问句与命中列。"""
+    labels = _schema_column_labels(state)
+    focus_question = f"{state.get('question') or ''} {question}".strip()
+    return _SummaryFocus(
+        labels=labels,
+        question=focus_question,
+        index=slots.focus_label_index(columns, rows, focus_question, labels),
+    )
+
+
+# ── 节点7:结构化洞察(stats 本地确定性 + 槽位契约渲染,违约走确定性兜底)──
 async def summarize(state: AgentState) -> dict[str, object]:
     execution = state.get("execution")
     if execution is None or not execution.rows:
@@ -940,55 +926,58 @@ async def summarize(state: AgentState) -> dict[str, object]:
     question = state.get("resolved_question")
     if not question:
         question = state["question"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+    columns, rows = execution.columns, execution.rows
+    # 标量结果(单行单列数值)答案唯一确定,服务端直接作答,不经模型复述
+    scalar = scalar_summary(state, question, columns, rows)
+    if scalar is not None:
+        return {"summary": scalar, "insights": [], "stats": stats}
+    focus = _summary_focus(state, question, columns, rows)
+    registry = slots.build_registry(
+        question=question,
+        columns=columns,
+        rows=rows,
+        stats=stats,
+        compute_slots=state.get("compute_slots") or {},
+        aliases=slots.parse_schema_aliases(state.get("schema_hint") or ""),
+        column_labels=focus.labels,
+        label_question=focus.question,
+        label_index=focus.index,
+    )
     # 上下文接地:行数+本地确定性统计+前 5 行——数值结论以 stats 为准,
     # 消除「只喂前 5 行以偏概全」的信息根源(冒烟 olist 状态分布说错最大值)
-    data_preview = (
-        f"列：{execution.columns}\n总行数：{len(execution.rows)}\n"
-        f"本地统计：{stats}\n前5行：{execution.rows[:5]}"
-    )
-    # 表说明段直拼(含业务称谓别名;用户用语已在 question 中,LLM 按
-    # SUMMARIZE_SYSTEM 称谓规则对齐:用户用语>alias>表说明中文名)
-    schema_hint = state.get("schema_hint") or ""
-    context = f"问题：{question}\n结果：\n{data_preview}"
-    table_hint = _table_hint_lines(schema_hint)
-    if table_hint:
-        context += f"\n所涉表(表名(业务称谓别名) 列 -- 表说明)：\n{table_hint}"
-    # 人设段注入 summarize(只影响表述风格与禁令,不改安全纪律)
-    skill_persona = (state.get("skill_persona") or "").strip()
-    if skill_persona:
-        context += f"\n回答风格与禁令(仅风格,不得臆测编表或放宽只读约束)：\n{skill_persona}"
-    context += "\n\n生成 JSON："
-    summary = ""
-    insights: list[dict[str, str]] = []
-    try:
-        raw = await deps.get_llm().chat(
-            SUMMARIZE_SYSTEM,
-            context,
-            task="SUMMARIZE",
-            trace_id=state.get("trace_id"),
-            tenant_key=state.get("tenant_key"),
-        )
-        parsed = parse_summary_json(raw)
-        summary = str(parsed.get("summary", "")).strip()
-        insights = _normalize_insights(parsed.get("insights", []))
-    except LlmError:
-        # LLM 失败降级:insights 空,summary 走 stats 兜底
-        log.warning("summarize LLM 调用失败,降级 stats 兜底", exc_info=True)
-    if not summary:
-        summary = fallback_summary(stats)
-    # 数值纪律收口:确定性审计剥离非白名单数值句(不重试 LLM、不动 stats)
-    compute_values = state.get("compute_values") or []
-    audited = numeric.audit_summarize_output(
-        summary,
-        insights,
-        columns=execution.columns,
-        rows=execution.rows,
+    context = summarize_context(
+        question=question,
+        original_question=str(state.get("question") or ""),
+        columns=columns,
+        rows=rows,
         stats=stats,
-        compute_values=compute_values,
-        structural=[float(len(execution.rows)), float(numeric.PREVIEW_ROWS)],
+        schema_hint=state.get("schema_hint") or "",
+        registry=registry,
+        skill_persona=state.get("skill_persona") or "",
     )
+    summary, insights = await _summarize_llm(state, context)
+    rendered, rendered_insights, worst = slots.apply_summary_contract(registry, summary, insights)
+    if rendered and slots.summary_mentions_label(
+        rendered, columns, rows, focus.index, focus.labels
+    ):
+        slots.emit_contract_event(
+            node="summarize", result=slots.ContractResult(rendered), tier="slot_render"
+        )
+        if worst.violation is not None:
+            # summary 合规、个别 insight 被丢弃:违约也要可观测
+            slots.emit_contract_event(node="summarize", result=worst, tier="insight_dropped")
+        return {"summary": rendered, "insights": rendered_insights, "stats": stats}
+    if rendered:
+        # 数字合规但没回答问句关注维度(如问城市却只报金额极值):改用确定性轮廓
+        worst = slots.ContractResult("", detail="focus_label_omitted")
+    # 违约/空稿:整段弃用,输出确定性轮廓(不剥句、不罗列 max/min/avg)
+    elif worst.violation is None:
+        worst = slots.ContractResult("", detail="empty_summary")
+    slots.emit_contract_event(node="summarize", result=worst, tier="outline")
     return {
-        "summary": audited.summary or fallback_summary(stats),
-        "insights": audited.insights,
+        "summary": slots.outline_answer(
+            columns=columns, rows=rows, stats=stats, label_index=focus.index
+        ),
+        "insights": [],
         "stats": stats,
     }

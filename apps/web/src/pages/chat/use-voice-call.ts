@@ -32,13 +32,13 @@ interface VoiceTurnRequest {
 
 interface UseVoiceCallOptions {
   tenantId: string | null;
-  /** 后端下发的 turn.request:页面播放固定应答并以听写原话发起问答(5.3)。 */
+  /** 后端下发的 turn.request:页面以听写原话发起问答,不额外播放提示音。 */
   onTurnRequest: (turn: VoiceTurnRequest) => void;
   /** 检测到说话开始:页面停止本地播放(即时打断感)。 */
   onSpeechStarted: () => void;
-  /** 模型开始播报真实答案:页面立即停播本地固定应答,避免双声重叠。 */
+  /** 模型开始播报真实答案:页面立即停播本地确认音,避免双声重叠。 */
   onPlaybackStarted?: () => void;
-  /** 后端确认停止:页面停掉本地固定应答并播放固定停止确认。 */
+  /** 后端确认停止:页面播放停止确认语音;取消已由后端完成,不再重复发起。 */
   onTurnStopped?: () => void;
   /** 通话结束(含通道断开):页面回打字状态。 */
   onEnded: () => void;

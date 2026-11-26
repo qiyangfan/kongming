@@ -128,7 +128,9 @@ async def _seed_knowledge(
     embed_text: str,
     team_id: str | None = None,
     source: str = "MANUAL_UPLOAD",
-    schema_name: str = "tenant_default",
+    # 知识种子表为虚构表:放在图管辖范围([tenant_default, public])之外,
+    # 避免被「图外表=残留」的提示词对齐逻辑剔除(该逻辑只处理管辖 schema 内)
+    schema_name: str = "fixture_knowledge",
 ) -> str:
     """直插知识条目(team_id 可空=公共;返回行 id)。"""
     vec = "[" + ",".join(repr(v) for v in _fake_vector(embed_text)) + "]"
@@ -641,7 +643,15 @@ async def test_upload_overwrite_team_entry_requires_entry_membership(
     x_team = await _mk_team(session, tid, "upw_x")
     y_team = await _mk_team(session, tid, "upw_y", members={y_uid: "MEMBER"})
     await _seed_knowledge(
-        session, tid, ds="default", table="upw_t", comment="旧", embed_text="x", team_id=x_team
+        session,
+        tid,
+        ds="default",
+        table="upw_t",
+        comment="旧",
+        embed_text="x",
+        team_id=x_team,
+        # 上传覆盖按四元(schema 含在内)命中既有条目:与上传 schema 保持一致
+        schema_name="tenant_default",
     )
     # 非成员携归属上传(意图转移归属):404 同形
     r1 = await _upload(client, y_token, _md("upw_t"), team_id=y_team)

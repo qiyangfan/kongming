@@ -124,7 +124,7 @@ def _pg_dsn(database: str | None = None) -> str:
     """gold 直连 DSN:KM_EVAL_PG_DSN 显式优先(独立 gold 库场景),缺省自
     控制面 DSN(settings)派生 → asyncpg 形态(剥 sqlalchemy +asyncpg 前缀)。
     database 非 None 时替换 URL 库段——动态数据源题 gold 直连其独立业务库
-    (如 sakila_ext),与生成侧动态路由(search_path=default_schema)同一落点。"""
+    (如外部 Sakila 库),与生成侧动态路由(search_path=default_schema)同一落点。"""
     url = os.getenv("KM_EVAL_PG_DSN") or _control_plane_dsn()
     dsn = url
     if dsn.startswith("postgresql+asyncpg://"):

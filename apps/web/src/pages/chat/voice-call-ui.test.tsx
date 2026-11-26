@@ -233,6 +233,13 @@ describe("useVoiceCallPage 闭包新鲜度与卸载清理", () => {
     expect(stopStreaming).toHaveBeenCalledWith({ restoreDraft: false });
     expect(submitTurn).toHaveBeenCalledWith("第二问", "vt-2");
 
+    // 停止工具到达:后端已取消在途轮,前端不得再发第二次取消,也不得挂断通话
+    act(() => {
+      pushWsMessage?.(JSON.stringify({ type: "turn.stopped" }));
+    });
+    expect(stopStreaming).toHaveBeenCalledTimes(1);
+    expect(wsClose).not.toHaveBeenCalled();
+
     // 卸载时自动释放麦克风与连接
     unmount();
     expect(stopTrack).toHaveBeenCalled();

@@ -27,7 +27,7 @@ export function classifyModelEvent(event: unknown): ModelEventAction {
   return "relay";
 }
 
-/** 会出声的模型事件(起播判断);字幕增量也算,保证固定应答尽早让位。 */
+/** 会出声的模型事件(起播判断);字幕增量也算,保证本地确认音尽早让位。 */
 const PLAYBACK_START_EVENTS: ReadonlySet<string> = new Set([
   "output_audio_buffer.started",
   "response.audio.delta",
@@ -222,13 +222,7 @@ export function channelUrl(origin: string): string {
   return `${wsOrigin}/api/voice/calls/channel`;
 }
 
-/** 固定应答录音清单(与模型同一音色 Serena;按序轮换) */
-export const FIXED_REPLIES: readonly string[] = [
-  "/voice/zh-querying-one.m4a",
-  "/voice/zh-querying-two.m4a",
-];
-
-/** 停止确认录音(与模型同一音色 Serena;停止意图由服务端判定后播放) */
+/** 停止确认语音(与模型同一音色 Serena;停止意图由服务端判定后播放) */
 export const STOP_REPLY = "/voice/zh-stopped.m4a";
 
 /** 从 AnalyserNode 时域字节样本(0..255,静音 128)计算归一音量 [0, 1]。 */

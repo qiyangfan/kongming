@@ -112,7 +112,8 @@ def test_summarize_factuality_rules() -> None:
 
 def test_summarize_numeric_grounding_rules() -> None:
     """白名单/派生量禁心算/trend 门槛已入 SUMMARIZE_SYSTEM。"""
-    assert "只写白名单数字" in prompts.SUMMARIZE_SYSTEM
+    assert "槽位" in prompts.SUMMARIZE_SYSTEM
+    assert "禁止出现任何阿拉伯数字" in prompts.SUMMARIZE_SYSTEM
     assert "派生量不得心算写入" in prompts.SUMMARIZE_SYSTEM
     assert "宁省略，不编造" in prompts.SUMMARIZE_SYSTEM
     assert "type=trend 仅在结果不少于 3 期" in prompts.SUMMARIZE_SYSTEM
@@ -124,8 +125,9 @@ def test_summarize_alias_alignment_rules() -> None:
     assert "用户用语优先，其次所给别名" in prompts.SUMMARIZE_SYSTEM
     assert "禁止只写物理表名" in prompts.SUMMARIZE_SYSTEM
     assert "禁止出现schema全限定名" in prompts.SUMMARIZE_SYSTEM
-    assert "首次提及可「业务名(物理表名)」并注(如「商品表(goods)」，物理表名即英文表名)" in (
-        prompts.SUMMARIZE_SYSTEM
+    assert (
+        "首次提及可「业务名(物理表名)」并注(如「业务实体表(entity_table)」，"
+        "物理表名即英文表名)" in prompts.SUMMARIZE_SYSTEM
     )
     assert "别名缺失时回退表说明中的中文名称" in prompts.SUMMARIZE_SYSTEM
     assert "禁止编造别名" in prompts.SUMMARIZE_SYSTEM
@@ -195,3 +197,11 @@ def test_doc_answer_citation_discipline() -> None:
     assert "SHALL NOT" in DOC_ANSWER_SYSTEM
     # 退役形态:文档名 §段落标注法不得出现
     assert "[文档名 §段落]" not in DOC_ANSWER_SYSTEM
+
+
+def test_prompt_examples_are_schema_agnostic() -> None:
+    """提示词示例不得固化某个库/表/字段;只保留通用形态示例。"""
+    for token in ("film_id", "rental_rate", "film_category", "tenant_default.goods"):
+        assert token not in prompts.SQL_GEN_SYSTEM
+    assert "goods" not in prompts.SUMMARIZE_SYSTEM
+    assert "回答措辞以用户原始问题为准" in prompts.SUMMARIZE_SYSTEM

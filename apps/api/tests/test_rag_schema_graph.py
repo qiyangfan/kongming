@@ -2,6 +2,7 @@
 # pyright: reportPrivateUsage=false
 
 from collections.abc import AsyncIterator
+from typing import Any, cast
 
 import pytest
 from httpx import AsyncClient
@@ -15,11 +16,14 @@ from kongming.rag.schema_graph import (
     GraphColumn,
     GraphForeignKey,
     GraphTable,
+    SchemaGraph,
+    drop_schema_hint_tables,
     infer_roles,
     schema_hint_tables,
     select_bridge_tables,
 )
-from kongming.rag.schema_graph_loader import load_schema_graph
+from kongming.rag.schema_graph_loader import _load_descriptions, load_schema_graph
+from kongming.rag.schema_graph_response import _align_hint_with_graph
 from kongming.redis_client import get_redis
 
 INTERNAL = {"X-Internal-Token": "test-internal-token"}
@@ -175,6 +179,66 @@ def test_schema_hint_table_parser_keeps_note() -> None:
     assert rows[1] == (("tenant_graph", "store"), "")
 
 
+def test_drop_schema_hint_tables_removes_block_with_examples() -> None:
+    hint = (
+        "tenant_graph.rental(rental_id(integer)) -- 租赁\n"
+        "  示例:SELECT * FROM tenant_graph.rental LIMIT 10;\n"
+        "tenant_graph.payment_p2007_01(amount(numeric)) -- 继承子表残留\n"
+        "  示例:SELECT * FROM tenant_graph.payment_p2007_01 LIMIT 10;\n"
+        "tenant_graph.store(store_id(integer))"
+    )
+    out = drop_schema_hint_tables(hint, {("tenant_graph", "payment_p2007_01")})
+    assert "payment_p2007_01" not in out
+    assert "tenant_graph.rental" in out and "示例:SELECT * FROM tenant_graph.rental" in out
+    assert out.splitlines()[-1] == "tenant_graph.store(store_id(integer))"
+
+
+def test_project_carries_full_known_tables(
+    graph_tables: list[GraphTable], graph_fks: list[GraphForeignKey]
+) -> None:
+    """子图只含召见表,但 known_tables 携带全图键:调用方据此区分未召回与不存在。"""
+    graph = infer_roles(graph_tables, graph_fks)
+    sub = graph.project([(SCHEMA, "rental")], {})
+    assert [t.key for t in sub.tables] == [(SCHEMA, "rental")]
+    assert sub.known_tables == tuple(sorted(t.key for t in graph.tables))
+    assert (SCHEMA, "store") in sub.known_tables
+
+
+def test_align_hint_drops_only_stale_tables_in_managed_schemas() -> None:
+    """图完整时只剔管辖 schema 内的图外表;管辖外 schema 的知识表保留。"""
+    graph = infer_roles([_table("rental", [("rental_id", "integer")], ["rental_id"])], [])
+    hint = (
+        "tenant_graph.rental(rental_id(integer)) -- 租赁\n"
+        "tenant_graph.payment_p2007_01(amount(numeric)) -- 继承子表残留\n"
+        "public.legacy(id(integer)) -- 管辖外"
+    )
+    out, recalled = _align_hint_with_graph(hint, schema_hint_tables(hint), graph)
+    assert "payment_p2007_01" not in out
+    assert "public.legacy" in out
+    assert [key for key, _ in recalled] == [
+        ("tenant_graph", "rental"),
+        ("public", "legacy"),
+    ]
+
+
+def test_align_hint_noop_when_graph_incomplete() -> None:
+    """图不完整时不做剔除,避免把未知状态当残留。"""
+    base = infer_roles([_table("rental", [("rental_id", "integer")], ["rental_id"])], [])
+    graph = SchemaGraph(
+        tables=base.tables,
+        foreign_keys=base.foreign_keys,
+        complete=False,
+    )
+    hint = (
+        "tenant_graph.rental(rental_id(integer))\n"
+        "tenant_graph.payment_p2007_01(amount(numeric)) -- 残留"
+    )
+    recalled = schema_hint_tables(hint)
+    out, kept = _align_hint_with_graph(hint, recalled, graph)
+    assert out == hint
+    assert kept == recalled
+
+
 @pytest.fixture(scope="module", autouse=True)
 async def _graph_biz() -> AsyncIterator[None]:  # pyright: ignore[reportUnusedFunction]
     async with get_engine().begin() as conn:
@@ -292,6 +356,28 @@ async def _tenant(s: AsyncSession) -> str:
     return str(tid)
 
 
+async def test_description_query_failure_rolls_back() -> None:
+    """可选说明查询失败后必须回滚,否则同请求后续检索全部被中止事务拖垮。"""
+
+    class _FailingConn:
+        rolled_back = False
+
+        async def execute(self, *_args: object, **_kwargs: object) -> object:
+            raise RuntimeError("boom")
+
+        async def rollback(self) -> None:
+            self.rolled_back = True
+
+    conn = _FailingConn()
+    assert (
+        await _load_descriptions(
+            cast("Any", conn), tenant_id="t", datasource_key="default", schemas=[SCHEMA]
+        )
+        == {}
+    )
+    assert conn.rolled_back is True
+
+
 async def test_retrieve_returns_graph_and_bridges(
     client: AsyncClient, session: AsyncSession, fake_embed: None
 ) -> None:
@@ -304,19 +390,63 @@ async def test_retrieve_returns_graph_and_bridges(
     r = await client.post(
         "/internal/rag/retrieve",
         json={"tenant_key": "graph", "question": QUESTION},
-        headers=INTERNAL,
+        headers={**INTERNAL, "Accept-Encoding": "gzip"},
     )
     assert r.status_code == 200, r.text
+    # 全图响应按内容协商压缩;httpx 自动解码,r.json() 仍是原结构
+    assert r.headers.get("content-encoding") == "gzip"
     body = r.json()
     graph = body["schema_graph"]
     assert graph is not None and graph["complete"] is True
+    assert graph["known_tables"]
     names = {t["table_name"] for t in graph["tables"]}
     assert {"rental", "payment", "staff", "store"} <= names
     roles = {t["table_name"]: t["role"] for t in graph["tables"]}
     assert roles["rental"] == "event" and roles["payment"] == "amount"
+    comments = {t["table_name"]: t["comment"] for t in graph["tables"]}
+    assert comments["rental"] == "租赁记录"  # 数据库无注释时取租户 RAG 表说明
+    assert comments["payment"] == "支付明细"
     assert "password" not in str(graph).lower()
     assert f"{SCHEMA}.staff" in body["schema_hint"]  # 桥接尾部追加
     assert f"JOIN {SCHEMA}.store ON" in body["relations_hint"]
+
+
+async def test_graph_ignores_team_owned_description(
+    client: AsyncClient, session: AsyncSession, fake_embed: None
+) -> None:
+    """租户级图缓存不得合并团队说明,否则非成员可经图看到团队文案。"""
+    tid = await _tenant(session)
+    team_id = str(
+        (
+            await session.execute(
+                text(
+                    "INSERT INTO public.sys_team"
+                    " (id, tenant_id, team_key, name, created_by)"
+                    " VALUES (gen_random_uuid(), CAST(:t AS uuid), 'graph_team',"
+                    "         'graph_team', gen_random_uuid()) RETURNING id"
+                ),
+                {"t": tid},
+            )
+        ).scalar_one()
+    )
+    await _seed(session, tid, "store", "团队专属门店说明")
+    await session.execute(
+        text(
+            "UPDATE rag.table_descriptions SET team_id = CAST(:team AS uuid)"
+            " WHERE tenant_id = CAST(:t AS uuid) AND table_name = 'store'"
+        ),
+        {"team": team_id, "t": tid},
+    )
+    await session.commit()
+    key = f"km:raggraph:{tid}:default:{get_settings().rag_fulltext_ts_config}:and-cw2"
+    await get_redis().delete(key)
+    r = await client.post(
+        "/internal/rag/retrieve",
+        json={"tenant_key": "graph", "question": QUESTION},
+        headers=INTERNAL,
+    )
+    assert r.status_code == 200, r.text
+    assert "团队专属门店说明" not in r.text
 
 
 async def test_graph_cache_hit_and_invalidated(

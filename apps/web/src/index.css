@@ -20,6 +20,55 @@
   }
 }
 
+/* 围栏代码块语法高亮:refractor/prism token 类名映射到设计 token(亮暗随主题变量) */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata,
+.token.blockquote {
+  color: var(--code-comment);
+}
+
+.token.punctuation {
+  color: var(--code-operator);
+}
+
+.token.keyword,
+.token.boolean,
+.token.important,
+.token.atrule {
+  color: var(--code-keyword);
+}
+
+.token.string,
+.token.char,
+.token.inserted,
+.token.regex {
+  color: var(--code-string);
+}
+
+.token.number,
+.token.constant,
+.token.symbol,
+.token.deleted {
+  color: var(--code-number);
+}
+
+.token.function,
+.token.class-name,
+.token.builtin,
+.token.tag {
+  color: var(--code-function);
+}
+
+.token.operator,
+.token.entity,
+.token.url,
+.token.property,
+.token.variable {
+  color: var(--code-operator);
+}
+
 /* 安全区工具类让贴边内容避开刘海和 Home 指示条。 */
 @utility pb-safe {
   padding-bottom: var(--kb-safe-bottom);
@@ -77,6 +126,14 @@
   /* 轨道填充与控件描边分开设置，避免未选开关看起来像已开启。 */
   --input-fill: #dfe3de;
   --ring: #c9a063; /* 鎏金点睛:匾额之金,哑光不炫 */
+
+  /* 代码高亮(围栏代码块 token 类名映射;亮暗双值) */
+  --code-keyword: #8f2d2f; /* 关键字:朱砂 */
+  --code-string: #15803d; /* 字符串:语义绿 */
+  --code-number: #b45309; /* 数字/常量:赭 */
+  --code-comment: #5f6b75; /* 注释:青灰,满足正文对比度 */
+  --code-function: #2e5a88; /* 函数/类名:黛青蓝 */
+  --code-operator: #52606d; /* 运算符/标点:青灰 */
 }
 
 .dark {
@@ -104,6 +161,14 @@
   --input: #62767c; /* 黛青控件线:对卡面 3.58、对底 3.89,与亮色同一口径(不沿用分隔线值) */
   --input-fill: #2a363a; /* 控件底/轨道填充,同亮色口径与 --input 解耦(宪法 Article 3) */
   --ring: #c9a063;
+
+  /* 代码高亮暗底提亮一档 */
+  --code-keyword: #e08a8c;
+  --code-string: #6fcf97;
+  --code-number: #fbbf24;
+  --code-comment: #84969e;
+  --code-function: #8fb8e0;
+  --code-operator: #9aa8ae;
 }
 
 @theme inline {

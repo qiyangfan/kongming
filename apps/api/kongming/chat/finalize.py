@@ -18,6 +18,7 @@ from kongming.chat.models import (
     MessageMeta,
     derive_artifacts,
     humanize_stats,
+    relabel_column_mentions,
     resolve_column_labels,
     suggest_charts,
 )
@@ -116,6 +117,23 @@ def _assign_error(status: str, guarded: _Guarded) -> _ErrorView:
         # 用户语言进 error,原始技术错误进 error_detail(web 折叠披露)
         return _ErrorView(guarded.summary, "查询执行失败,请调整问法后重试", error_raw)
     return _ErrorView(guarded.summary, None, None)
+
+
+def _relabel_guarded(guarded: _Guarded, columns: list[str], labels: list[str]) -> _Guarded:
+    """把总结/洞察中的物理列名替换为呈现标签;护栏已处理的其他字段不动。"""
+    if not labels:
+        return guarded
+    return dataclasses.replace(
+        guarded,
+        summary=relabel_column_mentions(guarded.summary, columns, labels),
+        insights=[
+            {
+                "type": item["type"],
+                "text": relabel_column_mentions(item["text"], columns, labels),
+            }
+            for item in guarded.insights
+        ],
+    )
 
 
 async def _writeback_history(
@@ -428,6 +446,7 @@ class ReplyFinalizer:
             user_id=user_id,
             tenant_id=tenant_id,
             datasource_key=datasource_key,
+            question=question,
         )
         mid = await self._persist(
             reply,
@@ -457,13 +476,13 @@ class ReplyFinalizer:
         user_id: str,
         tenant_id: str,
         datasource_key: str,
+        question: str,
     ) -> _Staged:
-        """终态呈现前的处理:三态映射 → 输出护栏 → 错误口径 → 呈现要素。"""
+        """终态呈现前的处理:三态映射 → 输出护栏 → 标签归并 → 错误口径。"""
         status = map_status(reply)
         guarded = await self._guard_output(
             reply, trace_id=trace_id, user_id=user_id, tenant_id=tenant_id
         )
-        view = _assign_error(status, guarded)
         # 形状→有序候选(纯函数,含 sql 供 pie 可加闸);首候选展平为存量
         # 「默认单图」,chart 字段语义不变
         chart_candidates = (
@@ -477,10 +496,15 @@ class ReplyFinalizer:
                 datasource_key=datasource_key,
                 columns=reply.columns,
                 sql=guarded.sql_text,
+                question=question,
+                resolved_question=reply.resolved_question or "",
             )
             if reply.success
             else []
         )
+        # 总结/洞察可能与 SQL 同源列名:统一换成同一套呈现标签后再落库
+        guarded = _relabel_guarded(guarded, reply.columns, column_labels)
+        view = _assign_error(status, guarded)
         # 统计键用户可读化(标签单源;落库即事实源,回显读档幂等再应用)
         stats = humanize_stats(reply.stats, reply.columns, column_labels)
         # 产物派生(三路径同源);如实说明不派生产物卡
@@ -541,9 +565,16 @@ class ReplyFinalizer:
         )
 
     async def _resolve_labels(
-        self, *, tenant_id: str, datasource_key: str, columns: list[str], sql: str
+        self,
+        *,
+        tenant_id: str,
+        datasource_key: str,
+        columns: list[str],
+        sql: str,
+        question: str,
+        resolved_question: str,
     ) -> list[str]:
-        """按 SQL 投影把列名映射为业务标签；无法溯源或查询失败时返回空列表，由调用方回退原列名。"""
+        """按 SQL 投影与用户原句映射业务标签;查询失败或无词时回退原列名。"""
         reader = self._ports.column_comments
         if not columns or reader is None:
             return []
@@ -554,7 +585,13 @@ class ReplyFinalizer:
         except Exception:  # 标签增强永不阻断主流程
             log.warning("列注释查询异常(标签回退原始列名)", exc_info=True)
             return []
-        return resolve_column_labels(columns, table_comments, sql)
+        return resolve_column_labels(
+            columns,
+            table_comments,
+            sql,
+            question=question,
+            resolved_question=resolved_question,
+        )
 
     async def _persist(
         self,

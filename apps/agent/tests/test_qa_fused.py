@@ -276,11 +276,16 @@ def _fused_state(**kw: object) -> AgentState:
 
 async def test_fused_answer_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """双命中融合:正文含数据结论+口径引用键,sources 投影,insights 清空
-    (融合正文即洞察位正文);文档口径数字(7 天)经双依据白名单不误杀。"""
+    (融合正文即洞察位正文);数据数字经槽位渲染,文档口径数字(7 天)为原文逐字片段。"""
     monkeypatch.setattr(
         deps,
         "get_llm",
-        lambda: _Llm(["上月退货率为 0.05,共 1 行。政策口径:7 天内可退【policy-A1B2】。"]),
+        lambda: _Llm(
+            [
+                "上月退货率为 {{stats.rate_avg}}，共 {{rows}} 行。"
+                "政策口径:7 天内可退【policy-A1B2】。"
+            ]
+        ),
     )
     out = await fused_answer(_fused_state())
     summary = str(out["summary"])
@@ -298,7 +303,7 @@ async def test_fused_answer_strips_fabricated_key(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(
         deps,
         "get_llm",
-        lambda: _Llm(["退货率 0.05。口径见【fake-DEAD】说明。"]),
+        lambda: _Llm(["退货率为 {{stats.rate_avg}}。口径见【fake-DEAD】说明。"]),
     )
     out = await fused_answer(_fused_state())
     summary = str(out["summary"])
@@ -321,22 +326,21 @@ async def test_fused_answer_suffix_normalization(monkeypatch: pytest.MonkeyPatch
     assert [s["citation_key"] for s in sources] == ["policy-A1B2"]
 
 
-async def test_fused_answer_sources_reprojected_after_audit(
+async def test_fused_answer_unquoted_doc_number_falls_back(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """审计剥句先于 sources 固化会造成「列表有条目而正文无标注」的幽灵
-    不一致(chat spec SHALL NOT)——sources 必须按过审终稿的存活标记重投影;
-    被引句整句被剥(回退纯数据答)时 sources 为空。"""
-    # 「500 元」不在结果面(0.05)/stats/文档(7 天)任一白名单 → 引用句整句被剥
+    """文档引用数字非原文逐字片段:正文整体弃用(空返回),保留 summarize 纯数据答,
+    sources 随融合正文一并作废。"""
+    # 「500 元」不在下发文档(7 天)原文中 → doc_number_unquoted
     monkeypatch.setattr(
         deps,
         "get_llm",
-        lambda: _Llm(["上月退货率 0.05。政策要求订单金额 500 元以上才可退【policy-A1B2】。"]),
+        lambda: _Llm(
+            ["上月退货率为 {{stats.rate_avg}}。政策要求订单金额 500 元以上才可退【policy-A1B2】。"]
+        ),
     )
     out = await fused_answer(_fused_state())
-    summary = str(out["summary"])
-    assert "500" not in summary and "【policy-A1B2】" not in summary
-    assert out["sources"] == []
+    assert out == {}
 
 
 async def test_fused_answer_llm_error_falls_back_to_data_answer(

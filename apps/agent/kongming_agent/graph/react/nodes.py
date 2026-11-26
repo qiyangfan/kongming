@@ -5,19 +5,21 @@
 
 import json
 import logging
+import re
 from typing import cast
 
 from langgraph.types import interrupt
 
-from kongming_agent import deps, numeric
+from kongming_agent import deps, numeric, sqlguard
 from kongming_agent import todos as todo_mod
 from kongming_agent.apiclient import ToolExecuteOutcome
-from kongming_agent.graph.nodes import compute_stats, fallback_summary
+from kongming_agent.graph import slots
+from kongming_agent.graph.nodes import compute_stats
 from kongming_agent.graph.react.prompts import (
     build_react_system,
     initial_user_prompt,
 )
-from kongming_agent.graph.react.state import ReactState
+from kongming_agent.graph.react.state import ReactState, ResultScope
 from kongming_agent.graph.state import ExecutionResult
 from kongming_agent.graph.streams import emit_event
 from kongming_agent.llm import LlmToolCall
@@ -215,6 +217,31 @@ async def _execute_observation(
     status = "done" if outcome.status in ("executed", "confirm_required") else "rejected"
     if outcome.status == "executed":
         _capture_success(call, outcome, sig, executed_sigs, compute_values, out)
+        if call.name == "execute_sql":
+            execution = out.get("last_execution")
+            if isinstance(execution, ExecutionResult) and execution.verdict == "PASS":
+                # 每次结果独占作用域(r0/r1…):同名坐标跨结果不互相顶替
+                scopes = list(
+                    cast(
+                        "list[ResultScope]",
+                        out.get("result_scopes") or state.get("result_scopes") or [],
+                    )
+                )
+                scopes.append(
+                    ResultScope(
+                        columns=execution.columns,
+                        rows=execution.rows,
+                        stats=compute_stats(execution.columns, execution.rows),
+                    )
+                )
+                out["result_scopes"] = scopes
+                block = _slot_registry(state, execution, scope=f"r{len(scopes) - 1}").prompt_block()
+                calc_slots = dict(state.get("compute_slots") or {})
+                calc_slots.update(cast("dict[str, float]", out.get("compute_slots") or {}))
+                calc = slots.build_calc_registry(calc_slots)
+                if calc.values:
+                    block += "\n\n" + calc.prompt_block()
+                obs = {**obs, "slot_contract": block}
     return obs, status
 
 
@@ -252,6 +279,7 @@ async def tool_dispatch(state: ReactState) -> dict[str, object]:
     # 不回调控制面(零副作用零审计噪音),直接观察引导 LLM 基于已有信息作答
     executed_sigs: set[str] = set(state.get("executed_sigs") or [])
     compute_values: list[float] = list(state.get("compute_values") or [])
+    compute_slots: dict[str, float] = dict(state.get("compute_slots") or {})
     todo_items = todo_mod.todos_from_dicts(state.get("todos") or [])
     out: dict[str, object] = {"rounds": rounds, "pending_tool_calls": []}
     # 多子目标建单:问句可保守拆出 ≥2 目标时落账;单目标不建
@@ -270,6 +298,14 @@ async def tool_dispatch(state: ReactState) -> dict[str, object]:
         if resolved is None:
             break
         obs, outcome_status = resolved
+        if outcome_status == "done" and call.name in ("compute_delta", "compute_share"):
+            new_slots = _compute_slots_of(obs, existing=compute_slots, call_id=call.call_id)
+            compute_slots.update(new_slots)
+            out["compute_slots"] = compute_slots
+            obs = {
+                **obs,
+                "slot_contract": slots.build_calc_registry(compute_slots).prompt_block(),
+            }
         # 工具结果回写账本(成功且非空才 DONE;失败/空/不适用如实标记)
         todo_items = _apply_todo_for_outcome(
             todo_items, call, obs, outcome_status, empty=_is_empty_tool_result(obs)
@@ -293,6 +329,7 @@ async def tool_dispatch(state: ReactState) -> dict[str, object]:
     out["messages"] = messages
     out["executed_sigs"] = sorted(executed_sigs)
     out["compute_values"] = compute_values
+    out["compute_slots"] = compute_slots
     out["todos"] = todo_mod.todos_as_dicts(todo_items)
     return out
 
@@ -415,6 +452,52 @@ def _apply_todo_for_outcome(
         reason=reason,
         todo_id=_todo_id_of(call),
     )
+
+
+def _resolved_question(state: ReactState) -> str:
+    """已改写问句优先(多轮指代已消解);缺键回退原问。"""
+    return str(state.get("resolved_question") or state.get("question") or "")
+
+
+def _slot_registry(
+    state: ReactState, execution: ExecutionResult, *, scope: str = ""
+) -> slots.SlotRegistry:
+    """按本轮结果构造槽位清单(随 execute_sql 观察下发给模型)。"""
+    stats = compute_stats(execution.columns, execution.rows)
+    question = _resolved_question(state)
+    return slots.build_registry(
+        question=question,
+        columns=execution.columns,
+        rows=execution.rows,
+        stats=stats,
+        # calc.* 是会话级共享槽位,不随结果作用域前缀;由调用方单独下发/解析
+        compute_slots=None if scope else dict(state.get("compute_slots") or {}),
+        scope=scope,
+    )
+
+
+def _compute_slots_of(
+    obs: dict[str, object],
+    *,
+    existing: dict[str, float] | None = None,
+    call_id: str = "",
+) -> dict[str, float]:
+    """计算工具观察 → calc.* 具名槽位;同名多次计算用 call_id 区分,避免覆盖。"""
+    result = obs.get("result")
+    if not isinstance(result, dict):
+        return {}
+    typed = cast("dict[str, object]", result)
+    out: dict[str, float] = {}
+    for key in ("delta_pct", "share", "share_pct"):
+        v = typed.get(key)
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            continue
+        target = key
+        if existing is not None and key in existing:
+            suffix = re.sub(r"[^A-Za-z0-9_.-]", "", call_id) or str(len(existing) + 1)
+            target = f"{key}.{suffix}"
+        out[target] = float(v)
+    return out
 
 
 def _turn_whitelist(
@@ -561,6 +644,72 @@ def _capture_execution(
         out["last_sql"] = str(call.args.get("sql") or "")
 
 
+def _summary_execution(state: ReactState, execution: ExecutionResult) -> ExecutionResult:
+    """终稿轮廓优先用最后一次非空执行;最后一次失败不应吞掉早先结果。"""
+    if execution.columns or execution.rows:
+        return execution
+    for scope in reversed(state.get("result_scopes") or []):
+        if scope["columns"] or scope["rows"]:
+            return ExecutionResult(
+                verdict="PASS", columns=list(scope["columns"]), rows=list(scope["rows"])
+            )
+    return execution
+
+
+def _contract_summary(
+    state: ReactState, execution: ExecutionResult, stats: dict[str, object], raw_answer: str
+) -> str:
+    """终稿按槽位契约收口:单次标量确定性作答;多次执行按作用域引用;违约走轮廓。"""
+    question = _resolved_question(state)
+    scopes = state.get("result_scopes") or []
+    # 多次执行时最终答案可能要综合各轮结果,最后一次即使为标量也不得覆盖
+    if (
+        len(scopes) <= 1
+        and "{{" not in raw_answer
+        and len(execution.rows) == 1
+        and len(execution.columns) == 1
+        and len(execution.rows[0]) == 1
+    ):
+        cell = execution.rows[0][0]
+        if isinstance(cell, (int, float)) and not isinstance(cell, bool):
+            summary = slots.scalar_answer(
+                column=execution.columns[0],
+                value=cell,
+                question=question,
+                unit_question=str(state.get("question") or ""),
+                aggregate=sqlguard.scalar_aggregate_kind(state.get("last_sql") or ""),
+            )
+            slots.emit_contract_event(
+                node="react_finalize", result=slots.ContractResult(summary), tier="scalar"
+            )
+            return summary
+    registry: slots.SlotRegistry | slots.ScopedSlotRegistry
+    if scopes:
+        registries = [
+            slots.build_registry(
+                question=question,
+                columns=s["columns"],
+                rows=s["rows"],
+                stats=s["stats"],
+                scope=f"r{index}",
+            )
+            for index, s in enumerate(scopes)
+        ]
+        calc = slots.build_calc_registry(state.get("compute_slots") or {})
+        if calc.values:
+            registries.append(calc)
+        registry = slots.ScopedSlotRegistry(registries)
+    else:
+        registry = _slot_registry(state, execution)
+    checked = slots.apply_contract(raw_answer, registry)
+    if checked.violation is None and checked.text:
+        slots.emit_contract_event(node="react_finalize", result=checked, tier="slot_render")
+        return checked.text
+    worst = checked if checked.violation else slots.ContractResult("", detail="empty_summary")
+    slots.emit_contract_event(node="react_finalize", result=worst, tier="outline")
+    return slots.outline_answer(columns=execution.columns, rows=execution.rows, stats=stats)
+
+
 # ── 节点3:终态构造(与 _build_query_out 字段契约同构)──
 def finalize(state: ReactState) -> dict[str, object]:
     execution = state.get("last_execution")
@@ -592,28 +741,22 @@ def finalize(state: ReactState) -> dict[str, object]:
     if execution is None:
         # 无 SQL 执行的纯文本回答:成功终态,空结果集
         execution = ExecutionResult(verdict="PASS", columns=[], rows=[])
-    stats = compute_stats(execution.columns, execution.rows)
-    # finalize 同口径数值审计(与 summarize 共用纯函数;不重试 LLM)。
-    # 仅对有结果集/列的数据收口审计——纯文本(无执行)无数可审,原文通过
-    # (否则「共有 4 件」等非结果数字会被整句剥空)。
+    summary_execution = _summary_execution(state, execution)
+    stats = compute_stats(summary_execution.columns, summary_execution.rows)
+    # 槽位契约收口(与 summarize 同一实现):数字与含数字标签只能经槽位引用;
+    # 违约整段弃用,走标量作答/确定性轮廓兜底(不剥句、不罗列 max/min/avg)
     compute_values = state.get("compute_values") or []
     raw_answer = state.get("final_answer") or "查询无结果。"
-    has_data = bool(execution.columns or execution.rows)
-    if has_data:
-        audited = numeric.audit_summarize_output(
-            raw_answer,
-            [],
-            columns=execution.columns,
-            rows=execution.rows,
-            stats=stats,
-            compute_values=compute_values,
-            structural=[float(len(execution.rows)), float(numeric.PREVIEW_ROWS)],
-        )
-        # 审计剥离后为空时不得回退未审原文(会把非法数字原样放行);与 summarize
-        # 同口径走确定性 stats 兜底
-        summary: str = audited.summary or fallback_summary(stats)
-    else:
-        summary = raw_answer
+    has_data = bool(
+        summary_execution.columns
+        or summary_execution.rows
+        or state.get("result_scopes")
+        or state.get("compute_slots")
+        or "{{" in raw_answer
+    )
+    summary = (
+        _contract_summary(state, summary_execution, stats, raw_answer) if has_data else raw_answer
+    )
     out: dict[str, object] = {
         "execution": execution,
         "summary": summary,

@@ -81,6 +81,27 @@ class TestParseIntentRoute:
         assert intent_nodes.parse_intent_route('{"intent":"data","confidence":2.0}') is None
 
 
+# ============ 歧义澄清的确定性抑制 ============
+
+
+class TestClarifySuppressed:
+    def test_metric_questions_are_not_clarified(self) -> None:
+        """实测误澄清三题:聚合指标明确,全量口径是合理默认。"""
+        for question in (
+            "一共有多少个订单",
+            "每个门店的库存数量",
+            "影片租金的平均价格是多少",
+        ):
+            assert intent_nodes.clarify_suppressed(question, "data") is True
+
+    def test_open_ended_data_question_keeps_clarify(self) -> None:
+        assert intent_nodes.clarify_suppressed("帮我看看销售情况", "data") is False
+
+    def test_non_data_intents_keep_clarify(self) -> None:
+        assert intent_nodes.clarify_suppressed("有多少种退款方式", "knowledge") is False
+        assert intent_nodes.clarify_suppressed("有多少种退款方式", "fused") is False
+
+
 # ============ route_intent 双兜底出口 ============
 
 

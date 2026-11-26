@@ -292,6 +292,18 @@ class ChatService:
             if turn.sid is not None
             else ""
         )
+        last_clarification = ""
+        if last_fallback == "CLARIFY" and turn.sid is not None:
+            try:
+                recent = await self._ports.repo.list_messages(session_id=turn.sid, limit=2)
+                for row in reversed(recent):
+                    if row.get("role") == "ASSISTANT":
+                        last_clarification = str(row.get("summary") or "").strip()
+                        break
+            except Exception:  # 澄清上下文缺失只降级为普通多轮,不阻断本轮
+                log.warning("上一轮澄清问句读取失败 session=%s", turn.sid, exc_info=True)
+                # 读语句失败会中止事务;不 rollback 会让本轮后续写 USER 行失败
+                await self._ports.repo.rollback()
         attachments = await self._validate_attachments(
             turn.attachment_ids, user_id=turn.user_id, tenant_id=turn.tenant_id
         )
@@ -315,6 +327,7 @@ class ChatService:
             user_id=turn.user_id,
             attachments=attachments,
             last_fallback=last_fallback,
+            last_clarification=last_clarification,
             user_message_id=user_message_id,
         )
 
@@ -607,6 +620,7 @@ class ChatService:
                 memory_hint=memory_hint,
                 attachment_ids=[str(a["id"]) for a in p.attachments or []],
                 last_fallback=p.last_fallback,
+                last_clarification=p.last_clarification,
             )
         except AgentUnavailable:
             log.warning("agent 不可达 trace_id=%s", p.trace_id)

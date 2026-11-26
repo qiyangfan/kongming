@@ -3174,6 +3174,12 @@ const schema31 = {
           default: [],
         },
         complete: { type: "boolean", title: "Complete", default: true },
+        known_tables: {
+          items: { type: "string" },
+          type: "array",
+          title: "Known Tables",
+          default: [],
+        },
       },
       type: "object",
       title: "SchemaGraphOut",

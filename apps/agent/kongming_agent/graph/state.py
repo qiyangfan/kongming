@@ -59,7 +59,8 @@ class AgentState(TypedDict, total=False):
     summary: NotRequired[str]
     insights: NotRequired[list[dict[str, str]]]
     stats: NotRequired[dict[str, object]]
-    compute_values: NotRequired[list[float]]  # 本轮计算工具返回值(入白名单)
+    compute_values: NotRequired[list[float]]  # 本轮计算工具返回值(可信数值源)
+    compute_slots: NotRequired[dict[str, float]]  # 计算工具具名结果(calc.* 槽位)
     end_reason: NotRequired[str]  # 终态分类(blocked 等)
     memory_hint: NotRequired[str]  # 召回的用户已知信息段(控制面注入)
     relations_hint: NotRequired[str]  # 召回集合内 JOIN path 段
@@ -72,6 +73,8 @@ class AgentState(TypedDict, total=False):
     fallback_type: NotRequired[str]  # 兜底轮分类(闲聊/澄清;诊断字段)
     # 上一轮兜底分类(控制面随载荷注入;CLARIFY 时本轮不再命中澄清,防循环)
     last_fallback: NotRequired[str]
+    # 上一轮澄清问句(控制面随载荷注入;与用户补充回答一起做指代消解)
+    last_clarification: NotRequired[str]
     skill_persona: NotRequired[str]  # 人设段
     doc_hints: NotRequired[list[dict[str, str]]]  # 文档段(source_ref+content)
     # 意图帧产出的文档子查询(仅知识/融合态);retrieve 用于并行补检合并

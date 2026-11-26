@@ -195,9 +195,11 @@
   category: join_2table
 
 - id: sakila_semantic_001
-  question: 按月统计每个门店的租赁笔数和总支付金额，按月份、门店排序
+  question: 按租赁月份统计每个门店的租赁笔数和总支付金额，按月份、门店排序
   # 语义护栏实验室用例：事件时间按月、事件归属走 rental→staff→store、
   # 笔数按 rental 主键去重（payment 一对多不得放大计数）。
+  # 问句显式「租赁月份」消歧：按月可指租赁月或支付月，未消歧时模型按支付月
+  # 分组属合理歧义，护栏按 fail-closed 拦截（登记口径见 README 基线行）。
   gold_sql: SELECT date_trunc('month', r.rental_date) AS month, st.store_id, COUNT(DISTINCT r.rental_id) AS rental_count, SUM(p.amount) AS amount FROM tenant_sakila.rental r JOIN tenant_sakila.staff st ON r.staff_id = st.staff_id LEFT JOIN tenant_sakila.payment p ON p.rental_id = r.rental_id GROUP BY 1, 2 ORDER BY 1, 2
   expected_tables: [rental, staff, payment]
   category: aggregate

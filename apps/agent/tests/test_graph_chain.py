@@ -126,10 +126,11 @@ async def test_first_round_pass(harness: Harness) -> None:
     )
     final = await _invoke(_initial())
     assert final["execution"].verdict == "PASS"
-    assert final["summary"] == "共 30"
+    assert final["summary"] == "合计为 30。"
     assert final["retry_count"] == 0
     assert api.calls == 1
-    assert len(llm.users) == 4  # route_intent/understand/generate/summarize 各一次
+    # 标量结果由服务端确定性作答,summarize 不再调用模型
+    assert len(llm.users) == 3  # understand/route_intent/generate 各一次
     assert "tenant_default.goods" in llm.users[2]  # schema 提示拼入 generate
 
 

@@ -119,3 +119,29 @@ def test_self_check_failure_downgrades(caplog: pytest.LogCaptureFixture) -> None
     assert not ok
     assert sqlguard.effective_mode() == "builtin"
     assert any("SQLGUARD" in rec.getMessage() for rec in caplog.records)
+
+
+@pytest.mark.parametrize(
+    ("sql", "kind"),
+    [
+        ("SELECT COUNT(*) FROM t", "count"),
+        ("SELECT COUNT(DISTINCT user_id) FROM t", "count"),
+        ("SELECT SUM(amount)::numeric FROM t", "sum"),
+        ("SELECT ROUND(SUM(amount), 2) FROM t", "sum"),
+        ("SELECT COALESCE(AVG(x), 0) FROM t", "avg"),
+        ("SELECT MAX(x) FROM t", "max"),
+        ("SELECT MIN(x) FROM t", "min"),
+        ("SELECT COUNT(*) FILTER (WHERE status = 'paid') FROM t", "count"),
+        ("SELECT SUM(amount) FILTER (WHERE status = 'paid') FROM t", "sum"),
+        ("SELECT x FROM t", None),
+        ("SELECT SUM(x) + 1 FROM t", None),
+        ("SELECT SUM(x) / COUNT(*) FROM t", None),
+        ("SELECT CASE WHEN x > 0 THEN SUM(x) ELSE 0 END FROM t", None),
+        ("SELECT COUNT(*), SUM(x) FROM t", None),
+        ("", None),
+        ("not sql", None),
+    ],
+)
+def test_scalar_aggregate_kind_from_sql_shape(sql: str, kind: str | None) -> None:
+    """标量措辞只认 SQL 聚合结构;算术/多聚合/非查询一律 None。"""
+    assert sqlguard.scalar_aggregate_kind(sql) == kind

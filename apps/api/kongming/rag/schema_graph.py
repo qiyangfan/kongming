@@ -81,6 +81,8 @@ class SchemaGraph:
     tables: tuple[GraphTable, ...]
     foreign_keys: tuple[GraphForeignKey, ...]
     complete: bool = True
+    # 全图已知表键(子图下发时携带):用于区分「未召回的已知表」与「库中不存在」
+    known_tables: tuple[TableKey, ...] = ()
 
     def table(self, key: TableKey) -> GraphTable | None:
         for t in self.tables:
@@ -118,6 +120,7 @@ class SchemaGraph:
             tables=tuple(sorted(tables, key=lambda x: x.key)),
             foreign_keys=tuple(fks),
             complete=self.complete and present == wanted,
+            known_tables=tuple(sorted(set(self.known_tables) | {t.key for t in self.tables})),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -150,6 +153,7 @@ class SchemaGraph:
                 for fk in self.foreign_keys
             ],
             "complete": self.complete,
+            "known_tables": [f"{s}.{t}" for s, t in self.known_tables],
         }
 
     @classmethod
@@ -187,7 +191,22 @@ class SchemaGraph:
             )
             for f in fks_raw
         )
-        return cls(tables=tables, foreign_keys=fks, complete=bool(data.get("complete", True)))
+        return cls(
+            tables=tables,
+            foreign_keys=fks,
+            complete=bool(data.get("complete", True)),
+            known_tables=_table_keys(_str_list(data.get("known_tables"))),
+        )
+
+
+def _table_keys(values: Sequence[str]) -> tuple[TableKey, ...]:
+    """解析「schema.table」形态的表键;畸形项丢弃。"""
+    out: list[TableKey] = []
+    for value in values:
+        schema, sep, table = value.partition(".")
+        if sep and schema and table:
+            out.append((schema, table))
+    return tuple(out)
 
 
 def _list_of_maps(value: object) -> list[dict[str, object]]:
@@ -316,9 +335,11 @@ def select_bridge_tables(
     *,
     max_bridges: int,
 ) -> list[BridgePath]:
-    """从已召回事件表沿外键补维表;尾部追加、独立预算、无路径零扩展。
+    """从已召回事件/金额表沿外键补维表;尾部追加、独立预算、无路径零扩展。
 
-    直连外键优先,其次按路径长度与问句命中排序;不按表名猜关系。
+    金额表也常作为度量基表(如支付按门店/月份聚合);只补维度/未知角色,
+    事件与金额角色仍不作为桥接目标。直连外键优先,其次按路径长度与问句命中排序;
+    不按表名猜关系。
     """
     if max_bridges <= 0:
         return []
@@ -326,7 +347,7 @@ def select_bridge_tables(
     candidates: dict[TableKey, tuple[int, int, int, tuple[GraphForeignKey, ...]]] = {}
     for key in recalled:
         table = graph.table(key)
-        if table is not None and table.role == ROLE_EVENT:
+        if table is not None and table.role in (ROLE_EVENT, ROLE_AMOUNT):
             _collect_bridge_candidates(graph, key, recalled_set, question, candidates)
     ordered = sorted(candidates.items(), key=lambda kv: (*kv[1][:3], kv[0]))
     return [BridgePath(key=key, edges=item[3]) for key, item in ordered[:max_bridges]]
@@ -421,6 +442,23 @@ def schema_hint_tables(schema_hint: str) -> list[tuple[TableKey, str]]:
         note = line.split("--", 1)[1].strip() if "--" in line else ""
         out.append((key, note))
     return out
+
+
+def drop_schema_hint_tables(schema_hint: str, drop: set[TableKey]) -> str:
+    """剔除 hint 中指定表的块(表头行及其后的示例/续行),其余块原样保留。
+
+    用于让提示词与结构化图对齐:知识条目里残留的已删除表/继承子表不在图内,
+    留在提示词里会诱导生成,并把整张图误标为不完整(语义硬规则整体跳过)。
+    """
+    kept: list[str] = []
+    dropping = False
+    for line in schema_hint.splitlines():
+        m = re.match(r"^([A-Za-z_][\w]*)\.([A-Za-z_][\w]*)\(", line)
+        if m is not None:
+            dropping = (m.group(1), m.group(2)) in drop
+        if not dropping:
+            kept.append(line)
+    return "\n".join(kept)
 
 
 # 仅用于测试/诊断的公开别名

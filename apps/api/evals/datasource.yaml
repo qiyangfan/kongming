@@ -1,12 +1,12 @@
 # 验证显式 datasource_key 的动态数据源；空 key 使用 default 租户 schema。
-# sakila_dyn 归属 default 租户并连接独立库 sakila_ext，default_schema=public。
-# 金标查询直连 sakila_ext，与应用的动态数据源落到同一数据库。
+# sakila 归属 default 租户并连接独立库 sakila，default_schema=public。
+# 金标查询直连同库，与应用的动态数据源落到同一数据库。
 
 - id: sakila_ds_001
   question: 有多少部影片
   tenant: default
-  datasource_key: sakila_dyn
-  gold_database: sakila_ext
+  datasource_key: sakila
+  gold_database: sakila
   gold_sql: SELECT COUNT(*) FROM film
   expected_tables: [film]
   category: datasource_dynamic
@@ -15,8 +15,8 @@
 - id: sakila_ds_002
   question: 每个影片分类有多少部影片
   tenant: default
-  datasource_key: sakila_dyn
-  gold_database: sakila_ext
+  datasource_key: sakila
+  gold_database: sakila
   gold_sql: SELECT c.name, COUNT(*) FROM category c JOIN film_category fc ON c.category_id = fc.category_id GROUP BY c.name
   expected_tables: [category, film_category]
   category: datasource_dynamic
@@ -24,8 +24,8 @@
 - id: sakila_ds_003
   question: 每位客户支付的总金额
   tenant: default
-  datasource_key: sakila_dyn
-  gold_database: sakila_ext
+  datasource_key: sakila
+  gold_database: sakila
   gold_sql: SELECT c.first_name, c.last_name, SUM(p.amount) FROM payment p JOIN customer c ON p.customer_id = c.customer_id GROUP BY c.customer_id, c.first_name, c.last_name
   expected_tables: [payment, customer]
   category: datasource_dynamic
@@ -34,6 +34,6 @@
 - id: sakila_ds_deny_001
   question: 有多少部影片
   tenant: sakila
-  datasource_key: sakila_dyn
+  datasource_key: sakila
   expect_reject: true
   category: datasource_deny

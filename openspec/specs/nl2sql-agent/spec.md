@@ -363,27 +363,32 @@ DISTINCT 去重查询 SHALL NOT 追加投影外的唯一列作排序键(SELECT D
 摘要 SHALL 事实性接地:summarize 喂给 LLM 的上下文 SHALL 含结果行数、本地确定性统计(stats)与前若干行预览,不只给行预览;summary 与 insights 的数值结论 SHALL 以所给统计与可见行为准,SHALL NOT 外推到不可见数据。
 
 #### Scenario: 聚合结果结构化洞察
+
 - GIVEN 查询返回分组聚合结果
 - WHEN summarize 节点执行
-- THEN 返回 JSON 含 summary + insights(如 [{type: "max", text: "动作类最多 120 部"}])+ stats
+- THEN 返回 JSON 含 summary + insights(数值经槽位引用,如 [{"type": "max", "text": "{{argmax.count.label}} 最多,{{argmax.count.value}} 部"}])+ stats
 - AND 前端渲染洞察卡片(不只一句话)
 
 #### Scenario: 明细结果数据质量提示
+
 - GIVEN 查询返回明细结果且某列有空值
 - WHEN summarize 节点执行
-- THEN insights 含 {type: "quality", text: "email 列有 3 个空值"}
+- THEN insights 含 {type: "quality", text: "email 列有 {{nulls.email}} 个空值"} 类提示,数量经槽位渲染
 
 #### Scenario: LLM 返回非 JSON 降级
+
 - GIVEN summarize 节点 LLM 返回纯文本
 - WHEN 解析失败
-- THEN 退化为 summary=该文本,insights/stats 为空,不报错
+- THEN 不采信原文,summary 走确定性兜底(结果轮廓),insights 为空,不报错
 
 #### Scenario: 摘要上下文含行数与统计接地
+
 - GIVEN 查询返回 50 行分组聚合结果
 - WHEN summarize 节点构造 LLM 上下文
 - THEN 上下文含结果行数、本地计算的数值列统计(max/min/avg)与前 5 行预览
 
 #### Scenario: 数值结论不外推(005 冒烟观察)
+
 - GIVEN 结果集 >5 行,前 5 行不含全局最大值
 - WHEN summarize 节点执行
 - THEN 摘要中的最值结论以所给统计为准,不以可见前 5 行外推
@@ -836,75 +841,25 @@ generate 节点 SHALL 识别哨兵输出(去除包裹标记后大小写不敏感
 - WHEN agent 组装 /query 响应
 - THEN 判别与字段形态与引入前逐字一致
 
-### Requirement: 派生量接地与数值白名单
-
-结果智能分析输出的 summary 与 insights 文本中的数值 MUST 来自以下白名单
-之一:①本次查询结果集的数值单元格;②服务端确定性统计(stats)字段;
-③计算工具本轮返回值;④结构性常量(结果行数、预览行数等系统自身给出的
-计数)。不在白名单的数值 SHALL NOT 出现。增幅、占比、倍数、差值、复合
-变化率等**派生量**若不在白名单,MUST NOT 由语言模型心算写入:要么经计算
-工具/服务端预计算得到并入白名单,要么省略该表述(宁省略,不编造)。
-
-#### Scenario: 增长率不得心算
-
-- GIVEN 结果集两行数值 100 与 80,stats 无增长率字段,本轮无计算工具返回
-- WHEN 生成 summary 与 insights
-- THEN 输出不出现「增长 25%」或任何比率数值
-- AND 允许「由 80 变为 100」这类仅含白名单数字的表述
-
-#### Scenario: 计算工具结果可写
-
-- GIVEN 模型调用计算工具得到 delta_pct=25.0
-- WHEN 生成 summary
-- THEN 允许写「增长 25%」(工具返回值在白名单)
-
-#### Scenario: 结构性常量不误伤
-
-- GIVEN 结果共 10 行,统计给出 avg=3.5
-- WHEN 生成 summary
-- THEN 允许出现 10 与 3.5,不被审计剥离
-
-### Requirement: 确定性数值审计
-
-总结收口 SHALL 对 summary 与 insights 文本做确定性数值抽取与白名单比对
-(数值等价比较,百分数/千分位先归一化)。含非白名单数值的句子 SHALL 被
-剥离或降级为不含该数值的表述;审计 SHALL NOT 触发语言模型重试、SHALL NOT
-阻断 SQL 与结果字段。审计对结构性常量零误伤;零违规时输出与审计前逐字
-一致(零回归)。
-
-#### Scenario: 违规句剥离
-
-- GIVEN summary 原文含一句「环比增长 15%」而 15 不在白名单
-- WHEN 审计收口
-- THEN 该句不出现在最终 summary
-- AND 其余白名单合法句保留,columns/rows/stats 不变
-
-#### Scenario: 零违规零回归
-
-- GIVEN summary 全部数值均在白名单
-- WHEN 审计收口
-- THEN 输出与审计前逐字一致
-
 ### Requirement: 计算工具
 
-系统 SHALL 提供确定性计算工具(至少增幅与占比两类),入参为显式数值,
-输出确定性结果并纳入本轮数值白名单。入参 SHALL 校验属于本轮白名单
-(结果集/stats/既有工具值),不属于则拒绝并返回可纠正错误。计算工具
-SHALL 为只读无副作用,不写任何业务数据。
+系统 SHALL 提供确定性计算工具(至少增幅与占比两类),入参为显式数值,输出确定性
+结果并纳入本轮可信数值源(结果集/stats/既有工具值),供槽位渲染引用。入参 SHALL
+校验属于本轮可信数值源,不属于则拒绝并返回可纠正错误。计算工具 SHALL 为只读
+无副作用,不写任何业务数据。
 
 #### Scenario: 入参白名单校验
 
 - GIVEN 模型以编造基数 50 调用占比计算
 - WHEN 工具执行
-- THEN 拒绝执行并返回纠正指引(入参不在本轮数值白名单)
+- THEN 拒绝执行并返回纠正指引(入参不在本轮可信数值源)
 - AND 不产生输出值
 
 ### Requirement: 趋势与异常类洞察收紧
 
-insights 类型为 trend(趋势)时,SHALL 要求存在不少于 3 期可排序序列且
-结论数字在白名单;类型为 anomaly(异常)时,定量结论 SHALL 以白名单值与
-确定性统计为据。不满足时 SHALL 不产出该条定量洞察(可保留非定量的数据
-质量提示)。
+insights 类型为 trend(趋势)时,SHALL 要求存在不少于 3 期可排序序列且结论数字
+经槽位引用;类型为 anomaly(异常)时,定量结论 SHALL 以槽位引用与确定性统计为据。
+不满足时 SHALL 不产出该条定量洞察(可保留非定量的数据质量提示)。
 
 #### Scenario: 两期不写趋势
 
@@ -1173,3 +1128,67 @@ data_scope 与只读执行路径,语义护栏 SHALL NOT 替代或削弱任何安
 - WHEN 结构化图和语义护栏可用
 - THEN 该 SQL 的权限、data_scope 与执行结果不变
 - AND 仅新增图范围/语义判定,不改变既有安全语义
+
+### Requirement: 答案数值的槽位渲染契约
+
+结果智能分析的 summary 与 insights 文本(含融合正文的数据结论部分)中的数值与含
+数字标签 MUST 经系统槽位语法引用并由服务端渲染;去除槽位与引用键标记后 SHALL NOT
+残留阿拉伯数字(半角/全角)。槽位 SHALL 至少覆盖:结果行数、stats 键、极值标签与值
+(argmax/argmin)、结果单元格(行列号)、问句前提数字、计算工具值、业务称谓与空值
+计数。槽位清单 MUST 由系统按本轮形态下发;未知键、越界、畸形语法 SHALL 判违约并
+fail-closed,SHALL NOT 猜测渲染,SHALL NOT 对自由文本做数值抽取与集合比对。对外
+stats 字段口径 SHALL 保持不变。
+
+#### Scenario: 含数字标签经槽位引用
+
+- GIVEN 分组结果为含数字标签(如 PG-13)的评级计数
+- WHEN 生成 summary
+- THEN 标签与数值均以槽位引用,模型文本无字面数字
+- AND 渲染结果为完整答案句,标签与计数原样呈现
+
+#### Scenario: 问句前提数字可复述
+
+- GIVEN 问句为「单笔支付金额超过 100 美元的订单一共有多少条」且结果为 0
+- WHEN 生成与渲染
+- THEN 阈值经问句数字槽位引用,不判违约
+
+#### Scenario: 未知槽位 fail-closed
+
+- GIVEN 模型输出槽位清单之外的键
+- WHEN 契约校验
+- THEN 该段文本弃用并进入兜底,不猜测渲染
+
+### Requirement: 标量结果的确定性作答
+
+执行成功且结果为单行单列数值时,summary SHALL 由服务端确定性生成(称谓 + 数值 +
+可识别量词),SHALL NOT 调用语言模型复述;称谓与量词不可得时 SHALL 退为无单位的
+确定性表述,insights 可为空。
+
+#### Scenario: 计数问题直接作答
+
+- GIVEN 问句「单笔支付金额超过 100 美元的订单一共有多少条」返回单行 0
+- WHEN 收口
+- THEN summary 为「共 0 条」类确定性文本
+- AND 不发生 summarize 模型调用
+
+### Requirement: 输出契约违约兜底与可观测
+
+槽位违约或渲染失败时 SHALL 改用确定性兜底:多行结果输出结果轮廓(行数 + 极值
+标签与值);SHALL NOT 以 max/min/avg 罗列充当答案,SHALL NOT 回填未校验文本。
+违约类型、槽位键与兜底层级 SHALL 计入当轮 trace,但 SHALL NOT 出现在用户可见
+summary/insights 中。违约处理 SHALL NOT 触发语言模型重试、SHALL NOT 阻断 SQL
+与结果字段。
+
+#### Scenario: 违约降级不答非所问
+
+- GIVEN 模型文本违反槽位契约
+- WHEN 收口
+- THEN 输出确定性结果轮廓
+- AND 用户可见文本不出现内部兜底层级或「未生成解读」标记
+- AND 不出现 max/min/avg 统计三元罗列
+
+#### Scenario: 违约可观测
+
+- GIVEN 任一违约发生
+- WHEN 收口
+- THEN trace 含违约类型、槽位键与兜底层级

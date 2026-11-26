@@ -110,7 +110,7 @@ podman exec kongming-redis-1 redis-cli --scan --pattern 'km:ragctx:*' | xargs -r
 | `sakila.yaml` | sakila 单轮 28 题(smoke ×2;092 并入 3 题) |
 | `olist.yaml` | olist 单轮 19 题(smoke ×2) |
 | `sakila_multi_turn.yaml` / `olist_multi_turn.yaml` | 多轮 turns[](6+4 case) |
-| `datasource.yaml` | 动态数据源(sakila_dyn 显式 key ×3 + 跨租户拒绝 ×1) |
+| `datasource.yaml` | 动态数据源(sakila 显式 key ×3 + 跨租户拒绝 ×1) |
 | `default.yaml` | default 数据源负例(实体领域错配,expect_no_data ×2) |
 | `retrieval/retrieval_eval.yaml` | 文档检索质量(retrieval-eval;corpus/ 语料幂等上传,28 题=single_hop 13+multi_hop_doc 6+multi_hop_cross 9,gold=文档名+必含片段) |
 | `retrieval/retrieval_scale.yaml` | 实验室规模语料(生成器 `generate_scale_corpus.py` 产出:corpus_scale/ 45 文档 234 父块,74 题,含 36 店近似干扰条款;`KM_EVAL_RETRIEVAL_DATASET` 切换) |
@@ -375,6 +375,7 @@ SHA-256 短十六进制前 8 位);历史行未采集记 `—`。两次运行指�
 | 2026-10-12 | 098 zhparser 对比(同指纹同环境同数据,唯一变量=分词配置;localenv-postgres 源码编译 zhparser+SCWS,重扫重算 tsv 后复跑;首跑两题撞 chat 每分钟限流 403 作废,提限流后本行为净对比)——宽松 +1、表命中 +2、严格持平,零回归;中文问句全文路增益受 plainto_tsquery AND 语义压制(虚词 token 打断匹配),向量路仍是主载;全文路命中稀缺,gate 对 no_hits 不裁,阈值无需复标(配方与量纲事实见 HANDOFF 分词节) | 32/53 (60%) | 49/53 (92%) | — | 4/4 | 46/53 (87%) | 340dbcea |
 | 2026-10-12 | 111 全文路「AND 优先、OR 兜底」回退(**本行结论已勘误**,见下行 112 勘误注记):当时判读=宽松/严格/表命中各 -4/53 系统性劣化(单字虚词词条噪声挤占 RRF 位次),据此回退并在 rag spec 落规范性排除 | 28/53 (53%) | 45/53 (85%) | — | 4/4 | 42/53 (79%) | 340dbcea |
 | 2026-10-12 | **111 勘误+112 内容词兜底采纳**(同指纹 340dbcea;变更 112 design D6 全链条):①111 的 -4 系**日配额耗尽事故**——`chat_quota_daily_calls` 500 按租户日累计,A 轮耗大头后 111B 轮中段撞线,逐题日志 8 败中 7 题为 429/403 异常,兜底机制从未被有效评估;②四轮基线(含 zhparser A 轮 49/32/46)另含 2 道 hex id 题恒 403(evals 租户推断对无下划线 id 失效,sakila.yaml 已补显式 tenant)——**历史基线均含此 2 题异常**;③112 内容词兜底(length≥2)修复后 B''=**50/34/47 创新高**(失败 3 题全确定性 FILTER 归因、异常清零),对齐口径(hex 两题按 A 轮恒失败计)49/33/46 三项 ≥A 轮,验收线全过采纳;评估环境常备配方补 `KM_CHAT_QUOTA_DAILY_CALLS=0` | 34/53 (64%) | 50/53 (94%) | — | 4/4 | 47/53 (89%) | 340dbcea |
+| 2026-11-26 | SQL 语义护栏评测轮:图/提示对齐、`known_tables` 全图清单、歧义澄清抑制、修正指令具体化(隔离栈 18000/18001,工作区代码;跑批前关 chat 限流与日/月配额);同日后 `sakila_semantic_001` 题面消歧(「按月」→「按租赁月份」)——消歧前模型按支付月分组属合理歧义(护栏拦截后 fail-closed,计入上行 2 题失败之一),消歧后单题复验 2/3 通过(PASS 轮第三轮写成 `COUNT(DISTINCT r.rental_id)`),**未重跑全量** | 37/57 (65%) | 55/57 (96%) | — | 4/4 | 52/57 (91%) | 3f78efa7 |
 
 > **051 注记**(2026-08-30):*严格分母含 2 题负例(expect_no_data 不计
 > 严格分);按正例口径对照为 34/48,与 048 基线 35 的 ±1 属 top-N 并列

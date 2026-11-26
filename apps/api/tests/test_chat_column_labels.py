@@ -11,7 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.chat.dependencies import get_agent_client
-from kongming.chat.models import resolve_column_labels
+from kongming.chat.models import humanize_stats, relabel_column_mentions, resolve_column_labels
 from kongming.main import app
 from tests.conftest import MakeUser
 from tests.test_chat_query import FakeAgent, _auth, _pass_reply, _user_with_chat_perm
@@ -92,6 +92,156 @@ def test_type_prefix_stripped() -> None:
     sql = "SELECT name, qty FROM goods"
     comments = {"goods": {"name": "varchar 商品名", "qty": "integer 库存数量"}}
     assert resolve_column_labels(["name", "qty"], comments, sql) == ["商品名", "库存数量"]
+
+
+def test_computed_labels_follow_question_wording() -> None:
+    # 计算列不能直接暴露 SQL 别名:按投影结构和用户问句取业务短语
+    comments = {
+        "ledger": {
+            "store_id": "integer 门店编号",
+            "booked_at": "timestamp 支付时间",
+            "amount": "numeric 支付金额",
+        }
+    }
+    sql = (
+        "SELECT DATE_TRUNC('month', booked_at)::DATE AS booked_month, store_id,"
+        " COUNT(*) AS n, SUM(amount) AS total FROM ledger GROUP BY 1, 2"
+    )
+    labels = resolve_column_labels(
+        ["booked_month", "store_id", "n", "total"],
+        comments,
+        sql,
+        question="按支付月份统计每个门店的支付笔数和总支付金额",
+    )
+    assert labels == ["支付月份", "门店编号", "支付笔数", "总支付金额"]
+
+
+def test_computed_labels_use_resolved_question_for_follow_up() -> None:
+    # 追问原句只带时间口径;指标短语从同轮意图兜底,仍不暴露别名
+    comments = {
+        "ledger": {
+            "store_id": "integer 门店编号",
+            "booked_at": "timestamp 租借时间",
+            "amount": "numeric 支付金额",
+        }
+    }
+    sql = (
+        "SELECT DATE_TRUNC('month', booked_at)::DATE AS booked_month, store_id,"
+        " COUNT(DISTINCT rental_id) AS n, SUM(amount) AS total FROM ledger GROUP BY 1, 2"
+    )
+    labels = resolve_column_labels(
+        ["booked_month", "store_id", "n", "total"],
+        comments,
+        sql,
+        question="按租赁月份。",
+        resolved_question="按租赁单的租借月份统计每个门店的租赁笔数和总支付金额。",
+    )
+    assert labels == ["租赁月份", "门店编号", "租赁笔数", "总支付金额"]
+
+
+def test_temporal_phrase_keeps_period_modifier_and_measure_word() -> None:
+    """「最近三个月」不能被单字截断成「近三月」;「每个」仍按连接词切开。"""
+    sql = (
+        "SELECT DATE_TRUNC('month', booked_at)::DATE AS booked_month, store_id,"
+        " COUNT(*) AS n FROM ledger GROUP BY 1, 2"
+    )
+    labels = resolve_column_labels(
+        ["booked_month", "store_id", "n"],
+        {},
+        sql,
+        question="最近三个月每个门店的支付笔数",
+    )
+    assert labels == ["最近三个月", "store_id", "支付笔数"]
+
+
+def test_computed_labels_without_comments_still_use_question() -> None:
+    # 无数据源注释的计算列也可从问句取标签;纯列保持物理名(fail-open)
+    sql = (
+        "SELECT DATE_TRUNC('month', booked_at)::DATE AS booked_month, store_id,"
+        " COUNT(*) AS n, SUM(amount) AS total FROM ledger GROUP BY 1, 2"
+    )
+    labels = resolve_column_labels(
+        ["booked_month", "store_id", "n", "total"],
+        {},
+        sql,
+        question="按月统计每个门店的支付笔数和总支付金额",
+    )
+    assert labels == ["月份", "store_id", "支付笔数", "总支付金额"]
+
+
+def test_multi_metric_labels_align_by_projection() -> None:
+    """同类投影多个时按投影顺序取问句候选,不把所有列贴成同一个名字。"""
+    sql = (
+        "SELECT store_id, COUNT(DISTINCT rental_id) AS rental_cnt,"
+        " COUNT(DISTINCT payment_id) AS payment_cnt FROM ledger GROUP BY store_id"
+    )
+    labels = resolve_column_labels(
+        ["store_id", "rental_cnt", "payment_cnt"],
+        {},
+        sql,
+        question="每个门店的租赁笔数和支付笔数",
+    )
+    assert labels == ["store_id", "租赁笔数", "支付笔数"]
+    stats = humanize_stats(
+        {"rows": 2, "rental_cnt_max": 30, "payment_cnt_max": 90},
+        ["store_id", "rental_cnt", "payment_cnt"],
+        labels,
+    )
+    assert stats["租赁笔数 最高"] == 30
+    assert stats["支付笔数 最高"] == 90
+
+
+def test_multi_amount_labels_align_by_projection() -> None:
+    sql = "SELECT SUM(amount) AS total, AVG(amount) AS avg_amt FROM ledger"
+    labels = resolve_column_labels(
+        ["total", "avg_amt"],
+        {"ledger": {"amount": "numeric 支付金额"}},
+        sql,
+        question="支付总额和平均支付金额",
+    )
+    assert labels == ["支付总额", "平均支付金额"]
+
+
+def test_ratio_projection_is_not_misclassified_as_count() -> None:
+    sql = "SELECT COUNT(*) FILTER (WHERE status = 'paid') * 1.0 / COUNT(*) AS rate FROM ledger"
+    assert resolve_column_labels(["rate"], {}, sql, question="支付笔数占比") == ["rate"]
+
+
+def test_conflicting_computed_labels_fall_back_to_physical_names() -> None:
+    """同类候选不足时宁缺毋错,不能把多列贴成同一个标签。"""
+    sql = (
+        "SELECT COUNT(DISTINCT rental_id) AS rental_cnt,"
+        " COUNT(DISTINCT payment_id) AS payment_cnt FROM ledger"
+    )
+    labels = resolve_column_labels(["rental_cnt", "payment_cnt"], {}, sql, question="支付笔数")
+    assert labels == ["rental_cnt", "payment_cnt"]
+
+
+def test_relabel_column_mentions_uses_business_labels() -> None:
+    text = "共 10 行；booked_month 为 2005-07-01 的 n 最高（3365），2006-02-01 最低（87）。"
+    assert (
+        relabel_column_mentions(
+            text,
+            ["booked_month", "store_id", "n", "total"],
+            ["支付月份", "门店编号", "支付笔数", "总支付金额"],
+        )
+        == "共 10 行；支付月份 为 2005-07-01 的 支付笔数 最高（3365），2006-02-01 最低（87）。"
+    )
+
+
+def test_relabel_guarded_applies_to_summary_and_insights() -> None:
+    from kongming.chat.finalize import _Guarded, _relabel_guarded
+
+    guarded = _Guarded(
+        summary="共 2 行；n 最高（30）",
+        insights=[{"type": "max", "text": "total 最高为 30"}],
+        sql_text="SELECT 1",
+        error_raw=None,
+    )
+    out = _relabel_guarded(guarded, ["n", "total"], ["支付笔数", "总支付金额"])
+    assert out.summary == "共 2 行；支付笔数 最高（30）"
+    assert out.insights == [{"type": "max", "text": "总支付金额 最高为 30"}]
+    assert out.sql_text == "SELECT 1"
 
 
 def test_length_alignment_and_empty_tables() -> None:

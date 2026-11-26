@@ -25,7 +25,6 @@ import { FeedbackActions } from "@/components/assistant-feedback";
 import { ExportButtons } from "@/components/assistant-export";
 import { ExplainCollapsible } from "@/components/assistant-explain";
 import { MetricProvenancePanel } from "@/components/metric-provenance-panel";
-import { ChevronRight, Database } from "lucide-react";
 
 type ChatResult = Exclude<SessionMessageOut["result"], null | undefined>;
 type ChartCandidate = NonNullable<ChatResult["chart_candidates"]>[number];
@@ -240,27 +239,11 @@ function ChartSlot({
   );
 }
 
-/* SQL 面板：有 sql 产物时用可编辑重跑卡，否则折叠展示原始 SQL。 */
+/* SQL 面板：产物与存量消息统一走同一张只读/可编辑卡，避免无产物时显示裸文本。 */
 function SqlSlot({ msg, sqlArt }: { msg: SessionMessageOut; sqlArt: ArtifactOut | undefined }) {
   if (sqlArt) return <SqlArtifactCard messageId={msg.id} sql={sqlArt.content} />;
   if (!msg.sql) return null;
-  return (
-    <Collapsible>
-      <CollapsibleTrigger className="group flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-        <ChevronRight
-          className="size-3.5 transition-transform group-data-[state=open]:rotate-90"
-          aria-hidden
-        />
-        <Database className="size-3.5" aria-hidden />
-        查看 SQL
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <pre className="mt-1.5 overflow-x-auto rounded-md bg-muted/60 p-3 text-xs leading-relaxed text-foreground">
-          {msg.sql}
-        </pre>
-      </CollapsibleContent>
-    </Collapsible>
-  );
+  return <SqlArtifactCard messageId={msg.id} sql={msg.sql} />;
 }
 
 /* 洞察条目列表；空列表不渲染。 */

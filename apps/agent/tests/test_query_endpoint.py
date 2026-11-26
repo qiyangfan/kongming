@@ -104,7 +104,8 @@ async def test_query_happy_path(client: AsyncClient) -> None:  # type: ignore[va
     data = resp.json()
     assert data["success"] is True
     assert data["verdict"] == "PASS"
-    assert data["summary"] == "共 30"
+    # 单行单列 SUM:措辞取自执行 SQL 的聚合结构,不按列名猜
+    assert data["summary"] == "合计为 30。"
     assert data["columns"] == ["qty"] and data["rows"] == [[30]]
     assert data["sql"] == "SELECT sum(qty) FROM goods"
     assert data["retry_count"] == 0

@@ -78,10 +78,11 @@ async def test_image_limit_fail_closed() -> None:
 
 
 def test_is_sql_intent_matrix() -> None:
-    """SQL 意图词表(纯函数):强信号命中;图片解读词与通用量词不命中。"""
-    assert is_sql_intent("sakila 里有多少位客户")
+    """SQL 意图词表(纯函数):只认通用 SQL 语义词;库名与通用量词不是信号。"""
+    assert is_sql_intent("库中有多少位客户")
     assert is_sql_intent("统计每个分类的电影数量")
     assert is_sql_intent("列出前 10 名客户")
+    assert not is_sql_intent("sakila 里有多少位客户")  # 库名不参与意图判定
     assert not is_sql_intent("这张图里哪个分类最高")
     assert not is_sql_intent("这张报表讲了什么")
     # 通用量词不足以判断为问数，是否询问图片内容由其他测试覆盖。
@@ -101,7 +102,7 @@ def test_route_image_question_to_doc_answer() -> None:
 def test_route_data_question_with_image_stays_generate() -> None:
     """spec「带图数据问题」:SQL 意图命中→generate(不分流)。"""
     state: dict[str, object] = {
-        "question": "sakila 里有多少位客户",
+        "question": "库中有多少位客户",
         "has_attachments": True,
         "doc_hints": [],
     }

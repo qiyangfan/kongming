@@ -484,6 +484,8 @@ class QueryIn(BaseModel):
     attachment_ids: list[str] = []
     # 上一轮兜底分类(澄清防循环判据;诊断字段,缺省不携带)
     last_fallback: str | None = None
+    # 上一轮澄清问句(与用户补充回答一起补全,缺省不携带)
+    last_clarification: str = ""
 
 
 class QueryOut(BaseModel):
@@ -554,6 +556,8 @@ def _initial_state(req: QueryIn) -> AgentState:
     }
     if req.last_fallback:
         state["last_fallback"] = req.last_fallback  # 澄清防循环判据(缺省不带)
+    if req.last_clarification:
+        state["last_clarification"] = req.last_clarification
     return state
 
 

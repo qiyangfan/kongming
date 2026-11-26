@@ -67,6 +67,7 @@ class _QueryRequest:
     memory_hint: str = ""
     attachment_ids: list[str] | None = None
     last_fallback: str = ""
+    last_clarification: str = ""
 
 
 @dataclass(frozen=True)
@@ -272,7 +273,7 @@ class AgentClient:
             headers=self._headers,
         )
 
-    async def query(
+    async def query(  # pylint: disable=too-many-locals  # 参数与 agent 协议逐项对应
         self,
         *,
         trace_id: str,
@@ -285,10 +286,11 @@ class AgentClient:
         memory_hint: str = "",
         attachment_ids: list[str] | None = None,
         last_fallback: str = "",
+        last_clarification: str = "",
     ) -> AgentReply:
         """同步问答;react_tools 非 None 即走 ReAct 内核端点(tools 注入);
         memory_hint=记忆段(空=不下发记忆段);last_fallback=上一轮兜底
-        分类(澄清防循环判据,空=不携带)。"""
+        分类(澄清防循环判据,空=不携带);last_clarification=上一轮澄清问句。"""
         path = "/query_react" if react_tools is not None else "/query"
         try:
             async with self._client() as client:
@@ -306,6 +308,7 @@ class AgentClient:
                             memory_hint=memory_hint,
                             attachment_ids=attachment_ids,
                             last_fallback=last_fallback,
+                            last_clarification=last_clarification,
                         )
                     ),
                 )
@@ -336,6 +339,7 @@ class AgentClient:
         memory_hint: str = "",
         attachment_ids: list[str] | None = None,
         last_fallback: str = "",
+        last_clarification: str = "",
     ) -> None:
         """流式问答:消费 agent SSE 流,逐帧 (event, data_json) 回调;
         错误语义与同步 query 同(不可达/非 200/传输失败一律 AgentUnavailable,
@@ -353,6 +357,7 @@ class AgentClient:
                 memory_hint=memory_hint,
                 attachment_ids=attachment_ids,
                 last_fallback=last_fallback,
+                last_clarification=last_clarification,
             ),
             on_frame,
         )
@@ -440,6 +445,8 @@ class AgentClient:
             payload["attachment_ids"] = req.attachment_ids
         if req.last_fallback:
             payload["last_fallback"] = req.last_fallback  # 澄清防循环判据(缺省不携带)
+        if req.last_clarification:
+            payload["last_clarification"] = req.last_clarification
         return payload
 
     async def query_react(

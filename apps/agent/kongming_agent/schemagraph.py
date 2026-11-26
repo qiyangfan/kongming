@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import cast
@@ -61,6 +62,8 @@ class SchemaGraph:
     tables: tuple[GraphTable, ...]
     foreign_keys: tuple[GraphForeignKey, ...]
     complete: bool = True
+    # 全图已知表键(控制面下发子图时携带):区分「未召回的已知表」与「库中不存在」
+    known_tables: tuple[TableKey, ...] = ()
 
     def table(self, key: TableKey) -> GraphTable | None:
         for table in self.tables:
@@ -68,8 +71,31 @@ class SchemaGraph:
                 return table
         return None
 
+    def knows(self, key: TableKey) -> bool:
+        return key in self.known_tables
+
     def outgoing(self, key: TableKey) -> list[GraphForeignKey]:
         return [fk for fk in self.foreign_keys if fk.source_key == key]
+
+    def project(self, keys: Sequence[TableKey], *, include_outgoing: bool = False) -> SchemaGraph:
+        """按给定表键取子图;include_outgoing 保留指向图外的外键提示行。"""
+        wanted = set(keys)
+        tables = tuple(t for t in self.tables if t.key in wanted)
+        present = {t.key for t in tables}
+        fks = tuple(
+            fk
+            for fk in self.foreign_keys
+            if fk.source_key in present and (include_outgoing or fk.target_key in present)
+        )
+        # 投影不能抹掉全图已知表:子图外但在全图中的表属“未召回”,不是图外,
+        # 否则语义预检会把合法 SQL 误拒。
+        known = tuple(dict.fromkeys((*self.known_tables, *(table.key for table in self.tables))))
+        return SchemaGraph(
+            tables=tables,
+            foreign_keys=fks,
+            complete=self.complete and present == wanted,
+            known_tables=known,
+        )
 
     def to_dict(self) -> dict[str, object]:
         """回写 LangGraph state 的可序列化形态(检查点/事件边界不传自定义对象)。"""
@@ -100,6 +126,7 @@ class SchemaGraph:
                 for fk in self.foreign_keys
             ],
             "complete": self.complete,
+            "known_tables": [f"{schema}.{table}" for schema, table in self.known_tables],
         }
 
     @classmethod
@@ -137,7 +164,18 @@ class SchemaGraph:
                 for f in fks_raw
             ),
             complete=bool(data.get("complete", True)),
+            known_tables=_table_keys(_str_list(data.get("known_tables"))),
         )
+
+
+def _table_keys(values: Sequence[str]) -> tuple[TableKey, ...]:
+    """解析「schema.table」形态的表键;畸形项丢弃。"""
+    out: list[TableKey] = []
+    for value in values:
+        schema, sep, table = value.partition(".")
+        if sep and schema and table:
+            out.append((schema, table))
+    return tuple(out)
 
 
 def _list_of_maps(value: object) -> list[dict[str, object]]:
@@ -168,6 +206,16 @@ def state_graph(raw: object) -> SchemaGraph | None:
         return None
 
 
+def column_comments(graph: SchemaGraph) -> dict[str, str]:
+    """按列名汇总列注释;同名冲突保留首个非空注释。"""
+    labels: dict[str, str] = {}
+    for table in graph.tables:
+        for column in table.columns:
+            if column.comment and column.name not in labels:
+                labels[column.name] = column.comment
+    return labels
+
+
 def format_prompt_hint(graph: SchemaGraph) -> str:
     """生成提示的结构事实段;图空返回空串(旧路径零变化)。"""
     lines: list[str] = []
@@ -184,6 +232,33 @@ def format_prompt_hint(graph: SchemaGraph) -> str:
             for fk in graph.outgoing(table.key)
         )
     return "\n".join(lines)
+
+
+_HINT_TABLE_RE = re.compile(r"^([A-Za-z_]\w*)\.([A-Za-z_]\w*)\(")
+
+
+def schema_hint_keys(schema_hint: str) -> set[TableKey]:
+    """从提示词表头行取 schema.table 键,供提示/校验子图过滤。"""
+    return {
+        (match.group(1), match.group(2))
+        for line in schema_hint.splitlines()
+        if (match := _HINT_TABLE_RE.match(line.strip()))
+    }
+
+
+def graph_for_prompt(
+    graph: SchemaGraph, schema_hint: str, *, include_outgoing: bool = True
+) -> SchemaGraph:
+    """只把 schema_hint 提到的表注入提示;完整图留给语义预检。"""
+    keys = schema_hint_keys(schema_hint)
+    if not keys:
+        return SchemaGraph(
+            tables=(),
+            foreign_keys=(),
+            complete=graph.complete,
+            known_tables=graph.known_tables,
+        )
+    return graph.project(tuple(keys), include_outgoing=include_outgoing)
 
 
 def path_tables(path: Sequence[GraphForeignKey]) -> set[TableKey]:
@@ -250,9 +325,12 @@ __all__ = [
     "GraphTable",
     "SchemaGraph",
     "canonical_path",
+    "column_comments",
     "format_prompt_hint",
+    "graph_for_prompt",
     "has_reciprocal_edge",
     "path_tables",
     "paths_between",
+    "schema_hint_keys",
     "state_graph",
 ]

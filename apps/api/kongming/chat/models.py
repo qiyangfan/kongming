@@ -6,9 +6,10 @@
 
 import datetime as dt
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
+from functools import partial
 from typing import TypedDict
 
 import sqlglot
@@ -375,17 +376,239 @@ def _clean_comment(comment: str) -> str:
     return stripped if stripped and _CJK.search(stripped) else ""
 
 
+_LABEL_TEMPORAL_SUFFIXES = ("月份", "日期", "季度", "月", "天", "年", "周")
+_LABEL_COUNT_SUFFIXES = ("笔数", "数量", "个数", "次数", "人数", "条数", "部数", "台数", "家数")
+_LABEL_AMOUNT_SUFFIXES = ("金额", "总额", "合计", "总和", "均值")
+_LABEL_PHRASE_WINDOW = 12
+# 问句短语截断点:连接词/量词/标点都不属于业务名词短语本身
+_LABEL_PHRASE_CUT = frozenset(
+    "，。；、,:：!?！？()（）[]【】{}<> \t\r\n"
+    "的和与及以及按每各所有分别在从到于为是有里超前多少几"
+    "高低统计查询列出显示计算求"
+)
+_LABEL_TRAILING_CONNECTORS = (
+    "的和与及以及按每各所有分别在从到于为是有超过多少几最高最低最多最少统计查询列出显示计算求"
+)
+_LABEL_MEASURE = re.compile(r"(?:多少|几)([位名人家台部件条笔次])")
+_LABEL_STOP_NOUNS = frozenset(("一共", "共", "总计", "合计"))
+_LABEL_FILTER_TERMS = ("超过",)
+
+
+def _trim_label_prefix(value: str) -> str:
+    """取问句片段中最后一个连接词之后的业务名词部分。"""
+    # 先去掉结尾连接词(「客户有」→「客户」),但保留标点作为强边界,
+    # 避免「租赁？按」先吃掉问号后把「多少」误当成名词。
+    value = value.rstrip(_LABEL_TRAILING_CONNECTORS)
+    cut = max((i for i, ch in enumerate(value) if ch in _LABEL_PHRASE_CUT), default=-1)
+    # 「超过」是完整过滤词:按单字切会留下「过三个月」;「过去」不是过滤词。
+    for term in _LABEL_FILTER_TERMS:
+        if (idx := value.rfind(term)) >= 0:
+            cut = max(cut, idx + len(term) - 1)
+    return value[cut + 1 :].strip().strip("0123456789０１２３４５６７８９.-_/ ")
+
+
+def _dedupe_label_phrases(items: list[str]) -> list[str]:
+    """去重并丢掉被更长短语覆盖的前缀(如「支付月」与「支付月份」并存)。"""
+    out: list[str] = []
+    for item in items:
+        if item and item not in out:
+            out.append(item)
+    return [
+        item for item in out if not any(other != item and other.startswith(item) for other in out)
+    ]
+
+
+def _sort_phrases_by_question(items: list[str], question: str, resolved_question: str) -> list[str]:
+    """按短语在问句中的出现顺序排序;同词优先原问句位置。"""
+    texts = (question, resolved_question)
+
+    def position(item: str) -> int:
+        hits = [text.find(item) for text in texts if text.find(item) >= 0]
+        return min(hits) if hits else 10**9
+
+    return sorted(items, key=position)
+
+
+def _suffix_phrases(text: str, suffixes: Sequence[str]) -> list[str]:
+    """按业务后缀从问句取短语;只保留纯中文,避免把数字/英文别名带进标签。"""
+    found: list[str] = []
+    for suffix in sorted(suffixes, key=len, reverse=True):
+        start = 0
+        while (idx := text.find(suffix, start)) >= 0:
+            start = idx + len(suffix)
+            before = _trim_label_prefix(text[max(0, idx - _LABEL_PHRASE_WINDOW) : idx])
+            if len(before) < 2 or not _CJK.search(before) or re.search(r"[0-9A-Za-z０-９]", before):
+                continue
+            found.append(before + suffix)
+    return _dedupe_label_phrases(found)
+
+
+def _leading_cjk(value: str) -> str:
+    """取开头连续中文(用于「有多少部不同的影片」的量词后名词)。"""
+    match = re.match(r"[\u4e00-\u9fff]{1,8}", value)
+    return match.group(0) if match is not None else ""
+
+
+def _trailing_cjk(value: str) -> str:
+    """取结尾连续中文(用于「客户有多少位」的量词前名词)。"""
+    match = re.search(r"[\u4e00-\u9fff]{1,8}$", value)
+    return match.group(0) if match is not None else ""
+
+
+def _measure_count_phrases(text: str) -> list[str]:
+    """从「多少/几 + 量词」问法推导计数标签,如「客户有多少位」→「客户数量」。"""
+    found: list[str] = []
+    for match in _LABEL_MEASURE.finditer(text):
+        measure = match.group(1)
+        tail = re.sub(
+            r"^(?:不同(?:的)?|的|个|些|所有|各|一| )+",
+            "",
+            text[match.end() : match.end() + _LABEL_PHRASE_WINDOW],
+        )
+        noun = _leading_cjk(tail)
+        if not noun:
+            window_start = max(0, match.start() - _LABEL_PHRASE_WINDOW)
+            before = _trim_label_prefix(text[window_start : match.start()])
+            noun = _trailing_cjk(before)
+        if not noun or noun in _LABEL_STOP_NOUNS:
+            continue
+        suffix = "笔数" if measure == "笔" else "次数" if measure == "次" else "数量"
+        found.append(noun + suffix)
+    return _dedupe_label_phrases(found)
+
+
+def _question_label_candidates(question: str, resolved_question: str) -> dict[str, list[str]]:
+    """从原问句优先、改写句兜底提取时间/计数/金额候选短语。"""
+    temporal: list[str] = []
+    count: list[str] = []
+    amount: list[str] = []
+    for text in (question, resolved_question):
+        if not text.strip():
+            continue
+        temporal.extend(_suffix_phrases(text, _LABEL_TEMPORAL_SUFFIXES))
+        count.extend(_suffix_phrases(text, _LABEL_COUNT_SUFFIXES))
+        count.extend(_measure_count_phrases(text))
+        amount.extend(_suffix_phrases(text, _LABEL_AMOUNT_SUFFIXES))
+    return {
+        "temporal": _sort_phrases_by_question(
+            _dedupe_label_phrases(temporal), question, resolved_question
+        ),
+        "count": _sort_phrases_by_question(
+            _dedupe_label_phrases(count), question, resolved_question
+        ),
+        "amount": _sort_phrases_by_question(
+            _dedupe_label_phrases(amount), question, resolved_question
+        ),
+    }
+
+
+def _projection_kind(proj: exp.Expr) -> str:
+    """SQL 投影结构 → 语义类别;标签取词只看结构,不按列名猜业务。"""
+    # 比率/占比投影先于 count 判定:分子分母里的 Count 不把整列变成计数
+    if proj.find(exp.Div):
+        return "ratio"
+    if proj.find(exp.Count):
+        return "count"
+    if proj.find(exp.Sum) or proj.find(exp.Avg):
+        return "amount"
+    if proj.find(exp.TimestampTrunc) or proj.find(exp.DateTrunc) or proj.find(exp.Date):
+        return "temporal"
+    return ""
+
+
+def _base_comment_for_projection(
+    proj: exp.Expr,
+    alias_map: dict[str, str],
+    involved: set[str],
+    table_comments: dict[str, dict[str, str]],
+) -> str:
+    """从投影里出现的基础列取数据源注释,供计算列在无问句短语时兜底。"""
+    for col in proj.find_all(exp.Column):
+        name = col.name.lower()
+        if col.table:
+            tbl = alias_map.get(col.table.lower())
+            if tbl:
+                cleaned = _clean_comment(table_comments.get(tbl, {}).get(name, ""))
+                if cleaned:
+                    return cleaned
+            continue
+        candidates = {
+            cleaned
+            for tbl in involved
+            if (cleaned := _clean_comment(table_comments.get(tbl, {}).get(name, "")))
+        }
+        if len(candidates) == 1:
+            return candidates.pop()
+    return ""
+
+
+def _computed_labels_by_projection(
+    projections: Sequence[exp.Expr],
+    question: str,
+    resolved_question: str,
+) -> dict[int, str]:
+    """同类候选与投影一一对应;数量不一致不猜,留给注释/物理名兜底。"""
+    candidates = _question_label_candidates(question, resolved_question)
+    positions: dict[str, list[int]] = {}
+    for i, proj in enumerate(projections):
+        kind = _projection_kind(proj)
+        if kind in candidates:
+            positions.setdefault(kind, []).append(i)
+    labels: dict[int, str] = {}
+    for kind, indexes in positions.items():
+        values = candidates[kind]
+        if len(indexes) == 1 and values:
+            labels[indexes[0]] = values[0]
+        elif len(values) == len(indexes):
+            labels.update(zip(indexes, values, strict=True))
+    return labels
+
+
+def _temporal_label(proj: exp.Expr, question: str, resolved_question: str) -> str:
+    """时间投影无候选中标时的确定性回退。"""
+    day_words = ("每天", "每日", "按天", "日期")
+    if any(word in question or word in resolved_question for word in day_words):
+        return "日期"
+    if proj.find(exp.TimestampTrunc) and ("按月" in question or "按月" in resolved_question):
+        return "月份"
+    return "日期"
+
+
+def _computed_label(
+    *,
+    kind: str,
+    proj: exp.Expr,
+    question: str,
+    resolved_question: str,
+    alias_map: dict[str, str],
+    involved: set[str],
+    table_comments: dict[str, dict[str, str]],
+) -> str:
+    """计算列无候选标签时的确定性兜底(不按列名猜测)。"""
+    if not question.strip() and not resolved_question.strip():
+        return ""
+    if kind == "amount":
+        return _base_comment_for_projection(proj, alias_map, involved, table_comments)
+    if kind == "temporal":
+        return _temporal_label(proj, question, resolved_question)
+    return ""
+
+
 def _label_for_projection(
     proj: exp.Expr,
     out_col: str,
     alias_map: dict[str, str],
     involved: set[str],
     table_comments: dict[str, dict[str, str]],
+    *,
+    question: str = "",
+    resolved_question: str = "",
+    computed_label: str = "",
 ) -> str:
     """单个投影表达式 → 标签: qualified 列(c.col)按别名定表精确溯源;
     裸列仅在 SQL 涉及表内唯一出现才用(涉及表之外的同名注释不构成候选;
     涉及表内语义冲突如 actor/customer 的 first_name → 回退);
-    表达式列(聚合/计算)回退——宁缺毋错,不猜标签。"""
+    计算列按聚合/时间结构和问句短语生成业务标签,不直接暴露 SQL 别名。"""
     col = proj.this if isinstance(proj, exp.Alias) and isinstance(proj.this, exp.Column) else proj
     if isinstance(col, exp.Column):
         name = col.name.lower()
@@ -399,45 +622,140 @@ def _label_for_projection(
             if (cleaned := _clean_comment(table_comments.get(tbl, {}).get(name, "")))
         }
         return candidates.pop() if len(candidates) == 1 else out_col
+    kind = _projection_kind(proj)
+    if kind:
+        if computed_label:
+            return computed_label
+        label = _computed_label(
+            kind=kind,
+            proj=proj,
+            question=question,
+            resolved_question=resolved_question,
+            alias_map=alias_map,
+            involved=involved,
+            table_comments=table_comments,
+        )
+        if label:
+            return label
     return out_col
 
 
-def resolve_column_labels(
-    columns: list[str], table_comments: dict[str, dict[str, str]], sql: str = ""
-) -> list[str]:
-    """输出列 → 呈现标签(纯函数;呈现层双轨制,SQL 恒持物理名)。
-
-    sql 可解析时按投影逐列溯源(qualified 别名定表 / 裸列唯一命中),
-    投影顺序与结果列一一对应;不可解析/无注释表 → 整列回退物理名(fail-open)。
-    与 columns 等长对齐,前端/导出按位取用;语义解释由洞察文本兜底。
-    """
-    labels = list(columns)
-    if not columns or not table_comments or not sql.strip():
-        return labels
+def _projection_inputs(
+    sql: str, columns: list[str]
+) -> tuple[dict[str, str], set[str], list[exp.Expr]] | None:
+    """解析 SQL 并对齐投影;解析失败/星号投影返回 None(调用方整体回退)。"""
     try:
         stmt = next(
             (s for s in sqlglot.parse(sql, read="postgres") if isinstance(s, exp.Select)),
             None,
         )
         if stmt is None:
-            return labels
+            return None
         alias_map: dict[str, str] = {}
-        for t in stmt.find_all(exp.Table):
-            tbl = t.name.lower()
-            if t.alias:
-                alias_map[t.alias.lower()] = tbl
-            alias_map.setdefault(tbl, tbl)
-        involved = set(alias_map.values())
+        for table in stmt.find_all(exp.Table):
+            name = table.name.lower()
+            if table.alias:
+                alias_map[table.alias.lower()] = name
+            alias_map.setdefault(name, name)
         projections = stmt.selects
         if len(projections) != len(columns):
-            # 星号投影(SELECT * / t.*)一对多:AST 投影数≠结果列数,按位对位
-            # 必错标(SELECT *, extra 会把 extra 的标签贴到星号展开列上)——
-            # 宁缺毋错,整体回退物理名
-            return labels
-        for i, out_col in enumerate(columns):
-            labels[i] = _label_for_projection(
-                projections[i], out_col, alias_map, involved, table_comments
-            )
+            # 星号投影一对多:按位对位会把后续投影标签贴到星号列上,整体回退
+            return None
+        return alias_map, set(alias_map.values()), projections
     except Exception:  # noqa: BLE001  # 解析任何异常整体回退物理名(标签永不阻断)
-        return list(columns)
+        return None
+
+
+def _assign_projection_labels(
+    labels: list[str],
+    columns: list[str],
+    projections: list[exp.Expr],
+    alias_map: dict[str, str],
+    involved: set[str],
+    table_comments: dict[str, dict[str, str]],
+    *,
+    question: str,
+    resolved_question: str,
+) -> None:
+    """按投影逐列写标签,并对重复计算标签回退物理名。"""
+    computed_labels = _computed_labels_by_projection(projections, question, resolved_question)
+    for i, out_col in enumerate(columns):
+        labels[i] = _label_for_projection(
+            projections[i],
+            out_col,
+            alias_map,
+            involved,
+            table_comments,
+            question=question,
+            resolved_question=resolved_question,
+            computed_label=computed_labels.get(i, ""),
+        )
+    seen: dict[str, int] = {}
+    for i, proj in enumerate(projections):
+        if not _projection_kind(proj) or labels[i] == columns[i]:
+            continue
+        previous = seen.get(labels[i])
+        if previous is None:
+            seen[labels[i]] = i
+            continue
+        labels[previous] = columns[previous]
+        labels[i] = columns[i]
+
+
+def resolve_column_labels(
+    columns: list[str],
+    table_comments: dict[str, dict[str, str]],
+    sql: str = "",
+    *,
+    question: str = "",
+    resolved_question: str = "",
+) -> list[str]:
+    """输出列 → 呈现标签(纯函数;呈现层双轨制,SQL 恒持物理名)。
+
+    sql 可解析时按投影逐列溯源;纯列取数据源注释,计算列按聚合/时间结构
+    从用户原句取业务短语(改写句仅兜底)。无问句/无可解析 SQL 时回退物理名。
+    与 columns 等长对齐,前端/导出按位取用;语义解释由洞察文本兜底。
+    """
+    labels = list(columns)
+    if not columns or not sql.strip():
+        return labels
+    if not table_comments and not (question.strip() or resolved_question.strip()):
+        return labels
+    inputs = _projection_inputs(sql, columns)
+    if inputs is None:
+        return labels
+    alias_map, involved, projections = inputs
+    _assign_projection_labels(
+        labels,
+        columns,
+        projections,
+        alias_map,
+        involved,
+        table_comments,
+        question=question,
+        resolved_question=resolved_question,
+    )
     return labels
+
+
+def _label_replacement(_match: re.Match[str], label: str) -> str:
+    """正则替换回调:返回目标标签。"""
+    return label
+
+
+def relabel_column_mentions(text: str, columns: Sequence[str], labels: Sequence[str]) -> str:
+    """把总结/洞察中的物理列名替换成业务标签;整词匹配,长名优先防截断。"""
+    if not text:
+        return text
+    pairs = [
+        (column, label)
+        for column, label in zip(columns, labels, strict=False)
+        if column and label and column != label
+    ]
+    for column, label in sorted(pairs, key=lambda pair: len(pair[0]), reverse=True):
+        text = re.sub(
+            rf"(?<![A-Za-z0-9_]){re.escape(column)}(?![A-Za-z0-9_])",
+            partial(_label_replacement, label=label),
+            text,
+        )
+    return text
