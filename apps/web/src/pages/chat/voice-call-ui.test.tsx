@@ -52,6 +52,25 @@ function makeComposerProps(
   };
 }
 
+function VoiceTestHarness() {
+  const voice = useVoiceCallPage({
+    tenantId: "default",
+    submitTurn: vi.fn(),
+    stopStreaming: vi.fn(),
+    streaming: false,
+  });
+  return (
+    <>
+      <button type="button" onClick={voice.start}>
+        start
+      </button>
+      <button type="button" onClick={voice.hangUp}>
+        hangup
+      </button>
+    </>
+  );
+}
+
 describe("ComposerBar 语音通话入口位置", () => {
   it("非流式且输入框为空时,语音通话键替代发送键", () => {
     render(<ComposerBar {...makeComposerProps({ draft: "   ", streaming: false })} />);
@@ -320,6 +339,64 @@ describe("useVoiceCallPage 建立失败清理", () => {
       ).toBe(true),
     );
     expect(result.current.failure).toBe("network");
+    unmount();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("useVoiceCallPage 连接中挂断", () => {
+  it("挂断会释放拨号锁,下一次点击重新申请麦克风", async () => {
+    const pendingMic = new Promise<MediaStream>(() => undefined);
+    const getUserMedia = vi.fn(() => pendingMic);
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(new Response(JSON.stringify({ enabled: true }), { status: 200 })),
+      ),
+    );
+
+    const { unmount } = render(<VoiceTestHarness />);
+    await userEvent.click(screen.getByRole("button", { name: "start" }));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(1));
+    await userEvent.click(screen.getByRole("button", { name: "hangup" }));
+    await userEvent.click(screen.getByRole("button", { name: "start" }));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(2));
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("旧拨号迟到完成时不会清掉新拨号的锁", async () => {
+    const resolvers: ((stream: MediaStream) => void)[] = [];
+    const getUserMedia = vi.fn(
+      () => new Promise<MediaStream>((resolve) => resolvers.push(resolve)),
+    );
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(new Response(JSON.stringify({ enabled: true }), { status: 200 })),
+      ),
+    );
+
+    const { unmount } = render(<VoiceTestHarness />);
+    await userEvent.click(screen.getByRole("button", { name: "start" }));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(1));
+    await userEvent.click(screen.getByRole("button", { name: "hangup" }));
+    await userEvent.click(screen.getByRole("button", { name: "start" }));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(2));
+
+    const staleStream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
+    resolvers[0]?.(staleStream);
+    await Promise.resolve();
+    await userEvent.click(screen.getByRole("button", { name: "start" }));
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
     unmount();
     vi.unstubAllGlobals();
   });

@@ -18,6 +18,8 @@ VOICE_NAME = "Serena"
 # 语义断句的静默下限:取数问题常带句中停顿,官方默认 800ms 偏急;2s 兼顾
 # 自然停顿与等待感(取值须在官方 [200, 6000] 内)
 END_OF_TURN_SILENCE_MS = 2000
+# 短促的“等一下/停”也应有较高概率进入 speech_started;0.5 对短句偏保守。
+END_OF_TURN_THRESHOLD = 0.4
 
 # 两个固定工具:提问交给问答链路;停止只取消在途轮,不发起新问题
 ASK_TOOL_NAME = "ask_kongming"
@@ -39,6 +41,10 @@ _PLAYBACK_END_EVENTS = {
     "response.done",
     "output_audio_buffer.stopped",
     "output_audio_buffer.cleared",
+}
+_TRANSCRIPT_EVENTS = {
+    "conversation.item.input_audio_transcription.completed",
+    "conversation.item.input_audio_transcription.delta",
 }
 
 
@@ -109,6 +115,7 @@ class CallStateMachine:
         self._waiting_own_response = False  # 我方 response.create 后的回应归属标记
         self._session_configured = False
         self._pending_call_id = ""
+        self._last_transcript = ""  # 模型听写文本:工具参数畸形时作为问题兜底
         self._tool_call_names: dict[str, str] = {}  # call_id → 工具名(参数事件可能不带 name)
         self._seen_call_ids: set[str] = set()
         self._current_response_id: str | None = None  # 正在进行的回应(插话取消定位)
@@ -201,6 +208,7 @@ class CallStateMachine:
 
     def _on_speech_started(self) -> list[Command]:
         """用户开口即打断:模型正在出声时取消该回应;未出声不动作(附和/噪声不误伤工具调用)。"""
+        self._last_transcript = ""
         if not self._response_has_audio:
             return []
         self._response_has_audio = False
@@ -289,8 +297,19 @@ class CallStateMachine:
             details_out.get("audio") or details_out.get("audio_tokens") or 0
         )
 
+    def _remember_transcript(self, event: dict[str, Any], *, delta: bool) -> None:
+        """缓存模型听写文本;工具参数缺失/畸形时用原话补问。"""
+        value = event.get("delta") if delta else event.get("transcript")
+        text = str(value or "")
+        if not text:
+            return
+        self._last_transcript = (self._last_transcript + text if delta else text).strip()
+
     def _maybe_tool_call(self, event: dict[str, Any], *, etype: object) -> list[Command]:
-        """识别 ask/stop 工具调用(兼容 item.create/output_item.done/arguments.done)。"""
+        """识别听写、ask/stop 工具调用(兼容 item.create/output_item.done/arguments.done)。"""
+        if etype in _TRANSCRIPT_EVENTS:
+            self._remember_transcript(event, delta=str(etype).endswith(".delta"))
+            return []
         if etype in ("conversation.item.create", "response.output_item.done"):
             item = cast("dict[str, Any]", event.get("item") or {})
             name = str(item.get("name") or "")
@@ -333,19 +352,32 @@ class CallStateMachine:
             try:
                 parsed = json.loads(raw_args)
             except ValueError:
-                log.warning("语音工具参数解析失败 call_id=%s", call_id)
-                return []
+                return self._fallback_transcript_question(call_id)
             if not isinstance(parsed, dict):
-                return []
+                return self._fallback_transcript_question(call_id)
             arguments = cast("dict[str, Any]", parsed)
         else:
-            return []
+            return self._fallback_transcript_question(call_id)
+        if not str(arguments.get("question") or "").strip():
+            return self._fallback_transcript_question(call_id)
         if call_id:
             self._seen_call_ids.add(call_id)
         return self._on_ask_call(arguments, call_id=call_id)
 
+    def _fallback_transcript_question(self, call_id: str) -> list[Command]:
+        """工具参数不可用时用模型听写原话补问;无听写则保持原拒绝行为。"""
+        question = self._last_transcript.strip()
+        if not question:
+            log.warning("语音工具参数解析失败且无听写兜底 call_id=%s", call_id)
+            return []
+        if call_id:
+            self._seen_call_ids.add(call_id)
+        log.info("语音工具参数不可用,回退听写原话 call_id=%s", call_id)
+        return self._on_ask_call({"question": question}, call_id=call_id)
+
     def _on_ask_call(self, arguments: dict[str, Any], *, call_id: str = "") -> list[Command]:
         """新提问:取消旧轮 → 签关联字段 → 下发 turn.request(问题=听写原话)。"""
+        self._last_transcript = ""
         commands: list[Command] = []
         if self.pending_trace_id:
             commands.append(TurnCancel(self.pending_trace_id))
@@ -469,7 +501,9 @@ class CallStateMachine:
         if outcome.get("verdict") == "FAILED":
             return "这次查询没有查到结果,请如实告诉用户查询失败了,不要编造数字。"
         summary = str(outcome.get("summary") or "")
-        if outcome.get("columns"):
+        rows = outcome.get("rows")
+        # 单行结果(尤其单值计数)不是“名单/明细”;只在多行结果时提示页面有数据。
+        if isinstance(rows, list) and len(cast("list[object]", rows)) > 1:
             summary += " 详细数据已显示在屏幕上。"
         return summary
 
@@ -486,13 +520,14 @@ class CallStateMachine:
             "model": model,
             "voice": VOICE_NAME,
             "instructions": (
-                "你是语音助手:用户提出查询或问题时,把用户的话原样交给 ask_kongming 工具,"
-                "自己不回答;用户明确要求停止当前查询时,调用 stop_current_query;"
-                "调用工具时不出声;只有系统给出的查询结果或失败说明才能念出,数字与原文一致,"
-                "不要编造。"
+                "你是语音助手:用户每一次语音输入都要立即调用 ask_kongming 工具,把用户的话"
+                "原样交给助手,自己绝不直接回答任何内容;用户明确要求停止当前查询时,调用"
+                " stop_current_query;调用工具时不出声;只有系统给出的查询结果或失败说明才能"
+                "念出,数字与原文一致,不要编造。"
             ),
             "turn_detection": {
                 "type": "semantic_vad",
+                "threshold": END_OF_TURN_THRESHOLD,
                 "silence_duration_ms": END_OF_TURN_SILENCE_MS,
             },
             "tools": [

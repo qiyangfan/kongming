@@ -937,6 +937,7 @@ def test_channel_tool_call_issues_turn_request_with_real_registry(
             assert cfg["payload"]["type"] == "session.update"
             assert cfg["payload"]["session"]["turn_detection"] == {
                 "type": "semantic_vad",
+                "threshold": 0.4,
                 "silence_duration_ms": 2000,
             }
             assert cfg["payload"]["session"]["voice"] == "Serena"

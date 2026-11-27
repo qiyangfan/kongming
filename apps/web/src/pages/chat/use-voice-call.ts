@@ -351,8 +351,15 @@ export function useVoiceCall(options: UseVoiceCallOptions) {
     return peerRef.current?.meter.sample() ?? { user: 0, model: 0 };
   }, []);
 
+  const releaseStartLock = useCallback((seq: number): void => {
+    if (callSeqRef.current === seq) startingRef.current = false;
+  }, []);
+
   const hangUp = useCallback(async () => {
     callSeqRef.current += 1;
+    // 连接中挂断时 start 仍可能卡在 getUserMedia/建联；释放拨号锁，
+    // 否则下一次点击会被 startingRef 直接挡掉。
+    startingRef.current = false;
     dispatch({ kind: "hang_up" });
     const peer = peerRef.current;
     peerRef.current = null;
@@ -433,9 +440,10 @@ export function useVoiceCall(options: UseVoiceCallOptions) {
       setFailure(classifyEstablishFailure(err));
       optionsRef.current.onEnded();
     } finally {
-      startingRef.current = false;
+      // 旧拨号被挂断/新拨号顶替后，不能清掉新一轮的 startingRef。
+      releaseStartLock(seq);
     }
-  }, [dispatch, hangUp]);
+  }, [dispatch, hangUp, releaseStartLock]);
 
   return { phase, failure, start, hangUp, sampleAudioLevels };
 }

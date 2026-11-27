@@ -258,16 +258,28 @@ def test_terminal_backfill_via_tool_result_then_create() -> None:
 
 
 def test_terminal_with_table_mentions_screen() -> None:
-    """有结果表时,念给模型的文本末尾提示数据已在屏幕上。"""
+    """多行结果时,念给模型的文本末尾提示数据已在屏幕上。"""
     m = _machine(_FakeBinding())
     m.pending_token = "vt-pending"
     commands = m.on_turn_terminal(
-        {"verdict": "PASS", "summary": "共 3 行", "columns": ["a"], "rows": [["1"]]},
+        {"verdict": "PASS", "summary": "共 3 行", "columns": ["a"], "rows": [["1"], ["2"]]},
         original_call_invalid=False,
     )
     assert (
         "屏幕" in cast("dict[str, Any]", cast("ModelSend", commands[0]).payload["item"])["output"]
     )
+
+
+def test_scalar_result_does_not_mention_screen() -> None:
+    """单值计数不是名单/明细,不得对模型说详细数据在屏幕上。"""
+    m = _machine(_FakeBinding())
+    m.pending_token = "vt-pending"
+    commands = m.on_turn_terminal(
+        {"verdict": "PASS", "summary": "共 200 位。", "columns": ["演员数量"], "rows": [[200]]},
+        original_call_invalid=False,
+    )
+    output = cast("dict[str, Any]", cast("ModelSend", commands[0]).payload["item"])["output"]
+    assert "屏幕" not in cast("str", output)
 
 
 def test_terminal_backfill_as_text_when_call_invalid() -> None:
@@ -350,13 +362,37 @@ def test_session_config_contains_behavior_and_semantic_vad() -> None:
     assert config["voice"] == "Serena"  # 固定应答录音按同一音色生成
     assert config["turn_detection"] == {
         "type": "semantic_vad",
+        "threshold": 0.4,
         "silence_duration_ms": 2000,
     }
     tools = config["tools"]
     assert [tool["name"] for tool in tools] == [SESSION_CONFIG_TOOL, STOP_SESSION_TOOL]
     assert "交给" in config["instructions"]  # 行为说明:每句话都交给该工具
+    assert "每一次语音输入" in config["instructions"]
+    assert "绝不直接回答" in config["instructions"]
     assert "停止" in config["instructions"]
     assert "k-secret" not in json.dumps(config)  # 密钥不出后端,不在配置里下发
+
+
+def test_malformed_tool_arguments_fall_back_to_transcript() -> None:
+    """模型工具参数畸形时用听写原话补问,避免用户重复一遍。"""
+    m = _machine(_FakeBinding())
+    m.on_model_event(
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": "上个月销售额",
+        }
+    )
+    commands = m.on_model_event(
+        {
+            "type": "response.function_call_arguments.done",
+            "name": SESSION_CONFIG_TOOL,
+            "call_id": "fc-bad",
+            "arguments": "{bad-json",
+        }
+    )
+    assert _types(commands) == [BrowserSend.kind]
+    assert cast("BrowserSend", commands[0]).payload["question"] == "上个月销售额"
 
 
 def test_new_tool_call_supersedes_old_turn() -> None:
@@ -452,6 +488,7 @@ def test_on_channel_open_and_session_created_emit_session_update() -> None:
     assert opened[0].payload["session"]["model"] == "qwen3.8-omni-flash-realtime"
     assert opened[0].payload["session"]["turn_detection"] == {
         "type": "semantic_vad",
+        "threshold": 0.4,
         "silence_duration_ms": 2000,
     }
     assert opened[0].payload["session"]["voice"] == "Serena"
