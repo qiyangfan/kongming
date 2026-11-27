@@ -23,7 +23,6 @@ export default function OAuthCallback() {
       setError("回调缺少 code/state,请重新登录。");
       return;
     }
-    let cancelled = false;
     void (async () => {
       try {
         const resp = await fetch("/api/admin-auth/keycloak/callback", {
@@ -45,14 +44,11 @@ export default function OAuthCallback() {
           token_type?: string;
         };
         await acceptTokens({ ...pair, token_type: pair.token_type ?? "Bearer" });
-        if (!cancelled) void navigate("/", { replace: true });
+        void navigate("/", { replace: true });
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "登录失败");
+        setError(e instanceof Error ? e.message : "登录失败");
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, [params, acceptTokens, navigate]);
 
   return (

@@ -5,6 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex" />
     <title>孔明管理台</title>
+    <script>
+      // 防 FOUC:首帧前按「localStorage 手动值 → 系统偏好」挂 .dark；
+      // 契约与 @kongming/api-client/theme-store 的 resolveTheme 同源(key km-theme)。
+      (function () {
+        try {
+          var t = localStorage.getItem("km-theme");
+          var dark =
+            t === "dark" ||
+            (t !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import uuid4
 
+import httpx
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -27,10 +28,11 @@ from kongming.control.identity_cache import SqlIdentityApplier, SqlTenantKeyReso
 from kongming.control.local_actions import LocalCommandActions
 from kongming.control.models import ControlUnavailable, FetchResult, HealthStatus
 from kongming.control.policy import PolicyService
-from kongming.control.ports import SnapshotSource
+from kongming.control.ports import SnapshotKeySource, SnapshotSource
 from kongming.control.registration import RegistrationService
 from kongming.control.service_auth import ServiceTokenVerifier
 from kongming.control.snapshot import SnapshotService, SystemClock
+from kongming.control.snapshot_keys import JwksSnapshotKeySource, StaticSnapshotKeySource
 from kongming.control.store import (
     SqlCommandReceiptStore,
     SqlRegistrationStore,
@@ -313,12 +315,12 @@ def build_runtime(
     transport: object | None = None,
 ) -> ControlRuntime:
     """按配置装配运行时。transport 仅供测试注入 httpx MockTransport。"""
-    import httpx
-
     http_transport = transport if isinstance(transport, httpx.AsyncBaseTransport) else None
     managed = settings.control_enabled()
-    client = _build_client(settings, http_transport) if managed else None
-    snapshot = _build_snapshot(settings, maker, client, managed)
+    client = (
+        _build_client(settings, http_transport, SqlTenantKeyResolver(maker)) if managed else None
+    )
+    snapshot = _build_snapshot(settings, maker, client, managed, http_transport)
     entitlements, policy, catalog = _build_domain(settings, snapshot, maker)
     instance_id = _instance_id(settings)
     registration, usage = _build_reporters(settings, maker, redis, client, managed, instance_id)
@@ -352,7 +354,9 @@ def _instance_id(settings: Settings) -> str:
     return configured or f"{SERVICE_ID}-{uuid4().hex[:12]}"
 
 
-def _build_client(settings: Settings, transport: object | None) -> ControlPlaneClient:
+def _build_client(
+    settings: Settings, transport: object | None, resolver: SqlTenantKeyResolver
+) -> ControlPlaneClient:
     provider = build_token_provider(
         local_token=settings.control_service_token,
         issuer=settings.control_keycloak_issuer,
@@ -363,7 +367,9 @@ def _build_client(settings: Settings, transport: object | None) -> ControlPlaneC
     return ControlPlaneClient(
         base_url=settings.control_base_url,
         service_id=SERVICE_ID,
+        environment=settings.control_environment,
         token_provider=provider,
+        tenant_key_resolver=resolver,
         transport=transport,  # type: ignore[arg-type]
         timeout_sec=settings.control_http_timeout_sec,
     )
@@ -374,15 +380,35 @@ def _build_snapshot(
     maker: async_sessionmaker[AsyncSession],
     client: ControlPlaneClient | None,
     managed: bool,
+    transport: httpx.AsyncBaseTransport | None,
 ) -> SnapshotService:
     source: SnapshotSource = client if client is not None else _DisabledSource()
+    keys: SnapshotKeySource | None = None
+    if managed:
+        if (settings.control_snapshot_public_key_pem or "").strip():
+            from kongming.control.verifier import load_public_key_pem
+
+            keys = StaticSnapshotKeySource(
+                load_public_key_pem(settings.control_snapshot_public_key_pem)
+            )
+        elif (settings.control_snapshot_public_key_file or "").strip():
+            from kongming.control.verifier import load_public_key
+
+            keys = StaticSnapshotKeySource(
+                load_public_key(settings.control_snapshot_public_key_file)
+            )
+        else:
+            jwks_url = (settings.control_snapshot_jwks_url or "").strip() or (
+                f"{settings.control_base_url.rstrip('/')}/.well-known/jwks.json"
+            )
+            keys = JwksSnapshotKeySource(url=jwks_url, transport=transport)
     return SnapshotService(
         source=source,
         store=SqlSnapshotStore(maker),
         applier=SqlIdentityApplier(maker),
         clock=SystemClock(),
         service_id=SERVICE_ID,
-        signing_secret=settings.control_signing_secret,
+        keys=keys,
         stale_after_sec=settings.control_stale_after_sec,
         enabled=managed,
     )

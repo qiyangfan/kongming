@@ -5,6 +5,7 @@
 """
 
 import logging
+from datetime import UTC, datetime
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -24,6 +25,7 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/system", tags=["control"])
 read_router = APIRouter(prefix="/service-read", tags=["service-read"])
+projection_router = APIRouter(prefix="/service/v1", tags=["service-read"])
 
 VIEW = "system:control:view"
 MANAGE = "system:control:manage"
@@ -264,13 +266,8 @@ async def command_receipts(
     )
 
 
-@read_router.get("/{section}")
-async def service_read(
-    section: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    authorization: Annotated[str | None, Header()] = None,
-) -> dict[str, object]:
-    """服务只读投影(锦官控制台消费)。未知节 404;写方法由框架 405。"""
+async def _verify_reader(authorization: str | None) -> ControlRuntime:
+    """服务只读认证；失败映射 401/503，不泄露差在哪。"""
     settings = get_settings()
     if not settings.control_readonly_enabled:
         raise HTTPException(status_code=404, detail="NOT_FOUND")
@@ -285,7 +282,47 @@ async def service_read(
     except Exception as e:  # JWKS 拉取失败等:服务只读不可用
         log.warning("服务只读认证不可用: %s", e)
         raise HTTPException(status_code=503, detail="SERVICE_READ_UNAVAILABLE") from e
+    return runtime
+
+
+@read_router.get("/{section}")
+async def service_read(
+    section: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, object]:
+    """服务只读投影(锦官控制台消费)。未知节 404;写方法由框架 405。"""
+    runtime = await _verify_reader(authorization)
     body = await project(section, session, runtime)
     if body is None:
         raise HTTPException(status_code=404, detail="NOT_FOUND")
     return body
+
+
+@projection_router.get("/read-projection")
+async def read_projection(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, object]:
+    """X-01 服务只读投影信封；锦官按节展示并做二次脱敏。"""
+    runtime = await _verify_reader(authorization)
+    sections: dict[str, object] = {}
+    for section in (
+        "summary",
+        "datasources",
+        "rag",
+        "bots",
+        "guardrails",
+        "identity",
+        "tools",
+    ):
+        body = await project(section, session, runtime)
+        if body is not None:
+            sections[section] = body
+    return {
+        "service_id": "kongming",
+        "version": "1",
+        "etag": "",
+        "observed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "sections": sections,
+    }

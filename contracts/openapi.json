@@ -13225,6 +13225,58 @@
         }
       }
     },
+    "/service/v1/read-projection": {
+      "get": {
+        "tags": [
+          "service-read"
+        ],
+        "summary": "Read Projection",
+        "description": "X-01 服务只读投影信封；锦官按节展示并做二次脱敏。",
+        "operationId": "read_projection_service_v1_read_projection_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Read Projection Service V1 Read Projection Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/voice/calls": {
       "post": {
         "tags": [

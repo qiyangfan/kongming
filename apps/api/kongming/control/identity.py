@@ -16,6 +16,7 @@ from kongming.control.ports import TokenProvider
 
 _META_TTL_SEC = 300.0
 _REFRESH_SKEW_SEC = 30
+CONTROL_SCOPES = "control:register control:snapshot control:command control:usage"
 
 
 class StaticTokenProvider:
@@ -37,17 +38,21 @@ class KeycloakClientCredentialsProvider:
         issuer: str,
         client_id: str,
         client_secret: str,
+        scope: str = CONTROL_SCOPES,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._issuer = issuer.rstrip("/")
         self._client_id = client_id
         self._client_secret = client_secret
+        self._scope = scope
         self._transport = transport
         self._meta: dict[str, Any] | None = None
         self._meta_at = 0.0
         self._token = ""
         self._token_exp = 0.0
         self._lock = asyncio.Lock()
+        # token() 持锁调用 _metadata();发现文档必须用独立锁,否则同锁重入死锁。
+        self._meta_lock = asyncio.Lock()
 
     def _http(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(timeout=10, transport=self._transport, trust_env=False)
@@ -55,7 +60,7 @@ class KeycloakClientCredentialsProvider:
     async def _metadata(self) -> dict[str, Any]:
         if self._meta is not None and time.monotonic() - self._meta_at < _META_TTL_SEC:
             return self._meta
-        async with self._lock:
+        async with self._meta_lock:
             if self._meta is not None and time.monotonic() - self._meta_at < _META_TTL_SEC:
                 return self._meta
             url = f"{self._issuer}/.well-known/openid-configuration"
@@ -86,7 +91,7 @@ class KeycloakClientCredentialsProvider:
                 async with self._http() as http:
                     resp = await http.post(
                         cast("str", meta["token_endpoint"]),
-                        data={"grant_type": "client_credentials"},
+                        data={"grant_type": "client_credentials", "scope": self._scope},
                         auth=(self._client_id, self._client_secret),
                         headers={"Accept": "application/json"},
                     )
@@ -119,6 +124,10 @@ def build_token_provider(
         return StaticTokenProvider(local_token.strip())
     if issuer and client_id and client_secret:
         return KeycloakClientCredentialsProvider(
-            issuer=issuer, client_id=client_id, client_secret=client_secret, transport=transport
+            issuer=issuer,
+            client_id=client_id,
+            client_secret=client_secret,
+            scope=CONTROL_SCOPES,
+            transport=transport,
         )
     raise ControlUnavailable("未配置服务身份")

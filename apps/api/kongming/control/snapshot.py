@@ -17,7 +17,13 @@ from kongming.control.models import (
     SnapshotView,
 )
 from kongming.control.payload import parse_snapshot
-from kongming.control.ports import Clock, SnapshotApplier, SnapshotSource, SnapshotStore
+from kongming.control.ports import (
+    Clock,
+    SnapshotApplier,
+    SnapshotKeySource,
+    SnapshotSource,
+    SnapshotStore,
+)
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +42,7 @@ class SnapshotService:
         applier: SnapshotApplier | None,
         clock: Clock,
         service_id: str,
-        signing_secret: str,
+        keys: SnapshotKeySource | None,
         stale_after_sec: int,
         enabled: bool,
     ) -> None:
@@ -45,7 +51,7 @@ class SnapshotService:
         self._applier = applier
         self._clock = clock
         self._service_id = service_id
-        self._secret = signing_secret
+        self._keys = keys
         self._stale_after = stale_after_sec
         self._enabled = enabled
         self._current: ControlSnapshot | None = None
@@ -82,7 +88,7 @@ class SnapshotService:
             if current is not None and not await self._apply_identity(current):
                 return "unavailable"
             return "not_modified"
-        return await self._apply(result.payload, current)
+        return await self._apply(result, current)
 
     async def _fetch(self, etag: str) -> FetchResult | None:
         try:
@@ -101,19 +107,35 @@ class SnapshotService:
             return f"同版本 ETag 漂移 {snapshot.version}"
         return None
 
-    async def _apply(
-        self, payload: dict[str, object] | None, current: ControlSnapshot | None
-    ) -> str:
-        if payload is None:
-            log.warning("控制快照响应缺载荷,保留 last-known")
-            return "rejected"
+    async def _apply(self, result: FetchResult, current: ControlSnapshot | None) -> str:
         try:
-            snapshot = parse_snapshot(
-                payload, expected_service_id=self._service_id, secret=self._secret
-            )
+            snapshot = await self._verified_snapshot(result)
+        except ControlUnavailable:
+            log.warning("快照验签公钥暂不可用,保留 last-known", exc_info=True)
+            return "unavailable"
         except SnapshotRejected:
             log.warning("控制快照被拒绝(验签/格式/安全节)", exc_info=True)
             return "rejected"
+        return await self._accept(snapshot, current)
+
+    async def _verified_snapshot(self, result: FetchResult) -> ControlSnapshot:
+        payload = result.payload
+        if payload is None or self._keys is None:
+            raise SnapshotRejected("控制快照缺载荷或验签公钥来源")
+        if not result.key_id.strip():
+            raise SnapshotRejected("控制快照缺 X-Jinguan-Key-Id")
+        key = await self._keys.key(result.key_id)
+        if key is None:
+            raise SnapshotRejected(f"控制快照签名 kid 未知: {result.key_id}")
+        return parse_snapshot(
+            result.raw,
+            payload,
+            expected_service_id=self._service_id,
+            signature=result.signature,
+            public_key=key,
+        )
+
+    async def _accept(self, snapshot: ControlSnapshot, current: ControlSnapshot | None) -> str:
         reason = self._guard(snapshot, current)
         if reason is not None:
             log.warning("控制快照被拒绝: %s", reason)

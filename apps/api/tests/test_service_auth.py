@@ -29,14 +29,18 @@ def _keypair(kid: str) -> tuple[str, dict[str, Any]]:
     return pem, jwk
 
 
-def _token(pem: str, *, kid: str = "kid-1", azp: str = CLIENT) -> str:
+def _token(pem: str, *, kid: str = "kid-1", azp: str = CLIENT, aud: str | None = "kongming") -> str:
     now = int(time.time())
-    return jwt.encode(
-        {"iss": ISSUER, "sub": "service", "exp": now + 60, "azp": azp},
-        pem,
-        algorithm="RS256",
-        headers={"kid": kid},
-    )
+    claims: dict[str, Any] = {
+        "iss": ISSUER,
+        "sub": "service",
+        "exp": now + 60,
+        "azp": azp,
+        "scope": "service:read",
+    }
+    if aud is not None:
+        claims["aud"] = aud
+    return jwt.encode(claims, pem, algorithm="RS256", headers={"kid": kid})
 
 
 def _transport(jwk: dict[str, Any]) -> httpx.MockTransport:
@@ -62,6 +66,22 @@ def _verifier(transport: httpx.MockTransport) -> ServiceTokenVerifier:
 async def test_keycloak_service_token_verifies_selected_kid() -> None:
     pem, jwk = _keypair("kid-1")
     verifier = _verifier(_transport(jwk))
+    assert await verifier.verify(f"Bearer {_token(pem)}") == CLIENT
+
+
+async def test_jwks_skips_keycloak_encryption_key() -> None:
+    pem, jwk = _keypair("kid-1")
+    enc = dict(jwk)
+    enc.update({"kid": "enc-1", "use": "enc", "alg": "RSA-OAEP"})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/.well-known/openid-configuration":
+            return httpx.Response(200, json={"issuer": ISSUER, "jwks_uri": f"{ISSUER}/jwks"})
+        if request.url.path == "/jwks":
+            return httpx.Response(200, json={"keys": [enc, jwk]})
+        return httpx.Response(404)
+
+    verifier = _verifier(httpx.MockTransport(handler))
     assert await verifier.verify(f"Bearer {_token(pem)}") == CLIENT
 
 
@@ -95,3 +115,15 @@ async def test_keycloak_service_token_rejects_unknown_key_and_client() -> None:
         await verifier.verify(f"Bearer {_token(other_pem, kid='kid-2')}")
     with pytest.raises(ControlAuthError):
         await verifier.verify(f"Bearer {_token(pem, azp='other-client')}")
+    no_scope = jwt.encode(
+        {"iss": ISSUER, "sub": "service", "exp": int(time.time()) + 60, "azp": CLIENT},
+        pem,
+        algorithm="RS256",
+        headers={"kid": "kid-1"},
+    )
+    with pytest.raises(ControlAuthError):
+        await verifier.verify(f"Bearer {no_scope}")
+    with pytest.raises(ControlAuthError):
+        await verifier.verify(f"Bearer {_token(pem, aud='muniu')}")
+    with pytest.raises(ControlAuthError):
+        await verifier.verify(f"Bearer {_token(pem, aud=None)}")

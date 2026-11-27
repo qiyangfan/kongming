@@ -47,7 +47,10 @@ class PolicyService:
                 continue
             if "*" not in package.tenant_keys and tenant_key not in package.tenant_keys:
                 continue
-            for name in package.rule_names:
+            # 锦官只下发策略包引用，不存服务域规则体/规则名；本地无显式映射时
+            # 按该包的本地规则目录全量执行，避免静默关闭护栏。
+            names = package.rule_names or tuple(self._local_rules)
+            for name in names:
                 if name not in self._local_rules:
                     raise PolicyPackageInvalid(
                         f"策略包 {package.package_key} 引用了未知规则 {name}"

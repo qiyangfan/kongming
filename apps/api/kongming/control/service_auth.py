@@ -13,6 +13,7 @@ import httpx
 import jwt
 from jwt import PyJWK
 
+from kongming.control.capabilities import SERVICE_ID
 from kongming.control.models import ControlAuthError, ControlUnavailable
 
 log = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ class ServiceTokenVerifier:
                     key,
                     algorithms=["RS256"],
                     issuer=self._issuer,
+                    audience=SERVICE_ID,
                     leeway=_CLOCK_LEEWAY_SEC,
                     options={"require": ["iss", "exp", "sub"]},
                 )
@@ -91,9 +93,17 @@ class ServiceTokenVerifier:
                 raise ControlAuthError("服务令牌校验失败") from e
         if claims is None:
             raise ControlAuthError("服务令牌校验失败")
+        return self._authorized_client(claims)
+
+    def _authorized_client(self, claims: dict[str, Any]) -> str:
+        """校验调用方白名单与读者 scope;返回 client id。"""
         client_id = claims.get("azp") or claims.get("client_id")
         if not isinstance(client_id, str) or client_id not in self._allowed:
             raise ControlAuthError("服务令牌调用方不在读者白名单")
+        scope = claims.get("scope")
+        granted: set[str] = set(scope.split()) if isinstance(scope, str) else set()
+        if "service:read" not in granted:
+            raise ControlAuthError("服务令牌缺 service:read scope")
         return client_id
 
     async def _signing_keys(self, *, force: bool = False) -> dict[str, PyJWK]:
@@ -136,13 +146,16 @@ class ServiceTokenVerifier:
 
 
 def _parse_jwks(keys: list[object]) -> dict[str, PyJWK]:
-    """JWKS → kid 索引;仅收 RSA,畸形条目整体拒绝(不跳过未知类型)。"""
+    """JWKS → kid 索引;仅收 RSA 签名键,加密键/未知类型跳过;畸形 RSA 条目整体拒绝。"""
     found: dict[str, PyJWK] = {}
     for item in keys:
         if not isinstance(item, dict):
             raise ControlUnavailable("服务身份 JWKS 条目非法")
         entry = cast("dict[str, Any]", item)
-        if entry.get("kty") != "RSA":
+        if entry.get("kty") != "RSA" or entry.get("use") not in (None, "sig"):
+            continue
+        alg = entry.get("alg")
+        if isinstance(alg, str) and alg and alg != "RS256":
             continue
         try:
             jwk = PyJWK.from_dict(entry)

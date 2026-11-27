@@ -308,10 +308,15 @@ class Settings(BaseSettings):
     control_mode: str = "standalone"  # standalone | managed
     control_base_url: str = ""
     control_service_id: str = "kongming"
+    # 注册环境标识(X-01 service-registration 必填),缺省 local
+    control_environment: str = "local"
     # 实例标识:空=每次启动生成(滚动重启视为新实例,旧实例靠 last_seen 收敛)
     control_instance_id: str = ""
-    # 快照/回执签名预共享密钥(X-01 契约冻结前的最小验签形态;空=无法验签)
-    control_signing_secret: str = ""
+    # 快照验签默认走锦官 JWKS;静态 RSA 公钥仅作离线 pin/兼容,留空即用 JWKS
+    control_snapshot_public_key_file: str = ""
+    control_snapshot_public_key_pem: str = ""
+    # 空=由 control_base_url + /.well-known/jwks.json 派生
+    control_snapshot_jwks_url: str = ""
     # 本地 pre-shared 服务身份(仅回环地址可用;生产走 Keycloak client credentials)
     control_service_token: str = ""
     control_keycloak_issuer: str = ""
@@ -356,9 +361,9 @@ class Settings(BaseSettings):
     def control_misconfiguration(self) -> str | None:
         """控制面组合配置校验(managed 缺必需项返回描述,否则 None)。
 
-        standalone 不连控制面,合法缺省;managed 必须有 base URL 与一种
-        服务身份(本地 pre-shared 或 Keycloak client),快照验签必须有
-        预共享密钥——否则拉回来的快照无法验真,等同裸信网络输入。
+        standalone 不连控制面,合法缺省;managed 必须有 base URL 与一种服务身份
+        (本地 pre-shared 或 Keycloak client);快照验签默认取锦官 JWKS,静态 PEM
+        仅作离线 pin——否则拉回来的快照无法验真,等同裸信网络输入。
         """
         mode = (self.control_mode or "").strip().lower()
         if mode not in ("standalone", "managed"):
@@ -367,8 +372,6 @@ class Settings(BaseSettings):
             return None
         if not (self.control_base_url or "").strip():
             return "KM_CONTROL_MODE=managed 但 KM_CONTROL_BASE_URL 缺失"
-        if not (self.control_signing_secret or "").strip():
-            return "KM_CONTROL_MODE=managed 但 KM_CONTROL_SIGNING_SECRET 缺失(快照无法验签)"
         has_local = bool((self.control_service_token or "").strip())
         has_keycloak = all(
             (v or "").strip()
@@ -517,7 +520,7 @@ class Settings(BaseSettings):
         de_misconfig = self.doc_entity_misconfiguration()
         if de_misconfig:
             raise RuntimeError(f"prod fail-closed: {de_misconfig}")
-        # 控制面组合残缺同样拒启:managed 缺 URL/验签密钥/服务身份时
+        # 控制面组合残缺同样拒启:managed 缺 URL/验签公钥/服务身份时
         # 拉回任何东西都无法验真,不能带着半配置启动。
         cm_misconfig = self.control_misconfiguration()
         if cm_misconfig:

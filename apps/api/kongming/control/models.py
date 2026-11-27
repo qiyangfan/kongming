@@ -159,6 +159,9 @@ class FetchResult:
     not_modified: bool
     etag: str = ""
     payload: dict[str, object] | None = None
+    raw: bytes = b""
+    signature: str = ""
+    key_id: str = ""
 
 
 @dataclass(frozen=True)

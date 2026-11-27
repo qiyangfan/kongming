@@ -3,6 +3,8 @@
 from datetime import datetime
 from typing import Protocol
 
+from cryptography.hazmat.primitives.asymmetric import rsa
+
 from kongming.control.models import (
     CommandEnvelope,
     CommandOutcome,
@@ -27,6 +29,12 @@ class SnapshotSource(Protocol):
     """控制快照拉取(带 ETag;304 返回 not_modified)。"""
 
     async def fetch(self, *, service_id: str, etag: str) -> FetchResult: ...
+
+
+class SnapshotKeySource(Protocol):
+    """按快照签名 kid 解析 RSA 公钥；未知 kid 返回 None。"""
+
+    async def key(self, key_id: str) -> rsa.RSAPublicKey | None: ...
 
 
 class SnapshotStore(Protocol):

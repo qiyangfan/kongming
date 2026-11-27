@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it, vi } from "vitest";
@@ -37,6 +37,7 @@ describe("管理台 OAuth 回调", () => {
     );
     await waitFor(() => expect(acceptTokens).toHaveBeenCalledTimes(1));
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("home")).toBeInTheDocument();
     vi.unstubAllGlobals();
   });
 });

@@ -40,6 +40,7 @@ from kongming.chat.router import router as chat_router
 from kongming.config import get_settings
 from kongming.connector.router import router as connector_router
 from kongming.control.dependencies import get_control_runtime
+from kongming.control.router import projection_router as control_projection_router
 from kongming.control.router import read_router as control_read_router
 from kongming.control.router import router as control_router
 from kongming.datasource.cipher import get_cipher
@@ -401,6 +402,7 @@ app.include_router(task_internal_router)
 app.include_router(connector_router)
 app.include_router(control_router)
 app.include_router(control_read_router)
+app.include_router(control_projection_router)
 # 语音通话(ADR-013);根级 Mount 兜底之前注册(新路由须在其前)
 app.include_router(voice_router)
 register_auth_error_handlers(app)

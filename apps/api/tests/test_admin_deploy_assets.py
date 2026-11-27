@@ -1,5 +1,8 @@
 """管理台部署资产:同源 /api、CSP、旧 /admin 308 的静态守卫。"""
 
+import base64
+import hashlib
+import re
 from pathlib import Path
 
 from httpx import AsyncClient
@@ -9,6 +12,11 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def test_admin_nginx_same_origin_api_and_csp() -> None:
     text = (ROOT / "infra/admin/nginx.conf").read_text(encoding="utf-8")
+    html = (ROOT / "apps/admin/index.html").read_text(encoding="utf-8")
+    inline = re.search(r"<script>(.*?)</script>", html, re.S)
+    assert inline is not None
+    digest = base64.b64encode(hashlib.sha256(inline.group(1).encode()).digest()).decode()
+    assert f"'sha256-{digest}'" in text  # 内联首帧脚本的 CSP 白名单不可漂移
     assert "proxy_pass http://api:8000/;" in text  # /api 前缀剥离
     assert "location /api/" in text
     assert "connect-src 'self'" in text

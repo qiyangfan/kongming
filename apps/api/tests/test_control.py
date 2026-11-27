@@ -4,13 +4,17 @@
 外部控制面一律用 httpx.MockTransport;不发起真实网络。
 """
 
+import base64
 import json
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import httpx
 import pytest
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from httpx import AsyncClient
+from jwt.algorithms import RSAAlgorithm
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,15 +46,36 @@ from kongming.control.models import (
     SnapshotSections,
     TenantRecord,
 )
-from kongming.control.payload import parse_snapshot, serialize_sections, sign
+from kongming.control.payload import parse_snapshot
 from kongming.control.registration import RegistrationService
 from kongming.control.snapshot import SnapshotService, SystemClock
+from kongming.control.snapshot_keys import JwksSnapshotKeySource, StaticSnapshotKeySource
 from kongming.control.store import SqlCommandReceiptStore
 from kongming.control.usage import ProductEventRejected, UsageReporter, build_product_event
 from kongming.db import get_sessionmaker, uuid7
 from tests.conftest import MakeUser
 
-SECRET = "test-signing-secret"  # 测试预共享验签密钥
+_SIGNING_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+PUBLIC_KEY = _SIGNING_KEY.public_key()
+PUBLIC_PEM = PUBLIC_KEY.public_bytes(
+    serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+).decode()
+
+
+def _sign_raw(raw: bytes) -> str:
+    signature = _SIGNING_KEY.sign(raw, padding.PKCS1v15(), hashes.SHA256())
+    return base64.b64encode(signature).decode()
+
+
+def _signed(payload: dict[str, object]) -> tuple[bytes, str]:
+    raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()
+    return raw, _sign_raw(raw)
+
+
+def _public_jwk(key: rsa.RSAPublicKey, kid: str = "kid-1") -> dict[str, object]:
+    jwk = RSAAlgorithm.to_jwk(key, as_dict=True)
+    jwk.update({"kid": kid, "use": "sig", "alg": "RS256"})
+    return jwk
 
 
 def _sections(
@@ -98,25 +123,92 @@ def _sections(
     )
 
 
+def _wire_sections(sections: SnapshotSections) -> dict[str, object]:
+    """内部六节 → 锦官 X-01 分节，供联调测试构造。"""
+    entitlements_by_key = {e.tenant_key: e for e in sections.entitlements}
+    tenants: list[dict[str, object]] = []
+    for tenant in sections.tenants:
+        members: list[dict[str, object]] = [
+            {
+                "subject": m.user_id,
+                "role": m.coarse_role_keys[0] if m.coarse_role_keys else "MEMBER",
+                "status": m.status,
+            }
+            for m in sections.members
+            if m.tenant_key == tenant.tenant_key
+        ]
+        tenants.append(
+            {
+                "id": tenant.tenant_id,
+                "tenantKey": tenant.tenant_key,
+                "name": tenant.tenant_name,
+                "status": tenant.status,
+                "members": members,
+            }
+        )
+    entitlement_rows: list[dict[str, object]] = []
+    for key, item in entitlements_by_key.items():
+        quotas: list[dict[str, object]] = []
+        for dimension, field in (
+            ("calls_daily", "quota_calls_daily"),
+            ("calls_monthly", "quota_calls_monthly"),
+            ("bot_calls_daily", "quota_bot_calls_daily"),
+            ("tool_calls_per_minute", "quota_tool_calls_per_minute"),
+        ):
+            value = getattr(item, field)
+            if value:
+                quotas.append({"dimension": dimension, "unit": "count", "limit": value})
+        entitlement_rows.append(
+            {
+                "tenantKey": key,
+                "planKey": "pro",
+                "boundAt": datetime.now(UTC).isoformat(),
+                "quotas": quotas,
+                "entitlementKeys": list(item.entitlement_keys),
+            }
+        )
+    package_rows: list[dict[str, object]] = [
+        {
+            "packageKey": p.package_key,
+            "serviceId": "kongming",
+            "scope": "GLOBAL" if "*" in p.tenant_keys else "TENANT",
+            "tenantKey": None if "*" in p.tenant_keys else p.tenant_keys[0],
+            "rulesetVersion": str(p.version),
+            "updatedAt": datetime.now(UTC).isoformat(),
+        }
+        for p in sections.policy_packages
+    ]
+    catalog_rows: list[dict[str, object]] = [
+        {
+            "entryKey": c.bot_key,
+            "botKey": c.bot_key,
+            "visibility": "PUBLIC" if c.visibility == "ALL" else "TENANT",
+            "tenantKey": None if "*" in c.tenant_keys else c.tenant_keys[0],
+            "entitlementKey": c.entitlement_key,
+            "featured": False,
+            "listing": c.listing,
+        }
+        for c in sections.catalog
+    ]
+    return {
+        "tenant_directory": {"tenantCount": len(tenants), "tenants": tenants},
+        "entitlements": {"tenantCount": len(entitlement_rows), "tenants": entitlement_rows},
+        "policy_packages": {"packageCount": len(package_rows), "packages": package_rows},
+        "market_catalog": {"entryCount": len(catalog_rows), "entries": catalog_rows},
+    }
+
+
 def _payload(
     version: int, sections: SnapshotSections | None = None, **over: object
 ) -> dict[str, object]:
-    secs = serialize_sections(sections or _sections())
     data: dict[str, object] = {
         "service_id": "kongming",
         "version": version,
         "observed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "etag": f"v{version}",
-        "sections": secs,
+        "security_sections": ["tenant_directory", "entitlements", "policy_packages"],
+        "sections": _wire_sections(sections or _sections()),
     }
-    data["signature"] = sign(
-        secret=SECRET,
-        service_id="kongming",
-        version=cast(int, data["version"]),
-        observed_at=cast(str, data["observed_at"]),
-        etag=cast(str, data["etag"]),
-        sections=secs,
-    )
     data.update(over)
     return data
 
@@ -131,7 +223,15 @@ class _FakeSource:
         item = self._items.pop(0) if self._items else Exception("no more")
         if isinstance(item, Exception):
             raise item
-        return FetchResult(not_modified=False, etag=str(item["etag"]), payload=item)
+        raw, signature = _signed(item)
+        return FetchResult(
+            not_modified=False,
+            etag=str(item["etag"]),
+            payload=item,
+            raw=raw,
+            signature=signature,
+            key_id="test-kid",
+        )
 
 
 class _MemStore:
@@ -163,7 +263,7 @@ def _snapshot_service(source: _FakeSource, store: _MemStore, applier: _Applier) 
         applier=applier,
         clock=SystemClock(),
         service_id="kongming",
-        signing_secret=SECRET,
+        keys=StaticSnapshotKeySource(PUBLIC_KEY),
         stale_after_sec=300,
         enabled=True,
     )
@@ -174,17 +274,114 @@ def _snapshot_service(source: _FakeSource, store: _MemStore, applier: _Applier) 
 
 def test_snapshot_signature_and_security_sections() -> None:
     payload = _payload(1)
-    snap = parse_snapshot(payload, expected_service_id="kongming", secret=SECRET)
+    raw, signature = _signed(payload)
+    snap = parse_snapshot(
+        raw, payload, expected_service_id="kongming", signature=signature, public_key=PUBLIC_KEY
+    )
     assert snap.version == 1
-    bad = dict(payload)
-    bad["sections"] = {**cast(dict[str, object], payload["sections"])}
+    tampered = raw.replace(b'"v1"', b'"drift"', 1)
     with pytest.raises(SnapshotRejected, match="签名"):
-        parse_snapshot({**bad, "etag": "drift"}, expected_service_id="kongming", secret=SECRET)
+        parse_snapshot(
+            tampered,
+            {**payload, "etag": "drift"},
+            expected_service_id="kongming",
+            signature=signature,
+            public_key=PUBLIC_KEY,
+        )
     missing = cast(dict[str, object], payload["sections"]).copy()
     missing.pop("entitlements")
+    missing_payload = {**payload, "sections": missing}
+    missing_raw, missing_sig = _signed(missing_payload)
     with pytest.raises(SnapshotRejected, match="安全节"):
         parse_snapshot(
-            {**payload, "sections": missing}, expected_service_id="kongming", secret=SECRET
+            missing_raw,
+            missing_payload,
+            expected_service_id="kongming",
+            signature=missing_sig,
+            public_key=PUBLIC_KEY,
+        )
+    blank_etag = {**payload, "etag": ""}
+    blank_raw, blank_sig = _signed(blank_etag)
+    with pytest.raises(SnapshotRejected, match="etag"):
+        parse_snapshot(
+            blank_raw,
+            blank_etag,
+            expected_service_id="kongming",
+            signature=blank_sig,
+            public_key=PUBLIC_KEY,
+        )
+
+
+async def test_jwks_key_source_refreshes_for_new_kid() -> None:
+    other_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        assert request.url.path == "/.well-known/jwks.json"
+        calls += 1
+        keys = [RSAAlgorithm.to_jwk(PUBLIC_KEY, as_dict=True)]
+        keys[0]["kid"] = "kid-1"
+        if calls > 1:
+            second = RSAAlgorithm.to_jwk(other_key.public_key(), as_dict=True)
+            second["kid"] = "kid-2"
+            keys.append(second)
+        return httpx.Response(200, json={"keys": keys})
+
+    source = JwksSnapshotKeySource(
+        url="http://control.local/.well-known/jwks.json",
+        transport=httpx.MockTransport(handler),
+        force_refresh_min_sec=0,
+    )
+    assert await source.key("kid-1") is not None
+    assert calls == 1
+    assert await source.key("kid-2") is not None
+    assert calls == 2
+
+
+def test_jinguan_catalog_without_listing_maps_to_listed() -> None:
+    payload = _payload(1, _sections(bot_key="assistant"))
+    sections = cast("dict[str, object]", payload["sections"])
+    catalog_block = cast("dict[str, object]", sections["market_catalog"])
+    entries = cast("list[dict[str, object]]", catalog_block["entries"])
+    entries[0].pop("listing")
+    raw, signature = _signed(payload)
+    snap = parse_snapshot(
+        raw, payload, expected_service_id="kongming", signature=signature, public_key=PUBLIC_KEY
+    )
+    assert snap.sections.catalog[0].listing == "LISTED"
+
+
+def test_snapshot_rejects_tenant_scope_without_tenant_key() -> None:
+    payload = _payload(1, _sections(bot_key="assistant"))
+    sections = cast("dict[str, object]", payload["sections"])
+    packages_block = cast("dict[str, object]", sections["policy_packages"])
+    packages = cast("list[dict[str, object]]", packages_block["packages"])
+    packages.append(
+        {
+            "packageKey": "tenant-only",
+            "serviceId": "kongming",
+            "scope": "TENANT",
+            "tenantKey": None,
+            "rulesetVersion": "v1",
+            "updatedAt": datetime.now(UTC).isoformat(),
+        }
+    )
+    raw, signature = _signed(payload)
+    with pytest.raises(SnapshotRejected, match="tenantKey"):
+        parse_snapshot(
+            raw, payload, expected_service_id="kongming", signature=signature, public_key=PUBLIC_KEY
+        )
+
+    payload = _payload(1, _sections(bot_key="assistant"))
+    sections = cast("dict[str, object]", payload["sections"])
+    catalog_block = cast("dict[str, object]", sections["market_catalog"])
+    entries = cast("list[dict[str, object]]", catalog_block["entries"])
+    entries[0]["tenantKey"] = None
+    raw, signature = _signed(payload)
+    with pytest.raises(SnapshotRejected, match="tenantKey"):
+        parse_snapshot(
+            raw, payload, expected_service_id="kongming", signature=signature, public_key=PUBLIC_KEY
         )
 
 
@@ -275,6 +472,73 @@ async def test_identity_cache_applies_and_reconciles(session: AsyncSession) -> N
         )
     ).scalar_one()
     assert int(left) == 0
+
+
+async def test_identity_cache_preserves_local_profile(
+    session: AsyncSession, make_user: MakeUser
+) -> None:
+    from kongming.control.identity_cache import SqlIdentityApplier
+
+    uid = await make_user("alice", email="alice@example.com", nickname="Alice")
+    sections = SnapshotSections(
+        tenants=(TenantRecord(tenant_id=str(uuid7()), tenant_key="t1", tenant_name="租户一"),),
+        members=(
+            MembershipRecord(
+                user_id=uid,
+                username=uid,
+                nickname="",
+                email=None,
+                status="ACTIVE",
+                tenant_key="t1",
+            ),
+        ),
+    )
+    await SqlIdentityApplier(get_sessionmaker()).apply(sections, service_id="kongming", version=1)
+    row = (
+        await session.execute(
+            text(
+                "SELECT username, email, nickname, status FROM public.sys_user"
+                " WHERE id = CAST(:u AS uuid)"
+            ),
+            {"u": uid},
+        )
+    ).one()
+    assert tuple(row) == ("alice", "alice@example.com", "Alice", "ACTIVE")
+
+
+async def test_identity_cache_disabled_membership_is_tenant_scoped(
+    session: AsyncSession, make_user: MakeUser
+) -> None:
+    from kongming.control.identity_cache import SqlIdentityApplier
+
+    uid = await make_user("bob", email="bob@example.com", nickname="Bob")
+    sections = SnapshotSections(
+        tenants=(TenantRecord(tenant_id=str(uuid7()), tenant_key="t1", tenant_name="租户一"),),
+        members=(
+            MembershipRecord(
+                user_id=uid,
+                username=uid,
+                nickname="",
+                email=None,
+                status="DISABLED",
+                tenant_key="t1",
+            ),
+        ),
+    )
+    await SqlIdentityApplier(get_sessionmaker()).apply(sections, service_id="kongming", version=1)
+    user = (
+        await session.execute(
+            text("SELECT status FROM public.sys_user WHERE id = CAST(:u AS uuid)"),
+            {"u": uid},
+        )
+    ).scalar_one()
+    memberships = (
+        await session.execute(
+            text("SELECT count(*) FROM public.sys_user_tenant WHERE user_id = CAST(:u AS uuid)"),
+            {"u": uid},
+        )
+    ).scalar_one()
+    assert user == "ACTIVE" and int(memberships) == 0
 
 
 async def test_identity_apply_version_is_monotonic(session: AsyncSession) -> None:
@@ -619,52 +883,131 @@ def test_event_sink_installed_reports() -> None:
 async def test_control_client_etag_and_ack_payload() -> None:
     seen: list[httpx.Request] = []
     payload = _payload(3)
+    raw, signature = _signed(payload)
+    ack_body: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        if request.url.path == "/control/snapshot":
+        if request.url.path == "/control/v1/snapshot":
             assert request.headers["If-None-Match"] == "v2"
-            return httpx.Response(200, json=payload)
-        if request.url.path == "/control/commands/claim":
             return httpx.Response(
                 200,
-                json={
-                    "commands": [
-                        {
-                            "command_id": "c1",
-                            "idempotency_key": "k1",
-                            "action": "cache.clear",
-                            "action_version": 1,
-                            "params": {"tenant_key": "t", "datasource_key": "d"},
-                        }
-                    ]
+                content=raw,
+                headers={
+                    "ETag": "v3",
+                    "X-Jinguan-Signature": signature,
+                    "X-Jinguan-Key-Id": "kid-1",
                 },
             )
+        if request.url.path == "/control/v1/commands/claim":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": "c1",
+                        "serviceId": "kongming",
+                        "action": "cache.clear",
+                        "actionSchemaVersion": 1,
+                        "params": {"tenant_key": "t", "datasource_key": "d"},
+                        "reason": "test",
+                        "actor": "ops",
+                        "status": "CLAIMED",
+                        "attempts": 1,
+                        "maxAttempts": 3,
+                        "createdAt": "2026-11-27T00:00:00Z",
+                        "updatedAt": "2026-11-27T00:00:00Z",
+                    }
+                ],
+            )
+        if request.url.path == "/control/v1/commands/c1/ack":
+            ack_body.update(cast("dict[str, object]", json.loads(request.content)))
+            return httpx.Response(204)
         return httpx.Response(200, json={})
 
     client = ControlPlaneClient(
         base_url="http://control.local",
         service_id="kongming",
+        environment="local",
         token_provider=StaticTokenProvider("tok"),
         transport=httpx.MockTransport(handler),
     )
     result = await client.fetch_snapshot(service_id="kongming", etag="v2")
     assert result.payload is not None and result.payload["version"] == 3
+    assert result.etag == "v3" and result.signature == signature
+    assert result.raw == raw and result.key_id == "kid-1"
     commands = await client.claim(service_id="kongming", instance_id="i")
     assert commands[0].action == "cache.clear"
+    assert commands[0].idempotency_key == "c1"
     await client.ack(
         service_id="kongming",
         command_id="c1",
         idempotency_key="k1",
         outcome=CommandOutcome(status="SUCCEEDED", result={"ok": True}),
     )
+    assert ack_body == {"status": "SUCCEEDED", "result": {"ok": True}}
     assert all(r.headers["Authorization"] == "Bearer tok" for r in seen)
+    assert all(r.headers["X-Service-Id"] == "kongming" for r in seen)
+
+
+async def test_control_client_ack_treats_terminal_conflict_as_success() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/control/v1/commands/c1/ack"
+        return httpx.Response(409, json={"detail": "already terminal"})
+
+    client = ControlPlaneClient(
+        base_url="http://control.local",
+        service_id="kongming",
+        environment="local",
+        token_provider=StaticTokenProvider("tok"),
+        transport=httpx.MockTransport(handler),
+    )
+    await client.ack(
+        service_id="kongming",
+        command_id="c1",
+        idempotency_key="c1",
+        outcome=CommandOutcome(status="SUCCEEDED", result={"ok": True}),
+    )
+
+
+async def test_control_client_registers_entitlement_keys_as_capabilities() -> None:
+    payloads: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payloads.append(cast("dict[str, object]", json.loads(request.content)))
+        return httpx.Response(200, json={})
+
+    client = ControlPlaneClient(
+        base_url="http://control.local",
+        service_id="kongming",
+        environment="local",
+        token_provider=StaticTokenProvider("tok"),
+        transport=httpx.MockTransport(handler),
+    )
+    await client.register(
+        service_id="kongming",
+        instance_id="i",
+        version="0.1.0",
+        capabilities=("chat",),
+        admin_capabilities=("role.manage",),
+        entitlement_keys=("chat.calls", "bot.runs"),
+        health=HealthStatus(ready=True, database=True, redis=True),
+    )
+    assert payloads[0] == {
+        "serviceId": "kongming",
+        "instanceId": "i",
+        "environment": "local",
+        "version": "0.1.0",
+        "capabilities": ["chat", "chat.calls", "bot.runs"],
+        "adminCapabilities": ["role.manage"],
+    }
+    assert payloads[1]["status"] == "UP"
 
 
 async def test_control_client_auth_failure_is_explicit() -> None:
     client = ControlPlaneClient(
         base_url="http://control.local",
         service_id="kongming",
+        environment="local",
         token_provider=StaticTokenProvider("tok"),
         transport=httpx.MockTransport(lambda _: httpx.Response(401, json={})),
     )
@@ -953,6 +1296,14 @@ async def test_service_read_projection_with_local_reader(
         assert body["source"] == "kongming"
         assert "capabilities" in body
         assert "password" not in json.dumps(body).lower()
+        projection = await client.get(
+            "/service/v1/read-projection", headers={"Authorization": "Bearer reader-secret"}
+        )
+        assert projection.status_code == 200, projection.text
+        envelope = projection.json()
+        assert envelope["service_id"] == "kongming"
+        assert envelope["sections"]["summary"]["source"] == "kongming"
+        assert (await client.get("/service/v1/read-projection")).status_code == 401
         assert (
             await client.get(
                 "/service-read/nope", headers={"Authorization": "Bearer reader-secret"}
@@ -1068,7 +1419,7 @@ def test_managed_runtime_generates_unique_instance_ids() -> None:
     base: dict[str, Any] = {
         "control_mode": "managed",
         "control_base_url": "http://control.local",
-        "control_signing_secret": SECRET,
+        "control_snapshot_public_key_pem": PUBLIC_PEM,
         "control_service_token": "tok",
     }
     first = build_runtime(settings=Settings(**base), maker=get_sessionmaker(), redis=_redis())
@@ -1095,15 +1446,27 @@ def test_managed_runtime_generates_unique_instance_ids() -> None:
 async def test_managed_security_gate(client: AsyncClient) -> None:
     from kongming.control.runtime import build_runtime
 
+    payload = _payload(1)
+    raw, signature = _signed(payload)
+
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/control/snapshot":
-            return httpx.Response(200, json=_payload(1))
+        if request.url.path == "/.well-known/jwks.json":
+            return httpx.Response(200, json={"keys": [_public_jwk(PUBLIC_KEY)]})
+        if request.url.path == "/control/v1/snapshot":
+            return httpx.Response(
+                200,
+                content=raw,
+                headers={
+                    "ETag": "v1",
+                    "X-Jinguan-Signature": signature,
+                    "X-Jinguan-Key-Id": "kid-1",
+                },
+            )
         return httpx.Response(200, json={})
 
     settings = Settings(
         control_mode="managed",
         control_base_url="http://control.local",
-        control_signing_secret=SECRET,
         control_service_token="tok",
         control_instance_id="i",
     )

@@ -10,9 +10,14 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from kongming.control.models import SnapshotSections
+from kongming.control.models import MembershipRecord, SnapshotSections
 
 log = logging.getLogger(__name__)
+
+
+def _active_members(members: tuple[MembershipRecord, ...]) -> tuple[MembershipRecord, ...]:
+    """只取租户级 ACTIVE 关系；停用关系不参与账号/角色写入。"""
+    return tuple(m for m in members if m.status.upper() == "ACTIVE")
 
 
 class SqlTenantKeyResolver:
@@ -94,19 +99,18 @@ async def _upsert_members(
     s: AsyncSession, sections: SnapshotSections, tenant_ids: dict[str, str]
 ) -> None:
     pairs: set[tuple[str, str]] = set()
-    for m in sections.members:
+    for m in _active_members(sections.members):
         tenant_id = tenant_ids.get(m.tenant_key)
         if tenant_id is None:
             log.warning("成员引用了快照内不存在的租户键,跳过: %s", m.tenant_key)
             continue
+        # 快照只含 subject/粗角色，资料归本地；更新不得用合成资料覆盖既有账号
         await s.execute(
             text(
                 "INSERT INTO public.sys_user"
                 " (id, username, email, nickname, status, updated_at, deleted_at)"
-                " VALUES (CAST(:id AS uuid), :u, :e, :n, :st, now(), NULL)"
+                " VALUES (CAST(:id AS uuid), :u, :e, :n, 'ACTIVE', now(), NULL)"
                 " ON CONFLICT (id) DO UPDATE SET"
-                "  username = EXCLUDED.username, email = EXCLUDED.email,"
-                "  nickname = EXCLUDED.nickname, status = EXCLUDED.status,"
                 "  updated_at = now(), deleted_at = NULL"
             ),
             {
@@ -114,7 +118,6 @@ async def _upsert_members(
                 "u": m.username,
                 "e": m.email,
                 "n": m.nickname[:64],
-                "st": m.status,
             },
         )
         await s.execute(
@@ -163,7 +166,7 @@ async def _bind_coarse_roles(s: AsyncSession, sections: SnapshotSections) -> Non
     if missing:
         log.warning("快照引用了本地不存在的粗角色,跳过绑定: %s", sorted(missing))
     desired: set[tuple[str, str]] = set()
-    for m in sections.members:
+    for m in _active_members(sections.members):
         for role_key in m.coarse_role_keys:
             role_id = roles.get(role_key)
             if role_id is not None:

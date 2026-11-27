@@ -6,7 +6,7 @@ wire 端点为 v1 形态,由 X-01 契约冻结;任何非 2xx 都转成域错误,
 
 import json
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import cast
 
 import httpx
 
@@ -20,15 +20,16 @@ from kongming.control.models import (
     HealthStatus,
     ProductEvent,
 )
-from kongming.control.ports import TokenProvider
+from kongming.control.ports import TenantKeyResolver, TokenProvider
 
 _MAX_RESPONSE_BYTES = 16 * 1024 * 1024
-_SNAPSHOT_PATH = "/control/snapshot"
-_REGISTER_PATH = "/control/services/register"
-_HEARTBEAT_PATH = "/control/services/heartbeat"
-_CLAIM_PATH = "/control/commands/claim"
-_ACK_PATH = "/control/commands/{command_id}/ack"
-_USAGE_PATH = "/control/usage/events"
+_SNAPSHOT_PATH = "/control/v1/snapshot"
+_REGISTER_PATH = "/control/v1/registry/register"
+_HEARTBEAT_PATH = "/control/v1/registry/heartbeat"
+_HEALTH_PATH = "/ingest/health"
+_CLAIM_PATH = "/control/v1/commands/claim"
+_ACK_PATH = "/control/v1/commands/{command_id}/ack"
+_USAGE_PATH = "/ingest/events"
 
 
 class ControlPlaneClient:
@@ -37,13 +38,17 @@ class ControlPlaneClient:
         *,
         base_url: str,
         service_id: str,
+        environment: str,
         token_provider: TokenProvider,
+        tenant_key_resolver: TenantKeyResolver | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         timeout_sec: float = 5.0,
     ) -> None:
         self._base = base_url.rstrip("/")
         self._service_id = service_id
+        self._environment = environment or "local"
         self._tokens = token_provider
+        self._tenant_keys = tenant_key_resolver
         self._transport = transport
         self._timeout = timeout_sec
 
@@ -59,7 +64,7 @@ class ControlPlaneClient:
         token = await self._tokens.token()
         return {
             "Authorization": f"Bearer {token}",
-            "X-Kongming-Service": self._service_id,
+            "X-Service-Id": self._service_id,
             "Accept": "application/json",
         }
 
@@ -71,16 +76,18 @@ class ControlPlaneClient:
             raise ControlUnavailable(f"控制面{action}失败({resp.status_code})")
 
     @staticmethod
-    def _json(resp: httpx.Response) -> dict[str, Any]:
+    def _json(resp: httpx.Response) -> dict[str, object] | list[object]:
         if len(resp.content) > _MAX_RESPONSE_BYTES:
             raise ControlUnavailable("控制面响应超过大小上限")
         try:
-            body = resp.json()
+            body: object = resp.json()
         except json.JSONDecodeError as e:
             raise ControlUnavailable("控制面响应不是合法 JSON") from e
-        if not isinstance(body, dict):
-            raise ControlUnavailable("控制面响应必须为对象")
-        return cast("dict[str, Any]", body)
+        if isinstance(body, dict):
+            return cast("dict[str, object]", body)
+        if isinstance(body, list):
+            return cast("list[object]", body)
+        raise ControlUnavailable("控制面响应必须为对象或数组")
 
     async def fetch(self, *, service_id: str, etag: str) -> FetchResult:
         """SnapshotSource 端口形态(与 fetch_snapshot 同一实现)。"""
@@ -96,15 +103,23 @@ class ControlPlaneClient:
             headers["If-None-Match"] = etag
         try:
             async with self._http() as http:
-                resp = await http.get(
-                    _SNAPSHOT_PATH, params={"service_id": service_id}, headers=headers
-                )
+                resp = await http.get(_SNAPSHOT_PATH, headers=headers)
         except httpx.HTTPError as e:
             raise ControlUnavailable("控制快照拉取失败") from e
         if resp.status_code == 304:
             return FetchResult(not_modified=True, etag=etag)
         self._raise_for_status(resp, "快照拉取")
-        return FetchResult(not_modified=False, etag=etag, payload=self._json(resp))
+        payload = self._json(resp)
+        if not isinstance(payload, dict):
+            raise ControlUnavailable("控制快照响应必须为对象")
+        return FetchResult(
+            not_modified=False,
+            etag=resp.headers.get("ETag", ""),
+            payload=payload,
+            raw=resp.content,
+            signature=resp.headers.get("X-Jinguan-Signature", ""),
+            key_id=resp.headers.get("X-Jinguan-Key-Id", ""),
+        )
 
     async def register(
         self,
@@ -117,60 +132,60 @@ class ControlPlaneClient:
         entitlement_keys: tuple[str, ...] = ENTITLEMENT_KEYS,
         health: HealthStatus,
     ) -> None:
+        declared = list(dict.fromkeys((*capabilities, *entitlement_keys)))
         payload: dict[str, object] = {
-            "service_id": service_id,
-            "instance_id": instance_id,
+            "serviceId": service_id,
+            "instanceId": instance_id,
+            "environment": self._environment,
             "version": version,
-            "capabilities": list(capabilities),
-            "admin_capabilities": list(admin_capabilities),
-            "entitlement_keys": list(entitlement_keys),
-            "health": {
-                "ready": health.ready,
-                "database": health.database,
-                "redis": health.redis,
-            },
-            "observed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "capabilities": declared,
+            "adminCapabilities": list(admin_capabilities),
         }
         await self._post(_REGISTER_PATH, payload, "注册")
+        await self._report_health(service_id, instance_id, health)
 
     async def heartbeat(
         self, *, service_id: str, instance_id: str, version: str, health: HealthStatus
     ) -> None:
         await self._post(
             _HEARTBEAT_PATH,
-            {
-                "service_id": service_id,
-                "instance_id": instance_id,
-                "version": version,
-                "health": {
-                    "ready": health.ready,
-                    "database": health.database,
-                    "redis": health.redis,
-                },
-                "observed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            },
+            {"serviceId": service_id, "instanceId": instance_id},
             "心跳",
         )
+        await self._report_health(service_id, instance_id, health)
+
+    async def _report_health(self, service_id: str, instance_id: str, health: HealthStatus) -> None:
+        """健康事件独立上报；失败不把注册/心跳判成故障。"""
+        status = "UP" if health.ready else "DEGRADED"
+        try:
+            await self._post(
+                _HEALTH_PATH,
+                {
+                    "serviceId": service_id,
+                    "instanceId": instance_id,
+                    "status": status,
+                    "observedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                },
+                "健康上报",
+            )
+        except Exception:  # noqa: BLE001  # 健康上报旁路失败不影响注册/心跳
+            return
 
     async def claim(self, *, service_id: str, instance_id: str) -> list[CommandEnvelope]:
-        body = await self._post(
-            _CLAIM_PATH, {"service_id": service_id, "instance_id": instance_id}, "命令领取"
-        )
-        items = body.get("commands")
-        if items is None:
-            return []
-        if not isinstance(items, list):
-            raise ControlUnavailable("命令领取响应 commands 必须为数组")
+        body = await self._post(_CLAIM_PATH, {"limit": 10}, "命令领取")
+        if not isinstance(body, list):
+            raise ControlUnavailable("命令领取响应必须为数组")
         out: list[CommandEnvelope] = []
-        for raw_item in cast("list[object]", items):
+        for raw_item in body:
             if not isinstance(raw_item, dict):
                 raise ControlUnavailable("命令条目必须为对象")
             raw = cast("dict[str, object]", raw_item)
-            action_version = raw.get("action_version")
+            action_version = raw.get("actionSchemaVersion")
+            command_id = str(raw.get("id") or "")
             out.append(
                 CommandEnvelope(
-                    command_id=str(raw.get("command_id") or ""),
-                    idempotency_key=str(raw.get("idempotency_key") or ""),
+                    command_id=command_id,
+                    idempotency_key=command_id,
                     action=str(raw.get("action") or ""),
                     action_version=action_version if isinstance(action_version, int) else 0,
                     params=cast("dict[str, object]", raw.get("params") or {}),
@@ -188,43 +203,47 @@ class ControlPlaneClient:
         idempotency_key: str,
         outcome: CommandOutcome,
     ) -> None:
+        status = "SUCCEEDED" if outcome.status == "SUCCEEDED" else "FAILED"
+        payload: dict[str, object] = {"status": status}
+        if status == "SUCCEEDED":
+            payload["result"] = outcome.result
+        else:
+            payload["error"] = outcome.error or "命令执行失败"
         await self._post(
             _ACK_PATH.format(command_id=command_id),
-            {
-                "service_id": service_id,
-                "idempotency_key": idempotency_key,
-                "status": outcome.status,
-                "result": outcome.result,
-                "error": outcome.error,
-                "observed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            },
+            payload,
             "命令回执",
+            allow_conflict=True,
         )
 
     async def send_usage(self, events: list[ProductEvent]) -> None:
         if not events:
             return
-        await self._post(
-            _USAGE_PATH,
-            {
-                "service_id": self._service_id,
-                "events": [
-                    {
-                        "event_id": e.event_id,
-                        "event_type": e.event_type,
-                        "occurred_at": e.occurred_at.isoformat().replace("+00:00", "Z"),
-                        "tenant_id": e.tenant_id,
-                        "user_id": e.user_id,
-                        "bot_key": e.bot_key,
-                        "attributes": e.attributes,
-                    }
-                    for e in events
-                ],
-            },
-            "用量上报",
-        )
+        items: list[dict[str, object]] = []
+        for event in events:
+            tenant_key = (
+                await self._tenant_keys.key_for_id(event.tenant_id)
+                if self._tenant_keys is not None
+                else None
+            )
+            item: dict[str, object] = {
+                "eventId": event.event_id,
+                "metric": event.event_type,
+                "quantity": 1,
+                "unit": "event",
+                "kind": "PRODUCT",
+                "occurredAt": event.occurred_at.isoformat().replace("+00:00", "Z"),
+            }
+            if tenant_key:
+                item["tenantKey"] = tenant_key
+            if event.user_id:
+                item["subject"] = event.user_id
+            items.append(item)
+        await self._post(_USAGE_PATH, {"events": items}, "用量上报")
 
-    async def _post(self, path: str, payload: dict[str, object], action: str) -> dict[str, Any]:
+    async def _post(
+        self, path: str, payload: object, action: str, *, allow_conflict: bool = False
+    ) -> dict[str, object] | list[object]:
         headers = await self._headers()
         headers["Content-Type"] = "application/json"
         try:
@@ -232,6 +251,9 @@ class ControlPlaneClient:
                 resp = await http.post(path, json=payload, headers=headers)
         except httpx.HTTPError as e:
             raise ControlUnavailable(f"控制面{action}失败") from e
+        # 终态重复回执返回 409;本地已终态,按幂等成功处理
+        if allow_conflict and resp.status_code == 409:
+            return {}
         self._raise_for_status(resp, action)
         if not resp.content:
             return {}

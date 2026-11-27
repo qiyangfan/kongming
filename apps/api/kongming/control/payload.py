@@ -1,19 +1,17 @@
 """快照载荷解析与验签(纯函数,零框架)。
 
-wire 形态(X-01 契约冻结前的本仓 v1):
-{"service_id","version","observed_at","etag","sections","signature"}
-signature=HMAC-SHA256(secret, canonical({service_id,version,observed_at,etag,sections}))。
+X-01 wire 形态:`{"version","observed_at","service_id","etag","security_sections","sections"}`,
+签名是响应头中的 RSA-SHA256 PKCS#1 v1.5 裸签名,覆盖原始响应体。
+内部 last-known 仍按六节(tenants/members/...)持久化,解析后做一次投影。
 任何字段类型不符/安全节缺失/条目超限都整体拒绝,不做部分接受。
 """
 
-import hashlib
-import hmac
-import json
 from datetime import UTC, datetime
 from typing import cast
 
+from cryptography.hazmat.primitives.asymmetric import rsa
+
 from kongming.control.models import (
-    ALL_SECTIONS,
     SECURITY_SECTIONS,
     CatalogEntryRecord,
     CoarseRoleRecord,
@@ -25,51 +23,37 @@ from kongming.control.models import (
     SnapshotSections,
     TenantRecord,
 )
+from kongming.control.verifier import verify_snapshot
 
 MAX_ENTRIES_PER_SECTION = 50_000
 MAX_RULE_NAMES_PER_PACKAGE = 500
 
-
-def _canonical(document: dict[str, object]) -> bytes:
-    return json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-
-
-def canonical_for_signature(
-    *,
-    service_id: str,
-    version: int,
-    observed_at: str,
-    etag: str,
-    sections: dict[str, object],
-) -> bytes:
-    return _canonical(
-        {
-            "service_id": service_id,
-            "version": version,
-            "observed_at": observed_at,
-            "etag": etag,
-            "sections": sections,
-        }
-    )
+# 锦官按服务投影时 kongming 的三个安全节。
+KONGMING_SECURITY_SECTIONS = ("tenant_directory", "entitlements", "policy_packages")
+# 权益配额维度 → Kongming 执行字段；未知维度不推断、不参与执行。
+# 缺失/未知维度按未配置处理(执行字段 0=不限):套餐是跨服务维度集合，
+# Muniu 维度不能成为 Kongming 的拒绝条件。
+QUOTA_DIMENSIONS = {
+    "calls_daily": "quota_calls_daily",
+    "calls_monthly": "quota_calls_monthly",
+    "bot_calls_daily": "quota_bot_calls_daily",
+    "tool_calls_per_minute": "quota_tool_calls_per_minute",
+}
 
 
-def sign(
-    *,
-    secret: str,
-    service_id: str,
-    version: int,
-    observed_at: str,
-    etag: str,
-    sections: dict[str, object],
-) -> str:
-    payload = canonical_for_signature(
-        service_id=service_id,
-        version=version,
-        observed_at=observed_at,
-        etag=etag,
-        sections=sections,
-    )
-    return hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
+def _require_list(value: object, field: str) -> list[object]:
+    if not isinstance(value, list):
+        raise SnapshotRejected(f"快照字段 {field} 必须为数组")
+    items = cast("list[object]", value)
+    if len(items) > MAX_ENTRIES_PER_SECTION:
+        raise SnapshotRejected(f"快照节 {field} 条目超过上限 {MAX_ENTRIES_PER_SECTION}")
+    return items
+
+
+def _require_dict(value: object, field: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise SnapshotRejected(f"快照字段 {field} 必须为对象")
+    return cast("dict[str, object]", value)
 
 
 def _require_str(value: object, field: str) -> str:
@@ -281,11 +265,15 @@ def parse_sections(raw_sections: dict[str, object]) -> SnapshotSections:
 
 
 def parse_snapshot(
-    payload: dict[str, object], *, expected_service_id: str, secret: str
+    raw_body: bytes,
+    payload: dict[str, object],
+    *,
+    expected_service_id: str,
+    signature: str,
+    public_key: rsa.RSAPublicKey,
 ) -> ControlSnapshot:
-    """解析并验签;任何不合规整体拒绝(SnapshotRejected)。"""
-    if not secret:
-        raise SnapshotRejected("未配置快照验签密钥,拒绝未验真输入")
+    """验签并解析 X-01 快照；任何不合规整体拒绝(SnapshotRejected)。"""
+    verify_snapshot(public_key, raw_body, signature)
     service_id = _require_str(payload.get("service_id"), "service_id")
     if service_id != expected_service_id:
         raise SnapshotRejected(f"快照服务标识不符: {service_id}")
@@ -293,29 +281,16 @@ def parse_snapshot(
     if version < 1:
         raise SnapshotRejected("快照 version 必须 >= 1")
     observed_at_raw = _require_str(payload.get("observed_at"), "observed_at")
-    etag = str(payload.get("etag") or "")
-    signature = _require_str(payload.get("signature"), "signature")
-    raw_value = payload.get("sections")
-    if not isinstance(raw_value, dict):
-        raise SnapshotRejected("快照缺 sections")
-    raw_sections = cast("dict[str, object]", raw_value)
-    missing = [name for name in SECURITY_SECTIONS if name not in raw_sections]
+    etag = _require_str(payload.get("etag"), "etag")
+    declared = _str_tuple(payload.get("security_sections"), "security_sections")
+    missing_declared = [name for name in KONGMING_SECURITY_SECTIONS if name not in declared]
+    if missing_declared:
+        raise SnapshotRejected(f"快照缺安全节声明 {missing_declared}")
+    raw_sections = _require_dict(payload.get("sections"), "sections")
+    missing = [name for name in KONGMING_SECURITY_SECTIONS if name not in raw_sections]
     if missing:
         raise SnapshotRejected(f"快照缺安全节 {missing}")
-    unknown = [name for name in raw_sections if name not in ALL_SECTIONS]
-    if unknown:
-        raise SnapshotRejected(f"快照含未知节 {unknown}")
-    expected = sign(
-        secret=secret,
-        service_id=service_id,
-        version=version,
-        observed_at=observed_at_raw,
-        etag=etag,
-        sections=raw_sections,
-    )
-    if not hmac.compare_digest(expected, signature):
-        raise SnapshotRejected("快照签名校验失败")
-    sections = parse_sections(raw_sections)
+    sections = _parse_jinguan_sections(raw_sections)
     return ControlSnapshot(
         service_id=service_id,
         version=version,
@@ -324,6 +299,185 @@ def parse_snapshot(
         etag=etag,
         signature=signature,
     )
+
+
+def _parse_jinguan_sections(raw: dict[str, object]) -> SnapshotSections:
+    """锦官分节 → Kongming 内部六节；成员/粗角色从租户目录派生。"""
+    tenants, by_key = _j_tenants(_require_dict(raw.get("tenant_directory"), "tenant_directory"))
+    entitlements = _j_entitlements(_require_dict(raw.get("entitlements"), "entitlements"), by_key)
+    packages = _j_packages(_require_dict(raw.get("policy_packages"), "policy_packages"))
+    members, roles = _j_members(
+        _require_dict(raw.get("tenant_directory"), "tenant_directory"), by_key
+    )
+    catalog = _j_catalog(raw.get("market_catalog"))
+    return SnapshotSections(
+        tenants=tenants,
+        members=members,
+        coarse_roles=roles,
+        entitlements=entitlements,
+        policy_packages=packages,
+        catalog=catalog,
+    )
+
+
+def _j_tenants(
+    section: dict[str, object],
+) -> tuple[tuple[TenantRecord, ...], dict[str, TenantRecord]]:
+    tenants: list[TenantRecord] = []
+    by_key: dict[str, TenantRecord] = {}
+    for item in _require_list(section.get("tenants"), "tenant_directory.tenants"):
+        o = _require_dict(item, "tenant_directory.tenants")
+        tenant_id = _require_str(o.get("id"), "tenant_directory.tenants.id")
+        tenant_key = _require_str(o.get("tenantKey"), "tenant_directory.tenants.tenantKey")
+        name = str(o.get("name") or tenant_key).strip() or tenant_key
+        value = str(o.get("status") or "ACTIVE").strip().upper()
+        if value not in ("ACTIVE", "DISABLED"):
+            raise SnapshotRejected(f"租户 {tenant_key} status 非法: {value}")
+        tenant = TenantRecord(
+            tenant_id=tenant_id,
+            tenant_key=tenant_key,
+            tenant_name=name,
+            status=value,
+        )
+        tenants.append(tenant)
+        by_key[tenant_key] = tenant
+    return tuple(tenants), by_key
+
+
+def _j_members(
+    section: dict[str, object], by_key: dict[str, TenantRecord]
+) -> tuple[tuple[MembershipRecord, ...], tuple[CoarseRoleRecord, ...]]:
+    members: list[MembershipRecord] = []
+    roles: dict[str, str] = {}
+    for item in _require_list(section.get("tenants"), "tenant_directory.tenants"):
+        o = _require_dict(item, "tenant_directory.tenants")
+        tenant_key = _require_str(o.get("tenantKey"), "tenant_directory.tenants.tenantKey")
+        if tenant_key not in by_key:
+            raise SnapshotRejected(f"成员引用了不存在的租户键: {tenant_key}")
+        for member in _require_list(o.get("members"), "tenant_directory.tenants.members"):
+            m = _require_dict(member, "tenant_directory.tenants.members")
+            subject = _require_str(m.get("subject"), "tenant_directory.tenants.members.subject")
+            role = str(m.get("role") or "").strip()
+            members.append(
+                MembershipRecord(
+                    user_id=subject,
+                    username=subject,
+                    nickname="",
+                    email=None,
+                    status=str(m.get("status") or "ACTIVE").strip().upper(),
+                    tenant_key=tenant_key,
+                    coarse_role_keys=(role,) if role else (),
+                )
+            )
+            if role:
+                roles.setdefault(role, role)
+    return tuple(members), tuple(
+        CoarseRoleRecord(role_key=k, role_name=v) for k, v in roles.items()
+    )
+
+
+def _j_entitlements(
+    section: dict[str, object], by_key: dict[str, TenantRecord]
+) -> tuple[EntitlementRecord, ...]:
+    out: list[EntitlementRecord] = []
+    for item in _require_list(section.get("tenants"), "entitlements.tenants"):
+        o = _require_dict(item, "entitlements.tenants")
+        tenant_key = _require_str(o.get("tenantKey"), "entitlements.tenants.tenantKey")
+        tenant = by_key.get(tenant_key)
+        if tenant is None:
+            raise SnapshotRejected(f"权益引用了不存在的租户键: {tenant_key}")
+        values = dict.fromkeys(QUOTA_DIMENSIONS.values(), 0)
+        for quota in _require_list(o.get("quotas"), "entitlements.tenants.quotas"):
+            q = _require_dict(quota, "entitlements.tenants.quotas")
+            dimension = str(q.get("dimension") or "").strip().lower()
+            field = QUOTA_DIMENSIONS.get(dimension)
+            if field is None:
+                continue
+            limit = _require_int(q.get("limit", 0), "entitlements.tenants.quotas.limit")
+            values[field] = limit
+        out.append(
+            EntitlementRecord(
+                tenant_id=tenant.tenant_id,
+                tenant_key=tenant_key,
+                status=tenant.status,
+                features=(),
+                entitlement_keys=_str_tuple(
+                    o.get("entitlementKeys"), "entitlements.tenants.entitlementKeys"
+                ),
+                quota_calls_daily=values["quota_calls_daily"],
+                quota_calls_monthly=values["quota_calls_monthly"],
+                quota_bot_calls_daily=values["quota_bot_calls_daily"],
+                quota_tool_calls_per_minute=values["quota_tool_calls_per_minute"],
+            )
+        )
+    return tuple(out)
+
+
+def _j_packages(section: dict[str, object]) -> tuple[PolicyPackageRecord, ...]:
+    out: list[PolicyPackageRecord] = []
+    for item in _require_list(section.get("packages"), "policy_packages.packages"):
+        o = _require_dict(item, "policy_packages.packages")
+        service_id = _require_str(o.get("serviceId"), "policy_packages.packages.serviceId")
+        if service_id != "kongming":
+            raise SnapshotRejected(f"策略包投影服务不符: {service_id}")
+        scope = _require_str(o.get("scope"), "policy_packages.packages.scope").upper()
+        if scope == "GLOBAL":
+            tenant_keys = ("*",)
+        elif scope == "TENANT":
+            tenant_keys = (_require_str(o.get("tenantKey"), "policy_packages.packages.tenantKey"),)
+        else:
+            raise SnapshotRejected(f"策略包 scope 非法: {scope}")
+        out.append(
+            PolicyPackageRecord(
+                package_key=_require_str(
+                    o.get("packageKey"), "policy_packages.packages.packageKey"
+                ),
+                version=1,
+                status="ACTIVE",
+                rule_names=(),
+                tenant_keys=tenant_keys,
+                tenant_ids=(),
+            )
+        )
+    return tuple(out)
+
+
+def _j_catalog(value: object) -> tuple[CatalogEntryRecord, ...]:
+    if value is None:
+        return ()
+    section = _require_dict(value, "market_catalog")
+    out: list[CatalogEntryRecord] = []
+    for item in _require_list(section.get("entries"), "market_catalog.entries"):
+        o = _require_dict(item, "market_catalog.entries")
+        raw_visibility = _require_str(
+            o.get("visibility"), "market_catalog.entries.visibility"
+        ).upper()
+        if raw_visibility == "PUBLIC":
+            visibility = "ALL"
+            tenant_keys = ("*",)
+        elif raw_visibility == "TENANT":
+            visibility = "TENANTS"
+            tenant_keys = (_require_str(o.get("tenantKey"), "market_catalog.entries.tenantKey"),)
+        else:
+            raise SnapshotRejected(f"market_catalog.visibility 非法: {raw_visibility}")
+        # 锦官目录以 enabled 表示上架；X-01 无 UNLISTED，缺省按 LISTED 消费。
+        listing = str(o.get("listing") or "LISTED").strip().upper()
+        if listing not in ("LISTED", "UNLISTED"):
+            raise SnapshotRejected(f"market_catalog.listing 非法: {listing}")
+        out.append(
+            CatalogEntryRecord(
+                bot_key=_require_str(o.get("botKey"), "market_catalog.entries.botKey"),
+                listing=listing,
+                visibility=visibility,
+                tenant_keys=tenant_keys,
+                entitlement_key=(
+                    str(o["entitlementKey"])
+                    if isinstance(o.get("entitlementKey"), str) and o.get("entitlementKey")
+                    else None
+                ),
+            )
+        )
+    return tuple(out)
 
 
 def serialize_sections(sections: SnapshotSections) -> dict[str, object]:
