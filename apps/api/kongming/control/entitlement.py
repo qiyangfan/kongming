@@ -6,6 +6,7 @@
 from dataclasses import dataclass
 
 from kongming.control.models import EntitlementMissing, EntitlementRecord
+from kongming.control.ports import TenantKeyResolver
 from kongming.control.snapshot import SnapshotService
 
 
@@ -24,20 +25,23 @@ class EntitlementService:
         snapshots: SnapshotService,
         mode: str,
         default_limits: QuotaLimits,
+        resolver: TenantKeyResolver | None = None,
     ) -> None:
         self._snapshots = snapshots
         self._mode = mode
         self._defaults = default_limits
+        self._resolver = resolver
 
     async def for_tenant_id(self, tenant_id: str) -> QuotaLimits:
-        """受保护请求的配额视图;managed 下无有效权益即拒绝。"""
+        """受保护请求的配额视图;统一经 tenant_key 匹配,managed 缺失即拒绝。"""
         if self._mode != "managed":
             return self._defaults
-        sections = await self._snapshots.require_security()
-        for item in sections.entitlements:
-            if item.tenant_id == tenant_id:
-                return self._limits(item)
-        raise EntitlementMissing(f"租户 {tenant_id} 无有效权益快照")
+        if self._resolver is None:
+            raise EntitlementMissing("租户键解析器未装配")
+        tenant_key = await self._resolver.key_for_id(tenant_id)
+        if tenant_key is None:
+            raise EntitlementMissing(f"租户 {tenant_id} 无本地租户键")
+        return await self.for_tenant_key(tenant_key)
 
     async def for_tenant_key(self, tenant_key: str) -> QuotaLimits:
         if self._mode != "managed":

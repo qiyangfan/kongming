@@ -224,6 +224,7 @@ async def run_local_command(req: LocalCommandIn, user: CurrentUser) -> LocalComm
         params=req.params,
         actor=user.user_id,
         source="local",
+        reason=req.reason,
     )
     return LocalCommandOut(
         command_id=command_id,

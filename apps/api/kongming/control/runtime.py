@@ -7,8 +7,9 @@ managed 才启动快照/注册/命令/用量循环;standalone 全部退化成本
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
+from uuid import uuid4
 
 from redis.asyncio import Redis
 from sqlalchemy import text
@@ -22,7 +23,7 @@ from kongming.control.commands import CommandExecutor
 from kongming.control.entitlement import EntitlementService, QuotaLimits
 from kongming.control.events import install_event_sink
 from kongming.control.identity import build_token_provider
-from kongming.control.identity_cache import SqlIdentityApplier
+from kongming.control.identity_cache import SqlIdentityApplier, SqlTenantKeyResolver
 from kongming.control.local_actions import LocalCommandActions
 from kongming.control.models import ControlUnavailable, FetchResult, HealthStatus
 from kongming.control.policy import PolicyService
@@ -120,10 +121,12 @@ class ControlRuntime:
         usage: UsageReporter | None,
         executor: CommandExecutor,
         reader_verifier: ServiceTokenVerifier,
+        instance_id: str,
     ) -> None:
         self._s = settings
         self._maker = maker
         self._redis = redis
+        self._instance_id = instance_id
         self._client = client
         self._snapshot = snapshot
         self._entitlements = entitlements
@@ -212,6 +215,7 @@ class ControlRuntime:
                 name="control-usage",
             ),
             asyncio.create_task(self._command_loop(), name="control-commands"),
+            asyncio.create_task(self._cleanup_loop(), name="control-cleanup"),
         ]
         install_event_sink(self._usage)
 
@@ -240,14 +244,52 @@ class ControlRuntime:
                 log.warning("控制快照循环异常(下轮重试): %s", e)
             await asyncio.sleep(self._s.control_snapshot_poll_sec)
 
+    async def cleanup_once(self, *, dry_run: bool = False) -> dict[str, int]:
+        """执行一次本地控制数据清理;dry_run 只计数,审计记录实际/预演结果。"""
+        now = datetime.now(UTC)
+        counts = {
+            "usage_delivered": await SqlUsageOutbox(self._maker).prune_delivered(
+                before=now - timedelta(days=self._s.control_usage_retention_days),
+                dry_run=dry_run,
+            ),
+            "command_receipts": await SqlCommandReceiptStore(self._maker).prune(
+                before=now - timedelta(days=self._s.control_receipt_retention_days),
+                dry_run=dry_run,
+            ),
+            "registrations": await SqlRegistrationStore(self._maker).prune_stale(
+                before=now - timedelta(days=self._s.control_registration_retention_days),
+                dry_run=dry_run,
+            ),
+        }
+        try:
+            await _SqlAuditPort(self._maker).log(
+                actor=None,
+                action="control.cleanup",
+                target=SERVICE_ID,
+                detail={**counts, "dry_run": dry_run},
+            )
+        except Exception:  # 清理结果审计失败不得让循环退出
+            log.warning("控制数据清理审计写入失败", exc_info=True)
+        return counts
+
+    async def _cleanup_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self._s.control_cleanup_interval_sec)
+            try:
+                counts = await self.cleanup_once(dry_run=self._s.control_cleanup_dry_run)
+                log.info("控制数据清理完成: %s", counts)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # 清理失败不退出,下轮重试
+                log.exception("控制数据清理失败(下轮重试)")
+
     async def _command_loop(self) -> None:
         client = self._client
         if client is None:
             return
-        instance_id = self._s.control_instance_id or SERVICE_ID
         while True:
             try:
-                commands = await client.claim(service_id=SERVICE_ID, instance_id=instance_id)
+                commands = await client.claim(service_id=SERVICE_ID, instance_id=self._instance_id)
                 for envelope in commands:
                     outcome = await self._executor.process(envelope)
                     await client.ack(
@@ -275,11 +317,11 @@ def build_runtime(
 
     http_transport = transport if isinstance(transport, httpx.AsyncBaseTransport) else None
     managed = settings.control_enabled()
-    mode = (settings.control_mode or "").strip().lower()
     client = _build_client(settings, http_transport) if managed else None
     snapshot = _build_snapshot(settings, maker, client, managed)
-    entitlements, policy, catalog = _build_domain(settings, mode, snapshot)
-    registration, usage = _build_reporters(settings, maker, redis, client, managed)
+    entitlements, policy, catalog = _build_domain(settings, snapshot, maker)
+    instance_id = _instance_id(settings)
+    registration, usage = _build_reporters(settings, maker, redis, client, managed, instance_id)
     return ControlRuntime(
         settings=settings,
         maker=maker,
@@ -300,7 +342,14 @@ def build_runtime(
             ),
             transport=http_transport,
         ),
+        instance_id=instance_id,
     )
+
+
+def _instance_id(settings: Settings) -> str:
+    """实例标识:未配置时每个进程生成一次,滚动重启按新实例上报。"""
+    configured = (settings.control_instance_id or "").strip()
+    return configured or f"{SERVICE_ID}-{uuid4().hex[:12]}"
 
 
 def _build_client(settings: Settings, transport: object | None) -> ControlPlaneClient:
@@ -340,15 +389,19 @@ def _build_snapshot(
 
 
 def _build_domain(
-    settings: Settings, mode: str, snapshot: SnapshotService
+    settings: Settings, snapshot: SnapshotService, maker: async_sessionmaker[AsyncSession]
 ) -> tuple[EntitlementService, PolicyService, CatalogService]:
+    mode = (settings.control_mode or "").strip().lower()
+    resolver = SqlTenantKeyResolver(maker)
     defaults = QuotaLimits(
         calls_daily=settings.chat_quota_daily_calls,
         calls_monthly=settings.chat_quota_monthly_calls,
-        bot_calls_daily=settings.bot_chat_rate_per_minute,
+        bot_calls_daily=settings.bot_quota_daily_calls,
         tool_calls_per_minute=settings.tool_rate_limit_per_minute,
     )
-    entitlements = EntitlementService(snapshots=snapshot, mode=mode, default_limits=defaults)
+    entitlements = EntitlementService(
+        snapshots=snapshot, mode=mode, default_limits=defaults, resolver=resolver
+    )
     from kongming.guardrail.policy_scope import install_policy_scope
     from kongming.guardrail.rules import REGISTRY as GUARDRAIL_RULES
 
@@ -356,6 +409,7 @@ def _build_domain(
         snapshots=snapshot,
         mode=mode,
         local_rule_names=frozenset(rule.name for rule in GUARDRAIL_RULES),
+        resolver=resolver,
     )
     install_policy_scope(policy if mode == "managed" else None)
     catalog = CatalogService(snapshots=snapshot, entitlements=entitlements, mode=mode)
@@ -368,6 +422,7 @@ def _build_reporters(
     redis: Redis,
     client: ControlPlaneClient | None,
     managed: bool,
+    instance_id: str,
 ) -> tuple[RegistrationService | None, UsageReporter | None]:
     if not managed or client is None:
         return None, None
@@ -376,7 +431,7 @@ def _build_reporters(
         store=SqlRegistrationStore(maker),
         health=SqlHealthProbe(maker, redis),
         service_id=SERVICE_ID,
-        instance_id=settings.control_instance_id or SERVICE_ID,
+        instance_id=instance_id,
         version=_version(),
         audit=_SqlAuditPort(maker),
     )

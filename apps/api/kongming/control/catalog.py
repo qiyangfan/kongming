@@ -28,8 +28,10 @@ class CatalogService:
     def managed(self) -> bool:
         return self._mode == "managed"
 
-    async def entries_for_tenant(self, tenant_key: str) -> dict[str, CatalogEntryRecord]:
-        """租户可见条目(bot_key → 条目);managed 缺失目录返回空(不伪造)。"""
+    async def entries_for_tenant(
+        self, tenant_key: str, *, include_unlisted: bool = False
+    ) -> dict[str, CatalogEntryRecord]:
+        """租户可见条目(bot_key → 条目);默认只含货架 LISTED,缺失返回空(不伪造)。"""
         if not self.managed:
             return {}
         view = await self._snapshots.view()
@@ -38,7 +40,7 @@ class CatalogService:
         items = {
             entry.bot_key: entry
             for entry in view.sections.catalog
-            if entry.listing == "LISTED"
+            if (include_unlisted or entry.listing == "LISTED")
             and (
                 entry.visibility == "ALL"
                 or "*" in entry.tenant_keys
@@ -52,9 +54,16 @@ class CatalogService:
             if entry.entitlement_key is None or entry.entitlement_key in granted
         }
 
+    async def allows_entry(self, tenant_key: str, bot_key: str) -> bool:
+        """直跑/详情闸:LISTED 与 UNLISTED 都可直达;standalone 不限。"""
+        if not self.managed:
+            return True
+        entries = await self.entries_for_tenant(tenant_key, include_unlisted=True)
+        return bot_key in entries
+
     async def require_entry(self, tenant_key: str, bot_key: str) -> CatalogEntryRecord | None:
-        """直跑/详情的目录闸;standalone 返回 None 表示不做目录限制。"""
+        """直跑/详情的目录条目;standalone 返回 None 表示不做目录限制。"""
         if not self.managed:
             return None
-        entries = await self.entries_for_tenant(tenant_key)
+        entries = await self.entries_for_tenant(tenant_key, include_unlisted=True)
         return entries.get(bot_key)

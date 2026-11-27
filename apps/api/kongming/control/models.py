@@ -49,6 +49,10 @@ class EntitlementMissing(ControlError):
     """managed 模式下租户无有效权益(缺失即 fail-closed)。"""
 
 
+class TenantResolutionError(ControlError):
+    """本地 tenant_id 无法解析为 tenant_key(作用域匹配失败即 fail-closed)。"""
+
+
 @dataclass(frozen=True)
 class TenantRecord:
     tenant_id: str
@@ -78,6 +82,8 @@ class CoarseRoleRecord:
 
 @dataclass(frozen=True)
 class EntitlementRecord:
+    """租户权益;执行匹配按 tenant_key,features 仅展示不推断功能开关。"""
+
     tenant_id: str
     tenant_key: str
     status: str = "ACTIVE"
@@ -96,6 +102,7 @@ class PolicyPackageRecord:
     status: str
     rule_names: tuple[str, ...]
     tenant_keys: tuple[str, ...] = ("*",)
+    # 仅随快照展示;执行作用域只按 tenant_keys,本地/快照 UUID 不保证一致
     tenant_ids: tuple[str, ...] = ()
 
 

@@ -1,10 +1,10 @@
-# Spec Delta
+# runtime-console Specification
 
 ## Purpose
 
 孔明独立管理台：`apps/admin` 前端承载 kongming 服务域配置 + 运行时管理；共享控制只读；本地命令可用；后端仍 `apps/api` `/admin/*`，锦官只读展示服务只读 API/投影。
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: 独立管理前端
 
@@ -86,23 +86,3 @@
 
 - WHEN ADMIN 提交控制面命令
 - THEN 显示 pending，完成后 acked/failed
-
-## REMOVED Requirements
-
-### Requirement: 管理面路由与页面守卫
-
-**Reason**: 管理面迁出用户 web，改为独立 `apps/admin` SPA + 独立 origin/session/CSP；旧 `/admin/*` 只做 308。
-
-**Migration**: 用户 web 删除 admin 路由；反向代理按 `${KM_ADMIN_PUBLIC_ORIGIN}` 将 `/admin/*` 308 到管理台同路径。
-
-### Requirement: 用户管理页
-
-**Reason**: 用户页改为只读身份视图；账户写入归 Keycloak/锦官。
-
-**Migration**: 管理台用户页仅展示用户名/昵称/状态/角色/部门/租户；写操作入口移除。
-
-### Requirement: 状态列行内启停范式
-
-**Reason**: 行内启停是用户账户写路径，随用户 CRUD 退役。
-
-**Migration**: 无替代入口；账户状态变更在 Keycloak 完成。

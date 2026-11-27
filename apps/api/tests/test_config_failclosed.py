@@ -68,6 +68,12 @@ def test_prod_local_service_token_requires_loopback() -> None:
         s.fail_closed_checks()
 
 
+def test_prod_reader_token_rejected() -> None:
+    s = _prod(control_reader_token="local-reader")
+    with pytest.raises(RuntimeError, match="KM_CONTROL_READER_TOKEN"):
+        s.fail_closed_checks()
+
+
 def test_managed_keycloak_identity_valid() -> None:
     s = _prod(
         control_mode="managed",

@@ -15,6 +15,8 @@ def test_admin_nginx_same_origin_api_and_csp() -> None:
     assert "frame-ancestors 'none'" in text
     assert "Access-Control-Allow-Origin" not in text  # 不开放 CORS
     assert "Sec-WebSocket-Protocol" in text
+    assert "client_max_body_size" in text  # 默认 1m 会拦 RAG 文档上传
+    assert "proxy_read_timeout 300s" in text  # 长任务不被默认 60s 截断
 
 
 def test_web_admin_redirect_rule() -> None:

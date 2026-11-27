@@ -86,6 +86,9 @@ async def get_admin_auth_service(
         settings=s,
         registry=_registry,
         refresh_ttl_sec=s.admin_session_ttl_sec,
+        access_ttl_sec=s.admin_access_ttl_sec,
+        surface="admin",
+        absolute_ttl_sec=s.admin_session_ttl_sec,
     )
 
 

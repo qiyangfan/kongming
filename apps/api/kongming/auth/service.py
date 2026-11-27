@@ -7,6 +7,7 @@
 import base64
 import hashlib
 import secrets
+import time
 from typing import cast
 
 import jwt as pyjwt
@@ -49,15 +50,21 @@ class AuthService:
         settings: Settings,
         registry: dict[str, OAuthProvider],
         refresh_ttl_sec: int | None = None,
+        access_ttl_sec: int | None = None,
+        surface: str = "user",
+        absolute_ttl_sec: int | None = None,
     ) -> None:
         self._uow = uow
         self._families = families
         self._states = states
         self._s = settings
         self._registry = registry
-        # 管理台会话独立于用户会话(30m refresh);None=沿用用户配置。
-        # 懒读 settings:部分用例只测身份/权限,不装配配置对象。
+        # 管理台会话独立于用户会话(access 5m/refresh 30m,且 30m 绝对上限);
+        # None=沿用用户配置。懒读 settings:部分用例只测身份/权限。
         self._refresh_ttl_override = refresh_ttl_sec
+        self._access_ttl_override = access_ttl_sec
+        self._surface = surface
+        self._absolute_ttl = absolute_ttl_sec
 
     # ---- 令牌签发(联邦回调与 refresh 共用) ----
 
@@ -67,19 +74,35 @@ class AuthService:
             return self._refresh_ttl_override
         return self._s.refresh_token_ttl_sec
 
+    @property
+    def _access_ttl(self) -> int:
+        if self._access_ttl_override is not None:
+            return self._access_ttl_override
+        return self._s.access_token_ttl_sec
+
+    def _refresh_extra(self, fid: str, jti: str, abs_exp: int | None) -> dict[str, object]:
+        extra: dict[str, object] = {"fid": fid, "jti": jti, "surf": self._surface}
+        if abs_exp is not None:
+            extra["abs_exp"] = int(abs_exp)
+        return extra
+
     async def _issue_pair(self, user: User) -> TokenPair:
         fid = uuid7().hex
         jti = uuid7().hex
-        access = tokens.issue(user.id, "access")
+        abs_exp = int(time.time()) + self._absolute_ttl if self._absolute_ttl is not None else None
+        access = tokens.issue(user.id, "access", ttl_sec=self._access_ttl)
         refresh = tokens.issue(
-            user.id, "refresh", extra={"fid": fid, "jti": jti}, ttl_sec=self._refresh_ttl
+            user.id,
+            "refresh",
+            extra=self._refresh_extra(fid, jti, abs_exp),
+            ttl_sec=self._refresh_ttl,
         )
         await self._families.issue(user.id, fid, jti, self._refresh_ttl)
         return TokenPair(access, refresh)
 
     # ---- refresh 轮换 / 登出 ----
 
-    def _decode_refresh(self, token: str) -> tuple[str, str, str]:
+    def _decode_refresh(self, token: str) -> tuple[str, str, str, int | None]:
         try:
             claims = tokens.verify(token, expected_type="refresh")
         except pyjwt.PyJWTError as e:
@@ -87,10 +110,17 @@ class AuthService:
         fid, jti = claims.get("fid"), claims.get("jti")
         if not isinstance(fid, str) or not isinstance(jti, str):
             raise TokenInvalid("refresh token 无效或已失效")
-        return str(claims["sub"]), fid, jti
+        if claims.get("surf") != self._surface:
+            raise TokenInvalid("refresh token 认证面不匹配")
+        abs_exp = claims.get("abs_exp")
+        if abs_exp is not None and not isinstance(abs_exp, int):
+            raise TokenInvalid("refresh token 无效或已失效")
+        return str(claims["sub"]), fid, jti, abs_exp
 
     async def refresh(self, refresh_token: str) -> TokenPair:
-        user_id, fid, jti = self._decode_refresh(refresh_token)
+        user_id, fid, jti, abs_exp = self._decode_refresh(refresh_token)
+        if abs_exp is not None and int(time.time()) >= abs_exp:
+            raise TokenInvalid("管理台会话已到绝对上限,请重新登录")
         if await self._families.is_revoked_family(fid):
             raise TokenInvalid("refresh token 无效或已失效")
         user = await self._uow.users.get_by_id(user_id)
@@ -105,9 +135,12 @@ class AuthService:
             raise TokenInvalid("refresh token 无效或已失效")
 
         new_jti = uuid7().hex
-        access = tokens.issue(user.id, "access")
+        access = tokens.issue(user.id, "access", ttl_sec=self._access_ttl)
         refresh = tokens.issue(
-            user.id, "refresh", extra={"fid": fid, "jti": new_jti}, ttl_sec=self._refresh_ttl
+            user.id,
+            "refresh",
+            extra=self._refresh_extra(fid, new_jti, abs_exp),
+            ttl_sec=self._refresh_ttl,
         )
         await self._families.issue(user.id, fid, new_jti, self._refresh_ttl)
         return TokenPair(access, refresh)
@@ -115,7 +148,7 @@ class AuthService:
     async def logout_sso(self, refresh_token: str) -> str | None:
         """撤销本地 refresh 家族并返回Keycloak end_session 地址;无可用端点时 None。"""
         try:
-            _, fid, _ = self._decode_refresh(refresh_token)
+            _, fid, _, _ = self._decode_refresh(refresh_token)
             await self._families.revoke_family(fid, self._refresh_ttl)
         except TokenInvalid:
             pass
@@ -135,7 +168,7 @@ class AuthService:
     async def logout(self, refresh_token: str) -> None:
         """幂等:无效令牌同样返回成功(不作存在性预言机)。"""
         try:
-            _, fid, _ = self._decode_refresh(refresh_token)
+            _, fid, _, _ = self._decode_refresh(refresh_token)
         except TokenInvalid:
             return
         await self._families.revoke_family(fid, self._refresh_ttl)

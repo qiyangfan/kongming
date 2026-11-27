@@ -6,7 +6,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 from kongming.control.models import CommandEnvelope, CommandOutcome, CommandRejected
 from kongming.control.ports import AuditPort, CommandReceiptStore
@@ -99,6 +99,7 @@ class CommandExecutor:
         params: dict[str, object],
         actor: str,
         source: str,
+        reason: str = "",
     ) -> CommandOutcome:
         prepared = self._prepare(action, action_version, params)
         if isinstance(prepared, CommandOutcome):
@@ -133,6 +134,7 @@ class CommandExecutor:
                 "source": source,
                 "status": outcome.status,
                 "error": outcome.error,
+                "reason": reason[:500],
             },
         )
         return outcome
@@ -169,6 +171,10 @@ class CommandExecutor:
         """处理一条队列命令(claim 之后);参数校验失败也返回终态供 ack。"""
         if not envelope.idempotency_key or not envelope.command_id:
             return CommandOutcome(status="REJECTED", error="命令缺 command_id/idempotency_key")
+        params = cast("object", envelope.params)
+        if not isinstance(params, dict):
+            # wire 上的 params 可能不是对象;必须拒绝并回执,不能让循环异常退出
+            return CommandOutcome(status="REJECTED", error="命令 params 必须为对象")
         return await self.execute(
             command_id=envelope.command_id,
             idempotency_key=envelope.idempotency_key,
@@ -177,4 +183,5 @@ class CommandExecutor:
             params=envelope.params,
             actor=envelope.actor or "control-plane",
             source=source,
+            reason=envelope.reason,
         )

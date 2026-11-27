@@ -51,6 +51,7 @@ TRUNCATED = (
     "control.command_receipt",
     "control.usage_outbox",
     "control.registration",
+    "control.identity_state",
     "rag.query_history",
     "rag.table_descriptions",
     "public.chat_message",

@@ -6,13 +6,24 @@
 
 ### 本地开发
 
-- api 8000、agent 8001、web 5173。`apps/api` 按工作目录读取 `.env`;agent 无独立
-  `.env`,配置在仓库根 `.env`,须从仓库根启动。
+- api 8000、agent 8001、web 5173、admin 5174。`apps/api` 按工作目录读取 `.env`;
+  agent 无独立 `.env`,配置在仓库根 `.env`,须从仓库根启动。
 - 本机 PostgreSQL/Redis 用统一环境栈 `~/workspace/env`(5432/6379),不要用
   `make up` 抢端口;测试数据源切到「Sakila 影院」。仓库根残留
   `.playwright-mcp/` 会让 lint-config 的 yamllint 报红,删掉即可。
 - `make check` 需要 `openspec`、pnpm 与 `/opt/podman/bin` 在 PATH;只跑 Web
-  子集时用 `mise exec -- pnpm ...`。
+  子集时用 `mise exec -- pnpm ...`。`make check` 不覆盖 `apps/admin`,另跑
+  `make admin-check`。
+
+### OpenSpec 与归档状态
+
+- Active changes:0。10 个 `2026-11-26-add-kongming-*` 运行时控制面 change 已归档;
+  `payment-gateway` 能力随支付退役删除 spec,`developer-portal-billing`/`web-admin`/
+  `rbac` 已按 REMOVED 增量移除退役需求。
+- 归档时保留的阻塞:`control-snapshot-consumer` 2.2 与
+  `service-registration-client` 2.1 的 X-01 跨仓契约对拍未跑;
+  `runtime-console` 2.2 响应式亮暗走查未做。三条在归档 tasks 中保持未勾选。
+- `openspec validate --all --strict`:63/63。
 
 ### 身份与访问
 
@@ -23,24 +34,41 @@
 - 三端 SSO 已验收(muniu/kongming/jinguan):issuer 统一为 `127.0.0.1:8080`、
   realm `longzhong`;多标签页 state 已并发安全。登录 demo 落到本地种子账号
   demo-keycloak(DEVELOPER+默认租户)。
+- 管理台独立会话:`apps/admin`(5174、`kongming-admin-web`、`/admin-auth/*`),
+  access 5m、refresh 30m 绝对上限;refresh 票据带 `surface`,管理台与用户面互不
+  接受对方 refresh。生产环境配置 `KM_CONTROL_READER_TOKEN` 即拒启,只允许
+  Keycloak 服务 token。旧 `apps/web` `/admin/*` 由反代或 Vite dev/preview 308
+  到管理台。
+- `sys_user.id` 依赖 Keycloak sub 为 UUID;登录限流为进程内、每 worker 独立。
 
 ### 运行时控制面与管理台(ADR-0005)
 
 - 服务默认 `KM_CONTROL_MODE=standalone`(本地种子/部署配置);`managed` 拉取锦官
   快照(last-known/版本单调/HMAC 验签)、注册心跳、claim/ack 命令、上报产品事件。
-  安全类快照缺失时受保护请求 503(不阻塞 `/auth`、`/internal`、`/service-read`)。
-- 本地命令 `POST /system/commands`(reindex/清缓存/取消任务)不依赖锦官;
-  跨服务命令只显示回执;服务只读投影 `/service-read/{section}` 供锦官
-  (本地 reader token 或 Keycloak 服务 token,字段脱敏、无写入口)。
-- 租户/成员/粗角色由快照写入本地 last-known 执行缓存;用户写端点返回 403;
-  管理台用户页只读。共享策略包驱动护栏规则集;商店货架/直跑按目录+权益过滤。
+  安全类快照缺失/验签失败/版本回退时受保护请求 503(不阻塞 `/auth`、`/internal`、
+  `/service-read`);控制面缺席时安全类按 last-known 继续,不做时间硬过期。
+- 身份缓存按快照版本单调应用(advisory lock + `control.identity_state`);快照先落库、
+  身份后补,失败由 304/同版本路径重试。多实例不会用旧版本覆盖新身份。
+- 租户作用域唯一锚点是 `tenant_key`:权益/策略执行先用本地 `tenant_id` 解析
+  `tenant_key`,再匹配快照;快照 `tenant_id` 只展示,不与本地 UUID 直接等值比较。
+  策略包按 `tenant_keys` 匹配;`features` 仅展示,不推断功能开关。
+- 本地命令 `POST /system/commands`(reindex/清缓存/取消任务)不依赖锦官;命令
+  `reason` 进审计;非对象 `params` 拒绝并回执。跨服务命令只显示回执;服务只读投影
+  `/service-read/{section}` 供锦官(本地 reader token 仅限本地演练或 Keycloak 服务
+  token,字段脱敏、无写入口)。
+- 租户/成员/粗角色由快照写入本地 last-known 执行缓存;用户写端点 403;管理台用户页
+  只读。商店货架只列 `LISTED` 且按租户/权益过滤;`UNLISTED` 只可直链/直跑。
+- 控制数据按天清理(已投递用量 90d、终态回执 180d、失联注册 7d;EXECUTING 回执
+  不删;dry-run 可审计);心跳审计只在注册成功、首次失败、恢复时写。
 - 本地 billing 域已删除(计划/账单/支付/门户),四张表改名 `legacy_*` 只读;
-  权益/配额改由快照执行,standalone 用部署配置。
-- 管理台:`apps/admin`(5174,`kongming-admin-web`,`/admin-auth/*`,
-  `km_admin_refresh` 30m),共享 `packages/ui`/`packages/api-client`;
-  用户 web 旧 `/admin/*` 由反代或 Vite dev/preview 308 到管理台同路径。
-- break-glass:`apps/api/scripts/break_glass.py`(独立凭证/限时/原因/二次确认/审计),
-  见 `docs/BREAK-GLASS.md`;无 admin 端点。
+  `developer:portal`/`system:billing:manage` 权限点已从种子与角色绑定删除;
+  权益/配额改由快照执行,standalone 用部署配置。`KM_BOT_QUOTA_DAILY_CALLS`
+  控制网关 Bot 日配额(0=沿用 `KM_CHAT_QUOTA_DAILY_CALLS`)。
+- break-glass:`apps/api/scripts/break_glass.py`(独立凭证/限时/原因/二次确认/审计;
+  口令交互读取,不走 `--token` argv),见 `docs/BREAK-GLASS.md`;无 admin 端点。
+- 管理台反代样例 `infra/admin/nginx.conf`:同源 `/api` 前缀剥离、CSP、
+  `client_max_body_size 12m`、长任务 300s 超时;旧入口规则
+  `infra/web/admin-redirect.conf`。真实反代尚未演练。
 
 ### 问答、流式与取消
 
@@ -134,29 +162,37 @@
 
 ## 下一步
 
-1. CI 全 job 因 GitHub Actions 账单锁定未启动;解锁后观察 contracts-check、镜像
-   扫描与 e2e;eval-nightly 仍只手动触发。
-2. 反代部署确认:`KM_AUTH_COOKIE_SECURE`、可信代理头、登录限流口径;反代须把
-   `/api` 前缀剥离到后端根路由,并透传 WebSocket Upgrade 与
-   `Sec-WebSocket-Protocol`(语音通道票据走子协议)。多实例按
-   `KM_API_SELF_BASE_URL` 逐实例配唯一可达地址,并确认实例间内部面互通。
-3. eval-nightly 首次运行前配置 `KM_AGENT_LLM_API_KEY` 与 `KM_EVAL_ACCESS_TOKEN`。
-4. 语音真机冒烟:停止意图、空闲自答拦截、停顿容忍、插话即停、叠音、音色、
-   WebRTC 设备面与受限网络禁 UDP;异常先看 `chrome://webrtc-internals` 的 ICE 与
-   DataChannel 状态。`add-voice-intent-guard` 4.3 与 `add-voice-call-guards` 7.2
-   保留为真机项。
-5. 运行时控制面 10 个 change 已按本仓能力实现;X-01 契约冻结、fujie
-   `kongming-admin-web` client 与真实 Keycloak 联调未完成前,跨仓契约对拍、
-   真实管理台登录与反代部署仍不可宣称通过。
-6. 管理台响应式(375/768/1280 × 亮暗)与真实反代 `/api` + CSP 未走查;
-   本地 dev/preview 已覆盖 308 与登录跳转。
+1. X-01 契约冻结后补跑 `control-snapshot-consumer` 2.2 与
+   `service-registration-client` 2.1 的跨仓对拍;冻结前不得对外宣称跨仓联通。
+2. fujie 创建 `kongming-admin-web` 与机器 client,完成真实 Keycloak 登录/角色授权/
+   会话验收;当前管理台以 fake provider 验证回调语义。
+3. 真实反代演练:`/api` 前缀剥离、CSP、`/admin/*` 308、WebSocket Upgrade 与
+   `Sec-WebSocket-Protocol` 透传;确认 `KM_AUTH_COOKIE_SECURE`、可信代理头、
+   登录限流口径。
+4. 管理台响应式 375/768/1280 × 亮暗走查(归档的 runtime-console 2.2),
+   以及登录/用户/Control 页的亮暗两态验收。
+5. 工作流/Bot 维度产品事件待 X-01 事件类型与维度冻结后接入;当前事件挂点覆盖
+   chat/tool/task/report。
+6. 语音真机冒烟:停止意图、空闲自答拦截、停顿容忍、插话即停、叠音、音色、
+   WebRTC 设备面与受限网络禁 UDP;异常先看 `chrome://webrtc-internals`。
+7. eval-nightly 首次运行前配置 `KM_AGENT_LLM_API_KEY` 与 `KM_EVAL_ACCESS_TOKEN`;
+   CI 仍受 GitHub Actions 账单锁定影响。
+8. 清理 `mobile-experience` 中仍引用旧用户管理页编辑/删除的场景,改为管理台只读
+   身份视图;这是归档后遗留的 spec 口径债。
 
 ## 开放决策项
 
+- 控制面 wire 契约(v1 快照/命令/用量/注册)为本仓自定;X-01 冻结后统一对拍。
+  `tenant_key` 作为跨平面作用域锚点、`features` 仅展示不作功能开关,需 X-01
+  书面确认;若锦官要求 `tenant_id` 或功能开关枚举,按契约再改。
+- 安全类快照按 ADR-0005 使用 last-known,不做时间硬过期;若业务要求硬过期,
+  需单独 ADR 并明确停锦官即停服务的可用性影响。
+- 管理台角色撤销窗口由 30m 绝对会话封顶;若要求即时吊销,需增加 Keycloak 会话
+  绑定/introspection,属外部依赖变更。
 - 管理台未配置锦官外链地址:计费/共享控制入口直接移除,是否需要外链待部署口径。
-- 控制面 wire 契约(v1 快照/命令/用量/注册)为本仓自定,等待 X-01 冻结后对拍;
-  冻结前不要对外宣称跨仓联通。
-
+- refresh cookie 作用域为 API 同源全路径:同源信任边界内接受;若同源再挂其他
+  应用,复评限定方案(仅 `/api` 或双 cookie)。`/auth/refresh` 响应仍回传明文
+  refresh_token,是否收窄为只回 access 待拍板。
 - 文档精排未启用:新索引 0.964→0.893(-7.1pp,两模型一致),旧索引 1.000→0.982;
   启用条件=语料扩容后出现非负收益。
 - zhparser 未切换:本语料 A/B 退化(新索引 0.964→0.946,旧索引 1.000→0.929);
@@ -164,11 +200,6 @@
 - 块索引上下文已生效:判别语料 0.291→1.000;15 文档 0.964(-3.6pp,009/012 各丢
   「租赁规则」一跳,012 为登记豁免边界题);收紧红线前先逐题评估 009/012。
 - K8s 跨文档多跳全跳 1/6;剩余缺口受查询改写与候选精度限制,不设通过线。
-- refresh cookie 作用域为 API 同源全路径:同源信任边界内接受;若同源再挂其他
-  应用,复评限定方案(仅 `/api` 或双 cookie)。`/auth/refresh` 响应仍回传明文
-  refresh_token,是否收窄为只回 access 待拍板。
-- `sys_user.id` 依赖 Keycloak sub 为 UUID;非 UUID sub 需迁移。登录限流为进程内、
-  每 worker 独立;严格全局阈值需共享后端。
 - 语音多实例:票据、准入与预算闸在 Redis;在途通话表与语音轮关联表在进程内,
   多实例部署前须外置或做实例粘滞;语音模型密钥只在 api,不下发浏览器。
 - 数据源内省父子语义目前只覆盖 PostgreSQL;其他数据库适配器需补同语义,不能靠
@@ -188,15 +219,16 @@
 
 ## 验收记录
 
-- 2026-11-27 控制面/管理台:api 测试(含控制面/管理台/break-glass 回归)全绿;
-  web typecheck/lint/format/madge/vitest(254)/build/size/e2e(3) 通过;
-  admin typecheck/lint/format/test(5)/build/e2e(2) 通过;契约导出与生成物零漂移。
-  Keycloak 真实登录、fujie client、反代 CSP 与响应式亮暗走查未验收。
-- 2026-11-27 全量门禁:`make check` exit 0。api-check 1936 passed/10 skipped,
-  覆盖率 78.15%;agent-check 719 passed,覆盖率 87.41%;liannu-check 23 passed;
-  web-check typecheck/lint/madge/lint:css/format/vitest(254)/build/size/e2e(2)
-  全通过;dead-code、dup-check、deps-audit、license、lint-config、lock、compose、
-  security-cov、secret-scan 通过;spec-check 64/64;契约导出与生成物零漂移。
+- 2026-11-27 归档收口:`openspec validate --all --strict` 63/63;10 个运行时控制面
+  change 已归档,`payment-gateway` 能力退役;归档阻塞见「OpenSpec 与归档状态」。
+- 2026-11-27 全量门禁:`make check` exit 0。api-check 1916 passed/10 skipped,
+  覆盖率 78.03%;agent-check 719 passed;liannu-check 23 passed;
+  web-check typecheck/lint/madge/lint:css/format/vitest(254)/build/size/e2e(3)
+  通过;dead-code、dup-check、deps-audit、license、lint-config、lock、compose、
+  security-cov、secret-scan 通过;契约导出与生成物零漂移。
+- 2026-11-27 管理台门禁(前端与归档前一致):admin typecheck/lint/format/
+  test(6)/build/e2e(2) 通过;真实 Keycloak、fujie client、反代 CSP 与响应式
+  亮暗走查未验收。
 - 2026-11-26 SQL 问答全量评测轮(隔离栈 18000/18001 加载工作区代码,真实
   Sakila/Olist,57 题):宽松 56/57(98%)、严格 36/57(63%)、表命中 53/57(93%)、
   动态数据源 4/4,指纹 4aabbc17。唯一失败 sakila_semantic_001 生成变体

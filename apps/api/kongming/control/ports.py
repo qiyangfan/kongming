@@ -40,9 +40,15 @@ class SnapshotStore(Protocol):
 
 
 class SnapshotApplier(Protocol):
-    """把安全类快照落到本地执行缓存(租户/成员/粗角色)。"""
+    """把安全类快照落到本地执行缓存(租户/成员/粗角色),按版本单调。"""
 
-    async def apply(self, sections: SnapshotSections) -> None: ...
+    async def apply(self, sections: SnapshotSections, *, service_id: str, version: int) -> None: ...
+
+
+class TenantKeyResolver(Protocol):
+    """本地 tenant_id → tenant_key;执行层作用域匹配的唯一锚点。"""
+
+    async def key_for_id(self, tenant_id: str) -> str | None: ...
 
 
 class CommandSource(Protocol):

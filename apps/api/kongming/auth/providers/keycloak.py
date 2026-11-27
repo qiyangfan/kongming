@@ -125,14 +125,22 @@ class KeycloakProvider(OAuthProviderBase):
         meta = await self._ensure_metadata(s)
         id_token = await self._exchange(s, meta, code, code_verifier)
         claims = await self._verify(s, meta, id_token, nonce)
-        self._require_role(claims)
+        self._require_role(s, claims)
         return _profile_from_claims(claims)
 
-    def _require_role(self, claims: dict[str, Any]) -> None:
+    def required_role(self, s: Settings) -> str | None:
+        """所需粗角色;子类可从部署配置注入(管理台按配置校验)。"""
+        return self._required_role
+
+    def role_client_id(self, s: Settings) -> str | None:
+        return self._role_client_id
+
+    def _require_role(self, s: Settings, claims: dict[str, Any]) -> None:
         """管理台 client role 校验;缺角色 403(不是认证失败,故独立错误)。"""
-        if not self._required_role:
+        required_role = self.required_role(s)
+        if not required_role:
             return
-        client_id = self._role_client_id or ""
+        client_id = self.role_client_id(s) or ""
         realm = claims.get("realm_access")
         roles: set[str] = set()
         if isinstance(realm, dict):
@@ -146,7 +154,7 @@ class KeycloakProvider(OAuthProviderBase):
                 raw = cast("dict[str, Any]", client).get("roles")
                 if isinstance(raw, list):
                     roles.update(str(r) for r in cast("list[object]", raw))
-        if self._required_role not in roles:
+        if required_role not in roles:
             raise RequiredRoleMissing("缺少管理台角色")
 
     def _http(self) -> httpx.AsyncClient:

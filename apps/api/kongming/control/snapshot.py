@@ -79,6 +79,8 @@ class SnapshotService:
         if result is None:
             return "unavailable"
         if result.not_modified:
+            if current is not None and not await self._apply_identity(current):
+                return "unavailable"
             return "not_modified"
         return await self._apply(result.payload, current)
 
@@ -117,10 +119,16 @@ class SnapshotService:
             log.warning("控制快照被拒绝: %s", reason)
             return "rejected"
         if current is not None and snapshot.version == current.version:
-            return "not_modified"
+            return await self._reconcile_identity(snapshot, success="not_modified")
+        persisted = await self._persist(snapshot)
+        if persisted != "updated":
+            return persisted
+        return await self._reconcile_identity(snapshot, success="updated")
+
+    async def _reconcile_identity(self, snapshot: ControlSnapshot, *, success: str) -> str:
         if not await self._apply_identity(snapshot):
             return "unavailable"
-        return await self._persist(snapshot)
+        return success
 
     async def _persist(self, snapshot: ControlSnapshot) -> str:
         try:
@@ -139,10 +147,12 @@ class SnapshotService:
         if self._applier is None:
             return True
         try:
-            await self._applier.apply(snapshot.sections)
+            await self._applier.apply(
+                snapshot.sections, service_id=snapshot.service_id, version=snapshot.version
+            )
         except Exception:
-            # 本地身份缓存写入失败时不得推进快照版本,否则该版本不会再被应用
-            log.exception("控制快照身份缓存应用失败,保留 last-known")
+            # 快照已落库时身份必须按版本补齐;304 与同版本路径都会重试应用
+            log.exception("控制快照身份缓存应用失败,保留 last-known 并等待重试")
             return False
         return True
 

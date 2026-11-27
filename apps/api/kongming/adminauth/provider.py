@@ -31,6 +31,13 @@ class AdminKeycloakProvider(KeycloakProvider):
     def enabled(self, s: Settings) -> bool:
         return s.keycloak_enabled
 
+    def required_role(self, s: Settings) -> str | None:
+        """管理台粗角色按部署配置校验;构造参数优先(测试/特殊部署)。"""
+        return self._required_role or s.admin_keycloak_required_role or None
+
+    def role_client_id(self, s: Settings) -> str | None:
+        return self._role_client_id or s.admin_keycloak_client_id or None
+
     def configured(self, s: Settings) -> bool:
         return bool(
             self.enabled(s) and self.issuer(s) and self.client_id(s) and self.client_secret(s)

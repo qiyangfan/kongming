@@ -15,15 +15,55 @@ from kongming.control.models import SnapshotSections
 log = logging.getLogger(__name__)
 
 
+class SqlTenantKeyResolver:
+    """本地 tenant_id → tenant_key;执行层统一经键匹配快照权益/策略。"""
+
+    def __init__(self, maker: async_sessionmaker[AsyncSession]) -> None:
+        self._maker = maker
+
+    async def key_for_id(self, tenant_id: str) -> str | None:
+        async with self._maker() as s:
+            row = (
+                await s.execute(
+                    text("SELECT tenant_key FROM public.sys_tenant WHERE id = CAST(:id AS uuid)"),
+                    {"id": tenant_id},
+                )
+            ).scalar_one_or_none()
+        return None if row is None else str(row)
+
+
 class SqlIdentityApplier:
     def __init__(self, maker: async_sessionmaker[AsyncSession]) -> None:
         self._maker = maker
 
-    async def apply(self, sections: SnapshotSections) -> None:
+    async def apply(self, sections: SnapshotSections, *, service_id: str, version: int) -> None:
+        """按快照版本单调应用身份缓存;多实例并发只前进不后退。"""
         async with self._maker() as s:
+            await s.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+                {"key": f"control.identity:{service_id}"},
+            )
+            current = (
+                await s.execute(
+                    text("SELECT version FROM control.identity_state WHERE service_id = :sid"),
+                    {"sid": service_id},
+                )
+            ).scalar_one_or_none()
+            if current is not None and int(current) >= version:
+                await s.rollback()
+                return
             tenant_ids = await _upsert_tenants(s, sections)
             await _upsert_members(s, sections, tenant_ids)
             await _bind_coarse_roles(s, sections)
+            await s.execute(
+                text(
+                    "INSERT INTO control.identity_state (service_id, version, updated_at)"
+                    " VALUES (:sid, :ver, now())"
+                    " ON CONFLICT (service_id) DO UPDATE SET"
+                    "  version = EXCLUDED.version, updated_at = now()"
+                ),
+                {"sid": service_id, "ver": version},
+            )
             await s.commit()
 
 

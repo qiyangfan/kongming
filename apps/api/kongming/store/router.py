@@ -170,12 +170,16 @@ async def _require_catalog(
     """managed 目录闸:不在租户可见目录即 404 同形,并落拒绝审计。"""
     from kongming.auth.repository import SqlOperLogRepo
     from kongming.control.dependencies import get_control_runtime
+    from kongming.control.models import EntitlementMissing
 
     catalog = get_control_runtime().catalog
     if not catalog.managed:
         return
-    entries = await catalog.entries_for_tenant(await _tenant_key(session, tenant_id))
-    if bot_key in entries:
+    try:
+        allowed = await catalog.allows_entry(await _tenant_key(session, tenant_id), bot_key)
+    except EntitlementMissing as e:
+        raise HTTPException(status_code=503, detail="CONTROL_SECURITY_UNAVAILABLE") from e
+    if allowed:
         return
     await SqlOperLogRepo(session).add(
         user_id, "store.catalog_denied", bot_key, {"tenant_id": tenant_id}
@@ -188,11 +192,15 @@ async def _filter_catalog(
     session: AsyncSession, rows: list[dict[str, Any]], tenant_id: str
 ) -> list[dict[str, Any]]:
     from kongming.control.dependencies import get_control_runtime
+    from kongming.control.models import EntitlementMissing
 
     catalog = get_control_runtime().catalog
     if not catalog.managed:
         return rows
-    entries = await catalog.entries_for_tenant(await _tenant_key(session, tenant_id))
+    try:
+        entries = await catalog.entries_for_tenant(await _tenant_key(session, tenant_id))
+    except EntitlementMissing as e:
+        raise HTTPException(status_code=503, detail="CONTROL_SECURITY_UNAVAILABLE") from e
     return [r for r in rows if str(r.get("bot_key")) in entries]
 
 

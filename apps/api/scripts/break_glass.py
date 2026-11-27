@@ -95,6 +95,18 @@ def _check_token(token: str | None) -> None:
         raise BreakGlassRefused("break-glass 口令不匹配")
 
 
+def _read_token(cli_token: str | None) -> str:
+    """口令优先交互读取,避免进入 shell 历史与进程参数;--token 仅兼容测试。"""
+    if cli_token is not None:
+        return cli_token
+    import getpass
+
+    try:
+        return getpass.getpass("break-glass 通道口令: ")
+    except (EOFError, KeyboardInterrupt) as e:
+        raise BreakGlassRefused("未提供 break-glass 口令") from e
+
+
 def _validate_target(value: str) -> str:
     try:
         return str(uuid.UUID(value))
@@ -153,7 +165,11 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--scenario", required=True, choices=sorted(SCENARIOS))
     p.add_argument("--id", required=True, dest="target")
     p.add_argument("--reason", required=True)
-    p.add_argument("--token", default=None)
+    p.add_argument(
+        "--token",
+        default=None,
+        help="通道口令(默认交互读取;显式传入会进入 argv,仅建议自动化/测试使用)",
+    )
     p.add_argument("--confirm", default="")
     p.add_argument("--apply", action="store_true")
     return p
@@ -170,7 +186,7 @@ async def _main_async(argv: list[str]) -> int:
         print(f'拒绝: --apply 需要 --confirm "{expected}"', file=sys.stderr)
         return 2
     try:
-        _check_token(args.token)
+        _check_token(_read_token(args.token))
         _check_window()
         target = _validate_target(str(args.target))
         await _run(SCENARIOS[str(args.scenario)], target, reason, bool(args.apply))

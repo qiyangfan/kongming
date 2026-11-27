@@ -163,6 +163,31 @@ class SqlCommandReceiptStore:
             )
             await s.commit()
 
+    async def prune(self, *, before: datetime, dry_run: bool = False) -> int:
+        """清理超期终态回执;EXECUTING 不删(未完成命令留待人工/队列收敛)。"""
+        async with self._maker() as s:
+            if dry_run:
+                return int(
+                    (
+                        await s.execute(
+                            text(
+                                "SELECT count(*) FROM control.command_receipt"
+                                " WHERE updated_at < :before AND status <> 'EXECUTING'"
+                            ),
+                            {"before": before},
+                        )
+                    ).scalar_one()
+                )
+            result = await s.execute(
+                text(
+                    "DELETE FROM control.command_receipt"
+                    " WHERE updated_at < :before AND status <> 'EXECUTING'"
+                ),
+                {"before": before},
+            )
+            await s.commit()
+        return int(cast("Any", result).rowcount or 0)
+
     async def recent(self, *, limit: int) -> list[dict[str, object]]:
         async with self._maker() as s:
             rows = (
@@ -285,13 +310,38 @@ class SqlUsageOutbox:
                 ).scalar_one()
             )
 
+    async def prune_delivered(self, *, before: datetime, dry_run: bool = False) -> int:
+        """清理已投递且超过保留期的用量事件(未投递事件不在此删)。"""
+        async with self._maker() as s:
+            if dry_run:
+                return int(
+                    (
+                        await s.execute(
+                            text(
+                                "SELECT count(*) FROM control.usage_outbox"
+                                " WHERE delivered_at IS NOT NULL AND delivered_at < :before"
+                            ),
+                            {"before": before},
+                        )
+                    ).scalar_one()
+                )
+            result = await s.execute(
+                text(
+                    "DELETE FROM control.usage_outbox"
+                    " WHERE delivered_at IS NOT NULL AND delivered_at < :before"
+                ),
+                {"before": before},
+            )
+            await s.commit()
+        return int(cast("Any", result).rowcount or 0)
+
     async def trim_to(self, *, limit: int) -> int:
         async with self._maker() as s:
             result = await s.execute(
                 text(
                     "DELETE FROM control.usage_outbox WHERE event_id IN ("
                     " SELECT event_id FROM control.usage_outbox WHERE delivered_at IS NULL"
-                    " ORDER BY occurred_at ASC OFFSET :keep)"
+                    " ORDER BY occurred_at DESC OFFSET :keep)"
                 ),
                 {"keep": max(limit, 0)},
             )
@@ -338,6 +388,33 @@ class SqlRegistrationStore:
                 },
             )
             await s.commit()
+
+    async def prune_stale(self, *, before: datetime, dry_run: bool = False) -> int:
+        """清理失联超过保留期的实例;活跃/审计记录不删。"""
+        async with self._maker() as s:
+            if dry_run:
+                return int(
+                    (
+                        await s.execute(
+                            text(
+                                "SELECT count(*) FROM control.registration"
+                                " WHERE COALESCE(last_heartbeat_at, last_registered_at,"
+                                " last_attempt_at) < :before"
+                            ),
+                            {"before": before},
+                        )
+                    ).scalar_one()
+                )
+            result = await s.execute(
+                text(
+                    "DELETE FROM control.registration"
+                    " WHERE COALESCE(last_heartbeat_at, last_registered_at,"
+                    " last_attempt_at) < :before"
+                ),
+                {"before": before},
+            )
+            await s.commit()
+        return int(cast("Any", result).rowcount or 0)
 
     async def record_heartbeat(
         self, *, service_id: str, instance_id: str, error: str | None

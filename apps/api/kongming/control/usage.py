@@ -138,6 +138,12 @@ class UsageReporter:
         if not self._enabled:
             return 0
         await self.drain_queue()
+        pending = await self._outbox.count_pending()
+        if pending > self._buffer_max:
+            dropped = await self._outbox.trim_to(limit=self._buffer_max)
+            if dropped:
+                self._dropped += dropped
+                log.warning("用量缓冲达上限,丢弃最旧事件 %d 条", dropped)
         events = await self._outbox.pending(limit=self._batch)
         if not events:
             return 0

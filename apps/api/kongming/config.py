@@ -224,6 +224,8 @@ class Settings(BaseSettings):
     chat_rate_per_minute: int = Field(default=20, ge=0)
     chat_quota_daily_calls: int = Field(default=500, ge=0)
     chat_quota_monthly_calls: int = Field(default=10000, ge=0)
+    # 网关(Bot)租户日配额;0=沿用 chat_quota_daily_calls(不把每分钟速率当日配额)
+    bot_quota_daily_calls: int = Field(default=0, ge=0)
     bot_chat_rate_per_minute: int = Field(default=30, ge=0)
     # 语音转写:faster-whisper 模型规格(small/base/medium…;int8/cpu)。
     # 模型文件在位即启用,缺失时 /chat/stt 返 503 明示配方(无独立开关,
@@ -320,10 +322,17 @@ class Settings(BaseSettings):
     control_command_poll_sec: int = Field(default=15, ge=5)
     control_usage_flush_sec: int = Field(default=10, ge=1)
     control_usage_buffer_max: int = Field(default=500, ge=1)
+    # 本地控制数据保留(天):delivered 用量、终态命令回执、失联注册实例
+    control_usage_retention_days: int = Field(default=90, ge=1)
+    control_receipt_retention_days: int = Field(default=180, ge=1)
+    control_registration_retention_days: int = Field(default=7, ge=1)
+    control_cleanup_interval_sec: int = Field(default=86400, ge=60)
+    control_cleanup_dry_run: bool = False
     control_http_timeout_sec: float = Field(default=5.0, gt=0)
     control_backoff_max_sec: int = Field(default=300, ge=1)
-    # 快照超过此龄视为 stale;安全类(租户/成员/粗角色/权益/共享策略)不看 stale,
-    # 缺失或过期一律拒绝新受保护操作(fail-closed)
+    # 快照超过此龄视为 stale;安全类(租户/成员/粗角色/权益/共享策略)不按 stale
+    # 降级:缺失或非法(验签/版本)一律拒绝新受保护操作(fail-closed)。
+    # 控制面缺席时 last-known 继续执行(ADR-0005),不做时间硬过期。
     control_stale_after_sec: int = Field(default=300, ge=1)
     # 服务只读 API(供锦官只读视图);关闭即整组端点 404。
     # reader token 是 localhost 演练用 pre-shared;生产用 Keycloak 服务 token
@@ -340,6 +349,7 @@ class Settings(BaseSettings):
     admin_keycloak_redirect_uri: str = "http://127.0.0.1:5174/auth/keycloak/callback"
     admin_keycloak_post_logout_redirect_uri: str = "http://127.0.0.1:5174/login"
     admin_keycloak_required_role: str = "kongming-admin"
+    admin_access_ttl_sec: int = Field(default=300, ge=60)
     admin_session_ttl_sec: int = Field(default=1800, ge=60)
     admin_cookie_name: str = "km_admin_refresh"
 
@@ -517,6 +527,12 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "prod fail-closed: KM_CONTROL_SERVICE_TOKEN 仅允许回环控制面地址;"
                 "生产请用 Keycloak client credentials"
+            )
+        # 读者面静态口令同理仅限本地演练;生产必须走 Keycloak 服务 token。
+        if (self.control_reader_token or "").strip():
+            raise RuntimeError(
+                "prod fail-closed: KM_CONTROL_READER_TOKEN 仅限本地演练;"
+                "生产请配置 Keycloak 服务身份"
             )
 
 

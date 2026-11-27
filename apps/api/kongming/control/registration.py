@@ -38,6 +38,8 @@ class RegistrationService:
         self._instance_id = instance_id
         self._version = version
         self._capabilities = capabilities
+        # 心跳审计只在状态变化时写(成功注册/首次失败/恢复),避免每 30s 一行
+        self._heartbeat_ok: bool | None = None
 
     async def register_once(self) -> bool:
         try:
@@ -70,6 +72,7 @@ class RegistrationService:
             error=None,
             registered=True,
         )
+        self._heartbeat_ok = True
         await self._audit_log("control.registration", registered=True, error="")
         return True
 
@@ -87,11 +90,18 @@ class RegistrationService:
             await self._store.record_heartbeat(
                 service_id=self._service_id, instance_id=self._instance_id, error=str(e)[:300]
             )
+            if self._heartbeat_ok is not False:
+                await self._audit_log(
+                    "control.heartbeat_failed", registered=False, error=str(e)[:300]
+                )
+            self._heartbeat_ok = False
             return False
         await self._store.record_heartbeat(
             service_id=self._service_id, instance_id=self._instance_id, error=None
         )
-        await self._audit_log("control.heartbeat", registered=True, error="")
+        if self._heartbeat_ok is False:
+            await self._audit_log("control.heartbeat_recovered", registered=True, error="")
+        self._heartbeat_ok = True
         return True
 
     async def _audit_log(self, action: str, *, registered: bool, error: str) -> None:

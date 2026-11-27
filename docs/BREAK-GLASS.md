@@ -10,7 +10,7 @@
 | 变量 | 含义 |
 | --- | --- |
 | `KM_BREAK_GLASS_DATABASE_URL` | 独立数据库凭证（与应用运行凭证分离） |
-| `KM_BREAK_GLASS_TOKEN` | 通道口令；必须与 `--token` 一致 |
+| `KM_BREAK_GLASS_TOKEN` | 通道口令；执行时交互输入同一口令 |
 | `KM_BREAK_GLASS_ACTOR` | 操作者标识（进审计） |
 | `KM_BREAK_GLASS_EXPIRES_AT` | 时间窗截止（ISO8601，带时区） |
 
@@ -27,15 +27,15 @@
 
 ## 操作步骤
 
-1. 先 dry-run，确认候选行数：
+1. 先 dry-run，确认候选行数（提示符处输入通道口令；不要把口令放进命令行参数，
+   否则会留在 shell 历史与进程列表中）：
 
    ```bash
    cd apps/api
    uv run python scripts/break_glass.py \
      --scenario mark-task-interrupted \
      --id <task-uuid> \
-     --reason "看门狗失效后人工收口" \
-     --token "$KM_BREAK_GLASS_TOKEN"
+     --reason "看门狗失效后人工收口"
    ```
 
 2. 二次确认后执行：
@@ -45,7 +45,6 @@
      --scenario mark-task-interrupted \
      --id <task-uuid> \
      --reason "看门狗失效后人工收口" \
-     --token "$KM_BREAK_GLASS_TOKEN" \
      --apply \
      --confirm "APPLY mark-task-interrupted <task-uuid>"
    ```

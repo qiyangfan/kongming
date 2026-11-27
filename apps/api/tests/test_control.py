@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """控制面消费者回归:快照验签/版本/安全闸、命令、用量、注册、只读投影。
 
 外部控制面一律用 httpx.MockTransport;不发起真实网络。
@@ -27,12 +28,15 @@ from kongming.control.events import install_event_sink, report_product_event
 from kongming.control.identity import StaticTokenProvider
 from kongming.control.models import (
     CatalogEntryRecord,
+    CommandEnvelope,
     CommandOutcome,
     ControlSnapshot,
+    EntitlementMissing,
     EntitlementRecord,
     FetchResult,
     HealthStatus,
     MembershipRecord,
+    PolicyPackageRecord,
     ProductEvent,
     SnapshotRejected,
     SnapshotSections,
@@ -50,7 +54,11 @@ SECRET = "test-signing-secret"  # 测试预共享验签密钥
 
 
 def _sections(
-    *, tenant_key: str = "default", bot_key: str | None = None, with_entitlement: bool = True
+    *,
+    tenant_key: str = "default",
+    bot_key: str | None = None,
+    listing: str = "LISTED",
+    with_entitlement: bool = True,
 ) -> SnapshotSections:
     tenant_id = str(uuid7())
     entitlements = (
@@ -71,7 +79,7 @@ def _sections(
         (
             CatalogEntryRecord(
                 bot_key=bot_key,
-                listing="LISTED",
+                listing=listing,
                 visibility="TENANTS",
                 tenant_keys=(tenant_key,),
                 entitlement_key="store.basic",
@@ -144,8 +152,8 @@ class _Applier:
     def __init__(self) -> None:
         self.applied: list[int] = []
 
-    async def apply(self, sections: SnapshotSections) -> None:
-        self.applied.append(len(sections.tenants))
+    async def apply(self, sections: SnapshotSections, *, service_id: str, version: int) -> None:
+        self.applied.append(version)
 
 
 def _snapshot_service(source: _FakeSource, store: _MemStore, applier: _Applier) -> SnapshotService:
@@ -192,7 +200,7 @@ async def test_snapshot_version_monotonic_and_last_known() -> None:
     assert await svc.refresh() == "unavailable"  # 控制面缺席保留 last-known
     view = await svc.view()
     assert view.present and view.version == 2
-    assert applier.applied == [1]
+    assert applier.applied == [2, 2]  # 同版本重拉会幂等重试身份补齐
 
 
 async def test_security_missing_fail_closed() -> None:
@@ -241,7 +249,7 @@ async def test_identity_cache_applies_and_reconciles(session: AsyncSession) -> N
         entitlements=(),
         policy_packages=(),
     )
-    await SqlIdentityApplier(get_sessionmaker()).apply(sections)
+    await SqlIdentityApplier(get_sessionmaker()).apply(sections, service_id="kongming", version=1)
     row = (
         await session.execute(
             text(
@@ -256,7 +264,9 @@ async def test_identity_cache_applies_and_reconciles(session: AsyncSession) -> N
     assert row[0] == "control-user" and row[1] == "t1"
     # 快照移除成员 → 该租户下成员关系被回收
     await SqlIdentityApplier(get_sessionmaker()).apply(
-        SnapshotSections(tenants=sections.tenants, members=(), coarse_roles=(), entitlements=())
+        SnapshotSections(tenants=sections.tenants, members=(), coarse_roles=(), entitlements=()),
+        service_id="kongming",
+        version=2,
     )
     left = (
         await session.execute(
@@ -265,6 +275,34 @@ async def test_identity_cache_applies_and_reconciles(session: AsyncSession) -> N
         )
     ).scalar_one()
     assert int(left) == 0
+
+
+async def test_identity_apply_version_is_monotonic(session: AsyncSession) -> None:
+    from kongming.control.identity_cache import SqlIdentityApplier
+
+    applier = SqlIdentityApplier(get_sessionmaker())
+    newer = SnapshotSections(
+        tenants=(TenantRecord(tenant_id=str(uuid7()), tenant_key="v2", tenant_name="二"),),
+        entitlements=(),
+    )
+    older = SnapshotSections(
+        tenants=(TenantRecord(tenant_id=str(uuid7()), tenant_key="v1", tenant_name="一"),),
+        entitlements=(),
+    )
+    await applier.apply(newer, service_id="kongming", version=2)
+    await applier.apply(older, service_id="kongming", version=1)
+    keys = (
+        (await session.execute(text("SELECT tenant_key FROM public.sys_tenant ORDER BY 1")))
+        .scalars()
+        .all()
+    )
+    assert keys == ["v2"]
+    version = (
+        await session.execute(
+            text("SELECT version FROM control.identity_state WHERE service_id='kongming'")
+        )
+    ).scalar_one()
+    assert int(version) == 2
 
 
 # ── 命令执行器 ──
@@ -318,6 +356,32 @@ async def test_command_rejects_unknown_action_and_params() -> None:
     assert bad_params.status == "REJECTED" and not calls
 
 
+async def test_command_rejects_non_object_params() -> None:
+    calls: list[dict[str, object]] = []
+
+    async def ok(params: dict[str, object], *, actor: str) -> dict[str, object]:
+        calls.append(params)
+        return {"ok": True}
+
+    executor = CommandExecutor(
+        receipts=await _receipts(),
+        handlers={"cache.clear": ok},
+        audit=cast(Any, _NullAudit()),
+    )
+    outcome = await executor.process(
+        CommandEnvelope(
+            command_id="c",
+            idempotency_key="bad-params",
+            action="cache.clear",
+            action_version=1,
+            params=cast(Any, []),
+            actor="a",
+        )
+    )
+    assert outcome.status == "REJECTED"
+    assert not calls
+
+
 async def test_command_idempotency() -> None:
     calls: list[int] = []
 
@@ -350,6 +414,41 @@ async def test_command_idempotency() -> None:
     )
     assert first.status == "SUCCEEDED" and len(calls) == 1
     assert second.status == "SUCCEEDED"
+
+
+async def test_command_audit_includes_reason() -> None:
+    entries: list[dict[str, object]] = []
+
+    class _Audit:
+        async def log(
+            self,
+            *,
+            actor: str | None,
+            action: str,
+            target: str,
+            detail: dict[str, object],
+        ) -> None:
+            entries.append(detail)
+
+    async def ok(params: dict[str, object], *, actor: str) -> dict[str, object]:
+        return {"ok": True}
+
+    executor = CommandExecutor(
+        receipts=await _receipts(),
+        handlers={"cache.clear": ok},
+        audit=cast(Any, _Audit()),
+    )
+    await executor.execute(
+        command_id="c-reason",
+        idempotency_key="k-reason",
+        action="cache.clear",
+        action_version=1,
+        params={"tenant_key": "t", "datasource_key": "d"},
+        actor="a",
+        source="local",
+        reason="排障清理",
+    )
+    assert entries[0]["reason"] == "排障清理"
 
 
 class _NullAudit:
@@ -442,6 +541,61 @@ async def test_usage_flush_and_failure_buffer() -> None:
     sink.fail = False
     assert await reporter.flush_once() == 1
     assert outbox.delivered_ids == ["e1"]
+
+
+async def test_usage_outbox_trim_keeps_newest(session: AsyncSession) -> None:
+    from kongming.control.store import SqlUsageOutbox
+
+    outbox = SqlUsageOutbox(get_sessionmaker())
+    base = datetime.now(UTC) - timedelta(minutes=10)
+    ids = [uuid7().hex for _ in range(4)]
+    for index, event_id in enumerate(ids):
+        await outbox.add(
+            ProductEvent(
+                event_id=event_id,
+                event_type="chat.turn",
+                occurred_at=base + timedelta(seconds=index),
+                tenant_id="t",
+            )
+        )
+    assert await outbox.trim_to(limit=2) == 2
+    pending = await outbox.pending(limit=10)
+    assert [e.event_id for e in pending] == ids[2:]
+
+
+async def test_usage_outbox_cap_enforced_on_flush() -> None:
+    class _TightOutbox(_MemOutbox):
+        def __init__(self) -> None:
+            super().__init__()
+            self.trims: list[int] = []
+
+        async def trim_to(self, *, limit: int) -> int:
+            self.trims.append(limit)
+            keep = self.items[-limit:] if limit > 0 else []
+            dropped = len(self.items) - len(keep)
+            self.items = keep
+            return dropped
+
+    outbox = _TightOutbox()
+    reporter = UsageReporter(
+        outbox=cast(Any, outbox),
+        sink=_Sink(fail=True),
+        clock=SystemClock(),
+        enabled=True,
+        buffer_max=3,
+    )
+    for index in range(5):
+        outbox.items.append(
+            ProductEvent(
+                event_id=f"cap-{index}",
+                event_type="chat.turn",
+                occurred_at=datetime.now(UTC) - timedelta(seconds=10 - index),
+                tenant_id="t",
+            )
+        )
+    assert await reporter.flush_once() == 0
+    assert outbox.trims == [3]
+    assert await outbox.count_pending() <= 3
 
 
 def test_event_sink_installed_reports() -> None:
@@ -554,6 +708,55 @@ class _Health:
         return HealthStatus(ready=self.ready, database=self.ready, redis=self.ready)
 
 
+class _FlakyRegSink(_RegSink):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fail = False
+
+    async def heartbeat(self, **kwargs: object) -> None:
+        if self.fail:
+            raise ConnectionError("down")
+        await super().heartbeat(**kwargs)
+
+
+async def test_registration_audits_heartbeat_transitions_only() -> None:
+    sink, store = _FlakyRegSink(), _RegStore()
+    actions: list[str] = []
+
+    class _Audit:
+        async def log(
+            self,
+            *,
+            actor: str | None,
+            action: str,
+            target: str,
+            detail: dict[str, object],
+        ) -> None:
+            actions.append(action)
+
+    svc = RegistrationService(
+        sink=sink,
+        store=store,
+        health=_Health(ready=True),
+        service_id="kongming",
+        instance_id="i1",
+        version="0.1.0",
+        audit=cast(Any, _Audit()),
+    )
+    assert await svc.register_once() is True
+    assert await svc.heartbeat_once() is True  # 注册成功后的首次心跳不重复审计
+    sink.fail = True
+    assert await svc.heartbeat_once() is False
+    assert await svc.heartbeat_once() is False  # 连续失败不重复审计
+    sink.fail = False
+    assert await svc.heartbeat_once() is True
+    assert actions == [
+        "control.registration",
+        "control.heartbeat_failed",
+        "control.heartbeat_recovered",
+    ]
+
+
 async def test_registration_reports_real_health_and_capabilities() -> None:
     sink, store = _RegSink(), _RegStore()
     svc = RegistrationService(
@@ -581,17 +784,98 @@ async def test_entitlement_fail_closed_and_catalog_filter() -> None:
         _FakeSource([_payload(1, _sections(bot_key="b1"))]), store, _Applier()
     )
     await snapshots.refresh()
-    tenant_id = store.snapshot.sections.entitlements[0].tenant_id  # type: ignore[union-attr]
     ent = EntitlementService(
         snapshots=snapshots, mode="managed", default_limits=QuotaLimits(0, 0, 0, 0)
     )
-    limits = await ent.for_tenant_id(tenant_id)
+    limits = await ent.for_tenant_key("default")
     assert limits.calls_daily == 10
     with pytest.raises(Exception, match="无有效权益"):
-        await ent.for_tenant_id(str(uuid7()))
+        await ent.for_tenant_key("missing")
     catalog = CatalogService(snapshots=snapshots, entitlements=ent, mode="managed")
     entries = await catalog.entries_for_tenant("default")
     assert "b1" in entries
+
+
+async def test_catalog_unlisted_is_direct_only() -> None:
+    store = _MemStore()
+    snapshots = _snapshot_service(
+        _FakeSource([_payload(1, _sections(bot_key="u1", listing="UNLISTED"))]),
+        store,
+        _Applier(),
+    )
+    await snapshots.refresh()
+    ent = EntitlementService(
+        snapshots=snapshots, mode="managed", default_limits=QuotaLimits(0, 0, 0, 0)
+    )
+    catalog = CatalogService(snapshots=snapshots, entitlements=ent, mode="managed")
+    assert await catalog.entries_for_tenant("default") == {}
+    assert await catalog.allows_entry("default", "u1") is True
+    assert await catalog.allows_entry("default", "other") is False
+
+
+async def test_entitlement_matches_tenant_key_not_snapshot_id(session: AsyncSession) -> None:
+    from kongming.control.identity_cache import SqlTenantKeyResolver
+
+    await seed_all(session, get_settings())
+    local_id = (
+        await session.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'"))
+    ).scalar_one()
+    store = _MemStore()
+    snapshots = _snapshot_service(_FakeSource([_payload(1)]), store, _Applier())
+    await snapshots.refresh()
+    ent = EntitlementService(
+        snapshots=snapshots,
+        mode="managed",
+        default_limits=QuotaLimits(0, 0, 0, 0),
+        resolver=SqlTenantKeyResolver(get_sessionmaker()),
+    )
+    limits = await ent.for_tenant_id(str(local_id))
+    assert limits.calls_daily == 10
+
+
+async def test_policy_scope_uses_tenant_key() -> None:
+    from kongming.control.policy import PolicyService
+
+    class _Resolver:
+        async def key_for_id(self, tenant_id: str) -> str | None:
+            return "default"
+
+    def _snap(package_key: str, tenant_keys: tuple[str, ...]) -> SnapshotService:
+        sections = SnapshotSections(
+            tenants=(),
+            entitlements=(),
+            policy_packages=(
+                PolicyPackageRecord(
+                    package_key=package_key,
+                    version=1,
+                    status="ACTIVE",
+                    rule_names=("injection",),
+                    tenant_keys=tenant_keys,
+                ),
+            ),
+        )
+        return _snapshot_service(_FakeSource([_payload(1, sections)]), _MemStore(), _Applier())
+
+    other = _snap("other-pkg", ("other",))
+    scoped = await other.refresh()
+    assert scoped == "updated"
+    policy = PolicyService(
+        snapshots=other,
+        mode="managed",
+        local_rule_names=frozenset({"injection"}),
+        resolver=cast(Any, _Resolver()),
+    )
+    assert await policy.rule_names_for_tenant("local-id") == frozenset()
+
+    default = _snap("default-pkg", ("default",))
+    await default.refresh()
+    policy = PolicyService(
+        snapshots=default,
+        mode="managed",
+        local_rule_names=frozenset({"injection"}),
+        resolver=cast(Any, _Resolver()),
+    )
+    assert await policy.rule_names_for_tenant("local-id") == frozenset({"injection"})
 
 
 # ── HTTP 面:状态/本地命令/只读投影/安全闸 ──
@@ -689,6 +973,125 @@ def _redis():  # type: ignore[no-untyped-def]
     return get_redis()
 
 
+def test_standalone_domain_uses_bot_daily_quota_setting() -> None:
+    from kongming.control.runtime import build_runtime
+
+    runtime = build_runtime(
+        settings=Settings(bot_quota_daily_calls=7, chat_quota_daily_calls=500),
+        maker=get_sessionmaker(),
+        redis=_redis(),
+    )
+    defaults = cast(Any, runtime.entitlements)._defaults
+    assert defaults.bot_calls_daily == 7
+    assert defaults.calls_daily == 500
+
+
+async def test_control_cleanup_dry_run_and_prune(session: AsyncSession) -> None:
+    from kongming.control.runtime import build_runtime
+    from kongming.control.store import SqlUsageOutbox
+
+    old = datetime.now(UTC) - timedelta(days=2)
+    outbox = SqlUsageOutbox(get_sessionmaker())
+    await outbox.add(
+        ProductEvent(
+            event_id="cleanup-event",
+            event_type="chat.turn",
+            occurred_at=old,
+            tenant_id="t",
+        )
+    )
+    await session.execute(
+        text("UPDATE control.usage_outbox SET delivered_at=:old WHERE event_id='cleanup-event'"),
+        {"old": old},
+    )
+    for key, status in (("cleanup-done", "SUCCEEDED"), ("cleanup-running", "EXECUTING")):
+        await session.execute(
+            text(
+                "INSERT INTO control.command_receipt"
+                " (idempotency_key, command_id, action, action_version, source, status,"
+                "  result, actor, created_at, updated_at)"
+                " VALUES (:k, :k, 'cache.clear', 1, 'control', :s, '{}', '', :old, :old)"
+            ),
+            {"k": key, "s": status, "old": old},
+        )
+    await session.execute(
+        text(
+            "INSERT INTO control.registration"
+            " (service_id, instance_id, version, capabilities, last_attempt_at,"
+            "  last_registered_at)"
+            " VALUES ('kongming', 'old-instance', '0.1.0', '[]', :old, :old)"
+        ),
+        {"old": old},
+    )
+    await session.commit()
+
+    runtime = build_runtime(
+        settings=Settings(
+            control_usage_retention_days=1,
+            control_receipt_retention_days=1,
+            control_registration_retention_days=1,
+        ),
+        maker=get_sessionmaker(),
+        redis=_redis(),
+    )
+    dry = await runtime.cleanup_once(dry_run=True)
+    assert dry == {"usage_delivered": 1, "command_receipts": 1, "registrations": 1}
+    remaining = (
+        await session.execute(text("SELECT count(*) FROM control.usage_outbox"))
+    ).scalar_one()
+    assert int(remaining) == 1
+
+    pruned = await runtime.cleanup_once()
+    assert pruned == {"usage_delivered": 1, "command_receipts": 1, "registrations": 1}
+    assert (
+        await session.execute(text("SELECT count(*) FROM control.usage_outbox"))
+    ).scalar_one() == 0
+    assert (
+        await session.execute(
+            text("SELECT count(*) FROM control.command_receipt WHERE status='EXECUTING'")
+        )
+    ).scalar_one() == 1
+    assert (
+        await session.execute(text("SELECT count(*) FROM control.registration"))
+    ).scalar_one() == 0
+    audits = (
+        await session.execute(
+            text("SELECT count(*) FROM public.sys_oper_log WHERE action='control.cleanup'")
+        )
+    ).scalar_one()
+    assert int(audits) == 2
+
+
+def test_managed_runtime_generates_unique_instance_ids() -> None:
+    from kongming.control.runtime import build_runtime
+
+    base: dict[str, Any] = {
+        "control_mode": "managed",
+        "control_base_url": "http://control.local",
+        "control_signing_secret": SECRET,
+        "control_service_token": "tok",
+    }
+    first = build_runtime(settings=Settings(**base), maker=get_sessionmaker(), redis=_redis())
+    second = build_runtime(settings=Settings(**base), maker=get_sessionmaker(), redis=_redis())
+    first_registration = cast(Any, first._registration)
+    second_registration = cast(Any, second._registration)
+    first_id = first_registration._instance_id
+    second_id = second_registration._instance_id
+    assert first_id and second_id
+    assert first_id != second_id
+    assert first_id != "kongming"
+    assert cast(Any, first)._instance_id == first_id
+    explicit = build_runtime(
+        settings=Settings(control_instance_id="fixed-instance", **base),
+        maker=get_sessionmaker(),
+        redis=_redis(),
+    )
+    assert cast(Any, explicit)._instance_id == "fixed-instance"
+    from kongming.guardrail.policy_scope import install_policy_scope
+
+    install_policy_scope(None)
+
+
 async def test_managed_security_gate(client: AsyncClient) -> None:
     from kongming.control.runtime import build_runtime
 
@@ -720,6 +1123,40 @@ async def test_managed_security_gate(client: AsyncClient) -> None:
         assert (await client.get("/healthz")).status_code == 200
     finally:
         await runtime.stop()
+        install_control_runtime(None)
+
+
+async def test_store_catalog_missing_entitlement_maps_503(session: AsyncSession) -> None:
+    from fastapi import HTTPException
+
+    from kongming.control.dependencies import install_control_runtime
+    from kongming.store.router import _filter_catalog, _require_catalog
+
+    class _Catalog:
+        managed = True
+
+        async def entries_for_tenant(self, tenant_key: str) -> dict[str, object]:
+            raise EntitlementMissing(f"无权益:{tenant_key}")
+
+        async def allows_entry(self, tenant_key: str, bot_key: str) -> bool:
+            raise EntitlementMissing(f"无权益:{tenant_key}")
+
+    class _Runtime:
+        catalog = _Catalog()
+
+    await seed_all(session, get_settings())
+    tenant_id = (
+        await session.execute(text("SELECT id FROM public.sys_tenant WHERE tenant_key='default'"))
+    ).scalar_one()
+    install_control_runtime(cast(Any, _Runtime()))
+    try:
+        with pytest.raises(HTTPException) as filtered:
+            await _filter_catalog(session, [], str(tenant_id))
+        assert filtered.value.status_code == 503
+        with pytest.raises(HTTPException) as required:
+            await _require_catalog(session, user_id="", tenant_id=str(tenant_id), bot_key="bot")
+        assert required.value.status_code == 503
+    finally:
         install_control_runtime(None)
 
 

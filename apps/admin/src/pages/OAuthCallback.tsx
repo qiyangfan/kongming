@@ -1,6 +1,6 @@
 /* 管理台 OIDC 回调:换本地会话并回到管理台;缺粗角色明确提示。 */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
 import { useAuth } from "@kongming/api-client/auth-store";
@@ -11,8 +11,12 @@ export default function OAuthCallback() {
   const navigate = useNavigate();
   const acceptTokens = useAuth((s) => s.acceptTokens);
   const [error, setError] = useState<string | null>(null);
+  const called = useRef(false);
 
   useEffect(() => {
+    // StrictMode 双挂载会重放副作用;state 只能消费一次
+    if (called.current) return;
+    called.current = true;
     const code = params.get("code") ?? "";
     const state = params.get("state") ?? "";
     if (!code || !state) {

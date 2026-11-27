@@ -73,6 +73,30 @@ async def test_expired_window_and_bad_token_refused(
     assert await m._main_async([*argv, "--token", "wrong"]) == 2
 
 
+async def test_token_read_from_prompt_when_omitted(
+    monkeypatch: pytest.MonkeyPatch, session: AsyncSession
+) -> None:
+    _env(monkeypatch)
+    task_id = await _mk_task(session)
+    import getpass
+
+    monkeypatch.setattr(getpass, "getpass", lambda prompt="": "bg-secret")
+    m = _module()
+    assert (
+        await m._main_async(
+            [
+                "--scenario",
+                "mark-task-interrupted",
+                "--id",
+                task_id,
+                "--reason",
+                "交互输入口令演练",
+            ]
+        )
+        == 0
+    )
+
+
 async def test_apply_requires_confirm_and_writes_audit(
     monkeypatch: pytest.MonkeyPatch, session: AsyncSession
 ) -> None:

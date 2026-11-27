@@ -64,36 +64,6 @@ data_scope 枚举见 datascope 域;sql_scope 枚举: SELECT_ONLY / READ_DDL / DM
 - WHEN 提交绑定 permIds=[A]
 - THEN 该角色绑定变为仅 A(事务内清空后写入目标集合)
 
-### Requirement: 用户管理 CRUD(权限点 system:user:manage)
-
-密码 SHALL 以 argon2id 哈希;用户名唯一性 SHALL 软删过滤;删除 SHALL 为软删;首登强制改密标志。
-
-#### Scenario: 创建用户
-- GIVEN 当前用户角色含 system:user:manage
-- WHEN 创建用户(username/password/tenantId 等)
-- THEN 密码 argon2id 哈希落库,首登改密标志初始为未改
-- AND 返回新用户 id
-
-#### Scenario: 无权限创建被拒
-- GIVEN 角色不含 system:user:manage
-- WHEN 创建
-- THEN 返回 403,无新增记录
-
-#### Scenario: 用户名唯一性(软删过滤)
-- GIVEN 存在已软删的同名用户
-- WHEN 创建同名新用户
-- THEN 创建成功(软删记录不占用唯一约束)
-
-#### Scenario: 编辑与重置密码
-- GIVEN 用户已存在
-- WHEN 编辑(不传密码则不改)或重置密码
-- THEN 重置后首登改密标志复位,新密码 argon2id 哈希落库
-
-#### Scenario: 删除用户(软删)
-- GIVEN 用户存在
-- WHEN 删除
-- THEN 软删(置 deleted_at),该用户后续登录被拒
-
 ### Requirement: 角色管理 CRUD(权限点 system:role:manage)
 
 角色 SHALL 含 dataScope/sqlScope;SHALL 支持角色-权限点绑定/撤销。
@@ -195,42 +165,6 @@ SHALL 分页返回未软删用户;SHALL 支持关键字对用户名/昵称不区
 - GIVEN 当前用户角色不含 system:user:manage
 - WHEN 查询用户列表
 - THEN 返回 403,且该次拒绝落操作审计
-
-### Requirement: 用户启用与禁用(权限点 system:user:manage)
-
-用户编辑 SHALL 支持状态切换(ACTIVE/DISABLED);禁用后该用户登录 SHALL 被拒,
-且既有访问令牌 SHALL 在下一次权限点校验时被拒。系统 SHALL 提供专用启停端点
-(enable/disable),保护规则与编辑路径同构;禁用 SHALL 同时吊销该用户
-全部 refresh 家族(与改密踢下线对称,任一禁用路径生效)。
-
-#### Scenario: 禁用用户后令牌立即失效
-- GIVEN 用户持有有效访问令牌
-- WHEN 管理员将其状态改为 DISABLED(编辑或专用禁用端点)
-- THEN 该用户再登录被拒
-- AND 以既有令牌访问受权限点保护的接口返回 401/403
-
-#### Scenario: 禁用即吊销 refresh 家族
-- GIVEN 用户持有有效 refresh token
-- WHEN 管理员禁用该用户(任一路径)
-- THEN 该用户全部 refresh 家族被吊销,旧 refresh token 不可再换新访问令牌
-- AND 启用操作不涉及吊销
-
-#### Scenario: 禁用自己被拒
-- GIVEN 管理员编辑自己的资料或调用禁用端点指向自己
-- WHEN 将自己的状态改为 DISABLED
-- THEN 返回 409,状态不变
-
-#### Scenario: 专用启停端点
-- GIVEN 当前用户角色含 system:user:manage
-- WHEN 调用专用 enable/disable 端点
-- THEN 状态即变更并落启停审计;无权限 403、目标不存在 404、
-  超管账号禁用 409(与编辑路径保护同构)
-
-#### Scenario: 管理员改密踢下线
-- GIVEN 用户持有有效 refresh token
-- WHEN 管理员重置其密码,或编辑时提交新密码
-- THEN 该用户全部 refresh 家族被吊销,旧 refresh token 不可再换新访问令牌
-- AND 重置路径同时复位首登改密标志,编辑改密路径不动该标志
 
 ### Requirement: 部门管理 CRUD(权限点 system:user:manage)
 

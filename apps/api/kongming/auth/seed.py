@@ -54,8 +54,6 @@ PERMISSIONS: list[tuple[str, str, int]] = [
     ("system:team:manage", "团队管理", 25),
     # 上架治理走 can_manage 校验,无新增管理点
     ("bot:run", "Bot商店使用", 26),
-    ("developer:portal", "开发者门户", 27),
-    ("system:billing:manage", "计费管理", 28),
     ("tool:compute", "工具-数值计算", 29),
     # 仅 SUPER_ADMIN
     ("system:skill:manage", "Skill包管理", 30),
@@ -101,7 +99,6 @@ ROLE_RECOMMENDED_PERMS: dict[str, list[str]] = {
         # 工作流执行(节点级防御逐层复校)
         "workflow:execute",
         "bot:run",
-        "developer:portal",
         "report:generate",
         "report:read",
         "report:export",

@@ -26,7 +26,8 @@
 
 ## Risks / Trade-offs
 
-- 快照陈旧 → observed_at/stale；安全类拒绝。
+- 快照陈旧 → observed_at/stale；安全类不按 stale 拒绝，控制面缺席时 last-known 继续运行；
+  只有缺失、验签失败或版本回退才 fail-closed（与 ADR-0005 停锦官仍可运行一致）。
 - 本地缓存损坏 → 从锦官重建；无法重建则 fail-closed。
 - 签名密钥轮换 → JWKS 缓存。
 
