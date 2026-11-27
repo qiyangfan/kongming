@@ -9,6 +9,7 @@ function displayCell(cell: unknown): { text: string; title: string | undefined }
   return { text, title: text || undefined };
 }
 
+/** 结果表保留横向滚动;显式 overscroll-y-auto 覆盖全局 contain,避免表格拦截页面纵向滚动。 */
 export function ResultTable({
   columns,
   rows,
@@ -19,7 +20,7 @@ export function ResultTable({
   labels?: string[];
 }) {
   return (
-    <div className="overflow-x-auto overscroll-x-contain rounded-lg border border-border">
+    <div className="overflow-x-auto overscroll-y-auto rounded-lg border border-border">
       <table className="w-full text-sm">
         <thead className="bg-muted/50">
           <tr>
