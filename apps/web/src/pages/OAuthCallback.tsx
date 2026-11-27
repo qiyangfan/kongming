@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { Loader2 } from "lucide-react";
-import { api, humanizeErrorText, type TokenPairOut } from "../lib/api";
-import { useAuth } from "../lib/auth-store";
-import { buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import { api, humanizeErrorText, type TokenPairOut } from "@kongming/api-client/api";
+import { useAuth } from "@kongming/api-client/auth-store";
+import { buttonVariants } from "@kongming/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kongming/ui/card";
+import { cn } from "@kongming/api-client/utils";
 
 export default function OAuthCallback() {
   const { provider } = useParams<{ provider: string }>();

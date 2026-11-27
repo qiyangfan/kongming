@@ -6,10 +6,10 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ShieldQuestion, Loader2 } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { api, type PendingToolCallOut, type ToolConfirmOut } from "@/lib/api";
-import { useDatasource } from "@/lib/datasource-store";
-import { useTenant } from "@/lib/tenant-store";
+import { Button } from "@kongming/ui/button";
+import { api, type PendingToolCallOut, type ToolConfirmOut } from "@kongming/api-client/api";
+import { useDatasource } from "@kongming/api-client/datasource-store";
+import { useTenant } from "@kongming/api-client/tenant-store";
 
 /* 工具名 → 中文短语(与 apps/api toolcall/registry.py 内置注册表对齐; MCP 动态工具等未收录名回退显示原名)。 */
 const TOOL_LABELS: Record<string, string> = {

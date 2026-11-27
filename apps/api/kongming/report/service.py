@@ -152,6 +152,7 @@ class ReportService:
                 created_by=str(report["user_id"]),
                 sections=[],
             )
+            _report_report_event(report, status=m.STATUS_FAILED, sections=0)
             return None
         sections = sections_from_payload(result["sections"])
         m.validate_tree(sections)
@@ -177,6 +178,7 @@ class ReportService:
             created_by=str(report["user_id"]),
             sections=sections,
         )
+        _report_report_event(report, status=status, sections=len(sections))
         session_id = report.get("session_id")
         if session_id and status in (m.STATUS_READY, m.STATUS_PARTIAL):
             # 报告卡挂回发起会话(failed 不挂——会话内只呈现成品/部分成品);
@@ -478,3 +480,14 @@ def _card_summary(status: str, sections: list[SectionNode], error: str) -> str:
     if error:
         return f"报告部分完成:{ok}/{total} 个章节完成;{error}"
     return f"报告部分完成:{ok}/{total} 个章节完成,其余如实标注未完成"
+
+
+def _report_report_event(report: dict[str, Any], *, status: str, sections: int) -> None:
+    from kongming.control.events import report_product_event
+
+    report_product_event(
+        "report.generation",
+        tenant_id=str(report["tenant_id"]),
+        user_id=str(report["user_id"]),
+        attributes={"status": status, "section_count": sections},
+    )

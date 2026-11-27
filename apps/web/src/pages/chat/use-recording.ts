@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { transcribeAudio } from "@/lib/chat-api";
+import { transcribeAudio } from "@kongming/api-client/chat-api";
 
 export interface RecordingApi {
   recording: boolean;

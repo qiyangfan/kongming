@@ -1,6 +1,0 @@
-allowBuilds:
-  esbuild: true
-overrides:
-  "@redocly/openapi-core>js-yaml": 4.3.2
-  # GHSA-g3hv-75wg-m249:eslint-plugin-sonarjs 声明 ^10,固定到已修复的 11.0.1
-  "eslint-plugin-sonarjs>minimatch": 11.0.1

@@ -309,6 +309,204 @@
         }
       }
     },
+    "/admin-auth/{provider}/start": {
+      "get": {
+        "tags": [
+          "admin-auth"
+        ],
+        "summary": "Admin Start",
+        "operationId": "admin_start_admin_auth__provider__start_get",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-auth/{provider}/callback": {
+      "post": {
+        "tags": [
+          "admin-auth"
+        ],
+        "summary": "Admin Callback",
+        "operationId": "admin_callback_admin_auth__provider__callback_post",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          },
+          {
+            "name": "km_admin_oidc_state",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Km Admin Oidc State"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CallbackIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-auth/refresh": {
+      "post": {
+        "tags": [
+          "admin-auth"
+        ],
+        "summary": "Admin Refresh",
+        "operationId": "admin_refresh_admin_auth_refresh_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-auth/logout": {
+      "post": {
+        "tags": [
+          "admin-auth"
+        ],
+        "summary": "Admin Logout",
+        "operationId": "admin_logout_admin_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
+    "/admin-auth/logout/sso": {
+      "post": {
+        "tags": [
+          "admin-auth"
+        ],
+        "summary": "Admin Logout Sso",
+        "operationId": "admin_logout_sso_admin_auth_logout_sso_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "type": "object",
+                  "title": "Response Admin Logout Sso Admin Auth Logout Sso Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin-auth/me": {
+      "get": {
+        "tags": [
+          "admin-auth"
+        ],
+        "summary": "Admin Me",
+        "operationId": "admin_me_admin_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/internal/sql/execute": {
       "post": {
         "tags": [
@@ -1246,158 +1444,6 @@
                 }
               }
             }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/system/users/{user_id}": {
-      "put": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Update User",
-        "operationId": "update_user_system_users__user_id__put",
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "User Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UserUpdateIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Delete User",
-        "operationId": "delete_user_system_users__user_id__delete",
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "User Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/system/users/{user_id}/enable": {
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Enable User",
-        "operationId": "enable_user_system_users__user_id__enable_post",
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "User Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/system/users/{user_id}/disable": {
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Disable User",
-        "operationId": "disable_user_system_users__user_id__disable_post",
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "User Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -10482,1250 +10528,6 @@
         }
       }
     },
-    "/billing/policies": {
-      "post": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Upsert Policy",
-        "operationId": "upsert_policy_billing_policies_post",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PolicyIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Upsert Policy Billing Policies Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "List Policies",
-        "operationId": "list_policies_billing_policies_get",
-        "parameters": [
-          {
-            "name": "tenant_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "title": "Tenant Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/PolicyOut"
-                  },
-                  "title": "Response List Policies Billing Policies Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/billing/policies/{policy_id}": {
-      "delete": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Delete Policy",
-        "operationId": "delete_policy_billing_policies__policy_id__delete",
-        "parameters": [
-          {
-            "name": "policy_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Policy Id"
-            }
-          },
-          {
-            "name": "tenant_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "title": "Tenant Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Delete Policy Billing Policies  Policy Id  Delete"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/billing/plans": {
-      "get": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "List Plans",
-        "operationId": "list_plans_billing_plans_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/PlanOut"
-                  },
-                  "type": "array",
-                  "title": "Response List Plans Billing Plans Get"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Create Plan",
-        "operationId": "create_plan_billing_plans_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PlanIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Create Plan Billing Plans Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/billing/plans/{plan_id}": {
-      "patch": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Update Plan",
-        "description": "更新套餐；已生成账单继续使用出账时保存的价格。",
-        "operationId": "update_plan_billing_plans__plan_id__patch",
-        "parameters": [
-          {
-            "name": "plan_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Plan Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PlanPatchIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Update Plan Billing Plans  Plan Id  Patch"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Delete Plan",
-        "description": "有租户仍在使用套餐时返回 409；删除成功后记录审计日志。",
-        "operationId": "delete_plan_billing_plans__plan_id__delete",
-        "parameters": [
-          {
-            "name": "plan_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Plan Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Delete Plan Billing Plans  Plan Id  Delete"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/billing/tenants": {
-      "get": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "List Tenants Brief",
-        "description": "返回计费管理所需的租户清单。",
-        "operationId": "list_tenants_brief_billing_tenants_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/TenantBriefOut"
-                  },
-                  "type": "array",
-                  "title": "Response List Tenants Brief Billing Tenants Get"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/billing/bots": {
-      "get": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "List Bots Brief",
-        "description": "BOT 级策略配置面 Bot 下拉(挂 MANAGE 自供,解耦 bot:manage——\n与租户清单同解耦原则)。",
-        "operationId": "list_bots_brief_billing_bots_get",
-        "parameters": [
-          {
-            "name": "tenant_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "title": "Tenant Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/BotBriefOut"
-                  },
-                  "title": "Response List Bots Brief Billing Bots Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/billing/users": {
-      "get": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "List Users Brief",
-        "description": "USER 级策略配置面用户下拉(挂 MANAGE 自供,解耦 user:manage——\n与 Bot 清单同解耦原则;软删用户不列)。",
-        "operationId": "list_users_brief_billing_users_get",
-        "parameters": [
-          {
-            "name": "tenant_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "title": "Tenant Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/UserBriefOut"
-                  },
-                  "title": "Response List Users Brief Billing Users Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/billing/teams": {
-      "get": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "List Teams Brief",
-        "description": "TEAM 级策略配置面团队下拉(挂 MANAGE 自供,解耦 team:manage——\n与 Bot 清单同解耦原则)。",
-        "operationId": "list_teams_brief_billing_teams_get",
-        "parameters": [
-          {
-            "name": "tenant_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "title": "Tenant Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/TeamBriefOut"
-                  },
-                  "title": "Response List Teams Brief Billing Teams Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/billing/tenants/{tenant_id}/plan": {
-      "get": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Get Tenant Plan",
-        "description": "管理面查租户当前绑定套餐(受控回显用;无绑定 null)。",
-        "operationId": "get_tenant_plan_billing_tenants__tenant_id__plan_get",
-        "parameters": [
-          {
-            "name": "tenant_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Tenant Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/PlanOut"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Get Tenant Plan Billing Tenants  Tenant Id  Plan Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/billing/tenants/bind-plan": {
-      "post": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Bind Plan",
-        "operationId": "bind_plan_billing_tenants_bind_plan_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BindPlanIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "type": "object",
-                  "title": "Response Bind Plan Billing Tenants Bind Plan Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/billing/invoices": {
-      "get": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Page All Invoices",
-        "description": "分页返回账单，并附带每张账单最新的支付状态。",
-        "operationId": "page_all_invoices_billing_invoices_get",
-        "parameters": [
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 1,
-              "title": "Page"
-            }
-          },
-          {
-            "name": "size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 20,
-              "title": "Size"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InvoiceAdminPageOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/portal/usage": {
-      "get": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Portal Usage",
-        "operationId": "portal_usage_portal_usage_get",
-        "parameters": [
-          {
-            "name": "x-tenant-id",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Tenant-Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PortalUsageOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/portal/keys": {
-      "get": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Portal Keys",
-        "description": "门户 api-key 清单(spec「key 列表」兑现;仓储聚合,\n本人 Bot 的 key,吊销态不回显)。",
-        "operationId": "portal_keys_portal_keys_get",
-        "parameters": [
-          {
-            "name": "x-tenant-id",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Tenant-Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/PortalKeyOut"
-                  },
-                  "title": "Response Portal Keys Portal Keys Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/portal/invoices": {
-      "get": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Portal Invoices",
-        "operationId": "portal_invoices_portal_invoices_get",
-        "parameters": [
-          {
-            "name": "x-tenant-id",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Tenant-Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/InvoiceOut"
-                  },
-                  "title": "Response Portal Invoices Portal Invoices Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/portal/invoices/{invoice_id}": {
-      "get": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Portal Invoice Detail",
-        "operationId": "portal_invoice_detail_portal_invoices__invoice_id__get",
-        "parameters": [
-          {
-            "name": "invoice_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Invoice Id"
-            }
-          },
-          {
-            "name": "x-tenant-id",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Tenant-Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InvoiceDetailOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/portal/invoices/{invoice_id}/payments": {
-      "post": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Create Payment",
-        "operationId": "create_payment_portal_invoices__invoice_id__payments_post",
-        "parameters": [
-          {
-            "name": "invoice_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Invoice Id"
-            }
-          },
-          {
-            "name": "x-tenant-id",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Tenant-Id"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/portal/payments/{payment_id}": {
-      "get": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Get Portal Payment",
-        "operationId": "get_portal_payment_portal_payments__payment_id__get",
-        "parameters": [
-          {
-            "name": "payment_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Payment Id"
-            }
-          },
-          {
-            "name": "x-tenant-id",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Tenant-Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/portal/payments/{payment_id}/cancel": {
-      "post": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Cancel Payment",
-        "operationId": "cancel_payment_portal_payments__payment_id__cancel_post",
-        "parameters": [
-          {
-            "name": "payment_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Payment Id"
-            }
-          },
-          {
-            "name": "x-tenant-id",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Tenant-Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Cancel Payment Portal Payments  Payment Id  Cancel Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/portal/payments/{payment_id}/mock-simulate": {
-      "post": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Mock Simulate",
-        "description": "mock 通道「支付动作」入口:服务端真实生成签名后\n走统一核销——收银台按钮唯一合法路径。",
-        "operationId": "mock_simulate_portal_payments__payment_id__mock_simulate_post",
-        "parameters": [
-          {
-            "name": "payment_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Payment Id"
-            }
-          },
-          {
-            "name": "x-tenant-id",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Tenant-Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MockSimulateIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReconcileOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/billing/payments/callback/{channel}": {
-      "post": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Payment Callback",
-        "operationId": "payment_callback_billing_payments_callback__channel__post",
-        "parameters": [
-          {
-            "name": "channel",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Channel"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CallbackIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReconcileOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/billing/invoices/{invoice_id}/void": {
-      "post": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Void Invoice",
-        "operationId": "void_invoice_billing_invoices__invoice_id__void_post",
-        "parameters": [
-          {
-            "name": "invoice_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Invoice Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Void Invoice Billing Invoices  Invoice Id  Void Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/system/billing/cost-reconciliation": {
-      "get": {
-        "tags": [
-          "billing"
-        ],
-        "summary": "Cost Reconciliation",
-        "description": "牌价轨与 muniu credit 成本轨的窗口量级核对(对 muniu HANDOFF 6b 的\n谱系修订见 change design:不直推、不下线自有牌价,消除的是「无对账」)。",
-        "operationId": "cost_reconciliation_system_billing_cost_reconciliation_get",
-        "parameters": [
-          {
-            "name": "window_days",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 90,
-              "minimum": 1,
-              "default": 7,
-              "title": "Window Days"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReconciliationReport"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/reports": {
       "post": {
         "tags": [
@@ -14230,6 +13032,199 @@
         }
       }
     },
+    "/system/control": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Control Status",
+        "description": "控制面连接/快照/缓冲状态(只读;不含服务身份与验签密钥)。",
+        "operationId": "control_status_system_control_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlStatusOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/control/snapshot": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Control Snapshot",
+        "description": "共享控制只读视图(服务管理台展示;不返回成员/凭据)。",
+        "operationId": "control_snapshot_system_control_snapshot_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharedSnapshotOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/commands": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Run Local Command",
+        "description": "本地运行命令(reindex/清缓存/取消任务):控制面缺席仍可执行,结果审计。",
+        "operationId": "run_local_command_system_commands_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalCommandIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalCommandOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/commands/receipts": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Command Receipts",
+        "description": "最近命令回执(本地执行 + 跨服务命令的终态)。",
+        "operationId": "command_receipts_system_commands_receipts_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/service-read/{section}": {
+      "get": {
+        "tags": [
+          "service-read"
+        ],
+        "summary": "Service Read",
+        "description": "服务只读投影(锦官控制台消费)。未知节 404;写方法由框架 405。",
+        "operationId": "service_read_service_read__section__get",
+        "parameters": [
+          {
+            "name": "section",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Section"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Service Read Service Read  Section  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/voice/calls": {
       "post": {
         "tags": [
@@ -14614,31 +13609,6 @@
         ],
         "title": "BindIn"
       },
-      "BindPlanIn": {
-        "properties": {
-          "tenant_id": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Tenant Id"
-          },
-          "plan_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Plan Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "tenant_id"
-        ],
-        "title": "BindPlanIn"
-      },
       "Body_transcribe_audio_chat_stt_post": {
         "properties": {
           "file": {
@@ -14724,29 +13694,6 @@
           "schema_name"
         ],
         "title": "Body_upload_document_system_rag_documents_upload_post"
-      },
-      "BotBriefOut": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "bot_key": {
-            "type": "string",
-            "title": "Bot Key"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "bot_key",
-          "name"
-        ],
-        "title": "BotBriefOut"
       },
       "BotChatIn": {
         "properties": {
@@ -15100,44 +14047,19 @@
       },
       "CallbackIn": {
         "properties": {
-          "payment_id": {
+          "code": {
             "type": "string",
-            "format": "uuid",
-            "title": "Payment Id"
+            "title": "Code"
           },
-          "trade_no": {
+          "state": {
             "type": "string",
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Trade No"
-          },
-          "result": {
-            "type": "string",
-            "enum": [
-              "SUCCESS",
-              "FAILURE"
-            ],
-            "title": "Result"
-          },
-          "amount": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Amount"
-          },
-          "sign": {
-            "type": "string",
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Sign"
+            "title": "State"
           }
         },
         "type": "object",
         "required": [
-          "payment_id",
-          "trade_no",
-          "result",
-          "amount",
-          "sign"
+          "code",
+          "state"
         ],
         "title": "CallbackIn"
       },
@@ -16420,44 +15342,85 @@
         "title": "ConnectorOut",
         "description": "连接器条目(掩码面;凭证只出形态与尾号掩码,spec「凭证不回显」)。"
       },
-      "CostTrack": {
+      "ControlStatusOut": {
         "properties": {
-          "available": {
-            "type": "boolean",
-            "title": "Available"
-          },
-          "reason": {
+          "mode": {
             "type": "string",
-            "title": "Reason",
-            "default": ""
+            "title": "Mode"
           },
-          "requests": {
-            "type": "integer",
-            "title": "Requests",
-            "default": 0
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
           },
-          "prompt_tokens": {
-            "type": "integer",
-            "title": "Prompt Tokens",
-            "default": 0
+          "service_id": {
+            "type": "string",
+            "title": "Service Id"
           },
-          "completion_tokens": {
-            "type": "integer",
-            "title": "Completion Tokens",
-            "default": 0
+          "base_url": {
+            "type": "string",
+            "title": "Base Url"
           },
-          "cost_credits": {
+          "snapshot_present": {
+            "type": "boolean",
+            "title": "Snapshot Present"
+          },
+          "snapshot_version": {
             "type": "integer",
-            "title": "Cost Credits",
-            "default": 0
+            "title": "Snapshot Version"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          },
+          "security_ok": {
+            "type": "boolean",
+            "title": "Security Ok"
+          },
+          "pending_usage": {
+            "type": "integer",
+            "title": "Pending Usage"
+          },
+          "dropped_usage": {
+            "type": "integer",
+            "title": "Dropped Usage"
+          },
+          "readonly_enabled": {
+            "type": "boolean",
+            "title": "Readonly Enabled"
+          },
+          "last_error": {
+            "type": "string",
+            "title": "Last Error"
           }
         },
         "type": "object",
         "required": [
-          "available"
+          "mode",
+          "enabled",
+          "service_id",
+          "base_url",
+          "snapshot_present",
+          "snapshot_version",
+          "observed_at",
+          "stale",
+          "security_ok",
+          "pending_usage",
+          "dropped_usage",
+          "readonly_enabled",
+          "last_error"
         ],
-        "title": "CostTrack",
-        "description": "成本轨(muniu credit 口径)。available=False 时 reason 必非空。"
+        "title": "ControlStatusOut"
       },
       "CoverageReportOut": {
         "properties": {
@@ -18153,176 +17116,6 @@
         ],
         "title": "IntrospectOut"
       },
-      "InvoiceAdminOut": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "period": {
-            "type": "string",
-            "title": "Period"
-          },
-          "amount": {
-            "type": "integer",
-            "title": "Amount"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "created_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created At"
-          },
-          "tenant_key": {
-            "type": "string",
-            "title": "Tenant Key"
-          },
-          "payment_status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Payment Status"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "period",
-          "amount",
-          "status",
-          "tenant_key"
-        ],
-        "title": "InvoiceAdminOut"
-      },
-      "InvoiceAdminPageOut": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/InvoiceAdminOut"
-            },
-            "type": "array",
-            "title": "Items"
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total"
-          },
-          "page": {
-            "type": "integer",
-            "title": "Page"
-          },
-          "size": {
-            "type": "integer",
-            "title": "Size"
-          }
-        },
-        "type": "object",
-        "required": [
-          "items",
-          "total",
-          "page",
-          "size"
-        ],
-        "title": "InvoiceAdminPageOut"
-      },
-      "InvoiceDetailOut": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "period": {
-            "type": "string",
-            "title": "Period"
-          },
-          "amount": {
-            "type": "integer",
-            "title": "Amount"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "created_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created At"
-          },
-          "usage_json": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Usage Json"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "period",
-          "amount",
-          "status",
-          "usage_json"
-        ],
-        "title": "InvoiceDetailOut"
-      },
-      "InvoiceOut": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "period": {
-            "type": "string",
-            "title": "Period"
-          },
-          "amount": {
-            "type": "integer",
-            "title": "Amount"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "created_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "period",
-          "amount",
-          "status"
-        ],
-        "title": "InvoiceOut"
-      },
       "InvolvedTableOut": {
         "properties": {
           "table_name": {
@@ -18501,6 +17294,73 @@
           "size"
         ],
         "title": "KnowledgePageOut"
+      },
+      "LocalCommandIn": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Action"
+          },
+          "action_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Action Version",
+            "default": 1
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action",
+          "reason"
+        ],
+        "title": "LocalCommandIn"
+      },
+      "LocalCommandOut": {
+        "properties": {
+          "command_id": {
+            "type": "string",
+            "title": "Command Id"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "title": "Idempotency Key"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "result": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Result"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "command_id",
+          "idempotency_key",
+          "status",
+          "result",
+          "error"
+        ],
+        "title": "LocalCommandOut"
       },
       "McpPromptArgOut": {
         "properties": {
@@ -19586,23 +18446,6 @@
         ],
         "title": "MissingColumnsOut"
       },
-      "MockSimulateIn": {
-        "properties": {
-          "result": {
-            "type": "string",
-            "enum": [
-              "SUCCESS",
-              "FAILURE"
-            ],
-            "title": "Result"
-          }
-        },
-        "type": "object",
-        "required": [
-          "result"
-        ],
-        "title": "MockSimulateIn"
-      },
       "MutateOut": {
         "properties": {
           "report_id": {
@@ -20071,83 +18914,6 @@
         ],
         "title": "ParamDeclIn"
       },
-      "PaymentOut": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "invoice_id": {
-            "type": "string",
-            "title": "Invoice Id"
-          },
-          "channel": {
-            "type": "string",
-            "title": "Channel"
-          },
-          "amount": {
-            "type": "integer",
-            "title": "Amount"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "trade_no": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trade No"
-          },
-          "expires_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expires At"
-          },
-          "paid_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Paid At"
-          },
-          "created_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "invoice_id",
-          "channel",
-          "amount",
-          "status"
-        ],
-        "title": "PaymentOut"
-      },
       "PendingToolCallOut": {
         "properties": {
           "confirm_id": {
@@ -20200,134 +18966,6 @@
         ],
         "title": "PermOut"
       },
-      "PlanIn": {
-        "properties": {
-          "plan_key": {
-            "type": "string",
-            "maxLength": 64,
-            "minLength": 2,
-            "title": "Plan Key"
-          },
-          "name": {
-            "type": "string",
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Name"
-          },
-          "monthly_tokens": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Monthly Tokens",
-            "default": 0
-          },
-          "monthly_calls": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Monthly Calls",
-            "default": 0
-          },
-          "price_per_mtok": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Price Per Mtok",
-            "default": 0
-          },
-          "price_per_call": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Price Per Call",
-            "default": 0
-          }
-        },
-        "type": "object",
-        "required": [
-          "plan_key",
-          "name"
-        ],
-        "title": "PlanIn"
-      },
-      "PlanOut": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "plan_key": {
-            "type": "string",
-            "title": "Plan Key"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "monthly_tokens": {
-            "type": "integer",
-            "title": "Monthly Tokens"
-          },
-          "monthly_calls": {
-            "type": "integer",
-            "title": "Monthly Calls"
-          },
-          "price_per_mtok": {
-            "type": "integer",
-            "title": "Price Per Mtok"
-          },
-          "price_per_call": {
-            "type": "integer",
-            "title": "Price Per Call"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "plan_key",
-          "name",
-          "monthly_tokens",
-          "monthly_calls",
-          "price_per_mtok",
-          "price_per_call"
-        ],
-        "title": "PlanOut"
-      },
-      "PlanPatchIn": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Name"
-          },
-          "monthly_tokens": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Monthly Tokens",
-            "default": 0
-          },
-          "monthly_calls": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Monthly Calls",
-            "default": 0
-          },
-          "price_per_mtok": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Price Per Mtok",
-            "default": 0
-          },
-          "price_per_call": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Price Per Call",
-            "default": 0
-          }
-        },
-        "type": "object",
-        "required": [
-          "name"
-        ],
-        "title": "PlanPatchIn"
-      },
       "PlanStepIn": {
         "properties": {
           "goal": {
@@ -20347,202 +18985,6 @@
           "goal"
         ],
         "title": "PlanStepIn"
-      },
-      "PolicyIn": {
-        "properties": {
-          "tenant_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Tenant Id"
-          },
-          "dimension": {
-            "type": "string",
-            "pattern": "^(TOKENS|CALLS|COST)$",
-            "title": "Dimension"
-          },
-          "limit_value": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Limit Value"
-          },
-          "warn_pct": {
-            "type": "integer",
-            "maximum": 100.0,
-            "minimum": 1.0,
-            "title": "Warn Pct",
-            "default": 80
-          },
-          "scope": {
-            "type": "string",
-            "pattern": "^(TENANT|BOT|USER|TEAM)$",
-            "title": "Scope",
-            "default": "TENANT"
-          },
-          "scope_ref": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scope Ref"
-          }
-        },
-        "type": "object",
-        "required": [
-          "tenant_id",
-          "dimension",
-          "limit_value"
-        ],
-        "title": "PolicyIn"
-      },
-      "PolicyOut": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "tenant_id": {
-            "type": "string",
-            "title": "Tenant Id"
-          },
-          "dimension": {
-            "type": "string",
-            "title": "Dimension"
-          },
-          "period": {
-            "type": "string",
-            "title": "Period"
-          },
-          "limit_value": {
-            "type": "integer",
-            "title": "Limit Value"
-          },
-          "warn_pct": {
-            "type": "integer",
-            "title": "Warn Pct"
-          },
-          "scope": {
-            "type": "string",
-            "title": "Scope",
-            "default": "TENANT"
-          },
-          "scope_ref": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scope Ref"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "tenant_id",
-          "dimension",
-          "period",
-          "limit_value",
-          "warn_pct"
-        ],
-        "title": "PolicyOut"
-      },
-      "PortalKeyOut": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "bot_key": {
-            "type": "string",
-            "title": "Bot Key"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "created_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created At"
-          },
-          "last_used_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Used At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "bot_key",
-          "name"
-        ],
-        "title": "PortalKeyOut"
-      },
-      "PortalUsageOut": {
-        "properties": {
-          "month": {
-            "type": "string",
-            "title": "Month"
-          },
-          "tokens": {
-            "type": "integer",
-            "title": "Tokens"
-          },
-          "calls": {
-            "type": "integer",
-            "title": "Calls"
-          },
-          "cost": {
-            "type": "integer",
-            "title": "Cost"
-          },
-          "policies": {
-            "items": {
-              "$ref": "#/components/schemas/PolicyOut"
-            },
-            "type": "array",
-            "title": "Policies"
-          },
-          "plan": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PlanOut"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "month",
-          "tokens",
-          "calls",
-          "cost",
-          "policies"
-        ],
-        "title": "PortalUsageOut"
       },
       "PrefsIn": {
         "properties": {
@@ -21583,95 +20025,75 @@
         "title": "RecallProbeOut",
         "description": "召回试跑响应(只读验证面;键集=service.recall_probe 现值锁定)。"
       },
-      "ReconcileOut": {
+      "ReceiptItemOut": {
         "properties": {
-          "idempotent": {
-            "type": "boolean",
-            "title": "Idempotent"
+          "idempotency_key": {
+            "type": "string",
+            "title": "Idempotency Key"
+          },
+          "command_id": {
+            "type": "string",
+            "title": "Command Id"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "action_version": {
+            "type": "integer",
+            "title": "Action Version"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
           },
           "status": {
             "type": "string",
             "title": "Status"
+          },
+          "result": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Result"
+          },
+          "actor": {
+            "type": "string",
+            "title": "Actor"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
           }
         },
         "type": "object",
         "required": [
-          "idempotent",
-          "status"
+          "idempotency_key",
+          "command_id",
+          "action",
+          "action_version",
+          "source",
+          "status",
+          "result",
+          "actor",
+          "updated_at"
         ],
-        "title": "ReconcileOut"
+        "title": "ReceiptItemOut"
       },
-      "ReconciliationReport": {
+      "ReceiptOut": {
         "properties": {
-          "window_days": {
-            "type": "integer",
-            "title": "Window Days"
-          },
-          "window_since": {
-            "type": "string",
-            "title": "Window Since"
-          },
-          "product_tokens": {
-            "type": "integer",
-            "title": "Product Tokens"
-          },
-          "product_invoice_li": {
-            "type": "integer",
-            "title": "Product Invoice Li"
-          },
-          "cost": {
-            "$ref": "#/components/schemas/CostTrack"
-          },
-          "cost_li_equiv": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cost Li Equiv"
-          },
-          "deviation_ratio": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deviation Ratio"
-          },
-          "threshold": {
-            "type": "number",
-            "title": "Threshold"
-          },
-          "alert": {
-            "type": "boolean",
-            "title": "Alert",
-            "default": false
-          },
-          "annotations": {
+          "items": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ReceiptItemOut"
             },
             "type": "array",
-            "title": "Annotations",
-            "default": []
+            "title": "Items"
           }
         },
         "type": "object",
         "required": [
-          "window_days",
-          "window_since",
-          "product_tokens",
-          "product_invoice_li",
-          "cost",
-          "threshold"
+          "items"
         ],
-        "title": "ReconciliationReport"
+        "title": "ReceiptOut"
       },
       "ReindexOut": {
         "properties": {
@@ -22899,6 +21321,219 @@
           "status"
         ],
         "title": "SessionMessageOut"
+      },
+      "SharedCatalogOut": {
+        "properties": {
+          "bot_key": {
+            "type": "string",
+            "title": "Bot Key"
+          },
+          "listing": {
+            "type": "string",
+            "title": "Listing"
+          },
+          "visibility": {
+            "type": "string",
+            "title": "Visibility"
+          },
+          "entitlement_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entitlement Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bot_key",
+          "listing",
+          "visibility",
+          "entitlement_key"
+        ],
+        "title": "SharedCatalogOut"
+      },
+      "SharedEntitlementOut": {
+        "properties": {
+          "tenant_key": {
+            "type": "string",
+            "title": "Tenant Key"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "features": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Features"
+          },
+          "entitlement_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Entitlement Keys"
+          },
+          "quota_calls_daily": {
+            "type": "integer",
+            "title": "Quota Calls Daily"
+          },
+          "quota_calls_monthly": {
+            "type": "integer",
+            "title": "Quota Calls Monthly"
+          },
+          "quota_bot_calls_daily": {
+            "type": "integer",
+            "title": "Quota Bot Calls Daily"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tenant_key",
+          "status",
+          "features",
+          "entitlement_keys",
+          "quota_calls_daily",
+          "quota_calls_monthly",
+          "quota_bot_calls_daily"
+        ],
+        "title": "SharedEntitlementOut"
+      },
+      "SharedPackageOut": {
+        "properties": {
+          "package_key": {
+            "type": "string",
+            "title": "Package Key"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "rule_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Rule Names"
+          },
+          "tenant_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tenant Keys"
+          }
+        },
+        "type": "object",
+        "required": [
+          "package_key",
+          "version",
+          "status",
+          "rule_names",
+          "tenant_keys"
+        ],
+        "title": "SharedPackageOut"
+      },
+      "SharedSnapshotOut": {
+        "properties": {
+          "present": {
+            "type": "boolean",
+            "title": "Present"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          },
+          "tenants": {
+            "items": {
+              "$ref": "#/components/schemas/SharedTenantOut"
+            },
+            "type": "array",
+            "title": "Tenants"
+          },
+          "entitlements": {
+            "items": {
+              "$ref": "#/components/schemas/SharedEntitlementOut"
+            },
+            "type": "array",
+            "title": "Entitlements"
+          },
+          "policy_packages": {
+            "items": {
+              "$ref": "#/components/schemas/SharedPackageOut"
+            },
+            "type": "array",
+            "title": "Policy Packages"
+          },
+          "catalog": {
+            "items": {
+              "$ref": "#/components/schemas/SharedCatalogOut"
+            },
+            "type": "array",
+            "title": "Catalog"
+          }
+        },
+        "type": "object",
+        "required": [
+          "present",
+          "version",
+          "observed_at",
+          "stale",
+          "tenants",
+          "entitlements",
+          "policy_packages",
+          "catalog"
+        ],
+        "title": "SharedSnapshotOut"
+      },
+      "SharedTenantOut": {
+        "properties": {
+          "tenant_key": {
+            "type": "string",
+            "title": "Tenant Key"
+          },
+          "tenant_name": {
+            "type": "string",
+            "title": "Tenant Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tenant_key",
+          "tenant_name",
+          "status"
+        ],
+        "title": "SharedTenantOut"
       },
       "SourceOut": {
         "properties": {
@@ -24140,29 +22775,6 @@
         ],
         "title": "TaskPlanIn"
       },
-      "TeamBriefOut": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "team_key": {
-            "type": "string",
-            "title": "Team Key"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "team_key",
-          "name"
-        ],
-        "title": "TeamBriefOut"
-      },
       "TeamDetailOut": {
         "properties": {
           "team": {
@@ -24288,29 +22900,6 @@
           "name"
         ],
         "title": "TeamRenameIn"
-      },
-      "TenantBriefOut": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "tenant_key": {
-            "type": "string",
-            "title": "Tenant Key"
-          },
-          "tenant_name": {
-            "type": "string",
-            "title": "Tenant Name"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "tenant_key",
-          "tenant_name"
-        ],
-        "title": "TenantBriefOut"
       },
       "TenantOut": {
         "properties": {
@@ -26151,29 +24740,6 @@
         ],
         "title": "UsageTrendPoint"
       },
-      "UserBriefOut": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "username": {
-            "type": "string",
-            "title": "Username"
-          },
-          "nickname": {
-            "type": "string",
-            "title": "Nickname"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "username",
-          "nickname"
-        ],
-        "title": "UserBriefOut"
-      },
       "UserItemOut": {
         "properties": {
           "id": {
@@ -26284,68 +24850,6 @@
           "items"
         ],
         "title": "UserPageOut"
-      },
-      "UserUpdateIn": {
-        "properties": {
-          "nickname": {
-            "type": "string",
-            "maxLength": 64,
-            "title": "Nickname"
-          },
-          "email": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 128
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Email"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "ACTIVE",
-              "DISABLED"
-            ],
-            "title": "Status"
-          },
-          "dept_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dept Id"
-          },
-          "tenant_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Tenant Id"
-          },
-          "role_ids": {
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "type": "array",
-            "title": "Role Ids"
-          }
-        },
-        "type": "object",
-        "required": [
-          "nickname",
-          "status",
-          "tenant_id"
-        ],
-        "title": "UserUpdateIn",
-        "description": "全量更新用户资料与授权;username 由Keycloak登录建档决定,创建后不可修改。"
       },
       "ValidationError": {
         "properties": {

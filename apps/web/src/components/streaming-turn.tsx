@@ -2,13 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { StreamCard, mergeToolCall } from "@/components/stream-card";
+import { StreamCard, mergeToolCall } from "@kongming/ui/stream-card";
 import {
   streamChatQuery,
   type ChatQueryOut,
   type StreamStageOut,
   type StreamToolCallOut,
-} from "@/lib/api";
+} from "@kongming/api-client/api";
 
 interface StreamingTurnProps {
   /** 发起时冻结的请求体(单次生效,不随页面重渲染变更) */

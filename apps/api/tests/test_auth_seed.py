@@ -38,6 +38,9 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
         "system:billing:manage",
         # 仅超管种子覆盖,不进 DEVELOPER 推荐集
         "system:chat-quality:view",
+        # 控制面状态与本地命令(管理台)
+        "system:control:manage",
+        "system:control:view",
         "system:datasource:manage",
         "system:document:manage",
         "system:feedback:handle",
@@ -90,7 +93,7 @@ async def test_seed_empty_db_creates_everything(session: AsyncSession) -> None:
                 " WHERE r.role_key='SUPER_ADMIN'"
             )
         )
-    ).scalar_one() == 40  # 全量权限点数(见 seed.PERMISSIONS)
+    ).scalar_one() == 42  # 全量权限点数(见 seed.PERMISSIONS)
     # DEVELOPER 默认绑定聊天执行、反馈提交和三项只读权限;公告写工具需显式授予。
     dev_perms = (
         (
@@ -138,12 +141,12 @@ async def test_seed_idempotent_on_repeat(
 
     assert await _count("public.sys_user") == 1
     assert await _count("public.sys_role") == 2
-    assert await _count("public.sys_permission") == 40
+    assert await _count("public.sys_permission") == 42
     assert await _count("public.sys_tenant") == 1
     assert await _count("public.sys_user_role") == 1
     assert await _count("public.sys_user_tenant") == 1
-    # 超管全量 40 + DEVELOPER 推荐 15
-    assert await _count("public.sys_role_permission") == 55
+    # 超管全量 42 + DEVELOPER 推荐 15
+    assert await _count("public.sys_role_permission") == 57
 
 
 async def test_seed_binds_admin_subject(

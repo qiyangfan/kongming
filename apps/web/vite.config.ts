@@ -1,7 +1,8 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { fileURLToPath, URL } from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 
 const REACT_VENDOR_PACKAGES = new Set([
   "react",
@@ -67,11 +68,38 @@ function vendorChunk(name: string): string | undefined {
   return undefined;
 }
 
+/* 旧入口 308:/admin、/admin/* → 管理台同路径;深链不 404、不渲染旧管理页。
+   生产由反代执行同规则(见 HANDOFF);本地 dev/preview 由此插件承担。 */
+function adminRedirectPlugin(): Plugin {
+  const target = process.env.VITE_ADMIN_ORIGIN ?? "http://127.0.0.1:5174";
+  const handle = (req: IncomingMessage, res: ServerResponse, next: () => void): void => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    if (url.pathname === "/admin" || url.pathname.startsWith("/admin/")) {
+      const rest = url.pathname.slice("/admin".length) || "/";
+      res.statusCode = 308;
+      res.setHeader("Location", `${target}${rest}${url.search}`);
+      res.end();
+      return;
+    }
+    next();
+  };
+  return {
+    name: "admin-redirect",
+    configureServer(server) {
+      server.middlewares.use(handle);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(handle);
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     // 启用 React Compiler，在构建时自动优化组件更新。
     react({ compiler: true }),
     tailwindcss(),
+    adminRedirectPlugin(),
   ],
   resolve: {
     alias: {

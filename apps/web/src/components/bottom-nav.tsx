@@ -2,9 +2,9 @@
 
 import { NavLink } from "react-router";
 
-import { useAuth } from "@/lib/auth-store";
-import { visibleNav } from "@/lib/nav";
-import { cn } from "@/lib/utils";
+import { useAuth } from "@kongming/api-client/auth-store";
+import { visibleNav } from "@kongming/api-client/nav";
+import { cn } from "@kongming/api-client/utils";
 
 export function BottomNav() {
   const { user } = useAuth();

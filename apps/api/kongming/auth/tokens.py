@@ -43,11 +43,17 @@ def _keypair() -> KeyPair:
     return priv, pub
 
 
-def issue(user_id: str, token_type: TokenType, extra: dict[str, object] | None = None) -> str:
+def issue(
+    user_id: str,
+    token_type: TokenType,
+    extra: dict[str, object] | None = None,
+    ttl_sec: int | None = None,
+) -> str:
     s = get_settings()
     priv, _ = _keypair()
     is_access = token_type == "access"  # noqa: S105 —— 字面量分支标记,非密钥
-    ttl = s.access_token_ttl_sec if is_access else s.refresh_token_ttl_sec
+    default_ttl = s.access_token_ttl_sec if is_access else s.refresh_token_ttl_sec
+    ttl = default_ttl if ttl_sec is None else ttl_sec
     now = datetime.now(UTC)
     claims = {
         "iss": s.jwt_issuer,

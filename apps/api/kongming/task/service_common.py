@@ -59,4 +59,10 @@ async def move_task(
     )
     if row is None:
         raise TaskConflict("任务状态/版本已变更,请刷新重试")
+    if to in m.TASK_TERMINAL:
+        from kongming.control.events import report_product_event
+
+        report_product_event(
+            "task.terminal", tenant_id=tenant_id, user_id=user_id, attributes={"status": to}
+        )
     return to

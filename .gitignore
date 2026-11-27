@@ -48,3 +48,5 @@ apps/api/evals/.baseline_fingerprint
 apps/web/playwright-report/
 apps/web/test-results/
 apps/web/coverage/
+apps/admin/playwright-report/
+apps/admin/test-results/

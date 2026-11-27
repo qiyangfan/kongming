@@ -4,14 +4,18 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 
-import { DataView, type DataViewColumn } from "@/components/data-view";
-import { ErrorAlert } from "@/components/error-alert";
-import { PageHeader } from "@/components/page-header";
-import { Pagination } from "@/components/pagination";
-import { StatusBadge } from "@/components/status-badge";
-import { useTenant } from "@/lib/tenant-store";
-import { listReports, REPORT_PHASE_LABEL, REPORT_STATUS_META } from "@/lib/report-api";
-import type { ReportItem } from "@/lib/report-api";
+import { DataView, type DataViewColumn } from "@kongming/ui/data-view";
+import { ErrorAlert } from "@kongming/ui/error-alert";
+import { PageHeader } from "@kongming/ui/page-header";
+import { Pagination } from "@kongming/ui/pagination";
+import { StatusBadge } from "@kongming/ui/status-badge";
+import { useTenant } from "@kongming/api-client/tenant-store";
+import {
+  listReports,
+  REPORT_PHASE_LABEL,
+  REPORT_STATUS_META,
+} from "@kongming/api-client/report-api";
+import type { ReportItem } from "@kongming/api-client/report-api";
 
 const PAGE_SIZE = 20;
 const REPORTS_POLL_MS = 2000;

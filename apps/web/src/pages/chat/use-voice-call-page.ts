@@ -2,8 +2,8 @@
    ChatPage 只消费状态与入口回调,媒体面细节在 use-voice-call。 */
 
 import { useEffect, useRef, useState } from "react";
-import { getVoiceCapability } from "@/lib/api";
-import { STOP_REPLY } from "@/lib/voice-call";
+import { getVoiceCapability } from "@kongming/api-client/api";
+import { STOP_REPLY } from "@kongming/api-client/voice-call";
 import { useVoiceCall } from "./use-voice-call";
 
 interface UseVoiceCallPageOptions {

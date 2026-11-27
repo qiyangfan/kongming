@@ -21,6 +21,9 @@ from starlette.requests import Request as _Req
 from starlette.responses import JSONResponse, Response
 from starlette.responses import Response as _Resp
 
+from kongming import __version__ as _app_version
+from kongming.adminauth.router import register_adminauth_error_handlers
+from kongming.adminauth.router import router as admin_auth_router
 from kongming.app_registry import bind_app
 from kongming.attachment.router import chat_router as attachment_chat_router
 from kongming.attachment.router import internal_router as attachment_internal_router
@@ -29,7 +32,6 @@ from kongming.audit.router import router as audit_router
 from kongming.auth.router import register_auth_error_handlers
 from kongming.auth.router import router as auth_router
 from kongming.auth.seed import seed_all
-from kongming.billing.router import router as billing_router
 from kongming.bot.router import public_router as bot_public_router
 from kongming.bot.router import router as bot_router
 from kongming.chat.dependencies import install_turn_canceler
@@ -37,6 +39,9 @@ from kongming.chat.internal_router import router as chat_internal_router
 from kongming.chat.router import router as chat_router
 from kongming.config import get_settings
 from kongming.connector.router import router as connector_router
+from kongming.control.dependencies import get_control_runtime
+from kongming.control.router import read_router as control_read_router
+from kongming.control.router import router as control_router
 from kongming.datasource.cipher import get_cipher
 from kongming.datasource.router import register_datasource_error_handlers
 from kongming.datasource.router import router as datasource_router
@@ -103,80 +108,6 @@ async def _daily_archive_loop() -> None:
             log.info("每日审计归档完成: %s", result)
         except Exception:  # 调度循环永不退出
             log.exception("每日审计归档失败(下轮重试)")
-
-
-async def _monthly_invoice_loop() -> None:
-    """月首出账循环：每小时检查，每月 1 日 04 点后为上月未出账租户
-    生成账单(幂等;独立短会话,失败下小时轮重试)。"""
-    while True:
-        await asyncio.sleep(3600)  # 小时轮(首 tick 立即判)
-        try:
-            from datetime import UTC, datetime
-
-            now = datetime.now(UTC)
-            if now.day != 1 or now.hour < 4:
-                continue
-            from kongming.auth.repository import SqlOperLogRepo
-            from kongming.billing.repository import SqlBillingRepo
-            from kongming.billing.service import BillingService
-
-            class _InvOper:
-                def __init__(self, s: AsyncSession) -> None:
-                    self._r = SqlOperLogRepo(s)
-
-                async def log(self, *, action: str, target: str, detail: dict[str, object]) -> None:
-                    await self._r.add(None, action, target, detail)
-
-            async with get_sessionmaker()() as s:
-                # 出账审计注入(generate 内部 commit 连带落库)
-                n = await BillingService(SqlBillingRepo(s), _InvOper(s)).generate_monthly_invoices()
-            if n:
-                log.info("月首出账完成: %d 条", n)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            # 失败不睡 20h——下一小时轮重试(出账幂等,重试安全;
-            # 此前失败即睡到 2 号,该月账单永久缺失)
-            log.warning("月首出账异常(下小时轮重试)", exc_info=True)
-            continue
-        # 每日最多一次(成功出账/非出账日后睡到次日)
-        await asyncio.sleep(20 * 3600)
-
-
-async def _payment_expire_loop() -> None:
-    """支付单过期兜底循环：04 点后每小时扫描，CREATED 过期单置
-    EXPIRED(惰性过期为主路径,此处兜底;独立短会话,失败下小时轮重试)。"""
-    while True:
-        await asyncio.sleep(3600)
-        try:
-            from datetime import UTC, datetime
-
-            # 窗口放宽到 4 点后全天,失败可当日重试
-            # (幂等;成功后 20h 睡眠防重复)
-            if datetime.now(UTC).hour < 4:
-                continue
-            from kongming.auth.repository import SqlOperLogRepo
-            from kongming.billing.repository import SqlBillingRepo
-            from kongming.billing.service import BillingService
-
-            class _ExpOper:
-                def __init__(self, s: AsyncSession) -> None:
-                    self._r = SqlOperLogRepo(s)
-
-                async def log(self, *, action: str, target: str, detail: dict[str, object]) -> None:
-                    await self._r.add(None, action, target, detail)
-
-            async with get_sessionmaker()() as s:
-                n = await BillingService(SqlBillingRepo(s), _ExpOper(s)).expire_overdue_payments()
-                await s.commit()
-            if n:
-                log.info("支付单过期兜底: %d 单置 EXPIRED", n)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            log.warning("支付单过期兜底异常(下小时轮重试)", exc_info=True)
-            continue
-        await asyncio.sleep(20 * 3600)
 
 
 async def _attachment_cleanup_loop() -> None:
@@ -349,14 +280,14 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
     async with get_sessionmaker()() as session:
         await _startup(session)
     archive_task = asyncio.create_task(_daily_archive_loop())
-    billing_task = asyncio.create_task(_monthly_invoice_loop())
-    expire_task = asyncio.create_task(_payment_expire_loop())
     attach_task = asyncio.create_task(_attachment_cleanup_loop())
     # 看门狗开关关闭则不创建循环(停用即回到既有收口链行为)
     watchdog_task = (
         asyncio.create_task(_task_watchdog_loop()) if get_settings().watchdog_enabled else None
     )
     start_trigger_scheduler()  # cron 调度循环(30s tick,单进程形态)
+    control_runtime = get_control_runtime()
+    control_runtime.start()  # 控制面缺席不阻塞:仅启动后台循环
 
     # 语音侧系统取消端口注入(voice→chat 经窄签名反转;语义=用户显式取消)
     async def _voice_cancel(user_id: str, trace_id: str) -> None:
@@ -383,20 +314,17 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
         with contextlib.suppress(BaseException):
             await mcp_sm_cm.__aexit__(None, None, None)
         archive_task.cancel()
-        billing_task.cancel()
-        expire_task.cancel()
         attach_task.cancel()
         if watchdog_task is not None:
             watchdog_task.cancel()
         # 收割防 pending 残留
         await asyncio.gather(
             archive_task,
-            billing_task,
-            expire_task,
             attach_task,
             return_exceptions=True,
         )
         await stop_trigger_scheduler()
+        await control_runtime.stop()
         await dispose_read_engines()
 
 
@@ -404,7 +332,7 @@ setup_logging(level=get_settings().log_level, json_logs=get_settings().environme
 
 app = FastAPI(
     title="Kongming API",
-    version="0.1.0",
+    version=_app_version,
     description="控制面:持凭证、做安全决策(ADR-002)",
     lifespan=lifespan,
 )
@@ -428,6 +356,7 @@ class _TraceIdMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(_TraceIdMiddleware)
 app.include_router(auth_router)
+app.include_router(admin_auth_router)
 app.include_router(internal_router)
 app.include_router(internal_meta_router)
 app.include_router(chat_router)
@@ -465,15 +394,17 @@ app.include_router(trigger_router)
 app.include_router(trigger_webhook_router)
 app.include_router(team_router)
 app.include_router(store_router)
-app.include_router(billing_router)
 app.include_router(report_router)
 app.include_router(report_internal_router)
 app.include_router(task_router)
 app.include_router(task_internal_router)
 app.include_router(connector_router)
+app.include_router(control_router)
+app.include_router(control_read_router)
 # 语音通话(ADR-013);根级 Mount 兜底之前注册(新路由须在其前)
 app.include_router(voice_router)
 register_auth_error_handlers(app)
+register_adminauth_error_handlers(app)
 register_system_error_handlers(app)
 register_datasource_error_handlers(app)
 
@@ -487,6 +418,38 @@ async def healthz() -> dict[str, str]:
 # 裸 /mcp 会 307;根级须是最后一条路由兜住未匹配路径,非 /mcp 由闸层
 # 404 守卫保持既有 404 形态)
 app.mount("", _mcp_inbound_proxy)
+
+
+_CONTROL_PUBLIC_PREFIXES = (
+    "/healthz",
+    "/auth/",
+    "/admin-auth/",
+    "/internal/",
+    "/service-read/",
+    "/mcp",
+    "/docs",
+    "/openapi.json",
+    "/redoc",
+    "/favicon.ico",
+)
+
+
+@app.middleware("http")
+async def guard_control_security(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """managed 且无有效安全类快照时,拒绝受保护操作(失败关闭,不看 stale)。"""
+    runtime = get_control_runtime()
+    if not runtime.managed:
+        return await call_next(request)
+    path = request.url.path
+    if path.startswith(_CONTROL_PUBLIC_PREFIXES):
+        return await call_next(request)
+    if not await runtime.security_available():
+        return JSONResponse(
+            status_code=503, content={"detail": "control security context unavailable"}
+        )
+    return await call_next(request)
 
 
 @app.middleware("http")

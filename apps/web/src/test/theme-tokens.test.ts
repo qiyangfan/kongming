@@ -63,7 +63,13 @@ function contrast(a: [number, number, number], b: [number, number, number]): num
 }
 
 describe("index.css 主题 token", () => {
-  const css = readFileSync(fileURLToPath(new URL("../index.css", import.meta.url)), "utf8");
+  const css = [
+    readFileSync(
+      fileURLToPath(new URL("../../../../packages/ui/theme.css", import.meta.url)),
+      "utf8",
+    ),
+    readFileSync(fileURLToPath(new URL("../index.css", import.meta.url)), "utf8"),
+  ].join("\n");
 
   it(":root 的每个主题 token 都有 .dark 覆盖(宪法 Article 3/10)", () => {
     const root = blockTokens(css, ":root");

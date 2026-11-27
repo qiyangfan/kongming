@@ -4,11 +4,11 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Brain, Download } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { DataView } from "@/components/data-view";
-import { ErrorAlert } from "@/components/error-alert";
-import { api } from "@/lib/api";
-import { listMyTeams } from "@/lib/team-api";
+import { Button } from "@kongming/ui/button";
+import { DataView } from "@kongming/ui/data-view";
+import { ErrorAlert } from "@kongming/ui/error-alert";
+import { api } from "@kongming/api-client/api";
+import { listMyTeams } from "@kongming/api-client/team-api";
 
 import {
   type MemoryItem,

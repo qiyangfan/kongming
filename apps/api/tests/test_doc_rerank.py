@@ -55,7 +55,6 @@ _PROD_KW: dict[str, Any] = {
     "jwt_public_key_pem": "k",
     "internal_token": "k",
     "datasource_encrypt_key": "k" * 32,
-    "billing_mock_secret": "prod-real-secret",
     "websearch_provider": "",
     "websearch_api_key": "",
 }

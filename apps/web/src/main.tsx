@@ -4,11 +4,11 @@ import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
 
 import { AppLayout } from "@/components/app-layout";
-import { PermRoute } from "@/components/perm-route";
-import { Skeleton } from "@/components/ui/skeleton";
+import { PermRoute } from "@kongming/ui/perm-route";
+import { Skeleton } from "@kongming/ui/skeleton";
 import Login from "@/pages/Login";
 import OAuthCallback from "@/pages/OAuthCallback";
-import { NotFoundPage } from "@/components/error-pages";
+import { NotFoundPage } from "@kongming/ui/error-pages";
 import "./index.css";
 
 /* 首屏外路由懒加载；登录页与公开 Bot 嵌入页保持静态导入。 */
@@ -18,32 +18,9 @@ const ReportsPage = lazy(() => import("@/pages/ReportsPage"));
 const ReportDetailPage = lazy(() => import("@/pages/ReportDetailPage"));
 const TasksPage = lazy(() => import("@/pages/TasksPage"));
 const TaskDetailPage = lazy(() => import("@/pages/TaskDetailPage"));
-const PortalPage = lazy(() => import("@/pages/PortalPage"));
-const PayPage = lazy(() => import("@/pages/PayPage"));
 const StorePage = lazy(() => import("@/pages/StorePage"));
 const ChatPage = lazy(() => import("@/pages/ChatPage"));
 const BotPublicPage = lazy(() => import("@/pages/BotPublicPage"));
-const AdminLayout = lazy(() => import("@/pages/admin/AdminLayout"));
-const AdminIndexPage = lazy(() => import("@/pages/admin/AdminIndexPage"));
-const DatasourcesPage = lazy(() => import("@/pages/admin/DatasourcesPage"));
-const DeptsPage = lazy(() => import("@/pages/admin/DeptsPage"));
-const RolesPage = lazy(() => import("@/pages/admin/RolesPage"));
-const UsersPage = lazy(() => import("@/pages/admin/UsersPage"));
-const RagPage = lazy(() => import("@/pages/admin/RagPage"));
-const AuditPage = lazy(() => import("@/pages/admin/AuditPage"));
-const ToolsPage = lazy(() => import("@/pages/admin/ToolsPage"));
-const FeedbackPage = lazy(() => import("@/pages/admin/FeedbackPage"));
-const BillingPage = lazy(() => import("@/pages/admin/BillingPage"));
-const GuardrailsPage = lazy(() => import("@/pages/admin/GuardrailsPage"));
-const SemanticPage = lazy(() => import("@/pages/admin/SemanticPage"));
-const BotsPage = lazy(() => import("@/pages/admin/BotsPage"));
-const McpPage = lazy(() => import("@/pages/admin/McpPage"));
-const ConnectorsPage = lazy(() => import("@/pages/admin/ConnectorsPage"));
-const WorkflowsPage = lazy(() => import("@/pages/admin/WorkflowsPage"));
-const TriggersPage = lazy(() => import("@/pages/admin/TriggersPage"));
-const TeamsPage = lazy(() => import("@/pages/admin/TeamsPage"));
-const UsagePage = lazy(() => import("@/pages/admin/UsagePage"));
-const QualityPage = lazy(() => import("@/pages/admin/QualityPage"));
 
 function RouteSuspenseFallback() {
   return (
@@ -96,22 +73,6 @@ const router = createBrowserRouter([
         ),
       },
       {
-        path: "portal",
-        element: el(
-          <PermRoute perm="developer:portal">
-            <PortalPage />
-          </PermRoute>,
-        ),
-      },
-      {
-        path: "portal/pay/:paymentId",
-        element: el(
-          <PermRoute perm="developer:portal">
-            <PayPage />
-          </PermRoute>,
-        ),
-      },
-      {
         path: "store",
         element: el(
           <PermRoute perm="bot:run">
@@ -158,165 +119,6 @@ const router = createBrowserRouter([
             <MemoryPage />
           </PermRoute>,
         ),
-      },
-      {
-        path: "admin",
-        element: el(<AdminLayout />),
-        children: [
-          { index: true, element: el(<AdminIndexPage />) },
-          {
-            path: "users",
-            element: el(
-              <PermRoute perm="system:user:manage">
-                <UsersPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "roles",
-            element: el(
-              <PermRoute perm="system:role:manage">
-                <RolesPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "depts",
-            element: el(
-              <PermRoute perm="system:user:manage">
-                <DeptsPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "datasources",
-            element: el(
-              <PermRoute perm="system:datasource:manage">
-                <DatasourcesPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "rag",
-            element: el(
-              <PermRoute perm="system:rag:manage">
-                <RagPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "feedback",
-            element: el(
-              <PermRoute perm="system:feedback:view">
-                <FeedbackPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "audit",
-            element: el(
-              <PermRoute perm="system:audit:view">
-                <AuditPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "tools",
-            element: el(
-              <PermRoute perm="system:tool:manage">
-                <ToolsPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "guardrails",
-            element: el(
-              <PermRoute perm="system:guardrail:manage">
-                <GuardrailsPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "semantic",
-            element: el(
-              <PermRoute perm="system:semantic:manage">
-                <SemanticPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "mcp",
-            element: el(
-              <PermRoute perm="system:mcp:manage">
-                <McpPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "connectors",
-            element: el(
-              <PermRoute perm="connector:manage">
-                <ConnectorsPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "workflow",
-            element: el(
-              <PermRoute perm="system:workflow:manage">
-                <WorkflowsPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "triggers",
-            element: el(
-              <PermRoute perm="system:trigger:manage">
-                <TriggersPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "billing",
-            element: el(
-              <PermRoute perm="system:billing:manage">
-                <BillingPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "teams",
-            element: el(
-              <PermRoute perm="system:team:manage">
-                <TeamsPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "bots",
-            element: el(
-              <PermRoute perm="chat:execute">
-                <BotsPage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "usage",
-            element: el(
-              <PermRoute perm="system:llm-usage:view">
-                <UsagePage />
-              </PermRoute>,
-            ),
-          },
-          {
-            path: "quality",
-            element: el(
-              <PermRoute perm="system:chat-quality:view">
-                <QualityPage />
-              </PermRoute>,
-            ),
-          },
-        ],
       },
       { path: "*", element: el(<NotFoundPage />) },
     ],

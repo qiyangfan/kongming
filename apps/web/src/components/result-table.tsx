@@ -1,6 +1,6 @@
 /* 问答和报告详情共用的结果表；动态列在窄屏内横向滚动。 */
 
-import { cellText } from "@/lib/utils";
+import { cellText } from "@kongming/api-client/utils";
 
 /** 单元格展示文本与 title:空值显示破折号,其余按弱类型转文本。 */
 function displayCell(cell: unknown): { text: string; title: string | undefined } {

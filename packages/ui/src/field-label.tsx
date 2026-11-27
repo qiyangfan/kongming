@@ -1,0 +1,38 @@
+import { CircleHelp } from "lucide-react";
+
+import { Button } from "@kongming/ui/button";
+import { Label } from "@kongming/ui/label";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kongming/ui/tooltip";
+
+/** 表单标签，可附带说明 Tooltip。 */
+export function FieldLabel({
+  htmlFor,
+  help,
+  children,
+}: {
+  htmlFor?: string | undefined;
+  help: string;
+  children: string;
+}) {
+  return (
+    <span className="flex items-center gap-1">
+      <Label htmlFor={htmlFor} className="whitespace-nowrap">
+        {children}
+      </Label>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-5 shrink-0 text-muted-foreground hover:text-foreground"
+            aria-label={`${children}的说明`}
+          >
+            <CircleHelp className="size-3.5" aria-hidden />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-72">{help}</TooltipContent>
+      </Tooltip>
+    </span>
+  );
+}

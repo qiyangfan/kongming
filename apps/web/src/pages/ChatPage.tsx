@@ -5,14 +5,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, AudioLines } from "lucide-react";
 import { useParams } from "react-router";
 
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import type { ChatQueryOut } from "@/lib/api";
-import { useAgentMode } from "@/lib/agent-mode-store";
-import { useAuth } from "@/lib/auth-store";
-import { hasPerm } from "@/lib/nav";
-import { useDatasource } from "@/lib/datasource-store";
-import { useTenant } from "@/lib/tenant-store";
+import { Button } from "@kongming/ui/button";
+import { ScrollArea } from "@kongming/ui/scroll-area";
+import type { ChatQueryOut } from "@kongming/api-client/api";
+import { useAgentMode } from "@kongming/api-client/agent-mode-store";
+import { useAuth } from "@kongming/api-client/auth-store";
+import { hasPerm } from "@kongming/api-client/nav";
+import { useDatasource } from "@kongming/api-client/datasource-store";
+import { useTenant } from "@kongming/api-client/tenant-store";
 
 import { ChatThread } from "./chat/chat-thread";
 import { useChatAttachments } from "./chat/use-chat-attachments";

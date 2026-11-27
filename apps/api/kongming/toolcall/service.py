@@ -279,6 +279,19 @@ class _ExecFinisher:
             if row_id is None:
                 return ToolOutcome(status="ERROR", reason="审计写入失败", duration_ms=elapsed)
             confirm_id = row_id
+        from kongming.control.events import report_product_event
+
+        report_product_event(
+            "tool.call",
+            tenant_id=self._tenant_id,
+            user_id=req.user_id,
+            attributes={
+                "tool_name": req.tool_name,
+                "status": status,
+                "domain": self._domain or "",
+                "channel": req.channel,
+            },
+        )
         return ToolOutcome(
             status=status,  # type: ignore[arg-type]  # 调用方仅传合法枚举
             reason=reason,

@@ -1,0 +1,5 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@kongming/ui/theme.css";
+
+@source "../../../packages/ui/src";

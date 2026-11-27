@@ -5,8 +5,8 @@ import type { RefObject } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 
-import type { ChatQueryOut } from "@/lib/api";
-import type { StopNotice } from "@/lib/turn-stop";
+import type { ChatQueryOut } from "@kongming/api-client/api";
+import type { StopNotice } from "@kongming/api-client/turn-stop";
 
 import {
   buildStreamBody,

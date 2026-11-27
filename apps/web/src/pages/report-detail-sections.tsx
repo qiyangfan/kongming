@@ -1,11 +1,11 @@
 /* 报告详情的章节呈现:章节标题/叙述、数据绑定表、绑定图表。 */
 
 import { ChartView } from "@/components/chart-view";
-import type { ChartSpec } from "@/lib/chart-shared";
-import { MarkdownText } from "@/components/markdown-text";
+import type { ChartSpec } from "@kongming/api-client/chart-shared";
+import { MarkdownText } from "@kongming/ui/markdown-text";
 import { ResultTable } from "@/components/result-table";
-import type { ReportBinding, SectionOut } from "@/lib/report-api";
-import { cellText } from "@/lib/utils";
+import type { ReportBinding, SectionOut } from "@kongming/api-client/report-api";
+import { cellText } from "@kongming/api-client/utils";
 
 /** 运行时弱类型的绑定收窄为强类型快照。 */
 function binding(b: { [key: string]: unknown }): ReportBinding {

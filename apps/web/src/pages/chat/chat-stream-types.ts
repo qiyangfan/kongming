@@ -1,7 +1,7 @@
 /* 在途流的数据类型：发起态、发起上下文、待确认卡与外部入参、对外 API 契约。 */
 
-import type { ChatQueryOut } from "@/lib/api";
-import type { StopNotice } from "@/lib/turn-stop";
+import type { ChatQueryOut } from "@kongming/api-client/api";
+import type { StopNotice } from "@kongming/api-client/turn-stop";
 
 /** 在途流状态:发起时一次性创建,过程事件不经它广播 */
 export interface StreamingTurnStart {

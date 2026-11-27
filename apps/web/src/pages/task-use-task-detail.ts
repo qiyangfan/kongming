@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { decideGraphConfirm, getTask, listCollabRuns } from "@/lib/task-api";
-import { useTenant } from "@/lib/tenant-store";
+import { decideGraphConfirm, getTask, listCollabRuns } from "@kongming/api-client/task-api";
+import { useTenant } from "@kongming/api-client/tenant-store";
 
 // 活动期轮询节奏;终态即停
 const TASK_ACTIVE_POLL_MS = 2000;
@@ -45,7 +45,7 @@ export function useTaskDetail(taskId: string) {
 
   const act = useMutation({
     mutationFn: async (kind: "pause" | "resume" | "cancel") => {
-      const { pauseTask, resumeTask, cancelTask } = await import("@/lib/task-api");
+      const { pauseTask, resumeTask, cancelTask } = await import("@kongming/api-client/task-api");
       if (kind === "pause") return pauseTask(taskId);
       if (kind === "resume") return resumeTask(taskId);
       return cancelTask(taskId);
@@ -59,7 +59,7 @@ export function useTaskDetail(taskId: string) {
 
   const approve = useMutation({
     mutationFn: async (input: { stepId: string; approve: boolean }) => {
-      const { approveStep } = await import("@/lib/task-api");
+      const { approveStep } = await import("@kongming/api-client/task-api");
       return approveStep(taskId, input.stepId, input.approve);
     },
     onSuccess: () => {

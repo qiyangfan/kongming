@@ -1,0 +1,180 @@
+/* 品牌色集中定义于此；组件应引用 token，色彩含义见 docs/brand.md。 */
+
+@custom-variant dark (&:is(.dark *));
+
+/* Tailwind v4 的裸 border 使用 currentColor；全局边框、轮廓和页面底色统一映射到语义 token。 */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+
+    /* 禁用移动端点击闪斑，并隔离嵌套滚动。 */
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: contain;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* 安全区工具类让贴边内容避开刘海和 Home 指示条。 */
+@utility pb-safe {
+  padding-bottom: var(--kb-safe-bottom);
+}
+
+@utility pl-safe {
+  padding-left: env(safe-area-inset-left, 0);
+}
+
+@utility pr-safe {
+  padding-right: env(safe-area-inset-right, 0);
+}
+
+/* 为页面内容和 Portal 浮层预留顶部安全区。 */
+@utility pt-safe {
+  padding-top: var(--kb-safe-top);
+}
+
+/* 窄屏底部导航占用行高和安全区；桌面布局不预留空间。 */
+@utility pb-safe-nav {
+  padding-bottom: calc(4rem + var(--kb-safe-bottom));
+}
+
+:root {
+  color-scheme: light;
+
+  /* 非全面屏设备返回 0px，不影响现有布局。 */
+  --kb-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --kb-safe-top: env(safe-area-inset-top, 0px);
+
+  /* 语义 token:主色朱砂(武侯祠红墙,庄重决断);鎏金仅点睛;中性色配黛瓦青灰 */
+  --background: #fbfaf7; /* 宣纸白(微暖,非冷白) */
+  --foreground: #1f2933; /* 青墨字 */
+  --card: #fff;
+  --card-foreground: #1f2933;
+  --primary: #8f2d2f; /* 红墙朱砂:深沉庄重,非高唤醒亮红 */
+  --primary-foreground: #fdf9f0; /* 宣纸白 */
+  --secondary: #eef0ec; /* 青灰浅 */
+  --secondary-foreground: #1f2933;
+  --muted: #eef0ec;
+  --muted-foreground: #52606d; /* 青灰 */
+  --accent: #f5edda; /* 宣纸米黄 */
+  --accent-foreground: #6b2424; /* 深朱 */
+  --destructive: #dc2626; /* 错误语义用鲜红,与朱砂 primary 靠明度区分 */
+  --destructive-foreground: #fff;
+  --success: #15803d; /* 成功语义:入账/绑定完成等正向反馈(词汇表对齐宪法 Article 3) */
+  --success-foreground: #fff;
+  --warning: #b45309; /* 警告语义:待支付/降级等中间态提示 */
+  --warning-foreground: #fff;
+  --border: #dfe3de; /* 青灰线:分隔线/卡片描边,刻意低对比是设计意图 */
+
+  /* 未选控件主要依靠边界辨识，需满足非文本控件 3:1 对比度。 */
+  --input: #808c86;
+
+  /* 轨道填充与控件描边分开设置，避免未选开关看起来像已开启。 */
+  --input-fill: #dfe3de;
+  --ring: #c9a063; /* 鎏金点睛:匾额之金,哑光不炫 */
+}
+
+.dark {
+  color-scheme: dark;
+
+  --background: #0e1416; /* 黛墨夜 */
+  --foreground: #eef0ec;
+  --card: #151d20; /* 黛瓦暗面 */
+  --card-foreground: #eef0ec;
+  --primary: #b0484a; /* 夜祠朱门:暗底提亮一档 */
+  --primary-foreground: #fdf9f0;
+  --secondary: #243034;
+  --secondary-foreground: #eef0ec;
+  --muted: #243034;
+  --muted-foreground: #9aa8ae;
+  --accent: #2a2018; /* 暗金底 */
+  --accent-foreground: #dcc08a;
+  --destructive: #ef4444;
+  --destructive-foreground: #fff;
+  --success: #4ade80; /* 暗底提亮一档的可读绿 */
+  --success-foreground: #052e16;
+  --warning: #fbbf24;
+  --warning-foreground: #451a03;
+  --border: #2a363a;
+  --input: #62767c; /* 黛青控件线:对卡面 3.58、对底 3.89,与亮色同一口径(不沿用分隔线值) */
+  --input-fill: #2a363a; /* 控件底/轨道填充,同亮色口径与 --input 解耦(宪法 Article 3) */
+  --ring: #c9a063;
+}
+
+@theme inline {
+  --font-sans:
+    -apple-system, blinkmacsystemfont, "Segoe UI", roboto, "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+
+  /* 补充 Tailwind 内建字号之间的刻度，业务代码统一使用这些 token。 */
+  --text-3xs: 0.625rem; /* 10px:分组标题/时间戳等最小微字 */
+  --text-2xs: 0.6875rem; /* 11px:slogan/工具名等辅助微字 */
+  --text-md: 0.9375rem; /* 15px:对话正文/响应文本档(sm 与 base 之间) */
+  --text-code-inline: 0.85em; /* 内联代码相对父级缩放(em,随上下文字号) */
+
+  /* 语义层 → Tailwind 色类(bg-background / text-muted-foreground / …) */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  /* 浮层别名:下拉/确认框等 portal 浮层与卡片同族(docs/brand.md) */
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-fill: var(--input-fill);
+  --color-ring: var(--ring);
+
+  /* 品牌点缀:鎏金(匾额之金,logo 一笔/高亮/点睛,禁大面积铺开) */
+  --color-gild: #c9a063;
+
+  /* 品牌渐变:黛瓦暮色(黛青→深黛→墨),沉静不晃眼 */
+  --color-grad-from: #2e4a56; /* 黛瓦 */
+  --color-grad-mid: #1d3742; /* 深黛 */
+  --color-grad-end: #0f1a22; /* 青墨 */
+
+  /* 时间轴突出运行中的节点，并保留已完成节点，便于查看重试过程。 */
+  --animate-timeline-ping: timeline-ping 1.8s cubic-bezier(0, 0, 0.2, 1)
+    infinite;
+  --animate-shimmer: shimmer 2.4s linear infinite;
+
+  @keyframes timeline-ping {
+    0% {
+      transform: scale(1);
+      opacity: 0.7;
+    }
+
+    75%,
+    100% {
+      transform: scale(2.4);
+      opacity: 0;
+    }
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: 200% center;
+    }
+
+    100% {
+      background-position: -200% center;
+    }
+  }
+}

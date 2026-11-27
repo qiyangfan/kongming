@@ -77,17 +77,6 @@ Service = Annotated[SystemService, Depends(get_system_service)]
 # ---- 传输模型 ----
 
 
-class UserUpdateIn(BaseModel):
-    """全量更新用户资料与授权;username 由Keycloak登录建档决定,创建后不可修改。"""
-
-    nickname: str = Field(max_length=64)
-    email: str | None = Field(default=None, max_length=128)
-    status: UserStatus
-    dept_id: uuid.UUID | None = None
-    tenant_id: uuid.UUID
-    role_ids: list[uuid.UUID] = Field(default_factory=list[uuid.UUID])
-
-
 class UserItemOut(BaseModel):
     id: str
     username: str
@@ -256,51 +245,52 @@ async def list_users(
     return UserPageOut(total=total, items=[_map_user(u) for u in items])
 
 
+# ---- 身份写入拒绝(共享控制归锦官) ----
+
+
+def _shared_control_readonly() -> None:
+    """租户/成员/粗角色写入口已上收锦官;本地只保留只读身份视图。"""
+    raise HTTPException(status_code=403, detail="SHARED_CONTROL_READONLY")
+
+
 @router.put(
     "/users/{user_id}",
-    status_code=204,
+    status_code=403,
+    include_in_schema=False,
     dependencies=[Depends(require_perm("system:user:manage"))],
 )
-async def update_user(
-    user_id: uuid.UUID, req: UserUpdateIn, user: CurrentUser, svc: Service
-) -> None:
-    await svc.update_user(
-        actor_id=user.user_id,
-        user_id=str(user_id),
-        nickname=req.nickname,
-        email=req.email,
-        status=req.status,
-        dept_id=None if req.dept_id is None else str(req.dept_id),
-        tenant_id=str(req.tenant_id),
-        role_ids=[str(r) for r in req.role_ids],
-    )
+async def update_user_removed(user_id: uuid.UUID) -> None:
+    _shared_control_readonly()
 
 
 @router.delete(
     "/users/{user_id}",
-    status_code=204,
+    status_code=403,
+    include_in_schema=False,
     dependencies=[Depends(require_perm("system:user:manage"))],
 )
-async def delete_user(user_id: uuid.UUID, user: CurrentUser, svc: Service) -> None:
-    await svc.delete_user(actor_id=user.user_id, user_id=str(user_id))
+async def delete_user_removed(user_id: uuid.UUID) -> None:
+    _shared_control_readonly()
 
 
 @router.post(
     "/users/{user_id}/enable",
-    status_code=204,
+    status_code=403,
+    include_in_schema=False,
     dependencies=[Depends(require_perm("system:user:manage"))],
 )
-async def enable_user(user_id: uuid.UUID, user: CurrentUser, svc: Service) -> None:
-    await svc.enable_user(actor_id=user.user_id, user_id=str(user_id))
+async def enable_user_removed(user_id: uuid.UUID) -> None:
+    _shared_control_readonly()
 
 
 @router.post(
     "/users/{user_id}/disable",
-    status_code=204,
+    status_code=403,
+    include_in_schema=False,
     dependencies=[Depends(require_perm("system:user:manage"))],
 )
-async def disable_user(user_id: uuid.UUID, user: CurrentUser, svc: Service) -> None:
-    await svc.disable_user(actor_id=user.user_id, user_id=str(user_id))
+async def disable_user_removed(user_id: uuid.UUID) -> None:
+    _shared_control_readonly()
 
 
 # ---- 角色管理(权限点 system:role:manage) ----

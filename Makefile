@@ -1,4 +1,4 @@
-.PHONY: check api-check agent-check liannu-check web-check contracts contracts-check secret-scan dead-code dup-check deps-audit license-check lint-config lock-check compose-check security-cov spec-check up down
+.PHONY: check api-check agent-check liannu-check web-check admin-check contracts contracts-check secret-scan dead-code dup-check deps-audit license-check lint-config lock-check compose-check security-cov spec-check up down
 
 check: api-check agent-check liannu-check web-check contracts-check dead-code dup-check deps-audit license-check lint-config lock-check compose-check security-cov secret-scan spec-check
 
@@ -35,6 +35,10 @@ liannu-check:
 web-check:
 	cd apps/web && pnpm typecheck && pnpm lint && pnpm dlx madge@8 --circular --extensions ts,tsx src && pnpm lint:css && pnpm format:check && pnpm test:cov && pnpm build && pnpm size && pnpm e2e
 
+# 管理台独立门禁(make check 保持只覆盖用户 web;发布前单独执行)
+admin-check:
+	cd apps/admin && pnpm install --frozen-lockfile && pnpm typecheck && pnpm lint && pnpm lint:css && pnpm format:check && pnpm test:run && pnpm build && pnpm e2e
+
 # 死代码:vulture 只取 100% 置信度(动态注册/数据类误报不进结果);
 # LangGraph 回调参数名由框架签名规定,按名豁免;TS 侧 knip 以 entry 图判定。
 dead-code:
@@ -46,7 +50,7 @@ dead-code:
 
 # 复制粘贴:jscpd 默认 50 tokens,门禁线=重复率 5%(超出即非零);只扫生产路径
 dup-check:
-	npx --yes jscpd@4.3.0 apps/api/kongming apps/agent/kongming_agent packages/liannu/liannu apps/web/src --threshold 5 --format python,typescript,tsx,css --ignore '**/*.gen.ts'
+	npx --yes jscpd@4.3.0 apps/api/kongming apps/agent/kongming_agent packages/liannu/liannu apps/web/src packages/ui/src packages/api-client/src --threshold 5 --format python,typescript,tsx,css --ignore '**/*.gen.ts'
 
 # 依赖漏洞:必须在各自项目环境里审计(uvx 会审到工具自身环境)
 deps-audit:
@@ -101,11 +105,11 @@ contracts-check:
 	cd apps/api && uv run python scripts/export_openapi.py
 	git diff --exit-code contracts/openapi.json
 	# 前端类型由 spec 生成,漏跑契约只拦 spec 不拦产物:再生成一次并断言无差异
-	cd apps/web && pnpm exec openapi-typescript ../../contracts/openapi.json --output src/lib/api-types.gen.ts
+	cd apps/web && pnpm exec openapi-typescript ../../contracts/openapi.json --output ../../packages/api-client/src/api-types.gen.ts
 	# 流事件运行时校验模块同属生成产物:漏生成即拦
 	cd apps/web && node scripts/gen-sse-validator.mjs
-	git diff --exit-code apps/web/src/lib/chat-stream-validate.gen.js apps/web/src/lib/chat-stream-validate.gen.d.ts
-	git diff --exit-code apps/web/src/lib/api-types.gen.ts
+	git diff --exit-code packages/api-client/src/chat-stream-validate.gen.js packages/api-client/src/chat-stream-validate.gen.d.ts
+	git diff --exit-code packages/api-client/src/api-types.gen.ts
 
 contracts:
 	cd apps/api && uv run python scripts/export_openapi.py

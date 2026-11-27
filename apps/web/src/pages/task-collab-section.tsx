@@ -2,11 +2,16 @@
 
 import { GitBranch, TriangleAlert } from "lucide-react";
 
-import { DataView, type DataViewColumn } from "@/components/data-view";
-import { StatusBadge } from "@/components/status-badge";
-import type { CollabRunOut, CollabTurnOut, CollabWorkerOut, TaskDetailOut } from "@/lib/task-api";
-import { COLLAB_STATUS_META } from "@/lib/task-api";
-import { cellText } from "@/lib/utils";
+import { DataView, type DataViewColumn } from "@kongming/ui/data-view";
+import { StatusBadge } from "@kongming/ui/status-badge";
+import type {
+  CollabRunOut,
+  CollabTurnOut,
+  CollabWorkerOut,
+  TaskDetailOut,
+} from "@kongming/api-client/task-api";
+import { COLLAB_STATUS_META } from "@kongming/api-client/task-api";
+import { cellText } from "@kongming/api-client/utils";
 
 // 裁决值中文映射(未知值原样透出)
 const COLLAB_VERDICT_LABELS: Record<string, string> = {

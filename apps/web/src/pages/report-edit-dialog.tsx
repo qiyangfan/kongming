@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Pencil } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@kongming/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -12,11 +12,11 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { saveEdit, type ReportDetailOut, type SectionOut } from "@/lib/report-api";
+} from "@kongming/ui/dialog";
+import { Input } from "@kongming/ui/input";
+import { Label } from "@kongming/ui/label";
+import { Textarea } from "@kongming/ui/textarea";
+import { saveEdit, type ReportDetailOut, type SectionOut } from "@kongming/api-client/report-api";
 
 type SectionEdit = { title?: string; narrative_md?: string };
 

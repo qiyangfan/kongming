@@ -144,51 +144,6 @@ async def test_role_key_immutable(
     assert await _role_id(session, "DEVELOPER") == rid
 
 
-async def test_admin_account_delete_rejected(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser
-) -> None:
-    _, token = await _admin(client, session, make_user)
-    admin_uid = str(get_settings().admin_subject)
-    r = await client.delete(f"/system/users/{admin_uid}", headers=_auth(token))
-    assert r.status_code == 409
-    kept = await session.execute(
-        text("SELECT deleted_at FROM public.sys_user WHERE id=:i"), {"i": admin_uid}
-    )
-    assert kept.scalar_one() is None
-
-
-async def test_self_delete_rejected(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser
-) -> None:
-    uid, token = await _admin(client, session, make_user)
-    r = await client.delete(f"/system/users/{uid}", headers=_auth(token))
-    assert r.status_code == 409
-
-
-async def test_self_disable_rejected(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser
-) -> None:
-    uid, token = await _admin(client, session, make_user)
-    tid = await _default_tenant_id(session)
-    r = await client.put(
-        f"/system/users/{uid}",
-        json={
-            "nickname": "自己",
-            "email": None,
-            "status": "DISABLED",
-            "dept_id": None,
-            "tenant_id": tid,
-            "role_ids": [],
-        },
-        headers=_auth(token),
-    )
-    assert r.status_code == 409
-    status = await session.execute(
-        text("SELECT status FROM public.sys_user WHERE id=:i"), {"i": uid}
-    )
-    assert status.scalar_one() == "ACTIVE"
-
-
 async def test_disabled_user_token_rejected(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
@@ -333,48 +288,23 @@ async def test_dept_cycle_parent_rejected(
 # ============ 履约:用户管理 ============
 
 
-async def test_user_crud_flow(
+async def test_user_list_readonly_and_writes_removed(
     client: AsyncClient, session: AsyncSession, make_user: MakeUser
 ) -> None:
-    """既有主体可编辑授权资料、停用与软删;列表聚合角色/部门。"""
+    """用户页只读:列表可见;身份写入一律 403(共享控制归锦官),不能改账户。"""
     _, token = await _admin(client, session, make_user)
-    tid = await _default_tenant_id(session)
-    dept = await _mk_dept(session, "研发部")
-    dev_role = await _role_id(session, "DEVELOPER")
     uid = await make_user("newbie")
-
-    r = await client.put(
-        f"/system/users/{uid}",
-        json={
-            "nickname": "新人",
-            "email": "newbie@example.com",
-            "status": "ACTIVE",
-            "dept_id": dept,
-            "tenant_id": tid,
-            "role_ids": [dev_role],
-        },
-        headers=_auth(token),
-    )
-    assert r.status_code == 204, r.text
     r = await client.get("/system/users", params={"keyword": "newbie"}, headers=_auth(token))
     assert r.status_code == 200
-    page = r.json()
-    assert page["total"] == 1
-    item = page["items"][0]
-    assert item["username"] == "newbie"
-    assert item["role_keys"] == ["DEVELOPER"]
-    assert item["dept_name"] == "研发部"
-    assert item["dept_id"] == dept
-    assert item["tenant_id"] == tid
-
+    assert r.json()["total"] == 1
+    r = await client.put(f"/system/users/{uid}", json={"nickname": "x"}, headers=_auth(token))
+    assert r.status_code == 403
     r = await client.delete(f"/system/users/{uid}", headers=_auth(token))
-    assert r.status_code == 204
-    soft = await session.execute(
-        text("SELECT deleted_at FROM public.sys_user WHERE id=:i"), {"i": uid}
-    )
-    assert soft.scalar_one() is not None
-    r = await client.get("/system/users", params={"keyword": "newbie"}, headers=_auth(token))
-    assert r.json()["total"] == 0
+    assert r.status_code == 403
+    r = await client.post(f"/system/users/{uid}/enable", headers=_auth(token))
+    assert r.status_code == 403
+    r = await client.post(f"/system/users/{uid}/disable", headers=_auth(token))
+    assert r.status_code == 403
 
 
 async def _role_by_key(client: AsyncClient, token: str, key: str) -> dict[str, Any]:
@@ -728,45 +658,7 @@ async def test_tenant_list(client: AsyncClient, session: AsyncSession, make_user
     assert "default" in keys
 
 
-# ============ 超级管理员保护与密码重置 ============
-
-
-async def test_admin_disable_and_role_strip_rejected(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser
-) -> None:
-    """超管账号不可禁用，也不能解除 SUPER_ADMIN 绑定。"""
-    _, token = await _admin(client, session, make_user)
-    admin_uid = str(get_settings().admin_subject)
-    tid = await _default_tenant_id(session)
-    super_rid = await _role_id(session, "SUPER_ADMIN")
-    base = {
-        "nickname": "超管",
-        "email": None,
-        "dept_id": None,
-        "tenant_id": tid,
-        "role_ids": [super_rid],
-    }
-    # 禁用被拒
-    r = await client.put(
-        f"/system/users/{admin_uid}",
-        json={**base, "status": "DISABLED"},
-        headers=_auth(token),
-    )
-    assert r.status_code == 409
-    # 剥离 SUPER_ADMIN 被拒
-    r = await client.put(
-        f"/system/users/{admin_uid}",
-        json={**base, "status": "ACTIVE", "role_ids": []},
-        headers=_auth(token),
-    )
-    assert r.status_code == 409
-    # 正常编辑(保留 SUPER_ADMIN)放行
-    r = await client.put(
-        f"/system/users/{admin_uid}",
-        json={**base, "status": "ACTIVE", "nickname": "超管改"},
-        headers=_auth(token),
-    )
-    assert r.status_code == 204
+# ============ 角色/部门管理 ============
 
 
 async def test_role_key_format_rejected(
@@ -789,21 +681,6 @@ async def test_write_operations_audited(
     """管理面写操作与业务同事务落操作审计(动作+目标可追溯)。"""
     _, token = await _admin(client, session, make_user)
     tid = await _default_tenant_id(session)
-    uid = await make_user("audit-user")
-    r = await client.put(
-        f"/system/users/{uid}",
-        json={"nickname": "审计改", "status": "ACTIVE", "tenant_id": tid, "role_ids": []},
-        headers=_auth(token),
-    )
-    assert r.status_code == 204
-    # 启停动作:专用端点动作进清单断言
-    r = await client.post(f"/system/users/{uid}/enable", headers=_auth(token))
-    assert r.status_code == 204
-    r = await client.post(f"/system/users/{uid}/disable", headers=_auth(token))
-    assert r.status_code == 204
-    r = await client.delete(f"/system/users/{uid}", headers=_auth(token))
-    assert r.status_code == 204
-    # 角色与部门
     rid_resp = await client.post(
         "/system/roles",
         json={"role_key": "AUDIT_TMP", "role_name": "审计角色"},
@@ -830,19 +707,14 @@ async def test_write_operations_audited(
     did = dept_resp.json()["id"]
     r = await client.delete(f"/system/depts/{did}", headers=_auth(token))
     assert r.status_code == 204
-    # 断言:全部动作都有审计行
     rows = await session.execute(
         text(  # 测试常量
             "SELECT action FROM public.sys_oper_log"
-            " WHERE action LIKE 'user.%' OR action LIKE 'role.%' OR action LIKE 'dept.%'"
+            " WHERE action LIKE 'role.%' OR action LIKE 'dept.%'"
         )
     )
     actions = {str(r[0]) for r in rows}
     expected = {
-        "user.update",
-        "user.delete",
-        "user.enable",
-        "user.disable",
         "role.create",
         "role.bind_perms",
         "role.delete",
@@ -850,9 +722,6 @@ async def test_write_operations_audited(
         "dept.delete",
     }
     assert expected <= actions, f"缺失审计动作:{expected - actions}"
-
-
-# ============ 密码修改、令牌吊销与查询语义 ============
 
 
 async def test_keyword_like_metachars_escaped(
@@ -882,34 +751,7 @@ async def test_error_detail_semantics(
 ) -> None:
     """404/409/400 的 detail 文案非空(web 直接透传展示,空文案=用户不可读)。"""
     _, token = await _admin(client, session, make_user)
-    ghost = str(uuidlib.uuid4())
-    r = await client.delete(f"/system/users/{ghost}", headers=_auth(token))
-    assert r.status_code == 404
-    assert r.json()["detail"]  # 非空文案断言
     rid = await _role_id(session, "SUPER_ADMIN")
     r = await client.delete(f"/system/roles/{rid}", headers=_auth(token))
     assert r.status_code == 409
     assert r.json()["detail"]
-
-
-# ============ 管理台状态启停范式(专用端点+禁用吊销) ============
-
-
-async def test_status_toggle_protections(
-    client: AsyncClient, session: AsyncSession, make_user: MakeUser
-) -> None:
-    """专用端点保护与编辑路径同构——自禁 409/超管禁 409/不存在 404。"""
-    await seed_all(session, get_settings())
-    admin_uid, token = await _admin(client, session, make_user, "boss8")
-    # 自禁
-    r = await client.post(f"/system/users/{admin_uid}/disable", headers=_auth(token))
-    assert r.status_code == 409
-    # 超管账号(settings.admin_username)禁用
-    real_admin_id = get_settings().admin_subject
-    r = await client.post(f"/system/users/{real_admin_id}/disable", headers=_auth(token))
-    assert r.status_code == 409
-    # 不存在
-    r = await client.post(f"/system/users/{uuidlib.uuid4()}/disable", headers=_auth(token))
-    assert r.status_code == 404
-    r = await client.post(f"/system/users/{uuidlib.uuid4()}/enable", headers=_auth(token))
-    assert r.status_code == 404

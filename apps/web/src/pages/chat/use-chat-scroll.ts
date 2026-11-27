@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { isNearBottom } from "@/lib/scroll-follow";
+import { isNearBottom } from "@kongming/api-client/scroll-follow";
 
 export interface ChatScrollApi {
   scrollRootRef: React.RefObject<HTMLDivElement | null>;

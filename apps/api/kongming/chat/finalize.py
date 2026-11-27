@@ -24,6 +24,7 @@ from kongming.chat.models import (
 )
 from kongming.chat.ports import ChatRepo, ChatStoreError, GuardrailPort, PendingToolReader
 from kongming.chat.results import ChatOutcome
+from kongming.control.events import report_product_event
 from kongming.rag.ports import ColumnCommentReader, QueryHistoryWriter
 
 log = logging.getLogger(__name__)
@@ -171,12 +172,13 @@ def _assemble_outcome(
     tenant_id: str,
     datasource_key: str,
     attachments: list[dict[str, object]] | None,
+    user_id: str = "",
 ) -> ChatOutcome:
-    """按落库结果组装响应(字段与 result_json 同源)。"""
+    """按落库结果组装响应(字段与 result_json 同源),并上报产品事件。"""
     guarded = committed.stage.guarded
     view = committed.stage.view
     presentation = committed.stage.presentation
-    return ChatOutcome(
+    outcome = ChatOutcome(
         session_id=sid,
         success=reply.success,
         verdict=reply.verdict,
@@ -201,6 +203,17 @@ def _assemble_outcome(
         metric_hits=reply.metric_hits,
         sources=reply.sources,
     )
+    report_product_event(
+        "chat.turn",
+        tenant_id=tenant_id,
+        user_id=user_id or None,
+        attributes={
+            "status": outcome.verdict or ("SUCCESS" if outcome.success else "FAILED"),
+            "datasource_key": datasource_key,
+            "retry_count": outcome.retry_count,
+        },
+    )
+    return outcome
 
 
 def _dumps_result_json(
@@ -421,6 +434,7 @@ class ReplyFinalizer:
             tenant_id=tenant_id,
             datasource_key=datasource_key,
             attachments=attachments,
+            user_id=user_id,
         )
 
     async def _commit(

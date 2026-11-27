@@ -2,8 +2,8 @@
 
 import { FileText, Loader2, Mic, Paperclip, SendHorizontal, StopCircle, X } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@kongming/ui/badge";
+import { Button } from "@kongming/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -11,12 +11,12 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+} from "@kongming/ui/dialog";
+import { Input } from "@kongming/ui/input";
+import { Label } from "@kongming/ui/label";
+import { Switch } from "@kongming/ui/switch";
+import { Textarea } from "@kongming/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kongming/ui/tooltip";
 
 import type { AttachmentChip } from "./use-chat-attachments";
 import type { ReportDialogApi } from "./use-report-dialog";

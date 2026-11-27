@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { ChevronRight, Database, Loader2 } from "lucide-react";
 
-import { explainPlan } from "@/lib/chat-api";
-import { cellText } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { explainPlan } from "@kongming/api-client/chat-api";
+import { cellText } from "@kongming/api-client/utils";
+import { Button } from "@kongming/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kongming/ui/collapsible";
 
 /* 展开时按需加载执行计划；异常结构以 JSON 展示，客户端只传 message_id。 */
 export function ExplainCollapsible({ messageId }: { messageId: string }) {

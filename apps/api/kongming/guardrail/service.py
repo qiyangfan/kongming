@@ -13,6 +13,7 @@ from kongming.guardrail.models import (
     RuleConfig,
     evaluate_text,
 )
+from kongming.guardrail.policy_scope import get_policy_scope
 from kongming.guardrail.ports import GuardrailAuditWriter, GuardrailConfigStore
 from kongming.guardrail.rules import REGISTRY
 
@@ -37,8 +38,12 @@ class GuardrailService:
         self._configs_store = config_store
         self._audit = audit_writer
 
-    async def _configs(self) -> list[RuleConfig]:
-        """注册表 + 库覆盖合并视图;库读失败 fail-closed=按注册表缺省从严。"""
+    async def _configs(self, tenant_id: str) -> list[RuleConfig]:
+        """注册表 + 库覆盖合并视图;库读失败 fail-closed=按注册表缺省从严。
+
+        managed 时再经共享策略包作用域过滤:包引用非法会抛错,由各判定
+        路径的 fail-closed 分支收敛为拦截/安全替换。
+        """
         try:
             overrides = await self._configs_store.list_overrides()
         except Exception:
@@ -58,6 +63,11 @@ class GuardrailService:
                     threshold=threshold,
                 )
             )
+        scope = get_policy_scope()
+        if scope is not None:
+            names = await scope.rule_names_for_tenant(tenant_id)
+            if names is not None:
+                out = [cfg for cfg in out if cfg.rule.name in names]
         return out
 
     async def _record_hits(
@@ -90,7 +100,7 @@ class GuardrailService:
     ) -> InputVerdict:
         """输入护栏:任一文本命中 blocked 即整体拦截;masked 逐条脱敏。"""
         try:
-            configs = await self._configs()
+            configs = await self._configs(tenant_id)
             processed: list[str] = []
             all_hits: list[GuardrailHit] = []
             blocked = False
@@ -137,7 +147,7 @@ class GuardrailService:
         """输出护栏(批量,单次配置读):blocked → 替换安全文案;masked → 脱敏;
         零命中原文。fail-closed:判定异常全部替换安全文案。"""
         try:
-            configs = await self._configs()
+            configs = await self._configs(tenant_id)
         except Exception:
             log.exception("输出护栏配置异常,fail-closed 替换 trace_id=%s", trace_id)
             # fail-closed 故障落审计(spec「故障事件落审计」字面立约)
@@ -205,7 +215,7 @@ class GuardrailService:
         if not tool_write:
             return True
         try:
-            configs = await self._configs()
+            configs = await self._configs(tenant_id)
             cfg = next((c for c in configs if c.rule.name == "write_burst"), None)
             threshold = cfg.threshold if cfg and cfg.threshold is not None else 1
             enabled = cfg.enabled if cfg else True

@@ -5,10 +5,10 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SqlArtifactCard } from "@/components/artifact-blocks";
-import { StreamCard } from "@/components/stream-card";
-import { rerunArtifact } from "@/lib/chat-api";
+import { StreamCard } from "@kongming/ui/stream-card";
+import { rerunArtifact } from "@kongming/api-client/chat-api";
 
-vi.mock("@/lib/chat-api", () => ({ rerunArtifact: vi.fn() }));
+vi.mock("@kongming/api-client/chat-api", () => ({ rerunArtifact: vi.fn() }));
 
 const mockRerun = vi.mocked(rerunArtifact);
 const SQL = "SELECT count(*) FROM film";

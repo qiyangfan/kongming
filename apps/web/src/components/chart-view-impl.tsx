@@ -1,13 +1,18 @@
 import { useMemo, useRef } from "react";
 import { ChartColumn, ChartLine, ChartPie, ChartScatter, ImageDown } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { EChart } from "@/lib/echarts";
-import { cssVar } from "@/lib/utils";
-import type { ChartDatum, ChartSpec, ChartTune, ChartType } from "@/lib/chart-shared";
-import { uniqueTypes } from "@/lib/chart-shared";
-import { buildChartOption } from "@/lib/chart-option";
+import { Button } from "@kongming/ui/button";
+import { ToggleGroup, ToggleGroupItem } from "@kongming/ui/toggle-group";
+import { EChart } from "@kongming/api-client/echarts";
+import { cssVar } from "@kongming/api-client/utils";
+import type {
+  ChartDatum,
+  ChartSpec,
+  ChartTune,
+  ChartType,
+} from "@kongming/api-client/chart-shared";
+import { uniqueTypes } from "@kongming/api-client/chart-shared";
+import { buildChartOption } from "@kongming/api-client/chart-option";
 
 export interface ChartViewProps {
   /** 有序图表候选:每个候选自带完整绑定,活动绑定=同类型首个候选 */

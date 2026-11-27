@@ -72,6 +72,16 @@
 | `KM_VOICE_REALTIME_BASE_URL`          | api | -    | 语音模型接入地址(浏览器直连的交换端点,缺省空=不启用) |
 | `KM_VOICE_API_KEY`                    | api | -    | 模型服务密钥(只存在于 api,不下发浏览器)              |
 
+## 前端 workspace(用户 web + 管理台)
+
+- pnpm workspace:`apps/web`(用户面 5173)、`apps/admin`(管理台 5174)、
+  `packages/ui`、`packages/api-client`;锁文件在仓库根 `pnpm-lock.yaml`。
+- 共享包:`@kongming/ui`(shadcn 标准件与共享业务组件,含 `theme.css` 主题 token)、
+  `@kongming/api-client`(生成类型、fetch/auth 适配器、纯工具);两 app 只依赖,
+  不跨 app 相对引用、不复制业务逻辑。
+- 管理台独立 Keycloak client `kongming-admin-web` 与 `km_admin_refresh` 会话;
+  后端仍 `apps/api` `/admin/*` 与 `/admin-auth/*`,由反代同源 `/api`。
+
 ## apps/web — React SPA
 
 | 维度     | 选型                                                                                                            |
@@ -91,13 +101,13 @@
 ## 前端样式铁律(继承旧项目 ADR-006/007 纪律,按新栈重写)
 
 1. **组件优先,禁手搓基础交互组件**:按钮/输入/下拉/弹窗/日期/开关等一律用
-   shadcn/ui(Radix 无头,代码自有于 `src/components/ui/`);手写仅限**业务组合层**
+   shadcn/ui(Radix 无头,代码自有于 `packages/ui/src/`);手写仅限**业务组合层**
    (`src/components/` 下的卡片、布局块,由基础组件拼装)。判据:一个"按钮"若需要
    focus 态/键盘可达性/aria 属性,就不该手写。
 2. **Tailwind 原子类是唯一样式语言**:不新建 `.css` 文件(`src/index.css` 的
    `@theme` 定义与必要第三方覆盖除外);禁内联 `style=`(第三方图表尺寸等动态值除外);
    禁 `@apply` 堆砌二次封装。
-3. **设计 token 单源**:品牌色/字体/圆角只定义在 `index.css` 的 `@theme`,组件经
+3. **设计 token 单源**:品牌色/字体/圆角只定义在 `packages/ui/theme.css` 的 `@theme`,组件经
    token 类引用(`bg-brand-600`);**禁散落硬编码色值**(hex/rgb 直接写进类名)。
    这是旧项目"设计 Token 三方镜像腐化"教训的单源化修正。
 4. **图标用 lucide-react**(shadcn 生态标配),禁 emoji 充图标。

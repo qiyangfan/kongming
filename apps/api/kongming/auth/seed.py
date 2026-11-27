@@ -75,6 +75,9 @@ PERMISSIONS: list[tuple[str, str, int]] = [
     # (租户自定义端点出站 + 凭证治理,与 websearch 同哲学)
     ("connector:manage", "连接器管理", 42),
     ("tool:http:call", "工具-HTTP连接器调用", 43),
+    # 控制面状态与本地命令(管理台);跨服务命令的提交入口在锦官,不在此
+    ("system:control:view", "控制面状态查看", 44),
+    ("system:control:manage", "本地运行命令", 45),
 ]
 
 ROLES: list[tuple[str, str, str, str, int]] = [

@@ -2,8 +2,8 @@
 
 import { Feather } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@kongming/ui/button";
+import { Skeleton } from "@kongming/ui/skeleton";
 
 export function EmptyState({
   items,

@@ -5,10 +5,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, MessageSquare, MoreVertical, Search } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
 
-import { api, type SessionItemOut } from "@/lib/api";
-import { listSessions, renameSession } from "@/lib/chat-api";
-import { groupSessionsByTime } from "@/lib/session-groups";
-import { useTenant } from "@/lib/tenant-store";
+import { api, type SessionItemOut } from "@kongming/api-client/api";
+import { listSessions, renameSession } from "@kongming/api-client/chat-api";
+import { groupSessionsByTime } from "@kongming/api-client/session-groups";
+import { useTenant } from "@kongming/api-client/tenant-store";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,8 +18,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+} from "@kongming/ui/alert-dialog";
+import { Button } from "@kongming/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -27,16 +27,16 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from "@kongming/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Skeleton } from "@/components/ui/skeleton";
+} from "@kongming/ui/dropdown-menu";
+import { Input } from "@kongming/ui/input";
+import { ScrollArea } from "@kongming/ui/scroll-area";
+import { Skeleton } from "@kongming/ui/skeleton";
 
 function timeLabel(iso: string): string {
   const d = new Date(iso);

@@ -4,14 +4,14 @@ import { useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 
-import { api, type SessionMessageOut } from "@/lib/api";
-import { getSuggestions } from "@/lib/chat-api";
+import { api, type SessionMessageOut } from "@kongming/api-client/api";
+import { getSuggestions } from "@kongming/api-client/chat-api";
 import {
   RECOVERY_POLL_BUDGET_MS,
   RECOVERY_POLL_INTERVAL_MS,
   recoveryExpired,
   needsTurnRecovery,
-} from "@/lib/recovery-poll";
+} from "@kongming/api-client/recovery-poll";
 
 import { toSyntheticMessage } from "./message-row";
 import { useFollowBottom, type ChatScrollApi } from "./use-chat-scroll";

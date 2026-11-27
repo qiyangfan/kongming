@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, ThumbsDown, ThumbsUp } from "lucide-react";
 
-import type { SessionMessageOut } from "@/lib/api";
-import { submitFeedback } from "@/lib/feedback-api";
-import { useAuth } from "@/lib/auth-store";
-import { hasPerm } from "@/lib/nav";
-import { Button } from "@/components/ui/button";
+import type { SessionMessageOut } from "@kongming/api-client/api";
+import { submitFeedback } from "@kongming/api-client/feedback-api";
+import { useAuth } from "@kongming/api-client/auth-store";
+import { hasPerm } from "@kongming/api-client/nav";
+import { Button } from "@kongming/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -16,10 +16,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
+} from "@kongming/ui/dialog";
+import { Textarea } from "@kongming/ui/textarea";
 
-import type { FeedbackOut } from "@/lib/feedback-api";
+import type { FeedbackOut } from "@kongming/api-client/feedback-api";
 
 type Rating = "UP" | "DOWN";
 

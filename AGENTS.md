@@ -9,7 +9,10 @@
 ```text
 apps/api/     控制面:FastAPI,持全部凭证(RBAC/租户/SQL 防火墙/审计/Alembic)
 apps/agent/   Agent 面:LangGraph,零凭证,SQL 执行 100% 回调 api /internal/*
-apps/web/     React 19 SPA:Vite + Tailwind v4;API 类型由生成获得,禁手写
+apps/web/     React 19 SPA(用户面):Vite + Tailwind v4;API 类型由生成获得,禁手写
+apps/admin/   管理台独立 SPA(127.0.0.1:5174,同源 /api;后端仍 apps/api)
+packages/ui/        共享 UI 标准件(@kongming/ui;两 app 依赖,不复制)
+packages/api-client/ 生成类型 + 请求/会话适配器(@kongming/api-client)
 infra/        docker-compose(pgvector/pg17 + redis + api + agent)、Dockerfile、pg-init
 contracts/    openapi.json(入库,CI 漂移门禁)
 docs/adr/     架构决策记录(为什么)
@@ -25,7 +28,8 @@ make contracts      # 导出 OpenAPI → 生成前端类型;改了 api 路由/�
 # make up/down 仅服务容器部署形态,本地开发勿自起(与 env 栈抢 5432)
 # apps/api:  uv sync && uv run alembic upgrade head && uv run uvicorn kongming.main:app --port 8000
 # apps/agent: uv sync && uv run uvicorn kongming_agent.main:app --port 8001
-# apps/web:  pnpm install && pnpm dev   (typecheck= tsc -b;lint= eslint;test= vitest run 纯函数)
+# 前端: 仓库根 pnpm install;apps/web 或 apps/admin 下 pnpm dev
+# apps/admin 门禁: make admin-check(独立 artifact 与 e2e)
 ```
 
 ## 架构铁律(违反即返工)

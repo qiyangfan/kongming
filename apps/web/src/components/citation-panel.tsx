@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, FileText } from "lucide-react";
 
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { isCitationKeyShape, keySuffix } from "@/lib/citation-utils";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kongming/ui/collapsible";
+import { isCitationKeyShape, keySuffix } from "@kongming/api-client/citation-utils";
 
 export interface CitationSource {
   citation_key: string;

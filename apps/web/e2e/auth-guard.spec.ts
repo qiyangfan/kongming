@@ -7,3 +7,9 @@ test("未登录访问受保护路由被导到登录页", async ({ page }) => {
   await expect(page).toHaveURL(/\/login$/);
   await expect(page.getByRole("heading", { name: "孔明 Kongming" })).toBeVisible();
 });
+
+test("旧 /admin 深链 308 到管理台同路径", async ({ request }) => {
+  const resp = await request.get("/admin/users", { maxRedirects: 0 });
+  expect(resp.status()).toBe(308);
+  expect(resp.headers()["location"]).toMatch(/:\d+\/users$/);
+});

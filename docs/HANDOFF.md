@@ -24,6 +24,24 @@
   realm `longzhong`;多标签页 state 已并发安全。登录 demo 落到本地种子账号
   demo-keycloak(DEVELOPER+默认租户)。
 
+### 运行时控制面与管理台(ADR-0005)
+
+- 服务默认 `KM_CONTROL_MODE=standalone`(本地种子/部署配置);`managed` 拉取锦官
+  快照(last-known/版本单调/HMAC 验签)、注册心跳、claim/ack 命令、上报产品事件。
+  安全类快照缺失时受保护请求 503(不阻塞 `/auth`、`/internal`、`/service-read`)。
+- 本地命令 `POST /system/commands`(reindex/清缓存/取消任务)不依赖锦官;
+  跨服务命令只显示回执;服务只读投影 `/service-read/{section}` 供锦官
+  (本地 reader token 或 Keycloak 服务 token,字段脱敏、无写入口)。
+- 租户/成员/粗角色由快照写入本地 last-known 执行缓存;用户写端点返回 403;
+  管理台用户页只读。共享策略包驱动护栏规则集;商店货架/直跑按目录+权益过滤。
+- 本地 billing 域已删除(计划/账单/支付/门户),四张表改名 `legacy_*` 只读;
+  权益/配额改由快照执行,standalone 用部署配置。
+- 管理台:`apps/admin`(5174,`kongming-admin-web`,`/admin-auth/*`,
+  `km_admin_refresh` 30m),共享 `packages/ui`/`packages/api-client`;
+  用户 web 旧 `/admin/*` 由反代或 Vite dev/preview 308 到管理台同路径。
+- break-glass:`apps/api/scripts/break_glass.py`(独立凭证/限时/原因/二次确认/审计),
+  见 `docs/BREAK-GLASS.md`;无 admin 端点。
+
 ### 问答、流式与取消
 
 - `/chat/query/stream` 只用默认 SSE 消息(`data:` 行),业务帧为
@@ -127,10 +145,17 @@
    WebRTC 设备面与受限网络禁 UDP;异常先看 `chrome://webrtc-internals` 的 ICE 与
    DataChannel 状态。`add-voice-intent-guard` 4.3 与 `add-voice-call-guards` 7.2
    保留为真机项。
-5. `openspec/changes/` 下 10 个 `add-kongming-runtime-*` 运行时控制面提案均为
-   0 任务;先确定实施顺序与跨仓边界,不能作为已完成能力对外表述。
+5. 运行时控制面 10 个 change 已按本仓能力实现;X-01 契约冻结、fujie
+   `kongming-admin-web` client 与真实 Keycloak 联调未完成前,跨仓契约对拍、
+   真实管理台登录与反代部署仍不可宣称通过。
+6. 管理台响应式(375/768/1280 × 亮暗)与真实反代 `/api` + CSP 未走查;
+   本地 dev/preview 已覆盖 308 与登录跳转。
 
 ## 开放决策项
+
+- 管理台未配置锦官外链地址:计费/共享控制入口直接移除,是否需要外链待部署口径。
+- 控制面 wire 契约(v1 快照/命令/用量/注册)为本仓自定,等待 X-01 冻结后对拍;
+  冻结前不要对外宣称跨仓联通。
 
 - 文档精排未启用:新索引 0.964→0.893(-7.1pp,两模型一致),旧索引 1.000→0.982;
   启用条件=语料扩容后出现非负收益。
@@ -163,6 +188,10 @@
 
 ## 验收记录
 
+- 2026-11-27 控制面/管理台:api 测试(含控制面/管理台/break-glass 回归)全绿;
+  web typecheck/lint/format/madge/vitest(254)/build/size/e2e(3) 通过;
+  admin typecheck/lint/format/test(5)/build/e2e(2) 通过;契约导出与生成物零漂移。
+  Keycloak 真实登录、fujie client、反代 CSP 与响应式亮暗走查未验收。
 - 2026-11-27 全量门禁:`make check` exit 0。api-check 1936 passed/10 skipped,
   覆盖率 78.15%;agent-check 719 passed,覆盖率 87.41%;liannu-check 23 passed;
   web-check typecheck/lint/madge/lint:css/format/vitest(254)/build/size/e2e(2)

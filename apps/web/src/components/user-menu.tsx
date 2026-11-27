@@ -3,8 +3,8 @@
 import { Brain, LogOut, Moon, Sun } from "lucide-react";
 import { useNavigate } from "react-router";
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback } from "@kongming/ui/avatar";
+import { Button } from "@kongming/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,10 +12,10 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { useAuth } from "@/lib/auth-store";
-import { roleLabel } from "@/lib/role-labels";
-import { useTheme } from "@/lib/theme-store";
+} from "@kongming/ui/dropdown-menu";
+import { useAuth } from "@kongming/api-client/auth-store";
+import { roleLabel } from "@kongming/api-client/role-labels";
+import { useTheme } from "@kongming/api-client/theme-store";
 
 export function UserMenu() {
   const { user, logout } = useAuth();

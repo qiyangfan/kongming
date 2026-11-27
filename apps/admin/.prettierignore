@@ -1,0 +1,7 @@
+dist
+pnpm-lock.yaml
+src/lib/api-types.gen.ts
+
+dist/
+test-results/
+playwright-report/

@@ -11,8 +11,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+} from "@kongming/ui/alert-dialog";
+import { Button } from "@kongming/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -20,15 +20,15 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { FormRow } from "@/components/form-row";
-import { StatusBadge, type StatusMeta } from "@/components/status-badge";
-import { Badge } from "@/components/ui/badge";
-import type { DataViewColumn } from "@/components/data-view";
-import { api } from "@/lib/api";
-import { formatDate } from "@/lib/datetime";
-import type { components } from "@/lib/api-types.gen";
+} from "@kongming/ui/dialog";
+import { Input } from "@kongming/ui/input";
+import { FormRow } from "@kongming/ui/form-row";
+import { StatusBadge, type StatusMeta } from "@kongming/ui/status-badge";
+import { Badge } from "@kongming/ui/badge";
+import type { DataViewColumn } from "@kongming/ui/data-view";
+import { api } from "@kongming/api-client/api";
+import { formatDate } from "@kongming/api-client/datetime";
+import type { components } from "@kongming/api-client/api-types.gen";
 
 export type MemoryItem = components["schemas"]["MemoryItemOut"];
 

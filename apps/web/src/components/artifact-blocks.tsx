@@ -16,23 +16,23 @@ import {
 } from "lucide-react";
 
 import { ChartView, type ChartDatum, type ChartTune } from "@/components/chart-view";
-import type { ChartSpec } from "@/lib/chart-shared";
-import { MarkdownText } from "@/components/markdown-text";
-import { useCopyFeedback } from "@/hooks/use-copy-feedback";
-import { rerunArtifact } from "@/lib/chat-api";
-import { fencedSql } from "@/lib/sql-markdown";
-import { cellText } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import type { ChartSpec } from "@kongming/api-client/chart-shared";
+import { MarkdownText } from "@kongming/ui/markdown-text";
+import { useCopyFeedback } from "@kongming/ui/use-copy-feedback";
+import { rerunArtifact } from "@kongming/api-client/chat-api";
+import { fencedSql } from "@kongming/api-client/sql-markdown";
+import { cellText } from "@kongming/api-client/utils";
+import { Button } from "@kongming/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kongming/ui/collapsible";
 import {
   CitationSourcesPanel,
   renderWithCitations,
   useCitationHighlight,
   type CitationSource,
 } from "@/components/citation-panel";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@kongming/ui/input";
+import { Label } from "@kongming/ui/label";
+import { Textarea } from "@kongming/ui/textarea";
 
 /* 默认只读高亮展示;编辑为次级入口。重跑结果作为新消息追加,不覆盖原卡。 */
 export function SqlArtifactCard({ messageId, sql }: { messageId: string; sql: string }) {

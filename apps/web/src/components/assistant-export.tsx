@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { Download, Loader2 } from "lucide-react";
 
-import { exportResult } from "@/lib/chat-api";
-import { Button } from "@/components/ui/button";
+import { exportResult } from "@kongming/api-client/chat-api";
+import { Button } from "@kongming/ui/button";
 
 function exportErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : "导出未成,请稍后再试。";

@@ -181,6 +181,25 @@ root_packages = ["kongming"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
+name = "control 领域模型/用例/端口不依赖 Web 框架与 SQL(宪法 Article II 领域纯净)"
+type = "forbidden"
+source_modules = [
+  "kongming.control.models",
+  "kongming.control.payload",
+  "kongming.control.snapshot",
+  "kongming.control.commands",
+  "kongming.control.usage",
+  "kongming.control.registration",
+  "kongming.control.entitlement",
+  "kongming.control.policy",
+  "kongming.control.catalog",
+  "kongming.control.events",
+  "kongming.control.ports",
+  "kongming.control.capabilities",
+]
+forbidden_modules = ["fastapi", "sqlalchemy", "redis"]
+
+[[tool.importlinter.contracts]]
 name = "auth 域不反向依赖业务域(ADR-003 回退路径前提)"
 type = "forbidden"
 source_modules = ["kongming.auth"]
@@ -350,17 +369,6 @@ source_modules = [
 forbidden_modules = ["fastapi", "sqlalchemy"]
 
 [[tool.importlinter.contracts]]
-name = "billing 领域模型/用例不依赖框架(034,宪法 Article II 领域纯净)"
-type = "forbidden"
-source_modules = [
-  "kongming.billing.models",
-  "kongming.billing.service",
-  "kongming.billing.ports",
-  "kongming.billing.channels",
-]
-forbidden_modules = ["fastapi", "sqlalchemy"]
-
-[[tool.importlinter.contracts]]
 name = "store 用例不依赖框架(033,宪法 Article II 领域纯净)"
 type = "forbidden"
 source_modules = ["kongming.store.service"]
@@ -486,11 +494,12 @@ type = "forbidden"
 source_modules = [
   "kongming.attachment",
   "kongming.audit",
+  "kongming.adminauth",
   "kongming.auth",
-  "kongming.billing",
   "kongming.bot",
   "kongming.chat",
   "kongming.connector",
+  "kongming.control",
   "kongming.datasource",
   "kongming.feedback",
   "kongming.guardrail",
@@ -515,11 +524,12 @@ source_modules = [
 forbidden_modules = [
   "kongming.attachment.router",
   "kongming.audit.router",
+  "kongming.adminauth.router",
   "kongming.auth.router",
-  "kongming.billing.router",
   "kongming.bot.router",
   "kongming.chat.router",
   "kongming.connector.router",
+  "kongming.control.router",
   "kongming.datasource.router",
   "kongming.feedback.router",
   "kongming.guardrail.router",

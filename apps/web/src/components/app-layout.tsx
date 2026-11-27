@@ -3,18 +3,18 @@
 import { Link, Outlet } from "react-router";
 import { Feather, Plus } from "lucide-react";
 
-import { Protected } from "@/components/protected";
+import { Protected } from "@kongming/ui/protected";
 import { BottomNav } from "@/components/bottom-nav";
 import { DatasourceSwitcher } from "@/components/datasource-switcher";
 import { SessionSidebar } from "@/components/session-sidebar";
 import { TenantSwitcher } from "@/components/tenant-switcher";
 import { UserMenu } from "@/components/user-menu";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import { useAuth } from "@/lib/auth-store";
-import { visibleNav } from "@/lib/nav";
-import { useTenant } from "@/lib/tenant-store";
-import { cn } from "@/lib/utils";
+import { Button } from "@kongming/ui/button";
+import { Separator } from "@kongming/ui/separator";
+import { useAuth } from "@kongming/api-client/auth-store";
+import { visibleNav } from "@kongming/api-client/nav";
+import { useTenant } from "@kongming/api-client/tenant-store";
+import { cn } from "@kongming/api-client/utils";
 
 function BrandMark() {
   return (

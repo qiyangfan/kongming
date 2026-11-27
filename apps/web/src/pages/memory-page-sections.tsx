@@ -13,22 +13,16 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { FormRow } from "@/components/form-row";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { ErrorAlert } from "@/components/error-alert";
-import { api } from "@/lib/api";
-import { listMyTeams } from "@/lib/team-api";
-import { useTenant } from "@/lib/tenant-store";
+} from "@kongming/ui/alert-dialog";
+import { Button } from "@kongming/ui/button";
+import { Input } from "@kongming/ui/input";
+import { Label } from "@kongming/ui/label";
+import { FormRow } from "@kongming/ui/form-row";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kongming/ui/select";
+import { ErrorAlert } from "@kongming/ui/error-alert";
+import { api } from "@kongming/api-client/api";
+import { listMyTeams } from "@kongming/api-client/team-api";
+import { useTenant } from "@kongming/api-client/tenant-store";
 import {
   PREF_SLOTS,
   buildPrefsPatch,
@@ -37,7 +31,7 @@ import {
   singleSlotDelete,
   type PrefsDraft,
   type PrefsMap,
-} from "@/lib/prefs-form";
+} from "@kongming/api-client/prefs-form";
 
 /* 团队记忆写入卡(team-api 创建端点;OWNER/MEMBER 校验在服务端) */
 export function TeamMemoryWrite() {

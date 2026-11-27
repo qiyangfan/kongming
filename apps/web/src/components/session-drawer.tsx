@@ -5,8 +5,8 @@ import { Link } from "react-router";
 import { History, Plus } from "lucide-react";
 
 import { SessionSidebar } from "@/components/session-sidebar";
-import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Button } from "@kongming/ui/button";
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@kongming/ui/sheet";
 
 export function SessionDrawer() {
   const [open, setOpen] = useState(false);

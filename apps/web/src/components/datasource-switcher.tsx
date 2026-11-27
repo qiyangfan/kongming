@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { useNavigate } from "react-router";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@kongming/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,10 +13,10 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { datasourceApi } from "@/lib/datasource-api";
-import { useDatasource } from "@/lib/datasource-store";
-import { useTenant } from "@/lib/tenant-store";
+} from "@kongming/ui/dropdown-menu";
+import { datasourceApi } from "@kongming/api-client/datasource-api";
+import { useDatasource } from "@kongming/api-client/datasource-store";
+import { useTenant } from "@kongming/api-client/tenant-store";
 
 export function DatasourceSwitcher() {
   const tenant = useTenant((s) => s.current);

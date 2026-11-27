@@ -48,21 +48,33 @@ class AuthService:
         states: OAuthStateStore,
         settings: Settings,
         registry: dict[str, OAuthProvider],
+        refresh_ttl_sec: int | None = None,
     ) -> None:
         self._uow = uow
         self._families = families
         self._states = states
         self._s = settings
         self._registry = registry
+        # 管理台会话独立于用户会话(30m refresh);None=沿用用户配置。
+        # 懒读 settings:部分用例只测身份/权限,不装配配置对象。
+        self._refresh_ttl_override = refresh_ttl_sec
 
     # ---- 令牌签发(联邦回调与 refresh 共用) ----
+
+    @property
+    def _refresh_ttl(self) -> int:
+        if self._refresh_ttl_override is not None:
+            return self._refresh_ttl_override
+        return self._s.refresh_token_ttl_sec
 
     async def _issue_pair(self, user: User) -> TokenPair:
         fid = uuid7().hex
         jti = uuid7().hex
         access = tokens.issue(user.id, "access")
-        refresh = tokens.issue(user.id, "refresh", extra={"fid": fid, "jti": jti})
-        await self._families.issue(user.id, fid, jti, self._s.refresh_token_ttl_sec)
+        refresh = tokens.issue(
+            user.id, "refresh", extra={"fid": fid, "jti": jti}, ttl_sec=self._refresh_ttl
+        )
+        await self._families.issue(user.id, fid, jti, self._refresh_ttl)
         return TokenPair(access, refresh)
 
     # ---- refresh 轮换 / 登出 ----
@@ -85,24 +97,26 @@ class AuthService:
         if user is None or not user.active:
             raise TokenInvalid("refresh token 无效或已失效")
 
-        rotated, tomb = await self._families.consume(jti, self._s.refresh_token_ttl_sec)
+        rotated, tomb = await self._families.consume(jti, self._refresh_ttl)
         if rotated is None:
             if tomb is not None:
                 # 复用检测:旧票重放 = 泄漏信号,吊销全家族(ADR-003)
-                await self._families.revoke_family(tomb, self._s.refresh_token_ttl_sec)
+                await self._families.revoke_family(tomb, self._refresh_ttl)
             raise TokenInvalid("refresh token 无效或已失效")
 
         new_jti = uuid7().hex
         access = tokens.issue(user.id, "access")
-        refresh = tokens.issue(user.id, "refresh", extra={"fid": fid, "jti": new_jti})
-        await self._families.issue(user.id, fid, new_jti, self._s.refresh_token_ttl_sec)
+        refresh = tokens.issue(
+            user.id, "refresh", extra={"fid": fid, "jti": new_jti}, ttl_sec=self._refresh_ttl
+        )
+        await self._families.issue(user.id, fid, new_jti, self._refresh_ttl)
         return TokenPair(access, refresh)
 
     async def logout_sso(self, refresh_token: str) -> str | None:
         """撤销本地 refresh 家族并返回Keycloak end_session 地址;无可用端点时 None。"""
         try:
             _, fid, _ = self._decode_refresh(refresh_token)
-            await self._families.revoke_family(fid, self._s.refresh_token_ttl_sec)
+            await self._families.revoke_family(fid, self._refresh_ttl)
         except TokenInvalid:
             pass
         provider = self._registry.get("keycloak")
@@ -124,7 +138,7 @@ class AuthService:
             _, fid, _ = self._decode_refresh(refresh_token)
         except TokenInvalid:
             return
-        await self._families.revoke_family(fid, self._s.refresh_token_ttl_sec)
+        await self._families.revoke_family(fid, self._refresh_ttl)
 
     # ---- 当前用户 ----
 

@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { cn } from "@/lib/utils";
+import { cn } from "@kongming/api-client/utils";
 
 /** 统一用户与助手消息气泡样式；左右对齐由调用方容器控制。 */
 export function ChatBubble({

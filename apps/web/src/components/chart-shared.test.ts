@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { hasChartToRender, type ChartSpec } from "@/lib/chart-shared";
+import { hasChartToRender, type ChartSpec } from "@kongming/api-client/chart-shared";
 
 /* 图表渲染闸:任一维为空即不渲染(含带 chart 产物但零候选的存量形态)。 */
 

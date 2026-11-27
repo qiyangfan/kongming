@@ -25,6 +25,7 @@ jobs:
       agent: ${{ steps.filter.outputs.agent }}
       liannu: ${{ steps.filter.outputs.liannu }}
       web: ${{ steps.filter.outputs.web }}
+      admin: ${{ steps.filter.outputs.admin }}
       contracts: ${{ steps.filter.outputs.contracts }}
       images: ${{ steps.filter.outputs.images }}
     steps:
@@ -42,7 +43,7 @@ jobs:
           fi
           if ! git rev-parse -q --verify "${BASE}^{commit}" >/dev/null 2>&1; then
             echo "变更基线不可得,视为全量变更"
-            for k in api agent liannu web contracts images; do
+            for k in api agent liannu web admin contracts images; do
               echo "$k=true" >> "$GITHUB_OUTPUT"
             done
             exit 0
@@ -54,8 +55,9 @@ jobs:
             echo "api=$(match '(^apps/api/|^packages/liannu/|^contracts/|^infra/|^scripts/|^Makefile$|^\.env\.example$|^\.github/workflows/ci\.yml$)')"
             echo "agent=$(match '(^apps/agent/|^packages/liannu/|^\.github/workflows/ci\.yml$)')"
             echo "liannu=$(match '(^packages/liannu/|^\.github/workflows/ci\.yml$)')"
-            echo "web=$(match '(^apps/web/|^\.github/workflows/ci\.yml$)')"
-            echo "contracts=$(match '(^apps/api/|^packages/liannu/|^contracts/|^openspec/|^Makefile$|^\.github/workflows/ci\.yml$)')"
+            echo "web=$(match '(^apps/web/|^packages/(ui|api-client)/|^pnpm-workspace\.yaml$|^pnpm-lock\.yaml$|^package\.json$|^\.github/workflows/ci\.yml$)')"
+            echo "admin=$(match '(^apps/admin/|^packages/(ui|api-client)/|^pnpm-workspace\.yaml$|^pnpm-lock\.yaml$|^package\.json$|^\.github/workflows/ci\.yml$)')"
+            echo "contracts=$(match '(^apps/api/|^packages/liannu/|^packages/api-client/src/.*\.gen\.|^contracts/|^openspec/|^Makefile$|^\.github/workflows/ci\.yml$)')"
             echo "images=$(match '(^apps/api/|^apps/agent/|^packages/liannu/|^infra/|^\.github/workflows/ci\.yml$)')"
           } >> "$GITHUB_OUTPUT"
 
@@ -255,7 +257,7 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
-          cache-dependency-path: apps/web/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test:cov
@@ -275,6 +277,48 @@ jobs:
           name: playwright-report
           path: apps/web/playwright-report
           if-no-files-found: ignore
+
+  # ── 门禁 4b:管理台(TypeScript,独立 artifact) ───────────
+  admin:
+    needs: changes
+    if: needs.changes.outputs.admin == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/admin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@9bbca1e9dc2902adb87e8780fe5c98796985a62d # v6.1.1
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm lint:css
+      - run: pnpm format:check
+      - run: pnpm test:run
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e
+      - if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: admin-playwright-report
+          path: apps/admin/playwright-report
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: kongming-admin-web
+          path: apps/admin/dist
+          if-no-files-found: error
 
   # ── 门禁 5:契约漂移(ADR-005) ──────────────────────────
   # 重新导出 OpenAPI 后 diff,防"改了代码忘了导出契约"
@@ -381,7 +425,7 @@ jobs:
         with:
           node-version: "24"
       # jscpd 默认 50 tokens,门禁线=重复率 5%(超出即非零);只扫生产路径
-      - run: npx --yes jscpd@4.3.0 apps/api/kongming apps/agent/kongming_agent packages/liannu/liannu apps/web/src --threshold 5 --format python,typescript,tsx,css --ignore '**/*.gen.ts'
+      - run: npx --yes jscpd@4.3.0 apps/api/kongming apps/agent/kongming_agent packages/liannu/liannu apps/web/src packages/ui/src packages/api-client/src --threshold 5 --format python,typescript,tsx,css --ignore '**/*.gen.ts'
 
   # ── 门禁 7:依赖漏洞(pip-audit 项目环境 + pnpm audit) ────
   supply-chain:
@@ -402,7 +446,7 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
-          cache-dependency-path: apps/web/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
       - run: cd apps/api && uv sync --frozen && uv run --with pip-audit==2.10.1 pip-audit --skip-editable --progress-spinner off
       - run: cd apps/agent && uv sync --frozen && uv run --with pip-audit==2.10.1 pip-audit --skip-editable --progress-spinner off
       - run: cd packages/liannu && uv sync --frozen && uv run --with pip-audit==2.10.1 pip-audit --skip-editable --progress-spinner off

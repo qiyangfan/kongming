@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
 
-import { generateReport } from "@/lib/report-api";
+import { generateReport } from "@kongming/api-client/report-api";
 
 export interface ReportDialogApi {
   open: boolean;

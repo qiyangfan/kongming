@@ -2,17 +2,17 @@
 
 import { Loader2, Play } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@kongming/ui/badge";
+import { Button } from "@kongming/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { ErrorAlert } from "@/components/error-alert";
-import type { StoreBotDetail } from "@/lib/store-api";
+} from "@kongming/ui/dialog";
+import { ErrorAlert } from "@kongming/ui/error-alert";
+import type { StoreBotDetail } from "@kongming/api-client/store-api";
 
 import { Stars } from "./store-bot-card";
 

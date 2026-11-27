@@ -2,7 +2,7 @@
    声音浏览器直连模型服务;决策全在后端(ADR-013);本 hook 只做搬运与媒体面。 */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { establishVoiceCall, hangUpVoiceCall, openVoiceChannel } from "@/lib/api";
+import { establishVoiceCall, hangUpVoiceCall, openVoiceChannel } from "@kongming/api-client/api";
 import {
   allowPlayback,
   classifyEstablishFailure,
@@ -15,7 +15,7 @@ import {
   type CallPhase,
   type FailureReason,
   type PlaybackGate,
-} from "@/lib/voice-call";
+} from "@kongming/api-client/voice-call";
 import {
   attachRemoteAudio,
   createAudioMeter,

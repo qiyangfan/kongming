@@ -6,10 +6,7 @@ import { describe, expect, it } from "vitest";
 // 与后端 import-linter 同思路的轻量分层守卫:共享层不得反向依赖页面层
 const SRC = fileURLToPath(new URL("..", import.meta.url));
 
-const RULES: { from: string; forbid: string[] }[] = [
-  { from: "components", forbid: ["pages"] },
-  { from: "lib", forbid: ["components", "pages"] },
-];
+const RULES: { from: string; forbid: string[] }[] = [{ from: "components", forbid: ["pages"] }];
 
 /** 递归列出目录下的 ts/tsx 生产源文件(测试文件允许引用上层做断言)。 */
 function sourceFiles(dir: string): string[] {

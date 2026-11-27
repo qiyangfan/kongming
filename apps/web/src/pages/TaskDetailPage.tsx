@@ -3,12 +3,12 @@
 import { ArrowLeft } from "lucide-react";
 import { Link, useParams } from "react-router";
 
-import { ErrorAlert } from "@/components/error-alert";
-import { PageHeader } from "@/components/page-header";
-import { StatusBadge } from "@/components/status-badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import type { TaskDetailOut } from "@/lib/task-api";
-import { TASK_STATUS_META } from "@/lib/task-api";
+import { ErrorAlert } from "@kongming/ui/error-alert";
+import { PageHeader } from "@kongming/ui/page-header";
+import { StatusBadge } from "@kongming/ui/status-badge";
+import { Skeleton } from "@kongming/ui/skeleton";
+import type { TaskDetailOut } from "@kongming/api-client/task-api";
+import { TASK_STATUS_META } from "@kongming/api-client/task-api";
 
 import { TaskCollabSection, TaskEventsSection } from "./task-collab-section";
 import { ConfirmOperationButton, OperationButton } from "./task-operation-buttons";

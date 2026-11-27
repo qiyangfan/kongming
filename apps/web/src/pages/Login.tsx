@@ -1,9 +1,9 @@
 /* 登录页只展示统一身份(Keycloak)入口;未配置时提示联系运维。 */
 
 import { useEffect, useState } from "react";
-import { api, humanizeErrorText, type OptionsOut, type StartOut } from "../lib/api";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { api, humanizeErrorText, type OptionsOut, type StartOut } from "@kongming/api-client/api";
+import { Button } from "@kongming/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kongming/ui/card";
 
 export default function Login() {
   const [providers, setProviders] = useState<OptionsOut["providers"]>([]);

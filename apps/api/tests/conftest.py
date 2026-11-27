@@ -47,6 +47,10 @@ if TYPE_CHECKING:
 TEST_DB = "kongming_test"
 
 TRUNCATED = (
+    "control.snapshot",
+    "control.command_receipt",
+    "control.usage_outbox",
+    "control.registration",
     "rag.query_history",
     "rag.table_descriptions",
     "public.chat_message",
@@ -94,10 +98,6 @@ TRUNCATED = (
     "public.sys_bot_favorite",
     "public.sys_bot_rating",
     "public.sys_bot_version",
-    "public.sys_invoice",
-    "public.sys_billing_plan",
-    "public.sys_quota_policy",
-    "public.sys_payment",
     "public.sys_agent_collab_worker",
     "public.sys_agent_collab_run",
     "public.sys_agent_task_step",

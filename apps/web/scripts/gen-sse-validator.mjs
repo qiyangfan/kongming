@@ -11,8 +11,8 @@ import { format, resolveConfig } from "prettier";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const specPath = path.resolve(here, "../../../contracts/openapi.json");
-const outJs = path.resolve(here, "../src/lib/chat-stream-validate.gen.js");
-const outDts = path.resolve(here, "../src/lib/chat-stream-validate.gen.d.ts");
+const outJs = path.resolve(here, "../../../packages/api-client/src/chat-stream-validate.gen.js");
+const outDts = path.resolve(here, "../../../packages/api-client/src/chat-stream-validate.gen.d.ts");
 
 const spec = JSON.parse(readFileSync(specPath, "utf8"));
 const op = spec.paths["/chat/query/stream"].post;

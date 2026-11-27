@@ -83,9 +83,6 @@ _COMPOSITION_ROOT_MODULES = [
     "kongming/toolcall/schemas.py",
     "kongming/toolcall/dependencies.py",
     "kongming/toolcall/adapters.py",
-    "kongming/billing/schemas.py",
-    "kongming/billing/dependencies.py",
-    "kongming/billing/adapters.py",
 ]
 
 

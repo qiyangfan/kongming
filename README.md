@@ -69,6 +69,7 @@ Agent 进程里**不存在任何数据库凭证**——import-linter 在 CI 里�
 ```mermaid
 flowchart LR
     web["React SPA · apps/web"] -->|"JWT"| api
+    admin["管理台 SPA · apps/admin"] -->|"Admin JWT(/admin-auth)"| api
     api["apps/api · 控制面(持凭证)<br/>FastAPI · RBAC · SQL 防火墙<br/>审计 · 数据源注册"]
     agent["apps/agent · Agent 面<br/>零凭证<br/>LangGraph · RAG · selfheal"]
     api -->|"内部令牌"| agent
@@ -109,14 +110,17 @@ uv run uvicorn kongming.main:app --port 8000
 cd apps/agent && uv sync
 uv run uvicorn kongming_agent.main:app --port 8001
 
-# 前端(另开终端)
-cd apps/web && pnpm install && pnpm dev   # http://localhost:5173
+# 前端(仓库根安装一次;另开终端)
+mise exec -- pnpm install
+cd apps/web && pnpm dev                    # http://127.0.0.1:5173
+cd apps/admin && pnpm dev                  # http://127.0.0.1:5174(管理台)
 ```
 
 ## 常用命令
 
 ```bash
-make check        # 全量门禁:静态/测试/契约/死代码/重复/依赖/配置 lint
+make check        # 全量门禁:静态/测试/契约/死代码/重复/依赖/配置 lint(不含 apps/admin)
+make admin-check  # 管理台独立门禁:typecheck/lint/test/build/e2e
 make contracts    # 导出 OpenAPI → 生成前端类型(提交前必跑)
 make up / down    # compose 基础设施
 ```

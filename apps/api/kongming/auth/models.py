@@ -116,3 +116,7 @@ class ProviderNotFound(AuthError):
 
 class ProviderExchangeFailed(AuthError):
     """联邦 code 交换/profile 拉取失败(provider 侧拒绝或异常)。"""
+
+
+class RequiredRoleMissing(AuthError):
+    """管理台登录缺少 Keycloak 粗角色(403;细权限仍本地判定)。"""

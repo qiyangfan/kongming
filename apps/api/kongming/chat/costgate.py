@@ -13,7 +13,7 @@ import logging
 from contextvars import ContextVar
 from typing import Protocol
 
-from kongming.billing.models import check_quota
+from kongming.quota import check_quota
 
 _TZ = dt.timezone(dt.timedelta(hours=8))  # Asia/Shanghai(与 billing 同口径)
 
@@ -46,6 +46,12 @@ class UsageCounterPort(Protocol):
 
 class OperLoggerPort(Protocol):
     async def log(self, *, action: str, target: str, detail: dict[str, object]) -> None: ...
+
+
+class QuotaSourcePort(Protocol):
+    """租户配额来源(managed=控制面权益快照;standalone 不注入走部署配置)。"""
+
+    async def limits(self, tenant_id: str) -> object: ...
 
 
 class ChatRateLimited(Exception):
@@ -88,6 +94,7 @@ class ChatCostGate:
         bot_rate_per_minute: int = 30,  # 公开嵌入面独立预算
         quota_daily_calls: int = 500,
         quota_monthly_calls: int = 10000,
+        quota_source: QuotaSourcePort | None = None,
         now: dt.datetime | None = None,  # 测试注入口(缺省取系统时钟)
     ) -> None:
         self._limiter = limiter
@@ -97,7 +104,19 @@ class ChatCostGate:
         self._bot_rate = bot_rate_per_minute
         self._daily = quota_daily_calls
         self._monthly = quota_monthly_calls
+        self._quota_source = quota_source
         self._now = now
+
+    async def _limits(self, tenant_id: str) -> tuple[int, int]:
+        """当前配额上限:注入快照来源时以其为准;缺失/异常 fail-closed。"""
+        if self._quota_source is None:
+            return self._daily, self._monthly
+        try:
+            limits = await self._quota_source.limits(tenant_id)
+        except Exception as e:
+            await self._audit("chat.quota_source_failed", tenant_id, {"error": str(e)[:200]})
+            raise ChatQuotaUnavailable("CHAT_QUOTA_UNAVAILABLE") from e
+        return int(getattr(limits, "calls_daily", 0)), int(getattr(limits, "calls_monthly", 0))
 
     async def _check_rate(self, *, tenant_id: str, user_id: str) -> None:
         """速率闸(租户,用户)近似滑动窗口;limit<=0 不限,存储异常 fail-open。"""
@@ -140,6 +159,7 @@ class ChatCostGate:
         await self._check_rate(tenant_id=tenant_id, user_id=user_id)
         if self._counter is None:
             return ""  # 无配额维(bot 面):仅速率闸
+        daily, monthly = await self._limits(tenant_id)
         day_start, month_start = day_window(self._now or dt.datetime.now(_TZ))
         try:
             used_day, used_month = await self._counter.count_calls(
@@ -150,14 +170,14 @@ class ChatCostGate:
             raise ChatQuotaUnavailable("CHAT_QUOTA_UNAVAILABLE") from e
         # 日维先于月维(拒绝/预警审计顺序不变)
         await self._check_quota_dim(
-            tenant_id, dimension="CHAT_DAILY_CALLS", used=used_day, limit=self._daily
+            tenant_id, dimension="CHAT_DAILY_CALLS", used=used_day, limit=daily
         )
         await self._check_quota_dim(
-            tenant_id, dimension="CHAT_MONTHLY_CALLS", used=used_month, limit=self._monthly
+            tenant_id, dimension="CHAT_MONTHLY_CALLS", used=used_month, limit=monthly
         )
         # 预警头经 contextvar 回传路由落响应头
         warn = self._warn_header(
-            used_day=used_day, used_month=used_month, daily=self._daily, monthly=self._monthly
+            used_day=used_day, used_month=used_month, daily=daily, monthly=monthly
         )
         quota_warn_var.set(warn)
         return warn

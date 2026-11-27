@@ -2,6 +2,8 @@
 OpenAI 兼容 API(api-key 鉴权)。组合根见 dependencies/adapters。
 """
 
+import datetime as dt
+import logging
 import time
 import uuid
 from typing import Annotated, cast
@@ -41,6 +43,8 @@ from kongming.bot.service_factory import get_bot_service
 from kongming.chat.costgate import ChatRateLimited
 from kongming.db import get_session
 from kongming.toolcall.repository import user_has_all_scope
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/system/bots", tags=["bot"])
 public_router = APIRouter(tags=["bot-public"])
@@ -509,31 +513,50 @@ async def openai_chat(
 
 
 async def _check_gateway_quota(key_info: dict[str, object]) -> tuple[bool, str, str]:
-    """网关配额判定(独立会话;拒前先落审计并显式提交);返回 (放行, 超限维度, 预警头)。"""
+    """网关配额判定:租户权益快照(BOT 日配额优先)对本地用量计数;
+    缺失权益 fail-closed(503);超限审计后 429。返回 (放行, 超限维度, 预警头)。"""
     from kongming.auth.repository import SqlOperLogRepo
-    from kongming.billing.repository import SqlBillingRepo
-    from kongming.billing.service import BillingService
+    from kongming.control.dependencies import get_control_runtime
     from kongming.db import get_sessionmaker as _gsm
 
-    class _QuotaOper:
-        def __init__(self, s: object) -> None:
-            self._r = SqlOperLogRepo(s)  # type: ignore[arg-type]
-
-        async def log(self, *, action: str, target: str, detail: dict[str, object]) -> None:
-            await self._r.add(None, action, target, detail)
-
+    tenant_id = str(key_info["tenant_id"])
+    bot_id = str(key_info["bot_id"])
+    runtime = get_control_runtime()
+    try:
+        limits = await runtime.entitlements.for_tenant_id(tenant_id)
+    except Exception as e:  # 缺权益/快照非法:受保护操作失败关闭
+        log.warning("网关配额来源不可用(拒绝): %s", e)
+        raise HTTPException(status_code=503, detail="QUOTA_UNAVAILABLE") from e
+    limit = limits.bot_calls_daily or limits.calls_daily
+    if limit <= 0:
+        return True, "", ""
+    tz = dt.timezone(dt.timedelta(hours=8))  # 与 chat 配额同口径(Asia/Shanghai)
+    day_start = dt.datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
     async with _gsm()() as qs:
-        # 审计注入(spec「429 并落审计」)+提交(独立会话须显式
-        # commit,否则审计随会话关闭回滚)
-        allowed, dimension, quota_warn = await BillingService(
-            SqlBillingRepo(qs), _QuotaOper(qs)
-        ).check_gateway_quota(
-            tenant_id=str(key_info["tenant_id"]),
-            bot_id=str(key_info["bot_id"]),  # BOT 级配额双路判定
+        used = int(
+            (
+                await qs.execute(
+                    text(
+                        "SELECT count(*) FROM public.sys_llm_usage"
+                        " WHERE tenant_id = CAST(:t AS uuid)"
+                        "   AND bot_id = CAST(:b AS uuid)"
+                        "   AND created_at >= :d"
+                    ),
+                    {"t": tenant_id, "b": bot_id, "d": day_start},
+                )
+            ).scalar_one()
         )
-        if not allowed:
-            await qs.commit()  # 拒前落审计
-    return allowed, dimension, quota_warn
+        warn = f"BOT_DAILY_CALLS:{used}/{limit}" if used * 100 >= limit * 80 else ""
+        if used < limit:
+            return True, "", warn
+        await SqlOperLogRepo(qs).add(
+            None,
+            "bot.quota_reject",
+            bot_id,
+            {"tenant_id": tenant_id, "used": used, "limit": limit},
+        )
+        await qs.commit()
+    return False, "BOT_DAILY_CALLS", warn
 
 
 def _completion_body(bot_key: str, out: dict[str, object]) -> dict[str, object]:

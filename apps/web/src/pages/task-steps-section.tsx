@@ -1,9 +1,9 @@
 /* 任务步骤账本:步骤状态、审批门、图内确认卡与断点摘要。 */
 
-import { MarkdownText } from "@/components/markdown-text";
-import { StatusBadge } from "@/components/status-badge";
-import type { GraphConfirmOut, TaskDetailOut } from "@/lib/task-api";
-import { TASK_STATUS_META } from "@/lib/task-api";
+import { MarkdownText } from "@kongming/ui/markdown-text";
+import { StatusBadge } from "@kongming/ui/status-badge";
+import type { GraphConfirmOut, TaskDetailOut } from "@kongming/api-client/task-api";
+import { TASK_STATUS_META } from "@kongming/api-client/task-api";
 
 import { ConfirmOperationButton, OperationButton } from "./task-operation-buttons";
 

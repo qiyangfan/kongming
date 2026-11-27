@@ -1,6 +1,6 @@
 /* 语音通话媒体底层工具:Web Audio 音量分析器、ICE 收集等待、延迟麦轨挂载与远端播放节点。 */
 
-import { computeAudioLevel } from "@/lib/voice-call";
+import { computeAudioLevel } from "@kongming/api-client/voice-call";
 
 export interface AudioLevels {
   user: number;

@@ -1,38 +1,82 @@
-"""config prod fail-closed 回归:mock 支付密钥闸。
+"""config prod fail-closed 回归:控制面组合残缺。
 
-prod + mock 开启 + 密钥缺省/占位 → 拒启(否则默认公开密钥可伪造 PAID 回调)。
+managed 缺 base URL/验签密钥/服务身份时拒启;本地 pre-shared 服务身份
+只允许回环控制面地址。standalone 合法缺省。
 """
 
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
 from kongming.config import Settings
 
-# 值全为 str,但 Settings(pydantic)会按字段类型做 env 风格强转:
-# 合并后的 kwargs cast 回全 Any 值域,免得 ** 展开被逐参数按 str 校验误报
 _PROD_KW: dict[str, Any] = {
     "environment": "prod",
     "jwt_private_key_pem": "k",
     "jwt_public_key_pem": "k",
     "internal_token": "k",
     "datasource_encrypt_key": "k" * 32,
-    # 清空 websearch 配置,避免本机 .env 改变生产环境校验结果。
+    # 清空外部供应商配置,避免本机 .env 改变生产环境校验结果。
     "websearch_provider": "",
     "websearch_api_key": "",
 }
 
 
-def test_prod_mock_secret_dev_placeholder_rejected() -> None:
-    s = Settings(
-        **cast("dict[str, Any]", {**_PROD_KW, "billing_mock_secret": "dev-mock-payment-secret"})
-    )
-    with pytest.raises(RuntimeError, match="KM_BILLING_MOCK_SECRET"):
+def _prod(**over: Any) -> Settings:
+    kw: dict[str, Any] = {**_PROD_KW, **over}
+    return Settings(**kw)
+
+
+def test_standalone_is_valid_default() -> None:
+    _prod().fail_closed_checks()  # 不抛:standalone 不连控制面
+
+
+def test_managed_missing_base_url_rejected() -> None:
+    s = _prod(control_mode="managed", control_signing_secret="s", control_service_token="t")
+    with pytest.raises(RuntimeError, match="KM_CONTROL_BASE_URL"):
         s.fail_closed_checks()
 
 
-def test_prod_mock_secret_explicit_passes() -> None:
-    s = Settings(**cast("dict[str, Any]", {**_PROD_KW, "billing_mock_secret": "prod-real-secret"}))
+def test_managed_missing_signing_secret_rejected() -> None:
+    s = _prod(
+        control_mode="managed",
+        control_base_url="http://127.0.0.1:9000",
+        control_service_token="t",
+    )
+    with pytest.raises(RuntimeError, match="KM_CONTROL_SIGNING_SECRET"):
+        s.fail_closed_checks()
+
+
+def test_managed_without_identity_rejected() -> None:
+    s = _prod(
+        control_mode="managed",
+        control_base_url="http://127.0.0.1:9000",
+        control_signing_secret="s",
+    )
+    with pytest.raises(RuntimeError, match="服务身份"):
+        s.fail_closed_checks()
+
+
+def test_prod_local_service_token_requires_loopback() -> None:
+    s = _prod(
+        control_mode="managed",
+        control_base_url="https://jinguan.example",
+        control_signing_secret="s",
+        control_service_token="t",
+    )
+    with pytest.raises(RuntimeError, match="回环"):
+        s.fail_closed_checks()
+
+
+def test_managed_keycloak_identity_valid() -> None:
+    s = _prod(
+        control_mode="managed",
+        control_base_url="https://jinguan.example",
+        control_signing_secret="s",
+        control_keycloak_issuer="https://idp",
+        control_keycloak_client_id="kongming-control",
+        control_keycloak_client_secret="x",
+    )
     s.fail_closed_checks()  # 不抛
 
 

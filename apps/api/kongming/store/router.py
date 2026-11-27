@@ -10,6 +10,7 @@ from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kongming.auth.deps import CurrentUser, require_perm
@@ -151,6 +152,48 @@ async def _tenant_or_403(user: AuthenticatedUser, session: AsyncSession, header:
     if default is None:
         raise HTTPException(status_code=403, detail="TENANT_FORBIDDEN")
     return str(default[0])
+
+
+async def _tenant_key(session: AsyncSession, tenant_id: str) -> str:
+    row = (
+        await session.execute(
+            text("SELECT tenant_key FROM public.sys_tenant WHERE id = CAST(:t AS uuid)"),
+            {"t": tenant_id},
+        )
+    ).scalar_one_or_none()
+    return "" if row is None else str(row)
+
+
+async def _require_catalog(
+    session: AsyncSession, *, user_id: str, tenant_id: str, bot_key: str
+) -> None:
+    """managed 目录闸:不在租户可见目录即 404 同形,并落拒绝审计。"""
+    from kongming.auth.repository import SqlOperLogRepo
+    from kongming.control.dependencies import get_control_runtime
+
+    catalog = get_control_runtime().catalog
+    if not catalog.managed:
+        return
+    entries = await catalog.entries_for_tenant(await _tenant_key(session, tenant_id))
+    if bot_key in entries:
+        return
+    await SqlOperLogRepo(session).add(
+        user_id, "store.catalog_denied", bot_key, {"tenant_id": tenant_id}
+    )
+    await session.commit()
+    raise HTTPException(status_code=404, detail="NOT_FOUND")
+
+
+async def _filter_catalog(
+    session: AsyncSession, rows: list[dict[str, Any]], tenant_id: str
+) -> list[dict[str, Any]]:
+    from kongming.control.dependencies import get_control_runtime
+
+    catalog = get_control_runtime().catalog
+    if not catalog.managed:
+        return rows
+    entries = await catalog.entries_for_tenant(await _tenant_key(session, tenant_id))
+    return [r for r in rows if str(r.get("bot_key")) in entries]
 
 
 async def _can_manage_bot(
@@ -437,6 +480,7 @@ async def store_list(
     rows = await _svc(session).list_store(
         tenant_id=tenant_id, keyword=q, sort=sort, user_id=user.user_id
     )
+    rows = await _filter_catalog(session, rows, tenant_id)
     return [_store_out(r) for r in rows]
 
 
@@ -452,6 +496,7 @@ async def store_detail(
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> StoreBotDetailOut:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
+    await _require_catalog(session, user_id=user.user_id, tenant_id=tenant_id, bot_key=bot_key)
     try:
         row = await _svc(session).get_detail(
             tenant_id=tenant_id, bot_key=bot_key, user_id=user.user_id
@@ -480,6 +525,7 @@ async def add_favorite(
     """收藏(幂等:set 语义,重复 POST 不反选—— 对齐 spec
     「重复操作幂等」;取消走 DELETE 同路径)。"""
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
+    await _require_catalog(session, user_id=user.user_id, tenant_id=tenant_id, bot_key=bot_key)
     try:
         favorited = await _svc(session).set_favorite(
             tenant_id=tenant_id, bot_key=bot_key, user_id=user.user_id, favorited=True
@@ -498,6 +544,7 @@ async def remove_favorite(
 ) -> dict[str, bool]:
     """取消收藏(幂等:未收藏时重复 DELETE 同样返回 favorited=false)。"""
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
+    await _require_catalog(session, user_id=user.user_id, tenant_id=tenant_id, bot_key=bot_key)
     try:
         favorited = await _svc(session).set_favorite(
             tenant_id=tenant_id, bot_key=bot_key, user_id=user.user_id, favorited=False
@@ -519,6 +566,7 @@ async def my_favorites(
     填充与收藏计数同源);列表本身即本人收藏,favorited 恒 TRUE。"""
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
     rows = await _svc(session).my_favorites(tenant_id=tenant_id, user_id=user.user_id)
+    rows = await _filter_catalog(session, rows, tenant_id)
     return [_store_out(r) for r in rows]
 
 
@@ -535,6 +583,7 @@ async def rate_bot(
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, bool]:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
+    await _require_catalog(session, user_id=user.user_id, tenant_id=tenant_id, bot_key=bot_key)
     svc = _svc(session)
     try:
         await svc.rate(
@@ -567,6 +616,7 @@ async def store_run(
     x_tenant_id: Annotated[str | None, Header()] = None,
 ) -> StoreRunOut:
     tenant_id = await _tenant_or_403(user, session, x_tenant_id)
+    await _require_catalog(session, user_id=user.user_id, tenant_id=tenant_id, bot_key=bot_key)
     try:
         out = await _svc(session).run(tenant_id=tenant_id, bot_key=bot_key, question=body.question)
     except StoreNotFound:

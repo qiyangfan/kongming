@@ -9,18 +9,18 @@ import {
   ReportArtifactCard,
   SqlArtifactCard,
 } from "@/components/artifact-blocks";
-import type { ChartSpec } from "@/lib/chart-shared";
+import type { ChartSpec } from "@kongming/api-client/chart-shared";
 import { ResultTable } from "@/components/result-table";
-import { hasChartToRender, normalizeBinding } from "@/lib/chart-shared";
+import { hasChartToRender, normalizeBinding } from "@kongming/api-client/chart-shared";
 import {
   CitationSourcesPanel,
   renderWithCitations,
   useCitationHighlight,
 } from "@/components/citation-panel";
-import type { ArtifactOut } from "@/lib/chat-api";
-import { humanizeErrorText, type SessionMessageOut } from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import type { ArtifactOut } from "@kongming/api-client/chat-api";
+import { humanizeErrorText, type SessionMessageOut } from "@kongming/api-client/api";
+import { Badge } from "@kongming/ui/badge";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kongming/ui/collapsible";
 import { FeedbackActions } from "@/components/assistant-feedback";
 import { ExportButtons } from "@/components/assistant-export";
 import { ExplainCollapsible } from "@/components/assistant-explain";

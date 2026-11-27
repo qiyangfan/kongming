@@ -5,9 +5,9 @@ import { Paperclip } from "lucide-react";
 
 import { AssistantCard } from "@/components/assistant-card";
 import { ChatBubble } from "@/components/chat-bubble";
-import type { ChatQueryOut, SessionMessageOut } from "@/lib/api";
-import { snapshotStatus } from "@/lib/turn-stop";
-import { cellText } from "@/lib/utils";
+import type { ChatQueryOut, SessionMessageOut } from "@kongming/api-client/api";
+import { snapshotStatus } from "@kongming/api-client/turn-stop";
+import { cellText } from "@kongming/api-client/utils";
 
 /** 附件徽标(user 气泡两处共用:历史回显与即时快照) */
 function AttachmentBadge({ items }: { items: { [key: string]: unknown }[] }) {

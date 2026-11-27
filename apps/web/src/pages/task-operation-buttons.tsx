@@ -10,8 +10,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+} from "@kongming/ui/alert-dialog";
+import { Button } from "@kongming/ui/button";
 
 export function OperationButton(props: {
   label: string;

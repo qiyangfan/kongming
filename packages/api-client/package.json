@@ -1,0 +1,29 @@
+{
+  "name": "@kongming/api-client",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/api.ts",
+    "./chat-stream-validate.gen.js": "./src/chat-stream-validate.gen.js",
+    "./*.json": "./src/*.json",
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "echarts": "^6.0.0",
+    "echarts-for-react": "^3.0.7",
+    "hast": "^1.0.0",
+    "lucide-react": "^1.59.0",
+    "react": "^19.3.0",
+    "refractor": "^5.0.0",
+    "tailwind-merge": "^3.6.0",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/hast": "^3.0.5"
+  }
+}

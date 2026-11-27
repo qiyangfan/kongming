@@ -3,13 +3,13 @@ import { render, screen } from "@testing-library/react";
 import { Inbox } from "lucide-react";
 import { describe, expect, it } from "vitest";
 
-import { EmptyState } from "@/components/empty-state";
-import { ErrorAlert } from "@/components/error-alert";
-import { FieldLabel } from "@/components/field-label";
-import { FormRow } from "@/components/form-row";
-import { PageHeader } from "@/components/page-header";
-import { StatCard } from "@/components/stat-card";
-import { Input } from "@/components/ui/input";
+import { EmptyState } from "@kongming/ui/empty-state";
+import { ErrorAlert } from "@kongming/ui/error-alert";
+import { FieldLabel } from "@kongming/ui/field-label";
+import { FormRow } from "@kongming/ui/form-row";
+import { PageHeader } from "@kongming/ui/page-header";
+import { StatCard } from "@kongming/ui/stat-card";
+import { Input } from "@kongming/ui/input";
 
 describe("页面骨架标准件", () => {
   it("PageHeader 渲染标题/描述/操作区,缺省项不渲染", () => {

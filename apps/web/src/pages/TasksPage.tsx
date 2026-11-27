@@ -4,21 +4,15 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 
-import { DataView, type DataViewColumn } from "@/components/data-view";
-import { ErrorAlert } from "@/components/error-alert";
-import { PageHeader } from "@/components/page-header";
-import { Pagination } from "@/components/pagination";
-import { StatusBadge } from "@/components/status-badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { listTasks, TASK_STATUS_META } from "@/lib/task-api";
-import type { TaskItem } from "@/lib/task-api";
-import { useTenant } from "@/lib/tenant-store";
+import { DataView, type DataViewColumn } from "@kongming/ui/data-view";
+import { ErrorAlert } from "@kongming/ui/error-alert";
+import { PageHeader } from "@kongming/ui/page-header";
+import { Pagination } from "@kongming/ui/pagination";
+import { StatusBadge } from "@kongming/ui/status-badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kongming/ui/select";
+import { listTasks, TASK_STATUS_META } from "@kongming/api-client/task-api";
+import type { TaskItem } from "@kongming/api-client/task-api";
+import { useTenant } from "@kongming/api-client/tenant-store";
 
 const PAGE_SIZE = 20;
 

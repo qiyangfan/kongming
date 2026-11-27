@@ -4,11 +4,11 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Search } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { EmptyState } from "@/components/empty-state";
-import { ErrorAlert } from "@/components/error-alert";
+import { Button } from "@kongming/ui/button";
+import { Input } from "@kongming/ui/input";
+import { ToggleGroup, ToggleGroupItem } from "@kongming/ui/toggle-group";
+import { EmptyState } from "@kongming/ui/empty-state";
+import { ErrorAlert } from "@kongming/ui/error-alert";
 import {
   addFavorite,
   getStoreBot,
@@ -19,7 +19,7 @@ import {
   runStoreBot,
   type StoreBotDetail,
   type StoreBotItem,
-} from "@/lib/store-api";
+} from "@kongming/api-client/store-api";
 
 import { StoreBotCard } from "./store-bot-card";
 import { StoreDetailDialog } from "./store-detail-dialog";

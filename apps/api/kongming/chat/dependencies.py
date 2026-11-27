@@ -72,6 +72,15 @@ _TURNS = InflightTurns()
 _FEDERATION = RedisTurnFederation(get_redis(), get_settings())
 
 
+class _EntitlementQuotaSource:
+    """把控制面权益服务适配为 chat 配额端口(缺失即抛出,由闸 fail-closed)。"""
+
+    async def limits(self, tenant_id: str) -> object:
+        from kongming.control.dependencies import get_control_runtime
+
+        return await get_control_runtime().entitlements.for_tenant_id(tenant_id)
+
+
 def _build_cost_gate() -> ChatCostGate:
     """成本双闸组合根(limiter=Redis 固定窗口;counter=上条适配;
     oper=SqlOperLogRepo 独立短会话;参数取自 settings,0=不限)。"""
@@ -98,6 +107,8 @@ def _build_cost_gate() -> ChatCostGate:
         rate_per_minute=settings.chat_rate_per_minute,
         quota_daily_calls=settings.chat_quota_daily_calls,
         quota_monthly_calls=settings.chat_quota_monthly_calls,
+        # managed 时以控制面权益快照为准;standalone 不注入(部署配置)
+        quota_source=_EntitlementQuotaSource() if settings.control_enabled() else None,
     )
 
 

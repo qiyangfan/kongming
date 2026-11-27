@@ -3,8 +3,12 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { NavigateFunction } from "react-router";
 
-import { api, type ChatQueryOut, type TurnCancelOut } from "@/lib/api";
-import { stopResultFromError, stopResultFromResponse, type StopNotice } from "@/lib/turn-stop";
+import { api, type ChatQueryOut, type TurnCancelOut } from "@kongming/api-client/api";
+import {
+  stopResultFromError,
+  stopResultFromResponse,
+  type StopNotice,
+} from "@kongming/api-client/turn-stop";
 
 import type { ChatCtx, StreamCtx, StreamInputs, StreamingTurnStart } from "./chat-stream-types";
 

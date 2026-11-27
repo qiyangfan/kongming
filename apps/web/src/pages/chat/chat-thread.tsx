@@ -6,10 +6,14 @@ import { AssistantCard } from "@/components/assistant-card";
 import { ChatBubble } from "@/components/chat-bubble";
 import { StreamingTurn } from "@/components/streaming-turn";
 import { ToolConfirmCard } from "@/components/tool-confirm-card";
-import { Skeleton } from "@/components/ui/skeleton";
-import type { ChatQueryOut, SessionMessageOut } from "@/lib/api";
-import { humanizeErrorText } from "@/lib/api";
-import { stopNoticeText, type StopNotice, type StopNoticeKind } from "@/lib/turn-stop";
+import { Skeleton } from "@kongming/ui/skeleton";
+import type { ChatQueryOut, SessionMessageOut } from "@kongming/api-client/api";
+import { humanizeErrorText } from "@kongming/api-client/api";
+import {
+  stopNoticeText,
+  type StopNotice,
+  type StopNoticeKind,
+} from "@kongming/api-client/turn-stop";
 
 import { EmptyState } from "./empty-state";
 import { MessageRow, UserTurn } from "./message-row";

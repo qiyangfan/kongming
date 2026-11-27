@@ -2,8 +2,8 @@
 
 import { Heart, Star } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import type { StoreBotItem } from "@/lib/store-api";
+import { Button } from "@kongming/ui/button";
+import type { StoreBotItem } from "@kongming/api-client/store-api";
 
 /** 平均分星标:≥3 分实心主色,0 分显示占位。 */
 export function Stars({ value }: { value: number }) {

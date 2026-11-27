@@ -4,9 +4,13 @@
 import { useEffect, useRef } from "react";
 import { AudioLines, MicOff, PhoneOff, X } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { smoothAudioLevel, type CallPhase, type FailureReason } from "@/lib/voice-call";
+import { Button } from "@kongming/ui/button";
+import { cn } from "@kongming/api-client/utils";
+import {
+  smoothAudioLevel,
+  type CallPhase,
+  type FailureReason,
+} from "@kongming/api-client/voice-call";
 
 const PHASE_TEXT: Record<Exclude<CallPhase, "failed">, string> = {
   idle: "",

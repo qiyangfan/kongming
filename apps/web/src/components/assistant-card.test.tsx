@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { AssistantCard } from "@/components/assistant-card";
-import type { SessionMessageOut } from "@/lib/api";
+import type { SessionMessageOut } from "@kongming/api-client/api";
 
 const SQL = "SELECT count(*) FROM film";
 

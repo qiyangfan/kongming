@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import type React from "react";
 
-import { uploadAttachment } from "@/lib/chat-api";
+import { uploadAttachment } from "@kongming/api-client/chat-api";
 
 export interface AttachmentChip {
   id: string;

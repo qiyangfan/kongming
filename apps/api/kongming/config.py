@@ -55,6 +55,17 @@ def validated_fulltext_ranker(value: str) -> str:
     return value
 
 
+def _is_loopback(url: str) -> bool:
+    """控制面地址是否指向本机(本地 pre-shared 身份的唯一合法场景)。"""
+    from urllib.parse import urlparse
+
+    try:
+        host = (urlparse(url).hostname or "").strip().lower()
+    except ValueError:
+        return False
+    return host in {"127.0.0.1", "::1", "localhost"}
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="KM_", extra="ignore")
 
@@ -198,12 +209,6 @@ class Settings(BaseSettings):
     audit_archive_days: int = Field(default=180, ge=1)
     audit_archive_dir: str = "var/audit-archive"
 
-    # mock 支付通道(payment-gateway spec):默认开启——mock 是 v1 唯一
-    # 收款路径;密钥 dev 默认占位(生产必须显式替换),支付单在途时长(分钟)
-    billing_mock_enabled: bool = True
-    billing_mock_secret: str = "dev-mock-payment-secret"  # noqa: S105  # dev 占位刻意(生产必须替换,上文注释)
-    billing_payment_ttl_minutes: int = Field(default=30, ge=1)
-
     # tool-calling:工具执行固定窗口限流(次/分钟,租户+用户维度)+
     # 写工具确认窗口(分钟)
     tool_rate_limit_per_minute: int = Field(default=60, ge=1)
@@ -295,11 +300,90 @@ class Settings(BaseSettings):
     # 引擎只对拍观测)。切换期行为契约零变更;引擎缺失/异常自动降级不阻断。
     sqlguard_mode: str = "shadow"
 
-    # 成本对账旁路:muniu 管理面只读访问,URL 与凭证均显式配置,
-    # 凭证环境变量注入,不落库不入日志;任一项空 = 对账端点报告「未配置」。
-    muniu_admin_base_url: str = ""
-    muniu_admin_token: str = ""
-    cost_reconcile_threshold: float = Field(default=0.2, ge=0.0, le=1.0)
+    # ── 共享控制面(ADR-0005;孔明是服务数据面) ─────────────────────
+    # standalone=不连锦官,租户/配额等用本地种子与部署配置(开发/独立部署);
+    # managed=消费锦官快照、命令与用量上报。切换不改服务域配置与运行时数据。
+    control_mode: str = "standalone"  # standalone | managed
+    control_base_url: str = ""
+    control_service_id: str = "kongming"
+    # 实例标识:空=每次启动生成(滚动重启视为新实例,旧实例靠 last_seen 收敛)
+    control_instance_id: str = ""
+    # 快照/回执签名预共享密钥(X-01 契约冻结前的最小验签形态;空=无法验签)
+    control_signing_secret: str = ""
+    # 本地 pre-shared 服务身份(仅回环地址可用;生产走 Keycloak client credentials)
+    control_service_token: str = ""
+    control_keycloak_issuer: str = ""
+    control_keycloak_client_id: str = ""
+    control_keycloak_client_secret: str = ""
+    control_snapshot_poll_sec: int = Field(default=30, ge=5)
+    control_heartbeat_sec: int = Field(default=30, ge=5)
+    control_command_poll_sec: int = Field(default=15, ge=5)
+    control_usage_flush_sec: int = Field(default=10, ge=1)
+    control_usage_buffer_max: int = Field(default=500, ge=1)
+    control_http_timeout_sec: float = Field(default=5.0, gt=0)
+    control_backoff_max_sec: int = Field(default=300, ge=1)
+    # 快照超过此龄视为 stale;安全类(租户/成员/粗角色/权益/共享策略)不看 stale,
+    # 缺失或过期一律拒绝新受保护操作(fail-closed)
+    control_stale_after_sec: int = Field(default=300, ge=1)
+    # 服务只读 API(供锦官只读视图);关闭即整组端点 404。
+    # reader token 是 localhost 演练用 pre-shared;生产用 Keycloak 服务 token
+    # (control_keycloak_issuer + control_reader_client_ids 校验 azp)。
+    control_readonly_enabled: bool = True
+    control_reader_token: str = ""
+    control_reader_client_ids: str = "jinguan-read-kongming"
+
+    # ── 孔明管理台(独立 apps/admin 前端;CONTROL-PLANE-PROJECT §7.1) ──
+    admin_public_origin: str = "http://127.0.0.1:5174"
+    admin_api_origin: str = "http://127.0.0.1:8000"
+    admin_keycloak_client_id: str = "kongming-admin-web"
+    admin_keycloak_client_secret: str = ""
+    admin_keycloak_redirect_uri: str = "http://127.0.0.1:5174/auth/keycloak/callback"
+    admin_keycloak_post_logout_redirect_uri: str = "http://127.0.0.1:5174/login"
+    admin_keycloak_required_role: str = "kongming-admin"
+    admin_session_ttl_sec: int = Field(default=1800, ge=60)
+    admin_cookie_name: str = "km_admin_refresh"
+
+    def control_misconfiguration(self) -> str | None:
+        """控制面组合配置校验(managed 缺必需项返回描述,否则 None)。
+
+        standalone 不连控制面,合法缺省;managed 必须有 base URL 与一种
+        服务身份(本地 pre-shared 或 Keycloak client),快照验签必须有
+        预共享密钥——否则拉回来的快照无法验真,等同裸信网络输入。
+        """
+        mode = (self.control_mode or "").strip().lower()
+        if mode not in ("standalone", "managed"):
+            return f"KM_CONTROL_MODE 非法值 {self.control_mode}(值域:standalone,managed)"
+        if mode == "standalone":
+            return None
+        if not (self.control_base_url or "").strip():
+            return "KM_CONTROL_MODE=managed 但 KM_CONTROL_BASE_URL 缺失"
+        if not (self.control_signing_secret or "").strip():
+            return "KM_CONTROL_MODE=managed 但 KM_CONTROL_SIGNING_SECRET 缺失(快照无法验签)"
+        has_local = bool((self.control_service_token or "").strip())
+        has_keycloak = all(
+            (v or "").strip()
+            for v in (
+                self.control_keycloak_issuer,
+                self.control_keycloak_client_id,
+                self.control_keycloak_client_secret,
+            )
+        )
+        if not has_local and not has_keycloak:
+            return "KM_CONTROL_MODE=managed 但未配置服务身份(本地 token 或 Keycloak client)"
+        return None
+
+    def require_control_mode(self) -> str:
+        """控制面模式与组合校验;非法/残缺 RuntimeError 拒启(dev/prod 同口径)。"""
+        misconfig = self.control_misconfiguration()
+        if misconfig:
+            raise RuntimeError(misconfig)
+        return (self.control_mode or "").strip().lower()
+
+    def control_enabled(self) -> bool:
+        """是否接入控制面(managed 且配置完整)。"""
+        return self.control_misconfiguration() is None and (
+            (self.control_mode or "").strip().lower() == "managed"
+        )
 
     def websearch_misconfiguration(self) -> str | None:
         """websearch 组合配置校验(残缺返回描述,否则 None)。
@@ -409,16 +493,6 @@ class Settings(BaseSettings):
         missing = [env for env, val in required if not val]
         if missing:
             raise RuntimeError(f"prod fail-closed: 缺少必需配置 {missing}")
-        # (mock 回调验签可伪造):mock 通道开启时密钥必须显式配置
-        # 且不得为仓库公开的 dev 占位值——否则任何人可伪造 PAID 回调核销账单
-        if self.billing_mock_enabled and self.billing_mock_secret in (
-            "",
-            "dev-mock-payment-secret",
-        ):
-            raise RuntimeError(
-                "prod fail-closed: KM_BILLING_MOCK_ENABLED 开启时"
-                " KM_BILLING_MOCK_SECRET 必须显式配置且不得为 dev 占位值"
-            )
         # websearch 组合残缺(供应商已配缺 key / 供应商非法值)在 prod
         # 拒启而非静默降级——配置错误必须显式暴露(dev 由 lifespan 告警降级)
         ws_misconfig = self.websearch_misconfiguration()
@@ -433,6 +507,17 @@ class Settings(BaseSettings):
         de_misconfig = self.doc_entity_misconfiguration()
         if de_misconfig:
             raise RuntimeError(f"prod fail-closed: {de_misconfig}")
+        # 控制面组合残缺同样拒启:managed 缺 URL/验签密钥/服务身份时
+        # 拉回任何东西都无法验真,不能带着半配置启动。
+        cm_misconfig = self.control_misconfiguration()
+        if cm_misconfig:
+            raise RuntimeError(f"prod fail-closed: {cm_misconfig}")
+        # 本地 pre-shared 服务身份只允许回环地址(CONTROL-PLANE §5.9)
+        if (self.control_service_token or "").strip() and not _is_loopback(self.control_base_url):
+            raise RuntimeError(
+                "prod fail-closed: KM_CONTROL_SERVICE_TOKEN 仅允许回环控制面地址;"
+                "生产请用 Keycloak client credentials"
+            )
 
 
 @lru_cache
@@ -442,4 +527,5 @@ def get_settings() -> Settings:
     s.require_fulltext_ts_config()  # 分词配置无效时拒绝启动。
     s.require_fulltext_ranker()  # 关键词排序配置无效时拒绝启动。
     s.require_rerank_provider()  # 重排供应商无效时拒绝启动。
+    s.require_control_mode()  # 控制面模式非法/半配置时拒绝启动。
     return s

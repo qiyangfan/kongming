@@ -7,7 +7,7 @@
 | Agent 产生事件 | 普通问答和 ReAct 使用同一个 `emit_event(name, dict)`。两条内部流都用 SSE 发送事件名和数据，内部 `result` 使用 `QueryOut`。见 [发射函数](../../../../apps/agent/kongming_agent/graph/streams.py#L26)和 [Agent 响应](../../../../apps/agent/kongming_agent/main.py#L489)。 |
 | API 接收 Agent 流 | 按事件名白名单筛选。过程消息只检查数据能否解析为字典，随后进入队列，阶段消息还会写入阶段记录。当前 `trace` 也会转发，内容可包含表预筛结果、评分或引用净化信息。见 [中继](../../../../apps/api/kongming/chat/stream_runner.py#L189)和 [诊断事件](../../../../apps/agent/kongming_agent/graph/nodes.py#L373)。 |
 | API 对外发送 | `result` 先将领域结果转成 `ChatQueryOut`，再由响应模型编码。其余事件用 `json.dumps(default=str)`，遇到不支持的值时可能直接转成文本。接口说明用 `oneOf` 列出裸数据结构，200 响应还额外声明了实际不会返回的 `application/json`。见 [发送函数](../../../../apps/api/kongming/chat/router.py#L194)、[模型与响应说明](../../../../apps/api/kongming/chat/schemas.py#L189)和 [生成的接口说明](../../../../contracts/openapi.json)。 |
-| 网页接收 | 按 SSE 的 `event:` 名查表，用 TypeScript 的 `as` 直接信任解析后的数据。现有测试把空对象视为合法结尾。读流逻辑标记结尾后还会继续分发同一网络分块中的消息。见 [分发函数](../../../../apps/web/src/lib/api.ts#L276)和 [现有测试](../../../../apps/web/src/lib/api.test.ts#L45)。 |
+| 网页接收 | 按 SSE 的 `event:` 名查表，用 TypeScript 的 `as` 直接信任解析后的数据。现有测试把空对象视为合法结尾。读流逻辑标记结尾后还会继续分发同一网络分块中的消息。见 [分发函数](../../../../packages/api-client/src/api.ts#L276)和 [现有测试](../../../../apps/web/src/test/shared/api.test.ts)。 |
 
 ## Goals / Non-Goals
 

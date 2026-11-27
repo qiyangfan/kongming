@@ -13,7 +13,11 @@ import httpx
 import jwt
 from jwt import PyJWK
 
-from kongming.auth.models import NormalizedProfile, ProviderExchangeFailed
+from kongming.auth.models import (
+    NormalizedProfile,
+    ProviderExchangeFailed,
+    RequiredRoleMissing,
+)
 from kongming.auth.providers.base import OAuthProviderBase
 from kongming.config import Settings
 
@@ -28,9 +32,17 @@ class KeycloakProvider(OAuthProviderBase):
     oidc = True
     scope = "openid profile email"
 
-    def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(
+        self,
+        transport: httpx.AsyncBaseTransport | None = None,
+        *,
+        required_role: str | None = None,
+        role_client_id: str | None = None,
+    ) -> None:
         # transport 仅供测试注入(MockTransport),生产为 None 走真实网络
         self._transport = transport
+        self._required_role = required_role
+        self._role_client_id = role_client_id
         self._meta: dict[str, Any] | None = None
         self._meta_at = 0.0
         self._jwks: dict[str, Any] | None = None
@@ -46,12 +58,18 @@ class KeycloakProvider(OAuthProviderBase):
     def redirect_uri(self, s: Settings) -> str:
         return s.keycloak_redirect_uri
 
+    def issuer(self, s: Settings) -> str | None:
+        return s.keycloak_issuer
+
+    def post_logout_uri(self, s: Settings) -> str:
+        return s.keycloak_post_logout_redirect_uri
+
+    def enabled(self, s: Settings) -> bool:
+        return s.keycloak_enabled
+
     def configured(self, s: Settings) -> bool:
         return bool(
-            s.keycloak_enabled
-            and s.keycloak_issuer
-            and s.keycloak_client_id
-            and s.keycloak_client_secret
+            self.enabled(s) and self.issuer(s) and self.client_id(s) and self.client_secret(s)
         )
 
     async def prepare(self, s: Settings) -> None:
@@ -91,8 +109,9 @@ class KeycloakProvider(OAuthProviderBase):
         parsed = urlparse(endpoint)
         q = dict(parse_qsl(parsed.query))
         q["client_id"] = self.client_id(s) or ""
-        if s.keycloak_post_logout_redirect_uri:
-            q["post_logout_redirect_uri"] = s.keycloak_post_logout_redirect_uri
+        target = self.post_logout_uri(s)
+        if target:
+            q["post_logout_redirect_uri"] = target
         return urlunparse(parsed._replace(query=urlencode(q)))
 
     async def fetch_profile(
@@ -106,20 +125,43 @@ class KeycloakProvider(OAuthProviderBase):
         meta = await self._ensure_metadata(s)
         id_token = await self._exchange(s, meta, code, code_verifier)
         claims = await self._verify(s, meta, id_token, nonce)
+        self._require_role(claims)
         return _profile_from_claims(claims)
+
+    def _require_role(self, claims: dict[str, Any]) -> None:
+        """管理台 client role 校验;缺角色 403(不是认证失败,故独立错误)。"""
+        if not self._required_role:
+            return
+        client_id = self._role_client_id or ""
+        realm = claims.get("realm_access")
+        roles: set[str] = set()
+        if isinstance(realm, dict):
+            raw = cast("dict[str, Any]", realm).get("roles")
+            if isinstance(raw, list):
+                roles.update(str(r) for r in cast("list[object]", raw))
+        resource = claims.get("resource_access")
+        if client_id and isinstance(resource, dict):
+            client = cast("dict[str, Any]", resource).get(client_id)
+            if isinstance(client, dict):
+                raw = cast("dict[str, Any]", client).get("roles")
+                if isinstance(raw, list):
+                    roles.update(str(r) for r in cast("list[object]", raw))
+        if self._required_role not in roles:
+            raise RequiredRoleMissing("缺少管理台角色")
 
     def _http(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(timeout=10, transport=self._transport, trust_env=False)
 
     async def _ensure_metadata(self, s: Settings) -> dict[str, Any]:
-        if not s.keycloak_issuer:
+        issuer_value = self.issuer(s)
+        if not issuer_value:
             raise ProviderExchangeFailed("统一身份登录未配置")
         if self._meta is not None and time.monotonic() - self._meta_at < _META_TTL_SEC:
             return self._meta
         async with self._lock:
             if self._meta is not None and time.monotonic() - self._meta_at < _META_TTL_SEC:
                 return self._meta
-            issuer = s.keycloak_issuer.rstrip("/")
+            issuer = issuer_value.rstrip("/")
             url = f"{issuer}/.well-known/openid-configuration"
             try:
                 async with self._http() as http:

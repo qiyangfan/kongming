@@ -12,23 +12,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/components/page-header";
-import { StatusBadge } from "@/components/status-badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+} from "@kongming/ui/alert-dialog";
+import { Button } from "@kongming/ui/button";
+import { PageHeader } from "@kongming/ui/page-header";
+import { StatusBadge } from "@kongming/ui/status-badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kongming/ui/select";
 import {
   exportReport,
   REPORT_PHASE_LABEL,
   REPORT_STATUS_META,
   type ReportDetailOut,
-} from "@/lib/report-api";
+} from "@kongming/api-client/report-api";
 
 import { EditReportDialog } from "./report-edit-dialog";
 

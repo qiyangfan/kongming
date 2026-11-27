@@ -2,12 +2,17 @@
 
 import { lazy, Suspense, useEffect, useState } from "react";
 
-import { Skeleton } from "@/components/ui/skeleton";
-import { useTheme } from "@/lib/theme-store";
-import type { ChartDatum, ChartSpec, ChartTune, ChartType } from "@/lib/chart-shared";
-import { normalizeType } from "@/lib/chart-shared";
+import { Skeleton } from "@kongming/ui/skeleton";
+import { useTheme } from "@kongming/api-client/theme-store";
+import type {
+  ChartDatum,
+  ChartSpec,
+  ChartTune,
+  ChartType,
+} from "@kongming/api-client/chart-shared";
+import { normalizeType } from "@kongming/api-client/chart-shared";
 
-export type { ChartDatum, ChartTune } from "@/lib/chart-shared";
+export type { ChartDatum, ChartTune } from "@kongming/api-client/chart-shared";
 
 const ChartViewImpl = lazy(() => import("./chart-view-impl"));
 

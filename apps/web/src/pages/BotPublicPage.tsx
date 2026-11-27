@@ -5,11 +5,11 @@ import { useState } from "react";
 import { Loader2, SendHorizontal } from "lucide-react";
 import { useParams } from "react-router";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@kongming/ui/button";
 import { ChatBubble } from "@/components/chat-bubble";
-import { Textarea } from "@/components/ui/textarea";
-import type { components } from "@/lib/api-types.gen";
-import { humanizeErrorText } from "@/lib/api";
+import { Textarea } from "@kongming/ui/textarea";
+import type { components } from "@kongming/api-client/api-types.gen";
+import { humanizeErrorText } from "@kongming/api-client/api";
 
 type BotChatReply = components["schemas"]["BotChatOut"];
 

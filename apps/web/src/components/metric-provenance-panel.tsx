@@ -1,11 +1,10 @@
 /* 问答口径依据面板：列出命中的指标名、口径表达式和修订时间。 */
 
-import { useNavigate } from "react-router";
 import { ChevronRight, Ruler } from "lucide-react";
 
-import { formatDateTime } from "@/lib/datetime";
-import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { formatDateTime } from "@kongming/api-client/datetime";
+import { Button } from "@kongming/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kongming/ui/collapsible";
 
 type MetricHit = {
   metric_id: string;
@@ -16,7 +15,6 @@ type MetricHit = {
 
 /* 展示指标名称、口径表达式和修订时间；管理链接由路由权限守卫处理。 */
 export function MetricProvenancePanel({ hits }: { hits: MetricHit[] }) {
-  const navigate = useNavigate();
   return (
     <Collapsible>
       <CollapsibleTrigger className="group flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
@@ -36,7 +34,11 @@ export function MetricProvenancePanel({ hits }: { hits: MetricHit[] }) {
                 size="xs"
                 className="h-auto p-0 text-xs font-medium"
                 onClick={() => {
-                  void navigate("/admin/semantic");
+                  window.open(
+                    `${import.meta.env.VITE_ADMIN_ORIGIN ?? "http://127.0.0.1:5174"}/semantic`,
+                    "_blank",
+                    "noopener",
+                  );
                 }}
               >
                 {h.metric_name}

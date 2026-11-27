@@ -5,17 +5,17 @@ import { ArrowLeft } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
-import { ErrorAlert } from "@/components/error-alert";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { useTenant } from "@/lib/tenant-store";
+import { ErrorAlert } from "@kongming/ui/error-alert";
+import { Button } from "@kongming/ui/button";
+import { Skeleton } from "@kongming/ui/skeleton";
+import { useTenant } from "@kongming/api-client/tenant-store";
 import {
   deleteReport,
   getProgress,
   getReport,
   listVersions,
   refreshReport,
-} from "@/lib/report-api";
+} from "@kongming/api-client/report-api";
 
 import { ReportPageHeader } from "./report-detail-header";
 import { SectionBlock } from "./report-detail-sections";
