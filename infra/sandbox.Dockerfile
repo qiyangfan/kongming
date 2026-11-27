@@ -1,7 +1,7 @@
 # 数据分析沙箱镜像，使用最小运行环境、非 root 用户并内置启动脚本。
 # 构建:podman build -f infra/sandbox.Dockerfile -t kongming-sandbox:dev infra/
 # 基础镜像按 digest 固定(供应链);Dependabot docker 同时更新 tag 与 digest
-FROM docker.io/library/python:3.13-slim-bookworm@sha256:a5a7017efc5969e00ae2b91c8eb0631049a569652aa4ffc4501769049ae45c72
+FROM docker.io/library/python:3.15-slim-bookworm@sha256:498829c717b1e59fc42f0e7865eafe4e04ca0f70a3769d4ae70ba218df54507c
 
 # 非 root 运行(与容器参数 --user 1000 对齐);matplotlib 配置目录
 # 由容器参数 --tmpfs /tmp 提供可写位(MPLCONFIGDIR 环境变量在 runner 内设定)
